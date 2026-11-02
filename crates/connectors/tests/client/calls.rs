@@ -270,3 +270,95 @@ fn a_recharge_id_that_is_not_one_is_refused_before_any_request() {
     }
     assert_eq!(rig.fake.requests().len(), 0);
 }
+
+/// A connector (or a proxy) answering `awaiting_payment` at once is polled at most every 2 s:
+/// within a 4 s deadline, no more than 4 / 2 + 1 = 3 polls.
+#[test]
+fn an_instant_awaiting_payment_answer_is_polled_at_most_every_2_seconds() {
+    let rig = rig_with(FakeOptions::default(), false, |config| {
+        config.recharge_deadline = Duration::from_secs(4);
+    });
+    sign_in(&rig);
+    rig.fake.set_wait_cap(Duration::ZERO);
+    let recharge = rig.handle.create_recharge("200").unwrap();
+    let id = recharge.recharge_id;
+    let result = rig.handle.wait_recharge(&id, &CancelFlag::new());
+    assert_eq!(result, Err(Error::RechargeTimedOut));
+    let polls = rig
+        .fake
+        .requests_to(&format!("/v1/case-law/recharges/{id}"))
+        .len();
+    assert!((2..=3).contains(&polls), "{polls} polls");
+}
+
+#[test]
+fn the_cancel_flag_acts_at_once_during_the_gap_between_polls() {
+    let rig = rig();
+    sign_in(&rig);
+    rig.fake.set_wait_cap(Duration::ZERO);
+    let recharge = rig.handle.create_recharge("200").unwrap();
+    let id = recharge.recharge_id;
+    let cancel = CancelFlag::new();
+    let flag = cancel.clone();
+    let handle = rig.handle;
+    let waiter = thread::spawn(move || handle.wait_recharge(&id, &flag));
+    // The first poll is answered at once; the wait is now in its 2 s gap.
+    CancelFlag::new().wait_timeout(Duration::from_millis(500));
+    let cancelled_at = SystemClock.now();
+    cancel.cancel();
+    assert_eq!(waiter.join().unwrap(), Err(Error::Cancelled));
+    assert!(SystemClock.now().duration_since(cancelled_at).unwrap() < Duration::from_millis(200));
+}
+
+#[test]
+fn an_answer_for_another_recharge_is_a_parse_error() {
+    let rig = rig();
+    sign_in(&rig);
+    let recharge = rig.handle.create_recharge("200").unwrap();
+    let id = recharge.recharge_id;
+    let body = serde_json::json!({
+        "recharge_id": "rch_someone_else",
+        "status": "paid",
+        "credits": 2000,
+    })
+    .to_string();
+    rig.fake.answer_next(
+        &format!("/v1/case-law/recharges/{id}"),
+        200,
+        &[("Content-Type", "application/json")],
+        body.as_bytes(),
+    );
+    assert!(matches!(
+        rig.handle.wait_recharge(&id, &CancelFlag::new()),
+        Err(Error::Parse(_))
+    ));
+}
+
+#[test]
+fn a_redirect_is_not_followed() {
+    let rig = rig();
+    sign_in(&rig);
+    let elsewhere = rig.fake.url("/elsewhere");
+    rig.fake.answer_next(
+        "/v1/case-law/account",
+        302,
+        &[("Location", elsewhere.as_str())],
+        b"",
+    );
+    assert_eq!(rig.handle.account(), Err(Error::Http { status: 302 }));
+    assert_eq!(rig.fake.requests_to("/elsewhere").len(), 0);
+}
+
+#[test]
+fn a_recharge_deadline_that_overflows_the_clock_is_a_parse_error() {
+    let rig = rig_with(FakeOptions::default(), false, |config| {
+        config.recharge_deadline = Duration::MAX;
+    });
+    sign_in(&rig);
+    let recharge = rig.handle.create_recharge("200").unwrap();
+    assert!(matches!(
+        rig.handle
+            .wait_recharge(&recharge.recharge_id, &CancelFlag::new()),
+        Err(Error::Parse(_))
+    ));
+}

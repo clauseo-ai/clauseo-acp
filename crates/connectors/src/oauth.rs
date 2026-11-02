@@ -29,8 +29,11 @@ use crate::secret::Secret;
 
 mod listener;
 
-/// The page the browser shows after the callback: English, then Hindi.
+/// The page the browser shows once the credential is stored: English, then Hindi.
 pub(crate) const SUCCESS_PAGE: &str = include_str!("oauth/page.html");
+/// The page the browser shows, with 400, when the callback or the exchange failed: English,
+/// then Hindi.
+pub(crate) const FAILURE_PAGE: &str = include_str!("oauth/failed.html");
 
 /// The endpoints discovery found, each `https` on the issuer's host (the fake's own origin in
 /// tests).
@@ -95,7 +98,8 @@ impl PendingSignIn {
     }
 
     /// Waits for the browser's callback, the sign-in timeout or the cancel flag; then exchanges
-    /// the code and stores the credential (the keychain, then the state file).
+    /// the code and stores the credential (the keychain, then the state file), and only then
+    /// answers the browser: the success page, or the failure page with 400.
     pub fn finish(self) -> Result<(), SignInError> {
         let PendingSignIn {
             handle,
@@ -109,17 +113,34 @@ impl PendingSignIn {
             ..
         } = self;
         let config = &handle.inner.shared.config;
-        let deadline = config.clock.now() + config.signin_timeout;
+        let deadline = config
+            .clock
+            .now()
+            .checked_add(config.signin_timeout)
+            .ok_or_else(|| {
+                SignInError::Exchange("the sign-in timeout is out of range".to_owned())
+            })?;
         let expect = listener::Expect {
             state: &state,
             issuer: &handle.inner.urls.issuer,
         };
         // The listener is moved in and closed as soon as the callback is answered.
-        let code = listener::wait_for_code(listener, &expect, &cancel, &*config.clock, deadline)?;
+        let (code, browser) =
+            listener::wait_for_code(listener, &expect, &cancel, &*config.clock, deadline)?;
         if cancel.is_cancelled() {
+            browser.failed();
             return Err(SignInError::Cancelled);
         }
-        exchange(&handle, &metadata, &code, &redirect_uri, &verifier)
+        match exchange(&handle, &metadata, &code, &redirect_uri, &verifier) {
+            Ok(()) => {
+                browser.signed_in();
+                Ok(())
+            }
+            Err(err) => {
+                browser.failed();
+                Err(err)
+            }
+        }
     }
 
     /// Replaces the PKCE verifier with another valid one, so the exchange fails as a stolen
@@ -153,6 +174,8 @@ pub(crate) fn begin_sign_in(
     };
     let listener_failed =
         |err: std::io::Error| SignInError::Exchange(format!("loopback listener: {:?}", err.kind()));
+    #[cfg(feature = "test-support")]
+    handle.inner.listeners_bound.fetch_add(1, Ordering::SeqCst);
     let listener = bind_loopback_exclusive(0).map_err(listener_failed)?;
     listener.set_nonblocking(true).map_err(listener_failed)?;
     let port = listener.local_addr().map_err(listener_failed)?.port();

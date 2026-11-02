@@ -47,6 +47,11 @@ mod tests {
         let listener = bind_loopback_exclusive(0).unwrap();
         let port = listener.local_addr().unwrap().port();
         let err = windows::bind_reuseaddr(port).unwrap_err();
-        assert!(err.raw_os_error().is_some(), "{err}");
+        // WSAEADDRINUSE (10048) or WSAEACCES (10013), nothing else.
+        assert!(
+            matches!(err.raw_os_error(), Some(10048 | 10013)),
+            "{err} ({:?})",
+            err.raw_os_error()
+        );
     }
 }

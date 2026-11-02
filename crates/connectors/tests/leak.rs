@@ -3,6 +3,12 @@
 //! `log` records into events. Neither the captured output nor the `Debug` and `Display` text of
 //! any public value holds a token, code, verifier or key the fake issued.
 //!
+//! Every error the run produces is checked by its `Debug` and its `Display` text.
+//!
+//! The fake is plain HTTP, so rustls never runs here and none of its `log` records can be
+//! captured; the TLS path's logging is covered only by rustls' own log levels (it logs no key
+//! material) and by ureq setting no key log file.
+//!
 //! Its own test binary, because the subscriber and `LogTracer` are process-wide.
 
 #[cfg(test)]
@@ -15,8 +21,8 @@ mod leak {
     use clauseo_connectors::fake::{FakeConnector, FakeOptions, RawResponse, ScratchDir, http};
     use clauseo_connectors::{
         AuthError, CASE_LAW, CancelFlag, Connectors, Error, KeyringStore, ManualClock,
-        McpRequestHeaders, MemoryStore, PayUrl, PendingSignIn, SignInError, StoreError,
-        classify_tool_result,
+        McpRequestHeaders, MemoryStore, PayUrl, PendingSignIn, ProxyChoice, SignInError,
+        StoreError, classify_tool_result,
     };
     use serde_json::json;
     use tracing_subscriber::fmt::MakeWriter;
@@ -45,6 +51,23 @@ mod leak {
             self.clone()
         }
     }
+
+    /// A result whose `Debug` text also holds the error's `Display` text.
+    struct Shown<'a, T, E>(&'a Result<T, E>);
+
+    impl<T: std::fmt::Debug, E: std::fmt::Debug + std::fmt::Display> std::fmt::Debug
+        for Shown<'_, T, E>
+    {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self.0 {
+                Ok(value) => write!(f, "Ok({value:?})"),
+                Err(err) => write!(f, "Err({err:?}) shown as {err}"),
+            }
+        }
+    }
+
+    /// The proxy password the `Debug` text of a `Config` and of `Connectors` must never show.
+    const PROXY_PASSWORD: &str = "pw-secret";
 
     fn complete(
         fake: &clauseo_connectors::fake::FakeHandle,
@@ -84,11 +107,10 @@ mod leak {
         let mut texts: Vec<String> = Vec::new();
         let mut debug = |value: &dyn std::fmt::Debug| texts.push(format!("{value:?} {value:#?}"));
 
-        // Sign in, with a stray wrong-state callback first, and the PKCE mismatch.
-        let mut tampered = handle.begin_sign_in(Some("advocate@example.in")).unwrap();
-        tampered.tamper_verifier_for_test();
-        let (_, mismatch) = complete(&fake, tampered);
-        debug(&mismatch);
+        // Discovery refused, the PKCE mismatch and the token endpoint failing; then the real
+        // sign-in. The stray wrong-state callback comes at the end, by hand.
+        sign_in_failures(&fake, &handle, &mut debug);
+
         let pending = handle.begin_sign_in(None).unwrap();
         debug(&pending);
         debug(&pending.cancel_flag());
@@ -116,40 +138,46 @@ mod leak {
         let recharge = handle.create_recharge("200").unwrap();
         debug(&recharge);
         fake.mark_paid(&recharge.recharge_id);
-        debug(&handle.wait_recharge(&recharge.recharge_id, &CancelFlag::new()));
+        debug(&Shown(
+            &handle.wait_recharge(&recharge.recharge_id, &CancelFlag::new()),
+        ));
 
         // Refresh by expiry, the 401 retry, a refresh refused, and every error after it.
         clock.advance(Duration::from_secs(3600));
         debug(&handle.bearer().unwrap());
         fake.expire_access_tokens();
-        debug(&handle.mcp_post(call.as_bytes(), &headers));
+        debug(&Shown(&handle.mcp_post(call.as_bytes(), &headers)));
         fake.fail_next("/token", 500);
         clock.advance(Duration::from_secs(3600));
-        debug(&handle.bearer());
+        debug(&Shown(&handle.bearer()));
+        fake.close_next("/token");
+        debug(&Shown(&handle.bearer()));
         store.fail_next_writes(2);
-        debug(&handle.bearer());
+        debug(&Shown(&handle.bearer()));
         debug(&handle.persist_failed());
         debug(&handle);
         debug(&connectors);
         debug(&store);
         fake.revoke_all();
         clock.advance(Duration::from_secs(3600));
-        debug(&handle.bearer());
-        debug(&handle.account());
+        debug(&Shown(&handle.bearer()));
+        debug(&Shown(&handle.account()));
 
         // Sign in again and sign out, then the API key: refused, accepted, revoked.
         let pending = handle.begin_sign_in(None).unwrap();
         complete(&fake, pending).1.unwrap();
-        debug(&handle.sign_out());
-        debug(&handle.add_api_key("cdk_live_0123456789abcdefghijABCDEFGHIJ01"));
-        debug(&handle.add_api_key("not a key"));
+        debug(&Shown(&handle.sign_out()));
+        debug(&Shown(
+            &handle.add_api_key("cdk_live_0123456789abcdefghijABCDEFGHIJ01"),
+        ));
+        debug(&Shown(&handle.add_api_key("not a key")));
         let key = fake.new_api_key();
         handle.add_api_key(&key).unwrap();
         debug(&handle.bearer().unwrap());
         fake.revoke_all();
         clock.advance(Duration::from_secs(120));
-        debug(&handle.account());
-        debug(&handle.remove());
+        debug(&Shown(&handle.account()));
+        debug(&Shown(&handle.remove()));
 
         // A callback with the wrong state, by hand.
         let pending = handle.begin_sign_in(None).unwrap();
@@ -165,14 +193,64 @@ mod leak {
         let finisher = thread::spawn(move || pending.finish());
         debug(&http("GET", &stray, &[], &[]).unwrap().status);
         flag.cancel();
-        debug(&finisher.join().unwrap());
+        debug(&Shown(&finisher.join().unwrap()));
 
+        proxied(&mut debug, &config);
         other_types(&mut debug, &config, &clock);
         drop(debug);
         let errors = texts;
 
         assert_no_secret(&fake, key, &captured, &errors);
     }
+    /// Discovery refused (an issuer one character off, then a 500), before any metadata is kept
+    /// for the process; then the PKCE mismatch and the token endpoint failing (a 500, then a
+    /// connection closed with no answer).
+    fn sign_in_failures(
+        fake: &clauseo_connectors::fake::FakeHandle,
+        handle: &clauseo_connectors::ConnectorHandle,
+        debug: &mut dyn FnMut(&dyn std::fmt::Debug),
+    ) {
+        let good_metadata = fake.as_metadata();
+        let mut bad_metadata = good_metadata.clone();
+        bad_metadata["issuer"] = json!(format!("{}x", fake.base()));
+        fake.set_as_metadata(bad_metadata);
+        debug(&Shown(&handle.begin_sign_in(None)));
+        fake.set_as_metadata(good_metadata);
+        fake.fail_next("/.well-known/oauth-authorization-server", 500);
+        debug(&Shown(&handle.begin_sign_in(None)));
+
+        let mut tampered = handle.begin_sign_in(Some("advocate@example.in")).unwrap();
+        tampered.tamper_verifier_for_test();
+        let (_, mismatch) = complete(fake, tampered);
+        debug(&Shown(&mismatch));
+        fake.fail_next("/token", 500);
+        let (_, refused) = complete(fake, handle.begin_sign_in(None).unwrap());
+        debug(&Shown(&refused));
+        fake.close_next("/token");
+        let (_, closed) = complete(fake, handle.begin_sign_in(None).unwrap());
+        assert!(
+            matches!(closed, Err(SignInError::Exchange(ref why)) if why.starts_with("network")),
+            "{closed:?}"
+        );
+        debug(&Shown(&closed));
+    }
+
+    /// A proxy with a password: the `Debug` text of the config and of `Connectors`.
+    fn proxied(debug: &mut dyn FnMut(&dyn std::fmt::Debug), config: &clauseo_connectors::Config) {
+        let mut proxied = config.clone();
+        proxied.proxy = ProxyChoice::Fixed(
+            url::Url::parse(&format!("http://user:{PROXY_PASSWORD}@127.0.0.1:9")).unwrap(),
+        );
+        debug(&proxied);
+        debug(&proxied.proxy);
+        let proxied_connectors = Connectors::new(proxied, Arc::new(MemoryStore::new())).unwrap();
+        debug(&proxied_connectors);
+        assert!(
+            format!("{proxied_connectors:?}").contains("Fixed(http://127.0.0.1:9)"),
+            "{proxied_connectors:?}"
+        );
+    }
+
     /// The Debug text of the public types the run did not produce.
     fn other_types(
         debug: &mut dyn FnMut(&dyn std::fmt::Debug),
@@ -188,8 +266,10 @@ mod leak {
             "https://data.clauseo.chat/pay/r1",
         ));
         debug(&classify_tool_result(&CASE_LAW, &json!({"isError": true})));
-        debug(&Error::Auth(AuthError::Network("x".to_owned())));
-        debug(&StoreError::Unsupported);
+        debug(&Shown::<(), _>(&Err(Error::Auth(AuthError::Network(
+            "x".to_owned(),
+        )))));
+        debug(&Shown::<(), _>(&Err(StoreError::Unsupported)));
     }
 
     /// Asserts no issued secret, verifier or key is in the log or any captured text.
@@ -204,6 +284,7 @@ mod leak {
         assert!(secrets.iter().any(|s| s.starts_with("fake_at_")));
         assert!(secrets.iter().any(|s| s.starts_with("fake_rt_")));
         secrets.push(key);
+        secrets.push(PROXY_PASSWORD.to_owned());
         for token in fake.requests_to("/token") {
             for (name, value) in token.form() {
                 if name == "code_verifier" {

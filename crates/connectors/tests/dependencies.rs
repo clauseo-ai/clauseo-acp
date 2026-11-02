@@ -6,15 +6,51 @@ use std::collections::{BTreeSet, HashMap};
 
 use serde_json::Value;
 
+/// Banned by name prefix: `tokio`, `tokio-util`, `hyper-util`, `tauri-plugin-*` ...
 #[cfg(test)]
-const BANNED: [&str; 6] = [
-    "tokio",
-    "async-std",
-    "tauri",
-    "reqwest",
-    "hyper",
-    "clauseo-host",
-];
+const BANNED_PREFIXES: [&str; 3] = ["tokio", "hyper", "tauri"];
+
+/// Banned by exact name.
+#[cfg(test)]
+const BANNED_NAMES: [&str; 5] = ["async-std", "smol", "async-io", "reqwest", "clauseo-host"];
+
+/// Whether a package name is banned from the crate's tree.
+#[cfg(test)]
+fn banned(name: &str) -> bool {
+    BANNED_PREFIXES
+        .iter()
+        .any(|prefix| name.starts_with(prefix))
+        || BANNED_NAMES.contains(&name)
+}
+
+#[test]
+fn the_ban_matches_prefixes_and_names() {
+    for name in [
+        "tokio",
+        "tokio-util",
+        "hyper",
+        "hyper-util",
+        "tauri",
+        "tauri-plugin-deep-link",
+        "async-std",
+        "smol",
+        "async-io",
+        "reqwest",
+        "clauseo-host",
+    ] {
+        assert!(banned(name), "{name}");
+    }
+    for name in [
+        "ureq",
+        "rustls",
+        "async-trait",
+        "smoltcp",
+        "clauseo-protocol",
+        "http",
+    ] {
+        assert!(!banned(name), "{name}");
+    }
+}
 
 /// Runs `cargo` (the one that runs this test) and returns its stdout as JSON.
 #[cfg(test)]
@@ -112,10 +148,9 @@ fn no_async_runtime_tauri_or_host_in_the_tree() {
         tree.contains("ureq") && tree.contains("rustls"),
         "the walk found the tree: {tree:?}"
     );
-    for banned in BANNED {
-        assert!(
-            !tree.contains(banned),
-            "{banned} is in clauseo-connectors' tree"
-        );
-    }
+    let found: Vec<&str> = tree.iter().copied().filter(|name| banned(name)).collect();
+    assert!(
+        found.is_empty(),
+        "banned in clauseo-connectors' tree: {found:?}"
+    );
 }

@@ -164,6 +164,9 @@ pub(crate) struct HandleInner {
     pub(crate) next_sign_in: AtomicU64,
     #[cfg(feature = "test-support")]
     pub(crate) test_rng: Mutex<Option<rand::rngs::StdRng>>,
+    /// How many loopback listeners sign-in asked `bind_loopback_exclusive` for.
+    #[cfg(feature = "test-support")]
+    pub(crate) listeners_bound: std::sync::atomic::AtomicUsize,
 }
 
 /// One known connector. Cheap to clone; every clone shares the credential. `Send + Sync`.
@@ -200,6 +203,8 @@ impl ConnectorHandle {
                 next_sign_in: AtomicU64::new(0),
                 #[cfg(feature = "test-support")]
                 test_rng: Mutex::new(None),
+                #[cfg(feature = "test-support")]
+                listeners_bound: std::sync::atomic::AtomicUsize::new(0),
             }),
         }
     }
@@ -266,6 +271,13 @@ impl ConnectorHandle {
     #[doc(hidden)]
     pub fn seed_rng_for_test(&self, seed: u64) {
         crate::oauth::seed_rng_for_test(self, seed);
+    }
+
+    /// How many times sign-in called `bind_loopback_exclusive` on this connector.
+    #[cfg(feature = "test-support")]
+    #[doc(hidden)]
+    pub fn listeners_bound_for_test(&self) -> usize {
+        self.inner.listeners_bound.load(Ordering::SeqCst)
     }
 
     /// Whether a rotated refresh token is held only in memory, because the keychain refused it
@@ -405,6 +417,17 @@ impl ConnectorHandle {
         })
     }
 
+    /// The keychain item read again now, past the slot: `None` when it is gone or does not
+    /// parse.
+    pub(crate) fn read_stored(&self) -> Result<Option<Credential>, StoreError> {
+        Ok(self
+            .inner
+            .shared
+            .store
+            .get(self.id())?
+            .and_then(|bytes| Credential::decode(&Zeroizing::new(bytes))))
+    }
+
     /// The usable credential, or why there is none.
     pub(crate) fn current<'a>(&self, slot: &'a mut Slot) -> Result<&'a Credential, AuthError> {
         if !self.is_added() {
@@ -452,8 +475,9 @@ impl ConnectorHandle {
         Ok(())
     }
 
-    /// Stores a new credential: the keychain first, then the state file (added, `ended: null`),
-    /// then memory. A keychain failure leaves the state file as it was.
+    /// Stores a new credential: first a best-effort revoke of the OAuth refresh token it
+    /// replaces (in memory or in the keychain), then the keychain, then the state file (added,
+    /// `ended: null`), then memory. A keychain failure leaves the state file as it was.
     pub(crate) fn store_new(
         &self,
         credential: Credential,
@@ -461,12 +485,44 @@ impl ConnectorHandle {
     ) -> Result<(), StoreError> {
         let bytes = credential.encode()?;
         let mut slot = lock(&self.inner.slot);
+        self.revoke_replaced(&mut slot);
         self.inner.shared.store.set(self.id(), &bytes)?;
         self.save_state(|state| state.add(self.id(), kind))?;
         *slot = Slot::Read(Some(credential));
         self.inner.generation.fetch_add(1, Ordering::SeqCst);
         self.inner.persist_failed.store(false, Ordering::Relaxed);
         Ok(())
+    }
+
+    /// Revokes the refresh tokens a new credential replaces: the one in memory and the one in
+    /// the keychain, when they are OAuth. Best effort: a failure is logged (without the token)
+    /// and the new credential is stored anyway.
+    fn revoke_replaced(&self, slot: &mut Slot) {
+        let mut old: Vec<Secret> = Vec::new();
+        match self.load(slot) {
+            Ok(Some(Credential::OAuth(tokens))) => old.push(tokens.refresh_token.clone()),
+            Ok(_) => {}
+            Err(err) => {
+                tracing::warn!(connector = self.id(), error = %err, "the replaced credential could not be read");
+            }
+        }
+        match self.read_stored() {
+            Ok(Some(Credential::OAuth(tokens))) if !old.contains(&tokens.refresh_token) => {
+                old.push(tokens.refresh_token);
+            }
+            Ok(_) => {}
+            Err(err) => {
+                tracing::warn!(connector = self.id(), error = %err, "the replaced keychain item could not be read");
+            }
+        }
+        for token in &old {
+            if !crate::refresh::revoke(self, token) {
+                tracing::warn!(
+                    connector = self.id(),
+                    "the replaced refresh token could not be revoked"
+                );
+            }
+        }
     }
 
     /// The `Authorization` value for `token`.

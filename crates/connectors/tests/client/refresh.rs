@@ -213,3 +213,142 @@ fn bearer_without_a_credential_is_not_added() {
     assert_eq!(rig.handle.bearer(), Err(AuthError::NotAdded));
     assert_eq!(rig.store.reads(), 0);
 }
+
+/// The refresh tokens presented at `/token` for a refresh, in order.
+fn presented_refresh_tokens(rig: &Rig) -> Vec<String> {
+    rig.fake
+        .requests_to("/token")
+        .iter()
+        .filter_map(|request| {
+            let form = request.form();
+            let refresh = form
+                .iter()
+                .any(|(k, v)| k == "grant_type" && v == "refresh_token");
+            let token = form.iter().find(|(k, _)| k == "refresh_token");
+            refresh.then(|| token.map(|(_, v)| v.clone())).flatten()
+        })
+        .collect()
+}
+
+/// Two `Connectors` on one store and one state file (two processes, say): A refreshes and
+/// rotates; B, holding A's spent refresh token in memory, adopts A's tokens from the keychain
+/// instead of refreshing with the spent one, and no refresh token is ever presented twice.
+#[test]
+fn a_second_instance_adopts_the_rotated_chain_instead_of_forking_it() {
+    let rig = manual_rig();
+    sign_in(&rig);
+    let (_b_connectors, b) = rig.restart();
+    let first = b.bearer().unwrap();
+    assert_eq!(first, rig.handle.bearer().unwrap());
+    let spent = item(&rig).unwrap()["refresh_token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    // Within 5 minutes of expiry: A refreshes and rotates.
+    rig.clock().advance(Duration::from_secs(3600 - 200));
+    let a_token = rig.handle.bearer().unwrap();
+    assert_eq!(presented_refresh_tokens(&rig), [spent.as_str()]);
+    // B adopts A's fresh access token: no refresh at all.
+    assert_eq!(b.bearer().unwrap(), a_token);
+    assert_eq!(presented_refresh_tokens(&rig), [spent.as_str()]);
+
+    // Well past the 30 s grace, A's token is in its window again. B refreshes first, with
+    // the stored (current) refresh token; then A adopts B's tokens.
+    rig.clock().advance(Duration::from_secs(3600 - 200));
+    let b_token = b.bearer().unwrap();
+    assert_eq!(rig.handle.bearer().unwrap(), b_token);
+    let presented = presented_refresh_tokens(&rig);
+    assert_eq!(presented.len(), 2, "{presented:?}");
+    assert_ne!(presented[1], spent, "B refreshed with A's spent token");
+    let mut unique = presented.clone();
+    unique.dedup();
+    assert_eq!(unique, presented, "a refresh token was presented twice");
+    // The chain is intact: one more refresh still works.
+    rig.clock().advance(Duration::from_secs(3600));
+    rig.handle.bearer().unwrap();
+    b.bearer().unwrap();
+    assert_eq!(presented_refresh_tokens(&rig).len(), 3);
+    assert_eq!(
+        rig.handle.status(),
+        CredentialStatus::SignedIn(clauseo_connectors::CredentialKind::OAuth)
+    );
+}
+
+/// The other instance signed out (the item is gone): the refresh is not tried, signed out.
+#[test]
+fn an_item_deleted_by_another_instance_is_signed_out_at_the_next_refresh() {
+    let rig = manual_rig();
+    sign_in(&rig);
+    rig.handle.bearer().unwrap();
+    let (_b_connectors, b) = rig.restart();
+    b.sign_out().unwrap();
+    rig.fake.clear_requests();
+    rig.clock().advance(Duration::from_secs(3600));
+    assert_eq!(rig.handle.bearer(), Err(AuthError::SignedOut));
+    assert_eq!(rig.fake.requests_to("/token").len(), 0);
+}
+
+/// A deviation from the brief's literal rule: a refresh that fails on the network while the
+/// access token has not expired yet returns that token (with a warning); once it has
+/// expired, the failure is `Network`.
+#[test]
+fn a_network_failure_before_expiry_returns_the_current_token() {
+    let rig = manual_rig();
+    sign_in(&rig);
+    let current = rig.handle.bearer().unwrap();
+    rig.clock().advance(Duration::from_secs(3600 - 200));
+    rig.fake.close_next("/token");
+    assert_eq!(rig.handle.bearer().unwrap(), current);
+    assert_eq!(
+        presented_refresh_tokens(&rig).len(),
+        1,
+        "the refresh was tried"
+    );
+    rig.clock().advance(Duration::from_secs(300));
+    rig.fake.close_next("/token");
+    assert!(matches!(rig.handle.bearer(), Err(AuthError::Network(_))));
+    assert!(rig.store.peek("case-law").is_some());
+    // The connector is back: the refresh works.
+    assert_ne!(rig.handle.bearer().unwrap(), current);
+}
+
+/// One thread's request with the old token is answered 401 after another thread already
+/// refreshed: it takes the newer token and retries, with no second refresh.
+#[test]
+fn a_401_after_another_thread_refreshed_takes_the_newer_token() {
+    let rig = rig();
+    sign_in(&rig);
+    let old = rig.handle.bearer().unwrap();
+    rig.fake.clear_requests();
+    // A's request is held 600 ms and then refused; B's is refused at once.
+    rig.fake
+        .delay_next("/mcp/case-law", Duration::from_millis(600));
+    rig.fake.fail_next("/mcp/case-law", 401);
+    rig.fake.fail_next("/mcp/case-law", 401);
+    let a = {
+        let handle = rig.handle.clone();
+        thread::spawn(move || handle.mcp_post(&tools_call(), &McpRequestHeaders::default()))
+    };
+    while rig.fake.requests_to("/mcp/case-law").is_empty() {
+        thread::park_timeout(Duration::from_millis(5));
+    }
+    // Long enough for A's connection to take the queued delay before B's arrives.
+    clauseo_connectors::CancelFlag::new().wait_timeout(Duration::from_millis(50));
+    // B: 401, the one refresh, and a retry with the new token.
+    rig.handle
+        .mcp_post(&tools_call(), &McpRequestHeaders::default())
+        .unwrap();
+    let new = rig.handle.bearer().unwrap();
+    assert_ne!(new, old);
+    assert_eq!(a.join().unwrap().unwrap().status, 200);
+    assert_eq!(rig.fake.requests_to("/token").len(), 1, "one refresh");
+    let mcp = rig.fake.requests_to("/mcp/case-law");
+    assert_eq!(mcp.len(), 4);
+    let new_header = format!("Bearer {}", new.0.expose());
+    assert_eq!(
+        mcp[3].header("authorization"),
+        Some(new_header.as_str()),
+        "A retried with the newer token"
+    );
+}

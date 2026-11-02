@@ -90,14 +90,16 @@ pub struct PaymentRef {
     pub url: Option<PayUrl>,
 }
 
-/// A pay link that is the connector's own: `https://data.clauseo.chat/pay/...`, with no port and
-/// no user info. Built only by [`PayUrl::parse`] and [`PayUrl::parse_for`].
+/// A pay link that is the connector's own: `https://data.clauseo.chat/pay/<id>`, with no port,
+/// user info, query or fragment. Built only by [`PayUrl::parse`] and [`PayUrl::parse_for`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PayUrl(String);
 
 impl PayUrl {
-    /// A production pay link, or `None`: `https`, host exactly `data.clauseo.chat`, no port,
-    /// no user info, a path under `/pay/` with something after it.
+    /// A production pay link, or `None`: `https`, host exactly `data.clauseo.chat` (no port,
+    /// not even 443, and no user info), path exactly `/pay/<id>` with `<id>` matching
+    /// `[A-Za-z0-9_-]{1,128}`, no query, no fragment. A backslash or a percent escape anywhere
+    /// is refused, so nothing the URL parser would rewrite gets through.
     pub fn parse(connector: &KnownConnector, text: &str) -> Option<PayUrl> {
         PayUrl::parse_for(connector, &Origin::Production, text)
     }
@@ -106,18 +108,33 @@ impl PayUrl {
     /// is. Under `Fake`, the fake's own `http://127.0.0.1:<port>/pay/`, returned rewritten to
     /// `https://data.clauseo.chat/pay/...`, so R24's tests see the production form.
     pub fn parse_for(connector: &KnownConnector, origin: &Origin, text: &str) -> Option<PayUrl> {
+        if text.contains(['\\', '%']) {
+            return None;
+        }
         let url = Url::parse(text).ok()?;
         let prefix = Url::parse(&origin.map_url(connector.pay_prefix)).ok()?;
-        let ours = url.scheme() == prefix.scheme()
+        let prefix_host = prefix.host_str()?;
+        let authority = match prefix.port() {
+            Some(port) => format!("{prefix_host}:{port}"),
+            None => prefix_host.to_owned(),
+        };
+        // The authority as written: the parser drops a default port such as `:443`.
+        let written = text
+            .split_once("://")
+            .and_then(|(_, rest)| rest.split(['/', '?', '#']).next());
+        let ours = written.is_some_and(|written| written.eq_ignore_ascii_case(&authority))
+            && url.scheme() == prefix.scheme()
             && url.host_str().is_some()
             && url.host_str() == prefix.host_str()
             && url.port() == prefix.port()
             && url.username().is_empty()
             && url.password().is_none()
+            && url.query().is_none()
+            && url.fragment().is_none()
             && url
                 .path()
                 .strip_prefix(prefix.path())
-                .is_some_and(|rest| !rest.is_empty());
+                .is_some_and(is_pay_id);
         if !ours {
             return None;
         }
@@ -135,6 +152,14 @@ impl PayUrl {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+}
+
+/// `[A-Za-z0-9_-]{1,128}`: the id part of a pay link.
+fn is_pay_id(id: &str) -> bool {
+    (1..=128).contains(&id.len())
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
 /// The wire form of a payment object.

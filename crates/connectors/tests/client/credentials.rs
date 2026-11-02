@@ -161,3 +161,67 @@ fn signing_in_again_after_sign_out_works() {
     );
     assert!(state_file(&rig).contains(r#""ended":null"#));
 }
+
+/// The `token` of every `/revoke` the fake saw, in order.
+fn revoked(rig: &Rig) -> Vec<String> {
+    rig.fake
+        .requests_to("/revoke")
+        .iter()
+        .filter_map(|request| {
+            request
+                .form()
+                .into_iter()
+                .find(|(name, _)| name == "token")
+                .map(|(_, value)| value)
+        })
+        .collect()
+}
+
+fn stored_refresh_token(rig: &Rig) -> String {
+    item(rig).unwrap()["refresh_token"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
+#[test]
+fn a_new_sign_in_first_revokes_the_old_refresh_token() {
+    let rig = rig();
+    sign_in(&rig);
+    let old = stored_refresh_token(&rig);
+    rig.fake.clear_requests();
+    sign_in(&rig);
+    assert_eq!(revoked(&rig), [old.as_str()]);
+    let form = rig.fake.requests_to("/revoke")[0].form();
+    assert!(form.contains(&("token_type_hint".to_owned(), "refresh_token".to_owned())));
+    assert_ne!(stored_refresh_token(&rig), old);
+    // The new chain works.
+    rig.handle.bearer().unwrap();
+}
+
+#[test]
+fn an_api_key_replacing_oauth_first_revokes_the_refresh_token() {
+    let rig = rig();
+    sign_in(&rig);
+    let old = stored_refresh_token(&rig);
+    rig.fake.clear_requests();
+    let key = rig.fake.new_api_key();
+    rig.handle.add_api_key(&key).unwrap();
+    assert_eq!(revoked(&rig), [old]);
+    assert_eq!(item(&rig).unwrap()["kind"], "api_key");
+}
+
+#[test]
+fn a_failed_revoke_of_the_replaced_token_does_not_block_the_new_credential() {
+    let rig = rig();
+    sign_in(&rig);
+    let old = stored_refresh_token(&rig);
+    rig.fake.fail_next("/revoke", 500);
+    sign_in(&rig);
+    assert_eq!(rig.fake.requests_to("/revoke").len(), 1);
+    assert_ne!(stored_refresh_token(&rig), old);
+    assert_eq!(
+        rig.handle.status(),
+        CredentialStatus::SignedIn(CredentialKind::OAuth)
+    );
+}

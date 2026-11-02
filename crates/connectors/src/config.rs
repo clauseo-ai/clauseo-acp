@@ -185,7 +185,7 @@ pub(crate) struct ConnectorUrls {
 }
 
 /// The proxy every request goes through.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum ProxyChoice {
     /// `HTTPS_PROXY` from the environment, until stage C's upstream lookup exists.
     Env,
@@ -193,6 +193,23 @@ pub enum ProxyChoice {
     Fixed(url::Url),
     /// No proxy.
     Direct,
+}
+
+/// `Fixed(<scheme>://<host>:<port>)`: never the user info (a proxy password), path or query.
+impl fmt::Debug for ProxyChoice {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ProxyChoice::Env => f.write_str("Env"),
+            ProxyChoice::Direct => f.write_str("Direct"),
+            ProxyChoice::Fixed(url) => {
+                let host = url.host_str().unwrap_or("?");
+                match url.port_or_known_default() {
+                    Some(port) => write!(f, "Fixed({}://{host}:{port})", url.scheme()),
+                    None => write!(f, "Fixed({}://{host})", url.scheme()),
+                }
+            }
+        }
+    }
 }
 
 /// The crate's one source of wall time.
