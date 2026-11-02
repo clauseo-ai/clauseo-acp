@@ -62,6 +62,8 @@ export type Snapshot = {
   refused: boolean;
   ask: Ask | null;
   done: Done | null;
+  /** Whether the toolbar's Undo has a change to take back, or one still to page in. */
+  canUndo: boolean;
   /** The code of the last act the host refused, for its words. */
   failed: string | null;
   unsaved: Unsaved | null;

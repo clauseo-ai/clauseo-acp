@@ -1,12 +1,18 @@
-// What Versions' controller (controller.ts) reads from the view store beyond the matter's timeline: every older page of
-// a stream, the newest change that couldn't be kept as a version, and whether the matter's stream has gained an entry
-// that isn't the room's last act's own (which ends the line saying what the act did).
+// What Versions' controller (controller.ts) reads beyond the matter's timeline: every older page of a stream, the
+// newest change that couldn't be kept as a version, whether the matter's stream has gained an entry that isn't the
+// room's last act's own (which ends the line saying what the act did), and which file a refused restore was held on.
 import type { ViewStore } from "../../store/store.ts";
 import { streamOf, type StreamView } from "../../store/view.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
-import type { StreamId, ThreadSummary, TurnId, ViewEntry } from "../../transport/protocol.ts";
+import type {
+  RestorePreview,
+  StreamId,
+  ThreadSummary,
+  TurnId,
+  ViewEntry,
+} from "../../transport/protocol.ts";
 import { orderOf, pageBefore } from "../matter-stream.ts";
-import type { Unsaved } from "./state.ts";
+import type { Ask, Unsaved } from "./state.ts";
 
 /** Pages a stream back from its window's first entry, oldest first, until none are left or `enough` says so. A page
  * that fails ends the reading with what came. */
@@ -69,4 +75,29 @@ export function movedPast(view: StreamView, base: ReadonlySet<string>, own: Own)
     if (!base.has(id) && e !== undefined && !isOwn(e, own)) return true;
   }
   return false;
+}
+
+/** The restore dialog after a program refused the restore a file: the file the preview names, or the only file the
+ * restore writes; failing both, the file a preview asked again names. Naming none, the dialog stays with what restoring
+ * writes, says why, and offers Try again. */
+export async function lockedRestore(
+  ask: Extract<Ask, { act: "restore" }>,
+  code: string,
+  previewOf: (id: string) => Promise<RestorePreview | null>,
+): Promise<Ask> {
+  const { id, undoes } = ask;
+  let preview = ask.preview;
+  let file =
+    preview.locked[0] ?? (preview.changes.length === 1 ? preview.changes[0]?.path : undefined);
+  if (file === undefined) {
+    try {
+      preview = (await previewOf(id)) ?? preview;
+    } catch (error: unknown) {
+      console.warn(`preview_restore failed: ${JSON.stringify(error)}`);
+    }
+    file = preview.locked[0];
+  }
+  return file === undefined
+    ? { act: "restore", id, preview, undoes, stage: "confirm", failed: code }
+    : { act: "restore", id, preview, undoes, stage: "word", file };
 }

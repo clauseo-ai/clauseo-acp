@@ -144,10 +144,13 @@ export function VersionsCentre({
   controller: c,
   standIns,
   fileRef,
+  onLeave,
 }: {
   controller: VersionsController;
   standIns: StandIns;
   fileRef: FileRefOf;
+  /** Closes Versions: Cancel in a dialog the toolbar's Undo opened along with Versions. */
+  onLeave: () => void;
 }) {
   const w = useVersionWords();
   const { lang } = w;
@@ -293,7 +296,7 @@ export function VersionsCentre({
         ask={ask}
         waiting={waiting}
         held={held}
-        onClose={() => c.close()}
+        onClose={() => c.close() && onLeave()}
         onChoice={(id, choice) => c.choose(id, choice)}
         onRestore={() => void c.confirm()}
         onTryAgain={() => void c.tryAgain()}

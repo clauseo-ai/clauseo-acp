@@ -2,7 +2,15 @@
 // matter, and its chunk (versions-chunk.ts), loaded the first time the lawyer presses Versions or Undo. While open, the
 // timeline stands where the rail stood (the room renders `rail` in the rail's place) and the band over the work
 // (`centre`); closing it, or opening another matter, brings the rail back.
-import { createElement, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  createElement,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 import type { Platform } from "@clauseo/components/lib/display.ts";
 import { late } from "@clauseo/components/lib/late.ts";
 import type { ViewStore } from "../../store/store.ts";
@@ -38,8 +46,9 @@ export type VersionsSlots = {
   rail: ReactNode;
   /** The band over the work, with the restore dialog, or null. */
   centre: ReactNode;
-  /** For the toolbar's Versions and Undo pair. */
-  toolbar: { onVersions: () => void; versionsOpen: boolean; onUndo: () => void };
+  /** For the toolbar's Versions and Undo pair; writing: Undo waits, faint, as while Clauseo writes: Versions is open
+   * and nothing in the matter can be undone. */
+  toolbar: { onVersions: () => void; versionsOpen: boolean; onUndo: () => void; writing: boolean };
   /** Closes Versions: the rail comes back. */
   close: () => void;
 };
@@ -87,28 +96,49 @@ export function useVersions({
       (mod) => {
         if (current.current !== matter) return;
         const controller = new mod.VersionsController(transport, store, matter);
-        if (undo) controller.undoNewest();
+        // Undo opened Versions: Cancel in its dialog closes it again
+        if (undo) controller.undoNewest(true);
         setSession({ matter, mod, controller });
       },
       (error: unknown) => console.warn(`Versions' chunk did not load: ${String(error)}`),
     );
   };
   const close = () => setSession(null);
+  // whether the open Versions found nothing to undo: the toolbar's Undo waits
+  const watch = useCallback(
+    (fn: () => void) => live?.controller.subscribe(fn) ?? (() => undefined),
+    [live],
+  );
+  const nothing = () => {
+    const s = live?.controller.snapshot();
+    return s !== undefined && s.ready && !s.canUndo;
+  };
+  const undoWaits = useSyncExternalStore(watch, nothing, nothing);
   const fileRef = (path: string) => papers?.papers.find((p) => p.path === path)?.file ?? null;
   if (live === null)
     return {
       open: false,
       rail: null,
       centre: null,
-      toolbar: { onVersions: () => show(false), versionsOpen: false, onUndo: () => show(true) },
+      toolbar: {
+        onVersions: () => show(false),
+        versionsOpen: false,
+        onUndo: () => show(true),
+        writing: false,
+      },
       close,
     };
   const { mod, controller } = live;
   return {
     open: true,
     rail: createElement(mod.VersionsRail, { controller, platform, standIns, onClose: close }),
-    centre: createElement(mod.VersionsCentre, { controller, standIns, fileRef }),
-    toolbar: { onVersions: close, versionsOpen: true, onUndo: () => show(true) },
+    centre: createElement(mod.VersionsCentre, { controller, standIns, fileRef, onLeave: close }),
+    toolbar: {
+      onVersions: close,
+      versionsOpen: true,
+      onUndo: () => show(true),
+      writing: undoWaits,
+    },
     close,
   };
 }
