@@ -57,6 +57,7 @@ fn run_agent(
     let spec = launch_spec(
         agent,
         BTreeMap::new(),
+        BTreeMap::new(),
         inherited.into_iter(),
         std::env::temp_dir(),
     )
@@ -113,7 +114,14 @@ fn launch_spec_layers_inherited_then_agent_then_hook() {
     let hook = BTreeMap::from([(OsString::from("MODE"), OsString::from("hook"))]);
     let inherited = [("MODE", "host"), ("HOME", "/home/x")]
         .map(|(name, value)| (OsString::from(name), OsString::from(value)));
-    let spec = launch_spec(&agent, hook, inherited.into_iter(), std::env::temp_dir()).unwrap();
+    let spec = launch_spec(
+        &agent,
+        hook,
+        BTreeMap::new(),
+        inherited.into_iter(),
+        std::env::temp_dir(),
+    )
+    .unwrap();
     let env: Vec<_> = spec
         .env()
         .iter()
@@ -128,10 +136,68 @@ fn launch_spec_layers_inherited_then_agent_then_hook() {
                 ..agent
             },
             BTreeMap::new(),
+            BTreeMap::new(),
             std::iter::empty(),
             std::env::temp_dir()
         )
         .is_err()
+    );
+}
+
+/// No inherited `GIT_*` reaches the agent, in any case of its name; one the agent's own settings
+/// name is the lawyer's choice and stays. What the host forces wins over the settings and the
+/// hook, whatever the case of their names.
+#[test]
+fn launch_spec_drops_inherited_git_and_forced_wins() {
+    let agent = AgentLaunch {
+        command: absolute_program(),
+        args: Vec::new(),
+        env: BTreeMap::from([
+            ("GIT_AUTHOR_NAME".to_owned(), "Ada".to_owned()),
+            (
+                "initial_agent_mode".to_owned(),
+                "agent-full-access".to_owned(),
+            ),
+        ]),
+    };
+    let hook = BTreeMap::from([(
+        OsString::from("Initial_Agent_Mode"),
+        OsString::from("agent"),
+    )]);
+    let forced = BTreeMap::from([(
+        OsString::from("INITIAL_AGENT_MODE"),
+        OsString::from("workspace-write"),
+    )]);
+    let inherited = [
+        ("GIT_DIR", "/elsewhere/.git"),
+        ("git_work_tree", "/elsewhere"),
+        ("Git_Index_File", "/elsewhere/index"),
+        ("GITHUB_TOKEN", FAKE_GITHUB_TOKEN),
+        ("INITIAL_AGENT_MODE", "read-only"),
+        ("HOME", "/home/x"),
+    ]
+    .map(|(name, value)| (OsString::from(name), OsString::from(value)));
+    let spec = launch_spec(
+        &agent,
+        hook,
+        forced,
+        inherited.into_iter(),
+        std::env::temp_dir(),
+    )
+    .unwrap();
+    let env: Vec<_> = spec
+        .env()
+        .iter()
+        .map(|(k, v)| (k.to_str().unwrap(), v.to_str().unwrap()))
+        .collect();
+    assert_eq!(
+        env,
+        [
+            ("GITHUB_TOKEN", FAKE_GITHUB_TOKEN),
+            ("GIT_AUTHOR_NAME", "Ada"),
+            ("HOME", "/home/x"),
+            ("INITIAL_AGENT_MODE", "workspace-write"),
+        ]
     );
 }
 
@@ -154,7 +220,14 @@ fn launch_spec_keeps_one_variable_per_name_ignoring_case() {
         ("HOME", "/home/x"),
     ]
     .map(|(name, value)| (OsString::from(name), OsString::from(value)));
-    let spec = launch_spec(&agent, hook, inherited.into_iter(), std::env::temp_dir()).unwrap();
+    let spec = launch_spec(
+        &agent,
+        hook,
+        BTreeMap::new(),
+        inherited.into_iter(),
+        std::env::temp_dir(),
+    )
+    .unwrap();
     let env: Vec<_> = spec
         .env()
         .iter()

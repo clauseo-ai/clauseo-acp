@@ -41,13 +41,14 @@ pub(super) fn on_event(actor: &mut Actor, thread: ThreadId, event: Box<AcpEvent>
         return;
     };
     if agent.stage == Stage::Loading
-        && matches!(
-            *event,
+        && match *event {
             AcpEvent::Update {
                 origin: Origin::Replay,
                 ..
-            }
-        )
+            } => true,
+            AcpEvent::Update { .. } => agent.preparing,
+            _ => false,
+        }
     {
         agent.replayed.push(*event);
         return;

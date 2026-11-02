@@ -1,13 +1,15 @@
 //! A launched agent's session: `session/load` with the stored session id when the agent offers
-//! it (after reading the thread's whole log for replay dedupe), else `session/new`, then the
-//! attach commit, the held replay and the work that waited.
+//! it (after reading the thread's whole log for replay dedupe), else `session/resume` when it
+//! offers that (nothing is replayed), else `session/new`; for a Codex agent the checks before
+//! its first prompt (the ask mode, the guard's trust); then the attach commit, the held replay
+//! and the work that waited.
 
 use std::path::PathBuf;
 
-use clauseo_acp::{AgentInfo, LoadSession, McpServer, NewSession, SessionStart};
+use clauseo_acp::{AcpClient, AgentInfo, LoadSession, McpServer, NewSession, SessionStart};
 use clauseo_protocol::{
-    AgentSessionAttached, ConfigOptionsReplaced, Envelope, ModeChanged, Notice, NoticeLevel,
-    StreamId, ThreadId, ViewEntry,
+    AgentChoiceId, AgentKind, AgentSessionAttached, CompactString, ConfigOptionsReplaced, Envelope,
+    ErrorCode, ModeChanged, Notice, NoticeLevel, StreamId, ThreadId, ViewEntry,
 };
 
 use super::super::Actor;
@@ -15,7 +17,7 @@ use super::super::input::Input;
 use super::agents::{Stage, call, launch_failed, run_waiting};
 use super::out::Out;
 use super::{AgentReply, LogFor, Then, TurnInput, lost, state, updates};
-use crate::agent;
+use crate::agent::{self, codex};
 use crate::error::Error;
 use crate::sent::SentView;
 
@@ -29,11 +31,16 @@ pub(super) fn on_initialized(actor: &mut Actor, thread: ThreadId, info: AgentInf
         .get(&thread)
         .and_then(|entry| entry.row.acp_session_id.clone());
     let loads = info.capabilities.load_session && stored.is_some();
+    let resumes = !loads && info.capabilities.session.resume && stored.is_some();
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };
     agent.info = Some(info);
     agent.stage = Stage::Loading;
+    if resumes {
+        resume_session(actor, thread);
+        return;
+    }
     if !loads {
         new_session(actor, thread);
         return;
@@ -93,6 +100,37 @@ pub(super) fn on_replay_log(
     });
 }
 
+/// `session/resume` with the stored session id: the agent takes it back and replays nothing.
+fn resume_session(actor: &mut Actor, thread: ThreadId) {
+    let session = actor
+        .threads
+        .get(&thread)
+        .and_then(|entry| entry.row.acp_session_id.clone());
+    let started = folder(actor, thread).and_then(|cwd| Ok((cwd, session_loads(actor, thread)?)));
+    let (Some(session), Ok((cwd, (meta, mcp_servers)))) = (session, started) else {
+        new_session(actor, thread);
+        return;
+    };
+    let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref()) else {
+        return;
+    };
+    let (id, client, fence) = (agent.id, agent.link.client.clone(), agent.link.fence());
+    call(actor, thread, id, async move {
+        let request = LoadSession {
+            session,
+            cwd,
+            mcp_servers,
+            meta: Some(meta),
+        };
+        let result = client.resume_session(request).await;
+        fence.await;
+        AgentReply::Session {
+            loaded: true,
+            result,
+        }
+    });
+}
+
 pub(super) fn new_session(actor: &mut Actor, thread: ThreadId) {
     let started = folder(actor, thread).and_then(|cwd| Ok((cwd, session_loads(actor, thread)?)));
     let (cwd, (meta, mcp_servers)) = match started {
@@ -140,6 +178,94 @@ fn folder(actor: &Actor, thread: ThreadId) -> Result<PathBuf, Error> {
     Ok(PathBuf::from(&actor.check_matter(matter)?.row.folder_path))
 }
 
+/// The session is up. A Codex agent's session first runs [`prepare`]'s checks; any other
+/// attaches now.
+pub(super) fn on_started(actor: &mut Actor, thread: ThreadId, start: SessionStart, loaded: bool) {
+    let codex = actor
+        .threads
+        .get(&thread)
+        .is_some_and(|entry| AgentKind::of(&entry.row.agent) == Some(AgentKind::Codex));
+    if !codex {
+        attach(actor, thread, start, loaded);
+        return;
+    }
+    let ask =
+        AgentChoiceId::new(codex::ASK_MODE).map_err(|error| Error::Internal(error.to_string()));
+    let checks = ask.and_then(|ask| {
+        let offered = start.modes.as_ref().is_some_and(|modes| {
+            modes
+                .available
+                .iter()
+                .any(|mode| mode.id == codex::ASK_MODE)
+        });
+        if !offered {
+            return Err(Error::refused(
+                ErrorCode::AgentProtocolError,
+                format!(
+                    "Codex offered no \"{}\" mode, which Clauseo runs it in, so no message was \
+                     sent",
+                    codex::ASK_MODE
+                ),
+            ));
+        }
+        let switch = start
+            .modes
+            .as_ref()
+            .is_some_and(|modes| modes.current != codex::ASK_MODE);
+        Ok((ask, switch, folder(actor, thread)?))
+    });
+    let (ask, switch, cwd) = match checks {
+        Ok(checks) => checks,
+        Err(error) => {
+            tracing::warn!(%thread, %error, "the Codex session cannot run in its ask mode");
+            launch_failed(actor, thread, &error);
+            return;
+        }
+    };
+    let guard = super::agents::codex_hooks(actor).is_some();
+    if !switch && !guard {
+        attach(actor, thread, start, loaded);
+        return;
+    }
+    let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
+        return;
+    };
+    agent.preparing = true;
+    let (id, client, fence) = (agent.id, agent.link.client.clone(), agent.link.fence());
+    let cwd = codex::session_folder(&cwd);
+    call(actor, thread, id, async move {
+        let result = prepare(&client, start, (ask, switch), guard.then_some(cwd)).await;
+        fence.await;
+        AgentReply::Prepared { loaded, result }
+    });
+}
+
+/// A Codex session's checks before its first prompt, in order: `session/set_mode` to the ask
+/// mode when `switch` (the host owns the mode: `INITIAL_AGENT_MODE` set it at launch, and
+/// this covers an adapter that did not take it); then, when a hooks object went into
+/// `CODEX_CONFIG` (`guard` is the session's folder), `_codex/hooks/list` once, which must
+/// show the guard trusted. The start comes back with the mode it now has.
+async fn prepare(
+    client: &AcpClient,
+    mut start: SessionStart,
+    (ask, switch): (AgentChoiceId, bool),
+    guard: Option<PathBuf>,
+) -> Result<SessionStart, Error> {
+    if switch {
+        client.set_mode(&start.session, ask.clone()).await?;
+        if let Some(modes) = &mut start.modes {
+            modes.current = CompactString::from(ask.as_str());
+        }
+    }
+    if let Some(cwd) = guard {
+        let answer = client.codex_hooks_list(&cwd).await?;
+        if !codex::guard_trusted(&answer) {
+            return Err(codex::guard_untrusted(&answer));
+        }
+    }
+    Ok(start)
+}
+
 /// The session is up: one commit of `AgentSessionAttached`, the thread row, the session's mode
 /// and options (and the "context not restored" notice), then the held replay and the waiting
 /// work.
@@ -156,6 +282,7 @@ pub(super) fn attach(actor: &mut Actor, thread: ThreadId, start: SessionStart, l
     };
     agent.session = Some(start.session);
     agent.stage = Stage::Attached;
+    agent.preparing = false;
     let replayed = std::mem::take(&mut agent.replayed);
     let waiting = std::mem::take(&mut agent.waiting);
     for event in replayed {

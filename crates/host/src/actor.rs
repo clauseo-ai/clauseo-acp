@@ -89,6 +89,9 @@ pub(crate) struct Actor {
     pub(crate) profile: Box<dyn ProfileHook>,
     /// Where Claude Code's enterprise `managed-mcp.json` would be.
     pub(crate) managed_mcp: std::path::PathBuf,
+    /// The Codex hooks object a test set (`HostConfig::with_codex_hooks`); read only through
+    /// the codex hooks seam, `turn::agents::codex_hooks`.
+    pub(crate) codex_hooks: Option<serde_json::Map<String, serde_json::Value>>,
     pub(crate) refused_folders: Vec<PathBuf>,
     pub(crate) clock: Arc<dyn Clock>,
     pub(crate) ids: Ids,

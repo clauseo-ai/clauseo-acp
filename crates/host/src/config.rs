@@ -54,6 +54,7 @@ pub struct HostConfig {
     patch_window_bytes: usize,
     managed_mcp: PathBuf,
     app_capacity: usize,
+    codex_hooks: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 /// A `HostConfig` taken apart by the host thread.
@@ -67,6 +68,7 @@ pub(crate) struct ConfigParts {
     pub(crate) patch_window_bytes: usize,
     pub(crate) managed_mcp: PathBuf,
     pub(crate) app_capacity: usize,
+    pub(crate) codex_hooks: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 impl HostConfig {
@@ -83,6 +85,7 @@ impl HostConfig {
             patch_window_bytes: PATCH_WINDOW_BYTES,
             app_capacity: SUBSCRIPTION_CAPACITY,
             managed_mcp: crate::agent::loads::managed_mcp_path(),
+            codex_hooks: None,
         }
     }
 
@@ -137,6 +140,14 @@ impl HostConfig {
         self
     }
 
+    /// The `hooks` object a Codex agent's `CODEX_CONFIG` carries, as the codex hooks seam
+    /// (`actor/turn/agents.rs`) would give it, for tests of the guard's trust check.
+    #[cfg(feature = "test-support")]
+    pub fn with_codex_hooks(mut self, hooks: serde_json::Map<String, serde_json::Value>) -> Self {
+        self.codex_hooks = Some(hooks);
+        self
+    }
+
     /// Takes the config apart.
     pub(crate) fn into_parts(self) -> ConfigParts {
         ConfigParts {
@@ -149,6 +160,7 @@ impl HostConfig {
             patch_window_bytes: self.patch_window_bytes,
             app_capacity: self.app_capacity,
             managed_mcp: self.managed_mcp,
+            codex_hooks: self.codex_hooks,
         }
     }
 }

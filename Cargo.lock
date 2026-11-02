@@ -871,6 +871,7 @@ dependencies = [
  "clauseo-acp",
  "clauseo-fake_agent",
  "clauseo-host",
+ "clauseo-limits",
  "clauseo-matters",
  "clauseo-process",
  "clauseo-protocol",

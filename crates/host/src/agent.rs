@@ -5,6 +5,7 @@
 //! consumes it. Either way it then waits, at most [`PUMP_END_BOUND`], for the stderr pump and the
 //! event forwarder to end, reads the exit report, and posts [`Ended`] after the agent's last event.
 
+pub(crate) mod codex;
 pub(crate) mod loads;
 mod spec;
 
