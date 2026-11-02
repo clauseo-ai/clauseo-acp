@@ -94,6 +94,8 @@ test(
       return into;
     };
     const first = closure(entry!.fileName);
+    // the first load is one chunk (vite.config.ts's codeSplitting): the entry statically imports no other file
+    expect([...first]).toEqual([entry!.fileName]);
     const bare = chunks.filter((c) =>
       BARE_CHUNKS.some((name) => c.fileName.startsWith(`assets/${name}-`)),
     );
@@ -121,8 +123,9 @@ type Chunk = Pick<Rolldown.OutputChunk, "fileName" | "code" | "imports">;
 
 /**
  * The exception to the bare-chunk rule: `dep` may be missing from the first load when it is a chunk outside `first`
- * (the first load's file names), under 1000 B brotli, that only bare chunks import (at least one does). Such a chunk
- * is reached by no static import of the entry, so it loads with the bare chunk that imports it, and no sooner.
+ * (the first load's file names), under 1000 B brotli, that only bare chunks import (at least one does), and whose own
+ * imports are all in the first load (so the exception adds no chunk that loads without a preload). Such a chunk is
+ * reached by no static import of the entry, so it loads with the bare chunk that imports it, and no sooner.
  */
 export function isLazyShared(
   dep: string,
@@ -132,6 +135,7 @@ export function isLazyShared(
 ): boolean {
   const target = chunks.find((c) => c.fileName === dep);
   if (target === undefined || first.has(dep)) return false;
+  if (!target.imports.every((d) => first.has(d))) return false;
   const bareNames = new Set(bare.map((c) => c.fileName));
   const importers = chunks.filter((c) => c.imports.includes(dep));
   return (
@@ -194,9 +198,9 @@ test("isLazyShared is true just under 1000 B brotli and false from 1000 B up", (
   const list = synth("assets/list.js", ["assets/shared.js"]);
   const under = synth("assets/shared.js", [], noise(limit - 1));
   const over = synth("assets/shared.js", [], noise(limit));
-  // the edge itself: the first length that is exactly 1000 B on this Node's brotli (under is 999 B or less)
+  // the edge: the first length at 1000 B or more (the length before it is under 1000 B)
   expect(brotliSize(under.code)).toBeLessThan(1000);
-  expect(brotliSize(over.code)).toBe(1000);
+  expect(brotliSize(over.code)).toBeGreaterThanOrEqual(1000);
   expect(
     isLazyShared("assets/shared.js", [synth("assets/index.js"), list, under], FIRST, [list]),
   ).toBe(true);
@@ -210,6 +214,16 @@ test("isLazyShared is false for a chunk the first load holds", () => {
   const chunks = [synth("assets/index.js"), list, synth("assets/shared.js")];
   const first = new Set([...FIRST, "assets/shared.js"]);
   expect(isLazyShared("assets/shared.js", chunks, first, [list])).toBe(false);
+});
+
+test("isLazyShared is false when the shared chunk imports a chunk outside the first load", () => {
+  const list = synth("assets/list.js", ["assets/shared.js"]);
+  const shared = synth("assets/shared.js", ["assets/big.js"]);
+  const chunks = [synth("assets/index.js"), list, shared, synth("assets/big.js")];
+  expect(isLazyShared("assets/shared.js", chunks, FIRST, [list])).toBe(false);
+  // the same chunk with its import in the first load is the exception
+  const inFirst = new Set([...FIRST, "assets/big.js"]);
+  expect(isLazyShared("assets/shared.js", chunks, inFirst, [list])).toBe(true);
 });
 
 test("isLazyShared is false for a name no chunk has, and for a chunk nothing imports", () => {
