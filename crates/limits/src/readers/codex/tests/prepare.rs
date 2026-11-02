@@ -78,6 +78,8 @@ fn codex_home_is_forced_over_inherited_and_settings_values_in_any_case() {
         "features.skill_mcp_dependency_install=false",
         "-c",
         "cloud.skills.enabled=false",
+        "-c",
+        "skills.bundled.enabled=false",
     ]
     .map(OsString::from);
     let mut args = vec![codex_js.into_os_string()];
