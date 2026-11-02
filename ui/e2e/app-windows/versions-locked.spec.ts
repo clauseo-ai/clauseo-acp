@@ -17,8 +17,13 @@ const BEFORE = { "brief.txt": "Clause 4 draft\n", "old.txt": "Old terms\n" };
 const AFTER = { "brief.txt": "Clause 4 final\n", "notes/a.txt": "Alpha\n" };
 /** The matter after restoring the import version: a restore never deletes, so notes/a.txt stays. */
 const RESTORED = { ...BEFORE, "notes/a.txt": "Alpha\n" };
-/** The restore dialog's line for a file added since the version (versions/words.ts). */
-const STAYS_LINE = "'a.txt', added since, stays.";
+/**
+ * The restore dialog's line for a file added since the version (versions/words.ts). The words put
+ * each file name between Unicode isolates (U+2068, U+2069), so the name is matched with them.
+ */
+const STAYS_LINE = /'\u2068?a\.txt\u2069?', added since, stays\./;
+/** The refusal's line for the file Word holds (restore-dialog.tsx), isolates as above. */
+const HELD_LINE = /Close '\u2068?brief\.txt\u2069?' in Word to restore it\./;
 /** Word's owner file for brief.txt: `~$` and the whole name (locks.rs `owner_names`). */
 const OWNER = "~$brief.txt";
 const OWNER_BYTES = "owner file: open in Word";
@@ -55,16 +60,21 @@ test("Restore waits while Word holds a file, then lands once it is closed", asyn
 
   // Refused: the dialog names the file, offers Try again, and the lock line shows; nothing moved.
   await expect(w.dialogTryAgain).toBeVisible();
-  await expect(w.dialog).toContainText("Close 'brief.txt' in Word to restore it.");
+  await expect(w.dialog).toContainText(HELD_LINE);
   await expect(app.page.getByText(LOCKED_LINE)).toBeVisible();
   expect(readFileSync(brief, "utf8")).toBe(AFTER["brief.txt"]);
   expect(readTree(scratch.matterDir)).toEqual({ ...AFTER, [OWNER]: OWNER_BYTES });
-  await expect(w.version("restore")).toHaveCount(0);
 
   // Closed in Word: Try again goes through.
   rmSync(join(scratch.matterDir, OWNER));
   await w.dialogTryAgain.click();
-  await expect(w.version("restore")).toHaveCount(1);
   await expect(w.dialog).toBeHidden();
   await expect.poll(() => readTree(scratch.matterDir)).toEqual(RESTORED);
+
+  // Below 1200 px (the e2e window is 1028 px wide) picking a version closed the panel; the
+  // toolbar's Versions brings it back. One restore version: the refused try kept none.
+  if (!(await w.versionsPanel.isVisible())) {
+    await w.versionsButton.click();
+  }
+  await expect(w.version("restore")).toHaveCount(1);
 });
