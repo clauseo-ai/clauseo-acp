@@ -1,6 +1,6 @@
-//! The agents' current `PreToolUse` input shapes (`tests/fixtures/pre_write_guard`, README.md
-//! there names the versions): the guard reads each one, so a shape change fails here instead of
-//! the guard failing open in the field.
+//! The agents' `PreToolUse` input shapes as captured for the pinned versions
+//! (`tests/fixtures/pre_write_guard`, README.md there names them and the rule to capture them
+//! again when a version moves): the guard reads each one, not through its fail-open path.
 
 use super::{Fixture, IGNORED, deny, guard, guard_with};
 

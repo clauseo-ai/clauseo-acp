@@ -1,6 +1,7 @@
 //! A shell command's targets: its words, segment by segment, each candidate name taken from the
-//! folder the command has `cd`'d to by then (lexically, as the shell's default `cd` does) and from
-//! the hook's `cwd`.
+//! hook's `cwd` and from every folder the command's own folder changes may have reached by then
+//! (by the folder's text, as the shell's default `cd` does, and through symlinks, as `cd -P`
+//! does).
 
 use std::borrow::Cow;
 use std::path::{Component, Path, PathBuf};
@@ -12,23 +13,43 @@ use super::{
     Ignored, MAX_WORDS, Targets, existing_resolved, lexical, patch_targets, text_has_codex_part,
 };
 
-/// Where a command's working folder is after its segments so far.
+/// The most folders [`Folders`] keeps; past it, the folder is unknown.
+const MAX_FOLDERS: usize = 16;
+
+/// The folders a command may be in after its segments so far.
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Folder {
-    /// A folder the guard followed the command to.
-    Known(PathBuf),
-    /// A `cd` the guard cannot follow (`cd "$(…)"`, `cd -`, `popd` with nothing pushed).
-    Unknown,
+struct Folders {
+    /// The hook's `cwd`, then every folder a folder change may have reached. A change that did not
+    /// run (`false && cd x`, a subshell's `cd`) only adds a folder, so the real one is always here
+    /// unless `unknown`.
+    reached: Vec<PathBuf>,
+    /// Whether a folder change went somewhere the guard cannot follow (`cd "$(…)"`, `cd ~`, `cd -`,
+    /// `popd` with nothing pushed), or more than [`MAX_FOLDERS`] were reached. It stays set.
+    unknown: bool,
+    /// How many `pushd`s the command ran, for `popd`.
+    pushed: usize,
 }
 
-/// A shell command's targets: the existing files among its first [`MAX_WORDS`] words, the files
-/// of a patch in its text, and whether one of those words has a `.codex` part. Claude Code sends
-/// the command as a string; an argument list (one shape Codex has used) is taken word by word,
-/// each split again so `["bash", "-lc", "…"]` reaches the script's words. Each word's
-/// candidates ([`candidates`]) are taken from `cwd` and from the folder the segments before it
-/// moved to ([`moved`]); after a `cd` the guard cannot follow, a relative candidate is also
-/// taken from `cwd` with its leading `..` and `.` parts off. Each of those paths counts as
-/// spelled and normalised ([`resolutions`]). A command of another JSON type is ignored.
+/// One segment to read: its words, whether it is a command (not a heredoc body), and its shell's
+/// escape character.
+struct Part<'a> {
+    words: &'a [String],
+    command: bool,
+    escape: Escape,
+}
+
+/// A shell command's targets: the existing files among its first [`MAX_WORDS`] words (and the
+/// first [`MAX_WORDS`] of each script it hands to `sh -c`, `bash -c`, `eval`, `pwsh -Command` and
+/// the like), the files of a patch in its text, and whether one of those words has a `.codex`
+/// part. Claude Code sends the command as a string; an argument list (one shape Codex has used) is
+/// taken word by word, each split again so `["bash", "-lc", "…"]` reaches the script's words.
+///
+/// Each word's candidates ([`candidates`]) are taken from `cwd` and from every folder reached so
+/// far ([`Folders`], [`moved`]). When the command names a folder change anywhere, followed or
+/// not, a relative candidate is also taken from `cwd` with its leading `..` and `.` parts off: a
+/// backstop for changes the guard misreads, at the cost of a rare refusal of a write that lands
+/// elsewhere. Each path counts as spelled and resolved ([`resolutions`]). A command of another
+/// JSON type is ignored.
 pub(super) fn shell_targets(
     command: Option<&Value>,
     cwd: &Path,
@@ -52,16 +73,46 @@ pub(super) fn shell_targets(
         }
         _ => return Err(Ignored::Shape("command string or list")),
     }
+    let scripts: Vec<(Segments, Escape)> = segments
+        .iter()
+        .filter(|segment| segment.command)
+        .filter_map(|segment| script(&segment.words, escape))
+        .map(|(script, escape)| {
+            let mut inner = Segments::new(MAX_WORDS);
+            shell_segments(&script, escape, &mut inner);
+            (inner, escape)
+        })
+        .collect();
+    let parts: Vec<Part<'_>> = segments
+        .iter()
+        .map(|segment| (segment, escape))
+        .chain(
+            scripts
+                .iter()
+                .flat_map(|(inner, escape)| inner.iter().map(move |segment| (segment, *escape))),
+        )
+        .map(|(segment, escape)| Part {
+            words: &segment.words,
+            command: segment.command,
+            escape,
+        })
+        .collect();
+    let changes = parts
+        .iter()
+        .any(|part| part.words.iter().any(|word| change(word).is_some()));
     let mut files: Vec<PathBuf> = Vec::new();
     let mut names_codex = false;
-    let mut folder = Folder::Known(cwd.to_path_buf());
-    let mut pushed: Vec<Folder> = Vec::new();
-    for segment in segments.iter() {
-        for word in segment {
+    let mut folders = Folders {
+        reached: vec![cwd.to_path_buf()],
+        unknown: false,
+        pushed: 0,
+    };
+    for part in &parts {
+        for word in part.words {
             for candidate in candidates(word) {
                 names_codex |= text_has_codex_part(candidate);
-                let candidate = native(candidate, escape);
-                for path in starts(&folder, cwd, Path::new(candidate.as_ref())) {
+                let candidate = native(candidate, part.escape);
+                for path in starts(&folders, changes, Path::new(candidate.as_ref())) {
                     for path in resolutions(&path) {
                         if !files.contains(&path) && path.metadata().is_ok_and(|m| m.is_file()) {
                             files.push(path);
@@ -70,7 +121,9 @@ pub(super) fn shell_targets(
                 }
             }
         }
-        folder = moved(folder, segment, escape, &mut pushed);
+        if part.command {
+            moved(&mut folders, part.words, part.escape);
+        }
     }
     Ok(Targets::Shell {
         files,
@@ -79,17 +132,21 @@ pub(super) fn shell_targets(
     })
 }
 
-/// `path` as spelled and normalised: `..` and `.` parts resolved by their text first, then its
-/// deepest existing folder canonicalised and the rest added. The first is what the OS opens when
-/// every folder exists (a symlinked folder's `..` included); the second catches a `..` after a
-/// folder the command makes first (`mkdir -p D && echo x > D/../Contract.docx`), or never does.
-/// A path with no `.` or `..` part names the same file both ways, so it comes once.
+/// `path` as spelled, and for a path with a `.` or `..` part also resolved two ways through its
+/// deepest existing folder: as spelled (a symlinked folder's `..` is its target's parent, as the
+/// OS reads it), and with `..` and `.` resolved by their text first (`mkdir -p D && echo x >
+/// D/../Contract.docx`, or a `D` that never exists). A path with no such part names the same file
+/// every way, so it comes once.
 pub(super) fn resolutions(path: &Path) -> Vec<PathBuf> {
     let normal = lexical(path);
     if normal == path {
         vec![normal]
     } else {
-        vec![path.to_path_buf(), existing_resolved(&normal)]
+        vec![
+            path.to_path_buf(),
+            existing_resolved(path),
+            existing_resolved(&normal),
+        ]
     }
 }
 
@@ -103,124 +160,189 @@ fn native(candidate: &str, escape: Escape) -> Cow<'_, str> {
     }
 }
 
-/// The paths `candidate` may name: from `folder` when known, from `cwd`, and when `folder` is
-/// unknown also from `cwd` with its leading `..` and `.` parts off (`cd "$(…)" && echo x >
-/// ../Contract.docx` most likely went one folder down first).
-fn starts(folder: &Folder, cwd: &Path, candidate: &Path) -> Vec<PathBuf> {
-    let mut paths = vec![cwd.join(candidate)];
-    match folder {
-        Folder::Known(folder) if folder != cwd => paths.push(folder.join(candidate)),
-        Folder::Known(_) => {}
-        Folder::Unknown => {
-            let rest: PathBuf = candidate
-                .components()
-                .skip_while(|part| matches!(part, Component::ParentDir | Component::CurDir))
-                .collect();
-            if !rest.as_os_str().is_empty() && rest != candidate {
-                paths.push(cwd.join(rest));
-            }
+/// The paths `candidate` may name: from each folder reached, and when the command changes folder
+/// (`changes`) or went somewhere unknown, from the first (`cwd`) with its leading `..` and `.`
+/// parts off (`cd "$(…)" && echo x > ../Contract.docx` most likely went one folder down first).
+fn starts(folders: &Folders, changes: bool, candidate: &Path) -> Vec<PathBuf> {
+    let mut paths: Vec<PathBuf> = folders
+        .reached
+        .iter()
+        .map(|folder| folder.join(candidate))
+        .collect();
+    if (changes || folders.unknown)
+        && let Some(cwd) = folders.reached.first()
+    {
+        let rest: PathBuf = candidate
+            .components()
+            .skip_while(|part| matches!(part, Component::ParentDir | Component::CurDir))
+            .collect();
+        if !rest.as_os_str().is_empty() && rest != candidate {
+            paths.push(cwd.join(rest));
         }
     }
     paths
 }
 
-/// The working folder after `segment` runs from `folder`. A segment that changes folder starts
-/// with `cd`, `chdir` or `pushd` (POSIX shells), or `Set-Location`, `sl`, `cd`, `chdir`,
-/// `Push-Location` or `pushd` (PowerShell), ignoring case and a leading `(` or `{`; its folder is
-/// its first word not starting with `-`, or the part after `:` of a `-Path:x` word. No folder,
-/// or one starting with `~`, leaves it (home is not the matter); a folder with `$`, `` ` ``, a
-/// glob or `-` alone is unknown; else it is joined to `folder` and normalised by its text. `popd`
-/// and `Pop-Location` go back to the folder `pushd` left, unknown when none.
-fn moved(folder: Folder, segment: &[String], escape: Escape, pushed: &mut Vec<Folder>) -> Folder {
-    let Some((command, args)) = segment.split_first() else {
-        return folder;
+/// What a folder-changing command does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Change {
+    /// `cd`, `chdir`, `Set-Location`, `sl`; with `push`, `pushd` and `Push-Location`.
+    Move { push: bool },
+    /// `popd`, `Pop-Location`.
+    Pop,
+}
+
+/// The folder change `word` names, ignoring case and shell punctuation around it.
+fn change(word: &str) -> Option<Change> {
+    let name = word
+        .trim_start_matches(['{', '(', '!', '$', '`', '@', '&'])
+        .trim_end_matches([';', ')', '}'])
+        .to_ascii_lowercase();
+    match name.as_str() {
+        "cd" | "chdir" | "set-location" | "sl" => Some(Change::Move { push: false }),
+        "pushd" | "push-location" => Some(Change::Move { push: true }),
+        "popd" | "pop-location" => Some(Change::Pop),
+        _ => None,
+    }
+}
+
+/// `words` from the command name on: leading reserved words, braces, `!`, the `builtin`,
+/// `command` and `time` prefixes and `NAME=value` assignments are skipped.
+fn command_words(words: &[String]) -> &[String] {
+    let skip = words
+        .iter()
+        .take_while(|word| {
+            matches!(
+                word.as_str(),
+                "{" | "}"
+                    | "("
+                    | "!"
+                    | "if"
+                    | "then"
+                    | "do"
+                    | "else"
+                    | "elif"
+                    | "while"
+                    | "until"
+                    | "time"
+                    | "builtin"
+                    | "command"
+            ) || is_assignment(word)
+        })
+        .count();
+    words.get(skip..).unwrap_or_default()
+}
+
+/// Whether `word` is a shell variable assignment, `NAME=value`.
+fn is_assignment(word: &str) -> bool {
+    word.split_once('=').is_some_and(|(name, _)| {
+        name.chars()
+            .next()
+            .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+            && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    })
+}
+
+/// The script a segment hands to another shell, and that shell's escape: the argument after a
+/// `-c`-style option of `sh`, `bash`, `zsh`, `dash` or `ksh` (`-c`, `-lc`, `-ec`), the arguments
+/// after `-c` or `-Command` of `pwsh` or `powershell`, or the arguments of `eval` (in this
+/// shell). One level only: a script's own scripts are not read.
+fn script(words: &[String], escape: Escape) -> Option<(String, Escape)> {
+    let (program, args) = command_words(words).split_first()?;
+    let name = program
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(program)
+        .to_ascii_lowercase();
+    let name = name.strip_suffix(".exe").unwrap_or(&name);
+    match name {
+        "sh" | "bash" | "zsh" | "dash" | "ksh" => {
+            let at = args.iter().position(|arg| {
+                arg.strip_prefix('-')
+                    .is_some_and(|flags| !flags.starts_with('-') && flags.contains('c'))
+            })?;
+            Some((args.get(at + 1)?.clone(), Escape::Backslash))
+        }
+        "pwsh" | "powershell" => {
+            let at = args.iter().position(|arg| {
+                matches!(
+                    arg.to_ascii_lowercase().as_str(),
+                    "-c" | "-command" | "/c" | "/command"
+                )
+            })?;
+            Some((args.get(at + 1..)?.join(" "), Escape::Backtick))
+        }
+        "eval" | "invoke-expression" | "iex" => Some((args.join(" "), escape)),
+        _ => None,
+    }
+}
+
+/// `folders` after the segment `words` runs. A segment that changes folder ([`change`], after
+/// [`command_words`]) names its folder by its first word not starting with `-`, or the part after
+/// `:` of a `-Path:x` word. Its folder joined to each folder reached, by its text and through
+/// symlinks, is added; an absolute folder is added alone. No folder, `-`, `+N`, or one starting
+/// with `~` (home is usually above the matter) or holding `$`, `` ` ``, a glob or a brace is
+/// unknown. `popd` and `Pop-Location` go back to a folder already reached, or to an unknown one
+/// when the command pushed none.
+fn moved(folders: &mut Folders, words: &[String], escape: Escape) {
+    let Some((command, args)) = command_words(words).split_first() else {
+        return;
     };
-    let command = command.trim_start_matches(['(', '{']).to_ascii_lowercase();
-    let push = match command.as_str() {
-        "pushd" | "push-location" => true,
-        "cd" | "chdir" | "set-location" | "sl" => false,
-        "popd" | "pop-location" => return pushed.pop().unwrap_or(Folder::Unknown),
-        _ => return folder,
+    let push = match change(command) {
+        Some(Change::Move { push }) => push,
+        Some(Change::Pop) => {
+            if folders.pushed == 0 {
+                folders.unknown = true;
+            } else {
+                folders.pushed -= 1;
+            }
+            return;
+        }
+        None => return,
     };
+    if push {
+        folders.pushed += 1;
+    }
     let target = args.iter().find_map(|arg| match arg.strip_prefix('-') {
         Some(option) if !option.is_empty() => option
             .split_once(':')
             .map(|(_, value)| value.trim_matches(['\'', '"'])),
         Some(_) | None => Some(arg.as_str()),
     });
-    let target = target.map(|target| target.trim_end_matches([')', '}', '&']));
-    let next = match target {
-        None => folder.clone(),
-        Some(target) if target.starts_with('~') => folder.clone(),
-        Some(target) if target == "-" || target.contains(['$', '`', '*', '?', '[']) => {
-            Folder::Unknown
-        }
-        Some(target) => {
-            let target = native(target, escape);
-            let target = Path::new(target.as_ref());
-            match &folder {
-                _ if target.is_absolute() => Folder::Known(lexical(target)),
-                Folder::Known(folder) => Folder::Known(lexical(&folder.join(target))),
-                Folder::Unknown => Folder::Unknown,
-            }
-        }
+    let target = target.map(|target| target.trim_end_matches([')', '}', ';']));
+    let Some(target) = target.filter(|target| {
+        !(target.is_empty()
+            || *target == "-"
+            || target.starts_with(['~', '+'])
+            || target.contains(['$', '`', '*', '?', '[', '{']))
+    }) else {
+        folders.unknown = true;
+        return;
     };
-    if push {
-        pushed.push(folder);
+    let target = native(target, escape);
+    let target = Path::new(target.as_ref());
+    let joined: Vec<PathBuf> = if target.is_absolute() {
+        vec![target.to_path_buf()]
+    } else {
+        folders
+            .reached
+            .iter()
+            .map(|folder| folder.join(target))
+            .collect()
+    };
+    for path in joined {
+        for folder in [lexical(&path), existing_resolved(&path)] {
+            if folders.reached.contains(&folder) {
+                continue;
+            }
+            if folders.reached.len() >= MAX_FOLDERS {
+                folders.unknown = true;
+                return;
+            }
+            folders.reached.push(folder);
+        }
     }
-    next
 }
 
 #[cfg(test)]
-mod tests {
-    use std::path::{Path, PathBuf};
-
-    use super::{Escape, Folder, moved};
-
-    /// The folder after each of `segments` (words split at spaces), from `/m`.
-    fn walk(segments: &[&str], escape: Escape) -> Folder {
-        let mut folder = Folder::Known(PathBuf::from("/m"));
-        let mut pushed = Vec::new();
-        for segment in segments {
-            let words: Vec<String> = segment.split(' ').map(str::to_owned).collect();
-            folder = moved(folder, &words, escape, &mut pushed);
-        }
-        folder
-    }
-
-    fn known(path: &str) -> Folder {
-        Folder::Known(Path::new(path).to_path_buf())
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn cd_moves_the_folder_by_its_text() {
-        let posix = Escape::Backslash;
-        assert_eq!(walk(&["cd D"], posix), known("/m/D"));
-        assert_eq!(walk(&["cd D", "cd .."], posix), known("/m"));
-        assert_eq!(walk(&["cd ./D/../E/"], posix), known("/m/E"));
-        assert_eq!(walk(&["cd -P D"], posix), known("/m/D"));
-        assert_eq!(walk(&["(cd D)"], posix), known("/m/D"));
-        assert_eq!(walk(&["cd /x/y"], posix), known("/x/y"));
-        assert_eq!(walk(&["cd"], posix), known("/m"));
-        assert_eq!(walk(&["cd ~/x"], posix), known("/m"));
-        assert_eq!(walk(&["echo cd D"], posix), known("/m"));
-        assert_eq!(walk(&["cd $(pwd)/D"], posix), Folder::Unknown);
-        assert_eq!(walk(&["cd -"], posix), Folder::Unknown);
-        assert_eq!(walk(&["cd $(pwd)", "cd D"], posix), Folder::Unknown);
-        assert_eq!(walk(&["cd $(pwd)", "cd /m"], posix), known("/m"));
-        assert_eq!(walk(&["pushd D", "cd E", "popd"], posix), known("/m"));
-        assert_eq!(walk(&["popd"], posix), Folder::Unknown);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn powershell_set_location_moves_the_folder() {
-        let ps = Escape::Backtick;
-        assert_eq!(walk(&["Set-Location D"], ps), known("/m/D"));
-        assert_eq!(walk(&["set-location -Path D\\E"], ps), known("/m/D/E"));
-        assert_eq!(walk(&["Set-Location -LiteralPath:'D'"], ps), known("/m/D"));
-        assert_eq!(walk(&["sl ..\\x"], ps), known("/x"));
-        assert_eq!(walk(&["Push-Location D", "Pop-Location"], ps), known("/m"));
-    }
-}
+mod tests;
