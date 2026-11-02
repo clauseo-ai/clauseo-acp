@@ -1,7 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use clauseo_protocol::{
-    LimitStopReason, MatterPath, RawFrom, TextOrBlob, ToolCallContent, ToolLocation,
+    LimitStopReason, MatterPath, RawFrom, SteeringCapability, TextOrBlob, ToolCallContent,
+    ToolLocation,
 };
 use serde_json::json;
 
@@ -321,4 +322,67 @@ fn agent_info_absent_has_no_title() {
     assert_eq!(info.name, None);
     assert_eq!(info.version, None);
     assert_eq!(info.title, None);
+}
+
+/// What `initialize` says about steering, from the agent's `initialize` result as JSON.
+fn steering_of(response: Value) -> Option<SteeringCapability> {
+    let response: acp::InitializeResponse = serde_json::from_value(response).unwrap();
+    agent_info(response).capabilities.steering
+}
+
+/// `steering` is `Some` only when `_meta.steering.supported` is true; `idle_fallback_to_host`
+/// is `agentCapabilities._meta.claudeCode.promptQueueing`.
+#[test]
+fn steering_capability_from_initialize_meta() {
+    let base = |meta: Value, capabilities_meta: Value| {
+        let mut response = json!({
+            "protocolVersion": 1,
+            "agentCapabilities": {"loadSession": true},
+            "authMethods": [],
+        });
+        if !meta.is_null() {
+            response["_meta"] = meta;
+        }
+        if !capabilities_meta.is_null() {
+            response["agentCapabilities"]["_meta"] = capabilities_meta;
+        }
+        response
+    };
+    let native = |idle| {
+        Some(SteeringCapability {
+            native: true,
+            idle_fallback_to_host: idle,
+        })
+    };
+    // No `_meta` at all: no steering.
+    assert_eq!(steering_of(base(Value::Null, Value::Null)), None);
+    // `supported: false`, even with claudeCode's promptQueueing: no steering.
+    assert_eq!(
+        steering_of(base(
+            json!({"steering": {"supported": false}}),
+            json!({"claudeCode": {"promptQueueing": true}}),
+        )),
+        None
+    );
+    // Supported, but no claudeCode: native steering without the idle fallback.
+    assert_eq!(
+        steering_of(base(json!({"steering": {"supported": true}}), Value::Null)),
+        native(false)
+    );
+    // Supported with promptQueueing: both flags.
+    assert_eq!(
+        steering_of(base(
+            json!({"steering": {"supported": true}}),
+            json!({"claudeCode": {"promptQueueing": true}}),
+        )),
+        native(true)
+    );
+    // promptQueueing alone does not make an agent steerable.
+    assert_eq!(
+        steering_of(base(
+            Value::Null,
+            json!({"claudeCode": {"promptQueueing": true}}),
+        )),
+        None
+    );
 }

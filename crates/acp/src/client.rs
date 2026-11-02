@@ -51,6 +51,12 @@ pub(crate) enum Command {
         session: AgentSessionId,
         reply: Reply<Vec<PendingKey>>,
     },
+    /// `_session/steering` with the content as a prompt, while the session's prompt may run.
+    Steer {
+        session: AgentSessionId,
+        content: Vec<ContentBlock>,
+        reply: Reply<SteerResult>,
+    },
     AnswerPermission {
         key: PendingKey,
         option_id: AgentChoiceId,
@@ -178,15 +184,24 @@ impl AcpClient {
         answer
     }
 
-    /// Steer a running turn. Not built yet: always [`Error::SteerUnsupported`], sending nothing.
+    /// Steers a running turn: `_session/steering` with `content` as a prompt, sent while the
+    /// turn's `session/prompt` still waits; the prompt's later updates stay the running turn's.
+    /// Only an agent with native steering that falls back to the host when idle takes it (its
+    /// `initialize` capabilities, [`AgentInfo`](crate::AgentInfo)); any other gives
+    /// [`Error::SteerUnsupported`] and sends nothing. An error answer, or an outcome the driver
+    /// does not know, is [`SteerResult::Failed`].
     pub async fn steer(
         &self,
         session: &AgentSessionId,
         content: Vec<ContentBlock>,
     ) -> Result<SteerResult, Error> {
-        drop((session, content));
-        // Async for the signature steer keeps once it is built.
-        futures::future::ready(Err(Error::SteerUnsupported)).await
+        let session = session.clone();
+        self.call(|reply| Command::Steer {
+            session,
+            content,
+            reply,
+        })
+        .await
     }
 
     /// `session/cancel`. Answers every pending permission request of the session as

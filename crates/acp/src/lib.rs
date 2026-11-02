@@ -9,6 +9,8 @@
 //!   plan.
 //! - What Clauseo advertises in `initialize` (`driver.rs`, `client_capabilities`), the version
 //!   check, and the refusal of `fs/*` and `terminal/*` (-32601).
+//! - Steering: the capability `initialize` gives (`steering.rs`) and `steer()`, which sends
+//!   `_session/steering` while a prompt may run (`driver/steer.rs`).
 //! - Turning agent traffic into [`AcpEvent`]s built from `protocol`'s types (`map.rs`), the
 //!   typed plan limit signals ([`LimitSignal`]), and the stdout line filter with its caps
 //!   (`line.rs`): a line at most 8 MiB, a text chunk at most 1 MiB, at most 64 updates read
@@ -37,9 +39,11 @@
 //!   next prompt starts; `Replay` between sending `session/load` and its response; else `Idle`
 //!   (`session/resume` replays nothing, so it never tags `Replay`).
 //!   A response's callback runs before any later agent message, so tags never guess from timing.
-//! - `_meta` is read only at `_claude/rateLimit` (on `usage_update`) and
-//!   `jetbrains.air.sessionFailure` (on `session_info_update` and the prompt response). A
-//!   `session/new`, `session/load` or `session/resume` `_meta` is sent verbatim and never read.
+//! - `_meta` is read only at `_claude/rateLimit` (on `usage_update`),
+//!   `jetbrains.air.sessionFailure` (on `session_info_update` and the prompt response), and
+//!   `initialize`'s steering capability (`steering.rs`: `_meta.steering.supported` and
+//!   `agentCapabilities._meta.claudeCode.promptQueueing`). A `session/new`, `session/load` or
+//!   `session/resume` `_meta` is sent verbatim and never read.
 //! - A malformed line (not UTF-8 JSON-RPC), an unknown update or an unknown content block never
 //!   ends the connection, and nothing is written back for it: it becomes a [`ProtocolWarning`],
 //!   naming its session when the message named one, or a `ContentBlock::Unsupported`.
@@ -75,6 +79,7 @@ mod inbound;
 mod line;
 mod map;
 mod state;
+mod steering;
 mod types;
 
 #[cfg(test)]
