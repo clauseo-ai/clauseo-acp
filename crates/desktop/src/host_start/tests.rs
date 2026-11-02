@@ -164,6 +164,12 @@ fn a_reload_while_the_host_starts_keeps_the_new_pages_channel() {
             dead.drain().is_empty(),
             "new page woke first: {new_wakes_first}"
         );
+        // The kept page follows the limits. A dead page dropped on waking never subscribes;
+        // one kept until the new page replaced it may have had the view first.
+        let _view = new.next_limits();
+        if new_wakes_first {
+            assert_eq!(dead.limits_received(), 0, "the dropped page got limits");
+        }
 
         drop(bridge);
         stop(&cell);
