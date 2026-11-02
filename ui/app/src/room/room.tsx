@@ -164,7 +164,7 @@ function RoomFrame({
         : "";
   return (
     <div
-      className={versions.open ? "room-window ver-window" : "room-window"}
+      className="room-window"
       data-panel={versions.open ? "" : undefined}
       ref={nodes.slot("window")}
     >

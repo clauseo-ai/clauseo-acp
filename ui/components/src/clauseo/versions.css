@@ -221,14 +221,14 @@
     margin-top: var(--s4);
   }
 
-  /* ---------- the timeline, in the rail's place ---------- */
-  .ver-window[data-panel] {
+  /* ---------- the timeline, in the rail's place: a column of the room's window, which still fills the view ---------- */
+  .room-window[data-panel] {
     --rail-col: var(--ver-panel-w);
     --work-w: calc(var(--view-w) - var(--rail-col) - var(--pane-w) + var(--overlap));
     --gutter: max(var(--thread-pad), calc((var(--work-w) - var(--measure)) / 2));
     grid-template-columns: var(--ver-panel-w) minmax(0, 1fr) var(--pane-w);
   }
-  .ver-window[data-panel] .room-lead {
+  .room-window[data-panel] .room-lead {
     width: var(--ver-panel-w);
   }
   .ver-panel {
@@ -461,7 +461,7 @@
   }
   /* a mid window: the panel opens over the work, as the folded rail does */
   @variant rail-folded {
-    .ver-window[data-panel] .ver-panel {
+    .room-window[data-panel] .ver-panel {
       position: absolute;
       z-index: 10;
       left: var(--s3);
