@@ -103,6 +103,12 @@ agent message text to one that does not (`:29655-29658`, `:44519-44523`). It nev
   lists the skills. The only
   keys a settings `CODEX_CONFIG` contributes are `model` and `model_reasoning_effort`, so a
   by-hand check can pick the cheapest model while no settings value can undo a switch.
+- **Clauseo's skills (amended for record 0031).** codex `rust-v0.162.1` has no root-scoped
+  skills key: `SkillsConfig` has only `bundled`, `include_instructions`, `max_context_tokens`
+  and `config` (`codex-rs/config/src/skills_config.rs:41-56`), `[[skills.config]]` matches one
+  exact path or name (`:103-130`), and `~/.agents/skills` comes from `HOME`
+  (`codex-rs/ext/skills/src/host_roots.rs:35-36`, `:95-114`). So `include_instructions=false`
+  stays, and Clauseo's skills reach Codex as an index in `developer_instructions` (record 0031).
 - **The home's `config.toml`.** codex-acp gives `CODEX_CONFIG` only to the session and starts
   the app-server with `-c` for hooks alone (`dist/index.js:45590-45601`), so app-server starts
   from the home's own `config.toml`, where plugins are on by default. G8a saw every start sync a
