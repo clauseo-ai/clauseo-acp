@@ -223,3 +223,20 @@ test("a key the answer names is announced: the design system's key cap without a
   expect(markup).toMatch(/<kbd class="[^"]*kbd-cap[^"]*">Esc<\/kbd>/);
   expect(markup).not.toContain("aria-hidden");
 });
+
+test("a tag cut at a line's start (nesting.ts) is a tag only where micromark reads one in the source", () => {
+  // Decoded, `&#62;` and `\"` read as a tag; micromark reads the source, where neither is one.
+  expect(html("para\n<script &#62;x</script> y")).toContain("&#x3C;script >x&#x3C;/script> y");
+  expect(html('para\n<pre a=\\"b\\">kept')).toBe('<p>para&#x3C;pre a="b">kept</p>');
+  // As written, it is a tag there as anywhere else, and two on one line are both seen.
+  expect(html("para\n<script>x</script> y")).toBe("<p>parax y</p>");
+  expect(html('para\n<pre a="b">kept</pre> and\n<pre>two</pre>')).toBe("<p>parakept andtwo</p>");
+  // A tag in the source whose text the value shows decoded stays text, whole (no offset of one is used
+  // in the other).
+  expect(html('para\n<pre a="&amp;">kept</pre> x')).toBe(
+    '<p>para&#x3C;pre a="&#x26;">kept&#x3C;/pre> x</p>',
+  );
+  // In a note, whose positions are its block's.
+  const note = html("A[^n].\n\n[^n]: B\n<script &#62;x</script> y");
+  expect(note).toContain("&#x3C;script >x&#x3C;/script> y");
+});

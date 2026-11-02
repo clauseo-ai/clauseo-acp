@@ -220,7 +220,7 @@ const FOOTER_SCHEMA = {
 export function unsplit(text: string): string {
   const capped = capNesting(text);
   const hast = toHast(parse(capped), { clobberPrefix: "spec-", handlers: HANDLERS }) as Root;
-  markCutTags(hast);
+  markCutTags(hast, capped);
   if (hasStandIns(capped)) restoreText(hast);
   pairTags(hast, false);
   // The answer's headings get anchors, remark-rehype's footer heading does not (the renderer draws its own).

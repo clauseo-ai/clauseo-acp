@@ -301,8 +301,13 @@ function dropBlockMarkup(value: string): string {
  * The tags nesting.ts made text at the start of a line (its stand-in for `<` before `script`, `pre`,
  * `style` or `textarea`, which would start an HTML block running to its end tag), as inline HTML again,
  * so HTML_ELEMENTS' rule sees them as it sees the same tag anywhere else. Before restoreText, outside code.
+ * A tag is what micromark would read as one, so it is matched on the source the text node was parsed from
+ * (`source`, at the node's position), and taken only where the text shows that source as written: a text
+ * node's value has its escapes and character references decoded, and `para\n<script &#62;x</script>`
+ * matched on it made a tag of what micromark reads as text, and dropped it. `offset` is where `source`
+ * starts in what was parsed (a note's text, in its block's input).
  */
-export function markCutTags(root: Root): void {
+export function markCutTags(root: Root, source: string, offset = 0): void {
   const stack: (Root | Element)[] = [root];
   for (let parent = stack.pop(); parent; parent = stack.pop()) {
     const children = parent.children as ElementContent[];
@@ -313,19 +318,50 @@ export function markCutTags(root: Root): void {
         continue;
       }
       if (child.type !== "text" || INLINE_HTML.has(child) || BLOCK_HTML.has(child)) continue;
-      const at = child.value.indexOf(CUT_LESS_THAN);
-      if (at < 0) continue;
-      TAG_AT.lastIndex = 0;
-      const match = TAG_AT.exec(`<${child.value.slice(at + 1)}`);
-      if (!match) continue;
-      const tag: Text = { type: "text", value: match[0] };
-      const after: Text = { type: "text", value: child.value.slice(at + match[0].length) };
-      INLINE_HTML.add(tag);
-      child.value = child.value.slice(0, at);
-      children.splice(index + 1, 0, tag, after);
-      index += 1; // `after` is looked at next, for another one.
+      const pieces = cutTagsIn(child, source, offset);
+      if (pieces.length === 0) continue;
+      children.splice(index, 1, ...pieces);
+      index += pieces.length - 1;
     }
   }
+}
+
+/**
+ * A text node's value split at the tags its stand-ins start, as micromark would read them from the
+ * node's source: each stand-in of the value has its own in the source, in the same order (no escape or
+ * reference makes or hides one; micromark turns U+FDD0 to U+FDEF written as references into U+FFFD); a
+ * tag there is one where the value shows that tag's text exactly. Text, tag (as inline HTML), text, and so
+ * on; none when there is no tag.
+ */
+function cutTagsIn(node: Text, source: string, offset: number): Text[] {
+  const { value } = node;
+  let at = value.indexOf(CUT_LESS_THAN);
+  if (at < 0) return [];
+  const start = (node.position?.start.offset ?? -1) - offset;
+  const end = (node.position?.end.offset ?? -1) - offset;
+  if (start < 0 || end > source.length) return [];
+  const written = source.slice(start, end);
+  const pieces: Text[] = [];
+  let copied = 0;
+  for (let from = written.indexOf(CUT_LESS_THAN); at >= 0 && from >= 0;) {
+    TAG_AT.lastIndex = 0;
+    // One inside the tag before (in an attribute's value) starts none.
+    const match = at >= copied ? TAG_AT.exec(`<${written.slice(from + 1)}`) : null;
+    if (match && value.startsWith(match[0].slice(1), at + 1)) {
+      const tag: Text = { type: "text", value: match[0] };
+      INLINE_HTML.add(tag);
+      pieces.push({ type: "text", value: value.slice(copied, at) }, tag);
+      copied = at + match[0].length;
+    }
+    at = value.indexOf(CUT_LESS_THAN, at + 1);
+    from = written.indexOf(CUT_LESS_THAN, from + 1);
+  }
+  if (pieces.length === 0) return [];
+  // The first piece keeps the node itself (a paragraph's first node stays one, PARAGRAPH_START).
+  node.value = pieces[0]!.value;
+  pieces[0] = node;
+  pieces.push({ type: "text", value: value.slice(copied) });
+  return pieces;
 }
 
 /** An HTML block of nothing but line breaks, each without attributes. */
