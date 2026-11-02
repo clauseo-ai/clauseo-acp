@@ -9,7 +9,7 @@ import { Kbd } from "../ui/kbd.tsx";
 import { useDisplay } from "../lib/display.ts";
 import { IconAccept, IconNewMatter, IconPaperBookPage } from "../icons/icons.tsx";
 import { useThreadWords } from "../lib/words-thread.ts";
-import { useVersionWords } from "../lib/words-versions.ts";
+import { useUiWords } from "../lib/words-ui.ts";
 import {
   ANSWER_ORDER,
   keyReachesPrompt,
@@ -74,7 +74,7 @@ export function PermissionPrompt({
   dataAnswer?: string;
 }) {
   const w = useThreadWords();
-  const v = useVersionWords();
+  const v = useUiWords();
   const id = useId();
   const { platform } = useDisplay();
   const mac = platform === "mac";
@@ -252,8 +252,8 @@ export function PermissionPrompt({
         <p className="perm-confirming" role="status">
           <Say>
             {platform === "mac"
-              ? v.v("macOS is asking you to confirm.")
-              : v.v("Windows is asking you to confirm.")}
+              ? v.ui("macOS is asking you to confirm.")
+              : v.ui("Windows is asking you to confirm.")}
           </Say>
         </p>
       )}

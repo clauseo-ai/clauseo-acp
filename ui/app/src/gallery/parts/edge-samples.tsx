@@ -4,10 +4,10 @@
 import { useState } from "react";
 import {
   AllowedList,
-  NotProtectedMark,
   WorkspaceLine,
   type Unprotected,
 } from "@clauseo/components/clauseo/allowed.tsx";
+import { NotProtectedMark } from "@clauseo/components/clauseo/not-protected.tsx";
 import {
   EdgePrompt,
   RefusalPause,

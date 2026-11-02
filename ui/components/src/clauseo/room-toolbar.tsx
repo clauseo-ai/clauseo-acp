@@ -11,7 +11,7 @@ import { cn } from "../lib/cn.ts";
 import { useDisplay, type Lang, type Platform } from "../lib/display.ts";
 import { useWords } from "../lib/words.ts";
 import { rt } from "../lib/words-room.ts";
-import { useVersionWords } from "../lib/words-versions.ts";
+import { useToolbarWords } from "../lib/words-toolbar.ts";
 import { HistoryPanel } from "./history.tsx";
 import type { HistoryRow } from "./matter.ts";
 import { CaptionButtons, CornerLights, type CaptionWiring } from "./caption.tsx";
@@ -19,7 +19,7 @@ import { useRoom } from "./room-scope.ts";
 import { mt } from "../lib/words-matters.ts";
 import { Dot, Say } from "./say.tsx";
 import { Heading } from "./heading.tsx";
-import { NotProtectedMark } from "./allowed.tsx";
+import { NotProtectedMark } from "./not-protected.tsx";
 
 export type RoomToolbarProps = {
   /** The matter's name as filed, in English in both languages. Empty, the toolbar draws no heading at all, never an
@@ -110,7 +110,7 @@ const planState = (left: number): PlanState =>
  * of the caption buttons, which end it at the top right. */
 export function RoomToolbar(p: RoomToolbarProps) {
   const w = useWords();
-  const vw = useVersionWords();
+  const vw = useToolbarWords();
   const display = useDisplay();
   const platform = p.platform ?? display.platform;
   const own = p.chrome !== "os";

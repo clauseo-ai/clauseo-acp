@@ -7,10 +7,10 @@ import { clock, t as roomWords, type Key } from "./words.ts";
 import { ui, type UiKey } from "./words-ui.ts";
 import { useDisplay, type Lang } from "./display.ts";
 import { wordsOf, type Slots } from "./words-core.ts";
+import { TOOLBAR_WORDS } from "./words-toolbar.ts";
 
 const HI = {
   // the name of the thing, and its places
-  Versions: "संस्करण",
   "{n} versions": "{n} संस्करण",
   "1 version": "1 संस्करण",
   Now: "अभी",
@@ -180,9 +180,6 @@ const EDGE = {
   "Don't allow": "अनुमति न दें",
   "Keep protection": "संरक्षण बनाए रखें",
   "Switch off": "बंद करें",
-  "macOS is asking you to confirm.": "macOS आपसे पुष्टि माँग रहा है।",
-  "Windows is asking you to confirm.": "Windows आपसे पुष्टि माँग रहा है।",
-  "Linux is asking you to confirm.": "Linux आपसे पुष्टि माँग रहा है।",
   // answered, in the past tense
   "Allowed for this matter. Clauseo can read {place}.":
     "इस मामले के लिए अनुमति दी गई। Clauseo {place} पढ़ सकता है।",
@@ -248,10 +245,6 @@ const EDGE = {
   "Safe workspace. Clauseo works inside this matter's folder and asks before going beyond it.":
     "सुरक्षित कार्यक्षेत्र। Clauseo इस मामले के फ़ोल्डर के भीतर काम करता है और उससे बाहर जाने से पहले पूछता है।",
   // not protected
-  "Not protected": "संरक्षित नहीं",
-  "Not protected.": "संरक्षित नहीं।",
-  "Clauseo can reach beyond this matter's folder without asking.":
-    "Clauseo बिना पूछे इस मामले के फ़ोल्डर से बाहर पहुँच सकता है।",
   "This matter is not protected": "यह मामला संरक्षित नहीं है",
   "Protection is off for {matter}. Clauseo can read and change files anywhere on this computer while it works here, without asking first.":
     "{matter} के लिए संरक्षण बंद है। यहाँ काम करते समय Clauseo बिना पहले पूछे इस कंप्यूटर पर कहीं भी फ़ाइलें पढ़ और बदल सकता है।",
@@ -286,7 +279,7 @@ const EDGE = {
 } as const;
 
 /** Every string of Versions, in English: the matter as it stood, and the edge of the matter. */
-const ALL = { ...HI, ...EDGE } as const;
+const ALL = { ...TOOLBAR_WORDS, ...HI, ...EDGE } as const;
 /** Every string, English to Hindi, for the tests' banned-words screen. */
 export const VERSION_WORDS: Readonly<Record<string, string>> = ALL;
 export type VersionKey = keyof typeof ALL;

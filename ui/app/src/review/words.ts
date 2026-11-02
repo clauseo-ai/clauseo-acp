@@ -10,6 +10,7 @@ import { rt, type RoomKey } from "@clauseo/components/lib/words-room.ts";
 import { brk, type BreakKey } from "@clauseo/components/lib/words-breaks.ts";
 import { startup, type StartupKey } from "@clauseo/components/lib/words-startup.ts";
 import { th, type ThreadKey } from "@clauseo/components/lib/words-thread.ts";
+import { ui, type UiKey } from "@clauseo/components/lib/words-ui.ts";
 import { vt, type VersionKey } from "@clauseo/components/lib/words-versions.ts";
 import { t, type Key } from "@clauseo/components/lib/words.ts";
 
@@ -70,6 +71,12 @@ export const matterFormWords = (key: MatterFormKey): WordsRef => ({
   file: "lib/words-matter-form.ts",
   key,
   text: (lang) => mf(lang, key),
+});
+
+export const uiWords = (key: UiKey): WordsRef => ({
+  file: "lib/words-ui.ts",
+  key,
+  text: (lang) => ui(lang, key),
 });
 
 export const versionWords = (key: VersionKey): WordsRef => ({

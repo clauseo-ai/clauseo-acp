@@ -20,7 +20,7 @@ import { cn } from "../lib/cn.ts";
 import { useDisplay } from "../lib/display.ts";
 import { useWords } from "../lib/words.ts";
 import { revealKey, ui } from "../lib/words-ui.ts";
-import { vt } from "../lib/words-versions.ts";
+import { tbt } from "../lib/words-toolbar.ts";
 import { Say } from "./say.tsx";
 import { ConversationList, type ConversationRowProps } from "./rail-conversations.tsx";
 import { MATTER_MARK, matterStatus, type MatterState } from "./rail-words.ts";
@@ -173,9 +173,9 @@ function RowWords({
           {name}
         </span>
         {unprotected === true && (
-          <span className="room-matter-np" title={vt(w.lang, "Not protected")}>
+          <span className="room-matter-np" title={tbt(w.lang, "Not protected")}>
             <IconNotProtected size={14} />
-            <span className="sr-only">{vt(w.lang, "Not protected")}</span>
+            <span className="sr-only">{tbt(w.lang, "Not protected")}</span>
           </span>
         )}
       </span>

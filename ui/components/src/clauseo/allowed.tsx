@@ -7,16 +7,11 @@
 import { Popover as BasePopover } from "@base-ui/react/popover";
 import { useState, type ReactNode } from "react";
 import { Button } from "../ui/button.tsx";
-import {
-  IconFolder,
-  IconNotProtected,
-  IconSafeWorkspace,
-  IconUndo,
-  IconWebsite,
-} from "../icons/icons.tsx";
+import { IconFolder, IconSafeWorkspace, IconUndo, IconWebsite } from "../icons/icons.tsx";
 import { useVersionWords } from "../lib/words-versions.ts";
 import { FloatingCard } from "./floating-card.tsx";
 import { Heading } from "./heading.tsx";
+import { NotProtectedMark } from "./not-protected.tsx";
 import { Say } from "./say.tsx";
 
 /** A place the matter allows or refuses: a folder or a website, as the computer writes it, and when. */
@@ -75,40 +70,6 @@ export function WorkspaceLine({
         {children}
       </FloatingCard>
     </BasePopover.Root>
-  );
-}
-
-/** Not protected, as a matter carries it for as long as it lasts, everywhere in the app: the open lock, "Not
- * protected." at chip weight in primary, then what it means in the muted tone, all in concrete and never red. On the
- * room's line it is the way into what the matter allows. The rail and the toolbar carry the short form, the lock and
- * "Not protected" alone. First launch's line, "Not protected." with Try again and Settings, takes this same mark. */
-export function NotProtectedMark({
-  short = false,
-  meaning,
-}: {
-  short?: boolean;
-  /** What Not protected means where it isn't protection switched off. When the workspace couldn't
-   * be set up, or Windows was told no, Clauseo falls back to asking before each change, and the caller says so in its
-   * own words: "Clauseo asks before each change in this matter." Without it, the sentence about protection switched
-   * off stands. */
-  meaning?: string;
-}) {
-  const w = useVersionWords();
-  return (
-    <span className="np-mark" data-short={short ? "" : undefined}>
-      <IconNotProtected size={14} className="np-icon" />
-      <span className="np-words">
-        <b className="np-name">{short ? w.v("Not protected") : w.v("Not protected.")}</b>
-        {!short && (
-          <>
-            {" "}
-            <Say>
-              {meaning ?? w.v("Clauseo can reach beyond this matter's folder without asking.")}
-            </Say>
-          </>
-        )}
-      </span>
-    </span>
   );
 }
 
