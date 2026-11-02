@@ -3,7 +3,13 @@
 //! after-turn checkpoint and ends `TurnFailed { thread.interrupted }` (a checkpoint R8 made
 //! whose record the log lost is recorded with the turn's changes, `known.rs`); a turn that never
 //! started stays queued, held behind its own thread; an attached session is detached. A turn
-//! with a `TurnEnded` is never touched, so each repair happens once.
+//! with a `TurnEnded` is never touched, so each repair happens once, with one exception: a
+//! thread whose last step stopped `AtLimit` with no `TurnStoppedAtLimit` for its turn (the read
+//! that was to give its reset time was lost with the restart, or its commit failed) gets one,
+//! with no window or reset time and the reason `PlanWindow`, in a commit of its own. Both are
+//! read from the loaded state (a snapshot keeps its steps and limit cards), and once that event
+//! is logged the card exists, so this too happens once. It runs only at start-up, when no
+//! pending stop of `limits.rs` can exist.
 //!
 //! A turn whose end ran but was never logged (it failed twice) freed the writer, so other
 //! threads' turns in the matter may have run, and one may still be open too. The started turns
@@ -26,14 +32,15 @@ use std::collections::BTreeSet;
 use clauseo_matters::TurnMeta;
 use clauseo_protocol::{
     AgentSessionDetached, CheckpointId, DetachReason, DomainEvent, ElicitationId, ElicitationState,
-    Envelope, ErrorCode, EventId, PermissionRequestId, PermissionState, StopReason, StreamId,
-    ThreadId, ThreadStatus, ToolCallId, TurnId, TurnQueued, UserMessageStatus, ViewEntry,
+    Envelope, ErrorCode, EventId, LimitStopReason, PermissionRequestId, PermissionState,
+    StopReason, StreamId, ThreadId, ThreadStatus, ToolCallId, TurnId, TurnQueued,
+    TurnStoppedAtLimit, UserMessageStatus, ViewEntry,
 };
 use clauseo_reducer::ThreadState;
 
 use super::super::Actor;
 use super::super::input::{Input, MatterTag};
-use super::close::{Expiries, TurnClose};
+use super::close::{Expiries, TurnClose, log_limit_stop};
 use super::out::Out;
 use super::{JobKind, LogFor, Then, TurnInput, TurnJob, end, matter_of, state};
 use crate::error::Error;
@@ -89,6 +96,19 @@ struct Pending {
 /// read (a snapshot keeps neither its session nor its queue events).
 pub(super) fn reconcile(actor: &mut Actor, thread: ThreadId) {
     let stream = StreamId::Thread(thread);
+    let unstopped = actor
+        .loaded(stream)
+        .and_then(|loaded| loaded.state.as_thread())
+        .and_then(stop_not_logged);
+    if let Some(turn) = unstopped {
+        let stopped = TurnStoppedAtLimit {
+            turn,
+            window: None,
+            resets_at: None,
+            reason: LimitStopReason::PlanWindow,
+        };
+        log_limit_stop(actor, thread, stopped);
+    }
     let needs = actor
         .loaded(stream)
         .and_then(|loaded| loaded.state.as_thread())
@@ -133,6 +153,22 @@ fn open_turn(state: &ThreadState) -> Option<(TurnId, bool)> {
         ThreadStatus::Running | ThreadStatus::NeedsYou
     );
     Some((turn, started))
+}
+
+/// The turn of the thread's last step when that step stopped `AtLimit` and the turn has no
+/// `TurnStoppedAtLimit`.
+fn stop_not_logged(state: &ThreadState) -> Option<TurnId> {
+    let mut last = None;
+    let mut cards: BTreeSet<TurnId> = BTreeSet::new();
+    for entry in state.entries().values() {
+        if let ViewEntry::Step(step) = entry {
+            last = Some((step.turn, step.stop));
+        } else if let ViewEntry::LimitStop(card) = entry {
+            cards.insert(card.turn);
+        }
+    }
+    let (turn, stop) = last?;
+    (stop == StopReason::AtLimit && !cards.contains(&turn)).then_some(turn)
 }
 
 fn has_pending(state: &ThreadState) -> bool {
