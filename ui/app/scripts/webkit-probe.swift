@@ -19,12 +19,14 @@
 // scrolls sideways. With ?confirm=1 as well, Always for this matter is pressed and held, and the page answers once the
 // prompt is confirming (data-confirming and its OS line), at 1280 px and under the frozen axe run.
 //
-// Versions (?versions=panel, band, undo, restore, wait; probe-states.tsx) is loaded at every width in both looks, the
-// panel also at text sizes 16 and 20 in night Hindi, and run through axe. Each page presses what it needs once, as the
-// lawyer would (Versions, a past version, Undo or Restore), and answers once its key element shows: the timeline with
+// Versions (?versions=panel, band, undo, restore, wait, newest; probe-states.tsx) is loaded at every width in both looks,
+// the panel also at text sizes 16 and 20 in night Hindi, and run through axe. Each page presses what it needs once, as
+// the lawyer would (Versions, a past version, Undo or Restore), and answers once its key element shows: the timeline with
 // its kinds of row and no rail (panel), the band with Undo and Restore (band), the undo or restore dialog (undo, restore,
-// with restore's added-since note), or the band's waiting line with Restore and Undo dimmed (wait). Each part is
-// measured for sideways scroll as the page is.
+// with restore's added-since note), the band's waiting line with Restore and Undo dimmed (wait), or the newest turn's
+// change picked at now, the band with its Undo alone (newest). On a mid window (1000 to 1199 px) picking a version puts
+// the panel away, so the pages after a pick wait for their own key, not the panel's. Each part is measured for sideways
+// scroll as the page is, and each dialog must be drawn (opacity 1) once it shows.
 //
 // Usage, from ui/app: pnpm build:probe, then serve dist-probe/ with `pnpm exec vite preview --mode probe` (port 4173),
 // then pnpm probe:webkit. PROBE_ORIGIN names another server; PROBE_SHOTS names a folder to save a PNG of each page
@@ -264,16 +266,21 @@ let pressVersions = press + "('versions', '.room-pair button[aria-expanded]')"
 let pressRow = press + "('row', '[data-testid=\"version\"][data-checkpoint=\"cp2\"]')"
 let pressUndo = press + "('undo', '[data-testid=\"version-undo\"]')"
 let pressRestore = press + "('restore', '[data-testid=\"version-restore\"]')"
+let pressNewest = press + "('newest', '[data-testid=\"version\"][data-checkpoint=\"cp4\"]')"
 /** The page's transitions are finished on every poll once rendered (as for the permission prompts): a dialog's enter
  * animation, started after the dialog shows, never advances in a WKWebView with no window, so it is finished as it starts. */
 let settledVersions = " && (document.getAnimations().forEach(function (a) { try { a.finish(); } catch (e) {} }), true)"
-/** Versions open, a past version (cp2, the turn three days ago) selected, the band showing it with Undo and Restore. */
-let versionsBand = pressVersions + " && document.querySelector('[data-testid=\"versions\"]') !== null" +
-  " && " + pressRow + " && document.querySelector('[data-testid=\"version\"][data-checkpoint=\"cp2\"]')?.getAttribute('aria-current') === 'true'" +
+/** The row, where it still stands (a wide window keeps the panel after a pick, a mid one puts it away), is the picked one. */
+func versionsRowCurrent(_ checkpoint: String) -> String {
+  "(function (r) { return r === null || r.getAttribute('aria-current') === 'true'; })(document.querySelector('[data-testid=\"version\"][data-checkpoint=\"\(checkpoint)\"]'))"
+}
+/** Versions open, a past version (cp2, the turn three days ago) picked, the band showing it with Undo and Restore. The
+ * pick closes the panel on a mid window, so the band's key is the band's own buttons, not the panel. */
+let versionsBand = pressVersions + " && " + pressRow + " && " + versionsRowCurrent("cp2") +
   " && document.querySelector('[data-testid=\"version-undo\"]') !== null && document.querySelector('[data-testid=\"version-restore\"]') !== null"
 let versionsDialog = "document.querySelector('[role=\"dialog\"] [data-testid=\"dialog-confirm\"]') !== null"
 /** Versions' page: no sideways scroll, the title not cut off, and the tile rows as the room measures them, and no
- * Versions part or dialog scrolls sideways. */
+ * Versions part or dialog scrolls sideways. A dialog shown must be drawn: its opacity is 1, not its starting style. */
 let versionsMeasured = "(function () { var errs = " + measured + ";" +
   " document.querySelectorAll('[data-testid=\"versions\"], .ver-room-band, [role=\"dialog\"]').forEach(function (p) {" +
   " if (p.scrollWidth > p.clientWidth + 1) errs.push('layout: a Versions part scrolls sideways, ' + p.scrollWidth + ' px in ' + p.clientWidth); });" +
@@ -299,15 +306,21 @@ let versionsKey: [String: String] = [
   "undo": versionsBand + " && " + pressUndo + " && " + versionsDialog,
   "restore": versionsBand + " && " + pressRestore + " && " + versionsDialog +
     " && document.querySelector('[role=\"dialog\"] .ver-dialog-note') !== null",
-  "wait": pressVersions + " && document.querySelector('[data-testid=\"versions\"]') !== null" +
-    " && " + pressRow + " && document.querySelector('[data-testid=\"versions-wait\"]') !== null" +
+  // the conversation running: its Restore and Undo dimmed under the line that says they wait
+  "wait": pressVersions + " && " + pressRow + " && document.querySelector('[data-testid=\"versions-wait\"]') !== null" +
     " && document.querySelector('[data-testid=\"version-undo\"]')?.getAttribute('aria-disabled') === 'true'" +
     " && document.querySelector('[data-testid=\"version-restore\"]')?.getAttribute('aria-disabled') === 'true'",
+  // the newest turn picked, its change undoable: the band at now with Undo alone, no Restore
+  "newest": pressVersions + " && " + pressNewest + " && " + versionsRowCurrent("cp4") +
+    " && document.querySelector('[data-testid=\"version-undo\"]')?.getAttribute('aria-disabled') !== 'true'" +
+    " && document.querySelector('[data-testid=\"version-restore\"]') === null",
 ]
+/** The Versions pages, in the order they are run. */
+let versionsPages = ["panel", "band", "undo", "restore", "wait", "newest"]
 for (theme, lang) in looks {
   for (w, h) in sizes {
     let rendered = versionsRoom(theme, lang)
-    for page in ["panel", "band", "undo", "restore", "wait"] {
+    for page in versionsPages {
       let q = "?versions=\(page)&theme=\(theme)&lang=\(lang)"
       var run = Run(name: "versions \(page) \(theme) \(lang)", url: URL(string: "\(origin)/\(q)")!, width: w, height: h,
                     rendered: rendered + " && " + versionsKey[page]! + settledVersions, setup: "")
@@ -315,7 +328,7 @@ for (theme, lang) in looks {
       runs.append(run)
     }
   }
-  for page in ["panel", "band", "undo", "restore", "wait"] {
+  for page in versionsPages {
     let q = "?versions=\(page)&theme=\(theme)&lang=\(lang)"
     var axe = Run(name: "versions \(page) \(theme) \(lang), frozen, axe", url: URL(string: "\(origin)/\(q)")!,
                   width: 1280, height: 800, rendered: versionsRoom(theme, lang) + " && " + versionsKey[page]! + settledVersions + axeRun,
