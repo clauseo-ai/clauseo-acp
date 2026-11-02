@@ -82,15 +82,49 @@ test("mostUsed: uses count by kind, so claude and claude-acp count together and 
   expect(agentFor({ chosen: null, setting: null, threads, agents: LISTED })).toBe("claude-acp");
 });
 
-test("mostUsed: the winning kind's agent is the one of it used most recently", () => {
-  // Claude wins with three uses; the newest of them is `claude`, not `claude-acp`, which was used most
+test("mostUsed: the winning kind's agent is the listed one of it used most recently", () => {
+  // Claude wins with three uses; the newest of them is `claude`, not `claude-acp`, which was used most; the settings
+  // still hold both (an older file's `claude` lists with no kind)
   const threads = [
     { thread: T1, agent: "claude-acp" },
     { thread: T2, agent: "claude-acp" },
     { thread: T3, agent: "claude" },
   ];
-  expect(mostUsed(threads, LISTED)).toBe("claude");
+  const both = [{ id: "claude" }, ...LISTED];
+  expect(mostUsed(threads, both)).toBe("claude");
+  expect(matterPlan(threads, both)).toBe("Claude");
+  // with `claude` gone from the settings, the newest listed Claude agent
+  expect(mostUsed(threads, LISTED)).toBe("claude-acp");
+});
+
+test("a matter from before R15's rename: its `claude` uses still count, and a new conversation runs claude-acp", () => {
+  // every conversation ran `claude`, which the settings no longer hold; creating a thread on it would be refused
+  // (command.invalid), so the Claude plan's listed agent runs instead, and the switch presses that one
+  const threads = [
+    { thread: T1, agent: "codex-acp" },
+    { thread: T2, agent: "claude" },
+    { thread: T3, agent: "claude" },
+  ];
+  expect(mostUsed(threads, LISTED)).toBe("claude-acp");
+  expect(agentFor({ chosen: null, setting: null, threads, agents: LISTED })).toBe("claude-acp");
   expect(matterPlan(threads, LISTED)).toBe("Claude");
+  expect(planOptions(LISTED, threads)).toEqual([
+    { value: "claude-acp", label: "Claude" },
+    { value: "codex-acp", label: "ChatGPT" },
+  ]);
+  // before the host's list arrives, nothing is known to be unlisted: the newest id stands
+  expect(mostUsed(threads, [])).toBe("claude");
+});
+
+test("mostUsed: an unlisted agent of no kind wins nothing a conversation can run, so the fallback runs", () => {
+  const threads = [
+    { thread: T1, agent: "fake-agent" },
+    { thread: T2, agent: "fake-agent" },
+  ];
+  expect(mostUsed(threads, LISTED)).toBeNull();
+  expect(agentFor({ chosen: null, setting: null, threads, agents: LISTED })).toBe(DEFAULT_AGENT);
+  // the rows still measure against the plan the matter used
+  expect(matterPlan(threads, LISTED)).toBe("fake-agent");
 });
 
 test("mostUsed: a tie between kinds goes to the kind used most recently, whatever the ids' counts", () => {
@@ -101,7 +135,8 @@ test("mostUsed: a tie between kinds goes to the kind used most recently, whateve
     { thread: T3, agent: "claude-acp" },
     { thread: T4, agent: "claude" },
   ];
-  expect(mostUsed(threads, LISTED)).toBe("claude");
+  // the newest Claude use is `claude`, which isn't listed, so Claude's listed agent
+  expect(mostUsed(threads, LISTED)).toBe("claude-acp");
 });
 
 test("mostUsed: an agent of no kind counts on its own, by its id", () => {
@@ -112,7 +147,7 @@ test("mostUsed: an agent of no kind counts on its own, by its id", () => {
     { thread: T3, agent: "claude-acp" },
     { thread: T4, agent: "claude" },
   ];
-  expect(mostUsed(threads, [{ id: "fake-agent" }, ...LISTED])).toBe("claude");
+  expect(mostUsed(threads, [{ id: "fake-agent" }, ...LISTED])).toBe("claude-acp");
   // alone, it is the most used
   expect(mostUsed(threads.slice(0, 2), [{ id: "fake-agent" }, ...LISTED])).toBe("fake-agent");
 });
