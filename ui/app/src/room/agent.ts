@@ -2,11 +2,12 @@
 // row shows for it. The order, first that is given (Rohan, 2026-11-02, HANDOFF item 9): the lawyer's choice in the
 // composer (R15's ListAgents gives the options); the plan used most in the matter, a tie going to the one used most
 // recently; in a matter with no conversation, the "Start new conversations with" setting (H7's default-agent key, which
-// U11 sets; not on the wire yet, so null today); else DEFAULT_AGENT. A row names its plan only where it differs from the
-// matter's, by the same rule. Agent ids are the settings' keys
-// (`agents.<id>`), which R15 renamed from `claude` to `claude-acp`, so nothing here keys on an id but DEFAULT_AGENT,
-// and the plan names go by the agent's kind (R15's `AgentSummary`), read off the id's start only for an agent the list
-// doesn't hold.
+// U11 sets; not on the wire yet, so null today); else the fallback (DEFAULT_AGENT, or a listed agent when the host
+// doesn't list that one). A plan is counted by kind, not by agent id: `claude` and `claude-acp` are both Claude, so
+// they count together, and the agent the matter runs is the one of the winning kind used most recently. Agent ids are
+// the settings' keys (`agents.<id>`), which R15 renamed from `claude` to `claude-acp`, so nothing here keys on an id
+// but DEFAULT_AGENT and the canonical ids, and the plan names go by the agent's kind (R15's `AgentSummary`), read off
+// the id's start only for an agent the list doesn't hold.
 import type { AgentId, AgentKind, ThreadSummary, Timestamp } from "../transport/protocol.ts";
 import type { AgentSummary } from "./host-next.ts";
 
@@ -22,6 +23,8 @@ export type AgentInputs = {
   setting: AgentId | null;
   /** The matter's conversations, archived ones left out. */
   threads: readonly Used[];
+  /** The agents the host lists (R15's ListAgents), for their kinds; empty before the list arrives. */
+  agents: readonly AgentSummary[];
 };
 
 /** A conversation as the rule weighs it: its agent, and when it was used: H6's last activity, else its creation (v7
@@ -35,29 +38,14 @@ const later = (a: Used, b: Used): boolean => {
   return a.thread > b.thread;
 };
 
-/** The agent the matter uses most, a tie going to the one used most recently; null with no conversation. */
-export function mostUsed(threads: readonly Used[]): AgentId | null {
-  const uses = new Map<AgentId, { n: number; last: Used }>();
-  for (const t of threads) {
-    const u = uses.get(t.agent);
-    if (u === undefined) uses.set(t.agent, { n: 1, last: t });
-    else uses.set(t.agent, { n: u.n + 1, last: later(t, u.last) ? t : u.last });
-  }
-  let best: { agent: AgentId; n: number; last: Used } | null = null;
-  for (const [agent, u] of uses)
-    if (best === null || u.n > best.n || (u.n === best.n && later(u.last, best.last)))
-      best = { agent, ...u };
-  return best?.agent ?? null;
-}
-
-/** The agent `create_thread` names. */
-export function agentFor({ chosen, setting, threads }: AgentInputs): AgentId {
-  if (chosen !== null) return chosen;
-  return mostUsed(threads) ?? setting ?? DEFAULT_AGENT;
-}
+/** The kinds in the order the composer lists their plans: Claude first. */
+const KINDS: readonly AgentKind[] = ["claude", "codex"];
 
 /** Each kind's plan, as the rows and the composer's choice name it. */
 const PLAN: Record<AgentKind, string> = { claude: "Claude", codex: "ChatGPT" };
+
+/** Each kind's canonical agent id: the one the plan option prefers when the host lists it. */
+const CANONICAL: Record<AgentKind, AgentId> = { claude: DEFAULT_AGENT, codex: "codex-acp" };
 
 /** An agent's kind: the one the host lists for it (R15's ListAgents), else read off its id (Claude Code's begin
  * `claude`, Codex's `codex`), for an agent the list doesn't hold or lists with no kind (#154 gives a kind to
@@ -68,6 +56,50 @@ function kindOf(agent: AgentId, agents: readonly AgentSummary[]): AgentKind | un
   if (agent.startsWith("claude")) return "claude";
   if (agent.startsWith("codex")) return "codex";
   return undefined;
+}
+
+/** The group an agent's uses count in: its kind, so that `claude` and `claude-acp` count together. An agent of no kind
+ * is a group of its own, keyed by its id, so that it never pools with another agent. */
+function groupOf(agent: AgentId, agents: readonly AgentSummary[]): string {
+  return kindOf(agent, agents) ?? `agent:${agent}`;
+}
+
+/** The agent the matter uses most, counted by kind (see the top of this file); a tie goes to the kind used most
+ * recently. The result is the most recently used agent of that kind; null with no conversation. */
+export function mostUsed(
+  threads: readonly Used[],
+  agents: readonly AgentSummary[] = [],
+): AgentId | null {
+  const uses = new Map<string, { n: number; last: Used }>();
+  for (const t of threads) {
+    const group = groupOf(t.agent, agents);
+    const u = uses.get(group);
+    if (u === undefined) uses.set(group, { n: 1, last: t });
+    else uses.set(group, { n: u.n + 1, last: later(t, u.last) ? t : u.last });
+  }
+  let best: { n: number; last: Used } | null = null;
+  for (const u of uses.values())
+    if (best === null || u.n > best.n || (u.n === best.n && later(u.last, best.last))) best = u;
+  return best?.last.agent ?? null;
+}
+
+/** The agent a conversation runs when nothing else names one: DEFAULT_AGENT, unless the host lists agents and does not
+ * list that one. Then it is the Claude plan's agent, else the first listed agent with a kind, else the first listed,
+ * so that a conversation never starts on an agent the host does not run. */
+function fallbackOf(agents: readonly AgentSummary[]): AgentId {
+  if (agents.length === 0 || agents.some((a) => a.id === DEFAULT_AGENT)) return DEFAULT_AGENT;
+  return (
+    choiceOf("claude", agents, []) ??
+    agents.find((a) => kindOf(a.id, agents) !== undefined)?.id ??
+    agents[0]?.id ??
+    DEFAULT_AGENT
+  );
+}
+
+/** The agent `create_thread` names. */
+export function agentFor({ chosen, setting, threads, agents }: AgentInputs): AgentId {
+  if (chosen !== null) return chosen;
+  return mostUsed(threads, agents) ?? setting ?? fallbackOf(agents);
 }
 
 /** The plan of an agent's kind, "Claude" or "ChatGPT"; null for an agent of no kind, which has no plan to name. */
@@ -90,15 +122,36 @@ export function matterPlan(
   threads: readonly Used[],
   agents: readonly AgentSummary[] = [],
 ): string | undefined {
-  const agent = mostUsed(threads);
+  const agent = mostUsed(threads, agents);
   return agent === null ? undefined : planName(agent, agents);
 }
 
-/** The composer's plan choice for a new conversation, from the agents the host lists (R15) that have a kind (a plan
- * to name), each labelled by its kind's plan; none when there is only one to choose. */
-export function planOptions(agents: readonly AgentSummary[]): { value: AgentId; label: string }[] {
-  const options = agents
-    .filter((a) => kindOf(a.id, agents) !== undefined)
-    .map((a) => ({ value: a.id, label: planName(a.id, agents) }));
+/** The agent a plan option stands for: the id of that kind the matter used most recently (from `threads`); else the
+ * kind's canonical id if the host lists it; else the first listed id of the kind. Undefined when the host lists no
+ * agent of the kind. */
+function choiceOf(
+  kind: AgentKind,
+  agents: readonly AgentSummary[],
+  threads: readonly Used[],
+): AgentId | undefined {
+  const listed = agents.filter((a) => kindOf(a.id, agents) === kind).map((a) => a.id);
+  if (listed.length === 0) return undefined;
+  let used: Used | undefined;
+  for (const t of threads)
+    if (kindOf(t.agent, agents) === kind && (used === undefined || later(t, used))) used = t;
+  if (used !== undefined) return used.agent;
+  return listed.includes(CANONICAL[kind]) ? CANONICAL[kind] : listed[0];
+}
+
+/** The composer's plan choice for a new conversation: one option per kind the host lists (R15), labelled by the kind's
+ * plan, Claude first. Each option's value is chosen by `choiceOf`. None when there is only one plan to choose. */
+export function planOptions(
+  agents: readonly AgentSummary[],
+  threads: readonly Used[] = [],
+): { value: AgentId; label: string }[] {
+  const options = KINDS.flatMap((kind) => {
+    const value = choiceOf(kind, agents, threads);
+    return value === undefined ? [] : [{ value, label: PLAN[kind] }];
+  });
   return options.length > 1 ? options : [];
 }
