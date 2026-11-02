@@ -8,7 +8,8 @@ import {
   ERROR_WORDS,
   errorSentence,
   errorWords,
-  launchFailedKey,
+  plannedKey,
+  PLANNED_CODES,
   type ErrorCode,
 } from "./words-errors.ts";
 import { frame } from "./words-frame.ts";
@@ -81,12 +82,10 @@ test("every error code has a sentence with Hindi, and none says agent", () => {
   const codes = Object.keys(ERROR_WORDS) as ErrorCode[];
   expect(codes.length).toBeGreaterThan(30);
   for (const c of codes) sound(errorWords("en", c), errorWords("hi", c));
-  // and the sentences a thread's plan picks (agent.launch_failed's, for ChatGPT and for an agent of no kind)
-  for (const plan of ["ChatGPT", null])
-    sound(
-      errorWords("en", "agent.launch_failed", plan),
-      errorWords("hi", "agent.launch_failed", plan),
-    );
+  // and the sentences a thread's plan picks (the agent.* codes', for ChatGPT and for an agent of no kind)
+  for (const c of PLANNED_CODES)
+    for (const plan of ["ChatGPT", null])
+      sound(errorWords("en", c, plan), errorWords("hi", c, plan));
 });
 
 test("a stopped Claude and an interrupted thread read as the thread's own stop, with its one Hindi", () => {
@@ -114,9 +113,55 @@ test("agent.launch_failed names the thread's plan: ChatGPT's, the agent for no k
     expect(errorWords("hi", code, plan)).toBe("Claude शुरू नहीं हुआ। आपका प्रश्न रखा गया है।");
   }
   expect(errorWords("en", code)).toBe(claude);
-  expect(launchFailedKey()).toBe(ERROR_WORDS[code]);
+  expect(plannedKey(code)).toBe(ERROR_WORDS[code]);
   // the plan touches no other code
   expect(errorWords("en", "store.io", "ChatGPT")).toBe(errorWords("en", "store.io"));
+});
+
+// [code, ChatGPT's English, its Hindi, no kind's English, its Hindi]
+const PLANNED_LINES = [
+  [
+    "agent.protocol_error",
+    "ChatGPT sent something Clauseo can't read.",
+    "ChatGPT ने कुछ ऐसा भेजा जिसे Clauseo पढ़ नहीं सकता।",
+    "Clauseo got a reply it can't read.",
+    "Clauseo को ऐसा उत्तर मिला जिसे वह पढ़ नहीं सकता।",
+  ],
+  [
+    "agent.auth_required",
+    "Sign in to ChatGPT in Codex first. Your question is kept.",
+    "पहले Codex में ChatGPT से साइन इन करें। आपका प्रश्न रखा गया है।",
+    "This conversation needs a sign-in first. Your question is kept.",
+    "इस बातचीत के लिए पहले साइन इन करना होगा। आपका प्रश्न रखा गया है।",
+  ],
+  [
+    "agent.unsupported_version",
+    "This version of Codex doesn't work with Clauseo.",
+    "Codex का यह संस्करण Clauseo के साथ काम नहीं करता।",
+    "Clauseo doesn't work with the program this conversation uses, in this version.",
+    "यह बातचीत जिस प्रोग्राम का उपयोग करती है, उसके इस संस्करण के साथ Clauseo काम नहीं करता।",
+  ],
+] as const;
+
+test.each(PLANNED_LINES)(
+  "%s names the thread's plan: ChatGPT's, none for no kind, Claude's otherwise",
+  (code, en, hi, noneEn, noneHi) => {
+    expect(errorWords("en", code, "ChatGPT")).toBe(en);
+    expect(errorWords("hi", code, "ChatGPT")).toBe(hi);
+    expect(errorWords("en", code, null)).toBe(noneEn);
+    expect(errorWords("hi", code, null)).toBe(noneHi);
+    for (const plan of ["Claude", undefined]) {
+      expect(errorWords("en", code, plan)).toBe(ERROR_WORDS[code]);
+      expect(errorWords("en", code, plan)).toContain("Claude");
+    }
+  },
+);
+
+test("only the agent.* codes that name Claude have a sentence per plan", () => {
+  const naming = (Object.keys(ERROR_WORDS) as ErrorCode[]).filter((c) =>
+    ERROR_WORDS[c].includes("Claude"),
+  );
+  expect([...PLANNED_CODES].sort()).toEqual(naming.sort());
 });
 
 test("a code this version doesn't know reads as unknown's sentence, which is internal's", () => {

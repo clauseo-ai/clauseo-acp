@@ -68,15 +68,26 @@ const HI = {
     "उस प्रश्न का उत्तर पहले ही दिया जा चुका है, या उसका समय निकल गया है।",
   "Those answers don't fit the question.": "ये उत्तर प्रश्न से मेल नहीं खाते।",
   "Claude didn't start. Your question is kept.": "Claude शुरू नहीं हुआ। आपका प्रश्न रखा गया है।",
-  // agent.launch_failed for a thread on the ChatGPT plan (Codex), and for an agent of no kind (launchFailedKey)
-  "ChatGPT didn't start. Your question is kept.": "ChatGPT शुरू नहीं हुआ। आपका प्रश्न रखा गया है।",
-  "Clauseo couldn't start this conversation. Your question is kept.":
-    "Clauseo यह बातचीत शुरू नहीं कर सका। आपका प्रश्न रखा गया है।",
   "Claude sent something Clauseo can't read.": "Claude ने कुछ ऐसा भेजा जिसे Clauseo पढ़ नहीं सकता।",
   "Sign in to Claude first. Your question is kept.":
     "पहले Claude में साइन इन करें। आपका प्रश्न रखा गया है।",
   "This version of Claude Code doesn't work with Clauseo.":
     "Claude Code का यह संस्करण Clauseo के साथ काम नहीं करता।",
+  // the agent.* sentences above for a thread on the ChatGPT plan (Codex), and for an agent of no kind (PLANNED). The
+  // lawyer signs in to Codex outside Clauseo until stage D's sign-in, so auth_required says where, with no button.
+  "ChatGPT didn't start. Your question is kept.": "ChatGPT शुरू नहीं हुआ। आपका प्रश्न रखा गया है।",
+  "Clauseo couldn't start this conversation. Your question is kept.":
+    "Clauseo यह बातचीत शुरू नहीं कर सका। आपका प्रश्न रखा गया है।",
+  "ChatGPT sent something Clauseo can't read.": "ChatGPT ने कुछ ऐसा भेजा जिसे Clauseo पढ़ नहीं सकता।",
+  "Clauseo got a reply it can't read.": "Clauseo को ऐसा उत्तर मिला जिसे वह पढ़ नहीं सकता।",
+  "Sign in to ChatGPT in Codex first. Your question is kept.":
+    "पहले Codex में ChatGPT से साइन इन करें। आपका प्रश्न रखा गया है।",
+  "This conversation needs a sign-in first. Your question is kept.":
+    "इस बातचीत के लिए पहले साइन इन करना होगा। आपका प्रश्न रखा गया है।",
+  "This version of Codex doesn't work with Clauseo.":
+    "Codex का यह संस्करण Clauseo के साथ काम नहीं करता।",
+  "Clauseo doesn't work with the program this conversation uses, in this version.":
+    "यह बातचीत जिस प्रोग्राम का उपयोग करती है, उसके इस संस्करण के साथ Clauseo काम नहीं करता।",
   "The computer's disk is full. Free some space, then try again.":
     "कंप्यूटर की डिस्क भर गई है। कुछ जगह खाली करें, फिर दोबारा प्रयास करें।",
   "Clauseo couldn't read back its saved data.": "Clauseo अपना सहेजा गया डेटा वापस नहीं पढ़ सका।",
@@ -168,20 +179,44 @@ export function errorSentence(lang: Lang, key: ErrorKey): string {
   return key === STOPPED ? th(lang, key) : own(lang, key);
 }
 
-/** agent.launch_failed's sentence for the thread's plan, as the app's knownPlan (room/agent.ts) names it: "ChatGPT"
- * names ChatGPT; null (an agent of no kind) says Clauseo couldn't start the conversation; "Claude", or a plan not known
- * (undefined), keeps Claude's. */
-export function launchFailedKey(plan?: string | null): ErrorKey {
-  if (plan === null) return "Clauseo couldn't start this conversation. Your question is kept.";
-  if (plan === "ChatGPT") return "ChatGPT didn't start. Your question is kept.";
-  return ERROR_WORDS["agent.launch_failed"];
+/** The codes whose sentence names Claude, with their sentence for a thread on the ChatGPT plan and for an agent of no
+ * kind (one with no plan to name, so Clauseo or the conversation is the subject). */
+const PLANNED: Partial<Record<ErrorCode, { chatgpt: ErrorKey; none: ErrorKey }>> = {
+  "agent.launch_failed": {
+    chatgpt: "ChatGPT didn't start. Your question is kept.",
+    none: "Clauseo couldn't start this conversation. Your question is kept.",
+  },
+  "agent.protocol_error": {
+    chatgpt: "ChatGPT sent something Clauseo can't read.",
+    none: "Clauseo got a reply it can't read.",
+  },
+  "agent.auth_required": {
+    chatgpt: "Sign in to ChatGPT in Codex first. Your question is kept.",
+    none: "This conversation needs a sign-in first. Your question is kept.",
+  },
+  "agent.unsupported_version": {
+    chatgpt: "This version of Codex doesn't work with Clauseo.",
+    none: "Clauseo doesn't work with the program this conversation uses, in this version.",
+  },
+};
+
+/** The codes PLANNED gives a sentence per plan. */
+export const PLANNED_CODES = Object.keys(PLANNED) as ErrorCode[];
+
+/** A code's sentence for the thread's plan, as the app's knownPlan (room/agent.ts) names it: "ChatGPT" picks
+ * PLANNED's ChatGPT sentence; null (an agent of no kind) its sentence with no plan; "Claude", a plan not known
+ * (undefined), or a code PLANNED doesn't hold, the code's own sentence (ERROR_WORDS, Claude's). */
+export function plannedKey(code: ErrorCode, plan?: string | null): ErrorKey {
+  const planned = PLANNED[code];
+  if (planned !== undefined && plan === null) return planned.none;
+  if (planned !== undefined && plan === "ChatGPT") return planned.chatgpt;
+  return ERROR_WORDS[code];
 }
 
 /** A code's sentence in the language; a code this version doesn't know reads as "unknown", which reads as "internal".
- * `plan` is the thread's plan, for the codes whose sentence names it (agent.launch_failed: launchFailedKey); a caller
- * that doesn't know the thread leaves it out. */
+ * `plan` is the thread's plan, for the codes whose sentence names it (plannedKey); a caller that doesn't know the
+ * thread leaves it out. */
 export function errorWords(lang: Lang, code: string, plan?: string | null): string {
-  if (code === "agent.launch_failed") return errorSentence(lang, launchFailedKey(plan));
-  const known = Object.hasOwn(ERROR_WORDS, code) ? ERROR_WORDS[code as ErrorCode] : null;
-  return errorSentence(lang, known ?? ERROR_WORDS.unknown);
+  const known = Object.hasOwn(ERROR_WORDS, code) ? (code as ErrorCode) : "unknown";
+  return errorSentence(lang, plannedKey(known, plan));
 }
