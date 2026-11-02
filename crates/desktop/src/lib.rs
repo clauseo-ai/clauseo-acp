@@ -21,6 +21,8 @@
 //!   256 KB unacknowledged per window; a 5 s watchdog that fires once per stall.
 //!   `docs/decisions/0012-desktop-bridge.md` records the commands, the capability and the message
 //!   format. Never Tauri events.
+//! - The `main` window's scripts carry `app.security.csp` like its page, the colouring worker's
+//!   included: Tauri sends the header with `.html` only (`csp.rs`).
 //! - No command takes a path: folders come from the native dialog drawn in Rust (`dialogs.rs`).
 //! - Plugins are called from Rust only. Each is registered with `plugin_rust_only`, which drops the
 //!   script a plugin would inject into the page (`rust_only.rs`). clippy's `disallowed-methods`
@@ -34,6 +36,7 @@
 
 mod bridge;
 mod commands;
+mod csp;
 mod dialogs;
 #[cfg(feature = "e2e")]
 mod e2e;
@@ -258,6 +261,9 @@ fn open_main_window(app: &App) -> tauri::Result<()> {
         .inner_size(width, height)
         .center();
     let builder = window_frame::with_frame(builder);
+    // Tauri sends the CSP with the page only; the scripts, the colouring worker's among them,
+    // get the same policy here (csp.rs).
+    let builder = csp::on_scripts(builder, app);
     #[cfg(all(windows, feature = "e2e"))]
     let builder = e2e::with_debugging_port(builder);
     // The page's perf globals, before any page script.

@@ -1,9 +1,10 @@
-// The blank app starts, renders #app-root under its CSP with no violation, keeps its WebView2 data in
-// the temporary folder, and its WebView2 browser process got the arguments the e2e build passes.
+// The blank app starts, renders #app-root under its CSP with no violation, sends that CSP with its
+// scripts too, keeps its WebView2 data in the temporary folder, and its WebView2 browser process
+// got the arguments the e2e build passes.
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { expect } from "@playwright/test";
+import { expect, type Response } from "@playwright/test";
 import { test } from "./fixture.ts";
 import { processTree } from "./memory.ts";
 
@@ -14,6 +15,11 @@ import { processTree } from "./memory.ts";
  * only in e2e.rs goes unchecked.
  */
 const WRY_DISABLED_FEATURES = ["msWebOOUI", "msPdfOOUI", "msSmartScreenProtection"];
+
+/** `app.security.csp` as `crates/desktop/tauri.conf.json` writes it. */
+const CONFIGURED_CSP: string = JSON.parse(
+  readFileSync(new URL("../../../crates/desktop/tauri.conf.json", import.meta.url), "utf8"),
+).app.security.csp;
 
 /** The arguments of a command line, without the quotes around each. */
 function argumentsOf(commandLine: string): string[] {
@@ -57,6 +63,28 @@ test("the blank app starts, renders #app-root and runs as the e2e build says", a
         ),
     );
     expect(refused).toEqual([]);
+  });
+
+  await test.step("the app's scripts carry the CSP tauri.conf.json writes", async () => {
+    // Tauri sends the CSP with the page only; the desktop crate's hook adds it to every script
+    // (crates/desktop/src/csp.rs), so the colouring worker, which takes its policy from its own
+    // script's response, runs under it. The page's scripts come from the same protocol and hook.
+    const scripts: Promise<[string, string | undefined]>[] = [];
+    const onResponse = (response: Response) => {
+      if (new URL(response.url()).pathname.endsWith(".js")) {
+        scripts.push(
+          response
+            .allHeaders()
+            .then((headers) => [response.url(), headers["content-security-policy"]]),
+        );
+      }
+    };
+    app.page.on("response", onResponse);
+    await app.page.reload({ waitUntil: "load" });
+    app.page.off("response", onResponse);
+    const seen = await Promise.all(scripts);
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen).toEqual(seen.map(([url]) => [url, CONFIGURED_CSP]));
   });
 
   await test.step("WebView2 keeps its data in the temporary folder", () => {
