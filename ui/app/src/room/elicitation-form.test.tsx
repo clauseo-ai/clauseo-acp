@@ -1,66 +1,25 @@
 // @vitest-environment happy-dom
 // The agent's question as a form in the room's live thread (elicitation-form.tsx), over FakeTransport: Claude's
 // AskUserQuestion as claude-agent-acp sends it, the answer_elicitation each sends, Don't answer, the gates on Send and
-// the lines naming a broken limit, refusals, the keys, a radio cleared, where focus goes, an entry that changes under
-// the form, and a schema the form can't show.
+// the lines naming a broken limit, refusals, a radio cleared, an entry that changes under the form, and a schema the
+// form can't show. Focus, keys and groups are in elicitation-form-a11y.test.tsx, over the same rig.
 import { act } from "react";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { th } from "@clauseo/components/lib/words-thread.ts";
-import { afterEach, expect, test } from "vitest";
-import { header, reset, upsert, uuid } from "../testing/stream-script.ts";
-import type { HostCommand, HostError, ViewEntry } from "../transport/protocol.ts";
-import { askEntry, ONE_QUESTION, TWO_QUESTIONS, type AskForm } from "./elicitation-fixtures.ts";
+import { expect, test } from "vitest";
+import { upsert } from "../testing/stream-script.ts";
+import { askEntry, ONE_QUESTION, TWO_QUESTIONS } from "./elicitation-fixtures.ts";
 import { ELICITATION_TEST_IDS as T } from "./elicitation-schema.ts";
-import { defaultOutcome, mountRoom, type Harness } from "./thread/harness.ts";
+import { ask, ID, rig } from "./elicitation-form-rig.ts";
+import type { Harness } from "./thread/harness.ts";
 
 let h: Harness | null = null;
-afterEach(async () => {
-  await h?.unmount();
-  h = null;
-  document.body.replaceChildren();
-});
-
-const ID = uuid(1, 9);
-const hostError = (code: string): HostError =>
-  ({ code, message: "refused", retryable: false }) as HostError;
-
-/** The room, its turn waiting on the lawyer at these entries; answer_elicitation refused with `refuse` when given. */
-async function room(entries: ViewEntry[], refuse?: string, blur = false): Promise<Harness> {
-  const harness = await mountRoom({
-    dispatch: (command: HostCommand) => {
-      if (refuse !== undefined && command.answer_elicitation !== undefined) throw hostError(refuse);
-      return defaultOutcome(command);
-    },
-  });
-  if (blur) await act(async () => (document.activeElement as HTMLElement | null)?.blur());
-  harness.deliver([reset(entries, header("needs_you"))]);
-  await harness.settle();
-  return harness;
-}
-const ask = (form: AskForm, refuse?: string) => room([askEntry(3, ID, form)], refuse);
-
-const el = <E extends HTMLElement = HTMLInputElement>(id: string): E => {
-  const found = h!.one(id);
-  if (found === null) throw new Error(`no ${id}`);
-  return found as E;
-};
-const answered = () => h!.sent("answer_elicitation");
-
-async function fill(id: string, text: string) {
-  const node = el<HTMLInputElement | HTMLTextAreaElement>(id);
-  await act(async () => {
-    const proto = node instanceof HTMLTextAreaElement ? HTMLTextAreaElement : HTMLInputElement;
-    Reflect.set(proto.prototype, "value", text, node);
-    node.dispatchEvent(new Event("input", { bubbles: true }));
-  });
-}
-async function keyOn(node: Element, init: KeyboardEventInit): Promise<boolean> {
-  const e = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init });
-  await act(async () => void node.dispatchEvent(e));
-  await h!.settle();
-  return e.defaultPrevented;
-}
-const held = (id: string) => el<HTMLElement>(id).getAttribute("aria-disabled") === "true";
+const { el, answered, fill, fillBad, held, keyOn } = rig(
+  () => h,
+  (next) => {
+    h = next;
+  },
+);
 
 test("one question renders as radios with their lines, and Other beneath them inside its group", async () => {
   h = await ask(ONE_QUESTION);
@@ -309,55 +268,6 @@ for (const [how, state] of [
     expect(document.activeElement).toBe(el<HTMLTextAreaElement>("composer"));
   });
 
-test("focus left outside the form stays where it is as the form goes", async () => {
-  h = await ask(ONE_QUESTION);
-  const elsewhere = document.createElement("input");
-  document.body.append(elsewhere);
-  await act(async () => elsewhere.focus());
-  h.deliver([upsert(askEntry(3, ID, ONE_QUESTION, { expired: { reason: "turn_ended" } }))]);
-  await h.settle();
-  expect(document.activeElement).toBe(elsewhere);
-});
-
-test("Escape outside a text field is Don't answer; in one it stays the field's", async () => {
-  h = await ask(ONE_QUESTION);
-  expect(await keyOn(el(T.input("question_0_custom")), { key: "Escape" })).toBe(false);
-  expect(answered()).toEqual([]);
-  // with Alt, neither Escape nor Enter answers, as in the permission prompt
-  await h.click(el(T.choice("question_0", 0)));
-  await keyOn(el(T.choice("question_0", 0)), { key: "Escape", altKey: true });
-  await keyOn(el(T.choice("question_0", 0)), { key: "Enter", altKey: true });
-  expect(answered()).toEqual([]);
-  expect(await keyOn(el(T.choice("question_0", 0)), { key: "Escape" })).toBe(true);
-  expect(answered().map((a) => a.response)).toEqual(["decline"]);
-  // busy: a second Escape sends nothing
-  await keyOn(el(T.stop), { key: "Escape" });
-  expect(answered()).toHaveLength(1);
-});
-
-test("a question with no title is named by its description, else by the agent's message", async () => {
-  const schema = {
-    type: "object",
-    properties: {
-      court: { type: "string", description: "Which court?", enum: ["Saket", "Tis Hazari"] },
-      bench: { type: "string", enum: ["Single", "Division"] },
-    },
-    required: ["bench"],
-  };
-  h = await ask({ message: "Where and before whom?", schema });
-  const court = el<HTMLFieldSetElement>(T.field("court"));
-  expect(court.querySelector("legend")?.textContent).toBe("Which court?");
-  // said once, as the name
-  expect(court.getAttribute("aria-describedby")).toBeNull();
-  const bench = el<HTMLFieldSetElement>(T.field("bench"));
-  expect(bench.textContent).not.toContain("bench");
-  const msg = el<HTMLElement>(T.form).getAttribute("aria-describedby")!;
-  expect(bench.getAttribute("aria-labelledby")).toBe(msg);
-  const radiogroup = bench.querySelector<HTMLElement>('[role="radiogroup"]')!;
-  expect(radiogroup.getAttribute("aria-labelledby")).toBe(msg);
-  expect(radiogroup.getAttribute("aria-required")).toBe("true");
-});
-
 test("a field over a limit the schema gives names it; with none to name, the general line", async () => {
   const schema = {
     type: "object",
@@ -400,70 +310,6 @@ test("a field over a limit the schema gives names it; with none to name, the gen
   expect(line("copies")).toBe(th("en", "Use a whole number."));
   expect(line("email")).toBe(th("en", "This answer doesn't fit the question."));
   expect(line("ref")).toBe("Use 4 characters or fewer.");
-});
-
-test("Enter on a radio sends; Enter in Other is a new line, and Cmd or Ctrl with Enter sends", async () => {
-  h = await ask(ONE_QUESTION);
-  const other = el<HTMLTextAreaElement>(T.input("question_0_custom"));
-  await fill(T.input("question_0_custom"), "Saket, if the bank agrees");
-  expect(await keyOn(other, { key: "Enter" })).toBe(false);
-  expect(answered()).toEqual([]);
-  expect(await keyOn(other, { key: "Enter", metaKey: true })).toBe(true);
-  expect(answered().map((a) => a.response)).toEqual([
-    { accept: { values: { question_0_custom: "Saket, if the bank agrees" } } },
-  ]);
-  await h.unmount();
-  h = await ask(TWO_QUESTIONS);
-  const radio = el(T.choice("question_0", 0));
-  // nothing filled: Enter sends nothing
-  await keyOn(radio, { key: "Enter" });
-  expect(answered()).toEqual([]);
-  await h.click(radio);
-  expect(await keyOn(radio, { key: "Enter" })).toBe(true);
-  expect(answered().map((a) => a.response)).toEqual([
-    { accept: { values: { question_0: "Quash the complaint" } } },
-  ]);
-});
-
-test("focus: the form takes it from the page, onto its first field; with two, the first question keeps it", async () => {
-  h = await room(
-    [askEntry(3, ID, TWO_QUESTIONS), askEntry(4, uuid(2, 9), ONE_QUESTION)],
-    undefined,
-    true,
-  );
-  expect(document.activeElement).toBe(el(T.choice("question_0", 0)));
-  expect(h.all(T.form)[0]?.contains(document.activeElement)).toBe(true);
-});
-
-test("focus: the form takes it from the thread too", async () => {
-  h = await mountRoom();
-  h.deliver([reset([], header("needs_you"))]);
-  const thread = h.host.querySelector<HTMLElement>('[role="log"]')!;
-  thread.tabIndex = -1;
-  await act(async () => thread.focus());
-  expect(document.activeElement).toBe(thread);
-  h.deliver([upsert(askEntry(3, ID, ONE_QUESTION))]);
-  await h.settle();
-  expect(document.activeElement).toBe(el(T.choice("question_0", 0)));
-});
-
-test("focus: never taken from the composer, nor from any other field", async () => {
-  h = await mountRoom();
-  const composer = el<HTMLTextAreaElement>("composer");
-  await act(async () => composer.focus());
-  h.deliver([reset([askEntry(3, ID, TWO_QUESTIONS)], header("needs_you"))]);
-  await h.settle();
-  expect(h.one(T.form)).not.toBeNull();
-  expect(document.activeElement).toBe(composer);
-  await h.unmount();
-  const elsewhere = document.createElement("input");
-  document.body.append(elsewhere);
-  h = await mountRoom();
-  await act(async () => elsewhere.focus());
-  h.deliver([reset([askEntry(3, ID, ONE_QUESTION)], header("needs_you"))]);
-  await h.settle();
-  expect(h.one(T.form)).not.toBeNull();
-  expect(document.activeElement).toBe(elsewhere);
 });
 
 test("a schema the form can't show: the agent's words, Don't answer and Stop, no fields and no Send", async () => {
@@ -510,25 +356,6 @@ test("a double click on Send, or Enter twice in one frame, sends one answer", as
     { accept: { values: { question_0: "Supreme Court" } } },
   ]);
 });
-
-test("an IME's Enter (composing, or keyCode 229) and a held Enter send nothing", async () => {
-  h = await ask(ONE_QUESTION);
-  const radio = el(T.choice("question_0", 0));
-  await h.click(radio);
-  expect(await keyOn(radio, { key: "Enter", isComposing: true })).toBe(false);
-  expect(await keyOn(radio, { key: "Enter", keyCode: 229 })).toBe(false);
-  expect(await keyOn(radio, { key: "Enter", repeat: true })).toBe(false);
-  const other = el<HTMLTextAreaElement>(T.input("question_0_custom"));
-  expect(await keyOn(other, { key: "Enter", metaKey: true, keyCode: 229 })).toBe(false);
-  expect(answered()).toEqual([]);
-});
-
-/** Puts words in a number field the input can't read: the browser reports "" with validity.badInput. */
-async function fillBad(id: string) {
-  const node = el(id);
-  Object.defineProperty(node, "validity", { configurable: true, get: () => ({ badInput: true }) });
-  await fill(id, "");
-}
 
 test("numbers: an integer and a number go as Numbers; words the input can't read hold Send", async () => {
   const schema = {
@@ -607,34 +434,4 @@ test("minItems and maxItems: too few or too many ticks hold Send and say so", as
   expect(answered().map((a) => a.response)).toEqual([
     { accept: { values: { papers: ["Notice", "Minutes"] } } },
   ]);
-});
-
-test("two forms keep their ids and their radios' names apart", async () => {
-  h = await room([askEntry(3, ID, TWO_QUESTIONS), askEntry(4, uuid(2, 9), TWO_QUESTIONS)]);
-  const ids = [...h.host.querySelectorAll("[id]")].map((n) => n.id);
-  expect(new Set(ids).size).toBe(ids.length);
-  const [a, b] = h.all(T.form);
-  const names = (f: HTMLElement | undefined) =>
-    new Set(
-      [...(f?.querySelectorAll<HTMLInputElement>('input[type="radio"]') ?? [])].map((r) => r.name),
-    );
-  expect(names(a).size).toBe(1);
-  expect([...names(a)].some((n) => names(b).has(n))).toBe(false);
-  // every reference points at an element of its own form
-  for (const f of [a, b])
-    for (const n of f?.querySelectorAll("[aria-describedby]") ?? [])
-      for (const ref of n.getAttribute("aria-describedby")!.split(" "))
-        expect(f?.contains(document.getElementById(ref))).toBe(true);
-});
-
-test("first focus goes to the first field, never to a later question's chosen option", async () => {
-  const schema = {
-    type: "object",
-    properties: {
-      name: { type: "string", title: "Name" },
-      court: { type: "string", enum: ["Saket", "Patiala House"], default: "Saket" },
-    },
-  };
-  h = await room([askEntry(3, ID, { message: "Details", schema })], undefined, true);
-  expect(document.activeElement).toBe(el(T.input("name")));
 });
