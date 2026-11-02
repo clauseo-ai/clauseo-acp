@@ -3,6 +3,8 @@
 import type {
   HostEvent,
   PatchBatch,
+  PermissionEntry,
+  PermissionOption,
   StepEntry,
   ToolCallEntry,
   ToolCallStatus,
@@ -79,6 +81,62 @@ export const step = (order: number, over: Partial<StepEntry> = {}): ViewEntry =>
     ts: order * 1000,
     ...over,
   },
+});
+
+/** A tool call that edits one paper inside the matter, "papers/Notice to the bank.docx". */
+export const editCall = (order: number, n: number, status: ToolCallStatus): ViewEntry => ({
+  tool_call: {
+    order,
+    tool_call: uuid(n, 7),
+    turn: TURN,
+    title: "Edit Notice to the bank.docx",
+    kind: "edit",
+    status,
+    locations: [{ inside: { path: "papers/Notice to the bank.docx" } }],
+    content: [],
+  },
+});
+
+/** A tool call that runs a command: no paper, so its prompt asks with the title beneath. */
+export const commandCall = (order: number, n: number, status: ToolCallStatus): ViewEntry => ({
+  tool_call: {
+    order,
+    tool_call: uuid(n, 7),
+    turn: TURN,
+    title: "Run ls papers",
+    kind: "execute",
+    status,
+    locations: [],
+    content: [],
+  },
+});
+
+/** The agent's four answers, one of each kind. */
+const OPTIONS: PermissionOption[] = (
+  ["allow_once", "allow_always", "reject_once", "reject_always"] as const
+).map((kind) => ({ option_id: `opt-${kind}`, kind, agent_label: kind }));
+
+/** A permission request about tool call `n` (none with `call` null), offering all four kinds, live; pending unless
+ * `state` says otherwise. */
+export const permission = (
+  order: number,
+  n: number,
+  state: PermissionEntry["state"] = "pending",
+  call: number | null = n,
+): ViewEntry => ({
+  permission: {
+    order,
+    request: uuid(n, 8),
+    ...(call === null ? {} : { tool_call: uuid(call, 7) }),
+    options: OPTIONS,
+    deliverable: "live",
+    state,
+  },
+});
+
+/** A permission request's state once the lawyer chose `kind` here. */
+export const chosen = (kind: PermissionOption["kind"]): PermissionEntry["state"] => ({
+  resolved: { choice: { selected: { option_id: `opt-${kind}`, kind } }, by: "local_desktop" },
 });
 
 /** One batch of patches at consecutive cursors from `first`. */

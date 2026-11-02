@@ -1,9 +1,11 @@
 // The probe build's page (vite.config.ts's probe mode, `pnpm build:probe`): the room over FakeTransport, with one
 // matter (or none, with ?matters=none, the empty rail; or with ?rail=states, matters showing every rail state: working,
 // a question, a permission, an answer ready, stopped, the limit with and without a reset, a moved folder, pinned, and
-// each date group), its papers, and the scripted stream (testing/stream-script.ts) played to whatever subscribes. The page's
-// query sets its display for this page only (theme=night, lang=hi, lite=1, motion=reduced, size=18), as the WebKit
-// probe (scripts/webkit-probe.swift) asks for it, and window.__clauseoDisplay and __clauseoAxe are set (dev-hooks.ts).
+// each date group), its papers, and the scripted stream (testing/stream-script.ts) played to whatever subscribes; with
+// ?thread=permission the stream ends, before its step, with the agent's permission requests: a pending prompt on a
+// paper above one answered once and done. The page's query sets its display for this page only (theme=night,
+// lang=hi, lite=1, motion=reduced, size=18), as the WebKit probe (scripts/webkit-probe.swift) asks for it, and
+// window.__clauseoDisplay and __clauseoAxe are set (dev-hooks.ts).
 // Not shipped.
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -12,10 +14,16 @@ import type { HostEvent, MatterSummary, ViewPatchBody } from "../transport/proto
 import { FakeTransport } from "../transport/fake-transport.ts";
 import {
   batch,
+  chosen,
+  editCall,
   event,
+  header,
   MATTER,
+  permission,
   reset,
   scriptedTurn,
+  THREAD,
+  upsert,
   uuid,
   userMessage,
 } from "../testing/stream-script.ts";
@@ -39,12 +47,29 @@ const papers: PaperSummary[] = FILES.map((name, i) => ({
   modified: 1_730_380_000_000 + i * 60_000,
 }));
 
+const page = new URLSearchParams(location.search);
+/** ?thread=permission: the turn stops short of its step, waiting on the lawyer, at a pending prompt to save a new
+ * version of a paper, above one answered once whose call completed. */
+const asking = page.get("thread") === "permission";
+
+/** The agent's permission requests the turn ends with on ?thread=permission: a pending prompt above an answered one. */
+const PERMISSIONS: ViewPatchBody[] = [
+  upsert(editCall(100, 301, "pending")),
+  upsert(permission(101, 301)),
+  upsert(editCall(102, 302, "completed")),
+  upsert(permission(103, 302, chosen("allow_once"))),
+];
+
 /** The scripted turn after the prompt, in batches of 25 bodies, as the bridge would deliver them. */
 function stream(): HostEvent[] {
-  const bodies: ViewPatchBody[] = [
-    reset([userMessage(2, 1, "When did the bank reply?")]),
-    ...scriptedTurn().bodies,
-  ];
+  const turn = scriptedTurn().bodies;
+  const bodies: ViewPatchBody[] = asking
+    ? [
+        reset([userMessage(2, 1, "Tighten the notice to the bank.")], header("needs_you")),
+        ...turn.slice(0, -1),
+        ...PERMISSIONS,
+      ]
+    : [reset([userMessage(2, 1, "When did the bank reply?")]), ...turn];
   const events: HostEvent[] = [];
   for (let at = 0; at < bodies.length; at += 25) {
     events.push(event(batch(at + 1, bodies.slice(at, at + 25))));
@@ -52,7 +77,6 @@ function stream(): HostEvent[] {
   return events;
 }
 
-const page = new URLSearchParams(location.search);
 /** ?matters=none: a host with no matters, so the title says so ("No matters yet"), the rail is empty and the wall
  * stays empty. */
 const noMatters = page.get("matters") === "none";
@@ -69,6 +93,11 @@ const matters: MatterInfo[] = noMatters
 const transport = new FakeTransport({
   platform: "mac",
   query: (query) => {
+    // ?thread=permission: the turn's thread, so the room subscribes to it and shows the prompts
+    if (asking && typeof query === "object" && query.list_threads !== undefined)
+      return {
+        threads: [{ thread: THREAD, matter: MATTER, agent: "claude", status: "needs_you" }],
+      };
     throw new Error(`the probe's host is a NextHost: it answers no ${JSON.stringify(query)}`);
   },
   subscribe: () => {

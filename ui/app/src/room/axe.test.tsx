@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 // axe-core 4.14.0 over the room's frame, in every theme, language, lite and motion, with a matter and its papers, with
 // a matter and none, with no matter (the empty rail), when list_matters fails, with the rail in every state, and with
-// the new matter dialog open, with and without a NextHost. happy-dom computes no styles, so axe can't judge colour contrast here: that
+// the new matter dialog open, with and without a NextHost, and with the agent's permission requests in the thread: a
+// pending prompt on a paper offering all four answers, one answered once and done, and a command's, which asks. happy-dom computes no styles, so axe can't judge colour contrast here: that
 // is checked by hand in the app, with window.__clauseoAxe() (dev-hooks.ts).
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -12,14 +13,28 @@ import { createRoot, type Root } from "react-dom/client";
 import { settled } from "@clauseo/components/lib/late.ts";
 import { afterEach, beforeAll, expect, test } from "vitest";
 import { FakeTransport } from "../transport/fake-transport.ts";
-import type { MatterSummary } from "../transport/protocol.ts";
-import { uuid } from "../testing/stream-script.ts";
+import type { MatterSummary, ViewEntry } from "../transport/protocol.ts";
+import {
+  batch,
+  chosen,
+  commandCall,
+  editCall,
+  event,
+  header,
+  MATTER,
+  permission,
+  reset,
+  THREAD,
+  userMessage,
+  uuid,
+} from "../testing/stream-script.ts";
 import { detailed, fakeNext, railStates } from "./fake-next.ts";
 import type { PaperSummary, UiSettings } from "./host-next.ts";
 import { frameBatch } from "../store/batch.ts";
 import { StoreContext } from "../store/hooks.ts";
 import { createViewStore } from "../store/store.ts";
 import { Room } from "./room.tsx";
+import { loadThread } from "./thread/chunk.ts";
 import { stubFonts } from "./thread/testing.ts";
 import { connectRoom } from "./start.ts";
 
@@ -54,7 +69,11 @@ type Scene = {
   papers: readonly PaperSummary[] | undefined;
   /** New matter, pressed: the dialog open over the room. */
   dialog?: boolean;
+  /** The open matter's one thread, with these entries, waiting on the lawyer. */
+  thread?: ViewEntry[];
 };
+
+const ASKED = userMessage(2, 1, "Tighten the notice to the bank.");
 
 const SCENES: Record<string, Scene> = {
   "a matter with papers": { matters: true, papers: PAPERS },
@@ -67,6 +86,24 @@ const SCENES: Record<string, Scene> = {
   "the rail in every state": { matters: "states", papers: PAPERS },
   "the new matter dialog": { matters: "states", papers: PAPERS, dialog: true },
   "the new matter dialog without a NextHost": { matters: true, papers: undefined, dialog: true },
+  // a prompt on one paper inside the matter, all four answers offered
+  "a pending permission": {
+    matters: true,
+    papers: undefined,
+    thread: [ASKED, editCall(3, 1, "pending"), permission(4, 1)],
+  },
+  // answered once, the call completed: the folded line
+  "an answered permission": {
+    matters: true,
+    papers: undefined,
+    thread: [ASKED, editCall(3, 1, "completed"), permission(4, 1, chosen("allow_once"))],
+  },
+  // a command, no paper: "Clauseo asks before going on." and the title beneath
+  "a command's permission": {
+    matters: true,
+    papers: undefined,
+    thread: [ASKED, commandCall(3, 2, "pending"), permission(4, 2)],
+  },
 };
 
 /** The room as App mounts it: inside the page's view store. */
@@ -82,23 +119,44 @@ const OPEN: MatterSummary = {
   kind: "folder",
 };
 const SCRATCH: MatterSummary = { matter: uuid(99, 2), name: "Scratch", kind: "scratch" };
+/** The matter the scripted thread belongs to (stream-script.ts's MATTER). */
+const THE_MATTER: MatterSummary = { ...OPEN, matter: MATTER };
 
 function transportFor(scene: Scene): FakeTransport {
-  const matters: MatterSummary[] = scene.matters === true ? [OPEN, SCRATCH] : [];
+  const matters: MatterSummary[] =
+    scene.matters !== true ? [] : scene.thread === undefined ? [OPEN, SCRATCH] : [THE_MATTER];
   const infos =
     scene.matters === "states"
       ? railStates(OPEN, SCRATCH, Date.now())
       : matters.map((m) => detailed(m));
-  return new FakeTransport({
+  const thread = scene.thread;
+  const transport: FakeTransport = new FakeTransport({
     query: (query) => {
       if (scene.matters === "fails") throw new Error("the host is gone");
-      if (typeof query === "object" && query.list_threads !== undefined) return { threads: [] };
+      if (typeof query === "object" && query.list_threads !== undefined)
+        return {
+          threads:
+            thread === undefined
+              ? []
+              : [{ thread: THREAD, matter: MATTER, agent: "claude", status: "needs_you" }],
+        };
       return { matters };
     },
+    ...(thread === undefined
+      ? {}
+      : {
+          subscribe: (stream) =>
+            queueMicrotask(() =>
+              transport.deliver(
+                event(batch(1, [reset(thread, header("needs_you"))], undefined, stream)),
+              ),
+            ),
+        }),
     ...(scene.papers === undefined
       ? {}
       : { next: fakeNext({ matters: () => infos, papers: scene.papers }) }),
   });
+  return transport;
 }
 
 const THEMES = ["light", "dark"] as const;
@@ -130,6 +188,26 @@ for (const theme of THEMES) {
               );
               await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
               expect(document.querySelector('[role="dialog"]'), name).not.toBeNull();
+            }
+            if (scene.thread !== undefined) {
+              await act(async () => void (await loadThread()));
+              await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+              const rows = [...host.querySelectorAll<HTMLElement>('[data-testid="permission"]')];
+              expect(
+                rows.map((r) => [r.dataset["state"], r.dataset["answer"] ?? null]),
+                name,
+              ).toEqual([
+                scene.thread.some(
+                  (e) => e.permission !== undefined && e.permission.state !== "pending",
+                )
+                  ? ["resolved", "allow_once"]
+                  : ["pending", null],
+              ]);
+              if (rows[0]?.dataset["state"] === "pending")
+                expect(host.querySelectorAll('[data-testid^="permission-"]'), name).toHaveLength(4);
+              // the command's prompt asks, with its title beneath
+              if (scene.thread.some((e) => e.tool_call?.kind === "execute"))
+                expect(rows[0]?.textContent, name).toContain("Run ls papers");
             }
             if (scene.matters === "states")
               expect(host.querySelectorAll('[data-testid="matter-row"]'), name).toHaveLength(13);
