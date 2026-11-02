@@ -1,6 +1,8 @@
 use super::{KEYS, Leaf, Raw, agent_id, typed};
 use crate::policy::kind_of;
-use crate::schema::{AgentLaunch, Density, FontSize, Language, McpServerLaunch, Settings, Theme};
+use crate::schema::{
+    AgentLaunch, Density, FontSize, Language, Lite, McpServerLaunch, Motion, Settings, Theme,
+};
 use crate::testing::{abs, abs_str};
 use crate::warning::{Origin, Warning, WarningKind};
 use serde_json::{Value, json};
@@ -51,10 +53,13 @@ fn each_ui_key_is_typed() {
         Ok(Leaf::Density(Density::Compact))
     );
     assert_eq!(
-        one("ui.language", json!("en-GB")),
-        Ok(Leaf::Language(
-            Language::try_from("en-GB".to_owned()).unwrap()
-        ))
+        one("ui.language", json!("hi")),
+        Ok(Leaf::Language(Language::Hi))
+    );
+    assert_eq!(one("ui.lite", json!("on")), Ok(Leaf::Lite(Lite::On)));
+    assert_eq!(
+        one("ui.motion", json!("reduce")),
+        Ok(Leaf::Motion(Motion::Reduce))
     );
 }
 
@@ -67,11 +72,42 @@ fn a_value_of_the_wrong_type_is_left_out_with_its_key() {
             "unknown variant `purple`, expected one of `system`, `light`, `dark`"
         ))
     );
+    // 12 and 13 were sizes before the range moved to 14 to 20: a stored one now warns and the
+    // key goes back to its default, as any value out of range does.
+    assert_eq!(
+        one("ui.font_size", json!(12)),
+        Err(invalid(
+            "ui.font_size",
+            "a font size is from 14 to 20, not 12"
+        ))
+    );
+    // A tag the app has no words for, BCP 47 or not, takes the same path.
+    assert_eq!(
+        one("ui.language", json!("en-GB")),
+        Err(invalid(
+            "ui.language",
+            "unknown variant `en-GB`, expected `en` or `hi`"
+        ))
+    );
+    assert_eq!(
+        one("ui.lite", json!("sometimes")),
+        Err(invalid(
+            "ui.lite",
+            "unknown variant `sometimes`, expected one of `automatic`, `on`, `off`"
+        ))
+    );
+    assert_eq!(
+        one("ui.motion", json!(true)),
+        Err(invalid(
+            "ui.motion",
+            "invalid type: boolean `true`, expected string or map"
+        ))
+    );
     assert_eq!(
         one("ui.font_size", json!(30)),
         Err(invalid(
             "ui.font_size",
-            "a font size is from 12 to 20, not 30"
+            "a font size is from 14 to 20, not 30"
         ))
     );
 }
@@ -236,10 +272,9 @@ fn key_names_each_leaf_and_apply_sets_it() {
             "ui.font_size",
         ),
         (Leaf::Density(Density::Compact), "ui.density"),
-        (
-            Leaf::Language(Language::try_from("fr".to_owned()).unwrap()),
-            "ui.language",
-        ),
+        (Leaf::Language(Language::Hi), "ui.language"),
+        (Leaf::Lite(Lite::On), "ui.lite"),
+        (Leaf::Motion(Motion::Reduce), "ui.motion"),
     ];
     let mut settings = Settings::default();
     for (leaf, key) in leaves {
@@ -252,7 +287,9 @@ fn key_names_each_leaf_and_apply_sets_it() {
     assert_eq!(settings.ui.theme, Theme::Light);
     assert_eq!(settings.ui.font_size.get(), 20);
     assert_eq!(settings.ui.density, Density::Compact);
-    assert_eq!(settings.ui.language.as_str(), "fr");
+    assert_eq!(settings.ui.language, Language::Hi);
+    assert_eq!(settings.ui.lite, Lite::On);
+    assert_eq!(settings.ui.motion, Motion::Reduce);
 }
 
 #[test]
@@ -261,9 +298,11 @@ fn every_fixed_key_types_and_the_kinds_agree() {
         json!(abs_str("m")),
         json!({"a": {"command": abs_str("bin/a")}}),
         json!("dark"),
-        json!(14),
+        json!(16),
         json!("compact"),
         json!("en"),
+        json!("automatic"),
+        json!("system"),
     ];
     // One sample per row, so a new row cannot go unchecked.
     assert_eq!(samples.len(), KEYS.len());
@@ -286,7 +325,9 @@ fn a_refused_key_goes_back_to_its_default() {
         json!("dark"),
         json!(20),
         json!("compact"),
-        json!("fr"),
+        json!("hi"),
+        json!("off"),
+        json!("full"),
     ];
     assert_eq!(samples.len(), KEYS.len());
     for ((key, _), sample) in KEYS.iter().zip(samples) {

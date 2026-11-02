@@ -57,7 +57,8 @@ fn matters(host: &HostHandle) -> Vec<(MatterId, MatterKind)> {
         | QueryResult::Entries(_)
         | QueryResult::FileChanges(_)
         | QueryResult::RestorePreview(_)
-        | QueryResult::Blob(_)) => panic!("not matters: {other:?}"),
+        | QueryResult::Blob(_)
+        | QueryResult::Settings(_)) => panic!("not matters: {other:?}"),
     }
 }
 
@@ -97,9 +98,9 @@ fn replay(events: &mut EventSubscription) -> (Vec<&'static str>, Vec<u64>, Seq) 
                 }
             }
             HostEvent::CaughtUp { last_seq, .. } => return (kinds, seqs, last_seq),
-            other @ (HostEvent::Patches(_) | HostEvent::AccountLimitsChanged(_)) => {
-                panic!("unexpected {other:?}")
-            }
+            other @ (HostEvent::Patches(_)
+            | HostEvent::AccountLimitsChanged(_)
+            | HostEvent::SettingsChanged(_)) => panic!("unexpected {other:?}"),
         }
     }
 }

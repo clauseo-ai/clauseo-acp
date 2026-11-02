@@ -36,10 +36,12 @@ use crate::pipeline::{Draft, FeederTx, Pipeline, Ticket};
 use crate::principal::{Access, authorize};
 use crate::snapshot::SnapshotWorker;
 
+mod app;
 mod commands;
 pub(crate) mod input;
 mod matters;
 mod query;
+mod settings;
 mod shutdown;
 mod startup;
 mod state;
@@ -75,7 +77,9 @@ pub(crate) struct Actor {
     pub(crate) pipeline: Pipeline<Tag>,
     pub(crate) feeder: FeederTx,
     pub(crate) snapshots: SnapshotWorker,
-    pub(crate) effective: Arc<Effective>,
+    /// The settings. Only the actor touches them, so it is the one lock their writes need:
+    /// `SetUiSettings` runs `Effective::apply_ui_patch` here, one command at a time.
+    pub(crate) effective: Effective,
     pub(crate) launcher: Arc<dyn Launcher>,
     /// Called at each session start, for the `_meta` of `session/new` and `session/load`, and
     /// at each launch, for the agent's variables (`agent/loads.rs`).
@@ -91,6 +95,8 @@ pub(crate) struct Actor {
     pub(crate) threads: BTreeMap<ThreadId, ThreadEntry>,
     pub(crate) streams: BTreeMap<StreamId, StreamSlot>,
     pub(crate) event_subs: BTreeMap<StreamId, Vec<EventSub>>,
+    /// The app subscribers, in the order they came.
+    pub(crate) app_subs: Vec<app::AppSub>,
     pub(crate) commands: BTreeMap<CommandId, PendingCommand>,
     pub(crate) folders: BTreeMap<FolderRefId, PathBuf>,
     pub(crate) files: BTreeMap<FileRefId, PathBuf>,
@@ -361,6 +367,7 @@ impl Actor {
                 after_seq,
                 reply,
             } => subs::subscribe_events(self, &principal, stream, after_seq, reply),
+            Request::SubscribeApp { principal, reply } => app::subscribe(self, &principal, reply),
             Request::Ack {
                 principal,
                 stream,
@@ -416,6 +423,8 @@ impl Actor {
             Input::Turn(input) => turn::turn_input(self, input),
             Input::Drained { stream, id } => subs::on_drained(self, stream, id),
             Input::Unsubscribed { stream, id } => subs::on_unsubscribed(self, stream, id),
+            Input::AppDrained { id } => app::on_drained(self, id),
+            Input::AppUnsubscribed { id } => app::on_unsubscribed(self, id),
             // The loop handles an abort before it gets here.
             #[cfg(feature = "test-support")]
             Input::Abort(reply) => {

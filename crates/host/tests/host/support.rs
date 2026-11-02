@@ -190,6 +190,17 @@ impl Dir {
         ManualClock::new(Timestamp::new(start).unwrap())
     }
 
+    /// The text of `settings.json`.
+    pub(crate) fn settings_json(&self) -> String {
+        std::fs::read_to_string(self.root.join("settings.json")).unwrap()
+    }
+
+    /// Starts run `run` with `policy`, a `policy.json`'s text, as its one policy source.
+    pub(crate) fn start_with_policy(&self, run: u16, policy: &str) -> Running {
+        self.set_policy(policy);
+        self.start(run)
+    }
+
     /// Starts run `run` with every default.
     pub(crate) fn start(&self, run: u16) -> Running {
         self.start_with(run, |config| config)

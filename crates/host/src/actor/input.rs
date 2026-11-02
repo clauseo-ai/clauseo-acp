@@ -14,7 +14,7 @@ use futures::channel::oneshot;
 use super::turn::{RestoreAsk, TurnInput, TurnJob, TurnTimer};
 use crate::agent::AgentInput;
 use crate::error::Error;
-use crate::handle::{EventSubscription, Subscription};
+use crate::handle::{AppSubscription, EventSubscription, Subscription};
 use crate::matter_worker::MatterReply;
 use crate::pipeline::Ticket;
 
@@ -48,6 +48,10 @@ pub(crate) enum Request {
         stream: StreamId,
         after_seq: Option<Seq>,
         reply: Reply<EventSubscription>,
+    },
+    SubscribeApp {
+        principal: Principal,
+        reply: Reply<AppSubscription>,
     },
     Ack {
         principal: Principal,
@@ -127,6 +131,10 @@ pub(crate) enum Input {
     Drained { stream: StreamId, id: SubId },
     /// A subscription was dropped.
     Unsubscribed { stream: StreamId, id: SubId },
+    /// An app subscription drained its channel after the actor found it full.
+    AppDrained { id: SubId },
+    /// An app subscription was dropped.
+    AppUnsubscribed { id: SubId },
     /// End the thread at once (tests); the sender is answered once the store is closed.
     #[cfg(feature = "test-support")]
     Abort(oneshot::Sender<()>),
@@ -146,6 +154,8 @@ impl std::fmt::Debug for Input {
             Self::Turn(_) => "Turn",
             Self::Drained { .. } => "Drained",
             Self::Unsubscribed { .. } => "Unsubscribed",
+            Self::AppDrained { .. } => "AppDrained",
+            Self::AppUnsubscribed { .. } => "AppUnsubscribed",
             #[cfg(feature = "test-support")]
             Self::Abort(_) => "Abort",
         };

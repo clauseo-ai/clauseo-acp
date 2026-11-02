@@ -8,7 +8,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 use crate::{
     AgentId, BlobHash, CheckpointId, CompactString, Count, Error, FileChange, MatterId, MatterKind,
-    MatterPath, RestoreRequest, Seq, StreamId, ThreadId, ThreadStatus, ViewEntry,
+    MatterPath, RestoreRequest, Seq, SettingsView, StreamId, ThreadId, ThreadStatus, ViewEntry,
 };
 
 /// Most entries one `PageEntries` returns: the size of a `Reset`'s view window (about 200 recent
@@ -128,6 +128,8 @@ pub enum HostQuery {
         /// How many bytes.
         len: ReadLen,
     },
+    /// The display settings in force, and the keys the firm's policy locks.
+    GetSettings,
 }
 
 /// A query's answer.
@@ -147,6 +149,8 @@ pub enum QueryResult {
     RestorePreview(RestorePreview),
     /// For `ReadBlob`.
     Blob(BlobRange),
+    /// For `GetSettings`.
+    Settings(SettingsView),
 }
 
 /// What a restore would do now, for `PreviewRestore`. Each list is sorted by path.

@@ -1,9 +1,9 @@
-//! The webview's settings: [`UiPatch`] carries only the four `ui` fields.
+//! The webview's settings: [`UiPatch`] carries only the `ui` fields.
 
 #[cfg(test)]
 mod tests;
 
-use crate::schema::{Density, FontSize, Language, Theme};
+use crate::schema::{Density, FontSize, Language, Lite, Motion, Theme};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -25,10 +25,17 @@ pub struct UiPatch {
     /// The new language, if it changes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub language: Option<Language>,
+    /// The new lite setting, if it changes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lite: Option<Lite>,
+    /// The new motion setting, if it changes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub motion: Option<Motion>,
 }
 
 impl UiPatch {
-    /// The dotted keys this patch sets, in field order (theme, font size, density, language).
+    /// The dotted keys this patch sets, in field order (theme, font size, density, language, lite,
+    /// motion).
     /// A key the patch leaves out is not in the list, so an empty list means an empty patch.
     pub(crate) fn keys(&self) -> Vec<&'static str> {
         // Every field is named here, so a new field does not compile until it is listed.
@@ -37,12 +44,16 @@ impl UiPatch {
             font_size,
             density,
             language,
+            lite,
+            motion,
         } = self;
         [
             ("ui.theme", theme.is_some()),
             ("ui.font_size", font_size.is_some()),
             ("ui.density", density.is_some()),
             ("ui.language", language.is_some()),
+            ("ui.lite", lite.is_some()),
+            ("ui.motion", motion.is_some()),
         ]
         .into_iter()
         .filter_map(|(key, set)| set.then_some(key))

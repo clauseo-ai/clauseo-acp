@@ -64,8 +64,14 @@ const V1: Corpus = (
 /// `corpus/added/<kind>.jsonl` and `.msgpack`, a new variant of an open enum (a unit value too)
 /// in `corpus/added/<kind>-<variant>.jsonl` and `.msgpack`, `<kind>` being the event that holds it.
 /// Each is written `("added/<name>", include_bytes!(..jsonl), include_bytes!(..msgpack),
-/// (length, hash), (length, hash))`. Empty: nothing has been added since v1.
-const ADDED_AFTER_V1: &[Corpus] = &[];
+/// (length, hash), (length, hash))`.
+const ADDED_AFTER_V1: &[Corpus] = &[(
+    "added/turn_failed-SettingsLocked",
+    include_bytes!("corpus/added/turn_failed-SettingsLocked.jsonl"),
+    include_bytes!("corpus/added/turn_failed-SettingsLocked.msgpack"),
+    (339, 0x49bd_0daf_8ff8_f75b),
+    (240, 0x12c1_6072_ca6b_e315),
+)];
 
 /// V1, then every file in [`ADDED_AFTER_V1`].
 fn every_corpus() -> Vec<Corpus> {

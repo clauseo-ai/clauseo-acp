@@ -22,9 +22,9 @@ keys need no new mechanism. `clauseo-settings` reads it, and IT writes against t
   - Only these count. `HKEY_CURRENT_USER`, roaming app data and user-writable files are never
     policy, and no variable moves a source: `CLAUSEO_DATA_DIR` moves only the data folder.
 - **Keys** are the dotted keys of `settings.json`: `matters.default_location`, `ui.theme`,
-  `ui.font_size`, `ui.density`, `ui.language`, `agents.<id>` for one agent's launch spec, and
-  `mcp.servers` for the whole list of MCP servers a lawyer can turn on (added with
-  clauseo-ai/clauseo-acp-private#160).
+  `ui.font_size`, `ui.density`, `ui.language`, `ui.lite`, `ui.motion` (the last two added by
+  0017), `agents.<id>` for one agent's launch spec, and `mcp.servers` for the whole list of MCP
+  servers a lawyer can turn on (added with clauseo-ai/clauseo-acp-private#160).
 - **Registry format.** One value per dotted key. `REG_DWORD` is a number, or a boolean (0 or 1)
   where the setting is one. `REG_SZ` is a string, or JSON text where the setting is an object
   (`agents.<id>`, `mcp.servers`). `REG_MULTI_SZ` is a list of strings. A value of another type is a warning (and

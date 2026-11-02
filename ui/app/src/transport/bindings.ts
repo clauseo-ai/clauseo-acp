@@ -397,7 +397,7 @@ export type CommandId = string;
 
 /**
  *  What a command did. The host's receipt stores it, so a repeated `command_id` returns the same
- *  outcome. The queue commands and `RestartAgent` answer `Done`.
+ *  outcome. The queue commands, `RestartAgent` and `SetUiSettings` answer `Done`.
  */
 export type CommandOutcome = 
 /**  Done; nothing new to name. */
@@ -1037,6 +1037,8 @@ export type ErrorCode =
 "transport.unauthorized" | 
 /** The message is larger than the transport accepts. */
 "transport.too_large" | 
+/** The change names a setting that the firm's policy sets, so the lawyer cannot change it; nothing was changed. */
+"settings.locked" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 
@@ -1211,14 +1213,14 @@ export type HostCommand =
 	name: Title,
 	/**  Where its folder comes from. */
 	source: MatterSource,
-} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_thread?: never; edit_queued_prompt?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; undo_step?: never } | 
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_thread?: never; edit_queued_prompt?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_ui_settings?: never; undo_step?: never } | 
 /**  Start a thread in a matter with an agent. */
 ({ create_thread: {
 	/**  The matter. */
 	matter: MatterId,
 	/**  The agent's registry id. */
 	agent: AgentId,
-} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; edit_queued_prompt?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; undo_step?: never } | 
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; edit_queued_prompt?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_ui_settings?: never; undo_step?: never } | 
 /**  Send a prompt. Never refused because a turn is running: it is queued, sent now or steered. */
 ({ send_prompt: {
 	/**  The thread. */
@@ -1230,7 +1232,7 @@ export type HostCommand =
 	 *  [`MAX_PROMPT_FILES`] `File` blocks.
 	 */
 	content: PromptBlock[],
-} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; undo_step?: never } | 
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_ui_settings?: never; undo_step?: never } | 
 /**  Replace a queued prompt's content; the turn keeps its id and its place. */
 ({ edit_queued_prompt: {
 	/**  The thread. */
@@ -1239,36 +1241,36 @@ export type HostCommand =
 	turn: TurnId,
 	/**  The new content, under the rules of `SendPrompt`'s `content`. */
 	content: PromptBlock[],
-} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; undo_step?: never } | 
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_ui_settings?: never; undo_step?: never } | 
 /**  Remove a queued prompt; its turn ends cancelled without starting. */
 ({ remove_queued_prompt: {
 	/**  The thread. */
 	thread: ThreadId,
 	/**  The queued turn. */
 	turn: TurnId,
-} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; undo_step?: never } | 
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_ui_settings?: never; undo_step?: never } | 
 /**  Cancel the running turn and start this queued turn next. */
 ({ send_queued_now: {
 	/**  The thread. */
 	thread: ThreadId,
 	/**  The queued turn. */
 	turn: TurnId,
-} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; set_config_option?: never; set_mode?: never; undo_step?: never } | 
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; set_config_option?: never; set_mode?: never; set_ui_settings?: never; undo_step?: never } | 
 /**  Start the head of a held queue. */
 ({ resume_queue: {
 	/**  The thread. */
 	thread: ThreadId,
-} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; undo_step?: never } | 
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_ui_settings?: never; undo_step?: never } | 
 /**  Stop the thread's current turn; its queued turns stay, held. */
 ({ cancel: {
 	/**  The thread. */
 	thread: ThreadId,
-} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; undo_step?: never } | 
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_ui_settings?: never; undo_step?: never } | 
 /**  Start the thread's agent again; refused while a turn runs. */
 ({ restart_agent: {
 	/**  The thread. */
 	thread: ThreadId,
-} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; remove_queued_prompt?: never; rename_thread?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; undo_step?: never } | 
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; remove_queued_prompt?: never; rename_thread?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_ui_settings?: never; undo_step?: never } | 
 /**  Answer a permission request; the first valid answer wins. */
 ({ answer_permission: {
 	/**  The thread. */
@@ -1277,7 +1279,7 @@ export type HostCommand =
 	request: PermissionRequestId,
 	/**  One of the offered options' ids. */
 	option_id: AgentChoiceId,
-} }) & { answer_elicitation?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; undo_step?: never } | 
+} }) & { answer_elicitation?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_ui_settings?: never; undo_step?: never } | 
 /**  Answer an elicitation. */
 ({ answer_elicitation: {
 	/**  The thread. */
@@ -1289,7 +1291,7 @@ export type HostCommand =
 	 *  keys) of at most [`MAX_ELICITATION_VALUES_BYTES`].
 	 */
 	response: ElicitationResponse,
-} }) & { answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; undo_step?: never } | 
+} }) & { answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_ui_settings?: never; undo_step?: never } | 
 /**  Set one of the agent's config options. */
 ({ set_config_option: {
 	/**  The thread. */
@@ -1298,26 +1300,26 @@ export type HostCommand =
 	option_id: AgentChoiceId,
 	/**  The new value. */
 	value: ConfigValue,
-} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_mode?: never; undo_step?: never } | 
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_mode?: never; set_ui_settings?: never; undo_step?: never } | 
 /**  Set the agent's mode, when it has no mode config option. */
 ({ set_mode: {
 	/**  The thread. */
 	thread: ThreadId,
 	/**  The mode's id. */
 	mode_id: AgentChoiceId,
-} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; undo_step?: never } | 
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_ui_settings?: never; undo_step?: never } | 
 /**  Rename a thread. */
 ({ rename_thread: {
 	/**  The thread. */
 	thread: ThreadId,
 	/**  The new title. */
 	title: Title,
-} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; remove_queued_prompt?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; undo_step?: never } | 
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; remove_queued_prompt?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_ui_settings?: never; undo_step?: never } | 
 /**  Archive a thread; refused while a turn runs. */
 ({ archive_thread: {
 	/**  The thread. */
 	thread: ThreadId,
-} }) & { answer_elicitation?: never; answer_permission?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; undo_step?: never } | 
+} }) & { answer_elicitation?: never; answer_permission?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_ui_settings?: never; undo_step?: never } | 
 /**  Undo a step, file by file; refused while a turn runs in the matter. */
 ({ undo_step: {
 	/**  The thread. */
@@ -1331,7 +1333,7 @@ export type HostCommand =
 	 *  that is not in the step's `FilesChanged`.
 	 */
 	files: FileDecision[],
-} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never } | 
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_ui_settings?: never } | 
 /**  Restore an earlier version; refused while a turn runs in the matter. */
 ({ restore_version: {
 	/**  The matter. */
@@ -1343,7 +1345,17 @@ export type HostCommand =
 	 *  version does not know is refused when the command decodes.
 	 */
 	scope: RestoreRequest,
-} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; undo_step?: never };
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_ui_settings?: never; undo_step?: never } | 
+/**
+ *  Change the display settings; answers `Done`, and every app subscriber gets
+ *  `HostEvent::SettingsChanged`. A patch naming a key the firm's policy sets is refused
+ *  whole with `settings.locked`, and a font size out of range with `command.invalid`;
+ *  either way nothing changes.
+ */
+({ set_ui_settings: {
+	/**  The fields to change. */
+	patch: UiPatch,
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; undo_step?: never };
 
 /**
  *  What every host call returns on failure.
@@ -1369,9 +1381,9 @@ export type HostError = {
 /**  What a subscriber receives. Never logged (the log holds only `DomainEvent`s). */
 export type HostEvent = 
 /**  View patches, for a view subscription. */
-({ patches: PatchBatch }) & { account_limits_changed?: never; caught_up?: never; events?: never } | 
+({ patches: PatchBatch }) & { account_limits_changed?: never; caught_up?: never; events?: never; settings_changed?: never } | 
 /**  Envelopes in `seq` order with no gap or duplicate, for an event subscription. */
-({ events: Envelope[] }) & { account_limits_changed?: never; caught_up?: never; patches?: never } | 
+({ events: Envelope[] }) & { account_limits_changed?: never; caught_up?: never; patches?: never; settings_changed?: never } | 
 /**  Once per event subscription, between the replayed envelopes and the live ones. */
 ({ caught_up: {
 	/**  The stream. */
@@ -1381,9 +1393,14 @@ export type HostEvent =
 	 *  creation event, so it is at least 1.
 	 */
 	last_seq: Seq,
-} }) & { account_limits_changed?: never; events?: never; patches?: never } | 
+} }) & { account_limits_changed?: never; events?: never; patches?: never; settings_changed?: never } | 
 /**  An account's limits changed (not part of any stream). */
-({ account_limits_changed: AccountLimits }) & { caught_up?: never; events?: never; patches?: never };
+({ account_limits_changed: AccountLimits }) & { caught_up?: never; events?: never; patches?: never; settings_changed?: never } | 
+/**
+ *  The display settings changed: the whole view after the change. App-wide, never part of
+ *  a stream: it reaches app subscribers only.
+ */
+({ settings_changed: SettingsView }) & { account_limits_changed?: never; caught_up?: never; events?: never; patches?: never };
 
 /**  A read. JSON: `"list_matters"` or `{"list_threads": {...}}`; unknown fields are refused. */
 export type HostQuery = 
@@ -1432,7 +1449,9 @@ export type HostQuery =
 	offset: Count,
 	/**  How many bytes. */
 	len: ReadLen,
-} }) & { compare_versions?: never; list_threads?: never; page_entries?: never; preview_restore?: never };
+} }) & { compare_versions?: never; list_threads?: never; page_entries?: never; preview_restore?: never } | 
+/**  The display settings in force, and the keys the firm's policy locks. */
+"get_settings";
 
 /**
  *  What the first checkpoint of a folder matter found. Counts are at most `u32::MAX`; `bytes`
@@ -1536,6 +1555,13 @@ export type KnownDomainEvent =
 ({ outside_edits: OutsideEdits }) & { agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; mode_changed?: never; notice?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never } | 
 /**  An earlier version was restored (matter stream; host, matters). */
 ({ version_restored: VersionRestored }) & { agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; mode_changed?: never; notice?: never; outside_edits?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never };
+
+/**  The app's language. */
+export type Language = 
+/**  English. */
+"en" | 
+/**  Hindi. */
+"hi";
 
 /**  The composer's gauge. */
 export type LimitMeter = {
@@ -1658,6 +1684,15 @@ export type LimitWindowView = {
 
 /**  What the UI shows for each signed-in agent: a JSON object keyed by agent kind. */
 export type LimitsView = Partial<{ [key in AgentKind]: AgentLimitsView }>;
+
+/**  Whether the app runs light: fewer effects, for slow machines. */
+export type Lite = 
+/**  The app decides from the machine. */
+"automatic" | 
+/**  Always light. */
+"on" | 
+/**  Never light. */
+"off";
 
 /**  An undo, a restore or a compaction. Entry id `marker:<event>`. */
 export type MarkerEntry = {
@@ -1825,6 +1860,15 @@ export type ModeChanged = {
 	/**  The new mode's id. */
 	mode_id: string,
 };
+
+/**  Whether the app animates. */
+export type Motion = 
+/**  As the OS's reduce-motion setting says. */
+"system" | 
+/**  Little or no animation. */
+"reduce" | 
+/**  Full animation. */
+"full";
 
 /**  A notice for the lawyer, from the agent or the host. */
 export type Notice = {
@@ -2095,17 +2139,19 @@ export type PromptCapabilities = {
 /**  A query's answer. */
 export type QueryResult = 
 /**  For `ListMatters`. */
-({ matters: MatterSummary[] }) & { blob?: never; entries?: never; file_changes?: never; restore_preview?: never; threads?: never } | 
+({ matters: MatterSummary[] }) & { blob?: never; entries?: never; file_changes?: never; restore_preview?: never; settings?: never; threads?: never } | 
 /**  For `ListThreads`. */
-({ threads: ThreadSummary[] }) & { blob?: never; entries?: never; file_changes?: never; matters?: never; restore_preview?: never } | 
+({ threads: ThreadSummary[] }) & { blob?: never; entries?: never; file_changes?: never; matters?: never; restore_preview?: never; settings?: never } | 
 /**  For `PageEntries`, newest last; fewer than `limit` means none older is left. */
-({ entries: ViewEntry[] }) & { blob?: never; file_changes?: never; matters?: never; restore_preview?: never; threads?: never } | 
+({ entries: ViewEntry[] }) & { blob?: never; file_changes?: never; matters?: never; restore_preview?: never; settings?: never; threads?: never } | 
 /**  For `CompareVersions`. */
-({ file_changes: FileChange[] }) & { blob?: never; entries?: never; matters?: never; restore_preview?: never; threads?: never } | 
+({ file_changes: FileChange[] }) & { blob?: never; entries?: never; matters?: never; restore_preview?: never; settings?: never; threads?: never } | 
 /**  For `PreviewRestore`. */
-({ restore_preview: RestorePreview }) & { blob?: never; entries?: never; file_changes?: never; matters?: never; threads?: never } | 
+({ restore_preview: RestorePreview }) & { blob?: never; entries?: never; file_changes?: never; matters?: never; settings?: never; threads?: never } | 
 /**  For `ReadBlob`. */
-({ blob: BlobRange }) & { entries?: never; file_changes?: never; matters?: never; restore_preview?: never; threads?: never };
+({ blob: BlobRange }) & { entries?: never; file_changes?: never; matters?: never; restore_preview?: never; settings?: never; threads?: never } | 
+/**  For `GetSettings`. */
+({ settings: SettingsView }) & { blob?: never; entries?: never; file_changes?: never; matters?: never; restore_preview?: never; threads?: never };
 
 /**  A queued prompt's content was replaced; the turn keeps its id and its place. */
 export type QueuedPromptEdited = {
@@ -2251,6 +2297,18 @@ export type SessionCapabilities = {
 	resume: boolean,
 	/**  `session/close`. */
 	close: boolean,
+};
+
+/**  What `GetSettings` answers and `SettingsChanged` carries. */
+export type SettingsView = {
+	/**  The display settings. */
+	ui: UiSettings,
+	/**
+	 *  Every dotted key the firm's policy sets, such as `ui.theme`, sorted. The lawyer cannot
+	 *  change these: a `SetUiSettings` naming one is refused with `settings.locked`. It can
+	 *  also name keys outside `ui` (`matters.default_location`, `agents.<id>`).
+	 */
+	locked: string[],
 };
 
 /**
@@ -2481,6 +2539,15 @@ export type TextOrBlob =
 ({ inline: string }) & { blob?: never } | 
 /**  A reference to a blob holding the text. */
 ({ blob: BlobRef }) & { inline?: never };
+
+/**  The colour theme. */
+export type Theme = 
+/**  As the OS is set. */
+"system" | 
+/**  Light. */
+"light" | 
+/**  Dark. */
+"dark";
 
 /**  The thread was archived. JSON: `{"thread_archived": {}}`. */
 export type ThreadArchived = Record<string, never>;
@@ -2865,6 +2932,38 @@ export type TurnUsage = {
 	cached_read?: Count,
 	/**  Input tokens written to the agent's cache. */
 	cached_write?: Count,
+};
+
+/**
+ *  A change to the display settings: each field set is changed, the rest stay. A patch that
+ *  names a locked key is refused whole with `settings.locked`; a font size out of range with
+ *  `command.invalid`. Unknown fields are refused, as in every command.
+ */
+export type UiPatch = {
+	/**  The new theme. */
+	theme?: Theme,
+	/**  The new text size in points. */
+	font_size?: number,
+	/**  The new language. */
+	language?: Language,
+	/**  The new lite setting. */
+	lite?: Lite,
+	/**  The new motion setting. */
+	motion?: Motion,
+};
+
+/**  The display settings in force: the user's, with policy's values over them. */
+export type UiSettings = {
+	/**  The colour theme. */
+	theme: Theme,
+	/**  The text size in points, 14 to 20 (the settings crate holds the range). */
+	font_size: number,
+	/**  The app's language. */
+	language: Language,
+	/**  Whether the app runs light. */
+	lite: Lite,
+	/**  Whether the app animates. */
+	motion: Motion,
 };
 
 /**  Why no limits are available. */

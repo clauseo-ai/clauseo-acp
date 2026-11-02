@@ -137,6 +137,8 @@ error_codes! {
         not allowed to make this call.";
     TransportTooLarge = "transport.too_large", retryable: false, meaning: "The message is larger \
         than the transport accepts.";
+    SettingsLocked = "settings.locked", retryable: false, meaning: "The change names a setting \
+        that the firm's policy sets, so the lawyer cannot change it; nothing was changed.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

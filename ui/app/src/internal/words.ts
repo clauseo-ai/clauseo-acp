@@ -40,6 +40,7 @@ export const ERROR_COPY: Record<ErrorCode, string> = {
   "matter.turn_running": "Wait for the answer to finish first.",
   "transport.unauthorized": "That was not allowed, so nothing changed.",
   "transport.too_large": "That is too large to send.",
+  "settings.locked": "Your organisation manages that setting, so it cannot be changed.",
   unknown: "Something went wrong.",
 };
 

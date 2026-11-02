@@ -94,6 +94,19 @@ pub fn file_changes() -> Vec<FileChange> {
     ]
 }
 
+/// Events that hold a value added after v1 that no example in [`every_event`] holds, so the
+/// corpus writer finds a holder for it: an error code no turn fails with today.
+pub fn later_variants() -> Vec<DomainEvent> {
+    vec![
+        TurnFailed {
+            turn: turn_id(3),
+            code: ErrorCode::SettingsLocked,
+            detail: Some("ui.theme is set by policy".to_owned()),
+        }
+        .into(),
+    ]
+}
+
 /// One example of every known event kind, in `DomainEvent::KINDS` order.
 pub fn every_event() -> Vec<DomainEvent> {
     [

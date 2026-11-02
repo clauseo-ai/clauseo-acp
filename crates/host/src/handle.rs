@@ -1,5 +1,5 @@
 //! The host's public surface: [`Host::start`], the [`HostHandle`] every caller holds, the
-//! [`HostJoin`] that waits for the host thread, and the two subscription streams.
+//! [`HostJoin`] that waits for the host thread, and the three subscription streams.
 //!
 //! Each call sends one request over the actor's `bounded(256)` request channel with a
 //! `futures` oneshot for the reply. A reply that never comes (the host stopped or panicked) is
@@ -21,7 +21,7 @@ use crate::error::Error;
 mod subscription;
 
 pub(crate) use subscription::Sink;
-pub use subscription::{EventSubscription, Subscription};
+pub use subscription::{AppSubscription, EventSubscription, Subscription};
 
 /// The session host. [`Host::start`] runs it on its own thread, `clauseo-host`.
 #[derive(Debug)]
@@ -153,6 +153,17 @@ impl HostHandle {
             reply,
         })
         .await
+    }
+
+    /// Subscribes `principal` to the app-wide events, those of no stream (see
+    /// [`AppSubscription`] for what comes and the rules). It checks the principal as
+    /// [`HostHandle::subscribe`] does: one this version does not know is
+    /// `transport.unauthorized`. Each subscriber has its own `bounded(1024)` channel; a full
+    /// one gets the current state once it has drained. Every subscription ends when the host
+    /// stops.
+    pub async fn subscribe_app(&self, principal: Principal) -> Result<AppSubscription, HostError> {
+        self.call(|reply| Request::SubscribeApp { principal, reply })
+            .await
     }
 
     /// Records that `principal` has applied the view of `stream` up to `cursor` of `epoch`.

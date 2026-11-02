@@ -160,8 +160,7 @@ fn next_agent_id() -> u64 {
 fn launch(actor: &Actor, thread: ThreadId) -> Result<AgentLink, Error> {
     let row = &actor.check_thread(thread)?.row;
     let folder = PathBuf::from(&actor.check_matter(row.matter)?.row.folder_path);
-    let effective = Arc::clone(&actor.effective);
-    let settings = effective.agent(row.agent.as_str()).ok_or_else(|| {
+    let settings = actor.effective.agent(row.agent.as_str()).ok_or_else(|| {
         Error::refused(
             ErrorCode::AgentLaunchFailed,
             format!("no agent {} in the settings", row.agent),

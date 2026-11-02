@@ -3,7 +3,7 @@
 
 use super::Effective;
 use crate::error::Error;
-use crate::schema::{Density, FontSize, Language, Theme, UiSettings};
+use crate::schema::{Density, FontSize, Language, Lite, Motion, Theme, UiSettings};
 use crate::testing::{MemFiles, locations, policy, user};
 use crate::ui::UiPatch;
 use std::path::PathBuf;
@@ -111,9 +111,9 @@ fn each_locked_key_is_reported_by_its_own_name() {
             "ui.density",
         ),
         (
-            r#"{"ui": {"language": "fr"}}"#,
+            r#"{"ui": {"language": "hi"}}"#,
             UiPatch {
-                language: Some(Language::try_from("en".to_owned()).unwrap()),
+                language: Some(Language::En),
                 ..UiPatch::default()
             },
             "ui.language",
@@ -136,11 +136,11 @@ fn each_locked_key_is_reported_by_its_own_name() {
 fn the_first_locked_key_in_field_order_is_named() {
     let firm = policy(
         "firm",
-        r#"{"ui": {"language": "fr", "density": "compact"}}"#,
+        r#"{"ui": {"language": "hi", "density": "compact"}}"#,
     );
     let mut effective = Effective::load(&locations(), &MemFiles::default(), &[&firm]);
     let patch = UiPatch {
-        language: Some(Language::try_from("en".to_owned()).unwrap()),
+        language: Some(Language::En),
         density: Some(Density::Comfortable),
         ..UiPatch::default()
     };
@@ -223,14 +223,18 @@ fn an_all_fields_patch_reaches_memory_and_a_fresh_load_alike() {
         theme: Some(Theme::Dark),
         font_size: Some(FontSize::try_from(18).unwrap()),
         density: Some(Density::Compact),
-        language: Some(Language::try_from("fr".to_owned()).unwrap()),
+        language: Some(Language::Hi),
+        lite: Some(Lite::On),
+        motion: Some(Motion::Reduce),
     };
     effective.apply_ui_patch(&files, &patch).unwrap();
     let expected = UiSettings {
         theme: Theme::Dark,
         font_size: FontSize::try_from(18).unwrap(),
         density: Density::Compact,
-        language: Language::try_from("fr".to_owned()).unwrap(),
+        language: Language::Hi,
+        lite: Lite::On,
+        motion: Motion::Reduce,
     };
     assert_eq!(effective.settings().ui, expected);
     let fresh = Effective::load(&locations(), &files, &[]);
@@ -265,7 +269,7 @@ fn a_repeated_section_reads_the_same_after_a_save_of_another_key() {
     assert_eq!(effective.settings().ui.theme, Theme::System);
     assert_eq!(effective.settings().ui.density, Density::Compact);
     let language = UiPatch {
-        language: Some(Language::try_from("fr".to_owned()).unwrap()),
+        language: Some(Language::Hi),
         ..UiPatch::default()
     };
     effective.apply_ui_patch(&files, &language).unwrap();
@@ -273,6 +277,6 @@ fn a_repeated_section_reads_the_same_after_a_save_of_another_key() {
     assert_eq!(fresh.settings().ui, effective.settings().ui);
     assert_eq!(fresh.settings().ui.theme, Theme::System);
     assert_eq!(fresh.settings().ui.density, Density::Compact);
-    assert_eq!(fresh.settings().ui.language.as_str(), "fr");
+    assert_eq!(fresh.settings().ui.language, Language::Hi);
     assert_eq!(fresh.warnings(), []);
 }

@@ -95,6 +95,10 @@ pub struct UiSettings {
     pub density: Density,
     /// The app's language.
     pub language: Language,
+    /// Whether the app drops its heavier effects, or decides from the machine.
+    pub lite: Lite,
+    /// Whether the app animates, or follows the OS's reduce-motion setting.
+    pub motion: Motion,
 }
 
 /// The colour theme.
@@ -121,16 +125,47 @@ pub enum Density {
     Compact,
 }
 
+/// Whether the app runs light: fewer effects, for slow machines.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Lite {
+    /// The app decides from the machine.
+    #[default]
+    Automatic,
+    /// Always light.
+    On,
+    /// Never light.
+    Off,
+}
+
+/// Whether the app animates.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Motion {
+    /// As the OS's reduce-motion setting says.
+    #[default]
+    System,
+    /// Little or no animation.
+    Reduce,
+    /// Full animation.
+    Full,
+}
+
 /// A text size from [`FontSize::MIN`] to [`FontSize::MAX`] points.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "u8", into = "u8")]
 pub struct FontSize(u8);
 
-/// A BCP 47 language tag, such as `en` or `en-GB`: a first part of 2 to 8 letters, then parts
-/// of 1 to 8 letters or digits, joined by `-`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
-pub struct Language(String);
+/// The app's language: one the app has words for.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Language {
+    /// English.
+    #[default]
+    En,
+    /// Hindi.
+    Hi,
+}
 
 impl Settings {
     /// Sets each `ui` field the patch holds. Only [`crate::Effective::apply_ui_patch`] calls it,
@@ -142,6 +177,8 @@ impl Settings {
             font_size,
             density,
             language,
+            lite,
+            motion,
         } = patch;
         if let Some(theme) = theme {
             self.ui.theme = *theme;
@@ -153,18 +190,24 @@ impl Settings {
             self.ui.density = *density;
         }
         if let Some(language) = language {
-            self.ui.language = language.clone();
+            self.ui.language = *language;
+        }
+        if let Some(lite) = lite {
+            self.ui.lite = *lite;
+        }
+        if let Some(motion) = motion {
+            self.ui.motion = *motion;
         }
     }
 }
 
 impl FontSize {
     /// The smallest size.
-    pub const MIN: u8 = 12;
+    pub const MIN: u8 = 14;
     /// The largest size.
     pub const MAX: u8 = 20;
     /// The size when none is set.
-    pub const DEFAULT: u8 = 14;
+    pub const DEFAULT: u8 = 16;
 
     /// The size in points.
     pub fn get(self) -> u8 {
@@ -211,63 +254,6 @@ impl JsonSchema for FontSize {
             "type": "integer",
             "minimum": Self::MIN,
             "maximum": Self::MAX,
-            "default": Self::DEFAULT,
-        })
-    }
-}
-
-impl Language {
-    /// The language when none is set.
-    pub const DEFAULT: &str = "en";
-
-    /// The tag.
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl Default for Language {
-    fn default() -> Self {
-        Self(Self::DEFAULT.to_owned())
-    }
-}
-
-impl TryFrom<String> for Language {
-    type Error = String;
-
-    fn try_from(tag: String) -> Result<Self, String> {
-        let mut parts = tag.split('-');
-        let first_ok = parts.next().is_some_and(|first| {
-            part_ok(first, 2) && first.bytes().all(|b| b.is_ascii_alphabetic())
-        });
-        if first_ok && parts.all(|part| part_ok(part, 1)) {
-            Ok(Self(tag))
-        } else {
-            Err(format!("{tag:?} is not a language tag such as en or en-GB"))
-        }
-    }
-}
-
-/// Whether one part of a language tag has `min` to 8 ASCII letters or digits.
-fn part_ok(part: &str, min: usize) -> bool {
-    (min..=8).contains(&part.len()) && part.bytes().all(|b| b.is_ascii_alphanumeric())
-}
-
-impl From<Language> for String {
-    fn from(language: Language) -> String {
-        language.0
-    }
-}
-
-impl JsonSchema for Language {
-    fn schema_name() -> Cow<'static, str> {
-        "Language".into()
-    }
-
-    fn json_schema(_: &mut SchemaGenerator) -> Schema {
-        json_schema!({
-            "description": "A BCP 47 language tag, such as en or en-GB.",
-            "type": "string",
             "default": Self::DEFAULT,
         })
     }

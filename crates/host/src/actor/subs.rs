@@ -95,7 +95,7 @@ impl EventSub {
     }
 }
 
-fn next_sub_id(actor: &mut Actor) -> SubId {
+pub(super) fn next_sub_id(actor: &mut Actor) -> SubId {
     actor.next_sub += 1;
     SubId(actor.next_sub)
 }

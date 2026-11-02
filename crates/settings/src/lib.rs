@@ -42,7 +42,7 @@
 //!   newer version still loads.
 //! - No variable moves or hides a policy source: [`DATA_DIR_VAR`] moves only the data folder.
 //!   Only `HKEY_LOCAL_MACHINE` and forced managed preferences count as policy.
-//! - [`UiPatch`] holds only the four `ui` fields and refuses any other key.
+//! - [`UiPatch`] holds only the `ui` fields and refuses any other key.
 //! - A [`UiPatch`] that names a locked key is refused with [`Error::Locked`], and nothing is
 //!   written or changed in memory.
 //! - An agent's `command` is an absolute path, or the agent is left out with a warning.
@@ -90,8 +90,8 @@ pub use policy::{
     system_policy_sources,
 };
 pub use schema::{
-    AgentLaunch, Density, FontSize, Language, MattersSettings, McpServerLaunch, McpSettings,
-    Settings, Theme, UiSettings, json_schema,
+    AgentLaunch, Density, FontSize, Language, Lite, MattersSettings, McpServerLaunch, McpSettings,
+    Motion, Settings, Theme, UiSettings, json_schema,
 };
 pub use system::{SystemDirs, SystemEnv};
 pub use ui::UiPatch;

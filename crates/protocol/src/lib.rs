@@ -16,7 +16,9 @@
 //! [`RawPayload`], [`TextOrBlob`], [`AccountLimits`], [`ErrorCode`] and [`HostError`]. Clients
 //! send a [`CommandEnvelope`] around a [`HostCommand`] (the host takes only the
 //! [`ValidatedCommand`] that [`CommandEnvelope::validate`] makes, and answers with a
-//! [`CommandOutcome`]) and read with a [`HostQuery`] ([`QueryResult`]). Subscribers receive
+//! [`CommandOutcome`]) and read with a [`HostQuery`] ([`QueryResult`]). The display
+//! settings cross as [`SettingsView`] and [`UiPatch`], mirrors of `clauseo-settings`' `ui`
+//! section. Subscribers receive
 //! [`HostEvent`]s: [`PatchBatch`]es of [`ViewPatch`]es over [`ViewEntry`]s (keyed by
 //! [`ViewEntry::id`], sorted by [`ViewEntry::order`]), or envelopes; [`Subscribe`],
 //! [`SubscribeEvents`] and [`Ack`] are the subscription calls' parameters. The serde
@@ -141,6 +143,7 @@ mod query;
 mod raw;
 mod serde_util;
 mod session;
+mod settings;
 mod stream;
 #[cfg(test)]
 mod test_support;
@@ -218,6 +221,7 @@ wire_types! {
         PlanStatus, PromptCapabilities, RenameSource, SessionCapabilities, SteeringCapability,
         TextKind, TurnUsage,
     },
+    settings::{Language, Lite, Motion, SettingsView, Theme, UiPatch, UiSettings},
     stream::{StreamId},
     text::{BlobRef, TextOrBlob},
     title::{Title},

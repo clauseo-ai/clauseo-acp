@@ -45,6 +45,15 @@ fn codes_map() {
         path: PathBuf::from("rel"),
     };
     assert_eq!(wire(Error::from(settings)).code(), ErrorCode::Internal);
+    let locked = wire(Error::from(clauseo_settings::Error::Locked {
+        key: "ui.theme".to_owned(),
+    }));
+    assert_eq!(locked.code(), ErrorCode::SettingsLocked);
+    assert!(!locked.retryable());
+    assert_eq!(
+        locked.message(),
+        "settings: ui.theme is set by policy and cannot be changed"
+    );
 
     let closed = wire(Error::Closed);
     assert_eq!(closed.code(), ErrorCode::Internal);
