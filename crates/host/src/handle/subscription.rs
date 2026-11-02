@@ -7,8 +7,9 @@
 //! An app subscription also reads a [`Front`] queue before its channel: the current state the
 //! actor puts there whole (its first frames, and each catch-up), which may hold more events than
 //! the channel has places, so a catch-up always arrives whole however many matters there are.
-//! While any of it is unread, the actor queues what follows behind it, up to the channel's
-//! capacity more; past that the subscriber lags again and is caught up once it has read it all.
+//! While any of it is unread, the actor queues what follows behind it, until the queue holds the
+//! catch-up's length plus a channel's worth; past that the subscriber lags again and is caught up
+//! once it has read it all.
 
 use std::collections::VecDeque;
 use std::pin::Pin;
