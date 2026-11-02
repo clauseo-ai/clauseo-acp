@@ -7,6 +7,7 @@ import { ScratchLine } from "../room/scratch-line.tsx";
 import type { Entry } from "./entry.ts";
 import { H11 } from "./registry-h11.tsx";
 import { U4 } from "./registry-u4.tsx";
+import { U4B } from "./registry-u4b.tsx";
 import { U10 } from "./registry-u10.tsx";
 import { U11 } from "./registry-u11.tsx";
 import { U12 } from "./registry-u12.tsx";
@@ -332,6 +333,7 @@ export const REGISTRY: readonly Entry[] = [
   ...U3,
   ...ERRORS,
   ...U4,
+  ...U4B,
   ...U10,
   ...U11,
   ...U12,
