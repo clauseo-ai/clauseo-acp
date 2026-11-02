@@ -78,6 +78,8 @@ const HI = {
   // the composer
   "Papers for this question": "इस प्रश्न के दस्तावेज़",
   "Remove {title}": "{title} हटाएँ",
+  // the composer's `/` menu, the agent's commands, named for assistive technology
+  Commands: "कमांड",
   // the plan in the status line, for a plan other than Claude
   "Uses your {name} plan": "आपके {name} प्लान का उपयोग करता है",
   // empty states

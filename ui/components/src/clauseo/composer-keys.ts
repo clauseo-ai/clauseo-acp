@@ -16,10 +16,15 @@ export function sendsOnEnter(e: {
 }
 
 /** Whether a key pressed where focus stands is a prompt's in this room: in this room's composer field, or with
- * nothing focused while this is the room last used. A focused button or another field keeps its own Enter. */
+ * nothing focused while this is the room last used. A focused button or another field keeps its own Enter, and so
+ * does the field while its `/` menu is open (`data-menu`, composer.tsx): Enter and Escape are the menu's then. */
 export function fromComposer(scope: RoomScope, target: EventTarget | null): boolean {
   if (!keyIsMine(scope, target)) return false;
   if (!(target instanceof Element)) return true;
   if (target === target.ownerDocument.body) return true;
-  return target instanceof HTMLTextAreaElement && target.form?.dataset["composer"] !== undefined;
+  return (
+    target instanceof HTMLTextAreaElement &&
+    target.form?.dataset["composer"] !== undefined &&
+    target.dataset["menu"] === undefined
+  );
 }

@@ -1,4 +1,7 @@
 import {
+  lazy,
+  Suspense,
+  useCallback,
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
@@ -10,59 +13,36 @@ import {
   type RefObject,
 } from "react";
 import { Button } from "../ui/button.tsx";
-import {
-  IconAddPapers,
-  IconNewMatter,
-  IconPaperBookPage,
-  IconSafeWorkspace,
-} from "../icons/icons.tsx";
+import { IconAddPapers, IconSafeWorkspace } from "../icons/icons.tsx";
 import { motionAllowed, useDisplay } from "../lib/display.ts";
+import { late } from "../lib/late.ts";
 import { useThreadWords } from "../lib/words-thread.ts";
 import { rt } from "../lib/words-room.ts";
-import { pbWords, type Paper } from "./matter.ts";
+import type { Paper } from "./matter.ts";
 import { dur, ease } from "./motion.ts";
+import { mayTakeFocus, pressOwn, replaceAll } from "./composer-edit.ts";
 import { sendsOnEnter } from "./composer-keys.ts";
+import type { MenuShown } from "./composer-menu.tsx";
 import { useRoom } from "./room-scope.ts";
+import { PaperChips } from "./paper-chips.tsx";
 import { Say } from "./say.tsx";
 import { StatusLine, type PlanChoice, type ReadyHint } from "./status-line.tsx";
 import { WorkingLine, WorkingSaid, WorkingTime, type WorkingState } from "./working-line.tsx";
 
 export type { PlanChoice, ReadyHint } from "./status-line.tsx";
 
+/** One of the agent's commands, as ACP's `available_commands_update` lists it and the session's header carries it
+ * (`HeaderEntry.commands`, passed as it is): its name without the slash, what it does, and a hint for its input. */
+export type SlashCommand = { name: string; description: string; input_hint?: string };
+
+/** The `/` menu, its filtering and its caret measurement: one late chunk, loaded as the field is first focused. */
+const CommandMenu = lazy(() =>
+  late(import("./composer-menu.tsx").then((m) => ({ default: m.CommandMenu }))),
+);
+
 /** A paper added to the question, as a small raised pill on the field's well: the paper book page glyph, its short
  * title and page, and a press to take it off again. */
 export type QuestionPaper = Pick<Paper, "id" | "title" | "pb">;
-
-function PaperChips({
-  papers,
-  onRemove,
-}: {
-  papers: readonly QuestionPaper[];
-  onRemove?: ((id: string) => void) | undefined;
-}) {
-  const w = useThreadWords();
-  return (
-    <ul className="q-papers" aria-label={w.th("Papers for this question")}>
-      {papers.map((p) => (
-        <li key={p.id} className="q-paper">
-          <IconPaperBookPage size={14} className="q-paper-icon" />
-          <span className="q-paper-title">
-            <Say>{p.title}</Say>
-          </span>
-          <span className="q-paper-pb">{pbWords(w.lang, p.pb)}</span>
-          <button
-            type="button"
-            className="q-paper-remove"
-            aria-label={w.th("Remove {title}", { title: p.title })}
-            onClick={() => onRemove?.(p.id)}
-          >
-            <IconNewMatter size={14} className="rotate-45" />
-          </button>
-        </li>
-      ))}
-    </ul>
-  );
-}
 
 /** The working line opens upward from the field in 240 ms on the spring: the well grows from the field's own
  * height to take the row, whose words are already on it. Once, as Clauseo starts; its words change in place after. */
@@ -105,46 +85,6 @@ export type ComposerHandle = {
   fill: (text: string) => void;
 };
 
-/** Replaces all the field holds with `text` through the engine's editing, so undo takes it back; where the engine
- * refuses (a disabled field, or no execCommand, as in happy-dom) the value is set in place. True when the engine did
- * it, in which case its own input event has already told the field. */
-function replaceAll(a: HTMLTextAreaElement, text: string, focus: boolean): boolean {
-  if (a.value === text) return true;
-  const focused = a.ownerDocument.activeElement === a;
-  if (!a.disabled && (focused || focus) && typeof a.ownerDocument.execCommand === "function") {
-    if (!focused) a.focus();
-    a.select();
-    // insertText and delete edit plain text only: nothing here parses HTML, so Trusted Types have nothing to check
-    const doc = a.ownerDocument;
-    const ok = text === "" ? doc.execCommand("delete") : doc.execCommand("insertText", false, text);
-    if (ok && a.value === text) return true;
-  }
-  a.value = text;
-  return false;
-}
-
-/** Whether clearing may move the focus to the field: focus is on nothing, on the field itself, or on a button of the
- * field's own row, as after a press on Ask. Anywhere else the lawyer has gone on to something and keeps it. */
-function mayTakeFocus(a: HTMLTextAreaElement): boolean {
-  const doc = a.ownerDocument;
-  const now = doc.activeElement;
-  if (now === null || now === doc.body || now === a) return true;
-  const row = a.closest(".room-field");
-  return now instanceof HTMLButtonElement && row !== null && now.closest(".room-field") === row;
-}
-
-/** Whether a press in the field landed on a button or the text itself, which take it themselves. */
-function pressOwn(target: EventTarget, field: Element): boolean {
-  for (
-    let n = target instanceof Element ? target : null;
-    n !== null && n !== field;
-    n = n.parentElement
-  ) {
-    if (n instanceof HTMLButtonElement || n instanceof HTMLTextAreaElement) return true;
-  }
-  return false;
-}
-
 export type ComposerProps<V extends string = string> = {
   /** "Took 38 seconds" once an answer is done, or nothing before the first. */
   took: string | null;
@@ -179,8 +119,18 @@ export type ComposerProps<V extends string = string> = {
   line?: ReactNode | false;
   /** No matter open: the field, Add papers and Ask take nothing. */
   disabled?: boolean;
-  /** data-testid on the field, Ask, Stop and the working line's row. */
-  testIds?: { field?: string; ask?: string; stop?: string; working?: string };
+  /** data-testid on the field, Ask, Stop, the working line's row, and the `/` menu and each of its rows. */
+  testIds?: {
+    field?: string;
+    ask?: string;
+    stop?: string;
+    working?: string;
+    menu?: string;
+    menuItem?: string;
+  };
+  /** The agent's commands, for the `/` menu: `/` at the field's start or after a space opens it at the caret, and a
+   * list replaced while it is open is read again. Without them `/` is only a character. */
+  commands?: readonly SlashCommand[];
   /** Questions drawn from the matter's papers, offered over an empty field: a press puts one in the field. */
   prompts?: { label: string; items: readonly { text: string }[] };
   /** A quiet note under the field, above the room's line, such as the plan running low. Optional. */
@@ -223,6 +173,7 @@ export function Composer<V extends string = string>({
   line,
   disabled = false,
   testIds,
+  commands,
   prompts,
   notice,
   queue,
@@ -232,6 +183,7 @@ export function Composer<V extends string = string>({
   onAddPapers,
 }: ComposerProps<V>) {
   const w = useThreadWords();
+  const room = useRoom();
   // the one thing the composer draws from the words: whether there are any, for Ask and the questions to ask. It
   // changes only when the field fills or empties, so a keystroke renders nothing
   // pinned at mount: React writes a textarea's defaultValue (its text child) on every commit, and the caller's draft
@@ -246,8 +198,28 @@ export function Composer<V extends string = string>({
   // a fill asked for while an input method composed: put in at the composition's end, if the field is empty then
   const fillAfter = useRef<string | null>(null);
   const fitRef = useRef<() => void>(() => {});
+  // the menu's chunk is asked for as the field is first focused, with what the field held then, so a `/` typed
+  // before it lands is read as it lands
+  const [armed, setArmed] = useState<{ field: HTMLTextAreaElement; held: string } | null>(null);
+  const [shown, setShown] = useState<MenuShown>(null);
+  const hasCommands = commands !== undefined;
+  // commands that arrive while the field already has the focus arm it too
+  useEffect(() => {
+    const a = area.current;
+    if (hasCommands && a !== null && a.ownerDocument.activeElement === a)
+      setArmed((was) => was ?? { field: a, held: a.value });
+  }, [hasCommands]);
+  const gated = gate !== undefined;
+  // the room's field is the one the lawyer can see: hidden under a gate, it is no field for the room's keys or focus
+  const fieldRef = useCallback(
+    (node: HTMLTextAreaElement | null) => {
+      area.current = node;
+      if (node === null || gated) return;
+      return room.nodes.slot("field")(node);
+    },
+    [room, gated],
+  );
   const entry = useRef<HTMLDivElement>(null);
-  const room = useRoom();
   const fieldId = room.id(id);
   const isWorking = working !== null;
   useOpening(entry, isWorking && opening);
@@ -417,15 +389,23 @@ export function Composer<V extends string = string>({
           <textarea
             hidden={gate !== undefined}
             id={fieldId}
-            ref={(node) => {
-              area.current = node;
-              return room.nodes.slot("field")(node);
-            }}
+            ref={fieldRef}
             rows={1}
             defaultValue={initial}
             disabled={disabled}
             data-testid={testIds?.field}
             placeholder={placeholder ?? w.t("Ask about this matter")}
+            // the `/` menu: a textarea takes no combobox role and no aria-expanded (ARIA in HTML; axe's
+            // aria-allowed-role and aria-allowed-attr), so it says it has a list and, while open, which row is lit
+            aria-autocomplete={commands !== undefined ? "list" : undefined}
+            aria-haspopup={commands !== undefined ? "listbox" : undefined}
+            aria-controls={shown?.list}
+            aria-activedescendant={shown?.active}
+            data-menu={shown !== null ? "" : undefined}
+            onFocus={(e) => {
+              if (armed === null && commands !== undefined)
+                setArmed({ field: e.currentTarget, held: e.currentTarget.value });
+            }}
             onInput={changed}
             onCompositionStart={() => {
               composing.current = true;
@@ -450,8 +430,9 @@ export function Composer<V extends string = string>({
                 isComposing: composing.current || e.nativeEvent.isComposing,
                 keyCode: e.keyCode,
               };
-              // while an input method composes, every key is its own: an Enter commits its candidate
-              if (key.isComposing || key.keyCode === 229) return;
+              // while an input method composes, every key is its own: an Enter commits its candidate. A key the open
+              // menu took (its listener on the field runs first) is the menu's
+              if (key.isComposing || key.keyCode === 229 || e.nativeEvent.defaultPrevented) return;
               if (onKeyCommand?.(e) === true) {
                 e.preventDefault();
                 return;
@@ -461,6 +442,22 @@ export function Composer<V extends string = string>({
               onAsk?.(e.currentTarget.value);
             }}
           />
+          {armed !== null &&
+            commands !== undefined &&
+            commands.length > 0 &&
+            !gated &&
+            !disabled && (
+              <Suspense fallback={null}>
+                <CommandMenu
+                  field={armed.field}
+                  commands={commands}
+                  composing={composing}
+                  held={armed.held}
+                  onShown={setShown}
+                  testIds={{ menu: testIds?.menu, item: testIds?.menuItem }}
+                />
+              </Suspense>
+            )}
           {gate === undefined && (
             <>
               {onAddPapers !== undefined && (
