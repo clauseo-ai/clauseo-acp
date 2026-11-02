@@ -11,7 +11,10 @@ pub const VIEW_SNAPSHOT_ENTRIES: usize = 200;
 /// un-durable text (the screen shows it): what a `Reset` carries. Walks only those entries.
 pub fn view_snapshot(state: &StreamState) -> ViewWindow {
     let header = match state {
-        StreamState::Thread(thread) => thread.header.clone().map(StreamHeader::Thread),
+        StreamState::Thread(thread) => thread
+            .header
+            .clone()
+            .map(|h| StreamHeader::Thread(Box::new(h))),
         StreamState::Matter(matter) => matter.header.clone().map(StreamHeader::Matter),
     };
     let all = state.entries();

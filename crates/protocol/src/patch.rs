@@ -99,7 +99,7 @@ pub struct ViewWindow {
 pub enum StreamHeader {
     /// A thread's header.
     #[serde(rename = "header")]
-    Thread(HeaderEntry),
+    Thread(Box<HeaderEntry>),
     /// A matter's header.
     #[serde(rename = "matter_header")]
     Matter(MatterHeaderEntry),

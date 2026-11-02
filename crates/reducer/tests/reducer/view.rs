@@ -22,7 +22,7 @@ fn view_snapshot_has_last_200() {
     assert_eq!(orders(&window.entries), all[all.len() - 200..]);
     assert!(window.has_older);
     let header = state.as_thread().unwrap().header().unwrap().clone();
-    assert_eq!(window.header, Some(StreamHeader::Thread(header)));
+    assert_eq!(window.header, Some(StreamHeader::Thread(Box::new(header))));
 
     // A short thread: every entry, nothing older.
     let short = fold(&long_thread(40).unwrap());
