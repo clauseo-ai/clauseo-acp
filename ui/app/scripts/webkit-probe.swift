@@ -4,6 +4,12 @@
 // per page and size; exits 1 if any page fails. The design's probe (design/03-system/scripts/webkit-probe.swift),
 // pointed at the app's room.
 //
+// Each page's WKWebView sits in a borderless window of the page's own width and height, at the top left of the main
+// screen, ordered to the back without activating the app. A view with no window counts as hidden to WebKit, and
+// requestAnimationFrame does not run in a hidden view: Base UI then never takes a dialog out of its starting style, so
+// the dialog stays at opacity 0. A window placed off-screen (-20000, -20000) was counted as hidden too, and WebKit has no
+// occlusion switch to turn that off, so the window is on screen, behind the others. The layout widths are the ones measured.
+//
 // A page fails when it doesn't answer within 3 s of its load event, logs an error, an unhandled rejection, a console
 // error or a CSP violation, or loses its content process. It answers once the room has its title, its wall's five
 // tiles, and the display the query asked for on <html>; then it is measured: the page never scrolls sideways, the title
@@ -130,6 +136,12 @@ for i in runs.indices where runs[i].name.hasPrefix("no matters") {
 // scratch matter at the foot, measured as every page is and for a rail that never scrolls sideways; at 1100 px the rail
 // folded behind Matters, opened as the floating panel; and axe over the rail and over the open new matter dialog, under
 // a frozen Object.prototype
+/** The page's transitions are finished on every poll once rendered (as for the permission prompts): a dialog's enter
+ * animation, started as the dialog shows, is finished at the poll that answers, so a transition still running does not fail the opacity check. */
+let settledVersions = " && (document.getAnimations().forEach(function (a) { try { a.finish(); } catch (e) {} }), true)"
+/** A dialog that is shown must be drawn: its opacity is 1, not its starting style (a statement, for a measure). */
+let dialogDrawn = " var dialog = document.querySelector('[role=\"dialog\"]');" +
+  " if (dialog && getComputedStyle(dialog).opacity !== '1') errs.push('layout: the dialog is not shown, opacity ' + getComputedStyle(dialog).opacity + ', ' + (dialog.hasAttribute('data-starting-style') ? 'still at its starting style' : 'past its starting style') + ', ' + (dialog.hasAttribute('data-open') ? 'open' : 'not open'));"
 let railMeasured = "(function () { var errs = " + measured + ", rail = document.querySelector('nav.room-rail');" +
   " if (rail && rail.clientWidth > 0 && rail.scrollWidth > rail.clientWidth + 1)" +
   " errs.push('layout: the rail scrolls sideways, ' + rail.scrollWidth + ' px in ' + rail.clientWidth);" +
@@ -184,9 +196,9 @@ for (theme, lang) in looks {
     " document.querySelector('[data-testid=\"new-matter\"]').click(), false))" +
     " && document.querySelector('[role=\"dialog\"] [data-testid=\"matter-name\"]') !== null"
   var newMatter = Run(name: "new matter dialog \(theme) \(lang), frozen, axe", url: URL(string: "\(origin)/\(q)")!,
-                      width: 1280, height: 800, rendered: dialog + axeRun,
+                      width: 1280, height: 800, rendered: dialog + settledVersions + axeRun,
                       setup: "Object.freeze(Object.prototype);")
-  newMatter.measure = railMeasured
+  newMatter.measure = "(function () { var errs = " + railMeasured + ";" + dialogDrawn + " return errs; })()"
   runs.append(newMatter)
   // the scratch matter, opened from the foot: its row stands current, on the raised tone
   let scratch = rendered + " && (window.__scratchPressed || (window.__scratchPressed = true," +
@@ -220,7 +232,7 @@ for (theme, lang) in looks {
     " && p[1].dataset.state === 'resolved' && p[1].dataset.answer === 'allow_once'; })" +
     "(document.querySelectorAll('[data-testid=\"permission\"]'))"
   // a running turn: Stop takes Ask's button, whose colour transition from a disabled Ask never advances in a WKWebView
-  // with no window, so once rendered the page's transitions are finished (an endless animation can't be, and is left)
+  // hidden to WebKit, so once rendered the page's transitions are finished (an endless animation can't be, and is left)
   // to their settled colours, for axe and the PNG; and the pending prompt is scrolled into view for the PNG, again as
   // the list lays out what it measured
   let settled = " && (window.__settled || (window.__settled = true," +
@@ -267,9 +279,6 @@ let pressRow = press + "('row', '[data-testid=\"version\"][data-checkpoint=\"cp2
 let pressUndo = press + "('undo', '[data-testid=\"version-undo\"]')"
 let pressRestore = press + "('restore', '[data-testid=\"version-restore\"]')"
 let pressNewest = press + "('newest', '[data-testid=\"version\"][data-checkpoint=\"cp4\"]')"
-/** The page's transitions are finished on every poll once rendered (as for the permission prompts): a dialog's enter
- * animation, started after the dialog shows, never advances in a WKWebView with no window, so it is finished as it starts. */
-let settledVersions = " && (document.getAnimations().forEach(function (a) { try { a.finish(); } catch (e) {} }), true)"
 /** The row, where it still stands (a wide window keeps the panel after a pick, a mid one puts it away), is the picked one. */
 func versionsRowCurrent(_ checkpoint: String) -> String {
   "(function (r) { return r === null || r.getAttribute('aria-current') === 'true'; })(document.querySelector('[data-testid=\"version\"][data-checkpoint=\"\(checkpoint)\"]'))"
@@ -284,9 +293,7 @@ let versionsDialog = "document.querySelector('[role=\"dialog\"] [data-testid=\"d
 let versionsMeasured = "(function () { var errs = " + measured + ";" +
   " document.querySelectorAll('[data-testid=\"versions\"], .ver-room-band, [role=\"dialog\"]').forEach(function (p) {" +
   " if (p.scrollWidth > p.clientWidth + 1) errs.push('layout: a Versions part scrolls sideways, ' + p.scrollWidth + ' px in ' + p.clientWidth); });" +
-  " var dialog = document.querySelector('[role=\"dialog\"]');" +
-  " if (dialog && getComputedStyle(dialog).opacity !== '1') errs.push('layout: the dialog is not shown, opacity ' + getComputedStyle(dialog).opacity + ', ' + (dialog.hasAttribute('data-starting-style') ? 'still at its starting style' : 'past its starting style') + ', ' + (dialog.hasAttribute('data-open') ? 'open' : 'not open'));" +
-  " return errs; })()"
+  dialogDrawn + " return errs; })()"
 /** The page's question for one Versions page: the room with its matter, in its look. */
 let versionsRoom = { (theme: String, lang: String) in
   "document.querySelector('#root main.room-centre') !== null" +
@@ -369,6 +376,7 @@ document.addEventListener('securitypolicyviolation', function (e) { __probe.errs
 final class Probe: NSObject, WKNavigationDelegate {
   var queue: [Run]
   var web: WKWebView?
+  var window: NSWindow?
   var current: Run?
   var seq = 0
   var asked = Date()
@@ -383,6 +391,8 @@ final class Probe: NSObject, WKNavigationDelegate {
   func next() {
     web?.navigationDelegate = nil
     web = nil
+    window?.orderOut(nil)
+    window = nil
     guard !queue.isEmpty else { finish() }
     let run = queue.removeFirst()
     seq += 1
@@ -397,6 +407,13 @@ final class Probe: NSObject, WKNavigationDelegate {
     cfg.userContentController = ucc
     let view = WKWebView(frame: NSRect(x: 0, y: 0, width: run.width, height: run.height), configuration: cfg)
     view.navigationDelegate = self
+    // the view needs a window of the page's size, on screen and behind the others: see the header
+    let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: run.width, height: run.height),
+                       styleMask: [.borderless], backing: .buffered, defer: false)
+    win.isReleasedWhenClosed = false
+    win.contentView = view
+    win.orderBack(nil)
+    window = win
     web = view
     asked = Date()
     view.load(URLRequest(url: run.url, cachePolicy: .reloadIgnoringLocalCacheData))
