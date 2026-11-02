@@ -5,6 +5,7 @@ use clauseo_protocol::AgentId;
 
 use super::firm::{BundleEntry, bundle_file, mirror_url};
 use super::*;
+use crate::snapshot::NPM_REGISTRY;
 use crate::testing::{
     Behaviour, TempDir, TestRegistry, npm_tarball, offline_resolver, resolve_all_to,
     sha512_integrity, write_file,
@@ -196,7 +197,13 @@ fn a_mirror_s_user_name_and_password_never_reach_the_error() {
         ..InstallConfig::default()
     };
     let fetcher = fetcher(&install, dir.path());
-    let url = mirror_url(RESOLVED, "http://rohan:hunter2@mirror.test/", dir.path()).unwrap();
+    let url = mirror_url(
+        RESOLVED,
+        NPM_REGISTRY,
+        "http://rohan:hunter2@mirror.test/",
+        dir.path(),
+    )
+    .unwrap();
     let err = fetch(&fetcher, &job_at(&url, &bytes, &dir)).unwrap_err();
     assert_eq!((err.kind, err.status), (FetchKind::Blocked, Some(403)));
     assert_eq!(err.host.as_deref(), Some("mirror.test"));
@@ -226,7 +233,7 @@ fn with_a_mirror_every_request_goes_to_the_mirror() {
         ),
     ];
     for (url, bytes, name) in resolved {
-        let url = mirror_url(url, "http://mirror.test", dir.path()).unwrap();
+        let url = mirror_url(url, NPM_REGISTRY, "http://mirror.test", dir.path()).unwrap();
         fetch(&fetcher, &job(&url, bytes, dir.path().join(name))).unwrap();
     }
     assert_eq!(lookups.names(), ["mirror.test", "mirror.test"]);
@@ -248,15 +255,19 @@ fn the_mirror_base_replaces_the_registry_s_and_other_urls_are_refused() {
         "https://npm.firm.example/repo",
         "https://npm.firm.example/repo/",
     ] {
-        assert_eq!(mirror_url(RESOLVED, base, data).unwrap(), want);
+        assert_eq!(
+            mirror_url(RESOLVED, NPM_REGISTRY, base, data).unwrap(),
+            want
+        );
     }
     let err = mirror_url(
         "https://evil.example/pkg.tgz",
+        NPM_REGISTRY,
         "https://npm.firm.example",
         data,
     );
     assert_eq!(err.unwrap_err().kind, FetchKind::Failed);
-    let err = mirror_url(RESOLVED, "npm.firm.example", data).unwrap_err();
+    let err = mirror_url(RESOLVED, NPM_REGISTRY, "npm.firm.example", data).unwrap_err();
     assert_eq!(err.kind, FetchKind::Failed);
 }
 

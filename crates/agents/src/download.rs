@@ -26,8 +26,6 @@ use crate::integrity::Expected;
 use crate::log::redact_url;
 use crate::write;
 
-/// The registry base every `resolved` URL in the pins starts with.
-pub(crate) const NPM_REGISTRY: &str = "https://registry.npmjs.org/";
 /// The most redirects one fetch follows.
 const MAX_REDIRECTS: u32 = 3;
 /// The longest a connect may take.

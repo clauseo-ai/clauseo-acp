@@ -62,6 +62,7 @@ mod cancel;
 mod config;
 mod disk;
 mod download;
+mod install;
 mod integrity;
 mod log;
 mod node;
@@ -71,6 +72,7 @@ mod receipt;
 mod snapshot;
 mod state;
 mod sysproxy;
+mod worker;
 mod write;
 
 /// Test support: a local registry, test resolvers, temp folders and tiny npm tarballs.
@@ -86,6 +88,7 @@ pub use snapshot::{
     AgentEntry, AgentSizes, NPM_REGISTRY, NodeArchive, NodeEntry, Snapshot, SnapshotError,
 };
 pub use state::{AgentsEvent, Failure, FailureKind, InstallState, Installed};
+pub use worker::Agents;
 
 /// Tests only: a host-name resolver standing in for the OS's. `Err` reads as a failed name
 /// lookup (offline).

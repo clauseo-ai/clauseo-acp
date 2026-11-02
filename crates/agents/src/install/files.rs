@@ -1,0 +1,273 @@
+//! A try's files: Node's archive when Node is downloaded, then each package of the agent's
+//! derived lock for this platform. Each comes from the network (through the mirror when one is
+//! set) into `agents/downloads/`, or from the offline bundle with no network call, and is
+//! checked against its digest. Progress covers them all.
+
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use clauseo_process::Timer;
+
+use super::{Job, NodeChoice, Run, TryError};
+use crate::config::AgentsConfig;
+use crate::download::firm::{BundleEntry, bundle_file, mirror_url};
+use crate::download::{FetchJob, Fetcher, Magic, part_path};
+use crate::state::InstallState;
+use crate::write;
+
+/// The least time between two `Downloading` events.
+const PROGRESS_EVERY: Duration = Duration::from_millis(250);
+
+/// A try's checked files.
+#[derive(Debug)]
+pub(crate) struct Fetched {
+    /// The tarballs' absolute paths, for `npm cache add`.
+    pub(crate) tarballs: Vec<PathBuf>,
+    /// Node's checked archive, when the runtime is to be unpacked.
+    pub(crate) node_archive: Option<PathBuf>,
+    /// The files this install put in `downloads/`, removed once it is `Ready`.
+    downloaded: Vec<PathBuf>,
+}
+
+/// One file to have.
+enum Source {
+    Fetch(FetchJob),
+    /// Already checked, in the offline bundle.
+    Bundle(PathBuf),
+}
+
+struct Item {
+    source: Source,
+    /// Its size when known before its request.
+    known: Option<u64>,
+    is_package: bool,
+}
+
+/// `<data_dir>/agents/downloads`.
+pub(crate) fn downloads_dir(data_dir: &Path) -> PathBuf {
+    data_dir.join("agents").join("downloads")
+}
+
+/// Fetches (or finds in the bundle) every file of the try, sending progress.
+pub(super) fn fetch_all<T: Timer + Send + Sync>(
+    job: &Job<T>,
+    node: &NodeChoice,
+    run: &mut Run,
+) -> Result<Fetched, TryError> {
+    let items = items(job, node)?;
+    let config = &job.config;
+    let estimate = config
+        .snapshot
+        .agent(&job.ticket.agent)
+        .and_then(|entry| entry.sizes_for(config.platform))
+        .map_or(0, |row| row.download_bytes);
+    let mut progress = Progress {
+        received: vec![0; items.len()],
+        totals: items.iter().map(|item| item.known).collect(),
+        is_package: items.iter().map(|item| item.is_package).collect(),
+        estimate,
+        last: None,
+    };
+    progress.tick(job, run, true);
+    let mut fetcher = None;
+    let mut fetched = Fetched {
+        tarballs: Vec::new(),
+        node_archive: None,
+        downloaded: Vec::new(),
+    };
+    for (n, item) in items.into_iter().enumerate() {
+        if job.cancel().is_cancelled() {
+            return Err(TryError::cancelled());
+        }
+        let path = match item.source {
+            Source::Bundle(path) => {
+                progress.done(n, item.known.unwrap_or(0));
+                path
+            }
+            Source::Fetch(fetch_job) => {
+                if fetcher.is_none() {
+                    fetcher = Some(Fetcher::new(
+                        &config.install,
+                        &job.ticket.agent,
+                        job.system_proxy.as_deref(),
+                        &config.data_dir,
+                    )?);
+                }
+                let Some(client) = fetcher.as_ref() else {
+                    return Err(TryError::retry("no HTTP client", config));
+                };
+                let size = client.fetch(&fetch_job, job.cancel(), &mut |received, total| {
+                    progress.update(n, received, total);
+                    progress.tick(job, run, false);
+                })?;
+                progress.done(n, size);
+                fetched.downloaded.push(fetch_job.dest.clone());
+                fetch_job.dest
+            }
+        };
+        if item.is_package {
+            fetched.tarballs.push(path);
+        } else {
+            fetched.node_archive = Some(path);
+        }
+    }
+    progress.tick(job, run, true);
+    Ok(fetched)
+}
+
+/// The try's files, Node's archive first.
+fn items<T: Timer + Send + Sync>(job: &Job<T>, node: &NodeChoice) -> Result<Vec<Item>, TryError> {
+    let config = &job.config;
+    let data = &config.data_dir;
+    let downloads = downloads_dir(data);
+    let size_of = |path: &Path| std::fs::metadata(path).ok().map(|meta| meta.len());
+    let mut items = Vec::new();
+    if let NodeChoice::Runtime { fetch: true, .. } = node {
+        let entry = config.snapshot.node();
+        let Some(archive) = config.snapshot.node_archive(config.platform) else {
+            return Err(TryError::retry(
+                "the snapshot has no Node for this platform",
+                config,
+            ));
+        };
+        let source = match &config.install.bundle {
+            Some(bundle) => Source::Bundle(bundle_file(
+                bundle,
+                BundleEntry::Node(archive.name()),
+                archive.expected(),
+                archive.name(),
+                data,
+            )?),
+            None => Source::Fetch(FetchJob {
+                url: entry.url(archive),
+                expected: archive.expected().clone(),
+                dest: downloads.join(archive.name()),
+                magic: if archive.is_zip() {
+                    Magic::Zip
+                } else {
+                    Magic::Gzip
+                },
+            }),
+        };
+        items.push(Item {
+            source,
+            known: Some(archive.size()),
+            is_package: false,
+        });
+    }
+    for package in config.snapshot.packages(&job.ticket.agent, config.platform) {
+        let short = package.name.rsplit('/').next().unwrap_or(&package.name);
+        let label = format!("{short}-{}.tgz", package.version);
+        let item = if let Some(bundle) = &config.install.bundle {
+            let path = bundle_file(bundle, BundleEntry::Npm, &package.integrity, &label, data)?;
+            Item {
+                known: size_of(&path),
+                source: Source::Bundle(path),
+                is_package: true,
+            }
+        } else {
+            let url = match &config.install.registry {
+                Some(mirror) => {
+                    mirror_url(&package.resolved, config.snapshot.registry(), mirror, data)?
+                }
+                None => package.resolved.clone(),
+            };
+            let dest = downloads.join(format!("{}.tgz", package.integrity.hex()));
+            Item {
+                known: size_of(&dest),
+                source: Source::Fetch(FetchJob {
+                    url,
+                    expected: package.integrity.clone(),
+                    dest,
+                    magic: Magic::Gzip,
+                }),
+                is_package: true,
+            }
+        };
+        items.push(item);
+    }
+    Ok(items)
+}
+
+/// Bytes received and the total, per file.
+struct Progress {
+    received: Vec<u64>,
+    /// Each file's size once known.
+    totals: Vec<Option<u64>>,
+    is_package: Vec<bool>,
+    /// The snapshot's size of the agent's packages, standing in for those not sized yet.
+    estimate: u64,
+    /// When the last event went out.
+    last: Option<Duration>,
+}
+
+impl Progress {
+    fn update(&mut self, n: usize, received: u64, total: u64) {
+        if let Some(slot) = self.received.get_mut(n) {
+            *slot = received;
+        }
+        if total > 0
+            && let Some(slot) = self.totals.get_mut(n)
+        {
+            *slot = Some(total);
+        }
+    }
+
+    fn done(&mut self, n: usize, size: u64) {
+        self.update(n, size, size);
+    }
+
+    /// Bytes received, and the total: every known size, plus what the estimate leaves for the
+    /// packages not sized yet.
+    fn sums(&self) -> (u64, u64) {
+        let received: u64 = self.received.iter().sum();
+        let known: u64 = self.totals.iter().flatten().sum();
+        let unsized_package = self
+            .totals
+            .iter()
+            .zip(&self.is_package)
+            .any(|(total, package)| total.is_none() && *package);
+        let total = if unsized_package {
+            let packages_known: u64 = self
+                .totals
+                .iter()
+                .zip(&self.is_package)
+                .filter_map(|(total, package)| total.filter(|_| *package))
+                .sum();
+            known.saturating_add(self.estimate.saturating_sub(packages_known))
+        } else {
+            known
+        };
+        (received, total.max(received))
+    }
+
+    /// Sends `Downloading` when `force`d (the first and the last) or 250 ms after the last.
+    fn tick<T: Timer + Send + Sync>(&mut self, job: &Job<T>, run: &mut Run, force: bool) {
+        let (received, total) = self.sums();
+        run.received = received;
+        run.total = total;
+        let now = job.config.clock.monotonic();
+        let due = self
+            .last
+            .is_none_or(|last| now.saturating_sub(last) >= PROGRESS_EVERY);
+        if force || due {
+            self.last = Some(now);
+            job.emit(InstallState::Downloading { received, total }, false);
+        }
+    }
+}
+
+/// After `Ready`: removes this install's downloads (never the bundle's files) and the npm
+/// cache's contents. A file that will not go is left; the next install reuses or replaces it.
+pub(super) fn clean_up(config: &AgentsConfig, fetched: &Fetched) {
+    for path in &fetched.downloaded {
+        drop(write::remove_file(path));
+        drop(write::remove_file(&part_path(path)));
+    }
+    drop(write::remove_dir_all(&npm_cache(&config.data_dir)));
+}
+
+/// `<data_dir>/agents/npm-cache`.
+pub(crate) fn npm_cache(data_dir: &Path) -> PathBuf {
+    data_dir.join("agents").join("npm-cache")
+}
