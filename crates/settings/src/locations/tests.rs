@@ -193,6 +193,22 @@ fn agent_home_is_under_the_data_folder_never_the_temp_folder() {
 }
 
 #[test]
+#[cfg(debug_assertions)]
+#[should_panic(expected = "an agent id is [a-z0-9-]+")]
+fn agent_home_refuses_a_path_for_an_agent_id() {
+    let at = Locations::under_root(Path::new("/tmp/clauseo-test-root"));
+    drop(at.agent_home("../../elsewhere"));
+}
+
+#[test]
+#[cfg(debug_assertions)]
+#[should_panic(expected = "an agent id is [a-z0-9-]+")]
+fn agent_home_refuses_an_empty_agent_id() {
+    let at = Locations::under_root(Path::new("/tmp/clauseo-test-root"));
+    drop(at.agent_home(""));
+}
+
+#[test]
 fn resolve_uses_this_os() {
     let dirs = FakeDirs {
         home: Some(PathBuf::from("/h")),
