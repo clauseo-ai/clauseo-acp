@@ -17,6 +17,7 @@ pub(super) fn begin_shutdown(actor: &mut Actor, reply: Option<Reply<()>>) {
     }
     actor.phase = HostPhase::Stopping(reply.into_iter().collect());
     super::matters::cancel_imports(actor);
+    super::scan::cancel_all(actor);
     turn::shutdown(actor);
 }
 

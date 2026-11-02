@@ -21,11 +21,12 @@
 //!
 //! Each event is serialised once ([`publish`]) and the same `EncodedEvent` goes to every
 //! subscriber. What publishes here: `SettingsChanged` after each successful settings write
-//! (`settings.rs`), and `MattersChanged` and `ThreadsChanged` when a row of the rail changes
-//! (`app_lists.rs`). Still to come, each through [`publish`] and each adding its part of the
-//! current state to [`catch_up`]: notices. The limits have their own subscribers (`limits.rs`).
-//! `subscribe_app` carries no window identity, so the host sends every changed thread summary
-//! to every app subscriber and each window drops those of threads it has open.
+//! (`settings.rs`), `MattersChanged` and `ThreadsChanged` when a row of the rail changes
+//! (`app_lists.rs`), and `FolderScanned` as a folder scan goes (`scan.rs`, throttled; its last
+//! event is part of the catch-up). Still to come, each through [`publish`] and each adding its
+//! part of the current state to [`catch_up`]: notices. The limits have their own subscribers
+//! (`limits.rs`). `subscribe_app` carries no window identity, so the host sends every changed
+//! thread summary to every app subscriber and each window drops those of threads it has open.
 //!
 //! The current state ([`catch_up`]) is whole: one `SettingsChanged`, one `MattersChanged` with
 //! `all` and one `ThreadsChanged` with `all` per matter, each replacing what a window holds. The
@@ -199,13 +200,15 @@ pub(super) fn on_unsubscribed(actor: &mut Actor, id: SubId) {
 }
 
 /// The current state, as the events that start a subscription and bring a lagged subscriber up
-/// to date: the settings, the matter list and each matter's thread list. Each event here must
-/// replace what a window holds whole; see the module doc before adding a partial one.
+/// to date: the settings, the matter list, each matter's thread list and the last folder scan
+/// event. Each event here must replace what a window holds whole; see the module doc before
+/// adding a partial one.
 fn catch_up(actor: &mut Actor) -> Vec<EncodedEvent> {
     let mut events = vec![HostEvent::SettingsChanged(super::settings::view(
         &actor.effective,
     ))];
     events.extend(super::app_lists::current(actor));
+    events.extend(super::scan::catch_up(actor));
     events
         .iter()
         .filter_map(|event| {

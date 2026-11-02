@@ -231,8 +231,7 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
         }
         HostCommand::MarkSeen { thread } => super::seen::mark_seen(actor, ctx, thread),
         HostCommand::CreateThread { matter, agent } => {
-            let done = create_thread(actor, ctx, matter, agent);
-            if let Err(error) = done {
+            if let Err(error) = create_thread(actor, ctx, matter, agent) {
                 actor.finish_command(ctx.id, Err(error));
             }
         }
@@ -298,6 +297,8 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
             super::settings::set_ui_settings(actor, ctx, &patch);
         }
         HostCommand::SetToolSettings { patch } => set_tool_settings(actor, ctx, &patch),
+        HostCommand::ScanFolder { folder } => super::scan::scan_folder(actor, ctx, folder),
+        HostCommand::CancelScan { folder } => super::scan::cancel_scan(actor, ctx, folder),
         // No receipt and no event: a repeated id asks the model again, under its read rules.
         HostCommand::RefreshLimits { agent, why } => {
             super::limits::refresh(actor, agent, why);

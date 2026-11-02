@@ -162,6 +162,8 @@ pub(crate) enum Input {
     /// What a `ListMatters` read of each matter's folder found, after it answered: the matter,
     /// the folder path its row had when the read began, and the state.
     FolderStates(Vec<(MatterId, String, clauseo_protocol::FolderState)>),
+    /// A folder scan's thread or throttle timer.
+    Scan(super::scan::ScanInput),
     /// End the thread at once (tests); the sender is answered once the store is closed.
     #[cfg(feature = "test-support")]
     Abort(oneshot::Sender<()>),
@@ -185,6 +187,7 @@ impl std::fmt::Debug for Input {
             Self::AppUnsubscribed { .. } => "AppUnsubscribed",
             Self::Limits(_) => "Limits",
             Self::FolderStates(_) => "FolderStates",
+            Self::Scan(_) => "Scan",
             #[cfg(feature = "test-support")]
             Self::Abort(_) => "Abort",
         };
