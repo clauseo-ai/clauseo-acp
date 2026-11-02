@@ -214,6 +214,13 @@
   html:not([data-theme]) body {
     visibility: hidden;
   }
+  /* and the ground before it is the OS's: the default theme is "system", so a dark OS starts on night's ground, the
+     colour the desktop crate paints the window's first frame (window_size.rs) */
+  @media (prefers-color-scheme: dark) {
+    html:not([data-theme]) {
+      background: oklch(22% 0.004 84);
+    }
+  }
   body {
     margin: 0;
     font-family: var(--font);
