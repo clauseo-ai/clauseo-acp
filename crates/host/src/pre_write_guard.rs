@@ -10,19 +10,31 @@
 //! - Codex's `apply_patch` (hooked under that name or its aliases `Write` and `Edit`): the
 //!   `*** Add File:`, `*** Update File:`, `*** Delete File:` and `*** Move to:` lines of the
 //!   patch in `tool_input.command`.
-//! - `Bash` (both agents) and Claude Code's `PowerShell`: a heuristic. `tool_input.command` is
-//!   split into words the simple shell way (whitespace, quotes, and the escape character: a
-//!   backslash, or PowerShell's backtick; no expansion), grouped into simple commands at each
-//!   unquoted newline, `;`, `&&`, `|` and `||`; the first [`MAX_WORDS`] words are kept, and a
-//!   word names a target when it is an existing file, also once its shell punctuation is off
-//!   (`words.rs`, `candidates`). A word is taken from the input's `cwd` and from the folder
-//!   the command's own `cd`, `pushd` or `Set-Location` moved to by then, followed by its text
-//!   (`shell.rs`); a `cd` it cannot follow (`cd "$(…)"`) also takes each later relative word
-//!   from `cwd` with its leading `..` parts off. PowerShell's `\` separates folders on every OS.
-//!   The patch lines in the command count too, from `cwd`: Codex's `exec_command` applies
-//!   `apply_patch <<'EOF' …` as a patch. A command that reaches a file another way (a glob, a
-//!   variable, a script, a .NET call such as `[IO.File]::WriteAllText('Contract.docx', …)`) is
-//!   not caught.
+//! - `Bash` (both agents) and Claude Code's `PowerShell`: a heuristic (`words.rs`, `shell.rs`).
+//!   `tool_input.command` is split into words the simple shell way (whitespace, quotes, the
+//!   escape character, a backslash or PowerShell's backtick, escaped newlines, `$'…'`; comments
+//!   dropped; no expansion), and into simple commands at each unquoted newline, `;`, `&`, `&&`,
+//!   `|`, `||`, `(` and `)`, with a heredoc's body read as data. The first [`MAX_WORDS`] words
+//!   are kept, plus as many of each script the command hands to `sh -c`, `bash -c`, `eval`,
+//!   `pwsh -Command` and the like (one level). A word names a target when it is an existing
+//!   file, also once its shell punctuation is off (`candidates`). A word is taken from the
+//!   input's `cwd` and from every folder the command's `cd`, `pushd` or `Set-Location` may
+//!   have reached by then, whether or not that change ran (`false && cd x`, a subshell), past
+//!   prefixes such as `builtin`, `then`, `{` and `NAME=value`, by the folder's text and through
+//!   symlinks. A change it cannot follow (`cd` alone, `cd ~`, `cd -`, `cd "$(…)"`) makes the
+//!   folder unknown for the rest of the command. As a backstop, when the command names a folder
+//!   change anywhere, a relative word is also taken from `cwd` with its leading `..` parts off;
+//!   that can refuse a write that lands elsewhere when its name matches a held file of the
+//!   matter, a rare false refusal accepted for safety. PowerShell's `\` separates folders on
+//!   every OS. The patch lines in the command count too, from `cwd`: Codex's `exec_command`
+//!   applies `apply_patch <<'EOF' …` as a patch.
+//!
+//!   Not caught, by design of a heuristic: a file reached by a glob (`Con*.docx`), brace
+//!   expansion (`Con{tract,x}.docx`) or a value built at run time (`f=Con; > $f"tract.docx"`,
+//!   `$(…)`), a script file or another interpreter (`python -c`, `node -e`, a .NET call such
+//!   as `[IO.File]::WriteAllText('Contract.docx', …)`), a folder changed by an option
+//!   (`env -C dir`, `git -C dir`, `make -C dir`), and under Codex a `.codex` folder named by a
+//!   glob (`cd .cod?`).
 //!
 //! The matter folder is the `--matter` argument when the hook passes one (Claude Code's entry
 //! does, `agent/loads.rs`: Claude Code's `cwd` follows the agent's `cd`), else the input's
@@ -30,10 +42,12 @@
 //! move). A relative target is taken from the input's `cwd`. Each target is checked twice with
 //! [`clauseo_matters::held_open_at`] against the matter folder, the permission check's own rule
 //! (both sides resolved canonically: symlinks, `..`, case on macOS and Windows; a target outside
-//! the folder not checked): as spelled, and normalised by its text first (`a/../b` is `b`, `.`
-//! dropped) with its deepest existing folder then canonicalised, so a `..` after a folder that
-//! does not exist yet (`Drafts/../Contract.docx`, which `mkdir -p Drafts` would make good) is
-//! caught. The first one held open is refused.
+//! the folder not checked): as spelled, and, when it has a `.` or `..` part, resolved through
+//! its deepest existing folder both as spelled (a symlink's `..` is its target's parent) and
+//! normalised by its text first (`a/../b` is `b`), so a `..` after a folder that does not exist
+//! yet (`Drafts/../Contract.docx`, which `mkdir -p Drafts` would make good) is caught. A path
+//! over 4096 bytes is only normalised by its text, so a huge word costs time in proportion to
+//! its length. The first one held open is refused.
 //!
 //! One more rule for Codex's writes: a patch target in the matter's `.codex` folder (the folder
 //! or anything under it; a move's source and destination both) is refused, held open or not.
@@ -61,10 +75,11 @@
 //! [`IGNORED`] saying why, naming no input content. Stdin comes from the agent CLI, not the
 //! model, so a model cannot make it malformed; and failing closed would refuse every matched
 //! tool, stopping the agent outright, the day Claude Code or Codex changes its input shape. The
-//! current shapes are pinned by fixtures (`tests/fixtures/pre_write_guard`), so such a change
-//! fails CI instead of opening the guard silently. In default and plan mode
-//! the permission check (ADR 0021) still stops a write to a held file; in acceptEdits and
-//! bypassPermissions this guard is the only stop. It never panics.
+//! fixtures in `tests/fixtures/pre_write_guard` pin how the guard reads the shapes captured for
+//! the agent versions their README names; CI alone does not notice a vendor change, so they are
+//! captured again from the real tool whenever a pinned Claude Code or Codex version moves. In
+//! default and plan mode the permission check (ADR 0021) still stops a write to a held file; in
+//! acceptEdits and bypassPermissions this guard is the only stop. It never panics.
 
 mod shell;
 mod words;
@@ -309,15 +324,37 @@ fn in_codex_folder(folder: &Path, base: &Path, path: &Path) -> bool {
         .is_some_and(|first| first.as_os_str().to_str().is_some_and(is_codex))
 }
 
-/// `path` with its deepest existing folder canonicalised and the rest added lexically.
+/// The longest path [`existing_resolved`] resolves; a longer one (no OS opens it) is only
+/// normalised by its text, so a huge word costs time in proportion to its length.
+const MAX_RESOLVED: usize = 4096;
+
+/// `path` with its deepest existing folder canonicalised and the rest added lexically. The
+/// folder is found from the root down, one `stat` per part until one is missing, then
+/// canonicalised once. A path over [`MAX_RESOLVED`] bytes, or one whose folder does not
+/// canonicalise, is only normalised by its text ([`lexical`]).
 fn existing_resolved(path: &Path) -> PathBuf {
-    for ancestor in path.ancestors() {
-        if let Ok(found) = dunce::canonicalize(ancestor) {
-            let rest = path.strip_prefix(ancestor).unwrap_or(Path::new(""));
-            return lexical(&found.join(rest));
-        }
+    if path.as_os_str().len() > MAX_RESOLVED {
+        return lexical(path);
     }
-    lexical(path)
+    let mut existing = PathBuf::new();
+    let mut depth = 0;
+    for part in path.components() {
+        let next = existing.join(part);
+        if next.metadata().is_err() {
+            break;
+        }
+        existing = next;
+        depth += 1;
+    }
+    match dunce::canonicalize(&existing) {
+        Ok(found) => lexical(
+            &path
+                .components()
+                .skip(depth)
+                .fold(found, |acc, part| acc.join(part)),
+        ),
+        Err(_) => lexical(path),
+    }
 }
 
 /// `path` with `.` parts dropped and each `..` taking the part before it off.
