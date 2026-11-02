@@ -19,7 +19,9 @@ const holds = (s: ThreadStatus, which: readonly string[]) =>
 
 /** The wait over the composer of the conversation `key`, or null for none.
  *
- * - Sent: its status is `queued { behind }`: the thread the host names.
+ * - Sent: its status is `queued { behind }`: the thread the host names. Or it is `starting` while another thread
+ *   runs or needs the lawyer: the reducer gives a sent message `starting` (its user_message) before the host's
+ *   TurnQueued makes it `queued { behind }`, so the wait stays in place through that hand-off, naming the other.
  * - Not yet: it is idle (a draft is) or idle_stopped, and another thread of the matter is running or needs the lawyer, or failing
  *   those, starting: the first such in the rows' order (newest activity first). A starting one comes last, as it may
  *   itself be about to wait behind the running one. */
@@ -34,12 +36,15 @@ export function otherWaitOf(view: ConversationsView, key: string | null): OtherW
     const behind = s.queued.behind;
     return { thread: behind, title: titleOf(rows.find((r) => r.thread === behind)), sent: true };
   }
+  const others = rows.filter((r) => r.key !== key && r.thread !== null && r.thread !== own.thread);
+  const holding = others.find((r) => holds(r.status, ["running", "needs_you"]));
+  if (s === "starting")
+    return holding?.thread == null
+      ? null
+      : { thread: holding.thread, title: titleOf(holding), sent: true };
   // idle, or stopped for being idle, which its next prompt starts again: a message would go
   if (s !== "idle" && s !== "idle_stopped") return null;
-  const others = rows.filter((r) => r.key !== key && r.thread !== null && r.thread !== own.thread);
-  const other =
-    others.find((r) => holds(r.status, ["running", "needs_you"])) ??
-    others.find((r) => holds(r.status, ["starting"]));
+  const other = holding ?? others.find((r) => holds(r.status, ["starting"]));
   if (other?.thread == null) return null;
   return { thread: other.thread, title: titleOf(other), sent: false };
 }
