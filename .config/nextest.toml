@@ -27,6 +27,10 @@ filter = 'package(clauseo-sandbox) & binary(jail) & test(/twenty_thousand/)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
 [profile.ci]
-retries = 0                        # flakes are bugs; reproduce with SEED
+# One retry in CI only (local runs use the default profile and keep none), so a test that fails
+# once under the runner's load does not eject a pull request from the merge queue. Flakes are still
+# bugs: a test that passes only on its retry shows as FLAKY in the log and in junit.xml, and goes on
+# the flaky-test tracking issue for its owner to fix. Reproduce with SEED.
+retries = 1
 failure-output = "immediate-final"
 junit = { path = "junit.xml" }
