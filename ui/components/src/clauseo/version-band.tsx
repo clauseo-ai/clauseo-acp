@@ -4,7 +4,7 @@
 // new draft saved. Looking back, it says plainly when the room stands, "The matter as it stood at 3:42 pm on 14
 // October", who made that version and what it touched, and offers the ways on: Compare with now, Restore this
 // version, Undo this change, Back to now. While an answer runs, Restore and Undo wait and the band says until when.
-import type { ReactNode, RefObject } from "react";
+import { useId, type ReactNode, type RefObject } from "react";
 import { Button } from "../ui/button.tsx";
 import { Chip } from "../ui/chip.tsx";
 import { SegmentedSwitch } from "../ui/segmented.tsx";
@@ -18,7 +18,7 @@ import {
 } from "../icons/icons.tsx";
 import { cn } from "../lib/cn.ts";
 import { useVersionWords } from "../lib/words-versions.ts";
-import { Dot, Say } from "./say.tsx";
+import { Say } from "./say.tsx";
 
 export type BandLook = {
   /** "The matter as it stood at 3:42 pm on 14 October". */
@@ -46,8 +46,11 @@ export function WaitingButton({
   kind = "tone",
   label,
   testId,
+  describedBy,
 }: {
   waiting: boolean;
+  /** Optional: the id of the line that says why it waits, which it points to while it does. */
+  describedBy?: string | undefined;
   /** Optional: a test id for the e2e specs. */
   testId?: string | undefined;
   className?: string;
@@ -64,6 +67,7 @@ export function WaitingButton({
       aria-label={label}
       data-testid={testId}
       aria-disabled={waiting ? true : undefined}
+      aria-describedby={waiting ? describedBy : undefined}
       data-disabled={waiting ? "" : undefined}
       onClick={() => !waiting && onClick()}
     >
@@ -85,6 +89,7 @@ export function VersionBand({
   onUndo,
   onBack,
   testIds,
+  waitId,
 }: {
   look: BandLook | null;
   /** At now, the paper the bar is over: its title as filed and how many pages it runs to. Without it, at now the band
@@ -105,8 +110,12 @@ export function VersionBand({
   onBack: () => void;
   /** Optional: test ids for the e2e specs: on Restore this version, Undo this change and the line that says they wait. */
   testIds?: { restore?: string; undo?: string; wait?: string };
+  /** Optional: the id for the line that says Restore and Undo wait, for a waiting act outside the band to point to. */
+  waitId?: string;
 }) {
   const w = useVersionWords();
+  const ownId = useId();
+  const wait = waitId ?? ownId;
   if (look === null) {
     return (
       <>
@@ -136,7 +145,7 @@ export function VersionBand({
           </p>
         ))}
         {waiting !== null && notices.length > 0 && (
-          <p className="ver-notice ver-notice-wait" data-testid={testIds?.wait}>
+          <p className="ver-notice ver-notice-wait" id={wait} data-testid={testIds?.wait}>
             <IconChecking size={14} className="ver-notice-icon" />
             <span className="ver-notice-text">
               <Say>{waiting}</Say>
@@ -159,10 +168,7 @@ export function VersionBand({
           </span>
           {look.did !== "" && (
             <span className="ver-meta-did">
-              <Dot />
-              <span>
-                <Say>{look.did}</Say>
-              </span>
+              <Say>{look.did}</Say>
             </span>
           )}
         </p>
@@ -196,6 +202,7 @@ export function VersionBand({
             waiting={waiting !== null}
             className="ver-restore"
             testId={testIds?.restore}
+            describedBy={wait}
             onClick={onRestore}
           >
             <IconUndo size={16} />
@@ -207,6 +214,7 @@ export function VersionBand({
               kind="quiet"
               className="ver-undo-change"
               testId={testIds?.undo}
+              describedBy={wait}
               onClick={onUndo}
             >
               {w.v("Undo this change")}
@@ -223,7 +231,7 @@ export function VersionBand({
         </p>
       )}
       {waiting !== null && (
-        <p className="ver-wait" data-testid={testIds?.wait}>
+        <p className="ver-wait" id={wait} data-testid={testIds?.wait}>
           <IconChecking size={14} className="ver-wait-icon" />
           <span>
             <Say>{waiting}</Say>

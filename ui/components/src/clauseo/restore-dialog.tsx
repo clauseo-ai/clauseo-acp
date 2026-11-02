@@ -5,7 +5,7 @@
 // again. While an answer runs, Restore and Undo wait and say until when. restoreWords and undoWords in
 // versions-model.ts compose what it says.
 import { Dialog as Base } from "@base-ui/react/dialog";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Button } from "../ui/button.tsx";
 import { focusPlane } from "../ui/dialog-start.ts";
 import { SegmentedSwitch } from "../ui/segmented.tsx";
@@ -68,6 +68,7 @@ export function RestoreDialog({
 }) {
   const w = useVersionWords();
   const [{ mount, start }] = useState(focusPlane);
+  const waitId = useId();
   return (
     <Base.Root open={ask !== null} onOpenChange={(open) => !open && onClose()}>
       <Base.Portal>
@@ -155,7 +156,7 @@ export function RestoreDialog({
                 </p>
               )}
               {waiting !== null && (
-                <p className="ver-wait">
+                <p className="ver-wait" id={waitId}>
                   <IconChecking size={14} className="ver-wait-icon" />
                   <span>
                     <Say>{waiting}</Say>
@@ -170,6 +171,7 @@ export function RestoreDialog({
                     className="ver-try"
                     data-testid={testIds?.tryAgain}
                     aria-disabled={waiting !== null || held ? true : undefined}
+                    aria-describedby={waiting !== null ? waitId : undefined}
                     data-disabled={waiting !== null || held ? "" : undefined}
                     onClick={() => waiting === null && !held && onTryAgain()}
                   >
@@ -181,6 +183,7 @@ export function RestoreDialog({
                     className="ver-do-restore"
                     data-testid={testIds?.confirm}
                     aria-disabled={waiting !== null || held ? true : undefined}
+                    aria-describedby={waiting !== null ? waitId : undefined}
                     data-disabled={waiting !== null || held ? "" : undefined}
                     onClick={() => waiting === null && !held && onRestore()}
                   >

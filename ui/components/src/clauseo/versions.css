@@ -90,6 +90,7 @@
     align-items: center;
     gap: var(--s2) var(--s4);
   }
+  /* who and what it did: a gap between them, never a dot, which would start a wrapped line */
   .ver-meta {
     @apply text-small text-muted;
     flex: 1 1 var(--change-text-min);
@@ -97,12 +98,7 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    column-gap: var(--s2);
-  }
-  .ver-meta-did {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--s2);
+    column-gap: var(--s4);
   }
   .ver-actions {
     display: flex;
@@ -200,12 +196,11 @@
     gap: var(--s3);
     margin-top: var(--s3);
   }
+  /* every row the same way at every width: the document and why above, its choice under it */
   .ver-edited-row {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--s2) var(--s3);
+    display: grid;
+    justify-items: start;
+    gap: var(--s2);
   }
   .ver-edited-what {
     display: grid;
