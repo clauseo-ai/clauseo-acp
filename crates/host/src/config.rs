@@ -13,6 +13,7 @@ use serde_json::Value;
 use crate::clock::{Clock, SystemClock};
 use crate::ids::{IdSource, RandomV7};
 
+use crate::handle::SUBSCRIPTION_CAPACITY;
 use crate::window::PATCH_WINDOW_BYTES;
 
 /// What a firm's profile adds to an agent's session and launch. The host calls it at each
@@ -52,6 +53,7 @@ pub struct HostConfig {
     ids: Box<dyn IdSource>,
     patch_window_bytes: usize,
     managed_mcp: PathBuf,
+    app_capacity: usize,
 }
 
 /// A `HostConfig` taken apart by the host thread.
@@ -64,6 +66,7 @@ pub(crate) struct ConfigParts {
     pub(crate) ids: Box<dyn IdSource>,
     pub(crate) patch_window_bytes: usize,
     pub(crate) managed_mcp: PathBuf,
+    pub(crate) app_capacity: usize,
 }
 
 impl HostConfig {
@@ -78,6 +81,7 @@ impl HostConfig {
             clock: Arc::new(SystemClock),
             ids: Box::new(RandomV7::new()),
             patch_window_bytes: PATCH_WINDOW_BYTES,
+            app_capacity: SUBSCRIPTION_CAPACITY,
             managed_mcp: crate::agent::loads::managed_mcp_path(),
         }
     }
@@ -125,6 +129,14 @@ impl HostConfig {
         self
     }
 
+    /// The capacity of each app subscription's channel (default 1024), for tests that fill one
+    /// with a few changes instead of a thousand.
+    #[cfg(feature = "test-support")]
+    pub fn with_app_subscription_capacity(mut self, capacity: usize) -> Self {
+        self.app_capacity = capacity.max(1);
+        self
+    }
+
     /// Takes the config apart.
     pub(crate) fn into_parts(self) -> ConfigParts {
         ConfigParts {
@@ -135,6 +147,7 @@ impl HostConfig {
             clock: self.clock,
             ids: self.ids,
             patch_window_bytes: self.patch_window_bytes,
+            app_capacity: self.app_capacity,
             managed_mcp: self.managed_mcp,
         }
     }

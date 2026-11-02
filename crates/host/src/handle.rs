@@ -20,8 +20,8 @@ use crate::error::Error;
 
 mod subscription;
 
-pub(crate) use subscription::Sink;
 pub use subscription::{AppSubscription, EventSubscription, Subscription};
+pub(crate) use subscription::{SUBSCRIPTION_CAPACITY, Sink};
 
 /// The session host. [`Host::start`] runs it on its own thread, `clauseo-host`.
 #[derive(Debug)]

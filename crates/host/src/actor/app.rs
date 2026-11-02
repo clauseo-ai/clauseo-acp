@@ -66,7 +66,7 @@ pub(super) fn subscribe(actor: &mut Actor, principal: &Principal, reply: Reply<A
         return;
     }
     let id = super::subs::next_sub_id(actor);
-    let (subscription, sink) = AppSubscription::new(actor.post.clone(), id);
+    let (subscription, sink) = AppSubscription::new(actor.post.clone(), id, actor.app_capacity);
     if reply.send(Ok(subscription)).is_ok() {
         actor.app_subs.push(AppSub {
             id,
