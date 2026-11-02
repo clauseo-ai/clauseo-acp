@@ -1,6 +1,6 @@
 // The thread's shape from its id list: exchanges and the agent's latest output, by prefix alone.
 import { expect, test } from "vitest";
-import { exchangesOf, latestOutput, latestQuestion, sameIds } from "./ids.ts";
+import { exchangesOf, latestQuestion, sameIds } from "./ids.ts";
 
 const ids = [
   "agent_text:a0",
@@ -19,16 +19,6 @@ test("exchanges start at each question; a run before the first question is its o
     ["user_message:q2", "agent_text:a2"],
   ]);
   expect(exchangesOf([])).toEqual([]);
-});
-
-test("the latest output skips questions, notices, markers and versions, and nothing else", () => {
-  expect(latestOutput(ids)).toBe("agent_text:a2");
-  expect(latestOutput([...ids, "notice:n", "marker:m", "version:v"])).toBe("agent_text:a2");
-  expect(latestOutput([...ids, "tool_call:t2"])).toBe("tool_call:t2");
-  expect(latestOutput(["user_message:q", "notice:n"])).toBeNull();
-  // a new list (the view makes one on every add) is read afresh
-  const grown = [...ids, "agent_text:a3"];
-  expect(latestOutput(grown)).toBe("agent_text:a3");
 });
 
 test("the latest question, and id lists compared by their ids", () => {

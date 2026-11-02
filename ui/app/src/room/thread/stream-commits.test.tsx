@@ -29,7 +29,6 @@ import type { EntryId, StreamId, ViewPatchBody } from "../../transport/protocol.
 import { Room } from "../room.tsx";
 import { connectRoom } from "../start.ts";
 import { defaultOutcome, summary, THE_MATTER } from "./harness.ts";
-import { latestOutput } from "./ids.ts";
 import { stubFonts } from "./testing.ts";
 import { loadThread } from "./chunk.ts";
 
@@ -146,13 +145,13 @@ test("500 chunks and 20 tool calls into the room's thread: one commit a frame, n
     for (const body of slice) transport.deliver(JSON.stringify(event(batch(cursor++, [body]))));
     const touched = touchedBy(slice);
     for (const id of touched) seen.add(id);
-    const streamingBefore = latestOutput(store.view(stream!)?.ids ?? []);
+    const streamingBefore = store.view(stream!)?.latestOutput ?? null;
     rowCommits.clear();
     phases.length = 0;
     frame();
     // an answer that stops being the latest output renders once more, settled (#123's final render: its code
     // coloured, its links live); its own part changed, so it counts apart from the unchanged rows
-    const streamingAfter = latestOutput(store.view(stream!)?.ids ?? []);
+    const streamingAfter = store.view(stream!)?.latestOutput ?? null;
     const settled =
       streamingBefore !== streamingAfter && streamingBefore?.startsWith("agent_text:") === true
         ? streamingBefore

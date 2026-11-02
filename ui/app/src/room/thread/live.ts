@@ -11,7 +11,7 @@ import type {
   TurnId,
   UserMessageEntry,
 } from "../../transport/protocol.ts";
-import { latestOutput, latestQuestion } from "./ids.ts";
+import { latestQuestion } from "./ids.ts";
 
 /** Whether the thread's status says a turn runs or is about to: Stop stands in Ask's place. */
 export function turnRunning(status: ThreadStatus | undefined): boolean {
@@ -44,7 +44,7 @@ export function useBusy(stream: StreamId | null, sent: TurnId | null): boolean {
 export function useStreaming(stream: StreamId, id: EntryId): boolean {
   const pick = useCallback(
     (v: StreamView | undefined) =>
-      v !== undefined && turnRunning(statusOf(v)) && latestOutput(v.ids) === id,
+      v !== undefined && turnRunning(statusOf(v)) && v.latestOutput === id,
     [id],
   );
   return useStreamPart(useViewStore(), stream, pick);
