@@ -99,7 +99,8 @@ until `StepUndone` is durable; a failed undo commit is retried once, as a turn's
   lost if the host restarts before that thread's next prompt (clauseo-acp-private#183 makes it
   durable).
 - `CompareVersions` answers `QueryResult::FileChanges` from `matters`'s compare of two
-  checkpoints. A compare with the folder now is not reachable through this query.
+  checkpoints, or, with `to` missing or `null`, of `from` with the matter's folder as it is now
+  (`CompareSide::Folder`, on the matter's thread; nothing is stored, and only `from` is checked).
 - `HostQuery::PreviewRestore { matter, checkpoint, scope }` is new and additive (0002): it
   answers `QueryResult::RestorePreview { changes, added_since, kept, locked }` from
   `Matter::preview_restore` and writes nothing. `locked` lists the files a program holds, which a

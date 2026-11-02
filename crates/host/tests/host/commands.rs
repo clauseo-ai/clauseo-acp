@@ -99,7 +99,7 @@ fn other_matter_ids_refused() {
         .query(HostQuery::CompareVersions {
             matter: two,
             from: from_one,
-            to: from_two,
+            to: Some(from_two),
         })
         .unwrap_err();
     assert_eq!(
@@ -116,7 +116,7 @@ fn other_matter_ids_refused() {
         .query(HostQuery::CompareVersions {
             matter: two,
             from: from_two,
-            to: from_two,
+            to: Some(from_two),
         })
         .unwrap();
     assert_eq!(own, QueryResult::FileChanges(Vec::new()), "own checkpoints");

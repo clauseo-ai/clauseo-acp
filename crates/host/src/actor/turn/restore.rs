@@ -53,7 +53,7 @@ pub(crate) fn restore_version(
         stream,
         Box::new(move |actor: &mut Actor, loaded: Result<(), Error>| {
             let sent = loaded
-                .and_then(|()| own_versions(actor, matter, [from, from]))
+                .and_then(|()| own_versions(actor, matter, &[from, from]))
                 .and_then(|()| send_restore(actor, ask));
             if let Err(error) = sent {
                 give_up(actor, matter, ctx, error);

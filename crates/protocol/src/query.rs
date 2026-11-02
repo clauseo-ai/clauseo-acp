@@ -102,14 +102,16 @@ pub enum HostQuery {
         /// How many.
         limit: PageLimit,
     },
-    /// The files that differ between two versions of a matter.
+    /// The files that differ between two versions of a matter, or between a version and the
+    /// matter's folder as it is now when `to` is `None` (nothing is stored).
     CompareVersions {
         /// The matter.
         matter: MatterId,
         /// The older version.
         from: CheckpointId,
-        /// The newer version.
-        to: CheckpointId,
+        /// The newer version; `None` (missing or `null` in JSON) is the folder now.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        to: Option<CheckpointId>,
     },
     /// What restoring a version would do now, file by file. Writes nothing.
     PreviewRestore {

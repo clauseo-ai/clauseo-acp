@@ -41,8 +41,8 @@ use clauseo_protocol::{
 };
 
 use fixtures::{
-    blob, choice, command_id, elicitation_id, entry, err_contains, file_ref_id, packed_raw,
-    permission_request_id, raw, round_trips, thread_id, turn_id, v7_text,
+    blob, checkpoint_id, choice, command_id, elicitation_id, entry, err_contains, file_ref_id,
+    matter_id, packed_raw, permission_request_id, raw, round_trips, thread_id, turn_id, v7_text,
 };
 
 fn envelope(n: u64, command: HostCommand) -> CommandEnvelope {
@@ -410,4 +410,50 @@ fn duplicate_permission_answer_shape() {
         .replace(r#""allow""#, r#""""#);
     let read = serde_json::from_str::<CommandEnvelope>(&json);
     err_contains(read, "expected 1 to 256 UTF-8 bytes");
+}
+
+/// `CompareVersions`'s `to` is a checkpoint, or missing or `null` for the folder now. Old clients
+/// send the checkpoint; a `None` is not written at all, as `PageEntries`' `before_order` is not.
+#[test]
+fn compare_versions_to_is_a_checkpoint_or_the_folder_now() {
+    let (matter, from, to) = (matter_id(1), checkpoint_id(2), checkpoint_id(3));
+    let with_to = HostQuery::CompareVersions {
+        matter,
+        from,
+        to: Some(to),
+    };
+    let folder_now = HostQuery::CompareVersions {
+        matter,
+        from,
+        to: None,
+    };
+    round_trips(&with_to);
+    round_trips(&folder_now);
+
+    let json = serde_json::to_value(&folder_now).unwrap();
+    let fields = json["compare_versions"].as_object().unwrap();
+    assert!(!fields.contains_key("to"), "{json}");
+
+    let text = |to: &str| {
+        format!(
+            r#"{{"compare_versions":{{"matter":"{}","from":"{}"{to}}}}}"#,
+            v7_text(1),
+            v7_text(2)
+        )
+    };
+    let parsed = |json: &str| serde_json::from_str::<HostQuery>(json).unwrap();
+    assert_eq!(
+        parsed(&text(&format!(r#","to":"{}""#, v7_text(3)))),
+        with_to
+    );
+    assert_eq!(parsed(&text(r#","to":null"#)), folder_now);
+    assert_eq!(parsed(&text("")), folder_now);
+    assert!(
+        serde_json::from_str::<HostQuery>(&text(r#","to":"not-an-id""#)).is_err(),
+        "a `to` that is not an id"
+    );
+    assert!(
+        serde_json::from_str::<HostQuery>(&text(r#","to":null,"extra":1"#)).is_err(),
+        "an unknown field is still refused"
+    );
 }

@@ -111,11 +111,9 @@ pub(crate) enum MatterJob {
     Undo(UndoJob),
     /// Restore a version.
     Restore(RestoreJob),
-    /// Compare two checkpoints.
-    Compare {
-        from: CheckpointId,
-        to: CheckpointId,
-    },
+    /// Compare a version with another version, or with the folder now (`to` is
+    /// [`CompareSide::Folder`]; nothing is stored).
+    Compare { from: CheckpointId, to: CompareSide },
     /// What restoring a version would do now; writes nothing.
     Preview {
         from: CheckpointId,
@@ -357,12 +355,10 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
             };
             Ok(Box::new(RestoreDone { restored, reused }))
         })),
-        MatterJob::Compare { from, to } => {
-            MatterReply::Compared(open(settings, slot).and_then(|matter| {
-                let (from, to) = (CompareSide::Checkpoint(from), CompareSide::Checkpoint(to));
-                Ok(matter.compare(from, to)?)
-            }))
-        }
+        MatterJob::Compare { from, to } => MatterReply::Compared(
+            open(settings, slot)
+                .and_then(|matter| Ok(matter.compare(CompareSide::Checkpoint(from), to)?)),
+        ),
         MatterJob::Preview { from, scope } => MatterReply::Previewed(
             open(settings, slot)
                 .and_then(|matter| Ok(Box::new(matter.preview_restore(from, (&scope).into())?))),
