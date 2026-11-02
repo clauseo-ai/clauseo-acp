@@ -103,6 +103,7 @@ fn replay(events: &mut EventSubscription) -> (Vec<&'static str>, Vec<u64>, Seq) 
             HostEvent::CaughtUp { last_seq, .. } => return (kinds, seqs, last_seq),
             other @ (HostEvent::Patches(_)
             | HostEvent::AccountLimitsChanged(_)
+            | HostEvent::LimitsViewChanged(_)
             | HostEvent::SettingsChanged(_)) => panic!("unexpected {other:?}"),
         }
     }

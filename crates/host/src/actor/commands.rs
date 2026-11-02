@@ -292,6 +292,10 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
         HostCommand::SetUiSettings { patch } => {
             super::settings::set_ui_settings(actor, ctx, &patch);
         }
+        // R16: wired in the host phase (the limits subscription and the refresh).
+        HostCommand::RefreshLimits { agent: _, why: _ } => {
+            actor.finish_command(ctx.id, Ok(CommandOutcome::Done));
+        }
         HostCommand::EditQueuedPrompt { .. }
         | HostCommand::RemoveQueuedPrompt { .. }
         | HostCommand::SendQueuedNow { .. }
