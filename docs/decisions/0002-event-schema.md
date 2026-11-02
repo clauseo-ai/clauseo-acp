@@ -100,7 +100,7 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
 | `user_message` | turn, message, acp_message_id?, content, delivery? | host; acp on replay | yes | T |
 | `turn_queued` | turn, behind, behind_turn? | host | yes | T |
 | `queued_prompt_edited` | turn, message, content | host | yes | T |
-| `steer_resolved` | message, outcome (`SteerOutcome`) | host | yes | T |
+| `steer_resolved` | message, outcome (`SteerOutcome`), aside? (tool call ids) | host | yes | T |
 | `turn_started` | turn, checkpoint_before | host | yes | T |
 | `text_appended` | turn, message, acp_message_id?, kind (answer or thought), text | acp | yes | T |
 | `content_appended` | turn, message, acp_message_id?, kind, block (never text) | acp | yes | T |
@@ -210,6 +210,22 @@ folded under the old rule is passed over and the thread's whole log is folded on
 reopen, as for 0018's bump (that note gives the cost: on iris-vm about 31 ms instead of 7 ms for
 20,000 events, once per thread).
 
+The queue and steer (H9, 0011's "Queue, send now and steer") fold what was logged but not folded
+before: a prompt waiting behind its own thread (`turn_queued` with `behind` its own thread) is
+`UserMessageStatus::Queued` until its `turn_started` (or a writer wait behind another thread)
+makes it `Sent`; `queued_prompt_edited` replaces its content and sets `edited`;
+`steer_resolved` sets the entry's `steer` and moves it to the outcome's turn, and marks each tool
+call in `aside` with `ToolCallEntry.background` (`BackgroundMark`, its `finished_at` from the
+update that gives it a final status). `HeaderEntry.steer_joins_turn` is new: from
+`thread_created` it is true for a `claude-acp` agent, then each `agent_session_attached` sets it
+from `SteeringCapability` (both flags). `HeaderEntry.queue_held` stays the host's in-memory
+flag: no event sets it, `clauseo_reducer::set_queue_held` does, and a snapshot writes it
+`false`. `steer_resolved.aside`, `ToolCallEntry.background` and `steer_joins_turn` are additive
+(missing reads as empty, `None`, `false`). `EditQueuedPrompt` now carries `text`, not
+`content` (it was refused as not built, so no client sent it). `REDUCER_SCHEMA_VERSION` goes from 3
+to 4: old snapshots are passed over and each thread's log is folded once at its next reopen, as for
+the bump above.
+
 A `Step` entry has no `undo_possible` field. The UI derives it from the step alone, as
 `checkpoint_after` exists and the step is not undone (`StepEntry::undo_possible` states the same
 rule). Whether a turn runs is the header's `status` for this thread and the host's check at
@@ -245,9 +261,10 @@ Every limit and rule, with its constant:
 
 | Where | Rule | Constant |
 |---|---|---|
-| `SendPrompt`, `EditQueuedPrompt` `content` | 1 to 100 blocks | `MAX_PROMPT_BLOCKS` |
+| `SendPrompt` `content` | 1 to 100 blocks | `MAX_PROMPT_BLOCKS` |
 | same | at most 256 KiB of text, UTF-8 bytes summed over `Text` blocks, not escaped | `MAX_PROMPT_TEXT_BYTES` |
 | same | at most 50 `File` blocks | `MAX_PROMPT_FILES` |
+| `EditQueuedPrompt.text` | at most 256 KiB, UTF-8 bytes; it replaces the queued prompt's text and keeps its file blocks, so empty text is refused by the host only for a prompt without files | `MAX_PROMPT_TEXT_BYTES` |
 | same | no empty `Text` block; a visible character (as titles count it) or a `File` block | |
 | `SendPrompt.delivery` | a `DeliveryRequest`: closed, so a newer mode fails to decode, never run as another mode; queue is written as a missing field | |
 | `Title` (`RenameThread.title`, `CreateMatter.name`) | at most 200 characters (`char`s) | `MAX_TITLE_CHARS` |

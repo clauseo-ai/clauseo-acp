@@ -34,7 +34,8 @@ thread all run through it, so it must add nothing a lawyer can feel.
 
 Each step is one commit on the thread stream unless it names the matter stream.
 
-1. `UserMessage` and the receipt; `dispatch` answers `PromptAccepted`.
+1. `UserMessage` and the receipt; `dispatch` answers `PromptAccepted`. A prompt sent while the
+   thread has a current turn or queued turns joins its queue instead (below).
 2. No live session: launch through `process::Launcher`, `initialize`, then `session/load` with the
    stored session id when the agent offers it, else `session/new` (with a "context not restored"
    `Notice` when the thread has turns). `AgentSessionAttached`. A failure ends the turn with
@@ -48,9 +49,11 @@ Each step is one commit on the thread stream unless it names the matter stream.
 6. Flush display, then durable text; expire pending permission requests and elicitations.
 7. After-turn checkpoint with the paths the turn's tool calls named. One commit: the matter's
    `CheckpointRecorded { AfterTurn }`, `FilesChanged` when not empty, `TurnFailed` on failure,
-   `TurnEnded`. If a turn's last commit fails, it is retried once when the stream drains; until
-   it is durable, `SendPrompt` on the thread is refused with `thread.turn_running`.
-8. Thread snapshot; the writer passes to the next turn waiting at step 4.
+   `TurnEnded`. If a turn's last commit fails, it is retried once when the stream drains; a
+   prompt sent meanwhile queues behind it, and once the retry has failed too, `SendPrompt` on the
+   thread is refused with `thread.turn_running` until the next start ends the turn.
+8. Thread snapshot; the writer passes to the next turn waiting at step 4; once `TurnEnded` is
+   durable the thread's queue moves on or holds.
 
 When `matters` answers a checkpoint with `Reused` and the matter's log does not hold that id, the
 host records it first (`CheckpointRecorded` with the kind, thread and turn from `matters`'s
@@ -60,9 +63,49 @@ checkpoint.
 Agent exit: expiries with `AgentExited`, step 7 with `TurnFailed { agent.exited }`, then
 `AgentSessionDetached { Exited }` last.
 
-The per-thread queue, send now and steer are decided in the brief and come with a follow-up. Until
-then `SendPrompt` on a thread with a current turn is refused with `thread.turn_running`
-(retryable), and the window disables Send while a turn runs.
+### Queue, send now and steer
+
+Amended by H9 (2026-11-02), the brief's "Later" list. The code is `actor/turn/queue.rs` and its
+`queue/` modules.
+
+- A thread's queued turns have a `UserMessage` and a `TurnQueued` behind their own thread
+  (`behind_turn`: the turn ahead), and no `TurnStarted` or `TurnEnded`. `SendPrompt` (delivery
+  queue) on a thread with a current turn, an end not yet durable or queued turns logs those two
+  events and the receipt in one commit; past `MAX_QUEUED_TURNS` (10) it is refused
+  `thread.queue_full` and nothing is logged. A thread whose own undo holds the writer still
+  refuses with `thread.turn_running`, as does one whose last end failed twice.
+- The queue moves on when the current turn's `TurnEnded` is durable: always to a head sent now
+  (send now, `SendQueuedNow`, a requeued steer), else only after `EndTurn`. Any other stop holds
+  it, `AtLimit` included (taken from `TurnEnded`, never from a later `TurnStoppedAtLimit`), until
+  `ResumeQueue`, `SendQueuedNow` or a new `SendPrompt`. While a steer request is out the queue
+  waits for its answer. A head goes to step 2 as any turn does; a wait for another thread's
+  writer logs its second `TurnQueued` there. The held flag is in memory only: the view shows it
+  as `queue_held` (set by the host through `clauseo_reducer::set_queue_held`, written `false` in
+  snapshots), true only while turns wait.
+- Send now, and a steer that cannot be real, log the new turn's `UserMessage`, `TurnQueued`
+  behind the current turn, the receipt and, for a steer, `SteerResolved { SentNow }`; the new turn
+  takes the head and the current turn takes the Cancel path. With no current turn it starts at
+  once, ahead of a held queue, which moves on after it. Send now is not counted against the limit.
+- A real steer needs the running turn's prompt in flight and both of the agent's
+  `SteeringCapability` flags (claude-agent-acp; `acp` reads `_meta.steering.supported` and
+  `agentCapabilities._meta.claudeCode.promptQueueing`). Its `UserMessage` names the running turn
+  and is durable before `_session/steering` goes out with `idleBehavior: promptRequired`.
+  `Injected` logs `SteerResolved { Injected }` with `aside`, the running turn's tool calls not yet
+  finished (the view marks them as carried on in the background); `promptRequired`, a failure or
+  `startedNewTurn` (cancelled at once) log `SteerResolved { Requeued }` and a `TurnQueued` behind
+  the steered turn, and the new turn takes the head with the steered content.
+- `EditQueuedPrompt { thread, turn, text }` replaces the prompt's first text block, drops its other
+  text blocks and keeps its file blocks (`QueuedPromptEdited`); empty text for a prompt without
+  files is `command.invalid`. `RemoveQueuedPrompt` logs `TurnEnded { Cancelled }` without holding
+  or moving the queue. `SendQueuedNow` moves the turn to the head, logs only the receipt and
+  cancels the current turn. These three also take the current turn while it is still launching
+  or waiting for another thread's writer, since the view shows it queued until `TurnStarted`;
+  anything else is `thread.turn_not_queued`. `ResumeQueue` logs only the receipt. `ArchiveThread`
+  is refused `thread.turn_running` while turns wait.
+- The queue is in the log, so it survives a restart: start-up reconciliation rebuilds it from the
+  whole log (edits applied, requeued steers in their new turns) and holds it; the started open
+  turn is the one the fold shows running, no longer the last prompt. A send now or a
+  `SendQueuedNow` move not yet started when the host stops is lost; the turn stays queued, held.
 
 The undo note (QR11.1) is not logged. Its words: "Note from Clauseo: since your last turn, the
 lawyer put these files back to an earlier version: notes/a.txt, brief.txt. Read them again before
@@ -186,8 +229,9 @@ The actor never blocks on the store, git or an agent, and text reaches the scree
 A command's answer means its events are durable. The desktop window, the `cli` and
 `transport_ws` build on the handle's shape. A later change must keep commit before publish, the
 gapless `seq`, and zstd and git off the actor. Stage B's `limits` arrives as a new actor input
-publishing `HostEvent::AccountLimitsChanged`. The queue, steer and the restart supervisor come
-with follow-ups. The profile hook is called at each session start (clauseo-acp-private#123), and
+publishing `HostEvent::AccountLimitsChanged`. The restart supervisor comes with a follow-up;
+the queue and steer came with H9 (above). The profile hook is called at each session start
+(clauseo-acp-private#123), and
 a session gets only the MCP servers the lawyer turned on (clauseo-acp-private#160):
 `crates/host/src/agent/loads.rs` holds the switches and their reasons.
 

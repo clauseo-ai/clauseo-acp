@@ -73,6 +73,7 @@ entries page in on scroll through `HostQuery::PageEntries`, which returns `Query
 | Tool call: fetch from the web | `ToolKind::Fetch` | as above |
 | Tool call: switch mode | `ToolKind::SwitchMode` | as above |
 | Tool call: other | `ToolKind::Other` | as above; `tool_name` when the agent gave one |
+| Tool call carried on in the background while a steer was answered | `ToolCallEntry.background` (`BackgroundMark`) | the steered message, the finish time once it finished |
 | Tool call of a kind from a newer Clauseo | `ToolKind::Unknown` | as other |
 | Tool call waiting to run | `ToolCallStatus::Pending` | `ViewEntry::ToolCall` fields |
 | Tool call running | `ToolCallStatus::InProgress` | as above |
@@ -175,9 +176,9 @@ reported it.
 | Slash commands | `AvailableCommand` | name, description, input hint |
 | Send, queued when a turn runs | `Delivery::Queue` | `HostCommand::SendPrompt` without `delivery` means queue |
 | Send now | `Delivery::SendNow` | cancels the running turn, then sends this prompt |
-| Steer | `Delivery::Steer` | the host steers where the agent can, else sends now; the result arrives as the entry's `steer`. No view entry says whether the agent steers natively (that is in the log's `agent_session_attached` capabilities) |
+| Steer | `Delivery::Steer` | the host steers where the agent can, else sends now; the result arrives as the entry's `steer`. Before sending, `HeaderEntry.steer_joins_turn` says which: true when a steer adds to the running answer (claude-agent-acp), false when it cancels and sends now (the answer so far is kept) |
 | Delivery from a newer client | `Delivery::Unknown` | never run: `HostCommand::SendPrompt` takes the closed `DeliveryRequest`, so the command fails to decode with `ErrorCode::CommandInvalid` |
-| Queued prompts, in order | `ViewEntry::UserMessage` per queued turn | content; actions `HostCommand::EditQueuedPrompt`, `HostCommand::RemoveQueuedPrompt`, `HostCommand::SendQueuedNow` |
+| Queued prompts, in order | `ViewEntry::UserMessage` per queued turn | content; actions `HostCommand::EditQueuedPrompt` (new text; the files stay), `HostCommand::RemoveQueuedPrompt`, `HostCommand::SendQueuedNow`; at most `MAX_QUEUED_TURNS` |
 | Queue held, also after a restart | `HeaderEntry.queue_held` in the thread header, `ThreadSummary.queue_held` in the sidebar | the entries with `UserMessageStatus::Queued` remain, with `HostCommand::ResumeQueue`; the last step's stop reason (section 3) only when the thread has one |
 | Queue full | `ErrorCode::ThreadQueueFull` | retryable: the prompt can be sent once a queued turn starts |
 | Edit, remove or send now refused: the turn already started | `ErrorCode::ThreadTurnNotQueued` | the turn's current state |
