@@ -1,6 +1,6 @@
 // Reading the thread's shape from its id list alone. Entry ids are "<kind>:<domain id>" (store/view.ts, entryId), so
-// the turns and the latest question are found by prefix, without reading any entry: a flush that only appends text
-// leaves the id list, and so everything derived here, the same.
+// the latest question is found by prefix, without reading any entry: a flush that only appends text leaves the id
+// list, and so everything derived here, the same. The exchanges need entries (a turn, a queued status): exchanges.ts.
 import type { EntryId } from "../../transport/protocol.ts";
 
 const QUESTION = "user_message:";
@@ -8,18 +8,6 @@ const ANSWER_TEXT = "agent_text:";
 
 export const isQuestion = (id: EntryId): boolean => id.startsWith(QUESTION);
 export const isAgentText = (id: EntryId): boolean => id.startsWith(ANSWER_TEXT);
-
-/** The ids by exchange: each starts at a question; a leading run before any question (a window that opens mid-turn)
- * is its own exchange, without one. */
-export function exchangesOf(ids: readonly EntryId[]): EntryId[][] {
-  const out: EntryId[][] = [];
-  for (const id of ids) {
-    const last = out.at(-1);
-    if (last === undefined || isQuestion(id)) out.push([id]);
-    else last.push(id);
-  }
-  return out;
-}
 
 const questions = new WeakMap<readonly EntryId[], EntryId | null>();
 

@@ -1,7 +1,7 @@
 // What the room's thread reads from the view store beyond one entry or one text: whether a turn runs, whether an answer
 // is the one still arriving, and the latest question's words. Each pick returns a boolean or a string, so a flush that
 // leaves its answer the same renders nothing.
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { useStreamPart, useViewStore } from "../../store/hooks.ts";
 import { entryId, textKey, type StreamView } from "../../store/view.ts";
 import type {
@@ -11,7 +11,7 @@ import type {
   TurnId,
   UserMessageEntry,
 } from "../../transport/protocol.ts";
-import { latestQuestion } from "./ids.ts";
+import { exchangesPick, latestAsked } from "./exchanges.ts";
 
 /** Whether the thread's status says a turn runs or is about to: Stop stands in Ask's place. */
 export function turnRunning(status: ThreadStatus | undefined): boolean {
@@ -93,13 +93,18 @@ export function useQuestionText(stream: StreamId, id: EntryId, entry: UserMessag
   return useStreamPart(useViewStore(), stream, pick);
 }
 
-/** The latest question's words, for the question pinned over the thread; "" before the first. */
+/** The latest question's words, for the question pinned over the thread; "" before the first. The question that
+ * heads the newest exchange (exchanges.ts): never a queued or removed message, nor a steer taken into an answer. */
 export function useLatestQuestion(stream: StreamId | null): string {
-  const pick = useCallback((v: StreamView | undefined) => {
-    const id = v === undefined ? null : latestQuestion(v.ids);
-    const entry = id === null ? undefined : v!.entries.get(id)?.user_message;
-    return id === null || entry === undefined ? "" : questionText(id, entry, v!.texts);
-  }, []);
+  const [shapeOf] = useState(exchangesPick);
+  const pick = useCallback(
+    (v: StreamView | undefined) => {
+      const id = v === undefined ? null : latestAsked(shapeOf(v));
+      const entry = id === null ? undefined : v!.entries.get(id)?.user_message;
+      return id === null || entry === undefined ? "" : questionText(id, entry, v!.texts);
+    },
+    [shapeOf],
+  );
   return useStreamPart(useViewStore(), stream, pick);
 }
 

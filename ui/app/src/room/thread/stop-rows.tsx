@@ -26,6 +26,7 @@ import { isoOf, whenOf } from "./clock.ts";
 import { planNameOf, stopTimeOf } from "./limit-words.ts";
 import { windowLine } from "./stop-words.ts";
 import { useBusy } from "./live.ts";
+import { SentNowLine } from "./steer-rows.tsx";
 import { useThreadActions } from "./session.ts";
 import { resetPassed, stopLine } from "./stops.ts";
 import { wordLock } from "../word/lock.ts";
@@ -142,9 +143,18 @@ function Changed({ entry }: { entry: StepEntry }) {
   );
 }
 
-export function StepRow({ id, entry }: { id: EntryId; entry: StepEntry }) {
+/** `sentNow`: a steer sent now stopped this turn, so its line says that, in place of the stop's own line or mark. */
+export function StepRow({
+  id,
+  entry,
+  sentNow = false,
+}: {
+  id: EntryId;
+  entry: StepEntry;
+  sentNow?: boolean | undefined;
+}) {
   const w = useWords();
-  const line = stopLine(entry);
+  const line = sentNow ? null : stopLine(entry);
   const plan = useAgentPlan();
   return (
     <div
@@ -154,7 +164,8 @@ export function StepRow({ id, entry }: { id: EntryId; entry: StepEntry }) {
       data-failure={entry.failure}
       className={ROW}
     >
-      {takesMark(entry) && <StoppedMark ts={entry.ts} />}
+      {sentNow && <SentNowLine ts={entry.ts} />}
+      {!sentNow && takesMark(entry) && <StoppedMark ts={entry.ts} />}
       {line !== null && !takesMark(entry) && (
         <p className={QUIET} data-code={line.code}>
           <Say>
