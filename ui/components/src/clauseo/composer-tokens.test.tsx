@@ -293,25 +293,88 @@ test("an input method's composition beside a token leaves it whole, moved by wha
   expect(starts()).toEqual([4]);
 });
 
-test("Tamil99 and Anjal's replacement edits right after a token leave it whole", async () => {
+const compositionStart = () =>
+  act(async () => {
+    field().dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true, data: "" }));
+  });
+const compositionEnd = async () => {
+  await act(async () => {
+    field().dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: "" }));
+  });
+  await act(settled);
+};
+
+test("Tamil99 and Anjal's replacement edits right after a token leave it whole, inside a composition or not", async () => {
   lay();
   engine();
   await mount(composer());
   await focus();
   await pickReview();
-  // a consonant, then the vowel sign that replaces it with the syllable, never composing
+  // a consonant, then the vowel sign that replaces it with the syllable: Tamil99 on macOS never composes
   await edit("/review க", 9);
   await edit("/review கா", 10, "insertReplacementText");
   expect(starts()).toEqual([0]);
-  // Anjal's: two characters replaced by three
-  await edit("/review கால", 11);
+  // Anjal's, inside a composition: two characters replaced by three
+  await compositionStart();
+  await edit("/review கால", 11, "insertCompositionText");
   await edit("/review காலை", 12, "insertReplacementText");
+  expect(starts()).toEqual([0]);
+  await compositionEnd();
   expect(field().value).toBe("/review காலை");
   expect(starts()).toEqual([0]);
-  // right against the token's end, no space: replaced too, and the token stands
-  await edit("/reviewக காலை", 8);
+  // right against the token's end, no space, composing: replaced too, and the token stands
+  await compositionStart();
+  await edit("/reviewக காலை", 8, "insertCompositionText");
   await edit("/reviewகா காலை", 9, "insertReplacementText");
+  await compositionEnd();
   expect(starts()).toEqual([0]);
+});
+
+test("while an input method composes, the caret is never moved out of a token; once it ends, it is", async () => {
+  lay();
+  engine();
+  await mount(composer());
+  await focus();
+  await pickReview("ask ");
+  await compositionStart();
+  // inside the token's range and at its edges, by the page's selection change, a key's end and a press's end
+  for (const at of [6, 9, 4, 11]) {
+    await put(at);
+    await act(async () => {
+      field().dispatchEvent(new KeyboardEvent("keyup", { key: "Process", bubbles: true }));
+      field().dispatchEvent(new Event("pointerup", { bubbles: true }));
+    });
+    expect(caret()).toEqual([at, at]);
+  }
+  await put(6);
+  expect(caret()).toEqual([6, 6]);
+  // the composition over: the next selection change takes the caret to the token's nearer edge
+  await compositionEnd();
+  await act(async () => document.dispatchEvent(new Event("selectionchange")));
+  expect(caret()).toEqual([4, 4]);
+});
+
+test("while an input method composes, Backspace and Delete at a token's edge are its own: the token stays whole", async () => {
+  lay();
+  engine();
+  await mount(composer());
+  await focus();
+  await pickReview("ask ");
+  await put(11);
+  await compositionStart();
+  // the composer knows of the composition from compositionstart, whatever the key event says
+  expect(await key("Backspace")).toBe(false);
+  await put(4);
+  expect(await key("Delete")).toBe(false);
+  await act(async () => field().setSelectionRange(11, 11));
+  expect(await key("Backspace", { altKey: true })).toBe(false);
+  expect(field().value).toBe("ask /review ");
+  expect(starts()).toEqual([4]);
+  await compositionEnd();
+  // over, Backspace takes it whole again
+  await put(11);
+  expect(await key("Backspace")).toBe(true);
+  expect(field().value).toBe("ask  ");
 });
 
 test("the caret steps over a token and never rests inside one; a selection grows to whole tokens", async () => {
