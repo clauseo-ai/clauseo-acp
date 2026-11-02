@@ -30,8 +30,9 @@ converted document. From there they can call any IPC command the page can reach.
 
 **What stops them.**
 
-- `built`: The release context names one capability, `main`, which grants only the nine bridge
-  commands, one permission each ([0012](decisions/0012-desktop-bridge.md)), and the two core
+- `built`: The release context names one capability, `main`, which grants only the ten bridge
+  commands, one permission each ([0012](decisions/0012-desktop-bridge.md),
+  [0019](decisions/0019-app-stream-to-the-window.md)), and the two core
   window commands of Tauri's drag script, granted in every build: start a drag, and maximise or
   restore on a double-click ([0015](decisions/0015-window-frame.md)). The room build adds
   `frame.json` at setup on Windows and Linux (`window_frame::grant_caption_commands`): minimise,
@@ -46,15 +47,19 @@ converted document. From there they can call any IPC command the page can reach.
   `base-uri 'none'`, Trusted Types enforced with one allowed policy, `clauseo-sanitize` (defence in
   depth: engines without support ignore it); the `tauri-config` check pins the string
 - `built`: An `AppManifest` in `build.rs`, so app commands go through the access check; it lists
-  the nine commands in release (the `e2e` and `marks` builds add theirs), and a test checks it
+  the ten commands in release (the `e2e` and `marks` builds add theirs), and a test checks it
   against the code and the capabilities
 - `built`: No global Tauri object and a frozen prototype (`tauri-config` check); no asset protocol
   (`tauri-config` check, and `deny.toml` bans tauri's `protocol-asset` feature); no devtools in
   release builds (`deny.toml` bans the feature; Tauri turns devtools on in debug builds)
 - `built`: Rust validates every command (types, opaque ids, allowed values); folders are named by
   opaque ids the bridge issued, never paths
-- `built`: A minimal command surface: dispatch, query, subscribe, acknowledge, answer a permission,
-  pick a folder ([0012](decisions/0012-desktop-bridge.md)); `designed`: open a file or link
+- `built`: `dispatch` and `query` are allow-lists that name every host command and read, with no
+  catch-all, so one the host adds is refused by the build until the bridge admits it
+  ([0019](decisions/0019-app-stream-to-the-window.md))
+- `built`: A minimal command surface: dispatch, query, subscribe (a stream, or the app-wide events,
+  which take nothing from the page), acknowledge, answer a permission, pick a folder
+  ([0012](decisions/0012-desktop-bridge.md)); `designed`: open a file or link
 - `built` for "always allow" and the folder picker: escalations only through native dialogs drawn
   by Rust, never a webview confirm; `designed` for the rest
 - `designed`: The webview never navigates; links go through one `open_external` (https, http,

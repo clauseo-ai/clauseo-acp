@@ -117,7 +117,8 @@ saves in this build, so e2e runs do not write the real app config folder.
 ## Consequences
 
 - In the default build the page reaches nine typed commands and no plugin; a tenth command needs a new record, a
-  permission and a line in each list the test compares.
+  permission and a line in each list the test compares. [0019](0019-app-stream-to-the-window.md) adds the tenth,
+  `subscribe_app`, and makes `dispatch` and `query` allow-lists.
 - A large patch costs a few fragment messages instead of one fetch round trip.
 - A window that falls 256 KB behind stops receiving until it catches up, then gets the tail or a
   `Reset`; the host keeps no per-window queue.

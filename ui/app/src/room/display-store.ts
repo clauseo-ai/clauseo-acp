@@ -10,7 +10,7 @@ import {
   type Platform,
 } from "@clauseo/components/lib/display.ts";
 import { frameBatch, liteBatch, type Batch } from "../store/batch.ts";
-import type { SettingsHost, UiSettings } from "./host-next.ts";
+import type { Settings, SettingsHost, UiSettings } from "./host-next.ts";
 
 /** Where the settings live until H7. */
 export const DISPLAY_KEY = "clauseo.display";
@@ -90,6 +90,8 @@ export type DisplayEnv = {
 export interface DisplayStore {
   /** The settings in force: the stored or the host's, with this page's override over them. */
   ui(): UiSettings;
+  /** The keys the firm's policy locks, dotted (`ui.theme`), as the host last said; none without a host. */
+  locked(): readonly string[];
   display(): Display;
   /** The lawyer's change: written to localStorage, or with a NextHost sent to the host as a patch. */
   set(patch: Partial<UiSettings>): void;
@@ -142,23 +144,27 @@ export function createDisplayStore(env: DisplayEnv): DisplayStore {
   reduced?.addEventListener("change", apply);
 
   const host = env.host;
+  let locked: readonly string[] = [];
   let stopHost = () => {};
+  const fromHost = (settings: Settings) => {
+    stored = { ...DEFAULT_UI, ...uiPatchOf(settings.ui) };
+    locked = settings.locked;
+    apply();
+  };
+  const readHost = (current: SettingsHost) =>
+    current
+      .getSettings()
+      .then(fromHost, (error: unknown) =>
+        console.warn(`get_settings failed: ${JSON.stringify(error)}`),
+      );
   if (host !== null) {
-    stopHost = host.onSettingsChanged((settings) => {
-      stored = { ...DEFAULT_UI, ...uiPatchOf(settings.ui) };
-      apply();
-    });
-    host.getSettings().then(
-      (settings) => {
-        stored = { ...DEFAULT_UI, ...uiPatchOf(settings.ui) };
-        apply();
-      },
-      (error: unknown) => console.warn(`get_settings failed: ${JSON.stringify(error)}`),
-    );
+    stopHost = host.onSettingsChanged(fromHost);
+    void readHost(host);
   }
 
   return {
     ui,
+    locked: () => locked,
     display: () => current,
     set(patch) {
       const clean = uiPatchOf(patch);
@@ -167,11 +173,11 @@ export function createDisplayStore(env: DisplayEnv): DisplayStore {
       for (const key of Object.keys(clean) as (keyof UiSettings)[]) delete rest[key];
       over = rest;
       if (host !== null) {
-        host
-          .setUiSettings(clean)
-          .catch((error: unknown) =>
-            console.warn(`set_ui_settings failed: ${JSON.stringify(error)}`),
-          );
+        host.setUiSettings(clean).catch((error: unknown) => {
+          console.warn(`set_ui_settings failed: ${JSON.stringify(error)}`);
+          // the host refused it (a locked key, say): show what the host holds, not the refused value
+          void readHost(host);
+        });
       } else {
         try {
           env.storage?.setItem(DISPLAY_KEY, JSON.stringify(stored));

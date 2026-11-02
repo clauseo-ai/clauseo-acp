@@ -2,7 +2,9 @@
 //! `capabilities/main.json`. Every argument is checked in Rust before it reaches the host
 //! (`docs/decisions/0001`, `docs/threat-model.md` "Webview"), and every call runs as
 //! `Principal::LocalDesktop`, which the bridge supplies; the webview never names a principal.
-//! `docs/decisions/0012-desktop-bridge.md` records the list and the stream's message format.
+//! `docs/decisions/0012-desktop-bridge.md` records the list and the stream's message format,
+//! and `docs/decisions/0019-app-stream-to-the-window.md` the tenth, `subscribe_app`, and the
+//! allow-lists of `dispatch` and `query`.
 //! `lib.rs` registers them with `tauri::generate_handler!`; tauri-specta reads them only in the
 //! test that writes the TypeScript bindings (`commands/bindings.rs`).
 
@@ -22,12 +24,13 @@ use crate::picked::PickedFolder;
 /// The command names, in the order `build.rs` and `capabilities/main.json` list them. A test
 /// checks they, `lib.rs`'s handler and the bindings agree.
 #[cfg(test)]
-pub(crate) const COMMANDS: [&str; 9] = [
+pub(crate) const COMMANDS: [&str; 10] = [
     "dispatch",
     "query",
     "open_stream",
     "subscribe",
     "unsubscribe",
+    "subscribe_app",
     "ack",
     "answer_permission",
     "pick_folder",
@@ -134,6 +137,18 @@ pub(crate) async fn unsubscribe<R: Runtime>(
     stream: StreamId,
 ) -> Result<(), HostError> {
     bridge.unsubscribe(webview.label(), stream)
+}
+
+/// Subscribes the window's channel to the app-wide events, those of no stream (today
+/// `settings_changed`). It starts with nothing: subscribe, then read the current state with
+/// `query`. Subscribing again restarts it; a new `open_stream` drops it.
+#[tauri::command]
+#[cfg_attr(test, specta::specta)]
+pub(crate) async fn subscribe_app<R: Runtime>(
+    webview: Webview<R>,
+    bridge: State<'_, Bridge>,
+) -> Result<(), HostError> {
+    bridge.subscribe_app(webview.label()).await
 }
 
 /// Records that the window has received and processed `messages` channel messages since
