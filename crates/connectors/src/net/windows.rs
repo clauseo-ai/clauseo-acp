@@ -12,10 +12,10 @@ use std::os::windows::io::{FromRawSocket as _, RawSocket};
 use std::sync::OnceLock;
 
 use windows::Win32::Networking::WinSock::{
-    AF_INET, IN_ADDR, IN_ADDR_0, INVALID_SOCKET, IPPROTO_TCP, SO_EXCLUSIVEADDRUSE, SO_REUSEADDR,
-    SOCK_STREAM, SOCKADDR, SOCKADDR_IN, SOCKET, SOCKET_ERROR, SOL_SOCKET, SOMAXCONN,
-    WSA_FLAG_NO_HANDLE_INHERIT, WSA_FLAG_OVERLAPPED, WSADATA, WSAGetLastError, WSASocketW,
-    WSAStartup, bind, closesocket, listen, setsockopt,
+    AF_INET, IN_ADDR, IN_ADDR_0, INVALID_SOCKET, IPPROTO_TCP, SO_EXCLUSIVEADDRUSE, SOCK_STREAM,
+    SOCKADDR, SOCKADDR_IN, SOCKET, SOCKET_ERROR, SOL_SOCKET, SOMAXCONN, WSA_FLAG_NO_HANDLE_INHERIT,
+    WSA_FLAG_OVERLAPPED, WSADATA, WSAGetLastError, WSASocketW, WSAStartup, bind, closesocket,
+    listen, setsockopt,
 };
 
 /// Winsock 2.2, started once per process (std starts it too, lazily; the calls are counted).
@@ -118,5 +118,5 @@ pub(super) fn bind_exclusive(port: u16) -> io::Result<TcpListener> {
 /// What another process would try: the same port with `SO_REUSEADDR`.
 #[cfg(test)]
 pub(super) fn bind_reuseaddr(port: u16) -> io::Result<TcpListener> {
-    bind_with(port, SO_REUSEADDR)
+    bind_with(port, windows::Win32::Networking::WinSock::SO_REUSEADDR)
 }

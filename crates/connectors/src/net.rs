@@ -1,7 +1,7 @@
 //! [`bind_loopback_exclusive`]: the sign-in callback's listener, and R24's relay's.
 
 use std::io;
-use std::net::{Ipv4Addr, TcpListener};
+use std::net::TcpListener;
 
 #[cfg(windows)]
 mod windows;
@@ -17,12 +17,14 @@ pub fn bind_loopback_exclusive(port: u16) -> io::Result<TcpListener> {
     }
     #[cfg(not(windows))]
     {
-        TcpListener::bind((Ipv4Addr::LOCALHOST, port))
+        TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port))
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::net::Ipv4Addr;
+
     use super::*;
 
     #[test]
