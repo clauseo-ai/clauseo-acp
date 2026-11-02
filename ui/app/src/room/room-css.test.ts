@@ -1,6 +1,6 @@
 // The room's stylesheet (styles/index.css) carries the sheet of every part the room draws: the rail and its rows
 // (matters.css: the find field, the moved folder's ring, the current matter), and the new matter form
-// (matter-form.css: the folder line with Change, the placeholder's tone). Without them the room build draws those
+// (matter-form.css: the folder line with Change, the placeholder's tone). Without them the room draws those
 // parts unstyled, as the WebKit shots of U2 showed.
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";

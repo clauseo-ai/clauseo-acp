@@ -34,8 +34,8 @@ test("the blank app starts, renders #app-root and runs as the e2e build says", a
 
   await test.step("no securitypolicyviolation event fires", async () => {
     // The page loaded before Playwright attached, so the listener goes in as an init script, which
-    // runs before any page script, and the page loads again under it: Tauri's CSP header and, in
-    // the room's build, the same policy as a meta tag (ui/app/vite.config.ts, cspMeta).
+    // runs before any page script, and the page loads again under it: Tauri's CSP header and the
+    // same policy as a meta tag (ui/app/vite.config.ts, cspMeta).
     await app.page.addInitScript(() => {
       const refused: string[] = [];
       (window as Refused).__clauseoRefused = refused;
