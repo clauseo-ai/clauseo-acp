@@ -162,9 +162,19 @@ lawyer's documents somewhere.
   to its matter by the jail's port rule
 - `built`: After DNS it refuses a host if any address is loopback, private, link-local, shared,
   unspecified or multicast (IPv4 inside IPv6 included), and connects only to the addresses it
-  checked; through an upstream proxy only IP literals are checked
-- `built`: It decides by host name and never intercepts TLS: it holds no CA; a firm upstream
-  proxy set in Clauseo is chained, with no credentials (a 407 is reported); `designed`: the OS
-  proxy settings and PAC
+  checked. Through an upstream proxy the name goes on unresolved, and is refused if the
+  desktop's own DNS gives any non-public answer. Gap: when local DNS gives no answer (a desktop
+  that resolves only through the proxy) the name goes on unchecked, and the upstream may resolve
+  it differently (split DNS, or rebinding on each request)
+- `built`: It decides by host name and never intercepts TLS: it holds no CA. Gap: a CONNECT to
+  an allowed host can carry TLS whose SNI or `Host` names another site on the same address
+  (domain fronting)
+- `built`: A firm upstream proxy is chained with no credentials (a 407 from it is reported, for
+  CONNECT and plain `http://` alike): the firm's setting, then the host's `HTTPS_PROXY` or
+  `HTTP_PROXY`, then the OS proxy settings and PAC (CFNetwork on macOS, WinHTTP with WPAD on
+  Windows)
+- `built`: One launch cannot take the host's file descriptors: per launch, 64 connections still
+  sending their head and 192 sockets; 1024 sockets across every launch; tunnels idle for 15
+  minutes are closed; `designed`: the host raising its open-file limit at start (R17)
 - `built`: A blocked domain becomes a denial (rate-capped per launch); `designed`: the denial
   event and an "Allow this site?" card that opens a native dialog
