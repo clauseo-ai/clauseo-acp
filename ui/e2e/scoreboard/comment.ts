@@ -1,7 +1,7 @@
-// The scoreboard-comment workflow's script: finds the pull request a finished CI or e2e-windows run
-// belongs to, reads that head's artifacts and main's, and creates or edits the one comment marked
-// <!-- scoreboard -->. Run by `.github/workflows/scoreboard-comment.yml` from main's copy of this
-// folder, never the pull request's:
+// The scoreboard-comment workflow's script: finds the pull request a finished CI, e2e-windows or
+// scoreboard-macos run belongs to, reads that head's artifacts and main's, and creates or edits
+// the one comment marked <!-- scoreboard -->. Run by `.github/workflows/scoreboard-comment.yml`
+// from main's copy of this folder, never the pull request's:
 //
 //   GITHUB_TOKEN=... GITHUB_REPOSITORY=owner/repo GITHUB_EVENT_PATH=event.json \
 //   DEFAULT_BRANCH=main BUDGETS_FILE=budgets.toml node ui/e2e/scoreboard/comment.ts
@@ -21,13 +21,26 @@ import { parseBudgets, parseReducerSummaries, type ReducerCounts } from "./input
 import { parseResult, type Os, type ResultValues } from "./metrics.ts";
 import { MARKER, renderComment, type RenderInput, type Source } from "./render.ts";
 
-/** The workflows whose runs carry the artifacts, by path. Their `name:`s are the workflow's trigger. */
-export const WATCHED = [".github/workflows/ci.yml", ".github/workflows/e2e-windows.yml"];
+/**
+ * The workflows whose runs carry the artifacts, by path, in the order of scoreboard-comment.yml's
+ * `workflow_run.workflows`. Their `name:`s are the workflow's trigger.
+ */
+export const WATCHED = [
+  ".github/workflows/ci.yml",
+  ".github/workflows/e2e-windows.yml",
+  ".github/workflows/scoreboard-macos.yml",
+];
 /** Each artifact the comment reads; the file inside is `<name>.json`. */
 export const ARTIFACTS = {
   windows: "scoreboard-windows",
   macos: "scoreboard-macos",
   reducer: "reducer-bench-summary",
+} as const;
+/** The workflow file whose runs upload each artifact, by the same keys as {@link ARTIFACTS}. */
+export const PRODUCERS = {
+  windows: ".github/workflows/e2e-windows.yml",
+  macos: ".github/workflows/scoreboard-macos.yml",
+  reducer: ".github/workflows/ci.yml",
 } as const;
 /** The most bytes an artifact may have, zipped or unzipped. */
 export const MAX_ARTIFACT_BYTES = 1_000_000;
@@ -133,6 +146,8 @@ export async function findPullRequest(
 /** A run as the listing endpoints return it, with only what the script reads. */
 interface Run {
   id: number;
+  /** The workflow file, one of WATCHED. */
+  path: string;
   url: string;
   sha: string;
   completed: boolean;
@@ -141,21 +156,24 @@ interface Run {
 function toRun(v: unknown): Run | null {
   const r = rec(v);
   const id = int(r["id"]);
+  const path = str(r["path"]);
   const url = str(r["html_url"]);
   const sha = str(r["head_sha"]);
-  if (id === null || url === null || sha === null) return null;
-  return { id, url, sha, completed: r["status"] === "completed" };
+  if (id === null || path === null || url === null || sha === null) return null;
+  return { id, path, url, sha, completed: r["status"] === "completed" };
 }
 
 type Artifact = { id: number; bytes: number };
+/** The run and the artifact a name was found in. */
+type Hit = { run: Run; artifact: Artifact };
 
-/** The artifacts of a run by name, unexpired, each listed once per script run. */
+/** The artifacts of a run by name, unexpired, each run listed once per script run. */
 async function artifacts(
   gh: GitHub,
   repo: string,
   run: Run,
   cache: Map<number, Map<string, Artifact>>,
-) {
+): Promise<Map<string, Artifact>> {
   let found = cache.get(run.id);
   if (found === undefined) {
     found = new Map();
@@ -208,20 +226,48 @@ async function read<T>(
   }
 }
 
-/** The first of `runs` (newest first) with artifact `name`, read; or the state when none has it. */
-async function source<T>(
+/**
+ * For each name, the newest of `runs` (newest first) that has an artifact of that name. Runs are
+ * listed one at a time, newest first, and the walk stops as soon as every name is found, so a
+ * newer run without an artifact never hides an older one that has it.
+ */
+async function locate(
   gh: GitHub,
   repo: string,
   runs: Run[],
-  name: string,
-  parse: (text: string) => T,
+  names: readonly string[],
   cache: Map<number, Map<string, Artifact>>,
-): Promise<Source<T>> {
+): Promise<Map<string, Hit>> {
+  const hits = new Map<string, Hit>();
   for (const run of runs) {
-    const a = (await artifacts(gh, repo, run, cache)).get(name);
-    if (a !== undefined) return read(gh, run, name, a, parse);
+    if (hits.size === names.length) break;
+    for (const [name, artifact] of await artifacts(gh, repo, run, cache)) {
+      if (names.includes(name) && !hits.has(name)) hits.set(name, { run, artifact });
+    }
   }
-  const running = runs.find((run) => !run.completed);
+  return hits;
+}
+
+/** The newest of `runs` (newest first) from workflow `path`, if that run is not completed. */
+function inFlight(runs: Run[], path: string): Run | undefined {
+  const newest = runs.find((run) => run.path === path);
+  return newest !== undefined && !newest.completed ? newest : undefined;
+}
+
+/**
+ * The artifact `name` read from its hit, or the state when no run has it: pending while the newest
+ * run of its producing workflow is still in progress (it may still upload it), else not run.
+ */
+async function source<T>(
+  gh: GitHub,
+  runs: Run[],
+  hits: Map<string, Hit>,
+  name: keyof typeof ARTIFACTS,
+  parse: (text: string) => T,
+): Promise<Source<T>> {
+  const hit = hits.get(ARTIFACTS[name]);
+  if (hit !== undefined) return read(gh, hit.run, ARTIFACTS[name], hit.artifact, parse);
+  const running = inFlight(runs, PRODUCERS[name]);
   return running !== undefined ? { state: "pending", url: running.url } : { state: "not-run" };
 }
 
@@ -249,19 +295,16 @@ export async function run(gh: GitHub, ctx: Context): Promise<Outcome> {
   });
   if (!product) return { action: "skip", reason: `pull request #${pr} changes no product code` };
 
-  // This head's runs of the watched workflows: the newest of each.
+  // This head's runs of the watched workflows, newest first. Every one is kept: a label on a pull
+  // request starts a new scoreboard-macos run for the same head, most without an artifact.
   const headRuns: Run[] = [];
-  const seen = new Set<string>();
   const listed = await page(
     gh,
     `/repos/${ctx.repo}/actions/runs?head_sha=${sha}&event=pull_request&per_page=100`,
   );
   for (const v of listed.sort((a, b) => (int(rec(b)["id"]) ?? 0) - (int(rec(a)["id"]) ?? 0))) {
-    const path = str(rec(v)["path"]);
     const r = toRun(v);
-    if (r === null || path === null || !WATCHED.includes(path) || r.sha !== sha || seen.has(path))
-      continue;
-    seen.add(path);
+    if (r === null || !WATCHED.includes(r.path) || r.sha !== sha) continue;
     headRuns.push(r);
   }
 
@@ -277,7 +320,7 @@ export async function run(gh: GitHub, ctx: Context): Promise<Outcome> {
     const run = toRun(v);
     if (
       run !== null &&
-      WATCHED.includes(str(r["path"]) ?? "") &&
+      WATCHED.includes(run.path) &&
       MAIN_EVENTS.includes(str(r["event"]) ?? "") &&
       rec(r["head_repository"])["full_name"] === ctx.repo &&
       r["conclusion"] === "success"
@@ -287,12 +330,15 @@ export async function run(gh: GitHub, ctx: Context): Promise<Outcome> {
     if (mainRuns.length === 20) break;
   }
 
+  const names = [ARTIFACTS.windows, ARTIFACTS.macos, ARTIFACTS.reducer];
   const cache = new Map<number, Map<string, Artifact>>();
+  const prHits = await locate(gh, ctx.repo, headRuns, names, cache);
+  const mainHits = await locate(gh, ctx.repo, mainRuns, names, cache);
   const board = async (os: Os) => {
     const parse = (text: string): ResultValues => parseResult(text, os);
     return {
-      pr: await source(gh, ctx.repo, headRuns, ARTIFACTS[os], parse, cache),
-      main: await source(gh, ctx.repo, mainRuns, ARTIFACTS[os], parse, cache),
+      pr: await source(gh, headRuns, prHits, os, parse),
+      main: await source(gh, mainRuns, mainHits, os, parse),
     };
   };
   const input: RenderInput = {
@@ -300,22 +346,8 @@ export async function run(gh: GitHub, ctx: Context): Promise<Outcome> {
     budgets: parseBudgets(ctx.budgetsText),
     scoreboard: { windows: await board("windows"), macos: await board("macos") },
     reducer: {
-      pr: await source<ReducerCounts>(
-        gh,
-        ctx.repo,
-        headRuns,
-        ARTIFACTS.reducer,
-        parseReducerSummaries,
-        cache,
-      ),
-      main: await source<ReducerCounts>(
-        gh,
-        ctx.repo,
-        mainRuns,
-        ARTIFACTS.reducer,
-        parseReducerSummaries,
-        cache,
-      ),
+      pr: await source<ReducerCounts>(gh, headRuns, prHits, "reducer", parseReducerSummaries),
+      main: await source<ReducerCounts>(gh, mainRuns, mainHits, "reducer", parseReducerSummaries),
     },
   };
   const body = renderComment(input);

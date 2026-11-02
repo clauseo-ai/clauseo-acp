@@ -1,4 +1,4 @@
-# CI: the fast lane (`cargo xtask check` on Linux) and the blank app built and tested on every
+# CI: the fast lane (`cargo xtask check` on Linux) and the workspace linted and tested on every
 # target. Nightly and on demand, it also runs the mutation tests of main's last 24 hours.
 #
 # - No version is written here. Rust comes from rust-toolchain.toml, pnpm from "packageManager" and
@@ -6,28 +6,35 @@
 #   xtask/src/setup.rs, which .github/actions/install-pinned-tools reads with
 #   `cargo xtask setup --list=json` and installs as prebuilt binaries. The WebKitGTK packages come
 #   from .github/actions/install-tauri-linux-deps.
-# - Tier 1 (macOS Apple silicon, Windows x64) and Linux build and test on every pull request.
-#   Tier 2 (Intel macOS, Windows ARM64) waits for the merge: on a pull request its build jobs start
-#   but skip every step, and they run in full on each push to main, nightly and on demand. The
-#   Apple silicon job checks on each pull request that the workspace still compiles for Intel macOS.
-# - A pull request that touches only Markdown or docs/ still runs the fast lane, and the build jobs
-#   still start but skip every step. A job skipped as a whole would report its check under the
-#   unexpanded name "build (${{ matrix.target }})", and a required check that never reports blocks
-#   the merge.
+# - What a pull request runs depends on the paths it changes: .github/scripts/changes.sh decides,
+#   in the `changes` job, after its fixtures (changes-test.sh) pass. Without a Rust change (`rust`:
+#   crates/, xtask/, Cargo.toml, Cargo.lock, the toolchain and cargo config, CI itself) the build
+#   jobs start but skip every step. A path no rule knows runs everything, and so does a failed
+#   `changes` job. A job skipped as a whole would report its check under the unexpanded name
+#   "build (${{ matrix.target }})", and a required check that never reports blocks the merge.
+# - On a pull request the build jobs lint and test with the dev profile only: clippy, nextest, and
+#   on Linux a debug app that embeds ui/app/dist, launched under xvfb. No pull request job builds a
+#   release app; e2e-windows.yml's smoke test builds and drives the Windows one. Each push to main,
+#   nightly and on demand run the same steps (so main's Rust cache holds what pull requests build)
+#   and then the release app, full LTO, uploaded as clauseo-desktop-<target>.
+# - Tier 1 (macOS Apple silicon, Windows x64) and Linux build and test on every pull request that
+#   changes Rust. Tier 2 (Intel macOS, Windows ARM64) waits for the merge: on a pull request its
+#   jobs run on ubuntu-24.04 (no macOS or ARM64 runner is taken) and skip every step, and they run
+#   in full on each push to main, nightly and on demand. The Apple silicon job checks on each run
+#   that the workspace still compiles for Intel macOS.
+# - Rust caches are saved on main only (`save-if`); pull requests restore main's and save nothing,
+#   so they never evict main's entries from the 10 GB Actions cache. Tier 2 saves none: Intel macOS
+#   restores the Apple silicon entry (same host, so its build scripts and proc macros are reused),
+#   Windows ARM64 builds cold.
 # - The mutants job has no matrix, so it is skipped as a whole on pull requests and pushes, where it
 #   still reports its check as "mutants". It only reports: a missed mutant never fails the run.
 # - The Linux job runs the tests with the network cut off, so a test that reaches the network fails.
-# - reducer-bench counts clauseo-reducer's instructions under Valgrind on every run and, on a pull
-#   request, compares them with the merge-base on main. It uploads the counts as the
-#   reducer-bench-summary artifact, which the speed scoreboard's comment reads
+# - reducer-bench counts clauseo-reducer's instructions under Valgrind on every run that changes
+#   Rust and, on a pull request, compares them with the merge-base on main. It uploads the counts as
+#   the reducer-bench-summary artifact, which the speed scoreboard's comment reads
 #   (scoreboard-comment.yml).
-# - scoreboard-macos plays the speed scoreboard on macOS Apple silicon (R13): the `marks` build of
-#   the app plays fake_agent's scoreboard session by itself, one warm-up and three measured launches
-#   (ui/e2e/scoreboard/macos.ts), and the job uploads scoreboard-macos.json as the artifact
-#   scoreboard-macos for the scoreboard comment. It runs on pull requests that touch product code
-#   (crates/, ui/, Cargo.toml, Cargo.lock; the `product` output of changes), on every push to
-#   main, nightly and on demand. It is not a required check: on other pull requests it is skipped
-#   as a whole.
+# - The macOS speed scoreboard is its own workflow, scoreboard-macos.yml (main, nightly, on demand,
+#   and pull requests labelled `scoreboard`), so a pull request takes at most one macOS runner.
 # - Every third-party action is pinned by commit SHA, with its tag in a comment.
 
 name: CI
@@ -58,14 +65,27 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
-      build: ${{ steps.filter.outputs.build }}
+      rust: ${{ steps.filter.outputs.rust }}
+      app: ${{ steps.filter.outputs.app }}
+      ui: ${{ steps.filter.outputs.ui }}
       product: ${{ steps.filter.outputs.product }}
     steps:
-      # A push, the nightly run and a run on demand build everything; a pull request builds unless
-      # it changes only Markdown or docs/. `product` (the scoreboard) is true for a push, nightly,
-      # on demand, and a pull request that touches crates/, ui/, Cargo.toml or Cargo.lock (the
-      # paths of comment.ts's isProductPath).
-      - name: Decide whether the build jobs run
+      # The script, its fixtures, and the crate manifests the fixtures read; nothing else.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /.github/scripts/
+            /crates/*/Cargo.toml
+
+      # A rule that would let a code change skip its jobs fails this required check instead.
+      - name: Test the path rules against their fixtures
+        run: bash .github/scripts/changes-test.sh
+
+      # A push, the nightly run and a run on demand run everything; a pull request runs what its
+      # changed paths need (.github/scripts/changes.sh).
+      - name: Decide which jobs run
         id: filter
         env:
           EVENT: ${{ github.event_name }}
@@ -75,32 +95,21 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$EVENT" != pull_request ]; then
-            echo "build=true" >> "$GITHUB_OUTPUT"
-            echo "product=true" >> "$GITHUB_OUTPUT"
+            printf '%s\n' rust=true app=true ui=true product=true | tee -a "$GITHUB_OUTPUT"
             exit 0
           fi
-          git init -q work
-          cd work
+          scripts=$PWD/.github/scripts
+          git init -q "$RUNNER_TEMP/work"
+          cd "$RUNNER_TEMP/work"
           git fetch -q --no-tags --filter=blob:none "$REPO_URL" \
             "+refs/heads/${BASE_REF}:refs/ci/base" \
             "+${HEAD_SHA}:refs/ci/head"
           # --no-renames lists both sides of a rename, so a code file renamed to .md or moved under
           # docs/ still runs the builds.
-          changed=$(git diff --no-renames --name-only refs/ci/base...refs/ci/head)
-          code=$(printf '%s\n' "$changed" | grep -vE '\.md$|^docs/' || true)
-          if [ -n "$code" ]; then
-            echo "build=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "Only Markdown or docs/ changed: the build jobs skip their steps."
-            echo "build=false" >> "$GITHUB_OUTPUT"
-          fi
-          product=$(printf '%s\n' "$changed" | grep -E '^(crates/|ui/|Cargo\.toml$|Cargo\.lock$)' || true)
-          if [ -n "$product" ]; then
-            echo "product=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "No change to product code (crates/, ui/, Cargo.toml, Cargo.lock): no macOS scoreboard."
-            echo "product=false" >> "$GITHUB_OUTPUT"
-          fi
+          git diff --no-renames -z --name-only refs/ci/base...refs/ci/head > "$RUNNER_TEMP/changed"
+          echo "Changed paths:"
+          tr '\0' '\n' < "$RUNNER_TEMP/changed"
+          bash "$scripts/changes.sh" < "$RUNNER_TEMP/changed" | tee -a "$GITHUB_OUTPUT"
 
   fast-lane:
     name: fast-lane
@@ -136,9 +145,11 @@ jobs:
           echo "pnpm $(pnpm -v), ui/package.json wants $(node -p 'require("./ui/package.json").packageManager')"
           echo "node $(node -v), ui/package.json wants $(node -p 'require("./ui/package.json").engines.node')"
 
+      # Saved on main only, as every Rust cache here.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: "false"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # Every pinned tool, as prebuilt binaries; nothing is built from source.
       - name: Install the pinned tools
@@ -150,7 +161,10 @@ jobs:
   build:
     name: build (${{ matrix.target }})
     needs: changes
-    runs-on: ${{ matrix.runner }}
+    # A failed `changes` runs everything (CODE below), so every check still reports.
+    if: ${{ !cancelled() }}
+    # Tier 2 on a pull request only skips, so it takes an ubuntu runner, not a macOS or ARM64 one.
+    runs-on: ${{ (matrix.tier2 && github.event_name == 'pull_request') && 'ubuntu-24.04' || matrix.runner }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -164,19 +178,25 @@ jobs:
           - { target: x86_64-unknown-linux-gnu, runner: ubuntu-22.04, native: true, tier2: false }
           - { target: x86_64-pc-windows-msvc, runner: windows-2025, native: true, tier2: false }
           - { target: aarch64-pc-windows-msvc, runner: windows-11-arm, native: true, tier2: true }
+    # None of these names starts with CARGO or RUST, so none enters rust-cache's key: a pull request
+    # and main look up the same entry.
     env:
       TARGET: ${{ matrix.target }}
       EXE: clauseo-desktop${{ contains(matrix.target, '-windows-') && '.exe' || '' }}
-      CODE: ${{ needs.changes.outputs.build }}
+      CODE: ${{ needs.changes.result != 'success' || needs.changes.outputs.rust == 'true' }}
       TIER2_WAITS: ${{ matrix.tier2 && github.event_name == 'pull_request' }}
-      BUILD: ${{ needs.changes.outputs.build == 'true' && !(matrix.tier2 && github.event_name == 'pull_request') }}
+      BUILD: ${{ (needs.changes.result != 'success' || needs.changes.outputs.rust == 'true') && !(matrix.tier2 && github.event_name == 'pull_request') }}
+      # The full-LTO release app: push to main, nightly and on demand.
+      RELEASE: ${{ github.event_name != 'pull_request' }}
+      # The ui is built for the release app, and on Linux for the debug app launched under xvfb.
+      UI: ${{ github.event_name != 'pull_request' || contains(matrix.target, '-linux-') }}
     defaults:
       run:
         shell: bash
     steps:
-      - name: Skip, only Markdown or docs/ changed
+      - name: Skip, no Rust change
         if: env.CODE != 'true'
-        run: echo "Only Markdown or docs/ changed; nothing to build."
+        run: echo "No change to crates/, xtask/, Cargo.toml, Cargo.lock or the Rust config; nothing to build."
 
       - name: Skip, a tier-2 target builds after the merge
         if: env.CODE == 'true' && env.TIER2_WAITS == 'true'
@@ -199,70 +219,32 @@ jobs:
         with:
           extra-packages: xvfb
 
+      # A dev-profile check, clippy or nextest embeds no ui (tauri's dev build loads devUrl), so
+      # only an app build needs pnpm, Node and the ui workspace.
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        if: env.BUILD == 'true'
+        if: env.BUILD == 'true' && env.UI == 'true'
         with:
           package_json_file: ui/package.json
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        if: env.BUILD == 'true'
+        if: env.BUILD == 'true' && env.UI == 'true'
         with:
           node-version-file: ui/package.json
           cache: pnpm
           cache-dependency-path: ui/pnpm-lock.yaml
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        if: env.BUILD == 'true'
-        with:
-          key: ${{ matrix.target }}
-          cache-bin: "false"
-
       - name: Install the ui workspace
-        if: env.BUILD == 'true'
+        if: env.BUILD == 'true' && env.UI == 'true'
         run: pnpm -C ui install --frozen-lockfile
 
-      # `tauri build` turns on `custom-protocol`, so the binary embeds ui/app/dist. A plain
-      # `cargo build` would load devUrl instead.
-      - name: Build the app
-        if: env.BUILD == 'true'
-        run: pnpm -C ui tauri build --no-bundle --target "$TARGET"
-
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: env.BUILD == 'true'
+      # Saved on main only. Intel macOS restores the Apple silicon entry and saves nothing; Windows
+      # ARM64 has none (the cache plan is in ci-perfmax's notes: tier 2 would push main past 10 GB).
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: env.BUILD == 'true' && matrix.target != 'aarch64-pc-windows-msvc'
         with:
-          name: clauseo-desktop-${{ matrix.target }}
-          path: target/${{ env.TARGET }}/release/${{ env.EXE }}
-          if-no-files-found: error
-
-      # One developer works on an Intel Mac, so main must always compile there; the full Intel
-      # build waits for the merge. After the app build, which writes the ui/app/dist the desktop
-      # crate embeds.
-      - name: Check that the workspace compiles for Intel macOS
-        if: env.BUILD == 'true' && matrix.target == 'aarch64-apple-darwin' && github.event_name == 'pull_request'
-        run: |
-          rustup target add x86_64-apple-darwin
-          cargo check --workspace --all-targets --target x86_64-apple-darwin --locked
-
-      # The app must still be running when the timeout stops it (exit 124), without a panic.
-      - name: Launch the app under xvfb
-        if: env.BUILD == 'true' && runner.os == 'Linux'
-        run: |
-          status=0
-          xvfb-run -a timeout 15 "target/$TARGET/release/$EXE" > launch.log 2>&1 || status=$?
-          cat launch.log
-          if [ "$status" -ne 124 ]; then
-            echo "::error::the app exited with $status before the 15 s timeout; expected 124"
-            exit 1
-          fi
-          if grep -n 'panicked' launch.log; then
-            echo "::error::the app panicked"
-            exit 1
-          fi
-
-      # cfg-gated code is linted only on its own OS.
-      - name: clippy
-        if: env.BUILD == 'true' && matrix.native
-        run: cargo clippy --workspace --all-targets --target "$TARGET" -- -D warnings
+          key: ${{ matrix.target == 'x86_64-apple-darwin' && 'aarch64-apple-darwin' || matrix.target }}
+          cache-bin: "false"
+          save-if: ${{ github.ref == 'refs/heads/main' && !matrix.tier2 }}
 
       # The tests need only one pinned tool, nextest, as a prebuilt binary.
       - name: Install nextest at its pin
@@ -270,6 +252,25 @@ jobs:
         uses: ./.github/actions/install-pinned-tools
         with:
           tools: cargo-nextest
+
+      # cfg-gated code is linted only on its own OS.
+      - name: clippy
+        if: env.BUILD == 'true' && matrix.native
+        run: cargo clippy --workspace --all-targets --target "$TARGET" -- -D warnings
+
+      # The marks build's macOS code (src/marks.rs), which the speed scoreboard plays; that job
+      # runs on pull requests only with the `scoreboard` label, so this keeps it compiling.
+      - name: clippy the desktop crate with the marks feature
+        if: env.BUILD == 'true' && matrix.target == 'aarch64-apple-darwin'
+        run: cargo clippy -p clauseo-desktop --all-targets --features marks --target "$TARGET" -- -D warnings
+
+      # One developer works on an Intel Mac, so main must always compile there; the full Intel
+      # build waits for the merge. It runs on main too, so main's cache holds its dependencies.
+      - name: Check that the workspace compiles for Intel macOS
+        if: env.BUILD == 'true' && matrix.target == 'aarch64-apple-darwin'
+        run: |
+          rustup target add x86_64-apple-darwin
+          cargo check --workspace --all-targets --target x86_64-apple-darwin --locked
 
       - name: Test
         if: env.BUILD == 'true' && matrix.native && runner.os != 'Linux'
@@ -309,106 +310,37 @@ jobs:
               as_runner cargo nextest run --workspace --profile ci --no-tests=pass
             '
 
-  # The speed scoreboard on macOS (R13). The `marks` build plays the session itself and writes each
-  # run to MARKS_OUT; macos.ts launches it four times and writes the medians. Its numbers report and
-  # alert, so a failure leaves the run green (continue-on-error, as mutants): a red CI run on main
-  # would also hide that run's reducer-bench-summary from the comment, which reads main's
-  # successful runs only. The job is not a required check. It also runs the desktop crate's tests
-  # and clippy with the marks feature, which no other job builds: a failure there marks this job
-  # failed and skips the plays, and the run stays green as above.
-  scoreboard-macos:
-    name: scoreboard-macos
-    needs: changes
-    if: needs.changes.outputs.product == 'true'
-    runs-on: macos-15
-    continue-on-error: true
-    # About 12 minutes of build and tests, then at worst 4 plays × 3 launches × 240 s
-    # (PLAY_TIMEOUT_MS and PLAY_ATTEMPTS in ui/e2e/scoreboard/macos.ts): 60 minutes.
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
+      # `tauri build` turns on `custom-protocol`, so the binary embeds ui/app/dist (a plain
+      # `cargo build` would load devUrl). --debug keeps the dev profile, whose dependencies the
+      # tests above already built: about 8 s on top of them on an M-series Mac, against 75 s for
+      # the full-LTO release build (ci-perfmax's notes).
+      - name: Build the debug app
+        if: env.BUILD == 'true' && runner.os == 'Linux'
+        run: pnpm -C ui tauri build --debug --no-bundle
 
-      - name: Install the Rust toolchain from rust-toolchain.toml
-        run: rustup toolchain install
-
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        with:
-          package_json_file: ui/package.json
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version-file: ui/package.json
-          cache: pnpm
-          cache-dependency-path: ui/pnpm-lock.yaml
-
-      # Its own key: the marks feature changes the desktop crate's build.
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          key: scoreboard-macos
-          cache-bin: "false"
-
-      - name: Install the ui workspace
-        run: pnpm -C ui install --frozen-lockfile
-
-      # `tauri build` embeds ui/app/dist (custom-protocol); `marks` turns on e2e as well.
-      - name: Build the app with the marks feature
-        run: pnpm -C ui tauri build --no-bundle --features marks
-
-      - name: Build fake_agent
-        run: cargo build --release --locked -p clauseo-fake_agent
-
-      # The desktop crate's marks-only code and tests, which no other job compiles. After the app
-      # build, which writes the ui/app/dist the crate embeds.
-      - name: Install nextest at its pin
-        uses: ./.github/actions/install-pinned-tools
-        with:
-          tools: cargo-nextest
-
-      # The permission tests start fake_agent from target/debug (test_support.rs), which only a
-      # workspace run builds, so the dev build comes first; the release one above is for the plays.
-      - name: Test the desktop crate with the marks feature
-        run: |
-          cargo build --locked -p clauseo-fake_agent
-          cargo nextest run -p clauseo-desktop --features marks --locked --profile ci
-
-      - name: clippy the desktop crate with the marks feature
-        run: cargo clippy -p clauseo-desktop --all-targets --features marks --locked -- -D warnings
-
-      # Plain Node, no install: macos.ts imports Node's own modules and ui/e2e files only.
-      - name: Speed scoreboard
+      # The app must still be running when the timeout stops it (exit 124), without a panic.
+      - name: Launch the debug app under xvfb
+        if: env.BUILD == 'true' && runner.os == 'Linux'
         env:
-          MARKS_APP: ${{ github.workspace }}/target/release/clauseo-desktop
-          MARKS_FAKE_AGENT: ${{ github.workspace }}/target/release/fake_agent
-          SCOREBOARD_OUT: ${{ runner.temp }}/scoreboard-out
-        # The runner stretches short sleeps: in PR #106's runs, 200 sleeps of 5 ms took 5.5 to 6.2 s
-        # (App Nap off and `taskpolicy -a` changed nothing), so the stream ran about 85 s instead
-        # of 13 s. macos.ts then reports first token, React commits per frame and IPC as not
-        # measured and keeps the rest. The probe prints this run's figure first.
-        run: |
-          set -euo pipefail
-          # shellcheck disable=SC2016 # Perl's variables, not the shell's.
-          probe='use Time::HiRes qw(sleep time); my $t = time; sleep(0.005) for 1..200; printf "200 sleeps of 5 ms: %.0f ms\n", (time - $t) * 1000'
-          perl -e "$probe"
-          node ui/e2e/scoreboard/macos.ts
+          APP: target/debug/${{ env.EXE }}
+        run: .github/scripts/launch-xvfb.sh "$APP"
 
-      # comment.ts reads scoreboard-macos.json from the artifact scoreboard-macos.
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: ${{ !cancelled() }}
-        with:
-          name: scoreboard-macos
-          path: ${{ runner.temp }}/scoreboard-out/scoreboard-macos.json
-          if-no-files-found: warn
+      - name: Build the release app (full LTO)
+        if: env.BUILD == 'true' && env.RELEASE == 'true'
+        run: pnpm -C ui tauri build --no-bundle --target "$TARGET"
 
-      # Each play's run file as the app wrote it (warm-up included), for checking the medians by
-      # hand. A separate artifact the comment never reads.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: ${{ !cancelled() }}
+        if: env.BUILD == 'true' && env.RELEASE == 'true'
         with:
-          name: scoreboard-macos-runs
-          path: ${{ runner.temp }}/scoreboard-out/runs
-          if-no-files-found: warn
+          name: clauseo-desktop-${{ matrix.target }}
+          path: target/${{ env.TARGET }}/release/${{ env.EXE }}
+          if-no-files-found: error
+
+      - name: Launch the release app under xvfb
+        if: env.BUILD == 'true' && env.RELEASE == 'true' && runner.os == 'Linux'
+        env:
+          APP: target/${{ env.TARGET }}/release/${{ env.EXE }}
+        run: .github/scripts/launch-xvfb.sh "$APP"
 
   # cargo-mutants on main's changes of the last 24 hours, nightly and on demand. It only reports:
   # a missed mutant, or a run that reaches `MUTANTS_TIMEOUT` in xtask/src/mutants.rs, shows in the
@@ -460,6 +392,7 @@ jobs:
         with:
           key: mutants
           cache-bin: "false"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # cargo-mutants runs each mutant's tests with nextest (`test_tool` in .cargo/mutants.toml), so
       # both are installed, and no other pinned tool.
@@ -505,8 +438,8 @@ jobs:
             target/xtask/wire/mutants.out
           if-no-files-found: warn
 
-  # clauseo-reducer's instruction counts under Valgrind (gungraun), on every run: the hard limits in
-  # crates/reducer_bench/benches/apply.rs always apply. On a pull request whose merge-base on main
+  # clauseo-reducer's instruction counts under Valgrind (gungraun), on every run that changes Rust
+  # (\`rust\` of changes): the hard limits in crates/reducer_bench/benches/apply.rs always apply. On a pull request whose merge-base on main
   # has the bench, it first saves main's counts as the baseline `main`, then fails the head on more
   # than 2% more `ir` in any case (the soft limit in apply.rs) unless the pull request carries the
   # label `bench-ok`. A label added after the run started takes effect when the job is re-run.
@@ -522,6 +455,9 @@ jobs:
   #   job's result stays the bench's.
   reducer-bench:
     name: reducer-bench
+    needs: changes
+    # Not a required check, so it may skip as a whole: on a pull request without a Rust change.
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.rust == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
@@ -543,6 +479,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: reducer-bench
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install Valgrind
         run: |

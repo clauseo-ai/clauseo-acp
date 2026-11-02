@@ -1,7 +1,7 @@
-# The speed scoreboard's pull request comment (R13). When a CI or e2e-windows run of a pull request
-# ends, this finds the pull request, reads the head's scoreboard and reducer-bench artifacts and
-# main's, and creates or edits the one comment that starts with <!-- scoreboard -->. The logic is
-# in ui/e2e/scoreboard/comment.ts, with its tests beside it.
+# The speed scoreboard's pull request comment (R13). When a CI, e2e-windows or scoreboard-macos run
+# of a pull request ends, this finds the pull request, reads the head's scoreboard and
+# reducer-bench artifacts and main's, and creates or edits the one comment that starts with
+# <!-- scoreboard -->. The logic is in ui/e2e/scoreboard/comment.ts, with its tests beside it.
 #
 # - workflow_run runs the copy of this file on the default branch, with a token that can comment,
 #   also for a fork's pull request. So it never checks out or runs the pull request's code: the
@@ -15,9 +15,10 @@
 # - Main's numbers come from main's newest successful run (push, nightly or on demand) that has
 #   each artifact. A pull request that changes no product code (crates/, ui/, Cargo.toml,
 #   Cargo.lock) gets no comment.
-# - Artifacts it reads: scoreboard-windows (e2e-windows.yml, the Speed scoreboard step of
-#   smoke (windows-2025)), scoreboard-macos (ci.yml, scoreboard-macos) and reducer-bench-summary
-#   (ci.yml, reducer-bench). One that is missing shows as "not run".
+# - Artifacts it reads: scoreboard-windows (e2e-windows.yml, job scoreboard-windows),
+#   scoreboard-macos (scoreboard-macos.yml, which runs on a pull request only with the label
+#   `scoreboard`) and reducer-bench-summary (ci.yml, reducer-bench). Each comes from the newest run
+#   of the head commit that has it; one that is missing shows as "not run".
 # - It runs Node without installing anything: comment.ts imports only Node's own modules.
 # - Every action is pinned by commit SHA, with its tag in a comment.
 
@@ -27,7 +28,7 @@ on:
   workflow_run:
     # The `name:`s of the workflows in WATCHED in ui/e2e/scoreboard/comment.ts; a test checks both
     # lists agree.
-    workflows: [CI, e2e-windows]
+    workflows: [CI, e2e-windows, scoreboard-macos]
     types: [completed]
 
 permissions: {}

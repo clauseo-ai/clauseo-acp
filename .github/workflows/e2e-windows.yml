@@ -6,36 +6,39 @@
 # the scripted fake_agent, built beside the app: each test gets a scratch CLAUSEO_DATA_DIR whose
 # settings.json starts fake_agent on that test's scenario as agents.claude, and a scratch
 # E2E_MATTER_DIR (ui/e2e/app-windows/scratch.ts), so no run touches the runner's real data folder.
-# On windows-2025 the job then plays the speed scoreboard (R13, ui/e2e/app-windows/scoreboard.spec.ts)
-# and uploads scoreboard-windows.json as the artifact scoreboard-windows, which the pull request's
-# scoreboard comment reads (scoreboard-comment.yml).
+# The job scoreboard-windows plays the speed scoreboard (R13, ui/e2e/app-windows/scoreboard.spec.ts)
+# on windows-2025 and uploads scoreboard-windows.json as the artifact scoreboard-windows, which the
+# pull request's scoreboard comment reads (scoreboard-comment.yml).
 #
 # - No version is written here, as in ci.yml: Rust comes from rust-toolchain.toml, pnpm from
 #   "packageManager" and Node from "engines.node" in ui/package.json, Playwright from
 #   ui/e2e/package.json.
 # - `tauri build` turns on `custom-protocol`, so the binary embeds ui/app/dist. A plain
 #   `cargo build` would load devUrl instead.
+# - The smoke test's app is a release build with LTO off and 16 codegen units
+#   (CARGO_PROFILE_RELEASE_* below): optimised, panic=abort and a GUI exe like the shipped app,
+#   about 4 times faster to build than full LTO with a warm cache (ci-perfmax's notes). The
+#   scoreboard measures the full-LTO build, as main's baselines always have, so it builds its own.
 # - Every action is pinned by commit SHA, with its tag in a comment.
 
 name: e2e-windows
 
 # Every pull request gets the check `smoke (windows-2025)`, the x64 smoke test. Branch protection on
-# main requires it (#51). The job e2e-changes decides whether the steps run, with two outputs:
-# - `run`: the pull request touches the app's paths (crates/desktop/, the crates it runs on and
-#   fake_agent, ui/, this workflow).
-# - `scoreboard`: it touches product code (crates/, ui/, Cargo.toml, Cargo.lock: the paths for
-#   which scoreboard-comment.yml comments, comment.ts's isProductPath).
-# The steps run, on x64 only, when either is true: the smoke test in full, then the speed
-# scoreboard (windows-2025, normal mode) when `scoreboard` is true. So a pull request that touches
-# product code outside the app's paths (another crate, Cargo.lock) runs the smoke test too. One
-# that touches neither starts the job and skips every step, so the check reports in seconds. A
-# failed decision runs everything, so the check always reports. A change elsewhere that breaks the
-# app (the toolchain, another workflow) shows up on the next push to main. smoke is never skipped
-# as a whole: a job skipped that way reports under the literal name `smoke (${{ matrix.runner }})`,
-# and a required check that never reports blocks the merge.
+# main requires it (#51). The job e2e-changes runs .github/scripts/changes.sh (as ci.yml's
+# `changes` does) for two outputs:
+# - `app`: the pull request touches the app: the desktop crate, the crates it runs on and
+#   fake_agent, ui/, Cargo.toml, Cargo.lock, the Rust config, or CI itself. The smoke steps run.
+# - `product`: it touches product code (crates/, ui/, Cargo.toml, Cargo.lock: the paths for which
+#   scoreboard-comment.yml comments, comment.ts's isProductPath). scoreboard-windows runs.
+# A pull request that touches neither starts smoke and skips every step, so the check reports in
+# seconds. A path no rule knows, or a failed decision, runs everything, so the check always
+# reports. smoke is never skipped as a whole: a job skipped that way reports under the literal name
+# `smoke (${{ matrix.runner }})`, and a required check that never reports blocks the merge.
+# scoreboard-windows is not a required check, so it is skipped as a whole when it has nothing to do.
 # Every push to main, the nightly run and a run on demand cover x64 and ARM64 (windows-11-arm) and
-# play the scoreboard on x64, which gives the budgets their baseline and keeps main's Rust cache,
-# the one pull requests can read, warm.
+# play the scoreboard on x64, which gives the budgets their baseline and keeps main's Rust caches,
+# the ones pull requests restore, warm. Caches are saved on main only, and ARM64 keeps none.
+
 on:
   pull_request:
   push:
@@ -54,19 +57,24 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # Not named changes (ci.yml's required check). Copies ci.yml's fetch and diff: fix both together.
+  # Not named changes (ci.yml's required check). The same script decides for both workflows.
   e2e-changes:
     name: e2e-changes
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
-      run: ${{ steps.filter.outputs.run }}
-      scoreboard: ${{ steps.filter.outputs.scoreboard }}
+      app: ${{ steps.filter.outputs.app }}
+      product: ${{ steps.filter.outputs.product }}
     steps:
-      # A push, the nightly run and a run on demand run the smoke test and the scoreboard; a pull
-      # request runs the smoke test only when it changes the desktop crate, a crate the app runs
-      # (host and what it uses), fake_agent, the ui or this workflow, and the scoreboard only when it
-      # changes product code (crates/, ui/, Cargo.toml, Cargo.lock; comment.ts's isProductPath).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /.github/scripts/
+
+      # A push, the nightly run and a run on demand run everything; a pull request runs what its
+      # changed paths need. ci.yml's `changes` job tests the rules against their fixtures.
       - name: Decide whether the smoke test and the scoreboard run
         id: filter
         env:
@@ -77,43 +85,26 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$EVENT" != pull_request ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            echo "scoreboard=true" >> "$GITHUB_OUTPUT"
+            printf '%s\n' app=true product=true | tee -a "$GITHUB_OUTPUT"
             exit 0
           fi
-          git init -q work
-          cd work
+          scripts=$PWD/.github/scripts
+          git init -q "$RUNNER_TEMP/work"
+          cd "$RUNNER_TEMP/work"
           git fetch -q --no-tags --filter=blob:none "$REPO_URL" \
             "+refs/heads/${BASE_REF}:refs/ci/base" \
             "+${HEAD_SHA}:refs/ci/head"
           # --no-renames lists both sides of a rename, so a file renamed out of an app path still
           # runs the smoke test.
-          changed=$(git diff --no-renames -z --name-only refs/ci/base...refs/ci/head | tr '\0' '\n')
-          # The crates here are clauseo-desktop and its path dependencies: update the list with
-          # crates/desktop/Cargo.toml's dependencies.
-          app=$(printf '%s\n' "$changed" \
-            | grep -E '^(crates/(desktop|host|protocol|acp|process|reducer|store|matters|settings|fake_agent)/|ui/|\.github/workflows/e2e-windows\.yml$)' || true)
-          if [ -n "$app" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "No change to the app's crates, fake_agent, ui/ or this workflow: the steps skip."
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          fi
-          product=$(printf '%s\n' "$changed" | grep -E '^(crates/|ui/|Cargo\.toml$|Cargo\.lock$)' || true)
-          if [ -n "$product" ]; then
-            echo "scoreboard=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "No change to product code (crates/, ui/, Cargo.toml, Cargo.lock): no scoreboard."
-            echo "scoreboard=false" >> "$GITHUB_OUTPUT"
-          fi
+          git diff --no-renames -z --name-only refs/ci/base...refs/ci/head > "$RUNNER_TEMP/changed"
+          bash "$scripts/changes.sh" < "$RUNNER_TEMP/changed" | tee -a "$GITHUB_OUTPUT"
 
   smoke:
     name: smoke (${{ matrix.runner }})
     needs: e2e-changes
     if: ${{ !cancelled() }}
     runs-on: ${{ matrix.runner }}
-    # The scoreboard's four plays add about five minutes on windows-2025.
-    timeout-minutes: 75
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       # x64 always; ARM64 on every event but a pull request. One JSON list per case, because an
@@ -126,9 +117,12 @@ jobs:
                  {"runner": "windows-11-arm", "target": "aarch64-pc-windows-msvc"}]') }}
     env:
       # A failed decision runs everything, so the check always reports.
-      RUN: ${{ needs.e2e-changes.result != 'success' || needs.e2e-changes.outputs.run == 'true' || needs.e2e-changes.outputs.scoreboard == 'true' }}
-      SCOREBOARD: ${{ matrix.runner == 'windows-2025' && (needs.e2e-changes.result != 'success' || needs.e2e-changes.outputs.scoreboard == 'true') }}
+      RUN: ${{ needs.e2e-changes.result != 'success' || needs.e2e-changes.outputs.app == 'true' }}
       TARGET: ${{ matrix.target }}
+      # Every event, so main saves the Rust cache under the key pull requests look up (rust-cache
+      # hashes CARGO_* variables into it).
+      CARGO_PROFILE_RELEASE_LTO: "false"
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
       E2E_APP: ${{ github.workspace }}/target/${{ matrix.target }}/release/clauseo-desktop.exe
       # The scripted agent the window's specs launch through settings.json (fixture.ts).
       E2E_FAKE_AGENT: ${{ github.workspace }}/target/${{ matrix.target }}/release/fake_agent.exe
@@ -137,9 +131,9 @@ jobs:
       run:
         shell: bash
     steps:
-      - name: Skip, the app's crates, ui, product code and this workflow are unchanged
+      - name: Skip, the app is unchanged
         if: env.RUN != 'true'
-        run: echo "No change to the app's crates, fake_agent, ui/, product code or this workflow; nothing to smoke-test."
+        run: echo "No change to the app's crates, fake_agent, ui/, the Rust config or CI; nothing to smoke-test."
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: env.RUN == 'true'
@@ -164,11 +158,13 @@ jobs:
           cache: pnpm
           cache-dependency-path: ui/pnpm-lock.yaml
 
+      # x64 only, saved on main only; ARM64 runs after the merge and keeps no cache.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        if: env.RUN == 'true'
+        if: env.RUN == 'true' && matrix.runner == 'windows-2025'
         with:
           key: e2e-${{ matrix.target }}
           cache-bin: "false"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install the ui workspace
         if: env.RUN == 'true'
@@ -192,7 +188,8 @@ jobs:
         if: env.RUN == 'true'
         run: pnpm -C ui tauri build --no-bundle --features e2e --target "$TARGET"
 
-      # Release, same target, beside the app: E2E_FAKE_AGENT above. The specs run it as agents.claude.
+      # Same profile and target, beside the app: E2E_FAKE_AGENT above. The specs run it as
+      # agents.claude.
       - name: Build fake_agent
         id: fake_agent
         if: env.RUN == 'true'
@@ -231,16 +228,68 @@ jobs:
           path: ${{ env.OUT }}
           if-no-files-found: warn
 
-      # The speed scoreboard (R13): one warm-up and three measured plays of fake_agent's scoreboard
-      # session, each a fresh launch, normal mode (ui/e2e/app-windows/scoreboard.spec.ts). Its numbers
-      # report and alert and never block a merge, so a failure here leaves the check green with a
-      # warning on the run; the comment then shows this pull request's Windows numbers as not run.
+  # The speed scoreboard (R13): one warm-up and three measured plays of fake_agent's scoreboard
+  # session, each a fresh launch, normal mode (ui/e2e/app-windows/scoreboard.spec.ts), on the
+  # full-LTO release build with the e2e feature, as main's baselines were measured. Its own job
+  # beside smoke, on pull requests that touch product code and on every push to main, nightly
+  # and on demand. Its numbers report and alert and never block a merge: the job is not a required
+  # check, and continue-on-error keeps a failure from turning the run red (a red run on main would
+  # hide that run's numbers from the comment, which reads main's successful runs only). The comment
+  # then shows this pull request's Windows numbers as not run.
+  scoreboard-windows:
+    name: scoreboard-windows
+    needs: e2e-changes
+    if: ${{ !cancelled() && (needs.e2e-changes.result != 'success' || needs.e2e-changes.outputs.product == 'true') }}
+    runs-on: windows-2025
+    continue-on-error: true
+    # About 8 minutes of build, then the four plays (about 2.5 minutes in smoke before, run
+    # 41383564166 and earlier) with room for slow ones.
+    timeout-minutes: 45
+    env:
+      TARGET: x86_64-pc-windows-msvc
+      E2E_APP: ${{ github.workspace }}/target/x86_64-pc-windows-msvc/release/clauseo-desktop.exe
+      E2E_FAKE_AGENT: ${{ github.workspace }}/target/x86_64-pc-windows-msvc/release/fake_agent.exe
+      SCOREBOARD_OUT: ${{ github.workspace }}/scoreboard-out
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the Rust toolchain from rust-toolchain.toml, and the target
+        run: |
+          rustup toolchain install
+          rustup target add "$TARGET"
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: ui/package.json
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ui/package.json
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+
+      # Its own key: the full-LTO release build shares no dependency builds with smoke's.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: scoreboard-windows
+          cache-bin: "false"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install the ui workspace
+        run: pnpm -C ui install --frozen-lockfile
+
+      - name: Build the app with the e2e feature (full LTO)
+        run: pnpm -C ui tauri build --no-bundle --features e2e --target "$TARGET"
+
+      - name: Build fake_agent
+        run: cargo build --release --locked -p clauseo-fake_agent --target "$TARGET"
+
       - name: Speed scoreboard
-        id: scoreboard
-        if: ${{ env.RUN == 'true' && env.SCOREBOARD == 'true' && !cancelled() && steps.build.outcome == 'success' && steps.fake_agent.outcome == 'success' }}
-        continue-on-error: true
-        env:
-          SCOREBOARD_OUT: ${{ github.workspace }}/scoreboard-out
         run: |
           status=0
           pnpm -C ui/e2e test scoreboard.spec.ts || status=$?
@@ -251,7 +300,6 @@ jobs:
 
       # comment.ts reads scoreboard-windows.json from the artifact scoreboard-windows.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: ${{ !cancelled() && steps.scoreboard.outcome == 'success' }}
         with:
           name: scoreboard-windows
           path: ${{ github.workspace }}/scoreboard-out/scoreboard-windows.json
@@ -260,7 +308,7 @@ jobs:
       # Each play's raw run and debug numbers (warm-up included), for checking the medians by hand.
       # A separate artifact the comment never reads; uploaded after a failed play too.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: ${{ !cancelled() && steps.scoreboard.outcome != 'skipped' }}
+        if: ${{ !cancelled() }}
         with:
           name: scoreboard-windows-runs
           path: ${{ github.workspace }}/scoreboard-out/runs
