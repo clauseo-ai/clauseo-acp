@@ -19,6 +19,7 @@ expression: "Snapshot::of(&every)"
           "paused_at_limit": {}
         },
         "queue_held": false,
+        "steer_joins_turn": true,
         "config_options": [],
         "commands": [],
         "plan": []

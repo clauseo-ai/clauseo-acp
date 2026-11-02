@@ -153,7 +153,7 @@ impl Serialize for ThreadState {
         let mut s = serializer.serialize_struct("ThreadState", 10)?;
         s.serialize_field("thread", &self.thread)?;
         s.serialize_field("seq", &self.seq)?;
-        s.serialize_field("header", &self.header)?;
+        s.serialize_field("header", &unheld(self.header.as_ref()))?;
         s.serialize_field("entries", &DurableEntries(self))?;
         s.serialize_field("text_utf16", &DurableCounts(self))?;
         s.serialize_field("turn", &self.turn)?;
@@ -163,6 +163,22 @@ impl Serialize for ThreadState {
         s.serialize_field("failures", &self.failures)?;
         s.end()
     }
+}
+
+/// The header as the fold left it: `queue_held` is the host's flag, set after each load
+/// ([`crate::set_queue_held`]), so a snapshot writes it `false` and still equals the fold of the
+/// log. Copies the header only while the flag is set.
+fn unheld(header: Option<&HeaderEntry>) -> Option<std::borrow::Cow<'_, HeaderEntry>> {
+    header.map(|header| {
+        if header.queue_held {
+            std::borrow::Cow::Owned(HeaderEntry {
+                queue_held: false,
+                ..header.clone()
+            })
+        } else {
+            std::borrow::Cow::Borrowed(header)
+        }
+    })
 }
 
 /// The entries as a list, oldest first, each message cut to its durable part, messages only
@@ -266,7 +282,8 @@ impl<'de> Deserialize<'de> for ThreadState {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let wire = ThreadWire::deserialize(deserializer)?;
         let entries = by_order(wire.entries);
-        let index = Index::rebuild(&entries, &wire.text_utf16);
+        let mut index = Index::rebuild(&entries, &wire.text_utf16);
+        index.rebuild_unstarted(&entries, wire.running);
         Ok(Self {
             thread: wire.thread,
             seq: wire.seq,

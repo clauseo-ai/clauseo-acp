@@ -47,6 +47,9 @@ expression: "entry(\"tool_call\")"
           }
         }
       }
-    ]
+    ],
+    "background": {
+      "steer": "01900000-0000-7000-8000-000000000009"
+    }
   }
 }

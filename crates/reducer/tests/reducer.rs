@@ -29,6 +29,8 @@ mod props;
 mod queued;
 #[path = "reducer/snapshot.rs"]
 mod snapshot;
+#[path = "reducer/steer.rs"]
+mod steer;
 #[path = "reducer/stream_kinds.rs"]
 mod stream_kinds;
 #[path = "reducer/text.rs"]

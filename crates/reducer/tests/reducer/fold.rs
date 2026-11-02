@@ -217,7 +217,7 @@ fn web_events_change_no_state() {
 }
 
 #[test]
-fn later_event_is_not_yet_folded() {
+fn edit_of_an_unknown_message_changes_nothing() {
     let (mut log, mut state) = created(5);
     let turn = start_turn(&mut log, "Read the lease.").unwrap();
     catch_up(&log, &mut state);
@@ -234,8 +234,9 @@ fn later_event_is_not_yet_folded() {
     assert!(out.changes.is_empty(), "{:?}", out.changes);
     assert_eq!(
         out.anomalies,
-        [Anomaly::NotYetFolded {
-            event: "queued_prompt_edited"
+        [Anomaly::UnknownReference {
+            event: "queued_prompt_edited",
+            target: clauseo_protocol::EntryId::UserMessage(message),
         }]
     );
     assert_eq!(state.seq(), Some(seq(4)));

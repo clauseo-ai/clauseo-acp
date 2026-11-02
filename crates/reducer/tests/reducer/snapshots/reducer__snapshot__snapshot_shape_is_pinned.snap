@@ -17,6 +17,7 @@ expression: "Snapshot::of(&state)"
         "agent": "claude-acp",
         "status": "needs_you",
         "queue_held": false,
+        "steer_joins_turn": true,
         "config_options": [],
         "commands": [],
         "plan": []

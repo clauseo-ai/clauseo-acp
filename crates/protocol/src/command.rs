@@ -249,14 +249,17 @@ pub enum HostCommand {
         #[serde(default, skip_serializing_if = "Delivery::is_queue")]
         delivery: DeliveryRequest,
     },
-    /// Replace a queued prompt's content; the turn keeps its id and its place.
+    /// Replace a queued prompt's text; the turn keeps its id, its place and its file blocks.
     EditQueuedPrompt {
         /// The thread.
         thread: ThreadId,
         /// The queued turn.
         turn: TurnId,
-        /// The new content, under the rules of `SendPrompt`'s `content`.
-        content: Vec<PromptBlock>,
+        /// The new text: it replaces the prompt's first text block, its other text blocks are
+        /// dropped, and every file block stays where it was. At most
+        /// [`MAX_PROMPT_TEXT_BYTES`] UTF-8 bytes. Empty keeps only the files, so the host
+        /// refuses it for a prompt without one (`command.invalid`).
+        text: String,
     },
     /// Remove a queued prompt; its turn ends cancelled without starting.
     RemoveQueuedPrompt {

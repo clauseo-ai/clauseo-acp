@@ -76,16 +76,18 @@ fn status(state: &StreamState) -> ThreadStatus {
     state.as_thread().unwrap().status()
 }
 
-/// The status of the header `Upsert`s in `out`, which holds no other change.
+/// The status of the header `Upsert`s in `out`, which holds no other change but prompt
+/// `Upsert`s (a prompt's place in the queue).
 #[cfg(test)]
 fn header_statuses(out: &Applied) -> Vec<ThreadStatus> {
     assert!(out.anomalies.is_empty(), "{:?}", out.anomalies);
     out.changes
         .iter()
-        .map(|change| match change {
+        .filter_map(|change| match change {
             ViewChange::Upsert(entry) => match &**entry {
-                ViewEntry::Header(header) => header.status,
-                other => panic!("not a header: {other:?}"),
+                ViewEntry::Header(header) => Some(header.status),
+                ViewEntry::UserMessage(_) => None,
+                other => panic!("not a header or a prompt: {other:?}"),
             },
             other => panic!("not an upsert: {other:?}"),
         })
@@ -186,7 +188,7 @@ fn held_queue_gives_idle() {
     assert!(!has_step(&state, second));
     assert_eq!(
         prompt_status(&state, message),
-        Some(UserMessageStatus::Sent)
+        Some(UserMessageStatus::Queued)
     );
     assert_eq!(state, fold(log.events()));
 }
@@ -223,7 +225,7 @@ fn restart_repair_of_writer_wait_gives_idle() {
     assert!(!has_step(&state, turn));
     assert_eq!(
         prompt_status(&state, message),
-        Some(UserMessageStatus::Sent)
+        Some(UserMessageStatus::Queued)
     );
     // The same state from the log and through a snapshot.
     assert_eq!(state, fold(log.events()));

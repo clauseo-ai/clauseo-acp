@@ -15,6 +15,7 @@ expression: fold(&prompt_stream().unwrap())
       "agent": "claude-acp",
       "status": "idle",
       "queue_held": false,
+      "steer_joins_turn": true,
       "config_options": [],
       "commands": [],
       "plan": []

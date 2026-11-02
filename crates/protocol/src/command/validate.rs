@@ -78,7 +78,7 @@ impl ValidatedCommand {
 impl CommandEnvelope {
     /// Checks the command's shape rules decoding cannot (counts, sums, rules across fields),
     /// never state, and returns the [`ValidatedCommand`] the host takes. Each rule is written
-    /// once, on what it bounds: `SendPrompt`'s `content` (also for `EditQueuedPrompt`),
+    /// once, on what it bounds: `SendPrompt`'s `content` (its text limit also for `EditQueuedPrompt`'s `text`),
     /// [`MatterSource::NewFolder`] for a new folder's name, `AnswerElicitation`'s `response`,
     /// `UndoStep`'s `files` and `RestoreVersion`'s `scope`, and [`MAX_FILE_LIST`] and
     /// [`MAX_PATH_LIST_BYTES`] for both file lists, in which no path is named twice. Titles
@@ -131,8 +131,8 @@ impl HostCommand {
             Self::EditQueuedPrompt {
                 thread: _,
                 turn: _,
-                content,
-            } => check_prompt("EditQueuedPrompt", content),
+                text,
+            } => check_edited_text(text),
             Self::AnswerElicitation {
                 thread: _,
                 elicitation: _,
@@ -287,6 +287,20 @@ fn check_prompt(kind: &'static str, content: &[PromptBlock]) -> Result<(), Error
             kind,
             rule: "a prompt holds a visible character of text or a file",
         });
+    }
+    Ok(())
+}
+
+/// `EditQueuedPrompt`'s text: within `SendPrompt`'s text limit. Whether the edited prompt
+/// still holds something to send depends on its files, which only the host knows.
+fn check_edited_text(text: &str) -> Result<(), Error> {
+    if text.len() > MAX_PROMPT_TEXT_BYTES {
+        return Err(too_large(
+            "EditQueuedPrompt",
+            "prompt text in UTF-8 bytes",
+            text.len(),
+            MAX_PROMPT_TEXT_BYTES,
+        ));
     }
     Ok(())
 }

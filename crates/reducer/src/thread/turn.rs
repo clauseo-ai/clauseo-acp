@@ -6,6 +6,7 @@ use clauseo_protocol::{
     TurnStoppedAtLimit, UserMessage, UserMessageEntry, UserMessageStatus, ViewEntry,
 };
 
+use super::queue::{mark_prompt, settle_prompt};
 use super::{insert_marker, insert_new, not_yet, set, set_status, set_vec};
 use crate::Applied;
 use crate::change::{Anomaly, ViewChange};
@@ -86,6 +87,10 @@ pub(super) fn user_message(
     };
     push_user_upsert(&mut out.changes, &entry);
     state.index.users.insert(event.message, seq);
+    // A steer into the running turn is not a prompt of its own turn.
+    if state.running != Some(event.turn) {
+        state.index.unstarted.insert(event.turn, seq);
+    }
     insert_entry(state, seq, ViewEntry::UserMessage(entry), out);
     if state.running.is_none() {
         state.turn = Some(event.turn);
@@ -96,11 +101,17 @@ pub(super) fn user_message(
 
 /// A turn waits. Behind another thread's writer it gives `Queued { behind }`, also as the turn's
 /// second `TurnQueued`, and when no turn runs it becomes the thread's last turn, so its
-/// `TurnEnded` before it starts (a cancel) settles the status. Behind its own thread it leaves
-/// the status while a turn runs; when none runs, it settles (to `Idle` unless the lawyer is
-/// asked).
+/// `TurnEnded` before it starts (a cancel) settles the status; its prompt has left the thread's
+/// queue (`Sent`). Behind its own thread its prompt shows `Queued`, and it leaves the status
+/// while a turn runs; when none runs, it settles (to `Idle` unless the lawyer is asked).
 pub(super) fn turn_queued(state: &mut ThreadState, event: &TurnQueued, out: &mut Applied) {
     let behind = event.behind();
+    let status = if behind == state.thread {
+        UserMessageStatus::Queued
+    } else {
+        UserMessageStatus::Sent
+    };
+    mark_prompt(state, event.turn(), status, out);
     if behind != state.thread {
         if state.running.is_none() {
             state.turn = Some(event.turn());
@@ -115,6 +126,7 @@ pub(super) fn turn_queued(state: &mut ThreadState, event: &TurnQueued, out: &mut
 }
 
 pub(super) fn turn_started(state: &mut ThreadState, turn: TurnId, out: &mut Applied) {
+    settle_prompt(state, turn, UserMessageStatus::Sent, out);
     state.running = Some(turn);
     state.turn = Some(turn);
     state.after_turn = None;
@@ -208,7 +220,7 @@ pub(super) fn turn_ended(
     if !running && event.stop != StopReason::Failed {
         state.files.remove(&event.turn);
         state.failures.remove(&event.turn);
-        remove_prompts(state, event.turn, out);
+        settle_prompt(state, event.turn, UserMessageStatus::Removed, out);
         if state.running.is_none()
             && state.turn == Some(event.turn)
             && matches!(
@@ -223,6 +235,9 @@ pub(super) fn turn_ended(
     }
     if running {
         state.running = None;
+    } else {
+        // A turn that failed before it started: its prompt was sent, and stays.
+        settle_prompt(state, event.turn, UserMessageStatus::Sent, out);
     }
     let files = state.files.remove(&event.turn);
     let (files, skipped) = files.map_or_else(Default::default, |f| (f.files, f.skipped));
@@ -257,20 +272,6 @@ pub(super) fn turn_ended(
         | ThreadStatus::Archived => after.unwrap_or_else(|| settled_status(state)),
     };
     set_status(state, "turn_ended", out, status);
-}
-
-/// Marks the user messages of `turn`, which ended without starting or failing, `Removed`. It
-/// walks every entry: such a turn is rare (a prompt removed or cancelled before its turn), and
-/// an index from turns to prompts would be one more to keep.
-fn remove_prompts(state: &mut ThreadState, turn: TurnId, out: &mut Applied) {
-    for entry in state.entries.values_mut() {
-        if let ViewEntry::UserMessage(prompt) = entry
-            && prompt.turn == turn
-            && set(&mut prompt.status, UserMessageStatus::Removed)
-        {
-            push_user_upsert(&mut out.changes, prompt);
-        }
-    }
 }
 
 pub(super) fn step_undone(

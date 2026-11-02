@@ -11,6 +11,7 @@ expression: "entry(\"header\")"
     "agent": "claude-acp",
     "status": "idle",
     "queue_held": true,
+    "steer_joins_turn": true,
     "mode_id": "plan",
     "config_options": [],
     "commands": [],

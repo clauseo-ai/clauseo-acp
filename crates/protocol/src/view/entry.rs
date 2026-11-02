@@ -42,6 +42,14 @@ pub struct HeaderEntry {
     /// Missing reads as `false`, so a header written before the field still decodes.
     #[serde(default)]
     pub queue_held: bool,
+    /// Whether a steered message joins the running turn (`SendPrompt` with `delivery: steer`):
+    /// true only for an agent whose steer adds to the answer, which needs both of
+    /// [`SteeringCapability`](crate::SteeringCapability)'s flags (claude-agent-acp). False
+    /// means a steer cancels the running turn and sends the message as the next turn (the
+    /// answer so far is kept). Known before the first send: from the agent's kind until its
+    /// first session attaches, then from that session's capabilities. Missing reads as `false`.
+    #[serde(default)]
+    pub steer_joins_turn: bool,
     /// The agent's current mode, if it reported one.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     #[cfg_attr(feature = "specta", specta(type = Option<String>))]
@@ -167,6 +175,21 @@ pub struct ToolCallEntry {
     pub raw_output: Option<TextOrBlob>,
     /// What it shows.
     pub content: Vec<ToolCallContent>,
+    /// Set when it had not finished as a steer joined its turn, so it carried on in the
+    /// background (`SteerResolved`'s `aside`). Missing reads as `None`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub background: Option<BackgroundMark>,
+}
+
+/// A tool call that carried on in the background while its turn answered a steered message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct BackgroundMark {
+    /// The steered message it made way for.
+    pub steer: MessageId,
+    /// When it finished: the `ts` of the update that gave it a final status; `None` until then.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub finished_at: Option<Timestamp>,
 }
 
 /// Where a permission request or an elicitation stands.

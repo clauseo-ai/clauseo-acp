@@ -85,11 +85,11 @@ fn send_prompt(content: Vec<PromptBlock>) -> HostCommand {
     }
 }
 
-fn edit_queued(content: Vec<PromptBlock>) -> HostCommand {
+fn edit_queued(text: &str) -> HostCommand {
     HostCommand::EditQueuedPrompt {
         thread: thread_id(1),
         turn: turn_id(2),
-        content,
+        text: text.to_owned(),
     }
 }
 
@@ -209,8 +209,8 @@ fn command_size_limits() {
     let accented = "é".repeat(MAX_PROMPT_TEXT_BYTES / 2);
     let half = "b".repeat(MAX_PROMPT_TEXT_BYTES / 2);
     let over = MAX_PROMPT_TEXT_BYTES + 1;
-    let builders: [fn(Vec<PromptBlock>) -> HostCommand; 2] = [send_prompt, edit_queued];
-    for build in builders {
+    {
+        let build = send_prompt;
         // Text: at the limit passes, one byte over fails, summed across blocks.
         assert!(build(vec![text(&max_text)]).validate().is_ok());
         assert!(build(vec![text(&accented)]).validate().is_ok());
@@ -239,10 +239,22 @@ fn command_size_limits() {
     }
 }
 
+/// `EditQueuedPrompt` carries text only (its file blocks stay with the queued turn): the text
+/// limit applies, and empty text passes the shape check, since the host knows the files.
+#[test]
+fn edit_queued_text_limit() {
+    let max_text = "a".repeat(MAX_PROMPT_TEXT_BYTES);
+    assert!(edit_queued(&max_text).validate().is_ok());
+    assert!(edit_queued("").validate().is_ok());
+    let over = edit_queued(&(max_text + "x")).validate();
+    let size = MAX_PROMPT_TEXT_BYTES + 1;
+    assert!(too_large(&over, size, MAX_PROMPT_TEXT_BYTES), "{over:?}");
+}
+
 #[test]
 fn prompt_shape() {
-    let builders: [fn(Vec<PromptBlock>) -> HostCommand; 2] = [send_prompt, edit_queued];
-    for build in builders {
+    {
+        let build = send_prompt;
         // Blocks: 100 pass, 101 fail (files stay at 50 or fewer).
         let mut hundred = files(MAX_PROMPT_FILES);
         hundred.extend((0..50).map(|_| text("x")));

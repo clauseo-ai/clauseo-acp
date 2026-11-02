@@ -9,13 +9,13 @@
 //! ```
 
 use clauseo_protocol::{
-    AgentContentEntry, AgentTextEntry, CheckpointKind, ContentBlock, ContextUsage, Deliverable,
-    Delivery, ElicitationEntry, ElicitationRequest, ElicitationState, ExpiryReason, HeaderEntry,
-    ImportSummary, LimitStopEntry, LimitStopReason, MarkerEntry, MarkerKind, MatterHeaderEntry,
-    MatterKind, NoticeEntry, NoticeLevel, PermissionChoice, PermissionEntry, PermissionKind,
-    PermissionOption, PermissionState, Principal, StepEntry, StopReason, TextKind, TextOrBlob,
-    ThreadStatus, Timestamp, ToolCallEntry, UserMessageEntry, UserMessageStatus, VersionEntry,
-    ViewEntry,
+    AgentContentEntry, AgentTextEntry, BackgroundMark, CheckpointKind, ContentBlock, ContextUsage,
+    Deliverable, Delivery, ElicitationEntry, ElicitationRequest, ElicitationState, ExpiryReason,
+    HeaderEntry, ImportSummary, LimitStopEntry, LimitStopReason, MarkerEntry, MarkerKind,
+    MatterHeaderEntry, MatterKind, NoticeEntry, NoticeLevel, PermissionChoice, PermissionEntry,
+    PermissionKind, PermissionOption, PermissionState, Principal, StepEntry, StopReason, TextKind,
+    TextOrBlob, ThreadStatus, Timestamp, ToolCallEntry, UserMessageEntry, UserMessageStatus,
+    VersionEntry, ViewEntry,
 };
 
 use crate::examples::{file_changes, tool_call_started};
@@ -46,6 +46,7 @@ pub fn header_entry() -> HeaderEntry {
         agent_name: None,
         status: ThreadStatus::Idle,
         queue_held: true,
+        steer_joins_turn: true,
         mode_id: Some(short("plan")),
         config_options: vec![],
         commands: vec![],
@@ -112,6 +113,10 @@ fn thread_entries() -> Vec<ViewEntry> {
             raw_input: tool.raw_input,
             raw_output: tool.raw_output,
             content: tool.content,
+            background: Some(BackgroundMark {
+                steer: message_id(9),
+                finished_at: None,
+            }),
         })),
     ]
 }

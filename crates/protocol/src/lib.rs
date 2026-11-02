@@ -239,7 +239,8 @@ wire_types! {
         ChangeKind, Delivery, FileChange, SkippedFile, SkippedFileReason, SteerOutcome, StopReason,
     },
     view::{
-        AgentContentEntry, AgentTextEntry, ContextUsage, ElicitationEntry, ElicitationState,
+        AgentContentEntry, AgentTextEntry, BackgroundMark, ContextUsage, ElicitationEntry,
+        ElicitationState,
         EntryId, HeaderEntry, LimitStopEntry, MarkerEntry, MarkerKind, MatterHeaderEntry,
         NoticeEntry, PermissionEntry, PermissionState, StepEntry, ThreadStatus, ToolCallEntry,
         UserMessageEntry, UserMessageStatus, VersionEntry, ViewEntry,

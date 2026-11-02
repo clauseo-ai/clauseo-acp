@@ -19,9 +19,10 @@ use crate::{
 mod entry;
 
 pub use entry::{
-    AgentContentEntry, AgentTextEntry, ElicitationEntry, ElicitationState, HeaderEntry,
-    LimitStopEntry, MarkerEntry, MarkerKind, MatterHeaderEntry, NoticeEntry, PermissionEntry,
-    PermissionState, StepEntry, ToolCallEntry, UserMessageEntry, UserMessageStatus, VersionEntry,
+    AgentContentEntry, AgentTextEntry, BackgroundMark, ElicitationEntry, ElicitationState,
+    HeaderEntry, LimitStopEntry, MarkerEntry, MarkerKind, MatterHeaderEntry, NoticeEntry,
+    PermissionEntry, PermissionState, StepEntry, ToolCallEntry, UserMessageEntry,
+    UserMessageStatus, VersionEntry,
 };
 
 enum_with_names! {
