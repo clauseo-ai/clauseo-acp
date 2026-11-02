@@ -12,6 +12,7 @@
 //! comes back held, rebuilt from the log ([`restore`]).
 
 mod commands;
+mod held;
 mod restore;
 mod steer;
 
@@ -23,7 +24,6 @@ use clauseo_protocol::{
 };
 
 use super::super::commands::{AfterCommand, CommandCtx};
-use super::super::streams::StreamSlot;
 use super::super::{Actor, Tag};
 use super::out::Out;
 use super::{Current, Then, TurnTag, cancel, host_stopping, lost, state, steps};
@@ -32,6 +32,8 @@ use crate::error::Error;
 
 use commands::put_content;
 pub(super) use commands::{edit, remove, resume, send_now};
+pub(crate) use held::queue_held;
+pub(super) use held::sync_held;
 pub(super) use restore::restore;
 pub(super) use steer::{Steered, on_steered};
 
@@ -88,14 +90,6 @@ pub(crate) enum After {
     Steer(Box<steer::Ask>),
     /// A requeued steer's turn joined the head.
     Requeued(TurnId),
-}
-
-/// Whether `thread`'s queue shows held: held with turns waiting.
-pub(crate) fn queue_held(actor: &Actor, thread: ThreadId) -> bool {
-    actor
-        .threads
-        .get(&thread)
-        .is_some_and(|entry| entry.turn.queue.held && !entry.turn.queue.is_empty())
 }
 
 pub(super) fn queue(actor: &mut Actor, thread: ThreadId) -> Option<&mut ThreadQueue> {
@@ -459,51 +453,4 @@ fn put_back(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     });
     state.queue.held = true;
     sync_held(actor, thread);
-}
-
-/// Shows `queue_held` when it changed: through the loaded view, or in the header kept for
-/// `ListThreads` when the stream is not loaded.
-pub(super) fn sync_held(actor: &mut Actor, thread: ThreadId) {
-    let shown = queue_held(actor, thread);
-    let Some(queue) = queue(actor, thread) else {
-        return;
-    };
-    if queue.shown == shown {
-        return;
-    }
-    queue.shown = shown;
-    let stream = StreamId::Thread(thread);
-    let Actor {
-        threads,
-        streams,
-        encoder,
-        ..
-    } = actor;
-    match streams.get_mut(&stream) {
-        Some(StreamSlot::Loaded(loaded)) => {
-            let change = loaded
-                .state
-                .as_thread_mut()
-                .and_then(|state| clauseo_reducer::set_queue_held(state, shown));
-            let Some(change) = change else {
-                return;
-            };
-            match loaded.view.publish(vec![change], encoder) {
-                Ok(encoded) => {
-                    for event in &encoded {
-                        loaded.views.retain_mut(|sub| sub.offer(event));
-                    }
-                }
-                Err(error) => tracing::error!(%thread, %error, "queue_held was not shown"),
-            }
-        }
-        Some(StreamSlot::Loading(_)) | None => {
-            if let Some(header) = threads
-                .get_mut(&thread)
-                .and_then(|entry| entry.header.as_mut())
-            {
-                header.queue_held = shown;
-            }
-        }
-    }
 }
