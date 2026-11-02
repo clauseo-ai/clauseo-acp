@@ -171,10 +171,12 @@
     pointer-events: none;
     user-select: none;
   }
+  /* design's tint for a token (#192): the neutral tint, a step off the well in both themes (--well-strong sinks below
+     the well by night); the field's words on it: 13.6:1 by day, 7.4:1 by night */
   .room-token {
     position: absolute;
     border-radius: var(--r-label);
-    background: var(--well-strong);
+    background: var(--neutral-tint);
   }
   /* under a gate the field is kept, hidden, with its words */
   .room-field textarea[hidden] {
