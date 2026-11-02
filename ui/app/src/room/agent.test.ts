@@ -63,14 +63,27 @@ test("planName goes by the listed kind, not the id; an agent of no kind is its i
   const agents: AgentSummary[] = [{ id: "work-plan", kind: "codex" }, { id: "fake-agent" }];
   expect(planName("work-plan", agents)).toBe("ChatGPT");
   expect(planName("fake-agent", agents)).toBe("fake-agent");
-  expect(planOptions(agents)).toEqual([
-    { value: "work-plan", label: "ChatGPT" },
-    { value: "fake-agent", label: "fake-agent" },
-  ]);
+  // the one agent with a plan to name is no choice
+  expect(planOptions(agents)).toEqual([]);
   expect(matterPlan([{ thread: T1, agent: "work-plan" }], agents)).toBe("ChatGPT");
 });
 
 test("planOptions: one agent is no choice, so none; no agents, none", () => {
   expect(planOptions([{ id: "claude-acp", kind: "claude" }])).toEqual([]);
   expect(planOptions([])).toEqual([]);
+});
+
+test("S4: a listed agent with no kind is named by its id's prefix", () => {
+  expect(planName("claude", [{ id: "claude" }])).toBe("Claude");
+  expect(planName("codex", [{ id: "codex" }])).toBe("ChatGPT");
+});
+
+test("S4: planOptions offers only agents with a plan to name", () => {
+  expect(
+    planOptions([{ id: "claude" }, { id: "codex-acp", kind: "codex" }, { id: "fake-agent" }]),
+  ).toEqual([
+    { value: "claude", label: "Claude" },
+    { value: "codex-acp", label: "ChatGPT" },
+  ]);
+  expect(planOptions([{ id: "claude-acp", kind: "claude" }, { id: "fake-agent" }])).toEqual([]);
 });

@@ -36,10 +36,11 @@ export function agentFor({ chosen, setting, threads }: AgentInputs): AgentId {
 const PLAN: Record<AgentKind, string> = { claude: "Claude", codex: "ChatGPT" };
 
 /** An agent's kind: the one the host lists for it (R15's ListAgents), else read off its id (Claude Code's begin
- * `claude`, Codex's `codex`), for a thread whose agent the list doesn't hold; none for any other id. */
+ * `claude`, Codex's `codex`), for an agent the list doesn't hold or lists with no kind (#154 gives a kind to
+ * `claude-acp` and `codex-acp` only, so today's `claude` lists without one); none for any other id. */
 function kindOf(agent: AgentId, agents: readonly AgentSummary[]): AgentKind | undefined {
   const listed = agents.find((a) => a.id === agent);
-  if (listed !== undefined) return listed.kind;
+  if (listed?.kind !== undefined) return listed.kind;
   if (agent.startsWith("claude")) return "claude";
   if (agent.startsWith("codex")) return "codex";
   return undefined;
@@ -64,9 +65,11 @@ export function matterPlan(
   return oldest === null ? undefined : planName(oldest.agent, agents);
 }
 
-/** The composer's plan choice for a new conversation, from the agents the host lists (R15), each labelled by its
- * kind's plan; none when there is only one to choose. */
+/** The composer's plan choice for a new conversation, from the agents the host lists (R15) that have a kind (a plan
+ * to name), each labelled by its kind's plan; none when there is only one to choose. */
 export function planOptions(agents: readonly AgentSummary[]): { value: AgentId; label: string }[] {
-  const options = agents.map((a) => ({ value: a.id, label: planName(a.id, agents) }));
+  const options = agents
+    .filter((a) => kindOf(a.id, agents) !== undefined)
+    .map((a) => ({ value: a.id, label: planName(a.id, agents) }));
   return options.length > 1 ? options : [];
 }

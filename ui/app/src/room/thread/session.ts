@@ -31,9 +31,9 @@ export type Drafts = Map<string, string>;
 export type ConversationLink = {
   /** Its thread: null for a draft, or while the matter's list loads. */
   thread: ThreadId | null;
-  /** The thread a send goes to when `thread` is null: the one the list opens, else a new one. Rejects with the host's
-   * error. */
-  create: () => Promise<ThreadId>;
+  /** The thread a send goes to when `thread` is null, for the conversation with this key (the session's own): the one
+   * the list opens, else a new one. Rejects with the host's error. */
+  create: (key: string) => Promise<ThreadId>;
   /** A prompt was accepted in the thread. */
   sent: (thread: ThreadId, text: string) => void;
   /** The code of the matter's refused list, until a read succeeds. */
@@ -88,6 +88,8 @@ export function useThreadSession(
   store: ViewStore,
   matter: MatterId | null,
   link: ConversationLink,
+  /** The open conversation's key (conversations.ts), which a first send's thread is made for. */
+  key: string | null,
 ): ThreadSession {
   // the thread opens only once the chunk is in, so its rows never render, settle or page before it (chunk.ts); once
   // it is, a conversation opens on its first render
@@ -128,13 +130,13 @@ export function useThreadSession(
 
   const ask = useCallback(
     async (text: string): Promise<boolean> => {
-      if (matter === null || sending.current) return false;
+      if (matter === null || key === null || sending.current) return false;
       sending.current = true;
       setRefused(null);
       try {
         let id = open.current;
         if (id === null) {
-          id = await create();
+          id = await create(key);
           open.current = id;
           setMade(id);
         }
@@ -151,7 +153,7 @@ export function useThreadSession(
         sending.current = false;
       }
     },
-    [matter, create, onSent, command, store],
+    [matter, key, create, onSent, command, store],
   );
 
   // The sent turn holds busy until its step or limit stop is in the view (live.ts, useBusy). A turn can end without

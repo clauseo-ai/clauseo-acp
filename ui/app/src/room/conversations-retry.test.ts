@@ -89,3 +89,24 @@ test("a refused retry rejects and opens nothing", async () => {
   expect(threadsOf(after.rows)).toEqual([T2, T1]);
   expect(after.retried).toBeNull();
 });
+
+test("S6: a move made while retry_from is on its way stands; the new thread is listed, not opened", async () => {
+  let answer: () => void = () => {};
+  const held = new Promise<void>((resolve) => (answer = resolve));
+  const { talks, settle } = await rig(
+    retrying([thread(T1), thread(T2)], async () => {
+      await held;
+      return { thread_created: { thread: RETRIED } };
+    }),
+  );
+  const retried = talks.retry(T2, QUESTION, 5);
+  talks.open(T1);
+  answer();
+  await retried;
+  await settle();
+  const view = talks.view();
+  expect(view.thread).toBe(T1);
+  expect(view.open).toBe(T1);
+  expect(view.retried).toBeNull();
+  expect(threadsOf(view.rows)).toContain(RETRIED);
+});

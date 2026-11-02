@@ -106,6 +106,11 @@ type MatterState = {
   renamed: Set<ThreadId>;
   /** H13: threads this room retried, with the thread and the time of the question they came from. */
   retried: Map<ThreadId, { from: ThreadId; at: Timestamp }>;
+  /** Threads this room made (create_thread, retry_from): a list read that started before one was made still keeps it. */
+  made: Set<ThreadId>;
+  /** Threads this room made whose first question the host hasn't accepted yet (send_prompt refused): left with
+   * nothing typed, they are archived, so no empty thread stays on the list. */
+  unsent: Set<ThreadId>;
 };
 
 const resting = (s: ThreadStatus) => !(s === "starting" || s === "running" || s === "needs_you");
@@ -123,7 +128,7 @@ export class Conversations {
   readonly #matters: Matters;
   readonly #next: NextHost;
   /** The composer drafts, by conversation key (session.ts's Drafts): an empty one drops its draft row on leaving. */
-  readonly #drafts: ReadonlyMap<string, string>;
+  readonly #drafts: Map<string, string>;
   readonly #focused: () => boolean;
   readonly #by = new Map<MatterId, MatterState>();
   readonly #listeners = new Set<() => void>();
@@ -141,7 +146,7 @@ export class Conversations {
     transport: HostTransport,
     store: ViewStore,
     matters: Matters,
-    drafts: ReadonlyMap<string, string>,
+    drafts: Map<string, string>,
     /** Whether the window has focus, for H6's marks: the document's, unless given. */
     focused: () => boolean = () => document.hasFocus(),
   ) {
@@ -188,7 +193,13 @@ export class Conversations {
   /** Opens a conversation by its key. Leaving a draft with nothing typed drops it. */
   open(key: string): void {
     const m = this.#current;
-    if (m === null || m.open === key) return;
+    if (m === null) return;
+    if (m.open === key) {
+      // the open one pressed again: the field takes the focus, as for any other
+      this.#focusOn(key);
+      this.#emit();
+      return;
+    }
     this.#leave(m);
     m.open = key;
     this.#opened(m);
@@ -212,27 +223,32 @@ export class Conversations {
     this.#emit();
   }
 
-  /** The plan the lawyer chose for the draft, in the composer. */
+  /** The plan the lawyer chose for the draft, in the composer. With the list failed the open key is a draft with no
+   * draft yet: the choice makes one, unshown, under that key. */
   choose(agent: AgentId): void {
-    const d = this.#current?.draft;
-    if (d == null) return;
-    d.chosen = agent;
+    const m = this.#current;
+    if (m === null || m.open === null) return;
+    if (m.draft === null || m.draft.key !== m.open) {
+      if (this.#threadOf(m, m.open) !== null) return;
+      m.draft = { key: m.open, shown: false, chosen: agent };
+    } else m.draft.chosen = agent;
     this.#emit();
   }
 
-  /** The thread a first send goes to: the open conversation's once the list is in, else a new one, made with the agent
-   * the draft runs (`create_thread`), which takes the draft's key. Rejects with the host's error. */
-  create = async (): Promise<ThreadId> => {
+  /** The thread the first send of the conversation `key` (the session's own) goes to: its thread once the list is in,
+   * else a new one, made with the agent its draft runs (`create_thread`), which takes the key. The key is the
+   * session's, not whatever is open when the answers come back, so a move made meanwhile can't take the question.
+   * Rejects with the host's error. */
+  create = async (key: string): Promise<ThreadId> => {
     const m = this.#current;
     if (m === null) throw internalError("no matter is open");
     // a failed list is read again: a thread made now might sit beside the one to reopen
     if (m.phase === "failed") await this.#list(m);
     else if (m.phase === "loading") await m.listing;
     if (m.phase !== "ready") throw toHostError(m.refusal);
-    const key = m.open;
-    const open = key === null ? null : this.#threadOf(m, key);
+    const open = this.#threadOf(m, key);
     if (open !== null) return open;
-    const agent = this.#agentOf(m);
+    const agent = this.#agentOf(m, key);
     const made = await this.#transport.dispatch({
       command_id: crypto.randomUUID(),
       command: { create_thread: { matter: m.matter, agent } },
@@ -240,14 +256,11 @@ export class Conversations {
     if (typeof made === "string" || made.thread_created === undefined)
       throw internalError("create_thread answered without a thread");
     const thread = made.thread_created.thread;
-    m.threads.set(thread, {
-      thread,
-      matter: m.matter,
-      agent,
-      status: "starting",
-      queue_held: false,
-    });
-    if (key !== null) m.keys.set(thread, key);
+    // idle until its question is accepted and its header says otherwise
+    m.threads.set(thread, { thread, matter: m.matter, agent, status: "idle", queue_held: false });
+    m.made.add(thread);
+    m.unsent.add(thread);
+    m.keys.set(thread, key);
     if (m.draft !== null && m.draft.key === key) m.draft = null;
     if (m === this.#current) this.#emit();
     return thread;
@@ -259,6 +272,7 @@ export class Conversations {
     const m = this.#stateOf(thread);
     const known = m?.threads.get(thread);
     if (m === undefined || known === undefined) return;
+    m.unsent.delete(thread);
     const header = this.#store.view(streamOf(thread))?.header?.header;
     if ((header?.title ?? known.title) !== undefined || m.renamed.has(thread)) return;
     m.renamed.add(thread);
@@ -291,7 +305,10 @@ export class Conversations {
     const host = this.#next.retry;
     const m = this.#stateOf(thread);
     if (host === null || m === undefined) throw internalError("this host can't retry a question");
+    // where the lawyer is now: the new thread opens only if they haven't moved on while it was made
+    const was = m.open;
     const made = await host.retryFrom(thread, message);
+    m.made.add(made);
     const from = m.threads.get(thread);
     m.threads.set(made, {
       thread: made,
@@ -302,6 +319,10 @@ export class Conversations {
     });
     m.retried.set(made, { from: thread, at });
     if (!this.#live || m !== this.#current) return;
+    if (m.open !== was) {
+      this.#emit();
+      return;
+    }
     this.#leave(m);
     m.open = made;
     this.#opened(m);
@@ -338,14 +359,19 @@ export class Conversations {
         ticket: 0,
         renamed: new Set(),
         retried: new Map(),
+        made: new Set(),
+        unsent: new Set(),
       };
       this.#by.set(matter, m);
     }
+    const revisit = m.open !== null && m.phase === "ready";
     if (m.open === null) {
       m.open = this.#key();
       m.pending = m.open;
     }
     this.#current = m;
+    // back in a matter: the conversation open there opens again, and H6 hears it seen
+    if (revisit) this.#opened(m);
     void this.#list(m);
     this.#emit();
   }
@@ -361,7 +387,13 @@ export class Conversations {
             ? await rows.listThreads(m.matter)
             : ((await this.#transport.query({ list_threads: { matter: m.matter } })).threads ?? []);
         if (!this.#live || ticket !== m.ticket) return;
-        m.threads = new Map(threads.map((t) => [t.thread, this.#withHeader(t)]));
+        const listed = new Map(threads.map((t) => [t.thread, this.#withHeader(t)]));
+        // a thread this room made that the answer predates stays
+        for (const made of m.made) {
+          const known = m.threads.get(made);
+          if (!listed.has(made) && known !== undefined) listed.set(made, known);
+        }
+        m.threads = listed;
         m.phase = "ready";
         m.refused = null;
         this.#settle(m);
@@ -405,12 +437,30 @@ export class Conversations {
     return m.threads.has(key) ? key : null;
   }
 
-  /** The conversation open is left: a draft with nothing typed goes. */
+  /** The conversation open is left: a draft with nothing typed goes, and so does a thread this room made whose first
+   * question the host refused (archived: nothing is deleted, and no empty thread stays listed or reopens). */
   #leave(m: MatterState): void {
+    const key = m.open;
+    if (key === null) return;
+    const typed = (this.#drafts.get(key) ?? "").trim() !== "";
+    if (typed) return;
+    // words of whitespace only go with their conversation
+    this.#drafts.delete(key);
     const d = m.draft;
-    if (d === null || m.open !== d.key) return;
-    if ((this.#drafts.get(d.key) ?? "").trim() !== "") return;
-    m.draft = null;
+    if (d !== null && d.key === key) {
+      m.draft = null;
+      return;
+    }
+    const thread = this.#threadOf(m, key);
+    if (thread === null || !m.unsent.has(thread)) return;
+    m.unsent.delete(thread);
+    const known = m.threads.get(thread);
+    if (known !== undefined) m.threads.set(thread, { ...known, status: "archived" });
+    this.#transport
+      .dispatch({ command_id: crypto.randomUUID(), command: { archive_thread: { thread } } })
+      .catch((error: unknown) =>
+        console.warn(`archive_thread failed: ${JSON.stringify(toHostError(error).code)}`),
+      );
   }
 
   /** A conversation opened: H6 marks its thread seen, if the window has focus. */
@@ -482,7 +532,17 @@ export class Conversations {
     if (m === undefined) return;
     const threads = change.all ? new Map<ThreadId, Known>() : new Map(m.threads);
     for (const t of change.threads) threads.set(t.thread, this.#withHeader(t));
-    for (const gone of change.removed) threads.delete(gone);
+    // a whole list that predates a thread this room made keeps it, as a read does
+    if (change.all)
+      for (const made of m.made) {
+        const known = m.threads.get(made);
+        if (!threads.has(made) && known !== undefined) threads.set(made, known);
+      }
+    for (const gone of change.removed) {
+      threads.delete(gone);
+      m.made.delete(gone);
+      m.unsent.delete(gone);
+    }
     m.threads = threads;
     if (change.all) {
       // a whole list is as good as a read: one in flight is older
@@ -506,12 +566,10 @@ export class Conversations {
     return undefined;
   }
 
-  #agentOf(m: MatterState): AgentId {
-    return agentFor({
-      chosen: m.draft?.chosen ?? null,
-      setting: null,
-      threads: [...m.threads.values()],
-    });
+  /** The agent a new thread for `key` runs: its draft's choice, else agent.ts's order. */
+  #agentOf(m: MatterState, key: string | null = m.open): AgentId {
+    const chosen = m.draft !== null && m.draft.key === key ? m.draft.chosen : null;
+    return agentFor({ chosen, setting: null, threads: [...m.threads.values()] });
   }
 
   #make(): ConversationsView {
