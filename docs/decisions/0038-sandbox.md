@@ -138,8 +138,11 @@ real terminal. Nothing under `/Users`, `/private/var/folders`, `/private/tmp` or
 
 **`SeatbeltLauncher::new(policy, opts, denials)`** implements `process::Launcher`. A launch runs
 `/usr/bin/sandbox-exec -p <profile> -D ... <program> <args>` through `spawn_in_tree`, with the
-agent's variables plus `TMPDIR`, in the same folder. `sandbox-exec` execs in place, so the pid,
-the process group and the tree kill stay `process`'s. Its tag is `clauseo-<host pid>-<counter>`.
+agent's variables plus `TMPDIR` and nothing else, in the same folder. The launcher adds
+`SpawnOptions::clear_env` to the options it is given, so no variable of the host's environment
+(`HOME`, `PATH`, a token) reaches the jail; R17 passes what the agent needs in the spec. A jail
+test runs `/usr/bin/env` and sees only its spec's variable and `TMPDIR`. `sandbox-exec` execs in
+place, so the pid, the process group and the tree kill stay `process`'s. Its tag is `clauseo-<host pid>-<counter>`.
 
 **The watcher** (`src/macos/watch.rs`). One `/usr/bin/log stream --style ndjson` per host, with the
 predicate `sender == "Sandbox" AND eventMessage CONTAINS "clauseo-"`, started by the first
@@ -195,6 +198,9 @@ launch and keeps it alive for exactly that launch, dropping it when the agent en
   runtime is the Xcode app, or nothing extra with the Command Line Tools.
 - CoreFoundation's read of `~/.CFUserTextEncoding` is allowed (above). The policy's home is
   `$HOME`, while CoreFoundation reads the account's home: they differ only when `HOME` is changed.
+- Deviation: `process` gains `SpawnOptions::clear_env` (additive; `spawn_in_tree` calls
+  `env_clear` before setting the spec's variables). Without it the jail inherited the host's whole
+  environment. `PassthroughLauncher` with default options still inherits it.
 - Deviation: the jail test cannot use only `fake_agent`, whose file steps are relative writes that
   stop at the first failure. `fake_agent` (scenario `sandbox-probe`) runs the handshake and the
   writes that must succeed; system tools (`cat`, `sh`, `ln`, `nc`, `git`, `logger`) run through the

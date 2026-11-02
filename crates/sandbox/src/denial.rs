@@ -97,6 +97,10 @@ pub enum Reachability {
 /// Where one launch's denials go. One sink per launch; the jail's watcher and the proxy both
 /// call it, from any thread. It gets every denial, with no dedupe (R18 dedupes per turn); put a
 /// [`CappedSink`] in front of it for the rate cap.
+///
+/// Implementations must not block. The proxy's and the watcher's threads call it, so a sink
+/// that blocks stalls them, and can deadlock `ProxyHandle`'s drop. Post the denial somewhere
+/// (a channel, a queue) and return.
 pub trait DenialSink: Send + Sync {
     /// One denial.
     fn denied(&self, d: Denial);

@@ -43,12 +43,13 @@ impl Launcher for PassthroughLauncher {
 #[non_exhaustive]
 pub struct SpawnOptions {
     pub(crate) home: Option<PathBuf>,
+    pub(crate) clear_env: bool,
     #[cfg(windows)]
     pub(crate) creation_flags: u32,
 }
 
 impl SpawnOptions {
-    /// No home folder, and no extra creation flags.
+    /// No home folder, the inherited environment, and no extra creation flags.
     pub fn new() -> SpawnOptions {
         SpawnOptions::default()
     }
@@ -57,6 +58,12 @@ impl SpawnOptions {
     /// it.
     pub fn home(mut self, home: PathBuf) -> SpawnOptions {
         self.home = Some(home);
+        self
+    }
+
+    /// The child gets only the spec's variables: none of this process's environment.
+    pub fn clear_env(mut self) -> SpawnOptions {
+        self.clear_env = true;
         self
     }
 
@@ -85,13 +92,15 @@ pub struct Launched {
 
 /// Starts `spec` with stdio pipes in a tree of its own: a new process group on Unix, a Job Object
 /// on Windows that it joins before it runs. The child inherits this process's environment, then
-/// `spec`'s variables override it. No shell, ever.
+/// `spec`'s variables override it; with [`SpawnOptions::clear_env`] it gets only `spec`'s
+/// variables. No shell, ever.
 pub fn spawn_in_tree(spec: &LaunchSpec, opts: &SpawnOptions) -> Result<Launched, Error> {
     let mut command = std::process::Command::new(spec.program());
-    command
-        .args(spec.args())
-        .envs(spec.env())
-        .current_dir(spec.cwd());
+    command.args(spec.args());
+    if opts.clear_env {
+        command.env_clear();
+    }
+    command.envs(spec.env()).current_dir(spec.cwd());
     os::prepare(&mut command, opts);
     let mut command = async_process::Command::from(command);
     // Set here, not on the std command: async-process's `spawn` resets to inherit every stream

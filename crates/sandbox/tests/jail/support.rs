@@ -247,8 +247,13 @@ const GIT_REDIRECTS: [&str; 9] = [
     "GIT_PREFIX",
 ];
 
+/// The `PATH` the jail's shell and git get: the jail inherits no variable, and the test
+/// process's own `PATH` would make the tests depend on the machine.
+const PATH: (&str, &str) = ("PATH", "/usr/bin:/bin");
+
 /// `/usr/bin/git args` through `launcher` in `cwd`, started by `/usr/bin/env` with every
-/// variable in [`GIT_REDIRECTS`] removed, so git works on the repository in `cwd` only.
+/// variable in [`GIT_REDIRECTS`] removed, so git works on the repository in `cwd` only. `env`
+/// plus [`PATH`].
 pub(crate) fn git(
     launcher: &dyn Launcher,
     args: &[&str],
@@ -261,7 +266,9 @@ pub(crate) fn git(
     }
     all.push("/usr/bin/git");
     all.extend_from_slice(args);
-    run(launcher, "/usr/bin/env", &all, cwd, env)
+    let mut env = env.to_vec();
+    env.push(PATH);
+    run(launcher, "/usr/bin/env", &all, cwd, &env)
 }
 
 /// [`git`] outside the jail.
@@ -270,11 +277,12 @@ pub(crate) fn git_outside(args: &[&str], cwd: &Path) -> Output {
     git(&launcher, args, cwd, &[])
 }
 
-/// `/bin/sh -c script` through `launcher` in `cwd`, with `args` as `$1`, `$2`, ...
+/// `/bin/sh -c script` through `launcher` in `cwd`, with `args` as `$1`, `$2`, ..., and
+/// [`PATH`].
 pub(crate) fn sh(launcher: &dyn Launcher, cwd: &Path, script: &str, args: &[&str]) -> Output {
     let mut all = vec!["-c", script, "sh"];
     all.extend_from_slice(args);
-    run(launcher, "/bin/sh", &all, cwd, &[])
+    run(launcher, "/bin/sh", &all, cwd, &[PATH])
 }
 
 /// Every file under `dir` with its bytes, by path.

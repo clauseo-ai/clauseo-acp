@@ -19,7 +19,8 @@
 //!   variables set on top of the inherited environment, and an absolute working folder.
 //! - [`Launcher`] (`host` holds an `Arc<dyn Launcher>`) and [`PassthroughLauncher`], which calls
 //!   [`spawn_in_tree`] with the spec unchanged and its [`SpawnOptions`] (the home folder for
-//!   redaction, and on Windows extra creation flags).
+//!   redaction, [`SpawnOptions::clear_env`] so the child gets only the spec's variables, and on
+//!   Windows extra creation flags). By default the child inherits this process's environment.
 //! - [`Launched`]: [`AgentStdin`] (an `AsyncWrite` the handle can close), the agent's stdout, the
 //!   [`StderrPump`] the caller must drive, and the [`Handle`].
 //! - [`Handle::exited`] (the agent exited on its own; its tree is then killed),

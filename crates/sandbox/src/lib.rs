@@ -44,7 +44,9 @@
 //!   and the tag. Rules: `src/macos/profile.rs` and `src/macos/base.sb`.
 //! - macOS: [`SeatbeltLauncher::new`]`(policy, opts, denials)` is a `process::Launcher`. Each
 //!   launch runs `/usr/bin/sandbox-exec -p <profile> -D NAME=path ... <program> <args>` through
-//!   `spawn_in_tree`, with the agent's variables plus `TMPDIR=<state>/tmp` (made if missing).
+//!   `spawn_in_tree`, with the agent's variables plus `TMPDIR=<state>/tmp` (made if missing) and
+//!   nothing else: the launcher always adds `SpawnOptions::clear_env` to the options it is
+//!   given, so no variable of the host's environment reaches the jail.
 //!   Denials reach `denials` through a [`CappedSink`]. The first launch registers the launcher
 //!   with the one host-wide watcher (`/usr/bin/log stream`, started with the first launcher
 //!   and stopped with the last); dropping the launcher unregisters it. The tag, the sink and the

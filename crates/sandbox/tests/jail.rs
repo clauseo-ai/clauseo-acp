@@ -50,3 +50,8 @@ mod links;
 #[cfg(target_os = "macos")]
 #[path = "jail/devices.rs"]
 mod devices;
+
+#[cfg(test)]
+#[cfg(target_os = "macos")]
+#[path = "jail/env.rs"]
+mod env;

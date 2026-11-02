@@ -49,8 +49,10 @@ impl std::fmt::Debug for SeatbeltLauncher {
 }
 
 impl SeatbeltLauncher {
-    /// A launcher for `policy`, starting agents with `opts`. Its denials reach `denials`
-    /// through the rate cap ([`CappedSink`]); the watcher ticks the cap once a second.
+    /// A launcher for `policy`, starting agents with `opts` plus [`SpawnOptions::clear_env`],
+    /// always: the jailed process gets the spec's variables plus `TMPDIR` and nothing from this
+    /// process's environment. Its denials reach `denials` through the rate cap
+    /// ([`CappedSink`]); the watcher ticks the cap once a second.
     pub fn new(
         policy: Policy,
         opts: SpawnOptions,
@@ -63,7 +65,7 @@ impl SeatbeltLauncher {
             policy: Arc::new(policy),
             profile,
             tag,
-            opts,
+            opts: opts.clear_env(),
             sink: Arc::new(CappedSink::new(denials)),
             registration: Mutex::new(None),
         }
@@ -86,7 +88,8 @@ impl SeatbeltLauncher {
 
     /// The spec `launch` starts for `spec`: `sandbox-exec` with the profile and its
     /// parameters, then the agent's program and arguments; the agent's variables plus `TMPDIR`
-    /// (the state folder's `tmp`); the same working folder.
+    /// (the state folder's `tmp`), which `launch` starts with no inherited variables; the same
+    /// working folder.
     pub fn jailed_spec(&self, spec: &LaunchSpec) -> Result<LaunchSpec, clauseo_process::Error> {
         let mut args = self.profile.args();
         args.push(OsString::from(spec.program()));
