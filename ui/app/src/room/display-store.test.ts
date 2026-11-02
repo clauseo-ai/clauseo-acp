@@ -12,7 +12,9 @@ import {
   displayOf,
   type DisplayEnv,
 } from "./display-store.ts";
+import type { HostEvent, SettingsView } from "../transport/protocol.ts";
 import { nextHostOf, type Settings, type UiSettings } from "./host-next.ts";
+import { wireSettingsHost } from "./host-wire.ts";
 import { connectRoom } from "./start.ts";
 
 /** A media query the test flips by hand. */
@@ -258,4 +260,68 @@ test("with a NextHost the store follows settings_changed", async () => {
   store.dispose();
   transport.settingsChanged(HOST_SETTINGS);
   expect(store.display().lang).toBe("en");
+});
+
+test("without a host no key is locked", () => {
+  expect(harness().store.locked()).toEqual([]);
+});
+
+/* ---------- over the desktop host's wire (host-wire.ts) ---------- */
+
+const WIRE_VIEW: SettingsView = {
+  ui: { theme: "dark", font_size: 17, language: "en", lite: "off", motion: "system" },
+  locked: ["ui.theme"],
+};
+
+/** The wire settings host over a scripted source: get_settings answers `held`, set_ui_settings is refused while
+ * `refuse` holds an error. */
+function overWire() {
+  const wire = { held: WIRE_VIEW, refuse: null as unknown, reads: 0 };
+  const listeners = new Set<(event: HostEvent) => void>();
+  const host = wireSettingsHost({
+    query: async () => {
+      wire.reads += 1;
+      return { settings: wire.held };
+    },
+    dispatch: async () => {
+      if (wire.refuse !== null) throw wire.refuse;
+      return "done";
+    },
+    onAppEvent: (listener) => {
+      listeners.add(listener);
+      return { ready: Promise.resolve(), stop: () => void listeners.delete(listener) };
+    },
+  });
+  const changed = (view: SettingsView) => {
+    wire.held = view;
+    for (const listener of listeners) listener({ settings_changed: view });
+  };
+  return { wire, changed, ...harness({ host }) };
+}
+
+test("over the wire the locked keys come from get_settings and follow settings_changed", async () => {
+  const { store, changed } = overWire();
+  await settled();
+  expect(store.locked()).toEqual(["ui.theme"]);
+  expect(store.ui()).toMatchObject({ theme: "dark", lite: "full", font_size: 17 });
+  changed({ ...WIRE_VIEW, ui: { ...WIRE_VIEW.ui, lite: "on" }, locked: ["ui.theme", "ui.lite"] });
+  expect(store.locked()).toEqual(["ui.theme", "ui.lite"]);
+  expect(store.display().render).toBe("lite");
+});
+
+test("a set the host refuses re-reads the settings and shows what the host holds", async () => {
+  const { store, wire } = overWire();
+  await settled();
+  wire.refuse = { code: "settings.locked", message: "locked", retryable: false };
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  try {
+    store.set({ theme: "light" });
+    expect(store.ui().theme).toBe("light");
+    await settled();
+    expect(wire.reads).toBe(2);
+    expect(store.ui().theme).toBe("dark");
+    expect(store.display().theme).toBe("night");
+  } finally {
+    warn.mockRestore();
+  }
 });

@@ -3,6 +3,12 @@
 //! state's clock once a second, and acks may restart subscriptions. A restart the host refuses
 //! sends the webview a `stream_failed` message, and the clock tries the stream again.
 //!
+//! The app-wide feed (`subscribe_app`) has a pump of its own on the same channel. A restart
+//! the bridge makes (a pause's end, the watchdog) subscribes again, reads `GetSettings` and sends
+//! one `settings_changed` before the new pump starts, so the window never ends on a stale view
+//! though it missed events (0017's subscribe-then-read rule). The host refuses `subscribe_app`
+//! only once it has stopped, so a failed restart is not retried: the window stops following it.
+//!
 //! Channel messages are sent while the window's lock is held, so the order the state counts them
 //! in is the order the webview receives them. Tasks hold the window weakly: dropping the window (a
 //! new `open_stream`, or the bridge going away) aborts every task and so drops every host
@@ -12,8 +18,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 
-use clauseo_host::{HostHandle, Subscription};
-use clauseo_protocol::{Ack, HostError, StreamId};
+use clauseo_host::{AppSubscription, HostHandle, Subscription};
+use clauseo_protocol::{Ack, ErrorCode, HostError, HostEvent, HostQuery, QueryResult, StreamId};
 use futures::StreamExt as _;
 use tauri::async_runtime::{self, JoinHandle};
 use tauri::ipc::Channel;
@@ -34,14 +40,14 @@ pub(crate) struct Window {
     state: WindowState,
     /// The pump of each stream whose host subscription is live.
     pumps: HashMap<StreamId, JoinHandle<()>>,
+    /// The app-wide feed's pump, while its host subscription is live.
+    app_pump: Option<JoinHandle<()>>,
     watchdog: Option<JoinHandle<()>>,
 }
 
 impl Drop for Window {
     fn drop(&mut self) {
-        for (_, pump) in self.pumps.drain() {
-            pump.abort();
-        }
+        self.stop_pumps();
         if let Some(watchdog) = self.watchdog.take() {
             watchdog.abort();
         }
@@ -66,6 +72,7 @@ impl Window {
             channel,
             state: WindowState::new(),
             pumps: HashMap::new(),
+            app_pump: None,
             watchdog: None,
         }));
         let watchdog = async_runtime::spawn(watch(Arc::downgrade(&window)));
@@ -96,9 +103,12 @@ impl Window {
         &self.state
     }
 
-    /// Drops every host subscription by aborting its pump.
+    /// Drops every host subscription by aborting its pump, the app-wide feed's too.
     fn stop_pumps(&mut self) {
         for (_, pump) in self.pumps.drain() {
+            pump.abort();
+        }
+        if let Some(pump) = self.app_pump.take() {
             pump.abort();
         }
     }
@@ -149,9 +159,12 @@ pub(crate) fn ack(
         let elapsed = guard.opened.elapsed();
         // Restarts end a pause, whose pumps are already stopped.
         let acked = guard.state.ack(positions, messages, elapsed)?;
-        (guard.host.clone(), acked)
+        let app = guard.state.take_app_restart();
+        (guard.host.clone(), (acked, app))
     };
+    let (acked, app) = acked;
     spawn_restarts(&host, window, acked.restarts);
+    spawn_app_restart(&host, window, app);
     Ok(acked.positions)
 }
 
@@ -274,6 +287,153 @@ async fn pump(
     }
 }
 
+/// Follows the app-wide feed. Returns the restart id of the subscription [`start_app`] starts;
+/// a current one's events are dropped from now on.
+pub(crate) fn follow_app(window: &Mutex<Window>) -> u64 {
+    lock(window).state.follow_app()
+}
+
+/// Stops following the app-wide feed for `restart_id`, a subscription the host refused, unless
+/// a newer one came since.
+pub(crate) fn forget_app(window: &Mutex<Window>, restart_id: u64) {
+    let mut window = lock(window);
+    if window.state.unfollow_app_restart(restart_id)
+        && let Some(pump) = window.app_pump.take()
+    {
+        pump.abort();
+    }
+}
+
+/// Starts the app feed's restart `restart_id`, when there is one, in its own task, sending the
+/// current state first. One the host refuses stops the window following the feed.
+fn spawn_app_restart(host: &HostHandle, window: &Arc<Mutex<Window>>, restart_id: Option<u64>) {
+    let Some(restart_id) = restart_id else {
+        return;
+    };
+    let host = host.clone();
+    let window = Arc::clone(window);
+    drop(async_runtime::spawn(async move {
+        if start_app(&host, &window, restart_id, true).await.is_err() {
+            forget_app(&window, restart_id);
+        }
+    }));
+}
+
+/// The current settings as the `settings_changed` event's text, read after the subscription it
+/// goes before.
+async fn current_settings(host: &HostHandle) -> Result<String, HostError> {
+    let QueryResult::Settings(settings) = host.query(PRINCIPAL, HostQuery::GetSettings).await?
+    else {
+        return Err(HostError::new(
+            ErrorCode::Internal,
+            "GetSettings answered with another kind of result",
+        ));
+    };
+    serde_json::to_string(&HostEvent::SettingsChanged(settings))
+        .map_err(|error| HostError::new(ErrorCode::Internal, error.to_string()))
+}
+
+/// Subscribes to the app-wide events for `restart_id` and starts its pump, unless the window
+/// paused or a newer subscription came first while the host answered. With `current` (a
+/// restart the bridge made) it then reads the settings and sends them, as one
+/// `settings_changed`, before any event of the new subscription.
+pub(crate) async fn start_app(
+    host: &HostHandle,
+    window: &Arc<Mutex<Window>>,
+    restart_id: u64,
+    current: bool,
+) -> Result<(), HostError> {
+    if lock(window).state.is_paused() {
+        // Started when acks catch up.
+        return Ok(());
+    }
+    let subscribed = host.subscribe_app(PRINCIPAL).await;
+    // The host answers in order: a change after the read is in the subscription.
+    let subscribed = match subscribed {
+        Ok(subscription) if current => current_settings(host)
+            .await
+            .map(|settings| (subscription, Some(settings))),
+        Ok(subscription) => Ok((subscription, None)),
+        Err(error) => Err(error),
+    };
+    let (subscription, settings) = match subscribed {
+        Ok(started) => started,
+        Err(error) => {
+            let mut guard = lock(window);
+            if guard.state.is_current_app(restart_id)
+                && let Some(old) = guard.app_pump.take()
+            {
+                old.abort();
+            }
+            return Err(error);
+        }
+    };
+    let mut guard = lock(window);
+    if guard.state.is_paused() || !guard.state.is_current_app(restart_id) {
+        return Ok(());
+    }
+    if let Some(settings) = settings {
+        let elapsed = guard.opened.elapsed();
+        if let Forward::Send { messages, pause } =
+            guard.state.forward_app(restart_id, &settings, elapsed)
+        {
+            if !guard.send(messages) {
+                return Ok(());
+            }
+            if pause {
+                // The pause's end restarts the feed again, with the state then.
+                guard.stop_pumps();
+                return Ok(());
+            }
+        }
+    }
+    let pump = async_runtime::spawn(pump_app(Arc::downgrade(window), restart_id, subscription));
+    if let Some(old) = guard.app_pump.replace(pump) {
+        old.abort();
+    }
+    Ok(())
+}
+
+/// Forwards the app subscription's events, restart `restart_id`, until it ends, the window is
+/// gone, or the subscription is no longer current.
+async fn pump_app(window: Weak<Mutex<Window>>, restart_id: u64, mut subscription: AppSubscription) {
+    while let Some(event) = subscription.next().await {
+        let Some(window) = window.upgrade() else {
+            return;
+        };
+        let mut window = lock(&window);
+        let elapsed = window.opened.elapsed();
+        match window.state.forward_app(restart_id, event.json(), elapsed) {
+            Forward::Send { messages, pause } => {
+                if !window.send(messages) {
+                    return;
+                }
+                if pause {
+                    window.stop_pumps();
+                    return;
+                }
+            }
+            // Dropped: paused or replaced, and this pump is about to be aborted. Too large:
+            // never sent; the next restart sends the current state.
+            Forward::Drop | Forward::TooLarge => {}
+        }
+    }
+}
+
+/// For tests: counts `json` as an app event sent on a new current subscription of the feed, as
+/// a pump would but without sending it, and drops every pump when that paused the window.
+#[cfg(test)]
+pub(crate) fn count_app_event(window: &Mutex<Window>, json: &str) -> Forward {
+    let mut window = lock(window);
+    let restart_id = window.state.follow_app();
+    let elapsed = window.opened.elapsed();
+    let forwarded = window.state.forward_app(restart_id, json, elapsed);
+    if matches!(forwarded, Forward::Send { pause: true, .. }) {
+        window.stop_pumps();
+    }
+    forwarded
+}
+
 /// Ticks the window's clock every [`TICK`] and starts the restarts it asks for: the watchdog's,
 /// and the retries of streams whose restart failed.
 async fn watch(window: Weak<Mutex<Window>>) {
@@ -287,8 +447,11 @@ async fn watch(window: Weak<Mutex<Window>>) {
             let elapsed = guard.opened.elapsed();
             // Each restart replaces its stream's pump, if any, once the new subscription starts.
             let restarts = guard.state.tick(elapsed);
-            (guard.host.clone(), restarts)
+            let app = guard.state.take_app_restart();
+            (guard.host.clone(), (restarts, app))
         };
+        let (restarts, app) = restarts;
         spawn_restarts(&host, &window, restarts);
+        spawn_app_restart(&host, &window, app);
     }
 }

@@ -9,6 +9,7 @@ import type {
   CommandOutcome,
   DisplayInfo,
   HostError,
+  HostEvent,
   HostQuery,
   PatchBatch,
   PermissionRequestId,
@@ -65,6 +66,16 @@ export interface HostTransport {
   /** Hears every command `dispatch` is given, as it is issued (the perf build times the send by it). Returns the
    * unsubscribe. */
   onDispatch(listener: (command: CommandEnvelope) => void): () => void;
+}
+
+/** One listener's hold on the app-wide events: `ready` resolves once the host subscribed the window to them (rejects
+ * with the HostError when it refused; a later listener tries again), `stop` ends the hold. */
+export type AppFeed = { ready: Promise<void>; stop: () => void };
+
+/** A transport that carries the host's app-wide events, those of no stream (today `settings_changed`). Only the
+ * desktop transport is one; the room asks for it by duck type (host-next.ts), so it is not part of HostTransport. */
+export interface AppFeedSource {
+  onAppEvent(listener: (event: HostEvent) => void): AppFeed;
 }
 
 /** A host error the transport made itself, for a failure that is not the host's answer. */

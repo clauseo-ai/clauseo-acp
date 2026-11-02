@@ -6,7 +6,7 @@
 //!   `CLAUSEO_DATA_DIR` moves the data folder; `Effective::load` with the system policy
 //!   sources), the `PassthroughLauncher`, and the refused folders of `refused_folders`. Exit
 //!   waits for `HostHandle::shutdown` and `HostJoin::join` on their own thread, then exits.
-//! - Nine async commands (`commands.rs`), each granted by its own permission in
+//! - Ten async commands (`commands.rs`), each granted by its own permission in
 //!   `capabilities/main.json` and listed in `build.rs`'s `AppManifest`. Beside them that file
 //!   grants only the two window commands of Tauri's drag script, and the room build adds the
 //!   caption buttons' four on Windows and Linux (`window_frame.rs`, 0015).
@@ -125,6 +125,7 @@ pub fn run() -> tauri::Result<()> {
             commands::open_stream,
             commands::subscribe,
             commands::unsubscribe,
+            commands::subscribe_app,
             commands::ack,
             commands::answer_permission,
             commands::pick_folder,

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-subscribe-app"
+description = "Enables the subscribe_app command without any pre-configured scope."
+commands.allow = ["subscribe_app"]
+
+[[permission]]
+identifier = "deny-subscribe-app"
+description = "Denies the subscribe_app command without any pre-configured scope."
+commands.deny = ["subscribe_app"]

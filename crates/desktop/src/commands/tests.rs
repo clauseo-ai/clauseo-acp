@@ -25,6 +25,7 @@ fn app(bridge: Bridge) -> (tauri::App<MockRuntime>, WebviewWindow<MockRuntime>) 
             open_stream,
             subscribe,
             unsubscribe,
+            subscribe_app,
             ack,
             answer_permission,
             pick_folder,

@@ -14,6 +14,8 @@ import { ChannelReader, streamFailedOf, type ChannelEvent } from "./channel.ts";
 import {
   NullTransport,
   toHostError,
+  type AppFeed,
+  type AppFeedSource,
   type BatchSubscriber,
   type DisplayInfo,
   type HostTransport,
@@ -22,6 +24,7 @@ import type {
   AgentChoiceId,
   CommandEnvelope,
   CommandOutcome,
+  HostEvent,
   HostQuery,
   PermissionRequestId,
   PickedFolder,
@@ -53,7 +56,7 @@ export type TauriOptions = {
   nextFrame?: (run: () => void) => void;
 };
 
-export class TauriTransport implements HostTransport {
+export class TauriTransport implements HostTransport, AppFeedSource {
   readonly kind = "tauri";
   readonly #reader: ChannelReader;
   readonly #subs: Subscriptions;
@@ -74,6 +77,10 @@ export class TauriTransport implements HostTransport {
   /** `onDispatch` listeners; none in release. */
   readonly #dispatched = new Set<(command: CommandEnvelope) => void>();
   #frameQueued = false;
+  /** `onAppEvent` listeners. */
+  readonly #appListeners = new Set<(event: HostEvent) => void>();
+  /** The `subscribe_app` call for the channel open now: null before the first listener, and after it failed. */
+  #appReady: Promise<void> | null = null;
 
   constructor(options: TauriOptions = {}) {
     const warn = options.warn ?? ((m: string) => console.warn(m));
@@ -99,6 +106,15 @@ export class TauriTransport implements HostTransport {
           this.#subs.fail(failed.stream, toHostError(failed.error));
         } else if ("patches" in event && event.patches !== undefined) {
           this.#carried = this.#subs.deliver(event.patches) > 0;
+        } else if ("settings_changed" in event && event.settings_changed !== undefined) {
+          // app-wide: no stream and no position, so the message counts as processed at once (#onMessage)
+          for (const listener of this.#appListeners) {
+            try {
+              listener(event);
+            } catch (error) {
+              warn(`an app event listener threw: ${String(error)}`);
+            }
+          }
         }
       },
       warn,
@@ -113,12 +129,46 @@ export class TauriTransport implements HostTransport {
       const channel = new Channel<StreamMessage>((message) => this.#reader.receive(message));
       const opened = call(commands.openStream(channel)).then(() => undefined);
       this.#opened = opened;
+      // a channel opened again (after a failed open) carries no app events until subscribed again
+      opened.then(
+        () => {
+          if (this.#appListeners.size > 0 && this.#appReady === null)
+            this.#subscribeApp().catch(() => {});
+        },
+        () => {},
+      );
       opened.catch((e: unknown) => {
         this.#warn(`open_stream failed: ${JSON.stringify(toHostError(e))}`);
         if (this.#opened === opened) this.#opened = null;
       });
     }
     return this.#opened;
+  }
+
+  /** Subscribes the channel to the app-wide events, once per open channel; after a failed attempt the next listener
+   * (or the next open) tries again. */
+  #subscribeApp(): Promise<void> {
+    if (this.#appReady === null) {
+      const ready = this.#open().then(() => call(commands.subscribeApp()).then(() => undefined));
+      this.#appReady = ready;
+      ready.catch((e: unknown) => {
+        this.#warn(`subscribe_app failed: ${JSON.stringify(toHostError(e))}`);
+        if (this.#appReady === ready) this.#appReady = null;
+      });
+    }
+    return this.#appReady;
+  }
+
+  /** Hears each app-wide event (`settings_changed`). The first listener subscribes the window's channel to them;
+   * read the current state with `query` after `ready`, so no change falls between. */
+  onAppEvent(listener: (event: HostEvent) => void): AppFeed {
+    this.#appListeners.add(listener);
+    return {
+      ready: this.#subscribeApp(),
+      stop: () => {
+        this.#appListeners.delete(listener);
+      },
+    };
   }
 
   #onMessage(): void {

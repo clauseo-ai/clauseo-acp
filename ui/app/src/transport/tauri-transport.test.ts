@@ -220,6 +220,66 @@ describe("TauriTransport", () => {
     expect(invoked.some((i) => i.command === "open_stream")).toBe(true);
   });
 
+  test("subscribe_app goes once, after open_stream, however many app listeners there are", async () => {
+    const { t } = await rig();
+    const a = t.onAppEvent(() => {});
+    const b = t.onAppEvent(() => {});
+    await expect(Promise.all([a.ready, b.ready])).resolves.toEqual([undefined, undefined]);
+    const order = invoked.map((i) => i.command).filter((c) => c !== "ack");
+    expect(order).toEqual(["open_stream", "subscribe_app"]);
+  });
+
+  test("a refused subscribe_app rejects ready with the host error, and the next listener tries again", async () => {
+    const error = { code: "internal", message: "no app feed", retryable: true };
+    let refuse = true;
+    answers.set("subscribe_app", () => (refuse ? Promise.reject(error) : null));
+    const { t } = await rig();
+    await expect(t.onAppEvent(() => {}).ready).rejects.toEqual(error);
+    refuse = false;
+    await expect(t.onAppEvent(() => {}).ready).resolves.toBeUndefined();
+    expect(invoked.filter((i) => i.command === "subscribe_app")).toHaveLength(2);
+  });
+
+  test("a channel opened again after a failed open subscribes the app listeners again", async () => {
+    let refuse = true;
+    answers.set("open_stream", () => (refuse ? Promise.reject("no channel") : null));
+    const { t } = await rig("a");
+    await expect(t.onAppEvent(() => {}).ready).rejects.toMatchObject({ code: "internal" });
+    expect(invoked.filter((i) => i.command === "subscribe_app")).toHaveLength(0);
+    refuse = false;
+    t.resubscribe("a", null);
+    await settle();
+    expect(invoked.filter((i) => i.command === "subscribe_app")).toHaveLength(1);
+  });
+
+  test("settings_changed reaches every app listener, no stream subscriber, and is acked on the next frame", async () => {
+    const { t, got, send, frame, acks } = await rig("a");
+    const heard: unknown[] = [];
+    const one = t.onAppEvent((e) => heard.push(["one", e]));
+    t.onAppEvent((e) => heard.push(["two", e]));
+    await one.ready;
+    const view = { ui: { theme: "dark" }, locked: ["ui.theme"] };
+    send({ settings_changed: view });
+    expect(heard).toEqual([
+      ["one", { settings_changed: view }],
+      ["two", { settings_changed: view }],
+    ]);
+    expect(got).toEqual([]);
+    await frame();
+    expect(acks()).toEqual([{ positions: [], messages: 1 }]);
+  });
+
+  test("stop removes only that app listener", async () => {
+    const { t, send } = await rig();
+    const heard: string[] = [];
+    const one = t.onAppEvent(() => heard.push("one"));
+    t.onAppEvent(() => heard.push("two"));
+    await one.ready;
+    one.stop();
+    send({ settings_changed: { ui: {}, locked: [] } });
+    expect(heard).toEqual(["two"]);
+  });
+
   test("outside Tauri the page transport reaches nothing", async () => {
     const t = pageTransport();
     expect(t.kind).toBe("null");

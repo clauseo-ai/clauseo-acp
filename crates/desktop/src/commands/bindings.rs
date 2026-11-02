@@ -29,6 +29,7 @@ fn with_commands(builder: tauri_specta::Builder<tauri::Wry>) -> tauri_specta::Bu
             open_stream::<tauri::Wry>,
             subscribe::<tauri::Wry>,
             unsubscribe::<tauri::Wry>,
+            subscribe_app::<tauri::Wry>,
             ack::<tauri::Wry>,
             answer_permission::<tauri::Wry>,
             pick_folder::<tauri::Wry>,

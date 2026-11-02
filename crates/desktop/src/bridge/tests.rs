@@ -395,4 +395,6 @@ fn stream_commands_need_open_stream_and_acks_are_bounded() {
     assert_eq!(messages.drain(), Vec::<String>::new());
 }
 
+mod admit;
+mod app;
 mod permission;

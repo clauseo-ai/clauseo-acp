@@ -91,27 +91,24 @@ impl Bridge {
         &self.host
     }
 
-    /// Checks `command`'s shape, refuses what goes another way (`AnswerPermission`) or may not
-    /// come from the window at all (`SetMode`, `SetConfigOption`), and runs it.
+    /// Checks `command`'s shape and that the window may send it (`admit`), and runs it.
     pub(crate) async fn dispatch(
         &self,
         command: CommandEnvelope,
     ) -> Result<CommandOutcome, HostError> {
         let checked = command.validate().map_err(HostError::invalid_command)?;
-        match checked.command() {
-            HostCommand::AnswerPermission { .. } => {
-                return Err(invalid(
-                    "a permission is answered with answer_permission, not dispatch",
-                ));
-            }
-            // A mode or option can widen what the agent may do without asking (Claude's
-            // bypassPermissions), an escalation 0001 puts behind a native dialog drawn by Rust.
-            // That path does not exist yet, and the window never sends either.
-            HostCommand::SetMode { .. } | HostCommand::SetConfigOption { .. } => {
-                return Err(invalid(
-                    "modes and config options are not settable from the window yet",
-                ));
-            }
+        self.admit(checked.command())?;
+        self.host.dispatch(checked.into_envelope()).await
+    }
+
+    /// Whether the window may send `command`: an allow-list, one arm per host command and no
+    /// catch-all, so a command the host adds does not compile here until the bridge rules on it
+    /// (`docs/decisions/0019-app-stream-to-the-window.md`). Refuses what goes another way
+    /// (`AnswerPermission`), what may not come from the window at all (`SetMode`,
+    /// `SetConfigOption`), and a `CreateMatter` whose folder ref this run's `pick_folder` did
+    /// not issue.
+    fn admit(&self, command: &HostCommand) -> Result<(), HostError> {
+        match command {
             HostCommand::CreateMatter { source, .. } => {
                 let (MatterSource::NewFolder { folder } | MatterSource::ExistingFolder { folder }) =
                     source;
@@ -120,14 +117,49 @@ impl Bridge {
                         "folder ref {folder} was not picked in this run"
                     )));
                 }
+                Ok(())
             }
-            _ => {}
+            // Slot: H3's `RelocateMatter` (#135), once it merges, takes only a folder ref this
+            // run's `pick_folder` issued, as `CreateMatter` does.
+            HostCommand::CreateThread { .. }
+            | HostCommand::SendPrompt { .. }
+            | HostCommand::EditQueuedPrompt { .. }
+            | HostCommand::RemoveQueuedPrompt { .. }
+            | HostCommand::SendQueuedNow { .. }
+            | HostCommand::ResumeQueue { .. }
+            | HostCommand::Cancel { .. }
+            | HostCommand::RestartAgent { .. }
+            | HostCommand::AnswerElicitation { .. }
+            | HostCommand::RenameThread { .. }
+            | HostCommand::ArchiveThread { .. }
+            | HostCommand::UndoStep { .. }
+            | HostCommand::RestoreVersion { .. }
+            | HostCommand::SetUiSettings { .. } => Ok(()),
+            HostCommand::AnswerPermission { .. } => Err(invalid(
+                "a permission is answered with answer_permission, not dispatch",
+            )),
+            // A mode or option can widen what the agent may do without asking (Claude's
+            // bypassPermissions), an escalation 0001 puts behind a native dialog drawn by Rust.
+            // That path does not exist yet, and the window never sends either.
+            HostCommand::SetMode { .. } | HostCommand::SetConfigOption { .. } => Err(invalid(
+                "modes and config options are not settable from the window yet",
+            )),
         }
-        self.host.dispatch(checked.into_envelope()).await
     }
 
-    /// Answers `query`.
+    /// Answers `query`, which every read the host has may be. The match is an allow-list like
+    /// `admit`'s: a read the host adds does not compile here until the bridge rules on it.
     pub(crate) async fn query(&self, query: HostQuery) -> Result<QueryResult, HostError> {
+        match &query {
+            // Slot: H8's `ListPapers` (#131), once it merges.
+            HostQuery::ListMatters
+            | HostQuery::ListThreads { .. }
+            | HostQuery::PageEntries { .. }
+            | HostQuery::CompareVersions { .. }
+            | HostQuery::PreviewRestore { .. }
+            | HostQuery::ReadBlob { .. }
+            | HostQuery::GetSettings => {}
+        }
         self.host.query(PRINCIPAL, query).await
     }
 
@@ -160,6 +192,15 @@ impl Bridge {
         pump::start(&self.host, &window, restart)
             .await
             .inspect_err(|_| pump::forget(&window, restart))
+    }
+
+    /// Follows the app-wide events on the window's channel (`pump::follow_app`).
+    pub(crate) async fn subscribe_app(&self, label: &str) -> Result<(), HostError> {
+        let window = self.window(label)?;
+        let restart = pump::follow_app(&window);
+        pump::start_app(&self.host, &window, restart, false)
+            .await
+            .inspect_err(|_| pump::forget_app(&window, restart))
     }
 
     /// Stops following `stream` on the window's channel.

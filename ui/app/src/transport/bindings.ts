@@ -31,6 +31,12 @@ export const commands = {
 	/**  Ends the window's subscription to `stream`. */
 	unsubscribe: (stream: StreamId) => typedError<null, HostError>(__TAURI_INVOKE("unsubscribe", { stream })),
 	/**
+	 *  Subscribes the window's channel to the app-wide events, those of no stream (today
+	 *  `settings_changed`). It starts with nothing: subscribe, then read the current state with
+	 *  `query`. Subscribing again restarts it; a new `open_stream` drops it.
+	 */
+	subscribeApp: () => typedError<null, HostError>(__TAURI_INVOKE("subscribe_app")),
+	/**
 	 *  Records that the window has received and processed `messages` channel messages since
 	 *  `open_stream`, and applied each stream in `positions` (maybe none) up to its cursor. Refused
 	 *  whole when `messages` is more than the window was sent or a stream is named twice.
