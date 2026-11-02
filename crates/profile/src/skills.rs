@@ -253,6 +253,10 @@ pub(crate) fn write_unlocked(
         recheck(root, skill)?;
     }
     no_links(root, &[MANIFEST])?;
+    // A linked skill folder is refused before the sweep, so it is never entered.
+    for skill in &rendered.skills {
+        no_links(root, &[skill.name.as_str()])?;
+    }
     write::sweep_temps(root, false);
     for skill in &rendered.skills {
         write::sweep_temps(&root.join(&skill.name), true);

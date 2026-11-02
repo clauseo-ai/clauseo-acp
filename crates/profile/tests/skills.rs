@@ -227,6 +227,21 @@ fn a_symlinked_skill_folder_is_never_written_through() {
     assert!(!skills::is_current(&skills_dir, "alpha", "1").unwrap());
 }
 
+#[cfg(unix)]
+#[test]
+fn a_linked_skill_folder_is_refused_before_the_temp_sweep_enters_it() {
+    let root = Scratch::new("symlink-sweep");
+    let outside = root.join("outside");
+    let looks_like_temp = outside.join(".SKILL.md.1-0.tmp");
+    write::write(&looks_like_temp, b"not ours").unwrap();
+    let skills_dir = root.join("skills");
+    write::fresh_dir(&skills_dir).unwrap();
+    write::symlink_dir(&outside, &skills_dir.join("alpha")).unwrap();
+    let one = render(&[skill("alpha", "1", vec![skill_md("alpha", "a\n")])]).unwrap();
+    assert!(write_rendered(&skills_dir, &one).is_err());
+    assert_eq!(read(&looks_like_temp), b"not ours");
+}
+
 #[test]
 fn a_manifest_that_does_not_parse_is_rebuilt_and_unknown_keys_are_kept() {
     let root = Scratch::new("manifest");
@@ -449,6 +464,18 @@ fn stetdocs_frontmatter_is_cut_to_its_name_and_description() {
     assert_eq!(
         String::from_utf8(loaded.files[0].bytes.clone()).unwrap(),
         "---\nname: stetdoc\ndescription: \"Edit Word files.\"\n---\n# stetdoc\n"
+    );
+    assert!(render(&[loaded]).is_ok());
+}
+
+#[test]
+fn a_literal_multi_line_stetdoc_description_is_joined_into_one_line() {
+    let text =
+        "---\nname: stetdoc\ndescription: |\n  Edit Word files\n  as tracked changes.\n---\nB\n";
+    let loaded = stetdoc::skill_source("stetdoc 0.9.1", text.as_bytes()).unwrap();
+    assert_eq!(
+        String::from_utf8(loaded.files[0].bytes.clone()).unwrap(),
+        "---\nname: stetdoc\ndescription: \"Edit Word files as tracked changes.\"\n---\nB\n"
     );
     assert!(render(&[loaded]).is_ok());
 }
