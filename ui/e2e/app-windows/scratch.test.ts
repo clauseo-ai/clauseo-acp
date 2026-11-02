@@ -14,6 +14,7 @@ import {
   readTree,
   readyReusedProfile,
   removeScratch,
+  retryWarmUp,
   scratchEnv,
   scratchSettings,
   warmProfile,
@@ -280,4 +281,145 @@ test("a warm profile still locked at the worker's end warns instead of failing",
   expect(warnings[0]).toMatch(
     /still holds the warm WebView2 profile .* 200 ms after the last launch ended/,
   );
+});
+
+test("resetting the warm profile removes its folder and starts over at launch 1", async () => {
+  const warm = warmProfile(base);
+  const one = makeScratch({ scenario: null, matterFiles: {} }, () => agent, base);
+  const first = launchProfile("warm", one, 1, warm);
+  expect(first.launch).toBe(1);
+  mkdirSync(join(first.folder, "EBWebView"));
+  // The failed launch's browser still holds the profile for a moment after its tree is killed.
+  writeFileSync(profileLock(first.folder), "");
+  const warnings: string[] = [];
+  const reset = warm.reset((message) => warnings.push(message), 5000);
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  expect(existsSync(first.folder)).toBe(true);
+  rmSync(profileLock(first.folder));
+  await reset;
+  expect(existsSync(first.folder)).toBe(false);
+  expect(warnings).toEqual([]);
+  expect(warm.launches).toBe(0);
+
+  // The retry is launch 1 again, on a new folder, and later launches reuse that one.
+  const retry = launchProfile("warm", one, 2, warm);
+  expect(retry.launch).toBe(1);
+  expect(retry.folder).not.toBe(first.folder);
+  expect(existsSync(retry.folder)).toBe(true);
+  expect(launchProfile("warm", one, 3, warm)).toEqual({
+    profile: "warm",
+    folder: retry.folder,
+    launch: 2,
+  });
+  await warm.remove(() => {}, 1000);
+  expect(existsSync(retry.folder)).toBe(false);
+});
+
+test("resetting a warm profile never asked for is a no-op", async () => {
+  const warm = warmProfile(base);
+  await warm.reset(() => {
+    throw new Error("warned");
+  });
+  expect(warm.launches).toBe(0);
+  expect(readTree(base)).toEqual({ "fake_agent.exe": "" });
+});
+
+test("a warm-up that passes first time is neither recovered nor reported", async () => {
+  const calls: string[] = [];
+  const result = await retryWarmUp(
+    async () => {
+      calls.push("attempt");
+      return 7;
+    },
+    () => true,
+    async () => {
+      calls.push("recover");
+    },
+    () => calls.push("report"),
+  );
+  expect(result).toBe(7);
+  expect(calls).toEqual(["attempt"]);
+});
+
+test("a warm-up that fails once is recovered, reported on one line, and tried again", async () => {
+  const calls: string[] = [];
+  let tries = 0;
+  const result = await retryWarmUp(
+    async () => {
+      tries += 1;
+      calls.push(`attempt ${tries}`);
+      if (tries === 1) throw new Error("connecting over CDP\r\ntimed out\nat port 9222");
+      return "app";
+    },
+    () => true,
+    async (error) => {
+      calls.push(`recover ${(error as Error).message.split(/\r?\n/)[0]}`);
+    },
+    (message) => calls.push(`report ${message}`),
+  );
+  expect(result).toBe("app");
+  // Cleaned up before the report, and both before the second try.
+  expect(calls).toEqual([
+    "attempt 1",
+    "recover connecting over CDP",
+    "report connecting over CDP timed out at port 9222",
+    "attempt 2",
+  ]);
+});
+
+test("a warm-up that fails twice throws the second error, naming the first", async () => {
+  let tries = 0;
+  const reports: string[] = [];
+  const second = new Error("no page");
+  const failed = retryWarmUp(
+    async () => {
+      tries += 1;
+      throw tries === 1 ? new Error("no port") : second;
+    },
+    () => true,
+    async () => {},
+    (message) => reports.push(message),
+  );
+  await expect(failed).rejects.toThrow(/no page.*first try: no port/);
+  await failed.catch((error: Error) => expect(error.cause).toBe(second));
+  expect(tries).toBe(2);
+  expect(reports).toEqual(["no port"]);
+});
+
+test("an error that is not a warm-up setup failure is never retried", async () => {
+  let tries = 0;
+  const failed = retryWarmUp(
+    async () => {
+      tries += 1;
+      throw new Error("a fresh launch failed");
+    },
+    () => false,
+    async () => {
+      throw new Error("recovered");
+    },
+    () => {
+      throw new Error("reported");
+    },
+  );
+  await expect(failed).rejects.toThrow("a fresh launch failed");
+  expect(tries).toBe(1);
+});
+
+test("a warm-up whose clean-up fails throws without a second try, naming the first error", async () => {
+  let tries = 0;
+  const cleanup = new Error("taskkill failed");
+  const failed = retryWarmUp(
+    async () => {
+      tries += 1;
+      throw new Error("no port");
+    },
+    () => true,
+    async () => {
+      throw cleanup;
+    },
+    () => {},
+  );
+  await expect(failed).rejects.toThrow(/cleaning up .* \(no port\)/);
+  await failed.catch((error: Error) => expect(error.cause).toBe(cleanup));
+  expect(tries).toBe(1);
 });

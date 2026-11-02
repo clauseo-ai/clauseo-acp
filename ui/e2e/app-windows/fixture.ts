@@ -42,11 +42,12 @@ import {
   portFile,
   readyReusedProfile,
   removeScratch,
+  retryWarmUp,
   scratchEnv,
   warmProfile,
   type Profile,
+  type RemovableWarmProfile,
   type Scratch,
-  type WarmProfile,
 } from "./scratch.ts";
 
 /** The time from starting the app to having its page: the port file, connecting, the page. */
@@ -284,13 +285,59 @@ interface Launched {
   browser: Browser | undefined;
 }
 
-/** Starts the app on `scratch` as launch number `launch`, on a `profile` WebView2 data folder. */
+/**
+ * The warm-up launch (the first on the worker's warm profile) failing to start: no port, no CDP
+ * connection or no page. `launched` is still in the fixture's set, for the retry to end.
+ */
+class WarmUpSetupError extends Error {
+  constructor(
+    readonly launched: Launched,
+    cause: unknown,
+  ) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+    this.name = "WarmUpSetupError";
+  }
+}
+
+/**
+ * Starts the app on `scratch` as launch number `n`, on a `profile` WebView2 data folder. The
+ * warm-up launch gets one retry on a setup failure (#192's CDP connect timeout): its tree is
+ * killed, the warm profile removed and reset, a warning printed, and the launch made again as
+ * launch 1 on a new profile. Fresh launches and the measured warm launches (2 and on, whose numbers
+ * must come from the profile the warm-up made) fail on the first setup error.
+ */
 async function launch(
   scratch: Scratch,
   n: number,
   owned: Set<Launched>,
   profile: Profile,
-  warm: WarmProfile,
+  warm: RemovableWarmProfile,
+): Promise<App> {
+  return await retryWarmUp(
+    () => launchOnce(scratch, n, owned, profile, warm),
+    (error) => error instanceof WarmUpSetupError,
+    async (error) => {
+      const { launched } = error as WarmUpSetupError;
+      owned.delete(launched);
+      await end(launched, "kill");
+      // Waits for the browser's lock to go, then deletes the folder; the next launch makes another.
+      await warm.reset((message) => {
+        process.stdout.write(`::warning title=Warm profile left on disk::${message}\n`);
+      });
+    },
+    (message) => {
+      process.stdout.write(`::warning title=App launch retried::${message}\n`);
+    },
+  );
+}
+
+/** One try at {@link launch}. */
+async function launchOnce(
+  scratch: Scratch,
+  n: number,
+  owned: Set<Launched>,
+  profile: Profile,
+  warm: RemovableWarmProfile,
 ): Promise<App> {
   const chosen = launchProfile(profile, scratch, n, warm);
   const userDataFolder = chosen.folder;
@@ -310,14 +357,23 @@ async function launch(
   createInterface({ input: child.stdout }).on("line", (line) => {
     process.stdout.write(`[app ${n}] ${line}\n`);
   });
-  const port = await readPort(child, userDataFolder, deadline);
-  const { pid } = child;
-  if (pid === undefined) {
-    throw new Error(`the app has no PID: ${appPath()}`);
+  const warmUp = chosen.profile === "warm" && chosen.launch === 1;
+  let port: number;
+  let pid: number | undefined;
+  let connectedAt: number;
+  let page: Page;
+  try {
+    port = await readPort(child, userDataFolder, deadline);
+    pid = child.pid;
+    if (pid === undefined) {
+      throw new Error(`the app has no PID: ${appPath()}`);
+    }
+    launched.browser = await connect(port, deadline);
+    connectedAt = performance.now();
+    page = await firstPage(launched.browser, deadline);
+  } catch (error) {
+    throw warmUp ? new WarmUpSetupError(launched, error) : error;
   }
-  launched.browser = await connect(port, deadline);
-  const connectedAt = performance.now();
-  const page = await firstPage(launched.browser, deadline);
   launched.app = {
     page,
     browser: launched.browser,
@@ -391,7 +447,7 @@ export interface AppOptions {
 
 export const test = base.extend<
   AppOptions & { scratch: Scratch; apps: Apps; app: App },
-  { warmProfile: WarmProfile }
+  { warmProfile: RemovableWarmProfile }
 >({
   scenario: [null, { option: true }],
   matterFiles: [{}, { option: true }],

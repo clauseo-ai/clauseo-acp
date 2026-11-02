@@ -32,12 +32,16 @@ export default defineConfig({
   // One app at a time: the single-instance plugin ends a second launch.
   workers: 1,
   fullyParallel: false,
-  retries: 0,
+  // One retry in CI (GitHub sets CI=true), so a load-sensitive test does not eject a PR from the
+  // merge queue. A test that passes only on its retry shows as flaky in the list reporter's summary
+  // and is tracked from there. Locally none: a failure fails the run.
+  retries: process.env["CI"] ? 1 : 0,
   forbidOnly: true,
   // Above the sum of the harness's own timeouts, so one of those fires first and names its step.
   timeout: 600_000,
   // The wait for #app-root: in normal mode on windows-2025, the navigation to the app has taken
   // from 2 s to over 30 s. A slow start shows in msToRoot instead of failing the run.
   expect: { timeout: 90_000 },
+  // The list reporter's "N flaky" summary is what the flaky-test collector reads.
   reporter: [["list"]],
 });
