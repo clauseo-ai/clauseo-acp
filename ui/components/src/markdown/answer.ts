@@ -22,6 +22,7 @@ import {
 import type { DefinitionLine, DefinitionLines } from "./definitions.ts";
 import {
   definedIn,
+  dropBackReferences,
   footnoteLabelsIn,
   footnotesIn,
   identifierOf,
@@ -81,6 +82,11 @@ export type BlockView = {
    * is the rest of that one, rendered without the gap between paragraphs (to-react.ts).
    */
   readonly continues?: true;
+  /**
+   * The ids of the footnote references this block's view shows as plain text, inside a dropped
+   * never-markup pair (inline-tags.ts): their notes leave out the back-reference to them.
+   */
+  readonly lostReferences?: readonly string[];
 };
 
 const EMPTY_HAST: Hast = { type: "root", children: [] };
@@ -247,10 +253,11 @@ export function createAnswer(scope: string): Answer {
       const tags = input.includes("<") || input.includes(CUT_LESS_THAN);
       if (tags) markCutTags(hast, input);
       if (hasStandIns(input)) restoreText(hast);
-      if (tags) pairTags(hast, streaming);
+      const lost = tags ? pairTags(hast, streaming) : [];
       const slugs = anchorHeadings(hast, scope);
       const clean = sanitize(hast, SCHEMA) as Hast;
-      return { source: shown, input, hast: clean, streaming: false, slugs };
+      const view: BlockView = { source: shown, input, hast: clean, streaming: false, slugs };
+      return lost.length > 0 ? { ...view, lostReferences: lost } : view;
     } catch {
       return fallback;
     }
@@ -416,13 +423,21 @@ export function createAnswer(scope: string): Answer {
    * A note still streaming in the last block has inert links, as that block does.
    */
   let lastNotes: BlockView | undefined;
-  const noteViewOf = (id: string, numbering: Numbering, streaming: boolean): BlockView => {
+  const noteViewOf = (
+    id: string,
+    numbering: Numbering,
+    streaming: boolean,
+    lost: ReadonlySet<string>,
+  ): BlockView => {
     const note = numbering.notes.get(id)!;
     let key = `${idOf(note.node)}:${numbering.number.get(id)},${numbering.total.get(id)}`;
     for (const [inner, list] of numbering.inNotes.get(id) ?? []) {
       const known = numbering.notes.has(inner) ? 1 : 0;
       key += `;${inner}\u0000${numbering.number.get(inner) ?? ""},${known},${list.join(".")}`;
     }
+    // The back-references it leaves out (lostReferences): any of the answer's change every note's key,
+    // which only a reference inside a dropped never-markup pair does.
+    if (lost.size > 0) key += `\u0004${[...lost].join(" ")}`;
     return noteViews.get(`${key}\u0002${streaming ? 1 : 0}`, () => {
       // As toView does for a block: a note too deep to walk safely, or any error on the way, shows its
       // source as plain text, and what capNesting replaced reads as written.
@@ -443,6 +458,7 @@ export function createAnswer(scope: string): Answer {
           markCutTags(raw, note.source, note.node.position?.start.offset ?? 0);
           if (hasStandIns(note.source) || note.definitions.length > 0) restoreText(raw);
           pairTags(raw, false);
+          if (lost.size > 0) dropBackReferences(raw, lost);
           hast = sanitize(raw, SCHEMA) as Hast;
         }
       } catch {
@@ -451,11 +467,15 @@ export function createAnswer(scope: string): Answer {
       return { source: shown, input: key, hast, streaming, note: id };
     });
   };
-  const notesOf = (numbering: Numbering, streamingNotes: Footnotes): BlockView | undefined => {
+  const notesOf = (
+    numbering: Numbering,
+    streamingNotes: Footnotes,
+    lost: ReadonlySet<string>,
+  ): BlockView | undefined => {
     const items: BlockView[] = [];
     for (const id of numbering.order) {
       const note = numbering.notes.get(id);
-      if (note) items.push(noteViewOf(id, numbering, streamingNotes.notes.includes(note)));
+      if (note) items.push(noteViewOf(id, numbering, streamingNotes.notes.includes(note), lost));
     }
     if (items.length === 0) return (lastNotes = undefined);
     const before = lastNotes?.items;
@@ -586,7 +606,8 @@ export function createAnswer(scope: string): Answer {
       });
       // An empty answer (every streamed answer starts as one) has no blocks, so no tail.
       const tail = streaming ? entries[last] : undefined;
-      const notes = notesOf(numbering, tail ? tail.footnotes : NO_FOOTNOTES);
+      const lost = new Set(blockViews.flatMap((view) => view.lostReferences ?? []));
+      const notes = notesOf(numbering, tail ? tail.footnotes : NO_FOOTNOTES, lost);
       const anchored = numberedSlugs(
         blockViews.map((view, index) => (continues[index] ? continuingOf(view) : view)),
       );

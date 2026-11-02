@@ -225,19 +225,25 @@ function markupIn(
   return { raw, dropped };
 }
 
-/** A hast node's text: its value, or its descendants' text. */
-function textOf(node: ElementContent): string {
+/**
+ * A hast node's text: its value, an image's alt text, or its descendants' text. The id of each footnote
+ * reference it holds goes to `lost`: shown as its number only, it is no link target any more.
+ */
+function textOf(node: ElementContent, lost: string[]): string {
   if (node.type === "text") return node.value;
-  if (node.type === "element") return node.children.map(textOf).join("");
-  return "";
+  if (node.type !== "element") return "";
+  const { alt, id, dataFootnoteRef } = node.properties;
+  if (node.tagName === "img") return typeof alt === "string" ? alt : "";
+  if (node.tagName === "a" && dataFootnoteRef && typeof id === "string") lost.push(id);
+  return node.children.map((child) => textOf(child, lost)).join("");
 }
 
 /**
  * `nodes` with HTML_ELEMENTS' rule applied: a dropped tag's text node is emptied (kept, so a paragraph's
- * first node stays one), and a never-markup pair is one text node of what it held. What becomes text here
- * is no tag any more for the allowlist.
+ * first node stays one), and a never-markup pair is one text node of what it held (textOf, the ids of the
+ * footnote references in it to `lost`). What becomes text here is no tag any more for the allowlist.
  */
-function dropMarkup(nodes: ElementContent[]): ElementContent[] {
+function dropMarkup(nodes: ElementContent[], lost: string[]): ElementContent[] {
   const tags = nodes.map((node) =>
     node.type === "text" && INLINE_HTML.has(node)
       ? htmlTagFrom(WHOLE_TAG.exec(node.value))
@@ -265,7 +271,7 @@ function dropMarkup(nodes: ElementContent[]): ElementContent[] {
       if (child.type === "text") INLINE_HTML.delete(child);
     const text = node as Text;
     INLINE_HTML.delete(text);
-    text.value = inner.map(textOf).join("");
+    text.value = inner.map((child) => textOf(child, lost)).join("");
     out.push(text);
     index = end;
   }
@@ -473,9 +479,11 @@ function endPath(root: Root): Set<Root | Element> {
 
 /**
  * Makes the allowlisted tags of `root` (built with htmlAsText) our elements, in place. `streaming` is true
- * for the streaming last block, whose unpaired opening tags at its end are hidden.
+ * for the streaming last block, whose unpaired opening tags at its end are hidden. Returns the ids of the
+ * footnote references a dropped never-markup pair made text (textOf).
  */
-export function pairTags(root: Root, streaming: boolean): void {
+export function pairTags(root: Root, streaming: boolean): string[] {
+  const lost: string[] = [];
   const open = streaming ? endPath(root) : undefined;
   const stack: [Root | Element, number][] = [[root, 0]];
   for (let item = stack.pop(); item; item = stack.pop()) {
@@ -495,11 +503,12 @@ export function pairTags(root: Root, streaming: boolean): void {
     }
     if (found)
       parent.children = paired(
-        dropMarkup(children),
+        dropMarkup(children, lost),
         open?.has(parent) ?? false,
         MAX_DEPTH - depth,
       ) as never;
     for (const child of parent.children)
       if (child.type === "element") stack.push([child, depth + 1]);
   }
+  return lost;
 }
