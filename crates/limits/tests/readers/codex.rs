@@ -145,6 +145,7 @@ fn the_spec_runs_codex_js_app_server_with_codex_home_forced() {
         "features.skill_mcp_dependency_install=false",
         "cloud.skills.enabled=false",
         "skills.bundled.enabled=false",
+        "skills.include_instructions=false",
     ] {
         args.extend([OsString::from("-c"), OsString::from(set)]);
     }
