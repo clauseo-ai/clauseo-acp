@@ -7,7 +7,7 @@
 // lights over the corner lights' place on it, inside the desktop app; elsewhere (tests, the probe, a browser) the
 // buttons log their presses and the lights are painted. Until U12 there is no plan, until a host query no search, and
 // until H5 nothing under a matter's title (the scratch matter's line stands). The wall
-// shows its surface only until H8 (host-next.ts's papers part). Folded, the rail closes on Escape and on opening a
+// lists H8's papers (host-next.ts's papers part, which the desktop gives through host-wire.ts). Folded, the rail closes on Escape and on opening a
 // matter or making one, and focus goes back to Matters; Matters carries the court-yellow dot while another matter
 // waits on the lawyer. A link or paper in an answer opens through the host (open.ts, H11), and so does a matter row's
 // Show in Finder.

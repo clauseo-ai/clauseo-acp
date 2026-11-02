@@ -1,5 +1,5 @@
-// H7 over the desktop host: the room's SettingsHost (host-next.ts) from the transport's `query`, `dispatch` and app feed
-// (`onAppEvent`). The room keeps its own spellings; this file is the one place they meet the wire's: lite's "full" and
+// H7 and H8 over the desktop host: the room's SettingsHost (host-next.ts) from the transport's `query`, `dispatch` and
+// app feed (`onAppEvent`), and its PapersHost from `query`'s `list_papers`. The room keeps its own spellings; this file is the one place they meet the wire's: lite's "full" and
 // "lite" are the wire's "off" and "on", motion's "reduced" is "reduce", and the text size is a number on the wire.
 import { DEFAULT_DISPLAY, TEXT_SIZES, type TextSize } from "@clauseo/components/lib/display.ts";
 import {
@@ -15,7 +15,15 @@ import type {
   UiPatch,
   UiSettings as WireUi,
 } from "../transport/protocol.ts";
-import type { Settings, SettingsHost, UiLite, UiMotion, UiSettings } from "./host-next.ts";
+import type {
+  Papers,
+  PapersHost,
+  Settings,
+  SettingsHost,
+  UiLite,
+  UiMotion,
+  UiSettings,
+} from "./host-next.ts";
 
 /** What the wire settings host reaches. */
 export type WireSettingsSource = Pick<HostTransport, "query" | "dispatch"> & AppFeedSource;
@@ -102,6 +110,18 @@ export function wireSettingsHost(source: WireSettingsSource): SettingsHost {
         feed.stop();
         feed = null;
       };
+    },
+  };
+}
+
+/** The room's PapersHost over the desktop host: `{"list_papers": {"matter": ...}}`, answered with `papers`. */
+export function wirePapersHost(source: Pick<HostTransport, "query">): PapersHost {
+  return {
+    async listPapers(matter): Promise<Papers> {
+      const answer = await source.query({ list_papers: { matter } });
+      if (!("papers" in answer) || answer.papers === undefined)
+        throw internalError("list_papers answered something else");
+      return answer.papers;
     },
   };
 }
