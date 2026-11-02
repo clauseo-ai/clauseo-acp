@@ -23,7 +23,7 @@ use crate::RawPayload;
 use crate::open_enum::{UnknownKind, serialize_one_key};
 
 pub use payload::{
-    AgentSessionAttached, AgentSessionDetached, CheckpointRecorded, CommandsAvailable,
+    AgentNamed, AgentSessionAttached, AgentSessionDetached, CheckpointRecorded, CommandsAvailable,
     CompactionChanged, ConfigOptionsReplaced, ContentAppended, ElicitationExpired,
     ElicitationRequested, ElicitationResolved, FilesChanged, MatterCreated, MatterRelocated,
     ModeChanged, Notice, OutsideEdits, PermissionExpired, PermissionRequested, PermissionResolved,
@@ -201,6 +201,8 @@ domain_events! {
     ThreadArchived(ThreadArchived) = "thread_archived", thread;
     /// An agent session started or was loaded (acp).
     AgentSessionAttached(AgentSessionAttached) = "agent_session_attached", thread;
+    /// The agent's own display name, from `initialize` (host).
+    AgentNamed(AgentNamed) = "agent_named", thread;
     /// The agent session ended (acp, host).
     AgentSessionDetached(AgentSessionDetached) = "agent_session_detached", thread;
     /// The lawyer's message (host; acp on a `session/load` replay).

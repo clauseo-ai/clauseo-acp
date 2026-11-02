@@ -191,7 +191,7 @@ wire_types! {
     envelope::{Envelope},
     error_code::{ErrorCode, HostError},
     event::{
-        AgentSessionAttached, AgentSessionDetached, CheckpointRecorded, CommandsAvailable,
+        AgentNamed, AgentSessionAttached, AgentSessionDetached, CheckpointRecorded, CommandsAvailable,
         CompactionChanged, ConfigOptionsReplaced, ContentAppended, DomainEvent, ElicitationExpired,
         ElicitationRequested, ElicitationResolved, FilesChanged, MatterCreated, MatterRelocated,
         ModeChanged, Notice, OutsideEdits, PermissionExpired, PermissionRequested, PermissionResolved,

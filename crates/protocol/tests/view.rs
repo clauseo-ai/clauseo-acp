@@ -282,6 +282,20 @@ fn elicitation_entry_with_a_too_deep_schema_fails_to_encode() {
 }
 
 #[test]
+fn agent_name_defaults_to_none() {
+    // A stored header from before `agent_name` decodes with it `None`, and `None` is left out.
+    let header = serde_json::to_value(header()).unwrap();
+    assert!(header["header"].get("agent_name").is_none());
+    let mut fields = header["header"].as_object().unwrap().clone();
+    fields.insert("agent_name".to_owned(), "Gemini CLI".into());
+    let named: HeaderEntry = serde_json::from_value(fields.clone().into()).unwrap();
+    assert_eq!(named.agent_name.as_deref(), Some("Gemini CLI"));
+    fields.remove("agent_name");
+    let entry: HeaderEntry = serde_json::from_value(fields.into()).unwrap();
+    assert_eq!(entry.agent_name, None);
+}
+
+#[test]
 fn queue_held_defaults_to_false() {
     // A stored header or thread summary from before `queue_held` decodes with it false.
     let header = serde_json::to_value(header()).unwrap();

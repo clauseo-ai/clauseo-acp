@@ -43,6 +43,7 @@ pub fn header_entry() -> HeaderEntry {
         matter: matter_id(1),
         title: Some(short("Draft SPA")),
         agent: agent("claude-acp"),
+        agent_name: None,
         status: ThreadStatus::Idle,
         queue_held: true,
         mode_id: Some(short("plan")),

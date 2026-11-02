@@ -2,10 +2,10 @@
 //! and entries that keep what their events carry.
 
 use clauseo_protocol::{
-    AgentSessionDetached, BlobHash, BlobRef, ContentAppended, ContentBlock, Count, DetachReason,
-    DomainEvent, EntryId, Envelope, LimitStopReason, ModeChanged, QueuedPromptEdited, StepUndone,
-    TextKind, TextOrBlob, ThreadStatus, Timestamp, ToolCallContent, ToolCallPatch, ToolCallStarted,
-    ToolCallStatus, ToolCallUpdated, ToolKind, TurnStoppedAtLimit, ViewEntry,
+    AgentNamed, AgentSessionDetached, BlobHash, BlobRef, ContentAppended, ContentBlock, Count,
+    DetachReason, DomainEvent, EntryId, Envelope, LimitStopReason, ModeChanged, QueuedPromptEdited,
+    StepUndone, TextKind, TextOrBlob, ThreadStatus, Timestamp, ToolCallContent, ToolCallPatch,
+    ToolCallStarted, ToolCallStatus, ToolCallUpdated, ToolKind, TurnStoppedAtLimit, ViewEntry,
 };
 use clauseo_reducer::{Anomaly, Error, StreamState, ViewChange, apply, view_snapshot};
 
@@ -14,7 +14,7 @@ use crate::fixtures::{
     short, start_turn, text, thread_created, tool_diff, tool_started, tool_status, turn_ended,
     usage, v7_text,
 };
-use crate::helpers::{fold, seq};
+use crate::helpers::{first_upsert, fold, seq};
 
 /// A log with its thread created and the state folded so far.
 #[cfg(test)]
@@ -386,6 +386,50 @@ fn no_patch_for_unchanged_entry() {
     );
     let again = push(&mut log, &mut state, tool_diff(tool_call, 1).unwrap());
     assert!(again.changes.is_empty() && again.anomalies.is_empty());
+}
+
+/// The agent's own name the header holds.
+#[cfg(test)]
+fn agent_name(state: &StreamState) -> Option<&str> {
+    state
+        .as_thread()
+        .unwrap()
+        .header()
+        .unwrap()
+        .agent_name
+        .as_deref()
+}
+
+#[test]
+fn agent_named_sets_the_header_name() {
+    let (mut log, mut state) = created(5);
+    assert_eq!(agent_name(&state), None);
+    let named = |name: &str| AgentNamed {
+        agent_name: short(name),
+    };
+    let out = push(&mut log, &mut state, named("Gemini CLI"));
+    assert!(out.anomalies.is_empty(), "{:?}", out.anomalies);
+    assert!(matches!(
+        first_upsert(&out.changes),
+        ViewEntry::Header(header) if header.agent_name.as_deref() == Some("Gemini CLI")
+    ));
+    assert_eq!(agent_name(&state), Some("Gemini CLI"));
+    // A second name replaces the first, and a repeat of the same one changes nothing.
+    push(&mut log, &mut state, named("Claude Code"));
+    assert_eq!(agent_name(&state), Some("Claude Code"));
+    let again = push(&mut log, &mut state, named("Claude Code"));
+    assert!(again.changes.is_empty(), "{:?}", again.changes);
+    // The same name, folded from the whole log, reads the same.
+    assert_eq!(agent_name(&fold(log.events())), Some("Claude Code"));
+}
+
+#[test]
+fn no_agent_named_leaves_the_name_none() {
+    let (mut log, mut state) = created(5);
+    start_turn(&mut log, "Go.").unwrap();
+    catch_up(&log, &mut state);
+    assert_eq!(agent_name(&state), None);
+    assert_eq!(agent_name(&fold(log.events())), None);
 }
 
 #[cfg(test)]

@@ -42,6 +42,7 @@ use clauseo_protocol::{
     FileChoice,
     FileDecision,
     FolderState,
+    HeaderEntry,
     HostCommand,
     HostError,
     HostEvent,
@@ -168,6 +169,7 @@ mod domain_event {
         ThreadRenamed => thread_renamed: event("thread_renamed");
         ThreadArchived => thread_archived: event("thread_archived");
         AgentSessionAttached => agent_session_attached: event("agent_session_attached");
+        AgentNamed => agent_named: event("agent_named");
         AgentSessionDetached => agent_session_detached: event("agent_session_detached");
         UserMessage => user_message: event("user_message");
         TurnQueued => turn_queued: event("turn_queued");
@@ -405,6 +407,19 @@ mod view_entry {
         MatterHeader => matter_header: entry("matter_header");
         Version => version: entry("version");
     } }
+
+    /// A header whose agent has named itself, as `AgentNamed` sets it. Its own snapshot, so the
+    /// `header` golden above stays as it was.
+    #[test]
+    fn header_with_agent_name() {
+        let header = HeaderEntry {
+            agent_name: Some(short("Gemini CLI")),
+            ..entries::header_entry()
+        };
+        let entry = ViewEntry::Header(header);
+        insta::assert_json_snapshot!("header_with_agent_name", entry);
+        round_trips(&entry);
+    }
 }
 
 mod host_event {
