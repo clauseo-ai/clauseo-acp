@@ -27,7 +27,9 @@ windowed controller (`CreateCoreWebView2Controller`, `wry/src/webview2/mod.rs`),
   one that also switched the page, and gave the room's frame for one value and the OS frame
   otherwise. From U5 the room is the only page and the switch is gone on both sides: the window
   is always built with the room's frame, so nothing flashes at start. `tauri-plugin-window-state`
-  no longer saves or restores decorations, so a frame saved by one build never reaches the other.
+  does not save or restore decorations: state saved before U5 has `"decorated": true`, and
+  restoring it would put the OS frame back on the room. The e2e and marks builds denylist `main`
+  in window-state, so they neither restore nor track the real app's saved state.
 - **The Mac.** An overlay title bar with its title hidden, and the native traffic lights moved
   with `traffic_light_position` onto the toolbar's first corner light. `CornerLights native`
   keeps a box as wide as the native lights (`--lights-native-w`), so the gap after them holds,

@@ -45,6 +45,7 @@ mod rust_only;
 #[cfg(test)]
 mod test_support;
 mod window_frame;
+mod window_size;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -104,13 +105,14 @@ pub fn run() -> tauri::Result<()> {
         // No endpoints, and an empty `pubkey` in tauri.conf.json: it never finds or installs an
         // update.
         .plugin_rust_only(tauri_plugin_updater::Builder::new().build())
-        // Not decorations: the frame is this build's (window_frame.rs), never a saved one.
+        // Not decorations: the frame is the room's (window_frame.rs), never a saved one.
         .plugin_rust_only(
             tauri_plugin_window_state::Builder::new()
                 .with_state_flags(
                     tauri_plugin_window_state::StateFlags::all()
                         - tauri_plugin_window_state::StateFlags::DECORATIONS,
                 )
+                .with_denylist(window_size::state_denylist())
                 .build(),
         )
         // dialog and opener are called from Rust only; the webview gets no permission for them.
@@ -237,24 +239,32 @@ fn stop_host_then_exit<R: Runtime>(app: &AppHandle<R>, exit: Arc<Exit>, code: i3
 }
 
 /// Builds the `main` window in code, not in `tauri.conf.json`, so builds can add webview arguments
-/// here, and give it the page's frame (`window_frame.rs`). The https scheme is fixed before the
-/// first release: changing it moves web storage. The title is `productName` from
-/// `tauri.conf.json`.
+/// here, and give it the page's frame (`window_frame.rs`) and size (`window_size.rs`). The https
+/// scheme is fixed before the first release: changing it moves web storage. The title is
+/// `productName` from `tauri.conf.json`.
 fn open_main_window(app: &App) -> tauri::Result<()> {
     let title = app.package_info().name.clone();
+    // The e2e and marks builds open at WINDOW_SIZE whatever the work area; the release build
+    // fits it to the primary monitor.
+    let fitted = window_size::fitted(window_size::primary_work_area(app.handle()));
+    let (width, height) = if cfg!(feature = "e2e") {
+        window_size::WINDOW_SIZE
+    } else {
+        fitted
+    };
     let builder = WebviewWindowBuilder::new(app, MAIN_WINDOW, WebviewUrl::App("index.html".into()))
         .title(title)
-        .use_https_scheme(true);
+        .use_https_scheme(true)
+        .inner_size(width, height)
+        .center();
     let builder = window_frame::with_frame(builder);
-    // The e2e and marks builds open at the size the speed scoreboard's room needs (`e2e.rs`).
-    #[cfg(feature = "e2e")]
-    let builder = builder.inner_size(e2e::WINDOW_SIZE.0, e2e::WINDOW_SIZE.1);
     #[cfg(all(windows, feature = "e2e"))]
     let builder = e2e::with_debugging_port(builder);
     // The page's perf globals, before any page script.
     #[cfg(feature = "e2e")]
     let builder = builder.initialization_script(e2e::init_script());
     let window = builder.build()?;
+    window_size::paint_first_frame(&window);
     window_frame::after_build(&window);
     Ok(())
 }
