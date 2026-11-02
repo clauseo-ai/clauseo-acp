@@ -7,6 +7,7 @@ use std::time::Duration;
 use clauseo_protocol::{SettingsView, Theme, UiPatch};
 
 use super::*;
+use crate::test_support::Messages;
 
 /// A `SetUiSettings` of `theme`.
 fn set_theme(theme: Theme) -> CommandEnvelope {
@@ -16,6 +17,23 @@ fn set_theme(theme: Theme) -> CommandEnvelope {
             ..UiPatch::default()
         },
     })
+}
+
+/// The host's first frames of an app subscription (0023): the settings, the whole matter list,
+/// and the whole thread list of its one matter (Scratch). Returns the settings.
+fn first_frames(messages: &Messages) -> SettingsView {
+    let current = settings(messages.next_event());
+    let event = messages.next_event();
+    assert!(
+        matches!(&event, HostEvent::MattersChanged(changed) if changed.all),
+        "{event:?}"
+    );
+    let event = messages.next_event();
+    assert!(
+        matches!(&event, HostEvent::ThreadsChanged(changed) if changed.all),
+        "{event:?}"
+    );
+    current
 }
 
 /// The settings a `settings_changed` message carries.
@@ -36,8 +54,8 @@ fn subscribe_app_needs_open_stream_then_carries_each_settings_change() {
 
     let messages = open(&bridge, MAIN);
     block_on(bridge.subscribe_app(MAIN)).unwrap();
-    // It starts with nothing: the window reads the settings itself.
-    assert_eq!(messages.drain(), Vec::<String>::new());
+    // It starts with the host's first frames: the settings as they are, then the lists.
+    assert_eq!(first_frames(&messages).ui.theme, Theme::System);
     block_on(bridge.dispatch(set_theme(Theme::Dark))).unwrap();
     let text = messages.next_text();
     assert!(text.starts_with(r#"{"settings_changed":"#), "{text}");
@@ -61,6 +79,7 @@ fn a_pause_s_end_resubscribes_and_sends_the_settings_then() {
     let bridge = host.bridge();
     let messages = open(&bridge, MAIN);
     block_on(bridge.subscribe_app(MAIN)).unwrap();
+    first_frames(&messages);
     let window = bridge.window(MAIN).unwrap();
 
     // Past the cap without the host: a large app event, counted as sent, pauses the window and
@@ -82,6 +101,8 @@ fn a_pause_s_end_resubscribes_and_sends_the_settings_then() {
     block_on(bridge.ack(MAIN, Vec::new(), count)).unwrap();
     let current = settings(messages.next_event());
     assert_eq!(current.ui.theme, Theme::Light);
+    // Then the new subscription's first frames.
+    assert_eq!(first_frames(&messages).ui.theme, Theme::Light);
     block_on(bridge.dispatch(set_theme(Theme::Dark))).unwrap();
     assert_eq!(settings(messages.next_event()).ui.theme, Theme::Dark);
 }
@@ -96,6 +117,7 @@ fn a_reload_drops_the_app_feed() {
     let bridge = host.bridge();
     let old = open(&bridge, MAIN);
     block_on(bridge.subscribe_app(MAIN)).unwrap();
+    first_frames(&old);
     let dropped = pump::feed_dropped(&bridge.window(MAIN).unwrap(), Feed::App).unwrap();
     let new = open(&bridge, MAIN);
     // The pump never sees another event, so only the abort can end it.
@@ -118,6 +140,7 @@ fn a_reload_drops_the_app_feed() {
     assert_eq!(new.drain(), Vec::<String>::new());
 
     block_on(bridge.subscribe_app(MAIN)).unwrap();
+    assert_eq!(first_frames(&new).ui.theme, Theme::Dark);
     block_on(bridge.dispatch(set_theme(Theme::Light))).unwrap();
     assert_eq!(settings(new.next_event()).ui.theme, Theme::Light);
     assert_eq!(old.drain(), Vec::<String>::new());
@@ -133,6 +156,7 @@ fn a_watchdog_fire_resubscribes_and_sends_the_settings_then() {
     let bridge = host.bridge();
     let messages = open(&bridge, MAIN);
     block_on(bridge.subscribe_app(MAIN)).unwrap();
+    first_frames(&messages);
     let window = bridge.window(MAIN).unwrap();
     // One message the page never acks.
     block_on(bridge.dispatch(set_theme(Theme::Dark))).unwrap();
@@ -142,6 +166,7 @@ fn a_watchdog_fire_resubscribes_and_sends_the_settings_then() {
     pump::tick_at(&window, window::WATCHDOG * 2);
     let resent = settings(messages.next_event());
     assert_eq!(resent.ui.theme, Theme::Dark);
+    assert_eq!(first_frames(&messages).ui.theme, Theme::Dark);
     assert_ne!(lock(&window).state().feeds().restart_id(Feed::App), before);
     block_on(bridge.dispatch(set_theme(Theme::Light))).unwrap();
     assert_eq!(settings(messages.next_event()).ui.theme, Theme::Light);

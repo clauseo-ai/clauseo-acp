@@ -90,6 +90,20 @@ ALTER TABLE matters ADD COLUMN last_opened_ms INTEGER;
 ALTER TABLE matters ADD COLUMN forgotten_ms INTEGER /* ForgetMatter's time; NULL while listed */;
 ```
 
+### Schema version 3
+
+`crates/store/src/migrations/0003_thread_seen.sql`, verbatim (the same test checks this copy
+too); decision record 0023 gives the reasons:
+
+```sql
+-- Schema version 3: each thread's seen mark for the rail.
+-- docs/decisions/0023-seen-marks-and-app-lists.md gives the reason for the column and the fill.
+-- Frozen: a later change is a new numbered file in this folder, never an edit here.
+
+ALTER TABLE threads ADD COLUMN seen_seq INTEGER /* MarkSeen: the thread's last seq then; NULL never */;
+UPDATE threads SET seen_seq = (SELECT last_seq FROM streams WHERE stream = 'thread:' || threads.id);
+```
+
 In the table columns, ids are stored as lowercase hyphenated UUID text and times as milliseconds
 since the Unix epoch. Inside `events.envelope`, the envelope's own encoding applies: ids are
 16-byte MessagePack bin, as `docs/decisions/0002-event-schema.md` says, and `stream` is its text.
@@ -197,6 +211,10 @@ since the Unix epoch. Inside `events.envelope`, the envelope's own encoding appl
   checkpoints and log; the host lists none of it until an import of its folder clears
   `forgotten_ms`. A bad `client` or `next_date` read back is `store.corrupt`.
 - `threads` holds each thread's summary row, listed per matter by `updated_ms`, newest first.
+  Since schema 3 it also holds `seen_seq`: the thread's last `seq` when the lawyer last marked it
+  seen (`MarkSeen`), `NULL` before the first. The migration fills it for every existing thread
+  with its stream's `last_seq`, so threads from before schema 3 start seen; a value that is no
+  `seq` read back is `store.corrupt`.
 - A commit's matter and thread rows insert or replace the row with that id.
 - `checkpoints` keeps only the id, the matter, the shadow repository's commit id and the `seq` of
   its `CheckpointRecorded` in the matter stream. The event already carries the rest; the commit id
@@ -313,7 +331,8 @@ Corruption is reported when a read meets it.
 - Never edit `0001_init.sql` or any merged migration. Never alter a table and ignore the error.
 - An event shape change is an upcaster in `protocol`, not a rewrite of `events` rows.
 - A file whose `user_version` is newer than `SCHEMA` is refused with `store.newer_version`.
-- Migrations so far: `0002_matter_details.sql` (schema 2), quoted above.
+- Migrations so far: `0002_matter_details.sql` (schema 2) and `0003_thread_seen.sql` (schema 3),
+  quoted above.
 
 ### Interface decisions taken in this task
 

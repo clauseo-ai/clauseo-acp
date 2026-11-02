@@ -1,0 +1,28 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "HostEvent::MattersChanged(MattersChanged\n{\n    matters:\n    vec![MatterSummary\n    {\n        matter: matter_id(1), name: \"Smith v Jones\".to_owned(), kind:\n        MatterKind::Folder, last_activity:\n        Some(Timestamp::new(1_760_000_009_000).unwrap()), client:\n        Some(ClientName::new(\"Rathi Steels\").unwrap()), next_date: None,\n        pinned: true, last_opened: None, status: MatterStatus::Stopped\n        { at: Timestamp::new(1_760_000_008_000).unwrap() }, folder_display:\n        \"Documents/Clauseo/Smith v Jones\".to_owned(),\n    }], removed: vec![matter_id(3)], all: false,\n})"
+---
+{
+  "matters_changed": {
+    "matters": [
+      {
+        "matter": "01900000-0000-7000-8000-000000000001",
+        "name": "Smith v Jones",
+        "kind": "folder",
+        "last_activity": 1760000009000,
+        "client": "Rathi Steels",
+        "pinned": true,
+        "status": {
+          "stopped": {
+            "at": 1760000008000
+          }
+        },
+        "folder_display": "Documents/Clauseo/Smith v Jones"
+      }
+    ],
+    "removed": [
+      "01900000-0000-7000-8000-000000000003"
+    ],
+    "all": false
+  }
+}

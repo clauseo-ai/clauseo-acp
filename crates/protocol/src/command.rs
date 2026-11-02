@@ -194,8 +194,7 @@ pub enum HostCommand {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pinned: Option<bool>,
     },
-    /// The lawyer opened a matter: its `last_opened` becomes now, which orders "Recent" and
-    /// clears a `ready` or `stopped` status from turns that ended before.
+    /// The lawyer opened a matter: its `last_opened` becomes now, which orders "Recent".
     OpenMatter {
         /// The matter.
         matter: MatterId,
@@ -220,6 +219,14 @@ pub enum HostCommand {
         matter: MatterId,
         /// The folder the lawyer picked.
         folder: FolderRefId,
+    },
+    /// The lawyer has seen a thread up to now: the host keeps the thread's last `seq` as its seen
+    /// mark, so `ThreadSummary::seen` is true until a turn ends after it, and a `ready` or
+    /// `stopped` status from turns that ended before clears. Answers `Done`. JSON:
+    /// `{"mark_seen": {"thread": "..."}}`.
+    MarkSeen {
+        /// The thread.
+        thread: ThreadId,
     },
     /// Start a thread in a matter with an agent.
     CreateThread {
@@ -373,7 +380,7 @@ pub enum HostCommand {
 
 /// What a command did. The host's receipt stores it, so a repeated `command_id` returns the same
 /// outcome. The queue commands, `RestartAgent`, `SetUiSettings`, `UpdateMatter`, `OpenMatter`,
-/// `ForgetMatter` and `RefreshLimits` answer `Done`.
+/// `ForgetMatter`, `RefreshLimits` and `MarkSeen` answer `Done`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "specta", derive(specta::Type))]

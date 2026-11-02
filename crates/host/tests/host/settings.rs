@@ -1,5 +1,6 @@
 //! The display settings over the wire: `GetSettings`, `SetUiSettings` and `settings.locked`,
-//! and the app subscription that carries `SettingsChanged` to every window and to no stream.
+//! and the app subscription that carries `SettingsChanged` to every window and to no stream,
+//! starting with the settings as they are.
 //! The mirror test holds the wire types to `clauseo-settings`, key for key and value for value.
 
 use std::collections::BTreeSet;
@@ -27,17 +28,30 @@ fn set(patch: UiPatch) -> HostCommand {
     HostCommand::SetUiSettings { patch }
 }
 
-/// An app subscription as the local desktop.
-fn app(host: &Running) -> AppSubscription {
-    wait(
+/// An app subscription as the local desktop, and its first frames: the current state.
+pub(crate) fn subscribe_app(host: &Running) -> (AppSubscription, Vec<HostEvent>) {
+    let mut sub = wait(
         "subscribe_app",
         host.handle.subscribe_app(Principal::LocalDesktop),
     )
-    .unwrap_or_else(|e| panic!("subscribe_app: {e}"))
+    .unwrap_or_else(|e| panic!("subscribe_app: {e}"));
+    host.settle();
+    let first = ready(&mut sub);
+    (sub, first)
+}
+
+/// An app subscription past its first frames, which start with the settings as they are.
+fn app(host: &Running) -> AppSubscription {
+    let (sub, first) = subscribe_app(host);
+    let Some(HostEvent::SettingsChanged(view)) = first.first() else {
+        panic!("the first frame is not the settings: {first:?}");
+    };
+    assert_eq!(*view, settings(host));
+    sub
 }
 
 /// What is already in `sub`'s channel, decoded, without waiting. Call after `host.settle()`.
-fn ready(sub: &mut AppSubscription) -> Vec<HostEvent> {
+pub(crate) fn ready(sub: &mut AppSubscription) -> Vec<HostEvent> {
     let mut events = Vec::new();
     while let Some(Some(item)) = sub.next().now_or_never() {
         events.push(decode(&item));
@@ -45,7 +59,7 @@ fn ready(sub: &mut AppSubscription) -> Vec<HostEvent> {
     events
 }
 
-fn decode(item: &EncodedEvent) -> HostEvent {
+pub(crate) fn decode(item: &EncodedEvent) -> HostEvent {
     item.decode()
         .unwrap_or_else(|e| panic!("{e}: {}", item.json()))
 }
@@ -276,16 +290,23 @@ fn an_unknown_principal_may_not_subscribe_to_the_app() {
 /// The app subscription capacity the slow-subscriber test sets, so a few changes fill it.
 const SMALL_CAPACITY: usize = 4;
 
-/// The font size of each `SettingsChanged` in `events`.
+/// The font size of each `SettingsChanged` in `events`; the whole lists a catch-up carries after
+/// it (`MattersChanged` and `ThreadsChanged` with `all`) are skipped, anything else fails.
 fn font_sizes(events: &[HostEvent]) -> Vec<u8> {
     events
         .iter()
-        .map(|event| match event {
-            HostEvent::SettingsChanged(view) => view.ui.font_size,
+        .filter_map(|event| match event {
+            HostEvent::SettingsChanged(view) => Some(view.ui.font_size),
+            HostEvent::MattersChanged(changed) if changed.all => None,
+            HostEvent::ThreadsChanged(changed) if changed.all => None,
             other => panic!("unexpected {other:?}"),
         })
         .collect()
 }
+
+/// The catch-up's frames on a host with only the Scratch matter: the settings, the matter list
+/// and the Scratch matter's thread list.
+const CATCH_UP_FRAMES: usize = 3;
 
 #[test]
 fn a_slow_app_subscriber_is_caught_up_with_the_current_settings() {
@@ -293,6 +314,7 @@ fn a_slow_app_subscriber_is_caught_up_with_the_current_settings() {
     let host = dir.start_with(0, |config| {
         config.with_app_subscription_capacity(SMALL_CAPACITY)
     });
+    // The first frames take three of the four places; `app` reads them.
     let mut slow = app(&host);
     let mut other = app(&host);
     // 14 to 17 fill each channel, 18 finds it full and marks it lagged, 19 is not sent to it.
@@ -303,10 +325,11 @@ fn a_slow_app_subscriber_is_caught_up_with_the_current_settings() {
         }));
     }
     host.settle();
-    // The channel's four, then, once drained, the settings as they are now: 19, never 18.
+    // The channel's four, then, once drained, the settings as they are now: 19, never 18, and
+    // the lists whole.
     let received = wait("the slow subscriber's events", async {
         let mut received = Vec::new();
-        while received.len() < SMALL_CAPACITY + 1 {
+        while received.len() < SMALL_CAPACITY + CATCH_UP_FRAMES {
             let item = slow.next().await.expect("the app stream ended");
             received.push(decode(&item));
         }
@@ -318,9 +341,13 @@ fn a_slow_app_subscriber_is_caught_up_with_the_current_settings() {
     // The other subscriber lagged on its own; draining it catches it up the same way.
     let mut caught = ready(&mut other);
     assert_eq!(font_sizes(&caught), [14, 15, 16, 17]);
-    let next = wait("the other subscriber's catch-up", other.next()).expect("ended");
-    caught.push(decode(&next));
+    for _ in 0..CATCH_UP_FRAMES {
+        let next = wait("the other subscriber's catch-up", other.next()).expect("ended");
+        caught.push(decode(&next));
+    }
     assert_eq!(font_sizes(&caught), [14, 15, 16, 17, 19]);
+    host.settle();
+    assert_eq!(ready(&mut other), []);
     host.shutdown();
 }
 

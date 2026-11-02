@@ -65,6 +65,9 @@ mod limits_stop;
 #[path = "host/list_agents.rs"]
 mod list_agents;
 #[cfg(test)]
+#[path = "host/lists.rs"]
+mod lists;
+#[cfg(test)]
 #[path = "host/locate.rs"]
 mod locate;
 #[cfg(test)]

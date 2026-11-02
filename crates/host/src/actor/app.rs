@@ -6,24 +6,24 @@
 //! subscriber has its own `bounded(1024)` channel filled with `try_send`, so one slow window
 //! never holds up the actor or another window; a full subscriber is marked lagged and gets
 //! nothing until it has drained and asked (`Input::AppDrained`), then gets the current state
-//! ([`catch_up`]), as a view subscriber gets a `Reset`; a closed channel (the subscription was
-//! dropped) removes the subscriber at the next send, and `Input::AppUnsubscribed` at once. The
+//! ([`catch_up`]), as a view subscriber gets a `Reset`; a new subscriber gets the same current
+//! state as its first frames, so a window never reads it separately; a closed channel (the
+//! subscription was dropped) removes the subscriber at the next send, and
+//! `Input::AppUnsubscribed` at once. The
 //! actor owns every sink, so when the host stops and the actor is dropped every app stream ends.
 //!
 //! Each event is serialised once ([`publish`]) and the same `EncodedEvent` goes to every
 //! subscriber. What publishes here: `SettingsChanged` after each successful settings write
-//! (`settings.rs`). Still to come, each through [`publish`] and each adding its part of the
-//! current state to [`catch_up`]: the matter list and thread summaries (H4) and notices.
-//! The limits have their own subscribers (`limits.rs`). H4's shape sends summaries of the
-//! threads *a window* is not subscribed to, but `subscribe_app` carries no window identity, so
-//! the host sends every changed summary to every app subscriber and each window drops those of
-//! threads it has open.
+//! (`settings.rs`), and `MattersChanged` and `ThreadsChanged` when a row of the rail changes
+//! (`app_lists.rs`). Still to come, each through [`publish`] and each adding its part of the
+//! current state to [`catch_up`]: notices. The limits have their own subscribers (`limits.rs`).
+//! `subscribe_app` carries no window identity, so the host sends every changed thread summary
+//! to every app subscriber and each window drops those of threads it has open.
 //!
-//! For H4: today's catch-up is one whole `SettingsChanged`, which replaces what a window holds.
-//! Once `matters_changed` sends partial rows (only the matters that changed), a lagged
-//! subscriber has missed rows it cannot rebuild from the next delta, so its catch-up needs an
-//! event that replaces the whole list (a reset or caught-up variant) before any partial row is
-//! sent on this stream.
+//! The current state ([`catch_up`]) is whole: one `SettingsChanged`, one `MattersChanged` with
+//! `all` and one `ThreadsChanged` with `all` per matter, each replacing what a window holds. The
+//! partial rows that follow build on it, so a subscriber that missed some (it lagged) gets it
+//! again before any partial row. An event added here must keep that: whole in the catch-up.
 
 use clauseo_protocol::{HostEvent, Principal};
 
@@ -89,8 +89,20 @@ pub(super) fn subscribe(actor: &mut Actor, principal: &Principal, reply: Reply<A
     }
     let id = super::subs::next_sub_id(actor);
     let (subscription, sink) = AppSubscription::new(actor.post.clone(), id, actor.app_capacity);
-    if reply.send(Ok(subscription)).is_ok() {
-        actor.app_subs.push(AppSub::new(id, sink));
+    if reply.send(Ok(subscription)).is_err() {
+        return;
+    }
+    let mut sub = AppSub::new(id, sink);
+    // The first frames: the current state, whole, before any change.
+    let mut stays = true;
+    for event in &catch_up(actor) {
+        stays = sub.offer(event);
+        if !stays {
+            break;
+        }
+    }
+    if stays {
+        actor.app_subs.push(sub);
     }
 }
 
@@ -126,17 +138,22 @@ pub(super) fn on_unsubscribed(actor: &mut Actor, id: SubId) {
     actor.app_subs.retain(|sub| sub.id != id);
 }
 
-/// The current state, as the events that bring a lagged subscriber up to date. Each event here
-/// must replace what a window holds whole; see the module doc before adding a partial one.
-fn catch_up(actor: &Actor) -> Vec<EncodedEvent> {
-    let settings = HostEvent::SettingsChanged(super::settings::view(&actor.effective));
-    match encode(&settings) {
-        Ok(encoded) => vec![encoded],
-        Err(error) => {
-            tracing::error!(%error, "an app event did not serialise");
-            Vec::new()
-        }
-    }
+/// The current state, as the events that start a subscription and bring a lagged subscriber up
+/// to date: the settings, the matter list and each matter's thread list. Each event here must
+/// replace what a window holds whole; see the module doc before adding a partial one.
+fn catch_up(actor: &mut Actor) -> Vec<EncodedEvent> {
+    let mut events = vec![HostEvent::SettingsChanged(super::settings::view(
+        &actor.effective,
+    ))];
+    events.extend(super::app_lists::current(actor));
+    events
+        .iter()
+        .filter_map(|event| {
+            encode(event)
+                .inspect_err(|error| tracing::error!(%error, "an app event did not serialise"))
+                .ok()
+        })
+        .collect()
 }
 
 /// `event` as JSON, once.

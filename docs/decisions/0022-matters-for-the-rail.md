@@ -52,7 +52,8 @@ unreadable `matter.json` and Clauseo's own data folder alike.
   with a pending permission is `needs_permission`, other `NeedsYou` `needs_answer`;
   `PausedAtLimit` is `paused_at_limit`; `Starting`, `Running`, `Queued` are `working`; a thread
   that runs nothing (`Idle`, `AgentExited`, `IdleStopped`) says how its last turn ended if that
-  was after the matter's `last_opened` (or it was never opened): `end_turn` is `ready`, every
+  was after the matter's `last_opened` (or it was never opened; 0023 replaces this with the
+  thread's seen mark): `end_turn` is `ready`, every
   other ending (`cancelled`, `failed`, `max_tokens`, `max_turn_requests`, `refusal`, `at_limit`,
   an unknown one) `stopped { at }`; otherwise `idle`. Archived threads say nothing. Across
   threads the first of this order wins: `needs_permission`, `needs_answer`, `paused_at_limit`
@@ -89,11 +90,11 @@ unreadable `matter.json` and Clauseo's own data folder alike.
 
 ## Consequences
 
-- The rail needs no subscription per thread for a status. H4 will push changed rows; until then
-  a window asks `ListMatters` again.
-- `ready` and `stopped` clear when the matter is opened, not per thread: a turn that ends while
-  the lawyer has the matter open shows as ready once they leave. H6's per-thread seen mark
-  (`MarkSeen`) replaces `last_opened` in that rule.
+- The rail needs no subscription per thread for a status. Decision record 0023 pushes changed
+  rows over `subscribe_app`.
+- `ready` and `stopped` cleared when the matter was opened, not per thread: a turn that ended
+  while the lawyer had the matter open showed as ready once they left. Decision record 0023
+  replaces `last_opened` in that rule with each thread's seen mark (`MarkSeen`).
 - Precedence picks recorded here because U2 and HANDOFF leave them open: a permission outranks
   everything, a pause at the limit outranks an answer ready, an answer ready outranks work in
   progress, and every ending but `end_turn` is a stop.
@@ -112,7 +113,7 @@ unreadable `matter.json` and Clauseo's own data folder alike.
 
 ## Status
 
-proposed
+proposed; the `last_opened` rule for `ready` and `stopped` is superseded by 0023
 
 ## Date
 

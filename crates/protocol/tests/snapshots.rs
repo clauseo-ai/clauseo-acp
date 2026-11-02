@@ -20,18 +20,13 @@ pub mod examples;
 #[path = "support/entries.rs"]
 pub mod entries;
 
-use std::collections::BTreeMap;
+#[cfg(test)]
+#[path = "support/limits.rs"]
+pub mod limits;
 
 use clauseo_protocol::{
-    AccountLimits,
-    AccountRef,
     AgentKind,
-    AgentLimitsView,
     AppendTarget,
-    AtLimitBehaviour,
-    Billing,
-    BillingKind,
-    BillingProvider,
     ClientName,
     ConfigValue,
     ContentBlock,
@@ -46,30 +41,32 @@ use clauseo_protocol::{
     FieldChange,
     FileChoice,
     FileDecision,
-    Freshness,
     HostCommand,
     HostError,
     HostEvent,
     // The display settings.
     Language,
-    LimitSource,
-    LimitWindow,
-    LimitWindowView,
-    LimitsView,
+    LastStop,
     Lite,
+    MatterKind,
     MatterSource,
-    MeterTone,
+    MatterStatus,
+    MatterSummary,
+    MattersChanged,
     Motion,
     PatchBatch,
-    PlanLabel,
     PromptBlock,
     RefreshWhy,
     RestoreRequest,
     SettingsView,
+    StopReason,
     StreamHeader,
     StreamId,
     TextOrBlob,
     Theme,
+    ThreadStatus,
+    ThreadSummary,
+    ThreadsChanged,
     Timestamp,
     ToolCallContent,
     ToolLocation,
@@ -80,17 +77,16 @@ use clauseo_protocol::{
     ViewPatch,
     ViewPatchBody,
     ViewWindow,
-    WindowFreshness,
-    WindowKind,
 };
 use entries::{agent_text_entry, every_entry, header_entry};
 use examples::{acp_unsupported_block, every_event};
 use fixtures::{
-    agent, checkpoint_id, choice, count, elicitation_id, event_id, file_ref_id, finite,
-    folder_ref_id, matter_id, message_id, path, permission_request_id, raw, round_trips, seq,
-    short, thread_id, title, turn_id, unknown_event, unknown_of, v7,
+    agent, checkpoint_id, choice, count, elicitation_id, event_id, file_ref_id, folder_ref_id,
+    matter_id, message_id, path, permission_request_id, raw, round_trips, seq, short, thread_id,
+    title, turn_id, unknown_event, unknown_of, v7,
 };
 use fixtures::{blob as sample_blob, envelope as sample_envelope};
+use limits::{account_limits, limits_view};
 
 /// The example of the known kind `kind`, from `examples::every_event`.
 #[cfg(test)]
@@ -143,70 +139,6 @@ fn view_window() -> ViewWindow {
         entries: vec![ViewEntry::AgentText(agent_text_entry())],
         has_older: true,
     }
-}
-
-/// An account's limits, with one window.
-#[cfg(test)]
-fn account_limits() -> AccountLimits {
-    AccountLimits {
-        agent: AgentKind::Claude,
-        account: AccountRef("acct-1".to_owned()),
-        plan: Some(PlanLabel("Max".to_owned())),
-        billing: Billing::Plan,
-        windows: vec![LimitWindow {
-            id: "five_hour".to_owned(),
-            kind: WindowKind::Session,
-            label: "5-hour".to_owned(),
-            used_percent: finite(82.5),
-            resets_at: Some(Timestamp::new(1_760_000_000_000).unwrap()),
-            duration_mins: Some(300),
-            warning: true,
-        }],
-        at_limit: AtLimitBehaviour::Pauses,
-        source: LimitSource::Fresh {
-            checked_at: Timestamp::new(1_760_000_000_000).unwrap(),
-        },
-    }
-}
-
-/// The limits view of two agents: Claude on a plan, with a next read planned, and Codex on pay as
-/// you go, billed by `OpenAI`, so both new fields are set.
-#[cfg(test)]
-fn limits_view() -> LimitsView {
-    let claude = AgentLimitsView {
-        plan: Some("Max".to_owned()),
-        billing: BillingKind::Plan,
-        meter: None,
-        windows: vec![LimitWindowView {
-            id: "five_hour".to_owned(),
-            kind: WindowKind::Session,
-            label: "5-hour".to_owned(),
-            used_percent: Some(finite(82.5)),
-            tone: MeterTone::Near,
-            resets_at: Some(Timestamp::new(1_760_000_000_000).unwrap()),
-            freshness: WindowFreshness::Fresh,
-        }],
-        at_limit_text: "When you reach a limit, Claude pauses until it resets.".to_owned(),
-        freshness: Freshness::Fresh,
-        checked_at: Some(Timestamp::new(1_759_999_000_000).unwrap()),
-        next_read_at: Some(Timestamp::new(1_760_000_000_000).unwrap()),
-        provider: None,
-    };
-    let codex = AgentLimitsView {
-        plan: None,
-        billing: BillingKind::PayAsYouGo,
-        meter: None,
-        windows: vec![],
-        at_limit_text: "This account pays as it goes, so no plan limits apply.".to_owned(),
-        freshness: Freshness::NotApplicable,
-        checked_at: None,
-        next_read_at: None,
-        provider: Some(BillingProvider::OpenAi),
-    };
-    LimitsView(BTreeMap::from([
-        (AgentKind::Claude, claude),
-        (AgentKind::Codex, codex),
-    ]))
 }
 
 /// A `FilesChanged`-free patch batch with one `AppendText` patch.
@@ -308,6 +240,7 @@ mod host_command {
         };
         OpenMatter => open_matter: HostCommand::OpenMatter { matter: matter_id(1) };
         ForgetMatter => forget_matter: HostCommand::ForgetMatter { matter: matter_id(1) };
+        MarkSeen => mark_seen: HostCommand::MarkSeen { thread: thread_id(2) };
         CreateThread => create_thread: HostCommand::CreateThread {
             matter: matter_id(1),
             agent: agent("claude-acp"),
@@ -496,6 +429,38 @@ mod host_event {
                 motion: Motion::Reduce,
             },
             locked: vec!["ui.font_size".to_owned(), "ui.theme".to_owned()],
+        });
+        MattersChanged => matters_changed: HostEvent::MattersChanged(MattersChanged {
+            matters: vec![MatterSummary {
+                matter: matter_id(1),
+                name: "Smith v Jones".to_owned(),
+                kind: MatterKind::Folder,
+                last_activity: Some(Timestamp::new(1_760_000_009_000).unwrap()),
+                client: Some(ClientName::new("Rathi Steels").unwrap()),
+                next_date: None,
+                pinned: true,
+                last_opened: None,
+                status: MatterStatus::Stopped { at: Timestamp::new(1_760_000_008_000).unwrap() },
+                folder_display: "Documents/Clauseo/Smith v Jones".to_owned(),
+            }],
+            removed: vec![matter_id(3)],
+            all: false,
+        });
+        ThreadsChanged => threads_changed: HostEvent::ThreadsChanged(ThreadsChanged {
+            matter: matter_id(1),
+            threads: vec![ThreadSummary {
+                thread: thread_id(2),
+                matter: matter_id(1),
+                title: Some("Draft the reply".into()),
+                agent: agent("claude-acp"),
+                status: ThreadStatus::Idle,
+                queue_held: false,
+                seen: false,
+                last_stop: Some(LastStop { reason: StopReason::Cancelled, at: Timestamp::new(1_760_000_008_000).unwrap() }),
+                last_activity: Some(Timestamp::new(1_760_000_009_000).unwrap()),
+            }],
+            removed: Vec::new(),
+            all: true,
         });
     } }
 }

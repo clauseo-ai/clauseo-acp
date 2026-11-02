@@ -37,6 +37,7 @@ use crate::principal::{Access, authorize};
 use crate::snapshot::SnapshotWorker;
 
 mod app;
+mod app_lists;
 mod commands;
 mod folder_state;
 pub(crate) mod input;
@@ -48,6 +49,7 @@ mod papers;
 mod query;
 mod rail;
 mod relocate;
+mod seen;
 mod settings;
 mod shutdown;
 mod startup;
@@ -126,6 +128,8 @@ pub(crate) struct Actor {
     pub(crate) app_subs: Vec<app::AppSub>,
     /// The limits model, its reader, timer and subscribers (`limits.rs`).
     pub(crate) limits: limits::LimitsHost,
+    /// The matter and thread rows last sent to the app subscribers, and what changed since.
+    pub(crate) lists: app_lists::Lists,
     pub(crate) commands: BTreeMap<CommandId, PendingCommand>,
     pub(crate) folders: BTreeMap<FolderRefId, PathBuf>,
     /// Folders a command is making a matter of (a create, an import, a relocate), by command,
@@ -242,12 +246,18 @@ async fn main_loop(
             return exit;
         }
         match inputs.next().await {
-            Some(Next::Request(request)) => actor.on_request(request),
+            Some(Next::Request(request)) => {
+                actor.on_request(request);
+                app_lists::flush(actor);
+            }
             // Every handle is gone (the internal channel never ends: the actor holds a sender).
             Some(Next::HandlesGone) | None => shutdown::begin_shutdown(actor, None),
             #[cfg(feature = "test-support")]
             Some(Next::Input(Input::Abort(reply))) => return Exit::Abort(reply),
-            Some(Next::Input(input)) => actor.on_input(input),
+            Some(Next::Input(input)) => {
+                actor.on_input(input);
+                app_lists::flush(actor);
+            }
         }
     }
 }

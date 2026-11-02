@@ -207,8 +207,8 @@ impl HostCommand {
             }
             | Self::OpenMatter { matter: _ }
             | Self::ForgetMatter { matter: _ }
-            | Self::RefreshLimits { agent: _, why: _ } => Ok(()),
-
+            | Self::RefreshLimits { agent: _, why: _ }
+            | Self::MarkSeen { thread: _ } => Ok(()),
         }
     }
 }
