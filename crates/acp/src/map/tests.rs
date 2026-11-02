@@ -283,3 +283,42 @@ fn config_option_with_unnameable_id_is_refused() {
         [AcpEvent::Warning { session: Some(_), warning: ProtocolWarning::InvalidUpdate { name: Some(name), .. } }] if name == "config_option_update"
     ));
 }
+
+/// `initialize`'s answer as the agent sent it, with `agent_info` (a JSON value) when given.
+fn initialize_answer(agent_info: Option<Value>) -> acp::InitializeResponse {
+    let mut answer = json!({"protocolVersion": 1});
+    if let Some(info) = agent_info {
+        answer["agentInfo"] = info;
+    }
+    serde_json::from_value(answer).unwrap()
+}
+
+#[test]
+fn agent_info_keeps_the_title() {
+    let info = agent_info(initialize_answer(Some(json!({
+        "name": "gemini-cli",
+        "title": "Gemini CLI",
+        "version": "1.2.3",
+    }))));
+    assert_eq!(info.name.as_deref(), Some("gemini-cli"));
+    assert_eq!(info.version.as_deref(), Some("1.2.3"));
+    assert_eq!(info.title.as_deref(), Some("Gemini CLI"));
+}
+
+#[test]
+fn agent_info_without_a_title_has_none() {
+    let info = agent_info(initialize_answer(Some(json!({
+        "name": "fake_agent",
+        "version": "0.0.0",
+    }))));
+    assert_eq!(info.name.as_deref(), Some("fake_agent"));
+    assert_eq!(info.title, None);
+}
+
+#[test]
+fn agent_info_absent_has_no_title() {
+    let info = agent_info(initialize_answer(None));
+    assert_eq!(info.name, None);
+    assert_eq!(info.version, None);
+    assert_eq!(info.title, None);
+}
