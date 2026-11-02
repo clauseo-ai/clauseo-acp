@@ -45,6 +45,8 @@ fn every_command_and_read_the_windows_send_today_is_admitted() {
         json!({"set_ui_settings": {"patch": {"theme": "dark"}}}),
         // The room's "Locate folder" (H3), with a folder this run's picker issued.
         json!({"relocate_matter": {"matter": matter, "folder": folder}}),
+        // The limits block's "Try again" (R16).
+        json!({"refresh_limits": {"agent": null, "why": "try_again"}}),
     ];
     for body in commands {
         let admitted = bridge.admit(&command(body.clone()));

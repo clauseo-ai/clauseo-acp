@@ -852,7 +852,6 @@ dependencies = [
  "tauri-plugin-window-state",
  "tauri-runtime",
  "tauri-specta",
- "tracing",
  "url",
  "uuid",
  "windows",

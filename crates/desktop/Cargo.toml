@@ -57,8 +57,6 @@ url = { workspace = true }
 dunce = { workspace = true }
 # The command ids the bridge mints for `answer_permission` and the focus refresh.
 uuid = { workspace = true, features = ["v7"] }
-# A window focus whose limits refresh failed is logged (lib.rs); host already builds it.
-tracing = { workspace = true }
 
 # The native window over the room's maximise button, for Snap Layouts
 # (src/window_frame/windows.rs): the window and its class, the top-level window's subclass, mouse
