@@ -237,7 +237,10 @@ function RoomFrame({
     !view.folderMissing &&
     !newOpen &&
     talks.matter === open.matter &&
-    talks.phase !== "loading";
+    talks.phase !== "loading" &&
+    // Versions' dialog, or a restore or undo still running, keeps the key: the dialog holds the focus, yet the key
+    // still reaches the document, and ending Versions would drop the dialog or the act's result line
+    versions.canLeave;
   useEffect(() => {
     if (!canStart) return;
     const onKey = (e: KeyboardEvent) => {
@@ -248,8 +251,8 @@ function RoomFrame({
       if (/^[a-z]$/.test(key) ? key !== "n" : e.code !== "KeyN") return;
       if (mac ? !e.metaKey || e.ctrlKey : !e.ctrlKey || e.metaKey) return;
       e.preventDefault();
-      // a new conversation is now's: Versions ends first, and the rail comes back
-      endVersions();
+      // a new conversation is now's: Versions ends first, through its controller, and the rail comes back
+      if (!endVersions()) return;
       conversations.startNew();
       setRailOpen(false);
     };
