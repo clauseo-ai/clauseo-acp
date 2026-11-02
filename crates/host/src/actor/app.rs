@@ -16,7 +16,8 @@
 //! subscription's front queue (`handle::Front`), which the subscription reads first, so the first
 //! frames and every catch-up arrive whole however many matters there are (one `ThreadsChanged`
 //! each), even past the channel's capacity. What is sent while some of it is unread queues behind
-//! it, up to a channel's worth; past that the subscriber lags as it would on a full channel.
+//! it, until the queue holds the catch-up's length plus a channel's worth; past that the
+//! subscriber lags as it would on a full channel.
 //!
 //! Each event is serialised once ([`publish`]) and the same `EncodedEvent` goes to every
 //! subscriber. What publishes here: `SettingsChanged` after each successful settings write

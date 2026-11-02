@@ -66,9 +66,9 @@ must land before or with the first partial row.
   channel; the state is already in memory, and the queue holds one catch-up at a time (it is
   filled only when the channel is empty: at subscribe, and after a drain, when nothing was sent
   meanwhile). Events sent while part of it is unread queue behind it in the same queue, under
-  the same lock that decides whether it is empty, so none overtakes it through the channel; past
-  a channel's worth behind it the subscriber lags as on a full channel and is caught up once it
-  has read everything. Live partial rows still go through the `bounded` channel, filled with
+  the same lock that decides whether it is empty, so none overtakes it through the channel. Once
+  the queue holds the catch-up's length plus a channel's worth, the subscriber lags as on a full
+  channel and is caught up once it has read everything. Live partial rows still go through the `bounded` channel, filled with
   `try_send`: a slow window never holds up the actor. The other option, sizing each channel
   for the frames plus its capacity, was not taken: the matter count grows after the channel is
   made, and `async_channel` cannot grow a bounded channel.
