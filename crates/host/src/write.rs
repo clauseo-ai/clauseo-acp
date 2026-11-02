@@ -39,12 +39,6 @@ pub(crate) fn make_private_dir(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
-/// Nothing off Unix: a folder's privacy there is its parent's.
-#[cfg(not(unix))]
-pub(crate) fn make_private_dir(_path: &Path) -> io::Result<()> {
-    Ok(())
-}
-
 /// Replaces the file `path` with `bytes` atomically: a fresh temp file beside it (0600 on Unix),
 /// written and synced, then renamed over `path`. A link at `path` is replaced, never followed.
 /// The temp file's name holds the process id and a count, so two writes (or two hosts sharing a

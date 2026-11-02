@@ -329,7 +329,10 @@ pub(crate) fn make_home(data: &Path, home: &Path) -> Result<(), Error> {
             return Err(home_failed(&at, "a link or not a folder"));
         }
     }
-    crate::write::make_private_dir(home).map_err(|error| home_failed(home, &error.to_string()))
+    // Off Unix a folder's privacy is its parent's: there is nothing to set.
+    #[cfg(unix)]
+    crate::write::make_private_dir(home).map_err(|error| home_failed(home, &error.to_string()))?;
+    Ok(())
 }
 
 /// A Codex launch's checks and writes, in order, on the `clauseo-codex-fs` thread

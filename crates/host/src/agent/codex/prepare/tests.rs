@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex, mpsc};
 
 use clauseo_protocol::{ErrorCode, Timestamp};
 
-use super::{PREPARE_WAIT, off_actor, recheck};
+use super::{PREPARE_WAIT, off_actor};
 use crate::ManualClock;
 
 fn clock() -> ManualClock {
@@ -62,7 +62,8 @@ fn the_recheck_resolves_a_linked_matter_again() {
     crate::write::create_dir_all(&root.join("other/.codex")).unwrap();
     let link = root.join("link");
     crate::write::symlink(&root.join("clean"), &link).unwrap();
-    let check = || futures::executor::block_on(recheck(Arc::new(clock()), Some(link.clone())));
+    let check =
+        || futures::executor::block_on(super::recheck(Arc::new(clock()), Some(link.clone())));
     assert!(check().is_ok());
     crate::write::remove_file(&link).unwrap();
     crate::write::symlink(&root.join("other"), &link).unwrap();
