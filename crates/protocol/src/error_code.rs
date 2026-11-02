@@ -129,6 +129,8 @@ error_codes! {
         folder is gone: moved, deleted, or its drive is not mounted.";
     MatterFolderRefused = "matter.folder_refused", retryable: false, meaning: "The folder may not \
         be a matter: a drive root, the home folder or a system folder.";
+    MatterCodexFolder = "matter.codex_folder", retryable: false, meaning: "The matter folder \
+        holds a `.codex` folder, whose settings Codex would load.";
     MatterFileLocked = "matter.file_locked", retryable: true, meaning: "A file the operation \
         needs is locked by another program, such as an open document.";
     MatterTurnRunning = "matter.turn_running", retryable: true, meaning: "A turn is running in \

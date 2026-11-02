@@ -60,6 +60,7 @@ as `yes` or `no`. The meaning is also each variant's doc comment in `error_code.
 | `matter.checkpoint_failed` | Taking a checkpoint of the matter's files failed. | yes | matters |
 | `matter.folder_missing` | The matter's folder is gone: moved, deleted, or its drive is not mounted. | no | matters |
 | `matter.folder_refused` | The folder may not be a matter: a drive root, the home folder or a system folder. | no | matters |
+| `matter.codex_folder` | The matter folder holds a `.codex` folder, whose settings Codex would load. | no | host (a Codex agent's launch and each of its prompts; decision record 0025) |
 | `matter.file_locked` | A file the operation needs is locked by another program, such as an open document. | yes | matters |
 | `matter.turn_running` | A turn is running in the matter, so undo or restore waits. | yes | host, matters |
 | `transport.unauthorized` | The client is not allowed to make this call. | no | transport_ws, desktop |

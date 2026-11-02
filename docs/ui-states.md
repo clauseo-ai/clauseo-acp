@@ -276,7 +276,7 @@ retried as they are; the others need the lawyer or a fix first. Meanings are in 
 | Store | `ErrorCode::StoreIo` | yes |
 | Store | `ErrorCode::StoreDiskFull`, `ErrorCode::StoreCorrupt`, `ErrorCode::StoreLocked`, `ErrorCode::StoreNewerVersion` | no |
 | Matter | `ErrorCode::MatterCheckpointFailed`, `ErrorCode::MatterFileLocked`, `ErrorCode::MatterTurnRunning` | yes |
-| Matter | `ErrorCode::MatterFolderMissing`, `ErrorCode::MatterFolderRefused` | no |
+| Matter | `ErrorCode::MatterFolderMissing`, `ErrorCode::MatterFolderRefused`, `ErrorCode::MatterCodexFolder` | no |
 | Transport | `ErrorCode::TransportUnauthorized`, `ErrorCode::TransportTooLarge` | no |
 | Settings | `ErrorCode::SettingsLocked` | no |
 | A code from a newer Clauseo | `ErrorCode::Unknown` | no |
