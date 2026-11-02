@@ -119,8 +119,11 @@ impl Bridge {
                 }
                 Ok(())
             }
-            // Slot: H3's `RelocateMatter` (#135), once it merges, takes only a folder ref this
-            // run's `pick_folder` issued, as `CreateMatter` does.
+            // Slots, once they merge. H3's `RelocateMatter` (#135) takes only a folder ref this
+            // run's `pick_folder` issued, as `CreateMatter` does. H5 and H20's `UpdateMatter`,
+            // `OpenMatter` and `ForgetMatter` name a matter only. H20's `CreateMatter` source
+            // `default_location` carries no folder ref and passes; the check above stays on
+            // `new_folder` and `existing_folder`.
             HostCommand::CreateThread { .. }
             | HostCommand::SendPrompt { .. }
             | HostCommand::EditQueuedPrompt { .. }
@@ -151,7 +154,7 @@ impl Bridge {
     /// `admit`'s: a read the host adds does not compile here until the bridge rules on it.
     pub(crate) async fn query(&self, query: HostQuery) -> Result<QueryResult, HostError> {
         match &query {
-            // Slot: H8's `ListPapers` (#131), once it merges.
+            // Slots, once they merge: H8's `ListPapers` (#131), H20's `GetDefaultLocation`.
             HostQuery::ListMatters
             | HostQuery::ListThreads { .. }
             | HostQuery::PageEntries { .. }
