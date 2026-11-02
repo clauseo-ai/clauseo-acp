@@ -280,6 +280,33 @@ test("without onQueue only Stop the other shows; a disabled Queue takes no press
   expect(pressed).toEqual([]);
 });
 
+test("the status region mounts empty and says the wait with Queue; silent without; the section repeats no name", async () => {
+  await mount(
+    <OtherConversationWait
+      title="Draft plaint"
+      onQueue={none}
+      onStopOther={none}
+      testIds={{ section: "other-wait", said: "said" }}
+    />,
+  );
+  const region = document.querySelector('[data-testid="said"]');
+  expect(region?.getAttribute("role")).toBe("status");
+  expect(region?.textContent).toBe(
+    "Waiting for 'Draft plaint' to finish. One conversation changes a matter's papers at a time. Your message is ready to go.",
+  );
+  expect(
+    document.querySelector('[data-testid="other-wait"]')?.getAttribute("aria-label"),
+  ).toBeNull();
+  // the visible line is no second live region
+  expect(document.querySelector(".queue-wait-head")?.getAttribute("role")).toBeNull();
+  await act(async () =>
+    root?.render(
+      <OtherConversationWait title="Draft plaint" onStopOther={none} testIds={{ said: "said" }} />,
+    ),
+  );
+  expect(document.querySelector('[data-testid="said"]')?.textContent).toBe("");
+});
+
 test("the title-only wait has its Hindi", () => {
   expect(mt("hi", "Waiting for '{title}' to finish.", { title: "x" })).toBe(
     "'x' के पूरा होने की प्रतीक्षा है।",
