@@ -1,0 +1,13 @@
+{
+  "session_id": "7c1b2f4e-0d1a-4c55-9a51-3f0e7d9b8a21",
+  "transcript_path": "/home/lawyer/.claude/projects/-m/7c1b2f4e-0d1a-4c55-9a51-3f0e7d9b8a21.jsonl",
+  "cwd": "{matter}",
+  "permission_mode": "acceptEdits",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "mkdir -p Drafts && cd Drafts && echo hi > ../Contract.docx",
+    "description": "Overwrite the contract"
+  },
+  "tool_use_id": "toolu_01A2b3C4d5E6f7G8h9J0k1L2"
+}

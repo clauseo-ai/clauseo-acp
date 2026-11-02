@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 
 use std::ffi::OsString;
 
-use super::{DENY, MAX_WORDS, run};
+use super::{DENY, IGNORED, MAX_WORDS, run};
 use crate::write;
 
 /// A matter folder `m` holding `Contract.docx`, which Word has open (its owner file
@@ -72,14 +72,21 @@ impl Drop for Fixture {
 }
 
 /// What the guard writes to stderr for `input` with `args`: the reason when it refuses (exit
-/// [`DENY`]), nothing when it lets the tool go (exit 0); the test checks the code matches.
+/// [`DENY`]), an [`IGNORED`] line when it could not read the input and nothing when it lets the
+/// tool go (exit 0 both); the test checks the code matches.
 fn guard_with(args: &[&str], input: &[u8]) -> String {
     let args: Vec<OsString> = args.iter().map(OsString::from).collect();
     let mut errors = Vec::new();
     let code = run(&args, input, &mut errors);
     let errors = String::from_utf8(errors).unwrap();
-    assert_eq!(code, if errors.is_empty() { 0 } else { DENY }, "{errors}");
+    let refused = !errors.is_empty() && !errors.starts_with(IGNORED);
+    assert_eq!(code, if refused { DENY } else { 0 }, "{errors}");
     errors
+}
+
+/// The exact stderr line for input ignored because `why`.
+fn ignored(why: &str) -> String {
+    format!("{IGNORED}: {why}. The tool goes on unchecked.\n")
 }
 
 /// [`guard_with`] and no arguments, as Codex's hook runs it.
@@ -252,43 +259,89 @@ fn codex_patches_that_change_a_held_file_are_refused_and_adding_a_new_one_is_not
     );
 }
 
+/// clauseo-acp-private#162: input it cannot read fails open (exit 0, stdout untouched: `run` has
+/// no stdout), with one stderr line naming why and no input content.
 #[test]
-fn input_it_cannot_read_gets_nothing_and_exit_0() {
+fn input_it_cannot_read_lets_the_tool_go_with_one_line_saying_why() {
     let fx = Fixture::new("malformed");
     let contract = fx.path("m/Contract.docx");
-    for input in [
-        b"".to_vec(),
-        b"not json".to_vec(),
-        b"{\"tool_name\": \"Write\"".to_vec(),
-        b"[]".to_vec(),
-        json!({}).to_string().into_bytes(),
+    let held = fx
+        .hook("Write", &json!({"file_path": contract}))
+        .to_string();
+    let cut = held.get(..held.len() / 2).unwrap().as_bytes().to_vec();
+    let bytes = |value: Value| value.to_string().into_bytes();
+    let not_json = ignored("stdin was not JSON, or was cut short");
+    let no_tool = ignored("it has no tool_name or tool_input");
+    let no_folder = ignored("it has no absolute cwd and no --matter was given");
+    let no_path = ignored("its tool_input has no file_path, notebook_path or command string");
+    let no_command = ignored("its tool_input has no command string or list");
+    for (input, line) in [
+        (b"".to_vec(), ignored("stdin was empty")),
+        (b" \n\t".to_vec(), ignored("stdin was empty")),
+        (cut, not_json.clone()),
+        (b"not json".to_vec(), not_json.clone()),
+        (b"{\"tool_name\": \"Write\"".to_vec(), not_json.clone()),
+        (vec![0xff, 0xfe, b'{'], not_json),
+        (b"[]".to_vec(), no_folder.clone()),
+        (bytes(json!({})), no_folder.clone()),
         // No cwd, a relative cwd, a cwd that is not a string.
-        json!({"tool_name": "Write", "tool_input": {"file_path": contract}})
-            .to_string()
-            .into_bytes(),
-        json!({"cwd": "m", "tool_name": "Write", "tool_input": {"file_path": contract}})
-            .to_string()
-            .into_bytes(),
-        json!({"cwd": 7, "tool_name": "Write", "tool_input": {"file_path": contract}})
-            .to_string()
-            .into_bytes(),
-        // An unknown tool, and known tools with inputs of the wrong shape.
-        fx.hook("Read", &json!({"file_path": contract}))
-            .to_string()
-            .into_bytes(),
-        fx.hook("Write", &json!("Contract.docx"))
-            .to_string()
-            .into_bytes(),
-        fx.hook("Write", &json!({"file_path": 7}))
-            .to_string()
-            .into_bytes(),
-        fx.hook("Bash", &json!({"command": {"rm": contract}}))
-            .to_string()
-            .into_bytes(),
-        vec![0xff, 0xfe, b'{'],
+        (
+            bytes(json!({"tool_name": "Write", "tool_input": {"file_path": contract}})),
+            no_folder.clone(),
+        ),
+        (
+            bytes(json!({"cwd": "m", "tool_name": "Write", "tool_input": {"file_path": contract}})),
+            no_folder.clone(),
+        ),
+        (
+            bytes(json!({"cwd": 7, "tool_name": "Write", "tool_input": {"file_path": contract}})),
+            no_folder,
+        ),
+        // No tool name or input, then known tools with inputs of the wrong shape.
+        (bytes(json!({"cwd": fx.path("m")})), no_tool.clone()),
+        (
+            bytes(json!({"cwd": fx.path("m"), "tool_name": "Write"})),
+            no_tool.clone(),
+        ),
+        (
+            bytes(json!({"cwd": fx.path("m"), "tool_name": 7, "tool_input": {}})),
+            no_tool,
+        ),
+        (
+            bytes(fx.hook("Write", &json!("Contract.docx"))),
+            no_path.clone(),
+        ),
+        (bytes(fx.hook("Write", &json!({"file_path": 7}))), no_path),
+        (
+            bytes(fx.hook("Bash", &json!({"command": {"rm": contract}}))),
+            no_command.clone(),
+        ),
+        (bytes(fx.hook("PowerShell", &json!({}))), no_command),
     ] {
-        assert_eq!(guard(&input), "", "{}", String::from_utf8_lossy(&input));
+        assert_eq!(guard(&input), line, "{}", String::from_utf8_lossy(&input));
     }
+    // A tool the guard does not check is let go quietly.
+    assert_eq!(
+        guard_json(&fx.hook("Read", &json!({"file_path": contract}))),
+        ""
+    );
+}
+
+/// Stdin that fails to read is ignored the same way.
+#[test]
+fn stdin_that_fails_to_read_lets_the_tool_go_with_one_line() {
+    struct Broken;
+    impl std::io::Read for Broken {
+        fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::other("pipe closed"))
+        }
+    }
+    let mut errors = Vec::new();
+    assert_eq!(run(&[], Broken, &mut errors), 0);
+    assert_eq!(
+        String::from_utf8(errors).unwrap(),
+        ignored("stdin could not be read")
+    );
 }
 
 /// Windows: a file another program holds with a share mode that refuses others (Word's way,
@@ -406,3 +459,5 @@ fn bash_punctuation_around_a_held_name_is_stripped() {
 }
 
 mod codex;
+mod fixtures;
+mod gaps;

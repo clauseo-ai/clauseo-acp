@@ -91,7 +91,9 @@
 //!   trusted by its own `state` entry; each Codex launch's `CODEX_CONFIG` carries it when
 //!   [`HostConfig::with_pre_write_guard`] names the program.
 //! - [`pre_write_guard::run`] reads one hook input object and returns 0, or
-//!   [`pre_write_guard::DENY`] with the reason on stderr; [`pre_write_guard::FLAG`] (then
+//!   [`pre_write_guard::DENY`] with the reason on stderr (0 with a line starting
+//!   [`pre_write_guard::IGNORED`] when it could not read the input);
+//!   [`pre_write_guard::FLAG`] (then
 //!   `--matter <folder>`) is what the hook passes. It runs in the hook's own process, with no
 //!   host thread.
 //! - The limits (`actor/limits.rs`): the host owns the `clauseo_limits::Limits` model, starts

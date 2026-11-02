@@ -12,20 +12,28 @@
 //!   patch in `tool_input.command`.
 //! - `Bash` (both agents) and Claude Code's `PowerShell`: a heuristic. `tool_input.command` is
 //!   split into words the simple shell way (whitespace, quotes, and the escape character: a
-//!   backslash, or PowerShell's backtick; no expansion), the first [`MAX_WORDS`] are kept, and a
+//!   backslash, or PowerShell's backtick; no expansion), grouped into simple commands at each
+//!   unquoted newline, `;`, `&&`, `|` and `||`; the first [`MAX_WORDS`] words are kept, and a
 //!   word names a target when it is an existing file, also once its shell punctuation is off
-//!   (`words.rs`, `candidates`). The patch lines in the command count too: Codex's
-//!   `exec_command` applies `apply_patch <<'EOF' …` as a patch. A command that reaches a file
-//!   another way (a glob, a variable, a script, a .NET call such as
-//!   `[IO.File]::WriteAllText('Contract.docx', …)`) is not caught.
+//!   (`words.rs`, `candidates`). A word is taken from the input's `cwd` and from the folder
+//!   the command's own `cd`, `pushd` or `Set-Location` moved to by then, followed by its text
+//!   (`shell.rs`); a `cd` it cannot follow (`cd "$(…)"`) also takes each later relative word
+//!   from `cwd` with its leading `..` parts off. PowerShell's `\` separates folders on every OS.
+//!   The patch lines in the command count too, from `cwd`: Codex's `exec_command` applies
+//!   `apply_patch <<'EOF' …` as a patch. A command that reaches a file another way (a glob, a
+//!   variable, a script, a .NET call such as `[IO.File]::WriteAllText('Contract.docx', …)`) is
+//!   not caught.
 //!
 //! The matter folder is the `--matter` argument when the hook passes one (Claude Code's entry
 //! does, `agent/loads.rs`: Claude Code's `cwd` follows the agent's `cd`), else the input's
 //! `cwd` (Codex's hook: its `cwd` is the turn's working folder, which a command's `cd` does not
-//! move). A relative target is taken from the input's `cwd`. Each target is checked with
-//! [`clauseo_matters::held_open_at`] against the matter folder, the permission check's own rule:
-//! both sides resolved canonically (symlinks, `..`, case on macOS and Windows), a target outside
-//! the folder not checked. The first one held open is refused.
+//! move). A relative target is taken from the input's `cwd`. Each target is checked twice with
+//! [`clauseo_matters::held_open_at`] against the matter folder, the permission check's own rule
+//! (both sides resolved canonically: symlinks, `..`, case on macOS and Windows; a target outside
+//! the folder not checked): as spelled, and normalised by its text first (`a/../b` is `b`, `.`
+//! dropped) with its deepest existing folder then canonicalised, so a `..` after a folder that
+//! does not exist yet (`Drafts/../Contract.docx`, which `mkdir -p Drafts` would make good) is
+//! caught. The first one held open is refused.
 //!
 //! One more rule for Codex's writes: a patch target in the matter's `.codex` folder (the folder
 //! or anything under it; a move's source and destination both) is refused, held open or not.
@@ -45,12 +53,20 @@
 //!
 //! A refusal is exit code 2 with the reason on stderr, which Claude Code and Codex both take as a
 //! block; stdout stays empty, so a login profile's output under Codex's `$SHELL -lc` cannot spoil
-//! it. Anything else is exit 0 with nothing written. It fails open: input it cannot read or
-//! parse, an unknown tool or a missing folder lets the tool go on, because refusing every tool
-//! when an agent changes its input shape would stop the agent outright. In default and plan mode
+//! it. An unknown tool, or a known one with nothing held, is exit 0 with nothing written.
+//!
+//! It fails open, a decision (clauseo-acp-private#162): input it cannot read (empty, cut short,
+//! not JSON), or a shape it does not know (no absolute `cwd` or `--matter`, no `tool_name` or
+//! `tool_input`, a checked tool without its path field), is exit 0 with one stderr line starting
+//! [`IGNORED`] saying why, naming no input content. Stdin comes from the agent CLI, not the
+//! model, so a model cannot make it malformed; and failing closed would refuse every matched
+//! tool, stopping the agent outright, the day Claude Code or Codex changes its input shape. The
+//! current shapes are pinned by fixtures (`tests/fixtures/pre_write_guard`), so such a change
+//! fails CI instead of opening the guard silently. In default and plan mode
 //! the permission check (ADR 0021) still stops a write to a held file; in acceptEdits and
 //! bypassPermissions this guard is the only stop. It never panics.
 
+mod shell;
 mod words;
 
 use std::ffi::OsString;
@@ -60,7 +76,8 @@ use std::path::{Component, Path, PathBuf};
 use clauseo_protocol::MatterPath;
 use serde_json::Value;
 
-use words::{Escape, candidates, shell_words};
+use shell::{resolutions, shell_targets};
+use words::Escape;
 
 /// The first argument that makes the desktop binary run [`run`] on its stdin and stderr and
 /// exit, before anything else starts. The hook entry passes it (`agent/loads.rs`).
@@ -81,24 +98,64 @@ const MAX_INPUT: u64 = 16 * 1024 * 1024;
 
 /// The guard. `args` are the arguments after [`FLAG`] (`--matter <folder>`, or none); one hook
 /// input object comes from `input`. Returns the exit code: [`DENY`], with the reason and a newline
-/// on `errors`, when a target is refused; else 0 with nothing written.
+/// on `errors`, when a target is refused; 0 with an [`IGNORED`] line when the input could not be
+/// read; else 0 with nothing written.
 pub fn run(args: &[OsString], input: impl Read, mut errors: impl Write) -> i32 {
     let mut bytes = Vec::new();
-    if input.take(MAX_INPUT).read_to_end(&mut bytes).is_err() {
-        return 0;
-    }
-    let Some(refusal) = refusal(&bytes, matter_arg(args).as_deref()) else {
-        return 0;
+    let found = match input.take(MAX_INPUT).read_to_end(&mut bytes) {
+        Ok(_) => refusal(&bytes, matter_arg(args).as_deref()),
+        Err(_) => Err(Ignored::Unreadable),
     };
-    let mut line = refusal.reason();
-    line.push('\n');
-    // Nothing more can be done when the agent stopped reading; the exit code still refuses.
+    let (line, code) = match found {
+        Ok(None) => return 0,
+        Ok(Some(refusal)) => (refusal.reason(), DENY),
+        Err(ignored) => (ignored.line(), 0),
+    };
+    // Nothing more can be done when the agent stopped reading; the exit code still decides.
     drop(
         errors
             .write_all(line.as_bytes())
+            .and_then(|()| errors.write_all(b"\n"))
             .and_then(|()| errors.flush()),
     );
-    DENY
+    code
+}
+
+/// The start of the stderr line saying the guard ignored its input ([`Ignored::line`]).
+pub const IGNORED: &str = "Clauseo's pre-write guard ignored its input";
+
+/// Why the guard let a tool go without reading what it writes: input it could not read, or a
+/// shape it does not know. The tool goes on (fail open: see the module doc), with one stderr
+/// line saying why.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Ignored {
+    /// Reading stdin failed.
+    Unreadable,
+    /// Stdin was empty or only whitespace.
+    Empty,
+    /// Stdin was not JSON, or was cut short.
+    NotJson,
+    /// No absolute `cwd` and no `--matter` folder.
+    NoFolder,
+    /// No `tool_name` string or no `tool_input`.
+    NoTool,
+    /// A known tool's `tool_input` lacked the field it names.
+    Shape(&'static str),
+}
+
+impl Ignored {
+    /// The stderr line, without its newline. It names no input content.
+    fn line(self) -> String {
+        let why = match self {
+            Self::Unreadable => "stdin could not be read".to_owned(),
+            Self::Empty => "stdin was empty".to_owned(),
+            Self::NotJson => "stdin was not JSON, or was cut short".to_owned(),
+            Self::NoFolder => "it has no absolute cwd and no --matter was given".to_owned(),
+            Self::NoTool => "it has no tool_name or tool_input".to_owned(),
+            Self::Shape(wanted) => format!("its tool_input has no {wanted}"),
+        };
+        format!("{IGNORED}: {why}. The tool goes on unchecked.")
+    }
 }
 
 /// The folder after [`MATTER_FLAG`], when `args` start with it and it is absolute.
@@ -140,19 +197,31 @@ impl Refusal {
 /// Why the hook input `bytes` is refused, if it is, with `matter` the folder from the
 /// arguments: a patch target in the matter's `.codex` folder, or under Codex's hook (no
 /// `matter`) a `Bash` word with a `.codex` part, else the first target that lies in the matter
-/// folder and is held open.
-fn refusal(bytes: &[u8], matter: Option<&Path>) -> Option<Refusal> {
-    let hook: Value = serde_json::from_slice(bytes).ok()?;
+/// folder and is held open. [`Ignored`] when the input cannot be read or has a shape the guard
+/// does not know.
+fn refusal(bytes: &[u8], matter: Option<&Path>) -> Result<Option<Refusal>, Ignored> {
+    if bytes.iter().all(u8::is_ascii_whitespace) {
+        return Err(Ignored::Empty);
+    }
+    let hook: Value = serde_json::from_slice(bytes).map_err(|_not_json| Ignored::NotJson)?;
     let cwd = hook
         .get("cwd")
         .and_then(Value::as_str)
         .map(PathBuf::from)
         .filter(|cwd| cwd.is_absolute());
-    let folder = matter.map(Path::to_path_buf).or_else(|| cwd.clone())?;
+    let folder = matter
+        .map(Path::to_path_buf)
+        .or_else(|| cwd.clone())
+        .ok_or(Ignored::NoFolder)?;
     let base = cwd.unwrap_or_else(|| folder.clone());
-    let tool = hook.get("tool_name")?.as_str()?;
-    let input = hook.get("tool_input")?;
-    let targets = targets(tool, input, &base);
+    let tool = hook
+        .get("tool_name")
+        .and_then(Value::as_str)
+        .ok_or(Ignored::NoTool)?;
+    let input = hook.get("tool_input").ok_or(Ignored::NoTool)?;
+    let Some(targets) = targets(tool, input, &base)? else {
+        return Ok(None);
+    };
     let into_codex = match &targets {
         Targets::Named(_) => false,
         Targets::Patch(paths) => paths
@@ -166,12 +235,13 @@ fn refusal(bytes: &[u8], matter: Option<&Path>) -> Option<Refusal> {
         }
     };
     if into_codex {
-        return Some(Refusal::CodexFolder);
+        return Ok(Some(Refusal::CodexFolder));
     }
-    targets
+    Ok(targets
         .paths()
-        .find_map(|path| clauseo_matters::held_open_at(&folder, &base.join(path)))
-        .map(|(path, _)| Refusal::HeldOpen(path))
+        .flat_map(|path| resolutions(&base.join(path)))
+        .find_map(|path| clauseo_matters::held_open_at(&folder, &path))
+        .map(|(path, _)| Refusal::HeldOpen(path)))
 }
 
 /// The paths a tool would write, as the agent spelled them, and where they came from.
@@ -200,24 +270,26 @@ impl Targets {
     }
 }
 
-/// The paths the tool `tool` with `input` would write; a shell command's words are files when
-/// they exist, taken from `base`.
-fn targets(tool: &str, input: &Value, base: &Path) -> Targets {
+/// The paths the tool `tool` with `input` would write, `None` for a tool the guard does not
+/// check; a shell command's words are files when they exist, taken from `base`. A checked tool
+/// whose input lacks the field its paths come from is ignored.
+fn targets(tool: &str, input: &Value, base: &Path) -> Result<Option<Targets>, Ignored> {
     let text = |key: &str| input.get(key).and_then(Value::as_str);
-    match tool {
+    let targets = match tool {
         "Edit" | "Write" | "MultiEdit" | "NotebookEdit" | "apply_patch" => {
             if let Some(path) = text("file_path").or_else(|| text("notebook_path")) {
                 Targets::Named(vec![PathBuf::from(path)])
             } else if let Some(patch) = text("command") {
                 Targets::Patch(patch_targets(patch))
             } else {
-                Targets::Named(Vec::new())
+                return Err(Ignored::Shape("file_path, notebook_path or command string"));
             }
         }
-        "Bash" => shell_targets(input.get("command"), base, Escape::Backslash),
-        "PowerShell" => shell_targets(input.get("command"), base, Escape::Backtick),
-        _ => Targets::Named(Vec::new()),
-    }
+        "Bash" => shell_targets(input.get("command"), base, Escape::Backslash)?,
+        "PowerShell" => shell_targets(input.get("command"), base, Escape::Backtick)?,
+        _ => return Ok(None),
+    };
+    Ok(Some(targets))
 }
 
 /// Whether `path`, taken from `base`, is `<folder>/.codex` or lies under it, resolved
@@ -299,49 +371,6 @@ fn patch_targets(patch: &str) -> Vec<PathBuf> {
                 .map(PathBuf::from)
         })
         .collect()
-}
-
-/// A shell command's targets: the existing files among its first [`MAX_WORDS`] words, taken from
-/// `base`, the files of a patch in its text, and whether one of those words has a `.codex` part.
-/// Claude Code sends the command as a string; an argument list (one shape Codex has used) is
-/// taken word by word, each split again so `["bash", "-lc", "…"]` reaches the script's words.
-fn shell_targets(command: Option<&Value>, base: &Path, escape: Escape) -> Targets {
-    let mut words: Vec<String> = Vec::new();
-    let mut text = String::new();
-    match command {
-        Some(Value::String(command)) => {
-            shell_words(command, MAX_WORDS, escape, &mut words);
-            text.push_str(command);
-        }
-        Some(Value::Array(parts)) => {
-            for part in parts.iter().filter_map(Value::as_str) {
-                text.push_str(part);
-                text.push('\n');
-                if words.len() < MAX_WORDS {
-                    words.push(part.to_owned());
-                    shell_words(part, MAX_WORDS, escape, &mut words);
-                }
-            }
-            words.truncate(MAX_WORDS);
-        }
-        _ => {}
-    }
-    let mut files: Vec<PathBuf> = Vec::new();
-    let mut names_codex = false;
-    for word in &words {
-        for candidate in candidates(word) {
-            names_codex |= text_has_codex_part(candidate);
-            let path = base.join(candidate);
-            if !files.contains(&path) && path.metadata().is_ok_and(|meta| meta.is_file()) {
-                files.push(path);
-            }
-        }
-    }
-    Targets::Shell {
-        files,
-        patch: patch_targets(&text),
-        names_codex,
-    }
 }
 
 #[cfg(test)]

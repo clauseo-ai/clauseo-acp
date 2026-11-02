@@ -10,12 +10,68 @@ pub(crate) enum Escape {
     Backtick,
 }
 
-/// Appends `command`'s words to `words` until it holds `limit`: split at unquoted whitespace;
+/// A shell command's words, grouped by the simple command (segment) each belongs to, the first
+/// `limit` words in all.
+#[derive(Debug)]
+pub(crate) struct Segments {
+    /// The segments in order, each its words; empty segments are not kept.
+    list: Vec<Vec<String>>,
+    /// How many words `list` holds.
+    count: usize,
+    /// The most words kept.
+    limit: usize,
+}
+
+impl Segments {
+    pub(crate) fn new(limit: usize) -> Self {
+        Self {
+            list: Vec::new(),
+            count: 0,
+            limit,
+        }
+    }
+
+    /// Whether it holds `limit` words.
+    pub(crate) fn full(&self) -> bool {
+        self.count >= self.limit
+    }
+
+    /// Adds `word` to the last segment, unless it is full.
+    pub(crate) fn push(&mut self, word: String) {
+        if self.full() {
+            return;
+        }
+        match self.list.last_mut() {
+            Some(last) => last.push(word),
+            None => self.list.push(vec![word]),
+        }
+        self.count += 1;
+    }
+
+    /// Ends the last segment: the next word starts a new one.
+    pub(crate) fn split(&mut self) {
+        if self.list.last().is_none_or(|last| !last.is_empty()) {
+            self.list.push(Vec::new());
+        }
+    }
+
+    /// The segments, each its words, empty ones left out.
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &[String]> {
+        self.list
+            .iter()
+            .filter(|segment| !segment.is_empty())
+            .map(Vec::as_slice)
+    }
+}
+
+/// Adds `command`'s words to `segments` until it is full: split at unquoted whitespace;
 /// single quotes keep everything; double quotes keep everything but the escape before `"`, the
 /// escape itself, `$` or `` ` `` (a backslash under [`Escape::Backslash`]), and the escape
-/// outside quotes keeps the next character. No expansion, no operators: `a;b` is one word. An
-/// unclosed quote ends with the command.
-pub(crate) fn shell_words(command: &str, limit: usize, escape: Escape, words: &mut Vec<String>) {
+/// outside quotes keeps the next character. No expansion. A new segment starts at each unquoted
+/// newline, `;`, `&&`, `|` and `||` (`|&` too), which end the word before them; a `|` right
+/// after `>` is the redirection `>|` and stays in the word, as does a single `&` (`2>&1`,
+/// `&>x`, a trailing `&`). An unclosed quote ends with the command.
+pub(crate) fn shell_segments(command: &str, escape: Escape, segments: &mut Segments) {
     #[derive(Clone, Copy, PartialEq, Eq)]
     enum Quote {
         None,
@@ -30,16 +86,36 @@ pub(crate) fn shell_words(command: &str, limit: usize, escape: Escape, words: &m
     let mut word = String::new();
     let mut in_word = false;
     let mut chars = command.chars().peekable();
+    segments.split();
+    let end_word = |word: &mut String, in_word: &mut bool, segments: &mut Segments| {
+        if *in_word {
+            segments.push(std::mem::take(word));
+            *in_word = false;
+        }
+    };
     while let Some(c) = chars.next() {
-        if words.len() >= limit {
+        if segments.full() {
             return;
         }
         match (quote, c) {
-            (Quote::None, c) if c.is_whitespace() => {
-                if in_word {
-                    words.push(std::mem::take(&mut word));
-                    in_word = false;
+            (Quote::None, '\n' | ';') => {
+                end_word(&mut word, &mut in_word, segments);
+                segments.split();
+            }
+            (Quote::None, '&') if chars.peek() == Some(&'&') => {
+                chars.next();
+                end_word(&mut word, &mut in_word, segments);
+                segments.split();
+            }
+            (Quote::None, '|') if !word.ends_with('>') => {
+                if matches!(chars.peek(), Some('|' | '&')) {
+                    chars.next();
                 }
+                end_word(&mut word, &mut in_word, segments);
+                segments.split();
+            }
+            (Quote::None, c) if c.is_whitespace() => {
+                end_word(&mut word, &mut in_word, segments);
             }
             (Quote::None, '\'') => {
                 quote = Quote::Single;
@@ -69,9 +145,7 @@ pub(crate) fn shell_words(command: &str, limit: usize, escape: Escape, words: &m
             }
         }
     }
-    if in_word && words.len() < limit {
-        words.push(word);
-    }
+    end_word(&mut word, &mut in_word, segments);
 }
 
 /// The file names `word` may hold, each when not empty: the word without trailing `;`, `|` or
@@ -97,12 +171,16 @@ pub(crate) fn candidates(word: &str) -> impl Iterator<Item = &str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Escape, candidates, shell_words};
+    use super::{Escape, Segments, candidates, shell_segments};
+
+    fn segments(command: &str, limit: usize, escape: Escape) -> Vec<Vec<String>> {
+        let mut segments = Segments::new(limit);
+        shell_segments(command, escape, &mut segments);
+        segments.iter().map(<[String]>::to_vec).collect()
+    }
 
     fn split(command: &str, limit: usize, escape: Escape) -> Vec<String> {
-        let mut words = Vec::new();
-        shell_words(command, limit, escape, &mut words);
-        words
+        segments(command, limit, escape).concat()
     }
 
     #[test]
@@ -116,6 +194,43 @@ mod tests {
         assert_eq!(split("a b c d", 2, posix), ["a", "b"]);
         assert_eq!(split("trailing\\", 64, posix), ["trailing"]);
         assert_eq!(split("  \t\n ", 64, posix), Vec::<String>::new());
+    }
+
+    #[test]
+    fn commands_split_into_segments_at_unquoted_operators() {
+        let posix = Escape::Backslash;
+        assert_eq!(
+            segments(
+                "mkdir -p D && cd D;echo 'a;b' \"c && d\" >|x | tee y||z\nw 2>&1 & v |& u",
+                64,
+                posix
+            ),
+            [
+                vec!["mkdir", "-p", "D"],
+                vec!["cd", "D"],
+                vec!["echo", "a;b", "c && d", ">|x"],
+                vec!["tee", "y"],
+                vec!["z"],
+                vec!["w", "2>&1", "&", "v"],
+                vec!["u"],
+            ]
+        );
+        assert_eq!(
+            segments("a\\;b ; ;; c", 64, posix),
+            [vec!["a;b"], vec!["c"]]
+        );
+        assert_eq!(segments("a; b; c", 2, posix), [vec!["a"], vec!["b"]]);
+        assert_eq!(
+            segments(
+                "Set-Location D; Set-Content ..\\C.docx hi",
+                64,
+                Escape::Backtick
+            ),
+            [
+                vec!["Set-Location", "D"],
+                vec!["Set-Content", r"..\C.docx", "hi"]
+            ]
+        );
     }
 
     #[test]
