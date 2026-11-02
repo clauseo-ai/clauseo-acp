@@ -3,7 +3,7 @@
 // as every Mac app's settings do. The sections stand on the bare ground, each saying where it stands, as the rail of
 // matters does; the open section stands on the work's raised surface. This is a part: it knows no host and no
 // settings. The app passes the sections, which is open, the window's wiring and the open section's body.
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 import type { Platform } from "../lib/display.ts";
 import { say } from "../lib/words-ui.ts";
 import { useSettingsWords } from "../lib/words-settings.ts";
@@ -16,7 +16,9 @@ export type SettingsNavItem = { id: string; name: string; note?: string };
 /** The window: on Windows and Linux a title bar with the caption buttons, on the Mac the corner lights; the sections
  * down the side, the open one marked; and the open section's head and body in the pane, which starts at its top each
  * time the section changes. Settings is a page of its own, so the window's name is its one h1 (the title bar's on
- * Windows and Linux, the side's head on the Mac), the section's name an h2 and its groups h3. */
+ * Windows and Linux, the side's head on the Mac), the section's name an h2 and its groups h3. It is a real window
+ * with its native title, so no dialog role: the title bar is its banner, the side its navigation, and the pane its
+ * main landmark, named by the section's h2. */
 export function SettingsWindow({
   platform,
   title,
@@ -45,31 +47,26 @@ export function SettingsWindow({
   children: ReactNode;
 }) {
   const w = useSettingsWords();
-  const pane = useRef<HTMLDivElement>(null);
+  const pane = useRef<HTMLElement>(null);
+  const head = useId();
   // a new section starts at its top
   useEffect(() => {
     pane.current?.scrollTo?.({ top: 0 });
   }, [current]);
   const open = sections.find((s) => s.id === current);
   return (
-    <div
-      className="set-win"
-      data-platform={platform}
-      role="dialog"
-      aria-modal="false"
-      aria-label={title}
-    >
+    <div className="set-win" data-platform={platform}>
       {platform === "mac" ? (
         <div className="set-win-lights" data-tauri-drag-region>
           <CornerLights native={nativeLights} />
         </div>
       ) : (
-        <div className="set-win-bar" data-tauri-drag-region>
+        <header className="set-win-bar" data-tauri-drag-region>
           <Heading level={1} className="set-win-title" data-tauri-drag-region>
             {say(title)}
           </Heading>
           <CaptionButtons {...caption} />
-        </div>
+        </header>
       )}
       <nav className="set-side" aria-label={w.s("Sections")}>
         {platform === "mac" && (
@@ -93,17 +90,17 @@ export function SettingsWindow({
           ))}
         </ul>
       </nav>
-      <div className="set-pane" ref={pane}>
+      <main className="set-pane" ref={pane} aria-labelledby={head}>
         <div className="set-pane-inner" key={current}>
-          <header className="set-pane-head">
-            <Heading level={2} className="set-pane-title">
+          <div className="set-pane-head">
+            <Heading level={2} id={head} className="set-pane-title">
               {say(open?.name ?? "")}
             </Heading>
             {lead !== undefined && <p className="set-pane-lead">{say(lead)}</p>}
-          </header>
+          </div>
           {children}
         </div>
-      </div>
+      </main>
     </div>
   );
 }

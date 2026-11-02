@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import { frame } from "./words-frame.ts";
 import { ui } from "./words-ui.ts";
-import { LANGUAGE_NAMES, settingsWords, st } from "./words-settings.ts";
+import { LANGUAGE_NAMES, PREVIEW_PAPERS, settingsWords, st } from "./words-settings.ts";
 
 test("the sections and their lines say the design's words in both languages", () => {
   expect(
@@ -19,6 +19,18 @@ test("the sections and their lines say the design's words in both languages", ()
   expect(st("hi", "How Clauseo looks on this computer.")).toBe("इस कंप्यूटर पर Clauseo कैसा दिखे।");
   expect(st("hi", "Managed by your organisation")).toBe("आपके संगठन द्वारा प्रबंधित");
   expect(LANGUAGE_NAMES).toEqual({ en: "English", hi: "हिन्दी" });
+});
+
+test("appearance's preview says the design's line, and its papers keep their filed titles", () => {
+  expect(st("hi", "How it looks")).toBe("यह कैसा दिखता है");
+  expect(
+    st("hi", "A strong case, because the complaint names Mr. Sharma only as a director."),
+  ).toBe("मामला मज़बूत है, क्योंकि शिकायत में श्री शर्मा को केवल निदेशक के रूप में नामित किया गया है।");
+  expect(PREVIEW_PAPERS.map((p) => p.title)).toEqual([
+    "Form DIR-12",
+    "Board minutes",
+    "Legal notice",
+  ]);
 });
 
 test("the side's notes fill their slots in both languages", () => {
@@ -87,6 +99,6 @@ test("only the sections built so far bring their strings: no later section's nam
     "Privacy",
   ])
     expect(Object.keys(settingsWords), later).not.toContain(later);
-  // no sample content: the preview's sentence and the design's facts stay in the design
-  expect(src).not.toMatch(/Sharma|3\.0\.4|October/);
+  // the design's facts (its version and date) stay in the design
+  expect(src).not.toMatch(/3\.0\.4|October/);
 });

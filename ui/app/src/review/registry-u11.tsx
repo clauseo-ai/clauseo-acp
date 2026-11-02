@@ -52,4 +52,10 @@ export const U11: Entry[] = [
   entry("U11-23", uiWords("Off"), "appearance"),
   entry("U11-24", uiWords("Never, even over a remote desktop"), "appearance"),
   entry("U11-25", uiWords("Settings"), "language"),
+  entry("U11-26", settingsWords("How it looks"), "appearance"),
+  entry(
+    "U11-27",
+    settingsWords("A strong case, because the complaint names Mr. Sharma only as a director."),
+    "appearance",
+  ),
 ];

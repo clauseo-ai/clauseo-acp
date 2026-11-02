@@ -71,9 +71,15 @@ test("the side lists each section with its note, marks the open one, and a press
 test("on the Mac the side's head is the window's one h1, the pane's head the section's h2, with its lead and body", async () => {
   const el = await mount(frame());
   const win = el.querySelector(".set-win");
-  expect(win?.getAttribute("role")).toBe("dialog");
-  expect(win?.getAttribute("aria-label")).toBe("Settings");
+  // a real window with its native title: no dialog role; the pane is the main landmark, named by its h2
+  expect(win?.getAttribute("role")).toBeNull();
+  expect(win?.hasAttribute("aria-modal")).toBe(false);
   expect(win?.getAttribute("data-platform")).toBe("mac");
+  const main = el.querySelector("main.set-pane");
+  expect(main).not.toBeNull();
+  expect(document.getElementById(main?.getAttribute("aria-labelledby") ?? "")?.textContent).toBe(
+    "Language",
+  );
   expect([...el.querySelectorAll("h1")].map((h) => h.textContent)).toEqual(["Settings"]);
   expect(el.querySelector(".set-side h1.set-side-title")).not.toBeNull();
   expect(el.querySelector(".set-pane h2.set-pane-title")?.textContent).toBe("Language");
@@ -96,7 +102,7 @@ test("off the Mac the title bar holds the title as the h1 and the caption button
   for (const platform of ["windows", "linux"] as const) {
     const onClose = vi.fn();
     const el = await mount(frame({ platform, caption: { onClose } }));
-    expect(el.querySelector(".set-win-bar h1.set-win-title")?.textContent).toBe("Settings");
+    expect(el.querySelector("header.set-win-bar h1.set-win-title")?.textContent).toBe("Settings");
     expect(el.querySelector(".set-side-title")).toBeNull();
     expect(el.querySelector(".set-win-lights")).toBeNull();
     // all three buttons, as the design's window has them
@@ -108,7 +114,7 @@ test("off the Mac the title bar holds the title as the h1 and the caption button
 
 test("a new section starts the pane at its top", async () => {
   const el = await mount(frame());
-  const pane = el.querySelector<HTMLDivElement>(".set-pane");
+  const pane = el.querySelector<HTMLElement>(".set-pane");
   const scrolled = vi.fn();
   if (pane !== null) pane.scrollTo = scrolled as typeof pane.scrollTo;
   await mount(frame({ current: "appearance" }));

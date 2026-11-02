@@ -55,27 +55,31 @@ export function PlateRow({
   );
 }
 
-/** The line a locked row carries: the firm's policy holds it. */
-export function Managed({ className }: { className?: string }) {
+/** The line a locked row carries: the firm's policy holds it. Its control names `id` in aria-describedby. */
+export function Managed({ id, className }: { id: string; className?: string }) {
   const w = useSettingsWords();
   return (
-    <p className={cn(settingNote, className)} data-testid="managed">
+    <p id={id} className={cn(settingNote, className)} data-testid="managed">
       {w.say(w.s("Managed by your organisation"))}
     </p>
   );
 }
 
 /** A setting chosen from a few short words: its name and line at the start, the control at the end, dropping under
- * the words once they'd have too little room. A locked one says so under its line. */
+ * the words once they'd have too little room. A locked one says so under its line, as `managedId`, which its control
+ * names in aria-describedby. */
 export function ChoiceRow({
   label,
   note,
   locked = false,
+  managedId,
   children,
 }: {
   label: string;
   note?: string;
   locked?: boolean;
+  /** The managed line's id, for the control's aria-describedby. */
+  managedId: string;
   children: ReactNode;
 }) {
   const w = useSettingsWords();
@@ -84,7 +88,7 @@ export function ChoiceRow({
       <div className="set-choice-words">
         <p className={settingLabel}>{w.say(label)}</p>
         {note !== undefined && <p className={settingNote}>{w.say(note)}</p>}
-        {locked && <Managed />}
+        {locked && <Managed id={managedId} />}
       </div>
       {children}
     </PlateRow>

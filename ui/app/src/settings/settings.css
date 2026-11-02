@@ -3,6 +3,7 @@
    it, so the review page, which renders SettingsApp too, keeps its own sheet. Tests are not sources, so their classes never reach the shipped CSS. */
 @import "../styles/system.css";
 @import "@clauseo/components/clauseo/shell.css";
+@import "@clauseo/components/clauseo/lockup.css";
 @import "@clauseo/components/clauseo/settings-window.css";
 @source ".";
 @source not "./**/*.test.*";

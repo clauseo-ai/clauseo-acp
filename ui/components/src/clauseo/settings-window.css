@@ -158,11 +158,82 @@
     flex: 1 1 var(--size-menu);
   }
 
+  /* ---------- appearance: the room in small ---------- */
+  /* the wall and the answer side by side, the answer a little wider; once the pane is too narrow for both, the
+     answer drops under the wall */
+  .set-preview {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s4);
+    padding: var(--s4);
+    border-radius: var(--r-card);
+    background: var(--ground);
+    box-shadow: var(--set-in-field);
+  }
+  .set-preview-wall {
+    flex: 1 1 var(--size-search);
+    min-width: 0;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--tile-gap);
+  }
+  .set-preview-tile {
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr);
+    align-content: start;
+    gap: var(--s1);
+    min-width: 0;
+    padding: var(--tile-pad);
+    border-radius: var(--r-control);
+    background: var(--flat);
+    color: var(--quiet);
+  }
+  .set-preview-tile[data-state="supports"] {
+    background: var(--green);
+    color: var(--on-colour);
+    box-shadow: var(--lit);
+  }
+  .set-preview-tile[data-state="against"] {
+    background: var(--red);
+    color: var(--on-colour);
+    box-shadow: var(--lit);
+  }
+  /* the chips stand in the tile's bottom slot, as the wall's do, so a title on two lines never pushes one chip below
+     its neighbour */
+  .set-preview-tile > :nth-child(3) {
+    justify-self: start;
+    align-self: end;
+    margin-top: var(--s1);
+  }
+  .set-preview-num {
+    @apply font-numeral text-numeral stretch-broad font-monument tracking-numeral;
+  }
+  .set-preview-tile:not([data-state]) .set-preview-num {
+    color: var(--flat-num);
+  }
+  .set-preview-title {
+    @apply text-tile-title stretch-tile-title;
+    overflow-wrap: anywhere;
+  }
+  .set-preview-work {
+    flex: 1.2 1 var(--size-search);
+    min-width: 0;
+    padding: var(--s4) var(--s5);
+    border-radius: var(--r-card);
+    background: var(--surface);
+    box-shadow: var(--e2);
+    @apply text-lead-narrow font-clauseo stretch-wide tracking-lead text-primary;
+  }
+
   /* ---------- about ---------- */
   .set-about {
     display: grid;
     justify-items: start;
     gap: var(--s3);
+  }
+  .set-lockup {
+    width: var(--size-search);
   }
 
   /* the window is the viewport: its side of sections stands at its own 960 px and down to where side and pane still
