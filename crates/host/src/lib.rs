@@ -33,7 +33,11 @@
 //! - What a session loads (`agent/loads.rs`): only the MCP servers the lawyer turned on, under
 //!   Claude Code's strict MCP config with `settingSources: ["user"]` and claude.ai connectors
 //!   off. When Claude Code's enterprise `managed-mcp.json` is present, none of its servers and
-//!   no strict config go: the firm controls MCP there.
+//!   no strict config go: the firm controls MCP there. Every session's `_meta` also turns
+//!   bypass off (`allowDangerouslySkipPermissions: false`), and a Claude session that starts in
+//!   another mode than `default` (the user's `permissions.defaultMode`, a resumed transcript's
+//!   mode) gets `session/set_mode default` before its first prompt; a failed switch fails the
+//!   launch.
 //! - What a Codex agent is launched with (`agent/codex.rs`): its ask mode
 //!   (`INITIAL_AGENT_MODE=workspace-write`), its home under the data folder as `CODEX_HOME` with a
 //!   `config.toml` of the same switches for app-server's start-up, a

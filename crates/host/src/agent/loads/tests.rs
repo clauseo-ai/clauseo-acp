@@ -6,8 +6,9 @@ use clauseo_settings::{Effective, Locations, SystemFiles};
 use serde_json::{Map, Value, json};
 
 use super::{
-    CLAUDE_AI_MCP_VAR, CLAUDE_MANAGED_SETTING_SOURCES, CLAUDE_SETTING_SOURCES, GUARD_MATCHER,
-    GuardHook, McpControl, guard_entry, launch_env, mcp_control, mcp_servers, session_meta,
+    ALLOW_BYPASS_OPTION, CLAUDE_AI_MCP_VAR, CLAUDE_MANAGED_SETTING_SOURCES, CLAUDE_MODE,
+    CLAUDE_SETTING_SOURCES, GUARD_MATCHER, GuardHook, McpControl, guard_entry, launch_env,
+    mcp_control, mcp_servers, session_meta,
 };
 use crate::write;
 
@@ -26,6 +27,7 @@ fn with_no_hook_the_meta_is_the_switches() {
         json!({"claudeCode": {"options": {
             "strictMcpConfig": true,
             "settingSources": CLAUDE_SETTING_SOURCES,
+            "allowDangerouslySkipPermissions": false,
             "env": {"ENABLE_CLAUDEAI_MCP_SERVERS": "false"},
         }}})
     );
@@ -57,6 +59,7 @@ fn the_switches_win_over_the_hook_and_every_other_hook_key_stays() {
                 "options": {
                     "strictMcpConfig": true,
                     "settingSources": ["user"],
+                    "allowDangerouslySkipPermissions": false,
                     "model": "opus",
                     "settings": {"syncClaudeAiPlugins": false},
                     "env": {"ENABLE_CLAUDEAI_MCP_SERVERS": "false", "FIRM": "1"},
@@ -82,7 +85,39 @@ fn a_hook_value_that_is_not_an_object_is_replaced() {
         let options = &meta["claudeCode"]["options"];
         assert_eq!(options["strictMcpConfig"], true, "{hook}");
         assert_eq!(options["env"][CLAUDE_AI_MCP_VAR], "false", "{hook}");
+        assert_eq!(options[ALLOW_BYPASS_OPTION], false, "{hook}");
     }
+}
+
+/// Bypass stays off whatever the hook asks, under either MCP control, and the hook cannot set
+/// the mode or allow bypass through an extra flag: the SDK writes extraArgs after its own
+/// `--permission-mode`. A `permissionMode` or flag-settings `defaultMode` the hook set stays
+/// (claude-agent-acp ignores both for the starting mode), and the host's mode is
+/// [`CLAUDE_MODE`], set after the start.
+#[test]
+fn bypass_stays_off_and_the_hooks_mode_flags_are_taken_out() {
+    let hook = object(&json!({"claudeCode": {"options": {
+        "allowDangerouslySkipPermissions": true,
+        "extraArgs": {
+            "permission-mode": "bypassPermissions",
+            "permission-mode=acceptEdits": null,
+            "dangerously-skip-permissions": null,
+            "allow-dangerously-skip-permissions": null,
+            "permission-modes": "kept",
+            "debug": null,
+        },
+    }}}));
+    for control in [McpControl::Clauseo, McpControl::Managed] {
+        let meta = Value::Object(session_meta(Some(hook.clone()), control, None, None));
+        let options = &meta["claudeCode"]["options"];
+        assert_eq!(options[ALLOW_BYPASS_OPTION], false, "{control:?}");
+        assert_eq!(
+            options["extraArgs"],
+            json!({"permission-modes": "kept", "debug": null}),
+            "{control:?}"
+        );
+    }
+    assert_eq!(CLAUDE_MODE, "default");
 }
 
 /// The guard's entry: the exec form with `--matter <folder>`, the matcher and the timeout,

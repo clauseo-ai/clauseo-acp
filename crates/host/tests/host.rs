@@ -35,6 +35,9 @@ mod browser;
 #[path = "host/cancel.rs"]
 mod cancel;
 #[cfg(test)]
+#[path = "host/claude_mode.rs"]
+mod claude_mode;
+#[cfg(test)]
 #[path = "host/codex.rs"]
 mod codex;
 #[cfg(test)]
