@@ -1,0 +1,32 @@
+[package]
+name = "clauseo-profile"
+version = "0.1.0"
+description = "Clauseo's launch profile: the instructions, each agent's options, the browser server and the skills, as plain values and files."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+# `test_support::tree_text`, the snapshot tool R22's render snapshots reuse.
+test-support = []
+
+[dependencies]
+clauseo-protocol = { path = "../protocol" }
+clauseo-process = { path = "../process" }
+clauseo-settings = { path = "../settings" }
+futures = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+# Itself with test-support, so the tests reach `tree_text` with no flag.
+clauseo-profile = { path = ".", features = ["test-support"] }
+clauseo-process = { path = "../process", features = ["test-support"] }
+futures = { workspace = true, features = ["executor"] }
+insta = { workspace = true, features = ["json"] }
+
+[lints]
+workspace = true

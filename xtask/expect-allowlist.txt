@@ -207,3 +207,6 @@ crates/mcp/examples/echo_stub.rs open_log clippy::disallowed_methods
 crates/mcp/tests/guard/write.rs - clippy::disallowed_methods
 crates/mcp/tests/guard/support.rs run clippy::disallowed_methods
 crates/mcp/tests/guard/support.rs Guard::start clippy::disallowed_methods
+# R21: clauseo-profile's write module (the skills folders it owns) and its skills tests' write module.
+crates/profile/src/write.rs - clippy::disallowed_methods
+crates/profile/tests/skills/write.rs - clippy::disallowed_methods

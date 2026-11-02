@@ -1,0 +1,204 @@
+//! Clauseo's launch profile (R21): what Clauseo adds to every agent session, as plain values
+//! and files, translated into each agent's own options. `crates/desktop` adapts it to the
+//! host's `ProfileHook`; this crate knows neither `host` nor `acp`.
+//!
+//! - The instructions ([`instructions`]): R21's tools part, with later parts appended (R22).
+//!   Claude gets them in `_meta.systemPrompt.append`, Codex as `developer_instructions`.
+//! - Claude's options ([`claude`]): the allow list, the skills plugin, and
+//!   `disableSkillShellExecution`. Codex's keys ([`codex`]).
+//! - The `browser` MCP server ([`servers`]), for every agent.
+//! - The launch variables: `STETDOC_AUTHOR`.
+//! - The skills ([`skills`]), rendered into Claude's plugin and Codex's home.
+//!
+//! What differs per session goes out as [`placeholders`] the host fills. The host decides
+//! everything the settings decide (web search on or off, the seeded `WebFetch` rules, the
+//! preflight switch), since the hook sees only the agent's id.
+
+pub mod claude;
+pub mod codex;
+pub mod error;
+pub mod instructions;
+pub mod paths;
+pub mod placeholders;
+pub mod servers;
+pub mod skills;
+#[cfg(feature = "test-support")]
+pub mod test_support;
+mod write;
+
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
+use clauseo_protocol::AgentKind;
+use serde_json::{Map, Value};
+
+pub use claude::ClaudeOptions;
+pub use codex::CodexConfig;
+pub use error::ProfileError;
+pub use instructions::Instructions;
+pub use paths::{BrowserSidecars, ProfilePaths};
+pub use servers::ProfileServer;
+pub use skills::{RenderReport, Rendered, SkillFile, SkillSource};
+
+/// The variable stetdoc reads its author from when `--author` is absent.
+pub const STETDOC_AUTHOR: &str = "STETDOC_AUTHOR";
+
+/// Whether Codex gets the skills in its home's `skills/` folder. Off: R15 runs Codex with
+/// `skills.include_instructions=false` (`clauseo_limits::CODEX_OVERRIDES`), so no skill catalog
+/// reaches the model, and codex 0.162.1 has no key that keeps the lawyer's `~/.agents/skills`
+/// out while letting a root under the agent home in (decision record 0030). Codex gets the
+/// stetdoc rules through `developer_instructions` instead.
+pub const CODEX_SKILLS: bool = false;
+
+/// The Claude plugin's manifest, `.claude-plugin/plugin.json`.
+const PLUGIN_MANIFEST: &str = concat!(
+    "{\n",
+    "  \"name\": \"clauseo\",\n",
+    "  \"description\": \"Clauseo's built-in skills.\"\n",
+    "}\n"
+);
+
+/// Launch variables the profile adds, by name.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ProfileEnv(pub BTreeMap<String, String>);
+
+/// The profile, built once at app start.
+#[derive(Debug, Clone)]
+pub struct ClauseoProfile {
+    paths: ProfilePaths,
+    author: String,
+    instructions: Instructions,
+    skills: Rendered,
+}
+
+impl ClauseoProfile {
+    /// The profile with R21's instructions and no skills yet. `author` is the lawyer's name
+    /// from the settings; there is no such key yet, so desktop passes `None` and tracked changes
+    /// carry `Clauseo`. Never the OS account name. [`instructions::author_name`] makes a name
+    /// safe.
+    pub fn new(paths: ProfilePaths, author: Option<String>) -> Self {
+        Self {
+            paths,
+            author: instructions::author_name(&author.unwrap_or_default()),
+            instructions: Instructions::tools(),
+            skills: Rendered::default(),
+        }
+    }
+
+    /// The same profile with `skills` rendered once, here, for every later
+    /// [`Self::skill_files`]: stetdoc's from [`skills::stetdoc::load_skill`] (run before, off
+    /// the host thread), and R22's built-ins.
+    pub fn with_skills(mut self, skills: &[SkillSource]) -> Result<Self, ProfileError> {
+        self.skills = skills::render(skills)?;
+        Ok(self)
+    }
+
+    /// The same profile with `instructions` (R22: `Instructions::tools().with_part(LEGAL)`).
+    #[must_use]
+    pub fn with_instructions(mut self, instructions: Instructions) -> Self {
+        self.instructions = instructions;
+        self
+    }
+
+    /// The paths.
+    pub fn paths(&self) -> &ProfilePaths {
+        &self.paths
+    }
+
+    /// The author name tracked changes carry.
+    pub fn author(&self) -> &str {
+        &self.author
+    }
+
+    /// The composed instructions, `{author}` filled, `{work_folder}` and `{matter_notes}` left.
+    pub fn instructions(&self) -> String {
+        self.instructions.compose(&self.author)
+    }
+
+    /// The servers for an agent of `kind`: `browser`, whatever the kind.
+    pub fn servers(&self, _kind: Option<AgentKind>) -> Vec<ProfileServer> {
+        vec![servers::browser(&self.paths)]
+    }
+
+    /// Claude's options.
+    pub fn claude_options(&self) -> ClaudeOptions {
+        ClaudeOptions::new(self.instructions(), Some(self.paths.claude_plugin.clone()))
+    }
+
+    /// Codex's keys.
+    pub fn codex_config(&self) -> CodexConfig {
+        CodexConfig::with_instructions(self.instructions())
+    }
+
+    /// The `_meta` for an agent of `kind`: Claude's fragment for Claude, none otherwise.
+    pub fn session_meta(&self, kind: Option<AgentKind>) -> Option<Map<String, Value>> {
+        (kind == Some(AgentKind::Claude)).then(|| self.claude_options().meta_fragment())
+    }
+
+    /// The `CODEX_CONFIG` keys for an agent of `kind`: Codex's for Codex, none otherwise.
+    pub fn codex_keys(&self, kind: Option<AgentKind>) -> Map<String, Value> {
+        if kind == Some(AgentKind::Codex) {
+            self.codex_config().into_keys()
+        } else {
+            Map::new()
+        }
+    }
+
+    /// The launch variables: [`STETDOC_AUTHOR`], for every agent.
+    pub fn env(&self) -> ProfileEnv {
+        ProfileEnv(BTreeMap::from([(
+            STETDOC_AUTHOR.to_owned(),
+            self.author.clone(),
+        )]))
+    }
+
+    /// The folder to put first on the agents' `PATH`.
+    pub fn path_prepend(&self) -> &Path {
+        self.paths.path_prepend()
+    }
+
+    /// The skills for an agent of `kind`, as data to write before its launch: Claude's into the
+    /// plugin (with the plugin's manifest); none for Codex while [`CODEX_SKILLS`] is off, and none
+    /// for an agent with no kind. Pure and cheap: what [`Self::with_skills`] rendered, cloned,
+    /// with no file read and no process. The launch-prep thread hands it to [`write_skills`].
+    pub fn skill_files(&self, kind: Option<AgentKind>) -> Option<SkillWrite> {
+        let (root, plugin) = match kind? {
+            AgentKind::Claude => (
+                self.paths.claude_skills(),
+                Some(
+                    self.paths
+                        .claude_plugin
+                        .join(".claude-plugin")
+                        .join("plugin.json"),
+                ),
+            ),
+            AgentKind::Codex if CODEX_SKILLS => (self.paths.codex_skills.clone(), None),
+            AgentKind::Codex => return None,
+        };
+        Some(SkillWrite {
+            root,
+            plugin_manifest: plugin,
+            rendered: self.skills.clone(),
+        })
+    }
+}
+
+/// Skills to write into one agent's skills folder.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkillWrite {
+    /// The skills folder.
+    pub root: PathBuf,
+    /// Where Claude's plugin manifest goes; none for Codex.
+    pub plugin_manifest: Option<PathBuf>,
+    /// The skills.
+    pub rendered: Rendered,
+}
+
+/// Writes `skills` (and the plugin manifest, when there is one) with [`skills::write_rendered`].
+/// Reads and writes files: on the launch-prep thread, never the host's.
+pub fn write_skills(skills: &SkillWrite) -> Result<RenderReport, ProfileError> {
+    if let Some(manifest) = &skills.plugin_manifest {
+        write::replace_if_differs(manifest, PLUGIN_MANIFEST.as_bytes())?;
+    }
+    skills::write_rendered(&skills.root, &skills.rendered)
+}

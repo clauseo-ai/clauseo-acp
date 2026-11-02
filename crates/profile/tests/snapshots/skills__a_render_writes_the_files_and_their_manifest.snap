@@ -1,0 +1,23 @@
+---
+source: crates/profile/tests/skills.rs
+expression: tree
+---
+== .clauseo-manifest.json ==
+{
+  "skills": {
+    "alpha": {
+      "files": {
+        "SKILL.md": "<skill hash>",
+        "references/a.md": "<ref hash>"
+      },
+      "version": "1"
+    }
+  }
+}
+== alpha/SKILL.md ==
+---
+name: alpha
+---
+body
+== alpha/references/a.md ==
+ref

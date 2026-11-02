@@ -1034,6 +1034,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "clauseo-profile"
+version = "0.1.0"
+dependencies = [
+ "clauseo-process",
+ "clauseo-profile",
+ "clauseo-protocol",
+ "clauseo-settings",
+ "futures",
+ "insta",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.21",
+ "tracing",
+]
+
+[[package]]
 name = "clauseo-protocol"
 version = "0.1.0"
 dependencies = [

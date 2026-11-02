@@ -1,0 +1,22 @@
+---
+source: crates/profile/tests/skills.rs
+expression: plugin
+---
+== .claude-plugin/plugin.json ==
+{
+  "name": "clauseo",
+  "description": "Clauseo's built-in skills."
+}
+== skills/.clauseo-manifest.json ==
+{
+  "skills": {
+    "stetdoc": {
+      "files": {
+        "SKILL.md": "<hash>"
+      },
+      "version": "stetdoc 0.9.1"
+    }
+  }
+}
+== skills/stetdoc/SKILL.md ==
+s
