@@ -19,7 +19,7 @@ const QUESTION = "Summarise the indemnity clause";
 const thread = (id: ThreadId, over: Partial<ThreadSummary> = {}): ThreadSummary => ({
   thread: id,
   matter: THE_MATTER.matter,
-  agent: "claude",
+  agent: "claude-acp",
   status: "idle",
   ...over,
 });

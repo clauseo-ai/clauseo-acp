@@ -4,15 +4,15 @@
 // recently; in a matter with no conversation, the "Start new conversations with" setting (H7's default-agent key, which
 // U11 sets; not on the wire yet, so null today); else DEFAULT_AGENT. A row names its plan only where it differs from the
 // matter's, by the same rule. Agent ids are the settings' keys
-// (`agents.<id>`), which R15 renames from `claude` to `claude-acp`, so nothing here keys on an id but DEFAULT_AGENT,
+// (`agents.<id>`), which R15 renamed from `claude` to `claude-acp`, so nothing here keys on an id but DEFAULT_AGENT,
 // and the plan names go by the agent's kind (R15's `AgentSummary`), read off the id's start only for an agent the list
 // doesn't hold.
 import type { AgentId, AgentKind, ThreadSummary, Timestamp } from "../transport/protocol.ts";
 import type { AgentSummary } from "./host-next.ts";
 
-/** The agent when nothing else says: the e2e settings' `agents.claude` (ui/e2e/app-windows/scratch.ts's AGENT_ID).
- * When `claude-acp` reaches settings, this and AGENT_ID change in one PR. */
-export const DEFAULT_AGENT: AgentId = "claude";
+/** The agent when nothing else says: the settings' `agents.claude-acp` (ui/e2e/app-windows/scratch.ts's AGENT_ID, and
+ * the id R15 named). */
+export const DEFAULT_AGENT: AgentId = "claude-acp";
 
 /** What decides a new conversation's agent, strongest first. */
 export type AgentInputs = {
@@ -61,7 +61,7 @@ const PLAN: Record<AgentKind, string> = { claude: "Claude", codex: "ChatGPT" };
 
 /** An agent's kind: the one the host lists for it (R15's ListAgents), else read off its id (Claude Code's begin
  * `claude`, Codex's `codex`), for an agent the list doesn't hold or lists with no kind (#154 gives a kind to
- * `claude-acp` and `codex-acp` only, so today's `claude` lists without one); none for any other id. */
+ * `claude-acp` and `codex-acp` only, so an older settings file's `claude` lists without one); none for any other id. */
 function kindOf(agent: AgentId, agents: readonly AgentSummary[]): AgentKind | undefined {
   const listed = agents.find((a) => a.id === agent);
   if (listed?.kind !== undefined) return listed.kind;

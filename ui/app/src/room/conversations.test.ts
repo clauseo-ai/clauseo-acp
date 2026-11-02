@@ -106,12 +106,12 @@ test("create with the draft open: create_thread once, and the thread keeps the d
   const key = talks.view().open;
   const made = await talks.create(talks.view().open ?? "");
   expect(made).toBe(MADE);
-  expect(sent("create_thread")).toEqual([{ matter: A.matter, agent: "claude" }]);
+  expect(sent("create_thread")).toEqual([{ matter: A.matter, agent: "claude-acp" }]);
   const view = talks.view();
   expect(view.open).toBe(key);
   expect(view.thread).toBe(MADE);
   expect(view.drafting).toBe(false);
-  expect(view.rows[0]).toMatchObject({ key, thread: MADE, agent: "claude" });
+  expect(view.rows[0]).toMatchObject({ key, thread: MADE, agent: "claude-acp" });
   expect(view.rows).toHaveLength(2);
   // the open conversation now has its thread: create doesn't make another
   expect(await talks.create(talks.view().open ?? "")).toBe(MADE);
@@ -182,8 +182,8 @@ test("the agent create_thread names: the plan chosen, else the one the matter us
     today(() => [
       thread(T1, { agent: "codex" }),
       thread(T2, { agent: "codex" }),
-      thread(T3, { agent: "claude" }),
-      thread(MADE, { agent: "claude", status: "archived" }),
+      thread(T3, { agent: "claude-acp" }),
+      thread(MADE, { agent: "claude-acp", status: "archived" }),
     ]),
   );
   newest.talks.startNew();
