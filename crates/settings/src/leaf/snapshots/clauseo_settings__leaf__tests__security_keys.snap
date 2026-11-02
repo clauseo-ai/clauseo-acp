@@ -1,0 +1,9 @@
+---
+source: crates/settings/src/leaf/tests.rs
+expression: SECURITY_KEYS
+---
+[
+  "mcp.servers",
+  "tools.web_search",
+  "tools.browser"
+]

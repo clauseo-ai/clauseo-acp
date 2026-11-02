@@ -26,6 +26,7 @@ use clauseo_protocol::{
     Timestamp, ToolCallContent, ToolCallEntry, ToolCallStatus, ToolKind, ToolLocation, ViewEntry,
     ViewEpoch, ViewPatch, ViewPatchBody, ViewWindow, WindowFreshness, WindowKind,
 };
+use clauseo_protocol::{ClauseoTool, ToolAvailability, ToolState, ToolsUnavailableReason};
 
 use entries::header_entry;
 use fixtures::{
@@ -294,6 +295,85 @@ fn agent_name_defaults_to_none() {
     fields.remove("agent_name");
     let entry: HeaderEntry = serde_json::from_value(fields.into()).unwrap();
     assert_eq!(entry.agent_name, None);
+}
+
+#[test]
+fn a_header_without_tools_decodes_with_none_and_writes_none() {
+    let header = serde_json::to_value(header()).unwrap();
+    let fields = header["header"].as_object().unwrap().clone();
+    // Empty is left out, so a stored header from before `tools` writes back the same.
+    assert!(!fields.contains_key("tools"));
+    let entry: HeaderEntry = serde_json::from_value(fields.into()).unwrap();
+    assert_eq!(entry.tools, []);
+    assert_eq!(entry, header_entry());
+}
+
+#[test]
+fn tool_states_round_trip_in_a_header_with_every_reason() {
+    let mut entry = header_entry();
+    entry.tools.push(ToolState {
+        tool: ClauseoTool::WebSearch,
+        availability: ToolAvailability::Available,
+    });
+    for reason in ToolsUnavailableReason::ALL
+        .into_iter()
+        .filter(|reason| *reason != ToolsUnavailableReason::Unknown)
+    {
+        entry.tools.push(ToolState {
+            tool: ClauseoTool::Browser,
+            availability: ToolAvailability::Unavailable { reason },
+        });
+    }
+    round_trips(&entry);
+    let json = serde_json::to_value(&entry).unwrap();
+    assert_eq!(
+        json["tools"][0],
+        serde_json::json!({"tool": "web_search", "availability": "available"})
+    );
+    let reasons: Vec<&str> = json["tools"].as_array().unwrap()[1..]
+        .iter()
+        .map(|state| {
+            assert_eq!(state["tool"], "browser");
+            state["availability"]["unavailable"]["reason"]
+                .as_str()
+                .unwrap()
+        })
+        .collect();
+    assert_eq!(
+        reasons,
+        [
+            "off",
+            "locked_off",
+            "no_search_on_this_login",
+            "managed_by_firm",
+            "no_proxy",
+            "browser_not_installed",
+            "too_many_browsers",
+        ]
+    );
+}
+
+#[test]
+fn an_unknown_tool_reason_or_availability_decodes() {
+    let state: ToolState = serde_json::from_str(
+        r#"{"tool": "scanner", "availability": {"unavailable": {"reason": "solar_flare"}}}"#,
+    )
+    .unwrap();
+    assert_eq!(state.tool, ClauseoTool::Unknown);
+    assert_eq!(
+        state.availability,
+        ToolAvailability::Unavailable {
+            reason: ToolsUnavailableReason::Unknown
+        }
+    );
+    let state: ToolState =
+        serde_json::from_str(r#"{"tool": "browser", "availability": {"paused": {"until": 3}}}"#)
+            .unwrap();
+    assert_eq!(state.tool, ClauseoTool::Browser);
+    assert!(matches!(
+        state.availability,
+        ToolAvailability::Unknown { .. }
+    ));
 }
 
 #[test]

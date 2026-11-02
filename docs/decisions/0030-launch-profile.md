@@ -153,7 +153,109 @@ The host thread set the conditions the profile must keep: Claude keeps `settingS
 
 ### The host, settings and protocol (PR-B)
 
-Added by a later R21 PR.
+- **The hook.** `ProfileHook` gains three methods, each defaulting to none, so `NoProfile`
+  is unchanged: `mcp_servers(agent)`, `codex_config(agent)` and `skill_files(agent) ->
+  Option<SkillWrite>`. The host re-exports `clauseo_acp::McpServer`. `host` now depends on
+  `profile`, for `placeholders::fill`, the token constants and `write_skills`. `profile`
+  brings no external crate that `host` did not already have (`dunce`, `futures`,
+  `serde_json`, `sha2`, `thiserror`, `tracing`), so ADR 0024's list does not change.
+- **No `_meta` servers.** `claudeCode.options.mcpServers` from the hook is removed in every
+  control mode (`agent/loads.rs`). Servers come only from `mcp_servers`, after the lawyer's
+  enabled servers.
+- **The browser entry** (`agent/loads/browser.rs`, beside `mcp_servers`):
+  - The host fills `IN_SERVERS` into each argument and each variable's value, one pass per
+    string. `{browser_dir}` is `dunce`-simplified.
+  - The entry is dropped, with the header's reason, in this order:
+    1. `tools.browser` off (`Off`, or `LockedOff`).
+    2. `managed-mcp.json` (`ManagedByFirm`): under Managed no hook server goes at all, the
+       browser included, and `settingSources` stays `["user"]` and strict stays off.
+    3. No slot (`TooManyBrowsers`).
+    4. No proxy port (`NoProxy`).
+    5. No Chrome (`BrowserNotInstalled`).
+  - Until S27's host PR, the Chrome (`with_browser_executable`) and the slots
+    (`with_browser_slots(limit, open)`) are test-support inputs.
+  - `HostConfig::with_egress_proxy(Arc<dyn EgressProxy>)`, with `port_for(SessionKey)`, and
+    `SessionKey { matter, thread, launch }`, are added here as stage C's R17 names them. Tests
+    use `TestProxy`. Production passes none, so production has no browser until stage C.
+- **Per-session folders** (`actor/turn/launch_checks.rs`). The launch-prep thread makes them
+  after the data-folder and `.codex` refusals, and before any `session/*` call:
+  - `run/<session id>/{work,browser}`. The session id is `<thread>-<launch>`, two opaque ids
+    and never user text. `launch` is the launch prep's id, from the agent ids' counter (a
+    deviation: R17 names `Agent::id`).
+  - `agent-state/<matter id>/notes`.
+
+  A folder that cannot be made fails the launch. When the agent ends, the run folder is
+  removed on a launch-prep thread (`remove_run`); the notes folder stays. A start-up sweep
+  removes every `run/` folder a crash left: the host's first launch prep does it, under a lock
+  that every prep takes before making its folders, so no live folder is taken. A relaunch of
+  the same thread also removes that thread's earlier folders.
+- **Instructions.** `{work_folder}` and `{matter_notes}` are filled after `session_meta`, in
+  `_meta.systemPrompt.append`, and at the launch in Codex's `developer_instructions`. An
+  unfillable token, or a folder that is not UTF-8, fails the launch with
+  `agent.launch_failed`, naming the token.
+- **Claude** (`agent/loads/profile.rs`, a `claude-acp` agent only). These are added after the
+  hook and before the guard's entry, so `hooks` and `disableAllHooks: false` still go last:
+  - `disallowedTools` gains `WebSearch` and `WebFetch` while `tools.web_search` is off, and
+    `allowedTools` loses every `WebSearch` and `WebFetch(...)` rule.
+  - While it is on, `allowedTools` gains `WebSearch` (not on Bedrock) and one
+    `WebFetch(domain:<host>)` per host in `host/src/browser/seed_sites.rs`. That file is R21's
+    copy of the hosts S27 names; S27 adds the High Courts.
+  - `additionalDirectories` gains the work folder and the matter's notes folder, after the
+    hook's entries.
+  - `settings` gains `disableSkillShellExecution: true`, and `skipWebFetchPreflight: true` when
+    the merged launch env sets `CLAUDE_CODE_USE_BEDROCK`, `_VERTEX` or `_FOUNDRY` to a value
+    that is not empty and not `0`.
+- **Codex.** The hook's keys, minus any whose first part is reserved, then `web_search`
+  (`live` or `disabled`), the filled `developer_instructions`, and
+  `sandbox_workspace_write.writable_roots`. `agent::codex::config` merges them after
+  `CODEX_OVERRIDES` and before `hooks`, add-only:
+  - Objects merge key by key and arrays gain missing items.
+  - A value already there stays.
+  - A dotted key clashes with its first part.
+
+  So `hooks` stays one `PreToolUse` group, and the home's `config.toml` is untouched.
+- **`DISABLE_MCP_CONFIG_FILTERING=true`** does not change the browser entry (codex-acp 2.2.2,
+  `dist/index.js`). The variable is read once, at `:35820`, into
+  `shouldDeduplicateMcpConflicts()` (`:35821`), which `createSessionConfig` (`:35437`) uses at
+  `:35459-35460`:
+  - With filtering on, a requested server whose name is already in any Codex config layer is
+    dropped (`:35465-35467`, names from `getConfigMcpServerNames`, `:35489-35498`).
+  - With it off, the requested entry wins instead.
+
+  Clauseo's home `config.toml` defines no `mcp_servers`, so `browser` is sent either way, as
+  `mcp_servers.browser` with `command`, `args` and `env` only (`createMcpSeverConfig`,
+  `:35519-35534`). codex-acp sends no per-server approval key, so Codex asks before each
+  browser tool call that is not read-only.
+- **Skills.** At the prep, for an agent with a kind, the host writes `skill_files(agent)` with
+  `write_skills`. The desktop adapter (PR-C) hands Claude's plugin skills to Codex agents too,
+  for R22's (b′) index. A write failure is a warning, not a failed launch.
+- **PATH.** `HostConfig::with_agent_path_prepend` puts stetdoc's folder first on the merged
+  `PATH` (`agent/spec.rs`, `prepend_path`), under the name the merge kept. It shadows nothing
+  the host relies on: the guard's hooks run the desktop executable by absolute path.
+- **Settings** (`crates/settings`). The `tools` section holds `web_search` (default `true`)
+  and `browser` (`true` on macOS only; off on Windows until G17 passes). Both are security
+  keys:
+  - `SECURITY_KEYS` holds `mcp.servers`, `tools.web_search` and `tools.browser`.
+  - An unreadable policy source, or a policy value of the wrong type, locks each through
+    `refuse`, separate from `reset`: `false` for the tools keys, empty for `mcp.servers`. The
+    warning says "locked off". This departs from 0009's "locks at its default" for these two
+    keys.
+  - `mcp.servers.browser` is a reserved name, dropped with a warning from the user's file and
+    from policy; `clauseo` loads like any other.
+- **Header tools** (`protocol`: `HeaderEntry::tools`, `ToolState`, `ClauseoTool`,
+  `ToolAvailability`, `ToolsUnavailableReason`, open enums, left out when empty):
+  - The host composes them at each session start, and never logs them. Per the host thread,
+    they are not in the reducer's state: `actor/header_tools.rs` keeps each thread's last
+    value in memory (as `folder_state` is kept for app rows). The thread's `StreamView` lays
+    it over every header upsert and every `Reset` window, so a new subscriber's first frame
+    carries it, and a relaunch replaces it.
+  - One entry point, `show`, so the shape can move. 0002 now says a header may carry
+    host-composed, unlogged fields.
+  - Web search appears for an agent with a kind; the browser appears when the hook offers one.
+- **Busy files touched.** `actor/turn/agents.rs`, three lines: the Codex keys into
+  `codex::launch_env`, the `PATH` folder into `launch_spec`, and `remove_run` in `on_ended`.
+  `actor/startup.rs`, three fields. `actor/turn/session.rs`: `session_loads` now calls
+  `turn/profile_loads.rs`.
 
 ### The desktop adapter (PR-C)
 

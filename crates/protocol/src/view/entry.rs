@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{ContextUsage, ThreadStatus};
+use super::{ContextUsage, ThreadStatus, ToolState};
 use crate::{
     AgentId, AvailableCommand, CheckpointId, CheckpointKind, CompactString, CompactionStatus,
     ConfigOption, ContentBlock, Deliverable, Delivery, ElicitationId, ElicitationOutcome,
@@ -50,6 +50,11 @@ pub struct HeaderEntry {
     /// first session attaches, then from that session's capabilities. Missing reads as `false`.
     #[serde(default)]
     pub steer_joins_turn: bool,
+    /// Clauseo's own tools and whether the agent has each in this session. Filled by the host at
+    /// each session start, as `queue_held` is. Missing reads as empty, and empty is left out, so
+    /// a header written before the field still decodes and compares equal.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tools: Vec<ToolState>,
     /// The agent's current mode, if it reported one.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     #[cfg_attr(feature = "specta", specta(type = Option<String>))]

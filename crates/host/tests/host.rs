@@ -89,6 +89,12 @@ mod papers;
 #[path = "host/permissions.rs"]
 mod permissions;
 #[cfg(test)]
+#[path = "host/profile.rs"]
+mod profile;
+#[cfg(test)]
+#[path = "host/profile_rig.rs"]
+mod profile_rig;
+#[cfg(test)]
 #[path = "host/queue.rs"]
 mod queue;
 #[cfg(test)]
@@ -124,6 +130,9 @@ mod subscribe;
 #[cfg(all(test, unix))]
 #[path = "host/symlink.rs"]
 mod symlink;
+#[cfg(test)]
+#[path = "host/tools.rs"]
+mod tools;
 #[cfg(test)]
 #[path = "host/turn.rs"]
 mod turn;

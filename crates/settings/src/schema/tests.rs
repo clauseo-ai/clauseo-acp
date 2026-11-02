@@ -1,4 +1,4 @@
-use super::{FontSize, Language, SECTIONS, Settings, json_schema};
+use super::{FontSize, Language, SECTIONS, Settings, ToolsSettings, json_schema};
 use crate::leaf::KEYS;
 use crate::policy::Kind;
 use serde_json::Value;
@@ -13,7 +13,12 @@ fn schema_snapshot() {
         omit_expression => true,
         sort_maps => true,
     }, {
-        insta::assert_json_snapshot!("settings_schema", json_schema());
+        insta::assert_json_snapshot!("settings_schema", json_schema(), {
+            // The `tools.browser` default differs by OS; the `the_browser_is_..._by_default_*`
+            // tests below pin it.
+            ".properties.tools.default.browser" => "[per OS]",
+            r#"["$defs"].ToolsSettings.properties.browser.default"# => "[per OS]",
+        });
     });
 }
 
@@ -58,6 +63,7 @@ fn the_keys_and_their_kinds_are_the_schemas() {
         .iter()
         .map(|(key, kind)| {
             let kind = match kind {
+                Kind::Boolean => "boolean",
                 Kind::Number => "integer",
                 Kind::String => "string",
                 Kind::Object => "object",
@@ -125,4 +131,29 @@ fn each_setting_has_its_default() {
             "motion": "system",
         })
     );
+}
+
+#[test]
+fn web_search_is_on_by_default() {
+    assert!(ToolsSettings::default().web_search);
+    assert_eq!(Settings::default().tools, ToolsSettings::default());
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn the_browser_is_on_by_default_on_macos() {
+    assert!(ToolsSettings::default().browser);
+}
+
+// Off on Windows until G17 passes (R21).
+#[cfg(windows)]
+#[test]
+fn the_browser_is_off_by_default_on_windows() {
+    assert!(!ToolsSettings::default().browser);
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+#[test]
+fn the_browser_is_off_by_default_elsewhere() {
+    assert!(!ToolsSettings::default().browser);
 }

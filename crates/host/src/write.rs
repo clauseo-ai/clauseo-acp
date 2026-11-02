@@ -28,6 +28,25 @@ pub(crate) fn create_private_dir(path: &Path) -> io::Result<()> {
     builder.create(path)
 }
 
+/// Creates `path` and every missing parent, each new one private to the user on Unix (0700):
+/// a session's run folder and a matter's notes folder (`actor/turn/launch_checks.rs`).
+pub(crate) fn create_private_dir_all(path: &Path) -> io::Result<()> {
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    builder.create(path)
+}
+
+/// Removes the folder `path` and everything under it; a missing folder is fine. A link inside
+/// is removed, never followed (`std::fs::remove_dir_all`): a session's run folder.
+pub(crate) fn remove_tree(path: &Path) -> io::Result<()> {
+    match std::fs::remove_dir_all(path) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        other => other,
+    }
+}
+
 /// Sets the folder `path` to 0700 when it is not already (a link is left as it is).
 #[cfg(unix)]
 pub(crate) fn make_private_dir(path: &Path) -> io::Result<()> {

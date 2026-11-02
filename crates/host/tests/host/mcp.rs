@@ -231,3 +231,77 @@ fn the_hooks_launch_variables_and_the_connector_switch_reach_the_agent() {
         )]
     );
 }
+
+/// R21's done-when "Hook servers": the lawyer's enabled servers first, in name order, then the
+/// hook's `browser` with its per-session values, on `session/new` and then `session/load`, for a
+/// `claude-acp` and a `codex-acp` agent (both `fake_agent`). The new session plays the
+/// checked-in `tools-mcp-servers`; the load and the Codex session check the filled folder and
+/// session id exactly.
+#[test]
+fn hook_servers_follow_the_lawyers_with_their_per_session_values() {
+    use crate::profile_rig::{
+        CLAUDE, CODEX, Hook, Wired, agent_lines, agents, browser_server, codex_lines,
+        filled_browser, settings, template, turn,
+    };
+    let dir = Dir::new("mcp_hook_servers", &[]);
+    let bin = dir.folder("bin", &[]);
+    let mcp = json!({"tools": {"browser": true}, "mcp": {"servers": {
+        "alpha": {"command": command(&bin, "alpha"), "args": ["--stdio"],
+            "env": {"REGION": "uk"}, "enabled": true},
+        "beta": {"command": command(&bin, "beta")},
+        "gamma": {"command": command(&bin, "gamma"), "enabled": true},
+    }}});
+    let lawyers = json!([
+        {"name": "alpha", "command": "{{any}}", "args": ["--stdio"],
+            "env": [{"name": "REGION", "value": "uk"}]},
+        {"name": "gamma", "command": "{{any}}", "args": [], "env": []},
+    ]);
+    let mut servers = lawyers.as_array().cloned().unwrap();
+    servers.push(filled_browser());
+    let codex = template(
+        &dir,
+        "hs-codex",
+        &codex_lines("hs-codex", &json!({"mcpServers": servers})),
+    );
+    let claude = crate::support::Scenario::Local("tools-mcp-servers");
+    settings(
+        &dir,
+        agents(&[(CLAUDE, &claude, json!({})), (CODEX, &codex, json!({}))]),
+        mcp.clone(),
+    );
+    let hook = Hook {
+        servers: vec![browser_server()],
+        ..Hook::default()
+    };
+    let wire = |config: clauseo_host::HostConfig, hook: Hook| {
+        config
+            .with_profile_hook(Box::new(hook))
+            .with_egress_proxy(Arc::new(clauseo_host::TestProxy(8123)))
+            .with_browser_executable(Some(std::path::PathBuf::from("/chrome")))
+    };
+    let launcher = Wired::new(&dir);
+    let first = hook.clone();
+    let host = dir.start_launching(0, Arc::<Wired>::clone(&launcher), |config| {
+        wire(config, first)
+    });
+    let matter = host.create_matter("m", &dir.folder("m", &[]));
+    let thread = host.create_thread(matter, CLAUDE);
+    turn(&host, thread);
+    turn(&host, host.create_thread(matter, CODEX));
+    host.shutdown();
+
+    let load = template(
+        &dir,
+        "hs-load",
+        &agent_lines(
+            "hs-load",
+            "session/load",
+            &json!({"sessionId": "sess-1", "mcpServers": servers}),
+            &[],
+        ),
+    );
+    settings(&dir, agents(&[(CLAUDE, &load, json!({}))]), mcp);
+    let host = dir.start_launching(1, launcher, |config| wire(config, hook));
+    turn(&host, thread);
+    host.shutdown();
+}

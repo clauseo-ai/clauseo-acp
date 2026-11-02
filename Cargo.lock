@@ -961,6 +961,7 @@ dependencies = [
  "clauseo-limits",
  "clauseo-matters",
  "clauseo-process",
+ "clauseo-profile",
  "clauseo-protocol",
  "clauseo-reducer",
  "clauseo-settings",

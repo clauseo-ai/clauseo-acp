@@ -281,11 +281,14 @@ fn an_unreadable_policy_source_locks_the_list_empty() {
     assert!(effective.policy().is_absent());
     assert!(matches!(
         effective.warnings(),
-        [w] if w.origin == Origin::Store { name: "broken".to_owned() }
+        [w, ..] if w.origin == Origin::Store { name: "broken".to_owned() }
             && matches!(&w.kind, WarningKind::InvalidValue { key, .. } if key == "mcp.servers")
     ));
-    // Other keys stay the user's: only security-relevant keys lock.
-    assert_eq!(effective.locked().collect::<Vec<_>>(), ["mcp.servers"]);
+    // Other keys stay the user's: only security keys lock (the tools keys: `tools_tests.rs`).
+    assert_eq!(
+        effective.locked().collect::<Vec<_>>(),
+        ["mcp.servers", "tools.browser", "tools.web_search"]
+    );
 }
 
 #[test]
@@ -293,7 +296,15 @@ fn an_unreadable_source_after_a_list_leaves_the_stronger_list() {
     let firm = policy("firm", servers_json(&[("firm", true)]));
     let effective = Effective::load(&locations(), &MemFiles::default(), &[&firm, &unreadable()]);
     assert_eq!(enabled(&effective), ["firm"]);
-    assert_eq!(effective.warnings(), []);
+    // Only the keys the stronger source left unset (both tools keys) lock off with a warning.
+    assert!(
+        effective.warnings().iter().all(|w| !matches!(
+            &w.kind,
+            WarningKind::InvalidValue { key, .. } if key == "mcp.servers"
+        )),
+        "{:?}",
+        effective.warnings()
+    );
     // A weaker readable list does not win over the stronger unreadable source.
     let weak = policy("weak", servers_json(&[("weak", true)]));
     let effective = Effective::load(&locations(), &MemFiles::default(), &[&unreadable(), &weak]);

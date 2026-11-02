@@ -142,7 +142,7 @@ fn finish_load(actor: &mut Actor, stream: StreamId, mut state: StreamState, tail
         .ids
         .mint(actor.clock.now().wall)
         .and_then(|epoch| StreamView::new(stream, epoch, actor.window_cap));
-    let view = match built {
+    let mut view = match built {
         Ok(view) => view,
         Err(error) => {
             let failure = LoadFailure::Internal(error.to_string());
@@ -152,6 +152,7 @@ fn finish_load(actor: &mut Actor, stream: StreamId, mut state: StreamState, tail
             return;
         }
     };
+    super::header_tools::seed(actor, stream, &mut view);
     let mut sent = SentView::rebuild(stream, tail);
     let since_snapshot = u64::try_from(tail.len()).unwrap_or(u64::MAX);
     // Commits that returned during the load: the read may already hold the first of them.

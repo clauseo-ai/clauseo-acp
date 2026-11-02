@@ -5,11 +5,13 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use clauseo_acp::McpServer;
 use clauseo_limits::ReadLimits;
 use clauseo_process::Launcher;
-use clauseo_protocol::AgentId;
+use clauseo_profile::SkillWrite;
+use clauseo_protocol::{AgentId, MatterId, ThreadId};
 use clauseo_settings::{Effective, PlatformDirs as _, SystemDirs};
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use crate::clock::{Clock, SystemClock};
 use crate::ids::{IdSource, RandomV7};
@@ -17,16 +19,114 @@ use crate::ids::{IdSource, RandomV7};
 use crate::handle::SUBSCRIPTION_CAPACITY;
 use crate::window::PATCH_WINDOW_BYTES;
 
-/// What a firm's profile adds to an agent's session and launch. The host calls it at each
-/// session start: `session_meta` becomes the `_meta` of `session/new` and `session/load`, and
-/// `launch_env` fills the hook slot of the agent's launch. The host then sets the keys that keep
-/// out MCP servers the lawyer did not turn on, over whatever the hook returned
-/// (`agent/loads.rs` lists them).
+/// What Clauseo's launch profile adds to an agent's session and launch (decision record 0030).
+/// The host calls it at each launch and session start, with only the agent's id, then fills the
+/// per-session placeholders (`clauseo_profile::placeholders`) and sets its own keys over what
+/// the hook returned (`agent/loads.rs` lists them):
+///
+/// - `session_meta` becomes the `_meta` of `session/new` and `session/load`. A
+///   `claudeCode.options.mcpServers` in it is removed in every MCP control mode: servers come
+///   only from [`ProfileHook::mcp_servers`].
+/// - `launch_env` fills the hook slot of the agent's launch.
+/// - `mcp_servers` go after the lawyer's enabled servers. The host fills each `browser`
+///   entry's tokens per session, or drops the entry (no proxy, no browser, too many browsers,
+///   `tools.browser` off, or the firm's `managed-mcp.json`).
+/// - `codex_config` keys go into a Codex agent's `CODEX_CONFIG`, added only where R15's keys
+///   and the host's own (`web_search`, `hooks`) leave room.
+/// - `skill_files` are written on the launch-prep thread before the agent starts.
 pub trait ProfileHook: Send {
     /// The `_meta` object for `session/new` and `session/load` with `agent`, or `None` for none.
-    fn session_meta(&self, agent: &AgentId) -> Option<serde_json::Map<String, Value>>;
+    fn session_meta(&self, agent: &AgentId) -> Option<Map<String, Value>>;
     /// Variables set on top of the agent's own when it launches.
     fn launch_env(&self, agent: &AgentId) -> BTreeMap<OsString, OsString>;
+    /// MCP servers for `agent`'s sessions, after the lawyer's (default: none). Strings may hold
+    /// `clauseo_profile::placeholders::IN_SERVERS` tokens.
+    fn mcp_servers(&self, _agent: &AgentId) -> Vec<McpServer> {
+        Vec::new()
+    }
+    /// Keys for a Codex agent's `CODEX_CONFIG`, as nested objects (default: none). Strings may
+    /// hold `clauseo_profile::placeholders::IN_INSTRUCTIONS` tokens in `developer_instructions`.
+    fn codex_config(&self, _agent: &AgentId) -> Map<String, Value> {
+        Map::new()
+    }
+    /// Skill files to write before `agent` starts (default: none). The desktop adapter hands
+    /// Claude's plugin skills for a Codex agent too, which Codex reads through the index in its
+    /// instructions. A write failure is a warning, never a failed launch.
+    fn skill_files(&self, _agent: &AgentId) -> Option<SkillWrite> {
+        None
+    }
+}
+
+/// One agent session, as the egress proxy knows it: the matter, the thread, and the launch (the
+/// launch prep's id, from the same counter as the agent's).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SessionKey {
+    /// The thread's matter.
+    pub matter: MatterId,
+    /// The thread.
+    pub thread: ThreadId,
+    /// The launch.
+    pub launch: u64,
+}
+
+impl SessionKey {
+    /// The session's id, `<thread>-<launch>`: the name of its `run/` folder and agent-browser's
+    /// session name.
+    pub fn id(&self) -> String {
+        format!("{}-{}", self.thread, self.launch)
+    }
+}
+
+/// The egress proxy, as the host asks it (stage C's R17 implements it). Until it exists,
+/// production passes none and the `browser` entry is left out (`NoProxy`).
+pub trait EgressProxy: Send + Sync {
+    /// The port of `session`'s browser listener, or none.
+    fn port_for(&self, session: SessionKey) -> Option<u16>;
+}
+
+/// A proxy stand-in for tests: the same port for every session.
+#[cfg(feature = "test-support")]
+#[derive(Debug, Clone, Copy)]
+pub struct TestProxy(pub u16);
+
+#[cfg(feature = "test-support")]
+impl EgressProxy for TestProxy {
+    fn port_for(&self, _session: SessionKey) -> Option<u16> {
+        Some(self.0)
+    }
+}
+
+/// What the browser entry and the agents' `PATH` need beyond the hook: the proxy, stetdoc's
+/// folder, and (until S27's host PR) the Chrome and the slot count as plain inputs.
+#[derive(Clone)]
+pub(crate) struct LaunchWiring {
+    pub(crate) proxy: Option<Arc<dyn EgressProxy>>,
+    pub(crate) path_prepend: Option<PathBuf>,
+    pub(crate) browser_executable: Option<PathBuf>,
+    /// Browsers allowed at once, and browsers open now.
+    pub(crate) browser_slots: (usize, usize),
+}
+
+impl Default for LaunchWiring {
+    fn default() -> Self {
+        Self {
+            proxy: None,
+            path_prepend: None,
+            browser_executable: None,
+            browser_slots: (usize::MAX, 0),
+        }
+    }
+}
+
+impl std::fmt::Debug for LaunchWiring {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LaunchWiring")
+            .field("proxy", &self.proxy.is_some())
+            .field("path_prepend", &self.path_prepend)
+            .field("browser_executable", &self.browser_executable)
+            .field("browser_slots", &self.browser_slots)
+            .finish()
+    }
 }
 
 /// No profile: no `_meta`, no extra variables.
@@ -34,7 +134,7 @@ pub trait ProfileHook: Send {
 pub struct NoProfile;
 
 impl ProfileHook for NoProfile {
-    fn session_meta(&self, _agent: &AgentId) -> Option<serde_json::Map<String, Value>> {
+    fn session_meta(&self, _agent: &AgentId) -> Option<Map<String, Value>> {
         None
     }
 
@@ -59,6 +159,7 @@ pub struct HostConfig {
     codex_hooks: Option<serde_json::Map<String, serde_json::Value>>,
     pre_write_guard: Option<PathBuf>,
     limits_reader: Option<Arc<dyn ReadLimits>>,
+    wiring: LaunchWiring,
 }
 
 /// A `HostConfig` taken apart by the host thread.
@@ -77,6 +178,7 @@ pub(crate) struct ConfigParts {
     pub(crate) pre_write_guard: Option<PathBuf>,
     /// The limits reader a caller set; `None` builds the default at start-up.
     pub(crate) limits_reader: Option<Arc<dyn ReadLimits>>,
+    pub(crate) wiring: LaunchWiring,
 }
 
 impl HostConfig {
@@ -97,6 +199,7 @@ impl HostConfig {
             codex_hooks: None,
             pre_write_guard: None,
             limits_reader: None,
+            wiring: LaunchWiring::default(),
         }
     }
 
@@ -141,6 +244,39 @@ impl HostConfig {
     /// `agent/loads.rs` builds the hook entry.
     pub fn with_pre_write_guard(mut self, program: PathBuf) -> Self {
         self.pre_write_guard = Some(program);
+        self
+    }
+
+    /// The egress proxy that gives each session's browser its port (default: none, so no session
+    /// gets the `browser` server and the header shows it unavailable with `NoProxy`).
+    pub fn with_egress_proxy(mut self, proxy: Arc<dyn EgressProxy>) -> Self {
+        self.wiring.proxy = Some(proxy);
+        self
+    }
+
+    /// A folder to put first on every agent's `PATH` (default: none): stetdoc's own folder,
+    /// `clauseo_profile::ClauseoProfile::path_prepend`, which holds no other program. It goes
+    /// before the `PATH` the agent would otherwise get (the hook's, else a settings env `PATH`,
+    /// else the inherited one). It shadows nothing the host relies on: the pre-write guard's
+    /// hooks run the desktop executable by its absolute path, never through `PATH`.
+    pub fn with_agent_path_prepend(mut self, folder: PathBuf) -> Self {
+        self.wiring.path_prepend = Some(folder);
+        self
+    }
+
+    /// The Chrome the browser entry runs (`{browser_executable}`), a stand-in for S27's choice
+    /// (default: none, `BrowserNotInstalled`).
+    #[cfg(feature = "test-support")]
+    pub fn with_browser_executable(mut self, chrome: Option<PathBuf>) -> Self {
+        self.wiring.browser_executable = chrome;
+        self
+    }
+
+    /// Browsers allowed at once and browsers open now, a stand-in for S27's slot count (default:
+    /// no limit). With `open >= limit` the browser is `TooManyBrowsers`.
+    #[cfg(feature = "test-support")]
+    pub fn with_browser_slots(mut self, limit: usize, open: usize) -> Self {
+        self.wiring.browser_slots = (limit, open);
         self
     }
 
@@ -204,6 +340,7 @@ impl HostConfig {
             codex_hooks: self.codex_hooks,
             pre_write_guard: self.pre_write_guard,
             limits_reader: self.limits_reader,
+            wiring: self.wiring,
         }
     }
 }

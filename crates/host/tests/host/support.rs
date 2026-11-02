@@ -67,8 +67,8 @@ pub(crate) enum Scenario {
     Bundled(&'static str),
     /// `crates/host/tests/scenarios/<name>.jsonl`.
     Local(&'static str),
-    /// A scenario file the test wrote (only the Unix symlink test writes one).
-    #[cfg(unix)]
+    /// A scenario file the test wrote (the Unix symlink test, and the launch profile's tests,
+    /// whose launcher fills in each session's folders).
     Written(PathBuf),
 }
 
@@ -77,7 +77,6 @@ impl Scenario {
     pub(crate) fn arg(&self) -> String {
         match self {
             Self::Bundled(name) => (*name).to_owned(),
-            #[cfg(unix)]
             Self::Written(path) => path.display().to_string(),
             Self::Local(name) => Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("tests")

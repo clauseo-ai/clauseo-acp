@@ -1,5 +1,6 @@
 ---
 source: crates/settings/src/schema/tests.rs
+assertion_line: 16
 ---
 {
   "$defs": {
@@ -191,6 +192,22 @@ source: crates/settings/src/schema/tests.rs
         }
       ]
     },
+    "ToolsSettings": {
+      "description": "The `tools` section: Clauseo's own tools. Both keys are security keys: a policy source that\ncannot be read, or a policy value that does not type, locks each `false`.",
+      "properties": {
+        "browser": {
+          "default": "[per OS]",
+          "description": "Whether the agent gets Clauseo's browser. On by default on macOS; off elsewhere, and on\nWindows until G17 passes.",
+          "type": "boolean"
+        },
+        "web_search": {
+          "default": true,
+          "description": "Whether the agent may search the web and read web pages. On by default.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "UiSettings": {
       "description": "The `ui` section. Design may change these values before M4 without a decision record.",
       "properties": {
@@ -252,6 +269,14 @@ source: crates/settings/src/schema/tests.rs
         "servers": {}
       },
       "description": "The MCP servers a lawyer can turn on for their agents' sessions."
+    },
+    "tools": {
+      "$ref": "#/$defs/ToolsSettings",
+      "default": {
+        "browser": "[per OS]",
+        "web_search": true
+      },
+      "description": "Clauseo's own tools an agent may use. Read at start-up; a change applies after a restart."
     },
     "ui": {
       "$ref": "#/$defs/UiSettings",

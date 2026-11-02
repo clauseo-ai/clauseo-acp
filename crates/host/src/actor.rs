@@ -40,6 +40,7 @@ mod app;
 mod app_lists;
 mod commands;
 mod folder_state;
+pub(crate) mod header_tools;
 pub(crate) mod input;
 pub(crate) mod limits;
 mod locate;
@@ -100,6 +101,12 @@ pub(crate) struct Actor {
     pub(crate) codex_hooks: Option<serde_json::Map<String, serde_json::Value>>,
     /// The program the pre-write guard hook runs, if any (`HostConfig::with_pre_write_guard`).
     pub(crate) pre_write_guard: Option<std::path::PathBuf>,
+    /// The proxy, stetdoc's folder and the browser inputs (`HostConfig::with_egress_proxy`).
+    pub(crate) wiring: crate::config::LaunchWiring,
+    /// The tools each thread's header shows, laid over the header unlogged.
+    pub(crate) header_tools: header_tools::HeaderTools,
+    /// The start-up sweep of leftover `run/` folders, done by the first launch's prep.
+    pub(crate) run_sweep: turn::RunSweep,
     pub(crate) refused_folders: Vec<PathBuf>,
     /// The lawyer's home folder as configured, for `matter.folder_is_home` (the refused list
     /// names it the same way).

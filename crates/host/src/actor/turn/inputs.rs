@@ -20,7 +20,7 @@ pub(crate) enum TurnInput {
     Prepared {
         thread: ThreadId,
         id: u64,
-        result: Result<super::launch_checks::Prepared, crate::error::Error>,
+        result: Result<Box<super::launch_checks::Prepared>, crate::error::Error>,
     },
     /// A whole-log read of `thread`'s stream for `why`.
     Log {

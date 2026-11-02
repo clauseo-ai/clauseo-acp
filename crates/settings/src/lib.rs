@@ -31,11 +31,15 @@
 //! - [`Effective::load`] never fails. A missing file is normal; a file or value that cannot be
 //!   read is a [`Warning`] (with path, line and column where there is one) and defaults stand in.
 //!   A policy source that cannot be read is dropped whole and listed in [`PolicyStatus`], and
-//!   locks each security-relevant key (today only `mcp.servers`) at its default.
+//!   locks each security key (`mcp.servers`, `tools.web_search`, `tools.browser`) off: the
+//!   list empty, each tool `false`.
 //! - Policy wins: a policy value replaces the user's for its key, and locks it. An agent's
 //!   policy entry replaces the user's whole entry for that id. Earlier sources win over later.
 //! - Policy fails closed per key: a policy value for a known key that does not type is a
-//!   warning and still locks the key, at its default (an agent: with no entry).
+//!   warning and still locks the key, at its default (an agent: with no entry), or off for a
+//!   security key.
+//! - The MCP server name `browser` ([`RESERVED_MCP_SERVER`]) is Clauseo's own: an entry of that
+//!   name in `settings.json` or a policy is left out with a warning; the rest of the list loads.
 //! - A key that `settings.json` or `policy.json` sets twice keeps its last value, valid or not:
 //!   a last value that does not type puts the key back at its default, with a warning.
 //! - A key this version does not know is a warning, never an error, so a firm's profile for a
@@ -82,6 +86,7 @@ pub use dirs::refused_folders;
 pub use effective::Effective;
 pub use error::Error;
 pub use files::{Files, SystemFiles};
+pub use leaf::RESERVED_MCP_SERVER;
 pub use locations::{
     DATA_DIR_VAR, Env, IDENTIFIER, KnownFolder, Locations, PlatformDirs, SETTINGS_FILE,
 };
@@ -91,7 +96,7 @@ pub use policy::{
 };
 pub use schema::{
     AgentLaunch, Density, FontSize, Language, Lite, MattersSettings, McpServerLaunch, McpSettings,
-    Motion, Settings, Theme, UiSettings, json_schema,
+    Motion, Settings, Theme, ToolsSettings, UiSettings, json_schema,
 };
 pub use system::{SystemDirs, SystemEnv};
 pub use ui::UiPatch;

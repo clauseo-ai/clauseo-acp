@@ -20,6 +20,7 @@ mod inputs;
 mod known;
 mod launch_checks;
 mod out;
+mod profile_loads;
 mod prompt;
 mod queue;
 mod reconcile;
@@ -53,6 +54,7 @@ pub(crate) use close::{closing, log_limit_stop};
 pub(crate) use end::limits_read;
 pub(crate) use failure::blocked as stream_blocked;
 pub(crate) use inputs::{AgentReply, LogFor, TurnInput};
+pub(crate) use launch_checks::RunSweep;
 pub(crate) use out::flush_text;
 pub(crate) use queue::queue_held;
 pub(crate) use restore::{
@@ -74,6 +76,8 @@ pub(crate) struct TurnState {
     agent: Option<Box<agents::Agent>>,
     /// A launch whose folder checks run off the actor, before its agent exists.
     preparing: Option<Box<launch_checks::Preparing>>,
+    /// The folders of the launched agent's session, from its launch until it ends.
+    run: Option<launch_checks::RunFolders>,
     /// The thread's current turn: accepted and not ended.
     current: Option<Box<Current>>,
     /// Text not durable yet.

@@ -191,7 +191,12 @@ fn codex_launch_variables_beat_the_settings_env() {
         var(codex, "DISABLE_MCP_CONFIG_FILTERING").as_deref(),
         Some("true")
     );
-    let config: Value = serde_json::from_str(&var(codex, "CODEX_CONFIG").unwrap()).unwrap();
+    let mut config: Value = serde_json::from_str(&var(codex, "CODEX_CONFIG").unwrap()).unwrap();
+    // R21's keys go beside R15's (decision record 0030); `tests/host/profile.rs` checks them.
+    let added = config.as_object_mut().unwrap();
+    assert_eq!(added.remove("web_search"), Some(json!("live")));
+    let roots = added.remove("sandbox_workspace_write").unwrap();
+    assert_eq!(roots["writable_roots"].as_array().map(Vec::len), Some(2));
     assert_eq!(
         config,
         json!({

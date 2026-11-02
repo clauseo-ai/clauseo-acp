@@ -212,7 +212,7 @@ fn launch(actor: &Actor, thread: ThreadId, prepared: Prepared) -> Result<Launche
     let (forced, codex) = if let Some(prepared) = prepared.codex {
         let hooks = codex_hooks(actor);
         let guard = hooks.is_some();
-        let forced = agent::codex::launch_env(&prepared.home, &settings.env, hooks);
+        let forced = agent::codex::launch_env(&prepared.home, &settings.env, prepared.keys, hooks);
         let codex = CodexAgent {
             folder: prepared.folder,
             guard,
@@ -235,6 +235,7 @@ fn launch(actor: &Actor, thread: ThreadId, prepared: Prepared) -> Result<Launche
         dropped,
         inherited,
         agent::session_folder(&folder),
+        actor.wiring.path_prepend.as_deref(),
     )?;
     let post = actor.post.clone();
     let post: Rc<dyn Fn(agent::AgentInput)> = Rc::new(move |input| {
@@ -463,6 +464,7 @@ pub(super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: Ended) {
     };
     // Its pending questions went with it.
     super::super::limits::asking_changed(actor);
+    launch_checks::remove_run(actor, thread);
     let Agent {
         session,
         waiting,

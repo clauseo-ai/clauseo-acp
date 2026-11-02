@@ -20,7 +20,7 @@ fn object(value: &Value) -> Map<String, Value> {
 
 #[test]
 fn with_no_hook_the_meta_is_the_switches() {
-    let meta = session_meta(None, McpControl::Clauseo, None);
+    let meta = session_meta(None, McpControl::Clauseo, None, None);
     assert_eq!(
         Value::Object(meta),
         json!({"claudeCode": {"options": {
@@ -47,7 +47,7 @@ fn the_switches_win_over_the_hook_and_every_other_hook_key_stays() {
             },
         },
     }));
-    let meta = session_meta(Some(hook), McpControl::Clauseo, None);
+    let meta = session_meta(Some(hook), McpControl::Clauseo, None, None);
     assert_eq!(
         Value::Object(meta),
         json!({
@@ -73,7 +73,12 @@ fn a_hook_value_that_is_not_an_object_is_replaced() {
         json!({"claudeCode": {"options": []}}),
         json!({"claudeCode": {"options": {"env": null}}}),
     ] {
-        let meta = Value::Object(session_meta(Some(object(&hook)), McpControl::Clauseo, None));
+        let meta = Value::Object(session_meta(
+            Some(object(&hook)),
+            McpControl::Clauseo,
+            None,
+            None,
+        ));
         let options = &meta["claudeCode"]["options"];
         assert_eq!(options["strictMcpConfig"], true, "{hook}");
         assert_eq!(options["env"][CLAUDE_AI_MCP_VAR], "false", "{hook}");
@@ -114,7 +119,7 @@ fn the_guard_entry_is_appended_after_the_hooks_entries() {
         "disableAllHooks": true,
         "hooks": {"PreToolUse": [firm], "Stop": []},
     }}}}));
-    let meta = Value::Object(session_meta(Some(hook), McpControl::Clauseo, guard));
+    let meta = Value::Object(session_meta(Some(hook), McpControl::Clauseo, guard, None));
     assert_eq!(
         meta["claudeCode"]["options"]["settings"],
         json!({
@@ -132,6 +137,7 @@ fn the_guard_entry_is_appended_after_the_hooks_entries() {
             Some(object(&hook)),
             McpControl::Managed,
             guard,
+            None,
         ));
         assert_eq!(
             meta["claudeCode"]["options"]["settings"],
@@ -139,7 +145,7 @@ fn the_guard_entry_is_appended_after_the_hooks_entries() {
             "{hook}"
         );
     }
-    let meta = Value::Object(session_meta(None, McpControl::Clauseo, None));
+    let meta = Value::Object(session_meta(None, McpControl::Clauseo, None, None));
     assert_eq!(meta["claudeCode"]["options"].get("settings"), None);
 }
 
@@ -157,14 +163,14 @@ fn a_path_that_is_not_utf8_gets_no_entry() {
         program: odd,
         matter: plain,
     });
-    let meta = Value::Object(session_meta(None, McpControl::Clauseo, guard));
+    let meta = Value::Object(session_meta(None, McpControl::Clauseo, guard, None));
     assert_eq!(meta["claudeCode"]["options"].get("settings"), None);
 }
 
 #[test]
 fn under_managed_mcp_strict_is_off_even_when_the_hook_asks() {
     let hook = object(&json!({"claudeCode": {"options": {"strictMcpConfig": true}}}));
-    let meta = Value::Object(session_meta(Some(hook), McpControl::Managed, None));
+    let meta = Value::Object(session_meta(Some(hook), McpControl::Managed, None, None));
     let options = &meta["claudeCode"]["options"];
     assert_eq!(options["strictMcpConfig"], false);
     assert_eq!(
@@ -185,7 +191,7 @@ fn the_hooks_setting_sources_flag_is_taken_out_of_extra_args() {
         "debug": null,
     }}}}));
     for control in [McpControl::Clauseo, McpControl::Managed] {
-        let meta = Value::Object(session_meta(Some(hook.clone()), control, None));
+        let meta = Value::Object(session_meta(Some(hook.clone()), control, None, None));
         let options = &meta["claudeCode"]["options"];
         assert_eq!(
             options["extraArgs"],
@@ -196,7 +202,7 @@ fn the_hooks_setting_sources_flag_is_taken_out_of_extra_args() {
     }
     // extraArgs that is not an object is left as the hook set it.
     let hook = object(&json!({"claudeCode": {"options": {"extraArgs": "x"}}}));
-    let meta = Value::Object(session_meta(Some(hook), McpControl::Clauseo, None));
+    let meta = Value::Object(session_meta(Some(hook), McpControl::Clauseo, None, None));
     assert_eq!(meta["claudeCode"]["options"]["extraArgs"], "x");
 }
 
@@ -208,7 +214,12 @@ fn under_managed_mcp_the_hooks_mcp_flags_are_taken_out_too() {
         "strict-mcp-config=true": null,
         "mcp-configx": "kept",
     }}}}));
-    let clauseo = Value::Object(session_meta(Some(hook.clone()), McpControl::Clauseo, None));
+    let clauseo = Value::Object(session_meta(
+        Some(hook.clone()),
+        McpControl::Clauseo,
+        None,
+        None,
+    ));
     assert_eq!(
         clauseo["claudeCode"]["options"]["extraArgs"],
         json!({
@@ -218,24 +229,27 @@ fn under_managed_mcp_the_hooks_mcp_flags_are_taken_out_too() {
             "mcp-configx": "kept",
         })
     );
-    let managed = Value::Object(session_meta(Some(hook), McpControl::Managed, None));
+    let managed = Value::Object(session_meta(Some(hook), McpControl::Managed, None, None));
     assert_eq!(
         managed["claudeCode"]["options"]["extraArgs"],
         json!({"mcp-configx": "kept"})
     );
 }
 
+/// R21: a hook cannot add servers through `_meta`, under Clauseo control as under Managed.
 #[test]
-fn the_hooks_servers_stay_under_clauseo_and_go_under_managed_mcp() {
+fn the_hooks_meta_servers_go_in_every_mode() {
     let hook = object(&json!({"claudeCode": {"options": {
         "mcpServers": {"clauseo": {"command": "/opt/clauseo-mcp"}},
     }}}));
-    let clauseo = Value::Object(session_meta(Some(hook.clone()), McpControl::Clauseo, None));
-    assert_eq!(
-        clauseo["claudeCode"]["options"]["mcpServers"],
-        json!({"clauseo": {"command": "/opt/clauseo-mcp"}})
-    );
-    let managed = Value::Object(session_meta(Some(hook), McpControl::Managed, None));
+    let clauseo = Value::Object(session_meta(
+        Some(hook.clone()),
+        McpControl::Clauseo,
+        None,
+        None,
+    ));
+    assert_eq!(clauseo["claudeCode"]["options"].get("mcpServers"), None);
+    let managed = Value::Object(session_meta(Some(hook), McpControl::Managed, None, None));
     assert_eq!(managed["claudeCode"]["options"].get("mcpServers"), None);
 }
 
