@@ -12,6 +12,7 @@ import { U8 } from "./registry-u8.tsx";
 import { U9 } from "./registry-u9.tsx";
 import { U6 } from "./registry-u6.tsx";
 import { C117 } from "./registry-c117.tsx";
+import { U6F } from "./registry-u6f.tsx";
 import {
   MATTER,
   NEW_MATTER,
@@ -333,6 +334,7 @@ export const REGISTRY: readonly Entry[] = [
   ...H11,
   ...U6,
   ...C117,
+  ...U6F,
   {
     id: "U2-01",
     words: frameWords("Add a matter's folder."),

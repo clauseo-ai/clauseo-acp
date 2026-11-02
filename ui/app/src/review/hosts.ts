@@ -6,6 +6,7 @@
 // a permission request may never come back.
 import { batch, event, header, reset, THREAD, TURN, upsert } from "../testing/stream-script.ts";
 import type {
+  AgentId,
   AvailableCommand,
   CommandOutcome,
   ErrorCode,
@@ -46,6 +47,8 @@ export function roomHost(matters: MatterSummary[], papers?: PaperSummary[]): Fak
 /** A thread's state for the review: its entries and status, and what the host refuses or loses. */
 export type ThreadState = {
   entries: ViewEntry[];
+  /** The thread's agent, as its list row and header name it; claude-acp by default. */
+  agent?: AgentId;
   status?: ThreadStatus;
   /** send_prompt is refused with this code. */
   refuse?: ErrorCode;
@@ -77,15 +80,17 @@ const refusal = (code: ErrorCode) => ({
 
 /** A host with one matter and its one thread, whose view arrives as the room subscribes. */
 export function threadHost(state: ThreadState): FakeTransport {
+  const agent = state.agent ?? "claude-acp";
   const head = header();
   head.header!.status = state.status ?? "idle";
   head.header!.commands = state.commands ?? [];
+  head.header!.agent = agent;
   const transport: FakeTransport = new FakeTransport({
     query: (query) => {
       if (query === "list_matters") return { matters: [MATTER] };
       if (typeof query === "object" && query.list_threads !== undefined)
         return {
-          threads: [{ thread: THREAD, matter: MATTER.matter, agent: "claude-acp", status: "idle" }],
+          threads: [{ thread: THREAD, matter: MATTER.matter, agent, status: "idle" }],
         };
       throw new Error(`the review's host doesn't answer ${JSON.stringify(query)}`);
     },
@@ -117,6 +122,7 @@ export function threadHost(state: ThreadState): FakeTransport {
         if (later !== undefined) {
           const after = header();
           after.header!.status = state.laterStatus ?? "agent_exited";
+          after.header!.agent = agent;
           setTimeout(
             () =>
               transport.deliver(
