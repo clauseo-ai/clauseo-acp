@@ -42,7 +42,13 @@ import {
   restore,
   restoreText,
 } from "./nesting.ts";
-import { htmlAsText, pairTags, paragraphNotingStart } from "./inline-tags.ts";
+import {
+  CUT_LESS_THAN,
+  htmlAsText,
+  markCutTags,
+  pairTags,
+  paragraphNotingStart,
+} from "./inline-tags.ts";
 import { endOf, parse } from "./parse.ts";
 import { repairTail } from "./repair.ts";
 import { CLOBBER_PREFIX, SCHEMA } from "./schema.ts";
@@ -231,8 +237,11 @@ export function createAnswer(scope: string): Answer {
       if (deeperThan(root, MAX_TREE_DEPTH)) return fallback;
       const handlers = { ...HANDLERS, footnoteReference: footnote };
       const hast = toHast(root, { ...options, handlers }) as Hast;
+      // A `<` nesting.ts made text at a line's start may be a tag again (markCutTags).
+      const tags = input.includes("<") || input.includes(CUT_LESS_THAN);
+      if (tags) markCutTags(hast);
       if (hasStandIns(input)) restoreText(hast);
-      if (input.includes("<")) pairTags(hast, streaming);
+      if (tags) pairTags(hast, streaming);
       const slugs = anchorHeadings(hast, scope);
       const clean = sanitize(hast, SCHEMA) as Hast;
       return { source: shown, input, hast: clean, streaming: false, slugs };
@@ -425,6 +434,7 @@ export function createAnswer(scope: string): Answer {
         else {
           const raw = noteHast(scope, numbering, id, options);
           // The note's own text, and the link definitions from other blocks it carries, may hold some.
+          markCutTags(raw);
           if (hasStandIns(note.source) || note.definitions.length > 0) restoreText(raw);
           pairTags(raw, false);
           hast = sanitize(raw, SCHEMA) as Hast;

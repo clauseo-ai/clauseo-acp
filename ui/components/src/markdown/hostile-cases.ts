@@ -24,6 +24,8 @@ export type HostileCase = {
   tags?: Record<string, number>;
   /** The characters each streamed delta adds; 16 when unset (1 shows every split of a tag). */
   delta?: number;
+  /** Literal text that must not show in the finished render: tags dropped as markup (inline-tags.ts). */
+  absent?: string[];
 };
 
 const PNG_1PX =
@@ -47,32 +49,39 @@ export const CASES: HostileCase[] = [
   {
     id: "raw-script",
     markdown: `Before <script>window.__g4pwn("raw-script")</script> after.`,
-    text: ["<script>"],
+    // An HTML element's pair is dropped, and a script's content shows as text (inline-tags.ts).
+    text: ['Before window.__g4pwn("raw-script") after.'],
+    streamingText: [],
+    absent: ["<script>"],
   },
   {
     id: "raw-script-block",
     markdown: `<script>\nwindow.__g4pwn("raw-script-block")\n</script>`,
-    text: ["<script>"],
+    text: ['window.__g4pwn("raw-script-block")'],
+    streamingText: [],
+    absent: ["<script>"],
   },
   {
     id: "img-onerror",
     markdown: `<img src=x onerror="window.__g4pwn('img-onerror')">`,
-    text: ["onerror"],
+    absent: ["onerror", "<img"],
   },
   {
     id: "svg-onload",
     markdown: `<svg onload="window.__g4pwn('svg-onload')"><circle r="4"/></svg>`,
-    text: ["<svg"],
+    text: ['<circle r="4"/>'],
+    absent: ["<svg", "onload"],
   },
   {
     id: "iframe",
     markdown: `<iframe src="https://exfil.test/frame" srcdoc="<script>parent.__g4pwn('iframe')</script>"></iframe>`,
-    text: ["<iframe"],
+    absent: ["<iframe", "srcdoc"],
   },
   {
     id: "raw-anchor-js",
     markdown: `<a href="javascript:window.__g4pwn('raw-anchor-js')">click</a>`,
-    text: ["<a href"],
+    text: ["click"],
+    absent: ["<a href", "javascript"],
   },
   { id: "js-link", markdown: `[click me](javascript:window.__g4pwn('js-link'))` },
   {
@@ -102,7 +111,7 @@ export const CASES: HostileCase[] = [
   {
     id: "dom-clobber",
     markdown: `<a id="__g4clobber" name="__g4clobber">x</a> <form id="__g4clobber"><input name="attributes"></form>\n\nA claim[^__g4clobber].\n\n[^__g4clobber]: The note.`,
-    text: ["<form"],
+    absent: ["<form", "<input", "<a id"],
   },
   {
     id: "link-spoof",
@@ -117,16 +126,19 @@ export const CASES: HostileCase[] = [
     id: "mxss",
     markdown: `<math><mtext><table><mglyph><style><img src=x onerror="window.__g4pwn('mxss')">\n\n<noscript><p title="</noscript><img src=x onerror=window.__g4pwn('mxss-noscript')>">`,
     text: ["<math>", "<noscript>"],
+    // Mid-stream, before the title's closing quote arrives, its `</noscript>` pairs with the opener: dropped.
+    streamingText: ["<math>"],
   },
   {
     id: "style-injection",
     markdown: `<style>body{background:url(https://exfil.test/css)}</style>`,
-    text: ["<style>"],
+    text: ["body{background:url(https://exfil.test/css)}"],
+    absent: ["<style>"],
   },
   {
     id: "link-meta",
     markdown: `<link rel="dns-prefetch" href="https://exfil.test"><meta http-equiv="refresh" content="0;url=https://exfil.test">`,
-    text: ["<link", "<meta"],
+    absent: ["<link", "<meta", "exfil"],
   },
   {
     id: "bidi",
@@ -136,7 +148,7 @@ export const CASES: HostileCase[] = [
     id: "code-with-html",
     markdown: "```html\n<script>window.__g4pwn('code-with-html')</script>\n```",
   },
-  { id: "long-line", markdown: LONG_LINE, text: ["<b>"] },
+  { id: "long-line", markdown: LONG_LINE, absent: ["<b>"] },
   { id: "unterminated-fence", markdown: "```python\nimport os\nos.system('echo unterminated')\n" },
   // Added after G4, from PR #107's security review.
   {

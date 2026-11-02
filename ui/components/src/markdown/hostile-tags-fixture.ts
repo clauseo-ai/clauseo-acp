@@ -102,7 +102,9 @@ export const TAG_CASES: HostileCase[] = [
       FORBIDDEN.map(
         (tag) => `<${tag} onclick="window.__g4pwn('tags-forbidden')">${tag}</${tag}>`,
       ).join(" "),
-    text: FORBIDDEN.map((tag) => `<${tag} onclick=`),
+    // Each pair is markup (an HTML element's name, a valued attribute): dropped, its content as text.
+    text: [`Inline: ${FORBIDDEN.join(" ")}`],
+    absent: ["onclick"],
   },
   {
     id: "tags-in-code",
@@ -172,8 +174,10 @@ export const TAG_CASES: HostileCase[] = [
     id: "tags-block-html",
     markdown:
       "Before.\n\n<br>\n<br/>\n\n<sup>\nnot a tag pair\n</sup>\n\n<div onclick=\"window.__g4pwn('tags-block-html')\">\n<sup>1</sup>\n</div>\n\n<br>\nShown, not swallowed <sup>2</sup>\n\nAfter.",
-    // The last HTML block holds a <br> and more: all of it shows as text, nothing is swallowed.
-    text: ["<sup>\nnot a tag pair", "<div onclick=", "<br>\nShown, not swallowed <sup>2</sup>"],
+    // The last HTML block holds a <br> and more: all of it shows as text, nothing is swallowed. The div's
+    // tags are markup, dropped; the allowlisted tags in an HTML block stay text.
+    text: ["<sup>\nnot a tag pair", "\n<sup>1</sup>\n", "<br>\nShown, not swallowed <sup>2</sup>"],
+    absent: ["<div onclick="],
     tags: { br: 2, sup: 0 },
   },
   {
@@ -197,6 +201,86 @@ export const TAG_CASES: HostileCase[] = [
     streamingText: ["a == b", "===c==="],
     tags: { mark: 1, sup: 2 },
     delta: 1,
+  },
+  // HTML-named tags that are not on the list (inline-tags.ts): dropped, with their attributes, only when
+  // clearly markup; placeholders that share an HTML element's name stay as written.
+  {
+    id: "tags-html-placeholders",
+    markdown:
+      "Send it to <Address>.\n\n<Title> of <Section> 4\n\nServe <Address of Tenant> by post.\n\n" +
+      "Signed by <section><Party A></section> on <time><insert date></time>.",
+    text: [
+      "Send it to <Address>.",
+      "<Title> of <Section> 4",
+      "Serve <Address of Tenant> by post.",
+      "Signed by <Party A> on <insert date>.",
+    ],
+    absent: ["<section>", "</section>", "<time>", "</time>"],
+  },
+  {
+    id: "tags-html-nested-placeholders",
+    markdown:
+      "<div><span><Party A></span></div>\n\nBetween <div><span><Party B></span></div> and <Client>.",
+    text: ["<Party A>", "Between <Party B> and <Client>."],
+    absent: ["<div>", "<span>", "</span>", "</div>"],
+  },
+  {
+    id: "tags-html-codex-divs",
+    markdown:
+      "| Point | Cap (₹) |\n|---|---:|\n" +
+      '| General liability cap | <div align="right">A: 1× 12-month fees<br>B: 2× contract value</div> |\n' +
+      '| कुल देयता की सीमा | <div align="right">A: ₹1 करोड़ तक<br>B: ₹1 करोड़ तक</div> |',
+    text: ["A: 1× 12-month fees", "B: 2× contract value", "A: ₹1 करोड़ तक"],
+    absent: ["<div", "</div>", "align"],
+    tags: { br: 2, "td div": 0 },
+  },
+  {
+    id: "tags-html-mixed-case",
+    markdown: `x <DiV class="q">y</dIv> z <SCRIPT>window.__g4pwn('tags-html-mixed-case')</SCRIPT> w <Center>c</CENTER>`,
+    text: ["x y z", "window.__g4pwn('tags-html-mixed-case')", "w c"],
+    // Mid-stream, tail repair may close the script's `__` as strong, which its text then lacks.
+    streamingText: ["x y z", "w c"],
+    absent: ["<DiV", "</dIv>", "<SCRIPT>", "</SCRIPT>", "<Center>"],
+    tags: { "p *": 0 },
+  },
+  {
+    id: "tags-html-split",
+    markdown:
+      'Cap: <div align="right">A: one<br>B: two</div> for <span><Party A></span>, <SPAN>kept</SPAN>.\n\n' +
+      "<script>window.__g4pwn('tags-html-split')</script> and <style>p { display: none }</style>",
+    text: [
+      "Cap: A: one",
+      "B: two for <Party A>, kept.",
+      "window.__g4pwn('tags-html-split') and p { display: none }",
+    ],
+    streamingText: [],
+    absent: ["<div", "<span>", "<SPAN>", "<script>", "<style>"],
+    tags: { br: 1 },
+    delta: 1,
+  },
+  {
+    id: "tags-html-attributes",
+    markdown:
+      `Text <div class="a" id="x" style="position:fixed" onclick="window.__g4pwn('tags-html-attributes')"\n` +
+      `  onmouseover='window.__g4pwn("tags-html-attributes")' data-x="a>b" title='c > d' hidden>held</div> end.\n\n` +
+      `<div onload="window.__g4pwn('tags-html-attributes')" data-q="</div>"\n  title=">">block</div>`,
+    text: ["Text held end.", "block"],
+    absent: ["onclick", "onmouseover", "data-x", "onload", "<div"],
+  },
+  {
+    id: "tags-html-script-style",
+    markdown:
+      "<script>window.__g4pwn('tags-html-script-style')</script>\n\n<style>body { display: none }</style>\n\n" +
+      "Inline <script>window.__g4pwn('tags-html-script-style')</script> and <style>p{color:red}</style>, " +
+      "<iframe src=x>frame <b>t</b></iframe> <svg><script>window.__g4pwn('tags-html-script-style')</script></svg>.",
+    text: [
+      "window.__g4pwn('tags-html-script-style')",
+      "body { display: none }",
+      "Inline window.__g4pwn('tags-html-script-style') and p{color:red}, frame <b>t</b> <script>window.__g4pwn('tags-html-script-style')</script>.",
+    ],
+    streamingText: ["body { display: none }"],
+    absent: ["<style>", "<iframe", "<svg>"],
+    tags: { "p *": 0 },
   },
   // Denial of service: each must stay within hostile-time.test.ts's ratio to ordinary prose.
   {

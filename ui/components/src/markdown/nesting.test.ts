@@ -221,7 +221,7 @@ test("a stand-in in the input is dropped, so every one the renderer sees is its 
 test.each([
   "<!-- a note",
   "<pre>",
-  "<script src=x>",
+  "<script async>",
   "<STYLE",
   "<textarea>",
   "<?php",

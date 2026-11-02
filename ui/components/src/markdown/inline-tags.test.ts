@@ -39,7 +39,7 @@ test("every attribute is dropped, whatever it is; tag names match ASCII case-ins
   expect(html(`<mark\nstyle="x">a</mark>`)).toBe("<p><mark>a</mark></p>");
 });
 
-test("tags not on the list, entities, lookalikes and broken tags show as text, as written", () => {
+test("an HTML-named tag not on the list drops when it is clearly markup, its content kept; else it is text", () => {
   for (const tag of [
     "script",
     "style",
@@ -63,7 +63,32 @@ test("tags not on the list, entities, lookalikes and broken tags show as text, a
     "pre",
     "b",
     "span",
-  ])
+  ]) {
+    // Paired in one parent, self-closed, or with a valued attribute: markup, dropped.
+    expect(html(`x <${tag}>y</${tag}> z`)).toBe("<p>x y z</p>");
+    expect(html(`x <${tag}/> <${tag} data-a="1"> z`)).toBe("<p>x   z</p>");
+    // Alone, with no valued attribute (a placeholder may share the name), or a stray closing tag: text.
+    for (const lone of [`<${tag}>`, `<${tag} of y>`, `</${tag}>`])
+      expect(html(`x ${lone} z`)).toBe(`<p>x ${lone.replace("<", "&#x3C;")} z</p>`);
+  }
+  expect(html("Send it to <Address>, <Address of Tenant>; <Title> of <Section> 4.")).toBe(
+    "<p>Send it to &#x3C;Address>, &#x3C;Address of Tenant>; &#x3C;Title> of &#x3C;Section> 4.</p>",
+  );
+  expect(html("a <section><Party A></section> b")).toBe("<p>a &#x3C;Party A> b</p>");
+  // A never-markup element's content is one plain text: no markup in it, tags as written.
+  expect(html("a <script>alert(<b>1</b>) *x*</script> b <SVG><i>c</i></svg>")).toBe(
+    "<p>a alert(&#x3C;b>1&#x3C;/b>) x b &#x3C;i>c&#x3C;/i></p>",
+  );
+  // Line-start kind 1 openers (made text by nesting.ts) follow the same rule.
+  expect(html("<script>alert(1)</script>\n\n<pre>\nkept\n</pre>\n\n<style lang=x>")).toBe(
+    "<p>alert(1)</p><p>kept</p><p></p>",
+  );
+  // An HTML block: its markup tags drop, the rest stays its text.
+  expect(html('<div align="right">\nA: <b>x</b> <Party A>\n</div>')).toBe("A: x &#x3C;Party A>");
+});
+
+test("tags not on the list, entities, lookalikes and broken tags show as text, as written", () => {
+  for (const tag of ["party", "insert", "client", "font-face", "x-tag"])
     expect(html(`x <${tag}>y</${tag}>`)).toBe(`<p>x &#x3C;${tag}>y&#x3C;/${tag}></p>`);
   expect(html("Made on <insert date> between <Party A> and <Party B>.")).toBe(
     "<p>Made on &#x3C;insert date> between &#x3C;Party A> and &#x3C;Party B>.</p>",
@@ -150,7 +175,12 @@ test("streaming: an unpaired opening tag at the end is hidden and what follows s
   expect(tail('a <sup class="x')).toBe("<p>a</p>");
   expect(tail("a <SUP\nstyle = 'color: red")).toBe("<p>a</p>");
   expect(tail('Fee <sup class="x">2')).toBe("<p>Fee 2</p>");
-  expect(tail('a <div class="x')).toBe('<p>a &#x3C;div class="x</p>');
+  // An HTML element's tag with a quoted value begun is markup, dropped once whole: hidden till then. A
+  // placeholder with no value shows as written.
+  expect(tail('a <div class="x')).toBe("<p>a</p>");
+  expect(tail('Cap: <div align="right">A: 1')).toBe("<p>Cap: A: 1</p>");
+  expect(tail("Serve <Address of Ten")).toBe("<p>Serve &#x3C;Address of Ten</p>");
+  expect(tail('a <party class="x')).toBe('<p>a &#x3C;party class="x</p>');
   expect(tail(`a <sup title="${"x".repeat(130)}`)).toContain("&#x3C;sup title=");
   expect(tail("if x<s then the clause")).toBe("<p>if x&#x3C;s then the clause</p>");
   expect(tail("a <b")).toBe("<p>a</p>");

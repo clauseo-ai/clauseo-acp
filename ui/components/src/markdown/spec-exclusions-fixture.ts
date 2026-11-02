@@ -12,7 +12,7 @@ export type Exclusion = {
 
 export const REASONS = {
   "raw-html":
-    "Raw HTML (an HTML block or inline HTML) shows as text, by design: the renderer keeps raw HTML out, except the approved inline tags (sup, sub, u, ins, del, s, mark, br, small, kbd) with no attributes, paired within one parent, and an HTML block of nothing but <br> (inline-tags.ts).",
+    "Raw HTML (an HTML block or inline HTML) never becomes HTML, by design: the approved inline tags (sup, sub, u, ins, del, s, mark, br, small, kbd) paired within one parent become our elements with no attributes, and an HTML block of nothing but <br> line breaks; a tag with an HTML element's name that is clearly markup (paired, self-closed, or with a valued attribute) is dropped, its content kept as text; everything else shows as text (inline-tags.ts).",
   protocol:
     "The sanitiser drops an href whose scheme is not https, http, mailto, clauseo-cite or clauseo-paper (schema.ts); its check is case-sensitive, and a colon before any slash, ? or # counts as a scheme.",
   "gfm-autolink":

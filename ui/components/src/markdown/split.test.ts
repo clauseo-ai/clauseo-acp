@@ -136,7 +136,8 @@ test("for every prefix the incremental split equals a fresh split, and the block
     }
   }
   expect(prefixes).toBeGreaterThan(100_000);
-}, 30_000);
+  // About 10 s alone at load 9 (two engines measuring beside it); 30 s was hit with the suites in parallel.
+}, 60_000);
 
 /** Paragraphs longer than MAX_PARAGRAPH, with block markers mid-line that must never start a part. */
 const LONG_PARAGRAPHS = [
