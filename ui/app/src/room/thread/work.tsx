@@ -2,11 +2,14 @@
 // or the first Ask makes one (session.ts). The thread's list, its rows and the Markdown renderer are one chunk of
 // their own (chunk.ts, list.tsx), started as Work mounts; the session opens the thread only once it is in, so the
 // rows never wait for it. The composer and the transcript's box are here, for the first paint.
-import { Suspense, useEffect } from "react";
+import { Suspense, useEffect, useMemo } from "react";
+import { useWords } from "@clauseo/components/lib/words.ts";
 import { useStreamError, useStreamPart, useViewStore, useWatch } from "../../store/hooks.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type { MatterSummary, ThreadId } from "../../transport/protocol.ts";
+import { nextHostOf } from "../host-next.ts";
 import { KeyedRequestContext, keyedRequest } from "../permission-keyed.ts";
+import { refillOf, useBreakLines, useStoppedLine, useThreadBreak } from "../thread-break.ts";
 import { LazyThreadList, loadThread } from "./chunk.ts";
 import { useBusy } from "./live.ts";
 import { ThreadActionsContext, useThreadSession, type Drafts } from "./session.ts";
@@ -32,6 +35,15 @@ export function Work({
   useWatch(store, stream);
   const busy = useBusy(stream, session.sentTurn);
   const failed = useStreamError(store, stream);
+  // U10: an answer Claude stopped giving, and Restart once the host has it (H10)
+  const { lang } = useWords();
+  const { brk, live } = useThreadBreak(store, stream);
+  const restart = useMemo(() => nextHostOf(transport).restart, [transport]);
+  const lines = useBreakLines();
+  const stopped = useStoppedLine({ lang, brk, live, busy, thread: session.thread, restart, lines });
+  const retry = () => {
+    if (stream !== null) store.retry(stream);
+  };
   // the one prompt that takes the keys, read here once a change rather than by every row
   const keyed = useStreamPart(store, stream, keyedRequest);
   useEffect(() => onThread?.(session.thread), [onThread, session.thread]);
@@ -57,12 +69,13 @@ export function Work({
         disabled={matter === null}
         busy={busy}
         refused={session.refused}
-        failed={failed?.code ?? null}
+        failed={
+          failed === null || lines === null ? null : lines.streamFailedLine(lang, failed, retry)
+        }
+        stopped={stopped}
+        refill={refillOf(brk, live)}
         onAsk={session.ask}
         onStop={session.stop}
-        onRetry={() => {
-          if (stream !== null) store.retry(stream);
-        }}
       />
     </>
   );

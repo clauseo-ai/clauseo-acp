@@ -48,8 +48,22 @@ export const ids = {
    * answered, one button per offered option kind. An answered card stays, without buttons.
    */
   permission: "permission",
-  /** The line a finished turn ends with, with `data-stop-reason` (the wire StopReason). */
+  /**
+   * The line a finished turn ends with, with `data-stop-reason` (the wire StopReason) and, on a
+   * failed turn, `data-failure` (its ErrorCode).
+   */
   turnStopped: "turn-stopped",
+  /**
+   * The working line once Claude stopped mid-answer (limits/stopped), with `data-code`: shown for
+   * a break this window saw arrive, until the next question.
+   */
+  agentStopped: "agent-stopped",
+  /** Restart on agentStopped, once the host restarts an agent (H10). */
+  restart: "restart",
+  /** The working line once the thread's stream failed, with `data-code`. */
+  streamFailed: "stream-failed",
+  /** Try again on streamFailed, for a retryable code only. */
+  retry: "retry",
   /** A file the turn changed, in the turn's change note. */
   fileChanged: "file-changed",
   notice: "notice",
@@ -68,7 +82,7 @@ export type OptionKind = "allow_once" | "allow_always" | "reject_once" | "reject
 export const permissionButton = (kind: OptionKind): string => `permission-${kind}`;
 
 /** The `data-stop-reason` values the specs expect: protocol StopReason wire values. */
-export type StopReason = "end_turn" | "cancelled" | "at_limit";
+export type StopReason = "end_turn" | "cancelled" | "at_limit" | "failed";
 
 /** The window's elements on `page`. */
 export function window(page: Page) {
@@ -111,6 +125,10 @@ export function window(page: Page) {
     permissionButton: (card: Locator, kind: OptionKind): Locator =>
       card.getByTestId(permissionButton(kind)),
     turnStopped: id(ids.turnStopped),
+    agentStopped: id(ids.agentStopped),
+    restart: id(ids.restart),
+    streamFailed: id(ids.streamFailed),
+    retry: id(ids.retry),
     fileChanged: id(ids.fileChanged),
     notices: id(ids.notice),
     limitStop: id(ids.limitStop),
