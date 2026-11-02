@@ -62,33 +62,34 @@ check "$T $F $F $T" crates/reducer_bench/benches/apply.rs
 check "$T $F $F $T" crates/codex_appserver/src/lib.rs
 check "$T $F $F $F" xtask/src/main.rs
 check "$T $F $F $F" .config/nextest.toml
-check "$T $F $F $F" budgets.toml
+check "$T $F $F $T" budgets.toml
 # What every Rust build reads.
 check "$T $T $F $T" Cargo.lock
 check "$T $T $F $T" Cargo.toml
-check "$T $T $F $F" rust-toolchain.toml
-check "$T $T $F $F" .cargo/config.toml clippy.toml
+check "$T $T $F $T" rust-toolchain.toml
+check "$T $T $F $T" .cargo/config.toml clippy.toml
+check "$T $T $F $F" clippy.toml
 
 # Mixed.
 check "$T $T $T $T" crates/limits/src/lib.rs ui/app/src/App.tsx
 check "$T $T $F $T" README.md crates/store/src/lib.rs
 
-# CI itself runs everything.
-check "$T $T $T $F" .github/workflows/ci.yml
-check "$T $T $T $F" .github/scripts/changes.sh
-check "$T $T $T $F" .github/actions/install-tauri-linux-deps/action.yml
+# CI itself runs everything, the scoreboards included.
+check "$T $T $T $T" .github/workflows/ci.yml
+check "$T $T $T $T" .github/scripts/changes.sh
+check "$T $T $T $T" .github/actions/install-tauri-linux-deps/action.yml
 
-# Fail safe: an unknown path, or no path at all, runs everything.
-check "$T $T $T $F" some-new-dir/thing.rs
-check "$T $T $T $F" README.md Makefile
-check "$T $T $T $F" crates
+# Fail safe: an unknown path, or no path at all, runs everything, product included.
+check "$T $T $T $T" some-new-dir/thing.rs
+check "$T $T $T $T" README.md Makefile
+check "$T $T $T $T" crates
 check "$T $T $T $T"
 
 # A path with a newline in it is one path: "README.md<newline>" is not prose, and
 # "README.md<newline>ui/x" is neither prose nor ui; both are unknown and run everything.
-check "$T $T $T $F" $'README.md\n'
-check "$T $T $T $F" $'README.md\nui/app/src/App.tsx'
-check "$T $T $T $F" $'docs/a.md\ncrates/desktop/src/lib.rs'
+check "$T $T $T $T" $'README.md\n'
+check "$T $T $T $T" $'README.md\nui/app/src/App.tsx'
+check "$T $T $T $T" $'docs/a.md\ncrates/desktop/src/lib.rs'
 
 # APP_CRATES is clauseo-desktop's path-dependency closure. Each crate's Cargo.toml names a
 # workspace crate as `path = "../<dir>"`; `path = "."` and `path = "src/..."` are its own targets.

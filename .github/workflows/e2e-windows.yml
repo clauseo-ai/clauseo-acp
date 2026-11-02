@@ -15,11 +15,12 @@
 #   ui/e2e/package.json.
 # - `tauri build` turns on `custom-protocol`, so the binary embeds ui/app/dist. A plain
 #   `cargo build` would load devUrl instead.
-# - The smoke test's app is a release build with LTO off and 16 codegen units
-#   (CARGO_PROFILE_RELEASE_* below): optimised, panic=abort and a GUI exe like the shipped app,
-#   about 4 times faster to build than full LTO with a warm cache (ci-perfmax's notes). The
-#   scoreboard plays this same build on pull requests and main; scoreboard.yml plays the full-LTO
-#   build nightly, on demand and on labelled pull requests.
+# - On a pull request and a push to main, the x64 smoke test's app is a release build with LTO
+#   off and 16 codegen units (CARGO_PROFILE_RELEASE_* below): optimised, panic=abort and a GUI exe
+#   like the shipped app, about 4 times faster to build than full LTO with a warm cache
+#   (ci-perfmax's notes). scoreboard-windows plays that same build on both. Nightly, on demand and
+#   on ARM64 the smoke test builds full LTO, the shipping profile, and runs the full suite on it;
+#   scoreboard.yml plays a full-LTO build nightly, on demand and on labelled pull requests.
 # - Every action is pinned by commit SHA, with its tag in a comment.
 
 name: e2e-windows
@@ -37,9 +38,9 @@ name: e2e-windows
 # reports. smoke is never skipped as a whole: a job skipped that way reports under the literal name
 # `smoke (${{ matrix.runner }})`, and a required check that never reports blocks the merge.
 # scoreboard-windows is not a required check, so it is skipped as a whole when it has nothing to do.
-# Every push to main, the nightly run and a run on demand cover x64 and ARM64 (windows-11-arm) and
-# play the scoreboard on x64, which gives the budgets their baseline and keeps main's Rust caches,
-# the ones pull requests restore, warm. Caches are saved on main only, and ARM64 keeps none.
+# Every push to main, the nightly run and a run on demand cover x64 and ARM64 (windows-11-arm). A
+# push to main plays the scoreboard on x64, which gives the comment its baseline, and saves the
+# Rust cache pull requests restore; nothing else saves one, and ARM64 keeps none.
 
 on:
   pull_request:
@@ -123,10 +124,12 @@ jobs:
       # A failed decision runs everything, so the check always reports.
       RUN: ${{ needs.e2e-changes.result != 'success' || needs.e2e-changes.outputs.app == 'true' }}
       TARGET: ${{ matrix.target }}
-      # Every event, so main saves the Rust cache under the key pull requests look up (rust-cache
-      # hashes CARGO_* variables into it).
-      CARGO_PROFILE_RELEASE_LTO: "false"
-      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+      # LTO off and 16 codegen units on a pull request and a push to main (x64), so main saves the
+      # Rust cache under the key pull requests look up (rust-cache hashes CARGO_* variables into
+      # it) and scoreboard-windows plays the same kind of build on both. Nightly, on demand and on
+      # ARM64: full LTO and 1 codegen unit, the shipping profile, under the full suite.
+      CARGO_PROFILE_RELEASE_LTO: ${{ (github.event_name == 'pull_request' || github.event_name == 'push') && matrix.runner == 'windows-2025' && 'false' || 'true' }}
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ (github.event_name == 'pull_request' || github.event_name == 'push') && matrix.runner == 'windows-2025' && '16' || '1' }}
       E2E_APP: ${{ github.workspace }}/target/${{ matrix.target }}/release/clauseo-desktop.exe
       # The scripted agent the window's specs launch through settings.json (fixture.ts).
       E2E_FAKE_AGENT: ${{ github.workspace }}/target/${{ matrix.target }}/release/fake_agent.exe
@@ -162,13 +165,15 @@ jobs:
           cache: pnpm
           cache-dependency-path: ui/pnpm-lock.yaml
 
-      # x64 only, saved on main only; ARM64 runs after the merge and keeps no cache.
+      # x64 only, saved by a push to main only: the key pull requests restore. The nightly full-LTO
+      # build saves nothing (its CARGO_* values give it another key, and it would only push a
+      # second entry into the 10 GB cache). ARM64 runs after the merge and keeps no cache.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         if: env.RUN == 'true' && matrix.runner == 'windows-2025'
         with:
           key: e2e-${{ matrix.target }}
           cache-bin: "false"
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
 
       - name: Install the ui workspace
         if: env.RUN == 'true'
@@ -249,7 +254,7 @@ jobs:
   # pull requests and main measure the same LTO-off release build, and the comment compares like
   # with like. scoreboard.yml plays a full-LTO build nightly, on demand and on pull requests labelled
   # `scoreboard`, for the absolute numbers. Runs on pull requests that touch the app's product code
-  # and on every push to main, nightly and on demand. Its numbers report and alert and never block
+  # and on every push to main. Its numbers report and alert and never block
   # a merge: the job is not a required check, and continue-on-error keeps a failure from turning
   # the run red (a red run on main would hide that run's numbers from the comment, which reads
   # main's successful runs only). The comment then shows this pull request's Windows numbers as
@@ -257,8 +262,12 @@ jobs:
   scoreboard-windows:
     name: scoreboard-windows
     needs: [e2e-changes, smoke]
+    # Pull requests and pushes to main only: nightly and on demand, smoke's build is full LTO, and
+    # its numbers would become main's baseline for the next pull requests (the comment reads main's
+    # newest run); scoreboard.yml's scoreboard-windows-lto plays full LTO then.
     if: >-
       ${{ !cancelled() && needs.smoke.result != 'skipped'
+      && (github.event_name == 'pull_request' || github.event_name == 'push')
       && (needs.e2e-changes.result != 'success'
       || (needs.e2e-changes.outputs.app == 'true' && needs.e2e-changes.outputs.product == 'true')) }}
     runs-on: windows-2025

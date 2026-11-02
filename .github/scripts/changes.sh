@@ -13,7 +13,8 @@
 #            crate, the crates it runs on, fake_agent, the ui, and what builds them.
 # - ui:      the ui changed. Informational: the fast lane decides its own ui steps.
 # - product: product code changed (crates/, ui/, Cargo.toml, Cargo.lock), the paths of
-#            comment.ts's isProductPath: the scoreboards run and the scoreboard comment posts.
+#            comment.ts's isProductPath, or what builds or budgets it (rust-toolchain.toml,
+#            .cargo/, budgets.toml): the scoreboards run. Everything on when all() is.
 #
 # Fail safe: a path no rule knows turns every output on, and so does an empty diff (a diff that
 # lists nothing is more likely a broken fetch than a no-op pull request). Each rule is a `case`
@@ -28,11 +29,12 @@ set -euo pipefail
 APP_CRATES="desktop host protocol settings process fake_agent reducer store matters acp"
 
 nl=$'\n'
-rust=false app=false ui=false product=false unknown=""
+rust=false app=false ui=false product=false product_also=false unknown=""
 count=0
 paths=()
 
-all() { rust=true app=true ui=true; }
+# Fail safe means everything: the scoreboards and the comment too.
+all() { rust=true app=true ui=true product_also=true; }
 
 is_app_crate() {
   local c
@@ -72,10 +74,12 @@ classify() {
     # Nightly fuzzing only (fuzz.yml); no pull request job builds fuzz/.
     fuzz/*) ;;
     # What every Rust build reads.
-    Cargo.toml | Cargo.lock | rust-toolchain.toml | .cargo/* | clippy.toml) rust=true app=true ;;
+    Cargo.toml | Cargo.lock | clippy.toml) rust=true app=true ;;
+    # The toolchain and cargo config change the binaries, so the scoreboards run too.
+    rust-toolchain.toml | .cargo/*) rust=true app=true product_also=true ;;
     .config/nextest.toml) rust=true ;;
     # reducer-bench's limits and the scoreboard budgets.
-    budgets.toml) rust=true ;;
+    budgets.toml) rust=true product_also=true ;;
     xtask/*) rust=true ;;
     crates/*/*)
       rust=true
@@ -106,7 +110,7 @@ else
   # One grep, which ui/e2e/scoreboard/comment.test.ts checks against comment.ts's isProductPath.
   # A newline inside a path becomes a space first, so no part of a path passes for a path.
   product=$(printf '%s\n' "${paths[@]//$nl/ }" | grep -E '^(crates/|ui/|Cargo\.toml$|Cargo\.lock$)' || true)
-  if [ -n "$product" ]; then product=true; else product=false; fi
+  if [ -n "$product" ] || [ "$product_also" = true ]; then product=true; else product=false; fi
 fi
 if [ -n "$unknown" ]; then
   echo "changes.sh: no rule for:$unknown; running everything" >&2
