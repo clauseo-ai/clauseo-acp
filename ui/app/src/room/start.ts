@@ -2,11 +2,11 @@
 // <html> for the frame contract (responsive.css), the host's OS, and in dev and e2e builds the hooks for checks by hand
 // (dev-hooks.ts).
 import { showDisplay, startDisplay } from "@clauseo/components/lib/display.ts";
+import { late } from "@clauseo/components/lib/late.ts";
 import { guessPlatform, hostPlatform } from "../platform.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import { createDisplayStore, type DisplayStore } from "./display-store.ts";
 import { nextHostOf, type UiSettings } from "./host-next.ts";
-import { late } from "./late.ts";
 
 let connected: { transport: HostTransport; store: DisplayStore } | null = null;
 

@@ -11,7 +11,7 @@
 import { createElement, use, type ComponentType } from "react";
 // a type alone: erased, so this file has no static dependency on the list
 import type { ThreadListProps } from "./list.tsx";
-import { late } from "../late.ts";
+import { late } from "@clauseo/components/lib/late.ts";
 
 type Loaded = ComponentType<ThreadListProps>;
 /** The import, tagged as React's use() reads a settled promise. */

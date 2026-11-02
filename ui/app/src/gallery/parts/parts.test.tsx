@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { settled } from "@clauseo/components/lib/late.ts";
 import { PartsRoot } from "@clauseo/components/ui/root.tsx";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -21,17 +22,19 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
-test("the parts gallery renders every group without a runtime <style>", () => {
+test("the parts gallery renders every group without a runtime <style>", async () => {
   const container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
-  act(() =>
+  // the gallery shows the parts' lazy pieces (the plan's select, an error's details): they load inside the act
+  await act(async () => {
     root?.render(
       <PartsRoot>
         <PartsPage />
       </PartsRoot>,
-    ),
-  );
+    );
+    await settled();
+  });
   expect(container.querySelector("h1")?.textContent).toBe("Clauseo parts");
   const titles = Array.from(container.querySelectorAll("[data-group] > h2"), (h) => h.textContent);
   expect(titles).toEqual(["The room", "Matters", "Versions", "The edge", "The reader"]);

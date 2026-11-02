@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import axe from "axe-core";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { settled } from "@clauseo/components/lib/late.ts";
 import { afterEach, beforeAll, expect, test } from "vitest";
 import { FakeTransport } from "../transport/fake-transport.ts";
 import type { MatterSummary } from "../transport/protocol.ts";
@@ -118,7 +119,11 @@ for (const theme of THEMES) {
             document.body.append(host);
             root = createRoot(host);
             await act(async () => root?.render(inStore(transport)));
-            await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+            // the host's answers, and the thread's chunk (late.ts), so axe checks the room as it stands
+            await act(async () => {
+              await new Promise((resolve) => setTimeout(resolve, 0));
+              await settled();
+            });
             if (scene.dialog === true) {
               await act(async () =>
                 host?.querySelector<HTMLButtonElement>('[data-testid="new-matter"]')?.click(),
@@ -169,6 +174,7 @@ test("axe in this environment finds a violation where there is one: a button wit
   document.body.append(host);
   root = createRoot(host);
   await act(async () => root?.render(inStore(transport)));
+  await act(settled);
   host.querySelector("main")?.append(document.createElement("button"));
   const results = await axe.run(document, { resultTypes: ["violations"] });
   expect(results.violations.map((v) => v.id)).toContain("button-name");
