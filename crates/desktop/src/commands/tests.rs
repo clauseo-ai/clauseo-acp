@@ -33,6 +33,7 @@ fn app(bridge: Bridge) -> (tauri::App<MockRuntime>, WebviewWindow<MockRuntime>) 
             open_external,
             open_file,
             reveal,
+            open_settings,
             #[cfg(feature = "e2e")]
             crate::e2e::perf_channel_bytes,
             #[cfg(feature = "marks")]
@@ -259,6 +260,7 @@ fn the_unconfirmed_opener_is_not_reachable_from_the_webview() {
         "capabilities/frame.json",
         "capabilities/e2e.json",
         "capabilities/marks.json",
+        "capabilities/settings.json",
         "src/lib.rs",
         "../../ui/app/src/transport/bindings.ts",
     ] {
@@ -294,11 +296,11 @@ fn build_list<'a>(build: &'a str, name: &str) -> BTreeSet<&'a str> {
     list.split('"').skip(1).step_by(2).collect()
 }
 
-/// The permissions `capabilities/<file>` grants, and the window it grants them to.
-fn granted(dir: &std::path::Path, file: &str) -> BTreeSet<String> {
+/// The permissions `capabilities/<file>` grants, after checking it grants them to `window` alone.
+fn granted(dir: &std::path::Path, file: &str, window: &str) -> BTreeSet<String> {
     let path = dir.join("capabilities").join(file);
     let capability: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
-    assert_eq!(capability["windows"], json!(["main"]), "{file}");
+    assert_eq!(capability["windows"], json!([window]), "{file}");
     capability["permissions"]
         .as_array()
         .unwrap()
@@ -333,7 +335,7 @@ fn every_list_of_commands_agrees() {
     assert_eq!(build_list(&build, "MARKS"), marks, "build.rs");
 
     assert_eq!(
-        granted(dir, "main.json")
+        granted(dir, "main.json", "main")
             .into_iter()
             .filter(|permission| !permission.starts_with("core:window:"))
             .collect::<BTreeSet<_>>(),
@@ -341,20 +343,34 @@ fn every_list_of_commands_agrees() {
         "capabilities/main.json, beside the window permissions window_frame/tests.rs checks"
     );
     assert_eq!(
-        granted(dir, "e2e.json"),
+        granted(dir, "e2e.json", "main"),
         allowed(&e2e),
         "capabilities/e2e.json"
     );
     assert_eq!(
-        granted(dir, "marks.json"),
+        granted(dir, "marks.json", "main"),
         allowed(&marks),
         "capabilities/marks.json"
     );
-    // The default build names only main; e2e::grant_scoreboard adds the other two in their builds.
+    // The settings window gets its six, all among the release commands.
+    assert_eq!(
+        granted(dir, "settings.json", "settings")
+            .into_iter()
+            .filter(|permission| !permission.starts_with("core:window:"))
+            .collect::<BTreeSet<_>>(),
+        allowed(&set(&SETTINGS_COMMANDS)),
+        "capabilities/settings.json, beside the window permissions window_frame/tests.rs checks"
+    );
+    assert!(set(&SETTINGS_COMMANDS).is_subset(&ours));
+    // The default build names main and settings; e2e::grant_scoreboard adds e2e and marks in
+    // their builds.
     let config: Value =
         serde_json::from_str(&std::fs::read_to_string(dir.join("tauri.conf.json")).unwrap())
             .unwrap();
-    assert_eq!(config["app"]["security"]["capabilities"], json!(["main"]));
+    assert_eq!(
+        config["app"]["security"]["capabilities"],
+        json!(["main", "settings"])
+    );
 
     let lib = std::fs::read_to_string(dir.join("src/lib.rs")).unwrap();
     let start = lib.find("generate_handler![").unwrap() + "generate_handler![".len();
@@ -390,4 +406,53 @@ fn every_list_of_commands_agrees() {
         .filter_map(|rest| rest.split('"').next())
         .collect();
     assert_eq!(invoked, ours, "bindings.ts");
+}
+
+/// The commands `capabilities/settings.json` grants the settings window (0028).
+const SETTINGS_COMMANDS: [&str; 6] = [
+    "dispatch",
+    "query",
+    "open_stream",
+    "subscribe_app",
+    "ack",
+    "display_info",
+];
+
+/// Whether Tauri refused `answer` before any command ran.
+fn denied(answer: &Result<Value, Value>) -> bool {
+    answer
+        .as_ref()
+        .err()
+        .and_then(Value::as_str)
+        .is_some_and(|text| text.contains("not allowed"))
+}
+
+/// Through Tauri's own access check: the settings window reaches exactly its six commands and is
+/// refused every other one, `open_settings` and `subscribe` among them, and the e2e and marks
+/// commands in their builds too. `main`'s `open_settings` opens it, once however often it is
+/// called.
+#[test]
+fn the_settings_window_is_allowed_exactly_its_commands() {
+    let scratch = Scratch::new("settings-granted", &[]);
+    let host = scratch.start(Vec::new());
+    let (app, main) = app(host.bridge());
+    assert_eq!(invoke(&main, "open_settings", json!({})), Ok(Value::Null));
+    assert_eq!(invoke(&main, "open_settings", json!({})), Ok(Value::Null));
+    let settings = app
+        .get_webview_window(crate::settings_window::SETTINGS_WINDOW)
+        .unwrap();
+    assert_eq!(app.webview_windows().len(), 2);
+    let allowed = set(&SETTINGS_COMMANDS);
+    // Empty arguments: an allowed command fails to decode them, or answers; it is never refused
+    // by the access check. The ones that would act (a dialog, a window) are only ever refused.
+    for command in COMMANDS.iter().chain(&E2E_COMMANDS).chain(&MARKS_COMMANDS) {
+        let answer = invoke(&settings, command, json!({}));
+        assert_eq!(
+            denied(&answer),
+            !allowed.contains(command),
+            "{command}: {answer:?}"
+        );
+    }
+    let info = invoke(&settings, "display_info", json!({})).unwrap();
+    assert!(info["platform"].is_string(), "{info}");
 }

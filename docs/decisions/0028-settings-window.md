@@ -1,0 +1,85 @@
+# 0028: The settings window
+
+## Context
+
+The design opens settings in a window of its own on both computers, never as a sheet over the room
+(`design/03-system/src/pages/settings/settings-window.tsx`): a matter stays in view beside it, and
+on the Mac it opens from Clauseo > Settings… and Cmd+, as every Mac app's settings do. Its frame is
+the room's: on the Mac the corner lights in the window's top left (20 px in, centred 26 px down,
+where the room's lead puts them), on Windows a bar ending in all three caption buttons, flush top
+right, so it can be maximised and snapped beside the room.
+
+Until now `main` was the only window. The bridge already keeps one stream per window label
+([0012](0012-desktop-bridge.md)), but nothing removed a window's stream: `main` only goes away
+when the app exits. [0015](0015-window-frame.md) asked a second window's record to say why the
+page's label-taking window commands reaching it are harmless, or to prevent it.
+
+## Decision
+
+**Window.** A second window, label `settings` (`crates/desktop/src/settings_window.rs`), showing
+`ui/app`'s `settings.html`. It is built in code like `main`: 960 by 700 logical px fitted to the
+primary monitor's work area and centred (the e2e build opens it unfitted), the https scheme (the
+same origin as `main`, so the same local storage), the room's frame (`window_frame::with_frame`,
+and on Windows the native window over the maximise button for Snap Layouts, made on the main
+thread), the page's CSP on its scripts (`csp::on_scripts`), and in the e2e build `main`'s webview
+arguments and init script, since `WebView2` webviews that share a profile must be created alike.
+Its title is "Settings". window-state never restores it: it opens at its size, centred, each time.
+
+**Lifecycle.** Made on open, destroyed on close, never hidden. Opening it when it is open
+unminimises, shows and focuses it. When a window is destroyed, the bridge drops its stream
+(`Bridge::close_window`): its channel, every pump and the app pump (so their host subscriptions),
+and its watchdog. Each build is numbered (`Bridge::window_built`, from the counter `open_stream`
+numbers from), and the window's own `Destroyed` handler passes that number, so a close that lands
+after the window was built again removes only a stream opened before that build, never the new
+page's. With Wry the guard never fires (Tauri removes a destroyed window before its handlers run,
+and builds a window on the event loop only after them); it holds whatever order a runtime keeps.
+Destroying `main` destroys `settings`, so closing `main` still ends the app.
+
+**Capability.** `capabilities/settings.json` grants `settings` six commands: `dispatch`, `query`,
+`open_stream`, `subscribe_app`, `ack` (app events count toward the flow-control window) and
+`display_info`, and the drag script's two window commands; `capabilities/frame.json` names it
+beside `main`, so on Windows and Linux it gets the caption buttons' four. Not granted: `subscribe`,
+`unsubscribe`, `answer_permission`, `pick_folder`, `open_external`, `open_file`, `reveal`,
+`open_settings`, and the e2e and marks commands. `tauri.conf.json` names `main` and `settings`.
+
+**What the bridge admits.** From `settings`, `dispatch` takes only `SetUiSettings` and `query` only
+`GetSettings` (`Bridge::admit`, `Bridge::query`, keyed on the calling webview's label); everything
+else is `command.invalid` before the host sees it. A window of any other label is refused every
+command and read. A settings section that needs more (plans, matters) widens this list in its own
+change.
+
+**Command.** `open_settings`, no arguments, `Result<(), HostError>` (`internal` when the window
+cannot be built): opens or focuses the window. Granted to `main` only; the page calls
+`commands.openSettings()`.
+
+**Menu.** On the Mac only, the app menu is Tauri's default with "Settings…" on Cmd+, after About
+and its separator, then a separator; choosing it opens or focuses the window. Windows and Linux
+get no menu: it would be a bar on the undecorated window.
+
+## Consequences
+
+- Script in either page can aim the drag and caption commands at the other window (Tauri's
+  window commands take a `label`). That is harmless here: neither window holds state the bridge
+  or the host does not keep; dragging, zooming, minimising or maximising the other is visible and
+  undone by hand; closing `settings` only destroys it; and closing `main` was already in the
+  page's reach and ends the app as its close button does. No granted command sets a window's
+  size, position or content, or reaches a plugin. A third window needs its own record (a test
+  counts the builders).
+- XSS in the settings page reaches the settings and nothing else of the host: no matter, thread,
+  folder, file, link or permission answer.
+- Main-only behaviour stays keyed on `MAIN_WINDOW`: the scoreboard's capabilities, the limits
+  subscription `open_stream` starts (`Bridge::open_stream` follows the limits for `main` alone)
+  and the focus refresh (`on_window_event` in `lib.rs` dispatches `Shown` for `main` alone).
+  The settings window's channel carries no limits, and its focus reads none. Closing a window
+  drops its limits pump with the rest of its feeds.
+- The mock runtime never removes a destroyed window, so the reopen after a close is tested at the
+  bridge (`bridge/tests/app.rs`), not through Tauri. The window itself, its frame and the menu are
+  checked by hand on each OS.
+
+## Status
+
+proposed
+
+## Date
+
+2026-11-02

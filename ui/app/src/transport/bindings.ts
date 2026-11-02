@@ -8,10 +8,11 @@ import { invoke as __TAURI_INVOKE, Channel } from "@tauri-apps/api/core";
 export const commands = {
 	/**
 	 *  Runs a command. Refuses `AnswerPermission` (that goes through `answer_permission`) and a
-	 *  `CreateMatter` whose folder ref this run's `pick_folder` did not issue.
+	 *  `CreateMatter` whose folder ref this run's `pick_folder` did not issue; from the settings
+	 *  window, everything but `SetUiSettings`.
 	 */
 	dispatch: (command: CommandEnvelope) => typedError<CommandOutcome, HostError>(__TAURI_INVOKE("dispatch", { command })),
-	/**  Answers a query. */
+	/**  Answers a query; from the settings window, `GetSettings` only. */
 	query: (query: HostQuery) => typedError<QueryResult, HostError>(__TAURI_INVOKE("query", { query })),
 	/**
 	 *  Registers the calling window's one channel. A second call (a page reload) replaces it and
@@ -79,6 +80,11 @@ export const commands = {
 	openFile: (file: FileRefId) => typedError<null, HostError>(__TAURI_INVOKE("open_file", { file })),
 	/**  Shows a matter's folder, or the app data folder, in Finder or File Explorer. */
 	reveal: (target: RevealTarget) => typedError<null, HostError>(__TAURI_INVOKE("reveal", { target })),
+	/**
+	 *  Opens the settings window, or brings it forward when it is open (`settings_window.rs`).
+	 *  Granted to `main` only.
+	 */
+	openSettings: () => typedError<null, HostError>(__TAURI_INVOKE("open_settings")),
 };
 
 /* Constants */

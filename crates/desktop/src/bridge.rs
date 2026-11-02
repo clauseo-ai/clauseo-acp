@@ -3,6 +3,11 @@
 //! stream state (`window.rs`, driven by `pump.rs`), and the folder refs this run's
 //! `pick_folder` issued. Every host call runs as `Principal::LocalDesktop`; the webview never
 //! names a principal.
+//!
+//! A window's entry lives from its page's `open_stream` until the window is destroyed
+//! (`close_window`, from `settings_window::on_destroyed`): then its channel, pumps, app pump and
+//! watchdog go. What a window may dispatch and query depends on its label (`admit`, `query`):
+//! `main` the allow-lists of 0019, `settings` only its own settings (0028).
 
 use std::collections::{HashMap, HashSet};
 use std::path::{MAIN_SEPARATOR, Path};
@@ -22,6 +27,7 @@ use crate::dialogs::{Confirm, Picker};
 use crate::frame::Frame;
 use crate::host_start::HostCell;
 use crate::picked::{self, PickedFolder};
+use crate::settings_window::SETTINGS_WINDOW;
 
 mod pump;
 mod window;
@@ -53,8 +59,11 @@ pub(crate) struct Bridge {
     cell: Arc<HostCell>,
     /// Each window's stream, by webview label.
     windows: Mutex<HashMap<String, Numbered>>,
-    /// The number the next `open_stream` call takes, in the order the calls arrive.
+    /// The number the next `open_stream` call or window build takes, in the order they arrive.
     opens: AtomicU64,
+    /// The number of each label's latest build (`window_built`): a window destroyed after a
+    /// newer one of its label was built leaves that one's stream alone (`close_window`).
+    builds: Mutex<HashMap<String, u64>>,
     /// The folder refs `pick_folder` issued in this run; `CreateMatter` takes no other.
     issued: Mutex<HashSet<FolderRefId>>,
 }
@@ -92,6 +101,7 @@ impl Bridge {
             cell,
             windows: Mutex::new(HashMap::new()),
             opens: AtomicU64::new(0),
+            builds: Mutex::new(HashMap::new()),
             issued: Mutex::new(HashSet::new()),
         }
     }
@@ -119,13 +129,14 @@ impl Bridge {
         }
     }
 
-    /// Checks `command`'s shape and that the window may send it (`admit`), and runs it.
+    /// Checks `command`'s shape and that the window `label` may send it (`admit`), and runs it.
     pub(crate) async fn dispatch(
         &self,
+        label: &str,
         command: CommandEnvelope,
     ) -> Result<CommandOutcome, HostError> {
         let checked = command.validate().map_err(HostError::invalid_command)?;
-        self.admit(checked.command())?;
+        self.admit(label, checked.command())?;
         self.host().await?.dispatch(checked.into_envelope()).await
     }
 
@@ -151,13 +162,26 @@ impl Bridge {
         self.host().await?.dispatch(checked.into_envelope()).await
     }
 
-    /// Whether the window may send `command`: an allow-list, one arm per host command and no
+    /// Whether the window `label` may send `command`: `main` what `admit_main` admits, the
+    /// `settings` window `SetUiSettings` alone (0028), any other window nothing.
+    fn admit(&self, label: &str, command: &HostCommand) -> Result<(), HostError> {
+        match label {
+            crate::MAIN_WINDOW => self.admit_main(command),
+            SETTINGS_WINDOW => match command {
+                HostCommand::SetUiSettings { .. } => Ok(()),
+                _ => Err(invalid("the settings window sends only set_ui_settings")),
+            },
+            _ => Err(invalid(format!("window {label} may send no command"))),
+        }
+    }
+
+    /// Whether `main` may send `command`: an allow-list, one arm per host command and no
     /// catch-all, so a command the host adds does not compile here until the bridge rules on it
     /// (`docs/decisions/0019-app-stream-to-the-window.md`). Refuses what goes another way
     /// (`AnswerPermission`), what may not come from the window at all (`SetMode`,
     /// `SetConfigOption`), and a `CreateMatter` or `RelocateMatter` whose folder ref this run's
     /// `pick_folder` did not issue.
-    fn admit(&self, command: &HostCommand) -> Result<(), HostError> {
+    fn admit_main(&self, command: &HostCommand) -> Result<(), HostError> {
         match command {
             HostCommand::CreateMatter { source, .. } => match source {
                 MatterSource::NewFolder { folder } | MatterSource::ExistingFolder { folder } => {
@@ -213,9 +237,21 @@ impl Bridge {
         }
     }
 
-    /// Answers `query`, which every read the host has may be. The match is an allow-list like
-    /// `admit`'s: a read the host adds does not compile here until the bridge rules on it.
-    pub(crate) async fn query(&self, query: HostQuery) -> Result<QueryResult, HostError> {
+    /// Answers the window `label`'s `query`. `main` may send every read the host has: the
+    /// match is an allow-list like `admit_main`'s, so a read the host adds does not compile here
+    /// until the bridge rules on it. The `settings` window reads the settings alone (0028), and
+    /// any other window nothing.
+    pub(crate) async fn query(
+        &self,
+        label: &str,
+        query: HostQuery,
+    ) -> Result<QueryResult, HostError> {
+        match label {
+            crate::MAIN_WINDOW => {}
+            SETTINGS_WINDOW if matches!(query, HostQuery::GetSettings) => {}
+            SETTINGS_WINDOW => return Err(invalid("the settings window reads only the settings")),
+            _ => return Err(invalid(format!("window {label} may send no query"))),
+        }
         match &query {
             HostQuery::ListMatters
             | HostQuery::GetDefaultLocation
@@ -260,8 +296,11 @@ impl Bridge {
         let old = if newer {
             Some(window)
         } else {
-            // Only the kept window follows the limits: a dropped one's channel is dead.
-            pump::follow_limits(host, &window);
+            // Only the kept window follows the limits: a dropped one's channel is dead. Only
+            // `main` shows them: the settings window gets no limits subscription (0028).
+            if label == crate::MAIN_WINDOW {
+                pump::follow_limits(host, &window);
+            }
             windows
                 .insert(label.to_owned(), (number, window))
                 .map(|(_, old)| old)
@@ -269,6 +308,42 @@ impl Bridge {
         drop(windows);
         drop(old);
         Ok(())
+    }
+
+    /// Numbers a build of the window `label`, before it is built: every `open_stream` its page
+    /// sends gets a higher number. The number goes to `close_window` when that window is
+    /// destroyed.
+    pub(crate) fn window_built(&self, label: &str) -> u64 {
+        let number = self.opens.fetch_add(1, Ordering::Relaxed);
+        lock(&self.builds).insert(label.to_owned(), number);
+        number
+    }
+
+    /// Drops the stream of the window `label` built as number `built`, which was destroyed: its
+    /// channel, every pump, the app pump and the watchdog, so their host subscriptions go. When a
+    /// newer window of that label was built since, only a stream opened before that build goes:
+    /// a late close never removes the newer page's stream. Tauri removes a destroyed window
+    /// before its handlers run and builds a window on the event loop only after them, so on Wry
+    /// the guard never fires; it holds whatever order a runtime keeps.
+    pub(crate) fn close_window(&self, label: &str, built: u64) {
+        let newer = {
+            let mut builds = lock(&self.builds);
+            match builds.get(label).copied() {
+                Some(latest) if latest > built => Some(latest),
+                _ => {
+                    builds.remove(label);
+                    None
+                }
+            }
+        };
+        let mut windows = lock(&self.windows);
+        let stale = windows
+            .get(label)
+            .is_some_and(|(opened, _)| newer.is_none_or(|latest| *opened < latest));
+        let old = if stale { windows.remove(label) } else { None };
+        drop(windows);
+        // Dropped outside the lock: aborting the pumps takes the window's own lock.
+        drop(old);
     }
 
     /// Follows `stream` on the window's channel from `after`.

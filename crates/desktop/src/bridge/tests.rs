@@ -14,6 +14,7 @@ use crate::dialogs::BoxFuture;
 use crate::test_support::{Scratch, envelope, open, stream};
 
 const MAIN: &str = "main";
+const SETTINGS: &str = "settings";
 
 /// A picker that returns one folder.
 struct Picks(Option<PathBuf>);
@@ -250,7 +251,7 @@ fn a_refused_folder_is_rejected() {
             next_date: None,
         })
     };
-    let refusal = block_on(bridge.dispatch(create(folder))).unwrap_err();
+    let refusal = block_on(bridge.dispatch(MAIN, create(folder))).unwrap_err();
     assert_eq!(
         refusal.code(),
         ErrorCode::MatterFolderIsSystem,
@@ -259,7 +260,8 @@ fn a_refused_folder_is_rejected() {
 
     // The data folder is always refused.
     let data = block_on(bridge.pick_folder(&Picks(Some(scratch.path().to_owned())), None));
-    let refusal = block_on(bridge.dispatch(create(data.unwrap().unwrap().folder))).unwrap_err();
+    let refusal =
+        block_on(bridge.dispatch(MAIN, create(data.unwrap().unwrap().folder))).unwrap_err();
     // It also holds the folder refused above, which the list names first.
     assert_eq!(
         refusal.code(),
@@ -274,7 +276,7 @@ fn a_refused_folder_is_rejected() {
     let picked = block_on(bridge.pick_folder(&Picks(Some(work)), Some(other.path()))).unwrap();
     let picked = picked.unwrap();
     assert_eq!(picked.display, "work");
-    block_on(bridge.dispatch(create(picked.folder))).unwrap();
+    block_on(bridge.dispatch(MAIN, create(picked.folder))).unwrap();
     let cancelled = block_on(bridge.pick_folder(&Picks(None), Some(home))).unwrap();
     assert_eq!(cancelled, None);
 }
@@ -293,7 +295,7 @@ fn dispatch_refuses_a_folder_ref_it_did_not_issue_and_a_permission_answer() {
         client: None,
         next_date: None,
     });
-    let refusal = block_on(bridge.dispatch(create)).unwrap_err();
+    let refusal = block_on(bridge.dispatch(MAIN, create)).unwrap_err();
     assert_eq!(refusal.code(), ErrorCode::CommandInvalid, "{refusal:?}");
 
     let thread = host.thread();
@@ -302,7 +304,7 @@ fn dispatch_refuses_a_folder_ref_it_did_not_issue_and_a_permission_answer() {
         request: PermissionRequestId::new(Uuid::now_v7()).unwrap(),
         option_id: AgentChoiceId::new("allow").unwrap(),
     });
-    let refusal = block_on(bridge.dispatch(answer)).unwrap_err();
+    let refusal = block_on(bridge.dispatch(MAIN, answer)).unwrap_err();
     assert_eq!(refusal.code(), ErrorCode::CommandInvalid, "{refusal:?}");
 }
 
@@ -325,7 +327,7 @@ fn dispatch_refuses_set_mode_and_set_config_option() {
         },
     ];
     for command in commands {
-        let refusal = block_on(bridge.dispatch(envelope(command.clone()))).unwrap_err();
+        let refusal = block_on(bridge.dispatch(MAIN, envelope(command.clone()))).unwrap_err();
         assert_eq!(
             refusal.code(),
             ErrorCode::CommandInvalid,

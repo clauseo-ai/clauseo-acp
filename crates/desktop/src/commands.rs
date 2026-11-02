@@ -1,7 +1,9 @@
 //! The commands the webview may invoke, each `async` and granted one by one in
-//! `capabilities/main.json`. Every argument is checked in Rust before it reaches the host
-//! (`docs/decisions/0001`, `docs/threat-model.md` "Webview"), and every call runs as
-//! `Principal::LocalDesktop`, which the bridge supplies; the webview never names a principal.
+//! `capabilities/main.json` (and a subset to the settings window in `capabilities/settings.json`,
+//! `docs/decisions/0028-settings-window.md`, which also records `open_settings`). Every
+//! argument is checked in Rust before it reaches the host (`docs/decisions/0001`,
+//! `docs/threat-model.md` "Webview"), and every call runs as `Principal::LocalDesktop`, which
+//! the bridge supplies; the webview never names a principal.
 //! `docs/decisions/0012-desktop-bridge.md` records the list and the stream's message format,
 //! `docs/decisions/0019-app-stream-to-the-window.md` the tenth, `subscribe_app`, and the
 //! allow-lists of `dispatch` and `query`, and `docs/decisions/0026-open-and-reveal.md` the three
@@ -26,7 +28,7 @@ use crate::picked::PickedFolder;
 /// The command names, in the order `build.rs` and `capabilities/main.json` list them. A test
 /// checks they, `lib.rs`'s handler and the bindings agree.
 #[cfg(test)]
-pub(crate) const COMMANDS: [&str; 13] = [
+pub(crate) const COMMANDS: [&str; 14] = [
     "dispatch",
     "query",
     "open_stream",
@@ -40,6 +42,7 @@ pub(crate) const COMMANDS: [&str; 13] = [
     "open_external",
     "open_file",
     "reveal",
+    "open_settings",
 ];
 
 /// The commands the `e2e` build adds (`e2e.rs`), as `build.rs`'s `E2E` and
@@ -85,26 +88,27 @@ pub(crate) struct DisplayInfo {
 }
 
 /// Runs a command. Refuses `AnswerPermission` (that goes through `answer_permission`) and a
-/// `CreateMatter` whose folder ref this run's `pick_folder` did not issue.
+/// `CreateMatter` whose folder ref this run's `pick_folder` did not issue; from the settings
+/// window, everything but `SetUiSettings`.
 #[tauri::command]
 #[cfg_attr(test, specta::specta)]
 pub(crate) async fn dispatch<R: Runtime>(
-    _app: AppHandle<R>,
+    webview: Webview<R>,
     bridge: State<'_, Bridge>,
     command: CommandEnvelope,
 ) -> Result<CommandOutcome, HostError> {
-    bridge.dispatch(command).await
+    bridge.dispatch(webview.label(), command).await
 }
 
-/// Answers a query.
+/// Answers a query; from the settings window, `GetSettings` only.
 #[tauri::command]
 #[cfg_attr(test, specta::specta)]
 pub(crate) async fn query<R: Runtime>(
-    _app: AppHandle<R>,
+    webview: Webview<R>,
     bridge: State<'_, Bridge>,
     query: HostQuery,
 ) -> Result<QueryResult, HostError> {
-    bridge.query(query).await
+    bridge.query(webview.label(), query).await
 }
 
 /// Registers the calling window's one channel. A second call (a page reload) replaces it and
@@ -275,6 +279,19 @@ pub(crate) async fn reveal<R: Runtime>(
         target,
     )
     .await
+}
+
+/// Opens the settings window, or brings it forward when it is open (`settings_window.rs`).
+/// Granted to `main` only.
+#[tauri::command]
+#[cfg_attr(test, specta::specta)]
+pub(crate) async fn open_settings<R: Runtime>(app: AppHandle<R>) -> Result<(), HostError> {
+    crate::settings_window::open_or_focus(&app).map_err(|error| {
+        HostError::new(
+            clauseo_protocol::ErrorCode::Internal,
+            format!("the settings window did not open: {error}"),
+        )
+    })
 }
 
 #[cfg(test)]

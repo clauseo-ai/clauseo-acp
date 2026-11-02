@@ -48,7 +48,7 @@ Words: "agent" means the lawyer's ACP agent (Claude Code, Codex). "You" is the c
 ## Never
 
 - Never add `tauri` or `tokio` to a core crate (see "Never depends on" in `ARCHITECTURE.md`). Tauri is about 90% of cold build time; the core must run without a window.
-- Never add a Tauri plugin or a webview permission beyond 0012, 0015, 0019 and 0026. The plugin set is fixed (a change forces a near-cold rebuild); permissions widen XSS reach.
+- Never add a Tauri plugin or a webview permission beyond 0012, 0015, 0019, 0026 and 0028. The plugin set is fixed (a change forces a near-cold rebuild); permissions widen XSS reach.
 - Never write a sync `#[tauri::command]` or stream through Tauri events. Sync commands block the UI thread; events go to every webview. Use async commands and one `ipc::Channel` per window.
 - Never read or write the real app data folder, `~/.claude` or `~/.codex`. They hold a lawyer's data and agent credentials.
 - Never kill a process by name. Kill only the PID you started.

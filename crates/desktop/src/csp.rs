@@ -6,11 +6,11 @@
 //!   `app.security.headers` has no field for it. A dedicated worker takes its policy from its own
 //!   script's response, so the code-colouring worker (`ui/components`, `highlight/worker.ts`)
 //!   ran with none.
-//! - [`on_scripts`] gives the `main` window a web-resource hook that adds `app.security.csp` from
-//!   the checked config, as written, to every JavaScript response of the app's protocol that has
-//!   no policy. The page keeps Tauri's own header, which adds the nonces and hashes of its inline
-//!   code; a script has no inline code to hash. The policy string lives in `tauri.conf.json`
-//!   only.
+//! - [`on_scripts`] gives each window (`main` and `settings`) a web-resource hook that adds
+//!   `app.security.csp` from the checked config, as written, to every JavaScript response of
+//!   the app's protocol that has no policy. The page keeps Tauri's own header, which adds the
+//!   nonces and hashes of its inline code; a script has no inline code to hash. The policy
+//!   string lives in `tauri.conf.json` only.
 //! - Tauri keeps only the last `on_web_resource_request` handler of a builder, so this file is the
 //!   only place in the crate that sets one (a test holds the crate to it).
 //! - Development builds load `devUrl` from Vite's server, which this hook never sees.
