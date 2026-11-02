@@ -70,8 +70,11 @@ pub(super) fn on_prompt_done(
     }
     // Held updates of the turn go first, while it is still live.
     updates::flush_rate(actor, thread);
+    // A turn whose commit already failed ends `Failed` whatever the read says.
+    let store_failed = current(actor, thread).is_some_and(|current| current.store_failed.is_some());
     let fallback = matches!(result, Err(clauseo_acp::Error::Rpc { .. }))
         && !host_stopping(actor)
+        && !store_failed
         && limits::reads_for(actor, thread) == Some(AgentKind::Codex);
     let Some(current) = current(actor, thread) else {
         return;
