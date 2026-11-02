@@ -394,13 +394,11 @@
     :is(p, ul, ol, dl, blockquote, pre, table, hr, h1, h2, h3, h4, h5, h6) {
     margin: 0;
   }
-  .reply-text [data-clauseo="markdown"] > * + *,
+  /* the rest of a paragraph cut into parts (a very long one, while it streams) reads on, no gap; :where keeps
+     the specificity, so the heading rule below still wins */
+  .reply-text [data-clauseo="markdown"] > * + :where(:not([data-clauseo-paragraph="continues"])),
   .reply-text [data-clauseo="markdown"] :is(li, blockquote, dd, .footnotes) > * + * {
     margin-top: var(--s3);
-  }
-  /* the rest of a paragraph cut into parts (a very long one, while it streams): it reads on, no gap */
-  .reply-text [data-clauseo="markdown"] > [data-clauseo-paragraph="continues"] {
-    margin-top: 0;
   }
   .reply-text [data-clauseo="markdown"] :is(h1, h2, h3, h4, h5, h6) {
     font-weight: var(--w-chip);
