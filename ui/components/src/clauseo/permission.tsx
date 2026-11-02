@@ -3,7 +3,7 @@
 // answers the agent offers, in ACP's kind order. Enter allows once, Cmd or Ctrl with Enter allows for this matter,
 // Escape declines; the keys act from the empty composer, from the page or from inside the prompt, without taking the
 // composer's focus. Once answered, the prompt folds to one line that says what was decided.
-import { useEffect, useId, useRef } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef } from "react";
 import { Button } from "../ui/button.tsx";
 import { Kbd } from "../ui/kbd.tsx";
 import { useDisplay } from "../lib/display.ts";
@@ -86,6 +86,27 @@ export function PermissionPrompt({
     latest.current = { onAnswer, offered };
   });
 
+  // Focus inside the prompt goes back to the room's field after an answer, and when the prompt goes inert or folds.
+  // Whether it was inside is tracked by focus and blur, since inert blurs the button and the fold removes it: a removed
+  // button's blur never reaches React, so the note survives the fold.
+  const focusInside = useRef(false);
+  const away = state !== "pending" || busy || confirming;
+  useLayoutEffect(() => {
+    if (!away || !focusInside.current) return;
+    const now = document.activeElement;
+    const lost = now === null || now === document.body || rootRef.current?.contains(now) === true;
+    focusInside.current = false;
+    if (lost) room.nodes.get("field")?.focus();
+  }, [away, room]);
+  const answer = useCallback(
+    (a: PermissionAnswer) => {
+      const inside = rootRef.current?.contains(document.activeElement) === true;
+      latest.current.onAnswer(a);
+      if (inside) room.nodes.get("field")?.focus();
+    },
+    [room],
+  );
+
   const listening = keys && state === "pending" && !busy && !confirming;
   useEffect(() => {
     if (!listening) return;
@@ -97,6 +118,7 @@ export function PermissionPrompt({
       const target = e.target;
       let where: KeyWhere = "other";
       let fieldEmpty = false;
+      const roomField = room.nodes.get("field");
       if (target instanceof Node && rootRef.current?.contains(target)) {
         // a focused answer keeps its own plain Enter: its click answers
         if (a === "once" && target instanceof HTMLButtonElement) return;
@@ -105,16 +127,20 @@ export function PermissionPrompt({
         if (target instanceof HTMLTextAreaElement) {
           where = "field";
           fieldEmpty = target.value.trim() === "";
-        } else where = "page";
+        } else {
+          // nothing focused: only while the room's own field is empty, and never with no field
+          where = "page";
+          fieldEmpty = roomField instanceof HTMLTextAreaElement && roomField.value.trim() === "";
+        }
       }
       if (!keyReachesPrompt(where, fieldEmpty)) return;
       e.preventDefault();
       e.stopPropagation();
-      latest.current.onAnswer(a);
+      answer(a);
     };
     document.addEventListener("keydown", onKey, true);
     return () => document.removeEventListener("keydown", onKey, true);
-  }, [listening, room]);
+  }, [listening, room, answer]);
 
   const rootData = {
     "data-testid": testIds?.root,
@@ -127,7 +153,12 @@ export function PermissionPrompt({
     const said = folded(w.th, state, paper, done);
     const refused = state === "deny" || state === "never";
     return (
-      <p className="perm-done" {...rootData}>
+      <p
+        className="perm-done"
+        aria-live="off"
+        data-glyph={state === "gone" ? "none" : undefined}
+        {...rootData}
+      >
         {/* one quiet grammar in concrete: the accept glyph where it was allowed, a plain cross where it wasn't. Green
             means checked or supports, so it stays out */}
         {state === "gone" ? null : refused ? (
@@ -162,10 +193,18 @@ export function PermissionPrompt({
       role="group"
       aria-labelledby={`${id}-ask`}
       aria-describedby={described.length > 0 ? described.join(" ") : undefined}
+      data-confirming={confirming ? "" : undefined}
+      onFocus={() => {
+        focusInside.current = true;
+      }}
+      onBlur={(e) => {
+        focusInside.current =
+          e.relatedTarget instanceof Node && rootRef.current?.contains(e.relatedTarget) === true;
+      }}
       {...rootData}
     >
       <p className="perm-ask">
-        <IconPaperBookPage size={16} className="perm-icon" />
+        {paper !== null && <IconPaperBookPage size={16} className="perm-icon" />}
         <span id={`${id}-ask`}>
           <Say>{ask}</Say>
         </span>
@@ -193,7 +232,7 @@ export function PermissionPrompt({
               size="small"
               aria-keyshortcuts={withKey && keysOn ? shortcut(a) : undefined}
               data-testid={testIds?.answer(a)}
-              onClick={() => onAnswer(a)}
+              onClick={() => answer(a)}
             >
               <span className="deva-nudge">{w.th(LABEL[a])}</span>
               {withKey && <Kbd className="perm-key">{cap(a)}</Kbd>}
@@ -201,14 +240,13 @@ export function PermissionPrompt({
           );
         })}
       </div>
-      {confirming && (
-        <p className="edge-confirming" role="status">
+      {/* Linux isn't a target yet, so it names no dialog */}
+      {confirming && platform !== "linux" && (
+        <p className="perm-confirming" role="status">
           <Say>
             {platform === "mac"
               ? v.v("macOS is asking you to confirm.")
-              : platform === "linux"
-                ? v.v("Linux is asking you to confirm.")
-                : v.v("Windows is asking you to confirm.")}
+              : v.v("Windows is asking you to confirm.")}
           </Say>
         </p>
       )}

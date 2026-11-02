@@ -22,3 +22,13 @@ test("the room's stylesheet imports the sheets of the rail and the new matter fo
   expect(imported.indexOf("live.css")).toBeLessThan(imported.indexOf("matter-form.css"));
   expect(imported.indexOf("matter-form.css")).toBeLessThan(imported.indexOf("matters.css"));
 });
+
+test("the room's stylesheet styles the permission prompt's confirming line, never leaning on edge.css", () => {
+  expect(imported).toContain("live.css");
+  const live = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "../../../components/src/clauseo/live.css"),
+    "utf8",
+  );
+  expect(live).toMatch(/\.perm-confirming\s*\{/);
+  expect(live).toMatch(/\.perm\[data-confirming\] \.perm-actions\s*\{/);
+});
