@@ -169,8 +169,8 @@ export function errorSentence(lang: Lang, key: ErrorKey): string {
 }
 
 /** agent.launch_failed's sentence for the thread's plan, as the app's knownPlan (room/agent.ts) names it: "ChatGPT"
- * names ChatGPT, null (an agent of no kind) names Clauseo as the one that couldn't start the conversation, and "Claude" or a plan not known (undefined) keeps
- * Claude's. */
+ * names ChatGPT; null (an agent of no kind) says Clauseo couldn't start the conversation; "Claude", or a plan not known
+ * (undefined), keeps Claude's. */
 export function launchFailedKey(plan?: string | null): ErrorKey {
   if (plan === null) return "Clauseo couldn't start this conversation. Your question is kept.";
   if (plan === "ChatGPT") return "ChatGPT didn't start. Your question is kept.";
