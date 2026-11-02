@@ -154,21 +154,26 @@ crates/limits/src/write.rs - clippy::disallowed_methods
 crates/limits/tests/readers/write.rs - clippy::disallowed_methods
 crates/limits/tests/live/write.rs - clippy::disallowed_methods
 
-# clauseo-connectors (S28): the base's internals that only the client (the next step of S28) will
-# call, the one clock read, the write module (the state file, and test-support's scratch folders),
-# the Winsock FFI for SO_EXCLUSIVEADDRUSE, the connector's own field names that the brief's API
-# fixes (account_id, pack, recharge_id, the *_inr amounts), and the dependency test's runs of cargo
-# and rustc.
+# clauseo-connectors (S28), one comment per line.
+# The one wall-clock read; every other time read goes through the Clock trait.
 crates/connectors/src/config.rs SystemClock::now clippy::disallowed_methods
+# The write module: the state file (temp file, then rename) and test-support's scratch folders.
 crates/connectors/src/write.rs - clippy::disallowed_methods
+# The Winsock FFI that sets SO_EXCLUSIVEADDRUSE before bind (Windows only), so no other process of
+# the same user can bind the OAuth callback's or R24's relay's port.
 crates/connectors/src/net/windows.rs - unsafe_code
+# The connector's own JSON field names, which the brief's API keeps (account_id, pack, recharge_id,
+# the *_inr amounts).
 crates/connectors/src/account.rs Account clippy::struct_field_names
 crates/connectors/src/pricing.rs Pack clippy::struct_field_names
 crates/connectors/src/recharge.rs Recharge clippy::struct_field_names
 crates/connectors/src/recharge.rs Amount clippy::struct_field_names
+# The dependency test runs cargo metadata and rustc -vV to read the crate's tree for each target.
 crates/connectors/tests/dependencies.rs cargo_json clippy::disallowed_methods
 crates/connectors/tests/dependencies.rs host_triple clippy::disallowed_methods
+# The ignored live sign-in test writes the authorize URL (no secret in it) to a file a browser opens.
 crates/connectors/tests/live.rs live::write_url clippy::disallowed_methods
+# The sign-in bench's setup unwraps, like the workspace's other benches.
 crates/connectors/benches/signin.rs - clippy::unwrap_used
 
 # The fuzz targets (fuzz/, outside the workspace): libfuzzer-sys's fuzz_target! macro writes its
