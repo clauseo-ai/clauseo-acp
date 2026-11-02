@@ -7,7 +7,7 @@ import { CASES } from "./hostile-cases.ts";
 import { capNesting } from "./nesting.ts";
 import { endOf, parse } from "./parse.ts";
 import { examplesOf, htmlOf, normalise, unsplit, withTabs } from "./spec-fixture.ts";
-import { createSplitter } from "./split.ts";
+import { createSplitter, MAX_PARAGRAPH } from "./split.ts";
 import type { BlockEnd } from "./split.ts";
 
 const ends = new Map<string, BlockEnd>();
@@ -137,6 +137,45 @@ test("for every prefix the incremental split equals a fresh split, and the block
   }
   expect(prefixes).toBeGreaterThan(100_000);
 }, 30_000);
+
+/** Paragraphs longer than MAX_PARAGRAPH, with block markers mid-line that must never start a part. */
+const LONG_PARAGRAPHS = [
+  "Lorem ipsum dolor sit amet, **consectetur** adipiscing [elit](u), sed do _eiusmod_ tempor.\n".repeat(
+    150,
+  ),
+  "word - item 1. two # three > four ``` five | six 7) seven <pre> ".repeat(200),
+  capNesting("a==b==".repeat(3000)),
+  capNesting("^a^".repeat(6000)),
+  "<u>a</u>".repeat(2000),
+  `Intro.\n\n${"x".repeat(9000)}\n\nOutro.\n`,
+];
+
+test("a paragraph longer than MAX_PARAGRAPH is cut into parts that start with text; the cuts never move", () => {
+  for (const text of LONG_PARAGRAPHS) {
+    const incremental = createSplitter(realEndOf);
+    for (let end = 16; end < text.length + 16; end += 16) {
+      const prefix = text.slice(0, Math.min(end, text.length));
+      const blocks = incremental(prefix);
+      expect(blocks.join("")).toBe(prefix);
+      expect(blocks).toEqual(fresh(prefix));
+    }
+    const blocks = fresh(text);
+    expect(blocks.length, text.slice(0, 40)).toBeGreaterThan(1);
+    for (const [index, block] of blocks.entries()) {
+      expect(block.length).toBeLessThanOrEqual(MAX_PARAGRAPH);
+      // A part after a cut starts with a letter, a tag or a stand-in, so it is a paragraph too.
+      if (index > 0 && !blocks[index - 1]!.endsWith("\n\n"))
+        expect(block).toMatch(/^(?:\p{L}|<\/?[A-Za-z]|[\uFDD1-\uFDE0])/u);
+    }
+  }
+  // Tags stay whole: every part is whole pairs.
+  for (const block of fresh("<u>a</u>".repeat(2000))) expect(block).toMatch(/^(?:<u>a<\/u>)+$/);
+}, 30_000);
+
+test("a footnote's definition is never cut, however long its note", () => {
+  const note = `[^n]: ${"a ".repeat(4000)}\n`;
+  expect(fresh(note)).toEqual([note]);
+});
 
 /**
  * A document as the one-piece comparison takes it, with one micromark 4.0.3 quirk: an ordered item

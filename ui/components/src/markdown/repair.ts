@@ -50,7 +50,7 @@ const HALF_LINK = /\[((?:[^[\]\\]|\\.)*)(?:\](?:\([^)]*|\[[^\]]*)?)?$/;
 /** A half superscript or allowlisted tag name (delimiters after it are the second pass's), and what ends one. */
 const HALF_SUPERSCRIPT = /^\^[^\s^[\]\\]{0,32}$/;
 const HALF_TAG = /^<\/?([A-Za-z]{0,5})[*_~=`]*$/;
-const HALF_STOP = /[\s^[\]\\<\uFDD1-\uFDDF]/;
+const HALF_STOP = /[\s^[\]\\<\uFDD1-\uFDE0]/;
 /**
  * An opening tag's name and attributes at the end of the text, as far as they have arrived (CommonMark's
  * attribute syntax, its last attribute maybe half there), with no `>` yet: hidden too when the name is

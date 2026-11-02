@@ -30,10 +30,11 @@ const SPACE_NESTING = Array.from(
   { length: 20 },
   (_, line) => `${" ".repeat(60 * line)}${"- ".repeat(30)}x\n`,
 ).join("");
-const LONG_RUNS = "*".repeat(5000) + "a" + "*".repeat(5000);
+/** Runs of `*` a paragraph's part holds whole (split.ts's MAX_PARAGRAPH). */
+const LONG_RUNS = "*".repeat(2000) + "a" + "*".repeat(2000);
 const hide = (text: string) => text.split("").map(standIn).join("");
 
-const hasStandIn = (text: string) => /[\uFDD1-\uFDDF]/.test(text);
+const hasStandIn = (text: string) => /[\uFDD1-\uFDE0]/.test(text);
 
 function count(node: Hast, tagName: string): number {
   let total = 0;
@@ -273,17 +274,21 @@ test.each([
 test.each([
   ["500 levels of list through tabs", TAB_NESTING, "ul", "- - - x"],
   ["600 levels of list through spaces", SPACE_NESTING, "ul", "- - - x"],
-  ["5,000 * a side", LONG_RUNS, "strong", "***a***"],
+  // 2,000 a side: 5,000 is longer than a paragraph's part (split.ts), and its strong spans the cut.
+  ["2,000 * a side", LONG_RUNS, "strong", "***a***"],
 ])(
   "%s render shallowly, the rest as text; the blocks around them render",
   (_, deep, tagName, rest) => {
     const views = createAnswer("t").update(`Intro **bold**.\n\n${deep}\n\nOutro _end_.\n`, false);
-    expect(views).toHaveLength(3);
-    const [intro, middle, outro] = views.map((view) => view.hast) as [Root, Root, Root];
+    // The middle is one block, or, a paragraph longer than MAX_PARAGRAPH, cut into parts (split.ts).
+    expect(views.length).toBeGreaterThanOrEqual(3);
+    const roots = views.map((view) => view.hast) as Root[];
+    const [intro, outro, parts] = [roots[0]!, roots.at(-1)!, roots.slice(1, -1)];
+    const middle: Root = { type: "root", children: parts.flatMap((part) => part.children) };
     expect(count(intro, "strong")).toBe(1);
     expect(count(outro, "em")).toBe(1);
     expect(count(middle, tagName)).toBeGreaterThan(0);
-    expect(depthOf(middle)).toBeLessThanOrEqual(80);
+    expect(Math.max(...parts.map(depthOf))).toBeLessThanOrEqual(80);
     expect(textOf(middle)).toContain(rest);
     expect(hasStandIn(textOf(middle))).toBe(false);
   },

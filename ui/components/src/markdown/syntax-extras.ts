@@ -27,8 +27,8 @@ const OPEN_BRACKET = 91;
 const CLOSE_BRACKET = 93;
 const BACKSLASH = 92;
 const BRACKET_STAND_IN = standIn("[").charCodeAt(0);
-/** nesting.ts's stand-ins, U+FDD1 to U+FDDF. */
-const isStandIn = (code: number) => code >= 0xfdd1 && code <= 0xfddf;
+/** nesting.ts's stand-ins, U+FDD1 to U+FDE0. */
+const isStandIn = (code: number) => code >= 0xfdd1 && code <= 0xfde0;
 
 const tokenizeSuperscript: Tokenizer = function (this: TokenizeContext, effects, ok, nok) {
   const previous = this.previous;
