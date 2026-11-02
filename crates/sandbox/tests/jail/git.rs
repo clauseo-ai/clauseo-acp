@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::support::{World, launcher, run, run_outside, tree};
+use crate::support::{World, git, git_outside, launcher, run_outside, tree};
 
 /// git's runtime: what `xcode-select -p` names (the folder `/usr/bin/git` runs git from), or
 /// for Xcode the whole app, whose `Info.plist` and shared frameworks the shim reads. The
@@ -27,11 +27,11 @@ fn git_runtime(cwd: &std::path::Path) -> PathBuf {
 fn a_commit_in_the_jail_leaves_git_unchanged() {
     let w = World::new();
     let m1 = w.at("m1");
-    let git = |args: &[&str]| run_outside("/usr/bin/git", args, &m1);
-    git(&["init", "-q", "-b", "main"]).assert_ok();
+    let git_set_up = |args: &[&str]| git_outside(args, &m1);
+    git_set_up(&["init", "-q", "-b", "main"]).assert_ok();
     w.file("m1/brief.txt", "Clause 4 draft\n");
-    git(&["add", "brief.txt"]).assert_ok();
-    git(&[
+    git_set_up(&["add", "brief.txt"]).assert_ok();
+    git_set_up(&[
         "-c",
         "user.name=Test",
         "-c",
@@ -59,7 +59,7 @@ fn a_commit_in_the_jail_leaves_git_unchanged() {
         "-am",
         "the agent's commit",
     ];
-    let out = run(&launcher, "/usr/bin/git", &commit, &m1, &env);
+    let out = git(&launcher, &commit, &m1, &env);
     assert_ne!(out.code, Some(0), "{out:#?}");
     assert!(out.stderr.contains("Operation not permitted"), "{out:#?}");
     assert_eq!(
@@ -68,12 +68,6 @@ fn a_commit_in_the_jail_leaves_git_unchanged() {
         "the jailed commit changed .git"
     );
     // The file the agent edits stays the agent's to change.
-    let status = run(
-        &launcher,
-        "/usr/bin/git",
-        &["status", "--porcelain"],
-        &m1,
-        &env,
-    );
+    let status = git(&launcher, &["status", "--porcelain"], &m1, &env);
     assert_eq!(status.assert_ok().stdout, " M brief.txt\n");
 }
