@@ -323,3 +323,44 @@ fn walk_first_lists_what_walk_lists_in_order_and_stops_past_the_limit() {
         assert_eq!(first.files, expected, "limit {limit}");
     }
 }
+
+/// `walk_first` keeps a folder that lists but cannot be entered as unread, as `walk` does,
+/// even when the cut falls where its files would be; the root not entering is an error.
+#[cfg(unix)]
+#[test]
+fn walk_first_keeps_a_folder_that_cannot_be_entered_as_unread() {
+    let dir = TestDir::new("walk-first-unenterable");
+    let root = dir.path();
+    put(root, "a.txt", 1);
+    put(root, "sub/b.txt", 1);
+    put(root, "sub/deeper/c.txt", 1);
+    put(root, "z/d.txt", 1);
+    let probe = NamedProbe(vec![]);
+    let first = |limit| walk_first(root, &NoDownload::begin(&probe), u64::MAX, limit).unwrap();
+    {
+        let _mode = Mode::set(&root.join("sub"), 0o444);
+        let all = first(100);
+        assert_eq!(paths(&all.files), ["a.txt", "z/d.txt"]);
+        assert_eq!(all.unread, ["sub"]);
+        let walked = walk(
+            root,
+            &NoDownload::begin(&probe),
+            u64::MAX,
+            None,
+            &mut |_| {},
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(all, walked);
+        // The cut falls inside `sub`: still nothing of it listed, the folder the entry past.
+        let cut = first(1);
+        assert_eq!(paths(&cut.files), ["a.txt"]);
+        assert_eq!(cut.unread, ["sub"]);
+    }
+    let _mode = Mode::set(root, 0o444);
+    let err = walk_first(root, &NoDownload::begin(&probe), u64::MAX, 100).unwrap_err();
+    assert!(
+        matches!(err, crate::Error::Io { op: "stat", .. }),
+        "{err:?}"
+    );
+}
