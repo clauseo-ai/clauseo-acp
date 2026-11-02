@@ -203,12 +203,13 @@ pub(crate) fn agent_info(response: acp::InitializeResponse) -> AgentInfo {
     let capabilities = response.agent_capabilities;
     let prompt = capabilities.prompt_capabilities;
     let session = capabilities.session_capabilities;
-    let (name, version) = response
-        .agent_info
-        .map_or((None, None), |info| (Some(info.name), Some(info.version)));
+    let (name, version, title) = response.agent_info.map_or((None, None, None), |info| {
+        (Some(info.name), Some(info.version), info.title)
+    });
     AgentInfo {
         name,
         version,
+        title,
         capabilities: AgentCapabilities {
             load_session: capabilities.load_session,
             prompt: PromptCapabilities {

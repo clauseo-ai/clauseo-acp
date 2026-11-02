@@ -24,6 +24,8 @@ pub struct AgentInfo {
     pub name: Option<String>,
     /// `agentInfo.version`; `None` when the agent sent no `agentInfo`.
     pub version: Option<String>,
+    /// `agentInfo.title`; `None` when the agent sent no `agentInfo` or no title.
+    pub title: Option<String>,
     /// What it supports. `steering` stays `None` until steer is built.
     pub capabilities: AgentCapabilities,
     /// How it signs in, in its order.
