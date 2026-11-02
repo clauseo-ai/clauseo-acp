@@ -27,8 +27,8 @@ pub struct Frontmatter {
     pub clauseo: BTreeMap<String, MetaValue>,
 }
 
-/// The frontmatter of `text` and the body after it, or what is wrong.
-pub fn parse(text: &str) -> Result<(Frontmatter, &str), String> {
+/// The frontmatter's text and the body after it.
+fn split(text: &str) -> Result<(&str, &str), String> {
     let rest = text
         .strip_prefix("---\n")
         .ok_or("the file does not start with a `---` line")?;
@@ -40,10 +40,15 @@ pub fn parse(text: &str) -> Result<(Frontmatter, &str), String> {
                 .map(|head| (head.len(), rest.len()))
         })
         .ok_or("the frontmatter has no closing `---` line")?;
-    let (head, body) = (
+    Ok((
         rest.get(..end.0).unwrap_or_default(),
         rest.get(end.1..).unwrap_or_default(),
-    );
+    ))
+}
+
+/// The frontmatter of `text` and the body after it, or what is wrong.
+pub fn parse(text: &str) -> Result<(Frontmatter, &str), String> {
+    let (head, body) = split(text)?;
     let mut name = None;
     let mut description = None;
     let mut clauseo = BTreeMap::new();
@@ -86,6 +91,48 @@ pub fn parse(text: &str) -> Result<(Frontmatter, &str), String> {
         },
         body,
     ))
+}
+
+/// The `description` of a frontmatter in any common YAML form, and the body after it, for a
+/// skill whose text is not Clauseo's (stetdoc's own): every other key is ignored, so the
+/// renderer can write `name` and `description` alone. The value may be bare, single- or
+/// double-quoted, folded (`>`) or literal (`|`), or a bare value continued on indented lines.
+pub fn lenient_description(text: &str) -> Result<(String, &str), String> {
+    let (head, body) = split(text)?;
+    let mut lines = head.lines().peekable();
+    while let Some(line) = lines.next() {
+        let Some(value) = line.strip_prefix("description:") else {
+            continue;
+        };
+        let value = value.trim();
+        let mut more = Vec::new();
+        while let Some(next) = lines.next_if(|next| next.starts_with([' ', '\t'])) {
+            more.push(next.trim());
+        }
+        let description = if value.starts_with('|') {
+            more.join("\n")
+        } else if value.is_empty() || value.starts_with('>') {
+            more.join(" ")
+        } else if let Some(inner) = value.strip_prefix('\'') {
+            inner
+                .strip_suffix('\'')
+                .ok_or_else(|| format!("the value `{value}` has no closing quote"))?
+                .replace("''", "'")
+        } else if value.starts_with('"') {
+            scalar(value)?
+        } else {
+            std::iter::once(value)
+                .chain(more)
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        let description = description.trim().to_owned();
+        if description.is_empty() {
+            return Err("the `description` is empty".to_owned());
+        }
+        return Ok((description, body));
+    }
+    Err("no `description`".to_owned())
 }
 
 /// Where the parser is.
@@ -174,6 +221,33 @@ mod tests {
         assert_eq!(front.description, r#"say "hi" \ there"#);
         assert!(front.clauseo.is_empty());
         assert_eq!(body, "body");
+    }
+
+    #[test]
+    fn a_description_is_read_from_any_common_form() {
+        for (text, want) in [
+            ("---\nname: x\ndescription: bare text\n---\nB", "bare text"),
+            (
+                "---\ndescription: 'it''s'\nallowed-tools: Bash\n---\nB",
+                "it's",
+            ),
+            ("---\ndescription: \"say \\\"hi\\\"\"\n---\nB", "say \"hi\""),
+            (
+                "---\ndescription: >\n  one\n  two\nname: y\n---\nB",
+                "one two",
+            ),
+            ("---\ndescription: |\n  one\n  two\n---\nB", "one\ntwo"),
+            ("---\ndescription: one\n  two\n---\nB", "one two"),
+        ] {
+            assert_eq!(
+                lenient_description(text),
+                Ok((want.to_owned(), "B")),
+                "{text}"
+            );
+        }
+        assert!(lenient_description("---\nname: x\n---\n").is_err());
+        assert!(lenient_description("---\ndescription:\n---\n").is_err());
+        assert!(lenient_description("no frontmatter").is_err());
     }
 
     #[test]

@@ -21,6 +21,53 @@ use crate::error::ProfileError;
 /// Numbers the temp files of one process, so two calls never pick the same name.
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
 
+/// The suffix of every temp file [`replace_if_differs`] makes: `.<name>.<pid>-<n>.tmp`.
+const TEMP_SUFFIX: &str = ".tmp";
+
+/// Whether `name` is one of [`replace_if_differs`]'s temp files: `.`, a name, `.`, digits,
+/// `-`, digits, `.tmp`.
+pub(crate) fn is_temp_name(name: &str) -> bool {
+    let Some(inner) = name
+        .strip_prefix('.')
+        .and_then(|rest| rest.strip_suffix(TEMP_SUFFIX))
+    else {
+        return false;
+    };
+    let Some((stem, number)) = inner.rsplit_once('.') else {
+        return false;
+    };
+    let Some((pid, n)) = number.split_once('-') else {
+        return false;
+    };
+    !stem.is_empty()
+        && [pid, n]
+            .iter()
+            .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
+/// Removes the temp files a crashed write left in `dir` and, when `deep`, in its subfolders,
+/// never following a symlink. Only names [`is_temp_name`] matches go. A missing `dir` is no
+/// error; a file that will not go is logged and left.
+pub(crate) fn sweep_temps(dir: &Path, deep: bool) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
+        let path = entry.path();
+        if kind.is_dir() && deep {
+            sweep_temps(&path, true);
+        } else if kind.is_file()
+            && entry.file_name().to_str().is_some_and(is_temp_name)
+            && let Err(err) = std::fs::remove_file(&path)
+        {
+            tracing::warn!(path = %path.display(), %err, "a leftover temp file stays");
+        }
+    }
+}
+
 /// `fs::create_dir_all`.
 pub(crate) fn create_dir_all(path: &Path) -> Result<(), ProfileError> {
     std::fs::create_dir_all(path).map_err(|err| ProfileError::io("create", path, err))
@@ -49,7 +96,7 @@ pub(crate) fn replace_if_differs(target: &Path, bytes: &[u8]) -> Result<bool, Pr
     create_dir_all(dir)?;
     let name = target.file_name().unwrap_or_default().to_string_lossy();
     let n = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
-    let temp = dir.join(format!(".{name}.{}-{n}.tmp", std::process::id()));
+    let temp = dir.join(format!(".{name}.{}-{n}{TEMP_SUFFIX}", std::process::id()));
     let written = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -60,5 +107,16 @@ pub(crate) fn replace_if_differs(target: &Path, bytes: &[u8]) -> Result<bool, Pr
         let _gone = std::fs::remove_file(&temp);
         return Err(ProfileError::io("write", target, err));
     }
+    sync_dir(dir);
     Ok(true)
 }
+
+/// Syncs the folder `dir`, so a rename in it survives a power cut. A failure is no error.
+#[cfg(unix)]
+fn sync_dir(dir: &Path) {
+    let _synced = std::fs::File::open(dir).and_then(|folder| folder.sync_all());
+}
+
+/// Nothing on Windows: a folder cannot be opened as a file there, and NTFS journals the rename.
+#[cfg(not(unix))]
+fn sync_dir(_dir: &Path) {}

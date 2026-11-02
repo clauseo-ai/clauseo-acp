@@ -3,25 +3,41 @@
 
 use std::path::{Path, PathBuf};
 
+use clauseo_profile::claude::{OPTION_KEYS, SETTINGS_KEYS};
 use clauseo_profile::instructions::{TOOLS, word_count};
 use clauseo_profile::placeholders::{
-    self, BROWSER_EXECUTABLE, IN_INSTRUCTIONS, IN_SERVERS, MATTER_NOTES, PROXY_PORT, SESSION_DIR,
+    self, BROWSER_DIR, BROWSER_EXECUTABLE, IN_INSTRUCTIONS, IN_SERVERS, MATTER_NOTES, PROXY_PORT,
     SESSION_ID, WORK_FOLDER,
 };
-use clauseo_profile::{BrowserSidecars, ClauseoProfile, CodexConfig, ProfilePaths};
+use clauseo_profile::{BrowserSidecars, ClauseoProfile, CodexConfig, ProfileError, ProfilePaths};
 use clauseo_protocol::AgentKind;
 use clauseo_settings::Locations;
 use serde_json::{Map, Value, json};
 
-fn paths() -> ProfilePaths {
+/// `path` made absolute on this OS: as it is on Unix, on drive `C:` on Windows.
+fn abs(path: &str) -> PathBuf {
+    if cfg!(windows) {
+        PathBuf::from(format!("C:{path}"))
+    } else {
+        PathBuf::from(path)
+    }
+}
+
+fn paths_with(app: &str, stetdoc: &str, sidecars: &str) -> Result<ProfilePaths, ProfileError> {
     ProfilePaths::new(
         &Locations::under_root(Path::new("/data")),
-        PathBuf::from("/app/stetdoc/stetdoc"),
+        abs(app),
+        abs(stetdoc),
         BrowserSidecars {
-            clauseo_mcp: PathBuf::from("/app/clauseo-mcp"),
-            agent_browser: PathBuf::from("/app/agent-browser"),
+            clauseo_mcp: abs(&format!("{sidecars}/clauseo-mcp")),
+            agent_browser: abs(&format!("{sidecars}/agent-browser")),
         },
     )
+}
+
+#[cfg(test)]
+fn paths() -> ProfilePaths {
+    paths_with("/app/clauseo", "/app/stetdoc/stetdoc", "/app").unwrap()
 }
 
 fn profile() -> ClauseoProfile {
@@ -53,16 +69,13 @@ fn no_name_is_clauseo_and_a_name_loses_what_a_shell_or_the_host_would_act_on() {
         paths(),
         Some("  A. \"Mehta\" $(rm) `x` {session_id}\n".into()),
     );
-    assert_eq!(named.author(), "A. Mehta (rm) x session_id");
+    assert_eq!(named.author(), "A. Mehta rm x sessionid");
     assert!(
         named
             .instructions()
-            .contains("--author \"A. Mehta (rm) x session_id\"")
+            .contains("--author \"A. Mehta rm x sessionid\"")
     );
-    assert_eq!(
-        named.env().0["STETDOC_AUTHOR"],
-        "A. Mehta (rm) x session_id"
-    );
+    assert_eq!(named.env().0["STETDOC_AUTHOR"], "A. Mehta rm x sessionid");
     assert_eq!(
         ClauseoProfile::new(paths(), Some("\"$`".into())).author(),
         "Clauseo"
@@ -70,11 +83,48 @@ fn no_name_is_clauseo_and_a_name_loses_what_a_shell_or_the_host_would_act_on() {
 }
 
 #[test]
+fn the_author_keeps_letters_marks_digits_and_four_marks_of_punctuation_only() {
+    for (given, kept) in [
+        ("O'Brien-Smith, Jr.", "O'Brien-Smith, Jr."),
+        // PowerShell reads curly quotes as quotes; cmd expands %VAR%.
+        (
+            "\u{201C}A\u{201D} \u{201E}B %USERPROFILE%",
+            "A B USERPROFILE",
+        ),
+        // Bidi controls and zero-width characters go.
+        ("Ana\u{202E}lis\u{2066}\u{200B}", "Analis"),
+        // Devanagari keeps its vowel signs and virama.
+        (
+            "\u{0930}\u{093E}\u{092E}\u{094D} 2",
+            "\u{0930}\u{093E}\u{092E}\u{094D} 2",
+        ),
+        ("Zo\u{0065}\u{0308}", "Zo\u{0065}\u{0308}"),
+        ("<>|&;()*?~#^=+/\\:", "Clauseo"),
+    ] {
+        assert_eq!(
+            ClauseoProfile::new(paths(), Some(given.into())).author(),
+            kept,
+            "{given}"
+        );
+    }
+}
+
+#[test]
 fn the_claude_fragment_holds_only_the_profiles_keys() {
     let meta = profile().session_meta(Some(AgentKind::Claude)).unwrap();
     let options = meta["claudeCode"]["options"].as_object().unwrap();
-    let keys: Vec<&str> = options.keys().map(String::as_str).collect();
-    assert_eq!(keys, ["allowedTools", "plugins", "settings"]);
+    assert!(
+        options
+            .keys()
+            .all(|key| OPTION_KEYS.contains(&key.as_str()))
+    );
+    assert!(
+        options["settings"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .all(|key| SETTINGS_KEYS.contains(&key.as_str()))
+    );
     for forced in [
         "strictMcpConfig",
         "settingSources",
@@ -90,9 +140,22 @@ fn the_claude_fragment_holds_only_the_profiles_keys() {
 }
 
 #[test]
+fn a_settings_key_outside_the_list_never_reaches_the_fragment() {
+    let options = profile()
+        .claude_options()
+        .with_setting("hooks", json!({"PreToolUse": []}))
+        .with_setting("disableAllHooks", json!(true));
+    let meta = options.meta_fragment();
+    assert_eq!(
+        meta["claudeCode"]["options"]["settings"],
+        json!({"disableSkillShellExecution": true})
+    );
+}
+
+#[test]
 fn the_allow_list_is_the_browser_and_stetdocs_read_only_commands() {
     assert_eq!(
-        profile().claude_options().allowed_tools,
+        profile().claude_options().allowed_tools(),
         [
             "mcp__browser",
             "Bash(stetdoc view:*)",
@@ -103,8 +166,8 @@ fn the_allow_list_is_the_browser_and_stetdocs_read_only_commands() {
         ]
     );
     assert_eq!(
-        profile().claude_options().disallowed_tools,
-        Vec::<String>::new()
+        profile().claude_options().disallowed_tools(),
+        Vec::<String>::new().as_slice()
     );
 }
 
@@ -138,6 +201,26 @@ fn reserved_codex_keys_never_leave_the_profile() {
 }
 
 #[test]
+fn a_dotted_codex_key_is_dropped_since_codex_reads_it_as_a_path() {
+    let mut keys = Map::new();
+    for key in [
+        "hooks.PreToolUse",
+        "mcp_servers.evil",
+        "features.apps",
+        "model.x",
+        "bypass_hook_trust",
+    ] {
+        keys.insert(key.to_owned(), json!(true));
+    }
+    keys.insert("developer_instructions".to_owned(), json!("x"));
+    let config = CodexConfig::new(keys);
+    assert_eq!(
+        config.keys().keys().collect::<Vec<_>>(),
+        ["developer_instructions"]
+    );
+}
+
+#[test]
 fn kind_specific_parts_go_only_to_their_kind() {
     let profile = profile();
     assert!(profile.session_meta(Some(AgentKind::Codex)).is_none());
@@ -157,15 +240,16 @@ fn the_browser_entry_runs_the_guard_with_four_variables() {
         .servers(Some(AgentKind::Claude))
         .try_into()
         .unwrap();
-    assert_eq!(browser.command, PathBuf::from("/app/clauseo-mcp"));
+    assert_eq!(browser.command, abs("/app/clauseo-mcp"));
+    let agent_browser = abs("/app/agent-browser").to_string_lossy().into_owned();
     assert_eq!(
         browser.args,
         [
             "browser-guard",
             "--agent-browser",
-            "/app/agent-browser",
+            agent_browser.as_str(),
             "--cwd",
-            "{session_dir}/browser",
+            "{browser_dir}",
             "--",
             "mcp",
             "--tools",
@@ -222,21 +306,26 @@ fn every_token_the_profile_sends_is_one_the_host_is_told_to_fill() {
 #[test]
 fn a_folder_named_like_a_token_stays_literal_and_json_escapes_it() {
     // The host fills decoded strings, then its encoder escapes them: here JSON.
-    let folder = r#"/Users/a "b"/{session_id}"#;
-    let filled = placeholders::fill(
-        "--cwd {session_dir}/browser",
-        &IN_SERVERS,
-        &[
-            (SESSION_DIR, folder),
+    let folder = r#"/Users/a "b"/{session_id}/browser"#;
+    let values = |folder| {
+        [
+            (BROWSER_DIR, folder),
             (SESSION_ID, "s1"),
             (PROXY_PORT, "1"),
             (BROWSER_EXECUTABLE, "/c"),
-        ],
-    )
-    .unwrap();
-    assert_eq!(filled, r#"--cwd /Users/a "b"/{session_id}/browser"#);
+        ]
+    };
+    let filled = placeholders::fill("{browser_dir}", &IN_SERVERS, &values(folder)).unwrap();
+    assert_eq!(filled, folder);
     let encoded = Value::String(filled).to_string();
-    assert_eq!(encoded, r#""--cwd /Users/a \"b\"/{session_id}/browser""#);
+    assert_eq!(encoded, r#""/Users/a \"b\"/{session_id}/browser""#);
+    // A Windows folder, as the host fills it: native separators, no `\\?\` prefix, one
+    // whole argument with its spaces.
+    let windows = r"C:\Users\A B\AppData\Roaming\Clauseo\run\{session_id}\browser";
+    assert_eq!(
+        placeholders::fill("{browser_dir}", &IN_SERVERS, &values(windows)).unwrap(),
+        windows
+    );
     let instructions = placeholders::fill(
         &profile().instructions(),
         &IN_INSTRUCTIONS,
@@ -265,5 +354,83 @@ fn an_unfillable_instruction_token_is_an_error_the_host_fails_the_launch_on() {
 
 #[test]
 fn stetdocs_own_folder_goes_first_on_path() {
-    assert_eq!(profile().path_prepend(), Path::new("/app/stetdoc"));
+    assert_eq!(
+        profile().path_prepend(),
+        Some(abs("/app/stetdoc").as_path())
+    );
+}
+
+#[test]
+fn a_stetdoc_folder_shared_with_other_programs_goes_nowhere_on_path() {
+    // Beside the browser sidecars (Tauri's externalBin), or beside the app itself.
+    let beside_sidecars = paths_with("/app/clauseo", "/bin/stetdoc", "/bin").unwrap();
+    assert_eq!(beside_sidecars.path_prepend(), None);
+    let beside_app = paths_with("/app/clauseo", "/app/stetdoc-bin", "/sidecars").unwrap();
+    assert_eq!(beside_app.path_prepend(), None);
+    // In the root: never on PATH.
+    assert_eq!(
+        paths_with("/app/clauseo", "/stetdoc", "/app")
+            .unwrap()
+            .path_prepend(),
+        None
+    );
+}
+
+#[test]
+fn a_relative_program_path_is_refused() {
+    let relative = ProfilePaths::new(
+        &Locations::under_root(Path::new("/data")),
+        abs("/app/clauseo"),
+        PathBuf::from("stetdoc"),
+        BrowserSidecars {
+            clauseo_mcp: abs("/app/clauseo-mcp"),
+            agent_browser: abs("/app/agent-browser"),
+        },
+    );
+    assert!(
+        matches!(relative, Err(ProfileError::Path { .. })),
+        "{relative:?}"
+    );
+    // A drive-relative Windows path is not absolute on any OS.
+    let drive_relative = ProfilePaths::new(
+        &Locations::under_root(Path::new("/data")),
+        abs("/app/clauseo"),
+        PathBuf::from(r"C:stetdoc\stetdoc.exe"),
+        BrowserSidecars {
+            clauseo_mcp: abs("/app/clauseo-mcp"),
+            agent_browser: abs("/app/agent-browser"),
+        },
+    );
+    assert!(drive_relative.is_err());
+}
+
+/// Windows paths: separators of both kinds and any case name the same folder.
+#[cfg(windows)]
+#[test]
+fn a_windows_stetdoc_folder_matches_a_sidecar_folder_in_any_case_and_separator() {
+    let paths = ProfilePaths::new(
+        &Locations::under_root(Path::new(r"C:\data")),
+        PathBuf::from(r"C:\Program Files\Clauseo\clauseo.exe"),
+        PathBuf::from(r"c:/program files/clauseo/stetdoc.exe"),
+        BrowserSidecars {
+            clauseo_mcp: PathBuf::from(r"C:\Program Files\Clauseo\clauseo-mcp.exe"),
+            agent_browser: PathBuf::from(r"C:\Program Files\Clauseo\agent-browser.exe"),
+        },
+    )
+    .unwrap();
+    assert_eq!(paths.path_prepend(), None);
+    let own = ProfilePaths::new(
+        &Locations::under_root(Path::new(r"C:\data")),
+        PathBuf::from(r"C:\Program Files\Clauseo\clauseo.exe"),
+        PathBuf::from(r"C:\Program Files\Clauseo\stetdoc\stetdoc.exe"),
+        BrowserSidecars {
+            clauseo_mcp: PathBuf::from(r"C:\Program Files\Clauseo\clauseo-mcp.exe"),
+            agent_browser: PathBuf::from(r"C:\Program Files\Clauseo\agent-browser.exe"),
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        own.path_prepend(),
+        Some(Path::new(r"C:\Program Files\Clauseo\stetdoc"))
+    );
 }

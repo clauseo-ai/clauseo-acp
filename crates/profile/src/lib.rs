@@ -28,6 +28,7 @@ mod write;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use clauseo_protocol::AgentKind;
 use serde_json::{Map, Value};
@@ -38,7 +39,7 @@ pub use error::ProfileError;
 pub use instructions::Instructions;
 pub use paths::{BrowserSidecars, ProfilePaths};
 pub use servers::ProfileServer;
-pub use skills::{RenderReport, Rendered, SkillFile, SkillSource};
+pub use skills::{RenderReport, Rendered, RenderedSkill, SkillFile, SkillSource};
 
 /// The variable stetdoc reads its author from when `--author` is absent.
 pub const STETDOC_AUTHOR: &str = "STETDOC_AUTHOR";
@@ -68,7 +69,7 @@ pub struct ClauseoProfile {
     paths: ProfilePaths,
     author: String,
     instructions: Instructions,
-    skills: Rendered,
+    skills: Arc<Rendered>,
 }
 
 impl ClauseoProfile {
@@ -81,16 +82,20 @@ impl ClauseoProfile {
             paths,
             author: instructions::author_name(&author.unwrap_or_default()),
             instructions: Instructions::tools(),
-            skills: Rendered::default(),
+            skills: Arc::default(),
         }
     }
 
     /// The same profile with `skills` rendered once, here, for every later
     /// [`Self::skill_files`]: stetdoc's from [`skills::stetdoc::load_skill`] (run before, off
-    /// the host thread), and R22's built-ins.
-    pub fn with_skills(mut self, skills: &[SkillSource]) -> Result<Self, ProfileError> {
-        self.skills = skills::render(skills)?;
-        Ok(self)
+    /// the host thread), and R22's built-ins. A skill the renderer refuses is left out with a
+    /// warning ([`skills::render_each`]), so a bad stetdoc text never costs the other skills;
+    /// the refusals are returned for the caller to log or show.
+    #[must_use]
+    pub fn with_skills(mut self, skills: &[SkillSource]) -> (Self, Vec<ProfileError>) {
+        let (rendered, refused) = skills::render_each(skills);
+        self.skills = Arc::new(rendered);
+        (self, refused)
     }
 
     /// The same profile with `instructions` (R22: `Instructions::tools().with_part(LEGAL)`).
@@ -152,53 +157,78 @@ impl ClauseoProfile {
         )]))
     }
 
-    /// The folder to put first on the agents' `PATH`.
-    pub fn path_prepend(&self) -> &Path {
+    /// The folder to put first on the agents' `PATH`, or none when stetdoc's folder holds
+    /// other programs ([`ProfilePaths::path_prepend`]).
+    pub fn path_prepend(&self) -> Option<&Path> {
         self.paths.path_prepend()
     }
 
     /// The skills for an agent of `kind`, as data to write before its launch: Claude's into the
     /// plugin (with the plugin's manifest); none for Codex while [`CODEX_SKILLS`] is off, and none
-    /// for an agent with no kind. Pure and cheap: what [`Self::with_skills`] rendered, cloned,
-    /// with no file read and no process. The launch-prep thread hands it to [`write_skills`].
+    /// for an agent with no kind. Pure and cheap: what [`Self::with_skills`] rendered, shared
+    /// through an `Arc`, with no file read, no process and no copy of the bytes. The
+    /// launch-prep thread hands it to [`write_skills`].
     pub fn skill_files(&self, kind: Option<AgentKind>) -> Option<SkillWrite> {
         let (root, plugin) = match kind? {
             AgentKind::Claude => (
                 self.paths.claude_skills(),
-                Some(
-                    self.paths
-                        .claude_plugin
-                        .join(".claude-plugin")
-                        .join("plugin.json"),
-                ),
+                Some(self.paths.claude_plugin.clone()),
             ),
             AgentKind::Codex if CODEX_SKILLS => (self.paths.codex_skills.clone(), None),
             AgentKind::Codex => return None,
         };
         Some(SkillWrite {
             root,
-            plugin_manifest: plugin,
-            rendered: self.skills.clone(),
+            plugin,
+            rendered: Arc::clone(&self.skills),
         })
     }
 }
 
-/// Skills to write into one agent's skills folder.
+/// Skills to write into one agent's skills folder. Only [`ClauseoProfile::skill_files`] makes
+/// one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SkillWrite {
-    /// The skills folder.
-    pub root: PathBuf,
-    /// Where Claude's plugin manifest goes; none for Codex.
-    pub plugin_manifest: Option<PathBuf>,
-    /// The skills.
-    pub rendered: Rendered,
+    root: PathBuf,
+    plugin: Option<PathBuf>,
+    rendered: Arc<Rendered>,
 }
 
-/// Writes `skills` (and the plugin manifest, when there is one) with [`skills::write_rendered`].
-/// Reads and writes files: on the launch-prep thread, never the host's.
-pub fn write_skills(skills: &SkillWrite) -> Result<RenderReport, ProfileError> {
-    if let Some(manifest) = &skills.plugin_manifest {
-        write::replace_if_differs(manifest, PLUGIN_MANIFEST.as_bytes())?;
+impl SkillWrite {
+    /// The skills folder.
+    pub fn root(&self) -> &Path {
+        &self.root
     }
-    skills::write_rendered(&skills.root, &skills.rendered)
+
+    /// Claude's plugin folder, whose `.claude-plugin/plugin.json` the write keeps; none for
+    /// Codex.
+    pub fn plugin(&self) -> Option<&Path> {
+        self.plugin.as_deref()
+    }
+
+    /// The skills.
+    pub fn rendered(&self) -> &Rendered {
+        &self.rendered
+    }
+}
+
+/// The plugin manifest's folder and file under the plugin folder.
+const PLUGIN_MANIFEST_PATH: [&str; 2] = [".claude-plugin", "plugin.json"];
+
+/// Writes `skills` (and the plugin manifest, when there is one) as [`skills::write_rendered`]
+/// does, under the same process-wide lock, and through no symlink. Reads and writes files: on
+/// the launch-prep thread, never the host's.
+///
+/// The host logs an error from here as a warning and never fails a launch on it: the agent then
+/// runs with the skills the folder already holds, or none.
+pub fn write_skills(skills: &SkillWrite) -> Result<RenderReport, ProfileError> {
+    let _held = skills::write_lock();
+    if let Some(plugin) = &skills.plugin {
+        skills::no_links(plugin, &PLUGIN_MANIFEST_PATH)?;
+        skills::no_links(plugin, &["skills"])?;
+        let [folder, file] = PLUGIN_MANIFEST_PATH;
+        write::sweep_temps(&plugin.join(folder), false);
+        write::replace_if_differs(&plugin.join(folder).join(file), PLUGIN_MANIFEST.as_bytes())?;
+    }
+    skills::write_unlocked(&skills.root, &skills.rendered)
 }

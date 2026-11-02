@@ -11,28 +11,39 @@ pub struct CodexConfig(Map<String, Value>);
 
 impl CodexConfig {
     /// Top-level keys the profile never sends: the hooks seam (the guard's one `PreToolUse`
-    /// group), MCP servers (they go in `session/new`), R15's override tables, and the host's
-    /// `web_search`, which follows `tools.web_search`.
-    pub const RESERVED: [&'static str; 6] = [
+    /// group), MCP servers (they go in `session/new`), R15's override tables, the host's
+    /// `web_search`, which follows `tools.web_search`, and `bypass_hook_trust`, which
+    /// codex-acp reads straight from the request (codex `rust-v0.162.1`,
+    /// `codex-rs/app-server/src/config_manager.rs:438`).
+    pub const RESERVED: [&'static str; 7] = [
         "hooks",
         "mcp_servers",
         "features",
         "cloud",
         "skills",
         "web_search",
+        "bypass_hook_trust",
     ];
 
-    /// `keys` less every [`Self::RESERVED`] key, each dropped with a warning.
+    /// `keys` less every key that could reach a reserved table, each dropped with a warning: a
+    /// key holding `.`, and a key whose first `.`-separated part is one of [`Self::RESERVED`].
+    ///
+    /// codex reads each request key as a dotted path (at `rust-v0.162.1`,
+    /// `codex-rs/app-server/src/config_manager.rs:446-454` chains the request's keys into the
+    /// CLI overrides, and `codex-rs/config/src/overrides.rs:18-22` splits each on `.`), so
+    /// `"hooks.PreToolUse"` would write into `hooks`. The host's merge must treat keys the
+    /// same way: a dotted key from anywhere is a clash with its first part.
     pub fn new(mut keys: Map<String, Value>) -> Self {
         keys.retain(|key, _| {
-            let reserved = Self::RESERVED.contains(&key.as_str());
-            if reserved {
+            let first = key.split('.').next().unwrap_or_default();
+            let refused = key.contains('.') || Self::RESERVED.contains(&first);
+            if refused {
                 tracing::warn!(
                     key,
-                    "a reserved CODEX_CONFIG key from the profile is dropped"
+                    "a reserved or dotted CODEX_CONFIG key from the profile is dropped"
                 );
             }
-            !reserved
+            !refused
         });
         Self(keys)
     }

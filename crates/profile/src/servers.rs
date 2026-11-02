@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use crate::paths::ProfilePaths;
-use crate::placeholders::{BROWSER_EXECUTABLE, PROXY_PORT, SESSION_DIR, SESSION_ID};
+use crate::placeholders::{BROWSER_DIR, BROWSER_EXECUTABLE, PROXY_PORT, SESSION_ID};
 
 /// The reserved server name: a `mcp.servers.browser` entry in the settings is dropped.
 pub const BROWSER: &str = "browser";
@@ -25,7 +25,8 @@ pub struct ProfileServer {
 }
 
 /// The `browser` entry. The command is `clauseo-mcp`; its `browser-guard` runs agent-browser's
-/// `mcp --tools core` with `--cwd` the session's browser state folder, and derives from it and
+/// `mcp --tools core` with `--cwd` the session's browser state folder (`{browser_dir}`, one
+/// token the host fills with a native path), and derives from it and
 /// the proxy every other folder and proxy variable agent-browser needs (downloads, socket,
 /// screenshots, `HOME`, `TMPDIR` or `TEMP`), so the entry carries exactly four variables. A
 /// sidecar path that is no UTF-8 is written lossily: the host's launch would then fail, which is
@@ -40,7 +41,7 @@ pub fn browser(paths: &ProfilePaths) -> ProfileServer {
             "--agent-browser".to_owned(),
             agent_browser,
             "--cwd".to_owned(),
-            format!("{SESSION_DIR}/browser"),
+            BROWSER_DIR.to_owned(),
             "--".to_owned(),
             "mcp".to_owned(),
             "--tools".to_owned(),
