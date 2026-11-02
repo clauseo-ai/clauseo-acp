@@ -66,9 +66,15 @@ pub(crate) fn mark_start() {
     T0_EPOCH_MS.get_or_init(epoch_ms);
 }
 
-/// Adds `len` bytes, one channel message sent (its release length), to the total.
+/// Adds `len` bytes, one channel message's release length, to the total. Called before the
+/// message is sent; a send that fails calls `uncount_channel_bytes` for it.
 pub(crate) fn count_channel_bytes(len: usize) {
     CHANNEL_BYTES.fetch_add(len as u64, Ordering::Relaxed);
+}
+
+/// Takes back `len` bytes that `count_channel_bytes` added for a message that was not sent.
+pub(crate) fn uncount_channel_bytes(len: usize) {
+    CHANNEL_BYTES.fetch_sub(len as u64, Ordering::Relaxed);
 }
 
 /// The window's initialization script: the page's perf globals, set before any page script.

@@ -90,16 +90,19 @@ impl Window {
 
     /// Sends `messages` in order. Stops at the first that fails: the webview is gone. The e2e
     /// build adds each message's release length (`Frame::release_len`: a `timed` message
-    /// without its wrapper) to `perf_channel_bytes`'s total once it is sent. Flow control
-    /// counts the wrapped length, in `WindowState`.
+    /// without its wrapper) to `perf_channel_bytes`'s total before it is sent, so a reader
+    /// that has the message can read the total; a send that fails takes its length back.
+    /// Flow control counts the wrapped length, in `WindowState`.
     fn send(&self, messages: Vec<Frame>) -> bool {
         messages.into_iter().all(|message| {
             #[cfg(feature = "e2e")]
             let len = message.release_len();
+            #[cfg(feature = "e2e")]
+            crate::e2e::count_channel_bytes(len);
             let sent = self.channel.send(message).is_ok();
             #[cfg(feature = "e2e")]
-            if sent {
-                crate::e2e::count_channel_bytes(len);
+            if !sent {
+                crate::e2e::uncount_channel_bytes(len);
             }
             sent
         })
