@@ -6,6 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{MAIN_SEPARATOR, Path};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use clauseo_host::HostHandle;
@@ -43,12 +44,17 @@ const MODE_OPTIONS: [&str; 4] = [
     "exit-plan-clear-auto",
 ];
 
+/// A window's stream, with the number of the `open_stream` call that made it.
+type Numbered = (u64, Arc<Mutex<Window>>);
+
 /// What the commands share: the host, the windows and the folder refs issued.
 pub(crate) struct Bridge {
     /// Where the host's start lands.
     cell: Arc<HostCell>,
     /// Each window's stream, by webview label.
-    windows: Mutex<HashMap<String, Arc<Mutex<Window>>>>,
+    windows: Mutex<HashMap<String, Numbered>>,
+    /// The number the next `open_stream` call takes, in the order the calls arrive.
+    opens: AtomicU64,
     /// The folder refs `pick_folder` issued in this run; `CreateMatter` takes no other.
     issued: Mutex<HashSet<FolderRefId>>,
 }
@@ -85,6 +91,7 @@ impl Bridge {
         Self {
             cell,
             windows: Mutex::new(HashMap::new()),
+            opens: AtomicU64::new(0),
             issued: Mutex::new(HashSet::new()),
         }
     }
@@ -200,19 +207,33 @@ impl Bridge {
     fn window(&self, label: &str) -> Result<Arc<Mutex<Window>>, HostError> {
         lock(&self.windows)
             .get(label)
-            .map(Arc::clone)
+            .map(|(_, window)| Arc::clone(window))
             .ok_or_else(|| invalid(format!("window {label} has not opened its stream")))
     }
 
     /// Makes `channel` the window's one channel. A window that had one (a page reload) drops
-    /// it and every subscription it had.
+    /// it and every subscription it had. Calls that wait together for the host's start (a
+    /// reload while it starts) wake in any order: the one that arrived last wins, so a dead
+    /// page's channel never replaces the new page's.
     pub(crate) async fn open_stream(
         &self,
         label: &str,
         channel: Channel<Frame>,
     ) -> Result<(), HostError> {
+        // Numbered before the wait: the order the calls arrived in, not the order they wake.
+        let number = self.opens.fetch_add(1, Ordering::Relaxed);
         let window = Window::open(self.host().await?.clone(), channel);
-        let old = lock(&self.windows).insert(label.to_owned(), window);
+        let mut windows = lock(&self.windows);
+        let newer = windows.get(label).is_some_and(|(kept, _)| *kept > number);
+        // A later call's window is in place: this one, a dead page's, is dropped instead.
+        let old = if newer {
+            Some(window)
+        } else {
+            windows
+                .insert(label.to_owned(), (number, window))
+                .map(|(_, old)| old)
+        };
+        drop(windows);
         drop(old);
         Ok(())
     }
