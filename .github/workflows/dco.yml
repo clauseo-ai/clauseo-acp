@@ -14,17 +14,22 @@ name: DCO
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+  # main's merge queue requires this check on each merge group; the job skips there (below).
+  merge_group:
 
 permissions:
   contents: read
 
 concurrency:
-  group: dco-${{ github.event.pull_request.number }}
+  group: dco-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 jobs:
   dco:
     name: DCO
+    # Skipped in the merge queue, which counts a skipped job as passing: every commit was checked
+    # on the pull request, which enters the queue only once its checks pass.
+    if: github.event_name != 'merge_group'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

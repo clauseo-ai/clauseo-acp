@@ -41,6 +41,9 @@ name: CI
 
 on:
   pull_request:
+  # A pull request in main's merge queue: the same jobs as on a pull request, run on main plus the
+  # pull requests queued ahead of it, so two green pull requests cannot break main together.
+  merge_group:
   push:
     branches: [main]
   # Nightly, on main: the tier-2 builds and the mutants of the last 24 hours.
@@ -54,7 +57,8 @@ permissions:
 # A pull request keeps only its newest run. Each push to main has a group of its own: in a shared
 # group, GitHub keeps one pending run and cancels it when a newer push arrives, even without
 # cancel-in-progress, so a commit merged between two others would never be checked. A nightly or
-# on-demand run has its own group too, so it never cancels or waits on the push of the same commit.
+# on-demand run has its own group too, so it never cancels or waits on the push of the same commit,
+# and so has each merge group (its own head commit).
 concurrency:
   group: ci-${{ github.event.pull_request.number || format('{0}-{1}', github.event_name, github.sha) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -85,17 +89,18 @@ jobs:
         run: bash .github/scripts/changes-test.sh
 
       # A push, the nightly run and a run on demand run everything; a pull request runs what its
-      # changed paths need (.github/scripts/changes.sh).
+      # changed paths need (.github/scripts/changes.sh), and so does a merge group, from main's
+      # commit it starts on to its head (the queued pull requests up to this one).
       - name: Decide which jobs run
         id: filter
         env:
           EVENT: ${{ github.event_name }}
           REPO_URL: ${{ github.server_url }}/${{ github.repository }}
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || format('refs/heads/{0}', github.event.pull_request.base.ref) }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
         run: |
           set -euo pipefail
-          if [ "$EVENT" != pull_request ]; then
+          if [ "$EVENT" != pull_request ] && [ "$EVENT" != merge_group ]; then
             printf '%s\n' rust=true app=true ui=true product=true | tee -a "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -103,7 +108,7 @@ jobs:
           git init -q "$RUNNER_TEMP/work"
           cd "$RUNNER_TEMP/work"
           git fetch -q --no-tags --filter=blob:none "$REPO_URL" \
-            "+refs/heads/${BASE_REF}:refs/ci/base" \
+            "+${BASE}:refs/ci/base" \
             "+${HEAD_SHA}:refs/ci/head"
           # --no-renames lists both sides of a rename, so a code file renamed to .md or moved under
           # docs/ still runs the builds.
@@ -167,7 +172,7 @@ jobs:
     # A job that only skips (a pull request without a Rust change) takes an ubuntu runner, which
     # starts fastest, never a macOS one: macOS runners are capped at 5 for the whole org. A failed
     # `changes` runs everything on the target's own runner.
-    runs-on: ${{ (github.event_name == 'pull_request' && needs.changes.result == 'success' && needs.changes.outputs.rust != 'true') && 'ubuntu-24.04' || matrix.runner }}
+    runs-on: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.changes.result == 'success' && needs.changes.outputs.rust != 'true' && 'ubuntu-24.04' || matrix.runner }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -179,7 +184,7 @@ jobs:
       # as in e2e-windows.yml's smoke.
       matrix:
         include: >-
-          ${{ fromJSON(github.event_name == 'pull_request'
+          ${{ fromJSON((github.event_name == 'pull_request' || github.event_name == 'merge_group')
             && '[{"target": "aarch64-apple-darwin", "runner": "macos-15", "native": true},
                  {"target": "x86_64-unknown-linux-gnu", "runner": "ubuntu-22.04", "native": true},
                  {"target": "x86_64-pc-windows-msvc", "runner": "windows-2025", "native": true}]'
@@ -194,10 +199,11 @@ jobs:
       TARGET: ${{ matrix.target }}
       EXE: clauseo-desktop${{ contains(matrix.target, '-windows-') && '.exe' || '' }}
       BUILD: ${{ needs.changes.result != 'success' || needs.changes.outputs.rust == 'true' }}
-      # The full-LTO release app: push to main, nightly and on demand.
-      RELEASE: ${{ github.event_name != 'pull_request' }}
+      # The full-LTO release app: push to main, nightly and on demand. A merge group runs what a
+      # pull request runs, here and in the matrix and runs-on above.
+      RELEASE: ${{ github.event_name != 'pull_request' && github.event_name != 'merge_group' }}
       # The ui is built for the release app, and on Linux for the debug app launched under xvfb.
-      UI: ${{ github.event_name != 'pull_request' || contains(matrix.target, '-linux-') }}
+      UI: ${{ (github.event_name != 'pull_request' && github.event_name != 'merge_group') || contains(matrix.target, '-linux-') }}
     defaults:
       run:
         shell: bash
@@ -498,8 +504,9 @@ jobs:
   reducer-bench:
     name: reducer-bench
     needs: changes
-    # Not a required check, so it may skip as a whole: on a pull request without a Rust change.
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.rust == 'true') }}
+    # Not a required check, so it may skip as a whole: on a pull request without a Rust change, and
+    # in the merge queue, where the pull request's own run already compared it with main.
+    if: ${{ !cancelled() && github.event_name != 'merge_group' && (needs.changes.result != 'success' || needs.changes.outputs.rust == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:

@@ -44,6 +44,8 @@ name: e2e-windows
 
 on:
   pull_request:
+  # A pull request in main's merge queue runs what a pull request runs (ci.yml).
+  merge_group:
   push:
     branches: [main]
   schedule:
@@ -53,8 +55,8 @@ on:
 permissions:
   contents: read
 
-# A pull request keeps only its newest run. Each push to main, nightly run and run on demand has a
-# group of its own, as in ci.yml.
+# A pull request keeps only its newest run. Each push to main, nightly run, run on demand and merge
+# group has a group of its own, as in ci.yml.
 concurrency:
   group: e2e-windows-${{ github.event.pull_request.number || format('{0}-{1}', github.event_name, github.sha) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -83,11 +85,12 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           REPO_URL: ${{ github.server_url }}/${{ github.repository }}
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          # A merge group diffs from main's commit it starts on to its head, as in ci.yml.
+          BASE: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || format('refs/heads/{0}', github.event.pull_request.base.ref) }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
         run: |
           set -euo pipefail
-          if [ "$EVENT" != pull_request ]; then
+          if [ "$EVENT" != pull_request ] && [ "$EVENT" != merge_group ]; then
             printf '%s\n' app=true product=true | tee -a "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -95,7 +98,7 @@ jobs:
           git init -q "$RUNNER_TEMP/work"
           cd "$RUNNER_TEMP/work"
           git fetch -q --no-tags --filter=blob:none "$REPO_URL" \
-            "+refs/heads/${BASE_REF}:refs/ci/base" \
+            "+${BASE}:refs/ci/base" \
             "+${HEAD_SHA}:refs/ci/head"
           # --no-renames lists both sides of a rename, so a file renamed out of an app path still
           # runs the smoke test.
@@ -108,15 +111,16 @@ jobs:
     if: ${{ !cancelled() }}
     # A pull request that leaves the app alone only skips, on an ubuntu runner, which starts faster
     # than a Windows one. A failed e2e-changes runs everything on Windows.
-    runs-on: ${{ (github.event_name == 'pull_request' && needs.e2e-changes.result == 'success' && needs.e2e-changes.outputs.app != 'true') && 'ubuntu-24.04' || matrix.runner }}
+    runs-on: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.e2e-changes.result == 'success' && needs.e2e-changes.outputs.app != 'true' && 'ubuntu-24.04' || matrix.runner }}
     timeout-minutes: 45
     strategy:
       fail-fast: false
-      # x64 always; ARM64 on every event but a pull request. One JSON list per case, because an
-      # `include` entry that matches no other entry is added as a combination of its own.
+      # x64 always; ARM64 on every event but a pull request or a merge group. One JSON list per
+      # case, because an `include` entry that matches no other entry is added as a combination of
+      # its own.
       matrix:
         include: >-
-          ${{ fromJSON(github.event_name == 'pull_request'
+          ${{ fromJSON((github.event_name == 'pull_request' || github.event_name == 'merge_group')
             && '[{"runner": "windows-2025", "target": "x86_64-pc-windows-msvc"}]'
             || '[{"runner": "windows-2025", "target": "x86_64-pc-windows-msvc"},
                  {"runner": "windows-11-arm", "target": "aarch64-pc-windows-msvc"}]') }}
@@ -124,12 +128,13 @@ jobs:
       # A failed decision runs everything, so the check always reports.
       RUN: ${{ needs.e2e-changes.result != 'success' || needs.e2e-changes.outputs.app == 'true' }}
       TARGET: ${{ matrix.target }}
-      # LTO off and 16 codegen units on a pull request and a push to main (x64), so main saves the
-      # Rust cache under the key pull requests look up (rust-cache hashes CARGO_* variables into
-      # it) and scoreboard-windows plays the same kind of build on both. Nightly, on demand and on
-      # ARM64: full LTO and 1 codegen unit, the shipping profile, under the full suite.
-      CARGO_PROFILE_RELEASE_LTO: ${{ (github.event_name == 'pull_request' || github.event_name == 'push') && matrix.runner == 'windows-2025' && 'false' || 'true' }}
-      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ (github.event_name == 'pull_request' || github.event_name == 'push') && matrix.runner == 'windows-2025' && '16' || '1' }}
+      # LTO off and 16 codegen units on a pull request, a merge group and a push to main (x64), so
+      # main saves the Rust cache under the key pull requests and merge groups look up (rust-cache
+      # hashes CARGO_* variables into it) and scoreboard-windows plays the same kind of build on
+      # both. Nightly, on demand and on ARM64: full LTO and 1 codegen unit, the shipping profile,
+      # under the full suite.
+      CARGO_PROFILE_RELEASE_LTO: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'push') && matrix.runner == 'windows-2025' && 'false' || 'true' }}
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'push') && matrix.runner == 'windows-2025' && '16' || '1' }}
       E2E_APP: ${{ github.workspace }}/target/${{ matrix.target }}/release/clauseo-desktop.exe
       # The scripted agent the window's specs launch through settings.json (fixture.ts).
       E2E_FAKE_AGENT: ${{ github.workspace }}/target/${{ matrix.target }}/release/fake_agent.exe
