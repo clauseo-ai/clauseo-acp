@@ -12,9 +12,11 @@
 // the switch (WKWebView's private _windowOcclusionDetectionEnabled; the probe goes on without it where it doesn't).
 // The layout widths are the ones measured.
 //
-// Precondition: run it with the screen awake and unlocked. A locked or sleeping screen hides every window to WebKit,
-// and where the switch is missing, so does another window covering the bottom left corner of the main screen
-// completely; either stops requestAnimationFrame, and the opacity checks of the dialogs then fail.
+// Precondition: run it with the screen awake and unlocked, and the main screen's bottom left corner not covered
+// completely by another window. A sleeping display stops the pages outright: each page after the display slept had no
+// load event in 20 s. `caffeinate -d -i -u pnpm probe:webkit` keeps the display awake. With the occlusion switch off, a
+// locked screen with the display awake passed all 140 pages (2026-11-02); where the switch is missing, a locked screen
+// or a covering window hides the window to WebKit, requestAnimationFrame stops, and the dialogs' opacity checks fail.
 //
 // A page fails when it doesn't answer within 3 s of its load event, logs an error, an unhandled rejection, a console
 // error or a CSP violation, or loses its content process. It answers once the room has its title, its wall's five
