@@ -113,25 +113,21 @@ pub fn later_variants() -> Vec<DomainEvent> {
             detail: Some("the matter folder holds a .codex folder".to_owned()),
         }
         .into(),
-        PageVisited {
-            thread: thread_id(2),
-            turn: turn_id(3),
-            tool_call_id: tool_call_id(4),
-            url: "https://example.com/brief".to_owned(),
-            title: None,
-            at: Timestamp::new(1_760_000_000_600).unwrap(),
-            via: PageVia::WebFetch,
-        }
+        PageVisited::new(
+            turn_id(3),
+            tool_call_id(4),
+            "https://example.com/brief",
+            None,
+            PageVia::WebFetch,
+        )
         .into(),
-        PageVisited {
-            thread: thread_id(2),
-            turn: turn_id(3),
-            tool_call_id: tool_call_id(4),
-            url: "https://example.com/codex".to_owned(),
-            title: Some("Codex page".to_owned()),
-            at: Timestamp::new(1_760_000_000_700).unwrap(),
-            via: PageVia::CodexOpenPage,
-        }
+        PageVisited::new(
+            turn_id(3),
+            tool_call_id(4),
+            "https://example.com/codex",
+            Some("Codex page".to_owned()),
+            PageVia::CodexOpenPage,
+        )
         .into(),
         TurnFailed {
             turn: turn_id(3),
@@ -302,28 +298,24 @@ fn streaming_events() -> Vec<DomainEvent> {
             },
         })
         .into(),
-        Box::new(WebSearchRecorded {
-            thread: thread_id(2),
+        Box::new(WebSearchRecorded::new(
             turn,
-            tool_call_id: tool_call_id(4),
-            agent: AgentId::new("claude-acp").unwrap(),
-            query: "limitation period contract claim".to_owned(),
-            results: vec![WebResult {
-                title: "Limitations Act, 2002".to_owned(),
-                url: "https://www.ontario.ca/laws/statute/02l24".to_owned(),
-            }],
-            at: Timestamp::new(1_760_000_000_000).unwrap(),
-        })
+            tool_call_id(4),
+            AgentId::new("claude-acp").unwrap(),
+            "limitation period contract claim",
+            vec![WebResult::new(
+                "Limitations Act, 2002",
+                "https://www.ontario.ca/laws/statute/02l24",
+            )],
+        ))
         .into(),
-        PageVisited {
-            thread: thread_id(2),
+        PageVisited::new(
             turn,
-            tool_call_id: tool_call_id(4),
-            url: "https://www.ontario.ca/laws/statute/02l24".to_owned(),
-            title: Some("Limitations Act, 2002".to_owned()),
-            at: Timestamp::new(1_760_000_000_500).unwrap(),
-            via: PageVia::Browser,
-        }
+            tool_call_id(4),
+            "https://www.ontario.ca/laws/statute/02l24",
+            Some("Limitations Act, 2002".to_owned()),
+            PageVia::Browser,
+        )
         .into(),
     ]
 }

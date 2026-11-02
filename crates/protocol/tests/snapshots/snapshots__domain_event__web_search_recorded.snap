@@ -4,9 +4,8 @@ expression: "event(\"web_search_recorded\")"
 ---
 {
   "web_search_recorded": {
-    "thread": "01900000-0000-7000-8000-000000000002",
     "turn": "01900000-0000-7000-8000-000000000003",
-    "tool_call_id": "01900000-0000-7000-8000-000000000004",
+    "tool_call": "01900000-0000-7000-8000-000000000004",
     "agent": "claude-acp",
     "query": "limitation period contract claim",
     "results": [
@@ -14,7 +13,6 @@ expression: "event(\"web_search_recorded\")"
         "title": "Limitations Act, 2002",
         "url": "https://www.ontario.ca/laws/statute/02l24"
       }
-    ],
-    "at": 1760000000000
+    ]
   }
 }

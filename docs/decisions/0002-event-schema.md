@@ -106,8 +106,8 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
 | `content_appended` | turn, message, acp_message_id?, kind, block (never text) | acp | yes | T |
 | `tool_call_started` | turn, tool_call, acp_id, title, kind, tool_name?, status, locations, raw_input?, raw_output?, content | acp | yes | T |
 | `tool_call_updated` | tool_call, patch (every field optional; lists replace wholesale) | acp; host on cancel | yes | T |
-| `web_search_recorded` | thread, turn, tool_call_id, agent (`AgentId`), query, results (`WebResult`s, may be empty), at | acp | yes | T |
-| `page_visited` | thread, turn, tool_call_id, url, title?, at, via (`PageVia`) | acp | yes | T |
+| `web_search_recorded` | turn, tool_call, agent (`AgentId`), query (cap 1,000 chars), results (`WebResult`s, at most 50, may be empty) | acp | yes | T |
+| `page_visited` | turn, tool_call, url, title?, via (`PageVia`) | acp | yes | T |
 | `permission_requested` | request, tool_call?, options, deliverable | acp | yes | T |
 | `permission_resolved` | request, choice, by, held_open? (0021) | host | yes | T |
 | `permission_expired` | request, reason | host | yes | T |
