@@ -6,7 +6,10 @@
 //! The app-wide feed (`subscribe_app`) has a pump of its own on the same channel. A restart
 //! the bridge makes (a pause's end, the watchdog) subscribes again, reads `GetSettings` and sends
 //! one `settings_changed` before the new pump starts, so the window never ends on a stale view
-//! though it missed events (0017's subscribe-then-read rule). The host refuses `subscribe_app`
+//! though it missed events (0017's subscribe-then-read rule). H4's `matters_changed` and
+//! `threads_changed` (not merged) go through as they come; when they land, the restart also
+//! needs their current lists, unless the host makes a subscription's first frame `all: true`.
+//! The host refuses `subscribe_app`
 //! only once it has stopped, so a failed restart is not retried: the window stops following it.
 //!
 //! Channel messages are sent while the window's lock is held, so the order the state counts them
