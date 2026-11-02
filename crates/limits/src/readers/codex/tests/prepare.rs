@@ -80,6 +80,8 @@ fn codex_home_is_forced_over_inherited_and_settings_values_in_any_case() {
         "cloud.skills.enabled=false",
         "-c",
         "skills.bundled.enabled=false",
+        "-c",
+        "skills.include_instructions=false",
     ]
     .map(OsString::from);
     let mut args = vec![codex_js.into_os_string()];

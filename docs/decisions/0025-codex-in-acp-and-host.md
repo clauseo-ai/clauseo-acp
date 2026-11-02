@@ -15,8 +15,12 @@ answers `loadSession: true` and `sessionCapabilities` `resume`, `list`, `close`,
 `additionalDirectories` and `subagents`; `promptCapabilities` `embeddedContext` and `image`. It
 reads `CODEX_CONFIG` with `JSON.parse` (`:45657-45660`) and sends it, less `hooks`, as the
 `config` of each thread start, resume and fork; `hooks` becomes one `-c hooks=…` at app-server
-start (`:45590-45601`). `INITIAL_AGENT_MODE` sets the first mode (`:34362-34367`). It sends
-`plan` and markdown `plan_update`, never item plans or `plan_removed`.
+start (`:45590-45601`). `INITIAL_AGENT_MODE` sets the first mode (`:34362-34367`). Its
+checklist plan (`turn/plan/updated`) goes as a standard `plan` update with every step
+(`:31712-31723`), whatever the client advertises. A proposed plan (a plan item's text) goes as a
+markdown `plan_update` to a client that advertises `plan` (`:29738-29748`, `:39794`), and as
+agent message text to one that does not (`:29655-29658`, `:44519-44523`). It never sends item
+`plan_update`s or `plan_removed`.
 
 ## Decision
 
@@ -33,21 +37,32 @@ start (`:45590-45601`). `INITIAL_AGENT_MODE` sets the first mode (`:34362-34367`
   win. Updates the agent sends meanwhile are held until the attach commit.
 - **`AcpClient::resume_session`** sends ACP v1's stable `session/resume`; nothing is replayed.
   The host loads when `loadSession` is set, else resumes when `sessionCapabilities.resume` is
-  set, else starts a new session. codex-acp 2.2.2 offers both load and resume, so a Codex thread
-  reopens with `session/load`, which replays.
+  set, else starts a new session. Found in codex-acp 2.2.2's source: it answers
+  `loadSession: true` as well as `sessionCapabilities.resume` (`dist/index.js:42416-42501`), so a
+  real Codex thread reopens with `session/load`, which replays (`:43068`); the resume path
+  serves an agent that offers resume alone.
 - **Plans.** `acp` keeps, per session, the id of the item plan updated last (`state.rs`); its
   `plan_update` shows as `AgentUpdate::Plan(entries)` and a `plan_removed` of it as an empty
   `Plan`. A removal of any other plan shows nothing, so no other plan's entries are kept. A whole
   `plan` replaces the shown item plan. Markdown and file plans stay
-  `ProtocolWarning::UnknownUpdate` until a protocol type exists.
+  `ProtocolWarning::UnknownUpdate` until a protocol type exists. Codex's checklist plans show:
+  they come as standard `plan` updates (scenario `codex-plan`). Clauseo keeps advertising
+  `plan`, so Codex's markdown proposed plans arrive as `plan_update` and show nothing yet; not
+  advertising it would turn them into answer text instead.
 - **`Locations::agent_home(agent)`** is `<data folder>/agents/<agent>/home`, never under the temp
   folder. The host makes it at launch (0700 on Unix) and passes it as `CODEX_HOME`; the limits
   reader reads the same home. It takes the id's text: `settings` does not depend on `protocol`.
 - **A Codex agent's launch env**, set over any settings or profile value of the same name:
   `INITIAL_AGENT_MODE=workspace-write`, `CODEX_HOME=<agent_home>`,
   `DISABLE_MCP_CONFIG_FILTERING=true`, and `CODEX_CONFIG`, a JSON object holding every one of
-  `clauseo_limits::CODEX_OVERRIDES` as nested keys (apps, plugins, skill MCP installs, cloud
-  skills and bundled skills off; bundled skills joined the list on #160's reasoning). The only
+  `clauseo_limits::CODEX_OVERRIDES` as nested keys: apps, plugins, skill MCP installs, cloud
+  skills and bundled skills off, and `skills.include_instructions=false`. The last two joined the
+  list on #160's reasoning, that Clauseo, not Codex, decides what a session loads. G8a found that
+  app-server lists the user's own skills from `~/.agents/skills`, which it finds through `HOME`,
+  not `CODEX_HOME`, and 5 system skills even with bundled skills off; with
+  `skills.include_instructions=false` the model gets no skill text (openai/codex
+  `rust-v0.162.1`, `ext/skills/src/extension.rs:196-198` and `:417`), though app-server still
+  lists the skills. The only
   keys a settings `CODEX_CONFIG` contributes are `model` and `model_reasoning_effort`, so a
   by-hand check can pick the cheapest model while no settings value can undo a switch.
 - **Every agent** is launched without the host's inherited `GIT_*` variables.

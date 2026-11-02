@@ -52,7 +52,7 @@ pub(crate) fn launch_env(
 
 /// The `CODEX_CONFIG` object: [`MODEL_KEYS`] from a settings `CODEX_CONFIG` that parses as a
 /// JSON object, then every one of `clauseo_limits::CODEX_OVERRIDES` (apps, plugins, skill MCP
-/// installs, cloud skills and bundled skills off) as nested keys over them, then `hooks`, the
+/// installs, cloud skills and bundled skills off, and no skills instructions) as nested keys over them, then `hooks`, the
 /// object the [hooks seam](crate::actor::turn) gives, when there is one.
 pub(crate) fn config(
     settings_env: &BTreeMap<String, String>,

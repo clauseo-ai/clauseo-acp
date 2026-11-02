@@ -22,7 +22,7 @@ fn switches() -> Value {
     json!({
         "features": {"apps": false, "plugins": false, "skill_mcp_dependency_install": false},
         "cloud": {"skills": {"enabled": false}},
-        "skills": {"bundled": {"enabled": false}},
+        "skills": {"bundled": {"enabled": false}, "include_instructions": false},
     })
 }
 
@@ -30,7 +30,7 @@ fn switches() -> Value {
 fn config_nests_every_limits_override() {
     let built = Value::Object(config(&BTreeMap::new(), None));
     assert_eq!(built, switches());
-    assert_eq!(clauseo_limits::CODEX_OVERRIDES.len(), 5);
+    assert_eq!(clauseo_limits::CODEX_OVERRIDES.len(), 6);
 }
 
 /// A settings `CODEX_CONFIG` gives only the model and its effort; it cannot turn a switch back

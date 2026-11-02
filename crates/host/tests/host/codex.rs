@@ -193,7 +193,7 @@ fn codex_launch_variables_beat_the_settings_env() {
             "model": "m",
             "features": {"apps": false, "plugins": false, "skill_mcp_dependency_install": false},
             "cloud": {"skills": {"enabled": false}},
-            "skills": {"bundled": {"enabled": false}},
+            "skills": {"bundled": {"enabled": false}, "include_instructions": false},
         })
     );
     assert!(std::fs::symlink_metadata(&home).unwrap().is_dir());
