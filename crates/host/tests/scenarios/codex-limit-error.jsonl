@@ -1,0 +1,10 @@
+{"scenario":"codex-limit-error","description":"The bundled limit-codex-error behind codex-acp's handshake (the host sets the ask mode before a Codex thread's first prompt, which the bundled one's generic handshake would refuse): a chunk, then the prompt answered with JSON-RPC error -32603 and a usage-limit message (no sessionFailure)","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"@agentclientprotocol/codex-acp","title":"Codex","version":"2.2.2"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1","modes":{"currentModeId":"agent","availableModes":[{"id":"read-only","name":"Read-only"},{"id":"workspace-write","name":"Workspace access"},{"id":"agent","name":"Auto review"}]}}}}
+{"expect":{"method":"session/set_mode","as":"set-mode","params":{"sessionId":"sess-1","modeId":"workspace-write"}}}
+{"respond":{"to":"set-mode","result":{}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Here is the draft clause. "}}}}
+{"respond":{"to":"p1","error":{"code":-32603,"message":"You've hit your usage limit · resets 3pm"}}}
