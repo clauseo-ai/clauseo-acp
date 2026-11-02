@@ -150,6 +150,14 @@ export function WorkComposer({
     refilled.current = refillKey;
     field.current?.fill(refillText);
   }, [refillKey, refillText]);
+  const waitTitle = wait?.title ?? mt(w.lang, "New conversation");
+  const said =
+    wait !== null && raised && !wait.sent && !busy
+      ? `${mt(w.lang, "Waiting for '{title}' to finish.", { title: waitTitle })} ${mt(
+          w.lang,
+          "One conversation changes a matter's papers at a time. Your message is ready to go.",
+        )}`
+      : "";
   const answering: WorkingState = { kind: "wait", words: frame(w.lang, "Answering."), pill: null };
   const line: BreakLine | null =
     failed ??
@@ -163,13 +171,14 @@ export function WorkComposer({
           },
           testId: "error",
         }
-      : wait?.sent === true
+      : wait !== null && (wait.sent || busy)
         ? {
-            // sent and waiting behind the other: the design's wait (room.tsx), never "Answering."
+            // sent (or accepted, before the row says starting) and waiting behind the other: the design's wait
+            // (room.tsx), never "Answering."
             state: {
               kind: "wait",
               words: mt(w.lang, "Waiting for '{title}' to finish.", {
-                title: wait.title ?? mt(w.lang, "New conversation"),
+                title: waitTitle,
               }),
               pill: null,
             },
@@ -194,16 +203,26 @@ export function WorkComposer({
       onInput={keep}
       onAsk={ask}
       queue={
-        others === null || wait === null || !(wait.sent || raised || busy) ? null : (
-          <OtherWait
-            transport={others.transport}
-            wait={wait}
-            busy={busy}
-            empty={empty}
-            onQueue={queueNow}
-            onFocusField={() => field.current?.focus()}
-            onRefused={others.onRefused}
-          />
+        others === null ? null : (
+          <>
+            {/* what assistive technology hears of the raised wait: one status region, mounted for the composer's
+                life and empty until the wait is raised, so the wait is said as it comes; once sent it is empty
+                again, as the composer's own region then says the working line's wait */}
+            <p className="sr-only" role="status" data-testid="other-wait-said">
+              {said}
+            </p>
+            {wait !== null && (wait.sent || raised || busy) && (
+              <OtherWait
+                transport={others.transport}
+                wait={wait}
+                busy={busy}
+                empty={empty}
+                onQueue={queueNow}
+                onFocusField={() => field.current?.focus()}
+                onRefused={others.onRefused}
+              />
+            )}
+          </>
         )
       }
       disabled={disabled}

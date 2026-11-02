@@ -1,6 +1,6 @@
 // The wait for another conversation in the same matter, one of the messages-while-Clauseo-works parts (queue.tsx, which
 // re-exports it): apart from the queue's other parts so the room's first load carries only this one.
-import { useEffect, useRef, type Ref } from "react";
+import type { Ref } from "react";
 import { Button } from "../ui/button.tsx";
 import { useMatterWords } from "../lib/words-matters.ts";
 import { Say } from "./say.tsx";
@@ -10,9 +10,9 @@ import { Say } from "./say.tsx";
  * With no time it says only what it waits for (no end estimates); without onQueue, as once the message has gone, it
  * offers Stop the other alone.
  *
- * What assistive technology hears: one status region, mounted empty and filled after, so the wait is said as it comes
- * (a region that mounts with its words says nothing). Before the message goes it says the wait and that the message
- * is ready; once it has gone it is silent, as the composer's working line then says the wait. */
+ * It holds no status region: one that mounts with its words says nothing, so the caller keeps one mounted beside it and
+ * says the wait there. Without the heading, as once the message has gone and the working line says the wait, it
+ * keeps the second line and Stop the other. */
 export function OtherConversationWait({
   title,
   by = "",
@@ -20,6 +20,7 @@ export function OtherConversationWait({
   queueDisabled = false,
   onStopOther,
   stopRef,
+  heading = true,
   testIds,
 }: {
   title: string;
@@ -32,8 +33,10 @@ export function OtherConversationWait({
   onStopOther: () => void;
   /** Stop the other's button, for the caller to put the focus on, as when Queue goes. */
   stopRef?: Ref<HTMLButtonElement>;
-  /** data-testid on the section, Stop the other, Queue and the status region. */
-  testIds?: { section?: string; stop?: string; queue?: string; said?: string };
+  /** Whether the line naming what it waits for shows. */
+  heading?: boolean;
+  /** data-testid on the section, Stop the other and Queue. */
+  testIds?: { section?: string; stop?: string; queue?: string };
 }) {
   const w = useMatterWords();
   const head =
@@ -43,19 +46,14 @@ export function OtherConversationWait({
   const ready = w.m(
     "One conversation changes a matter's papers at a time. Your message is ready to go.",
   );
-  const said = onQueue !== undefined ? `${head} ${ready}` : "";
-  // written to the DOM, not rendered: React leaves the region's text alone, and the fill is no commit of its own
-  const region = useRef<HTMLParagraphElement>(null);
-  useEffect(() => {
-    if (region.current !== null) region.current.textContent = said;
-  }, [said]);
   return (
     <section className="queue queue-wait" data-testid={testIds?.section}>
-      <p className="sr-only" role="status" ref={region} data-testid={testIds?.said} />
       <div className="queue-wait-text">
-        <p className="queue-wait-head">
-          <Say>{head}</Say>
-        </p>
+        {heading && (
+          <p className="queue-wait-head">
+            <Say>{head}</Say>
+          </p>
+        )}
         <p className="queue-say">
           <Say>{ready}</Say>
         </p>

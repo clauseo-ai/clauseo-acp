@@ -77,6 +77,8 @@ type Scene = {
   confirming?: boolean;
   /** The open thread idle while another conversation of its matter runs: Ask raises the wait over the composer (U7). */
   wait?: boolean;
+  /** The open thread's message sent and queued behind another conversation's: the panel without its heading (U7). */
+  queued?: boolean;
 };
 
 const ASKED = userMessage(2, 1, "Tighten the notice to the bank.");
@@ -124,7 +126,21 @@ const SCENES: Record<string, Scene> = {
     thread: [ASKED],
     wait: true,
   },
+  // its message queued behind the other's: Stop the other alone, the working line saying the wait
+  "a message queued behind another conversation": {
+    matters: true,
+    papers: undefined,
+    thread: [ASKED],
+    queued: true,
+  },
 };
+
+/** The open thread's header: queued behind OTHER, idle beside it, or waiting on the lawyer. */
+function headerFor(scene: Scene): ViewEntry {
+  const head = header(scene.wait === true ? "idle" : "needs_you");
+  if (scene.queued === true) head.header!.status = { queued: { behind: OTHER } };
+  return head;
+}
 
 /** The other conversation for the wait: its id sorts below THREAD's, so THREAD opens. */
 const OTHER = uuid(0, 1);
@@ -163,9 +179,14 @@ function transportFor(scene: Scene): FakeTransport {
           threads:
             thread === undefined
               ? []
-              : scene.wait === true
+              : scene.wait === true || scene.queued === true
                 ? [
-                    { thread: THREAD, matter: MATTER, agent: "claude-acp", status: "idle" },
+                    {
+                      thread: THREAD,
+                      matter: MATTER,
+                      agent: "claude-acp",
+                      status: scene.queued === true ? { queued: { behind: OTHER } } : "idle",
+                    },
                     {
                       thread: OTHER,
                       matter: MATTER,
@@ -184,14 +205,7 @@ function transportFor(scene: Scene): FakeTransport {
           subscribe: (stream) =>
             queueMicrotask(() =>
               transport.deliver(
-                event(
-                  batch(
-                    1,
-                    [reset(thread, header(scene.wait === true ? "idle" : "needs_you"))],
-                    undefined,
-                    stream,
-                  ),
-                ),
+                event(batch(1, [reset(thread, headerFor(scene))], undefined, stream)),
               ),
             ),
         }),
@@ -233,7 +247,14 @@ for (const theme of THEMES) {
               await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
               expect(document.querySelector('[role="dialog"]'), name).not.toBeNull();
             }
-            if (scene.wait === true) {
+            if (scene.queued === true) {
+              await act(async () => void (await loadThread()));
+              await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+              const wait = host.querySelector('[data-testid="other-wait"]');
+              expect(wait?.querySelector('[data-testid="stop-other"]'), name).not.toBeNull();
+              expect(wait?.querySelector('[data-testid="queue"]'), name).toBeNull();
+              expect(wait?.querySelector(".queue-wait-head"), name).toBeNull();
+            } else if (scene.wait === true) {
               await act(async () => void (await loadThread()));
               await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
               // words in the field, then Ask: with the other running, Ask raises the wait
