@@ -1,6 +1,6 @@
 // The status line on the composer's top edge: how long the answer took, the plan the questions go to, and the
 // prepared draft's hint while its Ready card is out of view.
-import { lazy, Suspense, useLayoutEffect, useRef, type PointerEvent } from "react";
+import { lazy, Suspense, useId, useLayoutEffect, useRef, type PointerEvent } from "react";
 import { late } from "../lib/late.ts";
 import { Kbd } from "../ui/kbd.tsx";
 import { SegmentedSwitch } from "../ui/segmented.tsx";
@@ -63,6 +63,7 @@ export function StatusLine<V extends string>({
   const tookRef = useRef<HTMLSpanElement>(null);
   const goRef = useRef<HTMLSpanElement>(null);
   const hadTook = useRef(took !== null);
+  const seg = useId();
   const { id, hand } = useRoom();
   const hintState = hint?.state ?? "none";
 
@@ -134,9 +135,12 @@ export function StatusLine<V extends string>({
         </span>
         {choice === undefined ? null : choice.segmented !== undefined ? (
           <span className="room-status-plan room-status-seg">
-            <span className="deva-nudge">{ui(lang, "Plan to ask with")}</span>
+            {/* the visible words name the switch, so they are read once, as its name */}
+            <span className="deva-nudge" id={seg}>
+              {ui(lang, "Plan to ask with")}
+            </span>
             <SegmentedSwitch<V>
-              label={ui(lang, "Plan to ask with")}
+              labelledBy={seg}
               value={choice.value}
               options={choice.segmented}
               onValueChange={choice.onValueChange}

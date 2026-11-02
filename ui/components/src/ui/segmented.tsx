@@ -14,14 +14,24 @@ export type SegmentOption<V extends string> = {
 /** The segmented switch: Day | Night, English | हिन्दी. One side is always chosen; arrow keys move between them. */
 export function SegmentedSwitch<V extends string>({
   label,
+  labelledBy,
   value,
   options,
   onValueChange,
   className,
   disabled = false,
-}: {
-  /** Names the switch for assistive technology, in the room's words. */
-  label: string;
+}: (
+  | {
+      /** Names the switch for assistive technology, in the room's words. */
+      label: string;
+      labelledBy?: never;
+    }
+  | {
+      /** The id of the visible words that name the switch, read once as its name (aria-labelledby). */
+      labelledBy: string;
+      label?: never;
+    }
+) & {
   value: V;
   options: readonly SegmentOption<V>[];
   onValueChange: (value: V) => void;
@@ -31,6 +41,7 @@ export function SegmentedSwitch<V extends string>({
   return (
     <ToggleGroup
       aria-label={label}
+      aria-labelledby={labelledBy}
       value={[value]}
       disabled={disabled}
       onValueChange={(next) => {
