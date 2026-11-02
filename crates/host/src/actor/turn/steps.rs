@@ -41,10 +41,13 @@ pub(super) fn refuse_unsendable(actor: &Actor, thread: ThreadId) -> Result<(), E
             "the thread is archived",
         ));
     }
-    let own_undo = actor
-        .matters
-        .get(&entry.row.matter)
-        .is_some_and(|matter| matter.turns.holder == Some(Holder::Thread(thread)));
+    // The thread holds its matter's writer for its own turn or its undo: with no current turn,
+    // it is the undo.
+    let own_undo = entry.turn.current.is_none()
+        && actor
+            .matters
+            .get(&entry.row.matter)
+            .is_some_and(|matter| matter.turns.holder == Some(Holder::Thread(thread)));
     if own_undo {
         return Err(Error::refused(
             ErrorCode::ThreadTurnRunning,
