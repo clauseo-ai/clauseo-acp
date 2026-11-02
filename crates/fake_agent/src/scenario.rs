@@ -85,6 +85,8 @@ pub(crate) enum StepKind {
     /// `expect` or `expect_response`.
     Wait(Wait),
     All(Vec<Wait>),
+    /// Reads the next client line and plays the first branch whose `expect` matches it.
+    OneOf(Vec<Branch>),
     Respond {
         to: String,
         reply: Reply,
@@ -145,6 +147,22 @@ pub(crate) struct ExpectResponse {
 pub(crate) enum Wait {
     Expect(Expect),
     Response(ExpectResponse),
+}
+
+/// One branch of a `one_of` step: the `expect` that picks it, then the steps it plays. Every step
+/// in it reports the `one_of` step's location.
+#[derive(Debug, Clone)]
+pub(crate) struct Branch {
+    pub(crate) first: Expect,
+    pub(crate) rest: Vec<BranchStep>,
+}
+
+/// A step inside a branch, which has no line of its own: the `one_of` line holds it.
+#[derive(Debug, Clone)]
+pub(crate) struct BranchStep {
+    pub(crate) kind: StepKind,
+    /// As [`Step::raw`].
+    pub(crate) raw: bool,
 }
 
 /// A JSON-RPC `result` or `error` value: sent by `respond`, a pattern in `expect_response`.

@@ -88,7 +88,7 @@ pub(super) fn describe_wait(wait: &Wait) -> String {
     }
 }
 
-fn describe_expect(expect: &Expect) -> String {
+pub(super) fn describe_expect(expect: &Expect) -> String {
     let kind = if expect.label.is_some() {
         "request"
     } else {
@@ -120,7 +120,11 @@ pub(super) fn match_wait(wait: &Wait, incoming: &Incoming, cwd: Option<&str>) ->
     }
 }
 
-fn match_expect(expect: &Expect, incoming: &Incoming, cwd: Option<&str>) -> Result<(), Miss> {
+pub(super) fn match_expect(
+    expect: &Expect,
+    incoming: &Incoming,
+    cwd: Option<&str>,
+) -> Result<(), Miss> {
     let params = match (incoming, expect.label.is_some()) {
         (Incoming::Request { method, params, .. }, true)
         | (Incoming::Notification { method, params }, false)

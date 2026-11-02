@@ -19,7 +19,7 @@ pub(crate) fn is_client_notification(method: &str) -> bool {
         || method == acp::PROTOCOL_LEVEL_METHOD_NAMES.cancel_request
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct Seen<'a> {
     /// Expect label to its method.
     labels: HashMap<&'a str, &'a str>,
@@ -27,96 +27,125 @@ struct Seen<'a> {
     answered: HashSet<&'a str>,
     /// Ids of the agent's `request` steps.
     requests: HashSet<&'a str>,
+    /// Labels set inside a finished `one_of` branch: taken, but not answerable after it.
+    branch_labels: HashSet<&'a str>,
+    /// Request ids sent inside a finished `one_of` branch: taken, but not awaitable after it.
+    branch_requests: HashSet<&'a str>,
 }
 
 /// Runs every static check over the flattened steps, in order.
 pub(super) fn check(steps: &[Step]) -> Result<(), Error> {
     let mut seen = Seen::default();
     for step in steps {
-        let at = &step.at;
-        match &step.kind {
-            StepKind::Wait(Wait::Expect(expect)) => {
-                check_expect(expect).map_err(|m| at.load_error(m))?;
-                seen.label(expect, at)?;
-            }
-            StepKind::All(waits) => {
-                for wait in waits {
-                    match wait {
-                        Wait::Expect(expect) => {
-                            check_expect(expect).map_err(|m| at.load_error(m))?;
-                        }
-                        Wait::Response(response) => seen.response(response, at)?,
+        check_step(&mut seen, &step.at, &step.kind, step.raw)?;
+    }
+    Ok(())
+}
+
+/// Checks one step at `at`, with `raw` its `"raw": true`, and records what it defines in `seen`.
+fn check_step<'a>(
+    seen: &mut Seen<'a>,
+    at: &Loc,
+    kind: &'a StepKind,
+    raw: bool,
+) -> Result<(), Error> {
+    match kind {
+        StepKind::Wait(Wait::Expect(expect)) => {
+            check_expect(expect).map_err(|m| at.load_error(m))?;
+            seen.label(expect, at)?;
+        }
+        StepKind::All(waits) => {
+            for wait in waits {
+                match wait {
+                    Wait::Expect(expect) => {
+                        check_expect(expect).map_err(|m| at.load_error(m))?;
                     }
-                }
-                // Labels inside `all` count once the whole `all` step is done.
-                for wait in waits {
-                    if let Wait::Expect(expect) = wait {
-                        seen.label(expect, at)?;
-                    }
+                    Wait::Response(response) => seen.response(response, at)?,
                 }
             }
-            StepKind::Wait(Wait::Response(response)) => seen.response(response, at)?,
-            StepKind::Respond { to, reply } => seen.respond(step, to, reply)?,
-            StepKind::Update { update, .. } => {
-                if !step.raw {
-                    let update = substitute(update, VALIDATION_CWD);
-                    checked(
-                        at,
-                        acp::CLIENT_METHOD_NAMES.session_update,
-                        &Sent::Update(&update),
-                    )?;
+            // Labels inside `all` count once the whole `all` step is done.
+            for wait in waits {
+                if let Wait::Expect(expect) = wait {
+                    seen.label(expect, at)?;
                 }
             }
-            StepKind::Notify { method, params } => {
-                if !step.raw {
-                    let params = params.as_ref().map(|p| substitute(p, VALIDATION_CWD));
-                    checked(
-                        at,
+        }
+        StepKind::OneOf(branches) => {
+            // Each branch starts from what came before the `one_of`; what a branch defines
+            // stays in it, and only marks its labels and ids as taken.
+            let mut after = seen.clone();
+            for branch in branches {
+                let mut inner = seen.clone();
+                check_expect(&branch.first).map_err(|m| at.load_error(m))?;
+                inner.label(&branch.first, at)?;
+                for step in &branch.rest {
+                    check_step(&mut inner, at, &step.kind, step.raw)?;
+                }
+                after.absorb(seen, inner);
+            }
+            *seen = after;
+        }
+        StepKind::Wait(Wait::Response(response)) => seen.response(response, at)?,
+        StepKind::Respond { to, reply } => seen.respond(at, raw, to, reply)?,
+        StepKind::Update { update, .. } => {
+            if !raw {
+                let update = substitute(update, VALIDATION_CWD);
+                checked(
+                    at,
+                    acp::CLIENT_METHOD_NAMES.session_update,
+                    &Sent::Update(&update),
+                )?;
+            }
+        }
+        StepKind::Notify { method, params } => {
+            if !raw {
+                let params = params.as_ref().map(|p| substitute(p, VALIDATION_CWD));
+                checked(
+                    at,
+                    method,
+                    &Sent::Notify {
                         method,
-                        &Sent::Notify {
-                            method,
-                            params: params.as_ref(),
-                        },
-                    )?;
-                }
+                        params: params.as_ref(),
+                    },
+                )?;
             }
-            StepKind::Request { id, method, params } => {
-                if !seen.requests.insert(id) {
-                    return Err(at.load_error(format!("request id `{id}` is used twice")));
-                }
-                if !step.raw {
-                    let params = params.as_ref().map(|p| substitute(p, VALIDATION_CWD));
-                    checked(
-                        at,
+        }
+        StepKind::Request { id, method, params } => {
+            if seen.branch_requests.contains(id.as_str()) || !seen.requests.insert(id) {
+                return Err(at.load_error(format!("request id `{id}` is used twice")));
+            }
+            if !raw {
+                let params = params.as_ref().map(|p| substitute(p, VALIDATION_CWD));
+                checked(
+                    at,
+                    method,
+                    &Sent::Request {
                         method,
-                        &Sent::Request {
-                            method,
-                            params: params.as_ref(),
-                        },
-                    )?;
-                }
+                        params: params.as_ref(),
+                    },
+                )?;
             }
-            StepKind::File(FileOp::Write { path, .. } | FileOp::Delete { path }) => {
-                relative(path, SESSION_CWD).map_err(|m| at.load_error(m))?;
-            }
-            StepKind::File(FileOp::Move { from, to }) => {
-                relative(from, SESSION_CWD).map_err(|m| at.load_error(m))?;
-                relative(to, SESSION_CWD).map_err(|m| at.load_error(m))?;
-            }
-            StepKind::SpawnChild { pid_file } => {
-                relative(pid_file, PROCESS_FOLDER).map_err(|m| at.load_error(m))?;
-            }
-            StepKind::SendLine(text) => {
-                if text.contains(CWD) {
-                    return Err(at.load_error(format!(
-                        "send_line: `{CWD}` is not allowed, since the line is written as raw text \
+        }
+        StepKind::File(FileOp::Write { path, .. } | FileOp::Delete { path }) => {
+            relative(path, SESSION_CWD).map_err(|m| at.load_error(m))?;
+        }
+        StepKind::File(FileOp::Move { from, to }) => {
+            relative(from, SESSION_CWD).map_err(|m| at.load_error(m))?;
+            relative(to, SESSION_CWD).map_err(|m| at.load_error(m))?;
+        }
+        StepKind::SpawnChild { pid_file } => {
+            relative(pid_file, PROCESS_FOLDER).map_err(|m| at.load_error(m))?;
+        }
+        StepKind::SendLine(text) => {
+            if text.contains(CWD) {
+                return Err(at.load_error(format!(
+                    "send_line: `{CWD}` is not allowed, since the line is written as raw text \
                          and a Windows cwd's backslashes would make it invalid JSON; use notify, \
                          update or request, which substitute it into parsed JSON"
-                    )));
-                }
+                )));
             }
-            StepKind::Stderr { .. } | StepKind::Exit { .. } => {}
         }
+        StepKind::Stderr { .. } | StepKind::Exit { .. } => {}
     }
     Ok(())
 }
@@ -124,16 +153,36 @@ pub(super) fn check(steps: &[Step]) -> Result<(), Error> {
 impl<'a> Seen<'a> {
     fn label(&mut self, expect: &'a Expect, at: &Loc) -> Result<(), Error> {
         if let Some(label) = &expect.label
-            && self.labels.insert(label, &expect.method).is_some()
+            && (self.branch_labels.contains(label.as_str())
+                || self.labels.insert(label, &expect.method).is_some())
         {
             return Err(at.load_error(format!("label `{label}` is used twice")));
         }
         Ok(())
     }
 
+    /// Folds in one finished branch, `inner`, that started from `before`: the labels and request
+    /// ids it added become taken, and the earlier labels it answered count as answered.
+    fn absorb(&mut self, before: &Seen<'a>, inner: Seen<'a>) {
+        let labels = inner.labels.into_keys();
+        let added = labels.filter(|label| !before.labels.contains_key(label));
+        self.branch_labels.extend(added.chain(inner.branch_labels));
+        let requests = inner.requests.into_iter();
+        let added = requests.filter(|id| !before.requests.contains(id));
+        self.branch_requests
+            .extend(added.chain(inner.branch_requests));
+        self.answered.extend(inner.answered);
+    }
+
     fn response(&self, response: &ExpectResponse, at: &Loc) -> Result<(), Error> {
         if self.requests.contains(response.id.as_str()) {
             Ok(())
+        } else if self.branch_requests.contains(response.id.as_str()) {
+            Err(at.load_error(format!(
+                "expect_response.id `{}` names a request inside a one_of branch; only that \
+                 branch can wait for its response",
+                response.id
+            )))
         } else {
             Err(at.load_error(format!(
                 "expect_response.id `{}` names no earlier request step",
@@ -142,15 +191,20 @@ impl<'a> Seen<'a> {
         }
     }
 
-    fn respond(&mut self, step: &Step, to: &'a str, reply: &Reply) -> Result<(), Error> {
-        let at = &step.at;
+    fn respond(&mut self, at: &Loc, raw: bool, to: &'a str, reply: &Reply) -> Result<(), Error> {
         let Some(&method) = self.labels.get(to) else {
+            if self.branch_labels.contains(to) {
+                return Err(at.load_error(format!(
+                    "respond.to `{to}` names a label inside a one_of branch; only that branch \
+                     can answer it"
+                )));
+            }
             return Err(at.load_error(format!("respond.to `{to}` names no earlier expect label")));
         };
         if !self.answered.insert(to) {
             return Err(at.load_error(format!("respond.to `{to}`: already answered")));
         }
-        if step.raw {
+        if raw {
             return Ok(());
         }
         match reply {

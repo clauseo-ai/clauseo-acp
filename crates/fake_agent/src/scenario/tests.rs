@@ -191,8 +191,9 @@ fn static_checks_name_file_and_line() {
 }
 
 /// Every step key, in the order `body.rs` declares them.
-const KEYS: &str = "expect, expect_response, all, respond, update, notify, request, send_line, \
-                    write_file, delete_file, move_file, stderr, spawn_child, exit, include";
+const KEYS: &str = "expect, expect_response, all, one_of, respond, update, notify, request, \
+                    send_line, write_file, delete_file, move_file, stderr, spawn_child, exit, \
+                    include";
 
 #[test]
 fn a_wrong_step_key_lists_every_key() {
@@ -336,4 +337,141 @@ fn stderr_repeat_defaults_to_one() {
         scenario.steps[0].kind,
         StepKind::Stderr { repeat: 1, .. }
     ));
+}
+
+const NEW: &str = r#"{"expect":{"method":"session/new","as":"s"}}"#;
+const LOAD: &str = r#"{"expect":{"method":"session/load","as":"s"}}"#;
+const ANSWER_S: &str = r#"{"respond":{"to":"s","result":{"sessionId":"sess-1"}}}"#;
+
+/// A `one_of` line with `branches`, each a list of step lines.
+fn one_of(branches: &[&[&str]]) -> String {
+    let branches: Vec<String> = branches
+        .iter()
+        .map(|steps| format!("[{}]", steps.join(",")))
+        .collect();
+    format!(r#"{{"one_of":[{}]}}"#, branches.join(","))
+}
+
+#[test]
+fn one_of_parses_its_branches() {
+    let line = one_of(&[&[NEW, ANSWER_S], &[LOAD]]);
+    let scenario = parse_text(&[INIT, &line], &[]).unwrap();
+    let StepKind::OneOf(branches) = &scenario.steps[1].kind else {
+        panic!("{:?}", scenario.steps[1].kind);
+    };
+    assert_eq!(branches.len(), 2);
+    assert_eq!(branches[0].first.method, "session/new");
+    assert_eq!(branches[0].rest.len(), 1);
+    assert_eq!(branches[1].first.method, "session/load");
+    assert!(branches[1].rest.is_empty());
+    // A note inside a branch is ignored as on any step, and a branch may hold another one_of.
+    let noted = r#"{"note":"n","expect":{"method":"session/new","as":"s"}}"#;
+    let inner = one_of(&[&[r#"{"expect":{"method":"session/prompt","as":"p"}}"#]]);
+    assert!(parse_text(&[&one_of(&[&[noted, &inner]])], &[]).is_ok());
+}
+
+#[test]
+fn one_of_shape_errors_name_the_line_branch_and_step() {
+    let respond_first = one_of(&[&[NEW], &[ANSWER_S]]);
+    let include = one_of(&[&[NEW, r#"{"include":"handshake.jsonl"}"#]]);
+    let bad_inner = one_of(&[&[NEW, r#"{"exit":{"code":3}}"#]]);
+    let nested_empty = one_of(&[&[NEW, r#"{"one_of":[[]]}"#]]);
+    let cases: &[(&str, &str)] = &[
+        (
+            r#"{"one_of":[]}"#,
+            "t.jsonl:3: one_of: the list of branches is empty",
+        ),
+        (
+            r#"{"one_of":[[]]}"#,
+            "t.jsonl:3: one_of: branch 1: the branch is empty",
+        ),
+        (
+            &respond_first,
+            "t.jsonl:3: one_of: branch 2: step 1 is `respond`; a branch must start with an `expect`",
+        ),
+        (
+            r#"{"one_of":[[{"expect_response":{"id":"x","result":{}}}]]}"#,
+            "t.jsonl:3: one_of: branch 1: step 1 is `expect_response`; a branch must start with an \
+             `expect`",
+        ),
+        (
+            r#"{"one_of":[[{"expect":{"method":"session/new"}}]]}"#,
+            "t.jsonl:3: expect `session/new`: a request needs an `as` label",
+        ),
+        (
+            &include,
+            "t.jsonl:3: one_of: branch 1: step 2: a branch may not include",
+        ),
+        (
+            &bad_inner,
+            "t.jsonl:3: one_of: branch 1: step 2: exit: code 3 is EXIT_MISMATCH",
+        ),
+        (
+            &nested_empty,
+            "t.jsonl:3: one_of: branch 1: step 2: one_of: branch 1: the branch is empty",
+        ),
+        (
+            r#"{"one_of":[[{"expect":{"method":"session/new","as":"s"}}],{}]}"#,
+            "t.jsonl:3: one_of: invalid type: map, expected a sequence",
+        ),
+    ];
+    for (line, want) in cases {
+        let error = load_error(&[INIT, line], &[]);
+        assert!(error.starts_with(want), "want {want}\n got {error}");
+    }
+}
+
+#[test]
+fn one_of_checks_each_branch_on_its_own() {
+    // Two branches may use the same label, and a branch may answer a label set before it.
+    let answer_init = r#"{"respond":{"to":"init","result":{"protocolVersion":1}}}"#;
+    let fine = one_of(&[&[NEW, ANSWER_S, answer_init], &[LOAD, answer_init]]);
+    assert!(parse_text(&[INIT, &fine], &[]).is_ok());
+    let request = r#"{"request":{"id":"perm-1","method":"fake/ask","raw":true}}"#;
+    let cases: &[(&[&str], &str)] = &[
+        (
+            &[&one_of(&[&[NEW]]), ANSWER_S],
+            "t.jsonl:3: respond.to `s` names a label inside a one_of branch; only that \
+             branch can answer it",
+        ),
+        (
+            &[&one_of(&[&[NEW]]), LOAD],
+            "t.jsonl:3: label `s` is used twice",
+        ),
+        (
+            &[NEW, &one_of(&[&[LOAD]])],
+            "t.jsonl:3: label `s` is used twice",
+        ),
+        (
+            &[
+                &one_of(&[&[NEW, request]]),
+                r#"{"expect_response":{"id":"perm-1","result":{}}}"#,
+            ],
+            "t.jsonl:3: expect_response.id `perm-1` names a request inside a one_of branch; \
+             only that branch can wait for its response",
+        ),
+        (
+            &[&one_of(&[&[NEW, request]]), request],
+            "t.jsonl:3: request id `perm-1` is used twice",
+        ),
+        (
+            &[INIT, answer_init, &one_of(&[&[NEW, answer_init]])],
+            "t.jsonl:4: respond.to `init`: already answered",
+        ),
+        (
+            &[INIT, &one_of(&[&[NEW, answer_init]]), answer_init],
+            "t.jsonl:4: respond.to `init`: already answered",
+        ),
+        (
+            &[&one_of(&[&[
+                NEW,
+                r#"{"respond":{"to":"s","result":{"sessionId":7}}}"#,
+            ]])],
+            "t.jsonl:2: session/new: ",
+        ),
+    ];
+    for (lines, want) in cases {
+        let error = load_error(lines, &[]);
+        assert!(error.starts_with(want), "want {want}\n got {error}");
+    }
 }

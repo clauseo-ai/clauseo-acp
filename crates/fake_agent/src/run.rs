@@ -10,9 +10,12 @@ use std::time::Duration;
 use agent_client_protocol::schema::v1 as acp;
 use serde_json::{Map, Value, json};
 
-use crate::scenario::{Loc, OnStdinClose, Reply, Scenario, StepKind, Wait};
+use crate::scenario::{Branch, Expect, Loc, OnStdinClose, Reply, Scenario, StepKind, Wait};
 use crate::{EXIT_MISMATCH, EXIT_OK, diagnostic};
-use client::{Incoming, Miss, NO_CWD, classify, describe_wait, match_wait, placed};
+use client::{
+    Incoming, Miss, NO_CWD, classify, describe_expect, describe_wait, match_expect, match_wait,
+    placed,
+};
 
 /// Why the script stopped before reaching its end.
 pub(crate) enum Stop {
@@ -82,16 +85,9 @@ impl<R: BufRead, W: Write> Runner<'_, R, W> {
     /// mismatch. With a pace, waits before each update that follows an update.
     fn play(&mut self) -> Stop {
         let scenario = self.scenario;
-        let mut after_update = false;
-        for step in &scenario.steps {
-            let is_update = matches!(step.kind, StepKind::Update { .. });
-            if is_update && after_update && !self.pace.is_zero() {
-                (self.pause)(self.pace);
-            }
-            if let Err(stop) = self.step(&step.at, &step.kind) {
-                return stop;
-            }
-            after_update = is_update;
+        let steps = scenario.steps.iter().map(|step| (&step.at, &step.kind));
+        if let Err(stop) = self.steps(steps, &mut false) {
+            return stop;
         }
         match self.read(&scenario.end) {
             Ok(incoming) => Stop::Fail(
@@ -102,7 +98,26 @@ impl<R: BufRead, W: Write> Runner<'_, R, W> {
         }
     }
 
-    fn step(&mut self, at: &Loc, kind: &StepKind) -> Result<(), Stop> {
+    /// Plays `steps` in order. `after_update` says whether the step played last was an update,
+    /// for the pace, and is left saying so for the last of `steps`.
+    fn steps<'k>(
+        &mut self,
+        steps: impl Iterator<Item = (&'k Loc, &'k StepKind)>,
+        after_update: &mut bool,
+    ) -> Result<(), Stop> {
+        for (at, kind) in steps {
+            let is_update = matches!(kind, StepKind::Update { .. });
+            if is_update && *after_update && !self.pace.is_zero() {
+                (self.pause)(self.pace);
+            }
+            // Set before the step runs, so a `one_of` leaves it as its branch's last step set it.
+            *after_update = is_update;
+            self.step(at, kind, after_update)?;
+        }
+        Ok(())
+    }
+
+    fn step(&mut self, at: &Loc, kind: &StepKind, after_update: &mut bool) -> Result<(), Stop> {
         match kind {
             StepKind::Wait(wait) => {
                 let incoming = self.read(at)?;
@@ -111,6 +126,11 @@ impl<R: BufRead, W: Write> Runner<'_, R, W> {
                 self.received(wait, incoming);
             }
             StepKind::All(waits) => self.all(at, waits)?,
+            StepKind::OneOf(branches) => {
+                let branch = self.branch(at, branches)?;
+                let rest = branch.rest.iter().map(|step| (at, &step.kind));
+                self.steps(rest, after_update)?;
+            }
             StepKind::Respond { to, reply } => self.respond(at, to, reply)?,
             StepKind::Update { update, session } => {
                 let session = session
@@ -192,10 +212,51 @@ impl<R: BufRead, W: Write> Runner<'_, R, W> {
         Ok(())
     }
 
+    /// Reads the next client line and returns the first branch whose `expect` matches it, with
+    /// the line received. No match fails as an `expect` or an `all` does: a branch that
+    /// expects this message with other params gives its params mismatch, else every branch's
+    /// message is named.
+    fn branch<'b>(&mut self, at: &Loc, branches: &'b [Branch]) -> Result<&'b Branch, Stop> {
+        let incoming = self.read(at)?;
+        let mut content_miss = None;
+        let mut only_miss = None;
+        for branch in branches {
+            match match_expect(&branch.first, &incoming, self.cwd.as_deref()) {
+                Ok(()) => {
+                    self.received_expect(&branch.first, incoming);
+                    return Ok(branch);
+                }
+                Err(Miss::Content(message)) => content_miss = content_miss.or(Some(message)),
+                Err(Miss::Identity(message)) => only_miss = Some(message),
+            }
+        }
+        let message = match (content_miss, only_miss, branches) {
+            (Some(message), _, _) | (None, Some(message), [_]) => message,
+            _ => {
+                let wanted: Vec<String> = branches
+                    .iter()
+                    .map(|branch| describe_expect(&branch.first))
+                    .collect();
+                format!(
+                    "expected one of: {}; got {}",
+                    wanted.join(", "),
+                    incoming.describe()
+                )
+            }
+        };
+        Err(Stop::Fail(at.clone(), message))
+    }
+
     /// Records what a matched client line changes: its label, and the current cwd and session.
     fn received(&mut self, wait: &Wait, incoming: Incoming) {
-        let (Wait::Expect(expect), Incoming::Request { id, method, params }) = (wait, incoming)
-        else {
+        if let Wait::Expect(expect) = wait {
+            self.received_expect(expect, incoming);
+        }
+    }
+
+    /// As [`Self::received`], for an `expect`.
+    fn received_expect(&mut self, expect: &Expect, incoming: Incoming) {
+        let Incoming::Request { id, method, params } = incoming else {
             return;
         };
         let names = acp::AGENT_METHOD_NAMES;
