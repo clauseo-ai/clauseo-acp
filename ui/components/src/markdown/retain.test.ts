@@ -52,4 +52,6 @@ test("a streamed answer keeps no old copies of its text", () => {
   const once = retainedBy(false);
   const streamed = retainedBy(true);
   expect(streamed - once).toBeLessThan(3_000_000);
-});
+  // Three answers, one of them streamed through about 2,600 deltas: about 3.5 s alone, past the default 5 s with
+  // three suites and a build beside it. The heap after a full collection does not depend on the load.
+}, 30_000);

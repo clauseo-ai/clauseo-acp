@@ -46,6 +46,8 @@ test.each([2, 40])(
     const final = htmlOf(updates.at(-1)!);
     expect(final).toContain('<a href="https://example.com/source/1">source 1</a>');
   },
+  // Every 16-character delta of 150 paragraphs: well under a second alone, but no faster on a loaded machine.
+  30_000,
 );
 
 // Under load it ran past the default 5 s, so it gets the hostile tests' 30 s.
