@@ -207,4 +207,3 @@ crates/mcp/examples/echo_stub.rs open_log clippy::disallowed_methods
 crates/mcp/tests/guard/write.rs - clippy::disallowed_methods
 crates/mcp/tests/guard/support.rs run clippy::disallowed_methods
 crates/mcp/tests/guard/support.rs Guard::start clippy::disallowed_methods
-crates/mcp/tests/guard/deps.rs metadata clippy::disallowed_methods
