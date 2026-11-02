@@ -154,9 +154,9 @@ agent message text to one that does not (`:29655-29658`, `:44519-44523`). It nev
   (and a Codex agent's preparation) run while the work that waits for the agent is held on the
   thread's state, then the launch runs on the actor with what they found. Every error
   the lawyer may see says what failed in words; paths and io errors go to the log only.
-- **`agent::codex::session_folder`** resolves the matter folder through links. It is a private
-  stand-in for clauseo-acp #160's `clauseo_host::session_folder`; whichever of #154 and #160
-  merges second does the swap.
+- **`clauseo_host::session_folder`** (clauseo-acp #160) resolves the matter folder through
+  links for the `.codex` checks: the same spelling the agent runs in and gets as its session
+  `cwd`. #160 merged second and replaced the private stand-in R15 carried until then.
 
 ## Consequences
 
