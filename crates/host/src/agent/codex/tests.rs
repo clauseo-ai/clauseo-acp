@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 
 use super::{
     config, guard_trusted, home_config, launch_env, make_home, prepare_launch, refuse_codex_folder,
-    session_folder, write_home_config,
+    write_home_config,
 };
 use crate::write;
 
@@ -170,12 +170,12 @@ fn a_linked_matter_is_checked_where_it_points() {
     write::create_dir_all(&real.join(".codex")).unwrap();
     let link = root.join("link");
     write::symlink(&real, &link).unwrap();
-    let resolved = session_folder(&link);
+    let resolved = super::session_folder(&link);
     assert_eq!(resolved, dunce::canonicalize(&real).unwrap());
     assert!(refuse_codex_folder(&resolved).is_err());
     // A path that does not resolve stays as stored.
     let gone = root.join("gone");
-    assert_eq!(session_folder(&gone), gone);
+    assert_eq!(super::session_folder(&gone), gone);
     write::remove_dir_all(&root).unwrap();
 }
 
