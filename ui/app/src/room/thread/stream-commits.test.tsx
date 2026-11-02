@@ -17,15 +17,20 @@ import { createViewStore } from "../../store/store.ts";
 import { entryIdOf } from "../../store/view.ts";
 import { manualBatch, stubLayout } from "../../testing/dom.ts";
 import {
+  agentText,
+  append,
   batch,
   event,
   header,
   reset,
   scriptedTurn,
+  toolCall,
+  upsert,
   userMessage,
+  uuid,
 } from "../../testing/stream-script.ts";
 import { FakeTransport } from "../../transport/fake-transport.ts";
-import type { EntryId, StreamId, ViewPatchBody } from "../../transport/protocol.ts";
+import type { EntryId, StreamId, ViewEntry, ViewPatchBody } from "../../transport/protocol.ts";
 import { Room } from "../room.tsx";
 import { connectRoom } from "../start.ts";
 import { defaultOutcome, summary, THE_MATTER } from "./harness.ts";
@@ -207,4 +212,81 @@ test("500 chunks and 20 tool calls into the room's thread: one commit a frame, n
       "unchangedRowCommits": 0,
     }
   `);
+});
+
+test("a pending permission while an answer streams: one commit a frame, and the permission row never renders on a flush", async () => {
+  const transport = new FakeTransport({
+    query: (query) =>
+      query === "list_matters" ? { matters: [THE_MATTER] } : { threads: [summary()] },
+    dispatch: (envelope) => defaultOutcome(envelope.command),
+  });
+  connectRoom(transport, {});
+  const manual = manualBatch();
+  const frame = () => act(manual.run);
+  const store = createViewStore(transport, { batch: () => manual.batch });
+  const phases: string[] = [];
+  const onRender: ProfilerOnRenderCallback = (_id, phase) => phases.push(phase);
+  const container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  await act(async () =>
+    root!.render(
+      createElement(
+        Profiler,
+        { id: "room", onRender },
+        createElement(StoreContext, { value: store }, createElement(Room, { transport })),
+      ),
+    ),
+  );
+  await act(async () => void (await loadThread()));
+  const tool = toolCall(6, 300, "pending");
+  const permission: ViewEntry = {
+    permission: {
+      order: 7,
+      request: uuid(1, 8),
+      tool_call: tool.tool_call!.tool_call,
+      options: [
+        { option_id: "once", kind: "allow_once", agent_label: "Allow" },
+        { option_id: "no", kind: "reject_once", agent_label: "Reject" },
+      ],
+      deliverable: "live",
+      state: "pending",
+    },
+  };
+  let cursor = 1;
+  const send = (bodies: ViewPatchBody[]) => {
+    for (const body of bodies) transport.deliver(JSON.stringify(event(batch(cursor++, [body]))));
+    frame();
+  };
+  send([
+    reset(
+      [userMessage(5, 1, "What does clause nine say?"), tool, permission, agentText(8, 100)],
+      header("needs_you"),
+    ),
+  ]);
+  const permissionId = entryIdOf(permission);
+  expect(container.querySelector('[data-testid="permission"]')?.getAttribute("data-state")).toBe(
+    "pending",
+  );
+  let maxCommits = 0;
+  let len = 0;
+  for (let i = 0; i < 30; i += 1) {
+    rowCommits.clear();
+    phases.length = 0;
+    const text = `word ${i} `;
+    // a text flush, and now and then a change to another row
+    const bodies: ViewPatchBody[] = [append(100, len, text)];
+    if (i % 10 === 9) bodies.push(upsert(toolCall(9 + i, 400 + i, "pending")));
+    send(bodies);
+    len += text.length;
+    maxCommits = Math.max(maxCommits, phases.length);
+    expect(rowCommits.get(permissionId), `frame ${i}`).toBeUndefined();
+    const touched = touchedBy(bodies);
+    expect([...rowCommits.keys()].filter((id) => !touched.has(id))).toEqual([]);
+  }
+  expect(maxCommits).toBe(1);
+  // the tool call it is about changing renders it, as it should
+  rowCommits.clear();
+  send([upsert(toolCall(6, 300, "in_progress"))]);
+  expect(rowCommits.get(permissionId)).toBe(1);
 });

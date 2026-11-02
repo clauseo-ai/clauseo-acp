@@ -1,6 +1,6 @@
 // The thread's rows, one per entry. A live row reads only its own entry and its own text from the view store, and is
 // memoized on its id, so a flush renders only the rows whose part changed. A paged row (older entries, page_entries)
-// shows the entry it was given. Permissions and elicitations show nothing until U4; markers, versions and compaction
+// shows the entry it was given. Permissions and elicitations are permission-row.tsx's; markers, versions and compaction
 // show nothing yet.
 import { memo, useState } from "react";
 import { QuestionLine, Who } from "@clauseo/components/clauseo/answer.tsx";
@@ -20,6 +20,7 @@ import type {
   UserMessageEntry,
   ViewEntry,
 } from "../../transport/protocol.ts";
+import { Elicitation, LivePermission, PagedPermission } from "../permission-row.tsx";
 import { stamp } from "./clock.ts";
 import { isolated, shownOf } from "./content.ts";
 import { questionText, useQuestionText, useStreaming } from "./live.ts";
@@ -203,6 +204,7 @@ function EntryRow({ id, entry }: { id: EntryId; entry: ViewEntry }) {
   if (entry.step !== undefined) return <StepRow id={id} entry={entry.step} />;
   if (entry.limit_stop !== undefined) return <LimitStopRow id={id} entry={entry.limit_stop} />;
   if (entry.notice !== undefined) return <Notice id={id} entry={entry.notice} />;
+  if (entry.elicitation !== undefined) return <Elicitation id={id} entry={entry.elicitation} />;
   return null;
 }
 
@@ -215,6 +217,8 @@ export const Row = memo(function Row({ id, stream }: { id: EntryId; stream: Stre
     return <LiveQuestion id={id} stream={stream} entry={entry.user_message} />;
   if (entry.agent_text !== undefined)
     return <LiveAgentText id={id} stream={stream} thought={entry.agent_text.kind === "thought"} />;
+  if (entry.permission !== undefined)
+    return <LivePermission id={id} stream={stream} entry={entry.permission} />;
   return <EntryRow id={id} entry={entry} />;
 });
 
@@ -233,5 +237,6 @@ export const PagedRow = memo(function PagedRow({ entry }: { entry: ViewEntry }) 
       <Answer id={id} text={a.text} streaming={false} />
     );
   }
+  if (entry.permission !== undefined) return <PagedPermission id={id} entry={entry.permission} />;
   return <EntryRow id={id} entry={entry} />;
 });

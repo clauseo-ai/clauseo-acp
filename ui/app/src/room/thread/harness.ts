@@ -12,6 +12,7 @@ import type {
   CommandOutcome,
   HostCommand,
   HostQuery,
+  MatterId,
   MatterSummary,
   QueryResult,
   ThreadSummary,
@@ -42,8 +43,8 @@ export const summary = (
 export type Script = {
   /** list_matters' answer; one matter by default. */
   matters?: MatterSummary[];
-  /** list_threads' answer; the one scripted thread by default. */
-  threads?: ThreadSummary[];
+  /** list_threads' answer, or each matter's; the one scripted thread by default. */
+  threads?: ThreadSummary[] | ((matter: MatterId) => ThreadSummary[]);
   /** Answers each command; by default create_thread makes THREAD, send_prompt is accepted for TURN, the rest done. */
   dispatch?: (command: HostCommand) => CommandOutcome | Promise<CommandOutcome>;
   /** Answers any other query. */
@@ -96,8 +97,12 @@ export async function mountRoom(script: Script = {}): Promise<Harness> {
   const transport = new FakeTransport({
     query: (query) => {
       if (query === "list_matters") return { matters: script.matters ?? [THE_MATTER] };
-      if (typeof query === "object" && query.list_threads !== undefined)
-        return { threads: script.threads ?? [summary()] };
+      if (typeof query === "object" && query.list_threads !== undefined) {
+        const t = script.threads;
+        return {
+          threads: typeof t === "function" ? t(query.list_threads.matter) : (t ?? [summary()]),
+        };
+      }
       if (script.query !== undefined) return script.query(query);
       throw new Error(`not scripted: ${JSON.stringify(query)}`);
     },

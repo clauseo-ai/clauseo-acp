@@ -1,14 +1,17 @@
 // The room's rail over FakeTransport, at the room's interface: the scratch matter only at the foot, each row's
 // status words (none on the open matter's), date groups across a Sunday, finding by name only without a NextHost and
 // by client with one, each saying so, Pinned and Recent (five), no Find on an empty rail, Remove from the list and the
-// open matter's chevron, isolated folder paths, and matters_changed updating a row.
+// open matter's chevron, isolated folder paths, matters_changed updating a row, and a left matter's thread waiting on a
+// permission.
 // @vitest-environment happy-dom
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, test, vi } from "vitest";
 import type { MatterSummary } from "../transport/protocol.ts";
 import { FakeTransport, type FakeHost } from "../transport/fake-transport.ts";
-import { uuid } from "../testing/stream-script.ts";
+import { header, reset, upsert, uuid } from "../testing/stream-script.ts";
+import type { ViewEntry } from "../transport/protocol.ts";
+import { mountRoom, summary, THE_MATTER } from "./thread/harness.ts";
 import { detailed, fakeNext } from "./fake-next.ts";
 import type { MatterInfo, NextCommand } from "./host-next.ts";
 import { Room } from "./room.tsx";
@@ -369,3 +372,50 @@ for (const language of ["en", "hi"] as const) {
       expect(text).not.toContain(held);
   });
 }
+
+test("a matter left while its thread waits on a permission says Needs your permission, until the entry resolves", async () => {
+  // older than THE_MATTER, so THE_MATTER opens first, with the scripted thread; this one has none
+  const other: MatterSummary = {
+    matter: uuid(0, 2),
+    name: "Rao v. Union of India",
+    kind: "folder",
+  };
+  const h = await mountRoom({
+    matters: [THE_MATTER, other],
+    threads: (m) => (m === THE_MATTER.matter ? [summary()] : []),
+  });
+  try {
+    const row = (name: string) =>
+      h.all("matter-row").find((r) => r.querySelector(".room-matter-name")?.textContent === name);
+    const perm = (state: "pending" | "resolved"): ViewEntry => ({
+      permission: {
+        order: 3,
+        request: uuid(1, 8),
+        options: [{ option_id: "once", kind: "allow_once", agent_label: "Allow" }],
+        deliverable: "live",
+        state:
+          state === "pending"
+            ? "pending"
+            : {
+                resolved: {
+                  choice: { selected: { option_id: "once", kind: "allow_once" } },
+                  by: "local_desktop",
+                },
+              },
+      },
+    });
+    h.deliver([reset([perm("pending")], header("needs_you"))]);
+    expect(h.one("permission")?.dataset["state"]).toBe("pending");
+    // the open matter's row says nothing: its prompt is in view
+    expect(row(THE_MATTER.name)?.dataset["state"]).toBe("idle");
+    await h.click(row(other.name));
+    expect(h.one("matter")?.textContent).toBe(other.name);
+    expect(row(THE_MATTER.name)?.dataset["state"]).toBe("permission");
+    expect(row(THE_MATTER.name)?.textContent).toContain("Needs your permission");
+    h.deliver([upsert(perm("resolved")), upsert(header("running"))]);
+    expect(row(THE_MATTER.name)?.dataset["state"]).toBe("working");
+    expect(row(THE_MATTER.name)?.textContent).not.toContain("permission");
+  } finally {
+    await h.unmount();
+  }
+});

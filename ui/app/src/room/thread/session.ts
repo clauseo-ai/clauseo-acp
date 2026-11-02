@@ -10,6 +10,7 @@ import type {
   ErrorCode,
   HostCommand,
   MatterId,
+  PermissionRequestId,
   StepEntry,
   StreamHeader,
   StreamId,
@@ -33,6 +34,11 @@ export type ThreadActions = {
   readonly sentTurn: TurnId | null;
   /** Undoes every file of a step; rejects with the HostError when the host refuses. */
   undo: (step: StepEntry) => Promise<void>;
+  /** Answers a permission request with an option it offered; rejects with the HostError when the host refuses (an
+   * allow_always declined at the native confirm: `transport.unauthorized`). */
+  answer: (request: PermissionRequestId, option: string) => Promise<void>;
+  /** Stop: cancels the open thread's turn. */
+  stop: () => void;
 };
 
 export const ThreadActionsContext = createContext<ThreadActions | null>(null);
@@ -178,7 +184,23 @@ export function useThreadSession(
     [command],
   );
 
+  const answer = useCallback(
+    async (request: PermissionRequestId, option: string) => {
+      const id = open.current;
+      if (id === null) throw internalError("no thread is open");
+      try {
+        await transport.answerPermission(id, request, option);
+      } catch (e) {
+        throw toHostError(e);
+      }
+    },
+    [transport],
+  );
+
   const stream = thread === null ? null : streamOf(thread);
-  const actions = useMemo(() => ({ stream, sentTurn, undo }), [stream, sentTurn, undo]);
+  const actions = useMemo(
+    () => ({ stream, sentTurn, undo, answer, stop }),
+    [stream, sentTurn, undo, answer, stop],
+  );
   return { thread, sentTurn, refused, ask, stop, actions };
 }
