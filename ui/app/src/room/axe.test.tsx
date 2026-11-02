@@ -3,7 +3,8 @@
 // a matter and none, with no matter (the empty rail), when list_matters fails, with the rail in every state, and with
 // the new matter dialog open, with and without a NextHost, and with the agent's permission requests in the thread: a
 // pending prompt on a paper offering all four answers, one answered once and done, a command's, which asks, and one confirming: Always for this matter
-// pressed and held while the OS asks, its answers waiting. happy-dom computes no styles, so axe can't judge colour contrast here: that
+// pressed and held while the OS asks, its answers waiting; and with the agent's questions as forms: Claude's
+// AskUserQuestion with one question and with two (radios, checkboxes, each with its Other). happy-dom computes no styles, so axe can't judge colour contrast here: that
 // is checked by hand in the app, with window.__clauseoAxe() (dev-hooks.ts). And U7's wait over the composer while
 // another conversation of the matter runs, with Stop the other and Queue.
 import { readFileSync } from "node:fs";
@@ -30,6 +31,7 @@ import {
   userMessage,
   uuid,
 } from "../testing/stream-script.ts";
+import { askEntry, ONE_QUESTION, TWO_QUESTIONS } from "./elicitation-fixtures.ts";
 import { detailed, fakeNext, railStates } from "./fake-next.ts";
 import type { PaperSummary, UiSettings } from "./host-next.ts";
 import { frameBatch } from "../store/batch.ts";
@@ -132,6 +134,12 @@ const SCENES: Record<string, Scene> = {
     papers: undefined,
     thread: [ASKED],
     queued: true,
+  },
+  // Claude's AskUserQuestion, one question and two, pending: the forms with their radios, checkboxes and Others
+  "the agent's questions": {
+    matters: true,
+    papers: undefined,
+    thread: [ASKED, askEntry(3, uuid(1, 9), ONE_QUESTION), askEntry(4, uuid(2, 9), TWO_QUESTIONS)],
   },
 };
 
@@ -285,6 +293,14 @@ for (const theme of THEMES) {
               expect(wait, name).not.toBeNull();
               expect(wait?.querySelector('[data-testid="stop-other"]'), name).not.toBeNull();
               expect(wait?.querySelector('[data-testid="queue"]'), name).not.toBeNull();
+            } else if (scene.thread?.some((e) => e.elicitation !== undefined) === true) {
+              await act(async () => void (await loadThread()));
+              await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+              expect(host.querySelectorAll('[data-testid="elicitation-form"]'), name).toHaveLength(
+                2,
+              );
+              expect(host.querySelectorAll('input[type="radio"]'), name).toHaveLength(5);
+              expect(host.querySelectorAll('input[type="checkbox"]'), name).toHaveLength(3);
             } else if (scene.thread !== undefined) {
               await act(async () => void (await loadThread()));
               await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
