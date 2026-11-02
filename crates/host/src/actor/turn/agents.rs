@@ -226,7 +226,13 @@ fn launch(actor: &Actor, thread: ThreadId, prepared: Option<Prepared>) -> Result
         (folder, BTreeMap::new(), None)
     };
     let hook = agent::loads::launch_env(actor.profile.launch_env(&row.agent));
-    let spec = agent::launch_spec(settings, hook, forced, std::env::vars_os(), folder.clone())?;
+    let dropped: &[&str] = if codex.is_some() {
+        &agent::codex::DROPPED_VARS
+    } else {
+        &[]
+    };
+    let inherited = std::env::vars_os();
+    let spec = agent::launch_spec(settings, hook, forced, dropped, inherited, folder.clone())?;
     let post = actor.post.clone();
     let post: Rc<dyn Fn(agent::AgentInput)> = Rc::new(move |input| {
         // The actor may be gone by then.
