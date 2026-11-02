@@ -211,8 +211,8 @@ wire_types! {
         ViewPatch, ViewPatchBody, ViewPosition, ViewWindow,
     },
     query::{
-        BlobRange, FolderState, HostQuery, MatterSummary, PageLimit, PaperSummary, QueryResult,
-        ReadLen, RestorePreview, ThreadSummary,
+        AgentSummary, BlobRange, FolderState, HostQuery, MatterSummary, PageLimit, PaperSummary,
+        QueryResult, ReadLen, RestorePreview, ThreadSummary,
     },
     raw::{RawPayload},
     session::{

@@ -1,4 +1,5 @@
-//! Queries: answered from host memory (`ListMatters`, `ListThreads`, `GetSettings`), a
+//! Queries: answered from host memory (`ListMatters`, `ListThreads`, `GetSettings`,
+//! `ListAgents`), a
 //! loaded stream (`PageEntries`), a loaded stream and then the matter's thread
 //! (`CompareVersions`, with a version or the folder now, and `PreviewRestore`) or a store
 //! read on a task of its own (`ReadBlob`); `ListPapers` runs on the matter's worker
@@ -6,8 +7,9 @@
 
 use clauseo_matters::CompareSide;
 use clauseo_protocol::{
-    CheckpointId, CompactString, ErrorCode, FolderState, HostQuery, MatterId, MatterSummary,
-    Principal, QueryResult, StreamId, ThreadStatus, ThreadSummary, ViewEntry,
+    AgentId, AgentKind, AgentSummary, CheckpointId, CompactString, ErrorCode, FolderState,
+    HostQuery, MatterId, MatterSummary, Principal, QueryResult, StreamId, ThreadStatus,
+    ThreadSummary, ViewEntry,
 };
 
 use std::path::PathBuf;
@@ -108,6 +110,10 @@ pub(super) fn query(
             }
             super::papers::list(actor, matter, reply);
         }
+        HostQuery::ListAgents => {
+            let agents = list_agents(&actor.effective.settings().agents);
+            let _gone = reply.send(Ok(QueryResult::Agents(agents)));
+        }
         HostQuery::ReadBlob { hash, offset, len } => {
             let store = actor.store.clone();
             let spawned = actor.spawner.spawn_local(async move {
@@ -124,6 +130,19 @@ pub(super) fn query(
             }
         }
     }
+}
+
+/// One summary per settings agent whose id is a valid `AgentId`, sorted by id (the map's
+/// order), with its kind. An id `AgentId` refuses could never name a thread, so it is left out.
+fn list_agents<T>(agents: &std::collections::BTreeMap<String, T>) -> Vec<AgentSummary> {
+    agents
+        .keys()
+        .filter_map(|id| AgentId::new(id.as_str()).ok())
+        .map(|id| AgentSummary {
+            kind: AgentKind::of(&id),
+            id,
+        })
+        .collect()
 }
 
 /// A query R8 answers (`CompareVersions`, `PreviewRestore`): checks on the loaded matter

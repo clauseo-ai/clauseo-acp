@@ -8,9 +8,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 use crate::open_enum::open_unit_enum;
 use crate::{
-    AgentId, BlobHash, CheckpointId, CompactString, Count, Error, FileChange, FileRefId, MatterId,
-    MatterKind, MatterPath, RestoreRequest, Seq, SettingsView, SkippedFile, StreamId, ThreadId,
-    ThreadStatus, Timestamp, ViewEntry,
+    AgentId, AgentKind, BlobHash, CheckpointId, CompactString, Count, Error, FileChange, FileRefId,
+    MatterId, MatterKind, MatterPath, RestoreRequest, Seq, SettingsView, SkippedFile, StreamId,
+    ThreadId, ThreadStatus, Timestamp, ViewEntry,
 };
 
 /// Most entries one `PageEntries` returns: the size of a `Reset`'s view window (about 200 recent
@@ -143,6 +143,8 @@ pub enum HostQuery {
         /// The matter.
         matter: MatterId,
     },
+    /// The agents in the settings, for a new thread's choice of agent.
+    ListAgents,
 }
 
 /// A query's answer.
@@ -181,6 +183,8 @@ pub enum QueryResult {
         /// where `<folder>/` sorts).
         truncated: bool,
     },
+    /// For `ListAgents`: one per settings agent whose id is a valid [`AgentId`], sorted by id.
+    Agents(Vec<AgentSummary>),
 }
 
 /// One file of a matter's folder, as `ListPapers` lists it.
@@ -195,6 +199,18 @@ pub struct PaperSummary {
     pub size: Count,
     /// When it was last modified.
     pub modified: Timestamp,
+}
+
+/// One agent in the settings, for `ListAgents`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct AgentSummary {
+    /// Its id, as a thread names it.
+    pub id: AgentId,
+    /// What it is ([`AgentKind::of`]); `None` for an id that names no known agent, such as
+    /// `fake-agent`.
+    #[serde(default)]
+    pub kind: Option<AgentKind>,
 }
 
 /// What a restore would do now, for `PreviewRestore`. Each list is sorted by path.
