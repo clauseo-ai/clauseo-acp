@@ -263,6 +263,375 @@
     "hi": "उत्तर दिया जा रहा है।",
     "status": "approved",
     "at": "2026-11-02",
-    "note": "Rohan, on the review page"
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-02": {
+    "en": "Failed",
+    "hi": "विफल",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-03": {
+    "en": "Stopped",
+    "hi": "रोका गया",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-04": {
+    "en": "You stopped the answer. The answer so far is kept.",
+    "hi": "आपने उत्तर रोक दिया। अब तक का उत्तर रखा गया है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-05": {
+    "en": "The answer stopped at its limit, before it finished.",
+    "hi": "उत्तर पूरा होने से पहले अपनी सीमा पर रुक गया।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-06": {
+    "en": "This question was declined, so there is no answer.",
+    "hi": "इस प्रश्न को अस्वीकार किया गया, इसलिए कोई उत्तर नहीं है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-07": {
+    "en": "The answer stopped. Your question and the answer so far are kept.",
+    "hi": "उत्तर रुक गया। आपका प्रश्न और अब तक का उत्तर रखे गए हैं।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-08": {
+    "en": "Your question",
+    "hi": "आपका प्रश्न",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-09": {
+    "en": "Clauseo's answer",
+    "hi": "Clauseo का उत्तर",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-10": {
+    "en": "Attached: {name}",
+    "hi": "संलग्न: {name}",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-11": {
+    "en": "Something here can't be shown in the thread.",
+    "hi": "यहाँ का कुछ हिस्सा बातचीत में नहीं दिखाया जा सकता।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-12": {
+    "en": "Clauseo changed 1 paper.",
+    "hi": "Clauseo ने 1 दस्तावेज़ बदला।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-13": {
+    "en": "You undid Clauseo's changes to 1 paper.",
+    "hi": "आपने 1 दस्तावेज़ में Clauseo के बदलाव पूर्ववत किए।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-14": {
+    "en": "Resets {time}",
+    "hi": "{time} बजे रीसेट",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-15": {
+    "en": "Resets {day} {time}",
+    "hi": "{day} {time} बजे रीसेट",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-16": {
+    "en": "Limit reached. Reset not given.",
+    "hi": "सीमा पूरी। रीसेट का समय नहीं बताया गया।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-17": {
+    "en": "Try again",
+    "hi": "फिर से प्रयास करें",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-18": {
+    "en": "Usage limit reached",
+    "hi": "उपयोग की सीमा पूरी हो गई",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-19": {
+    "en": "Something went wrong inside Clauseo.",
+    "hi": "Clauseo के भीतर कुछ गड़बड़ हो गई।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-20": {
+    "en": "Clauseo couldn't take that request as it was.",
+    "hi": "Clauseo वह अनुरोध उस रूप में नहीं ले सका।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-21": {
+    "en": "That request clashes with one already made, so nothing changed.",
+    "hi": "यह अनुरोध पहले किए गए अनुरोध से टकराता है, इसलिए कुछ नहीं बदला।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-22": {
+    "en": "This matter is no longer in Clauseo.",
+    "hi": "यह मामला अब Clauseo में नहीं है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-23": {
+    "en": "This thread is no longer in Clauseo.",
+    "hi": "यह बातचीत अब Clauseo में नहीं है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-24": {
+    "en": "Wait for the answer to finish, or stop it.",
+    "hi": "उत्तर पूरा होने तक प्रतीक्षा करें, या उसे रोकें।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-25": {
+    "en": "The answer to that question has already started or finished.",
+    "hi": "उस प्रश्न का उत्तर पहले ही शुरू या पूरा हो चुका है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-26": {
+    "en": "Too many questions are waiting in this thread.",
+    "hi": "इस बातचीत में बहुत अधिक प्रश्न प्रतीक्षा में हैं।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-27": {
+    "en": "That request was already answered, or it has expired.",
+    "hi": "उस अनुरोध का उत्तर पहले ही दिया जा चुका है, या उसका समय निकल गया है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-28": {
+    "en": "That answer wasn't one of the choices offered.",
+    "hi": "वह उत्तर दिए गए विकल्पों में से नहीं था।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-29": {
+    "en": "That question was already answered, or it has expired.",
+    "hi": "उस प्रश्न का उत्तर पहले ही दिया जा चुका है, या उसका समय निकल गया है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-30": {
+    "en": "Those answers don't fit the question.",
+    "hi": "ये उत्तर प्रश्न से मेल नहीं खाते।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-31": {
+    "en": "Claude didn't start. Your question is kept.",
+    "hi": "Claude शुरू नहीं हुआ। आपका प्रश्न रखा गया है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-32": {
+    "en": "Claude sent something Clauseo can't read.",
+    "hi": "Claude ने कुछ ऐसा भेजा जिसे Clauseo पढ़ नहीं सकता।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-33": {
+    "en": "Sign in to Claude first. Your question is kept.",
+    "hi": "पहले Claude में साइन इन करें। आपका प्रश्न रखा गया है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-34": {
+    "en": "This version of Claude Code doesn't work with Clauseo.",
+    "hi": "Claude Code का यह संस्करण Clauseo के साथ काम नहीं करता।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-35": {
+    "en": "The computer's disk is full. Free some space, then try again.",
+    "hi": "कंप्यूटर की डिस्क भर गई है। कुछ जगह खाली करें, फिर दोबारा प्रयास करें।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-36": {
+    "en": "Clauseo couldn't read back its saved data.",
+    "hi": "Clauseo अपना सहेजा गया डेटा वापस नहीं पढ़ सका।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-37": {
+    "en": "Clauseo couldn't read or write its data. Try again.",
+    "hi": "Clauseo अपना डेटा पढ़ या लिख नहीं सका। फिर से प्रयास करें।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-38": {
+    "en": "Clauseo is already open in another window.",
+    "hi": "Clauseo पहले से किसी दूसरी विंडो में खुला है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-39": {
+    "en": "This data comes from a newer version of Clauseo.",
+    "hi": "यह डेटा Clauseo के नए संस्करण से है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-40": {
+    "en": "Clauseo couldn't save a version of this matter's papers, so this change can't be undone.",
+    "hi": "Clauseo इस मामले के दस्तावेज़ों का संस्करण नहीं सहेज सका, इसलिए यह बदलाव पूर्ववत नहीं किया जा सकता।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-41": {
+    "en": "This matter's folder can't be found. It may have moved, or its drive isn't connected.",
+    "hi": "इस मामले का फ़ोल्डर नहीं मिल रहा। हो सकता है वह कहीं और ले जाया गया हो, या उसकी ड्राइव जुड़ी न हो।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-42": {
+    "en": "A whole drive, your home folder or a system folder can't be a matter.",
+    "hi": "पूरी ड्राइव, आपका होम फ़ोल्डर या कोई सिस्टम फ़ोल्डर मामला नहीं बन सकता।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-43": {
+    "en": "A paper is open in another program. Close it, then try again.",
+    "hi": "कोई दस्तावेज़ किसी दूसरे प्रोग्राम में खुला है। उसे बंद करें, फिर दोबारा प्रयास करें।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-44": {
+    "en": "Wait for the answer to finish first.",
+    "hi": "पहले उत्तर पूरा होने दें।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-45": {
+    "en": "That wasn't allowed, so nothing changed.",
+    "hi": "इसकी अनुमति नहीं थी, इसलिए कुछ नहीं बदला।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-46": {
+    "en": "That is too large to send.",
+    "hi": "यह भेजने के लिए बहुत बड़ा है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
+  },
+  "U3-47": {
+    "en": "Something went wrong.",
+    "hi": "कुछ गड़बड़ हो गई।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 53b4ca5d)"
   }
 }
