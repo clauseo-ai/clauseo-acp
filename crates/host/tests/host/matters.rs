@@ -320,6 +320,10 @@ fn a_home_reached_through_a_link_still_shortens_the_folder() {
     crate::write::symlink(dir.work(), &link);
     let host = dir.start_with(0, |config| config.with_home_folder(Some(link.clone())));
     let folder = dir.folder("Acme", &[]);
+    // Imported by its real path, as the room's folder picker gives it: on macOS the temp folder
+    // is under `/var`, itself a link to `/private/var`, so the path as written matches neither
+    // spelling of the home.
+    let folder = dunce::canonicalize(&folder).unwrap();
     let matter = created(import(&host, "Acme", &folder, (None, None)));
     assert_eq!(summary(&host, matter).folder_display, "Acme");
     host.shutdown();
