@@ -1,0 +1,20 @@
+[package]
+name = "clauseo-mcp"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "clauseo-mcp"
+path = "src/main.rs"
+
+# serde_json only (it brings serde): the guard reads JSON-RPC lines as `serde_json::Value`. No HTTP
+# client, socket crate, async runtime or tauri; `tests/guard/deps.rs` fails on any of them, and
+# ARCHITECTURE.md's row bans them.
+[dependencies]
+serde_json = { workspace = true }

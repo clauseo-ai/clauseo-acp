@@ -93,7 +93,7 @@ to write instead.
 | `legal` | Case-law and regulator data clients and parsers | protocol | tauri | planned |
 | `citations` | Deterministic citation parsing and checks | protocol, legal | tauri | planned |
 | `skills` | Skill format, built-in skills, validation, install through `profile` | protocol, profile | tauri | planned |
-| `mcp` | The `clauseo-mcp` sidecar: research tools, Word tracked changes, citation checks, views | legal, citations, stetdoc-core, rmcp | tauri | planned |
+| `mcp` | The `clauseo-mcp` sidecar: the browser guard in front of agent-browser's MCP server | serde, serde_json | tauri, tokio, reqwest, hyper, ureq, curl, rustls, native-tls | exists |
 
 The broker (keys, cache and limits for outside services, plus the socket the sandboxed sidecar
 reaches) is a module of `host`, not a crate. Frontend packages: `ui/app` (exists), `ui/components`
