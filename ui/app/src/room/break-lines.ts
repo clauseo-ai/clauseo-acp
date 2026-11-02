@@ -13,12 +13,13 @@ import { stamp } from "./thread/clock.ts";
 /** The working line for a stopped answer: agent.exited with its time, or, once the host restarts (H10), any code
  * Restart mends, with Restart; with H10 and agent.exited, the details say what Restart does. Null otherwise: the step
  * row's words say the rest. A refused Restart says its refusal's words, offers Restart again only when the refusal
- * says another try may work, and folds open no details. */
+ * says another try may work, and folds open no details. `plan` is the thread's, for the words that name it. */
 export function stoppedLine(
   lang: Lang,
   brk: Break,
   now: number,
   restart: { onRestart: () => void; refused: HostError | null } | null,
+  plan?: string | null,
 ): BreakLine | null {
   const mends = restart !== null && RESTARTS.has(brk.code);
   if (brk.code !== TIMED && !mends) return null;
@@ -29,7 +30,7 @@ export function stoppedLine(
       ? say(lang, "The answer stopped at {time}. Your question and the answer so far are kept.", {
           time: stamp(lang, brk.step.ts, now),
         })
-      : errorWords(lang, code);
+      : errorWords(lang, code, plan);
   const offers = mends && (refused === null || refused.retryable);
   return {
     testId: "agent-stopped",
@@ -57,12 +58,17 @@ export function stoppedLine(
 
 /** The working line for a stream that failed: that the thread stopped coming in and its code's sentence, with Try
  * again only when the code says another try may work. */
-export function streamFailedLine(lang: Lang, error: HostError, onRetry: () => void): BreakLine {
+export function streamFailedLine(
+  lang: Lang,
+  error: HostError,
+  onRetry: () => void,
+  plan?: string | null,
+): BreakLine {
   return {
     testId: "stream-failed",
     state: {
       kind: "wait",
-      words: streamFailedWords(lang, error.code, error.retryable),
+      words: streamFailedWords(lang, error.code, error.retryable, plan),
       pill: null,
       code: error.code,
       ...(error.retryable

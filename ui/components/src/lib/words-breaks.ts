@@ -40,9 +40,14 @@ const NO_TRY: Partial<Record<ErrorCode, BreakKey>> = {
 };
 
 /** The line for a stream that failed: that the thread stopped coming in, then its code's sentence; without Try again
- * (`retryable` false), a sentence that doesn't tell the lawyer to try again. */
-export function streamFailedWords(lang: Lang, code: string, retryable: boolean): string {
+ * (`retryable` false), a sentence that doesn't tell the lawyer to try again. `plan` is the thread's, as errorWords takes it. */
+export function streamFailedWords(
+  lang: Lang,
+  code: string,
+  retryable: boolean,
+  plan?: string | null,
+): string {
   const quiet = retryable || !Object.hasOwn(NO_TRY, code) ? undefined : NO_TRY[code as ErrorCode];
-  const said = quiet === undefined ? errorWords(lang, code) : brk(lang, quiet);
+  const said = quiet === undefined ? errorWords(lang, code, plan) : brk(lang, quiet);
   return `${brk(lang, "This conversation stopped updating in this window.")} ${said}`;
 }

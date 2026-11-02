@@ -158,9 +158,12 @@ export function useStoppedLine({
   thread,
   restart,
   lines,
+  plan,
 }: {
   /** The lines' chunk, once loaded. */
   lines: BreakLines | null;
+  /** The thread's plan, for the words that name it (agent-plan.ts). */
+  plan?: string | null | undefined;
   lang: Lang;
   brk: Break | null;
   live: boolean;
@@ -191,5 +194,6 @@ export function useStoppedLine({
     brk,
     brk.seen,
     restart === null ? null : { onRestart, refused: pressed?.refused ?? null },
+    plan,
   );
 }
