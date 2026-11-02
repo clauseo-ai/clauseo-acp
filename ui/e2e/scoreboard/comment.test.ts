@@ -1,5 +1,6 @@
 // comment.ts against a fake GitHub: finding the pull request (fork-shaped events included), the
-// product-code filter, pending and missing artifacts, main's baseline, and create versus edit.
+// product-code filter, which head run each artifact comes from, pending and missing artifacts,
+// main's baseline, and create versus edit.
 
 import { readFileSync } from "node:fs";
 
@@ -254,9 +255,9 @@ test("docs-, CI- and xtask-only pull requests get no comment", async () => {
   expect(isProductPath("xtask/Cargo.toml")).toBe(false);
 });
 
-// The two workflows decide with grep whether a change is product code (and so whether the
-// scoreboards run); the comment decides with isProductPath. They must agree, or a pull request gets
-// a scoreboard the comment skips, or a comment waiting on a scoreboard that never ran.
+// changes.sh decides with grep whether a change is product code (and so whether the scoreboards
+// run); the comment decides with isProductPath. They must agree, or a pull request gets a
+// scoreboard the comment skips, or a comment waiting on a scoreboard that never ran.
 test("the workflows' product-path greps agree with isProductPath", () => {
   const paths = [
     "crates/x",
@@ -270,7 +271,7 @@ test("the workflows' product-path greps agree with isProductPath", () => {
     "crates/x/Cargo.toml",
     "xtask/Cargo.toml",
   ];
-  for (const workflow of [".github/workflows/ci.yml", ".github/workflows/e2e-windows.yml"]) {
+  for (const workflow of [".github/scripts/changes.sh"]) {
     const lines = repoFile(workflow)
       .split("\n")
       .filter((line) => line.includes("product=$("));
@@ -313,6 +314,122 @@ test("a missing artifact is pending while a watched run is in progress, then not
   expect(done.body).toContain(
     "| Send to first token on screen | not run | 141 ms | – | 150 ms |  |",
   );
+});
+
+test("an artifact comes from the newest head run that has it, not the newest run", async () => {
+  // A re-run of e2e-windows (no artifact yet, say) newer than the run that has one.
+  const gh = world()
+    .route(`/repos/${REPO}/actions/runs?head_sha=${HEAD}&event=pull_request&per_page=100`, {
+      workflow_runs: [
+        wfRun(104, ".github/workflows/e2e-windows.yml"),
+        wfRun(102, ".github/workflows/e2e-windows.yml"),
+        wfRun(101, ".github/workflows/ci.yml"),
+      ],
+    })
+    .route(`/repos/${REPO}/actions/runs/104/artifacts?per_page=100`, { artifacts: [] });
+  const outcome = await run(gh, ctx(sameRepoEvent()));
+  if (outcome.action === "skip") throw new Error(outcome.reason);
+  expect(outcome.body).toContain(`this PR from [its scoreboard run](${htmlRun(102)})`);
+  expect(outcome.body).toContain(
+    "| Send to first token on screen | 162 ms | 141 ms | +21 ms (+14.9%) | 150 ms | ⚠️ over budget",
+  );
+});
+
+test("a macOS artifact is pending while the newest scoreboard-macos run is in progress", async () => {
+  // A label added to the pull request started a run that has not uploaded yet.
+  const gh = world().route(
+    `/repos/${REPO}/actions/runs?head_sha=${HEAD}&event=pull_request&per_page=100`,
+    {
+      workflow_runs: [
+        wfRun(301, ".github/workflows/scoreboard-macos.yml", { status: "in_progress" }),
+        wfRun(101, ".github/workflows/ci.yml"),
+        wfRun(102, ".github/workflows/e2e-windows.yml"),
+      ],
+    },
+  );
+  gh.route(`/repos/${REPO}/actions/runs/301/artifacts?per_page=100`, { artifacts: [] });
+  const outcome = await run(gh, ctx(sameRepoEvent()));
+  if (outcome.action === "skip") throw new Error(outcome.reason);
+  expect(outcome.body).toContain(`this PR's [scoreboard run](${htmlRun(301)}) is still running`);
+  expect(outcome.body).toContain(
+    "| Send to first token on screen | pending | not run | – | 150 ms |  |",
+  );
+  expect(outcome.body).toContain(`this PR from [its scoreboard run](${htmlRun(102)})`);
+});
+
+test("a missing artifact is not run when no run has it and every watched run is complete", async () => {
+  // The macOS job was skipped (no label): its run completed without an artifact.
+  const gh = world().route(
+    `/repos/${REPO}/actions/runs?head_sha=${HEAD}&event=pull_request&per_page=100`,
+    {
+      workflow_runs: [
+        wfRun(301, ".github/workflows/scoreboard-macos.yml"),
+        wfRun(101, ".github/workflows/ci.yml"),
+        wfRun(102, ".github/workflows/e2e-windows.yml"),
+      ],
+    },
+  );
+  gh.route(`/repos/${REPO}/actions/runs/301/artifacts?per_page=100`, { artifacts: [] });
+  const outcome = await run(gh, ctx(sameRepoEvent()));
+  if (outcome.action === "skip") throw new Error(outcome.reason);
+  expect(outcome.body).toContain("this PR has no scoreboard result");
+  expect(outcome.body).not.toContain("still running");
+  expect(outcome.body).toContain(
+    "| Send to first token on screen | not run | not run | – | 150 ms |  |",
+  );
+});
+
+test("a run of another watched workflow in progress does not make a macOS artifact pending", async () => {
+  // CI is still running, and the newest scoreboard-macos run (skipped, no label) has completed.
+  const gh = world().route(
+    `/repos/${REPO}/actions/runs?head_sha=${HEAD}&event=pull_request&per_page=100`,
+    {
+      workflow_runs: [
+        wfRun(301, ".github/workflows/scoreboard-macos.yml"),
+        wfRun(101, ".github/workflows/ci.yml", { status: "in_progress" }),
+        wfRun(102, ".github/workflows/e2e-windows.yml"),
+      ],
+    },
+  );
+  gh.route(`/repos/${REPO}/actions/runs/301/artifacts?per_page=100`, { artifacts: [] });
+  const outcome = await run(gh, ctx(sameRepoEvent()));
+  if (outcome.action === "skip") throw new Error(outcome.reason);
+  expect(outcome.body).toContain("this PR has no scoreboard result");
+  expect(outcome.body).not.toContain(`[scoreboard run](${htmlRun(301)}) is still running`);
+  expect(outcome.body).toContain(
+    "| Send to first token on screen | not run | not run | – | 150 ms |  |",
+  );
+});
+
+test("artifacts are listed newest run first and only until every name is found", async () => {
+  // The newest run has all three artifacts, so the older runs are never listed: their routes are
+  // gone, and a listing of either would throw.
+  const gh = world().route(
+    `/repos/${REPO}/actions/runs?head_sha=${HEAD}&event=pull_request&per_page=100`,
+    {
+      workflow_runs: [
+        wfRun(105, ".github/workflows/scoreboard-macos.yml"),
+        wfRun(102, ".github/workflows/e2e-windows.yml"),
+        wfRun(101, ".github/workflows/ci.yml"),
+      ],
+    },
+  );
+  gh.routes.delete(`/repos/${REPO}/actions/runs/101/artifacts?per_page=100`);
+  gh.routes.delete(`/repos/${REPO}/actions/runs/102/artifacts?per_page=100`);
+  gh.route(`/repos/${REPO}/actions/runs/105/artifacts?per_page=100`, {
+    artifacts: [
+      artifact(1051, ARTIFACTS.reducer),
+      artifact(1052, ARTIFACTS.windows),
+      artifact(1053, ARTIFACTS.macos),
+    ],
+  });
+  gh.files.set(1051, fixture("reducer-bench-summary.json"));
+  gh.files.set(1052, fixture("scoreboard-windows.json"));
+  gh.files.set(1053, fixture("scoreboard-macos.json"));
+  const outcome = await run(gh, ctx(sameRepoEvent()));
+  if (outcome.action === "skip") throw new Error(outcome.reason);
+  expect(outcome.body.split(`this PR from [its scoreboard run](${htmlRun(105)})`)).toHaveLength(3);
+  expect(outcome.body).toContain(`this PR from [its reducer-bench run](${htmlRun(105)})`);
 });
 
 test("an oversized or malformed artifact is refused and the comment still posts", async () => {

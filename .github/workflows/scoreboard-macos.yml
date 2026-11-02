@@ -1,0 +1,143 @@
+# The speed scoreboard on macOS Apple silicon (R13): the `marks` build of the app plays
+# fake_agent's scoreboard session by itself, one warm-up and three measured launches
+# (ui/e2e/scoreboard/macos.ts), and the job uploads scoreboard-macos.json as the artifact
+# scoreboard-macos for the scoreboard comment (scoreboard-comment.yml). It also runs the desktop
+# crate's tests and clippy with the marks feature.
+#
+# - Runs on every push to main, nightly and on demand, which gives the budgets their macOS
+#   baseline, and on a pull request only when it carries the label `scoreboard`: macOS runners
+#   are shared across the org and their queue was the slowest part of a pull request's checks, so
+#   a pull request takes at most one (ci.yml's `build (aarch64-apple-darwin)`). Adding the label
+#   starts a run; each push to a labelled pull request starts another.
+# - Its own workflow, so the label trigger stays out of ci.yml: `labeled` there would re-run all of
+#   CI for any label, and CI's cancel-in-progress would kill the run in progress. Here a label other
+#   than `scoreboard` starts a run whose job is skipped, in a concurrency group of its own, so it
+#   cancels nothing.
+# - On a pull request without the label, ci.yml's macOS build job clippies the marks feature; its
+#   tests run here only.
+# - Its numbers report and alert, so a failure leaves the run green (continue-on-error): a red run
+#   on main would hide its numbers from the comment, which reads main's successful runs only. Not a
+#   required check.
+# - No version is written here, as in ci.yml. Every action is pinned by commit SHA, with its tag in
+#   a comment.
+
+name: scoreboard-macos
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A pull request keeps only its newest run, except that a run started by another label gets a
+# group of its own (its run id), so it never cancels a scoreboard in progress. Each push to main,
+# nightly run and run on demand has a group of its own, as in ci.yml.
+concurrency:
+  group: >-
+    scoreboard-macos-${{ github.event.pull_request.number || format('{0}-{1}', github.event_name, github.sha) }}${{
+    (github.event.action == 'labeled' && github.event.label.name != 'scoreboard') && format('-other-label-{0}', github.run_id) || '' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  scoreboard-macos:
+    name: scoreboard-macos
+    if: >-
+      github.event_name != 'pull_request'
+      || (github.event.action == 'labeled' && github.event.label.name == 'scoreboard')
+      || (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'scoreboard'))
+    runs-on: macos-15
+    continue-on-error: true
+    # About 12 minutes of build and tests, then at worst 4 plays × 3 launches × 240 s
+    # (PLAY_TIMEOUT_MS and PLAY_ATTEMPTS in ui/e2e/scoreboard/macos.ts): 60 minutes.
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the Rust toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: ui/package.json
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ui/package.json
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+
+      # Its own key: the marks feature changes the desktop crate's build. Saved on main only.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: scoreboard-macos
+          cache-bin: "false"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install the ui workspace
+        run: pnpm -C ui install --frozen-lockfile
+
+      # `tauri build` embeds ui/app/dist (custom-protocol); `marks` turns on e2e as well.
+      - name: Build the app with the marks feature
+        run: pnpm -C ui tauri build --no-bundle --features marks
+
+      - name: Build fake_agent
+        run: cargo build --release --locked -p clauseo-fake_agent
+
+      # The desktop crate's marks-only code and tests, which no other job compiles. After the app
+      # build, which writes the ui/app/dist the crate embeds.
+      - name: Install nextest at its pin
+        uses: ./.github/actions/install-pinned-tools
+        with:
+          tools: cargo-nextest
+
+      # The permission tests start fake_agent from target/debug (test_support.rs), which only a
+      # workspace run builds, so the dev build comes first; the release one above is for the plays.
+      - name: Test the desktop crate with the marks feature
+        run: |
+          cargo build --locked -p clauseo-fake_agent
+          cargo nextest run -p clauseo-desktop --features marks --locked --profile ci
+
+      - name: clippy the desktop crate with the marks feature
+        run: cargo clippy -p clauseo-desktop --all-targets --features marks --locked -- -D warnings
+
+      # Plain Node, no install: macos.ts imports Node's own modules and ui/e2e files only.
+      - name: Speed scoreboard
+        env:
+          MARKS_APP: ${{ github.workspace }}/target/release/clauseo-desktop
+          MARKS_FAKE_AGENT: ${{ github.workspace }}/target/release/fake_agent
+          SCOREBOARD_OUT: ${{ runner.temp }}/scoreboard-out
+        # The runner stretches short sleeps: in PR #106's runs, 200 sleeps of 5 ms took 5.5 to 6.2 s
+        # (App Nap off and `taskpolicy -a` changed nothing), so the stream ran about 85 s instead
+        # of 13 s. macos.ts then reports first token, React commits per frame and IPC as not
+        # measured and keeps the rest. The probe prints this run's figure first.
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2016 # Perl's variables, not the shell's.
+          probe='use Time::HiRes qw(sleep time); my $t = time; sleep(0.005) for 1..200; printf "200 sleeps of 5 ms: %.0f ms\n", (time - $t) * 1000'
+          perl -e "$probe"
+          node ui/e2e/scoreboard/macos.ts
+
+      # comment.ts reads scoreboard-macos.json from the artifact scoreboard-macos.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: scoreboard-macos
+          path: ${{ runner.temp }}/scoreboard-out/scoreboard-macos.json
+          if-no-files-found: warn
+
+      # Each play's run file as the app wrote it (warm-up included), for checking the medians by
+      # hand. A separate artifact the comment never reads.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: scoreboard-macos-runs
+          path: ${{ runner.temp }}/scoreboard-out/runs
+          if-no-files-found: warn

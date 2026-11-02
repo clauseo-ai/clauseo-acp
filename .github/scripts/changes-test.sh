@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# The fixtures of changes.sh: each case is a list of changed paths and the outputs they must
+# give. ci.yml's `changes` job runs this before it classifies, so a rule that would let a code
+# change skip its jobs fails the required check `changes` instead of reporting green.
+# Run it from the repo root: bash .github/scripts/changes-test.sh
+#
+# It also recomputes changes.sh's APP_CRATES, clauseo-desktop's path-dependency closure, from
+# crates/*/Cargo.toml, and fails when the two differ.
+
+set -euo pipefail
+cd "$(dirname "$0")/../.."
+
+script=.github/scripts/changes.sh
+fail=0
+
+# check <expected "rust app ui product"> <path>...
+check() {
+  local want=$1
+  shift
+  local got
+  got=$(printf '%s\0' "$@" | bash "$script" 2> /dev/null \
+    | sed -nE 's/^(rust|app|ui|product)=//p' | tr '\n' ' ' | sed 's/ $//')
+  if [ "$got" != "$want" ]; then
+    echo "FAIL: $* -> rust app ui product = $got, want $want"
+    fail=1
+  fi
+}
+
+T="true"
+F="false"
+
+# Docs-only: nothing heavy runs.
+check "$F $F $F $F" README.md
+check "$F $F $F $F" docs/architecture/overview.md docs/img/flow.svg
+# product follows comment.ts's isProductPath, which goes by folder alone.
+check "$F $F $F $T" crates/host/README.md ui/app/NOTES.md
+check "$F $F $F $F" LICENSE LICENSES/MIT.txt cla/signatures.json CLA.md
+check "$F $F $F $F" .github/CODEOWNERS .github/pull_request_template.md
+check "$F $F $F $F" rustfmt.toml taplo.toml _typos.toml deny.toml .gitleaks.toml lefthook.yml
+check "$F $F $F $F" .gitignore .gitattributes
+check "$F $F $F $T" ui/.gitignore
+check "$F $F $F $F" fuzz/fuzz_targets/acp.rs fuzz/nightly.sh
+
+# ui-only: smoke runs, the Rust build matrix does not.
+check "$F $T $T $T" ui/app/src/App.tsx
+check "$F $T $T $T" ui/pnpm-lock.yaml ui/e2e/app-windows/smoke.spec.ts
+check "$F $T $T $T" ui/components/button.tsx docs/ui.md
+# The generated TypeScript bindings are a desktop unit test's output.
+check "$T $T $T $T" ui/app/src/transport/bindings.ts
+
+# Rust in an app crate: everything but the ui flag.
+check "$T $T $F $T" crates/desktop/src/lib.rs
+check "$T $T $F $T" crates/host/src/session.rs
+check "$T $T $F $T" crates/fake_agent/src/main.rs
+check "$T $T $F $T" crates/acp/Cargo.toml
+# Rust outside the app: the build matrix, no smoke.
+check "$T $F $F $T" crates/limits/src/lib.rs
+check "$T $F $F $T" crates/reducer_bench/benches/apply.rs
+check "$T $F $F $T" crates/codex_appserver/src/lib.rs
+check "$T $F $F $F" xtask/src/main.rs
+check "$T $F $F $F" .config/nextest.toml
+check "$T $F $F $F" budgets.toml
+# What every Rust build reads.
+check "$T $T $F $T" Cargo.lock
+check "$T $T $F $T" Cargo.toml
+check "$T $T $F $F" rust-toolchain.toml
+check "$T $T $F $F" .cargo/config.toml clippy.toml
+
+# Mixed.
+check "$T $T $T $T" crates/limits/src/lib.rs ui/app/src/App.tsx
+check "$T $T $F $T" README.md crates/store/src/lib.rs
+
+# CI itself runs everything.
+check "$T $T $T $F" .github/workflows/ci.yml
+check "$T $T $T $F" .github/scripts/changes.sh
+check "$T $T $T $F" .github/actions/install-tauri-linux-deps/action.yml
+
+# Fail safe: an unknown path, or no path at all, runs everything.
+check "$T $T $T $F" some-new-dir/thing.rs
+check "$T $T $T $F" README.md Makefile
+check "$T $T $T $F" crates
+check "$T $T $T $T"
+
+# Newline-separated input gives the same outputs as NUL-separated input.
+got=$(printf 'README.md\ncrates/desktop/src/lib.rs\n' | bash "$script" 2> /dev/null | tr '\n' ' ')
+if [ "$got" != "rust=true app=true ui=false product=true " ]; then
+  echo "FAIL: newline-separated input -> $got"
+  fail=1
+fi
+
+# APP_CRATES is clauseo-desktop's path-dependency closure. Each crate's Cargo.toml names a
+# workspace crate as `path = "../<dir>"`; `path = "."` and `path = "src/..."` are its own targets.
+deps() {
+  sed -n 's/.*path = "\.\.\/\([a-z_]*\)".*/\1/p' "crates/$1/Cargo.toml" | sort -u
+}
+closure="desktop"
+frontier="desktop"
+while [ -n "$frontier" ]; do
+  next=""
+  for c in $frontier; do
+    for d in $(deps "$c"); do
+      case " $closure " in
+        *" $d "*) ;;
+        *)
+          closure="$closure $d"
+          next="$next $d"
+          ;;
+      esac
+    done
+  done
+  frontier=$next
+done
+# shellcheck disable=SC2086 # split the space-separated list
+want=$(printf '%s\n' $closure | sort | tr '\n' ' ')
+listed=$(sed -n 's/^APP_CRATES="\(.*\)"$/\1/p' "$script" | tr ' ' '\n' | sort | tr '\n' ' ')
+if [ "$want" != "$listed" ]; then
+  echo "FAIL: APP_CRATES in $script is '$listed'; clauseo-desktop's path-dependency closure is '$want'"
+  fail=1
+fi
+
+if [ "$fail" -ne 0 ]; then
+  exit 1
+fi
+echo "changes.sh: all fixtures pass; APP_CRATES matches clauseo-desktop's closure ($want)"
