@@ -3,7 +3,8 @@
 //! title, no `AgentNamed`.
 
 use clauseo_protocol::{
-    DomainEvent, ErrorCode, StopReason, StreamHeader, StreamId, ThreadId, ViewPatchBody,
+    AgentChoiceId, DomainEvent, ErrorCode, HostCommand, StopReason, StreamHeader, StreamId,
+    ThreadId, ViewPatchBody,
 };
 
 use crate::support::{Dir, FAKE, Scenario, matter_with_thread};
@@ -87,6 +88,11 @@ fn same_title_on_a_second_start_logs_nothing_new() {
     }
     host.settle();
     events.drain_ready();
+    // Both turns failed at session/new, so the second start did happen.
+    let auth_failures = events.count(|event| {
+        matches!(event, DomainEvent::TurnFailed(failed) if failed.code == ErrorCode::AgentAuthRequired)
+    });
+    assert_eq!(auth_failures, 2, "{}", events.dump());
     assert_eq!(events.count(named("Fake Agent")), 1, "{}", events.dump());
     host.shutdown();
 }
@@ -112,5 +118,42 @@ fn an_agent_without_a_title_logs_no_name() {
         events.dump()
     );
     assert_eq!(header_name(&host, thread), None, "{}", events.dump());
+    host.shutdown();
+}
+
+/// A start on a restarted host, where the thread's stream is unloaded: `SetMode` starts the agent
+/// without loading the stream, so the name that start logs is not folded into it. The second
+/// start must read the name from the header the actor kept, and log nothing.
+#[test]
+fn a_start_with_the_stream_unloaded_logs_the_name_once() {
+    let dir = Dir::new(
+        "agent_name_unloaded",
+        &[(FAKE, Scenario::Bundled("auth-required"))],
+    );
+    let host = dir.start(0);
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], FAKE);
+    let (turn, _) = host.prompt(thread, "Read the lease.");
+    let mut events = host.events(StreamId::Thread(thread));
+    events.until_turn_ended(turn);
+    drop(events);
+    host.shutdown();
+
+    // The restarted host runs a titled agent; nothing loads the thread's stream before SetMode.
+    dir.set_agents(&[(FAKE, Scenario::Bundled("auth-required-titled"))]);
+    let host = dir.start(1);
+    let mode = || HostCommand::SetMode {
+        thread,
+        mode_id: AgentChoiceId::new("plan").unwrap(),
+    };
+    // Each SetMode starts the titled agent, which fails session/new.
+    host.refused(mode(), ErrorCode::AgentAuthRequired);
+    host.refused(mode(), ErrorCode::AgentAuthRequired);
+    host.shutdown();
+
+    // A fresh start reads the whole log.
+    let host = dir.start(2);
+    let mut events = host.events(StreamId::Thread(thread));
+    events.until_caught_up();
+    assert_eq!(events.count(named("Fake Agent")), 1, "{}", events.dump());
     host.shutdown();
 }

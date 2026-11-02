@@ -400,8 +400,9 @@ fn held_name(actor: &Actor, thread: ThreadId) -> Option<CompactString> {
 }
 
 /// Logs `AgentNamed` for `thread` when `name` is set and differs from the name its header holds,
-/// so a restart with the same agent logs nothing. A failed commit is logged and left out: the
-/// name is display text, and the session goes on without it.
+/// so a restart with the same agent logs nothing. A push or send refused at once is logged and
+/// the session goes on without the name. A store write that fails later is a store failure like
+/// any other commit's: `turn.rs` fails the launching turn with it.
 fn log_agent_name(actor: &mut Actor, thread: ThreadId, name: Option<CompactString>) {
     let Some(name) = name else {
         return;
@@ -411,11 +412,27 @@ fn log_agent_name(actor: &mut Actor, thread: ThreadId, name: Option<CompactStrin
     }
     let logged = (|| -> Result<(), Error> {
         let mut out = Out::new(actor, thread, None)?;
-        out.push(actor, AgentNamed { agent_name: name })?;
+        out.push(
+            actor,
+            AgentNamed {
+                agent_name: name.clone(),
+            },
+        )?;
         out.send(actor, Then::Nothing)
     })();
-    if let Err(error) = logged {
-        tracing::warn!(%thread, %error, "the agent's name was not logged");
+    match logged {
+        Ok(()) => {
+            // An unloaded stream folds nothing, so the header the actor kept takes the name here:
+            // a second start while it is unloaded then logs nothing.
+            if let Some(header) = actor
+                .threads
+                .get_mut(&thread)
+                .and_then(|entry| entry.header.as_mut())
+            {
+                header.agent_name = Some(name);
+            }
+        }
+        Err(error) => tracing::warn!(%thread, %error, "the agent's name was not logged"),
     }
 }
 
