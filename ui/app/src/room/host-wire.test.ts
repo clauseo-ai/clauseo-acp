@@ -10,7 +10,9 @@ import type {
   SettingsView,
 } from "../transport/protocol.ts";
 import type { UiLite, UiMotion } from "./host-next.ts";
-import { wireSettingsHost, type WireSettingsSource } from "./host-wire.ts";
+import { nextHostOf, type Papers } from "./host-next.ts";
+import { wirePapersHost, wireSettingsHost, type WireSettingsSource } from "./host-wire.ts";
+import type { HostTransport } from "../transport/host-transport.ts";
 
 const VIEW: SettingsView = {
   ui: { theme: "dark", font_size: 18, language: "hi", lite: "on", motion: "reduce" },
@@ -160,4 +162,48 @@ test("a refused subscribe keeps the listener, so the events come once the transp
   fake.emit({ ...VIEW, ui: { ...VIEW.ui, theme: "light" } });
   expect(heard).toEqual(["light"]);
   expect(fake.feeds()).toBe(1);
+});
+
+const PAPERS: Papers = {
+  papers: [
+    {
+      file: "0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b",
+      path: "drafts/lease.docx",
+      size: 10,
+      modified: 1,
+    },
+  ],
+  skipped: [],
+  unread: [],
+  truncated: false,
+};
+
+test("papers: list_papers names the matter, and the answer's papers come back as they are", async () => {
+  const asked: HostQuery[] = [];
+  const host = wirePapersHost({
+    query: async (query) => {
+      asked.push(query);
+      return { papers: PAPERS };
+    },
+  });
+  await expect(host.listPapers("m-1")).resolves.toEqual(PAPERS);
+  expect(asked).toEqual([{ list_papers: { matter: "m-1" } }]);
+});
+
+test("papers: another answer rejects as internal, and the host's refusal as itself", async () => {
+  const refused = { code: "matter.folder_missing", message: "gone", retryable: false };
+  await expect(
+    wirePapersHost({ query: async () => ({ matters: [] }) }).listPapers("m-1"),
+  ).rejects.toMatchObject({ code: "internal" });
+  await expect(
+    wirePapersHost({ query: () => Promise.reject(refused) }).listPapers("m-1"),
+  ).rejects.toEqual(refused);
+});
+
+test("a transport with the app feed (the desktop's) gives settings and papers, and no other part", () => {
+  const { source } = fakeSource();
+  const next = nextHostOf(source as unknown as HostTransport);
+  expect(next.settings).not.toBeNull();
+  expect(next.papers).not.toBeNull();
+  expect([next.matters, next.location, next.app]).toEqual([null, null, null]);
 });

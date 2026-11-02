@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { referenceOf } from "@clauseo/components/markdown/schema.ts";
 import { FakeTransport } from "../transport/fake-transport.ts";
 import type { Papers } from "./host-next.ts";
 import { AnswerHost, quietly, type ListedPapers } from "./open.ts";
@@ -47,6 +48,16 @@ describe("AnswerHost", () => {
       FILE,
       "0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5c",
     ]);
+  });
+
+  test("a clauseo-paper: reference naming a paper's file ref passes the renderer's id rule and opens that file", async () => {
+    const reference = referenceOf(`clauseo-paper:${FILE}`);
+    expect(reference).toEqual({ kind: "paper", id: FILE });
+    if (reference === null || reference === "invalid") return;
+    const t = new FakeTransport();
+    answerHost(t, "m-1", () => listed).openReference(reference.kind, reference.id);
+    await flush();
+    expect(t.only("open_file")).toEqual([{ call: "open_file", file: FILE }]);
   });
 
   test("no papers, another matter's papers or no match: the click does nothing", async () => {
