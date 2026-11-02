@@ -141,6 +141,7 @@ pub(super) fn cancel_running(actor: &mut Actor, thread: ThreadId, ctx: Option<Co
             });
         }
     }
+    super::super::limits::asking_changed(actor);
     let timer = actor.arm_timer(
         CANCEL_WAIT,
         TurnTimer {

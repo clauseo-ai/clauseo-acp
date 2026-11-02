@@ -460,6 +460,8 @@ pub(super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: Ended) {
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.take()) else {
         return;
     };
+    // Its pending questions went with it.
+    super::super::limits::asking_changed(actor);
     let Agent {
         session,
         waiting,
