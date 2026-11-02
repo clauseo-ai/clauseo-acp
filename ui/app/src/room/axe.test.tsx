@@ -75,7 +75,7 @@ type Scene = {
   thread?: ViewEntry[];
   /** Always for this matter, pressed and held: the OS's confirm line up, the answers waiting. */
   confirming?: boolean;
-  /** The open thread idle while another conversation of its matter runs: the wait over the composer (U7). */
+  /** The open thread idle while another conversation of its matter runs: Ask raises the wait over the composer (U7). */
   wait?: boolean;
 };
 
@@ -236,6 +236,28 @@ for (const theme of THEMES) {
             if (scene.wait === true) {
               await act(async () => void (await loadThread()));
               await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+              // words in the field, then Ask: with the other running, Ask raises the wait
+              const field = host.querySelector<HTMLTextAreaElement>('[data-testid="composer"]');
+              await act(async () => {
+                if (field === null) return;
+                Reflect.set(
+                  HTMLTextAreaElement.prototype,
+                  "value",
+                  "Does the lease allow it?",
+                  field,
+                );
+                field.dispatchEvent(new Event("input", { bubbles: true }));
+              });
+              await act(async () => {
+                field?.dispatchEvent(
+                  new KeyboardEvent("keydown", {
+                    key: "Enter",
+                    keyCode: 13,
+                    bubbles: true,
+                    cancelable: true,
+                  }),
+                );
+              });
               const wait = host.querySelector('[data-testid="other-wait"]');
               expect(wait, name).not.toBeNull();
               expect(wait?.querySelector('[data-testid="stop-other"]'), name).not.toBeNull();
