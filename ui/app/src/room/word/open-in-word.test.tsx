@@ -3,16 +3,28 @@
 // tile (a press, Enter or Space, with the hint on hover and keyboard focus and the label for screen readers) and from
 // a change note naming it while the changes stand; never for a .pdf, a .txt or a paper the wall doesn't list. A
 // declined or failed open is quiet.
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import axe from "axe-core";
 import { act } from "react";
 import { settled } from "@clauseo/components/lib/late.ts";
 import { rdt } from "@clauseo/components/lib/words-reader.ts";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeAll, expect, test, vi } from "vitest";
 import { reset, step, uuid } from "../../testing/stream-script.ts";
 import type { FileChange, PaperSummary, ViewEntry } from "../../transport/protocol.ts";
 import { fakeNext } from "../fake-next.ts";
 import { mountRoom, type Harness, type Script } from "../thread/harness.ts";
 
 let h: Harness | null = null;
+beforeAll(() => {
+  // the page's own title, as index.html gives it, for axe's document-title rule
+  const html = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "../../../index.html"),
+    "utf8",
+  );
+  document.title = /<title>([^<]*)<\/title>/.exec(html)?.[1] ?? "";
+});
 afterEach(async () => {
   await h?.unmount();
   h = null;
@@ -95,6 +107,30 @@ test("the hint shows on keyboard focus, in the tooltip, as on hover", async () =
   });
   await act(async () => vi.waitFor(() => expect(tipText()).toBe("Open in Word")));
 });
+
+for (const language of ["en", "hi"] as const) {
+  test(`axe finds no violation with a Word tile focused and its tooltip open: it mounts inside the wall (${language})`, async () => {
+    h = await withPapers({ display: { language } });
+    const face = faceOf("Reply.docx");
+    await act(async () => {
+      face?.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+      face?.focus();
+    });
+    const label = rdt(language, "Open in Word");
+    const popup = () =>
+      [...document.body.querySelectorAll<HTMLElement>("[data-side]")].find(
+        (n) => n.textContent === label,
+      );
+    await act(async () => vi.waitFor(() => expect(popup()).toBeDefined()));
+    const results = await axe.run(document, { resultTypes: ["violations"] });
+    expect(
+      results.violations.map(
+        (v) => `${v.id} at ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`,
+      ),
+    ).toEqual([]);
+    expect(popup()?.closest("aside.room-pane")).not.toBeNull();
+  });
+}
 
 const tipText = () =>
   [...document.body.querySelectorAll('[role="tooltip"], [data-side]')]

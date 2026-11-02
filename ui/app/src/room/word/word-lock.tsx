@@ -49,9 +49,11 @@ export function WordLock({
           </p>
         </>
       )}
+      {/* its words line up with the lines above: the small button's inline padding hangs out to the left */}
       <Button
         kind="quiet"
         size="small"
+        className="-ml-s3"
         disabled={pending}
         focusableWhenDisabled
         data-testid={testIds?.retry}
