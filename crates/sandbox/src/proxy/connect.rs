@@ -3,19 +3,27 @@
 
 use std::io;
 use std::net::{IpAddr, SocketAddr};
+use std::pin::pin;
+use std::time::Duration;
 
 use futures::AsyncWriteExt;
-use futures::future::try_join;
+use futures::future::{Either, select, try_join};
 
 use crate::proxy::Verdict;
 use crate::proxy::head::{self, read_head, within};
 use crate::proxy::relay::{Stream, pump};
-use crate::proxy::server::{Counts, Ctx, Way};
+use crate::proxy::server::{Counts, Ctx, SocketSlot, Way};
 use crate::proxy::target::Target;
 
 /// Opens the connection `way` names, under the connect timeout, and counts it for
-/// reachability. `Err` is the status to answer: 502, or 504 on the timeout.
-pub(crate) async fn dial(ctx: &Ctx, way: &Way) -> Result<Stream, u16> {
+/// reachability. The socket counts against the proxy's and the process's caps while its slot
+/// lives. `Err` is the status to answer: 502, 503 when the caps are full, or 504 on the
+/// timeout.
+pub(crate) async fn dial(ctx: &Ctx, way: &Way) -> Result<(Stream, SocketSlot), u16> {
+    let Some(slot) = ctx.socket_slot() else {
+        tracing::info!("egress: too many open sockets; no origin connection");
+        return Err(503);
+    };
     let attempt = async {
         let addresses = match way {
             Way::Direct(addresses) => addresses.clone(),
@@ -33,7 +41,7 @@ pub(crate) async fn dial(ctx: &Ctx, way: &Way) -> Result<Stream, u16> {
     match within(ctx.limits.connect, attempt).await {
         Some(Ok(stream)) => {
             ctx.reached(true);
-            Ok(stream)
+            Ok((stream, slot))
         }
         Some(Err(error)) => {
             tracing::info!(%error, "egress: connect failed");
@@ -61,6 +69,15 @@ async fn upstream_addresses(ctx: &Ctx, host: &str, port: u16) -> io::Result<Vec<
     ctx.net.resolve(bare, port).await
 }
 
+/// The verdict for a failed dial's status.
+pub(crate) fn failed(status: u16) -> Verdict {
+    if status == 503 {
+        Verdict::Busy
+    } else {
+        Verdict::Failed
+    }
+}
+
 /// Writes the proxy's own answer; a client that already left is fine.
 pub(crate) async fn send(client: &Stream, status: u16) {
     if let Err(error) = (&*client).write_all(&head::answer(status, "")).await {
@@ -78,11 +95,11 @@ pub(crate) async fn tunnel(
     way: Way,
     counts: &Counts,
 ) -> Verdict {
-    let origin = match dial(ctx, &way).await {
-        Ok(stream) => stream,
+    let (origin, _slot) = match dial(ctx, &way).await {
+        Ok(dialled) => dialled,
         Err(status) => {
             send(client, status).await;
-            return Verdict::Failed;
+            return failed(status);
         }
     };
     if let Way::Upstream { host, port } = &way {
@@ -109,18 +126,23 @@ pub(crate) async fn tunnel(
     if relay_bytes(&origin, early, &counts.up).await.is_err() {
         return Verdict::Tunnel;
     }
-    splice(client, &origin, counts).await;
+    splice(client, &origin, counts, ctx.limits.idle).await;
     Verdict::Tunnel
 }
 
-/// Copies both ways until both ends close or either fails.
-pub(crate) async fn splice(client: &Stream, origin: &Stream, counts: &Counts) {
+/// Copies both ways until both ends close, either fails, or `idle` passes with no byte moved
+/// either way. One side ending its writes is passed on, and the other way keeps flowing.
+pub(crate) async fn splice(client: &Stream, origin: &Stream, counts: &Counts, idle: Duration) {
     let both = try_join(
-        pump(client, origin, &counts.up),
-        pump(origin, client, &counts.down),
+        pump(client, origin, &counts.up, &counts.idle),
+        pump(origin, client, &counts.down, &counts.idle),
     );
-    if let Err(error) = both.await {
-        tracing::debug!(%error, "egress: tunnel ended with an error");
+    match select(pin!(both), pin!(counts.idle.expired(idle))).await {
+        Either::Left((Ok(_), _)) => {}
+        Either::Left((Err(error), _)) => {
+            tracing::debug!(%error, "egress: tunnel ended with an error");
+        }
+        Either::Right(((), _)) => tracing::info!("egress: tunnel closed after its idle timeout"),
     }
 }
 

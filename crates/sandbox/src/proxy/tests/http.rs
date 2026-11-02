@@ -1,11 +1,17 @@
 //! Plain `http://`: forwarding, header stripping, framing, and the other forms.
 
+use std::io::{Read, Write};
 use std::net::SocketAddr;
+use std::sync::Mutex;
+use std::sync::mpsc;
+use std::time::Duration;
 
-use super::harness::{host_denial, origin, rig_allowing};
+use super::harness::{
+    Setup, host_denial, origin, read_all, read_head, rig, rig_allowing, serve, status,
+};
 use crate::Denial;
 use crate::HostRefusal::{NotAllowed, Port, Scheme};
-use crate::proxy::Verdict;
+use crate::proxy::{Limits, Verdict};
 
 const OK: &str = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok";
 
@@ -123,7 +129,6 @@ fn origin_form_and_other_schemes_get_405_with_why_scheme() {
     let (rig, _received) = http_rig();
     for request in [
         "GET / HTTP/1.1\r\nHost: allowed.test\r\n\r\n",
-        "GET /x HTTP/1.1\r\n\r\n",
         "GET ftp://files.test/a HTTP/1.1\r\n\r\n",
         "GET https://allowed.test/ HTTP/1.1\r\n\r\n",
         "OPTIONS * HTTP/1.1\r\nHost: allowed.test:8080\r\n\r\n",
@@ -135,11 +140,129 @@ fn origin_form_and_other_schemes_get_405_with_why_scheme() {
         rig.denials(),
         vec![
             host_denial("allowed.test", 80, Scheme, false),
-            host_denial("", 0, Scheme, false),
             host_denial("files.test", 21, Scheme, false),
             host_denial("allowed.test", 443, Scheme, false),
             host_denial("allowed.test", 8080, Scheme, false),
         ]
     );
     assert_eq!(rig.net.dialled(), Vec::<SocketAddr>::new());
+}
+
+#[test]
+fn a_request_with_no_host_to_name_gets_400_and_no_denial() {
+    let (rig, _received) = http_rig();
+    for request in [
+        // Origin-form with no Host header.
+        "GET /x HTTP/1.1\r\n\r\n",
+        // A lowercase connect is not CONNECT: an authority-form target needs CONNECT.
+        "connect example.com:443 HTTP/1.1\r\n\r\n",
+        "GET allowed.test:80 HTTP/1.1\r\n\r\n",
+    ] {
+        let answer = rig.exchange(request);
+        assert!(answer.starts_with("HTTP/1.1 400 "), "{request:?}: {answer}");
+    }
+    assert_eq!(rig.denials(), Vec::<Denial>::new());
+    assert!(
+        rig.records()
+            .iter()
+            .all(|r| r.verdict == Verdict::BadRequest)
+    );
+}
+
+/// An origin that keeps everything it receives until the proxy closes, and answers nothing.
+fn sink_origin() -> (SocketAddr, mpsc::Receiver<Vec<u8>>) {
+    let (sent, received) = mpsc::channel();
+    let sent = Mutex::new(sent);
+    let address = serve(move |mut stream| {
+        let mut got = Vec::new();
+        drop(stream.read_to_end(&mut got));
+        sent.lock().unwrap().send(got).unwrap();
+    });
+    (address, received)
+}
+
+#[test]
+fn a_chunk_size_line_with_anything_but_an_extension_after_the_size_gets_400() {
+    for size_line in ["5 6", "5 x"] {
+        let rig = rig_allowing(&["allowed.test"]);
+        let (address, received) = sink_origin();
+        rig.net.name("allowed.test", &["192.0.2.20"]);
+        rig.net.route("192.0.2.20:80", address);
+        let answer = rig.exchange(&format!(
+            "POST http://allowed.test/ HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n\
+             {size_line}\r\nhello\r\n0\r\n\r\n"
+        ));
+        assert!(
+            answer.starts_with("HTTP/1.1 400 "),
+            "{size_line:?}: {answer}"
+        );
+        let got = String::from_utf8(received.recv().unwrap()).unwrap();
+        assert!(
+            !got.contains(size_line),
+            "{size_line:?} reached the origin: {got:?}"
+        );
+        assert_eq!(rig.records()[0].verdict, Verdict::BadRequest);
+    }
+}
+
+#[test]
+fn a_head_with_bare_lf_line_ends_gets_400_at_once() {
+    // A head limit far past the client's wait: a 408 would fail the test, only a prompt 400
+    // passes.
+    let rig = rig(Setup {
+        allow: vec!["allowed.test"],
+        limits: Limits {
+            head: Duration::from_secs(600),
+            ..Limits::default()
+        },
+        ..Setup::default()
+    });
+    for request in [
+        &b"GET http://allowed.test/ HTTP/1.1\nHost: allowed.test\n\n"[..],
+        // httparse would stop at the bare-LF blank line and drop X-Hidden.
+        b"GET http://allowed.test/ HTTP/1.1\r\nHost: allowed.test\n\nX-Hidden: 1\r\n\r\n",
+    ] {
+        let mut stream = rig.agent();
+        stream.write_all(request).unwrap();
+        assert_eq!(status(&read_head(&mut stream)), 400, "{request:?}");
+        assert_eq!(read_all(&mut stream), b"");
+    }
+    assert_eq!(rig.net.dialled(), Vec::<SocketAddr>::new());
+}
+
+#[test]
+fn a_silent_host_on_another_port_is_refused_with_no_denial() {
+    let rig = rig(Setup {
+        silent: vec!["telemetry.test"],
+        ..Setup::default()
+    });
+    let answer = rig.exchange("GET http://telemetry.test:8080/ HTTP/1.1\r\n\r\n");
+    assert!(answer.starts_with("HTTP/1.1 403 "), "{answer}");
+    assert_eq!(rig.denials(), Vec::<Denial>::new());
+    assert_eq!(rig.records()[0].verdict, Verdict::Silent);
+}
+
+#[test]
+fn a_forwarded_request_idle_past_the_limit_is_closed() {
+    let rig = rig(Setup {
+        allow: vec!["allowed.test"],
+        limits: Limits {
+            idle: Duration::from_millis(100),
+            ..Limits::default()
+        },
+        ..Setup::default()
+    });
+    let (address, received) = sink_origin();
+    rig.net.name("allowed.test", &["192.0.2.20"]);
+    rig.net.route("192.0.2.20:80", address);
+    // Three of ten body bytes, then nothing: the proxy closes both sides.
+    let answer =
+        rig.exchange("POST http://allowed.test/ HTTP/1.1\r\nContent-Length: 10\r\n\r\nabc");
+    assert_eq!(answer, "");
+    assert!(
+        String::from_utf8(received.recv().unwrap())
+            .unwrap()
+            .ends_with("abc")
+    );
+    assert_eq!(rig.records()[0].verdict, Verdict::Forward);
 }

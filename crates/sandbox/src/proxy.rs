@@ -6,10 +6,15 @@
 //! TLS (it holds no CA), refuses loopback and private addresses, and turns each refusal into a
 //! [`Denial`](crate::Denial) through the launch's sink, behind S14's rate cap.
 //!
-//! Each request passes these checks in order: the token (agent listener only), the head, the
-//! form and scheme (405, `Scheme`), the port (403, `Port`), the silent list (403, no denial),
-//! the allowlist (403, `NotAllowed`), the route, the address check (direct connections, or an
-//! IP literal through an upstream; 403, `PrivateAddress`), then the connect.
+//! Each request passes these checks in order: the head, the token (agent listener only), the
+//! form and scheme (405, `Scheme`; 400 when there is no host to name), the silent list (403, no
+//! denial), the port (403, `Port`), the allowlist (403, `NotAllowed`), the route, the address
+//! check (403, `PrivateAddress`: every resolved address on a direct connection; through an
+//! upstream, an IP literal, or a name's local answers when local DNS gives any), then the
+//! connect.
+//!
+//! A sink or record callback runs on the proxy thread and must not block: one that blocks stalls
+//! every connection of the launch, and `ProxyHandle`'s drop, which joins the thread.
 
 mod address;
 mod allowlist;
@@ -43,7 +48,7 @@ use crate::{Clock, DenialSink, Error, HostRefusal, SystemClock};
 use allowlist::Name;
 use net::{Network, SystemNetwork};
 use token::Token;
-use upstream::Lookup;
+use upstream::{Env, Lookup, OsRoute};
 
 /// What a launch's proxy allows, where it sends traffic, and where its refusals go.
 pub struct ProxyConfig {
@@ -135,10 +140,18 @@ pub(crate) struct Limits {
     pub(crate) head: Duration,
     /// To connect to an origin or an upstream, and for an upstream's answer to a CONNECT.
     pub(crate) connect: Duration,
+    /// With no byte moved either way, a tunnel or a forwarded request is closed. Agents keep
+    /// long streaming responses open, so it is long.
+    pub(crate) idle: Duration,
     /// Open tunnels (and forwarded requests) per launch; the next gets 503.
     pub(crate) tunnels: usize,
-    /// Client connections open at once, tunnels included; the next is closed unanswered.
-    pub(crate) clients: usize,
+    /// Client connections still reading their head, per launch; the next is closed unanswered.
+    pub(crate) pending: usize,
+    /// Client and origin sockets open at once, per launch. A client over it is closed
+    /// unanswered; an origin connection over it gets the client 503.
+    pub(crate) sockets: usize,
+    /// Client and origin sockets open at once across every proxy in the process, the same way.
+    pub(crate) process: usize,
 }
 
 impl Default for Limits {
@@ -146,16 +159,23 @@ impl Default for Limits {
         Limits {
             head: Duration::from_secs(10),
             connect: Duration::from_secs(10),
+            idle: Duration::from_mins(15),
             tunnels: 64,
-            clients: 256,
+            pending: 64,
+            // The pending clients, plus a client and an origin socket per tunnel.
+            sockets: 64 + 2 * 64,
+            process: 1024,
         }
     }
 }
 
-/// What tests swap: the clock behind the rate cap, and the limits.
+/// What tests swap: the clock behind the rate cap, the limits, and for `Upstream::System` the
+/// host's proxy variables and the OS lookup (setting the process's environment in a test is
+/// `unsafe` in edition 2024, and the crate denies unsafe code).
 pub(crate) struct Options {
     pub(crate) clock: Arc<dyn Clock>,
     pub(crate) limits: Limits,
+    pub(crate) system: Option<(Env, Box<OsRoute>)>,
 }
 
 impl Default for Options {
@@ -163,6 +183,7 @@ impl Default for Options {
         Options {
             clock: Arc::new(SystemClock::new()),
             limits: Limits::default(),
+            system: None,
         }
     }
 }
@@ -186,7 +207,10 @@ pub(crate) fn start_with(
     net: Arc<dyn Network>,
     options: Options,
 ) -> Result<ProxyHandle, Error> {
-    let lookup = Arc::new(Lookup::new(config.upstream)?);
+    let lookup = Arc::new(match options.system {
+        Some((env, os)) => Lookup::with_parts(config.upstream, env, os, SystemClock::new())?,
+        None => Lookup::new(config.upstream)?,
+    });
     let token = Token::generate()?;
     let bind = || -> Result<(Async<std::net::TcpListener>, u16), Error> {
         let listener = crate::ports::bind_loopback().map_err(Error::ProxyStart)?;

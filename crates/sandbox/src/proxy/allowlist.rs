@@ -146,10 +146,17 @@ impl Allowlist {
     }
 
     /// A list of one firm wildcard: every host under `d`. `d` may be written `example.com` or
-    /// `*.example.com`. Refused: an empty, single-label or IP-literal domain, a Public Suffix
-    /// List entry (private section included, so `amazonaws.com`'s `s3.amazonaws.com` and
-    /// `blob.core.windows.net` are refused), and a domain on or under the shipped
-    /// shared-hosting list, since a wildcard there allows strangers' sites.
+    /// `*.example.com`. Refused, since a wildcard there allows strangers' sites: an empty,
+    /// single-label or IP-literal domain; a Public Suffix List entry (private section included,
+    /// so `s3.amazonaws.com` and `blob.core.windows.net` are refused); a domain with a PSL rule
+    /// under it (`core.windows.net`, above `blob.core.windows.net`); and a domain on, under or
+    /// above an entry of the shipped shared-hosting list.
+    ///
+    /// The `psl` crate can say what a name's suffix is but cannot list its rules, so "a rule
+    /// under this domain" is found two ways: a wildcard rule (`*.domain`) by asking for the
+    /// suffix of a probe name under it, and a named rule from a short checked-in list of the
+    /// parents of PSL entries that matter here (`shared_hosts::PUBLIC_SUFFIX_PARENTS`). A
+    /// named PSL rule under a domain on neither list is not caught.
     pub fn firm_suffix(d: &str) -> Result<Allowlist, Error> {
         let refuse = |why: &str| Error::ProxyConfig(format!("firm wildcard {d:?} refused: {why}"));
         let bare = d.strip_prefix("*.").unwrap_or(d);
@@ -164,8 +171,18 @@ impl Allowlist {
         if psl::suffix_str(&domain) == Some(domain.as_str()) {
             return Err(refuse("a public suffix"));
         }
-        if Name::Domain(domain.clone()).is_shared_hosting() {
+        if has_suffix_under(&domain) {
+            return Err(refuse("a public suffix lies under it"));
+        }
+        let name = Name::Domain(domain.clone());
+        if name.is_shared_hosting() {
             return Err(refuse("a shared-hosting domain"));
+        }
+        let above_shared = shared_hosts::SHARED_HOSTS
+            .iter()
+            .any(|entry| Name::under(entry, |parent| parent == domain));
+        if above_shared {
+            return Err(refuse("a shared-hosting domain lies under it"));
         }
         let mut list = Allowlist::default();
         list.suffixes.insert(domain);
@@ -208,6 +225,18 @@ impl Allowlist {
     pub(crate) fn remove_exact(&mut self, name: &Name) {
         self.exact.remove(name);
     }
+}
+
+/// True when a Public Suffix List rule lies strictly under `domain`, as far as the `psl` crate
+/// and the checked-in parents can tell (see [`Allowlist::firm_suffix`]).
+fn has_suffix_under(domain: &str) -> bool {
+    let listed = shared_hosts::PUBLIC_SUFFIX_PARENTS
+        .iter()
+        .any(|parent| *parent == domain || Name::under(parent, |p| p == domain));
+    // A wildcard rule `*.domain` makes any name one label under it a suffix.
+    let probe = format!("clauseo-psl-probe.{domain}");
+    let wildcard = psl::suffix_str(&probe).is_some_and(|suffix| suffix.len() > domain.len());
+    listed || wildcard
 }
 
 /// How the agent signs in, which decides the hosts it needs before anything else is allowed.

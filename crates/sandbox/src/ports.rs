@@ -13,9 +13,25 @@ use std::net::{Ipv4Addr, SocketAddr};
 /// The loopback ports a Windows listener may take.
 pub const WINDOWS_PORTS: std::ops::RangeInclusive<u16> = 61080..=61179;
 
-/// Binds a listener on `127.0.0.1` for one launch.
+/// Binds a listener on `127.0.0.1` for one launch. On Windows, when no port in
+/// [`WINDOWS_PORTS`] binds, the error names the range and says what may hold it.
 pub fn bind_loopback() -> io::Result<TcpListener> {
     imp::bind()
+}
+
+/// The error when every port in [`WINDOWS_PORTS`] failed, keeping the last failure's kind.
+#[cfg(any(windows, test))]
+fn range_exhausted(last: &io::Error) -> io::Error {
+    io::Error::new(
+        last.kind(),
+        format!(
+            "no loopback port in {}..={} could be bound (last error: {last}); another program, \
+             or a Windows port reservation (Hyper-V, WSL or Docker; see `netsh int ipv4 show \
+             excludedportrange protocol=tcp`), may hold the range",
+            WINDOWS_PORTS.start(),
+            WINDOWS_PORTS.end()
+        ),
+    )
 }
 
 #[cfg(not(windows))]
@@ -38,7 +54,7 @@ mod imp {
         SO_EXCLUSIVEADDRUSE, SOCKET, SOL_SOCKET, setsockopt,
     };
 
-    use super::WINDOWS_PORTS;
+    use super::{WINDOWS_PORTS, range_exhausted};
 
     /// The backlog of each listener.
     const BACKLOG: i32 = 128;
@@ -64,7 +80,7 @@ mod imp {
                 Err(error) => return Err(error),
             }
         }
-        Err(last)
+        Err(range_exhausted(&last))
     }
 
     fn bind_port(port: u16) -> io::Result<TcpListener> {
@@ -114,6 +130,20 @@ mod tests {
         assert_ne!(address.port(), 0);
         #[cfg(windows)]
         assert!(WINDOWS_PORTS.contains(&address.port()), "{address}");
+    }
+
+    #[test]
+    fn a_full_range_names_itself_and_the_windows_reservations() {
+        let last = io::Error::from(io::ErrorKind::PermissionDenied);
+        let error = range_exhausted(&last);
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        let text = error.to_string();
+        assert!(text.contains("61080..=61179"), "{text}");
+        assert!(text.contains("another program"), "{text}");
+        assert!(
+            text.contains("netsh int ipv4 show excludedportrange protocol=tcp"),
+            "{text}"
+        );
     }
 
     #[cfg(windows)]

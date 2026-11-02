@@ -87,6 +87,14 @@ fn the_agent_listener_refuses_a_missing_or_wrong_token_and_another_launches_toke
             .iter()
             .all(|r| r.verdict == Verdict::AuthRequired)
     );
+    // The record names the host asked for, for the example's log.
+    assert!(
+        rig.records()
+            .iter()
+            .all(|r| (r.host.as_str(), r.port) == ("api.anthropic.com", 443)),
+        "{:?}",
+        rig.records()
+    );
 }
 
 #[test]
@@ -309,4 +317,69 @@ fn revoke_keeps_a_host_a_suffix_entry_still_covers() {
     rig.handle.revoke("docs.firm.example");
     assert_eq!(round_trip(&mut tunnel, b"still"), b"still");
     assert_eq!(rig.connect("docs.firm.example:443").1, 200);
+}
+
+#[test]
+fn a_silent_host_on_another_port_gets_403_and_no_denial() {
+    let rig = rig(Setup {
+        silent: vec!["telemetry.test"],
+        ..Setup::default()
+    });
+    assert_eq!(rig.connect("telemetry.test:8443").1, 403);
+    assert_eq!(rig.denials(), Vec::<Denial>::new());
+    assert_eq!(rig.records()[0].verdict, Verdict::Silent);
+}
+
+#[test]
+fn a_revoke_during_dns_refuses_the_connect() {
+    let rig = echo_rig(&["api.anthropic.com"], "api.anthropic.com");
+    let held = rig.net.hold_next_resolve();
+    let mut stream = rig.agent();
+    let request = format!(
+        "CONNECT api.anthropic.com:443 HTTP/1.1\r\n{}\r\n",
+        rig.auth()
+    );
+    stream.write_all(request.as_bytes()).unwrap();
+    held.arrived.recv().unwrap();
+    rig.handle.revoke("api.anthropic.com");
+    held.release.send(()).unwrap();
+    assert_eq!(status(&read_head(&mut stream)), 403);
+    assert_eq!(
+        rig.denials(),
+        vec![host_denial("api.anthropic.com", 443, NotAllowed, false)]
+    );
+    assert_eq!(rig.net.dialled(), Vec::<SocketAddr>::new());
+}
+
+#[test]
+fn a_revoke_during_the_origin_connect_ends_the_tunnel_before_its_200() {
+    let rig = echo_rig(&["api.anthropic.com"], "api.anthropic.com");
+    let held = rig.net.hold_next_connect();
+    let mut stream = rig.agent();
+    let request = format!(
+        "CONNECT api.anthropic.com:443 HTTP/1.1\r\n{}\r\n",
+        rig.auth()
+    );
+    stream.write_all(request.as_bytes()).unwrap();
+    held.arrived.recv().unwrap();
+    rig.handle.revoke("api.anthropic.com");
+    // The release may find the connect already dropped with its tunnel.
+    match held.release.send(()) {
+        Ok(()) | Err(()) => {}
+    }
+    assert_eq!(read_all(&mut stream), b"", "closed with no 200");
+    assert_eq!(rig.connect("api.anthropic.com:443").1, 403);
+}
+
+#[test]
+fn a_half_closed_tunnel_passes_the_end_on_and_keeps_the_other_way_open() {
+    let rig = echo_rig(&["api.anthropic.com"], "api.anthropic.com");
+    let (mut tunnel, code) = rig.connect("api.anthropic.com:443");
+    assert_eq!(code, 200);
+    tunnel.write_all(b"last words").unwrap();
+    tunnel.shutdown(std::net::Shutdown::Write).unwrap();
+    // The echo server sees the end only if the proxy passed it on; its reply still comes back.
+    assert_eq!(read_all(&mut tunnel), b"last words");
+    let record = &rig.records()[0];
+    assert_eq!((record.bytes_up, record.bytes_down), (10, 10));
 }

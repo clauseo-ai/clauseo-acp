@@ -33,12 +33,27 @@ pub(crate) struct Head {
     pub(crate) rest: Vec<u8>,
 }
 
+/// The most a response head from an upstream proxy may take (it may carry many cookies).
+pub(crate) const RESPONSE_HEAD_CAP: usize = 64 * 1024;
+
 /// Reads until the blank line that ends a head, at most [`HEAD_CAP`] bytes.
+///
+/// The head ends at the first empty line however its line ends are written (CRLF or a bare
+/// LF), which is where `httparse` stops too, so no byte between the two can be dropped;
+/// [`parse_request`] then refuses a head with a bare LF.
 pub(crate) async fn read_head<R: AsyncRead + Unpin>(reader: &mut R) -> Result<Head, HeadError> {
+    read_head_capped(reader, HEAD_CAP).await
+}
+
+/// [`read_head`] with its own cap.
+pub(crate) async fn read_head_capped<R: AsyncRead + Unpin>(
+    reader: &mut R,
+    cap: usize,
+) -> Result<Head, HeadError> {
     let mut buf: Vec<u8> = Vec::with_capacity(1024);
     let mut chunk = [0u8; 2048];
     loop {
-        let room = HEAD_CAP.saturating_sub(buf.len()).min(chunk.len());
+        let room = cap.saturating_sub(buf.len()).min(chunk.len());
         if room == 0 {
             return Err(HeadError::TooLarge);
         }
@@ -47,17 +62,22 @@ pub(crate) async fn read_head<R: AsyncRead + Unpin>(reader: &mut R) -> Result<He
         if n == 0 {
             return Err(HeadError::Closed);
         }
-        let from = buf.len().saturating_sub(3);
+        let from = buf.len().saturating_sub(2);
         buf.extend_from_slice(read_into.get(..n).unwrap_or_default());
-        let end = buf
-            .get(from..)
-            .and_then(|tail| tail.windows(4).position(|w| w == b"\r\n\r\n"))
-            .map(|at| from + at + 4);
-        if let Some(end) = end {
+        if let Some(end) = head_end(&buf, from) {
             let rest = buf.split_off(end);
             return Ok(Head { bytes: buf, rest });
         }
     }
+}
+
+/// The end of the first empty line at or after `from`: a LF followed by LF or by CRLF.
+fn head_end(buf: &[u8], from: usize) -> Option<usize> {
+    (from..buf.len()).find_map(|at| match buf.get(at..) {
+        Some([b'\n', b'\n', ..]) => Some(at + 2),
+        Some([b'\n', b'\r', b'\n', ..]) => Some(at + 3),
+        _ => None,
+    })
 }
 
 /// `Some` with the future's output, or `None` when `limit` passes first.
@@ -97,8 +117,16 @@ pub(crate) enum ParseError {
     Malformed,
 }
 
-/// Parses a complete request head.
+/// Parses a complete request head: CRLF line ends only, and `httparse` must have read all of
+/// it, so nothing the proxy holds goes unchecked.
 pub(crate) fn parse_request(head: &[u8]) -> Result<Request, ParseError> {
+    let bare_lf = head
+        .iter()
+        .enumerate()
+        .any(|(at, &b)| b == b'\n' && (at == 0 || head.get(at - 1) != Some(&b'\r')));
+    if bare_lf {
+        return Err(ParseError::Malformed);
+    }
     let mut slots = [httparse::EMPTY_HEADER; MAX_HEADERS];
     let mut request = httparse::Request::new(&mut slots);
     let status = request.parse(head).map_err(|error| {
@@ -108,7 +136,7 @@ pub(crate) fn parse_request(head: &[u8]) -> Result<Request, ParseError> {
             ParseError::Malformed
         }
     })?;
-    if status.is_partial() {
+    if status != httparse::Status::Complete(head.len()) {
         return Err(ParseError::Malformed);
     }
     let (Some(method), Some(target)) = (request.method, request.path) else {
@@ -204,6 +232,37 @@ mod tests {
             parse_request(b"GET /\r\nX: y\r\n\r\n").unwrap_err(),
             ParseError::Malformed
         );
+    }
+
+    #[test]
+    fn a_head_ends_at_its_first_empty_line_whatever_its_line_ends() {
+        let head = read(b"GET http://a.test/ HTTP/1.1\r\nHost: a\n\nX-Hidden: 1\r\n\r\n").unwrap();
+        assert_eq!(head.bytes, b"GET http://a.test/ HTTP/1.1\r\nHost: a\n\n");
+        assert_eq!(head.rest, b"X-Hidden: 1\r\n\r\n");
+        assert_eq!(
+            parse_request(&head.bytes).unwrap_err(),
+            ParseError::Malformed
+        );
+        let lf_only = read(b"GET http://a.test/ HTTP/1.1\nHost: a\n\n").unwrap();
+        assert_eq!(
+            parse_request(&lf_only.bytes).unwrap_err(),
+            ParseError::Malformed
+        );
+        let mixed = read(b"GET http://a.test/ HTTP/1.1\r\nHost: a\n\r\n").unwrap();
+        assert_eq!(mixed.bytes, b"GET http://a.test/ HTTP/1.1\r\nHost: a\n\r\n");
+        assert_eq!(
+            parse_request(&mixed.bytes).unwrap_err(),
+            ParseError::Malformed
+        );
+    }
+
+    #[test]
+    fn a_head_httparse_does_not_read_to_its_end_is_refused() {
+        assert_eq!(
+            parse_request(b"GET / HTTP/1.1\r\n\r\nextra").unwrap_err(),
+            ParseError::Malformed
+        );
+        assert!(parse_request(b"GET / HTTP/1.1\r\nHost: a\r\n\r\n").is_ok());
     }
 
     #[test]

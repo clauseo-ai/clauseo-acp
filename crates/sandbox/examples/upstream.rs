@@ -1,5 +1,6 @@
 //! Prints where the egress proxy would send a connection to one URL, as one JSON line, using the
-//! host's `HTTPS_PROXY` and then the OS proxy settings or PAC (`Upstream::System`).
+//! host's `HTTPS_PROXY` (`HTTP_PROXY` for an `http://` URL) and then the OS proxy settings or PAC
+//! (`Upstream::System`).
 //!
 //! `cargo run -p clauseo-sandbox --example upstream -- https://api.anthropic.com/`
 //!
@@ -16,7 +17,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let url = url::Url::parse(&arg)?;
     let host = url.host_str().ok_or("the URL has no host")?;
     let port = url.port_or_known_default().ok_or("the URL has no port")?;
-    let route = match upstream_for(&Upstream::System, &url) {
+    let route = match upstream_for(&Upstream::System, &url)? {
         Route::Direct => serde_json::json!("direct"),
         Route::Http { host, port } => serde_json::json!({ "http": { "host": host, "port": port } }),
     };
