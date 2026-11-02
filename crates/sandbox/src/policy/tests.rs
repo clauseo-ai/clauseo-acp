@@ -360,6 +360,9 @@ fn hidden_paths_need_not_exist() {
             root.join("not-yet/deeper")
         ]
     );
+    // On Unix `..` after a missing folder cannot be resolved, so it is refused. Windows resolves
+    // `..` by the text before it opens a path, so there the path means `<root>/../x` and builds.
+    #[cfg(unix)]
     refused(
         w.builder().hidden(w.at("not-yet/../../x")).build(),
         "`..`",
