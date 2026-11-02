@@ -1,0 +1,272 @@
+//! Liveness and price, the account, recharge and its poll, and out of credit.
+
+use std::net::TcpListener;
+use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
+
+use clauseo_connectors::fake::{FakeOptions, Fixture, ScratchDir};
+use clauseo_connectors::{
+    CancelFlag, Clock, Connectors, Error, MemoryStore, Origin, PricingStatus, RechargeStatus,
+    SystemClock,
+};
+
+use crate::support::*;
+
+#[test]
+fn pricing_live_is_live_with_its_packs() {
+    let rig = rig();
+    let liveness = rig.connectors.liveness();
+    assert!(liveness.live);
+    let pricing = liveness.pricing.unwrap();
+    assert_eq!(pricing.status, PricingStatus::Live);
+    assert_ne!(pricing.packs.len(), 0);
+    assert!(pricing.packs.iter().any(|pack| pack.pack == "200"));
+    let request = &rig.fake.requests_to("/pricing.json")[0];
+    assert!(request.header("authorization").is_none());
+    assert_eq!(request.header("user-agent"), Some("Clauseo/0.0.0-test"));
+}
+
+fn not_live(rig: &Rig) {
+    let liveness = rig.connectors.liveness();
+    assert!(!liveness.live, "{liveness:?}");
+    assert!(liveness.fetched_at.is_some());
+}
+
+#[test]
+fn preview_404_500_and_not_json_are_not_live() {
+    let rig = rig();
+    rig.fake.set_pricing(Fixture::File("pricing-preview.json"));
+    let liveness = rig.connectors.liveness();
+    assert!(!liveness.live);
+    assert_eq!(liveness.pricing.unwrap().status, PricingStatus::Preview);
+    for (status, body) in [(404, "{}"), (500, "{}"), (200, "<html>not json</html>")] {
+        let rig = crate::support::rig();
+        rig.fake.set_pricing(Fixture::Raw {
+            status,
+            content_type: "text/html".to_owned(),
+            body: body.as_bytes().to_vec(),
+        });
+        not_live(&rig);
+    }
+}
+
+#[test]
+fn a_refused_connection_and_a_timeout_are_not_live() {
+    // A port nothing listens on.
+    let closed = TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let scratch = ScratchDir::new("refused").unwrap();
+    let rig = rig();
+    let mut config = rig.fake.config(scratch.state_file());
+    config.origin = Origin::Fake(url::Url::parse(&format!("http://127.0.0.1:{closed}")).unwrap());
+    let connectors = Connectors::new(config, Arc::new(MemoryStore::new())).unwrap();
+    assert!(!connectors.liveness().live);
+
+    let rig = crate::support::rig();
+    rig.connectors
+        .set_request_timeout_for_test(Duration::from_millis(200));
+    rig.fake.delay_next("/pricing.json", Duration::from_secs(3));
+    let started = SystemClock.now();
+    not_live(&rig);
+    assert!(SystemClock.now().duration_since(started).unwrap() < Duration::from_secs(2));
+}
+
+#[test]
+fn liveness_is_cached_24_hours_and_a_failure_10_minutes() {
+    let rig = manual_rig();
+    assert!(rig.connectors.liveness().live);
+    rig.clock().advance(Duration::from_hours(23));
+    assert!(rig.connectors.liveness().live);
+    assert_eq!(rig.fake.requests_to("/pricing.json").len(), 1);
+    rig.clock().advance(Duration::from_hours(1));
+    rig.fake.fail_next("/pricing.json", 500);
+    assert!(!rig.connectors.liveness().live);
+    assert_eq!(rig.fake.requests_to("/pricing.json").len(), 2);
+    rig.clock().advance(Duration::from_mins(9));
+    assert!(!rig.connectors.liveness().live);
+    assert_eq!(rig.fake.requests_to("/pricing.json").len(), 2);
+    rig.clock().advance(Duration::from_mins(1));
+    assert!(rig.connectors.liveness().live);
+    assert_eq!(rig.fake.requests_to("/pricing.json").len(), 3);
+}
+
+#[test]
+fn the_account_is_read_at_most_once_a_minute() {
+    let rig = manual_rig();
+    sign_in(&rig);
+    let first = rig.handle.account().unwrap();
+    assert_eq!(first.balance_credits, 1000);
+    let request = &rig.fake.requests_to("/v1/case-law/account")[0];
+    assert_eq!(request.query, "recent_days=30");
+    rig.clock().advance(Duration::from_secs(30));
+    rig.fake.set_balance(900);
+    assert_eq!(rig.handle.account().unwrap().balance_credits, 1000);
+    assert_eq!(rig.fake.requests_to("/v1/case-law/account").len(), 1);
+    rig.clock().advance(Duration::from_secs(31));
+    assert_eq!(rig.handle.account().unwrap().balance_credits, 900);
+    assert_eq!(rig.fake.requests_to("/v1/case-law/account").len(), 2);
+}
+
+#[test]
+fn the_account_after_sign_out_is_not_served_from_the_cache() {
+    let rig = manual_rig();
+    sign_in(&rig);
+    rig.handle.account().unwrap();
+    rig.handle.sign_out().unwrap();
+    assert!(matches!(rig.handle.account(), Err(Error::Auth(_))));
+}
+
+#[test]
+fn create_recharge_sends_the_pack_and_returns_our_pay_link() {
+    let rig = rig();
+    sign_in(&rig);
+    let recharge = rig.handle.create_recharge("200").unwrap();
+    let request = &rig.fake.requests_to("/v1/case-law/recharges")[0];
+    assert_eq!(request.json().unwrap(), serde_json::json!({"pack": "200"}));
+    assert_eq!(request.header("content-type"), Some("application/json"));
+    assert_eq!(recharge.status, RechargeStatus::AwaitingPayment);
+    let url = recharge.url.unwrap();
+    assert_eq!(
+        url.as_str(),
+        format!("https://data.clauseo.chat/pay/{}", recharge.recharge_id)
+    );
+}
+
+#[test]
+fn a_pay_link_that_is_not_ours_is_refused() {
+    let rig = rig();
+    sign_in(&rig);
+    let base = rig.fake.base().to_owned();
+    let port = rig.fake.base_url().port().unwrap();
+    for bad in [
+        base.replace("http://", "https://") + "/pay/r1",
+        "http://evil.example/pay/r1".to_owned(),
+        format!("http://127.0.0.1:{}/pay/r1", port.wrapping_add(1)),
+        base.replace("http://", "http://user@") + "/pay/r1",
+        format!("{base}/other/r1"),
+        format!("{base}/pay/"),
+    ] {
+        rig.fake.set_pay_url(Some(&bad));
+        assert_eq!(
+            rig.handle.create_recharge("200"),
+            Err(Error::NotOurPayLink),
+            "{bad}"
+        );
+    }
+}
+
+#[test]
+fn wait_recharge_polls_until_paid() {
+    let rig = rig();
+    sign_in(&rig);
+    rig.fake.set_wait_cap(Duration::from_millis(100));
+    let recharge = rig.handle.create_recharge("200").unwrap();
+    let id = recharge.recharge_id;
+    let payer = id.clone();
+    let handle = rig.handle.clone();
+    let waiter = thread::spawn(move || handle.wait_recharge(&payer, &CancelFlag::new()));
+    // Let a few polls come back unpaid, then pay.
+    while rig
+        .fake
+        .requests_to(&format!("/v1/case-law/recharges/{id}"))
+        .len()
+        < 3
+    {
+        thread::park_timeout(Duration::from_millis(20));
+    }
+    assert!(rig.fake.mark_paid(&id));
+    let paid = waiter.join().unwrap().unwrap();
+    assert_eq!(paid.status, RechargeStatus::Paid);
+    for poll in rig
+        .fake
+        .requests_to(&format!("/v1/case-law/recharges/{id}"))
+    {
+        assert_eq!(poll.query, "wait=40");
+    }
+}
+
+#[test]
+fn wait_recharge_stops_at_the_deadline() {
+    let rig = rig_with(FakeOptions::default(), false, |config| {
+        config.recharge_deadline = Duration::from_millis(300);
+    });
+    sign_in(&rig);
+    let recharge = rig.handle.create_recharge("200").unwrap();
+    let started = SystemClock.now();
+    let result = rig
+        .handle
+        .wait_recharge(&recharge.recharge_id, &CancelFlag::new());
+    assert_eq!(result, Err(Error::RechargeTimedOut));
+    let took = SystemClock.now().duration_since(started).unwrap();
+    assert!(took < Duration::from_secs(1), "{took:?}");
+}
+
+#[test]
+fn the_cancel_flag_stops_wait_recharge() {
+    let rig = rig();
+    sign_in(&rig);
+    let recharge = rig.handle.create_recharge("200").unwrap();
+    let cancel = CancelFlag::new();
+    let handle = rig.handle;
+    let flag = cancel.clone();
+    let waiter = thread::spawn(move || handle.wait_recharge(&recharge.recharge_id, &flag));
+    thread::park_timeout(Duration::from_millis(100));
+    let cancelled_at = SystemClock.now();
+    cancel.cancel();
+    assert_eq!(waiter.join().unwrap(), Err(Error::Cancelled));
+    assert!(SystemClock.now().duration_since(cancelled_at).unwrap() < Duration::from_millis(500));
+}
+
+#[test]
+fn wait_recharge_retries_after_a_server_error() {
+    let rig = rig();
+    sign_in(&rig);
+    rig.fake.set_wait_cap(Duration::from_millis(50));
+    let recharge = rig.handle.create_recharge("200").unwrap();
+    let id = recharge.recharge_id;
+    rig.fake.mark_paid(&id);
+    rig.fake
+        .fail_next(&format!("/v1/case-law/recharges/{id}"), 503);
+    let started = SystemClock.now();
+    let paid = rig.handle.wait_recharge(&id, &CancelFlag::new()).unwrap();
+    assert_eq!(paid.status, RechargeStatus::Paid);
+    let took = SystemClock.now().duration_since(started).unwrap();
+    assert!(took >= Duration::from_secs(5), "the 5 s backoff: {took:?}");
+}
+
+#[test]
+fn the_api_402_is_insufficient_credits_with_the_payment() {
+    let rig = rig();
+    sign_in(&rig);
+    rig.fake.set_balance(0);
+    let Err(Error::InsufficientCredits(payment)) = rig.handle.account() else {
+        panic!("expected InsufficientCredits");
+    };
+    let id = payment.recharge_id.clone().unwrap();
+    assert_eq!(
+        payment.url.unwrap().as_str(),
+        format!("https://data.clauseo.chat/pay/{id}")
+    );
+    let Err(Error::InsufficientCredits(again)) = rig.handle.create_recharge("200") else {
+        panic!("expected InsufficientCredits");
+    };
+    assert_eq!(again.recharge_id, Some(id));
+}
+
+#[test]
+fn a_recharge_id_that_is_not_one_is_refused_before_any_request() {
+    let rig = rig();
+    sign_in(&rig);
+    rig.fake.clear_requests();
+    for bad in ["", "../account", "a/b", "a?b=c"] {
+        assert!(matches!(
+            rig.handle.wait_recharge(bad, &CancelFlag::new()),
+            Err(Error::Parse(_))
+        ));
+    }
+    assert_eq!(rig.fake.requests().len(), 0);
+}

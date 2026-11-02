@@ -432,6 +432,12 @@ impl FakeHandle {
         self.lock().api.recharge_ids()
     }
 
+    /// Every recharge answer carries this pay link instead of the fake's own; `None` restores
+    /// it.
+    pub fn set_pay_url(&self, url: Option<&str>) {
+        self.lock().api.pay_url = url.map(str::to_owned);
+    }
+
     /// MCP answers come as `text/event-stream` (one `message` event) instead of JSON.
     pub fn respond_as_sse(&self, sse: bool) {
         self.lock().api.sse = sse;

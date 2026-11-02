@@ -24,6 +24,8 @@ pub(super) struct ApiState {
     pub(super) tool_results: HashMap<String, VecDeque<Fixture>>,
     pub(super) sse: bool,
     pub(super) wait_cap: Duration,
+    /// A pay link to answer instead of the fake's own, for the client's refusals.
+    pub(super) pay_url: Option<String>,
     recharges: BTreeMap<String, FakeRecharge>,
     next_recharge: u64,
 }
@@ -44,6 +46,7 @@ impl ApiState {
             tool_results: HashMap::new(),
             sse: false,
             wait_cap: Duration::from_secs(2),
+            pay_url: None,
             recharges: BTreeMap::new(),
             next_recharge: 1,
         }
@@ -142,7 +145,11 @@ impl ApiState {
         };
         let mut value = fixtures::value(file, base);
         value["recharge_id"] = json!(id);
-        value["url"] = json!(format!("{base}/pay/{id}"));
+        value["url"] = json!(
+            self.pay_url
+                .clone()
+                .unwrap_or_else(|| format!("{base}/pay/{id}"))
+        );
         value["amount"] = recharge.amount.clone();
         value["credits"] = json!(recharge.credits);
         value

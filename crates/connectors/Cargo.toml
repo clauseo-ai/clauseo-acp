@@ -50,6 +50,11 @@ windows = { workspace = true, features = ["Win32_Networking_WinSock"] }
 clauseo-connectors = { path = ".", features = ["test-support"] }
 tracing-subscriber = { workspace = true, features = ["fmt", "std"] }
 tracing-log = { workspace = true, features = ["std", "log-tracer"] }
+criterion = { workspace = true }
+
+[[bench]]
+name = "signin"
+harness = false
 
 [lints]
 workspace = true

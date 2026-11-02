@@ -159,7 +159,6 @@ crates/limits/tests/live/write.rs - clippy::disallowed_methods
 # the Winsock FFI for SO_EXCLUSIVEADDRUSE, the connector's own field names that the brief's API
 # fixes (account_id, pack, recharge_id, the *_inr amounts), and the dependency test's runs of cargo
 # and rustc.
-crates/connectors/src/lib.rs - dead_code
 crates/connectors/src/config.rs SystemClock::now clippy::disallowed_methods
 crates/connectors/src/write.rs - clippy::disallowed_methods
 crates/connectors/src/net/windows.rs - unsafe_code
@@ -169,6 +168,8 @@ crates/connectors/src/recharge.rs Recharge clippy::struct_field_names
 crates/connectors/src/recharge.rs Amount clippy::struct_field_names
 crates/connectors/tests/dependencies.rs cargo_json clippy::disallowed_methods
 crates/connectors/tests/dependencies.rs host_triple clippy::disallowed_methods
+crates/connectors/tests/live.rs live::write_url clippy::disallowed_methods
+crates/connectors/benches/signin.rs - clippy::unwrap_used
 
 # The fuzz targets (fuzz/, outside the workspace): libfuzzer-sys's fuzz_target! macro writes its
 # debug file with std::fs, and three targets write their own scratch folder.

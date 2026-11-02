@@ -629,3 +629,13 @@ status = "unmeasured"
 measured = 3.1
 measured_on = "linux-x86_64-vm"
 source = "doc 17 §3.4"
+
+[[budget]]
+id = "connector_signin_host_p95"
+metric = "connector sign-in, host time only, p95: discovery, the token exchange and the keychain write (not the lawyer's time in the browser)"
+limit = 3.0
+unit = "s"
+gate = "alert"
+measured_by = "crates/connectors/benches/signin.rs against the fake; R24's by-hand row for the real one"
+status = "unmeasured"
+source = "S28 brief, Performance"

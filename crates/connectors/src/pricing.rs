@@ -2,12 +2,20 @@
 //! never hard-coded: the figures are not final.
 
 use std::collections::BTreeMap;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Deserializer};
 
+use crate::connectors::{Shared, lock};
 use crate::de;
 use crate::error::{Error, parse_error};
+use crate::http::{self, SendBody};
+
+/// How long a liveness answer that parsed is kept.
+const LIVENESS_TTL: Duration = Duration::from_hours(24);
+/// How long a failed liveness fetch is kept, so a broken network does not refetch on every
+/// Settings open.
+const LIVENESS_FAILURE_TTL: Duration = Duration::from_mins(10);
 
 /// Whether the slot shows, and what it costs.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -163,6 +171,44 @@ pub(crate) fn liveness_from(status: u16, body: &[u8], mcp_url: &str, at: SystemT
         pricing: Some(doc.pricing),
         fetched_at: Some(at),
     }
+}
+
+/// [`Connectors::liveness`](crate::Connectors::liveness): the cached answer while it is young
+/// enough, else one fetch of `pricing.json`.
+pub(crate) fn cached_liveness(shared: &Shared) -> Liveness {
+    let mut cache = lock(&shared.liveness);
+    let now = shared.config.clock.now();
+    if let Some(cached) = cache.as_ref()
+        && let Some(at) = cached.fetched_at
+        && let Ok(age) = now.duration_since(at)
+    {
+        let ttl = if cached.pricing.is_some() {
+            LIVENESS_TTL
+        } else {
+            LIVENESS_FAILURE_TTL
+        };
+        if age < ttl {
+            return cached.clone();
+        }
+    }
+    let headers = [("Accept", "application/json")];
+    let fetched = http::send(
+        &shared.agent,
+        "GET",
+        &shared.pricing_url,
+        &headers,
+        SendBody::None,
+        shared.timeout(),
+    );
+    let liveness = match fetched {
+        Ok(reply) => liveness_from(reply.status, &reply.body, &shared.mcp_url, now),
+        Err(err) => {
+            tracing::info!(error = %err, "pricing.json could not be fetched; not live");
+            Liveness::failed(now)
+        }
+    };
+    *cache = Some(liveness.clone());
+    liveness
 }
 
 #[cfg(test)]
