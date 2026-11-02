@@ -214,9 +214,9 @@ const PLANNED: Partial<
 export const PLANNED_CODES = Object.keys(PLANNED) as ErrorCode[];
 
 /** The thread's agent as the words name it: its kind, which picks the plan's line (Claude's or ChatGPT's), and its
- * name, for an agent of no kind (today its settings id: the settings hold no display name, and the host keeps ACP's
- * agentInfo to itself); null with no name at all. The whole is undefined where the caller doesn't know the thread. The
- * kind is the app's AgentKind, copied as ErrorCode is. */
+ * name, for an agent of no kind (the agent's own name from its header when the host has one, else its settings id);
+ * null with no name at all. The whole is undefined where the caller doesn't know the thread. The kind is the app's
+ * AgentKind, copied as ErrorCode is. */
 export type AgentName = { kind: "claude" | "codex" | undefined; name: string | null } | undefined;
 
 /** A code's sentence for the thread's agent: a codex agent picks PLANNED's ChatGPT sentence; an agent of no kind its

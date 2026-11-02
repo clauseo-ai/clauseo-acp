@@ -29,15 +29,20 @@ afterEach(async () => {
 const QUESTION = "Summarise the notice to the bank.";
 const field = () => h!.one("composer") as HTMLTextAreaElement;
 const H10: Script["next"] = { parts: ["restart"], query: () => ({ threads: [] }) };
-const status = (s: "starting" | "running" | "idle" | "agent_exited", agent?: string): ViewEntry => {
+const status = (
+  s: "starting" | "running" | "idle" | "agent_exited",
+  agent?: string,
+  name?: string,
+): ViewEntry => {
   const head = header();
   head.header!.status = s;
   if (agent !== undefined) head.header!.agent = agent;
+  if (name !== undefined) head.header!.agent_name = name;
   return head;
 };
 
 /** The room with an empty thread, the question asked and under way with its first chunk; its header names `agent`. */
-async function asked(script: Script = {}, agent?: string): Promise<Harness> {
+async function asked(script: Script = {}, agent?: string, name?: string): Promise<Harness> {
   const room = await mountRoom(script);
   room.deliver([reset([])]);
   await room.type(QUESTION);
@@ -45,14 +50,14 @@ async function asked(script: Script = {}, agent?: string): Promise<Harness> {
   room.deliver([
     upsert(userMessage(5, 1, QUESTION)),
     upsert(agentText(6, 1, "Clause nine requires notice")),
-    upsert(status("running", agent)),
+    upsert(status("running", agent, name)),
   ]);
   return room;
 }
 
-const failed = (failure: ErrorCode, ts = Date.now(), agent?: string) => [
+const failed = (failure: ErrorCode, ts = Date.now(), agent?: string, name?: string) => [
   upsert(step(9, { stop: "failed", failure, ts })),
-  upsert(status(failure === "agent.exited" ? "agent_exited" : "idle", agent)),
+  upsert(status(failure === "agent.exited" ? "agent_exited" : "idle", agent, name)),
 ];
 
 test("Claude stopping mid-answer: the stopped line with its time and no Restart, the answer so far kept, the question back in the empty field", async () => {
@@ -328,4 +333,54 @@ test.each([
   h.deliver(failed(code, Date.now(), agent));
   await h.settle();
   expect(h.one("turn-stopped")?.textContent).toContain(said);
+});
+
+// the error lines that name the open thread's agent (AgentPlanContext) take the agent's own name from its header when
+// the host has one (agent_name, from PR #210); without it, or with no thread open (a draft), its settings id
+test("a thread whose header names its agent: the line says the agent's own name, not its settings id", async () => {
+  h = await asked(
+    { threads: [{ ...summary(), agent: "my-agent" }], next: H10 },
+    "my-agent",
+    "Gemini CLI",
+  );
+  h.deliver(failed("agent.launch_failed", Date.now(), "my-agent", "Gemini CLI"));
+  await h.settle();
+  expect(h.one("agent-stopped")?.textContent).toContain(
+    "Gemini CLI didn't start. Your question is kept.",
+  );
+  expect(h.one("turn-stopped")?.textContent).toContain(
+    "Gemini CLI didn't start. Your question is kept.",
+  );
+});
+
+test("a thread whose header has no agent_name: the line says the settings id, as before", async () => {
+  h = await asked({ threads: [{ ...summary(), agent: "my-agent" }], next: H10 }, "my-agent");
+  h.deliver(failed("agent.launch_failed", Date.now(), "my-agent"));
+  await h.settle();
+  expect(h.one("agent-stopped")?.textContent).toContain(
+    "my-agent didn't start. Your question is kept.",
+  );
+});
+
+test("a draft with no thread names the agent by its settings id, though a thread of that agent has a name", async () => {
+  // the draft's send refuses to make its thread: the refusal's line names the draft's agent, which is the thread's
+  let refuse = false;
+  h = await mountRoom({
+    threads: [{ ...summary(), agent: "my-agent" }],
+    next: H10,
+    dispatch: (command) => {
+      if (command.create_thread !== undefined && refuse)
+        throw { code: "agent.launch_failed", message: "", retryable: false };
+      return defaultOutcome(command);
+    },
+  });
+  const head = status("idle", "my-agent", "Gemini CLI");
+  h.deliver([reset([], head)]);
+  await h.settle();
+  refuse = true;
+  await h.click(h.one("new-conversation"));
+  await h.type(QUESTION);
+  await h.key({ key: "Enter", keyCode: 13 });
+  expect(h.one("error")?.dataset["code"]).toBe("agent.launch_failed");
+  expect(h.one("error")?.textContent).toBe("my-agent didn't start. Your question is kept.");
 });

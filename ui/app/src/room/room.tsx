@@ -48,7 +48,7 @@ import type { MatterId } from "../transport/protocol.ts";
 import type { Papers, PapersHost } from "./host-next.ts";
 import type { AgentName } from "@clauseo/components/lib/words-errors.ts";
 import { kindOf, knownPlan } from "./agent.ts";
-import { AgentPlanContext } from "./thread/agent-plan.ts";
+import { AgentPlanContext, useThreadAgentName } from "./thread/agent-plan.ts";
 import { Conversations } from "./conversations.ts";
 import { Matters, type MattersView } from "./matters.ts";
 import { NewMatter } from "./new-matter.tsx";
@@ -267,12 +267,13 @@ function RoomFrame({
     open === null || talks.open === null || talks.phase === "loading"
       ? null
       : knownPlan(openAgent, talks.agents);
-  // the agent as the error words name it (AgentPlanContext): its kind, and its own name, the settings id (the only name
-  // the room has); undefined where not known, so those words keep Claude's line there
+  // the agent as the error words name it (AgentPlanContext): its kind, and its own name, the open thread's agent_name
+  // when its header has one, else the settings id; undefined where not known, so those words keep Claude's line there
+  const threadName = useThreadAgentName(store, talks.thread);
   const agentPlan: AgentName =
     open === null || talks.open === null || talks.phase === "loading"
       ? undefined
-      : { kind: kindOf(openAgent, talks.agents), name: openAgent };
+      : { kind: kindOf(openAgent, talks.agents), name: threadName ?? openAgent };
   const plan = planOfOpen === null ? "" : th(w.lang, "Uses your {name} plan", { name: planOfOpen });
   // a matter's name as filed is English in both languages, the scratch matter's is the room's own; with no matter, the
   // frame's words stand in its place
