@@ -16,6 +16,7 @@
 //   it (a matter just opened, before its list is in; a draft that became the thread): then it keeps that first key, so
 //   the work isn't remounted under a question on its way.
 // - H6: a thread is marked seen when it opens with the window focused, and when its turn ends while open and focused.
+import { late } from "@clauseo/components/lib/late.ts";
 import { pickReopenThread } from "../store/reopen.ts";
 import type { ViewStore } from "../store/store.ts";
 import { streamOf } from "../store/view.ts";
@@ -24,12 +25,12 @@ import type {
   AgentId,
   ErrorCode,
   MatterId,
+  MessageId,
   ThreadId,
   ThreadStatus,
   Timestamp,
 } from "../transport/protocol.ts";
 import { agentFor, matterPlan, planOptions } from "./agent.ts";
-import { titleOf } from "./conversation-title.ts";
 import type { AgentInfo, AppEvent, NextHost, ThreadInfo, ThreadsChanged } from "./host-next.ts";
 import type { Matters } from "./matters.ts";
 
@@ -77,6 +78,11 @@ export type ConversationsView = {
   options: readonly { value: AgentId; label: string }[];
   /** The agent the draft would run: the lawyer's choice, else agent.ts's order. */
   agent: AgentId;
+  /** Whether Retry from here can be offered (H13). */
+  canRetry: boolean;
+  /** H13: the open thread was retried, in this room, from a question of another: that one's key and title, and the
+   * question's time. Until H13 says it on the thread, a restart forgets it. */
+  retried: { from: string; title?: string; at: Timestamp } | null;
 };
 
 /** A row's words, from its status and H6's marks. Starting and running are "Answering."; a pending permission or
@@ -118,6 +124,8 @@ type MatterState = {
   ticket: number;
   /** Threads given a rename by this room: one each. */
   renamed: Set<ThreadId>;
+  /** H13: threads this room retried, with the thread and the time of the question they came from. */
+  retried: Map<ThreadId, { from: ThreadId; at: Timestamp }>;
 };
 
 const resting = (s: ThreadStatus) => !(s === "starting" || s === "running" || s === "needs_you");
@@ -267,8 +275,14 @@ export class Conversations {
     const header = this.#store.view(streamOf(thread))?.header?.header;
     if ((header?.title ?? known.title) !== undefined || m.renamed.has(thread)) return;
     m.renamed.add(thread);
-    const title = titleOf(text);
-    if (title === null) return;
+    // the title's rules load with the first question, off the first paint
+    void late(import("./conversation-title.ts")).then(({ titleOf }) => {
+      const title = titleOf(text);
+      if (title !== null && this.#live) this.#rename(m, thread, title);
+    });
+  };
+
+  #rename(m: MatterState, thread: ThreadId, title: string): void {
     this.#transport
       .dispatch({ command_id: crypto.randomUUID(), command: { rename_thread: { thread, title } } })
       .then(
@@ -281,6 +295,30 @@ export class Conversations {
         (error: unknown) =>
           console.warn(`rename_thread failed: ${JSON.stringify(toHostError(error).code)}`),
       );
+  }
+
+  /** H13, Retry from here: a new thread from the question `message` of `thread`, asked again; it opens once the
+   * host has made it, and nothing is deleted. `at` is the question's time, for the line the new thread opens with.
+   * Rejects with the host's error. */
+  retry = async (thread: ThreadId, message: MessageId, at: Timestamp): Promise<void> => {
+    const host = this.#next.retry;
+    const m = this.#stateOf(thread);
+    if (host === null || m === undefined) throw internalError("this host can't retry a question");
+    const made = await host.retryFrom(thread, message);
+    const from = m.threads.get(thread);
+    m.threads.set(made, {
+      thread: made,
+      matter: m.matter,
+      agent: from?.agent ?? this.#agentOf(m),
+      status: "starting",
+      queue_held: false,
+    });
+    m.retried.set(made, { from: thread, at });
+    if (!this.#live || m !== this.#current) return;
+    this.#leave(m);
+    m.open = made;
+    this.#opened(m);
+    this.#emit();
   };
 
   /* ---------- following the matter ---------- */
@@ -310,6 +348,7 @@ export class Conversations {
         listing: null,
         ticket: 0,
         renamed: new Set(),
+        retried: new Map(),
       };
       this.#by.set(matter, m);
     }
@@ -501,6 +540,8 @@ export class Conversations {
         plan: undefined,
         options,
         agent: agentFor({ chosen: null, setting: null, threads: [] }),
+        canRetry: this.#next.retry !== null,
+        retried: null,
       };
     const listed = [...m.threads.values()].filter((t) => t.status !== "archived").sort(newestFirst);
     const rows: ConversationRow[] = listed.map((t) => ({
@@ -516,6 +557,8 @@ export class Conversations {
     if (d !== null && d.shown)
       rows.unshift({ key: d.key, thread: null, agent: null, status: "idle" });
     const thread = m.open === null ? null : this.#threadOf(m, m.open);
+    const origin = thread === null ? undefined : m.retried.get(thread);
+    const source = origin === undefined ? undefined : m.threads.get(origin.from);
     return {
       matter: m.matter,
       phase: m.phase,
@@ -527,6 +570,15 @@ export class Conversations {
       plan: matterPlan(listed),
       options,
       agent: this.#agentOf(m),
+      canRetry: this.#next.retry !== null,
+      retried:
+        origin === undefined
+          ? null
+          : {
+              from: m.keys.get(origin.from) ?? origin.from,
+              ...(source?.title === undefined ? {} : { title: source.title }),
+              at: origin.at,
+            },
     };
   }
 

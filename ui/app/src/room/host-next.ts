@@ -16,6 +16,7 @@ import type {
   MatterId,
   MatterSource,
   MatterSummary,
+  MessageId,
   QueryResult,
   StopReason,
   ThreadId,
@@ -150,10 +151,21 @@ export type MattersCommand =
   | { relocate_matter: { matter: MatterId; folder: FolderRefId } }
   | { mark_seen: { thread: ThreadId } };
 
-/** The commands: `{"set_ui_settings": {"patch": ...}}`, only the keys that change, and the matters' commands. */
-export type NextCommand = { set_ui_settings: { patch: Partial<UiSettings> } } | MattersCommand;
-/** What a command did: `"done"`, or create_matter's `{"matter_created": {"matter": ...}}`. */
-export type NextOutcome = "done" | { matter_created: { matter: MatterId } };
+/** H13: a new thread from one of the lawyer's questions in `thread`, asked again there; nothing is deleted. */
+export type RetryCommand = { retry_from: { thread: ThreadId; message: MessageId } };
+
+/** The commands: `{"set_ui_settings": {"patch": ...}}`, only the keys that change, the matters' commands and H13's
+ * retry. */
+export type NextCommand =
+  | { set_ui_settings: { patch: Partial<UiSettings> } }
+  | MattersCommand
+  | RetryCommand;
+/** What a command did: `"done"`, create_matter's `{"matter_created": {"matter": ...}}`, or retry_from's
+ * `{"thread_created": {"thread": ...}}`, as create_thread answers. */
+export type NextOutcome =
+  | "done"
+  | { matter_created: { matter: MatterId } }
+  | { thread_created: { thread: ThreadId } };
 
 /** The event: `{"settings_changed": ...}`, the settings after any change, whoever made it. */
 export type NextEvent = { settings_changed: Settings };
@@ -190,6 +202,7 @@ export const WIRE = {
   forgetMatter: "forget_matter",
   relocateMatter: "relocate_matter",
   markSeen: "mark_seen",
+  retryFrom: "retry_from",
   matterCreated: "matter_created",
   mattersChanged: "matters_changed",
   threadsChanged: "threads_changed",
@@ -235,6 +248,12 @@ export interface AgentsHost {
   listAgents(): Promise<AgentInfo[]>;
 }
 
+/** H13: Retry from here. */
+export interface RetryHost {
+  /** Makes the new thread from the question `message` of `thread`, and gives its id. */
+  retryFrom(thread: ThreadId, message: MessageId): Promise<ThreadId>;
+}
+
 /** H4: the app's events. */
 export interface AppHost {
   /** Hears each AppEvent. Returns the unsubscribe. */
@@ -252,6 +271,7 @@ export type NextHost = {
   app: AppHost | null;
   restart: RestartHost | null;
   agents: AgentsHost | null;
+  retry: RetryHost | null;
 };
 
 /** One part of NextHost: a host row. */
@@ -266,6 +286,7 @@ export const NO_NEXT: NextHost = {
   app: null,
   restart: null,
   agents: null,
+  retry: null,
 };
 
 /** A transport that may carry the calls above: `nextHost()` gives the parts its host has. */
