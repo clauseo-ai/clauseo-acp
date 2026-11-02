@@ -25,7 +25,8 @@ import type { Platform } from "@clauseo/components/lib/display.ts";
 import { useVersionWords, vt } from "@clauseo/components/lib/words-versions.ts";
 import type { FileRefId } from "../../transport/protocol.ts";
 import { isHostError } from "../../transport/host-transport.ts";
-import type { Snapshot, VersionsController } from "./controller.ts";
+import type { VersionsController } from "./controller.ts";
+import type { Snapshot } from "./state.ts";
 import type { StandIns } from "./stand-ins.ts";
 import { calendarOf, fileName, undoable } from "./timeline.ts";
 import {
