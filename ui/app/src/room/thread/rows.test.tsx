@@ -278,20 +278,27 @@ test("the limit stop: the plan's words, its reset as a time today, with the week
   );
 });
 
-test("a reset gone by says no Resets at all, two days ago or earlier today: the headline stands alone", async () => {
+test("a reset gone by says when it reset, in its time element: two days ago, earlier today, exactly now, ten days back", async () => {
   fixNow();
   h = await mountRoom();
-  h.deliver([
-    reset([
-      limit(1, "plan_window", local(-2, 9, 0)),
-      limit(2, "plan_window", local(0, 8, 0)),
-      limit(3, "plan_window", NOW.getTime()),
-    ]),
-  ]);
-  for (const row of h.all("limit-stop")) {
-    expect(resetsAt(row)).toBeNull();
-    expect(row.textContent).toBe(t("en", "Claude plan limit reached"));
-  }
+  const gone = [local(-2, 9, 0), local(0, 8, 0), NOW.getTime(), local(-15, 8, 0)];
+  h.deliver([reset(gone.map((at, i) => limit(i + 1, "plan_window", at)))]);
+  const rows = h.all("limit-stop");
+  // 31 October 2026 is a Saturday; ten days and more back reads the date
+  const lines = [
+    lim("en", "The limit reset on {day} at {time}.", { day: "Saturday", time: "9:00 am" }),
+    lim("en", "The limit reset at {time}.", { time: "8:00 am" }),
+    lim("en", "The limit reset at {time}.", { time: "3:00 pm" }),
+    lim("en", "The limit reset on {day} at {time}.", { day: "18 October", time: "8:00 am" }),
+  ];
+  expect(rows).toHaveLength(4);
+  rows.forEach((row, i) => {
+    expect(resetsAt(row)?.dateTime).toBe(new Date(gone[i]!).toISOString());
+    expect(resetsAt(row)?.textContent).toBe(lines[i]);
+    expect(row.textContent).toBe(t("en", "Claude plan limit reached") + lines[i]);
+    expect(row.textContent).not.toContain("Resets");
+  });
+  expect(lines[3]).toBe("The limit reset on 18 October at 8:00 am.");
 });
 
 test("only a used-up plan window is the plan's limit; without a reset the row says its own Reset not given.", async () => {

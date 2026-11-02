@@ -12,7 +12,7 @@ import type { EntryId, LimitStopEntry, StepEntry } from "../../transport/protoco
 import { isoOf, whenOf } from "./clock.ts";
 import { useBusy } from "./live.ts";
 import { useThreadActions } from "./session.ts";
-import { resetShown, stopLine } from "./stops.ts";
+import { resetPassed, stopLine } from "./stops.ts";
 
 const QUIET = "text-small text-quiet";
 /** The space above a row under another in its section, on the spacing tokens; first in its section, the thread's own
@@ -83,8 +83,9 @@ export function LimitStopRow({ id, entry }: { id: EntryId; entry: LimitStopEntry
   const plan = entry.reason === "plan_window";
   // "now" as the row first showed: no clock runs to move it
   const [now] = useState(Date.now);
-  const shown = resetShown(entry.resets_at, now);
-  const when = shown === null ? null : whenOf(w.lang, shown, now);
+  const resets = entry.resets_at;
+  const when = resets === undefined ? null : whenOf(w.lang, resets, now);
+  const passed = resets !== undefined && resetPassed(resets, now);
   return (
     <div
       data-testid="limit-stop"
@@ -101,13 +102,22 @@ export function LimitStopRow({ id, entry }: { id: EntryId; entry: LimitStopEntry
           <Say>{lim(w.lang, "Reset not given.")}</Say>
         </p>
       )}
-      {shown !== null && when !== null && (
+      {resets !== undefined && when !== null && (
         <p className={QUIET}>
-          <time data-testid="limit-resets-at" dateTime={isoOf(shown)}>
+          <time data-testid="limit-resets-at" dateTime={isoOf(resets)}>
             <Say>
               {when.day === null
-                ? lim(w.lang, "Resets {time}", { time: when.time })
-                : lim(w.lang, "Resets {day} {time}", { day: when.day, time: when.time })}
+                ? lim(w.lang, passed ? "The limit reset at {time}." : "Resets {time}", {
+                    time: when.time,
+                  })
+                : lim(
+                    w.lang,
+                    passed ? "The limit reset on {day} at {time}." : "Resets {day} {time}",
+                    {
+                      day: when.day,
+                      time: when.time,
+                    },
+                  )}
             </Say>
           </time>
         </p>

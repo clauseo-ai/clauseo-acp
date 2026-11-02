@@ -229,6 +229,19 @@ const U3: Entry[] = [
     screen: "room/thread",
     render: thread({ entries: [QUESTION, PARTIAL, limit("plan_window")] }),
   },
+  {
+    id: "U3-49",
+    words: limitWords("The limit reset at {time}."),
+    screen: "room/thread",
+    // midnight today: always gone by, and always today
+    render: thread({ entries: [QUESTION, PARTIAL, limit("plan_window", atLocal(0, 0, 0))] }),
+  },
+  {
+    id: "U3-50",
+    words: limitWords("The limit reset on {day} at {time}."),
+    screen: "room/thread",
+    render: thread({ entries: [QUESTION, PARTIAL, limit("plan_window", atLocal(-2, 9, 0))] }),
+  },
 ];
 
 /* ---------- U2: the rail and matters ---------- */
