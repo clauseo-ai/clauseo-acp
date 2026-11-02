@@ -1,0 +1,215 @@
+# Mutation tests of the code that compiles only on Windows or only on macOS, each on its own OS
+# (clauseo-acp-private#139). CI's mutants job and `cargo xtask mutants` run on Linux, where a
+# `cfg(windows)` or `cfg(target_os = "macos")` mutant builds the same binary as the code and comes
+# back missed. Here those files are mutated where they compile.
+#
+# - Weekly, Sundays at 02:07 UTC, and by hand (workflow_dispatch, which needs write access). No pull
+#   request or push event, so it never takes a runner from a pull request: the org has 20 job
+#   slots and 5 macOS runners. 02:07 is after fuzz.yml's nightly (01:23, about 25 minutes) and
+#   before ci.yml's at 03:17. The longer jobs run past 03:17; then ci.yml (2 macOS jobs) and
+#   scoreboard.yml (1) plus this workflow's one macOS job still fit the 5.
+# - Four jobs, each one runner and one cargo-mutants run over the files in its matrix entry
+#   (`--file`), with `--jobs 2`: three on windows-2025 (the runner of e2e-windows.yml's smoke
+#   test), one on macos-15 (ci.yml's). Each file list comes from a grep of `cfg(windows)`,
+#   `cfg(not(unix))` and `cfg(target_os = "macos")` in the crate, outside tests, plus the files
+#   whose mutants need a case-insensitive file system (writeback.rs, undo.rs, refuse.rs). A whole
+#   file is mutated, so mutants Linux already tests run again here; that keeps the lists simple.
+# - The config is .cargo/mutants.toml without its `exclude_globs` entries for the files mutated
+#   here (the settings OS shims, excluded on Linux because they are not compiled there).
+#   .github/scripts/mutants-platform.sh writes it, and fails a file that gives no mutant.
+# - It only reports: a missed or timed-out mutant shows in the job summary and the artifact
+#   mutants-platform-<job> (mutants.out, kept 14 days), and never fails the job. A failed setup,
+#   or a cargo-mutants exit other than 0 (all caught), 2 (some missed) or 3 (some timed out),
+#   fails it: 1 is a usage error, 4 a baseline whose tests already fail, 70 an internal error
+#   (cargo-mutants 27.1.0, src/exit_code.rs).
+# - No version is written here, as in ci.yml: Rust comes from rust-toolchain.toml, cargo-mutants
+#   and nextest from xtask/src/setup.rs through .github/actions/install-pinned-tools.
+# - No Rust cache: each mutant builds in a copy of the tree with its own target/ (`gitignore` in
+#   .cargo/mutants.toml leaves target/ out), so a cache would speed up only the xtask build.
+# - Every third-party action is pinned by commit SHA, with its tag in a comment. No secrets.
+name: mutants-platform
+
+on:
+  schedule:
+    - cron: "7 2 * * 0"
+  workflow_dispatch:
+
+permissions: {}
+
+# One run at a time: a dispatch while the weekly run is going waits for it.
+concurrency:
+  group: mutants-platform
+  cancel-in-progress: false
+
+jobs:
+  mutants:
+    name: mutants (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    # Timeouts, from an estimate. CI's Linux runner (4 vCPU) took 7 to 24 s per mutant at 2 jobs
+    # (xtask/src/mutants.rs, run 41166189760). Assumed here: about 45 s per mutant on windows-2025,
+    # where builds and links are slower, and 25 s on macos-15 (3 cores), so 22 and 12 s of wall
+    # time each at 2 jobs; plus about 15 minutes of setup and cold baseline build. The step's
+    # timeout is about 2.5 times the estimate, the job's 20 minutes more so the summary and the
+    # artifact still run (job_minutes), and both stay well under GitHub's 6 hours.
+    # - process: 71 mutants, ~55 min (its tests start and stop real processes);
+    # - matters: 200, ~90 min;  matters-settings: 219, ~100 min;  macos: 276, ~70 min.
+    timeout-minutes: ${{ matrix.job_minutes }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # S7's job objects, the shutdown ladder and the launch rules.
+          - name: windows-process
+            runner: windows-2025
+            minutes: 140
+            job_minutes: 160
+            fake_agent: true
+            packages: clauseo-process
+            files: >-
+              crates/process/src/os/windows.rs
+              crates/process/src/handle.rs
+              crates/process/src/launch.rs
+          # Cloud placeholders, drive roots, hidden folders, and the case-insensitive file
+          # system's respelled names (writeback.rs, undo.rs).
+          - name: windows-matters
+            runner: windows-2025
+            minutes: 220
+            job_minutes: 240
+            fake_agent: false
+            packages: clauseo-matters
+            files: >-
+              crates/matters/src/write.rs
+              crates/matters/src/write/windows.rs
+              crates/matters/src/probe.rs
+              crates/matters/src/refuse.rs
+              crates/matters/src/fsync.rs
+              crates/matters/src/matter/json.rs
+              crates/matters/src/writeback.rs
+              crates/matters/src/undo.rs
+          # Files with one Windows-only branch each, and settings' policy and folders.
+          - name: windows-matters-settings
+            runner: windows-2025
+            minutes: 240
+            job_minutes: 260
+            fake_agent: false
+            packages: clauseo-matters clauseo-settings
+            files: >-
+              crates/matters/src/locks.rs
+              crates/matters/src/stat.rs
+              crates/matters/src/history/durable.rs
+              crates/matters/src/history/blob.rs
+              crates/settings/src/policy.rs
+              crates/settings/src/policy/windows.rs
+              crates/settings/src/system.rs
+              crates/settings/src/system/windows.rs
+          # One macOS job, so this workflow takes one of the org's 5 macOS runners. no_download,
+          # F_FULLFSYNC, /Volumes, the case-insensitive names, the managed-preferences policy, and
+          # the store's fullfsync pragma.
+          - name: macos
+            runner: macos-15
+            minutes: 180
+            job_minutes: 200
+            fake_agent: false
+            packages: clauseo-matters clauseo-settings clauseo-store
+            files: >-
+              crates/matters/src/no_download.rs
+              crates/matters/src/no_download/macos.rs
+              crates/matters/src/fsync.rs
+              crates/matters/src/refuse.rs
+              crates/matters/src/probe.rs
+              crates/matters/src/write.rs
+              crates/matters/src/writeback.rs
+              crates/matters/src/undo.rs
+              crates/settings/src/policy.rs
+              crates/settings/src/policy/macos.rs
+              crates/store/src/open.rs
+    env:
+      PACKAGES: ${{ matrix.packages }}
+      FILES: ${{ matrix.files }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the Rust toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+
+      # cargo-mutants runs each mutant's tests with nextest (`test_tool` in .cargo/mutants.toml).
+      # `./`, as in ci.yml: actionlint 1.7.12 rejects the `$/` form zizmor's self-repository audit
+      # asks for, and the checkout above is this run's own commit.
+      - name: Install cargo-mutants and nextest at their pins
+        uses: ./.github/actions/install-pinned-tools # zizmor: ignore[self-repository]
+        with:
+          tools: cargo-mutants cargo-nextest
+
+      # process's tests start fake_agent, which `-p clauseo-process` does not build. The binary
+      # stays in this tree's target/, which the mutants' copies leave out, so it is named by path.
+      - name: Build fake_agent for process's tests
+        if: matrix.fake_agent
+        env:
+          EXE: ${{ runner.os == 'Windows' && '.exe' || '' }}
+        run: |
+          set -euo pipefail
+          cargo build -p clauseo-fake_agent --bin fake_agent
+          bin="$GITHUB_WORKSPACE/target/debug/fake_agent$EXE"
+          test -f "$bin"
+          echo "CLAUSEO_FAKE_AGENT_BIN=$bin" >> "$GITHUB_ENV"
+
+      - name: Write the config and list the mutants per file
+        run: .github/scripts/mutants-platform.sh "$RUNNER_TEMP/mutants.toml"
+
+      # $PACKAGES and $FILES are split on purpose, into one -p and one --file per word.
+      - name: cargo mutants
+        timeout-minutes: ${{ matrix.minutes }}
+        run: |
+          set -uo pipefail
+          args=()
+          for package in $PACKAGES; do args+=(-p "$package"); done
+          for file in $FILES; do args+=(--file "$file"); done
+          cargo mutants --config "$RUNNER_TEMP/mutants.toml" --jobs 2 "${args[@]}"
+          code=$?
+          case "$code" in
+            0) echo "every mutant caught" ;;
+            2) echo "some mutants missed (reported, not a failure)" ;;
+            3) echo "some mutants timed out (reported, not a failure)" ;;
+            *) echo "::error::cargo mutants exited $code (1 usage, 4 baseline failed, 70 internal)"
+               exit "$code" ;;
+          esac
+
+      - name: Summarise the mutants
+        if: ${{ !cancelled() }}
+        env:
+          NAME: ${{ matrix.name }}
+        run: |
+          {
+            echo "## Mutants on their own OS: $NAME"
+            if [ -f mutants.out/outcomes.json ]; then
+              jq -r '"\(.total_mutants) mutants: \(.caught) caught, \(.missed) missed,"
+                + " \(.unviable) unviable, \(.timeout) timed out"' mutants.out/outcomes.json
+            else
+              echo "No mutants.out/outcomes.json: cargo mutants did not finish its run."
+            fi
+            for kind in missed timeout; do
+              if [ -s "mutants.out/$kind.txt" ]; then
+                echo
+                echo "### $kind"
+                echo
+                echo '```'
+                cat "mutants.out/$kind.txt"
+                echo '```'
+              fi
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: mutants-platform-${{ matrix.name }}
+          path: mutants.out
+          retention-days: 14
+          if-no-files-found: warn
