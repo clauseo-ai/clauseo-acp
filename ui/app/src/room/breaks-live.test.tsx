@@ -214,3 +214,35 @@ test("with H10 faked, an interrupted turn already in the view when the thread op
   expect(h.one("restart")).not.toBeNull();
   expect(field().value).toBe("");
 });
+
+test("a break this window didn't ask for, with the header's flip a batch before the step, is said in the one region", async () => {
+  // opened mid-answer: no question sent from here, so Answering. follows the header alone
+  h = await mountRoom();
+  h.deliver([
+    reset([userMessage(5, 1, QUESTION), agentText(6, 1, "Clause nine")], status("running")),
+  ]);
+  await h.settle();
+  const regions = () => [...h!.host.querySelectorAll('.room-entry [role="status"]')];
+  expect(regions()).toHaveLength(1);
+  const region = regions()[0];
+  expect(region?.textContent).toContain("Answering.");
+  h.deliver([upsert(status("agent_exited"))]);
+  await h.settle();
+  // nothing stands for a moment: the region stays, empty
+  expect(regions()).toEqual([region]);
+  expect(region?.textContent).toBe("");
+  h.deliver([upsert(step(9, { stop: "failed", failure: "agent.exited", ts: Date.now() }))]);
+  await h.settle();
+  expect(h.one("agent-stopped")).not.toBeNull();
+  expect(regions()).toEqual([region]);
+  expect(region?.textContent).toContain("The answer stopped at");
+});
+
+test("in Hindi the region tags English names, as the line's words do", async () => {
+  h = await asked({ next: H10, display: { language: "hi" } });
+  h.deliver(failed("agent.launch_failed"));
+  await h.settle();
+  const region = h.host.querySelector('.room-entry [role="status"]');
+  expect(region?.textContent).toContain(errorWords("hi", "agent.launch_failed"));
+  expect(region?.querySelector('[lang="en"]')?.textContent).toBe("Claude");
+});

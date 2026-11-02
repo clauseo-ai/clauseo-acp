@@ -25,7 +25,7 @@ import { sendsOnEnter } from "./composer-keys.ts";
 import { useRoom } from "./room-scope.ts";
 import { Say } from "./say.tsx";
 import { StatusLine, type PlanChoice, type ReadyHint } from "./status-line.tsx";
-import { WorkingLine, WorkingTime, type WorkingState } from "./working-line.tsx";
+import { WorkingLine, WorkingSaid, WorkingTime, type WorkingState } from "./working-line.tsx";
 
 export type { PlanChoice, ReadyHint } from "./status-line.tsx";
 
@@ -386,6 +386,11 @@ export function Composer<V extends string = string>({
       )}
       {/* while Clauseo works the working line is the well's top row, and the field its foot: one set-in region */}
       <div className="room-entry" ref={entry} data-working={working !== null ? "" : undefined}>
+        {/* what assistive technology hears of the working line: one status region, mounted as long as the composer
+            is and empty while nothing stands, so a line that comes, changes or goes is said once, in place */}
+        <span className="sr-only" role="status">
+          {working !== null && <WorkingSaid state={working} />}
+        </span>
         {working !== null && <WorkingLine state={working} testId={testIds?.working} />}
         <div
           className="room-field"
