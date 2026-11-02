@@ -1,20 +1,17 @@
 // A permission request as the thread shows it: the host's entry and the tool call it is about, read into the
-// prompt's props (the part, @clauseo/components/clauseo/permission.tsx). Pure, but for the one context that says
-// which prompt takes the keys: the oldest pending request an answer can still reach, found once per change of the
-// id list or of a permission entry, so a flush that only appends text finds the same one without a scan.
-import { createContext } from "react";
+// prompt's props (the part, @clauseo/components/clauseo/permission.tsx). Pure. Which prompt takes the keys is
+// permission-keyed.ts's, apart, so the room's first load (Work) carries only that and not this.
 import type {
   PermissionAnswer,
   PermissionState as PromptState,
 } from "@clauseo/components/clauseo/permission-keys.ts";
-import { entryId, type StreamView } from "../store/view.ts";
+import { entryId } from "../store/view.ts";
 import type {
   ElicitationEntry,
   EntryId,
   PermissionEntry,
   PermissionKind,
   PermissionOption,
-  PermissionRequestId,
   ToolCallEntry,
 } from "../transport/protocol.ts";
 import { isolated } from "./thread/content.ts";
@@ -163,29 +160,6 @@ export function permissionModel(
 /** The entry id of the tool call a request is about, or null. */
 export const toolCallIdOf = (entry: PermissionEntry): EntryId | null =>
   entry.tool_call === undefined ? null : entryId("tool_call", entry.tool_call);
-
-const PERMISSION = "permission:";
-const permissionIds = new WeakMap<readonly EntryId[], readonly EntryId[]>();
-
-/** The request whose prompt takes the keys: the oldest pending one an answer can still reach, or null. The view
- * replaces its id list on every add or remove and never changes one in place, so the permission ids are kept per id
- * list; a flush reads only the permission entries. */
-export function keyedRequest(view: StreamView | undefined): PermissionRequestId | null {
-  if (view === undefined) return null;
-  let ids = permissionIds.get(view.ids);
-  if (ids === undefined) {
-    ids = view.ids.filter((id) => id.startsWith(PERMISSION));
-    permissionIds.set(view.ids, ids);
-  }
-  for (const id of ids) {
-    const p = view.entries.get(id)?.permission;
-    if (p?.state === "pending" && p.deliverable === "live") return p.request;
-  }
-  return null;
-}
-
-/** The request that takes the keys in the open thread (Work provides it, from `keyedRequest`). */
-export const KeyedRequestContext = createContext<PermissionRequestId | null>(null);
 
 /** What an elicitation's agent says about it; null for a request from a newer Clauseo. Its URL is never read. */
 export function elicitationMessage(entry: ElicitationEntry): string | null {
