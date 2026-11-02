@@ -3,14 +3,16 @@
 
 use std::path::{Path, PathBuf};
 
-use super::{FetchError, FetchKind, NPM_REGISTRY, hash_file, host_of};
+use super::{FetchError, FetchKind, hash_file, host_of};
 use crate::integrity::Expected;
 use crate::log::redact_url;
 
-/// `resolved` with its registry base ([`NPM_REGISTRY`]) replaced by `mirror`'s base (one
-/// trailing `/` either way). A URL off the registry is refused rather than sent elsewhere.
+/// `resolved` with its registry base (`registry`: the snapshot's, [`crate::NPM_REGISTRY`] outside
+/// tests) replaced by `mirror`'s base (one trailing `/` either way). A URL off the registry
+/// is refused rather than sent elsewhere.
 pub(crate) fn mirror_url(
     resolved: &str,
+    registry: &str,
     mirror: &str,
     data_dir: &Path,
 ) -> Result<String, FetchError> {
@@ -23,10 +25,11 @@ pub(crate) fn mirror_url(
             data_dir,
         )
     };
-    let Some(path) = resolved.strip_prefix(NPM_REGISTRY) else {
+    let Some(path) = resolved.strip_prefix(registry) else {
         return Err(refuse(&format!(
-            "the package URL {} is not on {NPM_REGISTRY}, so the mirror cannot serve it",
-            redact_url(resolved)
+            "the package URL {} is not on {}, so the mirror cannot serve it",
+            redact_url(resolved),
+            redact_url(registry)
         )));
     };
     let base = mirror.trim().trim_end_matches('/');
