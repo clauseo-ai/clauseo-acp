@@ -63,6 +63,10 @@ export type ThreadState = {
   hold?: boolean;
   /** The slash commands the thread's header lists, for the composer's `/` menu. */
   commands?: AvailableCommand[];
+  /** undo_step is refused with this code: a Word document held open is matter.file_locked (U9). */
+  undoRefused?: ErrorCode;
+  /** H8's papers, as list_papers lists them: the wall's tiles, and a change note's Open in Word (U9). */
+  papers?: PaperSummary[];
 };
 
 const refusal = (code: ErrorCode) => ({
@@ -91,6 +95,8 @@ export function threadHost(state: ThreadState): FakeTransport {
         if (state.refuse !== undefined) throw refusal(state.refuse);
         return { prompt_accepted: { turn: TURN, message: THREAD } };
       }
+      if (command.undo_step !== undefined && state.undoRefused !== undefined)
+        throw refusal(state.undoRefused);
       return "done";
     },
     subscribe: (stream) =>
@@ -120,9 +126,19 @@ export function threadHost(state: ThreadState): FakeTransport {
           );
         }
       }),
-    ...(state.restart === true
-      ? { next: { parts: ["restart"], query: () => ({ threads: [] }) } satisfies FakeHost["next"] }
-      : {}),
+    ...(state.papers !== undefined
+      ? {
+          next: fakeNext({
+            matters: () => [detailed(MATTER)],
+            papers: state.papers,
+            parts: ["papers"],
+          }),
+        }
+      : state.restart === true
+        ? {
+            next: { parts: ["restart"], query: () => ({ threads: [] }) } satisfies FakeHost["next"],
+          }
+        : {}),
   });
   if (state.hold === true) transport.answerPermission = () => new Promise<void>(() => {});
   return transport;

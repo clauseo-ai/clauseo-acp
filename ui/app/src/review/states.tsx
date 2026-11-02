@@ -106,6 +106,35 @@ export function RoomPressing({ host, press }: { host: () => FakeTransport; press
   );
 }
 
+/** The room inside its view store, and once the element `focus` (a CSS selector) shows, that element focused as the
+ * keyboard focuses it (a key first, so its focus is the keyboard's), for a state that shows a hint on keyboard focus,
+ * such as a tile's tooltip. */
+export function RoomFocusing({ host, focus }: { host: () => FakeTransport; focus: string }) {
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = box.current;
+    if (el === null) return;
+    let focused = false;
+    const tap = () => {
+      const target = document.querySelector<HTMLElement>(focus);
+      if (focused || target === null) return;
+      focused = true;
+      watch.disconnect();
+      target.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+      target.focus();
+    };
+    const watch = new MutationObserver(tap);
+    watch.observe(el.ownerDocument.body, { subtree: true, childList: true });
+    tap();
+    return () => watch.disconnect();
+  }, [focus]);
+  return (
+    <div ref={box} className="contents">
+      <RoomOver host={host} />
+    </div>
+  );
+}
+
 /** The room inside its view store, and the controls `clicks` names (CSS selectors, in order), each pressed once it
  * shows and isn't waiting: for a state some presses in, such as Versions open, a version chosen and its Restore. The
  * selectors read the whole document, as a dialog stands outside the room. */

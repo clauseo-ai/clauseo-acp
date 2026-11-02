@@ -86,7 +86,7 @@ const stepEntry = (order: number, over: Partial<StepEntry>): ViewEntry => ({
   },
 });
 
-type Matter = {
+export type Matter = {
   /** The files of the conversation's turn three days ago, kept as version cp2. */
   files?: FileChange[];
   /** What the lawyer changed outside Clauseo today, version cp3. */
@@ -106,11 +106,13 @@ type Matter = {
   imported?: number | null;
   /** H8's papers, with H11's open_file passed to the room: the sheet can open the file now. */
   openable?: boolean;
+  /** preview_restore names these as locked, and the restore is refused with matter.file_locked (U9). */
+  locked?: string[];
 };
 
 /** The matter's history: its papers brought in three days ago, a turn of the conversation's that morning, the
  * lawyer's edits outside Clauseo this hour, and the conversation's next turn, now. */
-function versionsHost(m: Matter): FakeTransport {
+export function versionsHost(m: Matter): FakeTransport {
   const files = m.files ?? [file(NOTICE)];
   const versions = [
     version(1, "import", atLocal(-3, 10, 0)),
@@ -154,7 +156,7 @@ function versionsHost(m: Matter): FakeTransport {
     changes: [file(NOTICE)],
     added_since: m.added ?? [],
     kept: m.kept ?? [],
-    locked: [],
+    locked: m.locked ?? [],
   };
   const papers = (m.compare ?? []).map((f, i) => ({
     file: `ref-${i}`,
@@ -182,6 +184,8 @@ function versionsHost(m: Matter): FakeTransport {
     dispatch: (envelope) => {
       const to = envelope.command.restore_version?.checkpoint;
       if (to === undefined) return "done";
+      if ((m.locked?.length ?? 0) > 0)
+        throw { code: "matter.file_locked", message: "held", retryable: true };
       // the host writes the restore's version and its marker, then answers
       queueMicrotask(() =>
         transport.deliver(

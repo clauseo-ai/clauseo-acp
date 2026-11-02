@@ -7,6 +7,7 @@ import { lim, type LimitKey } from "@clauseo/components/lib/words-limits.ts";
 import { mf, type MatterFormKey } from "@clauseo/components/lib/words-matter-form.ts";
 import { mt, type MatterKey } from "@clauseo/components/lib/words-matters.ts";
 import { rt, type RoomKey } from "@clauseo/components/lib/words-room.ts";
+import { rdt, type ReaderKey } from "@clauseo/components/lib/words-reader.ts";
 import { brk, type BreakKey } from "@clauseo/components/lib/words-breaks.ts";
 import { startup, type StartupKey } from "@clauseo/components/lib/words-startup.ts";
 import { th, type ThreadKey } from "@clauseo/components/lib/words-thread.ts";
@@ -77,6 +78,13 @@ export const uiWords = (key: UiKey): WordsRef => ({
   file: "lib/words-ui.ts",
   key,
   text: (lang) => ui(lang, key),
+});
+
+/** A string of the judgment reader and Word's lines (words-reader.ts), such as Open in Word. */
+export const readerWords = (key: ReaderKey): WordsRef => ({
+  file: "lib/words-reader.ts",
+  key,
+  text: (lang) => rdt(lang, key),
 });
 
 export const versionWords = (key: VersionKey): WordsRef => ({
