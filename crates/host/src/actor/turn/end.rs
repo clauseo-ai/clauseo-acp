@@ -10,11 +10,11 @@
 //! The Codex fallback: a Codex prompt that fails with a JSON-RPC error may be codex-acp's form
 //! of the limit, which Clauseo never parses from prose. Step 6 runs as for any failure, then
 //! asks for one Codex read; step 7's commit waits until that read is done, or 10 s on the host
-//! clock (the read may wait behind a question of another Codex thread or a read in flight),
-//! then ends the turn `AtLimit` with its `TurnStoppedAtLimit` when `Limits::at_limit` answers,
-//! else `TurnFailed` as before. The turn stays `Ending` meanwhile, so a cancel, an agent's exit
-//! (its detach joins the end) or a commit failure changes nothing but what that commit holds,
-//! and shutdown decides at once.
+//! clock (`limits::CODEX_READ_WAIT`; the read may wait behind a question of another Codex
+//! thread or a read in flight), then ends the turn `AtLimit` with its `TurnStoppedAtLimit`
+//! when `Limits::at_limit` answers, else `TurnFailed` as before. The turn stays `Ending`
+//! meanwhile, so a cancel, an agent's exit (its detach joins the end) or a commit failure
+//! changes nothing but what that commit holds, and shutdown decides at once.
 
 use clauseo_matters::{CheckpointOutcome, TurnMeta};
 use clauseo_protocol::{
@@ -29,9 +29,8 @@ use super::agents;
 use super::close::{Expiries, TurnClose};
 use super::out::Out;
 use super::{
-    End, Holder, JobKind, LIMIT_READ_WAIT, LimitMark, Then, TimerKind, TurnJob, TurnPhase,
-    TurnTimer, asks, cancel, current, failure, host_stopping, known, matter_of, state, steps,
-    updates,
+    End, Holder, JobKind, LimitMark, Then, TimerKind, TurnJob, TurnPhase, TurnTimer, asks, cancel,
+    current, failure, host_stopping, known, matter_of, state, steps, updates,
 };
 use crate::error::Error;
 use crate::matter_worker::{MatterJob, TurnCheckpoint};
@@ -180,7 +179,7 @@ pub(super) fn end_turn(actor: &mut Actor, thread: ThreadId, mut end: End) {
             thread,
             kind: TimerKind::LimitRead(turn),
         };
-        let timer = actor.arm_timer(LIMIT_READ_WAIT, timer);
+        let timer = actor.arm_timer(limits::CODEX_READ_WAIT, timer);
         let waiting = state(actor, thread)
             .and_then(|state| state.current.as_deref_mut())
             .and_then(|current| current.limit_read.as_mut());

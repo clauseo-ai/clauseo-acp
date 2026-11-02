@@ -23,11 +23,14 @@
 //!   `Watching` off.
 //! - With no `claude-acp` or `codex-acp` entry in the settings there is no model: nothing reads,
 //!   the view is empty and every input does nothing.
+//! - Each read started gets a number, in order, so a pending stop can tell a read that began
+//!   before it from one that began after.
 //! - A turn stopped at the limit with no reset time leaves a pending stop here ([`stop_later`],
-//!   `limits/stops.rs` has the rules): the agent's next `ReadDone`, or 10 s with none, decides
-//!   one `TurnStoppedAtLimit`, logged once the turn's end is durable and kept until its own
-//!   commit is. A pending stop lives in memory only: one lost to a restart is logged by
-//!   start-up repair (`turn/reconcile.rs`).
+//!   `limits/stops.rs` has the rules): the agent's next read started after the stop, or
+//!   [`read_wait`] with none, decides one `TurnStoppedAtLimit`, logged once the turn's end is
+//!   durable and kept until its own commit is. Shutdown decides every one still waiting. A
+//!   pending stop lives in memory only: one lost to a crash is logged by start-up repair
+//!   (`turn/reconcile.rs`).
 //!   After every `ReadDone` of Codex, a Codex turn waiting on a read before it ends (the turn
 //!   path's Codex fallback) is told.
 
@@ -58,13 +61,33 @@ use crate::principal::{Access, authorize};
 mod stops;
 
 pub(crate) use stops::{
-    committed as stop_committed, holds as holds_stop, retry as retry_stops, stop_later,
+    busy as stops_busy, committed as stop_committed, decide_now as decide_stops_now,
+    holds as holds_stop, retry as retry_stops, stop_later,
 };
 
 /// The agent id whose home the host launches Codex with, as `CODEX_HOME`
 /// (`turn/launch_checks.rs` takes `Locations::agent_home` of the thread's agent id, which is
 /// this one for every Codex thread).
 const CODEX_AGENT: &str = "codex-acp";
+
+/// How long the Codex fallback (`turn/end.rs`) and a Codex pending stop wait for a read: the
+/// Codex reader's own deadline (`LIMIT` in `clauseo_limits`' `readers/codex.rs`, 10 s). A read
+/// that hits that deadline answers `Failed(TimedOut)`, which decides from `at_limit` as it
+/// stands, as the end of this wait does, so a margin past it would change nothing.
+pub(crate) const CODEX_READ_WAIT: Duration = Duration::from_secs(10);
+
+/// How long a Claude pending stop waits for a read: the Claude reader's own deadline (`LIMIT`
+/// in `clauseo_limits`' `readers/claude.rs`, 25 s) and 5 s more, so a slow read that still
+/// answers gives the reset time.
+const CLAUDE_READ_WAIT: Duration = Duration::from_secs(30);
+
+/// How long a pending stop of `agent` waits for a read before `at_limit` as it stands decides.
+pub(crate) const fn read_wait(agent: AgentKind) -> Duration {
+    match agent {
+        AgentKind::Claude => CLAUDE_READ_WAIT,
+        AgentKind::Codex => CODEX_READ_WAIT,
+    }
+}
 
 /// What the actor holds for limits.
 pub(crate) struct LimitsHost {
@@ -85,18 +108,21 @@ pub(crate) struct LimitsHost {
     asking: BTreeMap<AgentKind, bool>,
     /// Turns stopped at the limit whose `TurnStoppedAtLimit` is not logged yet.
     stops: Vec<stops::PendingStop>,
+    /// The number the next read started gets.
+    next_read: u64,
 }
 
 /// What the actor's own tasks and the limits subscriptions post back.
 pub(crate) enum LimitsInput {
-    /// A read the model asked for ended.
+    /// A read the model asked for ended; `number` is the one it got when it started.
     Read {
         agent: AgentKind,
         outcome: ReadOutcome,
+        number: u64,
     },
     /// The limits timer of `generation` fired.
     Deadline { generation: u64 },
-    /// The 10 s wait of `turn`'s pending stop for a read is over.
+    /// The wait of `turn`'s pending stop for a read ([`read_wait`]) is over.
     StopWait { thread: ThreadId, turn: TurnId },
     /// A limits subscription drained its channel after the actor found it full.
     Drained { id: SubId },
@@ -117,6 +143,7 @@ impl LimitsHost {
             generation: 0,
             asking: BTreeMap::new(),
             stops: Vec::new(),
+            next_read: 0,
         }
     }
 }
@@ -168,10 +195,14 @@ fn start_with(actor: &mut Actor, cached: Vec<AccountLimits>, agents: Vec<AgentKi
 /// One input from the actor's tasks or a limits subscription.
 pub(super) fn on_input(actor: &mut Actor, input: LimitsInput) {
     match input {
-        LimitsInput::Read { agent, outcome } => {
+        LimitsInput::Read {
+            agent,
+            outcome,
+            number,
+        } => {
             let failed = matches!(outcome, ReadOutcome::Failed(_));
             feed(actor, ModelInput::ReadDone { agent, outcome });
-            stops::read_done(actor, agent, failed);
+            stops::read_done(actor, agent, failed, number);
             super::turn::limits_read(actor, agent);
         }
         LimitsInput::Deadline { generation } => {
@@ -359,12 +390,18 @@ fn carry_out(actor: &mut Actor, actions: Vec<Action>, now: Timestamp) {
     }
 }
 
-/// Starts one read on the pool; its outcome comes back as [`LimitsInput::Read`].
-fn start_read(actor: &Actor, agent: AgentKind) {
+/// Starts one read on the pool, numbered; its outcome comes back as [`LimitsInput::Read`].
+fn start_read(actor: &mut Actor, agent: AgentKind) {
+    let number = actor.limits.next_read;
+    actor.limits.next_read = number.saturating_add(1);
     let read = actor.limits.reader.read(agent);
     actor.spawn_post(async move {
         let outcome = read.await;
-        Input::Limits(LimitsInput::Read { agent, outcome })
+        Input::Limits(LimitsInput::Read {
+            agent,
+            outcome,
+            number,
+        })
     });
 }
 

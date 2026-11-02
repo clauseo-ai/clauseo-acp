@@ -1,16 +1,23 @@
 //! Pending stops: a turn stopped at the limit with no reset time logs its `TurnStoppedAtLimit`
 //! after its agent's next read, as a commit of its own.
 //!
-//! - The stop is decided by the agent's next `ReadDone`, whichever read it is, from
-//!   [`Limits::at_limit`](clauseo_limits::Limits::at_limit) (nothing after a failed read), or
-//!   after 10 s on the host clock with no `ReadDone`, from `at_limit` as it stands then.
+//! - The stop is decided by the `ReadDone` of the agent's next read started after it, from
+//!   [`Limits::at_limit`](clauseo_limits::Limits::at_limit) (nothing after a failed read), or,
+//!   with none within [`read_wait`] of the agent's kind on the host clock, from `at_limit` as
+//!   it stands then. A read already running when the stop came may have begun before the
+//!   limit: its `ReadDone` decides nothing and asks for a read again (`TurnEnded { read_now:
+//!   true }`, so the model's one read per agent still holds).
+//! - Shutdown decides every stop still waiting from `at_limit` as it stands, and one that comes
+//!   during shutdown is decided at once, with no read. The actor stays up until each commit
+//!   logging one has returned ([`busy`]); a stop whose turn's end is not durable yet is logged
+//!   by that end's `Ok`, as at any time.
 //! - It is logged only once the commit holding the turn's `TurnEnded` is durable: while the
 //!   thread's closing record for that turn is there, it waits, and the record's `Ok` logs it.
 //!   A turn whose end never becomes durable gets no stop in this run.
 //! - It stays until its own commit returns `Ok`, and keeps the thread's stream loaded
 //!   meanwhile. A blocked stream retries it at the unblock, a refused or failed commit at the
 //!   next unblock (twice at most), then at the thread's next durable end or the agent's next
-//!   read. One lost to a restart is logged by start-up repair (`turn/reconcile.rs`).
+//!   read. One lost to a crash is logged by start-up repair (`turn/reconcile.rs`).
 
 use clauseo_protocol::{
     AgentKind, LimitStopReason, StreamId, ThreadId, TurnId, TurnStoppedAtLimit,
@@ -19,8 +26,9 @@ use futures::future::AbortHandle;
 
 use super::super::Actor;
 use super::super::input::Input;
+use super::super::state::HostPhase;
 use super::super::turn;
-use super::{LimitsInput, at_limit, turn_ended};
+use super::{LimitsInput, at_limit, read_wait, turn_ended};
 
 /// How many failed commits of one stop the unblock retries.
 const UNBLOCK_RETRIES: u8 = 2;
@@ -32,9 +40,11 @@ pub(super) struct PendingStop {
     turn: TurnId,
     /// From the turn's limit signal.
     reason: LimitStopReason,
-    /// The stop, once a read or the 10 s bound decided it.
+    /// The number of the first read that may decide it: the next one started after the stop.
+    first_read: u64,
+    /// The stop, once a read, the wait or shutdown decided it.
     stopped: Option<TurnStoppedAtLimit>,
-    /// The 10 s bound, while no read has decided it.
+    /// The wait for a read, while nothing has decided it.
     timer: Option<AbortHandle>,
     /// The commit logging it is in flight.
     sending: bool,
@@ -43,7 +53,9 @@ pub(super) struct PendingStop {
 }
 
 /// A turn of `thread` stopped at the limit with no reset time: its `TurnStoppedAtLimit` waits
-/// for `agent`'s next read, which this asks for (`TurnEnded { read_now: true }`), or 10 s.
+/// for `agent`'s next read, which this asks for (`TurnEnded { read_now: true }`), or
+/// [`read_wait`]. During shutdown `at_limit` decides it now; the end commit, sent after this
+/// call, logs it once it is `Ok`.
 pub(crate) fn stop_later(
     actor: &mut Actor,
     agent: AgentKind,
@@ -51,36 +63,45 @@ pub(crate) fn stop_later(
     turn: TurnId,
     reason: LimitStopReason,
 ) {
-    let wait = Input::Limits(LimitsInput::StopWait { thread, turn });
-    let timer = actor.post_after(turn::LIMIT_READ_WAIT, wait);
-    actor.limits.stops.push(PendingStop {
+    let mut stop = PendingStop {
         agent,
         thread,
         turn,
         reason,
+        first_read: actor.limits.next_read,
         stopped: None,
-        timer: Some(timer),
+        timer: None,
         sending: false,
         failed: 0,
-    });
+    };
+    if matches!(actor.phase, HostPhase::Stopping(_)) {
+        stop.decide(at_limit(actor, agent).as_ref());
+        actor.limits.stops.push(stop);
+        return;
+    }
+    let wait = Input::Limits(LimitsInput::StopWait { thread, turn });
+    stop.timer = Some(actor.post_after(read_wait(agent), wait));
+    actor.limits.stops.push(stop);
     turn_ended(actor, agent, true);
 }
 
-/// A read of `agent` is done and the model has its outcome: each of the agent's stops not yet
-/// decided takes the window and reset time `at_limit` gives (none after a failed read), and
-/// every decided stop of the agent not logged yet is tried.
-pub(super) fn read_done(actor: &mut Actor, agent: AgentKind, failed: bool) {
-    let hit = if failed { None } else { at_limit(actor, agent) };
-    let mut threads = Vec::new();
-    for stop in actor
-        .limits
-        .stops
-        .iter_mut()
-        .filter(|stop| stop.agent == agent)
-    {
-        if stop.stopped.is_none() {
+/// Shutdown: each stop nothing has decided yet takes the window and reset time `at_limit`
+/// gives now, and every stop not logged yet is tried (one whose turn's end is not durable yet
+/// waits for that end's `Ok`).
+pub(crate) fn decide_now(actor: &mut Actor) {
+    for agent in [AgentKind::Claude, AgentKind::Codex] {
+        let hit = at_limit(actor, agent);
+        for stop in actor
+            .limits
+            .stops
+            .iter_mut()
+            .filter(|stop| stop.agent == agent && stop.stopped.is_none())
+        {
             stop.decide(hit.as_ref());
         }
+    }
+    let mut threads = Vec::new();
+    for stop in &actor.limits.stops {
         if !threads.contains(&stop.thread) {
             threads.push(stop.thread);
         }
@@ -90,7 +111,49 @@ pub(super) fn read_done(actor: &mut Actor, agent: AgentKind, failed: bool) {
     }
 }
 
-/// The 10 s bound of `turn`'s stop is over with no read: `at_limit` as it stands decides it.
+/// Whether shutdown waits for a stop: one not decided yet, or one whose commit is in flight.
+pub(crate) fn busy(actor: &Actor) -> bool {
+    actor
+        .limits
+        .stops
+        .iter()
+        .any(|stop| stop.stopped.is_none() || stop.sending)
+}
+
+/// Read `number` of `agent` is done and the model has its outcome: each of the agent's stops
+/// not yet decided that this read may decide takes the window and reset time `at_limit` gives
+/// (none after a failed read), and every decided stop of the agent not logged yet is tried. A
+/// stop that came while this read ran asks for another read.
+pub(super) fn read_done(actor: &mut Actor, agent: AgentKind, failed: bool, number: u64) {
+    let hit = if failed { None } else { at_limit(actor, agent) };
+    let mut threads = Vec::new();
+    let mut again = false;
+    for stop in actor
+        .limits
+        .stops
+        .iter_mut()
+        .filter(|stop| stop.agent == agent)
+    {
+        if stop.stopped.is_none() {
+            if number < stop.first_read {
+                again = true;
+            } else {
+                stop.decide(hit.as_ref());
+            }
+        }
+        if !threads.contains(&stop.thread) {
+            threads.push(stop.thread);
+        }
+    }
+    for thread in threads {
+        log_ready(actor, thread, false);
+    }
+    if again {
+        turn_ended(actor, agent, true);
+    }
+}
+
+/// The wait of `turn`'s stop for a read is over: `at_limit` as it stands decides it.
 pub(super) fn on_wait_over(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     let Some(agent) = actor
         .limits
@@ -136,7 +199,7 @@ pub(crate) fn holds(actor: &Actor, thread: ThreadId) -> bool {
 }
 
 impl PendingStop {
-    /// The stop, from `hit` (both `None` without one); the 10 s bound is no longer needed.
+    /// The stop, from `hit` (both `None` without one); the wait is no longer needed.
     fn decide(&mut self, hit: Option<&clauseo_limits::LimitHit>) {
         self.stopped = Some(TurnStoppedAtLimit {
             turn: self.turn,
