@@ -151,6 +151,12 @@ jobs:
           echo "pnpm $(pnpm -v), ui/package.json wants $(node -p 'require("./ui/package.json").packageManager')"
           echo "node $(node -v), ui/package.json wants $(node -p 'require("./ui/package.json").engines.node')"
 
+      # release.yml runs only on tags and on demand, so its rules (pull request triggers, pinned
+      # actions, permissions, secrets on steps) and latest.json's writer are tested here, in
+      # plain Node, without the network.
+      - name: Test the release scripts and release.yml's rules
+        run: node --test .github/scripts/latest-json.test.mjs
+
       # Saved on main only, as every Rust cache here.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
