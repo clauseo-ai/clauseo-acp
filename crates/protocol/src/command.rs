@@ -390,11 +390,28 @@ pub enum HostCommand {
         /// What asked for the refresh.
         why: RefreshWhy,
     },
+    /// Scan a folder before it becomes a matter: count its files and bytes as an import would,
+    /// count its cloud-only files without reading them, and tell where it lives. Progress
+    /// reaches app subscribers as `HostEvent::FolderScanned`, the last with `done`; the
+    /// command answers `Done` when the walk ends. Nothing is stored. One scan runs at a time:
+    /// a newer `ScanFolder` cancels the one running. A folder import would refuse is
+    /// `matter.folder_refused`.
+    ScanFolder {
+        /// The folder.
+        folder: FolderRefId,
+    },
+    /// Cancel the scan of `folder`; its last `FolderScanned` says `cancelled`. Answers
+    /// `Done`, also when no scan of it runs.
+    CancelScan {
+        /// The folder.
+        folder: FolderRefId,
+    },
 }
 
 /// What a command did. The host's receipt stores it, so a repeated `command_id` returns the same
 /// outcome. The queue commands, `RestartAgent`, `SetUiSettings`, `SetToolSettings`,
-/// `UpdateMatter`, `OpenMatter`, `ForgetMatter`, `RefreshLimits` and `MarkSeen` answer `Done`.
+/// `UpdateMatter`, `OpenMatter`, `ForgetMatter`, `RefreshLimits`, `MarkSeen`, `ScanFolder` and
+/// `CancelScan` answer `Done`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "specta", derive(specta::Type))]

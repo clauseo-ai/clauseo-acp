@@ -14,8 +14,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AccountLimits, Cursor, EntryId, Envelope, HeaderEntry, LimitsView, MatterHeaderEntry,
-    MattersChanged, MessageId, Seq, SettingsView, StreamId, ThreadsChanged, ViewEntry, ViewEpoch,
+    AccountLimits, Cursor, EntryId, Envelope, FolderScanned, HeaderEntry, LimitsView,
+    MatterHeaderEntry, MattersChanged, MessageId, Seq, SettingsView, StreamId, ThreadsChanged,
+    ViewEntry, ViewEpoch,
 };
 
 /// One change to a stream's view, at its cursor.
@@ -149,6 +150,9 @@ pub enum HostEvent {
     /// list. App-wide: it reaches app subscribers only, each of which drops the rows of threads
     /// it has open.
     ThreadsChanged(ThreadsChanged),
+    /// How far a folder scan has got (`HostCommand::ScanFolder`). App-wide, never part of a
+    /// stream: it reaches app subscribers only.
+    FolderScanned(FolderScanned),
 }
 
 /// Where a view subscriber stands: an epoch and the last cursor it applied.

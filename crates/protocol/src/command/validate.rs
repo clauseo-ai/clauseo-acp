@@ -173,6 +173,8 @@ impl HostCommand {
                 matter: _,
                 folder: _,
             }
+            | Self::ScanFolder { folder: _ }
+            | Self::CancelScan { folder: _ }
             | Self::RemoveQueuedPrompt { thread: _, turn: _ }
             | Self::SendQueuedNow { thread: _, turn: _ }
             | Self::ResumeQueue { thread: _ }
