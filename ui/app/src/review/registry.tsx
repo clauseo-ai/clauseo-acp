@@ -11,6 +11,7 @@ import { U10 } from "./registry-u10.tsx";
 import { U8 } from "./registry-u8.tsx";
 import { U9 } from "./registry-u9.tsx";
 import { U6 } from "./registry-u6.tsx";
+import { U7 } from "./registry-u7.tsx";
 import { C117 } from "./registry-c117.tsx";
 import { U6F } from "./registry-u6f.tsx";
 import {
@@ -333,6 +334,7 @@ export const REGISTRY: readonly Entry[] = [
   ...U9,
   ...H11,
   ...U6,
+  ...U7,
   ...C117,
   ...U6F,
   {
