@@ -27,9 +27,9 @@ import type {
   ViewEntry,
 } from "../../transport/protocol.ts";
 
-/** Which Versions page the probe loads: Versions open, a past version selected, the undo or restore dialog open, or
- * the conversation running (its Restore and Undo waiting). */
-export type VersionsPage = "panel" | "band" | "undo" | "restore" | "wait";
+/** Which Versions page the probe loads: Versions open, a past version selected, the undo or restore dialog open, the
+ * conversation running (its Restore and Undo waiting), or the newest turn picked (its Undo alone, at now). */
+export type VersionsPage = "panel" | "band" | "undo" | "restore" | "wait" | "newest";
 
 /** ?versions=… as the probe reads it; any other value is no Versions page. */
 export function versionsPageOf(value: string | null): VersionsPage | null {
@@ -37,7 +37,8 @@ export function versionsPageOf(value: string | null): VersionsPage | null {
     value === "band" ||
     value === "undo" ||
     value === "restore" ||
-    value === "wait"
+    value === "wait" ||
+    value === "newest"
     ? value
     : null;
 }
@@ -103,13 +104,18 @@ const stepEntry = (order: number, over: Partial<StepEntry>): ViewEntry => ({
 
 /** The matter's versions, oldest first: the import and a turn three days ago, the lawyer's edits outside Clauseo this
  * morning, the turn of today whose big file isn't kept, its undo, the restore to the turn of three days ago (with its
- * marker), and the conversation's last turn, whose change wasn't kept. */
-function matterEntries(): ViewEntry[] {
-  return [
+ * marker), and the conversation's last turn, whose change wasn't kept. On newest the turn of today is the last version,
+ * kept and not undone, so its change can be undone. */
+function matterEntries(page: VersionsPage): ViewEntry[] {
+  const head = [
     version(1, "import", atLocal(-3, 10, 0)),
     version(2, "after_turn", atLocal(-3, 10, 30), [file(NOTICE, true), file(REPLY)], TURN),
     version(3, "outside_edits", today(0), [file(LEASE)]),
     version(4, "after_turn", today(10), [file(REPLY)], SECOND_TURN),
+  ];
+  if (page === "newest") return head;
+  return [
+    ...head,
     version(5, "undo", today(20), [file(REPLY)], SECOND_TURN),
     version(6, "restore", today(25)),
     {
@@ -124,8 +130,8 @@ function matterEntries(): ViewEntry[] {
 }
 
 /** The conversation's steps: its turn three days ago (kept as cp2), the turn that made cp4 with a file too large to keep
- * (undone since), and the last turn, whose change wasn't kept. */
-function steps(): ViewEntry[] {
+ * (undone since, or on newest not yet), and the last turn, whose change wasn't kept. */
+function steps(page: VersionsPage): ViewEntry[] {
   return [
     stepEntry(9, { files: [file(NOTICE, true), file(REPLY)], checkpoint_after: "cp2" }),
     stepEntry(19, {
@@ -133,7 +139,7 @@ function steps(): ViewEntry[] {
       files: [file(REPLY)],
       skipped: [{ path: ANNEXURE, reason: "over_size_cap" }],
       checkpoint_after: "cp4",
-      undone: true,
+      undone: page !== "newest",
       ts: today(10),
     }),
     stepEntry(29, { turn: UNSAVED_TURN, files: [file(REPLY)], ts: today(30) }),
@@ -191,7 +197,7 @@ export function versionsHost(page: VersionsPage): VersionsHost {
                           import: { files: 3, bytes: 1000, cloud_only: 0 },
                         },
                       },
-                      entries: matterEntries(),
+                      entries: matterEntries(page),
                       has_older: false,
                     },
                   },
@@ -203,7 +209,7 @@ export function versionsHost(page: VersionsPage): VersionsHost {
           ),
         ];
       if (stream === STREAM)
-        return [event(batch(1, [reset(steps(), header(status))], undefined, stream))];
+        return [event(batch(1, [reset(steps(page), header(status))], undefined, stream))];
       return [];
     },
   };

@@ -7,8 +7,9 @@
 // Always for this matter and find the prompt confirming (the OS line up, the answers waiting). The page's query sets its display for this page only (theme=night,
 // lang=hi, lite=1, motion=reduced, size=18), as the WebKit probe (scripts/webkit-probe.swift) asks for it, and
 // window.__clauseoDisplay and __clauseoAxe are set (dev-hooks.ts).
-// With ?versions=panel, band, undo, restore or wait, the room has Versions open over the matter's history (probe-states.tsx):
-// the timeline with its kinds of row, a past version selected, its undo or restore dialog, or the conversation running.
+// With ?versions=panel, band, undo, restore, wait or newest, the room has Versions open over the matter's history
+// (probe-states.tsx): the timeline with its kinds of row, a past version selected, its undo or restore dialog, the
+// conversation running, or the newest turn picked.
 // Not shipped.
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
