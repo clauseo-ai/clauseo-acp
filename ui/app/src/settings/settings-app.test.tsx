@@ -18,6 +18,8 @@ import type { WindowControls } from "../transport/window-controls.ts";
 import { SettingsApp } from "./settings-app.tsx";
 
 vi.mock("./version.ts", () => ({ APP_VERSION: "9.8.7" }));
+const setWindowTitle = vi.hoisted(() => vi.fn<(title: string) => void>());
+vi.mock("../transport/window-title.ts", () => ({ setWindowTitle }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 stubFonts();
@@ -36,6 +38,7 @@ vi.stubGlobal("localStorage", {
 });
 
 beforeEach(() => {
+  setWindowTitle.mockClear();
   localStorage.clear();
   history.replaceState(null, "", "/settings.html");
 });
@@ -125,6 +128,25 @@ test("the sections are Language, Appearance and About, in the design's order; no
   expect(el.querySelector(".set-pane-lead")?.textContent).toBe(
     "The language of every word on screen. Papers, quotes and case names stay as filed.",
   );
+});
+
+test("the native window title names the window in its language, at open and on every change of language", async () => {
+  localStorage.setItem(DISPLAY_KEY, JSON.stringify({ language: "en" }));
+  const { el } = await mount();
+  expect(setWindowTitle.mock.calls).toEqual([["Settings"]]);
+  await press(side(el, "Language", "हिन्दी"));
+  expect(setWindowTitle).toHaveBeenLastCalledWith("सेटिंग्स");
+  expect(document.title).toBe("सेटिंग्स");
+  // the switch now names itself in Hindi
+  await press(side(el, "भाषा", "English"));
+  expect(setWindowTitle).toHaveBeenLastCalledWith("Settings");
+  expect(setWindowTitle).toHaveBeenCalledTimes(3);
+});
+
+test("a window opened in Hindi gets its Hindi title at once", async () => {
+  localStorage.setItem(DISPLAY_KEY, JSON.stringify({ language: "hi" }));
+  await mount();
+  expect(setWindowTitle.mock.calls).toEqual([["सेटिंग्स"]]);
 });
 
 test("the address's hash opens its section, and a section pressed goes into the address", async () => {
