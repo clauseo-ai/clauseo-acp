@@ -56,6 +56,7 @@ impl Setup {
         let git_dir = root.join("m").join("history.git");
         let settings = Settings {
             matters_root: root,
+            refused_trees: Vec::new(),
             limits: Limits {
                 file_cap_bytes,
                 ..Limits::DEFAULT

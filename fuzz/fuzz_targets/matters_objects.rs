@@ -72,6 +72,7 @@ where
 fn settings(root: &Path) -> Settings {
     Settings {
         matters_root: root.join("homes"),
+        refused_trees: Vec::new(),
         limits: Limits::DEFAULT,
         retention: Retention::KeepAll,
         probe: Arc::new(OsProbe),

@@ -44,11 +44,13 @@ pub(crate) fn tool_paths(folder: &Path, paths: TurnPaths) -> BTreeSet<MatterPath
 /// The name every matter thread carries.
 const THREAD_NAME: &str = "clauseo-matter";
 
-/// R8's settings for the host: matters under `<data folder>/matters`, the default limits, every
-/// checkpoint kept, and the OS's cloud-only probe.
+/// R8's settings for the host: matters under `<data folder>/matters`, the data folder refused
+/// with everything inside it, the default limits, every checkpoint kept, and the OS's cloud-only
+/// probe.
 pub(crate) fn matter_settings(data_dir: &Path) -> Settings {
     Settings {
         matters_root: data_dir.join("matters"),
+        refused_trees: vec![data_dir.to_path_buf()],
         limits: Limits::DEFAULT,
         retention: Retention::KeepAll,
         probe: Arc::new(OsProbe),

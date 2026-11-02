@@ -13,6 +13,7 @@ use futures::channel::oneshot;
 use super::rig::{Rig, command_id, kind};
 use crate::actor::input::{Input, MatterTag, Request};
 use crate::actor::turn::{Holder, TurnPhase};
+use crate::pipeline::tests::support::TempDir;
 
 /// Every prompt ends at once; a new agent plays it from the start.
 const ANSWER: &str = r#"{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
@@ -56,7 +57,9 @@ fn a_turn_sent_during_a_relocate_waits_and_runs_in_the_new_folder() {
 
     // A copy of the folder, marker included, is where the matter is located.
     let old = PathBuf::from(&rig.actor.matters[&matter].row.folder_path);
-    let moved = old.with_file_name("Scratch moved");
+    // Outside the data folder: a folder inside it is refused, as the matters root is.
+    let copies = TempDir::new("relocate-copy-turn");
+    let moved = copies.path().join("Scratch moved");
     crate::write::create_dir_all(&moved.join(".clauseo")).unwrap();
     let marker = std::fs::read(old.join(".clauseo/matter.json")).unwrap();
     crate::write::write_file(&moved.join(".clauseo/matter.json"), &marker).unwrap();
@@ -165,7 +168,9 @@ fn a_failed_relocate_commit_puts_the_matter_back_on_its_folder() {
     let thread = rig.thread();
     let matter = rig.matter();
     let old = PathBuf::from(&rig.actor.matters[&matter].row.folder_path);
-    let moved = old.with_file_name("Scratch copy");
+    // Outside the data folder, so the relocate reaches its commit and not the refusal.
+    let copies = TempDir::new("relocate-copy-fails");
+    let moved = copies.path().join("Scratch copy");
     crate::write::create_dir_all(&moved.join(".clauseo")).unwrap();
     let marker = std::fs::read(old.join(".clauseo/matter.json")).unwrap();
     crate::write::write_file(&moved.join(".clauseo/matter.json"), &marker).unwrap();

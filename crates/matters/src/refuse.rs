@@ -1,13 +1,15 @@
 //! Refused folders: an import sanity check, not a security boundary. A folder that is a drive
 //! root, an entry of the host's refused list (the home folder, system folders) or an ancestor of
-//! one cannot be a matter; a folder inside a listed one can.
+//! one cannot be a matter; a folder inside a listed one can. A folder that is, holds or sits
+//! inside the matters root or a refused tree (the host's data folder) cannot be a matter, whether
+//! it is listed or not: the history would version itself, or an agent's home would be a matter.
 
 use std::ffi::OsString;
 use std::io;
 use std::path::{Component, Path, PathBuf, Prefix};
 
 use crate::matter::json;
-use crate::{Error, MissingReason, Refusal};
+use crate::{Error, MissingReason, Refusal, Settings};
 
 /// Refuses `folder` if, once canonicalised, it is a drive root, or equals or contains an entry of
 /// `refused` (each canonicalised too, or taken as written when that fails). Paths are compared
@@ -52,9 +54,9 @@ pub(crate) fn check_folder(folder: &Path, refused: &[PathBuf]) -> Result<(), Err
 }
 
 /// Refuses `folder` if it already holds a `.clauseo/matter.json` (it belongs to a matter;
-/// importing it again would take it from that matter), or if it is, contains or sits inside the
-/// matters root (the history would version itself). Called after [`check_folder`].
-pub(crate) fn check_new_matter(folder: &Path, matters_root: &Path) -> Result<(), Error> {
+/// importing it again would take it from that matter), or for its place as
+/// [`check_outside_root`] does. Called after [`check_folder`].
+pub(crate) fn check_new_matter(folder: &Path, settings: &Settings) -> Result<(), Error> {
     let refuse = |reason| Error::FolderRefused {
         folder: folder.to_path_buf(),
         reason,
@@ -70,22 +72,26 @@ pub(crate) fn check_new_matter(folder: &Path, matters_root: &Path) -> Result<(),
         json::Found::Matter(id) => return Err(refuse(Refusal::AlreadyMatter(id))),
         json::Found::Unreadable => return Err(refuse(Refusal::UnreadableMatterJson)),
     }
-    check_outside_root(folder, matters_root)
+    check_outside_root(folder, settings)
 }
 
-/// Refuses `folder` if it is, contains or sits inside the matters root (`Refusal::MattersRoot`):
-/// the history would version itself. Import checks it after the marker; locate and relink, which
-/// need a marker, check it alone.
-pub(crate) fn check_outside_root(folder: &Path, matters_root: &Path) -> Result<(), Error> {
+/// Refuses `folder` if it is, holds or sits inside the matters root (`Refusal::MattersRoot`: the
+/// history would version itself), or if it is, holds or sits inside a `refused_trees` entry
+/// (`Refusal::Listed(entry)`, the entry as the host passed it). Import checks it after the marker;
+/// locate and relink, which need a marker, check it alone.
+pub(crate) fn check_outside_root(folder: &Path, settings: &Settings) -> Result<(), Error> {
     let refuse = |reason| Error::FolderRefused {
         folder: folder.to_path_buf(),
         reason,
     };
-    let canonical =
-        dunce::canonicalize(folder).map_err(|err| Error::io("canonicalize", folder, err))?;
-    let root = dunce::canonicalize(matters_root).unwrap_or_else(|_| matters_root.to_path_buf());
-    if nested(&spellings(&canonical), &spellings(&root)) {
+    dunce::canonicalize(folder).map_err(|err| Error::io("canonicalize", folder, err))?;
+    if same_or_nested(folder, &settings.matters_root) {
         return Err(refuse(Refusal::MattersRoot));
+    }
+    for tree in &settings.refused_trees {
+        if same_or_nested(folder, tree) {
+            return Err(refuse(Refusal::Listed(tree.clone())));
+        }
     }
     Ok(())
 }

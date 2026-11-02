@@ -160,7 +160,7 @@ fn locate_refusals_leave_the_matter_unchanged() {
     let matter = host.create_matter("a", &old);
     let other_folder = dir.folder("outer/b", &[("lease.txt", "y\n")]);
     let other = host.create_matter("b", &other_folder);
-    let moved = dir.data_dir().join("work/a-moved");
+    let moved = dir.work_path("a-moved");
     write::rename(&old, &moved);
 
     let marker = std::fs::read(other_folder.join(".clauseo/matter.json")).unwrap();
@@ -182,7 +182,7 @@ fn locate_refusals_leave_the_matter_unchanged() {
         ("an unreadable marker", bad, ErrorCode::MatterFolderMissing),
         (
             "no folder",
-            dir.data_dir().join("work/gone"),
+            dir.work_path("gone"),
             ErrorCode::MatterFolderMissing,
         ),
         (
@@ -192,7 +192,7 @@ fn locate_refusals_leave_the_matter_unchanged() {
         ),
         (
             "a folder holding another matter's",
-            dir.data_dir().join("work/outer"),
+            dir.work_path("outer"),
             ErrorCode::MatterFolderRefused,
         ),
         (

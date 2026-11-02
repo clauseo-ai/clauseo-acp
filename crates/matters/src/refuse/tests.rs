@@ -171,6 +171,17 @@ fn same_or_nested_holds_for_the_folder_its_parents_and_its_children() {
     // A registered folder that has moved away compares as written.
     assert!(same_or_nested(&matter.join("gone"), &matter));
     assert!(!same_or_nested(&dir.path().join("gone"), &matter));
+    // A folder whose name only starts with the other's is beside it, not inside.
+    assert!(!same_or_nested(&dir.path().join("Matter-notes"), &matter));
+    // A tree not made yet compares as written, and so does a folder inside it.
+    let not_yet = matter.join("not-yet");
+    assert!(same_or_nested(&not_yet.join("x"), &not_yet));
     #[cfg(any(target_os = "macos", windows))]
-    assert!(same_or_nested(&dir.path().join("MATTER"), &inside));
+    {
+        assert!(same_or_nested(&dir.path().join("MATTER"), &inside));
+        assert!(same_or_nested(
+            &dir.path().join("MATTER").join("sub"),
+            &matter
+        ));
+    }
 }

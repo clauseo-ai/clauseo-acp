@@ -139,14 +139,29 @@ fn a_codex_folder_appearing_mid_session_fails_the_next_prompt_unsent() {
     host.shutdown();
 }
 
-/// Asserts that `agent`, in a thread of a matter at `folder`, is refused at launch with
-/// `matter.folder_refused` and words that name no path, and that nothing was launched.
-fn assert_refused_in_data(dir: &Dir, folder: &std::path::Path, agent: &str) {
-    write::create_dir_all(folder);
+/// Asserts that `agent`, in a thread of a matter whose folder is moved to `place` (in the data
+/// folder, where import would refuse it), is refused at launch with `matter.folder_refused` and
+/// words that name no path, and that nothing was launched. The matter is imported from
+/// `work/m` first; then its folder moves to `place` and `work/m` becomes a link to it, so the
+/// stored path resolves into the data folder, as a path changed after import does. Unix only:
+/// the link is a Unix symlink; the launch rule itself is unit-tested on every OS in
+/// `agent/data_folder/tests.rs`.
+#[cfg(unix)]
+fn assert_refused_in_data(dir: &Dir, place: &std::path::Path, agent: &str) {
+    let folder = dir.folder("m", &[("brief.txt", "x\n")]);
     let launcher = Recording::new(dir);
     let envs = Arc::clone(&launcher.envs);
     let host = dir.start_launching(0, Arc::new(launcher), |config| config);
-    let (_, events, turn) = turn_in(&host, folder, agent);
+    let matter = host.create_matter("m", &folder);
+    if let Some(parent) = place.parent() {
+        write::create_dir_all(parent);
+    }
+    write::remove_dir_all(place).unwrap();
+    write::rename(&folder, place);
+    write::symlink(place, &folder);
+    let thread = host.create_thread(matter, agent);
+    let mut events = host.events(StreamId::Thread(thread));
+    let turn = run_turn(&host, &mut events, thread);
     let failed = turn_failed(&events, turn)
         .unwrap_or_else(|| panic!("no TurnFailed of {turn}: {}", events.dump()));
     assert_eq!(
@@ -164,6 +179,7 @@ fn assert_refused_in_data(dir: &Dir, folder: &std::path::Path, agent: &str) {
 /// Any agent, Claude included, is refused at launch in a matter at the data folder's `agents`
 /// folder, which holds every agent's home. (Import already refuses the data folder itself; the
 /// unit tests in `agent/data_folder.rs` cover it.)
+#[cfg(unix)]
 #[test]
 fn claude_in_a_matter_holding_the_agent_homes_is_refused() {
     let dir = Dir::new(
@@ -174,6 +190,7 @@ fn claude_in_a_matter_holding_the_agent_homes_is_refused() {
 }
 
 /// A Codex agent is refused in a matter that is another agent's home.
+#[cfg(unix)]
 #[test]
 fn codex_in_a_sibling_agents_home_is_refused() {
     let dir = codex_dir("codex_refused_sibling_home", "codex-handshake");
@@ -187,7 +204,7 @@ fn a_linked_matter_folder_holding_codex_is_refused() {
     let dir = codex_dir("codex_refused_link", "codex-handshake");
     let real = dir.folder("real", &[("brief.txt", "x\n")]);
     write::create_dir_all(&real.join(".codex"));
-    let link = dir.data().join("work").join("link");
+    let link = dir.work_path("link");
     write::symlink(&real, &link);
     let host = dir.start(0);
     let (_, events, turn) = turn_in(&host, &link, CODEX);
