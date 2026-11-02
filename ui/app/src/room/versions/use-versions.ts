@@ -88,12 +88,28 @@ export function useVersions({
   // Versions belongs to the matter it opened on: opening another closes it, and coming back finds it closed
   if (session !== null && session.matter !== matter) setSession(null);
   const live = session !== null && session.matter === matter ? session : null;
+  useEffect(() => live?.controller.start(), [live]);
+  const watch = useCallback(
+    (fn: () => void) => live?.controller.subscribe(fn) ?? (() => undefined),
+    [live],
+  );
+  // whether the room looks at a version, back or the newest picked: the band stands with its acts
+  const looks = () => {
+    const look = live?.controller.snapshot().look;
+    return look !== undefined && (look.kind === "back" || look.id !== undefined);
+  };
+  const looking = useSyncExternalStore(watch, looks, looks);
   // on a mid window the panel stands over the band: picking a version puts it away, as a menu goes, and the band's
-  // Versions brings it back; a wider window shows it again
+  // Versions brings it back; while the room looks at a version, the panel's Close and Escape put it away again and
+  // keep the look, and a window narrowed to mid puts it away; a wider window shows it again
   const mid = useSyncExternalStore(onMid, isMid, () => false);
   const [away, setAway] = useState(false);
+  const [wasMid, setWasMid] = useState(mid);
+  if (wasMid !== mid) {
+    setWasMid(mid);
+    if (mid) setAway(looking);
+  }
   const panel = !(mid && away);
-  useEffect(() => live?.controller.start(), [live]);
   // the open matter, for a chunk that loads after the lawyer has moved on
   const current = useRef(matter);
   useEffect(() => {
@@ -121,10 +137,6 @@ export function useVersions({
   };
   const close = () => setSession(null);
   // whether the open Versions found nothing to undo: the toolbar's Undo waits
-  const watch = useCallback(
-    (fn: () => void) => live?.controller.subscribe(fn) ?? (() => undefined),
-    [live],
-  );
   const nothing = () => {
     const s = live?.controller.snapshot();
     return s !== undefined && s.ready && !s.canUndo;
@@ -147,6 +159,8 @@ export function useVersions({
   const { mod, controller } = live;
   const onPicked = () => setAway(isMid());
   const onPanel = () => setAway(false);
+  // over the band on a mid window: put away, with the look kept
+  const putAway = mid && looking ? () => setAway(true) : null;
   return {
     open: panel,
     rail: panel
@@ -154,7 +168,7 @@ export function useVersions({
           controller,
           platform,
           standIns,
-          onClose: close,
+          onClose: putAway ?? close,
           onPicked,
         })
       : null,
@@ -164,6 +178,7 @@ export function useVersions({
       fileRef,
       onLeave: close,
       onPanel: panel ? null : onPanel,
+      onAway: panel ? putAway : null,
     }),
     toolbar: {
       onVersions: panel ? close : onPanel,

@@ -1,7 +1,9 @@
 // @vitest-environment happy-dom
 // On a mid window (1000 to 1199 px) Versions' panel opens over the work, so picking a version puts it away and the
-// band's Versions brings it back; wider, the panel stays; a window widened while it is away shows it again. The width
-// comes from a media query's change events, never a timer.
+// band's Versions brings it back; while the room looks at a version, the panel's Close and Escape put it away again
+// and keep the look, and a window narrowed to mid puts it away; wider, the panel stays; a window widened while it is
+// away shows it again. Matters, with the panel away, leaves Versions be. The width comes from a media query's change
+// events, never a timer.
 import { act } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { THREAD, TURN } from "../../testing/stream-script.ts";
@@ -79,10 +81,72 @@ test("on a wide window the panel stays as a version is picked, and widening a mi
   expect(h.one("versions")).not.toBeNull();
   expect(lead()).toBeNull();
   await media.set(true);
+  await h.click(lead());
   await h.lookAt("cp1");
   expect(h.one("versions")).toBeNull();
   await media.set(false);
   expect(h.one("versions")).not.toBeNull();
+});
+
+test("a window narrowed to mid while the room looks back puts the panel away, and at now leaves it", async () => {
+  const media = stubMedia(false);
+  h = await mountVersions(VERSIONS, STEPS);
+  await h.openVersions();
+  await media.set(true);
+  expect(h.one("versions")).not.toBeNull();
+  await media.set(false);
+  await h.lookAt("cp2");
+  await media.set(true);
+  expect(h.one("versions")).toBeNull();
+  expect(h.one("version-restore")).not.toBeNull();
+  expect(lead()).not.toBeNull();
+});
+
+test("on a mid window, the reopened panel's Close puts it away and keeps the version in view", async () => {
+  stubMedia(true);
+  h = await mountVersions(VERSIONS, STEPS);
+  await h.openVersions();
+  await h.lookAt("cp2");
+  await h.click(lead());
+  await h.click(document.body.querySelector(".ver-panel-close"));
+  expect(h.one("versions")).toBeNull();
+  // Versions stays open on cp2: the band, its Restore and the way back into the panel
+  expect(h.one("version-restore")).not.toBeNull();
+  expect(lead()).not.toBeNull();
+  expect(document.activeElement).toBe(lead());
+  // at now, Close ends Versions, and the rail comes back
+  await h.click(document.body.querySelector(".ver-back"));
+  await h.click(h.host.querySelector(".room-pair button[aria-expanded]"));
+  await h.click(document.body.querySelector(".ver-panel-close"));
+  expect(document.body.querySelector(".ver-band")).toBeNull();
+  expect(h.host.querySelector("nav.room-rail")).not.toBeNull();
+});
+
+test("on a mid window, Escape inside the reopened panel puts it away first, then comes back to now", async () => {
+  stubMedia(true);
+  h = await mountVersions(VERSIONS, STEPS);
+  await h.openVersions();
+  await h.lookAt("cp2");
+  await h.click(lead());
+  const escape = async (from: Element | null) =>
+    act(async () => {
+      from?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+  await escape(h.one("version"));
+  expect(h.one("versions")).toBeNull();
+  expect(h.one("version-restore")).not.toBeNull();
+  await escape(lead());
+  expect(h.one("version-restore")).toBeNull();
+});
+
+test("Matters, with the panel put away on a mid window, leaves Versions on the version in view", async () => {
+  stubMedia(true);
+  h = await mountVersions(VERSIONS, STEPS);
+  await h.openVersions();
+  await h.lookAt("cp2");
+  await h.click(h.one("rail-toggle"));
+  expect(h.one("version-restore")).not.toBeNull();
+  expect(lead()).not.toBeNull();
 });
 
 test("in the e2e's 1028 by 779 window, picking a version closes the panel and the band's Restore is reachable", async () => {

@@ -153,6 +153,7 @@ export function VersionsCentre({
   fileRef,
   onLeave,
   onPanel,
+  onAway,
 }: {
   controller: VersionsController;
   standIns: StandIns;
@@ -161,6 +162,8 @@ export function VersionsCentre({
   onLeave: () => void;
   /** With the panel put away on a mid window: brings it back, from the band's Versions. */
   onPanel: (() => void) | null;
+  /** With the panel over the band on a mid window: puts it away, Escape's first step from inside it. */
+  onAway: (() => void) | null;
 }) {
   const w = useVersionWords();
   const { lang } = w;
@@ -176,8 +179,16 @@ export function VersionsCentre({
   const waitId = useId();
   const desk = useRef<HTMLDivElement>(null);
   const [doc, setDoc] = useState<string | null>(null);
+  const lead = useRef<HTMLButtonElement>(null);
+  const away = onPanel !== null;
+  // the panel put away took the focus with it: the band's Versions, which brings it back, takes it
+  useEffect(() => {
+    const at = document.activeElement;
+    if (away && (at === null || at === document.body)) lead.current?.focus();
+  }, [away]);
 
-  // Escape comes back to now, from anywhere in the room but a field or a dialog
+  // Escape comes back to now, from anywhere in the room but a field or a dialog; from inside a panel standing over
+  // the band, it puts the panel away first
   useEffect(() => {
     if (shown === undefined || s.ask !== null) return;
     const onKey = (e: KeyboardEvent) => {
@@ -190,11 +201,13 @@ export function VersionsCentre({
         return;
       if (!keyIsMine(room, t)) return;
       e.preventDefault();
-      c.look(null);
+      if (onAway !== null && t instanceof Element && t.closest('[data-testid="versions"]') !== null)
+        onAway();
+      else c.look(null);
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [c, shown, s.ask, room]);
+  }, [c, shown, s.ask, room, onAway]);
 
   const notices: BandNotice[] = [];
   if (look.kind === "now") {
@@ -262,6 +275,7 @@ export function VersionsCentre({
           : {
               lookLead: (
                 <Button
+                  ref={lead}
                   kind="quiet"
                   size="small"
                   className="ver-open-panel"

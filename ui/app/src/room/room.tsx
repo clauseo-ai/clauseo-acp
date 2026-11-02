@@ -187,8 +187,9 @@ function RoomFrame({
         canUndo={false}
         railOpen={railOpen}
         onRail={() => {
-          // the rail's place holds Versions' timeline: Matters closes it, and the rail comes back
-          versions.close();
+          // the rail's place holds Versions' timeline: Matters closes it, and the rail comes back; with the panel put
+          // away on a mid window the rail stands already, and Versions stays on the version in view
+          if (versions.open) versions.close();
           setRailOpen((open) => !open);
         }}
         railWaits={railWaits(view)}
