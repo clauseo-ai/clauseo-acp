@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { ERROR_WORDS } from "@clauseo/components/lib/words-errors.ts";
 import { currentOf } from "./entry.ts";
 import { REGISTRY } from "./registry.tsx";
 import {
@@ -86,6 +87,33 @@ test("registry ids are unique and typeable", () => {
     "U1-1",
     "u1-01",
   ]);
+  // an error's sentence goes by its code
+  expect(
+    malformedIds([
+      { id: "U3-err-store.disk_full" },
+      { id: "U3-err-unknown" },
+      { id: "U3-err-" },
+      { id: "U3-err-Store.full" },
+      { id: "U3-err-a..b" },
+    ]),
+  ).toEqual(["U3-err-", "U3-err-Store.full", "U3-err-a..b"]);
+});
+
+test("U3's ids are written as they are: one per error code but U3-07's, and the limit row's own Reset not given.", () => {
+  const ids = REGISTRY.map((e) => e.id).filter((id) => id.startsWith("U3-"));
+  const codes = (Object.entries(ERROR_WORDS) as [string, string][])
+    .filter(
+      ([, key]) => key !== "The answer stopped. Your question and the answer so far are kept.",
+    )
+    .map(([code]) => `U3-err-${code}`);
+  expect(ids.filter((id) => id.startsWith("U3-err-"))).toEqual(codes);
+  expect(ids.filter((id) => !id.startsWith("U3-err-"))).toEqual([
+    ...Array.from({ length: 15 }, (_, i) => `U3-${String(i + 1).padStart(2, "0")}`),
+    "U3-17",
+    "U3-18",
+    "U3-48",
+  ]);
+  expect(REGISTRY.find((e) => e.id === "U3-48")?.words.key).toBe("Reset not given.");
 });
 
 test("approvals of the wrong shape are refused by id", () => {

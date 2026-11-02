@@ -138,6 +138,8 @@ export type ComposerProps<V extends string = string> = {
   placeholder?: string;
   /** Ask, pressed, or the form sent. */
   onAsk?: () => void;
+  /** Add papers, pressed. Add papers shows only when given. */
+  onAddPapers?: () => void;
 };
 
 /** The composer: the status line or the working line, then a field set into the work's surface, Add papers as a
@@ -168,6 +170,7 @@ export function Composer<V extends string = string>({
   acts,
   placeholder,
   onAsk,
+  onAddPapers,
 }: ComposerProps<V>) {
   const w = useThreadWords();
   const [own, setOwn] = useState("");
@@ -254,7 +257,10 @@ export function Composer<V extends string = string>({
           </ul>
         )}
       {acts}
-      <StatusLine took={took} plan={plan} hint={hint} choice={choice} hidden={working !== null} />
+      {/* a status line with nothing to say isn't drawn: no time yet, no plan, no choice and no hint */}
+      {(took !== null || plan !== "" || choice !== undefined || hint !== null) && (
+        <StatusLine took={took} plan={plan} hint={hint} choice={choice} hidden={working !== null} />
+      )}
       {/* while Clauseo works the working line is the well's top row, and the field its foot: one set-in region */}
       <div className="room-entry" ref={entry} data-working={working !== null ? "" : undefined}>
         {working !== null && <WorkingLine state={working} testId={testIds?.working} />}
@@ -293,15 +299,18 @@ export function Composer<V extends string = string>({
                   if (onKeyCommand?.(e) === true) e.preventDefault();
                 }}
               />
-              <Button
-                kind="quiet"
-                shape="icon"
-                className="room-field-add"
-                aria-label={w.t("Add papers")}
-                disabled={disabled}
-              >
-                <IconAddPapers size={16} />
-              </Button>
+              {onAddPapers !== undefined && (
+                <Button
+                  kind="quiet"
+                  shape="icon"
+                  className="room-field-add"
+                  aria-label={w.t("Add papers")}
+                  disabled={disabled}
+                  onClick={onAddPapers}
+                >
+                  <IconAddPapers size={16} />
+                </Button>
+              )}
               {working !== null && <WorkingTime state={working} />}
               {busy ? (
                 <Button

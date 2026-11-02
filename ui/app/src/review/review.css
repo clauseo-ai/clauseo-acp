@@ -1,7 +1,10 @@
 /* The dev-only copy review's stylesheet: the design system's and every part's sheet, for the frames, and the list's
-   own plain classes (no Tailwind utilities, so nothing here could reach the app's CSS). */
+   own plain classes (no Tailwind utilities, so nothing here could reach the app's CSS). The room's own utilities, such
+   as the thread rows' spacing, are built from the room's sources, so its states read as the app lays them out. */
 @import "../styles/system.css";
 @import "@clauseo/components/clauseo/parts.css";
+@source "../room";
+@source not "../room/**/*.test.*";
 
 /* ---------- the list ---------- */
 .review-page {

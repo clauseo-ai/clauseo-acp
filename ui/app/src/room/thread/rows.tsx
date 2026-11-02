@@ -2,11 +2,12 @@
 // memoized on its id, so a flush renders only the rows whose part changed. A paged row (older entries, page_entries)
 // shows the entry it was given. Permissions and elicitations show nothing until U4; markers, versions and compaction
 // show nothing yet.
-import { memo, Suspense, useState } from "react";
+import { memo, useState } from "react";
 import { QuestionLine, Who } from "@clauseo/components/clauseo/answer.tsx";
 import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { useThreadWords } from "@clauseo/components/lib/words-thread.ts";
 import { Image } from "@clauseo/components/markdown/image.tsx";
+import { Markdown } from "@clauseo/components/markdown/markdown.tsx";
 import { useEntry, useText, useViewStore } from "../../store/hooks.ts";
 import { entryIdOf, textKey } from "../../store/view.ts";
 import type {
@@ -22,17 +23,17 @@ import type {
 } from "../../transport/protocol.ts";
 import { entryTime } from "../host-next.ts";
 import { stamp } from "./clock.ts";
-import { shownOf } from "./content.ts";
-import { LazyMarkdown } from "./markdown.ts";
+import { isolated, shownOf } from "./content.ts";
 import { questionText, useQuestionText, useStreaming } from "./live.ts";
 import { LimitStopRow, StepRow } from "./stop-rows.tsx";
 
 const QUIET = "text-small text-quiet";
-/** The space above a row under the answer's words, on the spacing tokens. */
-const ROW = "mt-(--s3)";
-/** The space above the answer's words under a tool call, a thought or any row before them in its section: the
- * design's .reply rhythm (thread.css). First in its section, the thread's own gap between sections stands alone. */
-const REPLY = "not-first:mt-(--s4)";
+/** The space above a row under another in its section, on the spacing tokens; first in its section, the thread's own
+ * gap between sections stands alone. */
+const ROW = "not-first:mt-(--s3)";
+/** The answer's words: the design's reply type (thread.css .reply-text, 17 px at Clauseo's weight), and its .reply
+ * rhythm above them under the meta line, a tool call, a thought or any row before them in its section. */
+const REPLY = "reply-text not-first:mt-(--s4)";
 
 /** A block that isn't text, as one line or an image. */
 function ContentLine({ block }: { block: ContentBlock }) {
@@ -43,7 +44,7 @@ function ContentLine({ block }: { block: ContentBlock }) {
     <p className={QUIET}>
       <Say>
         {shown.kind === "attached"
-          ? w.th("Attached: {name}", { name: shown.name })
+          ? w.th("Attached: {name}", { name: isolated(shown.name) })
           : w.th("Something here can't be shown in the thread.")}
       </Say>
     </p>
@@ -105,14 +106,17 @@ function LiveQuestion({
 
 function Answer({ id, text, streaming }: { id: EntryId; text: string; streaming: boolean }) {
   return (
-    <div data-testid="message-agent" data-entry-id={id} className={REPLY}>
-      {/* while the renderer's chunk loads (markdown.ts), the row stands empty: never the answer's raw syntax */}
-      <Suspense fallback={null}>
-        {/* the renderer throws on a streaming answer with no blocks yet (markdown/answer.ts reads the last block's
-            footnotes), so an answer that has no words yet isn't streaming */}
-        {/* #123 (b20e196e) fixes that throw: drop this workaround on rebase */}
-        <LazyMarkdown text={text} streaming={streaming && text.trim() !== ""} />
-      </Suspense>
+    // busy while it streams, so a screen reader reads the answer once it ends, not each flush's words
+    <div
+      data-testid="message-agent"
+      data-entry-id={id}
+      className={REPLY}
+      aria-busy={streaming ? true : undefined}
+    >
+      {/* the renderer throws on a streaming answer with no blocks yet (markdown/answer.ts reads the last block's
+          footnotes), so an answer that has no words yet isn't streaming */}
+      {/* #123 (b20e196e) fixes that throw: drop this workaround on rebase */}
+      <Markdown text={text} streaming={streaming && text.trim() !== ""} />
     </div>
   );
 }

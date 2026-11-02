@@ -48,11 +48,11 @@ const HI = {
   "That request clashes with one already made, so nothing changed.":
     "यह अनुरोध पहले किए गए अनुरोध से टकराता है, इसलिए कुछ नहीं बदला।",
   "This matter is no longer in Clauseo.": "यह मामला अब Clauseo में नहीं है।",
-  "This thread is no longer in Clauseo.": "यह बातचीत अब Clauseo में नहीं है।",
+  "This conversation is no longer in Clauseo.": "यह बातचीत अब Clauseo में नहीं है।",
   "Wait for the answer to finish, or stop it.": "उत्तर पूरा होने तक प्रतीक्षा करें, या उसे रोकें।",
   "The answer to that question has already started or finished.":
     "उस प्रश्न का उत्तर पहले ही शुरू या पूरा हो चुका है।",
-  "Too many questions are waiting in this thread.": "इस बातचीत में बहुत अधिक प्रश्न प्रतीक्षा में हैं।",
+  "Too many questions are waiting in this conversation.": "इस बातचीत में बहुत अधिक प्रश्न प्रतीक्षा में हैं।",
   "That request was already answered, or it has expired.":
     "उस अनुरोध का उत्तर पहले ही दिया जा चुका है, या उसका समय निकल गया है।",
   "That answer wasn't one of the choices offered.": "वह उत्तर दिए गए विकल्पों में से नहीं था।",
@@ -98,11 +98,11 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   "command.invalid": "Clauseo couldn't take that request as it was.",
   "command.conflict": "That request clashes with one already made, so nothing changed.",
   "command.unknown_matter": "This matter is no longer in Clauseo.",
-  "command.unknown_thread": "This thread is no longer in Clauseo.",
+  "command.unknown_thread": "This conversation is no longer in Clauseo.",
   "thread.turn_running": "Wait for the answer to finish, or stop it.",
   "thread.interrupted": STOPPED,
   "thread.turn_not_queued": "The answer to that question has already started or finished.",
-  "thread.queue_full": "Too many questions are waiting in this thread.",
+  "thread.queue_full": "Too many questions are waiting in this conversation.",
   "permission.not_pending": "That request was already answered, or it has expired.",
   "permission.unknown_option": "That answer wasn't one of the choices offered.",
   "elicitation.not_pending": "That question was already answered, or it has expired.",

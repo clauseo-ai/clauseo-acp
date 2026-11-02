@@ -6,7 +6,7 @@ import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { lim } from "@clauseo/components/lib/words-limits.ts";
 import { th } from "@clauseo/components/lib/words-thread.ts";
 import { t } from "@clauseo/components/lib/words.ts";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import {
   agentText,
   header,
@@ -30,6 +30,7 @@ afterEach(async () => {
   await h?.unmount();
   h = null;
   document.body.replaceChildren();
+  vi.useRealTimers();
 });
 
 const file = (path: string, edited = false): FileChange => ({
@@ -79,11 +80,16 @@ test("the answer under a tool call stands the reply's space below it; first in i
   ]);
   const [first, after] = h.all("message-agent");
   // the design's .reply: var(--s4) above the answer, as Tailwind's not-first: variant, so the margin falls only where
-  // a row stands above it in the answer's section
+  // something stands above it in the answer's section: the meta line, or a tool call
   expect(after?.previousElementSibling?.getAttribute("data-testid")).toBe("tool-call");
-  expect(after?.classList.contains("not-first:mt-(--s4)")).toBe(true);
-  expect(first?.previousElementSibling).toBeNull();
-  expect(first?.classList.contains("not-first:mt-(--s4)")).toBe(true);
+  expect(first?.previousElementSibling?.className).toBe("meta meta-live");
+  for (const a of [first, after]) {
+    expect(a?.classList.contains("not-first:mt-(--s4)")).toBe(true);
+    // the design's reply type: 17 px at Clauseo's weight (thread.css)
+    expect(a?.classList.contains("reply-text")).toBe(true);
+  }
+  // a row first in its section takes no space of its own: the gap between sections stands alone
+  expect(h.one("tool-call")?.className).toContain("not-first:mt-(--s3)");
 });
 
 test("each stop: always a turn-stopped row with its reason, and its line where it has one", async () => {
@@ -156,11 +162,15 @@ test("a paper edited since asks first: Keep current sends nothing, Undo anyway u
   h.deliver([reset([changed({ files: [file("Notice.docx"), file("Reply.docx", true)] })])]);
   const button = (name: string) =>
     [...document.querySelectorAll("button")].find((b) => b.textContent === name);
+  // the dialog is its own chunk, loaded on the press (or on reaching Undo): in memory first, as on a real reach
+  await act(async () => void (await import("@clauseo/components/clauseo/change-note-ask.tsx")));
   await h.click(h.one("undo"));
+  await h.settle();
   expect(document.body.textContent).toContain("Reply.docx");
   await h.click(button("Keep current"));
   expect(h.sent("undo_step")).toEqual([]);
   await h.click(h.one("undo"));
+  await h.settle();
   await h.click(button("Undo anyway"));
   expect(h.sent("undo_step")).toHaveLength(1);
   expect(h.sent("undo_step")[0]?.files.map((f) => f.choice)).toEqual(["undo", "undo"]);
@@ -183,6 +193,9 @@ test("a refused Undo shows its words beside Undo, by code", async () => {
   expect(h.host.querySelector('.working[data-testid="error"]')).toBeNull();
 });
 
+/** Undo waits as DESIGN.md has it: aria-disabled, still in the tab order. */
+const waits = () => h!.one("undo")?.getAttribute("aria-disabled") === "true";
+
 test("Undo waits while its undo_step is on its way: one undo however often it is pressed", async () => {
   let release: () => void = () => {};
   const held = new Promise<void>((resolve) => (release = resolve));
@@ -193,22 +206,24 @@ test("Undo waits while its undo_step is on its way: one undo however often it is
     },
   });
   h.deliver([reset([changed()])]);
-  const undo = () => h!.one("undo") as HTMLButtonElement;
-  await h.click(undo());
-  expect(undo().disabled).toBe(true);
-  await h.click(undo());
+  await h.click(h.one("undo"));
+  expect(waits()).toBe(true);
+  await h.click(h.one("undo"));
   expect(h.sent("undo_step")).toHaveLength(1);
   await act(async () => release());
   await h.settle();
-  expect(undo().disabled).toBe(false);
+  expect(waits()).toBe(false);
 });
 
-test("Undo is disabled while busy", async () => {
+test("Undo waits, faint but focusable, while busy, and a press then sends nothing", async () => {
   h = await mountRoom();
   h.deliver([reset([changed()], header("running"))]);
-  expect((h.one("undo") as HTMLButtonElement).disabled).toBe(true);
-  h.deliver([upsert(header("idle"))]);
+  expect(waits()).toBe(true);
   expect((h.one("undo") as HTMLButtonElement).disabled).toBe(false);
+  await h.click(h.one("undo"));
+  expect(h.sent("undo_step")).toEqual([]);
+  h.deliver([upsert(header("idle"))]);
+  expect(waits()).toBe(false);
 });
 
 test("without its checkpoint a step has no Undo, and says why", async () => {
@@ -221,45 +236,80 @@ test("without its checkpoint a step has no Undo, and says why", async () => {
   );
 });
 
+/** A fixed "now", Monday 2 November 2026 at 3 pm local, so a run that crosses midnight reads the same. */
+const NOW = new Date(2026, 10, 2, 15, 0);
+const local = (days: number, h: number, m: number) => new Date(2026, 10, 2 + days, h, m).getTime();
+const fixNow = () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
+};
+const limit = (n: number, reason: string, resets_at?: number): ViewEntry => ({
+  limit_stop: {
+    order: 10 + n,
+    turn: uuid(n, 4),
+    reason: reason as never,
+    ...(resets_at === undefined ? {} : { resets_at }),
+  },
+});
+const resetsAt = (row: HTMLElement | undefined) =>
+  row?.querySelector<HTMLTimeElement>('[data-testid="limit-resets-at"]') ?? null;
+
 test("the limit stop: the plan's words, its reset as a time today, with the weekday within six days, with the date further off", async () => {
+  fixNow();
   h = await mountRoom();
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59).getTime();
-  const later = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 2, 9, 5).getTime();
-  const past = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 10, 8, 0).getTime();
-  const limit = (n: number, reason: string, resets_at?: number): ViewEntry => ({
-    limit_stop: {
-      order: 10 + n,
-      turn: uuid(n, 4),
-      reason: reason as never,
-      ...(resets_at === undefined ? {} : { resets_at }),
-    },
-  });
   h.deliver([
     reset([
-      limit(1, "plan_window", today),
-      limit(2, "workspace_credits", later),
-      limit(3, "temporary"),
-      limit(4, "plan_window", past),
+      limit(1, "plan_window", local(0, 23, 59)),
+      limit(2, "workspace_credits", local(2, 9, 5)),
+      limit(3, "workspace_spend_cap", local(9, 8, 0)),
     ]),
   ]);
-  const [plan, credits, none, gone] = h.all("limit-stop");
+  const [plan, credits, cap] = h.all("limit-stop");
   expect(plan?.textContent).toContain(t("en", "Claude plan limit reached"));
-  const at = plan?.querySelector<HTMLTimeElement>('[data-testid="limit-resets-at"]');
-  expect(at?.dateTime).toBe(new Date(today).toISOString());
-  expect(at?.textContent).toBe(lim("en", "Resets {time}", { time: "11:59 pm" }));
+  expect(resetsAt(plan)?.dateTime).toBe(new Date(local(0, 23, 59)).toISOString());
+  expect(resetsAt(plan)?.textContent).toBe(lim("en", "Resets {time}", { time: "11:59 pm" }));
   expect(credits?.textContent).toContain(lim("en", "Usage limit reached"));
-  const day = new Intl.DateTimeFormat("en-GB", { weekday: "long" }).format(new Date(later));
-  expect(credits?.querySelector('[data-testid="limit-resets-at"]')?.textContent).toBe(
-    lim("en", "Resets {day} {time}", { day, time: "9:05 am" }),
+  // 4 November 2026 is a Wednesday
+  expect(resetsAt(credits)?.textContent).toBe(
+    lim("en", "Resets {day} {time}", { day: "Wednesday", time: "9:05 am" }),
   );
-  expect(none?.querySelector('[data-testid="limit-resets-at"]')).toBeNull();
-  expect(none?.textContent).toContain(lim("en", "Limit reached. Reset not given."));
-  // a reset ten days gone reads its date, not a weekday that looks ahead
-  const date = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "long" }).format(past);
-  expect(gone?.querySelector('[data-testid="limit-resets-at"]')?.textContent).toBe(
-    lim("en", "Resets {day} {time}", { day: date, time: "8:00 am" }),
+  expect(resetsAt(cap)?.textContent).toBe(
+    lim("en", "Resets {day} {time}", { day: "11 November", time: "8:00 am" }),
   );
+});
+
+test("a reset gone by says no Resets at all, two days ago or earlier today: the headline stands alone", async () => {
+  fixNow();
+  h = await mountRoom();
+  h.deliver([
+    reset([
+      limit(1, "plan_window", local(-2, 9, 0)),
+      limit(2, "plan_window", local(0, 8, 0)),
+      limit(3, "plan_window", NOW.getTime()),
+    ]),
+  ]);
+  for (const row of h.all("limit-stop")) {
+    expect(resetsAt(row)).toBeNull();
+    expect(row.textContent).toBe(t("en", "Claude plan limit reached"));
+  }
+});
+
+test("only a used-up plan window is the plan's limit; without a reset the row says its own Reset not given.", async () => {
+  fixNow();
+  h = await mountRoom();
+  h.deliver([
+    reset([limit(1, "temporary"), limit(2, "unknown", local(1, 9, 0)), limit(3, "plan_window")]),
+  ]);
+  const [temporary, unknown, plan] = h.all("limit-stop");
+  expect(temporary?.textContent).toBe(
+    lim("en", "Usage limit reached") + lim("en", "Reset not given."),
+  );
+  expect(unknown?.textContent).toContain(lim("en", "Usage limit reached"));
+  expect(unknown?.textContent).not.toContain(t("en", "Claude plan limit reached"));
+  expect(plan?.textContent).toBe(
+    t("en", "Claude plan limit reached") + lim("en", "Reset not given."),
+  );
+  expect(plan?.textContent).not.toContain("Limit reached.");
 });
 
 test("a notice is a quiet line; markers, versions, permissions and elicitations show nothing and break nothing", async () => {
@@ -323,7 +373,10 @@ test("an inline raster image shows through Image; an attachment is named; anythi
   const img = rows[0]?.querySelector("img");
   expect(img?.getAttribute("src")).toBe("data:image/png;base64,iVBORw0KGgo=");
   expect(img?.dataset["clauseo"]).toBe("image");
-  expect(rows[1]?.textContent).toBe(th("en", "Attached: {name}", { name: "Lease.pdf" }));
+  // the name isolated (FSI…PDI), so its own direction never reorders the sentence
+  expect(rows[1]?.textContent).toBe(
+    th("en", "Attached: {name}", { name: "\u2068Lease.pdf\u2069" }),
+  );
   expect(rows[2]?.textContent).toBe(th("en", "Something here can't be shown in the thread."));
 });
 
@@ -421,10 +474,41 @@ test("a thread that opens with older entries and can't scroll pages them in at o
   expect(h.all("message-user")[0]?.textContent).toContain("An older question");
 });
 
-test('H17: a question shows its time when the host gives one, and "You" alone when it doesn\'t', async () => {
+test("the log is busy until the first view lands; a streaming answer is busy until it ends", async () => {
   h = await mountRoom();
-  const now = new Date();
-  const at = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 1).getTime();
+  const log = () => h!.host.querySelector('[role="log"]');
+  expect(log()?.getAttribute("aria-busy")).toBe("true");
+  h.deliver([reset([userMessage(5, 1, "Q"), agentText(6, 1, "So far")], header("running"))]);
+  expect(log()?.getAttribute("aria-busy")).not.toBe("true");
+  expect(h.one("message-agent")?.getAttribute("aria-busy")).toBe("true");
+  h.deliver([upsert(step(7)), upsert(header("idle"))]);
+  expect(h.one("message-agent")?.hasAttribute("aria-busy")).toBe(false);
+});
+
+test("each answer section opens with the meta line: Clauseo, with no time yet", async () => {
+  h = await mountRoom();
+  h.deliver([
+    reset([
+      userMessage(5, 1, "First"),
+      agentText(6, 1, "One"),
+      step(7),
+      userMessage(8, 2, "Second"),
+    ]),
+  ]);
+  const answers = [...h.host.querySelectorAll("section.step-answer")];
+  // the latest question's section waits for its answer under the meta line already
+  expect(answers).toHaveLength(2);
+  for (const a of answers) {
+    const meta = a.firstElementChild;
+    expect(meta?.className).toBe("meta meta-live");
+    expect(meta?.textContent).toBe(t("en", "Clauseo"));
+  }
+});
+
+test('H17: a question shows its time when the host gives one, and "You" alone when it doesn\'t', async () => {
+  fixNow();
+  h = await mountRoom();
+  const at = local(0, 0, 1);
   h.deliver([reset([withTime(userMessage(5, 1, "Timed"), at), userMessage(8, 2, "Untimed")])]);
   const [timed, untimed] = h.all("message-user").map((m) => m.querySelector(".who")?.textContent);
   expect(timed).toBe(`${t("en", "You")}, ${clockTime("en", at)}`);

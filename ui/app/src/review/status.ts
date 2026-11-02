@@ -63,9 +63,10 @@ export function duplicateIds(rows: readonly Pick<Current, "id">[]): string[] {
   return [...twice];
 }
 
-const ID = /^[A-Z][A-Z0-9]*-\d{2,}$/;
+const ID = /^[A-Z][A-Z0-9]*-(?:\d{2,}|err-[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*)$/;
 
-/** Ids that don't take the form "U1-01": the brief, a dash, a number of two digits or more. */
+/** Ids that don't take the form "U1-01": the brief, a dash, a number of two digits or more; or, for an error's
+ * sentence, the brief, "err" and the wire's error code: "U3-err-store.disk_full". */
 export function malformedIds(rows: readonly Pick<Current, "id">[]): string[] {
   return rows.map((r) => r.id).filter((id) => !ID.test(id));
 }

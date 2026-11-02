@@ -1,12 +1,15 @@
 // The change note. After Clauseo changes papers, the thread says so in one line, with the papers named and two ways
 // on: Compare, and Undo, each when the caller gives it. A refused undo says why in a quiet line beside Undo. When a
 // paper was edited after Clauseo's change, Undo asks first, in the alert dialog, with Keep current as the safe choice.
-import { Fragment, useRef, useState } from "react";
-import { AlertDialog, AlertDialogClose, AlertDialogPopup } from "../ui/alert-dialog.tsx";
+import { Fragment, lazy, Suspense, useState } from "react";
 import { Button } from "../ui/button.tsx";
 import { IconOpen, IconPaperBookPage, IconUndo } from "../icons/icons.tsx";
 import { useThreadWords } from "../lib/words-thread.ts";
 import { Say } from "./say.tsx";
+
+const loadAsk = () => import("./change-note-ask.tsx");
+/** The dialog Undo opens when a paper changed since: its own chunk, as most notes never ask. */
+const UndoAsk = lazy(() => loadAsk().then((m) => ({ default: m.UndoAsk })));
 
 /** Clauseo's changes standing, or undone by the lawyer. */
 export type ChangeState = "changed" | "undone";
@@ -55,7 +58,9 @@ export function ChangeNote({
   const [own, setOwn] = useState<ChangeState>("changed");
   const state = held ?? own;
   const [asking, setAsking] = useState(false);
-  const keep = useRef<HTMLButtonElement>(null);
+  // the dialog's chunk loads when Undo is first in reach, and the dialog mounts the first time it is asked for
+  const [asked, setAsked] = useState(false);
+  const reach = editedSince === null ? undefined : () => void loadAsk();
   const undo = () => {
     if (held === undefined) setOwn("undone");
     onUndo?.();
@@ -113,34 +118,25 @@ export function ChangeNote({
             kind="quiet"
             size="small"
             disabled={undoDisabled}
+            focusableWhenDisabled
             data-testid={testIds?.undo}
-            onClick={() => (editedSince === null ? undo() : setAsking(true))}
+            onPointerEnter={reach}
+            onFocus={reach}
+            onClick={() => {
+              if (editedSince === null) return undo();
+              setAsked(true);
+              setAsking(true);
+            }}
           >
             <IconUndo size={16} />
             <span className="deva-nudge">{w.t("Undo")}</span>
           </Button>
         )}
       </div>
-      {editedSince !== null && onUndo !== undefined && (
-        <AlertDialog open={asking} onOpenChange={setAsking}>
-          <AlertDialogPopup
-            initialFocus={keep}
-            title={w.th("{name} changed after Clauseo's edit.", { name: editedSince })}
-            body={w.ui(
-              "Undo anyway puts back the version from before Clauseo's edit. The changes made since stay in Versions.",
-            )}
-            actions={
-              <>
-                <AlertDialogClose render={<Button kind="quiet" />} onClick={undo}>
-                  {w.ui("Undo anyway")}
-                </AlertDialogClose>
-                <AlertDialogClose render={<Button kind="tone" ref={keep} />}>
-                  {w.ui("Keep current")}
-                </AlertDialogClose>
-              </>
-            }
-          />
-        </AlertDialog>
+      {editedSince !== null && onUndo !== undefined && asked && (
+        <Suspense fallback={null}>
+          <UndoAsk name={editedSince} open={asking} onOpenChange={setAsking} onUndo={undo} />
+        </Suspense>
       )}
     </div>
   );

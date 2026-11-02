@@ -47,6 +47,7 @@ export function Thread({
   children,
   live = false,
   resting = true,
+  busy = false,
 }: {
   question: string;
   who: string;
@@ -55,6 +56,9 @@ export function Thread({
   live?: boolean;
   /** The answer has settled: land where the view rests. */
   resting?: boolean;
+  /** Rows are going in all at once, such as the first view or an older page: the log is marked aria-busy, so they
+   * aren't read out as they land. */
+  busy?: boolean;
 }) {
   const w = useWords();
   const { lang, textSize } = useDisplay();
@@ -291,6 +295,7 @@ export function Thread({
           return scope.nodes.slot("thread")(node);
         }}
         role="log"
+        aria-busy={busy || undefined}
         aria-label={w.t("This matter's thread")}
       >
         <div

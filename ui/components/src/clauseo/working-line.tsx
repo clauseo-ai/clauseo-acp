@@ -4,10 +4,8 @@
 // one line. Its words and times change in place; nothing loops, shimmers or spins, and no clock runs: it changes
 // only when the host says something. Errors stand on the same well, in concrete and never in red, because red means
 // the other side. The field below keeps what the lawyer wrote.
-import type { ReactNode } from "react";
-import { Collapsible as BaseCollapsible } from "@base-ui/react/collapsible";
+import { lazy, Suspense, type ReactNode } from "react";
 import { Button } from "../ui/button.tsx";
-import { CollapsiblePanel } from "../ui/collapsible.tsx";
 import { IconChecking, IconFold } from "../icons/icons.tsx";
 import { useThreadWords } from "../lib/words-thread.ts";
 import { sentence } from "./matter.ts";
@@ -135,6 +133,11 @@ export function WorkingTime({ state }: { state: WorkingState }) {
   return pill === null ? null : <TimePill place="field">{pill}</TimePill>;
 }
 
+/** The details an error folds open, with the row's Details trigger: its own chunk, since most rows have none. */
+const WorkingDetails = lazy(() =>
+  import("./working-details.tsx").then((m) => ({ default: m.WorkingDetails })),
+);
+
 /** The row itself, the well's top. */
 export function WorkingLine({
   state,
@@ -143,9 +146,9 @@ export function WorkingLine({
   state: WorkingState;
   testId?: string | undefined;
 }) {
-  const w = useThreadWords();
+  const wd = useThreadWords();
   const { words, pill, actions, details } = useParts(state);
-  const row = (
+  const row = (more: ReactNode) => (
     <div
       className="working"
       data-kind={state.kind}
@@ -164,28 +167,23 @@ export function WorkingLine({
       {actions !== null && (
         <span className="working-acts">
           {actions}
-          {details !== null && (
-            <BaseCollapsible.Trigger
-              className="working-more"
-              render={<Button kind="quiet" size="small" />}
-            >
-              <span className="deva-nudge">{w.th("Details")}</span>
-              <IconFold size={12} className="work-chev" />
-            </BaseCollapsible.Trigger>
-          )}
+          {more}
         </span>
       )}
     </div>
   );
-  if (details === null) return row;
+  if (details === null) return row(null);
+  // until the fold is in, its trigger stands as a plain button of the same look
   return (
-    <BaseCollapsible.Root className="working-wrap">
-      {row}
-      <CollapsiblePanel>
-        <p className="working-details">
-          <Say>{details}</Say>
-        </p>
-      </CollapsiblePanel>
-    </BaseCollapsible.Root>
+    <Suspense
+      fallback={row(
+        <Button kind="quiet" size="small" className="working-more">
+          <span className="deva-nudge">{wd.th("Details")}</span>
+          <IconFold size={12} className="work-chev" />
+        </Button>,
+      )}
+    >
+      <WorkingDetails row={row} details={details} />
+    </Suspense>
   );
 }

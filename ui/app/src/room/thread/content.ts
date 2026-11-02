@@ -43,3 +43,7 @@ export function shownOf(block: ContentBlock): Shown {
   if (block.resource !== undefined) return { kind: "attached", name: nameOf(block.resource.uri) };
   return { kind: "other" };
 }
+
+/** A name put into a sentence, isolated so its own direction never reorders the words around it (FSI…PDI: a <bdi>
+ * can't go inside a translated string). */
+export const isolated = (name: string): string => `\u2068${name}\u2069`;

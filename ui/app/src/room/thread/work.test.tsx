@@ -104,6 +104,8 @@ test("an input method's Enter commits its candidate and sends nothing; the Enter
   h.deliver([reset([])]);
   await h.type("नमस्ते");
   const el = field();
+  // the composition events are there for realism only: sendsOnEnter reads the keydown's isComposing and keyCode, which
+  // the two Enters below carry, and no code path listens for compositionstart or compositionend
   await act(async () => {
     el.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true, data: "" }));
   });
