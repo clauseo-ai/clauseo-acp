@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "The main window, by the label MAIN_WINDOW in src/lib.rs; rename both together. Grants the ten bridge commands of src/commands.rs, one permission each (docs/decisions/0012-desktop-bridge.md, docs/decisions/0019-app-stream-to-the-window.md), and the two window commands of Tauri's drag script for the room's title bar, DRAG_PERMISSIONS in src/window_frame.rs (docs/decisions/0015-window-frame.md). Nothing else: every permission widens what script in the page can reach.",
+  "description": "The main window, by the label MAIN_WINDOW in src/lib.rs; rename both together. Grants the thirteen bridge commands of src/commands.rs, one permission each (docs/decisions/0012-desktop-bridge.md, docs/decisions/0019-app-stream-to-the-window.md, and open_external, open_file and reveal in docs/decisions/0026-open-and-reveal.md), and the two window commands of Tauri's drag script for the room's title bar, DRAG_PERMISSIONS in src/window_frame.rs (docs/decisions/0015-window-frame.md). Nothing else: every permission widens what script in the page can reach.",
   "windows": ["main"],
   "permissions": [
     "allow-dispatch",
@@ -14,6 +14,9 @@
     "allow-answer-permission",
     "allow-pick-folder",
     "allow-display-info",
+    "allow-open-external",
+    "allow-open-file",
+    "allow-reveal",
     "core:window:allow-start-dragging",
     "core:window:allow-internal-toggle-maximize"
   ]

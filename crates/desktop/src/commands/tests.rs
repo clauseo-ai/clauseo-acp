@@ -30,6 +30,9 @@ fn app(bridge: Bridge) -> (tauri::App<MockRuntime>, WebviewWindow<MockRuntime>) 
             answer_permission,
             pick_folder,
             display_info,
+            open_external,
+            open_file,
+            reveal,
             #[cfg(feature = "e2e")]
             crate::e2e::perf_channel_bytes,
             #[cfg(feature = "marks")]
@@ -42,6 +45,7 @@ fn app(bridge: Bridge) -> (tauri::App<MockRuntime>, WebviewWindow<MockRuntime>) 
     #[cfg(feature = "e2e")]
     crate::e2e::grant_scoreboard(&app).unwrap();
     app.manage(bridge);
+    app.manage(crate::open::AppData(std::env::temp_dir()));
     let window = WebviewWindowBuilder::new(&app, "main", tauri::WebviewUrl::default())
         .build()
         .unwrap();
@@ -191,6 +195,47 @@ fn the_scoreboard_commands_answer_only_in_their_builds() {
             assert_eq!(finish.unwrap_err()["code"], "command.invalid");
         } else {
             assert!(denied(&finish), "{finish:?}");
+        }
+    }
+}
+
+/// The three commands that leave the app answer the main window from the app's page, and refuse
+/// before anything opens: a bad scheme and an unknown ref with `command.invalid`. A second
+/// window, and a page that is not the app's, get nothing: only main is granted.
+#[test]
+fn open_and_reveal_are_granted_to_main_only() {
+    let scratch = Scratch::new("open-granted", &[]);
+    let host = scratch.start(Vec::new());
+    let (app, window) = app(host.bridge());
+    let file = clauseo_protocol::FileRefId::new(Uuid::now_v7()).unwrap();
+    let calls = [
+        ("open_external", json!({ "url": "javascript:alert(1)" })),
+        ("open_file", json!({ "file": file })),
+        ("reveal", json!({ "target": { "matter": host.scratch() } })),
+    ];
+    let main: Vec<Value> = calls
+        .iter()
+        .map(|(cmd, body)| invoke(&window, cmd, body.clone()).unwrap_err())
+        .collect();
+    assert_eq!(main[0]["code"], "command.invalid", "{}", main[0]);
+    // Until the host's locate_file lands the placeholder answers internal; then command.invalid.
+    assert!(main[1]["code"].is_string(), "{}", main[1]);
+    assert!(main[2]["code"].is_string(), "{}", main[2]);
+
+    let other = WebviewWindowBuilder::new(&app, "other", tauri::WebviewUrl::default())
+        .build()
+        .unwrap();
+    for (cmd, body) in &calls {
+        for answer in [
+            invoke(&other, cmd, body.clone()),
+            invoke_from(&window, "https://example.com", cmd, body.clone()),
+        ] {
+            let denied = answer
+                .as_ref()
+                .err()
+                .and_then(Value::as_str)
+                .is_some_and(|text| text.contains("not allowed"));
+            assert!(denied, "{cmd}: {answer:?}");
         }
     }
 }

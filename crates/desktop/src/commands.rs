@@ -3,14 +3,15 @@
 //! (`docs/decisions/0001`, `docs/threat-model.md` "Webview"), and every call runs as
 //! `Principal::LocalDesktop`, which the bridge supplies; the webview never names a principal.
 //! `docs/decisions/0012-desktop-bridge.md` records the list and the stream's message format,
-//! and `docs/decisions/0019-app-stream-to-the-window.md` the tenth, `subscribe_app`, and the
-//! allow-lists of `dispatch` and `query`.
+//! `docs/decisions/0019-app-stream-to-the-window.md` the tenth, `subscribe_app`, and the
+//! allow-lists of `dispatch` and `query`, and `docs/decisions/0026-open-and-reveal.md` the three
+//! that leave the app: `open_external`, `open_file` and `reveal` (`open.rs`).
 //! `lib.rs` registers them with `tauri::generate_handler!`; tauri-specta reads them only in the
 //! test that writes the TypeScript bindings (`commands/bindings.rs`).
 
 use clauseo_protocol::{
-    Ack, AgentChoiceId, CommandEnvelope, CommandOutcome, HostError, HostQuery, PermissionRequestId,
-    QueryResult, StreamId, ThreadId, ViewPosition,
+    Ack, AgentChoiceId, CommandEnvelope, CommandOutcome, FileRefId, HostError, HostQuery,
+    PermissionRequestId, QueryResult, StreamId, ThreadId, ViewPosition,
 };
 use clauseo_settings::{PlatformDirs as _, SystemDirs};
 use serde::Serialize;
@@ -19,12 +20,13 @@ use tauri::{AppHandle, Runtime, State, Webview};
 
 use crate::bridge::Bridge;
 use crate::frame::Frame;
+use crate::open::{AppData, NativeLinkConfirm, NativeOpener, RevealTarget};
 use crate::picked::PickedFolder;
 
 /// The command names, in the order `build.rs` and `capabilities/main.json` list them. A test
 /// checks they, `lib.rs`'s handler and the bindings agree.
 #[cfg(test)]
-pub(crate) const COMMANDS: [&str; 10] = [
+pub(crate) const COMMANDS: [&str; 13] = [
     "dispatch",
     "query",
     "open_stream",
@@ -35,6 +37,9 @@ pub(crate) const COMMANDS: [&str; 10] = [
     "answer_permission",
     "pick_folder",
     "display_info",
+    "open_external",
+    "open_file",
+    "reveal",
 ];
 
 /// The commands the `e2e` build adds (`e2e.rs`), as `build.rs`'s `E2E` and
@@ -202,6 +207,46 @@ pub(crate) async fn display_info<R: Runtime>(_app: AppHandle<R>) -> Result<Displ
     Ok(DisplayInfo {
         platform: Platform::CURRENT,
     })
+}
+
+/// Opens an https, http or mailto `url` in the default browser or mail app, after a native
+/// confirm that names where it goes, in the app's language. Any other link is
+/// `command.invalid`; declined, nothing opens and the call fails with `transport.unauthorized`.
+#[tauri::command]
+#[cfg_attr(test, specta::specta)]
+pub(crate) async fn open_external<R: Runtime>(
+    app: AppHandle<R>,
+    bridge: State<'_, Bridge>,
+    url: String,
+) -> Result<(), HostError> {
+    let language = bridge.language().await;
+    let confirm = NativeLinkConfirm::new(app.clone());
+    crate::open::open_external(&confirm, &NativeOpener::new(app), language, &url).await
+}
+
+/// Opens the document `file` names with its default app. Refused with `command.invalid` when
+/// the host did not issue the ref, when the file is not inside its matter's folder, and when
+/// it is not a document type (`open::DOCUMENT_TYPES`).
+#[tauri::command]
+#[cfg_attr(test, specta::specta)]
+pub(crate) async fn open_file<R: Runtime>(
+    app: AppHandle<R>,
+    bridge: State<'_, Bridge>,
+    file: FileRefId,
+) -> Result<(), HostError> {
+    crate::open::open_file(bridge.host(), &NativeOpener::new(app), file).await
+}
+
+/// Shows a matter's folder, or the app data folder, in Finder or File Explorer.
+#[tauri::command]
+#[cfg_attr(test, specta::specta)]
+pub(crate) async fn reveal<R: Runtime>(
+    app: AppHandle<R>,
+    bridge: State<'_, Bridge>,
+    app_data: State<'_, AppData>,
+    target: RevealTarget,
+) -> Result<(), HostError> {
+    crate::open::reveal(bridge.host(), &NativeOpener::new(app), &app_data.0, target).await
 }
 
 #[cfg(test)]

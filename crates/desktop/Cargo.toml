@@ -49,6 +49,10 @@ futures = { workspace = true }
 async-io = { workspace = true }
 # Finding the quotes and backslashes to escape when an event is split into fragments.
 memchr = { workspace = true }
+# open_external's link check (src/open.rs): the scheme, the host in its ASCII form.
+url = { workspace = true }
+# open_file's containment check resolves paths; clippy.toml bans std's canonicalize.
+dunce = { workspace = true }
 # The command ids the bridge mints for `answer_permission`.
 uuid = { workspace = true, features = ["v7"] }
 
