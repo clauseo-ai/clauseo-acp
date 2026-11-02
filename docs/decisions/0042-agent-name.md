@@ -1,4 +1,4 @@
-# 0028: The agent's own name in the thread header
+# 0042: The agent's own name in the thread header
 
 ## Context
 
