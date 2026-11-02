@@ -128,8 +128,19 @@ function probeEntry(): Plugin {
   };
 }
 
-/** The chunks whose dynamic import is unwrapped: each imports nothing the page would need to preload. */
-const BARE_CHUNKS = ["perf", "character-entities"];
+/** The chunks whose dynamic import is unwrapped: each imports only chunks already loaded when it loads, so there is
+ * nothing to preload. The perf module and the entity table import nothing the first load lacks; the room's lazy parts
+ * (the thread's list, the plan trigger, the working line's details) import only chunks index.html preloads, and the
+ * list's change-note question only those and the list. vite-config.test.ts checks that, and that no chunk carries a
+ * preload list. */
+export const BARE_CHUNKS = [
+  "perf",
+  "character-entities",
+  "list",
+  "plan-trigger",
+  "working-details",
+  "change-note-ask",
+];
 
 const HELPER = "__vitePreload(() => ";
 const DEPS = ", __VITE_PRELOAD__)";
@@ -177,12 +188,11 @@ function closingBracket(code: string, open: number): number {
 }
 
 /**
- * Unwraps two dynamic imports from Vite's preload helper back to a plain `import()`: the perf module (src/main.tsx;
- * loaded only in the e2e and marks builds), which imports only what the main chunk already holds, and the answer
- * renderer's full entity table (`import("character-entities")` in ui/patches/' decode-named-character-reference), a
- * data module with no imports. Neither has anything to preload. Any other dynamic import keeps its preloads, so the
- * room's lazy screens keep the helper in its entry chunk; R12's window had none, and this dropped the helper's
- * 1.8 KB from its first load.
+ * Unwraps the dynamic imports of BARE_CHUNKS from Vite's preload helper back to a plain `import()`, with their
+ * preload lists: the perf module
+ * (src/main.tsx; loaded only in the e2e and marks builds), the answer renderer's full entity table
+ * (`import("character-entities")` in ui/patches/' decode-named-character-reference), and the room's lazy parts.
+ * None has anything to preload that the first load doesn't already hold. Any other dynamic import keeps its preloads.
  */
 function bareDynamicImports(): Plugin {
   return {
