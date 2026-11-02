@@ -1,4 +1,5 @@
-//! Session state: plans (whole and by plan id), commands, modes, config options, notices, capabilities.
+//! Session state: plans (whole and by plan id), commands, modes, config options, notices,
+//! capabilities.
 
 use std::collections::BTreeMap;
 
