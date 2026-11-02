@@ -34,10 +34,15 @@ fn a_held_file_named_after_a_cd_in_the_command_is_refused() {
         "cd Drafts; cd ../sub || true\necho hi > ../Contract.docx",
         "cd \"$(pwd)/Drafts\" && echo hi > ../Contract.docx",
         "pushd Drafts/deeper && echo hi > ../../Contract.docx",
+        // The Mac live run (Claude Code 2.1.316, bypassPermissions), step 7.
+        "mkdir x && cd x && echo hi > ../Contract.docx",
+        "mkdir x && cd x && echo hi | tee ../Contract.docx",
+        "mkdir x && cd x && cp src ../Contract.docx",
     ];
     for present in [false, true] {
         if present {
             write::create_dir_all(&fx.matter().join("Drafts").join("deeper")).unwrap();
+            write::create_dir_all(&fx.matter().join("x")).unwrap();
         }
         for command in commands {
             assert_refused(&fx, "Bash", &bash(command));

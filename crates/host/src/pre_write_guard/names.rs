@@ -1,20 +1,28 @@
-//! The name backstop (clauseo-acp-private#162, review round 2): a shell command whose text names a
-//! file of the matter that is held open right now is refused, whatever folder games it plays,
-//! unless the whole command only reads ([`read_only`]); and `stetdoc`'s writing and serving forms
-//! ([`stetdoc`]).
+//! The name backstop (clauseo-acp-private#162, review rounds 2 and 3): a shell command whose text
+//! or words name a file of the matter that is held open right now is refused, whatever folder
+//! games it plays, unless the whole command only reads ([`read_only`]); and `stetdoc`'s writing
+//! and serving forms ([`stetdoc()`]).
+
+mod allow;
+mod stetdoc;
 
 use std::path::{Path, PathBuf};
 
 use clauseo_protocol::MatterPath;
+use unicode_normalization::UnicodeNormalization;
 
 use super::shell::script;
-use super::words::{Escape, Segment, Segments, ansi_c_char, shell_segments};
+use super::words::{Escape, Segments, ansi_c_char, shell_segments};
+use super::{MAX_WORDS, Refusal};
+
+pub(super) use allow::read_only;
+pub(super) use stetdoc::{Stetdoc, stetdoc};
 
 /// The most folder entries [`held_files`] reads; a larger matter is read in part, shallow folders
 /// first.
 const MAX_ENTRIES: usize = 20_000;
 
-/// The most words [`read_only`] reads; a longer command is not read-only.
+/// The most words [`read_only`] and [`named_in`] read; a longer command is not read-only.
 const MAX_READ_WORDS: usize = 4096;
 
 /// A file of the matter that is held open.
@@ -83,9 +91,12 @@ pub(super) fn held_files(folder: &Path) -> Vec<Held> {
     held
 }
 
-/// `text` as the file system compares names: lower case on macOS and Windows, as it is elsewhere.
+/// `text` as the file system compares names: lower case on macOS and Windows, and on macOS also
+/// composed (NFC), since APFS finds a name typed in either Unicode form; as it is elsewhere.
 fn fold(text: &str) -> String {
-    if cfg!(any(target_os = "macos", windows)) {
+    if cfg!(target_os = "macos") {
+        text.to_lowercase().nfc().collect()
+    } else if cfg!(windows) {
         text.to_lowercase()
     } else {
         text.to_owned()
@@ -143,10 +154,38 @@ fn named<'a>(text: &str, held: &'a [Held]) -> Option<&'a Held> {
     held.iter().find(|file| holds(&text, &file.name))
 }
 
-/// The first of `held` that the shell command `command` names, in its text with escaped newlines
-/// joined and, under [`Escape::Backslash`], `$'…'` decoded; comments are not dropped.
+/// The first of `held` that the shell command `command` names: in its text with escaped newlines
+/// joined and, under [`Escape::Backslash`], `$'…'` decoded (comments are not dropped); or in one
+/// of its first [`MAX_READ_WORDS`] words as the shell reads them, quotes and escapes off
+/// (`Con""tract.docx`, `Con\tract.docx`, `My\ Deal.docx`), and the words of each script it
+/// hands to `sh -c`, `eval` and the like (one level).
 pub(super) fn named_in<'a>(command: &str, escape: Escape, held: &'a [Held]) -> Option<&'a Held> {
-    named(&raw_text(command, escape), held)
+    if held.is_empty() {
+        return None;
+    }
+    named(&raw_text(command, escape), held).or_else(|| named_in_words(command, escape, held, 1))
+}
+
+/// The first of `held` one of `command`'s words names, and those of its scripts to `depth`.
+fn named_in_words<'a>(
+    command: &str,
+    escape: Escape,
+    held: &'a [Held],
+    depth: usize,
+) -> Option<&'a Held> {
+    let mut segments = Segments::new(MAX_READ_WORDS);
+    shell_segments(command, escape, &mut segments);
+    segments.iter().find_map(|segment| {
+        segment
+            .words
+            .iter()
+            .find_map(|word| named(word, held))
+            .or_else(|| {
+                let (inner, inner_escape) =
+                    script(&segment.words, escape).filter(|_| segment.command && depth > 0)?;
+                named_in_words(&inner, inner_escape, held, depth - 1)
+            })
+    })
 }
 
 /// `command` with escaped newlines joined and (POSIX) `$'…'` replaced by its decoded text.
@@ -174,139 +213,38 @@ fn raw_text(command: &str, escape: Escape) -> String {
     text
 }
 
-/// What a `stetdoc` segment does to held files (stetdoc 0.9.0's `--help`, from the app thread
-/// for U13; check again when U13's 0.9.1 pin lands).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum Stetdoc<'a> {
-    /// Not `stetdoc`, or a form that writes no held file.
-    Fine,
-    /// `stetdoc mcp` or `stetdoc init`: refused in the agent's shell outright.
-    Serve,
-    /// A form that writes this held file.
-    Writes(&'a Held),
-    /// A subcommand or flag the list does not know, naming a held file.
-    Unknown,
-}
-
-/// What the segment `words` does if it runs `stetdoc` ([`Stetdoc`]):
-///
-/// - `view`, `inspect`, `check`, `lookup`, `capabilities`, `skills`: read only, whatever the flags.
-/// - `unpack H [-o DIR] [--refresh]`: writes `DIR` (default `NAME.stet`).
-/// - `edit|replace|comment H …`: with `--dry-run` nothing; with `--in-place` `H`; with `-o OUT`
-///   or `--output OUT` `OUT`; else `NAME.edited.docx` beside `H`.
-/// - `compare ORIGINAL REVISED [-o OUT]`: writes `OUT`; the two it reads may be held.
-/// - `pack DIR [-o OUT] [--force] [--done]`: writes `OUT`, default `NAME.edited.docx` from
-///   `DIR`'s name (`NAME.stet`).
-/// - `mcp`, `init`: serve or install, refused.
-///
-/// `--json` may appear anywhere. Any other word naming a held file, and any unknown subcommand
-/// naming one, is [`Stetdoc::Unknown`].
-pub(super) fn stetdoc<'a>(words: &[String], held: &'a [Held]) -> Stetdoc<'a> {
-    let Some((program, args)) = super::shell::command_words(words).split_first() else {
-        return Stetdoc::Fine;
-    };
-    if program_name(program) != "stetdoc" {
-        return Stetdoc::Fine;
-    }
-    let args: Vec<&str> = args
-        .iter()
-        .map(String::as_str)
-        .filter(|arg| *arg != "--json")
-        .collect();
-    let Some((sub, rest)) = args.split_first() else {
-        return Stetdoc::Fine;
-    };
-    let names_held = |word: &str| named(word, held);
-    let output = |rest: &[&str]| -> Option<String> {
-        rest.iter().enumerate().find_map(|(at, arg)| match *arg {
-            "-o" | "--output" => rest.get(at + 1).map(|out| (*out).to_owned()),
-            _ => arg
-                .strip_prefix("--output=")
-                .or_else(|| arg.strip_prefix("-o").filter(|out| !out.is_empty()))
-                .map(str::to_owned),
-        })
-    };
-    // Words besides the read documents (the first `reads` positionals) and the given flags
-    // with their values must not name a held file.
-    let others_unknown = |reads: usize, flags: &[&str], valued: &[&str]| {
-        let mut positional = 0;
-        let mut skip = false;
-        rest.iter().any(|arg| {
-            if skip {
-                skip = false;
-                return false;
+/// Why the shell command `text` (as one line, `line`) is refused, if it is, with `found` the
+/// first held file its words name from the folders it may be in and `hits` the words that name
+/// one. `stetdoc mcp` and `init` are refused outright, and a `stetdoc` form that writes a held
+/// file (its default output included) is refused. Else the name backstop: a command naming a
+/// held file of `folder`, found by its words' paths or by its text and words ([`named_in`]), is
+/// refused unless the whole command only reads ([`read_only`]).
+pub(super) fn shell_refusal(
+    text: &str,
+    line: &str,
+    escape: Escape,
+    folder: &Path,
+    found: Option<MatterPath>,
+    hits: &[String],
+) -> Option<Refusal> {
+    let held = held_files(folder);
+    let mut segments = Segments::new(MAX_WORDS);
+    shell_segments(text, escape, &mut segments);
+    for segment in segments.iter().filter(|segment| segment.command) {
+        match stetdoc(&segment.words, &held, hits) {
+            Stetdoc::Serve => return Some(Refusal::StetdocServe),
+            Stetdoc::Writes(Some(file)) => {
+                return Some(Refusal::HeldOpen(file.path.clone()));
             }
-            if valued.contains(arg) {
-                skip = true;
-                return false;
-            }
-            if flags.contains(arg) || arg.starts_with("--output=") {
-                return false;
-            }
-            if !arg.starts_with('-') {
-                positional += 1;
-                if positional <= reads {
-                    return false;
-                }
-            }
-            names_held(arg).is_some()
-        })
-    };
-    let edited = |source: &str, strip: &str| {
-        let last = source.rsplit(['/', '\\']).next().unwrap_or(source);
-        let stem = last
-            .strip_suffix(strip)
-            .unwrap_or_else(|| last.rsplit_once('.').map_or(last, |(stem, _)| stem));
-        format!("{stem}.edited.docx")
-    };
-    let writes = |out: &str| names_held(out).map_or(Stetdoc::Fine, Stetdoc::Writes);
-    let first = rest.iter().find(|arg| !arg.starts_with('-')).copied();
-    match *sub {
-        "view" | "inspect" | "check" | "lookup" | "capabilities" | "skills" => Stetdoc::Fine,
-        "mcp" | "init" => Stetdoc::Serve,
-        "unpack" => {
-            if others_unknown(1, &["--refresh"], &["-o", "--output"]) {
-                return Stetdoc::Unknown;
-            }
-            output(rest).map_or(Stetdoc::Fine, |out| writes(&out))
-        }
-        "edit" | "replace" | "comment" => {
-            if rest.contains(&"--dry-run") {
-                return Stetdoc::Fine;
-            }
-            if let Some(out) = output(rest) {
-                return writes(&out);
-            }
-            if rest.contains(&"--in-place") {
-                return first.map_or(Stetdoc::Fine, writes);
-            }
-            first.map_or(Stetdoc::Fine, |source| writes(&edited(source, ".docx")))
-        }
-        "compare" => {
-            if others_unknown(2, &[], &["-o", "--output"]) {
-                return Stetdoc::Unknown;
-            }
-            output(rest).map_or(Stetdoc::Fine, |out| writes(&out))
-        }
-        "pack" => {
-            if others_unknown(1, &["--force", "--done"], &["-o", "--output"]) {
-                return Stetdoc::Unknown;
-            }
-            match output(rest) {
-                Some(out) => writes(&out),
-                None => first.map_or(Stetdoc::Fine, |dir| {
-                    writes(&edited(dir.trim_end_matches(['/', '\\']), ".stet"))
-                }),
-            }
-        }
-        _ => {
-            if args.iter().any(|arg| names_held(arg).is_some()) {
-                Stetdoc::Unknown
-            } else {
-                Stetdoc::Fine
-            }
+            Stetdoc::Writes(None) | Stetdoc::Fine | Stetdoc::Unknown => {}
         }
     }
+    let path = found.or_else(|| named_in(text, escape, &held).map(|file| file.path.clone()))?;
+    let mut names_held = held;
+    if !names_held.iter().any(|file| file.path == path) {
+        names_held.push(Held::new(path.clone()));
+    }
+    (!read_only(line, escape, &names_held, hits)).then_some(Refusal::HeldOpen(path))
 }
 
 /// A program word's name: its last path part, lower case, without `.exe`.
@@ -317,103 +255,6 @@ fn program_name(program: &str) -> String {
         .unwrap_or(program)
         .to_ascii_lowercase();
     name.strip_suffix(".exe").map(str::to_owned).unwrap_or(name)
-}
-
-/// The segments of `command`, up to [`MAX_READ_WORDS`] words, and whether they are all of it.
-fn segments_of(command: &str, escape: Escape) -> (Segments, bool) {
-    let mut segments = Segments::new(MAX_READ_WORDS);
-    shell_segments(command, escape, &mut segments);
-    let whole = !segments.full();
-    (segments, whole)
-}
-
-/// Whether the shell command `command`, which names some of `held`, only reads them, judged
-/// conservatively (when in doubt, it does not):
-///
-/// - No command substitution or process substitution (`$(`, `` ` `` under POSIX shells, `<(`,
-///   `>(`), and under PowerShell no script block (`{`).
-/// - Every segment that names a held file is a command (not a heredoc body) whose program, past
-///   prefixes such as `time` and `NAME=value`, is `cat`, `head`, `tail`, `wc`, `file`,
-///   `strings`, `less` (without a log file option), `unzip` with only `-l`, `-p`, `-v`, `-lv`,
-///   `-q`, `-qq` options, `textutil` with `-stdout` and no `-output`, `pandoc` whose `-o` or
-///   `--output` (if any) names no held file, `stetdoc` in a form that writes no held file
-///   ([`stetdoc`]), or `sh`/`bash`/`zsh`/`dash`/`ksh -c` whose script is itself read-only.
-/// - No segment redirects output to a held file or to a target built at run time (`$`, a glob,
-///   `~`); `/dev/null`, `$null` and a duplication such as `2>&1` are fine.
-pub(super) fn read_only(command: &str, escape: Escape, held: &[Held]) -> bool {
-    read_only_at(command, escape, held, 1)
-}
-
-fn read_only_at(command: &str, escape: Escape, held: &[Held], depth: usize) -> bool {
-    let substitutes = ["$(", "<(", ">("].iter().any(|s| command.contains(s))
-        || (escape == Escape::Backslash && command.contains('`'))
-        || (escape == Escape::Backtick && command.contains('{'));
-    if substitutes {
-        return false;
-    }
-    let (segments, whole) = segments_of(command, escape);
-    whole
-        && segments.iter().all(|segment| {
-            redirects_ok(segment, held)
-                && (!segment.words.iter().any(|word| named(word, held).is_some())
-                    || (segment.command && reader(&segment.words, escape, held, depth)))
-        })
-}
-
-/// Whether `segment`'s output redirections write no held file and no target built at run time.
-fn redirects_ok(segment: &Segment, held: &[Held]) -> bool {
-    segment.redirects.iter().all(|target| {
-        target.starts_with('&')
-            || target == "/dev/null"
-            || target.eq_ignore_ascii_case("$null")
-            || (named(target, held).is_none()
-                && !target.contains(['$', '`', '*', '?', '[', '{', '~']))
-    })
-}
-
-/// Whether the command `words`, which names a held file, is one of [`read_only`]'s readers.
-fn reader(words: &[String], escape: Escape, held: &[Held], depth: usize) -> bool {
-    let Some((program, args)) = super::shell::command_words(words).split_first() else {
-        return false;
-    };
-    match program_name(program).as_str() {
-        "cat" | "head" | "tail" | "wc" | "file" | "strings" => true,
-        "less" => !args.iter().any(|arg| {
-            arg.starts_with("-o")
-                || arg.starts_with("-O")
-                || arg.starts_with("--log-file")
-                || arg.starts_with("--LOG-FILE")
-        }),
-        "unzip" => {
-            let options: Vec<&String> = args.iter().filter(|arg| arg.starts_with('-')).collect();
-            options
-                .iter()
-                .any(|arg| matches!(arg.as_str(), "-l" | "-p" | "-v" | "-lv"))
-                && options
-                    .iter()
-                    .all(|arg| matches!(arg.as_str(), "-l" | "-p" | "-v" | "-lv" | "-q" | "-qq"))
-        }
-        "textutil" => {
-            args.iter().any(|arg| arg == "-stdout") && !args.iter().any(|arg| arg == "-output")
-        }
-        "pandoc" => !args.iter().enumerate().any(|(at, arg)| {
-            let out = match arg.as_str() {
-                "-o" | "--output" => args.get(at + 1).map(String::as_str),
-                _ => arg
-                    .strip_prefix("--output=")
-                    .or_else(|| arg.strip_prefix("-o").filter(|out| !out.is_empty())),
-            };
-            out.is_some_and(|out| named(out, held).is_some())
-        }),
-        "stetdoc" => stetdoc(words, held) == Stetdoc::Fine,
-        "sh" | "bash" | "zsh" | "dash" | "ksh" if depth > 0 => {
-            script(words, escape).is_some_and(|(inner, inner_escape)| {
-                inner_escape == Escape::Backslash
-                    && read_only_at(&inner, inner_escape, held, depth - 1)
-            })
-        }
-        _ => false,
-    }
 }
 
 #[cfg(test)]
