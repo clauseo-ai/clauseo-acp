@@ -78,12 +78,13 @@ impl ValidatedCommand {
 impl CommandEnvelope {
     /// Checks the command's shape rules decoding cannot (counts, sums, rules across fields),
     /// never state, and returns the [`ValidatedCommand`] the host takes. Each rule is written
-    /// once, on what it bounds: `SendPrompt`'s `content` (its text limit also for `EditQueuedPrompt`'s `text`),
-    /// [`MatterSource::NewFolder`] for a new folder's name, `AnswerElicitation`'s `response`,
-    /// `UndoStep`'s `files` and `RestoreVersion`'s `scope`, and [`MAX_FILE_LIST`] and
-    /// [`MAX_PATH_LIST_BYTES`] for both file lists, in which no path is named twice. Titles
-    /// ([`check_display_title`]), agent-chosen ids ([`AgentChoiceId`]), paths ([`MatterPath`]),
-    /// the delivery ([`DeliveryRequest`]) and ids were checked when they were decoded or built.
+    /// once, on what it bounds: `SendPrompt`'s `content` (its text limit also for
+    /// `EditQueuedPrompt`'s `text`), [`MatterSource::NewFolder`] for a new folder's name,
+    /// `AnswerElicitation`'s `response`, `UndoStep`'s `files` and `RestoreVersion`'s `scope`, and
+    /// [`MAX_FILE_LIST`] and [`MAX_PATH_LIST_BYTES`] for both file lists, in which no path is
+    /// named twice. Titles ([`check_display_title`]), agent-chosen ids ([`AgentChoiceId`]), paths
+    /// ([`MatterPath`]), the delivery ([`DeliveryRequest`]) and ids were checked when they were
+    /// decoded or built.
     ///
     /// # Errors
     ///
