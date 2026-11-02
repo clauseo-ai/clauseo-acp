@@ -102,6 +102,15 @@ export const ids = {
   wordLockRetry: "word-lock-retry",
   /** Open in Word: a .doc or .docx paper's tile on the wall, or the change note's button. */
   openInWord: "open-in-word",
+  /**
+   * The wait panel of a conversation whose turn waits behind another conversation of the matter,
+   * which holds the matter's writer: it names that conversation by its title, with no clock time.
+   */
+  otherWait: "other-wait",
+  /** In otherWait: stops the other conversation's turn, so this conversation's turn runs next. */
+  stopOther: "stop-other",
+  /** In otherWait: the panel's Queue button. */
+  queue: "queue",
 } as const;
 
 /** The `data-kind` of a version row: the matter's CheckpointKind in snake_case. */
@@ -234,6 +243,12 @@ export function window(page: Page) {
     wordLockRetry: id(ids.wordLockRetry),
     /** Open in Word, on a Word paper's tile or the change note. */
     openInWord: id(ids.openInWord),
+    /** The wait panel that names the other conversation holding the matter's writer. */
+    otherWait: id(ids.otherWait),
+    /** The Stop button inside the wait panel `panel`. */
+    stopOther: (panel: Locator): Locator => panel.getByTestId(ids.stopOther),
+    /** The Queue button inside the wait panel `panel`. */
+    queue: (panel: Locator): Locator => panel.getByTestId(ids.queue),
   };
 }
 
