@@ -57,6 +57,31 @@ impl Redactor {
         let text = replace_runs(&text, "sk-", Marker::Starts, is_key_char);
         replace_runs(&text, "bearer ", Marker::Precedes, is_token68_char)
     }
+
+    /// `text` without what may be the end of a secret whose start was cut off, which [`redact`]
+    /// would no longer know: first the longest end of a secret value it starts with, then the
+    /// run of bearer-token chars (a superset of key chars) after that, which covers the end of an
+    /// `sk-` key or a bearer token. A value may hold any char, so only its own end is left out
+    /// for it. Ordinary text loses the token chars it starts with, and any start that matches the
+    /// end of a secret value.
+    ///
+    /// [`redact`]: Redactor::redact
+    pub(crate) fn without_cut_secret<'t>(&self, text: &'t str) -> &'t str {
+        let rest = self
+            .secrets
+            .iter()
+            .filter_map(|secret| without_end_of(secret, text))
+            .min_by_key(|rest| rest.len())
+            .unwrap_or(text);
+        rest.trim_start_matches(is_token68_char)
+    }
+}
+
+/// `text` without the longest end of `secret` it starts with, if it starts with one.
+fn without_end_of<'t>(secret: &str, text: &'t str) -> Option<&'t str> {
+    secret
+        .char_indices()
+        .find_map(|(at, _)| text.strip_prefix(&secret[at..]))
 }
 
 fn is_secret_name(name: &OsStr) -> bool {

@@ -238,8 +238,10 @@ impl ExitReport {
     /// The end of the agent's stderr, at most 4096 bytes, redacted, opening on a whole line: the
     /// home folder becomes `~`, and the values of the spec's secret variables (names holding
     /// `KEY`, `TOKEN`, `SECRET` or `PASSWORD`, values of 8 bytes or more), words starting `sk-`
-    /// and the word after `Bearer ` (in any case) become `[redacted]`. It reads the ring when
-    /// called, so drive the stderr pump to its end first to include the last lines.
+    /// and the word after `Bearer ` (in any case) become `[redacted]`. When it cannot open on a
+    /// whole line, it leaves out what may be the end of a secret longer than what it redacts, so
+    /// no part of a secret is left at its start. It reads the
+    /// ring when called, so drive the stderr pump to its end first to include the last lines.
     pub fn stderr_tail(&self) -> String {
         stderr::tail(&self.stderr.ring, &self.stderr.redactor)
     }

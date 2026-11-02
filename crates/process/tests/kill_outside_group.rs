@@ -8,6 +8,7 @@
 #[path = "support/self_agent.rs"]
 mod self_agent;
 
+use std::collections::BTreeMap;
 use std::io::Write as _;
 use std::pin::pin;
 use std::time::Duration;
@@ -67,7 +68,12 @@ fn ladder_kills_an_agent_that_left_its_group() {
         stderr,
         handle,
         ..
-    } = self_agent::launch("agent_leaves_its_group_and_holds", &SpawnOptions::new()).unwrap();
+    } = self_agent::launch(
+        "agent_leaves_its_group_and_holds",
+        &SpawnOptions::new(),
+        BTreeMap::new(),
+    )
+    .unwrap();
     // Out of its group, the agent outlives the handle's tree kill; the guard ends it if the test
     // fails before the ladder does.
     let mut guard = KillOnDrop(Some(Pid::from_raw(i32::try_from(handle.pid()).unwrap())));
