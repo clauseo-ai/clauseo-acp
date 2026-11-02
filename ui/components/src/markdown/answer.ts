@@ -6,7 +6,7 @@
 // more view after the last block. Inline HTML is text but for the allowlisted tags (inline-tags.ts), and
 // headings get GitHub's slugs as ids, numbered across the whole answer (slugs.ts). What a view keeps once its
 // update has ended, and what parses a finished block again, is view.ts's.
-import type { Root as Hast, Text } from "hast";
+import type { Root as Hast } from "hast";
 import type { Root } from "mdast";
 import { sanitize } from "hast-util-sanitize";
 import { defListHastHandlers } from "mdast-util-definition-list";
@@ -23,12 +23,10 @@ import {
 import type { DefinitionLine, DefinitionLines } from "./definitions.ts";
 import {
   definedIn,
-  dropBackReferences,
   footnoteLabelsIn,
   footnotesIn,
   identifierOf,
   NO_FOOTNOTES,
-  noteHast,
   noteNumbersOf,
   numberFootnotes,
   placeholdersFor,
@@ -36,7 +34,7 @@ import {
   referencesFor,
   withoutPlaceholders,
 } from "./footnotes.ts";
-import type { Footnotes, NoteNumbers, Nths, Numbering, References } from "./footnotes.ts";
+import type { Footnotes, Nths, Numbering, References } from "./footnotes.ts";
 import { createCache, createIds, createJoiner, createVariants } from "./cache.ts";
 import { characterEntitiesLoaded, characterReferenceMisses } from "./entities.ts";
 import {
@@ -61,6 +59,7 @@ import { anchorHeadings, createSlugNumbering, headingId, withSlugs } from "./slu
 import { createSplitter, joinParts } from "./split.ts";
 import type { BlockEnd } from "./split.ts";
 import { extrasHandlers } from "./syntax-extras.ts";
+import { noteViewHast } from "./note-view.ts";
 import { EMPTY_HAST, plainText, seal, variantOf, viewOf } from "./view.ts";
 import type { BlockView, Fields } from "./view.ts";
 
@@ -405,32 +404,9 @@ export function createAnswer(scope: string): Answer {
     return noteViews.get(`${key}\u0002${streaming ? 1 : 0}`, () => {
       const numbers = noteNumbersOf(numbering, id);
       const shown = restore(note.source);
-      const make = () => noteHastOf(numbers, shown, lost);
+      const make = () => noteViewHast(scope, options, numbers, shown, lost);
       return view({ source: shown, input: key, streaming, note: id }, make(), make);
     });
-  };
-  /**
-   * A note's hast. As toView does for a block: a note too deep to walk safely, or any error on the way,
-   * shows its source (`shown`) as plain text, and what capNesting replaced reads as written.
-   */
-  const noteHastOf = (numbers: NoteNumbers, shown: string, lost: ReadonlySet<string>): Hast => {
-    const { note } = numbers;
-    try {
-      if (deeperThan(note.node, MAX_TREE_DEPTH)) throw new Error("too deep");
-      const raw = noteHast(scope, numbers, options);
-      // The note's own text, and the link definitions from other blocks it carries, may hold some.
-      markCutTags(raw, note.source, note.node.position?.start.offset ?? 0);
-      if (hasStandIns(note.source) || note.definitions.length > 0) restoreText(raw);
-      pairTags(raw, false);
-      if (lost.size > 0) dropBackReferences(raw, lost);
-      return sanitize(raw, SCHEMA) as Hast;
-    } catch {
-      const text: Text = { type: "text", value: shown.trimEnd() };
-      return {
-        type: "root",
-        children: [{ type: "element", tagName: "li", properties: {}, children: [text] }],
-      };
-    }
   };
   const notesOf = (
     numbering: Numbering,
