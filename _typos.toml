@@ -27,5 +27,6 @@ TME = "TME"
 # The ordinal suffix in "2nd" (the legal extras' superscripts, `2^nd^`), and Unicode's Nd (decimal number)
 # category in the slug pattern of ui/components/src/markdown/slugs.ts.
 nd = "nd"
-# The flate2 crate (gzip), a dependency of crates/agents named in ARCHITECTURE.md and its decision record.
+# The flate2 crate (gzip), a dependency of crates/agents and crates/counts named in ARCHITECTURE.md
+# and their decision records.
 flate = "flate"
