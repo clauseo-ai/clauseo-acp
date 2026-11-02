@@ -314,7 +314,7 @@ fn a_slow_app_subscriber_is_caught_up_with_the_current_settings() {
     let host = dir.start_with(0, |config| {
         config.with_app_subscription_capacity(SMALL_CAPACITY)
     });
-    // The first frames take three of the four places; `app` reads them.
+    // The first frames come through the front queue, not the channel; `app` reads them.
     let mut slow = app(&host);
     let mut other = app(&host);
     // 14 to 17 fill each channel, 18 finds it full and marks it lagged, 19 is not sent to it.

@@ -22,7 +22,7 @@ use crate::error::Error;
 mod subscription;
 
 pub use subscription::{AppSubscription, EventSubscription, Subscription};
-pub(crate) use subscription::{SUBSCRIPTION_CAPACITY, Sink};
+pub(crate) use subscription::{Front, SUBSCRIPTION_CAPACITY, Sink};
 
 /// A file a ref names, as [`HostHandle::locate_file`] found it: the matter that owns it, that
 /// matter's folder, and the file, as the host recorded them (not resolved).
