@@ -80,8 +80,8 @@ agent message text to one that does not (`:29655-29658`, `:44519-44523`). It nev
   not run.
 - **Every agent** is launched without the host's inherited `GIT_*` variables.
 - **The hooks seam.** `actor/turn/agents.rs`'s `codex_hooks` gives the `hooks` object that goes
-  into `CODEX_CONFIG`, from `agent::loads::codex_hook_config` once #162 part 2 lands; until then
-  none. With an object, the host calls codex-acp's `_codex/hooks/list` once after the session
+  into `CODEX_CONFIG`, from `codex_hook_config()` in `crates/host/src/agent/loads/codex.rs`
+  (clauseo-acp #152) once it merges; until then none. With an object, the host calls codex-acp's `_codex/hooks/list` once after the session
   starts and requires every listed session-flags hook to be `trustStatus: "trusted"`: Codex skips
   an untrusted hook silently, so a drifted hash would leave the guard off. Otherwise it logs an
   error and fails the session start with `agent.launch_failed`, and no prompt is sent.
