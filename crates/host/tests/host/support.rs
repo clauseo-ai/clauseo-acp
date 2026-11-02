@@ -55,20 +55,24 @@ pub(crate) fn wait<T>(what: &str, fut: impl Future<Output = T>) -> T {
     within(fut).unwrap_or_else(|| panic!("timed out after {WATCHDOG:?} waiting for {what}"))
 }
 
-/// A scenario for an agent id: a bundled one by name, or a file in `tests/scenarios/`.
-#[derive(Debug, Clone, Copy)]
+/// A scenario for an agent id: a bundled one by name, a file in `tests/scenarios/`, or one a
+/// test wrote itself (for a path only known at run time).
+#[derive(Debug, Clone)]
 pub(crate) enum Scenario {
     /// A scenario bundled with `fake_agent`, such as `prompt-stream`.
     Bundled(&'static str),
     /// `crates/host/tests/scenarios/<name>.jsonl`.
     Local(&'static str),
+    /// A scenario file the test wrote.
+    Written(PathBuf),
 }
 
 impl Scenario {
     /// The `--scenario` argument.
-    fn arg(self) -> String {
+    fn arg(&self) -> String {
         match self {
-            Self::Bundled(name) => name.to_owned(),
+            Self::Bundled(name) => (*name).to_owned(),
+            Self::Written(path) => path.display().to_string(),
             Self::Local(name) => Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("tests")
                 .join("scenarios")

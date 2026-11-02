@@ -26,8 +26,8 @@ use std::collections::BTreeSet;
 use clauseo_matters::TurnMeta;
 use clauseo_protocol::{
     AgentSessionDetached, CheckpointId, DetachReason, DomainEvent, ElicitationId, ElicitationState,
-    Envelope, ErrorCode, EventId, MatterPath, PermissionRequestId, PermissionState, StopReason,
-    StreamId, ThreadId, ThreadStatus, ToolCallId, TurnId, TurnQueued, UserMessageStatus, ViewEntry,
+    Envelope, ErrorCode, EventId, PermissionRequestId, PermissionState, StopReason, StreamId,
+    ThreadId, ThreadStatus, ToolCallId, TurnId, TurnQueued, UserMessageStatus, ViewEntry,
 };
 use clauseo_reducer::ThreadState;
 
@@ -38,7 +38,7 @@ use super::out::Out;
 use super::{JobKind, LogFor, Then, TurnInput, TurnJob, end, matter_of, state};
 use crate::error::Error;
 use crate::matter_worker::{MatterJob, TurnCheckpoint};
-use crate::sent::SentView;
+use crate::sent::{SentView, TurnPaths};
 
 /// A started turn's repair, while its after-turn checkpoint runs.
 #[derive(Debug)]
@@ -71,7 +71,7 @@ struct Waiting {
     /// by a failed repair commit, then a clock set back before a later turn starts, could
     /// reverse it (follow-up: seed the id source from the newest stored id).
     started: Option<EventId>,
-    tool_paths: BTreeSet<MatterPath>,
+    tool_paths: TurnPaths,
     before: Option<CheckpointId>,
     pending: Pending,
 }
@@ -323,22 +323,22 @@ fn checkpoint_before(log: &[Envelope], turn: TurnId) -> Option<CheckpointId> {
     })
 }
 
-/// The matter paths the turn's tool calls named.
-fn turn_paths(log: &[Envelope], turn: TurnId) -> BTreeSet<MatterPath> {
+/// The places the turn's tool calls named.
+fn turn_paths(log: &[Envelope], turn: TurnId) -> TurnPaths {
     let mut tools: BTreeSet<ToolCallId> = BTreeSet::new();
-    let mut paths = BTreeSet::new();
+    let mut paths = TurnPaths::default();
     for envelope in log {
         if let DomainEvent::ToolCallStarted(started) = &envelope.event
             && started.turn == turn
         {
             tools.insert(started.tool_call);
-            crate::sent::note_paths(&mut paths, &started.locations, &started.content);
+            paths.note(&started.locations, &started.content);
         } else if let DomainEvent::ToolCallUpdated(updated) = &envelope.event
             && tools.contains(&updated.tool_call)
         {
             let locations = updated.patch.locations.as_deref().unwrap_or_default();
             let content = updated.patch.content.as_deref().unwrap_or_default();
-            crate::sent::note_paths(&mut paths, locations, content);
+            paths.note(locations, content);
         }
     }
     paths

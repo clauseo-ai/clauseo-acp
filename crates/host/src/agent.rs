@@ -11,6 +11,7 @@ pub(crate) mod loads;
 mod spec;
 
 use std::future::Future;
+use std::path::{Path, PathBuf};
 use std::pin::pin;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -33,6 +34,19 @@ pub(crate) use spec::launch_spec;
 /// so the exit report's tail holds the last lines and [`Ended`] follows every event. A helper the
 /// agent left holding a pipe cannot hold the report back longer than this.
 pub(crate) const PUMP_END_BOUND: Duration = Duration::from_secs(1);
+
+/// The one spelling of matter folder `stored` an agent works in, as its process's working
+/// folder and its session's `cwd`: its canonical path (`dunce::canonicalize`: symlinks and `..`
+/// followed, no Windows `\\?\` prefix), or `stored` itself when that fails. The host starts
+/// the agent in it and sends it as `cwd` on `session/new` and `session/load`, so it is the
+/// folder `acp` maps tool locations against. Claude Code works in the real path of its cwd and
+/// names its files through it; sent the folder as the lawyer picked it (macOS `/tmp`, really
+/// `/private/tmp`), every tool path of the turn would land outside the matter.
+///
+/// A blocking file system call (a few `lstat`s): call it once per agent start or session start.
+pub fn session_folder(stored: &Path) -> PathBuf {
+    dunce::canonicalize(stored).unwrap_or_else(|_| stored.to_path_buf())
+}
 
 /// What an agent's tasks post to the actor, in the order it happens.
 #[derive(Debug)]

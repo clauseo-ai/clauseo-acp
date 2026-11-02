@@ -316,7 +316,7 @@ fn tool_call(
         return Ok(());
     }
     if let Some(current) = current(actor, thread) {
-        crate::sent::note_paths(&mut current.tool_paths, &call.locations, &call.content);
+        current.tool_paths.note(&call.locations, &call.content);
     }
     let id = actor.ids.mint(actor.clock.now().wall)?;
     let (built, _fields) = build::tool_call_started(turn, id, call);
@@ -345,7 +345,7 @@ fn tool_update(
             if let Some(current) = current(actor, thread) {
                 let locations = patch.locations.as_deref().unwrap_or_default();
                 let content = patch.content.as_deref().unwrap_or_default();
-                crate::sent::note_paths(&mut current.tool_paths, locations, content);
+                current.tool_paths.note(locations, content);
             }
         }
         Context::Outside { replay: false } => {}

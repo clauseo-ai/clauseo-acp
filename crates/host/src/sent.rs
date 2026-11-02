@@ -41,13 +41,7 @@ pub(crate) fn note_paths(
     locations: &[ToolLocation],
     content: &[ToolCallContent],
 ) {
-    let diffs = content.iter().filter_map(|item| match item {
-        ToolCallContent::Diff { path, .. } => Some(path),
-        ToolCallContent::Text { .. }
-        | ToolCallContent::Content { .. }
-        | ToolCallContent::Unknown { .. } => None,
-    });
-    for location in locations.iter().chain(diffs) {
+    for location in locations.iter().chain(diffs(content)) {
         match location {
             ToolLocation::Inside { path, .. } => {
                 if !paths.contains(path) {
@@ -57,6 +51,44 @@ pub(crate) fn note_paths(
             ToolLocation::Outside { .. } | ToolLocation::Unknown { .. } => {}
         }
     }
+}
+
+/// The places a turn's tool calls named, for the after-turn checkpoint: the matter paths, and
+/// the text of every location or diff `acp` placed outside the session folder. A spelling of a
+/// matter file that no text comparison with the folder places inside it (through a symlink, in
+/// another case) is among `outside`; the matter thread resolves those on the disk
+/// (`matter_worker`) before it decides which changes no tool call named.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct TurnPaths {
+    /// The matter paths ([`note_paths`]).
+    pub(crate) inside: BTreeSet<MatterPath>,
+    /// The `Outside` locations and diffs, as `acp` displays them (the path as the agent sent
+    /// it).
+    pub(crate) outside: BTreeSet<String>,
+}
+
+impl TurnPaths {
+    /// Adds the places one tool call or update names.
+    pub(crate) fn note(&mut self, locations: &[ToolLocation], content: &[ToolCallContent]) {
+        note_paths(&mut self.inside, locations, content);
+        for location in locations.iter().chain(diffs(content)) {
+            if let ToolLocation::Outside { display } = location
+                && !self.outside.contains(display)
+            {
+                self.outside.insert(display.clone());
+            }
+        }
+    }
+}
+
+/// The locations of the diffs among `content`.
+fn diffs(content: &[ToolCallContent]) -> impl Iterator<Item = &ToolLocation> {
+    content.iter().filter_map(|item| match item {
+        ToolCallContent::Diff { path, .. } => Some(path),
+        ToolCallContent::Text { .. }
+        | ToolCallContent::Content { .. }
+        | ToolCallContent::Unknown { .. } => None,
+    })
 }
 
 /// A permission request with no answer logged yet.

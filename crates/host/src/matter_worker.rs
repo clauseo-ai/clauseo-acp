@@ -14,6 +14,7 @@ use clauseo_matters::{
     Checkpoint, CheckpointOutcome, CommitId, CompareSide, HeldOpen, ImportWarning, Imported,
     Limits, Matter, MissingReason, NewMatter, OsProbe, PaperList, Restore, RestorePlan, Restored,
     Retention, Settings, TimelineEntry, TurnMeta, UndoRequest, Undone, held_open_at,
+    matter_path_in,
 };
 use clauseo_protocol::{
     CheckpointId, CheckpointKind, FileChange, FileDecision, ImportSummary, MatterId, MatterPath,
@@ -21,6 +22,24 @@ use clauseo_protocol::{
 };
 
 use crate::error::Error;
+use crate::sent::TurnPaths;
+
+/// The matter paths a turn's tool calls named, in `folder`: those `acp` placed inside the
+/// session folder by text, and each `outside` path that [`matter_path_in`] resolves into
+/// `folder` on the disk (a spelling through a symlink, or in another case where the file system
+/// ignores case). The rest lie outside the matter.
+pub(crate) fn tool_paths(folder: &Path, paths: TurnPaths) -> BTreeSet<MatterPath> {
+    let TurnPaths {
+        mut inside,
+        outside,
+    } = paths;
+    for path in outside {
+        if let Some(found) = matter_path_in(folder, Path::new(&path)) {
+            inside.insert(found);
+        }
+    }
+    inside
+}
 
 /// The name every matter thread carries.
 const THREAD_NAME: &str = "clauseo-matter";
@@ -89,11 +108,12 @@ pub(crate) enum MatterJob {
     },
     /// The before-turn checkpoint.
     BeforeTurn(TurnMeta),
-    /// The after-turn checkpoint with the paths the turn's tool calls named, and the turn's
-    /// before-turn checkpoint when the host knows it (for a reused id's changes).
+    /// The after-turn checkpoint with the places the turn's tool calls named ([`tool_paths`]
+    /// resolves them), and the turn's before-turn checkpoint when the host knows it (for a
+    /// reused id's changes).
     AfterTurn {
         meta: TurnMeta,
-        tool_paths: BTreeSet<MatterPath>,
+        tool_paths: TurnPaths,
         before: Option<CheckpointId>,
     },
     /// The start-up repair of a turn the log left open, answered as [`MatterReply::AfterTurn`]:
@@ -102,7 +122,7 @@ pub(crate) enum MatterJob {
     /// checkpoint otherwise (see [`repair`]).
     Repair {
         meta: TurnMeta,
-        tool_paths: BTreeSet<MatterPath>,
+        tool_paths: TurnPaths,
         before: Option<CheckpointId>,
         /// No other open turn of the matter started after this one.
         last: bool,
@@ -318,6 +338,7 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
             tool_paths,
             before,
         } => MatterReply::AfterTurn(open(settings, slot).and_then(|matter| {
+            let tool_paths = self::tool_paths(matter.folder(), tool_paths);
             let checkpoint = matter.after_turn(&meta, &tool_paths)?;
             turn_checkpoint(matter, checkpoint, before)
         })),
@@ -326,10 +347,10 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
             tool_paths,
             before,
             last,
-        } => MatterReply::AfterTurn(
-            open(settings, slot)
-                .and_then(|matter| repair(matter, &meta, &tool_paths, before, last)),
-        ),
+        } => MatterReply::AfterTurn(open(settings, slot).and_then(|matter| {
+            let tool_paths = self::tool_paths(matter.folder(), tool_paths);
+            repair(matter, &meta, &tool_paths, before, last)
+        })),
         MatterJob::Undo(job) => MatterReply::Undone(open(settings, slot).and_then(|matter| {
             let request = UndoRequest {
                 before: job.before,

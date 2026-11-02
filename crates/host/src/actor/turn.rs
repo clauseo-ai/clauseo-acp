@@ -30,7 +30,7 @@ mod text;
 mod undo;
 mod updates;
 
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::VecDeque;
 
 use clauseo_protocol::{
     AgentChoiceId, ContentBlock, DetachReason, ElicitationResponse, ErrorCode, LimitStopReason,
@@ -130,8 +130,8 @@ struct Current {
     cancelled: bool,
     /// The first limit signal of the turn.
     limit: Option<LimitMark>,
-    /// The matter paths the turn's tool calls named, for the after-turn checkpoint.
-    tool_paths: BTreeSet<MatterPath>,
+    /// The places the turn's tool calls named, for the after-turn checkpoint.
+    tool_paths: crate::sent::TurnPaths,
     /// The before-turn checkpoint, once step 4 has it.
     checkpoint_before: Option<clauseo_protocol::CheckpointId>,
     /// Drops the prompt's call (the cancel fallback).
