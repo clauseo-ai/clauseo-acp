@@ -657,5 +657,157 @@
     "at": "2026-11-02",
     "by": "Rohan",
     "note": "Rohan, on the review page (built from U3 00b64f56)"
+  },
+  "U4-01": {
+    "en": "Don't allow for this matter",
+    "hi": "इस मामले के लिए अनुमति न दें",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U4 f96fdf40)"
+  },
+  "U4-02": {
+    "en": "Clauseo asks before going on.",
+    "hi": "आगे बढ़ने से पहले Clauseo आपसे पूछता है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U4 f96fdf40)"
+  },
+  "U4-03": {
+    "en": "No longer waiting for an answer.",
+    "hi": "अब उत्तर की प्रतीक्षा नहीं है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U4 f96fdf40)"
+  },
+  "U4-04": {
+    "en": "Allowed once.",
+    "hi": "एक बार अनुमति दी गई।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U4 f96fdf40)"
+  },
+  "U4-05": {
+    "en": "Allowed for this matter.",
+    "hi": "इस मामले के लिए अनुमति दी गई।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U4 f96fdf40)"
+  },
+  "U4-06": {
+    "en": "Not allowed.",
+    "hi": "अनुमति नहीं दी गई।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U4 f96fdf40)"
+  },
+  "U4-07": {
+    "en": "Not allowed for this matter.",
+    "hi": "इस मामले के लिए अनुमति नहीं दी गई।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U4 f96fdf40)"
+  },
+  "U4-08": {
+    "en": "Clauseo wants to save a new version of {paper}.",
+    "hi": "Clauseo {paper} का नया संस्करण सहेजना चाहता है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page: a design string in place (built from U4 f96fdf40)"
+  },
+  "U4-09": {
+    "en": "Allow once",
+    "hi": "एक बार अनुमति दें",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page: a design string in place (built from U4 f96fdf40)"
+  },
+  "U4-10": {
+    "en": "Always for this matter",
+    "hi": "इस मामले के लिए हमेशा",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page: a design string in place (built from U4 f96fdf40)"
+  },
+  "U4-11": {
+    "en": "Don't allow",
+    "hi": "अनुमति न दें",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page: a design string in place (built from U4 f96fdf40)"
+  },
+  "U4-12": {
+    "en": "Allowed once. Clauseo saved a new version of {paper}.",
+    "hi": "एक बार अनुमति दी गई। Clauseo ने {paper} का नया संस्करण सहेजा।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page: a design string in place (built from U4 f96fdf40)"
+  },
+  "U4-13": {
+    "en": "Allowed for this matter. Clauseo saved a new version of {paper}.",
+    "hi": "इस मामले के लिए अनुमति दी गई। Clauseo ने {paper} का नया संस्करण सहेजा।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page: a design string in place (built from U4 f96fdf40)"
+  },
+  "U4-14": {
+    "en": "Not allowed. Clauseo left {paper} as it was.",
+    "hi": "अनुमति नहीं दी गई। Clauseo ने {paper} में कोई बदलाव नहीं किया।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page: a design string in place (built from U4 f96fdf40)"
+  },
+  "U4-15": {
+    "en": "Every change is kept.",
+    "hi": "हर बदलाव सुरक्षित रहता है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page: a design string in place (built from U4 f96fdf40)"
+  },
+  "U4-16": {
+    "en": "macOS is asking you to confirm.",
+    "hi": "macOS आपसे पुष्टि माँग रहा है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page: a design string in place (built from U4 f96fdf40)"
+  },
+  "U4-17": {
+    "en": "Windows is asking you to confirm.",
+    "hi": "Windows आपसे पुष्टि माँग रहा है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page: a design string in place (built from U4 f96fdf40)"
+  },
+  "U4-18": {
+    "en": "A question for you",
+    "hi": "आपसे एक प्रश्न",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page: a design string in place (built from U4 f96fdf40)"
+  },
+  "U4-19": {
+    "en": "Stop the answer",
+    "hi": "उत्तर रोकें",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page: a design string in place (built from U4 f96fdf40)"
   }
 }
