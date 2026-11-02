@@ -10,4 +10,9 @@
   .ver-room-band {
     display: contents;
   }
+  /* at now, a line for what just happened is the card's first row: it starts as far below the card's edge as the
+     band's row does */
+  .ver-room-band > .ver-notice:first-child {
+    padding-top: var(--s3);
+  }
 }
