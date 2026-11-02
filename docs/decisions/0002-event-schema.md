@@ -132,6 +132,7 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
 | `events` (`HostEvent`) | envelopes, replayed then live | host | no | the subscribed stream |
 | `caught_up` (`HostEvent`) | stream, last_seq; once per `SubscribeEvents`, between replay and live | host | no | the subscribed stream |
 | `account_limits_changed` (`HostEvent`) | `AccountLimits` | limits, through the host | no | none |
+| `limits_view_changed` (`HostEvent`) | `LimitsView`, the whole view after a change | limits, through the host | no | none; `subscribe_limits` subscribers only |
 
 - Exactly one `turn_ended` per turn, including errors, cancels and a queued turn cancelled before it
   started. `turn_failed` and `turn_stopped_at_limit` add detail and never replace it;

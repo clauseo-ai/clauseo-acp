@@ -241,9 +241,10 @@ its step card, and compare (below) lists the files between any two versions.
 
 ## 8. Account limits
 
-Delivered by `HostEvent::AccountLimitsChanged`, never logged. The mapping from `AccountLimits` to
-`LimitsView` (freshness needs the clock) is the planned `limits` crate's job; these are the types it
-fills. The wire writes the tones in snake case (`at_limit`).
+Delivered by `HostEvent::AccountLimitsChanged`, never logged. The window's whole limits view
+(`LimitsView`) arrives by `HostEvent::LimitsViewChanged` on the limits subscription, never logged and
+in no stream. The mapping from `AccountLimits` to `LimitsView` (freshness needs the clock) is
+`limits`' job (`crates/limits/src/view.rs`). The wire writes the tones in snake case (`at_limit`).
 
 | State | Type and variant | Data the screen gets |
 |---|---|---|
@@ -253,12 +254,15 @@ fills. The wire writes the tones in snake case (`at_limit`).
 | Fresh, read under 15 minutes ago | `LimitSource::Fresh` | numbers, reset times, `Freshness::Fresh` |
 | Stale, aged or the last read failed | `LimitSource::Stale` with `StaleReason::Aged`, `StaleReason::ReadFailed` | same numbers, muted, with the check time; `Freshness::Stale` |
 | Loading, first read | `LimitSource::Loading` | no numbers; `Freshness::Loading` |
-| Unavailable, never read or read failed | `LimitSource::Unavailable` with `UnavailableReason::NeverRead`, `UnavailableReason::ReadFailed` | a try-again action; chat never blocked; `Freshness::Unavailable` |
+| Unavailable, never read or read failed | `LimitSource::Unavailable` with `UnavailableReason::NeverRead`, `UnavailableReason::ReadFailed` | a try-again action (`HostCommand::RefreshLimits` with `RefreshWhy::TryAgain`); chat never blocked; `Freshness::Unavailable` |
 | Unavailable, the sign-in lacks the profile scope | `UnavailableReason::MissingScope` | a sign-in-again action; `Freshness::MissingScope` |
-| Not applicable (API key, Bedrock, Vertex) | `LimitSource::NotApplicable` | `BillingKind::PayAsYouGo`, `at_limit_text`, the cost line; no bars; `Freshness::NotApplicable`. The provider (`BillingProvider`) is only in `AccountLimits`, not in `AgentLimitsView` |
+| Not applicable (API key, Bedrock, Vertex) | `LimitSource::NotApplicable` | `BillingKind::PayAsYouGo`, `at_limit_text`, the cost line; no bars; `Freshness::NotApplicable`. `AgentLimitsView.provider` (`BillingProvider`) names who bills it: `BillingProvider::Anthropic` (Anthropic), `BillingProvider::Bedrock` (AWS), `BillingProvider::Vertex` (Google Cloud), `BillingProvider::OpenAi` (OpenAI API account), `BillingProvider::Other`; no provider for a plan |
 | Live only, from the agent's signal while it works | `LimitSource::LiveOnly` | live bars, the update time (`checked_at`); `Freshness::LiveOnly` |
 | Freshness from a newer Clauseo | `LimitSource::Unknown` | as unavailable |
 | Reset time passed, one row | `WindowFreshness::ResetPassed` | the reset time, refreshing; never the old percentage |
+| Next refresh on the settings page, planned copy "Refreshes at the 4:45 pm reset" | `AgentLimitsView.next_read_at` | the next shown reset time; left out when no reset is pending |
+| Refresh when a window gets focus, or a meter or the settings page opens | `HostCommand::RefreshLimits` with `RefreshWhy::Shown` | reads only data older than 5 minutes; answers `Done` and logs nothing; `agent` left out means every agent |
+| Try again | `HostCommand::RefreshLimits` with `RefreshWhy::TryAgain` | reads now unless a read is in flight; no read while that agent has a permission or elicitation pending, it starts once answered |
 | At the limit, the agent pauses | `AtLimitBehaviour::Pauses` | `at_limit_text`, which the planned `limits` crate writes from the behaviour |
 | At the limit, extra usage | `AtLimitBehaviour::ExtraUsage` | as above (whether extra usage is on is folded into the text) |
 | At the limit, credits | `AtLimitBehaviour::Credits` | as above (whether the plan has credits is folded into the text) |
@@ -268,7 +272,7 @@ fills. The wire writes the tones in snake case (`at_limit`).
 | At-limit card actions: continue at the reset (sandboxed matter only), notify, ask the other signed-in agent | planned: the `limits` crate | reset time, the other agent's sign-in state |
 | Sidebar paused | `ThreadStatus::PausedAtLimit` | reset time |
 | Agent-picker line | `AgentLimitsView.meter` per `AgentKind::Claude`, `AgentKind::Codex` | tightest window: used percent, label |
-| Plan and usage settings page | `LimitsView` | per agent: plan, `BillingKind::Plan` or `BillingKind::PayAsYouGo`, each `LimitWindowView` (label, used percent, tone, reset time, freshness), at-limit text, check time |
+| Plan and usage settings page | `LimitsView` | per agent: plan, `BillingKind::Plan` or `BillingKind::PayAsYouGo` with its provider, each `LimitWindowView` (label, used percent, tone, reset time, freshness), at-limit text, check time, next read time |
 
 ## 9. Errors
 
