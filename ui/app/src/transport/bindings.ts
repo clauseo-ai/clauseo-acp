@@ -2540,8 +2540,9 @@ export type SteeringCapability = {
 };
 
 /**
- *  The step card of an ended turn that started; the reducer writes none for a turn that ends
- *  without starting (a queued prompt removed or cancelled). Entry id `step:<turn>`.
+ *  The step card of an ended turn that started, or that failed before it started (its agent's
+ *  launch failed); the reducer writes none for a turn cancelled before it starts (a queued prompt
+ *  removed or cancelled). Entry id `step:<turn>`.
  */
 export type StepEntry = {
 	/**  The `seq` of `TurnEnded`. */
@@ -3245,8 +3246,8 @@ export type ViewEntry =
 /**  An elicitation. */
 ({ elicitation: ElicitationEntry }) & { agent_content?: never; agent_text?: never; header?: never; limit_stop?: never; marker?: never; matter_header?: never; notice?: never; permission?: never; step?: never; tool_call?: never; user_message?: never; version?: never } | 
 /**
- *  The step card: one per ended turn that started. A turn that ends without starting
- *  (removed from the queue) gets none.
+ *  The step card: one per ended turn that started or failed before it started. A turn
+ *  cancelled before it starts (removed from the queue) gets none.
  */
 ({ step: StepEntry }) & { agent_content?: never; agent_text?: never; elicitation?: never; header?: never; limit_stop?: never; marker?: never; matter_header?: never; notice?: never; permission?: never; tool_call?: never; user_message?: never; version?: never } | 
 /**  A turn stopped at the usage limit: the at-limit card. */

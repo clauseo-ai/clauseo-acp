@@ -62,8 +62,10 @@
 //! - Entries live in a `BTreeMap` by `order`; the id indexes are std `HashMap`s, never iterated
 //!   or saved, rebuilt when a state is decoded. Everything serialised is ordered, so equal
 //!   states serialise to equal bytes.
-//! - [`REDUCER_SCHEMA_VERSION`] versions the snapshot shape: any change to a state field or how
-//!   it serialises bumps it (the insta test `snapshot_shape_is_pinned` fails until it is).
+//! - [`REDUCER_SCHEMA_VERSION`] versions the snapshot shape: any change to a state field, to how
+//!   it serialises, or to how events fold into it bumps it (the insta test
+//!   `snapshot_shape_is_pinned` fails until it is on a shape change; a fold-rule change needs the
+//!   bump by hand).
 //!
 //! # Depends on
 //!

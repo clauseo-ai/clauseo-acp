@@ -253,8 +253,9 @@ pub struct ElicitationEntry {
     pub answered_at: Option<Timestamp>,
 }
 
-/// The step card of an ended turn that started; the reducer writes none for a turn that ends
-/// without starting (a queued prompt removed or cancelled). Entry id `step:<turn>`.
+/// The step card of an ended turn that started, or that failed before it started (its agent's
+/// launch failed); the reducer writes none for a turn cancelled before it starts (a queued prompt
+/// removed or cancelled). Entry id `step:<turn>`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct StepEntry {

@@ -98,7 +98,8 @@ entries page in on scroll through `HostQuery::PageEntries`, which returns `Query
 
 ## 3. Step card
 
-One `ViewEntry::Step` per ended turn that started (a turn that ends without starting gets none;
+One `ViewEntry::Step` per ended turn that started, and per turn that failed before it started (its
+agent's launch failed; decision 0002) (a turn cancelled or removed before it starts gets none;
 see the cancelled row): stop reason, the failure code (`failure`) when it failed, files
 changed, skipped files, the after-turn checkpoint or none, `undone` once the step was undone, and
 token usage (`usage`: total, input, output, thought, `cached_read`, `cached_write`) when the agent

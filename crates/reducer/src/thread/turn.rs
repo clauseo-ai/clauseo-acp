@@ -2,7 +2,7 @@
 
 use clauseo_protocol::{
     DetachReason, EntryId, EventId, FilesChanged, LimitStopEntry, MarkerKind, Seq, StepEntry,
-    StepUndone, ThreadStatus, Timestamp, TurnEnded, TurnFailed, TurnId, TurnQueued,
+    StepUndone, StopReason, ThreadStatus, Timestamp, TurnEnded, TurnFailed, TurnId, TurnQueued,
     TurnStoppedAtLimit, UserMessage, UserMessageEntry, UserMessageStatus, ViewEntry,
 };
 
@@ -182,11 +182,14 @@ pub(super) fn stopped_at_limit(
     }
 }
 
-/// Ends the running turn: its step, then the status. A `TurnEnded` of a turn that is not
-/// running (one that never started) makes no step and marks its user message `Removed`
-/// (0002); it leaves the status, but for `Starting` from that turn's own prompt, or `Queued` from
-/// its wait for another thread's writer, while no turn runs, which settles (to `Idle` unless the
-/// lawyer is asked). A second `TurnEnded` of a turn with a step is [`Anomaly::Duplicate`].
+/// Ends the running turn: its step, then the status. A `TurnEnded { Failed }` of a turn that
+/// never started (its launch or its before-turn checkpoint failed) ends the same way: its prompt
+/// stays and it gets a step with its failure, and, as the thread's last turn while no turn runs,
+/// it settles the status (0002). Any other `TurnEnded` of a turn that is not running (a prompt
+/// removed or cancelled before its turn) makes no step and marks its user message `Removed`; it
+/// leaves the status, but for `Starting` from that turn's own prompt, or `Queued` from its wait
+/// for another thread's writer, while no turn runs, which settles (to `Idle` unless the lawyer
+/// is asked). A second `TurnEnded` of a turn with a step is [`Anomaly::Duplicate`].
 pub(super) fn turn_ended(
     state: &mut ThreadState,
     seq: Seq,
@@ -201,7 +204,8 @@ pub(super) fn turn_ended(
         });
         return;
     }
-    if state.running != Some(event.turn) {
+    let running = state.running == Some(event.turn);
+    if !running && event.stop != StopReason::Failed {
         state.files.remove(&event.turn);
         state.failures.remove(&event.turn);
         remove_prompts(state, event.turn, out);
@@ -217,7 +221,9 @@ pub(super) fn turn_ended(
         }
         return;
     }
-    state.running = None;
+    if running {
+        state.running = None;
+    }
     let files = state.files.remove(&event.turn);
     let (files, skipped) = files.map_or_else(Default::default, |f| (f.files, f.skipped));
     let entry = StepEntry {
@@ -234,6 +240,10 @@ pub(super) fn turn_ended(
     };
     state.index.steps.insert(event.turn, seq);
     insert_new(state, seq, ViewEntry::Step(entry), out);
+    if !running && (state.running.is_some() || state.turn != Some(event.turn)) {
+        // Not the thread's last turn: the status belongs to another.
+        return;
+    }
     let after = state.after_turn.take();
     let status = match state.status() {
         paused @ ThreadStatus::PausedAtLimit { .. } => paused,
@@ -249,8 +259,8 @@ pub(super) fn turn_ended(
     set_status(state, "turn_ended", out, status);
 }
 
-/// Marks the user messages of `turn`, which ended without starting, `Removed`. It walks every
-/// entry: a turn that never started is rare (a prompt removed or cancelled before its turn), and
+/// Marks the user messages of `turn`, which ended without starting or failing, `Removed`. It
+/// walks every entry: such a turn is rare (a prompt removed or cancelled before its turn), and
 /// an index from turns to prompts would be one more to keep.
 fn remove_prompts(state: &mut ThreadState, turn: TurnId, out: &mut Applied) {
     for entry in state.entries.values_mut() {
