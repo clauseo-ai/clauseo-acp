@@ -3,6 +3,7 @@
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
+use std::time::Duration;
 
 use clauseo_process::{AgentStdin, LaunchSpec, Launched, Launcher};
 use futures::StreamExt;
@@ -19,7 +20,7 @@ fn fake_agent_writes_in_the_matter_and_its_notes() {
     let policy = w.builder().runtime(&bin).build().unwrap();
     let matter = policy.matter().to_owned();
     let notes = policy.notes().unwrap().to_owned();
-    let (launcher, _denials) = launcher(policy);
+    let (launcher, denials) = launcher(policy);
     let args = vec![
         OsString::from("--scenario"),
         OsString::from("sandbox-probe"),
@@ -38,37 +39,56 @@ fn fake_agent_writes_in_the_matter_and_its_notes() {
             stdin: &mut stdin,
             lines: &mut lines,
         };
-        call.answer(
-            1,
-            "initialize",
-            json!({"protocolVersion": 1, "clientCapabilities": {}}),
-        )
+        let answered = async {
+            call.answer(
+                1,
+                "initialize",
+                json!({"protocolVersion": 1, "clientCapabilities": {}}),
+            )
+            .await?;
+            let new = json!({"cwd": matter, "mcpServers": []});
+            assert_eq!(
+                call.answer(2, "session/new", new).await?["sessionId"],
+                "sess-1"
+            );
+            let prompt = json!({"sessionId": "sess-1", "prompt": [{"type": "text", "text": "go"}]});
+            assert_eq!(
+                call.answer(3, "session/prompt", prompt).await?["stopReason"],
+                "end_turn"
+            );
+            let new = json!({"cwd": notes, "mcpServers": []});
+            assert_eq!(
+                call.answer(4, "session/new", new).await?["sessionId"],
+                "sess-2"
+            );
+            let prompt = json!({"sessionId": "sess-2", "prompt": [{"type": "text", "text": "go"}]});
+            assert_eq!(
+                call.answer(5, "session/prompt", prompt).await?["stopReason"],
+                "end_turn"
+            );
+            Ok::<(), u64>(())
+        }
         .await;
-        let new = json!({"cwd": matter, "mcpServers": []});
-        assert_eq!(
-            call.answer(2, "session/new", new).await["sessionId"],
-            "sess-1"
-        );
-        let prompt = json!({"sessionId": "sess-1", "prompt": [{"type": "text", "text": "go"}]});
-        assert_eq!(
-            call.answer(3, "session/prompt", prompt).await["stopReason"],
-            "end_turn"
-        );
-        let new = json!({"cwd": notes, "mcpServers": []});
-        assert_eq!(
-            call.answer(4, "session/new", new).await["sessionId"],
-            "sess-2"
-        );
-        let prompt = json!({"sessionId": "sess-2", "prompt": [{"type": "text", "text": "go"}]});
-        assert_eq!(
-            call.answer(5, "session/prompt", prompt).await["stopReason"],
-            "end_turn"
-        );
         stdin.close().await.unwrap();
-        handle.exited().await
+        (answered, handle.exited().await)
     };
-    let (report, pumped) = async_io::block_on(async { futures::join!(script, stderr.drain()) });
+    let ((answered, report), pumped) =
+        async_io::block_on(async { futures::join!(script, stderr.drain()) });
     pumped.unwrap();
+    if let Err(id) = answered {
+        // The watcher reports a denial a moment after it happens, so give it a little time.
+        let mut seen = Vec::new();
+        while let Ok(d) = denials.recv_timeout(Duration::from_secs(2)) {
+            seen.push(d);
+        }
+        panic!(
+            "the pipes closed before the answer to request {id}: exit code {:?}, signal {:?}, \
+             denials {seen:#?}, stderr:\n{}",
+            report.code(),
+            report.signal(),
+            report.stderr_tail()
+        );
+    }
     assert_eq!(
         report.code(),
         Some(clauseo_fake_agent::EXIT_OK),
@@ -92,17 +112,24 @@ struct Call<'a, L> {
 }
 
 impl<L: futures::Stream<Item = std::io::Result<String>> + Unpin> Call<'_, L> {
-    /// Sends request `id` and returns its result.
-    async fn answer(&mut self, id: u64, method: &str, params: Value) -> Value {
+    /// Sends request `id` and returns its result, or `Err(id)` when the agent's pipes close first.
+    async fn answer(&mut self, id: u64, method: &str, params: Value) -> Result<Value, u64> {
         let request = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
-        self.stdin
+        // A write fails with a broken pipe once the agent has exited: report it like an
+        // early end of stdout, with the exit and stderr.
+        let sent = self
+            .stdin
             .write_all(format!("{request}\n").as_bytes())
-            .await
-            .unwrap();
-        self.stdin.flush().await.unwrap();
-        let line = self.lines.next().await.expect("an answer").unwrap();
+            .await;
+        if sent.and(self.stdin.flush().await).is_err() {
+            return Err(id);
+        }
+        let Some(line) = self.lines.next().await else {
+            return Err(id);
+        };
+        let line = line.unwrap();
         let answer: Value = serde_json::from_str(&line).unwrap();
         assert_eq!(answer["id"], id, "{answer}");
-        answer["result"].clone()
+        Ok(answer["result"].clone())
     }
 }
