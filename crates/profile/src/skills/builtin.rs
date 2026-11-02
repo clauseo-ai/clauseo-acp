@@ -15,6 +15,11 @@ use crate::placeholders::IN_INSTRUCTIONS;
 /// R22's three skills, by name: the fixed list the renderer and cleanup act on.
 pub const BUILTIN: [&str; 3] = ["legal-drafting", "legal-research", "matter-brief"];
 
+/// Built-in skills a past Clauseo shipped and this one does not: `write_skills` removes their
+/// files and manifest entries ([`super::retire`]). Empty at launch. A name goes here when it
+/// leaves [`BUILTIN`], and never names `stetdoc` or a current built-in (tested).
+pub const RETIRED_BUILTINS: [&str; 0] = [];
+
 /// Every source file of the three, as `(skill, path, text)`. A test checks that this list is
 /// exactly the files under `assets/skills/<name>/`.
 pub const ASSETS: [(&str, &str, &str); 4] = [
@@ -113,23 +118,25 @@ pub fn use_of(name: &str) -> Option<&'static str> {
 /// under `skills_root` (the Claude plugin's `skills/`, where `write_rendered` puts it). Empty
 /// when nothing is rendered. Built per call, from the paths given, so nothing is cached.
 ///
-/// A path holding a line break or a placeholder the host fills in the instructions is left out
-/// with a warning: the first would break the list, the second would be filled by the host.
+/// A path that is not UTF-8, holds a control character or a Unicode line or paragraph separator,
+/// or holds a placeholder the host fills in the instructions is left out with a warning: the
+/// first would not name the file, the second could break the list for a reader or a tokenizer,
+/// the third would be filled by the host. The code span only neutralises Markdown: the model
+/// still reads the path's words, which the lawyer's data folder chooses (decision record 0031).
 pub fn codex_index(skills_root: &Path, rendered: &Rendered) -> String {
     let mut lines = Vec::new();
     for skill in rendered.skills() {
         let path = skills_root.join(skill.name()).join(SKILL_MD);
-        let path = path.to_string_lossy();
-        if path.contains(['\n', '\r']) || IN_INSTRUCTIONS.iter().any(|token| path.contains(token)) {
+        let Some(path) = path.to_str().filter(|path| is_listable(path)) else {
             tracing::warn!(
                 skill = skill.name(),
                 "a skill's path cannot go in Codex's index; it is left out"
             );
             continue;
-        }
+        };
         let line = match use_of(skill.name()) {
-            Some(use_line) => format!("- {} ({use_line}): {}", skill.name(), code_span(&path)),
-            None => format!("- {}: {}", skill.name(), code_span(&path)),
+            Some(use_line) => format!("- {} ({use_line}): {}", skill.name(), code_span(path)),
+            None => format!("- {}: {}", skill.name(), code_span(path)),
         };
         lines.push(line);
     }
@@ -137,6 +144,14 @@ pub fn codex_index(skills_root: &Path, rendered: &Rendered) -> String {
         return String::new();
     }
     format!("{INDEX_HEAD}\n\n{}", lines.join("\n"))
+}
+
+/// Whether `path` may go in the index (see [`codex_index`]).
+fn is_listable(path: &str) -> bool {
+    !path
+        .chars()
+        .any(|c| c.is_control() || matches!(c, '\u{2028}' | '\u{2029}'))
+        && !IN_INSTRUCTIONS.iter().any(|token| path.contains(token))
 }
 
 /// `text` as a Markdown code span: a backtick fence one longer than the longest backtick run in

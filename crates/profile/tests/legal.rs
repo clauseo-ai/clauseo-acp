@@ -2,18 +2,20 @@
 //! skills' source files, their budgets, the words they must never hold, the version lock, and
 //! the skills index Codex gets. Nothing is written; the lock test reads `assets/skills/`.
 
+#[path = "legal/index.rs"]
+mod index;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use clauseo_profile::RenderedSkill;
 use clauseo_profile::instructions::{LEGAL, TOOLS, word_count};
 use clauseo_profile::placeholders::{IN_INSTRUCTIONS, MATTER_NOTES, WORK_FOLDER};
-use clauseo_profile::skills::builtin::{ASSETS, BUILTIN, code_span, codex_index, sources};
+use clauseo_profile::skills::builtin::{ASSETS, BUILTIN, RETIRED_BUILTINS, sources};
 use clauseo_profile::skills::frontmatter::{self, MetaValue};
 use clauseo_profile::skills::stetdoc::STETDOC;
 use clauseo_profile::skills::{SKILL_MD, is_skill_name, render};
 use clauseo_profile::{BrowserSidecars, ClauseoProfile, Instructions, ProfilePaths};
-use clauseo_protocol::AgentKind;
 use clauseo_settings::Locations;
 use sha2::{Digest as _, Sha256};
 
@@ -343,6 +345,22 @@ fn collect(root: &Path, dir: &Path, files: &mut Vec<(String, PathBuf)>) {
     }
 }
 
+/// The lock's lines as they stand, which the file must start with: a line is never edited or
+/// removed, only appended after these. Changing one of these lines means changing this constant,
+/// which review sees (decision record 0031). Append a line here when the lock grows.
+const LAUNCH_LOCK_LINES: &str = "# Append-only. Each line is <skill> <version> <sha256 of the skill source files>; never edit or remove a line.\n# A text change to a skill adds a new line with a new version (see docs/decisions, legal instructions and skills).\nlegal-drafting 1 2e3f78effb79302213a392d335c6facb1c071e1389b579f7ead9740903c675f6\nlegal-research 1 8c136575eec7b0c2b4b3222b46504417b4182fe7cd9a08c4538c0e506aeb42c2\nmatter-brief 1 d535e938547b992311639fa5c9cbecb27b50c767b94a698565ecc880ab6659e6\n";
+
+#[test]
+fn versions_lock_is_append_only() {
+    let skills = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/skills");
+    let lock = std::fs::read_to_string(skills.join("versions.lock")).unwrap();
+    assert!(LAUNCH_LOCK_LINES.ends_with('\n'));
+    assert!(
+        lock.starts_with(LAUNCH_LOCK_LINES),
+        "versions.lock no longer starts with the pinned lines: a line was edited or removed"
+    );
+}
+
 /// Checks a lock's text against each skill's current `(version, hash)`: no (skill, version)
 /// with two hashes, and each current hash listed under the current version.
 fn check_lock(lock: &str, current: &[(&str, &str, &str)]) -> Result<(), String> {
@@ -441,79 +459,8 @@ fn the_embedded_assets_are_the_source_folders() {
 }
 
 #[test]
-fn the_index_lists_every_rendered_skill_within_150_words() {
-    let profile = launch_profile(Path::new("/data"));
-    let index = profile.skills_index();
-    assert!(word_count(&index) <= 150, "{} words", word_count(&index));
-    for name in [STETDOC].into_iter().chain(BUILTIN) {
-        let path = profile.paths().claude_skills().join(name).join(SKILL_MD);
-        assert!(
-            index.contains(&code_span(&path.to_string_lossy())),
-            "{name}"
-        );
+fn no_retired_name_is_a_shipped_skill() {
+    for name in RETIRED_BUILTINS {
+        assert!(!BUILTIN.contains(&name) && name != STETDOC, "{name}");
     }
-    let codex = profile.codex_keys(Some(AgentKind::Codex));
-    let instructions = codex["developer_instructions"].as_str().unwrap();
-    assert_eq!(
-        instructions,
-        format!("{}\n\n{index}", profile.instructions())
-    );
-    let claude = profile.claude_options().meta_fragment();
-    assert!(
-        !serde_json::to_string(&claude)
-            .unwrap()
-            .contains("## Skills")
-    );
-    insta::assert_snapshot!(index.replace('\\', "/"));
-}
-
-#[test]
-fn no_skill_rendered_means_no_index() {
-    let profile = ClauseoProfile::new(paths_under(Path::new("/data")), None);
-    assert_eq!(profile.skills_index(), "");
-    assert_eq!(profile.codex_instructions(), profile.instructions());
-}
-
-#[test]
-fn the_index_quotes_any_path_as_one_code_span() {
-    let rendered = render(&sources().unwrap()).unwrap();
-    for root in [
-        r#"/Users/A `B` "q" 'r'/Application Support/skills"#,
-        r"C:\Users\Ann O'Neil\AppData\Roaming\Clau``seo\skills",
-        "`/edge ",
-    ] {
-        let index = codex_index(Path::new(root), &rendered);
-        for name in BUILTIN {
-            let path = Path::new(root).join(name).join(SKILL_MD);
-            let path = path.to_string_lossy();
-            let line = index
-                .lines()
-                .find(|line| line.starts_with(&format!("- {name} (")))
-                .unwrap();
-            let span = line.split_once("): ").unwrap().1;
-            assert_eq!(span, code_span(&path), "{root}");
-            assert_eq!(unspan(span), path, "{root}");
-        }
-    }
-}
-
-/// The text of a code span per `CommonMark`: strip the fences, then one space from each side when
-/// both sides hold one and the text is not all spaces.
-fn unspan(span: &str) -> String {
-    let fence = span.chars().take_while(|c| *c == '`').count();
-    let inner = &span[fence..span.len() - fence];
-    let longest_run = inner.split(|c| c != '`').map(str::len).max().unwrap_or(0);
-    assert!(longest_run < fence, "{span}");
-    if inner.len() >= 2 && inner.starts_with(' ') && inner.ends_with(' ') && inner.trim() != "" {
-        inner[1..inner.len() - 1].to_owned()
-    } else {
-        inner.to_owned()
-    }
-}
-
-#[test]
-fn a_path_holding_a_placeholder_or_a_line_break_is_left_out_of_the_index() {
-    let rendered = render(&sources().unwrap()).unwrap();
-    assert_eq!(codex_index(Path::new("/x/{work_folder}"), &rendered), "");
-    assert_eq!(codex_index(Path::new("/x/a\nb"), &rendered), "");
 }

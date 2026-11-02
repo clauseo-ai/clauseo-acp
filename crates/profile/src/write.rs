@@ -83,6 +83,15 @@ pub(crate) fn remove_file(path: &Path) -> Result<(), ProfileError> {
     }
 }
 
+/// `fs::remove_dir` of a folder only when it is empty; a missing or non-empty folder is left
+/// as it is, with no error.
+pub(crate) fn remove_empty_dir(path: &Path) {
+    let empty = std::fs::read_dir(path).is_ok_and(|mut entries| entries.next().is_none());
+    if empty && let Err(err) = std::fs::remove_dir(path) {
+        tracing::warn!(path = %path.display(), %err, "an emptied skill folder stays");
+    }
+}
+
 /// Makes `target` hold exactly `bytes`, making its folder if missing: a new temp file beside it,
 /// written, synced, then renamed over it, so a reader never sees half a file. Writes only when
 /// the file differs (a missing file differs). Returns whether it wrote.

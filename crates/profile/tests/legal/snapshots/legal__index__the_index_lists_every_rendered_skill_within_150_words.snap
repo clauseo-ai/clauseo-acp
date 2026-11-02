@@ -1,5 +1,5 @@
 ---
-source: crates/profile/tests/legal.rs
+source: crates/profile/tests/legal/index.rs
 expression: "index.replace('\\\\', \"/\")"
 ---
 ## Skills

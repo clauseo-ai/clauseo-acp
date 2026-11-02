@@ -152,8 +152,17 @@ impl ClauseoProfile {
     /// ([`CODEX_SKILLS`]), so the index points it at the files Claude's plugin holds. Built on
     /// each call.
     pub fn codex_instructions(&self) -> String {
-        let index = self.skills_index();
+        self.codex_instructions_with(true)
+    }
+
+    /// [`Self::codex_instructions`] with the index or without it.
+    fn codex_instructions_with(&self, index: bool) -> String {
         let text = self.instructions();
+        let index = if index {
+            self.skills_index()
+        } else {
+            String::new()
+        };
         if index.is_empty() {
             text
         } else {
@@ -173,10 +182,22 @@ impl ClauseoProfile {
         (kind == Some(AgentKind::Claude)).then(|| self.claude_options().meta_fragment())
     }
 
-    /// The `CODEX_CONFIG` keys for an agent of `kind`: Codex's for Codex, none otherwise.
+    /// The `CODEX_CONFIG` keys for an agent of `kind`: Codex's for Codex, none otherwise, with
+    /// the skills index in `developer_instructions`. The host sends these only after every
+    /// [`Self::launch_writes`] write succeeded; otherwise [`Self::codex_keys_without_index`], so
+    /// the index never names files the write did not put there (decision record 0031).
     pub fn codex_keys(&self, kind: Option<AgentKind>) -> Map<String, Value> {
+        self.codex_keys_with(kind, true)
+    }
+
+    /// [`Self::codex_keys`] with no skills index: for a launch whose skills write failed.
+    pub fn codex_keys_without_index(&self, kind: Option<AgentKind>) -> Map<String, Value> {
+        self.codex_keys_with(kind, false)
+    }
+
+    fn codex_keys_with(&self, kind: Option<AgentKind>, index: bool) -> Map<String, Value> {
         if kind == Some(AgentKind::Codex) {
-            self.codex_config().into_keys()
+            CodexConfig::with_instructions(self.codex_instructions_with(index)).into_keys()
         } else {
             Map::new()
         }
@@ -202,24 +223,43 @@ impl ClauseoProfile {
     /// through an `Arc`, with no file read, no process and no copy of the bytes. The
     /// launch-prep thread hands it to [`write_skills`].
     pub fn skill_files(&self, kind: Option<AgentKind>) -> Option<SkillWrite> {
-        let (root, plugin) = match kind? {
-            AgentKind::Claude => (
-                self.paths.claude_skills(),
-                Some(self.paths.claude_plugin.clone()),
-            ),
-            AgentKind::Codex if CODEX_SKILLS => (self.paths.codex_skills.clone(), None),
-            AgentKind::Codex => return None,
-        };
-        Some(SkillWrite {
-            root,
-            plugin,
+        match kind? {
+            AgentKind::Claude => Some(self.claude_write()),
+            AgentKind::Codex if CODEX_SKILLS => Some(SkillWrite {
+                root: self.paths.codex_skills.clone(),
+                plugin: None,
+                rendered: Arc::clone(&self.skills),
+            }),
+            AgentKind::Codex => None,
+        }
+    }
+
+    /// Every skills write the launch-prep thread runs, with [`write_skills`], before an agent of
+    /// `kind` starts. Claude: its plugin. Codex: the Claude plugin too, since Codex's index
+    /// names the files there (and its own folder, once [`CODEX_SKILLS`] is on). None for an
+    /// agent with no kind. Pure and cheap, as [`Self::skill_files`].
+    pub fn launch_writes(&self, kind: Option<AgentKind>) -> Vec<SkillWrite> {
+        match kind {
+            Some(AgentKind::Claude) => vec![self.claude_write()],
+            Some(AgentKind::Codex) => std::iter::once(self.claude_write())
+                .chain(self.skill_files(kind))
+                .collect(),
+            None => Vec::new(),
+        }
+    }
+
+    /// The write of Claude's plugin.
+    fn claude_write(&self) -> SkillWrite {
+        SkillWrite {
+            root: self.paths.claude_skills(),
+            plugin: Some(self.paths.claude_plugin.clone()),
             rendered: Arc::clone(&self.skills),
-        })
+        }
     }
 }
 
-/// Skills to write into one agent's skills folder. Only [`ClauseoProfile::skill_files`] makes
-/// one.
+/// Skills to write into one skills folder. Only [`ClauseoProfile::skill_files`] and
+/// [`ClauseoProfile::launch_writes`] make one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SkillWrite {
     root: PathBuf,
@@ -252,8 +292,12 @@ const PLUGIN_MANIFEST_PATH: [&str; 2] = [".claude-plugin", "plugin.json"];
 /// does, under the same process-wide lock, and through no symlink. Reads and writes files: on
 /// the launch-prep thread, never the host's.
 ///
+/// Then the retired built-ins ([`skills::builtin::RETIRED_BUILTINS`]) go from the folder
+/// ([`skills::retire`]), and their files are reported as removed.
+///
 /// The host logs an error from here as a warning and never fails a launch on it: the agent then
-/// runs with the skills the folder already holds, or none.
+/// runs with the skills the folder already holds, or none, and a Codex agent gets
+/// [`ClauseoProfile::codex_keys_without_index`].
 pub fn write_skills(skills: &SkillWrite) -> Result<RenderReport, ProfileError> {
     let _held = skills::write_lock();
     if let Some(plugin) = &skills.plugin {
@@ -263,5 +307,10 @@ pub fn write_skills(skills: &SkillWrite) -> Result<RenderReport, ProfileError> {
         write::sweep_temps(&plugin.join(folder), false);
         write::replace_if_differs(&plugin.join(folder).join(file), PLUGIN_MANIFEST.as_bytes())?;
     }
-    skills::write_unlocked(&skills.root, &skills.rendered)
+    let mut report = skills::write_unlocked(&skills.root, &skills.rendered)?;
+    report.removed.extend(skills::retire_unlocked(
+        &skills.root,
+        &skills::builtin::RETIRED_BUILTINS,
+    )?);
+    Ok(report)
 }

@@ -4,12 +4,12 @@
 
 use std::path::Path;
 
-use clauseo_profile::skills::builtin::{BUILTIN, sources};
+use clauseo_profile::skills::builtin::{BUILTIN, RETIRED_BUILTINS, sources};
 use clauseo_profile::skills::manifest::MANIFEST;
 use clauseo_profile::skills::stetdoc::{STETDOC, skill_source};
-use clauseo_profile::skills::{SHELL_INJECTION, SKILL_MD, render, write_rendered};
+use clauseo_profile::skills::{SHELL_INJECTION, SKILL_MD, render, retire, write_rendered};
 use clauseo_profile::test_support::tree_text;
-use clauseo_profile::{ClauseoProfile, write_skills};
+use clauseo_profile::{ClauseoProfile, SkillFile, SkillSource, write_skills};
 use clauseo_protocol::AgentKind;
 
 use super::{Scratch, manifest, profile_paths, read, write};
@@ -129,13 +129,121 @@ fn stetdoc_skill_untouched() {
         write_rendered(&folder, &rendered).unwrap();
         let drifted = folder.join("matter-brief").join(SKILL_MD);
         write::write(&drifted, b"changed").unwrap();
+        // An old entry of R22's lists a file the skill no longer has: cleanup removes it.
+        let stale = folder
+            .join("legal-research")
+            .join("references")
+            .join("old.md");
+        write::fresh_dir(stale.parent().unwrap()).unwrap();
+        write::write(&stale, b"old").unwrap();
+        let mut old = manifest(&folder);
+        old["skills"]["legal-research"]["files"]["references/old.md"] = "0".repeat(64).into();
+        write::write(
+            &folder.join(MANIFEST),
+            serde_json::to_string_pretty(&old).unwrap().as_bytes(),
+        )
+        .unwrap();
         let report = write_rendered(&folder, &rendered).unwrap();
         assert_eq!(report.drifted, [drifted]);
+        assert_eq!(report.removed, std::slice::from_ref(&stale));
+        assert!(!stale.exists());
 
         assert_eq!(files_under(&folder.join(STETDOC)), stetdoc_files);
         assert_eq!(manifest(&folder)["skills"][STETDOC], stetdoc_entry);
         assert!(folder.join(MANIFEST).exists());
     }
+}
+
+#[test]
+fn a_retired_builtin_is_removed_and_nothing_else() {
+    let root = Scratch::new("r22-retired");
+    let old = SkillSource::verbatim(
+        "old-skill",
+        "1",
+        vec![
+            SkillFile {
+                path: SKILL_MD.to_owned(),
+                bytes: b"---\nname: old-skill\ndescription: \"d\"\n---\nold\n".to_vec(),
+            },
+            SkillFile {
+                path: "references/a.md".to_owned(),
+                bytes: b"a".to_vec(),
+            },
+        ],
+    );
+    let kept = SkillSource::verbatim(
+        "kept-skill",
+        "1",
+        vec![SkillFile {
+            path: SKILL_MD.to_owned(),
+            bytes: b"---\nname: kept-skill\ndescription: \"d\"\n---\nkept\n".to_vec(),
+        }],
+    );
+    write_rendered(&root, &render(&[stetdoc(), old.clone(), kept]).unwrap()).unwrap();
+    // A folder with no manifest entry is not Clauseo's.
+    let theirs = root.join("not-ours").join(SKILL_MD);
+    write::fresh_dir(theirs.parent().unwrap()).unwrap();
+    write::write(&theirs, b"the lawyer's").unwrap();
+    let stetdoc_files = files_under(&root.join(STETDOC));
+    let before = manifest(&root);
+
+    let removed = retire(&root, &["old-skill", "not-ours"]).unwrap();
+    assert_eq!(removed.len(), 2);
+    assert!(!root.join("old-skill").exists());
+    assert_eq!(read(&theirs), b"the lawyer's");
+    assert_eq!(files_under(&root.join(STETDOC)), stetdoc_files);
+    let after = manifest(&root);
+    assert!(after["skills"].get("old-skill").is_none());
+    assert_eq!(after["skills"][STETDOC], before["skills"][STETDOC]);
+    assert_eq!(
+        after["skills"]["kept-skill"],
+        before["skills"]["kept-skill"]
+    );
+
+    // A file the lawyer put in a retired folder stays, with its folder.
+    write_rendered(&root, &render(&[old]).unwrap()).unwrap();
+    let extra = root.join("old-skill").join("mine.md");
+    write::write(&extra, b"mine").unwrap();
+    retire(&root, &["old-skill"]).unwrap();
+    assert_eq!(read(&extra), b"mine");
+    assert!(!root.join("old-skill").join(SKILL_MD).exists());
+    assert!(!root.join("old-skill").join("references").exists());
+    // Nothing to retire: nothing changes.
+    assert_eq!(
+        retire(&root, &RETIRED_BUILTINS).unwrap(),
+        Vec::<std::path::PathBuf>::new()
+    );
+}
+
+#[test]
+fn a_codex_launch_writes_exactly_the_files_its_index_names() {
+    let root = Scratch::new("r22-codex-launch");
+    let paths = profile_paths(&root);
+    let (profile, refused) =
+        ClauseoProfile::new(paths.clone(), None).with_builtin_skills(Some(stetdoc()));
+    assert!(refused.is_empty(), "{refused:?}");
+    assert_eq!(profile.launch_writes(None), Vec::new());
+    assert_eq!(profile.launch_writes(Some(AgentKind::Claude)).len(), 1);
+    let writes = profile.launch_writes(Some(AgentKind::Codex));
+    for each in &writes {
+        write_skills(each).unwrap();
+    }
+    let mut written: Vec<std::path::PathBuf> = writes
+        .iter()
+        .flat_map(|each| files_under(each.root()))
+        .map(|(path, _)| path)
+        .filter(|path| path.file_name().is_some_and(|name| name == SKILL_MD))
+        .collect();
+    written.sort();
+    let mut listed: Vec<std::path::PathBuf> = profile
+        .skills_index()
+        .lines()
+        .filter_map(|line| line.strip_prefix("- "))
+        .map(|line| unspan(line.split_once("): ").unwrap().1).into())
+        .collect();
+    listed.sort();
+    assert_eq!(listed, written);
+    assert!(!paths.codex_skills().exists());
 }
 
 /// The text of a `CommonMark` code span.
