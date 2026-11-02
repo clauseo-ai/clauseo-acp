@@ -192,3 +192,23 @@ export const undoable = (m: VersionMeta | undefined): boolean =>
   m.step.checkpoint_after !== undefined &&
   !m.step.undone &&
   m.step.files.length > 0;
+
+/** What the toolbar's Undo takes back: the newest turn's version whose change can be undone (ready), walking newest
+ * first past each turn whose step is in and can't be undone; a turn whose step isn't in yet, and wasn't sought in vain
+ * (`missing`), stops the walk until it is paged in (unknown). Null when nothing can be undone. */
+export function newestUndo(
+  t: Timeline,
+  missing: ReadonlySet<TurnId>,
+): { kind: "ready" | "unknown"; id: string } | null {
+  for (let i = t.history.length - 1; i >= 0; i -= 1) {
+    const id = t.history[i]?.id ?? "";
+    const m = t.meta.get(id);
+    if (m?.kind !== "after_turn") continue;
+    if (m.step !== null) {
+      if (undoable(m)) return { kind: "ready", id };
+    } else if (m.thread !== undefined && m.turn !== undefined && !missing.has(m.turn)) {
+      return { kind: "unknown", id };
+    }
+  }
+  return null;
+}
