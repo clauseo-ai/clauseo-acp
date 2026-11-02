@@ -59,7 +59,7 @@ import { anchorHeadings, createSlugNumbering, headingId, withSlugs } from "./slu
 import { createSplitter, joinParts } from "./split.ts";
 import type { BlockEnd } from "./split.ts";
 import { extrasHandlers } from "./syntax-extras.ts";
-import { noteViewHast } from "./note-view.ts";
+import { noteViewRebuild } from "./note-view.ts";
 import { EMPTY_HAST, plainText, seal, variantOf, viewOf } from "./view.ts";
 import type { BlockView, Fields } from "./view.ts";
 
@@ -193,9 +193,12 @@ export function createAnswer(scope: string): Answer {
   ): BlockView => {
     const tail = written !== undefined;
     const shown = restore(source);
-    const render = () => {
+    // `cached`: through the tree cache, as an update parses. A rebuild after the update (view.ts) parses
+    // without it, so no finished block's mdast is left in the cache.
+    const render = (cached: boolean) => {
       try {
-        const root = withoutPlaceholders(tree(input), input.length - source.length);
+        const parsed = cached ? tree(input) : parse(input);
+        const root = withoutPlaceholders(parsed, input.length - source.length);
         if (deeperThan(root, MAX_TREE_DEPTH)) return undefined;
         const footnote = referenceHandler(scope, references, nths);
         const handlers = { ...HANDLERS, footnoteReference: footnote };
@@ -216,13 +219,13 @@ export function createAnswer(scope: string): Answer {
       input,
       streaming: tail,
     };
-    const done = render();
+    const done = render(true);
     if (!done) return view(fields, plainText(shown), () => plainText(shown));
     const rendered: Fields = { ...fields, slugs: done.slugs };
     return view(
       done.lost.length > 0 ? { ...rendered, lostReferences: done.lost } : rendered,
       done.hast,
-      () => render()?.hast ?? plainText(shown),
+      () => render(false)?.hast ?? plainText(shown),
     );
   };
 
@@ -404,7 +407,8 @@ export function createAnswer(scope: string): Answer {
     return noteViews.get(`${key}\u0002${streaming ? 1 : 0}`, () => {
       const numbers = noteNumbersOf(numbering, id);
       const shown = restore(note.source);
-      const make = () => noteViewHast(scope, options, numbers, shown, lost);
+      // Made apart from this scope, which holds the whole numbering: the view keeps only `numbers`.
+      const make = noteViewRebuild(scope, options, numbers, shown, lost);
       return view({ source: shown, input: key, streaming, note: id }, make(), make);
     });
   };

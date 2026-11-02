@@ -40,3 +40,17 @@ export function noteViewHast(
     };
   }
 }
+
+/**
+ * How a note's view makes its hast (noteViewHast), now and again after its update has ended. A closure of its
+ * own, holding only these: one made inside answer.ts's noteViewOf would keep that update's whole numbering.
+ */
+export function noteViewRebuild(
+  scope: string,
+  options: Options,
+  numbers: NoteNumbers,
+  shown: string,
+  lost: ReadonlySet<string>,
+): () => Hast {
+  return () => noteViewHast(scope, options, numbers, shown, lost);
+}

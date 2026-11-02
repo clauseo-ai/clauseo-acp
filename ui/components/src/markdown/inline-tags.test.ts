@@ -5,6 +5,7 @@ import { expect, test } from "vitest";
 import { createAnswer } from "./answer.ts";
 import { ALLOWED_TAGS, MAX_TAG_NESTING } from "./inline-tags.ts";
 import { htmlOf } from "./spec-fixture.ts";
+import { shownHast } from "./view-fixture.ts";
 import { toReact } from "./to-react.ts";
 
 const html = (text: string, streaming = false) =>
@@ -218,7 +219,7 @@ test("streamed a character at a time, a tag never hides or restyles the text aft
 test("a key the answer names is announced: the design system's key cap without aria-hidden", () => {
   const markup = createAnswer("t")
     .update("Press <kbd>Esc</kbd>", false)
-    .map((view) => renderToStaticMarkup(toReact(view.hast)))
+    .map((view) => renderToStaticMarkup(toReact(shownHast(view))))
     .join("");
   expect(markup).toMatch(/<kbd class="[^"]*kbd-cap[^"]*">Esc<\/kbd>/);
   expect(markup).not.toContain("aria-hidden");
