@@ -64,7 +64,7 @@ export function threadHost(state: ThreadState): FakeTransport {
   const transport: FakeTransport = new FakeTransport({
     query: (query) => {
       if (query === "list_matters") return { matters: [MATTER] };
-      if (query.list_threads !== undefined)
+      if (typeof query === "object" && query.list_threads !== undefined)
         return {
           threads: [{ thread: THREAD, matter: MATTER.matter, agent: "claude", status: "idle" }],
         };
