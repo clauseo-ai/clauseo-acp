@@ -8,6 +8,7 @@
 import { useCallback, useState, useSyncExternalStore } from "react";
 import type { WorkingState } from "@clauseo/components/clauseo/working-line.tsx";
 import type { Lang } from "@clauseo/components/lib/display.ts";
+import type { AgentName } from "@clauseo/components/lib/words-errors.ts";
 import { useStreamPart } from "../store/hooks.ts";
 import type { ViewStore } from "../store/store.ts";
 import type { StreamView } from "../store/view.ts";
@@ -162,8 +163,8 @@ export function useStoppedLine({
 }: {
   /** The lines' chunk, once loaded. */
   lines: BreakLines | null;
-  /** The thread's plan, for the words that name it (agent-plan.ts). */
-  plan?: string | null | undefined;
+  /** The thread's agent, for the words that name it (agent-plan.ts). */
+  plan?: AgentName;
   lang: Lang;
   brk: Break | null;
   live: boolean;

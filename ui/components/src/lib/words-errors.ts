@@ -213,21 +213,22 @@ const PLANNED: Partial<
 /** The codes PLANNED gives a sentence per agent. */
 export const PLANNED_CODES = Object.keys(PLANNED) as ErrorCode[];
 
-/** The thread's agent as the words name it: its plan, "Claude" or "ChatGPT", where it has a kind; else its own name
- * (today its settings id: the settings hold no display name, and the host keeps ACP's agentInfo to itself); null with
- * no name at all; undefined where the caller doesn't know the thread. */
-export type AgentName = string | null | undefined;
+/** The thread's agent as the words name it: its kind, which picks the plan's line (Claude's or ChatGPT's), and its
+ * name, for an agent of no kind (today its settings id: the settings hold no display name, and the host keeps ACP's
+ * agentInfo to itself); null with no name at all. The whole is undefined where the caller doesn't know the thread. The
+ * kind is the app's AgentKind, copied as ErrorCode is. */
+export type AgentName = { kind: "claude" | "codex" | undefined; name: string | null } | undefined;
 
-/** A code's sentence for the thread's agent: "ChatGPT" picks PLANNED's ChatGPT sentence; another name its `{name}`
- * sentence; null (or an empty name) its nameless one; "Claude", undefined, or a code PLANNED doesn't hold, the code's
- * own sentence (ERROR_WORDS, Claude's). */
+/** A code's sentence for the thread's agent: a codex agent picks PLANNED's ChatGPT sentence; an agent of no kind its
+ * `{name}` sentence with its name, or its nameless one with no name (or an empty one); a claude agent, an agent not
+ * known (undefined), or a code PLANNED doesn't hold, the code's own sentence (ERROR_WORDS, Claude's). */
 export function plannedKey(code: ErrorCode, agent?: AgentName): { key: ErrorKey; name?: string } {
   const planned = PLANNED[code];
-  if (planned === undefined || agent === undefined || agent === "Claude")
+  if (planned === undefined || agent === undefined || agent.kind === "claude")
     return { key: ERROR_WORDS[code] };
-  if (agent === "ChatGPT") return { key: planned.chatgpt };
-  if (agent === null || agent.trim() === "") return { key: planned.nameless };
-  return { key: planned.named, name: agent };
+  if (agent.kind === "codex") return { key: planned.chatgpt };
+  const name = agent.name?.trim() ?? "";
+  return name === "" ? { key: planned.nameless } : { key: planned.named, name };
 }
 
 /** A code's sentence in the language; a code this version doesn't know reads as "unknown", which reads as "internal".
