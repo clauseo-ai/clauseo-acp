@@ -4,8 +4,9 @@
 use std::cell::Cell;
 use std::io;
 use std::net::{Shutdown, TcpStream};
+use std::time::Duration;
 
-use async_io::Async;
+use async_io::{Async, Timer};
 use futures::{AsyncReadExt, AsyncWriteExt};
 
 use crate::proxy::head::HEAD_CAP;
@@ -16,17 +17,57 @@ pub(crate) type Stream = Async<TcpStream>;
 /// The size of each copy's buffer.
 const BUF: usize = 16 * 1024;
 
+/// The steps an idle limit is watched in: a relay is closed after this many whole steps with no
+/// byte moved, so between the limit and an eighth more after its last byte.
+const IDLE_STEPS: u32 = 8;
+
+/// Whether a relay moved a byte either way, for the idle timeout. It counts moves rather than
+/// reading a clock: the watcher wakes once a step and compares.
+#[derive(Default)]
+pub(crate) struct Idle {
+    moves: Cell<u64>,
+}
+
+impl Idle {
+    /// Bytes just moved.
+    pub(crate) fn touch(&self) {
+        self.moves.set(self.moves.get().wrapping_add(1));
+    }
+
+    /// Ends once `limit` has passed with no byte moved either way.
+    pub(crate) async fn expired(&self, limit: Duration) {
+        let step = limit / IDLE_STEPS;
+        let mut quiet = 0;
+        while quiet < IDLE_STEPS {
+            let seen = self.moves.get();
+            Timer::after(step).await;
+            if self.moves.get() == seen {
+                quiet += 1;
+            } else {
+                quiet = 0;
+            }
+        }
+    }
+}
+
 /// Copies `from` to `to` until `from` ends, counting bytes, then ends `to`'s write half so the
 /// other side sees the end too.
-pub(crate) async fn pump(from: &Stream, to: &Stream, count: &Cell<u64>) -> io::Result<()> {
+pub(crate) async fn pump(
+    from: &Stream,
+    to: &Stream,
+    count: &Cell<u64>,
+    idle: &Idle,
+) -> io::Result<()> {
     let mut buf = vec![0u8; BUF];
     loop {
         let n = (&*from).read(&mut buf).await?;
         if n == 0 {
             break;
         }
+        idle.touch();
         (&*to).write_all(buf.get(..n).unwrap_or_default()).await?;
         count.set(count.get().saturating_add(n as u64));
+        idle.touch();
     }
     end_writes(to);
     Ok(())
@@ -59,6 +100,7 @@ pub(crate) async fn copy_body(
     client: &Stream,
     origin: &Stream,
     count: &Cell<u64>,
+    idle: &Idle,
 ) -> io::Result<()> {
     let mut framer = match framing {
         Framing::Empty => return Ok(()),
@@ -72,6 +114,7 @@ pub(crate) async fn copy_body(
         let body = input.get(..taken).unwrap_or_default();
         (&*origin).write_all(body).await?;
         count.set(count.get().saturating_add(taken as u64));
+        idle.touch();
         if done {
             return Ok(());
         }
@@ -79,6 +122,7 @@ pub(crate) async fn copy_body(
         if n == 0 {
             return Err(io::ErrorKind::UnexpectedEof.into());
         }
+        idle.touch();
         input = buf.get(..n).unwrap_or_default();
     }
 }
@@ -105,18 +149,38 @@ impl Framer {
     }
 }
 
-/// Where a chunked body's reader stands. Strict: CRLF line ends only, at most 16 hex digits,
+/// Where a chunked body's reader stands. Strict: CRLF line ends only; a size line is 1 to 16
+/// hex digits, optional spaces or tabs, then CRLF or `;` and an extension of no control bytes;
 /// trailers at most [`HEAD_CAP`] bytes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Chunked {
-    Size { digits: u8, value: u64, ext: bool },
-    SizeLf { value: u64 },
+    Size {
+        digits: u8,
+        value: u64,
+    },
+    /// White space after the digits: only more of it, `;` or CR may follow.
+    SizeWs {
+        value: u64,
+    },
+    /// A chunk extension, after `;`.
+    Ext {
+        value: u64,
+    },
+    SizeLf {
+        value: u64,
+    },
     Data(u64),
     DataCr,
     DataLf,
-    LineStart { trailer: usize },
-    Line { trailer: usize },
-    LineLf { trailer: usize },
+    LineStart {
+        trailer: usize,
+    },
+    Line {
+        trailer: usize,
+    },
+    LineLf {
+        trailer: usize,
+    },
     EndLf,
     Done,
 }
@@ -130,7 +194,6 @@ impl Chunked {
         Chunked::Size {
             digits: 0,
             value: 0,
-            ext: false,
         }
     }
 
@@ -162,28 +225,29 @@ impl Chunked {
 
     fn step(self, b: u8) -> io::Result<Chunked> {
         let next = match self {
-            Chunked::Size { digits, value, ext } => {
-                if b == b'\r' && digits > 0 {
-                    Chunked::SizeLf { value }
-                } else if ext && b != b'\n' && b != b'\r' {
-                    self
-                } else if let Some(d) = (b as char).to_digit(16).filter(|_| !ext) {
+            Chunked::Size { digits, value } => {
+                if let Some(d) = (b as char).to_digit(16) {
                     if digits >= 16 {
                         return Err(bad_chunk());
                     }
                     Chunked::Size {
                         digits: digits + 1,
                         value: value << 4 | u64::from(d),
-                        ext,
                     }
-                } else if matches!(b, b';' | b' ' | b'\t') && digits > 0 {
-                    Chunked::Size {
-                        digits,
-                        value,
-                        ext: true,
-                    }
-                } else {
+                } else if digits == 0 {
                     return Err(bad_chunk());
+                } else {
+                    Chunked::after_size(value, b)?
+                }
+            }
+            Chunked::SizeWs { value } => Chunked::after_size(value, b)?,
+            Chunked::Ext { value } => {
+                if b == b'\r' {
+                    Chunked::SizeLf { value }
+                } else if b != b'\t' && (b < 0x20 || b == 0x7f) {
+                    return Err(bad_chunk());
+                } else {
+                    self
                 }
             }
             Chunked::SizeLf { value } if b == b'\n' => {
@@ -221,6 +285,16 @@ impl Chunked {
         };
         Ok(next)
     }
+
+    /// The byte after a size's digits, or after white space that followed them.
+    fn after_size(value: u64, b: u8) -> io::Result<Chunked> {
+        match b {
+            b'\r' => Ok(Chunked::SizeLf { value }),
+            b';' => Ok(Chunked::Ext { value }),
+            b' ' | b'\t' => Ok(Chunked::SizeWs { value }),
+            _ => Err(bad_chunk()),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -238,6 +312,18 @@ mod tests {
         input.extend_from_slice(b"GET http://other.test/ HTTP/1.1\r\n\r\n");
         assert_eq!(chunked(&input).unwrap(), (body.len(), true));
         assert_eq!(chunked(b"0\r\n\r\n").unwrap(), (5, true));
+        for good in [
+            &b"5 \r\nhello\r\n0\r\n\r\n"[..],
+            b"5\t ;name=\"v a\"\r\nhello\r\n0\r\n\r\n",
+            b"5;\tx\r\nhello\r\n0 ;y\r\n\r\n",
+        ] {
+            assert_eq!(
+                chunked(good).unwrap(),
+                (good.len(), true),
+                "{:?}",
+                String::from_utf8_lossy(good)
+            );
+        }
     }
 
     #[test]
@@ -268,6 +354,13 @@ mod tests {
             b"11111111111111111\r\n",
             b"0\r\n\n",
             b";x\r\n",
+            // Review defect 6: anything but `;` or CR after the size and its white space.
+            b"5 6\r\nhello\r\n",
+            b"5 x\r\nhello\r\n",
+            b"5x\r\n",
+            b"5;a\x01b\r\n",
+            b"5;a\nb\r\n",
+            b"5 \n",
         ] {
             assert!(chunked(bad).is_err(), "{:?}", String::from_utf8_lossy(bad));
         }

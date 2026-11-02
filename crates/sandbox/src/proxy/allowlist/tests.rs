@@ -106,6 +106,51 @@ fn firm_suffix_refuses_public_suffixes_and_shared_hosting() {
 }
 
 #[test]
+fn firm_suffix_refuses_a_domain_above_a_public_suffix_or_shared_host() {
+    // Review defect 2's table: each sits above PSL or shared-hosting entries.
+    for refused in [
+        "core.windows.net",
+        "windows.net",
+        "cloudflarestorage.com",
+        "firebaseio.com",
+        "dropboxusercontent.com",
+        "run.app",
+        "on.aws",
+        "onmicrosoft.com",
+        "nip.io",
+        "sslip.io",
+    ] {
+        assert!(Allowlist::firm_suffix(refused).is_err(), "{refused}");
+        assert!(
+            Allowlist::firm_suffix(&format!("*.{refused}")).is_err(),
+            "*.{refused}"
+        );
+    }
+    // Above a shared-hosting entry: storage.googleapis.com, s3.amazonaws.com.
+    for refused in [
+        "googleapis.com",
+        "*.googleapis.com",
+        "githubusercontent.com",
+    ] {
+        assert!(Allowlist::firm_suffix(refused).is_err(), "{refused}");
+    }
+    // A wildcard PSL rule under the domain, found by the probe alone.
+    assert!(
+        !super::shared_hosts::PUBLIC_SUFFIX_PARENTS.contains(&"kawasaki.jp")
+            && super::has_suffix_under("kawasaki.jp")
+    );
+    assert!(Allowlist::firm_suffix("*.kawasaki.jp").is_err());
+    // A firm's own domain has nothing under it.
+    for allowed in ["*.firm.example", "*.bigfirm.com", "law.firm.co.uk"] {
+        assert!(
+            !super::has_suffix_under(allowed.trim_start_matches("*.")),
+            "{allowed}"
+        );
+        assert!(Allowlist::firm_suffix(allowed).is_ok(), "{allowed}");
+    }
+}
+
+#[test]
 fn shared_hosting_is_flagged_at_or_under_an_entry() {
     for shared in [
         "raw.githubusercontent.com",

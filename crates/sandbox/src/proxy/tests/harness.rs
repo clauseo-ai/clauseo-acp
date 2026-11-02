@@ -10,11 +10,13 @@ use std::time::Duration;
 
 use async_io::Async;
 use base64::Engine;
+use futures::channel::oneshot;
 use futures::future::BoxFuture;
 
 use crate::proxy::net::Network;
+use crate::proxy::upstream::{Env, Scheme};
 use crate::proxy::{Exchange, Limits, Options, ProxyConfig, ProxyHandle, start_with};
-use crate::{Allowlist, Clock, Denial, DenialSink, Reachability, Upstream};
+use crate::{Allowlist, Clock, Denial, DenialSink, Reachability, Route, Upstream};
 
 /// How long a client waits for any one read before the test fails.
 const CLIENT_WAIT: Duration = Duration::from_secs(10);
@@ -27,6 +29,41 @@ pub(crate) struct TestNet {
     routes: Mutex<BTreeMap<SocketAddr, SocketAddr>>,
     dialled: Mutex<Vec<SocketAddr>>,
     resolved: Mutex<Vec<String>>,
+    /// Holds the next resolve, or the next connect, until released.
+    hold_resolve: Mutex<Option<Hold>>,
+    hold_connect: Mutex<Option<Hold>>,
+}
+
+/// One held call: it tells the test it arrived, then waits for the release.
+struct Hold {
+    arrived: mpsc::Sender<()>,
+    release: oneshot::Receiver<()>,
+}
+
+/// The test's end of a held call: wait for it to arrive, then release it.
+pub(crate) struct Held {
+    pub(crate) arrived: Receiver<()>,
+    pub(crate) release: oneshot::Sender<()>,
+}
+
+fn hold(slot: &Mutex<Option<Hold>>) -> Held {
+    let (arrived_tx, arrived) = mpsc::channel();
+    let (release, release_rx) = oneshot::channel();
+    *slot.lock().unwrap() = Some(Hold {
+        arrived: arrived_tx,
+        release: release_rx,
+    });
+    Held { arrived, release }
+}
+
+/// Waits for the hold's release, if the call was held.
+async fn wait_for(hold: Option<Hold>) {
+    if let Some(hold) = hold {
+        hold.arrived.send(()).unwrap();
+        match hold.release.await {
+            Ok(()) | Err(oneshot::Canceled) => {}
+        }
+    }
 }
 
 impl TestNet {
@@ -59,6 +96,16 @@ impl TestNet {
     pub(crate) fn resolved(&self) -> Vec<String> {
         self.resolved.lock().unwrap().clone()
     }
+
+    /// The next resolve waits until the test releases it.
+    pub(crate) fn hold_next_resolve(&self) -> Held {
+        hold(&self.hold_resolve)
+    }
+
+    /// The next connect waits until the test releases it.
+    pub(crate) fn hold_next_connect(&self) -> Held {
+        hold(&self.hold_connect)
+    }
 }
 
 impl Network for TestNet {
@@ -79,7 +126,11 @@ impl Network for TestNet {
                 .collect()),
             None => Err(io::Error::new(io::ErrorKind::NotFound, "no such name")),
         };
-        Box::pin(async move { result })
+        let held = self.hold_resolve.lock().unwrap().take();
+        Box::pin(async move {
+            wait_for(held).await;
+            result
+        })
     }
 
     fn connect(&self, addr: SocketAddr) -> BoxFuture<'static, io::Result<Async<TcpStream>>> {
@@ -91,7 +142,9 @@ impl Network for TestNet {
             None if addr.ip().is_loopback() => Some(addr),
             None => None,
         };
+        let held = self.hold_connect.lock().unwrap().take();
         Box::pin(async move {
+            wait_for(held).await;
             match target {
                 Some(to) => Async::<TcpStream>::connect(to).await,
                 None => Err(io::Error::from(io::ErrorKind::ConnectionRefused)),
@@ -139,6 +192,8 @@ pub(crate) struct Setup {
     pub(crate) silent: Vec<&'static str>,
     pub(crate) upstream: Upstream,
     pub(crate) limits: Limits,
+    /// For `Upstream::System`: the host's proxy variables; the OS answers direct.
+    pub(crate) env: Option<Env>,
 }
 
 impl Default for Setup {
@@ -148,6 +203,7 @@ impl Default for Setup {
             silent: Vec::new(),
             upstream: Upstream::Direct,
             limits: Limits::default(),
+            env: None,
         }
     }
 }
@@ -190,6 +246,10 @@ pub(crate) fn rig(setup: Setup) -> Rig {
     let options = Options {
         clock: Arc::clone(&clock) as Arc<dyn Clock>,
         limits: setup.limits,
+        system: setup.env.map(|env| {
+            let os = |_: Scheme, _: &str, _: u16| Route::Direct;
+            (env, Box::new(os) as Box<crate::proxy::upstream::OsRoute>)
+        }),
     };
     let handle = start_with(config, Arc::clone(&net) as Arc<dyn Network>, options).unwrap();
     Rig {

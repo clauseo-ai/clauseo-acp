@@ -4,7 +4,9 @@ use std::io::Write;
 use std::net::{SocketAddr, TcpStream};
 use std::time::Duration;
 
-use super::harness::{Setup, echo, read_all, read_head, rig, rig_allowing, status, token_of};
+use super::harness::{
+    Setup, echo, read_all, read_head, rig, rig_allowing, round_trip, status, token_of,
+};
 use crate::Denial;
 use crate::Reachability::{Reachable, Unreachable};
 use crate::proxy::head::HEAD_CAP;
@@ -158,4 +160,109 @@ fn env_points_at_the_agent_listener_and_debug_hides_the_token() {
     assert!(!debug.contains(&token), "{debug}");
     assert!(debug.contains("<redacted>"), "{debug}");
     assert_ne!(rig.handle.port(), rig.handle.browser_port());
+}
+
+/// Reads until the proxy closes: nothing, whether the close came as an end or a reset.
+fn closed_unanswered(stream: &mut TcpStream) -> bool {
+    let mut buf = Vec::new();
+    match std::io::Read::read_to_end(stream, &mut buf) {
+        Ok(_) => buf.is_empty(),
+        Err(error) => error.kind() == std::io::ErrorKind::ConnectionReset,
+    }
+}
+
+fn echo_rig_with(limits: Limits) -> super::harness::Rig {
+    let rig = rig(Setup {
+        allow: vec!["api.anthropic.com"],
+        limits,
+        ..Setup::default()
+    });
+    rig.net.name("api.anthropic.com", &["192.0.2.10"]);
+    rig.net.route("192.0.2.10:443", echo());
+    rig
+}
+
+#[test]
+fn connections_past_the_cap_on_unfinished_heads_are_closed_until_one_finishes() {
+    let rig = echo_rig_with(Limits {
+        pending: 2,
+        ..Limits::default()
+    });
+    assert_eq!(Limits::default().pending, 64);
+    // Two connections that never send a head fill the cap; the accept loop takes them in order.
+    let mut first = rig.agent();
+    let _second = rig.agent();
+    let mut third = rig.agent();
+    assert!(closed_unanswered(&mut third), "the third is closed");
+    // The first finishes its head: its slot frees, and the next connection is served.
+    let request = format!(
+        "CONNECT api.anthropic.com:443 HTTP/1.1\r\n{}\r\n",
+        rig.auth()
+    );
+    first.write_all(request.as_bytes()).unwrap();
+    assert_eq!(status(&read_head(&mut first)), 200);
+    assert_eq!(rig.connect("api.anthropic.com:443").1, 200);
+}
+
+#[test]
+fn origin_sockets_count_against_the_launch_socket_cap() {
+    let rig = echo_rig_with(Limits {
+        sockets: 2,
+        ..Limits::default()
+    });
+    let _idle = rig.agent();
+    // The second client fits, but its origin socket would be the third: 503, and no denial.
+    assert_eq!(rig.connect("api.anthropic.com:443").1, 503);
+    assert_eq!(rig.records()[0].verdict, Verdict::Busy);
+    assert_eq!(rig.denials(), Vec::<Denial>::new());
+}
+
+// nextest runs each test in its own process, so the process-wide count starts at zero in each.
+
+#[test]
+fn the_process_wide_socket_cap_counts_origin_sockets_of_other_launches() {
+    let limits = Limits {
+        process: 3,
+        ..Limits::default()
+    };
+    assert_eq!(Limits::default().process, 1024);
+    let one = echo_rig_with(limits);
+    let two = echo_rig_with(limits);
+    let (_tunnel, code) = one.connect("api.anthropic.com:443");
+    assert_eq!(code, 200, "a client and an origin socket");
+    // The other launch's client is the third socket; its origin socket would be the fourth.
+    assert_eq!(two.connect("api.anthropic.com:443").1, 503);
+}
+
+#[test]
+fn the_process_wide_socket_cap_closes_clients_of_other_launches() {
+    let limits = Limits {
+        process: 2,
+        ..Limits::default()
+    };
+    let one = echo_rig_with(limits);
+    let two = echo_rig_with(limits);
+    let (_tunnel, code) = one.connect("api.anthropic.com:443");
+    assert_eq!(code, 200);
+    let mut third = two.agent();
+    assert!(
+        closed_unanswered(&mut third),
+        "a client past the cap is closed"
+    );
+}
+
+#[test]
+fn a_tunnel_idle_past_the_limit_is_closed() {
+    assert_eq!(Limits::default().idle, Duration::from_mins(15));
+    let rig = echo_rig_with(Limits {
+        idle: Duration::from_millis(100),
+        ..Limits::default()
+    });
+    let (mut tunnel, code) = rig.connect("api.anthropic.com:443");
+    assert_eq!(code, 200);
+    assert_eq!(round_trip(&mut tunnel, b"ping"), b"ping");
+    // Then nothing either way: the proxy closes the tunnel.
+    assert_eq!(read_all(&mut tunnel), b"");
+    let record = &rig.records()[0];
+    assert_eq!((record.verdict, record.bytes_up), (Verdict::Tunnel, 4));
 }

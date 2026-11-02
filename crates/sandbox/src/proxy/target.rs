@@ -38,7 +38,12 @@ impl Refusal {
         }
     }
 
+    /// 405 with a `Scheme` denial for `host`; a plain 400 when there is no host to name, so
+    /// no denial (and no card) ever names an empty host.
     fn scheme(host: String, port: u16) -> Refusal {
+        if host.is_empty() {
+            return Refusal::bad();
+        }
         Refusal {
             status: 405,
             why: Some(HostRefusal::Scheme),
@@ -57,6 +62,10 @@ pub(crate) fn classify(request: &Request) -> Result<Target, Refusal> {
             port,
             kind: Kind::Connect,
         });
+    }
+    // `host:port` belongs to CONNECT only (a lowercase `connect` included).
+    if authority(&request.target).is_some() {
+        return Err(Refusal::bad());
     }
     let framing = framing(request).ok_or_else(Refusal::bad)?;
     if request.target.starts_with('/') || request.target == "*" {
