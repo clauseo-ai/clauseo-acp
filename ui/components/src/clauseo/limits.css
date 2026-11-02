@@ -40,6 +40,10 @@
   .lim-stop-line {
     margin-top: var(--s2);
   }
+  /* a mark on its own line wraps, so a long one (with its day) never runs past a narrow column */
+  .lim-stop-line > .lim-stop {
+    white-space: normal;
+  }
   .lim-anchor {
     display: block;
     height: 0;

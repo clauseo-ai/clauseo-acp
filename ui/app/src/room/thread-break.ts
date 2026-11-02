@@ -12,7 +12,7 @@ import { useStreamPart } from "../store/hooks.ts";
 import type { ViewStore } from "../store/store.ts";
 import type { StreamView } from "../store/view.ts";
 import { toHostError } from "../transport/host-transport.ts";
-import type { EntryId, StepEntry, StreamId, ThreadId } from "../transport/protocol.ts";
+import type { EntryId, HostError, StepEntry, StreamId, ThreadId } from "../transport/protocol.ts";
 // a type alone: erased, so the first paint has no static dependency on the lines, which come with the thread's chunk
 import type * as Lines from "./break-lines.ts";
 import type { RestartHost } from "./host-next.ts";
@@ -111,9 +111,17 @@ export function useThreadBreak(
 /** A working line state and the test id it stands under. */
 export type BreakLine = { state: WorkingState; testId: string };
 
-/** The stopped question for an empty field: a key per break, so it comes back once. Null for a reopened thread's. */
-export function refillOf(brk: Break | null, live: boolean): { key: EntryId; text: string } | null {
-  return brk !== null && live && brk.question !== "" ? { key: brk.id, text: brk.question } : null;
+/** The stopped question for an empty field, a key per break so it comes back once: only before the host restarts
+ * (H10), since Restart asks it itself and a question left in the field would be asked twice; only for a code that
+ * asking again can mend; and never for a reopened thread's break. */
+export function refillOf(
+  brk: Break | null,
+  live: boolean,
+  restart: RestartHost | null,
+): { key: EntryId; text: string } | null {
+  return brk !== null && live && restart === null && RESTARTS.has(brk.code) && brk.question !== ""
+    ? { key: brk.id, text: brk.question }
+    : null;
 }
 
 /** The break's lines (break-lines.ts), which arrive with the thread's chunk: stopped-mark.tsx, in that chunk, loads
@@ -139,7 +147,9 @@ const read = () => provided;
 export const useBreakLines = (): BreakLines | null => useSyncExternalStore(hear, read, read);
 
 /** The open thread's stopped line, with Restart once the host has it: null while a turn runs, for a reopened thread's
- * break, and once Restart is accepted. A refused Restart shows its own code's words. */
+ * break, and once Restart is accepted. A refused Restart shows its own code's words. An interrupted turn is written by
+ * start-up repair, so it is in the view before the window opens it: with Restart it counts as live, since Restart is
+ * its way on. */
 export function useStoppedLine({
   lang,
   brk,
@@ -158,21 +168,20 @@ export function useStoppedLine({
   thread: ThreadId | null;
   restart: RestartHost | null;
 }): BreakLine | null {
-  // per break: Restart pressed (and not refused), or its refusal's code
-  const [press, setPress] = useState<{ id: EntryId; refused: string | null } | null>(null);
+  // per break: Restart pressed (and not refused), or its refusal
+  const [press, setPress] = useState<{ id: EntryId; refused: HostError | null } | null>(null);
   const id = brk?.id ?? null;
   const onRestart = useCallback(() => {
     if (restart === null || thread === null || id === null) return;
     setPress({ id, refused: null });
-    restart
-      .restartAgent(thread)
-      .catch((e: unknown) => setPress({ id, refused: toHostError(e).code }));
+    restart.restartAgent(thread).catch((e: unknown) => setPress({ id, refused: toHostError(e) }));
   }, [restart, thread, id]);
   const pressed = press !== null && press.id === id ? press : null;
+  const shown = live || (restart !== null && brk?.code === "thread.interrupted");
   if (
     lines === null ||
     brk === null ||
-    !live ||
+    !shown ||
     busy ||
     (pressed !== null && pressed.refused === null)
   )

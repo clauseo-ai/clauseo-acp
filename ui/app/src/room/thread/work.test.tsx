@@ -215,7 +215,7 @@ test("a lost stream shows its code's words with Try again, before a refusal, and
   );
   const line = h.one("stream-failed");
   expect(line?.dataset["code"]).toBe("agent.exited");
-  expect(line?.textContent).toContain(streamFailedWords("en", "agent.exited"));
+  expect(line?.textContent).toContain(streamFailedWords("en", "agent.exited", true));
   const again = h.one("retry");
   expect(again?.textContent).toBe(lim("en", "Try again"));
   const retry = vi.spyOn(h.store, "retry");

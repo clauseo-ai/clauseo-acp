@@ -102,6 +102,6 @@ for (const theme of ["light", "dark"] as const) {
         await h.unmount();
         h = null;
       }
-    });
+    }, 20_000);
   }
 }

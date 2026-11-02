@@ -12,7 +12,7 @@ import { agentText, step, userMessage } from "../testing/stream-script.ts";
 import type { EntryId, ViewEntry } from "../transport/protocol.ts";
 import { entryIdOf, type StreamView } from "../store/view.ts";
 import { stoppedLine, streamFailedLine } from "./break-lines.ts";
-import { pickBreak, RESTARTS, type Break } from "./thread-break.ts";
+import { pickBreak, refillOf, RESTARTS, type Break } from "./thread-break.ts";
 import { clockTime } from "./thread/clock.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -114,16 +114,39 @@ test("with H10 faked: Restart for agent.exited, agent.launch_failed and thread.i
   expect(stoppedLine("en", brk("thread.interrupted"), 0, null)).toBeNull();
 });
 
-test("a refused Restart shows its own code's words on the line, never its message", () => {
-  const host = draw(
+test("a refused Restart shows its own code's words, never its message; Restart again only if the refusal is retryable; no details", () => {
+  const retry = draw(
     stoppedLine("en", brk("agent.exited"), 0, {
       onRestart: () => {},
-      refused: "thread.turn_running",
+      refused: { code: "thread.turn_running", message: "SECRET", retryable: true },
     }),
   );
-  const row = host.querySelector<HTMLElement>('[data-testid="agent-stopped"]');
+  const row = retry.querySelector<HTMLElement>('[data-testid="agent-stopped"]');
   expect(row?.dataset["code"]).toBe("thread.turn_running");
   expect(row?.textContent).toContain(errorWords("en", "thread.turn_running"));
+  expect(retry.textContent).not.toContain("SECRET");
+  expect(retry.querySelector('[data-testid="restart"]')).not.toBeNull();
+  expect(retry.textContent).not.toContain("Details");
+  const final = draw(
+    stoppedLine("en", brk("agent.exited"), 0, {
+      onRestart: () => {},
+      refused: { code: "command.unknown_thread", message: "SECRET", retryable: false },
+    }),
+  );
+  expect(final.querySelector('[data-testid="agent-stopped"]')?.textContent).toContain(
+    errorWords("en", "command.unknown_thread"),
+  );
+  expect(final.querySelector('[data-testid="restart"]')).toBeNull();
+});
+
+test("the stopped question comes back only before H10, only for the codes asking again mends, only for a live break", () => {
+  const restart = { restartAgent: async () => {} };
+  for (const code of RESTARTS)
+    expect(refillOf(brk(code), true, null)).toEqual({ key: "step:x", text: "Q" });
+  expect(refillOf(brk("agent.exited"), true, restart)).toBeNull();
+  expect(refillOf(brk("agent.exited"), false, null)).toBeNull();
+  expect(refillOf(brk("agent.protocol_error"), true, null)).toBeNull();
+  expect(refillOf(brk("agent.unsupported_version"), true, null)).toBeNull();
 });
 
 test("a stream that failed: its line and code; Try again only for a retryable code, and it calls retry", () => {
@@ -134,7 +157,7 @@ test("a stream that failed: its line and code; Try again only for a retryable co
     const host = draw(line);
     const row = host.querySelector<HTMLElement>('[data-testid="stream-failed"]');
     expect(row?.dataset["code"]).toBe("store.io");
-    expect(row?.textContent).toContain(streamFailedWords("hi", "store.io"));
+    expect(row?.textContent).toContain(streamFailedWords("hi", "store.io", retryable));
     expect(host.textContent).not.toContain("SECRET");
     const retry = host.querySelector<HTMLElement>('[data-testid="retry"]');
     expect(retry !== null).toBe(retryable);

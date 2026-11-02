@@ -72,4 +72,26 @@ export const U10: Entry[] = [
     screen: "startup-failed",
     render: startupLine(code),
   })),
+  {
+    id: "U10-09",
+    words: breakWords("The answer stopped here on {day} at {time}"),
+    screen: "room/thread",
+    // a thread reopened two days on, in the narrowest window the room takes, where the mark wraps
+    render: thread({
+      entries: [
+        ASKED,
+        SO_FAR,
+        step(9, { stop: "failed", failure: "agent.exited", ts: Date.now() - 2 * 86_400_000 }),
+      ],
+      status: "agent_exited",
+    }),
+    width: 320,
+  },
+  {
+    id: "U10-10",
+    words: breakWords("The computer's disk is full. Free some space."),
+    screen: "room/composer",
+    // a stream lost to a full disk, which another try won't mend: no Try again, and no sentence saying to
+    render: thread({ entries: [ASKED, SO_FAR], lose: "store.disk_full", loseRetryable: false }),
+  },
 ];

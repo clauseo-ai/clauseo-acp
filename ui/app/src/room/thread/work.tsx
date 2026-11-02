@@ -3,6 +3,7 @@
 // their own (chunk.ts, list.tsx), started as Work mounts; the session opens the thread only once it is in, so the
 // rows never wait for it. The composer and the transcript's box are here, for the first paint.
 import { Suspense, useEffect, useMemo } from "react";
+import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { useStreamError, useStreamPart, useViewStore, useWatch } from "../../store/hooks.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
@@ -70,10 +71,23 @@ export function Work({
         busy={busy}
         refused={session.refused}
         failed={
-          failed === null || lines === null ? null : lines.streamFailedLine(lang, failed, retry)
+          failed === null
+            ? null
+            : lines !== null
+              ? lines.streamFailedLine(lang, failed, retry)
+              : // the thread's chunk never came in (chunk.ts's NoThread): the code's words, never no line
+                {
+                  state: {
+                    kind: "wait",
+                    words: errorWords(lang, failed.code),
+                    pill: null,
+                    code: failed.code,
+                  },
+                  testId: "stream-failed",
+                }
         }
         stopped={stopped}
-        refill={refillOf(brk, live)}
+        refill={refillOf(brk, live, restart)}
         onAsk={session.ask}
         onStop={session.stop}
       />

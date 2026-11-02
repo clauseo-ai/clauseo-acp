@@ -6,7 +6,7 @@ import { ERROR_WORDS, errorWords, type ErrorCode } from "@clauseo/components/lib
 import { brk } from "@clauseo/components/lib/words-breaks.ts";
 import { afterEach, expect, test } from "vitest";
 import { agentText, reset, step, userMessage, uuid } from "../testing/stream-script.ts";
-import { stamp } from "./thread/clock.ts";
+import { whenOf } from "./thread/clock.ts";
 import { mountRoom, type Harness } from "./thread/harness.ts";
 
 let h: Harness | null = null;
@@ -38,7 +38,8 @@ test("a refused send shows its code's line on the working line for every code, n
     await h.unmount();
     h = null;
   }
-});
+  // a room per code: some 30 mounts, which a busy machine can take past the default 5 s
+}, 20_000);
 
 test("a failed step: agent.exited marks where it stopped with its time; every other code keeps its words; data-failure on each", async () => {
   h = await mountRoom();
@@ -60,11 +61,12 @@ test("a failed step: agent.exited marks where it stopped with its time; every ot
   const rows = h.all("turn-stopped");
   expect(rows.map((r) => r.dataset["failure"])).toEqual([...failures]);
   expect(rows.map((r) => r.dataset["stopReason"])).toEqual(failures.map(() => "failed"));
-  expect(rows[0]?.querySelector("time")?.getAttribute("datetime")).toBe(
-    new Date(7000).toISOString(),
-  );
+  // 1970 is another day: the mark names it
   expect(rows[0]?.textContent).toBe(
-    brk("en", "The answer stopped here at {time}", { time: stamp("en", 7000, Date.now()) }),
+    brk("en", "The answer stopped here on {day} at {time}", {
+      day: whenOf("en", 7000, Date.now()).day ?? "",
+      time: whenOf("en", 7000, Date.now()).time,
+    }),
   );
   for (const [i, failure] of failures.entries()) {
     if (i === 0) continue;

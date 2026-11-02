@@ -242,6 +242,34 @@ test("after a press on Ask, clear takes the focus back to the field and empties 
   expect(document.activeElement).toBe(field());
 });
 
+test("fill puts words into an empty field without taking the focus from elsewhere, and leaves words alone", async () => {
+  const calls = engine();
+  const onInput = vi.fn();
+  const ref = createRef<ComposerHandle>();
+  await mount(composer({ ref, onInput }));
+  const elsewhere = document.createElement("input");
+  document.body.append(elsewhere);
+  elsewhere.focus();
+  await act(async () => ref.current?.fill("Summarise the notice"));
+  expect(calls).toEqual([]);
+  expect(field().value).toBe("Summarise the notice");
+  expect(document.activeElement).toBe(elsewhere);
+  expect(onInput).toHaveBeenCalledExactlyOnceWith("Summarise the notice");
+  // words in the field keep their place
+  await act(async () => ref.current?.fill("Something else"));
+  expect(field().value).toBe("Summarise the notice");
+  elsewhere.remove();
+});
+
+test("fill with focus on nothing goes through the engine as one undoable step", async () => {
+  const calls = engine();
+  const ref = createRef<ComposerHandle>();
+  await mount(composer({ ref }));
+  await act(async () => ref.current?.fill("Summarise the notice"));
+  expect(calls).toEqual([["insertText", "Summarise the notice"]]);
+  expect(field().value).toBe("Summarise the notice");
+});
+
 test("clear(only) clears only while the field holds exactly that", async () => {
   const ref = createRef<ComposerHandle>();
   await mount(composer({ ref, initialText: "Asked" }));
@@ -275,6 +303,33 @@ test("a clear asked for while an input method composes waits for its end, and th
     await compose("compositionend");
     await act(async () => vi.runAllTimers());
     expect(field().value).toBe("Asked न");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("a fill asked for while an input method composes waits for its end, and then only into an empty field", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout"] });
+  try {
+    const calls = engine();
+    const ref = createRef<ComposerHandle>();
+    await mount(composer({ ref }));
+    field().focus();
+    await compose("compositionstart");
+    await act(async () => ref.current?.fill("Summarise the notice"));
+    expect(calls).toEqual([]);
+    expect(field().value).toBe("");
+    await compose("compositionend");
+    await act(async () => vi.runAllTimers());
+    expect(field().value).toBe("Summarise the notice");
+    // a composition that put words in keeps them: the fill finds the field taken
+    await act(async () => ref.current?.clear());
+    await compose("compositionstart");
+    await act(async () => ref.current?.fill("Summarise the notice"));
+    await type("न");
+    await compose("compositionend");
+    await act(async () => vi.runAllTimers());
+    expect(field().value).toBe("न");
   } finally {
     vi.useRealTimers();
   }
