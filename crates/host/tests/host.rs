@@ -44,6 +44,9 @@ mod limits;
 #[path = "host/list_agents.rs"]
 mod list_agents;
 #[cfg(test)]
+#[path = "host/locate.rs"]
+mod locate;
+#[cfg(test)]
 #[path = "host/mcp.rs"]
 mod mcp;
 #[cfg(test)]

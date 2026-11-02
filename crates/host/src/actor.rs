@@ -40,6 +40,7 @@ mod app;
 mod commands;
 mod folder_state;
 pub(crate) mod input;
+mod locate;
 mod matters;
 mod papers;
 mod query;
@@ -404,6 +405,24 @@ impl Actor {
                 let minted = authorize(&Principal::LocalDesktop, Access::RegisterFile)
                     .and_then(|()| papers::file_ref(self, path));
                 let _gone = reply.send(minted);
+            }
+            Request::LocateFile {
+                principal,
+                file,
+                reply,
+            } => {
+                let located = authorize(&principal, Access::LocateFile)
+                    .and_then(|()| locate::locate_file(self, file));
+                let _gone = reply.send(located);
+            }
+            Request::MatterFolder {
+                principal,
+                matter,
+                reply,
+            } => {
+                let folder = authorize(&principal, Access::MatterFolder)
+                    .and_then(|()| locate::matter_folder(self, matter));
+                let _gone = reply.send(folder);
             }
             Request::Shutdown { reply } => {
                 match authorize(&Principal::LocalDesktop, Access::Shutdown) {

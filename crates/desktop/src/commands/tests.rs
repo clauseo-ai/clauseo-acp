@@ -200,7 +200,8 @@ fn the_scoreboard_commands_answer_only_in_their_builds() {
 }
 
 /// The three commands that leave the app answer the main window from the app's page, and refuse
-/// before anything opens: a bad scheme and an unknown ref with `command.invalid`. A second
+/// before anything opens: a bad scheme and an unknown ref with `command.invalid`, an unknown
+/// matter with `command.unknown_matter`. A second
 /// window, and a page that is not the app's, get nothing: only main is granted.
 #[test]
 fn open_and_reveal_are_granted_to_main_only() {
@@ -211,16 +212,19 @@ fn open_and_reveal_are_granted_to_main_only() {
     let calls = [
         ("open_external", json!({ "url": "javascript:alert(1)" })),
         ("open_file", json!({ "file": file })),
-        ("reveal", json!({ "target": { "matter": host.scratch() } })),
+        // A matter the host does not know: refused before anything is shown.
+        (
+            "reveal",
+            json!({ "target": { "matter": clauseo_protocol::MatterId::new(Uuid::now_v7()).unwrap() } }),
+        ),
     ];
     let main: Vec<Value> = calls
         .iter()
         .map(|(cmd, body)| invoke(&window, cmd, body.clone()).unwrap_err())
         .collect();
     assert_eq!(main[0]["code"], "command.invalid", "{}", main[0]);
-    // Until the host's locate_file lands the placeholder answers internal; then command.invalid.
-    assert!(main[1]["code"].is_string(), "{}", main[1]);
-    assert!(main[2]["code"].is_string(), "{}", main[2]);
+    assert_eq!(main[1]["code"], "command.invalid", "{}", main[1]);
+    assert_eq!(main[2]["code"], "command.unknown_matter", "{}", main[2]);
 
     let other = WebviewWindowBuilder::new(&app, "other", tauri::WebviewUrl::default())
         .build()

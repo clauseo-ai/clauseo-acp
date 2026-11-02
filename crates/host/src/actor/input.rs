@@ -68,6 +68,16 @@ pub(crate) enum Request {
         path: PathBuf,
         reply: Reply<FileRefId>,
     },
+    LocateFile {
+        principal: Principal,
+        file: FileRefId,
+        reply: Reply<crate::LocatedFile>,
+    },
+    MatterFolder {
+        principal: Principal,
+        matter: MatterId,
+        reply: Reply<PathBuf>,
+    },
     Shutdown {
         reply: Reply<()>,
     },
