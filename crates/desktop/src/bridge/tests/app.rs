@@ -36,6 +36,13 @@ fn first_frames(messages: &Messages) -> SettingsView {
     current
 }
 
+/// A build of the window `label` that worked: numbered, then recorded.
+fn build(bridge: &Bridge, label: &str) -> u64 {
+    let number = bridge.number_build();
+    bridge.window_built(label, number);
+    number
+}
+
 /// The settings a `settings_changed` message carries.
 fn settings(event: HostEvent) -> SettingsView {
     let HostEvent::SettingsChanged(settings) = event else {
@@ -246,7 +253,7 @@ fn closing_a_window_drops_its_channel_app_pump_and_watchdog() {
     let (main_channel, main) = collector();
     block_on(bridge.open_stream(MAIN, main_channel)).unwrap();
     block_on(bridge.subscribe_app(MAIN)).unwrap();
-    let built = bridge.window_built(SETTINGS);
+    let built = build(&bridge, SETTINGS);
     let (channel, page) = collector();
     block_on(bridge.open_stream(SETTINGS, channel)).unwrap();
     block_on(bridge.subscribe_app(SETTINGS)).unwrap();
@@ -287,7 +294,8 @@ fn closing_main_drops_its_limits_feed() {
     let scratch = Scratch::new("limits-close", &[]);
     let host = scratch.start(Vec::new());
     let bridge = host.bridge();
-    let built = bridge.window_built(MAIN);
+    let built = bridge.number_build();
+    bridge.window_built(MAIN, built);
     let page = open(&bridge, MAIN);
     let dropped = pump::feed_dropped(&bridge.window(MAIN).unwrap(), Feed::Limits).unwrap();
     bridge.close_window(MAIN, built);
@@ -311,11 +319,11 @@ fn a_late_close_of_an_old_window_leaves_the_newer_one() {
     let scratch = Scratch::new("app-late-close", &[]);
     let host = scratch.start(Vec::new());
     let bridge = host.bridge();
-    let first_build = bridge.window_built(SETTINGS);
+    let first_build = build(&bridge, SETTINGS);
     let (first, _old) = collector();
     block_on(bridge.open_stream(SETTINGS, first)).unwrap();
     // Rebuilt before the old window's close lands: the old stream is stale and goes.
-    let second_build = bridge.window_built(SETTINGS);
+    let second_build = build(&bridge, SETTINGS);
     bridge.close_window(SETTINGS, first_build);
     assert!(
         bridge.window(SETTINGS).is_err(),

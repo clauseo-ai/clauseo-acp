@@ -61,9 +61,13 @@ pub(crate) struct Bridge {
     windows: Mutex<HashMap<String, Numbered>>,
     /// The number the next `open_stream` call or window build takes, in the order they arrive.
     opens: AtomicU64,
-    /// The number of each label's latest build (`window_built`): a window destroyed after a
-    /// newer one of its label was built leaves that one's stream alone (`close_window`).
+    /// The number of each label's latest successful build (`window_built`): a window destroyed
+    /// after a newer one of its label was built leaves that one's stream alone (`close_window`).
     builds: Mutex<HashMap<String, u64>>,
+    /// Per label, the number below which every `open_stream` belongs to a destroyed window
+    /// (`close_window`): a call still waiting for the host when its window closed drops its
+    /// stream instead of keeping it. Locked only inside `windows`' lock.
+    closed: Mutex<HashMap<String, u64>>,
     /// The folder refs `pick_folder` issued in this run; `CreateMatter` takes no other.
     issued: Mutex<HashSet<FolderRefId>>,
 }
@@ -102,6 +106,7 @@ impl Bridge {
             windows: Mutex::new(HashMap::new()),
             opens: AtomicU64::new(0),
             builds: Mutex::new(HashMap::new()),
+            closed: Mutex::new(HashMap::new()),
             issued: Mutex::new(HashSet::new()),
         }
     }
@@ -280,7 +285,8 @@ impl Bridge {
     /// the current view first, then each change. A window that had one (a page reload) drops
     /// it and every subscription it had. Calls that wait together for the host's start (a
     /// reload while it starts) wake in any order: the one that arrived last wins, so a dead
-    /// page's channel never replaces the new page's.
+    /// page's channel never replaces the new page's. A call that arrived before its window was
+    /// destroyed (`close_window`) drops its stream when it wakes.
     pub(crate) async fn open_stream(
         &self,
         label: &str,
@@ -292,8 +298,12 @@ impl Bridge {
         let window = Window::open(host.clone(), channel);
         let mut windows = lock(&self.windows);
         let newer = windows.get(label).is_some_and(|(kept, _)| *kept > number);
-        // A later call's window is in place: this one, a dead page's, is dropped instead.
-        let old = if newer {
+        let dead = lock(&self.closed)
+            .get(label)
+            .is_some_and(|below| number < *below);
+        // A later call's window is in place, or this call's window was destroyed while it
+        // waited: this one, a dead page's, is dropped instead.
+        let old = if newer || dead {
             Some(window)
         } else {
             // Only the kept window follows the limits: a dropped one's channel is dead. Only
@@ -310,13 +320,26 @@ impl Bridge {
         Ok(())
     }
 
-    /// Numbers a build of the window `label`, before it is built: every `open_stream` its page
-    /// sends gets a higher number. The number goes to `close_window` when that window is
-    /// destroyed.
-    pub(crate) fn window_built(&self, label: &str) -> u64 {
-        let number = self.opens.fetch_add(1, Ordering::Relaxed);
-        lock(&self.builds).insert(label.to_owned(), number);
-        number
+    /// Numbers a window's build, before it is built: every `open_stream` its page sends gets a
+    /// higher number. Recorded with `window_built` once the build worked.
+    pub(crate) fn number_build(&self) -> u64 {
+        self.opens.fetch_add(1, Ordering::Relaxed)
+    }
+
+    /// Records that the window `label` was built as `number` (`number_build`). Only a build
+    /// that worked is recorded: a second open that fails on the existing label must not make
+    /// the first window's close look late. The number goes to `close_window` when that window
+    /// is destroyed.
+    pub(crate) fn window_built(&self, label: &str, number: u64) {
+        let mut builds = lock(&self.builds);
+        let latest = builds.entry(label.to_owned()).or_insert(number);
+        *latest = (*latest).max(number);
+    }
+
+    /// For tests: the number of the window `label`'s latest recorded build.
+    #[cfg(test)]
+    pub(crate) fn latest_build(&self, label: &str) -> Option<u64> {
+        lock(&self.builds).get(label).copied()
     }
 
     /// Drops the stream of the window `label` built as number `built`, which was destroyed: its
@@ -324,7 +347,8 @@ impl Bridge {
     /// newer window of that label was built since, only a stream opened before that build goes:
     /// a late close never removes the newer page's stream. Tauri removes a destroyed window
     /// before its handlers run and builds a window on the event loop only after them, so on Wry
-    /// the guard never fires; it holds whatever order a runtime keeps.
+    /// the guard never fires; it holds whatever order a runtime keeps. An `open_stream` of the
+    /// destroyed window still waiting for the host drops its stream when it wakes (`closed`).
     pub(crate) fn close_window(&self, label: &str, built: u64) {
         let newer = {
             let mut builds = lock(&self.builds);
@@ -336,10 +360,17 @@ impl Bridge {
                 }
             }
         };
+        // Every stream numbered below this is the destroyed window's: before the newer build,
+        // or with none, every one numbered so far.
+        let below = newer.unwrap_or_else(|| self.opens.fetch_add(1, Ordering::Relaxed));
         let mut windows = lock(&self.windows);
+        let mut closed = lock(&self.closed);
+        let tombstone = closed.entry(label.to_owned()).or_insert(below);
+        *tombstone = (*tombstone).max(below);
+        drop(closed);
         let stale = windows
             .get(label)
-            .is_some_and(|(opened, _)| newer.is_none_or(|latest| *opened < latest));
+            .is_some_and(|(opened, _)| *opened < below);
         let old = if stale { windows.remove(label) } else { None };
         drop(windows);
         // Dropped outside the lock: aborting the pumps takes the window's own lock.

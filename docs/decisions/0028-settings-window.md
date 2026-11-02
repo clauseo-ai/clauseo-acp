@@ -31,7 +31,11 @@ unminimises, shows and focuses it. When a window is destroyed, the bridge drops 
 and its watchdog. Each build is numbered (`Bridge::window_built`, from the counter `open_stream`
 numbers from), and the window's own `Destroyed` handler passes that number, so a close that lands
 after the window was built again removes only a stream opened before that build, never the new
-page's. With Wry the guard never fires (Tauri removes a destroyed window before its handlers run,
+page's. Only a build that worked is recorded, so a second open that fails on the taken label
+(a double click, or the menu and Cmd+, together) does not make the first window's close look
+late. The close also leaves a tombstone, the number below which every `open_stream` of that label
+belongs to a destroyed window: a call still waiting for the host's start when its window closed
+drops its stream when it wakes. With Wry the late-close guard never fires (Tauri removes a destroyed window before its handlers run,
 and builds a window on the event loop only after them); it holds whatever order a runtime keeps.
 Destroying `main` destroys `settings`, so closing `main` still ends the app.
 
