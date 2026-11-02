@@ -1,0 +1,11 @@
+{"scenario":"permission-then-end","description":"Two permission requests; once the client answers the second (allow-once), the agent answers the prompt end_turn with the first still pending, and takes whatever the client answers it later","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1"}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"request":{"id":"perm-1","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"tc-perm-1","title":"Edit clause 1","kind":"edit","status":"pending"},"options":[{"optionId":"allow-once","name":"Allow once","kind":"allow_once"},{"optionId":"reject-once","name":"Reject","kind":"reject_once"}]}}}
+{"request":{"id":"perm-2","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"tc-perm-2","title":"Edit clause 2","kind":"edit","status":"pending"},"options":[{"optionId":"allow-once","name":"Allow once","kind":"allow_once"},{"optionId":"reject-once","name":"Reject","kind":"reject_once"}]}}}
+{"expect_response":{"id":"perm-2","result":{"outcome":{"outcome":"selected","optionId":"allow-once"}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
+{"expect_response":{"id":"perm-1","result":"{{any}}"}}

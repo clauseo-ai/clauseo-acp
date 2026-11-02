@@ -1,0 +1,8 @@
+{"scenario":"permission-cancel-unanswered","description":"A permission request pending when the turn is cancelled: the client answers it cancelled, and the prompt is never answered, so the turn waits for the 5 s fallback","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1"}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"request":{"id":"perm-1","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"tc-perm-1","title":"Edit clause 1","kind":"edit","status":"pending"},"options":[{"optionId":"allow-once","name":"Allow once","kind":"allow_once"},{"optionId":"reject-once","name":"Reject","kind":"reject_once"}]}}}
+{"all":[{"expect":{"method":"session/cancel","params":{"sessionId":"sess-1"}}},{"expect_response":{"id":"perm-1","result":{"outcome":{"outcome":"cancelled"}}}}]}

@@ -50,6 +50,9 @@ mod import;
 #[path = "host/limits.rs"]
 mod limits;
 #[cfg(test)]
+#[path = "host/limits_asks.rs"]
+mod limits_asks;
+#[cfg(test)]
 #[path = "host/limits_host.rs"]
 mod limits_host;
 #[cfg(test)]

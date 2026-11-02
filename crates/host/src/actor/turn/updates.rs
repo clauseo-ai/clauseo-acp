@@ -123,6 +123,7 @@ fn handle(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
             if let Some(agent) = agent(actor, thread) {
                 agent.url_elicitations.remove(&elicitation_id);
             }
+            super::super::limits::asking_changed(actor);
         }
         AcpEvent::Limit {
             session,

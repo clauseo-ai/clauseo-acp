@@ -168,6 +168,10 @@ pub(super) fn answer_elicitation(
         .elicitations
         .remove(&elicitation)
         .ok_or_else(not_pending)?;
+    if !matches!(response, ElicitationResponse::Accept { .. }) {
+        // Only an accepted URL elicitation goes on in the browser.
+        agent.url_elicitations.retain(|_, id| *id != elicitation);
+    }
     let outcome = match &response {
         ElicitationResponse::Accept { .. } => ElicitationOutcome::Accepted,
         ElicitationResponse::Decline => ElicitationOutcome::Declined,

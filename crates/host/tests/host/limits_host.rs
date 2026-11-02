@@ -146,7 +146,7 @@ impl Feed {
     }
 
     /// The events already in the channel, without waiting.
-    fn ready(&mut self) -> Vec<HostEvent> {
+    pub(crate) fn ready(&mut self) -> Vec<HostEvent> {
         let mut ready = Vec::new();
         while let Some(Some(item)) = self.sub.next().now_or_never() {
             ready.push(item.decode().unwrap());
@@ -201,7 +201,7 @@ fn seed(dir: &Dir, limits: AccountLimits) {
 }
 
 /// Starts run 0 of `dir` reading through `reads`.
-fn start(dir: &Dir, reads: &Reads) -> Running {
+pub(crate) fn start(dir: &Dir, reads: &Reads) -> Running {
     let reader = Arc::new(reads.clone());
     dir.start_with(0, move |config| config.with_limits_reader(reader))
 }
@@ -214,7 +214,7 @@ fn entry(view: &LimitsView, agent: AgentKind) -> &AgentLimitsView {
 }
 
 /// `RefreshLimits`, which answers `Done`.
-fn refresh(host: &Running, why: RefreshWhy) {
+pub(crate) fn refresh(host: &Running, why: RefreshWhy) {
     let outcome = host.ok(HostCommand::RefreshLimits { agent: None, why });
     assert_eq!(outcome, CommandOutcome::Done);
 }
