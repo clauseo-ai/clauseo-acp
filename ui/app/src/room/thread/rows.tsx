@@ -16,12 +16,10 @@ import type {
   EntryId,
   NoticeEntry,
   StreamId,
-  Timestamp,
   ToolCallEntry,
   UserMessageEntry,
   ViewEntry,
 } from "../../transport/protocol.ts";
-import { entryTime } from "../host-next.ts";
 import { stamp } from "./clock.ts";
 import { isolated, shownOf } from "./content.ts";
 import { questionText, useQuestionText, useStreaming } from "./live.ts";
@@ -51,25 +49,23 @@ function ContentLine({ block }: { block: ContentBlock }) {
   );
 }
 
-/** The lawyer's question: "You", its time when the host gave one (H17), and its words. `slots`: the room's named
+/** The lawyer's question: "You", the time it was sent (the entry's `ts`), and its words. `slots`: the room's named
  * nodes (the pinned question's measure) are the live thread's; a paged question takes none. */
 function Question({
   id,
   entry,
   text,
-  time,
   slots,
 }: {
   id: EntryId;
   entry: UserMessageEntry;
   text: string;
-  time: Timestamp | null;
   slots: boolean;
 }) {
   const w = useThreadWords();
   // "today" as the row first showed: no clock runs to move it
   const [now] = useState(Date.now);
-  const at = time === null ? undefined : stamp(w.lang, time, now);
+  const at = stamp(w.lang, entry.ts, now);
   return (
     <div data-testid="message-user" data-entry-id={id}>
       {slots ? (
@@ -93,15 +89,13 @@ function LiveQuestion({
   id,
   stream,
   entry,
-  time,
 }: {
   id: EntryId;
   stream: StreamId;
   entry: UserMessageEntry;
-  time: Timestamp | null;
 }) {
   const text = useQuestionText(stream, id, entry);
-  return <Question id={id} entry={entry} text={text} time={time} slots />;
+  return <Question id={id} entry={entry} text={text} slots />;
 }
 
 function Answer({ id, text, streaming }: { id: EntryId; text: string; streaming: boolean }) {
@@ -218,9 +212,7 @@ export const Row = memo(function Row({ id, stream }: { id: EntryId; stream: Stre
   const entry = useEntry(useViewStore(), stream, id);
   if (entry === undefined) return null;
   if (entry.user_message !== undefined)
-    return (
-      <LiveQuestion id={id} stream={stream} entry={entry.user_message} time={entryTime(entry)} />
-    );
+    return <LiveQuestion id={id} stream={stream} entry={entry.user_message} />;
   if (entry.agent_text !== undefined)
     return <LiveAgentText id={id} stream={stream} thought={entry.agent_text.kind === "thought"} />;
   return <EntryRow id={id} entry={entry} />;
@@ -231,15 +223,7 @@ export const PagedRow = memo(function PagedRow({ entry }: { entry: ViewEntry }) 
   const id = entryIdOf(entry);
   if (entry.user_message !== undefined) {
     const m = entry.user_message;
-    return (
-      <Question
-        id={id}
-        entry={m}
-        text={questionText(id, m, undefined)}
-        time={entryTime(entry)}
-        slots={false}
-      />
-    );
+    return <Question id={id} entry={m} text={questionText(id, m, undefined)} slots={false} />;
   }
   if (entry.agent_text !== undefined) {
     const a = entry.agent_text;

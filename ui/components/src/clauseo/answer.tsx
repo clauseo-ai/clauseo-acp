@@ -44,7 +44,7 @@ export function QuestionLine({
   text,
 }: {
   who: string;
-  /** Without it, "You" alone: no clock time is recorded for a question yet. */
+  /** When the question was sent; without it, the name alone. */
   time?: string | undefined;
   text: string;
 }) {

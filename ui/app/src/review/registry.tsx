@@ -34,14 +34,25 @@ import type { ErrorCode, StepEntry, ViewEntry } from "../transport/protocol.ts";
 
 /* ---------- U3: the live thread's states ---------- */
 
-const QUESTION = userMessage(5, 1, "What does clause nine of the lease say about notice?");
+/** A local time, `days` from today. */
+const atLocal = (days: number, h: number, m: number) => {
+  const d = new Date();
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + days, h, m).getTime();
+};
+/** The review's turn, asked at 4:31 pm today and ended at 4:32 pm: the question's "You, 4:31 pm", and the answer's
+ * "Clauseo, 4:32 pm" once its step is in. */
+const ASKED = atLocal(0, 16, 31);
+const ENDED = atLocal(0, 16, 32);
+
+const asked = userMessage(5, 1, "What does clause nine of the lease say about notice?");
+const QUESTION: ViewEntry = { user_message: { ...asked.user_message!, ts: ASKED } };
 const ANSWER = agentText(
   6,
   1,
   "Clause nine requires **notice in writing**, served at the tenant's registered office, at least thirty days ahead.",
 );
 const PARTIAL = agentText(6, 1, "Clause nine requires **notice in writing**, served at");
-const ended = (over: Partial<StepEntry> = {}): ViewEntry => step(9, over);
+const ended = (over: Partial<StepEntry> = {}): ViewEntry => step(9, { ts: ENDED, ...over });
 const paper = (undone: boolean): ViewEntry =>
   ended({
     files: [
@@ -65,16 +76,12 @@ const content = (block: object): ViewEntry => ({
     block: block as never,
   },
 });
-/** A local time, `days` from today. */
-const atLocal = (days: number, h: number, m: number) => {
-  const d = new Date();
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + days, h, m).getTime();
-};
 const limit = (reason: string, resets_at?: number): ViewEntry => ({
   limit_stop: {
     order: 9,
     turn: TURN,
     reason: reason as never,
+    ts: ENDED,
     ...(resets_at === undefined ? {} : { resets_at }),
   },
 });

@@ -14,6 +14,7 @@ const entry = (...texts: (string | null)[]): UserMessageEntry => ({
   ),
   status: "sent",
   edited: false,
+  ts: 1000,
 });
 
 test("one text block reads straight from the view, or from the entry before the view has it", () => {
