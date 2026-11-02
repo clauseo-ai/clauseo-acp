@@ -6,11 +6,13 @@ use std::sync::Arc;
 
 use clauseo_process::{PassthroughLauncher, SpawnOptions};
 use clauseo_protocol::{
-    AgentId, CommandEnvelope, CommandId, CommandOutcome, DomainEvent, ErrorCode, HostCommand,
-    HostEvent, HostQuery, MatterId, MatterKind, Principal, QueryResult, Seq, StreamId, ThreadId,
-    Timestamp, Title, ViewPatchBody,
+    AgentId, CommandEnvelope, CommandId, CommandOutcome, DomainEvent, Envelope, ErrorCode,
+    HostCommand, HostEvent, HostQuery, MatterId, MatterKind, Principal, QueryResult, Seq, StreamId,
+    ThreadId, Timestamp, Title, ViewEntry, ViewPatchBody,
 };
+use clauseo_reducer::{REDUCER_SCHEMA_VERSION, Snapshot, SnapshotRef, StreamState, apply};
 use clauseo_settings::{Effective, Locations, SystemFiles};
+use clauseo_store::{Store, StoreOptions, fixtures};
 use futures::StreamExt;
 use futures::executor::block_on;
 use uuid::Uuid;
@@ -267,4 +269,94 @@ fn a_second_start_is_locked_and_abort_frees_the_folder() {
     scratch(&host);
     block_on(host.shutdown()).unwrap();
     join.join().unwrap();
+}
+
+/// Schema-1 snapshot bytes of the state `events` fold to, as a build before entry times wrote.
+fn schema_1_snapshot(events: &[Envelope]) -> Vec<u8> {
+    let mut state = StreamState::new(fixtures::stream());
+    for envelope in events {
+        apply(&mut state, envelope).unwrap();
+    }
+    SnapshotRef {
+        reducer_schema: 1,
+        state: &state,
+    }
+    .to_bytes()
+    .unwrap()
+}
+
+#[test]
+fn a_schema_1_snapshot_is_passed_over_and_the_log_folded_and_snapshotted_again() {
+    let dir = TempDir::new("actor-old-snapshot");
+    block_on(async {
+        let store = Store::open(StoreOptions::new(dir.path())).await.unwrap();
+        for commit in fixtures::reopen_20k(schema_1_snapshot, 1) {
+            store.commit(commit).await.unwrap();
+        }
+        let reopen = store
+            .reopen(fixtures::stream(), REDUCER_SCHEMA_VERSION)
+            .await;
+        assert!(
+            reopen.unwrap().snapshot.is_none(),
+            "only a schema-1 snapshot"
+        );
+        store.close().await.unwrap();
+    });
+
+    let (host, join) = start(dir.path(), 0);
+    let mut view =
+        block_on(host.subscribe(Principal::LocalDesktop, fixtures::stream(), None)).unwrap();
+    let HostEvent::Patches(first) = block_on(view.next()).unwrap().decode().unwrap() else {
+        panic!("not patches");
+    };
+    let Some(ViewPatchBody::Reset { view_window }) = first.patches.first().map(|p| &p.body) else {
+        panic!("not a Reset: {first:?}");
+    };
+    // The fixture's envelope at seq n has ts 1_800_000_000_000 + n, so each time is its order's.
+    let event_time = |order: Seq| {
+        Timestamp::new(1_800_000_000_000 + i64::try_from(order.get()).unwrap()).unwrap()
+    };
+    let mut timed = 0;
+    for entry in &view_window.entries {
+        let ts = if let ViewEntry::UserMessage(prompt) = entry {
+            prompt.ts
+        } else if let ViewEntry::Step(step) = entry {
+            step.ts
+        } else {
+            continue;
+        };
+        assert_eq!(ts, event_time(entry.order()), "{entry:?}");
+        timed += 1;
+    }
+    assert!(
+        timed >= 2,
+        "a prompt and a step in the window: {view_window:?}"
+    );
+    block_on(host.shutdown()).unwrap();
+    join.join().unwrap();
+
+    // The whole-log fold was 20,000 events, past SNAPSHOT_EVERY_EVENTS: the load wrote a
+    // snapshot of this schema at the head, and it decodes with the same times.
+    block_on(async {
+        let store = Store::open(StoreOptions::new(dir.path())).await.unwrap();
+        let reopen = store
+            .reopen(fixtures::stream(), REDUCER_SCHEMA_VERSION)
+            .await
+            .unwrap();
+        let snapshot = reopen.snapshot.expect("a schema-2 snapshot");
+        assert_eq!(snapshot.seq, Seq::new(fixtures::EVENTS).unwrap());
+        let state = Snapshot::from_bytes(&snapshot.state)
+            .and_then(Snapshot::into_state)
+            .unwrap();
+        let step = state.entries().values().rev().find_map(|entry| {
+            if let ViewEntry::Step(step) = entry {
+                Some((step.order, step.ts))
+            } else {
+                None
+            }
+        });
+        let (order, ts) = step.expect("a step");
+        assert_eq!(ts, event_time(order));
+        store.close().await.unwrap();
+    });
 }

@@ -5,9 +5,9 @@ use std::collections::BTreeMap;
 
 use clauseo_protocol::{
     CompactionChanged, CompactionStatus, ElicitationExpired, ElicitationOutcome,
-    ElicitationRequest, ElicitationRequested, ElicitationResolved, Envelope, ExpiryReason,
-    LimitStopReason, Notice, NoticeLevel, PermissionExpired, Principal, Seq, StepUndone, Timestamp,
-    TurnStoppedAtLimit, ViewEntry,
+    ElicitationRequest, ElicitationRequested, ElicitationResolved, Envelope, ErrorCode,
+    ExpiryReason, LimitStopReason, Notice, NoticeLevel, PermissionExpired, Principal, Seq,
+    StepUndone, Timestamp, TurnFailed, TurnStoppedAtLimit, ViewEntry,
 };
 use clauseo_reducer::{
     Error, REDUCER_SCHEMA_VERSION, Snapshot, SnapshotRef, StreamState, ViewChange, apply,
@@ -28,7 +28,6 @@ fn clock(seq: Seq) -> Timestamp {
 }
 
 /// `events` with each `ts` replaced by [`clock`] of its `seq`.
-#[cfg(test)]
 fn retimed(events: Vec<Envelope>) -> Vec<Envelope> {
     events
         .into_iter()
@@ -40,7 +39,6 @@ fn retimed(events: Vec<Envelope>) -> Vec<Envelope> {
 }
 
 /// The `seq`s of the events that settle each entry, by the order of the entry they settle.
-#[cfg(test)]
 struct Settled {
     permission: (Seq, Seq),
     expired_permission: Seq,
@@ -65,8 +63,10 @@ fn timed_thread() -> (Vec<Envelope>, Settled) {
     };
     let (request, asked) = ask(&mut log);
     let answered = log.push(permission_resolved(request)).unwrap().seq;
-    let (expiring, expired_permission) = ask(&mut log);
     let reason = ExpiryReason::TurnEnded;
+    // An expiry after the answer is refused (`AlreadySettled`) and keeps the answer's time.
+    log.push(PermissionExpired { request, reason }).unwrap();
+    let (expiring, expired_permission) = ask(&mut log);
     log.push(PermissionExpired {
         request: expiring,
         reason,
@@ -143,7 +143,6 @@ fn timed_thread() -> (Vec<Envelope>, Settled) {
 
 /// Each entry's time, by order: `ts` for the entries made by one event, `answered_at` for
 /// permissions and elicitations. Entries with neither (header, texts, tool calls) are left out.
-#[cfg(test)]
 fn times(state: &StreamState) -> BTreeMap<Seq, (&'static str, Option<Timestamp>)> {
     state
         .entries()
@@ -242,6 +241,14 @@ fn a_step_shows_when_its_turn_ended_and_a_turn_that_never_ended_has_no_step() {
     assert_eq!(steps(&running), vec![]);
     let checkpoint = log.fresh().unwrap();
     let ended = log.push(turn_ended(turn, checkpoint).unwrap()).unwrap().seq;
+    // Files and a failure that arrive after the end update the step; its time stays the end's.
+    log.push(files_changed(turn).unwrap()).unwrap();
+    let failed = TurnFailed {
+        turn,
+        code: ErrorCode::ALL[0],
+        detail: None,
+    };
+    log.push(failed).unwrap();
     // The undo updates the step; its time stays the end's, the undo's is on its marker.
     let undo = StepUndone {
         turn,
@@ -252,9 +259,11 @@ fn a_step_shows_when_its_turn_ended_and_a_turn_that_never_ended_has_no_step() {
     log.push(undo).unwrap();
     let state = fold(&retimed(log.into_events()));
     assert_eq!(steps(&state), vec![(ended, clock(ended))]);
-    let step_undone = state.entries().values().any(
-        |entry| matches!(entry, ViewEntry::Step(step) if step.undone && step.ts == clock(ended)),
-    );
+    let step_undone = state.entries().values().any(|entry| {
+        matches!(entry, ViewEntry::Step(step)
+            if step.undone && step.failure.is_some() && !step.files.is_empty()
+                && step.ts == clock(ended))
+    });
     assert!(step_undone, "{:?}", state.entries());
 }
 
