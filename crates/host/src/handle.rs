@@ -10,7 +10,7 @@ use std::thread::JoinHandle;
 
 use clauseo_protocol::{
     CommandEnvelope, CommandOutcome, Cursor, FileRefId, FolderRefId, HostError, HostQuery,
-    Principal, QueryResult, Seq, StreamId, ViewEpoch,
+    MatterId, Principal, QueryResult, Seq, StreamId, ViewEpoch,
 };
 use futures::channel::oneshot;
 
@@ -22,6 +22,18 @@ mod subscription;
 
 pub use subscription::{AppSubscription, EventSubscription, Subscription};
 pub(crate) use subscription::{SUBSCRIPTION_CAPACITY, Sink};
+
+/// A file a ref names, as [`HostHandle::locate_file`] found it: the matter that owns it, that
+/// matter's folder, and the file, as the host recorded them (not resolved).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocatedFile {
+    /// The matter whose folder holds the file.
+    pub matter: MatterId,
+    /// That matter's folder.
+    pub folder: PathBuf,
+    /// The file.
+    pub path: PathBuf,
+}
 
 /// The session host. [`Host::start`] runs it on its own thread, `clauseo-host`.
 #[derive(Debug)]
@@ -195,6 +207,40 @@ impl HostHandle {
     pub async fn register_file(&self, path: PathBuf) -> Result<FileRefId, HostError> {
         self.call(|reply| Request::RegisterFile { path, reply })
             .await
+    }
+
+    /// What `file` names, for the desktop's `open_file` (0026): the matter that owns it, that
+    /// matter's folder, and the file, checked now against that folder with symlinks and `..`
+    /// followed. Refused with `command.invalid` for a ref this run did not issue, and for a file
+    /// in no matter's folder or outside its owner's; `matter.folder_missing` when the folder is
+    /// gone. Only the local desktop may ask.
+    pub async fn locate_file(
+        &self,
+        principal: Principal,
+        file: FileRefId,
+    ) -> Result<LocatedFile, HostError> {
+        self.call(|reply| Request::LocateFile {
+            principal,
+            file,
+            reply,
+        })
+        .await
+    }
+
+    /// The folder recorded for `matter`, for the desktop's `reveal` (0026):
+    /// `command.unknown_matter` for a matter the host does not know. Only the local desktop may
+    /// ask.
+    pub async fn matter_folder(
+        &self,
+        principal: Principal,
+        matter: MatterId,
+    ) -> Result<PathBuf, HostError> {
+        self.call(|reply| Request::MatterFolder {
+            principal,
+            matter,
+            reply,
+        })
+        .await
     }
 
     /// Stops the host: no more commands, running turns cancelled, agents stopped, text

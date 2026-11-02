@@ -13,6 +13,7 @@ mod words;
 
 use std::path::{Path, PathBuf};
 
+pub(crate) use clauseo_host::LocatedFile;
 use clauseo_protocol::{ErrorCode, FileRefId, HostError, Language, MatterId};
 use serde::Deserialize;
 
@@ -66,18 +67,6 @@ pub(crate) struct Link {
     pub(crate) url: String,
     /// Where it goes, as the confirm names it.
     pub(crate) destination: Destination,
-}
-
-/// A file the host issued a ref for, with the folder of the matter that owns the ref, as the
-/// host found them when asked.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct LocatedFile {
-    /// The matter that owns the ref.
-    pub(crate) matter: MatterId,
-    /// That matter's folder.
-    pub(crate) folder: PathBuf,
-    /// The file.
-    pub(crate) path: PathBuf,
 }
 
 /// The host's side: what a file ref names, and where a matter's folder is.

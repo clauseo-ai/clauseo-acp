@@ -16,6 +16,8 @@ pub(crate) enum Access {
     Ack,
     RegisterFolder,
     RegisterFile,
+    LocateFile,
+    MatterFolder,
     Shutdown,
 }
 
@@ -30,6 +32,8 @@ pub(crate) const ENTRY_POINTS: &[Access] = &[
     Access::Ack,
     Access::RegisterFolder,
     Access::RegisterFile,
+    Access::LocateFile,
+    Access::MatterFolder,
     Access::Shutdown,
 ];
 

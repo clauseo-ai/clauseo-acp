@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use clauseo_host::HostHandle;
-use clauseo_protocol::{ErrorCode, FileRefId, HostError, MatterId};
+use clauseo_protocol::{ErrorCode, FileRefId, HostError, MatterId, Principal};
 use futures::channel::oneshot;
 use tauri::{AppHandle, Runtime};
 use tauri_plugin_dialog::{DialogExt as _, MessageDialogButtons, MessageDialogKind};
@@ -91,24 +91,17 @@ impl<R: Runtime> Opener for NativeOpener<R> {
     }
 }
 
-/// PLACEHOLDER until the host's `locate_file` and `matter_folder` land (they follow #131):
-/// both refuse with `internal`.
+/// The host answers both as the local desktop, the principal of every bridge call.
 impl Locate for HostHandle {
     fn locate_file(&self, file: FileRefId) -> BoxFuture<'_, Result<LocatedFile, HostError>> {
-        Box::pin(async move {
-            Err(HostError::new(
-                ErrorCode::Internal,
-                format!("the host cannot locate file {file} yet"),
-            ))
-        })
+        Box::pin(HostHandle::locate_file(self, Principal::LocalDesktop, file))
     }
 
     fn matter_folder(&self, matter: MatterId) -> BoxFuture<'_, Result<PathBuf, HostError>> {
-        Box::pin(async move {
-            Err(HostError::new(
-                ErrorCode::Internal,
-                format!("the host cannot find matter {matter}'s folder yet"),
-            ))
-        })
+        Box::pin(HostHandle::matter_folder(
+            self,
+            Principal::LocalDesktop,
+            matter,
+        ))
     }
 }

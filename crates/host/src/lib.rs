@@ -42,8 +42,9 @@
 //! - [`HostHandle`], `Clone` and `Send`: [`HostHandle::dispatch`], [`HostHandle::query`],
 //!   [`HostHandle::subscribe`], [`HostHandle::subscribe_events`],
 //!   [`HostHandle::subscribe_app`], [`HostHandle::ack`],
-//!   [`HostHandle::register_folder`], [`HostHandle::register_file`] and
-//!   [`HostHandle::shutdown`]. Each call is one request over a `bounded(256)` channel with a
+//!   [`HostHandle::register_folder`], [`HostHandle::register_file`],
+//!   [`HostHandle::locate_file`] and [`HostHandle::matter_folder`] (the desktop's `open_file`
+//!   and `reveal`, 0026; the local desktop only), and [`HostHandle::shutdown`]. Each call is one request over a `bounded(256)` channel with a
 //!   `futures` oneshot for the reply. [`HostJoin::join`] waits for the thread to end.
 //! - [`Subscription`] yields [`EncodedEvent`]s: each `HostEvent` serialised once and shared by
 //!   every subscriber of the stream; [`EncodedEvent::json`] is sent on as it is and
@@ -138,7 +139,9 @@ pub use clock::{Clock, Now, SystemClock};
 pub use config::{HostConfig, NoProfile, ProfileHook};
 pub use encode::EncodedEvent;
 pub use error::Error;
-pub use handle::{AppSubscription, EventSubscription, Host, HostHandle, HostJoin, Subscription};
+pub use handle::{
+    AppSubscription, EventSubscription, Host, HostHandle, HostJoin, LocatedFile, Subscription,
+};
 #[cfg(feature = "test-support")]
 pub use ids::SequentialIds;
 pub use ids::{IdSource, RandomV7};

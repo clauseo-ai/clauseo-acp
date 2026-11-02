@@ -13,6 +13,8 @@ fn listed(access: Access) -> bool {
         | Access::Ack
         | Access::RegisterFolder
         | Access::RegisterFile
+        | Access::LocateFile
+        | Access::MatterFolder
         | Access::Shutdown => ENTRY_POINTS.contains(&access),
     }
 }
@@ -44,6 +46,8 @@ fn entry_points_name_every_access() {
         Access::Ack,
         Access::RegisterFolder,
         Access::RegisterFile,
+        Access::LocateFile,
+        Access::MatterFolder,
         Access::Shutdown,
     ];
     assert!(all.into_iter().all(listed));
