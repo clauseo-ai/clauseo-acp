@@ -25,6 +25,11 @@ impl World {
         self.dir.path().join(rel)
     }
 
+    /// The root of the temp folder's drive: `/`, or a drive root on Windows.
+    fn root(&self) -> PathBuf {
+        self.dir.path().ancestors().last().unwrap().to_owned()
+    }
+
     /// The builder every test starts from: this world's matter, state and home.
     fn builder(&self) -> PolicyBuilder {
         Policy::builder(self.at("matter"), self.at("state")).home(self.at("home"))
@@ -137,12 +142,13 @@ fn the_matter_may_not_meet_a_hidden_path() {
 #[test]
 fn the_matter_may_not_be_the_root_or_the_home_folder() {
     let w = World::new("matter-root");
+    let root = w.root();
     refused(
-        Policy::builder("/", w.at("state"))
+        Policy::builder(&root, w.at("state"))
             .home(w.at("home"))
             .build(),
         "the matter may not be the root folder",
-        Path::new("/"),
+        &root,
     );
     refused(
         Policy::builder(w.at("home"), w.at("state"))
@@ -264,6 +270,7 @@ fn allowed_folders_that_meet_the_matter_are_refused() {
 #[test]
 fn allowed_folders_that_are_home_root_or_git_are_refused() {
     let w = World::new("allowed-home");
+    let root = w.root();
     let home_rule = "an allowed folder may not equal or hold the home folder";
     refused(
         w.builder().allowed_folder(w.at("home")).build(),
@@ -276,9 +283,9 @@ fn allowed_folders_that_are_home_root_or_git_are_refused() {
         w.dir.path(),
     );
     refused(
-        w.builder().allowed_folder("/").build(),
+        w.builder().allowed_folder(&root).build(),
         "an allowed folder may not be the root folder",
-        Path::new("/"),
+        &root,
     );
     w.dir.dir("other/repo/.git/objects");
     refused(

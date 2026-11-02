@@ -53,13 +53,15 @@ impl MatterScan {
         &self.links
     }
 
-    /// Every `.git` in the matter at any depth, folder or file, sorted.
+    /// Every `.git` in the matter at any depth (folder, file, or link to a folder in the
+    /// matter), sorted.
     pub fn git(&self) -> &[PathBuf] {
         &self.git
     }
 
-    /// The folders that `.git` files' `gitdir:` lines name inside the matter, canonical, sorted.
-    /// One outside the matter is left out: the jail denies it anyway.
+    /// The folders that `.git` files' `gitdir:` lines name inside the matter, and that `.git`
+    /// links lead to inside it, canonical, sorted. One outside the matter is left out: the jail
+    /// denies it anyway.
     pub fn git_dirs(&self) -> &[PathBuf] {
         &self.git_dirs
     }
@@ -147,8 +149,16 @@ fn visit(
 ) {
     let is_git = entry.file_name().eq_ignore_ascii_case(".git");
     if kind.is_symlink() {
-        if let Some(finding) = symlink_finding(matter, path, kind) {
-            scan.links.push(finding);
+        match symlink_finding(matter, path, kind) {
+            Some(finding) => scan.links.push(finding),
+            // A `.git` link to a folder in the matter: that folder is the repository.
+            None if is_git => {
+                scan.git.push(path.to_owned());
+                if let Ok(dir) = dunce::canonicalize(path) {
+                    scan.git_dirs.push(dir);
+                }
+            }
+            None => {}
         }
     } else if kind.is_dir() {
         if is_git {
