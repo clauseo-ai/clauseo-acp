@@ -65,7 +65,7 @@ classify() {
     docs/decisions/0006-store-format.md | docs/ui-states.md) rust=true ;;
     ui/app/src/transport/bindings.ts | ui/components/src/styles/tokens-parts.css) ui=true app=true rust=true ;;
     ui/components/src/clauseo/shell.css | ui/components/src/clauseo/room-toolbar.tsx) ui=true app=true rust=true ;;
-    ui/components/src/clauseo/responsive.css) ui=true app=true rust=true ;;
+    ui/components/src/clauseo/responsive.css | ui/components/src/styles/tokens-colour.css) ui=true app=true rust=true ;;
     # Prose. The fast lane still runs and checks it (links, typos, the docs rules).
     *.md | docs/* | LICENSE | LICENSES/* | cla/*) ;;
     # Read by the fast lane alone (formatting, typos, TOML style, licences, secrets, hooks).
