@@ -333,6 +333,8 @@ impl Running {
         let outcome = self.ok(HostCommand::CreateMatter {
             name: Title::new(name).unwrap(),
             source: MatterSource::ExistingFolder { folder: folder_ref },
+            client: None,
+            next_date: None,
         });
         match outcome {
             CommandOutcome::MatterCreated { matter } => matter,

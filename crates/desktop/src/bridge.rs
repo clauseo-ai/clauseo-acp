@@ -137,17 +137,19 @@ impl Bridge {
     /// `pick_folder` did not issue.
     fn admit(&self, command: &HostCommand) -> Result<(), HostError> {
         match command {
-            HostCommand::CreateMatter { source, .. } => {
-                let (MatterSource::NewFolder { folder } | MatterSource::ExistingFolder { folder }) =
-                    source;
-                self.picked(*folder)
-            }
+            HostCommand::CreateMatter { source, .. } => match source {
+                MatterSource::NewFolder { folder } | MatterSource::ExistingFolder { folder } => {
+                    self.picked(*folder)
+                }
+                // The host's own default location: no folder ref, nothing to check.
+                MatterSource::DefaultLocation => Ok(()),
+            },
             HostCommand::RelocateMatter { folder, .. } => self.picked(*folder),
-            // Slots, once they merge. H5 and H20's `UpdateMatter`, `OpenMatter` and
-            // `ForgetMatter` name a matter only. H20's `CreateMatter` source
-            // `default_location` carries no folder ref and passes; the check above stays on
-            // `new_folder` and `existing_folder`.
-            HostCommand::CreateThread { .. }
+            // `UpdateMatter`, `OpenMatter` and `ForgetMatter` name a matter only.
+            HostCommand::UpdateMatter { .. }
+            | HostCommand::OpenMatter { .. }
+            | HostCommand::ForgetMatter { .. }
+            | HostCommand::CreateThread { .. }
             | HostCommand::SendPrompt { .. }
             | HostCommand::EditQueuedPrompt { .. }
             | HostCommand::RemoveQueuedPrompt { .. }
@@ -188,8 +190,8 @@ impl Bridge {
     /// `admit`'s: a read the host adds does not compile here until the bridge rules on it.
     pub(crate) async fn query(&self, query: HostQuery) -> Result<QueryResult, HostError> {
         match &query {
-            // Slot, once it merges: H20's `GetDefaultLocation`.
             HostQuery::ListMatters
+            | HostQuery::GetDefaultLocation
             | HostQuery::ListThreads { .. }
             | HostQuery::PageEntries { .. }
             | HostQuery::CompareVersions { .. }
@@ -397,7 +399,8 @@ impl Bridge {
 
     /// Asks `picker` for a folder and registers it, with the display `picked::display` gives
     /// it under `home`; `None` when the lawyer cancelled. Whether the folder may be a matter is
-    /// the host's rule: `CreateMatter` refuses a refused folder with `matter.folder_refused`.
+    /// the host's rule: `CreateMatter` refuses a refused folder with one `matter.folder_*` code
+    /// per reason (decision record 0022).
     pub(crate) async fn pick_folder(
         &self,
         picker: &dyn Picker,

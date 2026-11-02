@@ -41,9 +41,11 @@ mod commands;
 mod folder_state;
 pub(crate) mod input;
 mod locate;
+mod matter_details;
 mod matters;
 mod papers;
 mod query;
+mod rail;
 mod relocate;
 mod settings;
 mod shutdown;
@@ -96,6 +98,12 @@ pub(crate) struct Actor {
     /// The program the pre-write guard hook runs, if any (`HostConfig::with_pre_write_guard`).
     pub(crate) pre_write_guard: Option<std::path::PathBuf>,
     pub(crate) refused_folders: Vec<PathBuf>,
+    /// The lawyer's home folder as configured, for `matter.folder_is_home` (the refused list
+    /// names it the same way).
+    pub(crate) home: Option<PathBuf>,
+    /// The home folder's spellings for `folder_display`: as configured and canonicalised once
+    /// at start-up (`rail::home_spellings`).
+    pub(crate) home_spellings: Vec<PathBuf>,
     pub(crate) clock: Arc<dyn Clock>,
     pub(crate) ids: Ids,
     pub(crate) window_cap: usize,
@@ -103,6 +111,13 @@ pub(crate) struct Actor {
     pub(crate) app_capacity: usize,
     pub(crate) encoder: Encoder,
     pub(crate) matters: BTreeMap<MatterId, MatterEntry>,
+    /// Matters `ForgetMatter` took off the list: inert (no command, query or start-up repair
+    /// reaches them) until an import of their folder brings them back. Their threads stay in
+    /// `threads`.
+    pub(crate) forgotten: BTreeMap<MatterId, MatterEntry>,
+    /// The time of each stream's last durable event, for `MatterSummary::last_activity`: read
+    /// once at start-up (`Store::tail_times`), then kept by every returned commit.
+    pub(crate) tails: BTreeMap<StreamId, clauseo_protocol::Timestamp>,
     pub(crate) threads: BTreeMap<ThreadId, ThreadEntry>,
     pub(crate) streams: BTreeMap<StreamId, StreamSlot>,
     pub(crate) event_subs: BTreeMap<StreamId, Vec<EventSub>>,

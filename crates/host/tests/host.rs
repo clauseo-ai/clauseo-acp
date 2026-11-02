@@ -38,6 +38,9 @@ mod codex_plans;
 #[path = "host/commands.rs"]
 mod commands;
 #[cfg(test)]
+#[path = "host/forget.rs"]
+mod forget;
+#[cfg(test)]
 #[path = "host/guard_hook.rs"]
 mod guard_hook;
 #[cfg(test)]
@@ -50,6 +53,9 @@ mod list_agents;
 #[path = "host/locate.rs"]
 mod locate;
 #[cfg(test)]
+#[path = "host/matters.rs"]
+mod matters;
+#[cfg(test)]
 #[path = "host/mcp.rs"]
 mod mcp;
 #[cfg(test)]
@@ -58,6 +64,12 @@ mod papers;
 #[cfg(test)]
 #[path = "host/permissions.rs"]
 mod permissions;
+#[cfg(test)]
+#[path = "host/rail.rs"]
+mod rail;
+#[cfg(test)]
+#[path = "host/refusals.rs"]
+mod refusals;
 #[cfg(test)]
 #[path = "host/relaunch.rs"]
 mod relaunch;

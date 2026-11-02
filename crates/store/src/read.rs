@@ -241,7 +241,8 @@ pub(crate) fn receipt(conn: &Connection, command: CommandId) -> Result<Option<Re
 /// Every matter, oldest first.
 pub(crate) fn matters(conn: &Connection) -> Result<Vec<MatterRow>, Error> {
     let mut statement = conn.prepare_cached(
-        "SELECT id, name, kind, folder_path, folder_locator, shadow_repo_path, created_ms \
+        "SELECT id, name, kind, folder_path, folder_locator, shadow_repo_path, created_ms, \
+         client, next_date, pinned, last_opened_ms, forgotten_ms \
          FROM matters ORDER BY created_ms, id",
     )?;
     let mut rows = statement.query([])?;
@@ -255,7 +256,37 @@ pub(crate) fn matters(conn: &Connection) -> Result<Vec<MatterRow>, Error> {
             folder_locator: row.get(4)?,
             shadow_repo_path: row.get(5)?,
             created: timestamp(row, 6)?,
+            client: row
+                .get_ref(7)?
+                .as_str_or_null()?
+                .map(|text| codec::parse(text, "a client"))
+                .transpose()?,
+            next_date: row
+                .get_ref(8)?
+                .as_str_or_null()?
+                .map(|text| codec::parse(text, "a next date"))
+                .transpose()?,
+            pinned: row.get(9)?,
+            last_opened: optional_timestamp(row, 10)?,
+            forgotten: optional_timestamp(row, 11)?,
         });
+    }
+    Ok(out)
+}
+
+/// The time of the last event of every stream that has one, by one lookup of each stream's last
+/// key; only the envelope's `ts` is decoded.
+pub(crate) fn tail_times(conn: &Connection) -> Result<Vec<(StreamId, Timestamp)>, Error> {
+    let mut statement = conn.prepare_cached(
+        "SELECT s.stream, e.envelope FROM streams s \
+         JOIN events e ON e.key = (s.stream_id << 32) | s.last_seq",
+    )?;
+    let mut rows = statement.query([])?;
+    let mut out = Vec::new();
+    while let Some(row) = rows.next()? {
+        let stream: StreamId = codec::parse(row.get_ref(0)?.as_str()?, "a stream")?;
+        let ts = codec::decode_ts(row.get_ref(1)?.as_blob()?, stream)?;
+        out.push((stream, ts));
     }
     Ok(out)
 }
@@ -326,6 +357,17 @@ pub(crate) fn account_limits(conn: &Connection) -> Result<Vec<AccountLimits>, Er
         }
     }
     Ok(out)
+}
+
+/// A nullable time column.
+fn optional_timestamp(row: &Row<'_>, column: usize) -> Result<Option<Timestamp>, Error> {
+    let millis: Option<i64> = row.get(column)?;
+    millis
+        .map(|millis| {
+            Timestamp::new(millis)
+                .map_err(|error| Error::corrupt(format!("a time {millis}: {error}")))
+        })
+        .transpose()
 }
 
 fn timestamp(row: &Row<'_>, column: usize) -> Result<Timestamp, Error> {

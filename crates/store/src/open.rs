@@ -13,10 +13,13 @@ pub const DB_FILE: &str = "state.sqlite";
 pub const LOCK_FILE: &str = "state.sqlite.lock";
 
 /// The numbered migrations: entry `i` takes `user_version` from `i` to `i + 1`.
-const MIGRATIONS: &[&str] = &[include_str!("migrations/0001_init.sql")];
+const MIGRATIONS: &[&str] = &[
+    include_str!("migrations/0001_init.sql"),
+    include_str!("migrations/0002_matter_details.sql"),
+];
 
 /// The schema version this build writes, the number of the last migration.
-pub const SCHEMA: u32 = 1;
+pub const SCHEMA: u32 = 2;
 
 /// Statements each connection keeps prepared; the writer uses about twenty.
 const STATEMENT_CACHE: usize = 32;

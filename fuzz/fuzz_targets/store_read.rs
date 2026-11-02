@@ -132,6 +132,11 @@ fn fixture() -> &'static Fixture {
             folder_locator: None,
             shadow_repo_path: "/clauseo-fixture/shadow".to_owned(),
             created: fixture_time(0),
+            client: None,
+            next_date: None,
+            pinned: false,
+            last_opened: None,
+            forgotten: None,
         };
         let thread_row = ThreadRow {
             id: thread_id,

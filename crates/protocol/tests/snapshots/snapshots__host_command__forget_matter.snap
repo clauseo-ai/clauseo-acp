@@ -1,0 +1,9 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "HostCommand::ForgetMatter { matter: matter_id(1) }"
+---
+{
+  "forget_matter": {
+    "matter": "01900000-0000-7000-8000-000000000001"
+  }
+}

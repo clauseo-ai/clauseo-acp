@@ -198,7 +198,7 @@ fn finish_load(actor: &mut Actor, stream: StreamId, mut state: StreamState, tail
 
 /// Unloads `stream` when nothing needs it: no view subscriber, no commit in flight, and
 /// the turn path does not keep it (a thread's open turn, a matter whose writer is held). A
-/// thread keeps its header for `ListThreads`.
+/// thread keeps its header for `ListThreads` and its last step's ending for the matter's status.
 pub(crate) fn release(actor: &mut Actor, stream: StreamId) {
     let Some(StreamSlot::Loaded(loaded)) = actor.streams.get(&stream) else {
         return;
@@ -221,6 +221,9 @@ pub(crate) fn release(actor: &mut Actor, stream: StreamId) {
         && let Some(entry) = actor.threads.get_mut(&thread)
     {
         entry.header = state.header().cloned();
+        if let Some(stop) = super::rail::last_step(state) {
+            entry.last_stop = Some(stop);
+        }
     }
 }
 
@@ -292,6 +295,7 @@ fn continue_commit(actor: &mut Actor, tag: Tag, outcome: Result<(), &Failure>) {
 /// Applies one returned commit, stream by stream: fold, publish to view subscribers, take a
 /// snapshot when one is due; then hands each stream's envelopes to its event subscribers.
 fn apply_commit(actor: &mut Actor, envelopes: Vec<Envelope>, touched: &mut Vec<StreamId>) {
+    super::rail::note_commit(actor, &envelopes);
     let mut streams: Vec<StreamId> = Vec::new();
     for envelope in &envelopes {
         if !streams.contains(&envelope.stream) {

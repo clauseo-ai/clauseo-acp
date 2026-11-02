@@ -249,21 +249,24 @@ fn a_refused_folder_is_rejected() {
         envelope(HostCommand::CreateMatter {
             name: Title::new("Smith v Jones").unwrap(),
             source: MatterSource::ExistingFolder { folder },
+            client: None,
+            next_date: None,
         })
     };
     let refusal = block_on(bridge.dispatch(create(folder))).unwrap_err();
     assert_eq!(
         refusal.code(),
-        ErrorCode::MatterFolderRefused,
+        ErrorCode::MatterFolderIsSystem,
         "{refusal:?}"
     );
 
     // The data folder is always refused.
     let data = block_on(bridge.pick_folder(&Picks(Some(scratch.path().to_owned())), None));
     let refusal = block_on(bridge.dispatch(create(data.unwrap().unwrap().folder))).unwrap_err();
+    // It also holds the folder refused above, which the list names first.
     assert_eq!(
         refusal.code(),
-        ErrorCode::MatterFolderRefused,
+        ErrorCode::MatterFolderIsSystem,
         "{refusal:?}"
     );
 
@@ -288,6 +291,8 @@ fn dispatch_refuses_a_folder_ref_it_did_not_issue_and_a_permission_answer() {
     let create = envelope(HostCommand::CreateMatter {
         name: Title::new("Smith v Jones").unwrap(),
         source: MatterSource::ExistingFolder { folder },
+        client: None,
+        next_date: None,
     });
     let refusal = block_on(bridge.dispatch(create)).unwrap_err();
     assert_eq!(refusal.code(), ErrorCode::CommandInvalid, "{refusal:?}");

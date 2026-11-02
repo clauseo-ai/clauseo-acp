@@ -34,7 +34,9 @@ pub(super) async fn open(
         .map_err(|error| Error::Store(error.into()))?;
     let store = Store::open(StoreOptions::new(data_dir)).await?;
     let heads = store.heads().await?;
+    let tails = store.tail_times().await?.into_iter().collect();
     let mut matters = BTreeMap::new();
+    let mut forgotten = BTreeMap::new();
     let mut threads = BTreeMap::new();
     for row in store.matters().await? {
         for thread in store.threads(row.id).await? {
@@ -43,11 +45,17 @@ pub(super) async fn open(
                 ThreadEntry {
                     row: thread,
                     header: None,
+                    last_stop: None,
                     turn: turn::TurnState::default(),
                 },
             );
         }
-        matters.insert(
+        let list = if row.forgotten.is_some() {
+            &mut forgotten
+        } else {
+            &mut matters
+        };
+        list.insert(
             row.id,
             MatterEntry {
                 row,
@@ -79,12 +87,16 @@ pub(super) async fn open(
         codex_hooks: parts.codex_hooks,
         pre_write_guard: parts.pre_write_guard,
         refused_folders: parts.refused_folders,
+        home_spellings: super::rail::home_spellings(parts.home_folder.as_deref()),
+        home: parts.home_folder,
         clock: parts.clock,
         ids: Ids::new(parts.ids),
         window_cap: parts.patch_window_bytes,
         app_capacity: parts.app_capacity,
         encoder: Encoder::new(),
         matters,
+        forgotten,
+        tails,
         threads,
         streams: BTreeMap::new(),
         event_subs: BTreeMap::new(),
@@ -104,8 +116,9 @@ pub(super) async fn open(
 }
 
 /// Queues the start-up work: the Scratch matter when there is none, and the load and
-/// reconciliation of every thread that is not archived. The loop answers `start` once
-/// all of it is done.
+/// reconciliation of every thread that is not archived and whose matter is on the list (a
+/// forgotten matter's threads were idle when it was forgotten, and stay as they are). The loop
+/// answers `start` once all of it is done.
 pub(super) fn begin_startup(actor: &mut Actor) {
     let has_scratch = actor
         .matters
@@ -117,7 +130,7 @@ pub(super) fn begin_startup(actor: &mut Actor) {
     let open: Vec<_> = actor
         .threads
         .values()
-        .filter(|thread| !thread.row.archived)
+        .filter(|thread| !thread.row.archived && actor.matters.contains_key(&thread.row.matter))
         .map(|thread| thread.row.id)
         .collect();
     for &thread in &open {

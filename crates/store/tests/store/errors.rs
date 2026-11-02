@@ -126,6 +126,11 @@ fn error_codes_map() {
         folder_locator: None,
         shadow_repo_path: "/s".to_owned(),
         created: ts(0),
+        client: None,
+        next_date: None,
+        pinned: false,
+        last_opened: None,
+        forgotten: None,
     };
     let encode = block_on(store.commit(Commit {
         matter: Some(unknown),

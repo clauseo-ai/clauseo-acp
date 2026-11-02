@@ -1,5 +1,6 @@
 //! The std calls that change files, for the tests alone: making and removing each test's
-//! folder, writing its `settings.json`, seeding matter folders and the lawyer's own edits.
+//! folder, writing its `settings.json`, seeding matter folders and the lawyer's own edits, and
+//! taking a folder's permissions away or moving it.
 //! Workspace `clippy.toml` bans them everywhere else; the expect below covers only this file.
 
 #![expect(

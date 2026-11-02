@@ -13,6 +13,12 @@
 //! - One `clauseo-matter` thread per open matter, one `clauseo-snapshot` thread, and a
 //!   short-lived `clauseo-stat` thread per `ListMatters` that reads each matter's folder state.
 //! - The Scratch matter: a first start creates it.
+//! - The matter rail (`actor/rail.rs`, `actor/matter_details.rs`): each matter's details on
+//!   its row (`UpdateMatter`, `OpenMatter`), its status computed from its threads, its last
+//!   activity, `ForgetMatter` (which deletes nothing; an import of the folder brings the matter
+//!   back), a new matter in the default location (`GetDefaultLocation` shows where), and one
+//!   error code per refused folder.
+//!   `docs/decisions/0022-matters-for-the-rail.md` records the rules.
 //! - The profile hook: [`ProfileHook`], with [`NoProfile`] as the default. Its `_meta` goes on
 //!   `session/new` and `session/load`, and its variables into each launch, with the host's
 //!   switches over them.
@@ -41,8 +47,8 @@
 //!
 //! - [`Host::start`] with a [`HostConfig`] ([`HostConfig::new`] takes the settings and the
 //!   [`Launcher`](clauseo_process::Launcher); [`HostConfig::with_profile_hook`],
-//!   [`HostConfig::with_refused_folders`], [`HostConfig::with_managed_mcp_path`],
-//!   [`HostConfig::with_pre_write_guard`],
+//!   [`HostConfig::with_refused_folders`], [`HostConfig::with_home_folder`],
+//!   [`HostConfig::with_managed_mcp_path`], [`HostConfig::with_pre_write_guard`],
 //!   [`HostConfig::with_clock`] and [`HostConfig::with_ids`] set the rest). It returns once
 //!   start-up is done: the store is open in `Effective::data_dir()`, the Scratch matter exists,
 //!   and start-up reconciliation has committed. A second start on the same data folder fails

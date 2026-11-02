@@ -112,8 +112,15 @@ impl HostCommand {
 
     fn validate(&self) -> Result<(), Error> {
         match self {
-            Self::CreateMatter { name, source } => match source {
-                MatterSource::NewFolder { folder: _ } => check_folder_name(name),
+            Self::CreateMatter {
+                name,
+                source,
+                client: _,
+                next_date: _,
+            } => match source {
+                MatterSource::NewFolder { folder: _ } | MatterSource::DefaultLocation => {
+                    check_folder_name(name)
+                }
                 MatterSource::ExistingFolder { folder: _ } => Ok(()),
             },
             Self::SendPrompt {
@@ -190,7 +197,16 @@ impl HostCommand {
                 title: _,
             }
             // The font size's range is the settings crate's rule; the host checks it.
-            | Self::SetUiSettings { patch: _ } => Ok(()),
+            | Self::SetUiSettings { patch: _ }
+            // The client's name and the date are checked by their types as they decode.
+            | Self::UpdateMatter {
+                matter: _,
+                client: _,
+                next_date: _,
+                pinned: _,
+            }
+            | Self::OpenMatter { matter: _ }
+            | Self::ForgetMatter { matter: _ } => Ok(()),
         }
     }
 }

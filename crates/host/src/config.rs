@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use clauseo_process::Launcher;
 use clauseo_protocol::AgentId;
-use clauseo_settings::Effective;
+use clauseo_settings::{Effective, PlatformDirs as _, SystemDirs};
 use serde_json::Value;
 
 use crate::clock::{Clock, SystemClock};
@@ -49,6 +49,7 @@ pub struct HostConfig {
     launcher: Arc<dyn Launcher>,
     profile: Box<dyn ProfileHook>,
     refused_folders: Vec<PathBuf>,
+    home_folder: Option<PathBuf>,
     clock: Arc<dyn Clock>,
     ids: Box<dyn IdSource>,
     patch_window_bytes: usize,
@@ -64,6 +65,7 @@ pub(crate) struct ConfigParts {
     pub(crate) launcher: Arc<dyn Launcher>,
     pub(crate) profile: Box<dyn ProfileHook>,
     pub(crate) refused_folders: Vec<PathBuf>,
+    pub(crate) home_folder: Option<PathBuf>,
     pub(crate) clock: Arc<dyn Clock>,
     pub(crate) ids: Box<dyn IdSource>,
     pub(crate) patch_window_bytes: usize,
@@ -75,13 +77,14 @@ pub(crate) struct ConfigParts {
 
 impl HostConfig {
     /// A config with the settings, the launcher that starts agents, and every default: no
-    /// profile, no refused folders, the system clock and random ids.
+    /// profile, no refused folders, the OS's home folder, the system clock and random ids.
     pub fn new(effective: Effective, launcher: Arc<dyn Launcher>) -> Self {
         Self {
             effective,
             launcher,
             profile: Box::new(NoProfile),
             refused_folders: Vec::new(),
+            home_folder: SystemDirs.home(),
             clock: Arc::new(SystemClock),
             ids: Box::new(RandomV7::new()),
             patch_window_bytes: PATCH_WINDOW_BYTES,
@@ -102,6 +105,16 @@ impl HostConfig {
     /// (default: none). The host adds its data folder.
     pub fn with_refused_folders(mut self, folders: Vec<PathBuf>) -> Self {
         self.refused_folders = folders;
+        self
+    }
+
+    /// The lawyer's home folder (default: the OS's, from `clauseo_settings::SystemDirs`), for
+    /// two things: a matter's `folder_display`, its path below this folder, and telling the
+    /// home folder apart from the other refused folders (`matter.folder_is_home`). `None` shows
+    /// every path in full and refuses the home folder as a system folder. Tests pass a folder of
+    /// their own.
+    pub fn with_home_folder(mut self, home: Option<PathBuf>) -> Self {
+        self.home_folder = home;
         self
     }
 
@@ -168,6 +181,7 @@ impl HostConfig {
             launcher: self.launcher,
             profile: self.profile,
             refused_folders: self.refused_folders,
+            home_folder: self.home_folder,
             clock: self.clock,
             ids: self.ids,
             patch_window_bytes: self.patch_window_bytes,

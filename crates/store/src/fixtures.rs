@@ -98,6 +98,11 @@ pub fn matter_row() -> MatterRow {
         folder_locator: None,
         shadow_repo_path: "/clauseo-fixture/shadow".to_owned(),
         created: time(0),
+        client: None,
+        next_date: None,
+        pinned: false,
+        last_opened: None,
+        forgotten: None,
     }
 }
 

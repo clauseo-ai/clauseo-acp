@@ -1,5 +1,5 @@
 //! Queries: answered from host memory (`ListMatters`, `ListThreads`, `GetSettings`,
-//! `ListAgents`), a
+//! `ListAgents`, `GetDefaultLocation`), a
 //! loaded stream (`PageEntries`), a loaded stream and then the matter's thread
 //! (`CompareVersions`, with a version or the folder now, and `PreviewRestore`) or a store
 //! read on a task of its own (`ReadBlob`); `ListPapers` runs on the matter's worker
@@ -7,9 +7,8 @@
 
 use clauseo_matters::CompareSide;
 use clauseo_protocol::{
-    AgentId, AgentKind, AgentSummary, CheckpointId, CompactString, ErrorCode, FolderState,
-    HostQuery, MatterId, MatterSummary, Principal, QueryResult, StreamId, ThreadStatus,
-    ThreadSummary, ViewEntry,
+    AgentId, AgentKind, AgentSummary, CheckpointId, CompactString, ErrorCode, HostQuery, MatterId,
+    Principal, QueryResult, StreamId, ThreadStatus, ThreadSummary, ViewEntry,
 };
 
 use std::path::PathBuf;
@@ -99,6 +98,15 @@ pub(super) fn query(
             };
             matter_query(actor, matter, vec![checkpoint], job, reply);
         }
+        HostQuery::GetDefaultLocation => {
+            let display = super::rail::folder_display(
+                actor.effective.default_matters_dir(),
+                &actor.home_spellings,
+            );
+            let answer =
+                QueryResult::DefaultLocation(clauseo_protocol::DefaultLocation { display });
+            let _gone = reply.send(Ok(answer));
+        }
         HostQuery::GetSettings => {
             let view = super::settings::view(&actor.effective);
             let _gone = reply.send(Ok(QueryResult::Settings(view)));
@@ -182,22 +190,20 @@ fn matter_query(
     );
 }
 
-/// `ListMatters`: the rows from memory, each folder's state read off the actor
+/// `ListMatters`: the summaries from memory (`rail.rs`), each folder's state read off the actor
 /// (`folder_state.rs`), answered from a task of its own.
 fn list_matters(actor: &Actor, reply: Reply<QueryResult>) {
-    let (mut matters, folders): (Vec<MatterSummary>, Vec<PathBuf>) = actor
-        .matters
-        .values()
-        .map(|matter| {
-            let summary = MatterSummary {
-                matter: matter.row.id,
-                name: matter.row.name.clone(),
-                kind: matter.row.kind,
-                folder_state: FolderState::Found,
-            };
-            (summary, PathBuf::from(&matter.row.folder_path))
+    let mut matters = super::rail::summaries(actor);
+    let folders: Vec<PathBuf> = matters
+        .iter()
+        .map(|summary| {
+            actor
+                .matters
+                .get(&summary.matter)
+                .map(|entry| PathBuf::from(&entry.row.folder_path))
+                .unwrap_or_default()
         })
-        .unzip();
+        .collect();
     let clock = Arc::clone(&actor.clock);
     let running = Arc::clone(&actor.stats_running);
     let spawned = actor.spawner.spawn_local(async move {

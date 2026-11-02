@@ -296,13 +296,19 @@ fn deleted_marker_another_matter_claims_is_not_relinked() {
     );
     let host = dir.start(0);
     let folder = dir.folder("m", &[("brief.txt", "x\n")]);
-    let matter = host.create_matter("m", &folder);
-    let thread = host.create_thread(matter, FAKE);
     let marker = folder.join(".clauseo/matter.json");
-    // With its marker gone the folder imports again, as a second matter.
+    // A first matter of the folder, forgotten: its folder still counts. With its marker gone the
+    // folder imports again, as a second matter, the one this test prompts. (A listed matter's
+    // folder can no longer be imported a second time: decision record 0022.)
+    let first = host.create_matter("m", &folder);
+    assert_eq!(
+        host.ok(clauseo_protocol::HostCommand::ForgetMatter { matter: first }),
+        clauseo_protocol::CommandOutcome::Done
+    );
     write::remove_file(&marker);
-    let second = host.create_matter("m again", &folder);
-    assert_ne!(second, matter);
+    let matter = host.create_matter("m again", &folder);
+    assert_ne!(first, matter);
+    let thread = host.create_thread(matter, FAKE);
     host.shutdown();
     write::remove_file(&marker);
 

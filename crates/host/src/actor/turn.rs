@@ -515,6 +515,38 @@ pub(crate) fn keeps_matter_loaded(actor: &Actor, matter: MatterId) -> bool {
         .is_some_and(|entry| entry.turns.holder.is_some())
 }
 
+/// Whether anything runs in `matter` that `ForgetMatter` must wait for: a turn, undo, restore or
+/// relocate holds its writer or turns wait for it, or one of its threads has a turn not yet
+/// ended (one still launching takes the writer later) or an undo whose log is not durable.
+pub(crate) fn matter_busy(actor: &Actor, matter: MatterId) -> bool {
+    let writer = actor.matters.get(&matter).is_some_and(|entry| {
+        entry.turns.holder.is_some()
+            || !entry.turns.queue.is_empty()
+            || entry.turns.restore.is_some()
+    });
+    writer
+        || actor.threads.values().any(|entry| {
+            entry.row.matter == matter
+                && (entry.turn.current.is_some()
+                    || entry.turn.closing.is_some()
+                    || entry.turn.undo.is_some())
+        })
+}
+
+/// Stops the agent of every thread of `matter` with the shutdown ladder (`ForgetMatter`); each
+/// posts `Ended` and logs its detach as any stop does.
+pub(crate) fn stop_agents(actor: &mut Actor, matter: MatterId) {
+    let threads: Vec<ThreadId> = actor
+        .threads
+        .values()
+        .filter(|entry| entry.row.matter == matter && entry.turn.agent.is_some())
+        .map(|entry| entry.row.id)
+        .collect();
+    for thread in threads {
+        agents::stop(actor, thread);
+    }
+}
+
 /// Whether the host is shutting down.
 fn host_stopping(actor: &Actor) -> bool {
     matches!(actor.phase, HostPhase::Stopping(_))

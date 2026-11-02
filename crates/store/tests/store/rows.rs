@@ -185,6 +185,11 @@ fn matter_row(n: u64, created: i64) -> MatterRow {
         folder_locator: Some(vec![1, 2, 3]),
         shadow_repo_path: format!("/shadow/{n}"),
         created: ts(created),
+        client: None,
+        next_date: None,
+        pinned: false,
+        last_opened: None,
+        forgotten: None,
     }
 }
 

@@ -27,13 +27,14 @@ pub(super) async fn close(actor: Actor) -> Result<(), Error> {
         store,
         snapshots,
         matters,
+        forgotten,
         feeder,
         ..
     } = actor;
     if let Err(error) = snapshots.stop() {
         tracing::warn!(%error, "the snapshot thread ended badly");
     }
-    for (_, matter) in matters {
+    for (_, matter) in matters.into_iter().chain(forgotten) {
         if let Some(worker) = matter.worker
             && let Err(error) = worker.stop()
         {

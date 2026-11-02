@@ -16,9 +16,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::MatterPath;
 use crate::{
-    AgentChoiceId, AgentId, CheckpointId, CommandId, Delivery, ElicitationId, ElicitationResponse,
-    FileDecision, FolderRefId, MatterId, MessageId, PermissionRequestId, PromptBlock, RestoreScope,
-    ThreadId, Title, TurnId, UiPatch,
+    AgentChoiceId, AgentId, CheckpointId, ClientName, CommandId, Date, Delivery, ElicitationId,
+    ElicitationResponse, FieldChange, FileDecision, FolderRefId, MatterId, MessageId,
+    PermissionRequestId, PromptBlock, RestoreScope, ThreadId, Title, TurnId, UiPatch,
 };
 #[cfg(doc)]
 use crate::{FileChoice, RawPayload};
@@ -74,6 +74,11 @@ pub enum MatterSource {
         /// The folder.
         folder: FolderRefId,
     },
+    /// The host creates `<default location>/<name>` itself, in the settings'
+    /// `matters.default_location` (or, when that is not set, `Documents/Clauseo`), so no folder
+    /// is picked. The name follows [`MatterSource::NewFolder`]'s folder-name rules.
+    /// JSON: the plain string `"default_location"`.
+    DefaultLocation,
 }
 
 /// What a restore puts back, as a command asks for it: the strict, closed twin of the logged
@@ -147,10 +152,48 @@ pub enum ConfigValue {
 pub enum HostCommand {
     /// Make a matter from a folder.
     CreateMatter {
-        /// The matter's name; for [`MatterSource::NewFolder`] also the new folder's name.
+        /// The matter's name; for [`MatterSource::NewFolder`] and
+        /// [`MatterSource::DefaultLocation`] also the new folder's name.
         name: Title,
         /// Where its folder comes from.
         source: MatterSource,
+        /// The client it is for; missing means none.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        client: Option<ClientName>,
+        /// Its next date, such as a hearing; missing means none.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        next_date: Option<Date>,
+    },
+    /// Change a matter's details. Each field: missing leaves it, `null` clears it (`client`,
+    /// `next_date`), a value sets it. A command that changes nothing answers `Done` too.
+    UpdateMatter {
+        /// The matter.
+        matter: MatterId,
+        /// The client it is for.
+        #[serde(default, skip_serializing_if = "FieldChange::is_keep")]
+        #[cfg_attr(feature = "specta", specta(type = Option<Option<ClientName>>))]
+        client: FieldChange<ClientName>,
+        /// Its next date.
+        #[serde(default, skip_serializing_if = "FieldChange::is_keep")]
+        #[cfg_attr(feature = "specta", specta(type = Option<Option<Date>>))]
+        next_date: FieldChange<Date>,
+        /// Whether it is pinned to the top of the rail.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pinned: Option<bool>,
+    },
+    /// The lawyer opened a matter: its `last_opened` becomes now, which orders "Recent" and
+    /// clears a `ready` or `stopped` status from turns that ended before.
+    OpenMatter {
+        /// The matter.
+        matter: MatterId,
+    },
+    /// Take a matter off Clauseo's list and stop its threads' agents; refused with
+    /// `matter.turn_running` while a turn, undo or restore runs in it or turns wait. The
+    /// folder, its `.clauseo` and the matter's history are left as they are: importing the
+    /// folder again brings the matter back with its threads and versions.
+    ForgetMatter {
+        /// The matter.
+        matter: MatterId,
     },
     /// "Locate folder": the matter's folder moved, and the lawyer picked where it is now. The
     /// host accepts the folder only when its `.clauseo/matter.json` names this matter, then
@@ -304,7 +347,8 @@ pub enum HostCommand {
 }
 
 /// What a command did. The host's receipt stores it, so a repeated `command_id` returns the same
-/// outcome. The queue commands, `RestartAgent` and `SetUiSettings` answer `Done`.
+/// outcome. The queue commands, `RestartAgent`, `SetUiSettings`, `UpdateMatter`, `OpenMatter` and
+/// `ForgetMatter` answer `Done`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "specta", derive(specta::Type))]

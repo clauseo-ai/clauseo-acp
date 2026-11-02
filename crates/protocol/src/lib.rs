@@ -18,7 +18,8 @@
 //! [`ValidatedCommand`] that [`CommandEnvelope::validate`] makes, and answers with a
 //! [`CommandOutcome`]) and read with a [`HostQuery`] ([`QueryResult`]). The display
 //! settings cross as [`SettingsView`] and [`UiPatch`], mirrors of `clauseo-settings`' `ui`
-//! section. Subscribers receive
+//! section. A matter's rail details are [`ClientName`], [`Date`] and [`MatterStatus`] on
+//! [`MatterSummary`], changed with [`FieldChange`]s. Subscribers receive
 //! [`HostEvent`]s: [`PatchBatch`]es of [`ViewPatch`]es over [`ViewEntry`]s (keyed by
 //! [`ViewEntry::id`], sorted by [`ViewEntry::order`]), or envelopes; [`Subscribe`],
 //! [`SubscribeEvents`] and [`Ack`] are the subscription calls' parameters. The serde
@@ -129,6 +130,7 @@
 mod approval;
 mod command;
 mod content;
+mod details;
 mod envelope;
 mod error;
 mod error_code;
@@ -182,6 +184,7 @@ wire_types! {
         RestoreRequest,
     },
     content::{ContentBlock, PromptBlock, RawFrom, ToolCallContent},
+    details::{ClientName, Date, MatterStatus},
     envelope::{Envelope},
     error_code::{ErrorCode, HostError},
     event::{
@@ -211,7 +214,7 @@ wire_types! {
         ViewPatch, ViewPatchBody, ViewPosition, ViewWindow,
     },
     query::{
-        AgentSummary, BlobRange, FolderState, HostQuery, MatterSummary, PageLimit, PaperSummary,
+        AgentSummary, BlobRange, DefaultLocation, FolderState, HostQuery, MatterSummary, PageLimit, PaperSummary,
         QueryResult, ReadLen, RestorePreview, ThreadSummary,
     },
     raw::{RawPayload},
@@ -251,6 +254,8 @@ pub use command::{
     // A checked command inside Rust; never serialised (the client sends `CommandEnvelope`).
     ValidatedCommand,
 };
+// How `UpdateMatter` changes an optional detail; its fields export as the value's type or null.
+pub use details::FieldChange;
 // compact_str's type, re-exported for callers; wire fields holding it export as `string`.
 pub use compact_str::CompactString;
 // What a store decodes a stored envelope as; it is never written, so it has no wire form.

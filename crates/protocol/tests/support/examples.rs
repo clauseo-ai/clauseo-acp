@@ -96,7 +96,7 @@ pub fn file_changes() -> Vec<FileChange> {
 }
 
 /// Events that hold a value added after v1 that no example in [`every_event`] holds, so the
-/// corpus writer finds a holder for it: an error code no example turn fails with.
+/// corpus writer finds a holder for it: error codes no example turn fails with.
 pub fn later_variants() -> Vec<DomainEvent> {
     vec![
         TurnFailed {
@@ -109,6 +109,42 @@ pub fn later_variants() -> Vec<DomainEvent> {
             turn: turn_id(3),
             code: ErrorCode::MatterCodexFolder,
             detail: Some("the matter folder holds a .codex folder".to_owned()),
+        }
+        .into(),
+        TurnFailed {
+            turn: turn_id(3),
+            code: ErrorCode::MatterFolderIsDrive,
+            detail: Some("/ is a drive root".to_owned()),
+        }
+        .into(),
+        TurnFailed {
+            turn: turn_id(3),
+            code: ErrorCode::MatterFolderIsHome,
+            detail: Some("the home folder".to_owned()),
+        }
+        .into(),
+        TurnFailed {
+            turn: turn_id(3),
+            code: ErrorCode::MatterFolderIsSystem,
+            detail: Some("/usr is a system folder".to_owned()),
+        }
+        .into(),
+        TurnFailed {
+            turn: turn_id(3),
+            code: ErrorCode::MatterFolderUnreadable,
+            detail: Some("permission denied".to_owned()),
+        }
+        .into(),
+        TurnFailed {
+            turn: turn_id(3),
+            code: ErrorCode::MatterFolderIsMatter,
+            detail: Some("already a matter".to_owned()),
+        }
+        .into(),
+        TurnFailed {
+            turn: turn_id(3),
+            code: ErrorCode::MatterFolderInMattersRoot,
+            detail: Some("inside the data folder".to_owned()),
         }
         .into(),
     ]

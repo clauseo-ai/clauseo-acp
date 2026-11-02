@@ -9,8 +9,8 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::Error;
 use crate::serde_util::BorrowedStr;
+use crate::{Error, MatterId};
 
 /// Writes `ErrorCode` and its methods from one table: variant, dotted string, retryable, and the
 /// meaning, which is both the variant's doc comment and what `meaning()` returns. The record in
@@ -135,6 +135,21 @@ error_codes! {
         needs is locked by another program, such as an open document.";
     MatterTurnRunning = "matter.turn_running", retryable: true, meaning: "A turn is running in \
         the matter, so undo or restore waits.";
+    MatterFolderIsDrive = "matter.folder_is_drive", retryable: false, meaning: "The folder may \
+        not be a matter: it is the root of a drive or a mounted volume.";
+    MatterFolderIsHome = "matter.folder_is_home", retryable: false, meaning: "The folder may not \
+        be a matter: it is the home folder, or holds it.";
+    MatterFolderIsSystem = "matter.folder_is_system", retryable: false, meaning: "The folder may \
+        not be a matter: it is a system folder or a folder of app data or keys, or holds one.";
+    MatterFolderUnreadable = "matter.folder_unreadable", retryable: false, meaning: "Clauseo may \
+        not read the folder, or its `.clauseo/matter.json` does not read, so it may belong to a \
+        matter.";
+    MatterFolderIsMatter = "matter.folder_is_matter", retryable: false, meaning: "The folder is \
+        a matter's folder, or sits inside one or holds one; the error's `matter` names that \
+        matter when it is on Clauseo's list.";
+    MatterFolderInMattersRoot = "matter.folder_in_matters_root", retryable: false, meaning: "The \
+        folder is or holds Clauseo's data folder, or is, holds or sits inside the matters' \
+        history folder in it.";
     TransportUnauthorized = "transport.unauthorized", retryable: false, meaning: "The client is \
         not allowed to make this call.";
     TransportTooLarge = "transport.too_large", retryable: false, meaning: "The message is larger \
@@ -197,6 +212,11 @@ pub struct HostError {
     message: String,
     /// Whether the same call may succeed later.
     retryable: bool,
+    /// The matter the failure is about, where the code says so: for
+    /// `matter.folder_is_matter`, the matter on Clauseo's list that has the folder. Missing
+    /// otherwise, and when that matter is not on the list (forgotten, or from another install).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    matter: Option<MatterId>,
 }
 
 impl HostError {
@@ -206,7 +226,21 @@ impl HostError {
             code,
             retryable: code.is_retryable(),
             message: message.into(),
+            matter: None,
         }
+    }
+
+    /// The same failure, naming `matter` (see [`HostError::matter`]).
+    #[must_use]
+    pub const fn with_matter(mut self, matter: MatterId) -> Self {
+        self.matter = Some(matter);
+        self
+    }
+
+    /// The matter the failure is about, for the codes that name one
+    /// (`matter.folder_is_matter`).
+    pub const fn matter(&self) -> Option<MatterId> {
+        self.matter
     }
 
     /// Why the call failed.
@@ -244,6 +278,8 @@ struct HostErrorWire<'a> {
     code: BorrowedStr<'a>,
     message: String,
     retryable: bool,
+    #[serde(default)]
+    matter: Option<MatterId>,
 }
 
 impl<'de> Deserialize<'de> for HostError {
@@ -261,11 +297,13 @@ impl<'de> Deserialize<'de> for HostError {
                 } else {
                     code.is_retryable()
                 },
+                matter: wire.matter,
             },
             None => Self {
                 code: ErrorCode::Unknown,
                 message: format!("{raw}: {}", wire.message),
                 retryable: wire.retryable,
+                matter: wire.matter,
             },
         })
     }

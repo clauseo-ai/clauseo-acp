@@ -92,6 +92,11 @@ fn commit_is_atomic() {
             folder_locator: None,
             shadow_repo_path: "/s".to_owned(),
             created: ts(0),
+            client: None,
+            next_date: None,
+            pinned: false,
+            last_opened: None,
+            forgotten: None,
         }),
         snapshot: Some(SnapshotIn::compress(thread(2), seq(1), 1, b"state")),
         ..Commit::default()

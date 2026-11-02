@@ -33,6 +33,10 @@ mod settings;
 #[path = "commands/agents.rs"]
 mod agents;
 
+#[cfg(test)]
+#[path = "commands/matters.rs"]
+mod matters;
+
 use std::str::FromStr;
 
 use clauseo_protocol::{

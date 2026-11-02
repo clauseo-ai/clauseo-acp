@@ -27,15 +27,18 @@ use clauseo_protocol::{
     AppendTarget,
     AtLimitBehaviour,
     Billing,
+    ClientName,
     ConfigValue,
     ContentBlock,
     Cursor,
+    Date,
     DeliveryRequest,
     DomainEvent,
     ElicitationResponse,
     EntryId,
     Envelope,
     ErrorCode,
+    FieldChange,
     FileChoice,
     FileDecision,
     HostCommand,
@@ -239,11 +242,21 @@ mod host_command {
         CreateMatter => create_matter: HostCommand::CreateMatter {
             name: title("Smith v Jones"),
             source: MatterSource::NewFolder { folder: folder_ref_id(1) },
+            client: Some(ClientName::new("Rathi Steels").unwrap()),
+            next_date: Some("2026-11-20".parse::<Date>().unwrap()),
         };
         RelocateMatter => relocate_matter: HostCommand::RelocateMatter {
             matter: matter_id(1),
             folder: folder_ref_id(2),
         };
+        UpdateMatter => update_matter: HostCommand::UpdateMatter {
+            matter: matter_id(1),
+            client: FieldChange::Set(ClientName::new("Rathi Steels").unwrap()),
+            next_date: FieldChange::Clear,
+            pinned: Some(true),
+        };
+        OpenMatter => open_matter: HostCommand::OpenMatter { matter: matter_id(1) };
+        ForgetMatter => forget_matter: HostCommand::ForgetMatter { matter: matter_id(1) };
         CreateThread => create_thread: HostCommand::CreateThread {
             matter: matter_id(1),
             agent: agent("claude-acp"),
