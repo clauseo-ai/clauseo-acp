@@ -142,15 +142,19 @@ impl Inbound {
                 .await;
         };
         {
-            let state = self.shared.state();
-            let session_state = state.sessions.get(session.as_str());
-            let origin = session_state.map_or(crate::event::Origin::Idle, |s| s.origin);
-            let cwd = session_state.map(|s| s.cwd.as_path());
+            let mut state = self.shared.state();
+            // A session this connection never started still has its plans mapped, with no
+            // shown plan kept.
+            let mut no_plan = None;
+            let (origin, cwd, shown_plan) = match state.sessions.get_mut(session.as_str()) {
+                Some(s) => (s.origin, Some(s.cwd.as_path()), &mut s.shown_plan),
+                None => (crate::event::Origin::Idle, None, &mut no_plan),
+            };
             map::update(
                 session,
                 origin,
                 notification.update,
-                cwd,
+                (cwd, shown_plan),
                 quarantined,
                 &mut self.events,
             );

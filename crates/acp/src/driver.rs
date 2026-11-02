@@ -81,6 +81,7 @@ fn execute(cx: &ConnectionTo<Agent>, shared: &Arc<Shared>, command: Command) {
         }
         Command::NewSession { request, reply } => new_session(cx, shared, request, reply),
         Command::LoadSession { request, reply } => load_session(cx, shared, request, reply),
+        Command::ResumeSession { request, reply } => resume_session(cx, shared, request, reply),
         Command::Prompt {
             session,
             turn,
@@ -130,8 +131,18 @@ fn execute(cx: &ConnectionTo<Agent>, shared: &Arc<Shared>, command: Command) {
             );
             send(cx, shared, request, reply, |_| async { Ok(()) });
         }
+        Command::CodexHooksList { cwd, reply } => {
+            let params = serde_json::json!({ "cwd": cwd });
+            match agent_client_protocol::UntypedMessage::new(CODEX_HOOKS_LIST, params) {
+                Ok(request) => send(cx, shared, request, reply, |answer| async { Ok(answer) }),
+                Err(error) => answer(reply, Err(Error::Protocol(error.to_string()))),
+            }
+        }
     }
 }
+
+/// codex-acp's extension method that lists the session-flags hooks and their trust.
+const CODEX_HOOKS_LIST: &str = "_codex/hooks/list";
 
 fn new_session(
     cx: &ConnectionTo<Agent>,
@@ -271,6 +282,41 @@ fn load_session(
             }
         } else {
             locked.sessions.remove(&key);
+        }
+        start
+    };
+    send_with(cx, shared, sent, reply, on_answer);
+}
+
+/// `session/resume`: as `session/load`, but nothing is replayed, so the session is idle from
+/// the start. It is known before the answer, so an update the agent sends first still maps
+/// against its folder; a failed resume forgets it.
+fn resume_session(
+    cx: &ConnectionTo<Agent>,
+    shared: &Arc<Shared>,
+    request: crate::LoadSession,
+    reply: Reply<SessionStart>,
+) {
+    let key = CompactString::from(request.session.as_str());
+    let entry = SessionState::new(request.cwd.clone(), Origin::Idle);
+    shared.state().sessions.insert(key.clone(), entry);
+    let mut sent = acp::ResumeSessionRequest::new(request.session.as_str().to_owned(), request.cwd)
+        .mcp_servers(
+            request
+                .mcp_servers
+                .into_iter()
+                .map(mcp_server)
+                .collect::<Vec<_>>(),
+        );
+    sent.meta = request.meta;
+    let state = Arc::clone(shared);
+    let session = request.session;
+    let on_answer = move |result: Result<acp::ResumeSessionResponse, Error>| async move {
+        let start = result.and_then(|response| {
+            session_start(session.as_str(), response.modes, response.config_options)
+        });
+        if start.is_err() {
+            state.state().sessions.remove(&key);
         }
         start
     };

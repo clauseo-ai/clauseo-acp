@@ -21,11 +21,11 @@ pub(crate) use content::{prompt_block, split_text};
 pub(crate) use limit::session_failure;
 pub(crate) use session::{agent_info, config_options, modes, stop_reason};
 
-/// The `sessionUpdate` names this crate maps: every stable variant of schema 1.11.0. Anything
-/// else (`plan_update` and `plan_removed` until codex-acp's plans are mapped, the AIR
+/// The `sessionUpdate` names this crate maps: every stable variant of schema 1.11.0, and the
+/// unstable `plan_update` and `plan_removed` codex-acp sends. Anything else (the AIR
 /// `subagent_*` and `async_task_*` updates, a newer variant) is skipped with
 /// [`ProtocolWarning::UnknownUpdate`] before the update is decoded.
-pub(crate) const KNOWN_UPDATES: [&str; 14] = [
+pub(crate) const KNOWN_UPDATES: [&str; 16] = [
     "user_message_chunk",
     "agent_message_chunk",
     "agent_thought_chunk",
@@ -40,6 +40,8 @@ pub(crate) const KNOWN_UPDATES: [&str; 14] = [
     "notice",
     "compaction_update",
     "compaction_summary_chunk",
+    "plan_update",
+    "plan_removed",
 ];
 
 /// The ACP content block types schema 1.11.0 decodes.
@@ -110,13 +112,14 @@ fn take_unknown(block: &mut Value) -> Option<ContentBlock> {
 }
 
 /// Maps one decoded `session/update` into events, pushed onto `out`. `cwd` is the session's
-/// folder, for tool locations; `quarantined` the blocks [`quarantine_unknown_blocks`] took out.
-/// The last event takes `session`; only an update that makes several events clones it.
+/// folder, for tool locations; `shown_plan` the session's shown item plan, which a plan update
+/// changes; `quarantined` the blocks [`quarantine_unknown_blocks`] took out. The last event
+/// takes `session`; only an update that makes several events clones it.
 pub(crate) fn update(
     session: AgentSessionId,
     origin: Origin,
     update: acp::SessionUpdate,
-    cwd: Option<&Path>,
+    (cwd, shown_plan): (Option<&Path>, &mut Option<CompactString>),
     quarantined: Vec<Quarantined>,
     out: &mut Vec<AcpEvent>,
 ) {
@@ -141,7 +144,11 @@ pub(crate) fn update(
             acp_id: CompactString::from(&*update.tool_call_id.0),
             patch: tool::patch(update.fields, cwd, tool_blocks(quarantined)),
         },
-        acp::SessionUpdate::Plan(plan) => AgentUpdate::Plan(session::plan(plan.entries)),
+        acp::SessionUpdate::Plan(plan) => {
+            // The whole plan replaces any item plan, so no later removal empties it.
+            *shown_plan = None;
+            AgentUpdate::Plan(session::plan(plan.entries))
+        }
         acp::SessionUpdate::AvailableCommandsUpdate(update) => {
             AgentUpdate::Commands(session::commands(update.available_commands))
         }
@@ -197,12 +204,16 @@ pub(crate) fn update(
                 },
             );
         }
-        // Filtered out before decoding (`KNOWN_UPDATES`); kept for a change of that list.
-        acp::SessionUpdate::PlanUpdate(_) => {
-            return out.push(unknown(Some(session), "plan_update"));
-        }
-        acp::SessionUpdate::PlanRemoved(_) => {
-            return out.push(unknown(Some(session), "plan_removed"));
+        acp::SessionUpdate::PlanUpdate(update) => match session::plan_update(update, shown_plan) {
+            Some(update) => update,
+            // A markdown or file plan: no protocol type yet.
+            None => return out.push(unknown(Some(session), "plan_update")),
+        },
+        acp::SessionUpdate::PlanRemoved(removed) => {
+            match session::plan_removed(&removed, shown_plan) {
+                Some(update) => update,
+                None => return,
+            }
         }
         other => {
             let whole = serde_json::to_value(&other).unwrap_or_default();
