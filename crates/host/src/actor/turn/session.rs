@@ -1,9 +1,10 @@
 //! A launched agent's session: `session/load` with the stored session id when the agent offers
 //! it (after reading the thread's whole log for replay dedupe), else `session/resume` when it
 //! offers that (nothing is replayed), else `session/new`; for a Codex agent the checks before
-//! its first prompt (the ask mode, the guard's trust); then the attach commit, the held replay
-//! and the work that waited. When `initialize` gave the agent a title, its name is logged first
-//! (`AgentNamed`, `log_agent_name`), so a failed `session/new` leaves it in the thread.
+//! its first prompt (the ask mode, the guard's trust), for a Claude agent the switch to
+//! Clauseo's mode; then the attach commit, the held replay and the work that waited. When
+//! `initialize` gave the agent a title, its name is logged first (`AgentNamed`,
+//! `log_agent_name`), so a failed `session/new` leaves it in the thread.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -199,17 +200,19 @@ fn folder(actor: &Actor, thread: ThreadId) -> Result<PathBuf, Error> {
     )))
 }
 
-/// The session is up. A Codex agent's session first runs [`prepare`]'s checks; any other
-/// attaches now.
+/// The session is up. A Codex agent's session first runs [`prepare`]'s checks; a Claude
+/// agent's session that started in another mode than Clauseo's is first switched to it
+/// ([`claude_start`]); any other attaches now.
 pub(super) fn on_started(actor: &mut Actor, thread: ThreadId, start: SessionStart, loaded: bool) {
     super::profile_loads::show_tools(actor, thread);
-    let codex = actor
+    let kind = actor
         .threads
         .get(&thread)
-        .is_some_and(|entry| AgentKind::of(&entry.row.agent) == Some(AgentKind::Codex));
-    if !codex {
-        attach(actor, thread, start, loaded);
-        return;
+        .and_then(|entry| AgentKind::of(&entry.row.agent));
+    match kind {
+        Some(AgentKind::Codex) => {}
+        Some(AgentKind::Claude) => return claude_start(actor, thread, start, loaded),
+        None => return attach(actor, thread, start, loaded),
     }
     let ask =
         AgentChoiceId::new(codex::ASK_MODE).map_err(|error| Error::Internal(error.to_string()));
@@ -266,9 +269,10 @@ pub(super) fn on_started(actor: &mut Actor, thread: ThreadId, start: SessionStar
     });
 }
 
-/// A Codex session's checks before its first prompt, in order: `session/set_mode` to the ask
-/// mode when `switch` (the host owns the mode: `INITIAL_AGENT_MODE` set it at launch, and
-/// this covers an adapter that did not take it); then, when a hooks object went into
+/// A session's checks before its first prompt, in order: `session/set_mode` to `ask` when
+/// `switch` (Codex's ask mode: the host owns the mode, `INITIAL_AGENT_MODE` set it at launch,
+/// and this covers an adapter that did not take it; Claude's [`agent::loads::CLAUDE_MODE`],
+/// see [`claude_start`]); then, for Codex, when a hooks object went into
 /// `CODEX_CONFIG` (`guard` is the session's folder), `_codex/hooks/list` once, which must
 /// show the guard trusted. The start comes back with the mode it now has.
 async fn prepare(
@@ -290,6 +294,47 @@ async fn prepare(
         }
     }
     Ok(start)
+}
+
+/// A Claude agent's session started in another mode than [`CLAUDE_MODE`]: claude-agent-acp
+/// 0.89.1 starts it in the user's own `permissions.defaultMode` (or a resumed transcript's
+/// mode), which `_meta` cannot override (see `agent/loads.rs`). So `session/set_mode` goes
+/// first, before any prompt, through [`prepare`]; a failed switch fails the launch, so no
+/// prompt runs in the user's mode. A session already in it attaches now, and so does one whose
+/// agent offers no such mode, with a warning. On load this also resets a mode the lawyer
+/// reached in the session (see [`agent::loads::CLAUDE_MODE`]).
+fn claude_start(actor: &mut Actor, thread: ThreadId, start: SessionStart, loaded: bool) {
+    let Some(modes) = start.modes.as_ref() else {
+        return attach(actor, thread, start, loaded);
+    };
+    if modes.current == agent::loads::CLAUDE_MODE {
+        return attach(actor, thread, start, loaded);
+    }
+    let offered = modes
+        .available
+        .iter()
+        .any(|mode| mode.id == agent::loads::CLAUDE_MODE);
+    let mode = AgentChoiceId::new(agent::loads::CLAUDE_MODE);
+    let (true, Ok(mode)) = (offered, mode) else {
+        tracing::warn!(
+            %thread,
+            current = %modes.current,
+            "the Claude session offers no \"{}\" mode: it stays in the mode it started in",
+            agent::loads::CLAUDE_MODE
+        );
+        return attach(actor, thread, start, loaded);
+    };
+    tracing::info!(%thread, from = %modes.current, "switching the Claude session to Clauseo's mode");
+    let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
+        return;
+    };
+    agent.preparing = true;
+    let (id, client, fence) = (agent.id, agent.link.client.clone(), agent.link.fence());
+    call(actor, thread, id, async move {
+        let result = prepare(&client, start, (mode, true), None).await;
+        fence.await;
+        AgentReply::Prepared { loaded, result }
+    });
 }
 
 /// The session is up: one commit of `AgentSessionAttached`, the thread row, the session's mode

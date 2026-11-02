@@ -52,6 +52,25 @@ pub(crate) const CLAUDE_SETTING_SOURCES: &[&str] = &["user"];
 /// live). claude.ai connectors stay off too, since [`CLAUDE_AI_MCP_VAR`] is still `false`.
 pub(crate) const CLAUDE_MANAGED_SETTING_SOURCES: &[&str] = &["user"];
 
+/// The permission mode Clauseo runs every Claude session in: Claude Code's `default` ("Manual":
+/// ask before each change). The window cannot pick another mode yet (the desktop bridge refuses
+/// `SetMode`), so this is Clauseo's choice at every session start. Its cost: a mode the
+/// lawyer reached inside a session (accept edits, from a plan-exit option) goes back to
+/// `default` when the session is next loaded, the safer side. Re-applying the thread's last
+/// logged mode instead cannot tell such a choice from a mode the user's settings started a
+/// session in: both are logged as `ModeChanged`.
+///
+/// claude-agent-acp 0.89.1 starts a session in the mode it reads itself: an explicit one (only
+/// its own re-creations pass one), else a resumed transcript's, else `permissions.defaultMode`
+/// from the user's, the folder's and managed settings (`acp-agent.js:7215-7219`,
+/// `session-mode.js:22-35`). Its `SettingsManager` calls the SDK's `resolveSettings({cwd})`,
+/// which never sees the `--settings` flag (`settings.js`), and it forces the SDK option
+/// `permissionMode` over `_meta.claudeCode.options` (`acp-agent.js:7338`; `:388` lists the key
+/// as the adapter's own). So neither `_meta` route can set it: the host sends
+/// `session/set_mode` with this mode before the first prompt when the session started in
+/// another (`actor/turn/session.rs`), and [`session_meta`] takes bypass off the table.
+pub(crate) const CLAUDE_MODE: &str = "default";
+
 /// The variable that, set to `false`, keeps claude.ai's connectors out of a Claude Code session.
 pub(crate) const CLAUDE_AI_MCP_VAR: &str = "ENABLE_CLAUDEAI_MCP_SERVERS";
 
@@ -99,9 +118,15 @@ pub(crate) fn mcp_control(managed: &Path) -> McpControl {
 /// value at `claudeCode`, `options` or `env` that is not an object is replaced.
 ///
 /// - `claudeCode.options.env.ENABLE_CLAUDEAI_MCP_SERVERS`: `"false"`.
-/// - `claudeCode.options.extraArgs`: `setting-sources` taken out, in both forms the SDK turns
-///   into a flag (`{"setting-sources": "…"}` and `{"setting-sources=…": null}`), since an extra
-///   flag goes after the SDK's own `--setting-sources` and would win.
+/// - `claudeCode.options.allowDangerouslySkipPermissions`: `false`. claude-agent-acp 0.89.1 then
+///   starts a session whose user settings (or resumed transcript) say `bypassPermissions` in
+///   `default` instead, and offers no bypass mode, nor the plan-exit options that switch to it
+///   (`acp-agent.js:7212-7214`, `permissions/modes.js` `resolvePermissionMode`). Another
+///   starting mode (`acceptEdits`, `auto`, `plan`) is switched to [`CLAUDE_MODE`] after the
+///   start, since `_meta` cannot set it.
+/// - `claudeCode.options.extraArgs`: `setting-sources` and [`MODE_FLAGS`] taken out, in both
+///   forms the SDK turns into a flag (`{"setting-sources": "…"}` and
+///   `{"setting-sources=…": null}`), since an extra flag goes after the SDK's own and would win.
 /// - Under [`McpControl::Clauseo`]: `strictMcpConfig: true` and `settingSources`
 ///   [`CLAUDE_SETTING_SOURCES`].
 /// - Under [`McpControl::Managed`]: `strictMcpConfig: false`, `settingSources`
@@ -129,6 +154,7 @@ pub(crate) fn session_meta(
     let mut env = take_object(&mut options, "env");
     env.insert(CLAUDE_AI_MCP_VAR.to_owned(), Value::from("false"));
     options.insert("env".to_owned(), Value::Object(env));
+    options.insert(ALLOW_BYPASS_OPTION.to_owned(), Value::Bool(false));
     let (strict, sources) = match control {
         McpControl::Clauseo => (true, CLAUDE_SETTING_SOURCES),
         McpControl::Managed => (false, CLAUDE_MANAGED_SETTING_SOURCES),
@@ -136,6 +162,7 @@ pub(crate) fn session_meta(
     if let Some(Value::Object(extra)) = options.get_mut("extraArgs") {
         extra.retain(|flag, _| {
             let taken_out = is_flag(flag, SETTING_SOURCES_FLAG)
+                || MODE_FLAGS.iter().any(|name| is_flag(flag, name))
                 || (control == McpControl::Managed
                     && MANAGED_MCP_FLAGS.iter().any(|name| is_flag(flag, name)));
             !taken_out
@@ -172,8 +199,20 @@ fn is_flag(flag: &str, name: &str) -> bool {
         .is_some_and(|rest| rest.is_empty() || rest.starts_with('='))
 }
 
+/// The claude-agent-acp option that, `false`, keeps `bypassPermissions` out of a session.
+pub(crate) const ALLOW_BYPASS_OPTION: &str = "allowDangerouslySkipPermissions";
+
 /// The Claude Code flag `settingSources` becomes.
 const SETTING_SOURCES_FLAG: &str = "setting-sources";
+
+/// The Claude Code flags that set the permission mode or allow bypass. An extra flag goes after
+/// the SDK's own `--permission-mode`, so it would win over [`CLAUDE_MODE`] and over
+/// [`ALLOW_BYPASS_OPTION`].
+const MODE_FLAGS: [&str; 3] = [
+    "permission-mode",
+    "dangerously-skip-permissions",
+    "allow-dangerously-skip-permissions",
+];
 
 /// The flags that make Claude Code refuse to start while `managed-mcp.json` is present: a
 /// server config, and strict MCP config.

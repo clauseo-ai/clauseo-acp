@@ -99,8 +99,9 @@ pub(super) struct Agent {
     pub(super) replay: Option<SentView>,
     /// Replayed updates, held until the session is attached.
     pub(super) replayed: Vec<AcpEvent>,
-    /// A Codex session's checks run before its attach: every update is held with the replayed
-    /// ones meanwhile, so none is logged before `AgentSessionAttached`.
+    /// A Codex session's checks, or a Claude session's switch to Clauseo's mode, run before its
+    /// attach: every update is held with the replayed ones meanwhile, so none is logged before
+    /// `AgentSessionAttached`.
     pub(super) preparing: bool,
     /// What a Codex agent's launch recorded; `None` for any other agent.
     pub(super) codex: Option<CodexAgent>,
