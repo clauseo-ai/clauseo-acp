@@ -48,7 +48,7 @@ fn a_plain_get_is_forwarded_with_hop_by_hop_headers_and_the_token_stripped() {
         "GET /a/b?q=1 HTTP/1.1\r\nHost: allowed.test\r\nAccept: */*\r\nUser-Agent: test\r\n\
          Connection: close\r\n\r\n"
     );
-    let record = &rig.records()[0];
+    let record = &rig.records(1)[0];
     assert_eq!((record.verdict, record.port), (Verdict::Forward, 80));
     assert_eq!(record.bytes_down, OK.len() as u64);
     assert_eq!(rig.denials(), Vec::<Denial>::new());
@@ -163,7 +163,7 @@ fn a_request_with_no_host_to_name_gets_400_and_no_denial() {
     }
     assert_eq!(rig.denials(), Vec::<Denial>::new());
     assert!(
-        rig.records()
+        rig.records(3)
             .iter()
             .all(|r| r.verdict == Verdict::BadRequest)
     );
@@ -201,7 +201,7 @@ fn a_chunk_size_line_with_anything_but_an_extension_after_the_size_gets_400() {
             !got.contains(size_line),
             "{size_line:?} reached the origin: {got:?}"
         );
-        assert_eq!(rig.records()[0].verdict, Verdict::BadRequest);
+        assert_eq!(rig.records(1)[0].verdict, Verdict::BadRequest);
     }
 }
 
@@ -239,7 +239,7 @@ fn a_silent_host_on_another_port_is_refused_with_no_denial() {
     let answer = rig.exchange("GET http://telemetry.test:8080/ HTTP/1.1\r\n\r\n");
     assert!(answer.starts_with("HTTP/1.1 403 "), "{answer}");
     assert_eq!(rig.denials(), Vec::<Denial>::new());
-    assert_eq!(rig.records()[0].verdict, Verdict::Silent);
+    assert_eq!(rig.records(1)[0].verdict, Verdict::Silent);
 }
 
 #[test]
@@ -264,5 +264,5 @@ fn a_forwarded_request_idle_past_the_limit_is_closed() {
             .unwrap()
             .ends_with("abc")
     );
-    assert_eq!(rig.records()[0].verdict, Verdict::Forward);
+    assert_eq!(rig.records(1)[0].verdict, Verdict::Forward);
 }

@@ -146,12 +146,13 @@ pub(crate) struct Limits {
     pub(crate) idle: Duration,
     /// Open tunnels (and forwarded requests) per launch; the next gets 503.
     pub(crate) tunnels: usize,
-    /// Client connections still reading their head, per launch; the next is closed unanswered.
+    /// Client connections still reading their head, per listener; the next is closed unanswered.
     pub(crate) pending: usize,
     /// Client and origin sockets open at once, per launch. A client over it is closed
     /// unanswered; an origin connection over it gets the client 503.
     pub(crate) sockets: usize,
     /// Client and origin sockets open at once across every proxy in the process, the same way.
+    /// `start_proxy` lowers it to half the process's soft open-file limit when that is smaller.
     pub(crate) process: usize,
 }
 
@@ -200,7 +201,9 @@ impl Clock for SharedClock {
 
 /// Starts a launch's proxy on its own thread (`clauseo-proxy`). It runs until the handle drops.
 pub fn start_proxy(config: ProxyConfig) -> Result<ProxyHandle, Error> {
-    start_with(config, Arc::new(SystemNetwork), Options::default())
+    let mut options = Options::default();
+    options.limits.process = load::process_cap(load::soft_open_files());
+    start_with(config, Arc::new(SystemNetwork), options)
 }
 
 pub(crate) fn start_with(

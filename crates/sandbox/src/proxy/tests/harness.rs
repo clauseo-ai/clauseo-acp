@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::io::{self, Read, Write};
 use std::net::{IpAddr, Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::sync::mpsc::{self, Receiver};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -14,7 +14,7 @@ use futures::channel::oneshot;
 use futures::future::BoxFuture;
 
 use crate::proxy::net::Network;
-use crate::proxy::upstream::{Env, Scheme};
+use crate::proxy::upstream::{Env, OsRoute, Scheme};
 use crate::proxy::{Exchange, Limits, Options, ProxyConfig, ProxyHandle, start_with};
 use crate::{Allowlist, Clock, Denial, DenialSink, Reachability, Route, Upstream};
 
@@ -194,6 +194,8 @@ pub(crate) struct Setup {
     pub(crate) limits: Limits,
     /// For `Upstream::System`: the host's proxy variables; the OS answers direct.
     pub(crate) env: Option<Env>,
+    /// For `Upstream::System`: the OS lookup (direct when `None`).
+    pub(crate) os: Option<Box<OsRoute>>,
 }
 
 impl Default for Setup {
@@ -204,6 +206,7 @@ impl Default for Setup {
             upstream: Upstream::Direct,
             limits: Limits::default(),
             env: None,
+            os: None,
         }
     }
 }
@@ -214,7 +217,15 @@ pub(crate) struct Rig {
     pub(crate) net: Arc<TestNet>,
     pub(crate) sink: Arc<Sink>,
     pub(crate) clock: Arc<TestClock>,
-    pub(crate) records: Arc<Mutex<Vec<Exchange>>>,
+    pub(crate) records: Arc<Records>,
+}
+
+/// What the record callback got, and a signal for each new one: the proxy records an exchange
+/// just after the client may see its end.
+#[derive(Default)]
+pub(crate) struct Records {
+    kept: Mutex<Vec<Exchange>>,
+    added: Condvar,
 }
 
 fn list(entries: &[&str]) -> Allowlist {
@@ -232,7 +243,7 @@ pub(crate) fn rig(setup: Setup) -> Rig {
     let net = Arc::new(TestNet::default());
     let sink = Arc::new(Sink::default());
     let clock = Arc::new(TestClock::default());
-    let records = Arc::new(Mutex::new(Vec::new()));
+    let records = Arc::new(Records::default());
     let kept = Arc::clone(&records);
     let config = ProxyConfig {
         allow: list(&setup.allow),
@@ -240,16 +251,21 @@ pub(crate) fn rig(setup: Setup) -> Rig {
         upstream: setup.upstream,
         denials: Arc::clone(&sink) as Arc<dyn DenialSink>,
         record: Some(Arc::new(move |exchange: &Exchange| {
-            kept.lock().unwrap().push(exchange.clone());
+            kept.kept.lock().unwrap().push(exchange.clone());
+            kept.added.notify_all();
         })),
     };
     let options = Options {
         clock: Arc::clone(&clock) as Arc<dyn Clock>,
         limits: setup.limits,
-        system: setup.env.map(|env| {
-            let os = |_: Scheme, _: &str, _: u16| Route::Direct;
-            (env, Box::new(os) as Box<crate::proxy::upstream::OsRoute>)
-        }),
+        system: match (setup.env, setup.os) {
+            (None, None) => None,
+            (env, os) => {
+                let direct = |_: Scheme, _: &str, _: u16| Route::Direct;
+                let os = os.unwrap_or_else(|| Box::new(direct));
+                Some((env.unwrap_or_default(), os))
+            }
+        },
     };
     let handle = start_with(config, Arc::clone(&net) as Arc<dyn Network>, options).unwrap();
     Rig {
@@ -326,8 +342,15 @@ impl Rig {
         self.sink.reach.lock().unwrap().clone()
     }
 
-    pub(crate) fn records(&self) -> Vec<Exchange> {
-        self.records.lock().unwrap().clone()
+    /// The records, once there are at least `n` (or after the client wait).
+    pub(crate) fn records(&self, n: usize) -> Vec<Exchange> {
+        let kept = self.records.kept.lock().unwrap();
+        let (kept, _) = self
+            .records
+            .added
+            .wait_timeout_while(kept, CLIENT_WAIT, |kept| kept.len() < n)
+            .unwrap();
+        kept.clone()
     }
 }
 

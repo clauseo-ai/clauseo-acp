@@ -52,6 +52,10 @@ objc2-core-foundation = { workspace = true, features = [
   "CFURL",
 ] }
 
+# The process's soft open-file limit, which bounds the proxies' socket cap (src/proxy/load.rs).
+[target.'cfg(unix)'.dependencies]
+rustix = { workspace = true, features = ["process"] }
+
 # The proxy's listeners bind with SO_EXCLUSIVEADDRUSE (src/ports.rs).
 # The upstream lookup's WinHTTP calls (src/proxy/upstream/windows.rs).
 [target.'cfg(windows)'.dependencies]

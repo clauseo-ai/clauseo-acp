@@ -114,7 +114,7 @@ async fn accept(
             Ok((stream, _)) => {
                 // Counted here, before the task runs, so a burst of queued connections cannot
                 // pass the caps; the slots drop when the connection's task ends.
-                let Some(pending) = ctx.load.pending(&ctx.limits) else {
+                let Some(pending) = ctx.load.pending(&ctx.limits, which) else {
                     tracing::debug!("egress: too many connections reading a head; closed one");
                     continue;
                 };

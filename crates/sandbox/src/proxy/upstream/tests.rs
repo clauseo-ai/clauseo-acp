@@ -9,6 +9,7 @@ use super::parse::{self, BadProxy, Bypass, NoProxy};
 use super::{CACHE_FOR, Env, Lookup, Route, Upstream};
 use crate::{Clock, Error};
 
+mod flights;
 mod scheme;
 
 /// A clock the test moves by hand.
