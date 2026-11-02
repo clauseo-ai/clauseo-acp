@@ -10,13 +10,32 @@ import { markSyntax } from "./mark-syntax.ts";
 import type { BlockEnd } from "./split.ts";
 import { extrasFromMarkdown, superscriptSyntax } from "./syntax-extras.ts";
 
+const EXTENSIONS = [gfm(), superscriptSyntax, markSyntax, defList];
+const GFM = gfmFromMarkdown();
 const OPTIONS = {
-  extensions: [gfm(), superscriptSyntax, markSyntax, defList],
-  mdastExtensions: [gfmFromMarkdown(), extrasFromMarkdown, defListFromMarkdown],
+  extensions: EXTENSIONS,
+  mdastExtensions: [GFM, extrasFromMarkdown, defListFromMarkdown],
 };
+/**
+ * GFM's literal autolinks found after parsing (mdast-util-gfm-autolink-literal's transform) look for
+ * `http`, `www` or `@` in every text node, through a visit of every node of the tree that costs about a
+ * microsecond each: a third of the parse of `^a^`×6,000. A source with none of those, and no character
+ * reference that could decode to one, has nothing to find, so it skips the transform; the transform's
+ * handlers for the autolinks micromark finds itself stay.
+ */
+const OPTIONS_WITHOUT_LITERALS = {
+  extensions: EXTENSIONS,
+  mdastExtensions: [
+    GFM.map((extension) => (extension.transforms ? { ...extension, transforms: [] } : extension)),
+    extrasFromMarkdown,
+    defListFromMarkdown,
+  ],
+};
+const MAY_HOLD_LITERAL = /http|www/i;
 
 export function parse(source: string): Root {
-  return fromMarkdown(source, OPTIONS);
+  const literals = source.includes("@") || source.includes("&") || MAY_HOLD_LITERAL.test(source);
+  return fromMarkdown(source, literals ? OPTIONS : OPTIONS_WITHOUT_LITERALS);
 }
 
 const NOTHING_OPEN: BlockEnd = { open: false, list: "" };

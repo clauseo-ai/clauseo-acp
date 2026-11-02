@@ -73,12 +73,17 @@ export const superscriptSyntax: Extension = {
   text: { [CARET]: { name: "superscript", tokenize: tokenizeSuperscript } },
 };
 
-/** mdast for superscript and highlight: `superscript` and `mark` nodes holding phrasing content. */
+/**
+ * mdast for superscript and highlight: a `superscript` node holding its text as its `value` (its content is
+ * plain text: one node, not two, for each of a hostile run of thousands), and `mark` nodes holding phrasing
+ * content.
+ */
 export const extrasFromMarkdown: FromMarkdownExtension = {
   canContainEols: ["mark"],
   enter: {
     superscript(token) {
-      this.enter({ type: "superscript", children: [] } as never, token);
+      this.enter({ type: "superscript", value: "" } as never, token);
+      this.buffer();
     },
     mark(token) {
       this.enter({ type: "mark", children: [] } as never, token);
@@ -86,6 +91,8 @@ export const extrasFromMarkdown: FromMarkdownExtension = {
   },
   exit: {
     superscript(token) {
+      const value = this.resume();
+      (this.stack.at(-1) as unknown as { value: string }).value = value;
       this.exit(token);
     },
     mark(token) {
@@ -105,6 +112,11 @@ function element(tagName: string): Handler {
 
 /** hast for superscript and highlight. */
 export const extrasHandlers: Record<string, Handler> = {
-  superscript: element("sup"),
+  superscript: (state, node: { value: string }) => {
+    const text = { type: "text" as const, value: node.value };
+    const result: Element = { type: "element", tagName: "sup", properties: {}, children: [text] };
+    state.patch(node as never, result);
+    return result;
+  },
   mark: element("mark"),
 };
