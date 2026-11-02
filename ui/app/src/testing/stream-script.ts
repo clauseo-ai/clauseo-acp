@@ -27,7 +27,7 @@ export const header = (status: "idle" | "running" | "needs_you" = "idle"): ViewE
     order: 1,
     thread: THREAD,
     matter: MATTER,
-    agent: "claude",
+    agent: "claude-acp",
     status,
     config_options: [],
     commands: [],

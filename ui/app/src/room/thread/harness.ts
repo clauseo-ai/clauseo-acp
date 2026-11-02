@@ -36,7 +36,7 @@ export const summary = (
 ): ThreadSummary => ({
   thread,
   matter: MATTER,
-  agent: "claude",
+  agent: "claude-acp",
   status,
 });
 

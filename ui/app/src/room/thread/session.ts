@@ -20,9 +20,9 @@ import type {
 import { turnRunning } from "./live.ts";
 import { loadThread } from "./chunk.ts";
 
-/** The agent every thread the room starts runs: `agents.claude` in the user settings, until U6 lets the lawyer choose
+/** The agent every thread the room starts runs: `agents.claude-acp` in the user settings, until U6 lets the lawyer choose
  * (as R12's internal window did). */
-export const AGENT = "claude";
+export const AGENT = "claude-acp";
 
 /** Each matter's words in the composer's field, kept above the matter's Work, so leaving a matter and coming back
  * finds them where the lawyer left them (a refused send promises "Your question is kept."). */

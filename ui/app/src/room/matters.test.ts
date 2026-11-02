@@ -75,7 +75,7 @@ const headerEntry = (status: ThreadStatus, thread = T1, matter = A.matter): View
     order: 1,
     thread,
     matter,
-    agent: "claude",
+    agent: "claude-acp",
     status,
     config_options: [],
     commands: [],

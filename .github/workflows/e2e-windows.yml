@@ -4,7 +4,7 @@
 # control's numbers (time to #app-root, memory of the process tree, JS heap, DOM nodes) to
 # e2e-results-<runner>-<mode>.json. The numbers are recorded, not gated. The window's specs drive
 # the scripted fake_agent, built beside the app: each test gets a scratch CLAUSEO_DATA_DIR whose
-# settings.json starts fake_agent on that test's scenario as agents.claude, and a scratch
+# settings.json starts fake_agent on that test's scenario as agents.claude-acp, and a scratch
 # E2E_MATTER_DIR (ui/e2e/app-windows/scratch.ts), so no run touches the runner's real data folder.
 # The job scoreboard-windows plays the speed scoreboard (R13, ui/e2e/app-windows/scoreboard.spec.ts)
 # with smoke's app on windows-2025 and uploads scoreboard-windows.json as the artifact
@@ -203,7 +203,7 @@ jobs:
         run: pnpm -C ui tauri build --no-bundle --features e2e --target "$TARGET"
 
       # Same profile and target, beside the app: E2E_FAKE_AGENT above. The specs run it as
-      # agents.claude.
+      # agents.claude-acp.
       - name: Build fake_agent
         id: fake_agent
         if: env.RUN == 'true'

@@ -77,7 +77,7 @@ export function threadHost(state: ThreadState): FakeTransport {
       if (query === "list_matters") return { matters: [MATTER] };
       if (typeof query === "object" && query.list_threads !== undefined)
         return {
-          threads: [{ thread: THREAD, matter: MATTER.matter, agent: "claude", status: "idle" }],
+          threads: [{ thread: THREAD, matter: MATTER.matter, agent: "claude-acp", status: "idle" }],
         };
       throw new Error(`the review's host doesn't answer ${JSON.stringify(query)}`);
     },

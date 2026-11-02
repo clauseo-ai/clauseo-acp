@@ -28,14 +28,14 @@ test.afterEach(() => {
   rmSync(base, { recursive: true, force: true });
 });
 
-test("settings start fake_agent on the scenario as agents.claude", () => {
+test("settings start fake_agent on the scenario as agents.claude-acp", () => {
   expect(agentSettings(agent, "prompt-stream")).toEqual({
-    agents: { claude: { command: agent, args: ["--scenario", "prompt-stream"] } },
+    agents: { "claude-acp": { command: agent, args: ["--scenario", "prompt-stream"] } },
   });
   // The scoreboard's pace goes after the scenario.
   expect(agentSettings(agent, "scoreboard", ["--pace-ms", "5"])).toEqual({
     agents: {
-      claude: { command: agent, args: ["--scenario", "scoreboard", "--pace-ms", "5"] },
+      "claude-acp": { command: agent, args: ["--scenario", "scoreboard", "--pace-ms", "5"] },
     },
   });
 });
@@ -67,7 +67,7 @@ test("the folders: data with settings, a seeded matter beside it, and the launch
   );
   expect(settings).toEqual({
     matters: { default_location: scratch.mattersDir },
-    agents: { claude: { command: agent, args: ["--scenario", "files-one-turn"] } },
+    agents: { "claude-acp": { command: agent, args: ["--scenario", "files-one-turn"] } },
   });
   expect(scratch.mattersDir.startsWith(scratch.root)).toBe(true);
   expect(existsSync(scratch.mattersDir)).toBe(true);
