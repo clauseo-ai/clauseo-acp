@@ -80,6 +80,9 @@ export type ConversationsView = {
   options: readonly { value: AgentId; label: string }[];
   /** The agent the draft would run: the lawyer's choice, else agent.ts's order. */
   agent: AgentId;
+  /** The lawyer's last move to a conversation (New conversation, a row pressed, a retry): its key, and a number that
+   * grows with each, so the work puts the focus in the field once per move. Null after the room moved by itself. */
+  focus: { key: string; n: number } | null;
   /** Whether Retry from here can be offered (H13). */
   canRetry: boolean;
   /** H13: the open thread was retried, in this room, from a question of another: that one's key and title, and the
@@ -152,6 +155,7 @@ export class Conversations {
   #agents: AgentSummary[] = [];
   #current: MatterState | null = null;
   #n = 0;
+  #focus: { key: string; n: number } | null = null;
   /** Each held thread's header as last read: what changed, and which views went. */
   #seenHeaders = new Map<ThreadId, unknown>();
   #view: ConversationsView;
@@ -213,7 +217,12 @@ export class Conversations {
     this.#leave(m);
     m.open = key;
     this.#opened(m);
+    this.#focusOn(key);
     this.#emit();
+  }
+
+  #focusOn(key: string): void {
+    this.#focus = { key, n: (this.#focus?.n ?? 0) + 1 };
   }
 
   /** New conversation: the draft opens, its row shown; a draft already there opens again. */
@@ -224,6 +233,7 @@ export class Conversations {
     m.draft ??= { key: this.#key(), shown: true, chosen: null };
     m.draft.shown = true;
     m.open = m.draft.key;
+    this.#focusOn(m.open);
     this.#emit();
   }
 
@@ -320,6 +330,7 @@ export class Conversations {
     this.#leave(m);
     m.open = made;
     this.#opened(m);
+    this.#focusOn(made);
     this.#emit();
   };
 
@@ -330,6 +341,7 @@ export class Conversations {
     const matter = this.#matters.view().open?.matter ?? null;
     if (matter === (this.#current?.matter ?? null)) return;
     if (this.#current !== null) this.#leave(this.#current);
+    this.#focus = null;
     if (matter === null) {
       this.#current = null;
       this.#emit();
@@ -544,6 +556,7 @@ export class Conversations {
         agents,
         options,
         agent: agentFor({ chosen: null, setting: null, threads: [] }),
+        focus: null,
         canRetry: this.#next.retry !== null,
         retried: null,
       };
@@ -575,6 +588,7 @@ export class Conversations {
       agents,
       options,
       agent: this.#agentOf(m),
+      focus: this.#focus !== null && this.#focus.key === m.open ? this.#focus : null,
       canRetry: this.#next.retry !== null,
       retried:
         origin === undefined

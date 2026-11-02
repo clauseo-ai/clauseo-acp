@@ -37,14 +37,14 @@ function room(drafts: Drafts) {
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
-  // as room.tsx renders Work: keyed by the matter, so each matter's composer is a new one
+  // as room.tsx renders Work: keyed by the conversation (here one per matter), so each composer is a new one
   const show = (matter: MatterId, onAsk: (text: string) => Promise<boolean> = async () => false) =>
     act(async () =>
       root!.render(
         <WorkComposer
           key={matter}
           drafts={drafts}
-          matter={matter}
+          draftKey={matter}
           disabled={false}
           busy={false}
           refused={null}
