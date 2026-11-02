@@ -1,0 +1,14 @@
+{"scenario":"codex-files","description":"One Codex turn with three file changes in codex-acp's shape (dist/index.js:29117-29251, written from codex-acp 2.2.2 source until G8a's recordings replace it): creates notes/a.txt, edits brief.txt, deletes old.txt. The test seeds brief.txt with 'Clause 4 draft' and old.txt first","on_stdin_close":"exit"}
+{"include":"codex-handshake.jsonl"}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"note":"An add: codex-acp sends oldText null (dist/index.js:29117-29251); left out here, since SDK schema 1.11.0 drops a null oldText. No locations: Codex's file-change tool_call has none.","update":{"update":{"sessionUpdate":"tool_call","toolCallId":"call-create-a","title":"Editing files","kind":"edit","status":"in_progress","content":[{"type":"diff","path":"{{cwd}}/notes/a.txt","newText":"Alpha\n"}]}}}
+{"write_file":{"path":"notes/a.txt","content":"Alpha\n"}}
+{"note":"Completion is a tool_call_update {toolCallId, status} (dist/index.js:29133-29139).","update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"call-create-a","status":"completed"}}}
+{"note":"An update: oldText and newText (dist/index.js:29117-29251).","update":{"update":{"sessionUpdate":"tool_call","toolCallId":"call-edit-brief","title":"Editing files","kind":"edit","status":"in_progress","content":[{"type":"diff","path":"{{cwd}}/brief.txt","oldText":"Clause 4 draft\n","newText":"Clause 4 final\n"}]}}}
+{"write_file":{"path":"brief.txt","content":"Clause 4 final\n"}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"call-edit-brief","status":"completed"}}}
+{"note":"A delete: newText \"\" (dist/index.js:29117-29251); oldText is the file's text, which the test seeds.","update":{"update":{"sessionUpdate":"tool_call","toolCallId":"call-delete-old","title":"Editing files","kind":"edit","status":"in_progress","content":[{"type":"diff","path":"{{cwd}}/old.txt","oldText":"Old notes\n","newText":""}]}}}
+{"delete_file":{"path":"old.txt"}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"call-delete-old","status":"completed"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Created one note, edited the brief and deleted the old file."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
