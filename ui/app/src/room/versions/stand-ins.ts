@@ -21,13 +21,22 @@ export type StandIns = {
 /** No stand-ins: the desktop host's today. */
 export const NO_STAND_INS: StandIns = {};
 
-/** The stand-ins a transport carries, by duck type: a transport with H11's methods brings them. */
+const KEYS = [
+  "openFile",
+  "reveal",
+  "versionsFolder",
+  "diskUse",
+] as const satisfies readonly (keyof StandIns)[];
+
+/** The stand-ins a transport carries, by duck type: a transport with H11's methods (or a test's or the review page's
+ * fake with any of these) brings them, bound to it. The desktop transport has none today. */
 export function standInsOf(transport: object): StandIns {
-  const t = transport as Partial<Record<"openFile" | "reveal", unknown>>;
-  const out: StandIns = {};
-  if (typeof t.openFile === "function")
-    out.openFile = (t.openFile as (file: FileRefId) => Promise<void>).bind(transport);
-  if (typeof t.reveal === "function")
-    out.reveal = (t.reveal as (target: RevealTarget) => Promise<void>).bind(transport);
-  return out;
+  const t = transport as Partial<Record<keyof StandIns, unknown>>;
+  const out: Record<string, unknown> = {};
+  for (const key of KEYS) {
+    const method = t[key];
+    if (typeof method === "function")
+      out[key] = (method as (...a: never[]) => unknown).bind(transport);
+  }
+  return out as StandIns;
 }
