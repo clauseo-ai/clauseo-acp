@@ -131,6 +131,28 @@ test("the keys answer from the composer's empty field, or with nothing focused w
   expect(onRefuse).toHaveBeenCalledTimes(1);
 });
 
+test("a held key's repeats answer nothing: only its first press does", async () => {
+  const onAllow = vi.fn();
+  await show(
+    <EdgePrompt
+      kind="folder"
+      place="Documents/Precedents"
+      state={{ kind: "pending" }}
+      keys
+      onAllow={onAllow}
+      onRefuse={() => {}}
+    />,
+  );
+  await act(async () => {
+    document.body.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", repeat: true, bubbles: true, cancelable: true }),
+    );
+  });
+  expect(onAllow).not.toHaveBeenCalled();
+  await key(document.body, "Enter");
+  expect(onAllow).toHaveBeenCalledOnce();
+});
+
 test.each([
   ["mac", "macOS is asking you to confirm."],
   ["windows", "Windows is asking you to confirm."],

@@ -44,6 +44,7 @@ function useKeys(on: boolean, first: () => void, second: () => void) {
     const onKey = (e: KeyboardEvent) => {
       if (
         e.defaultPrevented ||
+        e.repeat ||
         e.isComposing ||
         e.keyCode === 229 ||
         e.altKey ||
