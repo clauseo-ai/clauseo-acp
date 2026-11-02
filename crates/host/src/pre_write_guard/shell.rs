@@ -28,6 +28,11 @@ struct Folders {
     unknown: bool,
     /// How many `pushd`s the command ran, for `popd`.
     pushed: usize,
+    /// The folder if every folder change ran, in order, by the folder's text, whatever
+    /// [`MAX_FOLDERS`]; `None` after a change it cannot follow, until an absolute one.
+    linear: Option<PathBuf>,
+    /// `linear` before each `pushd`, for `popd`.
+    linear_pushed: Vec<Option<PathBuf>>,
 }
 
 /// One segment to read: its words, whether it is a command (not a heredoc body), and its shell's
@@ -106,6 +111,8 @@ pub(super) fn shell_targets(
         reached: vec![cwd.to_path_buf()],
         unknown: false,
         pushed: 0,
+        linear: Some(cwd.to_path_buf()),
+        linear_pushed: Vec::new(),
     };
     for part in &parts {
         for word in part.words {
@@ -129,24 +136,27 @@ pub(super) fn shell_targets(
         files,
         patch: patch_targets(&text),
         names_codex,
+        text,
+        escape,
     })
 }
 
-/// `path` as spelled, and for a path with a `.` or `..` part also resolved two ways through its
+/// `path` as spelled when it has no `.` or `..` part; else `path` resolved two ways through its
 /// deepest existing folder: as spelled (a symlinked folder's `..` is its target's parent, as the
-/// OS reads it), and with `..` and `.` resolved by their text first (`mkdir -p D && echo x >
-/// D/../Contract.docx`, or a `D` that never exists). A path with no such part names the same file
-/// every way, so it comes once.
+/// OS reads it; when the path exists this is the file the OS opens, so the spelling itself is not
+/// checked again), and with `..` and `.` resolved by their text first (`mkdir -p D && echo x >
+/// D/../Contract.docx`, or a `D` that never exists).
 pub(super) fn resolutions(path: &Path) -> Vec<PathBuf> {
     let normal = lexical(path);
     if normal == path {
-        vec![normal]
+        return vec![normal];
+    }
+    let spelled = existing_resolved(path);
+    let normal = existing_resolved(&normal);
+    if spelled == normal {
+        vec![spelled]
     } else {
-        vec![
-            path.to_path_buf(),
-            existing_resolved(path),
-            existing_resolved(&normal),
-        ]
+        vec![spelled, normal]
     }
 }
 
@@ -167,6 +177,12 @@ fn starts(folders: &Folders, changes: bool, candidate: &Path) -> Vec<PathBuf> {
     let mut paths: Vec<PathBuf> = folders
         .reached
         .iter()
+        .chain(
+            folders
+                .linear
+                .iter()
+                .filter(|linear| !folders.reached.contains(linear)),
+        )
         .map(|folder| folder.join(candidate))
         .collect();
     if (changes || folders.unknown)
@@ -199,7 +215,9 @@ fn change(word: &str) -> Option<Change> {
         .trim_end_matches([';', ')', '}'])
         .to_ascii_lowercase();
     match name.as_str() {
-        "cd" | "chdir" | "set-location" | "sl" => Some(Change::Move { push: false }),
+        "cd" | "chdir" | "set-location" | "sl" | "cd.." | "cd\\" => {
+            Some(Change::Move { push: false })
+        }
         "pushd" | "push-location" => Some(Change::Move { push: true }),
         "popd" | "pop-location" => Some(Change::Pop),
         _ => None,
@@ -208,7 +226,7 @@ fn change(word: &str) -> Option<Change> {
 
 /// `words` from the command name on: leading reserved words, braces, `!`, the `builtin`,
 /// `command` and `time` prefixes and `NAME=value` assignments are skipped.
-fn command_words(words: &[String]) -> &[String] {
+pub(super) fn command_words(words: &[String]) -> &[String] {
     let skip = words
         .iter()
         .take_while(|word| {
@@ -247,7 +265,7 @@ fn is_assignment(word: &str) -> bool {
 /// `-c`-style option of `sh`, `bash`, `zsh`, `dash` or `ksh` (`-c`, `-lc`, `-ec`), the arguments
 /// after `-c` or `-Command` of `pwsh` or `powershell`, or the arguments of `eval` (in this
 /// shell). One level only: a script's own scripts are not read.
-fn script(words: &[String], escape: Escape) -> Option<(String, Escape)> {
+pub(super) fn script(words: &[String], escape: Escape) -> Option<(String, Escape)> {
     let (program, args) = command_words(words).split_first()?;
     let name = program
         .rsplit(['/', '\\'])
@@ -296,19 +314,27 @@ fn moved(folders: &mut Folders, words: &[String], escape: Escape) {
             } else {
                 folders.pushed -= 1;
             }
+            folders.linear = folders.linear_pushed.pop().flatten();
             return;
         }
         None => return,
     };
     if push {
         folders.pushed += 1;
+        folders.linear_pushed.push(folders.linear.clone());
     }
-    let target = args.iter().find_map(|arg| match arg.strip_prefix('-') {
-        Some(option) if !option.is_empty() => option
-            .split_once(':')
-            .map(|(_, value)| value.trim_matches(['\'', '"'])),
-        Some(_) | None => Some(arg.as_str()),
-    });
+    // PowerShell's built-in `cd..` and `cd\`.
+    let name = command.to_ascii_lowercase();
+    let target = match name.trim_start_matches(['{', '(', '!', '$', '`', '@', '&']) {
+        "cd.." => Some(".."),
+        "cd\\" => Some("\\"),
+        _ => args.iter().find_map(|arg| match arg.strip_prefix('-') {
+            Some(option) if !option.is_empty() => option
+                .split_once(':')
+                .map(|(_, value)| value.trim_matches(['\'', '"'])),
+            Some(_) | None => Some(arg.as_str()),
+        }),
+    };
     let target = target.map(|target| target.trim_end_matches([')', '}', ';']));
     let Some(target) = target.filter(|target| {
         !(target.is_empty()
@@ -317,10 +343,19 @@ fn moved(folders: &mut Folders, words: &[String], escape: Escape) {
             || target.contains(['$', '`', '*', '?', '[', '{']))
     }) else {
         folders.unknown = true;
+        folders.linear = None;
         return;
     };
     let target = native(target, escape);
     let target = Path::new(target.as_ref());
+    folders.linear = if target.is_absolute() {
+        Some(lexical(target))
+    } else {
+        folders
+            .linear
+            .as_ref()
+            .map(|linear| lexical(&linear.join(target)))
+    };
     let joined: Vec<PathBuf> = if target.is_absolute() {
         vec![target.to_path_buf()]
     } else {

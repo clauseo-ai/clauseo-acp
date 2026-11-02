@@ -10,31 +10,59 @@
 //! - Codex's `apply_patch` (hooked under that name or its aliases `Write` and `Edit`): the
 //!   `*** Add File:`, `*** Update File:`, `*** Delete File:` and `*** Move to:` lines of the
 //!   patch in `tool_input.command`.
-//! - `Bash` (both agents) and Claude Code's `PowerShell`: a heuristic (`words.rs`, `shell.rs`).
-//!   `tool_input.command` is split into words the simple shell way (whitespace, quotes, the
-//!   escape character, a backslash or PowerShell's backtick, escaped newlines, `$'…'`; comments
-//!   dropped; no expansion), and into simple commands at each unquoted newline, `;`, `&`, `&&`,
-//!   `|`, `||`, `(` and `)`, with a heredoc's body read as data. The first [`MAX_WORDS`] words
-//!   are kept, plus as many of each script the command hands to `sh -c`, `bash -c`, `eval`,
-//!   `pwsh -Command` and the like (one level). A word names a target when it is an existing
-//!   file, also once its shell punctuation is off (`candidates`). A word is taken from the
-//!   input's `cwd` and from every folder the command's `cd`, `pushd` or `Set-Location` may
-//!   have reached by then, whether or not that change ran (`false && cd x`, a subshell), past
-//!   prefixes such as `builtin`, `then`, `{` and `NAME=value`, by the folder's text and through
-//!   symlinks. A change it cannot follow (`cd` alone, `cd ~`, `cd -`, `cd "$(…)"`) makes the
-//!   folder unknown for the rest of the command. As a backstop, when the command names a folder
-//!   change anywhere, a relative word is also taken from `cwd` with its leading `..` parts off;
-//!   that can refuse a write that lands elsewhere when its name matches a held file of the
-//!   matter, a rare false refusal accepted for safety. PowerShell's `\` separates folders on
-//!   every OS. The patch lines in the command count too, from `cwd`: Codex's `exec_command`
-//!   applies `apply_patch <<'EOF' …` as a patch.
+//! - `Bash` (both agents) and Claude Code's `PowerShell`, in two layers:
+//!   - Paths, a heuristic (`words.rs`, `shell.rs`). `tool_input.command` is split into words
+//!     the simple shell way (whitespace, quotes, the escape character, a backslash or
+//!     PowerShell's backtick, escaped newlines, `$'…'` with bash's escapes; `#` comments and
+//!     PowerShell's `<# … #>` dropped; no expansion), and into simple commands at each unquoted
+//!     newline, `;`, `&`, `&&`, `|`, `||`, `(` and `)`, a heredoc's body read as data. The first
+//!     [`MAX_WORDS`] words are kept, plus as many of each script handed to `sh -c`, `bash -c`,
+//!     `eval`, `pwsh -Command` and the like (one level). A word names a target when it is an
+//!     existing file, also once its shell punctuation is off (`candidates`). It is taken from the
+//!     input's `cwd`, from every folder the command's `cd`, `pushd` or `Set-Location`
+//!     (PowerShell's `cd..` and `cd\` too) may have reached by then, whether or not that change
+//!     ran (`false && cd x`, a subshell), past prefixes such as `builtin`, `then`, `{` and
+//!     `NAME=value`, by the folder's text and through symlinks, at most 16 folders; and from the
+//!     folder it is in if every change ran in order, followed whatever the cap. A change it cannot
+//!     follow (`cd` alone, `cd ~`, `cd -`, `pushd +1`, `cd "$(…)"`) makes the folder
+//!     "unknown": the set stops growing past it and the in-order folder is lost until an absolute
+//!     change; nothing else changes, the layers below still apply. When the command names a
+//!     folder change anywhere, a relative word is also taken from `cwd` with its leading `..`
+//!     parts off (a rare false refusal when a write elsewhere has a held file's name, accepted).
+//!     PowerShell's `\` separates folders on every OS. A patch in the command (Codex's
+//!     `exec_command` applies `apply_patch <<'EOF' …`) counts, its lines taken from `cwd`.
+//!   - Names, a backstop that does not depend on following folders (`names.rs`). The files of
+//!     the matter held open right now are listed (the folders with an Office owner file `~$…`,
+//!     breadth first, at most 20 000 entries, no hidden folder, no symlink followed), and a
+//!     command whose text (escaped newlines joined, `$'…'` decoded, comments kept) holds one's
+//!     name as a whole name (between the start, a folder separator, whitespace, a quote or a
+//!     shell metacharacter, and the end, whitespace, a quote or a metacharacter; ignoring case
+//!     on macOS and Windows) is refused, as is one whose words name a held file by path, unless
+//!     the whole command only reads. Read-only, judged conservatively (`names::read_only`): no
+//!     `$(`, backtick, `<(` or `>(` (no `{` under PowerShell); each simple command naming a
+//!     held file is `cat`, `head`, `tail`, `wc`, `file`, `strings`, `less` (no log file),
+//!     `unzip` with only `-l`/`-p`/`-v`/`-q`, `textutil -convert … -stdout`, `pandoc` whose
+//!     `-o`/`--output` names no held file, a `stetdoc` form writing no held file, or `sh -c`
+//!     whose script is itself read-only; and no output redirection goes to a held file or a
+//!     target built at run time (`/dev/null`, `$null` and `2>&1` are fine). So while a document
+//!     is open in Word, `cat Contract.docx | grep x` goes on, but `echo Contract.docx`,
+//!     `grep x Contract.docx` or `python -c` naming it is refused, with the held-open reason.
+//!     The agent's own Read tool is not checked.
+//!   - stetdoc (`names::stetdoc`, matching stetdoc 0.9.0's `--help`; check it again when U13's
+//!     0.9.1 pin lands): `view`, `inspect`, `check`, `lookup`, `capabilities` and `skills` only
+//!     read; `unpack` writes its `-o` folder; `edit`, `replace` and `comment` write nothing with
+//!     `--dry-run`, the document with `--in-place`, `-o`/`--output`, else `NAME.edited.docx`;
+//!     `compare` writes its `-o`; `pack` its `-o`, else `NAME.edited.docx`. A form writing a held
+//!     file is refused even when the command names none (a default output), as are `stetdoc mcp`
+//!     and `stetdoc init` outright; an unknown subcommand or flag naming a held file is refused.
 //!
-//!   Not caught, by design of a heuristic: a file reached by a glob (`Con*.docx`), brace
-//!   expansion (`Con{tract,x}.docx`) or a value built at run time (`f=Con; > $f"tract.docx"`,
-//!   `$(…)`), a script file or another interpreter (`python -c`, `node -e`, a .NET call such
-//!   as `[IO.File]::WriteAllText('Contract.docx', …)`), a folder changed by an option
-//!   (`env -C dir`, `git -C dir`, `make -C dir`), and under Codex a `.codex` folder named by a
-//!   glob (`cd .cod?`).
+//!   Not caught: a held file named only by a glob (`Con*.docx`), brace expansion
+//!   (`Con{tract,x}.docx`) or a value built at run time (`f=Con; > $f"tract.docx"`), so the name
+//!   never appears whole in the text; a script file the command runs; a file held on Windows by a
+//!   share mode alone (no owner file) reached by a route the path layer misses; a held file past
+//!   the 20 000 entries listed. The name backstop catches the other routes the path layer misses
+//!   (other interpreters such as `python -c`, `env -C`/`git -C`, folder games) whenever the name
+//!   appears literally. Under Codex, a `.codex` folder named by a glob (`cd .cod?`) is not caught.
 //!
 //! The matter folder is the `--matter` argument when the hook passes one (Claude Code's entry
 //! does, `agent/loads.rs`: Claude Code's `cwd` follows the agent's `cd`), else the input's
@@ -81,6 +109,7 @@
 //! default and plan mode the permission check (ADR 0021) still stops a write to a held file; in
 //! acceptEdits and bypassPermissions this guard is the only stop. It never panics.
 
+mod names;
 mod shell;
 mod words;
 
@@ -191,6 +220,8 @@ enum Refusal {
     /// A Codex patch writes in the matter's `.codex` folder, or a Codex shell command names a
     /// `.codex` folder.
     CodexFolder,
+    /// A shell command runs `stetdoc mcp` or `stetdoc init`.
+    StetdocServe,
 }
 
 impl Refusal {
@@ -204,6 +235,9 @@ impl Refusal {
             ),
             Self::CodexFolder => "Clauseo doesn't let the agent change the .codex folder in a \
                                   matter: files there change what the agent loads and runs."
+                .to_owned(),
+            Self::StetdocServe => "Clauseo doesn't let the agent run stetdoc mcp or stetdoc init \
+                                   in its shell: run the stetdoc command you need directly."
                 .to_owned(),
         }
     }
@@ -252,11 +286,58 @@ fn refusal(bytes: &[u8], matter: Option<&Path>) -> Result<Option<Refusal>, Ignor
     if into_codex {
         return Ok(Some(Refusal::CodexFolder));
     }
-    Ok(targets
-        .paths()
-        .flat_map(|path| resolutions(&base.join(path)))
-        .find_map(|path| clauseo_matters::held_open_at(&folder, &path))
-        .map(|(path, _)| Refusal::HeldOpen(path)))
+    let held_at = |paths: &[PathBuf]| {
+        paths
+            .iter()
+            .flat_map(|path| resolutions(&base.join(path)))
+            .find_map(|path| clauseo_matters::held_open_at(&folder, &path))
+            .map(|(path, _)| path)
+    };
+    match &targets {
+        Targets::Named(paths) | Targets::Patch(paths) => Ok(held_at(paths).map(Refusal::HeldOpen)),
+        Targets::Shell {
+            files,
+            patch,
+            text,
+            escape,
+            ..
+        } => {
+            if let Some(path) = held_at(patch) {
+                return Ok(Some(Refusal::HeldOpen(path)));
+            }
+            Ok(shell_refusal(text, *escape, &folder, held_at(files)))
+        }
+    }
+}
+
+/// Why the shell command `text` is refused, if it is, with `found` the held file its words
+/// name from the folders it may be in. `stetdoc mcp` and `init` are refused outright, and a
+/// `stetdoc` form that writes a held file (its default output included) is refused. Else the
+/// name backstop: a command naming a held file of `folder`, found by its words or by its text
+/// ([`names::named_in`]), is refused unless it only reads ([`names::read_only`]).
+fn shell_refusal(
+    text: &str,
+    escape: Escape,
+    folder: &Path,
+    found: Option<MatterPath>,
+) -> Option<Refusal> {
+    let held = names::held_files(folder);
+    let mut segments = words::Segments::new(MAX_WORDS);
+    words::shell_segments(text, escape, &mut segments);
+    for segment in segments.iter().filter(|segment| segment.command) {
+        match names::stetdoc(&segment.words, &held) {
+            names::Stetdoc::Serve => return Some(Refusal::StetdocServe),
+            names::Stetdoc::Writes(file) => return Some(Refusal::HeldOpen(file.path.clone())),
+            names::Stetdoc::Fine | names::Stetdoc::Unknown => {}
+        }
+    }
+    let path =
+        found.or_else(|| names::named_in(text, escape, &held).map(|file| file.path.clone()))?;
+    let mut names_held = held;
+    if !names_held.iter().any(|file| file.path == path) {
+        names_held.push(names::Held::new(path.clone()));
+    }
+    (!names::read_only(text, escape, &names_held)).then_some(Refusal::HeldOpen(path))
 }
 
 /// The paths a tool would write, as the agent spelled them, and where they came from.
@@ -271,18 +352,10 @@ enum Targets {
         files: Vec<PathBuf>,
         patch: Vec<PathBuf>,
         names_codex: bool,
+        /// The command's text (an argument list's parts one per line) and its shell's escape.
+        text: String,
+        escape: Escape,
     },
-}
-
-impl Targets {
-    /// Every path to check for a file held open.
-    fn paths(&self) -> impl Iterator<Item = &PathBuf> {
-        let (first, second): (&[PathBuf], &[PathBuf]) = match self {
-            Self::Named(paths) | Self::Patch(paths) => (paths, &[]),
-            Self::Shell { files, patch, .. } => (files, patch),
-        };
-        first.iter().chain(second)
-    }
 }
 
 /// The paths the tool `tool` with `input` would write, `None` for a tool the guard does not
@@ -328,29 +401,40 @@ fn in_codex_folder(folder: &Path, base: &Path, path: &Path) -> bool {
 /// normalised by its text, so a huge word costs time in proportion to its length.
 const MAX_RESOLVED: usize = 4096;
 
-/// `path` with its deepest existing folder canonicalised and the rest added lexically. The
-/// folder is found from the root down, one `stat` per part until one is missing, then
-/// canonicalised once. A path over [`MAX_RESOLVED`] bytes, or one whose folder does not
-/// canonicalise, is only normalised by its text ([`lexical`]).
+/// `path` with its deepest existing folder canonicalised and the rest added lexically: the
+/// whole path canonicalised, else its parent with the name added, else the deepest existing
+/// prefix found by halving (a prefix of an existing one exists), canonicalised once, so a long
+/// path costs a few `stat`s, not one per part. A path over [`MAX_RESOLVED`] bytes, or one whose
+/// folder does not canonicalise, is only normalised by its text ([`lexical`]).
 fn existing_resolved(path: &Path) -> PathBuf {
     if path.as_os_str().len() > MAX_RESOLVED {
         return lexical(path);
     }
-    let mut existing = PathBuf::new();
-    let mut depth = 0;
-    for part in path.components() {
-        let next = existing.join(part);
-        if next.metadata().is_err() {
-            break;
-        }
-        existing = next;
-        depth += 1;
+    if let Ok(found) = dunce::canonicalize(path) {
+        return found;
     }
-    match dunce::canonicalize(&existing) {
+    if let (Some(parent), Some(name)) = (path.parent(), path.file_name())
+        && let Ok(found) = dunce::canonicalize(parent)
+    {
+        return lexical(&found.join(name));
+    }
+    let parts: Vec<Component<'_>> = path.components().collect();
+    let prefix = |count: usize| parts.iter().take(count).collect::<PathBuf>();
+    // The longest existing prefix has between `low` (exists, or is empty) and `high` parts.
+    let (mut low, mut high) = (0, parts.len().saturating_sub(1));
+    while low < high {
+        let middle = low + (high - low).div_ceil(2);
+        if prefix(middle).metadata().is_ok() {
+            low = middle;
+        } else {
+            high = middle - 1;
+        }
+    }
+    match dunce::canonicalize(prefix(low)) {
         Ok(found) => lexical(
-            &path
-                .components()
-                .skip(depth)
+            &parts
+                .iter()
+                .skip(low)
                 .fold(found, |acc, part| acc.join(part)),
         ),
         Err(_) => lexical(path),
