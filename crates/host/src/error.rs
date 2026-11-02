@@ -28,7 +28,7 @@ pub enum Error {
     /// An ACP call failed; the code is the ACP crate's.
     #[error("acp: {0}")]
     Acp(#[from] clauseo_acp::Error),
-    /// Settings failed (`internal`).
+    /// Settings failed: `settings.locked` for a change to a key policy sets, else `internal`.
     #[error("settings: {0}")]
     Settings(#[from] clauseo_settings::Error),
     /// The host stopped or panicked, so the call has no answer (`internal`).
@@ -49,6 +49,7 @@ impl Error {
             Self::Matters(error) => error.code(),
             Self::Process(error) => error.code(),
             Self::Acp(error) => error.code(),
+            Self::Settings(clauseo_settings::Error::Locked { .. }) => ErrorCode::SettingsLocked,
             Self::Reducer(_) | Self::Settings(_) | Self::Closed | Self::Internal(_) => {
                 ErrorCode::Internal
             }

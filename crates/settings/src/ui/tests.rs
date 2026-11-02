@@ -1,6 +1,6 @@
 use super::UiPatch;
 use crate::leaf::KEYS;
-use crate::schema::{Density, FontSize, Language, Settings, Theme};
+use crate::schema::{Density, FontSize, Language, Lite, Motion, Settings, Theme};
 
 #[test]
 fn patch_rejects_agents_key() {
@@ -15,20 +15,20 @@ fn patch_rejects_agents_key() {
 }
 
 #[test]
-fn a_patch_takes_the_four_ui_fields() {
+fn a_patch_takes_every_ui_field() {
     let patch: UiPatch = serde_json::from_str(
-        r#"{"theme": "dark", "font_size": 12, "density": "compact", "language": "de-AT"}"#,
+        r#"{"theme": "dark", "font_size": 14, "density": "compact", "language": "hi",
+            "lite": "on", "motion": "reduce"}"#,
     )
     .unwrap();
     let mut settings = Settings::default();
     settings.apply_ui_patch(&patch);
     assert_eq!(settings.ui.theme, Theme::Dark);
-    assert_eq!(settings.ui.font_size, FontSize::try_from(12).unwrap());
+    assert_eq!(settings.ui.font_size, FontSize::try_from(14).unwrap());
     assert_eq!(settings.ui.density, Density::Compact);
-    assert_eq!(
-        settings.ui.language,
-        Language::try_from("de-AT".to_owned()).unwrap()
-    );
+    assert_eq!(settings.ui.language, Language::Hi);
+    assert_eq!(settings.ui.lite, Lite::On);
+    assert_eq!(settings.ui.motion, Motion::Reduce);
 }
 
 #[test]
@@ -40,13 +40,15 @@ fn an_empty_patch_changes_nothing_and_serialises_empty() {
     assert_eq!(serde_json::to_string(&UiPatch::default()).unwrap(), "{}");
 }
 
-/// A patch that sets all four fields, to values that are not the defaults.
+/// A patch that sets every field, to values that are not the defaults.
 fn every_field() -> UiPatch {
     UiPatch {
         theme: Some(Theme::Dark),
         font_size: Some(FontSize::try_from(18).unwrap()),
         density: Some(Density::Compact),
-        language: Some(Language::try_from("fr".to_owned()).unwrap()),
+        language: Some(Language::Hi),
+        lite: Some(Lite::Off),
+        motion: Some(Motion::Full),
     }
 }
 

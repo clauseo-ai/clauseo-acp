@@ -9,13 +9,15 @@ use crate::helpers::{inside, kinds, values};
 use crate::{Corpus, V1, every_corpus, examples, fixtures, fnv1a, gaps};
 
 /// The files to add for what `corpora` lack, each as `(name, entries)`, from the examples of
-/// `support/examples.rs`: `<kind>` with every example of a kind no corpus holds, and
-/// `<kind>-<Variant>` with the first example that holds a variant no corpus holds. Then each
+/// `support/examples.rs` (`every_event`, then `later_variants`): `<kind>` with every example of
+/// a kind no corpus holds, and `<kind>-<Variant>` with the first example that holds a variant no
+/// corpus holds. Then each
 /// variant no example holds either.
 fn added_pairs(corpora: &[Corpus]) -> (Vec<(String, Vec<Envelope>)>, Vec<String>) {
     let held: BTreeSet<String> = corpora.iter().flat_map(kinds).collect();
     let entries: Vec<Envelope> = examples::every_event()
         .into_iter()
+        .chain(examples::later_variants())
         .map(|event| {
             let mut entry = fixtures::envelope(event);
             if entry.event.is_matter_level() == Some(true) {
@@ -94,8 +96,9 @@ fn write_the_added_pairs() {
     }
 }
 
-/// With a kind's entries and a variant's one entry taken out of v1, the writer would add a file
-/// for each, named for the kind and for the kind and variant.
+/// With a kind's entries and a variant's one entry taken out of v1 (the files added after v1
+/// still in), the writer would add a file for each, named for the kind and for the kind and
+/// variant.
 #[test]
 fn the_writer_adds_what_the_corpus_lacks() {
     let text = std::str::from_utf8(V1.1).unwrap();
@@ -106,9 +109,12 @@ fn the_writer_adds_what_the_corpus_lacks() {
         })
         .fold(String::new(), |kept, line| kept + line + "\n");
     let lacking: Corpus = ("v1/lacking", kept.leak().as_bytes(), V1.2, V1.3, V1.4);
-    let (pairs, unheld) = added_pairs(&[lacking]);
+    let corpora: Vec<Corpus> = std::iter::once(lacking)
+        .chain(every_corpus().into_iter().skip(1))
+        .collect();
+    let (pairs, unheld) = added_pairs(&corpora);
     let names: Vec<&str> = pairs.iter().map(|(name, _)| name.as_str()).collect();
     assert_eq!(names, ["thread_archived", "matter_created-Folder"]);
     assert!(unheld.is_empty(), "{unheld:?}");
-    assert_eq!(added_pairs(&[V1]), (Vec::new(), Vec::new()));
+    assert_eq!(added_pairs(&every_corpus()), (Vec::new(), Vec::new()));
 }

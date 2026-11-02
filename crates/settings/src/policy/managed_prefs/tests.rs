@@ -64,13 +64,13 @@ fn nothing_read_is_absent() {
 fn forced_values_are_typed() {
     let (leaves, warnings) = values(vec![
         ("ui.theme", string("light"), true),
-        ("ui.font_size", PlistValue::Integer(13), true),
+        ("ui.font_size", PlistValue::Integer(15), true),
     ]);
     assert_eq!(
         leaves,
         [
             Leaf::Theme(Theme::Light),
-            Leaf::FontSize(FontSize::try_from(13).unwrap())
+            Leaf::FontSize(FontSize::try_from(15).unwrap())
         ]
     );
     assert_eq!(warnings, []);

@@ -244,6 +244,9 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
             checkpoint,
             scope,
         } => turn::restore_version(actor, *ctx, matter, checkpoint, scope),
+        HostCommand::SetUiSettings { patch } => {
+            super::settings::set_ui_settings(actor, ctx, &patch);
+        }
         HostCommand::EditQueuedPrompt { .. }
         | HostCommand::RemoveQueuedPrompt { .. }
         | HostCommand::SendQueuedNow { .. }

@@ -85,6 +85,7 @@ pub(super) async fn open(
         threads,
         streams: BTreeMap::new(),
         event_subs: BTreeMap::new(),
+        app_subs: Vec::new(),
         commands: BTreeMap::new(),
         folders: BTreeMap::new(),
         files: BTreeMap::new(),

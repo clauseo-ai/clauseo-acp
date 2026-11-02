@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     AccountLimits, Cursor, EntryId, Envelope, HeaderEntry, MatterHeaderEntry, MessageId, Seq,
-    StreamId, ViewEntry, ViewEpoch,
+    SettingsView, StreamId, ViewEntry, ViewEpoch,
 };
 
 /// One change to a stream's view, at its cursor.
@@ -136,6 +136,9 @@ pub enum HostEvent {
     },
     /// An account's limits changed (not part of any stream).
     AccountLimitsChanged(AccountLimits),
+    /// The display settings changed: the whole view after the change. App-wide, never part of
+    /// a stream: it reaches app subscribers only.
+    SettingsChanged(SettingsView),
 }
 
 /// Where a view subscriber stands: an epoch and the last cursor it applied.

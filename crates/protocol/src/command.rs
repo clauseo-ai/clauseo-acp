@@ -18,7 +18,7 @@ use crate::MatterPath;
 use crate::{
     AgentChoiceId, AgentId, CheckpointId, CommandId, Delivery, ElicitationId, ElicitationResponse,
     FileDecision, FolderRefId, MatterId, MessageId, PermissionRequestId, PromptBlock, RestoreScope,
-    ThreadId, Title, TurnId,
+    ThreadId, Title, TurnId, UiPatch,
 };
 #[cfg(doc)]
 use crate::{FileChoice, RawPayload};
@@ -280,10 +280,18 @@ pub enum HostCommand {
         /// version does not know is refused when the command decodes.
         scope: RestoreRequest,
     },
+    /// Change the display settings; answers `Done`, and every app subscriber gets
+    /// `HostEvent::SettingsChanged`. A patch naming a key the firm's policy sets is refused
+    /// whole with `settings.locked`, and a font size out of range with `command.invalid`;
+    /// either way nothing changes.
+    SetUiSettings {
+        /// The fields to change.
+        patch: UiPatch,
+    },
 }
 
 /// What a command did. The host's receipt stores it, so a repeated `command_id` returns the same
-/// outcome. The queue commands and `RestartAgent` answer `Done`.
+/// outcome. The queue commands, `RestartAgent` and `SetUiSettings` answer `Done`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "specta", derive(specta::Type))]

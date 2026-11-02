@@ -84,36 +84,27 @@ fn the_keys_and_their_kinds_are_the_schemas() {
 }
 
 #[test]
-fn font_sizes_run_from_12_to_20() {
-    assert_eq!(FontSize::default().get(), 14);
-    for size in [12, 14, 20] {
+fn font_sizes_run_from_14_to_20() {
+    assert_eq!(FontSize::default().get(), 16);
+    for size in [14, 16, 20] {
         assert_eq!(FontSize::try_from(size).map(FontSize::get), Ok(size));
         assert_eq!(u8::from(FontSize::try_from(size).unwrap()), size);
     }
-    for size in [0, 11, 21, 255] {
+    for size in [0, 12, 13, 21, 255] {
         assert!(FontSize::try_from(size).is_err(), "{size}");
     }
 }
 
 #[test]
-fn languages_are_bcp_47_tags() {
-    assert_eq!(Language::default().as_str(), "en");
-    for tag in ["en", "en-GB", "zh-Hant-TW", "de-CH-1901", "abcdefgh-x"] {
-        let language = Language::try_from(tag.to_owned()).unwrap();
-        assert_eq!(String::from(language), tag);
+fn languages_are_the_ones_the_app_has_words_for() {
+    assert_eq!(Language::default(), Language::En);
+    for (text, language) in [("\"en\"", Language::En), ("\"hi\"", Language::Hi)] {
+        assert_eq!(serde_json::from_str::<Language>(text).unwrap(), language);
+        assert_eq!(serde_json::to_string(&language).unwrap(), text);
     }
-    for tag in [
-        "",
-        "e",
-        "1a",
-        "en_GB",
-        "en-",
-        "-en",
-        "abcdefghi",
-        "en-abcdefghi",
-        "é",
-    ] {
-        assert!(Language::try_from(tag.to_owned()).is_err(), "{tag:?}");
+    // Any other tag, a BCP 47 one included, is not a language the app has words for.
+    for text in ["\"en-GB\"", "\"fr\"", "\"EN\"", "\"\"", "1"] {
+        assert!(serde_json::from_str::<Language>(text).is_err(), "{text}");
     }
 }
 
@@ -125,6 +116,13 @@ fn each_setting_has_its_default() {
     assert_eq!(settings.matters.default_location, None);
     assert_eq!(
         serde_json::to_value(&settings.ui).unwrap(),
-        serde_json::json!({"theme": "system", "font_size": 14, "density": "comfortable", "language": "en"})
+        serde_json::json!({
+            "theme": "system",
+            "font_size": 16,
+            "density": "comfortable",
+            "language": "en",
+            "lite": "automatic",
+            "motion": "system",
+        })
     );
 }

@@ -44,7 +44,7 @@ impl ProfileHook for NoProfile {
 /// How to start a host. The data folder is `Effective::data_dir()`.
 #[non_exhaustive]
 pub struct HostConfig {
-    effective: Arc<Effective>,
+    effective: Effective,
     launcher: Arc<dyn Launcher>,
     profile: Box<dyn ProfileHook>,
     refused_folders: Vec<PathBuf>,
@@ -56,7 +56,7 @@ pub struct HostConfig {
 
 /// A `HostConfig` taken apart by the host thread.
 pub(crate) struct ConfigParts {
-    pub(crate) effective: Arc<Effective>,
+    pub(crate) effective: Effective,
     pub(crate) launcher: Arc<dyn Launcher>,
     pub(crate) profile: Box<dyn ProfileHook>,
     pub(crate) refused_folders: Vec<PathBuf>,
@@ -71,7 +71,7 @@ impl HostConfig {
     /// profile, no refused folders, the system clock and random ids.
     pub fn new(effective: Effective, launcher: Arc<dyn Launcher>) -> Self {
         Self {
-            effective: Arc::new(effective),
+            effective,
             launcher,
             profile: Box::new(NoProfile),
             refused_folders: Vec::new(),

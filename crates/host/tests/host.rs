@@ -41,6 +41,9 @@ mod permissions;
 #[path = "host/restart.rs"]
 mod restart;
 #[cfg(test)]
+#[path = "host/settings.rs"]
+mod settings;
+#[cfg(test)]
 #[path = "host/subscribe.rs"]
 mod subscribe;
 #[cfg(test)]

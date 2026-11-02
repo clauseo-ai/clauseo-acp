@@ -184,7 +184,9 @@ impl HostCommand {
             | Self::RenameThread {
                 thread: _,
                 title: _,
-            } => Ok(()),
+            }
+            // The font size's range is the settings crate's rule; the host checks it.
+            | Self::SetUiSettings { patch: _ } => Ok(()),
         }
     }
 }

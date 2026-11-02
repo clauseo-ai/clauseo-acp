@@ -30,14 +30,19 @@
 //!   and start-up reconciliation has committed. A second start on the same data folder fails
 //!   with `store.locked`.
 //! - [`HostHandle`], `Clone` and `Send`: [`HostHandle::dispatch`], [`HostHandle::query`],
-//!   [`HostHandle::subscribe`], [`HostHandle::subscribe_events`], [`HostHandle::ack`],
+//!   [`HostHandle::subscribe`], [`HostHandle::subscribe_events`],
+//!   [`HostHandle::subscribe_app`], [`HostHandle::ack`],
 //!   [`HostHandle::register_folder`], [`HostHandle::register_file`] and
 //!   [`HostHandle::shutdown`]. Each call is one request over a `bounded(256)` channel with a
 //!   `futures` oneshot for the reply. [`HostJoin::join`] waits for the thread to end.
 //! - [`Subscription`] yields [`EncodedEvent`]s: each `HostEvent` serialised once and shared by
 //!   every subscriber of the stream; [`EncodedEvent::json`] is sent on as it is and
 //!   [`EncodedEvent::decode`] gives the type back. [`EventSubscription`] yields typed
-//!   `HostEvent`s: the replay, one `CaughtUp`, then live `Events`.
+//!   `HostEvent`s: the replay, one `CaughtUp`, then live `Events`. [`AppSubscription`]
+//!   yields the app-wide events of no stream as [`EncodedEvent`]s: `SettingsChanged` today.
+//! - The display settings: `HostQuery::GetSettings` reads them and `HostCommand::SetUiSettings`
+//!   changes them through `Effective::apply_ui_patch`, on the actor; a patch naming a key policy
+//!   locks is `settings.locked`. `docs/decisions/0017-settings-over-the-wire.md` records it.
 //! - [`Error`] wraps the errors of `protocol`, `store`, `matters`, `process`, `acp`, `reducer`
 //!   and `settings`, plus `Closed` and `Internal`; [`Error::code`] gives its `ErrorCode`, and
 //!   every public call returns it as a `HostError`. After shutdown or a host panic, calls and
@@ -47,7 +52,7 @@
 //!   `HostConfig::with_patch_window_bytes`, `EncodedEvent::ptr_eq` and
 //!   `HostHandle::abort_for_test`, which ends the thread with no flush and no graceful stop.
 //! - Stage B's `limits` plugs in as a new actor input and publishes the existing
-//!   `HostEvent::AccountLimitsChanged`.
+//!   `HostEvent::AccountLimitsChanged` to app subscribers (`actor/app.rs`'s `publish`).
 //!
 //! # Invariants
 //!
@@ -119,7 +124,7 @@ pub use clock::{Clock, Now, SystemClock};
 pub use config::{HostConfig, NoProfile, ProfileHook};
 pub use encode::EncodedEvent;
 pub use error::Error;
-pub use handle::{EventSubscription, Host, HostHandle, HostJoin, Subscription};
+pub use handle::{AppSubscription, EventSubscription, Host, HostHandle, HostJoin, Subscription};
 #[cfg(feature = "test-support")]
 pub use ids::SequentialIds;
 pub use ids::{IdSource, RandomV7};

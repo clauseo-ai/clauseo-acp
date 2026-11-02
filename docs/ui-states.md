@@ -271,6 +271,7 @@ retried as they are; the others need the lawyer or a fix first. Meanings are in 
 | Matter | `ErrorCode::MatterCheckpointFailed`, `ErrorCode::MatterFileLocked`, `ErrorCode::MatterTurnRunning` | yes |
 | Matter | `ErrorCode::MatterFolderMissing`, `ErrorCode::MatterFolderRefused` | no |
 | Transport | `ErrorCode::TransportUnauthorized`, `ErrorCode::TransportTooLarge` | no |
+| Settings | `ErrorCode::SettingsLocked` | no |
 | A code from a newer Clauseo | `ErrorCode::Unknown` | no |
 
 A failed turn shows its code from `turn_failed` on the step card (section 3).

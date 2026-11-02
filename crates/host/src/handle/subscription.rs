@@ -1,7 +1,8 @@
-//! The two subscription streams a handle returns. Each reads a `bounded(1024)` channel the actor
-//! fills with `try_send`. When the channel was full the actor stops sending and raises a flag;
-//! the stream, once it has drained the channel, asks the actor to catch it up (a `Reset` for a
-//! view subscription, a refill from the store for an event subscription).
+//! The three subscription streams a handle returns. Each reads a `bounded(1024)` channel the
+//! actor fills with `try_send`. When the channel was full the actor stops sending and raises a
+//! flag; the stream, once it has drained the channel, asks the actor to catch it up (a `Reset`
+//! for a view subscription, a refill from the store for an event subscription, the current state
+//! for an app subscription).
 
 use std::pin::Pin;
 use std::sync::Arc;
@@ -40,13 +41,38 @@ impl Lag {
     }
 }
 
-/// The parts both subscription kinds hold.
+/// What a subscription follows: one stream, or the app-wide events.
+#[derive(Debug, Clone, Copy)]
+enum Topic {
+    Stream(StreamId),
+    App,
+}
+
+impl Topic {
+    /// What to tell the actor once the subscription has drained after a lag.
+    fn drained(self, id: SubId) -> Input {
+        match self {
+            Self::Stream(stream) => Input::Drained { stream, id },
+            Self::App => Input::AppDrained { id },
+        }
+    }
+
+    /// What to tell the actor when the subscription is dropped.
+    fn unsubscribed(self, id: SubId) -> Input {
+        match self {
+            Self::Stream(stream) => Input::Unsubscribed { stream, id },
+            Self::App => Input::AppUnsubscribed { id },
+        }
+    }
+}
+
+/// The parts every subscription kind holds.
 #[derive(Debug)]
 struct Feed<T> {
     items: Pin<Box<async_channel::Receiver<T>>>,
     lag: Arc<Lag>,
     actor: async_channel::Sender<Input>,
-    stream: StreamId,
+    topic: Topic,
     id: SubId,
 }
 
@@ -57,15 +83,9 @@ impl<T> Feed<T> {
             Poll::Pending => {
                 // Register first, then read the flag, so a raise between the two still wakes us.
                 self.lag.waker.register(cx.waker());
-                if self.lag.take() {
-                    let ask = Input::Drained {
-                        stream: self.stream,
-                        id: self.id,
-                    };
-                    if self.actor.try_send(ask).is_err() {
-                        // The host is gone: nothing more will come.
-                        return Poll::Ready(None);
-                    }
+                if self.lag.take() && self.actor.try_send(self.topic.drained(self.id)).is_err() {
+                    // The host is gone: nothing more will come.
+                    return Poll::Ready(None);
                 }
                 Poll::Pending
             }
@@ -76,10 +96,7 @@ impl<T> Feed<T> {
 impl<T> Drop for Feed<T> {
     fn drop(&mut self) {
         // The host may already be gone; then there is nobody to tell.
-        let _gone = self.actor.try_send(Input::Unsubscribed {
-            stream: self.stream,
-            id: self.id,
-        });
+        let _gone = self.actor.try_send(self.topic.unsubscribed(self.id));
     }
 }
 
@@ -96,14 +113,28 @@ pub struct Subscription(Feed<EncodedEvent>);
 #[derive(Debug)]
 pub struct EventSubscription(Feed<HostEvent>);
 
+/// An app subscription: the app-wide `HostEvent`s that belong to no stream, as
+/// [`EncodedEvent`]s, each serialised once and shared by every app subscriber. Today that is
+/// `SettingsChanged`, after every change of the settings; the matter list, summaries of threads
+/// no window has open, notices and `AccountLimitsChanged` are to come here too. No stream's
+/// patches or envelopes ever come here, and no app event goes to a stream's subscribers.
+///
+/// It starts with nothing: subscribe first, then read the current state (`GetSettings`); the
+/// host answers calls in order, so no change falls between the two. A subscriber whose channel
+/// is full gets nothing more until it has drained it, then gets the current state at once (one
+/// `SettingsChanged`), so it misses steps but never ends on a stale view. Ends when the host
+/// stops; dropping it unsubscribes.
+#[derive(Debug)]
+pub struct AppSubscription(Feed<EncodedEvent>);
+
 /// The actor's end of a new subscription: the sender it fills and the shared flag.
 pub(crate) struct Sink<T> {
     pub(crate) items: async_channel::Sender<T>,
     pub(crate) lag: Arc<Lag>,
 }
 
-/// Builds the two ends of a subscription of `stream` with id `id`.
-fn feed<T>(actor: async_channel::Sender<Input>, stream: StreamId, id: SubId) -> (Feed<T>, Sink<T>) {
+/// Builds the two ends of a subscription of `topic` with id `id`.
+fn feed<T>(actor: async_channel::Sender<Input>, topic: Topic, id: SubId) -> (Feed<T>, Sink<T>) {
     let (tx, rx) = async_channel::bounded(SUBSCRIPTION_CAPACITY);
     let lag = Arc::new(Lag::default());
     let sink = Sink {
@@ -114,7 +145,7 @@ fn feed<T>(actor: async_channel::Sender<Input>, stream: StreamId, id: SubId) -> 
         items: Box::pin(rx),
         lag,
         actor,
-        stream,
+        topic,
         id,
     };
     (feed, sink)
@@ -127,7 +158,18 @@ impl Subscription {
         stream: StreamId,
         id: SubId,
     ) -> (Self, Sink<EncodedEvent>) {
-        let (feed, sink) = feed(actor, stream, id);
+        let (feed, sink) = feed(actor, Topic::Stream(stream), id);
+        (Self(feed), sink)
+    }
+}
+
+impl AppSubscription {
+    /// An app subscription and the actor's end of it.
+    pub(crate) fn new(
+        actor: async_channel::Sender<Input>,
+        id: SubId,
+    ) -> (Self, Sink<EncodedEvent>) {
+        let (feed, sink) = feed(actor, Topic::App, id);
         (Self(feed), sink)
     }
 }
@@ -139,12 +181,20 @@ impl EventSubscription {
         stream: StreamId,
         id: SubId,
     ) -> (Self, Sink<HostEvent>) {
-        let (feed, sink) = feed(actor, stream, id);
+        let (feed, sink) = feed(actor, Topic::Stream(stream), id);
         (Self(feed), sink)
     }
 }
 
 impl Stream for Subscription {
+    type Item = EncodedEvent;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<EncodedEvent>> {
+        self.get_mut().0.poll_next(cx)
+    }
+}
+
+impl Stream for AppSubscription {
     type Item = EncodedEvent;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<EncodedEvent>> {

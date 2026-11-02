@@ -48,16 +48,46 @@ source: crates/settings/src/schema/tests.rs
       ]
     },
     "FontSize": {
-      "default": 14,
+      "default": 16,
       "description": "A text size, in points.",
       "maximum": 20,
-      "minimum": 12,
+      "minimum": 14,
       "type": "integer"
     },
     "Language": {
-      "default": "en",
-      "description": "A BCP 47 language tag, such as en or en-GB.",
-      "type": "string"
+      "description": "The app's language: one the app has words for.",
+      "oneOf": [
+        {
+          "const": "en",
+          "description": "English.",
+          "type": "string"
+        },
+        {
+          "const": "hi",
+          "description": "Hindi.",
+          "type": "string"
+        }
+      ]
+    },
+    "Lite": {
+      "description": "Whether the app runs light: fewer effects, for slow machines.",
+      "oneOf": [
+        {
+          "const": "automatic",
+          "description": "The app decides from the machine.",
+          "type": "string"
+        },
+        {
+          "const": "on",
+          "description": "Always light.",
+          "type": "string"
+        },
+        {
+          "const": "off",
+          "description": "Never light.",
+          "type": "string"
+        }
+      ]
     },
     "MattersSettings": {
       "description": "The `matters` section.",
@@ -121,6 +151,26 @@ source: crates/settings/src/schema/tests.rs
       },
       "type": "object"
     },
+    "Motion": {
+      "description": "Whether the app animates.",
+      "oneOf": [
+        {
+          "const": "system",
+          "description": "As the OS's reduce-motion setting says.",
+          "type": "string"
+        },
+        {
+          "const": "reduce",
+          "description": "Little or no animation.",
+          "type": "string"
+        },
+        {
+          "const": "full",
+          "description": "Full animation.",
+          "type": "string"
+        }
+      ]
+    },
     "Theme": {
       "description": "The colour theme.",
       "oneOf": [
@@ -151,13 +201,23 @@ source: crates/settings/src/schema/tests.rs
         },
         "font_size": {
           "$ref": "#/$defs/FontSize",
-          "default": 14,
+          "default": 16,
           "description": "The text size, in points."
         },
         "language": {
           "$ref": "#/$defs/Language",
           "default": "en",
           "description": "The app's language."
+        },
+        "lite": {
+          "$ref": "#/$defs/Lite",
+          "default": "automatic",
+          "description": "Whether the app drops its heavier effects, or decides from the machine."
+        },
+        "motion": {
+          "$ref": "#/$defs/Motion",
+          "default": "system",
+          "description": "Whether the app animates, or follows the OS's reduce-motion setting."
         },
         "theme": {
           "$ref": "#/$defs/Theme",
@@ -197,8 +257,10 @@ source: crates/settings/src/schema/tests.rs
       "$ref": "#/$defs/UiSettings",
       "default": {
         "density": "comfortable",
-        "font_size": 14,
+        "font_size": 16,
         "language": "en",
+        "lite": "automatic",
+        "motion": "system",
         "theme": "system"
       },
       "description": "How the app looks. The webview changes these only through a `UiPatch`."

@@ -64,6 +64,7 @@ as `yes` or `no`. The meaning is also each variant's doc comment in `error_code.
 | `matter.turn_running` | A turn is running in the matter, so undo or restore waits. | yes | host, matters |
 | `transport.unauthorized` | The client is not allowed to make this call. | no | transport_ws, desktop |
 | `transport.too_large` | The message is larger than the transport accepts. | no | transport_ws, desktop |
+| `settings.locked` | The change names a setting that the firm's policy sets, so the lawyer cannot change it; nothing was changed. | no | host (`SetUiSettings`; decision record 0017) |
 | `unknown` | A code from a newer Clauseo that this version does not know. Never produced here. | no | decoding only |
 
 Judgement calls on retryable: `agent.launch_failed` and `agent.exited` are retryable because a new

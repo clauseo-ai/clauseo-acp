@@ -26,7 +26,9 @@
 mod tests;
 
 use crate::policy::{Kind, kind_of};
-use crate::schema::{AgentLaunch, Density, FontSize, Language, McpServerLaunch, Settings, Theme};
+use crate::schema::{
+    AgentLaunch, Density, FontSize, Language, Lite, McpServerLaunch, Motion, Settings, Theme,
+};
 use crate::warning::{Origin, Warning, WarningKind};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -35,13 +37,15 @@ use std::path::{Path, PathBuf};
 
 /// Every key with a fixed name, and its kind. An agent's key is `agents.<id>`, an object.
 /// `schema::tests::the_keys_and_their_kinds_are_the_schemas` holds this to the schema.
-pub(crate) const KEYS: [(&str, Kind); 6] = [
+pub(crate) const KEYS: [(&str, Kind); 8] = [
     ("matters.default_location", Kind::String),
     ("mcp.servers", Kind::Object),
     ("ui.theme", Kind::String),
     ("ui.font_size", Kind::Number),
     ("ui.density", Kind::String),
     ("ui.language", Kind::String),
+    ("ui.lite", Kind::String),
+    ("ui.motion", Kind::String),
 ];
 
 /// The keys that decide what an agent can reach. A policy source that cannot be read locks each
@@ -76,6 +80,8 @@ pub(crate) enum Leaf {
     FontSize(FontSize),
     Density(Density),
     Language(Language),
+    Lite(Lite),
+    Motion(Motion),
     /// A known key whose value does not type, or that a policy source refused. Applied, it puts
     /// the key back at its default; for `agents.<id>`, the entry for that id is dropped. A
     /// policy also locks the key (fail closed, Rohan, 2026-10-31).
@@ -237,6 +243,8 @@ impl Leaf {
             "ui.font_size" => typed_value(key, value).map(Leaf::FontSize),
             "ui.density" => typed_value(key, value).map(Leaf::Density),
             "ui.language" => typed_value(key, value).map(Leaf::Language),
+            "ui.lite" => typed_value(key, value).map(Leaf::Lite),
+            "ui.motion" => typed_value(key, value).map(Leaf::Motion),
             _ => match agent_id(key) {
                 Some(id) => agent(key, id, value, unknown),
                 None => Err(WarningKind::UnknownKey {
@@ -256,6 +264,8 @@ impl Leaf {
             Leaf::FontSize(_) => "ui.font_size".to_owned(),
             Leaf::Density(_) => "ui.density".to_owned(),
             Leaf::Language(_) => "ui.language".to_owned(),
+            Leaf::Lite(_) => "ui.lite".to_owned(),
+            Leaf::Motion(_) => "ui.motion".to_owned(),
             Leaf::Refused(key) => key.clone(),
         }
     }
@@ -278,6 +288,8 @@ impl Leaf {
             Leaf::FontSize(size) => settings.ui.font_size = size,
             Leaf::Density(density) => settings.ui.density = density,
             Leaf::Language(language) => settings.ui.language = language,
+            Leaf::Lite(lite) => settings.ui.lite = lite,
+            Leaf::Motion(motion) => settings.ui.motion = motion,
             Leaf::Refused(key) => reset(&key, settings),
         }
     }
@@ -292,6 +304,8 @@ fn reset(key: &str, settings: &mut Settings) {
         "ui.font_size" => settings.ui.font_size = FontSize::default(),
         "ui.density" => settings.ui.density = Density::default(),
         "ui.language" => settings.ui.language = Language::default(),
+        "ui.lite" => settings.ui.lite = Lite::default(),
+        "ui.motion" => settings.ui.motion = Motion::default(),
         _ => {
             if let Some(id) = agent_id(key) {
                 settings.agents.remove(id);

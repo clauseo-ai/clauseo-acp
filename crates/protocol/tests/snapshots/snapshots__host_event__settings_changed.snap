@@ -1,0 +1,19 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "HostEvent::SettingsChanged(SettingsView\n{\n    ui: UiSettings\n    {\n        theme: Theme::Dark, font_size: 18, language: Language::Hi, lite:\n        Lite::Automatic, motion: Motion::Reduce,\n    }, locked: vec![\"ui.font_size\".to_owned(), \"ui.theme\".to_owned()],\n})"
+---
+{
+  "settings_changed": {
+    "ui": {
+      "theme": "dark",
+      "font_size": 18,
+      "language": "hi",
+      "lite": "automatic",
+      "motion": "reduce"
+    },
+    "locked": [
+      "ui.font_size",
+      "ui.theme"
+    ]
+  }
+}

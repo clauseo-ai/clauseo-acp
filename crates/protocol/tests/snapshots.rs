@@ -21,12 +21,53 @@ pub mod examples;
 pub mod entries;
 
 use clauseo_protocol::{
-    AccountLimits, AccountRef, AgentKind, AppendTarget, AtLimitBehaviour, Billing, ConfigValue,
-    ContentBlock, Cursor, DeliveryRequest, DomainEvent, ElicitationResponse, EntryId, Envelope,
-    ErrorCode, FileChoice, FileDecision, HostCommand, HostError, HostEvent, LimitSource,
-    LimitWindow, MatterSource, PatchBatch, PlanLabel, PromptBlock, RestoreRequest, StreamHeader,
-    StreamId, TextOrBlob, Timestamp, ToolCallContent, ToolLocation, ViewEntry, ViewEpoch,
-    ViewPatch, ViewPatchBody, ViewWindow, WindowKind,
+    AccountLimits,
+    AccountRef,
+    AgentKind,
+    AppendTarget,
+    AtLimitBehaviour,
+    Billing,
+    ConfigValue,
+    ContentBlock,
+    Cursor,
+    DeliveryRequest,
+    DomainEvent,
+    ElicitationResponse,
+    EntryId,
+    Envelope,
+    ErrorCode,
+    FileChoice,
+    FileDecision,
+    HostCommand,
+    HostError,
+    HostEvent,
+    // The display settings.
+    Language,
+    LimitSource,
+    LimitWindow,
+    Lite,
+    MatterSource,
+    Motion,
+    PatchBatch,
+    PlanLabel,
+    PromptBlock,
+    RestoreRequest,
+    SettingsView,
+    StreamHeader,
+    StreamId,
+    TextOrBlob,
+    Theme,
+    Timestamp,
+    ToolCallContent,
+    ToolLocation,
+    UiPatch,
+    UiSettings,
+    ViewEntry,
+    ViewEpoch,
+    ViewPatch,
+    ViewPatchBody,
+    ViewWindow,
+    WindowKind,
 };
 use entries::{agent_text_entry, every_entry, header_entry};
 use examples::{acp_unsupported_block, every_event};
@@ -260,6 +301,14 @@ mod host_command {
             checkpoint: checkpoint_id(17),
             scope: RestoreRequest::Files { paths: vec![path("a.docx")] },
         };
+        SetUiSettings => set_ui_settings: HostCommand::SetUiSettings {
+            patch: UiPatch {
+                theme: Some(Theme::Dark),
+                font_size: Some(18),
+                lite: Some(Lite::On),
+                ..UiPatch::default()
+            },
+        };
     } }
 }
 
@@ -345,6 +394,16 @@ mod host_event {
         AccountLimitsChanged => account_limits_changed: HostEvent::AccountLimitsChanged(
             account_limits(),
         );
+        SettingsChanged => settings_changed: HostEvent::SettingsChanged(SettingsView {
+            ui: UiSettings {
+                theme: Theme::Dark,
+                font_size: 18,
+                language: Language::Hi,
+                lite: Lite::Automatic,
+                motion: Motion::Reduce,
+            },
+            locked: vec!["ui.font_size".to_owned(), "ui.theme".to_owned()],
+        });
     } }
 }
 

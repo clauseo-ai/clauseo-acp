@@ -1,6 +1,6 @@
-//! Queries: answered from host memory (`ListMatters`, `ListThreads`), a loaded stream
-//! (`PageEntries`), a loaded stream and then the matter's thread (`CompareVersions`,
-//! `PreviewRestore`) or a store read on a task of its own (`ReadBlob`).
+//! Queries: answered from host memory (`ListMatters`, `ListThreads`, `GetSettings`), a
+//! loaded stream (`PageEntries`), a loaded stream and then the matter's thread
+//! (`CompareVersions`, `PreviewRestore`) or a store read on a task of its own (`ReadBlob`).
 
 use clauseo_protocol::{
     CheckpointId, CompactString, ErrorCode, HostQuery, MatterId, MatterSummary, Principal,
@@ -95,6 +95,10 @@ pub(super) fn query(
                 scope: scope.clone(),
             };
             matter_query(actor, matter, [checkpoint, checkpoint], job, reply);
+        }
+        HostQuery::GetSettings => {
+            let view = super::settings::view(&actor.effective);
+            let _gone = reply.send(Ok(QueryResult::Settings(view)));
         }
         HostQuery::ReadBlob { hash, offset, len } => {
             let store = actor.store.clone();
