@@ -32,6 +32,27 @@ export interface Row {
   WorkingSetPrivate: number | null;
 }
 
+/** The arguments of a Windows command line, without the quotes around each. */
+export function argumentsOf(commandLine: string): string[] {
+  return commandLine
+    .split(/\s+/)
+    .filter((part) => part !== "")
+    .map((part) => part.replace(/^"(.*)"$/, "$1"));
+}
+
+/**
+ * WebView2's browser processes in `tree`: msedgewebview2.exe without `--type=` (the others are its
+ * renderer, GPU and utility processes). A launch that started its own browser has exactly one.
+ */
+export function browserProcesses(tree: readonly TreeProcess[]): TreeProcess[] {
+  return tree.filter(
+    (entry) =>
+      entry.name === "msedgewebview2.exe" &&
+      entry.commandLine !== null &&
+      !argumentsOf(entry.commandLine).some((arg) => arg.startsWith("--type=")),
+  );
+}
+
 /** The tree's memory, summed. */
 export interface TreeMemory {
   /** Null if any process lacks the counter. */

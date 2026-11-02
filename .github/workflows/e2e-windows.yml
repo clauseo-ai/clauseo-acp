@@ -254,7 +254,9 @@ jobs:
           retention-days: 1
 
   # The speed scoreboard (R13): one warm-up and three measured plays of fake_agent's scoreboard
-  # session, each a fresh launch, normal mode (ui/e2e/app-windows/scoreboard.spec.ts). It plays
+  # session, each a fresh launch, normal mode (ui/e2e/app-windows/scoreboard.spec.ts). Start-up is
+  # a warm start: the warm-up makes one WebView2 profile and the measured plays reuse it (#173);
+  # the smoke tests keep a fresh profile per launch, a first launch. It plays
   # smoke's app and fake_agent (the artifact e2e-app-x86_64-pc-windows-msvc), so it builds nothing:
   # pull requests and main measure the same LTO-off release build, and the comment compares like
   # with like. scoreboard.yml plays a full-LTO build nightly, on demand and on pull requests labelled

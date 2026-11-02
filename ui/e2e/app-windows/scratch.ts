@@ -3,7 +3,7 @@
 // `matters.default_location` is the scratch `matters/` folder, where the host makes its Scratch
 // matter, and, with a scenario, whose `agents.claude-acp` starts `fake_agent` on it), the matter folder
 // (`E2E_MATTER_DIR`, which the e2e build's pick_folder returns instead of opening the dialog), and
-// one WebView2 data folder per launch.
+// the WebView2 data folder of each launch: new per launch, or one per worker reused (`Profile`).
 // Pure file work, no app: scratch.test.ts runs it on any OS.
 //
 //   E2E_FAKE_AGENT    absolute path to fake_agent(.exe); default: beside E2E_APP
@@ -151,6 +151,106 @@ export function webviewFolder(scratch: Scratch, n: number): string {
   const folder = join(scratch.root, `webview-${n}`);
   mkdirSync(folder);
   return folder;
+}
+
+/**
+ * Which WebView2 profile (`WEBVIEW2_USER_DATA_FOLDER`) a launch gets:
+ * - `fresh`: a new, empty folder for every launch, as on a user's first launch (the default; the
+ *   smoke tests and every spec but the scoreboard's);
+ * - `warm`: one folder per worker, made by its first launch and reused by every later one, as on a
+ *   later launch of an installed app (the scoreboard, whose warm-up play makes it: #173).
+ */
+export type Profile = "fresh" | "warm";
+
+/** The WebView2 profile reused by every `warm` launch of one worker. */
+export interface WarmProfile {
+  /** The folder; made on the first call, the same on every later one. */
+  folder(): string;
+  /** The launches started on it so far. */
+  launches: number;
+}
+
+/** A {@link WarmProfile} under a new temporary folder in `base`, made only when first asked for. */
+export function warmProfile(base = tmpdir()): WarmProfile & { remove(): void } {
+  let folder: string | null = null;
+  return {
+    launches: 0,
+    folder() {
+      folder ??= realpathSync.native(mkdtempSync(join(base, "clauseo-e2e-webview-")));
+      return folder;
+    },
+    remove() {
+      if (folder !== null) {
+        rmSync(folder, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+      }
+    },
+  };
+}
+
+/** The WebView2 data folder of one launch, and which launch on that folder it is (1 for the first). */
+export interface LaunchProfile {
+  profile: Profile;
+  folder: string;
+  /** 1 when the folder is new (always, for `fresh`); above 1 when an earlier launch left it. */
+  launch: number;
+}
+
+/**
+ * The WebView2 data folder for launch `n` on `scratch`: a new `webview-<n>` folder for `fresh`, the
+ * worker's one folder for `warm`. Counts the launch on `warm`.
+ */
+export function launchProfile(
+  profile: Profile,
+  scratch: Scratch,
+  n: number,
+  warm: WarmProfile,
+): LaunchProfile {
+  if (profile === "fresh") return { profile, folder: webviewFolder(scratch, n), launch: 1 };
+  warm.launches += 1;
+  return { profile, folder: warm.folder(), launch: warm.launches };
+}
+
+/** The file WebView2 writes its DevTools port to, in its data folder. */
+export function portFile(userDataFolder: string): string {
+  return join(userDataFolder, "EBWebView", "DevToolsActivePort");
+}
+
+/**
+ * The lock Chromium's browser process holds on its profile while it runs: opened without delete
+ * sharing and with delete-on-close (Chromium's process_singleton_win.cc), so it exists exactly as
+ * long as a browser runs on the folder, and goes even when the process is killed.
+ */
+export function profileLock(userDataFolder: string): string {
+  return join(userDataFolder, "EBWebView", "lockfile");
+}
+
+/** How long a reused profile may stay locked by the launch before it. */
+export const PROFILE_FREE_TIMEOUT_MS = 15_000;
+const PROFILE_FREE_RETRY_MS = 100;
+
+/**
+ * Readies a reused WebView2 data folder for the next launch: waits until no browser process holds
+ * it (its {@link profileLock} gone), since a new launch would otherwise join the old browser
+ * process instead of starting its own, then deletes the last launch's port file, so the port the
+ * fixture reads is always the new launch's. Throws when the lock stays past `timeoutMs`.
+ */
+export async function readyReusedProfile(
+  userDataFolder: string,
+  timeoutMs = PROFILE_FREE_TIMEOUT_MS,
+): Promise<void> {
+  const lock = profileLock(userDataFolder);
+  const deadline = performance.now() + timeoutMs;
+  while (existsSync(lock)) {
+    if (performance.now() >= deadline) {
+      throw new Error(
+        `a browser process still holds the reused WebView2 profile ${userDataFolder} ` +
+          `${timeoutMs} ms after its last launch ended (${lock} is there)`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, PROFILE_FREE_RETRY_MS));
+  }
+  // force: no port file is fine (the launch before never wrote one); a file still held throws.
+  rmSync(portFile(userDataFolder), { force: true });
 }
 
 /**

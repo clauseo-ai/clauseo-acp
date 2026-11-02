@@ -43,10 +43,18 @@ export const BLANK_APP_IDLE_MB = 72_118_272 / BYTES_PER_MB;
 /**
  * Every metric the scoreboard reports, in the comment's order. Each `id` is a budgets.toml row
  * (the comment compares with `<id>_vm` when that row exists, render.ts), except the ones marked
- * `reportOnly`, which have no budget and must have no row (metrics.test.ts checks both).
+ * `reportOnly`, which have no budget and must have no row (metrics.test.ts checks both). A start-up
+ * metric says which start it measures in `start`, and in its id and label (metrics.test.ts):
+ * `warm`, a later launch of the installed app (on Windows a WebView2 profile the warm-up launch
+ * made, reused), or `cold`, a first launch (a fresh profile per launch). render.ts explains both.
  */
 export const METRICS = [
-  { id: "warm_start_interactive", label: "Start-up to interactive", unit: "ms" },
+  {
+    id: "warm_start_interactive",
+    label: "Start-up to interactive, warm",
+    unit: "ms",
+    start: "warm",
+  },
   { id: "first_token_on_screen", label: "Send to first token on screen", unit: "ms" },
   { id: "chunk_to_paint_p50", label: "Chunk to paint, p50", unit: "ms" },
   { id: "chunk_to_paint_p95", label: "Chunk to paint, p95", unit: "ms" },
@@ -86,11 +94,20 @@ export const METRICS = [
   label: string;
   unit: "ms" | "count" | "MB" | "ratio";
   reportOnly?: true;
+  start?: Start;
 }[];
+
+/** Which start a start-up metric measures: a later launch (`warm`) or a first one (`cold`). */
+export type Start = "warm" | "cold";
 
 export type Metric = (typeof METRICS)[number];
 export type MetricId = Metric["id"];
 export type Unit = Metric["unit"];
+
+/** The start `metric` measures, or null for a metric that is not about start-up. */
+export function startOf(metric: Metric): Start | null {
+  return "start" in metric ? metric.start : null;
+}
 
 /** Whether `metric` reports without a budget. */
 export function isReportOnly(metric: Metric): boolean {

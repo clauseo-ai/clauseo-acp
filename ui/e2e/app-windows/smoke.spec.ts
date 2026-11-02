@@ -6,7 +6,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, type Response } from "@playwright/test";
 import { test } from "./fixture.ts";
-import { processTree } from "./memory.ts";
+import { argumentsOf, browserProcesses, processTree } from "./memory.ts";
 
 /**
  * The features in wry's own browser arguments: a copy of `WRY_DEFAULT_ARGS` in
@@ -37,14 +37,6 @@ type Reply = { id: number; lines: [number, string][][] | null };
 
 /** The test's handle on the worker it starts, and what the page's CSP refused meanwhile. */
 type Started = { __clauseoWorker?: Worker; __clauseoRefused?: string[] };
-
-/** The arguments of a command line, without the quotes around each. */
-function argumentsOf(commandLine: string): string[] {
-  return commandLine
-    .split(/\s+/)
-    .filter((part) => part !== "")
-    .map((part) => part.replace(/^"(.*)"$/, "$1"));
-}
 
 // One test, so the app starts once; each step names what failed.
 /** What the page's CSP refused since it loaded, as the init script below records it. */
@@ -111,14 +103,7 @@ test("the blank app starts, renders #app-root and runs as the e2e build says", a
   });
 
   await test.step("the browser process got the e2e build's arguments", async () => {
-    // The browser process is the one msedgewebview2.exe without --type=; the others are its
-    // renderer, GPU and utility processes.
-    const browsers = (await processTree(app.pid)).filter(
-      (entry) =>
-        entry.name === "msedgewebview2.exe" &&
-        entry.commandLine !== null &&
-        !argumentsOf(entry.commandLine).some((arg) => arg.startsWith("--type=")),
-    );
+    const browsers = browserProcesses(await processTree(app.pid));
     expect(browsers).toHaveLength(1);
     const args = argumentsOf(browsers[0]?.commandLine ?? "");
     // Port 0: the browser picks the port and writes it to DevToolsActivePort.

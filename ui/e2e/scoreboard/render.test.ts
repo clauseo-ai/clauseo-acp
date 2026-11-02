@@ -9,6 +9,7 @@ import { parseBudgets, parseReducerSummaries } from "./inputs.ts";
 import { METRICS, parseResult } from "./metrics.ts";
 import {
   BUDGET_NOTE,
+  START_NOTE,
   MARKER,
   budgetOf,
   change,
@@ -176,7 +177,7 @@ test("the Budget column names a VM limit, and report-only rows say so", () => {
     "| Long animation frames while streaming | 9 | 0 | +9 | 8 (VM) | ⚠️ over budget, more than 10% worse than main |",
   );
   expect(row(body, "Dropped frames while streaming, per 10 s")).toContain("| 100 (VM) |  |");
-  expect(row(body, "Start-up to interactive")).toContain("| 800 ms |");
+  expect(row(body, "Start-up to interactive, warm")).toContain("| 800 ms |");
   expect(row(body, "React commits per frame while streaming, in the app")).toBe(
     "| React commits per frame while streaming, in the app | 1.3 | not measured | – | report only |  |",
   );
@@ -237,4 +238,26 @@ test("a link is written only for an https URL without Markdown in it", () => {
   const body = renderComment(value);
   expect(body).toContain("main from its last successful run at an unknown commit");
   expect(body).not.toContain("javascript:");
+});
+
+test("each table says its start-up rows measure a warm start, and how, per OS", () => {
+  const body = renderComment(input());
+  const windows = body.slice(body.indexOf("### Windows"), body.indexOf("### macOS"));
+  const macos = body.slice(body.indexOf("### macOS"), body.indexOf("### Reducer"));
+  // Each OS's note under its own table, once, and not under the other.
+  expect(windows.split(START_NOTE.windows)).toHaveLength(2);
+  expect(macos.split(START_NOTE.macos)).toHaveLength(2);
+  expect(windows).not.toContain(START_NOTE.macos);
+  expect(macos).not.toContain(START_NOTE.windows);
+  // The row itself is labelled, so a reader of the table alone sees which start it is.
+  expect(row(windows, "Start-up to interactive, warm")).toContain("| 800 ms |");
+  // Windows: the profile the warm-up made, reused; a cold row would be a fresh profile per launch.
+  expect(START_NOTE.windows).toContain("`WEBVIEW2_USER_DATA_FOLDER`");
+  expect(START_NOTE.windows).toContain("reuse");
+  expect(START_NOTE.windows).toMatch(
+    /cold row would measure a first launch, on a fresh profile per launch/,
+  );
+  // macOS: no profile to set; the meaning matches Windows'.
+  expect(START_NOTE.macos).toContain("WKWebView has no profile folder");
+  expect(START_NOTE.macos).toContain("later launch");
 });
