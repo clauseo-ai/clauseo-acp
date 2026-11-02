@@ -8,6 +8,7 @@
   --s1: 4px;
   --s1-5: 6px;
   --s2: 8px;
+  --s2-5: 10px; /* the composer's words from its rounded edge when nothing stands before them */
   --s3: 12px;
   --s4: 16px;
   --s5: 20px;

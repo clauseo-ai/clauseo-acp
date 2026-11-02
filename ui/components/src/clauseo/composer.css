@@ -152,6 +152,11 @@
     height: calc(var(--lh-field) * var(--k));
     margin: 0;
   }
+  /* with no Add papers before it, the words stand clear of the well's rounded edge: 6 px of the well and 10 here,
+     the corner's own 16 */
+  .room-field:not(:has(.room-field-add)) textarea {
+    padding-left: var(--s2-5);
+  }
   .room-field textarea::placeholder {
     @apply font-ui text-muted;
   }
