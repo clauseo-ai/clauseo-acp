@@ -35,6 +35,9 @@
 //!   as an agent names it, resolved into the folder by [`matter_path_in`]. The host asks it
 //!   before letting an agent write a file.
 //! - [`scan`]: what importing a folder would take ([`ScanReport`]), before any write.
+//! - [`scan_folder`]: the folder scan before a matter, by the import's walk and rules, with
+//!   running counts and the file reached ([`ScanProgress`]) and its totals ([`FolderScan`],
+//!   [`FolderTotals`]); [`place`]: where a folder lives ([`Place`]: local, network, synced).
 //! - Inputs the host passes, so nothing depends on the machine: [`Settings`] (the matters root,
 //!   the refused trees, [`Limits`], [`Retention`], the [`PlaceholderProbe`]), [`NewMatter`] (ids,
 //!   `created_at`, [`Marker`]), [`TurnMeta`], the refused-folder list, a progress callback and a
@@ -78,8 +81,8 @@
 //!
 //! `protocol` (ids, `FileChange`, `SkippedFile`, error codes), `gix` (features `index`,
 //! `revision`, `sha1`), `serde` and `serde_json` (`matter.json`), `tracing`, `dunce`; `nix` on
-//! macOS for the sync calls; `windows` (`Win32_Storage_FileSystem`) on Windows to hide
-//! `.clauseo`.
+//! macOS for the sync calls and `statfs` (features `fs`, `mount`); `windows`
+//! (`Win32_Storage_FileSystem`) on Windows to hide `.clauseo` and to tell a network drive.
 //!
 //! # Start reading
 //!
@@ -99,12 +102,14 @@ mod checkpoint;
 mod compare;
 mod diff;
 mod error;
+mod folder_scan;
 mod fsync;
 mod history;
 mod locks;
 mod matter;
 mod no_download;
 mod papers;
+mod place;
 mod probe;
 mod refuse;
 mod restore;
@@ -121,9 +126,11 @@ mod write;
 mod writeback;
 
 pub use error::{Error, MissingReason, Refusal};
+pub use folder_scan::{FolderScan, FolderTotals, ScanProgress, scan_folder};
 pub use locks::{HeldOpen, held_open, held_open_at, matter_path_in};
 pub use matter::Matter;
 pub use papers::{Paper, PaperList};
+pub use place::{Place, place};
 pub use probe::{OsProbe, PlaceholderProbe};
 pub use refuse::{check_place, same_or_nested};
 pub use scan::scan;

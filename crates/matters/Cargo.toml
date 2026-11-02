@@ -19,11 +19,13 @@ tracing = { workspace = true }
 # clippy.toml bans std's canonicalize in favour of dunce's, for the refused-folder check.
 dunce = { workspace = true }
 
-# The durability sequence: plain fsync, F_BARRIERFSYNC and one F_FULLFSYNC per checkpoint.
+# The durability sequence: plain fsync, F_BARRIERFSYNC and one F_FULLFSYNC per checkpoint;
+# mount: `MNT_LOCAL` in `statfs`'s flags, for a folder on a network drive (place.rs).
 [target.'cfg(target_os = "macos")'.dependencies]
-nix = { workspace = true, features = ["fs"] }
+nix = { workspace = true, features = ["fs", "mount"] }
 
-# `SetFileAttributesW`, to hide `.clauseo` (write/windows.rs); the workspace's one `windows` line.
+# `SetFileAttributesW`, to hide `.clauseo` (write/windows.rs), and `GetVolumePathNameW` with
+# `GetDriveTypeW` for a network drive (place/windows.rs); the workspace's one `windows` line.
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = ["Win32_Storage_FileSystem"] }
 
