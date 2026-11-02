@@ -1,0 +1,22 @@
+[package]
+name = "clauseo-sandbox"
+version = "0.1.0"
+description = "The agent jail: the policy, the link scan, tier detection, the denial types and the per-OS launchers."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+clauseo-protocol = { path = "../protocol" }
+clauseo-process = { path = "../process" }
+thiserror = { workspace = true }
+# Denials print as JSON lines in the examples and travel to `host` (R18).
+serde = { workspace = true, features = ["derive"] }
+
+[dev-dependencies]
+# The denials' JSON shape.
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

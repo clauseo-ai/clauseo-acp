@@ -986,6 +986,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "clauseo-sandbox"
+version = "0.1.0"
+dependencies = [
+ "clauseo-process",
+ "clauseo-protocol",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "clauseo-settings"
 version = "0.1.0"
 dependencies = [
