@@ -339,8 +339,15 @@ function Marker({ id, entry }: { id: EntryId; entry: MarkerEntry }) {
 }
 
 /** One transcript row, by entry id. Memoized: the list renders its items again when an entry is added, and a row whose
- * id and stream are the same must not render with it. */
-export const Row = memo(function Row({ id, stream }: { id: EntryId; stream: StreamId }) {
+ * id and stream are the same must not render with it. Marked pure: the room build doesn't use R12's window, so this
+ * call must not keep the module in it; U5 deletes the file. */
+export const Row = /* @__PURE__ */ memo(function Row({
+  id,
+  stream,
+}: {
+  id: EntryId;
+  stream: StreamId;
+}) {
   const entry = useEntry(useViewStore(), stream, id);
   if (entry === undefined) return null;
   switch (kindOf(entry)) {
