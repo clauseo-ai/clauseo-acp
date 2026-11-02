@@ -1,0 +1,812 @@
+# Release builds: one commit becomes every installer, the updater's files, latest.json and
+# SHA256SUMS.txt. docs/decisions/0035-release-builds.md records why it is built this way.
+#
+# Three modes, which `check` decides from what started the run:
+# - release: a pushed tag v<X.Y.Z> on a commit on main. Builds under the environment `release`
+#   and leaves a draft GitHub Release; `publish` waits for Rohan's approval (environment
+#   `release-publish`), refuses unless every DMG is notarised and stapled, then publishes it.
+# - test: a pushed tag test-v<X.Y.Z> on a commit of a release-test/* branch. Builds with the
+#   `e2e` feature under `release-test`, signs the updater files with the throwaway test key, and
+#   makes a public pre-release (a draft's assets need a signed-in download) for the updater's
+#   check by hand.
+# - dry: workflow_dispatch, from any ref (`gh workflow run release.yml --ref <branch>`). No
+#   environment and no secret: each job that signs makes a throwaway updater key with a random
+#   password in its own runner, and nothing is published. The assets end up in the run's artifact
+#   release-assets, with latest.json and SHA256SUMS.txt.
+# Nothing else starts this workflow: never a pull request, so never a fork's.
+#
+# - The app's version lives in crates/desktop/Cargo.toml and tauri.conf.json (the desktop test
+#   tests/version.rs keeps them equal); a tag must name it. No version of a tool is written here:
+#   Rust comes from rust-toolchain.toml, pnpm from "packageManager", Node from "engines.node" in
+#   ui/package.json, the Tauri CLI from ui/pnpm-lock.yaml.
+# - Every action is pinned by commit SHA, with its tag in a comment; every job has its own
+#   `permissions:`; each secret is set on the one step that uses it, never on a job. Dependencies
+#   install with --frozen-lockfile and `cargo fetch --locked` before any secret is present. No
+#   cache is restored or saved: a release builds cold, and the bundler downloads NSIS itself and
+#   checks it against its own pinned hash.
+#   .github/scripts/latest-json.test.mjs fails on a change that breaks one of these rules.
+# - Release flags (here only): frame pointers on every target and a SHA-1 build id on Linux, line
+#   tables only, packed split debug info. The shipped binaries stay stripped (root Cargo.toml);
+#   the .dSYM, .pdb and .dwp go up as debug-files-<target>, the ui's source maps as
+#   ui-sourcemaps-<version>, never in a bundle or on the Release.
+# - crates/desktop/release/ holds the overlays passed with --config: release.conf.json (the
+#   binary's name, Clauseo, and the ui built once by the `ui` job instead of beforeBuildCommand),
+#   windows.conf.json (S15's sidecars and the uninstall hook) and machine.conf.json (the
+#   perMachine installer). `check` fails on any other key in them.
+# - Tier 1 is macOS Apple silicon and Windows x64; tier 2 (Intel macOS, Windows ARM64, Linux) is
+#   continue-on-error, and the release notes name a tier 2 asset that is missing.
+
+name: release
+
+on:
+  push:
+    tags: ["v*", "test-v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: A dry run builds everything and publishes nothing. A release starts only from a pushed tag, so false is refused.
+        type: boolean
+        default: true
+
+permissions: {}
+
+# One run per ref at a time; a second push of the same tag waits rather than cancelling a release.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_PROFILE_RELEASE_DEBUG: line-tables-only
+  CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO: packed
+
+jobs:
+  # What started the run, and whether it may: the mode, the version, the environment of the jobs
+  # that sign, the features, the release date. Reads the repo only.
+  check:
+    name: check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      mode: ${{ steps.mode.outputs.mode }}
+      version: ${{ steps.mode.outputs.version }}
+      tag: ${{ steps.mode.outputs.tag }}
+      environment: ${{ steps.mode.outputs.environment }}
+      features: ${{ steps.mode.outputs.features }}
+      release_date: ${{ steps.mode.outputs.release_date }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Decide the mode, check the tag against the version and its branch
+        id: mode
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$1"; exit 1; }
+          conf_version=$(jq -r .version crates/desktop/tauri.conf.json)
+          crate_version=$(python3 -c 'import tomllib; print(tomllib.load(open("crates/desktop/Cargo.toml", "rb"))["package"]["version"])')
+          [ "$conf_version" = "$crate_version" ] ||
+            fail "tauri.conf.json says $conf_version, crates/desktop/Cargo.toml says $crate_version"
+          tag="" release_date="" environment="" features=""
+          case "$EVENT:$REF" in
+            workflow_dispatch:*)
+              [ "$DRY_RUN" = true ] ||
+                fail "a release starts only from a pushed tag; a dispatched run is a dry run (dry_run: true)"
+              mode=dry version=$conf_version ;;
+            push:refs/tags/v*)
+              mode=release tag=${REF#refs/tags/} version=${REF#refs/tags/v} environment=release ;;
+            push:refs/tags/test-v*)
+              mode=test tag=${REF#refs/tags/} version=${REF#refs/tags/test-v} environment=release-test features=e2e ;;
+            *)
+              fail "release.yml runs on v* and test-v* tags and workflow_dispatch, not $EVENT $REF" ;;
+          esac
+          [[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] ||
+            fail "version $version is not plain X.Y.Z"
+          [ "$version" = "$conf_version" ] ||
+            fail "tag $tag names $version; crates/desktop/Cargo.toml and tauri.conf.json say $conf_version"
+
+          if [ "$mode" = release ]; then
+            git fetch -q --no-tags origin +refs/heads/main:refs/remotes/origin/main
+            git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main ||
+              fail "$tag is on $GITHUB_SHA, which is not on main"
+          fi
+          if [ "$mode" = test ]; then
+            git fetch -q --no-tags origin '+refs/heads/release-test/*:refs/remotes/origin/release-test/*'
+            [ -n "$(git for-each-ref --contains "$GITHUB_SHA" refs/remotes/origin/release-test/)" ] ||
+              fail "$tag is on $GITHUB_SHA, which is on no release-test/* branch"
+          fi
+
+          # A v* release never builds a test or measuring feature: none is asked for here, and
+          # the desktop crate's default features reach none of them.
+          default=$(python3 - <<'PY'
+          import tomllib
+          features = tomllib.load(open("crates/desktop/Cargo.toml", "rb")).get("features", {})
+          seen, todo = set(), list(features.get("default", []))
+          while todo:
+              name = todo.pop()
+              if name not in seen:
+                  seen.add(name)
+                  todo += features.get(name, [])
+          print(" ".join(sorted(seen & {"e2e", "marks", "crash_test"})))
+          PY
+          )
+          [ -z "$default" ] || fail "the desktop crate's default features turn on $default"
+          if [ "$mode" = release ] && [ -n "$features" ]; then
+            fail "a v* release would build with --features $features"
+          fi
+
+          # The release date the app shows (DisplayInfo.release_date): the annotated tag's date,
+          # else the tagged commit's, as YYYY-MM-DD in UTC. A dry run has none, as dev builds.
+          if [ -n "$tag" ]; then
+            git fetch -q --no-tags origin "+refs/tags/$tag:refs/tags/$tag"
+            if [ "$(git cat-file -t "refs/tags/$tag")" = tag ]; then
+              seconds=$(git for-each-ref --format='%(taggerdate:unix)' "refs/tags/$tag")
+            else
+              seconds=$(git log -1 --format=%ct "$GITHUB_SHA")
+            fi
+            release_date=$(date -u -d "@$seconds" +%F)
+          fi
+
+          # The updater key that signs this mode's files must have its public key: in a release
+          # the app's own (plugins.updater.pubkey), in a test the throwaway one R23 commits. A
+          # dry run makes its own in each signing job.
+          if [ "$mode" = release ] && [ -z "$(jq -r '.plugins.updater.pubkey // ""' crates/desktop/tauri.conf.json)" ]; then
+            fail "plugins.updater.pubkey in tauri.conf.json is empty; a v* release signs updates for it"
+          fi
+          if [ "$mode" = test ] && [ ! -s crates/desktop/release/updater-test.pub ]; then
+            fail "crates/desktop/release/updater-test.pub (the test key's public key) is missing"
+          fi
+
+          {
+            echo "mode=$mode"
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "environment=$environment"
+            echo "features=$features"
+            echo "release_date=$release_date"
+          } | tee -a "$GITHUB_OUTPUT"
+
+      # The overlays may hold only what they are for. S27's sidecars live in tauri.conf.json, which
+      # this does not read.
+      - name: The release overlays hold only their own keys
+        working-directory: crates/desktop/release
+        run: |
+          set -euo pipefail
+          # Every key path to a value that is not an object, array items left out.
+          leaves() {
+            jq -r '[paths as $p | select(($p | all(type == "string")) and (getpath($p) | type) != "object")
+              | $p | join(".")] | sort | join(" ")' "$1"
+          }
+          status=0
+          want() {
+            if [ "$(leaves "$1")" != "$2" ]; then
+              echo "::error file=crates/desktop/release/$1::$1 holds $(leaves "$1"); it may hold only $2"
+              status=1
+            fi
+          }
+          want release.conf.json "build.beforeBuildCommand mainBinaryName"
+          want machine.conf.json "bundle.windows.nsis.installMode"
+          # S15 adds bundle.externalBin; the hook is there from the start.
+          case "$(leaves windows.conf.json)" in
+            "bundle.windows.nsis.installerHooks" | "bundle.externalBin bundle.windows.nsis.installerHooks") ;;
+            *) want windows.conf.json "bundle.windows.nsis.installerHooks (and bundle.externalBin)" ;;
+          esac
+          [ "$(jq -r .mainBinaryName release.conf.json)" = Clauseo ] || { echo "::error::mainBinaryName is not Clauseo"; status=1; }
+          [ "$(jq -r .bundle.windows.nsis.installMode machine.conf.json)" = perMachine ] ||
+            { echo "::error::machine.conf.json's installMode is not perMachine"; status=1; }
+          exit "$status"
+
+  # The ui, built once for every leg, so each platform embeds the same files and the source maps
+  # match all of them. The maps are written hidden (no sourceMappingURL) and moved out of
+  # ui/app/dist before any leg embeds it.
+  ui:
+    name: ui
+    needs: check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: ui/package.json
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ui/package.json
+          package-manager-cache: false
+
+      - name: Install the ui workspace
+        run: pnpm -C ui install --frozen-lockfile
+
+      - name: Build the ui with hidden source maps, then move the maps out
+        env:
+          MAPS: ${{ runner.temp }}/ui-sourcemaps
+        run: |
+          set -euo pipefail
+          pnpm -C ui --filter @clauseo/app exec vite build --sourcemap hidden
+          cd ui/app/dist
+          find . -name '*.map' -print0 | while IFS= read -r -d '' map; do
+            mkdir -p "$MAPS/$(dirname "$map")"
+            mv "$map" "$MAPS/$map"
+          done
+          [ -z "$(find . -name '*.map')" ] || { echo "::error::a source map is left in ui/app/dist"; exit 1; }
+          [ -n "$(find "$MAPS" -name '*.map')" ] || { echo "::error::vite wrote no source map"; exit 1; }
+          if grep -rl 'sourceMappingURL' .; then echo "::error::a file in ui/app/dist names its source map"; exit 1; fi
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ui-dist
+          path: ui/app/dist
+          if-no-files-found: error
+          retention-days: 1
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ui-sourcemaps-${{ needs.check.outputs.version }}
+          path: ${{ runner.temp }}/ui-sourcemaps
+          if-no-files-found: error
+
+  # Every target from the one commit. macOS builds, bundles and signs the updater archive here;
+  # Windows builds the exe once (sign-windows bundles it); Linux bundles .deb and .rpm, which never
+  # update themselves, so it signs nothing and holds no secret. Only the macOS legs take the
+  # environment, since only they sign here.
+  build:
+    name: build (${{ matrix.target }})
+    needs: [check, ui]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    continue-on-error: ${{ matrix.tier == 2 }}
+    environment: ${{ matrix.signs && needs.check.outputs.environment || '' }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: aarch64-apple-darwin, runner: macos-15, tier: 1, signs: true, arch: aarch64, rustflags: "-C force-frame-pointers=yes" }
+          - { target: x86_64-apple-darwin, runner: macos-15, tier: 2, signs: true, arch: x64, rustflags: "-C force-frame-pointers=yes" }
+          - { target: x86_64-pc-windows-msvc, runner: windows-2025, tier: 1, signs: false, arch: x64, rustflags: "-C force-frame-pointers=yes" }
+          - { target: aarch64-pc-windows-msvc, runner: windows-11-arm, tier: 2, signs: false, arch: arm64, rustflags: "-C force-frame-pointers=yes" }
+          - { target: x86_64-unknown-linux-gnu, runner: ubuntu-22.04, tier: 2, signs: false, arch: amd64, rustflags: "-C force-frame-pointers=yes -C link-arg=-Wl,--build-id=sha1" }
+    env:
+      TARGET: ${{ matrix.target }}
+      MODE: ${{ needs.check.outputs.mode }}
+      VERSION: ${{ needs.check.outputs.version }}
+      FEATURES: ${{ needs.check.outputs.features }}
+      RELEASE_DATE: ${{ needs.check.outputs.release_date }}
+      RUSTFLAGS: ${{ matrix.rustflags }}
+      RELEASE_DIR: target/${{ matrix.target }}/release
+      OUT: ${{ github.workspace }}/release-out
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the Rust toolchain from rust-toolchain.toml, and the target
+        run: |
+          rustup toolchain install
+          rustup target add "$TARGET"
+
+      - name: Install the Linux system packages Tauri needs
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/install-tauri-linux-deps
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: ui/package.json
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ui/package.json
+          package-manager-cache: false
+
+      # Before any secret: the Tauri CLI from the lock file, every crate from Cargo.lock.
+      - name: Install the ui workspace and fetch the crates
+        run: |
+          pnpm -C ui install --frozen-lockfile
+          cargo fetch --locked
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ui-dist
+          path: ui/app/dist
+
+      # ---- The sidecar seam ----
+      # Each sidecar this leg ships is built or fetched here, for $TARGET, before the app is
+      # built (tauri-build checks that every bundle.externalBin file exists), as
+      # crates/desktop/binaries/<name>-$TARGET (.exe on Windows), Tauri's externalBin naming.
+      # S15 adds the Windows sandbox tools (bundle.externalBin in release/windows.conf.json);
+      # S27 adds clauseo-mcp and agent-browser (bundle.externalBin in tauri.conf.json). The size
+      # summary lists each beside the app, and the Windows legs carry them to sign-windows.
+      - name: Sidecars for this target (none yet)
+        run: echo "No sidecar yet for $TARGET."
+
+      # CLAUSEO_RELEASE_DATE is set only for a tag (release and test); unset, the app has none.
+      - name: Build the app
+        run: |
+          set -euo pipefail
+          if [ -n "$RELEASE_DATE" ]; then export CLAUSEO_RELEASE_DATE="$RELEASE_DATE"; fi
+          config=(--config release/release.conf.json)
+          if [ "$RUNNER_OS" = Windows ]; then config+=(--config release/windows.conf.json); fi
+          if [ "$RUNNER_OS" = Linux ]; then
+            pnpm -C ui tauri build --ci --target "$TARGET" ${FEATURES:+--features "$FEATURES"} "${config[@]}" \
+              --bundles deb,rpm --config '{"bundle":{"createUpdaterArtifacts":false}}' -- --locked
+          else
+            pnpm -C ui tauri build --ci --target "$TARGET" ${FEATURES:+--features "$FEATURES"} "${config[@]}" \
+              --no-bundle -- --locked
+          fi
+
+      # A dry run's updater key: made here, with a random password, and gone with the runner.
+      - name: Make a throwaway updater key (dry run)
+        if: matrix.signs && env.MODE == 'dry'
+        run: |
+          set -euo pipefail
+          head -c 32 /dev/urandom | base64 > "$RUNNER_TEMP/dry-updater.password"
+          pnpm -s -C ui tauri signer generate --ci -p "$(cat "$RUNNER_TEMP/dry-updater.password")" \
+            -w "$RUNNER_TEMP/dry-updater.key" > /dev/null
+
+      # The public key of the key that signs, for the bundler's check; the app's own key was built
+      # in from tauri.conf.json and is not changed here.
+      - name: Choose the updater public key
+        if: matrix.signs
+        run: |
+          set -euo pipefail
+          case "$MODE" in
+            dry) pub=$(cat "$RUNNER_TEMP/dry-updater.key.pub") ;;
+            test) pub=$(cat crates/desktop/release/updater-test.pub) ;;
+            release) pub=$(jq -r .plugins.updater.pubkey crates/desktop/tauri.conf.json) ;;
+          esac
+          jq -n --arg key "$pub" '{plugins: {updater: {pubkey: $key}}}' > "$RUNNER_TEMP/updater-key.conf.json"
+
+      # The bundler signs the .app ad hoc (APPLE_SIGNING_IDENTITY "-") until S20a's Developer ID,
+      # then the updater archive with the mode's key, which only this step holds.
+      - name: Bundle the .app and the DMG, and sign the updater archive
+        if: runner.os == 'macOS'
+        env:
+          APPLE_SIGNING_IDENTITY: "-"
+          TAURI_SIGNING_PRIVATE_KEY: ${{ needs.check.outputs.mode == 'release' && secrets.TAURI_SIGNING_PRIVATE_KEY || needs.check.outputs.mode == 'test' && secrets.TAURI_SIGNING_PRIVATE_KEY_TEST || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ needs.check.outputs.mode == 'release' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || needs.check.outputs.mode == 'test' && secrets.TAURI_SIGNING_PRIVATE_KEY_TEST_PASSWORD || '' }}
+        run: |
+          set -euo pipefail
+          if [ "$MODE" = dry ]; then
+            TAURI_SIGNING_PRIVATE_KEY=$(cat "$RUNNER_TEMP/dry-updater.key")
+            TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$(cat "$RUNNER_TEMP/dry-updater.password")
+            export TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+          fi
+          [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] || { echo "::error::no updater key for a $MODE run"; exit 1; }
+          pnpm -C ui tauri bundle --ci --target "$TARGET" ${FEATURES:+--features "$FEATURES"} --bundles app,dmg \
+            --config release/release.conf.json --config "$RUNNER_TEMP/updater-key.conf.json"
+
+      # Each leg's assets, under the names latest-json.mjs lists (assemble renames the macOS
+      # archive, which both macOS legs call Clauseo.app.tar.gz).
+      - name: Collect this leg's assets
+        if: runner.os != 'Windows'
+        run: |
+          set -euo pipefail
+          mkdir -p "$OUT"
+          bundle=$RELEASE_DIR/bundle
+          if [ "$RUNNER_OS" = macOS ]; then
+            cp "$bundle/dmg/Clauseo_${VERSION}_${{ matrix.arch }}.dmg" "$OUT/"
+            cp "$bundle/macos/Clauseo.app.tar.gz" "$bundle/macos/Clauseo.app.tar.gz.sig" "$OUT/"
+          else
+            cp "$bundle/deb/Clauseo_${VERSION}_amd64.deb" "$bundle/rpm/Clauseo-${VERSION}-1.x86_64.rpm" "$OUT/"
+          fi
+          ls -l "$OUT"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: runner.os != 'Windows'
+        with:
+          name: release-${{ matrix.target }}
+          path: ${{ env.OUT }}
+          if-no-files-found: error
+
+      # The exe exactly as linked, and the sidecars, for sign-windows to sign and bundle.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: runner.os == 'Windows'
+        with:
+          name: windows-exe-${{ matrix.target }}
+          path: |
+            ${{ env.RELEASE_DIR }}/Clauseo.exe
+            crates/desktop/binaries/*-${{ matrix.target }}.exe
+          if-no-files-found: error
+
+      # From the same link as the shipped binary, for S22's symbols job. Never on the Release.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: debug-files-${{ matrix.target }}
+          path: |
+            ${{ env.RELEASE_DIR }}/*.dSYM
+            ${{ env.RELEASE_DIR }}/*.pdb
+            ${{ env.RELEASE_DIR }}/*.dwp
+          if-no-files-found: error
+
+      # budgets.toml's release_binary_size is the app binary alone; each sidecar is listed beside
+      # it. deb_size is the .deb.
+      - name: Sizes to the job summary
+        run: |
+          set -euo pipefail
+          size() { wc -c < "$1" | tr -d ' '; }
+          row() { echo "| $1 | $2 | $(awk -v b="$2" 'BEGIN { printf "%.2f", b / 1000000 }') |"; }
+          exe=$RELEASE_DIR/Clauseo; [ "$RUNNER_OS" = Windows ] && exe=$exe.exe
+          {
+            echo "### Sizes, $TARGET"
+            echo "| file | bytes | MB |"
+            echo "|---|---|---|"
+            row "app binary (release_binary_size)" "$(size "$exe")"
+            for sidecar in crates/desktop/binaries/*-"$TARGET"*; do
+              [ -e "$sidecar" ] && row "sidecar $(basename "$sidecar")" "$(size "$sidecar")"
+            done
+            if [ -d "$OUT" ]; then
+              for asset in "$OUT"/*; do
+                case "$asset" in
+                  *.deb) row "$(basename "$asset") (deb_size)" "$(size "$asset")" ;;
+                  *.sig) ;;
+                  *) row "$(basename "$asset")" "$(size "$asset")" ;;
+                esac
+              done
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # The Windows exe, as built, signed (SignPath, S20a: v* only, once vars.SIGNPATH_ENABLED is
+  # true; until then it passes through), then bundled into both installers without patching the
+  # signed binary, then the currentUser installer's updater signature, last.
+  sign-windows:
+    name: sign-windows (${{ matrix.target }})
+    needs: [check, build]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    continue-on-error: ${{ matrix.tier == 2 }}
+    environment: ${{ needs.check.outputs.environment }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-pc-windows-msvc, runner: windows-2025, tier: 1, arch: x64 }
+          - { target: aarch64-pc-windows-msvc, runner: windows-11-arm, tier: 2, arch: arm64 }
+    env:
+      TARGET: ${{ matrix.target }}
+      MODE: ${{ needs.check.outputs.mode }}
+      VERSION: ${{ needs.check.outputs.version }}
+      FEATURES: ${{ needs.check.outputs.features }}
+      RELEASE_DIR: target/${{ matrix.target }}/release
+      OUT: ${{ github.workspace }}/release-out
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the Rust toolchain from rust-toolchain.toml, and the target
+        run: |
+          rustup toolchain install
+          rustup target add "$TARGET"
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: ui/package.json
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ui/package.json
+          package-manager-cache: false
+
+      # Before any secret. The bundler reads the crate graph (cargo metadata), so the crates too.
+      - name: Install the ui workspace and fetch the crates
+        run: |
+          pnpm -C ui install --frozen-lockfile
+          cargo fetch --locked
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: windows-exe-${{ matrix.target }}
+
+      - name: SignPath, the exe and the sidecars (S20a)
+        if: needs.check.outputs.mode == 'release' && vars.SIGNPATH_ENABLED == 'true'
+        run: |
+          echo "::error::SIGNPATH_ENABLED is true, but S20a has not added the SignPath step yet"
+          exit 1
+
+      # --no-binary-patching keeps the signed exe as signed (the updater then reads the plain
+      # windows-<arch> key of latest.json); --no-sign leaves the updater signature to the last
+      # step. Both installers ship the same exe.
+      - name: Bundle the currentUser and perMachine installers
+        run: |
+          set -euo pipefail
+          mkdir -p "$OUT"
+          nsis=$RELEASE_DIR/bundle/nsis
+          bundle() {
+            rm -rf "$nsis"
+            pnpm -C ui tauri bundle --ci --target "$TARGET" ${FEATURES:+--features "$FEATURES"} --bundles nsis \
+              --no-binary-patching --no-sign --config release/release.conf.json --config release/windows.conf.json "$@"
+          }
+          bundle
+          mv "$nsis/Clauseo_${VERSION}_${{ matrix.arch }}-setup.exe" "$OUT/"
+          bundle --config release/machine.conf.json
+          mv "$nsis/Clauseo_${VERSION}_${{ matrix.arch }}-setup.exe" "$OUT/Clauseo_${VERSION}_${{ matrix.arch }}-machine-setup.exe"
+          ls -l "$OUT"
+
+      - name: SignPath, the installers (S20a)
+        if: needs.check.outputs.mode == 'release' && vars.SIGNPATH_ENABLED == 'true'
+        run: |
+          echo "::error::SIGNPATH_ENABLED is true, but S20a has not added the SignPath step yet"
+          exit 1
+
+      - name: Make a throwaway updater key (dry run)
+        if: env.MODE == 'dry'
+        run: |
+          set -euo pipefail
+          head -c 32 /dev/urandom | base64 > "$RUNNER_TEMP/dry-updater.password"
+          pnpm -s -C ui tauri signer generate --ci -p "$(cat "$RUNNER_TEMP/dry-updater.password")" \
+            -w "$RUNNER_TEMP/dry-updater.key" > /dev/null
+
+      # Last, over the installer as it ships: the currentUser one, the one that updates itself.
+      - name: Sign the currentUser installer for the updater
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ needs.check.outputs.mode == 'release' && secrets.TAURI_SIGNING_PRIVATE_KEY || needs.check.outputs.mode == 'test' && secrets.TAURI_SIGNING_PRIVATE_KEY_TEST || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ needs.check.outputs.mode == 'release' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || needs.check.outputs.mode == 'test' && secrets.TAURI_SIGNING_PRIVATE_KEY_TEST_PASSWORD || '' }}
+        run: |
+          set -euo pipefail
+          if [ "$MODE" = dry ]; then
+            TAURI_SIGNING_PRIVATE_KEY=$(cat "$RUNNER_TEMP/dry-updater.key")
+            TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$(cat "$RUNNER_TEMP/dry-updater.password")
+            export TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+          fi
+          [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] || { echo "::error::no updater key for a $MODE run"; exit 1; }
+          pnpm -C ui tauri signer sign --app-version "$VERSION" "$OUT/Clauseo_${VERSION}_${{ matrix.arch }}-setup.exe"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-${{ matrix.target }}
+          path: ${{ env.OUT }}
+          if-no-files-found: error
+
+      - name: Sizes to the job summary
+        run: |
+          set -euo pipefail
+          {
+            echo "### Installers, $TARGET"
+            echo "| file | bytes | MB |"
+            echo "|---|---|---|"
+            for asset in "$OUT"/*.exe; do
+              bytes=$(wc -c < "$asset" | tr -d ' ')
+              echo "| $(basename "$asset") | $bytes | $(awk -v b="$bytes" 'BEGIN { printf "%.2f", b / 1000000 }') |"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # The Release: latest.json, SHA256SUMS.txt, an attestation per asset, then a draft (release) or
+  # a public pre-release (test). A dry run stops at the artifact release-assets.
+  assemble:
+    name: assemble
+    needs: [check, build, sign-windows]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      MODE: ${{ needs.check.outputs.mode }}
+      VERSION: ${{ needs.check.outputs.version }}
+      TAG: ${{ needs.check.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ui/package.json
+          package-manager-cache: false
+
+      # Each leg in a folder of its own: both macOS legs hold a Clauseo.app.tar.gz.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-*
+          path: ${{ runner.temp }}/legs
+
+      - name: Name the assets, write latest.json and SHA256SUMS.txt
+        run: |
+          set -euo pipefail
+          mkdir dist
+          for leg in "$RUNNER_TEMP"/legs/release-*; do
+            case "$leg" in
+              *-aarch64-apple-darwin) arch=aarch64 ;;
+              *-x86_64-apple-darwin) arch=x64 ;;
+              *) arch="" ;;
+            esac
+            if [ -n "$arch" ]; then
+              mv "$leg/Clauseo.app.tar.gz" "$leg/Clauseo_${VERSION}_${arch}.app.tar.gz"
+              mv "$leg/Clauseo.app.tar.gz.sig" "$leg/Clauseo_${VERSION}_${arch}.app.tar.gz.sig"
+            fi
+            mv "$leg"/* dist/
+          done
+          # A dry run publishes nothing; its URLs point at a tag that does not exist.
+          base="https://github.com/$GITHUB_REPOSITORY/releases/download/${TAG:-dry-run}"
+          node .github/scripts/latest-json.mjs dist "$VERSION" "$base" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > missing.txt
+          # Nothing but the table's assets, their .sig and latest.json.
+          known=$(node --input-type=module -e "
+            import { assets } from './.github/scripts/latest-json.mjs';
+            for (const a of assets(process.argv[1])) console.log(a.platforms ? a.name + '\n' + a.name + '.sig' : a.name);
+          " "$VERSION")
+          for file in dist/*; do
+            name=$(basename "$file")
+            [ "$name" = latest.json ] || grep -qxF "$name" <<< "$known" ||
+              { echo "::error::$name is not an asset latest-json.mjs lists"; exit 1; }
+          done
+          (cd dist && sha256sum -- * > ../SHA256SUMS.txt) && mv SHA256SUMS.txt dist/
+          (cd dist && sha256sum -c SHA256SUMS.txt)
+          {
+            echo "Clauseo $VERSION, built from $GITHUB_SHA by $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID."
+            echo
+            echo "Check a download with \`sha256sum -c SHA256SUMS.txt --ignore-missing\`."
+            if [ -s missing.txt ]; then
+              echo
+              echo "Not in this release (a tier 2 build failed):"
+              sed 's/^missing /- /' missing.txt
+            fi
+          } > notes.md
+          {
+            echo "### Release assets, $MODE"
+            echo '```'
+            cat dist/SHA256SUMS.txt
+            echo '```'
+            cat notes.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-assets
+          path: dist
+          if-no-files-found: error
+
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        if: env.MODE != 'dry'
+        with:
+          subject-path: dist/*
+
+      - name: Create the GitHub Release
+        if: env.MODE != 'dry'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "$MODE" = release ]; then kind=--draft; else kind=--prerelease; fi
+          gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --verify-tag "$kind" \
+            --title "Clauseo $VERSION" --notes-file notes.md
+
+  # Publishes a v* draft once Rohan approves it (environment release-publish). Refuses while a DMG
+  # is missing or not notarised and stapled: no release before the Apple account (QF.2 (a)).
+  publish:
+    name: publish
+    needs: [check, assemble]
+    if: needs.check.outputs.mode == 'release'
+    runs-on: macos-15
+    timeout-minutes: 20
+    environment: release-publish
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+      TAG: ${{ needs.check.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Every DMG is notarised and stapled
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.dmg' --dir "$RUNNER_TEMP/dmg"
+          [ -f "$RUNNER_TEMP/dmg/Clauseo_${VERSION}_aarch64.dmg" ] ||
+            { echo "::error::the draft has no Clauseo_${VERSION}_aarch64.dmg"; exit 1; }
+          for dmg in "$RUNNER_TEMP"/dmg/*.dmg; do
+            xcrun stapler validate "$dmg" || { echo "::error::$(basename "$dmg") is not notarised and stapled"; exit 1; }
+          done
+
+      - name: Publish the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: vars.COUNTS_RELEASES_ENABLED == 'true'
+        with:
+          node-version-file: ui/package.json
+          package-manager-cache: false
+
+      # S23's script, POST /v1/releases. Skipped until Rohan's Cloudflare set-up turns it on.
+      - name: Record the release (S23)
+        if: vars.COUNTS_RELEASES_ENABLED == 'true'
+        env:
+          CLAUSEO_RELEASE_ACCESS_CLIENT_ID: ${{ secrets.CLAUSEO_RELEASE_ACCESS_CLIENT_ID }}
+          CLAUSEO_RELEASE_ACCESS_CLIENT_SECRET: ${{ secrets.CLAUSEO_RELEASE_ACCESS_CLIENT_SECRET }}
+        run: node .github/scripts/record-release.mjs "$VERSION" stable
+
+  # S24's measuring builds: the shipped ui, release flags and profile, with `marks` on macOS and
+  # `e2e` on Windows, each with fake_agent beside it. No environment, no secret, never on a
+  # Release.
+  measure-builds:
+    name: measure-builds (${{ matrix.target }})
+    needs: [check, ui]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: aarch64-apple-darwin, runner: macos-15, feature: marks, exe: "" }
+          - { target: x86_64-pc-windows-msvc, runner: windows-2025, feature: e2e, exe: .exe }
+    env:
+      TARGET: ${{ matrix.target }}
+      RUSTFLAGS: "-C force-frame-pointers=yes"
+      RELEASE_DIR: target/${{ matrix.target }}/release
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the Rust toolchain from rust-toolchain.toml, and the target
+        run: |
+          rustup toolchain install
+          rustup target add "$TARGET"
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: ui/package.json
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ui/package.json
+          package-manager-cache: false
+
+      - name: Install the ui workspace and fetch the crates
+        run: |
+          pnpm -C ui install --frozen-lockfile
+          cargo fetch --locked
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ui-dist
+          path: ui/app/dist
+
+      - name: Build the app with ${{ matrix.feature }}, and fake_agent
+        run: |
+          set -euo pipefail
+          pnpm -C ui tauri build --ci --target "$TARGET" --features "${{ matrix.feature }}" \
+            --config release/release.conf.json --no-bundle -- --locked
+          cargo build --release --locked -p clauseo-fake_agent --target "$TARGET"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: clauseo-${{ matrix.feature }}-${{ matrix.target }}
+          path: |
+            ${{ env.RELEASE_DIR }}/Clauseo${{ matrix.exe }}
+            ${{ env.RELEASE_DIR }}/fake_agent${{ matrix.exe }}
+          if-no-files-found: error
