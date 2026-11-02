@@ -208,10 +208,11 @@ fn launch(actor: &Actor, thread: ThreadId) -> Result<(AgentLink, PathBuf), Error
 }
 
 /// THE CODEX HOOKS SEAM: the `hooks` object a Codex agent's `CODEX_CONFIG` carries, with its
-/// `state` trust entry and `trusted_hash`. The iris thread's `agent::loads::codex_hook_config`
-/// (clauseo-acp-private#162 part 2) fills it: whichever of R15 and #162 lands second wires it
-/// here. Until then it is `None` (tests set one through `HostConfig::with_codex_hooks`), and
-/// with `None` the session start skips the guard's trust check.
+/// `state` trust entry and `trusted_hash`. The guard PR's `codex_hook_config()`, in
+/// `crates/host/src/agent/loads/codex.rs` (clauseo-acp #152, for clauseo-acp-private#162),
+/// fills it: whichever of R15 and #152 merges second wires it here. Until then it is `None`
+/// (tests set one through `HostConfig::with_codex_hooks`), and with `None` the session start
+/// skips the guard's trust check.
 pub(super) fn codex_hooks(actor: &Actor) -> Option<serde_json::Map<String, serde_json::Value>> {
     actor.codex_hooks.clone()
 }
