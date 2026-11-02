@@ -75,11 +75,13 @@ user-facing words: U5 replaced R12's window, and U12 builds the limit screens.
   after the end commit. A shutdown during the hold decides at once.
 - **The dependency.** The `host` row has listed `limits` since R15 (`ARCHITECTURE.md`); this
   record covers the model's use of it.
-- **The bridge.** Each window's Channel opens one `subscribe_limits`, whose events count toward
-  acks, `timed` and `stream_failed` like any other. When the bridge renews its subscriptions
-  (0012), the new one starts with the current view, so nothing is replayed. The window's native
-  focus event dispatches `RefreshLimits { agent: None, why: Shown }` from Rust. The command
-  allow-list admits `RefreshLimits`.
+- **The bridge.** `open_stream` follows one `subscribe_limits` on each window's Channel. Its
+  events count toward acks and the 256 KB pause like any other. As with 0019's app feed, they are
+  never wrapped as `timed` and send no `stream_failed`, which names a `StreamId` that limits lack;
+  a refused renewal, only once the host has stopped, stops following them. When the bridge renews
+  its subscriptions (0012), the new one starts with the current view, so nothing is replayed. The
+  window's native focus event dispatches `RefreshLimits { agent: None, why: Shown }` from Rust.
+  The command allow-list admits `RefreshLimits`.
 
 ## Consequences
 
