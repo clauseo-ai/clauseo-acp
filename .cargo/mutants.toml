@@ -77,4 +77,88 @@ exclude_re = [
   # error needs a race between the two calls or an I/O fault. No test makes one without fault
   # injection, and EACCES on the file itself needs no read permission for metadata.
   'crates/settings/src/files\.rs:\d+:\d+: replace match guard error\.kind\(\) != io::ErrorKind::NotFound with false in <impl Files for SystemFiles>::write_atomic$',
+  # crates/acp/src/line.rs, `LineSplitter`'s read buffer (`READ_BUFFER_BYTES`, 64 KiB): its size only
+  # changes how many reads a line takes. The splitter keeps lines whole across reads and checks the cap
+  # on the joined line, so only speed changes. The column is pinned because the name has no function
+  # to tell it apart from the `* with +` on `MAX_LINE_BYTES`, which a test catches.
+  'crates/acp/src/line\.rs:\d+:37: replace \* with \+$',
+  # crates/acp/src/line.rs, `LineSplitter::next_line`: the check that a line fits in one buffer (`partial`
+  # empty) can never fire. `fill_buf` returns at most 64 KiB, below `MAX_LINE_BYTES`, so `>`, `==` and
+  # `>=` are all false. Longer lines are checked through `partial`, which the existing tests catch.
+  # The line pin keeps the `partial` checks below it (which tests catch) mutated. If the code
+  # moves, the entry stops matching and the mutant comes back as missed, not hidden.
+  'crates/acp/src/line\.rs:164:35: replace > with (==|>=) in LineSplitter<R>::next_line$',
+  # crates/acp/src/map.rs, `quarantine_unknown_blocks`: schema 1.11.0 decodes `CompactionUpdate.summary`
+  # so an unknown block is skipped, never an error, and the summary is not mapped. The arm matters only
+  # if the SDK's decode gets stricter; re-check on an SDK bump.
+  'crates/acp/src/map\.rs:\d+:\d+: delete match arm Some\("compaction_update"\) in quarantine_unknown_blocks$',
+  # crates/acp/src/map.rs, `push_parts`: for a text of exactly `MAX_TEXT_CHUNK_BYTES`, `split_text` returns
+  # one part equal to the text, so the host gets the same event either way. Only an extra copy differs.
+  'crates/acp/src/map\.rs:\d+:\d+: replace > with >= in push_parts$',
+  # crates/acp/src/driver.rs, `Debug for Driver`: the output is the fixed word `Driver`, and nothing
+  # formats a `Driver` with Debug, so no behaviour depends on it. Only a test of the wording itself
+  # could tell the mutant apart.
+  'crates/acp/src/driver\.rs:\d+:\d+: replace <impl std::fmt::Debug for Driver>::fmt -> std::fmt::Result with Ok\(Default::default\(\)\)$',
+  # crates/acp/src/line/envelope.rs, `EnvelopeVisitor::expecting`: it only builds the text of a
+  # serde type error, and `incoming` drops that error, so no behaviour depends on the text. Only a
+  # test of serde's error wording could tell the mutant apart.
+  'crates/acp/src/line/envelope\.rs:\d+:\d+: replace <impl Visitor<\x27de> for EnvelopeVisitor>::expecting -> fmt::Result with Ok\(Default::default\(\)\)$',
+  # crates/acp/src/line/envelope.rs, `KeyVisitor::expecting`: JSON object keys are always
+  # strings, so no type error is reported through it, and `incoming` would drop the text anyway.
+  # Only a test of serde's error wording could tell the mutant apart.
+  'crates/acp/src/line/envelope\.rs:\d+:\d+: replace <impl Visitor<\x27_> for KeyVisitor>::expecting -> fmt::Result with Ok\(Default::default\(\)\)$',
+  # crates/acp/src/line/envelope.rs, `ShapeOf::expecting`: `ShapeOf` handles every JSON type through
+  # `deserialize_any`, so no type error happens, and `incoming` would drop the text anyway. Only a
+  # test of serde's error wording could tell the mutant apart.
+  'crates/acp/src/line/envelope\.rs:\d+:\d+: replace <impl Visitor<\x27de> for ShapeOf>::expecting -> fmt::Result with Ok\(Default::default\(\)\)$',
+  # crates/process/src/stderr.rs, `READ` (the pump's read size): equivalent apart from speed. The size
+  # only sizes the pump's buffer; every byte still goes into the ring in order, and `LineSplitter` cuts
+  # lines at `MAX_LINE` however the bytes arrive. The column is pinned because the `* with +` on
+  # `MAX_LINE` (`16 * 1024`) is a different mutant, and a test catches it.
+  'crates/process/src/stderr\.rs:\d+:24: replace \* with \+$',
+  # crates/reducer/src/split.rs, `cut`: the condition is only a shortcut before the char walk below, which
+  # gives the same split when the shortcut is skipped.
+  'crates/reducer/src/split\.rs:\d+:\d+: replace \|\| with && in cut$',
+  # crates/reducer/src/split.rs, `cut`: with `text.len() > budget` the second clause can never be true
+  # (escaping never shortens text), so the char walk runs for every text the shortcut misses, and gives
+  # the same split.
+  'crates/reducer/src/split\.rs:\d+:24: replace <= with > in cut$',
+  # crates/reducer/src/snapshot.rs, `DurableEntries::serialize`: `durable_len <= text.len()` always holds,
+  # so the extra cases are wholly durable texts, written through `DurableText` with the whole text. Same bytes.
+  'crates/reducer/src/snapshot\.rs:\d+:\d+: replace match guard meta\.durable_len < text\.text\.len\(\) with true in <impl Serialize for DurableEntries<\x27_>>::serialize$',
+  # crates/reducer/src/snapshot.rs, `DurableEntries::serialize`: `<=` only adds `durable_len == len`, written
+  # through `DurableText` with the whole text, so the bytes are the same.
+  'crates/reducer/src/snapshot\.rs:\d+:\d+: replace < with <= in <impl Serialize for DurableEntries<\x27_>>::serialize$',
+  # crates/store/src/codec.rs, `key`: `stream_id << 32` has its low 32 bits zero and `seq` is a `u32`, so
+  # `|` and `^` give the same bits for every input `key` accepts.
+  'crates/store/src/codec\.rs:\d+:\d+: replace \| with \^ in key$',
+  # crates/store/src/fixtures.rs, `reopen_20k`: the loop's `start` is only ever 1 + 250k, 18,002 or
+  # 18,251 + 250k, never a multiple of 250, so `(start + 1) / 250` and `(start - 1) / 250` agree for every
+  # value it takes, and `start / 250` agrees with `(start - 1) / 250` for the same reason.
+  'crates/store/src/fixtures\.rs:\d+:31: replace - with (\+|/) in reopen_20k$',
+  # crates/store/src/fixtures.rs, `text`: the loop stops once the text reaches 400 bytes, the
+  # mutant's (`<=`) once it passes 400, and `truncate(400)` then gives the same 400-byte prefix of
+  # the same repeated sentence.
+  'crates/store/src/fixtures\.rs:\d+:\d+: replace < with <= in text$',
+  # crates/store/src/read.rs, `rows`: `capacity` is only `Vec::with_capacity`'s hint (capped at 65,536),
+  # so the rows read and returned are the same for every value of it.
+  'crates/store/src/read\.rs:\d+:\d+: replace < with (==|<=|>) in rows$',
+  # crates/store/src/read.rs, `rows`: the same capacity hint. `high + low` could overflow i64 only for
+  # stream ids of 2^30 or more, which no test or user reaches.
+  'crates/store/src/read\.rs:\d+:\d+: replace - with (\+|/) in rows$',
+  # crates/store/src/open.rs, `migrate`: the rollback runs only on the error path, and `open_writer` then
+  # drops the connection; closing a SQLite connection rolls back its open transaction, so the file ends
+  # the same either way.
+  'crates/store/src/open\.rs:\d+:\d+: delete ! in migrate$',
+  # crates/store/src/read.rs, `read_after`: at `after == u32::MAX` the original computes `low = high`, an
+  # empty range, so both versions return no envelopes.
+  'crates/store/src/read\.rs:\d+:\d+: replace > with >= in read_after$',
+  # crates/store/src/read.rs, `read_after`: `first_key(id)` has its low 32 bits zero, so `|` and `^` with
+  # `0xFFFF_FFFF` agree.
+  'crates/store/src/read\.rs:\d+:\d+: replace \| with \^ in read_after$',
+  # crates/store/src/read.rs, `reopen_in`: `last_seq` fits 32 bits (the key refuses more), so `|` and `^` agree.
+  'crates/store/src/read\.rs:\d+:\d+: replace \| with \^ in reopen_in$',
+  # crates/store/src/writer.rs, `Writer::commit_group`: a lone commit in a savepoint fails the same way and
+  # reaches the same replies and the same file; only the statements run differ.
+  'crates/store/src/writer\.rs:\d+:\d+: replace > with >= in Writer::commit_group$',
 ]
