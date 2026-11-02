@@ -2,10 +2,10 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 
 use clauseo_matters::{CheckpointOutcome, DEFAULT_MARKER, NewMatter, TurnMeta};
-use clauseo_protocol::{CheckpointId, MatterId, MatterPath, ThreadId, Timestamp, TurnId};
+use clauseo_protocol::{CheckpointId, MatterId, ThreadId, Timestamp, TurnId};
 use uuid::Uuid;
 
-use super::{MatterJob, MatterReply, MatterWorker, Registry, Relink, matter_settings, tool_paths};
+use super::{MatterJob, MatterReply, MatterWorker, Registry, Relink, matter_settings};
 use crate::sent::TurnPaths;
 use crate::write;
 
@@ -263,6 +263,9 @@ fn the_first_open_spends_the_relink_whatever_it_finds() {
 #[cfg(unix)]
 #[test]
 fn tool_paths_resolve_outside_spellings_into_the_matter() {
+    use super::tool_paths;
+    use clauseo_protocol::MatterPath;
+
     let root = test_dir("tool-paths");
     let real = root.join("real");
     write::create_dir_all(&real.join("notes")).unwrap();
