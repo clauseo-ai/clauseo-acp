@@ -34,9 +34,9 @@ pub(crate) const MCP_FILTER_VAR: &str = "DISABLE_MCP_CONFIG_FILTERING";
 /// The variables a Codex agent never gets, from any source (inherited, the settings' agent
 /// variables or the profile hook's), whatever their case. `CODEX_PATH` swaps the app-server
 /// binary; `APP_SERVER_LOGS` makes codex-acp log the whole `CODEX_CONFIG`, hooks included, to
-/// a file (`dist/index.js:27641-27675, 45673`); `DEFAULT_AUTH_REQUEST` picks a
-/// sign-in; `MODEL_PROVIDER` picks a provider, where the home's `config.toml` defines none and
-/// sign-in is Codex's ChatGPT login (0025).
+/// a file (`dist/index.js:27641-27675, 45673`); `DEFAULT_AUTH_REQUEST` picks a sign-in;
+/// `MODEL_PROVIDER` picks a provider, where the home's `config.toml` defines none and sign-in
+/// is the login Codex keeps in its home (0025).
 pub(crate) const DROPPED_VARS: [&str; 4] = [
     "CODEX_PATH",
     "APP_SERVER_LOGS",
