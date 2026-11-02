@@ -36,22 +36,25 @@ pub(crate) const LIMIT: Duration = Duration::from_secs(10);
 /// The variable that names Codex's home.
 const CODEX_HOME: &str = "CODEX_HOME";
 /// The `-c` overrides the Codex reader runs `app-server` with, before its subcommand, one per
-/// category #160 turns off: apps, plugins, skill MCP installs and cloud skills. #160 names the
-/// categories, not keys, and the host sends none yet: these keys come from the `@openai/codex`
-/// 0.162.1 source (tag `rust-v0.162.1`: `features/src/lib.rs` for `apps`, `plugins` and
-/// `skill_mcp_dependency_install`; `config/src/config_toml.rs` for `cloud.skills`). R15's
-/// `CODEX_CONFIG` for codex-acp must turn off the same ones, from this constant.
+/// category #160 turns off: apps, plugins, skill MCP installs and cloud skills; and Codex's
+/// bundled skills, agreed for R15 on #160's reasoning (Clauseo, not Codex, decides what a session
+/// loads). #160 names the categories, not keys: these come from the `@openai/codex` 0.162.1
+/// source (tag `rust-v0.162.1`: `features/src/lib.rs` for `apps`, `plugins` and
+/// `skill_mcp_dependency_install`; `config/src/config_toml.rs` for `cloud.skills`; and
+/// `skills.bundled.enabled` as the R15 agreement names it). The host's `CODEX_CONFIG` for
+/// codex-acp is built from this constant, so both turn off the same ones.
 ///
 /// G16's probe of 0.162.1 (#203) found that app-server, with no login, no thread and even an empty
 /// home, starts a git sync of `github.com/openai/plugins` into the home at start-up, because
 /// plugins are on by default. `features.plugins=false` stops it; nothing the home's config names
-/// (MCP servers, plugin and skill MCP servers, hooks) ran before a thread. The other three cost
+/// (MCP servers, plugin and skill MCP servers, hooks) ran before a thread. The others cost
 /// nothing.
-pub const CODEX_OVERRIDES: [&str; 4] = [
+pub const CODEX_OVERRIDES: [&str; 5] = [
     "features.apps=false",
     "features.plugins=false",
     "features.skill_mcp_dependency_install=false",
     "cloud.skills.enabled=false",
+    "skills.bundled.enabled=false",
 ];
 
 /// What the app-server answered.
