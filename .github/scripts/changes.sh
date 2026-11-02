@@ -5,8 +5,8 @@
 #
 #   git diff --no-renames -z --name-only BASE...HEAD | .github/scripts/changes.sh
 #
-# Reads NUL-separated paths on stdin (newline-separated works too, for paths without newlines)
-# and prints one `name=value` line per output, ready for $GITHUB_OUTPUT:
+# Reads NUL-separated paths on stdin, as `git diff -z` writes them (a path may hold a newline,
+# so nothing splits on one), and prints one `name=value` line per output, ready for $GITHUB_OUTPUT:
 #
 # - rust:    the Rust builds and tests on every target (ci.yml's build matrix, reducer-bench).
 # - app:     the app end to end (e2e-windows.yml's smoke and scoreboard-windows): the desktop
@@ -27,6 +27,7 @@ set -euo pipefail
 
 APP_CRATES="desktop host protocol settings process fake_agent reducer store matters acp"
 
+nl=$'\n'
 rust=false app=false ui=false product=false unknown=""
 count=0
 paths=()
@@ -43,11 +44,26 @@ is_app_crate() {
 
 classify() {
   local p=$1
+  # No rule is written for a path with a newline in it (a glob's * matches one), so it is unknown.
+  case "$p" in
+    *"$nl"*)
+      all
+      unknown="$unknown $p"
+      return
+      ;;
+  esac
   case "$p" in
     # Review routing and the pull request template: read by people, not jobs.
     .github/CODEOWNERS | .github/pull_request_template.md) ;;
     # Workflows, actions and these scripts: a CI change runs every job it could break.
     .github/*) all ;;
+    # Files outside the crates that Rust tests read (include_str! or a read from the crate's
+    # folder). changes-test.sh finds every such read under crates/ and fails when one is missing.
+    docs/decisions/0002-event-schema.md | docs/decisions/0003-error-codes.md) rust=true ;;
+    docs/decisions/0006-store-format.md | docs/ui-states.md) rust=true ;;
+    ui/app/src/transport/bindings.ts | ui/components/src/styles/tokens-parts.css) ui=true app=true rust=true ;;
+    ui/components/src/clauseo/shell.css | ui/components/src/clauseo/room-toolbar.tsx) ui=true app=true rust=true ;;
+    ui/components/src/clauseo/responsive.css) ui=true app=true rust=true ;;
     # Prose. The fast lane still runs and checks it (links, typos, the docs rules).
     *.md | docs/* | LICENSE | LICENSES/* | cla/*) ;;
     # Read by the fast lane alone (formatting, typos, TOML style, licences, secrets, hooks).
@@ -67,8 +83,6 @@ classify() {
       crate=${crate%%/*}
       if is_app_crate "$crate"; then app=true; fi
       ;;
-    # Written by a unit test of the desktop crate (src/commands/bindings.rs).
-    ui/app/src/transport/bindings.ts) ui=true app=true rust=true ;;
     ui/*) ui=true app=true ;;
     *)
       all
@@ -78,13 +92,10 @@ classify() {
 }
 
 while IFS= read -r -d '' p || [ -n "$p" ]; do
-  # Newline-separated input arrives as one record; split it.
-  while IFS= read -r line; do
-    [ -n "$line" ] || continue
-    count=$((count + 1))
-    paths+=("$line")
-    classify "$line"
-  done <<< "$p"
+  [ -n "$p" ] || continue
+  count=$((count + 1))
+  paths+=("$p")
+  classify "$p"
 done
 
 if [ "$count" -eq 0 ]; then
@@ -93,7 +104,8 @@ if [ "$count" -eq 0 ]; then
   product=true
 else
   # One grep, which ui/e2e/scoreboard/comment.test.ts checks against comment.ts's isProductPath.
-  product=$(printf '%s\n' "${paths[@]}" | grep -E '^(crates/|ui/|Cargo\.toml$|Cargo\.lock$)' || true)
+  # A newline inside a path becomes a space first, so no part of a path passes for a path.
+  product=$(printf '%s\n' "${paths[@]//$nl/ }" | grep -E '^(crates/|ui/|Cargo\.toml$|Cargo\.lock$)' || true)
   if [ -n "$product" ]; then product=true; else product=false; fi
 fi
 if [ -n "$unknown" ]; then

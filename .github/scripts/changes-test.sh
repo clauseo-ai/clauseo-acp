@@ -45,8 +45,11 @@ check "$F $F $F $F" fuzz/fuzz_targets/acp.rs fuzz/nightly.sh
 check "$F $T $T $T" ui/app/src/App.tsx
 check "$F $T $T $T" ui/pnpm-lock.yaml ui/e2e/app-windows/smoke.spec.ts
 check "$F $T $T $T" ui/components/button.tsx docs/ui.md
-# The generated TypeScript bindings are a desktop unit test's output.
+# Read by Rust tests (the scan at the end finds every such file).
 check "$T $T $T $T" ui/app/src/transport/bindings.ts
+check "$T $T $T $T" ui/components/src/clauseo/shell.css
+check "$T $F $F $F" docs/decisions/0006-store-format.md
+check "$T $F $F $F" docs/ui-states.md docs/other.md
 
 # Rust in an app crate: everything but the ui flag.
 check "$T $T $F $T" crates/desktop/src/lib.rs
@@ -81,12 +84,11 @@ check "$T $T $T $F" README.md Makefile
 check "$T $T $T $F" crates
 check "$T $T $T $T"
 
-# Newline-separated input gives the same outputs as NUL-separated input.
-got=$(printf 'README.md\ncrates/desktop/src/lib.rs\n' | bash "$script" 2> /dev/null | tr '\n' ' ')
-if [ "$got" != "rust=true app=true ui=false product=true " ]; then
-  echo "FAIL: newline-separated input -> $got"
-  fail=1
-fi
+# A path with a newline in it is one path: "README.md<newline>" is not prose, and
+# "README.md<newline>ui/x" is neither prose nor ui; both are unknown and run everything.
+check "$T $T $T $F" $'README.md\n'
+check "$T $T $T $F" $'README.md\nui/app/src/App.tsx'
+check "$T $T $T $F" $'docs/a.md\ncrates/desktop/src/lib.rs'
 
 # APP_CRATES is clauseo-desktop's path-dependency closure. Each crate's Cargo.toml names a
 # workspace crate as `path = "../<dir>"`; `path = "."` and `path = "src/..."` are its own targets.
@@ -118,7 +120,48 @@ if [ "$want" != "$listed" ]; then
   fail=1
 fi
 
+# Every file outside crates/ that Rust code reads by a relative path must run the Rust jobs:
+# literals that climb out of the crate into ui/ or docs/ (include_str!, or a read from
+# CARGO_MANIFEST_DIR), and every Markdown file a crate include_str!s, wherever it is.
+normalize() { # a/b/../c -> a/c
+  local out=() seg
+  local IFS=/
+  for seg in $1; do
+    case "$seg" in
+      "" | .) ;;
+      ..) [ ${#out[@]} -gt 0 ] && unset 'out[${#out[@]}-1]' ;;
+      *) out+=("$seg") ;;
+    esac
+  done
+  printf '%s\n' "${out[*]}"
+}
+reads=$(
+  grep -rhoE --include='*.rs' '"(\.\./)+(ui|docs)/[^"]+"' crates | tr -d '"' | sed -E 's#^(\.\./)+##'
+  grep -rnoE --include='*.rs' 'include_str!\("[^"]+\.md"\)' crates | while IFS= read -r hit; do
+    file=${hit%%:*}
+    lit=${hit#*include_str!(\"}
+    lit=${lit%\")}
+    normalize "$(dirname "$file")/$lit"
+  done
+)
+reads=$(printf '%s\n' "$reads" | sort -u)
+case "$reads" in
+  *ui/app/src/transport/bindings.ts*) ;;
+  *)
+    echo "FAIL: the scan for files Rust reads found no ui/app/src/transport/bindings.ts; it is broken"
+    fail=1
+    ;;
+esac
+for p in $reads; do
+  rust=$(printf '%s\0' "$p" | bash "$script" 2> /dev/null | sed -n 's/^rust=//p')
+  if [ "$rust" != true ]; then
+    echo "FAIL: Rust code under crates/ reads $p, but changes.sh gives it rust=$rust"
+    fail=1
+  fi
+done
+
 if [ "$fail" -ne 0 ]; then
   exit 1
 fi
-echo "changes.sh: all fixtures pass; APP_CRATES matches clauseo-desktop's closure ($want)"
+echo "changes.sh: all fixtures pass; APP_CRATES matches clauseo-desktop's closure ($want);"
+echo "every file Rust reads outside the crates runs the Rust jobs: $(printf '%s\n' "$reads" | tr '\n' ' ')"
