@@ -3,20 +3,27 @@
 // field keeps its words until the host accepts the question, and after a refusal. The working line says "Answering." while busy, and
 // stands for an error by its code: a lost stream (with Try again when its code is retryable), then a refused command,
 // then "Answering.", then an answer Claude stopped giving (thread-break.ts). The stopped question comes back into the
-// field when the field is empty.
-import { useEffect, useRef } from "react";
-import { Composer, type ComposerHandle } from "@clauseo/components/clauseo/composer.tsx";
+// field when the field is empty. Each conversation keeps its own words (the drafts, by its key); on a new conversation
+// the status line offers the plan to ask with, until its first question fixes it.
+import { useEffect, useImperativeHandle, useRef, type Ref } from "react";
+import {
+  Composer,
+  type ComposerHandle,
+  type PlanChoice,
+} from "@clauseo/components/clauseo/composer.tsx";
 import type { WorkingState } from "@clauseo/components/clauseo/working-line.tsx";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { frame } from "@clauseo/components/lib/words-frame.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
-import type { EntryId, MatterId } from "../../transport/protocol.ts";
+import type { EntryId } from "../../transport/protocol.ts";
 import type { BreakLine } from "../thread-break.ts";
 import type { Drafts } from "./session.ts";
 
 export function WorkComposer({
+  ref,
   drafts,
-  matter,
+  draftKey,
+  choice,
   disabled,
   busy,
   refused,
@@ -26,9 +33,14 @@ export function WorkComposer({
   onAsk,
   onStop,
 }: {
-  /** The room's drafts, by matter: the field starts with this matter's and keeps it there as it changes. */
+  /** The composer's handle, for the room to put the focus in the field. */
+  ref?: Ref<ComposerHandle>;
+  /** The room's drafts, by conversation: the field starts with this one's and keeps it there as it changes. */
   drafts: Drafts;
-  matter: MatterId | null;
+  /** The open conversation's key in the drafts; null with no matter open. */
+  draftKey: string | null;
+  /** A new conversation's plan choice, before its first question; absent once fixed, or with one plan. */
+  choice?: PlanChoice | undefined;
   /** No matter is open. */
   disabled: boolean;
   busy: boolean;
@@ -46,11 +58,22 @@ export function WorkComposer({
 }) {
   const w = useWords();
   const field = useRef<ComposerHandle>(null);
-  // the field holds the words, not React: each change goes straight to the matter's draft
+  useImperativeHandle(
+    ref,
+    () => ({
+      focus: () => field.current?.focus(),
+      text: () => field.current?.text() ?? "",
+      setText: (text: string) => field.current?.setText(text),
+      clear: (only?: string) => field.current?.clear(only),
+      fill: (text: string) => field.current?.fill(text),
+    }),
+    [],
+  );
+  // the field holds the words, not React: each change goes straight to the conversation's draft
   const keep = (text: string) => {
-    if (matter === null) return;
-    if (text === "") drafts.delete(matter);
-    else drafts.set(matter, text);
+    if (draftKey === null) return;
+    if (text === "") drafts.delete(draftKey);
+    else drafts.set(draftKey, text);
   };
   // Enter comes here busy or empty too, and sends nothing then: it never breaks the line
   const ask = (asked: string) => {
@@ -62,8 +85,8 @@ export function WorkComposer({
       // (while an input method composes, the composer holds the clear for the composition's end)
       field.current?.clear(asked);
       // and an accepted question is no draft: the drafts outlive this composer, so this holds when the lawyer has
-      // gone to another matter while the question went
-      if (matter !== null && drafts.get(matter) === asked) drafts.delete(matter);
+      // gone to another conversation while the question went
+      if (draftKey !== null && drafts.get(draftKey) === asked) drafts.delete(draftKey);
     });
   };
   // the stopped question, once per break, and only into an empty field: words typed since keep their place, and fill
@@ -89,17 +112,18 @@ export function WorkComposer({
         : stopped);
   return (
     <Composer
-      // keyed by the matter, so another matter's composer starts from that matter's draft
-      key={matter ?? "none"}
+      // keyed by the conversation, so another's composer starts from that one's draft
+      key={draftKey ?? "none"}
       ref={field}
       took={null}
       plan=""
+      {...(choice === undefined ? {} : { choice })}
       hint={null}
       working={line?.state ?? null}
       opening
       busy={busy}
       onStop={onStop}
-      initialText={matter === null ? "" : (drafts.get(matter) ?? "")}
+      initialText={draftKey === null ? "" : (drafts.get(draftKey) ?? "")}
       onInput={keep}
       onAsk={ask}
       disabled={disabled}

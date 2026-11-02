@@ -171,6 +171,19 @@ function RoomFrame({
     [talks.thread, talks.refused, talks.canRetry, conversations],
   );
   const retried = talks.retried;
+  // a new conversation's plan, offered where the host lists more than one, until its first question fixes it
+  const choice = useMemo(
+    () =>
+      talks.drafting && talks.options.length > 1
+        ? {
+            value: talks.agent,
+            options: talks.options,
+            segmented: talks.options,
+            onValueChange: (agent: string) => conversations.choose(agent),
+          }
+        : undefined,
+    [talks.drafting, talks.options, talks.agent, conversations],
+  );
   const open = view.open;
   const listed = usePapers(matters.next.papers, open?.matter ?? null);
   const papers = listed?.papers ?? null;
@@ -306,7 +319,10 @@ function RoomFrame({
                 transport={transport}
                 matter={open}
                 drafts={drafts}
+                draftKey={talks.open}
                 conversation={link}
+                choice={choice}
+                focus={talks.focus?.n ?? null}
                 onThread={matters.onThread}
               />
             </MarkdownHostContext>

@@ -3,7 +3,8 @@
 // conversation, so each opens fresh, with its own words in the field. The thread's list, its rows and the Markdown renderer are one chunk of
 // their own (chunk.ts, list.tsx), started as Work mounts; the session opens the thread only once it is in, so the
 // rows never wait for it. The composer and the transcript's box are here, for the first paint.
-import { Suspense, useEffect, useMemo } from "react";
+import { Suspense, useEffect, useMemo, useRef } from "react";
+import type { ComposerHandle, PlanChoice } from "@clauseo/components/clauseo/composer.tsx";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { useStreamError, useStreamPart, useViewStore, useWatch } from "../../store/hooks.ts";
@@ -27,19 +28,32 @@ export function Work({
   transport,
   matter,
   drafts,
+  draftKey,
   conversation,
+  choice,
+  focus = null,
   onThread,
 }: {
   transport: HostTransport;
   matter: MatterSummary | null;
   /** The room's composer drafts (room.tsx keeps them above Work's key). */
   drafts: Drafts;
+  /** The open conversation's key in the drafts; null with no matter open. */
+  draftKey: string | null;
   /** The open conversation: its thread, or how its first Ask makes one. */
   conversation: ConversationLink;
+  /** A new conversation's plan choice, before its first question. */
+  choice?: PlanChoice | undefined;
+  /** A request for the field's focus (New conversation, or a conversation pressed): each new number takes it. */
+  focus?: number | null;
   /** Hears the open thread: null until there is one. */
   onThread?: (thread: ThreadId | null) => void;
 }) {
   const store = useViewStore();
+  const field = useRef<ComposerHandle>(null);
+  useEffect(() => {
+    if (focus !== null) field.current?.focus();
+  }, [focus]);
   const session = useThreadSession(transport, store, matter?.matter ?? null, conversation);
   const stream = session.actions.stream;
   useWatch(store, stream);
@@ -74,8 +88,10 @@ export function Work({
         </div>
       </ThreadActionsContext>
       <WorkComposer
+        ref={field}
         drafts={drafts}
-        matter={matter?.matter ?? null}
+        draftKey={draftKey}
+        choice={choice}
         disabled={matter === null}
         busy={busy}
         refused={session.refused}
