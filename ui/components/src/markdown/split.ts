@@ -138,9 +138,31 @@ const LETTER = /\p{L}/u;
  * part never starts with a digit (`1. ` would start a list).
  */
 const WORD = /[\p{L}\p{N}\uFDD1-\uFDE0]/u;
-/** A tag's start (opening or closing), and the tags that start an HTML block running past a blank line. */
-const TAG_START = /^<\/?[A-Za-z]/;
-const BLOCK_TAG = /^<(?:script|pre|style|textarea)[\s>]/i;
+/**
+ * A whole tag (opening or closing) at the start of the text, its quoted attribute values read whole, then
+ * a character that is not a space, tab or line ending: a part starting with it is never an HTML block of
+ * kind 7 (a whole tag alone on its line). It stops at the next `<` (in a quoted value too, where HTML
+ * allows one: no cut there), so trying every `<` of a part reads its text once.
+ */
+const TAG_THEN_TEXT = /^<\/?[A-Za-z][A-Za-z0-9-]*(?:"[^"<]*"|'[^'<]*'|[^"'<>])*>[^ \t\n]/;
+/**
+ * The tag names that start an HTML block of kind 1 (running past a blank line to its end tag) or kind 6
+ * (running to a blank line), CommonMark 0.31.2, 4.6 "HTML blocks", start conditions 1 and 6; ASCII
+ * case-insensitive. A part starting with one would be an HTML block, shown as text (`"Intro " +
+ * "<div>x<sup>1</sup></div>".repeat(300)` showed every `<sup>1</sup>` after the cut as written).
+ */
+const BLOCK_TAG = new RegExp(
+  `^</?(?:${[
+    "script pre style textarea",
+    "address article aside base basefont blockquote body caption center col colgroup dd details dialog dir",
+    "div dl dt fieldset figcaption figure footer form frame frameset h1 h2 h3 h4 h5 h6 head header hr html",
+    "iframe legend li link main menu menuitem nav noframes ol optgroup option p param search section",
+    "summary table tbody td tfoot th thead title tr track ul",
+  ]
+    .join(" ")
+    .replaceAll(" ", "|")})(?:[ \\t\\n/>])`,
+  "i",
+);
 const DIGIT = /\p{N}/u;
 const STAND_IN = /[\uFDD1-\uFDE0]/;
 /** A footnote definition's start: its note must stay one block. */
@@ -150,8 +172,9 @@ const FOOTNOTE_DEFINITION = /^ {0,3}\[\^/;
  * Where to cut a paragraph in (`low`, `high`], or -1: the last place of the first kind there is.
  * 1. After a space, tab or line ending and before a letter: the next part starts with a word, never a
  *    list, heading, quote or fence marker.
- * 2. Before an opening tag's `<` and a letter, then before a closing tag's `</`, not after a backslash
- *    (`"<u>a</u>".repeat(5000)` keeps every pair whole), and never the start of an HTML block of kinds 1 to 5.
+ * 2. Before an opening tag, then before a closing tag, not after a backslash (`"<u>a</u>".repeat(5000)`
+ *    keeps every pair whole): one whose whole tag and the character after it have arrived, and never the
+ *    start of an HTML block (BLOCK_TAG, TAG_THEN_TEXT; kinds 2 to 5 start with `<!` or `<?`).
  * 3. Between two characters of a word: a letter or a stand-in after a letter, digit or stand-in.
  * 4. Before a stand-in, not after a backslash: what capNesting made text (`"](u)".repeat(5000)`).
  * It reads no further than text[high], so once that has arrived a cut never moves as the text grows. Each
@@ -165,8 +188,8 @@ function softCut(text: string, low: number, high: number): number {
   for (const closing of [false, true])
     for (let at = high - 10; at > low; at--)
       if (text[at] === "<" && text[at - 1] !== "\\" && (text[at + 1] === "/") === closing) {
-        const tag = text.slice(at, at + 10);
-        if (TAG_START.test(tag) && !BLOCK_TAG.test(tag)) return at;
+        const tag = text.slice(at, high + 1);
+        if (TAG_THEN_TEXT.test(tag) && !BLOCK_TAG.test(tag)) return at;
       }
   for (let at = high; at > low; at--)
     if (WORD.test(text[at - 1]!) && WORD.test(text[at]!) && !DIGIT.test(text[at]!)) return at;

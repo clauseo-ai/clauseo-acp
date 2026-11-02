@@ -151,6 +151,8 @@ const LONG_PARAGRAPHS = [
   capNesting("^a^".repeat(6000)),
   "<u>a</u>".repeat(2000),
   `Intro.\n\n${"x".repeat(9000)}\n\nOutro.\n`,
+  // A cut before `<div>` or `</div>` would start an HTML block of kind 6 (split.ts, BLOCK_TAG).
+  `Intro ${"<div>x<sup>1</sup></div>".repeat(400)}`,
 ];
 
 test("a paragraph longer than MAX_PARAGRAPH is cut into parts that start with text; the cuts never move", () => {
@@ -167,8 +169,10 @@ test("a paragraph longer than MAX_PARAGRAPH is cut into parts that start with te
     for (const [index, block] of blocks.entries()) {
       expect(block.length).toBeLessThanOrEqual(MAX_PARAGRAPH);
       // A part after a cut starts with a letter, a tag or a stand-in, so it is a paragraph too.
-      if (index > 0 && !blocks[index - 1]!.endsWith("\n\n"))
+      if (index > 0 && !blocks[index - 1]!.endsWith("\n\n")) {
         expect(block).toMatch(/^(?:\p{L}|<\/?[A-Za-z]|[\uFDD1-\uFDE0])/u);
+        expect(block).not.toMatch(/^<\/?(?:div|pre)\b/i);
+      }
     }
   }
   // Tags stay whole: every part is whole pairs.
@@ -231,6 +235,15 @@ test(`past MAX_JOINED (${MAX_JOINED}) characters, a paragraph stays cut finished
   expect(views.map((view) => view.source).join("")).toBe(long);
   const under = long.slice(0, MAX_JOINED - 100);
   expect(createAnswer("u").update(under, false)).toHaveLength(1);
+});
+
+test("a cut is never before a tag that starts an HTML block: every <sup> after it renders", () => {
+  const markdown = `Intro ${"<div>x<sup>1</sup></div>".repeat(300)}`;
+  for (const streaming of [true, false]) {
+    const html = htmlOf(createAnswer("d").update(markdown, streaming));
+    expect(html).not.toContain("&#x3C;sup>");
+    expect(html.match(/<sup>1<\/sup>/g)).toHaveLength(300);
+  }
 });
 
 test("a footnote's definition is never cut, however long its note", () => {
