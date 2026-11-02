@@ -6,10 +6,12 @@ import babel from "@rolldown/plugin-babel";
 import tailwindcss from "@tailwindcss/vite";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
-import { cspMeta } from "./vite.config.ts";
+import { APP_DEFINE, cspMeta } from "./vite.config.ts";
 
 export default defineConfig({
   plugins: [tailwindcss(), react(), babel({ presets: [reactCompilerPreset()] }), cspMeta()],
+  // the version About shows, as the app's build has it
+  define: APP_DEFINE,
   base: "./",
   build: {
     target: "es2022",

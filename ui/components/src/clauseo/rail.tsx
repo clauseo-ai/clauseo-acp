@@ -143,7 +143,7 @@ function FindField({
 /** The rail: matters on the bare ground, grouped by their next date, under a full-width New matter, with Scratch
  * matter, "Quick questions", below a hairline. Pinned matters stand above every date, under "Pinned". With no
  * matters at all, the rail says so. Given find, a field under New matter finds any matter; given settings, the
- * rail's foot links to them. */
+ * rail's foot links to them, and given onSettings, its Settings is a button that opens them (their own window). */
 export function Rail({
   groups,
   pinned = [],
@@ -152,6 +152,7 @@ export function Rail({
   find,
   scratch,
   settings,
+  onSettings,
   notice,
   label,
   testIds,
@@ -174,14 +175,17 @@ export function Rail({
   onEscape?: () => void;
   /** Where Settings lives, linked from the rail's foot. */
   settings?: string;
+  /** Optional: Settings at the rail's foot, pressed: opens them in a window of their own. Given it, Settings is a
+   * button, in the link's place and look. */
+  onSettings?: () => void;
   /** Optional: what sets this rail apart where several stand on one page, added to its name, "Matters, …". */
   label?: string;
   /** Optional: what the room says about Clauseo itself (an update, the first crash, a lab's terms),
    * as a RailNotice, in its own row at the rail's foot above Scratch matter. */
   notice?: ReactNode;
-  /** Optional: test ids for New matter, Find's field and the scratch matter's row (which also carries
-   * data-kind="scratch"). */
-  testIds?: { newMatter?: string; scratch?: string; find?: string };
+  /** Optional: test ids for New matter, Find's field, the scratch matter's row (which also carries
+   * data-kind="scratch") and Settings. */
+  testIds?: { newMatter?: string; scratch?: string; find?: string; settings?: string };
   /** Optional: New matter's button, so a dialog it opens can give focus back to it on close. */
   newMatterRef?: Ref<HTMLButtonElement>;
 }) {
@@ -400,22 +404,36 @@ export function Rail({
         </div>
       )}
       {/* with Settings, the scratch matter and Settings stand on the rail's foot, always in view as the list scrolls */}
-      {settings === undefined && notice === undefined ? (
+      {settings === undefined && onSettings === undefined && notice === undefined ? (
         scratchRow
       ) : (
         <div className="room-rail-foot">
           {notice}
           {scratchRow}
           {/* key caps stand on inline prompts only: the shortcut is named to assistive technology and under the pointer */}
-          {settings !== undefined && (
-            <a
+          {onSettings !== undefined ? (
+            <button
+              type="button"
               className="room-settings"
-              href={settings}
+              onClick={onSettings}
               title={platform === "mac" ? "⌘," : "Ctrl+,"}
               aria-keyshortcuts={platform === "mac" ? "Meta+Comma" : "Control+Comma"}
+              data-testid={testIds?.settings}
             >
               <span className="deva-nudge">{ui(w.lang, "Settings")}</span>
-            </a>
+            </button>
+          ) : (
+            settings !== undefined && (
+              <a
+                className="room-settings"
+                href={settings}
+                title={platform === "mac" ? "⌘," : "Ctrl+,"}
+                aria-keyshortcuts={platform === "mac" ? "Meta+Comma" : "Control+Comma"}
+                data-testid={testIds?.settings}
+              >
+                <span className="deva-nudge">{ui(w.lang, "Settings")}</span>
+              </a>
+            )
           )}
         </div>
       )}

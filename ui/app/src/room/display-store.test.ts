@@ -373,3 +373,143 @@ test("a set the host refuses re-reads the settings and shows what the host holds
     warn.mockRestore();
   }
 });
+
+/* ---------- two windows on one origin, and the store's listeners ---------- */
+
+/** Two windows' stores over one localStorage, each with its own window for storage events. A write in one reaches the
+ * other as the browser delivers it: a `storage` event on every other window, never on the writer's own. */
+function twoWindows(host: { a?: SettingsHost | null; b?: SettingsHost | null } = {}) {
+  const items = new Map<string, string>();
+  const windows = [new EventTarget(), new EventTarget()] as const;
+  const shown: [Display[], Display[]] = [[], []];
+  const make = (at: 0 | 1, settings: SettingsHost | null) =>
+    createDisplayStore({
+      storage: {
+        getItem: (key) => items.get(key) ?? null,
+        setItem: (key, value) => {
+          const old = items.get(key) ?? null;
+          items.set(key, value);
+          const other = windows[at === 0 ? 1 : 0];
+          other.dispatchEvent(new StorageEvent("storage", { key, oldValue: old, newValue: value }));
+        },
+      },
+      matchMedia: null,
+      events: windows[at],
+      host: settings,
+      start: () => {},
+      show: (d) => shown[at].push(d),
+    });
+  return { a: make(0, host.a ?? null), b: make(1, host.b ?? null), items, windows, shown };
+}
+
+test("without a host, a change in one window applies in the other at once, through the storage event", () => {
+  const { a, b, shown } = twoWindows();
+  const heard = vi.fn();
+  b.subscribe(heard);
+  a.set({ theme: "dark", language: "hi", font_size: 20, lite: "lite", motion: "reduced" });
+  expect(b.ui()).toEqual({
+    theme: "dark",
+    language: "hi",
+    font_size: 20,
+    lite: "lite",
+    motion: "reduced",
+  });
+  expect(b.display()).toMatchObject({
+    theme: "night",
+    lang: "hi",
+    textSize: 20,
+    render: "lite",
+    motion: "reduced",
+  });
+  expect(shown[1]).toHaveLength(1);
+  expect(heard).toHaveBeenCalledTimes(1);
+  // and back the other way
+  b.set({ theme: "light" });
+  expect(a.ui().theme).toBe("light");
+  expect(a.display().theme).toBe("day");
+});
+
+test("a storage event for another key is ignored, and clearing the storage brings back the defaults", () => {
+  const { a, b, windows } = twoWindows();
+  a.set({ theme: "dark" });
+  windows[1].dispatchEvent(new StorageEvent("storage", { key: "other", newValue: "{}" }));
+  expect(b.ui().theme).toBe("dark");
+  windows[1].dispatchEvent(new StorageEvent("storage", { key: null }));
+  expect(b.ui()).toEqual(DEFAULT_UI);
+});
+
+test("an unreadable value from the other window shows the defaults", () => {
+  const { b, windows } = twoWindows();
+  windows[1].dispatchEvent(
+    new StorageEvent("storage", { key: DISPLAY_KEY, newValue: "{not json" }),
+  );
+  expect(b.ui()).toEqual(DEFAULT_UI);
+});
+
+test("with a host the storage event is not heard: settings_changed reaches both windows, once each", async () => {
+  const transport = new FakeTransport({
+    next: {
+      query: (query) => {
+        if (query === "get_settings") return { settings: HOST_SETTINGS };
+        throw new Error("not scripted");
+      },
+    },
+  });
+  const settings = nextHostOf(transport).settings;
+  const { a, b, shown } = twoWindows({ a: settings, b: settings });
+  await settled();
+  const before = shown[1].length;
+  const heard = vi.fn();
+  b.subscribe(heard);
+  // the host's answer, as both windows hear it: each writes it to localStorage as the next start's cache, which fires
+  // a storage event in the other window; only the settings_changed applies
+  transport.settingsChanged({ ui: { ...HOST_SETTINGS.ui, theme: "light" }, locked: [] });
+  expect(a.ui().theme).toBe("light");
+  expect(b.ui().theme).toBe("light");
+  expect(shown[1].length).toBe(before + 1);
+  expect(heard).toHaveBeenCalledTimes(1);
+});
+
+test("after dispose the other window's changes no longer arrive", () => {
+  const { a, b } = twoWindows();
+  b.dispose();
+  a.set({ theme: "dark" });
+  expect(b.ui().theme).toBe("system");
+});
+
+test("subscribe hears each change of the settings or the locked keys, not the display alone, until unsubscribed", async () => {
+  const { store, queries } = harness();
+  const heard = vi.fn();
+  const stop = store.subscribe(heard);
+  // theme system to light under a light computer: the display stays day, the settings changed
+  store.set({ theme: "light" });
+  expect(heard).toHaveBeenCalledTimes(1);
+  store.override({ language: "hi" });
+  expect(heard).toHaveBeenCalledTimes(2);
+  queries.reduced.flip(true);
+  store.setPlatform("windows");
+  expect(heard).toHaveBeenCalledTimes(2);
+  stop();
+  store.set({ theme: "dark" });
+  expect(heard).toHaveBeenCalledTimes(2);
+  // a host's settings_changed that changes only the locked keys
+  const { transport, store: hosted } = withHost();
+  await settled();
+  const onHost = vi.fn();
+  hosted.subscribe(onHost);
+  transport.settingsChanged({ ui: HOST_SETTINGS.ui, locked: ["ui.theme"] });
+  expect(hosted.locked()).toEqual(["ui.theme"]);
+  expect(onHost).toHaveBeenCalledTimes(1);
+});
+
+test("connectRoom's store hears the page's storage events, and sets data-frame=own", () => {
+  const transport = new FakeTransport();
+  const store = connectRoom(transport);
+  expect(document.documentElement.dataset["frame"]).toBe("own");
+  window.dispatchEvent(
+    new StorageEvent("storage", { key: DISPLAY_KEY, newValue: JSON.stringify({ font_size: 19 }) }),
+  );
+  expect(store.ui().font_size).toBe(19);
+  expect(document.documentElement.dataset["textSize"]).toBe("19");
+  store.dispose();
+});

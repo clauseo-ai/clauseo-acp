@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import tauriConf from "../../../crates/desktop/tauri.conf.json" with { type: "json" };
+import { PAGES } from "../vite.config.ts";
 
 // The app runs under the production CSP in tauri.conf.json. ui/components' parts must work under it as they are:
 // no inline style or script, no runtime <style>, nothing loaded from the web, fonts as files from the app's own
@@ -51,11 +52,24 @@ test("ui/components writes no HTML strings and adds no <style> at runtime", () =
   expect(found).toEqual([]);
 });
 
-test("the app's page has no inline script or style", () => {
-  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
-  expect(html).not.toMatch(/<style|style=/);
-  for (const m of html.matchAll(/<script([^>]*)>([\s\S]*?)<\/script>/g)) {
-    expect(m[1]).toMatch(/\bsrc=/);
-    expect(m[2]?.trim()).toBe("");
-  }
+// The pages the app ships (vite.config.ts's PAGES): the room's and the settings window's.
+test.each(["index.html", "settings.html"])(
+  "the app's page %s has no inline script or style",
+  (page) => {
+    const html = readFileSync(new URL(`../${page}`, import.meta.url), "utf8");
+    expect(html).not.toMatch(/<style|style=/);
+    const scripts = [...html.matchAll(/<script([^>]*)>([\s\S]*?)<\/script>/g)];
+    expect(scripts.length).toBe(1);
+    for (const m of scripts) {
+      expect(m[1]).toMatch(/\bsrc=/);
+      expect(m[2]?.trim()).toBe("");
+    }
+  },
+);
+
+test("the pages checked for inline script or style are every page the build makes", () => {
+  expect(Object.values(PAGES).map((path) => path.split("/").pop())).toEqual([
+    "index.html",
+    "settings.html",
+  ]);
 });

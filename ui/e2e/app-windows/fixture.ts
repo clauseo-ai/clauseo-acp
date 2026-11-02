@@ -238,6 +238,42 @@ async function firstPage(browser: Browser, deadline: number): Promise<Page> {
   }
 }
 
+/**
+ * The pages of the app's windows whose URL path ends with `page` (`"settings.html"`), across every
+ * CDP context: each Tauri window is a page of the one WebView2 browser.
+ */
+export function pagesAt(app: App, page: string): Page[] {
+  return app.browser
+    .contexts()
+    .flatMap((context) => context.pages())
+    .filter((p) => {
+      try {
+        return new URL(p.url()).pathname.endsWith(`/${page}`);
+      } catch {
+        return false;
+      }
+    });
+}
+
+/**
+ * The page of another window of the app, once WebView2 has opened it: the first page whose URL
+ * path ends with `page` (the settings window's `"settings.html"`). Rejects after `timeoutMs`.
+ */
+export async function windowAt(app: App, page: string, timeoutMs = 15_000): Promise<Page> {
+  const deadline = performance.now() + timeoutMs;
+  for (;;) {
+    const found = pagesAt(app, page)[0];
+    if (found !== undefined) {
+      await found.waitForLoadState("domcontentloaded");
+      return found;
+    }
+    if (performance.now() + RETRY_MS > deadline) {
+      throw new Error(`no window at ${page} opened within ${timeoutMs} ms`);
+    }
+    await wait(RETRY_MS);
+  }
+}
+
 /** Ends the process tree rooted at `pid`, by PID only. */
 async function killTree(pid: number): Promise<void> {
   await promisify(execFile)("taskkill", ["/pid", String(pid), "/T", "/F"], {

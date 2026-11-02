@@ -94,6 +94,7 @@ export function RoomRail({
   onStartNew,
   newMatterRef,
   onEscape,
+  onSettings,
 }: {
   matters: Matters;
   view: MattersView;
@@ -114,6 +115,9 @@ export function RoomRail({
   newMatterRef: Ref<HTMLButtonElement>;
   /** Escape inside the rail. */
   onEscape: () => void;
+  /** Settings at the rail's foot, pressed; left out where there is no settings window to open (outside the desktop
+   * app), and the rail draws no Settings. */
+  onSettings?: (() => void) | undefined;
 }) {
   const w = useWords();
   const { now, zone } = view;
@@ -227,7 +231,8 @@ export function RoomRail({
           })}
       empty={view.phase === "ready"}
       onEscape={onEscape}
-      testIds={{ newMatter: "new-matter", find: "find" }}
+      {...(onSettings === undefined ? {} : { onSettings })}
+      testIds={{ newMatter: "new-matter", find: "find", settings: "open-settings" }}
     />
   );
 }

@@ -1,7 +1,8 @@
 import babel from "@rolldown/plugin-babel";
 import tailwindcss from "@tailwindcss/vite";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
-import { defineConfig, type Plugin } from "vite";
+import { fileURLToPath } from "node:url";
+import { defineConfig, type Plugin, type ViteBuilder } from "vite";
 import { configDefaults } from "vitest/config";
 import { BaseSequencer, type TestSpecification } from "vitest/node";
 import tauriConf from "../../crates/desktop/tauri.conf.json" with { type: "json" };
@@ -106,6 +107,26 @@ export function cspMeta(): Plugin {
   };
 }
 
+/** The compile-time constants every build of the app carries: the version About shows (src/settings/version.ts), from
+ * tauri.conf.json, its one home. vite.review.config.ts takes them too. */
+export const APP_DEFINE = { __CLAUSEO_VERSION__: JSON.stringify(tauriConf.version) };
+
+/** The pages the release build makes, each its own entry with its own first load: the room, and the settings window.
+ * The dev-only pages (gallery.html, parts.html, review.html) are not among them, so none of them ships. */
+export const PAGES = {
+  index: fileURLToPath(new URL("./index.html", import.meta.url)),
+  settings: fileURLToPath(new URL("./settings.html", import.meta.url)),
+};
+
+/** One page's build: its HTML the only input, and everything its entry imports statically one chunk, its first
+ * load, named after the page. */
+function pageBuild(page: keyof typeof PAGES) {
+  return {
+    input: { [page]: PAGES[page] },
+    output: { codeSplitting: { groups: [{ name: page, tags: ["$initial" as const] }] } },
+  };
+}
+
 /** The mode of `pnpm build:probe`. */
 const PROBE = "probe";
 
@@ -121,6 +142,7 @@ function probeEntry(): Plugin {
       order: "pre",
       handler(html) {
         const entry = '"/src/main.tsx"';
+        // the probe builds index.html alone (its input), the only page with this entry
         if (!html.includes(entry))
           throw new Error(`index.html has no ${entry} for the probe build to replace`);
         return html.replace(entry, '"/src/room/probe-main.tsx"');
@@ -258,11 +280,10 @@ export default defineConfig(({ mode }) => {
       ...(probe ? [probeEntry()] : []),
     ],
     // the probe is the room with the hooks for checks by hand (room/start.ts's HAND_CHECKS), which the probe runs
-    ...(probe
-      ? {
-          define: { "import.meta.env.VITE_CLAUSEO_HAND_CHECKS": JSON.stringify("1") },
-        }
-      : {}),
+    define: {
+      ...APP_DEFINE,
+      ...(probe ? { "import.meta.env.VITE_CLAUSEO_HAND_CHECKS": JSON.stringify("1") } : {}),
+    },
     server: {
       // Tauri's devUrl. The watcher stays out of the Rust crates and the multi-GB target folders, and out of
       // ui/app/components, the link to ui/components for oxlint: Vite already watches those files by their real path.
@@ -280,11 +301,31 @@ export default defineConfig(({ mode }) => {
       // own, so the first load is several files, and each new lazy chunk that imports shared modules changes the
       // split. On U8's unmerged branch (a new lazy chunk, Versions), initialJs rose by 2.8 KB brotli with the default
       // splitting.
-      rolldownOptions: {
-        output: { codeSplitting: { groups: [{ name: "index", tags: ["$initial"] }] } },
-      },
-      ...(probe ? { outDir: "dist-probe" } : {}),
+      ...(probe ? { rolldownOptions: pageBuild("index"), outDir: "dist-probe" } : {}),
     },
+    // Each page is a build of its own (an environment), so each first load is one chunk holding everything it needs,
+    // and neither holds the other's code. One build of both pages would put what both import (React, the display
+    // store) in a chunk of its own: the room's first load rose from 162.7 to 167.7 KB brotli that way, 1.5 KB of it
+    // the imports between the chunks and the rest brotli compressing each alone. The cost is that copy on disk.
+    // `vite build` builds every environment (`builder`), the room's first so it empties dist/; the probe is the room
+    // alone (probeEntry).
+    ...(probe
+      ? {}
+      : {
+          environments: {
+            client: { build: { rolldownOptions: pageBuild("index") } },
+            settings: {
+              consumer: "client" as const,
+              build: { emptyOutDir: false, rolldownOptions: pageBuild("settings") },
+            },
+          },
+          builder: {
+            async buildApp(builder: ViteBuilder) {
+              for (const name of ["client", "settings"])
+                await builder.build(builder.environments[name]!);
+            },
+          },
+        }),
     // The colouring worker (ui/components markdown/highlight/) as an ES module, so each Shiki grammar stays its own
     // chunk and loads when a block in that language first colours. The default `iife` cannot split, and inlines every
     // grammar into the worker: 862 KB.

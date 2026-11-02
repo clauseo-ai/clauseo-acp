@@ -112,6 +112,18 @@ describe("TauriTransport", () => {
     ]);
   });
 
+  test("open_settings asks the host to open or focus the settings window; a refusal rejects as a HostError", async () => {
+    const t = new TauriTransport({ warn: () => {} });
+    await expect(t.openSettings()).resolves.toBeUndefined();
+    expect(invoked.filter((i) => i.command === "open_settings")).toHaveLength(1);
+    answers.set("open_settings", () => Promise.reject("command open_settings not allowed"));
+    await expect(t.openSettings()).rejects.toEqual({
+      code: "internal",
+      message: "command open_settings not allowed",
+      retryable: false,
+    });
+  });
+
   test("a declined confirm and a refused open or reveal reject with the host's error", async () => {
     const declined = { code: "transport.unauthorized", message: "declined", retryable: false };
     const missing = { code: "matter.folder_missing", message: "gone", retryable: false };

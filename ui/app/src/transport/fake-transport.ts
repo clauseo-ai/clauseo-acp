@@ -57,6 +57,7 @@ export type FakeCall =
   | { call: "open_external"; url: string }
   | { call: "open_file"; file: FileRefId }
   | { call: "reveal"; target: RevealTarget }
+  | { call: "open_settings" }
   | { call: "next_query"; query: NextQuery }
   | { call: "next_command"; command: NextCommand };
 
@@ -81,6 +82,9 @@ export type FakeHost = {
   openExternal?: (url: string) => void | Promise<void>;
   openFile?: (file: FileRefId) => void | Promise<void>;
   reveal?: (target: RevealTarget) => void | Promise<void>;
+  /** With it, the fake has the settings window (`openSettings`), and this answers each open; throwing refuses. Without
+   * it the fake has no `openSettings`, like a host without the window. Read when the fake is made. */
+  openSettings?: () => void | Promise<void>;
   /** Answers each subscribe; throwing refuses it. */
   subscribe?: (stream: StreamId, after: ViewPosition | null) => void;
   platform?: DisplayInfo["platform"];
@@ -101,6 +105,8 @@ export class FakeTransport implements HostTransport, NextHostSource {
   readonly #dispatched = new Set<(command: CommandEnvelope) => void>();
   readonly #settingsHeard = new Set<(settings: Settings) => void>();
   readonly #appHeard = new Set<(event: AppEvent) => void>();
+  /** H14's settings window, when `host.openSettings` scripts it. */
+  readonly openSettings: (() => Promise<void>) | undefined;
   readonly #parts: { [P in NextPart]-?: NonNullable<NextHost[P]> } = {
     papers: {
       listPapers: async (matter) => {
@@ -177,6 +183,13 @@ export class FakeTransport implements HostTransport, NextHostSource {
 
   constructor(host: FakeHost = {}) {
     this.host = host;
+    this.openSettings =
+      host.openSettings === undefined
+        ? undefined
+        : async () => {
+            this.calls.push({ call: "open_settings" });
+            await this.#answer(() => this.host.openSettings?.());
+          };
     this.#subs = new Subscriptions(
       {
         subscribe: async (stream, after) => {
