@@ -6,7 +6,7 @@ import { DEFAULT_UI } from "./display-store.ts";
 import { uuid } from "../testing/stream-script.ts";
 import {
   WIRE,
-  type AgentInfo,
+  type AgentSummary,
   type MatterInfo,
   type NextPart,
   type PaperSummary,
@@ -37,7 +37,7 @@ export function fakeNext({
   matters: () => readonly MatterInfo[];
   papers?: readonly PaperSummary[];
   threads?: (matter: MatterId) => readonly ThreadInfo[];
-  agents?: readonly AgentInfo[];
+  agents?: readonly AgentSummary[];
   location?: string | null;
   command?: FakeNextHost["command"];
   parts?: readonly NextPart[];

@@ -3,7 +3,7 @@
 // (session.ts's ThreadActions), so it draws nothing where the host can't retry. It shows under the pointer or with
 // focus, as the design's does. The question row places it (thread/rows.tsx's Question, for live questions only);
 // until that row carries it, nothing renders it but the copy review.
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { IconUndo } from "@clauseo/components/icons/icons.tsx";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
@@ -24,6 +24,8 @@ export function RetryFromHere({
   const { lang } = useWords();
   const { retry } = useThreadActions();
   const [going, setGoing] = useState(false);
+  // two presses in one moment send one retry: the ref holds before React renders the state
+  const sending = useRef(false);
   if (retry === undefined) return null;
   return (
     <Button
@@ -39,11 +41,15 @@ export function RetryFromHere({
       aria-disabled={going || undefined}
       data-testid="retry-from-here"
       onClick={() => {
-        if (going) return;
+        if (sending.current) return;
+        sending.current = true;
         setGoing(true);
         retry(message, at)
           .catch((error: unknown) => console.warn(`retry_from failed: ${JSON.stringify(error)}`))
-          .finally(() => setGoing(false));
+          .finally(() => {
+            sending.current = false;
+            setGoing(false);
+          });
       }}
     >
       <IconUndo size={16} />

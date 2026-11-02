@@ -10,6 +10,7 @@ import type { TextSize } from "@clauseo/components/lib/display.ts";
 import type { AppFeedSource, HostTransport } from "../transport/host-transport.ts";
 import type {
   AgentId,
+  AgentKind,
   ErrorCode,
   FolderRefId,
   HostError,
@@ -97,9 +98,9 @@ export type ThreadInfo = ThreadSummary & {
 
 /* ---------- R15: the agents ---------- */
 
-/** An agent the settings set up, as R15's `list_agents` lists it (its shape until R15's record lands: the settings key
- * alone). */
-export type AgentInfo = { agent: AgentId };
+/** An agent the settings set up, as R15's `list_agents` lists it (`AgentSummary`, clauseo-acp #154): its settings key,
+ * and its kind where the id has one (none for, say, `fake-agent`). Sorted by id. */
+export type AgentSummary = { id: AgentId; kind?: AgentKind };
 
 /** H20: where a matter goes, with the default location the host makes `<location>/<name>` in. */
 export type NextMatterSource = MatterSource | "default_location";
@@ -133,7 +134,7 @@ export type NextQueryResult =
   | { matters: MatterInfo[] }
   | { threads: ThreadInfo[] }
   | { default_location: { display: string } }
-  | { agents: AgentInfo[] };
+  | { agents: AgentSummary[] };
 
 /** The commands of H5, H3, H6 and H20 for matters. */
 export type MattersCommand =
@@ -245,7 +246,7 @@ export interface RestartHost {
 
 /** R15: the agents the settings set up, for the composer's plan choice. */
 export interface AgentsHost {
-  listAgents(): Promise<AgentInfo[]>;
+  listAgents(): Promise<AgentSummary[]>;
 }
 
 /** H13: Retry from here. */

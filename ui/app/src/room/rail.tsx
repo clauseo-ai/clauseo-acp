@@ -63,7 +63,7 @@ function conversationRows(
     return {
       id: row.key,
       title: titleOf(row),
-      agent: planName(row.agent ?? talks.agent),
+      agent: planName(row.agent ?? talks.agent, talks.agents),
       state: words.state,
       ...extra,
       current: row.key === talks.open,

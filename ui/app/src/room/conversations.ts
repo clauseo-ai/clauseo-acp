@@ -31,7 +31,7 @@ import type {
   Timestamp,
 } from "../transport/protocol.ts";
 import { agentFor, matterPlan, planOptions } from "./agent.ts";
-import type { AgentInfo, AppEvent, NextHost, ThreadInfo, ThreadsChanged } from "./host-next.ts";
+import type { AgentSummary, AppEvent, NextHost, ThreadInfo, ThreadsChanged } from "./host-next.ts";
 import type { Matters } from "./matters.ts";
 
 /** A thread as a row knows it: the list's summary, with H6's marks where given. */
@@ -74,6 +74,8 @@ export type ConversationsView = {
   drafting: boolean;
   /** The plan the rows are measured against: the oldest thread's (agent.ts's matterPlan). */
   plan: string | undefined;
+  /** The agents the host lists (R15), for the plan names. */
+  agents: readonly AgentSummary[];
   /** The composer's plan choice for a draft: the agents the host lists (R15), none with one or none. */
   options: readonly { value: AgentId; label: string }[];
   /** The agent the draft would run: the lawyer's choice, else agent.ts's order. */
@@ -147,7 +149,7 @@ export class Conversations {
   readonly #focused: () => boolean;
   readonly #by = new Map<MatterId, MatterState>();
   readonly #listeners = new Set<() => void>();
-  #agents: AgentInfo[] = [];
+  #agents: AgentSummary[] = [];
   #current: MatterState | null = null;
   #n = 0;
   /** Each held thread's header as last read: what changed, and which views went. */
@@ -527,7 +529,8 @@ export class Conversations {
 
   #make(): ConversationsView {
     const m = this.#current;
-    const options = planOptions(this.#agents);
+    const agents = this.#agents;
+    const options = planOptions(agents);
     if (m === null)
       return {
         matter: null,
@@ -538,6 +541,7 @@ export class Conversations {
         thread: null,
         drafting: false,
         plan: undefined,
+        agents,
         options,
         agent: agentFor({ chosen: null, setting: null, threads: [] }),
         canRetry: this.#next.retry !== null,
@@ -567,7 +571,8 @@ export class Conversations {
       open: m.open,
       thread,
       drafting: m.phase !== "loading" && thread === null,
-      plan: matterPlan(listed),
+      plan: matterPlan(listed, agents),
+      agents,
       options,
       agent: this.#agentOf(m),
       canRetry: this.#next.retry !== null,

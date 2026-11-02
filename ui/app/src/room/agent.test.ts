@@ -1,6 +1,6 @@
 // agent.ts: the agent a new conversation runs, the plan name a row shows, the matter's plan, and the composer's plan options.
 import { expect, test } from "vitest";
-import type { AgentInfo } from "./host-next.ts";
+import type { AgentSummary } from "./host-next.ts";
 import { agentFor, DEFAULT_AGENT, matterPlan, planName, planOptions } from "./agent.ts";
 
 // v7 UUID strings: the greater string is the newer thread
@@ -49,14 +49,28 @@ test("matterPlan: undefined with no threads", () => {
 });
 
 test("planOptions: two agents give two options, labelled by plan", () => {
-  const agents: AgentInfo[] = [{ agent: "claude-acp" }, { agent: "codex-acp" }];
+  const agents: AgentSummary[] = [
+    { id: "claude-acp", kind: "claude" },
+    { id: "codex-acp", kind: "codex" },
+  ];
   expect(planOptions(agents)).toEqual([
     { value: "claude-acp", label: "Claude" },
     { value: "codex-acp", label: "ChatGPT" },
   ]);
 });
 
+test("planName goes by the listed kind, not the id; an agent of no kind is its id", () => {
+  const agents: AgentSummary[] = [{ id: "work-plan", kind: "codex" }, { id: "fake-agent" }];
+  expect(planName("work-plan", agents)).toBe("ChatGPT");
+  expect(planName("fake-agent", agents)).toBe("fake-agent");
+  expect(planOptions(agents)).toEqual([
+    { value: "work-plan", label: "ChatGPT" },
+    { value: "fake-agent", label: "fake-agent" },
+  ]);
+  expect(matterPlan([{ thread: T1, agent: "work-plan" }], agents)).toBe("ChatGPT");
+});
+
 test("planOptions: one agent is no choice, so none; no agents, none", () => {
-  expect(planOptions([{ agent: "claude-acp" }])).toEqual([]);
+  expect(planOptions([{ id: "claude-acp", kind: "claude" }])).toEqual([]);
   expect(planOptions([])).toEqual([]);
 });
