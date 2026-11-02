@@ -15,6 +15,8 @@ import type {
 } from "../transport/protocol.ts";
 import { titleOf } from "./conversation-title.ts";
 import { Conversations } from "./conversations.ts";
+import { fakeNext } from "./fake-next.ts";
+import type { AgentSummary } from "./host-next.ts";
 import { RetryFromHere } from "./retry-from-here.tsx";
 import { ThreadActionsContext, type ThreadActions } from "./thread/session.ts";
 import { clockOf } from "./when.ts";
@@ -269,4 +271,103 @@ test("RetryFromHere: a press calls retry(message, at) once, even pressed twice b
   await act(async () => r.button()?.click());
   expect(retry).toHaveBeenCalledTimes(2);
   await r.done();
+});
+
+/* ---------- the composer per conversation ---------- */
+
+const field = () => h!.one("composer") as HTMLTextAreaElement | null;
+const newRow = () =>
+  rows().find((r) => r.querySelector(".room-conv-title")?.textContent === "New conversation");
+
+test("each conversation keeps its own words in the field", async () => {
+  h = await mountRoom({
+    threads: [thread(T1, { title: "Lease notice" }), thread(T2, { title: "Indemnity" })],
+  });
+  await h.type("About the indemnity");
+  await h.click(rowOf("Lease notice"));
+  expect(field()?.value).toBe("");
+  await h.type("About the notice");
+  await h.click(rowOf("Indemnity"));
+  expect(field()?.value).toBe("About the indemnity");
+  await h.click(rowOf("Lease notice"));
+  expect(field()?.value).toBe("About the notice");
+});
+
+test("a New conversation with words survives leaving it; an empty one is dropped", async () => {
+  h = await mountRoom({ threads: [thread(T1, { title: "Lease notice" })] });
+  // empty: gone once left
+  await h.click(h.one("new-conversation"));
+  expect(newRow()).toBeDefined();
+  await h.click(rowOf("Lease notice"));
+  expect(newRow()).toBeUndefined();
+  // with words: its row stays, and its words come back
+  await h.click(h.one("new-conversation"));
+  await h.type("Draft a reply to the bank");
+  await h.click(rowOf("Lease notice"));
+  expect(newRow()).toBeDefined();
+  expect(field()?.value).toBe("");
+  await h.click(newRow());
+  expect(newRow()?.getAttribute("aria-current")).toBe("true");
+  expect(field()?.value).toBe("Draft a reply to the bank");
+  expect(h.sent("create_thread")).toEqual([]);
+});
+
+test("the field takes focus after New conversation and after a row is pressed, not on first load", async () => {
+  h = await mountRoom({
+    threads: [thread(T1, { title: "Lease notice" }), thread(T2, { title: "Indemnity" })],
+  });
+  expect(field()).not.toBeNull();
+  expect(document.activeElement).not.toBe(field());
+  await h.click(h.one("new-conversation"));
+  expect(document.activeElement).toBe(field());
+  (document.activeElement as HTMLElement | null)?.blur();
+  await h.click(rowOf("Lease notice"));
+  expect(document.activeElement).toBe(field());
+});
+
+/* ---------- the plan to ask with ---------- */
+
+const planSwitch = () => h!.host.querySelector<HTMLElement>('[aria-label="Plan to ask with"]');
+const planButton = (label: string) =>
+  [...(planSwitch()?.querySelectorAll("button") ?? [])].find((b) => b.textContent?.includes(label));
+
+const withAgents = (agents: AgentSummary[]) =>
+  fakeNext({ matters: () => [], agents, parts: ["agents"] });
+
+const TWO: AgentSummary[] = [
+  { id: "claude-acp", kind: "claude" },
+  { id: "codex-acp", kind: "codex" },
+];
+
+test("a new conversation offers the plan where the host lists two; ChatGPT chosen makes the thread with codex-acp, and the switch goes", async () => {
+  h = await mountRoom({
+    threads: [thread(T1, { title: "Lease notice", agent: "claude-acp" })],
+    next: withAgents(TWO),
+    dispatch: (command) =>
+      command.create_thread !== undefined
+        ? { thread_created: { thread: MADE } }
+        : defaultOutcome(command),
+  });
+  // an existing thread: no switch
+  expect(planSwitch()).toBeNull();
+  await h.click(h.one("new-conversation"));
+  expect(planSwitch()).not.toBeNull();
+  expect(planButton("Claude")).toBeDefined();
+  await h.click(planButton("ChatGPT"));
+  await h.type("Summarise the indemnity clause");
+  await h.key({ key: "Enter", keyCode: 13 });
+  await h.settle();
+  expect(h.sent("create_thread")).toEqual([{ matter: THE_MATTER.matter, agent: "codex-acp" }]);
+  expect(planSwitch()).toBeNull();
+});
+
+test("with one agent listed the switch never shows", async () => {
+  h = await mountRoom({
+    threads: [thread(T1, { title: "Lease notice" })],
+    next: withAgents([{ id: "claude-acp", kind: "claude" }]),
+  });
+  expect(planSwitch()).toBeNull();
+  await h.click(h.one("new-conversation"));
+  expect(newRow()).toBeDefined();
+  expect(planSwitch()).toBeNull();
 });
