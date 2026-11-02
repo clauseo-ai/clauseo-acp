@@ -40,6 +40,8 @@ function windowsRun(scale: number): RawRun {
     memory_after_session_mb: 240 * scale,
     react_commits_per_frame: 1.5,
     ipc_bytes_per_text_byte: 2.5 * scale,
+    viewport_width_px: 1280,
+    viewport_height_px: 800,
   };
 }
 

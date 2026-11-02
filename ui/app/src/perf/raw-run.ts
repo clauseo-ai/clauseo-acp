@@ -17,6 +17,9 @@ export interface RawRun {
   react_commits_per_frame: number | null;
   /** Channel bytes during the session per UTF-8 byte of answer text (report only, #153). */
   ipc_bytes_per_text_byte: number | null;
+  /** The page's innerWidth and innerHeight in CSS px during the session (recorded, not scored). */
+  viewport_width_px: number | null;
+  viewport_height_px: number | null;
 }
 
 export type RunParts = {
@@ -28,6 +31,8 @@ export type RunParts = {
   /** `perf_channel_bytes` before `startStream` and after `stopStream`. */
   channelBytesBefore: number;
   channelBytesAfter: number;
+  /** The page's innerWidth and innerHeight at the send; null where there is no window. */
+  viewport: { width: number; height: number } | null;
 };
 
 /** The run's RawRun. IPC bytes per text byte is null when the answer held no text. */
@@ -46,5 +51,7 @@ export function rawRun(p: RunParts): RawRun {
     react_commits_per_frame: p.stream.react_commits_per_frame,
     ipc_bytes_per_text_byte:
       text === 0 ? null : (p.channelBytesAfter - p.channelBytesBefore) / text,
+    viewport_width_px: p.viewport?.width ?? null,
+    viewport_height_px: p.viewport?.height ?? null,
   };
 }

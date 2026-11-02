@@ -112,6 +112,8 @@ test("a play reads the run the app wrote to MARKS_OUT, and fails on a non-zero e
     memory_after_session_mb: 190,
     react_commits_per_frame: 1.2,
     ipc_bytes_per_text_byte: 2.1,
+    viewport_width_px: 1280,
+    viewport_height_px: 800,
   };
   const app = join(base, "app.sh");
   // Writes the run only if the settings name the scoreboard scenario, as the real session needs.

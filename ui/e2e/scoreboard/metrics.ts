@@ -128,6 +128,12 @@ export interface RawRun {
    * `startStream` and after `stopStream`) over the UTF-8 bytes of the answer text at the end.
    */
   ipc_bytes_per_text_byte: number | null;
+  /**
+   * The page's `innerWidth` and `innerHeight` in CSS px during the session: 1280 by 800 when the
+   * e2e or marks build opened at its size, less where the screen clamped it. Recorded, not scored.
+   */
+  viewport_width_px: number | null;
+  viewport_height_px: number | null;
 }
 
 const RAW_KEYS = [
@@ -142,6 +148,8 @@ const RAW_KEYS = [
   "memory_after_session_mb",
   "react_commits_per_frame",
   "ipc_bytes_per_text_byte",
+  "viewport_width_px",
+  "viewport_height_px",
 ] as const satisfies readonly (keyof RawRun)[];
 
 /** Every key of {@link RawRun}, in order: the list ui/app's autoplay mirrors. */
