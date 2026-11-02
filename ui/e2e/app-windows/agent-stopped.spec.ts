@@ -35,14 +35,13 @@ test.describe("on exit-mid-turn", () => {
 
     // asking again: send_prompt relaunches the agent and the host accepts the question as a new
     // turn. The scenario's second launch can't answer: the relaunch sends session/load for the
-    // stored session, and exit-mid-turn's handshake expects session/new only, so this checks the
-    // new turn starts, not that it answers (the next test does, on exit-mid-turn-then-load).
+    // stored session, and exit-mid-turn's handshake expects session/new only, so that launch exits
+    // at once and the new turn fails too, putting the question back in the field. How soon is the
+    // runner's, so this checks only that the new turn starts; the field emptying, the stopped line
+    // going and the answer are the next test's, on exit-mid-turn-then-load.
     await w.send.click();
     await expect(w.userMessages).toHaveCount(2);
     await expect(w.userMessages.last()).toContainText(QUESTION);
-    await expect(w.composer).toHaveValue("");
-    await expect(w.error).toBeHidden();
-    await expect(w.agentStopped).toBeHidden();
     await expect(w.agentMessages.first()).toHaveText(CHUNK);
   });
 });
