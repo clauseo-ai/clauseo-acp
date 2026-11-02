@@ -7,7 +7,8 @@
 //!   built-in MCP server (`agent-browser mcp --tools core`, v0.41.1). It starts agent-browser with
 //!   an environment built from scratch, relays stdio both ways, and refuses tool calls whose
 //!   arguments would undo Clauseo's isolation. `docs/decisions/0029-browser.md` is the record.
-//! - The one place the crate creates folders (`write.rs`) and starts a process
+//! - The one place the crate creates folders (`write.rs`; the Unix socket folder under `/tmp`
+//!   is made with mode 0700 and checked in `browser_guard/socket.rs`) and starts a process
 //!   (`browser_guard/relay.rs`, `spawn_child`).
 //!
 //! # Interface
@@ -16,8 +17,9 @@
 //!   exit code, or a [`Failure`] for `main` to print. `main.rs` holds the table of modes.
 //! - The command line: `clauseo-mcp browser-guard --agent-browser <file> --cwd <folder> --
 //!   <agent-browser args...>`. Exit 2 for a bad command line or a missing or invalid variable;
-//!   1 when a folder cannot be made or agent-browser cannot start, or when agent-browser was
-//!   killed by a signal; otherwise agent-browser's own exit code.
+//!   1 when a folder cannot be made or agent-browser cannot start, when agent-browser was
+//!   killed (by a signal, by the guard after its exit wait, or for a line over 64 MiB);
+//!   otherwise agent-browser's own exit code. Exit 2 also for an unsafe Unix socket folder.
 //!
 //! # Invariants
 //!
@@ -30,8 +32,8 @@
 //!
 //! # Depends on
 //!
-//! `serde_json` alone. `tests/guard/deps.rs` fails if an HTTP client, a TLS crate, tokio or
-//! tauri becomes reachable.
+//! `serde_json` alone. `tests/guard/deps.rs` fails if an HTTP client, a socket or TLS crate, an
+//! async runtime or tauri becomes reachable.
 //!
 //! # Start reading
 //!

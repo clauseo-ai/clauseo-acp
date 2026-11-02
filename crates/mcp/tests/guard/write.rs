@@ -25,6 +25,19 @@ pub(crate) fn remove_dir_all(path: impl AsRef<Path>) -> io::Result<()> {
     std::fs::remove_dir_all(path)
 }
 
+/// `fs::set_permissions` with a Unix mode.
+#[cfg(unix)]
+pub(crate) fn set_mode(path: impl AsRef<Path>, mode: u32) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+}
+
+/// `os::unix::fs::symlink`.
+#[cfg(unix)]
+pub(crate) fn symlink(target: impl AsRef<Path>, link: impl AsRef<Path>) -> io::Result<()> {
+    std::os::unix::fs::symlink(target, link)
+}
+
 /// `fs::canonicalize`, to compare the folder a child reports (symlinks resolved, as on macOS's
 /// `/var`) with the one the test gave; both sides go through it.
 pub(crate) fn resolved(path: impl AsRef<Path>) -> io::Result<std::path::PathBuf> {

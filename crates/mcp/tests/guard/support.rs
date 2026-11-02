@@ -14,14 +14,15 @@ use crate::write;
 /// The guard binary under test.
 pub(crate) const GUARD: &str = env!("CARGO_BIN_EXE_clauseo-mcp");
 
-/// The session id the tests give the guard.
-pub(crate) const SESSION: &str = "thread-1_A";
 /// The proxy the tests give the guard.
 pub(crate) const PROXY: &str = "http://127.0.0.1:9";
 
-/// A folder under the system temp folder, unique per test and process, removed on drop.
+/// A folder under the system temp folder, unique per test and process, removed on drop, with
+/// the host's config and Chrome stand-in files in it. Each also has its own session id, whose
+/// first 16 characters name the Unix socket folder `/tmp/clauseo-ab-<id>`, removed on drop too.
 pub(crate) struct Scratch {
     path: PathBuf,
+    session: String,
 }
 
 impl Scratch {
@@ -31,7 +32,24 @@ impl Scratch {
             write::remove_dir_all(&path).unwrap();
         }
         write::create_dir_all(path.join("state")).unwrap();
-        Self { path }
+        write::write(path.join("agent-browser.json"), "{}").unwrap();
+        write::write(path.join("chrome"), "not chrome").unwrap();
+        // FNV-1a of the test's name, then the process id: 16 hex characters, unique per test.
+        let hash = test.bytes().fold(0x811c_9dc5_u32, |hash, byte| {
+            (hash ^ u32::from(byte)).wrapping_mul(0x0100_0193)
+        });
+        let session = format!("{hash:08x}{:08x}-t", std::process::id());
+        Self { path, session }
+    }
+
+    /// The session id this test gives the guard.
+    pub(crate) fn session(&self) -> &str {
+        &self.session
+    }
+
+    /// The socket folder the guard uses on Unix.
+    pub(crate) fn socket_dir(&self) -> PathBuf {
+        PathBuf::from(format!("/tmp/clauseo-ab-{}", &self.session[..16]))
     }
 
     pub(crate) fn path(&self) -> &Path {
@@ -62,6 +80,13 @@ impl Drop for Scratch {
         if let Err(error) = write::remove_dir_all(&self.path) {
             eprintln!("could not remove {}: {error}", self.path.display());
         }
+        let socket_dir = self.socket_dir();
+        if cfg!(unix)
+            && std::fs::symlink_metadata(&socket_dir).is_ok()
+            && let Err(error) = write::remove_dir_all(&socket_dir)
+        {
+            eprintln!("could not remove {}: {error}", socket_dir.display());
+        }
     }
 }
 
@@ -91,7 +116,10 @@ pub(crate) fn host_env(scratch: &Scratch) -> Vec<(String, String)> {
         ),
         ("AGENT_BROWSER_PROXY".to_owned(), PROXY.to_owned()),
         ("AGENT_BROWSER_EXECUTABLE_PATH".to_owned(), path("chrome")),
-        ("AGENT_BROWSER_SESSION".to_owned(), SESSION.to_owned()),
+        (
+            "AGENT_BROWSER_SESSION".to_owned(),
+            scratch.session().to_owned(),
+        ),
     ]
 }
 
@@ -199,7 +227,8 @@ impl Guard {
         (self.child.wait().unwrap(), rest)
     }
 
-    fn stderr_text(&mut self) -> String {
+    /// Reads stderr to its end; call once stdout has ended.
+    pub(crate) fn stderr_text(&mut self) -> String {
         let mut text = String::new();
         drop(self.stderr.read_to_string(&mut text));
         text

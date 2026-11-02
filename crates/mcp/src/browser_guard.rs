@@ -2,13 +2,17 @@
 //! <agent-browser args...>`.
 //!
 //! In order: read the command line (exit 2 on anything else), build the child's environment from
-//! the host's variables (`env.rs`; exit 2 naming a missing or invalid one), make the folders
-//! under `--cwd` the variables point at, then start agent-browser and relay (`relay.rs`), checking
-//! each agent line (`filter.rs`). `docs/decisions/0029-browser.md` gives every rule its reason.
+//! the host's variables (`env.rs`; exit 2 naming a missing or invalid one), on Unix make or
+//! check the socket folder under `/tmp` (`socket.rs`; exit 2 if it is unsafe or too long), make
+//! the folders under `--cwd` the variables point at, then start agent-browser and relay
+//! (`relay.rs`), checking each agent line (`filter.rs`). `docs/decisions/0029-browser.md` gives
+//! every rule its reason.
 
 mod env;
 mod filter;
 mod relay;
+#[cfg(any(unix, test))]
+mod socket;
 
 use std::ffi::OsString;
 use std::io;
@@ -45,6 +49,18 @@ pub fn run(args: &[OsString]) -> Result<i32, Failure> {
             message: format!("clauseo-mcp browser-guard: {error}"),
         },
     )?;
+    #[cfg(unix)]
+    {
+        let session = env
+            .get(env::SESSION)
+            .and_then(|value| value.to_str())
+            .unwrap_or_default();
+        let dir = env::socket_dir(env::Os::Unix, &command.cwd, session);
+        socket::prepare(&dir, &command.cwd, session).map_err(|reason| Failure {
+            code: EXIT_USAGE,
+            message: format!("clauseo-mcp browser-guard: {reason}"),
+        })?;
+    }
     for folder in env::folders(env::Os::CURRENT, &command.cwd) {
         make_folder(&folder).map_err(|error| Failure {
             code: EXIT_FAILED,
@@ -54,7 +70,7 @@ pub fn run(args: &[OsString]) -> Result<i32, Failure> {
             ),
         })?;
     }
-    relay::run(
+    let outcome = relay::run(
         &command.agent_browser,
         &command.child_args,
         &command.cwd,
@@ -66,7 +82,18 @@ pub fn run(args: &[OsString]) -> Result<i32, Failure> {
             "clauseo-mcp browser-guard: cannot run {}: {error}",
             command.agent_browser.display()
         ),
-    })
+    })?;
+    match outcome {
+        relay::Outcome::Exited(code) => Ok(code),
+        relay::Outcome::ChildLineTooLong => Err(Failure {
+            code: EXIT_FAILED,
+            message: format!(
+                "clauseo-mcp browser-guard: agent-browser wrote a line over {} bytes; the guard \
+                 killed it",
+                relay::CHILD_MAX_LINE_BYTES
+            ),
+        }),
+    }
 }
 
 /// Exactly `--agent-browser <file> --cwd <folder> -- <args...>`, in that order, each path

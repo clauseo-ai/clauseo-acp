@@ -27,10 +27,17 @@ pub(crate) const CONFIG: &str = "AGENT_BROWSER_CONFIG";
 pub(crate) const PROXY: &str = "AGENT_BROWSER_PROXY";
 /// The Chrome the host chose.
 pub(crate) const EXECUTABLE_PATH: &str = "AGENT_BROWSER_EXECUTABLE_PATH";
-/// The Clauseo session id; also the namespace.
+/// The Clauseo session id. `AGENT_BROWSER_NAMESPACE` is never set: it would put the socket at
+/// `<socket dir>/namespaces/<ns>/run/<session>.sock` (`connection.rs:136-141`), past the Unix
+/// limit, and the socket folder is per session already.
 pub(crate) const SESSION: &str = "AGENT_BROWSER_SESSION";
-/// Set to the session value, whatever the guard's own environment says.
-pub(crate) const NAMESPACE: &str = "AGENT_BROWSER_NAMESPACE";
+/// The socket folder: `/tmp/clauseo-ab-<session prefix>` on Unix, `<cwd>\run` on Windows.
+pub(crate) const SOCKET_DIR: &str = "AGENT_BROWSER_SOCKET_DIR";
+/// The prefix of the Unix socket folder; the first [`SOCKET_DIR_SESSION_CHARS`] characters of
+/// the session follow it.
+const UNIX_SOCKET_DIR_PREFIX: &str = "/tmp/clauseo-ab-";
+/// How much of the session names the Unix socket folder.
+const SOCKET_DIR_SESSION_CHARS: usize = 16;
 
 /// Values fixed in the guard, whatever its environment says.
 pub(crate) const FIXED: &[(&str, &str)] = &[
@@ -70,17 +77,17 @@ const PASS_WINDOWS: &[&str] = &[
     "USERPROFILE",
 ];
 
-/// Folders under `--cwd`, each named by the variables that point at it.
+/// Folders under `--cwd`, each named by the variables that point at it. The Unix socket folder
+/// is not among them: see [`socket_dir`].
 const FOLDERS_UNIX: &[(&str, &[&str])] = &[
     ("downloads", &["AGENT_BROWSER_DOWNLOAD_PATH"]),
-    ("run", &["AGENT_BROWSER_SOCKET_DIR"]),
     ("screenshots", &["AGENT_BROWSER_SCREENSHOT_DIR"]),
     ("home", &["HOME"]),
     ("tmp", &["TMPDIR"]),
 ];
 const FOLDERS_WINDOWS: &[(&str, &[&str])] = &[
     ("downloads", &["AGENT_BROWSER_DOWNLOAD_PATH"]),
-    ("run", &["AGENT_BROWSER_SOCKET_DIR"]),
+    ("run", &[SOCKET_DIR]),
     ("screenshots", &["AGENT_BROWSER_SCREENSHOT_DIR"]),
     ("tmp", &["TEMP", "TMP"]),
 ];
@@ -91,6 +98,18 @@ pub(crate) fn folders(os: Os, cwd: &Path) -> Vec<PathBuf> {
         .iter()
         .map(|(name, _)| cwd.join(name))
         .collect()
+}
+
+/// Unix: `/tmp/clauseo-ab-<first 16 characters of the session>`, short enough for the socket
+/// path (`socket.rs` makes and checks it). Windows: `<cwd>\run`, one of [`folders`].
+pub(crate) fn socket_dir(os: Os, cwd: &Path, session: &str) -> PathBuf {
+    match os {
+        Os::Unix => {
+            let prefix = session.get(..SOCKET_DIR_SESSION_CHARS).unwrap_or(session);
+            PathBuf::from(format!("{UNIX_SOCKET_DIR_PREFIX}{prefix}"))
+        }
+        Os::Windows => cwd.join("run"),
+    }
 }
 
 fn folder_table(os: Os) -> &'static [(&'static str, &'static [&'static str])] {
@@ -146,7 +165,7 @@ pub(crate) struct EnvError {
 #[derive(Debug, PartialEq, Eq)]
 enum Problem {
     Missing,
-    NotAbsolute,
+    NotFile,
     NotProxy,
     NotSession,
 }
@@ -156,7 +175,10 @@ impl fmt::Display for EnvError {
         let name = self.name;
         match self.problem {
             Problem::Missing => write!(f, "{name} is not set; the host sets it"),
-            Problem::NotAbsolute => write!(f, "{name} must be an absolute path"),
+            Problem::NotFile => write!(
+                f,
+                "{name} must be the absolute path of an existing file, not a network or device path"
+            ),
             Problem::NotProxy => write!(
                 f,
                 "{name} must be exactly http://127.0.0.1:<port>, the port from 1 to 65535 with no \
@@ -174,16 +196,23 @@ pub(crate) fn build(
     os: Os,
     cwd: &Path,
 ) -> Result<BTreeMap<String, OsString>, EnvError> {
-    let config = required(source, os, CONFIG, is_absolute_path, Problem::NotAbsolute)?;
-    let proxy = required(source, os, PROXY, is_loopback_proxy, Problem::NotProxy)?;
-    let executable = required(
+    let config = required(source, os, CONFIG, is_local_file, Problem::NotFile)?;
+    let proxy = required(
         source,
         os,
-        EXECUTABLE_PATH,
-        is_absolute_path,
-        Problem::NotAbsolute,
+        PROXY,
+        |v, _| is_loopback_proxy(v),
+        Problem::NotProxy,
     )?;
-    let session = required(source, os, SESSION, is_session, Problem::NotSession)?;
+    let executable = required(source, os, EXECUTABLE_PATH, is_local_file, Problem::NotFile)?;
+    let session = required(
+        source,
+        os,
+        SESSION,
+        |v, _| is_session(v),
+        Problem::NotSession,
+    )?;
+    let session_text = session.to_str().unwrap_or_default();
 
     let mut env = BTreeMap::new();
     let mut set = |name: &str, value: &OsStr| {
@@ -193,7 +222,7 @@ pub(crate) fn build(
     set(PROXY, proxy);
     set(EXECUTABLE_PATH, executable);
     set(SESSION, session);
-    set(NAMESPACE, session);
+    set(SOCKET_DIR, socket_dir(os, cwd, session_text).as_os_str());
     for (name, value) in FIXED {
         set(name, OsStr::new(value));
     }
@@ -226,6 +255,8 @@ pub(crate) fn build(
             let root = source
                 .get(os, "SystemRoot")
                 .unwrap_or(OsStr::new(DEFAULT_SYSTEM_ROOT));
+            // Windows networking needs SystemRoot; set it when the guard's own lacks it.
+            set("SystemRoot", root);
             let mut path = root.to_owned();
             path.push(r"\System32;");
             path.push(root);
@@ -239,7 +270,7 @@ fn required<'a>(
     source: &'a Source,
     os: Os,
     name: &'static str,
-    valid: fn(&OsStr) -> bool,
+    valid: fn(&OsStr, Os) -> bool,
     problem: Problem,
 ) -> Result<&'a OsStr, EnvError> {
     let Some(value) = source.get(os, name) else {
@@ -248,16 +279,30 @@ fn required<'a>(
             problem: Problem::Missing,
         });
     };
-    if valid(value) {
+    if valid(value, os) {
         Ok(value)
     } else {
         Err(EnvError { name, problem })
     }
 }
 
-/// An absolute path by this platform's rules (`C:\...` on Windows, `/...` elsewhere).
-fn is_absolute_path(value: &OsStr) -> bool {
-    Path::new(value).is_absolute()
+/// An existing file at an absolute path by this platform's rules (`C:\...` on Windows, `/...`
+/// elsewhere). On Windows, a path starting with two slashes or backslashes in any mix (a network
+/// share `\\host\share`, or a device path `\\?\`, `\\.\`) or with `\??` is refused before
+/// anything touches it, since reading a network path reaches the network.
+fn is_local_file(value: &OsStr, os: Os) -> bool {
+    if os == Os::Windows {
+        let Some(text) = value.to_str() else {
+            return false;
+        };
+        let mut chars = text.chars();
+        let slash = |c: Option<char>| matches!(c, Some('\\' | '/'));
+        if (slash(chars.next()) && slash(chars.next())) || text.starts_with("\\??") {
+            return false;
+        }
+    }
+    let path = Path::new(value);
+    path.is_absolute() && path.is_file()
 }
 
 /// Exactly `http://127.0.0.1:<port>`: the port 1 to 65535 in decimal with no leading zero, and

@@ -1,7 +1,7 @@
 use std::ffi::OsStr;
 use std::path::Path;
 
-use super::{Os, Source, build, is_loopback_proxy, is_session};
+use super::{Os, Source, build, is_local_file, is_loopback_proxy, is_session, socket_dir};
 
 /// Absolute by this platform's rules, so the same tests run on every OS.
 fn abs(name: &str) -> String {
@@ -12,11 +12,20 @@ fn abs(name: &str) -> String {
     }
 }
 
+/// An existing file at an absolute path: this test binary.
+fn existing_file() -> String {
+    std::env::current_exe()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_owned()
+}
+
 fn required() -> Vec<(&'static str, String)> {
     vec![
-        ("AGENT_BROWSER_CONFIG", abs("agent-browser.json")),
+        ("AGENT_BROWSER_CONFIG", existing_file()),
         ("AGENT_BROWSER_PROXY", "http://127.0.0.1:8080".to_owned()),
-        ("AGENT_BROWSER_EXECUTABLE_PATH", abs("chrome")),
+        ("AGENT_BROWSER_EXECUTABLE_PATH", existing_file()),
         ("AGENT_BROWSER_SESSION", "s-1_A".to_owned()),
     ]
 }
@@ -92,17 +101,31 @@ fn each_required_variable_missing_is_named() {
 #[test]
 fn each_required_variable_invalid_is_named() {
     let cwd = abs("cwd");
-    for (name, bad, words) in [
+    let cases: [(&str, &str, &str); 7] = [
         (
             "AGENT_BROWSER_CONFIG",
             "relative/agent-browser.json",
-            "must be an absolute path",
+            "must be the absolute path of an existing file",
         ),
-        ("AGENT_BROWSER_CONFIG", "", "must be an absolute path"),
+        (
+            "AGENT_BROWSER_CONFIG",
+            "",
+            "must be the absolute path of an existing file",
+        ),
+        (
+            "AGENT_BROWSER_CONFIG",
+            &abs("missing.json"),
+            "must be the absolute path of an existing file",
+        ),
         (
             "AGENT_BROWSER_EXECUTABLE_PATH",
             "chrome",
-            "must be an absolute path",
+            "must be the absolute path of an existing file",
+        ),
+        (
+            "AGENT_BROWSER_EXECUTABLE_PATH",
+            &abs("missing-chrome"),
+            "must be the absolute path of an existing file",
         ),
         (
             "AGENT_BROWSER_PROXY",
@@ -110,7 +133,8 @@ fn each_required_variable_invalid_is_named() {
             "must be exactly http://127.0.0.1:<port>",
         ),
         ("AGENT_BROWSER_SESSION", "../x", "must be 1 to 64 of"),
-    ] {
+    ];
+    for (name, bad, words) in cases {
         let source = source_with(&[(name, bad)], name);
         let error = build(&source, Os::CURRENT, Path::new(&cwd))
             .unwrap_err()
@@ -129,6 +153,7 @@ fn unix_map_is_exactly_the_allow_list() {
             ("NO_PROXY", "*"),
             ("AGENT_BROWSER_ARGS", "--foo"),
             ("AGENT_BROWSER_NAMESPACE", "other"),
+            ("AGENT_BROWSER_SOCKET_DIR", "/elsewhere"),
             ("AGENT_BROWSER_IDLE_TIMEOUT_MS", "1"),
             ("PATH", "/evil"),
             ("HOME", "/Users/lawyer"),
@@ -149,7 +174,6 @@ fn unix_map_is_exactly_the_allow_list() {
             "AGENT_BROWSER_EXECUTABLE_PATH",
             "AGENT_BROWSER_IDLE_TIMEOUT_MS",
             "AGENT_BROWSER_MAX_OUTPUT",
-            "AGENT_BROWSER_NAMESPACE",
             "AGENT_BROWSER_PROXY",
             "AGENT_BROWSER_PROXY_BYPASS",
             "AGENT_BROWSER_SCREENSHOT_DIR",
@@ -167,7 +191,10 @@ fn unix_map_is_exactly_the_allow_list() {
             "https_proxy",
         ]
     );
-    assert_eq!(get(&env, "AGENT_BROWSER_NAMESPACE"), "s-1_A");
+    assert_eq!(
+        get(&env, "AGENT_BROWSER_SOCKET_DIR"),
+        "/tmp/clauseo-ab-s-1_A"
+    );
     assert_eq!(get(&env, "HTTP_PROXY"), "http://127.0.0.1:8080");
     assert_eq!(get(&env, "http_proxy"), "http://127.0.0.1:8080");
     assert_eq!(get(&env, "AGENT_BROWSER_IDLE_TIMEOUT_MS"), "600000");
@@ -236,5 +263,45 @@ fn windows_names_match_without_case_and_appear_once() {
 fn windows_path_falls_back_to_c_windows() {
     let env = build(&source_with(&[], ""), Os::Windows, Path::new("/s")).unwrap();
     assert_eq!(get(&env, "PATH"), r"C:\Windows\System32;C:\Windows");
-    assert!(!env.contains_key("SystemRoot"));
+    assert_eq!(get(&env, "SystemRoot"), r"C:\Windows");
+}
+
+#[test]
+fn the_unix_socket_folder_is_short_and_windows_keeps_cwd_run() {
+    let cwd = Path::new("/state/browser");
+    assert_eq!(
+        socket_dir(Os::Unix, cwd, "s-1"),
+        Path::new("/tmp/clauseo-ab-s-1")
+    );
+    let session = format!("0123456789abcdef{}", "z".repeat(48));
+    assert_eq!(
+        socket_dir(Os::Unix, cwd, &session),
+        Path::new("/tmp/clauseo-ab-0123456789abcdef")
+    );
+    assert_eq!(socket_dir(Os::Windows, cwd, &session), cwd.join("run"));
+    let env = build(&source_with(&[], ""), Os::Windows, cwd).unwrap();
+    assert_eq!(
+        &env["AGENT_BROWSER_SOCKET_DIR"],
+        cwd.join("run").as_os_str()
+    );
+    assert!(!env.contains_key("AGENT_BROWSER_NAMESPACE"));
+}
+
+#[test]
+fn windows_refuses_network_and_device_paths_before_touching_them() {
+    let file = existing_file();
+    assert!(is_local_file(OsStr::new(&file), Os::Unix));
+    assert!(is_local_file(OsStr::new(&file), Os::Windows));
+    for bad in [
+        r"\\host\share\chrome.exe",
+        "//host/share/chrome.exe",
+        r"\/host/share",
+        r"/\host\share",
+        r"\\?\C:\chrome.exe",
+        r"\\.\pipe\x",
+        r"\??\C:\chrome.exe",
+    ] {
+        assert!(!is_local_file(OsStr::new(bad), Os::Windows), "{bad}");
+    }
+    assert!(!is_local_file(OsStr::new(&abs("missing")), Os::Unix));
 }
