@@ -205,6 +205,8 @@ describe("autoplay", () => {
       memory_after_session_mb: 60,
       react_commits_per_frame: 1,
       ipc_bytes_per_text_byte: 2,
+      viewport_width_px: window.innerWidth,
+      viewport_height_px: window.innerHeight,
     });
   });
 

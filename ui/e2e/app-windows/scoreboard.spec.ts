@@ -195,6 +195,7 @@ async function play(app: App, stop: (app: App) => Promise<void>, n: number): Pro
   if (startup.t0EpochMs === null) throw new Error("the page has no __CLAUSEO_PERF__.t0EpochMs");
 
   await openMatter(w);
+  const viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
 
   const keys = await test.step("type the prompt", async () => {
     await page.evaluate(() => window.__clauseoPerf!.startKeystrokes());
@@ -235,6 +236,8 @@ async function play(app: App, stop: (app: App) => Promise<void>, n: number): Pro
     memory_after_session_mb: afterSession,
     react_commits_per_frame: sample.react_commits_per_frame,
     ipc_bytes_per_text_byte: sample.answer_text_bytes > 0 ? bytes / sample.answer_text_bytes : null,
+    viewport_width_px: viewport.width,
+    viewport_height_px: viewport.height,
   } satisfies RawRun;
   // Written before the checks, so a run they refuse can still be read.
   writeRunFile(playName(n), raw);

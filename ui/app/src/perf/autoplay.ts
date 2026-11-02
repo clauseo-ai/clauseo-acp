@@ -283,6 +283,8 @@ async function play(d: AutoplayDeps, state: { step: string; expired: boolean; se
   await until("Send enabled", () => enabled(byId(doc, "send")));
 
   step("send");
+  const view = doc.defaultView;
+  const viewport = view === null ? null : { width: view.innerWidth, height: view.innerHeight };
   const channelBytesBefore = await perf.channelBytes();
   perf.startStream();
   need(doc, "send").click();
@@ -348,5 +350,6 @@ async function play(d: AutoplayDeps, state: { step: string; expired: boolean; se
     afterMemoryMb,
     channelBytesBefore,
     channelBytesAfter,
+    viewport,
   });
 }

@@ -135,6 +135,8 @@ const run = (raf: number[] | null): RawRun => ({
   memory_after_session_mb: 105,
   react_commits_per_frame: 1.9,
   ipc_bytes_per_text_byte: 5,
+  viewport_width_px: 1280,
+  viewport_height_px: 800,
 });
 
 test("heldPace: a stream up to twice the paced 13 s held it; a longer one did not", () => {
