@@ -89,7 +89,7 @@ pub(super) fn user_message(
     state.index.users.insert(event.message, seq);
     // A steer into the running turn is not a prompt of its own turn.
     if state.running != Some(event.turn) {
-        state.index.unstarted.insert(event.turn, seq);
+        state.index.set_unstarted(event.turn, seq);
     }
     insert_entry(state, seq, ViewEntry::UserMessage(entry), out);
     if state.running.is_none() {

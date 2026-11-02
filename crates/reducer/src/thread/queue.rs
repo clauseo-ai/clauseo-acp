@@ -49,7 +49,7 @@ pub(super) fn mark_prompt(
     status: UserMessageStatus,
     out: &mut Applied,
 ) {
-    let Some(order) = state.index.unstarted.get(&turn).copied() else {
+    let Some(order) = state.index.unstarted(turn) else {
         return;
     };
     if let Some(ViewEntry::UserMessage(prompt)) = state.entries.get_mut(&order)
@@ -67,7 +67,7 @@ pub(super) fn settle_prompt(
     out: &mut Applied,
 ) {
     mark_prompt(state, turn, status, out);
-    state.index.unstarted.remove(&turn);
+    state.index.take_unstarted(turn);
 }
 
 /// A queued prompt's content is replaced and it shows as edited.
@@ -127,7 +127,7 @@ pub(super) fn steer_resolved(state: &mut ThreadState, event: &SteerResolved, out
         && state.running != Some(turn)
         && !state.index.steps.contains_key(&turn)
     {
-        state.index.unstarted.insert(turn, order);
+        state.index.set_unstarted(turn, order);
     }
     for tool_call in &event.aside {
         set_aside(state, *tool_call, event.message, out);

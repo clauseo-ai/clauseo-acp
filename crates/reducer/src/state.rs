@@ -251,9 +251,10 @@ pub(crate) struct Index {
     pub(crate) elicitations: HashMap<ElicitationId, Seq>,
     pub(crate) steps: HashMap<TurnId, Seq>,
     pub(crate) limit_stops: HashMap<TurnId, Seq>,
-    /// The prompt of each turn that has neither started nor ended, by turn: queued, launching,
-    /// or waiting for the writer.
-    pub(crate) unstarted: HashMap<TurnId, Seq>,
+    /// The prompt of each turn that has neither started nor ended (queued, launching, or waiting
+    /// for the writer), by its prompt's order. A short list (the queue holds at most ten), so a
+    /// scan beats hashing on the fold's hot path, where every turn adds and removes one.
+    pub(crate) unstarted: Vec<(TurnId, Seq)>,
     /// Pending permissions and elicitations.
     pub(crate) waiting: u32,
     /// Messages a delta opened that no `TextAppended` has confirmed yet.
@@ -333,8 +334,30 @@ impl Index {
                 && running != Some(user.turn)
                 && !self.steps.contains_key(&user.turn)
             {
-                self.unstarted.insert(user.turn, *order);
+                self.set_unstarted(user.turn, *order);
             }
+        }
+    }
+
+    /// The order of `turn`'s prompt while the turn has not started.
+    pub(crate) fn unstarted(&self, turn: TurnId) -> Option<Seq> {
+        self.unstarted
+            .iter()
+            .find_map(|(id, order)| (*id == turn).then_some(*order))
+    }
+
+    /// Records `turn`'s prompt at `order`, kept sorted by order so a rebuilt index equals the
+    /// folded one.
+    pub(crate) fn set_unstarted(&mut self, turn: TurnId, order: Seq) {
+        self.take_unstarted(turn);
+        let at = self.unstarted.partition_point(|(_, other)| *other < order);
+        self.unstarted.insert(at, (turn, order));
+    }
+
+    /// Forgets `turn`'s prompt: its turn started or ended.
+    pub(crate) fn take_unstarted(&mut self, turn: TurnId) {
+        if let Some(at) = self.unstarted.iter().position(|(id, _)| *id == turn) {
+            self.unstarted.remove(at);
         }
     }
 }
