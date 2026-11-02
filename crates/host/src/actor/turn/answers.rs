@@ -11,7 +11,7 @@ use clauseo_protocol::{
 };
 
 use super::super::commands::{AfterCommand, CommandCtx};
-use super::super::{Actor, Tag};
+use super::super::{Actor, Tag, limits};
 use super::out::Out;
 use super::{Then, TurnTag, spawn, state};
 use crate::error::Error;
@@ -56,6 +56,7 @@ pub(super) fn answer_permission(
         key,
         option: option_id,
     };
+    limits::asking_changed(actor);
     let mut out = Out::new(actor, thread, Some(ctx.id))?;
     let resolved = PermissionResolved {
         request,
@@ -176,6 +177,7 @@ pub(super) fn answer_elicitation(
         key,
         response,
     };
+    limits::asking_changed(actor);
     let mut out = Out::new(actor, thread, Some(ctx.id))?;
     let resolved = ElicitationResolved {
         elicitation,
