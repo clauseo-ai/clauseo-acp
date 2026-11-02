@@ -122,9 +122,11 @@ export function VersionPanel({
     const row = list.current?.querySelector<HTMLElement>(
       `.ver-entry[data-at="${opening.current.at}"]`,
     );
-    (
-      row ?? nav.current?.querySelector<HTMLElement>("button:not(:disabled), [tabindex='0']")
-    )?.focus();
+    // the first control in tab order: an enabled element whose tabIndex is 0
+    const first = Array.from(nav.current?.querySelectorAll<HTMLElement>("*") ?? []).find(
+      (el) => el.tabIndex === 0 && !el.matches(":disabled"),
+    );
+    (row ?? first)?.focus();
   }, []);
 
   // each day's heading casts the pinned edge while its versions pass under it
