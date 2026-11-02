@@ -12,9 +12,10 @@ use crate::observe::ended_with;
 use crate::permissions::until_first_request;
 use crate::support::{Dir, FAKE, Scenario, matter_with_thread, wait};
 
-/// The display batch: armed by a message's first delta, so seeing it armed means the agent's
-/// first chunk reached the host.
-const DISPLAY: Duration = Duration::from_millis(16);
+/// The durable batch: armed by a message's first un-durable delta, so seeing it armed means the
+/// agent's first chunk reached the host. (The display shows that chunk at once, so no display
+/// timer is armed for it.)
+const DURABLE: Duration = Duration::from_millis(250);
 /// The cancel fallback.
 const CANCEL_WAIT: Duration = Duration::from_secs(5);
 
@@ -99,7 +100,7 @@ fn cancel_drops_late_updates() {
     let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], FAKE);
     let mut events = host.events(StreamId::Thread(thread));
     let (first, _) = host.prompt(thread, "Find the cap.");
-    host.wait_armed(DISPLAY);
+    host.wait_armed(DURABLE);
     assert_eq!(
         host.ok(HostCommand::Cancel { thread }),
         CommandOutcome::Done
@@ -152,7 +153,7 @@ fn cancel_unanswered_ends_after_5_s() {
     let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], FAKE);
     let mut events = host.events(StreamId::Thread(thread));
     let (turn, _) = host.prompt(thread, "Find the cap.");
-    host.wait_armed(DISPLAY);
+    host.wait_armed(DURABLE);
     assert_eq!(
         host.ok(HostCommand::Cancel { thread }),
         CommandOutcome::Done

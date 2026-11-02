@@ -10,8 +10,6 @@ use clauseo_protocol::{
 use crate::observe::{Events, ended_with};
 use crate::support::{Dir, FAKE, Scenario, matter_with_thread};
 
-/// The display batch: the view gets coalesced text this long after the first delta.
-const DISPLAY: Duration = Duration::from_millis(16);
 /// The durable batch: `TextAppended` is committed this long after the first un-durable delta.
 const DURABLE: Duration = Duration::from_millis(250);
 
@@ -103,8 +101,8 @@ fn prompt_turn_event_order() {
 
 /// Uses `cancel-unanswered` rather than `prompt-stream`: its one answer chunk is followed by a
 /// wait for `session/cancel`, so the prompt cannot end (and flush the text) while the test is
-/// still looking at the 16 ms mark. `prompt-stream` answers at once and has two messages, the
-/// first of which goes durable when the second one starts.
+/// still looking at the clock. `prompt-stream` answers at once and has two messages, the first
+/// of which goes durable when the second one starts.
 #[test]
 fn text_reaches_view_before_durable() {
     let dir = Dir::new(
@@ -121,11 +119,10 @@ fn text_reaches_view_before_durable() {
     let is_text = |event: &DomainEvent| matches!(event, DomainEvent::TextAppended(_));
 
     host.prompt(thread, "Summarise the cap.");
-    // The first delta arms the display timer, then the durable one, on the host thread. Moving
-    // the clock between the two would arm the durable timer 16 ms late, so wait for both.
-    host.wait_armed(DISPLAY);
+    // The first delta is shown at once, and arms only the durable timer. The clock does not move
+    // in this test until the durable batch, so the text reaching the view proves it did not wait
+    // for a display timer.
     host.wait_armed(DURABLE);
-    host.clock.advance(DISPLAY);
     view.until("the answer text in the view", |v| v.mentions("The clause "));
     host.settle();
     events.drain_ready();
@@ -136,7 +133,7 @@ fn text_reaches_view_before_durable() {
         events.dump()
     );
 
-    host.clock.advance(DURABLE.checked_sub(DISPLAY).unwrap());
+    host.clock.advance(DURABLE);
     events.until("a TextAppended", |e| e.count(is_text) >= 1);
     host.settle();
     events.drain_ready();

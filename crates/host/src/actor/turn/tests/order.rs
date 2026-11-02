@@ -121,7 +121,8 @@ fn delta_order_matches_pipelined_seq() {
         };
         apply_text_delta(thread, &delta).map(drop)
     };
-    text.flush_display(&mut show).unwrap();
+    text.flush_display(std::time::Duration::ZERO, &mut show)
+        .unwrap();
     let provisional = order_of(&state, message).expect("the delta opened the message");
 
     // The durable flush sends its `TextAppended` first in the next commit.
@@ -136,7 +137,9 @@ fn delta_order_matches_pipelined_seq() {
         };
         apply_text_delta(thread, &delta).map(drop)
     };
-    let appended = text.flush_durable(&mut show).unwrap();
+    let appended = text
+        .flush_durable(std::time::Duration::ZERO, &mut show)
+        .unwrap();
     let mut draft = Draft::new();
     let mut seqs = Vec::new();
     for event in appended {

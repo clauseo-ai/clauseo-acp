@@ -32,8 +32,8 @@ Clauseo app process (Rust)
    forwards it over `async-channel` to the host thread. Rust-side validation is the security boundary.
 3. The host checks it against current state, assigns the next gapless `seq` in the event's stream
    (a thread's or a matter's), and commits the event to `store` before acting or publishing. Text
-   deltas are the exception: they reach the screen in 16 ms batches
-   and disk in batches of at most 250 ms.
+   deltas are the exception: they reach the screen at once after a quiet 16 ms, else at most
+   once per 16 ms, and disk in batches of at most 250 ms.
 4. `reducer` folds events into thread and matter state and view patches (`Upsert`, `Remove`,
    `AppendText`, `Reset`), each with a per-stream `cursor`.
 5. The host sends patches to each subscribed window over its Channel. The webview applies only the

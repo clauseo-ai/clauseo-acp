@@ -152,7 +152,8 @@ until `StepUndone` is durable; a failed undo commit is retried once, as a turn's
   Waiting for each commit (about 4 ms under fullfsync) would cap a stream near 250 commits a
   second. Results are applied and published in `seq` order, only after `Ok`. After a failure the
   stream sends nothing until its in-flight commits return; no `seq` is reused.
-- Coalescing per thread on the host's clock: deltas reach the screen in one 16 ms display batch;
+- Coalescing per thread on the host's clock: a delta after a quiet 16 ms reaches the screen at once,
+  and deltas inside the window reach it in one trailing display flush at the window's end;
   they are committed as one `TextAppended` per message every 250 ms, at 8 KiB buffered, before any
   other event, at turn end and at shutdown. Per session, past 2,000 updates in one second, tool
   call patches merge per tool call and replace-style updates keep the last value.

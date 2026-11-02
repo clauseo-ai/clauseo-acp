@@ -1,6 +1,8 @@
 //! Text coalescing on the host clock: the 16 ms display batch, which shows text through
 //! `apply_text_delta` with the stream's pending head as `pending_seq`, and the 250 ms durable
-//! batch (or 8 KiB), which commits one `TextAppended` per message in first-delta order.
+//! batch (or 8 KiB), which commits one `TextAppended` per message in first-delta order. The
+//! display batch leads: text that comes after a quiet 16 ms is shown when it arrives, and text
+//! inside the window is shown by one timer at the window's end.
 
 use std::time::Duration;
 
@@ -31,8 +33,12 @@ pub(super) fn on_delta(actor: &mut Actor, thread: ThreadId, delta: TextIn) -> Re
     if let Some(at) = pushed.durable_at {
         arm(actor, thread, at.saturating_sub(now), TimerKind::Durable);
     }
+    // A full durable flush shows everything held, so the display flush below is not needed then.
     if pushed.full {
         Out::new(actor, thread, None)?.send(actor, Then::Nothing)?;
+    } else if pushed.display_now {
+        show_display(actor, thread, now);
+        end::check_abort(actor, thread);
     }
     Ok(())
 }
@@ -42,13 +48,22 @@ fn arm(actor: &Actor, thread: ThreadId, delay: Duration, kind: TimerKind) {
     let _handle = actor.arm_timer(delay, TurnTimer { thread, kind });
 }
 
-/// The display batch's timer fired.
+/// The display batch's timer fired. A timer that a later flush has overtaken finds its window
+/// still open and shows nothing; the timer of the current window does the flush.
 pub(super) fn on_display_timer(actor: &mut Actor, thread: ThreadId) {
-    let shown = state(actor, thread).is_some_and(|state| state.text.has_display());
-    if shown && let Err(error) = show(actor, thread, false) {
-        tracing::error!(%thread, %error, "text could not be shown");
+    let now = actor.now().mono;
+    if state(actor, thread).is_some_and(|state| state.text.display_due(now)) {
+        show_display(actor, thread, now);
     }
     end::check_abort(actor, thread);
+}
+
+/// The display flush at `now` for a display timer or a leading delta. A failure is logged; the
+/// text not shown stays held.
+fn show_display(actor: &mut Actor, thread: ThreadId, now: Duration) {
+    if let Err(error) = show(actor, thread, false, now) {
+        tracing::error!(%thread, %error, "text could not be shown");
+    }
 }
 
 /// The durable batch's timer fired.
@@ -69,16 +84,18 @@ pub(super) fn take_durable(
     actor: &mut Actor,
     thread: ThreadId,
 ) -> Result<Vec<TextAppended>, Error> {
-    Ok(show(actor, thread, true)?.unwrap_or_default())
+    let now = actor.now().mono;
+    Ok(show(actor, thread, true, now)?.unwrap_or_default())
 }
 
-/// Runs the display flush (and with `durable` the durable one) of `thread`, publishing the view
-/// changes once. A refused delta (`PendingSeqBehind`, a host bug) does not stop the flush: the
-/// text still goes durable, and the turn ends with `TurnFailed { internal }`.
+/// Runs the display flush (and with `durable` the durable one) of `thread` at `now`, publishing
+/// the view changes once. A refused delta (`PendingSeqBehind`, a host bug) does not stop the
+/// flush: the text still goes durable, and the turn ends with `TurnFailed { internal }`.
 fn show(
     actor: &mut Actor,
     thread: ThreadId,
     durable: bool,
+    now: Duration,
 ) -> Result<Option<Vec<TextAppended>>, Error> {
     let stream = StreamId::Thread(thread);
     let pending = actor
@@ -128,9 +145,9 @@ fn show(
         Ok(())
     };
     let appended = if durable {
-        Some(text.flush_durable(&mut apply)?)
+        Some(text.flush_durable(now, &mut apply)?)
     } else {
-        text.flush_display(&mut apply)?;
+        text.flush_display(now, &mut apply)?;
         None
     };
     if !changes.is_empty() {
