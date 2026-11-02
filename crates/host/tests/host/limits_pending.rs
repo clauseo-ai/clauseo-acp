@@ -145,7 +145,7 @@ fn a_stop_outlives_its_agent_and_every_viewer() {
 fn a_claude_stop_whose_read_never_answers_is_logged_after_thirty_seconds() {
     let mut rig = stopped(
         "a_claude_stop_whose_read_never_answers_is_logged_after_thirty_seconds",
-        Scenario::Bundled("session-failure"),
+        Scenario::Bundled("claude-session-failure"),
     );
     rig.host.wait_armed(STOP_WAIT);
     rig.host.clock.advance(Duration::from_millis(29_999));
@@ -232,7 +232,7 @@ fn a_stop_logged_while_a_later_turn_runs_is_no_duplicate() {
 fn a_read_that_began_before_the_stop_does_not_decide_it() {
     let dir = Dir::new(
         "a_read_that_began_before_the_stop_does_not_decide_it",
-        &[(CLAUDE, Scenario::Bundled("session-failure"))],
+        &[(CLAUDE, Scenario::Bundled("claude-session-failure"))],
     );
     let reads = Reads::new();
     let host = start(&dir, 0, &reads);

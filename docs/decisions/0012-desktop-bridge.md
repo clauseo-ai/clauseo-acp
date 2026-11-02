@@ -36,10 +36,10 @@ The confirm shows fixed text: nothing the agent wrote reaches it. `SetMode` and
 page never sends them. For the same reason `answer_permission` refuses the four
 option ids claude-agent-acp 0.89.1 offers on leaving plan mode that switch the session's mode:
 `exit-plan-bypass` and `exit-plan-clear-bypass` (`allow_always`, to `bypassPermissions`), and
-`exit-plan-auto` and `exit-plan-clear-auto` (auto mode). Follow-ups: a mode command that
-classifies the mode and draws that confirm first; and acp sending
-`allowDangerouslySkipPermissions: false` in its session meta, so the bypass options are never
-offered. A Tauri rejection (an argument
+`exit-plan-auto` and `exit-plan-clear-auto` (auto mode). Follow-up: a mode command that
+classifies the mode and draws that confirm first. Since clauseo-acp-private#162 the host sends
+`allowDangerouslySkipPermissions: false` in every session's meta, so the bypass options are no
+longer offered; the refusal stays for an adapter that offers them anyway. A Tauri rejection (an argument
 that does not decode, a command no capability grants) reaches the page as a plain string; the
 webview's transport maps it to `{ code: "internal", message, retryable: false }`.
 

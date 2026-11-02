@@ -157,7 +157,7 @@ fn claude_stop_with_no_reset_takes_the_window_from_the_read() {
         "claude_stop_with_no_reset_takes_the_window_from_the_read",
         CLAUDE,
         AgentKind::Claude,
-        "session-failure",
+        "claude-session-failure",
         full(AgentKind::Claude),
     );
     assert_eq!(
@@ -195,7 +195,7 @@ fn stop_with_no_reset_is_empty_when_the_read_finds_no_limit() {
         "stop_with_no_reset_is_empty_when_the_read_finds_no_limit",
         CLAUDE,
         AgentKind::Claude,
-        "session-failure",
+        "claude-session-failure",
         usage(AgentKind::Claude, 40.0, Some(at(7200))),
     );
     assert_eq!(
@@ -229,7 +229,7 @@ fn stop_with_no_reset_is_empty_after_a_read_that_failed() {
         "stop_with_no_reset_is_empty_after_a_read_that_failed",
         CLAUDE,
         AgentKind::Claude,
-        "session-failure",
+        "claude-session-failure",
         ReadOutcome::Failed(failed),
     );
     assert_eq!(
@@ -244,7 +244,7 @@ fn a_restart_before_the_read_logs_the_stop_once_at_start_up() {
         "a_restart_before_the_read_logs_the_stop_once_at_start_up",
         CLAUDE,
         AgentKind::Claude,
-        Scenario::Bundled("session-failure"),
+        Scenario::Bundled("claude-session-failure"),
     );
     let turn = rig.turn();
     until_reads(&rig.host, &rig.reads, AgentKind::Claude, 2);
@@ -344,7 +344,7 @@ fn stop_with_a_reset_stays_in_the_end_commit_then_reads() {
         "stop_with_a_reset_stays_in_the_end_commit_then_reads",
         CLAUDE,
         AgentKind::Claude,
-        Scenario::Bundled("limit-rejected"),
+        Scenario::Bundled("claude-limit-rejected"),
     );
     let turn = rig.turn();
     let stops = rig.until_stop();

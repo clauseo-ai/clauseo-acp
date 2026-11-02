@@ -44,8 +44,9 @@ const PRINCIPAL: Principal = Principal::LocalDesktop;
 /// The option ids claude-agent-acp 0.89.1 offers when it leaves plan mode that switch the
 /// session to `bypassPermissions` (`exit-plan-bypass`, `exit-plan-clear-bypass`) or to auto
 /// mode (`exit-plan-auto`, `exit-plan-clear-auto`). Choosing one is a mode change, refused for
-/// the reason `SetMode` is (see `dispatch`). Follow-up: acp's session meta sends
-/// `allowDangerouslySkipPermissions: false`, so the bypass options are never offered.
+/// the reason `SetMode` is (see `dispatch`). The host's session meta sends
+/// `allowDangerouslySkipPermissions: false`, so the bypass options are no longer offered; the
+/// refusal stays for an adapter that offers them anyway, and for the auto options.
 const MODE_OPTIONS: [&str; 4] = [
     "exit-plan-bypass",
     "exit-plan-clear-bypass",
