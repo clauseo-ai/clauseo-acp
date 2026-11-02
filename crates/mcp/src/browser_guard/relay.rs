@@ -6,9 +6,14 @@
 //!
 //! When the agent closes stdin, the guard asks agent-browser to close its browser (one
 //! `agent_browser_close` call, whose reply is not relayed), waits up to [`CLOSE_WAIT`] for that
-//! reply, closes the child's stdin and waits for it to exit. agent-browser's daemon is a detached
-//! process (`setsid`, or `DETACHED_PROCESS` on Windows), so closing it here is best-effort; the
-//! idle timeout ends it otherwise. When the child ends first, the guard exits at once.
+//! reply, closes the child's stdin and waits up to [`EXIT_WAIT`] for its stdout to end, then
+//! kills it. agent-browser's daemon is a detached process (`setsid`, or `DETACHED_PROCESS` on
+//! Windows), so closing it here is best-effort; the host's session end and the idle timeout end
+//! it otherwise. When the child ends first, the guard exits at once.
+//!
+//! The child's lines are capped at [`CHILD_MAX_LINE_BYTES`]: a longer one kills the child and
+//! the guard exits 1 (fail closed). A last line cut off by the child's end is dropped, with a
+//! note on stderr, so the agent never gets half a JSON message.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -23,14 +28,16 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use super::filter::{self, MAX_LINE_BYTES, Verdict};
-
-/// The id of the guard's own close request; the reply with this id is swallowed.
-pub(crate) const CLOSE_ID: &str = "clauseo-guard-close";
+use super::filter::{self, MAX_LINE_BYTES, RESERVED_ID as CLOSE_ID, Verdict};
 /// The request sent when the agent closes stdin.
 pub(crate) const CLOSE_REQUEST: &str = r#"{"jsonrpc":"2.0","id":"clauseo-guard-close","method":"tools/call","params":{"name":"agent_browser_close","arguments":{}}}"#;
 /// How long the guard waits for the close reply before closing the child's stdin anyway.
 pub(crate) const CLOSE_WAIT: Duration = Duration::from_secs(10);
+/// How long the guard waits for the child's stdout to end after closing its stdin, before it
+/// kills the child.
+pub(crate) const EXIT_WAIT: Duration = Duration::from_secs(5);
+/// The longest child line the guard relays, in bytes without the newline.
+pub(crate) const CHILD_MAX_LINE_BYTES: usize = 64 * 1024 * 1024;
 
 /// Windows: the child gets no console window (agent-browser issue #1644).
 #[cfg(windows)]
@@ -44,20 +51,37 @@ type ToChild = Arc<Mutex<Option<ChildStdin>>>;
 enum Event {
     /// The child's stdout reached EOF.
     ChildEnded,
+    /// The child wrote a line over [`CHILD_MAX_LINE_BYTES`].
+    ChildOversize,
     /// The agent's stdin reached EOF and the close request went out.
     AgentEnded,
     /// The reply to the close request arrived.
     CloseAnswered,
 }
 
-/// Starts agent-browser and relays until it exits. Returns its exit code, or 1 when a signal
-/// killed it.
+/// How the relay ended.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Outcome {
+    /// The child exited (or was killed after [`EXIT_WAIT`]) with this code; 1 for a signal.
+    Exited(i32),
+    /// The child wrote a line over [`CHILD_MAX_LINE_BYTES`] and was killed.
+    ChildLineTooLong,
+}
+
+/// What [`wait_for_end`] saw.
+enum End {
+    ChildEnded,
+    ChildOversize,
+    ExitTimedOut,
+}
+
+/// Starts agent-browser and relays until it exits.
 pub(crate) fn run(
     program: &Path,
     args: &[OsString],
     cwd: &Path,
     env: &BTreeMap<String, OsString>,
-) -> io::Result<i32> {
+) -> io::Result<Outcome> {
     let mut child = spawn_child(program, args, cwd, env)?;
     let stdout = child
         .stdout
@@ -71,8 +95,8 @@ pub(crate) fn run(
     let child_pump = {
         let (out, closing, events) = (Arc::clone(&out), Arc::clone(&closing), events.clone());
         thread::spawn(move || {
-            pump_child(BufReader::new(stdout), &out, &closing, &events);
-            send(&events, Event::ChildEnded);
+            let end = pump_child(BufReader::new(stdout), &out, &closing, &events);
+            send(&events, end);
         })
     };
     {
@@ -84,33 +108,81 @@ pub(crate) fn run(
         }));
     }
 
-    wait_for_end(&inbox, &to_child);
-    if child_pump.join().is_err() {
-        return Err(io::Error::other("the stdout relay thread panicked"));
+    match wait_for_end(&inbox, &to_child) {
+        End::ChildEnded => {
+            if child_pump.join().is_err() {
+                return Err(io::Error::other("the stdout relay thread panicked"));
+            }
+            Ok(Outcome::Exited(child.wait()?.code().unwrap_or(1)))
+        }
+        End::ChildOversize => {
+            stop(&mut child)?;
+            Ok(Outcome::ChildLineTooLong)
+        }
+        End::ExitTimedOut => {
+            note(&format!(
+                "agent-browser did not exit within {} s of its stdin closing; killed it",
+                EXIT_WAIT.as_secs()
+            ));
+            Ok(Outcome::Exited(stop(&mut child)?.code().unwrap_or(1)))
+        }
     }
-    Ok(child.wait()?.code().unwrap_or(1))
 }
 
-/// Returns once the child's stdout has ended, closing its stdin after the agent's EOF and the
-/// close reply (or [`CLOSE_WAIT`]).
-fn wait_for_end(inbox: &mpsc::Receiver<Event>, to_child: &ToChild) {
-    let mut closing = false;
+/// Kills the child (it may have exited already) and reaps it. The stdout pump is not joined:
+/// a grandchild could still hold the pipe open.
+fn stop(child: &mut Child) -> io::Result<std::process::ExitStatus> {
+    if child.try_wait()?.is_none() {
+        // It may exit between the two calls; `wait` below reaps it either way.
+        drop(child.kill());
+    }
+    child.wait()
+}
+
+/// The phase of the shutdown.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Phase {
+    /// Relaying; nothing has ended.
+    Running,
+    /// The agent has gone and the close request is out; waiting for its reply.
+    Closing,
+    /// The child's stdin is closed; waiting for its stdout to end.
+    Draining,
+}
+
+/// Returns once the child's stdout has ended, it wrote an oversize line, or it outlived
+/// [`EXIT_WAIT`] after its stdin was closed (following the agent's EOF and the close reply, or
+/// [`CLOSE_WAIT`]). Each wait restarts on an event, but each phase admits only a bounded number
+/// of them: the close reply is sent at most twice (by the reply, or by a failed write).
+fn wait_for_end(inbox: &mpsc::Receiver<Event>, to_child: &ToChild) -> End {
+    let mut phase = Phase::Running;
     loop {
-        let event = if closing {
-            match inbox.recv_timeout(CLOSE_WAIT) {
+        let event = match phase {
+            Phase::Running => inbox.recv().unwrap_or(Event::ChildEnded),
+            Phase::Closing => match inbox.recv_timeout(CLOSE_WAIT) {
                 Ok(event) => event,
                 Err(RecvTimeoutError::Timeout) => Event::CloseAnswered,
                 Err(RecvTimeoutError::Disconnected) => Event::ChildEnded,
-            }
-        } else {
-            inbox.recv().unwrap_or(Event::ChildEnded)
+            },
+            Phase::Draining => match inbox.recv_timeout(EXIT_WAIT) {
+                Ok(event) => event,
+                Err(RecvTimeoutError::Timeout) => return End::ExitTimedOut,
+                Err(RecvTimeoutError::Disconnected) => Event::ChildEnded,
+            },
         };
         match event {
-            Event::ChildEnded => return,
-            Event::AgentEnded => closing = true,
+            Event::ChildEnded => return End::ChildEnded,
+            Event::ChildOversize => return End::ChildOversize,
+            Event::AgentEnded => {
+                if phase == Phase::Running {
+                    phase = Phase::Closing;
+                }
+            }
             Event::CloseAnswered => {
-                closing = false;
-                drop(lock(to_child).take());
+                if phase != Phase::Draining {
+                    phase = Phase::Draining;
+                    drop(lock(to_child).take());
+                }
             }
         }
     }
@@ -144,33 +216,46 @@ fn spawn_child(
     command.spawn()
 }
 
-/// Child to agent: each line as read, the reply to the close request excepted.
+/// Child to agent: each whole line as read, the reply to the close request excepted. Returns
+/// the event that ends it: [`Event::ChildEnded`] or [`Event::ChildOversize`].
 fn pump_child(
     mut stdout: impl BufRead,
     out: &Out,
     closing: &AtomicBool,
     events: &mpsc::Sender<Event>,
-) {
+) -> Event {
     let mut line = Vec::new();
     // Once the agent stops reading, the child's output is still drained so it never blocks.
     let mut agent_reads = true;
     loop {
-        line.clear();
-        match stdout.read_until(b'\n', &mut line) {
-            Ok(0) | Err(_) => return,
-            Ok(_) => {}
+        match read_line(&mut stdout, &mut line, CHILD_MAX_LINE_BYTES, Overflow::Stop) {
+            Ok(Line::Eof) | Err(_) => return Event::ChildEnded,
+            // `browser_guard::run` says so on stderr once the child is killed.
+            Ok(Line::Oversize) => return Event::ChildOversize,
+            Ok(Line::Partial) => {
+                note(&format!(
+                    "agent-browser ended in the middle of a line; dropped its last {} bytes",
+                    line.len()
+                ));
+                return Event::ChildEnded;
+            }
+            Ok(Line::Whole) => {}
         }
         if closing.load(Ordering::SeqCst) && is_close_reply(&line) {
             send(events, Event::CloseAnswered);
             continue;
         }
-        if !line.ends_with(b"\n") {
-            line.push(b'\n');
-        }
+        line.push(b'\n');
         if agent_reads && emit(out, &line).is_err() {
             agent_reads = false;
         }
     }
+}
+
+/// One line on the guard's stderr. Diagnostics only; a failed write has nowhere to go.
+fn note(text: &str) {
+    let mut stderr = io::stderr().lock();
+    if writeln!(stderr, "clauseo-mcp browser-guard: {text}").is_err() {}
 }
 
 fn is_close_reply(line: &[u8]) -> bool {
@@ -189,10 +274,11 @@ fn pump_agent(
 ) {
     let mut line = Vec::new();
     loop {
-        let verdict = match read_line(stdin, &mut line, MAX_LINE_BYTES) {
+        let verdict = match read_line(stdin, &mut line, MAX_LINE_BYTES, Overflow::Skip) {
             Ok(Line::Eof) | Err(_) => break,
             Ok(Line::Oversize) => filter::parse_error(),
-            Ok(Line::Whole) => filter::check(&line),
+            // The agent's last line may lack its newline; it is checked like any other.
+            Ok(Line::Whole | Line::Partial) => filter::check(&line),
         };
         let sent = match verdict {
             Verdict::Forward(text) => write_child(to_child, &text),
@@ -215,12 +301,23 @@ fn pump_agent(
 /// What [`read_line`] found.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Line {
-    /// A line, now in the buffer without its newline (the last one may have none).
+    /// A line ended by a newline, now in the buffer without it.
     Whole,
-    /// A line over the limit, read to its end and thrown away.
+    /// Bytes the input ended in without a newline, now in the buffer.
+    Partial,
+    /// A line over the limit, thrown away (read to its end with [`Overflow::Skip`]).
     Oversize,
     /// The end of input, nothing read.
     Eof,
+}
+
+/// What [`read_line`] does with a line over its limit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Overflow {
+    /// Read it to its end and throw it away, so the next line can be read.
+    Skip,
+    /// Return at once, leaving the rest unread: the stream is not read again.
+    Stop,
 }
 
 /// Reads one line into `buf` (cleared first), never holding more than `max` bytes of it.
@@ -228,6 +325,7 @@ pub(crate) fn read_line(
     input: &mut impl BufRead,
     buf: &mut Vec<u8>,
     max: usize,
+    overflow: Overflow,
 ) -> io::Result<Line> {
     buf.clear();
     let mut over = false;
@@ -241,7 +339,7 @@ pub(crate) fn read_line(
         if chunk.is_empty() {
             return Ok(match (over, any) {
                 (true, _) => Line::Oversize,
-                (false, true) => Line::Whole,
+                (false, true) => Line::Partial,
                 (false, false) => Line::Eof,
             });
         }
@@ -250,6 +348,10 @@ pub(crate) fn read_line(
         let take = newline.unwrap_or(chunk.len());
         if !over {
             if buf.len() + take > max {
+                if overflow == Overflow::Stop {
+                    buf.clear();
+                    return Ok(Line::Oversize);
+                }
                 over = true;
                 buf.clear();
             } else {
@@ -297,18 +399,26 @@ fn send(events: &mpsc::Sender<Event>, event: Event) {
 mod tests {
     use std::io::Cursor;
 
-    use super::{Line, read_line};
+    use super::{Line, Overflow, read_line};
 
     fn lines(input: &[u8], max: usize) -> Vec<(Line, Vec<u8>)> {
+        lines_with(input, max, Overflow::Skip)
+    }
+
+    fn lines_with(input: &[u8], max: usize, overflow: Overflow) -> Vec<(Line, Vec<u8>)> {
         let mut input = std::io::BufReader::with_capacity(4, Cursor::new(input.to_vec()));
         let mut buf = Vec::new();
         let mut found = Vec::new();
         loop {
-            let line = read_line(&mut input, &mut buf, max).unwrap();
+            let line = read_line(&mut input, &mut buf, max, overflow).unwrap();
             if line == Line::Eof {
                 return found;
             }
+            let stop = overflow == Overflow::Stop && line == Line::Oversize;
             found.push((line, buf.clone()));
+            if stop {
+                return found;
+            }
         }
     }
 
@@ -320,9 +430,29 @@ mod tests {
             [
                 (Line::Whole, b"abcdefgh".to_vec()),
                 (Line::Whole, Vec::new()),
-                (Line::Whole, b"xyz".to_vec()),
+                (Line::Partial, b"xyz".to_vec()),
             ]
         );
+    }
+
+    #[test]
+    fn stop_returns_at_the_limit_without_reading_on() {
+        let mut input =
+            std::io::BufReader::with_capacity(4, Cursor::new(b"ok\n123456789\nmore".to_vec()));
+        let mut buf = Vec::new();
+        assert_eq!(
+            read_line(&mut input, &mut buf, 4, Overflow::Stop).unwrap(),
+            Line::Whole
+        );
+        assert_eq!(
+            read_line(&mut input, &mut buf, 4, Overflow::Stop).unwrap(),
+            Line::Oversize
+        );
+        assert_eq!(buf, b"");
+        let mut rest = Vec::new();
+        std::io::Read::read_to_end(&mut input, &mut rest).unwrap();
+        assert!(rest.ends_with(b"\nmore") && rest.len() < b"123456789\nmore".len());
+        assert_eq!(lines_with(b"1234\n12345", 4, Overflow::Stop).len(), 2);
     }
 
     #[test]
@@ -334,7 +464,7 @@ mod tests {
                 (Line::Oversize, Vec::new()),
                 (Line::Whole, b"1234".to_vec()),
                 (Line::Oversize, Vec::new()),
-                (Line::Whole, b"ok".to_vec()),
+                (Line::Partial, b"ok".to_vec()),
             ]
         );
         assert_eq!(lines(b"123456789", 4), [(Line::Oversize, Vec::new())]);

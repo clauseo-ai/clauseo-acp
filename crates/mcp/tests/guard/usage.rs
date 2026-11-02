@@ -127,6 +127,7 @@ fn a_missing_or_invalid_host_variable_is_named_and_nothing_starts() {
         ("AGENT_BROWSER_PROXY", "http://evil.example:1"),
         ("AGENT_BROWSER_PROXY", "http://127.0.0.1:0"),
         ("AGENT_BROWSER_CONFIG", "agent-browser.json"),
+        ("AGENT_BROWSER_EXECUTABLE_PATH", "/no/such/chrome"),
         ("AGENT_BROWSER_SESSION", "a b"),
     ] {
         let mut command = guard_command(&scratch, &stub, &args);
@@ -141,7 +142,7 @@ fn a_missing_or_invalid_host_variable_is_named_and_nothing_starts() {
     }
     assert!(!scratch.log().exists(), "the stub never started");
     assert!(
-        !scratch.cwd().join("run").exists(),
+        !scratch.cwd().join("run").exists() && !scratch.socket_dir().exists(),
         "no folder is made before the checks pass"
     );
 }
@@ -175,4 +176,34 @@ fn an_unstartable_child_exits_1() {
     let output = run(guard_command(&scratch, &not_a_program, &args));
     assert_eq!(output.status.code(), Some(1));
     assert!(stderr(&output).starts_with("clauseo-mcp browser-guard: cannot run "));
+}
+
+/// Unix: a socket folder already in `/tmp` that is a link, or not mode 0700, stops the guard
+/// with exit 2 before anything starts.
+#[cfg(unix)]
+#[test]
+fn an_unsafe_socket_folder_stops_the_guard() {
+    let scratch = Scratch::new("bad_socket_dir");
+    let log = scratch.log();
+    let check = |words: &str| {
+        let output = run(guard_command(
+            &scratch,
+            &example("echo_stub"),
+            &[log.as_os_str()],
+        ));
+        assert_eq!(output.status.code(), Some(2), "{words}");
+        let text = stderr(&output);
+        assert!(
+            text.starts_with("clauseo-mcp browser-guard: the socket folder /tmp/clauseo-ab-"),
+            "{text}"
+        );
+        assert!(text.contains(words), "{text}");
+        assert!(!scratch.log().exists(), "the stub never started");
+    };
+    write::create_dir_all(scratch.socket_dir()).unwrap();
+    write::set_mode(scratch.socket_dir(), 0o755).unwrap();
+    check("its mode is 755, not 700");
+    write::remove_dir_all(scratch.socket_dir()).unwrap();
+    write::symlink(scratch.cwd(), scratch.socket_dir()).unwrap();
+    check("it is a link");
 }

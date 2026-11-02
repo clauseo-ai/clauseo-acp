@@ -7,7 +7,7 @@ use std::path::Path;
 
 use serde_json::Value;
 
-use crate::support::{Guard, PROXY, SESSION, Scratch, example, guard_command, host_env};
+use crate::support::{Guard, PROXY, Scratch, example, guard_command, host_env};
 use crate::write;
 
 /// What the agent's environment may hold that must never reach agent-browser.
@@ -23,6 +23,7 @@ const HOSTILE: &[(&str, &str)] = &[
     ("AGENT_BROWSER_DAEMON", "1"),
     ("AGENT_BROWSER_ENGINE", "lightpanda"),
     ("AGENT_BROWSER_NAMESPACE", "other"),
+    ("AGENT_BROWSER_SOCKET_DIR", "/elsewhere"),
     ("AGENT_BROWSER_PROXY_BYPASS", "*"),
     ("AGENT_BROWSER_IDLE_TIMEOUT_MS", "1"),
     ("AGENT_BROWSER_SCREENSHOT_DIR", "/elsewhere"),
@@ -40,7 +41,6 @@ fn expected(scratch: &Scratch) -> BTreeMap<String, String> {
     let under = |name: &str| cwd.join(name).to_str().unwrap().to_owned();
     let mut map: BTreeMap<String, String> = host_env(scratch).into_iter().collect();
     let fixed = [
-        ("AGENT_BROWSER_NAMESPACE", SESSION),
         ("AGENT_BROWSER_PROXY_BYPASS", "<-loopback>"),
         (
             "AGENT_BROWSER_ARGS",
@@ -57,7 +57,6 @@ fn expected(scratch: &Scratch) -> BTreeMap<String, String> {
         map.insert(name.to_owned(), value.to_owned());
     }
     map.insert("AGENT_BROWSER_DOWNLOAD_PATH".to_owned(), under("downloads"));
-    map.insert("AGENT_BROWSER_SOCKET_DIR".to_owned(), under("run"));
     map.insert(
         "AGENT_BROWSER_SCREENSHOT_DIR".to_owned(),
         under("screenshots"),
@@ -65,6 +64,7 @@ fn expected(scratch: &Scratch) -> BTreeMap<String, String> {
     if cfg!(windows) {
         map.insert("TEMP".to_owned(), under("tmp"));
         map.insert("TMP".to_owned(), under("tmp"));
+        map.insert("AGENT_BROWSER_SOCKET_DIR".to_owned(), under("run"));
         for name in [
             "SystemRoot",
             "windir",
@@ -84,10 +84,13 @@ fn expected(scratch: &Scratch) -> BTreeMap<String, String> {
         }
         let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_owned());
         map.insert("PATH".to_owned(), format!(r"{root}\System32;{root}"));
+        map.insert("SystemRoot".to_owned(), root);
     } else {
         for name in ["http_proxy", "https_proxy", "all_proxy"] {
             map.insert(name.to_owned(), PROXY.to_owned());
         }
+        let socket_dir = scratch.socket_dir().to_str().unwrap().to_owned();
+        map.insert("AGENT_BROWSER_SOCKET_DIR".to_owned(), socket_dir);
         map.insert("HOME".to_owned(), under("home"));
         map.insert("TMPDIR".to_owned(), under("tmp"));
         map.insert("LANG".to_owned(), "en_IN.UTF-8".to_owned());
@@ -136,10 +139,21 @@ fn the_child_sees_exactly_the_allow_list_and_the_given_folder() {
     let folders: &[&str] = if cfg!(windows) {
         &["downloads", "run", "screenshots", "tmp"]
     } else {
-        &["downloads", "run", "screenshots", "home", "tmp"]
+        &["downloads", "screenshots", "home", "tmp"]
     };
     for folder in folders {
         assert!(scratch.cwd().join(folder).is_dir(), "{folder}");
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        assert!(
+            !scratch.cwd().join("run").exists(),
+            "Unix sockets live under /tmp"
+        );
+        let metadata = std::fs::symlink_metadata(scratch.socket_dir()).unwrap();
+        assert!(metadata.is_dir());
+        assert_eq!(metadata.mode() & 0o7777, 0o700);
     }
     assert_eq!(report["env"].get("AI_GATEWAY_API_KEY"), None::<&Value>);
 }

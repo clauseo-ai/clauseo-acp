@@ -1,5 +1,5 @@
-//! The guard's dependency tree, as cargo resolves it: no HTTP client, TLS stack, async runtime or
-//! tauri may be reachable through a normal or build dependency, on any target.
+//! The guard's dependency tree, as cargo resolves it: no HTTP client, socket or TLS crate, async
+//! runtime or tauri may be reachable through a normal or build dependency, on any target.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::process::Command;
@@ -16,6 +16,15 @@ const BANNED: &[&str] = &[
     "native-tls",
     "tauri",
     "tokio",
+    "socket2",
+    "mio",
+    "h2",
+    "hyper-util",
+    "openssl",
+    "isahc",
+    "attohttpc",
+    "async-std",
+    "smol",
 ];
 
 /// `cargo metadata` for the workspace, offline (tests never reach the network) and locked.

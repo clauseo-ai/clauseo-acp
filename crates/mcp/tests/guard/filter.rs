@@ -16,13 +16,16 @@ struct Session {
 
 impl Session {
     fn start(test: &str) -> Self {
+        Self::start_with(test, &[])
+    }
+
+    /// With the echo stub's options after its log file (`ignore-close`, `hang`).
+    fn start_with(test: &str, options: &[&str]) -> Self {
         let scratch = Scratch::new(test);
         let log = scratch.log();
-        let guard = Guard::start(guard_command(
-            &scratch,
-            &example("echo_stub"),
-            &[log.as_os_str()],
-        ));
+        let mut args = vec![log.as_os_str()];
+        args.extend(options.iter().map(std::ffi::OsStr::new));
+        let guard = Guard::start(guard_command(&scratch, &example("echo_stub"), &args));
         Self {
             scratch,
             guard,
@@ -71,8 +74,13 @@ impl Session {
     /// Closes the agent's side and checks the child got exactly the forwarded lines, then the
     /// guard's close request, whose reply never reached the agent.
     fn finish(self) {
+        self.finish_with(Some(0));
+    }
+
+    /// [`Self::finish`], expecting the guard's exit code `code`.
+    fn finish_with(self, code: Option<i32>) {
         let (status, rest) = self.guard.finish();
-        assert_eq!(status.code(), Some(0));
+        assert_eq!(status.code(), code);
         assert_eq!(rest, "", "the close reply is swallowed");
         let mut expected = self.forwarded;
         expected.push(json!({
@@ -132,7 +140,7 @@ fn url_schemes() {
     }
     for url in [
         "https://example.com",
-        "HTTP://127.0.0.1:8/",
+        "HTTP://Example.com:8/",
         "about:blank",
         "sci.gov.in",
     ] {
@@ -238,4 +246,124 @@ fn when_the_child_exits_first_the_guard_exits_with_its_code() {
     assert_eq!(session.guard.read_rest(), "");
     assert_eq!(session.guard.wait().code(), Some(7));
     assert_eq!(session.scratch.received().len(), 1);
+}
+
+#[test]
+fn the_review_rules_end_to_end() {
+    let mut session = Session::start("filter_review");
+    let screenshot = json!({"jsonrpc": "2.0", "id": "s", "method": "tools/call",
+        "params": {"name": "agent_browser_screenshot", "arguments": {"selector": "/Users/x/.zshrc"}}});
+    session.guard.send(&screenshot);
+    assert_eq!(
+        session.guard.read()["result"]["content"][0]["text"],
+        "Clauseo does not allow a file path as the screenshot selector in the browser."
+    );
+    let click = json!({"jsonrpc": "2.0", "id": "c", "method": "tools/call",
+        "params": {"name": "agent_browser_click", "arguments": {"selector": "@e1", "newTab": true}}});
+    session.guard.send(&click);
+    assert_eq!(
+        session.guard.read()["result"]["content"][0]["text"],
+        refusal("newTab")
+    );
+    for url in [
+        "http://127.0.0.1:41000/",
+        "http://0x7f.1/",
+        "http://[::1]/",
+        "localhost",
+    ] {
+        assert_eq!(
+            session.refused(&json!({ "url": url })),
+            refusal("local or private network addresses"),
+            "{url}"
+        );
+    }
+    assert_eq!(session.refused(&json!({"webgpu": true})), refusal("webgpu"));
+    assert_eq!(
+        session.refused(&json!({"timeoutMs": 300_001})),
+        refusal("a timeoutMs other than a whole number up to 300000")
+    );
+    let reserved = json!({"jsonrpc": "2.0", "id": "clauseo-guard-close", "method": "tools/list"});
+    session.guard.send(&reserved);
+    assert_eq!(session.guard.read()["error"]["code"], -32600);
+    let select = json!({"jsonrpc": "2.0", "id": "sel", "method": "tools/call",
+        "params": {"name": "agent_browser_select",
+            "arguments": {"selector": "#state", "values": ["--Select--", "-Select-", "-5"]}}});
+    session.passes(&select);
+    let eval = json!({"jsonrpc": "2.0", "id": "ev", "method": "tools/call",
+        "params": {"name": "agent_browser_eval", "arguments": {"script": "--x"}}});
+    session.passes(&eval);
+    assert_eq!(
+        session.refused(&json!({"text": "--proxy=x"})),
+        refusal("--proxy")
+    );
+    session.finish();
+}
+
+#[test]
+fn an_unanswered_close_request_times_out_and_the_guard_still_exits() {
+    let mut session = Session::start_with("filter_close_timeout", &["ignore-close"]);
+    session.passes(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}));
+    // Without the close wait's limit the guard would never close the stub's stdin, and the stub
+    // would never exit; nextest's slow-timeout would end the test.
+    session.finish();
+}
+
+#[test]
+fn a_child_that_outlives_its_stdin_is_killed() {
+    let mut session = Session::start_with("filter_exit_timeout", &["hang"]);
+    session.passes(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}));
+    session.guard.close_stdin();
+    assert_eq!(
+        session.guard.read_rest(),
+        "",
+        "the close reply is swallowed"
+    );
+    assert_eq!(session.guard.wait().code(), Some(1), "killed, so 1");
+    assert!(
+        session
+            .guard
+            .stderr_text()
+            .contains("did not exit within 5 s of its stdin closing"),
+        "the kill is noted on stderr"
+    );
+    assert_eq!(
+        session.scratch.received().len(),
+        2,
+        "the call, then the close request"
+    );
+}
+
+#[test]
+fn a_line_cut_off_by_the_child_exiting_is_dropped() {
+    let mut session = Session::start("filter_partial");
+    session
+        .guard
+        .send(&json!({"jsonrpc": "2.0", "id": 1, "method": "stub/partial"}));
+    assert_eq!(
+        session.guard.read_rest(),
+        "",
+        "half a line never reaches the agent"
+    );
+    assert_eq!(session.guard.wait().code(), Some(7));
+    let stderr = session.guard.stderr_text();
+    assert!(stderr.contains("ended in the middle of a line"), "{stderr}");
+}
+
+#[test]
+fn an_oversize_child_line_kills_the_child_and_fails_the_guard() {
+    let mut session = Session::start("filter_child_oversize");
+    session
+        .guard
+        .send(&json!({"jsonrpc": "2.0", "id": 1, "method": "stub/flood"}));
+    assert_eq!(
+        session.guard.read_rest(),
+        "",
+        "nothing of the line reaches the agent"
+    );
+    assert_eq!(session.guard.wait().code(), Some(1));
+    let stderr = session.guard.stderr_text();
+    assert!(
+        stderr.contains("agent-browser wrote a line over 67108864 bytes; the guard killed it"),
+        "{stderr}"
+    );
 }
