@@ -113,6 +113,7 @@ test("a play reads the run the app wrote to MARKS_OUT, and fails on a non-zero e
     idle_memory_mb: 150,
     memory_after_session_mb: 190,
     react_commits_per_frame: 1.2,
+    react_commits_per_frame_max: 2,
     ipc_bytes_per_text_byte: 2.1,
     viewport_width_px: 1280,
     viewport_height_px: 800,

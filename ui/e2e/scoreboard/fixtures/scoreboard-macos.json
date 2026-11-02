@@ -32,6 +32,10 @@
       "median": 1.2,
       "runs": [1.2, 1.2, 1.2]
     },
+    "react_commits_per_frame": {
+      "median": 2,
+      "runs": [2, 2, 2]
+    },
     "react_commits_per_frame_streaming": {
       "median": 1.1,
       "runs": [1.1, 1.1, 1.1]

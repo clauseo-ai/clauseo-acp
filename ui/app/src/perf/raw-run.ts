@@ -15,6 +15,8 @@ export interface RawRun {
   memory_after_session_mb: number | null;
   /** Mean React commits per frame with a commit while streaming (report only, #154). */
   react_commits_per_frame: number | null;
+  /** Most React commits in one streaming frame; null with no frame that had a commit (#253). */
+  react_commits_per_frame_max: number | null;
   /** Channel bytes during the session per UTF-8 byte of answer text (report only, #153). */
   ipc_bytes_per_text_byte: number | null;
   /** The page's innerWidth and innerHeight in CSS px during the session (recorded, not scored). */
@@ -49,6 +51,7 @@ export function rawRun(p: RunParts): RawRun {
     idle_memory_mb: p.idleMemoryMb,
     memory_after_session_mb: p.afterMemoryMb,
     react_commits_per_frame: p.stream.react_commits_per_frame,
+    react_commits_per_frame_max: p.stream.react_commits_per_frame_max,
     ipc_bytes_per_text_byte:
       text === 0 ? null : (p.channelBytesAfter - p.channelBytesBefore) / text,
     viewport_width_px: p.viewport?.width ?? null,

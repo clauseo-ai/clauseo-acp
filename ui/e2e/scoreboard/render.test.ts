@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 
 import { parseBudgets, parseReducerSummaries } from "./inputs.ts";
-import { METRICS, parseResult } from "./metrics.ts";
+import { METRICS, parseResult, summarise, type RawRun } from "./metrics.ts";
 import {
   BUDGET_NOTE,
   START_NOTE,
@@ -93,6 +93,9 @@ test("flags: over budget, more than 10% worse than main, both or none", () => {
   expect(flags(1, 0, null)).toEqual(["more than 10% worse than main"]);
   expect(flags(null, 100, 150)).toEqual([]);
   expect(flags(90, null, 150)).toEqual([]);
+  // A count against its limit of 1 (react_commits_per_frame): 2 is over, 1 is at the limit.
+  expect(flags(2, null, 1)).toEqual(["over budget"]);
+  expect(flags(1, null, 1)).toEqual([]);
 });
 
 test("change: the difference, with the percentage when main is above zero", () => {
@@ -156,7 +159,13 @@ test("each metric's budget: its _vm row when there is one, else its own row", ()
     limit: 150,
     vm: false,
   });
-  // A report-only metric never takes a row, even one that shares its name's start.
+  // The worst frame's row has no _vm twin and gates a merge (pr): the scoreboard still compares.
+  expect(budgetOf(metric("react_commits_per_frame"), budgets)).toEqual({
+    kind: "limit",
+    limit: 1,
+    vm: false,
+  });
+  // A report-only metric never takes a row, even the worst frame's, whose id is its prefix.
   expect(budgetOf(metric("react_commits_per_frame_streaming"), budgets)).toEqual({
     kind: "report-only",
   });
@@ -178,8 +187,11 @@ test("the Budget column names a VM limit, and report-only rows say so", () => {
   );
   expect(row(body, "Dropped frames while streaming, per 10 s")).toContain("| 100 (VM) |  |");
   expect(row(body, "Start-up to interactive, warm")).toContain("| 800 ms |");
-  expect(row(body, "React commits per frame while streaming, in the app")).toBe(
-    "| React commits per frame while streaming, in the app | 1.3 | not measured | – | report only |  |",
+  expect(row(body, "React commits in the worst frame while streaming, in the app")).toBe(
+    "| React commits in the worst frame while streaming, in the app | 2 | not measured | – | 1 | ⚠️ over budget |",
+  );
+  expect(row(body, "React commits per frame while streaming, mean, in the app")).toBe(
+    "| React commits per frame while streaming, mean, in the app | 1.3 | not measured | – | report only |  |",
   );
   expect(row(body, "IPC bytes per byte of answer text")).toBe(
     "| IPC bytes per byte of answer text | 2.4× | not measured | – | report only |  |",
@@ -191,6 +203,7 @@ test("the Budget column names a VM limit, and report-only rows say so", () => {
   expect(body.split(BUDGET_NOTE)).toHaveLength(3);
   expect(BUDGET_NOTE).toContain("virtual machine runners");
   expect(BUDGET_NOTE).toContain("laptop (stage F)");
+  expect(BUDGET_NOTE).toContain("unit test");
 });
 
 test("metrics the runners cannot measure yet show as not measured", () => {
@@ -209,6 +222,48 @@ test("pending and refused results say so", () => {
   expect(section(body, "### Windows")[0]).toContain("| pending | 760 ms |");
   expect(section(body, "### macOS")[0]).toContain("| invalid result |");
   expect(body).toContain(`this PR's [scoreboard result](${run(7)}) was refused: schema is not 1`);
+});
+
+test("a run whose worst frame has 2 commits is scored 2 and renders over the budget of 1", () => {
+  // Raw run -> summarise -> the result's JSON -> parseResult -> the comment: the path the workflow takes.
+  const raw = (max: number): RawRun => ({
+    start_to_interactive_ms: 700,
+    first_token_on_screen_ms: 90,
+    chunk_to_paint_ms: [5, 6],
+    raf_timestamps_ms: [0, 16, 32],
+    long_animation_frames_ms: [],
+    keystroke_latency_ms: [10],
+    keystroke_handler_ms: [1],
+    idle_memory_mb: 180,
+    memory_after_session_mb: 240,
+    react_commits_per_frame: 1.2,
+    react_commits_per_frame_max: max,
+    ipc_bytes_per_text_byte: 2,
+    viewport_width_px: 1280,
+    viewport_height_px: 800,
+  });
+  const scored = (max: number) => {
+    const json = JSON.stringify(summarise("windows", [raw(max), raw(max), raw(max)]));
+    const value = input();
+    value.scoreboard.windows.pr = {
+      state: "found",
+      data: parseResult(json, "windows"),
+      url: run(8),
+      sha: HEAD,
+    };
+    return renderComment(value);
+  };
+  const over = scored(2);
+  expect(row(over, "React commits in the worst frame while streaming, in the app")).toContain(
+    "| 2 | not measured | – | 1 | ⚠️ over budget |",
+  );
+  expect(row(over, "React commits per frame while streaming, mean, in the app")).toContain(
+    "| 1.2 | not measured | – | report only |  |",
+  );
+  const within = scored(1);
+  expect(row(within, "React commits in the worst frame while streaming, in the app")).toBe(
+    "| React commits in the worst frame while streaming, in the app | 1 | not measured | – | 1 |  |",
+  );
 });
 
 test("reducer counts: one row per case, flagged over 10% worse; or not run", () => {

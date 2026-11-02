@@ -32,17 +32,18 @@ export function heldPace(run: RawRun): boolean | null {
 
 /**
  * The run without the numbers a stretched pace distorts: first token (it waits out the paced steps
- * before the first answer chunk), React commits per frame and IPC bytes per byte of text (a slower
- * stream batches fewer chunks per event, so both count fewer chunks per frame or per event). The
- * frames (rAF timestamps, so dropped frames, and long animation frames) and chunk to paint stay:
- * each frame and each chunk is measured on its own, however far apart the chunks arrive, and a
- * slower stream only gives fewer of them. Start-up, memory and keystrokes stay too.
+ * before the first answer chunk), React commits per frame (mean and worst) and IPC bytes per byte
+ * of text (a slower stream batches fewer chunks per event, so each counts fewer chunks per frame or
+ * per event). The frames (rAF timestamps, so dropped frames, and long animation frames) and chunk to
+ * paint stay: each frame and each chunk is measured on its own, however far apart the chunks arrive,
+ * and a slower stream only gives fewer of them. Start-up, memory and keystrokes stay too.
  */
 export function withoutPacedMetrics(run: RawRun): RawRun {
   return {
     ...run,
     first_token_on_screen_ms: null,
     react_commits_per_frame: null,
+    react_commits_per_frame_max: null,
     ipc_bytes_per_text_byte: null,
   };
 }

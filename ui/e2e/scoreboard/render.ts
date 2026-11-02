@@ -99,8 +99,9 @@ function budgetCell(budget: MetricBudget, unit: Unit): string {
 /** The line under each scoreboard table. */
 export const BUDGET_NOTE =
   "A budget marked (VM) is the metric's `_vm` row in budgets.toml, the limit for GitHub's virtual " +
-  "machine runners (the Windows one renders without a GPU); the metric's own row is the release limit, " +
-  "measured on a laptop (stage F).";
+  "machine runners (the Windows one renders without a GPU); the metric's own row is the release " +
+  "limit, measured on a laptop (stage F). The one exception is react_commits_per_frame: its row " +
+  "gates a merge through a unit test, and here it only alerts.";
 
 /**
  * The line under each scoreboard table that says what its start-up rows measure (#173): on

@@ -259,9 +259,10 @@ export async function main(env: NodeJS.ProcessEnv): Promise<void> {
   });
   if (measured.some((run) => heldPace(run) === false)) {
     process.stdout.write(
-      `[scoreboard] not measured: first token, React commits per frame and IPC bytes per byte of ` +
-        `text. The streams took ${spans.join(", ")} ms against about ${PACED_STREAM_MS} ms at a ` +
-        `5 ms pace: this machine stretches the agent's sleeps (the probe above).\n`,
+      `[scoreboard] not measured: first token, React commits per frame (mean and worst) and IPC ` +
+        `bytes per byte of text. The streams took ${spans.join(", ")} ms against about ` +
+        `${PACED_STREAM_MS} ms at a 5 ms pace: this machine stretches the agent's sleeps ` +
+        `(the probe above).\n`,
     );
     measured.splice(0, measured.length, ...measured.map(withoutPacedMetrics));
   }

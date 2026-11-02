@@ -82,7 +82,7 @@ id = "memory_after_session"
 limit = 300.0
 unit = "MB"
 
-# A row a report-only metric's id might collide with: never used as its budget.
+# The limit the worst-frame React commits metric is compared with (the scoreboard reads this row).
 [[budget]]
 id = "react_commits_per_frame"
 limit = 1.0
