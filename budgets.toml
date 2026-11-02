@@ -69,8 +69,8 @@ unit = "ms"
 gate = "release"
 measured_by = "marks across Rust and JS"
 status = "measured"
-# The scoreboard's first CI run, e2e-windows 41214678308 (R13).
-measured = 1421.0
+# The scoreboard's full-LTO run on a warmed WebView2 profile, scoreboard 41424511277 (#173); the old 1421 was a fresh profile per launch.
+measured = 709.5
 measured_on = "windows-x86_64-gha"
 source = "synthesis §4; doc 15"
 
