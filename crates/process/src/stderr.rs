@@ -209,9 +209,10 @@ fn emit(line: &[u8], on_line: &mut impl FnMut(&str)) {
 /// value (at a line start, one that follows a `\n` of the value), and mid-line the end of a key
 /// or a bearer token. So ordinary text at a mid-line window start loses its leading run of
 /// bearer-token chars (letters, digits, `-._~+/=`); after a run that could end the word
-/// `Bearer`, or none, a space and the word after it too; and at any start, text that matches
-/// the end of a secret value. Redacting before cutting means no part of a secret survives at
-/// the start. When the redacted text is shorter than [`TAIL`] while the ring holds more, the
+/// `Bearer`, or none, a space and the word after it too; and text that matches the end of a
+/// secret value (mid-line any end of it, at a line start an end after one of its `\n`s).
+/// Redacting before cutting means no part of a secret survives at the start. When the
+/// redacted text is shorter than [`TAIL`] while the ring holds more, the
 /// window doubles. When opening on a whole line would leave nothing (one line longer than the
 /// cut), the text starts mid-line instead of coming out empty.
 pub(crate) fn tail(ring: &Mutex<Ring>, redactor: &Redactor) -> String {
