@@ -1,12 +1,27 @@
 //! The end of a turn: the prompt's answer, steps 6 to 8 (the held text and the expiries, the
 //! after-turn checkpoint and the commit that ends the turn, the writer passing on), and a host
 //! bug that ends a turn early. Store failures are in `failure.rs`.
+//!
+//! A turn that stops at the limit tells `limits` (`TurnEnded { read_now: true }`). With no reset
+//! time and an agent the model reads, its `TurnStoppedAtLimit` is left out of the end commit and
+//! logged after the read (`limits::stop_later`); an agent id with no kind gets no read, so its
+//! stop rides in the end commit as before.
+//!
+//! The Codex fallback: a Codex prompt that fails with a JSON-RPC error may be codex-acp's form
+//! of the limit, which Clauseo never parses from prose. Step 6 runs as for any failure, then
+//! asks for one Codex read; step 7's commit waits until that read is done, or 10 s on the host
+//! clock (the read may wait behind a question of another Codex thread or a read in flight),
+//! then ends the turn `AtLimit` with its `TurnStoppedAtLimit` when `Limits::at_limit` answers,
+//! else `TurnFailed` as before. The turn stays `Ending` meanwhile, so a cancel, an agent's exit
+//! (its detach joins the end) or a commit failure changes nothing but what that commit holds,
+//! and shutdown decides at once.
 
 use clauseo_matters::{CheckpointOutcome, TurnMeta};
 use clauseo_protocol::{
-    CheckpointKind, CheckpointRecorded, ErrorCode, ExpiryReason, FileChange, FilesChanged,
-    MatterId, StopReason, StreamId, ThreadId, TurnId,
+    AgentKind, CheckpointKind, CheckpointRecorded, ErrorCode, ExpiryReason, FileChange,
+    FilesChanged, MatterId, StopReason, StreamId, ThreadId, TurnId,
 };
+use futures::future::AbortHandle;
 
 use super::super::input::MatterTag;
 use super::super::{Actor, limits};
@@ -14,12 +29,32 @@ use super::agents;
 use super::close::{Expiries, TurnClose};
 use super::out::Out;
 use super::{
-    End, Holder, JobKind, Then, TurnJob, TurnPhase, asks, cancel, current, failure, host_stopping,
-    known, matter_of, state, steps, updates,
+    End, Holder, JobKind, LIMIT_READ_WAIT, LimitMark, Then, TimerKind, TurnJob, TurnPhase,
+    TurnTimer, asks, cancel, current, failure, host_stopping, known, matter_of, state, steps,
+    updates,
 };
 use crate::error::Error;
 use crate::matter_worker::{MatterJob, TurnCheckpoint};
 use crate::pipeline::MatterEvent;
+
+/// A Codex turn whose end waits for a limits read (the module doc's Codex fallback).
+#[derive(Debug, Default)]
+pub(super) struct LimitRead {
+    /// The read is done, or the wait is over: the end goes on.
+    done: bool,
+    /// The 10 s bound, once armed.
+    timer: Option<AbortHandle>,
+    /// The after-turn checkpoint's answer, held until the read is done.
+    held: Option<Result<TurnCheckpoint, Error>>,
+}
+
+#[cfg(test)]
+impl LimitRead {
+    /// Whether it holds the after-turn checkpoint's answer.
+    pub(super) const fn holds_checkpoint(&self) -> bool {
+        self.held.is_some()
+    }
+}
 
 /// The prompt returned: step 6.
 pub(super) fn on_prompt_done(
@@ -35,6 +70,9 @@ pub(super) fn on_prompt_done(
     }
     // Held updates of the turn go first, while it is still live.
     updates::flush_rate(actor, thread);
+    let fallback = matches!(result, Err(clauseo_acp::Error::Rpc { .. }))
+        && !host_stopping(actor)
+        && limits::reads_for(actor, thread) == Some(AgentKind::Codex);
     let Some(current) = current(actor, thread) else {
         return;
     };
@@ -52,7 +90,12 @@ pub(super) fn on_prompt_done(
                 detach: None,
             }
         }
-        Err(error) => End::failed(error.code(), Some(error.to_string()), None),
+        Err(error) => {
+            if fallback {
+                current.limit_read = Some(LimitRead::default());
+            }
+            End::failed(error.code(), Some(error.to_string()), None)
+        }
     };
     end_turn(actor, thread, end);
 }
@@ -124,6 +167,25 @@ pub(super) fn end_turn(actor: &mut Actor, thread: ThreadId, mut end: End) {
         agent.url_elicitations.clear();
     }
     limits::asking_changed(actor);
+    let reads = state(actor, thread)
+        .and_then(|state| state.current.as_deref())
+        .is_some_and(|current| current.limit_read.is_some());
+    if reads {
+        // Once, after the turn's own questions are gone, so none of them holds the read back.
+        limits::turn_ended(actor, AgentKind::Codex, true);
+        let timer = TurnTimer {
+            thread,
+            kind: TimerKind::LimitRead(turn),
+        };
+        let timer = actor.arm_timer(LIMIT_READ_WAIT, timer);
+        let waiting = state(actor, thread)
+            .and_then(|state| state.current.as_deref_mut())
+            .and_then(|current| current.limit_read.as_mut());
+        match waiting {
+            Some(read) => read.timer = Some(timer),
+            None => timer.abort(),
+        }
+    }
     let sent = (|| -> Result<(), Error> {
         let matter = matter_of(actor, thread)?;
         let now = actor.now().wall;
@@ -166,25 +228,46 @@ pub(super) fn on_after_turn(
     else {
         return;
     };
+    if let Some(read) = current.limit_read.as_mut().filter(|read| !read.done) {
+        read.held = Some(result);
+        return;
+    }
+    let fallback = current.limit_read.take().is_some();
     let mut end = current
         .end
         .take()
         .unwrap_or_else(|| End::failed(ErrorCode::Internal, None, None));
     // A commit of steps 6 and 7 may have failed after `end_turn` ran.
-    end.store_failed(current.store_failed);
-    let limit = current.limit.take();
+    let store_failed = current.store_failed;
+    end.store_failed(store_failed);
+    let mut limit = current.limit.take();
+    if fallback && store_failed.is_none() {
+        // The read decides: at the limit, the prompt's failure was the limit.
+        if let Some(hit) = limits::at_limit(actor, AgentKind::Codex) {
+            end.stop = StopReason::EndTurn;
+            end.failure = None;
+            limit = Some(LimitMark {
+                window: hit.window,
+                resets_at: hit.resets_at,
+                reason: hit.reason,
+            });
+        }
+    }
     // A turn stopped at its limit stays `AtLimit` when only its checkpoint fails.
     let stop = match (&limit, end.stop, &end.failure) {
         (Some(_), StopReason::EndTurn, None) => StopReason::AtLimit,
         (_, stop, _) => stop,
     };
-    limits::turn_ended_in(actor, thread, stop == StopReason::AtLimit);
     let mut close = TurnClose::new(turn, stop);
     // Expiries step 6 could not log (its commit failed, the stream rolled back).
     close.expiries = Expiries::Pending(end.expiry);
     close.failure = end.failure;
     close.limit = limit;
     close.detach = end.detach;
+    if !fallback {
+        // The fallback asked for its read before this commit, and asks nothing after it.
+        tell_limits(actor, thread, &mut close);
+    }
     let logged = matter_of(actor, thread).and_then(|matter| {
         match result {
             Ok(done) => after_events(actor, &mut close, matter, thread, done)?,
@@ -198,6 +281,77 @@ pub(super) fn on_after_turn(
     });
     failure::closing_sent(actor, thread, &close, logged);
     finish(actor, thread);
+}
+
+/// `TurnEnded` for `limits`, with `read_now` for a stop at the limit. A stop with no reset time
+/// whose agent the model reads leaves its `TurnStoppedAtLimit` to that read.
+fn tell_limits(actor: &mut Actor, thread: ThreadId, close: &mut TurnClose) {
+    if close.stop != StopReason::AtLimit {
+        limits::turn_ended_in(actor, thread, false);
+        return;
+    }
+    let later = close
+        .limit
+        .as_ref()
+        .filter(|limit| limit.resets_at.is_none())
+        .map(|limit| limit.reason)
+        .zip(limits::reads_for(actor, thread));
+    match later {
+        Some((reason, agent)) => {
+            close.limit = None;
+            limits::stop_later(actor, agent, thread, close.turn, reason);
+        }
+        None => limits::turn_ended_in(actor, thread, true),
+    }
+}
+
+/// A limits read of `agent` is done: each Codex turn waiting on one goes on to its end.
+pub(crate) fn limits_read(actor: &mut Actor, agent: AgentKind) {
+    if agent == AgentKind::Codex {
+        stop_waiting_for_reads(actor);
+    }
+}
+
+/// The 10 s wait for `turn`'s limits read is over.
+pub(super) fn on_limit_read_timer(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
+    read_over(actor, thread, Some(turn));
+}
+
+/// Every turn waiting for a limits read goes on: a Codex read is done, or the host shuts down.
+pub(super) fn stop_waiting_for_reads(actor: &mut Actor) {
+    let waiting: Vec<ThreadId> = actor
+        .threads
+        .iter()
+        .filter(|(_, entry)| {
+            let current = entry.turn.current.as_deref();
+            current.is_some_and(|current| current.limit_read.is_some())
+        })
+        .map(|(thread, _)| *thread)
+        .collect();
+    for thread in waiting {
+        read_over(actor, thread, None);
+    }
+}
+
+/// The wait of `thread`'s turn (of `turn`, when given) for its limits read is over: the end
+/// goes on now if the after-turn checkpoint has answered, else when it does.
+fn read_over(actor: &mut Actor, thread: ThreadId, turn: Option<TurnId>) {
+    let Some(current) =
+        current(actor, thread).filter(|current| turn.is_none_or(|turn| turn == current.turn))
+    else {
+        return;
+    };
+    let turn = current.turn;
+    let Some(read) = current.limit_read.as_mut().filter(|read| !read.done) else {
+        return;
+    };
+    read.done = true;
+    if let Some(timer) = read.timer.take() {
+        timer.abort();
+    }
+    if let Some(result) = read.held.take() {
+        on_after_turn(actor, thread, turn, result);
+    }
 }
 
 /// The after-turn checkpoint's part of a close: matter `CheckpointRecorded { AfterTurn }` when

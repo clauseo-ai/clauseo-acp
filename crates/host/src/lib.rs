@@ -96,7 +96,10 @@
 //!   pending questions and `RefreshLimits`, keeps one timer at its next deadline, stores each
 //!   changed `AccountLimits` (never in the log), and publishes `AccountLimitsChanged` and
 //!   `LimitsViewChanged` to limits subscribers ([`HostHandle::subscribe_limits`], a
-//!   [`Subscription`]).
+//!   [`Subscription`]). A turn stopped at the limit with no reset time logs its
+//!   `TurnStoppedAtLimit` in a commit of its own after its agent's next read (an agent id with
+//!   no kind keeps it in the end commit), and a Codex prompt failing with a JSON-RPC error waits
+//!   at most 10 s for one read, which decides whether it ends at the limit or failed.
 //!
 //! # Invariants
 //!

@@ -19,6 +19,12 @@
 //!   `Watching` off.
 //! - With no `claude-acp` or `codex-acp` entry in the settings there is no model: nothing reads,
 //!   the view is empty and every input does nothing.
+//! - A turn stopped at the limit with no reset time leaves a pending stop here ([`stop_later`]).
+//!   The agent's next `ReadDone`, whichever read it is, logs one `TurnStoppedAtLimit` for each,
+//!   filled from [`Limits::at_limit`] (nothing for a failed read). A pending stop lives in
+//!   memory only: one lost to a restart is logged by start-up repair (`turn/reconcile.rs`).
+//!   After every `ReadDone` of Codex, a Codex turn waiting on a read before it ends (the turn
+//!   path's Codex fallback) is told.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -26,12 +32,12 @@ use std::time::Duration;
 
 use clauseo_acp::{LimitSignal, LimitStatus};
 use clauseo_limits::{
-    Action, Input as ModelInput, Limits, LiveSignal, LiveStatus, ProcessReaders, ReadLimits,
-    ReadOutcome,
+    Action, Input as ModelInput, LimitHit, Limits, LiveSignal, LiveStatus, ProcessReaders,
+    ReadLimits, ReadOutcome,
 };
 use clauseo_protocol::{
-    AccountLimits, AgentId, AgentKind, HostEvent, LimitsView, Principal, RefreshWhy, ThreadId,
-    Timestamp,
+    AccountLimits, AgentId, AgentKind, HostEvent, LimitStopReason, LimitsView, Principal,
+    RefreshWhy, ThreadId, Timestamp, TurnId, TurnStoppedAtLimit,
 };
 use clauseo_settings::Effective;
 use futures::future::AbortHandle;
@@ -66,6 +72,17 @@ pub(crate) struct LimitsHost {
     generation: u64,
     /// The last `asking` sent per agent; none sent counts as `false`.
     asking: BTreeMap<AgentKind, bool>,
+    /// Turns stopped at the limit whose `TurnStoppedAtLimit` waits for their agent's next read.
+    stops: Vec<PendingStop>,
+}
+
+/// A turn stopped at the limit with no reset time, waiting for its agent's next read.
+struct PendingStop {
+    agent: AgentKind,
+    thread: ThreadId,
+    turn: TurnId,
+    /// From the turn's limit signal.
+    reason: LimitStopReason,
 }
 
 /// What the actor's own tasks and the limits subscriptions post back.
@@ -95,6 +112,7 @@ impl LimitsHost {
             timer: None,
             generation: 0,
             asking: BTreeMap::new(),
+            stops: Vec::new(),
         }
     }
 }
@@ -142,7 +160,9 @@ pub(super) fn start(actor: &mut Actor, cached: Vec<AccountLimits>) {
 pub(super) fn on_input(actor: &mut Actor, input: LimitsInput) {
     match input {
         LimitsInput::Read { agent, outcome } => {
+            let failed = matches!(outcome, ReadOutcome::Failed(_));
             feed(actor, ModelInput::ReadDone { agent, outcome });
+            read_done(actor, agent, failed);
         }
         LimitsInput::Deadline { generation } => {
             if generation != actor.limits.generation {
@@ -256,6 +276,57 @@ pub(crate) fn turn_ended_in(actor: &mut Actor, thread: ThreadId, read_now: bool)
 /// which sends `read_now: true` once, before the end commit.
 pub(crate) fn turn_ended(actor: &mut Actor, agent: AgentKind, read_now: bool) {
     feed(actor, ModelInput::TurnEnded { agent, read_now });
+}
+
+/// The kind of `thread`'s agent when the model has it, so a read of it will come; `None` for an
+/// agent id with no kind, or with no model.
+pub(crate) fn reads_for(actor: &Actor, thread: ThreadId) -> Option<AgentKind> {
+    kind_of(actor, thread).filter(|agent| actor.limits.agents.contains(agent))
+}
+
+/// What the model says `agent` is at now, if at its limit.
+pub(crate) fn at_limit(actor: &Actor, agent: AgentKind) -> Option<LimitHit> {
+    let now = actor.now().wall;
+    actor.limits.model.as_ref()?.at_limit(agent, now)
+}
+
+/// A turn of `thread` stopped at the limit with no reset time: its `TurnStoppedAtLimit` waits
+/// for `agent`'s next read, which this asks for (`TurnEnded { read_now: true }`).
+pub(crate) fn stop_later(
+    actor: &mut Actor,
+    agent: AgentKind,
+    thread: ThreadId,
+    turn: TurnId,
+    reason: LimitStopReason,
+) {
+    actor.limits.stops.push(PendingStop {
+        agent,
+        thread,
+        turn,
+        reason,
+    });
+    turn_ended(actor, agent, true);
+}
+
+/// A read of `agent` is done and the model has its outcome: one `TurnStoppedAtLimit` for each
+/// of the agent's pending stops (no window or reset after a failed read), then the turn path
+/// hears of it.
+fn read_done(actor: &mut Actor, agent: AgentKind, failed: bool) {
+    let hit = if failed { None } else { at_limit(actor, agent) };
+    let (due, kept): (Vec<PendingStop>, Vec<PendingStop>) = std::mem::take(&mut actor.limits.stops)
+        .into_iter()
+        .partition(|stop| stop.agent == agent);
+    actor.limits.stops = kept;
+    for stop in due {
+        let stopped = TurnStoppedAtLimit {
+            turn: stop.turn,
+            window: hit.as_ref().and_then(|hit| hit.window.clone()),
+            resets_at: hit.as_ref().and_then(|hit| hit.resets_at),
+            reason: stop.reason,
+        };
+        super::turn::log_limit_stop(actor, stop.thread, stopped);
+    }
+    super::turn::limits_read(actor, agent);
 }
 
 /// The kind of `thread`'s agent, if it has one.
