@@ -14,7 +14,9 @@ use serde::{Deserialize, Serialize};
 use crate::open_enum::{open_data_enum, open_unit_enum};
 use crate::{Finite, Timestamp};
 
-/// The agent a limit belongs to. Only for limits; threads name agents by [`AgentId`].
+/// An agent's kind: it picks what the host forces at the agent's launch, the kind
+/// `ListAgents` answers for each agent, and whose limits a limit is. Threads name agents by
+/// [`AgentId`].
 ///
 /// [`AgentId`]: crate::AgentId
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

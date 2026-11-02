@@ -152,7 +152,9 @@ export type AgentContentEntry = {
 export type AgentId = string;
 
 /**
- *  The agent a limit belongs to. Only for limits; threads name agents by [`AgentId`].
+ *  An agent's kind: it picks what the host forces at the agent's launch, the kind
+ *  `ListAgents` answers for each agent, and whose limits a limit is. Threads name agents by
+ *  [`AgentId`].
  * 
  *  [`AgentId`]: crate::AgentId
  */
@@ -1048,6 +1050,8 @@ export type ErrorCode =
 "matter.folder_missing" | 
 /** The folder may not be a matter: a drive root, the home folder or a system folder. */
 "matter.folder_refused" | 
+/** The matter folder holds a `.codex` folder, whose settings Codex would load. */
+"matter.codex_folder" | 
 /** A file the operation needs is locked by another program, such as an open document. */
 "matter.file_locked" | 
 /** A turn is running in the matter, so undo or restore waits. */

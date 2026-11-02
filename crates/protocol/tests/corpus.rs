@@ -80,6 +80,13 @@ const ADDED_AFTER_V1: &[Corpus] = &[
         (291, 0xa3e2_fa0b_b295_75ad),
         (220, 0x14ba_06d0_9664_8de4),
     ),
+    (
+        "added/turn_failed-MatterCodexFolder",
+        include_bytes!("corpus/added/turn_failed-MatterCodexFolder.jsonl"),
+        include_bytes!("corpus/added/turn_failed-MatterCodexFolder.msgpack"),
+        (357, 0x48d1_4ed4_b6a4_4245),
+        (259, 0x5cce_ad89_d5a3_ae0a),
+    ),
 ];
 
 /// V1, then every file in [`ADDED_AFTER_V1`].

@@ -36,6 +36,7 @@ export type ErrorCode =
   | "matter.checkpoint_failed"
   | "matter.folder_missing"
   | "matter.folder_refused"
+  | "matter.codex_folder"
   | "matter.file_locked"
   | "matter.turn_running"
   | "transport.unauthorized"
@@ -79,6 +80,8 @@ const HI = {
     "इस मामले का फ़ोल्डर नहीं मिल रहा। हो सकता है वह कहीं और ले जाया गया हो, या उसकी ड्राइव जुड़ी न हो।",
   "A whole drive, your home folder or a system folder can't be a matter.":
     "पूरी ड्राइव, आपका होम फ़ोल्डर या कोई सिस्टम फ़ोल्डर मामला नहीं बन सकता।",
+  "This matter's folder holds a .codex folder. Rename or remove it to use Codex here.":
+    "इस मामले के फ़ोल्डर में एक .codex फ़ोल्डर है। यहाँ Codex का उपयोग करने के लिए उसका नाम बदलें या उसे हटाएँ।",
   "A paper is open in another program. Close it, then try again.":
     "कोई दस्तावेज़ किसी दूसरे प्रोग्राम में खुला है। उसे बंद करें, फिर दोबारा प्रयास करें।",
   "Wait for the answer to finish first.": "पहले उत्तर पूरा होने दें।",
@@ -124,6 +127,8 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   "matter.folder_missing":
     "This matter's folder can't be found. It may have moved, or its drive isn't connected.",
   "matter.folder_refused": "A whole drive, your home folder or a system folder can't be a matter.",
+  "matter.codex_folder":
+    "This matter's folder holds a .codex folder. Rename or remove it to use Codex here.",
   "matter.file_locked": "A paper is open in another program. Close it, then try again.",
   "matter.turn_running": "Wait for the answer to finish first.",
   "transport.unauthorized": "That wasn't allowed, so nothing changed.",
