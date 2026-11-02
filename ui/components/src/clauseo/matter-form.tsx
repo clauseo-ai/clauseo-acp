@@ -232,7 +232,8 @@ export function NewMatterForm({
           ? { title: w("Clauseo makes this folder. Add papers to it any time.") }
           : {})}
       >
-        <IconFolder size={16} className="matter-form-folder-icon" />
+        {/* with no folder to name, Change stands alone: no icon beside nothing */}
+        {folder !== null && <IconFolder size={16} className="matter-form-folder-icon" />}
         {/* what Change changes: the folder line, or where there is none, its name for a screen reader */}
         <p id={folderId} className="matter-form-folder-words">
           {folder !== null ? (

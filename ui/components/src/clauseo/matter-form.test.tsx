@@ -155,6 +155,8 @@ test("folder null shows Change alone; Change waits for the picker, and a cancel 
   expect(document.querySelector("[data-testid=matter-name]")?.tagName).toBe("INPUT");
   expect(document.querySelector("[data-testid=create-matter]")).not.toBeNull();
   expect(document.querySelector(".matter-form-path")).toBeNull();
+  // no folder icon beside nothing
+  expect(document.querySelector(".matter-form-folder-icon")).toBeNull();
   // no folder words on screen; Change is described, for a screen reader, by what it changes
   const words = document.querySelector(".matter-form-folder-words");
   expect(words?.querySelector(".sr-only")?.textContent).toBe("The matter's folder");
