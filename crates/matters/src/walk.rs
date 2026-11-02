@@ -227,8 +227,9 @@ pub(crate) fn walk_first(
 
 /// One entry of a folder that the walk keeps.
 enum Item {
-    /// A regular file whose stat is not taken yet, and its path relative to the root.
-    File(DirEntry, MatterPath),
+    /// A regular file whose stat is not taken yet, and its path relative to the root. Boxed:
+    /// a `DirEntry` holds the whole find data on Windows, some 600 bytes.
+    File(Box<DirEntry>, MatterPath),
     /// A file whose stat is taken.
     Stated(Found),
     /// A subfolder to read: absolute path and path relative to the root.
@@ -476,7 +477,7 @@ fn entry_item(entry: DirEntry, parent: &str) -> Result<Entry, Error> {
     if is_dir {
         return Ok(Entry::Item(Item::Folder(entry.path(), relative)));
     }
-    Ok(Entry::Item(Item::File(entry, matter_path)))
+    Ok(Entry::Item(Item::File(Box::new(entry), matter_path)))
 }
 
 #[cfg(test)]
