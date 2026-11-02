@@ -417,6 +417,7 @@ function RoomFrame({
                     plan={plan}
                     focus={talks.focus?.n ?? null}
                     onThread={matters.onThread}
+                    conversations={conversations}
                   />
                 </AgentPlanContext>
               </WordOpenContext>

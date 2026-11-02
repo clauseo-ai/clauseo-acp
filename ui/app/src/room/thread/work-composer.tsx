@@ -6,7 +6,7 @@
 // back into the field when the field is empty. Each conversation keeps its own words (the drafts, by its key); on a new
 // conversation the status line offers the plan to ask with, until its first question fixes it, and otherwise names the
 // plan the conversation uses. `/` opens the menu of the agent's commands, as the thread's header lists them.
-import { useEffect, useImperativeHandle, useRef, type Ref } from "react";
+import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
 import {
   Composer,
   type ComposerHandle,
@@ -17,7 +17,10 @@ import type { WorkingState } from "@clauseo/components/clauseo/working-line.tsx"
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { frame } from "@clauseo/components/lib/words-frame.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
-import type { EntryId } from "../../transport/protocol.ts";
+import type { HostTransport } from "../../transport/host-transport.ts";
+import type { EntryId, ErrorCode } from "../../transport/protocol.ts";
+import type { Conversations } from "../conversations.ts";
+import { OtherWait } from "../queue.tsx";
 import type { BreakLine } from "../thread-break.ts";
 import { useAgentPlan } from "./agent-plan.ts";
 import type { Drafts } from "./session.ts";
@@ -37,6 +40,7 @@ export function WorkComposer({
   refill = null,
   onAsk,
   onStop,
+  others = null,
 }: {
   /** The composer's handle, for the room to put the focus in the field. */
   ref?: Ref<ComposerHandle>;
@@ -65,6 +69,13 @@ export function WorkComposer({
   /** True once the question is accepted. */
   onAsk: (text: string) => Promise<boolean>;
   onStop: () => void;
+  /** U7: the matter's conversations, for the wait over the field while another of them holds the matter, whose Queue
+   * sends the field's words as Ask does; with a refused Stop the other's code going to `onRefused`. Null: no wait. */
+  others?: {
+    transport: HostTransport;
+    conversations: Conversations;
+    onRefused: (code: ErrorCode | null) => void;
+  } | null;
 }) {
   const w = useWords();
   const agentPlan = useAgentPlan();
@@ -80,8 +91,18 @@ export function WorkComposer({
     }),
     [],
   );
+  // whether the field is empty, for Queue: set only as it fills or empties, so a keystroke renders nothing
+  const [empty, setEmpty] = useState(
+    () => (draftKey === null ? "" : (drafts.get(draftKey) ?? "")).trim() === "",
+  );
+  const emptyNow = useRef(empty);
   // the field holds the words, not React: each change goes straight to the conversation's draft
   const keep = (text: string) => {
+    const isEmpty = text.trim() === "";
+    if (emptyNow.current !== isEmpty) {
+      emptyNow.current = isEmpty;
+      setEmpty(isEmpty);
+    }
     if (draftKey === null) return;
     if (text === "") drafts.delete(draftKey);
     else drafts.set(draftKey, text);
@@ -100,6 +121,8 @@ export function WorkComposer({
       if (draftKey !== null && drafts.get(draftKey) === asked) drafts.delete(draftKey);
     });
   };
+  // U7's Queue: the field's words, sent as Ask sends them
+  const queueNow = () => ask(field.current?.text() ?? "");
   // the stopped question, once per break, and only into an empty field: words typed since keep their place, and fill
   // never moves the lawyer's focus or breaks a composition
   const refilled = useRef<EntryId | null>(null);
@@ -141,6 +164,19 @@ export function WorkComposer({
       initialText={draftKey === null ? "" : (drafts.get(draftKey) ?? "")}
       onInput={keep}
       onAsk={ask}
+      queue={
+        others === null ? null : (
+          <OtherWait
+            transport={others.transport}
+            conversations={others.conversations}
+            conversationKey={draftKey}
+            busy={busy}
+            empty={empty}
+            onQueue={queueNow}
+            onRefused={others.onRefused}
+          />
+        )
+      }
       disabled={disabled}
       line={false}
       testIds={{

@@ -11,6 +11,7 @@ import { useStreamError, useStreamPart, useViewStore, useWatch } from "../../sto
 import type { StreamView } from "../../store/view.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type { AvailableCommand, MatterSummary, ThreadId } from "../../transport/protocol.ts";
+import type { Conversations } from "../conversations.ts";
 import { nextHostOf } from "../host-next.ts";
 import { KeyedRequestContext, keyedRequest } from "../permission-keyed.ts";
 import { refillOf, useBreakLines, useStoppedLine, useThreadBreak } from "../thread-break.ts";
@@ -19,6 +20,7 @@ import { LazyThreadList, loadThread } from "./chunk.ts";
 import { useBusy } from "./live.ts";
 import {
   ThreadActionsContext,
+  useRefused,
   useThreadSession,
   type ConversationLink,
   type Drafts,
@@ -55,6 +57,7 @@ export function Work({
   plan = "",
   focus = null,
   onThread,
+  conversations,
 }: {
   transport: HostTransport;
   matter: MatterSummary | null;
@@ -72,6 +75,8 @@ export function Work({
   focus?: number | null;
   /** Hears the open thread: null until there is one. */
   onThread?: (thread: ThreadId | null) => void;
+  /** The matter's conversations, for the wait while another of them holds the matter (U7); none, no wait. */
+  conversations?: Conversations | undefined;
 }) {
   const store = useViewStore();
   const field = useRef<ComposerHandle>(null);
@@ -114,6 +119,12 @@ export function Work({
   // the one prompt that takes the keys, read here once a change rather than by every row
   const keyed = useStreamPart(store, stream, keyedRequest);
   useEffect(() => onThread?.(session.thread), [onThread, session.thread]);
+  // U7: a refused Stop the other, by its code, on the composer's line until the next press or Ask
+  const [otherRefused, refuseOther] = useRefused();
+  const ask = (text: string) => {
+    refuseOther(null);
+    return session.ask(text);
+  };
   // the thread's chunk, in memory before the first view or the first answer, with a matter or without
   useEffect(() => void loadThread(), []);
   return (
@@ -139,7 +150,7 @@ export function Work({
         commands={commands}
         disabled={matter === null}
         busy={busy}
-        refused={session.refused}
+        refused={session.refused ?? otherRefused}
         failed={
           failed === null
             ? null
@@ -158,8 +169,11 @@ export function Work({
         }
         stopped={stopped}
         refill={refillOf(brk, live, restart)}
-        onAsk={session.ask}
+        onAsk={ask}
         onStop={session.stop}
+        others={
+          conversations === undefined ? null : { transport, conversations, onRefused: refuseOther }
+        }
       />
     </>
   );

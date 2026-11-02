@@ -4,7 +4,8 @@
 // the new matter dialog open, with and without a NextHost, and with the agent's permission requests in the thread: a
 // pending prompt on a paper offering all four answers, one answered once and done, a command's, which asks, and one confirming: Always for this matter
 // pressed and held while the OS asks, its answers waiting. happy-dom computes no styles, so axe can't judge colour contrast here: that
-// is checked by hand in the app, with window.__clauseoAxe() (dev-hooks.ts).
+// is checked by hand in the app, with window.__clauseoAxe() (dev-hooks.ts). And U7's wait over the composer while
+// another conversation of the matter runs, with Stop the other and Queue.
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -74,6 +75,8 @@ type Scene = {
   thread?: ViewEntry[];
   /** Always for this matter, pressed and held: the OS's confirm line up, the answers waiting. */
   confirming?: boolean;
+  /** The open thread idle while another conversation of its matter runs: the wait over the composer (U7). */
+  wait?: boolean;
 };
 
 const ASKED = userMessage(2, 1, "Tighten the notice to the bank.");
@@ -114,7 +117,17 @@ const SCENES: Record<string, Scene> = {
     thread: [ASKED, editCall(3, 1, "pending"), permission(4, 1)],
     confirming: true,
   },
+  // another conversation of the matter runs: the wait over the composer, with Stop the other and Queue
+  "another conversation holding the matter": {
+    matters: true,
+    papers: undefined,
+    thread: [ASKED],
+    wait: true,
+  },
 };
+
+/** The other conversation for the wait: its id sorts below THREAD's, so THREAD opens. */
+const OTHER = uuid(0, 1);
 
 /** The room as App mounts it: inside the page's view store. */
 const inStore = (transport: FakeTransport) => (
@@ -150,7 +163,18 @@ function transportFor(scene: Scene): FakeTransport {
           threads:
             thread === undefined
               ? []
-              : [{ thread: THREAD, matter: MATTER, agent: "claude-acp", status: "needs_you" }],
+              : scene.wait === true
+                ? [
+                    { thread: THREAD, matter: MATTER, agent: "claude-acp", status: "idle" },
+                    {
+                      thread: OTHER,
+                      matter: MATTER,
+                      agent: "claude-acp",
+                      status: "running",
+                      title: "Draft petition",
+                    },
+                  ]
+                : [{ thread: THREAD, matter: MATTER, agent: "claude-acp", status: "needs_you" }],
         };
       return { matters };
     },
@@ -160,7 +184,14 @@ function transportFor(scene: Scene): FakeTransport {
           subscribe: (stream) =>
             queueMicrotask(() =>
               transport.deliver(
-                event(batch(1, [reset(thread, header("needs_you"))], undefined, stream)),
+                event(
+                  batch(
+                    1,
+                    [reset(thread, header(scene.wait === true ? "idle" : "needs_you"))],
+                    undefined,
+                    stream,
+                  ),
+                ),
               ),
             ),
         }),
@@ -202,7 +233,14 @@ for (const theme of THEMES) {
               await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
               expect(document.querySelector('[role="dialog"]'), name).not.toBeNull();
             }
-            if (scene.thread !== undefined) {
+            if (scene.wait === true) {
+              await act(async () => void (await loadThread()));
+              await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+              const wait = host.querySelector('[data-testid="other-wait"]');
+              expect(wait, name).not.toBeNull();
+              expect(wait?.querySelector('[data-testid="stop-other"]'), name).not.toBeNull();
+              expect(wait?.querySelector('[data-testid="queue"]'), name).not.toBeNull();
+            } else if (scene.thread !== undefined) {
               await act(async () => void (await loadThread()));
               await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
               const rows = [...host.querySelectorAll<HTMLElement>('[data-testid="permission"]')];
