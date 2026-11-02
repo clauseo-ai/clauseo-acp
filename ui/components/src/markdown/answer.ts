@@ -95,6 +95,10 @@ const EMPTY_HAST: Hast = { type: "root", children: [] };
 export type Answer = {
   /** The blocks for the whole answer so far; `streaming` is false once the turn has ended. */
   update(text: string, streaming: boolean): readonly BlockView[];
+  /** Whether a parse met a named character reference the common set doesn't know, and the full table hasn't
+   * arrived yet: the answer needs one more render once it does (entities.ts). Read when the table arrives, outside
+   * render, so the React compiler never caches it (markdown.tsx). */
+  waitsForEntities(): boolean;
 };
 
 /** mdast to hast: raw HTML as text, the syntax extras, definition lists. */
@@ -570,5 +574,6 @@ export function createAnswer(scope: string): Answer {
       joinOf.sweep();
       return lastViews;
     },
+    waitsForEntities: () => missed && !entities,
   };
 }
