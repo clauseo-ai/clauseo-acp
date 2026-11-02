@@ -16,17 +16,34 @@ tracing = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 # clippy.toml bans std's canonicalize in favour of dunce's.
 dunce = { workspace = true }
+# The egress proxy (src/proxy.rs): its thread runs async-io's block_on over an async-executor
+# LocalExecutor; DNS and the upstream lookup run on blocking's pool; httparse reads request and
+# response heads; url turns host names to ASCII (IDN) and parses http:// targets; psl refuses a
+# firm wildcard on a public suffix; getrandom, base64 and subtle make and check the token.
+async-executor = { workspace = true }
+async-io = { workspace = true }
+blocking = { workspace = true }
+futures = { workspace = true }
+httparse = { workspace = true }
+url = { workspace = true }
+psl = { workspace = true }
+getrandom = { workspace = true }
+base64 = { workspace = true }
+subtle = { workspace = true }
 
 # The watcher (src/macos/watch.rs): `log stream` started as a child, its ndjson lines read on a
 # thread of its own with a once-a-second tick, each line parsed as JSON.
 [target.'cfg(target_os = "macos")'.dependencies]
 async-process = { workspace = true }
-async-io = { workspace = true }
-futures = { workspace = true }
 serde_json = { workspace = true }
 
+# The proxy's listeners bind with SO_EXCLUSIVEADDRUSE (src/ports.rs).
+[target.'cfg(windows)'.dependencies]
+socket2 = { workspace = true }
+windows = { workspace = true, features = ["Win32_Networking_WinSock"] }
+
 [dev-dependencies]
-# The denials' JSON shape, and `run_sandboxed --print-spec`.
+# The denials' JSON shape, `run_sandboxed --print-spec`, and the proxy example's JSON lines.
 serde_json = { workspace = true }
 # The Seatbelt profile snapshots.
 insta = { workspace = true }
@@ -38,8 +55,6 @@ clauseo-process = { path = "../process", features = ["test-support"] }
 # The jail tests drive the launched programs, wait for a jailed tree's exits with kqueue, and
 # open a pty outside the jail (`term`, and `fs` for its name).
 [target.'cfg(target_os = "macos")'.dev-dependencies]
-async-io = { workspace = true }
-futures = { workspace = true }
 nix = { workspace = true, features = ["event", "term", "fs"] }
 
 [lints]

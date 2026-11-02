@@ -1096,19 +1096,29 @@ dependencies = [
 name = "clauseo-sandbox"
 version = "0.1.0"
 dependencies = [
+ "async-executor",
  "async-io",
  "async-process",
+ "base64 0.22.1",
+ "blocking",
  "clauseo-fake_agent",
  "clauseo-process",
  "clauseo-protocol",
  "dunce",
  "futures",
+ "getrandom 0.3.4",
+ "httparse",
  "insta",
  "nix",
+ "psl",
  "serde",
  "serde_json",
+ "socket2",
+ "subtle",
  "thiserror 2.0.21",
  "tracing",
+ "url",
+ "windows",
 ]
 
 [[package]]
@@ -4955,6 +4965,21 @@ dependencies = [
  "tempfile",
  "unarray",
 ]
+
+[[package]]
+name = "psl"
+version = "2.1.246"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "27d58bd13c235442118460335daf360f0fefaa9035ec4ad957f851d738e7b7d6"
+dependencies = [
+ "psl-types",
+]
+
+[[package]]
+name = "psl-types"
+version = "2.0.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33cb294fe86a74cbcf50d4445b37da762029549ebeea341421c7c70370f86cac"
 
 [[package]]
 name = "psm"

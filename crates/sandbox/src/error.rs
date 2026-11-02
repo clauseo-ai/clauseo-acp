@@ -18,14 +18,25 @@ pub enum Error {
     /// The jailed agent did not start.
     #[error(transparent)]
     Launch(#[from] clauseo_process::Error),
+    /// An egress proxy setting was refused: an allowlist entry or the upstream proxy's URL. The
+    /// message names the setting and the rule.
+    #[error("egress proxy setting refused: {0}")]
+    ProxyConfig(String),
+    /// The egress proxy did not start: a listener did not bind, the OS gave no randomness for
+    /// the token, or its thread did not start.
+    #[error("egress proxy did not start: {0}")]
+    ProxyStart(#[source] io::Error),
 }
 
 impl Error {
     /// The code a client sees. A refused policy stops the launch, so it is a failed launch, as
-    /// a launch error is; a failed probe is unexpected, so it is `Internal`.
+    /// a launch error is, and so are the proxy's errors; a failed probe is unexpected, so it is
+    /// `Internal`.
     pub fn code(&self) -> ErrorCode {
         match self {
-            Error::Policy(_) => ErrorCode::AgentLaunchFailed,
+            Error::Policy(_) | Error::ProxyConfig(_) | Error::ProxyStart(_) => {
+                ErrorCode::AgentLaunchFailed
+            }
             Error::Probe(_) => ErrorCode::Internal,
             Error::Launch(error) => error.code(),
         }
