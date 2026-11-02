@@ -49,6 +49,8 @@ fn every_command_and_read_the_windows_send_today_is_admitted() {
         json!({"relocate_matter": {"matter": matter, "folder": folder}}),
         // The limits block's "Try again" (R16).
         json!({"refresh_limits": {"agent": null, "why": "try_again"}}),
+        // The scan before a matter (R20a): a cancel passes with any ref.
+        json!({"cancel_scan": {"folder": folder}}),
     ];
     for body in commands {
         let admitted = bridge.admit(MAIN, &command(body.clone()));
@@ -85,6 +87,7 @@ fn every_refused_command_is_refused_before_open_stream() {
         command(json!({"create_matter": {"name": "Smith v Jones",
             "source": {"new_folder": {"folder": not_picked}}}})),
         command(json!({"relocate_matter": {"matter": host.scratch(), "folder": not_picked}})),
+        command(json!({"scan_folder": {"folder": not_picked}})),
         command(json!({"answer_permission": {"thread": thread,
             "request": Uuid::now_v7(), "option_id": "allow"}})),
         command(json!({"set_mode": {"thread": thread, "mode_id": "bypassPermissions"}})),
@@ -180,4 +183,40 @@ fn the_settings_window_sets_and_reads_the_settings_and_refreshes_the_limits_only
     assert_eq!(other.code(), ErrorCode::CommandInvalid);
     let other = block_on(bridge.query("other", HostQuery::GetSettings)).unwrap_err();
     assert_eq!(other.code(), ErrorCode::CommandInvalid);
+}
+
+/// `ScanFolder` passes `admit` only with a folder this run's picker issued; `CancelScan`
+/// passes with any ref, even one never issued, and starts nothing: no scan event comes and the
+/// host answers `Done`.
+#[test]
+fn scan_folder_needs_a_picked_folder_and_cancel_scan_starts_nothing() {
+    let scratch = Scratch::new("admit-scan", &["work"]);
+    let host = scratch.start(Vec::new());
+    let bridge = host.bridge();
+    let work = scratch.path().join("work");
+    let picked = block_on(bridge.pick_folder(&Picks(Some(work)), Some(scratch.path()))).unwrap();
+    let folder = picked.unwrap().folder;
+    let scan = command(json!({"scan_folder": {"folder": folder}}));
+    assert!(bridge.admit(MAIN, &scan).is_ok());
+
+    let mut app = block_on(
+        host.host
+            .subscribe_app(clauseo_protocol::Principal::LocalDesktop),
+    )
+    .unwrap();
+    let never_issued = Uuid::now_v7();
+    let cancel = command(json!({"cancel_scan": {"folder": never_issued}}));
+    let answer = block_on(bridge.dispatch(MAIN, envelope(cancel))).unwrap();
+    assert_eq!(answer, CommandOutcome::Done);
+    // A query after it: the host handled the cancel before answering it.
+    block_on(bridge.query(MAIN, HostQuery::ListMatters)).unwrap();
+    while let Some(Some(item)) =
+        futures::FutureExt::now_or_never(futures::StreamExt::next(&mut app))
+    {
+        let event: HostEvent = item.decode().unwrap();
+        assert!(
+            !matches!(event, HostEvent::FolderScanned(_)),
+            "a cancel started a scan: {event:?}"
+        );
+    }
 }
