@@ -1,6 +1,7 @@
 import type { Nodes as Hast } from "hast";
 import { expect, test, vi } from "vitest";
 import { createAnswer } from "./answer.ts";
+import { shownHast } from "./view-fixture.ts";
 import { MAX_TREE_DEPTH } from "./nesting.ts";
 
 // With nesting.ts's input limits off, the depth fallback after parsing still holds, for a block and for
@@ -38,8 +39,8 @@ test.each([true, false])(
     const note = views.at(-1)?.items?.[0];
     expect(note?.note).toBe("a");
     for (const view of [block, note!]) {
-      expect(depthOf(view.hast)).toBeLessThan(MAX_TREE_DEPTH);
-      expect(textOf(view.hast)).toContain("- - - x");
+      expect(depthOf(shownHast(view))).toBeLessThan(MAX_TREE_DEPTH);
+      expect(textOf(shownHast(view))).toContain("- - - x");
     }
   },
 );

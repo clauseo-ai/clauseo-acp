@@ -2,6 +2,7 @@ import type { Nodes as Hast, Root } from "hast";
 import type { Root as Mdast } from "mdast";
 import { expect, test } from "vitest";
 import { createAnswer } from "./answer.ts";
+import { shownHast } from "./view-fixture.ts";
 import {
   capNesting,
   deeperThan,
@@ -83,8 +84,8 @@ test("a footnote definition's label counts as a container marker, so the markers
   expect(capNesting(`[^a b]: ${"- ".repeat(40)}x`)).toBe(`[^a b]: ${"- ".repeat(40)}x`);
   const views = createAnswer("t").update(`x[^a]\n\n[^a]: ${"- ".repeat(3000)}x`, false);
   const note = views.at(-1)?.items?.[0];
-  expect(note && count(note.hast, "ul")).toBeLessThanOrEqual(MAX_NESTING);
-  expect(note && textOf(note.hast)).toContain("- - - x");
+  expect(note && count(shownHast(note), "ul")).toBeLessThanOrEqual(MAX_NESTING);
+  expect(note && textOf(shownHast(note))).toContain("- - - x");
 });
 
 test("a line's container prefix stops at column 64, tabs counted to the next multiple of 4", () => {
@@ -126,7 +127,7 @@ test("~ counts with * and _: runs of 64, 400 sequences a paragraph; a ~~~ fence 
   const late = `${"a~ ".repeat(MAX_SEQUENCES)}\n${fence}`;
   expect(capNesting(late).endsWith(`\n${fence}`)).toBe(true);
   const [, code] = createAnswer("t").update(`text\n\n~~~ts\nlet a = "~~";\n~~~\n`, false);
-  expect(code && textOf(code.hast)).toBe('let a = "~~";\n');
+  expect(code && textOf(shownHast(code))).toBe('let a = "~~";\n');
 });
 
 test("a paragraph keeps 32 `[` open, 64 `]` with none open, and no `[` open over 1,000 characters", () => {
@@ -155,9 +156,9 @@ test.each([
   ["a `~~~` fence of 40 `[` lines", `~~~\n${"x = a[\n".repeat(40)}~~~\nSee [docs](u).`],
 ])("brackets in code do not use up the paragraph's limit: %s, then a link", (_, text) => {
   const views = createAnswer("t").update(text, false);
-  const links = views.reduce((total, view) => total + count(view.hast, "a"), 0);
+  const links = views.reduce((total, view) => total + count(shownHast(view), "a"), 0);
   expect(links).toBe(1);
-  expect(hasStandIn(views.map((view) => JSON.stringify(view.hast)).join(""))).toBe(false);
+  expect(hasStandIn(views.map((view) => JSON.stringify(shownHast(view))).join(""))).toBe(false);
 });
 
 test("a backtick micromark does not read as code cannot hide more than 64 brackets from the limits", () => {
@@ -171,7 +172,7 @@ test("a backtick micromark does not read as code cannot hide more than 64 bracke
 test("links still work past the bracket limits, and every cut bracket reads as written", () => {
   const text = `${"[".repeat(40)}a${"]".repeat(40)} then [ok](https://b.example/) and [${"x".repeat(1200)}](/far)`;
   const [view] = createAnswer("t").update(text, false);
-  const hast = view!.hast;
+  const hast = shownHast(view!);
   expect(count(hast, "a")).toBe(1);
   expect(JSON.stringify(hast)).toContain('"href":"https://b.example/"');
   expect(textOf(hast)).toBe(
@@ -205,7 +206,7 @@ test("what the limits insert never shows: code, link URLs and text read as writt
   const url = `https://a.example/${"_".repeat(70)}`;
   const text = `\`\`\`\n${code}\n\`\`\`\n\nSee \`${"_".repeat(80)}\` and [the page](${url}).\n`;
   const views = createAnswer("t").update(text, false);
-  const [fence, paragraph] = views.map((view) => view.hast);
+  const [fence, paragraph] = views.map((view) => shownHast(view));
   expect(fence && textOf(fence)).toBe(`${code}\n`);
   expect(paragraph && textOf(paragraph)).toBe(`See ${"_".repeat(80)} and the page.`);
   const link = paragraph && JSON.stringify(paragraph);
@@ -244,7 +245,10 @@ test.each([
         "**bold** and `<pre>`\n\n",
         "- item\n",
       ]);
-      const root: Root = { type: "root", children: views.flatMap((view) => view.hast.children) };
+      const root: Root = {
+        type: "root",
+        children: views.flatMap((view) => shownHast(view).children),
+      };
       expect(textOf(root)).toContain(opener.replace(/^[ >\-1.]+/, ""));
       expect(count(root, "h2")).toBe(1);
       expect(count(root, "strong")).toBe(1);
@@ -265,9 +269,9 @@ test.each([
 ])("%s render 32 levels deep, the deeper part as text", (_, text, tagName, rest) => {
   for (const streaming of [true, false]) {
     const [view] = createAnswer("t").update(text, streaming);
-    expect(view && count(view.hast, tagName)).toBe(MAX_NESTING);
-    expect(view && textOf(view.hast)).toContain(rest);
-    expect(view && hasStandIn(textOf(view.hast))).toBe(false);
+    expect(view && count(shownHast(view), tagName)).toBe(MAX_NESTING);
+    expect(view && textOf(shownHast(view))).toContain(rest);
+    expect(view && hasStandIn(textOf(shownHast(view)))).toBe(false);
   }
 });
 
@@ -282,7 +286,7 @@ test.each([
     const views = createAnswer("t").update(`Intro **bold**.\n\n${deep}\n\nOutro _end_.\n`, false);
     // The middle is one block, or, a paragraph longer than MAX_PARAGRAPH, cut into parts (split.ts).
     expect(views.length).toBeGreaterThanOrEqual(3);
-    const roots = views.map((view) => view.hast) as Root[];
+    const roots = views.map((view) => shownHast(view)) as Root[];
     const [intro, outro, parts] = [roots[0]!, roots.at(-1)!, roots.slice(1, -1)];
     const middle: Root = { type: "root", children: parts.flatMap((part) => part.children) };
     expect(count(intro, "strong")).toBe(1);

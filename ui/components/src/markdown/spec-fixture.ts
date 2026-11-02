@@ -13,11 +13,13 @@ import { sanitize } from "hast-util-sanitize";
 import { toHtml } from "hast-util-to-html";
 import { toHast } from "mdast-util-to-hast";
 import { createAnswer, HANDLERS } from "./answer.ts";
+import type { BlockView } from "./answer.ts";
 import { markCutTags, pairTags } from "./inline-tags.ts";
 import { capNesting, hasStandIns, restoreText } from "./nesting.ts";
 import { parse } from "./parse.ts";
 import { SCHEMA } from "./schema.ts";
 import { anchorHeadings, headingId, numberSlugs, withSlugs } from "./slugs.ts";
+import { shownHast } from "./view-fixture.ts";
 
 export type Example = { example: number; section: string; markdown: string; html: string };
 
@@ -139,16 +141,14 @@ function withLabels(node: ElementContent): ElementContent {
   return { ...node, properties, children: node.children.map(withLabels) };
 }
 
-type View = { hast: Root; items?: readonly { hast: Root }[] | undefined };
-
 /**
  * The notes section the renderer puts around the notes view's items (notes.tsx), as hast: remark-rehype's
  * footer, its heading's id scoped as each item's is.
  */
-function notesSection(items: readonly { hast: Root }[]): Root {
+function notesSection(items: readonly BlockView[]): Root {
   const children: ElementContent[] = [{ type: "text", value: "\n" }];
   for (const item of items)
-    for (const child of item.hast.children)
+    for (const child of shownHast(item).children)
       if (child.type === "element") children.push(withLabels(child), { type: "text", value: "\n" });
   const first = children.find((child) => child.type === "element");
   const id = first?.type === "element" ? String(first.properties.id ?? "") : "";
@@ -173,9 +173,14 @@ function notesSection(items: readonly { hast: Root }[]): Root {
   };
 }
 
-/** The HTML of the answer model's final hast: each block's sanitised hast, in order, then the notes. */
-export function htmlOf(views: readonly View[]): string {
-  return views.map((view) => toHtml(view.items ? notesSection(view.items) : view.hast)).join("\n");
+/**
+ * The HTML of the answer model's final hast: each block's sanitised hast, in order, then the notes. Each
+ * view's hast is checked against the React elements it renders (shownHast).
+ */
+export function htmlOf(views: readonly BlockView[]): string {
+  return views
+    .map((view) => toHtml(view.items ? notesSection(view.items) : shownHast(view)))
+    .join("\n");
 }
 
 /**
