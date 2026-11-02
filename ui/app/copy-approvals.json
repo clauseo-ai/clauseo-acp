@@ -633,5 +633,21 @@
     "at": "2026-11-02",
     "by": "Rohan",
     "note": "Rohan, on the review page (built from U3 2ef845cc)"
+  },
+  "U3-49": {
+    "en": "The limit reset at {time}.",
+    "hi": "सीमा {time} बजे रीसेट हुई।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 635858d3)"
+  },
+  "U3-50": {
+    "en": "The limit reset on {day} at {time}.",
+    "hi": "सीमा {day} {time} बजे रीसेट हुई।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 635858d3)"
   }
 }
