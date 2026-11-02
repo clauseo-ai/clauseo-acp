@@ -73,7 +73,30 @@ export const ids = {
   limitResetsAt: "limit-resets-at",
   /** A finished turn's Undo. */
   undo: "undo",
+  /** The Versions panel, which stands where the rail of matters stood while it is open. */
+  versions: "versions",
+  /** One version row of the panel, with `data-checkpoint` and `data-kind` (`VersionKind`). */
+  version: "version",
+  /** Undo in the band of the selected version. */
+  versionUndo: "version-undo",
+  /** Restore in the band of the selected version. */
+  versionRestore: "version-restore",
+  /** The line that says Restore and Undo wait for an answer to finish. */
+  versionsWait: "versions-wait",
+  /** The confirm button of the Restore or Undo dialog. */
+  dialogConfirm: "dialog-confirm",
+  /** The dialog's Try again, after a refusal such as Word holding a file. */
+  dialogTryAgain: "dialog-try-again",
 } as const;
+
+/** The `data-kind` of a version row: the matter's CheckpointKind in snake_case. */
+export type VersionKind =
+  | "after_turn"
+  | "outside_edits"
+  | "undo"
+  | "restore"
+  | "import"
+  | "before_turn";
 
 /** The ACP option kinds a permission button is labelled by. */
 export type OptionKind = "allow_once" | "allow_always" | "reject_once" | "reject_always";
@@ -134,6 +157,26 @@ export function window(page: Page) {
     limitStop: id(ids.limitStop),
     limitResetsAt: id(ids.limitResetsAt),
     undo: id(ids.undo),
+    /** The Versions button on the toolbar, which opens the panel. */
+    versionsButton: page.getByRole("button", { name: "Versions", exact: true }),
+    /**
+     * The rail of matters, a navigation named "Matters" (rail.tsx's `aria-label`, no test id). It
+     * is out of the page while the Versions panel stands in its place.
+     */
+    rail: page.getByRole("navigation", { name: "Matters", exact: true }),
+    versionsPanel: id(ids.versions),
+    /** The panel's Close, which puts the rail back (version-panel.tsx's `.ver-panel-close`). */
+    versionsClose: id(ids.versions).getByRole("button", { name: "Close", exact: true }),
+    /** The version rows of `kind` in the panel. */
+    version: (kind: VersionKind): Locator =>
+      page.locator(`[data-testid="${ids.version}"][data-kind="${kind}"]`),
+    versionUndo: id(ids.versionUndo),
+    versionRestore: id(ids.versionRestore),
+    versionsWait: id(ids.versionsWait),
+    /** The confirm dialog of Restore or Undo, its confirm and its Try again. */
+    dialog: page.getByRole("dialog"),
+    dialogConfirm: id(ids.dialogConfirm),
+    dialogTryAgain: id(ids.dialogTryAgain),
   };
 }
 
