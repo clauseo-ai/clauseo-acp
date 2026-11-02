@@ -33,5 +33,7 @@ mod snapshot;
 mod stream_kinds;
 #[path = "reducer/text.rs"]
 mod text;
+#[path = "reducer/times.rs"]
+mod times;
 #[path = "reducer/view.rs"]
 mod view;

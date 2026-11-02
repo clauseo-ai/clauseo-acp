@@ -22,7 +22,7 @@ use clauseo_protocol::{
     ElicitationRequest, ElicitationState, EntryId, ExpiryReason, HeaderEntry, HostEvent,
     INLINE_LIMIT_BYTES, MAX_RAW_ENCODE_DEPTH, MarkerEntry, MarkerKind, MatterHeaderEntry,
     MatterKind, NoticeEntry, NoticeLevel, PatchBatch, RawFrom, RawPayload, StepEntry, StopReason,
-    StreamHeader, StreamId, TextOrBlob, ThreadSummary, ToolCallContent, ToolCallEntry,
+    StreamHeader, StreamId, TextOrBlob, ThreadSummary, Timestamp, ToolCallContent, ToolCallEntry,
     ToolCallStatus, ToolKind, ToolLocation, ViewEntry, ViewEpoch, ViewPatch, ViewPatchBody,
     ViewWindow,
 };
@@ -133,6 +133,7 @@ fn entry_inline_len_sums_vec_items() {
             order: seq(9),
             event: event_id(9),
             kind,
+            ts: Timestamp::ZERO,
         })
     };
     let compaction = |summary| MarkerKind::Compaction {
@@ -266,6 +267,7 @@ fn elicitation_entry_with_a_too_deep_schema_fails_to_encode() {
             state: ElicitationState::Expired {
                 reason: ExpiryReason::TurnEnded,
             },
+            answered_at: None,
         })
     };
     round_trips(&entry(MAX_RAW_ENCODE_DEPTH));
@@ -309,6 +311,7 @@ fn step_undo_possible_is_a_checkpoint_not_undone() {
         checkpoint_after,
         undone,
         usage: None,
+        ts: Timestamp::ZERO,
     };
     assert!(step(Some(checkpoint_id(14)), false).undo_possible());
     assert!(!step(Some(checkpoint_id(14)), true).undo_possible());
@@ -345,6 +348,7 @@ fn a_snapshot_header_is_only_a_header_entry() {
         event: event_id(4),
         level: NoticeLevel::Info,
         text: "hello".to_owned(),
+        ts: Timestamp::ZERO,
     });
     let json = serde_json::to_string(&notice).unwrap();
     let error = serde_json::from_str::<ViewWindow>(&snapshot(&json)).unwrap_err();

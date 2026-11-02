@@ -27,7 +27,7 @@ use crate::{Error, StreamState};
 /// The version of the state's serialised shape. A snapshot of another version is rebuilt from
 /// events. Bump it with any change to a state field or to how it serialises: the insta test
 /// `snapshot_shape_is_pinned` fails on such a change.
-pub const REDUCER_SCHEMA_VERSION: u32 = 1;
+pub const REDUCER_SCHEMA_VERSION: u32 = 2;
 
 /// A snapshot as read: the schema it was written with and the state.
 #[derive(Debug, Clone, PartialEq)]

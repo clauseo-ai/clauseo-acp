@@ -11,8 +11,8 @@ mod turn;
 use clauseo_protocol::{
     AgentContentEntry, CompactionChanged, ContentAppended, ContextUsage, DomainEvent, EntryId,
     Envelope, EventId, HeaderEntry, MarkerEntry, MarkerKind, Notice, NoticeEntry, Seq,
-    ThreadCreated, ThreadStatus, ToolCallEntry, ToolCallStarted, ToolCallUpdated, UsageUpdated,
-    ViewEntry,
+    ThreadCreated, ThreadStatus, Timestamp, ToolCallEntry, ToolCallStarted, ToolCallUpdated,
+    UsageUpdated, ViewEntry,
 };
 
 use crate::Applied;
@@ -25,6 +25,7 @@ use crate::text::text_appended;
 pub(crate) fn fold(state: &mut ThreadState, envelope: &Envelope, out: &mut Applied) {
     let seq = envelope.seq;
     let event_id = envelope.event_id;
+    let ts = envelope.ts;
     match &envelope.event {
         DomainEvent::ThreadCreated(event) => thread_created(state, seq, event, out),
         DomainEvent::ThreadRenamed(event) => {
@@ -39,7 +40,7 @@ pub(crate) fn fold(state: &mut ThreadState, envelope: &Envelope, out: &mut Appli
         // after an exit is a restart transition, not folded yet.
         DomainEvent::AgentSessionAttached(_) | DomainEvent::Unknown { .. } => {}
         DomainEvent::AgentSessionDetached(event) => turn::detached(state, &event.reason, out),
-        DomainEvent::UserMessage(event) => turn::user_message(state, seq, event, out),
+        DomainEvent::UserMessage(event) => turn::user_message(state, seq, ts, event, out),
         DomainEvent::TurnQueued(event) => turn::turn_queued(state, event, out),
         DomainEvent::QueuedPromptEdited(_) => not_yet(out, "queued_prompt_edited"),
         DomainEvent::SteerResolved(_) => not_yet(out, "steer_resolved"),
@@ -51,12 +52,16 @@ pub(crate) fn fold(state: &mut ThreadState, envelope: &Envelope, out: &mut Appli
         DomainEvent::PermissionRequested(event) => {
             asks::permission_requested(state, seq, event, out);
         }
-        DomainEvent::PermissionResolved(event) => asks::permission_resolved(state, event, out),
+        DomainEvent::PermissionResolved(event) => {
+            asks::permission_resolved(state, ts, event, out);
+        }
         DomainEvent::PermissionExpired(event) => asks::permission_expired(state, event, out),
         DomainEvent::ElicitationRequested(event) => {
             asks::elicitation_requested(state, seq, event, out);
         }
-        DomainEvent::ElicitationResolved(event) => asks::elicitation_resolved(state, event, out),
+        DomainEvent::ElicitationResolved(event) => {
+            asks::elicitation_resolved(state, ts, event, out);
+        }
         DomainEvent::ElicitationExpired(event) => asks::elicitation_expired(state, event, out),
         DomainEvent::PlanReplaced(event) => {
             update_header(state, "plan_replaced", out, |h| {
@@ -79,13 +84,15 @@ pub(crate) fn fold(state: &mut ThreadState, envelope: &Envelope, out: &mut Appli
             });
         }
         DomainEvent::UsageUpdated(event) => usage_updated(state, event, out),
-        DomainEvent::Notice(event) => notice(state, seq, event_id, event, out),
-        DomainEvent::CompactionChanged(event) => compaction(state, seq, event_id, event, out),
+        DomainEvent::Notice(event) => notice(state, seq, event_id, ts, event, out),
+        DomainEvent::CompactionChanged(event) => compaction(state, seq, event_id, ts, event, out),
         DomainEvent::FilesChanged(event) => turn::files_changed(state, event, out),
         DomainEvent::TurnFailed(event) => turn::turn_failed(state, event, out),
-        DomainEvent::TurnStoppedAtLimit(event) => turn::stopped_at_limit(state, seq, event, out),
-        DomainEvent::TurnEnded(event) => turn::turn_ended(state, seq, event, out),
-        DomainEvent::StepUndone(event) => turn::step_undone(state, seq, event_id, event, out),
+        DomainEvent::TurnStoppedAtLimit(event) => {
+            turn::stopped_at_limit(state, seq, ts, event, out);
+        }
+        DomainEvent::TurnEnded(event) => turn::turn_ended(state, seq, ts, event, out),
+        DomainEvent::StepUndone(event) => turn::step_undone(state, seq, event_id, ts, event, out),
         DomainEvent::MatterCreated(_) => wrong_stream(out, "matter_created"),
         DomainEvent::CheckpointRecorded(_) => wrong_stream(out, "checkpoint_recorded"),
         DomainEvent::OutsideEdits(_) => wrong_stream(out, "outside_edits"),
@@ -219,12 +226,20 @@ fn usage_updated(state: &mut ThreadState, event: &UsageUpdated, out: &mut Applie
     });
 }
 
-fn notice(state: &mut ThreadState, seq: Seq, event_id: EventId, event: &Notice, out: &mut Applied) {
+fn notice(
+    state: &mut ThreadState,
+    seq: Seq,
+    event_id: EventId,
+    ts: Timestamp,
+    event: &Notice,
+    out: &mut Applied,
+) {
     let entry = NoticeEntry {
         order: seq,
         event: event_id,
         level: event.level,
         text: event.text.clone(),
+        ts,
     };
     insert_new(state, seq, ViewEntry::Notice(entry), out);
 }
@@ -233,6 +248,7 @@ fn compaction(
     state: &mut ThreadState,
     seq: Seq,
     event_id: EventId,
+    ts: Timestamp,
     event: &CompactionChanged,
     out: &mut Applied,
 ) {
@@ -240,7 +256,7 @@ fn compaction(
         status: event.status,
         summary: event.summary.clone(),
     };
-    insert_marker(state, seq, event_id, kind, out);
+    insert_marker(state, seq, event_id, ts, kind, out);
 }
 
 fn content_appended(
@@ -340,6 +356,7 @@ pub(super) fn insert_marker(
     state: &mut ThreadState,
     seq: Seq,
     event: EventId,
+    ts: Timestamp,
     kind: MarkerKind,
     out: &mut Applied,
 ) {
@@ -347,6 +364,7 @@ pub(super) fn insert_marker(
         order: seq,
         event,
         kind,
+        ts,
     };
     insert_new(state, seq, ViewEntry::Marker(entry), out);
 }

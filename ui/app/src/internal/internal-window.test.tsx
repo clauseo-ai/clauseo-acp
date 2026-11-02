@@ -337,7 +337,15 @@ test("undo sends the turn's files; a limit stop shows its reset time as ISO UTC"
         { path: "lease.docx", change: "modified", size_bytes: 10, may_include_lawyer_edits: false },
       ],
     }),
-    { limit_stop: { order: 9, turn: uuid(2, 4), resets_at: resetsAt, reason: "plan_window" } },
+    {
+      limit_stop: {
+        order: 9,
+        turn: uuid(2, 4),
+        resets_at: resetsAt,
+        reason: "plan_window",
+        ts: 9000,
+      },
+    },
   ]);
   await click($("undo"));
   expect(sent).toEqual([

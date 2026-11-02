@@ -41,6 +41,7 @@ export const userMessage = (order: number, n: number, text: string): ViewEntry =
     content: [{ text: { text } }],
     status: "sent",
     edited: false,
+    ts: order * 1000,
   },
 });
 
@@ -75,6 +76,7 @@ export const step = (order: number, over: Partial<StepEntry> = {}): ViewEntry =>
     files: [],
     skipped: [],
     undone: false,
+    ts: order * 1000,
     ...over,
   },
 });

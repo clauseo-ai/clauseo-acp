@@ -236,8 +236,8 @@ test("IPC bytes against text bytes for the scripted stream", () => {
     ratioOneBatchPerFrame: Math.round((perFrame.bytes / textBytes) * 10) / 10,
   }).toMatchInlineSnapshot(`
     {
-      "ipcBytesOneBatchPerFrame": 74343,
-      "ipcBytesOnePatchPerMessage": 167856,
+      "ipcBytesOneBatchPerFrame": 74354,
+      "ipcBytesOnePatchPerMessage": 167867,
       "ratioOneBatchPerFrame": 13.2,
       "ratioOnePatchPerMessage": 29.8,
       "textBytes": 5639,

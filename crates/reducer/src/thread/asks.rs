@@ -3,7 +3,8 @@
 use clauseo_protocol::{
     ElicitationEntry, ElicitationExpired, ElicitationId, ElicitationRequested, ElicitationResolved,
     ElicitationState, EntryId, PermissionEntry, PermissionExpired, PermissionRequestId,
-    PermissionRequested, PermissionResolved, PermissionState, Seq, ThreadStatus, ViewEntry,
+    PermissionRequested, PermissionResolved, PermissionState, Seq, ThreadStatus, Timestamp,
+    ViewEntry,
 };
 
 use super::turn::settled_status;
@@ -33,6 +34,7 @@ pub(super) fn permission_requested(
         options: event.options.clone(),
         deliverable: event.deliverable,
         state: PermissionState::Pending,
+        answered_at: None,
     };
     insert_new(state, seq, ViewEntry::Permission(entry), out);
     asked(state, "permission_requested", out);
@@ -40,6 +42,7 @@ pub(super) fn permission_requested(
 
 pub(super) fn permission_resolved(
     state: &mut ThreadState,
+    ts: Timestamp,
     event: &PermissionResolved,
     out: &mut Applied,
 ) {
@@ -47,7 +50,14 @@ pub(super) fn permission_resolved(
         choice: event.choice.clone(),
         by: event.by.clone(),
     };
-    settle_permission(state, event.request, "permission_resolved", settled, out);
+    settle_permission(
+        state,
+        event.request,
+        "permission_resolved",
+        settled,
+        Some(ts),
+        out,
+    );
 }
 
 pub(super) fn permission_expired(
@@ -58,7 +68,14 @@ pub(super) fn permission_expired(
     let settled = PermissionState::Expired {
         reason: event.reason,
     };
-    settle_permission(state, event.request, "permission_expired", settled, out);
+    settle_permission(
+        state,
+        event.request,
+        "permission_expired",
+        settled,
+        None,
+        out,
+    );
 }
 
 pub(super) fn elicitation_requested(
@@ -80,6 +97,7 @@ pub(super) fn elicitation_requested(
         elicitation: event.elicitation,
         request: event.request.clone(),
         state: ElicitationState::Pending,
+        answered_at: None,
     };
     insert_new(state, seq, ViewEntry::Elicitation(entry), out);
     asked(state, "elicitation_requested", out);
@@ -87,6 +105,7 @@ pub(super) fn elicitation_requested(
 
 pub(super) fn elicitation_resolved(
     state: &mut ThreadState,
+    ts: Timestamp,
     event: &ElicitationResolved,
     out: &mut Applied,
 ) {
@@ -99,6 +118,7 @@ pub(super) fn elicitation_resolved(
         event.elicitation,
         "elicitation_resolved",
         settled,
+        Some(ts),
         out,
     );
 }
@@ -116,6 +136,7 @@ pub(super) fn elicitation_expired(
         event.elicitation,
         "elicitation_expired",
         settled,
+        None,
         out,
     );
 }
@@ -139,6 +160,7 @@ fn settle_permission(
     request: PermissionRequestId,
     event: &'static str,
     settled: PermissionState,
+    answered_at: Option<Timestamp>,
     out: &mut Applied,
 ) {
     let target = EntryId::Permission(request);
@@ -155,6 +177,7 @@ fn settle_permission(
         return;
     }
     entry.state = settled;
+    entry.answered_at = answered_at;
     out.changes
         .push(ViewChange::Upsert(Box::new(ViewEntry::Permission(
             entry.clone(),
@@ -167,6 +190,7 @@ fn settle_elicitation(
     elicitation: ElicitationId,
     event: &'static str,
     settled: ElicitationState,
+    answered_at: Option<Timestamp>,
     out: &mut Applied,
 ) {
     let target = EntryId::Elicitation(elicitation);
@@ -183,6 +207,7 @@ fn settle_elicitation(
         return;
     }
     entry.state = settled;
+    entry.answered_at = answered_at;
     out.changes
         .push(ViewChange::Upsert(Box::new(ViewEntry::Elicitation(
             entry.clone(),

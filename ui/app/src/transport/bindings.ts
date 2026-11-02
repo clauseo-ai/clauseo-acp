@@ -811,6 +811,11 @@ export type ElicitationEntry = {
 	request: ElicitationRequest,
 	/**  Where it stands. */
 	state: ElicitationState,
+	/**
+	 *  When it was answered (display only; the `ElicitationResolved` envelope's `ts`). `None`
+	 *  while pending and after it expired.
+	 */
+	answered_at?: Timestamp,
 };
 
 /**  An elicitation expired unanswered. */
@@ -1586,6 +1591,8 @@ export type LimitStopEntry = {
 	resets_at?: Timestamp,
 	/**  Which limit. */
 	reason: LimitStopReason,
+	/**  When the turn stopped (display only; the `TurnStoppedAtLimit` envelope's `ts`). */
+	ts: Timestamp,
 };
 
 /**  Which limit stopped a turn; a reason from a newer Clauseo decodes to `Unknown`. */
@@ -1651,6 +1658,8 @@ export type MarkerEntry = {
 	event: EventId,
 	/**  What it records. */
 	kind: MarkerKind,
+	/**  When that event was logged (display only; its envelope's `ts`). */
+	ts: Timestamp,
 };
 
 /**  What a marker records. */
@@ -1826,6 +1835,8 @@ export type NoticeEntry = {
 	level: NoticeLevel,
 	/**  The text. */
 	text: string,
+	/**  When it was logged (display only; the `Notice` envelope's `ts`). */
+	ts: Timestamp,
 };
 
 /**  How prominent a notice is. */
@@ -1889,6 +1900,11 @@ export type PermissionEntry = {
 	deliverable: Deliverable,
 	/**  Where it stands. */
 	state: PermissionState,
+	/**
+	 *  When it was answered or cancelled (display only; the `PermissionResolved` envelope's
+	 *  `ts`). `None` while pending and after it expired.
+	 */
+	answered_at?: Timestamp,
 };
 
 /**  A permission request expired unanswered. */
@@ -2297,6 +2313,11 @@ export type StepEntry = {
 	undone: boolean,
 	/**  The turn's token usage, if the agent reported it. */
 	usage?: TurnUsage,
+	/**
+	 *  When the turn ended (display only; the `TurnEnded` envelope's `ts`). A turn that has
+	 *  not ended has no step; after a crash, start-up repair's `TurnEnded` gives the time.
+	 */
+	ts: Timestamp,
 };
 
 /**  A step (a turn's changes) was undone. */
@@ -2872,6 +2893,8 @@ export type UserMessageEntry = {
 	edited: boolean,
 	/**  Where a steered message went, once resolved. */
 	steer?: SteerOutcome,
+	/**  When it was sent (display only; the `UserMessage` envelope's `ts`). */
+	ts: Timestamp,
 };
 
 /**  Where a prompt stands in its thread's queue. */
