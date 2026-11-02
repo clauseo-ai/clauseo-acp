@@ -64,7 +64,8 @@ code departs from the brief.
   agent proxy such as Zscaler or px, which shares the desktop's resolver), or to make it a firm
   setting, is G10's call. The upstream's own address is the firm's
   configuration (possibly `127.0.0.1`) and is not checked. This is stricter than the brief,
-  which checks only IP literals through an upstream: **for Rohan to confirm.**
+  which checks only IP literals through an upstream; approved as built by the orchestrator on
+  2026-11-02 (Rohan may override), with G10 deciding the loopback case.
 - **Plain `http://`.** One request per client connection, rewritten to origin-form (absolute-form
   to an upstream), `Host` written from the URL, `Connection: close`; `Proxy-Authorization`,
   `Proxy-Authenticate`, `Proxy-Connection`, `Connection`, `Keep-Alive`, `TE`, `Trailer`,
