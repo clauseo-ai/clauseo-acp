@@ -2,7 +2,8 @@
 // wall, H8's list_papers (room/host-next.ts), as room.test.tsx and the probe script them; the rail in every state;
 // hosts that refuse a new matter with a code, for the form's lines, with the steps a state takes once rendered
 // (states.tsx's RoomAfter): New matter pressed, a name typed, Change and Create pressed; and for the thread's states,
-// one thread whose view the host sends as the room subscribes (testing/stream-script.ts's entries).
+// one thread whose view the host sends as the room subscribes (testing/stream-script.ts's entries), and whose answers to
+// a permission request may never come back.
 import { batch, event, header, reset, THREAD, TURN } from "../testing/stream-script.ts";
 import type {
   CommandOutcome,
@@ -49,6 +50,8 @@ export type ThreadState = {
   refuse?: ErrorCode;
   /** The stream is lost with this code once its view has arrived. */
   lose?: ErrorCode;
+  /** An answer to a permission request never comes back, as while the OS asks the lawyer to confirm it. */
+  hold?: boolean;
 };
 
 const refusal = (code: ErrorCode) => ({
@@ -86,6 +89,7 @@ export function threadHost(state: ThreadState): FakeTransport {
         if (lose !== undefined) setTimeout(() => transport.failStream(stream, refusal(lose)), 250);
       }),
   });
+  if (state.hold === true) transport.answerPermission = () => new Promise<void>(() => {});
   return transport;
 }
 
