@@ -25,7 +25,7 @@ use crate::permissions::{KINDS_ANSWERS, answer_from, until_first_request};
 use crate::support::{Dir, FAKE, Running, START_MS, Scenario, matter_with_thread, wait};
 
 /// The agent id that makes an agent Claude.
-const CLAUDE: &str = "claude-acp";
+pub(crate) const CLAUDE: &str = "claude-acp";
 
 /// A minute of the host clock.
 const MINUTE: Duration = Duration::from_secs(60);
@@ -33,10 +33,15 @@ const MINUTE: Duration = Duration::from_secs(60);
 /// A scripted reader: records each read and answers it with the next outcome the test gave for
 /// that agent, waiting until there is one (a read the test has not answered stays in flight).
 #[derive(Clone)]
-struct Reads(Arc<Shared>);
+pub(crate) struct Reads(Arc<Shared>);
 
 struct Shared {
     calls: Mutex<Vec<AgentKind>>,
+    /// Each read's agent as it starts, for [`Reads::until_count`].
+    started: (
+        async_channel::Sender<AgentKind>,
+        async_channel::Receiver<AgentKind>,
+    ),
     answers: BTreeMap<
         AgentKind,
         (
@@ -47,25 +52,34 @@ struct Shared {
 }
 
 impl Reads {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let answers = [AgentKind::Claude, AgentKind::Codex]
             .into_iter()
             .map(|agent| (agent, async_channel::unbounded()))
             .collect();
         Self(Arc::new(Shared {
             calls: Mutex::new(Vec::new()),
+            started: async_channel::unbounded(),
             answers,
         }))
     }
 
     /// How many reads of `agent` started.
-    fn count(&self, agent: AgentKind) -> usize {
+    pub(crate) fn count(&self, agent: AgentKind) -> usize {
         let calls = self.0.calls.lock().unwrap();
         calls.iter().filter(|call| **call == agent).count()
     }
 
+    /// Waits until `agent` has had at least `n` reads (the host's agents run on the wall clock).
+    pub(crate) fn until_count(&self, agent: AgentKind, n: usize) {
+        let started = self.0.started.1.clone();
+        while self.count(agent) < n {
+            wait("a limits read", started.recv()).unwrap();
+        }
+    }
+
     /// Answers `agent`'s read in flight, or its next one, with `outcome`.
-    fn answer(&self, agent: AgentKind, outcome: ReadOutcome) {
+    pub(crate) fn answer(&self, agent: AgentKind, outcome: ReadOutcome) {
         let (tx, _) = &self.0.answers[&agent];
         tx.try_send(outcome).unwrap();
     }
@@ -74,6 +88,7 @@ impl Reads {
 impl ReadLimits for Reads {
     fn read(&self, agent: AgentKind) -> Pin<Box<dyn Future<Output = ReadOutcome> + Send>> {
         self.0.calls.lock().unwrap().push(agent);
+        self.0.started.0.try_send(agent).unwrap();
         let answers = self.0.answers.get(&agent).map(|(_, rx)| rx.clone());
         Box::pin(async move {
             let timed_out = ReadOutcome::Failed(ReadFailure::TimedOut);
@@ -86,13 +101,13 @@ impl ReadLimits for Reads {
 }
 
 /// A limits subscription and every event it delivered, decoded.
-struct Feed {
+pub(crate) struct Feed {
     sub: Subscription,
     events: Vec<HostEvent>,
 }
 
 impl Feed {
-    fn new(host: &Running) -> Self {
+    pub(crate) fn new(host: &Running) -> Self {
         let sub = wait(
             "subscribe_limits",
             host.handle.subscribe_limits(Principal::LocalDesktop),
@@ -114,7 +129,7 @@ impl Feed {
     }
 
     /// The next event, which must be a `LimitsViewChanged`.
-    fn view(&mut self, what: &str) -> LimitsView {
+    pub(crate) fn view(&mut self, what: &str) -> LimitsView {
         match self.next(what) {
             HostEvent::LimitsViewChanged(view) => view,
             other => panic!("{what}: expected LimitsViewChanged, got {other:?}"),
@@ -122,7 +137,7 @@ impl Feed {
     }
 
     /// The next two events: one `AccountLimitsChanged`, then the view.
-    fn changed(&mut self, what: &str) -> (AccountLimits, LimitsView) {
+    pub(crate) fn changed(&mut self, what: &str) -> (AccountLimits, LimitsView) {
         let limits = match self.next(what) {
             HostEvent::AccountLimitsChanged(limits) => limits,
             other => panic!("{what}: expected AccountLimitsChanged, got {other:?}"),
@@ -142,12 +157,12 @@ impl Feed {
 }
 
 /// The wall time `secs` seconds after run 0's start.
-fn at(secs: i64) -> Timestamp {
+pub(crate) fn at(secs: i64) -> Timestamp {
     Timestamp::new(START_MS + secs * 1000).unwrap()
 }
 
 /// A plan account of `agent` with one five-hour window `used` percent full.
-fn plan(agent: AgentKind, used: f64, resets_at: Option<Timestamp>) -> AccountLimits {
+pub(crate) fn plan(agent: AgentKind, used: f64, resets_at: Option<Timestamp>) -> AccountLimits {
     AccountLimits {
         agent,
         account: AccountRef("ada@example.com".to_owned()),
@@ -168,7 +183,7 @@ fn plan(agent: AgentKind, used: f64, resets_at: Option<Timestamp>) -> AccountLim
 }
 
 /// A good read of `agent`'s plan.
-fn usage(agent: AgentKind, used: f64, resets_at: Option<Timestamp>) -> ReadOutcome {
+pub(crate) fn usage(agent: AgentKind, used: f64, resets_at: Option<Timestamp>) -> ReadOutcome {
     ReadOutcome::Usage {
         limits: plan(agent, used, resets_at),
         reached: None,
