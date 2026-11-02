@@ -160,6 +160,13 @@ export function window(page: Page) {
     /** The Versions button on the toolbar, which opens the panel. */
     versionsButton: page.getByRole("button", { name: "Versions", exact: true }),
     /**
+     * The toolbar's Undo, beside Versions: it opens Versions on the newest turn's change, with its
+     * undo dialog. The toolbar is named "Tools for this matter" (no test id).
+     */
+    toolbarUndo: page
+      .getByRole("toolbar", { name: "Tools for this matter", exact: true })
+      .getByRole("button", { name: "Undo", exact: true }),
+    /**
      * The rail of matters, a navigation named "Matters" (rail.tsx's `aria-label`, no test id). It
      * is out of the page while the Versions panel stands in its place.
      */
