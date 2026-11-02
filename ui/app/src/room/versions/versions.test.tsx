@@ -27,3 +27,12 @@ test("Versions stands in the rail's place while open, and closing it brings the 
   expect(h.one("versions")).toBeNull();
   expect(h.host.querySelector("nav.room-rail")).not.toBeNull();
 });
+
+test("Matters, while Versions stands in the rail's place, closes Versions and brings the rail back", async () => {
+  h = await mountVersions([version(1, "import")]);
+  await h.openVersions();
+  expect(h.one("versions")).not.toBeNull();
+  await h.click(h.one("rail-toggle"));
+  expect(h.one("versions")).toBeNull();
+  expect(h.host.querySelector("nav.room-rail")).not.toBeNull();
+});

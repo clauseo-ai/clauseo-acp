@@ -9,6 +9,7 @@ import {
   reset,
   THREAD,
   TURN,
+  upsert,
   uuid,
 } from "../testing/stream-script.ts";
 import { FakeTransport } from "../transport/fake-transport.ts";
@@ -152,10 +153,34 @@ function versionsHost(m: Matter): FakeTransport {
       if (query.preview_restore !== undefined) return { restore_preview: preview };
       throw new Error(`not scripted: ${JSON.stringify(query)}`);
     },
-    dispatch: (envelope) =>
-      envelope.command.restore_version === undefined
-        ? "done"
-        : { version_restored: { checkpoint: "cp5" } },
+    dispatch: (envelope) => {
+      const to = envelope.command.restore_version?.checkpoint;
+      if (to === undefined) return "done";
+      // the host writes the restore's version and its marker, then answers
+      queueMicrotask(() =>
+        transport.deliver(
+          event(
+            batch(
+              2,
+              [
+                upsert(version(5, "restore", Date.now())),
+                upsert({
+                  marker: {
+                    order: 50,
+                    event: uuid(50, 9),
+                    ts: Date.now(),
+                    kind: { version_restored: { from: to, checkpoint: "cp5", scope: "matter" } },
+                  },
+                }),
+              ],
+              undefined,
+              MATTER_STREAM,
+            ),
+          ),
+        ),
+      );
+      return { version_restored: { checkpoint: "cp5" } };
+    },
     subscribe: (stream) =>
       queueMicrotask(() =>
         transport.deliver(

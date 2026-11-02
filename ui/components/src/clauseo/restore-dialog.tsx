@@ -37,6 +37,8 @@ export type RestoreAsk =
       stays: string | null;
       edited: readonly EditedRow[];
       editedHead: string | null;
+      /** Optional: why the act just failed, when no file can be named: said in the dialog, which offers Try again. */
+      failed?: string | null;
     }
   | { kind: "word"; act?: RestoreAct; file: string };
 
@@ -147,6 +149,11 @@ export function RestoreDialog({
                   </ul>
                 </div>
               )}
+              {ask.failed != null && (
+                <p className="ver-dialog-note ver-dialog-failed" role="alert">
+                  <Say>{ask.failed}</Say>
+                </p>
+              )}
               {waiting !== null && (
                 <p className="ver-wait">
                   <IconChecking size={14} className="ver-wait-icon" />
@@ -157,16 +164,29 @@ export function RestoreDialog({
               )}
               <div className={dialogActions} data-dialog-acts="">
                 <Base.Close render={<Button kind="quiet" />}>{w.ui("Cancel")}</Base.Close>
-                <Button
-                  kind="primary"
-                  className="ver-do-restore"
-                  data-testid={testIds?.confirm}
-                  aria-disabled={waiting !== null || held ? true : undefined}
-                  data-disabled={waiting !== null || held ? "" : undefined}
-                  onClick={() => waiting === null && !held && onRestore()}
-                >
-                  {ask.act === "undo" ? w.t("Undo") : w.ui("Restore")}
-                </Button>
+                {ask.failed != null ? (
+                  <Button
+                    kind="primary"
+                    className="ver-try"
+                    data-testid={testIds?.tryAgain}
+                    aria-disabled={waiting !== null || held ? true : undefined}
+                    data-disabled={waiting !== null || held ? "" : undefined}
+                    onClick={() => waiting === null && !held && onTryAgain()}
+                  >
+                    {w.v("Try again")}
+                  </Button>
+                ) : (
+                  <Button
+                    kind="primary"
+                    className="ver-do-restore"
+                    data-testid={testIds?.confirm}
+                    aria-disabled={waiting !== null || held ? true : undefined}
+                    data-disabled={waiting !== null || held ? "" : undefined}
+                    onClick={() => waiting === null && !held && onRestore()}
+                  >
+                    {ask.act === "undo" ? w.t("Undo") : w.ui("Restore")}
+                  </Button>
+                )}
               </div>
             </>
           ) : null}

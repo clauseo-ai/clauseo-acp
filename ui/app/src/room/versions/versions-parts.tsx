@@ -21,12 +21,12 @@ import {
   type Version,
 } from "@clauseo/components/clauseo/versions-model.ts";
 import { IconUndo } from "@clauseo/components/icons/icons.tsx";
-import type { Platform } from "@clauseo/components/lib/display.ts";
+import type { Lang, Platform } from "@clauseo/components/lib/display.ts";
 import { useVersionWords, vt } from "@clauseo/components/lib/words-versions.ts";
 import type { FileRefId } from "../../transport/protocol.ts";
 import { isHostError } from "../../transport/host-transport.ts";
 import type { VersionsController } from "./controller.ts";
-import type { Snapshot } from "./state.ts";
+import { restoreOf, type Snapshot } from "./state.ts";
 import type { StandIns } from "./stand-ins.ts";
 import { calendarOf, fileName, undoable } from "./timeline.ts";
 import {
@@ -34,6 +34,7 @@ import {
   conversationOf,
   doneLine,
   failedLine,
+  named,
   unsavedAt,
   unsavedLine,
   waitingOf,
@@ -42,10 +43,14 @@ import {
 /** A file's handle in the matter's papers (H8), for H11's open_file; null when the room has none for it. */
 export type FileRefOf = (path: string) => FileRefId | null;
 
-function useVersions(c: VersionsController): { s: Snapshot; cal: Calendar } {
+function useVersions(
+  c: VersionsController,
+  lang: Lang,
+): { s: Snapshot; cal: Calendar; history: readonly Version[] } {
   const s = useSyncExternalStore(c.subscribe, c.snapshot, c.snapshot);
   const cal = useMemo(() => calendarOf(s.now, s.zone), [s.now, s.zone]);
-  return { s, cal };
+  const history = useMemo(() => named(lang, s.timeline.history), [lang, s.timeline.history]);
+  return { s, cal, history };
 }
 
 /** A stand-in's refusal is logged; the lawyer declining the computer's own confirm says nothing. */
@@ -68,8 +73,8 @@ export function VersionsRail({
   onClose: () => void;
 }) {
   const w = useVersionWords();
-  const { s, cal } = useVersions(c);
-  const { history, meta } = s.timeline;
+  const { s, cal, history } = useVersions(c, w.lang);
+  const { meta } = s.timeline;
   const look = s.look;
   const at = look.kind === "back" ? history.findIndex((v) => v.id === look.id) : history.length - 1;
   const [whereOpen, setWhereOpen] = useState(false);
@@ -128,7 +133,7 @@ export function VersionsRail({
 }
 
 /** Whether a version's change can be taken back from the band: a turn's, with undo_step, or a restore, by restoring
- * the version before it. */
+ * the version before it through the restore dialog. */
 const takesBack = (s: Snapshot, v: Version): boolean => {
   const m = s.timeline.meta.get(v.id);
   return undoable(m) || m?.kind === "restore";
@@ -147,8 +152,7 @@ export function VersionsCentre({
   const w = useVersionWords();
   const { lang } = w;
   const room = useRoom();
-  const { s, cal } = useVersions(c);
-  const { history } = s.timeline;
+  const { s, cal, history } = useVersions(c, lang);
   const look = s.look;
   const shown = look.kind === "back" ? history.find((v) => v.id === look.id) : undefined;
   const waiting = waitingOf(lang, s);
@@ -178,11 +182,13 @@ export function VersionsCentre({
   if (look.kind === "now") {
     if (s.unsaved !== null) notices.push({ tone: "failed", text: unsavedLine(lang, s.unsaved) });
     const done = s.done;
+    // the restored line's Undo, once the host's marker says the restore was written
+    const restore = done === null ? null : restoreOf(s, done);
     if (done !== null)
       notices.push({
         tone: "done",
         text: doneLine(lang, cal, s, done),
-        ...(done.kind === "restored"
+        ...(restore !== null
           ? {
               action: (
                 <WaitingButton
@@ -190,7 +196,7 @@ export function VersionsCentre({
                   kind="quiet"
                   className="ver-notice-act ver-restored-undo"
                   label={w.v("Undo the restore")}
-                  onClick={() => void c.undoRestore(done.checkpoint)}
+                  onClick={() => c.undoRestore(restore)}
                 >
                   <IconUndo size={16} />
                   {w.t("Undo")}
@@ -236,7 +242,7 @@ export function VersionsCentre({
         onRestore={() => shown !== undefined && void c.askRestore(shown.id)}
         onUndo={() => {
           if (shown === undefined) return;
-          if (s.timeline.meta.get(shown.id)?.kind === "restore") void c.undoRestore(shown.id);
+          if (s.timeline.meta.get(shown.id)?.kind === "restore") c.undoRestore(shown.id);
           else c.askUndo(shown.id);
         }}
         onBack={() => c.look(null)}

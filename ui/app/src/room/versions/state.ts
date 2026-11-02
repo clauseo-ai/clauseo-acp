@@ -14,24 +14,38 @@ import type { Timeline } from "./timeline.ts";
 /** Where the room stands: at now, or looking back at a version, comparing it with the folder now or not. */
 export type Look = { kind: "now" } | { kind: "back"; id: string; comparing: boolean };
 
-/** What the restore dialog asks. */
-export type Ask =
-  | { act: "undo"; stage: "confirm"; id: string; choices: ReadonlyMap<string, FileChoice> }
-  | { act: "restore"; stage: "confirm"; id: string; preview: RestorePreview }
-  | {
-      act: "undo" | "restore";
-      stage: "word";
-      id: string;
-      file: string;
-      /** For an undo: the lawyer's choices, kept for Try again. */
-      choices?: ReadonlyMap<string, FileChoice>;
-    };
+/** An undo of one turn's change, with the lawyer's choice for each of its files. */
+type UndoAsk = { act: "undo"; id: string; choices: ReadonlyMap<string, FileChoice> };
+/** A restore of the matter to a version, with what restoring it writes now; undoes: the restore it takes back. */
+type RestoreAsk = { act: "restore"; id: string; preview: RestorePreview; undoes: string | null };
+
+/** What the restore dialog asks: to go ahead (failed: the code of a refusal that named no file, with Try again), or,
+ * where a program holds a file, to close it and try again. */
+export type Ask = (UndoAsk | RestoreAsk) &
+  ({ stage: "confirm"; failed: string | null } | { stage: "word"; file: string });
+
+/** What an act wrote: the version it made, or nothing (a bare done). */
+export type Outcome = { kind: "wrote"; checkpoint: string } | { kind: "nothing" };
 
 /** What the room last did, said under the band at now. */
 export type Done =
-  | { kind: "restored"; to: string; n: number; checkpoint: string }
+  | { kind: "restored"; to: string; n: number; outcome: Outcome }
   | { kind: "undidRestore"; at: Timestamp }
   | { kind: "undidChange"; of: Timestamp; papers: readonly string[] };
+
+/** The restore a restored line's Undo takes back: only one the host wrote and marked on the matter's stream. A restore
+ * that found nothing to write answers with a version that was already there, and has no marker. */
+export const restoreOf = (s: Snapshot, done: Done): string | null =>
+  done.kind === "restored" &&
+  done.outcome.kind === "wrote" &&
+  s.restores.has(done.outcome.checkpoint)
+    ? done.outcome.checkpoint
+    : null;
+
+/** Whether two previews would write the same: the same files, each changed the same way. */
+export const sameChanges = (a: RestorePreview, b: RestorePreview): boolean =>
+  a.changes.length === b.changes.length &&
+  a.changes.every((c, i) => c.path === b.changes[i]?.path && c.change === b.changes[i]?.change);
 
 /** A turn whose change couldn't be kept as a version: its conversation, its first file and when it ended. */
 export type Unsaved = { thread: ThreadId; paper: string; ts: Timestamp };
@@ -43,7 +57,8 @@ export type Snapshot = {
   look: Look;
   /** The conversation whose answer Restore and Undo wait for ("" untitled), or null while none runs. */
   busy: ThreadId | null;
-  /** A refusal said an answer runs: Restore and Undo wait until the matter's stream moves on. */
+  /** A refusal said an answer runs: Restore and Undo wait until list_threads, or a held conversation's header, says
+   * none does. */
   refused: boolean;
   ask: Ask | null;
   done: Done | null;
@@ -53,6 +68,8 @@ export type Snapshot = {
   /** Comparing: the files that differ between the version and the folder now, null while they're asked for. */
   compare: { id: string; changes: readonly FileChange[] | null } | null;
   titles: ReadonlyMap<ThreadId, string>;
+  /** Each restore the matter's stream has a marker for, to the version it restored. */
+  restores: ReadonlyMap<string, string>;
   now: Timestamp;
   zone: string;
 };

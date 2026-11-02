@@ -3,6 +3,7 @@
 // folds behind its newest and the All / By Clauseo / By you switch; the row for a file too large to keep versions;
 // and the row and band line for a change that couldn't be kept as a version.
 import { clock } from "@clauseo/components/lib/words.ts";
+import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { THREAD, TURN, uuid } from "../../testing/stream-script.ts";
 import type { CheckpointKind, ViewEntry } from "../../transport/protocol.ts";
@@ -98,6 +99,26 @@ test("each kind of version says who made it, and a before_turn version shows onl
   expect(whoText(rowOf(h, "cp10"))).toBe("You, outside Clauseo");
   expect(rowOf(h, "cp10")?.textContent).toContain("memo.docx");
   expect(rowOf(h, "cp9")).toBeUndefined();
+});
+
+test("a version made in a conversation without a title names a new conversation, in either language", async () => {
+  const { title: _, ...untitled } = thread(THREAD);
+  for (const [language, words] of [
+    ["en", "Clauseo, in New conversation"],
+    ["hi", mt("hi", "New conversation")],
+  ] as const) {
+    h = await mountVersions(
+      [version(1, "import"), version(2, "after_turn", { thread: THREAD, turn: turn(10) })],
+      [],
+      { threads: [untitled], display: { language } },
+    );
+    await h.openVersions();
+    const who = whoText(rowOf(h, "cp2")) ?? "";
+    expect(who).toContain(words);
+    expect(who).not.toMatch(/(in|में) $/);
+    await h.unmount();
+    h = null;
+  }
 });
 
 test("a run of one conversation's versions folds behind its newest, and the switch shows each hand's", async () => {
