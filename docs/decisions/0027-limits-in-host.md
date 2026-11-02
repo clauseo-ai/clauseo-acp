@@ -118,6 +118,9 @@ user-facing words: U5 replaced R12's window, and U12 builds the limit screens.
 
 proposed
 
+Amended 2026-11-03: since #185 (U11), only the `main` window's Channel follows limits; U12 opens
+it for Settings when Plan and usage reads it ([0028](0028-settings-window.md)).
+
 ## Date
 
 2026-11-02

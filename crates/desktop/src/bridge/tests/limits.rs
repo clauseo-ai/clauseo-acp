@@ -108,14 +108,20 @@ fn next_view(messages: &Messages) -> LimitsView {
 
 /// `main`'s channel gets the current view at open and then each change, and those messages
 /// count toward its acks like any other. The settings window's channel gets no limits at all:
-/// no subscription, so no view and no change (0028).
+/// no subscription, so no view and no change, and nothing to ack (0027's amendment, 0028).
 #[test]
 fn only_main_gets_the_limits_view_then_each_change_and_acks_count_them() {
     let scratch = Scratch::with_limits("limits-windows");
     let (host, reads, _clock) = start(&scratch);
     let bridge = host.bridge();
-    // `open` checks the window's first message is the view.
-    let main = open(&bridge, MAIN);
+    let (channel, main) = collector();
+    block_on(bridge.open_stream(MAIN, channel)).unwrap();
+    // `main`: the view first.
+    let first = main.next_limits();
+    assert!(
+        matches!(first, HostEvent::LimitsViewChanged(_)),
+        "main's first message is not the view: {first:?}"
+    );
     let (channel, settings) = collector();
     block_on(bridge.open_stream(SETTINGS, channel)).unwrap();
     let settings_window = bridge.window(SETTINGS).unwrap();
@@ -127,20 +133,34 @@ fn only_main_gets_the_limits_view_then_each_change_and_acks_count_them() {
         None,
         "the settings window follows the limits"
     );
+    let settings_got_nothing = |after: &str| {
+        // `drain` keeps the limits messages aside and counts them: none, and nothing else.
+        assert_eq!(settings.drain(), Vec::<String>::new(), "after {after}");
+        assert_eq!(
+            settings.limits_received(),
+            0,
+            "the settings window got limits after {after}"
+        );
+        assert_eq!(
+            lock(&settings_window).state().unacked_bytes(),
+            0,
+            "the settings window has messages to ack after {after}"
+        );
+        // Not one message sent, so an ack of one is refused.
+        let refusal = block_on(bridge.ack(SETTINGS, Vec::new(), 1)).unwrap_err();
+        assert_eq!(refusal.code(), ErrorCode::CommandInvalid, "{refusal:?}");
+    };
+    settings_got_nothing("main's view");
 
     // The start-up read answers: no account is signed in, which changes the view.
     reads.answer(ReadOutcome::SignedOut);
     let changed = next_view(&main);
     assert!(changed.0.contains_key(&AgentKind::Claude), "{changed:?}");
     // `main` got the change, so the settings window would have by now.
-    assert_eq!(settings.drain(), Vec::<String>::new());
-    assert_eq!(
-        settings.limits_received(),
-        0,
-        "the settings window got limits"
-    );
+    settings_got_nothing("the change");
 
-    // Two messages each: the view at open and the change.
+    // Two messages on main's channel: the view at open and the change.
+    assert_eq!(main.limits_received(), 2);
     let window = bridge.window(MAIN).unwrap();
     assert!(lock(&window).state().unacked_bytes() > 0);
     let refusal = block_on(bridge.ack(MAIN, Vec::new(), 3)).unwrap_err();
