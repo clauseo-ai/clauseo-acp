@@ -45,8 +45,8 @@ const NEW_THREAD: readonly ThreadKey[] = [
   "Choose up to {n}.",
   "Choose at least {n}.",
   "Use a number from {min} to {max}.",
-  "Use a number of {min} or more.",
-  "Use a number of {max} or less.",
+  "Use {min} or more.",
+  "Use {max} or less.",
   "Use a whole number.",
 ];
 const LIMITS: readonly LimitKey[] = [

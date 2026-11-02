@@ -95,8 +95,8 @@ const HI = {
   "Choose up to {n}.": "अधिकतम {n} चुनें।",
   "Choose at least {n}.": "कम से कम {n} चुनें।",
   "Use a number from {min} to {max}.": "{min} से {max} तक की कोई संख्या लिखें।",
-  "Use a number of {min} or more.": "{min} या उससे अधिक की संख्या लिखें।",
-  "Use a number of {max} or less.": "{max} या उससे कम की संख्या लिखें।",
+  "Use {min} or more.": "{min} या उससे बड़ी संख्या लिखें।",
+  "Use {max} or less.": "{max} या उससे छोटी संख्या लिखें।",
   "Use a whole number.": "पूर्ण संख्या लिखें।",
   // the change note
   "Clauseo changed {n} papers.": "Clauseo ने {n} दस्तावेज़ बदले।",

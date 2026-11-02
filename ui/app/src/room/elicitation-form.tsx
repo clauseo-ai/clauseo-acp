@@ -82,8 +82,8 @@ function limitLine(limit: Limit | null): [ThreadKey, Record<string, number>?] {
     case "range":
       if (limit.min !== null && limit.max !== null)
         return ["Use a number from {min} to {max}.", { min: limit.min, max: limit.max }];
-      if (limit.min !== null) return ["Use a number of {min} or more.", { min: limit.min }];
-      if (limit.max !== null) return ["Use a number of {max} or less.", { max: limit.max }];
+      if (limit.min !== null) return ["Use {min} or more.", { min: limit.min }];
+      if (limit.max !== null) return ["Use {max} or less.", { max: limit.max }];
       return ["This answer doesn't fit the question."];
     default:
       return ["This answer doesn't fit the question."];
@@ -163,6 +163,14 @@ export function ElicitationForm({ elicitation, message, schema }: Props) {
     };
   }, [room]);
 
+  // a not_pending refusal takes Send and Don't answer away: focus on one of them (or lost with it) goes to Stop
+  useEffect(() => {
+    if (!gone) return;
+    const now = document.activeElement;
+    if (now === null || now === document.body || rootRef.current?.contains(now) === true)
+      rootRef.current?.querySelector<HTMLElement>(`[data-testid="${T.stop}"]`)?.focus();
+  }, [gone]);
+
   const respond = useCallback(
     (kind: "accept" | "decline", response: ElicitationResponse) => {
       if (flying.current) return;
@@ -200,7 +208,8 @@ export function ElicitationForm({ elicitation, message, schema }: Props) {
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     // never an IME's key (keyCode 229 in WebKit) nor a held one, as composer-keys.ts and permission-keys.ts
-    if (e.repeat || e.defaultPrevented) return;
+    // nor with Alt, as permission-keys.ts
+    if (e.altKey || e.repeat || e.defaultPrevented) return;
     if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
     const t = e.target;
     if (e.key === "Escape") {

@@ -197,8 +197,8 @@ export const U4B: Entry[] = [
       ["U4B-13", "Choose up to {n}."],
       ["U4B-14", "Choose at least {n}."],
       ["U4B-15", "Use a number from {min} to {max}."],
-      ["U4B-16", "Use a number of {min} or more."],
-      ["U4B-17", "Use a number of {max} or less."],
+      ["U4B-16", "Use {min} or more."],
+      ["U4B-17", "Use {max} or less."],
       ["U4B-18", "Use a whole number."],
     ] as const
   ).map(([id, key]): Entry => ({
