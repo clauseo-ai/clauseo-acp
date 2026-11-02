@@ -1,6 +1,7 @@
 // What Versions holds for an open matter, as plain data the controller (controller.ts) makes and the parts read: where
 // the room stands, what the dialog asks, what the room last did, and the rules for an undo's defaults. Pure.
 import type {
+  CommandOutcome,
   FileChange,
   FileChoice,
   RestorePreview,
@@ -27,6 +28,26 @@ export type Ask = (UndoAsk | RestoreAsk) &
 
 /** What an act wrote: the version it made, or nothing (a bare done). */
 export type Outcome = { kind: "wrote"; checkpoint: string } | { kind: "nothing" };
+
+/** What the host's answer to an act says it wrote. */
+export function outcomeOf(r: CommandOutcome): Outcome {
+  if (typeof r === "object" && "step_undone" in r)
+    return { kind: "wrote", checkpoint: r.step_undone.checkpoint };
+  if (typeof r === "object" && "version_restored" in r)
+    return { kind: "wrote", checkpoint: r.version_restored.checkpoint };
+  return { kind: "nothing" };
+}
+
+/** Paths in the order a version's row names its papers: made, changed, then added; any it doesn't name go last. */
+export function inRowOrder(t: Timeline, id: string, paths: readonly string[]): string[] {
+  const v = t.history.find((x) => x.id === id);
+  const order = v === undefined ? [] : [...v.made, ...v.touched, ...v.added];
+  const rank = (p: string) => {
+    const i = order.indexOf(p);
+    return i < 0 ? order.length : i;
+  };
+  return [...paths].sort((a, b) => rank(a) - rank(b));
+}
 
 /** What the room last did, said under the band at now. */
 export type Done =
@@ -77,6 +98,25 @@ export type Snapshot = {
   zone: string;
 };
 
+/** Versions as it opens: at now, before the matter's first window. */
+export const freshSnapshot = (now: Timestamp, zone: string): Snapshot => ({
+  ready: false,
+  timeline: { history: [], meta: new Map() },
+  look: { kind: "now" },
+  busy: null,
+  refused: false,
+  ask: null,
+  done: null,
+  canUndo: true,
+  failed: null,
+  unsaved: null,
+  compare: null,
+  titles: new Map(),
+  restores: new Map(),
+  now,
+  zone,
+});
+
 /** A thread working or waiting on the lawyer: Restore and Undo wait for it. */
 export const isBusy = (s: ThreadStatus | undefined): boolean =>
   s === "starting" ||
@@ -96,6 +136,34 @@ export function defaultChoices(
       f.may_include_lawyer_edits || since.has(f.path) ? "keep" : "undo",
     ]),
   );
+}
+
+/** A newest version picked at now (for its Undo) once a newer one lands: looked back at, as any older version is; one
+ * the timeline no longer holds leaves now bare. */
+export function staleNewest(look: Look, timeline: Timeline): Look {
+  if (look.kind !== "now" || look.id === undefined || look.id === timeline.history.at(-1)?.id)
+    return look;
+  return timeline.meta.has(look.id)
+    ? { kind: "back", id: look.id, comparing: false }
+    : { kind: "now" };
+}
+
+/** The undo dialog after the matter moved: each file a newer version changed is kept, unless the lawyer chose for it
+ * (`chosen`); null when nothing changes. The room knows the files of the versions it can read only: a later turn of a
+ * conversation it doesn't hold, or a later restore, lists none until every version carries its files (H12). */
+export function keepChangedSince(
+  timeline: Timeline,
+  id: string,
+  choices: ReadonlyMap<string, FileChoice>,
+  chosen: ReadonlySet<string>,
+): Map<string, FileChoice> | null {
+  let next: Map<string, FileChoice> | null = null;
+  for (const path of changedSince(timeline, id).keys()) {
+    if (chosen.has(path) || choices.get(path) !== "undo") continue;
+    next ??= new Map(choices);
+    next.set(path, "keep");
+  }
+  return next;
 }
 
 /** The files of a step changed again by a later version, by path, with the newest version that did. */

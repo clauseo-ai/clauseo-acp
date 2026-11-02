@@ -13,19 +13,21 @@ import type {
   HostCommand,
   MatterId,
   RestorePreview,
-  StepEntry,
-  ThreadId,
-  TurnId,
   ViewEntry,
 } from "../../transport/protocol.ts";
 import { matterStreamOf, readMatter } from "../matter-stream.ts";
 import { localZone } from "../when.ts";
 import { Conversations } from "./conversations.ts";
-import { lockedRestore, movedPast, pageBack, unsavedOf, type Own } from "./reading.ts";
+import { DoneWatch, lockedRestore, pageBack, unsavedOf, type Own, type Undid } from "./reading.ts";
 import {
   changedSince,
   defaultChoices,
+  freshSnapshot,
+  inRowOrder,
+  keepChangedSince,
+  outcomeOf,
   sameChanges,
+  staleNewest,
   type Ask,
   type Done,
   type Look,
@@ -33,11 +35,10 @@ import {
   type Snapshot,
   type Unsaved,
 } from "./state.ts";
-import { newestUndo, timelineOf, undoable, type Timeline, type VersionMeta } from "./timeline.ts";
+import { StepSeeker } from "./seeking.ts";
+import { newestUndo, timelineOf, undoable, undoesAsRestore, type VersionMeta } from "./timeline.ts";
 
 export type { Ask, Done, Look, Snapshot, Unsaved };
-
-const EMPTY: Timeline = { history: [], meta: new Map() };
 
 type UndoAsk = Extract<Ask, { act: "undo" }>;
 type RestoreAsk = Extract<Ask, { act: "restore" }>;
@@ -55,23 +56,22 @@ export class VersionsController {
   #older: { epoch: string; entries: ViewEntry[] } | null = null;
   /** The epoch whose older pages are being read. */
   #paging: string | null = null;
-  readonly #pagedSteps = new Map<TurnId, StepEntry>();
-  #held: { thread: ThreadId; release: () => void } | null = null;
-  #seeking: TurnId | null = null;
+  readonly #steps: StepSeeker;
   #sig = "";
   #at: string | null = null;
   /** Undo was asked for from the toolbar: the dialog opens once the newest undoable step is in. */
   #undoNewest = false;
-  /** The turns whose step was sought and isn't there: the toolbar's Undo walks past them. */
-  readonly #missing = new Set<TurnId>();
   /** The dialog the toolbar's Undo opened, and where Cancel goes back to: out of Versions, or to where the lawyer was. */
   #fromToolbar: { id: string | null; back: Look | "leave" } | null = null;
   #acting = false;
+  /** The files of the open undo dialog the lawyer chose for: a move of the matter leaves their choices. */
+  #chosen = new Set<string>();
+  /** The newest comparison asked for. */
+  #compared = 0;
   /** The newest preview asked for: one that comes back after a newer ask, or after the dialog closed, is dropped. */
   #asked = 0;
-  /** The matter's entries as an act was sent: the line saying what it did goes once an entry not its own comes. */
-  #base: ReadonlySet<string> = new Set();
-  #doneBy: { base: ReadonlySet<string>; own: Own } | null = null;
+  /** The line saying what the last act did. */
+  readonly #done = new DoneWatch();
   /** As the last refusal said an answer runs: the next list_threads' number, and how many conversations had rested. */
   #refusedAt = { list: 0, rests: 0 };
 
@@ -80,27 +80,13 @@ export class VersionsController {
     this.#store = store;
     this.matter = matter;
     this.#stream = matterStreamOf(matter);
-    this.#talks = new Conversations(transport, store, matter, () => {
+    const again = () => {
       this.#sig = "";
       this.#read();
-    });
-    this.#snap = {
-      ready: false,
-      timeline: EMPTY,
-      look: { kind: "now" },
-      busy: null,
-      refused: false,
-      ask: null,
-      done: null,
-      canUndo: true,
-      failed: null,
-      unsaved: null,
-      compare: null,
-      titles: new Map(),
-      restores: new Map(),
-      now: Date.now(),
-      zone: localZone(),
     };
+    this.#talks = new Conversations(transport, store, matter, again);
+    this.#steps = new StepSeeker(transport, store, again);
+    this.#snap = freshSnapshot(Date.now(), localZone());
   }
 
   snapshot = (): Snapshot => this.#snap;
@@ -125,17 +111,11 @@ export class VersionsController {
       for (const stop of this.#stops) stop();
       this.#stops = [];
       this.#talks.stop();
-      this.#held?.release();
-      this.#held = null;
+      this.#steps.release();
     };
   }
 
   /* ---------- reading ---------- */
-
-  #stepOf = (thread: ThreadId, turn: TurnId): StepEntry | undefined => {
-    const e = this.#store.view(streamOf(thread))?.entries.get(`step:${turn}`);
-    return e?.step ?? this.#pagedSteps.get(turn);
-  };
 
   /** Re-reads what the store holds, and makes a new snapshot only when something Versions shows changed. */
   #read(): void {
@@ -143,7 +123,8 @@ export class VersionsController {
     const talks = this.#talks;
     talks.read();
     const statuses = talks.threads.map((t) => JSON.stringify(talks.statusOf(t))).join(",");
-    const held = this.#held === null ? null : this.#store.view(streamOf(this.#held.thread));
+    // every conversation's stream the room holds: a step undone there changes what Undo offers
+    const steps = talks.threads.map((t) => this.#store.view(streamOf(t.thread))?.cursor).join(",");
     const sig = [
       view?.epoch,
       view?.cursor,
@@ -152,22 +133,20 @@ export class VersionsController {
       statuses,
       talks.threads.length,
       talks.listed,
-      held?.cursor,
-      this.#pagedSteps.size,
+      steps,
+      this.#steps.sig(),
     ].join("|");
     if (sig === this.#sig) return;
     this.#sig = sig;
     const epoch = view?.epoch ?? null;
     const at = view?.cursor == null ? null : `${epoch}:${view.cursor}`;
-    if (at !== null && at !== this.#at) {
-      const moved = this.#at !== null;
-      this.#at = at;
-      // a new version or marker: a turn began or ended somewhere in the matter, so the conversations' statuses moved,
-      // and what a restore would write may have too
-      if (moved) {
-        talks.list();
-        this.#repreview();
-      }
+    const moved = at !== null && at !== this.#at && this.#at !== null;
+    if (at !== null) this.#at = at;
+    // a new version or marker: a turn began or ended somewhere in the matter, so the conversations' statuses moved,
+    // and what a restore would write may have too
+    if (moved) {
+      talks.list();
+      this.#repreview();
     }
     if (this.#older !== null && this.#older.epoch !== epoch) this.#older = null;
     if (view !== undefined && epoch !== null && view.hasOlder && this.#older === null)
@@ -181,11 +160,13 @@ export class VersionsController {
       restores: read.restores,
       titles,
       untitled: "",
-      step: this.#stepOf,
+      step: this.#steps.stepOf,
       now,
       zone: this.#snap.zone,
     });
     const busy = talks.busy();
+    // a step sought in vain that came after all: the toolbar's Undo finds it
+    const found = this.#steps.found(timeline);
     // a refusal said an answer runs: it stands until a list_threads asked after it, or a conversation coming to rest,
     // leaves none running
     const settled =
@@ -194,26 +175,44 @@ export class VersionsController {
     this.#set({
       ready: epoch !== null,
       timeline,
+      look: staleNewest(this.#snap.look, timeline),
       busy,
       refused: this.#snap.refused && !settled,
       titles,
       restores: read.restores,
       now,
       unsaved: unsavedOf(this.#store, talks.threads),
-      canUndo: newestUndo(timeline, this.#missing) !== null,
-      done: this.#doneAfter(this.#snap.done, view),
+      canUndo: newestUndo(timeline, this.#steps.missing, read.restores) !== null,
+      done: this.#done.after(this.#snap.done, view, this.#store, timeline),
     });
-    this.#seek();
+    if (moved) this.#afterMove();
+    if (found) this.#rewalk();
+    this.#steps.seek();
     if (this.#undoNewest) this.#openNewestUndo();
   }
 
-  /** The line for the room's last act stands until the matter's stream gains an entry not the act's own. */
-  #doneAfter(done: Done | null, view: StreamView | undefined): Done | null {
-    const by = this.#doneBy;
-    if (done === null || by === null || view === undefined || !movedPast(view, by.base, by.own))
-      return done;
-    this.#doneBy = null;
-    return null;
+  /** The matter moved: the undo dialog keeps each file changed since, and the comparison is asked for again. */
+  #afterMove(): void {
+    const { ask, look, timeline } = this.#snap;
+    if (ask?.act === "undo" && ask.stage === "confirm") {
+      const choices = keepChangedSince(timeline, ask.id, ask.choices, this.#chosen);
+      if (choices !== null) this.#set({ ask: { ...ask, choices } });
+    }
+    if (look.kind === "back" && look.comparing) void this.#compare(look.id, true);
+  }
+
+  /** A dialog the toolbar's Undo opened for an older turn, untouched, while the newest turn's step came late: the
+   * toolbar's Undo walks again, to the newest. */
+  #rewalk(): void {
+    const { ask } = this.#snap;
+    const from = this.#fromToolbar;
+    if (from === null || ask?.act !== "undo" || ask.stage !== "confirm" || ask.id !== from.id)
+      return;
+    if (this.#chosen.size > 0 || this.#acting) return;
+    const next = newestUndo(this.#snap.timeline, this.#steps.missing, this.#snap.restores);
+    if (next === null || next.id === ask.id) return;
+    this.#set({ ask: null });
+    this.#undoNewest = true;
   }
 
   /** Every older page of the matter's stream for an epoch, once: the timeline lists every version. A page read for an
@@ -244,10 +243,17 @@ export class VersionsController {
 
   /** Choosing a turn's version holds its conversation and pages back to its step, so Undo has its files. */
   #look(id: string | null): void {
-    const last = this.#snap.timeline.history.at(-1)?.id;
+    const { history } = this.#snap.timeline;
+    const last = history.at(-1)?.id;
     const at = id === null || id === last ? null : id;
-    // the newest version is now; a turn's stays picked, so the band can offer its Undo
-    const newest = id !== null && id === last && this.meta(id)?.kind === "after_turn" ? id : null;
+    // the newest version is now; a turn's, or a restore the host marked, stays picked, so the band can offer its Undo
+    const kind = id === null ? undefined : this.meta(id)?.kind;
+    const newest =
+      id !== null &&
+      id === last &&
+      (kind === "after_turn" || undoesAsRestore(this.#snap.timeline, this.#snap.restores, id))
+        ? id
+        : null;
     const look: Look =
       at === null
         ? newest === null
@@ -258,48 +264,9 @@ export class VersionsController {
             id: at,
             comparing: this.#snap.look.kind === "back" && this.#snap.look.comparing,
           };
-    this.#hold(this.meta(at ?? newest ?? ""));
+    this.#steps.hold(this.meta(at ?? newest ?? ""));
     this.#set({ look, done: null, failed: null, compare: null });
     if (look.kind === "back" && look.comparing) void this.#compare(look.id);
-  }
-
-  #hold(m: VersionMeta | undefined): void {
-    const thread = m?.kind === "after_turn" ? m.thread : undefined;
-    if (this.#held?.thread !== thread) {
-      this.#held?.release();
-      this.#held =
-        thread === undefined ? null : { thread, release: this.#store.watch(streamOf(thread)) };
-    }
-    this.#seeking = m?.kind === "after_turn" && m.step === null ? (m.turn ?? null) : null;
-    this.#seek();
-  }
-
-  /** Pages the held conversation back until the sought step is in; paged to its start without it, a pending Undo from
-   * the toolbar is dropped. */
-  #seek(): void {
-    const held = this.#held;
-    const turn = this.#seeking;
-    if (held === null || turn === null) return;
-    if (this.#stepOf(held.thread, turn) !== undefined) {
-      this.#seeking = null;
-      return;
-    }
-    const stream = streamOf(held.thread);
-    const view = this.#store.view(stream);
-    if (view === undefined || view.epoch === null) return;
-    this.#seeking = null;
-    if (!view.hasOlder) {
-      this.#missing.add(turn);
-      return;
-    }
-    void pageBack(this.#transport, stream, view, (page) => {
-      for (const e of page) if (e.step !== undefined) this.#pagedSteps.set(e.step.turn, e.step);
-      return this.#pagedSteps.has(turn);
-    }).then(() => {
-      if (!this.#pagedSteps.has(turn)) this.#missing.add(turn);
-      this.#sig = "";
-      this.#read();
-    });
   }
 
   /** Compare with now: on, it asks what differs between the version and the folder now. */
@@ -311,16 +278,22 @@ export class VersionsController {
     if (comparing) void this.#compare(look.id);
   }
 
-  async #compare(id: string): Promise<void> {
-    this.#set({ compare: { id, changes: null } });
+  /** Asks what differs between a version and the folder now; again: the matter moved, and the list shown stays until
+   * the answer. Only the newest ask's answer is shown; an answer of the wrong shape is a failure. */
+  async #compare(id: string, again = false): Promise<void> {
+    this.#compared += 1;
+    const asked = this.#compared;
+    if (!again) this.#set({ compare: { id, changes: null } });
+    const current = () => asked === this.#compared && this.#snap.compare?.id === id;
     try {
       const r = await this.#transport.query({
         compare_versions: { matter: this.matter, from: id },
       });
-      if (this.#snap.compare?.id !== id) return;
-      this.#set({ compare: { id, changes: "file_changes" in r ? r.file_changes : [] } });
+      if (!current()) return;
+      if ("file_changes" in r) this.#set({ compare: { id, changes: r.file_changes } });
+      else this.#set({ compare: null, failed: "internal" });
     } catch (e) {
-      if (this.#snap.compare?.id === id) this.#set({ compare: null, failed: toHostError(e).code });
+      if (current()) this.#set({ compare: null, failed: toHostError(e).code });
     }
   }
 
@@ -332,6 +305,7 @@ export class VersionsController {
     if (!undoable(m) || m?.step == null) return;
     const since = changedSince(this.#snap.timeline, id);
     const choices = defaultChoices(m.step, new Set(since.keys()));
+    this.#chosen = new Set();
     this.#set({ ask: { act: "undo", id, choices, stage: "confirm", failed: null }, failed: null });
   }
 
@@ -346,7 +320,7 @@ export class VersionsController {
   #openNewestUndo(): void {
     if (!this.#snap.ready) return;
     for (;;) {
-      const next = newestUndo(this.#snap.timeline, this.#missing);
+      const next = newestUndo(this.#snap.timeline, this.#steps.missing, this.#snap.restores);
       if (next === null) {
         // nothing to take back: Versions stays open on the timeline, and the toolbar's Undo waits
         this.#undoNewest = false;
@@ -354,18 +328,20 @@ export class VersionsController {
         return;
       }
       const there = this.#snap.look.id === next.id;
-      if (next.kind === "ready") {
+      if (next.kind !== "unknown") {
         this.#undoNewest = false;
         if (!there) this.#look(next.id);
         if (this.#fromToolbar !== null) this.#fromToolbar = { ...this.#fromToolbar, id: next.id };
-        this.askUndo(next.id);
+        // the newest version is a restore: Undo restores the version before it, through the restore dialog
+        if (next.kind === "restore") this.undoRestore(next.id);
+        else this.askUndo(next.id);
         return;
       }
       // its step isn't in: looking at it holds its conversation and pages back to it, then the walk goes on
       if (there) return;
       this.#look(next.id);
       const turn = this.meta(next.id)?.turn;
-      if (turn === undefined || !this.#missing.has(turn)) return;
+      if (turn === undefined || !this.#steps.missing.has(turn)) return;
     }
   }
 
@@ -374,6 +350,7 @@ export class VersionsController {
     if (ask?.act !== "undo" || ask.stage !== "confirm") return;
     const choices = new Map(ask.choices);
     choices.set(path, choice);
+    this.#chosen.add(path);
     this.#set({ ask: { ...ask, choices } });
   }
 
@@ -414,7 +391,12 @@ export class VersionsController {
         if (now?.act === "restore" && now.stage === "confirm" && now.id === ask.id)
           this.#set({ ask: { ...now, preview } });
       },
-      (error: unknown) => console.warn(`preview_restore failed: ${JSON.stringify(error)}`),
+      (error: unknown) => {
+        // the list may be out of date: the dialog says the act failed, and Try again asks again
+        const now = this.#snap.ask;
+        if (asked !== this.#asked || now?.act !== "restore" || now.stage !== "confirm") return;
+        if (now.id === ask.id) this.#set({ ask: { ...now, failed: toHostError(error).code } });
+      },
     );
   }
 
@@ -437,7 +419,9 @@ export class VersionsController {
     const ask = this.#snap.ask;
     this.#fromToolbar = null;
     this.#set({ ask: null });
-    if (from === null || ask === null || ask.id !== from.id) return false;
+    // a restore that undoes another was opened for the restore it undoes
+    const opened = ask?.act === "restore" ? (ask.undoes ?? ask.id) : ask?.id;
+    if (from === null || ask === null || opened !== from.id) return false;
     if (from.back === "leave") return true;
     this.#look(from.back.kind === "back" ? from.back.id : null);
     return false;
@@ -468,16 +452,23 @@ export class VersionsController {
       // undo_step's refusal doesn't name the file a program holds: an undo of one file can only mean that one; with
       // more, the dialog keeps the lawyer's choices, says why, and offers Try again
       const only = papers.length === 1 ? papers[0] : undefined;
-      await this.#refused(outcome.code, () =>
-        only === undefined
-          ? { act: "undo", id, choices, stage: "confirm", failed: outcome.code }
-          : { act: "undo", id, choices, stage: "word", file: only },
+      await this.#refused(
+        outcome.code,
+        outcome.current
+          ? () =>
+              only === undefined
+                ? { act: "undo", id, choices, stage: "confirm", failed: outcome.code }
+                : { act: "undo", id, choices, stage: "word", file: only }
+          : undefined,
       );
       return;
     }
+    // the line names the files chosen, in the order the version's row names them, until the host's marker says
+    // which it put back
     this.#finish(
-      { kind: "undidChange", of: m.ts, papers },
+      { kind: "undidChange", of: m.ts, papers: inRowOrder(this.#snap.timeline, id, papers) },
       { checkpoint: outcome.kind === "wrote" ? outcome.checkpoint : null, turn: step.turn },
+      { thread: m.thread, turn: step.turn, id },
     );
   }
 
@@ -487,8 +478,11 @@ export class VersionsController {
       restore_version: { matter: this.matter, checkpoint: id, scope: "matter" },
     });
     if (outcome.kind === "refused") {
-      await this.#refused(outcome.code, () =>
-        lockedRestore(ask, outcome.code, (id) => this.#preview(id)),
+      await this.#refused(
+        outcome.code,
+        outcome.current
+          ? () => lockedRestore(ask, outcome.code, (id) => this.#preview(id))
+          : undefined,
       );
       return;
     }
@@ -501,33 +495,34 @@ export class VersionsController {
   }
 
   /** An act done: back at now, with the line saying what it did. */
-  #finish(done: Done, own: Own): void {
+  #finish(done: Done, own: Own, undid: Undid | null = null): void {
     this.#fromToolbar = null;
-    this.#doneBy = { base: this.#base, own };
+    this.#done.finished(own, undid);
+    const view = this.#store.view(this.#stream);
     this.#set({
       ask: null,
       look: { kind: "now" },
-      done: this.#doneAfter(done, this.#store.view(this.#stream)),
+      done: this.#done.after(done, view, this.#store, this.#snap.timeline),
     });
   }
 
-  /** Sends one act; resolves with what it wrote, or the code the host refused it with. */
-  async #act(command: HostCommand): Promise<Outcome | { kind: "refused"; code: string }> {
+  /** Sends one act; resolves with what it wrote, or the code the host refused it with (current: its dialog wasn't
+   * closed meanwhile, so a dialog may open again to say why). */
+  async #act(
+    command: HostCommand,
+  ): Promise<Outcome | { kind: "refused"; code: string; current: boolean }> {
     this.#acting = true;
-    this.#base = new Set(this.#store.view(this.#stream)?.ids ?? []);
+    this.#done.sent(this.#store.view(this.#stream));
+    this.#asked += 1;
+    const asked = this.#asked;
     try {
-      const outcome = await this.#transport.dispatch({
-        command_id: crypto.randomUUID(),
-        command,
-      });
+      const outcome = outcomeOf(
+        await this.#transport.dispatch({ command_id: crypto.randomUUID(), command }),
+      );
       this.#set({ failed: null });
-      if (typeof outcome === "object" && "step_undone" in outcome)
-        return { kind: "wrote", checkpoint: outcome.step_undone.checkpoint };
-      if (typeof outcome === "object" && "version_restored" in outcome)
-        return { kind: "wrote", checkpoint: outcome.version_restored.checkpoint };
-      return { kind: "nothing" };
+      return outcome;
     } catch (e) {
-      return { kind: "refused", code: toHostError(e).code };
+      return { kind: "refused", code: toHostError(e).code, current: asked === this.#asked };
     } finally {
       this.#acting = false;
     }

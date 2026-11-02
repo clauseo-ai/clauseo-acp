@@ -7,12 +7,14 @@ import type { HostTransport } from "../../transport/host-transport.ts";
 import type {
   RestorePreview,
   StreamId,
+  ThreadId,
   ThreadSummary,
   TurnId,
   ViewEntry,
 } from "../../transport/protocol.ts";
 import { orderOf, pageBefore } from "../matter-stream.ts";
-import type { Ask, Unsaved } from "./state.ts";
+import { inRowOrder, type Ask, type Done, type Unsaved } from "./state.ts";
+import type { Timeline } from "./timeline.ts";
 
 /** Pages a stream back from its window's first entry, oldest first, until none are left or `enough` says so. A page
  * that fails ends the reading with what came. */
@@ -62,19 +64,87 @@ export function unsavedOf(store: ViewStore, threads: readonly ThreadSummary[]): 
  * undo the host answered with a bare done, an undo version of its turn. */
 export type Own = { checkpoint: string | null; turn: TurnId | null };
 
-const isOwn = (e: ViewEntry, own: Own): boolean =>
+/** The act's own version: the one it wrote, or its turn's undo. */
+const isOwnVersion = (e: ViewEntry, own: Own): boolean =>
   own.checkpoint !== null
-    ? e.version?.checkpoint === own.checkpoint ||
-      e.marker?.kind.version_restored?.checkpoint === own.checkpoint
+    ? e.version?.checkpoint === own.checkpoint
     : own.turn !== null && e.version?.kind === "undo" && e.version.turn === own.turn;
 
-/** Whether the matter's stream holds an entry it didn't hold as the act was sent (`base`) and that isn't the act's. */
+const isOwnMarker = (e: ViewEntry, own: Own): boolean =>
+  own.checkpoint !== null && e.marker?.kind.version_restored?.checkpoint === own.checkpoint;
+
+/** Whether the matter's stream holds an entry it didn't hold as the act was sent (`base`) and that isn't the act's. The
+ * act's are its version, its marker, and every entry at or below its version's order: the host writes the outside
+ * edits it found before writing (an outside_edits version) in the same commit as the act's own version. */
 export function movedPast(view: StreamView, base: ReadonlySet<string>, own: Own): boolean {
+  let upTo = Number.NEGATIVE_INFINITY;
   for (const id of view.ids) {
     const e = view.entries.get(id);
-    if (!base.has(id) && e !== undefined && !isOwn(e, own)) return true;
+    if (e !== undefined && isOwnVersion(e, own)) upTo = Math.max(upTo, orderOf(e));
+  }
+  for (const id of view.ids) {
+    const e = view.entries.get(id);
+    if (base.has(id) || e === undefined || isOwnMarker(e, own) || orderOf(e) <= upTo) continue;
+    return true;
   }
   return false;
+}
+
+/** The files the host put back for a turn's undo, as the step_undone marker on its conversation's stream says; null
+ * until the marker comes. */
+export function restoredOf(
+  store: ViewStore,
+  thread: ThreadId,
+  turn: TurnId,
+): readonly string[] | null {
+  const view = store.view(streamOf(thread));
+  let restored: readonly string[] | null = null;
+  for (const id of view?.ids ?? []) {
+    const undone = view?.entries.get(id)?.marker?.kind.step_undone;
+    if (undone?.turn === turn) restored = undone.restored;
+  }
+  return restored;
+}
+
+/** The undo a line says was done: the turn's conversation, the turn, and the version it took back. */
+export type Undid = { thread: ThreadId; turn: TurnId; id: string };
+
+/** The line for the room's last act: it stands until the matter's stream gains an entry not the act's own, and an
+ * undo's names the files the host put back once the marker on the conversation's stream says which: a file the host
+ * couldn't write stays as it is, whatever the lawyer chose. */
+export class DoneWatch {
+  /** The matter's entries as the act was sent. */
+  #base: ReadonlySet<string> = new Set();
+  #by: { base: ReadonlySet<string>; own: Own; undid: Undid | null } | null = null;
+
+  sent(view: StreamView | undefined): void {
+    this.#base = new Set(view?.ids ?? []);
+  }
+
+  finished(own: Own, undid: Undid | null): void {
+    this.#by = { base: this.#base, own, undid };
+  }
+
+  after(
+    done: Done | null,
+    view: StreamView | undefined,
+    store: ViewStore,
+    timeline: Timeline,
+  ): Done | null {
+    const by = this.#by;
+    if (done === null || by === null || view === undefined) return done;
+    if (movedPast(view, by.base, by.own)) {
+      this.#by = null;
+      return null;
+    }
+    if (done.kind !== "undidChange" || by.undid === null) return done;
+    const { thread, turn, id } = by.undid;
+    const restored = restoredOf(store, thread, turn);
+    // none put back says nothing the line could name: it keeps the lawyer's choices
+    if (restored === null || restored.length === 0) return done;
+    const papers = inRowOrder(timeline, id, restored);
+    return papers.join("\n") === done.papers.join("\n") ? done : { ...done, papers };
+  }
 }
 
 /** The restore dialog after a program refused the restore a file: the file the preview names, or the only file the

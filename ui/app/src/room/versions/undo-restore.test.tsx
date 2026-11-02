@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
 // Taking a restore back: the restored line's Undo shows only once the host has marked the restore it wrote, never for
 // a restore that found nothing to write; "Undo this change" on a restore version and the restored line's Undo both
-// ask through the restore dialog, which lists what restoring the version before writes now; and the restored line
-// goes once the matter moves past it.
+// ask through the restore dialog, which lists what restoring the version before writes now; the restored line goes
+// once the matter moves past it, but not for the outside edits the host wrote with the restore; and a newest restore
+// keeps its Undo, from the toolbar and from its row, once the line has gone.
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { MATTER, THREAD, TURN, upsert } from "../../testing/stream-script.ts";
 import type { RestorePreview, ViewEntry } from "../../transport/protocol.ts";
@@ -132,4 +133,53 @@ test("the restored line goes once the matter's stream moves past the restore", a
   await h.deliver(MATTER_STREAM, [upsert(version(5, "outside_edits", { files: [file("x.txt")] }))]);
   expect(notice()).toBeUndefined();
   expect(document.body.querySelector(".ver-restored-undo")).toBeNull();
+});
+
+test("the outside edits the host wrote with the restore, in one commit, keep the restored line and its Undo", async () => {
+  h = await mountVersions(VERSIONS, STEPS, {
+    query: answering({ preview_restore: { restore_preview: PREVIEW } }),
+    dispatch: () => ({ version_restored: { checkpoint: "cp5" } }),
+  });
+  await h.openVersions();
+  await restoreCp2(h);
+  // the folder had changed outside Clauseo: the host kept that as cp4 before writing the restore, cp5
+  await h.deliver(MATTER_STREAM, [
+    upsert(version(4, "outside_edits", { files: [file("other.txt")] })),
+    upsert(version(5, "restore")),
+    upsert(restoredMarker(50, "cp2", "cp5")),
+  ]);
+  expect(notice()).not.toBeUndefined();
+  expect(notice()?.querySelector(".ver-restored-undo")).not.toBeNull();
+});
+
+test("a newest restore keeps its Undo after a look elsewhere: the toolbar's Undo and its row's band take it back", async () => {
+  h = await mountVersions(VERSIONS, STEPS, {
+    query: answering({ preview_restore: { restore_preview: PREVIEW } }),
+    dispatch: () => ({ version_restored: { checkpoint: "cp4" } }),
+  });
+  await h.openVersions();
+  await restoreCp2(h);
+  await h.deliver(MATTER_STREAM, [
+    upsert(version(4, "restore")),
+    upsert(restoredMarker(40, "cp2", "cp4")),
+  ]);
+  await h.lookAt("cp1");
+  await h.click(document.body.querySelector(".ver-back"));
+  expect(notice()).toBeUndefined();
+  // the toolbar's Undo takes back the restore, not the older turn: it asks to restore cp3, the version before it
+  const undo = h.host.querySelector(".room-pair .room-undo");
+  expect(undo?.getAttribute("aria-disabled")).toBeNull();
+  await h.click(undo);
+  const cp3 = { preview_restore: { matter: MATTER, checkpoint: "cp3", scope: "matter" } };
+  expect(h.queried("preview_restore").at(-1)).toEqual(cp3);
+  expect(dialog()?.textContent).toMatch(/^Restore the matter to how it was at/);
+  await h.click(h.button("Cancel", dialog()));
+  // picking the restore's row keeps the room at now, with its Undo in the band
+  await h.lookAt("cp4");
+  expect(document.body.querySelector(".ver-line")?.textContent).toBe("Now");
+  expect(h.one("version-restore")).toBeNull();
+  const asked = h.queried("preview_restore").length;
+  await h.click(h.one("version-undo"));
+  expect(h.queried("preview_restore")).toHaveLength(asked + 1);
+  expect(h.queried("preview_restore").at(-1)).toEqual(cp3);
 });
