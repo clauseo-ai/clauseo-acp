@@ -442,7 +442,8 @@ impl PolicyBuilder {
     ///   The notes folder and the credential link may not be inside the matter. Read-only
     ///   paths in the state folder must be inside it; over-cap files inside the matter.
     /// - Each allowed folder passes [`Policy::check_allowed_folder`].
-    /// - Without [`PolicyBuilder::scan`], the matter is walked here ([`scan_matter`](crate::scan_matter)).
+    /// - Without [`PolicyBuilder::scan`], the matter is walked here
+    ///   ([`scan_matter`](crate::scan_matter)).
     /// - Proxy ports and [`Loopback::Ports`] are sorted and de-duplicated.
     pub fn build(self) -> Result<Policy, Error> {
         build::build(self)
