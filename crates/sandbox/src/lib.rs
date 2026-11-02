@@ -120,7 +120,7 @@ mod links;
 mod macos;
 mod policy;
 pub mod ports;
-mod proxy;
+pub mod proxy;
 #[cfg(test)]
 mod test_support;
 

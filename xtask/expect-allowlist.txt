@@ -100,6 +100,10 @@ crates/store/benches/common/dir.rs - clippy::disallowed_methods
 crates/store/benches/reopen.rs - clippy::unwrap_used
 crates/store/benches/commit.rs - clippy::unwrap_used
 
+# Added by S16: the upstream lookup's FFI to CFNetwork (macOS) and WinHTTP (Windows).
+crates/sandbox/src/proxy/upstream/macos.rs - unsafe_code
+crates/sandbox/src/proxy/upstream/windows.rs - unsafe_code
+
 # Added by R8: matters' write module, its tests' and bench's write modules, a unit test's symlink,
 # and the sync calls that have nothing to do off macOS (or, for folders, off Unix).
 crates/matters/src/write.rs - clippy::disallowed_methods

@@ -22,7 +22,7 @@ mod server;
 mod shared_hosts;
 mod target;
 mod token;
-mod upstream;
+pub mod upstream;
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;

@@ -68,7 +68,10 @@ Crates, each in the root `[workspace.dependencies]` table: `async-executor` 1.14
 executor), `blocking` 1.7 (DNS and the lookup off the I/O thread), `httparse` 1.10 (heads; small,
 no allocation, fuzzed upstream), `getrandom` 0.3.4, `base64` 0.22.1 and `subtle` 2.6 (the token),
 `psl` 2 (2.1.246, the only new package in `Cargo.lock`; MIT or Apache-2.0), `socket2` 0.6.5
-(Windows only). `async-io`, `futures`, `url`, `tracing` and `windows` were already workspace
+(Windows only).
+`objc2-cf-network` 0.3.2 (macOS, CFNetwork proxy settings and PAC; features `std` and `CFProxySupport`).
+`windows` gains the WinHTTP features `Win32_Foundation` and `Win32_Networking_WinHttp` (Windows only).
+`async-io`, `futures`, `url`, `tracing` and `windows` were already workspace
 dependencies. All but `psl` and its `psl-types` were already in `Cargo.lock`.
 
 Departures from the brief:
