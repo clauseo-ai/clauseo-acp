@@ -69,7 +69,6 @@ const OVER_LIMITS: AskForm = {
         minLength: 20,
         default: "Cheque",
       },
-      initial: { type: "string", title: "Bank's initial", minLength: 1, default: " " },
       branch: { type: "string", title: "Branch code letter", maxLength: 1, default: "DL" },
       papers: {
         type: "array",
@@ -195,7 +194,6 @@ export const U4B: Entry[] = [
       ["U4B-09", "Use {n} characters or fewer."],
       ["U4B-10", "Use 1 character or fewer."],
       ["U4B-11", "Use at least {n} characters."],
-      ["U4B-12", "Use at least 1 character."],
       ["U4B-13", "Choose up to {n}."],
       ["U4B-14", "Choose at least {n}."],
       ["U4B-15", "Use a number from {min} to {max}."],
