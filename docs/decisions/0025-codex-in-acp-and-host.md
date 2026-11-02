@@ -68,15 +68,21 @@ agent message text to one that does not (`:29655-29658`, `:44519-44523`). It nev
 - **The home is made without following links.** `make_home` walks `agents`, `agents/<id>` and
   `home` below the data folder one level at a time: each that exists must be a real folder (a
   link or junction is refused, never followed, so nothing is made where it points), and each
-  missing one is made, 0700 on Unix. The data folder itself may be a link: `CLAUSEO_DATA_DIR` may
-  name one, and the store lives there too.
-- **The matter folder may not overlap the home.** At each Codex launch, once the home exists, the
-  host compares the matter folder and the home, both resolved through links (without case on
-  macOS and Windows): a matter folder that is the home, holds it or sits inside it is refused with
-  `matter.folder_refused`. An agent working there could read the login, write rule files (`.rules`)
-  that Codex loads from the home, or edit `config.toml` before app-server reads it. Import
-  refuses only folders that overlap the matters root, so the data folder or its `agents` folder
-  can still be a matter; the launch check closes that.
+  missing one is made, 0700 on Unix. Another launch making the same folder first is fine. The
+  data folder itself may be a link: `CLAUSEO_DATA_DIR` may name one, and the store lives there
+  too.
+- **The matter folder may not be in the data folder's agent homes.** At every agent's launch,
+  Claude's included, the host refuses a matter folder that is the data folder, holds it, or is,
+  holds or sits inside `<data folder>/agents`, which covers every agent's home, a sibling's
+  included. It uses `matter.folder_refused`, close enough for this rare case. An agent working
+  there could read a login, write rule files (`.rules`) that Codex loads from its home, or edit
+  `config.toml` before app-server reads it. Paths compare as matters' refused-list check
+  compares them: resolved through links (as written when they do not resolve), by components,
+  without case on macOS and Windows, and on macOS also without `/System/Volumes/Data`. A private
+  `overlaps_tree` stands in until #155 exports `clauseo_matters::overlaps_tree`. iris's #155
+  refuses the whole data tree at import; this launch check is the second line, for matters
+  imported before #155 and for paths that change after import. The gap: a matter elsewhere
+  inside the data folder still launches; it holds no logins.
 - **Dropped variables.** A Codex agent never gets `CODEX_PATH` (it swaps the app-server binary),
   `APP_SERVER_LOGS` (codex-acp would log the whole `CODEX_CONFIG`, hooks included, to a file),
   `DEFAULT_AUTH_REQUEST` or `MODEL_PROVIDER`, whether inherited, set in the settings or given by
@@ -105,8 +111,9 @@ agent message text to one that does not (`:29655-29658`, `:44519-44523`). It nev
   under a header saying Clauseo manages it and edits are replaced: atomically (temp file and
   rename, the temp name holding the process id and a count, so two hosts sharing a data folder
   never collide), 0600 on Unix, over whatever is there; a `config.toml` that already holds
-  exactly those bytes, as a plain 0600 file, is left alone. It reads and touches nothing else in
-  the home
+  exactly those bytes, as a plain 0600 file, is left alone. Before a write, temp files a crashed
+  write left beside it (`config.toml.clauseo-*.new`) are removed. It reads and touches nothing
+  else in the home
   (`auth.json` is Codex's). `CODEX_CONFIG` stays: it reaches the session, the file reaches
   start-up. The hooks table never goes in the file: the guard's trust entry is keyed by the
   session-flags source, so a hook read from the file would be keyed by its path and silently
@@ -120,29 +127,34 @@ agent message text to one that does not (`:29655-29658`, `:44519-44523`). It nev
   to be `trustStatus: "trusted"`: Codex skips an untrusted hook silently, so a drifted hash would
   leave the guard off. Otherwise it logs each hook's trust status and the hook count (not the
   answer, which holds paths) and fails the session start with `agent.launch_failed`, and no
-  prompt is sent. `agent.launch_failed` keeps one host code for every launch failure; the app
-  makes its words kind-aware from the thread's agent.
+  prompt is sent. `agent.launch_failed` keeps one host code for every launch failure. Its words
+  still name Claude for a Codex thread: making them kind-aware from the thread's agent is a
+  follow-up the app track owns (U10 or U6), not done here.
 - **#184.** A Codex agent is refused, before it is launched, in a matter folder (as resolved
   through links) holding a `.codex` entry of any kind, with its own code `matter.codex_folder`
   (additive; its words tell the lawyer to rename or remove the matter's `.codex` folder to use
-  Codex there). The check runs again before each prompt and before each `session/new`,
+  Codex there). The check runs again, on the stored folder resolved through links afresh (a link
+  may point elsewhere since the launch), before each prompt and before each `session/new`,
   `session/resume` and `session/load`: codex-acp restarts a crashed app-server and resumes the
   session itself (`dist/index.js:37755-37772`), so a `.codex` that appears mid-session would
   load unchecked. On a hit the call is not sent, the agent is stopped and the turn ends failed
-  with `matter.codex_folder`. A stat that fails for any reason but not-found counts as present.
+  with `matter.codex_folder`. A stat that fails for any reason but not-found fails closed too,
+  with `matter.folder_missing` (the folder may be a share that does not answer), not as a
+  `.codex` to rename.
   It is lifted once codex-acp gets an option not to trust the session root
   (agentclientprotocol/codex-acp#690) or the direct Codex driver exists.
-- **Off the actor.** The folder resolution, the `.codex` stats, the home's checks, `make_home`
-  and the `config.toml` write never run on the actor thread. As for matter folders' states
+- **Off the actor.** The data-folder check, the folder resolution, the `.codex` stats,
+  `make_home` and the `config.toml` write never run on the actor thread. As for matter folders' states
   (`crates/host/src/actor/folder_state.rs`), each runs on a named thread (`clauseo-codex-fs`,
   `crates/host/src/agent/codex/prepare.rs`) whose answer comes back over a channel, with a 5 s
   deadline on the host clock; a stat that hangs strands at most that thread, and the launch or
-  the turn fails closed with `agent.launch_failed`. A Codex launch has two phases: its
-  preparation runs while the work that waits for the agent is held on the thread's state, then
-  the launch runs on the actor with what it found. Other agents launch as before. Every error
+  the turn fails closed with `matter.folder_missing`. Every launch has two phases: its checks
+  (and a Codex agent's preparation) run while the work that waits for the agent is held on the
+  thread's state, then the launch runs on the actor with what they found. Every error
   the lawyer may see says what failed in words; paths and io errors go to the log only.
 - **`agent::codex::session_folder`** resolves the matter folder through links. It is a private
-  stand-in until #231's `agent::session_folder` lands, which replaces it.
+  stand-in for clauseo-acp #160's `clauseo_host::session_folder`; whichever of #154 and #160
+  merges second does the swap.
 
 ## Consequences
 
