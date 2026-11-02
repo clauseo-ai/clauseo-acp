@@ -170,12 +170,12 @@ fn a_linked_matter_is_checked_where_it_points() {
     write::create_dir_all(&real.join(".codex")).unwrap();
     let link = root.join("link");
     write::symlink(&real, &link).unwrap();
-    let resolved = super::session_folder(&link);
+    let resolved = crate::agent::session_folder(&link);
     assert_eq!(resolved, dunce::canonicalize(&real).unwrap());
     assert!(refuse_codex_folder(&resolved).is_err());
     // A path that does not resolve stays as stored.
     let gone = root.join("gone");
-    assert_eq!(super::session_folder(&gone), gone);
+    assert_eq!(crate::agent::session_folder(&gone), gone);
     write::remove_dir_all(&root).unwrap();
 }
 

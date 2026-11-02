@@ -62,7 +62,7 @@ pub(crate) async fn recheck(clock: Arc<dyn Clock>, stored: Option<PathBuf>) -> R
     match stored {
         Some(stored) => {
             off_actor(clock, move || {
-                super::refuse_codex_folder(&super::session_folder(&stored))
+                super::refuse_codex_folder(&crate::agent::session_folder(&stored))
             })
             .await
         }

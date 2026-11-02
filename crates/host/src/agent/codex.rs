@@ -250,14 +250,6 @@ pub(crate) fn refuse_codex_folder(folder: &Path) -> Result<(), Error> {
     }
 }
 
-/// The matter folder `stored` as resolved through links, or `stored` as it is when it does not
-/// resolve.
-// replaced by clauseo_host::session_folder once clauseo-acp #160 lands; whichever of #154 and
-// #160 merges second does the swap
-pub(crate) fn session_folder(stored: &Path) -> PathBuf {
-    dunce::canonicalize(stored).unwrap_or_else(|_| stored.to_owned())
-}
-
 /// Whether `_codex/hooks/list`'s answer shows the guard trusted: at least one session-flags hook
 /// (codex-acp lists only those, `dist/index.js:39929-39933`), and each with `trustStatus`
 /// `trusted`. Codex silently skips a hook that is not trusted (`hooks/.../discovery.rs:714-721`
@@ -338,10 +330,11 @@ pub(crate) fn make_home(data: &Path, home: &Path) -> Result<(), Error> {
 /// A Codex launch's checks and writes, in order, on the `clauseo-codex-fs` thread
 /// ([`prepare::off_actor`]), after every agent's data-folder refusal
 /// (`agent/data_folder.rs`, which covers every agent's home): the matter folder `stored`
-/// resolved through links, the `.codex` refusal, the home made under `data`, then
-/// `config.toml`. The resolved folder comes back.
+/// resolved through links ([`crate::agent::session_folder`], the spelling the agent runs in),
+/// the `.codex` refusal, the home made under `data`, then `config.toml`. The resolved folder
+/// comes back.
 pub(crate) fn prepare_launch(stored: &Path, data: &Path, home: &Path) -> Result<PathBuf, Error> {
-    let folder = session_folder(stored);
+    let folder = crate::agent::session_folder(stored);
     refuse_codex_folder(&folder)?;
     make_home(data, home)?;
     write_home_config(home)?;
