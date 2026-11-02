@@ -1,5 +1,5 @@
 import { Tooltip as BaseTooltip } from "@base-ui/react/tooltip";
-import type { ReactElement, ReactNode } from "react";
+import { useCallback, useState, type ReactElement, type ReactNode } from "react";
 import { useLayer } from "./layer-context.ts";
 import { tip } from "./recipes.ts";
 
@@ -19,6 +19,7 @@ export function Tooltip({
   children,
   side = "top",
   fixed = false,
+  within,
 }: {
   content: ReactNode;
   /** The trigger: one element that can take focus. */
@@ -27,18 +28,29 @@ export function Tooltip({
   /** Placed against the window, not the page: for a trigger inside a box that scrolls and clips (the wall), where a
    * tooltip placed in the box would be cut off at its edge. It still mounts in the page's layer. */
   fixed?: boolean;
+  /** A selector for the trigger's ancestor the tooltip must stay inside: with no room on its side there, it flips to
+   * the other. For a trigger in a box that something else covers past its edge, such as the wall under the room's
+   * header. The window, when left out. */
+  within?: string;
 }) {
+  const [boundary, setBoundary] = useState<Element | null>(null);
+  const trigger = useCallback(
+    (el: Element | null) =>
+      setBoundary(within === undefined ? null : (el?.closest(within) ?? null)),
+    [within],
+  );
   // it mounts in the page's layer, inside the main landmark, as menus do
   const layer = useLayer();
   return (
     <BaseTooltip.Root>
-      <BaseTooltip.Trigger render={children} delay={500} />
+      <BaseTooltip.Trigger ref={trigger} render={children} delay={500} />
       <BaseTooltip.Portal container={layer}>
         <BaseTooltip.Positioner
           side={side}
           sideOffset={8}
           collisionPadding={8}
           positionMethod={fixed ? "fixed" : "absolute"}
+          {...(boundary === null ? {} : { collisionBoundary: boundary })}
         >
           <BaseTooltip.Popup className={tip}>{content}</BaseTooltip.Popup>
         </BaseTooltip.Positioner>

@@ -171,8 +171,9 @@ function wrapTip(tip: string | undefined, face: ReactElement): ReactElement {
   return tip === undefined ? (
     face
   ) : (
-    // the wall scrolls and clips: a top-row tile's tooltip, placed in it, would be cut off at its top edge
-    <Tooltip content={tip} fixed>
+    // the wall scrolls and clips, and the room's header covers what is above it: a top-row tile's tooltip, placed
+    // against the window and kept inside the wall, flips below the tile when there is no room above
+    <Tooltip content={tip} fixed within=".room-pane">
       {face}
     </Tooltip>
   );
