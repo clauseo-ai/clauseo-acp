@@ -12,6 +12,7 @@ use serde_json::{Value, json};
 
 use super::*;
 
+mod codex;
 mod interface;
 mod mcp_wire;
 mod prompts;

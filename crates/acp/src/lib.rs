@@ -5,6 +5,8 @@
 //! - The one wrapper over `agent-client-protocol` 3.3.0 (schema 1.11.0): no other crate but
 //!   `fake_agent` names the SDK, and no SDK type appears in this interface. A later SDK major
 //!   changes only this crate.
+//! - Per session, the shown item plan's id (`state.rs`), so a `plan_removed` of it empties the
+//!   plan.
 //! - What Clauseo advertises in `initialize` (`driver.rs`, `client_capabilities`), the version
 //!   check, and the refusal of `fs/*` and `terminal/*` (-32601).
 //! - Turning agent traffic into [`AcpEvent`]s built from `protocol`'s types (`map.rs`), the
@@ -32,11 +34,12 @@
 //! - No call blocks another: a pending prompt never holds back a permission answer or a cancel.
 //!   A call's future may be dropped; its answer is then discarded.
 //! - Origins: `Turn(t)` while turn `t`'s prompt is in flight; `Late(t)` from `cancel()` until the
-//!   next prompt starts; `Replay` between sending `session/load` and its response; else `Idle`.
+//!   next prompt starts; `Replay` between sending `session/load` and its response; else `Idle`
+//!   (`session/resume` replays nothing, so it never tags `Replay`).
 //!   A response's callback runs before any later agent message, so tags never guess from timing.
 //! - `_meta` is read only at `_claude/rateLimit` (on `usage_update`) and
 //!   `jetbrains.air.sessionFailure` (on `session_info_update` and the prompt response). A
-//!   `session/new` or `session/load` `_meta` is sent verbatim and never read.
+//!   `session/new`, `session/load` or `session/resume` `_meta` is sent verbatim and never read.
 //! - A malformed line (not UTF-8 JSON-RPC), an unknown update or an unknown content block never
 //!   ends the connection, and nothing is written back for it: it becomes a [`ProtocolWarning`],
 //!   naming its session when the message named one, or a `ContentBlock::Unsupported`.
