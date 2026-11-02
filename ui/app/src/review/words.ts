@@ -8,6 +8,7 @@ import { mf, type MatterFormKey } from "@clauseo/components/lib/words-matter-for
 import { mt, type MatterKey } from "@clauseo/components/lib/words-matters.ts";
 import { rt, type RoomKey } from "@clauseo/components/lib/words-room.ts";
 import { th, type ThreadKey } from "@clauseo/components/lib/words-thread.ts";
+import { vt, type VersionKey } from "@clauseo/components/lib/words-versions.ts";
 import { t, type Key } from "@clauseo/components/lib/words.ts";
 
 export type WordsRef = {
@@ -67,4 +68,10 @@ export const matterFormWords = (key: MatterFormKey): WordsRef => ({
   file: "lib/words-matter-form.ts",
   key,
   text: (lang) => mf(lang, key),
+});
+
+export const versionWords = (key: VersionKey): WordsRef => ({
+  file: "lib/words-versions.ts",
+  key,
+  text: (lang) => vt(lang, key),
 });

@@ -1,6 +1,6 @@
 // The states the registered strings show in: the real room (src/room/room.tsx) over a host scripted for the state,
 // inside the page's view store, as App mounts it; and the room after the steps a state takes once rendered (New
-// matter, a name, Change, Create).
+// matter, a name, Change, Create), or after one control in the thread is pressed.
 import { useEffect, useRef, useState } from "react";
 import { Room } from "../room/room.tsx";
 import { frameBatch } from "../store/batch.ts";
@@ -52,6 +52,33 @@ export function RoomAsking({ host, question }: { host: () => FakeTransport; ques
     ask();
     return () => watch.disconnect();
   }, [question]);
+  return (
+    <div ref={box} className="contents">
+      <RoomOver host={host} />
+    </div>
+  );
+}
+
+/** The room inside its view store, and once a control with the test id `press` shows, that control pressed once: for
+ * a state that follows a click in the thread, such as the OS asking to confirm an answer. */
+export function RoomPressing({ host, press }: { host: () => FakeTransport; press: string }) {
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = box.current;
+    if (el === null) return;
+    let pressed = false;
+    const tap = () => {
+      const target = el.querySelector<HTMLElement>(`[data-testid="${press}"]`);
+      if (pressed || target === null) return;
+      pressed = true;
+      watch.disconnect();
+      target.click();
+    };
+    const watch = new MutationObserver(tap);
+    watch.observe(el, { subtree: true, childList: true });
+    tap();
+    return () => watch.disconnect();
+  }, [press]);
   return (
     <div ref={box} className="contents">
       <RoomOver host={host} />
