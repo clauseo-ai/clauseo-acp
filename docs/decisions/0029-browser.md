@@ -23,7 +23,7 @@ Source lines below are agent-browser's, at tag v0.41.1, under `cli/src/`.
 table of modes, which also builds the usage line; R24 adds `connector` to it. No mode, or any
 name not in the table (case-sensitive), prints `usage: clauseo-mcp <mode> ... (modes:
 browser-guard)` on stderr and exits 2. Dependencies: `serde_json` only. Plain threads, no async
-runtime, no HTTP client; `crates/mcp/tests/guard/deps.rs` walks `cargo metadata` and fails if
+runtime, no HTTP client; `crates/mcp/tests/guard/deps.rs` walks `Cargo.lock` and fails if
 reqwest, hyper, hyper-util, h2, ureq, curl, isahc, attohttpc, rustls, native-tls, openssl,
 socket2, mio, tokio, async-std, smol or tauri becomes reachable.
 
