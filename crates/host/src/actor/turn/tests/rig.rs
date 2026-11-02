@@ -369,6 +369,28 @@ impl Rig {
         (seqs, row)
     }
 
+    /// Every `CheckpointRecorded` of the Scratch matter's log has its `CheckpointRow`, with the
+    /// matter, the event's `seq` and a 40-hex commit. Returns how many it checked.
+    pub(super) fn assert_every_checkpoint_has_its_row(&mut self) -> usize {
+        let store = self.actor.store.clone();
+        let matter = self.matter();
+        let read = streams::read_whole_log(&store, StreamId::Matter(matter));
+        let reopen = self.pool.run_until(read).unwrap();
+        let mut checked = 0;
+        for envelope in &reopen.tail {
+            let DomainEvent::CheckpointRecorded(recorded) = &envelope.event else {
+                continue;
+            };
+            let id = recorded.checkpoint();
+            let row = self.pool.run_until(store.checkpoint(id)).unwrap();
+            let row = row.unwrap_or_else(|| panic!("no row for {:?} {id}", recorded.kind()));
+            assert_eq!((row.matter, row.seq), (matter, envelope.seq), "{id}");
+            assert_eq!(row.commit_oid.len(), 40, "{id}: {}", row.commit_oid);
+            checked += 1;
+        }
+        checked
+    }
+
     /// The checkpoints the Scratch matter's log records, in order.
     pub(super) fn recorded(&mut self) -> Vec<CheckpointRecorded> {
         self.matter_log()

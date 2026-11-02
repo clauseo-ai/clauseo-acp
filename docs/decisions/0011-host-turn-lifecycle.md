@@ -75,7 +75,9 @@ until `StepUndone` is durable; a failed undo commit is retried once, as a turn's
 - Every checkpoint gets its `CheckpointRow` (id, matter, git commit, the `seq` of its
   `CheckpointRecorded`) in the same commit as that event: the import, before-turn, after-turn,
   outside-edits, undo and restore checkpoints. A `Reused` checkpoint the host records late
-  (at step 4, step 7, start-up repair or a restore that writes nothing) gets its row too, except
+  (at step 4, step 7, start-up repair, including the turn's own after-turn checkpoint the repair
+  takes from the timeline, or a restore that writes nothing) gets its row too, with the commit
+  `Matter::commit_of` gives, except
   when the matter's log could not be read: the host then cannot tell whether a row exists, and a
   second row of one id would fail the whole commit.
 - `RestoreVersion` holds the matter's writer for the whole restore, and is refused with
