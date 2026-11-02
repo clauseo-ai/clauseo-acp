@@ -158,6 +158,13 @@ export class FakeTransport implements HostTransport, NextHostSource {
         });
       },
     },
+    agents: {
+      listAgents: async () => {
+        const result = await this.#nextQuery(WIRE.listAgents);
+        if (!("agents" in result)) throw internalError("list_agents answered without agents");
+        return result.agents;
+      },
+    },
   };
 
   constructor(host: FakeHost = {}) {
@@ -211,6 +218,7 @@ export class FakeTransport implements HostTransport, NextHostSource {
       location: has("location") ? this.#parts.location : null,
       app: has("app") ? this.#parts.app : null,
       restart: has("restart") ? this.#parts.restart : null,
+      agents: has("agents") ? this.#parts.agents : null,
     };
   }
 

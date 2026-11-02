@@ -1,5 +1,6 @@
-// The room's work column: the open thread and the composer under it. The thread reopens the matter's newest thread,
-// or the first Ask makes one (session.ts). The thread's list, its rows and the Markdown renderer are one chunk of
+// The room's work column: the open conversation's thread and the composer under it. The conversations (conversations.ts)
+// say which thread is open, and make one on a draft's first Ask (session.ts); the room keys this column by
+// conversation, so each opens fresh, with its own words in the field. The thread's list, its rows and the Markdown renderer are one chunk of
 // their own (chunk.ts, list.tsx), started as Work mounts; the session opens the thread only once it is in, so the
 // rows never wait for it. The composer and the transcript's box are here, for the first paint.
 import { Suspense, useEffect, useMemo } from "react";
@@ -13,7 +14,12 @@ import { KeyedRequestContext, keyedRequest } from "../permission-keyed.ts";
 import { refillOf, useBreakLines, useStoppedLine, useThreadBreak } from "../thread-break.ts";
 import { LazyThreadList, loadThread } from "./chunk.ts";
 import { useBusy } from "./live.ts";
-import { ThreadActionsContext, useThreadSession, type Drafts } from "./session.ts";
+import {
+  ThreadActionsContext,
+  useThreadSession,
+  type ConversationLink,
+  type Drafts,
+} from "./session.ts";
 import { WorkComposer } from "./work-composer.tsx";
 
 /** The work column of the room: the matter's thread, and the composer (disabled with no matter). */
@@ -21,17 +27,20 @@ export function Work({
   transport,
   matter,
   drafts,
+  conversation,
   onThread,
 }: {
   transport: HostTransport;
   matter: MatterSummary | null;
-  /** The room's composer drafts, by matter (room.tsx keeps them above Work's key). */
+  /** The room's composer drafts (room.tsx keeps them above Work's key). */
   drafts: Drafts;
+  /** The open conversation: its thread, or how its first Ask makes one. */
+  conversation: ConversationLink;
   /** Hears the open thread: null until there is one. */
   onThread?: (thread: ThreadId | null) => void;
 }) {
   const store = useViewStore();
-  const session = useThreadSession(transport, store, matter?.matter ?? null);
+  const session = useThreadSession(transport, store, matter?.matter ?? null, conversation);
   const stream = session.actions.stream;
   useWatch(store, stream);
   const busy = useBusy(stream, session.sentTurn);

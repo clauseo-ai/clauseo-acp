@@ -1,10 +1,17 @@
 // Scripted NextHost answers (host-next.ts) for tests, the probe build and the copy review: the matters with their
 // details, H8's papers, H7's settings and H20's default location. Not shipped: nothing room.tsx imports reaches it.
 import type { FakeNextHost } from "../transport/fake-transport.ts";
-import type { MatterSummary } from "../transport/protocol.ts";
+import type { MatterId, MatterSummary } from "../transport/protocol.ts";
 import { DEFAULT_UI } from "./display-store.ts";
 import { uuid } from "../testing/stream-script.ts";
-import { WIRE, type MatterInfo, type NextPart, type PaperSummary } from "./host-next.ts";
+import {
+  WIRE,
+  type AgentInfo,
+  type MatterInfo,
+  type NextPart,
+  type PaperSummary,
+  type ThreadInfo,
+} from "./host-next.ts";
 
 /** A matter with details: unpinned, its folder found, idle, unless `over` says otherwise. */
 export const detailed = (m: MatterSummary, over: Partial<MatterInfo> = {}): MatterInfo => ({
@@ -15,17 +22,22 @@ export const detailed = (m: MatterSummary, over: Partial<MatterInfo> = {}): Matt
   ...over,
 });
 
-/** A NextHost's answers: `matters` read on each list_matters, papers for every matter (none without), the default
- * location (none: the read fails), and the commands' answers; with `parts`, only those host rows. */
+/** A NextHost's answers: `matters` read on each list_matters, papers for every matter (none without), each matter's
+ * threads (none without), the agents (none without), the default location (none: the read fails), and the commands'
+ * answers; with `parts`, only those host rows. */
 export function fakeNext({
   matters,
   papers = [],
   location = null,
+  threads = () => [],
+  agents = [],
   command,
   parts,
 }: {
   matters: () => readonly MatterInfo[];
   papers?: readonly PaperSummary[];
+  threads?: (matter: MatterId) => readonly ThreadInfo[];
+  agents?: readonly AgentInfo[];
   location?: string | null;
   command?: FakeNextHost["command"];
   parts?: readonly NextPart[];
@@ -38,9 +50,10 @@ export function fakeNext({
         if (location === null) throw new Error("no default location in this host");
         return { default_location: { display: location } };
       }
+      if (query === WIRE.listAgents) return { agents: [...agents] };
       if (WIRE.listPapers in query)
         return { papers: { papers: [...papers], skipped: [], unread: [], truncated: false } };
-      return { threads: [] };
+      return { threads: [...threads(query.list_threads.matter)] };
     },
     ...(command === undefined ? {} : { command }),
     ...(parts === undefined ? {} : { parts }),

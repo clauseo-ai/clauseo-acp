@@ -198,7 +198,7 @@ test("H5's statuses as row states; a moved folder over any of them", () => {
   expect(row({ status: "working", folder_state: "missing" })).toEqual({ state: "moved" });
 });
 
-test("with a NextHost: the last opened reopens, opening sends open_matter, the open thread is marked seen, and no header is kept", async () => {
+test("with a NextHost: the last opened reopens, opening sends open_matter, and no header is kept (seen marks are the conversations')", async () => {
   const list = [info(A, { last_opened: 10 }), info(B, { last_activity: 99 }), info(SCRATCH)];
   const { matters, transport, settle } = await rig(nextHost(() => list));
   expect(matters.view().detailed).toBe(true);
@@ -207,7 +207,7 @@ test("with a NextHost: the last opened reopens, opening sends open_matter, the o
   matters.onThread(T1);
   await settle();
   const sent = transport.only("next_command").map((c) => c.command);
-  expect(sent).toEqual([{ open_matter: { matter: B.matter } }, { mark_seen: { thread: T1 } }]);
+  expect(sent).toEqual([{ open_matter: { matter: B.matter } }]);
   expect(transport.only("subscribe")).toEqual([]);
   expect(transport.only("query")).toEqual([]);
 });

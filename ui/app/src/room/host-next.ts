@@ -9,6 +9,7 @@
 import type { TextSize } from "@clauseo/components/lib/display.ts";
 import type { AppFeedSource, HostTransport } from "../transport/host-transport.ts";
 import type {
+  AgentId,
   ErrorCode,
   FolderRefId,
   HostError,
@@ -93,6 +94,12 @@ export type ThreadInfo = ThreadSummary & {
   last_activity?: Timestamp;
 };
 
+/* ---------- R15: the agents ---------- */
+
+/** An agent the settings set up, as R15's `list_agents` lists it (its shape until R15's record lands: the settings key
+ * alone). */
+export type AgentInfo = { agent: AgentId };
+
 /** H20: where a matter goes, with the default location the host makes `<location>/<name>` in. */
 export type NextMatterSource = MatterSource | "default_location";
 
@@ -116,14 +123,16 @@ export type NextQuery =
   | "get_settings"
   | "list_matters"
   | { list_threads: { matter: MatterId } }
-  | "get_default_location";
+  | "get_default_location"
+  | "list_agents";
 /** Their answers, one per read, in the order above. */
 export type NextQueryResult =
   | { papers: Papers }
   | { settings: Settings }
   | { matters: MatterInfo[] }
   | { threads: ThreadInfo[] }
-  | { default_location: { display: string } };
+  | { default_location: { display: string } }
+  | { agents: AgentInfo[] };
 
 /** The commands of H5, H3, H6 and H20 for matters. */
 export type MattersCommand =
@@ -149,11 +158,20 @@ export type NextOutcome = "done" | { matter_created: { matter: MatterId } };
 /** The event: `{"settings_changed": ...}`, the settings after any change, whoever made it. */
 export type NextEvent = { settings_changed: Settings };
 
-/** H4: the app's events, to every window: the matters as they now are, a matter's threads as they now are, and matters
+/** H4 and H6: a matter's threads that changed, those taken off its list, and whether `threads` is its whole list (the
+ * first frames after the app subscription are each matter's whole list; later ones carry only what changed). */
+export type ThreadsChanged = {
+  matter: MatterId;
+  threads: ThreadInfo[];
+  removed: ThreadId[];
+  all: boolean;
+};
+
+/** H4: the app's events, to every window: the matters as they now are, a matter's threads that changed, and matters
  * taken off the list (an addition the root didn't list). */
 export type AppEvent =
   | { matters_changed: { matters: MatterInfo[] } }
-  | { threads_changed: { matter: MatterId; threads: ThreadInfo[] } }
+  | { threads_changed: ThreadsChanged }
   | { matters_removed: { matters: MatterId[] } };
 
 /** The wire names, one home each: the reads, the commands and the events as the host will spell them. */
@@ -165,6 +183,7 @@ export const WIRE = {
   listMatters: "list_matters",
   listThreads: "list_threads",
   getDefaultLocation: "get_default_location",
+  listAgents: "list_agents",
   createMatter: "create_matter",
   updateMatter: "update_matter",
   openMatter: "open_matter",
@@ -211,6 +230,11 @@ export interface RestartHost {
   restartAgent(thread: ThreadId): Promise<void>;
 }
 
+/** R15: the agents the settings set up, for the composer's plan choice. */
+export interface AgentsHost {
+  listAgents(): Promise<AgentInfo[]>;
+}
+
 /** H4: the app's events. */
 export interface AppHost {
   /** Hears each AppEvent. Returns the unsubscribe. */
@@ -227,6 +251,7 @@ export type NextHost = {
   location: LocationHost | null;
   app: AppHost | null;
   restart: RestartHost | null;
+  agents: AgentsHost | null;
 };
 
 /** One part of NextHost: a host row. */
@@ -240,6 +265,7 @@ export const NO_NEXT: NextHost = {
   location: null,
   app: null,
   restart: null,
+  agents: null,
 };
 
 /** A transport that may carry the calls above: `nextHost()` gives the parts its host has. */

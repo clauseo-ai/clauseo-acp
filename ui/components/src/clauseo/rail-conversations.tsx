@@ -29,6 +29,8 @@ export type ConversationRowProps = {
   onOpen?: () => void;
   /** The current conversation's actions: continue it with the other plan. */
   other?: { agent: string; onContinue: () => void };
+  /** Optional: a test id on the row's button, which carries data-state and data-conversation. */
+  testId?: string | undefined;
 };
 
 /** Each status's dot: court yellow only where the conversation waits on the lawyer's hand. */
@@ -50,6 +52,7 @@ function ConversationRow({
   current = false,
   onOpen,
   other,
+  testId,
   plan = true,
 }: ConversationRowProps & { plan?: boolean }) {
   const w = useMatterWords();
@@ -68,6 +71,7 @@ function ConversationRow({
         aria-current={current ? "true" : undefined}
         data-state={state}
         data-conversation={id}
+        data-testid={testId}
         title={hint}
         onClick={onOpen}
       >
@@ -132,6 +136,7 @@ export function ConversationList({
   conversations,
   onNew,
   plan,
+  newTestId,
 }: {
   /** The matter's name as filed, to name the list. */
   matter: string;
@@ -139,6 +144,8 @@ export function ConversationList({
   plan?: string | undefined;
   conversations: readonly ConversationRowProps[];
   onNew?: () => void;
+  /** Optional: a test id on New conversation. */
+  newTestId?: string | undefined;
 }) {
   const w = useMatterWords();
   // the plan is named only on a conversation whose plan differs from the matter's own: the plan of its first
@@ -161,6 +168,7 @@ export function ConversationList({
         type="button"
         className="room-conv room-conv-new"
         onClick={onNew}
+        data-testid={newTestId}
         aria-keyshortcuts="Meta+N Control+N"
       >
         <IconNewMatter size={14} className="room-conv-new-icon" />
