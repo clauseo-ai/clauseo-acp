@@ -125,7 +125,7 @@ test("an input method's Enter commits its candidate and sends nothing; the Enter
   ]);
 });
 
-test("busy: Stop in Ask's place, Answering. on the working line, Enter sends nothing, and Stop sends cancel", async () => {
+test("busy: Stop in Ask's place, Answering. on the working line, Enter queues the words (U7), and Stop sends cancel", async () => {
   h = await mountRoom();
   h.deliver([reset([userMessage(5, 1, "Q")], header("running"))]);
   expect(h.one("send")).toBeNull();
@@ -134,11 +134,14 @@ test("busy: Stop in Ask's place, Answering. on the working line, Enter sends not
   expect(h.one("working")?.dataset["kind"]).toBe("wait");
   await h.type("Another question");
   expect(await h.key({ key: "Enter", keyCode: 13 })).toBe(true);
-  expect(h.sent("send_prompt")).toEqual([]);
-  expect(field().value).toBe("Another question");
+  // the host queues a send during a turn (H9): no delivery, and the field clears once it is accepted
+  expect(h.sent("send_prompt")).toEqual([
+    { thread: THREAD, content: [{ text: { text: "Another question" } }] },
+  ]);
+  expect(field().value).toBe("");
   await h.click(h.one("cancel"));
   expect(h.sent("cancel")).toEqual([{ thread: THREAD }]);
-  // the turn ends: Ask is back, the words still in the field
+  // the turn ends: Ask is back
   h.deliver([upsert(header("idle")), upsert(step(9, { stop: "cancelled" }))]);
   expect(h.one("cancel")).toBeNull();
   expect(h.one("send")).not.toBeNull();

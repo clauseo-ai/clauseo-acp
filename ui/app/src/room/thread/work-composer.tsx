@@ -7,7 +7,19 @@
 // conversation the status line offers the plan to ask with, until its first question fixes it, and otherwise names the
 // plan the conversation uses; paused at the plan's limit, it says where the answer stopped (U12). `/` opens the menu
 // of the agent's commands, as the thread's header lists them.
-import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
+// U7: while Clauseo works, Enter queues the field's words (the host queues a send during a turn, H9), and the line above
+// the field offers Send now and Queue (composer-steer.tsx); at QUEUE_CAP Enter queues nothing and keeps the words, and a
+// send refused as `thread.queue_full` says the cap. The queue's strip sits over the field for every conversation
+// with a thread (queue-slot.tsx), under the wait for another conversation (queue.tsx).
+import {
+  use,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type Ref,
+} from "react";
 import {
   Composer,
   type ComposerHandle,
@@ -19,17 +31,21 @@ import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { frame } from "@clauseo/components/lib/words-frame.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
+import { StoreContext } from "../../store/hooks.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
-import type { EntryId, ErrorCode } from "../../transport/protocol.ts";
+import type { EntryId, ErrorCode, StreamId, ThreadId } from "../../transport/protocol.ts";
 import type { Conversations } from "../conversations.ts";
 import { OtherWait } from "../queue.tsx";
 import { useOtherWait } from "../queue-model.ts";
+import { QueueSlot } from "../queue-slot.tsx";
 import type { BreakLine } from "../thread-break.ts";
 import { LimitWarning } from "../limits/limit-warning.tsx";
 import { useAgentPlan } from "./agent-plan.ts";
 import { useNow } from "../../store/limits.ts";
 import { pausedLine, type Paused } from "./limit-words.ts";
-import type { Drafts } from "./session.ts";
+import { pickFull, queueFullLine } from "./composer-queue.ts";
+import { ComposerSteer } from "./composer-steer.tsx";
+import type { AskHow, Drafts } from "./session.ts";
 
 export function WorkComposer({
   ref,
@@ -48,6 +64,9 @@ export function WorkComposer({
   onStop,
   others = null,
   paused = null,
+  transport = null,
+  stream = null,
+  thread = null,
 }: {
   /** The composer's handle, for the room to put the focus in the field. */
   ref?: Ref<ComposerHandle>;
@@ -73,8 +92,8 @@ export function WorkComposer({
   stopped?: BreakLine | null;
   /** The stopped question, once per break, for an empty field. */
   refill?: { key: EntryId; text: string } | null;
-  /** True once the question is accepted. */
-  onAsk: (text: string) => Promise<boolean>;
+  /** True once the question is accepted; `how` says whether it goes behind a running turn, or steers it (U7). */
+  onAsk: (text: string, how?: AskHow) => Promise<boolean>;
   onStop: () => void;
   /** U7: the matter's conversations, for the wait over the field while another of them holds the matter, whose Queue
    * sends the field's words as Ask does; with a refused Stop the other's code going to `onRefused`. Null: no wait. */
@@ -86,7 +105,14 @@ export function WorkComposer({
   /** U12: the open thread paused at the plan's limit (limit-words.ts's pausedPick), for the status line's words; null
    * while it isn't. Send stays enabled: no limits state holds a question back. */
   paused?: Paused | null;
+  /** The host, for the queue's strip; none, no strip. */
+  transport?: HostTransport | null;
+  /** The open thread's stream and thread, for the queue: null before the conversation has one. */
+  stream?: StreamId | null;
+  thread?: ThreadId | null;
 }) {
+  // the view store, read as Enter queues (the cap); none where the composer is mounted alone
+  const store = use(StoreContext);
   const w = useWords();
   // the paused line's time against this render's clock (U12)
   const now = useNow();
@@ -131,19 +157,31 @@ export function WorkComposer({
     if (text === "") drafts.delete(draftKey);
     else drafts.set(draftKey, text);
   };
-  // Enter comes here busy or empty too, and sends nothing then: it never breaks the line; while another conversation
-  // holds the matter, it raises the wait instead, whose Queue sends
+  // Enter comes here empty too, and sends nothing then: it never breaks the line. While Clauseo works it queues the
+  // words, but not past the cap, when they stay in the field; while another conversation holds the matter, it raises
+  // the wait instead, whose Queue sends
   const ask = (asked: string) => {
-    if (disabled || busy || asked.trim() === "") return;
+    if (disabled || asked.trim() === "") return;
+    if (busy) {
+      queue(asked);
+      return;
+    }
     if (wait !== null && !wait.sent) {
       setRaised(true);
       return;
     }
     send(asked);
   };
-  const send = (asked: string) => {
-    if (disabled || busy || asked.trim() === "") return;
-    void onAsk(asked).then((ok) => {
+  // the field's words behind the running turn: the host queues them (send_prompt with no `delivery`)
+  const queue = (asked: string) => {
+    if (pickFull(stream === null ? undefined : store?.view(stream))) return;
+    send(asked, { behind: true });
+  };
+  const send = (asked: string, how?: AskHow) => {
+    if (disabled || asked.trim() === "") return;
+    // idle, Ask waits for the turn it sent; Queue (another's wait) and the hint's buttons go behind or steer
+    if (how === undefined && busy) return;
+    void onAsk(asked, how).then((ok) => {
       if (!ok) return;
       // words typed while it went keep their place; the emptied field's change drops the draft, and Cmd/Ctrl+Z
       // brings the question back
@@ -156,6 +194,10 @@ export function WorkComposer({
   };
   // U7's Queue: the field's words, sent as Ask sends them (send_prompt with no `delivery`, the wire's queue)
   const queueNow = () => send(field.current?.text() ?? "");
+  // the hint's Queue, as Enter; its Send now steers the running answer
+  const queueField = () => queue(field.current?.text() ?? "");
+  const focusField = useCallback(() => field.current?.focus(), []);
+  const steerField = () => send(field.current?.text() ?? "", { behind: true, delivery: "steer" });
   // the stopped question, once per break, and only into an empty field: words typed since keep their place, and fill
   // never moves the lawyer's focus or breaks a composition
   const refilled = useRef<EntryId | null>(null);
@@ -181,7 +223,10 @@ export function WorkComposer({
       ? {
           state: {
             kind: "wait",
-            words: errorWords(w.lang, refused, agentPlan),
+            words:
+              refused === "thread.queue_full"
+                ? queueFullLine(w.lang)
+                : errorWords(w.lang, refused, agentPlan),
             pill: null,
             code: refused,
           },
@@ -221,30 +266,47 @@ export function WorkComposer({
       initialText={draftKey === null ? "" : (drafts.get(draftKey) ?? "")}
       onInput={keep}
       onAsk={ask}
+      acts={
+        // while Clauseo works and the field holds words, unless the conversation waits behind another (design
+        // room.tsx: `busy && hasText && live.behind === null`)
+        busy && !empty && !disabled && wait === null ? (
+          <ComposerSteer stream={stream} onSendNow={steerField} onQueue={queueField} />
+        ) : null
+      }
       queue={
-        others === null ? null : (
-          <>
-            {/* what assistive technology hears of the raised wait: one status region, mounted for the composer's
+        <>
+          {others !== null && (
+            <>
+              {/* what assistive technology hears of the raised wait: one status region, mounted for the composer's
                 life and empty until the wait is raised, so the wait is said as it comes; once sent it is empty
                 again, as the composer's own region then says the working line's wait */}
-            <p className="sr-only" role="status" data-testid="other-wait-said">
-              {said}
-            </p>
-            {wait !== null && (wait.sent || raised || busy) && (
-              <OtherWait
-                transport={others.transport}
-                wait={wait}
-                busy={busy}
-                empty={empty}
-                onQueue={queueNow}
-                onFocusField={() => field.current?.focus()}
-                onRefused={others.onRefused}
-                stopWanted={isStopWanted}
-                onStopWanted={setStopWanted}
-              />
-            )}
-          </>
-        )
+              <p className="sr-only" role="status" data-testid="other-wait-said">
+                {said}
+              </p>
+              {wait !== null && (wait.sent || raised || busy) && (
+                <OtherWait
+                  transport={others.transport}
+                  wait={wait}
+                  busy={busy}
+                  empty={empty}
+                  onQueue={queueNow}
+                  onFocusField={focusField}
+                  onRefused={others.onRefused}
+                  stopWanted={isStopWanted}
+                  onStopWanted={setStopWanted}
+                />
+              )}
+            </>
+          )}
+          {transport !== null && thread !== null && (
+            <QueueSlot
+              transport={transport}
+              stream={stream}
+              thread={thread}
+              onFocusField={focusField}
+            />
+          )}
+        </>
       }
       disabled={disabled}
       line={false}
