@@ -301,6 +301,7 @@ async function play(app: App, stop: (app: App) => Promise<void>, n: number): Pro
     idle_memory_mb: idleMemory,
     memory_after_session_mb: afterSession,
     react_commits_per_frame: sample.react_commits_per_frame,
+    react_commits_per_frame_max: sample.react_commits_per_frame_max,
     ipc_bytes_per_text_byte: sample.answer_text_bytes > 0 ? bytes / sample.answer_text_bytes : null,
     viewport_width_px: viewport.width,
     viewport_height_px: viewport.height,

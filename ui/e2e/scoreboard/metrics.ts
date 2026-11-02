@@ -66,9 +66,16 @@ export const METRICS = [
     label: "Dropped frames while streaming, per 10 s",
     unit: "count",
   },
+  // Compared with budgets.toml's `react_commits_per_frame` (limit 1); the unit test
+  // (stream-commits.test.tsx) is what blocks a merge, this row reports and alerts.
+  {
+    id: "react_commits_per_frame",
+    label: "React commits in the worst frame while streaming, in the app",
+    unit: "count",
+  },
   {
     id: "react_commits_per_frame_streaming",
-    label: "React commits per frame while streaming, in the app",
+    label: "React commits per frame while streaming, mean, in the app",
     unit: "count",
     reportOnly: true,
   },
@@ -140,6 +147,8 @@ export interface RawRun {
   memory_after_session_mb: number | null;
   /** Mean React commits over the frames that had at least one, while streaming. */
   react_commits_per_frame: number | null;
+  /** The most React commits in any one streaming frame; null with no frame that had a commit. */
+  react_commits_per_frame_max: number | null;
   /**
    * Bytes the bridge sent down the window's channel during the session (read before
    * `startStream` and after `stopStream`) over the UTF-8 bytes of the answer text at the end.
@@ -164,6 +173,7 @@ const RAW_KEYS = [
   "idle_memory_mb",
   "memory_after_session_mb",
   "react_commits_per_frame",
+  "react_commits_per_frame_max",
   "ipc_bytes_per_text_byte",
   "viewport_width_px",
   "viewport_height_px",
@@ -247,6 +257,7 @@ export function runMetrics(run: RawRun, os: Os): Record<MetricId, number | null>
       (v) => v.filter((d) => d > LONG_FRAME_MS).length,
     ),
     dropped_frames_streaming: of(run.raf_timestamps_ms, droppedFramesPer10s),
+    react_commits_per_frame: run.react_commits_per_frame_max,
     react_commits_per_frame_streaming: run.react_commits_per_frame,
     keystroke_latency_p95: of(run.keystroke_latency_ms, (v) => percentile(v, 95)),
     keystroke_latency_ime_p95: null,

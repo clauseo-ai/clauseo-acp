@@ -134,6 +134,7 @@ const run = (raf: number[] | null): RawRun => ({
   idle_memory_mb: 70,
   memory_after_session_mb: 105,
   react_commits_per_frame: 1.9,
+  react_commits_per_frame_max: 3,
   ipc_bytes_per_text_byte: 5,
   viewport_width_px: 1280,
   viewport_height_px: 800,
@@ -147,11 +148,12 @@ test("heldPace: a stream up to twice the paced 13 s held it; a longer one did no
   expect(heldPace(run([5]))).toBeNull();
 });
 
-test("withoutPacedMetrics drops first token, React commits and IPC, and keeps the frames and chunk to paint", () => {
+test("withoutPacedMetrics drops first token, React commits (mean and worst) and IPC, and keeps the frames and chunk to paint", () => {
   expect(withoutPacedMetrics(run([0, 85_000]))).toEqual({
     ...run([0, 85_000]),
     first_token_on_screen_ms: null,
     react_commits_per_frame: null,
+    react_commits_per_frame_max: null,
     ipc_bytes_per_text_byte: null,
   });
 });

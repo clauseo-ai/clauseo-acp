@@ -314,7 +314,10 @@ metric = "React commits per frame while streaming"
 limit = 1.0
 unit = "count"
 gate = "pr"
-measured_by = "test scheduler and React Profiler"
+# The merge block is the unit test (stream-commits.test.tsx). The scoreboard row reports and alerts
+# only: scoreboard.yml's scoreboard-macos and e2e-windows.yml's scoreboard-windows are
+# continue-on-error, so neither is a required check.
+measured_by = "test scheduler and React Profiler (ui/app/src/room/thread/stream-commits.test.tsx); in the app, speed scoreboard (ui/e2e/scoreboard), worst frame"
 status = "unmeasured"
 source = "synthesis §4; doc 14; doc 15"
 

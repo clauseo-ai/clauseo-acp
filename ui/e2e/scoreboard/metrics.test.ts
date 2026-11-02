@@ -40,6 +40,7 @@ function windowsRun(scale: number): RawRun {
     idle_memory_mb: 180 * scale,
     memory_after_session_mb: 240 * scale,
     react_commits_per_frame: 1.5,
+    react_commits_per_frame_max: 2,
     ipc_bytes_per_text_byte: 2.5 * scale,
     viewport_width_px: 1280,
     viewport_height_px: 800,
@@ -105,6 +106,8 @@ test("summarise: the median of three measured runs for each metric", () => {
   expect(result.metrics.keystroke_handler.median).toBe(3);
   expect(result.metrics.memory_after_session.median).toBe(240);
   expect(result.metrics.react_commits_per_frame_streaming.median).toBe(1.5);
+  // The worst frame is the run's max: 2 in every run, so the median is 2 (the budget's limit is 1).
+  expect(result.metrics.react_commits_per_frame).toEqual({ median: 2, runs: [2, 2, 2] });
   expect(result.metrics.ipc_bytes_per_text_byte.median).toBe(2.5);
   expect(result.metrics.idle_memory_over_blank.median).toBeCloseTo(180 - BLANK_APP_IDLE_MB);
   // Not measurable yet: no input method on a runner, no lite mode in the app.
@@ -141,6 +144,30 @@ test("summarise: what WebKit cannot measure is null, not zero", () => {
   expect(result.metrics.idle_memory_total.median).toBe(180);
 });
 
+test("summarise: a run with no frame that had a commit reads null on both commit metrics", () => {
+  const none = {
+    ...windowsRun(1),
+    react_commits_per_frame: null,
+    react_commits_per_frame_max: null,
+  };
+  const result = summarise("windows", [none, none, none]);
+  expect(result.metrics.react_commits_per_frame).toEqual({
+    median: null,
+    runs: [null, null, null],
+  });
+  expect(result.metrics.react_commits_per_frame_streaming.median).toBeNull();
+});
+
+test("the worst-frame commit row is scored and sits just before the report-only mean", () => {
+  const ids = METRICS.map((m) => m.id);
+  const worst = METRICS.find((m) => m.id === "react_commits_per_frame")!;
+  expect(isReportOnly(worst)).toBe(false);
+  expect(worst.unit).toBe("count");
+  expect(ids.indexOf("react_commits_per_frame") + 1).toBe(
+    ids.indexOf("react_commits_per_frame_streaming"),
+  );
+});
+
 test("summarise: a metric measured in some runs but not all is refused", () => {
   // The scroll failed in one run: its dropped frames are null while the other two have them.
   const broken = { ...windowsRun(1), raf_timestamps_ms: null };
@@ -173,6 +200,12 @@ test("RAW_RUN_KEYS lists every key of a run, in order", () => {
   expect(RAW_RUN_KEYS).toEqual(Object.keys(windowsRun(1)));
   const { ipc_bytes_per_text_byte: _, ...old } = windowsRun(1);
   expect(() => parseRawRun(old)).toThrow("missing key `ipc_bytes_per_text_byte`");
+  // The worst frame's key is required too, so a run from a page without it fails, not reads as 0.
+  const { react_commits_per_frame_max: __, ...beforeMax } = windowsRun(1);
+  expect(() => parseRawRun(beforeMax)).toThrow("missing key `react_commits_per_frame_max`");
+  expect(RAW_RUN_KEYS.indexOf("react_commits_per_frame_max")).toBe(
+    RAW_RUN_KEYS.indexOf("react_commits_per_frame") + 1,
+  );
 });
 
 test("parseResult reads a result written before the newer metrics existed", () => {
@@ -180,6 +213,7 @@ test("parseResult reads a result written before the newer metrics existed", () =
   const values = parseResult(fixture("scoreboard-windows-main.json"), "windows");
   expect(values.first_token_on_screen).toBe(141);
   expect(values.idle_memory_over_blank).toBeNull();
+  expect(values.react_commits_per_frame).toBeNull();
   expect(values.react_commits_per_frame_streaming).toBeNull();
   expect(values.ipc_bytes_per_text_byte).toBeNull();
 });
@@ -283,6 +317,8 @@ test("budgets.toml has a row for every metric but the report-only ones, in the s
   expect(budgets.get("chunk_to_paint_p95")!.limit).toBe(50);
   expect(budgets.get("dropped_frames_streaming")!.limit).toBe(10);
   expect(budgets.get("memory_after_session")!.limit).toBe(300);
+  // The worst-frame row: its limit is the one the scoreboard's commit row is compared with.
+  expect(budgets.get("react_commits_per_frame")).toEqual({ limit: 1, unit: "count" });
 });
 
 test("parseBudgets reads the flat rows, comments and all", () => {
