@@ -241,6 +241,30 @@ test("the wait stays mounted from Queue through starting to queued behind the ot
   expect(working()).toBe(`Waiting for '${TITLE}' to finish.`);
 });
 
+test("queued behind the other, its own row says nothing while open, and waits for the other's title once another is open", async () => {
+  // the order the Mac run saw: Ask raises, Queue sends, starting, queued { behind }; then the lawyer opens the other
+  h = await mountWith("running");
+  h.deliver([reset([], headerOf(THREAD, "idle"))]);
+  await h.settle();
+  await raise();
+  await h.click(queueButton());
+  h.deliver([upsert(headerOf(THREAD, "starting"))]);
+  await h.settle();
+  h.deliver([upsert(headerOf(THREAD, { queued: { behind: OTHER } }))]);
+  await h.settle();
+  const rowTitled = (title: string) =>
+    h!.all("conversation").find((b) => b.querySelector(".room-conv-title")?.textContent === title);
+  // the open conversation's row carries no status (the design's rail-conversations): its wait is in the room
+  expect(rowTitled("Lease notice")?.getAttribute("aria-current")).toBe("true");
+  expect(rowTitled("Lease notice")?.querySelector(".sr-only")).toBeNull();
+  await h.click(rowTitled(TITLE));
+  expect(rowTitled(TITLE)?.getAttribute("aria-current")).toBe("true");
+  expect(rowTitled("Lease notice")?.dataset["state"]).toBe("waiting");
+  expect(rowTitled("Lease notice")?.querySelector(".sr-only")?.textContent).toContain(
+    `Waiting for '${TITLE}'`,
+  );
+});
+
 test("once sent, the working line says the wait, never Answering.", async () => {
   h = await mountWith("running");
   h.deliver([reset([], headerOf(THREAD, { queued: { behind: OTHER } }))]);
