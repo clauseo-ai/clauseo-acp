@@ -154,7 +154,17 @@ lawyer's documents somewhere.
 **What stops them.**
 
 - `designed`: The sandbox allows no network except Clauseo's local proxy; raw sockets are refused
-- `designed`: The proxy is CONNECT-only, with an allowlist of domains measured per agent
-- `designed`: It never intercepts TLS; upstream it follows the OS proxy settings
-- `designed`: A blocked domain becomes a denial event and an "Allow this site?" card that opens a
-  native dialog
+- `built`: One proxy per agent launch on two loopback listeners. It carries CONNECT to port 443
+  and plain `http://` to port 80 of a host on the launch's allowlist, and refuses every other
+  form, scheme and port; `designed`: the allowlists measured per agent and login kind (G8b)
+- `built`: The agent listener takes only its launch's token (32 random bytes, compared in
+  constant time, never logged or sent upstream); the browser listener takes no token and is held
+  to its matter by the jail's port rule
+- `built`: After DNS it refuses a host if any address is loopback, private, link-local, shared,
+  unspecified or multicast (IPv4 inside IPv6 included), and connects only to the addresses it
+  checked; through an upstream proxy only IP literals are checked
+- `built`: It decides by host name and never intercepts TLS: it holds no CA; a firm upstream
+  proxy set in Clauseo is chained, with no credentials (a 407 is reported); `designed`: the OS
+  proxy settings and PAC
+- `built`: A blocked domain becomes a denial (rate-capped per launch); `designed`: the denial
+  event and an "Allow this site?" card that opens a native dialog
