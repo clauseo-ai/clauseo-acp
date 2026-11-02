@@ -59,6 +59,8 @@ const PAPERS: PaperSummary[] = ["Plaint.pdf", "Written statement.pdf", "Lease de
 
 /** The room on a matter with no conversation yet: a new one, before its first question. */
 const fresh = () => <RoomOver host={() => roomHost([MATTER], PAPERS)} />;
+/** The same with one paper in the matter. */
+const freshOne = () => <RoomOver host={() => roomHost([MATTER], PAPERS.slice(0, 1))} />;
 
 /** U6's entries, each id written as it is: an id never moves when an entry is added or taken out. */
 export const U6: Entry[] = [
@@ -101,5 +103,11 @@ export const U6: Entry[] = [
     words: threadWords("Uses your {name} plan"),
     screen: "matters/new-conversation",
     render: fresh,
+  },
+  {
+    id: "U6-07",
+    words: matterWords("A new conversation. It reads this matter's one paper."),
+    screen: "matters/new-conversation",
+    render: freshOne,
   },
 ];

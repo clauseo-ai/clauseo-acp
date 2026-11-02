@@ -476,6 +476,15 @@ test("a new conversation says what it reads once the papers are counted; nothing
   expect(draftLine()).toBeNull();
 });
 
+test("with one paper the draft's line says so in the singular", async () => {
+  h = await mountRoom({
+    threads: [thread(T1, { title: "Lease notice" })],
+    next: fakeNext({ matters: () => [], papers: [paper(1, "lease.pdf")], parts: ["papers"] }),
+  });
+  await h.click(h.one("new-conversation"));
+  expect(draftLine()?.textContent).toBe("A new conversation. It reads this matter's one paper.");
+});
+
 test("the status line names the open conversation's plan, and a draft's", async () => {
   h = await mountRoom({
     threads: [

@@ -71,6 +71,9 @@ const HI = {
   // a new conversation before its first message, at the reading column's top
   "A new conversation. It reads this matter's {n} papers.":
     "एक नई बातचीत। यह इस मामले के {n} दस्तावेज़ पढ़ती है।",
+  // the same with one paper, which the design's line has no form for (U6's draft, QU.8)
+  "A new conversation. It reads this matter's one paper.":
+    "एक नई बातचीत। यह इस मामले का एक दस्तावेज़ पढ़ती है।",
   // H13: Retry from here on one of the lawyer's questions, the line a retried conversation opens with, and its way
   // back to the first
   "Retry from here": "यहाँ से फिर पूछें",
