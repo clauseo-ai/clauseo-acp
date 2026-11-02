@@ -62,7 +62,7 @@ export const thread = (
 ): ThreadSummary => ({
   thread: id,
   matter: MATTER,
-  agent: "claude",
+  agent: "claude-acp",
   status,
   title,
 });

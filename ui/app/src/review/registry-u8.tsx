@@ -172,7 +172,7 @@ function versionsHost(m: Matter): FakeTransport {
       if (query.list_threads !== undefined)
         return {
           threads: [
-            { thread: THREAD, matter: MATTER, agent: "claude", status, title: "Draft reply" },
+            { thread: THREAD, matter: MATTER, agent: "claude-acp", status, title: "Draft reply" },
           ],
         };
       if (query.compare_versions !== undefined) return { file_changes: m.compare ?? [] };

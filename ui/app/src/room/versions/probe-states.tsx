@@ -171,7 +171,7 @@ export function versionsHost(page: VersionsPage): VersionsHost {
       if (query.list_threads !== undefined)
         return {
           threads: [
-            { thread: THREAD, matter: MATTER, agent: "claude", status, title: "Draft reply" },
+            { thread: THREAD, matter: MATTER, agent: "claude-acp", status, title: "Draft reply" },
           ],
         };
       if (query.preview_restore !== undefined) return { restore_preview: PREVIEW };
