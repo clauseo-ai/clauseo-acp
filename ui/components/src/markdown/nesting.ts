@@ -7,10 +7,11 @@
 // 4.2 s). So, line by line and run by run:
 // - A line's leading container prefix (block quote and list markers, spaces and tabs) stops at the 33rd
 //   marker or at column MAX_INDENT, whichever comes first: the rest of the line is text.
-// - A run of `*`, `_`, `~` or `=` keeps its first MAX_RUN characters as delimiters, and a paragraph (text
-//   between blank lines) its first MAX_SEQUENCES delimiter sequences; the rest become text. A `~~~` fence
-//   line and a setext underline are left alone, and so is a run of `=` that is not two long (only `==`
-//   delimits highlight).
+// - A run of `*`, `_`, `~`, `=` or `^` keeps its first MAX_RUN characters as delimiters, and a paragraph
+//   (text between blank lines) its first MAX_SEQUENCES delimiter sequences; the rest become text. Each `^`
+//   is a sequence of its own (a superscript's marker is one caret). A `~~~` fence line and a setext
+//   underline are left alone, and so are a run of `=` that is not two long (only `==` delimits highlight)
+//   and the caret of a footnote's `[^`.
 // - A paragraph keeps at most MAX_OPEN_BRACKETS `[` (link or image openers) open at once, and
 //   MAX_UNMATCHED_BRACKETS `]` with none open; past those a bracket is text.
 // - A definition list keeps its first MAX_DEFINITIONS definitions; the `:` of each one after that is text,
@@ -34,12 +35,14 @@ import type { Nodes } from "mdast";
 export const MAX_NESTING = 32;
 /** The column a line's container prefix may reach: 32 levels of `1. ` items, or 64 of `- `. */
 export const MAX_INDENT = 64;
-/** The `*`, `_`, `~` and `=` characters one run keeps as delimiters (the longest legitimate run is a few). */
+/** The `*`, `_`, `~`, `=` and `^` characters one run keeps as delimiters (the longest legitimate run is a few). */
 export const MAX_RUN = 64;
 /**
- * The `*`, `_` and `~` delimiter sequences one paragraph keeps: micromark matches each closer against
- * every opener before it, so `"a* ".repeat(5000)` took 560 ms (`"a~ "`, 400 to 560 ms); at 400 sequences
- * the worst is a few ms, and a paragraph of advice has tens.
+ * The `*`, `_`, `~`, `==` and `^` delimiter sequences one paragraph keeps: micromark matches each closer
+ * against every opener before it, so `"a* ".repeat(5000)` took 560 ms (`"a~ "`, 400 to 560 ms); at 400
+ * sequences the worst is a few ms, and a paragraph of advice has tens. It also bounds the inline elements
+ * one paragraph's delimiters make: `"^a^".repeat(6000)` made 6,000 `<sup>`, and streamed in WebView2 on
+ * 2 vCPUs a flush took over a second.
  */
 export const MAX_SEQUENCES = 400;
 /**
@@ -70,13 +73,13 @@ export const MAX_DEFINITIONS = 32;
 /** Levels of mdast below a block's root: 32 nested lists are 64 (list and item), plus their inline content. */
 export const MAX_TREE_DEPTH = 128;
 
-/** The characters a cut replaces, and their stand-ins, the noncharacters U+FDD1 to U+FDDF. */
-const CUT = "*_-+>.) \t~[]=:<";
+/** The characters a cut replaces, and their stand-ins, the noncharacters U+FDD1 to U+FDE0. */
+const CUT = "*_-+>.) \t~[]=:<^";
 const STAND_IN =
-  "\uFDD1\uFDD2\uFDD3\uFDD4\uFDD5\uFDD6\uFDD7\uFDD8\uFDD9\uFDDA\uFDDB\uFDDC\uFDDD\uFDDE\uFDDF";
-const STAND_INS = /[\uFDD1-\uFDDF]/g;
-/** A stand-in in a URL, which micromark percent-encodes (U+FDD1 is EF B7 91, U+FDDF is EF B7 9F). */
-const ENCODED_STAND_INS = /%EF%B7%9([1-9A-F])/gi;
+  "\uFDD1\uFDD2\uFDD3\uFDD4\uFDD5\uFDD6\uFDD7\uFDD8\uFDD9\uFDDA\uFDDB\uFDDC\uFDDD\uFDDE\uFDDF\uFDE0";
+const STAND_INS = /[\uFDD1-\uFDE0]/g;
+/** A stand-in in a URL, which micromark percent-encodes (U+FDD1 is EF B7 91, U+FDE0 is EF B7 A0). */
+const ENCODED_STAND_INS = /%EF%B7%(9[1-9A-F]|A0)/gi;
 
 /** `char` (one of CUT) as its stand-in. */
 export function standIn(char: string): string {
@@ -180,7 +183,7 @@ function capPrefixes(text: string): string {
   return copied === 0 ? text : out + text.slice(copied);
 }
 
-const RUN = /[*_~=]+/g;
+const RUN = /[*_~=]+|\^+/g;
 /** A setext heading's `=` underline, whose run is no delimiter. */
 const SETEXT_EQUALS = /^ {0,3}=+[ \t]*$/;
 const EQUALS_ONLY = /^=+$/;
@@ -188,14 +191,18 @@ const EQUALS_ONLY = /^=+$/;
 const TILDE_FENCE = /^ {0,3}~{3,}/;
 const BLANK_LINE = /\n[ \t]*\n/;
 
-/** Delimiter sequences in a run of `*`, `_` and `~`: where the character changes, a new one starts. */
+/**
+ * Delimiter sequences in a run of `*`, `_`, `~` and `=`: where the character changes, a new one starts.
+ * In a run of `^`, each caret is one.
+ */
 function sequencesIn(run: string): number {
+  if (run[0] === "^") return run.length;
   let sequences = 1;
   for (let at = 1; at < run.length; at++) if (run[at] !== run[at - 1]) sequences++;
   return sequences;
 }
 
-/** Every run and paragraph of `*`, `_` and `~` delimiters in bounds (MAX_RUN, MAX_SEQUENCES). */
+/** Every run and paragraph of `*`, `_`, `~`, `=` and `^` delimiters in bounds (MAX_RUN, MAX_SEQUENCES). */
 function capRuns(text: string): string {
   let out = "";
   let copied = 0;
@@ -221,6 +228,8 @@ function capRuns(text: string): string {
     if (run[0] === "~" && at - lineStart <= 3 && TILDE_FENCE.test(text.slice(lineStart, previous)))
       continue;
     if (run.length !== 2 && EQUALS_ONLY.test(run)) continue;
+    // A footnote's `[^` delimits nothing.
+    if (run[0] === "^" && text.charCodeAt(at - 1) === 91 /* [ */) continue;
     let keep = Math.min(run.length, MAX_RUN);
     let kept = sequencesIn(run.slice(0, keep));
     while (sequences + kept > MAX_SEQUENCES && keep > 0) {
@@ -446,17 +455,25 @@ export function capNesting(text: string): string {
   return capDefinitions(capBrackets(capRuns(capPrefixes(capHtmlBlocks(clean)))));
 }
 
-/** `value` with the characters capNesting replaced put back. */
+/**
+ * `value` with the characters capNesting replaced put back. One native replaceAll per stand-in present: a
+ * replace with a callback per character took a fifth of each update of `"a==b==".repeat(3000)` in
+ * Chromium (thousands of stand-ins in the streaming tail, restored in its source and its text).
+ */
 export function restore(value: string): string {
-  return hasStandIns(value)
-    ? value.replace(STAND_INS, (char) => CUT[STAND_IN.indexOf(char)] ?? "")
-    : value;
+  if (!hasStandIns(value)) return value;
+  let out = value;
+  for (let index = 0; index < STAND_IN.length; index++) {
+    const char = STAND_IN[index]!;
+    if (out.includes(char)) out = out.replaceAll(char, CUT[index]!);
+  }
+  return out;
 }
 
 /** A URL with the characters capNesting replaced put back (a space or tab stays percent-encoded). */
 function restoreUrl(value: string): string {
-  return restore(value).replace(ENCODED_STAND_INS, (_, digit: string) => {
-    const char = CUT[Number.parseInt(digit, 16) - 1] ?? "";
+  return restore(value).replace(ENCODED_STAND_INS, (_, byte: string) => {
+    const char = CUT[Number.parseInt(byte, 16) - 0x91] ?? "";
     return char === " " ? "%20" : char === "\t" ? "%09" : char;
   });
 }

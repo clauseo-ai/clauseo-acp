@@ -219,7 +219,9 @@ export const TAG_CASES: HostileCase[] = [
     streamingText: [],
   },
   { id: "extras-carets", markdown: "^a".repeat(8000) },
-  { id: "extras-superscripts-6000", markdown: "^a^".repeat(6000), tags: { sup: 6000 } },
+  // 400 carets, each a delimiter sequence, are as many as a paragraph keeps (nesting.ts): 200 superscripts,
+  // the rest as written.
+  { id: "extras-superscripts-6000", markdown: "^a^".repeat(6000), tags: { sup: 200 } },
   { id: "headings-5000", markdown: "# a\n".repeat(5000), tags: { h1: 5000 } },
   { id: "extras-caret-long", markdown: "2^" + "a".repeat(20000) },
   { id: "extras-equals", markdown: "==a ".repeat(5000) },

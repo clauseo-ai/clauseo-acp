@@ -1,6 +1,8 @@
+import type { Nodes as Hast } from "hast";
 import { expect, test } from "vitest";
 import { createAnswer } from "./answer.ts";
 import { CASES } from "./hostile-cases.ts";
+import { MAX_PARAGRAPH } from "./split.ts";
 
 // No hostile case may freeze the answer. One update of the model (split, definitions, parse, sanitise)
 // may cost at most RATIO times what one update of a single paragraph of ordinary prose of the same length
@@ -57,6 +59,51 @@ function streamedTo(markdown: string, previous: number, end: number): number {
   if (previous > 0) answer.update(markdown.slice(0, previous), true);
   return time(() => answer.update(markdown.slice(0, end), true));
 }
+
+/**
+ * The hostile cases whose blocks may be longer than MAX_PARAGRAPH, and why: no cut inside them is safe.
+ * capNesting bounds the depth of each, and each passed the real engines' stall guard.
+ */
+const LONG_BLOCKS: Record<string, string> = {
+  "deep-quote": "one block quote, nested as deep as nesting.ts allows",
+  "tab-nesting": "one list, nested through tabs as deep as nesting.ts allows",
+  "footnote-many-labels": "a footnote's note stays one block",
+  "footnote-deeper-list": "a footnote's note stays one block",
+  "extras-definition-markers": "a definition list is never cut",
+};
+/** The elements one block of a hostile case may hold. */
+const MAX_ELEMENTS = 1_000;
+
+const elementsIn = (node: Hast): number =>
+  (node.type === "element" ? 1 : 0) +
+  ("children" in node ? node.children.reduce((sum, child) => sum + elementsIn(child), 0) : 0);
+
+// What the test above cannot see. Each update parses and renders the streaming last block whole (and
+// the block that has just finished), and in a real engine its flush costs that block's parse, view, React
+// render and commit. The prose it is compared with is one paragraph of the same length, parsed whole on
+// every update too, so it grows with the case: `"a==b==".repeat(3000)`, one 18 KB paragraph, cost about
+// 1.7 times its prose in Node and passed, while in WebView2 on 2 vCPUs one of its flushes took 1.2 s (and
+// finishing it 1.5 s), and `"^a^".repeat(6000)` made 6,000 `<sup>` in one block. Bounding every block's
+// length and elements bounds what one update parses and renders, whatever the engine; the split is
+// incremental and its cuts never move (split.test.ts), so the streaming last block is bounded too.
+test.each(CASES.map((c) => [c.id, c] as const))(
+  `%s: every block holds at most ${MAX_PARAGRAPH} characters and ${MAX_ELEMENTS} elements`,
+  (id, c) => {
+    for (const streaming of [true, false]) {
+      const views = createAnswer("b").update(c.markdown, streaming);
+      for (const view of views) {
+        if (!(id in LONG_BLOCKS))
+          expect(view.source.length, `${id} (streaming ${streaming})`).toBeLessThanOrEqual(
+            MAX_PARAGRAPH,
+          );
+        expect(elementsIn(view.hast), `${id} (streaming ${streaming})`).toBeLessThanOrEqual(
+          MAX_ELEMENTS,
+        );
+      }
+    }
+  },
+  30_000,
+);
 
 test.each(CASES.map((c) => [c.id, c] as const))(
   "%s: no update costs more than 8 times as much as ordinary prose of its length",

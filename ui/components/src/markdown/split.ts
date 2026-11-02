@@ -2,7 +2,8 @@
 // there only where CommonMark parses the two sides separately exactly as it parses them together, and
 // otherwise the two merge (merging is always correct, only slower to re-render). The split is
 // incremental: when the new text extends the old, every block but the last two is kept and only the
-// rest is lexed again. Blocks are slices of the text, so they always concatenate back to it.
+// rest is lexed again. Blocks are slices of the text, so they always concatenate back to it. A paragraph
+// longer than MAX_PARAGRAPH is the one exception to the merging: it is cut into parts (softCut).
 import { Lexer, Tokenizer } from "marked";
 
 /**
@@ -23,6 +24,20 @@ class BlockStartTokenizer extends Tokenizer {
     return undefined;
   }
 }
+
+/**
+ * The characters of one paragraph that one block holds; past this the paragraph is cut (softCut), and each
+ * part is a block of its own, parsed and shown as a paragraph of its own. Every update parses the streaming
+ * last block whole, so its length bounds an update's work: one 18 KB paragraph of `"a==b==".repeat(3000)`
+ * made each update parse 18 KB (in Chromium at a 6x CPU throttle 75 ms a flush on average and up to 700 ms;
+ * in WebView2 on 2 vCPUs one flush took 1.2 s, and the one that finished it, as the next block began,
+ * 1.5 s). The
+ * longest paragraph of the legal answer is 719 characters, of the memo 1,025, of the spec examples 67. A
+ * part is longer only when the paragraph has no cut (softCut) in the second half of its MAX_PARAGRAPH
+ * characters; it then ends at the first cut after them. A footnote's definition is not cut (its note
+ * stays whole).
+ */
+export const MAX_PARAGRAPH = 4096;
 
 /** What the parser says about the end of a block parsed on its own. */
 export type BlockEnd = {
@@ -96,14 +111,62 @@ function safeCut(text: string, from: number, at: number, last: number, endOf: En
   return !(marker && end.list !== "" && end.list === (marker[1] ?? marker[2]));
 }
 
+const SPACE = /[ \t\n]/;
+const LETTER = /\p{L}/u;
+/**
+ * A letter, a digit or one of nesting.ts's stand-ins (U+FDD1 to U+FDE0): part of a word, as text reads. A
+ * part never starts with a digit (`1. ` would start a list).
+ */
+const WORD = /[\p{L}\p{N}\uFDD1-\uFDE0]/u;
+/** A tag's start (opening or closing), and the tags that start an HTML block running past a blank line. */
+const TAG_START = /^<\/?[A-Za-z]/;
+const BLOCK_TAG = /^<(?:script|pre|style|textarea)[\s>]/i;
+const DIGIT = /\p{N}/u;
+const STAND_IN = /[\uFDD1-\uFDE0]/;
+/** A footnote definition's start: its note must stay one block. */
+const FOOTNOTE_DEFINITION = /^ {0,3}\[\^/;
+
+/**
+ * Where to cut a paragraph in (`low`, `high`], or -1: the last place of the first kind there is.
+ * 1. After a space, tab or line ending and before a letter: the next part starts with a word, never a
+ *    list, heading, quote or fence marker.
+ * 2. Before an opening tag's `<` and a letter, then before a closing tag's `</`, not after a backslash
+ *    (`"<u>a</u>".repeat(5000)` keeps every pair whole), and never the start of an HTML block of kinds 1 to 5.
+ * 3. Between two characters of a word: a letter or a stand-in after a letter, digit or stand-in.
+ * 4. Before a stand-in, not after a backslash: what capNesting made text (`"](u)".repeat(5000)`).
+ * It reads no further than text[high], so once that has arrived a cut never moves as the text grows. Each
+ * kind starts the next part with text, so the part's line starts are the paragraph's own, whose container
+ * prefixes capNesting has already bounded. A cut can break what spans it (a link, a highlight, an
+ * emphasis) into the text of its two sides; only a paragraph this long, which no answer writes, is cut.
+ */
+function softCut(text: string, low: number, high: number): number {
+  for (let at = high; at > low; at--)
+    if (SPACE.test(text[at - 1]!) && LETTER.test(text[at]!)) return at;
+  for (const closing of [false, true])
+    for (let at = high - 10; at > low; at--)
+      if (text[at] === "<" && text[at - 1] !== "\\" && (text[at + 1] === "/") === closing) {
+        const tag = text.slice(at, at + 10);
+        if (TAG_START.test(tag) && !BLOCK_TAG.test(tag)) return at;
+      }
+  for (let at = high; at > low; at--)
+    if (WORD.test(text[at - 1]!) && WORD.test(text[at]!) && !DIGIT.test(text[at]!)) return at;
+  for (let at = high; at > low; at--)
+    if (STAND_IN.test(text[at]!) && text[at - 1] !== "\\") return at;
+  return -1;
+}
+
+/** Block starts, and for each whether it is a cut inside a paragraph (softCut). */
+type Starts = { at: number[]; soft: boolean[] };
+
 /**
  * The block starts in `text` at or after `from` (which is itself a block start), using marked's top-level
  * tokens as the places to try. A token whose raw text is not the next slice of the input (marked can add a
  * line ending when it joins tokens, and a streamed list item ending in a space gets `\n` for it) still starts
  * where the tokens before it end, so it may be cut there; it ends the search: the rest stays one block.
  */
-function startsFrom(text: string, from: number, endOf: EndOf): number[] {
+function startsFrom(text: string, from: number, endOf: EndOf): Starts {
   const starts = [from];
+  const soft = [false];
   const tokens = new Lexer({ gfm: true, tokenizer: new BlockStartTokenizer() }).blockTokens(
     text.slice(from),
   );
@@ -114,13 +177,31 @@ function startsFrom(text: string, from: number, endOf: EndOf): number[] {
   for (const token of tokens) {
     if (token.type !== "space" && at > blockStart && safeCut(text, blockStart, at, last, endOf)) {
       starts.push(at);
+      soft.push(false);
       blockStart = at;
     }
     if (!text.startsWith(token.raw, at)) break;
     if (token.type !== "space") last = at;
+    if (token.type === "paragraph" && !FOOTNOTE_DEFINITION.test(token.raw)) {
+      // Each part ends at the first cut in the second half of the MAX_PARAGRAPH characters after its
+      // start, or in the half after that when there is none, and so on.
+      const end = at + token.raw.length;
+      let base = Math.max(blockStart, at);
+      for (let high = base + MAX_PARAGRAPH; end > high;) {
+        const cut = softCut(text, high - MAX_PARAGRAPH / 2, high);
+        if (cut < 0) {
+          high += MAX_PARAGRAPH / 2;
+          continue;
+        }
+        starts.push(cut);
+        soft.push(true);
+        blockStart = last = base = cut;
+        high = base + MAX_PARAGRAPH;
+      }
+    }
     at += token.raw.length;
   }
-  return starts;
+  return { at: starts, soft };
 }
 
 /**
@@ -134,23 +215,38 @@ function ownCopy(block: string): string {
   return ` ${block}`.slice(1);
 }
 
-/** One splitter per answer: its state is the previous split, which the next call extends. */
+/**
+ * One splitter per answer: its state is the previous split, which the next call extends. Lexing starts
+ * again at a block start that is not a paragraph's cut (marked would read the part after one as a block
+ * of its own, which it is not), so a long paragraph is lexed whole on every update, as it was before it
+ * was cut; its parts that did not change keep their strings.
+ */
 export function createSplitter(endOf: EndOf): (text: string) => readonly string[] {
   let input = "";
   let starts: number[] = [];
+  let soft: boolean[] = [];
   let blocks: readonly string[] = [];
   return (text) => {
     if (text === input && blocks.length > 0) return blocks;
-    const keep = blocks.length > 2 && text.startsWith(input) ? blocks.length - 2 : 0;
+    const grows = text.startsWith(input);
+    let keep = blocks.length > 2 && grows ? blocks.length - 2 : 0;
+    while (keep > 0 && soft[keep]) keep--;
     const from = keep > 0 ? (starts[keep] ?? 0) : 0;
-    const next = starts.slice(0, keep).concat(text.length > 0 ? startsFrom(text, from, endOf) : []);
+    const found = text.length > 0 ? startsFrom(text, from, endOf) : { at: [], soft: [] };
+    const next = starts.slice(0, keep).concat(found.at);
     const kept = blocks.slice(0, keep);
     const fresh: string[] = [];
     for (let index = keep; index < next.length; index++) {
-      fresh.push(ownCopy(text.slice(next[index] ?? 0, next[index + 1] ?? text.length)));
+      const start = next[index] ?? 0;
+      const end = next[index + 1] ?? text.length;
+      // A block that was not the last, with the same start and end, is the same slice of the same text.
+      const same =
+        grows && index + 1 < blocks.length && starts[index] === start && starts[index + 1] === end;
+      fresh.push(same ? blocks[index]! : ownCopy(text.slice(start, end)));
     }
     input = text;
     starts = next;
+    soft = soft.slice(0, keep).concat(found.soft);
     blocks = kept.concat(fresh);
     return blocks;
   };

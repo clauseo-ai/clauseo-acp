@@ -97,7 +97,9 @@ test("only the innermost four openers get closers: closing all of `*a `×2,000 m
   // The closers go after the last `a`, before the trailing space; the text before them is as written.
   expect(repaired).toBe(`${input.trimEnd()}${"*".repeat(MAX_CLOSERS)} `);
   expect(parses).toBe(1);
-  expect(tail(input).match(/<em>/g)).toHaveLength(MAX_CLOSERS);
+  // Shown at half the length: a paragraph of 6,000 characters is cut into parts (split.ts), and its last
+  // part's openers, past nesting.ts's 400 sequences, are text.
+  expect(tail(`x ${"*a ".repeat(1000)}`).match(/<em>/g)).toHaveLength(MAX_CLOSERS);
 });
 
 test("a run nesting.ts cut short gets no closer: a signature line's underscores stay underscores", () => {

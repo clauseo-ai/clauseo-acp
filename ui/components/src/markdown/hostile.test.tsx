@@ -73,7 +73,7 @@ function failuresIn(label: string, el: Element): string[] {
   }
   // What nesting.ts cuts never shows, and no tree gets past its depth limit (MAX_TREE_DEPTH, 128 hast
   // levels, plus the components' own wrappers).
-  if (/[\uFDD1-\uFDDF]/.test(el.textContent ?? ""))
+  if (/[\uFDD1-\uFDE0]/.test(el.textContent ?? ""))
     failures.push(`${label}: a stand-in for a cut character shows`);
   const depth = depthOf(el);
   if (depth > MAX_DOM_DEPTH) failures.push(`${label}: ${depth} elements deep`);
