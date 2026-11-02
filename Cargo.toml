@@ -35,6 +35,9 @@ tauri-plugin-os = "2.4.0"
 tauri-plugin-notification = "2.7.0"
 # The confirms drawn by Rust (crates/desktop/src/dialogs.rs) call tauri-plugin-dialog's own rfd
 # directly, with its features: the plugin maps rfd's plain Cancel to the second button's label.
+# On Linux they rely on rfd's gtk3 backend (the plugin's default gtk3 feature), where Escape is a
+# plain Cancel; its xdg-portal feature would use zenity, which answers Escape with the second label
+# (accept). A desktop test fails when Cargo.lock's rfd takes the portal (ashpd) or loses gtk.
 rfd = { version = "0.16.0", default-features = false, features = [
   "common-controls-v6",
 ] }

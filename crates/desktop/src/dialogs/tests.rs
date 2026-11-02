@@ -62,3 +62,44 @@ fn escape_or_close_declines_always_allow() {
         CONFIRM_OK
     ));
 }
+
+/// The confirms never go through the dialog plugin's message dialog, which turns rfd's plain
+/// `Cancel` (Escape, close) into the second label: with Cancel first, the accepting one.
+#[test]
+fn the_confirms_never_use_the_plugins_message_dialog() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    for file in ["src/dialogs.rs", "src/open/native.rs"] {
+        let text = std::fs::read_to_string(dir.join(file)).unwrap();
+        for call in [
+            ".dialog().message(",
+            ".message_dialog(",
+            "show_with_result(",
+        ] {
+            assert!(!text.contains(call), "{file} calls {call}");
+        }
+    }
+}
+
+/// On Linux the confirms rely on rfd's gtk3 backend, where Escape is a plain `Cancel`. With
+/// tauri-plugin-dialog's `xdg-portal` feature rfd would use the portal and zenity, which answers
+/// Escape with the second label (accept). Cargo.lock lists the dependencies of the features in
+/// force, so rfd there must take gtk and not ashpd (the portal).
+#[test]
+fn rfd_keeps_its_gtk_backend_and_not_the_portal() {
+    let lock = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.lock");
+    let lock = std::fs::read_to_string(lock).unwrap();
+    let start = lock.find("\nname = \"rfd\"\n").unwrap();
+    let entry = &lock[start..];
+    let end = entry[1..]
+        .find("\n[[package]]")
+        .map_or(entry.len(), |end| end + 1);
+    let entry = &entry[..end];
+    assert!(
+        entry.contains("\"gtk-sys\""),
+        "rfd lost its gtk3 backend:{entry}"
+    );
+    assert!(
+        !entry.contains("\"ashpd\""),
+        "rfd takes the xdg portal:{entry}"
+    );
+}
