@@ -122,6 +122,14 @@ fn only_main_gets_the_limits_view_then_each_change_and_acks_count_them() {
         matches!(first, HostEvent::LimitsViewChanged(_)),
         "main's first message is not the view: {first:?}"
     );
+    // A limits event never goes on a window other than main's, even were its feed followed
+    // there: the allow-list refuses it apart from `open_stream`'s label check.
+    let view_json = serde_json::to_string(&first).unwrap();
+    assert!(pump::AppEvents::of(MAIN).carries(Feed::Limits, &view_json));
+    assert!(
+        !pump::AppEvents::of(SETTINGS).carries(Feed::Limits, &view_json),
+        "a settings window's channel carries a limits event"
+    );
     let (channel, settings) = collector();
     block_on(bridge.open_stream(SETTINGS, channel)).unwrap();
     let settings_window = bridge.window(SETTINGS).unwrap();
