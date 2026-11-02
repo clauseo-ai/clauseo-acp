@@ -51,6 +51,22 @@ const OUT_OF_RANGE: AskForm = {
   },
 };
 
+/** A required property Clauseo can't draw (an object inside the form): the form has no fields, and the line says so. */
+const UNSUPPORTED: AskForm = {
+  message: "Clauseo needs the bank's address for the letter.",
+  schema: {
+    type: "object",
+    properties: {
+      address: {
+        type: "object",
+        title: "Address",
+        properties: { street: { type: "string" } },
+      },
+    },
+    required: ["address"],
+  },
+};
+
 /** The thread: the lawyer's question, then `form` pending, the lawyer waiting on it. */
 const asking = (...forms: [AskForm, ...AskForm[]]) =>
   threadHost({
@@ -68,6 +84,9 @@ const requiredSent = () => <RoomPressing host={() => asking(REQUIRED)} press="el
 const invalidSent = () => (
   <RoomPressing host={() => asking(OUT_OF_RANGE)} press="elicitation-send" />
 );
+
+/** The question whose form can't be drawn: its message, the line that says so, and Decline and Stop the answer. */
+const unsupported = () => <RoomOver host={() => asking(UNSUPPORTED)} />;
 
 /** U4b's entries, each id written as it is: an id never moves when an entry is added or taken out. */
 export const U4B: Entry[] = [
@@ -112,5 +131,11 @@ export const U4B: Entry[] = [
     words: threadWords("Choose an answer to send, or Decline to go on without one."),
     screen: "room/thread",
     render: probe,
+  },
+  {
+    id: "U4B-08",
+    words: threadWords("This question can't be shown here. Decline, or Stop the answer."),
+    screen: "room/thread",
+    render: unsupported,
   },
 ];
