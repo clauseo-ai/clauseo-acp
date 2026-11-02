@@ -649,5 +649,13 @@
     "at": "2026-11-02",
     "by": "Rohan",
     "note": "Rohan, on the review page (built from U3 635858d3)"
+  },
+  "U3-err-settings.locked": {
+    "en": "Your organisation manages that setting, so it can't be changed.",
+    "hi": "यह सेटिंग आपका संगठन संभालता है, इसलिए इसे बदला नहीं जा सकता।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 00b64f56)"
   }
 }
