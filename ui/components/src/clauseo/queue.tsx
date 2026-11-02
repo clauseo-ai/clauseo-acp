@@ -3,12 +3,10 @@
 // The queue sends the next message once an answer finishes; after the lawyer stops an answer, or an answer fails, it
 // holds until the lawyer sends. Here too: the wait for another conversation in the same matter, and the note an answer
 // carries when the lawyer's words moved a running search aside.
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "../ui/button.tsx";
-import { IconChecking, IconFold } from "../icons/icons.tsx";
+import { IconFold } from "../icons/icons.tsx";
 import { useMatterWords } from "../lib/words-matters.ts";
-import { Collapsible as BaseCollapsible } from "@base-ui/react/collapsible";
-import { CollapsiblePanel } from "../ui/collapsible.tsx";
 import { Say } from "./say.tsx";
 
 import { QUEUE_CAP, type QueueHold, type QueuedMessage } from "./queue-model.ts";
@@ -16,6 +14,9 @@ import { QUEUE_CAP, type QueueHold, type QueuedMessage } from "./queue-model.ts"
 // the wait for another conversation lives in its own file, so the room's first load carries it without the queue's
 // parts (the collapsible among them)
 export { OtherConversationWait } from "./queue-wait.tsx";
+// the steer's parts live apart, for the same reason: the hint in the composer, the marks in the thread's chunk
+export { SteerHint } from "./steer-hint.tsx";
+export { SteerMark, SteerNote } from "./steer-marks.tsx";
 
 function QueueItem({
   item,
@@ -219,95 +220,5 @@ export function QueueStrip({
         </button>
       )}
     </section>
-  );
-}
-
-/** The line above the field while the lawyer types during an answer: what Send now does with this plan, and at its
- * right end Send now and Queue, two quiet buttons, so the field keeps its width. Enter still queues. */
-export function SteerHint({
-  text,
-  onSendNow,
-  onQueue,
-  full = false,
-}: {
-  text: string;
-  onSendNow: () => void;
-  onQueue: () => void;
-  full?: boolean;
-}) {
-  const w = useMatterWords();
-  return (
-    <div className="steer-hint">
-      <p className="steer-hint-text">
-        <Say>{text}</Say>
-      </p>
-      <span className="steer-hint-acts">
-        <Button kind="quiet" size="small" className="mat-send-now" onClick={onSendNow}>
-          <span className="deva-nudge">{w.m("Send now")}</span>
-        </Button>
-        <Button
-          kind="quiet"
-          size="small"
-          className="mat-queue"
-          aria-keyshortcuts="Enter"
-          disabled={full}
-          onClick={onQueue}
-        >
-          <span className="deva-nudge">{w.m("Queue")}</span>
-        </Button>
-      </span>
-    </div>
-  );
-}
-
-/** Where an answer shows what happened while it ran: the lawyer's words came in during a search, which carried on in
- * the background and was used. A press opens what the search found, with times. */
-export function SteerNote({
-  text,
-  found,
-}: {
-  text: string;
-  found: readonly { at: string; what: string }[];
-}) {
-  const w = useMatterWords();
-  return (
-    <BaseCollapsible.Root className="steer-note">
-      <div className="steer-note-row">
-        <IconChecking size={16} className="change-icon" />
-        <p className="steer-note-text">
-          <Say>{text}</Say>
-        </p>
-        <BaseCollapsible.Trigger
-          className="steer-note-more"
-          render={<Button kind="quiet" size="small" />}
-        >
-          <span className="deva-nudge">{w.m("Show what it found")}</span>
-          <IconFold size={12} className="work-chev" />
-        </BaseCollapsible.Trigger>
-      </div>
-      <CollapsiblePanel>
-        <ul className="work-list steer-note-list">
-          {found.map((f) => (
-            <li key={f.what} className="work-item">
-              <span className="work-at">{f.at}</span>
-              <span>
-                <Say>{f.what}</Say>
-              </span>
-            </li>
-          ))}
-        </ul>
-      </CollapsiblePanel>
-    </BaseCollapsible.Root>
-  );
-}
-
-/** The lawyer's words sent into the running answer, standing in it where they arrived: who and when, then the words at
- * the lawyer's weight. */
-export function SteerMark({ who, text }: { who: string; text: ReactNode }) {
-  return (
-    <div className="steer-mark">
-      <p className="steer-mark-who">{who}</p>
-      <p className="steer-mark-text">{text}</p>
-    </div>
   );
 }
