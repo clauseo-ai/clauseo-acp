@@ -24,8 +24,12 @@ pub(crate) struct HostCell {
     done: Shared<oneshot::Receiver<()>>,
 }
 
+/// The message of the `internal` error a start dropped without an outcome leaves.
+const NO_OUTCOME: &str = "the host's start ended without an outcome";
+
 /// The one way to fill a [`HostCell`]. Dropped without [`finish`](HostStart::finish) (the
-/// starting thread panicked), every waiter gets `internal`.
+/// starting thread unwound, in a dev or test build: release aborts on panic; or setup failed
+/// after `HostCell::new`), every waiter gets `internal`.
 pub(crate) struct HostStart {
     cell: Arc<HostCell>,
     done: oneshot::Sender<()>,
@@ -62,10 +66,7 @@ impl HostCell {
         match self.started.get() {
             Some(Ok(host)) => Ok(host),
             Some(Err(error)) => Err(error.clone()),
-            None => Err(HostError::new(
-                ErrorCode::Internal,
-                "the host's start ended without an outcome",
-            )),
+            None => Err(HostError::new(ErrorCode::Internal, NO_OUTCOME)),
         }
     }
 }
@@ -89,7 +90,7 @@ impl HostStart {
     }
 }
 
-/// Runs `start` (in the app, `Host::start` with the effective settings) on a thread named
+/// Runs `run` (in the app, `Host::start` with the effective settings) on a thread named
 /// `clauseo-host-start`, its outcome going into `start`'s cell.
 pub(crate) fn start_on_thread(
     start: HostStart,

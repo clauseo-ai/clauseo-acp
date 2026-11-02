@@ -105,19 +105,26 @@ fn exit_while_the_host_starts_waits_for_it_then_stops_it() {
     release.send(()).unwrap();
     done.recv_timeout(THREAD_WAIT).unwrap();
 
-    // The host thread was joined, and the host answers no more.
+    // The start finished and worked: read past the cell's own wait, so a `host()` that skips
+    // it cannot hide a stop that returned before the start.
+    block_on(cell.done.clone()).unwrap();
+    assert!(matches!(cell.started.get(), Some(Ok(_))));
+    // The host thread was joined, and the host answers no more: shut down, not unstarted.
     assert!(lock(&cell.join).is_none());
     let after = block_on(bridge.query(HostQuery::ListMatters)).unwrap_err();
     assert_eq!(after.code(), ErrorCode::Internal, "{after:?}");
+    assert_ne!(after.message(), NO_OUTCOME, "{after:?}");
 }
 
 #[test]
-fn a_start_dropped_without_an_outcome_fails_every_call_with_internal() {
+fn a_start_dropped_without_an_outcome_leaves_the_cell_internal() {
     let (cell, start) = HostCell::new();
-    // The starting thread panicked: its `HostStart` is dropped unfinished.
+    // The starting thread unwound (dev and test builds) or setup failed after
+    // `HostCell::new`: its `HostStart` is dropped unfinished.
     drop(start);
     let error = block_on(cell.host()).unwrap_err();
     assert_eq!(error.code(), ErrorCode::Internal, "{error:?}");
+    assert_eq!(error.message(), NO_OUTCOME);
     // Exit has nothing to stop.
     stop(&cell);
 }
