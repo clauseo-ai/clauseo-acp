@@ -88,7 +88,8 @@ test("New conversation sends nothing; its first Enter runs create_thread, send_p
   expect(h.sent("create_thread")).toEqual([{ matter: THE_MATTER.matter, agent: "claude-acp" }]);
   expect(h.sent("send_prompt")[0]?.thread).toBe(MADE);
   expect(h.sent("rename_thread")).toEqual([{ thread: MADE, title: titleOf(question) }]);
-  // the draft became the thread, its row titled, still current
+  // the draft became the thread, its row titled (with the next frame: #253), still current
+  await act(async () => h!.store.flush());
   const current = rows().find((r) => r.getAttribute("aria-current") === "true");
   expect(current?.textContent).toContain(titleOf(question) ?? "");
   expect(rows()).toHaveLength(2);

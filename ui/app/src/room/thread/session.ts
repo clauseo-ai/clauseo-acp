@@ -22,6 +22,20 @@ import type {
 import { turnRunning } from "./live.ts";
 import { loadThread } from "./chunk.ts";
 
+/** The code of a refused command, and its setter, which makes no set to the code already held: React drops such a
+ * set at once but keeps it queued at its lane (Ask's click: sync), and the next render of Work at another lane (a
+ * reply's) skips it and renders Work once more straight after, a second commit in the reply's frame (#253). */
+export function useRefused(): [ErrorCode | null, (code: ErrorCode | null) => void] {
+  const [refused, setRefused] = useState<ErrorCode | null>(null);
+  const now = useRef<ErrorCode | null>(null);
+  const refuse = useCallback((code: ErrorCode | null) => {
+    if (now.current === code) return;
+    now.current = code;
+    setRefused(code);
+  }, []);
+  return [refused, refuse];
+}
+
 /** Each conversation's words in the composer's field, by its key (conversations.ts), kept above the room's Work, so
  * leaving a conversation or its matter and coming back finds them where the lawyer left them (a refused send promises
  * "Your question is kept."). */
@@ -96,7 +110,7 @@ export function useThreadSession(
   const [loaded, setLoaded] = useState(chunkIn);
   const [made, setMade] = useState<ThreadId | null>(null);
   const [sentTurn, setSentTurn] = useState<TurnId | null>(null);
-  const [refused, setRefused] = useState<ErrorCode | null>(null);
+  const [refused, refuse] = useRefused();
   const known = link.thread ?? made;
   const thread = loaded ? known : null;
   // the refs hold what an Ask in flight reads: two Enters in one frame must make one thread
@@ -132,13 +146,15 @@ export function useThreadSession(
     async (text: string): Promise<boolean> => {
       if (matter === null || key === null || sending.current) return false;
       sending.current = true;
-      setRefused(null);
+      refuse(null);
       try {
         let id = open.current;
         if (id === null) {
           id = await create(key);
+          // the conversations' emit has opened it already (Room re-rendered, `known`'s effect set open.current): a
+          // set here would be a second commit in the reply's frame (#253)
+          if (open.current !== id) setMade(id);
           open.current = id;
-          setMade(id);
         }
         headerAtSend.current = store.view(streamOf(id))?.header ?? null;
         const sent = await command({ send_prompt: { thread: id, content: [{ text: { text } }] } });
@@ -147,13 +163,13 @@ export function useThreadSession(
         onSent(id, text);
         return true;
       } catch (e) {
-        setRefused(toHostError(e).code);
+        refuse(toHostError(e).code);
         return false;
       } finally {
         sending.current = false;
       }
     },
-    [matter, key, create, onSent, command, store],
+    [matter, key, create, onSent, command, store, refuse],
   );
 
   // The sent turn holds busy until its step or limit stop is in the view (live.ts, useBusy). A turn can end without
@@ -179,11 +195,11 @@ export function useThreadSession(
     if (id === null || stopping.current) return;
     stopping.current = true;
     command({ cancel: { thread: id } })
-      .catch((e: unknown) => setRefused(toHostError(e).code))
+      .catch((e: unknown) => refuse(toHostError(e).code))
       .finally(() => {
         stopping.current = false;
       });
-  }, [command]);
+  }, [command, refuse]);
 
   const undo = useCallback(
     async (step: StepEntry) => {
