@@ -4,7 +4,14 @@
 // versions by one hand folds behind its latest, days before the last few fold under one line, and a switch shows only
 // Clauseo's versions or only the lawyer's. Choosing one shows the whole room as it stood. The newest is now. The
 // arrow keys move along what shows. Its foot says where the history is kept.
-import { useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import { Button } from "../ui/button.tsx";
 import { SegmentedSwitch } from "../ui/segmented.tsx";
 import { IconFold } from "../icons/icons.tsx";
@@ -49,6 +56,7 @@ export function VersionPanel({
   where,
   testIds,
   kindOf,
+  focusOnOpen = false,
 }: {
   history: readonly Version[];
   /** Today, and the words for a day. */
@@ -68,10 +76,15 @@ export function VersionPanel({
   testIds?: { panel?: string; entry?: string };
   /** Optional: what made a version, as the host names it ("after_turn"), for the entry's data-kind. */
   kindOf?: (v: Version) => string;
+  /** Optional: the panel takes the focus as it opens, onto the version in view, or else its first control; for a
+   * panel brought back over the work, so the focus never stays behind on the page. */
+  focusOnOpen?: boolean;
 }) {
   const w = useVersionWords();
   const { id } = useRoom();
   const list = useRef<HTMLDivElement>(null);
+  const nav = useRef<HTMLElement>(null);
+  const opening = useRef({ focus: focusOnOpen, at });
   const last = history.length - 1;
   const [show, setShow] = useState<Show>("all");
   const [openRuns, setOpenRuns] = useState<ReadonlySet<string>>(new Set());
@@ -102,6 +115,17 @@ export function VersionPanel({
     const head = 40;
     if (r.top < o.top + head || r.bottom > o.bottom) box.scrollTop += r.top - o.top - head - 8;
   }, [at, olderOpen]);
+
+  // brought back over the work, the panel takes the focus: the version in view, or its first control
+  useEffect(() => {
+    if (!opening.current.focus) return;
+    const row = list.current?.querySelector<HTMLElement>(
+      `.ver-entry[data-at="${opening.current.at}"]`,
+    );
+    (
+      row ?? nav.current?.querySelector<HTMLElement>("button:not(:disabled), [tabindex='0']")
+    )?.focus();
+  }, []);
 
   // each day's heading casts the pinned edge while its versions pass under it
   useStuck(list, ".ver-day", `${show}|${olderOpen ? 1 : 0}|${openRuns.size}|${history.length}`);
@@ -178,7 +202,12 @@ export function VersionPanel({
   const span = foldedSpan(w.lang, calendar, groups);
 
   return (
-    <nav className="ver-panel" aria-labelledby={id("ver-panel-head")} data-testid={testIds?.panel}>
+    <nav
+      ref={nav}
+      className="ver-panel"
+      aria-labelledby={id("ver-panel-head")}
+      data-testid={testIds?.panel}
+    >
       <header className="ver-panel-head">
         <Heading level={2} className="wall-title" id={id("ver-panel-head")}>
           {w.v("Versions")} <span className="wall-count">{history.length}</span>

@@ -104,10 +104,16 @@ export function useVersions({
   // keep the look, and a window narrowed to mid puts it away; a wider window shows it again
   const mid = useSyncExternalStore(onMid, isMid, () => false);
   const [away, setAway] = useState(false);
+  // the panel was brought back over the work: it takes the focus as it opens
+  const [reopened, setReopened] = useState(false);
+  const putPanel = (gone: boolean) => {
+    setAway(gone);
+    setReopened(false);
+  };
   const [wasMid, setWasMid] = useState(mid);
   if (wasMid !== mid) {
     setWasMid(mid);
-    if (mid) setAway(looking);
+    if (mid) putPanel(looking);
   }
   const panel = !(mid && away);
   // the open matter, for a chunk that loads after the lawyer has moved on
@@ -129,7 +135,7 @@ export function useVersions({
         const controller = new mod.VersionsController(transport, store, matter);
         // Undo opened Versions: Cancel in its dialog closes it again
         if (undo) controller.undoNewest(true);
-        setAway(false);
+        putPanel(false);
         setSession({ matter, mod, controller });
       },
       (error: unknown) => console.warn(`Versions' chunk did not load: ${String(error)}`),
@@ -157,10 +163,13 @@ export function useVersions({
       close,
     };
   const { mod, controller } = live;
-  const onPicked = () => setAway(isMid());
-  const onPanel = () => setAway(false);
+  const onPicked = () => putPanel(isMid());
+  const onPanel = () => {
+    setAway(false);
+    setReopened(true);
+  };
   // over the band on a mid window: put away, with the look kept
-  const putAway = mid && looking ? () => setAway(true) : null;
+  const putAway = mid && looking ? () => putPanel(true) : null;
   return {
     open: panel,
     rail: panel
@@ -170,6 +179,7 @@ export function useVersions({
           standIns,
           onClose: putAway ?? close,
           onPicked,
+          focusOnOpen: reopened,
         })
       : null,
     centre: createElement(mod.VersionsCentre, {
