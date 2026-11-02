@@ -245,7 +245,10 @@ export class Conversations {
           const now = m.threads.get(thread);
           if (now === undefined || now.title !== undefined) return;
           m.threads.set(thread, { ...now, title });
-          if (m === this.#current) this.#emit();
+          // with the next frame's flush, not a commit of its own beside it: the reply lands mid-stream (#253)
+          this.#store.inFrame(() => {
+            if (m === this.#current) this.#emit();
+          });
         },
         (error: unknown) =>
           console.warn(`rename_thread failed: ${JSON.stringify(toHostError(error).code)}`),

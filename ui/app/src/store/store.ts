@@ -21,6 +21,9 @@ export type ViewStore = {
   retry: (stream: StreamId) => void;
   /** Called after each flush that changed a view, and when a stream's error comes or goes. */
   subscribe: (listener: () => void) => () => void;
+  /** Runs `run` in the next flush, after its notify and in the same task, so what an IPC reply changes commits with
+   * that frame's store changes, not in a commit of its own (#253). */
+  inFrame: (run: () => void) => void;
   /** Applies everything waiting, now. */
   flush: () => void;
   /** Drops anything waiting and stops any batch waiting to run. */
@@ -45,6 +48,7 @@ export function createViewStore(transport: HostTransport, options: StoreOptions)
   const resubscribing = new Set<StreamId>();
   const listeners = new Set<() => void>();
   let queue: PatchBatch[] = [];
+  let runs: (() => void)[] = [];
   let cancel: (() => void) | null = null;
 
   const notify = () => {
@@ -82,6 +86,9 @@ export function createViewStore(transport: HostTransport, options: StoreOptions)
       }
     }
     if (changed) notify();
+    const due = runs;
+    runs = [];
+    for (const run of due) run();
     for (const stream of applied) {
       const position = positionOf(views.get(stream));
       if (position !== null) transport.ack(stream, position);
@@ -143,6 +150,10 @@ export function createViewStore(transport: HostTransport, options: StoreOptions)
       listeners.add(fn);
       return () => listeners.delete(fn);
     },
+    inFrame: (run) => {
+      runs.push(run);
+      cancel ??= options.batch()(flush);
+    },
     flush: () => {
       cancel?.();
       flush();
@@ -151,6 +162,7 @@ export function createViewStore(transport: HostTransport, options: StoreOptions)
       cancel?.();
       cancel = null;
       queue = [];
+      runs = [];
     },
   };
 }

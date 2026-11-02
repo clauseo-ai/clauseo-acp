@@ -172,3 +172,41 @@ test("a batch that applies clears the stream's error", () => {
   frame();
   expect(store.error(STREAM)).toBeUndefined();
 });
+
+test("inFrame runs with the next flush, after its notify, in the same task (#253)", () => {
+  const { transport, store, frame, pending } = rig();
+  const order: string[] = [];
+  store.subscribe(() => order.push("notify"));
+  store.watch(STREAM);
+  transport.deliver(START);
+  store.inFrame(() => order.push("run"));
+  expect(pending).toHaveLength(1);
+  expect(order).toEqual([]);
+  frame();
+  expect(order).toEqual(["notify", "run"]);
+  // once only
+  transport.deliver(event(batch(2, [append(1, 0, "a")])));
+  frame();
+  expect(order).toEqual(["notify", "run", "notify"]);
+});
+
+test("inFrame with nothing waiting asks for a frame of its own and runs in it", () => {
+  const { store, frame, pending } = rig();
+  let ran = 0;
+  store.inFrame(() => (ran += 1));
+  store.inFrame(() => (ran += 1));
+  expect(pending).toHaveLength(1);
+  frame();
+  expect(ran).toBe(2);
+});
+
+test("inFrame's runs are dropped on dispose", () => {
+  const { store, frame, pending } = rig();
+  let ran = 0;
+  store.inFrame(() => (ran += 1));
+  store.dispose();
+  expect(pending).toHaveLength(0);
+  frame();
+  store.flush();
+  expect(ran).toBe(0);
+});
