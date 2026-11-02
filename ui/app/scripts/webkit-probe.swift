@@ -13,7 +13,10 @@
 // matters (?matters=none: "No matters yet" as its title, the empty rail) is loaded in night Hindi at text sizes 16
 // and 20. The rail in every state (?rail=states) is loaded at every width in both looks, folded and opened at 1100 px,
 // and run through axe, with and without the new matter dialog open; there the find field must show (80 px or more),
-// the moved row its ring, the form's folder line one line, and the scratch matter, opened, its raised row.
+// the moved row its ring, the form's folder line one line, and the scratch matter, opened, its raised row. The
+// agent's permission requests (?thread=permission) are loaded at every width in both looks and run through axe: the
+// page answers once it also shows a pending prompt with its four answers above one answered once, and neither prompt
+// scrolls sideways.
 //
 // Usage, from ui/app: pnpm build:probe, then serve dist-probe/ with `pnpm exec vite preview --mode probe` (port 4173),
 // then pnpm probe:webkit. PROBE_ORIGIN names another server; PROBE_SHOTS names a folder to save a PNG of each page
@@ -185,6 +188,46 @@ for (theme, lang) in looks {
     " if (bg === 'transparent' || bg === 'rgba(0, 0, 0, 0)') errs.push('layout: the open scratch matter row has no raised tone');" +
     " return errs; })()"
   runs.append(opened)
+}
+
+// the agent's permission requests (?thread=permission, probe-main.tsx): the room as every page has it, and in its thread a
+// pending prompt on a paper with its four answers, above one answered once (data-state is the wire's, data-answer
+// the kind chosen); measured as every page is and for prompts that never scroll sideways; and axe over it, under a
+// frozen Object.prototype
+let permissionMeasured = "(function () { var errs = " + measured + ";" +
+  " document.querySelectorAll('[data-testid=\"permission\"]').forEach(function (p) {" +
+  " if (p.scrollWidth > p.clientWidth + 1) errs.push('layout: a permission prompt scrolls sideways, ' + p.scrollWidth + ' px in ' + p.clientWidth); });" +
+  " return errs; })()"
+for (theme, lang) in looks {
+  let q = "?thread=permission&theme=\(theme)&lang=\(lang)"
+  let rendered = "document.querySelector('#root main.room-centre') !== null" +
+    " && (document.querySelector('[data-testid=\"matter\"]')?.textContent ?? '') !== ''" +
+    " && document.querySelectorAll('#root aside.room-pane li.tile').length === 5" +
+    " && document.documentElement.dataset.theme === '\(theme)' && document.documentElement.lang === '\(lang)'" +
+    " && (function (p) { return p.length === 2 && p[0].dataset.state === 'pending' && p[0].dataset.answer === undefined" +
+    " && ['allow_once', 'allow_always', 'reject_once', 'reject_always'].every(function (k) {" +
+    " return p[0].querySelector('[data-testid=\"permission-' + k + '\"]') !== null; })" +
+    " && p[1].dataset.state === 'resolved' && p[1].dataset.answer === 'allow_once'; })" +
+    "(document.querySelectorAll('[data-testid=\"permission\"]'))"
+  // a running turn: Stop takes Ask's button, whose colour transition from a disabled Ask never advances in a WKWebView
+  // with no window, so once rendered the page's transitions are finished (an endless animation can't be, and is left)
+  // to their settled colours, for axe and the PNG; and the pending prompt is scrolled into view for the PNG, again as
+  // the list lays out what it measured
+  let settled = " && (window.__settled || (window.__settled = true," +
+    " document.getAnimations().forEach(function (a) { try { a.finish(); } catch (e) {} })," +
+    " [0, 300, 900].forEach(function (t) { setTimeout(function () {" +
+    " document.querySelector('[data-testid=\"permission\"]').scrollIntoView({ block: 'center' }); }, t); }), true))"
+  for (w, h) in sizes {
+    var run = Run(name: "permission \(theme) \(lang)", url: URL(string: "\(origin)/\(q)")!, width: w, height: h,
+                  rendered: rendered + settled, setup: "")
+    run.measure = permissionMeasured
+    runs.append(run)
+  }
+  var axe = Run(name: "permission \(theme) \(lang), frozen, axe", url: URL(string: "\(origin)/\(q)")!,
+                width: 1280, height: 800, rendered: rendered + settled + axeRun,
+                setup: "Object.freeze(Object.prototype);")
+  axe.measure = permissionMeasured
+  runs.append(axe)
 }
 
 // Listens for errors from the first moment, before the page's own scripts run.
