@@ -22,7 +22,7 @@
 //! are dropped, so a stream never mixes two subscriptions.
 //!
 //! The app-wide feed (`subscribe_app`) shares the channel and the count, with no position: a
-//! pause drops it too, and each restart of every stream restarts it, for the driver to take
+//! pause drops it too, and a pause's end or a watchdog fire restarts it, for the driver to take
 //! ([`take_app_restart`](WindowState::take_app_restart)) and send the current state first.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -211,10 +211,10 @@ impl WindowState {
         self.app.is_some_and(|app| app.restart_id == restart_id)
     }
 
-    /// Whether the window follows the app-wide feed.
+    /// The app-wide feed's current restart id; `None` when the window does not follow it.
     #[cfg(test)]
-    pub(crate) fn follows_app(&self) -> bool {
-        self.app.is_some()
+    pub(crate) fn app_restart_id(&self) -> Option<u64> {
+        self.app.map(|app| app.restart_id)
     }
 
     /// The app-wide feed's restart id, once, when a pause's end or the watchdog restarted it

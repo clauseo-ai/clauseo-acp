@@ -30,8 +30,11 @@ host added later reached the page without anyone deciding it should.
   does not compile in `crates/desktop` until the bridge rules on it.
   - `admit` refuses `AnswerPermission`, `SetMode`, `SetConfigOption`, and a `CreateMatter` whose
     folder ref this run's `pick_folder` did not issue, as before, all with `command.invalid`.
-  - Slots wait as comments for `ListPapers` (#131) and `RelocateMatter` (#135). `RelocateMatter`
-    will take only a folder ref this run's `pick_folder` issued, as `CreateMatter` does.
+  - Slots wait as comments for `ListPapers` (#131), `RelocateMatter` (#135), H5 and H20's
+    `UpdateMatter`, `OpenMatter` and `ForgetMatter`, and H20's `GetDefaultLocation`.
+    `RelocateMatter` will take only a folder ref this run's `pick_folder` issued, as
+    `CreateMatter` does. H20's `CreateMatter` source `default_location` carries no folder ref and
+    passes; the folder-ref check stays on `new_folder` and `existing_folder`.
 - **One new command, `subscribe_app()`.** It takes no arguments, and it needs `open_stream` first
   (otherwise it fails with `command.invalid`).
   - It subscribes the window's existing channel to `subscribe_app(LocalDesktop)`. Each message is
@@ -67,7 +70,9 @@ host added later reached the page without anyone deciding it should.
 - Every app event reaches every window that subscribed. A window drops what it does not need
   (0017).
 - The room is unreleased, so the display values it kept in localStorage before this change are
-  not carried over. In the real app the host's settings replace them at the first start.
+  not carried over. With a host, localStorage becomes a cache of the host's last answer, read
+  only for the next start's first frame; the host's answer then replaces it. A start shows the
+  wrong settings for a moment only when they changed while the room was not running.
 - R12's internal window sends the same calls as before. A bridge test,
   `every_command_and_read_the_windows_send_today_is_admitted`, lists them and fails if one is
   refused.

@@ -1,6 +1,7 @@
 // The room's display settings, and the display they show on <html> (ui/components' display.ts). The settings are H7's
-// `ui` table (host-next.ts). Until H7, they live in localStorage under "clauseo.display", in that shape; with a
-// NextHost the host holds them: read at start, written as patches, followed as they change. Theme and motion follow the
+// `ui` table (host-next.ts). Without a host they live in localStorage under "clauseo.display", in that shape; with
+// one the host holds them: read at start, written as patches, followed as they change, and localStorage keeps its last
+// answer for the next start's first frame. Theme and motion follow the
 // computer's light and reduced-motion preferences, live, until set; lite's "automatic" means off until H7's display
 // report; English and text size 16 until set. The platform is the host's (platform.ts), never a setting.
 import {
@@ -12,7 +13,7 @@ import {
 import { frameBatch, liteBatch, type Batch } from "../store/batch.ts";
 import type { Settings, SettingsHost, UiSettings } from "./host-next.ts";
 
-/** Where the settings live until H7. */
+/** The settings without a host; with one, a cache of the host's last answer, read only for the first frame. */
 export const DISPLAY_KEY = "clauseo.display";
 
 /** The settings before the lawyer sets any. */
@@ -146,19 +147,33 @@ export function createDisplayStore(env: DisplayEnv): DisplayStore {
   const host = env.host;
   let locked: readonly string[] = [];
   let stopHost = () => {};
+  /** The settings_changed events heard: a read that one overtook is older than it, and dropped. */
+  let heard = 0;
   const fromHost = (settings: Settings) => {
     stored = { ...DEFAULT_UI, ...uiPatchOf(settings.ui) };
     locked = settings.locked;
+    try {
+      env.storage?.setItem(DISPLAY_KEY, JSON.stringify(stored));
+    } catch {
+      // only the next start's first frame reads it
+    }
     apply();
   };
-  const readHost = (current: SettingsHost) =>
-    current
-      .getSettings()
-      .then(fromHost, (error: unknown) =>
-        console.warn(`get_settings failed: ${JSON.stringify(error)}`),
-      );
+  // the wire host subscribes before it reads, so a change after the read also arrives as an event
+  const readHost = (current: SettingsHost) => {
+    const at = heard;
+    return current.getSettings().then(
+      (settings) => {
+        if (heard === at) fromHost(settings);
+      },
+      (error: unknown) => console.warn(`get_settings failed: ${JSON.stringify(error)}`),
+    );
+  };
   if (host !== null) {
-    stopHost = host.onSettingsChanged(fromHost);
+    stopHost = host.onSettingsChanged((settings) => {
+      heard += 1;
+      fromHost(settings);
+    });
     void readHost(host);
   }
 

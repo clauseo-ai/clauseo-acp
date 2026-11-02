@@ -1,6 +1,9 @@
 //! The app-wide feed on the window's channel (`subscribe_app`): what reaches it, a restart the
 //! bridge makes, and a reload.
 
+use std::sync::mpsc::RecvTimeoutError;
+use std::time::Duration;
+
 use clauseo_protocol::{SettingsView, Theme, UiPatch};
 
 use super::*;
@@ -84,8 +87,9 @@ fn a_pause_s_end_resubscribes_and_sends_the_settings_then() {
     assert_eq!(settings(messages.next_event()).ui.theme, Theme::Dark);
 }
 
-/// A reload (a second `open_stream`) drops the app feed: a change reaches neither channel until
-/// the new page subscribes.
+/// A reload (a second `open_stream`) drops the app feed: the old window's pump is aborted, so
+/// its host subscription goes at once, and a change reaches neither channel until the new page
+/// subscribes.
 #[test]
 fn a_reload_drops_the_app_feed() {
     let scratch = Scratch::new("app-reload", &[]);
@@ -94,12 +98,21 @@ fn a_reload_drops_the_app_feed() {
     let (first, old) = collector();
     bridge.open_stream(MAIN, first);
     block_on(bridge.subscribe_app(MAIN)).unwrap();
+    let dropped = pump::app_dropped(&bridge.window(MAIN).unwrap()).unwrap();
     let (second, new) = collector();
     bridge.open_stream(MAIN, second);
-    assert!(!lock(&bridge.window(MAIN).unwrap()).state().follows_app());
+    // The pump never sees another event, so only the abort can end it.
+    assert_eq!(
+        dropped.recv_timeout(Duration::from_secs(20)),
+        Err(RecvTimeoutError::Disconnected),
+        "the old window's app pump outlived the reload"
+    );
+    assert_eq!(
+        lock(&bridge.window(MAIN).unwrap()).state().app_restart_id(),
+        None
+    );
     block_on(bridge.dispatch(set_theme(Theme::Dark))).unwrap();
-    // The host answers in order: a read after the write sees it, and the dropped subscription
-    // had its event, if any, before the read answered.
+    // The host answers in order: a read after the write comes after any event of it.
     let _read = block_on(bridge.query(HostQuery::GetSettings)).unwrap();
     assert_eq!(old.drain(), Vec::<String>::new());
     assert_eq!(new.drain(), Vec::<String>::new());
@@ -108,4 +121,29 @@ fn a_reload_drops_the_app_feed() {
     block_on(bridge.dispatch(set_theme(Theme::Light))).unwrap();
     assert_eq!(settings(new.next_event()).ui.theme, Theme::Light);
     assert_eq!(old.drain(), Vec::<String>::new());
+}
+
+/// The watchdog, with bytes unacknowledged for 5 s, restarts the app feed through the driver's
+/// tick: it subscribes again and sends the settings, then follows changes on the new
+/// subscription.
+#[test]
+fn a_watchdog_fire_resubscribes_and_sends_the_settings_then() {
+    let scratch = Scratch::new("app-watchdog", &[]);
+    let host = scratch.start(Vec::new());
+    let bridge = host.bridge();
+    let (channel, messages) = collector();
+    bridge.open_stream(MAIN, channel);
+    block_on(bridge.subscribe_app(MAIN)).unwrap();
+    let window = bridge.window(MAIN).unwrap();
+    // One message the page never acks.
+    block_on(bridge.dispatch(set_theme(Theme::Dark))).unwrap();
+    assert_eq!(settings(messages.next_event()).ui.theme, Theme::Dark);
+    let before = lock(&window).state().app_restart_id();
+
+    pump::tick_at(&window, window::WATCHDOG * 2);
+    let resent = settings(messages.next_event());
+    assert_eq!(resent.ui.theme, Theme::Dark);
+    assert_ne!(lock(&window).state().app_restart_id(), before);
+    block_on(bridge.dispatch(set_theme(Theme::Light))).unwrap();
+    assert_eq!(settings(messages.next_event()).ui.theme, Theme::Light);
 }
