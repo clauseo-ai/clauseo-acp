@@ -68,6 +68,13 @@ pub fn skill_source(version: &str, text: &[u8]) -> Result<SkillSource, ProfileEr
         .map_err(|err| ProfileError::skill(STETDOC, format!("its text is not UTF-8: {err}")))?;
     let (description, body) = frontmatter::lenient_description(text)
         .map_err(|reason| ProfileError::skill(STETDOC, reason))?;
+    // A literal (`|`) description holds newlines; the rendered frontmatter is one line.
+    let description = description
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
     let rendered = format!("{}{body}", frontmatter::render(STETDOC, &description));
     Ok(SkillSource::verbatim(
         STETDOC,

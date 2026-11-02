@@ -124,14 +124,49 @@ impl ProfilePaths {
     }
 }
 
-/// Whether `a` and `b` name the same folder, comparing parts without regard to case or to
-/// `/` against `\\` (macOS and Windows disks ignore case by default; a false match only keeps
-/// stetdoc off `PATH`).
+/// Whether `a` and `b` name the same folder: each `dunce::simplified`, then compared
+/// lexically, so it reads Windows-style paths the same on every OS. A `\\?\` prefix goes
+/// (`\\?\UNC\` becomes `\\`), `/` and `\\` are one separator, empty parts are skipped,
+/// and case is ignored (macOS and Windows disks ignore case by default; a false match only
+/// keeps stetdoc off `PATH`).
 fn same_folder(a: &Path, b: &Path) -> bool {
-    let parts = |path: &Path| -> Vec<String> {
-        path.components()
-            .map(|part| part.as_os_str().to_string_lossy().to_lowercase())
-            .collect()
+    lexical_parts(dunce::simplified(a)) == lexical_parts(dunce::simplified(b))
+}
+
+/// `path`'s parts as [`same_folder`] compares them.
+fn lexical_parts(path: &Path) -> Vec<String> {
+    let text = path.to_string_lossy().to_lowercase();
+    let text = if let Some(unc) = text.strip_prefix(r"\\?\unc\") {
+        format!(r"\\{unc}")
+    } else {
+        text.strip_prefix(r"\\?\").unwrap_or(&text).to_owned()
     };
-    parts(a) == parts(b)
+    let rooted = text.starts_with(['/', '\\']);
+    std::iter::once(if rooted { "/" } else { "" }.to_owned())
+        .chain(
+            text.split(['/', '\\'])
+                .filter(|part| !part.is_empty())
+                .map(str::to_owned),
+        )
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn windows_style_folders_match_with_or_without_the_verbatim_prefix() {
+        let same = |a: &str, b: &str| same_folder(Path::new(a), Path::new(b));
+        assert!(same(r"\\?\C:\x", r"C:\x"));
+        assert!(same(
+            r"\\?\C:\Program Files\Clauseo",
+            r"c:/program files/clauseo/"
+        ));
+        assert!(same(r"\\?\UNC\server\share\app", r"\\server\share\app"));
+        assert!(!same(r"\\?\C:\x", r"C:\x\stetdoc"));
+        assert!(!same(r"C:\x", r"D:\x"));
+        assert!(same("/app/bin", "/app//bin/"));
+        assert!(!same("/app", "app"));
+    }
 }

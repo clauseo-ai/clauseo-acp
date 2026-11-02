@@ -1041,6 +1041,7 @@ dependencies = [
  "clauseo-profile",
  "clauseo-protocol",
  "clauseo-settings",
+ "dunce",
  "futures",
  "insta",
  "serde_json",

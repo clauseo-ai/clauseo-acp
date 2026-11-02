@@ -89,7 +89,7 @@ to write instead.
 | `transport_ws` | Dev and test only WebSocket transport, random token | host | tauri | planned |
 | `sandbox` | Policy model, tier detection, per-OS launchers, egress proxy, denial detection | protocol, process, thiserror, tracing, serde, dunce, async-process, async-io, futures, serde_json | tauri, host | exists |
 | `agents` | Agent registry, Node runtime, silent installs, sign-in runs, idle stop and resume | protocol, process, sandbox, settings | tauri | planned |
-| `profile` | Clauseo profile translated into each agent's native options and files: the instructions, Claude's `_meta` fragment, Codex's `CODEX_CONFIG` keys, the `browser` server, the skills and their manifest (0030) | protocol, settings, process, serde_json, sha2, futures, thiserror, tracing | tauri, tokio, host, acp | exists |
+| `profile` | Clauseo profile translated into each agent's native options and files: the instructions, Claude's `_meta` fragment, Codex's `CODEX_CONFIG` keys, the `browser` server, the skills and their manifest (0030) | protocol, settings, process, serde_json, sha2, futures, thiserror, tracing, dunce | tauri, tokio, host, acp | exists |
 | `legal` | Case-law and regulator data clients and parsers | protocol | tauri | planned |
 | `citations` | Deterministic citation parsing and checks | protocol, legal | tauri | planned |
 | `skills` | Skill format, built-in skills, validation, install through `profile` | protocol, profile | tauri | planned |
