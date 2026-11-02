@@ -4,6 +4,7 @@ expression: tree
 ---
 == .clauseo-manifest.json ==
 {
+  "format": 1,
   "skills": {
     "alpha": {
       "files": {
@@ -17,6 +18,7 @@ expression: tree
 == alpha/SKILL.md ==
 ---
 name: alpha
+description: "d"
 ---
 body
 == alpha/references/a.md ==

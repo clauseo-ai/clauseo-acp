@@ -48,15 +48,16 @@ impl Instructions {
     }
 }
 
-/// The name as it may go inside `--author "…"` in a shell command: without `"`, `\`, `` ` ``,
-/// `$`, `!`, braces and control characters (a person's name needs none of them; a shell could
-/// act on each, and braces could make a placeholder the host fills), spaces collapsed, at most
-/// 100 characters; [`DEFAULT_AUTHOR`] when nothing is left.
+/// The name as it may go inside `--author "…"` in a shell command (sh, PowerShell or cmd): only
+/// letters, combining marks, digits, spaces and `.`, `,`, `'` and `-` are kept, every other
+/// character is dropped (quotes of every kind, `$`, `%`, backticks, braces, bidi and other
+/// control characters: a shell could act on each, and braces could make a placeholder the host
+/// fills), spaces collapsed, at most 100 characters; [`DEFAULT_AUTHOR`] when nothing is left.
 pub fn author_name(name: &str) -> String {
     let kept: String = name
         .chars()
-        .map(|c| if c.is_control() { ' ' } else { c })
-        .filter(|c| !matches!(c, '"' | '\\' | '`' | '$' | '!' | '{' | '}'))
+        .map(|c| if c.is_whitespace() { ' ' } else { c })
+        .filter(|&c| is_author_char(c))
         .collect();
     let joined = kept.split_whitespace().collect::<Vec<_>>().join(" ");
     let cut: String = joined.chars().take(AUTHOR_MAX).collect();
@@ -66,6 +67,54 @@ pub fn author_name(name: &str) -> String {
     } else {
         cut
     }
+}
+
+/// The allowlist: ASCII letters, digits, space and `.,'-`; beyond ASCII, letters, digits and
+/// combining marks. No ASCII punctuation a shell reads gets through, and no Unicode quote,
+/// `%`-like sign or format character (bidi controls are `Cf`, neither letters nor marks).
+fn is_author_char(c: char) -> bool {
+    if c.is_ascii() {
+        return c.is_ascii_alphanumeric() || matches!(c, ' ' | '.' | ',' | '\'' | '-');
+    }
+    c.is_alphabetic() || c.is_numeric() || is_mark(c)
+}
+
+/// Combining marks std's `is_alphabetic` misses: the combining blocks, Hebrew, Arabic and the
+/// Indic scripts' signs (virama, nukta), which names in those scripts need.
+fn is_mark(c: char) -> bool {
+    matches!(c,
+        '\u{0300}'..='\u{036F}'
+        | '\u{0483}'..='\u{0489}'
+        | '\u{0591}'..='\u{05BD}'
+        | '\u{05BF}' | '\u{05C1}' | '\u{05C2}' | '\u{05C4}' | '\u{05C5}' | '\u{05C7}'
+        | '\u{0610}'..='\u{061A}'
+        | '\u{064B}'..='\u{065F}'
+        | '\u{0670}'
+        | '\u{0900}'..='\u{0903}'
+        | '\u{093A}'..='\u{094F}'
+        | '\u{0951}'..='\u{0957}'
+        | '\u{0962}' | '\u{0963}'
+        | '\u{0981}'..='\u{0983}'
+        | '\u{09BC}'..='\u{09CD}'
+        | '\u{0A01}'..='\u{0A03}'
+        | '\u{0A3C}'..='\u{0A4D}'
+        | '\u{0A81}'..='\u{0A83}'
+        | '\u{0ABC}'..='\u{0ACD}'
+        | '\u{0B01}'..='\u{0B03}'
+        | '\u{0B3C}'..='\u{0B4D}'
+        | '\u{0B82}'
+        | '\u{0BBE}'..='\u{0BCD}'
+        | '\u{0C00}'..='\u{0C04}'
+        | '\u{0C3C}'..='\u{0C4D}'
+        | '\u{0C81}'..='\u{0C83}'
+        | '\u{0CBC}'..='\u{0CCD}'
+        | '\u{0D00}'..='\u{0D03}'
+        | '\u{0D3B}'..='\u{0D4D}'
+        | '\u{1AB0}'..='\u{1AFF}'
+        | '\u{1DC0}'..='\u{1DFF}'
+        | '\u{20D0}'..='\u{20FF}'
+        | '\u{FE20}'..='\u{FE2F}'
+    )
 }
 
 /// Words as `wc -w` counts them: runs of non-whitespace.

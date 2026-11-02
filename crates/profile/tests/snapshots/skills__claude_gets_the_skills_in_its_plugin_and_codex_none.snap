@@ -9,6 +9,7 @@ expression: plugin
 }
 == skills/.clauseo-manifest.json ==
 {
+  "format": 1,
   "skills": {
     "stetdoc": {
       "files": {
@@ -19,4 +20,8 @@ expression: plugin
   }
 }
 == skills/stetdoc/SKILL.md ==
+---
+name: stetdoc
+description: "d"
+---
 s

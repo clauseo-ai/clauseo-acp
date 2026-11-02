@@ -24,18 +24,21 @@ pub const SETTINGS_KEYS: [&str; 1] = ["disableSkillShellExecution"];
 /// `WebFetch(domain:…)` rules to `allowedTools` when web search is on, `WebSearch` and
 /// `WebFetch` to `disallowedTools` when it is off, and `skipWebFetchPreflight` to `settings` on
 /// a cloud login.
+///
+/// The fields are private: [`Self::meta_fragment`] is the only way out, and it emits only
+/// [`OPTION_KEYS`] and, in `settings`, only [`SETTINGS_KEYS`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClaudeOptions {
     /// The instructions; still holds `{work_folder}` and `{matter_notes}`.
-    pub system_prompt_append: String,
+    system_prompt_append: String,
     /// `mcp__browser`, then `Bash(stetdoc <sub>:*)` for each of [`STETDOC_READ_ONLY`].
-    pub allowed_tools: Vec<String>,
+    allowed_tools: Vec<String>,
     /// None from the profile: the web tools are the host's, from `tools.web_search`.
-    pub disallowed_tools: Vec<String>,
+    disallowed_tools: Vec<String>,
     /// The local plugin holding the skills.
-    pub plugin_dir: Option<PathBuf>,
+    plugin_dir: Option<PathBuf>,
     /// `{"disableSkillShellExecution": true}`: no skill runs a shell command on load.
-    pub settings: Map<String, Value>,
+    settings: Map<String, Value>,
 }
 
 impl ClaudeOptions {
@@ -58,10 +61,40 @@ impl ClaudeOptions {
         }
     }
 
+    /// The same options with `key` set to `value` in `settings`. Only [`SETTINGS_KEYS`] ever
+    /// leave in [`Self::meta_fragment`]; any other key set here is dropped there, with a warning.
+    #[must_use]
+    pub fn with_setting(mut self, key: &str, value: Value) -> Self {
+        self.settings.insert(key.to_owned(), value);
+        self
+    }
+
+    /// The instructions.
+    pub fn system_prompt_append(&self) -> &str {
+        &self.system_prompt_append
+    }
+
+    /// The allow list.
+    pub fn allowed_tools(&self) -> &[String] {
+        &self.allowed_tools
+    }
+
+    /// The deny list: empty from the profile.
+    pub fn disallowed_tools(&self) -> &[String] {
+        &self.disallowed_tools
+    }
+
+    /// The plugin folder.
+    pub fn plugin_dir(&self) -> Option<&PathBuf> {
+        self.plugin_dir.as_ref()
+    }
+
     /// The `_meta` object: `systemPrompt.append`, and under `claudeCode.options` only
     /// [`OPTION_KEYS`] (`disallowedTools` when it is not empty, `plugins` when there is a
-    /// plugin, as one `{"type": "local", "path": …}`). A plugin path that is no UTF-8 is left
-    /// out with a warning: a lossy copy could name another folder.
+    /// plugin, as one `{"type": "local", "path": …}`, and `settings` holding only
+    /// [`SETTINGS_KEYS`]). So `hooks`, `disableAllHooks` or any other settings key never
+    /// reaches the host's merge; each is dropped with a warning. A plugin path that is no UTF-8
+    /// is left out with a warning: a lossy copy could name another folder.
     pub fn meta_fragment(&self) -> Map<String, Value> {
         let mut options = Map::new();
         options.insert(
@@ -87,7 +120,23 @@ impl ClaudeOptions {
                 );
             }
         }
-        options.insert("settings".to_owned(), Value::Object(self.settings.clone()));
+        let mut settings = Map::new();
+        for (key, value) in &self.settings {
+            if SETTINGS_KEYS.contains(&key.as_str()) {
+                settings.insert(key.clone(), value.clone());
+            } else {
+                tracing::warn!(
+                    key,
+                    "a Claude settings key the profile may not send is dropped"
+                );
+            }
+        }
+        options.insert("settings".to_owned(), Value::Object(settings));
+        debug_assert!(
+            options
+                .keys()
+                .all(|key| OPTION_KEYS.contains(&key.as_str()))
+        );
         let mut claude = Map::new();
         claude.insert("options".to_owned(), Value::Object(options));
         // Keys inserted in sorted order, so the object reads the same whether or not

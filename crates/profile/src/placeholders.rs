@@ -6,15 +6,25 @@
 //! `developer_instructions`, and [`IN_SERVERS`] in every argument and variable of the
 //! `browser` entry, both with [`fill`]. `{author}` is not here: the profile fills it itself
 //! (`instructions::Instructions::compose`), since it knows the author when it is built.
+//!
+//! This module is the one home of the token strings and of the fill: the host depends on
+//! `clauseo-profile` and calls [`fill`] with these constants, with no copy of its own
+//! (decision record 0030).
+//!
+//! The host fills decoded strings (one argument, one variable's value, the instructions' text)
+//! and only then encodes them for their destination (`serde_json` for `_meta` and
+//! `CODEX_CONFIG`; MCP arguments go as a list, with no shell). It never fills inside text that
+//! is already encoded.
 
 /// The session's work folder: `<data>/run/<session id>/work` until stage C's per-agent state
 /// folders exist. Instructions only.
 pub const WORK_FOLDER: &str = "{work_folder}";
 /// The matter's notes folder, `<data>/agent-state/<matter id>/notes` (R22). Instructions only.
 pub const MATTER_NOTES: &str = "{matter_notes}";
-/// The session's own folder, `<data>/run/<session id>`. The browser guard's `--cwd` is its
-/// `browser` subfolder.
-pub const SESSION_DIR: &str = "{session_dir}";
+/// The session's browser state folder, `<data>/run/<session id>/browser`, as the browser
+/// guard's `--cwd`. The host joins it with the platform's own separators and fills it with a
+/// `dunce`-simplified path (no `\\?\` prefix on Windows), as one whole argument.
+pub const BROWSER_DIR: &str = "{browser_dir}";
 /// The egress proxy's port for the session. Unfillable (no proxy): the host drops `browser`
 /// and shows `NoProxy`.
 pub const PROXY_PORT: &str = "{proxy_port}";
@@ -24,10 +34,11 @@ pub const SESSION_ID: &str = "{session_id}";
 /// `browser` and shows `BrowserNotInstalled`.
 pub const BROWSER_EXECUTABLE: &str = "{browser_executable}";
 
-/// The tokens the host fills in the instructions.
+/// The tokens the host fills in the instructions. An unfillable one is a host bug: the host
+/// fails the launch with `agent.launch_failed`, naming the token ([`Unfilled`]'s message).
 pub const IN_INSTRUCTIONS: [&str; 2] = [WORK_FOLDER, MATTER_NOTES];
 /// The tokens the host fills in the `browser` entry.
-pub const IN_SERVERS: [&str; 4] = [SESSION_DIR, PROXY_PORT, SESSION_ID, BROWSER_EXECUTABLE];
+pub const IN_SERVERS: [&str; 4] = [BROWSER_DIR, PROXY_PORT, SESSION_ID, BROWSER_EXECUTABLE];
 
 /// A token in `tokens` that [`fill`] had no value for.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -72,14 +83,11 @@ mod tests {
     #[test]
     fn a_filled_value_is_never_scanned_again() {
         let filled = fill(
-            "--cwd {session_dir}/browser on {proxy_port}",
+            "--cwd {browser_dir} on {proxy_port}",
             &IN_SERVERS,
-            &[(SESSION_DIR, "/tmp/{proxy_port}"), (PROXY_PORT, "8123")],
+            &[(BROWSER_DIR, "/tmp/{proxy_port}"), (PROXY_PORT, "8123")],
         );
-        assert_eq!(
-            filled.as_deref(),
-            Ok("--cwd /tmp/{proxy_port}/browser on 8123")
-        );
+        assert_eq!(filled.as_deref(), Ok("--cwd /tmp/{proxy_port} on 8123"));
     }
 
     #[test]
@@ -107,12 +115,12 @@ mod tests {
     fn a_server_token_in_the_instructions_is_left_alone() {
         assert_eq!(
             fill(
-                "{session_dir} {work_folder}",
+                "{browser_dir} {work_folder}",
                 &IN_INSTRUCTIONS,
                 &[(WORK_FOLDER, "w"), (MATTER_NOTES, "m")]
             )
             .as_deref(),
-            Ok("{session_dir} w")
+            Ok("{browser_dir} w")
         );
     }
 }

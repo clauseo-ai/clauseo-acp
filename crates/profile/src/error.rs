@@ -25,6 +25,15 @@ pub enum ProfileError {
         /// What went wrong.
         reason: String,
     },
+    /// A path the profile was given, or found on disk, is one it must not use: a relative
+    /// program path, a symlink inside a skills folder, a name that escapes it.
+    #[error("{}: {reason}", path.display())]
+    Path {
+        /// The path.
+        path: PathBuf,
+        /// Why it is refused.
+        reason: &'static str,
+    },
     /// A skill's text breaks the format or a rule.
     #[error("the skill {skill}: {reason}")]
     Skill {
@@ -41,6 +50,13 @@ impl ProfileError {
             action,
             path: path.to_owned(),
             source,
+        }
+    }
+
+    pub(crate) fn path(path: &Path, reason: &'static str) -> Self {
+        Self::Path {
+            path: path.to_owned(),
+            reason,
         }
     }
 

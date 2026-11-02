@@ -2,11 +2,13 @@
 //! writes: for each skill, its version and the SHA-256 of each of its files.
 //!
 //! ```json
-//! {"skills": {"stetdoc": {"version": "stetdoc 0.9.1", "files": {"SKILL.md": "<hex>"}}}}
+//! {"format": 1,
+//!  "skills": {"stetdoc": {"version": "stetdoc 0.9.1", "files": {"SKILL.md": "<hex>"}}}}
 //! ```
 //!
-//! A render rewrites only the entries of the skills it is given; every other entry stays as
-//! the file had it.
+//! A render rewrites only the entries of the skills it is given; every other entry, and every
+//! top-level key other than `format` and `skills`, stays as the file had it. `format` is
+//! [`FORMAT`], so a later Clauseo can tell this shape from its own.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -19,6 +21,9 @@ use crate::error::ProfileError;
 
 /// The manifest's file name.
 pub const MANIFEST: &str = ".clauseo-manifest.json";
+
+/// The manifest's `format`.
+pub const FORMAT: u64 = 1;
 
 /// One skill's entry.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -52,6 +57,8 @@ impl Entry {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Manifest {
     skills: Map<String, Value>,
+    /// Top-level keys other than `format` and `skills`, kept as they were.
+    other: Map<String, Value>,
 }
 
 impl Manifest {
@@ -64,11 +71,14 @@ impl Manifest {
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Self::default()),
             Err(err) => return Err(ProfileError::io("read", &path, err)),
         };
-        let skills = serde_json::from_slice::<Value>(&bytes)
-            .ok()
-            .and_then(|value| value.get("skills")?.as_object().cloned());
-        if let Some(skills) = skills {
-            return Ok(Self { skills });
+        let parsed = serde_json::from_slice::<Value>(&bytes).ok();
+        if let Some(Value::Object(mut top)) = parsed
+            && let Some(Value::Object(skills)) = top.remove("skills")
+        {
+            if top.remove("format").is_some_and(|format| format != FORMAT) {
+                tracing::warn!(path = %path.display(), "a skills manifest of another format");
+            }
+            return Ok(Self { skills, other: top });
         }
         tracing::warn!(path = %path.display(), "a skills manifest does not parse");
         Ok(Self::default())
@@ -86,9 +96,17 @@ impl Manifest {
 
     /// The file's bytes: pretty JSON with keys in order, and a final newline.
     pub fn to_bytes(&self) -> Vec<u8> {
-        // Skills sorted by name, whatever order they were read or set in.
+        // Every key sorted, whatever order it was read or set in, so the bytes do not depend on
+        // serde_json's `preserve_order`.
         let skills: BTreeMap<&String, &Value> = self.skills.iter().collect();
-        let value = serde_json::json!({ "skills": skills });
+        let mut top: BTreeMap<&str, Value> = self
+            .other
+            .iter()
+            .map(|(key, value)| (key.as_str(), value.clone()))
+            .collect();
+        top.insert("format", Value::from(FORMAT));
+        top.insert("skills", serde_json::json!(skills));
+        let value = serde_json::json!(top);
         let mut text = serde_json::to_string_pretty(&value).unwrap_or_default();
         text.push('\n');
         text.into_bytes()
