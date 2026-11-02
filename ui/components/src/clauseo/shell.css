@@ -268,12 +268,18 @@
     scrollbar-gutter: stable;
     min-height: 0;
     position: relative;
+    /* a streamed line's layout stops here, so the centre doesn't lay out the pinned question again (WebKit repaints
+       it whole each time); the thread's size comes from the flex column, never from its content */
+    contain: strict;
   }
   .room-thread-inner {
     padding: var(--s8) var(--gutter) var(--s6);
     display: flex;
     flex-direction: column;
     gap: var(--s8);
+    /* its own layer: WebKit repaints a scroller's visible tiles whole whenever its scroll height changes, which a
+       stream does nearly every chunk; as a layer of its own, the growth repaints only the new area */
+    will-change: opacity;
   }
   .room-centre[data-turn="page"] .room-thread {
     visibility: hidden;
