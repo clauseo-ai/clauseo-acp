@@ -179,6 +179,46 @@ test("a paragraph longer than MAX_PARAGRAPH is cut into parts that start with te
   for (const block of fresh("<u>a</u>".repeat(2000))) expect(block).toMatch(/^(?:<u>a<\/u>)+$/);
 }, 30_000);
 
+test("over random grow, insert, rewrite and shrink steps, long paragraphs split incrementally as fresh", () => {
+  // A change inside a part after a cut must lex again from the paragraph's start (split.ts,
+  // `while (keep > 0 && soft[keep]) keep--`): from the part, marked reads it as a block of its own.
+  const next = random(173);
+  const CHARACTERS = ["x", " ", "\n", "<", "=", "\uFDDD", "*"];
+  let steps = 0;
+  let longest = 0;
+  for (const text of LONG_PARAGRAPHS) {
+    const incremental = createSplitter(realEndOf);
+    let current = "";
+    for (let step = 0; step < 400; step++) {
+      // Mostly growing, so the text reaches several parts; the changes land anywhere before its end.
+      const roll = next();
+      const at = Math.floor(next() * current.length);
+      if (roll < 0.6)
+        current += text.slice(current.length, current.length + 1 + Math.floor(next() * 400));
+      else if (roll < 0.75)
+        current =
+          current.slice(0, at) +
+          text.slice(at, at + 1 + Math.floor(next() * 40)) +
+          current.slice(at);
+      else if (roll < 0.95) {
+        const character = CHARACTERS[Math.floor(next() * CHARACTERS.length)]!;
+        current = current.slice(0, at) + character + current.slice(at + 1);
+      } else current = current.slice(0, Math.max(0, current.length - Math.floor(next() * 600)));
+      longest = Math.max(longest, current.length);
+      const blocks = incremental(current);
+      const once = createSplitter(realEndOf);
+      const label = `step ${step} of ${JSON.stringify(text.slice(0, 30))}`;
+      expect(blocks.join("")).toBe(current);
+      expect(blocks, label).toEqual(once(current));
+      // Which blocks continue a paragraph too: a part lexed as a block of its own would be a hard start.
+      expect(incremental.continues(), label).toEqual(once.continues());
+      steps++;
+    }
+  }
+  expect(steps).toBe(400 * LONG_PARAGRAPHS.length);
+  expect(longest).toBeGreaterThan(3 * MAX_PARAGRAPH);
+}, 60_000);
+
 /** A 5 KB paragraph whose emphasis, tag, link and footnote reference span where a part would be cut. */
 const SPANNING = `${"Filler words of an ordinary sentence. ".repeat(102)}**Strong text starts here <sup>tag starts [link text ${"long ".repeat(60)}ends](https://example.com) and a note[^n] ${"more ".repeat(30)}</sup> strong ends** ${"Then the paragraph goes on. ".repeat(30)}`;
 
