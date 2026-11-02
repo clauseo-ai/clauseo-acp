@@ -236,6 +236,24 @@ test("after a click answer, focus inside the prompt goes back to the room's fiel
   expect(document.activeElement).toBe(field());
 });
 
+test("a click answer with focus nowhere, as WebKit on macOS leaves it, puts focus in the room's field", async () => {
+  const onAnswer = await show();
+  await act(async () => (document.activeElement as HTMLElement | null)?.blur());
+  expect(document.activeElement).toBe(document.body);
+  await act(async () => ($(".perm button") as HTMLButtonElement).click());
+  expect(onAnswer.mock.calls).toEqual([["once"]]);
+  expect(document.activeElement).toBe(field());
+});
+
+test("a click answer with focus in another control leaves it there", async () => {
+  const onAnswer = await show();
+  const other = $(".other-field") as HTMLInputElement;
+  other.focus();
+  await act(async () => ($(".perm button") as HTMLButtonElement).click());
+  expect(onAnswer.mock.calls).toEqual([["once"]]);
+  expect(document.activeElement).toBe(other);
+});
+
 test("after a key answer from inside the prompt, focus goes back to the room's field", async () => {
   const onAnswer = await show();
   const button = $(".perm button:nth-child(3)") as HTMLButtonElement;

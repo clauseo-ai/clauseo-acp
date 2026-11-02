@@ -102,9 +102,12 @@ export function PermissionPrompt({
     (a: PermissionAnswer) => {
       // busy or confirming, the answers are held: a press on one does nothing
       if (latest.current.held) return;
-      const inside = rootRef.current?.contains(document.activeElement) === true;
+      // focus nowhere counts as inside: WebKit on macOS doesn't focus a clicked button, so a click leaves the body
+      // focused, and the field must take the next words, never the page's keys
+      const now = document.activeElement;
+      const back = now === null || now === document.body || rootRef.current?.contains(now) === true;
       latest.current.onAnswer(a);
-      if (inside) room.nodes.get("field")?.focus();
+      if (back) room.nodes.get("field")?.focus();
     },
     [room],
   );
