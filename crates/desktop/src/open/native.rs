@@ -1,14 +1,14 @@
 //! The native sides of [`super::LinkConfirm`] and [`super::Opener`]: the confirm drawn by
-//! Rust with the dialog plugin, and the OS's default apps and file manager through the opener
-//! plugin. The webview has no permission for either plugin.
+//! Rust with the dialog plugin (`dialogs::confirm`: Cancel first and default, over the main
+//! window), and the OS's default apps and file manager through the opener plugin. The webview
+//! has no permission for either plugin.
 
 use std::path::{Path, PathBuf};
 
 use clauseo_host::HostHandle;
 use clauseo_protocol::{ErrorCode, FileRefId, HostError, MatterId, Principal};
-use futures::channel::oneshot;
 use tauri::{AppHandle, Runtime};
-use tauri_plugin_dialog::{DialogExt as _, MessageDialogButtons, MessageDialogKind};
+use tauri_plugin_dialog::MessageDialogKind;
 use tauri_plugin_opener::OpenerExt as _;
 
 use super::{LinkConfirm, LinkWords, Locate, LocatedFile, Opener};
@@ -28,19 +28,14 @@ impl<R: Runtime> NativeLinkConfirm<R> {
 
 impl<R: Runtime> LinkConfirm for NativeLinkConfirm<R> {
     fn confirm_link(&self, words: LinkWords) -> BoxFuture<'_, bool> {
-        let (tx, rx) = oneshot::channel();
-        self.app
-            .dialog()
-            .message(words.message)
-            .title(words.title)
-            .kind(MessageDialogKind::Info)
-            .buttons(MessageDialogButtons::OkCancelCustom(words.ok, words.cancel))
-            .show(move |ok| {
-                // The command may have gone; then nobody reads the answer.
-                let _gone = tx.send(ok);
-            });
-        // A dialog that never answers (the app closing) counts as declined.
-        Box::pin(async move { rx.await.unwrap_or(false) })
+        crate::dialogs::confirm(
+            &self.app,
+            MessageDialogKind::Info,
+            words.title,
+            words.message,
+            words.ok,
+            &words.cancel,
+        )
     }
 }
 
@@ -54,6 +49,29 @@ impl<R: Runtime> NativeOpener<R> {
     pub(crate) fn new(app: AppHandle<R>) -> Self {
         Self { app }
     }
+}
+
+/// The app to open files of `kind` with, by path: on macOS `LaunchServices`' default for the
+/// type (`mac_app`), so a file swapped for a link to a program after the checks opens as a
+/// document in that app; `internal` when macOS knows none. Elsewhere `None`: Windows picks the
+/// app by the name's extension, which was checked, and Linux is not a release platform.
+#[cfg(target_os = "macos")]
+fn default_app(kind: &str) -> Result<Option<String>, HostError> {
+    let app = super::mac_app::default_app(kind).ok_or_else(|| {
+        HostError::new(
+            ErrorCode::Internal,
+            format!("no app opens files of the type {kind}"),
+        )
+    })?;
+    let app = app.to_str().map(str::to_owned).ok_or_else(|| {
+        HostError::new(ErrorCode::Internal, "the default app's path is not Unicode")
+    })?;
+    Ok(Some(app))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn default_app(_kind: &str) -> Result<Option<String>, HostError> {
+    Ok(None)
 }
 
 /// An `internal` failure: the OS did not open what it was asked to.
@@ -72,14 +90,15 @@ impl<R: Runtime> Opener for NativeOpener<R> {
             .map_err(|error| not_opened("link", &error))
     }
 
-    fn open_path(&self, path: &Path) -> Result<(), HostError> {
+    fn open_path(&self, path: &Path, kind: &str) -> Result<(), HostError> {
         // A lossy name could name another file: one that is not Unicode is refused.
         let path = path.to_str().ok_or_else(|| {
             HostError::new(ErrorCode::CommandInvalid, "the file's name is not Unicode")
         })?;
+        let app = default_app(kind)?;
         self.app
             .opener()
-            .open_path(path, None::<&str>)
+            .open_path(path, app.as_deref())
             .map_err(|error| not_opened("file", &error))
     }
 

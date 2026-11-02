@@ -4,6 +4,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use clauseo_protocol::{ErrorCode, FileRefId, HostError, Language, MatterId};
 use uuid::Uuid;
@@ -17,7 +18,8 @@ mod links;
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Opened {
     Url(String),
-    Path(PathBuf),
+    /// A file, and the type it was opened as.
+    Path(PathBuf, String),
     Reveal(PathBuf),
 }
 
@@ -35,11 +37,11 @@ impl Opener for FakeOpener {
         self.0.lock().unwrap().push(Opened::Url(url.to_owned()));
         Ok(())
     }
-    fn open_path(&self, path: &Path) -> Result<(), HostError> {
+    fn open_path(&self, path: &Path, kind: &str) -> Result<(), HostError> {
         self.0
             .lock()
             .unwrap()
-            .push(Opened::Path(path.to_path_buf()));
+            .push(Opened::Path(path.to_path_buf(), kind.to_owned()));
         Ok(())
     }
     fn reveal(&self, path: &Path) -> Result<(), HostError> {
@@ -128,6 +130,49 @@ fn host(folder: &Path, path: &Path) -> FakeHost {
     }
 }
 
+/// A clock the test moves by hand.
+struct Clock(Mutex<Instant>);
+
+impl Clock {
+    fn new() -> Self {
+        Self(Mutex::new(gate::now()))
+    }
+    fn now(&self) -> Instant {
+        *self.0.lock().unwrap()
+    }
+    fn advance(&self, by: Duration) {
+        *self.0.lock().unwrap() += by;
+    }
+}
+
+/// `open_external` as the command runs it: the link checked first, then the confirm, through a
+/// fresh gate.
+fn external(
+    confirm: &FakeConfirm,
+    opener: &FakeOpener,
+    clock: &Clock,
+    language: Language,
+    url: &str,
+) -> Result<(), HostError> {
+    let link = check_link(url)?;
+    let gate = gate::Gate::default();
+    block_on(open_external(
+        confirm,
+        opener,
+        &gate,
+        &|| clock.now(),
+        language,
+        &link,
+    ))
+}
+
+/// `open_file` through a fresh gate.
+fn file(host: &FakeHost, opener: &FakeOpener, file: FileRefId) -> Result<(), HostError> {
+    let clock = Clock::new();
+    let gate = gate::Gate::default();
+    block_on(open_file(host, opener, &gate, &|| clock.now(), file))
+}
+
 fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
     futures::executor::block_on(future)
 }
@@ -155,10 +200,13 @@ fn a_document_in_its_matter_opens_by_its_resolved_path() {
         &folder.join("Drafts").join("..").join("Drafts/Brief.docx"),
     );
     let opener = FakeOpener::default();
-    block_on(open_file(&host, &opener, host.file)).unwrap();
+    file(&host, &opener, host.file).unwrap();
     assert_eq!(
         opener.opened(),
-        [Opened::Path(dunce::canonicalize(&brief).unwrap())]
+        [Opened::Path(
+            dunce::canonicalize(&brief).unwrap(),
+            "docx".to_owned()
+        )]
     );
 }
 
@@ -168,7 +216,7 @@ fn an_unknown_ref_opens_nothing() {
     let (folder, brief, _) = matter_folder(&scratch);
     let host = host(&folder, &brief);
     let opener = FakeOpener::default();
-    let refused = block_on(open_file(&host, &opener, file_ref()));
+    let refused = file(&host, &opener, file_ref());
     assert_eq!(code(refused), ErrorCode::CommandInvalid);
     assert_eq!(opener.opened(), []);
 }
@@ -180,7 +228,7 @@ fn a_file_outside_its_matter_is_refused() {
     let opener = FakeOpener::default();
     for path in [outside.as_path(), &folder.join("..").join("Outside.docx")] {
         let host = host(&folder, path);
-        let refused = block_on(open_file(&host, &opener, host.file));
+        let refused = file(&host, &opener, host.file);
         assert_eq!(
             code(refused),
             ErrorCode::CommandInvalid,
@@ -193,7 +241,7 @@ fn a_file_outside_its_matter_is_refused() {
     {
         let link = scratch.link(&outside, "Acme/Linked.docx");
         let host = host(&folder, &link);
-        let refused = block_on(open_file(&host, &opener, host.file));
+        let refused = file(&host, &opener, host.file);
         assert_eq!(code(refused), ErrorCode::CommandInvalid);
     }
     assert_eq!(opener.opened(), []);
@@ -225,7 +273,7 @@ fn only_document_files_open() {
     }
     for path in refused {
         let host = host(&folder, &path);
-        let answer = block_on(open_file(&host, &opener, host.file));
+        let answer = file(&host, &opener, host.file);
         assert_eq!(
             code(answer),
             ErrorCode::CommandInvalid,
@@ -238,8 +286,44 @@ fn only_document_files_open() {
     // The type is matched without regard to case.
     let upper = scratch.file("Acme/NOTE.PDF", b"%PDF");
     let host = host(&folder, &upper);
-    block_on(open_file(&host, &opener, host.file)).unwrap();
+    file(&host, &opener, host.file).unwrap();
     assert_eq!(opener.opened().len(), 1);
+}
+
+/// A document marked as a program (an execute bit) is refused on macOS and Linux, whatever its
+/// name says.
+#[cfg(unix)]
+#[test]
+fn a_file_marked_as_a_program_is_refused() {
+    let scratch = Scratch::new("open-executable", &[]);
+    let (folder, brief, _) = matter_folder(&scratch);
+    scratch.executable("Acme/Drafts/Brief.docx");
+    let host = host(&folder, &brief);
+    let opener = FakeOpener::default();
+    let refused = file(&host, &opener, host.file);
+    assert_eq!(code(refused), ErrorCode::CommandInvalid);
+    assert_eq!(opener.opened(), []);
+}
+
+/// One open at a time and at most one a second: a page cannot open documents in a loop.
+#[test]
+fn files_open_one_at_a_time_and_at_most_one_a_second() {
+    let scratch = Scratch::new("open-gate", &[]);
+    let (folder, brief, _) = matter_folder(&scratch);
+    let host = host(&folder, &brief);
+    let opener = FakeOpener::default();
+    let clock = Clock::new();
+    let gate = gate::Gate::default();
+    let run = || block_on(open_file(&host, &opener, &gate, &|| clock.now(), host.file));
+    let pass = gate.enter(clock.now()).unwrap();
+    assert_eq!(code(run()), ErrorCode::CommandConflict);
+    drop(pass);
+    run().unwrap();
+    clock.advance(BETWEEN_OPENS.checked_sub(Duration::from_millis(1)).unwrap());
+    assert_eq!(code(run()), ErrorCode::CommandConflict);
+    clock.advance(Duration::from_millis(1));
+    run().unwrap();
+    assert_eq!(opener.opened().len(), 2);
 }
 
 #[test]
@@ -248,11 +332,11 @@ fn a_missing_file_or_folder_opens_nothing() {
     let (folder, brief, _) = matter_folder(&scratch);
     let opener = FakeOpener::default();
     let gone = host(&folder, &folder.join("Gone.docx"));
-    let refused = block_on(open_file(&gone, &opener, gone.file));
+    let refused = file(&gone, &opener, gone.file);
     assert_eq!(code(refused), ErrorCode::CommandInvalid);
 
     let moved = host(&scratch.path().join("Moved"), &brief);
-    let refused = block_on(open_file(&moved, &opener, moved.file));
+    let refused = file(&moved, &opener, moved.file);
     assert_eq!(code(refused), ErrorCode::MatterFolderMissing);
     assert_eq!(opener.opened(), []);
 }

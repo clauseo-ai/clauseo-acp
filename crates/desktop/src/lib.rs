@@ -71,7 +71,7 @@ pub const BUILDTIME_MARKER: u64 = 0;
 /// The label of the one window. `capabilities/main.json` grants by this label
 /// (`"windows": ["main"]`), so rename both together: a window whose label no capability names
 /// gets no IPC at all.
-const MAIN_WINDOW: &str = "main";
+pub(crate) const MAIN_WINDOW: &str = "main";
 
 /// The app's context, from the checked `tauri.conf.json` and capabilities. Generic, so the
 /// mock-runtime tests run under the same capabilities as the app.
@@ -195,6 +195,7 @@ fn start_host(app: &App) -> Result<(), Box<dyn std::error::Error>> {
         .with_refused_folders(clauseo_settings::refused_folders(&SystemDirs));
     let (handle, join) = Host::start(config)?;
     app.manage(open::AppData(locations.data_dir().to_path_buf()));
+    app.manage(open::OpenGates::default());
     app.manage(Bridge::new(handle));
     app.manage(HostThread(Mutex::new(Some(join))));
     Ok(())

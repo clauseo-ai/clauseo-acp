@@ -67,12 +67,14 @@ export const commands = {
 	 *  Opens an https, http or mailto `url` in the default browser or mail app, after a native
 	 *  confirm that names where it goes, in the app's language. Any other link is
 	 *  `command.invalid`; declined, nothing opens and the call fails with `transport.unauthorized`.
+	 *  One confirm at a time: `command.conflict` while one is open, and for a second after a decline.
 	 */
 	openExternal: (url: string) => typedError<null, HostError>(__TAURI_INVOKE("open_external", { url })),
 	/**
 	 *  Opens the document `file` names with its default app. Refused with `command.invalid` when
 	 *  the host did not issue the ref, when the file is not inside its matter's folder, and when
-	 *  it is not a document type (`open::DOCUMENT_TYPES`).
+	 *  it is not a document type (`open::DOCUMENT_TYPES`). One at a time and at most one a second:
+	 *  `command.conflict` otherwise.
 	 */
 	openFile: (file: FileRefId) => typedError<null, HostError>(__TAURI_INVOKE("open_file", { file })),
 	/**  Shows a matter's folder, or the app data folder, in Finder or File Explorer. */

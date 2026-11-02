@@ -24,6 +24,9 @@
 crates/desktop/src/bridge/pump.rs now clippy::disallowed_methods
 crates/desktop/src/frame.rs StreamMessage dead_code
 crates/desktop/src/open.rs open_url_unconfirmed dead_code
+crates/desktop/src/open/gate.rs now clippy::disallowed_methods
+crates/desktop/src/open/mac_app.rs - unsafe_code
+crates/desktop/src/test_support.rs Scratch::executable clippy::disallowed_methods
 crates/desktop/src/test_support.rs Scratch::dir clippy::disallowed_methods
 crates/desktop/src/test_support.rs Scratch::file clippy::disallowed_methods
 crates/desktop/src/test_support.rs Scratch::link clippy::disallowed_methods

@@ -20,7 +20,7 @@ use tauri::{AppHandle, Runtime, State, Webview};
 
 use crate::bridge::Bridge;
 use crate::frame::Frame;
-use crate::open::{AppData, NativeLinkConfirm, NativeOpener, RevealTarget};
+use crate::open::{AppData, NativeLinkConfirm, NativeOpener, OpenGates, RevealTarget};
 use crate::picked::PickedFolder;
 
 /// The command names, in the order `build.rs` and `capabilities/main.json` list them. A test
@@ -212,29 +212,52 @@ pub(crate) async fn display_info<R: Runtime>(_app: AppHandle<R>) -> Result<Displ
 /// Opens an https, http or mailto `url` in the default browser or mail app, after a native
 /// confirm that names where it goes, in the app's language. Any other link is
 /// `command.invalid`; declined, nothing opens and the call fails with `transport.unauthorized`.
+/// One confirm at a time: `command.conflict` while one is open, and for a second after a decline.
 #[tauri::command]
 #[cfg_attr(test, specta::specta)]
 pub(crate) async fn open_external<R: Runtime>(
     app: AppHandle<R>,
     bridge: State<'_, Bridge>,
+    gates: State<'_, OpenGates>,
     url: String,
 ) -> Result<(), HostError> {
+    // The link is checked before anything else, the settings read included.
+    let link = crate::open::check_link(&url)?;
     let language = bridge.language().await;
     let confirm = NativeLinkConfirm::new(app.clone());
-    crate::open::open_external(&confirm, &NativeOpener::new(app), language, &url).await
+    let opener = NativeOpener::new(app);
+    crate::open::open_external(
+        &confirm,
+        &opener,
+        &gates.links,
+        &crate::open::now,
+        language,
+        &link,
+    )
+    .await
 }
 
 /// Opens the document `file` names with its default app. Refused with `command.invalid` when
 /// the host did not issue the ref, when the file is not inside its matter's folder, and when
-/// it is not a document type (`open::DOCUMENT_TYPES`).
+/// it is not a document type (`open::DOCUMENT_TYPES`). One at a time and at most one a second:
+/// `command.conflict` otherwise.
 #[tauri::command]
 #[cfg_attr(test, specta::specta)]
 pub(crate) async fn open_file<R: Runtime>(
     app: AppHandle<R>,
     bridge: State<'_, Bridge>,
+    gates: State<'_, OpenGates>,
     file: FileRefId,
 ) -> Result<(), HostError> {
-    crate::open::open_file(bridge.host(), &NativeOpener::new(app), file).await
+    let opener = NativeOpener::new(app);
+    crate::open::open_file(
+        bridge.host(),
+        &opener,
+        &gates.files,
+        &crate::open::now,
+        file,
+    )
+    .await
 }
 
 /// Shows a matter's folder, or the app data folder, in Finder or File Explorer.

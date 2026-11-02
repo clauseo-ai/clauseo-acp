@@ -90,3 +90,20 @@ impl LinkWords {
         }
     }
 }
+
+#[cfg(test)]
+impl LinkWords {
+    /// The words for both kinds of link in every language, for tests.
+    pub(crate) fn every_table_for_tests() -> Vec<Self> {
+        let mut all = Vec::new();
+        for language in [Language::En, Language::Hi] {
+            for destination in [
+                Destination::Web("example.com".to_owned()),
+                Destination::Mail("a@b.example".to_owned()),
+            ] {
+                all.push(Self::new(&destination, language));
+            }
+        }
+        all
+    }
+}

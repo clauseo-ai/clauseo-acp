@@ -24,6 +24,12 @@ pub(crate) fn remove_dir_all(path: &Path) -> std::io::Result<()> {
     }
 }
 
+/// Unix: makes `link` a symbolic link to `target`.
+#[cfg(unix)]
+pub(crate) fn symlink(target: &Path, link: &Path) {
+    std::os::unix::fs::symlink(target, link).unwrap();
+}
+
 /// Windows: opens `path` to read and write with a share mode that lets others read it but not
 /// write it, as Word holds a document it has open.
 #[cfg(windows)]
@@ -63,12 +69,6 @@ pub(crate) fn set_mtime(path: &Path, mtime: std::time::SystemTime) {
 /// `fs::rename`: the lawyer moving a folder.
 pub(crate) fn rename(from: &Path, to: &Path) {
     std::fs::rename(from, to).unwrap();
-}
-
-/// A link at `link` to the folder `target`.
-#[cfg(unix)]
-pub(crate) fn symlink(target: &Path, link: &Path) {
-    std::os::unix::fs::symlink(target, link).unwrap();
 }
 
 /// `fs::remove_file`.
