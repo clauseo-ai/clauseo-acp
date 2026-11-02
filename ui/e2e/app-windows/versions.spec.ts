@@ -6,7 +6,7 @@
 
 import { expect } from "@playwright/test";
 import { test } from "./fixture.ts";
-import { expectTurnEnded, openMatter, sendPrompt } from "./flow.ts";
+import { expectTurnEnded, openMatter, sendPrompt, showRail } from "./flow.ts";
 import { readTree } from "./scratch.ts";
 import { window, type Window } from "./selectors.ts";
 
@@ -43,11 +43,18 @@ test("Undo from Versions puts back the files a turn changed", async ({ app, scra
   await w.dialogConfirm.click();
   await expect(w.dialog).toBeHidden();
 
+  // Below 1200 px (the e2e window is 1028 px wide) picking a version closes the panel; the
+  // toolbar's Versions brings it back, now with the undo as a version of its own.
+  if (!(await w.versionsPanel.isVisible())) {
+    await w.versionsButton.click();
+  }
   await expect(w.version("undo")).toHaveCount(1);
   await expect.poll(() => readTree(scratch.matterDir)).toEqual(BEFORE);
 
+  // Closing the panel puts the rail back: open, or folded behind Matters below 1200 px.
   await w.versionsClose.click();
   await expect(w.versionsPanel).toBeHidden();
+  await showRail(w);
   await expect(w.rail).toBeVisible();
 });
 
