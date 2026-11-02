@@ -13,8 +13,10 @@ use clauseo_protocol::{
 use crate::permissions::{KINDS_ANSWERS, PERM, answer_from, until_first_request};
 use crate::support::{Dir, FAKE, Running, Scenario, matter_with_thread};
 
-/// One display batch.
-const DISPLAY: Duration = Duration::from_millis(16);
+/// The durable batch: armed by a message's first un-durable delta, so seeing it armed means the
+/// agent's first chunk reached the host, as the cancel tests wait for it. (The display shows that
+/// chunk at once, so no display timer is armed for it.)
+const DURABLE: Duration = Duration::from_millis(250);
 
 /// The cancel fallback's wait.
 const CANCEL_WAIT: Duration = Duration::from_secs(5);
@@ -39,7 +41,7 @@ fn working_then_stopped_then_idle_once_opened() {
     assert_eq!(status(&host, matter), MatterStatus::Idle, "a new thread");
     let mut events = host.events(StreamId::Thread(thread));
     let (turn, _) = host.prompt(thread, "Find the cap.");
-    host.wait_armed(DISPLAY);
+    host.wait_armed(DURABLE);
     assert_eq!(status(&host, matter), MatterStatus::Working);
     host.ok(HostCommand::Cancel { thread });
     host.wait_armed(CANCEL_WAIT);

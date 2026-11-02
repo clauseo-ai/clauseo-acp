@@ -174,6 +174,11 @@ impl Dir {
         &self.root
     }
 
+    /// The folder the matter folders go in, `<root>-work`, beside the data folder.
+    pub(crate) fn work(&self) -> &Path {
+        &self.work
+    }
+
     /// `name` in the matter folders' place, outside the data folder; not made.
     pub(crate) fn work_path(&self, name: &str) -> PathBuf {
         self.work.join(name)

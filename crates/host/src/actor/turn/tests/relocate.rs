@@ -182,7 +182,9 @@ fn a_folder_a_relocate_is_moving_a_matter_to_counts_against_new_matters() {
     let mut rig = Rig::start("relocate-target-claimed", ANSWER);
     let matter = rig.matter();
     let old = PathBuf::from(&rig.actor.matters[&matter].row.folder_path);
-    let moved = old.with_file_name("Scratch target");
+    // Outside the data folder: a folder inside it is refused, as the matters root is (#176).
+    let copies = TempDir::new("relocate-target-claimed-copies");
+    let moved = copies.path().join("Scratch target");
     crate::write::create_dir_all(&moved.join(".clauseo")).unwrap();
     let marker = std::fs::read(old.join(".clauseo/matter.json")).unwrap();
     crate::write::write_file(&moved.join(".clauseo/matter.json"), &marker).unwrap();

@@ -19,8 +19,10 @@ fn import_refuses_a_folder_inside_the_data_folder() {
         HostCommand::CreateMatter {
             name: Title::new("agents").unwrap(),
             source: MatterSource::ExistingFolder { folder },
+            client: None,
+            next_date: None,
         },
-        ErrorCode::MatterFolderRefused,
+        ErrorCode::MatterFolderInMattersRoot,
     );
     assert!(
         !agents.join(".clauseo").exists(),

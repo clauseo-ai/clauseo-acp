@@ -59,9 +59,10 @@ pub(crate) fn created(outcome: Result<CommandOutcome, clauseo_protocol::HostErro
 #[test]
 fn a_create_keeps_its_details_and_list_matters_shows_every_field() {
     let dir = Dir::new("create_details", &[]);
-    let host = dir.start_with(0, |config| {
-        config.with_home_folder(Some(dir.data().to_owned()))
-    });
+    // The home holds the work folder, so the matter's folder shows below it.
+    let home = dir.work().parent().unwrap().to_owned();
+    let work = Path::new(dir.work().file_name().unwrap());
+    let host = dir.start_with(0, |config| config.with_home_folder(Some(home.clone())));
     let folder = dir.folder("State v. Kunal Desai", &[("fir.txt", "x\n")]);
     let now = host.clock.now().wall;
     let matter = created(import(
@@ -83,10 +84,7 @@ fn a_create_keeps_its_details_and_list_matters_shows_every_field() {
             pinned: false,
             last_opened: None,
             status: MatterStatus::Idle,
-            folder_display: Path::new("work")
-                .join("State v. Kunal Desai")
-                .display()
-                .to_string(),
+            folder_display: work.join("State v. Kunal Desai").display().to_string(),
             folder_state: FolderState::Found,
         }
     );
@@ -100,9 +98,7 @@ fn a_create_keeps_its_details_and_list_matters_shows_every_field() {
     host.shutdown();
 
     // A restart reads the same row and the same last activity back.
-    let host = dir.start_with(1, |config| {
-        config.with_home_folder(Some(dir.data().to_owned()))
-    });
+    let host = dir.start_with(1, |config| config.with_home_folder(Some(home)));
     assert_eq!(summary(&host, matter), listed);
     host.shutdown();
 }
@@ -319,15 +315,13 @@ fn last_activity_follows_the_newest_event_of_the_matter_and_its_threads() {
 #[test]
 fn a_home_reached_through_a_link_still_shortens_the_folder() {
     let dir = Dir::new("home_through_link", &[]);
+    // The link stands for the work folder, where the matter folders are.
     let link = dir.data().join("home-link");
-    crate::write::symlink(dir.data(), &link);
+    crate::write::symlink(dir.work(), &link);
     let host = dir.start_with(0, |config| config.with_home_folder(Some(link.clone())));
     let folder = dir.folder("Acme", &[]);
     let matter = created(import(&host, "Acme", &folder, (None, None)));
-    assert_eq!(
-        summary(&host, matter).folder_display,
-        Path::new("work").join("Acme").display().to_string()
-    );
+    assert_eq!(summary(&host, matter).folder_display, "Acme");
     host.shutdown();
 }
 
