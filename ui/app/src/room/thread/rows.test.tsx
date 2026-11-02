@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 // The room's thread over FakeTransport, the rows' side: tool calls, each stop line, the change note and its Undo, the
-// limit stop, a notice, images and attachments, a failed turn reopened, older pages, and H17's clock times.
+// limit stop, a notice, images and attachments, a failed turn reopened, older pages, and the clock
+// times on questions and answers.
 import { act } from "react";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { lim } from "@clauseo/components/lib/words-limits.ts";
@@ -21,7 +22,6 @@ import {
   uuid,
 } from "../../testing/stream-script.ts";
 import type { FileChange, HostError, StepEntry, ViewEntry } from "../../transport/protocol.ts";
-import { withTime } from "../host-next.ts";
 import { clockTime } from "./clock.ts";
 import { defaultOutcome, mountRoom, type Harness } from "./harness.ts";
 
@@ -236,6 +236,10 @@ test("without its checkpoint a step has no Undo, and says why", async () => {
   );
 });
 
+// The thread's clock reads the computer's time zone; this file's times are Asia/Kolkata's whatever zone the run has,
+// so the same lines come out under TZ=UTC, TZ=Asia/Kolkata or a CI runner's own zone.
+process.env["TZ"] = "Asia/Kolkata";
+
 /** A fixed "now", Monday 2 November 2026 at 3 pm local, so a run that crosses midnight reads the same. */
 const NOW = new Date(2026, 10, 2, 15, 0);
 const local = (days: number, h: number, m: number) => new Date(2026, 10, 2 + days, h, m).getTime();
@@ -248,6 +252,7 @@ const limit = (n: number, reason: string, resets_at?: number): ViewEntry => ({
     order: 10 + n,
     turn: uuid(n, 4),
     reason: reason as never,
+    ts: 10_000 + n,
     ...(resets_at === undefined ? {} : { resets_at }),
   },
 });
@@ -330,6 +335,7 @@ test("a notice is a quiet line; markers, versions, permissions and elicitations 
           event: uuid(1, 10),
           level: "warning",
           text: "Claude Code was updated.",
+          ts: 6000,
         },
       },
       {
@@ -337,6 +343,7 @@ test("a notice is a quiet line; markers, versions, permissions and elicitations 
           order: 7,
           event: uuid(2, 10),
           kind: { compaction: { status: "started" } } as never,
+          ts: 7000,
         },
       },
       {
@@ -492,33 +499,40 @@ test("the log is busy until the first view lands; a streaming answer is busy unt
   expect(h.one("message-agent")?.hasAttribute("aria-busy")).toBe(false);
 });
 
-test("each answer section opens with the meta line: Clauseo, with no time yet", async () => {
+/** 4:31 pm and 4:33 pm on Monday 2 November 2026 in Asia/Kolkata (UTC+5:30), as the host sends them: ms since the
+ * epoch. */
+const ASKED = Date.UTC(2026, 10, 2, 11, 1);
+const ENDED = Date.UTC(2026, 10, 2, 11, 3);
+const sent = (order: number, n: number, text: string, ts: number): ViewEntry => ({
+  user_message: { ...userMessage(order, n, text).user_message!, ts },
+});
+
+test("a question's Who line is You and the time it was sent; each answer's meta line is Clauseo, with its turn's time once the step is in", async () => {
+  fixNow();
   h = await mountRoom();
   h.deliver([
     reset([
-      userMessage(5, 1, "First"),
+      sent(5, 1, "First", ASKED),
       agentText(6, 1, "One"),
-      step(7),
-      userMessage(8, 2, "Second"),
+      step(7, { ts: ENDED }),
+      sent(8, 2, "Second", ENDED),
+      agentText(9, 2, "Two so far"),
     ]),
   ]);
-  const answers = [...h.host.querySelectorAll("section.step-answer")];
-  // the latest question's section waits for its answer under the meta line already
-  expect(answers).toHaveLength(2);
-  for (const a of answers) {
-    const meta = a.firstElementChild;
-    expect(meta?.className).toBe("meta meta-live");
-    expect(meta?.textContent).toBe(t("en", "Clauseo"));
-  }
-});
-
-test('H17: a question shows its time when the host gives one, and "You" alone when it doesn\'t', async () => {
-  fixNow();
-  h = await mountRoom();
-  const at = local(0, 0, 1);
-  h.deliver([reset([withTime(userMessage(5, 1, "Timed"), at), userMessage(8, 2, "Untimed")])]);
-  const [timed, untimed] = h.all("message-user").map((m) => m.querySelector(".who")?.textContent);
-  expect(timed).toBe(`${t("en", "You")}, ${clockTime("en", at)}`);
-  expect(timed).toBe("You, 12:01 am");
-  expect(untimed).toBe(t("en", "You"));
+  const who = () => h!.all("message-user").map((m) => m.querySelector(".who")?.textContent);
+  const metas = () =>
+    [...h!.host.querySelectorAll("section.step-answer")].map((a) => a.firstElementChild);
+  expect(who()).toEqual([
+    `${t("en", "You")}, ${clockTime("en", ASKED)}`,
+    `${t("en", "You")}, ${clockTime("en", ENDED)}`,
+  ]);
+  expect(who()[0]).toBe("You, 4:31 pm");
+  expect(metas().map((m) => m?.className)).toEqual(["meta meta-live", "meta meta-live"]);
+  // the latest turn runs: its meta line is Clauseo alone until its step comes in
+  expect(metas().map((m) => m?.textContent)).toEqual([
+    `${t("en", "Clauseo")}, ${clockTime("en", ENDED)}`,
+    t("en", "Clauseo"),
+  ]);
+  h.deliver([upsert(step(10, { turn: uuid(2, 4), ts: ENDED + 60_000 }))]);
+  expect(metas()[1]?.textContent).toBe("Clauseo, 4:34 pm");
 });

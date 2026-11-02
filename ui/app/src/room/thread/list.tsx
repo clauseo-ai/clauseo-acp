@@ -2,17 +2,18 @@
 // scroller, the older pages above, and the exchanges, grouped from the id list alone (ids.ts), each row reading its
 // own entry (rows.tsx), so while an answer streams one frame commits once and renders only the row whose text grew.
 // Nothing here is needed for the room's first paint: Work, the session and the composer are in the room's own chunk.
-import { memo, useCallback, useMemo, type ReactNode } from "react";
+import { memo, useCallback, useMemo, useState, type ReactNode } from "react";
 import { Who } from "@clauseo/components/clauseo/answer.tsx";
 import { useRoom } from "@clauseo/components/clauseo/room-scope.ts";
 import { Thread } from "@clauseo/components/clauseo/thread.tsx";
 import { th } from "@clauseo/components/lib/words-thread.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { MarkdownHostContext, type MarkdownHost } from "@clauseo/components/markdown/host.ts";
-import { useEntryIds, useStreamPart, useViewStore } from "../../store/hooks.ts";
+import { useEntry, useEntryIds, useStreamPart, useViewStore } from "../../store/hooks.ts";
 import { entryIdOf, orderOf, type StreamView } from "../../store/view.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
-import type { EntryId, StreamId, ViewEntry } from "../../transport/protocol.ts";
+import type { EntryId, StreamId, Timestamp, ViewEntry } from "../../transport/protocol.ts";
+import { stamp } from "./clock.ts";
 import { exchangesOf, isQuestion, sameIds } from "./ids.ts";
 import { useHasOlder, useLatestQuestion } from "./live.ts";
 import { useOlder } from "./older.ts";
@@ -25,15 +26,36 @@ const ANSWER_HOST: MarkdownHost = {
   openReference() {},
 };
 
+/** The answer's meta line: "Clauseo", with its turn's time once the turn's step is in (the step's `ts`), alone
+ * before it. */
+function AnswerWho({ time }: { time: Timestamp | null }) {
+  const w = useWords();
+  // "today" as the line first showed: no clock runs to move it
+  const [now] = useState(Date.now);
+  return <Who name={w.t("Clauseo")} time={time === null ? undefined : stamp(w.lang, time, now)} />;
+}
+
+const STEP = "step:";
+
+/** A live exchange's meta line, reading only its turn's step, so a flush of the answer's text doesn't render it. */
+function LiveAnswerWho({ ids, stream }: { ids: readonly EntryId[]; stream: StreamId }) {
+  const step = ids.find((id) => id.startsWith(STEP));
+  const entry = useEntry(useViewStore(), stream, step ?? STEP);
+  return <AnswerWho time={entry?.step?.ts ?? null} />;
+}
+
 /** One exchange: the question's section and the answer's. The room's named nodes for the question and the answer
  * (the thread's scroll and its pinned question measure them) go on the latest exchange only. */
 function Sections({
   question,
   answer,
+  who,
   latest,
 }: {
   question: ReactNode | null;
   answer: ReactNode;
+  /** The answer's meta line. */
+  who: ReactNode;
   latest: boolean;
 }) {
   const w = useWords();
@@ -55,9 +77,9 @@ function Sections({
           ref={latest ? nodes.slot("answerStep") : undefined}
           aria-label={th(w.lang, "Clauseo's answer")}
         >
-          {/* the design's meta line opens each answer: "Clauseo", with no time until H17 gives one */}
+          {/* the design's meta line opens each answer: "Clauseo", and its turn's time once the step is in */}
           <div className="meta meta-live" ref={latest ? nodes.slot("meta") : undefined}>
-            <Who name={w.t("Clauseo")} />
+            {who}
           </div>
           {answer}
         </section>
@@ -84,6 +106,7 @@ const LiveExchange = memo(
         answer={
           rest.length === 0 ? null : rest.map((id) => <Row key={id} id={id} stream={stream} />)
         }
+        who={<LiveAnswerWho ids={rest} stream={stream} />}
         latest={latest}
       />
     );
@@ -99,6 +122,7 @@ function PagedExchange({ entries }: { entries: readonly ViewEntry[] }) {
     <Sections
       question={asked ? <PagedRow entry={first} /> : null}
       answer={rest.length === 0 ? null : rest.map((e) => <PagedRow key={entryIdOf(e)} entry={e} />)}
+      who={<AnswerWho time={rest.find((e) => e.step !== undefined)?.step?.ts ?? null} />}
       latest={false}
     />
   );

@@ -1,8 +1,7 @@
 // The host calls the room needs that the host doesn't have yet: H8's list of a matter's papers, H7's display
 // settings, the matters' rows: H5's details and statuses, H3's moved folders, H4's app events, H6's thread marks and
-// H20's default location, and H17's clock times on a thread's entries (read through `entryTime` and `answeredAt`).
-// Their wire shapes as the briefs give them (names in WIRE), and NextHost: one optional part per host row, which a
-// transport may give. FakeTransport does, from scripted answers; TauriTransport doesn't and never sends these. The room
+// H20's default location. Their wire shapes as the briefs give them (names in WIRE), and NextHost: one optional part
+// per host row, which a transport may give. FakeTransport does, from scripted answers; TauriTransport doesn't and never sends these. The room
 // asks for them only through `nextHostOf`, so as each row lands, the swap to the generated bindings touches this file
 // alone. Without papers the wall shows its surface only; without settings they live in localStorage
 // (display-store.ts); without matters the rail lists today's matters with no details.
@@ -22,7 +21,6 @@ import type {
   ThreadId,
   ThreadSummary,
   Timestamp,
-  ViewEntry,
 } from "../transport/protocol.ts";
 
 /* ---------- H8: a matter's papers ---------- */
@@ -69,50 +67,6 @@ export type UiSettings = {
 
 /** `get_settings`'s answer, and what `settings_changed` carries: the settings, and the keys a policy locks. */
 export type Settings = { ui: UiSettings; locked: string[] };
-
-/* ---------- H17: when a thread's entries happened ---------- */
-
-/** H17's clock time on the entries the thread shows with one: `ts`, when the entry happened. Optional: the host on
- * main sends none, and a line then shows without its time. */
-export type EntryTime = { ts?: Timestamp };
-/** H17's clock time on a permission or an elicitation: when the lawyer answered it. */
-export type AnsweredTime = { answered_at?: Timestamp };
-
-/** The entries H17 gives `ts`. */
-const TIMED = ["user_message", "step", "limit_stop", "notice", "marker"] as const;
-/** The entries H17 gives `answered_at`. */
-const ANSWERED = ["permission", "elicitation"] as const;
-
-/** The entry's body, whatever its kind, read as H17 shapes it. */
-function bodyOf<K extends keyof ViewEntry>(
-  entry: ViewEntry,
-  kinds: readonly K[],
-): Record<string, unknown> | null {
-  for (const kind of kinds) {
-    const body = entry[kind];
-    if (body !== undefined) return body as unknown as Record<string, unknown>;
-  }
-  return null;
-}
-
-const timestamp = (value: unknown): Timestamp | null =>
-  typeof value === "number" && Number.isFinite(value) ? value : null;
-
-/** When an entry happened (H17's `ts`), or null: before H17, or for a kind that carries none. */
-export const entryTime = (entry: ViewEntry): Timestamp | null =>
-  timestamp(bodyOf(entry, TIMED)?.["ts"]);
-
-/** When a permission or an elicitation was answered (H17's `answered_at`), or null. */
-export const answeredAt = (entry: ViewEntry): Timestamp | null =>
-  timestamp(bodyOf(entry, ANSWERED)?.["answered_at"]);
-
-/** An entry with H17's `ts`, as a script for FakeTransport writes it: the generated ViewEntry has no field for it
- * until H17 lands. */
-export function withTime(entry: ViewEntry, ts: Timestamp): ViewEntry {
-  const kind = TIMED.find((k) => entry[k] !== undefined);
-  if (kind === undefined) return entry;
-  return { [kind]: { ...entry[kind], ts } } as unknown as ViewEntry;
-}
 
 /* ---------- H3, H5, H20: a matter's details ---------- */
 
