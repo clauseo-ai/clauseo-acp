@@ -240,7 +240,7 @@ test("a link is written only for an https URL without Markdown in it", () => {
   expect(body).not.toContain("javascript:");
 });
 
-test("each table says its start-up rows measure a warm start, and how, per OS", () => {
+test("each table says what its start-up rows measure, per OS", () => {
   const body = renderComment(input());
   const windows = body.slice(body.indexOf("### Windows"), body.indexOf("### macOS"));
   const macos = body.slice(body.indexOf("### macOS"), body.indexOf("### Reducer"));
@@ -257,7 +257,8 @@ test("each table says its start-up rows measure a warm start, and how, per OS", 
   expect(START_NOTE.windows).toMatch(
     /cold row would measure a first launch, on a fresh profile per launch/,
   );
-  // macOS: no profile to set; the meaning matches Windows'.
-  expect(START_NOTE.macos).toContain("WKWebView has no profile folder");
-  expect(START_NOTE.macos).toContain("later launch");
+  // macOS: only what is known: no profile the harness sets, so measured as before.
+  expect(START_NOTE.macos).toContain("WKWebView has no profile folder the harness sets");
+  expect(START_NOTE.macos).toContain("measured as before, with no warmed-profile step");
+  expect(START_NOTE.macos).not.toMatch(/keeps|website data/);
 });

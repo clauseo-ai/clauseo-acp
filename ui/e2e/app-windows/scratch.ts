@@ -170,8 +170,18 @@ export interface WarmProfile {
   launches: number;
 }
 
+/** A {@link WarmProfile} that can be removed at the worker's end. */
+export interface RemovableWarmProfile extends WarmProfile {
+  /**
+   * Removes the folder, if it was made, once no browser holds it ({@link waitForFreeProfile}, up to
+   * `timeoutMs`). Never throws, since the results are written by then: a profile still locked when
+   * the wait ends, or a folder that cannot be removed, goes to `warn` and stays on disk.
+   */
+  remove(warn: (message: string) => void, timeoutMs?: number): Promise<void>;
+}
+
 /** A {@link WarmProfile} under a new temporary folder in `base`, made only when first asked for. */
-export function warmProfile(base = tmpdir()): WarmProfile & { remove(): void } {
+export function warmProfile(base = tmpdir()): RemovableWarmProfile {
   let folder: string | null = null;
   return {
     launches: 0,
@@ -179,9 +189,18 @@ export function warmProfile(base = tmpdir()): WarmProfile & { remove(): void } {
       folder ??= realpathSync.native(mkdtempSync(join(base, "clauseo-e2e-webview-")));
       return folder;
     },
-    remove() {
-      if (folder !== null) {
+    async remove(warn, timeoutMs = PROFILE_FREE_TIMEOUT_MS) {
+      if (folder === null) return;
+      if (!(await waitForFreeProfile(folder, timeoutMs))) {
+        warn(
+          `a browser process still holds the warm WebView2 profile ${folder} ${timeoutMs} ms after ` +
+            `the last launch ended; removing it anyway`,
+        );
+      }
+      try {
         rmSync(folder, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+      } catch (error) {
+        warn(`the warm WebView2 profile ${folder} could not be removed: ${String(error)}`);
       }
     },
   };
@@ -229,6 +248,23 @@ export const PROFILE_FREE_TIMEOUT_MS = 15_000;
 const PROFILE_FREE_RETRY_MS = 100;
 
 /**
+ * Waits until no browser process holds `userDataFolder` (its {@link profileLock} gone): true once
+ * free, false when the lock is still there after `timeoutMs`.
+ */
+export async function waitForFreeProfile(
+  userDataFolder: string,
+  timeoutMs = PROFILE_FREE_TIMEOUT_MS,
+): Promise<boolean> {
+  const lock = profileLock(userDataFolder);
+  const deadline = performance.now() + timeoutMs;
+  while (existsSync(lock)) {
+    if (performance.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, PROFILE_FREE_RETRY_MS));
+  }
+  return true;
+}
+
+/**
  * Readies a reused WebView2 data folder for the next launch: waits until no browser process holds
  * it (its {@link profileLock} gone), since a new launch would otherwise join the old browser
  * process instead of starting its own, then deletes the last launch's port file, so the port the
@@ -238,16 +274,11 @@ export async function readyReusedProfile(
   userDataFolder: string,
   timeoutMs = PROFILE_FREE_TIMEOUT_MS,
 ): Promise<void> {
-  const lock = profileLock(userDataFolder);
-  const deadline = performance.now() + timeoutMs;
-  while (existsSync(lock)) {
-    if (performance.now() >= deadline) {
-      throw new Error(
-        `a browser process still holds the reused WebView2 profile ${userDataFolder} ` +
-          `${timeoutMs} ms after its last launch ended (${lock} is there)`,
-      );
-    }
-    await new Promise((resolve) => setTimeout(resolve, PROFILE_FREE_RETRY_MS));
+  if (!(await waitForFreeProfile(userDataFolder, timeoutMs))) {
+    throw new Error(
+      `a browser process still holds the reused WebView2 profile ${userDataFolder} ` +
+        `${timeoutMs} ms after its last launch ended (${profileLock(userDataFolder)} is there)`,
+    );
   }
   // force: no port file is fine (the launch before never wrote one); a file still held throws.
   rmSync(portFile(userDataFolder), { force: true });
