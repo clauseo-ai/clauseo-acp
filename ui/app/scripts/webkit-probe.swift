@@ -4,11 +4,17 @@
 // per page and size; exits 1 if any page fails. The design's probe (design/03-system/scripts/webkit-probe.swift),
 // pointed at the app's room.
 //
-// Each page's WKWebView sits in a borderless window of the page's own width and height, at the top left of the main
-// screen, ordered to the back without activating the app. A view with no window counts as hidden to WebKit, and
-// requestAnimationFrame does not run in a hidden view: Base UI then never takes a dialog out of its starting style, so
-// the dialog stays at opacity 0. A window placed off-screen (-20000, -20000) was counted as hidden too, and WebKit has no
-// occlusion switch to turn that off, so the window is on screen, behind the others. The layout widths are the ones measured.
+// Each page's WKWebView sits in a borderless window of the page's own width and height, at the bottom left of the main
+// screen (Cocoa's origin), ordered to the back without activating the app. A view with no window counts as hidden to
+// WebKit, and requestAnimationFrame does not run in a hidden view: Base UI then never takes a dialog out of its starting
+// style, so the dialog stays at opacity 0. A window placed off-screen (-20000, -20000) was counted as hidden too, so the
+// window is on screen, behind the others, and the view's window occlusion detection is turned off where this WebKit has
+// the switch (WKWebView's private _windowOcclusionDetectionEnabled; the probe goes on without it where it doesn't).
+// The layout widths are the ones measured.
+//
+// Precondition: run it with the screen awake and unlocked. A locked or sleeping screen hides every window to WebKit,
+// and where the switch is missing, so does another window covering the bottom left corner of the main screen
+// completely; either stops requestAnimationFrame, and the opacity checks of the dialogs then fail.
 //
 // A page fails when it doesn't answer within 3 s of its load event, logs an error, an unhandled rejection, a console
 // error or a CSP violation, or loses its content process. It answers once the room has its title, its wall's five
@@ -407,7 +413,14 @@ final class Probe: NSObject, WKNavigationDelegate {
     cfg.userContentController = ucc
     let view = WKWebView(frame: NSRect(x: 0, y: 0, width: run.width, height: run.height), configuration: cfg)
     view.navigationDelegate = self
-    // the view needs a window of the page's size, on screen and behind the others: see the header
+    // a window behind others still draws, where this WebKit lets occlusion detection be turned off: see the header
+    if view.responds(to: NSSelectorFromString("_setWindowOcclusionDetectionEnabled:")) {
+      let set = NSSelectorFromString("_setWindowOcclusionDetectionEnabled:")
+      typealias Setter = @convention(c) (AnyObject, Selector, Bool) -> Void
+      unsafeBitCast(view.method(for: set), to: Setter.self)(view, set, false)
+    }
+    // the view needs a window of the page's size, on screen (at the main screen's bottom left) and behind the others:
+    // see the header
     let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: run.width, height: run.height),
                        styleMask: [.borderless], backing: .buffered, defer: false)
     win.isReleasedWhenClosed = false
