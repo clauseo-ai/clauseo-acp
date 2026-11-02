@@ -9,14 +9,17 @@ use std::pin::Pin;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
 
-use clauseo_host::ManualClock;
+use clauseo_host::{Host, ManualClock};
 use clauseo_limits::{ReadFailure, ReadLimits, ReadOutcome};
 use clauseo_protocol::{AgentKind, LimitsView, Timestamp};
+use futures::FutureExt as _;
+use futures::StreamExt as _;
 use futures::channel::oneshot;
 use tauri::test::{MockRuntime, mock_builder};
 use tauri::{Manager as _, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 
 use super::*;
+use crate::host_start::{HostCell, stop};
 use crate::test_support::{Messages, Running};
 
 /// The second window's label.
@@ -221,4 +224,51 @@ fn only_the_main_window_s_focus_dispatches_a_shown_refresh() {
     block_on(task).unwrap();
     // The host starts the read as it takes the command, so the count is final once it answers.
     assert_eq!(reads.count(), 2, "one read for one focus");
+}
+
+/// A focus before the host has started: the handler returns at once with a task that waits on
+/// the host's cell, and once the host is in it, that task dispatches its one refresh, which
+/// reads (the start-up read is answered and 5 minutes old by then).
+#[test]
+fn a_focus_before_the_host_starts_refreshes_once_it_has() {
+    let scratch = Scratch::with_limits("limits-focus-before-start");
+    let reads = Reads::new();
+    let clock = ManualClock::new(Timestamp::new(1_790_000_000_000).unwrap());
+    let (cell, start) = HostCell::new();
+    let app = mock_builder()
+        .build(crate::context::<MockRuntime>())
+        .unwrap();
+    app.manage(Bridge::new(Arc::clone(&cell)));
+    let main = WebviewWindowBuilder::new(&app, crate::MAIN_WINDOW, WebviewUrl::default())
+        .build()
+        .unwrap();
+    let focused = WindowEvent::Focused(true);
+    let mut task = crate::on_window_event(&main.as_ref().window(), &focused)
+        .expect("the main window's focus dispatches");
+    assert!(
+        (&mut task).now_or_never().is_none(),
+        "the refresh ran with no host"
+    );
+
+    let config = scratch
+        .config(Vec::new())
+        .with_limits_reader(Arc::<Reads>::clone(&reads))
+        .with_clock(Arc::new(clock.clone()));
+    let (host, join) = Host::start(config).unwrap();
+    let mut views = block_on(host.subscribe_limits(PRINCIPAL)).unwrap();
+    let _first = block_on(views.next()).unwrap();
+    reads.until_count(1);
+    // The start-up read ends (its view change shows it did), then 5 minutes pass.
+    reads.answer(ReadOutcome::SignedOut);
+    let _changed = block_on(views.next()).unwrap();
+    clock.advance(SHOWN_AFTER);
+    assert_eq!(reads.count(), 1);
+    start.finish(Ok((host, join)));
+
+    block_on(task).unwrap();
+    // The host starts the read as it takes the command, so the count is final once it answers.
+    assert_eq!(reads.count(), 2, "one read for the one focus");
+    drop(views);
+    drop(app);
+    stop(&cell);
 }
