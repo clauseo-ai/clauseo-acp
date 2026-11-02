@@ -1,13 +1,17 @@
 //! What the bridge's tests share: a scratch data folder, a host started on it, and a channel
 //! that collects what the bridge sends. No agent runs: the settings name one (this test binary,
-//! an absolute path) that `CreateThread` accepts and no test prompts.
+//! an absolute path) that `CreateThread` accepts and no test prompts. The collector sets the
+//! limits messages every window gets apart from the rest ([`Messages::next_limits`]).
 
+use std::cell::{Cell, RefCell};
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use clauseo_host::{Host, HostConfig, HostHandle, HostJoin};
+use clauseo_host::{Host, HostConfig, HostHandle, HostJoin, ManualClock};
+use clauseo_limits::ReadLimits;
 use clauseo_process::{PassthroughLauncher, SpawnOptions};
 use clauseo_protocol::{
     AgentId, CommandEnvelope, CommandId, CommandOutcome, HostCommand, HostEvent, HostQuery,
@@ -22,6 +26,9 @@ use crate::frame::Frame;
 
 /// The agent id the settings name.
 pub(crate) const AGENT: &str = "fake";
+
+/// The agent id that makes an agent Claude, so the host follows its limits.
+pub(crate) const CLAUDE: &str = "claude-acp";
 
 /// The folder under a [`Scratch`] root that new matters go in (`matters.default_location`).
 pub(crate) const MATTERS_DIR: &str = "matters";
@@ -40,7 +47,14 @@ impl Scratch {
     /// `dirs` made under it. The agent is never started.
     pub(crate) fn new(test: &str, dirs: &[&str]) -> Self {
         let agent = std::env::current_exe().unwrap();
-        Self::with_agent(test, dirs, &agent, &[])
+        Self::with_agent(test, dirs, &agent, &[], false)
+    }
+
+    /// [`Scratch::new`] whose settings also name [`CLAUDE`], so the host has limits to read.
+    /// Start it with [`Scratch::start_reading`]: the default reader would launch a process.
+    pub(crate) fn with_limits(test: &str) -> Self {
+        let agent = std::env::current_exe().unwrap();
+        Self::with_agent(test, &[], &agent, &[], true)
     }
 
     /// [`Scratch::new`] with [`AGENT`] playing the bundled `fake_agent` scenario `scenario`.
@@ -50,15 +64,16 @@ impl Scratch {
     pub(crate) fn with_fake_agent(test: &str, scenario: &str) -> Self {
         let bin = clauseo_fake_agent::bin_path()
             .unwrap_or_else(|e| panic!("{e} (run cargo build -p clauseo-fake_agent)"));
-        Self::with_agent(test, &[], &bin, &["--scenario", scenario])
+        Self::with_agent(test, &[], &bin, &["--scenario", scenario], false)
     }
 
-    /// A fresh folder whose settings run `agent` with `args` for [`AGENT`].
+    /// A fresh folder whose settings run `agent` with `args` for [`AGENT`], and for [`CLAUDE`]
+    /// too with `claude`.
     #[expect(
         clippy::disallowed_methods,
         reason = "test set-up writes its scratch folder; the desktop crate has no write module"
     )]
-    fn with_agent(test: &str, dirs: &[&str], agent: &Path, args: &[&str]) -> Self {
+    fn with_agent(test: &str, dirs: &[&str], agent: &Path, args: &[&str], claude: bool) -> Self {
         let root =
             std::env::temp_dir().join(format!("clauseo-desktop-{test}-{}", std::process::id()));
         if root.exists() {
@@ -70,8 +85,13 @@ impl Scratch {
         }
         // New matters, the Scratch matter included, go in the scratch folder on every OS, set
         // here and not only through `Locations::under_root`: never the real Documents folder.
+        let entry = serde_json::json!({ "command": agent.display().to_string(), "args": args });
+        let mut agents = serde_json::json!({ AGENT: entry });
+        if claude {
+            agents[CLAUDE] = entry;
+        }
         let settings = serde_json::json!({
-            "agents": { AGENT: { "command": agent.display().to_string(), "args": args } },
+            "agents": agents,
             "matters": { "default_location": root.join(MATTERS_DIR).display().to_string() }
         });
         std::fs::write(root.join("settings.json"), settings.to_string()).unwrap();
@@ -139,7 +159,22 @@ impl Scratch {
 
     /// Starts a host on the folder, refusing `refused` as a matter.
     pub(crate) fn start(&self, refused: Vec<PathBuf>) -> Running {
-        let (host, join) = Host::start(self.config(refused)).unwrap();
+        Self::start_config(self.config(refused))
+    }
+
+    /// Starts a host on the folder that reads limits through `reader` on `clock`.
+    pub(crate) fn start_reading(&self, reader: Arc<dyn ReadLimits>, clock: ManualClock) -> Running {
+        let config = self.config(Vec::new());
+        Self::start_config(
+            config
+                .with_limits_reader(reader)
+                .with_clock(Arc::new(clock)),
+        )
+    }
+
+    /// Starts a host with `config`.
+    fn start_config(config: HostConfig) -> Running {
+        let (host, join) = Host::start(config).unwrap();
         Running {
             host,
             join: Some(join),
@@ -224,6 +259,26 @@ pub(crate) fn envelope(command: HostCommand) -> CommandEnvelope {
     }
 }
 
+/// Opens the window `label`'s channel on `bridge` and waits for the limits view the host sends
+/// it first, which stays unacknowledged: the window has been sent one message.
+pub(crate) fn open(bridge: &Bridge, label: &str) -> Messages {
+    let (channel, messages) = collector();
+    futures::executor::block_on(bridge.open_stream(label, channel)).unwrap();
+    let first = messages.next_limits();
+    assert!(
+        matches!(first, HostEvent::LimitsViewChanged(_)),
+        "not the view first: {first:?}"
+    );
+    messages
+}
+
+/// Whether `text` is a limits event, whose wire keys are not `fragment`, `stream_failed` or
+/// `timed`.
+fn is_limits(text: &str) -> bool {
+    text.starts_with(r#"{"limits_view_changed":"#)
+        || text.starts_with(r#"{"account_limits_changed":"#)
+}
+
 /// A channel like a window's, and the messages sent on it. In the e2e build it reads a `timed`
 /// message as the page does: it keeps the event inside and counts the message as timed.
 pub(crate) fn collector() -> (Channel<Frame>, Messages) {
@@ -238,7 +293,15 @@ pub(crate) fn collector() -> (Channel<Frame>, Messages) {
         let _gone = tx.send(text);
         Ok(())
     });
-    (channel, Messages { rx, timed })
+    (
+        channel,
+        Messages {
+            rx,
+            timed,
+            held: RefCell::new(VecDeque::new()),
+            limits_received: Cell::new(0),
+        },
+    )
 }
 
 /// `text` itself, or the event of a `timed` message, whose time and length go in `seen`.
@@ -269,14 +332,54 @@ pub(crate) struct Messages {
     rx: Receiver<String>,
     /// The receive time and length of each `timed` message, in order.
     timed: Arc<Mutex<Vec<(f64, usize)>>>,
+    /// Messages received and not yet returned, in order.
+    held: RefCell<VecDeque<String>>,
+    /// The limits messages received so far.
+    limits_received: Cell<u32>,
 }
 
 impl Messages {
-    /// The next message's text, as sent.
+    /// The first held message `wanted` takes, else the next received one, holding the rest.
+    fn next_where(&self, wanted: impl Fn(&str) -> bool) -> String {
+        let mut held = self.held.borrow_mut();
+        if let Some(at) = held.iter().position(|text| wanted(text)) {
+            return held.remove(at).unwrap();
+        }
+        loop {
+            let text = self
+                .rx
+                .recv_timeout(MESSAGE_WAIT)
+                .unwrap_or_else(|err| panic!("no channel message: {err}"));
+            self.count(&text);
+            if wanted(&text) {
+                return text;
+            }
+            held.push_back(text);
+        }
+    }
+
+    /// Counts `text`, just received, when it is a limits message.
+    fn count(&self, text: &str) {
+        if is_limits(text) {
+            self.limits_received.set(self.limits_received.get() + 1);
+        }
+    }
+
+    /// The next message's text, as sent, that is not a limits message.
     pub(crate) fn next_text(&self) -> String {
-        self.rx
-            .recv_timeout(MESSAGE_WAIT)
-            .unwrap_or_else(|err| panic!("no channel message: {err}"))
+        self.next_where(|text| !is_limits(text))
+    }
+
+    /// The next limits message, decoded.
+    pub(crate) fn next_limits(&self) -> HostEvent {
+        let text = self.next_where(is_limits);
+        serde_json::from_str(&text).unwrap_or_else(|err| panic!("not an event ({err}): {text}"))
+    }
+
+    /// How many limits messages were received so far, returned or not: for acks, which count
+    /// every message.
+    pub(crate) fn limits_received(&self) -> u32 {
+        self.limits_received.get()
     }
 
     /// The next message, an event below the limit, decoded.
@@ -286,9 +389,17 @@ impl Messages {
         serde_json::from_str(&text).unwrap_or_else(|err| panic!("not an event ({err}): {text}"))
     }
 
-    /// Messages already received, without waiting.
+    /// Messages already received, without waiting, but the limits messages.
     pub(crate) fn drain(&self) -> Vec<String> {
-        self.rx.try_iter().collect()
+        let mut held = self.held.borrow_mut();
+        for text in self.rx.try_iter() {
+            self.count(&text);
+            held.push_back(text);
+        }
+        let (limits, rest): (VecDeque<String>, VecDeque<String>) =
+            held.drain(..).partition(|text| is_limits(text));
+        *held = limits;
+        rest.into()
     }
 
     /// The receive time and length of each `timed` message so far.

@@ -34,8 +34,7 @@ fn subscribe_app_needs_open_stream_then_carries_each_settings_change() {
     let refusal = block_on(bridge.subscribe_app(MAIN)).unwrap_err();
     assert_eq!(refusal.code(), ErrorCode::CommandInvalid, "{refusal:?}");
 
-    let (channel, messages) = collector();
-    block_on(bridge.open_stream(MAIN, channel)).unwrap();
+    let messages = open(&bridge, MAIN);
     block_on(bridge.subscribe_app(MAIN)).unwrap();
     // It starts with nothing: the window reads the settings itself.
     assert_eq!(messages.drain(), Vec::<String>::new());
@@ -60,15 +59,14 @@ fn a_pause_s_end_resubscribes_and_sends_the_settings_then() {
     let scratch = Scratch::new("app-restart", &[]);
     let host = scratch.start(Vec::new());
     let bridge = host.bridge();
-    let (channel, messages) = collector();
-    block_on(bridge.open_stream(MAIN, channel)).unwrap();
+    let messages = open(&bridge, MAIN);
     block_on(bridge.subscribe_app(MAIN)).unwrap();
     let window = bridge.window(MAIN).unwrap();
 
     // Past the cap without the host: a large app event, counted as sent, pauses the window and
     // drops every host subscription.
     let big = format!("{{\"settings_changed\":\"{}\"}}", "x".repeat(300 * 1024));
-    let paused = pump::count_app_event(&window, &big);
+    let paused = pump::count_feed_event(&window, Feed::App, &big);
     let window::Forward::Send {
         messages: sent,
         pause: true,
@@ -80,7 +78,8 @@ fn a_pause_s_end_resubscribes_and_sends_the_settings_then() {
     block_on(bridge.dispatch(set_theme(Theme::Light))).unwrap();
     assert_eq!(messages.drain(), Vec::<String>::new());
 
-    block_on(bridge.ack(MAIN, Vec::new(), u32::try_from(sent.len()).unwrap())).unwrap();
+    let count = u32::try_from(sent.len()).unwrap() + messages.limits_received();
+    block_on(bridge.ack(MAIN, Vec::new(), count)).unwrap();
     let current = settings(messages.next_event());
     assert_eq!(current.ui.theme, Theme::Light);
     block_on(bridge.dispatch(set_theme(Theme::Dark))).unwrap();
@@ -95,12 +94,10 @@ fn a_reload_drops_the_app_feed() {
     let scratch = Scratch::new("app-reload", &[]);
     let host = scratch.start(Vec::new());
     let bridge = host.bridge();
-    let (first, old) = collector();
-    block_on(bridge.open_stream(MAIN, first)).unwrap();
+    let old = open(&bridge, MAIN);
     block_on(bridge.subscribe_app(MAIN)).unwrap();
-    let dropped = pump::app_dropped(&bridge.window(MAIN).unwrap()).unwrap();
-    let (second, new) = collector();
-    block_on(bridge.open_stream(MAIN, second)).unwrap();
+    let dropped = pump::feed_dropped(&bridge.window(MAIN).unwrap(), Feed::App).unwrap();
+    let new = open(&bridge, MAIN);
     // The pump never sees another event, so only the abort can end it.
     assert_eq!(
         dropped.recv_timeout(Duration::from_secs(20)),
@@ -108,7 +105,10 @@ fn a_reload_drops_the_app_feed() {
         "the old window's app pump outlived the reload"
     );
     assert_eq!(
-        lock(&bridge.window(MAIN).unwrap()).state().app_restart_id(),
+        lock(&bridge.window(MAIN).unwrap())
+            .state()
+            .feeds()
+            .restart_id(Feed::App),
         None
     );
     block_on(bridge.dispatch(set_theme(Theme::Dark))).unwrap();
@@ -131,19 +131,18 @@ fn a_watchdog_fire_resubscribes_and_sends_the_settings_then() {
     let scratch = Scratch::new("app-watchdog", &[]);
     let host = scratch.start(Vec::new());
     let bridge = host.bridge();
-    let (channel, messages) = collector();
-    block_on(bridge.open_stream(MAIN, channel)).unwrap();
+    let messages = open(&bridge, MAIN);
     block_on(bridge.subscribe_app(MAIN)).unwrap();
     let window = bridge.window(MAIN).unwrap();
     // One message the page never acks.
     block_on(bridge.dispatch(set_theme(Theme::Dark))).unwrap();
     assert_eq!(settings(messages.next_event()).ui.theme, Theme::Dark);
-    let before = lock(&window).state().app_restart_id();
+    let before = lock(&window).state().feeds().restart_id(Feed::App);
 
     pump::tick_at(&window, window::WATCHDOG * 2);
     let resent = settings(messages.next_event());
     assert_eq!(resent.ui.theme, Theme::Dark);
-    assert_ne!(lock(&window).state().app_restart_id(), before);
+    assert_ne!(lock(&window).state().feeds().restart_id(Feed::App), before);
     block_on(bridge.dispatch(set_theme(Theme::Light))).unwrap();
     assert_eq!(settings(messages.next_event()).ui.theme, Theme::Light);
 }

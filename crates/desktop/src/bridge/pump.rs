@@ -3,14 +3,15 @@
 //! state's clock once a second, and acks may restart subscriptions. A restart the host refuses
 //! sends the webview a `stream_failed` message, and the clock tries the stream again.
 //!
-//! The app-wide feed (`subscribe_app`) has a pump of its own on the same channel (`app.rs`).
+//! Each feed of no stream (the app-wide events, the limits) has a pump of its own on the same
+//! channel (`feeds.rs`).
 //!
 //! Channel messages are sent while the window's lock is held, so the order the state counts them
 //! in is the order the webview receives them. Tasks hold the window weakly: dropping the window (a
 //! new `open_stream`, or the bridge going away) aborts every task and so drops every host
 //! subscription.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 
@@ -20,16 +21,16 @@ use futures::StreamExt as _;
 use tauri::async_runtime::{self, JoinHandle};
 use tauri::ipc::Channel;
 
-use super::window::{AckError, Forward, Position, Restart, WindowState};
+use super::window::{AckError, Feed, Forward, Position, Restart, WindowState};
 use super::{PRINCIPAL, lock};
 use crate::frame::{self, Frame};
 
-mod app;
+mod feeds;
 
-use app::spawn_app_restart;
+use feeds::spawn_feed_restarts;
 #[cfg(test)]
-pub(crate) use app::{app_dropped, count_app_event};
-pub(crate) use app::{follow_app, forget_app, start_app};
+pub(crate) use feeds::{count_feed_event, feed_dropped};
+pub(crate) use feeds::{follow_feed, follow_limits, forget_feed, start_feed};
 
 /// How often the watchdog reads the clock.
 const TICK: Duration = Duration::from_secs(1);
@@ -43,11 +44,12 @@ pub(crate) struct Window {
     state: WindowState,
     /// The pump of each stream whose host subscription is live.
     pumps: HashMap<StreamId, JoinHandle<()>>,
-    /// The app-wide feed's pump, while its host subscription is live.
-    app_pump: Option<JoinHandle<()>>,
-    /// For tests: hangs up when the current app pump, and so its host subscription, is dropped.
+    /// The pump of each feed whose host subscription is live.
+    feed_pumps: BTreeMap<Feed, JoinHandle<()>>,
+    /// For tests: each hangs up when its feed's current pump, and so its host subscription, is
+    /// dropped.
     #[cfg(test)]
-    app_dropped: Option<std::sync::mpsc::Receiver<()>>,
+    feed_dropped: BTreeMap<Feed, std::sync::mpsc::Receiver<()>>,
     watchdog: Option<JoinHandle<()>>,
 }
 
@@ -78,9 +80,9 @@ impl Window {
             channel,
             state: WindowState::new(),
             pumps: HashMap::new(),
-            app_pump: None,
+            feed_pumps: BTreeMap::new(),
             #[cfg(test)]
-            app_dropped: None,
+            feed_dropped: BTreeMap::new(),
             watchdog: None,
         }));
         let watchdog = async_runtime::spawn(watch(Arc::downgrade(&window)));
@@ -114,12 +116,12 @@ impl Window {
         &self.state
     }
 
-    /// Drops every host subscription by aborting its pump, the app-wide feed's too.
+    /// Drops every host subscription by aborting its pump, the feeds' too.
     fn stop_pumps(&mut self) {
         for (_, pump) in self.pumps.drain() {
             pump.abort();
         }
-        if let Some(pump) = self.app_pump.take() {
+        for (_, pump) in std::mem::take(&mut self.feed_pumps) {
             pump.abort();
         }
     }
@@ -170,12 +172,12 @@ pub(crate) fn ack(
         let elapsed = guard.opened.elapsed();
         // Restarts end a pause, whose pumps are already stopped.
         let acked = guard.state.ack(positions, messages, elapsed)?;
-        let app = guard.state.take_app_restart();
-        (guard.host.clone(), (acked, app))
+        let feeds = guard.state.feeds_mut().take_restarts();
+        (guard.host.clone(), (acked, feeds))
     };
-    let (acked, app) = acked;
+    let (acked, feeds) = acked;
     spawn_restarts(&host, window, acked.restarts);
-    spawn_app_restart(&host, window, app);
+    spawn_feed_restarts(&host, window, feeds);
     Ok(acked.positions)
 }
 
@@ -312,15 +314,15 @@ async fn watch(window: Weak<Mutex<Window>>) {
 }
 
 /// One watchdog tick at `elapsed` since the window opened: starts the restarts the state asks
-/// for, the app feed's included.
+/// for, the feeds' included.
 pub(crate) fn tick_at(window: &Arc<Mutex<Window>>, elapsed: Duration) {
-    let (host, restarts, app) = {
+    let (host, restarts, feeds) = {
         let mut guard = lock(window);
         // Each restart replaces its stream's pump, if any, once the new subscription starts.
         let restarts = guard.state.tick(elapsed);
-        let app = guard.state.take_app_restart();
-        (guard.host.clone(), restarts, app)
+        let feeds = guard.state.feeds_mut().take_restarts();
+        (guard.host.clone(), restarts, feeds)
     };
     spawn_restarts(&host, window, restarts);
-    spawn_app_restart(&host, window, app);
+    spawn_feed_restarts(&host, window, feeds);
 }

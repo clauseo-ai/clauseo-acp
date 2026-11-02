@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use super::*;
 use crate::dialogs::BoxFuture;
-use crate::test_support::{Scratch, collector, envelope, stream};
+use crate::test_support::{Scratch, envelope, open, stream};
 
 const MAIN: &str = "main";
 
@@ -73,8 +73,7 @@ fn a_stale_cursor_gets_reset() {
     let scratch = Scratch::new("stale-cursor", &[]);
     let host = scratch.start(Vec::new());
     let bridge = host.bridge();
-    let (channel, messages) = collector();
-    block_on(bridge.open_stream(MAIN, channel)).unwrap();
+    let messages = open(&bridge, MAIN);
     let stream = StreamId::Matter(host.scratch());
 
     // An epoch the host never minted: the position is stale.
@@ -100,8 +99,7 @@ fn only_the_e2e_build_sends_an_event_timed_and_counts_its_bytes() {
     let scratch = Scratch::new("timed-event", &[]);
     let host = scratch.start(Vec::new());
     let bridge = host.bridge();
-    let (channel, messages) = collector();
-    block_on(bridge.open_stream(MAIN, channel)).unwrap();
+    let messages = open(&bridge, MAIN);
     #[cfg(feature = "e2e")]
     let (before, start) = (crate::e2e::channel_bytes(), crate::e2e::epoch_ms());
     block_on(bridge.subscribe(MAIN, StreamId::Matter(host.scratch()), None)).unwrap();
@@ -133,8 +131,7 @@ fn a_resubscribe_from_an_older_cursor_gets_the_tail_in_the_same_epoch() {
     let host = scratch.start(Vec::new());
     let thread = host.thread();
     let bridge = host.bridge();
-    let (channel, messages) = collector();
-    block_on(bridge.open_stream(MAIN, channel)).unwrap();
+    let messages = open(&bridge, MAIN);
     let stream = stream(thread);
     let mut view = Applier::default();
 
@@ -175,8 +172,7 @@ fn past_the_cap_the_driver_pauses_and_resubscribes_once_acks_catch_up() {
     let host = scratch.start(Vec::new());
     let thread = host.thread();
     let bridge = host.bridge();
-    let (channel, messages) = collector();
-    block_on(bridge.open_stream(MAIN, channel)).unwrap();
+    let messages = open(&bridge, MAIN);
     let stream = stream(thread);
     block_on(bridge.subscribe(MAIN, stream, None)).unwrap();
     let mut sent = vec![messages.next_text()];
@@ -204,7 +200,8 @@ fn past_the_cap_the_driver_pauses_and_resubscribes_once_acks_catch_up() {
     // the last acknowledged cursor, and the host sends the tail from there.
     let last = batch(serde_json::from_str(sent.last().unwrap()).unwrap());
     let cursor = last.patches.last().unwrap().cursor;
-    let count = u32::try_from(sent.len()).unwrap();
+    // The limits view sent at open counts too.
+    let count = u32::try_from(sent.len()).unwrap() + messages.limits_received();
     let position = Ack {
         stream,
         epoch: last.epoch,
@@ -346,8 +343,7 @@ fn a_failed_restart_tells_the_window_and_waits_for_a_retry() {
     let host = scratch.start(Vec::new());
     let thread = host.thread();
     let bridge = host.bridge();
-    let (channel, messages) = collector();
-    block_on(bridge.open_stream(MAIN, channel)).unwrap();
+    let messages = open(&bridge, MAIN);
     let window = bridge.window(MAIN).unwrap();
     let other = StreamId::Matter(host.scratch());
     block_on(host.host.shutdown()).unwrap();
@@ -381,8 +377,7 @@ fn stream_commands_need_open_stream_and_acks_are_bounded() {
     let refusal = block_on(bridge.subscribe(MAIN, stream, None)).unwrap_err();
     assert_eq!(refusal.code(), ErrorCode::CommandInvalid);
 
-    let (channel, messages) = collector();
-    block_on(bridge.open_stream(MAIN, channel)).unwrap();
+    let messages = open(&bridge, MAIN);
     block_on(bridge.subscribe(MAIN, stream, None)).unwrap();
     let reset = batch(messages.next_event());
     let cursor = reset.patches[0].cursor;
@@ -391,7 +386,9 @@ fn stream_commands_need_open_stream_and_acks_are_bounded() {
         epoch: reset.epoch,
         cursor,
     };
-    let refusal = block_on(bridge.ack(MAIN, vec![position], 2)).unwrap_err();
+    // Sent: the limits view at open, and the Reset.
+    let sent = 1 + messages.limits_received();
+    let refusal = block_on(bridge.ack(MAIN, vec![position], sent + 1)).unwrap_err();
     assert_eq!(refusal.code(), ErrorCode::CommandInvalid);
     let refusal = block_on(bridge.ack(MAIN, vec![position, position], 1)).unwrap_err();
     assert_eq!(refusal.code(), ErrorCode::CommandInvalid);
@@ -404,4 +401,5 @@ fn stream_commands_need_open_stream_and_acks_are_bounded() {
 
 mod admit;
 mod app;
+mod limits;
 mod permission;
