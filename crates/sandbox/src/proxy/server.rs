@@ -6,7 +6,6 @@ use std::net::{SocketAddr, TcpListener};
 use std::pin::pin;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use async_executor::LocalExecutor;
@@ -18,6 +17,7 @@ use futures::{AsyncWriteExt, StreamExt};
 use crate::proxy::address::is_public;
 use crate::proxy::allowlist::Name;
 use crate::proxy::head::{self, Head, HeadError, ParseError, Request, within};
+use crate::proxy::load::{Load, PendingSlot, SocketSlot};
 use crate::proxy::net::Network;
 use crate::proxy::relay::{Idle, Stream};
 use crate::proxy::target::{Kind, Target, classify};
@@ -33,10 +33,6 @@ use crate::{CappedSink, Denial, DenialSink, HostRefusal, Reachability};
 const FAILURES_UNREACHABLE: u32 = 3;
 /// The pause after a failed accept (out of file descriptors), so the loop does not spin.
 const ACCEPT_BACKOFF: Duration = Duration::from_millis(50);
-
-/// Client and origin sockets open across every proxy in the process, against
-/// [`Limits::process`]: one launch cannot take the host's last file descriptors.
-static PROCESS_SOCKETS: AtomicUsize = AtomicUsize::new(0);
 
 /// What the proxy thread gets from `start_with`.
 pub(crate) struct Parts {
@@ -62,34 +58,7 @@ pub(crate) struct Ctx {
     record: Option<Record>,
     pub(crate) limits: Limits,
     reach: RefCell<Reach>,
-    load: Rc<Load>,
-}
-
-/// One proxy's open sockets: client connections still reading their head, and client and
-/// origin sockets together.
-#[derive(Default)]
-pub(crate) struct Load {
-    pending: Cell<usize>,
-    sockets: Cell<usize>,
-}
-
-/// One socket counted against the proxy's and the process's caps, until it drops.
-pub(crate) struct SocketSlot(Rc<Load>);
-
-impl Drop for SocketSlot {
-    fn drop(&mut self) {
-        self.0.sockets.set(self.0.sockets.get().saturating_sub(1));
-        PROCESS_SOCKETS.fetch_sub(1, Ordering::SeqCst);
-    }
-}
-
-/// One client connection counted as not having finished its head, until it drops.
-struct PendingSlot(Rc<Load>);
-
-impl Drop for PendingSlot {
-    fn drop(&mut self) {
-        self.0.pending.set(self.0.pending.get().saturating_sub(1));
-    }
+    pub(crate) load: Rc<Load>,
 }
 
 /// The connectivity count: no state until the first connect.
@@ -145,11 +114,11 @@ async fn accept(
             Ok((stream, _)) => {
                 // Counted here, before the task runs, so a burst of queued connections cannot
                 // pass the caps; the slots drop when the connection's task ends.
-                let Some(pending) = ctx.pending_slot() else {
+                let Some(pending) = ctx.load.pending(&ctx.limits) else {
                     tracing::debug!("egress: too many connections reading a head; closed one");
                     continue;
                 };
-                let Some(socket) = ctx.socket_slot() else {
+                let Some(socket) = ctx.load.socket(&ctx.limits) else {
                     tracing::debug!("egress: too many open sockets; closed a client connection");
                     continue;
                 };
@@ -336,10 +305,13 @@ impl Ctx {
                 Scheme::Http
             };
             let lookup = blocking::unblock(move || lookup.route(scheme, &host, port));
-            within(self.limits.connect, lookup).await.unwrap_or_else(|| {
-                tracing::warn!(host = %target.name, "egress: the upstream lookup took too long; going direct");
-                Route::Direct
-            })
+            within(self.limits.connect, lookup)
+                .await
+                .unwrap_or_else(|| {
+                    let host = &target.name;
+                    tracing::warn!(%host, "egress: upstream lookup too slow; going direct");
+                    Route::Direct
+                })
         };
         let way = match route {
             Route::Direct => match self.resolve(&target, exchange).await {
@@ -448,11 +420,13 @@ impl Ctx {
                 match within(self.limits.connect, self.net.resolve(domain, target.port)).await {
                     Some(Ok(found)) => found.iter().all(|a| is_public(a.ip())),
                     Some(Err(error)) => {
-                        tracing::debug!(host = %target.name, %error, "egress: local DNS failed; the upstream resolves the name");
+                        let host = &target.name;
+                        tracing::debug!(%host, %error, "egress: local DNS failed; sent upstream");
                         true
                     }
                     None => {
-                        tracing::debug!(host = %target.name, "egress: local DNS timed out; the upstream resolves the name");
+                        let host = &target.name;
+                        tracing::debug!(%host, "egress: local DNS timed out; upstream resolves it");
                         true
                     }
                 }
@@ -464,29 +438,6 @@ impl Ctx {
             self.refuse(exchange, HostRefusal::PrivateAddress, false);
             Err(())
         }
-    }
-
-    /// One socket against the proxy's and the process's caps, or `None` when either is full.
-    pub(crate) fn socket_slot(&self) -> Option<SocketSlot> {
-        if self.load.sockets.get() >= self.limits.sockets {
-            return None;
-        }
-        PROCESS_SOCKETS
-            .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
-                (n < self.limits.process).then_some(n + 1)
-            })
-            .ok()?;
-        self.load.sockets.set(self.load.sockets.get() + 1);
-        Some(SocketSlot(Rc::clone(&self.load)))
-    }
-
-    /// One more connection reading its head, or `None` when the cap is reached.
-    fn pending_slot(&self) -> Option<PendingSlot> {
-        if self.load.pending.get() >= self.limits.pending {
-            return None;
-        }
-        self.load.pending.set(self.load.pending.get() + 1);
-        Some(PendingSlot(Rc::clone(&self.load)))
     }
 
     /// Reports a refusal: the denial through the capped sink, and a log line by host only.

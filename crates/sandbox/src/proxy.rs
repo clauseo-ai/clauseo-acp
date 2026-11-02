@@ -21,6 +21,7 @@ mod allowlist;
 mod connect;
 mod head;
 mod http;
+mod load;
 mod net;
 mod relay;
 mod server;

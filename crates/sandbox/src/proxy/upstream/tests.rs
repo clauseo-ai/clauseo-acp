@@ -6,8 +6,10 @@ use url::Url;
 
 use super::Scheme::{Http, Https};
 use super::parse::{self, BadProxy, Bypass, NoProxy};
-use super::{CACHE_FOR, CACHE_MAX, Env, Lookup, Route, Upstream};
+use super::{CACHE_FOR, Env, Lookup, Route, Upstream};
 use crate::{Clock, Error};
+
+mod scheme;
 
 /// A clock the test moves by hand.
 #[derive(Clone, Default)]
@@ -32,10 +34,10 @@ fn http(host: &str, port: u16) -> Route {
     }
 }
 
-fn env(https_proxy: Option<&str>, no_proxy: Option<&str>) -> Env {
+fn env(https: Option<&str>, no_proxy: Option<&str>) -> Env {
     Env {
-        https_proxy: https_proxy.map(str::to_owned),
-        http_proxy: None,
+        https: https.map(str::to_owned),
+        http: None,
         no_proxy: no_proxy.map(str::to_owned),
     }
 }
@@ -327,86 +329,6 @@ fn target_urls() {
         super::target_url(Http, "example.test", 80).as_deref(),
         Some("http://example.test/")
     );
-}
-
-#[test]
-fn plain_http_uses_http_proxy_and_asks_the_os_about_http() {
-    let asked = Arc::new(Mutex::new(Vec::new()));
-    let seen = Arc::clone(&asked);
-    let both = Env {
-        https_proxy: Some("http://secure-proxy:8443".to_owned()),
-        http_proxy: Some("http://plain-proxy:8080".to_owned()),
-        no_proxy: Some("internal.test".to_owned()),
-    };
-    let (lookup, _, _) = lookup(Upstream::System, both, http("os-proxy", 1));
-    assert_eq!(
-        lookup.route(Https, "a.test", 443),
-        http("secure-proxy", 8443)
-    );
-    assert_eq!(lookup.route(Http, "a.test", 80), http("plain-proxy", 8080));
-    assert_eq!(lookup.route(Http, "internal.test", 80), Route::Direct);
-    // Only HTTPS_PROXY set: plain http asks the OS, about an http:// URL.
-    let os = Lookup::with_parts(
-        Upstream::System,
-        env(Some("http://secure-proxy:8443"), None),
-        move |scheme: super::Scheme, host: &str, port: u16| {
-            seen.lock().unwrap().push((scheme, host.to_owned(), port));
-            http("os-proxy", 1)
-        },
-        FakeClock::default(),
-    )
-    .unwrap();
-    assert_eq!(os.route(Http, "a.test", 80), http("os-proxy", 1));
-    assert_eq!(os.route(Https, "a.test", 443), http("secure-proxy", 8443));
-    assert_eq!(
-        *asked.lock().unwrap(),
-        vec![(Http, "a.test".to_owned(), 80)]
-    );
-    assert_eq!(
-        super::upstream_for(
-            &Upstream::Fixed(url("http://firm-proxy:3128")),
-            &url("http://a.test/")
-        )
-        .unwrap(),
-        http("firm-proxy", 3128)
-    );
-}
-
-#[test]
-fn the_os_cache_holds_at_most_1024_answers_and_drops_the_oldest() {
-    let (lookup, calls, clock) = lookup(Upstream::System, Env::default(), http("os-proxy", 1));
-    for i in 0..=CACHE_MAX {
-        lookup.route(Https, &format!("h{i}.test"), 443);
-        clock.advance(Duration::from_millis(1));
-    }
-    assert_eq!(lookup.cached(), CACHE_MAX);
-    assert_eq!(calls.load(Ordering::SeqCst), CACHE_MAX + 1);
-    lookup.route(Https, &format!("h{CACHE_MAX}.test"), 443);
-    lookup.route(Https, "h1.test", 443);
-    assert_eq!(
-        calls.load(Ordering::SeqCst),
-        CACHE_MAX + 1,
-        "the newest are kept"
-    );
-    lookup.route(Https, "h0.test", 443);
-    assert_eq!(
-        calls.load(Ordering::SeqCst),
-        CACHE_MAX + 2,
-        "the oldest was dropped"
-    );
-    assert_eq!(lookup.cached(), CACHE_MAX);
-}
-
-#[test]
-fn debug_of_an_upstream_shows_only_scheme_host_and_port() {
-    let fixed = Upstream::Fixed(url("http://user:secret@firm-proxy:3128/path?token=x#f"));
-    let debug = format!("{fixed:?}");
-    assert_eq!(debug, "Fixed(http://firm-proxy:3128)");
-    assert_eq!(
-        format!("{:?}", Upstream::Fixed(url("http://firm-proxy"))),
-        "Fixed(http://firm-proxy:80)"
-    );
-    assert_eq!(format!("{:?}", Upstream::System), "System");
 }
 
 #[test]

@@ -8,9 +8,10 @@
 //! `http://` URL to match (so a PAC script that branches on the scheme, and macOS's separate
 //! HTTP proxy setting, apply): `CFNetwork` on macOS (it runs PAC), `WinHTTP` on Windows (PAC
 //! and WPAD, the whole call bounded to 10 s), nothing on Linux. An OS answer is kept 5 minutes
-//! per scheme, host and port, at most 1024 of them (the oldest goes first). A failed OS lookup (an API error, a PAC script that throws or takes over 5 s)
-//! goes direct and is logged with the host only: the firm's network refuses a direct connection
-//! it does not allow, and the agent sees that refusal rather than a hang.
+//! per scheme, host and port, at most 1024 of them (the oldest goes first). A failed OS lookup
+//! (an API error, a PAC script that throws or takes over 5 s) goes direct and is logged with the
+//! host only: the firm's network refuses a direct connection it does not allow, and the agent
+//! sees that refusal rather than a hang.
 //!
 //! No credentials, ever: a [`Route`] carries none, and a user name or password in `HTTPS_PROXY`
 //! is dropped with a warning that never prints it. Only `http://` proxies: both an HTTP and an
@@ -112,15 +113,11 @@ pub enum Route {
 
 /// The host's proxy variables, as [`Lookup`] reads them.
 #[derive(Debug, Clone, Default)]
-#[expect(
-    clippy::struct_field_names,
-    reason = "each field is named after the variable it holds"
-)]
 pub(crate) struct Env {
     /// `HTTPS_PROXY`, else `https_proxy`; `None` when unset or empty.
-    pub(crate) https_proxy: Option<String>,
+    pub(crate) https: Option<String>,
     /// `HTTP_PROXY`, else `http_proxy`; `None` when unset or empty.
-    pub(crate) http_proxy: Option<String>,
+    pub(crate) http: Option<String>,
     /// `NO_PROXY`, else `no_proxy`; `None` when unset or empty.
     pub(crate) no_proxy: Option<String>,
 }
@@ -136,8 +133,8 @@ impl Env {
             })
         };
         Env {
-            https_proxy: read(["HTTPS_PROXY", "https_proxy"]),
-            http_proxy: read(["HTTP_PROXY", "http_proxy"]),
+            https: read(["HTTPS_PROXY", "https_proxy"]),
+            http: read(["HTTP_PROXY", "http_proxy"]),
             no_proxy: read(["NO_PROXY", "no_proxy"]),
         }
     }
@@ -228,13 +225,13 @@ impl Lookup {
 impl System {
     fn new(env: Env, resolve: Box<OsRoute>, clock: Box<dyn Clock>) -> System {
         let Env {
-            https_proxy,
-            http_proxy,
+            https,
+            http,
             no_proxy,
         } = env;
         System {
-            https: env_route("HTTPS_PROXY", https_proxy.as_deref()),
-            http: env_route("HTTP_PROXY", http_proxy.as_deref()),
+            https: env_route("HTTPS_PROXY", https.as_deref()),
+            http: env_route("HTTP_PROXY", http.as_deref()),
             no_proxy: NoProxy::parse(no_proxy.as_deref().unwrap_or_default()),
             os: OsLookup {
                 resolve,

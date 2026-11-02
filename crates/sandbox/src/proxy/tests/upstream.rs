@@ -166,7 +166,7 @@ fn https_proxy_from_the_host_env_carries_a_connect_end_to_end() {
         allow: vec!["api.anthropic.com"],
         upstream: Upstream::System,
         env: Some(Env {
-            https_proxy: Some(format!("http://user:secret@{address}")),
+            https: Some(format!("http://user:secret@{address}")),
             ..Env::default()
         }),
         ..Setup::default()
@@ -189,8 +189,8 @@ fn http_proxy_from_the_host_env_carries_plain_http_and_https_proxy_does_not() {
         allow: vec!["allowed.test"],
         upstream: Upstream::System,
         env: Some(Env {
-            https_proxy: Some(format!("http://{secure}")),
-            http_proxy: Some(format!("http://{plain}")),
+            https: Some(format!("http://{secure}")),
+            http: Some(format!("http://{plain}")),
             no_proxy: None,
         }),
         ..Setup::default()
