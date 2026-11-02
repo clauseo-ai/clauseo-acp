@@ -1,8 +1,9 @@
 // fake_agent `exit-mid-turn`: one prompt, one answer chunk, then the agent's process exits 1
 // mid-turn. The chunk stays in the transcript, the turn ends failed with agent.exited, the
 // working line says the answer stopped (with no Restart until the host has it, H10), and the
-// question is back in the field, so asking again starts a new turn. The relaunch's answer waits
-// for fake_agent's one_of step (the fixme at the end).
+// question is back in the field, so asking again starts a new turn. fake_agent
+// `exit-mid-turn-then-load` plays the same first launch, and its relaunch takes session/load (which
+// replays the chunk) and answers the asked-again question, so the second test sees that turn end.
 
 import { expect } from "@playwright/test";
 import { test } from "./fixture.ts";
@@ -11,6 +12,8 @@ import { window } from "./selectors.ts";
 
 const QUESTION = "Summarise the indemnity clause";
 const CHUNK = "Starting on the answer.";
+/** exit-mid-turn-then-load's answer to the question asked again. */
+const SECOND = "Second answer.";
 
 test.describe("on exit-mid-turn", () => {
   test.use({ scenario: "exit-mid-turn" });
@@ -33,7 +36,7 @@ test.describe("on exit-mid-turn", () => {
     // asking again: send_prompt relaunches the agent and the host accepts the question as a new
     // turn. The scenario's second launch can't answer: the relaunch sends session/load for the
     // stored session, and exit-mid-turn's handshake expects session/new only, so this checks the
-    // new turn starts, not that it answers (the by-hand rows ask again with Claude Code itself).
+    // new turn starts, not that it answers (the next test does, on exit-mid-turn-then-load).
     await w.send.click();
     await expect(w.userMessages).toHaveCount(2);
     await expect(w.userMessages.last()).toContainText(QUESTION);
@@ -44,26 +47,31 @@ test.describe("on exit-mid-turn", () => {
   });
 });
 
-// The relaunch answering: needs fake_agent's one_of step (iris's branch fake-agent-one-of) and its
-// scenario exit-mid-turn-then-load, whose second launch takes session/load and answers. Until then
-// the relaunch fails on session/load and the turn neither runs nor ends (the host hang iris has),
-// so Stop never shows: Windows x64 showed no Stop 15 s and 60 s after the second Ask.
 test.describe("on exit-mid-turn-then-load", () => {
   test.use({ scenario: "exit-mid-turn-then-load" });
 
-  test.fixme("asking again relaunches the agent, and the new turn runs and ends", async ({
-    app,
-  }) => {
+  test("asking again relaunches the agent, and the new turn answers and ends", async ({ app }) => {
     const w = window(app.page);
     await openMatter(w);
     await sendPrompt(w, QUESTION);
     await expectTurnEnded(w, "failed");
+    await expect(w.turnStopped.last()).toHaveAttribute("data-failure", "agent.exited");
+    await expect(w.agentMessages.last()).toHaveText(CHUNK);
     await expect(w.composer).toHaveValue(QUESTION);
+
+    // asking again: send_prompt relaunches the agent, whose session/load replays the chunk. The host
+    // drops agent text outside a turn, so the replay adds no row; the new turn answers and ends.
     await w.send.click();
-    // the new turn is live: Stop stands in Ask's place
-    await expect(w.cancel).toBeVisible();
     await expect(w.userMessages).toHaveCount(2);
+    await expect(w.userMessages.last()).toContainText(QUESTION);
     await expect(w.turnStopped).toHaveCount(2);
+    await expectTurnEnded(w, "end_turn");
+    await expect(w.turnStopped.first()).toHaveAttribute("data-stop-reason", "failed");
     await expect(w.agentMessages).toHaveCount(2);
+    await expect(w.agentMessages.first()).toHaveText(CHUNK);
+    await expect(w.agentMessages.last()).toHaveText(SECOND);
+    await expect(w.agentStopped).toBeHidden();
+    await expect(w.error).toBeHidden();
+    await expect(w.composer).toHaveValue("");
   });
 });
