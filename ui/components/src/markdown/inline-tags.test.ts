@@ -104,6 +104,13 @@ test("tags never pair across a block sibling or a paragraph break a list item or
   // Within one unwrapped paragraph, and in each one on its own, tags still pair.
   expect(html("- <sup>a</sup>\n  # h\n  <sub>b</sub>")).toMatch(/<sup>a<\/sup>[^]*<sub>b<\/sub>/);
   expect(html("Term\n: <sup>a\n  b</sup>")).toContain("<sup>ab</sup>");
+  // A second paragraph that starts with markup is a barrier too.
+  for (const start of ["*b*", "**b**", "[b](https://ok.example/)", "`b`", "^x^", "==x=="]) {
+    const out = html(`Term\n: <sup>a\n\n  ${start}</sup>`);
+    expect(out, start).toContain("&#x3C;sup>a");
+    expect(out, start).toContain("&#x3C;/sup>");
+    expect(out, start).not.toMatch(/<sup>a/);
+  }
 });
 
 test("tags in code show as code; in link text, table cells, headings and notes they render", () => {
