@@ -1,8 +1,8 @@
 // The blank app starts, renders #app-root under its CSP with no violation, sends that CSP with its
-// scripts too, keeps its WebView2 data in the temporary folder, and its WebView2 browser process
-// got the arguments the e2e build passes.
+// scripts too, keeps its WebView2 data in the temporary folder, its WebView2 browser process got
+// the arguments the e2e build passes, and the code-colouring worker runs and colours under the CSP.
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, type Response } from "@playwright/test";
 import { test } from "./fixture.ts";
@@ -20,6 +20,23 @@ const WRY_DISABLED_FEATURES = ["msWebOOUI", "msPdfOOUI", "msSmartScreenProtectio
 const CONFIGURED_CSP: string = JSON.parse(
   readFileSync(new URL("../../../crates/desktop/tauri.conf.json", import.meta.url), "utf8"),
 ).app.security.csp;
+
+/**
+ * The colouring worker's path in the app, from the `ui/app/dist` the app embeds: the smoke job
+ * builds it just before (`tauri build`), and a local run builds it with the app.
+ */
+function workerPath(): string {
+  const assets = new URL("../../app/dist/assets/", import.meta.url);
+  const workers = readdirSync(assets).filter((name) => /^worker-[\w-]+\.js$/.test(name));
+  expect(workers, `one colouring worker in ${assets.pathname}`).toHaveLength(1);
+  return `/assets/${workers[0]}`;
+}
+
+/** What the colouring worker answers (`ui/components`, `highlight/languages.ts` HighlightReply). */
+type Reply = { id: number; lines: [number, string][][] | null };
+
+/** The test's handle on the worker it starts, and what the page's CSP refused meanwhile. */
+type Started = { __clauseoWorker?: Worker; __clauseoRefused?: string[] };
 
 /** The arguments of a command line, without the quotes around each. */
 function argumentsOf(commandLine: string): string[] {
@@ -65,10 +82,10 @@ test("the blank app starts, renders #app-root and runs as the e2e build says", a
     expect(refused).toEqual([]);
   });
 
-  await test.step("the app's scripts carry the CSP tauri.conf.json writes", async () => {
+  await test.step("the page's scripts carry the CSP tauri.conf.json writes", async () => {
     // Tauri sends the CSP with the page only; the desktop crate's hook adds it to every script
-    // (crates/desktop/src/csp.rs), so the colouring worker, which takes its policy from its own
-    // script's response, runs under it. The page's scripts come from the same protocol and hook.
+    // (crates/desktop/src/csp.rs). This covers the scripts the blank page loads; the last step
+    // covers the colouring worker.
     const scripts: Promise<[string, string | undefined]>[] = [];
     const onResponse = (response: Response) => {
       if (new URL(response.url()).pathname.endsWith(".js")) {
@@ -117,5 +134,81 @@ test("the blank app starts, renders #app-root and runs as the e2e build says", a
     } else {
       expect(args).not.toContain("--disable-gpu");
     }
+  });
+
+  await test.step("the colouring worker carries the CSP and colours a block under it", async () => {
+    // A dedicated worker takes its policy from its own script's response, and the blank app never
+    // starts it (the first code block does: start-worker.ts). So the step starts the built worker
+    // from the page as start-worker.ts does, through a `clauseo-sanitize` policy (the page's CSP
+    // takes a Worker URL only as a TrustedScriptURL; the app creates that policy only with its
+    // first worker, so the name is free). Last, since the page then holds the policy.
+    const path = workerPath();
+    const workerResponse = app.page.waitForResponse(
+      (response) => new URL(response.url()).pathname === path,
+    );
+    const workerStarted = app.page.waitForEvent("worker");
+    await app.page.evaluate((url) => {
+      const page = window as Started;
+      // The init script of the CSP step already records the page's violations after each load.
+      if (page.__clauseoRefused === undefined) {
+        const refused: string[] = [];
+        page.__clauseoRefused = refused;
+        document.addEventListener("securitypolicyviolation", (event) => {
+          refused.push(`page: ${event.effectiveDirective} ${event.blockedURI}`);
+        });
+      }
+      type Factory = {
+        createPolicy(
+          name: string,
+          rules: { createScriptURL: (url: string) => string },
+        ): { createScriptURL(url: string): unknown };
+      };
+      const types = (window as { trustedTypes?: Factory }).trustedTypes;
+      const policy = types?.createPolicy("clauseo-sanitize", {
+        createScriptURL: (checked: string) => checked,
+      });
+      const scriptUrl = (policy?.createScriptURL(url) ?? url) as string;
+      page.__clauseoWorker = new Worker(scriptUrl, { type: "module", name: "clauseo-highlight" });
+    }, path);
+
+    const response = await workerResponse;
+    expect(response.status()).toBe(200);
+    const headers = await response.allHeaders();
+    expect(headers["content-type"]).toBe("text/javascript");
+    expect(headers["content-security-policy"]).toBe(CONFIGURED_CSP);
+
+    // Its own violations fire in its scope, not the page's: listen there before the first block,
+    // which loads Shiki's grammar chunks and runs the colouring under require-trusted-types-for.
+    const worker = await workerStarted;
+    await worker.evaluate(() => {
+      const scope = globalThis as { __clauseoRefused?: string[] } & typeof globalThis;
+      const refused: string[] = [];
+      scope.__clauseoRefused = refused;
+      scope.addEventListener("securitypolicyviolation", (event) => {
+        const violation = event as SecurityPolicyViolationEvent;
+        refused.push(`worker: ${violation.effectiveDirective} ${violation.blockedURI}`);
+      });
+    });
+
+    const reply = await app.page.evaluate(
+      () =>
+        new Promise<Reply>((resolve, reject) => {
+          const started = (window as Started).__clauseoWorker;
+          if (started === undefined) return reject(new Error("no worker"));
+          started.addEventListener("message", (event: MessageEvent<Reply>) => resolve(event.data));
+          started.addEventListener("error", (event) => reject(new Error(event.message)));
+          started.postMessage({ id: 1, language: "typescript", code: "const x = 1; // note" });
+        }),
+    );
+    expect(reply.id).toBe(1);
+    // Coloured: some token took a role other than plain (0).
+    expect(reply.lines?.flat().some(([role]) => role > 0)).toBe(true);
+
+    const inWorker = await worker.evaluate(
+      () => (globalThis as { __clauseoRefused?: string[] }).__clauseoRefused ?? null,
+    );
+    const inPage = await app.page.evaluate(() => (window as Started).__clauseoRefused ?? null);
+    expect([...(inPage ?? []), ...(inWorker ?? [])]).toEqual([]);
+    expect(inWorker).toEqual([]);
   });
 });
