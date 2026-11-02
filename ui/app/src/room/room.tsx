@@ -355,9 +355,11 @@ function RoomFrame({
                 data-testid="new-conversation-line"
               >
                 <Say>
-                  {mt(w.lang, "A new conversation. It reads this matter's {n} papers.", {
-                    n: papers.papers.length,
-                  })}
+                  {papers.papers.length === 1
+                    ? mt(w.lang, "A new conversation. It reads this matter's one paper.")
+                    : mt(w.lang, "A new conversation. It reads this matter's {n} papers.", {
+                        n: papers.papers.length,
+                      })}
                 </Say>
               </p>
             )}
