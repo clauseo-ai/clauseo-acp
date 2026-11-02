@@ -32,6 +32,7 @@ import type {
   ViewEntry,
   ViewPatchBody,
 } from "../../transport/protocol.ts";
+import type { UiSettings } from "../host-next.ts";
 import { matterStreamOf } from "../matter-stream.ts";
 import { Room } from "../room.tsx";
 import { connectRoom } from "../start.ts";
@@ -129,6 +130,8 @@ export type Script = {
   dispatch?: (command: HostCommand) => CommandOutcome | Promise<CommandOutcome>;
   query?: (query: HostQuery) => QueryResult | Promise<QueryResult> | undefined;
   standIns?: StandIns;
+  /** The display the room starts with, as connectRoom's override takes it: the language, say. */
+  display?: Partial<UiSettings>;
 };
 
 export type VersionsHarness = {
@@ -175,7 +178,7 @@ export async function mountVersions(
     dispatch: (envelope) => script.dispatch?.(envelope.command) ?? "done",
   });
   if (script.standIns !== undefined) Object.assign(transport, script.standIns);
-  connectRoom(transport, {});
+  connectRoom(transport, script.display ?? {});
   const manual = manualBatch();
   const store = createViewStore(transport, { batch: () => manual.batch });
   const host = document.createElement("div");
@@ -220,7 +223,8 @@ export async function mountVersions(
         .filter((c) => c !== undefined) as never,
     click,
     openVersions: async () => {
-      await click(button("Versions", host.querySelector(".room-pair")));
+      // the pair's Versions, by its aria-expanded: its words are the room's language
+      await click(host.querySelector(".room-pair button[aria-expanded]"));
       await act(async () => void (await loadVersions()));
       await settle();
       // the matter's stream, once Versions holds it
