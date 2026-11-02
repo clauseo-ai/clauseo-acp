@@ -11,11 +11,11 @@ use crate::{
 };
 
 /// Scans `folder` for an import: refuses it as [`Matter::import`](crate::Matter::import) would
-/// (a drive root, or an entry of `refused` or an ancestor of one), then walks it with the
-/// settings' probe and size cap. `progress` gets the running count of files seen and their bytes
-/// after each file. Returns [`Scanned::Cancelled`] once `cancel` is set. Reads no file's content
-/// and writes nothing; lists folders under a [`NoDownload`] guard, so a folder that is not
-/// downloaded stays so.
+/// (a drive root, an entry of `refused` or an ancestor of one, the matters root or a refused
+/// tree), then walks it with the settings' probe and size cap. `progress` gets the running count
+/// of files seen and their bytes after each file. Returns [`Scanned::Cancelled`] once `cancel` is
+/// set. Reads no file's content and writes nothing; lists folders under a [`NoDownload`] guard,
+/// so a folder that is not downloaded stays so.
 pub fn scan(
     folder: &Path,
     refused: &[PathBuf],
@@ -24,7 +24,7 @@ pub fn scan(
     cancel: &AtomicBool,
 ) -> Result<Scanned, Error> {
     refuse::check_folder(folder, refused)?;
-    refuse::check_new_matter(folder, &settings.matters_root)?;
+    refuse::check_new_matter(folder, settings)?;
     let mut seen = Progress { files: 0, bytes: 0 };
     let guard = NoDownload::begin(settings.probe.as_ref());
     let walked = walk::walk(

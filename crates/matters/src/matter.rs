@@ -67,11 +67,11 @@ impl Matter {
         }
     }
 
-    /// Imports the existing folder `new.folder` as a matter: refuses a drive root or a listed
-    /// folder (or an ancestor of one), writes `matter.json` and the git dir, and takes the root
-    /// `import` checkpoint. `progress` gets files and bytes read; when `cancel` is set the git
-    /// dir and `matter.json` are removed and the result is [`Imported::Cancelled`]. A failed
-    /// import removes them too.
+    /// Imports the existing folder `new.folder` as a matter: refuses a drive root, a listed
+    /// folder (or an ancestor of one), the matters root and a refused tree, writes
+    /// `matter.json` and the git dir, and takes the root `import` checkpoint. `progress` gets
+    /// files and bytes read; when `cancel` is set the git dir and `matter.json` are removed and
+    /// the result is [`Imported::Cancelled`]. A failed import removes them too.
     pub fn import(
         settings: Settings,
         new: NewMatter,
@@ -81,7 +81,7 @@ impl Matter {
     ) -> Result<Imported, Error> {
         refuse_marker(new.marker)?;
         refuse::check_folder(&new.folder, refused)?;
-        refuse::check_new_matter(&new.folder, &settings.matters_root)?;
+        refuse::check_new_matter(&new.folder, &settings)?;
         let home = matter_home(&settings, new.id);
         if exists(&home)? {
             return Err(Error::HistoryExists { git_dir: home });
@@ -159,8 +159,9 @@ impl Matter {
     /// matter's folder moved. Writes nothing and changes nothing when it refuses:
     ///
     /// - a folder import would refuse for its place: `matter.folder_refused` for a drive root,
-    ///   an entry of `refused` or an ancestor of one, and the matters root or a folder nested
-    ///   with it; `matter.folder_missing` (`NoFolder`) for a folder that does not exist;
+    ///   an entry of `refused` or an ancestor of one, the matters root or a folder nested with
+    ///   it, and a refused tree (`Settings::refused_trees`) or a folder nested with it;
+    ///   `matter.folder_missing` (`NoFolder`) for a folder that does not exist;
     /// - a folder whose `.clauseo/matter.json` is missing, does not read or names another
     ///   matter: `matter.folder_missing` with that reason.
     ///
@@ -181,7 +182,7 @@ impl Matter {
         refused: &[PathBuf],
     ) -> Result<Self, Error> {
         refuse::check_folder(folder, refused)?;
-        refuse::check_outside_root(folder, &settings.matters_root)?;
+        refuse::check_outside_root(folder, &settings)?;
         Self::open(settings, id, folder)
     }
 
@@ -199,7 +200,8 @@ impl Matter {
     /// claims: the same registry check, with [`crate::same_or_nested`], as for
     /// [`Matter::locate`]. Writes nothing when it refuses:
     ///
-    /// - the places [`Matter::locate`] refuses (`refused`, a drive root, the matters root);
+    /// - the places [`Matter::locate`] refuses (`refused`, a drive root, the matters root, a
+    ///   refused tree);
     /// - a `matter.json` naming another matter: `matter.folder_missing` (`OtherMatter`), never
     ///   overwritten;
     /// - a folder the history does not record: `matter.folder_missing` with the reason
@@ -214,7 +216,7 @@ impl Matter {
         refused: &[PathBuf],
     ) -> Result<Self, Error> {
         refuse::check_folder(folder, refused)?;
-        refuse::check_outside_root(folder, &settings.matters_root)?;
+        refuse::check_outside_root(folder, &settings)?;
         let reason = match json::read(folder)? {
             json::Found::NoMarker => MissingReason::NoMatterJson,
             json::Found::Unreadable => MissingReason::Unreadable,

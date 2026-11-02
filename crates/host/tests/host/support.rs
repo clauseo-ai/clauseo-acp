@@ -86,21 +86,26 @@ impl Scenario {
 }
 
 /// A test's own folder, `<temp>/clauseo-host-<test>-<pid>`, removed when dropped. The data
-/// folder is the root itself (`Locations::under_root`), agents get `home/` as their home,
-/// and matter folders go under `work/`.
+/// folder is the root itself (`Locations::under_root`), agents get `home/` as their home, and
+/// matter folders go in `<temp>/clauseo-host-<test>-<pid>-work`, beside the root: a folder inside
+/// the data folder cannot be a matter.
 #[derive(Debug)]
 pub(crate) struct Dir {
     root: PathBuf,
+    work: PathBuf,
 }
 
 impl Dir {
     /// A fresh folder for `test`, with `agents` written into `settings.json`.
     pub(crate) fn new(test: &str, agents: &[(&str, Scenario)]) -> Self {
-        let root = std::env::temp_dir().join(format!("clauseo-host-{test}-{}", std::process::id()));
+        let stem = format!("clauseo-host-{test}-{}", std::process::id());
+        let root = std::env::temp_dir().join(&stem);
+        let work = std::env::temp_dir().join(format!("{stem}-work"));
         write::remove_dir_all(&root).unwrap();
+        write::remove_dir_all(&work).unwrap();
         write::create_dir_all(&root.join("home"));
-        write::create_dir_all(&root.join("work"));
-        let dir = Self { root };
+        write::create_dir_all(&work);
+        let dir = Self { root, work };
         dir.set_agents(agents);
         dir
     }
@@ -156,7 +161,7 @@ impl Dir {
 
     /// Makes `work/<name>` holding `files` (relative path, content) and returns its path.
     pub(crate) fn folder(&self, name: &str, files: &[(&str, &str)]) -> PathBuf {
-        let folder = self.root.join("work").join(name);
+        let folder = self.work_path(name);
         write::create_dir_all(&folder);
         for (path, content) in files {
             write::write(&folder.join(path), content.as_bytes());
@@ -167,6 +172,11 @@ impl Dir {
     /// The data folder (the test's root).
     pub(crate) fn data_dir(&self) -> &Path {
         &self.root
+    }
+
+    /// `name` in the matter folders' place, outside the data folder; not made.
+    pub(crate) fn work_path(&self, name: &str) -> PathBuf {
+        self.work.join(name)
     }
 
     /// The config of run `run` (its clock starts `run` hours after [`START_MS`]).
@@ -246,8 +256,10 @@ impl Dir {
 
 impl Drop for Dir {
     fn drop(&mut self) {
-        if let Err(error) = write::remove_dir_all(&self.root) {
-            eprintln!("could not remove {}: {error}", self.root.display());
+        for folder in [&self.root, &self.work] {
+            if let Err(error) = write::remove_dir_all(folder) {
+                eprintln!("could not remove {}: {error}", folder.display());
+            }
         }
     }
 }

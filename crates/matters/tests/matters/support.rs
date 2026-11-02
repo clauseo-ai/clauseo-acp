@@ -138,6 +138,7 @@ impl PlaceholderProbe for MarkedProbe {
 pub(crate) fn settings(root: impl Into<PathBuf>, probe: Arc<MarkedProbe>) -> Settings {
     Settings {
         matters_root: root.into(),
+        refused_trees: Vec::new(),
         limits: Limits::DEFAULT,
         retention: Retention::KeepAll,
         probe,

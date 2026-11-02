@@ -3,10 +3,10 @@
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
 
-use clauseo_matters::{Error, Matter, MissingReason, NewMatter, Refusal, Settings, scan};
+use clauseo_matters::{Error, Imported, Matter, MissingReason, NewMatter, Refusal, Settings, scan};
 use clauseo_protocol::ErrorCode;
 
-use crate::fixture::{Fixture, matter_id};
+use crate::fixture::{Fixture, at, matter_id};
 use crate::support;
 
 /// The refusal of both `scan` and `import` (as matter 2) of `folder`; asserts they agree and
@@ -110,4 +110,185 @@ fn import_refuses_plain_file_up_front() {
         "nothing written, not even the matters root"
     );
     assert_eq!(std::fs::read(&file).unwrap(), b"a file, not a folder");
+}
+
+/// The settings of a test whose data folder `data` is a refused tree: the matters root sits
+/// inside it, as the host's does.
+fn tree_settings(fx: &Fixture, data: &Path) -> Settings {
+    let mut settings = fx.settings();
+    settings.matters_root = data.join("matters");
+    settings.refused_trees = vec![data.to_owned()];
+    settings
+}
+
+/// The refusal of `Matter::locate` of `folder`, which must refuse.
+fn located_refusal(settings: &Settings, folder: &Path) -> Refusal {
+    let err = Matter::locate(settings.clone(), matter_id(1), folder, &[]).unwrap_err();
+    refusal_of(err)
+}
+
+/// The refusal of `Matter::relink` of `folder`, which must refuse.
+fn relinked_refusal(settings: &Settings, folder: &Path) -> Refusal {
+    let err = Matter::relink(settings.clone(), matter_id(1), folder, at(0), &[]).unwrap_err();
+    refusal_of(err)
+}
+
+fn refusal_of(err: Error) -> Refusal {
+    assert_eq!(err.code(), ErrorCode::MatterFolderRefused, "{err:?}");
+    match err {
+        Error::FolderRefused { reason, .. } => reason,
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+}
+
+/// A folder inside a refused tree cannot be a matter: import (and scan), locate and relink refuse
+/// it with the tree's entry, and write nothing.
+#[test]
+fn refused_tree_refuses_folders_inside_it() {
+    let fx = Fixture::new("refuse-tree");
+    let data = fx.dir.path().join("data");
+    let settings = tree_settings(&fx, &data);
+    let agents = data.join("agents");
+    let deep = data.join("x").join("y");
+    support::write(agents.join("config.toml"), "model = \"a\"");
+    support::write(deep.join("a.txt"), "a");
+
+    for folder in [&agents, &deep] {
+        let listed = Refusal::Listed(data.clone());
+        assert_eq!(
+            refusals(&fx, &settings, folder),
+            listed,
+            "{}",
+            folder.display()
+        );
+        assert_eq!(
+            located_refusal(&settings, folder),
+            listed,
+            "{}",
+            folder.display()
+        );
+        assert_eq!(
+            relinked_refusal(&settings, folder),
+            listed,
+            "{}",
+            folder.display()
+        );
+        assert!(!folder.join(".clauseo").exists(), "{}", folder.display());
+    }
+}
+
+/// The data folder itself, and a folder holding it, are refused too. Here the matters root is
+/// outside the tree (the fixture's `root`), so the reason is the tree's.
+#[test]
+fn refused_tree_refuses_the_tree_and_its_parent() {
+    let fx = Fixture::new("refuse-tree-parent");
+    let host = fx.dir.path().join("host");
+    let data = host.join("data");
+    let mut settings = fx.settings();
+    settings.refused_trees = vec![data.clone()];
+    support::write(data.join("notes.txt"), "the data folder");
+
+    for folder in [data.clone(), host] {
+        let listed = Refusal::Listed(data.clone());
+        assert_eq!(
+            refusals(&fx, &settings, &folder),
+            listed,
+            "{}",
+            folder.display()
+        );
+        assert_eq!(
+            located_refusal(&settings, &folder),
+            listed,
+            "{}",
+            folder.display()
+        );
+        assert_eq!(
+            relinked_refusal(&settings, &folder),
+            listed,
+            "{}",
+            folder.display()
+        );
+    }
+}
+
+/// A folder beside the refused tree, even one whose name starts with the tree's, is accepted.
+#[test]
+fn refused_tree_accepts_folders_beside_it() {
+    let fx = Fixture::new("refuse-tree-beside");
+    let data = fx.dir.path().join("data");
+    let settings = tree_settings(&fx, &data);
+    let beside = fx.dir.path().join("data-notes");
+    support::write(beside.join("a.txt"), "a");
+
+    let cancel = AtomicBool::new(false);
+    scan(&beside, &[], &settings, &mut |_| {}, &cancel).unwrap();
+    let new = NewMatter {
+        id: matter_id(2),
+        folder: beside.clone(),
+        ..fx.new_matter()
+    };
+    let imported = Matter::import(settings, new, &[], &mut |_| {}, &cancel).unwrap();
+    assert!(matches!(imported, Imported::Done { .. }));
+    assert!(beside.join(".clauseo/matter.json").exists());
+}
+
+/// A folder inside a listed (non-tree) folder, the home folder say, stays importable; the listed
+/// folder itself is refused as it was.
+#[test]
+fn listed_folder_keeps_its_rule_beside_a_refused_tree() {
+    let fx = Fixture::new("refuse-listed");
+    let data = fx.dir.path().join("data");
+    let settings = tree_settings(&fx, &data);
+    let home = fx.dir.path().join("home");
+    let docs = home.join("docs");
+    support::write(docs.join("a.txt"), "a");
+    let cancel = AtomicBool::new(false);
+    let listed = std::slice::from_ref(&home);
+
+    let new = NewMatter {
+        id: matter_id(2),
+        folder: home.clone(),
+        ..fx.new_matter()
+    };
+    let refused = Matter::import(settings.clone(), new, listed, &mut |_| {}, &cancel).unwrap_err();
+    assert_eq!(refusal_of(refused), Refusal::Listed(home.clone()));
+
+    let new = NewMatter {
+        id: matter_id(2),
+        folder: docs.clone(),
+        ..fx.new_matter()
+    };
+    let imported = Matter::import(settings, new, listed, &mut |_| {}, &cancel).unwrap();
+    assert!(matches!(imported, Imported::Done { .. }));
+    assert!(docs.join(".clauseo/matter.json").exists());
+}
+
+/// The matters root inside the refused tree (the host's layout) is still refused as the matters
+/// root, and so is the tree that holds it: the matters root is checked first.
+#[test]
+fn refused_tree_keeps_the_matters_root_reason() {
+    let fx = Fixture::new("refuse-tree-root");
+    let data = fx.dir.path().join("data");
+    let settings = tree_settings(&fx, &data);
+    let root = data.join("matters");
+    support::write(root.join("notes.txt"), "the root");
+    assert_eq!(refusals(&fx, &settings, &root), Refusal::MattersRoot);
+    assert_eq!(located_refusal(&settings, &root), Refusal::MattersRoot);
+    assert_eq!(refusals(&fx, &settings, &data), Refusal::MattersRoot);
+}
+
+/// Refused tree entries match in any case on macOS and Windows, as listed entries do.
+#[cfg(any(target_os = "macos", windows))]
+#[test]
+fn refused_tree_matches_in_any_case() {
+    let fx = Fixture::new("refuse-tree-case");
+    let data = fx.dir.path().join("data");
+    let settings = tree_settings(&fx, &data);
+    support::write(data.join("agents").join("config.toml"), "model = \"a\"");
+    let spelled = fx.dir.path().join("DATA").join("agents");
+    assert_eq!(
+        refusals(&fx, &settings, &spelled),
+        Refusal::Listed(data.clone())
+    );
+    assert_eq!(located_refusal(&settings, &spelled), Refusal::Listed(data));
 }

@@ -98,6 +98,7 @@ pub(crate) fn checkpoint_id(n: u64) -> CheckpointId {
 pub(crate) fn import(root: &Path, folder: &Path) -> Matter {
     let settings = Settings {
         matters_root: root.to_owned(),
+        refused_trees: Vec::new(),
         limits: Limits::DEFAULT,
         retention: Retention::KeepAll,
         probe: Arc::new(OsProbe),

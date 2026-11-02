@@ -35,8 +35,9 @@
 //!   before letting an agent write a file.
 //! - [`scan`]: what importing a folder would take ([`ScanReport`]), before any write.
 //! - Inputs the host passes, so nothing depends on the machine: [`Settings`] (the matters root,
-//!   [`Limits`], [`Retention`], the [`PlaceholderProbe`]), [`NewMatter`] (ids, `created_at`,
-//!   [`Marker`]), [`TurnMeta`], the refused-folder list, a progress callback and a cancel flag.
+//!   the refused trees, [`Limits`], [`Retention`], the [`PlaceholderProbe`]), [`NewMatter`] (ids,
+//!   `created_at`, [`Marker`]), [`TurnMeta`], the refused-folder list, a progress callback and a
+//!   cancel flag.
 //! - [`Error`], with [`Error::code`] mapping each variant to a `clauseo_protocol::ErrorCode`.
 //!
 //! # Invariants

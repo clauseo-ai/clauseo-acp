@@ -267,9 +267,11 @@ fn a_refused_folder_is_rejected() {
         "{refusal:?}"
     );
 
-    // A folder that is allowed works; a cancelled pick is `None`.
-    let work = scratch.path().join("work");
-    let picked = block_on(bridge.pick_folder(&Picks(Some(work)), Some(home))).unwrap();
+    // A folder outside the data folder works (one inside it is refused, as the matters root
+    // is); a cancelled pick is `None`. The other scratch's folder is outside this data folder.
+    let other = Scratch::new("refused-folder-other", &["work"]);
+    let work = other.path().join("work");
+    let picked = block_on(bridge.pick_folder(&Picks(Some(work)), Some(other.path()))).unwrap();
     let picked = picked.unwrap();
     assert_eq!(picked.display, "work");
     block_on(bridge.dispatch(create(picked.folder))).unwrap();

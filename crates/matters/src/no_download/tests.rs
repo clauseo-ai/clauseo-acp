@@ -90,6 +90,7 @@ impl Fixture {
         }
         let settings = Settings {
             matters_root: dir.path().join("root"),
+            refused_trees: Vec::new(),
             limits: Limits::DEFAULT,
             retention: Retention::KeepAll,
             probe,

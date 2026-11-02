@@ -48,7 +48,7 @@ fn refusals_say_why() {
         (Refusal::DriveRoot, "it is a drive root".to_owned()),
         (
             Refusal::Listed(PathBuf::from("/home/lawyer")),
-            "it is or contains /home/lawyer".to_owned(),
+            "it is, holds or sits inside the protected folder /home/lawyer".to_owned(),
         ),
         (
             Refusal::AlreadyMatter(matter_id(3)),

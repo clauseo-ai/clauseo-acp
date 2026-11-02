@@ -142,8 +142,9 @@ impl fmt::Display for MissingReason {
 pub enum Refusal {
     /// A drive root: `/`, `/Volumes/<name>`, a Linux mount point, or `X:\`.
     DriveRoot,
-    /// It is an entry of the refused list (the home folder, a system folder), or an ancestor of
-    /// one. The entry, as the host passed it.
+    /// It is, holds or sits inside a protected folder: an entry of the refused list (the home
+    /// folder, a system folder; it is or holds the entry), or an entry of the refused trees (the
+    /// data folder; any of the three). The entry, as the host passed it.
     Listed(PathBuf),
     /// It holds a `.clauseo/matter.json` naming this matter: it already belongs to one.
     AlreadyMatter(MatterId),
@@ -157,7 +158,13 @@ impl fmt::Display for Refusal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::DriveRoot => f.write_str("it is a drive root"),
-            Self::Listed(entry) => write!(f, "it is or contains {}", entry.display()),
+            Self::Listed(entry) => {
+                write!(
+                    f,
+                    "it is, holds or sits inside the protected folder {}",
+                    entry.display()
+                )
+            }
             Self::AlreadyMatter(id) => write!(f, "it is already matter {id}"),
             Self::UnreadableMatterJson => {
                 f.write_str("its .clauseo/matter.json does not read, so it may be a matter")

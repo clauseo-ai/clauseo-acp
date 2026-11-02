@@ -74,6 +74,11 @@ pub struct Settings {
     /// The folder holding one folder per matter (`<root>/<matter id>/history.git`). On Windows
     /// it is under `%LOCALAPPDATA%`, never `Roaming`.
     pub matters_root: PathBuf,
+    /// Folders refused together with everything inside them, as the matters root is: the host
+    /// passes its data folder (the agents' homes, the store). A folder that is, holds or sits
+    /// inside one cannot be a matter. The host's refused list (home, system folders) is not
+    /// this: a folder inside one of those can still be a matter.
+    pub refused_trees: Vec<PathBuf>,
     /// The size limits.
     pub limits: Limits,
     /// How many versions to keep.
@@ -86,6 +91,7 @@ impl std::fmt::Debug for Settings {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Settings")
             .field("matters_root", &self.matters_root)
+            .field("refused_trees", &self.refused_trees)
             .field("limits", &self.limits)
             .field("retention", &self.retention)
             .finish_non_exhaustive()
