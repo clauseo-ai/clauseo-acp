@@ -6,7 +6,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { StoreContext } from "../../store/hooks.ts";
 import { createViewStore, type ViewStore } from "../../store/store.ts";
 import { manualBatch } from "../../testing/dom.ts";
-import { batch, event, MATTER, THREAD, TURN } from "../../testing/stream-script.ts";
+import { batch, EPOCH, event, MATTER, THREAD, TURN } from "../../testing/stream-script.ts";
 import { FakeTransport, type FakeHost } from "../../transport/fake-transport.ts";
 import type {
   CommandOutcome,
@@ -15,6 +15,7 @@ import type {
   MatterId,
   MatterSummary,
   QueryResult,
+  StreamId,
   ThreadSummary,
   ViewPatchBody,
 } from "../../transport/protocol.ts";
@@ -74,6 +75,8 @@ export type Harness = {
   /** As `deliver`, inside an awaited act: for a render that may suspend (the thread's chunk still loading), whose
    * retry React schedules only for an act it can wait on. */
   deliverAwaited: (bodies: ViewPatchBody[]) => Promise<void>;
+  /** As `deliver`, on another thread's stream, at that stream's own cursors. */
+  deliverOn: (stream: StreamId, bodies: ViewPatchBody[]) => void;
   /** Lets the host's answers and React settle. */
   settle: () => Promise<void>;
   one: (testId: string) => HTMLElement | null;
@@ -130,6 +133,7 @@ export async function mountRoom(script: Script = {}): Promise<Harness> {
   // Work started the thread's chunk as it mounted
   if (script.waitForRenderer !== false) await act(async () => void (await loadThread()));
   let cursor = 1;
+  const cursors = new Map<StreamId, number>();
   const field = () => host.querySelector<HTMLTextAreaElement>('[data-testid="composer"]');
   return {
     transport,
@@ -144,6 +148,12 @@ export async function mountRoom(script: Script = {}): Promise<Harness> {
       transport.deliver(JSON.stringify(event(batch(cursor, bodies))));
       cursor += bodies.length;
       await act(async () => manual.run());
+    },
+    deliverOn: (stream, bodies) => {
+      const first = cursors.get(stream) ?? 1;
+      transport.deliver(JSON.stringify(event(batch(first, bodies, EPOCH, stream))));
+      cursors.set(stream, first + bodies.length);
+      act(manual.run);
     },
     settle,
     one: (id) => host.querySelector<HTMLElement>(`[data-testid="${id}"]`),
