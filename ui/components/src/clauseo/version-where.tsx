@@ -44,7 +44,7 @@ export function VersionWhere({
         </span>
       </BasePopover.Trigger>
       <FloatingCard side="top" width="history" className="ver-where">
-        <BasePopover.Title render={<Heading level={2} className="allows-title" />}>
+        <BasePopover.Title render={<Heading level={2} className="ver-where-title" />}>
           {w.v("Where versions are kept")}
         </BasePopover.Title>
         <p className="ver-where-line">
