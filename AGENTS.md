@@ -43,7 +43,7 @@ Words: "agent" means the lawyer's ACP agent (Claude Code, Codex). "You" is the c
 - `crates/store`: the event log, snapshots, blobs and receipts in one SQLite file.
 - `ui/app`: the React app, the room (`src/room/`); `ui/components`: tokens, words, parts. New strings: `ui/app/src/review/registry.tsx`. Tauri APIs only in `ui/app/src/transport`.
 - `ui/e2e`: Playwright tests of the real app over CDP on Windows, and the speed scoreboard's code. `cargo xtask check` typechecks it and runs its unit tests; no lint or write rule yet (#86).
-- `xtask`: checks, build timing, budgets. Builds with no app crate. Frozen: no new checks.
+- `xtask`: checks, build timing, budgets. Builds without any app crate. Frozen: no new checks.
 
 ## Never
 
@@ -74,7 +74,7 @@ Words: "agent" means the lawyer's ACP agent (Claude Code, Codex). "You" is the c
   `ui/app/scripts/buildtime-proc.mjs` in scripts, each with a timeout and a whole-tree kill.
 - Each pinned version has one home.
 - Component files in `ui/` export only components.
-- Tests never reach the network; CI's Linux job runs them with it cut off.
+- Tests never reach the network; CI's Linux job runs them offline.
 
 ## Testing
 
@@ -86,8 +86,7 @@ Words: "agent" means the lawyer's ACP agent (Claude Code, Codex). "You" is the c
 - The blank app is the control for every memory and start-up budget. Keep it blank.
 - Product code takes every speed or memory win, however small. The same few paths run all day:
   streaming an answer to the screen, saving each event, versioning the matter after every turn,
-  reopening long conversations. Many small savings there make the app feel instant, as a carmaker
-  shaving a few grams off every part ends up with a much lighter car. When two ways to do
+  reopening long conversations. Many small savings there make the app feel instant, as a carmaker shaving a few grams off every part ends up with a much lighter car. When two ways to do
   something on a product path both meet the brief, measure both and keep the faster, even when the
   gap is tiny. Under Performance, list what you compared, the machine, the medians, what you kept.
 - Tooling, CI, docs and tests are exempt: keep them correct and simple; do not benchmark them.

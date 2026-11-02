@@ -227,7 +227,6 @@ expression: w.render(&policy)
 ; Links that lead outside the matter, and where they lead.
 (deny file-read* file-write*
   (literal (param "LINK_0"))
-  (subpath (param "LINK_TARGET_0"))
   (with message "clauseo-4242-7"))
 
 ; Hidden paths: the data dir, other matters and state folders, refused folders.
@@ -279,7 +278,6 @@ READ_ONLY_8 = <root>/matter/CLAUDE.local.md
 READ_ONLY_9 = <root>/matter/CLAUDE.md
 READ_ONLY_10 = <root>/matter/sub/.git
 LINK_0 = <root>/matter/to-secret
-LINK_TARGET_0 = <root>/elsewhere/secret.txt
 HIDDEN_0 = <root>/data
 STATE_READ_ONLY_0 = <root>/data/agent-state/m1/codex/config.toml
 BROWSER_RUN = <root>/data/agent-state/m1/codex/browser/run

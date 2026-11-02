@@ -23,7 +23,6 @@ pub(super) struct Params {
 impl Params {
     pub(super) fn new(policy: &Policy) -> Params {
         let store = policy.claude_store();
-        let allowed = allowed_paths(policy);
         Params {
             runtime: numbered("RUNTIME", policy.runtime()),
             read: numbered("READ", policy.read()),
@@ -44,17 +43,8 @@ impl Params {
                 .enumerate()
                 .map(|(i, rule)| (format!("READ_ONLY_{i}"), rule.clone()))
                 .collect(),
-            // A target that is or holds an allowed path gets no rule: a subpath rule on it
-            // would deny the matter (or the root) itself, and the default deny already refuses
-            // it, its ancestors' metadata aside.
-            link_targets: policy
-                .links()
-                .iter()
-                .enumerate()
-                .filter_map(|(i, f)| f.target.as_ref().map(|t| (i, t)))
-                .filter(|(_, target)| !allowed.iter().any(|a| a.starts_with(target)))
-                .map(|(i, target)| (format!("LINK_TARGET_{i}"), target.clone()))
-                .collect(),
+            // Only targets an allow rule covers; see `Policy::link_targets`.
+            link_targets: numbered("LINK_TARGET", policy.link_targets()),
             hidden: numbered("HIDDEN", policy.hidden()),
             read_only_state: numbered("STATE_READ_ONLY", policy.read_only_in_state()),
             keychains: policy
@@ -69,21 +59,6 @@ impl Params {
                 }),
         }
     }
-}
-
-/// Every path the policy allows, for the link-target check.
-fn allowed_paths(policy: &Policy) -> Vec<PathBuf> {
-    let mut all = vec![policy.matter().to_owned(), policy.state().to_owned()];
-    all.extend(policy.runtime().iter().cloned());
-    all.extend(policy.read().iter().cloned());
-    all.extend(policy.allowed_folders().iter().cloned());
-    all.extend(policy.notes().map(Path::to_owned));
-    all.extend(policy.credential_link().map(Path::to_owned));
-    if let Some(store) = policy.claude_store() {
-        all.extend(store.files());
-        all.extend(store.lock_folders());
-    }
-    all
 }
 
 fn numbered(prefix: &str, paths: &[PathBuf]) -> Vec<(String, PathBuf)> {

@@ -136,6 +136,48 @@ fn a_folder_holding_a_git_is_never_a_link_folder() {
 
 #[cfg(unix)]
 #[test]
+fn a_folder_above_a_working_tree_is_never_a_link_folder() {
+    // The round 2 reviewer's case: `projects/` would hide `projects/repo` and its files.
+    let w = World::new("findings-above-git");
+    w.dir
+        .file("matter/projects/repo/.git/HEAD", "ref: refs/heads/main\n");
+    w.dir.file("matter/projects/repo/brief.txt", "brief\n");
+    for i in 0..300 {
+        let outside = w.dir.file(&format!("other/o{i}.txt"), "o");
+        w.dir.dir(&format!("matter/projects/x{i}"));
+        w.dir
+            .hard_link(&format!("matter/projects/x{i}/f"), &outside);
+    }
+    refused(
+        w.builder().build(),
+        "the matter has 300 links",
+        &w.at("matter"),
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn symlink_targets_nothing_allows_take_no_rules() {
+    let w = World::new("findings-targets");
+    w.dir.dir("matter/links");
+    for i in 0..300 {
+        let outside = w.dir.file(&format!("other/o{i}.txt"), "o");
+        w.dir.symlink(&format!("matter/links/l{i}"), &outside);
+    }
+    // One target inside a read path keeps its rule: the read path's allow would let it through.
+    let skill = w.dir.file("skills/s.md", "s");
+    w.dir.symlink("matter/links/skill", &skill);
+    let policy = w.builder().read(w.at("skills")).build().unwrap();
+    assert_eq!(policy.links().len(), 301);
+    assert_eq!(policy.link_targets(), [canon(&skill)]);
+    assert_eq!(
+        policy.link_folders(),
+        [canon(&w.at("matter")).join("links")]
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn a_hard_link_from_git_to_a_writable_name_is_a_finding() {
     let w = World::new("findings-mixed");
     let config = w.dir.file("matter/.git/config", "[core]\n");

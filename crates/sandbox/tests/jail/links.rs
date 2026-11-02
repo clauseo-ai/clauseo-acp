@@ -90,3 +90,47 @@ fn twenty_thousand_hard_links_to_outside_files_fit_the_budget() {
         "plain\n"
     );
 }
+
+/// `projects/repo` (a working tree) beside many hard links to outside files: the build either
+/// refuses or leaves `projects/repo/brief.txt` readable, never silently unreadable.
+#[test]
+fn a_repository_beside_many_links_stays_readable_or_the_build_is_refused() {
+    let w = World::new();
+    w.file("m1/projects/repo/.git/HEAD", "ref: refs/heads/main\n");
+    w.file("m1/projects/repo/brief.txt", "brief\n");
+    // The reviewer's layout: one link per folder right under `projects/`, which cannot fold.
+    for i in 0..300 {
+        w.file(&format!("outside/o{i}.txt"), "outside\n");
+        w.dir(&format!("m1/projects/x{i}"));
+        w.hard_link(&format!("outside/o{i}.txt"), &format!("m1/projects/x{i}/f"));
+    }
+    let error = w.builder().build().unwrap_err();
+    assert!(error.to_string().contains("300 links"), "{error}");
+    // One level deeper they fold into `projects/docs`, and the repository stays readable.
+    for i in 0..300 {
+        w.dir(&format!("m1/projects/docs/x{i}"));
+        w.hard_link(
+            &format!("outside/o{i}.txt"),
+            &format!("m1/projects/docs/x{i}/f"),
+        );
+        w.remove(&format!("m1/projects/x{i}/f"));
+    }
+    let policy = w.builder().build().unwrap();
+    assert_eq!(
+        policy.link_folders().len(),
+        1,
+        "{:?}",
+        policy.link_folders()
+    );
+    let (launcher, _) = launcher(policy);
+    let m1 = w.at("m1");
+    let out = run(
+        &launcher,
+        "/bin/cat",
+        &["projects/repo/brief.txt"],
+        &m1,
+        &[],
+    );
+    assert_eq!(out.assert_ok().stdout, "brief\n");
+    run(&launcher, "/bin/cat", &["projects/docs/x5/f"], &m1, &[]).assert_refused();
+}
