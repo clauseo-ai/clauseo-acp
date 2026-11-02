@@ -4,6 +4,7 @@
 // times on questions and answers.
 import { act } from "react";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
+import { brk } from "@clauseo/components/lib/words-breaks.ts";
 import { lim } from "@clauseo/components/lib/words-limits.ts";
 import { th } from "@clauseo/components/lib/words-thread.ts";
 import { t } from "@clauseo/components/lib/words.ts";
@@ -22,7 +23,7 @@ import {
   uuid,
 } from "../../testing/stream-script.ts";
 import type { FileChange, HostError, StepEntry, ViewEntry } from "../../transport/protocol.ts";
-import { clockTime } from "./clock.ts";
+import { clockTime, stamp } from "./clock.ts";
 import { defaultOutcome, mountRoom, type Harness } from "./harness.ts";
 
 let h: Harness | null = null;
@@ -407,8 +408,10 @@ test("reopening a failed turn keeps the question and the answer so far (the brie
   ]);
   expect(h.one("message-user")?.textContent).toContain("Summarise the indemnity clause");
   expect(h.one("message-agent")?.textContent).toBe("The clause");
+  // agent.exited's step has a true time, so the thread marks where it stopped (U10; stopped-mark.tsx)
+  expect(h.one("turn-stopped")?.dataset["failure"]).toBe("agent.exited");
   expect(h.one("turn-stopped")?.textContent).toBe(
-    th("en", "The answer stopped. Your question and the answer so far are kept."),
+    brk("en", "The answer stopped here at {time}", { time: stamp("en", 7000, Date.now()) }),
   );
 });
 

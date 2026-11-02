@@ -809,5 +809,26 @@
     "at": "2026-11-02",
     "by": "Rohan",
     "note": "Rohan, on the review page: a design string in place (built from U4 f96fdf40)"
+  },
+  "U10-01": {
+    "en": "The answer stopped at {time}. Your question and the answer so far are kept.",
+    "hi": "उत्तर {time} बजे रुक गया। आपका प्रश्न और अब तक का उत्तर रखे गए हैं।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U10-02": {
+    "en": "The answer stopped here at {time}",
+    "hi": "उत्तर {time} बजे यहाँ रुका",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U10-03": {
+    "en": "The answer stopped with no reason given. Restart asks your question once more. The answer so far stays above.",
+    "hi": "उत्तर बिना किसी कारण के रुक गया। फिर से शुरू करने पर आपका प्रश्न एक बार फिर पूछा जाता है। अब तक का उत्तर ऊपर बना रहता है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
   }
 }

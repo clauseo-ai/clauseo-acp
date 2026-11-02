@@ -140,6 +140,14 @@ export class FakeTransport implements HostTransport, NextHostSource {
         return () => this.#appHeard.delete(listener);
       },
     },
+    restart: {
+      restartAgent: async (thread) => {
+        await this.dispatch({
+          command_id: crypto.randomUUID(),
+          command: { restart_agent: { thread } },
+        });
+      },
+    },
   };
 
   constructor(host: FakeHost = {}) {
@@ -192,6 +200,7 @@ export class FakeTransport implements HostTransport, NextHostSource {
       matters: has("matters") ? this.#parts.matters : null,
       location: has("location") ? this.#parts.location : null,
       app: has("app") ? this.#parts.app : null,
+      restart: has("restart") ? this.#parts.restart : null,
     };
   }
 

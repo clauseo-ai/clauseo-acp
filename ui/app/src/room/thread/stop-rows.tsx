@@ -8,6 +8,8 @@ import { lim } from "@clauseo/components/lib/words-limits.ts";
 import { th } from "@clauseo/components/lib/words-thread.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { toHostError } from "../../transport/host-transport.ts";
+import { StoppedMark } from "../stopped-mark.tsx";
+import { takesMark } from "../thread-break.ts";
 import type { EntryId, LimitStopEntry, StepEntry } from "../../transport/protocol.ts";
 import { isoOf, whenOf } from "./clock.ts";
 import { useBusy } from "./live.ts";
@@ -64,9 +66,11 @@ export function StepRow({ id, entry }: { id: EntryId; entry: StepEntry }) {
       data-testid="turn-stopped"
       data-entry-id={id}
       data-stop-reason={entry.stop}
+      data-failure={entry.failure}
       className={ROW}
     >
-      {line !== null && (
+      {takesMark(entry) && <StoppedMark ts={entry.ts} />}
+      {line !== null && !takesMark(entry) && (
         <p className={QUIET} data-code={line.code}>
           <Say>{line.kind === "error" ? errorWords(w.lang, line.code) : th(w.lang, line.key)}</Say>
         </p>
