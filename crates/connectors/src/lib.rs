@@ -48,6 +48,8 @@ pub use cancel::CancelFlag;
 #[cfg(feature = "test-support")]
 pub use config::ManualClock;
 pub use config::{Clock, Config, Origin, ProxyChoice, SystemClock};
+#[cfg(feature = "test-support")]
+pub use connectors::ListenerLoad;
 pub use connectors::{ConnectorHandle, Connectors};
 pub use credential::{CredentialKind, CredentialStatus, SignOutReport};
 pub use error::{AuthError, Error, SignInError, StoreError};
