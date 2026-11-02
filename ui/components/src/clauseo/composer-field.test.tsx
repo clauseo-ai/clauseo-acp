@@ -238,3 +238,26 @@ test("the field stands in the room's field slot, and a capture listener reads it
   }
   expect(seen).toEqual({ mine: true, value: "Typed words" });
 });
+
+test("a gate keeps the words: typed, gated, ungated, the same field is back with them and its undo, Ask with it", async () => {
+  const onInput = vi.fn();
+  const gate = <button type="button">Sign in</button>;
+  await mount(composer({ onInput }));
+  const before = field();
+  await type("What did the bank know?");
+  onInput.mockClear();
+  await rerender(composer({ onInput, gate }));
+  // the gate stands in the row; the field is kept, hidden, with Ask and Add papers gone
+  expect(document.querySelector(".room-field")?.textContent).toContain("Sign in");
+  expect(field().hidden).toBe(true);
+  expect(document.querySelector('[data-testid="send"]')).toBeNull();
+  await rerender(composer({ onInput }));
+  // the very node, so the engine's undo stack for what was typed is the one the lawyer left
+  expect(field()).toBe(before);
+  expect(field().hidden).toBe(false);
+  expect(field().value).toBe("What did the bank know?");
+  expect(ask().disabled).toBe(false);
+  // nothing changed the words, so the room's draft heard nothing
+  expect(onInput).not.toHaveBeenCalled();
+  expect(scope?.nodes.get("field")).toBe(before);
+});

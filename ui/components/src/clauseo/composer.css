@@ -157,6 +157,10 @@
   .room-field:not(:has(.room-field-add)) textarea {
     padding-left: var(--s2-5);
   }
+  /* under a gate the field is kept, hidden, with its words */
+  .room-field textarea[hidden] {
+    display: none;
+  }
   .room-field textarea::placeholder {
     @apply font-ui text-muted;
   }
