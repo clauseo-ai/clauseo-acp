@@ -10,9 +10,9 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use clauseo_host::HostHandle;
 use clauseo_protocol::{
     Ack, AgentChoiceId, CommandEnvelope, CommandId, CommandOutcome, ErrorCode, FolderRefId,
-    HostCommand, HostError, HostQuery, MAX_PAGE_ENTRIES, MatterSource, PageLimit, PermissionEntry,
-    PermissionKind, PermissionRequestId, PermissionState, Principal, QueryResult, StreamId,
-    ThreadId, ViewEntry, ViewPosition,
+    HostCommand, HostError, HostQuery, Language, MAX_PAGE_ENTRIES, MatterSource, PageLimit,
+    PermissionEntry, PermissionKind, PermissionRequestId, PermissionState, Principal, QueryResult,
+    StreamId, ThreadId, ViewEntry, ViewPosition,
 };
 use tauri::ipc::Channel;
 
@@ -89,6 +89,15 @@ impl Bridge {
     /// The host handle, for shutdown.
     pub(crate) fn host(&self) -> &HostHandle {
         &self.host
+    }
+
+    /// The app's language (`ui.language`), for the words Rust draws: English when the settings
+    /// do not read.
+    pub(crate) async fn language(&self) -> Language {
+        match self.host.query(PRINCIPAL, HostQuery::GetSettings).await {
+            Ok(QueryResult::Settings(settings)) => settings.ui.language,
+            _ => Language::En,
+        }
     }
 
     /// Checks `command`'s shape and that the window may send it (`admit`), and runs it.

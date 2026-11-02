@@ -63,6 +63,20 @@ export const commands = {
 } | null, HostError>(__TAURI_INVOKE("pick_folder")),
 	/**  The OS the host runs on. */
 	displayInfo: () => typedError<DisplayInfo, HostError>(__TAURI_INVOKE("display_info")),
+	/**
+	 *  Opens an https, http or mailto `url` in the default browser or mail app, after a native
+	 *  confirm that names where it goes, in the app's language. Any other link is
+	 *  `command.invalid`; declined, nothing opens and the call fails with `transport.unauthorized`.
+	 */
+	openExternal: (url: string) => typedError<null, HostError>(__TAURI_INVOKE("open_external", { url })),
+	/**
+	 *  Opens the document `file` names with its default app. Refused with `command.invalid` when
+	 *  the host did not issue the ref, when the file is not inside its matter's folder, and when
+	 *  it is not a document type (`open::DOCUMENT_TYPES`).
+	 */
+	openFile: (file: FileRefId) => typedError<null, HostError>(__TAURI_INVOKE("open_file", { file })),
+	/**  Shows a matter's folder, or the app data folder, in Finder or File Explorer. */
+	reveal: (target: RevealTarget) => typedError<null, HostError>(__TAURI_INVOKE("reveal", { target })),
 };
 
 /* Constants */
@@ -2420,6 +2434,13 @@ export type RestoreScope =
 } } | 
 /**  A scope from a newer Clauseo; written back as the plain string `kind`. */
 string;
+
+/**  What `reveal` shows. */
+export type RevealTarget = 
+/**  The matter's folder. */
+{ matter: MatterId } | 
+/**  Clauseo's app data folder: the event store, the version store and the settings. */
+"app_data";
 
 /**  An event's position in its stream: gapless, starting at 1, assigned by the host at commit. */
 export type Seq = number;

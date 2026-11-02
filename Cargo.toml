@@ -42,6 +42,8 @@ serde_json = "1.0.154"
 # canonicalize without the `\\?\` prefix std adds on Windows, which most tools refuse; clippy.toml
 # bans std's canonicalize in its favour.
 dunce = "1.0.5"
+# The desktop's link check (crates/desktop/src/open.rs); already in the tree through tauri.
+url = "2.5.8"
 # Shared with floor 2's `process` crate (S7), which adds the features it needs in its own line.
 # xtask's process door (xtask/src/process/unix.rs) sends signals to process groups with
 # `sys::signal::killpg`, which `signal` turns on (with `process`, for `unistd::Pid`). `process`

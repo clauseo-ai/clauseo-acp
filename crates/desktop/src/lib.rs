@@ -6,7 +6,7 @@
 //!   `CLAUSEO_DATA_DIR` moves the data folder; `Effective::load` with the system policy
 //!   sources), the `PassthroughLauncher`, and the refused folders of `refused_folders`. Exit
 //!   waits for `HostHandle::shutdown` and `HostJoin::join` on their own thread, then exits.
-//! - Ten async commands (`commands.rs`), each granted by its own permission in
+//! - Thirteen async commands (`commands.rs`), each granted by its own permission in
 //!   `capabilities/main.json` and listed in `build.rs`'s `AppManifest`. Beside them that file
 //!   grants only the two window commands of Tauri's drag script, and `window_frame.rs` adds
 //!   the caption buttons' four on Windows and Linux (0015).
@@ -23,7 +23,9 @@
 //!   format. Never Tauri events.
 //! - The `main` window's scripts carry `app.security.csp` like its page, the colouring worker's
 //!   included: Tauri sends the header with `.html` only (`csp.rs`).
-//! - No command takes a path: folders come from the native dialog drawn in Rust (`dialogs.rs`).
+//! - No command takes a path: folders come from the native dialog drawn in Rust (`dialogs.rs`),
+//!   files are named by the refs the host issued, and `reveal` names a matter or the app data
+//!   folder (`open.rs`, 0026).
 //! - Plugins are called from Rust only. Each is registered with `plugin_rust_only`, which drops the
 //!   script a plugin would inject into the page (`rust_only.rs`). clippy's `disallowed-methods`
 //!   (`clippy.toml`) forbids the other public ways we know of to register a plugin, grant a
@@ -43,6 +45,7 @@ mod e2e;
 mod frame;
 #[cfg(feature = "marks")]
 mod marks;
+mod open;
 mod picked;
 mod rust_only;
 #[cfg(test)]
@@ -135,6 +138,9 @@ pub fn run() -> tauri::Result<()> {
             commands::answer_permission,
             commands::pick_folder,
             commands::display_info,
+            commands::open_external,
+            commands::open_file,
+            commands::reveal,
             #[cfg(feature = "e2e")]
             e2e::perf_channel_bytes,
             #[cfg(feature = "marks")]
@@ -188,6 +194,7 @@ fn start_host(app: &App) -> Result<(), Box<dyn std::error::Error>> {
     let config = HostConfig::new(effective, Arc::new(launcher))
         .with_refused_folders(clauseo_settings::refused_folders(&SystemDirs));
     let (handle, join) = Host::start(config)?;
+    app.manage(open::AppData(locations.data_dir().to_path_buf()));
     app.manage(Bridge::new(handle));
     app.manage(HostThread(Mutex::new(Some(join))));
     Ok(())

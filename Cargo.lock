@@ -830,6 +830,7 @@ dependencies = [
  "clauseo-process",
  "clauseo-protocol",
  "clauseo-settings",
+ "dunce",
  "futures",
  "memchr",
  "serde",
@@ -848,6 +849,7 @@ dependencies = [
  "tauri-plugin-window-state",
  "tauri-runtime",
  "tauri-specta",
+ "url",
  "uuid",
  "windows",
 ]
