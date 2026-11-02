@@ -12,7 +12,7 @@ fn bash(command: &str) -> Value {
 
 /// What the guard says for `command` under `tool`, the matter as `cwd`, Codex's way (no
 /// `--matter`); the same must come with Claude Code's `--matter`.
-fn check(fx: &Fixture, tool: &str, command: &str) -> String {
+pub(super) fn check(fx: &Fixture, tool: &str, command: &str) -> String {
     let hook = fx.hook(tool, &bash(command));
     let without = guard_json(&hook);
     let matter = fx.path("m");
@@ -21,7 +21,7 @@ fn check(fx: &Fixture, tool: &str, command: &str) -> String {
     without
 }
 
-fn add(fx: &Fixture, names: &[&str]) {
+pub(super) fn add(fx: &Fixture, names: &[&str]) {
     for name in names {
         let path = name
             .split('/')
@@ -154,7 +154,6 @@ fn reading_a_held_file_is_let_through() {
         "tail -n 5 ./Contract.docx",
         "wc -c Contract.docx",
         "file Contract.docx",
-        "less Contract.docx",
         "strings Contract.docx | head",
         "unzip -l Contract.docx",
         "unzip -p Contract.docx word/document.xml | head -c 2000",
@@ -249,7 +248,7 @@ fn stetdoc_reads_are_let_through_and_writes_to_a_held_file_refused() {
         "stetdoc skills --json",
         "stetdoc unpack Contract.docx",
         "stetdoc unpack Contract.docx -o work --refresh",
-        "stetdoc edit Contract.docx --find a --replace b",
+        "stetdoc edit Contract.docx --ops ops.txt",
         "stetdoc replace Contract.docx a b",
         "stetdoc comment Contract.docx 2.1 note",
         "stetdoc edit Contract.docx -o Out.docx",
@@ -290,14 +289,14 @@ fn stetdoc_reads_are_let_through_and_writes_to_a_held_file_refused() {
     add(&fx, &["Contract.edited.docx", "~$ntract.edited.docx"]);
     let edited = deny("Contract.edited.docx");
     for command in [
-        "stetdoc edit Contract.docx --find a --replace b",
+        "stetdoc edit Contract.docx --ops ops.txt",
         "stetdoc comment Contract.docx 2.1 note",
         "stetdoc pack Contract.stet",
     ] {
         assert_eq!(check(&fx, "Bash", command), edited, "{command}");
     }
     for command in [
-        "stetdoc edit Contract.docx --find a --replace b --dry-run",
+        "stetdoc edit Contract.docx --ops ops.txt --dry-run",
         "stetdoc pack Other.stet",
         "stetdoc edit Contract.docx -o Out.docx",
     ] {

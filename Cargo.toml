@@ -122,6 +122,9 @@ async-io = "2"
 # computes it with sha2 0.10 (crates/host/src/agent/loads/codex.rs). clauseo-connectors: the PKCE
 # S256 challenge.
 sha2 = { version = "0.10.9", default-features = false }
+# clauseo-host: the pre-write guard compares a held file's name with a shell command's words in one
+# Unicode form on macOS, as APFS does (gix already builds it for clauseo-matters).
+unicode-normalization = "0.1.26"
 # clauseo-settings: JSONC (settings.json and policy.json take comments and trailing commas),
 # the settings JSON Schema, and macOS managed preferences (CFPreferencesCopyAppValue and
 # CFPreferencesAppValueIsForced). Features go on the crate's own lines.

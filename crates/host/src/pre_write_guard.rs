@@ -34,35 +34,50 @@
 //!   - Names, a backstop that does not depend on following folders (`names.rs`). The files of
 //!     the matter held open right now are listed (the folders with an Office owner file `~$…`,
 //!     breadth first, at most 20 000 entries, no hidden folder, no symlink followed), and a
-//!     command whose text (escaped newlines joined, `$'…'` decoded, comments kept) holds one's
-//!     name as a whole name (between the start, a folder separator, whitespace, a quote or a
-//!     shell metacharacter, and the end, whitespace, a quote or a metacharacter; ignoring case
-//!     on macOS and Windows) is refused, as is one whose words name a held file by path, unless
-//!     the whole command only reads. Read-only, judged conservatively (`names::read_only`): no
-//!     `$(`, backtick, `<(` or `>(` (no `{` under PowerShell); each simple command naming a
-//!     held file is `cat`, `head`, `tail`, `wc`, `file`, `strings`, `less` (no log file),
-//!     `unzip` with only `-l`/`-p`/`-v`/`-q`, `textutil -convert … -stdout`, `pandoc` whose
-//!     `-o`/`--output` names no held file, a `stetdoc` form writing no held file, or `sh -c`
-//!     whose script is itself read-only; and no output redirection goes to a held file or a
-//!     target built at run time (`/dev/null`, `$null` and `2>&1` are fine). So while a document
-//!     is open in Word, `cat Contract.docx | grep x` goes on, but `echo Contract.docx`,
-//!     `grep x Contract.docx` or `python -c` naming it is refused, with the held-open reason.
-//!     The agent's own Read tool is not checked.
-//!   - stetdoc (`names::stetdoc`, matching stetdoc 0.9.0's `--help`; check it again when U13's
-//!     0.9.1 pin lands): `view`, `inspect`, `check`, `lookup`, `capabilities` and `skills` only
-//!     read; `unpack` writes its `-o` folder; `edit`, `replace` and `comment` write nothing with
-//!     `--dry-run`, the document with `--in-place`, `-o`/`--output`, else `NAME.edited.docx`;
-//!     `compare` writes its `-o`; `pack` its `-o`, else `NAME.edited.docx`. A form writing a held
-//!     file is refused even when the command names none (a default output), as are `stetdoc mcp`
-//!     and `stetdoc init` outright; an unknown subcommand or flag naming a held file is refused.
+//!     command that holds one's name as a whole name (between the start, a folder separator,
+//!     whitespace, a quote or a shell metacharacter, and the end, whitespace, a quote or a
+//!     metacharacter; ignoring case on macOS and Windows, and Unicode form on macOS), in its text
+//!     (escaped newlines joined, `$'…'` decoded, comments kept) or in its words as the shell reads
+//!     them (quotes and escapes off: `Con""tract.docx`, `My\ Deal.docx`; and one level of
+//!     `sh -c` scripts), is refused, as is one whose words name a held file by path (a symlink,
+//!     another case or form), unless the whole command only reads. Read-only is narrow and
+//!     whole-command, and when in doubt it is not (`names::read_only`): no `$(`, backtick, `<(`,
+//!     `>(`, `$_` or function definition (no `{` under PowerShell); every simple command, by a
+//!     bare program name (no `/`, no `NAME=value` before it), is a reader, which may name the
+//!     held file (`cat`, `head`, `tail`, `wc`, `strings`, `file`, `unzip` with only
+//!     `-l`/`-p`/`-v`/`-q`, `textutil -convert … -stdout`, `pandoc` with no option that writes
+//!     or runs code, a `stetdoc` form writing no held file, `sh -c` whose script passes and whose
+//!     other words name no held file), or a filter (`grep`, `rg`, `sed` without `-i`, `sort`
+//!     without `-o`, `uniq`, `cut`, `tr`, `nl`, `column`) or neutral command (`cd`, `pushd`,
+//!     `popd`, `echo`, `pwd`, `ls`, `true`), which must not name it; and each output
+//!     redirection or pandoc `-o` goes to `/dev/null`, `$null`, a descriptor (`2>&1`, `>&2`,
+//!     `>&-`) or a literal path naming no held file (never `>&file`, a `$`, a glob, a brace or
+//!     `~`). So while a document is open in Word, `cat Contract.docx | grep x > notes.txt` and
+//!     `pandoc Contract.docx -o summary.md` go on, but `echo Contract.docx`, `grep x
+//!     Contract.docx`, `less Contract.docx`, `cat Contract.docx; rm x` or `python -c` naming it
+//!     is refused, with the held-open reason. The agent's own Read tool is not checked.
+//!   - stetdoc (`names::stetdoc`, read with stetdoc v0.9.1's options and their arity, so a
+//!     flag's value is never taken for the document): `view`, `inspect`, `check`, `lookup`,
+//!     `capabilities` and `skills` only read; an output (`-o`, `--output`, `-oX`, `--output=X`)
+//!     naming a held file writes it; with `--in-place` any word naming a held file is written;
+//!     else `--dry-run` writes nothing; else `edit`, `replace` and `comment` write
+//!     `NAME.edited.docx` beside the document and `pack` `NAME.edited.docx`. A form writing a
+//!     held file is refused even when the command names none (a default output), as are
+//!     `stetdoc mcp` and `stetdoc init` outright; an unknown subcommand or option in a command
+//!     naming a held file is refused.
 //!
-//!   Not caught: a held file named only by a glob (`Con*.docx`), brace expansion
-//!   (`Con{tract,x}.docx`) or a value built at run time (`f=Con; > $f"tract.docx"`), so the name
-//!   never appears whole in the text; a script file the command runs; a file held on Windows by a
-//!   share mode alone (no owner file) reached by a route the path layer misses; a held file past
-//!   the 20 000 entries listed. The name backstop catches the other routes the path layer misses
-//!   (other interpreters such as `python -c`, `env -C`/`git -C`, folder games) whenever the name
-//!   appears literally. Under Codex, a `.codex` folder named by a glob (`cd .cod?`) is not caught.
+//!   Not caught: the guard stops an agent overwriting a held document by accident; it is not a
+//!   boundary against an agent set on evading it (stage C's sandbox is). So it misses a held file
+//!   named only by a glob (`Con*.docx`), brace expansion (`Con{tract,x}.docx`) or a value built
+//!   at run time (`f=Con; > $f"tract.docx"`), so the name never appears whole; a script file the
+//!   command runs, or a `sed`/`rg` script reading its commands from a file; a reader's own code
+//!   paths (a program shadowing `cat` early in `PATH` set before the command, a shell profile);
+//!   a file held on Windows by a share mode alone (no owner file) reached by a route the path
+//!   layer misses; a held file past the 20 000 entries listed. The name backstop catches the
+//!   other routes the path layer misses (other interpreters such as `python -c`, `env -C`/`git
+//!   -C`, folder games) whenever the name appears literally. Under Codex, a `.codex` folder named
+//!   by a glob (`cd .cod?`) is not caught. A command given as an argument list (a shape Codex
+//!   used before) is judged read-only as its parts quoted and joined into one line.
 //!
 //! The matter folder is the `--matter` argument when the hook passes one (Claude Code's entry
 //! does, `agent/loads.rs`: Claude Code's `cwd` follows the agent's `cd`), else the input's
@@ -299,45 +314,29 @@ fn refusal(bytes: &[u8], matter: Option<&Path>) -> Result<Option<Refusal>, Ignor
             files,
             patch,
             text,
+            line,
             escape,
             ..
         } => {
             if let Some(path) = held_at(patch) {
                 return Ok(Some(Refusal::HeldOpen(path)));
             }
-            Ok(shell_refusal(text, *escape, &folder, held_at(files)))
+            // The first held file the words name by path, and every word that names one.
+            let mut found = None;
+            let mut hits: Vec<String> = Vec::new();
+            for (path, word) in files {
+                if let Some(held) = held_at(std::slice::from_ref(path)) {
+                    found.get_or_insert(held);
+                    if !hits.contains(word) {
+                        hits.push(word.clone());
+                    }
+                }
+            }
+            Ok(names::shell_refusal(
+                text, line, *escape, &folder, found, &hits,
+            ))
         }
     }
-}
-
-/// Why the shell command `text` is refused, if it is, with `found` the held file its words
-/// name from the folders it may be in. `stetdoc mcp` and `init` are refused outright, and a
-/// `stetdoc` form that writes a held file (its default output included) is refused. Else the
-/// name backstop: a command naming a held file of `folder`, found by its words or by its text
-/// ([`names::named_in`]), is refused unless it only reads ([`names::read_only`]).
-fn shell_refusal(
-    text: &str,
-    escape: Escape,
-    folder: &Path,
-    found: Option<MatterPath>,
-) -> Option<Refusal> {
-    let held = names::held_files(folder);
-    let mut segments = words::Segments::new(MAX_WORDS);
-    words::shell_segments(text, escape, &mut segments);
-    for segment in segments.iter().filter(|segment| segment.command) {
-        match names::stetdoc(&segment.words, &held) {
-            names::Stetdoc::Serve => return Some(Refusal::StetdocServe),
-            names::Stetdoc::Writes(file) => return Some(Refusal::HeldOpen(file.path.clone())),
-            names::Stetdoc::Fine | names::Stetdoc::Unknown => {}
-        }
-    }
-    let path =
-        found.or_else(|| names::named_in(text, escape, &held).map(|file| file.path.clone()))?;
-    let mut names_held = held;
-    if !names_held.iter().any(|file| file.path == path) {
-        names_held.push(names::Held::new(path.clone()));
-    }
-    (!names::read_only(text, escape, &names_held)).then_some(Refusal::HeldOpen(path))
 }
 
 /// The paths a tool would write, as the agent spelled them, and where they came from.
@@ -346,14 +345,16 @@ enum Targets {
     Named(Vec<PathBuf>),
     /// The files of a Codex `apply_patch` patch.
     Patch(Vec<PathBuf>),
-    /// A shell command: the existing files it names, the files of a patch in its text, and
-    /// whether a word of it has a `.codex` part.
+    /// A shell command: the existing files it names (each with the word naming it), the files of
+    /// a patch in its text, and whether a word of it has a `.codex` part.
     Shell {
-        files: Vec<PathBuf>,
+        files: Vec<(PathBuf, String)>,
         patch: Vec<PathBuf>,
         names_codex: bool,
         /// The command's text (an argument list's parts one per line) and its shell's escape.
         text: String,
+        /// The command as one shell line (an argument list's parts quoted, joined by spaces).
+        line: String,
         escape: Escape,
     },
 }

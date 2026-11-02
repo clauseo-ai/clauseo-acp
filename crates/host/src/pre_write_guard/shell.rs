@@ -62,15 +62,23 @@ pub(super) fn shell_targets(
 ) -> Result<Targets, Ignored> {
     let mut segments = Segments::new(MAX_WORDS);
     let mut text = String::new();
+    let mut line = String::new();
     match command {
         Some(Value::String(command)) => {
             shell_segments(command, escape, &mut segments);
             text.push_str(command);
+            line.push_str(command);
         }
         Some(Value::Array(parts)) => {
             for part in parts.iter().filter_map(Value::as_str) {
                 text.push_str(part);
                 text.push('\n');
+                if !line.is_empty() {
+                    line.push(' ');
+                }
+                line.push('\'');
+                line.push_str(&part.replace('\'', "'\\''"));
+                line.push('\'');
                 segments.split();
                 segments.push(part.to_owned());
                 shell_segments(part, escape, &mut segments);
@@ -105,7 +113,7 @@ pub(super) fn shell_targets(
     let changes = parts
         .iter()
         .any(|part| part.words.iter().any(|word| change(word).is_some()));
-    let mut files: Vec<PathBuf> = Vec::new();
+    let mut files: Vec<(PathBuf, String)> = Vec::new();
     let mut names_codex = false;
     let mut folders = Folders {
         reached: vec![cwd.to_path_buf()],
@@ -121,8 +129,9 @@ pub(super) fn shell_targets(
                 let candidate = native(candidate, part.escape);
                 for path in starts(&folders, changes, Path::new(candidate.as_ref())) {
                     for path in resolutions(&path) {
-                        if !files.contains(&path) && path.metadata().is_ok_and(|m| m.is_file()) {
-                            files.push(path);
+                        let file = (path, word.clone());
+                        if !files.contains(&file) && file.0.metadata().is_ok_and(|m| m.is_file()) {
+                            files.push(file);
                         }
                     }
                 }
@@ -137,6 +146,7 @@ pub(super) fn shell_targets(
         patch: patch_targets(&text),
         names_codex,
         text,
+        line,
         escape,
     })
 }
