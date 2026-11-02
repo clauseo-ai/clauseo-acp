@@ -11,6 +11,7 @@
 import { createElement, use, type ComponentType } from "react";
 // a type alone: erased, so this file has no static dependency on the list
 import type { ThreadListProps } from "./list.tsx";
+import { late } from "../late.ts";
 
 type Loaded = ComponentType<ThreadListProps>;
 /** The import, tagged as React's use() reads a settled promise. */
@@ -26,17 +27,20 @@ function NoThread(): null {
 /** Starts loading the thread's chunk, once; resolves when it is in memory. */
 export function loadThread(): Promise<Loaded> {
   if (chunk !== null) return chunk;
-  const loading: Chunk = import("./list.tsx").then(
+  const loading: Chunk = late(import("./list.tsx")).then(
     (m): Loaded => m.ThreadList,
     (error: unknown): Loaded => {
       console.warn(`the thread's chunk did not load: ${String(error)}`);
       return NoThread;
     },
   );
-  void loading.then((value) => {
-    loading.status = "fulfilled";
-    loading.value = value;
-  });
+  // kept until it is tagged, so a test that waits on its late imports sees the list's first render without a fallback
+  void late(
+    loading.then((value) => {
+      loading.status = "fulfilled";
+      loading.value = value;
+    }),
+  );
   chunk = loading;
   return loading;
 }
