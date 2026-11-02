@@ -23,6 +23,10 @@
 # spawn (below). R3 moved noisy_pass and boom_fail into steps/run/tests.rs.
 crates/desktop/src/bridge/pump.rs now clippy::disallowed_methods
 crates/desktop/src/frame.rs StreamMessage dead_code
+crates/desktop/src/open.rs open_url_unconfirmed dead_code
+crates/desktop/src/test_support.rs Scratch::dir clippy::disallowed_methods
+crates/desktop/src/test_support.rs Scratch::file clippy::disallowed_methods
+crates/desktop/src/test_support.rs Scratch::link clippy::disallowed_methods
 crates/desktop/src/lib.rs context clippy::disallowed_methods
 crates/desktop/src/lib.rs raise_main_window clippy::let_underscore_must_use
 crates/desktop/src/lib.rs stop_host_then_exit clippy::exit

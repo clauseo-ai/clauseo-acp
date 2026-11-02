@@ -44,6 +44,11 @@ added: the dialog and opener plugins are called from Rust, as before.
   is the one `Locations::resolve` found at start-up. The folder is shown selected in its parent
   folder (the opener plugin's `reveal_item_in_dir`), which never launches what it shows, even a
   folder that is a bundle. A matter's folder that is not there is `matter.folder_missing`.
+- **`open_url_unconfirmed`**, for Rust's own callers only (stage D's R20 opens the captured
+  sign-in page with it): `open_external`'s link check narrowed to https, then the default browser,
+  with no confirm. It is a crate-internal function, not a command: no capability, handler or
+  binding names it, and a test checks so. `open_external` shares its check and the opener, and
+  adds the confirm.
 - The host gains two Rust-only `HostHandle` methods for the bridge, `locate_file` and
   `matter_folder`, authorised for the desktop's own principal only. Nothing changes on the wire
   between host and desktop, in the protocol or in the store; no error code is added.
