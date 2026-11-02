@@ -1,0 +1,39 @@
+[package]
+name = "clauseo-counts"
+version = "0.1.0"
+description = "The anonymous usage counts: the closed schema, the install id, the day's cells, the weekly tally, the queue and the sender."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+default = ["client"]
+# Everything that touches files, the OS random source or the network seam: the install id, the
+# day's cells on disk, the queue, the tally files and the sender. The Worker builds the crate with
+# `default-features = false` for wasm32 and gets the `schema` module alone, which does no I/O.
+client = ["dep:flate2", "dep:futures", "uuid/v4"]
+
+[dependencies]
+clauseo-protocol = { path = "../protocol" }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+flate2 = { workspace = true, optional = true }
+futures = { workspace = true, optional = true }
+
+[dev-dependencies]
+# The agreement test: setting_changed's values are the settings' own (src/schema/tests/settings.rs).
+clauseo-settings = { path = "../settings" }
+# The committed JSON Schema of the payloads (src/schema/tests/wire.rs); derived in tests only.
+schemars = { workspace = true, features = ["std", "derive"] }
+insta = { workspace = true, features = ["json"] }
+proptest = { workspace = true }
+trybuild = { workspace = true }
+
+# The compile-fail cases trybuild builds one by one (tests/closed.rs), not test targets.
+[package.metadata.cargo-shear]
+ignored-paths = ["tests/closed/*.rs"]
+
+[lints]
+workspace = true
