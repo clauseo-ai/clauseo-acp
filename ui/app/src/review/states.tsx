@@ -29,8 +29,17 @@ export function RoomOver({
 }
 
 /** The room, and once its composer takes words, the lawyer asking `question` with Enter: for a state that follows a
- * send, such as the host refusing it. */
-export function RoomAsking({ host, question }: { host: () => FakeTransport; question: string }) {
+ * send, such as the host refusing it. With `send` false, `question` is only typed, the field focused first: for a
+ * state the words open, such as the `/` menu. */
+export function RoomAsking({
+  host,
+  question,
+  send = true,
+}: {
+  host: () => FakeTransport;
+  question: string;
+  send?: boolean;
+}) {
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = box.current;
@@ -41,9 +50,12 @@ export function RoomAsking({ host, question }: { host: () => FakeTransport; ques
       if (asked || field === null || field.disabled) return;
       asked = true;
       watch.disconnect();
+      // the focus asks for the menu's chunk, as a click in the field would
+      if (!send) field.focus();
       // the prototype's setter, past React's own value tracker, then the input React hears
       Reflect.set(HTMLTextAreaElement.prototype, "value", question, field);
       field.dispatchEvent(new Event("input", { bubbles: true }));
+      if (!send) return;
       queueMicrotask(() =>
         field.dispatchEvent(
           new KeyboardEvent("keydown", {
@@ -59,7 +71,7 @@ export function RoomAsking({ host, question }: { host: () => FakeTransport; ques
     watch.observe(el, { subtree: true, childList: true, attributes: true });
     ask();
     return () => watch.disconnect();
-  }, [question]);
+  }, [question, send]);
   return (
     <div ref={box} className="contents">
       <RoomOver host={host} />

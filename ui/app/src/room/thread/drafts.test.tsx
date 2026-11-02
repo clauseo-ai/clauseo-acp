@@ -45,6 +45,7 @@ function room(drafts: Drafts) {
           key={matter}
           drafts={drafts}
           draftKey={matter}
+          commands={[]}
           disabled={false}
           busy={false}
           refused={null}
