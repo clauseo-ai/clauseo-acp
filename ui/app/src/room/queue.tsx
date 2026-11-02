@@ -6,7 +6,7 @@
 // estimates). Stop the other cancels the other's turn, whose answer so far stays in that conversation; pressed before
 // the message went, the message then goes, as the design has it. A refused cancel's code goes to the composer's line
 // (Work), and every reply lands with the next frame's flush, as it may come mid-stream (#253).
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { OtherConversationWait } from "@clauseo/components/clauseo/queue-wait.tsx";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
@@ -27,6 +27,8 @@ export function OtherWait({
   onQueue,
   onFocusField,
   onRefused,
+  stopWanted,
+  onStopWanted,
 }: {
   transport: HostTransport;
   wait: Wait;
@@ -40,6 +42,11 @@ export function OtherWait({
   onFocusField: () => void;
   /** A refused Stop the other's code; null as another press goes. */
   onRefused: (code: ErrorCode | null) => void;
+  /** Whether Queue was pressed and Stop the other should hold the focus until the message waits: kept by the
+   * composer, so it outlives this panel. */
+  stopWanted: () => boolean;
+  /** Sets it. */
+  onStopWanted: (wanted: boolean) => void;
 }) {
   const { lang } = useWords();
   const store = useViewStore();
@@ -47,7 +54,22 @@ export function OtherWait({
   // one cancel at a time: a second press while the first is on its way sends nothing
   const stopping = useRef(false);
   const queueable = !wait.sent && !busy;
+  const sentForm = !queueable;
+  // the hand-off from Queue to `queued { behind }` makes the thread, switches the row and clears the field; on
+  // Windows the focus fell to the page on the way (CI, room-other.spec.ts), and the field's clear takes an unfocused
+  // page's focus. Until the message waits, focus lost to the page or the field comes back to Stop the other
+  useEffect(() => {
+    if (!stopWanted() || !sentForm) return;
+    const now = document.activeElement;
+    const lost =
+      now === null ||
+      now === document.body ||
+      (now instanceof HTMLTextAreaElement && now.closest("[data-composer]") !== null);
+    if (lost) stop.current?.focus();
+    if (wait.sent) onStopWanted(false);
+  }, [stopWanted, onStopWanted, sentForm, wait.sent]);
   const queue = () => {
+    onStopWanted(true);
     onQueue();
     // Queue goes once the message is on its way: the focus goes to Stop the other, which stays, never to the page
     if (stop.current !== null) stop.current.focus();
