@@ -29,6 +29,8 @@ use crate::secret::Secret;
 
 mod listener;
 
+pub(crate) use listener::ListenerStats;
+
 /// The page the browser shows once the credential is stored: English, then Hindi.
 pub(crate) const SUCCESS_PAGE: &str = include_str!("oauth/page.html");
 /// The page the browser shows, with 400, when the callback or the exchange failed: English,
@@ -55,6 +57,7 @@ pub struct PendingSignIn {
     verifier: Secret,
     state: Secret,
     cancel: CancelFlag,
+    stats: Arc<ListenerStats>,
     _pending: PendingGuard,
 }
 
@@ -109,6 +112,7 @@ impl PendingSignIn {
             verifier,
             state,
             cancel,
+            stats,
             _pending,
             ..
         } = self;
@@ -126,7 +130,7 @@ impl PendingSignIn {
         };
         // The listener is moved in and closed as soon as the callback is answered.
         let (code, browser) =
-            listener::wait_for_code(listener, &expect, &cancel, &*config.clock, deadline)?;
+            listener::wait_for_code(listener, &expect, &cancel, &*config.clock, deadline, &stats)?;
         if cancel.is_cancelled() {
             browser.failed();
             return Err(SignInError::Cancelled);
@@ -180,6 +184,8 @@ pub(crate) fn begin_sign_in(
     listener.set_nonblocking(true).map_err(listener_failed)?;
     let port = listener.local_addr().map_err(listener_failed)?.port();
     let redirect_uri = format!("http://127.0.0.1:{port}/oauth/callback");
+    let stats = Arc::new(ListenerStats::default());
+    *lock(&handle.inner.listener_stats) = Some(Arc::clone(&stats));
     let urls = &handle.inner.urls;
     let mut authorize_url = metadata.authorize.clone();
     {
@@ -208,6 +214,7 @@ pub(crate) fn begin_sign_in(
         verifier,
         state,
         cancel,
+        stats,
         _pending: pending,
     })
 }

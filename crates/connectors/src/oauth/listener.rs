@@ -1,14 +1,20 @@
 //! Step 7: the one-shot loopback listener. Each connection is read on its own thread with one
-//! total deadline of 2 seconds of real time for its whole request head, and at most 8 KB of it;
-//! only `GET /oauth/callback` reaches the checks, anything else gets 404. A wrong or missing
-//! `state` gets 400 and the listener keeps waiting, so no other page can end the sign-in. Then
-//! `error`, then `iss`. The callback's connection is handed back open, so the page the browser
-//! shows says how the exchange went.
+//! total deadline of 2 seconds on the monotonic clock for its whole request head, and at most
+//! 8 KB of it; only `GET /oauth/callback` reaches the checks, anything else gets 404. A wrong or
+//! missing `state` gets 400 and the listener keeps waiting, so no other page can end the
+//! sign-in. Then `error`, then `iss`. The callback's connection is handed back open, so the page
+//! the browser shows says how the exchange went.
 //!
 //! The accept loop takes at most 16 connections per tick and looks at the cancel flag and the
 //! sign-in timeout every tick, so a connect flood cannot hold it. At most 8 connections are read
-//! at once; the others wait in a short queue until a reader is free (at most 2 s), so slow
-//! clients delay the browser's callback but do not drop it.
+//! at once; up to 64 more wait in a queue for a reader, and any beyond that are closed
+//! unanswered. A connection at the back of a full queue can wait about 16 s (8 rounds of 8
+//! readers at 2 s each) before it is read.
+//!
+//! Accepted risk: a local process of the same user that floods the port can delay the browser's
+//! callback, or get it dropped, and so block the sign-in (such a process can block it in simpler
+//! ways too). It cannot exhaust anything: threads stay at 8, the queue at 64 sockets, and the
+//! accept loop at 16 accepts per tick.
 
 use std::collections::VecDeque;
 use std::io::{Read as _, Write as _};
@@ -16,13 +22,13 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use zeroize::Zeroizing;
 
 use super::{FAILURE_PAGE, SUCCESS_PAGE, is_error_code};
 use crate::cancel::CancelFlag;
-use crate::config::{Clock, SystemClock};
+use crate::config::Clock;
 use crate::error::SignInError;
 use crate::secret::Secret;
 
@@ -42,6 +48,16 @@ const MAX_ACCEPTS_PER_TICK: usize = 16;
 const MAX_QUEUED: usize = 64;
 /// The callback path of the redirect URI.
 const CALLBACK_PATH: &str = "/oauth/callback";
+
+/// The listener's load, now and at its peak: reader threads and queued connections. Read by
+/// tests through `ConnectorHandle::listener_stats_for_test`.
+#[derive(Debug, Default)]
+pub(crate) struct ListenerStats {
+    pub(crate) readers: AtomicUsize,
+    pub(crate) queued: AtomicUsize,
+    pub(crate) peak_readers: AtomicUsize,
+    pub(crate) peak_queued: AtomicUsize,
+}
 
 /// What the callback must carry.
 pub(super) struct Expect<'a> {
@@ -80,9 +96,9 @@ pub(super) fn wait_for_code(
     cancel: &CancelFlag,
     clock: &dyn Clock,
     deadline: SystemTime,
+    stats: &Arc<ListenerStats>,
 ) -> Result<(Secret, Browser), SignInError> {
     let (sender, receiver) = mpsc::channel::<Callback>();
-    let readers = Arc::new(AtomicUsize::new(0));
     let mut queue: VecDeque<TcpStream> = VecDeque::new();
     loop {
         if cancel.is_cancelled() {
@@ -99,11 +115,13 @@ pub(super) fn wait_for_code(
                 queue.push_back(stream);
             }
         }
-        while readers.load(Ordering::SeqCst) < MAX_READERS
+        stats.peak_queued.fetch_max(queue.len(), Ordering::SeqCst);
+        while stats.readers.load(Ordering::SeqCst) < MAX_READERS
             && let Some(stream) = queue.pop_front()
         {
-            spawn_reader(stream, &sender, &readers);
+            spawn_reader(stream, &sender, stats);
         }
+        stats.queued.store(queue.len(), Ordering::SeqCst);
         if let Ok(callback) = receiver.recv_timeout(TICK)
             && let Some(outcome) = judge(callback, expect)
         {
@@ -113,10 +131,14 @@ pub(super) fn wait_for_code(
     }
 }
 
-fn spawn_reader(stream: TcpStream, sender: &mpsc::Sender<Callback>, readers: &Arc<AtomicUsize>) {
-    readers.fetch_add(1, Ordering::SeqCst);
+fn spawn_reader(stream: TcpStream, sender: &mpsc::Sender<Callback>, stats: &Arc<ListenerStats>) {
+    let now = stats
+        .readers
+        .fetch_add(1, Ordering::SeqCst)
+        .saturating_add(1);
+    stats.peak_readers.fetch_max(now, Ordering::SeqCst);
     let sender = sender.clone();
-    let count = Arc::clone(readers);
+    let count = Arc::clone(stats);
     let spawned = std::thread::Builder::new()
         .name("connector-sign-in".to_owned())
         .spawn(move || {
@@ -124,28 +146,35 @@ fn spawn_reader(stream: TcpStream, sender: &mpsc::Sender<Callback>, readers: &Ar
                 // The receiver is gone once the sign-in ended; the connection just closes.
                 let _sent = sender.send(callback);
             }
-            count.fetch_sub(1, Ordering::SeqCst);
+            count.readers.fetch_sub(1, Ordering::SeqCst);
         });
     if spawned.is_err() {
-        readers.fetch_sub(1, Ordering::SeqCst);
+        stats.readers.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
-/// What is left of `deadline` in real time, or `None` once it passed.
-fn left(deadline: SystemTime) -> Option<Duration> {
+/// The monotonic clock, for the per-connection deadline: the injected `Clock` is wall time and
+/// may be a test's manual clock, and a wall clock stepped back must not stretch a deadline.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the listener's per-connection deadline is real elapsed time on the monotonic clock"
+)]
+fn monotonic_now() -> Instant {
+    Instant::now()
+}
+
+/// What is left of `deadline`, or `None` once it passed.
+fn left(deadline: Instant) -> Option<Duration> {
     deadline
-        .duration_since(SystemClock.now())
-        .ok()
+        .checked_duration_since(monotonic_now())
         .filter(|left| !left.is_zero())
-        // A clock stepped back never stretches the deadline past its length.
-        .map(|left| left.min(HEAD_DEADLINE))
 }
 
 /// Reads one request head, within [`HEAD_DEADLINE`] in all. Answers anything but
 /// `GET /oauth/callback` itself (404, or 400 and 431 for a malformed or oversized head) and
 /// returns `None`; a head not complete by the deadline is closed unanswered.
 fn read_request(mut stream: TcpStream) -> Option<Callback> {
-    let deadline = SystemClock.now().checked_add(HEAD_DEADLINE)?;
+    let deadline = monotonic_now().checked_add(HEAD_DEADLINE)?;
     stream.set_nonblocking(false).ok()?;
     stream.set_write_timeout(Some(WRITE_TIMEOUT)).ok()?;
     let mut head = Zeroizing::new(Vec::with_capacity(MAX_HEAD));

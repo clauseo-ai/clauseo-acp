@@ -503,3 +503,43 @@ fn a_sign_in_timeout_that_overflows_the_clock_is_refused() {
     let pending = rig.handle.begin_sign_in(None).unwrap();
     assert!(matches!(pending.finish(), Err(SignInError::Exchange(_))));
 }
+
+/// A flood of 100 connections that send nothing: the readers stay at 8 or fewer and the queue
+/// at 64 or fewer (the rest are closed). Once every held connection has timed out, the real
+/// callback still ends the sign-in, well within the sign-in timeout.
+#[test]
+fn a_silent_flood_stays_bounded_and_the_callback_succeeds_after_it() {
+    let rig = rig_with(FakeOptions::default(), false, |config| {
+        config.signin_timeout = Duration::from_secs(60);
+    });
+    let pending = rig.handle.begin_sign_in(None).unwrap();
+    let url = pending.authorize_url().clone();
+    let port = port_of(&url);
+    let finisher = thread::spawn(move || pending.finish());
+    let flood: Vec<TcpStream> = (0..100)
+        .filter_map(|_| TcpStream::connect(("127.0.0.1", port)).ok())
+        .collect();
+    assert!(flood.len() >= 72, "{} connected", flood.len());
+    // Wait until the listener has taken them all and every reader timed out.
+    let started = SystemClock.now();
+    let drained = loop {
+        let load = rig.handle.listener_stats_for_test().unwrap();
+        assert!(load.readers <= 8, "{load:?}");
+        assert!(load.queued <= 64, "{load:?}");
+        if load.peak_readers > 0 && load.readers == 0 && load.queued == 0 {
+            break load;
+        }
+        assert!(
+            SystemClock.now().duration_since(started).unwrap() < Duration::from_secs(40),
+            "never drained: {load:?}"
+        );
+        CancelFlag::new().wait_timeout(Duration::from_millis(50));
+    };
+    assert_eq!(drained.peak_readers, 8, "{drained:?}");
+    assert!((16..=64).contains(&drained.peak_queued), "{drained:?}");
+    drop(flood);
+    let page = rig.fake.drive_authorize(&url).unwrap();
+    assert_eq!(page.status, 200);
+    finisher.join().unwrap().unwrap();
+    assert!(rig.store.peek("case-law").is_some());
+}

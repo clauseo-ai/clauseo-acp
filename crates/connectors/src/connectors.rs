@@ -167,6 +167,24 @@ pub(crate) struct HandleInner {
     /// How many loopback listeners sign-in asked `bind_loopback_exclusive` for.
     #[cfg(feature = "test-support")]
     pub(crate) listeners_bound: std::sync::atomic::AtomicUsize,
+    /// The load of the latest sign-in's listener.
+    pub(crate) listener_stats: Mutex<Option<Arc<crate::oauth::ListenerStats>>>,
+}
+
+/// The latest sign-in listener's load: reader threads and queued connections, now and at the
+/// peak (test-support only).
+#[cfg(feature = "test-support")]
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ListenerLoad {
+    /// Reader threads now.
+    pub readers: usize,
+    /// Connections queued for a reader now.
+    pub queued: usize,
+    /// The most reader threads at once.
+    pub peak_readers: usize,
+    /// The longest the queue was.
+    pub peak_queued: usize,
 }
 
 /// One known connector. Cheap to clone; every clone shares the credential. `Send + Sync`.
@@ -205,6 +223,7 @@ impl ConnectorHandle {
                 test_rng: Mutex::new(None),
                 #[cfg(feature = "test-support")]
                 listeners_bound: std::sync::atomic::AtomicUsize::new(0),
+                listener_stats: Mutex::new(None),
             }),
         }
     }
@@ -278,6 +297,20 @@ impl ConnectorHandle {
     #[doc(hidden)]
     pub fn listeners_bound_for_test(&self) -> usize {
         self.inner.listeners_bound.load(Ordering::SeqCst)
+    }
+
+    /// The latest sign-in listener's load; `None` before any sign-in.
+    #[cfg(feature = "test-support")]
+    #[doc(hidden)]
+    pub fn listener_stats_for_test(&self) -> Option<ListenerLoad> {
+        lock(&self.inner.listener_stats)
+            .as_ref()
+            .map(|stats| ListenerLoad {
+                readers: stats.readers.load(Ordering::SeqCst),
+                queued: stats.queued.load(Ordering::SeqCst),
+                peak_readers: stats.peak_readers.load(Ordering::SeqCst),
+                peak_queued: stats.peak_queued.load(Ordering::SeqCst),
+            })
     }
 
     /// Whether a rotated refresh token is held only in memory, because the keychain refused it
@@ -475,47 +508,28 @@ impl ConnectorHandle {
         Ok(())
     }
 
-    /// Stores a new credential: first a best-effort revoke of the OAuth refresh token it
-    /// replaces (in memory or in the keychain), then the keychain, then the state file (added,
-    /// `ended: null`), then memory. A keychain failure leaves the state file as it was.
+    /// Stores a new credential: the keychain first, then the state file (added, `ended: null`),
+    /// then memory, all under the slot's lock. A keychain failure leaves the state file and the
+    /// old credential as they were. Once the lock is released, the OAuth refresh tokens the new
+    /// credential replaced (in memory or in the keychain) are revoked, best effort: a failure is
+    /// logged without the token. The new credential's own token is never revoked.
     pub(crate) fn store_new(
         &self,
         credential: Credential,
         kind: CredentialKind,
     ) -> Result<(), StoreError> {
         let bytes = credential.encode()?;
-        let mut slot = lock(&self.inner.slot);
-        self.revoke_replaced(&mut slot);
-        self.inner.shared.store.set(self.id(), &bytes)?;
-        self.save_state(|state| state.add(self.id(), kind))?;
-        *slot = Slot::Read(Some(credential));
-        self.inner.generation.fetch_add(1, Ordering::SeqCst);
-        self.inner.persist_failed.store(false, Ordering::Relaxed);
-        Ok(())
-    }
-
-    /// Revokes the refresh tokens a new credential replaces: the one in memory and the one in
-    /// the keychain, when they are OAuth. Best effort: a failure is logged (without the token)
-    /// and the new credential is stored anyway.
-    fn revoke_replaced(&self, slot: &mut Slot) {
-        let mut old: Vec<Secret> = Vec::new();
-        match self.load(slot) {
-            Ok(Some(Credential::OAuth(tokens))) => old.push(tokens.refresh_token.clone()),
-            Ok(_) => {}
-            Err(err) => {
-                tracing::warn!(connector = self.id(), error = %err, "the replaced credential could not be read");
-            }
-        }
-        match self.read_stored() {
-            Ok(Some(Credential::OAuth(tokens))) if !old.contains(&tokens.refresh_token) => {
-                old.push(tokens.refresh_token);
-            }
-            Ok(_) => {}
-            Err(err) => {
-                tracing::warn!(connector = self.id(), error = %err, "the replaced keychain item could not be read");
-            }
-        }
-        for token in &old {
+        let replaced = {
+            let mut slot = lock(&self.inner.slot);
+            let replaced = self.replaced_refresh_tokens(&mut slot, &credential);
+            self.inner.shared.store.set(self.id(), &bytes)?;
+            self.save_state(|state| state.add(self.id(), kind))?;
+            *slot = Slot::Read(Some(credential));
+            self.inner.generation.fetch_add(1, Ordering::SeqCst);
+            self.inner.persist_failed.store(false, Ordering::Relaxed);
+            replaced
+        };
+        for token in &replaced {
             if !crate::refresh::revoke(self, token) {
                 tracing::warn!(
                     connector = self.id(),
@@ -523,6 +537,37 @@ impl ConnectorHandle {
                 );
             }
         }
+        Ok(())
+    }
+
+    /// The OAuth refresh tokens `new` replaces: the one in memory and the one in the keychain,
+    /// without duplicates and never `new`'s own. The slot is locked by the caller.
+    fn replaced_refresh_tokens(&self, slot: &mut Slot, new: &Credential) -> Vec<Secret> {
+        let own = match new {
+            Credential::OAuth(tokens) => Some(&tokens.refresh_token),
+            Credential::ApiKey(_) => None,
+        };
+        let mut old: Vec<Secret> = Vec::new();
+        let mut keep = |token: Secret| {
+            if own != Some(&token) && !old.contains(&token) {
+                old.push(token);
+            }
+        };
+        match self.load(slot) {
+            Ok(Some(Credential::OAuth(tokens))) => keep(tokens.refresh_token.clone()),
+            Ok(_) => {}
+            Err(err) => {
+                tracing::warn!(connector = self.id(), error = %err, "the replaced credential could not be read");
+            }
+        }
+        match self.read_stored() {
+            Ok(Some(Credential::OAuth(tokens))) => keep(tokens.refresh_token),
+            Ok(_) => {}
+            Err(err) => {
+                tracing::warn!(connector = self.id(), error = %err, "the replaced keychain item could not be read");
+            }
+        }
+        old
     }
 
     /// The `Authorization` value for `token`.

@@ -157,6 +157,8 @@ crates/limits/tests/live/write.rs - clippy::disallowed_methods
 # clauseo-connectors (S28), one comment per line.
 # The one wall-clock read; every other time read goes through the Clock trait.
 crates/connectors/src/config.rs SystemClock::now clippy::disallowed_methods
+# The sign-in listener's per-connection 2 s head deadline, on the monotonic clock (Instant::now).
+crates/connectors/src/oauth/listener.rs monotonic_now clippy::disallowed_methods
 # The write module: the state file (temp file, then rename) and test-support's scratch folders.
 crates/connectors/src/write.rs - clippy::disallowed_methods
 # The Winsock FFI that sets SO_EXCLUSIVEADDRUSE before bind (Windows only), so no other process of

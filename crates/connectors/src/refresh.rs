@@ -81,8 +81,8 @@ pub(crate) fn after_second_401(handle: &ConnectorHandle, used: &Secret) -> AuthE
 /// read again: gone is signed out; a different refresh token (another instance rotated) is
 /// adopted, and its access token returned when it has more than 5 minutes left. `invalid_grant`
 /// ends the credential; any other answer leaves it as it is. With `keep_on_network_error` (a
-/// refresh ahead of expiry, not after a 401), a network failure while the access token has
-/// not expired yet returns that token.
+/// refresh ahead of expiry, not after a 401), a network failure or a 5xx while the access
+/// token has not expired yet returns that token.
 fn refresh_locked(
     handle: &ConnectorHandle,
     slot: &mut Slot,
@@ -103,7 +103,7 @@ fn refresh_locked(
             tracing::warn!(
                 connector = handle.id(),
                 error = why,
-                "the refresh failed on the network; the current access token is still valid"
+                "the refresh failed (network or 5xx); the current access token is still valid"
             );
             current.access_token.clone()
         })
@@ -149,10 +149,14 @@ fn refresh_locked(
             handle.end_credential(slot, Ended::SignedOut);
             return Err(AuthError::SignedOut);
         }
-        return Err(AuthError::Network(format!(
-            "the token endpoint answered HTTP {} ({code})",
-            reply.status
-        )));
+        let why = format!("the token endpoint answered HTTP {} ({code})", reply.status);
+        // A 5xx is the connector failing, not an answer about the token: like the network.
+        if reply.status >= 500
+            && let Some(token) = keep_current(&why)
+        {
+            return Ok(token);
+        }
+        return Err(AuthError::Network(why));
     }
     let tokens = parse_token_answer(&reply.body, shared.unix_now(), Some(&old_refresh))
         .map_err(AuthError::Network)?;

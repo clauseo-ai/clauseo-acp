@@ -1,6 +1,7 @@
 //! `bearer` and the refresh: before expiry, single-flight, rotation, `invalid_grant`, the 401
 //! retry, and a keychain that refuses the rotated token.
 
+use std::collections::HashSet;
 use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Duration;
@@ -261,14 +262,18 @@ fn a_second_instance_adopts_the_rotated_chain_instead_of_forking_it() {
     let presented = presented_refresh_tokens(&rig);
     assert_eq!(presented.len(), 2, "{presented:?}");
     assert_ne!(presented[1], spent, "B refreshed with A's spent token");
-    let mut unique = presented.clone();
-    unique.dedup();
-    assert_eq!(unique, presented, "a refresh token was presented twice");
     // The chain is intact: one more refresh still works.
     rig.clock().advance(Duration::from_secs(3600));
     rig.handle.bearer().unwrap();
     b.bearer().unwrap();
-    assert_eq!(presented_refresh_tokens(&rig).len(), 3);
+    let presented = presented_refresh_tokens(&rig);
+    assert_eq!(presented.len(), 3, "{presented:?}");
+    let unique: HashSet<&String> = presented.iter().collect();
+    assert_eq!(
+        unique.len(),
+        3,
+        "a refresh token was presented twice: {presented:?}"
+    );
     assert_eq!(
         rig.handle.status(),
         CredentialStatus::SignedIn(clauseo_connectors::CredentialKind::OAuth)
@@ -351,4 +356,26 @@ fn a_401_after_another_thread_refreshed_takes_the_newer_token() {
         Some(new_header.as_str()),
         "A retried with the newer token"
     );
+}
+
+/// A 5xx from the token endpoint is treated like a network failure: before expiry the current
+/// token comes back; once it has expired, `Network`.
+#[test]
+fn a_5xx_on_refresh_before_expiry_returns_the_current_token() {
+    let rig = manual_rig();
+    sign_in(&rig);
+    let current = rig.handle.bearer().unwrap();
+    rig.clock().advance(Duration::from_secs(3600 - 200));
+    rig.fake.fail_next("/token", 502);
+    assert_eq!(rig.handle.bearer().unwrap(), current);
+    assert_eq!(
+        presented_refresh_tokens(&rig).len(),
+        1,
+        "the refresh was tried"
+    );
+    rig.clock().advance(Duration::from_secs(300));
+    rig.fake.fail_next("/token", 500);
+    assert!(matches!(rig.handle.bearer(), Err(AuthError::Network(_))));
+    assert!(rig.store.peek("case-law").is_some());
+    assert_ne!(rig.handle.bearer().unwrap(), current);
 }
