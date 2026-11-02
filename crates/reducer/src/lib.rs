@@ -44,8 +44,10 @@
 //! - No I/O, no clock, no randomness: time comes in as the envelope's `ts`.
 //! - The fold is total and never panics: an event that names something the state does not hold
 //!   changes nothing and adds an [`Anomaly`]; an unknown kind advances `seq` and changes nothing.
-//!   `QueuedPromptEdited`, `SteerResolved` and the restart and idle-stop detach reasons are not
-//!   folded yet: they advance `seq` and add [`Anomaly::NotYetFolded`].
+//!   The restart and idle-stop detach reasons are not folded yet: they advance `seq` and add
+//!   [`Anomaly::NotYetFolded`].
+//! - `queue_held` is the host's: no event sets it, [`set_queue_held`] does, and a snapshot
+//!   writes it `false`.
 //! - No change for an unchanged entry: each field is compared as it is set, and an `Upsert` is
 //!   emitted only when something changed.
 //! - No change carries more than `INLINE_LIMIT_BYTES` of text, counted as `escaped_len` counts
@@ -146,6 +148,14 @@ pub fn apply(state: &mut StreamState, envelope: &Envelope) -> Result<Applied, Er
         }
     }
     Ok(out)
+}
+
+/// Sets the thread's `queue_held` ([`HeaderEntry::queue_held`](clauseo_protocol::HeaderEntry)),
+/// the host's in-memory flag that no event carries, and returns the header's `Upsert` when it
+/// changed. `None` also before `ThreadCreated`. A snapshot writes the flag `false`, so the
+/// host sets it again after each load.
+pub fn set_queue_held(state: &mut ThreadState, held: bool) -> Option<ViewChange> {
+    thread::set_queue_held(state, held)
 }
 
 /// Folds display-stage text into the thread: appends it to its message's shown text (an

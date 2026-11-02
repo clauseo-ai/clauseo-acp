@@ -252,7 +252,8 @@ fn thread_events() -> Vec<DomainEvent> {
         .into(),
         SteerResolved {
             message,
-            outcome: SteerOutcome::Requeued { turn: turn_id(7) },
+            outcome: SteerOutcome::Injected { turn },
+            aside: vec![tool_call_id(4)],
         }
         .into(),
     ]

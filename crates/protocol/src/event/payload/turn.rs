@@ -6,7 +6,7 @@ use crate::serde_util::BorrowedStr;
 use crate::{
     CheckpointId, CompactString, ContentBlock, Delivery, Error, ErrorCode, FileChange,
     LimitStopReason, MatterPath, MessageId, SkippedFile, SteerOutcome, StopReason, TextKind,
-    ThreadId, Timestamp, TurnId, TurnUsage,
+    ThreadId, Timestamp, ToolCallId, TurnId, TurnUsage,
 };
 
 /// The lawyer's message, logged before its turn is queued or started. `session/load` replays
@@ -114,6 +114,12 @@ pub struct SteerResolved {
     pub message: MessageId,
     /// Where it went.
     pub outcome: SteerOutcome,
+    /// For an `Injected` steer, the running turn's tool calls that had not finished when the
+    /// agent took it: an agent that pre-empts its answer for a steer (claude-agent-acp) lets
+    /// them carry on in the background. Empty is written as a missing field, and a missing
+    /// field reads as empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aside: Vec<ToolCallId>,
 }
 
 /// A turn started, after its before-turn checkpoint.

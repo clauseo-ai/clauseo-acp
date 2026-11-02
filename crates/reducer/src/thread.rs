@@ -6,7 +6,10 @@
 //! no old entry is cloned to compare afterwards.
 
 mod asks;
+mod queue;
 mod turn;
+
+pub(crate) use queue::set_queue_held;
 
 use clauseo_protocol::{
     AgentContentEntry, CompactionChanged, ContentAppended, ContextUsage, DomainEvent, EntryId,
@@ -41,23 +44,26 @@ pub(crate) fn fold(state: &mut ThreadState, envelope: &Envelope, out: &mut Appli
                 set_some(&mut h.agent_name, &event.agent_name)
             });
         }
-        // An attach changes nothing yet: the next prompt gives the status. Going back to `Idle`
-        // after an exit is a restart transition, not folded yet. The web events are logged only:
-        // no view entry yet, so they change nothing either.
-        DomainEvent::AgentSessionAttached(_)
-        | DomainEvent::WebSearchRecorded(_)
+        // An attach changes the status not yet: the next prompt gives it. Going back to `Idle`
+        // after an exit is a restart transition, not folded yet. Its capabilities say whether a
+        // steer joins the running turn.
+        DomainEvent::AgentSessionAttached(event) => {
+            queue::session_attached(state, &event.capabilities, out);
+        }
+        // The web events are logged only: no view entry yet, so they change nothing.
+        DomainEvent::WebSearchRecorded(_)
         | DomainEvent::PageVisited(_)
         | DomainEvent::Unknown { .. } => {}
         DomainEvent::AgentSessionDetached(event) => turn::detached(state, &event.reason, out),
         DomainEvent::UserMessage(event) => turn::user_message(state, seq, ts, event, out),
         DomainEvent::TurnQueued(event) => turn::turn_queued(state, event, out),
-        DomainEvent::QueuedPromptEdited(_) => not_yet(out, "queued_prompt_edited"),
-        DomainEvent::SteerResolved(_) => not_yet(out, "steer_resolved"),
+        DomainEvent::QueuedPromptEdited(event) => queue::queued_prompt_edited(state, event, out),
+        DomainEvent::SteerResolved(event) => queue::steer_resolved(state, event, out),
         DomainEvent::TurnStarted(event) => turn::turn_started(state, event.turn, out),
         DomainEvent::TextAppended(event) => text_appended(state, seq, event, out),
         DomainEvent::ContentAppended(event) => content_appended(state, seq, event_id, event, out),
         DomainEvent::ToolCallStarted(event) => tool_call_started(state, seq, event, out),
-        DomainEvent::ToolCallUpdated(event) => tool_call_updated(state, event, out),
+        DomainEvent::ToolCallUpdated(event) => tool_call_updated(state, ts, event, out),
         DomainEvent::PermissionRequested(event) => {
             asks::permission_requested(state, seq, event, out);
         }
@@ -203,6 +209,7 @@ fn thread_created(state: &mut ThreadState, seq: Seq, event: &ThreadCreated, out:
         agent_name: None,
         status: ThreadStatus::Idle,
         queue_held: false,
+        steer_joins_turn: queue::steer_joins_by_kind(&event.agent),
         mode_id: None,
         config_options: Vec::new(),
         commands: Vec::new(),
@@ -314,11 +321,17 @@ fn tool_call_started(
         raw_input: event.raw_input.clone(),
         raw_output: event.raw_output.clone(),
         content: event.content.clone(),
+        background: None,
     };
     insert_new(state, seq, ViewEntry::ToolCall(Box::new(entry)), out);
 }
 
-fn tool_call_updated(state: &mut ThreadState, event: &ToolCallUpdated, out: &mut Applied) {
+fn tool_call_updated(
+    state: &mut ThreadState,
+    ts: Timestamp,
+    event: &ToolCallUpdated,
+    out: &mut Applied,
+) {
     let target = EntryId::ToolCall(event.tool_call);
     let found = state.index.tool_calls.get(&event.tool_call).copied();
     let Some(ViewEntry::ToolCall(entry)) = found.and_then(|order| state.entries.get_mut(&order))
@@ -342,6 +355,7 @@ fn tool_call_updated(state: &mut ThreadState, event: &ToolCallUpdated, out: &mut
     }
     if let Some(status) = patch.status {
         changed |= set(&mut entry.status, status);
+        changed |= queue::background_finished(entry, ts);
     }
     if let Some(locations) = &patch.locations {
         changed |= set_vec(&mut entry.locations, locations);

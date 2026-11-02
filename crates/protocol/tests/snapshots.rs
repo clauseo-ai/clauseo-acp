@@ -261,7 +261,7 @@ mod host_command {
         EditQueuedPrompt => edit_queued_prompt: HostCommand::EditQueuedPrompt {
             thread: thread_id(2),
             turn: turn_id(3),
-            content: vec![PromptBlock::Text { text: "Shorter".to_owned() }],
+            text: "Shorter".to_owned(),
         };
         RemoveQueuedPrompt => remove_queued_prompt: HostCommand::RemoveQueuedPrompt {
             thread: thread_id(2),

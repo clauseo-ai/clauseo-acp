@@ -3,12 +3,11 @@
 
 use clauseo_protocol::{
     AgentChoiceId, CommandEnvelope, ConfigValue, Error, HostCommand, MAX_ID_TEXT_BYTES,
-    MAX_TITLE_CHARS, MatterSource, PromptBlock, Title, check_display_title,
-    is_windows_reserved_name,
+    MAX_TITLE_CHARS, MatterSource, Title, check_display_title, is_windows_reserved_name,
 };
 
 use super::fixtures::{choice, command_id, err_contains, folder_ref_id, thread_id, title};
-use super::{Validate, edit_queued, files, invalid, send_prompt, text, too_large};
+use super::{Validate, files, invalid, send_prompt, text, too_large};
 
 /// Whether `result` is one of the errors a refused title or id gives.
 fn refused<T>(result: &Result<T, Error>) -> bool {
@@ -158,19 +157,17 @@ fn invisible_characters_alone_are_refused() {
         NO_VISIBLE,
     );
     // Prompts count visibility the same way.
-    let builders: [fn(Vec<PromptBlock>) -> HostCommand; 2] = [send_prompt, edit_queued];
-    for build in builders {
-        assert!(invalid(&build(vec![text("\u{200B}")]).validate()));
-        assert!(invalid(
-            &build(vec![text("\u{3164}\u{00AD}\u{2800}")]).validate()
-        ));
-        assert!(
-            build(vec![text("\u{200B}"), files(1).remove(0)])
-                .validate()
-                .is_ok()
-        );
-        assert!(build(vec![text("\u{200B}x")]).validate().is_ok());
-    }
+    let build = send_prompt;
+    assert!(invalid(&build(vec![text("\u{200B}")]).validate()));
+    assert!(invalid(
+        &build(vec![text("\u{3164}\u{00AD}\u{2800}")]).validate()
+    ));
+    assert!(
+        build(vec![text("\u{200B}"), files(1).remove(0)])
+            .validate()
+            .is_ok()
+    );
+    assert!(build(vec![text("\u{200B}x")]).validate().is_ok());
 }
 
 #[test]

@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, HashMap};
 use clauseo_protocol::{
     CheckpointId, ElicitationId, ElicitationState, ErrorCode, FileChange, HeaderEntry,
     MatterHeaderEntry, MatterId, MessageId, PermissionRequestId, PermissionState, Seq, SkippedFile,
-    StreamId, ThreadId, ThreadStatus, ToolCallId, TurnId, ViewEntry, utf16_len,
+    StreamId, ThreadId, ThreadStatus, ToolCallId, TurnId, UserMessageStatus, ViewEntry, utf16_len,
 };
 use serde::{Deserialize, Serialize};
 
@@ -163,6 +163,11 @@ impl ThreadState {
     pub const fn entries(&self) -> &BTreeMap<Seq, ViewEntry> {
         &self.entries
     }
+
+    /// The turn that started and has not ended.
+    pub const fn running(&self) -> Option<TurnId> {
+        self.running
+    }
 }
 
 /// A matter's folded state: its header and its Versions timeline.
@@ -246,6 +251,9 @@ pub(crate) struct Index {
     pub(crate) elicitations: HashMap<ElicitationId, Seq>,
     pub(crate) steps: HashMap<TurnId, Seq>,
     pub(crate) limit_stops: HashMap<TurnId, Seq>,
+    /// The prompt of each turn that has neither started nor ended, by turn: queued, launching,
+    /// or waiting for the writer.
+    pub(crate) unstarted: HashMap<TurnId, Seq>,
     /// Pending permissions and elicitations.
     pub(crate) waiting: u32,
     /// Messages a delta opened that no `TextAppended` has confirmed yet.
@@ -310,6 +318,24 @@ impl Index {
             }
         }
         index
+    }
+
+    /// Fills [`Index::unstarted`] from the entries, once the steps are indexed: each prompt not
+    /// removed whose turn has no step and is not `running`.
+    pub(crate) fn rebuild_unstarted(
+        &mut self,
+        entries: &BTreeMap<Seq, ViewEntry>,
+        running: Option<TurnId>,
+    ) {
+        for (order, entry) in entries {
+            if let ViewEntry::UserMessage(user) = entry
+                && user.status != UserMessageStatus::Removed
+                && running != Some(user.turn)
+                && !self.steps.contains_key(&user.turn)
+            {
+                self.unstarted.insert(user.turn, *order);
+            }
+        }
     }
 }
 

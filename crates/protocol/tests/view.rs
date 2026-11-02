@@ -87,6 +87,7 @@ fn tool_call() -> ToolCallEntry {
                 },
             },
         ],
+        background: None,
     }
 }
 
@@ -311,6 +312,21 @@ fn queue_held_defaults_to_false() {
     let summary: ThreadSummary = serde_json::from_str(&summary).unwrap();
     assert!(!summary.queue_held);
     assert_eq!(summary.thread, thread_id(1));
+}
+
+#[test]
+fn steer_joins_turn_and_background_default_when_missing() {
+    // A stored header from before `steer_joins_turn` decodes with it false.
+    let header = serde_json::to_value(header()).unwrap();
+    let mut fields = header["header"].as_object().unwrap().clone();
+    assert_eq!(fields.remove("steer_joins_turn"), Some(true.into()));
+    let entry: HeaderEntry = serde_json::from_value(fields.into()).unwrap();
+    assert!(!entry.steer_joins_turn);
+    // A tool call without a background mark writes no field and reads back `None`.
+    let tool = serde_json::to_value(tool_call()).unwrap();
+    assert!(tool.get("background").is_none(), "{tool}");
+    let read: ToolCallEntry = serde_json::from_value(tool).unwrap();
+    assert_eq!(read.background, None);
 }
 
 #[test]
