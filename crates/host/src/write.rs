@@ -15,41 +15,48 @@ pub(crate) fn create_dir_all(path: &Path) -> io::Result<()> {
     std::fs::create_dir_all(path)
 }
 
-/// Creates `path` and every missing parent, `path` itself private to the user on Unix (0700,
-/// and set to 0700 when it already exists): an agent's home, which holds its login.
-pub(crate) fn create_private_dir_all(path: &Path) -> io::Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let mut builder = std::fs::DirBuilder::new();
+/// Creates the one folder `path`, private to the user on Unix (0700). Its parent must exist; a
+/// link or anything else already at `path` fails with `AlreadyExists`, never followed.
+pub(crate) fn create_private_dir(path: &Path) -> io::Result<()> {
+    let builder = std::fs::DirBuilder::new();
     #[cfg(unix)]
-    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
-    match builder.create(path) {
-        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-        other => other?,
+    let builder = {
+        let mut builder = builder;
+        std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+        builder
+    };
+    builder.create(path)
+}
+
+/// Sets the folder `path` to 0700 when it is not already (a link is left as it is).
+#[cfg(unix)]
+pub(crate) fn make_private_dir(path: &Path) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let meta = std::fs::symlink_metadata(path)?;
+    if meta.is_dir() && meta.permissions().mode() & 0o777 != 0o700 {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
     }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let meta = std::fs::symlink_metadata(path)?;
-        if meta.is_dir() && meta.permissions().mode() & 0o777 != 0o700 {
-            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
-        }
-    }
+    Ok(())
+}
+
+/// Nothing off Unix: a folder's privacy there is its parent's.
+#[cfg(not(unix))]
+pub(crate) fn make_private_dir(_path: &Path) -> io::Result<()> {
     Ok(())
 }
 
 /// Replaces the file `path` with `bytes` atomically: a fresh temp file beside it (0600 on Unix),
 /// written and synced, then renamed over `path`. A link at `path` is replaced, never followed.
+/// The temp file's name holds the process id and a count, so two writes (or two hosts sharing a
+/// data folder) never share one.
 pub(crate) fn replace_private_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
     use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNT: AtomicU64 = AtomicU64::new(0);
     let mut temp = path.as_os_str().to_owned();
-    temp.push(".clauseo-new");
+    let count = COUNT.fetch_add(1, Ordering::Relaxed);
+    temp.push(format!(".clauseo-{}-{count}.new", std::process::id()));
     let temp = std::path::PathBuf::from(temp);
-    match std::fs::remove_file(&temp) {
-        Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
-        Ok(()) | Err(_) => {}
-    }
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
@@ -91,6 +98,13 @@ pub(crate) fn rename(from: &Path, to: &Path) -> io::Result<()> {
 #[cfg(test)]
 pub(crate) fn remove_file(path: &Path) -> io::Result<()> {
     std::fs::remove_file(path)
+}
+
+/// Sets `path`'s permission bits to `mode`. For unit tests: a folder the user may not search.
+#[cfg(all(test, unix))]
+pub(crate) fn set_mode(path: &Path, mode: u32) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
 }
 
 /// Makes `link` a symbolic link to `target`. For unit tests: a matter stored as a link.

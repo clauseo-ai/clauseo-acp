@@ -57,6 +57,29 @@ pub(super) fn on_prompt_done(
     end_turn(actor, thread, end);
 }
 
+/// A Codex prompt's `.codex` re-check refused it, so nothing reached the agent: the agent is
+/// stopped (its app-server would load the folder's settings on any restart) and the turn ends
+/// failed with the refusal's code.
+pub(super) fn on_prompt_refused(actor: &mut Actor, thread: ThreadId, turn: TurnId, error: &Error) {
+    let prompting = current(actor, thread)
+        .is_some_and(|current| current.turn == turn && current.phase == TurnPhase::Prompting);
+    if !prompting {
+        return;
+    }
+    tracing::warn!(%thread, %error, "a Codex prompt was refused before it was sent");
+    if let Some(current) = current(actor, thread) {
+        current.prompt_call = None;
+    }
+    let cancelled = current(actor, thread).is_some_and(|current| current.cancelled);
+    let end = if cancelled {
+        End::cancelled(None)
+    } else {
+        End::failed(error.code(), Some(error.to_string()), None)
+    };
+    end_turn(actor, thread, end);
+    agents::stop(actor, thread);
+}
+
 /// Steps 6 and 7: the held text and the expiries in one commit, then the after-turn
 /// checkpoint, whose answer logs the end.
 pub(super) fn end_turn(actor: &mut Actor, thread: ThreadId, mut end: End) {

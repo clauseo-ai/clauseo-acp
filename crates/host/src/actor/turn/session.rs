@@ -5,6 +5,7 @@
 //! and the work that waited.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use clauseo_acp::{AcpClient, AgentInfo, LoadSession, McpServer, NewSession, SessionStart};
 use clauseo_protocol::{
@@ -71,6 +72,7 @@ pub(super) fn on_replay_log(
         .and_then(|entry| entry.row.acp_session_id.clone());
     let cwd = folder(actor, thread);
     let loads = session_loads(actor, thread);
+    let clock = Arc::clone(&actor.clock);
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };
@@ -84,7 +86,14 @@ pub(super) fn on_replay_log(
         Err(error) => tracing::warn!(%thread, %error, "no log for replay dedupe"),
     }
     let (id, client, fence) = (agent.id, agent.link.client.clone(), agent.link.fence());
+    let check = codex::prepare::recheck(
+        clock,
+        agent.codex.as_ref().map(|codex| codex.folder.clone()),
+    );
     call(actor, thread, id, async move {
+        if let Err(error) = check.await {
+            return AgentReply::Refused(error);
+        }
         let request = LoadSession {
             session,
             cwd,
@@ -111,11 +120,19 @@ fn resume_session(actor: &mut Actor, thread: ThreadId) {
         new_session(actor, thread);
         return;
     };
+    let clock = Arc::clone(&actor.clock);
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref()) else {
         return;
     };
     let (id, client, fence) = (agent.id, agent.link.client.clone(), agent.link.fence());
+    let check = codex::prepare::recheck(
+        clock,
+        agent.codex.as_ref().map(|codex| codex.folder.clone()),
+    );
     call(actor, thread, id, async move {
+        if let Err(error) = check.await {
+            return AgentReply::Refused(error);
+        }
         let request = LoadSession {
             session,
             cwd,
@@ -140,11 +157,19 @@ pub(super) fn new_session(actor: &mut Actor, thread: ThreadId) {
             return;
         }
     };
+    let clock = Arc::clone(&actor.clock);
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref()) else {
         return;
     };
     let (id, client, fence) = (agent.id, agent.link.client.clone(), agent.link.fence());
+    let check = codex::prepare::recheck(
+        clock,
+        agent.codex.as_ref().map(|codex| codex.folder.clone()),
+    );
     call(actor, thread, id, async move {
+        if let Err(error) = check.await {
+            return AgentReply::Refused(error);
+        }
         let request = NewSession {
             cwd,
             mcp_servers,
@@ -212,9 +237,9 @@ pub(super) fn on_started(actor: &mut Actor, thread: ThreadId, start: SessionStar
             .modes
             .as_ref()
             .is_some_and(|modes| modes.current != codex::ASK_MODE);
-        Ok((ask, switch, folder(actor, thread)?))
+        Ok((ask, switch))
     });
-    let (ask, switch, cwd) = match checks {
+    let (ask, switch) = match checks {
         Ok(checks) => checks,
         Err(error) => {
             tracing::warn!(%thread, %error, "the Codex session cannot run in its ask mode");
@@ -222,19 +247,23 @@ pub(super) fn on_started(actor: &mut Actor, thread: ThreadId, start: SessionStar
             return;
         }
     };
-    let guard = super::agents::codex_hooks(actor).is_some();
-    if !switch && !guard {
-        attach(actor, thread, start, loaded);
-        return;
-    }
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };
+    // Whether a hooks object went in was recorded at launch, with the folder resolved then.
+    let guard = agent
+        .codex
+        .as_ref()
+        .filter(|codex| codex.guard)
+        .map(|codex| codex.folder.clone());
+    if !switch && guard.is_none() {
+        attach(actor, thread, start, loaded);
+        return;
+    }
     agent.preparing = true;
     let (id, client, fence) = (agent.id, agent.link.client.clone(), agent.link.fence());
-    let cwd = codex::session_folder(&cwd);
     call(actor, thread, id, async move {
-        let result = prepare(&client, start, (ask, switch), guard.then_some(cwd)).await;
+        let result = prepare(&client, start, (ask, switch), guard).await;
         fence.await;
         AgentReply::Prepared { loaded, result }
     });
