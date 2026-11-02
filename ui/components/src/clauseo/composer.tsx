@@ -1,10 +1,12 @@
 import {
   useEffect,
+  useImperativeHandle,
   useLayoutEffect,
   useRef,
   useState,
   type KeyboardEvent,
   type ReactNode,
+  type Ref,
   type RefObject,
 } from "react";
 import { Button } from "../ui/button.tsx";
@@ -19,6 +21,7 @@ import { useThreadWords } from "../lib/words-thread.ts";
 import { rt } from "../lib/words-room.ts";
 import { pbWords, type Paper } from "./matter.ts";
 import { dur, ease } from "./motion.ts";
+import { sendsOnEnter } from "./composer-keys.ts";
 import { useRoom } from "./room-scope.ts";
 import { Say } from "./say.tsx";
 import { StatusLine, type PlanChoice, type ReadyHint } from "./status-line.tsx";
@@ -81,6 +84,38 @@ function useOpening(ref: RefObject<HTMLDivElement | null>, on: boolean) {
   }, [ref, on]);
 }
 
+/** What the room may do to the field from outside. The field is uncontrolled: React never writes its value, so the
+ * engine's undo stack stays whole through an input method's edits, and every change made here goes through the
+ * engine's own editing (`execCommand`), so Cmd/Ctrl+Z takes it back. */
+export type ComposerHandle = {
+  focus: () => void;
+  /** What the field holds now. */
+  text: () => string;
+  /** Puts the field's focus in it and replaces all it holds with `text`, as one step undo takes back. */
+  setText: (text: string) => void;
+  /** Empties the field: as one undoable step while the field has focus; without focus it is emptied in place, so the
+   * lawyer's focus elsewhere never moves, and that one step can't be undone. */
+  clear: () => void;
+};
+
+/** Replaces all the field holds with `text` through the engine's editing, so undo takes it back; where the engine
+ * refuses (a disabled field, or no execCommand, as in happy-dom) the value is set in place. True when the engine did
+ * it, in which case its own input event has already told the field. */
+function replaceAll(a: HTMLTextAreaElement, text: string, focus: boolean): boolean {
+  if (a.value === text) return true;
+  const focused = a.ownerDocument.activeElement === a;
+  if (!a.disabled && (focused || focus) && typeof a.ownerDocument.execCommand === "function") {
+    if (!focused) a.focus();
+    a.select();
+    // insertText and delete edit plain text only: nothing here parses HTML, so Trusted Types have nothing to check
+    const doc = a.ownerDocument;
+    const ok = text === "" ? doc.execCommand("delete") : doc.execCommand("insertText", false, text);
+    if (ok && a.value === text) return true;
+  }
+  a.value = text;
+  return false;
+}
+
 /** Whether a press in the field landed on a button or the text itself, which take it themselves. */
 function pressOwn(target: EventTarget, field: Element): boolean {
   for (
@@ -105,13 +140,17 @@ export type ComposerProps<V extends string = string> = {
   /** Clauseo is answering: Stop stands where Ask stood. */
   busy?: boolean;
   onStop?: () => void;
-  /** The lawyer's words, when the room holds them; otherwise the field keeps its own. */
-  text?: string;
-  onText?: (text: string) => void;
+  /** The words the field starts with, such as the matter's draft. Read once, as the field mounts: key the composer to
+   * start it again with other words. */
+  initialText?: string;
+  /** Hears what the field holds after each change, an input method's composing included, read from the field. */
+  onInput?: (text: string) => void;
+  /** The handle: focus, the field's words, and setting or clearing them so undo survives. */
+  ref?: Ref<ComposerHandle>;
   papers?: readonly QuestionPaper[];
   onRemovePaper?: (id: string) => void;
   choice?: PlanChoice<V>;
-  /** Keys the field passes on first, such as the permission prompt's. True when one was taken. */
+  /** Keys the field passes on first, before its own Enter. True when one was taken, and its default is prevented. */
   onKeyCommand?: (e: KeyboardEvent<HTMLTextAreaElement>) => boolean;
   /** The field's id, unique on the page. */
   id?: string;
@@ -125,7 +164,7 @@ export type ComposerProps<V extends string = string> = {
   /** data-testid on the field, Ask, Stop and the working line's row. */
   testIds?: { field?: string; ask?: string; stop?: string; working?: string };
   /** Questions drawn from the matter's papers, offered over an empty field: a press puts one in the field. */
-  prompts?: { label: string; items: readonly { text: string; onPick: () => void }[] };
+  prompts?: { label: string; items: readonly { text: string }[] };
   /** A quiet note under the field, above the room's line, such as the plan running low. Optional. */
   notice?: ReactNode;
   /** What waits above the composer, such as the messages queued while Clauseo works. */
@@ -136,8 +175,9 @@ export type ComposerProps<V extends string = string> = {
   acts?: ReactNode;
   /** The field's placeholder and name, where the room isn't a matter's: the scratch matter's "Ask a quick question". */
   placeholder?: string;
-  /** Ask, pressed, or the form sent. */
-  onAsk?: () => void;
+  /** Ask, pressed, or Enter with nothing composing, with what the field holds. Enter is always the composer's: it
+   * never breaks the line (Shift+Enter does), even when busy or empty; whether anything goes is the caller's call. */
+  onAsk?: (text: string) => void;
   /** Add papers, pressed. Add papers shows only when given. */
   onAddPapers?: () => void;
 };
@@ -153,8 +193,9 @@ export function Composer<V extends string = string>({
   opening = false,
   busy = false,
   onStop,
-  text: held,
-  onText,
+  initialText = "",
+  onInput,
+  ref,
   papers = [],
   onRemovePaper,
   choice,
@@ -173,10 +214,12 @@ export function Composer<V extends string = string>({
   onAddPapers,
 }: ComposerProps<V>) {
   const w = useThreadWords();
-  const [own, setOwn] = useState("");
-  const text = held ?? own;
-  const setText = onText ?? setOwn;
+  // the one thing the composer draws from the words: whether there are any, for Ask and the questions to ask. It
+  // changes only when the field fills or empties, so a keystroke renders nothing
+  const [empty, setEmpty] = useState(() => initialText.trim() === "");
   const area = useRef<HTMLTextAreaElement>(null);
+  const composing = useRef(false);
+  const fitRef = useRef<() => void>(() => {});
   const entry = useRef<HTMLDivElement>(null);
   const room = useRoom();
   const fieldId = room.id(id);
@@ -199,6 +242,7 @@ export function Composer<V extends string = string>({
       a.style.overflowY = scrolls ? "" : "hidden";
       if (!scrolls) a.scrollTop = 0;
     };
+    fitRef.current = fit;
     fit();
     // the fit can change the field's height and so the form's, which the status line's observer, watching the form,
     // has already been told of this frame: the browser keeps that change for the next frame and reports
@@ -214,7 +258,32 @@ export function Composer<V extends string = string>({
     });
     ro.observe(a);
     return () => ro.disconnect();
-  }, [text, lang, textSize]);
+  }, [lang, textSize]);
+  // after every change to the words, typed, composed, undone or set through the handle: fit the field to them, say
+  // whether it holds any, and tell the room
+  const changed = () => {
+    const a = area.current;
+    if (a === null) return;
+    fitRef.current();
+    setEmpty(a.value.trim() === "");
+    onInput?.(a.value);
+  };
+  const put = (next: string) => {
+    const a = area.current;
+    if (a === null) return;
+    if (!replaceAll(a, next, true)) changed();
+    a.focus();
+  };
+  // made anew each render, as changed reads the caller's onInput: the composer renders rarely, never per keystroke
+  useImperativeHandle(ref, () => ({
+    focus: () => area.current?.focus(),
+    text: () => area.current?.value ?? "",
+    setText: put,
+    clear: () => {
+      const a = area.current;
+      if (a !== null && !replaceAll(a, "", false)) changed();
+    },
+  }));
   // the room keeps the composer's height, so what scrolls into view on a phone stands above it, and the turned page
   // stands clear of it
   useEffect(() => {
@@ -238,24 +307,21 @@ export function Composer<V extends string = string>({
       data-composer=""
       onSubmit={(e) => {
         e.preventDefault();
-        onAsk?.();
+        onAsk?.(area.current?.value ?? "");
       }}
     >
       {queue}
-      {prompts !== undefined &&
-        prompts.items.length > 0 &&
-        text.trim() === "" &&
-        gate === undefined && (
-          <ul className="room-prompts" aria-label={prompts.label}>
-            {prompts.items.map((p) => (
-              <li key={p.text}>
-                <button type="button" className="room-prompt" onClick={p.onPick}>
-                  <Say>{p.text}</Say>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
+      {prompts !== undefined && prompts.items.length > 0 && empty && gate === undefined && (
+        <ul className="room-prompts" aria-label={prompts.label}>
+          {prompts.items.map((p) => (
+            <li key={p.text}>
+              <button type="button" className="room-prompt" onClick={() => put(p.text)}>
+                <Say>{p.text}</Say>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       {acts}
       {/* a status line with nothing to say isn't drawn: no time yet, no plan, no choice and no hint */}
       {(took !== null || plan !== "" || choice !== undefined || hint !== null) && (
@@ -290,13 +356,37 @@ export function Composer<V extends string = string>({
                   return room.nodes.slot("field")(node);
                 }}
                 rows={1}
-                value={text}
+                defaultValue={initialText}
                 disabled={disabled}
                 data-testid={testIds?.field}
                 placeholder={placeholder ?? w.t("Ask about this matter")}
-                onChange={(e) => setText(e.target.value)}
+                onInput={changed}
+                onCompositionStart={() => {
+                  composing.current = true;
+                }}
+                onCompositionEnd={() => {
+                  composing.current = false;
+                }}
+                onBlur={() => {
+                  // a composition the engine ended without its compositionend must not hold Enter for good
+                  composing.current = false;
+                }}
                 onKeyDown={(e) => {
-                  if (onKeyCommand?.(e) === true) e.preventDefault();
+                  if (onKeyCommand?.(e) === true) {
+                    e.preventDefault();
+                    return;
+                  }
+                  if (e.key !== "Enter" || e.shiftKey) return;
+                  // an input method's Enter commits its candidate: the engine's, never a send
+                  const key = {
+                    key: e.key,
+                    shiftKey: e.shiftKey,
+                    isComposing: composing.current || e.nativeEvent.isComposing,
+                    keyCode: e.keyCode,
+                  };
+                  if (!sendsOnEnter(key)) return;
+                  e.preventDefault();
+                  onAsk?.(e.currentTarget.value);
                 }}
               />
               {onAddPapers !== undefined && (
@@ -327,7 +417,7 @@ export function Composer<V extends string = string>({
                   kind="primary"
                   type="submit"
                   className="room-field-ask"
-                  disabled={disabled || text.trim() === ""}
+                  disabled={disabled || empty}
                   data-testid={testIds?.ask}
                 >
                   {w.t("Ask")}

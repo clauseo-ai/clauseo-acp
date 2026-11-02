@@ -70,7 +70,7 @@ test("the field's size observer leaves its height alone while its width holds", 
     },
   );
   try {
-    await mount(composer({ text: "What did the bank know?" }));
+    await mount(composer({ initialText: "What did the bank know?" }));
     const area = host?.querySelector("textarea");
     expect(area).not.toBeNull();
     if (area === null || area === undefined) return;
@@ -87,7 +87,7 @@ test("the field's size observer leaves its height alone while its width holds", 
 test("a note under the field never blocks Ask", async () => {
   await mount(
     composer({
-      text: "What did the bank know?",
+      initialText: "What did the bank know?",
       notice: <p className="test-note">Your plan is running low.</p>,
     }),
   );
@@ -96,7 +96,7 @@ test("a note under the field never blocks Ask", async () => {
 });
 
 test("Ask waits for words in the field", async () => {
-  await mount(composer({ text: "  " }));
+  await mount(composer({ initialText: "  " }));
   expect(document.querySelector<HTMLButtonElement>(".room-field-ask")?.disabled).toBe(true);
 });
 
@@ -140,20 +140,22 @@ test("without its own line the composer says what the Safe workspace does", asyn
   );
 });
 
-test("questions are offered over an empty field only, and a press picks one", async () => {
-  const onPick = vi.fn();
-  const prompts = {
-    label: "Questions to ask",
-    items: [{ text: "When was the notice sent?", onPick }],
-  };
-  await mount(composer({ text: "", prompts }));
+test("questions are offered over an empty field only, and a press puts one in the field", async () => {
+  const onInput = vi.fn();
+  const prompts = { label: "Questions to ask", items: [{ text: "When was the notice sent?" }] };
+  await mount(composer({ initialText: "", prompts, onInput }));
   const prompt = document.querySelector<HTMLButtonElement>(".room-composer .room-prompt");
   expect(txt(prompt)).toBe("When was the notice sent?");
   await act(async () => prompt?.click());
-  expect(onPick).toHaveBeenCalledOnce();
+  const area = document.querySelector<HTMLTextAreaElement>(".room-field textarea");
+  expect(area?.value).toBe("When was the notice sent?");
+  expect(document.activeElement).toBe(area);
+  expect(onInput).toHaveBeenLastCalledWith("When was the notice sent?");
+  // the field holds words now: the questions step aside
+  expect(document.querySelector(".room-composer .room-prompts")).toBeNull();
   await act(async () => root?.unmount());
   host?.remove();
-  await mount(composer({ text: "Something typed", prompts }));
+  await mount(composer({ initialText: "Something typed", prompts }));
   expect(document.querySelector(".room-composer .room-prompts")).toBeNull();
 });
 
