@@ -50,8 +50,16 @@ function BlockContent({ view }: { view: BlockView }) {
 export function Markdown({ text, streaming = false }: MarkdownProps) {
   const scope = scopeOf(useId());
   const [answer] = useState(() => createAnswer(scope));
-  // Re-render once the full entity table arrives: the model then re-parses only the blocks that need it.
-  useSyncExternalStore(onCharacterEntities, characterEntitiesLoaded, characterEntitiesLoaded);
+  // Re-render once the full entity table arrives, but only an answer that met a name the common set doesn't know:
+  // the model then re-parses only the blocks holding `&`. Any other answer never renders for the table, so its
+  // arrival adds no commit to a streaming frame. The model is asked when the table arrives, not during render.
+  const [onTable] = useState(
+    () => (notify: () => void) =>
+      onCharacterEntities(() => {
+        if (answer.waitsForEntities()) notify();
+      }),
+  );
+  useSyncExternalStore(onTable, characterEntitiesLoaded, characterEntitiesLoaded);
   useEffect(prefetchEntities, []);
   const blocks = answer.update(text, streaming);
   return (
