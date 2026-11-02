@@ -38,6 +38,7 @@ import { th } from "@clauseo/components/lib/words-thread.ts";
 import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { MarkdownHostContext, type MarkdownHost } from "@clauseo/components/markdown/host.ts";
+import { LayerProvider } from "@clauseo/components/ui/layer.tsx";
 import { PartsRoot } from "@clauseo/components/ui/root.tsx";
 import { frameBatch } from "../store/batch.ts";
 import { StoreContext } from "../store/hooks.ts";
@@ -410,27 +411,30 @@ function RoomFrame({
           (papers.papers.length === 0 ? (
             <EmptyPapers body={false} />
           ) : (
-            <ol className="facade facade-names">
-              {papers.papers.map((paper) => {
-                const opener = word.openerFor(paper.path);
-                return (
-                  <PaperTile
-                    key={paper.file}
-                    id={paper.file}
-                    state="uncited"
-                    title={fileName(paper.path)}
-                    {...(opener === null
-                      ? {}
-                      : {
-                          onTurn: opener.onOpen,
-                          tip: opener.label,
-                          label: opener.label,
-                          testIds: { face: "open-in-word" },
-                        })}
-                  />
-                );
-              })}
-            </ol>
+            // a Word tile's tooltip mounts at the end of the wall, inside its landmark, not at the end of the body
+            <LayerProvider>
+              <ol className="facade facade-names">
+                {papers.papers.map((paper) => {
+                  const opener = word.openerFor(paper.path);
+                  return (
+                    <PaperTile
+                      key={paper.file}
+                      id={paper.file}
+                      state="uncited"
+                      title={fileName(paper.path)}
+                      {...(opener === null
+                        ? {}
+                        : {
+                            onTurn: opener.onOpen,
+                            tip: opener.label,
+                            label: opener.label,
+                            testIds: { face: "open-in-word" },
+                          })}
+                    />
+                  );
+                })}
+              </ol>
+            </LayerProvider>
           ))}
       </aside>
     </div>
