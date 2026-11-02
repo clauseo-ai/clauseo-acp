@@ -17,8 +17,11 @@ use crate::error::Error;
 
 /// The variable codex-acp takes its first mode from (`dist/index.js:34362-34367`).
 pub(crate) const MODE_VAR: &str = "INITIAL_AGENT_MODE";
-/// Codex's ask mode, the one every session runs in with no Clauseo sandbox (tier C): it edits
-/// the matter folder only with the lawyer's approval.
+/// The mode every Codex session runs in, with no Clauseo sandbox (tier C). codex-acp describes
+/// it as "edit workspace files; ask before writing outside the workspace" (`dist/index.js:
+/// 34277-34281`): Codex creates, changes and deletes files inside the matter folder without
+/// asking (G8a saw it, clauseo-acp-private #255), and asks before writing outside it or
+/// escalating. Undo per turn is the lawyer's way back.
 pub(crate) const ASK_MODE: &str = "workspace-write";
 /// The variable the Codex app-server takes its home from.
 pub(crate) const HOME_VAR: &str = "CODEX_HOME";
@@ -147,20 +150,55 @@ pub(crate) fn home_config() -> String {
 /// is keyed by the session-flags source (`/<session-flags>/config.toml:pre_tool_use:0:0`), so a
 /// hook written here would be keyed by this file's path, its `trusted_hash` would not match,
 /// and Codex would silently not run it.
+///
+/// A `config.toml` that already holds exactly these bytes (a plain file, 0600 on Unix) is left
+/// as it is: no write, so no rename over a file another program holds open on Windows.
 pub(crate) fn write_home_config(home: &Path) -> Result<(), Error> {
     let path = home.join("config.toml");
-    crate::write::replace_private_file(&path, home_config().as_bytes()).map_err(|error| {
-        Error::refused(
-            ErrorCode::AgentLaunchFailed,
-            format!("the agent's config {}: {error}", path.display()),
-        )
-    })
+    let text = home_config();
+    if holds(&path, text.as_bytes()) {
+        return Ok(());
+    }
+    crate::write::replace_private_file(&path, text.as_bytes())
+        .map_err(|error| home_failed(&path, &error.to_string()))
+}
+
+/// Whether the file at `path`, our own `config.toml`, is a plain file (0600 on Unix) holding
+/// exactly `bytes`.
+fn holds(path: &Path, bytes: &[u8]) -> bool {
+    let Ok(meta) = std::fs::symlink_metadata(path) else {
+        return false;
+    };
+    #[cfg(unix)]
+    let private = {
+        use std::os::unix::fs::PermissionsExt;
+        meta.permissions().mode() & 0o777 == 0o600
+    };
+    #[cfg(not(unix))]
+    let private = true;
+    meta.is_file()
+        && private
+        && usize::try_from(meta.len()).is_ok_and(|len| len == bytes.len())
+        && std::fs::read(path).is_ok_and(|held| held == bytes)
+}
+
+/// The failure of a Codex launch whose home or `config.toml` could not be made: the path and
+/// the error go to the log only (the path holds the user's name).
+fn home_failed(path: &Path, error: &str) -> Error {
+    tracing::warn!(path = %path.display(), %error, "Codex's folder could not be prepared");
+    Error::refused(
+        ErrorCode::AgentLaunchFailed,
+        "Clauseo couldn't prepare Codex's folder.",
+    )
 }
 
 /// #184: codex-acp marks every session root `trusted` (`dist/index.js:35450-35455`), so a
 /// `.codex/` in the matter folder would load as project config (its MCP servers, hooks, model
 /// and sandbox switches). A Codex agent is refused in a folder holding a `.codex` entry of any
-/// kind, before it starts. `folder` is the matter folder as resolved through links.
+/// kind, before it starts, and before each of its prompts and session calls (the entry may
+/// appear later: codex-acp restarts a crashed app-server and resumes the session itself,
+/// `dist/index.js:37755-37772`). `folder` is the matter folder as resolved through links. A
+/// stat that fails for any reason but not-found counts as present: the check fails closed.
 ///
 /// Lift this once codex-acp has an option to not trust the session root
 /// (agentclientprotocol/codex-acp#690), or once the direct Codex driver exists. The guard
@@ -168,22 +206,23 @@ pub(crate) fn write_home_config(home: &Path) -> Result<(), Error> {
 pub(crate) fn refuse_codex_folder(folder: &Path) -> Result<(), Error> {
     let entry = folder.join(".codex");
     // `symlink_metadata`: a link named `.codex` counts too, wherever it points.
-    if std::fs::symlink_metadata(&entry).is_ok() {
-        tracing::warn!(
-            folder = %folder.display(),
-            "a Codex session was refused: the matter folder holds a .codex entry"
-        );
-        return Err(Error::refused(
-            ErrorCode::MatterFolderRefused,
-            format!(
-                "Codex can't work in this matter while its folder holds a \".codex\" folder \
-                 ({}). Codex would load the settings inside it. Rename or remove that \".codex\" \
+    match std::fs::symlink_metadata(&entry) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        found => {
+            tracing::warn!(
+                folder = %folder.display(),
+                error = ?found.err(),
+                "a Codex session was refused: the matter folder holds a .codex entry, or its \
+                 stat failed"
+            );
+            Err(Error::refused(
+                ErrorCode::MatterCodexFolder,
+                "Codex can't work in this matter while its folder holds a \".codex\" folder: \
+                 Codex would load the settings inside it. Rename or remove that \".codex\" \
                  folder, then try again.",
-                entry.display()
-            ),
-        ));
+            ))
+        }
     }
-    Ok(())
 }
 
 /// The matter folder `stored` as resolved through links, or `stored` as it is when it does not
@@ -209,8 +248,20 @@ pub(crate) fn guard_trusted(answer: &Value) -> bool {
 
 /// The failure of a Codex session whose guard is not trusted.
 pub(crate) fn guard_untrusted(answer: &Value) -> Error {
+    // Each hook's trust status and the count only: the answer also holds paths.
+    let hooks = answer.get("hooks").and_then(Value::as_array);
+    let trust: Vec<&str> = hooks
+        .into_iter()
+        .flatten()
+        .map(|hook| {
+            hook.get("trustStatus")
+                .and_then(Value::as_str)
+                .unwrap_or("none")
+        })
+        .collect();
     tracing::error!(
-        %answer,
+        hooks = trust.len(),
+        ?trust,
         "the Codex guard hook is not trusted, so Codex would not run it; the session start fails"
     );
     Error::refused(
@@ -220,22 +271,89 @@ pub(crate) fn guard_untrusted(answer: &Value) -> Error {
     )
 }
 
-/// Makes `home` (and its parents) for the agent, private to the user on Unix (0700). A `home`
-/// that is a link or not a folder is refused, as the limits reader refuses it.
-pub(crate) fn make_home(home: &Path) -> Result<(), Error> {
-    let failed = |error: String| {
-        Error::refused(
-            ErrorCode::AgentLaunchFailed,
-            format!("the agent's home {}: {error}", home.display()),
-        )
-    };
-    crate::write::create_private_dir_all(home).map_err(|error| failed(error.to_string()))?;
-    let meta = std::fs::symlink_metadata(home).map_err(|error| failed(error.to_string()))?;
-    if !meta.is_dir() {
-        return Err(failed("not a folder".to_owned()));
+/// Makes `home`, `<data>/agents/<id>/home`, one folder at a time below `data`, each made
+/// private to the user on Unix (0700), and `home` set to 0700 when it already exists. Each of
+/// `agents`, `agents/<id>` and `home` that exists must be a real folder: a link (or a
+/// junction) anywhere below `data` is refused and never followed, so nothing is made where it
+/// points. The data folder itself may be a link: `CLAUSEO_DATA_DIR` may name one, and the
+/// store lives there too.
+pub(crate) fn make_home(data: &Path, home: &Path) -> Result<(), Error> {
+    let below = home
+        .strip_prefix(data)
+        .map_err(|_outside| home_failed(home, "not under the data folder"))?;
+    let mut at = data.to_owned();
+    for part in below.components() {
+        at.push(part);
+        let made = match std::fs::symlink_metadata(&at) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                crate::write::create_private_dir(&at)
+            }
+            other => other.map(drop),
+        };
+        // `symlink_metadata` never follows a link, so a link is not a folder here.
+        let meta = made
+            .and_then(|()| std::fs::symlink_metadata(&at))
+            .map_err(|error| home_failed(&at, &error.to_string()))?;
+        if !meta.is_dir() {
+            return Err(home_failed(&at, "a link or not a folder"));
+        }
     }
-    Ok(())
+    crate::write::make_private_dir(home).map_err(|error| home_failed(home, &error.to_string()))
 }
+
+/// Refuses a Codex launch whose matter folder `folder` (resolved through links) is the agent's
+/// home, holds it, or sits inside it: an agent working there could read the login or write
+/// what Codex loads from the home. `home` exists by now; it is resolved the same way. On
+/// macOS and Windows the names compare without case, as their file systems do by default.
+pub(crate) fn refuse_home_overlap(folder: &Path, home: &Path) -> Result<(), Error> {
+    let resolved =
+        dunce::canonicalize(home).map_err(|error| home_failed(home, &error.to_string()))?;
+    if !(within(folder, &resolved) || within(&resolved, folder)) {
+        return Ok(());
+    }
+    tracing::warn!(
+        folder = %folder.display(),
+        home = %resolved.display(),
+        "a Codex session was refused: the matter folder overlaps Codex's folder"
+    );
+    Err(Error::refused(
+        ErrorCode::MatterFolderRefused,
+        "Codex can't work in this matter: its folder overlaps Clauseo's own data, where Codex \
+         keeps its sign-in.",
+    ))
+}
+
+/// Whether `inner` is `outer` or sits inside it, comparing whole names.
+fn within(inner: &Path, outer: &Path) -> bool {
+    let fold = cfg!(any(windows, target_os = "macos"));
+    let same = |a: std::path::Component<'_>, b: std::path::Component<'_>| {
+        if fold {
+            a.as_os_str().to_string_lossy().to_lowercase()
+                == b.as_os_str().to_string_lossy().to_lowercase()
+        } else {
+            a == b
+        }
+    };
+    let mut inner = inner.components();
+    outer
+        .components()
+        .all(|part| inner.next().is_some_and(|other| same(other, part)))
+}
+
+/// A Codex launch's checks and writes, in order, on the `clauseo-codex-fs` thread
+/// ([`prepare::off_actor`]): the matter folder `stored` resolved through links, the `.codex`
+/// refusal, the home made under `data`, the overlap refusal, then `config.toml`. The resolved
+/// folder comes back.
+pub(crate) fn prepare_launch(stored: &Path, data: &Path, home: &Path) -> Result<PathBuf, Error> {
+    let folder = session_folder(stored);
+    refuse_codex_folder(&folder)?;
+    make_home(data, home)?;
+    refuse_home_overlap(&folder, home)?;
+    write_home_config(home)?;
+    Ok(folder)
+}
+
+pub(crate) mod prepare;
 
 #[cfg(test)]
 mod tests;

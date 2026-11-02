@@ -16,6 +16,12 @@ pub(crate) enum TurnInput {
         agent: u64,
         reply: AgentReply,
     },
+    /// A Codex launch's preparation `id` (`codex_start.rs`) answered.
+    CodexPrepared {
+        thread: ThreadId,
+        id: u64,
+        result: Result<super::codex_start::Prepared, crate::error::Error>,
+    },
     /// A whole-log read of `thread`'s stream for `why`.
     Log {
         thread: ThreadId,
@@ -43,6 +49,13 @@ pub(crate) enum AgentReply {
         turn: TurnId,
         result: Result<PromptEnd, clauseo_acp::Error>,
     },
+    /// A Codex prompt's `.codex` re-check (or its wait) refused it before it was sent.
+    PromptRefused {
+        turn: TurnId,
+        error: crate::error::Error,
+    },
+    /// A Codex session call's `.codex` re-check refused it before it was sent.
+    Refused(crate::error::Error),
     Config {
         ctx: CommandCtx,
         result: Result<Vec<ConfigOption>, clauseo_acp::Error>,

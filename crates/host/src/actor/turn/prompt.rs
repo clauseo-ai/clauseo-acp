@@ -7,6 +7,7 @@ use super::super::Actor;
 use super::super::input::Input;
 use super::agents::Stage;
 use super::{AgentReply, End, TurnInput, TurnPhase, current, end, spawn, state};
+use crate::agent::codex;
 use crate::undo_note::{self, NoteInput};
 
 /// Step 5: the prompt, with the undo note first.
@@ -18,13 +19,16 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
         .and_then(|agent| {
             let session = agent.session.clone()?;
             Some((
-                agent.id,
+                (
+                    agent.id,
+                    agent.codex.as_ref().map(|codex| codex.folder.clone()),
+                ),
                 agent.link.client.clone(),
                 agent.link.fence(),
                 session,
             ))
         });
-    let Some((id, client, fence, session)) = agent else {
+    let Some(((id, check), client, fence, session)) = agent else {
         if let Some(current) = current(actor, thread) {
             current.phase = TurnPhase::Prompting;
         }
@@ -48,19 +52,23 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     content.extend(blocks);
     let (abort, registration) = AbortHandle::new_pair();
     current.prompt_call = Some(abort);
+    let clock = std::sync::Arc::clone(&actor.clock);
     let call = Abortable::new(
         async move {
+            // A Codex agent's matter folder is checked for `.codex` again first, off the actor.
+            if let Err(error) = codex::prepare::recheck(clock, check).await {
+                return AgentReply::PromptRefused { turn, error };
+            }
             let result = client.prompt(&session, turn, content).await;
             fence.await;
-            result
+            AgentReply::Prompt { turn, result }
         },
         registration,
     );
     let post = actor.post.clone();
     spawn(actor, async move {
         // Aborted: the cancel fallback dropped the prompt; nothing to post.
-        if let Ok(result) = call.await {
-            let reply = AgentReply::Prompt { turn, result };
+        if let Ok(reply) = call.await {
             let input = TurnInput::Agent {
                 thread,
                 agent: id,

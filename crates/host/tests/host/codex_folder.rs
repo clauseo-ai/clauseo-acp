@@ -31,7 +31,7 @@ fn assert_refused(events: &Events, turn: TurnId) {
         .unwrap_or_else(|| panic!("no TurnFailed of {turn}: {}", events.dump()));
     assert_eq!(
         failed.code,
-        ErrorCode::MatterFolderRefused,
+        ErrorCode::MatterCodexFolder,
         "{}",
         events.dump()
     );

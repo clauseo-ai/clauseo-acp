@@ -8,14 +8,14 @@ use std::sync::Arc;
 
 use clauseo_acp::{AcpEvent, AgentInfo, MessageRole, PendingKey};
 use clauseo_protocol::{
-    AgentChoiceId, AgentKind, AgentSessionDetached, AgentSessionId, CompactString, ConfigValue,
-    DetachReason, ElicitationId, ErrorCode, MessageId, PermissionRequestId, StreamId, ThreadId,
-    TurnId,
+    AgentChoiceId, AgentSessionDetached, AgentSessionId, CompactString, ConfigValue, DetachReason,
+    ElicitationId, ErrorCode, MessageId, PermissionRequestId, StreamId, ThreadId, TurnId,
 };
 
 use super::super::Actor;
 use super::super::commands::CommandCtx;
 use super::super::input::Input;
+use super::codex_start::{self, Prepared};
 use super::out::Out;
 use super::{
     AgentReply, End, Then, TurnInput, TurnPhase, current, end, host_stopping, lost, session, state,
@@ -88,6 +88,19 @@ pub(super) struct Agent {
     /// A Codex session's checks run before its attach: every update is held with the replayed
     /// ones meanwhile, so none is logged before `AgentSessionAttached`.
     pub(super) preparing: bool,
+    /// What a Codex agent's launch recorded; `None` for any other agent.
+    pub(super) codex: Option<CodexAgent>,
+}
+
+/// What a Codex agent's launch recorded.
+#[derive(Debug)]
+pub(super) struct CodexAgent {
+    /// The matter folder as resolved through links at the launch: each prompt and session
+    /// call checks it for `.codex` first, and `_codex/hooks/list` names it.
+    pub(super) folder: PathBuf,
+    /// A hooks object went into its `CODEX_CONFIG`, so its session start checks that Codex
+    /// trusts the guard.
+    pub(super) guard: bool,
 }
 
 /// Runs `waiting` once `thread`'s agent has a session, launching the agent first.
@@ -97,7 +110,11 @@ pub(super) fn ensure(actor: &mut Actor, thread: ThreadId, waiting: Waiting) {
         return;
     };
     match state.agent.as_deref_mut() {
-        None => start(actor, thread, vec![waiting]),
+        None => match state.codex_start.as_deref_mut() {
+            // A Codex launch's preparation runs: the work waits for it.
+            Some(preparing) => preparing.waiting.push(waiting),
+            None => start(actor, thread, vec![waiting]),
+        },
         Some(agent) => match agent.stage {
             Stage::Attached => run_waiting(actor, thread, waiting),
             Stage::Initializing | Stage::Loading => agent.waiting.push(waiting),
@@ -106,12 +123,11 @@ pub(super) fn ensure(actor: &mut Actor, thread: ThreadId, waiting: Waiting) {
     }
 }
 
-/// Launches `thread`'s agent and sends `initialize`.
+/// Launches `thread`'s agent and sends `initialize`; a Codex agent's file checks and writes go
+/// off the actor first (`codex_start.rs`).
 fn start(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>) {
     if host_stopping(actor) {
-        for item in waiting {
-            fail_waiting(actor, thread, &item, &Error::Closed);
-        }
+        fail_all(actor, thread, waiting, &Error::Closed);
         return;
     }
     // A new session attaches after the old one's detach, which a waiting turn still holds.
@@ -119,12 +135,24 @@ fn start(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>) {
     if let Some(reason) = held {
         log_detach(actor, thread, reason);
     }
-    let (link, folder) = match launch(actor, thread) {
+    if codex_start::is_codex(actor, thread) {
+        codex_start::prepare(actor, thread, waiting);
+        return;
+    }
+    launch_now(actor, thread, waiting, None);
+}
+
+/// The launch on the actor, with a Codex agent's `prepared` folder and home, and `initialize`.
+pub(super) fn launch_now(
+    actor: &mut Actor,
+    thread: ThreadId,
+    waiting: Vec<Waiting>,
+    prepared: Option<Prepared>,
+) {
+    let (link, folder, codex) = match launch(actor, thread, prepared) {
         Ok(launched) => launched,
         Err(error) => {
-            for item in waiting {
-                fail_waiting(actor, thread, &item, &error);
-            }
+            fail_all(actor, thread, waiting, &error);
             return;
         }
     };
@@ -155,40 +183,47 @@ fn start(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>) {
         replay: None,
         replayed: Vec::new(),
         preparing: false,
+        codex,
     };
     if let Some(state) = state(actor, thread) {
         state.agent = Some(Box::new(agent));
     }
 }
 
-/// A new agent id.
-fn next_agent_id() -> u64 {
+/// A new agent id (a Codex launch's preparation takes one too).
+pub(super) fn next_agent_id() -> u64 {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
+/// What a launch gives: the link, the folder it runs in, and what a Codex launch recorded.
+type Launched = (AgentLink, PathBuf, Option<CodexAgent>);
+
 /// The launch itself: the spec from the settings (inherited environment, the agent's
 /// variables, then the profile hook's with the host's switches over them, then what the host
-/// forces for the agent's kind), in the matter folder. A Codex agent is refused in a folder
-/// holding `.codex` (#184) before anything starts, and its home and its `config.toml` are made
-/// first.
-fn launch(actor: &Actor, thread: ThreadId) -> Result<(AgentLink, PathBuf), Error> {
+/// forces for the agent's kind), in the matter folder. A Codex agent comes `prepared`: its
+/// `.codex` refusal (#184), its home and its `config.toml` are done, and it runs in the folder
+/// that was checked.
+fn launch(actor: &Actor, thread: ThreadId, prepared: Option<Prepared>) -> Result<Launched, Error> {
     let row = &actor.check_thread(thread)?.row;
-    let folder = PathBuf::from(&actor.check_matter(row.matter)?.row.folder_path);
     let settings = actor.effective.agent(row.agent.as_str()).ok_or_else(|| {
         Error::refused(
             ErrorCode::AgentLaunchFailed,
             format!("no agent {} in the settings", row.agent),
         )
     })?;
-    let forced = if AgentKind::of(&row.agent) == Some(AgentKind::Codex) {
-        agent::codex::refuse_codex_folder(&agent::codex::session_folder(&folder))?;
-        let home = actor.effective.locations().agent_home(row.agent.as_str());
-        agent::codex::make_home(&home)?;
-        agent::codex::write_home_config(&home)?;
-        agent::codex::launch_env(&home, &settings.env, codex_hooks(actor))
+    let (folder, forced, codex) = if let Some(prepared) = prepared {
+        let hooks = codex_hooks(actor);
+        let guard = hooks.is_some();
+        let forced = agent::codex::launch_env(&prepared.home, &settings.env, hooks);
+        let codex = CodexAgent {
+            folder: prepared.folder,
+            guard,
+        };
+        (prepared.stored, forced, Some(codex))
     } else {
-        BTreeMap::new()
+        let folder = PathBuf::from(&actor.check_matter(row.matter)?.row.folder_path);
+        (folder, BTreeMap::new(), None)
     };
     let hook = agent::loads::launch_env(actor.profile.launch_env(&row.agent));
     let spec = agent::launch_spec(settings, hook, forced, std::env::vars_os(), folder.clone())?;
@@ -204,16 +239,17 @@ fn launch(actor: &Actor, thread: ThreadId) -> Result<(AgentLink, PathBuf), Error
         Arc::clone(&actor.clock),
         post,
     )?;
-    Ok((link, folder))
+    Ok((link, folder, codex))
 }
 
 /// THE CODEX HOOKS SEAM: the `hooks` object a Codex agent's `CODEX_CONFIG` carries, with its
 /// `state` trust entry and `trusted_hash`. The guard PR's `codex_hook_config()`, in
 /// `crates/host/src/agent/loads/codex.rs` (clauseo-acp #152, for clauseo-acp-private#162),
 /// fills it: whichever of R15 and #152 merges second wires it here. Until then it is `None`
-/// (tests set one through `HostConfig::with_codex_hooks`), and with `None` the session start
+/// (tests set one through `HostConfig::with_codex_hooks`). It is read once per launch, which
+/// records on the agent whether one went in (`Agent::guard`); with none the session start
 /// skips the guard's trust check.
-pub(super) fn codex_hooks(actor: &Actor) -> Option<serde_json::Map<String, serde_json::Value>> {
+fn codex_hooks(actor: &Actor) -> Option<serde_json::Map<String, serde_json::Value>> {
     actor.codex_hooks.clone()
 }
 
@@ -279,7 +315,13 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
         AgentReply::Mode { ctx, mode, result } => {
             super::answers::on_mode(actor, thread, ctx, same, &mode, result);
         }
-        AgentReply::Initialized(_) | AgentReply::Session { .. } | AgentReply::Prepared { .. }
+        AgentReply::PromptRefused { turn, error } => {
+            end::on_prompt_refused(actor, thread, turn, &error);
+        }
+        AgentReply::Initialized(_)
+        | AgentReply::Session { .. }
+        | AgentReply::Prepared { .. }
+        | AgentReply::Refused(_)
             if !same => {}
         AgentReply::Initialized(Ok(info)) => session::on_initialized(actor, thread, info),
         AgentReply::Initialized(Err(error))
@@ -295,9 +337,11 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
             result: Ok(start),
             loaded,
         } => session::attach(actor, thread, start, loaded),
+        // `Refused`: a session call's `.codex` re-check refused it, so no call was sent.
         AgentReply::Prepared {
             result: Err(error), ..
-        } => launch_failed(actor, thread, &error),
+        }
+        | AgentReply::Refused(error) => launch_failed(actor, thread, &error),
         AgentReply::Session {
             result: Err(error),
             loaded: true,
@@ -337,6 +381,13 @@ pub(super) fn run_waiting(actor: &mut Actor, thread: ThreadId, waiting: Waiting)
             let result = client.set_mode(&session, mode.clone()).await;
             AgentReply::Mode { ctx, mode, result }
         }),
+    }
+}
+
+/// Fails each of `waiting` with `error`.
+pub(super) fn fail_all(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>, error: &Error) {
+    for item in waiting {
+        fail_waiting(actor, thread, &item, error);
     }
 }
 
