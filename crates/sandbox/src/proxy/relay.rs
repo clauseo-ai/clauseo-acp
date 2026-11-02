@@ -9,7 +9,7 @@ use std::time::Duration;
 use async_io::{Async, Timer};
 use futures::{AsyncReadExt, AsyncWriteExt};
 
-use crate::proxy::head::HEAD_CAP;
+use crate::proxy::head::{HEAD_CAP, within};
 
 /// One socket of a relay.
 pub(crate) type Stream = Async<TcpStream>;
@@ -77,6 +77,33 @@ pub(crate) async fn pump(
 pub(crate) fn end_writes(stream: &Stream) {
     if let Err(error) = stream.get_ref().shutdown(Shutdown::Write) {
         tracing::trace!(%error, "egress: write half already closed");
+    }
+}
+
+/// What [`linger`] reads and discards at most before it closes anyway.
+pub(crate) const LINGER_CAP: usize = 64 * 1024;
+
+/// Ends the write half after an error answer, then reads and discards what the client still
+/// sends, until it closes, [`LINGER_CAP`] bytes, or `limit`. Closing with unread bytes in the
+/// receive buffer sends a reset, and on Windows the client then loses the answer.
+pub(crate) async fn linger(stream: &Stream, limit: Duration) {
+    end_writes(stream);
+    let drain = async {
+        let mut buf = vec![0u8; BUF];
+        let mut left = LINGER_CAP;
+        while left > 0 {
+            let want = buf.len().min(left);
+            match (&*stream)
+                .read(buf.get_mut(..want).unwrap_or_default())
+                .await
+            {
+                Ok(0) | Err(_) => return,
+                Ok(n) => left = left.saturating_sub(n),
+            }
+        }
+    };
+    if within(limit, drain).await.is_none() {
+        tracing::debug!("egress: the client kept sending after an error answer; closed");
     }
 }
 

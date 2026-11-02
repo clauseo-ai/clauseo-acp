@@ -10,6 +10,7 @@ use super::harness::{
 use crate::Denial;
 use crate::Reachability::{Reachable, Unreachable};
 use crate::proxy::head::HEAD_CAP;
+use crate::proxy::relay::LINGER_CAP;
 use crate::proxy::{Limits, Verdict};
 
 #[test]
@@ -33,12 +34,52 @@ fn the_sixty_fifth_open_tunnel_gets_503_and_no_denial() {
 fn a_head_over_8_kb_gets_431() {
     let rig = rig_allowing(&["api.anthropic.com"]);
     let mut stream = rig.agent();
-    let filler = "a".repeat(HEAD_CAP);
-    let request = format!("CONNECT api.anthropic.com:443 HTTP/1.1\r\nX-Filler: {filler}\r\n\r\n");
-    // The proxy may close before reading it all; the answer is what counts.
-    drop(stream.write_all(request.as_bytes()));
+    let request = oversized_head();
+    assert!(request.len() > HEAD_CAP);
+    // The proxy reads and discards what is left after its answer, so the whole write lands and
+    // the close is clean: the 431 arrives whole, then the end, with no reset (Windows sent one).
+    stream.write_all(request.as_bytes()).unwrap();
     assert_eq!(status(&read_head(&mut stream)), 431);
+    assert_eq!(read_all(&mut stream), b"");
     assert_eq!(rig.net.dialled(), Vec::<SocketAddr>::new());
+}
+
+fn oversized_head() -> String {
+    let filler = "a".repeat(HEAD_CAP);
+    format!("CONNECT api.anthropic.com:443 HTTP/1.1\r\nX-Filler: {filler}\r\n\r\n")
+}
+
+#[test]
+fn a_client_that_stays_open_after_an_error_answer_is_closed_after_the_linger() {
+    assert_eq!(Limits::default().linger, Duration::from_secs(1));
+    let rig = echo_rig_with(Limits {
+        sockets: 2,
+        linger: Duration::from_millis(100),
+        ..Limits::default()
+    });
+    let mut first = rig.agent();
+    first.write_all(oversized_head().as_bytes()).unwrap();
+    assert_eq!(status(&read_head(&mut first)), 431);
+    // The client neither reads on nor closes. The record is written after the socket slot is
+    // given back, so once it is in, the next client and its origin fit in the two slots.
+    assert_eq!(rig.records(1)[0].verdict, Verdict::BadRequest);
+    assert_eq!(rig.connect("api.anthropic.com:443").1, 200);
+    drop(first);
+}
+
+#[test]
+fn the_linger_stops_reading_at_its_byte_cap() {
+    let rig = echo_rig_with(Limits {
+        // Longer than the test waits: only the byte cap can end the linger.
+        linger: Duration::from_mins(5),
+        ..Limits::default()
+    });
+    let mut stream = rig.agent();
+    let mut flood = oversized_head().into_bytes();
+    flood.resize(flood.len() + LINGER_CAP + 16 * 1024, b'a');
+    // The proxy closes once it has discarded the cap, so the end of the write may be reset.
+    drop(stream.write_all(&flood));
+    assert_eq!(rig.records(1)[0].verdict, Verdict::BadRequest);
 }
 
 #[test]

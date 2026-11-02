@@ -154,6 +154,9 @@ pub(crate) struct Limits {
     /// Client and origin sockets open at once across every proxy in the process, the same way.
     /// `start_proxy` lowers it to half the process's soft open-file limit when that is smaller.
     pub(crate) process: usize,
+    /// After an error answer, how long the proxy reads and discards what the client still sends
+    /// before it closes, so the close does not reset the connection and lose the answer.
+    pub(crate) linger: Duration,
 }
 
 impl Default for Limits {
@@ -167,6 +170,7 @@ impl Default for Limits {
             // The pending clients, plus a client and an origin socket per tunnel.
             sockets: 64 + 2 * 64,
             process: 1024,
+            linger: Duration::from_secs(1),
         }
     }
 }
