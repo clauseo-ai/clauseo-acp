@@ -345,7 +345,8 @@ for (const theme of THEMES) {
           }
           root = null;
           host = null;
-        });
+          // every scene in one test: U7's and U9's scenes together pass 5 s under the full suite's load
+        }, 20_000);
       }
     }
   }
