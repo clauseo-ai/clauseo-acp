@@ -1,4 +1,4 @@
-//! Permission requests: answers, refusals while a turn runs, the lawyer-edits flag.
+//! Permission requests: answers, an undo refused while a turn runs, the lawyer-edits flag.
 
 use clauseo_protocol::{
     AgentChoiceId, CommandOutcome, DomainEvent, ErrorCode, FileChoice, FileDecision, HostCommand,
@@ -6,7 +6,7 @@ use clauseo_protocol::{
 };
 
 use crate::observe::Events;
-use crate::support::{Dir, Running, Scenario, matter_with_thread, send_prompt};
+use crate::support::{Dir, Running, Scenario, matter_with_thread};
 use crate::turn::change_label;
 use crate::write;
 
@@ -83,53 +83,6 @@ fn lawyer_edit_during_turn_is_flagged() {
         })
         .collect();
     assert_eq!(files, [("lawyer-notes.txt", "added", true)]);
-    host.shutdown();
-}
-
-#[test]
-fn prompt_refused_while_turn_runs() {
-    let dir = kinds_dir("prompt_refused_while_turn_runs");
-    let host = dir.start(0);
-    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], PERM);
-    let mut events = host.events(StreamId::Thread(thread));
-    let (turn, _) = host.prompt(thread, "Edit the four clauses.");
-    until_first_request(&mut events);
-
-    let id = crate::support::command_id();
-    let error = host
-        .dispatch_as(id, send_prompt(thread, "Another question."))
-        .unwrap_err();
-    assert_eq!(error.code(), ErrorCode::ThreadTurnRunning, "{error}");
-    assert!(error.retryable());
-
-    answer_from(&host, &mut events, thread, 0, &KINDS_ANSWERS);
-    let ended = events.until_turn_ended(turn);
-    host.settle();
-    events.drain_ready();
-    events.assert_no_mismatch();
-    assert_eq!(
-        ended.stop,
-        StopReason::EndTurn,
-        "the agent saw a second prompt"
-    );
-    let user_messages = events.count(|event| matches!(event, DomainEvent::UserMessage(_)));
-    assert_eq!(
-        user_messages,
-        1,
-        "the refused prompt was logged: {}",
-        events.dump()
-    );
-
-    // No receipt was stored: the same command id now runs as a new prompt. The scenario has no
-    // second prompt, so the agent ends that turn with a mismatch, which is not checked here.
-    let outcome = host
-        .dispatch_as(id, send_prompt(thread, "Another question."))
-        .unwrap_or_else(|e| panic!("the refused command left a receipt: {e}"));
-    let CommandOutcome::PromptAccepted { turn: second, .. } = outcome else {
-        panic!("SendPrompt answered {outcome:?}");
-    };
-    assert_ne!(second, turn);
-    events.until_turn_ended(second);
     host.shutdown();
 }
 

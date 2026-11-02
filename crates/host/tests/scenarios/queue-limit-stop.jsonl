@@ -1,0 +1,14 @@
+{"scenario":"queue-limit-stop","description":"Prompt 1 asks one permission; after the answer a rejected rate-limit usage_update and end_turn (the host ends it at the limit); then prompt 2 (Second question) runs to end_turn","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1"}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"request":{"id":"perm-1","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"tc-perm-1","title":"Edit clause 4","kind":"edit","status":"pending"},"options":[{"optionId":"allow-once","name":"Allow once","kind":"allow_once"},{"optionId":"reject-once","name":"Reject","kind":"reject_once"}]}}}
+{"expect_response":{"id":"perm-1","result":"{{any}}"}}
+{"update":{"update":{"sessionUpdate":"usage_update","used":200000,"size":200000,"_meta":{"_claude/rateLimit":{"status":"rejected","resetsAt":1792310400,"rateLimitType":"five_hour","utilization":1,"overageStatus":"rejected","isUsingOverage":false,"surpassedThreshold":0.95}}}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"You've hit your usage limit"}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
+{"expect":{"method":"session/prompt","as":"p2","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"Second question"}]}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-2","content":{"type":"text","text":"Second answer."}}}}
+{"respond":{"to":"p2","result":{"stopReason":"end_turn"}}}

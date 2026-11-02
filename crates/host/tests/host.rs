@@ -89,6 +89,12 @@ mod papers;
 #[path = "host/permissions.rs"]
 mod permissions;
 #[cfg(test)]
+#[path = "host/queue.rs"]
+mod queue;
+#[cfg(test)]
+#[path = "host/queue_moves.rs"]
+mod queue_moves;
+#[cfg(test)]
 #[path = "host/rail.rs"]
 mod rail;
 #[cfg(test)]
@@ -106,6 +112,9 @@ mod restart;
 #[cfg(test)]
 #[path = "host/settings.rs"]
 mod settings;
+#[cfg(test)]
+#[path = "host/steer.rs"]
+mod steer;
 #[cfg(test)]
 #[path = "host/subscribe.rs"]
 mod subscribe;
