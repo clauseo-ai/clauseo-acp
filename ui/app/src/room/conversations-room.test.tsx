@@ -346,7 +346,14 @@ test("the field takes focus after New conversation and after a row is pressed, n
 
 /* ---------- the plan to ask with ---------- */
 
-const planSwitch = () => h!.host.querySelector<HTMLElement>('[aria-label="Plan to ask with"]');
+/** The plan switch, a group named by the visible "Plan to ask with" before it (aria-labelledby). */
+const planSwitch = () => {
+  const group = h!.host.querySelector<HTMLElement>(".room-plan-seg");
+  const by = group?.getAttribute("aria-labelledby");
+  return by != null && h!.host.ownerDocument.getElementById(by)?.textContent === "Plan to ask with"
+    ? group
+    : null;
+};
 const planButton = (label: string) =>
   [...(planSwitch()?.querySelectorAll("button") ?? [])].find((b) => b.textContent?.includes(label));
 
