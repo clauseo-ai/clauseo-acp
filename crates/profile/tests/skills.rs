@@ -6,6 +6,9 @@
 #[path = "skills/write.rs"]
 mod write;
 
+#[path = "skills/builtin.rs"]
+mod builtin;
+
 use std::path::{Path, PathBuf};
 
 use clauseo_process::{AsyncIoTimer, PassthroughLauncher, SpawnOptions};

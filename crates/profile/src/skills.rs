@@ -13,6 +13,7 @@
 //! once. A write that fails leaves the agent's launch to go on: the host logs it as a warning
 //! and never fails a launch on it (decision record 0030).
 
+pub mod builtin;
 pub mod frontmatter;
 pub mod manifest;
 pub mod stetdoc;

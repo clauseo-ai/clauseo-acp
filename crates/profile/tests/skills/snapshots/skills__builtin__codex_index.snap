@@ -1,0 +1,11 @@
+---
+source: crates/profile/tests/skills/builtin.rs
+expression: index
+---
+## Skills
+
+Your skills are files on this computer. When a task fits one, read its SKILL.md with your file tools before you start, and the references it names, and follow it.
+
+- legal-drafting (drafting or revising a legal document, or marking up a draft): `<root>/profile/claude-plugin/skills/legal-drafting/SKILL.md`
+- legal-research (Indian legal research that needs more than one search): `<root>/profile/claude-plugin/skills/legal-research/SKILL.md`
+- matter-brief (reading and updating the matter brief when work starts and before a turn ends): `<root>/profile/claude-plugin/skills/matter-brief/SKILL.md`

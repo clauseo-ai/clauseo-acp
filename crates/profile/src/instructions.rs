@@ -6,6 +6,10 @@
 /// `{work_folder}`, which the host fills per session.
 pub const TOOLS: &str = include_str!("../assets/instructions/tools.txt");
 
+/// R22's legal part, appended after the tools part. It holds `{work_folder}` and
+/// `{matter_notes}`, which the host fills per session.
+pub const LEGAL: &str = include_str!("../assets/instructions/legal.md");
+
 /// The token the profile fills with the author's name.
 pub const AUTHOR: &str = "{author}";
 
@@ -25,6 +29,11 @@ impl Instructions {
     /// The tools part alone.
     pub fn tools() -> Self {
         Self { parts: vec![TOOLS] }
+    }
+
+    /// The launch instructions: the tools part, then R22's legal part.
+    pub fn launch() -> Self {
+        Self::tools().with_part(LEGAL)
     }
 
     /// These parts with `part` after them (R22: the legal part).

@@ -1,4 +1,4 @@
-# NNNN: Legal instructions and the skills that need no data source
+# 0031: Legal instructions and the skills that need no data source
 
 ## Context
 
@@ -70,8 +70,9 @@ Two agents may edit the brief close together, and there is no lock. The `matter-
 | Skill `description` | 20 to 1,024 characters, one line, no `:` and no `"` |
 | `SKILL.md` body | under 5,000 words |
 | Each reference file | at most 1,000 words |
+| Codex's skills index | at most 150 words |
 
-Words are counted by splitting on whitespace, as `wc -w` does.
+Words are counted by splitting on whitespace, as `wc -w` does. At launch: `legal.md` 1,168 words, the whole (tools part and `legal.md`) 1,362, and Codex's index 86 with stetdoc's skill and a data folder at `/data`, so Codex's `developer_instructions` is 1,448 words there. A data folder whose path holds spaces adds those words once per index line.
 
 ### The version lock
 
@@ -101,9 +102,55 @@ for name in ['legal-drafting', 'legal-research', 'matter-brief']:
     print(name, 1, skill_hash(os.path.join(skills, name)))
 ```
 
+### The code (`crates/profile`)
+
+- `instructions::LEGAL` embeds `legal.md` with `include_str!`. `Instructions::launch()` is the tools part, a blank line, then `LEGAL`, and `ClauseoProfile::new` starts from it; `{work_folder}` and `{matter_notes}` stay for the host, and only `{author}` is filled by the profile.
+- `skills::builtin` holds the fixed list `BUILTIN` (`legal-drafting`, `legal-research`, `matter-brief`) and `ASSETS`, every source file embedded with `include_str!` (a test checks it is exactly the files under `assets/skills/<name>/`, byte for byte). `sources()` builds the three with `SkillSource::builtin`, which parses the source frontmatter with the crate's parser, `metadata.clauseo` included, and renders `name` and `description` alone. `with_stetdoc(stetdoc)` puts stetdoc's skill first, then the three; `ClauseoProfile::with_builtin_skills(stetdoc)` renders that list.
+- The render and its cleanup (removing files a skill dropped, rewriting a drifted file) act only on the skills they are given, so R22's code acts on `BUILTIN` alone: the `stetdoc` folder, its manifest entry and every other folder (a lawyer's, Codex's `.system`) stay byte for byte.
+- No `agents/openai.yaml` is written: Codex reads no skills folder (below), so its implicit-invocation default does not matter at launch.
+
+### Codex (b′): the skills index
+
+Codex 0.162.1 has no root-scoped skills key (decision record 0030, "Codex gets no skills"; amended into 0025), so `skills.include_instructions=false` stays and Codex gets no skills folder (`CODEX_SKILLS` is `false`, as R21's PR-A left it). Agreed with stage B and the host thread:
+
+- Codex's `developer_instructions` is the instructions, a blank line, then a short index (`ClauseoProfile::codex_instructions`, `skills_index`, `skills::builtin::codex_index`): a `## Skills` heading, one rule ("read its SKILL.md with your file tools before you start, and the references it names, and follow it"), then one line per rendered skill: its name, a one-line use, and the path of its rendered `SKILL.md` in the Claude plugin's `skills/` folder under app data (`ProfilePaths::claude_skills`).
+- The index is generated from the same `Rendered` list `write_skills` writes, in its order (stetdoc's first when it loaded). A test writes the skills and checks that every listed path is exactly where the write put the file, with the same bytes.
+- Each path is a Markdown code span whose backtick fence is one longer than the longest backtick run in the path, with a space inside each fence when the path starts or ends with a backtick or a space. Tested with spaces, backticks, both quote marks and Windows backslashes. A path holding a line break, or a placeholder the host fills in the instructions (`{work_folder}`, `{matter_notes}`), is left out with a warning, since the host's fill would rewrite it.
+- It is built each time the Codex keys are composed, from the profile's paths; nothing is cached across sessions. At most 150 words (test). Claude gets no index: it loads the plugin.
+- **The host must write the rendered skills folder** (`write_skills(&profile.skill_files(Some(AgentKind::Claude)))`) in launch prep before any agent starts, Codex included, or Codex's index points at files that are not there. That wiring is the host PR's.
+
+Sample, for a data folder at `/data`:
+
+```markdown
+## Skills
+
+Your skills are files on this computer. When a task fits one, read its SKILL.md with your file tools before you start, and the references it names, and follow it.
+
+- stetdoc (reading and editing Word files as tracked changes): `/data/profile/claude-plugin/skills/stetdoc/SKILL.md`
+- legal-drafting (drafting or revising a legal document, or marking up a draft): `/data/profile/claude-plugin/skills/legal-drafting/SKILL.md`
+- legal-research (Indian legal research that needs more than one search): `/data/profile/claude-plugin/skills/legal-research/SKILL.md`
+- matter-brief (reading and updating the matter brief when work starts and before a turn ends): `/data/profile/claude-plugin/skills/matter-brief/SKILL.md`
+```
+
+### Tests
+
+In `crates/profile/tests/legal.rs` (text, lock, index) and `crates/profile/tests/skills/builtin.rs` (on disk, a module of `tests/skills.rs`, which is near the 600-line limit):
+
+- `profile` (this PR): `legal_word_budget`, `legal_sections_in_order`, `legal_names_matter_brief`, `skill_frontmatter_valid`, `skill_body_budget`, `render_snapshots`, `no_v2_tool_names`, `no_ik_or_viewer_links`, `no_dashes`, `no_shell_injection`, `no_placeholder_in_skills`, `manifest_detects_change`, `stetdoc_skill_untouched`, `versions_lock`, and the index's: `the_index_lists_every_rendered_skill_within_150_words`, `every_index_path_is_where_the_write_puts_the_file`, `the_index_quotes_any_path_as_one_code_span`, `a_path_holding_a_placeholder_or_a_line_break_is_left_out_of_the_index`, `no_skill_rendered_means_no_index`.
+- Host PR: `work_folder_substituted`, `matter_notes_folder`, `matter_notes_survives_session_end`, `writable_folders`, `skill_shell_off`, and the host's write of the rendered skills folder before a Codex launch.
+
 ### Q6: public text
 
 Answered (a), public (Rohan, 2026-11-02). The instructions and skills live in the public repo under `crates/profile/assets/`.
+
+### Deviations from the brief
+
+- **Codex reads the skills through an index (b′)**, not a copy in `$CODEX_HOME/skills`: no root-scoped key exists at codex 0.162.1. Codex's `developer_instructions` grows by the index (86 words at launch, 1,448 in all); the 1,500-word test covers the text both agents share, and the index has its own 150-word test.
+- **The Codex render snapshot** is Codex's index, with its skills folder checked empty, since Codex gets no folder; the Claude snapshot is the plugin's whole tree.
+- **The host-side tests move to the host PR** (list above), with the `{matter_notes}` folder, the writable folders, `disableSkillShellExecution` (already set by R21, record 0030) and the skills write before a Codex launch.
+- **`versions_lock` also checks the version**: the current hash must be listed under the version the skill's `metadata.clauseo.version` holds, so a text change with a new line but no version bump fails too.
+- **R21's profile tests pin the tools part alone** (`with_instructions(Instructions::tools())`), so their snapshots stay R21's; the launch text is tested here.
+- **The descriptions also hold no `:` and no `"`** (tested), as the budget table says.
 
 ## Consequences
 
@@ -111,7 +158,8 @@ Answered (a), public (Rohan, 2026-11-02). The instructions and skills live in th
 - Without v2's gate and helper review, quality rests on the agent's own discipline: the self-check of citations and the five-question review. G15 measures it with v2's eval harness; R22 sets no quality bar.
 - Any edit to a skill's text needs a new `versions.lock` line and a version bump, or the `versions_lock` test fails.
 - `competition-law`, the views paragraph, helper agents and lawyer-made skills come back only with their own decisions.
-- Stage C must grant each matter's jails write access to `<data_dir>/agent-state/<matter_id>/notes/` and deny it to other matters.
+- Stage C must grant each matter's jails write access to `<data_dir>/agent-state/<matter_id>/notes/` and deny it to other matters, and let Codex's jail read the Claude plugin's `skills/` folder, which its index points at.
+- The host writes the Claude plugin's skills before every agent's launch, Codex's included. If a later Codex gets a root-scoped skills key, Codex can get its own copy and the index goes.
 
 ## Status
 

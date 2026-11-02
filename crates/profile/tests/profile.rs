@@ -9,7 +9,9 @@ use clauseo_profile::placeholders::{
     self, BROWSER_DIR, BROWSER_EXECUTABLE, IN_INSTRUCTIONS, IN_SERVERS, MATTER_NOTES, PROXY_PORT,
     SESSION_ID, WORK_FOLDER,
 };
-use clauseo_profile::{BrowserSidecars, ClauseoProfile, CodexConfig, ProfileError, ProfilePaths};
+use clauseo_profile::{
+    BrowserSidecars, ClauseoProfile, CodexConfig, Instructions, ProfileError, ProfilePaths,
+};
 use clauseo_protocol::AgentKind;
 use clauseo_settings::Locations;
 use serde_json::{Map, Value, json};
@@ -40,8 +42,10 @@ fn paths() -> ProfilePaths {
     paths_with("/app/clauseo", "/app/stetdoc/stetdoc", "/app").unwrap()
 }
 
+/// The profile with R21's tools part alone, so these snapshots stay R21's; R22's legal part is
+/// tested in `tests/legal.rs`.
 fn profile() -> ClauseoProfile {
-    ClauseoProfile::new(paths(), None)
+    ClauseoProfile::new(paths(), None).with_instructions(Instructions::tools())
 }
 
 /// Pretty JSON with Windows' `\` separators shown as `/`, so one snapshot serves every OS.

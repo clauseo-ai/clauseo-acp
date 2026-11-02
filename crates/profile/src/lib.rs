@@ -8,7 +8,8 @@
 //!   `disableSkillShellExecution`. Codex's keys ([`codex`]).
 //! - The `browser` MCP server ([`servers`]), for every agent.
 //! - The launch variables: `STETDOC_AUTHOR`.
-//! - The skills ([`skills`]), rendered into Claude's plugin and Codex's home.
+//! - The skills ([`skills`]), rendered into Claude's plugin; Codex gets an index of them in
+//!   its instructions ([`skills::builtin::codex_index`]).
 //!
 //! What differs per session goes out as [`placeholders`] the host fills. The host decides
 //! everything the settings decide (web search on or off, the seeded `WebFetch` rules, the
@@ -48,7 +49,8 @@ pub const STETDOC_AUTHOR: &str = "STETDOC_AUTHOR";
 /// `skills.include_instructions=false` (`clauseo_limits::CODEX_OVERRIDES`), so no skill catalog
 /// reaches the model, and codex 0.162.1 has no key that keeps the lawyer's `~/.agents/skills`
 /// out while letting a root under the agent home in (decision record 0030). Codex gets the
-/// stetdoc rules through `developer_instructions` instead.
+/// stetdoc rules, and an index of the skills Claude's plugin holds, through
+/// `developer_instructions` instead (decision record 0031).
 pub const CODEX_SKILLS: bool = false;
 
 /// The Claude plugin's manifest, `.claude-plugin/plugin.json`.
@@ -73,15 +75,15 @@ pub struct ClauseoProfile {
 }
 
 impl ClauseoProfile {
-    /// The profile with R21's instructions and no skills yet. `author` is the lawyer's name
-    /// from the settings; there is no such key yet, so desktop passes `None` and tracked changes
-    /// carry `Clauseo`. Never the OS account name. [`instructions::author_name`] makes a name
-    /// safe.
+    /// The profile with the launch instructions (R21's tools part, then R22's legal part) and no
+    /// skills yet. `author` is the lawyer's name from the settings; there is no such key yet, so
+    /// desktop passes `None` and tracked changes carry `Clauseo`. Never the OS account name.
+    /// [`instructions::author_name`] makes a name safe.
     pub fn new(paths: ProfilePaths, author: Option<String>) -> Self {
         Self {
             paths,
             author: instructions::author_name(&author.unwrap_or_default()),
-            instructions: Instructions::tools(),
+            instructions: Instructions::launch(),
             skills: Arc::default(),
         }
     }
@@ -98,7 +100,17 @@ impl ClauseoProfile {
         (self, refused)
     }
 
-    /// The same profile with `instructions` (R22: `Instructions::tools().with_part(LEGAL)`).
+    /// The same profile with stetdoc's skill (when it loaded) and R22's three built-ins
+    /// ([`skills::builtin::with_stetdoc`]), rendered as [`Self::with_skills`] does.
+    #[must_use]
+    pub fn with_builtin_skills(self, stetdoc: Option<SkillSource>) -> (Self, Vec<ProfileError>) {
+        let (sources, mut refused) = skills::builtin::with_stetdoc(stetdoc);
+        let (profile, more) = self.with_skills(&sources);
+        refused.extend(more);
+        (profile, refused)
+    }
+
+    /// The same profile with `instructions` in place of [`Instructions::launch`].
     #[must_use]
     pub fn with_instructions(mut self, instructions: Instructions) -> Self {
         self.instructions = instructions;
@@ -130,9 +142,30 @@ impl ClauseoProfile {
         ClaudeOptions::new(self.instructions(), Some(self.paths.claude_plugin.clone()))
     }
 
-    /// Codex's keys.
+    /// Codex's keys: `developer_instructions` is [`Self::codex_instructions`].
     pub fn codex_config(&self) -> CodexConfig {
-        CodexConfig::with_instructions(self.instructions())
+        CodexConfig::with_instructions(self.codex_instructions())
+    }
+
+    /// Codex's instructions: [`Self::instructions`], then a blank line and the skills index
+    /// ([`Self::skills_index`]) when a skill is rendered. Codex gets no skills folder
+    /// ([`CODEX_SKILLS`]), so the index points it at the files Claude's plugin holds. Built on
+    /// each call.
+    pub fn codex_instructions(&self) -> String {
+        let index = self.skills_index();
+        let text = self.instructions();
+        if index.is_empty() {
+            text
+        } else {
+            format!("{text}\n\n{index}")
+        }
+    }
+
+    /// The skills index for Codex: each rendered skill's name, its use and the path of its
+    /// rendered `SKILL.md` in the Claude plugin's `skills/` folder, where [`write_skills`]
+    /// puts it ([`skills::builtin::codex_index`]). Claude gets none: it loads the plugin.
+    pub fn skills_index(&self) -> String {
+        skills::builtin::codex_index(&self.paths.claude_skills(), &self.skills)
     }
 
     /// The `_meta` for an agent of `kind`: Claude's fragment for Claude, none otherwise.
