@@ -15,13 +15,18 @@ const ROLE: &str = "CLAUSEO_PROCESS_TEST_AGENT_ROLE";
 
 /// This test binary, started through [`spawn_in_tree`] with `opts`, to run only the test
 /// function `name` (its path in the test crate, as `--exact` wants) as the agent. Its working
-/// folder is this crate's, which it does not change.
-pub(crate) fn launch(name: &str, opts: &SpawnOptions) -> Result<Launched, Error> {
+/// folder is this crate's, which it does not change. `env`'s variables are added to its
+/// environment, and so to the stderr tail's secret variables.
+pub(crate) fn launch(
+    name: &str,
+    opts: &SpawnOptions,
+    mut env: BTreeMap<OsString, OsString>,
+) -> Result<Launched, Error> {
     let program = std::env::current_exe().expect("the test binary's path");
     let args = ["--exact", name, "--nocapture", "--test-threads=1"]
         .map(OsString::from)
         .to_vec();
-    let env = BTreeMap::from([(OsString::from(ROLE), OsString::from("1"))]);
+    env.insert(OsString::from(ROLE), OsString::from("1"));
     let spec = LaunchSpec::new(
         program,
         args,
