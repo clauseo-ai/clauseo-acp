@@ -29,6 +29,16 @@ bundled! {
         "auth-required",
         "cancel-late-updates",
         "cancel-unanswered",
+        "codex-auth-required",
+        "codex-files",
+        "codex-handshake",
+        "codex-hook-trusted",
+        "codex-hook-untrusted",
+        "codex-limit-air",
+        "codex-mode-agent",
+        "codex-no-workspace-write",
+        "codex-permission",
+        "codex-resume",
         "elicitation-form",
         "elicitation-url",
         "exit-mid-turn",
@@ -62,7 +72,7 @@ bundled! {
         "unknown-update",
         "usage",
     ],
-    common: ["handshake"],
+    common: ["codex-handshake", "handshake"],
 }
 
 /// The text of bundled scenario `name`.

@@ -26,6 +26,12 @@ mod blobs;
 #[path = "host/cancel.rs"]
 mod cancel;
 #[cfg(test)]
+#[path = "host/codex.rs"]
+mod codex;
+#[cfg(test)]
+#[path = "host/codex_folder.rs"]
+mod codex_folder;
+#[cfg(test)]
 #[path = "host/commands.rs"]
 mod commands;
 #[cfg(test)]

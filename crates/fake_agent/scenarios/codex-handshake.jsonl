@@ -1,0 +1,6 @@
+{"scenario":"codex-handshake","description":"Codex (codex-acp 2.2.2, written from codex-acp 2.2.2 source until G8a's recordings replace it): initialize, session/new in mode agent, set_mode workspace-write, then one prompt answered 'Codex here. Ready to work on the matter.' and end_turn","on_stdin_close":"exit"}
+{"include":"codex-handshake.jsonl"}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Codex here. "}}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Ready to work on the matter."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

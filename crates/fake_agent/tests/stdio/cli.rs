@@ -33,13 +33,15 @@ fn every_bundled_scenario_validates() {
     assert_eq!(finished.stdout, format!("ok {}\n", SCENARIOS.len()));
 }
 
-/// Every `agentInfo.version` in `value`, with its JSON pointer.
+/// Every `agentInfo.version` of `fake_agent` in `value`, with its JSON pointer. An `agentInfo`
+/// naming another agent (the `codex-*` scenarios stand in for codex-acp 2.2.2) carries that
+/// agent's version, so it is skipped.
 fn agent_versions(value: &serde_json::Value, pointer: &str, found: &mut Vec<(String, String)>) {
     match value {
         serde_json::Value::Object(map) => {
             for (key, child) in map {
                 let at = format!("{pointer}/{key}");
-                if key == "agentInfo" {
+                if key == "agentInfo" && child["name"] == "fake_agent" {
                     found.push((at.clone(), child["version"].to_string()));
                 }
                 agent_versions(child, &at, found);
@@ -54,8 +56,8 @@ fn agent_versions(value: &serde_json::Value, pointer: &str, found: &mut Vec<(Str
     }
 }
 
-/// The crate version has one home, Cargo.toml; every `agentInfo` in every bundled scenario and
-/// common include must carry it.
+/// The crate version has one home, Cargo.toml; every `fake_agent` `agentInfo` in every bundled
+/// scenario and common include must carry it.
 #[test]
 fn every_agent_info_names_the_crate_version() {
     let mut files: Vec<std::path::PathBuf> =

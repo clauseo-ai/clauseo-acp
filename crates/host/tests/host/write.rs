@@ -65,6 +65,12 @@ pub(crate) fn rename(from: &Path, to: &Path) {
     std::fs::rename(from, to).unwrap();
 }
 
+/// A link at `link` to the folder `target`.
+#[cfg(unix)]
+pub(crate) fn symlink(target: &Path, link: &Path) {
+    std::os::unix::fs::symlink(target, link).unwrap();
+}
+
 /// `fs::remove_file`.
 pub(crate) fn remove_file(path: &Path) {
     std::fs::remove_file(path).unwrap();
