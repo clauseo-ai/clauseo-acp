@@ -147,11 +147,14 @@ pub(super) fn on_held_open(
 }
 
 /// Whether any thread whose agent has kind `kind` has a permission request or an elicitation
-/// pending, for the limits model's `Asking` (no read while the agent asks).
+/// pending, for the limits model's `Asking` (no read while the agent asks). A URL elicitation
+/// the lawyer accepted counts until the agent says it is complete.
 pub(crate) fn asks_pending(actor: &Actor, kind: clauseo_protocol::AgentKind) -> bool {
     actor.threads.values().any(|entry| {
         entry.turn.agent.as_deref().is_some_and(|agent| {
-            !(agent.permissions.is_empty() && agent.elicitations.is_empty())
+            !(agent.permissions.is_empty()
+                && agent.elicitations.is_empty()
+                && agent.url_elicitations.is_empty())
                 && clauseo_protocol::AgentKind::of(&entry.row.agent) == Some(kind)
         })
     })
