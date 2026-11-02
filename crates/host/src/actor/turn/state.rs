@@ -66,6 +66,7 @@ impl Current {
             abort: false,
             store_failed: None,
             detach: None,
+            limit_read: None,
         }
     }
 

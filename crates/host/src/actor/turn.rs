@@ -46,6 +46,8 @@ use crate::matter_worker::MatterReply;
 use crate::pipeline::Failure;
 
 pub(crate) use asks::asks_pending;
+pub(crate) use close::log_limit_stop;
+pub(crate) use end::limits_read;
 pub(crate) use inputs::{AgentReply, LogFor, TurnInput};
 pub(crate) use out::flush_text;
 pub(crate) use restore::{
@@ -55,6 +57,10 @@ pub(crate) use route::{TurnCommand, command};
 
 /// How long a cancelled turn waits for the agent's answer before the host stops the agent.
 const CANCEL_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// How long a Codex turn whose prompt failed waits for a limits read before it ends: the Codex
+/// reader's own timeout.
+const LIMIT_READ_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// A thread's turn state: its current turn, its agent, its text buffers and its undo note. One
 /// per thread, made with `Default` when the thread is loaded from the store or created.
@@ -149,6 +155,8 @@ struct Current {
     store_failed: Option<ErrorCode>,
     /// The agent exited before the prompt went out; logged last, after `TurnEnded`.
     detach: Option<DetachReason>,
+    /// A Codex prompt failed with a JSON-RPC error: the turn's end waits for a limits read.
+    limit_read: Option<end::LimitRead>,
 }
 
 /// Where a current turn is.
@@ -228,7 +236,8 @@ enum Then {
     },
 }
 
-/// A turn timer: the display and durable batches, the rate window, the cancel fallback.
+/// A turn timer: the display and durable batches, the rate window, the cancel fallback, the
+/// wait for a limits read.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct TurnTimer {
     thread: ThreadId,
@@ -241,6 +250,7 @@ enum TimerKind {
     Durable,
     Rate,
     Cancel(TurnId),
+    LimitRead(TurnId),
 }
 
 /// What a matter job of a turn (a checkpoint, an undo) continues with.
@@ -298,6 +308,7 @@ pub(crate) fn timer(actor: &mut Actor, timer: TurnTimer) {
         TimerKind::Durable => text::on_durable_timer(actor, thread),
         TimerKind::Rate => updates::on_rate_timer(actor, thread),
         TimerKind::Cancel(turn) => cancel::on_cancel_timer(actor, thread, turn),
+        TimerKind::LimitRead(turn) => end::on_limit_read_timer(actor, thread, turn),
     }
 }
 
@@ -403,10 +414,11 @@ pub(crate) fn reconcile_skipped(actor: &mut Actor, thread: ThreadId) {
     reconcile::skipped(actor, thread);
 }
 
-/// Shutdown, after the host stopped taking commands: cancel every running turn through the
-/// Cancel path and stop every agent. The actor closes the store once [`busy`] is false and
-/// every commit has returned.
+/// Shutdown, after the host stopped taking commands: a turn whose end waits for a limits read
+/// stops waiting, then every running turn is cancelled through the Cancel path and every agent
+/// stops. The actor closes the store once [`busy`] is false and every commit has returned.
 pub(crate) fn shutdown(actor: &mut Actor) {
+    end::stop_waiting_for_reads(actor);
     cancel::shutdown(actor);
 }
 

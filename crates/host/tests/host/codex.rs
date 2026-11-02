@@ -422,14 +422,21 @@ fn codex_air_limit_ends_the_turn_at_the_limit() {
         (stop.turn, stop.reason),
         (turn, LimitStopReason::PlanWindow)
     );
+    // No reset time: the end commit holds `TurnEnded { AtLimit }` alone, and the stop follows
+    // in a commit of its own once the read is done (the harness's reader fails at once, so it
+    // has no window or reset time).
+    assert_eq!((&stop.window, stop.resets_at), (&None, None));
     let ended_at = events
         .position(|e| matches!(e, DomainEvent::TurnEnded(_)))
         .unwrap();
     assert_eq!(stop_at, ended_at + 1, "{}", events.dump());
-    assert_eq!(
+    assert_ne!(
         events.batch[ended_at], events.batch[stop_at],
-        "not one commit"
+        "the stop rode in the end commit"
     );
+    host.settle();
+    events.drain_ready();
+    assert_eq!(events.count(is_stop), 1, "{}", events.dump());
     host.shutdown();
 }
 

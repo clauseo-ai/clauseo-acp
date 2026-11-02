@@ -4,6 +4,10 @@
 //! expiries, cancelled tool calls, the matter's checkpoint events, `FilesChanged`,
 //! `TurnFailed`, `TurnEnded`, `TurnStoppedAtLimit`, and the detach last, so R6 leaves the
 //! thread in the state the detach gives.
+//!
+//! A stop at the limit whose reset time a limits read is to give has no `TurnStoppedAtLimit`
+//! in its close: [`log_limit_stop`] logs it alone once the read is done (`limits.rs`), and
+//! start-up repair logs one the restart lost.
 
 use clauseo_protocol::{
     AgentSessionDetached, CheckpointId, DetachReason, ElicitationExpired, ElicitationId, ErrorCode,
@@ -93,7 +97,8 @@ pub(super) struct TurnClose {
     pub(super) matter: Option<(MatterId, Vec<MatterEvent>)>,
     pub(super) files: Option<FilesChanged>,
     pub(super) checkpoint_after: Option<CheckpointId>,
-    /// The turn's limit signal; `TurnStoppedAtLimit` when it stops `AtLimit`.
+    /// The turn's limit signal; `TurnStoppedAtLimit` when it stops `AtLimit`. `None` when a
+    /// limits read gives that event after the close.
     pub(super) limit: Option<LimitMark>,
     /// The agent exited during the turn: `AgentSessionDetached`, last.
     pub(super) detach: Option<DetachReason>,
@@ -198,5 +203,23 @@ impl TurnClose {
         }
         self.expiries = Expiries::Pending(self.expiries.reason());
         self.cancel_tools = true;
+    }
+}
+
+/// Logs `stopped` in `thread` as its own commit: a turn's stop at the limit, after the read
+/// that gave its reset time, or the one start-up repair adds. A thread no longer loaded, or a
+/// commit refused, loses it until start-up repair logs it at the next start.
+pub(crate) fn log_limit_stop(actor: &mut Actor, thread: ThreadId, stopped: TurnStoppedAtLimit) {
+    let turn = stopped.turn;
+    if actor.loaded(StreamId::Thread(thread)).is_none() {
+        tracing::warn!(%thread, %turn, "a stop at the limit was not logged: the thread is not loaded");
+        return;
+    }
+    let sent = Out::new(actor, thread, None).and_then(|mut out| {
+        out.push(actor, stopped)?;
+        out.send(actor, super::Then::Nothing)
+    });
+    if let Err(error) = sent {
+        tracing::warn!(%thread, %turn, %error, "a stop at the limit was not logged");
     }
 }
