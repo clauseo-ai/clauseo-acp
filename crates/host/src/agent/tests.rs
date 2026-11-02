@@ -58,6 +58,7 @@ fn run_agent(
         agent,
         BTreeMap::new(),
         BTreeMap::new(),
+        &[],
         inherited.into_iter(),
         std::env::temp_dir(),
     )
@@ -118,6 +119,7 @@ fn launch_spec_layers_inherited_then_agent_then_hook() {
         &agent,
         hook,
         BTreeMap::new(),
+        &[],
         inherited.into_iter(),
         std::env::temp_dir(),
     )
@@ -137,6 +139,7 @@ fn launch_spec_layers_inherited_then_agent_then_hook() {
             },
             BTreeMap::new(),
             BTreeMap::new(),
+            &[],
             std::iter::empty(),
             std::env::temp_dir()
         )
@@ -181,6 +184,7 @@ fn launch_spec_drops_inherited_git_and_forced_wins() {
         &agent,
         hook,
         forced,
+        &[],
         inherited.into_iter(),
         std::env::temp_dir(),
     )
@@ -199,6 +203,41 @@ fn launch_spec_drops_inherited_git_and_forced_wins() {
             ("INITIAL_AGENT_MODE", "workspace-write"),
         ]
     );
+}
+
+/// Each dropped name is left out whatever its case and wherever it comes from: inherited, the
+/// agent's variables or the hook's.
+#[test]
+fn launch_spec_leaves_out_dropped_names_from_every_source() {
+    let agent = AgentLaunch {
+        command: absolute_program(),
+        args: Vec::new(),
+        env: BTreeMap::from([
+            ("codex_path".to_owned(), "/elsewhere/codex".to_owned()),
+            ("KEEP".to_owned(), "1".to_owned()),
+        ]),
+    };
+    let hook = BTreeMap::from([
+        (OsString::from("Model_Provider"), OsString::from("other")),
+        (OsString::from("HOOKED"), OsString::from("2")),
+    ]);
+    let inherited = [
+        ("APP_SERVER_LOGS", "/tmp/logs"),
+        ("default_auth_request", "api-key"),
+        ("HOME", "/home/x"),
+    ]
+    .map(|(name, value)| (OsString::from(name), OsString::from(value)));
+    let spec = launch_spec(
+        &agent,
+        hook,
+        BTreeMap::new(),
+        &crate::agent::codex::DROPPED_VARS,
+        inherited.into_iter(),
+        std::env::temp_dir(),
+    )
+    .unwrap();
+    let names: Vec<_> = spec.env().keys().map(|k| k.to_str().unwrap()).collect();
+    assert_eq!(names, ["HOME", "HOOKED", "KEEP"]);
 }
 
 /// On Windows env names ignore case: an inherited `Path` must not stand beside (and beat) the
@@ -224,6 +263,7 @@ fn launch_spec_keeps_one_variable_per_name_ignoring_case() {
         &agent,
         hook,
         BTreeMap::new(),
+        &[],
         inherited.into_iter(),
         std::env::temp_dir(),
     )

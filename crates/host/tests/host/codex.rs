@@ -120,13 +120,18 @@ fn codex_handshake_streams_in_workspace_write() {
     host.shutdown();
 }
 
-/// What a settings `env` sets for each agent: the four names the host forces on Codex.
+/// What a settings `env` sets for each agent: the four names the host forces on Codex, then
+/// the four it drops for Codex (in mixed case).
 fn greedy_env() -> Value {
     json!({
         "INITIAL_AGENT_MODE": "agent-full-access",
         "CODEX_HOME": "/elsewhere",
         "CODEX_CONFIG": r#"{"features":{"apps":true},"model":"m"}"#,
         "DISABLE_MCP_CONFIG_FILTERING": "false",
+        "codex_path": "/elsewhere/codex",
+        "App_Server_Logs": "/elsewhere/logs",
+        "DEFAULT_AUTH_REQUEST": "api-key",
+        "model_provider": "other",
     })
 }
 
@@ -196,6 +201,15 @@ fn codex_launch_variables_beat_the_settings_env() {
             "skills": {"bundled": {"enabled": false}, "include_instructions": false},
         })
     );
+    for dropped in [
+        "CODEX_PATH",
+        "APP_SERVER_LOGS",
+        "DEFAULT_AUTH_REQUEST",
+        "MODEL_PROVIDER",
+    ] {
+        let found = codex.keys().find(|name| name.eq_ignore_ascii_case(dropped));
+        assert_eq!(found, None, "{dropped} reached Codex");
+    }
     assert!(std::fs::symlink_metadata(&home).unwrap().is_dir());
     #[cfg(unix)]
     {

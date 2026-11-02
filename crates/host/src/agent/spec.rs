@@ -15,7 +15,9 @@ use crate::error::Error;
 /// `GIT_*` variable and every name an agent, hook or forced variable also names, then the
 /// agent's variables minus those the hook or `forced` names, then the hook's minus those
 /// `forced` names, then `forced`: what the host sets for the agent's kind (a Codex agent's
-/// mode, home and config, `agent/codex.rs`), which nothing in the settings can override. No
+/// mode, home and config, `agent/codex.rs`), which nothing in the settings can override. Every
+/// name in `dropped` (a Codex agent's `codex::DROPPED_VARS`) is left out wherever it comes
+/// from (inherited, the agent's variables or the hook's), ignoring ASCII case. No
 /// inherited `GIT_*` reaches any agent: a `GIT_DIR` or `GIT_WORK_TREE` the host was started
 /// with would point the agent's git at another repository (agents never see a git repository
 /// through the environment). Names are compared ignoring ASCII case: on Windows `PATH` and `Path`
@@ -29,19 +31,22 @@ pub(crate) fn launch_spec(
     agent: &AgentLaunch,
     mut hook_env: BTreeMap<OsString, OsString>,
     forced: BTreeMap<OsString, OsString>,
+    dropped: &[&str],
     inherited: impl Iterator<Item = (OsString, OsString)>,
     cwd: PathBuf,
 ) -> Result<LaunchSpec, Error> {
-    hook_env.retain(|name, _| !names(&forced, name));
+    let drops = |name: &OsStr| dropped.iter().any(|drop| same(OsStr::new(drop), name));
+    hook_env.retain(|name, _| !names(&forced, name) && !drops(name));
     let own: Vec<(OsString, OsString)> = agent
         .env
         .iter()
         .map(|(name, value)| (OsString::from(name), OsString::from(value)))
-        .filter(|(name, _)| !names(&hook_env, name) && !names(&forced, name))
+        .filter(|(name, _)| !names(&hook_env, name) && !names(&forced, name) && !drops(name))
         .collect();
     let mut env: BTreeMap<OsString, OsString> = inherited
         .filter(|(name, _)| {
             !is_git(name)
+                && !drops(name)
                 && !names(&hook_env, name)
                 && !names(&forced, name)
                 && !own.iter().any(|(own, _)| same(own, name))
