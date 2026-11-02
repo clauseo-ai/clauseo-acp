@@ -85,10 +85,11 @@ test("a stopped Claude and an interrupted thread read as the thread's own stop, 
   }
 });
 
-test("a code this version doesn't know reads as unknown's sentence", () => {
-  expect(errorWords("en", "store.melted")).toBe("Something went wrong.");
+test("a code this version doesn't know reads as unknown's sentence, which is internal's", () => {
+  expect(ERROR_WORDS.unknown).toBe(ERROR_WORDS.internal);
+  expect(errorWords("en", "store.melted")).toBe("Something went wrong inside Clauseo.");
   expect(errorWords("hi", "store.melted")).toBe(errorSentence("hi", ERROR_WORDS.unknown));
-  expect(errorWords("en", "toString")).toBe("Something went wrong.");
+  expect(errorWords("en", "toString")).toBe("Something went wrong inside Clauseo.");
 });
 
 test.each([["./words-errors.ts"], ["./words-limits.ts"], ["./words-thread.ts"]])(

@@ -86,7 +86,6 @@ const HI = {
   "That is too large to send.": "यह भेजने के लिए बहुत बड़ा है।",
   "Your organisation manages that setting, so it can't be changed.":
     "यह सेटिंग आपका संगठन संभालता है, इसलिए इसे बदला नहीं जा सकता।",
-  "Something went wrong.": "कुछ गड़बड़ हो गई।",
 } as const;
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
@@ -130,7 +129,8 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   "transport.unauthorized": "That wasn't allowed, so nothing changed.",
   "transport.too_large": "That is too large to send.",
   "settings.locked": "Your organisation manages that setting, so it can't be changed.",
-  unknown: "Something went wrong.",
+  // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
+  unknown: "Something went wrong inside Clauseo.",
 };
 
 const own = wordsOf<keyof typeof HI>(HI);
@@ -140,7 +140,7 @@ export function errorSentence(lang: Lang, key: ErrorKey): string {
   return key === STOPPED ? th(lang, key) : own(lang, key);
 }
 
-/** A code's sentence in the language; a code this version doesn't know reads as "unknown". */
+/** A code's sentence in the language; a code this version doesn't know reads as "unknown", which reads as "internal". */
 export function errorWords(lang: Lang, code: string): string {
   const known = Object.hasOwn(ERROR_WORDS, code) ? ERROR_WORDS[code as ErrorCode] : null;
   return errorSentence(lang, known ?? ERROR_WORDS.unknown);

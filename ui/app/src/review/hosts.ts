@@ -4,7 +4,7 @@
 // (states.tsx's RoomAfter): New matter pressed, a name typed, Change and Create pressed; and for the thread's states,
 // one thread whose view the host sends as the room subscribes (testing/stream-script.ts's entries), and whose answers to
 // a permission request may never come back.
-import { batch, event, header, reset, THREAD, TURN } from "../testing/stream-script.ts";
+import { batch, event, header, reset, THREAD, TURN, upsert } from "../testing/stream-script.ts";
 import type {
   CommandOutcome,
   ErrorCode,
@@ -50,6 +50,14 @@ export type ThreadState = {
   refuse?: ErrorCode;
   /** The stream is lost with this code once its view has arrived. */
   lose?: ErrorCode;
+  /** Whether the lost stream's code says another try may work (Try again shows only then). */
+  loseRetryable?: boolean;
+  /** Entries the host sends after the view, as they would arrive live: a turn that fails while the lawyer watches. */
+  later?: ViewEntry[];
+  /** The status the header says once `later` has arrived. */
+  laterStatus?: ThreadStatus;
+  /** H10 faked: the host restarts an agent (room/host-next.ts's restart part). */
+  restart?: boolean;
   /** An answer to a permission request never comes back, as while the OS asks the lawyer to confirm it. */
   hold?: boolean;
 };
@@ -86,8 +94,31 @@ export function threadHost(state: ThreadState): FakeTransport {
         transport.deliver(event(batch(1, [reset(state.entries, head)], undefined, stream)));
         // lost after the view has applied (a frame, or the store's 100 ms catch-up), which would clear it
         const lose = state.lose;
-        if (lose !== undefined) setTimeout(() => transport.failStream(stream, refusal(lose)), 250);
+        if (lose !== undefined)
+          setTimeout(
+            () =>
+              transport.failStream(stream, {
+                ...refusal(lose),
+                retryable: state.loseRetryable ?? false,
+              }),
+            250,
+          );
+        const later = state.later;
+        if (later !== undefined) {
+          const after = header();
+          after.header!.status = state.laterStatus ?? "agent_exited";
+          setTimeout(
+            () =>
+              transport.deliver(
+                event(batch(2, [...later.map(upsert), upsert(after)], undefined, stream)),
+              ),
+            250,
+          );
+        }
       }),
+    ...(state.restart === true
+      ? { next: { parts: ["restart"], query: () => ({ threads: [] }) } satisfies FakeHost["next"] }
+      : {}),
   });
   if (state.hold === true) transport.answerPermission = () => new Promise<void>(() => {});
   return transport;

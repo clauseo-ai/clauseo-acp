@@ -217,6 +217,14 @@ export interface LocationHost {
   getDefaultLocation(): Promise<string>;
 }
 
+/** H10: restart_agent, which the host refuses today. Built, it relaunches the thread's agent and asks the last
+ * question again; refused with thread.turn_running during a turn. The command is on the wire already, so the part
+ * says only that the host has built it. */
+export interface RestartHost {
+  /** Rejects with the HostError when the host refuses. */
+  restartAgent(thread: ThreadId): Promise<void>;
+}
+
 /** H4: the app's events. */
 export interface AppHost {
   /** Hears each AppEvent. Returns the unsubscribe. */
@@ -232,6 +240,7 @@ export type NextHost = {
   matters: MattersHost | null;
   location: LocationHost | null;
   app: AppHost | null;
+  restart: RestartHost | null;
 };
 
 /** One part of NextHost: a host row. */
@@ -244,6 +253,7 @@ export const NO_NEXT: NextHost = {
   matters: null,
   location: null,
   app: null,
+  restart: null,
 };
 
 /** A transport that may carry the calls above: `nextHost()` gives the parts its host has. */

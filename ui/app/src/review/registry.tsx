@@ -6,6 +6,7 @@ import { LocateGate, MovedFolder } from "../room/moved.tsx";
 import { ScratchLine } from "../room/scratch-line.tsx";
 import type { Entry } from "./entry.ts";
 import { U4 } from "./registry-u4.tsx";
+import { U10 } from "./registry-u10.tsx";
 import {
   MATTER,
   NEW_MATTER,
@@ -222,7 +223,8 @@ const U3: Entry[] = [
     id: "U3-17",
     words: limitWords("Try again"),
     screen: "room/composer",
-    render: thread({ entries: [QUESTION, PARTIAL], lose: "agent.exited" }),
+    // a code the wire calls retryable, since Try again shows only for one (U10)
+    render: thread({ entries: [QUESTION, PARTIAL], lose: "store.io", loseRetryable: true }),
   },
   {
     id: "U3-18",
@@ -320,6 +322,7 @@ export const REGISTRY: readonly Entry[] = [
   ...U3,
   ...ERRORS,
   ...U4,
+  ...U10,
   {
     id: "U2-01",
     words: frameWords("Add a matter's folder."),

@@ -1,0 +1,37 @@
+// The words of item 16, when something breaks: an answer Claude stopped giving (the design's limits/stopped lines, from
+// its words-limits.ts) and a stream that failed. Apart from words-limits.ts and words-errors.ts, which the room's first
+// paint carries, since these show only after a break: the room loads them with the break's lines (room/break-lines.ts)
+// and the thread's chunk. As in words.ts the English is the key, the exact string on screen, and {time} takes clock(),
+// so Hindi puts the part of the day first. The design's three lines keep the design's Hindi; the stream-failed line is
+// a specialist's draft, waiting for a Hindi-speaking lawyer: the formal आप, the danda, Western digits, English names in
+// Latin script.
+import type { Lang } from "./display.ts";
+import { wordsOf } from "./words-core.ts";
+import { errorWords } from "./words-errors.ts";
+
+const HI = {
+  // the working line, when Claude stopped mid-answer: its time is when the host saw Claude's process end
+  "The answer stopped at {time}. Your question and the answer so far are kept.":
+    "उत्तर {time} बजे रुक गया। आपका प्रश्न और अब तक का उत्तर रखे गए हैं।",
+  // the mark in the thread, under the answer so far
+  "The answer stopped here at {time}": "उत्तर {time} बजे यहाँ रुका",
+  // Restart's details, only once the host restarts (H10), and only for agent.exited
+  "The answer stopped with no reason given. Restart asks your question once more. The answer so far stays above.":
+    "उत्तर बिना किसी कारण के रुक गया। फिर से शुरू करने पर आपका प्रश्न एक बार फिर पूछा जाता है। अब तक का उत्तर ऊपर बना रहता है।",
+  // a stream that failed: the thread stopped coming in, said before its code's sentence
+  "This conversation stopped updating in this window.": "यह बातचीत इस विंडो में अपडेट होना बंद हो गई।",
+} as const;
+
+/** Every string of item 16, in English. */
+export type BreakKey = keyof typeof HI;
+
+/** A string of item 16 in the language, its slots filled. */
+export const brk = wordsOf<BreakKey>(HI);
+
+/** Every key, for the banned-words screen in the tests. */
+export const breakWords: Readonly<Record<BreakKey, string>> = HI;
+
+/** The line for a stream that failed: that the thread stopped coming in, then its code's sentence. */
+export function streamFailedWords(lang: Lang, code: string): string {
+  return `${brk(lang, "This conversation stopped updating in this window.")} ${errorWords(lang, code)}`;
+}
