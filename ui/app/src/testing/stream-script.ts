@@ -1,6 +1,7 @@
 // Scripted host traffic for tests: view entries and patch batches as the host encodes them, with ids that are the
 // same on every run. Not shipped: only tests and the room's probe build (room/probe-main.tsx) import it.
 import type {
+  AvailableCommand,
   HostEvent,
   PatchBatch,
   PermissionEntry,
@@ -22,7 +23,10 @@ export const STREAM = `thread:${THREAD}`;
 export const EPOCH = uuid(1, 3);
 export const TURN = uuid(1, 4);
 
-export const header = (status: "idle" | "running" | "needs_you" = "idle"): ViewEntry => ({
+export const header = (
+  status: "idle" | "running" | "needs_you" = "idle",
+  commands: AvailableCommand[] = [],
+): ViewEntry => ({
   header: {
     order: 1,
     thread: THREAD,
@@ -30,7 +34,7 @@ export const header = (status: "idle" | "running" | "needs_you" = "idle"): ViewE
     agent: "claude-acp",
     status,
     config_options: [],
-    commands: [],
+    commands,
     plan: [],
   },
 });

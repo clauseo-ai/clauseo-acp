@@ -13,21 +13,25 @@
 // With ?word=lock, general, open, tile or tile-top (word/probe-states.ts), the open conversation's last turn changed papers and
 // the wall lists two Word documents: the change note's Undo refused with the lock (Word's lines for one Word document,
 // or the general line for two files), the note's "Open in Word", or the wall's Word tile, for its tooltip.
-// Not shipped.
+// With ?thread=commands, the thread is idle with the agent's commands in its header (COMMANDS below), so the composer's
+// `/` menu has items, and no turn runs; window.__clauseoProbeCalls is the fake transport's calls, for the page to read
+// what was sent. Not shipped.
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "../App.tsx";
 import type {
+  AvailableCommand,
   CommandOutcome,
   HostEvent,
   MatterSummary,
   ViewPatchBody,
 } from "../transport/protocol.ts";
-import { FakeTransport } from "../transport/fake-transport.ts";
+import { type FakeCall, FakeTransport } from "../transport/fake-transport.ts";
 import {
   batch,
   chosen,
   editCall,
+  agentText,
   event,
   header,
   MATTER,
@@ -74,6 +78,21 @@ const papers: PaperSummary[] = (wordPage === null ? FILES : wordFiles(FILES, wor
 const asking = page.get("thread") === "permission";
 /** ?confirm=1: answer_permission never answers, as while the OS's own confirm is up. */
 const holding = asking && page.get("confirm") === "1";
+/** ?thread=commands: an idle thread whose header lists COMMANDS, and no scripted turn, so the composer is not busy. */
+const commanding = page.get("thread") === "commands";
+
+/** The agent's commands on ?thread=commands, in the order the composer's `/` menu lists them: the first six are the
+ * spike's fixture (spike/src/mentions/fixtures.json), the last two match a name typed in Devanagari or Tamil. */
+const COMMANDS: AvailableCommand[] = [
+  { name: "review", description: "Review the open document" },
+  { name: "redline", description: "Redline against the last version" },
+  { name: "cite", description: "Insert a citation" },
+  { name: "research", description: "Research a point of law", input_hint: "the question" },
+  { name: "plan", description: "Make a plan before acting" },
+  { name: "web", description: "Search the web", input_hint: "query to search for" },
+  { name: "न्यायालय", description: "Court (a Devanagari name, test only)" },
+  { name: "நீதிமன்றம்", description: "Court (a Tamil name, test only)" },
+];
 
 /** The agent's permission requests the turn ends with on ?thread=permission: a pending prompt above an answered one. */
 const PERMISSIONS: ViewPatchBody[] = [
@@ -86,13 +105,23 @@ const PERMISSIONS: ViewPatchBody[] = [
 /** The scripted turn after the prompt, in batches of 25 bodies, as the bridge would deliver them. */
 function stream(): HostEvent[] {
   const turn = scriptedTurn().bodies;
-  const bodies: ViewPatchBody[] = asking
+  const bodies: ViewPatchBody[] = commanding
     ? [
-        reset([userMessage(2, 1, "Tighten the notice to the bank.")], header("needs_you")),
-        ...turn.slice(0, -1),
-        ...PERMISSIONS,
+        reset(
+          [
+            userMessage(2, 1, "When did the bank reply?"),
+            agentText(3, 100, "The bank replied on 12 March 2001."),
+          ],
+          header("idle", COMMANDS),
+        ),
       ]
-    : [reset([userMessage(2, 1, "When did the bank reply?")]), ...turn];
+    : asking
+      ? [
+          reset([userMessage(2, 1, "Tighten the notice to the bank.")], header("needs_you")),
+          ...turn.slice(0, -1),
+          ...PERMISSIONS,
+        ]
+      : [reset([userMessage(2, 1, "When did the bank reply?")]), ...turn];
   const events: HostEvent[] = [];
   for (let at = 0; at < bodies.length; at += 25) {
     events.push(event(batch(at + 1, bodies.slice(at, at + 25))));
@@ -134,6 +163,11 @@ const transport = new FakeTransport({
       return {
         threads: [{ thread: THREAD, matter: MATTER, agent: "claude-acp", status: "needs_you" }],
       };
+    // ?thread=commands: the same thread, idle, so the room subscribes to it and shows its header's commands
+    if (commanding && typeof query === "object" && query.list_threads !== undefined)
+      return {
+        threads: [{ thread: THREAD, matter: MATTER, agent: "claude-acp", status: "idle" }],
+      };
     throw new Error(`the probe's host is a NextHost: it answers no ${JSON.stringify(query)}`);
   },
   subscribe: (streamId) => {
@@ -145,15 +179,29 @@ const transport = new FakeTransport({
       for (const message of stream()) transport.deliver(message);
     });
   },
+  // the thread a matter lists: the host's next_query answers list_threads (the `query` above answers only the legacy
+  // HostQuery form), so ?thread=commands lists its idle thread here
   next: fakeNext({
     matters: () => matters,
     papers,
     location: "Documents/Clauseo",
-    threads: () => wording?.threads ?? [],
+    threads: () =>
+      commanding
+        ? [{ thread: THREAD, matter: MATTER, agent: "claude-acp", status: "idle", seen: true }]
+        : (wording?.threads ?? []),
   }),
 });
 
 if (holding) transport.answerPermission = () => new Promise<void>(() => {});
+
+declare global {
+  interface Window {
+    /** ?thread=commands: the calls the fake transport has had (sends among them), for the probe to read. */
+    __clauseoProbeCalls?: FakeCall[];
+  }
+}
+// the fake's calls, for the probe to read what the composer sent: only on ?thread=commands, so no other page has them
+if (commanding) window.__clauseoProbeCalls = transport.calls;
 
 // the page's query over the settings, before the first render, so night never starts as day; and the hooks the
 // by-hand checks use, so the WebKit probe can run window.__clauseoAxe() as it would run in the app
