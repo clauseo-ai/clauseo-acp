@@ -7,8 +7,9 @@ import { expect, test } from "vitest";
 const roots = ["../ui/", "../icons/", "../clauseo/", "../markdown/"].map(
   (p) => new URL(p, import.meta.url),
 );
-/** The renderer's test data (the hostile corpus, the spec fixtures) is Markdown, where [text](url) is a link, not a class. */
-const MARKDOWN_DATA = /^(?:hostile-cases|[\w-]+-fixture)\.ts$/;
+/** The renderer's test data (the hostile corpus, the spec fixtures) is Markdown, where [text](url) is a link, not a class,
+ * and its tests' shared code (hostile-dom-fixture.tsx) queries the DOM, where [id] is a selector. */
+const MARKDOWN_DATA = /^(?:hostile-cases\.ts|[\w-]+-fixture\.tsx?)$/;
 
 /** Rules on the code itself. */
 const CODE: [string, RegExp][] = [

@@ -13,7 +13,7 @@ import { characterEntitiesLoaded, loadEntities } from "./entities.ts";
 
 /** The renderer's product files: what a consumer's first load takes in from this folder. */
 const PRODUCT = readdirSync(new URL(".", import.meta.url)).filter(
-  (file) => /\.tsx?$/.test(file) && !/\.test\.tsx?$|-fixture\.ts$|^hostile-cases\.ts$/.test(file),
+  (file) => /\.tsx?$/.test(file) && !/\.test\.tsx?$|-fixture\.tsx?$|^hostile-cases\.ts$/.test(file),
 );
 
 /** The bare packages the renderer imports (not types, not React, which the app already loads). */

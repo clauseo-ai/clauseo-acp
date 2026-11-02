@@ -29,7 +29,7 @@
     "./markdown/*-fixture.ts": null
   },
   "scripts": {
-    "test": "pnpm -C ../app exec vitest run --project components"
+    "test": "pnpm -C ../app exec vitest run --project components --project components-timed"
   },
   "dependencies": {
     "@base-ui/react": "1.9.0",
