@@ -176,3 +176,36 @@ fn a_reload_while_the_host_starts_keeps_the_new_pages_channel() {
         stop(&cell);
     }
 }
+
+/// A window closed while its page's `open_stream` waits for the host's start (settings closed
+/// before the host started, or a dead page's call in flight): the call, when it wakes, drops its
+/// stream instead of keeping it for a window that is gone.
+#[test]
+fn an_open_stream_waiting_when_its_window_closes_keeps_nothing() {
+    let scratch = Scratch::new("close-during-open", &[]);
+    let (cell, bridge, release) = held_start(scratch.config(Vec::new()));
+    let built = bridge.number_build();
+    bridge.window_built("settings", built);
+    let (channel, page) = collector();
+    let mut open = Box::pin(bridge.open_stream("settings", channel));
+    assert!(
+        (&mut open).now_or_never().is_none(),
+        "opened before the host started"
+    );
+    bridge.close_window("settings", built);
+    release.send(()).unwrap();
+    block_on(open).unwrap();
+
+    let refusal = block_on(bridge.subscribe_app("settings")).unwrap_err();
+    assert_eq!(refusal.code(), ErrorCode::CommandInvalid, "{refusal:?}");
+    assert_eq!(page.drain(), Vec::<String>::new());
+    // A window built again after the close opens its stream as usual.
+    let again = bridge.number_build();
+    bridge.window_built("settings", again);
+    let (channel, _new) = collector();
+    block_on(bridge.open_stream("settings", channel)).unwrap();
+    block_on(bridge.subscribe_app("settings")).unwrap();
+
+    drop(bridge);
+    stop(&cell);
+}

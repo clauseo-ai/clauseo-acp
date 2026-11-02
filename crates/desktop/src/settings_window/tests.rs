@@ -38,6 +38,13 @@ fn opening_twice_gives_one_settings_window_showing_its_page() {
     );
 }
 
+/// A build of the window `label` that worked, as `build` and `on_destroyed` record it.
+fn built(bridge: &Bridge, label: &str) -> u64 {
+    let number = bridge.number_build();
+    bridge.window_built(label, number);
+    number
+}
+
 /// The settings window's destruction drops its stream in the bridge and leaves main's.
 #[test]
 fn a_destroyed_window_drops_its_stream_only() {
@@ -45,10 +52,10 @@ fn a_destroyed_window_drops_its_stream_only() {
     let host = scratch.start(Vec::new());
     let app = app(Some(host.bridge()));
     let bridge = app.state::<Bridge>();
-    let main_built = number_build(&app, MAIN_WINDOW);
+    let main_built = Some(built(&bridge, MAIN_WINDOW));
     let (main_channel, _main) = collector();
     futures::executor::block_on(bridge.open_stream(MAIN_WINDOW, main_channel)).unwrap();
-    let built = number_build(&app, SETTINGS_WINDOW);
+    let built = Some(built(&bridge, SETTINGS_WINDOW));
     assert!(built > main_built, "{built:?} {main_built:?}");
     let (channel, _page) = collector();
     futures::executor::block_on(bridge.open_stream(SETTINGS_WINDOW, channel)).unwrap();
@@ -60,4 +67,30 @@ fn a_destroyed_window_drops_its_stream_only() {
 
     closed(&app, MAIN_WINDOW, main_built);
     assert!(futures::executor::block_on(bridge.subscribe_app(MAIN_WINDOW)).is_err());
+}
+
+/// Two opens at once (a double click, or the menu and Cmd+, together): the second build fails on
+/// the label the first took, and records nothing, so the first window's close still drops its
+/// page's stream.
+#[test]
+fn a_second_open_that_fails_leaves_the_first_windows_close_whole() {
+    let scratch = Scratch::new("settings-two-opens", &[]);
+    let host = scratch.start(Vec::new());
+    let app = app(Some(host.bridge()));
+    let bridge = app.state::<Bridge>();
+    open_or_focus(&app).unwrap();
+    let first = bridge.latest_build(SETTINGS_WINDOW).unwrap();
+    let (channel, _page) = collector();
+    futures::executor::block_on(bridge.open_stream(SETTINGS_WINDOW, channel)).unwrap();
+
+    // The other open's build, past its own check: the label is taken.
+    assert!(build(&app).is_err(), "a second settings window was built");
+    assert_eq!(bridge.latest_build(SETTINGS_WINDOW), Some(first));
+
+    closed(&app, SETTINGS_WINDOW, Some(first));
+    let refusal = futures::executor::block_on(bridge.subscribe_app(SETTINGS_WINDOW));
+    assert!(
+        refusal.is_err(),
+        "the first window's stream survived its close"
+    );
 }

@@ -12,8 +12,9 @@
 //!   and init script as `main`, since `WebView2` webviews sharing a profile must match.
 //! - Callers: the `open_settings` command (granted to `main` only) and, on the Mac, the app
 //!   menu's "Settings…" item on Cmd+, ([`app_menu`]). No menu on Windows or Linux.
-//! - Each window's destruction drops its bridge stream ([`on_destroyed`]); destroying `main`
-//!   destroys `settings` too, so closing `main` still ends the app.
+//! - Each window's destruction drops its bridge stream ([`on_destroyed`]), one its page's
+//!   `open_stream` still waiting for the host included; destroying `main` destroys `settings`
+//!   too, so closing `main` still ends the app. Only a build that worked is recorded.
 //! - The page retitles its window in the app's language (`set_title`, granted to `settings`
 //!   alone, [`TITLE_PERMISSION`]); [`TITLE`] is the English one it opens with.
 //! - Nothing here is main-like: main-only behaviour stays keyed on `MAIN_WINDOW`.
@@ -86,7 +87,7 @@ fn build<R: Runtime, M: Manager<R>>(manager: &M) -> tauri::Result<()> {
     let builder = crate::e2e::with_debugging_port(builder);
     #[cfg(feature = "e2e")]
     let builder = builder.initialization_script(crate::e2e::init_script());
-    let built = number_build(manager, SETTINGS_WINDOW);
+    let built = number_build(manager);
     let window = builder.build()?;
     window_size::paint_first_frame(&window);
     // The Windows maximise cover makes a Win32 child window and subclasses this one, which must
@@ -97,18 +98,23 @@ fn build<R: Runtime, M: Manager<R>>(manager: &M) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Numbers a build of the window `label` in the bridge, before it is built (`None` when no
-/// bridge is managed, in tests).
-pub(crate) fn number_build<R: Runtime, M: Manager<R>>(manager: &M, label: &str) -> Option<u64> {
+/// Numbers a window's build in the bridge, before it is built (`None` when no bridge is
+/// managed, in tests). Nothing is recorded until [`on_destroyed`], after the build worked.
+pub(crate) fn number_build<R: Runtime, M: Manager<R>>(manager: &M) -> Option<u64> {
     manager
         .try_state::<Bridge>()
-        .map(|bridge| bridge.window_built(label))
+        .map(|bridge| bridge.number_build())
 }
 
-/// When `window` is destroyed, runs [`closed`] for it.
+/// Records in the bridge that `window` was built as number `built` (`Bridge::window_built`),
+/// and when it is destroyed runs [`closed`] for it. Called only once the build worked: a second
+/// open that failed on the label records nothing.
 pub(crate) fn on_destroyed<R: Runtime>(window: &WebviewWindow<R>, built: Option<u64>) {
     let app = window.app_handle().clone();
     let label = window.label().to_owned();
+    if let (Some(built), Some(bridge)) = (built, app.try_state::<Bridge>()) {
+        bridge.window_built(&label, built);
+    }
     window.on_window_event(move |event| {
         if matches!(event, WindowEvent::Destroyed) {
             closed(&app, &label, built);

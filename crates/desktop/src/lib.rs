@@ -315,7 +315,7 @@ fn open_main_window(app: &App) -> tauri::Result<()> {
     // The page's perf globals, before any page script.
     #[cfg(feature = "e2e")]
     let builder = builder.initialization_script(e2e::init_script());
-    let built = settings_window::number_build(app, MAIN_WINDOW);
+    let built = settings_window::number_build(app);
     let window = builder.build()?;
     window_size::paint_first_frame(&window);
     window_frame::after_build(&window);
