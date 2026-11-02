@@ -7,6 +7,7 @@ import { ScratchLine } from "../room/scratch-line.tsx";
 import type { Entry } from "./entry.ts";
 import { U4 } from "./registry-u4.tsx";
 import { U10 } from "./registry-u10.tsx";
+import { U8 } from "./registry-u8.tsx";
 import {
   MATTER,
   NEW_MATTER,
@@ -323,6 +324,7 @@ export const REGISTRY: readonly Entry[] = [
   ...ERRORS,
   ...U4,
   ...U10,
+  ...U8,
   {
     id: "U2-01",
     words: frameWords("Add a matter's folder."),
