@@ -219,6 +219,10 @@ export async function mountVersions(
     },
     dispatch: (envelope) => script.dispatch?.(envelope.command) ?? "done",
   });
+  // a wide window, past the room's 1200 px breakpoint, where Versions' panel stands beside the work
+  (
+    globalThis as { happyDOM?: { setViewport: (v: { width: number; height: number }) => void } }
+  ).happyDOM?.setViewport({ width: 1280, height: 800 });
   if (script.carries !== undefined) Object.assign(transport, script.carries);
   connectRoom(transport, script.display ?? {});
   const manual = manualBatch();

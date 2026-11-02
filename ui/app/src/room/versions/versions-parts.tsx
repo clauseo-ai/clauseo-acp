@@ -21,6 +21,7 @@ import {
   type Version,
 } from "@clauseo/components/clauseo/versions-model.ts";
 import { IconUndo } from "@clauseo/components/icons/icons.tsx";
+import { Button } from "@clauseo/components/ui/button.tsx";
 import type { Lang, Platform } from "@clauseo/components/lib/display.ts";
 import { useVersionWords, vt } from "@clauseo/components/lib/words-versions.ts";
 import type { FileRefId } from "../../transport/protocol.ts";
@@ -66,11 +67,14 @@ export function VersionsRail({
   platform,
   standIns,
   onClose,
+  onPicked,
 }: {
   controller: VersionsController;
   platform: Platform;
   standIns: StandIns;
   onClose: () => void;
+  /** After a pick: on a mid window, the panel goes away. */
+  onPicked: () => void;
 }) {
   const w = useVersionWords();
   const { s, cal, history } = useVersions(c, w.lang);
@@ -104,7 +108,10 @@ export function VersionsRail({
       calendar={cal}
       name={fileName}
       at={at < 0 ? history.length - 1 : at}
-      onPick={(i) => c.look(history[i]?.id ?? null)}
+      onPick={(i) => {
+        c.look(history[i]?.id ?? null);
+        onPicked();
+      }}
       onClose={onClose}
       unsaved={
         u === null
@@ -145,12 +152,15 @@ export function VersionsCentre({
   standIns,
   fileRef,
   onLeave,
+  onPanel,
 }: {
   controller: VersionsController;
   standIns: StandIns;
   fileRef: FileRefOf;
   /** Closes Versions: Cancel in a dialog the toolbar's Undo opened along with Versions. */
   onLeave: () => void;
+  /** With the panel put away on a mid window: brings it back, from the band's Versions. */
+  onPanel: (() => void) | null;
 }) {
   const w = useVersionWords();
   const { lang } = w;
@@ -240,6 +250,22 @@ export function VersionsCentre({
               }
         }
         notices={notices}
+        {...(onPanel === null
+          ? {}
+          : {
+              lookLead: (
+                <Button
+                  kind="quiet"
+                  size="small"
+                  className="ver-open-panel"
+                  aria-expanded={false}
+                  onClick={onPanel}
+                >
+                  {w.v("Versions")}
+                  <span className="ver-open-count">{history.length}</span>
+                </Button>
+              ),
+            })}
         waiting={waiting}
         onCompare={() => c.toggleCompare()}
         onRestore={() => shown !== undefined && void c.askRestore(shown.id)}
