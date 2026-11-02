@@ -16,15 +16,16 @@ use clauseo_protocol::{
     Deliverable, Delivery, DetachReason, DomainEvent, ElicitationExpired, ElicitationOutcome,
     ElicitationRequest, ElicitationRequested, ElicitationResolved, ErrorCode, ExpiryReason,
     FileChange, FilesChanged, ImportSummary, LimitStopReason, MatterCreated, MatterKind,
-    MatterRelocated, ModeChanged, Notice, NoticeLevel, OutsideEdits, PermissionChoice,
-    PermissionExpired, PermissionKind, PermissionOption, PermissionRequested, PermissionResolved,
-    PlanEntry, PlanPriority, PlanReplaced, PlanStatus, Principal, PromptCapabilities,
-    QueuedPromptEdited, RawFrom, RenameSource, RestoreScope, SessionCapabilities, SkippedFile,
-    SkippedFileReason, SteerOutcome, SteerResolved, SteeringCapability, StepUndone, StopReason,
-    TextAppended, TextKind, TextOrBlob, ThreadArchived, ThreadCreated, ThreadRenamed, Timestamp,
-    ToolCallContent, ToolCallPatch, ToolCallStarted, ToolCallStatus, ToolCallUpdated, ToolKind,
-    ToolLocation, TurnEnded, TurnFailed, TurnQueued, TurnStarted, TurnStoppedAtLimit, TurnUsage,
-    UsageUpdated, UserMessage, VersionRestored,
+    MatterRelocated, ModeChanged, Notice, NoticeLevel, OutsideEdits, PageVia, PageVisited,
+    PermissionChoice, PermissionExpired, PermissionKind, PermissionOption, PermissionRequested,
+    PermissionResolved, PlanEntry, PlanPriority, PlanReplaced, PlanStatus, Principal,
+    PromptCapabilities, QueuedPromptEdited, RawFrom, RenameSource, RestoreScope,
+    SessionCapabilities, SkippedFile, SkippedFileReason, SteerOutcome, SteerResolved,
+    SteeringCapability, StepUndone, StopReason, TextAppended, TextKind, TextOrBlob, ThreadArchived,
+    ThreadCreated, ThreadRenamed, Timestamp, ToolCallContent, ToolCallPatch, ToolCallStarted,
+    ToolCallStatus, ToolCallUpdated, ToolKind, ToolLocation, TurnEnded, TurnFailed, TurnQueued,
+    TurnStarted, TurnStoppedAtLimit, TurnUsage, UsageUpdated, UserMessage, VersionRestored,
+    WebResult, WebSearchRecorded,
 };
 
 use crate::fixtures::{
@@ -96,7 +97,8 @@ pub fn file_changes() -> Vec<FileChange> {
 }
 
 /// Events that hold a value added after v1 that no example in [`every_event`] holds, so the
-/// corpus writer finds a holder for it: error codes no example turn fails with.
+/// corpus writer finds a holder for it: error codes no example turn fails with, and the page
+/// vias no example opens a page with.
 pub fn later_variants() -> Vec<DomainEvent> {
     vec![
         TurnFailed {
@@ -109,6 +111,26 @@ pub fn later_variants() -> Vec<DomainEvent> {
             turn: turn_id(3),
             code: ErrorCode::MatterCodexFolder,
             detail: Some("the matter folder holds a .codex folder".to_owned()),
+        }
+        .into(),
+        PageVisited {
+            thread: thread_id(2),
+            turn: turn_id(3),
+            tool_call_id: tool_call_id(4),
+            url: "https://example.com/brief".to_owned(),
+            title: None,
+            at: Timestamp::new(1_760_000_000_600).unwrap(),
+            via: PageVia::WebFetch,
+        }
+        .into(),
+        PageVisited {
+            thread: thread_id(2),
+            turn: turn_id(3),
+            tool_call_id: tool_call_id(4),
+            url: "https://example.com/codex".to_owned(),
+            title: Some("Codex page".to_owned()),
+            at: Timestamp::new(1_760_000_000_700).unwrap(),
+            via: PageVia::CodexOpenPage,
         }
         .into(),
         TurnFailed {
@@ -279,6 +301,29 @@ fn streaming_events() -> Vec<DomainEvent> {
                 ..ToolCallPatch::default()
             },
         })
+        .into(),
+        Box::new(WebSearchRecorded {
+            thread: thread_id(2),
+            turn,
+            tool_call_id: tool_call_id(4),
+            agent: AgentId::new("claude-acp").unwrap(),
+            query: "limitation period contract claim".to_owned(),
+            results: vec![WebResult {
+                title: "Limitations Act, 2002".to_owned(),
+                url: "https://www.ontario.ca/laws/statute/02l24".to_owned(),
+            }],
+            at: Timestamp::new(1_760_000_000_000).unwrap(),
+        })
+        .into(),
+        PageVisited {
+            thread: thread_id(2),
+            turn,
+            tool_call_id: tool_call_id(4),
+            url: "https://www.ontario.ca/laws/statute/02l24".to_owned(),
+            title: Some("Limitations Act, 2002".to_owned()),
+            at: Timestamp::new(1_760_000_000_500).unwrap(),
+            via: PageVia::Browser,
+        }
         .into(),
     ]
 }

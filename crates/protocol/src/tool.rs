@@ -37,6 +37,19 @@ open_unit_enum! {
 }
 
 open_unit_enum! {
+    /// How a page was opened: the agent's web fetch, Codex's open-page tool, or the browser.
+    pub enum PageVia {
+        /// The agent's web fetch tool.
+        WebFetch,
+        /// Codex's open-page tool.
+        CodexOpenPage,
+        /// The browser.
+        Browser,
+    }
+    test mod page_via;
+}
+
+open_unit_enum! {
     /// Where a tool call stands: ACP v1's statuses plus Clauseo's `Cancelled`.
     pub enum ToolCallStatus {
         /// Not started; its input may still be streaming, or it waits for a permission.

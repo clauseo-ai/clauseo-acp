@@ -180,6 +180,8 @@ mod domain_event {
         ContentAppended => content_appended: event("content_appended");
         ToolCallStarted => tool_call_started: event("tool_call_started");
         ToolCallUpdated => tool_call_updated: event("tool_call_updated");
+        WebSearchRecorded => web_search_recorded: event("web_search_recorded");
+        PageVisited => page_visited: event("page_visited");
         PermissionRequested => permission_requested: event("permission_requested");
         PermissionResolved => permission_resolved: event("permission_resolved");
         PermissionExpired => permission_expired: event("permission_expired");

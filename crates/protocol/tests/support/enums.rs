@@ -85,7 +85,8 @@ macro_rules! logged_enums {
                 ConfigCategory,
                 CompactionStatus,
                 LimitStopReason,
-                MatterKind;
+                MatterKind,
+                PageVia;
             closed: TextOrBlob, RawPayload, StreamId;
         }
     };

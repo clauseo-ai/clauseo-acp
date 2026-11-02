@@ -106,6 +106,8 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
 | `content_appended` | turn, message, acp_message_id?, kind, block (never text) | acp | yes | T |
 | `tool_call_started` | turn, tool_call, acp_id, title, kind, tool_name?, status, locations, raw_input?, raw_output?, content | acp | yes | T |
 | `tool_call_updated` | tool_call, patch (every field optional; lists replace wholesale) | acp; host on cancel | yes | T |
+| `web_search_recorded` | thread, turn, tool_call_id, agent (`AgentId`), query, results (`WebResult`s, may be empty), at | acp | yes | T |
+| `page_visited` | thread, turn, tool_call_id, url, title?, at, via (`PageVia`) | acp | yes | T |
 | `permission_requested` | request, tool_call?, options, deliverable | acp | yes | T |
 | `permission_resolved` | request, choice, by, held_open? (0021) | host | yes | T |
 | `permission_expired` | request, reason | host | yes | T |
@@ -459,7 +461,7 @@ as the room left by the blocks before it allows, so a block past the limit comes
 | `ErrorCode` | open, `Unknown` | unit | |
 | `ContentBlock` | open, `Unsupported { kind, raw_from, raw }` | data | |
 | `DetachReason`, `SteerOutcome`, `Principal`, `ToolCallContent`, `ToolLocation`, `PermissionChoice`, `ElicitationRequest`, `ConfigOptionKind`, `ChangeKind`, `RestoreScope` | open, `Unknown { kind }` | data | |
-| `ToolKind`, `ToolCallStatus`, `PermissionKind`, `StopReason`, `NoticeLevel`, `Deliverable`, `CheckpointKind`, `ExpiryReason`, `RenameSource`, `Delivery`, `SkippedFileReason`, `TextKind`, `RawFrom`, `ElicitationOutcome`, `PlanPriority`, `PlanStatus`, `ConfigCategory`, `CompactionStatus`, `LimitStopReason`, `MatterKind` | open, `Unknown` | unit | |
+| `ToolKind`, `ToolCallStatus`, `PermissionKind`, `StopReason`, `NoticeLevel`, `Deliverable`, `CheckpointKind`, `ExpiryReason`, `RenameSource`, `Delivery`, `SkippedFileReason`, `TextKind`, `RawFrom`, `ElicitationOutcome`, `PlanPriority`, `PlanStatus`, `ConfigCategory`, `CompactionStatus`, `LimitStopReason`, `MatterKind`, `PageVia` | open, `Unknown` | unit | |
 | `TextOrBlob` | closed | data | Inline text or a blob reference is how Clauseo stores a payload; a third form is a new storage format. |
 | `RawPayload` | closed | data | It is the data model of JSON and MessagePack themselves. |
 | `StreamId` | closed | data (one string) | A thread's or a matter's stream is the log's own keying; a new stream kind changes the store. |

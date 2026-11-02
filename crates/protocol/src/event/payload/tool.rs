@@ -1,13 +1,13 @@
-//! Payloads about a tool call and what the agent asks the lawyer (permissions, elicitations),
-//! logged in the thread's stream.
+//! Payloads about a tool call, a web search or page, and what the agent asks the lawyer
+//! (permissions, elicitations), logged in the thread's stream.
 
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    CompactString, Deliverable, ElicitationId, ElicitationOutcome, ElicitationRequest,
-    ExpiryReason, MatterPath, PermissionChoice, PermissionOption, PermissionRequestId, Principal,
-    TextOrBlob, ToolCallContent, ToolCallId, ToolCallPatch, ToolCallStatus, ToolKind, ToolLocation,
-    TurnId,
+    AgentId, CompactString, Deliverable, ElicitationId, ElicitationOutcome, ElicitationRequest,
+    ExpiryReason, MatterPath, PageVia, PermissionChoice, PermissionOption, PermissionRequestId,
+    Principal, TextOrBlob, ThreadId, Timestamp, ToolCallContent, ToolCallId, ToolCallPatch,
+    ToolCallStatus, ToolKind, ToolLocation, TurnId,
 };
 
 /// A tool call the agent reported.
@@ -126,4 +126,55 @@ pub struct ElicitationExpired {
     pub elicitation: ElicitationId,
     /// Why.
     pub reason: ExpiryReason,
+}
+
+/// A web search the agent ran, with the results it got.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct WebSearchRecorded {
+    /// The thread it ran in.
+    pub thread: ThreadId,
+    /// The turn it ran in.
+    pub turn: TurnId,
+    /// The tool call that ran it.
+    pub tool_call_id: ToolCallId,
+    /// The agent that ran the search, by registry id.
+    pub agent: AgentId,
+    /// The query text.
+    pub query: String,
+    /// The results, in the order the agent got them; empty when there were none.
+    pub results: Vec<WebResult>,
+    /// When it was recorded.
+    pub at: Timestamp,
+}
+
+/// One result of a web search.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct WebResult {
+    /// The result's title.
+    pub title: String,
+    /// The result's address.
+    pub url: String,
+}
+
+/// A page the agent opened.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct PageVisited {
+    /// The thread it ran in.
+    pub thread: ThreadId,
+    /// The turn it ran in.
+    pub turn: TurnId,
+    /// The tool call that opened it.
+    pub tool_call_id: ToolCallId,
+    /// The page's address.
+    pub url: String,
+    /// The page's title, when the agent reported one.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub title: Option<String>,
+    /// When it was recorded.
+    pub at: Timestamp,
+    /// How the page was opened.
+    pub via: PageVia,
 }

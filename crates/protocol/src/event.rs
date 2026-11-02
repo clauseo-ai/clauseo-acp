@@ -26,10 +26,11 @@ pub use payload::{
     AgentNamed, AgentSessionAttached, AgentSessionDetached, CheckpointRecorded, CommandsAvailable,
     CompactionChanged, ConfigOptionsReplaced, ContentAppended, ElicitationExpired,
     ElicitationRequested, ElicitationResolved, FilesChanged, MatterCreated, MatterRelocated,
-    ModeChanged, Notice, OutsideEdits, PermissionExpired, PermissionRequested, PermissionResolved,
-    PlanReplaced, QueuedPromptEdited, SteerResolved, StepUndone, TextAppended, ThreadArchived,
-    ThreadCreated, ThreadRenamed, ToolCallStarted, ToolCallUpdated, TurnEnded, TurnFailed,
-    TurnQueued, TurnStarted, TurnStoppedAtLimit, UsageUpdated, UserMessage, VersionRestored,
+    ModeChanged, Notice, OutsideEdits, PageVisited, PermissionExpired, PermissionRequested,
+    PermissionResolved, PlanReplaced, QueuedPromptEdited, SteerResolved, StepUndone, TextAppended,
+    ThreadArchived, ThreadCreated, ThreadRenamed, ToolCallStarted, ToolCallUpdated, TurnEnded,
+    TurnFailed, TurnQueued, TurnStarted, TurnStoppedAtLimit, UsageUpdated, UserMessage,
+    VersionRestored, WebResult, WebSearchRecorded,
 };
 
 /// `true` for the `matter` stream, `false` for `thread`; any other word does not compile.
@@ -223,6 +224,10 @@ domain_events! {
     ToolCallStarted(Box<ToolCallStarted>) = "tool_call_started", thread;
     /// A tool call changed (acp; host marks in-flight calls cancelled).
     ToolCallUpdated(Box<ToolCallUpdated>) = "tool_call_updated", thread;
+    /// A web search the agent ran, with its results (acp).
+    WebSearchRecorded(Box<WebSearchRecorded>) = "web_search_recorded", thread;
+    /// A page the agent opened (acp).
+    PageVisited(PageVisited) = "page_visited", thread;
     /// The agent asked for permission (acp).
     PermissionRequested(PermissionRequested) = "permission_requested", thread;
     /// A permission request was answered (host).
@@ -284,4 +289,9 @@ macro_rules! from_unboxed {
     };
 }
 
-from_unboxed!(ContentAppended, ToolCallStarted, ToolCallUpdated);
+from_unboxed!(
+    ContentAppended,
+    ToolCallStarted,
+    ToolCallUpdated,
+    WebSearchRecorded
+);
