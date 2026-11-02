@@ -1,4 +1,4 @@
-# 0017: Locate a moved matter folder, and each matter's folder state
+# 0020: Locate a moved matter folder, and each matter's folder state
 
 ## Context
 
