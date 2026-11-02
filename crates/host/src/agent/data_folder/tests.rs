@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use clauseo_protocol::ErrorCode;
 
-use super::{overlaps_tree, refuse_data_folder};
+use super::refuse_data_folder;
 use crate::write;
 
 /// A fresh data folder under the temp folder for `test`, with a sibling agent's home made.
@@ -50,6 +50,8 @@ fn a_matter_folder_in_the_data_folders_agents_or_holding_it_is_refused() {
     assert!(!refused(&data.join("work/m"), &data));
     // A name that only starts like `agents` is not inside it.
     assert!(!refused(&data.join("agents2"), &data));
+    // A data folder that does not resolve refuses, failing closed.
+    assert!(refused(&root.join("matter"), &root.join("missing-data")));
     write::remove_dir_all(&root).unwrap();
 }
 
@@ -66,7 +68,6 @@ fn a_case_folded_spelling_is_caught() {
         .join("home");
     assert!(refused(&shouted, &data));
     assert!(refused(&root.join("Data"), &data));
-    assert!(overlaps_tree(&root.join("Data"), &data));
     write::remove_dir_all(&root).unwrap();
 }
 
@@ -82,6 +83,5 @@ fn a_linked_spelling_is_caught() {
     write::symlink(&data.join("agents/claude-acp/home"), &to_home).unwrap();
     assert!(refused(&to_data, &data));
     assert!(refused(&to_home, &data));
-    assert!(overlaps_tree(&to_home, &data));
     write::remove_dir_all(&root).unwrap();
 }
