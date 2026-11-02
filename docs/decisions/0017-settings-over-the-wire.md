@@ -63,7 +63,14 @@ and `limits`' `AccountLimitsChanged` (R16).
   actor orders every change, and each window's stream delivers them in that order.
 - **Later events** go through the same `publish` in `actor/app.rs`, and each adds its part of the
   current state to the catch-up a lagged subscriber gets: H4's matter list and thread summaries,
-  notices, and R16's `AccountLimitsChanged`. None is built here.
+  notices, and R16's `AccountLimitsChanged`. None is built here. `subscribe_app` carries no
+  window identity, so H4's summaries of threads a window has not opened go to every app
+  subscriber and each window drops those of threads it has open.
+- **For H4: partial rows need a whole-state catch-up first.** The catch-up works today because
+  `SettingsChanged` is the whole view. A lagged subscriber misses events, so once
+  `matters_changed` sends only the rows that changed, its catch-up must be an event that replaces
+  the whole list (a reset or caught-up variant). That variant lands before or with the first
+  partial row on this stream.
 
 ## Consequences
 
