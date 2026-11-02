@@ -238,9 +238,12 @@ test("a refusal (elicitation.not_pending): the question can't be answered anymor
   const code = "elicitation.not_pending";
   h = await ask(TWO_QUESTIONS, code);
   await h.click(el(T.choice("question_0", 1)));
+  el<HTMLElement>(T.send).focus();
   await h.click(el(T.send));
   expect(answered()).toHaveLength(1);
   expect(el<HTMLElement>(T.error).textContent).toBe(errorWords("en", code));
+  // the focused Send is gone: focus goes to Stop
+  expect(document.activeElement).toBe(el(T.stop));
   expect(h.one(T.send)).toBeNull();
   expect(h.one(T.decline)).toBeNull();
   expect(h.one(T.hint)).toBeNull();
@@ -320,6 +323,11 @@ test("Escape outside a text field is Don't answer; in one it stays the field's",
   h = await ask(ONE_QUESTION);
   expect(await keyOn(el(T.input("question_0_custom")), { key: "Escape" })).toBe(false);
   expect(answered()).toEqual([]);
+  // with Alt, neither Escape nor Enter answers, as in the permission prompt
+  await h.click(el(T.choice("question_0", 0)));
+  await keyOn(el(T.choice("question_0", 0)), { key: "Escape", altKey: true });
+  await keyOn(el(T.choice("question_0", 0)), { key: "Enter", altKey: true });
+  expect(answered()).toEqual([]);
   expect(await keyOn(el(T.choice("question_0", 0)), { key: "Escape" })).toBe(true);
   expect(answered().map((a) => a.response)).toEqual(["decline"]);
   // busy: a second Escape sends nothing
@@ -387,8 +395,8 @@ test("a field over a limit the schema gives names it; with none to name, the gen
   expect(line("papers")).toBe(th("en", "Choose up to {n}.", { n: 1 }));
   expect(line("witnesses")).toBe(th("en", "Choose at least {n}.", { n: 2 }));
   expect(line("amount")).toBe(th("en", "Use a number from {min} to {max}.", { min: 1, max: 100 }));
-  expect(line("days")).toBe(th("en", "Use a number of {min} or more.", { min: 15 }));
-  expect(line("rate")).toBe(th("en", "Use a number of {max} or less.", { max: 24 }));
+  expect(line("days")).toBe(th("en", "Use {min} or more.", { min: 15 }));
+  expect(line("rate")).toBe(th("en", "Use {max} or less.", { max: 24 }));
   expect(line("copies")).toBe(th("en", "Use a whole number."));
   expect(line("email")).toBe(th("en", "This answer doesn't fit the question."));
   expect(line("ref")).toBe("Use 4 characters or fewer.");
