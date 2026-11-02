@@ -18,7 +18,15 @@ import type {
 import { matterStreamOf, readMatter } from "../matter-stream.ts";
 import { localZone } from "../when.ts";
 import { Conversations } from "./conversations.ts";
-import { DoneWatch, lockedRestore, pageBack, unsavedOf, type Own, type Undid } from "./reading.ts";
+import {
+  DoneWatch,
+  lockedRestore,
+  pageBack,
+  stepsSig,
+  unsavedOf,
+  type Own,
+  type Undid,
+} from "./reading.ts";
 import {
   changedSince,
   defaultChoices,
@@ -123,8 +131,11 @@ export class VersionsController {
     const talks = this.#talks;
     talks.read();
     const statuses = talks.threads.map((t) => JSON.stringify(talks.statusOf(t))).join(",");
-    // every conversation's stream the room holds: a step undone there changes what Undo offers
-    const steps = talks.threads.map((t) => this.#store.view(streamOf(t.thread))?.cursor).join(",");
+    // the steps of every conversation the room holds: a step undone there changes what Undo offers; their streamed
+    // text doesn't count
+    const steps = talks.threads
+      .map((t) => stepsSig(this.#store.view(streamOf(t.thread))))
+      .join(",");
     const sig = [
       view?.epoch,
       view?.cursor,

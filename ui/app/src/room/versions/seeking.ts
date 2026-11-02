@@ -5,7 +5,7 @@ import type { ViewStore } from "../../store/store.ts";
 import { streamOf } from "../../store/view.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type { StepEntry, ThreadId, TurnId } from "../../transport/protocol.ts";
-import { pageBack } from "./reading.ts";
+import { pageBack, stepsSig } from "./reading.ts";
 import type { Timeline, VersionMeta } from "./timeline.ts";
 
 export class StepSeeker {
@@ -31,10 +31,10 @@ export class StepSeeker {
     return e?.step ?? this.#steps.get(turn);
   };
 
-  /** What a change of the seeker shows in: the held stream's cursor and how many steps were read back. */
+  /** What a change of the seeker shows in: the held stream's steps and how many were read back. */
   sig(): string {
-    const held = this.#held === null ? null : this.#store.view(streamOf(this.#held.thread));
-    return `${held?.cursor}|${this.#steps.size}`;
+    const held = this.#held === null ? undefined : this.#store.view(streamOf(this.#held.thread));
+    return `${stepsSig(held)}|${this.#steps.size}`;
   }
 
   /** Holds the conversation of the version looked at (none for another kind), and seeks its step if it isn't in. */
