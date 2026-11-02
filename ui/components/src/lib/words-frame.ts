@@ -36,6 +36,13 @@ const HI = {
   "Add a matter's folder.": "मामले का फ़ोल्डर जोड़ें।",
   "Add a matter's folder. Clauseo reads its papers before your first question.":
     "मामले का फ़ोल्डर जोड़ें। आपके पहले प्रश्न से पहले Clauseo उसके दस्तावेज़ पढ़ लेता है।",
+  // settings: how Clauseo looks
+  Theme: "थीम",
+  "Follow the computer": "कंप्यूटर के अनुसार",
+  "Text size": "अक्षरों का आकार",
+  "Every word on screen grows or shrinks with it.": "स्क्रीन के सभी शब्द इसके साथ बड़े या छोटे होते हैं।",
+  "Reduced motion": "कम हलचल",
+  "Every change lands at once, and nothing moves.": "हर बदलाव तुरंत दिखता है और कुछ भी हिलता नहीं।",
 } as const;
 
 /** Every string of the frame, in English. */

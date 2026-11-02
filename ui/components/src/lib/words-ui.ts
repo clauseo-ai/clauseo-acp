@@ -31,6 +31,13 @@ const HI = {
   // settings, in sections
   Settings: "सेटिंग्स",
   Matters: "मामले",
+  // lite, in settings: until the host reports remote desktops, On and Off only
+  "Lite mode": "सादा मोड",
+  "Takes away every shadow and all motion.": "सभी छायाएँ और सारी हलचल हटा देता है।",
+  On: "चालू",
+  "Always, on this computer": "इस कंप्यूटर पर हमेशा",
+  Off: "बंद",
+  "Never, even over a remote desktop": "कभी नहीं, रिमोट डेस्कटॉप पर भी नहीं",
   // a confirmation
   Close: "बंद करें",
   Notifications: "सूचनाएँ",

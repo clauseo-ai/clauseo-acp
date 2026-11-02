@@ -4,7 +4,9 @@
 @import "../styles/system.css";
 @import "@clauseo/components/clauseo/parts.css";
 @source "../room";
+@source "../settings";
 @source not "../room/**/*.test.*";
+@source not "../settings/**/*.test.*";
 
 /* ---------- the list ---------- */
 .review-page {
