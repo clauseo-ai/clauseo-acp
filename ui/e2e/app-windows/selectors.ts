@@ -154,6 +154,12 @@ export function window(page: Page) {
     /** The conversation row whose text contains `title` (its text also holds its status). */
     conversationRow: (title: string): Locator => id(ids.conversation).filter({ hasText: title }),
     /**
+     * The conversation row whose own title contains `title`, its status words aside: a row that
+     * waits for another holds the other's title in its words.
+     */
+    conversationTitled: (title: string): Locator =>
+      id(ids.conversation).filter({ has: page.locator(".room-conv-title", { hasText: title }) }),
+    /**
      * A conversation row's title alone, without its plan or status words (the row's
      * `.room-conv-title`; a part's class, not a test id, like folderLine).
      */

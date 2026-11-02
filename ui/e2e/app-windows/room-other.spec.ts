@@ -30,7 +30,7 @@ const CLOCK = /\d{1,2}:\d{2}/;
 
 /** Presses the row titled `title` and waits until it is the open conversation. */
 async function openConversation(w: Window, title: string): Promise<void> {
-  const row = w.conversationRow(title);
+  const row = w.conversationTitled(title);
   await showRail(w);
   await row.click();
   await expect(row).toHaveAttribute("aria-current", "true");
@@ -65,7 +65,7 @@ test("a second conversation waits behind the first's writer until its Stop", asy
   // its prompt, so it has no answer yet.
   await w.queue(w.otherWait).click();
   await expect(w.userMessages.last()).toContainText(SECOND);
-  await expect(w.conversationRow(SECOND)).toHaveAttribute("aria-current", "true");
+  await expect(w.conversationTitled(SECOND)).toHaveAttribute("aria-current", "true");
   await expect(w.otherWait).toBeVisible();
   await expect(w.queue(w.otherWait)).toHaveCount(0);
   await expect(w.stopOther(w.otherWait)).toBeFocused();
@@ -73,6 +73,17 @@ test("a second conversation waits behind the first's writer until its Stop", asy
   expect((await w.otherWait.textContent()) ?? "").not.toMatch(CLOCK);
   await expect(w.working).toContainText(`Waiting for '${FIRST}' to finish.`);
   await expect(w.agentMessages).toHaveCount(0);
+
+  // The open conversation's own row says nothing of its state (the design's rail); read from A,
+  // B's row waits for A, by A's title. Back in B, its wait is still there.
+  await openConversation(w, FIRST);
+  await expect(w.conversationTitled(SECOND)).toHaveAttribute("data-state", "waiting");
+  await expect(w.conversationTitled(SECOND)).toHaveAttribute(
+    "title",
+    new RegExp(`Waiting for '${FIRST}'`),
+  );
+  await openConversation(w, SECOND);
+  await expect(w.otherWait).toBeVisible();
 
   // Stop the other conversation's turn: A's turn is cancelled, the panel goes, and B's turn
   // starts, so its answer streams in B.
