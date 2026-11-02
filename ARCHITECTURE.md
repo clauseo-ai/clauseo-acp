@@ -84,6 +84,7 @@ to write instead.
 | `host` | Own thread and executor: sessions, commands, permissions, coalescing, subscriptions, checkpoints per turn; the `profile` hook | protocol, reducer, store, matters, process, acp, settings, limits, async-channel, async-io, futures, uuid, serde_json, tracing, dunce, sha2 | tauri, tokio, agents | exists |
 | `limits` | Plan usage readers: the Claude usage helper and the Codex reader; event-driven refresh; merging live `_claude/rateLimit` signals; the limits model and its view | protocol, process, settings, codex_appserver, serde, serde_json, futures, tracing | tauri, tokio, keyring | exists |
 | `fake_agent` | Scripted ACP agent for tests | agent-client-protocol, serde, serde_json | | exists |
+| `connectors` | The paid connectors' OAuth client, keychain token store, refresh and revocation, account and recharge API, liveness and price | serde, serde_json, ureq, rustls, rustls-platform-verifier, sha2, base64, rand, url, zeroize, thiserror, tracing; keyring (macOS and Windows only); windows (Windows only) | tauri, tokio, async-std, smol, hyper, reqwest, host, protocol | exists |
 | `cli` | Headless client for agents and CI | host, settings | tauri | planned |
 | `transport_ws` | Dev and test only WebSocket transport, random token | host | tauri | planned |
 | `sandbox` | Policy model, tier detection, per-OS launchers, egress proxy, denial detection | protocol, process, thiserror, tracing, serde, dunce, async-process, async-io, futures, serde_json | tauri, host | exists |

@@ -1,0 +1,123 @@
+{
+  "tools": [
+    {
+      "name": "search_law",
+      "description": "Search Indian judgments and statutes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "read_document",
+      "description": "Read a judgment or statute by its id.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "doc_id": {
+            "type": "string"
+          },
+          "max_tokens": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "doc_id"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "citator",
+      "description": "List the judgments that cite, or are cited by, a judgment.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "doc_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "doc_id"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "check_citations",
+      "description": "Check that each citation in a text resolves to a real judgment.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "account",
+      "description": "The account's balance and recent spend.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "recharge",
+      "description": "Open a payment for a credit pack, or wait for one to be paid.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pack": {
+            "type": "string"
+          },
+          "recharge_id": {
+            "type": "string"
+          },
+          "wait": {
+            "type": "boolean"
+          }
+        },
+        "required": []
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true
+      }
+    }
+  ]
+}

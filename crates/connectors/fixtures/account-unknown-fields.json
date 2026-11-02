@@ -1,0 +1,57 @@
+{
+  "account_id": "acct_example0001",
+  "state": "active",
+  "balance_credits": 1000,
+  "balance_inr": "100.00",
+  "spent_today_credits": 46,
+  "recent": [
+    {
+      "day": "2026-11-01",
+      "credits": 120,
+      "breakdown": {
+        "search_page": 1
+      },
+      "calls": 3
+    },
+    {
+      "day": "2026-11-02",
+      "credits": 46,
+      "breakdown": {
+        "search_page": 1
+      },
+      "calls": 3
+    }
+  ],
+  "limits": {
+    "daily_credits": 5000,
+    "per_call_max_credits": 200,
+    "monthly_credits": null,
+    "note": "new"
+  },
+  "open_payment": null,
+  "claimed": true,
+  "prices": {
+    "search_page": 20,
+    "search_repeat": 2,
+    "open": 3,
+    "read_per_4000_tokens": 1,
+    "details": 1,
+    "citation_check": 10,
+    "cite_resolve": 5,
+    "unit": "credits"
+  },
+  "brake": {
+    "enabled": false,
+    "daily_credits": null,
+    "since": null,
+    "extra": {
+      "deep": true
+    }
+  },
+  "schema": "account.v2",
+  "flags": {
+    "beta": [
+      "x"
+    ]
+  }
+}

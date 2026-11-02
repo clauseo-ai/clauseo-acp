@@ -1,0 +1,13 @@
+{
+  "protocolVersion": "2025-06-18",
+  "capabilities": {
+    "tools": {
+      "listChanged": false
+    }
+  },
+  "serverInfo": {
+    "name": "clauseo-case-law",
+    "version": "0.0.0-fixture"
+  },
+  "instructions": "Search and read Indian case law from Indian Kanoon. Paid tools spend credits; account and recharge are free."
+}

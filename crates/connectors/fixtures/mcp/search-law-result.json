@@ -1,0 +1,22 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "2 results for \"basic structure doctrine\"."
+    }
+  ],
+  "structuredContent": {
+    "results": [
+      {
+        "title": "Kesavananda Bharati Sripadagalvaru v. State of Kerala (1973)",
+        "url": "https://indiankanoon.org/doc/257876/"
+      },
+      {
+        "title": "Minerva Mills Ltd. v. Union of India (1980)",
+        "url": "https://indiankanoon.org/doc/1939993/"
+      }
+    ],
+    "charged_credits": 20
+  },
+  "isError": false
+}
