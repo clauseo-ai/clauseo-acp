@@ -1,0 +1,10 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "HostCommand::RefreshLimits\n{ agent: Some(AgentKind::Claude), why: RefreshWhy::Shown, }"
+---
+{
+  "refresh_limits": {
+    "agent": "claude",
+    "why": "shown"
+  }
+}

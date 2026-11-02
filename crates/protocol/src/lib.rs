@@ -181,7 +181,7 @@ wire_types! {
     },
     command::{
         CommandEnvelope, CommandOutcome, ConfigValue, DeliveryRequest, HostCommand, MatterSource,
-        RestoreRequest,
+        RefreshWhy, RestoreRequest,
     },
     content::{ContentBlock, PromptBlock, RawFrom, ToolCallContent},
     details::{ClientName, Date, MatterStatus},

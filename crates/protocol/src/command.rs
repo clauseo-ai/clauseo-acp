@@ -16,9 +16,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::MatterPath;
 use crate::{
-    AgentChoiceId, AgentId, CheckpointId, ClientName, CommandId, Date, Delivery, ElicitationId,
-    ElicitationResponse, FieldChange, FileDecision, FolderRefId, MatterId, MessageId,
-    PermissionRequestId, PromptBlock, RestoreScope, ThreadId, Title, TurnId, UiPatch,
+    AgentChoiceId, AgentId, AgentKind, CheckpointId, ClientName, CommandId, Date, Delivery,
+    ElicitationId, ElicitationResponse, FieldChange, FileDecision, FolderRefId, MatterId,
+    MessageId, PermissionRequestId, PromptBlock, RestoreScope, ThreadId, Title, TurnId, UiPatch,
 };
 #[cfg(doc)]
 use crate::{FileChoice, RawPayload};
@@ -131,6 +131,19 @@ impl From<DeliveryRequest> for Delivery {
             DeliveryRequest::Steer => Self::Steer,
         }
     }
+}
+
+/// Why account limits are refreshed, as `RefreshLimits` asks for it: a window got focus, or a
+/// meter or the settings page opened (`Shown`), or the lawyer pressed "Try again" (`TryAgain`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub enum RefreshWhy {
+    /// A window got focus, or a meter or the settings page opened. Reads only data older than
+    /// 5 minutes.
+    Shown,
+    /// The lawyer asked again. Reads now, unless a read is in flight.
+    TryAgain,
 }
 
 /// A config option's new value, matching the option's kind.
@@ -344,11 +357,23 @@ pub enum HostCommand {
         /// The fields to change.
         patch: UiPatch,
     },
+    /// Refresh account limits. Answers `Done` and logs nothing. `Shown` reads only data older
+    /// than 5 minutes; `TryAgain` reads now unless a read is in flight. No read starts while the
+    /// agent has a permission or an elicitation pending; it starts once that is answered.
+    /// `agent: None` means every agent. JSON: `{"refresh_limits": {"why": "shown"}}`, with
+    /// `"agent": "claude"` (or `"codex"`) when one agent is named.
+    RefreshLimits {
+        /// The agent, or `None` for every agent; left out of the JSON when `None`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent: Option<AgentKind>,
+        /// What asked for the refresh.
+        why: RefreshWhy,
+    },
 }
 
 /// What a command did. The host's receipt stores it, so a repeated `command_id` returns the same
-/// outcome. The queue commands, `RestartAgent`, `SetUiSettings`, `UpdateMatter`, `OpenMatter` and
-/// `ForgetMatter` answer `Done`.
+/// outcome. The queue commands, `RestartAgent`, `SetUiSettings`, `UpdateMatter`, `OpenMatter`,
+/// `ForgetMatter` and `RefreshLimits` answer `Done`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "specta", derive(specta::Type))]

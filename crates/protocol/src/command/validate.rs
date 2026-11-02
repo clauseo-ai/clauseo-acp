@@ -206,7 +206,9 @@ impl HostCommand {
                 pinned: _,
             }
             | Self::OpenMatter { matter: _ }
-            | Self::ForgetMatter { matter: _ } => Ok(()),
+            | Self::ForgetMatter { matter: _ }
+            | Self::RefreshLimits { agent: _, why: _ } => Ok(()),
+
         }
     }
 }
