@@ -325,10 +325,11 @@ fn open_main_window(app: &App) -> tauri::Result<()> {
 }
 
 /// A window event: the `main` window's focus, the only window following the limits (the
-/// `settings` window follows none, 0028), asks the host to read the limits older than 5 minutes (`Bridge::shown`),
-/// in a task, so the event loop never waits on the host: a focus before the host has started
-/// waits in its task for the start, then dispatches once. Focus lost does nothing. Returns the
-/// task, for tests. A failed dispatch (a failed start) is dropped: the desktop has no log yet.
+/// `settings` window follows none, 0028), asks the host to read the limits older than 5 minutes
+/// (`Bridge::shown`), in a task, so the event loop never waits on the host: a focus before the
+/// host has started waits in its task for the start, then dispatches once. Focus lost does
+/// nothing. Returns the task, for tests. A failed dispatch (a failed start) is dropped: the
+/// desktop has no log yet.
 fn on_window_event<R: Runtime>(
     window: &tauri::Window<R>,
     event: &WindowEvent,
