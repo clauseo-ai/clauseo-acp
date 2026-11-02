@@ -93,9 +93,12 @@ export type ComposerHandle = {
   text: () => string;
   /** Puts the field's focus in it and replaces all it holds with `text`, as one step undo takes back. */
   setText: (text: string) => void;
-  /** Empties the field: as one undoable step while the field has focus; without focus it is emptied in place, so the
-   * lawyer's focus elsewhere never moves, and that one step can't be undone. */
-  clear: () => void;
+  /** Empties the field as one undoable step: with the field focused, or with focus on nothing or on a button of the
+   * field's own row (Ask, just pressed), which it takes back to the field. With focus anywhere else on the page it is
+   * emptied in place, so the lawyer's focus never moves, and that one step can't be undone. Given `only`, it clears
+   * only while the field holds exactly that. While an input method composes it waits for the composition's end and
+   * clears then if the field still holds what it held. */
+  clear: (only?: string) => void;
 };
 
 /** Replaces all the field holds with `text` through the engine's editing, so undo takes it back; where the engine
@@ -114,6 +117,16 @@ function replaceAll(a: HTMLTextAreaElement, text: string, focus: boolean): boole
   }
   a.value = text;
   return false;
+}
+
+/** Whether clearing may move the focus to the field: focus is on nothing, on the field itself, or on a button of the
+ * field's own row, as after a press on Ask. Anywhere else the lawyer has gone on to something and keeps it. */
+function mayTakeFocus(a: HTMLTextAreaElement): boolean {
+  const doc = a.ownerDocument;
+  const now = doc.activeElement;
+  if (now === null || now === doc.body || now === a) return true;
+  const row = a.closest(".room-field");
+  return now instanceof HTMLButtonElement && row !== null && now.closest(".room-field") === row;
 }
 
 /** Whether a press in the field landed on a button or the text itself, which take it themselves. */
@@ -150,7 +163,8 @@ export type ComposerProps<V extends string = string> = {
   papers?: readonly QuestionPaper[];
   onRemovePaper?: (id: string) => void;
   choice?: PlanChoice<V>;
-  /** Keys the field passes on first, before its own Enter. True when one was taken, and its default is prevented. */
+  /** Keys the field passes on first, before its own Enter. True when one was taken, and its default is prevented.
+   * While an input method composes it hears nothing: every key is the input method's then. */
   onKeyCommand?: (e: KeyboardEvent<HTMLTextAreaElement>) => boolean;
   /** The field's id, unique on the page. */
   id?: string;
@@ -216,9 +230,15 @@ export function Composer<V extends string = string>({
   const w = useThreadWords();
   // the one thing the composer draws from the words: whether there are any, for Ask and the questions to ask. It
   // changes only when the field fills or empties, so a keystroke renders nothing
-  const [empty, setEmpty] = useState(() => initialText.trim() === "");
+  // pinned at mount: React writes a textarea's defaultValue (its text child) on every commit, and the caller's draft
+  // changes as the lawyer types, so passing the prop through would rewrite the field's child mid-composition
+  const [initial] = useState(initialText);
+  const [empty, setEmpty] = useState(() => initial.trim() === "");
   const area = useRef<HTMLTextAreaElement>(null);
   const composing = useRef(false);
+  // a clear asked for while an input method composed: what the field held then, cleared at the composition's end
+  // only if the field still holds it
+  const clearAfter = useRef<string | null>(null);
   const fitRef = useRef<() => void>(() => {});
   const entry = useRef<HTMLDivElement>(null);
   const room = useRoom();
@@ -274,15 +294,29 @@ export function Composer<V extends string = string>({
     if (!replaceAll(a, next, true)) changed();
     a.focus();
   };
+  const clear = (only?: string, inPlace = false) => {
+    const a = area.current;
+    if (a === null || (only !== undefined && a.value !== only)) return;
+    if (composing.current) {
+      // select-all and delete inside a composition would break it: wait for its end
+      clearAfter.current = a.value;
+      return;
+    }
+    if (inPlace) a.value = "";
+    if (inPlace || !replaceAll(a, "", mayTakeFocus(a))) changed();
+  };
+  // the held clear, once the composition is over; in place when the field is losing focus, which it never takes back
+  const settle = (inPlace: boolean) => {
+    const held = clearAfter.current;
+    clearAfter.current = null;
+    if (held !== null) clear(held, inPlace);
+  };
   // made anew each render, as changed reads the caller's onInput: the composer renders rarely, never per keystroke
   useImperativeHandle(ref, () => ({
     focus: () => area.current?.focus(),
     text: () => area.current?.value ?? "",
     setText: put,
-    clear: () => {
-      const a = area.current;
-      if (a !== null && !replaceAll(a, "", false)) changed();
-    },
+    clear: (only) => clear(only),
   }));
   // the room keeps the composer's height, so what scrolls into view on a phone stands above it, and the turned page
   // stands clear of it
@@ -360,7 +394,7 @@ export function Composer<V extends string = string>({
               return room.nodes.slot("field")(node);
             }}
             rows={1}
-            defaultValue={initialText}
+            defaultValue={initial}
             disabled={disabled}
             data-testid={testIds?.field}
             placeholder={placeholder ?? w.t("Ask about this matter")}
@@ -370,24 +404,29 @@ export function Composer<V extends string = string>({
             }}
             onCompositionEnd={() => {
               composing.current = false;
+              // a clear held for the composition runs once the engine has settled the value, as the spike's
+              // triggers do
+              if (clearAfter.current !== null) setTimeout(() => settle(false), 0);
             }}
             onBlur={() => {
-              // a composition the engine ended without its compositionend must not hold Enter for good
+              // a composition the engine ended without its compositionend must not hold Enter, or a clear, for
+              // good
               composing.current = false;
+              settle(true);
             }}
             onKeyDown={(e) => {
-              if (onKeyCommand?.(e) === true) {
-                e.preventDefault();
-                return;
-              }
-              if (e.key !== "Enter" || e.shiftKey) return;
-              // an input method's Enter commits its candidate: the engine's, never a send
               const key = {
                 key: e.key,
                 shiftKey: e.shiftKey,
                 isComposing: composing.current || e.nativeEvent.isComposing,
                 keyCode: e.keyCode,
               };
+              // while an input method composes, every key is its own: an Enter commits its candidate
+              if (key.isComposing || key.keyCode === 229) return;
+              if (onKeyCommand?.(e) === true) {
+                e.preventDefault();
+                return;
+              }
               if (!sendsOnEnter(key)) return;
               e.preventDefault();
               onAsk?.(e.currentTarget.value);

@@ -54,7 +54,8 @@ export function WorkComposer({
       if (!ok) return;
       // words typed while it went keep their place; the emptied field's change drops the draft, and Cmd/Ctrl+Z
       // brings the question back
-      if (field.current?.text() === asked) field.current.clear();
+      // (while an input method composes, the composer holds the clear for the composition's end)
+      field.current?.clear(asked);
       // and an accepted question is no draft: the drafts outlive this composer, so this holds when the lawyer has
       // gone to another matter while the question went
       if (matter !== null && drafts.get(matter) === asked) drafts.delete(matter);

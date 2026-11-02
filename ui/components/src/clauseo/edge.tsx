@@ -20,6 +20,7 @@ import {
 import { useDisplay } from "../lib/display.ts";
 import { useVersionWords } from "../lib/words-versions.ts";
 import { fromComposer } from "./composer-keys.ts";
+import { keyReachesPrompt } from "./permission-keys.ts";
 import { useRoom } from "./room-scope.ts";
 import { Say } from "./say.tsx";
 
@@ -32,29 +33,39 @@ export type EdgeState =
   | { kind: "allowed"; remembered: boolean; at: string }
   | { kind: "refused"; remembered: boolean };
 
-/** Enter for the first answer, Escape for the second, from the composer, while the prompt waits. */
+/** Enter for the first answer, Escape for the second, from the composer, while the prompt waits: from its field, or
+ * with nothing focused, only while the room's field is empty (permission-keys.ts's rule), so typed words are never
+ * answered over and their Enter sends them. */
 function useKeys(on: boolean, first: () => void, second: () => void) {
   const room = useRoom();
   useEffect(() => {
     if (!on) return;
+    // capture: the composer takes Enter in its own handler and prevents it, so a bubbling listener would never see it
     const onKey = (e: KeyboardEvent) => {
       if (
         e.defaultPrevented ||
         e.isComposing ||
+        e.keyCode === 229 ||
         e.altKey ||
         e.metaKey ||
         e.ctrlKey ||
         e.shiftKey ||
+        (e.key !== "Enter" && e.key !== "Escape") ||
         !fromComposer(room, e.target)
       )
         return;
+      const target = e.target;
+      const field = target instanceof HTMLTextAreaElement ? target : room.nodes.get("field");
+      const where = target instanceof HTMLTextAreaElement ? "field" : "page";
+      const empty = field instanceof HTMLTextAreaElement && field.value.trim() === "";
+      if (!keyReachesPrompt(where, empty)) return;
       if (e.key === "Enter") first();
-      else if (e.key === "Escape") second();
-      else return;
+      else second();
       e.preventDefault();
+      e.stopPropagation();
     };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
   }, [on, first, second, room]);
 }
 
