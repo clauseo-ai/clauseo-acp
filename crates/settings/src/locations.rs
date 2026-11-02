@@ -124,6 +124,15 @@ impl Locations {
     /// one plain folder name. It is under the data folder, never the temp folder: a temp
     /// cleaner would sign the lawyer out.
     pub fn agent_home(&self, agent: &str) -> PathBuf {
+        // A free-text caller must not put the home, and the login with it, outside
+        // `<data>/agents`.
+        debug_assert!(
+            !agent.is_empty()
+                && agent
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-'),
+            "an agent id is [a-z0-9-]+"
+        );
         self.data_dir.join("agents").join(agent).join("home")
     }
 
