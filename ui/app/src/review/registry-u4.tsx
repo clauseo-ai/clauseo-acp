@@ -12,7 +12,7 @@ import type { ViewEntry } from "../transport/protocol.ts";
 import type { Entry } from "./entry.ts";
 import { threadHost, type ThreadState } from "./hosts.ts";
 import { RoomOver, RoomPressing } from "./states.tsx";
-import { frameWords, shared, threadWords, versionWords } from "./words.ts";
+import { frameWords, shared, threadWords, uiWords } from "./words.ts";
 
 const thread = (state: ThreadState) => () => <RoomOver host={() => threadHost(state)} />;
 
@@ -142,13 +142,13 @@ export const U4: Entry[] = [
   // the Mac's frame says macOS, the Windows frame Windows
   {
     id: "U4-16",
-    words: versionWords("macOS is asking you to confirm."),
+    words: uiWords("macOS is asking you to confirm."),
     screen: "room/thread",
     render: confirming,
   },
   {
     id: "U4-17",
-    words: versionWords("Windows is asking you to confirm."),
+    words: uiWords("Windows is asking you to confirm."),
     screen: "room/thread",
     render: confirming,
   },

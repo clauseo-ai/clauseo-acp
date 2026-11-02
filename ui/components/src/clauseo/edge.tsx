@@ -209,10 +209,10 @@ export function EdgePrompt({
         <p className="edge-confirming" role="status">
           <Say>
             {platform === "mac"
-              ? w.v("macOS is asking you to confirm.")
+              ? w.ui("macOS is asking you to confirm.")
               : platform === "linux"
-                ? w.v("Linux is asking you to confirm.")
-                : w.v("Windows is asking you to confirm.")}
+                ? w.ui("Linux is asking you to confirm.")
+                : w.ui("Windows is asking you to confirm.")}
           </Say>
         </p>
       )}

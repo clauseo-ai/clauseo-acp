@@ -1,5 +1,5 @@
 // Versions' panel, band and dialog stay out of the room's first load: walking the static imports from the room's entry
-// (entry.ts) reaches use-versions.ts, Versions' one way in, and none of Versions' chunk. A type-only import and a bare
+// (entry.ts) reaches use-versions.ts, Versions' one way in, and none of Versions' chunk, nor Versions' words table. A type-only import and a bare
 // import() don't count; an import whose every name is a type still does (verbatimModuleSyntax keeps it as an import of
 // the module).
 import { existsSync, readFileSync } from "node:fs";
@@ -92,6 +92,11 @@ test("the room's first load reaches use-versions.ts and none of Versions' chunk"
     "app/src/room/versions/timeline.ts",
     "app/src/room/versions/words.ts",
     "app/src/room/versions/state.ts",
+    "app/src/room/versions/seeking.ts",
+    // Versions' words and what the matter allows: the toolbar's few words, and its Not protected mark, have homes of
+    // their own (words-toolbar.ts, not-protected.tsx)
+    "components/src/lib/words-versions.ts",
+    "components/src/clauseo/allowed.tsx",
   ])
     expect(names.has(kept), kept).toBe(false);
 });

@@ -36,6 +36,10 @@ const HI = {
   Notifications: "सूचनाएँ",
   // the matter's folder and its note
   "Locate folder": "फ़ोल्डर ढूँढें",
+  // the computer's own dialog, open over a prompt or the edge's ask
+  "macOS is asking you to confirm.": "macOS आपसे पुष्टि माँग रहा है।",
+  "Windows is asking you to confirm.": "Windows आपसे पुष्टि माँग रहा है।",
+  "Linux is asking you to confirm.": "Linux आपसे पुष्टि माँग रहा है।",
 } as const;
 
 /** Every new interface string, in English. */

@@ -2,7 +2,7 @@ import { Popover } from "@base-ui/react/popover";
 import { floating } from "../ui/recipes.ts";
 import { cn } from "../lib/cn.ts";
 import { useWords } from "../lib/words.ts";
-import { useVersionWords } from "../lib/words-versions.ts";
+import { useToolbarWords } from "../lib/words-toolbar.ts";
 import type { HistoryRow } from "./matter.ts";
 import { Say } from "./say.tsx";
 
@@ -17,7 +17,7 @@ export function HistoryPanel({
   rows: readonly HistoryRow[];
   anchor: () => Element | null;
 }) {
-  const vw = useVersionWords();
+  const vw = useToolbarWords();
   return (
     <Popover.Portal>
       <Popover.Positioner

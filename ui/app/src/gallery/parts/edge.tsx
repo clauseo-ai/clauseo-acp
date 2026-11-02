@@ -1,7 +1,7 @@
 // The edge of the matter, in the room's group: the prompt Clauseo asks in before it goes beyond the matter, the
 // refusals that stop it, Not protected, and what the matter allows. The computer's own dialog only opens on a press.
 import { EdgePrompt, RefusalPause } from "@clauseo/components/clauseo/edge.tsx";
-import { NotProtectedMark } from "@clauseo/components/clauseo/allowed.tsx";
+import { NotProtectedMark } from "@clauseo/components/clauseo/not-protected.tsx";
 import { EdgeFlow, NoteSample, RefusalFlow, WorkspaceSample } from "./edge-samples.tsx";
 import { FOLDER, NOW, OTHER_SITE, REFUSALS, SITE } from "./edge-data.ts";
 import { Group, Sample } from "./frame.tsx";
