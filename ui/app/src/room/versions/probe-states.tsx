@@ -1,4 +1,4 @@
-// The Versions pages of the probe build (probe-main.tsx's ?versions=panel, band, undo, restore and wait): the matter's
+// The Versions pages of the probe build (probe-main.tsx's ?versions=panel, band, undo, restore, wait, newest and word): the matter's
 // history as room/versions/testing.ts and review/registry-u8.tsx script it (its import, a turn's version, the lawyer's
 // edits outside Clauseo, the same turn again and its undo, a restore, a turn whose big file isn't kept, a turn whose
 // change wasn't kept), its one conversation's steps, and the answers to list_threads, preview_restore and
@@ -28,8 +28,9 @@ import type {
 } from "../../transport/protocol.ts";
 
 /** Which Versions page the probe loads: Versions open, a past version selected, the undo or restore dialog open, the
- * conversation running (its Restore and Undo waiting), or the newest turn picked (its Undo alone, at now). */
-export type VersionsPage = "panel" | "band" | "undo" | "restore" | "wait" | "newest";
+ * conversation running (its Restore and Undo waiting), the newest turn picked (its Undo alone, at now), or the newest
+ * turn's undo refused because Word holds its one Word document (the dialog's Word stage). */
+export type VersionsPage = "panel" | "band" | "undo" | "restore" | "wait" | "newest" | "word";
 
 /** ?versions=… as the probe reads it; any other value is no Versions page. */
 export function versionsPageOf(value: string | null): VersionsPage | null {
@@ -38,7 +39,8 @@ export function versionsPageOf(value: string | null): VersionsPage | null {
     value === "undo" ||
     value === "restore" ||
     value === "wait" ||
-    value === "newest"
+    value === "newest" ||
+    value === "word"
     ? value
     : null;
 }
@@ -105,7 +107,7 @@ const stepEntry = (order: number, over: Partial<StepEntry>): ViewEntry => ({
 /** The matter's versions, oldest first: the import and a turn three days ago, the lawyer's edits outside Clauseo this
  * morning, the turn of today whose big file isn't kept, its undo, the restore to the turn of three days ago (with its
  * marker), and the conversation's last turn, whose change wasn't kept. On newest the turn of today is the last version,
- * kept and not undone, so its change can be undone. */
+ * kept and not undone, so its change can be undone; so it is on word. */
 function matterEntries(page: VersionsPage): ViewEntry[] {
   const head = [
     version(1, "import", atLocal(-3, 10, 0)),
@@ -113,7 +115,7 @@ function matterEntries(page: VersionsPage): ViewEntry[] {
     version(3, "outside_edits", today(0), [file(LEASE)]),
     version(4, "after_turn", today(10), [file(REPLY)], SECOND_TURN),
   ];
-  if (page === "newest") return head;
+  if (page === "newest" || page === "word") return head;
   return [
     ...head,
     version(5, "undo", today(20), [file(REPLY)], SECOND_TURN),
@@ -130,7 +132,7 @@ function matterEntries(page: VersionsPage): ViewEntry[] {
 }
 
 /** The conversation's steps: its turn three days ago (kept as cp2), the turn that made cp4 with a file too large to keep
- * (undone since, or on newest not yet), and the last turn, whose change wasn't kept. */
+ * (undone since, or on newest and word not yet), and the last turn, whose change wasn't kept. */
 function steps(page: VersionsPage): ViewEntry[] {
   return [
     stepEntry(9, { files: [file(NOTICE, true), file(REPLY)], checkpoint_after: "cp2" }),
@@ -139,7 +141,7 @@ function steps(page: VersionsPage): ViewEntry[] {
       files: [file(REPLY)],
       skipped: [{ path: ANNEXURE, reason: "over_size_cap" }],
       checkpoint_after: "cp4",
-      undone: page !== "newest",
+      undone: page !== "newest" && page !== "word",
       ts: today(10),
     }),
     stepEntry(29, { turn: UNSAVED_TURN, files: [file(REPLY)], ts: today(30) }),
@@ -160,12 +162,16 @@ export type VersionsHost = {
   query: (query: HostQuery) => QueryResult | undefined;
   /** The events a subscription to `stream` is sent, at once, or none for a stream the page doesn't have. */
   subscribe: (stream: string) => HostEvent[];
+  /** Whether the host refuses an undo_step because a program holds the file (matter.file_locked): on word. */
+  refusesUndo: boolean;
 };
 
-/** The host for one Versions page: the conversation runs on wait, and every other page has it idle. */
+/** The host for one Versions page: the conversation runs on wait, and every other page has it idle; on word an undo is
+ * refused with the lock. */
 export function versionsHost(page: VersionsPage): VersionsHost {
   const status: "idle" | "running" = page === "wait" ? "running" : "idle";
   return {
+    refusesUndo: page === "word",
     query: (query) => {
       if (typeof query !== "object") return undefined;
       if (query.list_threads !== undefined)
