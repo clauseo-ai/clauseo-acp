@@ -1390,5 +1390,33 @@
     "at": "2026-11-03",
     "by": "Rohan",
     "note": "Rohan, via the orchestrator (main page, #182)"
+  },
+  "U7-01": {
+    "en": "Waiting for '{title}' to finish.",
+    "hi": "'{title}' के पूरा होने की प्रतीक्षा है।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U7-02": {
+    "en": "One conversation changes a matter's papers at a time. Your message is ready to go.",
+    "hi": "किसी मामले के दस्तावेज़ एक समय में एक ही बातचीत बदलती है। आपका संदेश भेजने के लिए तैयार है।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U7-03": {
+    "en": "Stop the other",
+    "hi": "दूसरी रोकें",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U7-04": {
+    "en": "Queue",
+    "hi": "कतार में रखें",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
   }
 }
