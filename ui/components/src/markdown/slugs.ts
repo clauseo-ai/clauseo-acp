@@ -126,18 +126,18 @@ export function withSlugs(
   return copy(root);
 }
 
-/** What createSlugNumbering numbers: a view's sanitised hast and its headings' own slugs. */
-type Sluggable = { readonly hast: Root; readonly slugs?: readonly string[] };
+/** What createSlugNumbering numbers: a view with its headings' own slugs. */
+type Sluggable = { readonly slugs?: readonly string[] };
 
 /**
  * A function giving the views of an answer, in order, every heading's id numbered across the answer: a view
- * whose slugs an earlier heading took becomes a copy with `-1`, `-2`… ids (made by `id`), made again only
- * when those change. It keeps what it made of every view but the last: while those stay the same views (a
+ * whose slugs an earlier heading took becomes a copy with `-1`, `-2`… ids (made by `copy`, with withSlugs),
+ * made again only when those change. It keeps what it made of every view but the last: while those stay the same views (a
  * stream only changes its last block or two), the numbering carries on from there, instead of going over
  * every heading of the answer on every update.
  */
 export function createSlugNumbering<V extends Sluggable>(
-  id: (value: string) => string,
+  copy: (view: V, slugs: readonly string[]) => V,
 ): (views: readonly V[]) => readonly V[] {
   const renumbered = new WeakMap<V, { key: string; view: V }>();
   const renumber = (view: V, slugs: readonly string[]): V => {
@@ -145,9 +145,9 @@ export function createSlugNumbering<V extends Sluggable>(
     const key = slugs.join("\u0000");
     const known = renumbered.get(view);
     if (known?.key === key) return known.view;
-    const copy = { ...view, hast: withSlugs(view.hast, slugs, id) };
-    renumbered.set(view, { key, view: copy });
-    return copy;
+    const made = copy(view, slugs);
+    renumbered.set(view, { key, view: made });
+    return made;
   };
   let before: {
     views: readonly V[];

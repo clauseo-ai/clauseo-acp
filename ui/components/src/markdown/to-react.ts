@@ -89,8 +89,6 @@ const TAGS: ReadonlyMap<string, unknown> = new Map<string, unknown>([
 const VOID = new Set(["br", "hr", "img", "input"]);
 /** Tags whose whitespace-only text children React would warn about (no text node may sit there in HTML). */
 const TABLE_PARTS = new Set(["table", "thead", "tbody", "tfoot", "tr"]);
-/** Our components that read their hast element (passNode). */
-const NEEDS_NODE = new Set(["a", "pre"]);
 /** The cell alignments mdast-util-to-hast produces. */
 const ALIGNMENTS = new Set(["left", "right", "center"]);
 const WHITESPACE = /^[ \t\n\f\r]*$/;
@@ -166,13 +164,41 @@ function create(
   return make(type as never, props, key);
 }
 
+/** The text of hast nodes, through any markup (`**good.com**`, `` `good.com` ``). */
+function textOf(nodes: readonly ElementContent[]): string {
+  let text = "";
+  for (const node of nodes) {
+    if (node.type === "text") text += node.value;
+    else if (node.type === "element") text += textOf(node.children);
+  }
+  return text;
+}
+
+/**
+ * What a code block (`pre`) shows: its `code` child's text and language, as CodeBlock takes them. The
+ * elements keep these strings, not the hast: a finished block's view lets its hast go (answer.ts).
+ */
+function codeOf(node: Element, props: Record<string, unknown>): void {
+  const code = node.children.find(
+    (child): child is Element => child.type === "element" && child.tagName === "code",
+  );
+  const classes = code?.properties["className"];
+  const language = Array.isArray(classes)
+    ? classes.map(String).find((name) => name.startsWith("language-"))
+    : undefined;
+  props["text"] = textOf(code ? code.children : []);
+  if (language) props["lang"] = language.slice("language-".length);
+}
+
 function elementOf(node: Element, key: string, continues = false): ReactNode {
   const type = TAGS.get(node.tagName);
   if (type === undefined) return null;
   const props = propsOf(node);
   if (continues) props[CONTINUES.name] = CONTINUES.value;
-  if (NEEDS_NODE.has(node.tagName)) props["node"] = node;
-  // A code block reads its text from the node; its children would be built only to be thrown away.
+  // A link's whole text, for its spoofed-host check (link.tsx); a code block's text and language.
+  if (node.tagName === "a") props["text"] = textOf(node.children);
+  else if (node.tagName === "pre") codeOf(node, props);
+  // A code block's children would be built only to be thrown away.
   const children =
     VOID.has(node.tagName) || node.tagName === "pre"
       ? []

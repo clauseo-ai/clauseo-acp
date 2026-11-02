@@ -239,11 +239,35 @@ function refPart(id: string, nth: number): string {
   return `${id.replaceAll("-", "--")}${nth > 1 ? `-${nth}` : ""}`;
 }
 
+/** What rendering references reads of the numbering: each identifier's number, and whether its note exists. */
+export type References = {
+  readonly number: ReadonlyMap<string, number>;
+  readonly notes: { has(id: string): boolean };
+};
+
+const NO_REFERENCES: References = { number: new Map(), notes: new Set() };
+
+/**
+ * The part of `numbering` that references to `ids` read: what a finished view keeps, so that it can be
+ * rendered again from its source (answer.ts) without holding on to the whole numbering and its notes.
+ */
+export function referencesFor(numbering: References, ids: readonly string[]): References {
+  if (ids.length === 0) return NO_REFERENCES;
+  const number = new Map<string, number>();
+  const notes = new Set<string>();
+  for (const id of ids) {
+    const value = numbering.number.get(id);
+    if (value !== undefined) number.set(id, value);
+    if (numbering.notes.has(id)) notes.add(id);
+  }
+  return { number, notes };
+}
+
 /**
  * The footnoteReference handler for one block (or note): the reference's answer-wide number, its own
  * back-reference id for each repeat, a link to the note when it is defined, and a pending number when not.
  */
-export function referenceHandler(scope: string, numbering: Numbering, nths: Nths): Handler {
+export function referenceHandler(scope: string, numbering: References, nths: Nths): Handler {
   const met = new Map<string, number>();
   return (_state, node: FootnoteReference) => {
     const id = node.identifier;
@@ -312,15 +336,41 @@ function backReferences(scope: string, id: string, index: number, count: number)
 }
 
 /**
+ * What one shown note's rendering reads of the numbering (`numberOf`): its note, its number, how many
+ * references call it, and the numbers of the references inside it. A note's view keeps it, so that it can be
+ * rendered again (answer.ts).
+ */
+export type NoteNumbers = {
+  readonly note: Note;
+  readonly number: number;
+  readonly total: number;
+  readonly inner: Nths;
+  readonly references: References;
+};
+
+/** The NoteNumbers of shown note `id`. */
+export function noteNumbersOf(numbering: Numbering, id: string): NoteNumbers {
+  const note = numbering.notes.get(id)!;
+  return {
+    note,
+    number: numbering.number.get(id)!,
+    total: numbering.total.get(id) ?? 0,
+    inner: numbering.inNotes.get(id) ?? EMPTY,
+    references: referencesFor(numbering, note.refs),
+  };
+}
+
+/**
  * One note of the notes section, unsanitised: a root holding its list item, its content rendered with
- * `options` (and the reference handler for the references inside it), then its back-references. `id` is
- * a shown note's identifier; each note is its own view, so one that changes re-renders alone. The
+ * `options` (and the reference handler for the references inside it), then its back-references. `numbers`
+ * are a shown note's (noteNumbersOf); each note is its own view, so one that changes re-renders alone. The
  * section around the items (notes.tsx) is the same for every answer.
  */
-export function noteHast(scope: string, numbering: Numbering, id: string, options: Options): Hast {
-  const note = numbering.notes.get(id)!;
-  const index = numbering.number.get(id)! - 1;
-  const handler = referenceHandler(scope, numbering, numbering.inNotes.get(id) ?? EMPTY);
+export function noteHast(scope: string, numbers: NoteNumbers, options: Options): Hast {
+  const { note, inner, references } = numbers;
+  const id = note.id;
+  const index = numbers.number - 1;
+  const handler = referenceHandler(scope, references, inner);
   const tree: Root = { type: "root", children: [...note.definitions, ...note.node.children] };
   const content = (
     toHast(tree, {
@@ -328,7 +378,7 @@ export function noteHast(scope: string, numbering: Numbering, id: string, option
       handlers: { ...options.handlers, footnoteReference: handler },
     }) as Hast
   ).children.filter((child): child is ElementContent => child.type !== "doctype");
-  const back = backReferences(scope, id, index, numbering.total.get(id) ?? 0);
+  const back = backReferences(scope, id, index, numbers.total);
   let last: ElementContent | undefined;
   for (const child of content) if (child.type === "element") last = child;
   // The space before them is a text node of its own: added to the note's last text, it made a closing

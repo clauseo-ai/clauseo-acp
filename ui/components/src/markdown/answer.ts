@@ -4,7 +4,8 @@
 // footnote numbers, so a finished block costs a map lookup and keeps the same view object (the React layer
 // memoises on it). Only the streaming last block gets tail repair (repair.ts). The notes, if any, are one
 // more view after the last block. Inline HTML is text but for the allowlisted tags (inline-tags.ts), and
-// headings get GitHub's slugs as ids, numbered across the whole answer (slugs.ts).
+// headings get GitHub's slugs as ids, numbered across the whole answer (slugs.ts). What a view keeps once its
+// update has ended, and what parses a finished block again, is view.ts's.
 import type { Root as Hast, Text } from "hast";
 import type { Root } from "mdast";
 import { sanitize } from "hast-util-sanitize";
@@ -28,12 +29,14 @@ import {
   identifierOf,
   NO_FOOTNOTES,
   noteHast,
+  noteNumbersOf,
   numberFootnotes,
   placeholdersFor,
   referenceHandler,
+  referencesFor,
   withoutPlaceholders,
 } from "./footnotes.ts";
-import type { Footnotes, Numbering } from "./footnotes.ts";
+import type { Footnotes, NoteNumbers, Nths, Numbering, References } from "./footnotes.ts";
 import { createCache, createIds, createJoiner, createVariants } from "./cache.ts";
 import { characterEntitiesLoaded, characterReferenceMisses } from "./entities.ts";
 import {
@@ -54,43 +57,15 @@ import {
 import { endOf, parse } from "./parse.ts";
 import { repairTail } from "./repair.ts";
 import { CLOBBER_PREFIX, SCHEMA } from "./schema.ts";
-import { anchorHeadings, createSlugNumbering, headingId } from "./slugs.ts";
+import { anchorHeadings, createSlugNumbering, headingId, withSlugs } from "./slugs.ts";
 import { createSplitter, joinParts } from "./split.ts";
 import type { BlockEnd } from "./split.ts";
 import { extrasHandlers } from "./syntax-extras.ts";
+import { EMPTY_HAST, plainText, seal, variantOf, viewOf } from "./view.ts";
+import type { BlockView, Fields } from "./view.ts";
 
-/**
- * One block, ready to render: `source` is the block's text, `input` what was parsed for it (with its
- * footnote numbers, for the notes view a key), `hast` the sanitised result. `streaming` marks the last
- * block of a streaming answer, whose links stay inert until it is finished (a URL may still be arriving,
- * and tail repair may have rewritten it). `notes` marks the answer's notes, after its last block: `items`
- * holds one view per note, in number order, each with its note's identifier as `note`, and its `hast` is
- * empty (the section around the items is the renderer's).
- */
-export type BlockView = {
-  readonly source: string;
-  readonly input: string;
-  readonly hast: Hast;
-  readonly streaming: boolean;
-  readonly notes?: true;
-  readonly items?: readonly BlockView[];
-  readonly note?: string;
-  /** The slug of each of its headings, in order, before the answer's repeats are numbered. */
-  readonly slugs?: readonly string[];
-  /**
-   * The block continues the paragraph of the block before: a paragraph longer than split.ts's
-   * MAX_PARAGRAPH is cut into parts while it streams (and for good, past MAX_JOINED). Its first paragraph
-   * is the rest of that one, rendered without the gap between paragraphs (to-react.ts).
-   */
-  readonly continues?: true;
-  /**
-   * The ids of the footnote references this block's view shows as plain text, inside a dropped
-   * never-markup pair (inline-tags.ts): their notes leave out the back-reference to them.
-   */
-  readonly lostReferences?: readonly string[];
-};
-
-const EMPTY_HAST: Hast = { type: "root", children: [] };
+export type { BlockView } from "./view.ts";
+export { holdsHast, plainText } from "./view.ts";
 
 export type Answer = {
   /** The blocks for the whole answer so far; `streaming` is false once the turn has ended. */
@@ -108,15 +83,6 @@ export const HANDLERS: Record<string, Handler> = {
   ...extrasHandlers,
   ...(defListHastHandlers as Record<string, Handler>),
 };
-
-/** A block shown as its source, in plain text: what a block that cannot render safely falls back to. */
-export function plainText(source: string): Hast {
-  const text: Text = { type: "text", value: source.trimEnd() };
-  return {
-    type: "root",
-    children: [{ type: "element", tagName: "p", properties: {}, children: [text] }],
-  };
-}
 
 /**
  * What one block needs for its view: its parse input with every footnote label it may call (`input`, from
@@ -159,8 +125,8 @@ export function createAnswer(scope: string): Answer {
   const views = createCache<BlockView>();
   const tails = createCache<BlockView>();
   const noteViews = createCache<BlockView>();
+  // Not trees: each update keeps only the streaming last block's parses (tailKeys).
   const caches = [
-    trees,
     ends,
     owned,
     labels,
@@ -177,13 +143,30 @@ export function createAnswer(scope: string): Answer {
   // Whether a parse met a named character reference before the full table had loaded (entities.ts).
   let missed = false;
   let entities = characterEntitiesLoaded();
-  const tree = (source: string) =>
-    trees.get(source, () => {
+  // The inputs parsed for the streaming last block this update: the only mdast the model keeps after it.
+  const tailKeys = new Set<string>();
+  let inTail = false;
+  const tree = (source: string) => {
+    if (inTail) tailKeys.add(source);
+    return trees.get(source, () => {
       const misses = characterReferenceMisses();
       const root = parse(source);
       if (!entities && characterReferenceMisses() !== misses) missed = true;
       return root;
     });
+  };
+  // The views this update made, sealed as it ends.
+  const made: BlockView[] = [];
+  const view = (fields: Fields, hast: Hast | undefined, rebuild: () => Hast) => {
+    const one = viewOf(fields, hast, rebuild);
+    made.push(one);
+    return one;
+  };
+  const variant = (base: BlockView, extra: Partial<Fields>, change?: (hast: Hast) => Hast) => {
+    const one = variantOf(base, extra, change);
+    made.push(one);
+    return one;
+  };
   const split = createSplitter((block) => ends.get(block, () => endOf(block, tree(block))));
   const options: Options = { clobberPrefix: `${scope}-`, handlers: HANDLERS };
 
@@ -198,33 +181,50 @@ export function createAnswer(scope: string): Answer {
    * A block's view. A tree too deep to walk safely, or any error on the way, shows the block's source as
    * plain text instead: one bad block never takes the answer down (markdown.tsx adds an error boundary).
    * `source` and `input` are as capped (nesting.ts); the view's `source` and text are as written.
-   * `streaming` marks the streaming last block, whose unpaired tags at its end are hidden.
+   * `references` and `nths` are what its footnote references read (referencesFor), kept to make its hast
+   * again. `written` marks the streaming last block, as written before tail repair: its unpaired tags at its
+   * end are hidden, and the view's `source` is that text.
    */
   const toView = (
     source: string,
     input: string,
-    footnote: Handler,
-    streaming = false,
+    references: References,
+    nths: Nths,
+    written?: string,
   ): BlockView => {
+    const tail = written !== undefined;
     const shown = restore(source);
-    const fallback = { source: shown, input, hast: plainText(shown), streaming: false };
-    try {
-      const root = withoutPlaceholders(tree(input), input.length - source.length);
-      if (deeperThan(root, MAX_TREE_DEPTH)) return fallback;
-      const handlers = { ...HANDLERS, footnoteReference: footnote };
-      const hast = toHast(root, { ...options, handlers }) as Hast;
-      // A `<` nesting.ts made text at a line's start may be a tag again (markCutTags).
-      const tags = input.includes("<") || input.includes(CUT_LESS_THAN);
-      if (tags) markCutTags(hast, input);
-      if (hasStandIns(input)) restoreText(hast);
-      const lost = tags ? pairTags(hast, streaming) : [];
-      const slugs = anchorHeadings(hast, scope);
-      const clean = sanitize(hast, SCHEMA) as Hast;
-      const view: BlockView = { source: shown, input, hast: clean, streaming: false, slugs };
-      return lost.length > 0 ? { ...view, lostReferences: lost } : view;
-    } catch {
-      return fallback;
-    }
+    const render = () => {
+      try {
+        const root = withoutPlaceholders(tree(input), input.length - source.length);
+        if (deeperThan(root, MAX_TREE_DEPTH)) return undefined;
+        const footnote = referenceHandler(scope, references, nths);
+        const handlers = { ...HANDLERS, footnoteReference: footnote };
+        const hast = toHast(root, { ...options, handlers }) as Hast;
+        // A `<` nesting.ts made text at a line's start may be a tag again (markCutTags).
+        const tags = input.includes("<") || input.includes(CUT_LESS_THAN);
+        if (tags) markCutTags(hast, input);
+        if (hasStandIns(input)) restoreText(hast);
+        const lost = tags ? pairTags(hast, tail) : [];
+        const slugs = anchorHeadings(hast, scope);
+        return { hast: sanitize(hast, SCHEMA) as Hast, slugs, lost };
+      } catch {
+        return undefined;
+      }
+    };
+    const fields: Fields = {
+      source: tail ? restore(written) : shown,
+      input,
+      streaming: tail,
+    };
+    const done = render();
+    if (!done) return view(fields, plainText(shown), () => plainText(shown));
+    const rendered: Fields = { ...fields, slugs: done.slugs };
+    return view(
+      done.lost.length > 0 ? { ...rendered, lostReferences: done.lost } : rendered,
+      done.hast,
+      () => render()?.hast ?? plainText(shown),
+    );
   };
 
   /**
@@ -403,33 +403,34 @@ export function createAnswer(scope: string): Answer {
     // which only a reference inside a dropped never-markup pair does.
     if (lost.size > 0) key += `\u0004${[...lost].join(" ")}`;
     return noteViews.get(`${key}\u0002${streaming ? 1 : 0}`, () => {
-      // As toView does for a block: a note too deep to walk safely, or any error on the way, shows its
-      // source as plain text, and what capNesting replaced reads as written.
+      const numbers = noteNumbersOf(numbering, id);
       const shown = restore(note.source);
-      const fallback = (): Hast => {
-        const text: Text = { type: "text", value: shown.trimEnd() };
-        return {
-          type: "root",
-          children: [{ type: "element", tagName: "li", properties: {}, children: [text] }],
-        };
-      };
-      let hast: Hast;
-      try {
-        if (deeperThan(note.node, MAX_TREE_DEPTH)) hast = fallback();
-        else {
-          const raw = noteHast(scope, numbering, id, options);
-          // The note's own text, and the link definitions from other blocks it carries, may hold some.
-          markCutTags(raw, note.source, note.node.position?.start.offset ?? 0);
-          if (hasStandIns(note.source) || note.definitions.length > 0) restoreText(raw);
-          pairTags(raw, false);
-          if (lost.size > 0) dropBackReferences(raw, lost);
-          hast = sanitize(raw, SCHEMA) as Hast;
-        }
-      } catch {
-        hast = fallback();
-      }
-      return { source: shown, input: key, hast, streaming, note: id };
+      const make = () => noteHastOf(numbers, shown, lost);
+      return view({ source: shown, input: key, streaming, note: id }, make(), make);
     });
+  };
+  /**
+   * A note's hast. As toView does for a block: a note too deep to walk safely, or any error on the way,
+   * shows its source (`shown`) as plain text, and what capNesting replaced reads as written.
+   */
+  const noteHastOf = (numbers: NoteNumbers, shown: string, lost: ReadonlySet<string>): Hast => {
+    const { note } = numbers;
+    try {
+      if (deeperThan(note.node, MAX_TREE_DEPTH)) throw new Error("too deep");
+      const raw = noteHast(scope, numbers, options);
+      // The note's own text, and the link definitions from other blocks it carries, may hold some.
+      markCutTags(raw, note.source, note.node.position?.start.offset ?? 0);
+      if (hasStandIns(note.source) || note.definitions.length > 0) restoreText(raw);
+      pairTags(raw, false);
+      if (lost.size > 0) dropBackReferences(raw, lost);
+      return sanitize(raw, SCHEMA) as Hast;
+    } catch {
+      const text: Text = { type: "text", value: shown.trimEnd() };
+      return {
+        type: "root",
+        children: [{ type: "element", tagName: "li", properties: {}, children: [text] }],
+      };
+    }
   };
   const notesOf = (
     numbering: Numbering,
@@ -447,19 +448,18 @@ export function createAnswer(scope: string): Answer {
       return lastNotes;
     const source = items.map((item) => item.source).join("");
     const input = items.map((item) => item.input).join("\u0001");
-    return (lastNotes = { source, input, hast: EMPTY_HAST, streaming: false, notes: true, items });
+    const fields: Fields = { source, input, streaming: false, notes: true, items };
+    return (lastNotes = view(fields, EMPTY_HAST, () => EMPTY_HAST));
   };
 
   /** The block views with every heading's id numbered across the answer (slugs.ts). */
-  const numberedSlugs = createSlugNumbering<BlockView>(
-    (value) => CLOBBER_PREFIX + headingId(scope, value),
+  const slugId = (value: string) => CLOBBER_PREFIX + headingId(scope, value);
+  const numberedSlugs = createSlugNumbering<BlockView>((base, slugs) =>
+    variant(base, {}, (hast) => withSlugs(hast, slugs, slugId)),
   );
 
   /** A view as a block that continues the paragraph before (BlockView's `continues`), the same object each time. */
-  const continuingOf = createVariants((view: BlockView): BlockView => ({
-    ...view,
-    continues: true,
-  }));
+  const continuingOf = createVariants((base: BlockView) => variant(base, { continues: true }));
   /** A paragraph's parts joined (joinParts), the same string while its parts are the same strings. */
   const joinOf = createJoiner();
 
@@ -504,7 +504,14 @@ export function createAnswer(scope: string): Answer {
       const reusable = lines === lastLinesUsed ? lastBlocks.length - (lastStreaming ? 1 : 0) : 0;
       const entries = blocks.map((block, index): Entry => {
         const before = lastEntries[index];
-        if (streaming && index === last) return tailEntryOf(block, lines, defined);
+        if (streaming && index === last) {
+          inTail = true;
+          try {
+            return tailEntryOf(block, lines, defined);
+          } finally {
+            inTail = false;
+          }
+        }
         if (
           before &&
           index < reusable &&
@@ -513,8 +520,6 @@ export function createAnswer(scope: string): Answer {
         ) {
           for (const cache of [noteLabels, defines, labels, inputs]) cache.keep(block);
           facts.keep(before.input);
-          // Kept parsed: a note arriving re-renders the blocks that call it without parsing them again.
-          if (before.footnotes.refs.length > 0) trees.keep(before.input);
           return before;
         }
         return entryOf(block, lines, defined, streaming);
@@ -542,17 +547,20 @@ export function createAnswer(scope: string): Answer {
         entry.viewInput = viewInput;
         const key = keyOf(entry.source, viewInput);
         entry.key = signature === "" ? key : `${key}\u0002${signature}`;
-        const make = () =>
-          toView(entry.source, viewInput, referenceHandler(scope, numbering, nths), tail);
-        if (!tail) return views.get(entry.key, make);
+        const references = () => referencesFor(numbering, entry.footnotes.refs);
+        if (!tail)
+          return views.get(entry.key, () => toView(entry.source, viewInput, references(), nths));
         // The streaming tail's view holds the block as written (for its fallback), not the repaired text,
         // and so is cached on both.
         const written = blocks[index]!;
-        return tails.get(`${entry.key}\u0003${written}`, () => ({
-          ...make(),
-          source: restore(written),
-          streaming: true,
-        }));
+        return tails.get(`${entry.key}\u0003${written}`, () => {
+          inTail = true;
+          try {
+            return toView(entry.source, viewInput, references(), nths, written);
+          } finally {
+            inTail = false;
+          }
+        });
       });
       // An empty answer (every streamed answer starts as one) has no blocks, so no tail.
       const tail = streaming ? entries[last] : undefined;
@@ -571,7 +579,21 @@ export function createAnswer(scope: string): Answer {
       lastText = raw;
       lastStreaming = streaming;
       for (const cache of caches) cache.sweep();
+      trees.retain(tailKeys);
+      tailKeys.clear();
       joinOf.sweep();
+      // Every view this update made lets its hast go; those it shows make their React elements first.
+      // A stream makes a view or two an update, near the end: looked for from there.
+      const shownViews = notes?.items ? [...lastViews, ...notes.items] : lastViews;
+      const shown =
+        made.length > 8
+          ? (
+              (all) => (view: BlockView) =>
+                all.has(view)
+            )(new Set(shownViews))
+          : (view: BlockView) => shownViews.lastIndexOf(view) >= 0;
+      for (const one of made) seal(one, shown(one));
+      made.length = 0;
       return lastViews;
     },
     waitsForEntities: () => missed && !entities,

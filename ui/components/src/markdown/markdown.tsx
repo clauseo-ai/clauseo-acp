@@ -1,6 +1,6 @@
 // The answer renderer: one memoised block per top-level Markdown block, so finished blocks never re-render
-// while the tail streams. The model (answer.ts) does the split, the definitions, the parse and the
-// sanitiser; this file only maps each block's sanitised hast to React through our components.
+// while the tail streams. The model (answer.ts) does the split, the definitions, the parse, the sanitiser
+// and each block's React elements (to-react.ts); this file only renders them.
 import { memo, useEffect, useId, useState, useSyncExternalStore } from "react";
 import { createAnswer } from "./answer.ts";
 import type { BlockView } from "./answer.ts";
@@ -8,7 +8,6 @@ import { BlockBoundary } from "./boundary.tsx";
 import { characterEntitiesLoaded, onCharacterEntities, prefetchEntities } from "./entities.ts";
 import { AnswerScopeContext, InertLinksContext, scopeOf } from "./host.ts";
 import { Notes } from "./notes.tsx";
-import { toReact } from "./to-react.ts";
 
 /**
  * `text` is the whole answer so far (an AppendText patch's result; what the patch appended is not needed,
@@ -44,7 +43,7 @@ const NotesBlock = memo(function NotesBlock({ items }: { items: readonly BlockVi
 });
 
 function BlockContent({ view }: { view: BlockView }) {
-  return toReact(view.hast, view.continues);
+  return view.content;
 }
 
 export function Markdown({ text, streaming = false }: MarkdownProps) {
