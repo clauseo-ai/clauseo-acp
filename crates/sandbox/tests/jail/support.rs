@@ -232,6 +232,44 @@ pub(crate) fn run_outside(program: &str, args: &[&str], cwd: &Path) -> Output {
     run(&launcher, program, args, cwd, &[])
 }
 
+/// The variables that point git at another repository. A spawned process inherits the test's
+/// environment, and git sets `GIT_DIR` for its hooks, so a test run from a pre-push hook would
+/// otherwise run these git commands against the repository being pushed.
+const GIT_REDIRECTS: [&str; 9] = [
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_COMMON_DIR",
+    "GIT_NAMESPACE",
+    "GIT_CEILING_DIRECTORIES",
+    "GIT_PREFIX",
+];
+
+/// `/usr/bin/git args` through `launcher` in `cwd`, started by `/usr/bin/env` with every
+/// variable in [`GIT_REDIRECTS`] removed, so git works on the repository in `cwd` only.
+pub(crate) fn git(
+    launcher: &dyn Launcher,
+    args: &[&str],
+    cwd: &Path,
+    env: &[(&str, &str)],
+) -> Output {
+    let mut all = Vec::new();
+    for name in GIT_REDIRECTS {
+        all.extend(["-u", name]);
+    }
+    all.push("/usr/bin/git");
+    all.extend_from_slice(args);
+    run(launcher, "/usr/bin/env", &all, cwd, env)
+}
+
+/// [`git`] outside the jail.
+pub(crate) fn git_outside(args: &[&str], cwd: &Path) -> Output {
+    let launcher = PassthroughLauncher::new(SpawnOptions::new());
+    git(&launcher, args, cwd, &[])
+}
+
 /// `/bin/sh -c script` through `launcher` in `cwd`, with `args` as `$1`, `$2`, ...
 pub(crate) fn sh(launcher: &dyn Launcher, cwd: &Path, script: &str, args: &[&str]) -> Output {
     let mut all = vec!["-c", script, "sh"];
