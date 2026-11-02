@@ -30,6 +30,7 @@ use clauseo_protocol::{
     ClientName,
     ConfigValue,
     ContentBlock,
+    Count,
     Cursor,
     Date,
     DeliveryRequest,
@@ -41,6 +42,8 @@ use clauseo_protocol::{
     FieldChange,
     FileChoice,
     FileDecision,
+    FolderPlace,
+    FolderScanned,
     FolderState,
     HeaderEntry,
     HostCommand,
@@ -328,6 +331,8 @@ mod host_command {
             agent: Some(AgentKind::Claude),
             why: RefreshWhy::Shown,
         };
+        ScanFolder => scan_folder: HostCommand::ScanFolder { folder: folder_ref_id(2) };
+        CancelScan => cancel_scan: HostCommand::CancelScan { folder: folder_ref_id(2) };
     } }
 
     /// `RefreshLimits` for every agent (no `agent` field), from a "Try again".
@@ -492,6 +497,16 @@ mod host_event {
             }],
             removed: Vec::new(),
             all: true,
+        });
+        FolderScanned => folder_scanned: HostEvent::FolderScanned(FolderScanned {
+            folder: folder_ref_id(2),
+            files: 12,
+            bytes: Count::new(40_960).unwrap(),
+            now_reading: Some(path("Leases/a.docx")),
+            place: FolderPlace::Synced { service: "OneDrive".to_owned() },
+            cloud_only: 3,
+            done: false,
+            cancelled: false,
         });
     } }
 }

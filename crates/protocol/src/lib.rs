@@ -214,7 +214,10 @@ wire_types! {
         UnavailableReason, WindowFreshness, WindowKind,
     },
     lists::{LastStop, MattersChanged, ThreadsChanged},
-    matter::{CheckpointKind, FileChoice, FileDecision, ImportSummary, MatterKind, RestoreScope},
+    matter::{
+        CheckpointKind, FileChoice, FileDecision, FolderPlace, FolderScanned, ImportSummary,
+        MatterKind, RestoreScope,
+    },
     number::{Count, Cursor, Finite, Seq, Timestamp},
     patch::{
         Ack, AppendTarget, HostEvent, PatchBatch, StreamHeader, Subscribe, SubscribeEvents,

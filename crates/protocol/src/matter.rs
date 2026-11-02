@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::open_enum::{open_data_enum, open_unit_enum};
-use crate::{Count, MatterPath};
+use crate::{Count, FolderRefId, MatterPath};
 
 open_unit_enum! {
     /// How a matter was made.
@@ -93,4 +93,50 @@ pub enum FileChoice {
     Undo,
     /// Leave it as it is.
     Keep,
+}
+
+/// How far the scan of a folder before it becomes a matter has got, after
+/// `HostCommand::ScanFolder`: an app-wide event (`HostEvent::FolderScanned`), never logged
+/// and never part of a stream. The host sends at most one every 250 ms while the walk runs, and
+/// always a last one with `done`. Counts are at most `u32::MAX`; `bytes` is at most
+/// [`MAX_SAFE`](crate::MAX_SAFE).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct FolderScanned {
+    /// The folder, as `ScanFolder` named it.
+    pub folder: FolderRefId,
+    /// Files an import would version so far: cloud-only and over-cap files are not counted.
+    /// When the scan is done and not cancelled, `ImportSummary::files` for the same folder.
+    pub files: u32,
+    /// Their total size in bytes; when done, `ImportSummary::bytes`.
+    pub bytes: Count,
+    /// The file the walk reached last, relative to the folder; left out before the first file
+    /// and in the last event.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub now_reading: Option<MatterPath>,
+    /// Where the folder lives.
+    pub place: FolderPlace,
+    /// Cloud-only files so far, counted from their metadata and never read.
+    pub cloud_only: u32,
+    /// The last event of this scan.
+    pub done: bool,
+    /// The scan was cancelled (`CancelScan`, or a newer `ScanFolder`); only with `done`.
+    pub cancelled: bool,
+}
+
+/// Where a folder lives. JSON: `"local"`, `"network"` or `{"synced": {"service": ".."}}`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub enum FolderPlace {
+    /// On a disk of this computer, and no cloud service Clauseo knows syncs it.
+    Local,
+    /// On a network drive or share.
+    Network,
+    /// In a folder a cloud service syncs.
+    Synced {
+        /// The service, from the synced folder's name: `OneDrive`, `GoogleDrive`,
+        /// `iCloud Drive`.
+        service: String,
+    },
 }
