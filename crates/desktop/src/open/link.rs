@@ -145,10 +145,10 @@ fn public_v6(v6: Ipv6Addr) -> bool {
 }
 
 /// The addresses a mailto link writes to, decoded, `,` between two. Each is `local@domain` with
-/// both parts non-empty, in RFC 5322's atext and `.` (so no space, quote, angle bracket,
-/// backslash, control or letter outside ASCII reaches the confirm or the mail app), at most
-/// [`MAX_MAIL_SHOWN`] bytes in all. The link may carry a subject and a body ([`MAIL_FIELDS`]),
-/// each once, and nothing else: no other header and no fragment.
+/// both parts non-empty, in RFC 5322's atext and `.` less `? & = % /` (so no space, quote, angle
+/// bracket, backslash, control or letter outside ASCII reaches the confirm or the mail app), at
+/// most [`MAX_MAIL_SHOWN`] bytes in all. The link may carry a subject and a body
+/// ([`MAIL_FIELDS`]), each once, and nothing else: no other header and no fragment.
 fn mail_addresses(url: &url::Url) -> Result<String, HostError> {
     let refused = |why: &str| invalid(format!("this mailto link does not open: {why}"));
     if url.fragment().is_some() {
@@ -179,7 +179,8 @@ fn mail_addresses(url: &url::Url) -> Result<String, HostError> {
 }
 
 /// Whether `address` is `local@domain`: one `@`, both sides non-empty, every byte RFC 5322
-/// atext or `.`.
+/// atext or `.`, less `? & = % /`, which a mail app that decodes the address again could read as
+/// a header.
 fn plain_address(address: &str) -> bool {
     let Some((local, domain)) = address.split_once('@') else {
         return false;
@@ -188,10 +189,14 @@ fn plain_address(address: &str) -> bool {
         !part.is_empty()
             && part
                 .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || b"!#$%&'*+-/=?^_`{|}~.".contains(&byte))
+                .all(|byte| byte.is_ascii_alphanumeric() || ADDRESS_BYTES.contains(&byte))
     };
     atext(local) && atext(domain)
 }
+
+/// The bytes beside letters and digits an address may hold: RFC 5322 atext and `.`, less
+/// `? & = % /`.
+const ADDRESS_BYTES: &[u8] = b"!#$'*+-^_`{|}~.";
 
 /// `text` with each `%XX` decoded, when the result is UTF-8.
 fn percent_decode(text: &str) -> Option<String> {

@@ -99,7 +99,8 @@ pub(crate) struct Document {
 
 /// Checks `path` is a document `open_file` may open: it and `folder` resolve (symlinks and `..`
 /// followed), it lies in `folder`, it is a file (not a folder, so not a macOS app bundle), it
-/// is not marked as a program (no execute bit, on macOS and Linux), and its type is one of
+/// is not marked as a program (no execute bit, on Linux; macOS opens with the checked type's app,
+/// and its SMB and exFAT volumes mark every file executable), and its type is one of
 /// [`DOCUMENT_TYPES`]. `matter.folder_missing` when the folder does not resolve;
 /// `command.invalid` otherwise.
 pub(crate) fn check_document(path: &Path, folder: &Path) -> Result<Document, HostError> {
@@ -119,7 +120,7 @@ pub(crate) fn check_document(path: &Path, folder: &Path) -> Result<Document, Hos
     if !metadata.is_file() {
         return Err(invalid("only files open, not folders"));
     }
-    #[cfg(unix)]
+    #[cfg(all(unix, not(target_os = "macos")))]
     {
         use std::os::unix::fs::PermissionsExt as _;
         if metadata.permissions().mode() & 0o111 != 0 {
@@ -185,9 +186,9 @@ pub(crate) async fn open_external(
     opener.open_url(&link.url)
 }
 
-/// `open_file`: through `gate` (one at a time, at most one per [`BETWEEN_OPENS`]:
-/// `command.conflict`), asks the host what `file` names, checks it (`check_document`) and
-/// opens it with the default app for its type.
+/// `open_file`: through `gate` (one at a time, and at most one document opened per
+/// [`BETWEEN_OPENS`]: `command.conflict`), asks the host what `file` names, checks it
+/// (`check_document`) and opens it with the default app for its type.
 pub(crate) async fn open_file(
     locate: &dyn Locate,
     opener: &dyn Opener,
@@ -196,9 +197,11 @@ pub(crate) async fn open_file(
     file: FileRefId,
 ) -> Result<(), HostError> {
     let pass = gate.enter(now())?;
-    pass.quiet_for(now(), BETWEEN_OPENS);
     let located = locate.locate_file(file).await?;
     let document = check_document(&located.path, &located.folder)?;
+    // Only a call that gets this far holds the next one back: a page sending refs that are
+    // refused cannot keep the lawyer's own clicks out.
+    pass.quiet_for(now(), BETWEEN_OPENS);
     opener.open_path(&document.path, &document.kind)
 }
 

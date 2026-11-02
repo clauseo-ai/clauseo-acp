@@ -67,12 +67,12 @@ converted document. From there they can call any IPC command the page can reach.
 - `built`: Links go through one `open_external`: https or http to a public host (no credentials,
   no localhost, loopback, private or link-local address, no overlong name), or mailto to plain
   `local@domain` addresses with at most a subject and a body, after a native confirm that names the
-  host in ASCII (`xn--` for an international name) or the addresses. Cancel is the default button,
-  one confirm shows at a time and none for a second after a decline; declined is
+  host in ASCII (`xn--` for an international name) or the addresses. Cancel is the default button and
+  only the open button accepts (Escape and close decline), one confirm shows at a time and none for a second after a decline; declined is
   `transport.unauthorized` ([0026](decisions/0026-open-and-reveal.md))
 - `built`: `open_file` opens only a file the host issued a ref for, inside the folder of the matter
   that owns it (checked by the host and again by the desktop on the resolved path), a regular file
-  with no execute bit, of a listed document type, at most one a second; on macOS in the type's
+  (with no execute bit, on Linux) of a listed document type, at most one a second; on macOS in the type's
   default app, named, so a file swapped for a link opens as a document, never as a program. `reveal`
   shows a folder selected in its parent and never launches it. Known gap: a process that can write
   the matter folder (the agent, until the sandbox) can swap the file or a folder on its path for a

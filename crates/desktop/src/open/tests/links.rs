@@ -80,6 +80,11 @@ fn a_mailto_link_that_hides_anything_is_refused() {
         // Quotes, angle brackets and backslashes.
         "mailto:a@b.example%22/x%3Cy%3E",
         "mailto:a%5Cb@c.example",
+        // Header-like bytes in the address.
+        "mailto:evil%3Fbcc=x@y.example",
+        "mailto:a&b@c.example",
+        "mailto:a%25b@c.example",
+        "mailto:a/b@c.example",
     ] {
         assert_eq!(code(check_link(bad)), ErrorCode::CommandInvalid, "{bad}");
     }

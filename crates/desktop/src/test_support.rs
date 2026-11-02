@@ -107,7 +107,7 @@ impl Scratch {
     }
 
     /// Marks the file `rel` under the scratch folder as a program (mode 0755).
-    #[cfg(unix)]
+    #[cfg(all(unix, not(target_os = "macos")))]
     #[expect(
         clippy::disallowed_methods,
         reason = "test set-up writes its scratch folder; the desktop crate has no write module"

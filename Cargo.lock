@@ -834,6 +834,7 @@ dependencies = [
  "futures",
  "memchr",
  "objc2-core-foundation",
+ "rfd",
  "serde",
  "serde_json",
  "specta",

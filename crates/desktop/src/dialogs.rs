@@ -1,16 +1,17 @@
-//! The two native dialogs the commands draw in Rust: the folder picker and the "always allow"
-//! confirm. Each sits behind a trait, so tests answer without a window, and the `e2e` build
-//! answers from its variables (`e2e.rs`). The webview has no permission for the dialog plugin.
+//! The native dialogs the commands draw in Rust: the folder picker (the dialog plugin) and the
+//! confirms, "always allow" and the link's (rfd, called directly: see [`confirm`]). Each sits
+//! behind a trait, so tests answer without a window, and the `e2e` build answers the picker and
+//! "always allow" from its variables (`e2e.rs`). The webview has no permission for the dialog
+//! plugin.
 
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 
 use futures::channel::oneshot;
+use rfd::{MessageButtons, MessageDialogResult, MessageLevel};
 use tauri::{AppHandle, Manager as _, Runtime};
-use tauri_plugin_dialog::{
-    DialogExt as _, MessageDialogButtons, MessageDialogKind, MessageDialogResult,
-};
+use tauri_plugin_dialog::DialogExt as _;
 
 /// A boxed future, so the traits stay object safe.
 pub(crate) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -35,39 +36,52 @@ const CONFIRM_CANCEL: &str = "Cancel";
 
 /// The buttons of a confirm: `cancel` first, so it is the default and focused button (Return
 /// and Enter on both OSes, Space on Windows) and a stray key never accepts. `ok` second.
-pub(crate) fn cancel_first(ok: &str, cancel: &str) -> MessageDialogButtons {
-    MessageDialogButtons::OkCancelCustom(cancel.to_owned(), ok.to_owned())
+pub(crate) fn cancel_first(ok: &str, cancel: &str) -> MessageButtons {
+    MessageButtons::OkCancelCustom(cancel.to_owned(), ok.to_owned())
 }
 
-/// Whether a confirm drawn with [`cancel_first`] was accepted: only a press of the `ok` button.
-/// Cancel, Escape, closing the dialog and anything else decline.
+/// Whether a confirm drawn with [`cancel_first`] was accepted: only rfd's answer for a press of
+/// the `ok` button, `Custom(ok)`. Its plain `Cancel` (Escape, Alt+F4 or the close button on
+/// Windows, a stopped sheet on macOS, a dialog that failed) and anything else decline.
 pub(crate) fn accepted(result: &MessageDialogResult, ok: &str) -> bool {
     matches!(result, MessageDialogResult::Custom(label) if label == ok)
 }
 
 /// Draws a native confirm on `app`, over the main window, with [`cancel_first`]'s buttons, and
-/// answers [`accepted`]. A dialog that never answers (the app closing) counts as declined.
+/// answers [`accepted`]. rfd is called directly, as the dialog plugin itself calls it (built on
+/// the main thread, awaited on a thread of its own), because the plugin turns rfd's plain
+/// `Cancel` into `Custom(<second label>)`, which with Cancel first is the accepting label. A
+/// dialog that never answers (the app closing, no main thread, no thread) counts as declined.
 pub(crate) fn confirm<R: Runtime>(
     app: &AppHandle<R>,
-    kind: MessageDialogKind,
+    level: MessageLevel,
     title: String,
     message: String,
     ok: String,
     cancel: &str,
 ) -> BoxFuture<'static, bool> {
     let (tx, rx) = oneshot::channel();
-    let mut dialog = app
-        .dialog()
-        .message(message)
-        .title(title)
-        .kind(kind)
-        .buttons(cancel_first(&ok, cancel));
-    if let Some(main) = app.get_webview_window(crate::MAIN_WINDOW) {
-        dialog = dialog.parent(&main);
-    }
-    dialog.show_with_result(move |result| {
-        // The command may have gone; then nobody reads the answer.
-        let _gone = tx.send(accepted(&result, &ok));
+    let main = app.get_webview_window(crate::MAIN_WINDOW);
+    let buttons = cancel_first(&ok, cancel);
+    // Not posted (the event loop has gone): the closure and its sender drop, which declines.
+    let _unposted = app.run_on_main_thread(move || {
+        let mut dialog = rfd::AsyncMessageDialog::new()
+            .set_title(&title)
+            .set_description(&message)
+            .set_level(level)
+            .set_buttons(buttons);
+        if let Some(main) = &main {
+            dialog = dialog.set_parent(main);
+        }
+        let shown = dialog.show();
+        // No thread: the sender drops with the closure, which declines.
+        let _no_thread = std::thread::Builder::new()
+            .name("clauseo-confirm".to_owned())
+            .spawn(move || {
+                let result = futures::executor::block_on(shown);
+                // The command may have gone; then nobody reads the answer.
+                let _gone = tx.send(accepted(&result, &ok));
+            });
     });
     Box::pin(async move { rx.await.unwrap_or(false) })
 }
@@ -119,7 +133,7 @@ impl<R: Runtime> Confirm for NativeConfirm<R> {
         }
         confirm(
             &self.app,
-            MessageDialogKind::Warning,
+            MessageLevel::Warning,
             CONFIRM_TITLE.to_owned(),
             CONFIRM_MESSAGE.to_owned(),
             CONFIRM_OK.to_owned(),

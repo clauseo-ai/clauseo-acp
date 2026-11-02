@@ -290,9 +290,9 @@ fn only_document_files_open() {
     assert_eq!(opener.opened().len(), 1);
 }
 
-/// A document marked as a program (an execute bit) is refused on macOS and Linux, whatever its
-/// name says.
-#[cfg(unix)]
+/// A document marked as a program (an execute bit) is refused on Linux, whatever its name says.
+/// macOS opens with the checked type's app instead (`mac_app`).
+#[cfg(all(unix, not(target_os = "macos")))]
 #[test]
 fn a_file_marked_as_a_program_is_refused() {
     let scratch = Scratch::new("open-executable", &[]);
@@ -318,6 +318,15 @@ fn files_open_one_at_a_time_and_at_most_one_a_second() {
     let pass = gate.enter(clock.now()).unwrap();
     assert_eq!(code(run()), ErrorCode::CommandConflict);
     drop(pass);
+    // A refused call does not hold the next back.
+    let refused = block_on(open_file(
+        &host,
+        &opener,
+        &gate,
+        &|| clock.now(),
+        file_ref(),
+    ));
+    assert_eq!(code(refused), ErrorCode::CommandInvalid);
     run().unwrap();
     clock.advance(BETWEEN_OPENS.checked_sub(Duration::from_millis(1)).unwrap());
     assert_eq!(code(run()), ErrorCode::CommandConflict);
