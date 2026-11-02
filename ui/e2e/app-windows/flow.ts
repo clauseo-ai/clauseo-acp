@@ -64,6 +64,20 @@ export async function moveTo(w: Window, name: string): Promise<void> {
   await expect(w.matter).toHaveText(name);
 }
 
+/**
+ * Presses New conversation under the open matter and waits for its draft: a current row that
+ * says "New conversation" (English build words), and an empty transcript. Nothing reaches the
+ * host until the first send, which creates the thread and then names it from that message.
+ */
+export async function newConversation(w: Window): Promise<void> {
+  await showRail(w);
+  await w.newConversation.click();
+  const draft = w.conversationRow("New conversation");
+  await expect(draft).toHaveAttribute("aria-current", "true");
+  await expect(w.userMessages).toHaveCount(0);
+  await expect(w.composer).toBeEnabled();
+}
+
 /** Types `text` and sends it; the user's message shows in the transcript. */
 export async function sendPrompt(w: Window, text: string): Promise<void> {
   await w.composer.fill(text);

@@ -23,6 +23,15 @@ export const ids = {
    * `aria-current="page"` on the open matter. The scratch matter's foot row is not one.
    */
   matterRow: "matter-row",
+  /**
+   * A conversation's row button under the open matter's rail row, with `data-state` (the
+   * ConversationState), `data-conversation` (its key) and `aria-current="true"` on the open one.
+   * Its text is the title ("New conversation" for a draft or a thread with no title yet), then,
+   * on a row not open, its status words for assistive technology ("Answering.").
+   */
+  conversation: "conversation",
+  /** New conversation, under the open matter's conversations: opens a draft, sending nothing. */
+  newConversation: "new-conversation",
   /** The rail's find field (shown once there is a matter to find). */
   find: "find",
   /** Matters on the toolbar, which opens and folds the rail below 1200 px. */
@@ -123,6 +132,16 @@ export function window(page: Page) {
     matterRows: id(ids.matterRow),
     /** The rail row of the matter named `name` (its text also holds its status). */
     matterRow: (name: string): Locator => id(ids.matterRow).filter({ hasText: name }),
+    /** The open matter's conversation rows, in the rail's order. */
+    conversations: id(ids.conversation),
+    /** The conversation row whose text contains `title` (its text also holds its status). */
+    conversationRow: (title: string): Locator => id(ids.conversation).filter({ hasText: title }),
+    /**
+     * A conversation row's title alone, without its plan or status words (the row's
+     * `.room-conv-title`; a part's class, not a test id, like folderLine).
+     */
+    conversationTitle: (row: Locator): Locator => row.locator(".room-conv-title"),
+    newConversation: id(ids.newConversation),
     /** The rail's find field. */
     findMatter: id(ids.find),
     /**
