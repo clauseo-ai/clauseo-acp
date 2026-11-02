@@ -42,7 +42,6 @@ const NEW_THREAD: readonly ThreadKey[] = [
   "Use {n} characters or fewer.",
   "Use 1 character or fewer.",
   "Use at least {n} characters.",
-  "Use at least 1 character.",
   "Choose up to {n}.",
   "Choose at least {n}.",
   "Use a number from {min} to {max}.",

@@ -70,10 +70,9 @@ function limitLine(limit: Limit | null): [ThreadKey, Record<string, number>?] {
       return limit.n === 1
         ? ["Use 1 character or fewer."]
         : ["Use {n} characters or fewer.", { n: limit.n }];
+    // never 1: words are trimmed, so a minimum of 1 is empty (Answer this question., when required) or met
     case "minLength":
-      return limit.n === 1
-        ? ["Use at least 1 character."]
-        : ["Use at least {n} characters.", { n: limit.n }];
+      return ["Use at least {n} characters.", { n: limit.n }];
     case "maxItems":
       return ["Choose up to {n}.", { n: limit.n }];
     case "minItems":

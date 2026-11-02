@@ -92,7 +92,6 @@ const HI = {
   "Use {n} characters or fewer.": "{n} या उससे कम अक्षर लिखें।",
   "Use 1 character or fewer.": "1 या उससे कम अक्षर लिखें।",
   "Use at least {n} characters.": "कम से कम {n} अक्षर लिखें।",
-  "Use at least 1 character.": "कम से कम 1 अक्षर लिखें।",
   "Choose up to {n}.": "अधिकतम {n} चुनें।",
   "Choose at least {n}.": "कम से कम {n} चुनें।",
   "Use a number from {min} to {max}.": "{min} से {max} तक की कोई संख्या लिखें।",
