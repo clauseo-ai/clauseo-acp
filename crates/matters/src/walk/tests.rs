@@ -286,7 +286,8 @@ fn walk_of_a_root_that_cannot_be_entered_fails() {
 fn walk_first_lists_what_walk_lists_in_order_and_stops_past_the_limit() {
     let dir = TestDir::new("walk-first");
     let root = dir.path();
-    // `a.txt` sorts before `a/` and `a0` after it; uppercase before lowercase.
+    // `a.txt` sorts before `a/` and `a0` after it; uppercase before lowercase. `Z` and `y`, not
+    // `Z` and `z`, which are one name on a case-insensitive volume (APFS by default).
     for relative in [
         "a.txt",
         "a/b.txt",
@@ -298,7 +299,7 @@ fn walk_first_lists_what_walk_lists_in_order_and_stops_past_the_limit() {
         "b/c/d/e.txt",
         "c.tmp",
         ".git/HEAD",
-        "z",
+        "y",
     ] {
         put(root, relative, 1);
     }
@@ -314,7 +315,7 @@ fn walk_first_lists_what_walk_lists_in_order_and_stops_past_the_limit() {
             "a/b.txt",
             "a0",
             "b/c/d/e.txt",
-            "z"
+            "y"
         ]
     );
     for limit in 0..=all.len() + 1 {
