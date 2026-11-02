@@ -3,22 +3,23 @@
 //!
 //! The budget: Seatbelt compiles one rule per finding, and a few thousand stop the profile
 //! (4,000 failed to compile in review; 20,000 overflowed the argument list). So a policy holds
-//! at most [`LINK_RULES_MAX`] link rules: one per finding path, one per distinct target. Past
-//! it, findings are replaced by deny rules on folders (read and write, subpath), nearest first.
-//! At the deepest level that has a rule that can move, the rules are grouped by their folder;
-//! the largest groups merge into a rule on their folder first (a group of k saves k - 1) until
-//! the count fits; if merging every group of two or more is not enough, the single rules move up
-//! a level too, where they may merge next round. A rule under a folder rule is dropped. The
-//! rounds repeat until the count fits. A folder is never the matter
-//! root (it holds the protected names) or a folder that holds a `.git` (a repository's
-//! working tree, which would hide the whole repository); a rule whose folder is one of those
-//! stays where it is. If the count still does not fit, `build` refuses.
+//! at most [`LINK_RULES_MAX`] link rules: one per finding path, and one per distinct target that
+//! an allow rule covers (a target nothing allows is refused by the default deny and needs no
+//! rule). Past it, findings are replaced by deny rules on folders (read and write, subpath),
+//! nearest first. At the deepest level that has a rule that can move, the rules are grouped by
+//! their folder; the largest groups merge into a rule on their folder first (a group of k saves
+//! k - 1) until the count fits; if merging every group of two or more is not enough, the single
+//! rules move up a level too, where they may merge next round. A rule under a folder rule is
+//! dropped. The rounds repeat until the count fits. A folder is never the matter root (it holds
+//! the protected names), a folder that holds a `.git` (a repository's working tree), or any
+//! folder above one: either would hide the repository and the files beside it. A rule whose
+//! folder is one of those stays where it is. If the count still does not fit, `build` refuses.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use super::build::{beneath_existing, refuse};
-use super::{PathRule, instruction_file};
+use super::{PathRule, instruction_file, under};
 use crate::{Error, LinkFinding, LinkKind};
 
 /// The most link rules (finding paths, folders and targets) one profile holds.
@@ -112,18 +113,22 @@ pub(super) fn split_linked(
 }
 
 /// The folders that replace findings so the policy fits [`LINK_RULES_MAX`] (none when it fits
-/// already), by the algorithm in this module's notes; refuses when it cannot fit. `keep` are
-/// folders never used (the matter root is never used either).
+/// already), by the algorithm in this module's notes; refuses when it cannot fit. `targets` are
+/// the target rules the profile writes ([`covered_targets`]). `working_trees` are the folders
+/// that hold a `.git`: neither they nor any folder above them is used (the matter root is never
+/// used either), so a fallback never hides a repository or the files beside it.
 pub(super) fn fit_budget(
     findings: &[LinkFinding],
+    targets: &[PathBuf],
     matter: &Path,
-    keep: &[PathBuf],
+    working_trees: &[PathBuf],
 ) -> Result<Vec<PathBuf>, Error> {
-    let targets: BTreeSet<&PathBuf> = findings.iter().filter_map(|f| f.target.as_ref()).collect();
     let mut paths: BTreeSet<PathBuf> = findings.iter().map(|f| f.path.clone()).collect();
     let mut folders: BTreeSet<PathBuf> = BTreeSet::new();
     let usable = |folder: &Path| {
-        folder != matter && folder.starts_with(matter) && !keep.iter().any(|k| k == folder)
+        folder != matter
+            && folder.starts_with(matter)
+            && !working_trees.iter().any(|tree| tree.starts_with(folder))
     };
     loop {
         let mut count = paths.len() + folders.len() + targets.len();
@@ -179,4 +184,27 @@ pub(super) fn fit_budget(
         let snapshot = folders.clone();
         folders.retain(|p| !covered(p, &snapshot));
     }
+}
+
+/// The distinct symbolic-link targets that get a deny rule: those some allow rule covers
+/// (`allowed`: runtime and read paths, allowed folders, the state and notes folders; or a
+/// `literal` the policy allows: the credential link and the Claude store's names, or under one of
+/// its lock folders). A target nothing allows is refused by `(deny default)` already. A target
+/// that holds an allowed path (a link to `..` or `/`) gets none either: a subpath deny on it
+/// would deny the allowed path itself.
+pub(super) fn covered_targets(
+    findings: &[LinkFinding],
+    allowed: &[&Path],
+    allowed_exactly: &dyn Fn(&Path) -> bool,
+) -> Vec<PathBuf> {
+    let targets: BTreeSet<&PathBuf> = findings.iter().filter_map(|f| f.target.as_ref()).collect();
+    targets
+        .into_iter()
+        .filter(|target| {
+            let covered = allowed.iter().any(|a| under(target, a)) || allowed_exactly(target);
+            let holds_allowed = allowed.iter().any(|a| a.starts_with(target));
+            covered && !holds_allowed
+        })
+        .cloned()
+        .collect()
 }

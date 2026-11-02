@@ -96,6 +96,10 @@ impl World {
         path
     }
 
+    pub(crate) fn remove(&self, rel: &str) {
+        std::fs::remove_file(self.at(rel)).unwrap();
+    }
+
     pub(crate) fn symlink(&self, target: &str, link: &str) -> PathBuf {
         let path = self.at(link);
         std::os::unix::fs::symlink(self.at(target), &path).unwrap();

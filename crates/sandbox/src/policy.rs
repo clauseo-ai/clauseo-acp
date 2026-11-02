@@ -180,6 +180,7 @@ pub struct Policy {
     keychain: bool,
     over_cap: Vec<PathBuf>,
     links: Vec<LinkFinding>,
+    link_targets: Vec<PathBuf>,
     link_folders: Vec<PathBuf>,
     read_only_in_matter: Vec<PathRule>,
 }
@@ -304,9 +305,17 @@ impl Policy {
     }
 
     /// Links in the matter that lead outside it, canonical; read and write are denied on each
-    /// path (or the link folder that holds it) and target.
+    /// path (or the link folder that holds it) and on the targets of [`Policy::link_targets`].
     pub fn links(&self) -> &[LinkFinding] {
         &self.links
+    }
+
+    /// The link targets the profile denies read and write on (subpath), distinct: those some
+    /// allow rule of the policy covers (runtime, read, allowed folders, state, notes, the Claude
+    /// store, the credential link). A target nothing allows is refused by the default deny
+    /// already, and one that holds an allowed path gets no rule (it would deny that path).
+    pub fn link_targets(&self) -> &[PathBuf] {
+        &self.link_targets
     }
 
     /// Folders in the matter denied read and write in place of the findings under them, so the

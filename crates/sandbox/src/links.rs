@@ -27,8 +27,9 @@ pub enum LinkKind {
 }
 
 /// A link in the matter that can lead the agent outside it. The jail denies read and write on
-/// both [`LinkFinding::path`] and [`LinkFinding::target`]; a denial on either is
-/// [`PathClass::LinkTarget`](crate::PathClass::LinkTarget).
+/// [`LinkFinding::path`] (or a link folder holding it), and on [`LinkFinding::target`] when an
+/// allow rule would otherwise reach it ([`Policy::link_targets`](crate::Policy::link_targets));
+/// a denial on either is [`PathClass::LinkTarget`](crate::PathClass::LinkTarget).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct LinkFinding {
     /// The link in the matter, canonical up to its own name (the link itself is not followed).

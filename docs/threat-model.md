@@ -134,7 +134,9 @@ anything the agent starts.
 - `built` (macOS): Any `.git` already in the matter, the folder a `gitdir:` file names, files over
   the size cap, and `.codex/`, `.claude/`, `.agents/`, `.clauseo/`, `.mcp.json`, `CLAUDE.md`,
   `CLAUDE.local.md` and `AGENTS.md` at the matter root (existing or not, in any letter case) are
-  read-only, and their folders cannot be renamed; `CLAUDE.md` is read-only at any depth
+  read-only, and their folders cannot be renamed; `CLAUDE.md` cannot be written in place at any
+  depth, but a folder moved into the matter that already holds one (made in the state folder, notes
+  or `TMPDIR`) is not stopped, and a nested `CLAUDE.local.md` is writable
 - `built` (macOS): A symbolic link in the matter that leads outside it is denied, and so is where it
   leads; so is every name in the matter of a file that also has a name outside it, `.git`
   included (the walk counts names per inode), and a writable name of a file whose other name is

@@ -5,7 +5,7 @@ use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
-use super::links::{canonical_findings, fit_budget, split_linked};
+use super::links::{canonical_findings, covered_targets, fit_budget, split_linked};
 use super::{ClaudeStore, Loopback, PROTECTED_NAMES, PathRule, Policy, PolicyBuilder};
 use crate::Error;
 use crate::links::scan_matter;
@@ -80,12 +80,7 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
     };
     scan.add_links(b.links);
     let parts = scan.into_parts();
-    // A folder that holds a `.git`, a repository's working tree, is never a link folder.
-    let working_trees: Vec<PathBuf> = parts
-        .git
-        .iter()
-        .filter_map(|git| git.parent().map(Path::to_owned))
-        .collect();
+    let working_trees = working_trees(&parts.git);
     let mut read_only_in_matter: Vec<PathRule> = PROTECTED_NAMES
         .iter()
         .map(|name| PathRule::Subpath(matter.join(name)))
@@ -102,7 +97,19 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
             .into_iter()
             .filter(|finding| !found.contains(&finding.path)),
     );
-    let link_folders = fit_budget(&links, &matter, &working_trees)?;
+    let mut allowed: Vec<&Path> = vec![state.as_path()];
+    allowed.extend(runtime.iter().map(PathBuf::as_path));
+    allowed.extend(read.iter().map(PathBuf::as_path));
+    allowed.extend(allowed_folders.iter().map(PathBuf::as_path));
+    allowed.extend(notes.as_deref());
+    let allowed_exactly = |p: &Path| {
+        credential_link
+            .as_deref()
+            .is_some_and(|link| super::same(p, link))
+            || claude_store.as_ref().is_some_and(|store| store.covers(p))
+    };
+    let link_targets = covered_targets(&links, &allowed, &allowed_exactly);
+    let link_folders = fit_budget(&links, &link_targets, &matter, &working_trees)?;
 
     Ok(Policy {
         matter,
@@ -124,9 +131,18 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
         keychain: b.keychain,
         over_cap,
         links,
+        link_targets,
         link_folders,
         read_only_in_matter,
     })
+}
+
+/// The folders that hold a `.git`, repositories' working trees: neither they nor a folder above
+/// them is ever a link folder.
+fn working_trees(git: &[PathBuf]) -> Vec<PathBuf> {
+    git.iter()
+        .filter_map(|git| git.parent().map(Path::to_owned))
+        .collect()
 }
 
 /// The matter's own rules, on canonical paths.
