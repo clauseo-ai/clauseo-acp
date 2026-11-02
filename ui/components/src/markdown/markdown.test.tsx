@@ -135,10 +135,13 @@ test("a code block is plain text in a pre, its language as data-lang, no class a
   expect(pre?.querySelectorAll("[class], [style], span, b")).toHaveLength(0);
 });
 
-test("raw HTML is text, block and inline", () => {
-  show('<div onclick="x()">\nblock\n</div>\n\nInline <b>bold</b> and <img src=x onerror=y>.');
-  expect(host.textContent).toContain('<div onclick="x()">');
-  expect(host.textContent).toContain("<b>bold</b>");
+test("raw HTML never becomes elements, block and inline: markup tags drop, the rest is text", () => {
+  show(
+    '<div onclick="x()">\nblock\n</div>\n\nInline <b>bold</b> and <img src=x onerror=y>, <Party A> <b>.',
+  );
+  expect(host.textContent).toContain("block");
+  expect(host.textContent).toContain("Inline bold and , <Party A> <b>.");
+  expect(host.textContent).not.toContain("onclick");
   expect(host.querySelectorAll("div[onclick], b, img")).toHaveLength(0);
 });
 

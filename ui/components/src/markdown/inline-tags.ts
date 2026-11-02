@@ -4,14 +4,31 @@
 // an allowlisted opening tag and its closing tag become one of our elements, with no properties: every
 // attribute is dropped, whatever it was (`style`, `class`, `on…`). Everything else stays the text it was
 // written as, so a lawyer sees every character the agent wrote:
-// - Any tag not on the list (`<script>`, `<img>`, `<a>`, `<div>`, and placeholders like `<Party A>` or
-//   `<insert date>`), comments, and tags written as entities (`&lt;sup&gt;`, which are text already).
+// - Any tag not on the list whose name is not an HTML element's (placeholders like `<Party A>`, `<insert
+//   date>`, `<Client>`), an HTML-named tag that is not clearly markup (below), comments, and tags written as
+//   entities (`&lt;sup&gt;`, which are text already).
 // - An opening tag with no closing tag in the same parent (a tag cannot pair across a paragraph, a list item
 //   or an emphasis it is not inside, nor across a block element or a new paragraph among its siblings, as
 //   a tight list item or a definition has), a stray closing tag, a self-closed `<sup/>`, `</br>`, and of
 //   misnested tags (`<sup><sub>a</sup></sub>`) the inner one.
 // - Past MAX_TAG_NESTING allowlisted elements inside each other, or MAX_DEPTH levels of hast, the deeper
 //   tags (hostile nesting: the tree is walked recursively later).
+// A tag not on the list whose name is an HTML element's (HTML_ELEMENTS: `<div>`, `<span>`, `<center>`) is
+// dropped, every attribute with it, and what it held stays where it was, as text and Markdown, but only
+// when it is clearly markup: an opening tag that pairs with its closing tag in the same parent (as an
+// allowlisted pair would), a self-closed tag, or an opening tag with an attribute that has a value; and the
+// closing tag of a dropped pair. Agents use such tags for presentation: in the #137 format battery (48
+// answers each from Claude Code and Codex, measurements/137-markdown/format-battery/COUNTS.md in the
+// private harness), Codex wrote `<div align="right">A: …<br>B: …</div>` in table cells in 2 answers
+// (p01-r3, p15-r1), which as text buries the cell's words in markup. Placeholders must never vanish, and
+// some share an HTML element's name: `<Address>`, `<Title>`, `<Section>`, `<Label>`, `<Time>`, and
+// `<Address of Tenant>` is a valid tag to micromark (name `address`, two attributes without values). So a
+// lone opening tag with no valued attribute, and a closing tag with no dropped opener, stay text.
+// The never-markup elements (RAW_CONTENT: script, style, iframe, object, embed, template, noscript, svg,
+// math) follow the same rule, and a dropped pair's content is shown as one plain text, never as markup:
+// tags in it stay as written, and the Markdown in it as its text. An HTML block (one of kinds 6 and 7; kinds
+// 1 to 5 never start, nesting.ts) is text, and the same rule drops its clearly-markup tags; a kind 1 start
+// that nesting.ts made text (`<script>` at the start of a line) is a tag again for this rule (markCutTags).
 // `<br>`, `<br/>` and `<br />` are void: a line break. A block of HTML holding only those (`<br>` on a line
 // of its own) is line breaks too; any other HTML block stays text.
 //
@@ -25,6 +42,10 @@
 import type { Element, ElementContent, Root, RootContent, Text } from "hast";
 import { defaultHandlers } from "mdast-util-to-hast";
 import type { Handler } from "mdast-util-to-hast";
+import { standIn } from "./nesting.ts";
+
+/** nesting.ts's stand-in for a `<` that would start an HTML block of kinds 1 to 5. */
+export const CUT_LESS_THAN = standIn("<");
 
 /** The approved inline tags. */
 export const ALLOWED_TAGS: ReadonlySet<string> = new Set([
@@ -38,6 +59,43 @@ export const ALLOWED_TAGS: ReadonlySet<string> = new Set([
   "br",
   "small",
   "kbd",
+]);
+
+/**
+ * HTML element names, fixed here and never inferred: the WHATWG HTML Living Standard (Last Updated
+ * 14 October 2026), Index, "Elements" (https://html.spec.whatwg.org/multipage/indices.html#elements-3, 113
+ * names, with MathML `math` and SVG `svg`), and the entirely obsolete elements of 16.2 "Non-conforming
+ * features" (https://html.spec.whatwg.org/multipage/obsolete.html#non-conforming-features).
+ */
+export const HTML_ELEMENTS: ReadonlySet<string> = new Set(
+  [
+    // Index, Elements.
+    "a abbr address area article aside audio b base bdi bdo blockquote body br button canvas caption cite",
+    "code col colgroup data datalist dd del details dfn dialog div dl dt em embed fieldset figcaption figure",
+    "footer form h1 h2 h3 h4 h5 h6 head header hgroup hr html i iframe img input ins kbd label legend li link",
+    "main map mark math menu meta meter nav noscript object ol optgroup option output p picture pre progress",
+    "q rp rt ruby s samp script search section select selectedcontent slot small source span strong style",
+    "sub summary sup svg table tbody td template textarea tfoot th thead time title tr track u ul var video",
+    "wbr",
+    // 16.2, obsolete elements.
+    "applet acronym bgsound dir frame frameset noframes isindex keygen listing menuitem nextid noembed param",
+    "plaintext rb rtc strike xmp basefont big blink center font marquee multicol nobr spacer tt",
+  ]
+    .join(" ")
+    .split(" "),
+);
+
+/** HTML elements whose content is never markup: a dropped pair's content shows as one plain text. */
+export const RAW_CONTENT: ReadonlySet<string> = new Set([
+  "script",
+  "style",
+  "iframe",
+  "object",
+  "embed",
+  "template",
+  "noscript",
+  "svg",
+  "math",
 ]);
 
 /** Allowlisted elements one parent may hold inside each other; deeper tags stay text. */
@@ -116,6 +174,158 @@ function tagOf(value: string): Tag | undefined {
   const name = match[2]!.toLowerCase();
   if (!ALLOWED_TAGS.has(name)) return undefined;
   return { name, close: match[1] === "/", selfClosed: value.endsWith("/>") };
+}
+
+/** CommonMark's open and closing tags (6.6), with groups: name, attributes, `/`; or a closing tag's name. */
+const ATTRIBUTE = String.raw`[ \t\n]+[A-Za-z_:][A-Za-z0-9_.:-]*(?:[ \t\n]*=[ \t\n]*(?:[^"'=<>\`\s]+|'[^']*'|"[^"]*"))?`;
+const RAW_TAG = String.raw`<([A-Za-z][A-Za-z0-9-]*)((?:${ATTRIBUTE})*)[ \t\n]*(\/?)>|<\/([A-Za-z][A-Za-z0-9-]*)[ \t\n]*>`;
+const WHOLE_TAG = new RegExp(`^(?:${RAW_TAG})$`);
+const TAG_AT = new RegExp(RAW_TAG, "y");
+
+/** A tag not on the list whose name is an HTML element's: its name, kind and whether a value is set. */
+type HtmlTag = Tag & { valued: boolean };
+
+/** The HtmlTag a match of RAW_TAG is, or undefined. */
+function htmlTagFrom(match: RegExpExecArray | null): HtmlTag | undefined {
+  if (!match) return undefined;
+  const name = (match[1] ?? match[4])!.toLowerCase();
+  if (!HTML_ELEMENTS.has(name) || ALLOWED_TAGS.has(name)) return undefined;
+  // `=` is in no attribute name nor unquoted value, and a quoted value comes after one.
+  const valued = (match[2] ?? "").includes("=");
+  return { name, close: match[4] !== undefined, selfClosed: match[3] === "/", valued };
+}
+
+/**
+ * Of `tags` (one per node or token, undefined for the rest), what HTML_ELEMENTS' rule drops: the
+ * never-markup pairs (opening tag index to closing tag index), whose content shows as text, and every
+ * other tag that is clearly markup (header). Never-markup pairs are found first; a tag inside one is not
+ * looked at.
+ */
+function markupIn(
+  tags: readonly (HtmlTag | undefined)[],
+  barriers: readonly boolean[],
+): { raw: Map<number, number>; dropped: Set<number> } {
+  const raw = pairsIn(
+    tags.map((tag) => (tag && RAW_CONTENT.has(tag.name) ? tag : undefined)),
+    barriers,
+  ).pairs;
+  // Pairs nest or are apart (pairsIn); only the outermost count. What they span is no tag any more.
+  let outerEnd = -1;
+  for (const start of [...raw.keys()].sort((a, b) => a - b)) {
+    if (start < outerEnd) raw.delete(start);
+    else outerEnd = raw.get(start)!;
+  }
+  const rest = [...tags];
+  for (const [start, end] of raw) rest.fill(undefined, start, end + 1);
+  const dropped = new Set<number>();
+  for (const [start, end] of pairsIn(rest, barriers).pairs) dropped.add(start).add(end);
+  rest.forEach((tag, index) => {
+    if (tag && !tag.close && (tag.selfClosed || tag.valued)) dropped.add(index);
+  });
+  return { raw, dropped };
+}
+
+/** A hast node's text: its value, or its descendants' text. */
+function textOf(node: ElementContent): string {
+  if (node.type === "text") return node.value;
+  if (node.type === "element") return node.children.map(textOf).join("");
+  return "";
+}
+
+/**
+ * `nodes` with HTML_ELEMENTS' rule applied: a dropped tag's text node is emptied (kept, so a paragraph's
+ * first node stays one), and a never-markup pair is one text node of what it held. What becomes text here
+ * is no tag any more for the allowlist.
+ */
+function dropMarkup(nodes: ElementContent[]): ElementContent[] {
+  const tags = nodes.map((node) =>
+    node.type === "text" && INLINE_HTML.has(node)
+      ? htmlTagFrom(WHOLE_TAG.exec(node.value))
+      : undefined,
+  );
+  if (!tags.some(Boolean)) return nodes;
+  const barriers = nodes.map((node, index) => index > 0 && isBarrier(node));
+  const { raw, dropped } = markupIn(tags, barriers);
+  for (const index of dropped) {
+    const node = nodes[index] as Text;
+    INLINE_HTML.delete(node);
+    node.value = "";
+  }
+  if (raw.size === 0) return nodes;
+  const out: ElementContent[] = [];
+  for (let index = 0; index < nodes.length; index++) {
+    const node = nodes[index]!;
+    const end = raw.get(index);
+    if (end === undefined) {
+      out.push(node);
+      continue;
+    }
+    const inner = nodes.slice(index + 1, end);
+    for (const child of [...inner, nodes[end]!])
+      if (child.type === "text") INLINE_HTML.delete(child);
+    const text = node as Text;
+    INLINE_HTML.delete(text);
+    text.value = inner.map(textOf).join("");
+    out.push(text);
+    index = end;
+  }
+  return out;
+}
+
+/** An HTML block's text with HTML_ELEMENTS' rule applied (its tags never pair with the allowlist). */
+function dropBlockMarkup(value: string): string {
+  if (!value.includes("<")) return value;
+  const found: { start: number; end: number; tag: HtmlTag | undefined }[] = [];
+  for (let at = value.indexOf("<"); at >= 0; at = value.indexOf("<", at + 1)) {
+    TAG_AT.lastIndex = at;
+    const match = TAG_AT.exec(value);
+    if (!match) continue;
+    found.push({ start: at, end: TAG_AT.lastIndex, tag: htmlTagFrom(match) });
+    at = TAG_AT.lastIndex - 1;
+  }
+  const { raw, dropped } = markupIn(
+    found.map((token) => token.tag),
+    found.map(() => false),
+  );
+  for (const [start, end] of raw) dropped.add(start).add(end);
+  let out = "";
+  let copied = 0;
+  for (const index of [...dropped].sort((a, b) => a - b)) {
+    out += value.slice(copied, found[index]!.start);
+    copied = found[index]!.end;
+  }
+  return out + value.slice(copied);
+}
+
+/**
+ * The tags nesting.ts made text at the start of a line (its stand-in for `<` before `script`, `pre`,
+ * `style` or `textarea`, which would start an HTML block running to its end tag), as inline HTML again,
+ * so HTML_ELEMENTS' rule sees them as it sees the same tag anywhere else. Before restoreText, outside code.
+ */
+export function markCutTags(root: Root): void {
+  const stack: (Root | Element)[] = [root];
+  for (let parent = stack.pop(); parent; parent = stack.pop()) {
+    const children = parent.children as ElementContent[];
+    for (let index = 0; index < children.length; index++) {
+      const child = children[index]!;
+      if (child.type === "element") {
+        if (child.tagName !== "code" && child.tagName !== "pre") stack.push(child);
+        continue;
+      }
+      if (child.type !== "text" || INLINE_HTML.has(child) || BLOCK_HTML.has(child)) continue;
+      const at = child.value.indexOf(CUT_LESS_THAN);
+      if (at < 0) continue;
+      TAG_AT.lastIndex = 0;
+      const match = TAG_AT.exec(`<${child.value.slice(at + 1)}`);
+      if (!match) continue;
+      const tag: Text = { type: "text", value: match[0] };
+      const after: Text = { type: "text", value: child.value.slice(at + match[0].length) };
+      INLINE_HTML.add(tag);
+      child.value = child.value.slice(0, at);
+      children.splice(index + 1, 0, tag, after);
+      index += 1; // `after` is looked at next, for another one.
+    }
+  }
 }
 
 /** An HTML block of nothing but line breaks, each without attributes. */
@@ -244,11 +454,15 @@ export function pairTags(root: Root, streaming: boolean): void {
           const breaks = (child.value.match(BREAK) ?? []).map(() => element("br"));
           children.splice(index, 1, ...breaks);
           index += breaks.length - 1;
-        }
+        } else child.value = dropBlockMarkup(child.value);
       } else if (INLINE_HTML.has(child)) found = true;
     }
     if (found)
-      parent.children = paired(children, open?.has(parent) ?? false, MAX_DEPTH - depth) as never;
+      parent.children = paired(
+        dropMarkup(children),
+        open?.has(parent) ?? false,
+        MAX_DEPTH - depth,
+      ) as never;
     for (const child of parent.children)
       if (child.type === "element") stack.push([child, depth + 1]);
   }

@@ -13,7 +13,7 @@ import { sanitize } from "hast-util-sanitize";
 import { toHtml } from "hast-util-to-html";
 import { toHast } from "mdast-util-to-hast";
 import { createAnswer, HANDLERS } from "./answer.ts";
-import { pairTags } from "./inline-tags.ts";
+import { markCutTags, pairTags } from "./inline-tags.ts";
 import { capNesting, hasStandIns, restoreText } from "./nesting.ts";
 import { parse } from "./parse.ts";
 import { SCHEMA } from "./schema.ts";
@@ -220,6 +220,7 @@ const FOOTER_SCHEMA = {
 export function unsplit(text: string): string {
   const capped = capNesting(text);
   const hast = toHast(parse(capped), { clobberPrefix: "spec-", handlers: HANDLERS }) as Root;
+  markCutTags(hast);
   if (hasStandIns(capped)) restoreText(hast);
   pairTags(hast, false);
   // The answer's headings get anchors, remark-rehype's footer heading does not (the renderer draws its own).

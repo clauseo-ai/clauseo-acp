@@ -7,15 +7,16 @@
 //   flanking rules), so `Section 2(a)_ and` gains nothing, and escaped literals (`\*\*`) are never runs.
 // - A half link (`[text`, `[text]`, `[text](url`, `[text][ref`) shows its text, plain: never a link that
 //   could later turn back into text. A half image, a half footnote reference (`[^lab`), a half superscript
-//   (`^th`, up to 32 characters), a half allowlisted tag (`<su`, `</ma`, `<sup class="x`) and a trailing
-//   backslash are hidden.
+//   (`^th`, up to 32 characters), a half allowlisted tag (`<su`, `</ma`, `<sup class="x`), a half tag with
+//   an HTML element's name once a quoted value has begun (`<div align="ri`, dropped once whole) and a
+//   trailing backslash are hidden.
 // - A last line holding only a block marker (`-`, `1.`, `#`, `>`, `---`, a fence's first backticks) is
 //   hidden until its content arrives; so are the lines of a table whose delimiter row has not arrived.
 // Any other half tag hides nothing (raw HTML is text); inline-tags.ts hides an allowlisted one till it pairs.
 // The cuts and their application are in repair-edits.ts.
 import type { Nodes, Parent, Root } from "mdast";
 import { standIn } from "./nesting.ts";
-import { ALLOWED_TAGS } from "./inline-tags.ts";
+import { ALLOWED_TAGS, HTML_ELEMENTS } from "./inline-tags.ts";
 import { apply, createCuts, keptEnd, originOf } from "./repair-edits.ts";
 import type { Cuts, Edit, Kept } from "./repair-edits.ts";
 
@@ -54,7 +55,8 @@ const HALF_STOP = /[\s^[\]\\<\uFDD1-\uFDE0]/;
 /**
  * An opening tag's name and attributes at the end of the text, as far as they have arrived (CommonMark's
  * attribute syntax, its last attribute maybe half there), with no `>` yet: hidden too when the name is
- * allowlisted and a quoted value has begun, for at most MAX_HALF_ATTRIBUTES characters after the name.
+ * allowlisted or an HTML element's (whose tag, with a valued attribute, inline-tags.ts drops once whole) and
+ * a quoted value has begun, for at most MAX_HALF_ATTRIBUTES characters after the name.
  * Without a quote it may be prose (`if x<s then the clause`), which never hides.
  */
 const MAX_HALF_ATTRIBUTES = 128;
@@ -62,7 +64,9 @@ const ATTRIBUTE_NAME = /[A-Za-z_:][A-Za-z0-9_.:-]*/.source;
 const ATTRIBUTE = `[ \\t\\n]+${ATTRIBUTE_NAME}(?:[ \\t\\n]*=[ \\t\\n]*(?:[^"'=<>\`\\s]+|'[^']*'|"[^"]*"))?`;
 const HALF_ATTRIBUTE = `[ \\t\\n]+(?:${ATTRIBUTE_NAME}(?:[ \\t\\n]*=[ \\t\\n]*(?:'[^']*|"[^"]*)?)?)?`;
 const QUOTED_VALUE = /=[ \t\n]*["']/;
-const HALF_ATTRIBUTES = new RegExp(`<([A-Za-z]{1,5})(?:${ATTRIBUTE})*(?:${HALF_ATTRIBUTE})?$`);
+const HALF_ATTRIBUTES = new RegExp(
+  `<([A-Za-z][A-Za-z0-9-]{0,15})(?:${ATTRIBUTE})*(?:${HALF_ATTRIBUTE})?$`,
+);
 
 /** Whether the character at `at` is escaped by an odd run of backslashes before it. */
 function escaped(text: string, at: number): boolean {
@@ -302,12 +306,17 @@ function halfConstructs(input: string, root: Root, from: number, cuts: Cuts): bo
     else for (const at of kept.slice(0, length)) cut(at, at + 1); // A cut above fell inside it.
     end = keptEnd(input, from, cuts);
   }
-  // A half allowlisted opening tag past its name (`<sup class="x`), in text, last of all that stays, in the
-  // same paragraph, heading or cell: hidden until its `>` arrives, as its name was (inline-tags.ts drops
-  // the attributes then).
+  // A half allowlisted or HTML-named opening tag past its name (`<sup class="x`, `<div align="ri`), in
+  // text, last of all that stays, in the same paragraph, heading or cell: hidden until its `>` arrives
+  // (inline-tags.ts drops the attributes, or the whole tag, then).
   const scanFrom = Math.max(from, end - MAX_HALF_ATTRIBUTES - 7);
   const half = HALF_ATTRIBUTES.exec(input.slice(scanFrom, end));
-  if (half && QUOTED_VALUE.test(half[0]) && ALLOWED_TAGS.has(half[1]!.toLowerCase())) {
+  const halfName = half?.[1]!.toLowerCase() ?? "";
+  if (
+    half &&
+    QUOTED_VALUE.test(half[0]) &&
+    (ALLOWED_TAGS.has(halfName) || HTML_ELEMENTS.has(halfName))
+  ) {
     const start = scanFrom + half.index;
     const holder = leafAt(input, root, from, end);
     let whole = holder !== undefined && (holder.position?.start.offset ?? from) <= start;
