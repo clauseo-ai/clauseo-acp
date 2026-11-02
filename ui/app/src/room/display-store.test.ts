@@ -13,7 +13,7 @@ import {
   type DisplayEnv,
 } from "./display-store.ts";
 import type { HostEvent, SettingsView } from "../transport/protocol.ts";
-import { nextHostOf, type Settings, type UiSettings } from "./host-next.ts";
+import { nextHostOf, type Settings, type SettingsHost, type UiSettings } from "./host-next.ts";
 import { wireSettingsHost } from "./host-wire.ts";
 import { connectRoom } from "./start.ts";
 
@@ -238,7 +238,7 @@ test("with a NextHost the store reads get_settings at start and shows them", asy
   expect(store.batch()).toBe(liteBatch);
 });
 
-test("with a NextHost set sends a set_ui_settings patch of the changed keys and writes no localStorage", async () => {
+test("with a NextHost set sends a set_ui_settings patch of the changed keys; localStorage keeps the host's answer", async () => {
   const { transport, store, saved } = withHost();
   await settled();
   store.set({ theme: "light" });
@@ -246,7 +246,8 @@ test("with a NextHost set sends a set_ui_settings patch of the changed keys and 
     { call: "next_command", command: { set_ui_settings: { patch: { theme: "light" } } } },
   ]);
   expect(store.display().theme).toBe("day");
-  expect(saved()).toBeUndefined();
+  // localStorage keeps the host's last answer, not the lawyer's unconfirmed change
+  expect(saved()).toEqual(HOST_SETTINGS.ui);
 });
 
 test("with a NextHost the store follows settings_changed", async () => {
@@ -271,8 +272,9 @@ test("a repeated settings_changed with the same values shows nothing new and sen
   transport.settingsChanged({ ...HOST_SETTINGS, ui: { ...HOST_SETTINGS.ui } });
   expect(shown.length).toBe(before);
   expect(store.ui()).toEqual(HOST_SETTINGS.ui);
+  expect(store.locked()).toEqual(HOST_SETTINGS.locked);
   expect(transport.only("next_command")).toEqual([]);
-  expect(saved()).toBeUndefined();
+  expect(saved()).toEqual(HOST_SETTINGS.ui);
 });
 
 test("without a host no key is locked", () => {
@@ -313,13 +315,46 @@ function overWire() {
 }
 
 test("over the wire the locked keys come from get_settings and follow settings_changed", async () => {
-  const { store, changed } = overWire();
+  const { store, changed, saved } = overWire();
   await settled();
   expect(store.locked()).toEqual(["ui.theme"]);
   expect(store.ui()).toMatchObject({ theme: "dark", lite: "full", font_size: 17 });
+  expect(saved()).toEqual(store.ui());
   changed({ ...WIRE_VIEW, ui: { ...WIRE_VIEW.ui, lite: "on" }, locked: ["ui.theme", "ui.lite"] });
   expect(store.locked()).toEqual(["ui.theme", "ui.lite"]);
   expect(store.display().render).toBe("lite");
+  expect(saved()).toMatchObject({ lite: "lite" });
+});
+
+test("the first frame shows the host's last answer from localStorage, before the host answers again", () => {
+  const cached = JSON.stringify({ ...DEFAULT_UI, theme: "dark" });
+  const host: SettingsHost = {
+    getSettings: () => new Promise(() => {}),
+    setUiSettings: async () => {},
+    onSettingsChanged: () => () => {},
+  };
+  const { started } = harness({ host }, cached);
+  expect(started[0]?.theme).toBe("night");
+});
+
+test("a get_settings answer that a settings_changed overtook is dropped", async () => {
+  let answer: (settings: Settings) => void = () => {};
+  let changed: (settings: Settings) => void = () => {};
+  const host: SettingsHost = {
+    getSettings: () => new Promise((resolve) => (answer = resolve)),
+    setUiSettings: async () => {},
+    onSettingsChanged: (listener) => {
+      changed = listener;
+      return () => {};
+    },
+  };
+  const { store } = harness({ host });
+  // the event, newer, reaches the page before the read's answer
+  changed({ ui: { ...HOST_SETTINGS.ui, theme: "light" }, locked: ["ui.lite"] });
+  answer({ ...HOST_SETTINGS, ui: { ...HOST_SETTINGS.ui, theme: "dark" } });
+  await settled();
+  expect(store.ui().theme).toBe("light");
+  expect(store.locked()).toEqual(["ui.lite"]);
 });
 
 test("a set the host refuses re-reads the settings and shows what the host holds", async () => {

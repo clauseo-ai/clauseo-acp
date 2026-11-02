@@ -23,6 +23,7 @@ function fakeSource(view: () => SettingsView = () => VIEW) {
   const commands: CommandEnvelope[] = [];
   const listeners = new Set<(event: HostEvent) => void>();
   let answer: () => void = () => {};
+  let refuse: (error: unknown) => void = () => {};
   let feeds = 0;
   const source: WireSettingsSource = {
     query: async (query: HostQuery): Promise<QueryResult> => {
@@ -38,11 +39,12 @@ function fakeSource(view: () => SettingsView = () => VIEW) {
       feeds += 1;
       listeners.add(listener);
       calls.push("subscribe");
-      const ready = new Promise<void>((done) => {
+      const ready = new Promise<void>((done, fail) => {
         answer = () => {
           calls.push("subscribed");
           done();
         };
+        refuse = fail;
       });
       return { ready, stop: () => void listeners.delete(listener) };
     },
@@ -50,7 +52,16 @@ function fakeSource(view: () => SettingsView = () => VIEW) {
   const emit = (settings: SettingsView) => {
     for (const listener of listeners) listener({ settings_changed: settings });
   };
-  return { source, calls, commands, emit, answer: () => answer(), feeds: () => feeds, listeners };
+  return {
+    source,
+    calls,
+    commands,
+    emit,
+    answer: () => answer(),
+    refuse: (error: unknown) => refuse(error),
+    feeds: () => feeds,
+    listeners,
+  };
 }
 
 const LITES: [UiLite, string][] = [
@@ -135,4 +146,18 @@ test("one feed serves every listener, mapped to the room's spelling; the last un
   expect(fake.listeners.size).toBe(1);
   offTwo();
   expect(fake.listeners.size).toBe(0);
+});
+
+test("a refused subscribe keeps the listener, so the events come once the transport subscribes again", async () => {
+  const fake = fakeSource();
+  const host = wireSettingsHost(fake.source);
+  const heard: unknown[] = [];
+  host.onSettingsChanged((s) => heard.push(s.ui.theme));
+  fake.refuse({ code: "internal", message: "open_stream failed", retryable: true });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(fake.listeners.size).toBe(1);
+  // the transport's re-subscribe after its channel reopens: the same listener hears the next change
+  fake.emit({ ...VIEW, ui: { ...VIEW.ui, theme: "light" } });
+  expect(heard).toEqual(["light"]);
+  expect(fake.feeds()).toBe(1);
 });

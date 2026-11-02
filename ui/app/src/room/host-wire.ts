@@ -73,12 +73,8 @@ export function wireSettingsHost(source: WireSettingsSource): SettingsHost {
       for (const listener of listeners) listener(settings);
     });
     feed = opened;
-    // refused: drop it, so the next read or listener asks again
-    opened.ready.catch(() => {
-      if (feed !== opened) return;
-      opened.stop();
-      feed = null;
-    });
+    // refused: keep the listener; the transport subscribes again when its channel reopens
+    opened.ready.catch(() => {});
   };
 
   return {

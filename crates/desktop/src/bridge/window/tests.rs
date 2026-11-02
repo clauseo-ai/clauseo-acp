@@ -483,7 +483,7 @@ fn the_watchdog_restarts_the_app_feed_and_a_failed_restart_unfollows_it() {
         "an older restart unfollows nothing"
     );
     assert!(state.unfollow_app_restart(restarted));
-    assert!(!state.follows_app());
+    assert_eq!(state.app_restart_id(), None);
     assert_eq!(
         state.forward_app(restarted, &event(100), SECOND),
         Forward::Drop
