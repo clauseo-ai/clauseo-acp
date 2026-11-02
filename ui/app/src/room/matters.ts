@@ -268,7 +268,8 @@ export class Matters {
     let matter: MatterId;
     if (this.#rows !== null) {
       const outcome = await this.#rows.command({ create_matter: { name, source, ...details } });
-      if (outcome === "done") throw new Error("create_matter gave no matter");
+      if (outcome === "done" || !("matter_created" in outcome))
+        throw new Error("create_matter gave no matter");
       matter = outcome.matter_created.matter;
     } else {
       if (source === "default_location") throw new Error("this host has no default location");

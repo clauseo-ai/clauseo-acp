@@ -11,7 +11,17 @@
 // matter or making one, and focus goes back to Matters; Matters carries the court-yellow dot while another matter
 // waits on the lawyer. A link or paper in an answer opens through the host (open.ts, H11), and so does a matter row's
 // Show in Finder.
-import { use, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import {
+  lazy,
+  Suspense,
+  use,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import { late } from "@clauseo/components/lib/late.ts";
 import { EmptyPapers } from "@clauseo/components/clauseo/empty.tsx";
 import { PaperTile } from "@clauseo/components/clauseo/paper-tile.tsx";
 import { useRoom } from "@clauseo/components/clauseo/room-scope.ts";
@@ -38,10 +48,16 @@ import { RoomRail } from "./rail.tsx";
 import { ScratchLine } from "./scratch-line.tsx";
 import type { StandIns } from "./versions/stand-ins.ts";
 import { useVersions } from "./versions/use-versions.ts";
+import { clockOf } from "./when.ts";
 import type { Drafts } from "./thread/session.ts";
 import { Work } from "./thread/work.tsx";
 import { tauriWindowControls, type WindowControls } from "../transport/window-controls.ts";
 import { useWindowFrame } from "../window/use-window-frame.ts";
+
+/** H13's line atop a retried conversation, loaded only when one opens. */
+const RetriedLine = lazy(() =>
+  late(import("./retried-line.tsx")).then((m) => ({ default: m.RetriedLine })),
+);
 
 /** The matter's papers from H8, or null: before they arrive, without H8, or when the read fails. */
 function usePapers(next: PapersHost | null, matter: MatterId | null): ListedPapers {
@@ -150,9 +166,11 @@ function RoomFrame({
       create: conversations.create,
       sent: conversations.sent,
       refused: talks.refused,
+      ...(talks.canRetry ? { retry: conversations.retry } : {}),
     }),
-    [talks.thread, talks.refused, conversations],
+    [talks.thread, talks.refused, talks.canRetry, conversations],
   );
+  const retried = talks.retried;
   const open = view.open;
   const listed = usePapers(matters.next.papers, open?.matter ?? null);
   const papers = listed?.papers ?? null;
@@ -272,6 +290,15 @@ function RoomFrame({
           <StoreContext value={store}>
             {versions.centre}
             {scratch && <ScratchLine />}
+            {retried !== null && (
+              <Suspense fallback={null}>
+                <RetriedLine
+                  time={clockOf(retried.at, view.now, view.zone, w.lang).time}
+                  title={retried.title ?? mt(w.lang, "New conversation")}
+                  onOpen={() => conversations.open(retried.from)}
+                />
+              </Suspense>
+            )}
             {/* one thread's state per conversation: each starts its own; with no matter open, the composer waits */}
             <MarkdownHostContext value={answers}>
               <Work

@@ -1138,5 +1138,33 @@
     "at": "2026-11-02",
     "by": "Rohan",
     "note": "Rohan, on the review page, 15:35"
+  },
+  "U6-01": {
+    "en": "Retried from your question at {time}. The first answer stays in '{title}'.",
+    "hi": "{time} बजे के आपके प्रश्न से फिर पूछा गया। पहला उत्तर '{title}' में बना रहता है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U6-02": {
+    "en": "Open it",
+    "hi": "खोलें",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U6-03": {
+    "en": "Retry from here",
+    "hi": "यहाँ से फिर पूछें",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U6-04": {
+    "en": "Retry from here starts a new conversation from this question. Nothing is deleted.",
+    "hi": "यहाँ से फिर पूछने पर इसी प्रश्न से एक नई बातचीत शुरू होती है। कुछ भी हटाया नहीं जाता।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
   }
 }

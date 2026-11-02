@@ -68,6 +68,14 @@ const HI = {
   "A new conversation, with a summary of this one and a link back.":
     "एक नई बातचीत, इस बातचीत के सारांश और इस पर लौटने की कड़ी के साथ।",
   "Waiting for '{title}'": "'{title}' की प्रतीक्षा में",
+  // H13: Retry from here on one of the lawyer's questions, the line a retried conversation opens with, and its way
+  // back to the first
+  "Retry from here": "यहाँ से फिर पूछें",
+  "Retry from here starts a new conversation from this question. Nothing is deleted.":
+    "यहाँ से फिर पूछने पर इसी प्रश्न से एक नई बातचीत शुरू होती है। कुछ भी हटाया नहीं जाता।",
+  "Retried from your question at {time}. The first answer stays in '{title}'.":
+    "{time} बजे के आपके प्रश्न से फिर पूछा गया। पहला उत्तर '{title}' में बना रहता है।",
+  "Open it": "खोलें",
   /* ---------- messages while Clauseo works: the queue ---------- */
   Queue: "कतार में रखें",
   "Queued messages": "कतार के संदेश",

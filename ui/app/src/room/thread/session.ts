@@ -10,11 +10,13 @@ import type {
   ErrorCode,
   HostCommand,
   MatterId,
+  MessageId,
   PermissionRequestId,
   StepEntry,
   StreamHeader,
   StreamId,
   ThreadId,
+  Timestamp,
   TurnId,
 } from "../../transport/protocol.ts";
 import { turnRunning } from "./live.ts";
@@ -36,6 +38,8 @@ export type ConversationLink = {
   sent: (thread: ThreadId, text: string) => void;
   /** The code of the matter's refused list, until a read succeeds. */
   refused: ErrorCode | null;
+  /** H13, where the host has it: a new conversation from one of the lawyer's questions in `thread`, which opens. */
+  retry?: (thread: ThreadId, message: MessageId, at: Timestamp) => Promise<void>;
 };
 
 /** What the rows can do and need to know: Undo, and the turn sent last (busy until its end is in the view). */
@@ -49,6 +53,9 @@ export type ThreadActions = {
   answer: (request: PermissionRequestId, option: string) => Promise<void>;
   /** Stop: cancels the open thread's turn. */
   stop: () => void;
+  /** H13's Retry from here on one of the lawyer's questions, at its time; absent where the host can't. Rejects with
+   * the HostError when the host refuses. */
+  retry?: ((message: MessageId, at: Timestamp) => Promise<void>) | undefined;
 };
 
 export const ThreadActionsContext = createContext<ThreadActions | null>(null);
@@ -96,7 +103,7 @@ export function useThreadSession(
   const stopping = useRef(false);
   /** The view's header as the last prompt went: its turn is over once a later header says nothing runs. */
   const headerAtSend = useRef<StreamHeader | null>(null);
-  const { create, sent: onSent } = link;
+  const { create, sent: onSent, retry: retryFrom } = link;
 
   // a thread the conversations open (the list's, or one made elsewhere) is the one the commands go to
   useEffect(() => {
@@ -203,10 +210,26 @@ export function useThreadSession(
     [transport],
   );
 
+  const retry = useMemo(
+    () =>
+      retryFrom === undefined
+        ? undefined
+        : async (message: MessageId, at: Timestamp) => {
+            const id = open.current;
+            if (id === null) throw internalError("no thread is open");
+            try {
+              await retryFrom(id, message, at);
+            } catch (e) {
+              throw toHostError(e);
+            }
+          },
+    [retryFrom],
+  );
+
   const stream = thread === null ? null : streamOf(thread);
   const actions = useMemo(
-    () => ({ stream, sentTurn, undo, answer, stop }),
-    [stream, sentTurn, undo, answer, stop],
+    () => ({ stream, sentTurn, undo, answer, stop, retry }),
+    [stream, sentTurn, undo, answer, stop, retry],
   );
   return { thread, sentTurn, refused: refused ?? link.refused, ask, stop, actions };
 }

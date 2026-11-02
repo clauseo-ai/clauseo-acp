@@ -165,6 +165,14 @@ export class FakeTransport implements HostTransport, NextHostSource {
         return result.agents;
       },
     },
+    retry: {
+      retryFrom: async (thread, message) => {
+        const outcome = await this.#nextCommand({ [WIRE.retryFrom]: { thread, message } });
+        if (typeof outcome === "string" || !("thread_created" in outcome))
+          throw internalError("retry_from answered without a thread");
+        return outcome.thread_created.thread;
+      },
+    },
   };
 
   constructor(host: FakeHost = {}) {
@@ -219,6 +227,7 @@ export class FakeTransport implements HostTransport, NextHostSource {
       app: has("app") ? this.#parts.app : null,
       restart: has("restart") ? this.#parts.restart : null,
       agents: has("agents") ? this.#parts.agents : null,
+      retry: has("retry") ? this.#parts.retry : null,
     };
   }
 

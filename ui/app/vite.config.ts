@@ -131,8 +131,8 @@ function probeEntry(): Plugin {
 /** The chunks whose dynamic import is unwrapped: each imports only chunks already loaded when it loads, so there is
  * nothing to preload. The perf module and the entity table import nothing the first load lacks; the room's lazy parts
  * (the thread's list, the plan trigger, the working line's details) import only chunks index.html preloads, and the
- * list's change-note question only those and the list. vite-config.test.ts checks that, and that no chunk carries a
- * preload list. */
+ * list's change-note question only those and the list; U6's retried line only those, and the title rules nothing.
+ * vite-config.test.ts checks that, and that no chunk carries a preload list. */
 export const BARE_CHUNKS = [
   "perf",
   "character-entities",
@@ -141,6 +141,8 @@ export const BARE_CHUNKS = [
   "working-details",
   "change-note-ask",
   "versions-chunk",
+  "retried-line",
+  "conversation-title",
 ];
 
 const HELPER = "__vitePreload(() => ";
