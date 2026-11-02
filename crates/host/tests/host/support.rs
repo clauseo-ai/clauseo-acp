@@ -2,7 +2,9 @@
 //! that maps agent ids to `fake_agent` scenarios, and a host started on it with a
 //! `ManualClock`, `SequentialIds` and a `PassthroughLauncher` whose home is `<tmp>/home`. The
 //! one policy source is `<root>/policy.json`, and the host looks for Claude Code's enterprise
-//! `managed-mcp.json` at `<root>/managed-mcp.json`, never at the system path.
+//! `managed-mcp.json` at `<root>/managed-mcp.json`, never at the system path. Its limits
+//! reader is [`NoReader`], which launches nothing: a `claude-acp` or `codex-acp` entry
+//! would otherwise start the real readers at start-up. `limits_host.rs` sets its own.
 //!
 //! The helpers are blocking: each runs one future to completion with [`wait`], under a
 //! watchdog of real time so a broken host fails the test instead of hanging it. They never nest
@@ -10,17 +12,19 @@
 
 use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use clauseo_host::{Host, HostConfig, HostHandle, HostJoin, ManualClock, SequentialIds};
+use clauseo_limits::{ReadFailure, ReadLimits, ReadOutcome};
 use clauseo_process::{Launcher, PassthroughLauncher, SpawnOptions};
 use clauseo_protocol::{
-    AgentId, CommandEnvelope, CommandId, CommandOutcome, Cursor, DeliveryRequest, ErrorCode,
-    FolderRefId, HostCommand, HostError, HostQuery, MatterId, MatterSource, MatterSummary,
-    MessageId, Principal, PromptBlock, QueryResult, Seq, StreamId, ThreadId, ThreadStatus,
-    ThreadSummary, Timestamp, Title, TurnId, ViewEpoch,
+    AgentId, AgentKind, CommandEnvelope, CommandId, CommandOutcome, Cursor, DeliveryRequest,
+    ErrorCode, FolderRefId, HostCommand, HostError, HostQuery, MatterId, MatterSource,
+    MatterSummary, MessageId, Principal, PromptBlock, QueryResult, Seq, StreamId, ThreadId,
+    ThreadStatus, ThreadSummary, Timestamp, Title, TurnId, ViewEpoch,
 };
 use clauseo_settings::{Effective, FilePolicy, Locations, SystemFiles};
 use futures::future::Either;
@@ -205,6 +209,7 @@ impl Dir {
         let policy = FilePolicy::new(self.root.join("policy.json"), SystemFiles);
         let effective = Effective::load(&locations, &SystemFiles, &[&policy]);
         HostConfig::new(effective, launcher)
+            .with_limits_reader(Arc::new(NoReader))
             .with_clock(Arc::new(clock.clone()))
             .with_ids(Box::new(SequentialIds::with_run(run)))
             .with_managed_mcp_path(self.root.join("managed-mcp.json"))
@@ -266,6 +271,16 @@ impl Drop for Dir {
                 eprintln!("could not remove {}: {error}", folder.display());
             }
         }
+    }
+}
+
+/// The harness's limits reader: every read fails at once, and nothing is launched.
+pub(crate) struct NoReader;
+
+impl ReadLimits for NoReader {
+    fn read(&self, _agent: AgentKind) -> Pin<Box<dyn Future<Output = ReadOutcome> + Send>> {
+        let failed = ReadFailure::LaunchFailed("the host tests launch no limits reader".to_owned());
+        Box::pin(std::future::ready(ReadOutcome::Failed(failed)))
     }
 }
 
