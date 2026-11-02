@@ -37,15 +37,37 @@ pub(crate) const PUMP_END_BOUND: Duration = Duration::from_secs(1);
 
 /// The one spelling of matter folder `stored` an agent works in, as its process's working
 /// folder and its session's `cwd`: its canonical path (`dunce::canonicalize`: symlinks and `..`
-/// followed, no Windows `\\?\` prefix), or `stored` itself when that fails. The host starts
-/// the agent in it and sends it as `cwd` on `session/new` and `session/load`, so it is the
-/// folder `acp` maps tool locations against. Claude Code works in the real path of its cwd and
-/// names its files through it; sent the folder as the lawyer picked it (macOS `/tmp`, really
-/// `/private/tmp`), every tool path of the turn would land outside the matter.
+/// followed), or `stored` itself when that fails or when the canonical path keeps a Windows
+/// `\\?\` prefix ([`keep_canonical`]). So the result never starts with `\\?\` unless `stored`
+/// did, and a network folder (a UNC share or a mapped drive, which canonicalises to
+/// `\\?\UNC\...`) keeps its stored spelling. The host starts the agent in it and sends it as
+/// `cwd` on `session/new` and `session/load`, so it is the folder `acp` maps tool locations
+/// against. Claude Code works in the real path of its cwd and names its files through it; sent
+/// the folder as the lawyer picked it (macOS `/tmp`, really `/private/tmp`), every tool path of
+/// the turn would land outside the matter.
 ///
 /// A blocking file system call (a few `lstat`s): call it once per agent start or session start.
 pub fn session_folder(stored: &Path) -> PathBuf {
-    dunce::canonicalize(stored).unwrap_or_else(|_| stored.to_path_buf())
+    match dunce::canonicalize(stored) {
+        Ok(canonical) => keep_canonical(&canonical, stored),
+        Err(_) => stored.to_path_buf(),
+    }
+}
+
+/// `canonical`, unless its text starts with Windows' verbatim prefix `\\?\`: then `stored`.
+/// `dunce` strips the prefix only where the plain spelling means the same folder (a local drive
+/// path), so one that is left (`\\?\UNC\srv\share`, a path too long or with a reserved name)
+/// is a spelling `cmd` refuses as a working folder and that tool paths would not match.
+fn keep_canonical(canonical: &Path, stored: &Path) -> PathBuf {
+    if canonical
+        .as_os_str()
+        .as_encoded_bytes()
+        .starts_with(br"\\?\")
+    {
+        stored.to_path_buf()
+    } else {
+        canonical.to_path_buf()
+    }
 }
 
 /// What an agent's tasks post to the actor, in the order it happens.
