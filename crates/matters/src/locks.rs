@@ -64,7 +64,9 @@ pub fn held_open_at(folder: &Path, path: &Path) -> Option<(MatterPath, HeldOpen)
 /// refused folders are: ignoring case on macOS and Windows, exactly elsewhere. The rest of the
 /// path keeps the spelling the file system gave it. When either side does not resolve, the path's
 /// text is compared with the folder's instead: no `.` or `..` part, and the folder's text as a
-/// prefix.
+/// prefix. A `..` after a missing folder follows the OS, as a write through the path would:
+/// Windows drops the pair by its text (`sub/../x` is `x` even with no `sub`), so the path
+/// resolves; Unix needs `sub` to exist, so it does not, and the write would fail with ENOENT.
 pub fn matter_path_in(folder: &Path, path: &Path) -> Option<MatterPath> {
     let joined = folder.join(path);
     if let (Ok(root), Some(target)) = (dunce::canonicalize(folder), resolved(&joined)) {

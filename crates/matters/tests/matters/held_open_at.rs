@@ -44,9 +44,13 @@ fn paths_inside_the_folder_are_checked_however_they_are_spelled() {
     let invoice = Some((path("Invoice.docx"), owner()));
     assert_eq!(held(&folder.join("Invoice.docx")), invoice);
     assert_eq!(held(Path::new("Invoice.docx")), invoice);
+    // With no folder `sub`, Windows reads `sub/..` by its text and opens Invoice.docx, so a
+    // write through that path lands on the open document and is refused; on Unix the path does
+    // not resolve (ENOENT), so a write through it fails and nothing is checked.
+    let through_missing = if cfg!(windows) { invoice.clone() } else { None };
     assert_eq!(
         held(&folder.join("sub/../Invoice.docx")),
-        None,
+        through_missing,
         "no folder sub"
     );
     support::create_dir_all(folder.join("sub"));
