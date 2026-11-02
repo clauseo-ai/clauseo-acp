@@ -13,8 +13,10 @@ use clauseo_protocol::{
 use crate::matters::{client, created, date, import, summary};
 use crate::support::{Dir, FAKE, Scenario, matter_with_thread, send_prompt, wait};
 
-/// One display batch, as the cancel tests wait for it.
-const DISPLAY: Duration = Duration::from_millis(16);
+/// The durable batch: armed by a message's first un-durable delta, so seeing it armed means the
+/// agent's first chunk reached the host, as the cancel tests wait for it. (The display shows that
+/// chunk at once, so no display timer is armed for it.)
+const DURABLE: Duration = Duration::from_millis(250);
 
 /// The cancel fallback's wait.
 const CANCEL_WAIT: Duration = Duration::from_secs(5);
@@ -156,7 +158,7 @@ fn forget_is_refused_for_the_scratch_matter_and_while_a_turn_runs() {
     let (matter, thread, _) = matter_with_thread(&dir, &host, "m", &[("a.txt", "x\n")], FAKE);
     let mut events = host.events(StreamId::Thread(thread));
     let (turn, _) = host.prompt(thread, "Find the cap.");
-    host.wait_armed(DISPLAY);
+    host.wait_armed(DURABLE);
     let error = host.refused(
         HostCommand::ForgetMatter { matter },
         ErrorCode::MatterTurnRunning,
