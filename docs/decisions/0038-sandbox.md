@@ -62,7 +62,8 @@ only "holds the matter" stands for the brief's `Documents/Clauseo`.
 
 `CLAUDE.md` at any depth of the matter cannot be created, written, renamed onto or removed, in any
 letter case: Claude loads a nested `CLAUDE.md` when it works in that folder. This is stricter than
-the brief ("at the matter root"); **Rohan to confirm in review.** The rule is one deny that requires
+the brief ("at the matter root"); approved by the orchestrator on 2026-11-02, in line with QC.11
+(Rohan may override). The rule is one deny that requires
 both `(subpath (param "MATTER"))` and a path-free regex on the last name with two-case letter
 classes, `/[cC][lL][aA][uU][dD][eE]\.[mM][dD]$`. It does not fold Unicode normalisation. It
 stops writes in place, not a folder moved into the matter that already holds a `CLAUDE.md`: the
