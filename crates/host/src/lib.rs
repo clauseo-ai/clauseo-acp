@@ -94,7 +94,8 @@
 //!   own thread.
 //! - Committed before published: an event reaches a subscriber, and a command its answer, only
 //!   after the commit holding it returned `Ok`. Text deltas are the one exception: they reach
-//!   view subscribers in 16 ms display batches and are committed in 250 ms durable batches.
+//!   view subscribers at most once per 16 ms (at once after a quiet 16 ms) and are committed in
+//!   250 ms durable batches.
 //! - `seq` is gapless per stream. Commits are pipelined (each takes `pending + 1` and is sent
 //!   without waiting for the ones before it) and applied in `seq` order. After a failed commit
 //!   nothing more is sent for that stream until its in-flight commits have returned, and no

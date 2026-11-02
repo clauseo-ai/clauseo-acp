@@ -1,6 +1,13 @@
 //! Text coalescing for one thread: the display batch and the durable batch. Time comes in as an
 //! argument (the host clock's `mono`); this module reads no clock and arms no timer itself.
 //!
+//! The display batch leads with its first text: a delta that comes after a quiet
+//! [`DISPLAY_BATCH`] (no display flush in the last 16 ms, a durable flush included) is shown at
+//! once, so the first token of a turn does not wait for a timer. A delta inside that window
+//! waits for one timer, at the window's end, and that flush carries everything since. So the
+//! screen gets at most one flush per 16 ms, a steady stream is shown every 16 ms, and no text
+//! waits longer than 16 ms after the previous flush.
+//!
 //! Each message's un-durable text is held once, in first-delta order, with how much of it the
 //! display has shown. A display flush hands the unshown part of each message to the caller,
 //! borrowed, for `reducer::apply_text_delta`. A durable flush first hands over whatever the display
@@ -16,7 +23,8 @@ use std::time::Duration;
 
 use clauseo_protocol::{CompactString, MessageId, TextAppended, TextKind, TurnId};
 
-/// How long display text waits before it goes to the screen.
+/// The display batch: at most one display flush per this window. Text that comes after a quiet
+/// window is shown at once; text inside the window waits for the window's end.
 pub(crate) const DISPLAY_BATCH: Duration = Duration::from_millis(16);
 
 /// How long un-durable text waits before it is saved as `TextAppended` events.
@@ -44,12 +52,16 @@ pub(crate) struct DisplayText<'a> {
     pub(crate) text: &'a str,
 }
 
-/// What a push asks of the caller: timers to arm (deadlines in `mono` time) and whether the
-/// durable batch is full and must be flushed now.
+/// What a push asks of the caller: display text to show now or a timer to arm (deadlines in
+/// `mono` time), and whether the durable batch is full and must be flushed now.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[must_use]
 pub(crate) struct Pushed {
-    /// Arm the display timer for this deadline: the first delta since the last display flush.
+    /// Show the display text now (run the display flush): the first delta since the last
+    /// display flush, and no display flush in the last [`DISPLAY_BATCH`]. No timer is needed.
+    pub(crate) display_now: bool,
+    /// Arm the display timer for this deadline: the first delta since the last display flush,
+    /// inside [`DISPLAY_BATCH`] of it. The deadline is the end of that window.
     pub(crate) display_at: Option<Duration>,
     /// Arm the durable timer for this deadline: the first un-durable delta since the last
     /// durable flush.
@@ -95,6 +107,9 @@ pub(crate) struct ThreadText {
     held_bytes: usize,
     /// Text arrived since the last display flush (or the last durable flush).
     display_armed: bool,
+    /// When the display last flushed (a durable flush runs the display flush too), in `mono`
+    /// time; `None` until the first flush.
+    last_display: Option<Duration>,
 }
 
 impl ThreadText {
@@ -131,7 +146,12 @@ impl ThreadText {
         }
         if !self.display_armed {
             self.display_armed = true;
-            pushed.display_at = Some(now.saturating_add(DISPLAY_BATCH));
+            match self.last_display {
+                Some(last) if now.saturating_sub(last) < DISPLAY_BATCH => {
+                    pushed.display_at = Some(last.saturating_add(DISPLAY_BATCH));
+                }
+                _ => pushed.display_now = true,
+            }
         }
         self.held_bytes += delta.text.len();
         if let Some(held) = self
@@ -161,14 +181,27 @@ impl ThreadText {
         pushed
     }
 
-    /// The display flush: hands `show` the unshown text of each message, in first-delta order,
-    /// and marks it shown once `show` returns `Ok`. The first error stops the flush; the text
-    /// not shown stays for the next one.
+    /// Whether a display timer that fires at `now` should flush: some text is unshown and the
+    /// display has not flushed within the last [`DISPLAY_BATCH`]. A timer armed before a later
+    /// flush finds the window still open and does nothing; the timer of the current batch is
+    /// the one that flushes.
+    pub(crate) fn display_due(&self, now: Duration) -> bool {
+        self.has_display()
+            && self
+                .last_display
+                .is_none_or(|last| now.saturating_sub(last) >= DISPLAY_BATCH)
+    }
+
+    /// The display flush at `now`: hands `show` the unshown text of each message, in
+    /// first-delta order, and marks it shown once `show` returns `Ok`. The first error stops the
+    /// flush; the text not shown stays for the next one.
     pub(crate) fn flush_display<E>(
         &mut self,
+        now: Duration,
         mut show: impl FnMut(DisplayText<'_>) -> Result<(), E>,
     ) -> Result<(), E> {
         self.display_armed = false;
+        self.last_display = Some(now);
         for held in &mut self.held {
             if let Some(text) = held.unshown() {
                 show(text)?;
@@ -178,14 +211,15 @@ impl ThreadText {
         Ok(())
     }
 
-    /// The durable flush: runs the display flush through `show`, then returns one `TextAppended`
-    /// per message in first-delta order and holds nothing more. On an error from `show` nothing is
-    /// returned and the text stays held.
+    /// The durable flush at `now`: runs the display flush through `show` (so it counts as a
+    /// display flush), then returns one `TextAppended` per message in first-delta order and holds
+    /// nothing more. On an error from `show` nothing is returned and the text stays held.
     pub(crate) fn flush_durable<E>(
         &mut self,
+        now: Duration,
         show: impl FnMut(DisplayText<'_>) -> Result<(), E>,
     ) -> Result<Vec<TextAppended>, E> {
-        self.flush_display(show)?;
+        self.flush_display(now, show)?;
         self.held_bytes = 0;
         Ok(self
             .held
