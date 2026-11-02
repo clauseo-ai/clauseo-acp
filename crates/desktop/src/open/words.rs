@@ -36,9 +36,9 @@ pub(super) const EN: Table = Table {
 };
 
 pub(super) const HI: Table = Table {
-    web_title: "यह लिंक ब्राउज़र में खोलें?",
-    web_message: "यह लिंक {host} पर जाता है।",
-    web_ok: "लिंक खोलें",
+    web_title: "यह कड़ी ब्राउज़र में खोलें?",
+    web_message: "यह कड़ी {host} पर जाती है।",
+    web_ok: "कड़ी खोलें",
     cancel: "रद्द करें",
     mail_title: "ईमेल लिखें?",
     mail_message: "आपका ईमेल ऐप {address} के लिए नया संदेश खोलेगा।",

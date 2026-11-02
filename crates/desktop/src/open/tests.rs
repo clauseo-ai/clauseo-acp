@@ -473,3 +473,30 @@ fn a_reveal_target_reads_a_matter_or_app_data_only() {
         );
     }
 }
+
+/// Every word of the confirm, in both languages, appears verbatim in its review home,
+/// `ui/app/src/review/registry-h11.tsx`, so the copy the reviewers approve is what Rust draws.
+#[test]
+fn the_confirms_words_are_the_reviewed_copy() {
+    let registry = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../ui/app/src/review/registry-h11.tsx");
+    let registry = std::fs::read_to_string(&registry).unwrap();
+    for table in [&words::EN, &words::HI] {
+        for (id, text) in [
+            ("H11-01", table.web_title),
+            ("H11-02", table.web_message),
+            ("H11-03", table.web_ok),
+            ("H11-04", table.cancel),
+            ("H11-05", table.mail_title),
+            ("H11-06", table.mail_message),
+            ("H11-07", table.mail_ok),
+        ] {
+            assert!(registry.contains(id), "registry-h11.tsx has no {id}");
+            let quoted = format!("\"{text}\"");
+            assert!(
+                registry.contains(&quoted),
+                "registry-h11.tsx lacks {id}: {quoted}"
+            );
+        }
+    }
+}

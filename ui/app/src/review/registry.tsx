@@ -5,6 +5,7 @@
 import { LocateGate, MovedFolder } from "../room/moved.tsx";
 import { ScratchLine } from "../room/scratch-line.tsx";
 import type { Entry } from "./entry.ts";
+import { H11 } from "./registry-h11.tsx";
 import { U4 } from "./registry-u4.tsx";
 import { U10 } from "./registry-u10.tsx";
 import { U8 } from "./registry-u8.tsx";
@@ -325,6 +326,7 @@ export const REGISTRY: readonly Entry[] = [
   ...U4,
   ...U10,
   ...U8,
+  ...H11,
   {
     id: "U2-01",
     words: frameWords("Add a matter's folder."),

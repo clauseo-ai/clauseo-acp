@@ -1,7 +1,7 @@
 // The room's rail: the parts' Rail with a MatterRow for every matter the host lists (matters.ts), the scratch matter
 // only at its foot. With the NextHost's matters part, the date groups (when.ts), Pinned, Recent (the five opened last),
-// finding by name and client, and each row's menu (Pin, Locate folder, Remove from the list); without it, one group,
-// "No date yet", newest first, and finding by name only. What each row says it's doing comes from matters.ts's status,
+// finding by name and client, and each row's menu (Pin, Locate folder, Show in Finder, Remove from the list); without it,
+// one group, "No date yet", newest first, finding by name only, and a menu of Show in Finder alone. What each row says it's doing comes from matters.ts's status,
 // its moments put in the lawyer's clock as the rail renders, so nothing ticks at rest; the open matter's row says
 // nothing, since the lawyer is looking at it. Until the list arrives, and if it can't be read, the rail draws no list
 // and no scratch row.
@@ -80,6 +80,8 @@ export function RoomRail({
         matters.open(m.matter);
         onMoved();
       },
+      // Show in Finder (File Explorer): the menu greys it while the folder has moved
+      onReveal: () => void matters.reveal(m.matter),
       ...(detailed
         ? {
             pinned: m.pinned,

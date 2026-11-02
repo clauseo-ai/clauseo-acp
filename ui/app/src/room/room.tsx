@@ -9,7 +9,8 @@
 // until H5 nothing under a matter's title (the scratch matter's line stands). The wall
 // shows its surface only until H8 (host-next.ts's papers part). Folded, the rail closes on Escape and on opening a
 // matter or making one, and focus goes back to Matters; Matters carries the court-yellow dot while another matter
-// waits on the lawyer.
+// waits on the lawyer. A link or paper in an answer opens through the host (open.ts, H11), and so does a matter row's
+// Show in Finder.
 import { use, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { EmptyPapers } from "@clauseo/components/clauseo/empty.tsx";
 import { PaperTile } from "@clauseo/components/clauseo/paper-tile.tsx";
@@ -20,6 +21,7 @@ import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { frame } from "@clauseo/components/lib/words-frame.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
+import { MarkdownHostContext, type MarkdownHost } from "@clauseo/components/markdown/host.ts";
 import { PartsRoot } from "@clauseo/components/ui/root.tsx";
 import { frameBatch } from "../store/batch.ts";
 import { StoreContext } from "../store/hooks.ts";
@@ -29,6 +31,7 @@ import type { MatterId } from "../transport/protocol.ts";
 import type { Papers, PapersHost } from "./host-next.ts";
 import { Matters, type MattersView } from "./matters.ts";
 import { NewMatter } from "./new-matter.tsx";
+import { AnswerHost, type ListedPapers } from "./open.ts";
 import { LocateGate, MovedFolder } from "./moved.tsx";
 import { RoomRail } from "./rail.tsx";
 import { ScratchLine } from "./scratch-line.tsx";
@@ -40,7 +43,7 @@ import { tauriWindowControls, type WindowControls } from "../transport/window-co
 import { useWindowFrame } from "../window/use-window-frame.ts";
 
 /** The matter's papers from H8, or null: before they arrive, without H8, or when the read fails. */
-function usePapers(next: PapersHost | null, matter: MatterId | null): Papers | null {
+function usePapers(next: PapersHost | null, matter: MatterId | null): ListedPapers {
   const [listed, setListed] = useState<{ matter: MatterId; papers: Papers } | null>(null);
   useEffect(() => {
     if (next === null || matter === null) return;
@@ -55,7 +58,19 @@ function usePapers(next: PapersHost | null, matter: MatterId | null): Papers | n
       live = false;
     };
   }, [next, matter]);
-  return listed !== null && listed.matter === matter ? listed.papers : null;
+  return listed !== null && listed.matter === matter ? listed : null;
+}
+
+/** The answers' MarkdownHost (open.ts): one object per transport and matter, so a new papers list or a streaming row
+ * never makes a new one; the wall's papers reach it as they arrive. */
+function useAnswerHost(
+  transport: HostTransport,
+  matter: MatterId | null,
+  listed: ListedPapers,
+): MarkdownHost {
+  const host = useMemo(() => new AnswerHost(transport, matter), [transport, matter]);
+  useEffect(() => host.show(listed), [host, listed]);
+  return host;
 }
 
 /** Whether a matter the lawyer isn't looking at waits on them, with a question or for permission: Matters' dot. The
@@ -122,7 +137,9 @@ function RoomFrame({
   useEffect(() => matters.start(), [matters]);
   const view = useSyncExternalStore(matters.subscribe, matters.view, matters.view);
   const open = view.open;
-  const papers = usePapers(matters.next.papers, open?.matter ?? null);
+  const listed = usePapers(matters.next.papers, open?.matter ?? null);
+  const papers = listed?.papers ?? null;
+  const answers = useAnswerHost(transport, open?.matter ?? null, listed);
   /** The folded rail closes, and focus goes back to Matters, which opened it. */
   const fold = () => {
     if (!railOpen) return;
@@ -237,13 +254,15 @@ function RoomFrame({
             {versions.centre}
             {scratch && <ScratchLine />}
             {/* one thread's state per matter: a new matter starts its own; with none open, the composer waits */}
-            <Work
-              key={open?.matter ?? "none"}
-              transport={transport}
-              matter={open}
-              drafts={drafts}
-              onThread={matters.onThread}
-            />
+            <MarkdownHostContext value={answers}>
+              <Work
+                key={open?.matter ?? "none"}
+                transport={transport}
+                matter={open}
+                drafts={drafts}
+                onThread={matters.onThread}
+              />
+            </MarkdownHostContext>
           </StoreContext>
         )}
       </main>

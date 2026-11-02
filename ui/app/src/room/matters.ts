@@ -11,6 +11,7 @@ import { frameBatch, type Batch } from "../store/batch.ts";
 import type { ViewStore } from "../store/store.ts";
 import { streamOf } from "../store/view.ts";
 import { pickReopenMatter } from "../store/reopen.ts";
+import { quietly } from "./open.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import type {
   FolderRefId,
@@ -308,6 +309,11 @@ export class Matters {
     const picked = await this.#transport.pickFolder();
     if (picked === null) return;
     await this.#command({ relocate_matter: { matter, folder: picked.folder } }, "relocate_matter");
+  }
+
+  /** H11: shows the matter's folder in Finder or File Explorer; a refusal only goes to the console. */
+  reveal(matter: MatterId): Promise<void> {
+    return quietly("reveal", this.#transport.reveal({ matter }));
   }
 
   /** H20: where a new matter's folder goes, as the lawyer would write it; null without it, or when the read fails. */

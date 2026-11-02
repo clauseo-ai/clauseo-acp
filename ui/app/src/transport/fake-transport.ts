@@ -27,11 +27,13 @@ import type {
   AgentChoiceId,
   CommandEnvelope,
   CommandOutcome,
+  FileRefId,
   HostError,
   HostQuery,
   PermissionRequestId,
   PickedFolder,
   QueryResult,
+  RevealTarget,
   StreamId,
   ThreadId,
   ViewPosition,
@@ -52,6 +54,9 @@ export type FakeCall =
       option: AgentChoiceId;
     }
   | { call: "pick_folder" }
+  | { call: "open_external"; url: string }
+  | { call: "open_file"; file: FileRefId }
+  | { call: "reveal"; target: RevealTarget }
   | { call: "next_query"; query: NextQuery }
   | { call: "next_command"; command: NextCommand };
 
@@ -71,6 +76,11 @@ export type FakeHost = {
   dispatch?: (command: CommandEnvelope) => CommandOutcome | Promise<CommandOutcome>;
   query?: (query: HostQuery) => QueryResult | Promise<QueryResult>;
   pickFolder?: () => PickedFolder | null;
+  /** Answer `openExternal`, `openFile` and `reveal`; throwing refuses (a HostError, such as the declined confirm's
+   * `transport.unauthorized`). Without one the call succeeds. */
+  openExternal?: (url: string) => void | Promise<void>;
+  openFile?: (file: FileRefId) => void | Promise<void>;
+  reveal?: (target: RevealTarget) => void | Promise<void>;
   /** Answers each subscribe; throwing refuses it. */
   subscribe?: (stream: StreamId, after: ViewPosition | null) => void;
   platform?: DisplayInfo["platform"];
@@ -279,6 +289,29 @@ export class FakeTransport implements HostTransport, NextHostSource {
   async pickFolder(): Promise<PickedFolder | null> {
     this.calls.push({ call: "pick_folder" });
     return this.host.pickFolder?.() ?? null;
+  }
+
+  async openExternal(url: string): Promise<void> {
+    this.calls.push({ call: "open_external", url });
+    await this.#answer(() => this.host.openExternal?.(url));
+  }
+
+  async openFile(file: FileRefId): Promise<void> {
+    this.calls.push({ call: "open_file", file });
+    await this.#answer(() => this.host.openFile?.(file));
+  }
+
+  async reveal(target: RevealTarget): Promise<void> {
+    this.calls.push({ call: "reveal", target });
+    await this.#answer(() => this.host.reveal?.(target));
+  }
+
+  async #answer(run: () => void | Promise<void>): Promise<void> {
+    try {
+      await run();
+    } catch (error) {
+      throw toHostError(error);
+    }
   }
 
   async displayInfo(): Promise<DisplayInfo> {

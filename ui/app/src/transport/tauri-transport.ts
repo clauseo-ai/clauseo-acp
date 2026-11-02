@@ -24,11 +24,13 @@ import type {
   AgentChoiceId,
   CommandEnvelope,
   CommandOutcome,
+  FileRefId,
   HostEvent,
   HostQuery,
   PermissionRequestId,
   PickedFolder,
   QueryResult,
+  RevealTarget,
   StreamId,
   ThreadId,
   ViewPosition,
@@ -242,6 +244,15 @@ export class TauriTransport implements HostTransport, AppFeedSource {
   }
   displayInfo(): Promise<DisplayInfo> {
     return call(commands.displayInfo());
+  }
+  async openExternal(url: string): Promise<void> {
+    await call(commands.openExternal(url));
+  }
+  async openFile(file: FileRefId): Promise<void> {
+    await call(commands.openFile(file));
+  }
+  async reveal(target: RevealTarget): Promise<void> {
+    await call(commands.reveal(target));
   }
   subscribe(stream: StreamId, after: ViewPosition | null, subscriber: BatchSubscriber): () => void {
     return this.#subs.add(stream, after, subscriber);

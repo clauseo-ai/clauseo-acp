@@ -15,7 +15,7 @@ import { vt, type VersionKey } from "@clauseo/components/lib/words-versions.ts";
 import { t, type Key } from "@clauseo/components/lib/words.ts";
 
 export type WordsRef = {
-  /** The words file, under ui/components/src/. */
+  /** The words file, under ui/components/src/; from the repo root for words the webview doesn't draw (H11's). */
   file: string;
   /** The English key in it. */
   key: string;

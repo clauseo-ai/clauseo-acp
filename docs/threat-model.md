@@ -30,9 +30,9 @@ converted document. From there they can call any IPC command the page can reach.
 
 **What stops them.**
 
-- `built`: The release context names one capability, `main`, which grants only the ten bridge
+- `built`: The release context names one capability, `main`, which grants only the thirteen bridge
   commands, one permission each ([0012](decisions/0012-desktop-bridge.md),
-  [0019](decisions/0019-app-stream-to-the-window.md)), and the two core
+  [0019](decisions/0019-app-stream-to-the-window.md), [0026](decisions/0026-open-and-reveal.md)), and the two core
   window commands of Tauri's drag script, granted in every build: start a drag, and maximise or
   restore on a double-click ([0015](decisions/0015-window-frame.md)). The frame adds
   `frame.json` at setup on Windows and Linux (`window_frame::grant_caption_commands`): minimise,
@@ -47,23 +47,34 @@ converted document. From there they can call any IPC command the page can reach.
   `base-uri 'none'`, Trusted Types enforced with one allowed policy, `clauseo-sanitize` (defence in
   depth: engines without support ignore it); the `tauri-config` check pins the string
 - `built`: An `AppManifest` in `build.rs`, so app commands go through the access check; it lists
-  the ten commands in release (the `e2e` and `marks` builds add theirs), and a test checks it
+  the thirteen commands in release (the `e2e` and `marks` builds add theirs), and a test checks it
   against the code and the capabilities
 - `built`: No global Tauri object and a frozen prototype (`tauri-config` check); no asset protocol
   (`tauri-config` check, and `deny.toml` bans tauri's `protocol-asset` feature); no devtools in
   release builds (`deny.toml` bans the feature; Tauri turns devtools on in debug builds)
-- `built`: Rust validates every command (types, opaque ids, allowed values); folders are named by
-  opaque ids the bridge issued, never paths
+- `built`: Rust validates every command (types, opaque ids, allowed values); folders and files are
+  named by opaque ids the bridge or the host issued, and folders to show by their matter, never
+  paths
 - `built`: `dispatch` and `query` are allow-lists that name every host command and read, with no
   catch-all, so one the host adds is refused by the build until the bridge admits it
   ([0019](decisions/0019-app-stream-to-the-window.md))
 - `built`: A minimal command surface: dispatch, query, subscribe (a stream, or the app-wide events,
   which take nothing from the page), acknowledge, answer a permission, pick a folder
-  ([0012](decisions/0012-desktop-bridge.md)); `designed`: open a file or link
-- `built` for "always allow" and the folder picker: escalations only through native dialogs drawn
-  by Rust, never a webview confirm; `designed` for the rest
-- `designed`: The webview never navigates; links go through one `open_external` (https, http,
-  mailto) with a native confirm; `open_file` opens only document types inside a matter
+  ([0012](decisions/0012-desktop-bridge.md)), open a link or a matter's document, and show a
+  matter's folder or the app data folder ([0026](decisions/0026-open-and-reveal.md))
+- `built` for "always allow", the folder picker and external links: escalations only through
+  native dialogs drawn by Rust, never a webview confirm; `designed` for the rest
+- `built`: Links go through one `open_external`: https, http with a host and no credentials, or
+  mailto with plain addresses, after a native confirm that names the host in ASCII (`xn--` for an
+  international name); declined is `transport.unauthorized` ([0026](decisions/0026-open-and-reveal.md))
+- `built`: `open_file` opens only a file the host issued a ref for, inside the folder of the matter
+  that owns the ref (checked by the host and again by the desktop on the resolved path), a regular
+  file of a listed document type, never a program, script, shortcut, web page, macro file or app
+  bundle; `reveal` shows a folder selected in its parent and never launches it. Known gap: a
+  process that can write the matter folder can swap a folder on the path for a link between the
+  check and the open (the agent, until the sandbox) ([0026](decisions/0026-open-and-reveal.md))
+- `designed`: The webview never navigates (no navigation guard yet; every link click is cancelled
+  in the renderer)
 - `designed`: Markdown renders without raw HTML; DOMPurify only on the few HTML-string paths
 
 ## Agents

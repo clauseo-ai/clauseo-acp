@@ -1,7 +1,7 @@
 // The room's rail over FakeTransport, at the room's interface: the scratch matter only at the foot, each row's
 // status words (none on the open matter's), date groups across a Sunday, finding by name only without a NextHost and
-// by client with one, each saying so, Pinned and Recent (five), no Find on an empty rail, Remove from the list and the
-// open matter's chevron, isolated folder paths, matters_changed updating a row, and a left matter's thread waiting on a
+// by client with one, each saying so, Pinned and Recent (five), no Find on an empty rail, Remove from the list, Show in
+// Finder and the open matter's chevron, isolated folder paths, matters_changed updating a row, and a left matter's thread waiting on a
 // permission.
 // @vitest-environment happy-dom
 import { act } from "react";
@@ -296,7 +296,7 @@ test("with H5 the open matter's row carries its actions' chevron, reached by key
   );
 });
 
-test("Remove from the list sends forget_matter and the row leaves; without a NextHost the row has no menu", async () => {
+test("Remove from the list sends forget_matter and the row leaves", async () => {
   let list = [detailed(A), detailed(B)];
   const sent: NextCommand[] = [];
   await mount(
@@ -321,16 +321,41 @@ test("Remove from the list sends forget_matter and the row leaves; without a Nex
   await settle();
   expect(sent).toContainEqual({ forget_matter: { matter: A.matter } });
   expect(names()).toEqual([B.name]);
-  await act(async () => root?.unmount());
-  host?.remove();
-  await mount(today([A]));
+});
+
+/** Opens a row's context menu and presses its one item, which without a NextHost is Show in Finder. */
+async function showInFinder(name: string) {
   await act(async () =>
-    rowOf(A.name)?.dispatchEvent(
-      new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
-    ),
+    rowOf(name)?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })),
   );
   await settle();
-  expect(document.querySelector('[role="menu"]')).toBeNull();
+  const items = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+  expect(items.map((i) => i.textContent)).toEqual(["Show in Finder"]);
+  await act(async () => items[0]?.click());
+  await settle();
+}
+
+test("without a NextHost a row's menu is Show in Finder alone, and it reveals the matter's folder", async () => {
+  const transport = await mount({ ...today([A, B]), platform: "mac" });
+  await showInFinder(A.name);
+  expect(transport.only("reveal")).toEqual([{ call: "reveal", target: { matter: A.matter } }]);
+});
+
+test("a refused Show in Finder only goes to the console; the rail stays as it was", async () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const transport = await mount({
+    ...today([A, B]),
+    platform: "mac",
+    reveal: () => {
+      throw { code: "matter.folder_missing", message: "gone", retryable: false };
+    },
+  });
+  const before = names();
+  await showInFinder(A.name);
+  expect(transport.only("reveal")).toEqual([{ call: "reveal", target: { matter: A.matter } }]);
+  expect(warn).toHaveBeenCalledWith(expect.stringContaining("reveal failed"));
+  expect(names()).toEqual(before);
+  warn.mockRestore();
 });
 
 test("matters_changed updates a row in place", async () => {

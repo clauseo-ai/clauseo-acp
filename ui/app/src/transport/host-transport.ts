@@ -8,6 +8,7 @@ import type {
   CommandEnvelope,
   CommandOutcome,
   DisplayInfo,
+  FileRefId,
   HostError,
   HostEvent,
   HostQuery,
@@ -15,6 +16,7 @@ import type {
   PermissionRequestId,
   PickedFolder,
   QueryResult,
+  RevealTarget,
   StreamId,
   ThreadId,
   ViewPosition,
@@ -46,6 +48,14 @@ export interface HostTransport {
   /** The native folder dialog: the folder's ref and its home-relative display; `null` when the lawyer cancels it. */
   pickFolder(): Promise<PickedFolder | null>;
   displayInfo(): Promise<DisplayInfo>;
+  /** Opens a web or mail link (https, http, mailto) in the default browser or mail app, after the host's native
+   * confirm names its host. A declined confirm rejects with `transport.unauthorized`; a bad link with
+   * `command.invalid`. */
+  openExternal(url: string): Promise<void>;
+  /** Opens a matter document with its default app. */
+  openFile(file: FileRefId): Promise<void>;
+  /** Shows a matter's folder, or the app data folder, in Finder or File Explorer. */
+  reveal(target: RevealTarget): Promise<void>;
   /**
    * Starts receiving a stream's patches, `after` a position (the tail after it, or one `Reset`). Ref-counted per
    * stream: the host is subscribed once however many subscribers there are, and released a microtask after the last
@@ -114,6 +124,9 @@ export class NullTransport implements HostTransport {
   answerPermission = nothing;
   pickFolder = nothing;
   displayInfo = nothing;
+  openExternal = nothing;
+  openFile = nothing;
+  reveal = nothing;
   subscribe(): () => void {
     return () => {};
   }
