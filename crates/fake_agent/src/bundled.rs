@@ -26,6 +26,8 @@ macro_rules! bundled {
 
 bundled! {
     scenarios: [
+        "ask-user-question",
+        "ask-user-question-stop",
         "auth-required",
         "auth-required-titled",
         "cancel-late-updates",

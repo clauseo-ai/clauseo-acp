@@ -23,6 +23,9 @@ mod write;
 #[path = "host/agent_name.rs"]
 mod agent_name;
 #[cfg(test)]
+#[path = "host/ask_user_question.rs"]
+mod ask_user_question;
+#[cfg(test)]
 #[path = "host/blobs.rs"]
 mod blobs;
 #[cfg(test)]
