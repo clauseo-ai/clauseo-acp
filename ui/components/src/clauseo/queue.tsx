@@ -9,7 +9,7 @@ import { IconFold } from "../icons/icons.tsx";
 import { useMatterWords } from "../lib/words-matters.ts";
 import { Say } from "./say.tsx";
 
-import { QUEUE_CAP, type QueueHold, type QueuedMessage } from "./queue-model.ts";
+import { QUEUE_CAP, type QueueHold, type QueuedMessage, type QueueTestIds } from "./queue-model.ts";
 
 // the wait for another conversation lives in its own file, so the room's first load carries it without the queue's
 // parts (the collapsible among them)
@@ -24,12 +24,14 @@ function QueueItem({
   onEdit,
   onRemove,
   onSendNow,
+  testIds,
 }: {
   item: QueuedMessage;
   index: number;
   onEdit: (id: string, text: string) => void;
   onRemove: (id: string) => void;
   onSendNow: (id: string) => void;
+  testIds: QueueTestIds | undefined;
 }) {
   const w = useMatterWords();
   const [editing, setEditing] = useState(false);
@@ -40,7 +42,7 @@ function QueueItem({
   }, [editing]);
   if (editing) {
     return (
-      <li className="queue-item" data-editing="">
+      <li className="queue-item" data-editing="" data-testid={testIds?.row} data-turn={item.turn}>
         <label className="sr-only" htmlFor={`queue-edit-${item.id}`}>
           {w.m("Edit queued message {n}", { n: index + 1 })}
         </label>
@@ -90,7 +92,7 @@ function QueueItem({
   }
   // Edit and Remove come in under the pointer or with focus, as the answer's Accept does; Send now stays in view
   return (
-    <li className="queue-item">
+    <li className="queue-item" data-testid={testIds?.row} data-turn={item.turn}>
       <p className="queue-text">
         <Say>{item.text}</Say>
       </p>
@@ -99,6 +101,7 @@ function QueueItem({
           kind="quiet"
           size="small"
           className="queue-more-act"
+          data-testid={testIds?.edit}
           onClick={() => {
             setDraft(item.text);
             setEditing(true);
@@ -110,11 +113,18 @@ function QueueItem({
           kind="quiet"
           size="small"
           className="queue-more-act"
+          data-testid={testIds?.remove}
           onClick={() => onRemove(item.id)}
         >
           {w.m("Remove")}
         </Button>
-        <Button kind="quiet" size="small" className="queue-send" onClick={() => onSendNow(item.id)}>
+        <Button
+          kind="quiet"
+          size="small"
+          className="queue-send"
+          data-testid={testIds?.sendNow}
+          onClick={() => onSendNow(item.id)}
+        >
           {w.m("Send now")}
         </Button>
       </span>
@@ -127,25 +137,42 @@ const SHOWN = 2;
 
 /** The queue over the composer: one line on what it holds, or why it holds, then the messages in the order they go,
  * the next at the top. Two show, then a row that opens the rest; opened, the list scrolls and casts an edge where it
- * is cut. Nothing in it is numbered: the order is the order they stand in. */
+ * is cut. Nothing in it is numbered: the order is the order they stand in. Held with no stop to name, the head keeps
+ * its count line and offers Send next. A refused press's words stand under the head while the host gives them.
+ * After Remove or Send now takes a row away, the focus goes to the next row's Send now, or out (`onFocusOut`). */
 export function QueueStrip({
   items,
   held = null,
+  note = null,
   onEdit,
   onRemove,
   onSendNow,
   onSendNext,
+  onFocusOut,
+  testIds,
 }: {
   items: readonly QueuedMessage[];
   held?: QueueHold | null;
+  /** A refused press's words and its code, under the head; null for none. */
+  note?: { words: string; code: string } | null;
   onEdit: (id: string, text: string) => void;
   onRemove: (id: string) => void;
   onSendNow: (id: string) => void;
   onSendNext: () => void;
+  /** Where the focus goes when a row it was on went and no row follows, as the composer's field. */
+  onFocusOut?: (() => void) | undefined;
+  testIds?: QueueTestIds | undefined;
 }) {
   const w = useMatterWords();
   const [open, setOpen] = useState(false);
+  const section = useRef<HTMLElement>(null);
   const list = useRef<HTMLOListElement>(null);
+  // the row a Remove or Send now was pressed on, and where it stood, until it goes
+  const going = useRef<{ id: string; index: number } | null>(null);
+  const focusOut = useRef(onFocusOut);
+  useLayoutEffect(() => {
+    focusOut.current = onFocusOut;
+  });
   const n = items.length;
   const rest = n - SHOWN;
   const showing = open || rest <= 0 ? items : items.slice(0, SHOWN);
@@ -161,35 +188,71 @@ export function QueueStrip({
     l.addEventListener("scroll", mark, { passive: true });
     return () => l.removeEventListener("scroll", mark);
   }, [open, n]);
+  // the pressed row gone: focus that went with it (to the page) or stayed in the strip moves to the next row's Send
+  // now, else out
+  useLayoutEffect(() => {
+    const g = going.current;
+    if (g === null || items.some((item) => item.id === g.id)) return;
+    going.current = null;
+    if (!focusLost(section.current)) return;
+    const next = list.current?.children[g.index]?.querySelector<HTMLElement>(".queue-send");
+    if (next != null) next.focus();
+    else focusOut.current?.();
+  }, [items]);
+  // the strip itself going with the row (the queue emptied): out, while its nodes still hold the focus
+  useLayoutEffect(
+    () => () => {
+      if (going.current !== null && focusLost(section.current)) focusOut.current?.();
+    },
+    [],
+  );
+  const press = (id: string, then: (id: string) => void) => {
+    going.current = { id, index: items.findIndex((item) => item.id === id) };
+    then(id);
+  };
   if (n === 0) return null;
+  const count = [
+    n === 1
+      ? w.m("1 queued, sent once this answer is done.")
+      : w.m("{n} queued, sent in order.", { n }),
+    n >= QUEUE_CAP ? w.m("The queue holds {n}.", { n: QUEUE_CAP }) : null,
+  ]
+    .filter((x) => x !== null)
+    .join(" ");
   const head =
-    held !== null
-      ? w.m(
+    held === null || held.kind === "held"
+      ? count
+      : w.m(
           held.kind === "stopped"
             ? "The queue is held. You stopped the answer at {time}, so nothing more is sent until you send."
             : "The queue is held. The answer failed at {time}, so nothing more is sent until you send.",
           { time: w.clock(held.at) },
-        )
-      : [
-          n === 1
-            ? w.m("1 queued, sent once this answer is done.")
-            : w.m("{n} queued, sent in order.", { n }),
-          n >= QUEUE_CAP ? w.m("The queue holds {n}.", { n: QUEUE_CAP }) : null,
-        ]
-          .filter((x) => x !== null)
-          .join(" ");
+        );
   return (
     <section
+      ref={section}
       className="queue"
       aria-label={w.m("Queued messages")}
       data-held={held !== null ? "" : undefined}
     >
       <div className="queue-head">
-        <p className="queue-say" role="status">
+        {/* one status region: a refused press's words join the head's, so they are said as they come */}
+        <p className="queue-say" role="status" data-testid={testIds?.say}>
           <Say>{head}</Say>
+          {note !== null && (
+            <span className="queue-note" data-code={note.code} data-testid={testIds?.note}>
+              <Say>{note.words}</Say>
+            </span>
+          )}
         </p>
         {held !== null && (
-          <Button kind="tone" size="small" className="queue-next" onClick={onSendNext}>
+          <Button
+            kind="tone"
+            size="small"
+            className="queue-next"
+            data-testid={testIds?.sendNext}
+            onClick={onSendNext}
+          >
             {w.m("Send next")}
           </Button>
         )}
@@ -201,8 +264,9 @@ export function QueueStrip({
             item={item}
             index={i}
             onEdit={onEdit}
-            onRemove={onRemove}
-            onSendNow={onSendNow}
+            onRemove={(id) => press(id, onRemove)}
+            onSendNow={(id) => press(id, onSendNow)}
+            testIds={testIds}
           />
         ))}
       </ol>
@@ -221,4 +285,10 @@ export function QueueStrip({
       )}
     </section>
   );
+}
+
+/** Whether the focus fell to the page or stands in the strip. */
+function focusLost(strip: HTMLElement | null): boolean {
+  const at = document.activeElement;
+  return at === null || at === document.body || (strip !== null && strip.contains(at));
 }

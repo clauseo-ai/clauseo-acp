@@ -176,6 +176,118 @@ describe("the queue over the composer", () => {
   });
 });
 
+const IDS = {
+  row: "queued",
+  edit: "queued-edit",
+  remove: "queued-remove",
+  sendNow: "queued-send-now",
+  sendNext: "send-next",
+  say: "queue-say",
+  note: "queue-error",
+};
+const byId = (id: string) => [...document.querySelectorAll<HTMLElement>(`[data-testid="${id}"]`)];
+
+describe("the queue's hooks, the held queue with no stop to name, a refused press, and focus", () => {
+  test("testIds land on the rows (with their turn), the acts, Send next and the head", async () => {
+    const items = messages(2).map((m, i) => ({ ...m, turn: `t${i + 1}` }));
+    await mount(
+      <QueueStrip
+        items={items}
+        held={{ kind: "stopped", at: "4:32 pm" }}
+        onEdit={none}
+        onRemove={none}
+        onSendNow={none}
+        onSendNext={none}
+        testIds={IDS}
+      />,
+    );
+    expect(byId("queued").map((r) => r.dataset["turn"])).toEqual(["t1", "t2"]);
+    expect(byId("queued-edit")).toHaveLength(2);
+    expect(byId("queued-remove")).toHaveLength(2);
+    expect(byId("queued-send-now")).toHaveLength(2);
+    expect(txt(byId("send-next")[0])).toBe("Send next");
+    expect(byId("queue-say")[0]?.getAttribute("role")).toBe("status");
+    // no hooks by default
+    await act(async () =>
+      root?.render(
+        <QueueStrip
+          items={items}
+          onEdit={none}
+          onRemove={none}
+          onSendNow={none}
+          onSendNext={none}
+        />,
+      ),
+    );
+    expect(document.querySelector("[data-testid]")).toBeNull();
+  });
+
+  test("held with no stop to name: the count line, the cap line at ten, and Send next", async () => {
+    await mount(
+      <QueueStrip
+        items={messages(QUEUE_CAP)}
+        held={{ kind: "held" }}
+        onEdit={none}
+        onRemove={none}
+        onSendNow={none}
+        onSendNext={none}
+      />,
+    );
+    expect(txt(document.querySelector(".queue-say"))).toBe(
+      "10 queued, sent in order. The queue holds 10.",
+    );
+    expect(document.querySelector(".queue")?.hasAttribute("data-held")).toBe(true);
+    expect(document.querySelector(".queue-next")).not.toBeNull();
+  });
+
+  test("a refused press's words join the head's status line with their code", async () => {
+    await mount(
+      <QueueStrip
+        items={messages(2)}
+        note={{ words: mt("en", "That message had already gone."), code: "thread.turn_not_queued" }}
+        onEdit={none}
+        onRemove={none}
+        onSendNow={none}
+        onSendNext={none}
+        testIds={IDS}
+      />,
+    );
+    const note = byId("queue-error")[0];
+    expect(txt(note)).toBe("That message had already gone.");
+    expect(note?.dataset["code"]).toBe("thread.turn_not_queued");
+    expect(note?.closest('[role="status"]')).toBe(byId("queue-say")[0]);
+  });
+
+  test("a row Remove or Send now took away hands the focus to the next row's Send now, else out", async () => {
+    let out = 0;
+    const strip = (items: QueuedMessage[]) => (
+      <QueueStrip
+        items={items}
+        onEdit={none}
+        onRemove={none}
+        onSendNow={none}
+        onSendNext={none}
+        onFocusOut={() => (out += 1)}
+        testIds={IDS}
+      />
+    );
+    const all = messages(3);
+    await mount(strip(all));
+    byId("queued-remove")[0]!.focus();
+    await act(async () => byId("queued-remove")[0]!.click());
+    await act(async () => root?.render(strip(all.slice(1))));
+    expect(document.activeElement).toBe(byId("queued-send-now")[0]);
+    // the last one's Send now: no row follows
+    await act(async () => byId("queued-send-now")[1]!.click());
+    await act(async () => root?.render(strip(all.slice(1, 2))));
+    expect(out).toBe(1);
+    // a row that goes without a press moves no focus
+    byId("queued-edit")[0]!.focus();
+    await act(async () => root?.render(strip([])));
+    expect(out).toBe(1);
+  });
+});
+
 describe("steering the running answer", () => {
   test("Send now and Queue are quiet buttons on the line above the field, and Enter queues", async () => {
     await mount(
