@@ -19,7 +19,7 @@ use crate::proxy::allowlist::Name;
 use crate::proxy::head::{self, Head, HeadError, ParseError, Request, within};
 use crate::proxy::load::{Load, PendingSlot, SocketSlot};
 use crate::proxy::net::Network;
-use crate::proxy::relay::{Idle, Stream};
+use crate::proxy::relay::{Idle, Stream, linger};
 use crate::proxy::target::{Kind, Target, classify};
 use crate::proxy::token::Token;
 use crate::proxy::upstream::{Lookup, Route, Scheme};
@@ -483,7 +483,7 @@ impl Ctx {
         }
     }
 
-    /// Writes the proxy's own answer and sets the verdict.
+    /// Writes the proxy's own error answer, sets the verdict, and lingers before the close.
     pub(crate) async fn answer(
         &self,
         client: &Stream,
@@ -493,8 +493,16 @@ impl Ctx {
         extra: &str,
     ) {
         exchange.verdict = verdict;
-        if let Err(error) = (&*client).write_all(&head::answer(status, extra)).await {
-            tracing::debug!(%error, "egress: the client left before the answer");
+        self.fail(client, status, extra).await;
+    }
+
+    /// Writes an error answer, then reads and discards what the client still sends (bounded in
+    /// bytes and time) so the close does not reset the connection. The socket slot stays held
+    /// until the caller drops the client.
+    pub(crate) async fn fail(&self, client: &Stream, status: u16, extra: &str) {
+        match (&*client).write_all(&head::answer(status, extra)).await {
+            Ok(()) => linger(client, self.limits.linger).await,
+            Err(error) => tracing::debug!(%error, "egress: the client left before the answer"),
         }
     }
 }

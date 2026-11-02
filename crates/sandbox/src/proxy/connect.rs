@@ -79,9 +79,10 @@ pub(crate) fn failed(status: u16) -> Verdict {
     }
 }
 
-/// Writes the proxy's own answer; a client that already left is fine.
-pub(crate) async fn send(client: &Stream, status: u16) {
-    if let Err(error) = (&*client).write_all(&head::answer(status, "")).await {
+/// Answers 200 to a CONNECT; a client that already left is fine. Error answers go through
+/// `Ctx::fail`, which lingers before the close.
+async fn established(client: &Stream) {
+    if let Err(error) = (&*client).write_all(&head::answer(200, "")).await {
         tracing::debug!(%error, "egress: the client left before the answer");
     }
 }
@@ -99,30 +100,30 @@ pub(crate) async fn tunnel(
     let (origin, _slot) = match dial(ctx, &way).await {
         Ok(dialled) => dialled,
         Err(status) => {
-            send(client, status).await;
+            ctx.fail(client, status, "").await;
             return failed(status);
         }
     };
     if let Way::Upstream { host, port } = &way {
         match ask_upstream(ctx, &origin, target).await {
             Asked::Open(late) => {
-                send(client, 200).await;
+                established(client).await;
                 if relay_bytes(client, &late, &counts.down).await.is_err() {
                     return Verdict::Tunnel;
                 }
             }
             Asked::Auth => {
                 ctx.upstream_auth(format!("{host}:{port}"));
-                send(client, 502).await;
+                ctx.fail(client, 502, "").await;
                 return Verdict::UpstreamAuth;
             }
             Asked::Failed => {
-                send(client, 502).await;
+                ctx.fail(client, 502, "").await;
                 return Verdict::Failed;
             }
         }
     } else {
-        send(client, 200).await;
+        established(client).await;
     }
     if relay_bytes(&origin, early, &counts.up).await.is_err() {
         return Verdict::Tunnel;

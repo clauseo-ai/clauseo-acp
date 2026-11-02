@@ -45,7 +45,10 @@ code departs from the brief.
   the client 503. Clients are counted in the accept loop and released when their task ends. A
   tunnel or forwarded request with no byte moved either way for 15 minutes is closed (agents keep
   long streaming responses open, so not shorter; it is watched in eighths, so it closes between 15
-  and about 17 minutes after the last byte).
+  and about 17 minutes after the last byte). After any error answer the proxy ends its write
+  half and reads and discards what the client still sends, up to 64 KB or 1 s, before it closes:
+  closing with unread bytes sends a reset, and on Windows the client then loses the answer. The
+  client's socket slot stays held until then.
 - **Names.** One helper reads list entries and requests alike: one trailing dot dropped, IDN to
   ASCII and case folded through `url`'s host parser, labels checked against DNS's shape, IPv4 in
   any form the URL standard reads. `*.domain` matches names under `domain`, not `domain` itself.

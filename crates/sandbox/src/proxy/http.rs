@@ -10,7 +10,7 @@ use futures::AsyncWriteExt;
 use futures::future::{Either, pending, select};
 
 use crate::proxy::Verdict;
-use crate::proxy::connect::{dial, failed, send};
+use crate::proxy::connect::{dial, failed};
 use crate::proxy::head::{RESPONSE_HEAD_CAP, Request, parse_status, read_head_capped};
 use crate::proxy::relay::{Framing, Stream, copy_body, pump};
 use crate::proxy::server::{Counts, Ctx, Way};
@@ -46,13 +46,13 @@ pub(crate) async fn forward(
     let (origin, _slot) = match dial(ctx, &way).await {
         Ok(dialled) => dialled,
         Err(status) => {
-            send(client, status).await;
+            ctx.fail(client, status, "").await;
             return failed(status);
         }
     };
     let head = rewrite(request, target, url, through_upstream);
     if (&origin).write_all(&head).await.is_err() {
-        send(client, 502).await;
+        ctx.fail(client, 502, "").await;
         return Verdict::Failed;
     }
     // Ends only when the body fails: true when its framing was malformed.
@@ -96,19 +96,19 @@ pub(crate) async fn forward(
         Either::Left((Either::Left((malformed, _)), _)) => {
             // A malformed chunked body gets 400 if no byte of a response has gone back yet.
             if malformed && counts.down.get() == 0 {
-                send(client, 400).await;
+                ctx.fail(client, 400, "").await;
                 return Verdict::BadRequest;
             }
         }
         Either::Left((Either::Right((Answered::Relayed, _)), _)) => {}
         Either::Left((Either::Right((Answered::Auth(upstream), _)), _)) => {
             ctx.upstream_auth(upstream);
-            send(client, 502).await;
+            ctx.fail(client, 502, "").await;
             return Verdict::UpstreamAuth;
         }
         Either::Left((Either::Right((Answered::Failed, _)), _)) => {
             tracing::info!("egress: the upstream sent no response head");
-            send(client, 502).await;
+            ctx.fail(client, 502, "").await;
             return Verdict::Failed;
         }
         Either::Right(((), _)) => {
