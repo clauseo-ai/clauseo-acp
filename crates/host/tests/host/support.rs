@@ -70,7 +70,7 @@ pub(crate) enum Scenario {
 
 impl Scenario {
     /// The `--scenario` argument.
-    fn arg(&self) -> String {
+    pub(crate) fn arg(&self) -> String {
         match self {
             Self::Bundled(name) => (*name).to_owned(),
             #[cfg(unix)]
