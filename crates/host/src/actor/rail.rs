@@ -272,8 +272,13 @@ fn matter_row(
         last_opened: row.last_opened,
         status: matter_status(facts),
         folder_display: folder_display(Path::new(&row.folder_path), &actor.home_spellings),
-        // Filled in off the actor by `ListMatters` (`folder_state.rs`).
-        folder_state: FolderState::Found,
+        // As the last `ListMatters` read it (`found` before any); `ListMatters` fills its own
+        // answer off the actor (`folder_state.rs`).
+        folder_state: actor
+            .folder_states
+            .get(&row.id)
+            .copied()
+            .unwrap_or(FolderState::Found),
     }
 }
 

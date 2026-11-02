@@ -1,8 +1,8 @@
 //! The comparison that decides whether a row goes out: every shown field but `last_activity`.
 
 use clauseo_protocol::{
-    AgentId, LastStop, MatterId, MatterKind, MatterStatus, MatterSummary, StopReason, ThreadId,
-    ThreadStatus, ThreadSummary, Timestamp,
+    AgentId, FolderState, LastStop, MatterId, MatterKind, MatterStatus, MatterSummary, StopReason,
+    ThreadId, ThreadStatus, ThreadSummary, Timestamp,
 };
 
 use super::{same_matter, same_thread};
@@ -27,6 +27,7 @@ fn matter() -> MatterSummary {
         last_opened: None,
         status: MatterStatus::Idle,
         folder_display: "Documents/m".to_owned(),
+        folder_state: FolderState::Found,
     }
 }
 
@@ -79,6 +80,10 @@ fn every_other_shown_field_is_a_change() {
         },
         MatterSummary {
             folder_display: "Elsewhere/m".to_owned(),
+            ..matter()
+        },
+        MatterSummary {
+            folder_state: FolderState::Missing,
             ..matter()
         },
     ];

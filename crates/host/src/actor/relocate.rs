@@ -208,6 +208,8 @@ pub(super) fn committed(actor: &mut Actor, matter: MatterId, folder: String, dur
         if let Some(entry) = actor.matters.get_mut(&matter) {
             entry.row.folder_path = folder;
         }
+        // The folder the lawyer just picked is there: `found` until a list reads it again.
+        actor.folder_states.remove(&matter);
     } else {
         reopen_recorded(actor, matter);
     }

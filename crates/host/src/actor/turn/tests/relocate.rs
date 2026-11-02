@@ -7,8 +7,8 @@ use std::path::PathBuf;
 
 use clauseo_protocol::{
     CommandEnvelope, CommandOutcome, DetachReason, DomainEvent, ErrorCode, FileChoice,
-    FileDecision, FolderRefId, HostCommand, MatterPath, MatterSource, PromptBlock, StopReason,
-    ThreadId, Title, TurnId,
+    FileDecision, FolderRefId, FolderState, HostCommand, MatterPath, MatterSource, PromptBlock,
+    StopReason, ThreadId, Title, TurnId,
 };
 use futures::channel::oneshot;
 
@@ -315,5 +315,44 @@ fn a_failed_relocate_commit_puts_the_matter_back_on_its_folder() {
             if edits.files.iter().any(|file| file.path().as_str() == "late.txt"))
     });
     assert!(edited, "the turn did not version the recorded folder");
+    rig.finish();
+}
+
+/// A `ListMatters` read in flight when a relocate commits comes back with the old folder's
+/// state: it does not land over the relocate's `found`. A read of the folder the row names does.
+#[test]
+fn a_list_read_of_the_old_folder_does_not_land_after_a_relocate() {
+    let mut rig = Rig::start("relocate-stale-list", ANSWER);
+    let matter = rig.matter();
+    let old = rig.actor.matters[&matter].row.folder_path.clone();
+    let copies = TempDir::new("relocate-stale-list-copies");
+    let moved = copies.path().join("Scratch moved");
+    crate::write::create_dir_all(&moved.join(".clauseo")).unwrap();
+    let marker = std::fs::read(PathBuf::from(&old).join(".clauseo/matter.json")).unwrap();
+    crate::write::write_file(&moved.join(".clauseo/matter.json"), &marker).unwrap();
+    let now = rig.actor.now().wall;
+    let folder: FolderRefId = rig.actor.ids.mint(now).unwrap();
+    rig.actor.folders.insert(folder, moved);
+
+    // A read of the folder the row names lands.
+    let read = |state| vec![(matter, old.clone(), state)];
+    crate::actor::query::on_folder_states(&mut rig.actor, read(FolderState::Missing));
+    assert_eq!(
+        rig.actor.folder_states.get(&matter),
+        Some(&FolderState::Missing)
+    );
+
+    let relocated = rig.dispatch(20, HostCommand::RelocateMatter { matter, folder });
+    assert!(relocated.is_ok(), "{relocated:?}");
+    assert_ne!(rig.actor.matters[&matter].row.folder_path, old);
+    assert_eq!(rig.actor.folder_states.get(&matter), None, "found");
+
+    // The read that was in flight, of the old folder, comes back after the commit.
+    crate::actor::query::on_folder_states(&mut rig.actor, read(FolderState::Missing));
+    assert_eq!(
+        rig.actor.folder_states.get(&matter),
+        None,
+        "the stale read landed"
+    );
     rig.finish();
 }

@@ -68,6 +68,9 @@ mod list_agents;
 #[path = "host/lists.rs"]
 mod lists;
 #[cfg(test)]
+#[path = "host/lists_folder.rs"]
+mod lists_folder;
+#[cfg(test)]
 #[path = "host/locate.rs"]
 mod locate;
 #[cfg(test)]

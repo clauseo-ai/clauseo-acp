@@ -74,14 +74,25 @@ must land before or with the first partial row.
   made, and `async_channel` cannot grow a bounded channel.
 - **When a row goes out.** A row goes out when a field the rail shows changes: status (a
   permission waiting counts, though the thread row does not show it), `seen`, `last_stop`,
-  title, `pinned`, `client`, `next_date`, `last_opened`, name, `folder_display`, `queue_held`,
+  title, `pinned`, `client`, `next_date`, `last_opened`, name, `folder_display`, `folder_state`, `queue_held`,
   and a create, forget or bring-back. The host keeps the rows it last sent while anyone is
   subscribed and compares after each input it handles. What may have changed is marked as it
   happens: each durable envelope of a thread's stream and each unload marks that thread, and
-  each answered command marks everything (matter rows change only by commands, which are clicks).
+  each answered command marks everything (matter rows change only by commands, which are clicks,
+  and by a `ListMatters` folder read, which marks everything too when it changes a state).
   A marked thread's row is built and compared; only when it changed is its matter's row built
-  and compared. `folder_state` (H3) is not on this branch; once it is, it is one more field of
-  the comparison, which is written out field by field so a new field fails to compile there.
+  and compared. The comparison is written out field by field, so a new field fails to compile
+  there until it is decided.
+- **`folder_state` in the app rows** (0020's field) is what the last `ListMatters` read: the
+  host keeps each matter's state from that read in memory, a cache of the last read and not
+  state in the log, and builds every app row with it, `found` before any read. A read that
+  changes one marks every row, so the change goes out as a `MattersChanged` row. A durable
+  relocate sets the matter back to `found` (the folder the lawyer just picked is there) and a
+  forget drops it. A read carries the folder path the row had when it began, and one whose path
+  the row no longer names (a relocate committed while it was in flight) is dropped. The app stream never stats a folder itself: the stats stay on `ListMatters`'
+  threads (0020), so a folder that disappears between lists shows `missing` only after the next
+  list. Without the cache every app row would say `found` and overwrite a `missing` the window
+  had from `ListMatters`.
 - **`last_activity` is coalesced** by riding along: it is never a reason to send a row, and every
   row sent carries it current. It changes on every event; a time-based throttle (at most once
   every 5 s) would need a timer and would not be deterministic in tests without one, while the

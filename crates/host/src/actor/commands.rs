@@ -174,7 +174,8 @@ pub(crate) fn finish_command(
     let Some(pending) = actor.commands.remove(&id) else {
         return;
     };
-    // Matter rows change only by commands; the app lists compare every row at the next flush.
+    // Matter rows change only by commands and by a `ListMatters` folder read; the app lists
+    // compare every row at the next flush.
     actor.lists.touch_all();
     let mut waiters = pending.waiters.into_iter();
     let Some(first) = waiters.next() else {

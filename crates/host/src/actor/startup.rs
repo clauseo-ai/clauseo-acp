@@ -114,6 +114,7 @@ pub(super) async fn open(
         commands: BTreeMap::new(),
         folders: BTreeMap::new(),
         claims: BTreeMap::new(),
+        folder_states: BTreeMap::new(),
         stats_running: std::sync::Arc::default(),
         files: super::papers::FileRefs::default(),
         next_sub: 0,

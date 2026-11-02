@@ -7,8 +7,8 @@
 
 use clauseo_matters::CompareSide;
 use clauseo_protocol::{
-    AgentId, AgentKind, AgentSummary, CheckpointId, ErrorCode, HostQuery, MatterId, Principal,
-    QueryResult, StreamId, ViewEntry,
+    AgentId, AgentKind, AgentSummary, CheckpointId, ErrorCode, FolderState, HostQuery, MatterId,
+    Principal, QueryResult, StreamId, ViewEntry,
 };
 
 use std::path::PathBuf;
@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use super::Actor;
 use super::folder_state::folder_states;
-use super::input::{MatterTag, Reply};
+use super::input::{Input, MatterTag, Reply};
 use super::streams::StreamSlot;
 use futures::task::LocalSpawnExt;
 
@@ -191,30 +191,54 @@ fn matter_query(
 }
 
 /// `ListMatters`: the summaries from memory (`rail.rs`), each folder's state read off the actor
-/// (`folder_state.rs`), answered from a task of its own.
+/// (`folder_state.rs`), answered from a task of its own, which then posts the states back
+/// ([`on_folder_states`]).
 fn list_matters(actor: &Actor, reply: Reply<QueryResult>) {
     let mut matters = super::rail::summaries(actor);
-    let folders: Vec<PathBuf> = matters
+    let paths: Vec<String> = matters
         .iter()
         .map(|summary| {
             actor
                 .matters
                 .get(&summary.matter)
-                .map(|entry| PathBuf::from(&entry.row.folder_path))
+                .map(|entry| entry.row.folder_path.clone())
                 .unwrap_or_default()
         })
         .collect();
+    let folders: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
     let clock = Arc::clone(&actor.clock);
     let running = Arc::clone(&actor.stats_running);
-    let spawned = actor.spawner.spawn_local(async move {
+    actor.spawn_post(async move {
         let states = folder_states(folders, clock, running).await;
-        for (summary, state) in matters.iter_mut().zip(states) {
+        let mut read = Vec::with_capacity(matters.len());
+        for ((summary, state), path) in matters.iter_mut().zip(states).zip(paths) {
             summary.folder_state = state;
+            read.push((summary.matter, path, state));
         }
         let _gone = reply.send(Ok(QueryResult::Matters(matters)));
+        Input::FolderStates(read)
     });
-    if let Err(error) = spawned {
-        tracing::error!(%error, "the host pool refused a matter list");
+}
+
+/// A `ListMatters` read came back: keep each listed matter's folder state for the app rows,
+/// and compare every row at the next flush when one changed. A state read of a folder the
+/// matter's row no longer names (a relocate, or a forget and an import, committed while the
+/// read was in flight) is dropped: it says nothing of the folder the row names now.
+pub(super) fn on_folder_states(actor: &mut Actor, states: Vec<(MatterId, String, FolderState)>) {
+    let mut changed = false;
+    for (matter, path, state) in states {
+        let current = actor
+            .matters
+            .get(&matter)
+            .is_some_and(|entry| entry.row.folder_path == path);
+        if !current {
+            continue;
+        }
+        let before = actor.folder_states.insert(matter, state);
+        changed |= before.unwrap_or(FolderState::Found) != state;
+    }
+    if changed {
+        actor.lists.touch_all();
     }
 }
 

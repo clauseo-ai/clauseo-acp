@@ -45,8 +45,9 @@ folder, and a line in the matter's history.
   clock: a folder not answered by then reads `found`. A folder whose stat is still running from
   an earlier list (a share that hangs) reads `found` without a new stat, so a hung folder strands
   one thread at most. 100 bare stats cost about 0.17 ms; the threaded read of 100 folders about
-  0.35 ms in a release build and 0.5 ms in a debug one (Linux VM, ext4). There is no stored
-  state: each list looks again, so a folder that comes back reads `found` at once.
+  0.35 ms in a release build and 0.5 ms in a debug one (Linux VM, ext4). Nothing is stored in
+  the log: each list looks again, so a folder that comes back reads `found` at once (0023 keeps
+  the last read in memory for the rows sent to app subscribers).
 - Relink: the first open of a matter on its worker calls `Matter::relink` with the registry's
   `created_at` when it fails with `NoMatterJson` or `Unreadable`, after the same registry check,
   and logs a warning. That first open spends the relink whatever it finds, so a later open never

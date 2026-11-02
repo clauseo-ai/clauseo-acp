@@ -135,6 +135,10 @@ pub(crate) struct Actor {
     /// Folders a command is making a matter of (a create, an import, a relocate), by command,
     /// until it is answered: the registry check counts them as the matters they will be.
     pub(crate) claims: BTreeMap<CommandId, (MatterId, PathBuf)>,
+    /// Each matter's folder state as the last `ListMatters` read it, for the rows sent to app
+    /// subscribers (`app_lists.rs`): in memory only, never logged. A matter with none reads
+    /// `found`; a relocate and a forget drop its entry.
+    pub(crate) folder_states: BTreeMap<MatterId, clauseo_protocol::FolderState>,
     /// Matter folders whose `ListMatters` stat is still running (`folder_state.rs`).
     pub(crate) stats_running: folder_state::Running,
     pub(crate) files: papers::FileRefs,
@@ -494,6 +498,7 @@ impl Actor {
             Input::AppDrained { id } => app::on_drained(self, id),
             Input::AppUnsubscribed { id } => app::on_unsubscribed(self, id),
             Input::Limits(input) => limits::on_input(self, input),
+            Input::FolderStates(states) => query::on_folder_states(self, states),
             // The loop handles an abort before it gets here.
             #[cfg(feature = "test-support")]
             Input::Abort(reply) => {
