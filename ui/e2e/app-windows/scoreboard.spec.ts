@@ -4,8 +4,8 @@
 // Start-up is a warm start, a later launch of the installed app: every play runs on one WebView2
 // profile (`profile: "warm"`, fixture.ts), which the warm-up play makes and the measured plays
 // reuse (#173). Each measured play checks that it started its own browser process and that the
-// profile carries no page storage but the display settings' cache, which every play's same
-// settings fill the same way (`expectNoCarriedState`).
+// profile carries no page storage but the display settings' cache, holding the value the warm-up
+// play wrote (`expectNoCarriedState`).
 // The page's perf API (`window.__clauseoPerf`, ui/app/src/perf/, loaded only in the e2e and marks
 // builds) records the marks, the frames, chunk-to-paint and the keystrokes; this spec drives the
 // session, reads memory with memory.ts and builds one RawRun (scoreboard/metrics.ts) per play. The
@@ -136,41 +136,54 @@ async function scrollUpAndDown(page: Page, w: AppWindow): Promise<void> {
 /**
  * The only page storage a play may find in the reused profile: the room's display settings cache
  * (ui/app/src/room/display-store.ts, `DISPLAY_KEY`), which holds the host's last answer for the
- * next start's first frame. Every play's settings.json is the same, so every play writes and reads
- * the same value.
+ * next start's first frame. Every play's settings.json is the same, so every play must hold the
+ * value the warm-up play wrote; a play that finds another fails.
  */
 const CARRIED_KEYS: readonly string[] = ["clauseo.display"];
 
-/** What the page keeps in the WebView2 profile beyond the run: its storage, by name. */
+/** What the page keeps in the WebView2 profile beyond the run: its storage by name, and the value of each {@link CARRIED_KEYS}. */
 interface PageStorage {
   localStorage: string[];
   sessionStorage: string[];
   indexedDB: string[];
   caches: string[];
+  /** Each of {@link CARRIED_KEYS} to its localStorage value, null when it has none. */
+  carried: Record<string, string | null>;
 }
 
-/** Reads the page's storage names. */
+/** Reads the page's storage names and the carried keys' values. */
 async function pageStorage(page: Page): Promise<PageStorage> {
-  return await page.evaluate(async () => ({
-    localStorage: Object.keys(localStorage).sort(),
-    sessionStorage: Object.keys(sessionStorage).sort(),
-    indexedDB: (await indexedDB.databases()).map((db) => db.name ?? "").sort(),
-    caches: typeof caches === "undefined" ? [] : (await caches.keys()).sort(),
-  }));
+  return await page.evaluate(
+    async (keys) => ({
+      localStorage: Object.keys(localStorage).sort(),
+      sessionStorage: Object.keys(sessionStorage).sort(),
+      indexedDB: (await indexedDB.databases()).map((db) => db.name ?? "").sort(),
+      caches: typeof caches === "undefined" ? [] : (await caches.keys()).sort(),
+      carried: Object.fromEntries(keys.map((key) => [key, localStorage.getItem(key)])),
+    }),
+    CARRIED_KEYS,
+  );
 }
+
+/** The carried values the warm-up play wrote, read at its end: what every measured play must find. */
+let warmupCarried: Record<string, string | null> | null = null;
 
 /**
  * Fails a play whose reused profile carries state that could change what it does or measures:
- * any page storage but {@link CARRIED_KEYS} (a draft, a reopened matter, a cache the app added).
+ * any page storage but {@link CARRIED_KEYS} (a draft, a reopened matter, a cache the app added),
+ * or a carried key whose value is not the one the warm-up play wrote (`reference`).
  */
-function expectNoCarriedState(storage: PageStorage): void {
+function expectNoCarriedState(
+  storage: PageStorage,
+  reference: Record<string, string | null> | null,
+): void {
+  const { carried, ...names } = storage;
   expect(
-    {
-      ...storage,
-      localStorage: storage.localStorage.filter((key) => !CARRIED_KEYS.includes(key)),
-    },
+    { ...names, localStorage: names.localStorage.filter((key) => !CARRIED_KEYS.includes(key)) },
     "page storage a reused WebView2 profile would carry into the next play",
   ).toEqual({ localStorage: [], sessionStorage: [], indexedDB: [], caches: [] });
+  if (reference === null) throw new Error("no warm-up play recorded the carried storage values");
+  expect(carried, "carried storage values against the warm-up play's").toEqual(reference);
 }
 
 /** SCOREBOARD_OUT, or null when unset. */
@@ -316,7 +329,10 @@ async function play(app: App, stop: (app: App) => Promise<void>, n: number): Pro
     webview_profile: { profile: app.profile, launch: app.profileLaunch, storage },
   });
   const run = parseRawRun(raw);
-  if (app.profileLaunch > 1) expectNoCarriedState(storage);
+  // The warm-up's values at its end, once the page has surely written them; a measured play's at
+  // its start, as the profile brought them in.
+  if (app.profileLaunch === 1) warmupCarried = (await pageStorage(page)).carried;
+  else expectNoCarriedState(storage, warmupCarried);
   await stop(app);
   return run;
 }

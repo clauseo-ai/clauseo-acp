@@ -103,8 +103,8 @@ export const BUDGET_NOTE =
   "measured on a laptop (stage F).";
 
 /**
- * The line under each scoreboard table that says what its start-up rows measure (#173). Windows
- * and macOS both measure a warm start, by different means.
+ * The line under each scoreboard table that says what its start-up rows measure (#173): on
+ * Windows a WebView2 profile the warm-up made, reused; on macOS no profile step at all.
  */
 export const START_NOTE: Record<Os, string> = {
   windows:
@@ -113,9 +113,8 @@ export const START_NOTE: Record<Os, string> = {
     "app's own data and matter folders are new for each launch. A cold row would measure a first " +
     "launch, on a fresh profile per launch; this table has none.",
   macos:
-    "Start-up rows marked warm measure a later launch here too: WKWebView has no profile folder the " +
-    "harness can set, and WebKit keeps the app's website data between launches, so the measured " +
-    "launches follow the warm-up's. The app's own data and matter folders are new for each launch.",
+    "Start-up rows on macOS are measured as before, with no warmed-profile step: WKWebView has no " +
+    "profile folder the harness sets. The app's own data and matter folders are new for each launch.",
 };
 
 /** The flags of one row: over its budget, more than 10% worse than main, both, or none. */

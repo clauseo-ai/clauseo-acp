@@ -408,7 +408,11 @@ export const test = base.extend<
             process.stdout.write(`warm WebView2 profile kept in ${warm.folder()}\n`);
           }
         } else {
-          warm.remove();
+          // Waits for the last browser to let go; warns instead of failing, so the run's results
+          // (already written) still upload.
+          await warm.remove((message) => {
+            process.stdout.write(`::warning title=Warm profile left on disk::${message}\n`);
+          });
         }
       }
     },

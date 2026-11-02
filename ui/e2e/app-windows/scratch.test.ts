@@ -140,7 +140,7 @@ test("readTree leaves out .clauseo and empty folders", () => {
   expect(readTree(folder)).toEqual({ "brief.txt": "x" });
 });
 
-test("a fresh profile is a new folder per launch; a warm one is the worker's folder, counted", () => {
+test("a fresh profile is a new folder per launch; a warm one is the worker's folder, counted", async () => {
   const one = makeScratch({ scenario: null, matterFiles: {} }, () => agent, base);
   const two = makeScratch({ scenario: null, matterFiles: {} }, () => agent, base);
   const warm = warmProfile(base);
@@ -167,13 +167,17 @@ test("a fresh profile is a new folder per launch; a warm one is the worker's fol
   removeScratch(one);
   removeScratch(two);
   expect(existsSync(folder)).toBe(true);
-  warm.remove();
+  const warnings: string[] = [];
+  await warm.remove((message) => warnings.push(message), 1000);
   expect(existsSync(folder)).toBe(false);
+  expect(warnings).toEqual([]);
 });
 
-test("a warm profile never asked for makes no folder", () => {
+test("a warm profile never asked for makes no folder", async () => {
   const warm = warmProfile(base);
-  warm.remove();
+  await warm.remove(() => {
+    throw new Error("warned");
+  });
   expect(readTree(base)).toEqual({ "fake_agent.exe": "" });
 });
 
@@ -206,4 +210,34 @@ test("readying a reused profile waits while a browser holds it, and fails when i
   setTimeout(() => rmSync(profileLock(folder)), 250);
   await ready;
   expect(existsSync(portFile(folder))).toBe(false);
+});
+
+test("removing the warm profile waits for the last browser to let go of it", async () => {
+  const warm = warmProfile(base);
+  const folder = warm.folder();
+  mkdirSync(join(folder, "EBWebView"));
+  writeFileSync(profileLock(folder), "");
+  const warnings: string[] = [];
+  const removed = warm.remove((message) => warnings.push(message), 5000);
+  // Still held: nothing is removed yet.
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  expect(existsSync(folder)).toBe(true);
+  // The browser exits and its lock goes; then the folder goes, without a warning.
+  rmSync(profileLock(folder));
+  await removed;
+  expect(existsSync(folder)).toBe(false);
+  expect(warnings).toEqual([]);
+});
+
+test("a warm profile still locked at the worker's end warns instead of failing", async () => {
+  const warm = warmProfile(base);
+  const folder = warm.folder();
+  mkdirSync(join(folder, "EBWebView"));
+  writeFileSync(profileLock(folder), "");
+  const warnings: string[] = [];
+  await warm.remove((message) => warnings.push(message), 200);
+  expect(warnings).toHaveLength(1);
+  expect(warnings[0]).toMatch(
+    /still holds the warm WebView2 profile .* 200 ms after the last launch ended/,
+  );
 });
