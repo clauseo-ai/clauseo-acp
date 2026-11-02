@@ -29,10 +29,12 @@
 //!   No agent inherits a `GIT_*` variable. `docs/decisions/0025-codex-in-acp-and-host.md`.
 //! - The session start: `session/load` when the agent offers it, else `session/resume`, else
 //!   `session/new`.
-//! - The pre-write guard ([`pre_write_guard`]): the check Claude Code's `PreToolUse` hook runs
-//!   before each file edit and shell command, refusing a write to a file of the matter that
-//!   Word holds open, in every permission mode; and that hook's entry in the session's `_meta`
-//!   when [`HostConfig::with_pre_write_guard`] names the program to run.
+//! - The pre-write guard ([`pre_write_guard`]): the check an agent's `PreToolUse` hook runs
+//!   before each file edit and shell command, in every permission mode. It refuses a write to a
+//!   file of the matter that Word holds open (an Office owner file beside it, or on Windows a
+//!   file another program holds with a share mode that refuses others), and a Codex patch into
+//!   the matter's `.codex` folder. Claude Code's entry goes in the session's `_meta`, with the
+//!   matter folder, when [`HostConfig::with_pre_write_guard`] names the program to run.
 //!
 //! # Interface
 //!
@@ -75,9 +77,10 @@
 //!   `HostHandle::abort_for_test`, which ends the thread with no flush and no graceful stop.
 //! - [`codex_hook_config`]: the `hooks` value for Codex's config that runs the same guard,
 //!   trusted by its own `state` entry; R15 merges it into `CODEX_CONFIG`.
-//! - [`pre_write_guard::run`] reads one hook input object and writes the deny object or nothing;
-//!   [`pre_write_guard::FLAG`] is the argument the hook passes. It runs in the hook's own
-//!   process, with no host thread.
+//! - [`pre_write_guard::run`] reads one hook input object and returns 0, or
+//!   [`pre_write_guard::DENY`] with the reason on stderr; [`pre_write_guard::FLAG`] (then
+//!   `--matter <folder>`) is what the hook passes. It runs in the hook's own process, with no
+//!   host thread.
 //! - Stage B's `limits` plugs in as a new actor input and publishes the existing
 //!   `HostEvent::AccountLimitsChanged` to app subscribers (`actor/app.rs`'s `publish`).
 //!

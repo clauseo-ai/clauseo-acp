@@ -1,8 +1,10 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use serde_json::{Value, json};
 
-use super::{MAX_WORDS, run, shell_words};
+use std::ffi::OsString;
+
+use super::{DENY, MAX_WORDS, run};
 use crate::write;
 
 /// A matter folder `m` holding `Contract.docx`, which Word has open (its owner file
@@ -69,30 +71,33 @@ impl Drop for Fixture {
     }
 }
 
-/// What the guard prints for `input`, after checking it returned 0.
+/// What the guard writes to stderr for `input` with `args`: the reason when it refuses (exit
+/// [`DENY`]), nothing when it lets the tool go (exit 0); the test checks the code matches.
+fn guard_with(args: &[&str], input: &[u8]) -> String {
+    let args: Vec<OsString> = args.iter().map(OsString::from).collect();
+    let mut errors = Vec::new();
+    let code = run(&args, input, &mut errors);
+    let errors = String::from_utf8(errors).unwrap();
+    assert_eq!(code, if errors.is_empty() { 0 } else { DENY }, "{errors}");
+    errors
+}
+
+/// [`guard_with`] and no arguments, as Codex's hook runs it.
 fn guard(input: &[u8]) -> String {
-    let mut output = Vec::new();
-    assert_eq!(run(input, &mut output), 0);
-    String::from_utf8(output).unwrap()
+    guard_with(&[], input)
 }
 
 fn guard_json(hook: &Value) -> String {
     guard(hook.to_string().as_bytes())
 }
 
-/// The exact deny line for `name`.
+/// The exact stderr line refusing a write to `name`.
 fn deny(name: &str) -> String {
-    let reason = format!(
+    format!(
         "{name} is open in Word or another program on this computer. A change made now would be \
          lost when that program saves it. Ask the lawyer to close it, or write to a copy with \
-         another name."
-    );
-    let line = json!({"hookSpecificOutput": {
-        "hookEventName": "PreToolUse",
-        "permissionDecision": "deny",
-        "permissionDecisionReason": reason,
-    }});
-    format!("{line}\n")
+         another name.\n"
+    )
 }
 
 #[test]
@@ -247,115 +252,6 @@ fn codex_patches_that_change_a_held_file_are_refused_and_adding_a_new_one_is_not
     );
 }
 
-/// The deny line for a Codex patch into the matter's `.codex` folder.
-fn codex_refused() -> String {
-    let reason = "Clauseo doesn't let the agent change the .codex folder in a matter: files there \
-                  change what the agent loads and runs.";
-    let line = json!({"hookSpecificOutput": {
-        "hookEventName": "PreToolUse",
-        "permissionDecision": "deny",
-        "permissionDecisionReason": reason,
-    }});
-    format!("{line}\n")
-}
-
-fn patch(body: &str) -> String {
-    format!("*** Begin Patch\n{body}\n*** End Patch\n")
-}
-
-/// clauseo-acp-private#184: each patch `body` writes in the matter's `.codex` folder and is
-/// refused under each of Codex's names for `apply_patch`. `{matter}` in a body stands for the
-/// matter folder's absolute path.
-fn assert_codex_folder_refused(test: &str, bodies: &[&str]) {
-    let fx = Fixture::new(test);
-    for body in bodies {
-        let body = body.replace("{matter}", &fx.path("m"));
-        for tool in ["apply_patch", "Edit", "Write"] {
-            assert_eq!(
-                guard_json(&fx.hook(tool, &json!({"command": patch(&body)}))),
-                codex_refused(),
-                "{tool} {body}"
-            );
-        }
-    }
-}
-
-#[test]
-fn a_codex_patch_adding_to_the_codex_folder_is_refused() {
-    let inside = Path::new("{matter}").join(".codex").join("config.toml");
-    let absolute = format!("*** Add File: {}", inside.display());
-    assert_codex_folder_refused(
-        "codex-add",
-        &[
-            "*** Add File: .codex/config.toml\n+approval_policy = \"never\"",
-            "*** Add File: .codex",
-            "*** Add File: sub/../.codex/config.toml",
-            "*** Add File: ./.CODEX/config.toml",
-            "*** Add File: .codex. /config.toml",
-            &absolute,
-        ],
-    );
-}
-
-#[test]
-fn a_codex_patch_updating_the_codex_folder_is_refused() {
-    assert_codex_folder_refused(
-        "codex-update",
-        &["*** Update File: .codex/config.toml\n@@\n-a\n+b"],
-    );
-}
-
-#[test]
-fn a_codex_patch_deleting_from_the_codex_folder_is_refused() {
-    assert_codex_folder_refused("codex-delete", &["*** Delete File: .codex/config.toml"]);
-}
-
-#[test]
-fn a_codex_patch_moving_into_the_codex_folder_is_refused() {
-    assert_codex_folder_refused(
-        "codex-move-in",
-        &["*** Update File: Free.docx\n*** Move to: .codex/hooks.json"],
-    );
-}
-
-#[test]
-fn a_codex_patch_moving_out_of_the_codex_folder_is_refused() {
-    assert_codex_folder_refused(
-        "codex-move-out",
-        &["*** Update File: .codex/config.toml\n*** Move to: notes/config.toml"],
-    );
-}
-
-/// A patch elsewhere in the matter, and a `.codex` folder outside it, are not refused by the
-/// `.codex` rule; nor are Claude's tools and Bash, which keep the held-file rule alone.
-#[test]
-fn the_codex_folder_rule_covers_only_codex_patches_into_the_matters_folder() {
-    let fx = Fixture::new("codex-elsewhere");
-    let outside = fx.path("out/.codex/config.toml");
-    for body in [
-        "*** Add File: notes/codex.md\n+hi".to_owned(),
-        "*** Add File: sub/.codex/config.toml".to_owned(),
-        "*** Add File: .codexrc".to_owned(),
-        "*** Add File: ../.codex/config.toml".to_owned(),
-        format!("*** Add File: {outside}"),
-    ] {
-        assert_eq!(
-            guard_json(&fx.hook("apply_patch", &json!({"command": patch(&body)}))),
-            "",
-            "{body}"
-        );
-    }
-    let inside = fx.path("m/.codex/config.toml");
-    assert_eq!(
-        guard_json(&fx.hook("Write", &json!({"file_path": inside, "content": "x"}))),
-        ""
-    );
-    assert_eq!(
-        guard_json(&fx.hook("Bash", &json!({"command": "touch .codex/config.toml"}))),
-        ""
-    );
-}
-
 #[test]
 fn input_it_cannot_read_gets_nothing_and_exit_0() {
     let fx = Fixture::new("malformed");
@@ -414,23 +310,6 @@ fn a_file_held_with_a_deny_write_share_mode_is_refused() {
     );
 }
 
-#[test]
-fn shell_words_split_the_simple_shell_way() {
-    let split = |command: &str, limit: usize| {
-        let mut words = Vec::new();
-        shell_words(command, limit, &mut words);
-        words
-    };
-    assert_eq!(
-        split(r#"cp  'a b' "c \"d\" \$e \x" f\ g '' h"#, 64),
-        ["cp", "a b", r#"c "d" $e \x"#, "f g", "", "h"]
-    );
-    assert_eq!(split("a 'b c", 64), ["a", "b c"]);
-    assert_eq!(split("a b c d", 2), ["a", "b"]);
-    assert_eq!(split("trailing\\", 64), ["trailing"]);
-    assert_eq!(split("  \t\n ", 64), Vec::<String>::new());
-}
-
 /// A held file spelled through a symlink to the matter folder is refused, by the permission
 /// check's own rule (`held_open_at` resolves both sides), with the matter path it names.
 #[cfg(unix)]
@@ -449,18 +328,79 @@ fn a_held_file_spelled_through_a_symlink_is_refused() {
     );
 }
 
-/// A Codex patch into the matter's `.codex` folder through a symlink to it is refused.
-#[cfg(unix)]
+/// The hook input for `tool` with `input` after the agent ran `cd sub`: Claude Code's `cwd`
+/// follows it.
+fn hook_in_sub(fx: &Fixture, tool: &str, input: &Value) -> Vec<u8> {
+    let mut hook = fx.hook(tool, input);
+    hook["cwd"] = json!(fx.path("m/sub"));
+    hook.to_string().into_bytes()
+}
+
+/// Claude Code's entry passes `--matter`: after a `cd`, a held file of the matter named by an
+/// absolute path or from the new folder is still refused. Without `--matter` (an entry from
+/// before it), the old rule takes the folder from `cwd` and lets the write through.
 #[test]
-fn a_codex_patch_through_a_symlink_to_the_codex_folder_is_refused() {
-    let fx = Fixture::new("symlink-codex");
-    write::create_dir_all(&fx.matter().join(".codex")).unwrap();
-    write::symlink(&fx.matter().join(".codex"), &fx.matter().join("settings")).unwrap();
+fn the_matter_argument_keeps_guarding_after_the_agent_changes_folder() {
+    let fx = Fixture::new("matter-arg");
+    let matter = fx.path("m");
+    let args = ["--matter", matter.as_str()];
+    let write = hook_in_sub(
+        &fx,
+        "Write",
+        &json!({"file_path": fx.path("m/Contract.docx")}),
+    );
+    let bash = hook_in_sub(
+        &fx,
+        "Bash",
+        &json!({"command": "echo hi > ../Contract.docx"}),
+    );
+    let relative = hook_in_sub(&fx, "Edit", &json!({"file_path": "../Contract.docx"}));
+    for input in [&write, &bash, &relative] {
+        assert_eq!(guard_with(&args, input), deny("Contract.docx"));
+        assert_eq!(guard(input), "", "the cwd rule alone misses it");
+    }
+    // A free file is let through, and a relative --matter is ignored (the cwd rule applies).
+    let free = hook_in_sub(&fx, "Write", &json!({"file_path": fx.path("m/Free.docx")}));
+    assert_eq!(guard_with(&args, &free), "");
+    assert_eq!(guard_with(&["--matter", "m"], &write), "");
+}
+
+/// Claude Code's `PowerShell` tool is checked like `Bash`, with backslashes kept.
+#[test]
+fn powershell_naming_a_held_file_is_refused() {
+    let fx = Fixture::new("powershell");
+    for command in [
+        "Remove-Item Contract.docx".to_owned(),
+        "Set-Content -Path 'Contract.docx' -Value hi; Get-Item x".to_owned(),
+        format!("Set-Content \"{}\" hi", fx.path("m/Contract.docx")),
+    ] {
+        assert_eq!(
+            guard_json(&fx.hook("PowerShell", &json!({"command": command}))),
+            deny("Contract.docx"),
+            "{command}"
+        );
+    }
     assert_eq!(
-        guard_json(&fx.hook(
-            "apply_patch",
-            &json!({"command": patch("*** Add File: settings/config.toml\n+x")})
-        )),
-        codex_refused()
+        guard_json(&fx.hook("PowerShell", &json!({"command": "Get-ChildItem"}))),
+        ""
     );
 }
+
+/// Shell punctuation stuck to a name does not hide it.
+#[test]
+fn bash_punctuation_around_a_held_name_is_stripped() {
+    let fx = Fixture::new("punctuation");
+    for command in [
+        "rm Contract.docx; ls",
+        "echo hi >>Contract.docx",
+        "echo hi >|Contract.docx&",
+    ] {
+        assert_eq!(
+            guard_json(&fx.hook("Bash", &json!({"command": command}))),
+            deny("Contract.docx"),
+            "{command}"
+        );
+    }
+}
+
+mod codex;
