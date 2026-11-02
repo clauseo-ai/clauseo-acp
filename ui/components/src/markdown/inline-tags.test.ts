@@ -249,3 +249,12 @@ test("a closing tag at the end of a note pairs as it does in the body (the back-
     /Note <sup>y<\/sup> <a [^>]*data-footnote-backref/,
   );
 });
+
+test("inside a dropped never-markup pair, an image shows its alt text, and a reference's note has no way back", () => {
+  expect(html("<script>![the alt](x.png)</script>")).toBe("<p>the alt</p>");
+  const markup = html("See <script>x[^n]</script> and[^m].\n\n[^n]: Note n.\n\n[^m]: Note m.");
+  expect(markup).toContain("<p>See x1 and<sup>");
+  // Note n keeps no back-reference (its reference is text now), note m keeps its own.
+  expect(markup).toMatch(/Note n\.\s*<\/p>/);
+  expect(markup).toMatch(/Note m\. <a [^>]*data-footnote-backref/);
+});

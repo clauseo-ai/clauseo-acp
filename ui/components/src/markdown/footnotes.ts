@@ -344,3 +344,35 @@ export function noteHast(scope: string, numbering: Numbering, id: string, option
   };
   return { type: "root", children: [item] };
 }
+
+/**
+ * Leaves out of a note's hast (noteHast) each back-reference to a reference in `lost` (by its id, as
+ * referenceHandler sets it): a reference a dropped never-markup pair shows as plain text
+ * (inline-tags.ts), so no anchor is there to go back to. The space before it goes with it.
+ */
+export function dropBackReferences(root: Hast, lost: ReadonlySet<string>): void {
+  const stack: (Hast | Element)[] = [root];
+  for (let parent = stack.pop(); parent; parent = stack.pop()) {
+    const children = parent.children as ElementContent[];
+    for (let index = children.length - 1; index >= 0; index--) {
+      const child = children[index]!;
+      if (child.type !== "element") continue;
+      const href = child.properties["href"];
+      if (!child.properties["dataFootnoteBackref"] || typeof href !== "string") {
+        stack.push(child);
+        continue;
+      }
+      let target = "";
+      try {
+        target = decodeURIComponent(href.slice(1));
+      } catch {
+        continue;
+      }
+      if (!lost.has(target)) continue;
+      const before = children[index - 1];
+      const space = before?.type === "text" && before.value === " " ? 1 : 0;
+      children.splice(index - space, 1 + space);
+      index -= space;
+    }
+  }
+}
