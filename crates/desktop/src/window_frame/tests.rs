@@ -2,7 +2,7 @@ use super::geometry::{
     CAPTION_H, CAPTION_W, LEAD_H, LEAD_PAD, LIGHT, LIGHT_PITCH, NATIVE_BUTTON_W, NATIVE_PITCH,
     Rect, maximise_button, over_maximise, traffic_lights,
 };
-use super::{CAPTION_PERMISSIONS, Chrome, DRAG_PERMISSIONS, add_frame_capability, chrome_from};
+use super::{CAPTION_PERMISSIONS, DRAG_PERMISSIONS, add_frame_capability};
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -17,21 +17,6 @@ fn manifest_dir() -> &'static Path {
 
 fn read(relative: &str) -> String {
     std::fs::read_to_string(manifest_dir().join(relative)).unwrap()
-}
-
-#[test]
-fn only_room_selects_the_own_frame() {
-    assert_eq!(chrome_from(Some("room")), Chrome::Own);
-    for other in [
-        None,
-        Some(""),
-        Some("Room"),
-        Some("rooms"),
-        Some("roo"),
-        Some("internal"),
-    ] {
-        assert_eq!(chrome_from(other), Chrome::Os, "{other:?}");
-    }
 }
 
 #[test]
@@ -212,7 +197,7 @@ fn main_grants_the_drag_permissions_and_frame_the_caption_ones_on_windows_and_li
     let (frame, core) = core_permissions("capabilities/frame.json");
     assert_eq!(core, set(CAPTION_PERMISSIONS), "capabilities/frame.json");
     assert_eq!(frame["platforms"], json!(["windows", "linux"]));
-    // Only main is in the context; grant_caption_commands adds frame in the room build.
+    // Only main is in the context; grant_caption_commands adds frame at setup.
     let config: Value = serde_json::from_str(&read("tauri.conf.json")).unwrap();
     assert_eq!(config["app"]["security"]["capabilities"], json!(["main"]));
     for permission in DRAG_PERMISSIONS.iter().chain(CAPTION_PERMISSIONS) {

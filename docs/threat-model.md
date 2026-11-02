@@ -34,7 +34,7 @@ converted document. From there they can call any IPC command the page can reach.
   commands, one permission each ([0012](decisions/0012-desktop-bridge.md),
   [0019](decisions/0019-app-stream-to-the-window.md)), and the two core
   window commands of Tauri's drag script, granted in every build: start a drag, and maximise or
-  restore on a double-click ([0015](decisions/0015-window-frame.md)). The room build adds
+  restore on a double-click ([0015](decisions/0015-window-frame.md)). The frame adds
   `frame.json` at setup on Windows and Linux (`window_frame::grant_caption_commands`): minimise,
   maximise or restore, close, and whether the window is maximised. The `e2e` and `marks`
   builds add `e2e.json` and `marks.json` at setup (`e2e::grant_scoreboard`), and their permissions
@@ -82,7 +82,7 @@ any ACP message, including permission requests with misleading text.
   off, full-access modes, "always allow", all through native dialogs drawn by Rust or a denial card that
   opens one
 - `built`: Permission answers are checked against the options offered, in the bridge and again in
-  the host; `designed`: options are labelled by kind, not by the agent's text (the internal window)
+  the host; `designed`: options are labelled by kind, not by the agent's text (the permission prompt)
 - `designed`: ACP message sizes are capped; Clauseo advertises no file or terminal access to the
   adapter
 - `designed`: The host checkpoints the matter before and after every turn, so any step can be undone

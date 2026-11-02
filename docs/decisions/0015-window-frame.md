@@ -9,8 +9,9 @@ shows Snap Layouts. The toolbar's empty space drags the window, and a double-cli
 Windows and zooms on the Mac. The page has to move, size and close its own window for that, and
 [0001](0001-rust-webview-boundary.md) asks for a record for each capability change.
 
-R12's internal window stays the default page until U5 and keeps its OS frame, so the frame is
-chosen by the same build switch as the page, `VITE_CLAUSEO_WINDOW=room`.
+Until U5, R12's internal window was the default page and kept its OS frame: a build-time switch
+chose the frame together with the page. From U5 the room is the only page and the switch is gone,
+so the frame is always the room's.
 
 Snap Layouts appears only when the window under the pointer answers `WM_NCHITTEST` with
 `HTMAXBUTTON`. WebView2 covers the client area with its own child window, which answers
@@ -22,12 +23,11 @@ windowed controller (`CreateCoreWebView2Controller`, `wry/src/webview2/mod.rs`),
 
 ## Decision
 
-- **The switch.** `crates/desktop/src/window_frame.rs` reads `VITE_CLAUSEO_WINDOW` at compile time
-  (`option_env!`, which rustc tracks, so the crate rebuilds when it changes). `room` gives the
-  page's frame; anything else, or unset, keeps the OS frame. The window is built with its frame,
-  so nothing flashes at start. `tauri-plugin-window-state` no longer saves or restores
-  decorations, so a frame saved by one build never reaches the other. U5 removes the switch on
-  both sides.
+- **The switch.** Until U5, `crates/desktop/src/window_frame.rs` read a build-time variable, the
+  one that also switched the page, and gave the room's frame for one value and the OS frame
+  otherwise. From U5 the room is the only page and the switch is gone on both sides: the window
+  is always built with the room's frame, so nothing flashes at start. `tauri-plugin-window-state`
+  no longer saves or restores decorations, so a frame saved by one build never reaches the other.
 - **The Mac.** An overlay title bar with its title hidden, and the native traffic lights moved
   with `traffic_light_position` onto the toolbar's first corner light. `CornerLights native`
   keeps a box as wide as the native lights (`--lights-native-w`), so the gap after them holds,
@@ -51,20 +51,19 @@ windowed controller (`CreateCoreWebView2Controller`, `wry/src/webview2/mod.rs`),
 - **The capabilities.** One permission per command, no permission set, no event permission.
   - `capabilities/main.json` grants `main` the two commands of Tauri's drag script, in every
     build: `start_dragging` (a press on `data-tauri-drag-region`) and
-    `internal_toggle_maximize` (a double-click there). The default build's page has no drag
-    region. The list is `DRAG_PERMISSIONS`.
+    `internal_toggle_maximize` (a double-click there). The list is `DRAG_PERMISSIONS`.
   - `capabilities/frame.json` grants `main` the caption buttons' four: `minimize`,
     `toggle_maximize`, `close` and `is_maximized` (the maximised state names the middle
     button). Its `platforms` are Windows and Linux, since the Mac's own lights need none, and
-    `window_frame::grant_caption_commands` adds it at setup only in the room build, as
-    `e2e::grant_scoreboard` adds `e2e.json`; `tauri.conf.json` names only `main`. The list is
+    `window_frame::grant_caption_commands` adds it at setup, as `e2e::grant_scoreboard` adds
+    `e2e.json`; `tauri.conf.json` names only `main`. The list is
     `CAPTION_PERMISSIONS`.
   - Tests hold both files to their lists and check, through Tauri's own access check, that the
     caption commands answer only with `frame.json` and never on the Mac. The page reads the
     maximised state again after its own `resize` event, not from Tauri's window events.
 - **The page keeps its side.** The native controls stand at fixed places in the window: the Mac's
   lights at the toolbar's first corner light, Windows' maximise window flush with the top right.
-  So in the room build (`data-frame="own"` on `<html>`) the toolbar stays at the window's top at
+  So the toolbar (`data-frame="own"` on `<html>`) stays at the window's top at
   every size, the caption buttons flush with its top right, the pinned question below it, and
   the lights' box fixed where the native lights stand. The rules are in
   `ui/components/src/clauseo/responsive.css`, and a test fails when one is missing.
@@ -74,8 +73,8 @@ windowed controller (`CreateCoreWebView2Controller`, `wry/src/webview2/mod.rs`),
 
 ## Consequences
 
-- Script in the page can drag the window, maximise or restore it, and in the room build on
-  Windows and Linux minimise and close it and ask whether it is maximised. That is all it gains:
+- Script in the page can drag the window, maximise or restore it, and on Windows and Linux
+  minimise and close it and ask whether it is maximised. That is all it gains:
   no command sets a window's size, position, title, decorations or any other property, and none
   reaches another plugin.
 - Tauri's window commands take an optional `label`, so script in the page can aim them at any

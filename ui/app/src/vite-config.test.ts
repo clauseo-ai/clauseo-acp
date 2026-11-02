@@ -59,9 +59,10 @@ test("the build's only input is index.html, so the dev-only gallery stays out of
 
 // The perf module (src/perf/) loads only in the e2e and marks builds; a release page must not pay for it. This builds
 // the app in memory and checks the perf code sits in its own chunk, imported with a bare import() from the entry
-// chunk, and that Vite's preload helper (about 1.8 KB, which vite.config.ts's bareDynamicImports unwraps) is gone.
+// chunk, and the entity table in its own, imported with a bare import() from the chunk that decodes entities: neither
+// goes through Vite's preload helper, whose call would wrap it in an arrow (vite.config.ts's bareDynamicImports).
 test(
-  "the release build keeps the perf module and the entity table in lazy chunks, with no preload helper in the entry",
+  "the release build keeps the perf module and the entity table in lazy chunks, each imported without a preload",
   BUILD,
   async () => {
     const out = (await build({
@@ -81,8 +82,9 @@ test(
     const entities = chunks.find((c) => c.fileName.startsWith("assets/character-entities-"));
     expect(entities).toBeDefined();
     expect(entities!.isDynamicEntry).toBe(true);
-    expect(entry!.code).toMatch(/[^>]import\(`\.\/character-entities-[\w-]+\.js`\)\.then\(/);
-    expect(entry!.code).not.toContain("vite:preloadError");
+    const decoders = chunks.filter((c) => /import\(`\.\/character-entities-/.test(c.code));
+    expect(decoders.length).toBe(1);
+    expect(decoders[0]!.code).toMatch(/[^>]import\(`\.\/character-entities-[\w-]+\.js`\)\.then\(/);
     expect(entry!.code).not.toContain("startStream");
   },
 );
@@ -131,47 +133,10 @@ test("the meta CSP is the production CSP less frame-ancestors, which a meta tag 
   expect(meta.split("; ").length).toBe(16);
 });
 
-/** What only the room's code, its axe-core or the copy review page holds: none of it may reach the default build. */
-const ROOM_ONLY = [
-  "room-window",
-  "__clauseoAxe",
-  "__clauseoDisplay",
-  "axe.run",
-  "Tools for this matter",
-  "U1-01",
-  "copy-approvals",
-  "clauseo.display",
-];
+/** What only the copy review page holds: none of it may reach the release build. */
+const REVIEW_ONLY = ["U1-01", "copy-approvals"];
 
-test(
-  "the default build is R12's window alone: no meta CSP, no room, review or axe code, and no stylesheet",
-  BUILD,
-  async () => {
-    const { html, chunks, files } = await builtWith();
-    expect(html).not.toContain("Content-Security-Policy");
-    expect(chunks.some((c) => c.isEntry)).toBe(true);
-    for (const chunk of chunks) {
-      for (const word of ROOM_ONLY)
-        expect(chunk.code, `${chunk.fileName}: ${word}`).not.toContain(word);
-      const strays = chunk.moduleIds.filter(
-        (id) =>
-          id.includes("/src/room/") || id.includes("/src/review/") || id.includes("/axe-core/"),
-      );
-      expect(strays, chunk.fileName).toEqual([]);
-    }
-    expect(files.map((f) => f.fileName).filter((name) => name.endsWith(".css"))).toEqual([]);
-  },
-);
-
-test("the default build check finds the room where it is: the room build", BUILD, async () => {
-  vi.stubEnv("VITE_CLAUSEO_WINDOW", "room");
-  const { chunks, files } = await builtWith();
-  expect(chunks.some((c) => c.moduleIds.some((id) => id.includes("/src/room/")))).toBe(true);
-  expect(chunks.some((c) => c.code.includes("room-window"))).toBe(true);
-  expect(files.some((f) => f.fileName.endsWith(".css"))).toBe(true);
-});
-
-/** The room build's hooks for checks by hand and axe-core's chunk, where it has them. */
+/** The build's hooks for checks by hand and axe-core's chunk, where it has them. */
 function handCheckChunks(chunks: Rolldown.OutputChunk[]) {
   return {
     hooks: chunks.filter(
@@ -186,26 +151,33 @@ function handCheckChunks(chunks: Rolldown.OutputChunk[]) {
   };
 }
 
-// A room build without VITE_CLAUSEO_HAND_CHECKS, as a release build will be once the room is the default (U5): the
-// policy as its head's first element after the charset, and neither the hooks nor axe-core anywhere in it.
+// The release build, without VITE_CLAUSEO_HAND_CHECKS: the room and its stylesheet, the policy as its head's first
+// element after the charset, and neither the copy review page, the hooks nor axe-core anywhere in it.
 test(
-  "the room build without VITE_CLAUSEO_HAND_CHECKS has the meta CSP and no hooks or axe-core chunk",
+  "the release build is the room under the meta CSP, with no review page, hooks or axe-core chunk",
   BUILD,
   async () => {
-    vi.stubEnv("VITE_CLAUSEO_WINDOW", "room");
-    const { html, chunks } = await builtWith();
+    const { html, chunks, files } = await builtWith();
     expect(unescape(META.exec(html)?.[1] ?? "")).toBe(metaCsp(tauriConf.app.security.csp));
+    expect(chunks.some((c) => c.moduleIds.some((id) => id.includes("/src/room/")))).toBe(true);
+    expect(chunks.some((c) => c.code.includes("room-window"))).toBe(true);
+    expect(files.some((f) => f.fileName.endsWith(".css"))).toBe(true);
+    for (const chunk of chunks) {
+      for (const word of REVIEW_ONLY)
+        expect(chunk.code, `${chunk.fileName}: ${word}`).not.toContain(word);
+      const strays = chunk.moduleIds.filter((id) => id.includes("/src/review/"));
+      expect(strays, chunk.fileName).toEqual([]);
+    }
     expect(handCheckChunks(chunks)).toEqual({ hooks: [], axe: [] });
   },
 );
 
-// With VITE_CLAUSEO_HAND_CHECKS=1, the room's e2e build: the hooks (room/dev-hooks.ts) and axe-core in chunks of their
+// With VITE_CLAUSEO_HAND_CHECKS=1, the e2e build: the hooks (room/dev-hooks.ts) and axe-core in chunks of their
 // own that the page doesn't load at start.
 test(
-  "the room build with VITE_CLAUSEO_HAND_CHECKS=1 keeps its hooks and axe-core in chunks of their own",
+  "the build with VITE_CLAUSEO_HAND_CHECKS=1 keeps its hooks and axe-core in chunks of their own",
   BUILD,
   async () => {
-    vi.stubEnv("VITE_CLAUSEO_WINDOW", "room");
     vi.stubEnv("VITE_CLAUSEO_HAND_CHECKS", "1");
     const { html, chunks } = await builtWith();
     const { hooks, axe } = handCheckChunks(chunks);

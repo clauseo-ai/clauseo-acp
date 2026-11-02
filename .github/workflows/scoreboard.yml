@@ -87,7 +87,8 @@ jobs:
       - name: Install the ui workspace
         run: pnpm -C ui install --frozen-lockfile
 
-      # `tauri build` embeds ui/app/dist (custom-protocol); `marks` turns on e2e as well.
+      # `tauri build` embeds ui/app/dist (custom-protocol); `marks` turns on e2e as well, so the
+      # room opens at 1280 x 800 (WINDOW_SIZE in crates/desktop/src/window_size.rs).
       - name: Build the app with the marks feature
         run: pnpm -C ui tauri build --no-bundle --features marks
 

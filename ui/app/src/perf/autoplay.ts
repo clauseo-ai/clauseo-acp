@@ -4,8 +4,10 @@
 //  1. wait for the `interactive` mark;
 //  2. idle memory: `IDLE_SETTLE_MS` after `interactive` (start-up work, the first fetches and the webview's own
 //     processes calm down), one `marks_memory` reading (WebKit: no forced GC);
-//  3. open the matter through the UI: the prefilled name, Pick folder (the build's `E2E_MATTER_DIR` answers it), until
-//     the matter shows and the composer is enabled;
+//  3. open the matter through the room's rail, as ui/e2e/app-windows/flow.ts's `openMatter` does: New matter (after
+//     Matters, if the rail is folded), the name, Change (the build's `E2E_MATTER_DIR` answers its picker, and becomes the
+//     matter) until the form names the folder, Create the matter, until the toolbar names the matter and the composer
+//     is enabled;
 //  4. type `PROMPT` into the composer (one value change: keystrokes are not measured on WebKit);
 //  5. `channelBytes`, `startStream`, click Send;
 //  6. wait for the first answer text in the view store (or the permission card, whichever comes first);
@@ -21,7 +23,7 @@ import { rawRun } from "./raw-run.ts";
 
 /** The prompt the session sends: fixed and short. */
 export const PROMPT = "Review clause 4 and check the notice periods.";
-/** The name the matter gets (the window prefills it). */
+/** The name the matter gets. */
 export const MATTER = "Matter";
 /** How long after `interactive` the idle memory is read. */
 export const IDLE_SETTLE_MS = 2000;
@@ -74,6 +76,16 @@ function setValue(el: HTMLElement, value: string): void {
 
 const enabled = (el: HTMLElement | null): boolean =>
   el !== null && !(el as HTMLButtonElement).disabled;
+
+/** Whether `el` shows: laid out and not hidden (the folded rail's New matter is neither). */
+function shown(doc: Document, el: HTMLElement): boolean {
+  const view = doc.defaultView;
+  return el.getClientRects().length > 0 && view?.getComputedStyle(el).visibility !== "hidden";
+}
+
+/** The folder the New matter form names, or null while it names none: the matter form's path line. */
+const formFolder = (doc: Document): string | null =>
+  doc.querySelector(".matter-form-path")?.textContent ?? null;
 
 /** The transcript's scrolling element: the first one under it that scrolls vertically and has more to show. */
 function scroller(doc: Document): Element {
@@ -246,11 +258,24 @@ async function play(d: AutoplayDeps, state: { step: string; expired: boolean; se
   const idleMemoryMb = await d.memory();
 
   step("open matter");
-  setValue(need(doc, "matter-name"), MATTER);
+  // The rail folds behind Matters below 1200 px; the marks build's window is 1280 px wide, so it stands open.
+  if (!shown(doc, need(doc, "new-matter"))) need(doc, "rail-toggle").click();
+  await until("New matter", () => shown(doc, need(doc, "new-matter")));
   need(doc, "new-matter").click();
+  await until("the new matter form", () => byId(doc, "matter-name") !== null);
+  setValue(need(doc, "matter-name"), MATTER);
+  // Change picks E2E_MATTER_DIR: the matter is that folder itself, as on Windows. Create waits until the form names
+  // it, or it would make a new folder instead.
+  const before = formFolder(doc);
+  need(doc, "matter-existing").click();
+  await until(
+    "the picked folder",
+    () => formFolder(doc) !== before && enabled(byId(doc, "matter-existing")),
+  );
+  need(doc, "create-matter").click();
   await until(
     "the matter",
-    () => byId(doc, "matter")?.textContent === MATTER && enabled(byId(doc, "composer")),
+    () => byId(doc, "matter")?.textContent?.trim() === MATTER && enabled(byId(doc, "composer")),
   );
 
   step("type");
@@ -291,14 +316,14 @@ async function play(d: AutoplayDeps, state: { step: string; expired: boolean; se
     list.scrollBy(0, SCROLL_PX);
     await d.frame();
   }
-  // Back to the very end, so the transcript follows it again. Scrolling up stops LegendList following, and 1,200 px
-  // back down lands short of an end that grew meanwhile (it re-follows only within ~10% of the viewport), so the
-  // turn's last rows would never be drawn (the macos-15 "stall" in #106).
+  // Back to the very end, so the transcript follows it again: scrolling up stops it following, and 1,200 px back down
+  // lands short of an end that grew meanwhile (R12's window's list then never drew the turn's last rows: the macos-15
+  // "stall" in #106).
   list.scrollTo(0, list.scrollHeight);
   await d.frame();
 
   step("end of turn");
-  // Cancel is in the composer, which is not virtualized: it goes when the turn ends, whether or not the transcript
+  // Cancel is the composer's Stop, outside the transcript: it goes when the turn ends, whether or not the transcript
   // has drawn its "turn-stopped" row. A drawn row with another reason fails the play.
   await until("the end of the turn", () => byId(doc, "cancel") === null);
   const stopped = byId(doc, "turn-stopped")?.getAttribute("data-stop-reason");

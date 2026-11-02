@@ -32,28 +32,67 @@ const el = (html: string): HTMLElement => {
   return t.content.firstElementChild as HTMLElement;
 };
 
-/** The internal window, as far as the autoplay reads it, answering the way the real one does. `permission: false`
- * leaves the permission card out, so the session never ends; `clicksToAnswer` is how many clicks on "allow once" it
- * takes to answer the card (Infinity: never). */
+/** The room, as far as the autoplay reads it, answering the way the real one does. `permission: false` leaves the
+ * permission card out, so the session never ends; `clicksToAnswer` is how many clicks on "allow once" it takes to
+ * answer the card (Infinity: never). `folded` starts the rail folded behind Matters. Change's picker answers after
+ * `pickPolls` turns of the event loop, as the host's pick_folder does, with E2E_MATTER_DIR. */
 function fakeWindow(
   log: string[],
-  { permission = true, clicksToAnswer = 1, stepRowRendered = true, answer = "The edit" } = {},
+  {
+    permission = true,
+    clicksToAnswer = 1,
+    stepRowRendered = true,
+    answer = "The edit",
+    folded = false,
+    pickPolls = 3,
+  } = {},
 ) {
   document.body.innerHTML = `
-    <input data-testid="matter-name" value="Matter">
-    <button data-testid="new-matter">Pick folder…</button>
-    <span data-testid="matter">No matter</span>
+    <button data-testid="rail-toggle">Matters</button>
+    <button data-testid="new-matter" style="visibility: ${folded ? "hidden" : "visible"}">New matter</button>
+    <span data-testid="matter"></span>
     <div data-testid="transcript"><div data-scroller style="overflow-y: auto"></div></div>
     <textarea data-testid="composer" disabled></textarea>
-    <button data-testid="send" disabled>Send</button>`;
+    <button data-testid="send" disabled>Ask</button>`;
   const q = (id: string) => document.querySelector<HTMLElement>(`[data-testid="${id}"]`)!;
   const scroller = document.querySelector<HTMLElement>("[data-scroller]")!;
   const scrolls: number[] = [];
   scroller.scrollBy = ((_x: number, y: number) => void scrolls.push(y)) as typeof scroller.scrollBy;
+  q("rail-toggle").addEventListener("click", () => {
+    log.push("click rail-toggle");
+    q("new-matter").style.visibility = "visible";
+  });
   q("new-matter").addEventListener("click", () => {
-    log.push(`click new-matter as ${(q("matter-name") as HTMLInputElement).value}`);
-    q("matter").textContent = "Matter";
-    (q("composer") as HTMLTextAreaElement).disabled = false;
+    log.push("click new-matter");
+    document.body.append(
+      el(`<form>
+        <input data-testid="matter-name" value="">
+        <p><bdi class="matter-form-path">/home/Clauseo/Matter</bdi></p>
+        <button type="button" data-testid="matter-existing">Change</button>
+        <button type="submit" data-testid="create-matter">Create the matter</button>
+      </form>`),
+    );
+    const change = q("matter-existing") as HTMLButtonElement;
+    change.addEventListener("click", () => {
+      log.push("click matter-existing");
+      change.disabled = true;
+      const answer = (left: number) =>
+        setTimeout(() => {
+          if (left > 0) return answer(left - 1);
+          document.querySelector(".matter-form-path")!.textContent = "/e2e/matter";
+          change.disabled = false;
+        }, 0);
+      answer(pickPolls);
+    });
+    q("create-matter").addEventListener("click", (e) => {
+      e.preventDefault();
+      const name = (q("matter-name") as HTMLInputElement).value;
+      const folder = document.querySelector(".matter-form-path")!.textContent;
+      log.push(`click create-matter as ${name} in ${folder}`);
+      q("create-matter").closest("form")!.remove();
+      q("matter").textContent = name;
+      (q("composer") as HTMLTextAreaElement).disabled = false;
+    });
   });
   q("composer").addEventListener("input", (e) => {
     const text = (e.target as HTMLTextAreaElement).value;
@@ -127,7 +166,9 @@ describe("autoplay", () => {
       "step idle memory",
       "memory",
       "step open matter",
-      "click new-matter as Matter",
+      "click new-matter",
+      "click matter-existing",
+      "click create-matter as Matter in /e2e/matter",
       "step type",
       `type ${PROMPT}`,
       "step send",
@@ -167,8 +208,9 @@ describe("autoplay", () => {
     });
   });
 
-  // Stall diagnosis (R13 macos-15): autoplay's scroll runs while the second message streams, so LegendList stops
-  // following the end and never mounts the step row 7,000+ px below. The turn has ended; the play must see that.
+  // Stall diagnosis (R13 macos-15): autoplay's scroll runs while the second message streams, so R12's window's list
+  // stopped following the end and never mounted the step row 7,000+ px below. The turn has ended; the play must see
+  // that.
   test("a turn whose step row the virtualized transcript does not render still finishes the play", async () => {
     const log: string[] = [];
     fakeWindow(log, { stepRowRendered: false });
@@ -183,6 +225,25 @@ describe("autoplay", () => {
     });
     await autoplay(d);
     expect(finished).toHaveLength(1);
+    expect(finished[0]!.error).toBeNull();
+  });
+
+  test("a folded rail is unfolded through Matters before New matter", async () => {
+    const log: string[] = [];
+    fakeWindow(log, { folded: true });
+    const { d, finished } = deps(log);
+    await autoplay(d);
+    const at = log.indexOf("step open matter");
+    expect(log.slice(at + 1, at + 3)).toEqual(["click rail-toggle", "click new-matter"]);
+    expect(finished[0]!.error).toBeNull();
+  });
+
+  test("Create the matter waits until Change's picker has named the folder", async () => {
+    const log: string[] = [];
+    fakeWindow(log, { pickPolls: 20 });
+    const { d, finished } = deps(log);
+    await autoplay(d);
+    expect(log).toContain("click create-matter as Matter in /e2e/matter");
     expect(finished[0]!.error).toBeNull();
   });
 
