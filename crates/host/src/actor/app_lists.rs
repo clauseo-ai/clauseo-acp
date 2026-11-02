@@ -9,8 +9,11 @@
 //! - every durable envelope of a thread's stream marks that thread (`rail::note_commit`), and so
 //!   does unloading its stream (its kept header and last stop are set then);
 //! - every answered command marks everything (`commands::finish_command`): matter rows change
-//!   only by commands (create, update, open, forget, bring back), and commands are the lawyer's
-//!   clicks, so a whole comparison there is cheap.
+//!   only by commands (create, update, open, forget, bring back, relocate) and by a
+//!   `ListMatters` folder read, and both are the lawyer's doing, so a whole comparison there is
+//!   cheap;
+//! - a `ListMatters` folder read that changes a matter's folder state marks everything
+//!   (`query::on_folder_states`).
 //!
 //! A marked thread's row is built and compared with the one sent; only when it differs is its
 //! matter's row built and compared too. Rows are compared on every field but `last_activity`,
@@ -283,6 +286,7 @@ fn same_matter(a: &MatterSummary, b: &MatterSummary) -> bool {
         last_opened,
         status,
         folder_display,
+        folder_state,
     } = a;
     *matter == b.matter
         && *name == b.name
@@ -293,6 +297,7 @@ fn same_matter(a: &MatterSummary, b: &MatterSummary) -> bool {
         && *last_opened == b.last_opened
         && *status == b.status
         && *folder_display == b.folder_display
+        && *folder_state == b.folder_state
 }
 
 /// Whether two thread rows show the same: every field but `last_activity`.

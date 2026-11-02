@@ -286,8 +286,10 @@ pub struct MatterSummary {
     /// answer) reads as empty, which the UI shows as no folder line.
     #[serde(default)]
     pub folder_display: String,
-    /// Whether its folder is where the host last recorded it, as of this list; missing reads
-    /// as `found`.
+    /// Whether its folder is where the host last recorded it: in `ListMatters`, as of this list;
+    /// in `MattersChanged`, as the last `ListMatters` read it (an in-memory cache of that read,
+    /// not state in the log; `found` before any read and after a relocate). Missing reads as
+    /// `found`.
     #[serde(default)]
     pub folder_state: FolderState,
 }

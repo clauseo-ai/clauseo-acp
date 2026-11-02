@@ -124,6 +124,7 @@ fn forget(actor: &mut Actor, ctx: &CommandCtx, matter: MatterId) -> Result<(), E
 /// list with its row as it was.
 pub(super) fn forget_committed(actor: &mut Actor, matter: MatterId, durable: bool) {
     if durable {
+        actor.folder_states.remove(&matter);
         turn::stop_agents(actor, matter);
         return;
     }
