@@ -3,11 +3,15 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::web::{
+    MAX_SEARCH_QUERY_CHARS, MAX_SEARCH_RESULTS, MAX_URL_CHARS, MAX_WEB_TITLE_CHARS, cut_chars,
+    logged_url,
+};
 use crate::{
     AgentId, CompactString, Deliverable, ElicitationId, ElicitationOutcome, ElicitationRequest,
     ExpiryReason, MatterPath, PageVia, PermissionChoice, PermissionOption, PermissionRequestId,
-    Principal, TextOrBlob, ThreadId, Timestamp, ToolCallContent, ToolCallId, ToolCallPatch,
-    ToolCallStatus, ToolKind, ToolLocation, TurnId,
+    Principal, TextOrBlob, ToolCallContent, ToolCallId, ToolCallPatch, ToolCallStatus, ToolKind,
+    ToolLocation, TurnId,
 };
 
 /// A tool call the agent reported.
@@ -128,53 +132,106 @@ pub struct ElicitationExpired {
     pub reason: ExpiryReason,
 }
 
-/// A web search the agent ran, with the results it got.
+/// A web search the agent ran, with the results it got. Built with [`WebSearchRecorded::new`],
+/// which applies the caps; the log's envelope carries the stream (the thread) and the time.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct WebSearchRecorded {
-    /// The thread it ran in.
-    pub thread: ThreadId,
     /// The turn it ran in.
     pub turn: TurnId,
     /// The tool call that ran it.
-    pub tool_call_id: ToolCallId,
+    pub tool_call: ToolCallId,
     /// The agent that ran the search, by registry id.
     pub agent: AgentId,
-    /// The query text.
+    /// The query text: at most [`MAX_SEARCH_QUERY_CHARS`] characters, cut by
+    /// [`WebSearchRecorded::new`].
     pub query: String,
-    /// The results, in the order the agent got them; empty when there were none.
+    /// The results, in the order the agent got them; empty when there were none. At most
+    /// [`MAX_SEARCH_RESULTS`] of them, kept by [`WebSearchRecorded::new`].
     pub results: Vec<WebResult>,
-    /// When it was recorded.
-    pub at: Timestamp,
+}
+
+impl WebSearchRecorded {
+    /// A search the agent ran. The producer calls this, not a struct literal: it cuts `query` to
+    /// [`MAX_SEARCH_QUERY_CHARS`] characters, keeps the first [`MAX_SEARCH_RESULTS`] results and
+    /// builds each through [`WebResult::new`] (its title capped, its URL logged by
+    /// [`logged_url`]).
+    pub fn new(
+        turn: TurnId,
+        tool_call: ToolCallId,
+        agent: AgentId,
+        query: &str,
+        results: Vec<WebResult>,
+    ) -> Self {
+        Self {
+            turn,
+            tool_call,
+            agent,
+            query: cut_chars(query.to_owned(), MAX_SEARCH_QUERY_CHARS),
+            results: results
+                .into_iter()
+                .take(MAX_SEARCH_RESULTS)
+                .map(|result| WebResult::new(result.title, &result.url))
+                .collect(),
+        }
+    }
 }
 
 /// One result of a web search.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct WebResult {
-    /// The result's title.
+    /// The result's title: at most [`MAX_WEB_TITLE_CHARS`] characters.
     pub title: String,
-    /// The result's address.
+    /// The result's address: at most [`MAX_URL_CHARS`] characters, after [`logged_url`].
     pub url: String,
 }
 
-/// A page the agent opened.
+impl WebResult {
+    /// A result. The producer calls this: it cuts `title` to [`MAX_WEB_TITLE_CHARS`] characters
+    /// and logs `url` by [`logged_url`], then cuts it to [`MAX_URL_CHARS`].
+    pub fn new(title: impl Into<String>, url: &str) -> Self {
+        Self {
+            title: cut_chars(title.into(), MAX_WEB_TITLE_CHARS),
+            url: cut_chars(logged_url(url), MAX_URL_CHARS),
+        }
+    }
+}
+
+/// A page the agent opened. Built with [`PageVisited::new`], which applies the caps.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct PageVisited {
-    /// The thread it ran in.
-    pub thread: ThreadId,
     /// The turn it ran in.
     pub turn: TurnId,
     /// The tool call that opened it.
-    pub tool_call_id: ToolCallId,
-    /// The page's address.
+    pub tool_call: ToolCallId,
+    /// The page's address: at most [`MAX_URL_CHARS`] characters, after [`logged_url`].
     pub url: String,
-    /// The page's title, when the agent reported one.
+    /// The page's title, when the agent reported one: at most [`MAX_WEB_TITLE_CHARS`]
+    /// characters. Left out of the JSON when there is none.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub title: Option<String>,
-    /// When it was recorded.
-    pub at: Timestamp,
     /// How the page was opened.
     pub via: PageVia,
+}
+
+impl PageVisited {
+    /// A page the agent opened. The producer calls this: it logs `url` by [`logged_url`] and cuts
+    /// it to [`MAX_URL_CHARS`] characters, and cuts `title` to [`MAX_WEB_TITLE_CHARS`].
+    pub fn new(
+        turn: TurnId,
+        tool_call: ToolCallId,
+        url: &str,
+        title: Option<String>,
+        via: PageVia,
+    ) -> Self {
+        Self {
+            turn,
+            tool_call,
+            url: cut_chars(logged_url(url), MAX_URL_CHARS),
+            title: title.map(|title| cut_chars(title, MAX_WEB_TITLE_CHARS)),
+            via,
+        }
+    }
 }

@@ -157,6 +157,7 @@ mod title;
 mod tool;
 mod turn;
 mod view;
+mod web;
 #[cfg(feature = "specta")]
 mod wire;
 
@@ -275,6 +276,10 @@ pub use query::{MAX_BLOB_READ_BYTES, MAX_PAGE_ENTRIES, MAX_PAPERS};
 pub use raw::{MAX_MSGPACK_DEPTH, MAX_RAW_DEPTH, MAX_RAW_ENCODE_DEPTH};
 pub use text::{INLINE_LIMIT_BYTES, PREVIEW_BYTES, escaped_len, preview_of, utf16_len};
 pub use title::{MAX_TITLE_CHARS, check_display_title};
+pub use web::{
+    MAX_SEARCH_QUERY_CHARS, MAX_SEARCH_RESULTS, MAX_URL_CHARS, MAX_WEB_TITLE_CHARS, REDACTED,
+    logged_url,
+};
 #[cfg(feature = "specta")]
 pub use wire::{WireFormat, known_kinds_typescript};
 

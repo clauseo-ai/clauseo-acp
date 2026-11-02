@@ -2,17 +2,18 @@
 //! and entries that keep what their events carry.
 
 use clauseo_protocol::{
-    AgentNamed, AgentSessionDetached, BlobHash, BlobRef, ContentAppended, ContentBlock, Count,
-    DetachReason, DomainEvent, EntryId, Envelope, LimitStopReason, ModeChanged, QueuedPromptEdited,
-    StepUndone, TextKind, TextOrBlob, ThreadStatus, Timestamp, ToolCallContent, ToolCallPatch,
-    ToolCallStarted, ToolCallStatus, ToolCallUpdated, ToolKind, TurnStoppedAtLimit, ViewEntry,
+    AgentId, AgentNamed, AgentSessionDetached, BlobHash, BlobRef, ContentAppended, ContentBlock,
+    Count, DetachReason, DomainEvent, EntryId, Envelope, LimitStopReason, ModeChanged, PageVia,
+    PageVisited, QueuedPromptEdited, StepUndone, TextKind, TextOrBlob, ThreadStatus, Timestamp,
+    ToolCallContent, ToolCallPatch, ToolCallStarted, ToolCallStatus, ToolCallUpdated, ToolKind,
+    TurnStoppedAtLimit, ViewEntry, WebResult, WebSearchRecorded,
 };
 use clauseo_reducer::{Anomaly, Error, StreamState, ViewChange, apply, view_snapshot};
 
 use crate::fixtures::{
     Log, file_changes, files_changed, permission_requested, permission_resolved, prompt_stream,
-    short, start_turn, text, thread_created, tool_diff, tool_started, tool_status, turn_ended,
-    usage, v7_text,
+    short, start_turn, text, thread_created, tool_call_id, tool_diff, tool_started, tool_status,
+    turn_ended, usage, v7_text,
 };
 use crate::helpers::{first_upsert, fold, seq};
 
@@ -150,13 +151,69 @@ fn unknown_kind_advances_seq() {
     assert_eq!(out, clauseo_reducer::Applied::default());
     assert_eq!(state.seq(), Some(seq(2)));
     // Everything but seq is as before.
-    let without_seq = |state: &StreamState| {
-        let mut value = serde_json::to_value(state).unwrap();
-        value["thread"]["seq"] = serde_json::Value::Null;
-        value
-    };
     assert_eq!(without_seq(&state), without_seq(&before));
     assert_eq!(view_snapshot(&state), view_snapshot(&before));
+}
+
+/// A thread state as JSON, with its `seq` cleared: what a no-op event must leave as it was.
+#[cfg(test)]
+fn without_seq(state: &StreamState) -> serde_json::Value {
+    let mut value = serde_json::to_value(state).unwrap();
+    value["thread"]["seq"] = serde_json::Value::Null;
+    value
+}
+
+/// The web events are logged only: each one leaves the state as it was but for its `seq`, and
+/// the view as it was, so the reducer's state equals what it was before the event.
+#[test]
+fn web_events_change_no_state() {
+    let (mut log, mut state) = created(6);
+    let turn = start_turn(&mut log, "Find the limitation period.").unwrap();
+    catch_up(&log, &mut state);
+    let tool_call = tool_call_id(9).unwrap();
+    let agent = AgentId::new("claude-acp").unwrap();
+    let events: Vec<DomainEvent> = vec![
+        WebSearchRecorded::new(
+            turn,
+            tool_call,
+            agent.clone(),
+            "limitation period",
+            vec![WebResult::new(
+                "Limitations Act, 2002",
+                "https://www.ontario.ca/laws/statute/02l24?token=abc#s2",
+            )],
+        )
+        .into(),
+        WebSearchRecorded::new(turn, tool_call, agent, "no hits", Vec::new()).into(),
+        PageVisited::new(
+            turn,
+            tool_call,
+            "https://example.com/a",
+            Some("A page".to_owned()),
+            PageVia::Browser,
+        )
+        .into(),
+        PageVisited::new(
+            turn,
+            tool_call,
+            "https://example.com/b",
+            None,
+            PageVia::WebFetch,
+        )
+        .into(),
+    ];
+    for event in events {
+        let before = state.clone();
+        let out = push(&mut log, &mut state, event);
+        assert_eq!(out, clauseo_reducer::Applied::default(), "{out:?}");
+        assert_eq!(
+            state.seq(),
+            log.events().last().map(|e| e.seq),
+            "seq advances"
+        );
+        assert_eq!(without_seq(&state), without_seq(&before));
+        assert_eq!(view_snapshot(&state), view_snapshot(&before));
+    }
 }
 
 #[test]
