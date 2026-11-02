@@ -1,5 +1,4 @@
-// The room's rail on the room's e2e build (`VITE_CLAUSEO_WINDOW=room`, run with
-// `E2E_WINDOW=room`): opening the e2e folder as a matter, two matters and moving between them,
+// The room's rail: opening the e2e folder as a matter, two matters and moving between them,
 // finding one, and "Answering." on a matter left while its turn runs.
 //
 // The e2e build's pick_folder always returns E2E_MATTER_DIR. A folder can be one matter only and a
@@ -11,8 +10,6 @@ import { expect } from "@playwright/test";
 import { test } from "./fixture.ts";
 import { createRoomMatter, expectTurnEnded, moveTo, sendPrompt, showRail } from "./flow.ts";
 import { window, type Window } from "./selectors.ts";
-
-test.skip(process.env["E2E_WINDOW"] !== "room", "the room's e2e build only (E2E_WINDOW=room)");
 
 const FIRST = "Lease review";
 const SECOND = "Share purchase";

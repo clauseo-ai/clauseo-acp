@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // U3's done-when 1: React commits while the room's thread takes a scripted 500-chunk, 20-tool-call stream, under a test
-// scheduler (internal/stream-commits.test.tsx's pattern, on the room). Frames run by hand (the store's `Batch`), so
+// scheduler (the pattern R12's internal window's test used, on the room). Frames run by hand (the store's `Batch`), so
 // every number here is the same on every run. Then the thread at rest: no timer, no animation frame, no commit.
 import {
   act,

@@ -50,6 +50,12 @@ static T0_EPOCH_MS: OnceLock<f64> = OnceLock::new();
 /// The bytes sent down every window channel since the app started.
 static CHANNEL_BYTES: AtomicU64 = AtomicU64::new(0);
 
+/// The main window's inner size in logical px, in the `e2e` and `marks` builds: 1280 by 800, so
+/// the room lays out in three columns and its transcript holds the scroller the speed
+/// scoreboard scrolls. Below 1000 px the room scrolls the page itself. The release build keeps
+/// Tauri's default size.
+pub(crate) const WINDOW_SIZE: (f64, f64) = (1280.0, 800.0);
+
 /// The time now in ms since the Unix epoch, with its fraction; 0 for a clock before 1970.
 #[expect(
     clippy::disallowed_methods,

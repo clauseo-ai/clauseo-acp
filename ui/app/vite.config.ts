@@ -2,7 +2,7 @@
 import babel from "@rolldown/plugin-babel";
 import tailwindcss from "@tailwindcss/vite";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
-import { defineConfig, loadEnv, type Plugin } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import tauriConf from "../../crates/desktop/tauri.conf.json" with { type: "json" };
 
 /** The directives the dev policy loosens, and what each gets, for a dev server on `port`. */
@@ -177,11 +177,12 @@ function closingBracket(code: string, open: number): number {
 }
 
 /**
- * Unwraps two dynamic imports from Vite's preload helper back to a plain `import()`, so the minifier drops the
- * helper, which would add about 1.8 KB to every release page's initial JS: the perf module (src/main.tsx; loaded only
- * in the e2e and marks builds), which imports only what the main chunk already holds, and the answer renderer's full
- * entity table (`import("character-entities")` in ui/patches/' decode-named-character-reference), a data module
- * with no imports. Neither has anything to preload. Any other dynamic import keeps its preloads.
+ * Unwraps two dynamic imports from Vite's preload helper back to a plain `import()`: the perf module (src/main.tsx;
+ * loaded only in the e2e and marks builds), which imports only what the main chunk already holds, and the answer
+ * renderer's full entity table (`import("character-entities")` in ui/patches/' decode-named-character-reference), a
+ * data module with no imports. Neither has anything to preload. Any other dynamic import keeps its preloads, so the
+ * room's lazy screens keep the helper in its entry chunk; R12's window had none, and this dropped the helper's
+ * 1.8 KB from its first load.
  */
 function bareDynamicImports(): Plugin {
   return {
@@ -197,9 +198,6 @@ function bareDynamicImports(): Plugin {
 
 export default defineConfig(({ mode }) => {
   const probe = mode === PROBE;
-  // App.tsx's switch, as the build sees it: the room's build and the probe's carry the CSP as a meta tag too
-  const room =
-    probe || loadEnv(mode, process.cwd(), "VITE_CLAUSEO_")["VITE_CLAUSEO_WINDOW"] === "room";
   return {
     plugins: [
       tailwindcss(),
@@ -207,16 +205,13 @@ export default defineConfig(({ mode }) => {
       babel({ presets: [reactCompilerPreset()] }),
       devCspHeader(),
       bareDynamicImports(),
-      ...(room ? [cspMeta()] : []),
+      cspMeta(),
       ...(probe ? [probeEntry()] : []),
     ],
     // the probe is the room with the hooks for checks by hand (room/start.ts's HAND_CHECKS), which the probe runs
     ...(probe
       ? {
-          define: {
-            "import.meta.env.VITE_CLAUSEO_WINDOW": JSON.stringify("room"),
-            "import.meta.env.VITE_CLAUSEO_HAND_CHECKS": JSON.stringify("1"),
-          },
+          define: { "import.meta.env.VITE_CLAUSEO_HAND_CHECKS": JSON.stringify("1") },
         }
       : {}),
     server: {

@@ -33,7 +33,7 @@ which check ids and bounded values as they decode; the bridge then checks what d
 The confirm shows fixed text: nothing the agent wrote reaches it. `SetMode` and
 `SetConfigOption` are refused because a mode can widen what the agent does without asking
 (Claude's `bypassPermissions`), an escalation 0001 puts behind a native dialog drawn by Rust; the
-internal window never sends them. For the same reason `answer_permission` refuses the four
+page never sends them. For the same reason `answer_permission` refuses the four
 option ids claude-agent-acp 0.89.1 offers on leaving plan mode that switch the session's mode:
 `exit-plan-bypass` and `exit-plan-clear-bypass` (`allow_always`, to `bypassPermissions`), and
 `exit-plan-auto` and `exit-plan-clear-auto` (auto mode). Follow-ups: a mode command that
@@ -113,6 +113,9 @@ At exit the `e2e` build calls `std::process::exit` once the host thread has join
 `app.exit`. On Windows in a session with no visible window (CI), tao's loop never delivers
 `RunEvent::Exit`, so `app.exit` would leave the process running. A side effect: window-state never
 saves in this build, so e2e runs do not write the real app config folder.
+
+From U5 the room is the only page and the build-time switch between it and the internal window is
+gone; the commands, permissions and capabilities this record names serve the room.
 
 ## Consequences
 

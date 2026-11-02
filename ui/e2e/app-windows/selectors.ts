@@ -1,51 +1,41 @@
-// The windows' elements, in one place: every spec finds them through here, so a renamed test id
-// changes this file only. The test ids are the ones ui/app/src/internal (R12's window) and
-// ui/app/src/room (the room, `E2E_WINDOW=room`) set; every transcript row also carries
-// `data-entry-id`. The two windows share `matter-name`, `new-matter` and `matter`.
+// The room's elements, in one place: every spec and the speed scoreboard find them through here,
+// so a renamed test id changes this file only. The test ids are the ones the room
+// (ui/app/src/room) sets, some through a part's optional `testIds` prop; every transcript row also
+// carries `data-entry-id`. ui/app/src/perf/autoplay.ts takes the same steps on macOS.
 
 import type { Locator, Page } from "@playwright/test";
 
 /** The `data-testid` of each element the specs use. */
 export const ids = {
-  /**
-   * The new matter's name. Internal window: prefilled "Matter", New matter is disabled while it
-   * is empty. Room: the New matter form's name field.
-   */
+  /** The New matter form's name field. */
   matterName: "matter-name",
-  /**
-   * Internal window: pick_folder (E2E_MATTER_DIR in the e2e build), then CreateMatter and a
-   * thread. Room: the rail's New matter, which opens the form.
-   */
+  /** The rail's New matter, which opens the form. */
   newMatter: "new-matter",
-  /** Room, in the form: Change, pick_folder for an existing folder (`existing_folder`). */
+  /** In the form: Change, pick_folder for an existing folder (`existing_folder`). */
   matterExisting: "matter-existing",
   /**
-   * Room, in the form: Create the matter. With a folder picked by Change, that folder; without,
+   * In the form: Create the matter. With a folder picked by Change, that folder; without,
    * pick_folder for the parent and the host makes `<parent>/<name>` (`new_folder`).
    */
   createMatter: "create-matter",
   /**
-   * Room: a matter's row button in the rail, with `data-state` (the MatterRow state) and
+   * A matter's row button in the rail, with `data-state` (the MatterRow state) and
    * `aria-current="page"` on the open matter. The scratch matter's foot row is not one.
    */
   matterRow: "matter-row",
-  /** Room: the rail's find field (shown once there is a matter to find). */
+  /** The rail's find field (shown once there is a matter to find). */
   find: "find",
-  /** Room: Matters on the toolbar, which opens and folds the rail below 1200 px. */
+  /** Matters on the toolbar, which opens and folds the rail below 1200 px. */
   railToggle: "rail-toggle",
-  /** The open matter's name; in the internal window also "Opening…" or "No matter". */
+  /** The toolbar's title: the open matter's name. */
   matter: "matter",
-  /** The open matter's threads. */
-  threadSelect: "thread-select",
-  /** Button: a new thread in the open matter. */
-  newThread: "new-thread",
   /** The window's error line, with `data-code` (the HostError code). */
   error: "error",
   /** The prompt `<textarea>`. */
   composer: "composer",
-  /** Sends the prompt; disabled while a turn runs. */
+  /** Ask: sends the prompt; hidden while a turn runs, when Stop stands in its place. */
   send: "send",
-  /** Shown while a turn runs. */
+  /** Stop: shown while a turn runs. */
   cancel: "cancel",
   transcript: "transcript",
   userMessage: "message-user",
@@ -60,8 +50,7 @@ export const ids = {
   permission: "permission",
   /** The line a finished turn ends with, with `data-stop-reason` (the wire StopReason). */
   turnStopped: "turn-stopped",
-  /** Inside turnStopped: the files the turn changed, one fileChanged each. */
-  filesChanged: "files-changed",
+  /** A file the turn changed, in the turn's change note. */
   fileChanged: "file-changed",
   notice: "notice",
   /** A turn stopped at a usage limit; holds `resetsAt`. */
@@ -90,18 +79,16 @@ export function window(page: Page) {
     matterExisting: id(ids.matterExisting),
     createMatter: id(ids.createMatter),
     matterRows: id(ids.matterRow),
-    /** Room: the rail row of the matter named `name` (its text also holds its status). */
+    /** The rail row of the matter named `name` (its text also holds its status). */
     matterRow: (name: string): Locator => id(ids.matterRow).filter({ hasText: name }),
-    /** Room: the rail's find field. */
+    /** The rail's find field. */
     findMatter: id(ids.find),
     /**
-     * Room: Matters on the toolbar, which unfolds the rail below 1200 px (the e2e window opens at
-     * Tauri's default 800 x 600, so the rail starts folded).
+     * Matters on the toolbar, which unfolds the rail below 1200 px (the e2e window opens at
+     * 1280 x 800, crates/desktop's e2e.rs, so the rail starts open).
      */
     railToggle: id(ids.railToggle),
     matter: id(ids.matter),
-    threadSelect: id(ids.threadSelect),
-    newThread: id(ids.newThread),
     error: id(ids.error),
     composer: id(ids.composer),
     send: id(ids.send),
@@ -119,7 +106,6 @@ export function window(page: Page) {
     permissionButton: (card: Locator, kind: OptionKind): Locator =>
       card.getByTestId(permissionButton(kind)),
     turnStopped: id(ids.turnStopped),
-    filesChanged: id(ids.filesChanged),
     fileChanged: id(ids.fileChanged),
     notices: id(ids.notice),
     limitStop: id(ids.limitStop),

@@ -4,8 +4,8 @@ import type { Batch } from "../store/batch.ts";
 
 /** The stubbed viewport: room for 100 rows of 40 px, more than any test shows (the scripted stream has 42; its test
  * asserts every row rendered, so a test that outgrows this fails on that assertion, not quietly). Kept small on purpose:
- * LegendList sizes its container pool from the viewport, and a 1,000,000 px viewport made it build ~20,000 containers,
- * which took ~0.9 s per mount and pushed the commit test past vitest's 5 s timeout under CPU load. */
+ * a virtualized list sizes its pool from the viewport (R12's window's LegendList built ~20,000 containers for a
+ * 1,000,000 px one, ~0.9 s per mount), which would push a commit test past vitest's 5 s timeout under CPU load. */
 const VIEWPORT = 4000;
 
 /** happy-dom lays nothing out. Gives a scroller (overflow auto or scroll) a viewport of `VIEWPORT` px and every other

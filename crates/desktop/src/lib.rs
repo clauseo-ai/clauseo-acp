@@ -8,8 +8,8 @@
 //!   waits for `HostHandle::shutdown` and `HostJoin::join` on their own thread, then exits.
 //! - Nine async commands (`commands.rs`), each granted by its own permission in
 //!   `capabilities/main.json` and listed in `build.rs`'s `AppManifest`. Beside them that file
-//!   grants only the two window commands of Tauri's drag script, and the room build adds the
-//!   caption buttons' four on Windows and Linux (`window_frame.rs`, 0015).
+//!   grants only the two window commands of Tauri's drag script, and `window_frame.rs` adds
+//!   the caption buttons' four on Windows and Linux (0015).
 //!   Every argument is checked in Rust first, and every host call runs as `LocalDesktop`.
 //!   The `e2e` build adds `perf_channel_bytes` (`e2e.rs`, granted by `capabilities/e2e.json`),
 //!   and the `marks` build `marks_memory` and `marks_finish` (`marks.rs`,
@@ -140,7 +140,7 @@ pub fn run() -> tauri::Result<()> {
             // The scoreboard commands' capabilities, in the e2e and marks builds only.
             #[cfg(feature = "e2e")]
             e2e::grant_scoreboard(app)?;
-            // The caption buttons' window commands, in the room build on Windows and Linux.
+            // The caption buttons' window commands, on Windows and Linux.
             window_frame::grant_caption_commands(app)?;
             start_host(app)?;
             open_main_window(app)?;
@@ -236,7 +236,7 @@ fn stop_host_then_exit<R: Runtime>(app: &AppHandle<R>, exit: Arc<Exit>, code: i3
 }
 
 /// Builds the `main` window in code, not in `tauri.conf.json`, so builds can add webview arguments
-/// here, and give it this build's frame (`window_frame.rs`). The https scheme is fixed before the
+/// here, and give it the page's frame (`window_frame.rs`). The https scheme is fixed before the
 /// first release: changing it moves web storage. The title is `productName` from
 /// `tauri.conf.json`.
 fn open_main_window(app: &App) -> tauri::Result<()> {
@@ -245,6 +245,9 @@ fn open_main_window(app: &App) -> tauri::Result<()> {
         .title(title)
         .use_https_scheme(true);
     let builder = window_frame::with_frame(builder);
+    // The e2e and marks builds open at the size the speed scoreboard's room needs (`e2e.rs`).
+    #[cfg(feature = "e2e")]
+    let builder = builder.inner_size(e2e::WINDOW_SIZE.0, e2e::WINDOW_SIZE.1);
     #[cfg(all(windows, feature = "e2e"))]
     let builder = e2e::with_debugging_port(builder);
     // The page's perf globals, before any page script.

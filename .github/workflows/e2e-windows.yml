@@ -192,9 +192,14 @@ jobs:
         if: env.RUN == 'true'
         run: cargo clippy -p clauseo-desktop --all-targets --features e2e --target "$TARGET" -- -D warnings
 
+      # VITE_CLAUSEO_HAND_CHECKS=1 builds in the room's hooks for checks by hand (__clauseoDisplay,
+      # __clauseoAxe: ui/app/src/room/start.ts), each in a chunk the page loads after its start; a
+      # release build carries neither.
       - name: Build the app with the e2e feature
         id: build
         if: env.RUN == 'true'
+        env:
+          VITE_CLAUSEO_HAND_CHECKS: "1"
         run: pnpm -C ui tauri build --no-bundle --features e2e --target "$TARGET"
 
       # Same profile and target, beside the app: E2E_FAKE_AGENT above. The specs run it as

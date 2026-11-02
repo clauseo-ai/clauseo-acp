@@ -1,15 +1,11 @@
-// The steps every spec takes: open a matter, send a prompt, wait for the turn to end. Built on
-// selectors.ts only. `E2E_WINDOW=room` says the e2e build is the room's
-// (`VITE_CLAUSEO_WINDOW=room`); unset, it is R12's internal window.
+// The steps every spec takes in the room: open a matter, send a prompt, wait for the turn to end.
+// Built on selectors.ts only.
 
 import { expect } from "@playwright/test";
 import type { StopReason, Window } from "./selectors.ts";
 
-/** Whether the e2e build under test is the room's. */
-export const isRoom = (): boolean => process.env["E2E_WINDOW"] === "room";
-
 /**
- * Room: unfolds the rail if it is folded behind Matters (below 1200 px; opening a matter folds it
+ * Unfolds the rail if it is folded behind Matters (below 1200 px; opening a matter folds it
  * again), so New matter, the find field and the rows can be pressed.
  */
 export async function showRail(w: Window): Promise<void> {
@@ -22,7 +18,7 @@ export async function showRail(w: Window): Promise<void> {
 }
 
 /**
- * Room: makes a matter through the rail's New matter form and waits until it is open. `existing`
+ * Makes a matter through the rail's New matter form and waits until it is open. `existing`
  * presses Change first (pick_folder returns E2E_MATTER_DIR, which becomes the matter); without
  * it, Create picks the parent (E2E_MATTER_DIR again) and the host makes `<parent>/<name>`. A
  * folder can be one matter only, and a matter may not sit inside another, so a test that makes
@@ -45,28 +41,16 @@ export async function createRoomMatter(
 }
 
 /**
- * Opens the matter folder E2E_MATTER_DIR (the e2e build's pick_folder returns it).
- *
- * Internal window: New matter under the prefilled name; the window then makes a thread, which
- * enables the composer (it shows but stays disabled while no thread is open).
- *
- * Room (`E2E_WINDOW=room`): New matter, the name, Change, Create the matter; the toolbar title
- * then names the matter, and the composer is enabled, as in the internal window: today's specs type
- * at once. The room has a composer once U3's work stands in the centre slot.
+ * Opens the matter folder E2E_MATTER_DIR (the e2e build's pick_folder returns it) as the matter
+ * `name`: New matter, the name, Change, Create the matter; the toolbar title then names the
+ * matter, and the composer is enabled, so a spec can type at once.
  */
 export async function openMatter(w: Window, name = "Matter"): Promise<void> {
-  if (isRoom()) {
-    await createRoomMatter(w, name, { existing: true });
-    await expect(w.composer).toBeEnabled();
-    return;
-  }
-  await w.matterName.fill(name);
-  await w.newMatter.click();
-  await expect(w.matter).toHaveText(name);
+  await createRoomMatter(w, name, { existing: true });
   await expect(w.composer).toBeEnabled();
 }
 
-/** Room: presses the rail row of the matter named `name` and waits until it is open. */
+/** Presses the rail row of the matter named `name` and waits until it is open. */
 export async function moveTo(w: Window, name: string): Promise<void> {
   await showRail(w);
   await w.matterRow(name).click();

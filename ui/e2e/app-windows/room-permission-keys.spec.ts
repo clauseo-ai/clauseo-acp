@@ -1,7 +1,6 @@
-// The permission prompt's keys on the room's e2e build (`VITE_CLAUSEO_WINDOW=room`, run with
-// `E2E_WINDOW=room`), under QU.9 (a): Enter, Ctrl with Enter and Escape answer the waiting prompt
-// from the composer only while its field is empty; with words in the field Enter keeps its field
-// job. fake_agent `permission-kinds` asks four times and takes only allow_once, allow_always,
+// The permission prompt's keys in the room, under QU.9 (a): Enter, Ctrl with Enter and Escape
+// answer the waiting prompt from the composer only while its field is empty; with words in the
+// field Enter keeps its field job. fake_agent `permission-kinds` asks four times and takes only allow_once, allow_always,
 // reject_once, reject_always in that order (any other answer ends it), so a wrong key fails the
 // next step. allow_always passes Rust's native confirm because the fixture sets
 // E2E_CONFIRM_ALWAYS=accept. fake_agent `permission-cancelled` leaves its request pending until
@@ -18,8 +17,6 @@ import {
   showRail,
 } from "./flow.ts";
 import { window, type Window } from "./selectors.ts";
-
-test.skip(process.env["E2E_WINDOW"] !== "room", "the room's e2e build only (E2E_WINDOW=room)");
 
 /** The Nth card is waiting, and the one before it, if any, is answered. */
 async function waiting(w: Window, index: number): Promise<Locator> {
