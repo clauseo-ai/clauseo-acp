@@ -1366,5 +1366,29 @@
     "at": "2026-11-02",
     "by": "Rohan",
     "note": "Rohan, via the orchestrator (U6-followup page)"
+  },
+  "C117-01": {
+    "en": "Commands",
+    "hi": "कमांड",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator (main page, #182)"
+  },
+  "C117-02": {
+    "en": "{n} commands",
+    "hi": "{n} कमांड",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator (main page, #182)"
+  },
+  "C117-03": {
+    "en": "1 command",
+    "hi": "1 कमांड",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator (main page, #182)"
   }
 }
