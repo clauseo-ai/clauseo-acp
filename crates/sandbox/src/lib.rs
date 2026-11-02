@@ -26,7 +26,7 @@
 //!   `home`, and `build`. Accessors carry the builder's names, plus [`Policy::tmpdir`] and
 //!   [`Policy::read_only_in_matter`] ([`PathRule`]s); [`Policy::claude_store`] gives a
 //!   [`ClaudeStore`] with its allowed names ([`CLAUDE_STORE_FILES`],
-//!   [`CLAUDE_STORE_LOCK_FOLDERS`]).
+//!   [`CLAUDE_STORE_LOCK_FOLDERS`], [`CLAUDE_STORE_BESIDE_LOCK_SUFFIX`]).
 //! - [`Policy::check_allowed_folder`]: R18 runs it before a card; `build` runs it on each
 //!   allowed folder. [`Policy::classify`]: the [`PathClass`] of a refused path, for a watcher.
 //! - [`scan_links`]`(matter) -> Vec<`[`LinkFinding`]`>` ([`LinkKind`]), and [`scan_matter`],
@@ -87,6 +87,6 @@ pub use detect::{Detection, NoSandbox, Tier, detect, probe};
 pub use error::Error;
 pub use links::{LinkFinding, LinkKind, MatterScan, scan_links, scan_matter};
 pub use policy::{
-    CLAUDE_STORE_FILES, CLAUDE_STORE_LOCK_FOLDERS, ClaudeStore, Loopback, PROTECTED_NAMES,
-    PathRule, Policy, PolicyBuilder,
+    CLAUDE_STORE_BESIDE_LOCK_SUFFIX, CLAUDE_STORE_FILES, CLAUDE_STORE_LOCK_FOLDERS, ClaudeStore,
+    Loopback, PROTECTED_NAMES, PathRule, Policy, PolicyBuilder,
 };

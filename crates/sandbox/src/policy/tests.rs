@@ -313,8 +313,17 @@ fn the_claude_store_allows_only_its_names() {
         store.lock_folders(),
         [
             dir.join(".storage-write.lock"),
-            dir.join(".oauth_refresh.lock")
+            dir.join(".oauth_refresh.lock"),
+            canon(&w.at("home")).join(".claude.lock"),
         ]
+    );
+    // The legacy lock beside the folder is allowed again too, and so is what Claude makes in it.
+    let beside = canon(&w.at("home")).join(".claude.lock/lock");
+    assert_eq!(policy.classify(&beside, Access::Write), PathClass::Outside);
+    let beside_other = canon(&w.at("home")).join(".claude.lockx");
+    assert_eq!(
+        policy.classify(&beside_other, Access::Write),
+        PathClass::Hidden
     );
     // The store's names are allowed again after the hidden home; a sibling is not.
     let other = dir.join("other.txt");

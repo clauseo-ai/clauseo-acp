@@ -29,9 +29,14 @@ pub const CLAUDE_STORE_FILES: [&str; 2] = [".credentials.json", ".storage-write"
 /// The lock folders Claude makes in that folder (proper-lockfile makes a lock as a folder):
 /// the write lock's (`.storage-write` plus `.lock`) and the OAuth refresh lock. Unverified:
 /// read from Claude Code 2.1.316's bundled code (`lockfilePath: <dir>/.oauth_refresh.lock`),
-/// not seen live; G7 row 17 records the names. That build also takes a legacy lock,
-/// `<dir>.lock` beside the folder, which the jail does not allow.
+/// not seen live; G7 row 17 records the names. See also [`CLAUDE_STORE_BESIDE_LOCK_SUFFIX`].
 pub const CLAUDE_STORE_LOCK_FOLDERS: [&str; 2] = [".storage-write.lock", ".oauth_refresh.lock"];
+
+/// The suffix of Claude's legacy OAuth refresh lock, a folder that sits beside the store
+/// folder, not in it: `<dir>.lock` (for `~/.claude`, `~/.claude.lock`). Without it a token
+/// refresh can fail mid-session. Unverified like the others: read from Claude Code 2.1.316's
+/// bundled code (`${realpath(dir)}.lock`), not seen live; G7 row 17 records it.
+pub const CLAUDE_STORE_BESIDE_LOCK_SUFFIX: &str = ".lock";
 
 /// The browser's loopback reach (agent-browser's and Chrome's CDP ports).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -93,12 +98,18 @@ impl ClaudeStore {
             .collect()
     }
 
-    /// [`CLAUDE_STORE_LOCK_FOLDERS`] in the folder: read-write subpath rules.
+    /// The lock folders, read-write subpath rules, each creatable: [`CLAUDE_STORE_LOCK_FOLDERS`]
+    /// in the folder, then the legacy lock beside it (`<dir>.lock`,
+    /// [`CLAUDE_STORE_BESIDE_LOCK_SUFFIX`]), which sits next to the store folder, not in it.
     pub fn lock_folders(&self) -> Vec<PathBuf> {
-        CLAUDE_STORE_LOCK_FOLDERS
+        let mut locks: Vec<PathBuf> = CLAUDE_STORE_LOCK_FOLDERS
             .iter()
             .map(|name| self.dir.join(name))
-            .collect()
+            .collect();
+        let mut beside = self.dir.clone().into_os_string();
+        beside.push(CLAUDE_STORE_BESIDE_LOCK_SUFFIX);
+        locks.push(PathBuf::from(beside));
+        locks
     }
 
     /// Whether `path` is one of the allowed names or under a lock folder.
