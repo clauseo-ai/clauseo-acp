@@ -33,8 +33,10 @@ showing those papers as gone.
 **Bounded.** At most `MAX_PAPERS` (2,000) entries, papers, skipped files and unread folders
 together, the first by path bytes (a folder counted where `<folder>/` sorts); `truncated` says
 the folder holds more. The walk takes each folder's entries in
-path-byte order (a folder `a` sorts as `a/`) and stops at the file past the cap, so it never
-reads a folder, or takes the stat of a file, that sorts after it.
+path-byte order (a folder `a` sorts as `a/`) and stops at the entry past the cap, so it never
+reads a folder that sorts after it, and takes the stat of no file that does but each folder's
+first file. That first stat tells whether the folder can be entered: a folder whose every stat
+is denied (mode `0o444`) is unread, as a checkpoint has it, even when the cut falls inside it.
 
 **Where it runs.** On the matter's worker thread, as checkpoints do; the actor only adds the
 ids. No push event: the window asks again after `checkpoint_recorded` or `outside_edits`.

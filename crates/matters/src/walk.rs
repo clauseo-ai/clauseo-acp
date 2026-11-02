@@ -148,12 +148,16 @@ pub(crate) fn walk(
 /// folder's entries are taken in path-byte order (a folder `a` as `a/`, so `a.txt` comes
 /// before what it holds and `a0` after), so the files come out sorted and the walk stops at
 /// the file past `limit`, never reading a folder that sorts after it nor taking the stat of
-/// a file that does (a folder is sorted by its entries' names and types, which reading it
-/// gives). A subfolder that does not read, or stops reading, counts as one entry in its place
-/// (as `<folder>/`), and goes in [`Listing::unread`]: so `files` and `unread` together hold
-/// at most `limit + 1` entries, the first in that order. A folder that lists but cannot be
-/// entered is unread as in [`walk`]: the stat of its first file is taken when it is read, so
-/// none of it is listed even when the cut falls inside it.
+/// a file that does, but for each folder's first file (a folder is sorted by its entries'
+/// names and types, which reading it gives). A subfolder that does not read, or stops
+/// reading, counts as one entry in its place (as `<folder>/`), and goes in
+/// [`Listing::unread`]: so `files` and `unread` together hold at most `limit + 1` entries,
+/// the first in that order. A folder whose every stat is denied
+/// (it lists but cannot be entered, mode `0o444`) is unread as in [`walk`]: the stat of its
+/// first file is taken when the folder is read (it can sort after the cut when the folder's
+/// subfolders sort first), so none of it is listed even when the cut falls inside it. A folder
+/// with one denied file among others that stat (a security module, a FUSE mount) is unread
+/// once the walk reaches that file; files of it listed before the cut stay listed.
 pub(crate) fn walk_first(
     root: &Path,
     guard: &NoDownload<'_>,
@@ -359,8 +363,9 @@ impl Walker<'_> {
             return Err(Error::io("stat", path, err));
         }
         tracing::warn!(path = %dir.display(), error = %err, "skipped a folder that does not read");
-        // A folder that stopped reading part way is already listed.
-        if self.unread.last().map(String::as_str) != Some(relative) {
+        // A folder that stopped reading part way, or whose subfolder was dropped with it, may
+        // be listed already.
+        if !self.unread.iter().any(|dir| dir == relative) {
             self.unread.push(relative.to_owned());
         }
         Ok(())
