@@ -197,7 +197,12 @@ fn main_and_settings_grant_the_drag_permissions_and_frame_the_caption_ones_on_wi
     let (_main, core) = core_permissions("capabilities/main.json", &["main"]);
     assert_eq!(core, set(DRAG_PERMISSIONS), "capabilities/main.json");
     let (_settings, core) = core_permissions("capabilities/settings.json", &["settings"]);
-    assert_eq!(core, set(DRAG_PERMISSIONS), "capabilities/settings.json");
+    let mut expected = set(DRAG_PERMISSIONS);
+    expected.insert(crate::settings_window::TITLE_PERMISSION.to_owned());
+    assert_eq!(
+        core, expected,
+        "capabilities/settings.json: the drag pair and set_title"
+    );
     let (frame, core) = core_permissions("capabilities/frame.json", &["main", "settings"]);
     assert_eq!(core, set(CAPTION_PERMISSIONS), "capabilities/frame.json");
     assert_eq!(frame["platforms"], json!(["windows", "linux"]));
@@ -301,6 +306,25 @@ fn caption_commands_answer_only_with_the_frame_capability(label: &str) {
         let answer = invoke(&window, command);
         assert!(denied(&answer), "{command}: {answer:?}");
     }
+}
+
+/// Through Tauri's own access check: the settings window may set its title (the page names it in
+/// the app's language), and `main` may not.
+#[test]
+fn only_the_settings_window_may_set_a_title() {
+    let app = mock_builder()
+        .build(crate::context::<MockRuntime>())
+        .unwrap();
+    let main = WebviewWindowBuilder::new(&app, "main", WebviewUrl::default())
+        .build()
+        .unwrap();
+    let settings = WebviewWindowBuilder::new(&app, "settings", WebviewUrl::default())
+        .build()
+        .unwrap();
+    let answer = invoke(&settings, "set_title");
+    assert!(!denied(&answer), "settings: {answer:?}");
+    let answer = invoke(&main, "set_title");
+    assert!(denied(&answer), "main: {answer:?}");
 }
 
 /// The source files under `dir`, tests left out, with the text of each.

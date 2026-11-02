@@ -23,7 +23,7 @@ same origin as `main`, so the same local storage), the room's frame (`window_fra
 and on Windows the native window over the maximise button for Snap Layouts, made on the main
 thread), the page's CSP on its scripts (`csp::on_scripts`), and in the e2e build `main`'s webview
 arguments and init script, since `WebView2` webviews that share a profile must be created alike.
-Its title is "Settings". window-state never restores it: it opens at its size, centred, each time.
+Its title is "Settings" until the page sets it in the app's language. window-state never restores it: it opens at its size, centred, each time.
 
 **Lifecycle.** Made on open, destroyed on close, never hidden. Opening it when it is open
 unminimises, shows and focuses it. When a window is destroyed, the bridge drops its stream
@@ -37,7 +37,9 @@ Destroying `main` destroys `settings`, so closing `main` still ends the app.
 
 **Capability.** `capabilities/settings.json` grants `settings` six commands: `dispatch`, `query`,
 `open_stream`, `subscribe_app`, `ack` (app events count toward the flow-control window) and
-`display_info`, and the drag script's two window commands; `capabilities/frame.json` names it
+`display_info`, the drag script's two window commands, and `core:window:allow-set-title`, so the
+page names its window in the app's language at open and on each language change (Windows shows
+the title in the taskbar and Alt+Tab; `main` is not granted it); `capabilities/frame.json` names it
 beside `main`, so on Windows and Linux it gets the caption buttons' four. Not granted: `subscribe`,
 `unsubscribe`, `answer_permission`, `pick_folder`, `open_external`, `open_file`, `reveal`,
 `open_settings`, and the e2e and marks commands. `tauri.conf.json` names `main` and `settings`.
@@ -65,6 +67,11 @@ get no menu: it would be a bar on the undecorated window.
   page's reach and ends the app as its close button does. No granted command sets a window's
   size, position or content, or reaches a plugin. A third window needs its own record (a test
   counts the builders).
+- `set_title` takes a `label` too, so the settings page could retitle `main`. Tauri's capabilities
+  have no scope for core window commands, and a label-free command of our own would be a new
+  command for a string, so it is not scoped. It is harmless: the title is text in the taskbar,
+  Alt+Tab and the Mac's Window menu; it carries nothing to the host, opens nothing, and the
+  page could already close `main` outright. `main`'s page cannot set any title.
 - XSS in the settings page reaches the settings and nothing else of the host: no matter, thread,
   folder, file, link or permission answer.
 - Main-only behaviour stays keyed on `MAIN_WINDOW`: the scoreboard's capabilities, the limits

@@ -10,6 +10,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { DisplayStore } from "../room/display-store.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import { tauriWindowControls, type WindowControls } from "../transport/window-controls.ts";
+import { setWindowTitle } from "../transport/window-title.ts";
 import { useWindowFrame } from "../window/use-window-frame.ts";
 import { contextOf, sectionOf, shownSections, type SectionId } from "./sections.tsx";
 import { useSettings } from "./use-settings.ts";
@@ -52,10 +53,12 @@ export function SettingsApp({
     [display.platform, controls],
   );
   const caption = useWindowFrame(wired);
-  // the page's title names the window in its language, for the window's title and assistive technology
+  // the window names itself in its language: the page's title for assistive technology, and the native title Windows
+  // shows in the taskbar and Alt-Tab
   const title = w.ui("Settings");
   useEffect(() => {
     document.title = title;
+    setWindowTitle(title);
   }, [title]);
   const onSection = (id: string) => {
     const next = shown.find((s) => s.id === id);

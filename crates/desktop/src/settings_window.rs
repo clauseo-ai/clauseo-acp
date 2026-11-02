@@ -14,6 +14,8 @@
 //!   menu's "Settings…" item on Cmd+, ([`app_menu`]). No menu on Windows or Linux.
 //! - Each window's destruction drops its bridge stream ([`on_destroyed`]); destroying `main`
 //!   destroys `settings` too, so closing `main` still ends the app.
+//! - The page retitles its window in the app's language (`set_title`, granted to `settings`
+//!   alone, [`TITLE_PERMISSION`]); [`TITLE`] is the English one it opens with.
 //! - Nothing here is main-like: main-only behaviour stays keyed on `MAIN_WINDOW`.
 
 use tauri::{Manager, Runtime, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
@@ -24,6 +26,12 @@ use crate::{MAIN_WINDOW, csp, window_frame, window_size};
 /// The settings window's label. `capabilities/settings.json` grants by it
 /// (`"windows": ["settings"]`), and `capabilities/frame.json` names it beside `main`.
 pub(crate) const SETTINGS_WINDOW: &str = "settings";
+
+/// The one core permission `capabilities/settings.json` grants beside the drag pair: the page
+/// sets its window's title in the app's language (Windows shows it in the taskbar and Alt+Tab).
+/// `main` does not have it. A test holds the file to it.
+#[cfg(test)]
+pub(crate) const TITLE_PERMISSION: &str = "core:window:allow-set-title";
 
 /// The page it shows, an entry of `ui/app`'s build.
 const PAGE: &str = "settings.html";
