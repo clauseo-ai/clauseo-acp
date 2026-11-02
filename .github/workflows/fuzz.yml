@@ -9,17 +9,20 @@
 # - First checks nightly.sh's reporting with stand-in fuzzers (fuzz/test-nightly.sh), then builds
 #   every target (a harness that no longer compiles fails the job before any fuzzing), then
 #   fuzzes each for FUZZ_SECONDS, as many at once as the runner has cores (fuzz/nightly.sh).
-# - The corpus lives in the Actions cache. Each night restores the newest entry, cuts the corpus to
-#   the inputs that add coverage, and saves it as a new entry; older entries age out. The
-#   committed seeds in fuzz/seeds/ start it when there is none. The job summary says which.
+# - The corpus is an artifact, fuzz-corpus, kept 14 days. Each night downloads it from the newest
+#   fuzz run on main that has one, cuts it to the inputs that add coverage, and uploads it again.
+#   Only main's artifacts are ever used: a run dispatched from another branch uploads one too,
+#   but nothing reads it. The committed seeds in fuzz/seeds/ start the corpus when there is none,
+#   and the job summary says which. (Not the Actions cache: CI's caches fill it past its 10 GB
+#   limit, and a once-a-night entry was evicted within minutes.)
 # - A panic, timeout or out-of-memory stop uploads its input, log and minimised input (kept 14
 #   days), fails the job, and the report job opens one issue or comments on the open one. This
 #   repo is public, so all of that is public. Withheld: sanitizer reports, the panics of Rust's
 #   UB checks, and crashes with no panic. Their log and input stay on the runner, the issue
-#   names only the target, and that night's corpus is not saved.
+#   names only the target, and that night's corpus is not uploaded.
 #   Moving crash reports private before the private beta: clauseo-ai/clauseo-acp-private#180.
-# - The fuzz job can read the repo and nothing else. Only the report job can write, and only to
-#   issues. It checks out nothing, runs no code from the repo, and posts the fuzz job's text only
+# - The fuzz job can read the repo and its Actions runs (to find and download the corpus), and
+#   nothing else. Only the report job can write, and only to issues. It checks out nothing, runs no code from the repo, and posts the fuzz job's text only
 #   in the shapes nightly.sh writes. No secrets are used.
 name: fuzz
 
@@ -46,6 +49,7 @@ jobs:
     timeout-minutes: 75
     permissions:
       contents: read
+      actions: read # to find the newest fuzz run on main and download its corpus artifact
     outputs:
       found: ${{ steps.run.outputs.found }}
       title: ${{ steps.run.outputs.title }}
@@ -81,20 +85,36 @@ jobs:
         working-directory: fuzz
         run: cargo fuzz build --fuzz-dir . -O --debug-assertions
 
-      - name: Restore the corpus
-        id: restore
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: fuzz/corpus
-          key: fuzz-corpus-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: fuzz-corpus-
+      # Only runs of this workflow on main are looked at (schedule, or dispatched with main as the
+      # ref), newest first; the first with an unexpired fuzz-corpus artifact is used. This run is
+      # still in progress, so it is not among them.
+      - name: Download the newest corpus from main
+        id: corpus
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          from=""
+          runs=$(gh run list --workflow fuzz.yml --branch main --status completed --limit 30 \
+            --json databaseId,headBranch,event \
+            --jq '.[] | select(.headBranch == "main" and (.event == "schedule" or .event == "workflow_dispatch")) | .databaseId')
+          for run in $runs; do
+            if [[ -n $(gh api "repos/$GH_REPO/actions/runs/$run/artifacts" \
+              --jq '.artifacts[] | select(.name == "fuzz-corpus" and (.expired | not)) | .id') ]]; then
+              gh run download "$run" --name fuzz-corpus --dir fuzz/corpus
+              from=$run
+              break
+            fi
+          done
+          echo "from=$from" >>"$GITHUB_OUTPUT"
 
       - name: Fuzz
         id: run
         working-directory: fuzz
         env:
           FUZZ_SECONDS: ${{ inputs.seconds || '480' }}
-          RESTORED: ${{ steps.restore.outputs.cache-matched-key }}
+          CORPUS_RUN: ${{ steps.corpus.outputs.from }}
         run: |
           set -euo pipefail
           if [[ ! $FUZZ_SECONDS =~ ^[0-9]{1,4}$ ]] || ((10#$FUZZ_SECONDS < 1 || 10#$FUZZ_SECONDS > 900)); then
@@ -103,7 +123,7 @@ jobs:
           fi
           ./nightly.sh "$((10#$FUZZ_SECONDS))"
           {
-            echo "Corpus: ${RESTORED:-none in the cache, so the run started from fuzz/seeds/}"
+            echo "Corpus: ${CORPUS_RUN:+the artifact of run }${CORPUS_RUN:-none on main, so the run started from fuzz/seeds/}"
             echo
             cat out/summary.md
           } >>"$GITHUB_STEP_SUMMARY"
@@ -124,14 +144,17 @@ jobs:
           fi
 
       # The corpus never holds a crashing input (libFuzzer writes those to fuzz/artifacts/), so it
-      # is saved on finding nights too, but not after a withheld finding: fork pull requests can
-      # restore this cache, and the corpus holds the inputs that crash was found from.
-      - name: Save the corpus
+      # is uploaded on finding nights too, but not after a withheld finding: this repo's artifacts
+      # are public, and the corpus holds the inputs that crash was found from. overwrite: a re-run
+      # of this run replaces the first attempt's corpus.
+      - name: Upload the corpus
         if: always() && steps.run.outcome == 'success' && steps.run.outputs.withheld != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          path: fuzz/corpus
-          key: fuzz-corpus-${{ github.run_id }}-${{ github.run_attempt }}
+          name: fuzz-corpus
+          path: fuzz/corpus/
+          retention-days: 14
+          overwrite: true
 
       - name: Upload the findings
         if: always() && hashFiles('fuzz/out/upload/**') != ''

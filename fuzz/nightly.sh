@@ -5,8 +5,8 @@
 #
 # - Fuzzes each target named after SECONDS (all of ALL when none is) for SECONDS, as many at once
 #   as there are cores, or FUZZ_JOBS when it is set. Each target reads seeds/<target>
-#   (committed, never written) and corpus/<target> (grown in place; in CI the Actions cache
-#   keeps it from night to night).
+#   (committed, never written) and corpus/<target> (grown in place; in CI an artifact keeps
+#   it from night to night).
 # - Then cuts each corpus down to the inputs that add coverage (libFuzzer -merge=1).
 # - A finding is a panic, a timeout or an out-of-memory stop. It fails the run, but only after
 #   every target has had its time. A panic's input is minimised for up to 5 minutes.
