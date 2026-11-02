@@ -51,7 +51,6 @@ function room(drafts: Drafts) {
           failed={null}
           onAsk={onAsk}
           onStop={() => {}}
-          onRetry={() => {}}
         />,
       ),
     );

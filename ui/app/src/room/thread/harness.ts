@@ -7,7 +7,7 @@ import { StoreContext } from "../../store/hooks.ts";
 import { createViewStore, type ViewStore } from "../../store/store.ts";
 import { manualBatch } from "../../testing/dom.ts";
 import { batch, event, MATTER, THREAD, TURN } from "../../testing/stream-script.ts";
-import { FakeTransport } from "../../transport/fake-transport.ts";
+import { FakeTransport, type FakeHost } from "../../transport/fake-transport.ts";
 import type {
   CommandOutcome,
   HostCommand,
@@ -54,6 +54,8 @@ export type Script = {
   waitForRenderer?: boolean;
   /** Hears every commit of the room. */
   onRender?: ProfilerOnRenderCallback;
+  /** The host rows it fakes beyond today's host (room/host-next.ts), such as H10's restart. */
+  next?: FakeHost["next"];
 };
 
 export const defaultOutcome = (command: HostCommand): CommandOutcome => {
@@ -107,6 +109,7 @@ export async function mountRoom(script: Script = {}): Promise<Harness> {
       throw new Error(`not scripted: ${JSON.stringify(query)}`);
     },
     dispatch: (envelope) => (script.dispatch ?? defaultOutcome)(envelope.command),
+    ...(script.next === undefined ? {} : { next: script.next }),
   });
   connectRoom(transport, script.display ?? {});
   const manual = manualBatch();

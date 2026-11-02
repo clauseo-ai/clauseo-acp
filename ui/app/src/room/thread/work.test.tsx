@@ -2,6 +2,7 @@
 // The room's thread over FakeTransport, the composer's side: reopening a thread, the first Ask making exactly one,
 // Enter and the input method's Enter, busy and Stop, a refused send, a lost stream with Try again, no matter.
 import { act } from "react";
+import { streamFailedWords } from "@clauseo/components/lib/words-breaks.ts";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { frame } from "@clauseo/components/lib/words-frame.ts";
 import { lim } from "@clauseo/components/lib/words-limits.ts";
@@ -208,10 +209,13 @@ test("a lost stream shows its code's words with Try again, before a refusal, and
   await h.type("Again");
   await h.key({ key: "Enter", keyCode: 13 });
   expect(h.one("error")?.dataset["code"]).toBe("store.io");
-  await act(async () => h!.transport.failStream(STREAM, refusal("agent.exited")));
-  const line = h.one("error");
+  // a retryable code, since Try again shows only for one (U10)
+  await act(async () =>
+    h!.transport.failStream(STREAM, { ...refusal("agent.exited"), retryable: true }),
+  );
+  const line = h.one("stream-failed");
   expect(line?.dataset["code"]).toBe("agent.exited");
-  expect(line?.textContent).toContain(errorWords("en", "agent.exited"));
+  expect(line?.textContent).toContain(streamFailedWords("en", "agent.exited"));
   const again = h.one("retry");
   expect(again?.textContent).toBe(lim("en", "Try again"));
   const retry = vi.spyOn(h.store, "retry");
@@ -271,7 +275,7 @@ test("a lost stream ends the sent turn's busy", async () => {
   expect(h.one("cancel")).not.toBeNull();
   await act(async () => h!.transport.failStream(STREAM, refusal("agent.exited")));
   expect(h.one("cancel")).toBeNull();
-  expect(h.one("error")?.dataset["code"]).toBe("agent.exited");
+  expect(h.one("stream-failed")?.dataset["code"]).toBe("agent.exited");
 });
 
 test("Stop pressed again while its cancel is on its way sends one cancel", async () => {
