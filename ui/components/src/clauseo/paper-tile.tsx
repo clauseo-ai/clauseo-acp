@@ -168,7 +168,14 @@ export function PaperTile({
 
 /** The face in the tooltip, where the tile has one. */
 function wrapTip(tip: string | undefined, face: ReactElement): ReactElement {
-  return tip === undefined ? face : <Tooltip content={tip}>{face}</Tooltip>;
+  return tip === undefined ? (
+    face
+  ) : (
+    // the wall scrolls and clips: a top-row tile's tooltip, placed in it, would be cut off at its top edge
+    <Tooltip content={tip} fixed>
+      {face}
+    </Tooltip>
+  );
 }
 
 /* ---------- the wall of papers ---------- */

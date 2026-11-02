@@ -7,6 +7,7 @@ import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { vt } from "@clauseo/components/lib/words-versions.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
+import { useEffect, useRef } from "react";
 import { fileName } from "../versions/timeline.ts";
 
 export function WordLock({
@@ -14,6 +15,7 @@ export function WordLock({
   code,
   pending,
   onRetry,
+  focusOnMount = false,
   testIds,
 }: {
   /** The matter-relative path of the Word document held, or null when the room can't say which file it is. */
@@ -23,11 +25,23 @@ export function WordLock({
   /** Try again waits, faint but focusable, while its undo is on its way. */
   pending: boolean;
   onRetry: () => void;
+  /** As the lines come, Try again takes focus that was in the note or had fallen to the page (the press that brought
+   * them took its button away); focus the lawyer moved elsewhere stays there. */
+  focusOnMount?: boolean;
   testIds?: { block?: string; retry?: string };
 }) {
   const { lang } = useDisplay();
+  const block = useRef<HTMLDivElement>(null);
+  const retry = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!focusOnMount) return;
+    const at = document.activeElement;
+    const note = block.current?.parentElement ?? null;
+    if (at === null || at === document.body || note?.contains(at) === true) retry.current?.focus();
+  }, [focusOnMount]);
   return (
     <div
+      ref={block}
       role="alert"
       data-code={code}
       data-testid={testIds?.block}
@@ -56,6 +70,7 @@ export function WordLock({
         className="-ml-s3"
         disabled={pending}
         focusableWhenDisabled
+        ref={retry}
         data-testid={testIds?.retry}
         onClick={onRetry}
       >

@@ -10,7 +10,7 @@
 // With ?versions=panel, band, undo, restore, wait, newest or word, the room has Versions open over the matter's history
 // (probe-states.tsx): the timeline with its kinds of row, a past version selected, its undo or restore dialog, the
 // conversation running, the newest turn picked, or its undo refused because Word holds the file.
-// With ?word=lock, general, open or tile (word/probe-states.ts), the open conversation's last turn changed papers and
+// With ?word=lock, general, open, tile or tile-top (word/probe-states.ts), the open conversation's last turn changed papers and
 // the wall lists two Word documents: the change note's Undo refused with the lock (Word's lines for one Word document,
 // or the general line for two files), the note's "Open in Word", or the wall's Word tile, for its tooltip.
 // Not shipped.
@@ -60,12 +60,14 @@ const page = new URLSearchParams(location.search);
 const wordPage = wordPageOf(page.get("word"));
 const wording = wordPage === null ? null : wordHost(wordPage);
 
-const papers: PaperSummary[] = (wording === null ? FILES : wordFiles(FILES)).map((name, i) => ({
-  file: uuid(i + 1, 8),
-  path: `papers/${name}`,
-  size: 40_000 + i * 1_000,
-  modified: 1_730_380_000_000 + i * 60_000,
-}));
+const papers: PaperSummary[] = (wordPage === null ? FILES : wordFiles(FILES, wordPage)).map(
+  (name, i) => ({
+    file: uuid(i + 1, 8),
+    path: `papers/${name}`,
+    size: 40_000 + i * 1_000,
+    modified: 1_730_380_000_000 + i * 60_000,
+  }),
+);
 
 /** ?thread=permission: the turn stops short of its step, waiting on the lawyer, at a pending prompt to save a new
  * version of a paper, above one answered once whose call completed. */

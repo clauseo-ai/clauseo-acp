@@ -384,7 +384,10 @@ let wordMeasured = "(function () { var errs = " + measured + ";" +
   " if (e.scrollWidth > e.clientWidth + 1 || e.scrollHeight > e.clientHeight + 1) errs.push('layout: cut off, ' + e.textContent.slice(0, 40) + ' ' + e.scrollWidth + 'x' + e.scrollHeight + ' in ' + e.clientWidth + 'x' + e.clientHeight); });" +
   " var tip = window.__wordTip; if (tip) { var r = tip.getBoundingClientRect();" +
   " if (r.left < 0 || r.top < 0 || r.right > innerWidth || r.bottom > innerHeight) errs.push('layout: the tooltip leaves the window, ' + [r.left, r.top, r.right, r.bottom].map(Math.round).join(','));" +
-  " if (tip.scrollWidth > tip.clientWidth + 1) errs.push('layout: the tooltip scrolls sideways'); }" +
+  " if (tip.scrollWidth > tip.clientWidth + 1) errs.push('layout: the tooltip scrolls sideways');" +
+  // a tooltip the wall's scroll clips: its corners are not on top where it says it is
+  " [[r.left + 2, r.top + 2], [r.right - 2, r.top + 2], [r.left + 2, r.bottom - 2], [r.right - 2, r.bottom - 2]].forEach(function (p) {" +
+  " var at = document.elementFromPoint(p[0], p[1]); if (at === null || !tip.contains(at)) errs.push('layout: the tooltip is cut off or covered at ' + p.map(Math.round).join(',')); }); }" +
   dialogDrawn + " return errs; })()"
 /** The room with its five tiles and its look, and the change note in the thread. */
 let wordRoom = { (theme: String, lang: String) in
@@ -397,6 +400,13 @@ let wordRoom = { (theme: String, lang: String) in
 /** The note in view, for the PNG, once its key shows. */
 let noteInView = " && (window.__noteShown || (window.__noteShown = true, document.querySelector('[data-testid=\"files-changed\"]').scrollIntoView({ block: 'center' }), true))"
 let pressNoteUndo = press + "('note-undo', '[data-testid=\"files-changed\"] [data-testid=\"undo\"]')"
+/** The petition's tile, focused, and its tooltip open. */
+let focusPetitionTile = "(function () { var face = Array.prototype.find.call(document.querySelectorAll('aside.room-pane [data-testid=\"open-in-word\"]')," +
+    " function (f) { return f.textContent.indexOf('Petition') !== -1; }); if (!face) return false;" +
+    " if (document.activeElement !== face) face.focus();" +
+    " var words = document.getElementById(face.getAttribute('aria-describedby') || '')?.textContent ?? '';" +
+    " var tip = Array.prototype.find.call(document.querySelectorAll('[data-open]'), function (e) { return e !== face && !e.contains(face) && e.textContent === words; });" +
+    " if (!tip || words === '') return false; window.__wordTip = tip; return true; })()"
 let wordKey: [String: String] = [
   "lock": pressNoteUndo + " && (function (b) { return b !== null && b.querySelectorAll('p').length === 2" +
     " && b.querySelector('[data-testid=\"word-lock-retry\"]') !== null" +
@@ -408,14 +418,11 @@ let wordKey: [String: String] = [
   "open": "document.querySelector('[data-testid=\"files-changed\"] [data-testid=\"open-in-word\"]') !== null" +
     " && document.querySelector('[data-testid=\"files-changed\"] [data-testid=\"undo\"]') !== null" + noteInView,
   // the petition's tile, focused: its tooltip holds the words its sr-only line gives assistive technology
-  "tile": "(function () { var face = Array.prototype.find.call(document.querySelectorAll('aside.room-pane [data-testid=\"open-in-word\"]')," +
-    " function (f) { return f.textContent.indexOf('Petition') !== -1; }); if (!face) return false;" +
-    " if (document.activeElement !== face) face.focus();" +
-    " var words = document.getElementById(face.getAttribute('aria-describedby') || '')?.textContent ?? '';" +
-    " var tip = Array.prototype.find.call(document.querySelectorAll('[data-open]'), function (e) { return e !== face && !e.contains(face) && e.textContent === words; });" +
-    " if (!tip || words === '') return false; window.__wordTip = tip; return true; })()",
+  "tile": focusPetitionTile,
+  // the same, with the petition first on the wall: its top row, where the tooltip has the least room above it
+  "tile-top": focusPetitionTile,
 ]
-let wordPages = ["lock", "general", "open", "tile"]
+let wordPages = ["lock", "general", "open", "tile", "tile-top"]
 let versionsWordKey = pressVersions + " && " + pressNewest + " && " + pressUndo + " && " +
   press + "('confirm', '[role=\"dialog\"] [data-testid=\"dialog-confirm\"]')" +
   " && document.querySelector('[role=\"dialog\"] [data-testid=\"dialog-try-again\"]') !== null" +

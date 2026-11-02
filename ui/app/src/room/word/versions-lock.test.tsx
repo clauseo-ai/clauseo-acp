@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 // Versions' dialog meeting a lock, over FakeTransport: Word's stage only when the undo writes one Word document, or the
 // restore's preview names one (as locked, or as the only file it writes); any other lock keeps the confirm stage with
-// the error map's line and Try again.
+// the error map's line and Try again. Behind the Word stage the band says nothing of the lock; behind the confirm stage
+// it gives the general line.
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { THREAD, TURN } from "../../testing/stream-script.ts";
@@ -123,3 +124,19 @@ for (const [name, preview, word] of [
     expect(h.one("dialog-try-again")).not.toBeNull();
   });
 }
+
+const band = () =>
+  [...document.body.querySelectorAll(".ver-room-band")].map((n) => n.textContent).join(" ");
+
+test("behind the dialog's Word stage the band doesn't give the general lock line", async () => {
+  h = await undoRefused("drafts/notes.docx");
+  expect(dialog()?.textContent).toContain("in Word to undo the change.");
+  expect(band()).not.toBe("");
+  expect(band()).not.toContain(errorWords("en", "matter.file_locked"));
+});
+
+test("behind the confirm stage's failure the band still gives the general lock line", async () => {
+  h = await undoRefused("brief.txt");
+  expect(alert()).toBe(errorWords("en", "matter.file_locked"));
+  expect(band()).toContain(errorWords("en", "matter.file_locked"));
+});

@@ -1,20 +1,22 @@
 // @vitest-environment happy-dom
 // "Open in Word" over FakeTransport: a .doc or .docx the wall lists opens through open_file with its file ref, from its
 // tile (a press, Enter or Space, with the hint on hover and keyboard focus and the label for screen readers) and from
-// a change note naming it while the changes stand; never for a .pdf, a .txt or a paper the wall doesn't list. A
-// declined or failed open is quiet.
+// a change note naming it while the changes stand; never for a .pdf, a .txt or a paper the wall doesn't list. A second
+// press while an open is on its way sends nothing. A declined open is quiet; a failed one says why under the note, and
+// only in the console for a tile.
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import axe from "axe-core";
 import { act } from "react";
 import { settled } from "@clauseo/components/lib/late.ts";
+import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { rdt } from "@clauseo/components/lib/words-reader.ts";
 import { afterEach, beforeAll, expect, test, vi } from "vitest";
 import { reset, step, uuid } from "../../testing/stream-script.ts";
 import type { FileChange, PaperSummary, ViewEntry } from "../../transport/protocol.ts";
 import { fakeNext } from "../fake-next.ts";
-import { mountRoom, type Harness, type Script } from "../thread/harness.ts";
+import { defaultOutcome, mountRoom, type Harness, type Script } from "../thread/harness.ts";
 
 let h: Harness | null = null;
 beforeAll(() => {
@@ -129,6 +131,11 @@ for (const language of ["en", "hi"] as const) {
       ),
     ).toEqual([]);
     expect(popup()?.closest("aside.room-pane")).not.toBeNull();
+    // the first tile, on the wall's top row: placed against the window, so the wall's scroll doesn't cut it off
+    expect(tiles()[0]?.contains(face ?? null)).toBe(true);
+    // its positioner, the first [data-side] holding the words
+    expect(popup()?.getAttribute("role")).toBe("presentation");
+    expect(popup()?.style.position).toBe("fixed");
   });
 }
 
@@ -201,4 +208,86 @@ test("without H8's list nothing offers Open in Word", async () => {
   await act(settled);
   expect(h.one("files-changed")).not.toBeNull();
   expect(h.all("open-in-word")).toEqual([]);
+});
+
+test("two quick presses on a Word tile send one open_file; once it answers, the next press opens again", async () => {
+  h = await withPapers();
+  const answers: (() => void)[] = [];
+  h.transport.host.openFile = () => new Promise<void>((resolve) => void answers.push(resolve));
+  await h.click(faceOf("Reply.docx"));
+  await h.click(faceOf("Reply.docx"));
+  expect(opened()).toEqual([uuid(1, 8)]);
+  // another file isn't held back by it
+  await h.click(faceOf("Old notice.DOC"));
+  expect(opened()).toEqual([uuid(1, 8), uuid(2, 8)]);
+  await act(async () => answers.forEach((answer) => answer()));
+  await h.settle();
+  h.transport.host.openFile = () => {};
+  await h.click(faceOf("Reply.docx"));
+  expect(opened()).toEqual([uuid(1, 8), uuid(2, 8), uuid(1, 8)]);
+});
+
+test("two quick presses on the note's Open in Word send one open_file", async () => {
+  h = await withPapers();
+  h.transport.host.openFile = () => new Promise<void>(() => {});
+  h.deliver([reset([changed(["drafts/Reply.docx"])])]);
+  const open = () =>
+    h!.one("files-changed")?.querySelector<HTMLElement>('[data-testid="open-in-word"]');
+  await h.click(open());
+  await h.click(open());
+  expect(opened()).toEqual([uuid(1, 8)]);
+});
+
+const noteError = () =>
+  h!.one("files-changed")?.querySelector<HTMLElement>('[data-testid="error"]') ?? null;
+
+for (const code of ["internal", "command.conflict", "matter.folder_missing", "command.invalid"]) {
+  test(`a failed open from the note says why in its error line, by its code: ${code}`, async () => {
+    h = await withPapers();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    h.transport.host.openFile = () => {
+      throw { code, message: "for logs", retryable: false };
+    };
+    h.deliver([reset([changed(["drafts/Reply.docx"])])]);
+    await h.click(h.one("files-changed")?.querySelector('[data-testid="open-in-word"]'));
+    await h.settle();
+    expect(noteError()?.dataset["code"]).toBe(code);
+    expect(noteError()?.textContent).toBe(errorWords("en", code));
+    // a press that opens clears it
+    h.transport.host.openFile = () => {};
+    await h.click(h.one("files-changed")?.querySelector('[data-testid="open-in-word"]'));
+    await h.settle();
+    expect(noteError()).toBeNull();
+  });
+}
+
+test("a declined open from the note says nothing", async () => {
+  h = await withPapers();
+  h.transport.host.openFile = () => {
+    throw { code: "transport.unauthorized", message: "declined", retryable: false };
+  };
+  h.deliver([reset([changed(["drafts/Reply.docx"])])]);
+  await h.click(h.one("files-changed")?.querySelector('[data-testid="open-in-word"]'));
+  await h.settle();
+  expect(noteError()).toBeNull();
+  expect(opened()).toHaveLength(1);
+});
+
+test("Open in Word stays on the note while the lock's lines stand", async () => {
+  h = await withPapers({
+    dispatch: (command) => {
+      if (command.undo_step !== undefined)
+        throw { code: "matter.file_locked", message: "held", retryable: true };
+      return defaultOutcome(command);
+    },
+  });
+  h.deliver([reset([changed(["drafts/Reply.docx"])])]);
+  await h.click(h.one("undo"));
+  await act(settled);
+  await h.settle();
+  expect(h.one("word-lock")).not.toBeNull();
+  const open = h.one("files-changed")?.querySelector<HTMLElement>('[data-testid="open-in-word"]');
+  expect(open?.textContent).toBe("Open in Word");
+  await h.click(open);
+  expect(opened()).toEqual([uuid(1, 8)]);
 });

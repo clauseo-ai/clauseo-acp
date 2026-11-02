@@ -1,6 +1,7 @@
 // The change note. After Clauseo changes papers, the thread says so in one line, with the papers named and two ways
 // on: Compare, and Undo, each when the caller gives it, and a way to open a paper where the caller gives one ("Open in
-// Word"). A refused undo says why in a quiet line beside Undo. When a
+// Word"). A refused undo, or a failed open, says why in a quiet line beside Undo. The note itself takes focus (not by
+// Tab) when the control under it that held focus goes. When a
 // paper was edited after Clauseo's change, Undo asks first, in the alert dialog, with Keep current as the safe choice.
 import { Fragment, lazy, Suspense, useState } from "react";
 import { late } from "../lib/late.ts";
@@ -73,7 +74,7 @@ export function ChangeNote({
 
   if (state === "undone") {
     return (
-      <p className="change-note change-undone">
+      <p className="change-note change-undone" tabIndex={-1}>
         <IconUndo size={16} className="change-icon" />
         <span>
           <Say>{counts.undone}</Say>
@@ -82,7 +83,8 @@ export function ChangeNote({
     );
   }
   return (
-    <div className="change-note" role="group" aria-label={counts.changed}>
+    // tabIndex -1: where focus goes back to when the control the lawyer pressed under the note goes away
+    <div className="change-note" role="group" aria-label={counts.changed} tabIndex={-1}>
       <IconPaperBookPage size={16} className="change-icon" />
       <p className="change-text">
         <span className="change-what">

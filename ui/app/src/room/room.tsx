@@ -425,7 +425,7 @@ function RoomFrame({
                       {...(opener === null
                         ? {}
                         : {
-                            onTurn: opener.onOpen,
+                            onTurn: () => void opener.onOpen(),
                             tip: opener.label,
                             label: opener.label,
                             testIds: { face: "open-in-word" },
