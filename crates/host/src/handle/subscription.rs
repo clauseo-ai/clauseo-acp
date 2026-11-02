@@ -115,9 +115,11 @@ pub struct EventSubscription(Feed<HostEvent>);
 
 /// An app subscription: the app-wide `HostEvent`s that belong to no stream, as
 /// [`EncodedEvent`]s, each serialised once and shared by every app subscriber. Today that is
-/// `SettingsChanged`, after every change of the settings; the matter list, summaries of threads
-/// no window has open, notices and `AccountLimitsChanged` are to come here too. No stream's
-/// patches or envelopes ever come here, and no app event goes to a stream's subscribers.
+/// `SettingsChanged`, after every change of the settings; the matter list, thread summaries,
+/// notices and `AccountLimitsChanged` are to come here too. A subscription carries no window
+/// identity, so every app subscriber gets every app event: a window that wants only the
+/// summaries of threads it has not opened drops the others itself. No stream's patches or
+/// envelopes ever come here, and no app event goes to a stream's subscribers.
 ///
 /// It starts with nothing: subscribe first, then read the current state (`GetSettings`); the
 /// host answers calls in order, so no change falls between the two. A subscriber whose channel

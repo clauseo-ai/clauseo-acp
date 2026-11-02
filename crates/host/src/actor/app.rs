@@ -13,8 +13,16 @@
 //! Each event is serialised once ([`publish`]) and the same `EncodedEvent` goes to every
 //! subscriber. What publishes here: `SettingsChanged` after each successful settings write
 //! (`settings.rs`). Still to come, each through [`publish`] and each adding its part of the
-//! current state to [`catch_up`]: the matter list and summaries of threads no window has open
-//! (H4), notices, and `limits`' `AccountLimitsChanged` (R16).
+//! current state to [`catch_up`]: the matter list and thread summaries (H4), notices, and
+//! `limits`' `AccountLimitsChanged` (R16). H4's shape sends summaries of the threads *a window*
+//! is not subscribed to, but `subscribe_app` carries no window identity, so the host sends every
+//! changed summary to every app subscriber and each window drops those of threads it has open.
+//!
+//! For H4: today's catch-up is one whole `SettingsChanged`, which replaces what a window holds.
+//! Once `matters_changed` sends partial rows (only the matters that changed), a lagged
+//! subscriber has missed rows it cannot rebuild from the next delta, so its catch-up needs an
+//! event that replaces the whole list (a reset or caught-up variant) before any partial row is
+//! sent on this stream.
 
 use clauseo_protocol::{HostEvent, Principal};
 
@@ -106,7 +114,8 @@ pub(super) fn on_unsubscribed(actor: &mut Actor, id: SubId) {
     actor.app_subs.retain(|sub| sub.id != id);
 }
 
-/// The current state, as the events that bring a lagged subscriber up to date.
+/// The current state, as the events that bring a lagged subscriber up to date. Each event here
+/// must replace what a window holds whole; see the module doc before adding a partial one.
 fn catch_up(actor: &Actor) -> Vec<EncodedEvent> {
     let settings = HostEvent::SettingsChanged(super::settings::view(&actor.effective));
     match encode(&settings) {
