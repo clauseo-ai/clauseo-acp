@@ -9,7 +9,7 @@ use clauseo_protocol::{
 };
 
 use crate::model::{AgentState, Row, STALE_AFTER_MS};
-use crate::policy::kind_rules;
+use crate::policy::{kind_rules, next_read_at};
 
 /// Used from this percentage, a window's tone is `Near`.
 const NEAR_PERCENT: f64 = 75.0;
@@ -44,6 +44,11 @@ pub(crate) fn agent_view(state: &AgentState, now: Timestamp) -> AgentLimitsView 
             }
             LimitSource::LiveOnly { updated_at } => Some(updated_at),
             _ => None,
+        },
+        next_read_at: next_read_at(state),
+        provider: match state.billing {
+            Billing::Plan => None,
+            Billing::PayAsYouGo { via } => Some(via),
         },
     }
 }

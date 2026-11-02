@@ -15,6 +15,7 @@ use crate::readers::ReadOutcome;
 use crate::view::agent_view;
 use crate::view::at_limit_words;
 
+pub(crate) use deadlines::next_read_at;
 pub(crate) use triggers::Reads;
 use triggers::request_read;
 
