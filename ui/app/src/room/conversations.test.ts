@@ -172,17 +172,23 @@ test("a list that fails again: create rejects and makes nothing", async () => {
   expect(sent("create_thread")).toEqual([]);
 });
 
-test("the agent create_thread names: the plan chosen, else the newest thread's, else DEFAULT_AGENT", async () => {
+test("the agent create_thread names: the plan chosen, else the one the matter uses most (archived left out), else DEFAULT_AGENT", async () => {
   // nothing to go by
   const none = await rig(today(() => []));
   await none.talks.create(none.talks.view().open ?? "");
   expect(none.sent("create_thread")).toEqual([{ matter: A.matter, agent: DEFAULT_AGENT }]);
-  // the newest thread's, archived or not
+  // the plan used most, over the newest thread's; an archived thread doesn't count
   const newest = await rig(
-    today(() => [thread(T1), thread(T2, { agent: "codex", status: "archived" })]),
+    today(() => [
+      thread(T1, { agent: "codex" }),
+      thread(T2, { agent: "codex" }),
+      thread(T3, { agent: "claude" }),
+      thread(MADE, { agent: "claude", status: "archived" }),
+    ]),
   );
   newest.talks.startNew();
   expect(newest.talks.view().agent).toBe("codex");
+  expect(newest.talks.view().plan).toBe("ChatGPT");
   await newest.talks.create(newest.talks.view().open ?? "");
   expect(newest.sent("create_thread")).toEqual([{ matter: A.matter, agent: "codex" }]);
   // the lawyer's choice over both

@@ -12,19 +12,32 @@ test("agentFor: the chosen agent wins over the setting and the threads", () => {
   expect(agentFor({ chosen: "codex-acp", setting: "claude-acp", threads })).toBe("codex-acp");
 });
 
-test("agentFor: the setting wins over the threads", () => {
-  const threads = [{ thread: T2, agent: "gemini" }];
-  expect(agentFor({ chosen: null, setting: "codex-acp", threads })).toBe("codex-acp");
+const T3 = "00000000-0000-7000-8000-000000000003";
+
+test("agentFor: the plan the matter uses most wins over the newest thread's and over the setting", () => {
+  const threads = [
+    { thread: T1, agent: "codex-acp" },
+    { thread: T2, agent: "codex-acp" },
+    { thread: T3, agent: "claude-acp" },
+  ];
+  expect(agentFor({ chosen: null, setting: "claude-acp", threads })).toBe("codex-acp");
 });
 
-test("agentFor: else the newest thread's agent, by id, whatever the order given", () => {
+test("agentFor: a tie goes to the plan used most recently: by H6's last activity, else the newest thread", () => {
   const older = { thread: T1, agent: "codex-acp" };
   const newer = { thread: T2, agent: "claude-acp" };
   expect(agentFor({ chosen: null, setting: null, threads: [older, newer] })).toBe("claude-acp");
   expect(agentFor({ chosen: null, setting: null, threads: [newer, older] })).toBe("claude-acp");
+  // the older thread used last
+  const active = [
+    { ...older, last_activity: 20 },
+    { ...newer, last_activity: 10 },
+  ];
+  expect(agentFor({ chosen: null, setting: null, threads: active })).toBe("codex-acp");
 });
 
-test("agentFor: with no threads, DEFAULT_AGENT", () => {
+test("agentFor: a matter with no conversation takes the setting, else DEFAULT_AGENT", () => {
+  expect(agentFor({ chosen: null, setting: "codex-acp", threads: [] })).toBe("codex-acp");
   expect(agentFor({ chosen: null, setting: null, threads: [] })).toBe(DEFAULT_AGENT);
 });
 
@@ -36,12 +49,18 @@ test("planName: Claude Code's ids are Claude, Codex's are ChatGPT, others as the
   expect(planName("gemini")).toBe("gemini");
 });
 
-test("matterPlan: the oldest thread's plan, by id", () => {
-  const threads = [
+test("matterPlan: the plan used most; a tie goes to the one used most recently", () => {
+  const most = [
+    { thread: T1, agent: "codex-acp" },
+    { thread: T2, agent: "codex-acp" },
+    { thread: T3, agent: "claude-acp" },
+  ];
+  expect(matterPlan(most)).toBe("ChatGPT");
+  const tie = [
     { thread: T2, agent: "claude-acp" },
     { thread: T1, agent: "codex-acp" },
   ];
-  expect(matterPlan(threads)).toBe("ChatGPT");
+  expect(matterPlan(tie)).toBe("Claude");
 });
 
 test("matterPlan: undefined with no threads", () => {

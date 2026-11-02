@@ -523,7 +523,8 @@ export class Conversations {
   /** The agent a new thread for `key` runs: its draft's choice, else agent.ts's order. */
   #agentOf(m: MatterState, key: string | null = m.open): AgentId {
     const chosen = m.draft !== null && m.draft.key === key ? m.draft.chosen : null;
-    return agentFor({ chosen, setting: null, threads: [...m.threads.values()] });
+    const threads = [...m.threads.values()].filter((t) => t.status !== "archived");
+    return agentFor({ chosen, setting: null, threads });
   }
 
   #make(): ConversationsView {

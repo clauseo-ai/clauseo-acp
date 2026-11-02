@@ -41,7 +41,7 @@ export type ConversationsView = {
   thread: ThreadId | null;
   /** Whether the open conversation is a draft (no thread yet), once the list is in. */
   drafting: boolean;
-  /** The plan the rows are measured against: the oldest thread's (agent.ts's matterPlan). */
+  /** The plan the rows are measured against: the one the matter uses most (agent.ts's matterPlan). */
   plan: string | undefined;
   /** The agents the host lists (R15), for the plan names. */
   agents: readonly AgentSummary[];

@@ -1,11 +1,13 @@
 // The agent a new conversation runs, fixed at `create_thread` by its first message (HANDOFF item 9), and the plan name a
-// row shows for it. The order, first that is given: the lawyer's choice in the composer (R15's ListAgents gives the
-// options); the "Start new conversations with" setting (H7's default-agent key, which U11 sets; not on the wire yet,
-// so null today); the agent of the matter's newest thread; else DEFAULT_AGENT. Agent ids are the settings' keys
+// row shows for it. The order, first that is given (Rohan, 2026-11-02, HANDOFF item 9): the lawyer's choice in the
+// composer (R15's ListAgents gives the options); the plan used most in the matter, a tie going to the one used most
+// recently; in a matter with no conversation, the "Start new conversations with" setting (H7's default-agent key, which
+// U11 sets; not on the wire yet, so null today); else DEFAULT_AGENT. A row names its plan only where it differs from the
+// matter's, by the same rule. Agent ids are the settings' keys
 // (`agents.<id>`), which R15 renames from `claude` to `claude-acp`, so nothing here keys on an id but DEFAULT_AGENT,
 // and the plan names go by the agent's kind (R15's `AgentSummary`), read off the id's start only for an agent the list
 // doesn't hold.
-import type { AgentId, AgentKind, ThreadSummary } from "../transport/protocol.ts";
+import type { AgentId, AgentKind, ThreadSummary, Timestamp } from "../transport/protocol.ts";
 import type { AgentSummary } from "./host-next.ts";
 
 /** The agent when nothing else says: the e2e settings' `agents.claude` (ui/e2e/app-windows/scratch.ts's AGENT_ID).
@@ -18,18 +20,40 @@ export type AgentInputs = {
   chosen: AgentId | null;
   /** The "Start new conversations with" setting (H7), if the host gives it. */
   setting: AgentId | null;
-  /** The matter's threads, archived ones too: the newest names the agent the lawyer used last here. */
-  threads: readonly Pick<ThreadSummary, "thread" | "agent">[];
+  /** The matter's conversations, archived ones left out. */
+  threads: readonly Used[];
 };
+
+/** A conversation as the rule weighs it: its agent, and when it was used: H6's last activity, else its creation (v7
+ * ids sort by it). */
+export type Used = Pick<ThreadSummary, "thread" | "agent"> & { last_activity?: Timestamp };
+
+/** Whether `a` was used after `b`. */
+const later = (a: Used, b: Used): boolean => {
+  const at = [a.last_activity ?? -Infinity, b.last_activity ?? -Infinity] as const;
+  if (at[0] !== at[1]) return at[0] > at[1];
+  return a.thread > b.thread;
+};
+
+/** The agent the matter uses most, a tie going to the one used most recently; null with no conversation. */
+export function mostUsed(threads: readonly Used[]): AgentId | null {
+  const uses = new Map<AgentId, { n: number; last: Used }>();
+  for (const t of threads) {
+    const u = uses.get(t.agent);
+    if (u === undefined) uses.set(t.agent, { n: 1, last: t });
+    else uses.set(t.agent, { n: u.n + 1, last: later(t, u.last) ? t : u.last });
+  }
+  let best: { agent: AgentId; n: number; last: Used } | null = null;
+  for (const [agent, u] of uses)
+    if (best === null || u.n > best.n || (u.n === best.n && later(u.last, best.last)))
+      best = { agent, ...u };
+  return best?.agent ?? null;
+}
 
 /** The agent `create_thread` names. */
 export function agentFor({ chosen, setting, threads }: AgentInputs): AgentId {
   if (chosen !== null) return chosen;
-  if (setting !== null) return setting;
-  let newest: Pick<ThreadSummary, "thread" | "agent"> | null = null;
-  // ids are v7 UUIDs, whose text sorts by creation
-  for (const t of threads) if (newest === null || t.thread > newest.thread) newest = t;
-  return newest?.agent ?? DEFAULT_AGENT;
+  return mostUsed(threads) ?? setting ?? DEFAULT_AGENT;
 }
 
 /** Each kind's plan, as the rows and the composer's choice name it. */
@@ -59,16 +83,15 @@ export function planName(agent: AgentId, agents: readonly AgentSummary[] = []): 
   return kind === undefined ? agent : PLAN[kind];
 }
 
-/** The plan a matter's rows are measured against (rail-conversations.tsx's `plan`): its oldest thread's, by id. A row
- * names its plan only where it differs. DESIGN.md:1154 says the first conversation's, HANDOFF item 9 the most common;
- * U6 takes the first, the one the host knows. */
+/** The plan a matter's rows are measured against (rail-conversations.tsx's `plan`): the plan it uses most, a tie
+ * going to the one used most recently (HANDOFF item 9; DESIGN.md now agrees). A row names its plan only where it
+ * differs. */
 export function matterPlan(
-  threads: readonly Pick<ThreadSummary, "thread" | "agent">[],
+  threads: readonly Used[],
   agents: readonly AgentSummary[] = [],
 ): string | undefined {
-  let oldest: Pick<ThreadSummary, "thread" | "agent"> | null = null;
-  for (const t of threads) if (oldest === null || t.thread < oldest.thread) oldest = t;
-  return oldest === null ? undefined : planName(oldest.agent, agents);
+  const agent = mostUsed(threads);
+  return agent === null ? undefined : planName(agent, agents);
 }
 
 /** The composer's plan choice for a new conversation, from the agents the host lists (R15) that have a kind (a plan
