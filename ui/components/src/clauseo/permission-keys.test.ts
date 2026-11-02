@@ -25,6 +25,8 @@ test.each([
   ["Enter while composing", { ...press("Enter"), isComposing: true }, null],
   ["Enter with keyCode 229", { ...press("Enter"), keyCode: 229 }, null],
   ["Escape while composing", { ...press("Escape"), isComposing: true }, null],
+  ["a held Enter's repeat", { ...press("Enter"), repeat: true }, null],
+  ["a held Escape's repeat", { ...press("Escape"), repeat: true }, null],
   ["Enter with keyCode 13", { ...press("Enter"), keyCode: 13, isComposing: false }, "once"],
 ] as const)("%s is %s", (_name, e, answer) => {
   expect(permissionKey(e)).toBe(answer);
@@ -35,7 +37,7 @@ test.each([
   ["prompt", true, true],
   ["field", true, true],
   ["field", false, false],
-  ["page", false, true],
+  ["page", false, false],
   ["page", true, true],
   ["other", true, false],
   ["other", false, false],

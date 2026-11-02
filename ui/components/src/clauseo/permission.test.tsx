@@ -11,6 +11,7 @@ import { TooltipProvider } from "../ui/tooltip.tsx";
 import { PermissionPrompt } from "./permission.tsx";
 import type { PermissionAnswer } from "./permission-keys.ts";
 import { RoomScopeProvider } from "./room-scope-provider.tsx";
+import { useRoom } from "./room-scope.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -27,35 +28,48 @@ afterEach(async () => {
 
 type Props = Partial<ComponentProps<typeof PermissionPrompt>>;
 
+/** The composer as the room draws it: its field handed to the room's nodes, unless the room has none yet. */
+function Composer({ registered }: { registered: boolean }) {
+  const room = useRoom();
+  return (
+    <form data-composer="">
+      <textarea ref={registered ? room.nodes.slot<HTMLTextAreaElement>("field") : undefined} />
+    </form>
+  );
+}
+
+/** Draws the same room again with new props, as the caller does when the answer is on its way or the prompt folds. */
+let again: (props: Props) => Promise<void> = async () => {};
+
 /** A room with the prompt, another button and field, and a composer, as the room lays them out. */
-async function show(props: Props = {}, platform: Platform = "windows") {
+async function show(props: Props = {}, platform: Platform = "windows", registered = true) {
   showDisplay({ ...DEFAULT_DISPLAY, motion: "reduced", platform });
   const onAnswer = vi.fn<(a: PermissionAnswer) => void>();
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
-  await act(async () =>
-    root?.render(
-      <TooltipProvider>
-        <RoomScopeProvider>
-          <PermissionPrompt
-            paper="Notice to the bank"
-            state="pending"
-            onAnswer={onAnswer}
-            keys
-            {...props}
-          />
-          <button type="button" className="other">
-            Other
-          </button>
-          <input className="other-field" />
-          <form data-composer="">
-            <textarea />
-          </form>
-        </RoomScopeProvider>
-      </TooltipProvider>,
-    ),
-  );
+  again = (next: Props) =>
+    act(async () =>
+      root?.render(
+        <TooltipProvider>
+          <RoomScopeProvider>
+            <PermissionPrompt
+              paper="Notice to the bank"
+              state="pending"
+              onAnswer={onAnswer}
+              keys
+              {...next}
+            />
+            <button type="button" className="other">
+              Other
+            </button>
+            <input className="other-field" />
+            <Composer registered={registered} />
+          </RoomScopeProvider>
+        </TooltipProvider>,
+      ),
+    );
+  await again(props);
   return onAnswer;
 }
 
@@ -180,18 +194,74 @@ test.each([
   expect(onAnswer.mock.calls).toEqual([["always"]]);
 });
 
-test("Escape answers deny from the empty composer, from the page and from inside the prompt", async () => {
-  let onAnswer = await show();
+test("Escape answers deny from the empty composer, from the page with the field empty and from inside the prompt", async () => {
+  const onAnswer = await show();
   await key(field(), "Escape");
   await key(document.body, "Escape");
   await key($(".perm button"), "Escape");
   await key($(".perm-ask"), "Escape");
   expect(onAnswer.mock.calls).toEqual([["deny"], ["deny"], ["deny"], ["deny"]]);
-  await act(async () => root?.unmount());
-  host?.remove();
-  onAnswer = await show();
+});
+
+test("from the page, the keys answer only while the room's field is empty", async () => {
+  let onAnswer = await show();
   await key(document.body, "Enter");
   expect(onAnswer.mock.calls).toEqual([["once"]]);
+  onAnswer.mockClear();
+  field().value = "Draft a reply";
+  expect(await key(document.body, "Enter")).toBe(false);
+  expect(await key(document.body, "Escape")).toBe(false);
+  expect(onAnswer).not.toHaveBeenCalled();
+  await act(async () => root?.unmount());
+  host?.remove();
+  // a room with no field handed over: the page's keys answer nothing
+  onAnswer = await show({}, "windows", false);
+  expect(await key(document.body, "Enter")).toBe(false);
+  expect(onAnswer).not.toHaveBeenCalled();
+});
+
+test("a held key's repeats never answer", async () => {
+  const onAnswer = await show();
+  expect(await key(field(), "Enter", { repeat: true })).toBe(false);
+  expect(await key($(".perm-ask"), "Escape", { repeat: true })).toBe(false);
+  expect(onAnswer).not.toHaveBeenCalled();
+});
+
+test("after a click answer, focus inside the prompt goes back to the room's field", async () => {
+  const onAnswer = await show();
+  const button = $(".perm button") as HTMLButtonElement;
+  button.focus();
+  await act(async () => button.click());
+  expect(onAnswer.mock.calls).toEqual([["once"]]);
+  expect(document.activeElement).toBe(field());
+});
+
+test("after a key answer from inside the prompt, focus goes back to the room's field", async () => {
+  const onAnswer = await show();
+  const button = $(".perm button:nth-child(3)") as HTMLButtonElement;
+  button.focus();
+  await key(button, "Escape");
+  expect(onAnswer.mock.calls).toEqual([["deny"]]);
+  expect(document.activeElement).toBe(field());
+});
+
+test("when the prompt goes busy or folds with focus inside, focus goes back to the room's field", async () => {
+  await show();
+  ($(".perm button") as HTMLButtonElement).focus();
+  await again({ busy: true });
+  expect(document.activeElement).toBe(field());
+  await again({});
+  ($(".perm button") as HTMLButtonElement).focus();
+  await again({ state: "gone" });
+  expect(document.activeElement).toBe(field());
+});
+
+test("a fold with focus elsewhere leaves focus where it is", async () => {
+  await show();
+  const other = $(".other") as HTMLButtonElement;
+  other.focus();
+  await again({ state: "once" });
+  expect(document.activeElement).toBe(other);
 });
 
 test("a plain Enter on a focused answer is left to the button's own click", async () => {
@@ -308,11 +378,41 @@ test.each([
 test.each([
   ["mac", "macOS is asking you to confirm."],
   ["windows", "Windows is asking you to confirm."],
-  ["linux", "Linux is asking you to confirm."],
-] as const)("confirming on %s says %s", async (platform, line) => {
+] as const)("confirming on %s says %s, in the room's own class", async (platform, line) => {
   await show({ confirming: true }, platform);
   const status = $('.perm [role="status"]');
-  expect(status.textContent).toBe(line);
+  expect([status.className, status.textContent]).toEqual(["perm-confirming", line]);
+  expect($(".perm").hasAttribute("data-confirming")).toBe(true);
+});
+
+test("confirming on linux names no dialog, Linux isn't a target yet", async () => {
+  await show({ confirming: true }, "linux");
+  expect(host?.querySelector('.perm [role="status"]')).toBeNull();
+  expect($(".perm").hasAttribute("data-confirming")).toBe(true);
+});
+
+test("not confirming, the root carries no data-confirming", async () => {
+  await show();
+  expect($(".perm").hasAttribute("data-confirming")).toBe(false);
+});
+
+test("the paper glyph stands only when a paper is named", async () => {
+  await show({ paper: null });
+  expect(host?.querySelector(".perm-icon")).toBeNull();
+  await act(async () => root?.unmount());
+  host?.remove();
+  await show();
+  expect(host?.querySelector(".perm-icon")).not.toBeNull();
+});
+
+test("the folded line is never announced as live, and the glyph-less one is marked to line up", async () => {
+  await show({ state: "gone" });
+  expect($(".perm-done").getAttribute("aria-live")).toBe("off");
+  expect($(".perm-done").getAttribute("data-glyph")).toBe("none");
+  expect(host?.querySelector(".perm-done-icon")).toBeNull();
+  await again({ state: "deny" });
+  expect($(".perm-done").getAttribute("aria-live")).toBe("off");
+  expect($(".perm-done").hasAttribute("data-glyph")).toBe(false);
 });
 
 test("an error stands under the answers as a status", async () => {

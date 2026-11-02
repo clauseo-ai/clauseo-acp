@@ -237,6 +237,15 @@
   .perm-key {
     margin-right: calc(-1 * var(--s1));
   }
+  /* the computer's own dialog is up: the answers wait, and one line says whose dialog it is */
+  .perm[data-confirming] .perm-actions {
+    opacity: 0.45;
+  }
+  .perm-confirming {
+    @apply text-small text-primary;
+    margin-top: var(--s2);
+    padding-left: var(--perm-indent);
+  }
   .perm-done {
     @apply text-small-row text-muted;
     display: flex;
@@ -244,6 +253,10 @@
     gap: var(--s1-5);
     max-width: var(--measure);
     margin-top: var(--s5);
+  }
+  /* a folded line with no glyph: its words stand where the others' do, past the 14 px glyph and its --s1-5 gap */
+  .perm-done[data-glyph="none"] {
+    padding-left: var(--s5);
   }
   .perm-done-icon {
     flex: none;
