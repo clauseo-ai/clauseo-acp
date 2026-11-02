@@ -191,6 +191,11 @@ fn remove_loaded(
         .receipt(ctx.receipt(stream, CommandOutcome::Done, now));
     out.send_tagged(actor, done_tag(ctx))?;
     drop_turn(actor, thread, turn);
+    if let Some(queue) = queue(actor, thread)
+        && queue.is_empty()
+    {
+        queue.held = false;
+    }
     Ok(())
 }
 
