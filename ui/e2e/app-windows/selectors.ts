@@ -111,6 +111,8 @@ export const ids = {
   stopOther: "stop-other",
   /** In otherWait: the panel's Queue button. */
   queue: "queue",
+  /** The composer's working line while a turn runs or waits ("Answering.", or the wait behind another). */
+  working: "working",
 } as const;
 
 /** The `data-kind` of a version row: the matter's CheckpointKind in snake_case. */
@@ -249,6 +251,8 @@ export function window(page: Page) {
     stopOther: (panel: Locator): Locator => panel.getByTestId(ids.stopOther),
     /** The Queue button inside the wait panel `panel`. */
     queue: (panel: Locator): Locator => panel.getByTestId(ids.queue),
+    /** The composer's working line. */
+    working: id(ids.working),
   };
 }
 

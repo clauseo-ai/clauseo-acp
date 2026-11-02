@@ -1,8 +1,10 @@
 // Two conversations in one matter, the second waiting behind the first's writer (U7). The first
-// asks and its turn runs; a second conversation's send waits as `Queued` while the first holds
-// the matter's writer. The wait panel (`other-wait`) names the first conversation by its title and
-// shows no clock time. Its Stop (`stop-other`) cancels the first turn, so the second turn starts.
-// The first keeps the answer it streamed before the cancel.
+// asks and its turn runs. In the second, Ask raises the wait panel (`other-wait`) and sends
+// nothing; the panel names the first conversation by its title and shows no clock time. Its Queue
+// sends, and the turn waits as `Queued` while the first holds the matter's writer: the panel keeps
+// Stop the other alone and the working line says the wait. Stop the other (`stop-other`) cancels
+// the first turn, so the second turn starts. The first keeps the answer it streamed before the
+// cancel.
 //
 // Every agent a test starts runs the same fake_agent scenario (scratch.ts writes one scenario into
 // the settings), so `cancel-unanswered` plays in both conversations. Each thread launches its own
@@ -44,20 +46,32 @@ test("a second conversation waits behind the first's writer until its Stop", asy
   await expect(w.cancel).toBeVisible();
   await expect(w.send).toBeHidden();
 
-  // B, a draft in the same matter: the panel names A before B sends, and has a Queue button.
+  // B, a draft in the same matter: no panel over its empty field.
   await newConversation(w);
   await expect(w.conversations).toHaveCount(2);
+  await expect(w.otherWait).toBeHidden();
+
+  // B's Ask raises the panel, which names A and has Queue; nothing is sent and the words stay.
+  await w.composer.fill(SECOND);
+  await w.send.click();
   await expect(w.otherWait).toBeVisible();
   await expect(w.otherWait).toContainText(FIRST);
-  await expect(w.queue(w.otherWait)).toBeAttached();
+  await expect(w.queue(w.otherWait)).toBeVisible();
+  await expect(w.composer).toHaveValue(SECOND);
+  await expect(w.userMessages).toHaveCount(0);
 
-  // B asks with the composer's send. Its turn waits: the panel stays, names A, and shows no
-  // clock time, and B's agent has not been given its prompt, so it has no answer yet.
-  await sendPrompt(w, SECOND);
+  // Queue sends. B's turn waits: the panel stays with Stop the other alone, focused, names A and
+  // shows no clock time; the working line says the wait, and B's agent has not been given its
+  // prompt, so it has no answer yet.
+  await w.queue(w.otherWait).click();
+  await expect(w.userMessages.last()).toContainText(SECOND);
   await expect(w.conversationRow(SECOND)).toHaveAttribute("aria-current", "true");
   await expect(w.otherWait).toBeVisible();
+  await expect(w.queue(w.otherWait)).toHaveCount(0);
+  await expect(w.stopOther(w.otherWait)).toBeFocused();
   await expect(w.otherWait).toContainText(FIRST);
   expect((await w.otherWait.textContent()) ?? "").not.toMatch(CLOCK);
+  await expect(w.working).toContainText(`Waiting for '${FIRST}' to finish.`);
   await expect(w.agentMessages).toHaveCount(0);
 
   // Stop the other conversation's turn: A's turn is cancelled, the panel goes, and B's turn
