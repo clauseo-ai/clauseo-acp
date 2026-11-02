@@ -74,18 +74,31 @@ const HI = {
     "अनुमति नहीं दी गई। Clauseo ने {paper} में कोई बदलाव नहीं किया।",
   // drafts for Rohan (U4b): the agent's question as a form, inline in the thread. "Other" leads a question's own
   // free-text answer; "Required" marks a question that must be answered; the line under the answers shows while
-  // nothing is filled in, since an answer with nothing in it is the same as Decline
-  "Send the answer": "उत्तर भेजें",
-  Decline: "अस्वीकार करें",
+  // nothing is filled in, since an answer with nothing in it is the same as Don't answer. "Don't answer" matches the
+  // permission prompt's "Don't allow"
+  Send: "भेजें",
+  "Don't answer": "उत्तर न दें",
   Other: "अन्य",
   Required: "आवश्यक",
   "Answer this question.": "इस प्रश्न का उत्तर दें।",
+  // a field that doesn't fit and whose schema names no limit; one that does names it below
   "This answer doesn't fit the question.": "यह उत्तर प्रश्न से मेल नहीं खाता।",
-  "Choose an answer to send, or Decline to go on without one.":
-    "भेजने के लिए कोई उत्तर चुनें, या बिना उत्तर के आगे बढ़ने के लिए अस्वीकार करें।",
+  "Choose an answer to send, or 'Don't answer' to go on without one.":
+    "भेजने के लिए कोई उत्तर चुनें, या बिना उत्तर के आगे बढ़ने के लिए 'उत्तर न दें' चुनें।",
   // a question whose form Clauseo can't draw: the two ways on
-  "This question can't be shown here. Decline, or Stop the answer.":
-    "यह प्रश्न यहाँ नहीं दिखाया जा सकता। अस्वीकार करें, या उत्तर रोकें।",
+  "This question can't be shown here. Choose 'Don't answer', or Stop the answer.":
+    "यह प्रश्न यहाँ नहीं दिखाया जा सकता। 'उत्तर न दें' चुनें, या उत्तर रोकें।",
+  // the limit a field's answer broke, as the agent's schema gives it
+  "Use {n} characters or fewer.": "{n} या उससे कम अक्षर लिखें।",
+  "Use 1 character or fewer.": "1 या उससे कम अक्षर लिखें।",
+  "Use at least {n} characters.": "कम से कम {n} अक्षर लिखें।",
+  "Use at least 1 character.": "कम से कम 1 अक्षर लिखें।",
+  "Choose up to {n}.": "अधिकतम {n} चुनें।",
+  "Choose at least {n}.": "कम से कम {n} चुनें।",
+  "Use a number from {min} to {max}.": "{min} से {max} तक की कोई संख्या लिखें।",
+  "Use a number of {min} or more.": "{min} या उससे अधिक की संख्या लिखें।",
+  "Use a number of {max} or less.": "{max} या उससे कम की संख्या लिखें।",
+  "Use a whole number.": "पूर्ण संख्या लिखें।",
   // the change note
   "Clauseo changed {n} papers.": "Clauseo ने {n} दस्तावेज़ बदले।",
   "Clauseo changed 1 paper.": "Clauseo ने 1 दस्तावेज़ बदला।",

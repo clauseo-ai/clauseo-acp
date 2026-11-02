@@ -1,14 +1,19 @@
 // The agent's question as a form, inline in the thread, on the permission prompt's well: a court-yellow dot and "A
-// question for you", the agent's words, its fields (elicitation-schema.ts), then Send the answer, Decline and Stop the
-// answer. Send waits until every field holds and something is filled in: an answer with nothing in it is Decline.
-// One answer at a time; a refusal says why under the answers and keeps the form as the lawyer left it. Enter in a
-// single-line field, a radio or a checkbox sends; in a textarea it's a new line, and Cmd or Ctrl with Enter sends.
-// The form takes focus as it appears only from the page or the thread, never from the composer or anywhere else.
+// question for you", the agent's words, its fields (elicitation-schema.ts), then Send, Don't answer and Stop the
+// answer. Send waits until every field holds and something is filled in: an answer with nothing in it is Don't answer.
+// One answer at a time; a refusal says why under the answers and keeps the form as the lawyer left it, except a
+// question the host no longer waits on (elicitation.not_pending), which leaves only Stop. Enter in a single-line
+// field, a radio or a checkbox sends; in a textarea it's a new line, and Cmd or Ctrl with Enter sends. Escape outside
+// a text field is Don't answer, as Escape is Don't allow on the permission prompt. A chosen radio is cleared by a
+// click or Space on it, so Other can go alone after a wrong pick.
+// The form takes focus as it appears only from the page or the thread, never from the composer or anywhere else;
+// as it goes, focus inside it goes to the composer's field.
 // Everything the agent wrote is set in <bdi> or dir="auto".
 import {
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -20,7 +25,7 @@ import { useRoom } from "@clauseo/components/clauseo/room-scope.ts";
 import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { frame } from "@clauseo/components/lib/words-frame.ts";
-import { useThreadWords } from "@clauseo/components/lib/words-thread.ts";
+import { useThreadWords, type ThreadKey } from "@clauseo/components/lib/words-thread.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
 import { fieldError, textControl } from "@clauseo/components/ui/recipes-controls.ts";
 import { toHostError } from "../transport/host-transport.ts";
@@ -30,6 +35,7 @@ import {
   content,
   anyFilled,
   initialDraft,
+  limitOf,
   parseForm,
   problems,
   type Choice,
@@ -37,6 +43,7 @@ import {
   type Field,
   type FieldProblem,
   type FieldValue,
+  type Limit,
   type TextField,
   BAD_NUMBER,
   ELICITATION_TEST_IDS,
@@ -55,6 +62,39 @@ const NATIVE = [
   "is-disabled:bg-well-strong is-disabled:shadow-none",
 ].join(" ");
 const MARK = "relative pointer-events-none col-start-1 row-start-1 hidden peer-checked:block";
+
+/** The line naming the limit an answer broke, as the schema gives it, or the general line when it names none. */
+function limitLine(limit: Limit | null): [ThreadKey, Record<string, number>?] {
+  switch (limit?.kind) {
+    case "maxLength":
+      return limit.n === 1
+        ? ["Use 1 character or fewer."]
+        : ["Use {n} characters or fewer.", { n: limit.n }];
+    case "minLength":
+      return limit.n === 1
+        ? ["Use at least 1 character."]
+        : ["Use at least {n} characters.", { n: limit.n }];
+    case "maxItems":
+      return ["Choose up to {n}.", { n: limit.n }];
+    case "minItems":
+      return ["Choose at least {n}.", { n: limit.n }];
+    case "whole":
+      return ["Use a whole number."];
+    case "range":
+      if (limit.min !== null && limit.max !== null)
+        return ["Use a number from {min} to {max}.", { min: limit.min, max: limit.max }];
+      if (limit.min !== null) return ["Use a number of {min} or more.", { min: limit.min }];
+      if (limit.max !== null) return ["Use a number of {max} or less.", { max: limit.max }];
+      return ["This answer doesn't fit the question."];
+    default:
+      return ["This answer doesn't fit the question."];
+  }
+}
+
+/** Whether keys typed here are words: Escape in one stays the field's own. */
+const isTextField = (t: EventTarget) =>
+  t instanceof HTMLTextAreaElement ||
+  (t instanceof HTMLInputElement && t.type !== "radio" && t.type !== "checkbox");
 
 /** A field's ids, and whether its problem shows. */
 type Ids = { base: string; problem: string | null };
@@ -79,6 +119,8 @@ export function ElicitationForm({ elicitation, message, schema }: Props) {
   const [attempted, setAttempted] = useState(false);
   const [asked, setAsked] = useState<"accept" | "decline" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // the host no longer waits on this question (a not_pending refusal): only Stop is left
+  const [gone, setGone] = useState(false);
   const flying = useRef(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const fieldsRef = useRef<HTMLDivElement>(null);
@@ -90,6 +132,7 @@ export function ElicitationForm({ elicitation, message, schema }: Props) {
   const filled = form !== null && anyFilled(form, draft);
   const ready = form !== null && canSend(form, draft);
   const busy = asked !== null;
+  const answerable = !gone;
 
   // the form takes focus as it appears only from nowhere (the page) or the thread, never from the composer
   useEffect(() => {
@@ -112,6 +155,15 @@ export function ElicitationForm({ elicitation, message, schema }: Props) {
     // as it appears only: the room's scope stays the same for the row's life
   }, [room]);
 
+  // gone by another way (Stop, answered or expired elsewhere): focus inside it goes to the composer's field, as a
+  // successful answer's does. A layout effect, so its cleanup runs while the form is still in the page
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    return () => {
+      if (root?.contains(document.activeElement) === true) room.nodes.get("field")?.focus();
+    };
+  }, [room]);
+
   const respond = useCallback(
     (kind: "accept" | "decline", response: ElicitationResponse) => {
       if (flying.current) return;
@@ -126,9 +178,12 @@ export function ElicitationForm({ elicitation, message, schema }: Props) {
             room.nodes.get("field")?.focus();
         },
         (e: unknown) => {
+          const code = toHostError(e).code;
           flying.current = false;
           setAsked(null);
-          setError(errorWords(lang, toHostError(e).code, plan));
+          // until the host marks a question it can't deliver (#208), not_pending means it can't be answered anymore
+          if (code === "elicitation.not_pending") setGone(true);
+          setError(errorWords(lang, code, plan));
         },
       );
     },
@@ -136,19 +191,25 @@ export function ElicitationForm({ elicitation, message, schema }: Props) {
   );
 
   const send = useCallback(() => {
-    if (form === null || busy) return;
+    if (form === null || busy || gone) return;
     if (!ready) return setAttempted(true);
     respond("accept", { accept: { values: content(form, draft) } });
-  }, [form, busy, ready, respond, draft]);
+  }, [form, busy, gone, ready, respond, draft]);
   const decline = useCallback(() => {
-    if (!busy) respond("decline", "decline");
-  }, [busy, respond]);
+    if (!busy && !gone) respond("decline", "decline");
+  }, [busy, gone, respond]);
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    // never an IME's Enter (keyCode 229 in WebKit) nor a held one, as composer-keys.ts and permission-keys.ts
-    if (e.key !== "Enter" || e.repeat || e.defaultPrevented) return;
+    // never an IME's key (keyCode 229 in WebKit) nor a held one, as composer-keys.ts and permission-keys.ts
+    if (e.repeat || e.defaultPrevented) return;
     if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
     const t = e.target;
+    if (e.key === "Escape") {
+      if (isTextField(t) || busy || gone) return;
+      e.preventDefault();
+      return decline();
+    }
+    if (e.key !== "Enter") return;
     if (t instanceof HTMLTextAreaElement) {
       if (!e.metaKey && !e.ctrlKey) return;
     } else if (!(t instanceof HTMLInputElement) || e.shiftKey) return;
@@ -175,17 +236,33 @@ export function ElicitationForm({ elicitation, message, schema }: Props) {
         <Say>
           {found.get(key) === "required"
             ? w.th("Answer this question.")
-            : w.th("This answer doesn't fit the question.")}
+            : w.th(...limitLine(limitOf(fieldByKey(key), draft[key])))}
         </Say>
       </p>
     );
   const required = <Say>{w.th("Required")}</Say>;
-  const ctx: FieldCtx = { draft, set, touch, idsOf, problemLine, required, other: w.th("Other") };
-
   const askId = `${uid}-ask`;
   const msgId = `${uid}-msg`;
+  const ctx: FieldCtx = {
+    draft,
+    set,
+    touch,
+    idsOf,
+    problemLine,
+    required,
+    other: w.th("Other"),
+    msgId,
+  };
+
   const hintId = `${uid}-hint`;
-  const hint = form !== null && !filled && !busy;
+  const hint = form !== null && !filled && !busy && answerable;
+  const fieldByKey = (key: string): Field => {
+    for (const f of form?.fields ?? []) {
+      if (f.key === key) return f;
+      if ((f.kind === "choice" || f.kind === "multi") && f.other?.key === key) return f.other;
+    }
+    throw new Error(`no field ${key}`);
+  };
   return (
     <div
       ref={rootRef}
@@ -199,7 +276,10 @@ export function ElicitationForm({ elicitation, message, schema }: Props) {
       onKeyDown={onKeyDown}
     >
       <p className="perm-ask">
-        <span className="flex flex-none w-s4 justify-center" aria-hidden="true">
+        <span
+          className="flex flex-none w-[calc(var(--perm-indent)-var(--s2))] justify-center"
+          aria-hidden="true"
+        >
           <span className="size-dot-hint mt-s2 rounded-full bg-yellow shadow-dot" />
         </span>
         <span id={askId}>
@@ -215,7 +295,9 @@ export function ElicitationForm({ elicitation, message, schema }: Props) {
       </p>
       {form === null && (
         <p className="perm-kept mt-s2" data-testid={T.unsupported}>
-          <Say>{w.th("This question can't be shown here. Decline, or Stop the answer.")}</Say>
+          <Say>
+            {w.th("This question can't be shown here. Choose 'Don't answer', or Stop the answer.")}
+          </Say>
         </p>
       )}
       {form !== null && (
@@ -226,35 +308,40 @@ export function ElicitationForm({ elicitation, message, schema }: Props) {
         </div>
       )}
       <div className="perm-actions">
-        {form !== null && (
+        {form !== null && answerable && (
           <Button
             kind="tone"
             size="small"
             data-testid={T.send}
             aria-disabled={!ready || busy ? true : undefined}
+            data-disabled={!ready || busy ? "" : undefined}
             aria-describedby={hint ? hintId : undefined}
             aria-keyshortcuts="Enter"
             onClick={send}
           >
-            <span className="deva-nudge">{w.th("Send the answer")}</span>
+            <span className="deva-nudge">{w.th("Send")}</span>
           </Button>
         )}
-        <Button
-          kind="quiet"
-          size="small"
-          data-testid={T.decline}
-          aria-disabled={busy ? true : undefined}
-          onClick={decline}
-        >
-          <span className="deva-nudge">{w.th("Decline")}</span>
-        </Button>
+        {answerable && (
+          <Button
+            kind="quiet"
+            size="small"
+            data-testid={T.decline}
+            aria-disabled={busy ? true : undefined}
+            data-disabled={busy ? "" : undefined}
+            aria-keyshortcuts="Escape"
+            onClick={decline}
+          >
+            <span className="deva-nudge">{w.th("Don't answer")}</span>
+          </Button>
+        )}
         <Button kind="quiet" size="small" data-testid={T.stop} onClick={stop}>
           <span className="deva-nudge">{w.th("Stop the answer")}</span>
         </Button>
       </div>
       {hint && (
         <p id={hintId} className="perm-kept mt-s2" data-testid={T.hint}>
-          <Say>{w.th("Choose an answer to send, or Decline to go on without one.")}</Say>
+          <Say>{w.th("Choose an answer to send, or 'Don't answer' to go on without one.")}</Say>
         </p>
       )}
       {/* always there, so a refusal's words are announced as they arrive */}
@@ -279,13 +366,16 @@ type FieldCtx = {
   problemLine: (key: string, ids: Ids) => ReactNode;
   required: ReactNode;
   other: string;
+  /** The agent's message, naming a field that has neither title nor description. */
+  msgId: string;
 };
 
 const ids = (...list: (string | null | false | undefined)[]) =>
   list.filter(Boolean).join(" ") || undefined;
 
-/** A field's name: its title, else its key. */
-const nameOf = (f: Field) => f.title ?? f.key;
+/** A field's name: its title, else its description (then not shown again beneath it), else none, and the agent's
+ * message names it. */
+const nameOf = (f: Field) => f.title ?? f.description;
 
 function Marker({ children }: { children: ReactNode }) {
   return <span className="ms-s2 text-small text-muted">{children}</span>;
@@ -293,31 +383,41 @@ function Marker({ children }: { children: ReactNode }) {
 
 function FieldView({ field: f, index, ctx }: { field: Field; index: number; ctx: FieldCtx }) {
   const own = ctx.idsOf(f.key, String(index));
-  const descId = f.description === null ? null : `${own.base}-desc`;
-  const desc =
-    f.description === null ? null : (
-      <p id={descId ?? undefined} className="mt-s0-5 text-small text-muted" dir="auto">
-        <bdi>{f.description}</bdi>
-      </p>
-    );
+  const name = nameOf(f);
+  // a description standing in for the title is said once, as the name
+  const described = f.title !== null && f.description !== null;
+  const descId = described ? `${own.base}-desc` : null;
+  const nameId = `${own.base}-name`;
+  const desc = !described ? null : (
+    <p id={descId ?? undefined} className="mt-s0-5 text-small text-muted" dir="auto">
+      <bdi>{f.description}</bdi>
+    </p>
+  );
   if (f.kind === "choice" || f.kind === "multi") {
     const v = ctx.draft[f.key];
     const multi = f.kind === "multi";
     return (
       <fieldset
         className="m-0 p-0 border-0 min-w-0"
-        role={multi ? undefined : "radiogroup"}
+        aria-labelledby={name === null ? ctx.msgId : undefined}
         aria-describedby={ids(descId, own.problem)}
-        aria-required={!multi && f.required ? true : undefined}
         aria-invalid={own.problem === null ? undefined : true}
         data-testid={T.field(f.key)}
       >
-        <legend className="p-0 text-ui font-ui text-primary">
-          <bdi>{nameOf(f)}</bdi>
-          {f.required && <Marker>{ctx.required}</Marker>}
-        </legend>
+        {(name !== null || f.required) && (
+          <legend id={nameId} className="p-0 text-ui font-ui text-primary">
+            {name !== null && <bdi>{name}</bdi>}
+            {f.required && <Marker>{ctx.required}</Marker>}
+          </legend>
+        )}
         {desc}
-        <div className="mt-s1 grid">
+        {/* the radios alone are the radiogroup; Other sits beside it, in the question's group */}
+        <div
+          className="mt-s1 grid"
+          role={multi ? undefined : "radiogroup"}
+          aria-labelledby={multi ? undefined : name === null ? ctx.msgId : nameId}
+          aria-required={!multi && f.required ? true : undefined}
+        >
           {f.choices.map((c, i) => (
             <Option
               key={i}
@@ -327,6 +427,7 @@ function FieldView({ field: f, index, ctx }: { field: Field; index: number; ctx:
               testId={T.choice(f.key, i)}
               checked={multi ? Array.isArray(v) && v.includes(i) : v === i}
               required={!multi && f.required}
+              onClear={multi ? undefined : () => ctx.set(f.key, null)}
               onChange={(on) => {
                 if (!multi) return ctx.set(f.key, i);
                 const was = Array.isArray(v) ? v : [];
@@ -354,6 +455,7 @@ function FieldView({ field: f, index, ctx }: { field: Field; index: number; ctx:
                 required={f.required || undefined}
                 aria-required={f.required || undefined}
                 onChange={(e) => ctx.set(f.key, e.currentTarget.checked)}
+                aria-labelledby={name === null ? ctx.msgId : undefined}
                 aria-describedby={ids(descId)}
                 data-testid={T.input(f.key)}
               />
@@ -361,7 +463,7 @@ function FieldView({ field: f, index, ctx }: { field: Field; index: number; ctx:
             </span>
           </span>
           <span className="min-w-0 text-ui font-ui text-primary">
-            <bdi>{nameOf(f)}</bdi>
+            {name !== null && <bdi>{name}</bdi>}
             {f.required && <Marker>{ctx.required}</Marker>}
           </span>
         </label>
@@ -396,6 +498,7 @@ function Typed({
     "aria-required": f.required || undefined,
     "aria-invalid": own.problem === null ? undefined : true,
     "aria-describedby": ids(descId, own.problem),
+    "aria-labelledby": nameOf(f) === null ? ctx.msgId : undefined,
     "data-testid": T.input(f.key),
     onBlur: () => ctx.touch(f.key),
   };
@@ -420,7 +523,7 @@ function Typed({
   return (
     <div className="grid gap-s1-5 min-w-0" data-testid={T.field(f.key)}>
       <label htmlFor={own.base} className="text-ui font-ui text-primary">
-        <bdi>{nameOf(f)}</bdi>
+        {nameOf(f) !== null && <bdi>{nameOf(f)}</bdi>}
         {f.required && <Marker>{ctx.required}</Marker>}
       </label>
       {control}
@@ -441,6 +544,7 @@ type Common = {
   "aria-required": boolean | undefined;
   "aria-invalid": boolean | undefined;
   "aria-describedby": string | undefined;
+  "aria-labelledby": string | undefined;
   "data-testid": string;
   onBlur: () => void;
 };
@@ -521,6 +625,7 @@ function Option({
   checked,
   required,
   onChange,
+  onClear,
 }: {
   choice: Choice;
   multi: boolean;
@@ -529,6 +634,8 @@ function Option({
   checked: boolean;
   required: boolean;
   onChange: (on: boolean) => void;
+  /** A chosen radio's click or Space clears it. */
+  onClear?: (() => void) | undefined;
 }) {
   const lineId = `${name}-${testId}-line`;
   return (
@@ -544,6 +651,9 @@ function Option({
             aria-describedby={choice.description === null ? undefined : lineId}
             data-testid={testId}
             onChange={(e) => onChange(e.currentTarget.checked)}
+            // a click on the radio already chosen (Space on it is one too) changes nothing natively; it clears it.
+            // The arrows move the choice with a click on the newly chosen radio, which wasn't chosen, so they never clear
+            onClick={onClear === undefined || !checked ? undefined : onClear}
           />
           {multi ? (
             <IconTick size={14} className={`${MARK} text-on-primary`} />
