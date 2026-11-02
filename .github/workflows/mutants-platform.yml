@@ -11,11 +11,16 @@
 # - Four jobs, each one runner and one cargo-mutants run over the files in its matrix entry
 #   (`--file`), with `--jobs 2`: three on windows-2025 (the runner of e2e-windows.yml's smoke
 #   test), one on macos-15 (ci.yml's). Each file list comes from a grep of `cfg(windows)`,
-#   `cfg(not(unix))` and `cfg(target_os = "macos")` in the crate, outside tests, plus the files
-#   whose mutants need a case-insensitive file system (writeback.rs, undo.rs, refuse.rs). A whole
-#   file is mutated, so mutants Linux already tests run again here; that keeps the lists simple.
+#   `cfg(not(unix))` and `cfg(target_os = "macos")`, outside tests, in the crates the issue
+#   names (process, matters, settings, store), plus the files whose mutants need a
+#   case-insensitive file system (writeback.rs, undo.rs, refuse.rs). A whole file is mutated, so
+#   mutants Linux already tests run again here; that keeps the lists simple. Left out:
+#   crates/limits/src/readers/paths.rs's `cfg!(windows)` site, since limits was not in the issue.
 # - The config is .cargo/mutants.toml without its `exclude_globs` entries for the files mutated
-#   here (the settings OS shims, excluded on Linux because they are not compiled there).
+#   here (the settings OS shims, excluded on Linux because they are not compiled there), so the
+#   shims' own mutants run. Its `exclude_re` still applies, including SystemDirs' `home` and
+#   `known_folder` in crates/settings/src/system.rs: no test reads the real OS folders on any OS
+#   (tests use their own `PlatformDirs`), so those mutants stay excluded on Windows too.
 #   .github/scripts/mutants-platform.sh writes it, and fails a file that gives no mutant.
 # - It only reports: a missed or timed-out mutant shows in the job summary and the artifact
 #   mutants-platform-<job> (mutants.out, kept 14 days), and never fails the job. A failed setup,
@@ -155,7 +160,7 @@ jobs:
           EXE: ${{ runner.os == 'Windows' && '.exe' || '' }}
         run: |
           set -euo pipefail
-          cargo build -p clauseo-fake_agent --bin fake_agent
+          cargo build --locked -p clauseo-fake_agent --bin fake_agent
           bin="$GITHUB_WORKSPACE/target/debug/fake_agent$EXE"
           test -f "$bin"
           echo "CLAUSEO_FAKE_AGENT_BIN=$bin" >> "$GITHUB_ENV"
@@ -165,6 +170,7 @@ jobs:
 
       # $PACKAGES and $FILES are split on purpose, into one -p and one --file per word.
       - name: cargo mutants
+        id: mutants
         timeout-minutes: ${{ matrix.minutes }}
         run: |
           set -uo pipefail
@@ -185,8 +191,13 @@ jobs:
         if: ${{ !cancelled() }}
         env:
           NAME: ${{ matrix.name }}
+          OUTCOME: ${{ steps.mutants.outcome }}
         run: |
           {
+            if [ "$OUTCOME" != "success" ]; then
+              echo "partial run: the step timed out or failed; counts cover only the mutants tested"
+              echo
+            fi
             echo "## Mutants on their own OS: $NAME"
             if [ -f mutants.out/outcomes.json ]; then
               jq -r '"\(.total_mutants) mutants: \(.caught) caught, \(.missed) missed,"
