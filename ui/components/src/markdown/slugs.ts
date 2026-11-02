@@ -10,6 +10,8 @@ import type { Element, ElementContent, Root } from "hast";
 
 const REMOVED = /[^\p{L}\p{M}\p{Nd}\p{Nl}\p{Pc} -]/gu;
 const HEADING = /^h[1-6]$/;
+/** The hast elements a heading may sit in (as the mdast flow containers become): no other is walked. */
+const CONTAINERS = new Set(["blockquote", "ul", "ol", "li", "dl", "dd"]);
 
 /** The id of a heading whose slug is `value`, in the answer `scope` (before the sanitiser's prefix). */
 export function headingId(scope: string, value: string): string {
@@ -30,7 +32,11 @@ function textOf(nodes: readonly ElementContent[]): string {
   return text;
 }
 
-/** The headings of `root`, in document order (an iterative walk: the tree may be deep). */
+/**
+ * The headings of `root`, in document order (an iterative walk: the tree may be deep). It goes into
+ * CONTAINERS only, never into a paragraph, table or code block: it runs on the streaming block at every
+ * update.
+ */
 function headingsIn(root: Root): Element[] {
   const found: Element[] = [];
   const stack: (Root | Element)[] = [root];
@@ -41,7 +47,11 @@ function headingsIn(root: Root): Element[] {
     }
     for (let index = node.children.length - 1; index >= 0; index--) {
       const child = node.children[index]!;
-      if (child.type === "element") stack.push(child);
+      if (
+        child.type === "element" &&
+        (HEADING.test(child.tagName) || CONTAINERS.has(child.tagName))
+      )
+        stack.push(child);
     }
   }
   return found;
@@ -90,18 +100,31 @@ export function numberBlockSlugs(
 }
 
 /**
- * A copy of the sanitised `root` whose headings carry the ids of `slugs` (one per heading, in order), each
- * made by `id`: what a block shows when an earlier heading took some of its slugs.
+ * The sanitised `root` with its headings carrying the ids of `slugs` (one per heading, in order, as
+ * headingsIn finds them), each made by `id`: what a block shows when an earlier heading took some of its
+ * slugs. Only the headings and the containers above them are copied; the rest is shared with `root`, which
+ * stays as it was. Recursive: the trees given have passed answer.ts's depth check.
  */
 export function withSlugs(
   root: Root,
   slugs: readonly string[],
   id: (value: string) => string,
 ): Root {
-  const copy = structuredClone(root);
-  headingsIn(copy).forEach((heading, index) => {
-    const value = slugs[index];
-    if (value) heading.properties["id"] = id(value);
-  });
-  return copy;
+  let next = 0;
+  const copy = <T extends Root | Element>(node: T): T => {
+    let children: T["children"] | undefined;
+    node.children.forEach((child, index) => {
+      if (child.type !== "element") return;
+      let made = child;
+      if (HEADING.test(child.tagName)) {
+        const value = slugs[next++];
+        if (value) made = { ...child, properties: { ...child.properties, id: id(value) } };
+      } else if (CONTAINERS.has(child.tagName)) made = copy(child);
+      if (made === child) return;
+      children ??= [...node.children] as T["children"];
+      children[index] = made;
+    });
+    return children ? { ...node, children } : node;
+  };
+  return copy(root);
 }
