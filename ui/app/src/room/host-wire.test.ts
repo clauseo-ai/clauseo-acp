@@ -9,9 +9,14 @@ import type {
   QueryResult,
   SettingsView,
 } from "../transport/protocol.ts";
-import type { UiLite, UiMotion } from "./host-next.ts";
+import type { AgentSummary, UiLite, UiMotion } from "./host-next.ts";
 import { nextHostOf, type Papers } from "./host-next.ts";
-import { wirePapersHost, wireSettingsHost, type WireSettingsSource } from "./host-wire.ts";
+import {
+  wireAgentsHost,
+  wirePapersHost,
+  wireSettingsHost,
+  type WireSettingsSource,
+} from "./host-wire.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 
 const VIEW: SettingsView = {
@@ -200,10 +205,45 @@ test("papers: another answer rejects as internal, and the host's refusal as itse
   ).rejects.toEqual(refused);
 });
 
-test("a transport with the app feed (the desktop's) gives settings and papers, and no other part", () => {
+const AGENTS: AgentSummary[] = [
+  { id: "claude-acp", kind: "claude" },
+  { id: "codex-acp", kind: "codex" },
+  { id: "fake-agent" },
+];
+
+test("agents: list_agents is asked, and the answer's agents come back as they are, a kind-less one too", async () => {
+  const asked: HostQuery[] = [];
+  const host = wireAgentsHost({
+    query: async (query) => {
+      asked.push(query);
+      return { agents: AGENTS };
+    },
+  });
+  await expect(host.listAgents()).resolves.toEqual(AGENTS);
+  expect(asked).toEqual(["list_agents"]);
+});
+
+test("agents: another answer rejects as internal, and the host's refusal as itself", async () => {
+  const refused = { code: "internal", message: "no settings", retryable: false };
+  await expect(
+    wireAgentsHost({ query: async () => ({ matters: [] }) }).listAgents(),
+  ).rejects.toMatchObject({ code: "internal" });
+  await expect(
+    wireAgentsHost({ query: () => Promise.reject(refused) }).listAgents(),
+  ).rejects.toEqual(refused);
+});
+
+test("a transport with the app feed (the desktop's) gives settings, papers and agents, and no other part", () => {
   const { source } = fakeSource();
   const next = nextHostOf(source as unknown as HostTransport);
   expect(next.settings).not.toBeNull();
   expect(next.papers).not.toBeNull();
-  expect([next.matters, next.location, next.app]).toEqual([null, null, null]);
+  expect(next.agents).not.toBeNull();
+  expect([next.matters, next.location, next.app, next.restart, next.retry]).toEqual([
+    null,
+    null,
+    null,
+    null,
+    null,
+  ]);
 });
