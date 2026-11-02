@@ -570,6 +570,54 @@
     "by": "Rohan",
     "note": "Rohan, on the review page (built from U3 53b4ca5d, approved as U3-42)"
   },
+  "U3-err-matter.folder_is_drive": {
+    "en": "A whole drive can't be a matter.",
+    "hi": "पूरी ड्राइव मामला नहीं बन सकती।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (H5-matters-rail, #148 5c3ad943)"
+  },
+  "U3-err-matter.folder_is_home": {
+    "en": "Your home folder can't be a matter.",
+    "hi": "आपका होम फ़ोल्डर मामला नहीं बन सकता।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (H5-matters-rail, #148 5c3ad943)"
+  },
+  "U3-err-matter.folder_is_system": {
+    "en": "A system folder can't be a matter.",
+    "hi": "कोई सिस्टम फ़ोल्डर मामला नहीं बन सकता।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (H5-matters-rail, #148 5c3ad943)"
+  },
+  "U3-err-matter.folder_unreadable": {
+    "en": "Clauseo can't read that folder.",
+    "hi": "Clauseo वह फ़ोल्डर नहीं पढ़ पा रहा।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (H5-matters-rail, #148 5c3ad943)"
+  },
+  "U3-err-matter.folder_is_matter": {
+    "en": "That folder is already a matter's, or inside one.",
+    "hi": "वह फ़ोल्डर पहले से किसी मामले का है, या किसी मामले के भीतर है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (H5-matters-rail, #148 5c3ad943)"
+  },
+  "U3-err-matter.folder_in_matters_root": {
+    "en": "That folder holds Clauseo's own data.",
+    "hi": "उस फ़ोल्डर में Clauseo का अपना डेटा है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (H5-matters-rail, #148 5c3ad943)"
+  },
   "U3-err-matter.codex_folder": {
     "en": "This matter's folder holds a .codex folder. Rename or remove it to use Codex here.",
     "hi": "इस मामले के फ़ोल्डर में एक .codex फ़ोल्डर है। यहाँ Codex का उपयोग करने के लिए उसका नाम बदलें या उसे हटाएँ।",
