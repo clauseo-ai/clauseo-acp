@@ -1,7 +1,15 @@
 // The `/` menu's rules apart from the page: where a trigger stands, what a query matches, the highlight kept by name
-// when the list changes, what a pick puts in, and where the menu stands by the caret.
+// when the list changes, what a pick puts in and how far, the rows' ids, and where the menu stands by the caret.
 import { expect, test } from "vitest";
-import { keepHighlight, matching, picked, placeMenu, slashAt } from "./composer-menu-logic.ts";
+import {
+  keepHighlight,
+  matching,
+  optionIds,
+  picked,
+  placeMenu,
+  runEnd,
+  slashAt,
+} from "./composer-menu-logic.ts";
 
 const COMMANDS = [
   { name: "review", description: "Review the changes" },
@@ -69,4 +77,19 @@ test("the menu stands at the caret's x, below its line, or above it at the windo
   // a menu taller than either side: the larger side, cut to it
   const tall = placeMenu({ x: 10, top: 200, bottom: 226 }, { width: 240, height: 900 }, view);
   expect(tall).toEqual({ left: 10, top: 230, maxHeight: 600 - 8 - 230 });
+});
+
+test("a pick's run ends at the next whitespace or the field's end", () => {
+  expect(runEnd("/review the lease", 3)).toBe(7);
+  expect(runEnd("/re", 3)).toBe(3);
+  expect(runEnd("x /re\nview", 5)).toBe(5);
+  expect(runEnd("/reवि", 3)).toBe(5);
+});
+
+test("the rows' ids come from their names, a name listed twice counted, never from their place", () => {
+  expect(optionIds("m", COMMANDS)).toEqual(["m-review", "m-Restart", "m-compact"]);
+  expect(optionIds("m", [COMMANDS[2]!, COMMANDS[0]!])).toEqual(["m-compact", "m-review"]);
+  const twice = optionIds("m", [COMMANDS[0]!, { name: "review", description: "" }]);
+  expect(new Set(twice).size).toBe(2);
+  expect(optionIds("m", [{ name: "a b/ç", description: "" }])[0]).not.toMatch(/\s/);
 });

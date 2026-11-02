@@ -198,16 +198,18 @@ export function Composer<V extends string = string>({
   // a fill asked for while an input method composed: put in at the composition's end, if the field is empty then
   const fillAfter = useRef<string | null>(null);
   const fitRef = useRef<() => void>(() => {});
-  // the menu's chunk is asked for as the field is first focused, with what the field held then, so a `/` typed
-  // before it lands is read as it lands
-  const [armed, setArmed] = useState<{ field: HTMLTextAreaElement; held: string } | null>(null);
+  // the menu's chunk is asked for as the field is first focused with commands to list, with what the field held
+  // then, so a `/` typed before it lands is read as it lands; the chunk reads it once
+  const [armed, setArmed] = useState<HTMLTextAreaElement | null>(null);
+  const held = useRef<string | null>(null);
   const [shown, setShown] = useState<MenuShown>(null);
-  const hasCommands = commands !== undefined;
-  // commands that arrive while the field already has the focus arm it too
+  const hasCommands = commands !== undefined && commands.length > 0;
+  // commands that arrive while the field already has the focus arm it too, but with nothing to read as the chunk
+  // lands: a `/re` run typed before the list came is old words, and only the next insertion opens the menu
   useEffect(() => {
     const a = area.current;
     if (hasCommands && a !== null && a.ownerDocument.activeElement === a)
-      setArmed((was) => was ?? { field: a, held: a.value });
+      setArmed((was) => was ?? a);
   }, [hasCommands]);
   const gated = gate !== undefined;
   // the room's field is the one the lawyer can see: hidden under a gate, it is no field for the room's keys or focus
@@ -397,14 +399,15 @@ export function Composer<V extends string = string>({
             placeholder={placeholder ?? w.t("Ask about this matter")}
             // the `/` menu: a textarea takes no combobox role and no aria-expanded (ARIA in HTML; axe's
             // aria-allowed-role and aria-allowed-attr), so it says it has a list and, while open, which row is lit
-            aria-autocomplete={commands !== undefined ? "list" : undefined}
-            aria-haspopup={commands !== undefined ? "listbox" : undefined}
+            aria-autocomplete={hasCommands ? "list" : undefined}
+            aria-haspopup={hasCommands ? "listbox" : undefined}
             aria-controls={shown?.list}
             aria-activedescendant={shown?.active}
             data-menu={shown !== null ? "" : undefined}
             onFocus={(e) => {
-              if (armed === null && commands !== undefined)
-                setArmed({ field: e.currentTarget, held: e.currentTarget.value });
+              if (armed !== null || !hasCommands) return;
+              held.current = e.currentTarget.value;
+              setArmed(e.currentTarget);
             }}
             onInput={changed}
             onCompositionStart={() => {
@@ -442,22 +445,18 @@ export function Composer<V extends string = string>({
               onAsk?.(e.currentTarget.value);
             }}
           />
-          {armed !== null &&
-            commands !== undefined &&
-            commands.length > 0 &&
-            !gated &&
-            !disabled && (
-              <Suspense fallback={null}>
-                <CommandMenu
-                  field={armed.field}
-                  commands={commands}
-                  composing={composing}
-                  held={armed.held}
-                  onShown={setShown}
-                  testIds={{ menu: testIds?.menu, item: testIds?.menuItem }}
-                />
-              </Suspense>
-            )}
+          {armed !== null && commands !== undefined && hasCommands && !gated && !disabled && (
+            <Suspense fallback={null}>
+              <CommandMenu
+                field={armed}
+                commands={commands}
+                composing={composing}
+                held={held}
+                onShown={setShown}
+                testIds={{ menu: testIds?.menu, item: testIds?.menuItem }}
+              />
+            </Suspense>
+          )}
           {gate === undefined && (
             <>
               {onAddPapers !== undefined && (

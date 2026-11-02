@@ -3,17 +3,12 @@
 // conversation, so each opens fresh, with its own words in the field. The thread's list, its rows and the Markdown renderer are one chunk of
 // their own (chunk.ts, list.tsx), started as Work mounts; the session opens the thread only once it is in, so the
 // rows never wait for it. The composer and the transcript's box are here, for the first paint.
-import { Suspense, useEffect, useMemo, useRef } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { ComposerHandle, PlanChoice } from "@clauseo/components/clauseo/composer.tsx";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
-import {
-  useHeader,
-  useStreamError,
-  useStreamPart,
-  useViewStore,
-  useWatch,
-} from "../../store/hooks.ts";
+import { useStreamError, useStreamPart, useViewStore, useWatch } from "../../store/hooks.ts";
+import type { StreamView } from "../../store/view.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type { AvailableCommand, MatterSummary, ThreadId } from "../../transport/protocol.ts";
 import { nextHostOf } from "../host-next.ts";
@@ -30,6 +25,23 @@ import {
 import { WorkComposer } from "./work-composer.tsx";
 
 const NO_COMMANDS: readonly AvailableCommand[] = [];
+
+const sameCommand = (a: AvailableCommand | undefined, b: AvailableCommand) =>
+  a !== undefined &&
+  a.name === b.name &&
+  a.description === b.description &&
+  a.input_hint === b.input_hint;
+
+/** The header's commands, the same array for as long as they read the same: a header that changes for its status or
+ * its usage, as it does through a turn, re-renders nothing here. */
+function commandsPick(): (v: StreamView | undefined) => readonly AvailableCommand[] {
+  let last = NO_COMMANDS;
+  return (v) => {
+    const next = v?.header?.header?.commands ?? NO_COMMANDS;
+    if (next.length !== last.length || next.some((c, i) => !sameCommand(last[i], c))) last = next;
+    return last;
+  };
+}
 
 /** The work column of the room: the matter's thread, and the composer (disabled with no matter). */
 export function Work({
@@ -77,7 +89,8 @@ export function Work({
   const busy = useBusy(stream, session.sentTurn);
   const failed = useStreamError(store, stream);
   // the agent's commands for the composer's `/` menu, as the thread's header has them
-  const commands = useHeader(store, stream)?.header?.commands ?? NO_COMMANDS;
+  const [pickCommands] = useState(commandsPick);
+  const commands = useStreamPart(store, stream, pickCommands);
   // U10: an answer Claude stopped giving, and Restart once the host has it (H10)
   const { lang } = useWords();
   const { brk, live } = useThreadBreak(store, stream);

@@ -4,8 +4,12 @@
 // - No query is read while an input method composes; a trigger typed inside a composition is read at
 //   compositionend. Every insertion outside a composition reads it, a replacement too (Tamil99 and Anjal on macOS
 //   edit by replacement and never compose).
-// - A pick replaces the trigger through execCommand("insertText"), so one undo takes it back.
+// - A pick replaces the trigger's whole run through execCommand("insertText"), so one undo takes it back. A modified
+//   Enter (Ctrl, Cmd, Alt) is no pick.
 // - A list that changes while the menu is open is read again, the highlighted row kept by its name.
+// - A polite live region says how many commands the menu opened with, then the highlighted one's name as the arrows
+//   move: a textarea takes no combobox role, and VoiceOver follows aria-activedescendant reliably only on one.
+// - It stands at the caret, placed again as the window resizes or anything scrolls while it is open.
 import { useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "../lib/cn.ts";
@@ -18,7 +22,9 @@ import {
   caretOf,
   keepHighlight,
   matching,
+  optionIds,
   picked,
+  runEnd,
   placeMenu,
   slashAt,
   type Slash,
@@ -42,9 +48,10 @@ export function CommandMenu({
   commands: readonly SlashCommand[];
   /** The composer's own record of a composition in progress. */
   composing: RefObject<boolean>;
-  /** What the field held as it was first focused: words typed since, while this chunk was on its way, are read as
-   * it arrives, so a `/` typed then opens the menu. */
-  held: string;
+  /** What the field held as it was first focused, or null when the commands came while it had the focus: words typed
+   * since, while this chunk was on its way, are read as it arrives, so a `/` typed then opens the menu. Read once,
+   * then emptied, so the menu mounting again never reads old words. */
+  held: RefObject<string | null>;
   onShown: (shown: MenuShown) => void;
   testIds?: { menu?: string | undefined; item?: string | undefined } | undefined;
 }) {
@@ -61,11 +68,23 @@ export function CommandMenu({
   const picking = useRef(false);
   const plane = useRef<HTMLDivElement>(null);
   const shown = useRef<MenuShown>(null);
+  // what the live region says: the count as the menu opens, then the highlighted row's name
+  const [said, setSaid] = useState("");
 
   const setOpen = (next: Open | null) => {
+    const was = now.current.open;
     now.current = { ...now.current, open: next };
     setOpenState(next);
-    const s: MenuShown = next === null ? null : { list, active: `${list}-${next.hi}` };
+    if (next === null) setSaid("");
+    else if (was === null) {
+      const n = next.items.length;
+      setSaid(n === 1 ? w.th("1 command") : w.th("{n} commands", { n }));
+    } else {
+      const name = next.items[next.hi]?.name;
+      if (name !== undefined && name !== was.items[was.hi]?.name) setSaid(`/${name}`);
+    }
+    const s: MenuShown =
+      next === null ? null : { list, active: optionIds(list, next.items)[next.hi] ?? list };
     if (s?.active !== shown.current?.active || (s === null) !== (shown.current === null)) {
       shown.current = s;
       onShown(s);
@@ -97,18 +116,19 @@ export function CommandMenu({
   const pick = (command: SlashCommand) => {
     const cur = now.current.open;
     if (cur === null) return;
-    const text = picked(command, field.value[field.selectionEnd]);
+    const end = runEnd(field.value, field.selectionEnd);
+    const text = picked(command, field.value[end]);
     setOpen(null);
     picking.current = true;
     try {
       field.focus();
-      field.setSelectionRange(cur.slash.at, field.selectionEnd);
+      field.setSelectionRange(cur.slash.at, end);
       const doc = field.ownerDocument;
       const ok =
         typeof doc.execCommand === "function" && doc.execCommand("insertText", false, text);
       if (!ok || field.value.slice(cur.slash.at, cur.slash.at + text.length) !== text) {
         // no undo-keeping edit in this engine (happy-dom): put the words in, and tell the field's listeners
-        field.setRangeText(text, cur.slash.at, field.selectionEnd, "end");
+        field.setRangeText(text, cur.slash.at, end, "end");
         field.dispatchEvent(new Event("input", { bubbles: true }));
       }
     } finally {
@@ -137,7 +157,13 @@ export function CommandMenu({
         e.preventDefault();
         const n = cur.items.length;
         setOpen({ ...cur, hi: (cur.hi + (e.key === "ArrowDown" ? 1 : n - 1)) % n });
-      } else if ((e.key === "Enter" && !e.shiftKey) || (e.key === "Tab" && !e.shiftKey)) {
+      } else if (
+        (e.key === "Enter" || e.key === "Tab") &&
+        !e.shiftKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey
+      ) {
         // never a send while the menu is open: the composer sees this Enter prevented and leaves it
         e.preventDefault();
         const item = cur.items[cur.hi];
@@ -172,9 +198,11 @@ export function CommandMenu({
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [field, composing]);
 
-  // a `/` typed while this chunk was on its way: read as it arrives
+  // a `/` typed while this chunk was on its way: read as it arrives, once, and only for the chunk the focus asked for
   useEffect(() => {
-    if (field.value !== held && field.ownerDocument.activeElement === field)
+    const was = held.current;
+    held.current = null;
+    if (was !== null && field.value !== was && field.ownerDocument.activeElement === field)
       refreshRef.current(true);
     // once, as the chunk arrives
     // oxlint-disable-next-line react-hooks/exhaustive-deps
@@ -188,70 +216,107 @@ export function CommandMenu({
   // closed, the field shows nothing of it
   useEffect(() => () => onShown(null), [onShown]);
 
-  // at the caret, once drawn, and the highlighted row in view
-  useLayoutEffect(() => {
+  /** Puts the open menu at the caret. */
+  const place = () => {
     const el = plane.current;
-    if (el === null || open === null) return;
+    if (el === null) return;
     const view = field.ownerDocument.defaultView;
-    const place = placeMenu(
+    const at = placeMenu(
       caretOf(field),
       { width: el.offsetWidth, height: el.scrollHeight },
       { width: view?.innerWidth ?? 0, height: view?.innerHeight ?? 0 },
     );
-    el.style.left = `${place.left}px`;
-    el.style.top = `${place.top}px`;
-    el.style.maxHeight = `${place.maxHeight}px`;
+    el.style.left = `${at.left}px`;
+    el.style.top = `${at.top}px`;
+    el.style.maxHeight = `${at.maxHeight}px`;
+  };
+  const placeRef = useRef(place);
+  placeRef.current = place;
+
+  // at the caret, once drawn, and the highlighted row in view
+  useLayoutEffect(() => {
+    const el = plane.current;
+    if (el === null || open === null) return;
+    place();
     const hi = el.children.item(open.hi);
     if (typeof hi?.scrollIntoView === "function") hi.scrollIntoView({ block: "nearest" });
   });
 
-  if (open === null) return null;
-  return createPortal(
-    <div
-      ref={plane}
-      id={list}
-      role="listbox"
-      aria-label={w.th("Commands")}
-      data-testid={testIds?.menu}
-      className={cn(raised({ width: "menu" }), "fixed z-20")}
-    >
-      {open.items.map((c, i) => (
-        <div
-          key={`${i}:${c.name}`}
-          id={`${list}-${i}`}
-          role="option"
-          aria-selected={i === open.hi}
-          data-highlighted={i === open.hi ? "" : undefined}
-          data-testid={testIds?.item}
-          className={cn(row, "items-start")}
-          // the field keeps the focus: a press picks, as Enter does
-          onPointerDown={(e) => {
-            e.preventDefault();
-            pick(c);
-          }}
-          onPointerMove={() => {
-            if (i !== open.hi) setOpen({ ...open, hi: i });
-          }}
-        >
-          <span className="min-w-0">
-            <span className="block">
-              <bdi>/{c.name}</bdi>
-              {c.input_hint !== undefined && c.input_hint !== "" && (
-                <span className="text-muted">
-                  {" "}
-                  <Mixed>{c.input_hint}</Mixed>
+  // and again as the window resizes or anything scrolls under it, the field included; the list's own scroll aside
+  const isOpen = open !== null;
+  useEffect(() => {
+    const view = field.ownerDocument.defaultView;
+    if (!isOpen || view === null) return;
+    const again = (e: Event) => {
+      if (e.target !== plane.current) placeRef.current();
+    };
+    view.addEventListener("resize", again);
+    view.addEventListener("scroll", again, { capture: true, passive: true });
+    return () => {
+      view.removeEventListener("resize", again);
+      view.removeEventListener("scroll", again, { capture: true });
+    };
+  }, [isOpen, field]);
+
+  const live = (
+    <span className="sr-only" aria-live="polite" aria-atomic="true">
+      {said}
+    </span>
+  );
+  // one tree open or closed, so the live region is the same node throughout and is heard as it changes
+  const ids = open === null ? [] : optionIds(list, open.items);
+  return (
+    <>
+      {live}
+      {open !== null &&
+        createPortal(
+          <div
+            ref={plane}
+            id={list}
+            role="listbox"
+            aria-label={w.th("Commands")}
+            data-testid={testIds?.menu}
+            className={cn(raised({ width: "menu" }), "fixed z-20")}
+          >
+            {open.items.map((c, i) => (
+              <div
+                key={ids[i]}
+                id={ids[i]}
+                role="option"
+                aria-selected={i === open.hi}
+                data-highlighted={i === open.hi ? "" : undefined}
+                data-testid={testIds?.item}
+                className={cn(row, "items-start")}
+                // the field keeps the focus: a press picks, as Enter does
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  pick(c);
+                }}
+                onPointerMove={() => {
+                  if (i !== open.hi) setOpen({ ...open, hi: i });
+                }}
+              >
+                <span className="min-w-0">
+                  <span className="block">
+                    <bdi>/{c.name}</bdi>
+                    {c.input_hint !== undefined && c.input_hint !== "" && (
+                      <span className="text-muted">
+                        {" "}
+                        <Mixed>{c.input_hint}</Mixed>
+                      </span>
+                    )}
+                  </span>
+                  {c.description !== "" && (
+                    <span className={rowNote}>
+                      <Mixed>{c.description}</Mixed>
+                    </span>
+                  )}
                 </span>
-              )}
-            </span>
-            {c.description !== "" && (
-              <span className={rowNote}>
-                <Mixed>{c.description}</Mixed>
-              </span>
-            )}
-          </span>
-        </div>
-      ))}
-    </div>,
-    layer ?? field.ownerDocument.body,
+              </div>
+            ))}
+          </div>,
+          layer ?? field.ownerDocument.body,
+        )}
+    </>
   );
 }
