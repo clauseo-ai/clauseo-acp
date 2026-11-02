@@ -48,7 +48,7 @@ fn an_upstream_407_gives_502_and_an_upstream_auth_denial() {
             upstream: address.to_string()
         }]
     );
-    assert_eq!(rig.records()[0].verdict, Verdict::UpstreamAuth);
+    assert_eq!(rig.records(1)[0].verdict, Verdict::UpstreamAuth);
 }
 
 #[test]
@@ -89,7 +89,7 @@ fn a_plain_http_407_from_the_upstream_gives_502_and_an_upstream_auth_denial() {
             upstream: address.to_string()
         }]
     );
-    assert_eq!(rig.records()[0].verdict, Verdict::UpstreamAuth);
+    assert_eq!(rig.records(1)[0].verdict, Verdict::UpstreamAuth);
 }
 
 #[test]

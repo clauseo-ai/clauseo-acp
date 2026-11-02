@@ -118,7 +118,7 @@ fn three_failures_in_a_row_are_unreachable_and_the_next_success_reachable() {
     assert_eq!(rig.connect("up.test:443").1, 200);
     assert_eq!(rig.reach(), vec![Reachable, Unreachable, Reachable]);
     let failed = rig
-        .records()
+        .records(7)
         .iter()
         .filter(|r| r.verdict == Verdict::Failed)
         .count();
@@ -213,7 +213,7 @@ fn origin_sockets_count_against_the_launch_socket_cap() {
     let _idle = rig.agent();
     // The second client fits, but its origin socket would be the third: 503, and no denial.
     assert_eq!(rig.connect("api.anthropic.com:443").1, 503);
-    assert_eq!(rig.records()[0].verdict, Verdict::Busy);
+    assert_eq!(rig.records(1)[0].verdict, Verdict::Busy);
     assert_eq!(rig.denials(), Vec::<Denial>::new());
 }
 
@@ -263,6 +263,68 @@ fn a_tunnel_idle_past_the_limit_is_closed() {
     assert_eq!(round_trip(&mut tunnel, b"ping"), b"ping");
     // Then nothing either way: the proxy closes the tunnel.
     assert_eq!(read_all(&mut tunnel), b"");
-    let record = &rig.records()[0];
+    let record = &rig.records(1)[0];
     assert_eq!((record.verdict, record.bytes_up), (Verdict::Tunnel, 4));
+}
+
+#[test]
+fn idle_browser_connections_cannot_lock_out_the_agent_listener() {
+    let rig = echo_rig_with(Limits {
+        pending: 2,
+        ..Limits::default()
+    });
+    // The token-free browser listener's pending slots fill, and its next connection is closed.
+    let _first = rig.browser();
+    let _second = rig.browser();
+    let mut third = rig.browser();
+    assert!(closed_unanswered(&mut third));
+    // The agent listener has its own.
+    assert_eq!(rig.connect("api.anthropic.com:443").1, 200);
+}
+
+#[test]
+fn dns_past_the_connect_timeout_answers_504() {
+    let rig = echo_rig_with(Limits {
+        connect: Duration::from_millis(100),
+        ..Limits::default()
+    });
+    // Never released: the lookup outlives the timeout.
+    let _held = rig.net.hold_next_resolve();
+    assert_eq!(rig.connect("api.anthropic.com:443").1, 504);
+    assert_eq!(rig.records(1)[0].verdict, Verdict::Failed);
+    assert_eq!(rig.net.dialled(), Vec::<SocketAddr>::new());
+}
+
+#[test]
+fn a_route_lookup_past_the_connect_timeout_goes_direct() {
+    let (release, wait) = std::sync::mpsc::channel::<()>();
+    let wait = std::sync::Mutex::new(wait);
+    // An OS lookup that never answers while the test runs.
+    let hung = move |_: crate::proxy::upstream::Scheme, _: &str, _: u16| {
+        if wait.lock().unwrap().recv().is_err() {
+            // Released by the test dropping its end.
+        }
+        crate::Route::Http {
+            host: "127.0.0.1".to_owned(),
+            port: 9,
+        }
+    };
+    let rig = rig(Setup {
+        allow: vec!["api.anthropic.com"],
+        upstream: crate::Upstream::System,
+        os: Some(Box::new(hung)),
+        limits: Limits {
+            connect: Duration::from_millis(100),
+            ..Limits::default()
+        },
+        ..Setup::default()
+    });
+    rig.net.name("api.anthropic.com", &["192.0.2.10"]);
+    rig.net.route("192.0.2.10:443", echo());
+    let (mut tunnel, code) = rig.connect("api.anthropic.com:443");
+    assert_eq!(code, 200);
+    assert_eq!(round_trip(&mut tunnel, b"direct"), b"direct");
+    let direct: SocketAddr = "192.0.2.10:443".parse().unwrap();
+    assert_eq!(rig.net.dialled(), vec![direct]);
+    drop(release);
 }

@@ -26,9 +26,9 @@ mod tests;
 #[cfg(windows)]
 mod windows;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::sync::{Mutex, OnceLock, PoisonError};
+use std::sync::{Condvar, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::Duration;
 
 use url::Url;
@@ -42,6 +42,9 @@ const CACHE_FOR: Duration = Duration::from_mins(5);
 /// The most OS answers kept. At the cap a new answer first drops the expired ones, then the
 /// oldest, so random names under a firm wildcard cannot grow the cache.
 const CACHE_MAX: usize = 1024;
+
+/// The most OS lookups running at once per [`Lookup`]; a miss past it goes direct, uncached.
+const OS_LOOKUPS_MOST: usize = 4;
 
 /// Where the firm's upstream proxy comes from.
 #[derive(Clone)]
@@ -151,7 +154,7 @@ pub(crate) struct Lookup {
 enum Source {
     Direct,
     Fixed(Route),
-    System(System),
+    System(Box<System>),
 }
 
 /// `Upstream::System`: per scheme, the environment's proxy (with `NO_PROXY`) when usable, else
@@ -169,10 +172,37 @@ struct OsLookup {
     clock: Box<dyn Clock>,
     /// Per scheme, normalised host and port: the answer and when it was got.
     cache: Mutex<Cache>,
+    /// The lookups running now, one per key; `landed` wakes those waiting on one.
+    flights: Mutex<Flights>,
+    landed: Condvar,
 }
 
-/// OS answers per scheme, normalised host and port, with when each was got.
-type Cache = HashMap<(Scheme, String, u16), (Route, Duration)>;
+/// A scheme, normalised host and port.
+type Key = (Scheme, String, u16);
+
+/// OS answers per key, with when each was got.
+type Cache = HashMap<Key, (Route, Duration)>;
+
+/// The OS lookups in flight.
+#[derive(Default)]
+struct Flights {
+    running: HashSet<Key>,
+    /// Callers waiting for another's lookup of the same key (read by tests).
+    waiting: usize,
+}
+
+/// One running lookup: ends its flight and wakes the waiters when it drops, a panic included.
+struct Flight<'a> {
+    os: &'a OsLookup,
+    key: &'a Key,
+}
+
+impl Drop for Flight<'_> {
+    fn drop(&mut self) {
+        self.os.flights().running.remove(self.key);
+        self.os.landed.notify_all();
+    }
+}
 
 impl Lookup {
     /// Refuses a Fixed URL that is not `http://host[:port]` with no userinfo, path, query or
@@ -196,9 +226,11 @@ impl Lookup {
                     bad.reason()
                 ))
             })?),
-            Upstream::System => {
-                Source::System(System::new(env, Box::new(resolve), Box::new(clock)))
-            }
+            Upstream::System => Source::System(Box::new(System::new(
+                env,
+                Box::new(resolve),
+                Box::new(clock),
+            ))),
         };
         Ok(Lookup { source })
     }
@@ -220,6 +252,15 @@ impl Lookup {
             Source::Direct | Source::Fixed(_) => 0,
         }
     }
+
+    /// How many callers wait for another's OS lookup (0 when the lookup has no OS part).
+    #[cfg(test)]
+    fn waiting(&self) -> usize {
+        match &self.source {
+            Source::System(system) => system.os.flights().waiting,
+            Source::Direct | Source::Fixed(_) => 0,
+        }
+    }
 }
 
 impl System {
@@ -237,6 +278,8 @@ impl System {
                 resolve,
                 clock,
                 cache: Mutex::new(HashMap::new()),
+                flights: Mutex::new(Flights::default()),
+                landed: Condvar::new(),
             },
         }
     }
@@ -279,19 +322,57 @@ fn env_route(name: &str, raw: Option<&str>) -> Option<Route> {
 }
 
 impl OsLookup {
-    /// A fresh cached answer, else the OS's, with no lock held while the OS answers.
+    /// A fresh cached answer, else the OS's, with no lock held while the OS answers. One lookup
+    /// runs per key: a second caller waits for the first's answer. At most [`OS_LOOKUPS_MOST`]
+    /// run at once; a miss past that goes direct for this request and is not cached.
     fn route(&self, scheme: Scheme, host: &str, port: u16) -> Route {
         let key = (scheme, host.to_owned(), port);
-        let now = self.clock.now();
-        {
-            let cache = self.cache.lock().unwrap_or_else(PoisonError::into_inner);
-            if let Some((route, at)) = cache.get(&key)
-                && now.saturating_sub(*at) < CACHE_FOR
-            {
-                return route.clone();
+        let mut flights = self.flights();
+        loop {
+            if let Some(route) = self.fresh(&key) {
+                return route;
             }
+            if !flights.running.contains(&key) {
+                break;
+            }
+            flights.waiting += 1;
+            flights = self
+                .landed
+                .wait_while(flights, |f| f.running.contains(&key))
+                .unwrap_or_else(PoisonError::into_inner);
+            flights.waiting -= 1;
         }
+        if flights.running.len() >= OS_LOOKUPS_MOST {
+            tracing::debug!(host, port, "OS proxy lookups all busy; going direct");
+            return Route::Direct;
+        }
+        flights.running.insert(key.clone());
+        drop(flights);
+        let _flight = Flight {
+            os: self,
+            key: &key,
+        };
         let route = (self.resolve)(scheme, host, port);
+        self.store(key.clone(), route.clone());
+        route
+    }
+
+    fn flights(&self) -> MutexGuard<'_, Flights> {
+        self.flights.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The cached answer for `key` if it is under 5 minutes old.
+    fn fresh(&self, key: &Key) -> Option<Route> {
+        let now = self.clock.now();
+        let cache = self.cache.lock().unwrap_or_else(PoisonError::into_inner);
+        cache
+            .get(key)
+            .filter(|(_, at)| now.saturating_sub(*at) < CACHE_FOR)
+            .map(|(route, _)| route.clone())
+    }
+
+    /// Keeps an answer, within [`CACHE_MAX`].
+    fn store(&self, key: Key, route: Route) {
         let at = self.clock.now();
         let mut cache = self.cache.lock().unwrap_or_else(PoisonError::into_inner);
         if cache.len() >= CACHE_MAX && !cache.contains_key(&key) {
@@ -305,8 +386,7 @@ impl OsLookup {
                 cache.remove(&oldest);
             }
         }
-        cache.insert(key, (route.clone(), at));
-        route
+        cache.insert(key, (route, at));
     }
 
     #[cfg(test)]
@@ -329,11 +409,11 @@ pub fn upstream_for(upstream: &Upstream, url: &Url) -> Result<Route, Error> {
     let made;
     let lookup = if let Upstream::System = upstream {
         SYSTEM.get_or_init(|| Lookup {
-            source: Source::System(System::new(
+            source: Source::System(Box::new(System::new(
                 Env::from_process(),
                 Box::new(os_route),
                 Box::new(SystemClock::new()),
-            )),
+            ))),
         })
     } else {
         made = Lookup::new(upstream.clone())?;
@@ -394,9 +474,13 @@ fn os_route(scheme: Scheme, host: &str, port: u16) -> Route {
         .ok_or_else(|| "the host is not a URL host".to_owned())
         .and_then(|target| {
             let host = host.to_owned();
-            bounded(WINDOWS_LOOKUP_LIMIT, move || {
-                windows::route(&target, &host, port)
-            })
+            let threads = &WINDOWS_LOOKUP_THREADS;
+            bounded(
+                WINDOWS_LOOKUP_LIMIT,
+                threads,
+                WINDOWS_LOOKUP_THREADS_MOST,
+                move || windows::route(&target, &host, port),
+            )
         });
     settle(host, port, answer)
 }
@@ -405,21 +489,45 @@ fn os_route(scheme: Scheme, host: &str, port: u16) -> Route {
 #[cfg(windows)]
 const WINDOWS_LOOKUP_LIMIT: Duration = Duration::from_secs(10);
 
-/// Runs `lookup` on its own thread and waits at most `limit` for it. A lookup still running
-/// then is left to finish on its thread, and its answer is dropped.
+/// Windows lookup threads alive now, those past their bound included.
 #[cfg(windows)]
+static WINDOWS_LOOKUP_THREADS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+/// The most Windows lookup threads alive at once, across the process.
+#[cfg(windows)]
+const WINDOWS_LOOKUP_THREADS_MOST: usize = 4;
+
+/// Runs `lookup` on its own thread and waits at most `limit` for it. A lookup still running
+/// then is left to finish on its thread, and its answer is dropped. `threads` counts the
+/// threads alive, those left running included; past `most` no thread starts and the lookup
+/// fails, so hung lookups cannot pile up threads.
+#[cfg(any(windows, test))]
 fn bounded(
     limit: Duration,
+    threads: &'static std::sync::atomic::AtomicUsize,
+    most: usize,
     lookup: impl FnOnce() -> Result<Route, String> + Send + 'static,
 ) -> Result<Route, String> {
+    use std::sync::atomic::Ordering;
+    threads
+        .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+            (n < most).then_some(n + 1)
+        })
+        .map_err(|_running| format!("{most} lookups are still running"))?;
     let (answer, answered) = std::sync::mpsc::sync_channel(1);
-    std::thread::Builder::new()
+    let spawned = std::thread::Builder::new()
         .name("clauseo-proxy-lookup".to_owned())
         .spawn(move || {
+            let route = lookup();
+            threads.fetch_sub(1, Ordering::SeqCst);
             // The waiter may have given up; its answer is then dropped.
-            drop(answer.send(lookup()));
-        })
-        .map_err(|error| format!("could not start the lookup thread ({error})"))?;
+            drop(answer.send(route));
+        });
+    if let Err(error) = spawned {
+        threads.fetch_sub(1, Ordering::SeqCst);
+        return Err(format!("could not start the lookup thread ({error})"));
+    }
     answered
         .recv_timeout(limit)
         .map_err(|_timeout| format!("the lookup took over {} s", limit.as_secs()))?

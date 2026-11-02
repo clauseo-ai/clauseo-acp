@@ -31,7 +31,7 @@ fn an_allowed_connect_gets_200_and_bytes_pass_both_ways_unchanged() {
     let dialled: SocketAddr = "192.0.2.10:443".parse().unwrap();
     assert_eq!(rig.net.dialled(), vec![dialled]);
     assert_eq!(rig.denials(), Vec::<Denial>::new());
-    let records = rig.records();
+    let records = rig.records(1);
     assert_eq!(records.len(), 1);
     let record = &records[0];
     assert_eq!(
@@ -83,17 +83,17 @@ fn the_agent_listener_refuses_a_missing_or_wrong_token_and_another_launches_toke
     assert_eq!(rig.net.dialled(), Vec::<SocketAddr>::new());
     assert_eq!(rig.denials(), Vec::<Denial>::new());
     assert!(
-        rig.records()
+        rig.records(5)
             .iter()
             .all(|r| r.verdict == Verdict::AuthRequired)
     );
     // The record names the host asked for, for the example's log.
     assert!(
-        rig.records()
+        rig.records(5)
             .iter()
             .all(|r| (r.host.as_str(), r.port) == ("api.anthropic.com", 443)),
         "{:?}",
-        rig.records()
+        rig.records(5)
     );
 }
 
@@ -116,7 +116,7 @@ fn the_browser_listener_needs_no_token_under_the_same_list_and_sink() {
         rig.denials(),
         vec![host_denial("example.com", 443, NotAllowed, false)]
     );
-    let listeners: Vec<Listener> = rig.records().iter().map(|r| r.listener).collect();
+    let listeners: Vec<Listener> = rig.records(1).iter().map(|r| r.listener).collect();
     assert_eq!(listeners, vec![Listener::Browser]);
 }
 
@@ -173,7 +173,7 @@ fn a_silent_host_is_refused_with_no_denial() {
     assert_eq!(code, 403);
     drop(read_all(&mut stream));
     assert_eq!(rig.denials(), Vec::<Denial>::new());
-    assert_eq!(rig.records()[0].verdict, Verdict::Silent);
+    assert_eq!(rig.records(1)[0].verdict, Verdict::Silent);
 }
 
 #[test]
@@ -327,7 +327,7 @@ fn a_silent_host_on_another_port_gets_403_and_no_denial() {
     });
     assert_eq!(rig.connect("telemetry.test:8443").1, 403);
     assert_eq!(rig.denials(), Vec::<Denial>::new());
-    assert_eq!(rig.records()[0].verdict, Verdict::Silent);
+    assert_eq!(rig.records(1)[0].verdict, Verdict::Silent);
 }
 
 #[test]
@@ -380,6 +380,6 @@ fn a_half_closed_tunnel_passes_the_end_on_and_keeps_the_other_way_open() {
     tunnel.shutdown(std::net::Shutdown::Write).unwrap();
     // The echo server sees the end only if the proxy passed it on; its reply still comes back.
     assert_eq!(read_all(&mut tunnel), b"last words");
-    let record = &rig.records()[0];
+    let record = &rig.records(1)[0];
     assert_eq!((record.bytes_up, record.bytes_down), (10, 10));
 }

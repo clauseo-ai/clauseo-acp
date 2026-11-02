@@ -156,6 +156,9 @@ getrandom = "0.3.4"
 subtle = "2.6"
 psl = "2"
 socket2 = "0.6.5"
+# clauseo-sandbox: the process's soft open-file limit, for the proxies' process-wide socket cap
+# (getrlimit, safe; already in Cargo.lock through async-io).
+rustix = "1.1.5"
 # clauseo-sandbox: the macOS proxy settings and PAC runs of the egress proxy's upstream lookup
 # (crates/sandbox/src/proxy/upstream/macos.rs). Only the modules the crate line names.
 objc2-cf-network = { version = "0.3.2", default-features = false }

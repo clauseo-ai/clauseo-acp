@@ -36,10 +36,12 @@ code departs from the brief.
   `proxy/shared_hosts.rs`), route (under the connect timeout; a lookup that takes longer goes
   direct), address check (DNS under the connect timeout; 504), then a tunnel slot (64 per launch;
   the next gets 503 and no denial) and the connect (10 s; 502, or 504 on the timeout).
-- **Caps and timeouts.** Per launch: 64 client connections that have not finished their head (the
-  next is closed unanswered), and 192 client and origin sockets together (64 heads plus a client
-  and an origin socket per tunnel); across every proxy in the host process, 1024 sockets (a static
-  counter). A client past a socket cap is closed unanswered; an origin connection past one gets
+- **Caps and timeouts.** Per listener: 64 client connections that have not finished their head
+  (the next is closed unanswered), so connections to the token-free browser listener cannot lock
+  out the agent's. Per launch: 192 client and origin sockets together (64 heads plus a client and
+  an origin socket per tunnel). Across every proxy in the host process (a static counter): 1024
+  sockets, or half the process's soft open-file limit when that is smaller, read at
+  `start_proxy` with `rustix`'s `getrlimit` (Windows has no such limit and keeps 1024). A client past a socket cap is closed unanswered; an origin connection past one gets
   the client 503. Clients are counted in the accept loop and released when their task ends. A
   tunnel or forwarded request with no byte moved either way for 15 minutes is closed (agents keep
   long streaming responses open, so not shorter; it is watched in eighths, so it closes between 15
@@ -54,9 +56,13 @@ code departs from the brief.
   proxy resolves it locally too (through the same network seam, under the connect timeout) and
   refuses it with `PrivateAddress` if any local answer is not public; an IP literal is checked
   as on the direct path. When local DNS fails or times out the name goes upstream unchecked, so
-  a firm whose desktops resolve names only through the proxy keeps working; that is a known gap,
-  and so is split DNS (the upstream may resolve the name to another address than the desktop
-  did, and may re-resolve on every request). The upstream's own address is the firm's
+  a firm whose desktops resolve names only through the proxy keeps working. That is a known gap,
+  and whoever controls the name's DNS can choose it: answer the desktop's query with a failure or
+  too slowly, and the upstream's with a private or loopback address. So is split DNS (the
+  upstream may resolve the name to another address than the desktop did, and may re-resolve on
+  every request). Whether to refuse the fail-open branch when the upstream is on loopback (a local
+  agent proxy such as Zscaler or px, which shares the desktop's resolver), or to make it a firm
+  setting, is G10's call. The upstream's own address is the firm's
   configuration (possibly `127.0.0.1`) and is not checked. This is stricter than the brief,
   which checks only IP literals through an upstream: **for Rohan to confirm.**
 - **Plain `http://`.** One request per client connection, rewritten to origin-form (absolute-form
@@ -75,8 +81,12 @@ code departs from the brief.
   `HTTP_PROXY` for plain `http://` (each with its lower-case form and `NO_PROXY`), then the OS
   asked about an `https://` or `http://` URL to match (macOS's separate HTTP proxy setting and
   PAC scripts that branch on the scheme apply). OS answers are cached 5 minutes, at most 1024 of
-  them, the oldest dropped first. On Windows the whole WinHTTP lookup, WPAD included, is bounded
-  to 10 s. `upstream_for` (stage E's connector relay) returns `Result<Route, Error>` and refuses
+  them, the oldest dropped first. A miss runs one OS lookup per scheme, host and port (other
+  callers for the same key wait for its answer), and at most 4 at once per proxy; a miss past
+  that goes direct for that request and is not cached. On Windows the whole WinHTTP lookup, WPAD
+  included, is bounded to 10 s on its own thread, and at most 4 such threads live at once in the
+  process (a lookup left running past its bound keeps its slot), so hung lookups cannot pile up
+  threads; past that the lookup fails and goes direct. `upstream_for` (stage E's connector relay) returns `Result<Route, Error>` and refuses
   a firm URL that `start_proxy` refuses, so the relay fails visibly rather than going around the
   firm's proxy. `Upstream`'s `Debug` shows only a fixed URL's scheme, host and port.
 - **allow and revoke** change a live exact-host list, read on every request. `revoke` removes the
@@ -106,7 +116,8 @@ Crates, each in the root `[workspace.dependencies]` table: `async-executor` 1.14
 executor), `blocking` 1.7 (DNS and the lookup off the I/O thread), `httparse` 1.10 (heads; small,
 no allocation, fuzzed upstream), `getrandom` 0.3.4, `base64` 0.22.1 and `subtle` 2.6 (the token),
 `psl` 2 (2.1.246, the only new package in `Cargo.lock`; MIT or Apache-2.0), `socket2` 0.6.5
-(Windows only).
+(Windows only), `rustix` 1.1.5 with `process` (Unix only: the soft open-file limit through a
+safe `getrlimit`; already in `Cargo.lock` through `async-io`).
 `objc2-cf-network` 0.3.2 (macOS, CFNetwork proxy settings and PAC; features `std` and `CFProxySupport`).
 `windows` gains the WinHTTP features `Win32_Foundation` and `Win32_Networking_WinHttp` (Windows only).
 `async-io`, `futures`, `url`, `tracing` and `windows` were already workspace
@@ -150,10 +161,10 @@ Departures from the brief:
   endpoints are refused. G10 decides whether firms need exceptions.
 - A tunnel where one side half-closes passes the end on and stays open the other way until that
   side closes, `revoke` closes it, 15 minutes pass with no byte, or the handle drops.
-- **Requirement on R17:** the host raises its soft `RLIMIT_NOFILE` at start. launchd starts a GUI
-  app with a soft limit of 256 open files, under the proxies' process-wide cap of 1024 sockets
-  plus the host's own files; the proxy does not raise it, since `sandbox` does not own the host
-  process.
+- **Requirement on R17:** the host raises its soft `RLIMIT_NOFILE` at start, before the first
+  `start_proxy`. launchd starts a GUI app with a soft limit of 256 open files; the proxies then
+  cap themselves at 128 sockets, under one launch's 192, so a second busy launch is refused. The
+  proxy does not raise the limit, since `sandbox` does not own the host process.
 - The proxy decides by host name and never looks inside TLS, so a CONNECT to an allowed host can
   carry a TLS session whose SNI or HTTP `Host` names another site served from the same address
   (domain fronting). Accepted with the no-interception decision.
