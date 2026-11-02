@@ -41,8 +41,35 @@ fn bidi_embedding_override_and_isolate_characters_are_dropped() {
         let title = format!("Gem{bidi}ini");
         assert_eq!(cleaned(&title).as_deref(), Some("Gemini"), "{bidi:?}");
     }
-    // The bidi marks outside those ranges are not in the rule, so they stay.
-    assert_eq!(cleaned("a\u{200E}b").as_deref(), Some("a\u{200E}b"));
+    // The left-to-right and right-to-left marks are format characters too.
+    assert_eq!(cleaned("a\u{200E}\u{200F}b").as_deref(), Some("ab"));
+    assert_eq!(cleaned("a\u{061C}b").as_deref(), Some("ab"));
+}
+
+#[test]
+fn a_title_of_only_zero_width_space_is_none() {
+    assert_eq!(cleaned("\u{200B}"), None);
+    assert_eq!(cleaned(" \u{200B}\u{200B} \u{FEFF} "), None);
+}
+
+#[test]
+fn byte_order_mark_and_tag_characters_are_dropped() {
+    assert_eq!(cleaned("Gemini\u{FEFF}CLI").as_deref(), Some("GeminiCLI"));
+    // A tag character (U+E0020 to U+E007F), as in an emoji flag's tags.
+    assert_eq!(
+        cleaned("Gemini\u{E0067}\u{E007F}").as_deref(),
+        Some("Gemini")
+    );
+    assert_eq!(cleaned("\u{E0001}Gemini").as_deref(), Some("Gemini"));
+}
+
+#[test]
+fn zero_width_joiners_inside_an_emoji_sequence_survive() {
+    // The man technologist: a man, a zero width joiner, a laptop.
+    let technologist = "\u{1F468}\u{200D}\u{1F4BB}";
+    assert_eq!(cleaned(technologist).as_deref(), Some(technologist));
+    let kept = "Gem\u{200C}ini";
+    assert_eq!(cleaned(kept).as_deref(), Some(kept));
 }
 
 #[test]
