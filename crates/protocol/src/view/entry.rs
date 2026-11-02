@@ -179,8 +179,10 @@ pub enum PermissionState {
         by: Principal,
         /// The file a program holds open, when the host refused the request without asking
         /// because of it (`PermissionResolved::held_open`).
+        // Boxed: rarely set, and inline it would grow every permission entry by a path. Serde
+        // and specta see through the box, so the wire shape is the path's.
         #[serde(skip_serializing_if = "Option::is_none", default)]
-        held_open: Option<MatterPath>,
+        held_open: Option<Box<MatterPath>>,
     },
     /// Expired unanswered.
     Expired {

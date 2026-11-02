@@ -49,7 +49,7 @@ pub(super) fn permission_resolved(
     let settled = PermissionState::Resolved {
         choice: event.choice.clone(),
         by: event.by.clone(),
-        held_open: event.held_open.clone(),
+        held_open: event.held_open.clone().map(Box::new),
     };
     settle_permission(
         state,

@@ -131,7 +131,7 @@ fn approval_entries() -> Vec<ViewEntry> {
             state: PermissionState::Resolved {
                 choice: PermissionChoice::Cancelled,
                 by: Principal::LocalDesktop,
-                held_open: Some(path("Brief.docx")),
+                held_open: Some(Box::new(path("Brief.docx"))),
             },
             answered_at: Some(Timestamp::new(1_760_000_002_000).unwrap()),
         }),

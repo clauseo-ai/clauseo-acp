@@ -73,7 +73,7 @@ fn a_permission_refused_for_an_open_document_names_the_file() {
     let settled = PermissionState::Resolved {
         choice,
         by,
-        held_open,
+        held_open: held_open.map(Box::new),
     };
     assert_eq!(entry.state, settled);
     assert_eq!(status(&state), ThreadStatus::Running);
