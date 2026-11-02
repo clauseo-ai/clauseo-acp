@@ -144,6 +144,13 @@ export const NOT_SUPPORTED: readonly { syntax: string; shows: string; reason: st
     reason: "Block-level HTML is never rendered; only a line break on a line of its own is.",
   },
   {
+    syntax: "a paragraph longer than 16 KB (split.ts's MAX_JOINED)",
+    shows:
+      "as paragraphs of about 4 KB each (MAX_PARAGRAPH), shown with no gap between them; an emphasis, link, tag pair or highlight spanning a cut shows its syntax as written",
+    reason:
+      "While streaming, every update parses the last block whole, so a long paragraph is cut into parts of MAX_PARAGRAPH (one 18 KB paragraph stalled a WebView2 flush for 1.2 s). A finished paragraph's parts are joined and parsed once, up to 16 KB: one join at 16 KB costs 22 to 51 ms in Node, one of 64 KB of links 455 ms, past what a real engine's frame budget allows. An answer's paragraphs are about 1 KB.",
+  },
+  {
     syntax: "a definition list's 33rd definition and on",
     shows: "as paragraphs, with a visible ': '",
     reason:

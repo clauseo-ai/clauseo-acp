@@ -53,7 +53,7 @@ import { endOf, parse } from "./parse.ts";
 import { repairTail } from "./repair.ts";
 import { CLOBBER_PREFIX, SCHEMA } from "./schema.ts";
 import { anchorHeadings, createSlugNumbering, headingId } from "./slugs.ts";
-import { createSplitter } from "./split.ts";
+import { createSplitter, joinParts } from "./split.ts";
 import type { BlockEnd } from "./split.ts";
 import { extrasHandlers } from "./syntax-extras.ts";
 
@@ -75,6 +75,12 @@ export type BlockView = {
   readonly note?: string;
   /** The slug of each of its headings, in order, before the answer's repeats are numbered. */
   readonly slugs?: readonly string[];
+  /**
+   * The block continues the paragraph of the block before: a paragraph longer than split.ts's
+   * MAX_PARAGRAPH is cut into parts while it streams (and for good, past MAX_JOINED). Its first paragraph
+   * is the rest of that one, rendered without the gap between paragraphs (to-react.ts).
+   */
+  readonly continues?: true;
 };
 
 const EMPTY_HAST: Hast = { type: "root", children: [] };
@@ -465,6 +471,28 @@ export function createAnswer(scope: string): Answer {
     (value) => CLOBBER_PREFIX + headingId(scope, value),
   );
 
+  /** A view as a block that continues the paragraph before (BlockView's `continues`), the same object each time. */
+  const continuing = new WeakMap<BlockView, BlockView>();
+  const continuingOf = (view: BlockView): BlockView => {
+    let known = continuing.get(view);
+    if (!known) continuing.set(view, (known = { ...view, continues: true }));
+    return known;
+  };
+
+  /**
+   * A paragraph's parts joined (joinParts), the same string each update while its parts are the same
+   * strings: a finished block's caches and views are found by it without hashing a new copy every update.
+   */
+  let joinedBefore = new Map<string, { parts: readonly string[]; joined: string }>();
+  let joinedNow = new Map<string, { parts: readonly string[]; joined: string }>();
+  const joinOf = (parts: readonly string[]): string => {
+    let known = joinedBefore.get(parts[0]!);
+    if (known?.parts.length !== parts.length || known.parts.some((part, at) => part !== parts[at]))
+      known = { parts, joined: parts.join("") };
+    joinedNow.set(parts[0]!, known);
+    return known.joined;
+  };
+
   let lastText: string | undefined;
   let lastStreaming = true;
   let lastViews: readonly BlockView[] = [];
@@ -489,10 +517,15 @@ export function createAnswer(scope: string): Answer {
       if (raw === lastText && streaming === lastStreaming) return lastViews;
       const text = capNesting(raw.includes("\r") ? raw.replace(/\r\n?/g, "\n") : raw);
       let blocks: readonly string[];
+      let continues: readonly boolean[];
       try {
         blocks = split(text);
+        continues = split.continues();
+        // A finished paragraph's parts are one block again, parsed whole (split.ts's MAX_JOINED).
+        ({ blocks, continues } = joinParts(blocks, continues, streaming, joinOf));
       } catch {
         blocks = [text];
+        continues = [false];
       }
       const last = blocks.length - 1;
       const lines = documentOf(blocks, streaming ? last : blocks.length);
@@ -554,7 +587,9 @@ export function createAnswer(scope: string): Answer {
       // An empty answer (every streamed answer starts as one) has no blocks, so no tail.
       const tail = streaming ? entries[last] : undefined;
       const notes = notesOf(numbering, tail ? tail.footnotes : NO_FOOTNOTES);
-      const anchored = numberedSlugs(blockViews);
+      const anchored = numberedSlugs(
+        blockViews.map((view, index) => (continues[index] ? continuingOf(view) : view)),
+      );
       lastViews = notes ? [...anchored, notes] : anchored;
       lastBlockViews = blockViews;
       lastBlocks = blocks;
@@ -565,6 +600,8 @@ export function createAnswer(scope: string): Answer {
       lastText = raw;
       lastStreaming = streaming;
       for (const cache of caches) cache.sweep();
+      joinedBefore = joinedNow;
+      joinedNow = new Map();
       return lastViews;
     },
   };

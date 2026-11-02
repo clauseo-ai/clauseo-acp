@@ -1,4 +1,5 @@
 import { Lexer } from "marked";
+import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test, vi } from "vitest";
 import spec from "commonmark-spec/spec.txt?raw";
 import { createAnswer } from "./answer.ts";
@@ -7,7 +8,8 @@ import { CASES } from "./hostile-cases.ts";
 import { capNesting } from "./nesting.ts";
 import { endOf, parse } from "./parse.ts";
 import { examplesOf, htmlOf, normalise, unsplit, withTabs } from "./spec-fixture.ts";
-import { createSplitter, MAX_PARAGRAPH } from "./split.ts";
+import { CONTINUES, toReact } from "./to-react.ts";
+import { createSplitter, MAX_JOINED, MAX_PARAGRAPH } from "./split.ts";
 import type { BlockEnd } from "./split.ts";
 
 const ends = new Map<string, BlockEnd>();
@@ -172,6 +174,64 @@ test("a paragraph longer than MAX_PARAGRAPH is cut into parts that start with te
   // Tags stay whole: every part is whole pairs.
   for (const block of fresh("<u>a</u>".repeat(2000))) expect(block).toMatch(/^(?:<u>a<\/u>)+$/);
 }, 30_000);
+
+/** A 5 KB paragraph whose emphasis, tag, link and footnote reference span where a part would be cut. */
+const SPANNING = `${"Filler words of an ordinary sentence. ".repeat(102)}**Strong text starts here <sup>tag starts [link text ${"long ".repeat(60)}ends](https://example.com) and a note[^n] ${"more ".repeat(30)}</sup> strong ends** ${"Then the paragraph goes on. ".repeat(30)}`;
+
+test("finished, a paragraph's parts are one block again: one <p> with what spans the cut", () => {
+  expect(SPANNING.length).toBeGreaterThan(MAX_PARAGRAPH);
+  // Streaming, as the last block, it is cut inside the link's text, which every element spans.
+  const parts = createAnswer("s").update(SPANNING, true);
+  expect(parts.length).toBeGreaterThan(1);
+  expect(parts[0]!.source).toContain("[link text long");
+  expect(parts[0]!.source).not.toContain("ends](");
+  const markdown = `${SPANNING}\n\n[^n]: The note.\n`;
+  for (const streamed of [false, true]) {
+    // Fresh, and after streaming every 64 characters.
+    const answer = createAnswer("f");
+    if (streamed)
+      for (let end = 64; end < markdown.length; end += 64)
+        answer.update(markdown.slice(0, end), true);
+    const views = answer.update(markdown, false);
+    // The note's definition is a block of its own, with nothing to show where it stands.
+    const body = views.filter((view) => !view.items && view.hast.children.length > 0);
+    expect(body).toHaveLength(1);
+    const html = htmlOf(body);
+    expect(html.match(/<p>/g)).toHaveLength(1);
+    expect(html).toMatch(
+      /<p>Filler words[^]*<strong>Strong text starts here <sup>tag starts <a href="https:\/\/example\.com">link text long[^]*ends<\/a> and a note<sup><a [^>]*data-footnote-ref[^>]*>1<\/a><\/sup> more[^]*<\/sup> strong ends<\/strong> Then the paragraph goes on\./,
+    );
+    expect(html).not.toContain("**");
+    expect(body[0]!.continues).toBeUndefined();
+  }
+});
+
+test("streaming, a part that continues a paragraph is marked so it shows no paragraph gap", () => {
+  const words = "Words of a very long paragraph. ".repeat(400);
+  const views = createAnswer("c").update(words, true);
+  expect(views.length).toBeGreaterThan(2);
+  expect(views.map((view) => view.continues ?? false)).toEqual(views.map((_, index) => index > 0));
+  const marked = `<p ${CONTINUES.name}="${CONTINUES.value}">`;
+  expect(renderToStaticMarkup(toReact(views[0]!.hast, views[0]!.continues))).toMatch(/^<p>/);
+  for (const view of views.slice(1))
+    expect(renderToStaticMarkup(toReact(view.hast, view.continues)).startsWith(marked)).toBe(true);
+  // The same object each update while the part is unchanged (memoised blocks do not re-render).
+  const again = createAnswer("c");
+  again.update(words, true);
+  const first = again.update(`${words}more`, true);
+  const second = again.update(`${words}more words`, true);
+  expect(second[1]).toBe(first[1]);
+});
+
+test(`past MAX_JOINED (${MAX_JOINED}) characters, a paragraph stays cut finished, its parts marked`, () => {
+  const long = "Words of a very long paragraph. ".repeat(Math.ceil((MAX_JOINED + 1) / 32));
+  const views = createAnswer("l").update(long, false);
+  expect(views.length).toBeGreaterThan(3);
+  expect(views.slice(1).every((view) => view.continues)).toBe(true);
+  expect(views.map((view) => view.source).join("")).toBe(long);
+  const under = long.slice(0, MAX_JOINED - 100);
+  expect(createAnswer("u").update(under, false)).toHaveLength(1);
+});
 
 test("a footnote's definition is never cut, however long its note", () => {
   const note = `[^n]: ${"a ".repeat(4000)}\n`;

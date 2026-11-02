@@ -334,5 +334,12 @@ export const CASES: HostileCase[] = [
     text: ["<!-- the agent's note", "<pre>"],
     tags: { h2: 450, ul: 450, strong: 450 },
   },
+  // A link-dense paragraph just under split.ts's MAX_JOINED (16 KB), then a new block: streamed, it is cut
+  // into parts, and when the next block starts the parts are joined and parsed whole in one update.
+  {
+    id: "links-joined-paragraph",
+    markdown: `${"[clause](https://a.example/x) ".repeat(540)}\n\nThe next block.\n`,
+    text: ["The next block."],
+  },
   ...TAG_CASES,
 ];
