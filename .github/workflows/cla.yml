@@ -22,18 +22,25 @@ on:
   # edit EXEMPT, or the steps, and pass its own check.
   pull_request_target:
     types: [opened, synchronize, reopened]
+  # main's merge queue requires this check on each merge group; the job skips there (below). A merge
+  # group runs the workflow from its own head, but the pull request's pull_request_target run, from
+  # the base branch, had to pass before the pull request could enter the queue.
+  merge_group:
 
 permissions:
   contents: read
   pull-requests: read
 
 concurrency:
-  group: cla-${{ github.event.pull_request.number }}
+  group: cla-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 jobs:
   cla:
     name: CLA
+    # Skipped in the merge queue, which counts a skipped job as passing: every login was checked
+    # on the pull request, which enters the queue only once its checks pass.
+    if: github.event_name != 'merge_group'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
