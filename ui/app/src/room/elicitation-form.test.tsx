@@ -203,6 +203,9 @@ for (const code of ["elicitation.invalid_values", "elicitation.not_pending"]) {
     h = await ask(TWO_QUESTIONS, code);
     await h.click(el(T.choice("question_0", 1)));
     await fill(T.input("question_1_custom"), "Affidavit");
+    // the live region stands before the refusal, empty, so its words are announced
+    expect(el<HTMLElement>(T.error).getAttribute("role")).toBe("status");
+    expect(el<HTMLElement>(T.error).textContent).toBe("");
     await h.click(el(T.send));
     expect(answered()).toHaveLength(1);
     expect(el<HTMLElement>(T.error).textContent).toBe(errorWords("en", code));
@@ -291,8 +294,163 @@ test("a schema the form can't show: the agent's words, Decline and Stop, no fiel
   expect(form.querySelector("bdi")?.textContent).toBe("Where is the office?");
   expect(form.querySelector("input, textarea")).toBeNull();
   expect(h.one(T.send)).toBeNull();
+  expect(el<HTMLElement>(T.unsupported).textContent).toBe(
+    th("en", "This question can't be shown here. Decline, or Stop the answer."),
+  );
   await h.click(el(T.decline));
   expect(answered().map((a) => a.response)).toEqual(["decline"]);
   await h.click(el(T.stop));
   expect(h.sent("cancel")).toHaveLength(1);
+});
+
+test("a double click on Send, or Enter twice in one frame, sends one answer", async () => {
+  h = await ask(ONE_QUESTION);
+  await h.click(el(T.choice("question_0", 0)));
+  const send = el<HTMLElement>(T.send);
+  await act(async () => {
+    send.click();
+    send.click();
+  });
+  expect(answered()).toHaveLength(1);
+  await h.unmount();
+  h = await ask(ONE_QUESTION);
+  const radio = el(T.choice("question_0", 2));
+  await h.click(radio);
+  await act(async () => {
+    for (let i = 0; i < 2; i++)
+      radio.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
+      );
+  });
+  expect(answered().map((a) => a.response)).toEqual([
+    { accept: { values: { question_0: "Supreme Court" } } },
+  ]);
+});
+
+test("an IME's Enter (composing, or keyCode 229) and a held Enter send nothing", async () => {
+  h = await ask(ONE_QUESTION);
+  const radio = el(T.choice("question_0", 0));
+  await h.click(radio);
+  expect(await keyOn(radio, { key: "Enter", isComposing: true })).toBe(false);
+  expect(await keyOn(radio, { key: "Enter", keyCode: 229 })).toBe(false);
+  expect(await keyOn(radio, { key: "Enter", repeat: true })).toBe(false);
+  const other = el<HTMLTextAreaElement>(T.input("question_0_custom"));
+  expect(await keyOn(other, { key: "Enter", metaKey: true, keyCode: 229 })).toBe(false);
+  expect(answered()).toEqual([]);
+});
+
+/** Puts words in a number field the input can't read: the browser reports "" with validity.badInput. */
+async function fillBad(id: string) {
+  const node = el(id);
+  Object.defineProperty(node, "validity", { configurable: true, get: () => ({ badInput: true }) });
+  await fill(id, "");
+}
+
+test("numbers: an integer and a number go as Numbers; words the input can't read hold Send", async () => {
+  const schema = {
+    type: "object",
+    properties: {
+      copies: { type: "integer", title: "Copies", minimum: 1 },
+      fee: { type: "number", title: "Fee" },
+    },
+  };
+  h = await ask({ message: "How many copies, and the fee?", schema });
+  const copies = el(T.input("copies"));
+  expect(copies.type).toBe("number");
+  expect(copies.step).toBe("1");
+  expect(el(T.input("fee")).step).toBe("any");
+  await fillBad(T.input("fee"));
+  expect(held(T.send)).toBe(true);
+  await act(async () => el(T.input("fee")).focus());
+  await act(async () => el(T.input("copies")).focus());
+  expect(el<HTMLElement>(T.problem("fee")).textContent).toBe(
+    th("en", "This answer doesn't fit the question."),
+  );
+  Reflect.deleteProperty(el(T.input("fee")), "validity");
+  await fill(T.input("fee"), "2500.5");
+  await fill(T.input("copies"), "2.5");
+  expect(held(T.send)).toBe(true);
+  await fill(T.input("copies"), "3");
+  await h.click(el(T.send));
+  expect(answered().map((a) => a.response)).toEqual([
+    { accept: { values: { copies: 3, fee: 2500.5 } } },
+  ]);
+});
+
+test("a form of one box: Send waits until it's touched, then sends false as well as true; required shows its marker", async () => {
+  const schema = {
+    type: "object",
+    properties: { urgent: { type: "boolean", title: "Urgent" } },
+    required: ["urgent"],
+  };
+  h = await ask({ message: "Is it urgent?", schema });
+  const box = el(T.input("urgent"));
+  expect(box.closest("label")?.textContent).toBe(`Urgent${th("en", "Required")}`);
+  expect(box.getAttribute("aria-required")).toBe("true");
+  expect(held(T.send)).toBe(true);
+  await h.click(box);
+  await h.click(box);
+  expect(box.checked).toBe(false);
+  expect(held(T.send)).toBe(false);
+  await h.click(el(T.send));
+  expect(answered().map((a) => a.response)).toEqual([{ accept: { values: { urgent: false } } }]);
+});
+
+test("minItems and maxItems: too few or too many ticks hold Send and say so", async () => {
+  const schema = {
+    type: "object",
+    properties: {
+      papers: {
+        type: "array",
+        title: "Papers",
+        minItems: 2,
+        maxItems: 2,
+        items: { enum: ["Notice", "Reply", "Minutes"] },
+      },
+    },
+  };
+  h = await ask({ message: "Which two papers?", schema });
+  await h.click(el(T.choice("papers", 0)));
+  expect(held(T.send)).toBe(true);
+  expect(h.one(T.problem("papers"))).not.toBeNull();
+  await h.click(el(T.choice("papers", 2)));
+  expect(held(T.send)).toBe(false);
+  expect(h.one(T.problem("papers"))).toBeNull();
+  await h.click(el(T.choice("papers", 1)));
+  expect(held(T.send)).toBe(true);
+  await h.click(el(T.choice("papers", 1)));
+  await h.click(el(T.send));
+  expect(answered().map((a) => a.response)).toEqual([
+    { accept: { values: { papers: ["Notice", "Minutes"] } } },
+  ]);
+});
+
+test("two forms keep their ids and their radios' names apart", async () => {
+  h = await room([askEntry(3, ID, TWO_QUESTIONS), askEntry(4, uuid(2, 9), TWO_QUESTIONS)]);
+  const ids = [...h.host.querySelectorAll("[id]")].map((n) => n.id);
+  expect(new Set(ids).size).toBe(ids.length);
+  const [a, b] = h.all(T.form);
+  const names = (f: HTMLElement | undefined) =>
+    new Set(
+      [...(f?.querySelectorAll<HTMLInputElement>('input[type="radio"]') ?? [])].map((r) => r.name),
+    );
+  expect(names(a).size).toBe(1);
+  expect([...names(a)].some((n) => names(b).has(n))).toBe(false);
+  // every reference points at an element of its own form
+  for (const f of [a, b])
+    for (const n of f?.querySelectorAll("[aria-describedby]") ?? [])
+      for (const ref of n.getAttribute("aria-describedby")!.split(" "))
+        expect(f?.contains(document.getElementById(ref))).toBe(true);
+});
+
+test("first focus goes to the first field, never to a later question's chosen option", async () => {
+  const schema = {
+    type: "object",
+    properties: {
+      name: { type: "string", title: "Name" },
+      court: { type: "string", enum: ["Saket", "Patiala House"], default: "Saket" },
+    },
+  };
+  h = await room([askEntry(3, ID, { message: "Details", schema })], undefined, true);
+  expect(document.activeElement).toBe(el(T.input("name")));
 });
