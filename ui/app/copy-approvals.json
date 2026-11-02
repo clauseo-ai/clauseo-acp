@@ -820,10 +820,11 @@
   },
   "U8-01": {
     "en": "Version history is kept on this computer.",
-    "hi": "संस्करणों का इतिहास इसी कंप्यूटर पर रहता है।",
+    "hi": "संस्करणों का इतिहास इसी कंप्यूटर पर रखा जाता है।",
     "status": "approved",
     "at": "2026-11-02",
-    "by": "design"
+    "by": "Rohan",
+    "note": "Rohan, 2026-11-02, round 2 wording"
   },
   "U8-02": {
     "en": "Restore and Undo wait until the answer in {conversation} is done.",
@@ -974,20 +975,36 @@
     "note": "Rohan, on the review page (built from U8 edccb807), \"approve u8\""
   },
   "U8-21": {
-    "en": "'{papers}' can't be restored and stay as they are.",
-    "hi": "'{papers}' पुनर्स्थापित नहीं हो सकते और जैसे हैं वैसे ही रहेंगे।",
+    "en": "{papers} can't be restored and stay as they are.",
+    "hi": "{papers} पुनर्स्थापित नहीं हो सकते और जैसे हैं वैसे ही रहेंगे।",
     "status": "approved",
     "at": "2026-11-02",
     "by": "Rohan",
-    "note": "Rohan, on the review page (built from U8 edccb807), \"approve u8\""
+    "note": "Rohan, 2026-11-02, round 2 wording"
   },
   "U8-22": {
-    "en": "'{papers}', added since, stay.",
-    "hi": "बाद में जोड़े गए '{papers}' बने रहेंगे।",
+    "en": "{papers}, added since, stay.",
+    "hi": "बाद में जोड़े गए {papers} बने रहेंगे।",
     "status": "approved",
     "at": "2026-11-02",
     "by": "Rohan",
-    "note": "Rohan, on the review page (built from U8 edccb807), \"approve u8\""
+    "note": "Rohan, 2026-11-02, round 2 wording"
+  },
+  "U8-23": {
+    "en": "Restored to {time} on {date}",
+    "hi": "{date}, {time} बजे पर पुनर्स्थापित",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, 2026-11-02, round 2 wording"
+  },
+  "U8-24": {
+    "en": "Restored to {time} today",
+    "hi": "आज {time} बजे पर पुनर्स्थापित",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, 2026-11-02, round 2 wording"
   },
   "U10-01": {
     "en": "The answer stopped at {time}. Your question and the answer so far are kept.",

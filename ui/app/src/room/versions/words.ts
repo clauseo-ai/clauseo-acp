@@ -72,25 +72,27 @@ export function askOf(lang: Lang, cal: Calendar, s: Snapshot, ask: Ask | null): 
     const name = namesOf([...changes.map((c) => c.path), ...added_since, ...kept]);
     const changed = changes.map((c) => name(c.path));
     const papers = listOf(lang, changed);
+    // one name stands in the line's own quotes; several are each quoted, and "and" joins them outside the quotes
+    const quoted = (paths: readonly string[]) =>
+      listOf(
+        lang,
+        paths.map((p) => `'${name(p)}'`),
+      );
     const stays = [
       added_since.length === 0
         ? null
-        : vt(
-            lang,
-            added_since.length === 1
-              ? "'{papers}', added since, stays."
-              : "'{papers}', added since, stay.",
-            { papers: listOf(lang, added_since.map(name)) },
-          ),
+        : added_since.length === 1
+          ? vt(lang, "'{papers}', added since, stays.", { papers: name(added_since[0] ?? "") })
+          : vt(lang, "{papers}, added since, stay.", { papers: quoted(added_since) }),
       kept.length === 0
         ? null
-        : vt(
-            lang,
-            kept.length === 1
-              ? "'{papers}' can't be restored and stays as it is."
-              : "'{papers}' can't be restored and stay as they are.",
-            { papers: listOf(lang, kept.map(name)) },
-          ),
+        : kept.length === 1
+          ? vt(lang, "'{papers}' can't be restored and stays as it is.", {
+              papers: name(kept[0] ?? ""),
+            })
+          : vt(lang, "{papers} can't be restored and stay as they are.", {
+              papers: quoted(kept),
+            }),
     ].filter((x) => x !== null);
     return {
       kind: "confirm",

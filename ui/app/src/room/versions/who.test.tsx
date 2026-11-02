@@ -94,7 +94,7 @@ test("each kind of version says who made it, and a before_turn version shows onl
   expect(whoText(rowOf(h, "cp4"))).toBe(`Undo of the change at ${at2}`);
   expect(whoText(rowOf(h, "cp5"))).toBe("Undo of a change");
   // the restore names the version its marker restored from
-  expect(whoText(rowOf(h, "cp6"))).toBe(`Restore to ${timeText(rowOf(h, "cp3"))} today`);
+  expect(whoText(rowOf(h, "cp6"))).toBe(`Restored to ${timeText(rowOf(h, "cp3"))} today`);
   expect(whoText(rowOf(h, "cp7"))).toBe("Restore of a version");
   // a kind this version doesn't know shows its time alone
   expect(whoText(rowOf(h, "cp8"))).toBe("");

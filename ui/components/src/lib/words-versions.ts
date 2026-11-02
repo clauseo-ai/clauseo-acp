@@ -15,7 +15,7 @@ const HI = {
   "1 version": "1 संस्करण",
   Now: "अभी",
   Today: "आज",
-  "Version history is kept on this computer.": "संस्करणों का इतिहास इसी कंप्यूटर पर रहता है।",
+  "Version history is kept on this computer.": "संस्करणों का इतिहास इसी कंप्यूटर पर रखा जाता है।",
   // the timeline, with hundreds of versions
   "Show versions by": "किसके संस्करण दिखाएँ",
   All: "सभी",
@@ -43,8 +43,8 @@ const HI = {
   "Imported 1 document": "1 दस्तावेज़ आयात किया गया",
   // an import whose count the matter's header doesn't give
   "Imported the matter's documents": "मामले के दस्तावेज़ आयात किए गए",
-  "Restore to {time} on {date}": "{date}, {time} बजे पर पुनर्स्थापित",
-  "Restore to {time} today": "आज {time} बजे पर पुनर्स्थापित",
+  "Restored to {time} on {date}": "{date}, {time} बजे पर पुनर्स्थापित",
+  "Restored to {time} today": "आज {time} बजे पर पुनर्स्थापित",
   "Undo of a restore": "पुनर्स्थापन पूर्ववत किया गया",
   "Undo of the restore at {time}": "{time} बजे का पुनर्स्थापन पूर्ववत किया गया",
   "Undo of the restore at {time} on {date}": "{date} को {time} बजे का पुनर्स्थापन पूर्ववत किया गया",
@@ -91,11 +91,11 @@ const HI = {
   "Nothing will change. The matter already stands as it did then.":
     "कुछ नहीं बदलेगा। मामला पहले से वैसा ही है जैसा तब था।",
   "'{papers}', added since, stays.": "बाद में जोड़ा गया '{papers}' बना रहेगा।",
-  "'{papers}', added since, stay.": "बाद में जोड़े गए '{papers}' बने रहेंगे।",
+  "{papers}, added since, stay.": "बाद में जोड़े गए {papers} बने रहेंगे।",
   "'{papers}' can't be restored and stays as it is.":
     "'{papers}' पुनर्स्थापित नहीं हो सकता और जैसा है वैसा ही रहेगा।",
-  "'{papers}' can't be restored and stay as they are.":
-    "'{papers}' पुनर्स्थापित नहीं हो सकते और जैसे हैं वैसे ही रहेंगे।",
+  "{papers} can't be restored and stay as they are.":
+    "{papers} पुनर्स्थापित नहीं हो सकते और जैसे हैं वैसे ही रहेंगे।",
   "Close '{file}' in Word to restore it.": "पुनर्स्थापित करने के लिए Word में '{file}' बंद करें।",
   "Close '{file}' in Word to undo the change.": "बदलाव पूर्ववत करने के लिए Word में '{file}' बंद करें।",
   "Word holds the file while it is open. Nothing has changed yet.":

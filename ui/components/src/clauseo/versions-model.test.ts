@@ -75,7 +75,7 @@ test("restoring 3:42 pm on 9 March would change three documents and keep what wa
   expect(addedSince(v4.state, now.state)).toEqual(["letter"]);
   // a restore the host made reads as one, and one to a version no longer there reads as nothing
   const restored: Version = { ...now, id: "r1", who: { kind: "restore", to: "v4" } };
-  expect(whoOf("en", CAL, restored, [...HISTORY, restored])).toBe("Restore to 3:42 pm on 9 March");
+  expect(whoOf("en", CAL, restored, [...HISTORY, restored])).toBe("Restored to 3:42 pm on 9 March");
 });
 
 test("a restore names the version it restored by id, and one whose version is missing still says what it is", () => {
@@ -83,9 +83,9 @@ test("a restore names the version it restored by id, and one whose version is mi
   const b: Version = { ...at("v4"), id: "b", at: "3:42 pm", day: "2027-03-10" };
   const restore: Version = { ...now, id: "r", who: { kind: "restore", to: "b" } };
   const all = [a, b, restore];
-  expect(whoOf("en", CAL, restore, all)).toBe("Restore to 3:42 pm on 10 March");
+  expect(whoOf("en", CAL, restore, all)).toBe("Restored to 3:42 pm on 10 March");
   expect(whoOf("en", CAL, { ...restore, who: { kind: "restore", to: "a" } }, all)).toBe(
-    "Restore to 3:42 pm on 9 March",
+    "Restored to 3:42 pm on 9 March",
   );
   const gone: Version = { ...now, id: "g", who: { kind: "restore", to: "nope" } };
   expect(whoOf("en", CAL, gone, HISTORY)).toBe("Restore of a version");
