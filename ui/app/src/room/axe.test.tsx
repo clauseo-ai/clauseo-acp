@@ -2,7 +2,8 @@
 // axe-core 4.14.0 over the room's frame, in every theme, language, lite and motion, with a matter and its papers, with
 // a matter and none, with no matter (the empty rail), when list_matters fails, with the rail in every state, and with
 // the new matter dialog open, with and without a NextHost, and with the agent's permission requests in the thread: a
-// pending prompt on a paper offering all four answers, one answered once and done, and a command's, which asks. happy-dom computes no styles, so axe can't judge colour contrast here: that
+// pending prompt on a paper offering all four answers, one answered once and done, a command's, which asks, and one confirming: Always for this matter
+// pressed and held while the OS asks, its answers waiting. happy-dom computes no styles, so axe can't judge colour contrast here: that
 // is checked by hand in the app, with window.__clauseoAxe() (dev-hooks.ts).
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -71,6 +72,8 @@ type Scene = {
   dialog?: boolean;
   /** The open matter's one thread, with these entries, waiting on the lawyer. */
   thread?: ViewEntry[];
+  /** Always for this matter, pressed and held: the OS's confirm line up, the answers waiting. */
+  confirming?: boolean;
 };
 
 const ASKED = userMessage(2, 1, "Tighten the notice to the bank.");
@@ -104,6 +107,13 @@ const SCENES: Record<string, Scene> = {
     papers: undefined,
     thread: [ASKED, commandCall(3, 2, "pending"), permission(4, 2)],
   },
+  // Always for this matter pressed, its answer held while the OS asks the lawyer to confirm
+  "a permission confirming": {
+    matters: true,
+    papers: undefined,
+    thread: [ASKED, editCall(3, 1, "pending"), permission(4, 1)],
+    confirming: true,
+  },
 };
 
 /** The room as App mounts it: inside the page's view store. */
@@ -131,6 +141,8 @@ function transportFor(scene: Scene): FakeTransport {
       : matters.map((m) => detailed(m));
   const thread = scene.thread;
   const transport: FakeTransport = new FakeTransport({
+    // the confirming line names the OS's dialog, which Linux has none of
+    ...(scene.confirming === true ? { platform: "mac" as const } : {}),
     query: (query) => {
       if (scene.matters === "fails") throw new Error("the host is gone");
       if (typeof query === "object" && query.list_threads !== undefined)
@@ -156,6 +168,7 @@ function transportFor(scene: Scene): FakeTransport {
       ? {}
       : { next: fakeNext({ matters: () => infos, papers: scene.papers }) }),
   });
+  if (scene.confirming === true) transport.answerPermission = () => new Promise<void>(() => {});
   return transport;
 }
 
@@ -205,6 +218,17 @@ for (const theme of THEMES) {
               ]);
               if (rows[0]?.dataset["state"] === "pending")
                 expect(host.querySelectorAll('[data-testid^="permission-"]'), name).toHaveLength(4);
+              if (scene.confirming === true) {
+                await act(async () =>
+                  host
+                    ?.querySelector<HTMLButtonElement>('[data-testid="permission-allow_always"]')
+                    ?.click(),
+                );
+                expect(rows[0]?.dataset["confirming"], name).toBeDefined();
+                expect(rows[0]?.querySelector(".perm-confirming"), name).not.toBeNull();
+                // the answers wait, dimmed, while the OS asks
+                expect(rows[0]?.querySelector(".perm-actions[inert]"), name).not.toBeNull();
+              }
               // the command's prompt asks, with its title beneath
               if (scene.thread.some((e) => e.tool_call?.kind === "execute"))
                 expect(rows[0]?.textContent, name).toContain("Run ls papers");
