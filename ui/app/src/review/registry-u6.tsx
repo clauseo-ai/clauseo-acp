@@ -21,6 +21,7 @@ const ACTIONS: ThreadActions = {
   sentTurn: null,
   undo: async () => undefined,
   answer: async () => undefined,
+  answerElicitation: async () => undefined,
   stop: () => undefined,
   retry: async () => undefined,
 };
