@@ -233,7 +233,19 @@ export default defineConfig(({ mode }) => {
     },
     // WebView2 (Chromium), WKWebView (Safari 16+) and WebKitGTK all run ES2022. Fonts and every other asset load as
     // files under the CSP's 'self', never inlined as data: URLs.
-    build: { target: "es2022", assetsInlineLimit: 0, ...(probe ? { outDir: "dist-probe" } : {}) },
+    build: {
+      target: "es2022",
+      assetsInlineLimit: 0,
+      // Everything the entry imports statically is one chunk, the first load, whichever lazy chunks also import it.
+      // Left to itself, Rolldown puts each module that the entry and a lazy chunk both import into a chunk of its
+      // own, so the first load is several files, and each new lazy chunk that imports shared modules changes the
+      // split. On U8's unmerged branch (a new lazy chunk, Versions), initialJs rose by 2.8 KB brotli with the default
+      // splitting.
+      rolldownOptions: {
+        output: { codeSplitting: { groups: [{ name: "index", tags: ["$initial"] }] } },
+      },
+      ...(probe ? { outDir: "dist-probe" } : {}),
+    },
     // The colouring worker (ui/components markdown/highlight/) as an ES module, so each Shiki grammar stays its own
     // chunk and loads when a block in that language first colours. The default `iife` cannot split, and inlines every
     // grammar into the worker: 862 KB.

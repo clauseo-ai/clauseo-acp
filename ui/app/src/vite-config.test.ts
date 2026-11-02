@@ -1,3 +1,4 @@
+import { brotliCompressSync } from "node:zlib";
 import { build, createServer, resolveConfig, type Rolldown } from "vite";
 import { afterEach, expect, test, vi } from "vitest";
 import tauriConf from "../../../crates/desktop/tauri.conf.json" with { type: "json" };
@@ -97,6 +98,8 @@ test(
       BARE_CHUNKS.some((name) => c.fileName.startsWith(`assets/${name}-`)),
     );
     expect(bare.length).toBeGreaterThanOrEqual(BARE_CHUNKS.length);
+    // the one exception (isLazyShared): a small chunk that only bare chunks import, and that the first load lacks.
+    // Nothing the entry imports reaches it, so it loads with the bare chunk that imports it
     for (const chunk of bare) {
       expect(chunk.isDynamicEntry, chunk.fileName).toBe(true);
       const importers = chunks.filter((c) => c.dynamicImports.includes(chunk.fileName));
@@ -104,11 +107,117 @@ test(
       for (const importer of importers) {
         const loaded = new Set([...first, ...closure(importer.fileName)]);
         for (const dep of chunk.imports)
-          expect(loaded.has(dep), `${chunk.fileName}: ${dep}`).toBe(true);
+          expect(
+            loaded.has(dep) || isLazyShared(dep, chunks, first, bare),
+            `${chunk.fileName}: ${dep}`,
+          ).toBe(true);
       }
     }
   },
 );
+
+/** A chunk as the build reports it, with only the fields the rule reads. */
+type Chunk = Pick<Rolldown.OutputChunk, "fileName" | "code" | "imports">;
+
+/**
+ * The exception to the bare-chunk rule: `dep` may be missing from the first load when it is a chunk outside `first`
+ * (the first load's file names), under 1000 B brotli, that only bare chunks import (at least one does). Such a chunk
+ * is reached by no static import of the entry, so it loads with the bare chunk that imports it, and no sooner.
+ */
+export function isLazyShared(
+  dep: string,
+  chunks: readonly Chunk[],
+  first: ReadonlySet<string>,
+  bare: readonly Chunk[],
+): boolean {
+  const target = chunks.find((c) => c.fileName === dep);
+  if (target === undefined || first.has(dep)) return false;
+  const bareNames = new Set(bare.map((c) => c.fileName));
+  const importers = chunks.filter((c) => c.imports.includes(dep));
+  return (
+    importers.length > 0 &&
+    importers.every((c) => bareNames.has(c.fileName)) &&
+    brotliCompressSync(target.code).length < 1000
+  );
+}
+
+/** `n` characters of a seeded LCG, 7 bits each, so brotli cannot shrink them much. Shorter output is a prefix. */
+function noise(n: number): string {
+  let state = 12345;
+  let out = "";
+  for (let i = 0; i < n; i++) {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    out += String.fromCharCode(state >>> 25);
+  }
+  return out;
+}
+
+const brotliSize = (code: string) => brotliCompressSync(code).length;
+
+/** The smallest length whose noise brotli-compresses to 1000 B or more, by bisection (brotli grows with length here). */
+function firstLengthAtLimit(): number {
+  let below = 0;
+  let atOrAbove = 8000;
+  expect(brotliSize(noise(atOrAbove))).toBeGreaterThanOrEqual(1000);
+  while (atOrAbove - below > 1) {
+    const mid = (below + atOrAbove) >> 1;
+    if (brotliSize(noise(mid)) < 1000) below = mid;
+    else atOrAbove = mid;
+  }
+  return atOrAbove;
+}
+
+// Synthetic chunks. The first load is `index`; `list` and `plan` are bare; `shared` is the chunk under test.
+const synth = (fileName: string, imports: string[] = [], code = "export {};"): Chunk => ({
+  fileName,
+  imports,
+  code,
+});
+const FIRST = new Set(["assets/index.js"]);
+
+test("isLazyShared is true for a small chunk that only bare chunks import, outside the first load", () => {
+  const list = synth("assets/list.js", ["assets/shared.js"]);
+  const plan = synth("assets/plan.js", ["assets/shared.js"]);
+  const chunks = [synth("assets/index.js"), list, plan, synth("assets/shared.js")];
+  expect(isLazyShared("assets/shared.js", chunks, FIRST, [list, plan])).toBe(true);
+});
+
+test("isLazyShared is false when a chunk that is not bare also imports it", () => {
+  const list = synth("assets/list.js", ["assets/shared.js"]);
+  const markdown = synth("assets/markdown.js", ["assets/shared.js"]);
+  const chunks = [synth("assets/index.js"), list, markdown, synth("assets/shared.js")];
+  expect(isLazyShared("assets/shared.js", chunks, FIRST, [list])).toBe(false);
+});
+
+test("isLazyShared is true just under 1000 B brotli and false from 1000 B up", () => {
+  const limit = firstLengthAtLimit();
+  const list = synth("assets/list.js", ["assets/shared.js"]);
+  const under = synth("assets/shared.js", [], noise(limit - 1));
+  const over = synth("assets/shared.js", [], noise(limit));
+  // the edge itself: the first length that is exactly 1000 B on this Node's brotli (under is 999 B or less)
+  expect(brotliSize(under.code)).toBeLessThan(1000);
+  expect(brotliSize(over.code)).toBe(1000);
+  expect(
+    isLazyShared("assets/shared.js", [synth("assets/index.js"), list, under], FIRST, [list]),
+  ).toBe(true);
+  expect(
+    isLazyShared("assets/shared.js", [synth("assets/index.js"), list, over], FIRST, [list]),
+  ).toBe(false);
+});
+
+test("isLazyShared is false for a chunk the first load holds", () => {
+  const list = synth("assets/list.js", ["assets/shared.js"]);
+  const chunks = [synth("assets/index.js"), list, synth("assets/shared.js")];
+  const first = new Set([...FIRST, "assets/shared.js"]);
+  expect(isLazyShared("assets/shared.js", chunks, first, [list])).toBe(false);
+});
+
+test("isLazyShared is false for a name no chunk has, and for a chunk nothing imports", () => {
+  const list = synth("assets/list.js");
+  const chunks = [synth("assets/index.js"), list];
+  expect(isLazyShared("assets/missing.js", chunks, FIRST, [list])).toBe(false);
+  expect(isLazyShared("assets/list.js", chunks, FIRST, [list])).toBe(false);
+});
 
 /** A build in memory under `mode`, its chunks, its other files and its index.html. */
 async function builtWith(mode?: string) {
