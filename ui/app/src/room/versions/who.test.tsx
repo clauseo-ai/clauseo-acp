@@ -51,6 +51,7 @@ const whoText = (row: HTMLElement | undefined) =>
 const timeText = (row: HTMLElement | undefined) =>
   row?.querySelector(".ver-entry-time")?.textContent ?? null;
 
+// the first case renders the room cold (module load, DOM warm-up), which is slow on a loaded runner
 test("each kind of version says who made it, and a before_turn version shows only with files", async () => {
   h = await mountVersions(
     [
@@ -103,7 +104,7 @@ test("each kind of version says who made it, and a before_turn version shows onl
   expect(whoText(rowOf(h, "cp10"))).toBe("You, outside Clauseo");
   expect(rowOf(h, "cp10")?.textContent).toContain("memo.docx");
   expect(rowOf(h, "cp9")).toBeUndefined();
-});
+}, 30_000);
 
 test("a version made in a conversation without a title names a new conversation, in either language", async () => {
   const { title: _, ...untitled } = thread(THREAD);

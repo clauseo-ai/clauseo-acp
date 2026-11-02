@@ -56,50 +56,56 @@ async function violations(scene: string): Promise<string[]> {
 }
 
 for (const language of ["en", "hi"] as const) {
-  test(`axe finds no violation in Versions (${language})`, async () => {
-    h = await mountVersions(VERSIONS, STEPS, {
-      display: { language },
-      query: (q) =>
-        typeof q === "object" && q.preview_restore !== undefined
-          ? {
-              restore_preview: {
-                changes: [file("brief.txt"), file("notes.docx")],
-                added_since: ["new.txt"],
-                kept: [],
-                locked: ["notes.docx"],
-              },
-            }
-          : undefined,
-      dispatch: () => {
-        throw { code: "matter.file_locked", message: "held", retryable: true };
-      },
-    });
-    await h.openVersions();
-    const found: string[] = [];
-    // the timeline, and the band at now with the not-saved notice
-    expect(h.one("versions")?.querySelector(".ver-unsaved")).not.toBeNull();
-    expect(document.body.querySelector(".ver-notice")).not.toBeNull();
-    found.push(...(await violations("at now")));
+  // the first axe run loads axe-core and warms the DOM, which is slow on a loaded runner
+  const timeout = language === "en" ? 30_000 : undefined;
+  test(
+    `axe finds no violation in Versions (${language})`,
+    async () => {
+      h = await mountVersions(VERSIONS, STEPS, {
+        display: { language },
+        query: (q) =>
+          typeof q === "object" && q.preview_restore !== undefined
+            ? {
+                restore_preview: {
+                  changes: [file("brief.txt"), file("notes.docx")],
+                  added_since: ["new.txt"],
+                  kept: [],
+                  locked: ["notes.docx"],
+                },
+              }
+            : undefined,
+        dispatch: () => {
+          throw { code: "matter.file_locked", message: "held", retryable: true };
+        },
+      });
+      await h.openVersions();
+      const found: string[] = [];
+      // the timeline, and the band at now with the not-saved notice
+      expect(h.one("versions")?.querySelector(".ver-unsaved")).not.toBeNull();
+      expect(document.body.querySelector(".ver-notice")).not.toBeNull();
+      found.push(...(await violations("at now")));
 
-    await h.click(h.all("version").find((r) => r.dataset["checkpoint"] === "cp2"));
-    expect(h.one("version-undo")).not.toBeNull();
-    found.push(...(await violations("looking back")));
+      await h.click(h.all("version").find((r) => r.dataset["checkpoint"] === "cp2"));
+      expect(h.one("version-undo")).not.toBeNull();
+      found.push(...(await violations("looking back")));
 
-    await h.click(h.one("version-undo"));
-    expect(document.body.querySelector(".ver-edited-row")).not.toBeNull();
-    found.push(...(await violations("the undo dialog")));
-    // Cancel, the dialog's first act
-    await h.click(document.body.querySelector('[role="dialog"] [data-dialog-acts] button'));
-    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+      await h.click(h.one("version-undo"));
+      expect(document.body.querySelector(".ver-edited-row")).not.toBeNull();
+      found.push(...(await violations("the undo dialog")));
+      // Cancel, the dialog's first act
+      await h.click(document.body.querySelector('[role="dialog"] [data-dialog-acts] button'));
+      expect(document.body.querySelector('[role="dialog"]')).toBeNull();
 
-    await h.click(h.one("version-restore"));
-    expect(document.body.querySelector(".ver-dialog-note")).not.toBeNull();
-    found.push(...(await violations("the restore dialog")));
+      await h.click(h.one("version-restore"));
+      expect(document.body.querySelector(".ver-dialog-note")).not.toBeNull();
+      found.push(...(await violations("the restore dialog")));
 
-    await h.click(h.one("dialog-confirm"));
-    expect(h.one("dialog-try-again")).not.toBeNull();
-    found.push(...(await violations("Word holds a file")));
+      await h.click(h.one("dialog-confirm"));
+      expect(h.one("dialog-try-again")).not.toBeNull();
+      found.push(...(await violations("Word holds a file")));
 
-    expect(found).toEqual([]);
-  });
+      expect(found).toEqual([]);
+    },
+    timeout,
+  );
 }

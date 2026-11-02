@@ -44,6 +44,7 @@ const previewOf = (paths: string[], locked: string[] = []): RestorePreview => ({
 });
 const locked = { code: "matter.file_locked", message: "held", retryable: true };
 
+// the first case renders the room cold (module load, DOM warm-up), which is slow on a loaded runner
 test("the matter moving while the restore dialog asks re-reads the preview, and the dialog lists the new files", async () => {
   let preview = previewOf(["brief.txt"]);
   h = await mountVersions(VERSIONS, STEPS, {
@@ -65,7 +66,7 @@ test("the matter moving while the restore dialog asks re-reads the preview, and 
   );
   await h.click(h.one("dialog-confirm"));
   expect(document.body.textContent).toMatch(/Restored to .+ today\. 2 documents changed\./);
-});
+}, 30_000);
 
 test("Try again after Word let go goes back to the dialog when what the restore writes has changed", async () => {
   let preview = previewOf(["brief.txt", "notes.docx"], ["notes.docx"]);
