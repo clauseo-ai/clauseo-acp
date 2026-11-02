@@ -1,7 +1,7 @@
 // Versions in the room, from its own chunk: the timeline in the rail's place (VersionsRail), and the band over the
 // work with the restore dialog (VersionsCentre). Both read one VersionsController (controller.ts) and compose the parts
 // of ui/components: VersionPanel, VersionWhere, VersionBand, CompareBar, PdfSheet and RestoreDialog.
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { RestoreDialog } from "@clauseo/components/clauseo/restore-dialog.tsx";
 import { keyIsMine, useRoom } from "@clauseo/components/clauseo/room-scope.ts";
 import {
@@ -169,6 +169,8 @@ export function VersionsCentre({
   const look = s.look;
   const shown = look.kind === "back" ? history.find((v) => v.id === look.id) : undefined;
   const waiting = waitingOf(lang, s);
+  // the line that says Restore and Undo wait, which every waiting act points to
+  const waitId = useId();
   const desk = useRef<HTMLDivElement>(null);
   const [doc, setDoc] = useState<string | null>(null);
 
@@ -206,6 +208,7 @@ export function VersionsCentre({
               action: (
                 <WaitingButton
                   waiting={waiting !== null}
+                  describedBy={waitId}
                   kind="quiet"
                   className="ver-notice-act ver-restored-undo"
                   label={w.v("Undo the restore")}
@@ -276,6 +279,7 @@ export function VersionsCentre({
         }}
         onBack={() => c.look(null)}
         testIds={{ restore: "version-restore", undo: "version-undo", wait: "versions-wait" }}
+        waitId={waitId}
       />
       {look.kind === "back" && look.comparing && changes !== null && shown !== undefined && (
         <>

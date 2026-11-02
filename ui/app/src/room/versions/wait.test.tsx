@@ -74,6 +74,13 @@ for (const [name, status] of BUSY) {
     expect(h.one("versions-wait")?.textContent).toBe(
       "Restore and Undo wait until the answer in Draft reply is done.",
     );
+    // each waiting act points to the line that says why
+    for (const id of ["version-undo", "version-restore"]) {
+      const by = h.one(id)?.getAttribute("aria-describedby");
+      expect(by == null ? null : document.getElementById(by), id).toBe(h.one("versions-wait"));
+    }
+    // who and what it did stand apart by a gap: no dot to start a wrapped line
+    expect(document.body.querySelector(".ver-meta .room-dot")).toBeNull();
     await h.click(h.one("version-undo"));
     await h.click(h.one("version-restore"));
     expect(document.body.querySelector('[role="dialog"]')).toBeNull();
