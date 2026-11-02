@@ -1,5 +1,5 @@
-//! The limits on `main`'s channel (`open_stream` follows them there alone), and the refresh the main
-//! window's focus asks for (`on_window_event` in `lib.rs`, then `Bridge::shown`). A scripted
+//! The limits on `main`'s channel (`open_stream` follows them there alone), and the refresh the
+//! main window's focus asks for (`on_window_event` in `lib.rs`, then `Bridge::shown`). A scripted
 //! reader stands in for the limits readers: it records each read and answers only when the test
 //! says, so no reader process starts.
 
