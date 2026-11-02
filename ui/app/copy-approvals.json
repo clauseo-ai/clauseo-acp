@@ -1270,5 +1270,101 @@
     "status": "approved",
     "at": "2026-11-02",
     "by": "design"
+  },
+  "U6F-01": {
+    "en": "ChatGPT didn't start. Your question is kept.",
+    "hi": "ChatGPT शुरू नहीं हुआ। आपका प्रश्न रखा गया है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator (U6-followup page)"
+  },
+  "U6F-02": {
+    "en": "{name} didn't start. Your question is kept.",
+    "hi": "{name} शुरू नहीं हुआ। आपका प्रश्न रखा गया है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator (U6-followup page)"
+  },
+  "U6F-03": {
+    "en": "ChatGPT sent something Clauseo can't read.",
+    "hi": "ChatGPT ने कुछ ऐसा भेजा जिसे Clauseo पढ़ नहीं सकता।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator (U6-followup page)"
+  },
+  "U6F-04": {
+    "en": "{name} sent something Clauseo can't read.",
+    "hi": "{name} ने कुछ ऐसा भेजा जिसे Clauseo पढ़ नहीं सकता।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator (U6-followup page)"
+  },
+  "U6F-05": {
+    "en": "Sign in to ChatGPT in Codex first. Your question is kept.",
+    "hi": "पहले Codex में ChatGPT से साइन इन करें। आपका प्रश्न रखा गया है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator (U6-followup page)"
+  },
+  "U6F-06": {
+    "en": "Sign in to {name} first. Your question is kept.",
+    "hi": "पहले {name} में साइन इन करें। आपका प्रश्न रखा गया है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator (U6-followup page)"
+  },
+  "U6F-07": {
+    "en": "This version of Codex doesn't work with Clauseo.",
+    "hi": "Codex का यह संस्करण Clauseo के साथ काम नहीं करता।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator (U6-followup page)"
+  },
+  "U6F-08": {
+    "en": "This version of {name} doesn't work with Clauseo.",
+    "hi": "{name} का यह संस्करण Clauseo के साथ काम नहीं करता।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator (U6-followup page)"
+  },
+  "U6F-09": {
+    "en": "The AI didn't start. Your question is kept.",
+    "hi": "AI शुरू नहीं हुआ। आपका प्रश्न रखा गया है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator (U6-followup page)"
+  },
+  "U6F-10": {
+    "en": "The AI sent something Clauseo can't read.",
+    "hi": "AI ने कुछ ऐसा भेजा जिसे Clauseo पढ़ नहीं सकता।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator (U6-followup page)"
+  },
+  "U6F-11": {
+    "en": "Sign in to the AI first. Your question is kept.",
+    "hi": "पहले AI में साइन इन करें। आपका प्रश्न रखा गया है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator (U6-followup page)"
+  },
+  "U6F-12": {
+    "en": "This version of the AI doesn't work with Clauseo.",
+    "hi": "AI का यह संस्करण Clauseo के साथ काम नहीं करता।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator (U6-followup page)"
   }
 }
