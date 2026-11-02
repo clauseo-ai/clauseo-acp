@@ -5,7 +5,8 @@
 //   (execCommand("delete")), so one undo brings it back. Left at a token's end goes to its start, Right at its start
 //   to its end; a caret put inside one any other way (a press, Up or Down) goes to its nearer edge, and a selection
 //   grows to whole tokens. Never while an input method composes, and never with Ctrl, Cmd or Alt held.
-// - Undo and redo read the value again for the agent's commands, so a token they bring back is one again.
+// - Undo and redo read the value again for the tokens' texts (the agent's commands, the papers picked here), so a
+//   token they bring back is one again.
 // - The overlay is a copy of the field behind it: the field's face, padding, line height and transform (the
 //   Devanagari nudge) copied, its client width (a scrollbar can't move the wrapping), its scroll followed. It holds the
 //   value as one text node, drawn transparent, so its words shape as one run as the field's do (a box around a token
@@ -16,6 +17,7 @@ import {
   scanTokens,
   shiftTokens,
   snapped,
+  standing,
   stillListed,
   tokenEndingAt,
   tokenStartingAt,
@@ -25,12 +27,15 @@ import {
 } from "./composer-tokens-logic.ts";
 
 export type Tokens = {
-  /** The tokens now, in order. */
+  /** The tokens that count now, in order: those standing alone (one typed against is plain text while it is). */
   now: () => readonly Token[];
+  /** Every token held, typed against or not: a trigger at one's start is still no trigger. */
+  held: () => readonly Token[];
   /** A pick about to put `text` in at `start`: the edit that does it makes it a token. */
   expect: (start: number, text: string) => void;
-  /** The agent's commands changed: a token whose command has gone is plain text. */
-  names: (names: readonly string[]) => void;
+  /** The tokens' texts changed (`/review` for each of the agent's commands, `@Notice.pdf` for each paper picked): a
+   * token whose text has gone is plain text, and undo finds the new ones. */
+  texts: (texts: readonly string[]) => void;
   /** The field changed with no input event of its own (the composer set its value in place): read it again. */
   sync: () => void;
   /** Takes the listeners off and empties the overlay. */
@@ -47,11 +52,11 @@ export function holdTokens(
   field: HTMLTextAreaElement,
   overlay: HTMLElement,
   composing: { readonly current: boolean },
-  names: readonly string[],
+  texts: readonly string[],
 ): Tokens {
   const doc = field.ownerDocument;
   const view = doc.defaultView;
-  let listed = names;
+  let listed = texts;
   let value = field.value;
   // what the field held as the menu's chunk arrived: a command standing alone is a token, as after an undo
   let tokens: Token[] = scanTokens(value, listed, []);
@@ -60,7 +65,8 @@ export function holdTokens(
 
   /** The overlay laid over the field, the field's words in it, and a box behind each token. */
   const draw = () => {
-    if (tokens.length === 0) {
+    const shown = standing(value, tokens);
+    if (shown.length === 0) {
       if (overlay.firstChild !== null) overlay.replaceChildren();
       return;
     }
@@ -86,7 +92,7 @@ export function holdTokens(
     const left = base.left + overlay.clientLeft - overlay.scrollLeft;
     const top = base.top + overlay.clientTop - overlay.scrollTop;
     const boxes: HTMLElement[] = [];
-    for (const t of tokens) {
+    for (const t of shown) {
       if (t.end > value.length) continue;
       const range = doc.createRange();
       range.setStart(text, t.start);
@@ -107,7 +113,7 @@ export function holdTokens(
   };
 
   /** The field's value read again: the tokens moved across the edit, a pick's made, and after undo or redo, the
-   * agent's commands found again. */
+   * tokens' texts found again. */
   const read = (history: boolean) => {
     const next = field.value;
     if (next === value && pending === null && !history) return;
@@ -146,11 +152,12 @@ export function holdTokens(
     if (composing.current || e.isComposing || e.keyCode === 229 || e.defaultPrevented) return;
     const at = field.selectionStart;
     if (at !== field.selectionEnd) return;
+    const live = standing(value, tokens);
     // a word delete, Option or Ctrl with Backspace or Delete, that would cut into a token takes it whole, as
     // Backspace does; macOS's Ctrl+H is Backspace. Cmd with Backspace deletes to the line's start, whole tokens only
     if ((e.altKey || e.ctrlKey) && !e.metaKey && (e.key === "Backspace" || e.key === "Delete")) {
       const forward = e.key === "Delete";
-      const r = wordDelete(value, tokens, at, forward);
+      const r = wordDelete(value, live, at, forward);
       if (r === null) return;
       e.preventDefault();
       remove(r, forward ? "deleteContentForward" : "deleteContentBackward");
@@ -158,7 +165,7 @@ export function holdTokens(
     }
     const ctrlH = mac && e.ctrlKey && !e.altKey && !e.metaKey && e.key.toLowerCase() === "h";
     if (ctrlH) {
-      const t = tokenEndingAt(tokens, at);
+      const t = tokenEndingAt(live, at);
       if (t !== undefined) {
         e.preventDefault();
         remove(t, "deleteContentBackward");
@@ -166,8 +173,8 @@ export function holdTokens(
       return;
     }
     if (e.altKey || e.metaKey || e.ctrlKey) return;
-    const before = tokenEndingAt(tokens, at);
-    const after = tokenStartingAt(tokens, at);
+    const before = tokenEndingAt(live, at);
+    const after = tokenStartingAt(live, at);
     if (e.key === "Backspace" && before !== undefined) {
       e.preventDefault();
       remove(before, "deleteContentBackward");
@@ -191,7 +198,7 @@ export function holdTokens(
     if (tokens.length > 0) {
       // a selection change can come before the input event that moved the words under it
       if (field.value !== value) read(false);
-      const to = snapped(tokens, field.selectionStart, field.selectionEnd, last);
+      const to = snapped(standing(value, tokens), field.selectionStart, field.selectionEnd, last);
       if (to !== null)
         field.setSelectionRange(to.start, to.end, field.selectionDirection ?? undefined);
     }
@@ -215,11 +222,12 @@ export function holdTokens(
   draw();
 
   return {
-    now: () => tokens,
+    now: () => standing(value, tokens),
+    held: () => tokens,
     expect: (start, t) => {
       pending = { start, end: start + t.length, text: t };
     },
-    names: (next) => {
+    texts: (next) => {
       listed = next;
       const kept = stillListed(tokens, next);
       if (kept.length === tokens.length) return;

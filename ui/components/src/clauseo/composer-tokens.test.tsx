@@ -288,8 +288,11 @@ test("an input method's composition beside a token leaves it whole, moved by wha
   ]);
   expect(field().value).toBe("प्र /review किराया");
   expect(starts()).toEqual([4]);
-  // and right against its end, no space between: the token's characters still stand
+  // and right against its end, no space between: the token is held, but typed against it is plain text, with no box
+  // (PR 4: a token counts only standing alone); a space put back between makes it a token again
   await compose([["प्र /reviewक किराया", 12]]);
+  expect(starts()).toEqual([]);
+  await edit("प्र /review क किराया", 12);
   expect(starts()).toEqual([4]);
 });
 
@@ -322,11 +325,14 @@ test("Tamil99 and Anjal's replacement edits right after a token leave it whole, 
   await compositionEnd();
   expect(field().value).toBe("/review காலை");
   expect(starts()).toEqual([0]);
-  // right against the token's end, no space, composing: replaced too, and the token stands
+  // right against the token's end, no space, composing: replaced too, and the token is held, but counts for nothing
+  // while typed against (no box); with a space put back it is a token again
   await compositionStart();
   await edit("/reviewக காலை", 8, "insertCompositionText");
   await edit("/reviewகா காலை", 9, "insertReplacementText");
   await compositionEnd();
+  expect(starts()).toEqual([]);
+  await edit("/review கா காலை", 8);
   expect(starts()).toEqual([0]);
 });
 

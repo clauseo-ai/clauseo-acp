@@ -9,13 +9,25 @@ const WS = /\s/u;
 /** A `/` trigger: where its slash stands and the query typed after it, up to the caret. */
 export type Slash = { at: number; query: string };
 
-/** The trigger the caret stands in, if any. The caret's run is the text since the last whitespace or the field's
- * start; a `/` counts only as the run's first character, so `a/` is no trigger and `x /re` is. */
-export function slashAt(value: string, caret: number): Slash | null {
+/** A trigger of either menu: its character (`/` for the agent's commands, `@` for the matter's papers), where it
+ * stands, and the query typed after it, up to the caret. */
+export type Trigger = Slash & { char: string };
+
+/** The trigger the caret stands in, if any, of the characters `chars`. The caret's run is the text since the last
+ * whitespace or the field's start; a trigger counts only as the run's first character, so `a/` and `rohan@x` are no
+ * trigger and `x /re` and `x @le` are. */
+export function triggerAt(value: string, caret: number, chars: string): Trigger | null {
   let start = caret;
   while (start > 0 && !WS.test(value[start - 1] ?? "")) start -= 1;
-  if (value[start] !== "/" || start >= caret) return null;
-  return { at: start, query: value.slice(start + 1, caret) };
+  const char = value[start];
+  if (char === undefined || chars === "" || !chars.includes(char) || start >= caret) return null;
+  return { char, at: start, query: value.slice(start + 1, caret) };
+}
+
+/** The `/` trigger the caret stands in, if any. */
+export function slashAt(value: string, caret: number): Slash | null {
+  const t = triggerAt(value, caret, "/");
+  return t === null ? null : { at: t.at, query: t.query };
 }
 
 const fold = (s: string) => s.normalize("NFC").toLowerCase();
@@ -44,11 +56,20 @@ export function runEnd(value: string, from: number): number {
 /** The rows' element ids, from the list's id and each command's name, so a list replaced under the highlight says the
  * new row (aria-activedescendant changes with it). A name the agent lists twice gets a count after it. */
 export function optionIds(list: string, items: readonly SlashCommand[]): string[] {
+  return keyIds(
+    list,
+    items.map((c) => c.name),
+  );
+}
+
+/** The rows' element ids from the list's id and each row's key (a command's name, a paper's id); a key listed twice
+ * gets a count after it. */
+export function keyIds(list: string, keys: readonly string[]): string[] {
   const seen = new Map<string, number>();
-  return items.map((c) => {
-    const n = seen.get(c.name) ?? 0;
-    seen.set(c.name, n + 1);
-    const id = `${list}-${encodeURIComponent(c.name)}`;
+  return keys.map((k) => {
+    const n = seen.get(k) ?? 0;
+    seen.set(k, n + 1);
+    const id = `${list}-${encodeURIComponent(k)}`;
     return n === 0 ? id : `${id}~${n}`;
   });
 }

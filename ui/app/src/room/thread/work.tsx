@@ -27,6 +27,7 @@ import {
   type ConversationLink,
   type Drafts,
 } from "./session.ts";
+import { paperMentions } from "./paper-mentions.ts";
 import { WorkComposer } from "./work-composer.tsx";
 
 const NO_COMMANDS: readonly AvailableCommand[] = [];
@@ -130,6 +131,9 @@ export function Work({
     refuseOther(null);
     return session.ask(text, how);
   };
+  // the matter's papers for the composer's `@`, read from the host only once `@` first opens its menu
+  const matterId = matter?.matter ?? null;
+  const mentions = useMemo(() => paperMentions(transport, matterId), [transport, matterId]);
   // the thread's chunk, in memory before the first view or the first answer, with a matter or without
   useEffect(() => void loadThread(), []);
   return (
@@ -153,6 +157,7 @@ export function Work({
         choice={choice}
         plan={plan}
         commands={commands}
+        mentions={mentions}
         disabled={matter === null}
         busy={busy}
         refused={session.refused ?? otherRefused}

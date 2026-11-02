@@ -6,7 +6,8 @@
 // back into the field when the field is empty. Each conversation keeps its own words (the drafts, by its key); on a new
 // conversation the status line offers the plan to ask with, until its first question fixes it, and otherwise names the
 // plan the conversation uses; paused at the plan's limit, it says where the answer stopped (U12). `/` opens the menu
-// of the agent's commands, as the thread's header lists them.
+// of the agent's commands, as the thread's header lists them, and `@` the matter's papers (paper-mentions.ts): a send,
+// queued or steered too, names each paper its tokens still mention.
 // U7: while Clauseo works, Enter queues the field's words (the host queues a send during a turn, H9), and the line above
 // the field offers Send now and Queue (composer-steer.tsx); at QUEUE_CAP Enter queues nothing and keeps the words, and a
 // send refused as `thread.queue_full` says the cap. The queue's strip sits over the field for every conversation
@@ -27,6 +28,7 @@ import {
 import {
   Composer,
   type ComposerHandle,
+  type Mentions,
   type PlanChoice,
   type SlashCommand,
 } from "@clauseo/components/clauseo/composer.tsx";
@@ -59,6 +61,7 @@ export function WorkComposer({
   choice,
   plan = "",
   commands,
+  mentions,
   disabled,
   busy,
   refused,
@@ -86,6 +89,8 @@ export function WorkComposer({
   plan?: string;
   /** The agent's commands for the `/` menu, from the open thread's header; [] before there are any. */
   commands: readonly SlashCommand[];
+  /** The matter's papers for the `@` menu; none with no matter open, or without H8. */
+  mentions?: Mentions | undefined;
   /** No matter is open. */
   disabled: boolean;
   busy: boolean;
@@ -131,6 +136,7 @@ export function WorkComposer({
       setText: (text: string) => field.current?.setText(text),
       clear: (only?: string) => field.current?.clear(only),
       fill: (text: string) => field.current?.fill(text),
+      mentioned: () => field.current?.mentioned() ?? [],
     }),
     [],
   );
@@ -205,7 +211,9 @@ export function WorkComposer({
     // idle, Ask waits for the turn it sent; Queue (another's wait) and the hint's buttons go behind or steer
     if (how === undefined && busy) return;
     if (lost !== null) setLost(null);
-    void onAsk(asked, how).then((ok) => {
+    // the papers the field's tokens mention as it goes, read with its words, sent with them however they go
+    const files = (field.current?.mentioned() ?? []).map((m) => m.id);
+    void onAsk(asked, files.length === 0 ? how : { ...how, files }).then((ok) => {
       if (!ok) return;
       // pressed on the hint's Send now or Queue, which sit outside the field's row: the focus goes back to the field
       // first, so the clear is one step Cmd/Ctrl+Z takes back, and not lost with the hint as it goes
@@ -311,6 +319,7 @@ export function WorkComposer({
       {...(choice === undefined ? {} : { choice })}
       hint={null}
       commands={commands}
+      mentions={mentions}
       working={line?.state ?? null}
       opening
       busy={busy}
