@@ -203,6 +203,8 @@ export function Composer<V extends string = string>({
   const [armed, setArmed] = useState<HTMLTextAreaElement | null>(null);
   const held = useRef<string | null>(null);
   const [shown, setShown] = useState<MenuShown>(null);
+  // the menu's chunk reads the field again through this after an edit made in place, so its tokens follow
+  const tokenSync = useRef<(() => void) | null>(null);
   const hasCommands = commands !== undefined && commands.length > 0;
   // commands that arrive while the field already has the focus arm it too, but with nothing to read as the chunk
   // lands: a `/re` run typed before the list came is old words, and only the next insertion opens the menu
@@ -265,6 +267,7 @@ export function Composer<V extends string = string>({
     const a = area.current;
     if (a === null) return;
     fitRef.current();
+    tokenSync.current?.();
     setEmpty(a.value.trim() === "");
     onInput?.(a.value);
   };
@@ -453,6 +456,7 @@ export function Composer<V extends string = string>({
                 composing={composing}
                 held={held}
                 onShown={setShown}
+                sync={tokenSync}
                 testIds={{ menu: testIds?.menu, item: testIds?.menuItem }}
               />
             </Suspense>

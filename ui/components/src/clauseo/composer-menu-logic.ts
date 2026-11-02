@@ -81,8 +81,9 @@ export function placeMenu(
   return { left: Math.round(left), top: Math.round(top), maxHeight };
 }
 
-/** What the hidden copy takes from the field, so its words wrap where the field's do. */
-const COPIED = [
+/** What a copy of the field takes from it, so its words shape and wrap where the field's do: the caret's measure here,
+ * and the tokens' overlay (composer-tokens.ts). Not its transform: each copy places itself its own way. */
+export const FACE = [
   "boxSizing",
   "borderTopWidth",
   "borderRightWidth",
@@ -114,7 +115,6 @@ const COPIED = [
   "wordBreak",
   "overflowWrap",
   "hyphens",
-  "transform",
 ] as const;
 
 /** The caret's place, from a hidden copy of the field laid over it with a mark at the caret: the same face, size,
@@ -125,7 +125,8 @@ export function caretOf(field: HTMLTextAreaElement): Caret {
   const style = getComputedStyle(field);
   const box = field.getBoundingClientRect();
   const copy = doc.createElement("div");
-  for (const p of COPIED) copy.style[p] = style[p];
+  // the field's box is read as drawn, its transform (the Devanagari nudge) in it, so the copy takes none
+  for (const p of FACE) copy.style[p] = style[p];
   const borders = parseFloat(style.borderLeftWidth) + parseFloat(style.borderRightWidth);
   copy.style.position = "fixed";
   copy.style.left = `${box.left}px`;

@@ -125,6 +125,9 @@
     }
   }
   .room-field {
+    /* the box the tokens' overlay is placed in, and their own layer: its boxes draw on the well, behind the words */
+    position: relative;
+    isolation: isolate;
     max-width: var(--measure);
     display: flex;
     align-items: center;
@@ -156,6 +159,22 @@
      the corner's own 16 */
   .room-field:not(:has(.room-field-add)) textarea {
     padding-left: var(--s2-5);
+  }
+  /* the tokens' overlay (composer-tokens.ts): a copy of the field laid behind it, its words transparent, drawing a
+     box behind each picked command; holdTokens copies the field's face, padding and transform and places it */
+  .room-field-tokens {
+    position: absolute;
+    z-index: -1;
+    margin: 0;
+    overflow: hidden;
+    color: transparent;
+    pointer-events: none;
+    user-select: none;
+  }
+  .room-token {
+    position: absolute;
+    border-radius: var(--r-label);
+    background: var(--well-strong);
   }
   /* under a gate the field is kept, hidden, with its words */
   .room-field textarea[hidden] {
