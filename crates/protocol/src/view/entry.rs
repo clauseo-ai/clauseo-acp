@@ -30,6 +30,11 @@ pub struct HeaderEntry {
     pub title: Option<CompactString>,
     /// Its agent.
     pub agent: AgentId,
+    /// The agent's own name, from its last `AgentNamed`; missing reads as `None`, so a header
+    /// written before the field still decodes.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    #[cfg_attr(feature = "specta", specta(type = Option<String>))]
+    pub agent_name: Option<CompactString>,
     /// Where it stands.
     pub status: ThreadStatus,
     /// Whether the thread's queue is held: its queued turns wait for `ResumeQueue`. Filled by

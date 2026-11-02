@@ -95,6 +95,7 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
 | `thread_renamed` | title, by (lawyer or agent) | host, acp | yes | T |
 | `thread_archived` | nothing (`{}`) | host | yes | T |
 | `agent_session_attached` | session, agent_version?, capabilities | acp | yes | T |
+| `agent_named` | agent_name (the agent's own display name, `initialize`'s title, cleaned) | host, from acp | yes | T |
 | `agent_session_detached` | reason (`DetachReason`) | acp, host | yes | T |
 | `user_message` | turn, message, acp_message_id?, content, delivery? | host; acp on replay | yes | T |
 | `turn_queued` | turn, behind, behind_turn? | host | yes | T |

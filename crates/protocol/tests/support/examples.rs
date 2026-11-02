@@ -9,22 +9,22 @@
 //! ```
 
 use clauseo_protocol::{
-    AgentCapabilities, AgentId, AgentSessionAttached, AgentSessionDetached, AvailableCommand,
-    ChangeKind, CheckpointKind, CheckpointRecorded, CommandsAvailable, CompactionChanged,
-    CompactionStatus, ConfigCategory, ConfigChoice, ConfigOption, ConfigOptionKind,
-    ConfigOptionsReplaced, ContentAppended, ContentBlock, ContentId, Cost, Deliverable, Delivery,
-    DetachReason, DomainEvent, ElicitationExpired, ElicitationOutcome, ElicitationRequest,
-    ElicitationRequested, ElicitationResolved, ErrorCode, ExpiryReason, FileChange, FilesChanged,
-    ImportSummary, LimitStopReason, MatterCreated, MatterKind, MatterRelocated, ModeChanged,
-    Notice, NoticeLevel, OutsideEdits, PermissionChoice, PermissionExpired, PermissionKind,
-    PermissionOption, PermissionRequested, PermissionResolved, PlanEntry, PlanPriority,
-    PlanReplaced, PlanStatus, Principal, PromptCapabilities, QueuedPromptEdited, RawFrom,
-    RenameSource, RestoreScope, SessionCapabilities, SkippedFile, SkippedFileReason, SteerOutcome,
-    SteerResolved, SteeringCapability, StepUndone, StopReason, TextAppended, TextKind, TextOrBlob,
-    ThreadArchived, ThreadCreated, ThreadRenamed, Timestamp, ToolCallContent, ToolCallPatch,
-    ToolCallStarted, ToolCallStatus, ToolCallUpdated, ToolKind, ToolLocation, TurnEnded,
-    TurnFailed, TurnQueued, TurnStarted, TurnStoppedAtLimit, TurnUsage, UsageUpdated, UserMessage,
-    VersionRestored,
+    AgentCapabilities, AgentId, AgentNamed, AgentSessionAttached, AgentSessionDetached,
+    AvailableCommand, ChangeKind, CheckpointKind, CheckpointRecorded, CommandsAvailable,
+    CompactionChanged, CompactionStatus, ConfigCategory, ConfigChoice, ConfigOption,
+    ConfigOptionKind, ConfigOptionsReplaced, ContentAppended, ContentBlock, ContentId, Cost,
+    Deliverable, Delivery, DetachReason, DomainEvent, ElicitationExpired, ElicitationOutcome,
+    ElicitationRequest, ElicitationRequested, ElicitationResolved, ErrorCode, ExpiryReason,
+    FileChange, FilesChanged, ImportSummary, LimitStopReason, MatterCreated, MatterKind,
+    MatterRelocated, ModeChanged, Notice, NoticeLevel, OutsideEdits, PermissionChoice,
+    PermissionExpired, PermissionKind, PermissionOption, PermissionRequested, PermissionResolved,
+    PlanEntry, PlanPriority, PlanReplaced, PlanStatus, Principal, PromptCapabilities,
+    QueuedPromptEdited, RawFrom, RenameSource, RestoreScope, SessionCapabilities, SkippedFile,
+    SkippedFileReason, SteerOutcome, SteerResolved, SteeringCapability, StepUndone, StopReason,
+    TextAppended, TextKind, TextOrBlob, ThreadArchived, ThreadCreated, ThreadRenamed, Timestamp,
+    ToolCallContent, ToolCallPatch, ToolCallStarted, ToolCallStatus, ToolCallUpdated, ToolKind,
+    ToolLocation, TurnEnded, TurnFailed, TurnQueued, TurnStarted, TurnStoppedAtLimit, TurnUsage,
+    UsageUpdated, UserMessage, VersionRestored,
 };
 
 use crate::fixtures::{
@@ -200,6 +200,10 @@ fn thread_events() -> Vec<DomainEvent> {
             session: "sess-1".parse().unwrap(),
             agent_version: Some("0.9.0".to_owned()),
             capabilities,
+        }
+        .into(),
+        AgentNamed {
+            agent_name: short("Gemini CLI"),
         }
         .into(),
         AgentSessionDetached {

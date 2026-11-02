@@ -51,6 +51,16 @@ pub struct AgentSessionAttached {
     pub capabilities: AgentCapabilities,
 }
 
+/// The agent's own display name, from `initialize`'s `agentInfo.title`, cleaned for display by
+/// the host. It never picks or identifies the agent: the agent's settings id does that.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct AgentNamed {
+    /// The name to show.
+    #[cfg_attr(feature = "specta", specta(type = String))]
+    pub agent_name: CompactString,
+}
+
 /// The thread's agent session ended.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]

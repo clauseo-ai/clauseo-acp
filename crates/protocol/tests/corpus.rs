@@ -129,6 +129,13 @@ const ADDED_AFTER_V1: &[Corpus] = &[
         (350, 0x0485_5c65_a3c5_28ee),
         (251, 0xc4fe_70c7_6452_5b8b),
     ),
+    (
+        "added/agent_named",
+        include_bytes!("corpus/added/agent_named.jsonl"),
+        include_bytes!("corpus/added/agent_named.msgpack"),
+        (257, 0xe029_cb0b_9067_8a4b),
+        (185, 0x151e_09ed_77c7_f901),
+    ),
 ];
 
 /// V1, then every file in [`ADDED_AFTER_V1`].

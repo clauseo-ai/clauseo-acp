@@ -38,6 +38,11 @@ pub(crate) fn fold(state: &mut ThreadState, envelope: &Envelope, out: &mut Appli
         }
         // An attach changes nothing yet: the next prompt gives the status. Going back to `Idle`
         // after an exit is a restart transition, not folded yet.
+        DomainEvent::AgentNamed(event) => {
+            update_header(state, "agent_named", out, |h| {
+                set_some(&mut h.agent_name, &event.agent_name)
+            });
+        }
         DomainEvent::AgentSessionAttached(_) | DomainEvent::Unknown { .. } => {}
         DomainEvent::AgentSessionDetached(event) => turn::detached(state, &event.reason, out),
         DomainEvent::UserMessage(event) => turn::user_message(state, seq, ts, event, out),
@@ -191,6 +196,7 @@ fn thread_created(state: &mut ThreadState, seq: Seq, event: &ThreadCreated, out:
         matter: event.matter,
         title: event.title.clone(),
         agent: event.agent.clone(),
+        agent_name: None,
         status: ThreadStatus::Idle,
         queue_held: false,
         mode_id: None,
