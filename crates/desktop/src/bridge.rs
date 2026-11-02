@@ -162,7 +162,9 @@ impl Bridge {
             | HostCommand::ArchiveThread { .. }
             | HostCommand::UndoStep { .. }
             | HostCommand::RestoreVersion { .. }
-            | HostCommand::SetUiSettings { .. } => Ok(()),
+            | HostCommand::SetUiSettings { .. }
+            // R16: wired in the host phase; the window's "Try again" sends it.
+            | HostCommand::RefreshLimits { .. } => Ok(()),
             HostCommand::AnswerPermission { .. } => Err(invalid(
                 "a permission is answered with answer_permission, not dispatch",
             )),
