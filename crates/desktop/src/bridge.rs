@@ -214,8 +214,9 @@ impl Bridge {
     /// catch-all, so a command the host adds does not compile here until the bridge rules on it
     /// (`docs/decisions/0019-app-stream-to-the-window.md`). Refuses what goes another way
     /// (`AnswerPermission`), what may not come from the window at all (`SetMode`,
-    /// `SetConfigOption`), and a `CreateMatter` or `RelocateMatter` whose folder ref this run's
-    /// `pick_folder` did not issue.
+    /// `SetConfigOption`), and a `CreateMatter`, `RelocateMatter` or `ScanFolder` whose folder
+    /// ref this run's `pick_folder` did not issue. `CancelScan` always passes: it starts nothing,
+    /// and cancelling a scan that is not running does nothing.
     fn admit_main(&self, command: &HostCommand) -> Result<(), HostError> {
         match command {
             HostCommand::CreateMatter { source, .. } => match source {
@@ -225,7 +226,10 @@ impl Bridge {
                 // The host's own default location: no folder ref, nothing to check.
                 MatterSource::DefaultLocation => Ok(()),
             },
-            HostCommand::RelocateMatter { folder, .. } => self.picked(*folder),
+            // Both read the folder the ref names: only one this run's picker issued.
+            HostCommand::RelocateMatter { folder, .. } | HostCommand::ScanFolder { folder } => {
+                self.picked(*folder)
+            }
             // `UpdateMatter`, `OpenMatter` and `ForgetMatter` name a matter only.
             HostCommand::UpdateMatter { .. }
             | HostCommand::OpenMatter { .. }
@@ -246,6 +250,7 @@ impl Bridge {
             | HostCommand::UndoStep { .. }
             | HostCommand::RestoreVersion { .. }
             | HostCommand::SetUiSettings { .. }
+            | HostCommand::CancelScan { .. }
             // The window's "Try again" sends it; a window's focus sends `Shown` from Rust
             // (`Bridge::shown`), not through here.
             | HostCommand::RefreshLimits { .. } => Ok(()),
