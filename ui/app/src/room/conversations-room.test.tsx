@@ -94,32 +94,46 @@ test("the rows under the open matter: the draft says New conversation, a thread 
   h = await mountRoom({
     threads: [thread(T1, { title: "Lease notice" }), thread(T2, { title: "Indemnity" })],
   });
-  // before New conversation: the newest is current; the one with the same plan as the oldest names none
+  // before New conversation: the newest is current; a row whose plan is the matter's names none
   expect(rows().map((r) => r.textContent)).toEqual(["Indemnity", "Lease notice"]);
   expect(rowOf("Indemnity")?.getAttribute("aria-current")).toBe("true");
   expect(rowOf("Lease notice")?.getAttribute("aria-current")).toBeNull();
   await h.unmount();
 
+  // Claude used most: only the ChatGPT row names its plan, though it is the newest
   h = await mountRoom({
     threads: [
       thread(T1, { title: "Lease notice" }),
-      thread(T2, { title: "Indemnity", agent: "codex" }),
+      thread(T3, { title: "Reply to notice" }),
+      thread(T4, { title: "Indemnity", agent: "codex" }),
     ],
   });
   expect(rowOf("Indemnity")?.querySelector(".room-conv-plan")?.textContent).toBe("ChatGPT");
   expect(rowOf("Lease notice")?.querySelector(".room-conv-plan")).toBeNull();
+  expect(rowOf("Reply to notice")?.querySelector(".room-conv-plan")).toBeNull();
   await h.click(h.one("new-conversation"));
   const [draft, ...rest] = rows();
   expect(draft?.querySelector(".room-conv-title")?.textContent).toBe("New conversation");
   expect(draft?.getAttribute("aria-current")).toBe("true");
   expect(rest.map((r) => r.querySelector(".room-conv-title")?.textContent)).toEqual([
     "Indemnity",
+    "Reply to notice",
     "Lease notice",
   ]);
   expect(rest.every((r) => r.getAttribute("aria-current") === null)).toBe(true);
-  // the draft names the plan it would run: the newest thread's, ChatGPT, unlike the oldest's
-  expect(draft?.querySelector(".room-conv-plan")?.textContent).toBe("ChatGPT");
-  expect(rowOf("Lease notice")?.querySelector(".room-conv-plan")).toBeNull();
+  // the draft runs the plan used most, Claude, the matter's own: it names none
+  expect(draft?.querySelector(".room-conv-plan")).toBeNull();
+  await h.unmount();
+
+  // a tie goes to the plan used most recently: ChatGPT, the newest, so the Claude row names its plan
+  h = await mountRoom({
+    threads: [
+      thread(T1, { title: "Lease notice" }),
+      thread(T2, { title: "Indemnity", agent: "codex" }),
+    ],
+  });
+  expect(rowOf("Lease notice")?.querySelector(".room-conv-plan")?.textContent).toBe("Claude");
+  expect(rowOf("Indemnity")?.querySelector(".room-conv-plan")).toBeNull();
 });
 
 test("switching: the other row's thread is watched and shown; the first's header stays held while it runs, and goes once idle", async () => {
