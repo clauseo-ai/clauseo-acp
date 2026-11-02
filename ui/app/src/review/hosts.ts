@@ -6,6 +6,7 @@
 // a permission request may never come back.
 import { batch, event, header, reset, THREAD, TURN, upsert } from "../testing/stream-script.ts";
 import type {
+  AvailableCommand,
   CommandOutcome,
   ErrorCode,
   MatterSummary,
@@ -60,6 +61,8 @@ export type ThreadState = {
   restart?: boolean;
   /** An answer to a permission request never comes back, as while the OS asks the lawyer to confirm it. */
   hold?: boolean;
+  /** The slash commands the thread's header lists, for the composer's `/` menu. */
+  commands?: AvailableCommand[];
 };
 
 const refusal = (code: ErrorCode) => ({
@@ -72,6 +75,7 @@ const refusal = (code: ErrorCode) => ({
 export function threadHost(state: ThreadState): FakeTransport {
   const head = header();
   head.header!.status = state.status ?? "idle";
+  head.header!.commands = state.commands ?? [];
   const transport: FakeTransport = new FakeTransport({
     query: (query) => {
       if (query === "list_matters") return { matters: [MATTER] };

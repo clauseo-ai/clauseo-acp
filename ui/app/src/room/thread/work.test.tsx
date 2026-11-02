@@ -1,7 +1,9 @@
 // @vitest-environment happy-dom
 // The room's thread over FakeTransport, the composer's side: reopening a thread, the first Ask making exactly one,
-// Enter and the input method's Enter, busy and Stop, a refused send, a lost stream with Try again, no matter.
+// Enter and the input method's Enter, busy and Stop, a refused send, a lost stream with Try again, no matter, and the
+// `/` menu listing the commands the thread's header has.
 import { act } from "react";
+import { settled } from "@clauseo/components/lib/late.ts";
 import { streamFailedWords } from "@clauseo/components/lib/words-breaks.ts";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { frame } from "@clauseo/components/lib/words-frame.ts";
@@ -295,4 +297,23 @@ test("Stop pressed again while its cancel is on its way sends one cancel", async
   await h.settle();
   await h.click(h.one("cancel"));
   expect(h.sent("cancel")).toHaveLength(2);
+});
+
+test("the thread's header lists the agent's commands: `/` in the focused field opens the menu with them", async () => {
+  h = await mountRoom({ threads: [summary(THREAD, "idle")] });
+  const head = header();
+  head.header!.commands = [
+    { name: "compact", description: "Compact the conversation" },
+    { name: "review", description: "Review a pull request", input_hint: "pull request number" },
+  ];
+  h.deliver([reset([], head)]);
+  await act(async () => field().focus());
+  await act(settled);
+  await h.type("/");
+  await act(settled);
+  // the menu is in the room's layer, outside the column
+  expect(document.querySelector('[data-testid="composer-menu"]')).not.toBeNull();
+  const rows = [...document.querySelectorAll('[data-testid="composer-menu-item"]')];
+  expect(rows.map((r) => r.querySelector("bdi")?.textContent)).toEqual(["/compact", "/review"]);
+  expect(field().hasAttribute("data-menu")).toBe(true);
 });

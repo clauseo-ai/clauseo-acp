@@ -7,9 +7,15 @@ import { Suspense, useEffect, useMemo, useRef } from "react";
 import type { ComposerHandle, PlanChoice } from "@clauseo/components/clauseo/composer.tsx";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
-import { useStreamError, useStreamPart, useViewStore, useWatch } from "../../store/hooks.ts";
+import {
+  useHeader,
+  useStreamError,
+  useStreamPart,
+  useViewStore,
+  useWatch,
+} from "../../store/hooks.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
-import type { MatterSummary, ThreadId } from "../../transport/protocol.ts";
+import type { AvailableCommand, MatterSummary, ThreadId } from "../../transport/protocol.ts";
 import { nextHostOf } from "../host-next.ts";
 import { KeyedRequestContext, keyedRequest } from "../permission-keyed.ts";
 import { refillOf, useBreakLines, useStoppedLine, useThreadBreak } from "../thread-break.ts";
@@ -22,6 +28,8 @@ import {
   type Drafts,
 } from "./session.ts";
 import { WorkComposer } from "./work-composer.tsx";
+
+const NO_COMMANDS: readonly AvailableCommand[] = [];
 
 /** The work column of the room: the matter's thread, and the composer (disabled with no matter). */
 export function Work({
@@ -68,6 +76,8 @@ export function Work({
   useWatch(store, stream);
   const busy = useBusy(stream, session.sentTurn);
   const failed = useStreamError(store, stream);
+  // the agent's commands for the composer's `/` menu, as the thread's header has them
+  const commands = useHeader(store, stream)?.header?.commands ?? NO_COMMANDS;
   // U10: an answer Claude stopped giving, and Restart once the host has it (H10)
   const { lang } = useWords();
   const { brk, live } = useThreadBreak(store, stream);
@@ -102,6 +112,7 @@ export function Work({
         draftKey={draftKey}
         choice={choice}
         plan={plan}
+        commands={commands}
         disabled={matter === null}
         busy={busy}
         refused={session.refused}

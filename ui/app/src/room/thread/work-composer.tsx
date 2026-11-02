@@ -1,16 +1,17 @@
 // The room's composer as the thread drives it: Ask, or Stop while a turn runs; Enter sends (the composer's own, through
 // composer-keys.ts's sendsOnEnter: Shift+Enter breaks the line, and an input method's composing Enter is its own); the
-// field keeps its words until the host accepts the question, and after a refusal. The working line says "Answering." while busy, and
-// stands for an error by its code: a lost stream (with Try again when its code is retryable), then a refused command,
-// then "Answering.", then an answer Claude stopped giving (thread-break.ts). The stopped question comes back into the
-// field when the field is empty. Each conversation keeps its own words (the drafts, by its key); on a new conversation
-// the status line offers the plan to ask with, until its first question fixes it, and otherwise names the plan the
-// conversation uses.
+// field keeps its words until the host accepts the question, and after a refusal. The working line says "Answering."
+// while busy, and stands for an error by its code: a lost stream (with Try again when its code is retryable), then a
+// refused command, then "Answering.", then an answer Claude stopped giving (thread-break.ts). The stopped question comes
+// back into the field when the field is empty. Each conversation keeps its own words (the drafts, by its key); on a new
+// conversation the status line offers the plan to ask with, until its first question fixes it, and otherwise names the
+// plan the conversation uses. `/` opens the menu of the agent's commands, as the thread's header lists them.
 import { useEffect, useImperativeHandle, useRef, type Ref } from "react";
 import {
   Composer,
   type ComposerHandle,
   type PlanChoice,
+  type SlashCommand,
 } from "@clauseo/components/clauseo/composer.tsx";
 import type { WorkingState } from "@clauseo/components/clauseo/working-line.tsx";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
@@ -26,6 +27,7 @@ export function WorkComposer({
   draftKey,
   choice,
   plan = "",
+  commands,
   disabled,
   busy,
   refused,
@@ -39,12 +41,15 @@ export function WorkComposer({
   ref?: Ref<ComposerHandle>;
   /** The room's drafts, by conversation: the field starts with this one's and keeps it there as it changes. */
   drafts: Drafts;
-  /** The open conversation's key in the drafts; null with no matter open. */
+  /** The open conversation's key in the drafts; null with no matter open. Fixed for the composer's life: the field
+   * reads its draft once, so the host keys this composer by it (room.tsx keys Work so). */
   draftKey: string | null;
   /** A new conversation's plan choice, before its first question; absent once fixed, or with one plan. */
   choice?: PlanChoice | undefined;
   /** The status line's plan words, "Uses your Claude plan"; "" for none. Not drawn while the choice stands. */
   plan?: string;
+  /** The agent's commands for the `/` menu, from the open thread's header; [] before there are any. */
+  commands: readonly SlashCommand[];
   /** No matter is open. */
   disabled: boolean;
   busy: boolean;
@@ -116,13 +121,12 @@ export function WorkComposer({
         : stopped);
   return (
     <Composer
-      // keyed by the conversation, so another's composer starts from that one's draft
-      key={draftKey ?? "none"}
       ref={field}
       took={null}
       plan={plan}
       {...(choice === undefined ? {} : { choice })}
       hint={null}
+      commands={commands}
       working={line?.state ?? null}
       opening
       busy={busy}
@@ -137,6 +141,8 @@ export function WorkComposer({
         ask: "send",
         stop: "cancel",
         working: line?.testId ?? "working",
+        menu: "composer-menu",
+        menuItem: "composer-menu-item",
       }}
     />
   );
