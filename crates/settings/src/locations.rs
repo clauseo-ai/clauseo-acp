@@ -117,6 +117,16 @@ impl Locations {
         &self.default_matters_dir
     }
 
+    /// The home Clauseo owns for agent `agent`: `<data folder>/agents/<agent>/home`. The host
+    /// makes it at launch and runs Codex with it as `CODEX_HOME`, so Codex keeps its login
+    /// there and never in the user's `~/.codex` (#160); the limits reader reads the same one.
+    /// `agent` is an agent id's text (`[a-z0-9-]`, as `protocol`'s `AgentId` checks), so it is
+    /// one plain folder name. It is under the data folder, never the temp folder: a temp
+    /// cleaner would sign the lawyer out.
+    pub fn agent_home(&self, agent: &str) -> PathBuf {
+        self.data_dir.join("agents").join(agent).join("home")
+    }
+
     pub(crate) fn resolve_for(
         os: Os,
         dirs: &dyn PlatformDirs,
