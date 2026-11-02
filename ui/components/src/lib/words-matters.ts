@@ -116,6 +116,11 @@ const HI = {
   "Your words at {time} came in while Clauseo searched Indian Kanoon for {what}. That search carried on in the background, finished at {done}, and this answer uses it.":
     "आपके {time} बजे के शब्द तब पहुँचे जब Clauseo Indian Kanoon पर {what} खोज रहा था। वह खोज पृष्ठभूमि में चलती रही, {done} बजे पूरी हुई, और यह उत्तर उसका इस्तेमाल करता है।",
   "Show what it found": "क्या मिला, देखें",
+  // a tool call a steer moved to the background, named by its title (any agent, any tool): the note under the answer
+  // once it finished, and the mark on its row
+  "Your words at {time} came in during '{title}'. It carried on in the background, finished at {done}, and this answer uses what it found.":
+    "आपके {time} बजे के शब्द '{title}' के दौरान पहुँचे। वह पृष्ठभूमि में चलता रहा, {done} बजे पूरा हुआ, और यह उत्तर उसमें मिली बातों का इस्तेमाल करता है।",
+  "In the background": "पृष्ठभूमि में",
   /* ---------- another conversation is changing the matter ---------- */
   "Waiting for '{title}' to finish, by {time}": "'{title}' के पूरा होने की प्रतीक्षा, {time} बजे तक",
   "Waiting for '{title}' to finish.": "'{title}' के पूरा होने की प्रतीक्षा है।",
