@@ -366,6 +366,23 @@ test("after an answer focus is in the composer's field, by click and by key", as
   expect(document.activeElement).toBe(field);
 });
 
+test("a click with focus on the page, as WebKit on macOS leaves it, puts focus in the field, so the page's Enter can't answer B", async () => {
+  h = await room([perm(3, 1), perm(4, 2)]);
+  const field = h.one("composer");
+  await act(async () => (document.activeElement as HTMLElement | null)?.blur());
+  expect(document.activeElement).toBe(document.body);
+  await h.click(h.all("permission")[0]!.querySelector('[data-testid="permission-allow_once"]'));
+  expect(document.activeElement).toBe(field);
+  h.deliver([upsert(perm(3, 1, { state: chose("allow_once") }))]);
+  expect(h.all("permission")[1]?.dataset["state"]).toBe("pending");
+  // B takes the keys now; words in the field and focus blurred to the page, Enter sends nothing
+  await h.type("and the lease");
+  await act(async () => (document.activeElement as HTMLElement | null)?.blur());
+  await keyOn(document.body, { key: "Enter" });
+  expect(h.transport.only("answer_permission").map((c) => c.request)).toEqual([request(1)]);
+  expect(h.one("composer")).toHaveProperty("value", "and the lease");
+});
+
 test("an elicitation: a question for you, the agent's words isolated, Stop the answer; never its URL; then only its words", async () => {
   const pending: ViewEntry = {
     elicitation: {
