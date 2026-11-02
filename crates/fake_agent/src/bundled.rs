@@ -38,6 +38,7 @@ bundled! {
         "codex-mode-agent",
         "codex-no-workspace-write",
         "codex-permission",
+        "codex-plan",
         "codex-resume",
         "elicitation-form",
         "elicitation-url",
