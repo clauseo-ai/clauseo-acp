@@ -1,11 +1,12 @@
 //! Start-up reconciliation: a thread whose log ends inside a turn (the host stopped without
 //! ending it) gets one commit. Pending requests expire `HostRestarted`; a started turn gets an
 //! after-turn checkpoint and ends `TurnFailed { thread.interrupted }` (a checkpoint R8 made
-//! whose record the log lost is recorded with the turn's changes, `known.rs`); a turn that never
-//! started stays queued, held behind its own thread; an attached session is detached. A turn
-//! with a `TurnEnded` is never touched, so each repair happens once, with one exception: every
-//! step of the thread that stopped `AtLimit` with no `TurnStoppedAtLimit` for its turn (the
-//! read that was to give its reset time was lost with a crash, or its commit failed) gets one,
+//! whose record the log lost is recorded with the turn's changes, `known.rs`); every turn that
+//! never started stays queued, held behind its own thread (`queue::restore`); an attached
+//! session is detached. A turn with a `TurnEnded` is never touched, so each repair happens once,
+//! with one exception: every step of the thread that stopped `AtLimit` with no
+//! `TurnStoppedAtLimit` for its turn (the read that was to give its reset time was lost with a
+//! crash, or its commit failed) gets one,
 //! with no window or reset time and the reason `PlanWindow`, in a commit of its own. Not only
 //! the last step: a later turn of the thread may have started, and ended, while an earlier
 //! turn's stop still waited. Both are read from the loaded state (a snapshot keeps its steps and
@@ -34,8 +35,8 @@ use clauseo_matters::TurnMeta;
 use clauseo_protocol::{
     AgentSessionDetached, CheckpointId, DetachReason, DomainEvent, ElicitationId, ElicitationState,
     Envelope, ErrorCode, EventId, LimitStopReason, PermissionRequestId, PermissionState,
-    StopReason, StreamId, ThreadId, ThreadStatus, ToolCallId, TurnId, TurnQueued,
-    TurnStoppedAtLimit, UserMessageStatus, ViewEntry,
+    StopReason, StreamId, ThreadId, ToolCallId, TurnId, TurnStoppedAtLimit, UserMessageStatus,
+    ViewEntry,
 };
 use clauseo_reducer::ThreadState;
 
@@ -43,7 +44,7 @@ use super::super::Actor;
 use super::super::input::{Input, MatterTag};
 use super::close::{Expiries, TurnClose, log_limit_stop};
 use super::out::Out;
-use super::{JobKind, LogFor, Then, TurnInput, TurnJob, end, matter_of, state};
+use super::{JobKind, LogFor, Then, TurnInput, TurnJob, end, matter_of, queue, state};
 use crate::error::Error;
 use crate::matter_worker::{MatterJob, TurnCheckpoint};
 use crate::sent::{SentView, TurnPaths};
@@ -137,9 +138,12 @@ pub(super) fn reconcile(actor: &mut Actor, thread: ThreadId) {
     });
 }
 
-/// The open turn: the last `UserMessage` not removed and without a step, and whether it
-/// started (the thread is `Running` or `NeedsYou`).
+/// The open turn: the started turn without a step, else the last `UserMessage` not removed and
+/// without a step (a queued turn), and whether it started.
 fn open_turn(state: &ThreadState) -> Option<(TurnId, bool)> {
+    if let Some(running) = state.running() {
+        return Some((running, true));
+    }
     let mut stepped: BTreeSet<TurnId> = BTreeSet::new();
     let mut last = None;
     for entry in state.entries().values() {
@@ -152,11 +156,7 @@ fn open_turn(state: &ThreadState) -> Option<(TurnId, bool)> {
         }
     }
     let turn = last.filter(|turn| !stepped.contains(turn))?;
-    let started = matches!(
-        state.status(),
-        ThreadStatus::Running | ThreadStatus::NeedsYou
-    );
-    Some((turn, started))
+    Some((turn, false))
 }
 
 /// The turns of the thread's steps that stopped `AtLimit` with no `TurnStoppedAtLimit`, in the
@@ -216,19 +216,23 @@ pub(super) fn on_log(
         .and_then(|loaded| loaded.state.as_thread())
         .and_then(open_turn);
     match open {
-        Some((turn, true)) => hold(actor, thread, turn, &log, pending),
-        Some((turn, false)) => {
-            let queued = needs_queued(&log, thread, turn)
-                .then(|| TurnQueued::new(thread, turn, thread, previous_turn(&log, turn)));
+        Some((turn, true)) => {
+            // The turns queued behind it come back held; the repair ends it later.
+            let logged = (|| -> Result<(), Error> {
+                let mut out = Out::new(actor, thread, None)?;
+                queue::restore(actor, thread, &log, &mut out)?;
+                out.send(actor, Then::Nothing)
+            })();
+            if let Err(error) = logged {
+                tracing::warn!(%thread, %error, "the queued turns were not held");
+            }
+            hold(actor, thread, turn, &log, pending);
+        }
+        Some((_, false)) => {
             let logged = (|| -> Result<(), Error> {
                 let mut out = Out::new(actor, thread, None)?;
                 pending.expiries().push_into(actor, &mut out)?;
-                if let Some(queued) = queued {
-                    out.push(
-                        actor,
-                        queued.map_err(|error| Error::Internal(error.to_string()))?,
-                    )?;
-                }
+                queue::restore(actor, thread, &log, &mut out)?;
                 detach(actor, &mut out, &pending)?;
                 out.send(actor, Then::Nothing)
             })();
@@ -325,7 +329,7 @@ fn turn_started(log: &[Envelope], turn: TurnId) -> Option<EventId> {
 }
 
 /// Whether the turn's last `TurnQueued` (if any) waits for another thread or is missing.
-fn needs_queued(log: &[Envelope], thread: ThreadId, turn: TurnId) -> bool {
+pub(super) fn needs_queued(log: &[Envelope], thread: ThreadId, turn: TurnId) -> bool {
     let last = log.iter().rev().find_map(|envelope| {
         if let DomainEvent::TurnQueued(queued) = &envelope.event
             && queued.turn() == turn
@@ -339,7 +343,7 @@ fn needs_queued(log: &[Envelope], thread: ThreadId, turn: TurnId) -> bool {
 }
 
 /// The thread's turn before `turn`, by its `UserMessage`s.
-fn previous_turn(log: &[Envelope], turn: TurnId) -> Option<TurnId> {
+pub(super) fn previous_turn(log: &[Envelope], turn: TurnId) -> Option<TurnId> {
     let mut previous = None;
     for envelope in log {
         if let DomainEvent::UserMessage(message) = &envelope.event {

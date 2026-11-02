@@ -93,6 +93,7 @@ fn send_answer(
             | Then::Closing(_)
             | Then::LimitStop(_)
             | Then::Undone
+            | Then::Queue(_)
             | Then::Permission { .. }
             | Then::CancelPermission { .. }
             | Then::Elicitation { .. }) => AfterCommand::Turn(TurnTag { thread, then }),

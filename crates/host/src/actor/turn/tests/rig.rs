@@ -291,7 +291,8 @@ impl Rig {
     pub(super) fn current_turn(&mut self, thread: ThreadId, phase: TurnPhase) -> TurnId {
         let now = self.actor.now().wall;
         let turn: TurnId = self.actor.ids.mint(now).unwrap();
-        let mut current = Current::new(turn, Vec::new());
+        let message = self.actor.ids.mint(now).unwrap();
+        let mut current = Current::new(turn, message, Vec::new());
         current.phase = phase;
         self.actor.threads.get_mut(&thread).unwrap().turn.current = Some(Box::new(current));
         let stream = StreamId::Thread(thread);

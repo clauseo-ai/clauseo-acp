@@ -339,6 +339,7 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
         AgentReply::PromptRefused { turn, error } => {
             end::on_prompt_refused(actor, thread, turn, &error);
         }
+        AgentReply::Steer(steered) => super::queue::on_steered(actor, thread, *steered),
         AgentReply::Initialized(_)
         | AgentReply::Session { .. }
         | AgentReply::Prepared { .. }

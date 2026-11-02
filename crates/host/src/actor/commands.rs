@@ -301,11 +301,20 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
             super::limits::refresh(actor, agent, why);
             actor.finish_command(ctx.id, Ok(CommandOutcome::Done));
         }
-        HostCommand::EditQueuedPrompt { .. }
-        | HostCommand::RemoveQueuedPrompt { .. }
-        | HostCommand::SendQueuedNow { .. }
-        | HostCommand::ResumeQueue { .. }
-        | HostCommand::RestartAgent { .. } => {
+        HostCommand::EditQueuedPrompt { thread, turn, text } => {
+            let command = TurnCommand::EditQueuedPrompt { turn, text };
+            turn_command(actor, ctx, thread, command);
+        }
+        HostCommand::RemoveQueuedPrompt { thread, turn } => {
+            turn_command(actor, ctx, thread, TurnCommand::RemoveQueuedPrompt { turn });
+        }
+        HostCommand::SendQueuedNow { thread, turn } => {
+            turn_command(actor, ctx, thread, TurnCommand::SendQueuedNow { turn });
+        }
+        HostCommand::ResumeQueue { thread } => {
+            turn_command(actor, ctx, thread, TurnCommand::ResumeQueue);
+        }
+        HostCommand::RestartAgent { .. } => {
             let refusal = Error::refused(ErrorCode::CommandInvalid, "not built yet");
             actor.finish_command(ctx.id, Err(refusal));
         }

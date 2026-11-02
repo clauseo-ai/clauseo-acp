@@ -30,7 +30,7 @@ pub(super) fn cancel_command(
         current(actor, thread).map(|current| (current.phase, current.cancelled, current.turn));
     match found {
         Some((TurnPhase::Accepting | TurnPhase::Launching | TurnPhase::Queued, false, turn)) => {
-            dequeue(actor, ctx, thread, turn)
+            dequeue(actor, Some(ctx), thread, turn)
         }
         Some((TurnPhase::Prompting, false, _)) => {
             cancel_running(actor, thread, Some(ctx));
@@ -67,30 +67,56 @@ fn done_tag(ctx: CommandCtx) -> Tag {
     }
 }
 
+/// The current turn, for a send now (`queue.rs`): the Cancel path without a command, whatever
+/// its phase.
+pub(super) fn cancel_current(actor: &mut Actor, thread: ThreadId) {
+    let found =
+        current(actor, thread).map(|current| (current.phase, current.cancelled, current.turn));
+    match found {
+        Some((TurnPhase::Accepting | TurnPhase::Launching | TurnPhase::Queued, false, turn)) => {
+            if let Err(error) = dequeue(actor, None, thread, turn) {
+                tracing::warn!(%thread, %error, "a turn was not dequeued for a send now");
+            }
+        }
+        Some((TurnPhase::Prompting, false, _)) => cancel_running(actor, thread, None),
+        Some((TurnPhase::Checkpointing | TurnPhase::Starting, false, _)) => {
+            if let Some(current) = current(actor, thread) {
+                current.cancelled = true;
+            }
+        }
+        Some((_, true, _) | (TurnPhase::FallbackStop | TurnPhase::Ending, false, _)) | None => {}
+    }
+}
+
 /// A turn that has not started: `TurnEnded { Cancelled, None }`, no `TurnStarted`, then the
-/// detach of an agent that exited while the turn waited.
-fn dequeue(
+/// detach of an agent that exited while the turn waited; with the command's receipt when a
+/// command asked (`Cancel`, `RemoveQueuedPrompt`).
+pub(super) fn dequeue(
     actor: &mut Actor,
-    ctx: CommandCtx,
+    ctx: Option<CommandCtx>,
     thread: ThreadId,
     turn: TurnId,
 ) -> Result<(), Error> {
     let mut close = TurnClose::new(turn, StopReason::Cancelled);
     close.detach = current(actor, thread).and_then(|current| current.detach.clone());
-    let mut out = Out::new(actor, thread, Some(ctx.id))?;
+    let mut out = Out::new(actor, thread, ctx.map(|ctx| ctx.id))?;
     close.push_into(actor, &mut out)?;
-    let now = actor.now().wall;
-    out.draft
-        .receipt(ctx.receipt(Some(StreamId::Thread(thread)), CommandOutcome::Done, now));
-    let tag = Tag::Command {
-        id: ctx.id,
-        outcome: CommandOutcome::Done,
-        after: AfterCommand::Turn(TurnTag {
-            thread,
-            then: Then::Closing(turn),
-        }),
-    };
-    out.send_tagged(actor, tag)?;
+    let then = Then::Closing(turn);
+    match ctx {
+        Some(ctx) => {
+            let now = actor.now().wall;
+            let stream = Some(StreamId::Thread(thread));
+            out.draft
+                .receipt(ctx.receipt(stream, CommandOutcome::Done, now));
+            let tag = Tag::Command {
+                id: ctx.id,
+                outcome: CommandOutcome::Done,
+                after: AfterCommand::Turn(TurnTag { thread, then }),
+            };
+            out.send_tagged(actor, tag)?;
+        }
+        None => out.send(actor, then)?,
+    }
     failure::closing_sent(actor, thread, &close, Ok(()));
     end::finish(actor, thread);
     Ok(())

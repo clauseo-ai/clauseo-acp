@@ -65,6 +65,8 @@ pub(crate) enum AgentReply {
         mode: AgentChoiceId,
         result: Result<(), clauseo_acp::Error>,
     },
+    /// A steer into the running turn answered (`queue/steer.rs`).
+    Steer(Box<super::queue::Steered>),
 }
 
 /// Why a thread's whole log was read.

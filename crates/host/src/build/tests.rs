@@ -95,6 +95,7 @@ fn tool_entry(
         raw_input,
         raw_output,
         content,
+        background: None,
     }))
 }
 

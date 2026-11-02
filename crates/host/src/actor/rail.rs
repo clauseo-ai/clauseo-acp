@@ -223,7 +223,7 @@ pub(crate) fn thread_summary(actor: &Actor, thread: &ThreadEntry) -> (ThreadSumm
             .or_else(|| thread.row.title.as_deref().map(CompactString::from)),
         agent: thread.row.agent.clone(),
         status: read.status,
-        queue_held: false,
+        queue_held: super::turn::queue_held(actor, thread.row.id),
         seen: seen(thread),
         last_stop: thread.last_stop.map(|stop| LastStop {
             reason: stop.reason,

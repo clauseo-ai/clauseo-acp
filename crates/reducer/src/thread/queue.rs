@@ -182,9 +182,7 @@ pub(super) fn background_finished(
 fn is_final(status: ToolCallStatus) -> bool {
     match status {
         ToolCallStatus::Completed | ToolCallStatus::Failed | ToolCallStatus::Cancelled => true,
-        ToolCallStatus::Pending | ToolCallStatus::InProgress | ToolCallStatus::Unknown { .. } => {
-            false
-        }
+        ToolCallStatus::Pending | ToolCallStatus::InProgress | ToolCallStatus::Unknown => false,
     }
 }
 

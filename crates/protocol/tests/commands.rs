@@ -215,7 +215,7 @@ fn command_size_limits() {
         assert!(build(vec![text(&max_text)]).validate().is_ok());
         assert!(build(vec![text(&accented)]).validate().is_ok());
         assert!(build(vec![text(&half), text(&half)]).validate().is_ok());
-        let one_over = build(vec![text(&(max_text.clone() + "x"))]).validate();
+        let one_over = build(vec![text(&(max_text + "x"))]).validate();
         assert!(
             too_large(&one_over, over, MAX_PROMPT_TEXT_BYTES),
             "{one_over:?}"
@@ -226,7 +226,7 @@ fn command_size_limits() {
             text(&(half.clone() + "x")),
         ]);
         assert!(too_large(&split.validate(), over, MAX_PROMPT_TEXT_BYTES));
-        let accented_over = build(vec![text(&(accented.clone() + "x"))]).validate();
+        let accented_over = build(vec![text(&(accented + "x"))]).validate();
         assert!(too_large(&accented_over, over, MAX_PROMPT_TEXT_BYTES));
         // Files: 50 pass, 51 fail.
         let mut at_limit = files(MAX_PROMPT_FILES);

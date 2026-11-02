@@ -4,7 +4,8 @@
 //!
 //! A turn moves through the steps of the brief's "The turn": the `UserMessage` commit, the
 //! agent's launch (`agents.rs`), the writer queue and the before-turn checkpoint, the prompt, and
-//! the end (`steps.rs`). Agent updates are mapped in `updates.rs`, text goes through the
+//! the end (`steps.rs`); a thread's queue of prompts waiting behind its turn, send now and steer
+//! are in `queue.rs`. Agent updates are mapped in `updates.rs`, text goes through the
 //! coalescer in `text.rs`, and every commit of a thread stream starts by flushing that thread's
 //! held text (`out.rs`), so text and other events keep their order.
 
@@ -20,6 +21,7 @@ mod known;
 mod launch_checks;
 mod out;
 mod prompt;
+mod queue;
 mod reconcile;
 mod restore;
 mod route;
@@ -29,6 +31,7 @@ mod steps;
 mod text;
 mod undo;
 mod updates;
+mod writer;
 
 use std::collections::VecDeque;
 
@@ -51,10 +54,14 @@ pub(crate) use end::limits_read;
 pub(crate) use failure::blocked as stream_blocked;
 pub(crate) use inputs::{AgentReply, LogFor, TurnInput};
 pub(crate) use out::flush_text;
+pub(crate) use queue::queue_held;
 pub(crate) use restore::{
     RestoreAsk, committed as restore_committed, on_restored, restore_version,
 };
 pub(crate) use route::{TurnCommand, command};
+pub(crate) use writer::{
+    hold_for_relocate, matter_busy, release_relocate, stop_agents, writer_busy,
+};
 
 /// How long a cancelled turn waits for the agent's answer before the host stops the agent.
 const CANCEL_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
@@ -85,6 +92,8 @@ pub(crate) struct TurnState {
     /// An undo R8 has done, until the commit logging it returns `Ok` or its retry returns;
     /// the thread holds its matter's writer meanwhile.
     undo: Option<Box<undo::UndoLog>>,
+    /// The prompts waiting behind the current turn, whether they are held, steers in flight.
+    queue: queue::ThreadQueue,
 }
 
 /// A turn whose `TurnEnded` is sent but not durable yet.
@@ -127,6 +136,8 @@ pub(crate) enum Holder {
 #[derive(Debug)]
 struct Current {
     turn: TurnId,
+    /// The lawyer's message that opened it.
+    message: clauseo_protocol::MessageId,
     /// The prompt's content, until step 5 sends it.
     prompt: Vec<ContentBlock>,
     phase: TurnPhase,
@@ -216,6 +227,8 @@ enum Then {
     LimitStop(TurnId),
     /// The commit logging an undo: update the note, let the writer go.
     Undone,
+    /// A queue command's commit (`queue.rs`).
+    Queue(queue::After),
     /// A permission answer: tell the agent.
     Permission {
         agent: u64,
@@ -361,6 +374,7 @@ pub(crate) fn committed(actor: &mut Actor, tag: TurnTag, outcome: Result<(), &Fa
         (Then::LimitStop(turn), outcome) => {
             super::limits::stop_committed(actor, thread, turn, outcome.is_ok());
         }
+        (Then::Queue(after), outcome) => queue::committed(actor, thread, after, outcome.is_ok()),
         (Then::Undone, Ok(())) => undo::on_logged(actor, thread),
         (Then::Undone, Err(_)) => undo::on_failed(actor, thread),
         (Then::Permission { agent, key, option }, Ok(())) => {
@@ -450,60 +464,13 @@ pub(crate) fn busy(actor: &Actor) -> bool {
         })
 }
 
-/// Whether `thread` has a current turn, or a last turn whose end is not durable yet
-/// (`thread.turn_running` for `ArchiveThread`).
+/// Whether `thread` has a current turn, a last turn whose end is not durable yet, or queued
+/// turns (`thread.turn_running` for `ArchiveThread`).
 pub(crate) fn turn_running(actor: &Actor, thread: ThreadId) -> bool {
-    actor
-        .threads
-        .get(&thread)
-        .is_some_and(|entry| entry.turn.current.is_some() || entry.turn.closing.is_some())
-}
-
-/// Whether `matter`'s writer is taken or soon wanted: a turn or an undo holds it, a turn waits
-/// for it, or a thread of the matter has a turn, an undo not yet logged or a start-up repair in
-/// progress (`matter.turn_running` for `RelocateMatter`).
-pub(crate) fn writer_busy(actor: &Actor, matter: MatterId) -> bool {
-    let held = actor
-        .matters
-        .get(&matter)
-        .is_some_and(|entry| entry.turns.holder.is_some() || !entry.turns.queue.is_empty());
-    held || actor
-        .threads
-        .values()
-        .filter(|entry| entry.row.matter == matter)
-        .any(|entry| {
-            let state = &entry.turn;
-            state.current.is_some()
-                || state.closing.is_some()
-                || state.undo.is_some()
-                || state.reconciling
-        })
-}
-
-/// Takes `matter`'s writer for a relocate when it is free (see [`writer_busy`]); `false` when
-/// it is not.
-pub(crate) fn hold_for_relocate(actor: &mut Actor, matter: MatterId) -> bool {
-    if writer_busy(actor, matter) {
-        return false;
-    }
-    match actor.matters.get_mut(&matter) {
-        Some(entry) => {
-            entry.turns.holder = Some(Holder::Relocate);
-            true
-        }
-        None => false,
-    }
-}
-
-/// The relocate holding `matter`'s writer is done: the next queued turn takes it.
-pub(crate) fn release_relocate(actor: &mut Actor, matter: MatterId) {
-    let held = actor
-        .matters
-        .get(&matter)
-        .is_some_and(|entry| entry.turns.holder == Some(Holder::Relocate));
-    if held {
-        end::pass_writer(actor, matter);
-    }
+    actor.threads.get(&thread).is_some_and(|entry| {
+        let state = &entry.turn;
+        state.current.is_some() || state.closing.is_some() || !state.queue.is_empty()
+    })
 }
 
 /// Whether `thread`'s stream stays loaded: an agent, open turn, repair, retriable end, limit stop.
@@ -529,38 +496,6 @@ pub(crate) fn keeps_matter_loaded(actor: &Actor, matter: MatterId) -> bool {
         .matters
         .get(&matter)
         .is_some_and(|entry| entry.turns.holder.is_some())
-}
-
-/// Whether anything runs in `matter` that `ForgetMatter` must wait for: a turn, undo, restore or
-/// relocate holds its writer or turns wait for it, or one of its threads has a turn not yet
-/// ended (one still launching takes the writer later) or an undo whose log is not durable.
-pub(crate) fn matter_busy(actor: &Actor, matter: MatterId) -> bool {
-    let writer = actor.matters.get(&matter).is_some_and(|entry| {
-        entry.turns.holder.is_some()
-            || !entry.turns.queue.is_empty()
-            || entry.turns.restore.is_some()
-    });
-    writer
-        || actor.threads.values().any(|entry| {
-            entry.row.matter == matter
-                && (entry.turn.current.is_some()
-                    || entry.turn.closing.is_some()
-                    || entry.turn.undo.is_some())
-        })
-}
-
-/// Stops the agent of every thread of `matter` with the shutdown ladder (`ForgetMatter`); each
-/// posts `Ended` and logs its detach as any stop does.
-pub(crate) fn stop_agents(actor: &mut Actor, matter: MatterId) {
-    let threads: Vec<ThreadId> = actor
-        .threads
-        .values()
-        .filter(|entry| entry.row.matter == matter && entry.turn.agent.is_some())
-        .map(|entry| entry.row.id)
-        .collect();
-    for thread in threads {
-        agents::stop(actor, thread);
-    }
 }
 
 /// Whether the host is shutting down.

@@ -332,5 +332,5 @@ fn queue_held_is_the_hosts_flag() {
     let bytes = Snapshot::of(&state).to_bytes().unwrap();
     let read = Snapshot::from_bytes(&bytes).unwrap().state;
     assert!(!header(&read).queue_held);
-    assert_eq!(header(&state).queue_held, true);
+    assert!(header(&state).queue_held);
 }
