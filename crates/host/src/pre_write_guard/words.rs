@@ -76,15 +76,20 @@ pub(crate) fn shell_words(command: &str, limit: usize, escape: Escape, words: &m
 
 /// The file names `word` may hold, each when not empty: the word without trailing `;`, `|` or
 /// `&` (`Contract.docx;`), its part after the last `>`, `<` or `|` (a redirection such as
-/// `>Contract.docx`, `>>x`, `>|x` or `2>x`), and its part after the first `=`
-/// (`--out=Contract.docx`).
+/// `>Contract.docx`, `>>x`, `>|x` or `2>x`), its part after the first `=`
+/// (`--out=Contract.docx`), and for a word starting with `-` its part after the first `:`
+/// without quotes around it (PowerShell's colon form of a parameter, `-Path:Contract.docx`).
 pub(crate) fn candidates(word: &str) -> impl Iterator<Item = &str> {
     let word = word.trim_end_matches([';', '|', '&']);
     let redirected = word
         .rfind(['>', '<', '|'])
         .and_then(|at| word.get(at + 1..));
     let assigned = word.split_once('=').map(|(_, value)| value);
-    [Some(word), redirected, assigned]
+    let parameter = word
+        .strip_prefix('-')
+        .and_then(|rest| rest.split_once(':'))
+        .map(|(_, value)| value.trim_matches(['\'', '"']));
+    [Some(word), redirected, assigned, parameter]
         .into_iter()
         .flatten()
         .filter(|candidate| !candidate.is_empty())
@@ -141,6 +146,19 @@ mod tests {
             all("--out=Contract.docx"),
             ["--out=Contract.docx", "Contract.docx"]
         );
+        assert_eq!(
+            all("-Path:Contract.docx"),
+            ["-Path:Contract.docx", "Contract.docx"]
+        );
+        assert_eq!(
+            all(r#"-LiteralPath:"C:\m\Contract.docx""#),
+            [
+                r#"-LiteralPath:"C:\m\Contract.docx""#,
+                r"C:\m\Contract.docx"
+            ]
+        );
+        assert_eq!(all("a:b"), ["a:b"]);
+        assert_eq!(all("-Force:"), ["-Force:"]);
         assert_eq!(all(";"), Vec::<&str>::new());
     }
 }

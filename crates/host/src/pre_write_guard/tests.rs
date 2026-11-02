@@ -372,6 +372,8 @@ fn powershell_naming_a_held_file_is_refused() {
     for command in [
         "Remove-Item Contract.docx".to_owned(),
         "Set-Content -Path 'Contract.docx' -Value hi; Get-Item x".to_owned(),
+        "Set-Content -Path:Contract.docx -Value hi".to_owned(),
+        "Set-Content -LiteralPath:'Contract.docx' hi".to_owned(),
         format!("Set-Content \"{}\" hi", fx.path("m/Contract.docx")),
     ] {
         assert_eq!(

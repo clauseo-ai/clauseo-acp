@@ -252,14 +252,26 @@ fn launch(actor: &Actor, thread: ThreadId, prepared: Prepared) -> Result<Launche
 }
 
 /// THE CODEX HOOKS SEAM: the `hooks` object a Codex agent's `CODEX_CONFIG` carries, with its
-/// `state` trust entry and `trusted_hash`. The guard PR's `codex_hook_config()`, in
-/// `crates/host/src/agent/loads/codex.rs` (clauseo-acp #152, for clauseo-acp-private#162),
-/// fills it: whichever of R15 and #152 merges second wires it here. Until then it is `None`
-/// (tests set one through `HostConfig::with_codex_hooks`). It is read once per launch, which
-/// records on the agent whether one went in (`Agent::guard`); with none the session start
-/// skips the guard's trust check.
+/// `state` trust entry and `trusted_hash`: the one a test set (`HostConfig::with_codex_hooks`),
+/// else [`codex_hook_config`](agent::loads::codex_hook_config) for the guard program the
+/// Claude Code entry runs (`HostConfig::with_pre_write_guard`), so its `PreToolUse` holds one
+/// group, the guard's. `None` with no guard program, or (with a warning) one that
+/// `codex_hook_config` cannot quote. It is read once per launch, which records on the agent
+/// whether one went in (`Agent::guard`); with none the session start skips the guard's trust
+/// check.
 fn codex_hooks(actor: &Actor) -> Option<serde_json::Map<String, serde_json::Value>> {
-    actor.codex_hooks.clone()
+    if let Some(hooks) = &actor.codex_hooks {
+        return Some(hooks.clone());
+    }
+    let program = actor.pre_write_guard.as_deref()?;
+    let Some(serde_json::Value::Object(hooks)) = agent::loads::codex_hook_config(program) else {
+        tracing::warn!(
+            "the pre-write guard's path cannot go in Codex's hook command, so Codex runs without \
+             the guard"
+        );
+        return None;
+    };
+    Some(hooks)
 }
 
 /// Step 4 for a turn whose agent was started in another folder than its matter's row now names

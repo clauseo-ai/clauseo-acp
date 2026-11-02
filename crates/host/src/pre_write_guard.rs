@@ -16,7 +16,8 @@
 //!   word names a target when it is an existing file, also once its shell punctuation is off
 //!   (`words.rs`, `candidates`). The patch lines in the command count too: Codex's
 //!   `exec_command` applies `apply_patch <<'EOF' …` as a patch. A command that reaches a file
-//!   another way (a glob, a variable, a script) is not caught.
+//!   another way (a glob, a variable, a script, a .NET call such as
+//!   `[IO.File]::WriteAllText('Contract.docx', …)`) is not caught.
 //!
 //! The matter folder is the `--matter` argument when the hook passes one (Claude Code's entry
 //! does, `agent/loads.rs`: Claude Code's `cwd` follows the agent's `cd`), else the input's
@@ -36,8 +37,11 @@
 //! lexical (`..` takes a part off, so `sub/../.codex/x` is caught with no `sub` yet). The name
 //! compares ignoring ASCII case and trailing dots and spaces, as macOS and Windows file systems
 //! do. In a shell command, where the working folder is unknown, any patch target with a `.codex`
-//! part is refused. Claude Code needs no such rule: its `settingSources` leave out project
-//! settings.
+//! part is refused, and under Codex's hook (the one with no `--matter` argument) so is a `Bash`
+//! command any of whose words, once its shell punctuation is off, has a `.codex` part, relative
+//! or absolute: `touch .codex/config.toml`, `echo x > .codex/config.toml`, and reads such as
+//! `cat .codex/config.toml` too, since an agent has no reason to touch a folder Clauseo refuses
+//! it. Claude Code needs no such rule: its `settingSources` leave out project settings.
 //!
 //! A refusal is exit code 2 with the reason on stderr, which Claude Code and Codex both take as a
 //! block; stdout stays empty, so a login profile's output under Codex's `$SHELL -lc` cannot spoil
@@ -112,7 +116,8 @@ fn matter_arg(args: &[OsString]) -> Option<PathBuf> {
 enum Refusal {
     /// A target is held open by Word or another program.
     HeldOpen(MatterPath),
-    /// A Codex patch writes in the matter's `.codex` folder.
+    /// A Codex patch writes in the matter's `.codex` folder, or a Codex shell command names a
+    /// `.codex` folder.
     CodexFolder,
 }
 
@@ -133,8 +138,9 @@ impl Refusal {
 }
 
 /// Why the hook input `bytes` is refused, if it is, with `matter` the folder from the
-/// arguments: a patch target in the matter's `.codex` folder, else the first target that lies
-/// in the matter folder and is held open.
+/// arguments: a patch target in the matter's `.codex` folder, or under Codex's hook (no
+/// `matter`) a `Bash` word with a `.codex` part, else the first target that lies in the matter
+/// folder and is held open.
 fn refusal(bytes: &[u8], matter: Option<&Path>) -> Option<Refusal> {
     let hook: Value = serde_json::from_slice(bytes).ok()?;
     let cwd = hook
@@ -152,7 +158,12 @@ fn refusal(bytes: &[u8], matter: Option<&Path>) -> Option<Refusal> {
         Targets::Patch(paths) => paths
             .iter()
             .any(|path| in_codex_folder(&folder, &base, path)),
-        Targets::Shell { patch, .. } => patch.iter().any(|path| has_codex_part(path)),
+        Targets::Shell {
+            patch, names_codex, ..
+        } => {
+            patch.iter().any(|path| has_codex_part(path))
+                || (*names_codex && matter.is_none() && tool == "Bash")
+        }
     };
     if into_codex {
         return Some(Refusal::CodexFolder);
@@ -169,10 +180,12 @@ enum Targets {
     Named(Vec<PathBuf>),
     /// The files of a Codex `apply_patch` patch.
     Patch(Vec<PathBuf>),
-    /// A shell command: the existing files it names, and the files of a patch in its text.
+    /// A shell command: the existing files it names, the files of a patch in its text, and
+    /// whether a word of it has a `.codex` part.
     Shell {
         files: Vec<PathBuf>,
         patch: Vec<PathBuf>,
+        names_codex: bool,
     },
 }
 
@@ -181,7 +194,7 @@ impl Targets {
     fn paths(&self) -> impl Iterator<Item = &PathBuf> {
         let (first, second): (&[PathBuf], &[PathBuf]) = match self {
             Self::Named(paths) | Self::Patch(paths) => (paths, &[]),
-            Self::Shell { files, patch } => (files, patch),
+            Self::Shell { files, patch, .. } => (files, patch),
         };
         first.iter().chain(second)
     }
@@ -258,8 +271,12 @@ fn is_codex(name: &str) -> bool {
 
 /// Whether any part of `path`, split at `/` and `\\`, is `.codex` ([`is_codex`]).
 fn has_codex_part(path: &Path) -> bool {
-    path.to_str()
-        .is_some_and(|text| text.split(['/', '\\']).any(is_codex))
+    path.to_str().is_some_and(text_has_codex_part)
+}
+
+/// Whether any part of `text`, split at `/` and `\\`, is `.codex` ([`is_codex`]).
+fn text_has_codex_part(text: &str) -> bool {
+    text.split(['/', '\\']).any(is_codex)
 }
 
 /// The files a Codex `apply_patch` patch adds, updates, deletes or moves to.
@@ -285,9 +302,9 @@ fn patch_targets(patch: &str) -> Vec<PathBuf> {
 }
 
 /// A shell command's targets: the existing files among its first [`MAX_WORDS`] words, taken from
-/// `base`, and the files of a patch in its text. Claude Code sends the command as a string; an
-/// argument list (one shape Codex has used) is taken word by word, each split again so
-/// `["bash", "-lc", "…"]` reaches the script's words.
+/// `base`, the files of a patch in its text, and whether one of those words has a `.codex` part.
+/// Claude Code sends the command as a string; an argument list (one shape Codex has used) is
+/// taken word by word, each split again so `["bash", "-lc", "…"]` reaches the script's words.
 fn shell_targets(command: Option<&Value>, base: &Path, escape: Escape) -> Targets {
     let mut words: Vec<String> = Vec::new();
     let mut text = String::new();
@@ -310,8 +327,10 @@ fn shell_targets(command: Option<&Value>, base: &Path, escape: Escape) -> Target
         _ => {}
     }
     let mut files: Vec<PathBuf> = Vec::new();
+    let mut names_codex = false;
     for word in &words {
         for candidate in candidates(word) {
+            names_codex |= text_has_codex_part(candidate);
             let path = base.join(candidate);
             if !files.contains(&path) && path.metadata().is_ok_and(|meta| meta.is_file()) {
                 files.push(path);
@@ -321,6 +340,7 @@ fn shell_targets(command: Option<&Value>, base: &Path, escape: Escape) -> Target
     Targets::Shell {
         files,
         patch: patch_targets(&text),
+        names_codex,
     }
 }
 
