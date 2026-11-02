@@ -1,8 +1,8 @@
 // Claude's AskUserQuestion arrives as a form elicitation (elicitation-schema.ts, elicitation-form.tsx):
 // the question is a pending `elicitation` row whose form holds a choice per question, and each
 // question's `_custom` Other beneath it. fake_agent `ask-user-question` asks one question with
-// options and an Other, and the spec answers it: one option picked, words in the Other, Send the
-// answer; the row leaves pending and the turn ends normally. fake_agent `ask-user-question-stop`
+// options and an Other, and the spec answers it: one option picked, words in the Other, Send;
+// the row leaves pending and the turn ends normally. fake_agent `ask-user-question-stop`
 // asks the same and waits; Stop the answer ends the turn as cancelled, as cancel-unanswered asserts.
 //
 // Both scenarios live on another team's branch (host-ask-and-mode) and are not on main yet, so
@@ -34,6 +34,10 @@ test.describe("ask-user-question", () => {
 
       await app.page.getByTestId("elicitation-choice-question_0-0").click();
       await app.page.getByTestId("elicitation-input-question_0_custom").fill("Saket, with a note");
+      // The selectors are test ids, so the words on the buttons (Send, Don't answer) can change
+      // without them. This spec checks only what the window shows; the shape of the answer the agent
+      // received (question_0 the option's const, question_0_custom the words) is asserted by fake_agent's
+      // ask-user-question scenario itself (on iris's host-ask-and-mode), which fails the turn otherwise.
       await app.page.getByTestId("elicitation-send").click();
 
       // The answer is sent: the row leaves pending and its form goes with it.
