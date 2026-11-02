@@ -19,6 +19,9 @@ use crate::secret::Secret;
 pub const ACCOUNT_MIN_INTERVAL: Duration = Duration::from_mins(1);
 /// How long `wait_recharge` waits after a network error before polling again.
 const POLL_BACKOFF: Duration = Duration::from_secs(5);
+/// The least time between the starts of two recharge polls, so a connector (or a proxy) that
+/// answers `awaiting_payment` at once is not polled in a loop.
+const POLL_MIN_INTERVAL: Duration = Duration::from_secs(2);
 /// How often a waiting `wait_recharge` looks at the cancel flag and the deadline.
 const POLL_TICK: Duration = Duration::from_millis(20);
 
@@ -115,8 +118,8 @@ pub(crate) fn create_recharge(handle: &ConnectorHandle, pack: &str) -> Result<Re
 
 /// Polls `GET /v1/case-law/recharges/{id}?wait=40` until the recharge is no longer awaiting
 /// payment, the recharge deadline passes (`RechargeTimedOut`) or `cancel` is set
-/// (`Cancelled`, within about 20 ms, even mid-poll). A network error or a 5xx waits 5 s and
-/// polls again.
+/// (`Cancelled`, within about 20 ms, even mid-poll). Polls start at least 2 s apart. A network
+/// error or a 5xx waits 5 s and polls again. An answer for another recharge is `Parse`.
 pub(crate) fn wait_recharge(
     handle: &ConnectorHandle,
     recharge_id: &str,
@@ -131,19 +134,41 @@ pub(crate) fn wait_recharge(
         return Err(Error::Parse("recharge: not a recharge id".to_owned()));
     }
     let config = &handle.inner.shared.config;
-    let deadline = config.clock.now() + config.recharge_deadline;
+    let deadline = config
+        .clock
+        .now()
+        .checked_add(config.recharge_deadline)
+        .ok_or_else(|| Error::Parse("recharge: the deadline is out of range".to_owned()))?;
     let url = format!(
         "{}/recharges/{recharge_id}?wait=40",
         handle.inner.urls.api_base
     );
     loop {
         let remaining = time_left(handle, deadline, cancel)?;
+        let started = config.clock.now();
         let failure = match poll_once(handle, &url, remaining.min(POLL_TIMEOUT), cancel, deadline)?
         {
             Ok(reply) if reply.status == 200 => {
                 let recharge = recharge_from(handle, &reply)?;
+                if recharge.recharge_id != recharge_id {
+                    return Err(Error::Parse(
+                        "recharge: the answer is for another recharge".to_owned(),
+                    ));
+                }
                 if recharge.status != RechargeStatus::AwaitingPayment {
                     return Ok(recharge);
+                }
+                let took = config
+                    .clock
+                    .now()
+                    .duration_since(started)
+                    .unwrap_or_default();
+                let gap = POLL_MIN_INTERVAL.saturating_sub(took);
+                if !gap.is_zero() {
+                    let remaining = time_left(handle, deadline, cancel)?;
+                    if cancel.wait_timeout(remaining.min(gap)) {
+                        return Err(Error::Cancelled);
+                    }
                 }
                 continue;
             }

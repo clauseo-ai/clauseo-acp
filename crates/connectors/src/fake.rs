@@ -193,6 +193,19 @@ struct FakeState {
     api: api::ApiState,
     fail_next: HashMap<String, VecDeque<u16>>,
     delay_next: HashMap<String, VecDeque<Duration>>,
+    inject_next: HashMap<String, VecDeque<Injected>>,
+}
+
+/// An answer injected for the next request to a path.
+enum Injected {
+    /// This status, these headers and this body, as they are.
+    Raw {
+        status: u16,
+        headers: Vec<(String, String)>,
+        body: Vec<u8>,
+    },
+    /// The connection closes with no answer.
+    Close,
 }
 
 impl FakeState {
@@ -206,6 +219,7 @@ impl FakeState {
             api: api::ApiState::new(),
             fail_next: HashMap::new(),
             delay_next: HashMap::new(),
+            inject_next: HashMap::new(),
         }
     }
 }
@@ -313,6 +327,33 @@ impl FakeHandle {
             .entry(path.to_owned())
             .or_default()
             .push_back(delay);
+    }
+
+    /// The next request to `path` (no query) gets exactly this status, these headers and this
+    /// body (a 302 with a `Location`, say). Calls queue up, and come before `fail_next`.
+    pub fn answer_next(&self, path: &str, status: u16, headers: &[(&str, &str)], body: &[u8]) {
+        self.lock()
+            .inject_next
+            .entry(path.to_owned())
+            .or_default()
+            .push_back(Injected::Raw {
+                status,
+                headers: headers
+                    .iter()
+                    .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+                    .collect(),
+                body: body.to_vec(),
+            });
+    }
+
+    /// The next request to `path` (no query) is read and recorded, then its connection closes
+    /// with no answer: a network failure. Calls queue up, and come before `fail_next`.
+    pub fn close_next(&self, path: &str) {
+        self.lock()
+            .inject_next
+            .entry(path.to_owned())
+            .or_default()
+            .push_back(Injected::Close);
     }
 
     /// The protected resource metadata served now (origin already swapped).

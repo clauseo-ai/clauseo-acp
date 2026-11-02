@@ -105,8 +105,13 @@ fn serve(stream: &TcpStream, shared: &Shared) {
         .unwrap_or_else(PoisonError::into_inner)
         .requests
         .push(request.clone());
-    let response = answer(shared, &request);
-    write_response(stream, &response);
+    match answer(shared, &request) {
+        Some(response) => write_response(stream, &response),
+        // An injected close: the connection ends with no answer.
+        None => {
+            let _closed = stream.shutdown(std::net::Shutdown::Both);
+        }
+    }
 }
 
 /// The request's head and body; `None` when the peer closed before sending anything.
@@ -201,9 +206,10 @@ fn reason(status: u16) -> &'static str {
     }
 }
 
-/// The injected failure or delay for this path, then the endpoint's answer.
-fn answer(shared: &Shared, request: &RecordedRequest) -> Response {
-    let (fail, delay) = {
+/// The injected answer, failure or delay for this path, then the endpoint's answer. `None`
+/// closes the connection unanswered.
+fn answer(shared: &Shared, request: &RecordedRequest) -> Option<Response> {
+    let (inject, fail, delay) = {
         let mut state = shared.state.lock().unwrap_or_else(PoisonError::into_inner);
         let fail = state
             .fail_next
@@ -213,20 +219,39 @@ fn answer(shared: &Shared, request: &RecordedRequest) -> Response {
             .delay_next
             .get_mut(&request.path)
             .and_then(std::collections::VecDeque::pop_front);
-        (fail, delay)
+        let inject = state
+            .inject_next
+            .get_mut(&request.path)
+            .and_then(std::collections::VecDeque::pop_front);
+        (inject, fail, delay)
     };
+    match inject {
+        Some(super::Injected::Close) => return None,
+        Some(super::Injected::Raw {
+            status,
+            headers,
+            body,
+        }) => {
+            return Some(Response {
+                status,
+                headers,
+                body,
+            });
+        }
+        None => {}
+    }
     if let Some(delay) = delay
         && shared.stop.wait_timeout(delay)
     {
-        return Response::text(503, "the fake connector is stopping");
+        return Some(Response::text(503, "the fake connector is stopping"));
     }
     if let Some(status) = fail {
-        return Response::json(
+        return Some(Response::json(
             status,
             &serde_json::json!({"error": {"code": "injected", "status": status}}),
-        );
+        ));
     }
-    route(shared, request)
+    Some(route(shared, request))
 }
 
 fn route(shared: &Shared, request: &RecordedRequest) -> Response {

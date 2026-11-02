@@ -31,9 +31,11 @@ fn begin_sign_in_passes_discovery_against_the_fake() {
             .len(),
         1
     );
+    assert_eq!(rig.handle.listeners_bound_for_test(), 1);
     drop(pending);
     // The metadata is kept for the process.
     let _again = rig.handle.begin_sign_in(None).unwrap();
+    assert_eq!(rig.handle.listeners_bound_for_test(), 2);
     assert_eq!(
         rig.fake
             .requests_to("/.well-known/oauth-authorization-server")
@@ -42,8 +44,8 @@ fn begin_sign_in_passes_discovery_against_the_fake() {
     );
 }
 
-/// Begins a sign-in with the metadata changed by `edit`; asserts `Discovery` and no request
-/// past discovery (no listener: nothing reached `/authorize` and the fake saw no callback).
+/// Begins a sign-in with the metadata changed by `edit`; asserts `Discovery` and that sign-in
+/// never called `bind_loopback_exclusive`.
 fn refused(edit_prm: impl FnOnce(&mut Value), edit_as: impl FnOnce(&mut Value, &str)) -> String {
     let rig = rig();
     let mut prm = rig.fake.prm();
@@ -52,10 +54,16 @@ fn refused(edit_prm: impl FnOnce(&mut Value), edit_as: impl FnOnce(&mut Value, &
     let mut metadata = rig.fake.as_metadata();
     edit_as(&mut metadata, rig.fake.base());
     rig.fake.set_as_metadata(metadata);
-    match rig.handle.begin_sign_in(None) {
+    let why = match rig.handle.begin_sign_in(None) {
         Err(SignInError::Discovery(why)) => why,
         other => panic!("expected Discovery, got {other:?}"),
-    }
+    };
+    assert_eq!(
+        rig.handle.listeners_bound_for_test(),
+        0,
+        "a listener was bound"
+    );
+    why
 }
 
 fn prm_refused(edit: impl FnOnce(&mut Value)) -> String {
@@ -162,6 +170,7 @@ fn metadata_that_is_missing_or_not_json_is_refused() {
         rig.handle.begin_sign_in(None),
         Err(SignInError::Discovery(_))
     ));
+    assert_eq!(rig.handle.listeners_bound_for_test(), 0);
 }
 
 #[test]

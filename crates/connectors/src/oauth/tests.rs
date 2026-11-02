@@ -56,11 +56,14 @@ fn a_form_is_url_encoded_in_order() {
 
 #[test]
 fn the_success_page_has_no_script_and_no_external_resource() {
-    let page = SUCCESS_PAGE.to_ascii_lowercase();
-    for banned in [
-        "<script", "src=", "href=", "url(", "@import", "http:", "https:",
-    ] {
-        assert!(!page.contains(banned), "{banned}");
+    for page in [SUCCESS_PAGE, FAILURE_PAGE] {
+        let page = page.to_ascii_lowercase();
+        for banned in [
+            "<script", "src=", "href=", "url(", "@import", "http:", "https:",
+        ] {
+            assert!(!page.contains(banned), "{banned}");
+        }
     }
     assert!(SUCCESS_PAGE.contains("Signed in. You can close this tab and go back to Clauseo."));
+    assert!(FAILURE_PAGE.contains("Sign-in didn't finish. Go back to Clauseo and try again."));
 }

@@ -8,7 +8,7 @@ use std::time::Duration;
 use base64::Engine as _;
 use clauseo_connectors::Clock;
 use clauseo_connectors::fake::{FakeOptions, http};
-use clauseo_connectors::{CredentialKind, CredentialStatus, SignInError, SystemClock};
+use clauseo_connectors::{CancelFlag, CredentialKind, CredentialStatus, SignInError, SystemClock};
 use sha2::Digest as _;
 use url::Url;
 
@@ -175,7 +175,7 @@ fn a_missing_or_wrong_iss_fails_the_sign_in_and_stores_nothing() {
     rig.fake.omit_iss();
     let pending = rig.handle.begin_sign_in(None).unwrap();
     let (page, result) = complete(&rig.fake, pending);
-    assert_eq!(page.status, 400);
+    check_failure_page(&page);
     assert_eq!(result, Err(SignInError::IssuerMismatch));
 
     let rig = rig_with(FakeOptions::default(), false, |_| {});
@@ -259,29 +259,68 @@ fn the_success_page_is_fixed_with_no_script_and_no_store() {
     let pending = rig.handle.begin_sign_in(None).unwrap();
     let (page, result) = complete(&rig.fake, pending);
     result.unwrap();
-    assert_eq!(page.status, 200);
+    // The page goes out only after the exchange and the keychain write.
+    assert!(rig.store.peek("case-law").is_some());
+    check_page(
+        &page,
+        200,
+        "Signed in. You can close this tab and go back to Clauseo.",
+        "साइन इन हो गया",
+        15..=40,
+    );
+}
+
+/// The fixed failure page: 400, the same headers, English then Hindi, about 12 words each.
+fn check_failure_page(page: &clauseo_connectors::fake::RawResponse) {
+    check_page(
+        page,
+        400,
+        "Sign-in didn't finish. Go back to Clauseo and try again.",
+        "साइन इन पूरा नहीं हुआ",
+        16..=30,
+    );
+    let text = page.text();
+    let english = text.find("Sign-in didn't finish").unwrap();
+    let hindi = text.find("साइन इन पूरा नहीं हुआ").unwrap();
+    assert!(english < hindi, "English comes first");
+}
+
+/// A fixed page: the status, `text/html; charset=utf-8`, `no-store`, the text, no script and
+/// no external resource, and a word count in `words`.
+fn check_page(
+    page: &clauseo_connectors::fake::RawResponse,
+    status: u16,
+    english: &str,
+    hindi: &str,
+    words: std::ops::RangeInclusive<usize>,
+) {
+    assert_eq!(page.status, status);
     assert_eq!(
         page.header("content-type"),
         Some("text/html; charset=utf-8")
     );
     assert_eq!(page.header("cache-control"), Some("no-store"));
+    assert_eq!(
+        page.header("content-security-policy"),
+        Some("default-src 'none'; style-src 'unsafe-inline'")
+    );
     let text = page.text();
-    assert!(text.contains("Signed in. You can close this tab and go back to Clauseo."));
-    assert!(text.contains("साइन इन हो गया"));
+    assert!(text.contains(english), "{text}");
+    assert!(text.contains(hindi), "{text}");
     let lower = text.to_ascii_lowercase();
     for banned in [
         "<script", "src=", "href=", "http:", "https:", "url(", "@import",
     ] {
         assert!(!lower.contains(banned), "{banned}");
     }
-    let words = text
+    let shown = text
         .split('<')
-        .filter_map(|part| part.split_once('>').map(|(_, words)| words))
-        .filter(|words| !words.trim().is_empty() && !words.contains('{'))
+        .filter_map(|part| part.split_once('>').map(|(_, shown)| shown))
+        .filter(|shown| !shown.trim().is_empty() && !shown.contains('{'))
         .collect::<Vec<_>>()
         .join(" ");
-    let count = words.split_whitespace().count();
-    assert!((15..=40).contains(&count), "{count} words: {words}");
+    let count = shown.split_whitespace().count();
+    assert!(words.contains(&count), "{count} words: {shown}");
 }
 
 #[test]
@@ -375,7 +414,8 @@ fn an_expired_code_fails_the_exchange() {
     let first = http("GET", &url, &[], &[]).unwrap();
     let location = Url::parse(first.header("location").unwrap()).unwrap();
     rig.fake.expire_codes();
-    assert_eq!(callback(port, location.query().unwrap()).status, 200);
+    let page = callback(port, location.query().unwrap());
+    check_failure_page(&page);
     let result = finisher.join().unwrap();
     assert!(
         matches!(result, Err(SignInError::Exchange(ref why)) if why.contains("invalid_grant")),
@@ -390,7 +430,8 @@ fn a_pkce_mismatch_fails_the_exchange() {
     let rig = rig();
     let mut pending = rig.handle.begin_sign_in(None).unwrap();
     pending.tamper_verifier_for_test();
-    let (_, result) = complete(&rig.fake, pending);
+    let (page, result) = complete(&rig.fake, pending);
+    check_failure_page(&page);
     assert!(
         matches!(result, Err(SignInError::Exchange(ref why)) if why.contains("invalid_grant")),
         "{result:?}"
@@ -404,8 +445,61 @@ fn a_keychain_failure_fails_the_sign_in_and_leaves_the_state_file() {
     let rig = rig();
     rig.store.fail_next_writes(1);
     let pending = rig.handle.begin_sign_in(None).unwrap();
-    let (_, result) = complete(&rig.fake, pending);
+    let (page, result) = complete(&rig.fake, pending);
+    check_failure_page(&page);
     assert!(matches!(result, Err(SignInError::Store(_))), "{result:?}");
     assert_eq!(state_file(&rig), "");
     assert_eq!(rig.handle.status(), CredentialStatus::NotAdded);
+}
+
+/// Eight connections sending one byte every 500 ms hold every reader; each is cut at its 2 s
+/// deadline for the whole head, so the browser's callback, queued behind them, still ends the
+/// sign-in within 4 s.
+#[test]
+fn eight_trickling_connections_do_not_keep_the_callback_out() {
+    let rig = rig();
+    let pending = rig.handle.begin_sign_in(None).unwrap();
+    let url = pending.authorize_url().clone();
+    let port = port_of(&url);
+    let finisher = thread::spawn(move || pending.finish());
+    let stop = CancelFlag::new();
+    let tricklers: Vec<_> = (0..8)
+        .map(|_| {
+            let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            let stop = stop.clone();
+            thread::spawn(move || {
+                for byte in b"GET /oauth/callback?state=x HTTP/1.1\r\n".iter().cycle() {
+                    if stream.write_all(&[*byte]).is_err()
+                        || stop.wait_timeout(Duration::from_millis(500))
+                    {
+                        break;
+                    }
+                }
+            })
+        })
+        .collect();
+    // Long enough for the listener to accept all eight and hand each a reader.
+    CancelFlag::new().wait_timeout(Duration::from_millis(300));
+    let started = SystemClock.now();
+    let page = rig.fake.drive_authorize(&url).unwrap();
+    let result = finisher.join().unwrap();
+    let took = SystemClock.now().duration_since(started).unwrap();
+    stop.cancel();
+    for trickler in tricklers {
+        trickler.join().unwrap();
+    }
+    assert_eq!(page.status, 200);
+    result.unwrap();
+    assert!(took < Duration::from_secs(4), "{took:?}");
+    assert!(rig.store.peek("case-law").is_some());
+}
+
+/// `SignInError` has no `Parse`; a sign-in timeout past the end of the clock is `Exchange`.
+#[test]
+fn a_sign_in_timeout_that_overflows_the_clock_is_refused() {
+    let rig = rig_with(FakeOptions::default(), false, |config| {
+        config.signin_timeout = Duration::MAX;
+    });
+    let pending = rig.handle.begin_sign_in(None).unwrap();
+    assert!(matches!(pending.finish(), Err(SignInError::Exchange(_))));
 }

@@ -1,8 +1,16 @@
-//! Step 7: the one-shot loopback listener. Each connection is read on its own thread, with a
-//! 2-second read timeout and at most 8 KB of request head; only `GET /oauth/callback` reaches
-//! the checks, anything else gets 404. A wrong or missing `state` gets 400 and the listener keeps
-//! waiting, so no other page can end the sign-in. Then `error`, then `iss`, then the fixed page.
+//! Step 7: the one-shot loopback listener. Each connection is read on its own thread with one
+//! total deadline of 2 seconds of real time for its whole request head, and at most 8 KB of it;
+//! only `GET /oauth/callback` reaches the checks, anything else gets 404. A wrong or missing
+//! `state` gets 400 and the listener keeps waiting, so no other page can end the sign-in. Then
+//! `error`, then `iss`. The callback's connection is handed back open, so the page the browser
+//! shows says how the exchange went.
+//!
+//! The accept loop takes at most 16 connections per tick and looks at the cancel flag and the
+//! sign-in timeout every tick, so a connect flood cannot hold it. At most 8 connections are read
+//! at once; the others wait in a short queue until a reader is free (at most 2 s), so slow
+//! clients delay the browser's callback but do not drop it.
 
+use std::collections::VecDeque;
 use std::io::{Read as _, Write as _};
 use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
@@ -12,20 +20,26 @@ use std::time::{Duration, SystemTime};
 
 use zeroize::Zeroizing;
 
-use super::{SUCCESS_PAGE, is_error_code};
+use super::{FAILURE_PAGE, SUCCESS_PAGE, is_error_code};
 use crate::cancel::CancelFlag;
-use crate::config::Clock;
+use crate::config::{Clock, SystemClock};
 use crate::error::SignInError;
 use crate::secret::Secret;
 
 /// How often the wait looks at the cancel flag, the deadline and new connections.
 const TICK: Duration = Duration::from_millis(20);
-/// How long one connection may take to send its request.
-const READ_TIMEOUT: Duration = Duration::from_secs(2);
+/// How long one connection may take to send its whole request head, in real time.
+const HEAD_DEADLINE: Duration = Duration::from_secs(2);
+/// How long writing an answer may take.
+const WRITE_TIMEOUT: Duration = Duration::from_secs(2);
 /// The most request head read from one connection.
 const MAX_HEAD: usize = 8 * 1024;
-/// Connections read at once; more are closed unanswered.
+/// Connections read at once; more wait in the queue.
 const MAX_READERS: usize = 8;
+/// Connections accepted per tick.
+const MAX_ACCEPTS_PER_TICK: usize = 16;
+/// Accepted connections waiting for a reader; more are closed unanswered.
+const MAX_QUEUED: usize = 64;
 /// The callback path of the redirect URI.
 const CALLBACK_PATH: &str = "/oauth/callback";
 
@@ -41,17 +55,35 @@ struct Callback {
     query: Zeroizing<String>,
 }
 
-/// Waits for the callback, the deadline or the flag, and returns the code. The listener is
-/// closed when this returns.
+/// The browser's callback connection, still waiting for its answer.
+pub(super) struct Browser {
+    stream: TcpStream,
+}
+
+impl Browser {
+    /// The fixed success page.
+    pub(super) fn signed_in(mut self) {
+        write_response(&mut self.stream, 200, "OK", Some(SUCCESS_PAGE));
+    }
+
+    /// The fixed failure page, with 400.
+    pub(super) fn failed(mut self) {
+        failed(&mut self.stream);
+    }
+}
+
+/// Waits for the callback, the deadline or the flag, and returns the code and the browser's
+/// connection, unanswered. The listener is closed when this returns.
 pub(super) fn wait_for_code(
     listener: TcpListener,
     expect: &Expect<'_>,
     cancel: &CancelFlag,
     clock: &dyn Clock,
     deadline: SystemTime,
-) -> Result<Secret, SignInError> {
+) -> Result<(Secret, Browser), SignInError> {
     let (sender, receiver) = mpsc::channel::<Callback>();
     let readers = Arc::new(AtomicUsize::new(0));
+    let mut queue: VecDeque<TcpStream> = VecDeque::new();
     loop {
         if cancel.is_cancelled() {
             return Err(SignInError::Cancelled);
@@ -59,8 +91,17 @@ pub(super) fn wait_for_code(
         if clock.now() >= deadline {
             return Err(SignInError::TimedOut);
         }
-        // Every connection waiting to be accepted, each to a reader thread.
-        while let Ok((stream, _)) = listener.accept() {
+        for _ in 0..MAX_ACCEPTS_PER_TICK {
+            let Ok((stream, _)) = listener.accept() else {
+                break;
+            };
+            if queue.len() < MAX_QUEUED {
+                queue.push_back(stream);
+            }
+        }
+        while readers.load(Ordering::SeqCst) < MAX_READERS
+            && let Some(stream) = queue.pop_front()
+        {
             spawn_reader(stream, &sender, &readers);
         }
         if let Ok(callback) = receiver.recv_timeout(TICK)
@@ -73,10 +114,7 @@ pub(super) fn wait_for_code(
 }
 
 fn spawn_reader(stream: TcpStream, sender: &mpsc::Sender<Callback>, readers: &Arc<AtomicUsize>) {
-    if readers.fetch_add(1, Ordering::SeqCst) >= MAX_READERS {
-        readers.fetch_sub(1, Ordering::SeqCst);
-        return;
-    }
+    readers.fetch_add(1, Ordering::SeqCst);
     let sender = sender.clone();
     let count = Arc::clone(readers);
     let spawned = std::thread::Builder::new()
@@ -93,12 +131,23 @@ fn spawn_reader(stream: TcpStream, sender: &mpsc::Sender<Callback>, readers: &Ar
     }
 }
 
-/// Reads one request head. Answers anything but `GET /oauth/callback` itself (404, or 400 and
-/// 431 for a malformed or oversized head) and returns `None`.
+/// What is left of `deadline` in real time, or `None` once it passed.
+fn left(deadline: SystemTime) -> Option<Duration> {
+    deadline
+        .duration_since(SystemClock.now())
+        .ok()
+        .filter(|left| !left.is_zero())
+        // A clock stepped back never stretches the deadline past its length.
+        .map(|left| left.min(HEAD_DEADLINE))
+}
+
+/// Reads one request head, within [`HEAD_DEADLINE`] in all. Answers anything but
+/// `GET /oauth/callback` itself (404, or 400 and 431 for a malformed or oversized head) and
+/// returns `None`; a head not complete by the deadline is closed unanswered.
 fn read_request(mut stream: TcpStream) -> Option<Callback> {
+    let deadline = SystemClock.now().checked_add(HEAD_DEADLINE)?;
     stream.set_nonblocking(false).ok()?;
-    stream.set_read_timeout(Some(READ_TIMEOUT)).ok()?;
-    stream.set_write_timeout(Some(READ_TIMEOUT)).ok()?;
+    stream.set_write_timeout(Some(WRITE_TIMEOUT)).ok()?;
     let mut head = Zeroizing::new(Vec::with_capacity(MAX_HEAD));
     let mut chunk = Zeroizing::new([0u8; 1024]);
     while !head.windows(4).any(|window| window == b"\r\n\r\n") {
@@ -107,6 +156,9 @@ fn read_request(mut stream: TcpStream) -> Option<Callback> {
             respond(&mut stream, 431, "Request Header Fields Too Large");
             return None;
         }
+        // The socket timeout is recomputed from what is left, so a client sending one byte at
+        // a time still runs out at the deadline.
+        stream.set_read_timeout(Some(left(deadline)?)).ok()?;
         let read = stream.read(&mut chunk[..room]).ok()?;
         if read == 0 {
             return None;
@@ -137,8 +189,12 @@ fn read_request(mut stream: TcpStream) -> Option<Callback> {
 }
 
 /// The callback's checks, in order: `state` (wrong: 400 and keep waiting), `error`, `iss`, then
-/// the code and the fixed page. `None` keeps waiting.
-fn judge(mut callback: Callback, expect: &Expect<'_>) -> Option<Result<Secret, SignInError>> {
+/// the code, handed back with the unanswered connection. A failed check answers the failure
+/// page. `None` keeps waiting.
+fn judge(
+    mut callback: Callback,
+    expect: &Expect<'_>,
+) -> Option<Result<(Secret, Browser), SignInError>> {
     let pairs: Vec<(String, Zeroizing<String>)> =
         url::form_urlencoded::parse(callback.query.as_bytes())
             .map(|(name, value)| (name.into_owned(), Zeroizing::new(value.into_owned())))
@@ -159,7 +215,7 @@ fn judge(mut callback: Callback, expect: &Expect<'_>) -> Option<Result<Secret, S
         return None;
     }
     if let Some((_, error)) = pairs.iter().find(|(key, _)| key == "error") {
-        respond(stream, 400, "Bad Request");
+        failed(stream);
         return Some(Err(if error.as_str() == "access_denied" {
             SignInError::Cancelled
         } else if is_error_code(error) {
@@ -172,18 +228,27 @@ fn judge(mut callback: Callback, expect: &Expect<'_>) -> Option<Result<Secret, S
         }));
     }
     if one("iss") != Some(expect.issuer) {
-        respond(stream, 400, "Bad Request");
+        failed(stream);
         return Some(Err(SignInError::IssuerMismatch));
     }
     let Some(code) = one("code").filter(|code| !code.is_empty()) else {
-        respond(stream, 400, "Bad Request");
+        failed(stream);
         return Some(Err(SignInError::Exchange(
             "the callback holds no code".to_owned(),
         )));
     };
     let code = Secret::from(code);
-    write_response(stream, 200, "OK", Some(SUCCESS_PAGE));
-    Some(Ok(code))
+    Some(Ok((
+        code,
+        Browser {
+            stream: callback.stream,
+        },
+    )))
+}
+
+/// The fixed failure page, with 400.
+fn failed(stream: &mut TcpStream) {
+    write_response(stream, 400, "Bad Request", Some(FAILURE_PAGE));
 }
 
 /// An answer with no body.

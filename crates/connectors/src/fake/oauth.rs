@@ -321,7 +321,12 @@ fn exchange_code(shared: &Shared, params: &[(String, String)]) -> Response {
         oauth.revoked.insert(chain);
         return oauth_error(400, "invalid_grant", "the code was used");
     }
-    if code.stale || code.issued_at + CODE_TTL < now {
+    if code.stale
+        || code
+            .issued_at
+            .checked_add(CODE_TTL)
+            .is_none_or(|end| end < now)
+    {
         return oauth_error(400, "invalid_grant", "the code expired");
     }
     // The code is spent now, whatever the checks below say; its chain number is reserved.
@@ -383,7 +388,7 @@ fn refresh(shared: &Shared, params: &[(String, String)]) -> Response {
             oauth.answer(chain, &next, now)
         }
         Some(next) => match successor_first_used {
-            Some(used) if used + ROTATION_GRACE < now => {
+            Some(used) if used.checked_add(ROTATION_GRACE).is_none_or(|end| end < now) => {
                 oauth.revoked.insert(chain);
                 oauth_error(400, "invalid_grant", "a rotated refresh token was reused")
             }
