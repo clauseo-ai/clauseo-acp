@@ -20,11 +20,249 @@
     "at": "2026-11-02",
     "by": "design"
   },
+  "U2-01": {
+    "en": "Add a matter's folder.",
+    "hi": "मामले का फ़ोल्डर जोड़ें।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "note": "Rohan, on the review page"
+  },
+  "U2-02": {
+    "en": "Tomorrow",
+    "hi": "कल",
+    "status": "approved",
+    "at": "2026-11-02",
+    "note": "Rohan, on the review page"
+  },
+  "U2-03": {
+    "en": "This week",
+    "hi": "इस सप्ताह",
+    "status": "approved",
+    "at": "2026-11-02",
+    "note": "Rohan, on the review page"
+  },
+  "U2-04": {
+    "en": "Next week",
+    "hi": "अगले सप्ताह",
+    "status": "approved",
+    "at": "2026-11-02",
+    "note": "Rohan, on the review page"
+  },
+  "U2-05": {
+    "en": "Later",
+    "hi": "बाद में",
+    "status": "approved",
+    "at": "2026-11-02",
+    "note": "Rohan, on the review page"
+  },
+  "U2-06": {
+    "en": "No date yet",
+    "hi": "अभी कोई तारीख नहीं",
+    "status": "approved",
+    "at": "2026-11-02",
+    "note": "Rohan, on the review page"
+  },
+  "U2-07": {
+    "en": "Limit reached until {time}",
+    "hi": "{time} बजे तक सीमा पूरी",
+    "status": "approved",
+    "at": "2026-11-02",
+    "note": "Rohan, on the review page"
+  },
+  "U2-08": {
+    "en": "Limit reached until {day} {time}",
+    "hi": "{day} {time} बजे तक सीमा पूरी",
+    "status": "approved",
+    "at": "2026-11-02",
+    "note": "Rohan, on the review page"
+  },
+  "U2-09": {
+    "en": "Limit reached. Reset not given.",
+    "hi": "सीमा पूरी। रीसेट का समय नहीं बताया गया।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "note": "Rohan, on the review page"
+  },
+  "U2-10": {
+    "en": "{path} is a whole drive.",
+    "hi": "{path} पूरी ड्राइव है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "note": "Rohan, on the review page"
+  },
+  "U2-11": {
+    "en": "A matter is one folder of papers. Choose the folder for one matter.",
+    "hi": "एक मामला दस्तावेज़ों का एक फ़ोल्डर होता है। किसी एक मामले का फ़ोल्डर चुनें।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "note": "Rohan, on the review page"
+  },
+  "U2-12": {
+    "en": "{path} is your home folder.",
+    "hi": "{path} आपका होम फ़ोल्डर है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "note": "Rohan, on the review page"
+  },
+  "U2-13": {
+    "en": "It holds far more than one matter. Choose the folder for one matter.",
+    "hi": "इसमें एक मामले से कहीं अधिक है। किसी एक मामले का फ़ोल्डर चुनें।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "note": "Rohan, on the review page"
+  },
+  "U2-14": {
+    "en": "{path} is a folder the computer keeps for itself.",
+    "hi": "{path} वह फ़ोल्डर है जिसे कंप्यूटर अपने लिए रखता है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "note": "Rohan, on the review page"
+  },
+  "U2-15": {
+    "en": "Choose the folder that holds the matter's papers.",
+    "hi": "वह फ़ोल्डर चुनें जिसमें मामले के दस्तावेज़ हैं।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "note": "Rohan, on the review page"
+  },
+  "U2-16": {
+    "en": "Clauseo can't read {path}.",
+    "hi": "Clauseo {path} नहीं पढ़ पा रहा।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "note": "Rohan, on the review page"
+  },
+  "U2-17": {
+    "en": "Clauseo can't read that folder.",
+    "hi": "Clauseo वह फ़ोल्डर नहीं पढ़ पा रहा।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "note": "Rohan, on the review page"
+  },
+  "U2-18": {
+    "en": "It may be locked, or on a drive that's no longer connected.",
+    "hi": "हो सकता है वह लॉक हो, या ऐसी ड्राइव पर हो जो अब जुड़ी नहीं है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "note": "Rohan, on the review page"
+  },
+  "U2-19": {
+    "en": "Clauseo couldn't create the matter. Try again, or choose another folder.",
+    "hi": "Clauseo मामला नहीं बना सका। फिर से प्रयास करें, या दूसरा फ़ोल्डर चुनें।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "note": "Rohan, on the review page"
+  },
+  "U2-20": {
+    "en": "Write the date as 30 October 2026.",
+    "hi": "तारीख इस तरह लिखें: 30 अक्टूबर 2026।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "note": "Rohan, on the review page"
+  },
+  "U2-21": {
+    "en": "A matter for quick questions, with no papers of its own.",
+    "hi": "त्वरित प्रश्नों के लिए एक मामला, जिसके अपने कोई दस्तावेज़ नहीं हैं।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "note": "Rohan, on the review page"
+  },
+  "U2-22": {
+    "en": "Every question asked here is kept, with its versions, like any matter's.",
+    "hi": "यहाँ पूछा गया हर प्रश्न, अपने संस्करणों के साथ, किसी भी मामले की तरह रखा जाता है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "note": "Rohan, on the review page"
+  },
+  "U2-23": {
+    "en": "This matter's folder has moved.",
+    "hi": "इस मामले का फ़ोल्डर कहीं और ले जाया गया है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "note": "Rohan, on the review page"
+  },
+  "U2-24": {
+    "en": "It was at {path}. Find it where it is now, and the matter opens as you left it.",
+    "hi": "यह {path} पर था। यह अब जहाँ है वहाँ इसे ढूँढें, और मामला वैसे ही खुलेगा जैसा आपने छोड़ा था।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "note": "Rohan, on the review page"
+  },
+  "U2-25": {
+    "en": "Its conversations and versions are kept on this computer, so nothing is lost while the folder is away.",
+    "hi": "इसकी बातचीत और संस्करण इसी कंप्यूटर पर रखे हैं, इसलिए फ़ोल्डर के न मिलने तक भी कुछ नहीं खोता।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "note": "Rohan, on the review page"
+  },
+  "U2-26": {
+    "en": "Locate the folder to ask about this matter",
+    "hi": "इस मामले के बारे में पूछने के लिए फ़ोल्डर ढूँढें",
+    "status": "approved",
+    "at": "2026-11-02",
+    "note": "Rohan, on the review page"
+  },
+  "U2-27": {
+    "en": "Find a matter by its name",
+    "hi": "नाम से मामला खोजें",
+    "status": "approved",
+    "at": "2026-11-02",
+    "note": "Rohan, on the review page"
+  },
+  "U2-28": {
+    "en": "Find a matter by its name or client",
+    "hi": "नाम या मुवक्किल से मामला खोजें",
+    "status": "approved",
+    "at": "2026-11-02",
+    "note": "Rohan, on the review page"
+  },
+  "U2-29": {
+    "en": "Search covers names.",
+    "hi": "खोज में नाम शामिल हैं।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "note": "Rohan, on the review page"
+  },
+  "U2-30": {
+    "en": "Search covers names and clients.",
+    "hi": "खोज में नाम और मुवक्किल शामिल हैं।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "note": "Rohan, on the review page"
+  },
+  "U2-31": {
+    "en": "Clauseo can't make a matter of this folder. Choose another folder.",
+    "hi": "Clauseo इस फ़ोल्डर से मामला नहीं बना सकता। दूसरा फ़ोल्डर चुनें।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "note": "Rohan, on the review page"
+  },
   "U2-32": {
     "en": "Quick questions, kept like any matter",
     "hi": "त्वरित प्रश्न, किसी भी मामले की तरह सहेजे गए",
     "status": "approved",
     "at": "2026-11-02",
     "by": "design"
+  },
+  "U2-33": {
+    "en": "Stopped on {day} at {time}",
+    "hi": "{day} को {time} बजे रोका गया",
+    "status": "approved",
+    "at": "2026-11-02",
+    "note": "Rohan, on the review page"
+  },
+  "U2-34": {
+    "en": "The matter's folder",
+    "hi": "मामले का फ़ोल्डर",
+    "status": "approved",
+    "at": "2026-11-02",
+    "note": "Rohan, on the review page"
+  },
+  "U3-01": {
+    "en": "Answering.",
+    "hi": "उत्तर दिया जा रहा है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "note": "Rohan, on the review page"
   }
 }
