@@ -177,6 +177,51 @@ test("a footnote's definition is never cut, however long its note", () => {
   expect(fresh(note)).toEqual([note]);
 });
 
+test("a change before the text's end splits as a fresh split does, from the changed block on", () => {
+  let updates = 0;
+  for (const text of [...SPEC_TEXTS.slice(0, 200), ...GENERATED.slice(0, 50)]) {
+    const incremental = createSplitter(realEndOf);
+    for (let end = 2; end <= text.length; end += 3) {
+      // The last character turns into another, as capNesting's stand-ins do, then the text grows on.
+      const prefix = text.slice(0, end);
+      for (const changed of [`${prefix.slice(0, -1)}\uFDDD`, prefix]) {
+        expect(incremental(changed), JSON.stringify(changed)).toEqual(fresh(changed));
+        updates++;
+      }
+    }
+  }
+  expect(updates).toBeGreaterThan(10_000);
+}, 60_000);
+
+test("an update lexes from the block it changes, not from the start: capNesting's tail changes cost no more", () => {
+  // 100 KB of prose, then `"a==b==".repeat(3000)`: past nesting.ts's 400 sequences, a `=` that ends one
+  // update is text, and a stand-in once the next `=` arrives. That change, before the end of the text,
+  // made the splitter lex the whole answer again (12.6 s in JavaScriptCore for the 540 KB hostile corpus).
+  const markdown = `${"Prose of an ordinary answer, one paragraph after another.\n\n".repeat(1700)}${"a==b==".repeat(3000)}`;
+  const lexed: number[] = [];
+  const spy = vi.spyOn(Lexer.prototype, "blockTokens");
+  const split = createSplitter(realEndOf);
+  let tailChanges = 0;
+  let previous = "";
+  try {
+    for (let end = 100_000; end <= markdown.length; end += 16) {
+      const text = capNesting(markdown.slice(0, end));
+      if (!text.startsWith(previous)) tailChanges++;
+      previous = text;
+      spy.mockClear();
+      split(text);
+      // The first update splits the 100 KB it starts with.
+      if (end > 100_000)
+        lexed.push(Math.max(0, ...spy.mock.calls.map(([source]) => source.length)));
+    }
+  } finally {
+    spy.mockRestore();
+  }
+  expect(tailChanges).toBeGreaterThan(100);
+  // The 18 KB paragraph is lexed whole from its start (its parts' cuts are decided from there).
+  expect(Math.max(...lexed)).toBeLessThan(20_000);
+}, 60_000);
+
 /**
  * A document as the one-piece comparison takes it, with one micromark 4.0.3 quirk: an ordered item
  * starting at a number other than 1, right after an indented line and a blank line, is a paragraph where
