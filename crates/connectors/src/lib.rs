@@ -17,20 +17,11 @@
 //! The `test-support` feature adds the fake connector ([`fake`]), [`MemoryStore`],
 //! [`ManualClock`] and `Origin::Fake`.
 
-// The base lands before the client: the parsers, the credential JSON and the state file have
-// only their own tests as callers until `Connectors` and `ConnectorHandle` exist. The client's
-// change removes this line (it fails as unfulfilled once nothing is dead).
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the base's internals wait for the client, which removes this"
-    )
-)]
-
 mod account;
+mod calls;
 mod cancel;
 mod config;
+mod connectors;
 mod credential;
 mod de;
 mod error;
@@ -38,9 +29,11 @@ mod http;
 mod known;
 mod mcp;
 mod net;
+mod oauth;
 mod pkce;
 mod pricing;
 mod recharge;
+mod refresh;
 mod secret;
 mod state;
 mod store;
@@ -50,10 +43,12 @@ mod write;
 pub mod fake;
 
 pub use account::{Account, DaySpend};
+pub use calls::ACCOUNT_MIN_INTERVAL;
 pub use cancel::CancelFlag;
 #[cfg(feature = "test-support")]
 pub use config::ManualClock;
 pub use config::{Clock, Config, Origin, ProxyChoice, SystemClock};
+pub use connectors::{ConnectorHandle, Connectors};
 pub use credential::{CredentialKind, CredentialStatus, SignOutReport};
 pub use error::{AuthError, Error, SignInError, StoreError};
 pub use known::{CASE_LAW, CLIENT_ID, KEYCHAIN_SERVICE, KNOWN, KnownConnector, PRICING_URL, known};
@@ -62,6 +57,7 @@ pub use mcp::{
     classify_tool_result_for,
 };
 pub use net::bind_loopback_exclusive;
+pub use oauth::PendingSignIn;
 pub use pricing::{Liveness, Pack, Pricing, PricingStatus};
 pub use recharge::{Amount, PayUrl, PaymentRef, Recharge, RechargeStatus};
 pub use secret::{Bearer, Secret, new_relay_token};

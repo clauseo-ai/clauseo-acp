@@ -91,7 +91,7 @@ struct In {
 }
 
 /// A string read straight into a [`Secret`], so a refused item leaves no plain copy behind.
-struct WireSecret(Secret);
+pub(crate) struct WireSecret(pub(crate) Secret);
 
 impl<'de> Deserialize<'de> for WireSecret {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<WireSecret, D::Error> {
@@ -176,6 +176,12 @@ impl Credential {
             }
         }
     }
+}
+
+/// `^cdk_live_[0-9A-Za-z]{32}$`.
+pub(crate) fn is_api_key(key: &str) -> bool {
+    key.strip_prefix("cdk_live_")
+        .is_some_and(|tail| tail.len() == 32 && tail.bytes().all(|b| b.is_ascii_alphanumeric()))
 }
 
 #[cfg(test)]

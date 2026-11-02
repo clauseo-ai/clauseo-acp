@@ -9,13 +9,25 @@ use super::{SecretStore, check_size};
 use crate::error::StoreError;
 
 /// A [`SecretStore`] in memory, for tests. Knobs: fail the next N writes, count reads, writes and
-/// deletes, read an item back.
-#[derive(Debug, Default)]
+/// deletes, read an item back. `Debug` names the accounts and never prints an item.
+#[derive(Default)]
 pub struct MemoryStore {
     inner: Mutex<Inner>,
 }
 
-#[derive(Debug, Default)]
+impl std::fmt::Debug for MemoryStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let inner = self.lock();
+        f.debug_struct("MemoryStore")
+            .field("accounts", &inner.items.keys().collect::<Vec<_>>())
+            .field("reads", &inner.reads)
+            .field("writes", &inner.writes)
+            .field("deletes", &inner.deletes)
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Default)]
 struct Inner {
     items: BTreeMap<String, Vec<u8>>,
     fail_writes: usize,

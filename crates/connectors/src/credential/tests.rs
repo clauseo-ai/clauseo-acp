@@ -100,3 +100,14 @@ fn debug_shows_no_token() {
     let text = format!("{:?}", oauth("at_secret_value", "rt_secret_value"));
     assert!(!text.contains("secret_value"), "{text}");
 }
+
+#[test]
+fn the_api_key_format_is_cdk_live_and_32_base62() {
+    assert!(is_api_key("cdk_live_0123456789abcdefghijABCDEFGHIJ01"));
+    assert!(!is_api_key("cdk_live_0123456789abcdefghijABCDEFGHIJ0"));
+    assert!(!is_api_key("cdk_live_0123456789abcdefghijABCDEFGHIJ012"));
+    assert!(!is_api_key("cdk_test_0123456789abcdefghijABCDEFGHIJ01"));
+    assert!(!is_api_key("cdk_live_0123456789abcdefghij-BCDEFGHIJ01"));
+    assert!(!is_api_key("cdk_live_0123456789abcdefghijABCDEFGHIé1"));
+    assert!(!is_api_key(""));
+}
