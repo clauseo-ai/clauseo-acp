@@ -76,10 +76,12 @@ agent message text to one that does not (`:29655-29658`, `:44519-44523`). It nev
   holds or sits inside `<data folder>/agents`, which covers every agent's home, a sibling's
   included. It uses `matter.folder_refused`, close enough for this rare case. An agent working
   there could read a login, write rule files (`.rules`) that Codex loads from its home, or edit
-  `config.toml` before app-server reads it. Paths compare as matters' refused-list check
-  compares them: resolved through links (as written when they do not resolve), by components,
-  without case on macOS and Windows, and on macOS also without `/System/Volumes/Data`. A private
-  `overlaps_tree` stands in until #155 exports `clauseo_matters::overlaps_tree`. iris's #155
+  `config.toml` before app-server reads it. One call does it:
+  `clauseo_matters::same_or_nested(matter, <canonical data folder>/agents)`, which compares as
+  matters' refused-list check does (resolved through links, as written when they do not
+  resolve, by components, without case on macOS and Windows). It is symmetric, so it is never
+  called against the data folder itself, which would refuse a matter anywhere inside it. A data
+  folder that does not resolve refuses, failing closed. #155 uses the same function. iris's #155
   refuses the whole data tree at import; this launch check is the second line, for matters
   imported before #155 and for paths that change after import. The gap: a matter elsewhere
   inside the data folder still launches; it holds no logins.
