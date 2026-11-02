@@ -16,9 +16,7 @@ test-support = ["dep:rcgen"]
 [dependencies]
 clauseo-protocol = { path = "../protocol" }
 clauseo-process = { path = "../process" }
-clauseo-settings = { path = "../settings" }
 async-channel = { workspace = true }
-async-io = { workspace = true }
 base64 = "0.22.1"
 dunce = { workspace = true }
 flate2 = "1.1.10"
@@ -63,6 +61,8 @@ windows = { workspace = true, features = [
 # Itself with test-support, so the tests reach `InstallConfig::resolver` with no flag.
 clauseo-agents = { path = ".", features = ["test-support"] }
 clauseo-process = { path = "../process", features = ["test-support"] }
+# The example finds the data folder as the app does.
+clauseo-settings = { path = "../settings" }
 
 [lints]
 workspace = true

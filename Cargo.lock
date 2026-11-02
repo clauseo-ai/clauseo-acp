@@ -929,7 +929,6 @@ name = "clauseo-agents"
 version = "0.1.0"
 dependencies = [
  "async-channel",
- "async-io",
  "base64 0.22.1",
  "clauseo-agents",
  "clauseo-process",
