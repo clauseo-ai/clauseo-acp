@@ -297,6 +297,42 @@ export function problemOf(f: Field, v: FieldValue | undefined): FieldProblem | n
   }
 }
 
+/** The limit of the schema an invalid value breaks, so its line can name it; null when there's none to name (a
+ * format, words the input can't read). */
+export type Limit =
+  | { kind: "maxLength" | "minLength" | "maxItems" | "minItems"; n: number }
+  | { kind: "range"; min: number | null; max: number | null }
+  | { kind: "whole" };
+
+export function limitOf(f: Field, v: FieldValue | undefined): Limit | null {
+  if (problemOf(f, v) !== "invalid") return null;
+  switch (f.kind) {
+    case "multi": {
+      const n = (v as readonly number[]).length;
+      if (f.minItems !== null && n < f.minItems) return { kind: "minItems", n: f.minItems };
+      if (f.maxItems !== null && n > f.maxItems) return { kind: "maxItems", n: f.maxItems };
+      return null;
+    }
+    case "text": {
+      const n = chars((v as string).trim());
+      if (f.minLength !== null && n < f.minLength) return { kind: "minLength", n: f.minLength };
+      if (f.maxLength !== null && n > f.maxLength) return { kind: "maxLength", n: f.maxLength };
+      return null;
+    }
+    case "number": {
+      if (v === BAD_NUMBER) return null;
+      const n = Number((v as string).trim());
+      if (!Number.isFinite(n)) return null;
+      if (f.integer && !Number.isInteger(n)) return { kind: "whole" };
+      return f.minimum === null && f.maximum === null
+        ? null
+        : { kind: "range", min: f.minimum, max: f.maximum };
+    }
+    default:
+      return null;
+  }
+}
+
 /** Every field's problem, by key; empty when the draft holds. */
 export function problems(form: Form, draft: Draft): Map<string, FieldProblem> {
   const out = new Map<string, FieldProblem>();
