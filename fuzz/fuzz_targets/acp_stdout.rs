@@ -201,6 +201,7 @@ fuzz_target!(|data: &[u8]| {
                         session: start.session,
                         cwd: PathBuf::from("/matters/fuzz"),
                         mcp_servers: Vec::new(),
+                        meta: None,
                     })
                     .await;
             }
