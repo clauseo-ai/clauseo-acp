@@ -1,16 +1,15 @@
 // The host calls the room needs beyond the generated commands: H8's list of a matter's papers, H7's display
 // settings, the matters' rows: H5's details and statuses, H3's moved folders, H4's app events, H6's thread marks and
 // H20's default location. Their wire shapes as the briefs give them (names in WIRE), and NextHost: one optional part
-// per host row, which a transport may give. FakeTransport does, from scripted answers; TauriTransport gives settings
-// and papers, over the desktop host's wire (host-wire.ts). The room asks for them only through `nextHostOf`, so as
-// each row lands, the swap to the generated bindings touches this file and host-wire.ts alone. Without papers the wall shows
-// its surface only; without settings they live in localStorage (display-store.ts); without matters the rail lists
-// today's matters with no details.
+// per host row, which a transport may give. FakeTransport does, from scripted answers; TauriTransport gives settings,
+// papers and agents, over the desktop host's wire (host-wire.ts). The room asks for them only through `nextHostOf`, so
+// as each row lands, the swap to the generated bindings touches this file and host-wire.ts alone. Without papers the
+// wall shows its surface only; without settings they live in localStorage (display-store.ts); without matters the
+// rail lists today's matters with no details; without agents the composer offers no plan choice.
 import type { TextSize } from "@clauseo/components/lib/display.ts";
 import type { AppFeedSource, HostTransport } from "../transport/host-transport.ts";
 import type {
-  AgentId,
-  AgentKind,
+  AgentSummary,
   ErrorCode,
   FolderRefId,
   HostError,
@@ -24,7 +23,7 @@ import type {
   ThreadSummary,
   Timestamp,
 } from "../transport/protocol.ts";
-import { wirePapersHost, wireSettingsHost } from "./host-wire.ts";
+import { wireAgentsHost, wirePapersHost, wireSettingsHost } from "./host-wire.ts";
 
 /* ---------- H8: a matter's papers ---------- */
 
@@ -98,9 +97,11 @@ export type ThreadInfo = ThreadSummary & {
 
 /* ---------- R15: the agents ---------- */
 
-/** An agent the settings set up, as R15's `list_agents` lists it (`AgentSummary`, clauseo-acp #154): its settings key,
- * and its kind where the id has one (none for, say, `fake-agent`). Sorted by id. */
-export type AgentSummary = { id: AgentId; kind?: AgentKind };
+// R15 has landed: its types are the generated ones (bindings.ts), and the desktop gives the part (host-wire.ts).
+
+/** An agent the settings set up, as R15's `list_agents` lists it: its settings key, and its kind where the id has one
+ * (none for, say, `fake-agent`). Sorted by id. */
+export type { AgentSummary };
 
 /** H20: where a matter goes, with the default location the host makes `<location>/<name>` in. */
 export type NextMatterSource = MatterSource | "default_location";
@@ -119,7 +120,9 @@ export type NextHostError = Omit<HostError, "code"> & { code: NextErrorCode };
 /* ---------- the wire shapes ---------- */
 
 /** The reads: `{"list_papers": {"matter": ...}}`, `"get_settings"`, `"list_matters"`, `{"list_threads": {"matter":
- * ...}}` and `"get_default_location"` (an addition the root didn't list: the form's folder line before a pick). */
+ * ...}}`, `"get_default_location"` (an addition the root didn't list: the form's folder line before a pick) and
+ * `"list_agents"`. `list_papers` and `list_agents` are generated now, and stay listed here because FakeTransport's
+ * scripted queries are typed as this union. */
 export type NextQuery =
   | { list_papers: { matter: MatterId } }
   | "get_settings"
@@ -302,12 +305,17 @@ const hasAppFeed = (transport: object): transport is AppFeedSource =>
   typeof (transport as Partial<AppFeedSource>).onAppEvent === "function";
 
 /** The calls the room needs beyond today's host, each part null where the transport's host lacks it. A NextHostSource
- * (FakeTransport) gives its scripted parts; a transport with the app feed (TauriTransport) gives settings and papers
- * over the wire and nothing else, since the desktop host has no H4, H5, H6 or H20 yet. The one place the room asks for
- * them. */
+ * (FakeTransport) gives its scripted parts; a transport with the app feed (TauriTransport) gives settings, papers and
+ * agents over the wire and nothing else, since the desktop host has no H4, H5, H6 or H20 yet. The one place the room
+ * asks for them. */
 export function nextHostOf(transport: HostTransport): NextHost {
   if (isSource(transport)) return transport.nextHost();
   if (hasAppFeed(transport))
-    return { ...NO_NEXT, settings: wireSettingsHost(transport), papers: wirePapersHost(transport) };
+    return {
+      ...NO_NEXT,
+      settings: wireSettingsHost(transport),
+      papers: wirePapersHost(transport),
+      agents: wireAgentsHost(transport),
+    };
   return NO_NEXT;
 }
