@@ -86,6 +86,11 @@ export type RoomToolbarProps = {
   /** Optional, true by default: false leaves the Versions and Undo pair out. (Not `history`, which holds Versions'
    * rows.) */
   versions?: boolean;
+  /** Optional: Versions opens the room's own Versions panel, where the rail stands, instead of the card of rows under
+   * the pair; `history` then goes unshown. */
+  onVersions?: () => void;
+  /** Optional, with onVersions: whether the Versions panel stands open. */
+  versionsOpen?: boolean;
   /** Optional: the title's language where it isn't a matter's name as filed, which is English in both languages; such
    * as words of the interface standing in the title's place. "en" by default. */
   titleLang?: Lang;
@@ -119,6 +124,25 @@ export function RoomToolbar(p: RoomToolbarProps) {
   // Versions opens under the pair, its right edge on the pair's: Undo's own group
   const pairOf = () => undo.current?.parentElement ?? null;
   const writing = p.writing === true;
+  // while Clauseo writes, Undo waits disabled and stays focusable, as Base UI's toolbar draws a disabled button:
+  // aria-disabled and data-disabled. Set here rather than through `disabled`, which re-registers the toolbar's items and
+  // costs a second commit in the frame the answer starts and the one it ends
+  const undoButton = (
+    <ToolbarPairButton
+      ref={undo}
+      className="room-undo"
+      aria-disabled={writing ? true : undefined}
+      data-disabled={writing ? "" : undefined}
+      aria-label={p.canUndo ? w.t("Undo accepting the answer") : undefined}
+      onClick={(e) => {
+        if (writing) e.preventDefault();
+        else p.onUndo();
+      }}
+    >
+      <IconUndo size={16} className="room-pair-icon" />
+      <span className="deva-nudge room-undo-label">{w.t("Undo")}</span>
+    </ToolbarPairButton>
+  );
   const top = useRef<HTMLElement>(null);
   // the room keeps the toolbar's height, so what pins under it on a narrow window (responsive.css) stands clear of it
   useEffect(() => {
@@ -223,7 +247,16 @@ export function RoomToolbar(p: RoomToolbarProps) {
                 className={cn("room-search", captions && "max-mid:ml-auto max-narrow:ml-0")}
               />
             )}
-            {versions && (
+            {versions && p.onVersions !== undefined && (
+              <ToolbarPair label={w.t("Versions and Undo")} className="room-pair">
+                <ToolbarPairButton aria-expanded={p.versionsOpen === true} onClick={p.onVersions}>
+                  <IconHistory size={16} className="room-pair-icon" />
+                  <span className="deva-nudge">{vw.v("Versions")}</span>
+                </ToolbarPairButton>
+                {undoButton}
+              </ToolbarPair>
+            )}
+            {versions && p.onVersions === undefined && (
               <Popover.Root
                 onOpenChange={(open, details) => {
                   // Undo keeps Versions up, so the row it takes out can be seen to go
@@ -243,23 +276,7 @@ export function RoomToolbar(p: RoomToolbarProps) {
                     <IconHistory size={16} className="room-pair-icon" />
                     <span className="deva-nudge">{vw.v("Versions")}</span>
                   </ToolbarPairButton>
-                  {/* while Clauseo writes, Undo waits disabled and stays focusable, as Base UI's toolbar draws a disabled
-                    button: aria-disabled and data-disabled. Set here rather than through `disabled`, which re-registers
-                    the toolbar's items and costs a second commit in the frame the answer starts and the one it ends */}
-                  <ToolbarPairButton
-                    ref={undo}
-                    className="room-undo"
-                    aria-disabled={writing ? true : undefined}
-                    data-disabled={writing ? "" : undefined}
-                    aria-label={p.canUndo ? w.t("Undo accepting the answer") : undefined}
-                    onClick={(e) => {
-                      if (writing) e.preventDefault();
-                      else p.onUndo();
-                    }}
-                  >
-                    <IconUndo size={16} className="room-pair-icon" />
-                    <span className="deva-nudge room-undo-label">{w.t("Undo")}</span>
-                  </ToolbarPairButton>
+                  {undoButton}
                 </ToolbarPair>
                 <HistoryPanel rows={p.history} anchor={pairOf} />
               </Popover.Root>

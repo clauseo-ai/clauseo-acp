@@ -1,0 +1,14 @@
+/* Versions' own sheet, loaded with its chunk the first time Versions opens (versions-chunk.ts), so the room's first
+   load carries none of it. Its parts' sheets in clauseo/parts.css's order, compiled against the design system's
+   (referenced, not repeated), then the room's own: the band over the work. */
+@reference "../../styles/system.css";
+@import "@clauseo/components/clauseo/versions.css";
+@import "@clauseo/components/clauseo/version-page.css";
+@import "@clauseo/components/clauseo/edge.css";
+
+@layer components {
+  /* the band and the comparison stand over the work, the thread under them */
+  .ver-room-band {
+    display: contents;
+  }
+}

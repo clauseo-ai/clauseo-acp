@@ -31,8 +31,9 @@ import {
   type Version,
 } from "./versions-model.ts";
 
-/** A version that couldn't be kept, shown at the top of the timeline where it would have stood. */
-export type Unsaved = { at: string; who: string; why: string };
+/** A version that couldn't be kept, shown at the top of the timeline where it would have stood; at: its clock time,
+ * when the host gives one. */
+export type Unsaved = { at?: string; who: string; why: string };
 
 /** A clock time holds together on its line: "4:28 pm" never breaks before "pm". */
 const hold = (time: string) => time.replace(/ (am|pm)$/, "\u00a0$1");
@@ -41,25 +42,32 @@ export function VersionPanel({
   history,
   calendar,
   name,
-  at,
+  at = history.length - 1,
   onPick,
   onClose,
   unsaved = null,
   where,
+  testIds,
+  kindOf,
 }: {
   history: readonly Version[];
   /** Today, and the words for a day. */
   calendar: Calendar;
   /** A paper's name, as its tile titles it, by id. */
   name: NameOf;
-  /** The version in view, by its place in history; the last is now. */
-  at: number;
+  /** Optional: the version in view, by its place in history; the last, now, by default. */
+  at?: number;
   onPick: (i: number) => void;
   onClose: () => void;
   /** A version that couldn't be saved, at the top. */
   unsaved?: Unsaved | null;
   /** The foot: where the history is kept, as a control that says more. */
   where?: ReactNode;
+  /** Optional: test ids for the e2e specs. panel: on the panel; entry: on each version, with its id in
+   * data-checkpoint and, given kindOf, its kind in data-kind. */
+  testIds?: { panel?: string; entry?: string };
+  /** Optional: what made a version, as the host names it ("after_turn"), for the entry's data-kind. */
+  kindOf?: (v: Version) => string;
 }) {
   const w = useVersionWords();
   const { id } = useRoom();
@@ -125,6 +133,13 @@ export function VersionPanel({
           type="button"
           className="ver-entry"
           data-at={i}
+          {...(testIds?.entry === undefined
+            ? {}
+            : {
+                "data-testid": testIds.entry,
+                "data-checkpoint": v.id,
+                ...(kindOf === undefined ? {} : { "data-kind": kindOf(v) }),
+              })}
           aria-current={i === at ? "true" : undefined}
           tabIndex={i === at ? 0 : -1}
           title={i === last ? timeOf(w.lang, v) : undefined}
@@ -163,7 +178,7 @@ export function VersionPanel({
   const span = foldedSpan(w.lang, calendar, groups);
 
   return (
-    <nav className="ver-panel" aria-labelledby={id("ver-panel-head")}>
+    <nav className="ver-panel" aria-labelledby={id("ver-panel-head")} data-testid={testIds?.panel}>
       <header className="ver-panel-head">
         <Heading level={2} className="wall-title" id={id("ver-panel-head")}>
           {w.v("Versions")} <span className="wall-count">{history.length}</span>
@@ -188,7 +203,9 @@ export function VersionPanel({
           <section className="ver-group">
             <ul className="ver-entries">
               <li className="ver-unsaved">
-                <span className="ver-entry-time">{w.clock(unsaved.at)}</span>
+                <span className="ver-entry-time">
+                  {unsaved.at === undefined ? "" : w.clock(unsaved.at)}
+                </span>
                 <span className="ver-entry-who">
                   <Say>{unsaved.who}</Say>
                 </span>

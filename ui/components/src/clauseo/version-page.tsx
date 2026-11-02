@@ -155,6 +155,8 @@ export function PdfSheet({
   then,
   now,
   onOpen,
+  openable = "both",
+  pdf = true,
 }: {
   title: string;
   changed: boolean;
@@ -162,8 +164,13 @@ export function PdfSheet({
   state: string;
   then: PdfSide;
   now: PdfSide;
-  /** Opens the file as it was, or as it is now. */
+  /** Optional: opens the file as it was, or as it is now. Without it, neither way to open stands. */
   onOpen?: (which: "then" | "now") => void;
+  /** Optional, with onOpen: which of the two can be opened; both by default. */
+  openable?: "both" | "now";
+  /** Optional, true by default: the file is a PDF, and the sheet says a PDF shows only whether it changed. A document
+   * whose words can't be compared yet takes the same look without that sentence. */
+  pdf?: boolean;
 }) {
   const w = useVersionWords();
   const side = (s: PdfSide, which: "then" | "now") => (
@@ -177,10 +184,12 @@ export function PdfSheet({
       <p className="ver-pdf-saved">
         <Say>{s.saved}</Say>
       </p>
-      <Button kind="tone" size="small" className="ver-pdf-open" onClick={() => onOpen?.(which)}>
-        <IconOpen size={16} />
-        {which === "then" ? w.v("Open as it was") : w.v("Open now")}
-      </Button>
+      {onOpen !== undefined && (openable === "both" || which === "now") && (
+        <Button kind="tone" size="small" className="ver-pdf-open" onClick={() => onOpen(which)}>
+          <IconOpen size={16} />
+          {which === "then" ? w.v("Open as it was") : w.v("Open now")}
+        </Button>
+      )}
     </div>
   );
   return (
@@ -202,9 +211,11 @@ export function PdfSheet({
         {side(then, "then")}
         {changed && side(now, "now")}
       </div>
-      <p className="ver-pdf-note">
-        <Say>{w.v("A PDF shows only whether it changed. Open each to read it.")}</Say>
-      </p>
+      {pdf && (
+        <p className="ver-pdf-note">
+          <Say>{w.v("A PDF shows only whether it changed. Open each to read it.")}</Say>
+        </p>
+      )}
     </article>
   );
 }
