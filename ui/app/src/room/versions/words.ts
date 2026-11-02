@@ -17,7 +17,7 @@ import { listOf, vt } from "@clauseo/components/lib/words-versions.ts";
 import type { ThreadId, Timestamp } from "../../transport/protocol.ts";
 import { clockOf } from "../when.ts";
 import { changedSince, type Ask, type Done, type Snapshot, type Unsaved } from "./state.ts";
-import { fileName } from "./timeline.ts";
+import { baseName, fileName, isolate } from "./timeline.ts";
 
 /** A conversation's name as list_threads gives it; one without a title is a new conversation. */
 export const conversationOf = (lang: Lang, s: Snapshot, thread: ThreadId): string =>
@@ -48,11 +48,11 @@ export function waitingOf(lang: Lang, s: Snapshot): string | null {
 }
 
 /** Each file's name in a dialog, by its path: the name alone, or, where two of the dialog's files share a name, the
- * whole path, isolated from the words around it. */
+ * whole path; isolated either way. */
 export function namesOf(paths: readonly string[]): (path: string) => string {
   const count = new Map<string, number>();
-  for (const p of new Set(paths)) count.set(fileName(p), (count.get(fileName(p)) ?? 0) + 1);
-  return (p) => ((count.get(fileName(p)) ?? 0) > 1 ? `\u2068${p}\u2069` : fileName(p));
+  for (const p of new Set(paths)) count.set(baseName(p), (count.get(baseName(p)) ?? 0) + 1);
+  return (p) => ((count.get(baseName(p)) ?? 0) > 1 ? isolate(p) : fileName(p));
 }
 
 /** "{when}" of a version by its id, for the dialogs' titles. */

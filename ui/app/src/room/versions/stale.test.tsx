@@ -53,7 +53,7 @@ test("the matter moving while the restore dialog asks re-reads the preview, and 
   await h.openVersions();
   await h.lookAt("cp2");
   await h.click(h.one("version-restore"));
-  expect(describedBy()).toBe("1 document will change: brief.txt. You can undo this.");
+  expect(describedBy()).toBe("1 document will change: \u2068brief.txt\u2069. You can undo this.");
   // a turn ends elsewhere and changes memo.docx: restoring cp2 now writes it back too
   preview = previewOf(["brief.txt", "memo.docx"]);
   await h.deliver(MATTER_STREAM, [
@@ -61,7 +61,7 @@ test("the matter moving while the restore dialog asks re-reads the preview, and 
   ]);
   expect(h.queried("preview_restore")).toHaveLength(2);
   expect(describedBy()).toBe(
-    "2 documents will change: brief.txt and memo.docx. You can undo this.",
+    "2 documents will change: \u2068brief.txt\u2069 and \u2068memo.docx\u2069. You can undo this.",
   );
   await h.click(h.one("dialog-confirm"));
   expect(document.body.textContent).toMatch(/Restored to .+ today\. 2 documents changed\./);
@@ -81,14 +81,14 @@ test("Try again after Word let go goes back to the dialog when what the restore 
   await h.lookAt("cp2");
   await h.click(h.one("version-restore"));
   await h.click(h.one("dialog-confirm"));
-  expect(dialog()?.textContent).toContain("Close 'brief.txt' in Word to restore it.");
+  expect(dialog()?.textContent).toContain("Close '\u2068brief.txt\u2069' in Word to restore it.");
   held = false;
   preview = previewOf(["brief.txt", "notes.docx", "memo.docx"]);
   await h.click(h.one("dialog-try-again"));
   // the restore waits: the dialog lists the three files for the lawyer to read again
   expect(h.sent("restore_version")).toHaveLength(1);
   expect(describedBy()).toBe(
-    "3 documents will change: brief.txt, notes.docx and memo.docx. You can undo this.",
+    "3 documents will change: \u2068brief.txt\u2069, \u2068notes.docx\u2069 and \u2068memo.docx\u2069. You can undo this.",
   );
   await h.click(h.one("dialog-confirm"));
   expect(h.sent("restore_version")).toHaveLength(2);
@@ -115,7 +115,7 @@ test("only the newest restore asked for opens the dialog, whichever preview come
   waiting.get("cp2")?.(previewOf(["brief.txt"]));
   await h.settle();
   expect(describedBy()).toBe(
-    "2 documents will change: brief.txt and other.txt. You can undo this.",
+    "2 documents will change: \u2068brief.txt\u2069 and \u2068other.txt\u2069. You can undo this.",
   );
 });
 
@@ -133,7 +133,7 @@ test("Word holding a file no one named: the restore asks the preview again, and 
   await h.click(h.one("version-restore"));
   await h.click(h.one("dialog-confirm"));
   expect(h.queried("preview_restore")).toHaveLength(2);
-  expect(dialog()?.textContent).toContain("Close 'notes.docx' in Word to restore it.");
+  expect(dialog()?.textContent).toContain("Close '\u2068notes.docx\u2069' in Word to restore it.");
   expect(h.one("dialog-try-again")).not.toBeNull();
 });
 
@@ -190,6 +190,6 @@ test("two files of one name in the restore dialog show their paths, isolated fro
   await h.lookAt("cp2");
   await h.click(h.one("version-restore"));
   expect(describedBy()).toBe(
-    "3 documents will change: \u2068a/brief.txt\u2069, \u2068b/brief.txt\u2069 and memo.docx. You can undo this.",
+    "3 documents will change: \u2068a/brief.txt\u2069, \u2068b/brief.txt\u2069 and \u2068memo.docx\u2069. You can undo this.",
   );
 });

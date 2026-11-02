@@ -105,7 +105,7 @@ test("Undo this change on a restore version asks through the restore dialog, wit
     { preview_restore: { matter: MATTER, checkpoint: "cp3", scope: "matter" } },
   ]);
   expect(describedBy()).toBe(
-    "2 documents will change: brief.txt and memo.docx. You can undo this.",
+    "2 documents will change: \u2068brief.txt\u2069 and \u2068memo.docx\u2069. You can undo this.",
   );
   await h.click(h.one("dialog-confirm"));
   expect(h.sent("restore_version")).toEqual([

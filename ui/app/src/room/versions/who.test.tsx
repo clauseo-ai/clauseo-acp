@@ -165,7 +165,9 @@ test("a file too large to keep versions says so on its version's row", async () 
     ],
   );
   await h.openVersions();
-  expect(rowOf(h, "cp2")?.textContent).toContain("exhibits.pdf is too large to keep versions");
+  expect(rowOf(h, "cp2")?.textContent).toContain(
+    "\u2068exhibits.pdf\u2069 is too large to keep versions",
+  );
   expect(rowOf(h, "cp1")?.textContent).not.toContain("too large");
 });
 
@@ -184,6 +186,6 @@ test("a turn's change that couldn't be kept as a version shows on the timeline a
   );
   const notices = [...document.body.querySelectorAll(".ver-notice")].map((n) => n.textContent);
   expect(notices).toContain(
-    "Clauseo changed brief.txt, and the change couldn't be kept as a version.",
+    "Clauseo changed \u2068brief.txt\u2069, and the change couldn't be kept as a version.",
   );
 });
