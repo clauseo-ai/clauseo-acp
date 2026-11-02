@@ -1235,5 +1235,40 @@
     "status": "approved",
     "at": "2026-11-02",
     "note": "Rohan, on the review page, 15:35"
+  },
+  "U9-01": {
+    "en": "Close '{file}' in Word to undo the change.",
+    "hi": "बदलाव पूर्ववत करने के लिए Word में '{file}' बंद करें।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U9-02": {
+    "en": "Word holds the file while it is open. Nothing has changed yet.",
+    "hi": "खुली रहने तक फ़ाइल Word के पास रहती है। अभी कुछ नहीं बदला है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U9-03": {
+    "en": "Try again",
+    "hi": "फिर से प्रयास करें",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U9-04": {
+    "en": "Close '{file}' in Word to restore it.",
+    "hi": "पुनर्स्थापित करने के लिए Word में '{file}' बंद करें।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U9-05": {
+    "en": "Open in Word",
+    "hi": "Word में खोलें",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
   }
 }
