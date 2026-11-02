@@ -5,7 +5,10 @@ use std::path::{Path, PathBuf};
 use clauseo_protocol::ErrorCode;
 use serde_json::{Value, json};
 
-use super::{config, guard_trusted, launch_env, make_home, refuse_codex_folder, session_folder};
+use super::{
+    config, guard_trusted, home_config, launch_env, make_home, refuse_codex_folder, session_folder,
+    write_home_config,
+};
 use crate::write;
 
 /// A fresh folder under the temp folder for `test`, removed first.
@@ -169,5 +172,61 @@ fn make_home_makes_a_private_folder() {
     let file = root.join("file-home");
     write::write_file(&file, b"").unwrap();
     assert!(make_home(&file).is_err());
+    write::remove_dir_all(&root).unwrap();
+}
+
+/// The home's `config.toml`: the header, then each override as a TOML dotted key, and nothing
+/// else (no hooks table, whatever the seam gives: hooks go only through `CODEX_CONFIG`).
+#[test]
+fn home_config_holds_only_the_switches() {
+    let text = home_config();
+    let lines: Vec<&str> = text.lines().collect();
+    assert!(
+        lines[0].starts_with("# Clauseo manages this file."),
+        "{text}"
+    );
+    assert!(lines[1].starts_with("# "), "{text}");
+    assert_eq!(
+        lines[2..],
+        [
+            "features.apps = false",
+            "features.plugins = false",
+            "features.skill_mcp_dependency_install = false",
+            "cloud.skills.enabled = false",
+            "skills.bundled.enabled = false",
+            "skills.include_instructions = false",
+        ]
+    );
+    assert!(!text.contains("hooks"), "{text}");
+}
+
+/// Written at 0600, written again over an edit, and `auth.json` beside it untouched.
+#[test]
+fn home_config_is_rewritten_and_auth_json_is_left_alone() {
+    let root = scratch("home-config");
+    let home = root.join("home");
+    make_home(&home).unwrap();
+    let auth = br#"{"tokens": "not-a-real-token"}"#;
+    write::write_file(&home.join("auth.json"), auth).unwrap();
+    write_home_config(&home).unwrap();
+    let path = home.join("config.toml");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), home_config());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+    }
+    write::write_file(&path, b"features.plugins = true\n").unwrap();
+    write_home_config(&home).unwrap();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), home_config());
+    assert_eq!(std::fs::read(home.join("auth.json")).unwrap(), auth);
+    // No temp file is left beside it.
+    let mut names: Vec<String> = std::fs::read_dir(&home)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    assert_eq!(names, ["auth.json", "config.toml"]);
     write::remove_dir_all(&root).unwrap();
 }
