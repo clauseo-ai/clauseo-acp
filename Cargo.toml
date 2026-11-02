@@ -139,12 +139,23 @@ objc2-core-foundation = "0.3.2"
 ureq = { version = "3.4", default-features = false }
 rustls = { version = "0.23", default-features = false }
 keyring = { version = "4", default-features = false }
-base64 = "0.22"
+base64 = "0.22.1"
 rand = "0.9"
 zeroize = "1.9"
 # clauseo-connectors' leak test only: captures tracing events and ureq's and rustls's log records.
 tracing-subscriber = { version = "0.3", default-features = false }
 tracing-log = { version = "0.2", default-features = false }
+# clauseo-sandbox's egress proxy (it also uses the async-io, futures, url, tracing and windows lines
+# above): the proxy thread's executor, DNS off the I/O thread, the request-head parser, the
+# token's randomness, encoding and constant-time compare, the Public Suffix List, and the
+# Windows listener socket (SO_EXCLUSIVEADDRUSE is set before bind).
+async-executor = "1.14"
+blocking = "1.7"
+httparse = "1.10"
+getrandom = "0.3.4"
+subtle = "2.6"
+psl = "2"
+socket2 = "0.6.5"
 
 [workspace.lints.rust]
 unsafe_code = "deny"               # deny, not forbid: an FFI module overrides with #[expect(unsafe_code, reason = "…")]
