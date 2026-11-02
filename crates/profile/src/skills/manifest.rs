@@ -94,6 +94,11 @@ impl Manifest {
         self.skills.insert(skill.to_owned(), entry.to_value());
     }
 
+    /// Removes the entry of `skill`, if it has one.
+    pub fn remove(&mut self, skill: &str) {
+        self.skills.remove(skill);
+    }
+
     /// The file's bytes: pretty JSON with keys in order, and a final newline.
     pub fn to_bytes(&self) -> Vec<u8> {
         // Every key sorted, whatever order it was read or set in, so the bytes do not depend on

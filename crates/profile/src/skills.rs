@@ -308,6 +308,72 @@ pub(crate) fn write_unlocked(
     Ok(report)
 }
 
+/// Removes the skills in `names` that a past Clauseo wrote into `root` and no longer ships
+/// (`builtin::RETIRED_BUILTINS`): for each that has a manifest entry, the files the entry lists,
+/// then their folders once empty, then the entry. A name with no entry is not Clauseo's and is
+/// left alone, and so is any file the entry does not list. The same symlink and path checks as
+/// [`write_rendered`], under the same lock. Returns the files removed.
+pub fn retire(root: &Path, names: &[&str]) -> Result<Vec<PathBuf>, ProfileError> {
+    let _held = write_lock();
+    retire_unlocked(root, names)
+}
+
+/// [`retire`], with the lock already held.
+pub(crate) fn retire_unlocked(root: &Path, names: &[&str]) -> Result<Vec<PathBuf>, ProfileError> {
+    no_links(root, &[MANIFEST])?;
+    let mut manifest = Manifest::read(root)?;
+    let mut removed = Vec::new();
+    let mut changed = false;
+    for name in names {
+        if !is_skill_name(name) {
+            tracing::warn!(
+                name,
+                "a retired skill name is not a skill name; it is left alone"
+            );
+            continue;
+        }
+        let Some(entry) = manifest.entry(name) else {
+            continue;
+        };
+        no_links(root, &[name])?;
+        let folder = root.join(name);
+        let mut dirs = BTreeSet::new();
+        for path in entry.files.keys() {
+            if !is_safe_path(path) {
+                tracing::warn!(
+                    path,
+                    "a manifest entry names an unsafe path; it is left alone"
+                );
+                continue;
+            }
+            no_links(root, &path_parts(name, path))?;
+            let target = folder.join(path);
+            if std::fs::symlink_metadata(&target).is_ok() {
+                write::remove_file(&target)?;
+                removed.push(target);
+            }
+            let parts: Vec<&str> = path.split('/').collect();
+            for depth in 1..parts.len() {
+                dirs.insert(parts.get(..depth).unwrap_or_default().join("/"));
+            }
+        }
+        // Deepest first, then the skill's own folder.
+        let mut dirs: Vec<String> = dirs.into_iter().collect();
+        dirs.sort_by_key(|dir| std::cmp::Reverse(dir.matches('/').count()));
+        for dir in dirs {
+            write::remove_empty_dir(&folder.join(dir));
+        }
+        write::remove_empty_dir(&folder);
+        tracing::info!(skill = *name, "a retired built-in skill is removed");
+        manifest.remove(name);
+        changed = true;
+    }
+    if changed {
+        write::replace_if_differs(&root.join(MANIFEST), &manifest.to_bytes())?;
+    }
+    Ok(removed)
+}
+
 /// Whether `skill`'s files in `root` are what its manifest entry records for `version`: the
 /// entry has that version, and every file it lists is on disk with its hash, reached through no
 /// symlink. A render that would change nothing can be skipped (stetdoc's: no need to run
