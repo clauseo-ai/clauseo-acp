@@ -135,6 +135,29 @@ export const ids = {
   working: "working",
   /** Settings at the rail's foot: opens the settings window, or brings it forward when open. */
   openSettings: "open-settings",
+  /** One message queued over the composer while a turn runs, with `data-turn` (the turn that answers it). */
+  queued: "queued",
+  /** In a queued row: edits its text. */
+  queuedEdit: "queued-edit",
+  /** In a queued row: removes it from the queue. */
+  queuedRemove: "queued-remove",
+  /** In a queued row: sends it now, ending the running turn when there is one. */
+  queuedSendNow: "queued-send-now",
+  /** The held strip's Send next: sends the next queued message while the queue is held. */
+  sendNext: "send-next",
+  /**
+   * The queue strip's head line (`role="status"`): the held line after a stop or a failure, or
+   * the count line otherwise.
+   */
+  queueSay: "queue-say",
+  /** The line above the field while the lawyer types during an answer the agent can steer. */
+  steerHint: "steer-hint",
+  /** In steerHint: sends the typed words now, steering the answer or stopping it. */
+  steerSendNow: "steer-send-now",
+  /** The lawyer's words steered into an answer, standing in it where they arrived (`data-entry-id`). */
+  steerMark: "steer-mark",
+  /** Where a steered message went, with `data-outcome` ("requeued" or "sent_now"). */
+  steerOutcome: "steer-outcome",
 } as const;
 
 /** The settings window's page: the last part of its URL path (crates/desktop's settings window). */
@@ -151,6 +174,9 @@ export type VersionKind =
 
 /** The ACP option kinds a permission button is labelled by. */
 export type OptionKind = "allow_once" | "allow_always" | "reject_once" | "reject_always";
+
+/** The `data-outcome` of a steer outcome line; an injected steer has none, its words show as a steer mark. */
+export type SteerOutcomeKind = "requeued" | "sent_now";
 
 /** The `data-testid` of the permission button for `kind`. */
 export const permissionButton = (kind: OptionKind): string => `permission-${kind}`;
@@ -291,6 +317,27 @@ export function window(page: Page) {
     /** The composer's working line. */
     working: id(ids.working),
     openSettings: id(ids.openSettings),
+    /** The queued rows of the strip, in order. */
+    queued: id(ids.queued),
+    /** The Edit button inside the queued row `row`. */
+    queuedEdit: (row: Locator): Locator => row.getByTestId(ids.queuedEdit),
+    /** The Remove button inside the queued row `row`. */
+    queuedRemove: (row: Locator): Locator => row.getByTestId(ids.queuedRemove),
+    /** The Send now button inside the queued row `row`. */
+    queuedSendNow: (row: Locator): Locator => row.getByTestId(ids.queuedSendNow),
+    /** The strip's Send next, shown while the queue is held. */
+    sendNext: id(ids.sendNext),
+    /** The strip's head line: the held line, or the count line. */
+    queueSay: id(ids.queueSay),
+    /** The steer hint above the field, shown while the lawyer types during a steerable answer. */
+    steerHint: id(ids.steerHint),
+    /** Send now in the steer hint. */
+    steerSendNow: id(ids.steerSendNow),
+    /** The steered words in the answer. */
+    steerMark: id(ids.steerMark),
+    /** The steer outcome line of `outcome`: `requeued` or `sent_now`. */
+    steerOutcome: (outcome: SteerOutcomeKind): Locator =>
+      page.locator(`[data-testid="${ids.steerOutcome}"][data-outcome="${outcome}"]`),
   };
 }
 
