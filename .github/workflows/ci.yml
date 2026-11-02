@@ -33,8 +33,8 @@
 #   Rust and, on a pull request, compares them with the merge-base on main. It uploads the counts as
 #   the reducer-bench-summary artifact, which the speed scoreboard's comment reads
 #   (scoreboard-comment.yml).
-# - The macOS speed scoreboard is its own workflow, scoreboard-macos.yml (main, nightly, on demand,
-#   and pull requests labelled `scoreboard`), so a pull request takes at most one macOS runner.
+# - The macOS speed scoreboard is in scoreboard.yml (main, nightly, on demand, and pull requests
+#   labelled `scoreboard`), so a pull request takes at most one macOS runner.
 # - Every third-party action is pinned by commit SHA, with its tag in a comment.
 
 name: CI
@@ -164,8 +164,10 @@ jobs:
     needs: changes
     # A failed `changes` runs everything (CODE below), so every check still reports.
     if: ${{ !cancelled() }}
-    # Tier 2 on a pull request only skips, so it takes an ubuntu runner, not a macOS or ARM64 one.
-    runs-on: ${{ (matrix.tier2 && github.event_name == 'pull_request') && 'ubuntu-24.04' || matrix.runner }}
+    # A job that only skips (tier 2 on a pull request, or a pull request without a Rust change) takes
+    # an ubuntu runner, which starts fastest, never a macOS or ARM64 one: macOS runners are capped
+    # at 5 for the whole org. A failed `changes` runs everything on the target's own runner.
+    runs-on: ${{ (github.event_name == 'pull_request' && (matrix.tier2 || (needs.changes.result == 'success' && needs.changes.outputs.rust != 'true'))) && 'ubuntu-24.04' || matrix.runner }}
     timeout-minutes: 60
     strategy:
       fail-fast: false

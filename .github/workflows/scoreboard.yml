@@ -1,27 +1,30 @@
-# The speed scoreboard on macOS Apple silicon (R13): the `marks` build of the app plays
-# fake_agent's scoreboard session by itself, one warm-up and three measured launches
-# (ui/e2e/scoreboard/macos.ts), and the job uploads scoreboard-macos.json as the artifact
-# scoreboard-macos for the scoreboard comment (scoreboard-comment.yml). It also runs the desktop
-# crate's tests and clippy with the marks feature.
+# The speed scoreboard (R13) where it needs a macOS runner or a full-LTO build. The pull request
+# comment (scoreboard-comment.yml) reads scoreboard-macos from here; e2e-windows.yml's
+# scoreboard-windows job plays smoke's LTO-off build on every product pull request and main.
 #
-# - Runs on every push to main, nightly and on demand, which gives the budgets their macOS
-#   baseline, and on a pull request only when it carries the label `scoreboard`: macOS runners
-#   are shared across the org and their queue was the slowest part of a pull request's checks, so
-#   a pull request takes at most one (ci.yml's `build (aarch64-apple-darwin)`). Adding the label
-#   starts a run; each push to a labelled pull request starts another.
-# - Its own workflow, so the label trigger stays out of ci.yml: `labeled` there would re-run all of
-#   CI for any label, and CI's cancel-in-progress would kill the run in progress. Here a label other
-#   than `scoreboard` starts a run whose job is skipped, in a concurrency group of its own, so it
-#   cancels nothing.
-# - On a pull request without the label, ci.yml's macOS build job clippies the marks feature; its
-#   tests run here only.
-# - Its numbers report and alert, so a failure leaves the run green (continue-on-error): a red run
+# - scoreboard-macos: the `marks` build of the app plays fake_agent's scoreboard session by itself,
+#   one warm-up and three measured launches (ui/e2e/scoreboard/macos.ts), and the job uploads
+#   scoreboard-macos.json as the artifact scoreboard-macos. It also runs the desktop crate's tests
+#   and clippy with the marks feature. Every push to main, nightly, on demand, and pull requests
+#   labelled `scoreboard`: macOS runners are capped at 5 for the whole org, and their queue was the
+#   slowest part of a pull request's checks, so an unlabelled pull request takes at most one
+#   (ci.yml's `build (aarch64-apple-darwin)`, which also clippies the marks feature).
+# - scoreboard-windows-lto: the full-LTO release build with the e2e feature, the shipping-grade
+#   binary, played as scoreboard-windows plays smoke's; uploaded as scoreboard-windows-lto, which
+#   the comment does not read. Nightly, on demand, and pull requests labelled `scoreboard`.
+# - Its own workflow, so the label trigger stays out of ci.yml and e2e-windows.yml: `labeled`
+#   there would re-run them for any label, and their cancel-in-progress would kill the run in
+#   progress. Here a label other than `scoreboard` starts a run whose jobs are all skipped, in a
+#   concurrency group of its own, so it cancels nothing and takes no runner; scoreboard-comment.yml
+#   skips such a run too. Adding the label starts a run; each push to a labelled pull request
+#   starts another.
+# - The numbers report and alert, so a failure leaves the run green (continue-on-error): a red run
 #   on main would hide its numbers from the comment, which reads main's successful runs only. Not a
 #   required check.
 # - No version is written here, as in ci.yml. Every action is pinned by commit SHA, with its tag in
 #   a comment.
 
-name: scoreboard-macos
+name: scoreboard
 
 on:
   pull_request:
@@ -40,7 +43,7 @@ permissions:
 # nightly run and run on demand has a group of its own, as in ci.yml.
 concurrency:
   group: >-
-    scoreboard-macos-${{ github.event.pull_request.number || format('{0}-{1}', github.event_name, github.sha) }}${{
+    scoreboard-${{ github.event.pull_request.number || format('{0}-{1}', github.event_name, github.sha) }}${{
     (github.event.action == 'labeled' && github.event.label.name != 'scoreboard') && format('-other-label-{0}', github.run_id) || '' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
@@ -140,4 +143,83 @@ jobs:
         with:
           name: scoreboard-macos-runs
           path: ${{ runner.temp }}/scoreboard-out/runs
+          if-no-files-found: warn
+
+  scoreboard-windows-lto:
+    name: scoreboard-windows-lto
+    if: >-
+      github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+      || (github.event.action == 'labeled' && github.event.label.name == 'scoreboard')
+      || (github.event_name == 'pull_request' && github.event.action != 'labeled'
+          && contains(github.event.pull_request.labels.*.name, 'scoreboard'))
+    runs-on: windows-2025
+    continue-on-error: true
+    # About 8 minutes of build, then the four plays with room for slow ones.
+    timeout-minutes: 45
+    env:
+      TARGET: x86_64-pc-windows-msvc
+      E2E_APP: ${{ github.workspace }}/target/x86_64-pc-windows-msvc/release/clauseo-desktop.exe
+      E2E_FAKE_AGENT: ${{ github.workspace }}/target/x86_64-pc-windows-msvc/release/fake_agent.exe
+      SCOREBOARD_OUT: ${{ github.workspace }}/scoreboard-out
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the Rust toolchain from rust-toolchain.toml, and the target
+        run: |
+          rustup toolchain install
+          rustup target add "$TARGET"
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: ui/package.json
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ui/package.json
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+
+      # Its own key: the full-LTO release build shares no dependency builds with smoke's. Saved by
+      # the nightly run (on main) only.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: scoreboard-windows-lto
+          cache-bin: "false"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install the ui workspace
+        run: pnpm -C ui install --frozen-lockfile
+
+      - name: Build the app with the e2e feature (full LTO)
+        run: pnpm -C ui tauri build --no-bundle --features e2e --target "$TARGET"
+
+      - name: Build fake_agent
+        run: cargo build --release --locked -p clauseo-fake_agent --target "$TARGET"
+
+      - name: Speed scoreboard
+        run: |
+          status=0
+          pnpm -C ui/e2e test scoreboard.spec.ts || status=$?
+          if [ "$status" -ne 0 ]; then
+            echo "::warning title=Speed scoreboard failed::scoreboard.spec.ts exited with $status; no scoreboard-windows.json"
+            exit "$status"
+          fi
+
+      # The same file as scoreboard-windows, under a name the comment does not read.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: scoreboard-windows-lto
+          path: ${{ github.workspace }}/scoreboard-out/scoreboard-windows.json
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: scoreboard-windows-lto-runs
+          path: ${{ github.workspace }}/scoreboard-out/runs
           if-no-files-found: warn

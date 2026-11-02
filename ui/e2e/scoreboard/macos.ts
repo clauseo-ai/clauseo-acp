@@ -38,8 +38,8 @@ import {
  * How long one play may take, launch to exit: a minute past the page's own 180 s limit on the
  * session (ui/app/src/perf/autoplay.ts, TIMEOUT_MS), so the page reports how far it got before
  * this kills it. The session streams for about 15 s at 5 ms a step, about 85 s where the runner
- * stretches the pace. scoreboard-macos.yml's job timeout fits 4 plays × PLAY_ATTEMPTS × this,
- * plus the build.
+ * stretches the pace. The timeout of scoreboard.yml's scoreboard-macos job fits 4 plays ×
+ * PLAY_ATTEMPTS × this, plus the build.
  */
 export const PLAY_TIMEOUT_MS = 240_000;
 /**

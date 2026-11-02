@@ -250,7 +250,7 @@ export function renderComment(input: RenderInput): string {
   for (const os of OSES) lines.push(...scoreboardSection(input, os), "");
   lines.push(...reducerSection(input), "");
   lines.push(
-    "<sub>Written by `.github/workflows/scoreboard-comment.yml` when a CI, e2e-windows or scoreboard-macos run of this " +
+    "<sub>Written by `.github/workflows/scoreboard-comment.yml` when a CI, e2e-windows or scoreboard run of this " +
       "pull request ends; each run edits this comment.</sub>",
   );
   return lines.join("\n") + "\n";

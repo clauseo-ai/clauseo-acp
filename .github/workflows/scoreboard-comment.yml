@@ -1,4 +1,4 @@
-# The speed scoreboard's pull request comment (R13). When a CI, e2e-windows or scoreboard-macos run
+# The speed scoreboard's pull request comment (R13). When a CI, e2e-windows or scoreboard run
 # of a pull request ends, this finds the pull request, reads the head's scoreboard and
 # reducer-bench artifacts and main's, and creates or edits the one comment that starts with
 # <!-- scoreboard -->. The logic is in ui/e2e/scoreboard/comment.ts, with its tests beside it.
@@ -16,7 +16,7 @@
 #   each artifact. A pull request that changes no product code (crates/, ui/, Cargo.toml,
 #   Cargo.lock) gets no comment.
 # - Artifacts it reads: scoreboard-windows (e2e-windows.yml, job scoreboard-windows),
-#   scoreboard-macos (scoreboard-macos.yml, which runs on a pull request only with the label
+#   scoreboard-macos (scoreboard.yml, which runs on a pull request only with the label
 #   `scoreboard`) and reducer-bench-summary (ci.yml, reducer-bench). Each comes from the newest run
 #   of the head commit that has it; one that is missing shows as "not run".
 # - It runs Node without installing anything: comment.ts imports only Node's own modules.
@@ -28,7 +28,7 @@ on:
   workflow_run:
     # The `name:`s of the workflows in WATCHED in ui/e2e/scoreboard/comment.ts; a test checks both
     # lists agree.
-    workflows: [CI, e2e-windows, scoreboard-macos]
+    workflows: [CI, e2e-windows, scoreboard]
     types: [completed]
 
 permissions: {}
@@ -42,7 +42,7 @@ concurrency:
 jobs:
   comment:
     name: comment
-    # A run whose jobs were all skipped uploaded nothing: scoreboard-macos on a pull request without
+    # A run whose jobs were all skipped uploaded nothing: scoreboard on a pull request without
     # the `scoreboard` label (each push, each other label). It starts no comment job, so it costs no
     # runner.
     if: github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion != 'skipped'
