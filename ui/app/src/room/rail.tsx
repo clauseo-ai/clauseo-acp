@@ -91,6 +91,7 @@ export function RoomRail({
   onNewMatter,
   onMoved,
   onConversation,
+  onStartNew,
   newMatterRef,
   onEscape,
 }: {
@@ -107,6 +108,8 @@ export function RoomRail({
   /** A conversation was opened, or a new one started, from the rail: the folded rail closes, and the field takes the
    * focus the conversations ask for. */
   onConversation: () => void;
+  /** Heard just before New conversation starts one from the rail: the room ends Versions, back to now. */
+  onStartNew?: (() => void) | undefined;
   newMatterRef: Ref<HTMLButtonElement>;
   /** Escape inside the rail. */
   onEscape: () => void;
@@ -142,6 +145,7 @@ export function RoomRail({
               w.lang,
             ),
             onNewConversation: () => {
+              onStartNew?.();
               conversations.startNew();
               onConversation();
             },

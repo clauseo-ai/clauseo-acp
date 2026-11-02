@@ -141,7 +141,8 @@ export function useVersions({
       (error: unknown) => console.warn(`Versions' chunk did not load: ${String(error)}`),
     );
   };
-  const close = () => setSession(null);
+  // one function for the room's life, so the room's New conversation key needn't listen again each render
+  const close = useCallback(() => setSession(null), []);
   // whether the open Versions found nothing to undo: the toolbar's Undo waits
   const nothing = () => {
     const s = live?.controller.snapshot();

@@ -212,6 +212,15 @@ function RoomFrame({
   const word = useWordOpeners(transport, listed, w.lang);
   const ownStandIns = useTransportStandIns(transport);
   const { platform } = useDisplay();
+  // Versions, for the open matter: the timeline in the rail's place while open, the band over the work
+  const versions = useVersions({
+    transport,
+    store,
+    matter: open?.matter ?? null,
+    papers,
+    platform,
+    standIns: standIns ?? ownStandIns,
+  });
   /** The folded rail closes, and focus goes back to Matters, which opened it. */
   const fold = () => {
     if (!railOpen) return;
@@ -221,6 +230,7 @@ function RoomFrame({
   // New conversation's key, while a matter's conversations are in and no dialog holds the keys; an input method's
   // composing key is its own
   const mac = platform === "mac";
+  const endVersions = versions.close;
   const canStart =
     open !== null &&
     !view.folderMissing &&
@@ -237,12 +247,14 @@ function RoomFrame({
       if (/^[a-z]$/.test(key) ? key !== "n" : e.code !== "KeyN") return;
       if (mac ? !e.metaKey || e.ctrlKey : !e.ctrlKey || e.metaKey) return;
       e.preventDefault();
+      // a new conversation is now's: Versions ends first, and the rail comes back
+      endVersions();
       conversations.startNew();
       setRailOpen(false);
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [canStart, mac, conversations]);
+  }, [canStart, mac, conversations, endVersions]);
   // the plan the open conversation uses, on the status line: its thread's, or the one a draft would run
   // nothing while the matter's list loads (its agent isn't known yet), or for an agent of no kind
   const openRow = talks.rows.find((r) => r.key === talks.open);
@@ -268,15 +280,6 @@ function RoomFrame({
   // there, so asking whether the window is maximised would only be refused, on every resize
   const wired = useMemo(() => (platform === "mac" ? null : controls), [platform, controls]);
   const caption = useWindowFrame(wired);
-  // Versions, for the open matter: the timeline in the rail's place while open, the band over the work
-  const versions = useVersions({
-    transport,
-    store,
-    matter: open?.matter ?? null,
-    papers,
-    platform,
-    standIns: standIns ?? ownStandIns,
-  });
   const title =
     open !== null
       ? scratch
@@ -333,6 +336,7 @@ function RoomFrame({
           }}
           onMoved={fold}
           onConversation={() => setRailOpen(false)}
+          onStartNew={versions.close}
           onEscape={fold}
           newMatterRef={newMatter}
         />
