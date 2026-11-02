@@ -519,8 +519,9 @@ fn bounded(
     let spawned = std::thread::Builder::new()
         .name("clauseo-proxy-lookup".to_owned())
         .spawn(move || {
+            // Gives the slot back when the thread ends, a panicking lookup included.
+            let _slot = Release(threads);
             let route = lookup();
-            threads.fetch_sub(1, Ordering::SeqCst);
             // The waiter may have given up; its answer is then dropped.
             drop(answer.send(route));
         });
@@ -531,6 +532,17 @@ fn bounded(
     answered
         .recv_timeout(limit)
         .map_err(|_timeout| format!("the lookup took over {} s", limit.as_secs()))?
+}
+
+/// One running lookup thread, counted in `bounded`'s counter until dropped.
+#[cfg(any(windows, test))]
+struct Release(&'static std::sync::atomic::AtomicUsize);
+
+#[cfg(any(windows, test))]
+impl Drop for Release {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
 /// The OS lookup on Linux and others: none, so direct.

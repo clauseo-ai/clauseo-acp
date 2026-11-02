@@ -121,3 +121,17 @@ fn a_bounded_lookup_times_out_and_lingering_threads_are_capped() {
     let fast = bounded(Duration::from_secs(10), &THREADS, 2, || Ok(http("p", 1)));
     assert_eq!(fast.unwrap(), http("p", 1));
 }
+
+#[test]
+fn a_lookup_that_panics_gives_its_thread_slot_back() {
+    static THREADS: AtomicUsize = AtomicUsize::new(0);
+    // The thread unwinds: its slot guard drops before the answer's sender, so by the time the
+    // waiter sees the sender gone, the count is back to zero.
+    let failed = bounded(Duration::from_secs(10), &THREADS, 1, || {
+        std::panic::resume_unwind(Box::new("the OS lookup failed"))
+    });
+    assert!(failed.is_err());
+    assert_eq!(THREADS.load(std::sync::atomic::Ordering::SeqCst), 0);
+    let next = bounded(Duration::from_secs(10), &THREADS, 1, || Ok(http("p", 1)));
+    assert_eq!(next.unwrap(), http("p", 1));
+}
