@@ -1,0 +1,306 @@
+// Versions in the room, from its own chunk: the timeline in the rail's place (VersionsRail), and the band over the
+// work with the restore dialog (VersionsCentre). Both read one VersionsController (controller.ts) and compose the parts
+// of ui/components: VersionPanel, VersionWhere, VersionBand, CompareBar, PdfSheet and RestoreDialog.
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { RestoreDialog } from "@clauseo/components/clauseo/restore-dialog.tsx";
+import { keyIsMine, useRoom } from "@clauseo/components/clauseo/room-scope.ts";
+import {
+  CompareBar,
+  VersionBand,
+  WaitingButton,
+  type BandNotice,
+} from "@clauseo/components/clauseo/version-band.tsx";
+import { Desk, PdfSheet } from "@clauseo/components/clauseo/version-page.tsx";
+import { VersionPanel } from "@clauseo/components/clauseo/version-panel.tsx";
+import { VersionWhere } from "@clauseo/components/clauseo/version-where.tsx";
+import {
+  asItStood,
+  didOf,
+  whoOf,
+  type Calendar,
+  type Version,
+} from "@clauseo/components/clauseo/versions-model.ts";
+import { IconUndo } from "@clauseo/components/icons/icons.tsx";
+import type { Platform } from "@clauseo/components/lib/display.ts";
+import { useVersionWords, vt } from "@clauseo/components/lib/words-versions.ts";
+import type { FileRefId } from "../../transport/protocol.ts";
+import { isHostError } from "../../transport/host-transport.ts";
+import type { Snapshot, VersionsController } from "./controller.ts";
+import type { StandIns } from "./stand-ins.ts";
+import { calendarOf, fileName, undoable } from "./timeline.ts";
+import {
+  askOf,
+  conversationOf,
+  doneLine,
+  failedLine,
+  unsavedAt,
+  unsavedLine,
+  waitingOf,
+} from "./words.ts";
+
+/** A file's handle in the matter's papers (H8), for H11's open_file; null when the room has none for it. */
+export type FileRefOf = (path: string) => FileRefId | null;
+
+function useVersions(c: VersionsController): { s: Snapshot; cal: Calendar } {
+  const s = useSyncExternalStore(c.subscribe, c.snapshot, c.snapshot);
+  const cal = useMemo(() => calendarOf(s.now, s.zone), [s.now, s.zone]);
+  return { s, cal };
+}
+
+/** A stand-in's refusal is logged; the lawyer declining the computer's own confirm says nothing. */
+const quietly = (run: Promise<void>) =>
+  run.catch((error: unknown) => {
+    if (isHostError(error) && error.code === "transport.unauthorized") return;
+    console.warn(`a Versions act failed: ${JSON.stringify(error)}`);
+  });
+
+/** The timeline, where the rail stands while Versions is open. */
+export function VersionsRail({
+  controller: c,
+  platform,
+  standIns,
+  onClose,
+}: {
+  controller: VersionsController;
+  platform: Platform;
+  standIns: StandIns;
+  onClose: () => void;
+}) {
+  const w = useVersionWords();
+  const { s, cal } = useVersions(c);
+  const { history, meta } = s.timeline;
+  const look = s.look;
+  const at = look.kind === "back" ? history.findIndex((v) => v.id === look.id) : history.length - 1;
+  const [whereOpen, setWhereOpen] = useState(false);
+  const [where, setWhere] = useState<{ folder?: string; size?: string }>({});
+  const { reveal, versionsFolder, diskUse } = standIns;
+  useEffect(() => {
+    let live = true;
+    // H12's folder and size, where a host gives them
+    void Promise.all([versionsFolder?.(c.matter), diskUse?.(c.matter)]).then(
+      ([folder, size]) => {
+        if (live)
+          setWhere({
+            ...(folder === undefined ? {} : { folder }),
+            ...(size === undefined ? {} : { size }),
+          });
+      },
+      (error: unknown) => console.warn(`the versions' folder or size: ${JSON.stringify(error)}`),
+    );
+    return () => {
+      live = false;
+    };
+  }, [c, versionsFolder, diskUse]);
+  const u = s.unsaved;
+  return (
+    <VersionPanel
+      history={history}
+      calendar={cal}
+      name={fileName}
+      at={at < 0 ? history.length - 1 : at}
+      onPick={(i) => c.look(history[i]?.id ?? null)}
+      onClose={onClose}
+      unsaved={
+        u === null
+          ? null
+          : {
+              at: unsavedAt(s, u),
+              who: vt(w.lang, "Clauseo, in {conversation}", {
+                conversation: conversationOf(w.lang, s, u.thread),
+              }),
+              why: vt(w.lang, "Not kept as a version."),
+            }
+      }
+      where={
+        <VersionWhere
+          platform={platform}
+          open={whereOpen}
+          onOpenChange={setWhereOpen}
+          {...where}
+          {...(reveal === undefined ? {} : { onShow: () => void quietly(reveal("app_data")) })}
+        />
+      }
+      testIds={{ panel: "versions", entry: "version" }}
+      kindOf={(v) => meta.get(v.id)?.kind ?? "unknown"}
+    />
+  );
+}
+
+/** Whether a version's change can be taken back from the band: a turn's, with undo_step, or a restore, by restoring
+ * the version before it. */
+const takesBack = (s: Snapshot, v: Version): boolean => {
+  const m = s.timeline.meta.get(v.id);
+  return undoable(m) || m?.kind === "restore";
+};
+
+/** The band over the work, the comparison under it, and the restore dialog. */
+export function VersionsCentre({
+  controller: c,
+  standIns,
+  fileRef,
+}: {
+  controller: VersionsController;
+  standIns: StandIns;
+  fileRef: FileRefOf;
+}) {
+  const w = useVersionWords();
+  const { lang } = w;
+  const room = useRoom();
+  const { s, cal } = useVersions(c);
+  const { history } = s.timeline;
+  const look = s.look;
+  const shown = look.kind === "back" ? history.find((v) => v.id === look.id) : undefined;
+  const waiting = waitingOf(lang, s);
+  const desk = useRef<HTMLDivElement>(null);
+  const [doc, setDoc] = useState<string | null>(null);
+
+  // Escape comes back to now, from anywhere in the room but a field or a dialog
+  useEffect(() => {
+    if (look.kind !== "back" || s.ask !== null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      const t = e.target;
+      if (
+        t instanceof HTMLElement &&
+        (t.isContentEditable || t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement)
+      )
+        return;
+      if (!keyIsMine(room, t)) return;
+      e.preventDefault();
+      c.look(null);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [c, look.kind, s.ask, room]);
+
+  const notices: BandNotice[] = [];
+  if (look.kind === "now") {
+    if (s.unsaved !== null) notices.push({ tone: "failed", text: unsavedLine(lang, s.unsaved) });
+    const done = s.done;
+    if (done !== null)
+      notices.push({
+        tone: "done",
+        text: doneLine(lang, cal, s, done),
+        ...(done.kind === "restored"
+          ? {
+              action: (
+                <WaitingButton
+                  waiting={waiting !== null}
+                  kind="quiet"
+                  className="ver-notice-act ver-restored-undo"
+                  label={w.v("Undo the restore")}
+                  onClick={() => void c.undoRestore(done.checkpoint)}
+                >
+                  <IconUndo size={16} />
+                  {w.t("Undo")}
+                </WaitingButton>
+              ),
+            }
+          : {}),
+      });
+  }
+  // a refusal says why on the page, by its code; a running answer says so in the waiting line instead
+  if (s.failed !== null && s.failed !== "matter.turn_running" && s.failed !== "thread.turn_running")
+    notices.push(failedLine(lang, s.failed));
+
+  const changes = s.compare?.changes ?? null;
+  const inView = changes?.find((f) => f.path === doc) ?? changes?.[0];
+  const ask = askOf(lang, cal, s, s.ask);
+  const held =
+    s.ask?.act === "undo" &&
+    s.ask.stage === "confirm" &&
+    ![...s.ask.choices.values()].includes("undo");
+  return (
+    <div className="ver-room-band">
+      <VersionBand
+        look={
+          shown === undefined
+            ? null
+            : {
+                line: asItStood(lang, cal, shown),
+                who: whoOf(lang, cal, shown, history),
+                did: didOf(lang, shown, fileName),
+                comparing: look.kind === "back" && look.comparing,
+                undoable: takesBack(s, shown),
+                note: null,
+              }
+        }
+        notices={notices}
+        waiting={waiting}
+        onCompare={() => c.toggleCompare()}
+        onRestore={() => shown !== undefined && void c.askRestore(shown.id)}
+        onUndo={() => {
+          if (shown === undefined) return;
+          if (s.timeline.meta.get(shown.id)?.kind === "restore") void c.undoRestore(shown.id);
+          else c.askUndo(shown.id);
+        }}
+        onBack={() => c.look(null)}
+        testIds={{ restore: "version-restore", undo: "version-undo", wait: "versions-wait" }}
+      />
+      {look.kind === "back" && look.comparing && changes !== null && shown !== undefined && (
+        <>
+          <CompareBar
+            docs={changes.map((f) => ({ id: f.path, label: fileName(f.path) }))}
+            doc={inView?.path ?? ""}
+            onDoc={setDoc}
+            legend={changes.length === 0 ? vt(lang, "No changes since then.") : ""}
+            unchanged=""
+          />
+          {inView !== undefined && (
+            <Desk label={fileName(inView.path)} scrollRef={desk}>
+              <PdfSheet
+                title={fileName(inView.path)}
+                changed
+                state={
+                  shown.day === cal.today
+                    ? vt(lang, "Changed since {time} today", { time: w.clock(shown.at) })
+                    : vt(lang, "Changed since {time} on {date}", {
+                        time: w.clock(shown.at),
+                        date: cal.words(lang, shown.day, "date"),
+                      })
+                }
+                then={{
+                  head:
+                    shown.day === cal.today
+                      ? vt(lang, "As it was at {time} today", { time: w.clock(shown.at) })
+                      : vt(lang, "As it was at {time} on {date}", {
+                          time: w.clock(shown.at),
+                          date: cal.words(lang, shown.day, "date"),
+                        }),
+                  facts: "",
+                  saved: "",
+                }}
+                now={{ head: vt(lang, "As it is now"), facts: "", saved: "" }}
+                pdf={/\.pdf$/i.test(inView.path)}
+                {...openNow(standIns, fileRef(inView.path))}
+              />
+            </Desk>
+          )}
+        </>
+      )}
+      <RestoreDialog
+        ask={ask}
+        waiting={waiting}
+        held={held}
+        onClose={() => c.close()}
+        onChoice={(id, choice) => c.choose(id, choice)}
+        onRestore={() => void c.confirm()}
+        onTryAgain={() => void c.tryAgain()}
+        testIds={{ confirm: "dialog-confirm", tryAgain: "dialog-try-again" }}
+      />
+    </div>
+  );
+}
+
+/** "Open now", through H11's open_file, where the host has it and the room has the file's handle. The file as it was
+ * has no handle until the matter as it stood can be read (H12), so it has no way to open. */
+function openNow(standIns: StandIns, file: FileRefId | null) {
+  const { openFile } = standIns;
+  if (openFile === undefined || file === null) return {};
+  return {
+    openable: "now" as const,
+    onOpen: (which: "then" | "now") => {
+      if (which === "now") void quietly(openFile(file));
+    },
+  };
+}

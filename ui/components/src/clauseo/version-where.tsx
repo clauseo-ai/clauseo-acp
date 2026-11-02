@@ -1,7 +1,8 @@
-// Where the versions live. The Versions panel's foot says it in one line, "The matter's versions are kept on this
+// Where the versions live. The Versions panel's foot says it in one line, "Version history is kept on this
 // computer.", and a press on it says the rest: in Clauseo's own folder, as the computer writes it, never in OneDrive
 // or any folder that syncs; the matter's own folder syncs as it always has; another computer starts afresh; how much
-// room it takes, kept for good, with the way to keep 90 days instead in Settings.
+// room it takes, kept for good, with the way to keep 90 days instead in Settings. The folder, the size, the way to
+// Settings and the way to show the folder each stand only when given: a host that can't say one leaves its line out.
 import { Popover as BasePopover } from "@base-ui/react/popover";
 import { Button } from "../ui/button.tsx";
 import { IconSafeWorkspace } from "../icons/icons.tsx";
@@ -22,12 +23,12 @@ export function VersionWhere({
   onShow,
 }: {
   platform: Platform;
-  /** Clauseo's own folder for the matter's versions, as the computer writes it. */
-  folder: string;
-  /** How much room this matter's versions take: "412 MB". */
-  size: string;
-  /** Where Settings keeps how long versions are kept. */
-  settings: string;
+  /** Optional: Clauseo's own folder for the matter's versions, as the computer writes it. */
+  folder?: string;
+  /** Optional: how much room this matter's versions take, "412 MB", and that they are kept for good. */
+  size?: string;
+  /** Optional: where Settings keeps how long versions are kept, with Keep 90 days instead. */
+  settings?: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Shows the folder in Finder or File Explorer. */
@@ -39,7 +40,7 @@ export function VersionWhere({
       <BasePopover.Trigger className="ver-foot">
         <IconSafeWorkspace size={14} className="ver-foot-icon" />
         <span>
-          <Say>{w.v("The matter's versions are kept on this computer.")}</Say>
+          <Say>{w.v("Version history is kept on this computer.")}</Say>
         </span>
       </BasePopover.Trigger>
       <FloatingCard side="top" width="history" className="ver-where">
@@ -53,9 +54,11 @@ export function VersionWhere({
             )}
           </Say>
         </p>
-        <p className="ver-where-path" lang="en">
-          {folder}
-        </p>
+        {folder !== undefined && (
+          <p className="ver-where-path" lang="en">
+            <bdi>{folder}</bdi>
+          </p>
+        )}
         <p className="ver-where-line">
           <Say>
             {w.v("The matter's own folder can sync as it always has. Its versions stay here.")}
@@ -64,17 +67,27 @@ export function VersionWhere({
         <p className="ver-where-line">
           <Say>{w.v("On another computer, this matter's versions start afresh.")}</Say>
         </p>
-        <p className="ver-where-line ver-where-size">
-          <Say>{w.v("This matter's versions take {size}. They are kept for good.", { size })}</Say>
-        </p>
-        <div className="ver-where-actions">
-          <Button kind="tone" size="small" onClick={onShow}>
-            <span className="deva-nudge">{w.ui(revealKey(platform))}</span>
-          </Button>
-          <Button kind="quiet" size="small" render={<a href={settings} />} nativeButton={false}>
-            <span className="deva-nudge">{w.v("Keep 90 days instead")}</span>
-          </Button>
-        </div>
+        {size !== undefined && (
+          <p className="ver-where-line ver-where-size">
+            <Say>
+              {w.v("This matter's versions take {size}. They are kept for good.", { size })}
+            </Say>
+          </p>
+        )}
+        {(onShow !== undefined || settings !== undefined) && (
+          <div className="ver-where-actions">
+            {onShow !== undefined && (
+              <Button kind="tone" size="small" onClick={onShow}>
+                <span className="deva-nudge">{w.ui(revealKey(platform))}</span>
+              </Button>
+            )}
+            {settings !== undefined && (
+              <Button kind="quiet" size="small" render={<a href={settings} />} nativeButton={false}>
+                <span className="deva-nudge">{w.v("Keep 90 days instead")}</span>
+              </Button>
+            )}
+          </div>
+        )}
       </FloatingCard>
     </BasePopover.Root>
   );

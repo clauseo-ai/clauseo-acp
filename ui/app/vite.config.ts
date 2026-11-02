@@ -140,6 +140,7 @@ export const BARE_CHUNKS = [
   "plan-trigger",
   "working-details",
   "change-note-ask",
+  "versions-chunk",
 ];
 
 const HELPER = "__vitePreload(() => ";

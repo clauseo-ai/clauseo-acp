@@ -45,8 +45,11 @@ export function WaitingButton({
   children,
   kind = "tone",
   label,
+  testId,
 }: {
   waiting: boolean;
+  /** Optional: a test id for the e2e specs. */
+  testId?: string | undefined;
   className?: string;
   onClick: () => void;
   children: ReactNode;
@@ -59,6 +62,7 @@ export function WaitingButton({
       size="small"
       className={cn(className)}
       aria-label={label}
+      data-testid={testId}
       aria-disabled={waiting ? true : undefined}
       data-disabled={waiting ? "" : undefined}
       onClick={() => !waiting && onClick()}
@@ -80,10 +84,12 @@ export function VersionBand({
   onRestore,
   onUndo,
   onBack,
+  testIds,
 }: {
   look: BandLook | null;
-  /** At now, the paper the bar is over: its title as filed and how many pages it runs to. */
-  draft: { title: string; pages: number };
+  /** At now, the paper the bar is over: its title as filed and how many pages it runs to. Without it, at now the band
+   * is its lines alone. */
+  draft?: { title: string; pages: number };
   /** At now, the way into Versions, at the bar's left. */
   lead?: ReactNode;
   /** Looking back, on a mid window with the panel put away: the way back into it, at the meta row's left. */
@@ -97,21 +103,25 @@ export function VersionBand({
   onRestore: () => void;
   onUndo: () => void;
   onBack: () => void;
+  /** Optional: test ids for the e2e specs: on Restore this version, Undo this change and the line that says they wait. */
+  testIds?: { restore?: string; undo?: string; wait?: string };
 }) {
   const w = useVersionWords();
   if (look === null) {
     return (
       <>
-        <div className="turn-bar ver-bar">
-          {lead}
-          <p className="turn-what">
-            <Chip role="prepared" />
-            <b>
-              <Say>{draft.title}</Say>
-            </b>
-            <span className="turn-page">{w.t("Page 1 of {n}", { n: draft.pages })}</span>
-          </p>
-        </div>
+        {draft !== undefined && (
+          <div className="turn-bar ver-bar">
+            {lead}
+            <p className="turn-what">
+              <Chip role="prepared" />
+              <b>
+                <Say>{draft.title}</Say>
+              </b>
+              <span className="turn-page">{w.t("Page 1 of {n}", { n: draft.pages })}</span>
+            </p>
+          </div>
+        )}
         {notices.map((n) => (
           <p key={n.text} className="ver-notice" data-tone={n.tone} role="status">
             {n.tone === "done" ? (
@@ -126,7 +136,7 @@ export function VersionBand({
           </p>
         ))}
         {waiting !== null && notices.length > 0 && (
-          <p className="ver-notice ver-notice-wait">
+          <p className="ver-notice ver-notice-wait" data-testid={testIds?.wait}>
             <IconChecking size={14} className="ver-notice-icon" />
             <span className="ver-notice-text">
               <Say>{waiting}</Say>
@@ -182,7 +192,12 @@ export function VersionBand({
             <IconOpen size={16} />
             {w.v("Compare with now")}
           </Button>
-          <WaitingButton waiting={waiting !== null} className="ver-restore" onClick={onRestore}>
+          <WaitingButton
+            waiting={waiting !== null}
+            className="ver-restore"
+            testId={testIds?.restore}
+            onClick={onRestore}
+          >
             <IconUndo size={16} />
             {w.v("Restore this version")}
           </WaitingButton>
@@ -191,6 +206,7 @@ export function VersionBand({
               waiting={waiting !== null}
               kind="quiet"
               className="ver-undo-change"
+              testId={testIds?.undo}
               onClick={onUndo}
             >
               {w.v("Undo this change")}
@@ -207,7 +223,7 @@ export function VersionBand({
         </p>
       )}
       {waiting !== null && (
-        <p className="ver-wait">
+        <p className="ver-wait" data-testid={testIds?.wait}>
           <IconChecking size={14} className="ver-wait-icon" />
           <span>
             <Say>{waiting}</Say>

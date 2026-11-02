@@ -47,6 +47,8 @@ export function RestoreDialog({
   onChoice,
   onRestore,
   onTryAgain,
+  held = false,
+  testIds,
 }: {
   /** What the dialog asks, or null while it's closed. */
   ask: RestoreAsk | null;
@@ -56,6 +58,11 @@ export function RestoreDialog({
   onChoice: (id: string, choice: EditedChoice) => void;
   onRestore: () => void;
   onTryAgain: () => void;
+  /** Optional: the act can't go ahead as chosen, such as an undo that would put nothing back: faint, aria-disabled,
+   * still focusable, as while an answer runs. */
+  held?: boolean;
+  /** Optional: test ids for the e2e specs: on the act, and on Try again. */
+  testIds?: { confirm?: string; tryAgain?: string };
 }) {
   const w = useVersionWords();
   const [{ mount, start }] = useState(focusPlane);
@@ -87,7 +94,12 @@ export function RestoreDialog({
               </Base.Description>
               <div className={dialogActions} data-dialog-acts="">
                 <Base.Close render={<Button kind="quiet" />}>{w.ui("Cancel")}</Base.Close>
-                <Button kind="primary" onClick={onTryAgain} className="ver-try">
+                <Button
+                  kind="primary"
+                  onClick={onTryAgain}
+                  className="ver-try"
+                  data-testid={testIds?.tryAgain}
+                >
                   {w.v("Try again")}
                 </Button>
               </div>
@@ -148,9 +160,10 @@ export function RestoreDialog({
                 <Button
                   kind="primary"
                   className="ver-do-restore"
-                  aria-disabled={waiting !== null ? true : undefined}
-                  data-disabled={waiting !== null ? "" : undefined}
-                  onClick={() => waiting === null && onRestore()}
+                  data-testid={testIds?.confirm}
+                  aria-disabled={waiting !== null || held ? true : undefined}
+                  data-disabled={waiting !== null || held ? "" : undefined}
+                  onClick={() => waiting === null && !held && onRestore()}
                 >
                   {ask.act === "undo" ? w.t("Undo") : w.ui("Restore")}
                 </Button>

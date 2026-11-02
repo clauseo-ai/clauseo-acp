@@ -5,8 +5,8 @@
 // draws its own frame
 // (H19): the toolbar is the title bar, with the caption buttons wired to the window off the Mac and macOS's own traffic
 // lights over the corner lights' place on it, inside the desktop app; elsewhere (tests, the probe, a browser) the
-// buttons log their presses and the lights are painted. Until U12 there is no plan, until a host query no search, until
-// U8 no Versions and Undo, and until H5 nothing under a matter's title (the scratch matter's line stands). The wall
+// buttons log their presses and the lights are painted. Until U12 there is no plan, until a host query no search, and
+// until H5 nothing under a matter's title (the scratch matter's line stands). The wall
 // shows its surface only until H8 (host-next.ts's papers part). Folded, the rail closes on Escape and on opening a
 // matter or making one, and focus goes back to Matters; Matters carries the court-yellow dot while another matter
 // waits on the lawyer.
@@ -32,6 +32,7 @@ import { NewMatter } from "./new-matter.tsx";
 import { LocateGate, MovedFolder } from "./moved.tsx";
 import { RoomRail } from "./rail.tsx";
 import { ScratchLine } from "./scratch-line.tsx";
+import { useVersions } from "./versions/use-versions.ts";
 import type { Drafts } from "./thread/session.ts";
 import { Work } from "./thread/work.tsx";
 import { tauriWindowControls, type WindowControls } from "../transport/window-controls.ts";
@@ -138,6 +139,14 @@ function RoomFrame({
   // there, so asking whether the window is maximised would only be refused, on every resize
   const wired = useMemo(() => (platform === "mac" ? null : controls), [platform, controls]);
   const caption = useWindowFrame(wired);
+  // Versions, for the open matter: the timeline in the rail's place while open, the band over the work
+  const versions = useVersions({
+    transport,
+    store,
+    matter: open?.matter ?? null,
+    papers,
+    platform,
+  });
   const title =
     open !== null
       ? scratch
@@ -147,13 +156,18 @@ function RoomFrame({
         ? frame(w.lang, "No matters yet")
         : "";
   return (
-    <div className="room-window" ref={nodes.slot("window")}>
+    <div
+      className={versions.open ? "room-window ver-window" : "room-window"}
+      data-panel={versions.open ? "" : undefined}
+      ref={nodes.slot("window")}
+    >
       <RoomToolbar
         chrome="own"
         caption={caption}
         nativeLights={controls !== null}
         search={false}
-        versions={false}
+        versions={open !== null}
+        {...versions.toolbar}
         plan={null}
         title={title}
         titleLang={open !== null && !scratch ? "en" : w.lang}
@@ -164,7 +178,6 @@ function RoomFrame({
         court=""
         history={[]}
         canUndo={false}
-        onUndo={() => {}}
         railOpen={railOpen}
         onRail={() => setRailOpen((open) => !open)}
         railWaits={railWaits(view)}
@@ -172,18 +185,20 @@ function RoomFrame({
         testIds={{ title: "matter", rail: "rail-toggle" }}
       />
       {/* Matters opens and folds it below 1200 px; opening a matter, making one or Escape folds it again */}
-      <RoomRail
-        matters={matters}
-        view={view}
-        open={railOpen}
-        onNewMatter={() => {
-          madeFolded.current = false;
-          setNewOpen(true);
-        }}
-        onMoved={fold}
-        onEscape={fold}
-        newMatterRef={newMatter}
-      />
+      {versions.rail ?? (
+        <RoomRail
+          matters={matters}
+          view={view}
+          open={railOpen}
+          onNewMatter={() => {
+            madeFolded.current = false;
+            setNewOpen(true);
+          }}
+          onMoved={fold}
+          onEscape={fold}
+          newMatterRef={newMatter}
+        />
+      )}
       <NewMatter
         matters={matters}
         detailed={view.detailed}
@@ -207,6 +222,7 @@ function RoomFrame({
           </>
         ) : (
           <StoreContext value={store}>
+            {versions.centre}
             {scratch && <ScratchLine />}
             {/* one thread's state per matter: a new matter starts its own; with none open, the composer waits */}
             <Work

@@ -15,7 +15,7 @@ const HI = {
   "1 version": "1 संस्करण",
   Now: "अभी",
   Today: "आज",
-  "The matter's versions are kept on this computer.": "मामले के संस्करण इसी कंप्यूटर पर रखे जाते हैं।",
+  "Version history is kept on this computer.": "संस्करणों का इतिहास इसी कंप्यूटर पर रहता है।",
   // the timeline, with hundreds of versions
   "Show versions by": "किसके संस्करण दिखाएँ",
   All: "सभी",
@@ -64,6 +64,11 @@ const HI = {
   "Open as it was": "जैसा था वैसा खोलें",
   "Open now": "अभी वाला खोलें",
   "{title} did not exist yet.": "{title} तब तक बनी नहीं थी।",
+  "No changes since then.": "तब से कोई बदलाव नहीं।",
+  "Changed since {time} on {date}": "{date} को {time} बजे के बाद बदला गया",
+  "Changed since {time} today": "आज {time} बजे के बाद बदला गया",
+  "As it was at {time} on {date}": "जैसा {date} को {time} बजे था",
+  "As it was at {time} today": "जैसा आज {time} बजे था",
   // over the sheet, and saving it as a new draft
   "{paper}, as it stood at {time} on {date}": "{paper}, जैसा {date} को {time} बजे था",
   "{paper}, as it stood at {time} today": "{paper}, जैसा आज {time} बजे था",
@@ -80,6 +85,8 @@ const HI = {
   "Nothing will change. The matter already stands as it did then.":
     "कुछ नहीं बदलेगा। मामला पहले से वैसा ही है जैसा तब था।",
   "'{papers}', added since, stays.": "बाद में जोड़ा गया '{papers}' बना रहेगा।",
+  "'{papers}' can't be restored and stays as it is.":
+    "'{papers}' पुनर्स्थापित नहीं हो सकता और जैसा है वैसा ही रहेगा।",
   "Close '{file}' in Word to restore it.": "पुनर्स्थापित करने के लिए Word में '{file}' बंद करें।",
   "Close '{file}' in Word to undo the change.": "बदलाव पूर्ववत करने के लिए Word में '{file}' बंद करें।",
   "Word holds the file while it is open. Nothing has changed yet.":
@@ -87,6 +94,10 @@ const HI = {
   "Try again": "फिर से प्रयास करें",
   "Restore and Undo wait until the answer in {conversation} is done, expected by {time}.":
     "'{conversation}' का उत्तर पूरा होने तक पुनर्स्थापन और पूर्ववत प्रतीक्षा करेंगे। {time} बजे तक अपेक्षित।",
+  // the same wait without an end time: the room never estimates one
+  "Restore and Undo wait until the answer in {conversation} is done.":
+    "'{conversation}' का उत्तर पूरा होने तक पुनर्स्थापन और पूर्ववत प्रतीक्षा करेंगे।",
+  "Undo the restore": "पुनर्स्थापन पूर्ववत करें",
   "Restored to {time} on {date}. {n} documents changed.":
     "{date}, {time} बजे पर पुनर्स्थापित किया गया। {n} दस्तावेज़ बदले।",
   "Restored to {time} on {date}. 1 document changed.":
@@ -112,9 +123,17 @@ const HI = {
   "Changed by you, outside Clauseo, at {time}": "आपने Clauseo के बाहर {time} बजे बदला",
   "Changed by Clauseo at {time}": "Clauseo ने {time} बजे बदला",
   "For {title}": "{title} के लिए",
+  // a document the watcher saw change during the answer with no edit of Clauseo's: kept unless the lawyer says
+  "It may hold your own edits": "इसमें आपके अपने बदलाव हो सकते हैं",
+  "1 document may hold your own edits.": "1 दस्तावेज़ में आपके अपने बदलाव हो सकते हैं।",
+  "{n} documents may hold your own edits.": "{n} दस्तावेज़ों में आपके अपने बदलाव हो सकते हैं।",
+  "Choose for each document.": "हर दस्तावेज़ के लिए चुनें।",
   "Undid the change at {time}. {papers} went back, and the undo is a version of its own.":
     "{time} बजे का बदलाव पूर्ववत किया गया। {papers} पहले जैसे हो गए, और यह पूर्ववत करना एक अलग संस्करण है।",
   // a version that couldn't be saved
+  "Clauseo changed {paper}, and the change couldn't be kept as a version.":
+    "Clauseo ने {paper} बदला, पर यह बदलाव संस्करण के रूप में नहीं रखा जा सका।",
+  "Not kept as a version.": "संस्करण के रूप में नहीं रखा गया।",
   // where the history lives
   "Where versions are kept": "संस्करण कहाँ रखे जाते हैं",
   "On this computer, in Clauseo's own folder. Never in OneDrive, Dropbox or any folder that syncs, so syncing never touches them.":

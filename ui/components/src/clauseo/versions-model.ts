@@ -44,7 +44,9 @@ export type Who =
   /** A restore to the version with id `to`. Its time and day are read from that version when shown, as undo's are. */
   | { kind: "restore"; to: string }
   /** An undo of the restore with id `of`. Its time and day are read from that restore when shown. */
-  | { kind: "undoRestore"; of: string };
+  | { kind: "undoRestore"; of: string }
+  /** A version made in a way this version of Clauseo doesn't know: it shows its time alone. */
+  | { kind: "unknown" };
 
 export type Version = {
   id: string;
@@ -144,6 +146,8 @@ export function whoOf(lang: Lang, cal: Calendar, v: Version, all: readonly Versi
         ? vt(lang, "Undo of the restore at {time}", { time: timeOf(lang, of) })
         : vt(lang, "Undo of the restore at {time} on {date}", when(lang, cal, of));
     }
+    case "unknown":
+      return "";
   }
 }
 

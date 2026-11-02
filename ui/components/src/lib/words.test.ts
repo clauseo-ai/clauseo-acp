@@ -17,16 +17,23 @@ test("Hindi puts the part of the day first", () => {
   expect(clock("en", "4:33 pm")).toBe("4:33 pm");
 });
 
-test("the versions view is Versions on screen: no words file says History or इतिहास in a string", () => {
+// The design's foot, "Version history is kept on this computer.", says what is kept, not the view's name: the phrase
+// "version history" (संस्करणों का इतिहास) alone may stand.
+const HISTORY = /"[^"\n]*(?<!version |संस्करणों का )(history|इतिहास)/i;
+
+test("the versions view is Versions on screen: no words file says History or इतिहास in a string, but for the foot's version history", () => {
   const dir = new URL(".", import.meta.url);
   const files = readdirSync(dir).filter((f) => /^words.*\.ts$/.test(f) && !f.endsWith(".test.ts"));
   // the scan reads the words files, so a renamed folder can't pass by finding nothing
   expect(files).toContain("words-ui.ts");
   for (const f of files) {
-    expect(readFileSync(new URL(f, dir), "utf8").match(/"[^"\n]*(history|इतिहास)/gi), f).toBeNull();
+    expect(
+      readFileSync(new URL(f, dir), "utf8").match(new RegExp(HISTORY.source, "gi")),
+      f,
+    ).toBeNull();
   }
   // the pattern catches the string it should
-  expect('"Search covers the papers, the answers and History."').toMatch(
-    /"[^"\n]*(history|इतिहास)/i,
-  );
+  expect('"Search covers the papers, the answers and History."').toMatch(HISTORY);
+  expect('"Version history is kept on this computer."').not.toMatch(HISTORY);
+  expect('"Open the matter\'s history."').toMatch(HISTORY);
 });

@@ -141,7 +141,7 @@ test("while list_matters is on its way, and after it fails, the toolbar has no h
   }
 });
 
-test("the frame has the toolbar, the rail slot, the work and the wall, and no search or plan", async () => {
+test("the frame has the toolbar with Versions and Undo, the rail slot, the work and the wall, and no search or plan", async () => {
   await mount(fake([NEWER]));
   const win = host?.querySelector(".room-window");
   expect(win?.querySelector("header.room-top .room-lead .room-rail-toggle")).not.toBeNull();
@@ -152,7 +152,9 @@ test("the frame has the toolbar, the rail slot, the work and the wall, and no se
   // the rail (rail.tsx): New matter at its head, the matter's row, the scratch matter at its foot
   expect(win?.querySelector("nav.room-rail [data-testid='new-matter']")).not.toBeNull();
   expect(win?.querySelectorAll("nav.room-rail [data-testid='matter-row']")).toHaveLength(1);
-  for (const gone of [".room-search", ".room-pair", ".room-plan", '[role="toolbar"]']) {
+  // with a matter open, the Versions and Undo pair (U8); no search and no plan yet
+  expect(win?.querySelector(".room-pair")).not.toBeNull();
+  for (const gone of [".room-search", ".room-plan"]) {
     expect(win?.querySelector(gone), gone).toBeNull();
   }
 });
