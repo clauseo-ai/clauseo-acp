@@ -203,6 +203,12 @@ export interface RemovableWarmProfile extends WarmProfile {
    * the wait ends, or a folder that cannot be removed, goes to `warn` and stays on disk.
    */
   remove(warn: (message: string) => void, timeoutMs?: number): Promise<void>;
+  /**
+   * Removes the folder as {@link remove} does, then starts over: the next `folder()` makes a new
+   * one and `launches` is 0 again, so the next launch is once more launch 1 on a new profile. For a
+   * warm-up launch that failed to start ({@link retryWarmUp}).
+   */
+  reset(warn: (message: string) => void, timeoutMs?: number): Promise<void>;
 }
 
 /** A {@link WarmProfile} under a new temporary folder in `base`, made only when first asked for. */
@@ -213,6 +219,11 @@ export function warmProfile(base = tmpdir()): RemovableWarmProfile {
     folder() {
       folder ??= realpathSync.native(mkdtempSync(join(base, "clauseo-e2e-webview-")));
       return folder;
+    },
+    async reset(warn, timeoutMs = PROFILE_FREE_TIMEOUT_MS) {
+      await this.remove(warn, timeoutMs);
+      folder = null;
+      this.launches = 0;
     },
     async remove(warn, timeoutMs = PROFILE_FREE_TIMEOUT_MS) {
       if (folder === null) return;
@@ -252,6 +263,50 @@ export function launchProfile(
   if (profile === "fresh") return { profile, folder: webviewFolder(scratch, n), launch: 1 };
   warm.launches += 1;
   return { profile, folder: warm.folder(), launch: warm.launches };
+}
+
+/** An error's message on one line, for a `::warning` workflow command. */
+export function oneLine(error: unknown): string {
+  return (error instanceof Error ? error.message : String(error)).replace(/\r?\n/g, " ");
+}
+
+/**
+ * Tries `attempt`, and once more when the first try fails with an error `retryable` accepts (the
+ * warm-up launch failing to start: fixture.ts). Before the second try, `recover` cleans up what the
+ * first left, then `report` gets the first error's message on one line, so the run still shows a
+ * launch that passed only on its retry. Any other error, or a second failure, throws; a second
+ * failure names the first in its message and has the second as `cause`.
+ */
+export async function retryWarmUp<T>(
+  attempt: () => Promise<T>,
+  retryable: (error: unknown) => boolean,
+  recover: (error: unknown) => Promise<void>,
+  report: (message: string) => void,
+): Promise<T> {
+  let first: unknown;
+  try {
+    return await attempt();
+  } catch (error) {
+    if (!retryable(error)) throw error;
+    first = error;
+  }
+  const firstMessage = oneLine(first);
+  try {
+    await recover(first);
+  } catch (error) {
+    throw new Error(`cleaning up after the failed warm-up launch failed (${firstMessage})`, {
+      cause: error,
+    });
+  }
+  report(firstMessage);
+  try {
+    return await attempt();
+  } catch (error) {
+    throw new Error(
+      `the warm-up launch failed again on its one retry: ${oneLine(error)} (first try: ${firstMessage})`,
+      { cause: error },
+    );
+  }
 }
 
 /** The file WebView2 writes its DevTools port to, in its data folder. */
