@@ -311,3 +311,59 @@ fn workspace_spend_cap_text() {
         "the next good read without the reason clears it"
     );
 }
+
+#[test]
+fn pay_as_you_go_view_names_its_provider() {
+    let limits = AccountLimits {
+        billing: Billing::PayAsYouGo {
+            via: BillingProvider::Bedrock,
+        },
+        source: LimitSource::NotApplicable,
+        ..account(CLAUDE, vec![five_hour(50.0)])
+    };
+    let view = view_of(&read_once(limits), CLAUDE, t0());
+    assert_eq!(view.billing, BillingKind::PayAsYouGo);
+    assert_eq!(view.provider, Some(BillingProvider::Bedrock));
+}
+
+#[test]
+fn plan_view_has_no_provider() {
+    let view = view_of(
+        &read_once(account(CLAUDE, vec![five_hour(10.0)])),
+        CLAUDE,
+        t0(),
+    );
+    assert_eq!(view.provider, None);
+}
+
+#[test]
+fn next_read_at_is_the_earliest_reset_not_yet_passed() {
+    let model = read_once(account(
+        CLAUDE,
+        vec![
+            resetting(five_hour(40.0), at(60)),
+            resetting(seven_day(20.0), at(10)),
+        ],
+    ));
+    assert_eq!(view_of(&model, CLAUDE, t0()).next_read_at, Some(at(10)));
+}
+
+#[test]
+fn next_read_at_moves_past_a_reset_that_passed() {
+    let mut model = read_once(account(
+        CLAUDE,
+        vec![
+            resetting(five_hour(40.0), at(60)),
+            resetting(seven_day(20.0), at(10)),
+        ],
+    ));
+    model.input(Input::Deadline, at(10));
+    assert_eq!(view_of(&model, CLAUDE, at(10)).next_read_at, Some(at(60)));
+}
+
+#[test]
+fn next_read_at_is_none_once_the_last_reset_passed() {
+    let mut model = read_once(account(CLAUDE, vec![resetting(five_hour(40.0), at(10))]));
+    model.input(Input::Deadline, at(10));
+    assert_eq!(view_of(&model, CLAUDE, at(10)).next_read_at, None);
+}
