@@ -157,6 +157,12 @@
     min-width: 0;
     flex: 1 1 var(--size-menu);
   }
+  /* a segmented switch already under its words that still has too little room (the narrowest window at text size
+     20) wraps its sides rather than run past the plate */
+  .set-choice > [role="group"] {
+    flex-wrap: wrap;
+    max-width: 100%;
+  }
 
   /* ---------- appearance: the room in small ---------- */
   /* the wall and the answer side by side, the answer a little wider; once the pane is too narrow for both, the
@@ -171,19 +177,22 @@
     background: var(--ground);
     box-shadow: var(--set-in-field);
   }
+  /* three tiles of one width, each never narrower than its chip, which never wraps or clips: a tile too narrow for
+     its chip grows, and once the row can't hold all three at that, the last drops to the next row */
   .set-preview-wall {
     flex: 1 1 var(--size-search);
     min-width: 0;
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    display: flex;
+    flex-wrap: wrap;
     gap: var(--tile-gap);
   }
   .set-preview-tile {
+    flex: 1 1 0;
+    min-width: min-content;
     display: grid;
     grid-template-rows: auto auto minmax(0, 1fr);
     align-content: start;
     gap: var(--s1);
-    min-width: 0;
     padding: var(--tile-pad);
     border-radius: var(--r-control);
     background: var(--flat);
