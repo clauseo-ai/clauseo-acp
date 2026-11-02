@@ -372,7 +372,7 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
   }
 
   async displayInfo(): Promise<DisplayInfo> {
-    return { platform: this.host.platform ?? "linux" };
+    return { platform: this.host.platform ?? "linux", release_date: null };
   }
 
   subscribe(stream: StreamId, after: ViewPosition | null, subscriber: BatchSubscriber): () => void {
