@@ -111,13 +111,17 @@ pub(crate) fn decide_now(actor: &mut Actor) {
     }
 }
 
-/// Whether shutdown waits for a stop: one not decided yet, or one whose commit is in flight.
+/// Whether shutdown waits for a stop: one not decided yet, one whose commit is in flight, or a
+/// decided one whose stream is blocked while the unblock will still retry it (a stop whose
+/// stream is not blocked gets no retry, so shutdown never waits for it).
 pub(crate) fn busy(actor: &Actor) -> bool {
-    actor
-        .limits
-        .stops
-        .iter()
-        .any(|stop| stop.stopped.is_none() || stop.sending)
+    actor.limits.stops.iter().any(|stop| {
+        stop.stopped.is_none()
+            || stop.sending
+            || (stop.failed > 0
+                && stop.failed < UNBLOCK_RETRIES
+                && turn::stream_blocked(actor, stop.thread))
+    })
 }
 
 /// Read `number` of `agent` is done and the model has its outcome: each of the agent's stops
