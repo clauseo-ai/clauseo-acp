@@ -9,7 +9,7 @@
 
 import { expect } from "@playwright/test";
 import { test } from "./fixture.ts";
-import { expectTurnEnded, newConversation, openMatter, sendPrompt } from "./flow.ts";
+import { expectTurnEnded, newConversation, openMatter, sendPrompt, showRail } from "./flow.ts";
 import { window, type Window } from "./selectors.ts";
 
 test.use({ scenario: "prompt-stream" });
@@ -29,9 +29,11 @@ async function ask(w: Window, question: string): Promise<void> {
   await expectTurnEnded(w, "end_turn");
 }
 
-/** Presses the row titled `title`; the transcript then holds `shown` and not `hidden`. */
+/** Presses the row titled `title`; the transcript then holds `shown` and not `hidden`. Below 1200 px the rail is
+ * folded behind Matters (a conversation started or pressed folds it), so it is raised first. */
 async function openRow(w: Window, title: string, shown: string, hidden: string): Promise<void> {
   const row = w.conversationRow(title);
+  await showRail(w);
   await row.click();
   await expect(row).toHaveAttribute("aria-current", "true");
   await expect(w.userMessages).toHaveCount(1);
