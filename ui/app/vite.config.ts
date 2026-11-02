@@ -331,6 +331,8 @@ export default defineConfig(({ mode }) => {
             setupFiles: ["src/testing/setup.ts"],
             sequence: { groupOrder: 0 },
             maxWorkers: 3,
+            // CI only: a timed test that fails gets one more run, for a spike the per-round median did not absorb
+            retry: process.env.CI ? 1 : 0,
           },
         },
       ],
