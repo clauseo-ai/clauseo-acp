@@ -254,14 +254,17 @@ jobs:
   # pull requests and main measure the same LTO-off release build, and the comment compares like
   # with like. scoreboard.yml plays a full-LTO build nightly, on demand and on pull requests labelled
   # `scoreboard`, for the absolute numbers. Runs on pull requests that touch the app's product code
-  # and on every push to main. Its numbers report and alert and never block
-  # a merge: the job is not a required check, and continue-on-error keeps a failure from turning
-  # the run red (a red run on main would hide that run's numbers from the comment, which reads
-  # main's successful runs only). The comment then shows this pull request's Windows numbers as
-  # not run.
+  # and on every push to main. Its numbers report and alert and never block a merge: the job is not
+  # a required check, and continue-on-error keeps a failure from turning the run red (a red run on
+  # main would hide that run's numbers from the comment, which reads main's successful runs only).
+  # The comment then shows this pull request's Windows numbers as not run.
   scoreboard-windows:
     name: scoreboard-windows
     needs: [e2e-changes, smoke]
+    # On a push it waits for the ARM64 leg of smoke too, which costs nothing that matters: the
+    # comment reads main's numbers only from a completed, successful run, so the baseline is usable
+    # only once the whole run has ended, ARM64 included. An ARM64 failure does not skip this job
+    # (!cancelled() below); only a missing x64 artifact fails it, at the download.
     # Pull requests and pushes to main only: nightly and on demand, smoke's build is full LTO, and
     # its numbers would become main's baseline for the next pull requests (the comment reads main's
     # newest run); scoreboard.yml's scoreboard-windows-lto plays full LTO then.

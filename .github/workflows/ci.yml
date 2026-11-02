@@ -543,6 +543,11 @@ jobs:
       # is the merge commit's first parent, the main the change lands on, so the comparison shows
       # the pull request's change alone; if main has moved, it is an older main commit. A push
       # to main, the nightly run and a run on demand have no baseline.
+      # The base is benched in this same checkout (the merge-base checked out, then HEAD again),
+      # with the same command line: a ~2.4k-Ir case moves by tens of instructions with the length
+      # of the paths the bench process sees (argv, the manifest dir, PWD), which shifts its heap and
+      # stack layout. From a worktree in $RUNNER_TEMP, turn_ended read 2360 against the head's 2434
+      # (+3.1%, over the 2% soft limit) on a pull request that changed no Rust (run 41394700908).
       - name: cargo bench (apply)
         env:
           EVENT: ${{ github.event_name }}
@@ -554,11 +559,17 @@ jobs:
           bench=(cargo bench --locked -p clauseo-reducer_bench --bench apply --)
           baseline=false
           if [ "$EVENT" = pull_request ]; then
+            head=$(git rev-parse HEAD)
             base=$(git merge-base HEAD origin/main)
             if git cat-file -e "$base:crates/reducer_bench/Cargo.toml" 2>/dev/null; then
               echo "Baseline: main at $base"
-              git worktree add --detach "$RUNNER_TEMP/base" "$base"
-              (cd "$RUNNER_TEMP/base" && rustup toolchain install && "${bench[@]}" --save-baseline=main)
+              # Back on HEAD however this step ends, so no later step sees the base's tree.
+              trap 'git checkout -q --detach "$head"' EXIT
+              git checkout -q --detach "$base"
+              rustup toolchain install
+              "${bench[@]}" --save-baseline=main
+              git checkout -q --detach "$head"
+              rustup toolchain install
               baseline=true
             else
               echo "No baseline: crates/reducer_bench is not at $base"
