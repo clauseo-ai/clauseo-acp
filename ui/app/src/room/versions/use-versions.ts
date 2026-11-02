@@ -39,6 +39,16 @@ export function loadVersions(): Promise<Chunk> {
   );
 }
 
+/** A mid window, where the rail folds behind Matters and Versions' panel opens over the work (responsive.css). */
+const MID = "(min-width: 1000px) and (max-width: 1199px)";
+const midQuery = () => (typeof matchMedia === "function" ? matchMedia(MID) : null);
+const onMid = (fn: () => void) => {
+  const q = midQuery();
+  q?.addEventListener("change", fn);
+  return () => q?.removeEventListener("change", fn);
+};
+const isMid = () => midQuery()?.matches ?? false;
+
 export type VersionsSlots = {
   /** Whether the timeline stands in the rail's place. */
   open: boolean;
@@ -78,6 +88,11 @@ export function useVersions({
   // Versions belongs to the matter it opened on: opening another closes it, and coming back finds it closed
   if (session !== null && session.matter !== matter) setSession(null);
   const live = session !== null && session.matter === matter ? session : null;
+  // on a mid window the panel stands over the band: picking a version puts it away, as a menu goes, and the band's
+  // Versions brings it back; a wider window shows it again
+  const mid = useSyncExternalStore(onMid, isMid, () => false);
+  const [away, setAway] = useState(false);
+  const panel = !(mid && away);
   useEffect(() => live?.controller.start(), [live]);
   // the open matter, for a chunk that loads after the lawyer has moved on
   const current = useRef(matter);
@@ -98,6 +113,7 @@ export function useVersions({
         const controller = new mod.VersionsController(transport, store, matter);
         // Undo opened Versions: Cancel in its dialog closes it again
         if (undo) controller.undoNewest(true);
+        setAway(false);
         setSession({ matter, mod, controller });
       },
       (error: unknown) => console.warn(`Versions' chunk did not load: ${String(error)}`),
@@ -129,13 +145,29 @@ export function useVersions({
       close,
     };
   const { mod, controller } = live;
+  const onPicked = () => setAway(isMid());
+  const onPanel = () => setAway(false);
   return {
-    open: true,
-    rail: createElement(mod.VersionsRail, { controller, platform, standIns, onClose: close }),
-    centre: createElement(mod.VersionsCentre, { controller, standIns, fileRef, onLeave: close }),
+    open: panel,
+    rail: panel
+      ? createElement(mod.VersionsRail, {
+          controller,
+          platform,
+          standIns,
+          onClose: close,
+          onPicked,
+        })
+      : null,
+    centre: createElement(mod.VersionsCentre, {
+      controller,
+      standIns,
+      fileRef,
+      onLeave: close,
+      onPanel: panel ? null : onPanel,
+    }),
     toolbar: {
-      onVersions: close,
-      versionsOpen: true,
+      onVersions: panel ? close : onPanel,
+      versionsOpen: panel,
       onUndo: () => show(true),
       writing: undoWaits,
     },
