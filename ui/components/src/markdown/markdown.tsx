@@ -44,7 +44,7 @@ const NotesBlock = memo(function NotesBlock({ items }: { items: readonly BlockVi
 });
 
 function BlockContent({ view }: { view: BlockView }) {
-  return toReact(view.hast);
+  return toReact(view.hast, view.continues);
 }
 
 export function Markdown({ text, streaming = false }: MarkdownProps) {

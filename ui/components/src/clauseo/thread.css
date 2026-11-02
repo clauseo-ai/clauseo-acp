@@ -398,6 +398,10 @@
   .reply-text [data-clauseo="markdown"] :is(li, blockquote, dd, .footnotes) > * + * {
     margin-top: var(--s3);
   }
+  /* the rest of a paragraph cut into parts (a very long one, while it streams): it reads on, no gap */
+  .reply-text [data-clauseo="markdown"] > [data-clauseo-paragraph="continues"] {
+    margin-top: 0;
+  }
   .reply-text [data-clauseo="markdown"] :is(h1, h2, h3, h4, h5, h6) {
     font-weight: var(--w-chip);
     color: var(--primary);

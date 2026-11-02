@@ -3,7 +3,8 @@
 // otherwise the two merge (merging is always correct, only slower to re-render). The split is
 // incremental: when the new text extends the old, every block but the last two is kept and only the
 // rest is lexed again. Blocks are slices of the text, so they always concatenate back to it. A paragraph
-// longer than MAX_PARAGRAPH is the one exception to the merging: it is cut into parts (softCut).
+// longer than MAX_PARAGRAPH is the one exception to the merging: it is cut into parts (softCut), and the
+// splitter says which blocks continue the paragraph before (answer.ts joins them again when finished).
 import { Lexer, Tokenizer } from "marked";
 
 /**
@@ -27,7 +28,9 @@ class BlockStartTokenizer extends Tokenizer {
 
 /**
  * The characters of one paragraph that one block holds; past this the paragraph is cut (softCut), and each
- * part is a block of its own, parsed and shown as a paragraph of its own. Every update parses the streaming
+ * part is a block of its own, parsed on its own, and shown as one paragraph read on from the one before
+ * (no gap between them, BlockView's `continues`). Once the paragraph is finished its parts are joined
+ * again, up to MAX_JOINED (joinParts). Every update parses the streaming
  * last block whole, so its length bounds an update's work: one 18 KB paragraph of `"a==b==".repeat(3000)`
  * made each update parse 18 KB (in Chromium at a 6x CPU throttle 75 ms a flush on average and up to 700 ms;
  * in WebView2 on 2 vCPUs one flush took 1.2 s, and the one that finished it, as the next block began,
@@ -38,6 +41,23 @@ class BlockStartTokenizer extends Tokenizer {
  * stays whole).
  */
 export const MAX_PARAGRAPH = 4096;
+
+/**
+ * The longest run of a paragraph's parts that is joined back into one block, parsed once, when the
+ * paragraph is finished (joinParts): a cut breaks what spans it (an emphasis, a link, a tag pair) into the
+ * text of its two sides, and CommonMark parses a paragraph whole. Longer, the parts stay cut for good
+ * (NOT_SUPPORTED). The update that joins a paragraph parses all of it, so this bounds that update's work,
+ * as MAX_PARAGRAPH bounds a streaming one. The ratio to prose of the same length cannot pick it (the parse
+ * is linear: at 16 to 128 KB the worst content stays within 6 times prose); the absolute cost of one join
+ * does. The join update in Node (least of 7) at just under 16 KB: prose 22 ms, links (`[the clause](…)`)
+ * 31 ms, code spans 51 ms, emphasis 25 ms; at 64 KB a paragraph of only links took 455 ms, likely past
+ * the real engines' 1 s stall guard in JavaScriptCore or WebView2 on 2 vCPUs. Joining every paragraph at
+ * the answer's end instead made that update parse them all at once (the hostile corpus as one answer:
+ * 900 ms in Node, against 72 ms), so each is joined as the next block starts. An answer's longest
+ * paragraph is about 1 KB (the memo's), so only hostile input stays cut (hostile case
+ * "links-joined-paragraph" is just under this).
+ */
+export const MAX_JOINED = 16_384;
 
 /** What the parser says about the end of a block parsed on its own. */
 export type BlockEnd = {
@@ -229,6 +249,48 @@ function changedBlock(text: string, input: string, starts: readonly number[]): n
 }
 
 /**
+ * The blocks to render: each run of a paragraph's parts (a block, then the blocks that continue it) joined
+ * back into one block (by `join`) once the paragraph is finished, when the run holds at most MAX_JOINED
+ * characters; and for each block whether it continues the one before (a part of a longer run, which stays
+ * cut). A paragraph is finished when a block after it has started, or the answer has (`streaming` false):
+ * while streaming, the last run is the tail, still cut.
+ */
+export function joinParts(
+  blocks: readonly string[],
+  continues: readonly boolean[],
+  streaming: boolean,
+  join: (parts: readonly string[]) => string = (parts) => parts.join(""),
+): { blocks: readonly string[]; continues: readonly boolean[] } {
+  if (!continues.includes(true)) return { blocks, continues };
+  const joined: string[] = [];
+  const flags: boolean[] = [];
+  for (let start = 0; start < blocks.length;) {
+    let end = start + 1;
+    let length = blocks[start]!.length;
+    while (end < blocks.length && continues[end]) length += blocks[end++]!.length;
+    const tail = streaming && end === blocks.length;
+    if (end - start > 1 && !tail && length <= MAX_JOINED) {
+      joined.push(join(blocks.slice(start, end)));
+      flags.push(false);
+    } else
+      for (let index = start; index < end; index++) {
+        joined.push(blocks[index]!);
+        flags.push(index > start);
+      }
+    start = end;
+  }
+  return { blocks: joined, continues: flags };
+}
+
+/**
+ * A splitter: the blocks of a text, and for the last text split, which of its blocks continue the paragraph
+ * of the block before (a cut, softCut), one flag per block.
+ */
+export type Splitter = ((text: string) => readonly string[]) & {
+  readonly continues: () => readonly boolean[];
+};
+
+/**
  * One splitter per answer: its state is the previous split, which the next call extends. Every block
  * before the one the text changes in, but the last of them, is kept (when the text grows, every block but
  * the last two). The text may change before its end, not only grow: capNesting decides a character by what
@@ -239,12 +301,12 @@ function changedBlock(text: string, input: string, starts: readonly number[]): n
  * would read the part after one as a block of its own, which it is not), so a long paragraph is lexed whole
  * on every update, as it was before it was cut; its parts that did not change keep their strings.
  */
-export function createSplitter(endOf: EndOf): (text: string) => readonly string[] {
+export function createSplitter(endOf: EndOf): Splitter {
   let input = "";
   let starts: number[] = [];
   let soft: boolean[] = [];
   let blocks: readonly string[] = [];
-  return (text) => {
+  const split = (text: string): readonly string[] => {
     if (text === input && blocks.length > 0) return blocks;
     const grows = text.startsWith(input);
     let keep = Math.max(0, changedBlock(text, input, starts) - 1);
@@ -268,4 +330,5 @@ export function createSplitter(endOf: EndOf): (text: string) => readonly string[
     blocks = kept.concat(fresh);
     return blocks;
   };
+  return Object.assign(split, { continues: () => soft });
 }

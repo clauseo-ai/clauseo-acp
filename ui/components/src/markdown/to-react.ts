@@ -130,8 +130,15 @@ function propsOf(node: Element): Record<string, unknown> {
   return props;
 }
 
-/** Text and allowed elements of `nodes`; inside table parts, text that is only whitespace goes. */
-function childrenOf(nodes: readonly ElementContent[], table: boolean): ReactNode[] {
+/**
+ * Text and allowed elements of `nodes`; inside table parts, text that is only whitespace goes. `marked`,
+ * one of them, gets CONTINUES.
+ */
+function childrenOf(
+  nodes: readonly ElementContent[],
+  table: boolean,
+  marked?: ElementContent,
+): ReactNode[] {
   const children: ReactNode[] = [];
   const counts = new Map<string, number>();
   for (const child of nodes) {
@@ -140,7 +147,7 @@ function childrenOf(nodes: readonly ElementContent[], table: boolean): ReactNode
     } else if (child.type === "element") {
       const count = counts.get(child.tagName) ?? 0;
       counts.set(child.tagName, count + 1);
-      const element = elementOf(child, `${child.tagName}-${count}`);
+      const element = elementOf(child, `${child.tagName}-${count}`, child === marked);
       if (element !== null) children.push(element);
     }
   }
@@ -159,10 +166,11 @@ function create(
   return make(type as never, props, key);
 }
 
-function elementOf(node: Element, key: string): ReactNode {
+function elementOf(node: Element, key: string, continues = false): ReactNode {
   const type = TAGS.get(node.tagName);
   if (type === undefined) return null;
   const props = propsOf(node);
+  if (continues) props[CONTINUES.name] = CONTINUES.value;
   if (NEEDS_NODE.has(node.tagName)) props["node"] = node;
   // A code block reads its text from the node; its children would be built only to be thrown away.
   const children =
@@ -172,7 +180,20 @@ function elementOf(node: Element, key: string): ReactNode {
   return create(type, props, children, key);
 }
 
-/** One block's sanitised hast as React elements. */
-export function toReact(root: Root): ReactNode {
-  return create(Fragment, {}, childrenOf(root.children as ElementContent[], false));
+/**
+ * The attribute and value a paragraph gets when it continues the paragraph of the block before (a cut,
+ * BlockView's `continues`): a token the answer's styles take away the gap between paragraphs for
+ * (thread.css), so the parts read as one paragraph.
+ */
+export const CONTINUES = { name: "data-clauseo-paragraph", value: "continues" } as const;
+
+/**
+ * One block's sanitised hast as React elements. With `continues`, its first element, when a paragraph,
+ * gets CONTINUES (the attribute is ours: the sanitiser lets no `data-` attribute onto a `p`).
+ */
+export function toReact(root: Root, continues = false): ReactNode {
+  const nodes = root.children as ElementContent[];
+  const first = nodes.find((child) => child.type === "element");
+  const marked = continues && first?.tagName === "p" ? first : undefined;
+  return create(Fragment, {}, childrenOf(nodes, false, marked));
 }
