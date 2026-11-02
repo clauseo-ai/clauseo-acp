@@ -116,7 +116,7 @@ anything the agent starts.
   sandbox user on Windows; tier C has no sandbox, and Linux stays at tier C (bubblewrap is Later)
 - `built` (macOS): Seatbelt through `/usr/bin/sandbox-exec`, with a profile generated from the
   policy in which every path is a parameter, never profile text
-  ([0027](decisions/0027-sandbox.md)); `designed`: the host runs every agent through it (R17)
+  ([0038](decisions/0038-sandbox.md)); `designed`: the host runs every agent through it (R17)
 - `built` (macOS): The agent reads and writes only the matter folder, its state folder and the
   matter's notes folder; it reads and runs its own runtime, reads listed system locations (nothing
   under `/Users`, `/private/var/folders`, `/private/tmp` or `/Volumes`), and reaches the network
@@ -124,13 +124,22 @@ anything the agent starts.
   the version store are denied after every allow
 - `built` (macOS): Its credential file is linked into the state folder and only the link is
   allowed; for Claude only the store's own files and lock folders are allowed, and the folder
-  cannot be listed; `designed`: the link itself and sign-in outside the sandbox (R17)
+  cannot be listed; `designed`: the link itself and sign-in outside the sandbox (R17). Limit: the
+  link is a hard link, which an agent's temp-file-and-rename save breaks (the lawyer's copy keeps a
+  stale token); stage D's split rule handles it, and G7 row 17 records how Claude saves its store
+- `built` (macOS): The matter, state and notes folders themselves cannot be removed or replaced,
+  and `build()` refuses one that is a symbolic link, so an agent cannot point its next launch at
+  another folder; paths allowed again after the hidden paths (state, notes, credential link,
+  runtime, read) cannot equal or hold the home folder, the matter, a hidden path or `/`
 - `built` (macOS): Any `.git` already in the matter, the folder a `gitdir:` file names, files over
-  the size cap, and `.codex/`, `.claude/`, `.agents/`, `.clauseo/`, `.mcp.json`, `CLAUDE.md` and
-  `AGENTS.md` at the matter root (existing or not, in any letter case) are read-only, and their
-  folders cannot be renamed
-- `built` (macOS): A symbolic or hard link in the matter that leads outside it is denied, and so is
-  where it leads
+  the size cap, and `.codex/`, `.claude/`, `.agents/`, `.clauseo/`, `.mcp.json`, `CLAUDE.md`,
+  `CLAUDE.local.md` and `AGENTS.md` at the matter root (existing or not, in any letter case) are
+  read-only, and their folders cannot be renamed; `CLAUDE.md` is read-only at any depth
+- `built` (macOS): A symbolic link in the matter that leads outside it is denied, and so is where it
+  leads; so is every name in the matter of a file that also has a name outside it, `.git`
+  included (the walk counts names per inode), and a writable name of a file whose other name is
+  read-only. Past 256 link rules the nearest folders are denied instead, and a matter that still
+  does not fit is refused at launch. A file whose every name is in the matter stays readable
 - `built` (macOS): A refused file read or write reaches a denial sink through the unified log
   watcher; `designed`: the denial event and card, and widening access restarts the agent only if
   the lawyer accepts (R18)
