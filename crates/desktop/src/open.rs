@@ -222,6 +222,25 @@ pub(crate) fn check_document(path: &Path, folder: &Path) -> Result<PathBuf, Host
     Ok(path)
 }
 
+/// Opens an https `url` in the default browser with no confirm, for Rust's own callers only
+/// (stage D's sign-in page, R20): no command, capability or binding reaches it, and a test checks
+/// none names it. The link check is `open_external`'s, narrowed to https; anything else is
+/// `command.invalid`.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "stage D's R20 calls it; until then only its tests do"
+    )
+)]
+pub(crate) fn open_url_unconfirmed(opener: &dyn Opener, url: &str) -> Result<(), HostError> {
+    let link = check_link(url)?;
+    if !link.url.starts_with("https://") {
+        return Err(invalid("only https links open without a confirm"));
+    }
+    opener.open_url(&link.url)
+}
+
 /// `open_external`: checks `url` (`check_link`), asks the lawyer in `language`, and opens it.
 /// Declined, nothing opens and the call fails with `transport.unauthorized`.
 pub(crate) async fn open_external(

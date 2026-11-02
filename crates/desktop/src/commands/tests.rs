@@ -240,6 +240,39 @@ fn open_and_reveal_are_granted_to_main_only() {
     }
 }
 
+/// The opener with no confirm (`open::open_url_unconfirmed`, for Rust's own callers) is no
+/// command: no list of commands, no capability, no handler and no binding names it.
+#[test]
+fn the_unconfirmed_opener_is_not_reachable_from_the_webview() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let name = "open_url_unconfirmed";
+    assert!(!COMMANDS.contains(&name));
+    assert!(!E2E_COMMANDS.contains(&name) && !MARKS_COMMANDS.contains(&name));
+    for file in [
+        "build.rs",
+        "capabilities/main.json",
+        "capabilities/frame.json",
+        "capabilities/e2e.json",
+        "capabilities/marks.json",
+        "src/lib.rs",
+        "../../ui/app/src/transport/bindings.ts",
+    ] {
+        let text = std::fs::read_to_string(dir.join(file)).unwrap();
+        assert!(!text.contains(name), "{file} names {name}");
+        assert!(!text.contains("open-url-unconfirmed"), "{file} grants it");
+    }
+    let scratch = Scratch::new("unconfirmed-unreachable", &[]);
+    let host = scratch.start(Vec::new());
+    let (_app, window) = app(host.bridge());
+    let answer = invoke(&window, name, json!({ "url": "https://example.com/" }));
+    let denied = answer
+        .as_ref()
+        .err()
+        .and_then(Value::as_str)
+        .is_some_and(|text| text.contains("not allowed"));
+    assert!(denied, "{answer:?}");
+}
+
 /// The command names of `list`, a set.
 fn set<'a>(list: &[&'a str]) -> BTreeSet<&'a str> {
     let set: BTreeSet<&str> = list.iter().copied().collect();

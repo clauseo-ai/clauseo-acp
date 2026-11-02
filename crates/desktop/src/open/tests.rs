@@ -211,8 +211,8 @@ fn a_bad_scheme_is_refused_before_any_confirm() {
         "file:///Applications/Calculator.app",
     ));
     assert_eq!(code(refused), ErrorCode::CommandInvalid);
-    assert!(confirm.shown().is_empty());
-    assert!(opener.opened().is_empty());
+    assert_eq!(confirm.shown(), []);
+    assert_eq!(opener.opened(), []);
 }
 
 #[test]
@@ -229,7 +229,7 @@ fn a_declined_confirm_opens_nothing_and_is_unauthorized() {
     assert_eq!(error.code(), ErrorCode::TransportUnauthorized);
     assert!(!error.retryable());
     assert_eq!(confirm.shown().len(), 1);
-    assert!(opener.opened().is_empty());
+    assert_eq!(opener.opened(), []);
 }
 
 #[test]
@@ -282,11 +282,9 @@ fn the_confirm_speaks_the_apps_language() {
 /// A matter folder under `scratch` holding `Brief.docx`, and a file beside the folder.
 fn matter_folder(scratch: &Scratch) -> (PathBuf, PathBuf, PathBuf) {
     let folder = scratch.path().join("Acme");
-    std::fs::create_dir_all(folder.join("Drafts")).unwrap();
-    let brief = folder.join("Drafts").join("Brief.docx");
-    std::fs::write(&brief, b"PK").unwrap();
-    let outside = scratch.path().join("Outside.docx");
-    std::fs::write(&outside, b"PK").unwrap();
+    scratch.dir("Acme/Drafts");
+    let brief = scratch.file("Acme/Drafts/Brief.docx", b"PK");
+    let outside = scratch.file("Outside.docx", b"PK");
     (folder, brief, outside)
 }
 
@@ -315,7 +313,7 @@ fn an_unknown_ref_opens_nothing() {
     let opener = FakeOpener::default();
     let refused = block_on(open_file(&host, &opener, file_ref()));
     assert_eq!(code(refused), ErrorCode::CommandInvalid);
-    assert!(opener.opened().is_empty());
+    assert_eq!(opener.opened(), []);
 }
 
 #[test]
@@ -323,8 +321,8 @@ fn a_file_outside_its_matter_is_refused() {
     let scratch = Scratch::new("open-outside", &[]);
     let (folder, _, outside) = matter_folder(&scratch);
     let opener = FakeOpener::default();
-    for path in [outside.clone(), folder.join("..").join("Outside.docx")] {
-        let host = host(&folder, &path);
+    for path in [outside.as_path(), &folder.join("..").join("Outside.docx")] {
+        let host = host(&folder, path);
         let refused = block_on(open_file(&host, &opener, host.file));
         assert_eq!(
             code(refused),
@@ -336,13 +334,12 @@ fn a_file_outside_its_matter_is_refused() {
     // A link inside the folder to a file outside it.
     #[cfg(unix)]
     {
-        let link = folder.join("Linked.docx");
-        std::os::unix::fs::symlink(&outside, &link).unwrap();
+        let link = scratch.link(&outside, "Acme/Linked.docx");
         let host = host(&folder, &link);
         let refused = block_on(open_file(&host, &opener, host.file));
         assert_eq!(code(refused), ErrorCode::CommandInvalid);
     }
-    assert!(opener.opened().is_empty());
+    assert_eq!(opener.opened(), []);
 }
 
 #[test]
@@ -351,9 +348,8 @@ fn only_document_files_open() {
     let (folder, _, _) = matter_folder(&scratch);
     let opener = FakeOpener::default();
     // A folder, and a folder named like an app bundle.
-    let bundle = folder.join("Tool.app");
-    std::fs::create_dir_all(bundle.join("Contents")).unwrap();
-    let mut refused = vec![folder.join("Drafts"), bundle];
+    scratch.dir("Acme/Tool.app/Contents");
+    let mut refused = vec![folder.join("Drafts"), folder.join("Tool.app")];
     for name in [
         "run.command",
         "setup.exe",
@@ -368,9 +364,7 @@ fn only_document_files_open() {
         "a.webloc",
         "a.terminal",
     ] {
-        let path = folder.join(name);
-        std::fs::write(&path, b"x").unwrap();
-        refused.push(path);
+        refused.push(scratch.file(&format!("Acme/{name}"), b"x"));
     }
     for path in refused {
         let host = host(&folder, &path);
@@ -382,11 +376,10 @@ fn only_document_files_open() {
             path.display()
         );
     }
-    assert!(opener.opened().is_empty());
+    assert_eq!(opener.opened(), []);
 
     // The type is matched without regard to case.
-    let upper = folder.join("NOTE.PDF");
-    std::fs::write(&upper, b"%PDF").unwrap();
+    let upper = scratch.file("Acme/NOTE.PDF", b"%PDF");
     let host = host(&folder, &upper);
     block_on(open_file(&host, &opener, host.file)).unwrap();
     assert_eq!(opener.opened().len(), 1);
@@ -404,7 +397,7 @@ fn a_missing_file_or_folder_opens_nothing() {
     let moved = host(&scratch.path().join("Moved"), &brief);
     let refused = block_on(open_file(&moved, &opener, moved.file));
     assert_eq!(code(refused), ErrorCode::MatterFolderMissing);
-    assert!(opener.opened().is_empty());
+    assert_eq!(opener.opened(), []);
 }
 
 #[test]
@@ -424,7 +417,7 @@ fn reveal_shows_a_matters_folder_or_the_app_data_folder() {
     block_on(reveal(&host, &opener, &app_data, RevealTarget::AppData)).unwrap();
     assert_eq!(
         opener.opened(),
-        [Opened::Reveal(folder.clone()), Opened::Reveal(app_data)]
+        [Opened::Reveal(folder), Opened::Reveal(app_data)]
     );
 }
 
@@ -450,7 +443,7 @@ fn reveal_refuses_an_unknown_matter_and_a_missing_folder() {
         RevealTarget::Matter(moved.located.matter),
     ));
     assert_eq!(code(missing), ErrorCode::MatterFolderMissing);
-    assert!(opener.opened().is_empty());
+    assert_eq!(opener.opened(), []);
 }
 
 #[test]
@@ -499,4 +492,29 @@ fn the_confirms_words_are_the_reviewed_copy() {
             );
         }
     }
+}
+
+#[test]
+fn the_unconfirmed_opener_opens_https_only_and_asks_nobody() {
+    let opener = FakeOpener::default();
+    open_url_unconfirmed(&opener, "https://claude.ai/oauth/authorize?code=x").unwrap();
+    for bad in [
+        "http://claude.ai/",
+        "mailto:a@b.example",
+        "javascript:alert(1)",
+        "file:///etc/passwd",
+        "https://user:pw@claude.ai/",
+    ] {
+        assert_eq!(
+            code(open_url_unconfirmed(&opener, bad)),
+            ErrorCode::CommandInvalid,
+            "{bad}"
+        );
+    }
+    assert_eq!(
+        opener.opened(),
+        [Opened::Url(
+            "https://claude.ai/oauth/authorize?code=x".into()
+        )]
+    );
 }

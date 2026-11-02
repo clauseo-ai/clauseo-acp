@@ -83,6 +83,41 @@ impl Scratch {
         &self.root
     }
 
+    /// Makes the folder `rel` under the scratch folder, with its parents, and answers its path.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "test set-up writes its scratch folder; the desktop crate has no write module"
+    )]
+    pub(crate) fn dir(&self, rel: &str) -> PathBuf {
+        let path = self.root.join(rel);
+        std::fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    /// Writes `bytes` to the file `rel` under the scratch folder (its folder must exist), and
+    /// answers its path.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "test set-up writes its scratch folder; the desktop crate has no write module"
+    )]
+    pub(crate) fn file(&self, rel: &str, bytes: &[u8]) -> PathBuf {
+        let path = self.root.join(rel);
+        std::fs::write(&path, bytes).unwrap();
+        path
+    }
+
+    /// Makes `rel` under the scratch folder a symbolic link to `target`, and answers its path.
+    #[cfg(unix)]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "test set-up writes its scratch folder; the desktop crate has no write module"
+    )]
+    pub(crate) fn link(&self, target: &Path, rel: &str) -> PathBuf {
+        let path = self.root.join(rel);
+        std::os::unix::fs::symlink(target, &path).unwrap();
+        path
+    }
+
     /// Starts a host on the folder, refusing `refused` as a matter.
     pub(crate) fn start(&self, refused: Vec<PathBuf>) -> Running {
         let effective = Effective::load(&Locations::under_root(&self.root), &SystemFiles, &[]);
