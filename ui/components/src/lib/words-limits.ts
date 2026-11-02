@@ -12,6 +12,9 @@ const HI = {
   // the thread: when the limit resets, today at a time, or on a day
   "Resets {time}": "{time} बजे रीसेट",
   "Resets {day} {time}": "{day} {time} बजे रीसेट",
+  // when the limit reset, once it has: earlier today, or on a day before
+  "The limit reset at {time}.": "सीमा {time} बजे रीसेट हुई।",
+  "The limit reset on {day} at {time}.": "सीमा {day} {time} बजे रीसेट हुई।",
   // the limit row's own line under its headline, when the reset isn't given
   "Reset not given.": "रीसेट का समय नहीं बताया गया।",
   // a workspace out of credits or at its spend cap, where "Claude plan limit reached" isn't true

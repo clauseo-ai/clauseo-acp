@@ -24,8 +24,6 @@ export function stopLine(step: StepEntry): StopLine | null {
   }
 }
 
-/** The limit's reset as its row says it: only while it is still to come. A reset at or before `now` is over, and
- * "Resets Saturday" would read as a limit still in force, so the row shows its headline alone. */
-export function resetShown(resets: Timestamp | undefined, now: number): Timestamp | null {
-  return resets !== undefined && resets > now ? resets : null;
-}
+/** Whether the limit's reset is over: at or before `now`. "Resets Saturday" would then read as a limit still in
+ * force, so the row says when it reset, in the past tense. */
+export const resetPassed = (resets: Timestamp, now: number): boolean => resets <= now;
