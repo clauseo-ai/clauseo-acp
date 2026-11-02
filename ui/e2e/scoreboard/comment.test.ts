@@ -335,6 +335,30 @@ test("an artifact comes from the newest head run that has it, not the newest run
   );
 });
 
+test("a macOS artifact is pending while any scoreboard-macos run is in progress, not only the newest", async () => {
+  // A label started the real run (in progress, 301); a newer run (302) for the same head was
+  // skipped by the job's condition and completed without an artifact.
+  const gh = world().route(
+    `/repos/${REPO}/actions/runs?head_sha=${HEAD}&event=pull_request&per_page=100`,
+    {
+      workflow_runs: [
+        wfRun(302, ".github/workflows/scoreboard-macos.yml"),
+        wfRun(301, ".github/workflows/scoreboard-macos.yml", { status: "in_progress" }),
+        wfRun(101, ".github/workflows/ci.yml"),
+        wfRun(102, ".github/workflows/e2e-windows.yml"),
+      ],
+    },
+  );
+  gh.route(`/repos/${REPO}/actions/runs/302/artifacts?per_page=100`, { artifacts: [] });
+  gh.route(`/repos/${REPO}/actions/runs/301/artifacts?per_page=100`, { artifacts: [] });
+  const outcome = await run(gh, ctx(sameRepoEvent()));
+  if (outcome.action === "skip") throw new Error(outcome.reason);
+  expect(outcome.body).toContain(`this PR's [scoreboard run](${htmlRun(301)}) is still running`);
+  expect(outcome.body).toContain(
+    "| Send to first token on screen | pending | not run | – | 150 ms |  |",
+  );
+});
+
 test("a macOS artifact is pending while the newest scoreboard-macos run is in progress", async () => {
   // A label added to the pull request started a run that has not uploaded yet.
   const gh = world().route(

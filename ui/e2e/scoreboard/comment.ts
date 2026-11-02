@@ -248,15 +248,14 @@ async function locate(
   return hits;
 }
 
-/** The newest of `runs` (newest first) from workflow `path`, if that run is not completed. */
+/** The newest of `runs` (newest first) from workflow `path` that is not completed, if any. */
 function inFlight(runs: Run[], path: string): Run | undefined {
-  const newest = runs.find((run) => run.path === path);
-  return newest !== undefined && !newest.completed ? newest : undefined;
+  return runs.find((run) => run.path === path && !run.completed);
 }
 
 /**
- * The artifact `name` read from its hit, or the state when no run has it: pending while the newest
- * run of its producing workflow is still in progress (it may still upload it), else not run.
+ * The artifact `name` read from its hit, or the state when no run has it: pending while a run of its
+ * producing workflow is still in progress (it may still upload it), else not run.
  */
 async function source<T>(
   gh: GitHub,

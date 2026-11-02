@@ -42,7 +42,10 @@ concurrency:
 jobs:
   comment:
     name: comment
-    if: github.event.workflow_run.event == 'pull_request'
+    # A run whose jobs were all skipped uploaded nothing: scoreboard-macos on a pull request without
+    # the `scoreboard` label (each push, each other label). It starts no comment job, so it costs no
+    # runner.
+    if: github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion != 'skipped'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:

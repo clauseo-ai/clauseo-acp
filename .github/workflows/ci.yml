@@ -70,14 +70,15 @@ jobs:
       ui: ${{ steps.filter.outputs.ui }}
       product: ${{ steps.filter.outputs.product }}
     steps:
-      # The script, its fixtures, and the crate manifests the fixtures read; nothing else.
+      # The script, its fixtures, and crates/, which the fixtures read (the crate manifests, and the
+      # files outside the crates that Rust code reads); nothing else.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           sparse-checkout-cone-mode: false
           sparse-checkout: |
             /.github/scripts/
-            /crates/*/Cargo.toml
+            /crates/
 
       # A rule that would let a code change skip its jobs fails this required check instead.
       - name: Test the path rules against their fixtures
@@ -239,9 +240,12 @@ jobs:
 
       # Saved on main only. Intel macOS restores the Apple silicon entry and saves nothing; Windows
       # ARM64 has none (the cache plan is in ci-perfmax's notes: tier 2 would push main past 10 GB).
+      # rust-cache never saves over an exact hit, so v1-rust starts fresh entries: main now also
+      # builds the Intel check and the Linux debug app, and the v0 entries lack their dependencies.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         if: env.BUILD == 'true' && matrix.target != 'aarch64-pc-windows-msvc'
         with:
+          prefix-key: v1-rust
           key: ${{ matrix.target == 'x86_64-apple-darwin' && 'aarch64-apple-darwin' || matrix.target }}
           cache-bin: "false"
           save-if: ${{ github.ref == 'refs/heads/main' && !matrix.tier2 }}
@@ -439,10 +443,11 @@ jobs:
           if-no-files-found: warn
 
   # clauseo-reducer's instruction counts under Valgrind (gungraun), on every run that changes Rust
-  # (\`rust\` of changes): the hard limits in crates/reducer_bench/benches/apply.rs always apply. On a pull request whose merge-base on main
-  # has the bench, it first saves main's counts as the baseline `main`, then fails the head on more
-  # than 2% more `ir` in any case (the soft limit in apply.rs) unless the pull request carries the
-  # label `bench-ok`. A label added after the run started takes effect when the job is re-run.
+  # (`rust` of changes): the hard limits in crates/reducer_bench/benches/apply.rs always apply. On a
+  # pull request whose merge-base on main has the bench, it first saves main's counts as the
+  # baseline `main`, then fails the head on more than 2% more `ir` in any case (the soft limit in
+  # apply.rs) unless the pull request carries the label `bench-ok`. A label added after the run
+  # started takes effect when the job is re-run.
   # - Both runs share one CARGO_TARGET_DIR: gungraun keeps baselines under it (`gungraun/`), and
   #   the head run reuses the base run's dependency builds.
   # - The soft limit is in apply.rs, not on the command line: gungraun's `--callgrind-limits`
