@@ -6,8 +6,9 @@
 //! thread in the state the detach gives.
 //!
 //! A stop at the limit whose reset time a limits read is to give has no `TurnStoppedAtLimit`
-//! in its close: [`log_limit_stop`] logs it alone once the read is done (`limits.rs`), and
-//! start-up repair logs one the restart lost.
+//! in its close: [`log_limit_stop`] logs it alone once the read is done and the close is
+//! durable (`limits/stops.rs`, which keeps it until that commit is `Ok`), and start-up repair
+//! logs one the restart lost.
 
 use clauseo_protocol::{
     AgentSessionDetached, CheckpointId, DetachReason, ElicitationExpired, ElicitationId, ErrorCode,
@@ -206,20 +207,19 @@ impl TurnClose {
     }
 }
 
-/// Logs `stopped` in `thread` as its own commit: a turn's stop at the limit, after the read
-/// that gave its reset time, or the one start-up repair adds. A thread no longer loaded, or a
-/// commit refused, loses it until start-up repair logs it at the next start.
-pub(crate) fn log_limit_stop(actor: &mut Actor, thread: ThreadId, stopped: TurnStoppedAtLimit) {
+/// Sends `stopped` in `thread` as its own commit, tagged so that its result reaches the
+/// pending stop (`limits/stops.rs`): a turn's stop at the limit, after the read that gave its
+/// reset time, or the one start-up repair adds. The thread's stream must be loaded.
+pub(crate) fn log_limit_stop(
+    actor: &mut Actor,
+    thread: ThreadId,
+    stopped: TurnStoppedAtLimit,
+) -> Result<(), Error> {
     let turn = stopped.turn;
     if actor.loaded(StreamId::Thread(thread)).is_none() {
-        tracing::warn!(%thread, %turn, "a stop at the limit was not logged: the thread is not loaded");
-        return;
+        return Err(Error::Internal(format!("thread {thread} is not loaded")));
     }
-    let sent = Out::new(actor, thread, None).and_then(|mut out| {
-        out.push(actor, stopped)?;
-        out.send(actor, super::Then::Nothing)
-    });
-    if let Err(error) = sent {
-        tracing::warn!(%thread, %turn, %error, "a stop at the limit was not logged");
-    }
+    let mut out = Out::new(actor, thread, None)?;
+    out.push(actor, stopped)?;
+    out.send(actor, super::Then::LimitStop(turn))
 }
