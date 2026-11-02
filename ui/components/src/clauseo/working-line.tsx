@@ -128,6 +128,19 @@ function TimePill({ children, place }: { children: string; place: "row" | "field
   );
 }
 
+/** What assistive technology hears of the line: its words, with English names tagged in Hindi, and its time. The
+ * composer holds the status region these go into, mounted whenever the composer is, so each change (Answering., then
+ * a break's words, or nothing between) is said once in place; the row's own words are seen, not read twice. */
+export function WorkingSaid({ state }: { state: WorkingState }) {
+  const { words, pill } = useParts(state);
+  return (
+    <>
+      <Say>{words}</Say>
+      {pill !== null && ` ${pill}`}
+    </>
+  );
+}
+
 /** The pill's place beside Stop, in the field's row. Shown only where the field has room for it. */
 export function WorkingTime({ state }: { state: WorkingState }) {
   const { pill } = useParts(state);
@@ -149,15 +162,6 @@ export function WorkingLine({
 }) {
   const wd = useThreadWords();
   const { words, pill, actions, details } = useParts(state);
-  // what assistive technology hears: one status region that stays mounted while the line does, its words changing in
-  // place (Answering., then the break's), so each change is said once. The row's own words are seen, not read twice;
-  // a row with details renders through Suspense and would mount a region anew
-  const said = (
-    <span className="sr-only" role="status">
-      {words}
-      {pill !== null && ` ${pill}`}
-    </span>
-  );
   const row = (more: ReactNode) => (
     <div
       className="working"
@@ -180,17 +184,10 @@ export function WorkingLine({
       )}
     </div>
   );
-  if (details === null)
-    return (
-      <>
-        {said}
-        {row(null)}
-      </>
-    );
+  if (details === null) return row(null);
   // until the fold is in, its trigger stands as a plain button of the same look
   return (
     <>
-      {said}
       <Suspense
         fallback={row(
           <Button kind="quiet" size="small" className="working-more">
