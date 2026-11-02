@@ -12,7 +12,7 @@ export type Exclusion = {
 
 export const REASONS = {
   "raw-html":
-    "Raw HTML (an HTML block or inline HTML) never becomes HTML, by design: the approved inline tags (sup, sub, u, ins, del, s, mark, br, small, kbd) paired within one parent become our elements with no attributes, and an HTML block of nothing but <br> line breaks; a tag with an HTML element's name that is clearly markup (paired, self-closed, or with a valued attribute) is dropped, its content kept as text; everything else shows as text (inline-tags.ts).",
+    "Raw HTML (an HTML block or inline HTML) never becomes HTML, by design: the approved inline tags (sup, sub, u, ins, del, s, mark, br, small, kbd) paired within one parent become our elements with no attributes, and an HTML block of nothing but <br> line breaks; a tag with an HTML element's name that is clearly markup (paired, self-closed, or with a valued attribute) is dropped, its content kept as text, so prose naming a tag pair loses it (`Use <b> to start bold and </b> to end it.` shows `Use  to start bold and  to end it.`); everything else shows as text (inline-tags.ts).",
   protocol:
     "The sanitiser drops an href whose scheme is not https, http, mailto, clauseo-cite or clauseo-paper (schema.ts); its check is case-sensitive, and a colon before any slash, ? or # counts as a scheme.",
   "gfm-autolink":
@@ -134,9 +134,10 @@ export const NOT_SUPPORTED: readonly { syntax: string; shows: string; reason: st
   {
     syntax:
       "inline HTML beyond the allowlist (any tag but sup, sub, u, ins, del, s, mark, br, small, kbd), and every attribute",
-    shows: "the tag as text; an allowlisted tag's attributes are dropped",
+    shows:
+      "the tag as text; a tag with an HTML element's name that is clearly markup (paired, self-closed, or with a valued attribute) is dropped, its content kept; an allowlisted tag's attributes are dropped",
     reason:
-      "Raw HTML stays out (research 16; G4's acceptance check 3 shows what rehype-raw lets through). Tags show as text, not dropped, because legal drafting uses placeholders like <Party A> and a lawyer must see everything the agent wrote.",
+      'Raw HTML stays out (research 16; G4\'s acceptance check 3 shows what rehype-raw lets through). Other tags show as text, because legal drafting uses placeholders like <Party A> and a lawyer must see everything the agent wrote. HTML-named markup is dropped because agents use it for presentation (Codex\'s <div align="right"> in table cells). So prose that names a tag pair loses it: "Use <b> to start bold and </b> to end it." shows "Use  to start bold and  to end it."',
   },
   {
     syntax: "an HTML block other than one of nothing but <br>, <br/> or <br /> without attributes",
