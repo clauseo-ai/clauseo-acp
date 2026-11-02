@@ -40,6 +40,7 @@ export type ErrorCode =
   | "matter.turn_running"
   | "transport.unauthorized"
   | "transport.too_large"
+  | "settings.locked"
   | "unknown";
 
 const HI = {
@@ -83,6 +84,8 @@ const HI = {
   "Wait for the answer to finish first.": "पहले उत्तर पूरा होने दें।",
   "That wasn't allowed, so nothing changed.": "इसकी अनुमति नहीं थी, इसलिए कुछ नहीं बदला।",
   "That is too large to send.": "यह भेजने के लिए बहुत बड़ा है।",
+  "Your organisation manages that setting, so it can't be changed.":
+    "यह सेटिंग आपका संगठन संभालता है, इसलिए इसे बदला नहीं जा सकता।",
   "Something went wrong.": "कुछ गड़बड़ हो गई।",
 } as const;
 
@@ -126,6 +129,7 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   "matter.turn_running": "Wait for the answer to finish first.",
   "transport.unauthorized": "That wasn't allowed, so nothing changed.",
   "transport.too_large": "That is too large to send.",
+  "settings.locked": "Your organisation manages that setting, so it can't be changed.",
   unknown: "Something went wrong.",
 };
 

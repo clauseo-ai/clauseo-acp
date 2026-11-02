@@ -96,7 +96,8 @@ export async function mountRoom(script: Script = {}): Promise<Harness> {
   const transport = new FakeTransport({
     query: (query) => {
       if (query === "list_matters") return { matters: script.matters ?? [THE_MATTER] };
-      if (query.list_threads !== undefined) return { threads: script.threads ?? [summary()] };
+      if (typeof query === "object" && query.list_threads !== undefined)
+        return { threads: script.threads ?? [summary()] };
       if (script.query !== undefined) return script.query(query);
       throw new Error(`not scripted: ${JSON.stringify(query)}`);
     },
