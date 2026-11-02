@@ -137,7 +137,12 @@ fn item_plans_by_plan_id() {
                 warning: ProtocolWarning::UnknownUpdate { name },
                 ..
             } => format!("unknown {name}"),
-            other => panic!("unexpected {other:?}"),
+            other @ (AcpEvent::Update { .. }
+            | AcpEvent::PermissionRequested { .. }
+            | AcpEvent::ElicitationRequested { .. }
+            | AcpEvent::ElicitationCompleted { .. }
+            | AcpEvent::Limit { .. }
+            | AcpEvent::Warning { .. }) => panic!("unexpected {other:?}"),
         })
         .collect();
     assert_eq!(
