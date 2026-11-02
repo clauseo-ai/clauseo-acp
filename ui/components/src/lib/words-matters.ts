@@ -100,10 +100,19 @@ const HI = {
   "The queue is held. The answer failed at {time}, so nothing more is sent until you send.":
     "कतार रुकी है। {time} बजे उत्तर पूरा नहीं हो सका, इसलिए जब तक आप न भेजें, आगे कुछ नहीं भेजा जाएगा।",
   "Send next": "अगला भेजें",
+  // a queued message's Edit, Remove or Send now refused with thread.turn_not_queued: it had gone as it was pressed
+  "That message had already gone.": "वह संदेश पहले ही जा चुका था।",
   /* ---------- steering the running answer: the words a host gives SteerHint, SteerMark and SteerNote ---------- */
   "Send now gives your words to Clauseo while it writes.":
     "अभी भेजें से Clauseo लिखते समय ही आपके शब्द ले लेता है।",
+  "ChatGPT can't take words mid-answer. Send now stops this answer, keeps what it wrote, and sends your words first.":
+    "ChatGPT उत्तर के बीच में शब्द नहीं ले सकता। अभी भेजें इस उत्तर को रोकता है, जितना लिखा गया वह रखता है, और आपके शब्द पहले भेजता है।",
   "You, {time}, while Clauseo answered": "आप, {time}, जब Clauseo उत्तर दे रहा था",
+  // where a steered message went: the answer had just ended (requeued), or it was stopped for the words (sent now)
+  "Your words came as the answer ended, so they go next.":
+    "आपके शब्द उत्तर पूरा होते समय पहुँचे, इसलिए वे अगले भेजे जाएँगे।",
+  "Stopped at {time} to send your words first. The answer so far is kept.":
+    "आपके शब्द पहले भेजने के लिए {time} बजे रोका गया। अब तक का उत्तर रखा गया है।",
   "Your words at {time} came in while Clauseo searched Indian Kanoon for {what}. That search carried on in the background, finished at {done}, and this answer uses it.":
     "आपके {time} बजे के शब्द तब पहुँचे जब Clauseo Indian Kanoon पर {what} खोज रहा था। वह खोज पृष्ठभूमि में चलती रही, {done} बजे पूरी हुई, और यह उत्तर उसका इस्तेमाल करता है।",
   "Show what it found": "क्या मिला, देखें",
