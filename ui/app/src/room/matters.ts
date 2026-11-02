@@ -2,11 +2,11 @@
 // the frame read (useSyncExternalStore), built once per transport.
 //
 // With the NextHost's matters part (host-next.ts: H3, H5, H6 and H20's rows) the list is `list_matters`'s MatterInfo,
-// each row's status is the host's (H5), opening a matter sends open_matter and the open thread is marked seen (H6).
-// H4's app events (the app part) keep the list current, applied once a frame. Without the matters part (today's
-// desktop host) the list is today's `list_matters`, with no dates, pins or statuses, and a row says what it's doing
-// only from the thread headers the room holds: the open matter's thread, and the thread of a matter the lawyer left
-// while it was working, kept subscribed until it rests. A list answer older than the list shown is dropped.
+// each row's status is the host's (H5), and opening a matter sends open_matter. H4's app events (the app part) keep the
+// list current, applied once a frame. H6's seen marks are the conversations' (conversations.ts). Without the matters
+// part (today's desktop host) the list is today's `list_matters`, with no dates, pins or statuses, and a row says what
+// it's doing only from the thread headers the room holds: the open conversation's thread, and the threads of
+// conversations the lawyer left while they were working, kept subscribed until they rest. A list answer older than the list shown is dropped.
 import { frameBatch, type Batch } from "../store/batch.ts";
 import type { ViewStore } from "../store/store.ts";
 import { streamOf } from "../store/view.ts";
@@ -238,21 +238,15 @@ export class Matters {
     });
   }
 
-  /** The open matter's thread, as the work reports it (U3's onThread). Without the matters part the room holds its
-   * thread's view, so the row can say what it's doing and keep saying it once left; with it (H6) the thread is marked
-   * seen. */
+  /** The open conversation's thread, as the work reports it (U3's onThread). Without the matters part the room holds
+   * its thread's view, so its matter's row and its conversation's row can say what it's doing and keep saying it once
+   * left (U2's rule until H4). H6's seen marks are the conversations' (conversations.ts). */
   onThread = (thread: ThreadId | null): void => {
     if (thread === this.#thread) return;
     this.#leaveThread();
     this.#thread = thread;
     const open = this.#view.open;
-    if (thread === null || open === null) return;
-    if (this.#rows !== null) {
-      this.#rows.command({ mark_seen: { thread } }).catch((error: unknown) => {
-        console.warn(`mark_seen failed: ${JSON.stringify(error)}`);
-      });
-      return;
-    }
+    if (thread === null || open === null || this.#rows !== null) return;
     // the watch receives the thread's whole stream and the store keeps its whole view (entries and streamed text);
     // the room reads only the header's status, and for needs_you whether a permission entry is pending
     // U3: if U3's view store gains a header-only watch, use it here, so a left thread holds no entries
@@ -375,7 +369,7 @@ export class Matters {
         matters = matters.filter((m) => !gone.has(m.matter));
         changed = true;
       }
-      // threads_changed carries the threads' own marks, for the work's conversations (U3); a row's status is H5's
+      // threads_changed is the conversations' (conversations.ts); a matter row's status is H5's
     }
     if (!changed) return;
     this.#shown = this.#heardAt;

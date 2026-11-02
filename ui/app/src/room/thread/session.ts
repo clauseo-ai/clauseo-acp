@@ -1,8 +1,8 @@
-// The open thread of the room's work column and what the lawyer does in it: which thread is open (the newest that is
-// not archived, store/reopen.ts), and the commands Ask, Stop and Undo send. With no thread yet, the first Ask makes
-// one, so a visit leaves no empty thread behind. A refused command shows by its code only, never its message.
+// The open conversation's thread in the room's work column and what the lawyer does in it: the commands Ask, Stop and
+// Undo send. Which thread is open is the conversations' (conversations.ts), which also make the thread on a draft's
+// first Ask and title it once the question is accepted, so a visit leaves no empty thread behind. A refused command
+// shows by its code only, never its message.
 import { createContext, use, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { pickReopenThread } from "../../store/reopen.ts";
 import type { ViewStore } from "../../store/store.ts";
 import { streamOf } from "../../store/view.ts";
 import { internalError, toHostError, type HostTransport } from "../../transport/host-transport.ts";
@@ -20,13 +20,23 @@ import type {
 import { turnRunning } from "./live.ts";
 import { loadThread } from "./chunk.ts";
 
-/** The agent every thread the room starts runs: `agents.claude-acp` in the user settings, until U6 lets the lawyer choose
- * (as R12's internal window did). */
-export const AGENT = "claude-acp";
+/** Each conversation's words in the composer's field, by its key (conversations.ts), kept above the room's Work, so
+ * leaving a conversation or its matter and coming back finds them where the lawyer left them (a refused send promises
+ * "Your question is kept."). */
+export type Drafts = Map<string, string>;
 
-/** Each matter's words in the composer's field, kept above the matter's Work, so leaving a matter and coming back
- * finds them where the lawyer left them (a refused send promises "Your question is kept."). */
-export type Drafts = Map<MatterId, string>;
+/** What the session needs of the open conversation (conversations.ts). */
+export type ConversationLink = {
+  /** Its thread: null for a draft, or while the matter's list loads. */
+  thread: ThreadId | null;
+  /** The thread a send goes to when `thread` is null: the one the list opens, else a new one. Rejects with the host's
+   * error. */
+  create: () => Promise<ThreadId>;
+  /** A prompt was accepted in the thread. */
+  sent: (thread: ThreadId, text: string) => void;
+  /** The code of the matter's refused list, until a read succeeds. */
+  refused: ErrorCode | null;
+};
 
 /** What the rows can do and need to know: Undo, and the turn sent last (busy until its end is in the view). */
 export type ThreadActions = {
@@ -50,11 +60,12 @@ export function useThreadActions(): ThreadActions {
 }
 
 export type ThreadSession = {
-  /** The open thread, or null before the first Ask makes one (or while list_threads runs). */
+  /** The open thread, or null before the first Ask makes one, while list_threads runs, or before the thread's chunk is
+   * in. */
   readonly thread: ThreadId | null;
   /** The turn of the last prompt accepted. */
   readonly sentTurn: TurnId | null;
-  /** The code of the last refused list, send or Stop, until the next Ask. */
+  /** The code of the last refused send or Stop, until the next Ask; else the matter's refused list. */
   readonly refused: ErrorCode | null;
   /** Sends a question, making the thread first if there is none. True once send_prompt is accepted. Never rejects. */
   ask: (text: string) => Promise<boolean>;
@@ -62,55 +73,51 @@ export type ThreadSession = {
   actions: ThreadActions;
 };
 
+/** Whether the thread's chunk is in memory: its import is tagged fulfilled once it is (chunk.ts). */
+const chunkIn = (): boolean => (loadThread() as { status?: string }).status === "fulfilled";
+
 export function useThreadSession(
   transport: HostTransport,
   store: ViewStore,
   matter: MatterId | null,
+  link: ConversationLink,
 ): ThreadSession {
-  const [thread, setThread] = useState<ThreadId | null>(null);
+  // the thread opens only once the chunk is in, so its rows never render, settle or page before it (chunk.ts); once
+  // it is, a conversation opens on its first render
+  const [loaded, setLoaded] = useState(chunkIn);
+  const [made, setMade] = useState<ThreadId | null>(null);
   const [sentTurn, setSentTurn] = useState<TurnId | null>(null);
   const [refused, setRefused] = useState<ErrorCode | null>(null);
+  const known = link.thread ?? made;
+  const thread = loaded ? known : null;
   // the refs hold what an Ask in flight reads: two Enters in one frame must make one thread
-  const open = useRef<ThreadId | null>(null);
-  const lookup = useRef<Promise<ThreadId | null> | null>(null);
+  const open = useRef<ThreadId | null>(known);
   const sending = useRef(false);
   const stopping = useRef(false);
   /** The view's header as the last prompt went: its turn is over once a later header says nothing runs. */
   const headerAtSend = useRef<StreamHeader | null>(null);
+  const { create, sent: onSent } = link;
 
-  const adopt = useCallback((id: ThreadId) => {
-    open.current = id;
-    setThread(id);
-  }, []);
+  // a thread the conversations open (the list's, or one made elsewhere) is the one the commands go to
+  useEffect(() => {
+    open.current = known;
+  }, [known]);
+
+  useEffect(() => {
+    if (loaded) return;
+    let live = true;
+    void loadThread().then(() => {
+      if (live) setLoaded(true);
+    });
+    return () => {
+      live = false;
+    };
+  }, [loaded]);
 
   const command = useCallback(
     (body: HostCommand) => transport.dispatch({ command_id: crypto.randomUUID(), command: body }),
     [transport],
   );
-
-  /** The thread to reopen, once: a failed lookup is asked again by the next Ask. The thread's chunk (the list, its rows and the
-   * Markdown renderer, chunk.ts) loads alongside: the thread opens only once it is in, so no row renders, and the
-   * thread never settles or pages, before it. */
-  const find = useCallback((): Promise<ThreadId | null> => {
-    if (matter === null) return Promise.resolve(null);
-    if (lookup.current !== null) return lookup.current;
-    const listed = transport.query({ list_threads: { matter } });
-    const asked = Promise.all([listed, loadThread()]).then(([result]) => {
-      const pick = pickReopenThread(result.threads ?? []);
-      if (pick !== null && open.current === null) adopt(pick.thread);
-      return open.current;
-    });
-    lookup.current = asked;
-    asked.catch(() => {
-      if (lookup.current === asked) lookup.current = null;
-    });
-    return asked;
-  }, [transport, matter, adopt]);
-
-  useEffect(() => {
-    // Strict Mode runs this twice; find() asks once
-    find().catch((e: unknown) => setRefused(toHostError(e).code));
-  }, [find]);
 
   const ask = useCallback(
     async (text: string): Promise<boolean> => {
@@ -118,18 +125,17 @@ export function useThreadSession(
       sending.current = true;
       setRefused(null);
       try {
-        let id = open.current ?? (await find());
+        let id = open.current;
         if (id === null) {
-          const made = await command({ create_thread: { matter, agent: AGENT } });
-          if (typeof made === "string" || made.thread_created === undefined)
-            throw internalError("create_thread answered without a thread");
-          id = made.thread_created.thread;
-          adopt(id);
+          id = await create();
+          open.current = id;
+          setMade(id);
         }
         headerAtSend.current = store.view(streamOf(id))?.header ?? null;
         const sent = await command({ send_prompt: { thread: id, content: [{ text: { text } }] } });
         if (typeof sent !== "string" && sent.prompt_accepted !== undefined)
           setSentTurn(sent.prompt_accepted.turn);
+        onSent(id, text);
         return true;
       } catch (e) {
         setRefused(toHostError(e).code);
@@ -138,7 +144,7 @@ export function useThreadSession(
         sending.current = false;
       }
     },
-    [matter, find, command, adopt, store],
+    [matter, create, onSent, command, store],
   );
 
   // The sent turn holds busy until its step or limit stop is in the view (live.ts, useBusy). A turn can end without
@@ -202,5 +208,5 @@ export function useThreadSession(
     () => ({ stream, sentTurn, undo, answer, stop }),
     [stream, sentTurn, undo, answer, stop],
   );
-  return { thread, sentTurn, refused, ask, stop, actions };
+  return { thread, sentTurn, refused: refused ?? link.refused, ask, stop, actions };
 }

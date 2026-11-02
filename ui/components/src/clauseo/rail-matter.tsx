@@ -67,6 +67,11 @@ export type MatterRowProps = {
   /** The current matter's conversations, opened beneath it, with New conversation. */
   conversations?: readonly ConversationRowProps[] | undefined;
   onNewConversation?: (() => void) | undefined;
+  /** Optional: the plan the conversations are measured against (ConversationList's `plan`): its first conversation's,
+   * where known. */
+  conversationPlan?: string | undefined;
+  /** Optional: a test id on New conversation. */
+  newConversationTestId?: string | undefined;
 };
 
 /** A matter's actions: pin it to the top, show its folder in the computer's own file manager, or find a folder that
@@ -230,6 +235,8 @@ export function MatterRow({
   testIds,
   conversations,
   onNewConversation,
+  conversationPlan,
+  newConversationTestId,
 }: MatterRowProps) {
   const w = useWords();
   const status = matterStatus(w.lang, state, at, day);
@@ -287,6 +294,8 @@ export function MatterRow({
           <ConversationList
             matter={name}
             conversations={conversations}
+            plan={conversationPlan}
+            newTestId={newConversationTestId}
             {...(onNewConversation === undefined ? {} : { onNew: onNewConversation })}
           />
         )}

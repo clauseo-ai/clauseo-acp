@@ -29,6 +29,7 @@ import { createViewStore } from "../store/store.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import type { MatterId } from "../transport/protocol.ts";
 import type { Papers, PapersHost } from "./host-next.ts";
+import { Conversations } from "./conversations.ts";
 import { Matters, type MattersView } from "./matters.ts";
 import { NewMatter } from "./new-matter.tsx";
 import { AnswerHost, type ListedPapers } from "./open.ts";
@@ -132,10 +133,26 @@ function RoomFrame({
   const shared = use(StoreContext);
   const [store] = useState(() => shared ?? createViewStore(transport, { batch: () => frameBatch }));
   const [matters] = useState(() => new Matters(transport, store));
-  // each matter's composer draft, kept here, above Work's key, so it outlives a visit to another matter
+  // each conversation's composer draft, kept here, above Work's key, so it outlives a visit to another conversation
   const [drafts] = useState<Drafts>(() => new Map());
+  const [conversations] = useState(() => new Conversations(transport, store, matters, drafts));
   useEffect(() => matters.start(), [matters]);
+  useEffect(() => conversations.start(), [conversations]);
   const view = useSyncExternalStore(matters.subscribe, matters.view, matters.view);
+  const talks = useSyncExternalStore(
+    conversations.subscribe,
+    conversations.view,
+    conversations.view,
+  );
+  const link = useMemo(
+    () => ({
+      thread: talks.thread,
+      create: conversations.create,
+      sent: conversations.sent,
+      refused: talks.refused,
+    }),
+    [talks.thread, talks.refused, conversations],
+  );
   const open = view.open;
   const listed = usePapers(matters.next.papers, open?.matter ?? null);
   const papers = listed?.papers ?? null;
@@ -218,6 +235,8 @@ function RoomFrame({
         <RoomRail
           matters={matters}
           view={view}
+          conversations={conversations}
+          talks={talks}
           open={railOpen}
           onNewMatter={() => {
             madeFolded.current = false;
@@ -253,13 +272,14 @@ function RoomFrame({
           <StoreContext value={store}>
             {versions.centre}
             {scratch && <ScratchLine />}
-            {/* one thread's state per matter: a new matter starts its own; with none open, the composer waits */}
+            {/* one thread's state per conversation: each starts its own; with no matter open, the composer waits */}
             <MarkdownHostContext value={answers}>
               <Work
-                key={open?.matter ?? "none"}
+                key={talks.open ?? open?.matter ?? "none"}
                 transport={transport}
                 matter={open}
                 drafts={drafts}
+                conversation={link}
                 onThread={matters.onThread}
               />
             </MarkdownHostContext>

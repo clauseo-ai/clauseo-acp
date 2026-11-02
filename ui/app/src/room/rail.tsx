@@ -4,15 +4,25 @@
 // one group, "No date yet", newest first, finding by name only, and a menu of Show in Finder alone. What each row says it's doing comes from matters.ts's status,
 // its moments put in the lawyer's clock as the rail renders, so nothing ticks at rest; the open matter's row says
 // nothing, since the lawyer is looking at it. Until the list arrives, and if it can't be read, the rail draws no list
-// and no scratch row.
+// and no scratch row. Under the open matter's row stand its conversations (conversations.ts), with New conversation:
+// a draft, or a thread with no title yet, says "New conversation"; a row not open says what it's doing.
 import type { Ref } from "react";
 import { Rail, type MatterRowProps, type RailGroup } from "@clauseo/components/clauseo/rail.tsx";
+import type { ConversationRowProps } from "@clauseo/components/clauseo/rail-conversations.tsx";
+import { mt } from "@clauseo/components/lib/words-matters.ts";
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { frame } from "@clauseo/components/lib/words-frame.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { isolate } from "@clauseo/components/lib/bidi.ts";
 import type { MatterId } from "../transport/protocol.ts";
 import type { MatterInfo } from "./host-next.ts";
+import { planName } from "./agent.ts";
+import {
+  rowWords,
+  type ConversationRow,
+  type Conversations,
+  type ConversationsView,
+} from "./conversations.ts";
 import type { Matters, MattersView, RowStatus } from "./matters.ts";
 import { clockOf, dayOf, groupMatters } from "./when.ts";
 
@@ -30,6 +40,39 @@ function stateWords(
   return { state: status.state, at: time, day };
 }
 
+/** The open matter's conversations as ConversationList takes them. A draft takes the plan it would run. A row's moment
+ * goes into the lawyer's clock here, as the matters' do; one on another day keeps its time only, since the row has no
+ * room for a day. */
+function conversationRows(
+  talks: ConversationsView,
+  conversations: Conversations,
+  now: number,
+  zone: string,
+  lang: Lang,
+): ConversationRowProps[] {
+  const untitled = mt(lang, "New conversation");
+  const titleOf = (row: ConversationRow | undefined) => row?.title ?? untitled;
+  return talks.rows.map((row) => {
+    const words = rowWords(row);
+    const extra =
+      words.state === "waiting"
+        ? { behind: titleOf(talks.rows.find((r) => r.thread === words.behind)) }
+        : words.state === "stopped"
+          ? { at: clockOf(words.at, now, zone, lang).time }
+          : {};
+    return {
+      id: row.key,
+      title: titleOf(row),
+      agent: planName(row.agent ?? talks.agent),
+      state: words.state,
+      ...extra,
+      current: row.key === talks.open,
+      testId: "conversation",
+      onOpen: () => conversations.open(row.key),
+    };
+  });
+}
+
 /** How many matters Recent shows: the five opened last. */
 const RECENT = 5;
 
@@ -40,6 +83,8 @@ const newestFirst = (a: MatterInfo, b: MatterInfo) =>
 export function RoomRail({
   matters,
   view,
+  conversations,
+  talks,
   open,
   onNewMatter,
   onMoved,
@@ -48,6 +93,9 @@ export function RoomRail({
 }: {
   matters: Matters;
   view: MattersView;
+  conversations: Conversations;
+  /** The open matter's conversations. */
+  talks: ConversationsView;
   /** Matters, pressed below 1200 px: the rail stands open over the work. */
   open: boolean;
   onNewMatter: () => void;
@@ -76,6 +124,15 @@ export function RoomRail({
         ? { state: "idle" as const }
         : stateWords(view.status.get(m.matter), now, zone, w.lang)),
       testIds: { row: "matter-row" },
+      // the open matter's conversations, once its list is in
+      ...(current && talks.matter === m.matter && talks.phase !== "loading"
+        ? {
+            conversations: conversationRows(talks, conversations, now, zone, w.lang),
+            onNewConversation: () => conversations.startNew(),
+            conversationPlan: talks.plan,
+            newConversationTestId: "new-conversation",
+          }
+        : {}),
       onOpen: () => {
         matters.open(m.matter);
         onMoved();
