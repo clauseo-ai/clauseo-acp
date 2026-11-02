@@ -1,7 +1,8 @@
-//! The bridge between the webview's commands and the session host. It holds the
-//! [`HostHandle`], each window's channel and stream state (`window.rs`, driven by `pump.rs`),
-//! and the folder refs this run's `pick_folder` issued. Every host call runs as
-//! `Principal::LocalDesktop`; the webview never names a principal.
+//! The bridge between the webview's commands and the session host. It holds the host's
+//! [`HostCell`] (every call waits there for the host's start), each window's channel and
+//! stream state (`window.rs`, driven by `pump.rs`), and the folder refs this run's
+//! `pick_folder` issued. Every host call runs as `Principal::LocalDesktop`; the webview never
+//! names a principal.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{MAIN_SEPARATOR, Path};
@@ -18,6 +19,7 @@ use tauri::ipc::Channel;
 
 use crate::dialogs::{Confirm, Picker};
 use crate::frame::Frame;
+use crate::host_start::HostCell;
 use crate::picked::{self, PickedFolder};
 
 mod pump;
@@ -43,7 +45,8 @@ const MODE_OPTIONS: [&str; 4] = [
 
 /// What the commands share: the host, the windows and the folder refs issued.
 pub(crate) struct Bridge {
-    host: HostHandle,
+    /// Where the host's start lands.
+    cell: Arc<HostCell>,
     /// Each window's stream, by webview label.
     windows: Mutex<HashMap<String, Arc<Mutex<Window>>>>,
     /// The folder refs `pick_folder` issued in this run; `CreateMatter` takes no other.
@@ -77,24 +80,33 @@ fn needs_confirm(kind: PermissionKind) -> Result<bool, HostError> {
 }
 
 impl Bridge {
-    /// A bridge to `host` with no window yet.
-    pub(crate) fn new(host: HostHandle) -> Self {
+    /// A bridge to the host whose start lands in `cell`, with no window yet.
+    pub(crate) fn new(cell: Arc<HostCell>) -> Self {
         Self {
-            host,
+            cell,
             windows: Mutex::new(HashMap::new()),
             issued: Mutex::new(HashSet::new()),
         }
     }
 
-    /// The host handle, for shutdown.
-    pub(crate) fn host(&self) -> &HostHandle {
-        &self.host
+    /// The host's cell, for exit.
+    pub(crate) fn cell(&self) -> Arc<HostCell> {
+        Arc::clone(&self.cell)
+    }
+
+    /// The host, once its start finished: every call waits here, and after a failed start
+    /// gets that start's error.
+    pub(crate) async fn host(&self) -> Result<&HostHandle, HostError> {
+        self.cell.host().await
     }
 
     /// The app's language (`ui.language`), for the words Rust draws: English when the settings
-    /// do not read.
+    /// do not read or the host did not start.
     pub(crate) async fn language(&self) -> Language {
-        match self.host.query(PRINCIPAL, HostQuery::GetSettings).await {
+        let Ok(host) = self.host().await else {
+            return Language::En;
+        };
+        match host.query(PRINCIPAL, HostQuery::GetSettings).await {
             Ok(QueryResult::Settings(settings)) => settings.ui.language,
             _ => Language::En,
         }
@@ -107,7 +119,7 @@ impl Bridge {
     ) -> Result<CommandOutcome, HostError> {
         let checked = command.validate().map_err(HostError::invalid_command)?;
         self.admit(checked.command())?;
-        self.host.dispatch(checked.into_envelope()).await
+        self.host().await?.dispatch(checked.into_envelope()).await
     }
 
     /// Whether the window may send `command`: an allow-list, one arm per host command and no
@@ -181,7 +193,7 @@ impl Bridge {
             // H8's wall (#131): reads the folder's stats, and names files by refs.
             | HostQuery::ListPapers { .. } => {}
         }
-        self.host.query(PRINCIPAL, query).await
+        self.host().await?.query(PRINCIPAL, query).await
     }
 
     /// The window `label`'s stream, or `command.invalid` before its `open_stream`.
@@ -194,10 +206,15 @@ impl Bridge {
 
     /// Makes `channel` the window's one channel. A window that had one (a page reload) drops
     /// it and every subscription it had.
-    pub(crate) fn open_stream(&self, label: &str, channel: Channel<Frame>) {
-        let window = Window::open(self.host.clone(), channel);
+    pub(crate) async fn open_stream(
+        &self,
+        label: &str,
+        channel: Channel<Frame>,
+    ) -> Result<(), HostError> {
+        let window = Window::open(self.host().await?.clone(), channel);
         let old = lock(&self.windows).insert(label.to_owned(), window);
         drop(old);
+        Ok(())
     }
 
     /// Follows `stream` on the window's channel from `after`.
@@ -208,9 +225,11 @@ impl Bridge {
         after: Option<ViewPosition>,
     ) -> Result<(), HostError> {
         let window = self.window(label)?;
+        // Before `follow`: a stream followed with no host would never be forgotten.
+        let host = self.host().await?;
         let after = after.map(|position| (position.epoch, position.cursor));
         let restart = pump::follow(&window, stream, after);
-        pump::start(&self.host, &window, restart)
+        pump::start(host, &window, restart)
             .await
             .inspect_err(|_| pump::forget(&window, restart))
     }
@@ -218,8 +237,9 @@ impl Bridge {
     /// Follows the app-wide events on the window's channel (`pump::follow_app`).
     pub(crate) async fn subscribe_app(&self, label: &str) -> Result<(), HostError> {
         let window = self.window(label)?;
+        let host = self.host().await?;
         let restart = pump::follow_app(&window);
-        pump::start_app(&self.host, &window, restart, false)
+        pump::start_app(host, &window, restart, false)
             .await
             .inspect_err(|_| pump::forget_app(&window, restart))
     }
@@ -250,9 +270,9 @@ impl Bridge {
                 invalid(format!("ack names stream {stream} more than once"))
             }
         })?;
+        let host = self.host().await?;
         for position in followed {
-            self.host
-                .ack(PRINCIPAL, position.stream, position.epoch, position.cursor)
+            host.ack(PRINCIPAL, position.stream, position.epoch, position.cursor)
                 .await?;
         }
         Ok(())
@@ -302,7 +322,7 @@ impl Bridge {
             },
         };
         let checked = answer.validate().map_err(HostError::invalid_command)?;
-        self.host.dispatch(checked.into_envelope()).await?;
+        self.host().await?.dispatch(checked.into_envelope()).await?;
         Ok(())
     }
 
@@ -327,7 +347,8 @@ impl Bridge {
                 before_order,
                 limit,
             };
-            let QueryResult::Entries(entries) = self.host.query(PRINCIPAL, page).await? else {
+            let QueryResult::Entries(entries) = self.host().await?.query(PRINCIPAL, page).await?
+            else {
                 return Err(HostError::new(
                     ErrorCode::Internal,
                     "PageEntries answered with another kind of result",
@@ -365,7 +386,7 @@ impl Bridge {
             return Ok(None);
         };
         let display = picked::display(&path, home, MAIN_SEPARATOR);
-        let folder = self.host.register_folder(path).await?;
+        let folder = self.host().await?.register_folder(path).await?;
         lock(&self.issued).insert(folder);
         Ok(Some(PickedFolder { folder, display }))
     }

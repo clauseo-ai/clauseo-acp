@@ -116,8 +116,7 @@ pub(crate) async fn open_stream<R: Runtime>(
     bridge: State<'_, Bridge>,
     channel: Channel<Frame>,
 ) -> Result<(), HostError> {
-    bridge.open_stream(webview.label(), channel);
-    Ok(())
+    bridge.open_stream(webview.label(), channel).await
 }
 
 /// Subscribes the window's channel to `stream`: the tail after `after` or one `Reset`, then
@@ -251,7 +250,7 @@ pub(crate) async fn open_file<R: Runtime>(
 ) -> Result<(), HostError> {
     let opener = NativeOpener::new(app);
     crate::open::open_file(
-        bridge.host(),
+        bridge.host().await?,
         &opener,
         &gates.files,
         &crate::open::now,
@@ -269,7 +268,13 @@ pub(crate) async fn reveal<R: Runtime>(
     app_data: State<'_, AppData>,
     target: RevealTarget,
 ) -> Result<(), HostError> {
-    crate::open::reveal(bridge.host(), &NativeOpener::new(app), &app_data.0, target).await
+    crate::open::reveal(
+        bridge.host().await?,
+        &NativeOpener::new(app),
+        &app_data.0,
+        target,
+    )
+    .await
 }
 
 #[cfg(test)]

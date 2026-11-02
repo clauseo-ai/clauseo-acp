@@ -74,7 +74,7 @@ fn a_stale_cursor_gets_reset() {
     let host = scratch.start(Vec::new());
     let bridge = host.bridge();
     let (channel, messages) = collector();
-    bridge.open_stream(MAIN, channel);
+    block_on(bridge.open_stream(MAIN, channel)).unwrap();
     let stream = StreamId::Matter(host.scratch());
 
     // An epoch the host never minted: the position is stale.
@@ -101,7 +101,7 @@ fn only_the_e2e_build_sends_an_event_timed_and_counts_its_bytes() {
     let host = scratch.start(Vec::new());
     let bridge = host.bridge();
     let (channel, messages) = collector();
-    bridge.open_stream(MAIN, channel);
+    block_on(bridge.open_stream(MAIN, channel)).unwrap();
     #[cfg(feature = "e2e")]
     let (before, start) = (crate::e2e::channel_bytes(), crate::e2e::epoch_ms());
     block_on(bridge.subscribe(MAIN, StreamId::Matter(host.scratch()), None)).unwrap();
@@ -134,7 +134,7 @@ fn a_resubscribe_from_an_older_cursor_gets_the_tail_in_the_same_epoch() {
     let thread = host.thread();
     let bridge = host.bridge();
     let (channel, messages) = collector();
-    bridge.open_stream(MAIN, channel);
+    block_on(bridge.open_stream(MAIN, channel)).unwrap();
     let stream = stream(thread);
     let mut view = Applier::default();
 
@@ -176,7 +176,7 @@ fn past_the_cap_the_driver_pauses_and_resubscribes_once_acks_catch_up() {
     let thread = host.thread();
     let bridge = host.bridge();
     let (channel, messages) = collector();
-    bridge.open_stream(MAIN, channel);
+    block_on(bridge.open_stream(MAIN, channel)).unwrap();
     let stream = stream(thread);
     block_on(bridge.subscribe(MAIN, stream, None)).unwrap();
     let mut sent = vec![messages.next_text()];
@@ -340,7 +340,7 @@ fn a_failed_restart_tells_the_window_and_waits_for_a_retry() {
     let thread = host.thread();
     let bridge = host.bridge();
     let (channel, messages) = collector();
-    bridge.open_stream(MAIN, channel);
+    block_on(bridge.open_stream(MAIN, channel)).unwrap();
     let window = bridge.window(MAIN).unwrap();
     let other = StreamId::Matter(host.scratch());
     block_on(host.host.shutdown()).unwrap();
@@ -375,7 +375,7 @@ fn stream_commands_need_open_stream_and_acks_are_bounded() {
     assert_eq!(refusal.code(), ErrorCode::CommandInvalid);
 
     let (channel, messages) = collector();
-    bridge.open_stream(MAIN, channel);
+    block_on(bridge.open_stream(MAIN, channel)).unwrap();
     block_on(bridge.subscribe(MAIN, stream, None)).unwrap();
     let reset = batch(messages.next_event());
     let cursor = reset.patches[0].cursor;

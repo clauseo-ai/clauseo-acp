@@ -130,12 +130,16 @@ impl Scratch {
         path
     }
 
-    /// Starts a host on the folder, refusing `refused` as a matter.
-    pub(crate) fn start(&self, refused: Vec<PathBuf>) -> Running {
+    /// The config of a host on the folder, refusing `refused` as a matter.
+    pub(crate) fn config(&self, refused: Vec<PathBuf>) -> HostConfig {
         let effective = Effective::load(&Locations::under_root(&self.root), &SystemFiles, &[]);
         let launcher = PassthroughLauncher::new(SpawnOptions::new());
-        let config = HostConfig::new(effective, Arc::new(launcher)).with_refused_folders(refused);
-        let (host, join) = Host::start(config).unwrap();
+        HostConfig::new(effective, Arc::new(launcher)).with_refused_folders(refused)
+    }
+
+    /// Starts a host on the folder, refusing `refused` as a matter.
+    pub(crate) fn start(&self, refused: Vec<PathBuf>) -> Running {
+        let (host, join) = Host::start(self.config(refused)).unwrap();
         Running {
             host,
             join: Some(join),
@@ -171,7 +175,7 @@ impl Drop for Running {
 impl Running {
     /// A bridge on this host.
     pub(crate) fn bridge(&self) -> Bridge {
-        Bridge::new(self.host.clone())
+        Bridge::new(crate::host_start::HostCell::ready(self.host.clone()))
     }
 
     /// The Scratch matter, which a first start creates.

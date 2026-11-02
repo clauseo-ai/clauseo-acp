@@ -35,7 +35,7 @@ fn subscribe_app_needs_open_stream_then_carries_each_settings_change() {
     assert_eq!(refusal.code(), ErrorCode::CommandInvalid, "{refusal:?}");
 
     let (channel, messages) = collector();
-    bridge.open_stream(MAIN, channel);
+    block_on(bridge.open_stream(MAIN, channel)).unwrap();
     block_on(bridge.subscribe_app(MAIN)).unwrap();
     // It starts with nothing: the window reads the settings itself.
     assert_eq!(messages.drain(), Vec::<String>::new());
@@ -61,7 +61,7 @@ fn a_pause_s_end_resubscribes_and_sends_the_settings_then() {
     let host = scratch.start(Vec::new());
     let bridge = host.bridge();
     let (channel, messages) = collector();
-    bridge.open_stream(MAIN, channel);
+    block_on(bridge.open_stream(MAIN, channel)).unwrap();
     block_on(bridge.subscribe_app(MAIN)).unwrap();
     let window = bridge.window(MAIN).unwrap();
 
@@ -96,11 +96,11 @@ fn a_reload_drops_the_app_feed() {
     let host = scratch.start(Vec::new());
     let bridge = host.bridge();
     let (first, old) = collector();
-    bridge.open_stream(MAIN, first);
+    block_on(bridge.open_stream(MAIN, first)).unwrap();
     block_on(bridge.subscribe_app(MAIN)).unwrap();
     let dropped = pump::app_dropped(&bridge.window(MAIN).unwrap()).unwrap();
     let (second, new) = collector();
-    bridge.open_stream(MAIN, second);
+    block_on(bridge.open_stream(MAIN, second)).unwrap();
     // The pump never sees another event, so only the abort can end it.
     assert_eq!(
         dropped.recv_timeout(Duration::from_secs(20)),
@@ -132,7 +132,7 @@ fn a_watchdog_fire_resubscribes_and_sends_the_settings_then() {
     let host = scratch.start(Vec::new());
     let bridge = host.bridge();
     let (channel, messages) = collector();
-    bridge.open_stream(MAIN, channel);
+    block_on(bridge.open_stream(MAIN, channel)).unwrap();
     block_on(bridge.subscribe_app(MAIN)).unwrap();
     let window = bridge.window(MAIN).unwrap();
     // One message the page never acks.

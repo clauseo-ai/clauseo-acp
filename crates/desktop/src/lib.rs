@@ -2,10 +2,13 @@
 //! from the window's commands to the session host (`clauseo-host`).
 //!
 //! Contract:
-//! - Setup starts the host with the effective settings (`Locations::resolve`, so
-//!   `CLAUSEO_DATA_DIR` moves the data folder; `Effective::load` with the system policy
-//!   sources), the `PassthroughLauncher`, and the refused folders of `refused_folders`. Exit
-//!   waits for `HostHandle::shutdown` and `HostJoin::join` on their own thread, then exits.
+//! - Setup opens the window first, then starts the host on a thread of its own
+//!   (`host_start.rs`), so the webview never waits for the store; a command sent before the host
+//!   is ready waits for it, and after a failed start gets that start's error. The host runs with
+//!   the effective settings (`Locations::resolve`, so `CLAUSEO_DATA_DIR` moves the data folder;
+//!   `Effective::load` with the system policy sources), the `PassthroughLauncher`, and the
+//!   refused folders of `refused_folders`. Exit waits for the start, then for
+//!   `HostHandle::shutdown` and `HostJoin::join`, on their own thread, then exits.
 //! - Thirteen async commands (`commands.rs`), each granted by its own permission in
 //!   `capabilities/main.json` and listed in `build.rs`'s `AppManifest`. Beside them that file
 //!   grants only the two window commands of Tauri's drag script, and `window_frame.rs` adds
@@ -43,6 +46,7 @@ mod dialogs;
 #[cfg(feature = "e2e")]
 mod e2e;
 mod frame;
+mod host_start;
 #[cfg(feature = "marks")]
 mod marks;
 mod open;
@@ -53,15 +57,16 @@ mod test_support;
 mod window_frame;
 mod window_size;
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 
 use bridge::Bridge;
-use clauseo_host::{Host, HostConfig, HostJoin};
+use clauseo_host::{Host, HostConfig};
 use clauseo_process::{PassthroughLauncher, SpawnOptions};
 use clauseo_settings::{
     Effective, Locations, PlatformDirs as _, SystemDirs, SystemEnv, SystemFiles,
 };
+use host_start::{HostCell, HostStart};
 use rust_only::PluginRustOnly;
 use tauri::{App, AppHandle, Manager, RunEvent, Runtime, WebviewUrl, WebviewWindowBuilder};
 
@@ -89,9 +94,6 @@ struct Exit {
     stopping: AtomicBool,
     stopped: AtomicBool,
 }
-
-/// The host thread, joined at exit.
-struct HostThread(Mutex<Option<HostJoin>>);
 
 /// Builds the app and runs it until it exits.
 pub fn run() -> tauri::Result<()> {
@@ -154,8 +156,14 @@ pub fn run() -> tauri::Result<()> {
             e2e::grant_scoreboard(app)?;
             // The caption buttons' window commands, on Windows and Linux.
             window_frame::grant_caption_commands(app)?;
-            start_host(app)?;
+            let locations = Locations::resolve(&SystemDirs, &SystemEnv)?;
+            // Managed before the window opens: a command reaching unmanaged state fails.
+            app.manage(open::AppData(locations.data_dir().to_path_buf()));
+            app.manage(open::OpenGates::default());
+            let (cell, start) = HostCell::new();
+            app.manage(Bridge::new(cell));
             open_main_window(app)?;
+            start_host(start, locations)?;
             Ok(())
         })
         .build(context)?;
@@ -179,48 +187,40 @@ pub fn run() -> tauri::Result<()> {
     Ok(())
 }
 
-/// Starts the session host and hands the bridge to the commands.
-fn start_host(app: &App) -> Result<(), Box<dyn std::error::Error>> {
-    let locations = Locations::resolve(&SystemDirs, &SystemEnv)?;
+/// Starts the session host on its own thread (`Host::start` blocks until the store opens),
+/// its outcome going into the bridge's cell through `start`.
+fn start_host(start: HostStart, locations: Locations) -> std::io::Result<()> {
+    host_start::start_on_thread(start, move || Host::start(host_config(&locations)))
+}
+
+/// The host's config: the effective settings under `locations` with the system policy
+/// sources, the `PassthroughLauncher`, and the refused folders.
+fn host_config(locations: &Locations) -> HostConfig {
     let sources = clauseo_settings::system_policy_sources();
     let sources: Vec<&dyn clauseo_settings::PolicySource> =
         sources.iter().map(AsRef::as_ref).collect();
-    let effective = Effective::load(&locations, &SystemFiles, &sources);
+    let effective = Effective::load(locations, &SystemFiles, &sources);
     let mut spawn = SpawnOptions::new();
     if let Some(home) = SystemDirs.home() {
         spawn = spawn.home(home);
     }
     let launcher = PassthroughLauncher::new(spawn);
-    let config = HostConfig::new(effective, Arc::new(launcher))
-        .with_refused_folders(clauseo_settings::refused_folders(&SystemDirs));
-    let (handle, join) = Host::start(config)?;
-    app.manage(open::AppData(locations.data_dir().to_path_buf()));
-    app.manage(open::OpenGates::default());
-    app.manage(Bridge::new(handle));
-    app.manage(HostThread(Mutex::new(Some(join))));
-    Ok(())
+    HostConfig::new(effective, Arc::new(launcher))
+        .with_refused_folders(clauseo_settings::refused_folders(&SystemDirs))
 }
 
-/// Stops the host off the UI thread (shutdown, then join), then exits with `code`.
+/// Stops the host off the UI thread (waits for its start, shuts it down, joins it), then exits
+/// with `code`.
 fn stop_host_then_exit<R: Runtime>(app: &AppHandle<R>, exit: Arc<Exit>, code: i32) {
     let fallback = app.clone();
     let fallback_exit = Arc::clone(&exit);
     let app = app.clone();
-    let host = app
-        .try_state::<Bridge>()
-        .map(|bridge| bridge.host().clone());
-    let join = app
-        .try_state::<HostThread>()
-        .and_then(|thread| bridge::lock(&thread.0).take());
+    let cell = app.try_state::<Bridge>().map(|bridge| bridge.cell());
     let stopper = std::thread::Builder::new()
         .name("clauseo-host-stop".to_owned())
         .spawn(move || {
-            if let Some(host) = host {
-                // Already stopped or failed: join reports it, and the app exits either way.
-                let _stopped = futures::executor::block_on(host.shutdown());
-            }
-            if let Some(join) = join {
-                let _joined = join.join();
+            if let Some(cell) = cell {
+                host_start::stop(&cell);
             }
             exit.stopped.store(true, Ordering::Release);
             // The e2e build ends the process itself once the host has joined. On a Windows
