@@ -143,7 +143,8 @@ fn a_tauri_rejection_is_a_string_and_a_refusal_is_a_host_error() {
     } else {
         "linux"
     };
-    assert_eq!(info, json!({ "platform": platform }));
+    // Tests are never a release build, so no release date (release.yml sets one on tags only).
+    assert_eq!(info, json!({ "platform": platform, "release_date": null }));
 
     // The same command from a page that is not the app's is refused.
     let foreign = invoke_from(&window, "https://example.com", "display_info", json!({}));

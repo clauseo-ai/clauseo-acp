@@ -1,0 +1,4 @@
+{
+  "mainBinaryName": "Clauseo",
+  "build": { "beforeBuildCommand": null }
+}

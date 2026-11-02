@@ -62,7 +62,7 @@ export const commands = {
 	 */
 	display: string,
 } | null, HostError>(__TAURI_INVOKE("pick_folder")),
-	/**  The OS the host runs on. */
+	/**  The OS the host runs on, and this build's release date. */
 	displayInfo: () => typedError<DisplayInfo, HostError>(__TAURI_INVOKE("display_info")),
 	/**
 	 *  Opens an https, http or mailto `url` in the default browser or mail app, after a native
@@ -803,10 +803,12 @@ export type DetachReason =
 /**  A reason from a newer Clauseo; written back as the plain string `kind`. */
 string;
 
-/**  What the webview may know about the machine. */
+/**  What the webview may know about the machine and this build. */
 export type DisplayInfo = {
 	/**  The OS the host runs on. */
 	platform: Platform,
+	/**  The date of this release (`YYYY-MM-DD`, UTC), from its tag; `None` in dev and CI builds. */
+	release_date: string | null,
 };
 
 /**

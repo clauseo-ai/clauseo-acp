@@ -16,6 +16,10 @@
 //! links, the lib's unit-test binary included. tauri-build would embed its manifest into the app
 //! only (`rustc-link-arg-bins`), and the test binary then fails to start with 0xc0000139
 //! (tauri-apps/tauri#13419); `rustc-link-arg-tests` does not reach lib unit tests.
+//!
+//! `CLAUSEO_RELEASE_DATE`, which `.github/workflows/release.yml` sets for a tagged release and
+//! `src/commands.rs` reads with `option_env!`, must be a `YYYY-MM-DD` date when set; any other
+//! value fails the build. Unset (dev and CI builds), there is no release date.
 
 use std::io::Write as _;
 
@@ -73,7 +77,44 @@ fn remove_permissions(dir: &str, absent: &[&str]) -> std::io::Result<()> {
     Ok(())
 }
 
+/// The variable release.yml sets to the tag's date, UTC.
+const RELEASE_DATE: &str = "CLAUSEO_RELEASE_DATE";
+
+/// True when `date` is `YYYY-MM-DD` with a month from 01 to 12 and a day from 01 to 31.
+fn is_release_date(date: &str) -> bool {
+    let bytes = date.as_bytes();
+    let digits = |range: std::ops::Range<usize>| {
+        bytes
+            .get(range)
+            .is_some_and(|part| part.iter().all(u8::is_ascii_digit))
+    };
+    let number = |range: std::ops::Range<usize>| date.get(range).and_then(|n| n.parse::<u8>().ok());
+    bytes.len() == 10
+        && digits(0..4)
+        && bytes.get(4) == Some(&b'-')
+        && digits(5..7)
+        && bytes.get(7) == Some(&b'-')
+        && digits(8..10)
+        && number(5..7).is_some_and(|month| (1..=12).contains(&month))
+        && number(8..10).is_some_and(|day| (1..=31).contains(&day))
+}
+
+/// Fails on a release date that is set but not `YYYY-MM-DD`, and reruns when it changes.
+fn check_release_date() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    writeln!(
+        std::io::stdout().lock(),
+        "cargo:rerun-if-env-changed={RELEASE_DATE}"
+    )?;
+    match std::env::var(RELEASE_DATE) {
+        Err(std::env::VarError::NotPresent) => Ok(()),
+        Ok(date) if is_release_date(&date) => Ok(()),
+        Ok(date) => Err(format!("{RELEASE_DATE} is {date:?}, not a YYYY-MM-DD date").into()),
+        Err(error) => Err(format!("{RELEASE_DATE} is not valid Unicode: {error}").into()),
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    check_release_date()?;
     let e2e = std::env::var_os("CARGO_FEATURE_E2E").is_some();
     let marks = std::env::var_os("CARGO_FEATURE_MARKS").is_some();
     let (ours, absent) = commands(e2e, marks);

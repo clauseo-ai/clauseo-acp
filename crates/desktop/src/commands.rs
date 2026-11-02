@@ -79,12 +79,18 @@ impl Platform {
     };
 }
 
-/// What the webview may know about the machine.
+/// The release date release.yml builds a tagged release with (`YYYY-MM-DD`, UTC; `build.rs`
+/// checks the form). Dev and CI builds have none.
+const RELEASE_DATE: Option<&str> = option_env!("CLAUSEO_RELEASE_DATE");
+
+/// What the webview may know about the machine and this build.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(test, derive(specta::Type))]
 pub(crate) struct DisplayInfo {
     /// The OS the host runs on.
     pub(crate) platform: Platform,
+    /// The date of this release (`YYYY-MM-DD`, UTC), from its tag; `None` in dev and CI builds.
+    pub(crate) release_date: Option<&'static str>,
 }
 
 /// Runs a command. Refuses `AnswerPermission` (that goes through `answer_permission`) and a
@@ -203,12 +209,13 @@ pub(crate) async fn pick_folder<R: Runtime>(
     bridge.pick_folder(&picker, home.as_deref()).await
 }
 
-/// The OS the host runs on.
+/// The OS the host runs on, and this build's release date.
 #[tauri::command]
 #[cfg_attr(test, specta::specta)]
 pub(crate) async fn display_info<R: Runtime>(_app: AppHandle<R>) -> Result<DisplayInfo, HostError> {
     Ok(DisplayInfo {
         platform: Platform::CURRENT,
+        release_date: RELEASE_DATE,
     })
 }
 
