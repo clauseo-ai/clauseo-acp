@@ -74,7 +74,8 @@ fn another_turn_writes(rig: &mut Rig, name: &str) -> (ThreadId, TurnId) {
     let second = rig.thread_by(2);
     let turn = rig.current_turn(second, TurnPhase::Queued);
     let matter = rig.matter();
-    rig.actor.matters.get_mut(&matter).unwrap().turns.holder = Some(second);
+    rig.actor.matters.get_mut(&matter).unwrap().turns.holder =
+        Some(crate::actor::turn::Holder::Thread(second));
     steps::before_turn(&mut rig.actor, second, turn);
     let started = |actor: &Actor, input: &Input| {
         matches!(input, Input::Committed { ticket, .. }
@@ -148,6 +149,8 @@ fn a_lost_after_turn_checkpoint_is_recorded_at_the_next_start() {
         "{undone:?}"
     );
     assert!(!rig.scratch_file("brief.txt").exists());
+    // Every checkpoint the repair recorded, late or new, has its row.
+    assert!(rig.assert_every_checkpoint_has_its_row() >= 2);
     rig.finish();
 }
 
@@ -190,6 +193,8 @@ fn a_reused_checkpoint_the_log_lost_is_recorded_before_turn_started() {
         Some(lost.checkpoint())
     );
     assert_eq!(records_of(&recorded, lost.checkpoint()), 1);
+    // Every checkpoint the repair recorded, late or new, has its row.
+    assert!(rig.assert_every_checkpoint_has_its_row() >= 2);
     rig.finish();
 }
 
@@ -233,6 +238,7 @@ fn the_repair_takes_the_turns_own_checkpoint_after_another_threads_turn() {
     );
     assert!(!rig.scratch_file("brief.txt").exists());
     assert!(rig.scratch_file("notes.txt").exists());
+    assert!(rig.assert_every_checkpoint_has_its_row() >= 2);
     rig.finish();
 }
 
@@ -310,6 +316,8 @@ fn a_crash_before_the_after_turn_checkpoint_takes_one_at_the_next_start() {
     assert_eq!(end.checkpoint_after, Some(after.checkpoint()));
     // No tool call named it, so the new checkpoint flags it.
     assert_eq!(changed(&log), [("brief.txt".to_owned(), true)]);
+    // Every checkpoint the repair recorded, late or new, has its row.
+    assert!(rig.assert_every_checkpoint_has_its_row() >= 2);
     rig.finish();
 }
 
@@ -373,6 +381,7 @@ fn assert_two_open_turns_repaired(c_thread_first: bool) {
     let mut rig = rig.restart(1);
     assert_a_empty(&mut rig, a, a_turn, before);
     assert_c_takes_notes(&mut rig, c, c_turn);
+    assert!(rig.assert_every_checkpoint_has_its_row() >= 2);
     rig.finish();
 }
 
