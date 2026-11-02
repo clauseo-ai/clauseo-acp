@@ -245,7 +245,13 @@ fn value_names_ignore_case_but_agent_ids_keep_theirs() {
 // (0009), and an unrelated one only warns.
 #[test]
 fn an_unknown_value_name_about_mcp_locks_the_list() {
-    for name in ["mcpServers", "MCP", "mcp_servers", "Mcp.Server"] {
+    for name in [
+        "mcpServers",
+        "MCP",
+        "mcp_servers",
+        "Mcp.Server",
+        "mcp.servers.firm",
+    ] {
         let values = parse(vec![(name.to_owned(), RegValue::Sz("{}".to_owned()))]);
         let (leaves, warnings) = values.into_parts();
         assert_eq!(leaves, [Leaf::Refused("mcp.servers".to_owned())], "{name}");

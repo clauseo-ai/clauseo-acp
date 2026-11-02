@@ -187,6 +187,15 @@ fn a_malformed_or_misnamed_policy_mcp_section_locks_the_list_empty() {
         r#"{"mcp_servers": {}}"#.to_owned(),
         r#"{"mcp": {"mcpServers": {}}}"#.to_owned(),
         r#"{"mcp": {"servers ": {}}}"#.to_owned(),
+        // An entry written as one key, at the top level or inside the section.
+        format!(
+            r#"{{"mcp.servers.firm": {{"command": "{}", "enabled": true}}}}"#,
+            abs_json("bin/firm")
+        ),
+        format!(
+            r#"{{"mcp": {{"servers.firm": {{"command": "{}", "enabled": true}}}}}}"#,
+            abs_json("bin/firm")
+        ),
     ];
     for text in texts {
         let firm = policy("firm", text.clone());
@@ -211,8 +220,23 @@ fn a_malformed_or_misnamed_policy_mcp_section_locks_the_list_empty() {
     let effective = Effective::load(&locations(), &files, &[&policy("firm", both)]);
     assert!(effective.mcp_servers().is_empty());
     assert!(effective.is_locked("mcp.servers"));
-    // An unrelated unknown key, an empty `mcp` section and a bad entry inside a valid list
-    // lock nothing beyond what they name.
+    // So does a stray `mcpServers` inside the section beside a valid `servers`.
+    let stray = format!(
+        r#"{{"mcp": {{"servers": {{"firm": {{"command": "{}", "enabled": true}}}}, "mcpServers": {{}}}}}}"#,
+        abs_json("bin/firm")
+    );
+    let effective = Effective::load(&locations(), &files, &[&policy("firm", stray)]);
+    assert!(effective.mcp_servers().is_empty());
+    assert!(effective.is_locked("mcp.servers"));
+    // A bad entry inside a valid list drops that entry only: the firm's list stands, locked.
+    let bad_entry = format!(
+        r#"{{"mcp": {{"servers": {{"firm": {{"command": "{}", "enabled": true}}, "bad name": {{}}}}}}}}"#,
+        abs_json("bin/firm")
+    );
+    let effective = Effective::load(&locations(), &files, &[&policy("firm", bad_entry)]);
+    assert_eq!(enabled(&effective), ["firm"]);
+    assert!(effective.is_locked("mcp.servers"));
+    // An unrelated unknown key and an empty `mcp` section lock nothing.
     let other = policy(
         "firm",
         r#"{"tools": {}, "ui": {"colour": "red"}, "mcp": {}}"#,
