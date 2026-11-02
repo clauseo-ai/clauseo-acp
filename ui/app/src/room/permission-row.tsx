@@ -25,11 +25,11 @@ import type {
 import {
   elicitationMessage,
   elicitationState,
-  KeyedRequestContext,
   PERMISSION_TEST_IDS,
   permissionModel,
   toolCallIdOf,
 } from "./permission-model.ts";
+import { KeyedRequestContext } from "./permission-keyed.ts";
 import { useThreadActions } from "./thread/session.ts";
 
 /** The space above a row under another in its section (rows.tsx's ROW). */

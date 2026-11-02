@@ -10,13 +10,13 @@ import type {
 } from "../transport/protocol.ts";
 import {
   elicitationMessage,
-  keyedRequest,
   offersOf,
   PERMISSION_TEST_IDS,
   PLAN_EXIT_OPTIONS,
   paperName,
   permissionModel,
 } from "./permission-model.ts";
+import { keyedRequest } from "./permission-keyed.ts";
 
 const opt = (option_id: string, kind: PermissionOption["kind"]): PermissionOption => ({
   option_id,

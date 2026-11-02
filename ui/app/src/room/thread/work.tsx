@@ -6,7 +6,7 @@ import { Suspense, useEffect } from "react";
 import { useStreamError, useStreamPart, useViewStore, useWatch } from "../../store/hooks.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type { MatterSummary, ThreadId } from "../../transport/protocol.ts";
-import { KeyedRequestContext, keyedRequest } from "../permission-model.ts";
+import { KeyedRequestContext, keyedRequest } from "../permission-keyed.ts";
 import { LazyThreadList, loadThread } from "./chunk.ts";
 import { useBusy } from "./live.ts";
 import { ThreadActionsContext, useThreadSession, type Drafts } from "./session.ts";
