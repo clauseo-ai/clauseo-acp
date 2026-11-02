@@ -1,4 +1,5 @@
-//! Start-up: open the store, load the registry, start the feeder and the snapshot thread, then
+//! Start-up: open the store, load the registry, start the feeder and the snapshot thread and the
+//! limits model (its first reads run on their own), then
 //! (in the loop) create the Scratch matter on the first start and reconcile every thread.
 
 use std::collections::BTreeMap;
@@ -73,7 +74,14 @@ pub(super) async fn open(
     let snapshots = SnapshotWorker::start(Box::new(move |snapshot| {
         let _gone = snapshot_post.try_send(Input::Snapshot(snapshot));
     }))?;
-    Ok(Actor {
+    let cached_limits = store.account_limits().await.unwrap_or_else(|error| {
+        tracing::warn!(%error, "the stored account limits were not read");
+        Vec::new()
+    });
+    let limits_reader = parts.limits_reader.unwrap_or_else(|| {
+        super::limits::default_reader(&parts.effective, &parts.launcher, &parts.clock)
+    });
+    let mut actor = Actor {
         spawner,
         post,
         store,
@@ -101,6 +109,7 @@ pub(super) async fn open(
         streams: BTreeMap::new(),
         event_subs: BTreeMap::new(),
         app_subs: Vec::new(),
+        limits: super::limits::LimitsHost::new(limits_reader),
         commands: BTreeMap::new(),
         folders: BTreeMap::new(),
         claims: BTreeMap::new(),
@@ -112,7 +121,10 @@ pub(super) async fn open(
         scratch: None,
         #[cfg(test)]
         fault: None,
-    })
+    };
+    // The limits model and its first reads; nothing waits on them.
+    super::limits::start(&mut actor, cached_limits);
+    Ok(actor)
 }
 
 /// Queues the start-up work: the Scratch matter when there is none, and the load and

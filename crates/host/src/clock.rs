@@ -61,7 +61,8 @@ impl Clock for SystemClock {
     }
 }
 
-/// The host clock as the process crate's timer, for the shutdown ladder.
+/// The host clock as the process crate's timer, for the shutdown ladder and the limits readers.
+#[derive(Clone)]
 pub(crate) struct ProcessTimer(pub(crate) Arc<dyn Clock>);
 
 impl clauseo_process::Timer for ProcessTimer {

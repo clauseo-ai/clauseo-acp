@@ -1,6 +1,6 @@
 //! What reaches the actor: requests from handles over the bounded request channel, and
-//! everything else (store results, matter and snapshot replies, agent events, timers,
-//! subscription asks) over the internal channel.
+//! everything else (store results, matter and snapshot replies, agent events, timers, limits
+//! reads, subscription asks) over the internal channel.
 
 use std::path::PathBuf;
 
@@ -11,6 +11,7 @@ use clauseo_protocol::{
 use clauseo_store::{Committed, Receipt, Reopen, SnapshotIn};
 use futures::channel::oneshot;
 
+use super::limits::LimitsInput;
 use super::turn::{RestoreAsk, TurnInput, TurnJob, TurnTimer};
 use crate::agent::AgentInput;
 use crate::error::Error;
@@ -52,6 +53,10 @@ pub(crate) enum Request {
     SubscribeApp {
         principal: Principal,
         reply: Reply<AppSubscription>,
+    },
+    SubscribeLimits {
+        principal: Principal,
+        reply: Reply<Subscription>,
     },
     Ack {
         principal: Principal,
@@ -152,6 +157,8 @@ pub(crate) enum Input {
     AppDrained { id: SubId },
     /// An app subscription was dropped.
     AppUnsubscribed { id: SubId },
+    /// A limits read ended, a limits timer fired, or a limits subscription drained or went.
+    Limits(LimitsInput),
     /// End the thread at once (tests); the sender is answered once the store is closed.
     #[cfg(feature = "test-support")]
     Abort(oneshot::Sender<()>),
@@ -173,6 +180,7 @@ impl std::fmt::Debug for Input {
             Self::Unsubscribed { .. } => "Unsubscribed",
             Self::AppDrained { .. } => "AppDrained",
             Self::AppUnsubscribed { .. } => "AppUnsubscribed",
+            Self::Limits(_) => "Limits",
             #[cfg(feature = "test-support")]
             Self::Abort(_) => "Abort",
         };

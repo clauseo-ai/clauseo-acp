@@ -13,10 +13,11 @@
 //! Each event is serialised once ([`publish`]) and the same `EncodedEvent` goes to every
 //! subscriber. What publishes here: `SettingsChanged` after each successful settings write
 //! (`settings.rs`). Still to come, each through [`publish`] and each adding its part of the
-//! current state to [`catch_up`]: the matter list and thread summaries (H4), notices, and
-//! `limits`' `AccountLimitsChanged` (R16). H4's shape sends summaries of the threads *a window*
-//! is not subscribed to, but `subscribe_app` carries no window identity, so the host sends every
-//! changed summary to every app subscriber and each window drops those of threads it has open.
+//! current state to [`catch_up`]: the matter list and thread summaries (H4) and notices.
+//! The limits have their own subscribers (`limits.rs`). H4's shape sends summaries of the
+//! threads *a window* is not subscribed to, but `subscribe_app` carries no window identity, so
+//! the host sends every changed summary to every app subscriber and each window drops those of
+//! threads it has open.
 //!
 //! For H4: today's catch-up is one whole `SettingsChanged`, which replaces what a window holds.
 //! Once `matters_changed` sends partial rows (only the matters that changed), a lagged
@@ -33,7 +34,7 @@ use crate::error::Error;
 use crate::handle::{AppSubscription, Sink};
 use crate::principal::{Access, authorize};
 
-/// One app subscriber.
+/// One app subscriber; a limits subscriber (`limits.rs`) is one too, with the same rules.
 pub(crate) struct AppSub {
     id: SubId,
     sink: Sink<EncodedEvent>,
@@ -42,8 +43,29 @@ pub(crate) struct AppSub {
 }
 
 impl AppSub {
+    /// A subscriber that is not lagged.
+    pub(super) fn new(id: SubId, sink: Sink<EncodedEvent>) -> Self {
+        Self {
+            id,
+            sink,
+            lagged: false,
+        }
+    }
+
+    /// Its number.
+    pub(super) fn id(&self) -> SubId {
+        self.id
+    }
+
+    /// It drained its channel: it is no longer lagged and gets `events`, the current state.
+    /// Returns whether it stays.
+    pub(super) fn catch_up(&mut self, events: &[EncodedEvent]) -> bool {
+        self.lagged = false;
+        events.iter().all(|event| self.offer(event))
+    }
+
     /// Offers one event; returns whether the subscriber stays.
-    fn offer(&mut self, event: &EncodedEvent) -> bool {
+    pub(super) fn offer(&mut self, event: &EncodedEvent) -> bool {
         if self.lagged {
             return true;
         }
@@ -68,11 +90,7 @@ pub(super) fn subscribe(actor: &mut Actor, principal: &Principal, reply: Reply<A
     let id = super::subs::next_sub_id(actor);
     let (subscription, sink) = AppSubscription::new(actor.post.clone(), id, actor.app_capacity);
     if reply.send(Ok(subscription)).is_ok() {
-        actor.app_subs.push(AppSub {
-            id,
-            sink,
-            lagged: false,
-        });
+        actor.app_subs.push(AppSub::new(id, sink));
     }
 }
 
@@ -94,16 +112,10 @@ pub(super) fn on_drained(actor: &mut Actor, id: SubId) {
     let Some(index) = actor.app_subs.iter().position(|sub| sub.id == id) else {
         return;
     };
-    let mut stays = true;
-    if let Some(sub) = actor.app_subs.get_mut(index) {
-        sub.lagged = false;
-        for event in &events {
-            stays = sub.offer(event);
-            if !stays {
-                break;
-            }
-        }
-    }
+    let stays = actor
+        .app_subs
+        .get_mut(index)
+        .is_none_or(|sub| sub.catch_up(&events));
     if !stays {
         actor.app_subs.remove(index);
     }
@@ -128,7 +140,7 @@ fn catch_up(actor: &Actor) -> Vec<EncodedEvent> {
 }
 
 /// `event` as JSON, once.
-fn encode(event: &HostEvent) -> Result<EncodedEvent, Error> {
+pub(super) fn encode(event: &HostEvent) -> Result<EncodedEvent, Error> {
     let json = serde_json::to_vec(event).map_err(|error| crate::encode::encode_error(&error))?;
     EncodedEvent::from_json(&json)
 }

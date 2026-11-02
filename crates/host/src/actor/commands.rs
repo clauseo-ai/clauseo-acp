@@ -292,8 +292,9 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
         HostCommand::SetUiSettings { patch } => {
             super::settings::set_ui_settings(actor, ctx, &patch);
         }
-        // R16: wired in the host phase (the limits subscription and the refresh).
-        HostCommand::RefreshLimits { agent: _, why: _ } => {
+        // No receipt and no event: a repeated id asks the model again, under its read rules.
+        HostCommand::RefreshLimits { agent, why } => {
+            super::limits::refresh(actor, agent, why);
             actor.finish_command(ctx.id, Ok(CommandOutcome::Done));
         }
         HostCommand::EditQueuedPrompt { .. }

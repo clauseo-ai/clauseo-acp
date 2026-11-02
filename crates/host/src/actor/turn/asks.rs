@@ -1,8 +1,8 @@
 //! The agent's asks and signals: permission requests and elicitations (logged `Live` during
 //! the live turn, else answered cancelled with nothing logged) and limit signals (a rejection
-//! or a stop marks the live turn; the first wins). A permission request that names a file of the
-//! matter a program holds open (Word, say) is answered for the lawyer, rejected, in the commit
-//! that logs it.
+//! or a stop marks the live turn; the first wins; a rate limit also feeds the limits model). A
+//! permission request that names a file of the matter a program holds open (Word, say) is
+//! answered for the lawyer, rejected, in the commit that logs it.
 
 use std::path::PathBuf;
 
@@ -15,8 +15,8 @@ use clauseo_protocol::{
     Principal, StreamId, ThreadId, TurnId,
 };
 
-use super::super::Actor;
 use super::super::input::MatterTag;
+use super::super::{Actor, limits};
 use super::out::Out;
 use super::updates::{agent, commit, known_tool};
 use super::{JobKind, LimitMark, Then, TurnJob, current, matter_of, spawn};
@@ -146,6 +146,17 @@ pub(super) fn on_held_open(
     }
 }
 
+/// Whether any thread whose agent has kind `kind` has a permission request or an elicitation
+/// pending, for the limits model's `Asking` (no read while the agent asks).
+pub(crate) fn asks_pending(actor: &Actor, kind: clauseo_protocol::AgentKind) -> bool {
+    actor.threads.values().any(|entry| {
+        entry.turn.agent.as_deref().is_some_and(|agent| {
+            !(agent.permissions.is_empty() && agent.elicitations.is_empty())
+                && clauseo_protocol::AgentKind::of(&entry.row.agent) == Some(kind)
+        })
+    })
+}
+
 /// The live turn of `thread`, if one is.
 fn live_turn(actor: &mut Actor, thread: ThreadId) -> Option<TurnId> {
     current(actor, thread)
@@ -189,6 +200,7 @@ fn log_for_lawyer(actor: &mut Actor, thread: ThreadId, ask: PermissionAsk) {
         };
         commit(actor, thread, [event.into()], Vec::new())
     })();
+    limits::asking_changed(actor);
     if let Err(error) = logged {
         tracing::warn!(%thread, %error, "a permission request was not logged");
     }
@@ -308,13 +320,15 @@ pub(super) fn on_elicitation(
         };
         commit(actor, thread, [event.into()], Vec::new())
     })();
+    limits::asking_changed(actor);
     if let Err(error) = logged {
         tracing::warn!(%thread, %error, "an elicitation was not logged");
     }
 }
 
 /// A limit signal: a rejection or a stop during the turn marks it (the first wins); anything
-/// else goes to `tracing`.
+/// else goes to `tracing`. A rate limit, in a turn or outside one, also goes to the limits
+/// model as a live signal, unless it is history replayed by `session/load`.
 pub(super) fn on_limit(
     actor: &mut Actor,
     thread: ThreadId,
@@ -322,6 +336,9 @@ pub(super) fn on_limit(
     origin: Origin,
     signal: &LimitSignal,
 ) {
+    if !matches!(origin, Origin::Replay) {
+        limits::live(actor, thread, signal);
+    }
     let mark = limit_mark(signal);
     let turn = match origin {
         Origin::Turn(turn) => Some(turn),

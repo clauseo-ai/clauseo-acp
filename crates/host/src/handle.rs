@@ -1,5 +1,6 @@
 //! The host's public surface: [`Host::start`], the [`HostHandle`] every caller holds, the
-//! [`HostJoin`] that waits for the host thread, and the three subscription streams.
+//! [`HostJoin`] that waits for the host thread, and the three subscription streams (a limits
+//! subscription is a [`Subscription`] too).
 //!
 //! Each call sends one request over the actor's `bounded(256)` request channel with a
 //! `futures` oneshot for the reply. A reply that never comes (the host stopped or panicked) is
@@ -175,6 +176,18 @@ impl HostHandle {
     /// stops.
     pub async fn subscribe_app(&self, principal: Principal) -> Result<AppSubscription, HostError> {
         self.call(|reply| Request::SubscribeApp { principal, reply })
+            .await
+    }
+
+    /// Subscribes `principal` to the limits of every agent account (see [`Subscription`] for
+    /// what comes): first the current `LimitsViewChanged`, then for each change one
+    /// `AccountLimitsChanged` per changed account and one `LimitsViewChanged`. It checks the
+    /// principal as [`HostHandle::subscribe`] does. While any limits subscriber is left the host
+    /// runs the limits deadlines (stale marks, reset times); with none it arms no limits timer.
+    /// A full subscriber gets the current view once it has drained. Every subscription ends
+    /// when the host stops.
+    pub async fn subscribe_limits(&self, principal: Principal) -> Result<Subscription, HostError> {
+        self.call(|reply| Request::SubscribeLimits { principal, reply })
             .await
     }
 
