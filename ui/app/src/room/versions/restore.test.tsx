@@ -156,7 +156,7 @@ test("the restore dialog lists exactly the preview's files, restores, and its Un
       .all("version")
       .find((r) => r.dataset["checkpoint"] === "cp4")
       ?.querySelector(".ver-entry-who")?.textContent,
-  ).toBe(`Restore to ${at2} today`);
+  ).toBe(`Restored to ${at2} today`);
 
   await h.click(done?.querySelector(".ver-restored-undo"));
   // the Undo asks first, with what restoring the version before writes now

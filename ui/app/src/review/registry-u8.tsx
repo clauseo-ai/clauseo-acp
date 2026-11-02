@@ -350,14 +350,22 @@ export const U8: Entry[] = [
   ]),
   state(
     "U8-21",
-    versionWords("'{papers}' can't be restored and stay as they are."),
+    versionWords("{papers} can't be restored and stay as they are."),
     { kept: ["Annexure 3.pdf", "Annexure 4.pdf"] },
     [OPEN, EARLIER, RESTORE],
   ),
   state(
     "U8-22",
-    versionWords("'{papers}', added since, stay."),
+    versionWords("{papers}, added since, stay."),
     { added: ["Rejoinder.docx", "Synopsis.docx"] },
     [OPEN, EARLIER, RESTORE],
   ),
+  // the restore's own row in the panel, once the host has written it: to a version three days ago, and to today's
+  state("U8-23", versionWords("Restored to {time} on {date}"), {}, [
+    OPEN,
+    EARLIER,
+    RESTORE,
+    CONFIRM,
+  ]),
+  state("U8-24", versionWords("Restored to {time} today"), {}, [OPEN, TODAY, RESTORE, CONFIRM]),
 ];

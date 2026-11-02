@@ -140,8 +140,8 @@ export function whoOf(lang: Lang, cal: Calendar, v: Version, all: readonly Versi
       // the version restored isn't in the history passed in: say what it is without its time
       if (to === undefined) return vt(lang, "Restore of a version");
       return isToday(cal, to)
-        ? vt(lang, "Restore to {time} today", { time: timeOf(lang, to) })
-        : vt(lang, "Restore to {time} on {date}", when(lang, cal, to));
+        ? vt(lang, "Restored to {time} today", { time: timeOf(lang, to) })
+        : vt(lang, "Restored to {time} on {date}", when(lang, cal, to));
     }
     case "undoRestore": {
       const of = all.find((x) => x.id === w.of);

@@ -211,7 +211,34 @@ test("the restore dialog says what stays in the plural for two documents, in the
   await h.lookAt("cp2");
   await h.click(h.one("version-restore"));
   const note = dialog()?.querySelector(".ver-dialog-note")?.textContent ?? "";
-  expect(note).toContain("', added since, stay.");
-  expect(note).toContain("' can't be restored and stay as they are.");
+  // each name in quotes of its own, "and" outside them
+  expect(note).toContain("'\u2068r.docx\u2069' and '\u2068s.docx\u2069', added since, stay.");
+  expect(note).toContain(
+    "'\u2068a.pdf\u2069' and '\u2068b.pdf\u2069' can't be restored and stay as they are.",
+  );
   expect(note).not.toContain("stays");
+});
+
+test("in Hindi too, each name of what stays is quoted, and और joins them outside the quotes", async () => {
+  h = await mountVersions(VERSIONS, STEPS, {
+    query: answering({
+      preview_restore: {
+        restore_preview: {
+          changes: [file("brief.txt")],
+          added_since: ["r.docx", "s.docx"],
+          kept: ["a.pdf", "b.pdf"],
+          locked: [],
+        },
+      },
+    }),
+    display: { language: "hi" },
+  });
+  await h.openVersions();
+  await h.lookAt("cp2");
+  await h.click(h.one("version-restore"));
+  const note = dialog()?.querySelector(".ver-dialog-note")?.textContent ?? "";
+  expect(note).toContain("बाद में जोड़े गए '\u2068r.docx\u2069' और '\u2068s.docx\u2069' बने रहेंगे।");
+  expect(note).toContain(
+    "'\u2068a.pdf\u2069' और '\u2068b.pdf\u2069' पुनर्स्थापित नहीं हो सकते और जैसे हैं वैसे ही रहेंगे।",
+  );
 });
