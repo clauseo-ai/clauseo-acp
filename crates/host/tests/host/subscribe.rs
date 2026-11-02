@@ -259,8 +259,8 @@ fn subscribe_events_no_gap_no_dup() {
         if n.is_multiple_of(8)
             && let Some(prompt) = prompts.get(n / 8)
         {
-            // A prompt while a turn is current is refused (`thread.turn_running`) until the
-            // queue lands, so the next prompt waits for the previous turn's end.
+            // The next prompt waits for the previous turn's end, so the scripted agent gets
+            // its prompts in order.
             let previous = turns.borrow().last().copied();
             if let Some(previous) = previous {
                 main.borrow_mut().until_turn_ended(previous);
