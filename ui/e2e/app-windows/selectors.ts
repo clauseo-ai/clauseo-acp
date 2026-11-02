@@ -147,6 +147,11 @@ export function window(page: Page) {
      * `.room-conv-title`; a part's class, not a test id, like folderLine).
      */
     conversationTitle: (row: Locator): Locator => row.locator(".room-conv-title"),
+    /**
+     * A conversation row's plan words (the row's `.room-conv-plan`; a part's class, not a test id).
+     * Only a row whose plan differs from the matter's plan has one.
+     */
+    conversationPlan: (row: Locator): Locator => row.locator(".room-conv-plan"),
     newConversation: id(ids.newConversation),
     /** The rail's find field. */
     findMatter: id(ids.find),
@@ -156,6 +161,21 @@ export function window(page: Page) {
      */
     railToggle: id(ids.railToggle),
     matter: id(ids.matter),
+    /**
+     * The plan to ask with, offered on a new conversation until its first question: a segmented
+     * switch, a group named "Plan to ask with" (status-line.tsx's SegmentedSwitch, no test id).
+     */
+    planChoice: page.getByRole("group", { name: "Plan to ask with", exact: true }),
+    /** One plan in the plan choice, "Claude" or "ChatGPT": a button, `aria-pressed` when chosen. */
+    planOption: (plan: string): Locator =>
+      page
+        .getByRole("group", { name: "Plan to ask with", exact: true })
+        .getByRole("button", { name: plan, exact: true }),
+    /**
+     * The status line's plan words, "Uses your ChatGPT plan", once the conversation has its plan (a
+     * part's class, not a test id, like folderLine).
+     */
+    statusPlan: page.locator(".room-status-plan"),
     error: id(ids.error),
     composer: id(ids.composer),
     send: id(ids.send),

@@ -13,8 +13,8 @@
 //
 // Every launch runs on the test's scratch folders (scratch.ts): `CLAUSEO_DATA_DIR` is a new data
 // folder, never the real one, and `E2E_MATTER_DIR` the matter folder. A spec picks fake_agent's
-// scenario, its extra arguments and the matter's files with
-// `test.use({ scenario, agentArgs, matterFiles })`; `apps` starts and
+// scenario, its extra arguments, the other agents and the matter's files with
+// `test.use({ scenario, agentArgs, otherAgents, matterFiles })`; `apps` starts and
 // stops more launches on the same folders (the restart spec).
 //
 //   E2E_APP           path to the e2e build of clauseo-desktop.exe (required)
@@ -380,6 +380,8 @@ export interface AppOptions {
   matterFiles: Readonly<Record<string, string>>;
   /** More fake_agent arguments after the scenario (the scoreboard's `--pace-ms 5`). */
   agentArgs: readonly string[];
+  /** More agents, with a scenario only: agent id (`codex-acp`) to the scenario it plays. */
+  otherAgents: Readonly<Record<string, string>>;
   /**
    * The WebView2 profile of each launch: `fresh` (the default) a new one, as on a first launch;
    * `warm` the worker's one, reused, as on a later launch (the scoreboard's warm start).
@@ -394,6 +396,7 @@ export const test = base.extend<
   scenario: [null, { option: true }],
   matterFiles: [{}, { option: true }],
   agentArgs: [[], { option: true }],
+  otherAgents: [{}, { option: true }],
   profile: ["fresh", { option: true }],
 
   // One per worker, so it outlives each test's scratch folders; made only when a warm launch asks.
@@ -419,8 +422,8 @@ export const test = base.extend<
     { scope: "worker" },
   ],
 
-  scratch: async ({ scenario, matterFiles, agentArgs }, use) => {
-    const scratch = makeScratch({ scenario, matterFiles, agentArgs }, () =>
+  scratch: async ({ scenario, matterFiles, agentArgs, otherAgents }, use) => {
+    const scratch = makeScratch({ scenario, matterFiles, agentArgs, otherAgents }, () =>
       fakeAgentPath(process.env, appPath(), process.platform === "win32"),
     );
     try {

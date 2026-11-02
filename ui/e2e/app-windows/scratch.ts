@@ -32,6 +32,8 @@ export interface ScratchOptions {
   matterFiles: Readonly<Record<string, string>>;
   /** More arguments for fake_agent after `--scenario <name>`, e.g. `--pace-ms 5`. */
   agentArgs?: readonly string[];
+  /** More agents beside `agents.claude-acp`: agent id (`codex-acp`) to the scenario it plays. */
+  otherAgents?: Readonly<Record<string, string>>;
 }
 
 /** One test's folders. */
@@ -49,17 +51,28 @@ export interface Scratch {
 }
 
 /**
- * The `agents` section that starts `command --scenario <scenario> [...extra]` as `agents.claude-acp`.
+ * The `agents` section that starts `command --scenario <scenario> [...extra]` as
+ * `agents.claude-acp`, and `command --scenario <its scenario>` as each of `others`.
  */
 export function agentSettings(
   command: string,
   scenario: string,
   extra: readonly string[] = [],
+  others: Readonly<Record<string, string>> = {},
 ): Record<string, unknown> {
   if (!isAbsolute(command)) {
     throw new Error(`the agent command must be an absolute path (S5), not ${command}`);
   }
-  return { agents: { [AGENT_ID]: { command, args: ["--scenario", scenario, ...extra] } } };
+  if (AGENT_ID in others) {
+    throw new Error(`${AGENT_ID} plays the test's scenario; it cannot be one of the other agents`);
+  }
+  const agents: Record<string, unknown> = {
+    [AGENT_ID]: { command, args: ["--scenario", scenario, ...extra] },
+  };
+  for (const [id, other] of Object.entries(others)) {
+    agents[id] = { command, args: ["--scenario", other] };
+  }
+  return { agents };
 }
 
 /**
@@ -69,14 +82,21 @@ export function agentSettings(
  */
 export function scratchSettings(
   mattersDir: string,
-  agent: { command: string; scenario: string; args?: readonly string[] } | null,
+  agent: {
+    command: string;
+    scenario: string;
+    args?: readonly string[];
+    others?: Readonly<Record<string, string>>;
+  } | null,
 ): Record<string, unknown> {
   if (!isAbsolute(mattersDir)) {
     throw new Error(`matters.default_location must be an absolute path, not ${mattersDir}`);
   }
   return {
     matters: { default_location: mattersDir },
-    ...(agent === null ? {} : agentSettings(agent.command, agent.scenario, agent.args)),
+    ...(agent === null
+      ? {}
+      : agentSettings(agent.command, agent.scenario, agent.args, agent.others)),
   };
 }
 
@@ -136,7 +156,12 @@ export function makeScratch(
       mattersDir,
       agentCommand === null || options.scenario === null
         ? null
-        : { command: agentCommand, scenario: options.scenario, args: options.agentArgs ?? [] },
+        : {
+            command: agentCommand,
+            scenario: options.scenario,
+            args: options.agentArgs ?? [],
+            others: options.otherAgents ?? {},
+          },
     );
     writeFileSync(join(dataDir, "settings.json"), `${JSON.stringify(settings, null, 2)}\n`);
     return { root, dataDir, matterDir, mattersDir, agentCommand };

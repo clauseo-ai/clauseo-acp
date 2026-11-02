@@ -45,6 +45,27 @@ test("settings start fake_agent on the scenario as agents.claude-acp", () => {
   });
 });
 
+test("other agents each start fake_agent on their own scenario, beside agents.claude-acp", () => {
+  expect(
+    agentSettings(agent, "prompt-stream", ["--pace-ms", "5"], { "codex-acp": "codex-handshake" }),
+  ).toEqual({
+    agents: {
+      "claude-acp": { command: agent, args: ["--scenario", "prompt-stream", "--pace-ms", "5"] },
+      "codex-acp": { command: agent, args: ["--scenario", "codex-handshake"] },
+    },
+  });
+  // No others: the same section as before.
+  expect(agentSettings(agent, "prompt-stream", [], {})).toEqual(
+    agentSettings(agent, "prompt-stream"),
+  );
+});
+
+test("an other agent may not be claude-acp, the test's own agent", () => {
+  expect(() =>
+    agentSettings(agent, "prompt-stream", [], { "claude-acp": "codex-handshake" }),
+  ).toThrow(/claude-acp plays the test's scenario/);
+});
+
 test("settings refuse a relative command", () => {
   expect(() => agentSettings("fake_agent.exe", "prompt-stream")).toThrow(/absolute/);
 });
@@ -91,6 +112,25 @@ test("the folders: data with settings, a seeded matter beside it, and the launch
   expect(webviewFolder(scratch, 2)).not.toBe(first);
   removeScratch(scratch);
   expect(existsSync(scratch.root)).toBe(false);
+});
+
+test("the settings file holds the other agents, each on its scenario", () => {
+  const scratch = makeScratch(
+    { scenario: "prompt-stream", matterFiles: {}, otherAgents: { "codex-acp": "codex-handshake" } },
+    () => agent,
+    base,
+  );
+  const settings: unknown = JSON.parse(
+    readFileSync(join(scratch.dataDir, "settings.json"), "utf8"),
+  );
+  expect(settings).toEqual({
+    matters: { default_location: scratch.mattersDir },
+    agents: {
+      "claude-acp": { command: agent, args: ["--scenario", "prompt-stream"] },
+      "codex-acp": { command: agent, args: ["--scenario", "codex-handshake"] },
+    },
+  });
+  removeScratch(scratch);
 });
 
 test("no scenario: settings hold only the matters' location, and fake_agent is never asked for", () => {
