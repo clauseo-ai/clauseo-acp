@@ -1,5 +1,5 @@
 // The open conversation's thread in the room's work column and what the lawyer does in it: the commands Ask, Stop and
-// Undo send. Which thread is open is the conversations' (conversations.ts), which also make the thread on a draft's
+// Undo send, and the answers to the agent's permission requests and questions. Which thread is open is the conversations' (conversations.ts), which also make the thread on a draft's
 // first Ask and title it once the question is accepted, so a visit leaves no empty thread behind. A refused command
 // shows by its code only, never its message.
 import { createContext, use, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -7,6 +7,8 @@ import type { ViewStore } from "../../store/store.ts";
 import { streamOf } from "../../store/view.ts";
 import { internalError, toHostError, type HostTransport } from "../../transport/host-transport.ts";
 import type {
+  ElicitationId,
+  ElicitationResponse,
   ErrorCode,
   FileRefId,
   HostCommand,
@@ -68,6 +70,9 @@ export type ThreadActions = {
   /** Answers a permission request with an option it offered; rejects with the HostError when the host refuses (an
    * allow_always declined at the native confirm: `transport.unauthorized`). */
   answer: (request: PermissionRequestId, option: string) => Promise<void>;
+  /** Answers an elicitation: accept with values, decline or cancel; rejects with the HostError when the host refuses
+   * (`elicitation.not_pending`, `elicitation.invalid_values`). */
+  answerElicitation: (elicitation: ElicitationId, response: ElicitationResponse) => Promise<void>;
   /** Stop: cancels the open thread's turn. */
   stop: () => void;
   /** H13's Retry from here on one of the lawyer's questions, at its time; absent where the host can't. Rejects with
@@ -255,6 +260,19 @@ export function useThreadSession(
     [transport],
   );
 
+  const answerElicitation = useCallback(
+    async (elicitation: ElicitationId, response: ElicitationResponse) => {
+      const id = open.current;
+      if (id === null) throw internalError("no thread is open");
+      try {
+        await command({ answer_elicitation: { thread: id, elicitation, response } });
+      } catch (e) {
+        throw toHostError(e);
+      }
+    },
+    [command],
+  );
+
   const retry = useMemo(
     () =>
       retryFrom === undefined
@@ -273,8 +291,8 @@ export function useThreadSession(
 
   const stream = thread === null ? null : streamOf(thread);
   const actions = useMemo(
-    () => ({ stream, sentTurn, undo, answer, stop, retry }),
-    [stream, sentTurn, undo, answer, stop, retry],
+    () => ({ stream, sentTurn, undo, answer, answerElicitation, stop, retry }),
+    [stream, sentTurn, undo, answer, answerElicitation, stop, retry],
   );
   return { thread, sentTurn, refused: refused ?? link.refused, ask, stop, actions };
 }
