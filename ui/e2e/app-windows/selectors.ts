@@ -77,6 +77,11 @@ export function window(page: Page) {
     matterName: id(ids.matterName),
     newMatter: id(ids.newMatter),
     matterExisting: id(ids.matterExisting),
+    /**
+     * The New matter form's folder line: the path it names, once there is one (the matter form's
+     * `.matter-form-path`; a part's class, not a test id, as ui/app/src/perf/autoplay.ts reads it).
+     */
+    folderLine: page.locator(".matter-form-path"),
     createMatter: id(ids.createMatter),
     matterRows: id(ids.matterRow),
     /** The rail row of the matter named `name` (its text also holds its status). */

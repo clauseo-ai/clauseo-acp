@@ -33,7 +33,14 @@ export async function createRoomMatter(
   await w.newMatter.click();
   await w.matterName.fill(name);
   if (existing) {
+    // Create waits until the form names the picked folder: pressed while the picker still runs,
+    // it would make a new folder instead (autoplay.ts waits the same way).
+    const folder = async () =>
+      (await w.folderLine.count()) === 0 ? null : await w.folderLine.textContent();
+    const before = await folder();
     await w.matterExisting.click();
+    await expect.poll(folder).not.toBe(before);
+    await expect(w.matterExisting).toBeEnabled();
   }
   await w.createMatter.click();
   await expect(w.matter).toHaveText(name);
