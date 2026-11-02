@@ -2,6 +2,7 @@ import type { Nodes as Hast } from "hast";
 import { expect, test } from "vitest";
 import { createAnswer } from "./answer.ts";
 import { CASES } from "./hostile-cases.ts";
+import { takesWholeSlice } from "./hostile-slice-fixture.ts";
 import { TIME_FILES, timeSlice } from "./hostile-time-fixture.ts";
 import { MAX_JOINED, MAX_PARAGRAPH } from "./split.ts";
 
@@ -68,8 +69,15 @@ test("links-joined-paragraph: cut while it streams, one block once the next bloc
 test("the timed files between them time every case once", () => {
   const timed = Array.from({ length: TIME_FILES }, (_, k) => timeSlice(k + 1)).flat();
   expect(timed.map((c) => c.id).sort()).toEqual(CASES.map((c) => c.id).sort());
-  const files = Object.keys(import.meta.glob("./hostile-time-*.timed.test.ts"));
-  expect([...files].sort()).toEqual(
+  // Files 1 to TIME_FILES, each taking the slice its own name gives, whole.
+  const sources = import.meta.glob<string>("./hostile-time-*.timed.test.ts", {
+    query: "?raw",
+    import: "default",
+    eager: true,
+  });
+  expect(Object.keys(sources).sort()).toEqual(
     Array.from({ length: TIME_FILES }, (_, k) => `./hostile-time-${k + 1}.timed.test.ts`),
   );
+  for (const [file, source] of Object.entries(sources))
+    expect(takesWholeSlice(source, "timeThisSlice", "timeSlice"), file).toBe(true);
 });

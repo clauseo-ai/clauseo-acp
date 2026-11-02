@@ -1,4 +1,5 @@
-// Slice 1 of the hostile cases, each timed against ordinary prose of its length (hostile-time-fixture.ts).
-import { timeCases } from "./hostile-time-fixture.ts";
+// One slice of the hostile cases, the one this file's name gives, each timed against ordinary prose of its length
+// (hostile-time-fixture.ts's timeThisSlice).
+import { timeThisSlice } from "./hostile-time-fixture.ts";
 
-timeCases(1);
+timeThisSlice();

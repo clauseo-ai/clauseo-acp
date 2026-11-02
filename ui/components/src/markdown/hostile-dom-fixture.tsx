@@ -21,12 +21,13 @@
 import { act } from "react";
 import type { ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import { afterAll, beforeAll, expect } from "vitest";
+import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { characterEntitiesLoaded, loadEntities } from "./entities.ts";
 import { CASES } from "./hostile-cases.ts";
 import type { HostileCase } from "./hostile-cases.ts";
 import { MarkdownHostContext } from "./host.ts";
 import type { MarkdownHost } from "./host.ts";
+import { sliceOfThisFile } from "./hostile-slice-fixture.ts";
 import { Markdown } from "./markdown.tsx";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -45,7 +46,7 @@ const MAX_DOM_DEPTH = 160;
 /** How many hostile-stream-<k>.test.tsx files there are; file k streams the cases at k-1, k-1 + STREAM_FILES, ... */
 export const STREAM_FILES = 3;
 
-/** The cases hostile-stream-<file>.test.tsx streams (file counts from 1). */
+/** The cases hostile-stream-<file>.test.tsx streams (file counts from 1), for hostile-all.test.tsx's guard. */
 export function streamSlice(file: number): HostileCase[] {
   return CASES.filter((_, index) => index % STREAM_FILES === file - 1);
 }
@@ -203,4 +204,29 @@ export function streamFailures(surface: Surface, c: HostileCase): string[] {
   }
   surface.render(null);
   return [...new Set(failures)];
+}
+
+/**
+ * The tests of a hostile-stream-<k>.test.tsx: every case of streamSlice(k), k from the file's own name, streamed in
+ * its deltas with G4's DOM checks after every delta, before the entity table has loaded. Called with nothing, so a
+ * file can neither pick another slice nor drop a case from its own.
+ */
+export function streamThisSlice(): void {
+  const cases = streamSlice(sliceOfThisFile("hostile-stream-", ".test.tsx", STREAM_FILES));
+  catchPayloads();
+  const surface = mountSurface();
+  describe("entity table not loaded", () => {
+    beforeAll(() => {
+      expect(characterEntitiesLoaded()).toBe(false);
+    });
+
+    test.each(cases.map((c) => [c.id, c] as const))(
+      "%s streamed in 16-character deltas stays clean at every step",
+      (_, c) => {
+        expect(streamFailures(surface(), c)).toEqual([]);
+        expect(pwned).toEqual([]);
+      },
+      30_000,
+    );
+  });
 }
