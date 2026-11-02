@@ -1,7 +1,8 @@
 // U7's copy review entries: apart from registry.tsx, as registry-u6.tsx is. The wait over the composer while another
 // conversation of the matter holds it (matters/other), in the real room over a host whose matter has two
-// conversations: the open one, and "Draft petition", which runs. Before the open one sends, the wait offers Stop the
-// other and Queue; once its message waits behind the other (`queued { behind }`), Stop the other alone.
+// conversations: the open one, and "Draft petition", which runs. Before the open one sends, Ask raises the wait, which
+// offers Stop the other and Queue; once its message waits behind the other (`queued { behind }`), Stop the other
+// alone, and the composer's working line says the same wait.
 import {
   batch,
   event,
@@ -15,7 +16,7 @@ import type { ThreadStatus } from "../transport/protocol.ts";
 import { FakeTransport } from "../transport/fake-transport.ts";
 import type { Entry } from "./entry.ts";
 import { MATTER } from "./hosts.ts";
-import { RoomOver } from "./states.tsx";
+import { RoomAsking, RoomOver } from "./states.tsx";
 import { matterWords } from "./words.ts";
 
 /** The conversation that holds the matter; its id sorts below THREAD's, so the open one is THREAD. */
@@ -68,8 +69,10 @@ function heldHost(status: ThreadStatus): FakeTransport {
   return transport;
 }
 
-/** Before sending: the open conversation idle, the other running. */
-const before = () => <RoomOver host={() => heldHost("idle")} />;
+/** Before sending: the open conversation idle, the other running, and Ask pressed with words, which raises the wait. */
+const before = () => (
+  <RoomAsking host={() => heldHost("idle")} question="Does the reply admit the notice?" />
+);
 /** After sending: the open conversation's message waits behind the other. */
 const queued = () => <RoomOver host={() => heldHost({ queued: { behind: OTHER } })} />;
 
