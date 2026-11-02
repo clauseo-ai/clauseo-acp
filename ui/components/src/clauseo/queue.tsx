@@ -13,6 +13,10 @@ import { Say } from "./say.tsx";
 
 import { QUEUE_CAP, type QueueHold, type QueuedMessage } from "./queue-model.ts";
 
+// the wait for another conversation lives in its own file, so the room's first load carries it without the queue's
+// parts (the collapsible among them)
+export { OtherConversationWait } from "./queue-wait.tsx";
+
 function QueueItem({
   item,
   index,
@@ -253,52 +257,6 @@ export function SteerHint({
         </Button>
       </span>
     </div>
-  );
-}
-
-/** A message for a conversation while another in the same matter is changing its papers: what it waits for and until
- * when, with Queue, which keeps the message to go once the other finishes, or Stop the other. */
-export function OtherConversationWait({
-  title,
-  by,
-  onQueue,
-  onStopOther,
-}: {
-  title: string;
-  /** The clock time the other is expected to finish, in English. */
-  by: string;
-  onQueue: () => void;
-  onStopOther: () => void;
-}) {
-  const w = useMatterWords();
-  return (
-    <section
-      className="queue queue-wait"
-      aria-label={w.m("Waiting for '{title}' to finish.", { title })}
-    >
-      <div className="queue-wait-text">
-        <p className="queue-wait-head" role="status">
-          <Say>
-            {w.m("Waiting for '{title}' to finish, by {time}", { title, time: w.clock(by) })}
-          </Say>
-        </p>
-        <p className="queue-say">
-          <Say>
-            {w.m(
-              "One conversation changes a matter's papers at a time. Your message is ready to go.",
-            )}
-          </Say>
-        </p>
-      </div>
-      <span className="queue-acts">
-        <Button kind="quiet" size="small" onClick={onStopOther}>
-          {w.m("Stop the other")}
-        </Button>
-        <Button kind="tone" size="small" onClick={onQueue}>
-          {w.m("Queue")}
-        </Button>
-      </span>
-    </section>
   );
 }
 

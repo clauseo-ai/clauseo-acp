@@ -241,3 +241,47 @@ test("another conversation's wait says until when, and offers Queue or Stop the 
   await press("Queue");
   expect(pressed).toEqual(["stop", "queue"]);
 });
+
+test("with no time the wait says only what it waits for, and names no clock", async () => {
+  await mount(
+    <OtherConversationWait
+      title="Draft plaint"
+      onQueue={none}
+      onStopOther={none}
+      testIds={{ section: "other-wait", stop: "stop-other", queue: "queue" }}
+    />,
+  );
+  const section = document.querySelector('[data-testid="other-wait"]');
+  expect(txt(section?.querySelector(".queue-wait-head"))).toBe(
+    "Waiting for 'Draft plaint' to finish.",
+  );
+  expect(txt(section)).not.toMatch(/\d|by /);
+  expect(document.querySelector('[data-testid="stop-other"]')?.textContent).toBe("Stop the other");
+  expect(document.querySelector('[data-testid="queue"]')?.textContent).toBe("Queue");
+});
+
+test("without onQueue only Stop the other shows; a disabled Queue takes no press", async () => {
+  await mount(<OtherConversationWait title="Draft plaint" onStopOther={none} />);
+  expect([...document.querySelectorAll("button")].map((b) => txt(b))).toEqual(["Stop the other"]);
+  await act(async () => root?.unmount());
+  const pressed: string[] = [];
+  root = createRoot(host!);
+  await act(async () =>
+    root?.render(
+      <OtherConversationWait
+        title="Draft plaint"
+        onQueue={() => pressed.push("queue")}
+        queueDisabled
+        onStopOther={none}
+      />,
+    ),
+  );
+  await press("Queue");
+  expect(pressed).toEqual([]);
+});
+
+test("the title-only wait has its Hindi", () => {
+  expect(mt("hi", "Waiting for '{title}' to finish.", { title: "x" })).toBe(
+    "'x' के पूरा होने की प्रतीक्षा है।",
+  );
+});
