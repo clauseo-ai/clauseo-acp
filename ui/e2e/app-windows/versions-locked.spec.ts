@@ -15,6 +15,10 @@ import { window } from "./selectors.ts";
 const BEFORE = { "brief.txt": "Clause 4 draft\n", "old.txt": "Old terms\n" };
 /** The matter after the turn. */
 const AFTER = { "brief.txt": "Clause 4 final\n", "notes/a.txt": "Alpha\n" };
+/** The matter after restoring the import version: a restore never deletes, so notes/a.txt stays. */
+const RESTORED = { ...BEFORE, "notes/a.txt": "Alpha\n" };
+/** The restore dialog's line for a file added since the version (versions/words.ts). */
+const STAYS_LINE = "'a.txt', added since, stays.";
 /** Word's owner file for brief.txt: `~$` and the whole name (locks.rs `owner_names`). */
 const OWNER = "~$brief.txt";
 const OWNER_BYTES = "owner file: open in Word";
@@ -45,6 +49,8 @@ test("Restore waits while Word holds a file, then lands once it is closed", asyn
   await expect(w.versionsPanel).toBeVisible();
   await w.version("import").click();
   await w.versionRestore.click();
+  // A restore never deletes (crates/matters/src/restore.rs): the note the turn added stays.
+  await expect(w.dialog).toContainText(STAYS_LINE);
   await w.dialogConfirm.click();
 
   // Refused: the dialog names the file, offers Try again, and the lock line shows; nothing moved.
@@ -60,5 +66,5 @@ test("Restore waits while Word holds a file, then lands once it is closed", asyn
   await w.dialogTryAgain.click();
   await expect(w.version("restore")).toHaveCount(1);
   await expect(w.dialog).toBeHidden();
-  await expect.poll(() => readTree(scratch.matterDir)).toEqual(BEFORE);
+  await expect.poll(() => readTree(scratch.matterDir)).toEqual(RESTORED);
 });
