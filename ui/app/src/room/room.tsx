@@ -258,12 +258,17 @@ function RoomFrame({
   // the plan the open conversation uses, on the status line: its thread's, or the one a draft would run
   // nothing while the matter's list loads (its agent isn't known yet), or for an agent of no kind
   const openRow = talks.rows.find((r) => r.key === talks.open);
-  // undefined where not known, so a launch failure's words (AgentPlanContext) keep Claude's line there
+  const openAgent = openRow?.agent ?? talks.agent;
+  const planOfOpen =
+    open === null || talks.open === null || talks.phase === "loading"
+      ? null
+      : knownPlan(openAgent, talks.agents);
+  // the agent as the error words name it (AgentPlanContext): its plan, else its own name, the settings id (the only
+  // name the room has); undefined where not known, so those words keep Claude's line there
   const agentPlan =
     open === null || talks.open === null || talks.phase === "loading"
       ? undefined
-      : knownPlan(openRow?.agent ?? talks.agent, talks.agents);
-  const planOfOpen = agentPlan ?? null;
+      : (planOfOpen ?? openAgent);
   const plan = planOfOpen === null ? "" : th(w.lang, "Uses your {name} plan", { name: planOfOpen });
   // a matter's name as filed is English in both languages, the scratch matter's is the room's own; with no matter, the
   // frame's words stand in its place

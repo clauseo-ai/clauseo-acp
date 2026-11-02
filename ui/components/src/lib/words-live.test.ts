@@ -96,66 +96,74 @@ test("a stopped Claude and an interrupted thread read as the thread's own stop, 
   }
 });
 
-test("agent.launch_failed names the thread's plan: ChatGPT's, the agent for no kind, Claude's otherwise", () => {
-  const code = "agent.launch_failed";
-  expect(errorWords("en", code, "ChatGPT")).toBe("ChatGPT didn't start. Your question is kept.");
-  expect(errorWords("hi", code, "ChatGPT")).toBe("ChatGPT शुरू नहीं हुआ। आपका प्रश्न रखा गया है।");
-  expect(errorWords("en", code, null)).toBe(
-    "Clauseo couldn't start this conversation. Your question is kept.",
-  );
-  expect(errorWords("hi", code, null)).toBe(
-    "Clauseo यह बातचीत शुरू नहीं कर सका। आपका प्रश्न रखा गया है।",
-  );
-  const claude = "Claude didn't start. Your question is kept.";
-  // a caller that doesn't know the thread, or a Claude thread, keeps the approved line
-  for (const plan of ["Claude", undefined]) {
-    expect(errorWords("en", code, plan)).toBe(claude);
-    expect(errorWords("hi", code, plan)).toBe("Claude शुरू नहीं हुआ। आपका प्रश्न रखा गया है।");
-  }
-  expect(errorWords("en", code)).toBe(claude);
-  expect(plannedKey(code)).toBe(ERROR_WORDS[code]);
-  // the plan touches no other code
-  expect(errorWords("en", "store.io", "ChatGPT")).toBe(errorWords("en", "store.io"));
-});
-
-// [code, ChatGPT's English, its Hindi, no kind's English, its Hindi]
+// [code, ChatGPT's English and Hindi, a named agent's (gemini) English and Hindi, the nameless English and Hindi]
 const PLANNED_LINES = [
+  [
+    "agent.launch_failed",
+    "ChatGPT didn't start. Your question is kept.",
+    "ChatGPT शुरू नहीं हुआ। आपका प्रश्न रखा गया है।",
+    "gemini didn't start. Your question is kept.",
+    "gemini शुरू नहीं हुआ। आपका प्रश्न रखा गया है।",
+    "The AI didn't start. Your question is kept.",
+    "AI शुरू नहीं हुआ। आपका प्रश्न रखा गया है।",
+  ],
   [
     "agent.protocol_error",
     "ChatGPT sent something Clauseo can't read.",
     "ChatGPT ने कुछ ऐसा भेजा जिसे Clauseo पढ़ नहीं सकता।",
-    "Clauseo got a reply it can't read.",
-    "Clauseo को ऐसा उत्तर मिला जिसे वह पढ़ नहीं सकता।",
+    "gemini sent something Clauseo can't read.",
+    "gemini ने कुछ ऐसा भेजा जिसे Clauseo पढ़ नहीं सकता।",
+    "The AI sent something Clauseo can't read.",
+    "AI ने कुछ ऐसा भेजा जिसे Clauseo पढ़ नहीं सकता।",
   ],
   [
     "agent.auth_required",
     "Sign in to ChatGPT in Codex first. Your question is kept.",
     "पहले Codex में ChatGPT से साइन इन करें। आपका प्रश्न रखा गया है।",
-    "This conversation needs a sign-in first. Your question is kept.",
-    "इस बातचीत के लिए पहले साइन इन करना होगा। आपका प्रश्न रखा गया है।",
+    "Sign in to gemini first. Your question is kept.",
+    "पहले gemini में साइन इन करें। आपका प्रश्न रखा गया है।",
+    "Sign in to the AI first. Your question is kept.",
+    "पहले AI में साइन इन करें। आपका प्रश्न रखा गया है।",
   ],
   [
     "agent.unsupported_version",
     "This version of Codex doesn't work with Clauseo.",
     "Codex का यह संस्करण Clauseo के साथ काम नहीं करता।",
-    "Clauseo doesn't work with the program this conversation uses, in this version.",
-    "यह बातचीत जिस प्रोग्राम का उपयोग करती है, उसके इस संस्करण के साथ Clauseo काम नहीं करता।",
+    "This version of gemini doesn't work with Clauseo.",
+    "gemini का यह संस्करण Clauseo के साथ काम नहीं करता।",
+    "This version of the AI doesn't work with Clauseo.",
+    "AI का यह संस्करण Clauseo के साथ काम नहीं करता।",
   ],
 ] as const;
 
 test.each(PLANNED_LINES)(
-  "%s names the thread's plan: ChatGPT's, none for no kind, Claude's otherwise",
-  (code, en, hi, noneEn, noneHi) => {
+  "%s names the thread's agent: ChatGPT's line, a named agent's, the nameless one, Claude's otherwise",
+  (code, en, hi, namedEn, namedHi, namelessEn, namelessHi) => {
     expect(errorWords("en", code, "ChatGPT")).toBe(en);
     expect(errorWords("hi", code, "ChatGPT")).toBe(hi);
-    expect(errorWords("en", code, null)).toBe(noneEn);
-    expect(errorWords("hi", code, null)).toBe(noneHi);
-    for (const plan of ["Claude", undefined]) {
-      expect(errorWords("en", code, plan)).toBe(ERROR_WORDS[code]);
-      expect(errorWords("en", code, plan)).toContain("Claude");
+    expect(errorWords("en", code, "gemini")).toBe(namedEn);
+    expect(errorWords("hi", code, "gemini")).toBe(namedHi);
+    for (const none of [null, "", "  "]) {
+      expect(errorWords("en", code, none)).toBe(namelessEn);
+      expect(errorWords("hi", code, none)).toBe(namelessHi);
     }
+    // a Claude thread, or a caller that doesn't know the thread, keeps the approved line
+    for (const agent of ["Claude", undefined]) {
+      expect(errorWords("en", code, agent)).toBe(ERROR_WORDS[code]);
+      expect(errorWords("hi", code, agent)).toBe(errorWords("hi", code));
+      expect(plannedKey(code, agent).key).toBe(ERROR_WORDS[code]);
+    }
+    expect(errorWords("en", code)).toContain("Claude");
   },
 );
+
+test("an agent's name fills no other code", () => {
+  expect(errorWords("en", "store.io", "ChatGPT")).toBe(errorWords("en", "store.io"));
+  expect(errorWords("en", "store.io", "gemini")).toBe(errorWords("en", "store.io"));
+  expect(errorWords("en", "thread.interrupted", "gemini")).toBe(
+    errorWords("en", "thread.interrupted"),
+  );
+});
 
 test("only the agent.* codes that name Claude have a sentence per plan", () => {
   const naming = (Object.keys(ERROR_WORDS) as ErrorCode[]).filter((c) =>

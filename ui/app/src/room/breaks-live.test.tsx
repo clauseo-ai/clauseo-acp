@@ -295,14 +295,14 @@ test("in Hindi the region tags English names, as the line's words do", async () 
 });
 
 // agent.launch_failed names the open conversation's plan (words-errors.ts's plannedKey): its kind read off the
-// thread's agent, Codex's as ChatGPT, and an agent of no kind (a settings file's own id) as Clauseo's conversation
+// thread's agent, Codex's as ChatGPT, and an agent of no kind by its own name (its settings id)
 test.each([
   ["codex-acp", "en", "ChatGPT didn't start. Your question is kept."],
   ["codex-acp", "hi", "ChatGPT शुरू नहीं हुआ। आपका प्रश्न रखा गया है।"],
   ["claude-acp", "en", "Claude didn't start. Your question is kept."],
   ["claude-acp", "hi", "Claude शुरू नहीं हुआ। आपका प्रश्न रखा गया है।"],
-  ["my-agent", "en", "Clauseo couldn't start this conversation. Your question is kept."],
-  ["my-agent", "hi", "Clauseo यह बातचीत शुरू नहीं कर सका। आपका प्रश्न रखा गया है।"],
+  ["my-agent", "en", "my-agent didn't start. Your question is kept."],
+  ["my-agent", "hi", "my-agent शुरू नहीं हुआ। आपका प्रश्न रखा गया है।"],
 ] as const)(
   "a thread on %s that didn't start says so for its plan, in %s",
   async (agent, language, said) => {
