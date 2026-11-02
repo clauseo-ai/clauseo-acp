@@ -200,10 +200,13 @@ fn a_reload_drops_the_limits_feed() {
     assert_eq!(old.drain(), Vec::<String>::new());
 }
 
-/// `main` and `settings` each follow the app feed on their own channel: a change the settings
-/// window makes reaches both.
+/// `main` and `settings` each follow the app feed on their own channel, and a change the
+/// settings window makes reaches both. `main` gets every app event: the three first frames and
+/// the thread list's changes. The settings window gets `settings_changed` alone (0028): the
+/// first frame's settings and each change, never a matter or thread list, and its acks count
+/// only those.
 #[test]
-fn both_windows_get_the_settings_change() {
+fn both_windows_get_the_settings_change_and_only_main_the_lists() {
     let scratch = Scratch::new("app-two-windows", &[]);
     let host = scratch.start(Vec::new());
     let bridge = host.bridge();
@@ -213,10 +216,31 @@ fn both_windows_get_the_settings_change() {
     block_on(bridge.open_stream(SETTINGS, settings_channel)).unwrap();
     block_on(bridge.subscribe_app(MAIN)).unwrap();
     block_on(bridge.subscribe_app(SETTINGS)).unwrap();
+    assert_eq!(first_frames(&main).ui.theme, Theme::System);
+    assert_eq!(settings(settings_page.next_event()).ui.theme, Theme::System);
+
+    // A new thread changes the lists: main hears of it, the settings window does not.
+    let _thread = host.thread();
     block_on(bridge.dispatch(SETTINGS, set_theme(Theme::Dark))).unwrap();
-    assert_eq!(settings(main.next_event()).ui.theme, Theme::Dark);
+    let mut lists = 0;
+    let theme = loop {
+        match main.next_event() {
+            HostEvent::SettingsChanged(changed) => break changed.ui.theme,
+            HostEvent::ThreadsChanged(_) | HostEvent::MattersChanged(_) => lists += 1,
+            other => panic!("main got {other:?}"),
+        }
+    };
+    assert_eq!(theme, Theme::Dark);
+    assert!(lists > 0, "main got no change to the lists");
+    // In order: had a list change reached the settings window, it would come before this.
     assert_eq!(settings(settings_page.next_event()).ui.theme, Theme::Dark);
-    block_on(bridge.ack(SETTINGS, Vec::new(), 1)).unwrap();
+    assert_eq!(settings_page.drain(), Vec::<String>::new());
+    // Two messages sent: the first frame and the change.
+    let refusal = block_on(bridge.ack(SETTINGS, Vec::new(), 3)).unwrap_err();
+    assert_eq!(refusal.code(), ErrorCode::CommandInvalid, "{refusal:?}");
+    block_on(bridge.ack(SETTINGS, Vec::new(), 2)).unwrap();
+    let window = bridge.window(SETTINGS).unwrap();
+    assert_eq!(lock(&window).state().unacked_bytes(), 0);
 }
 
 /// A settings page reopened (a second `open_stream` from `settings`) replaces only its own
@@ -229,6 +253,7 @@ fn reopening_settings_leaves_mains_channel() {
     let (main_channel, main) = collector();
     block_on(bridge.open_stream(MAIN, main_channel)).unwrap();
     block_on(bridge.subscribe_app(MAIN)).unwrap();
+    first_frames(&main);
     let main_window = bridge.window(MAIN).unwrap();
     let (first, old) = collector();
     block_on(bridge.open_stream(SETTINGS, first)).unwrap();
@@ -253,10 +278,13 @@ fn closing_a_window_drops_its_channel_app_pump_and_watchdog() {
     let (main_channel, main) = collector();
     block_on(bridge.open_stream(MAIN, main_channel)).unwrap();
     block_on(bridge.subscribe_app(MAIN)).unwrap();
+    first_frames(&main);
     let built = build(&bridge, SETTINGS);
     let (channel, page) = collector();
     block_on(bridge.open_stream(SETTINGS, channel)).unwrap();
     block_on(bridge.subscribe_app(SETTINGS)).unwrap();
+    // Its one first frame: the settings.
+    let _current = settings(page.next_event());
     let window = bridge.window(SETTINGS).unwrap();
     let dropped = pump::feed_dropped(&window, Feed::App).unwrap();
     let gone = Arc::downgrade(&window);
@@ -335,6 +363,7 @@ fn a_late_close_of_an_old_window_leaves_the_newer_one() {
     // The old window's close again, later still: the newer page keeps its stream.
     bridge.close_window(SETTINGS, first_build);
     block_on(bridge.subscribe_app(SETTINGS)).unwrap();
+    assert_eq!(settings(new.next_event()).ui.theme, Theme::System);
     block_on(bridge.dispatch(SETTINGS, set_theme(Theme::Dark))).unwrap();
     assert_eq!(settings(new.next_event()).ui.theme, Theme::Dark);
 

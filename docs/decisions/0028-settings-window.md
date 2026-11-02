@@ -51,7 +51,11 @@ beside `main`, so on Windows and Linux it gets the caption buttons' four. Not gr
 **What the bridge admits.** From `settings`, `dispatch` takes only `SetUiSettings` and `query` only
 `GetSettings` (`Bridge::admit`, `Bridge::query`, keyed on the calling webview's label); everything
 else is `command.invalid` before the host sees it. A window of any other label is refused every
-command and read. A settings section that needs more (plans, matters) widens this list in its own
+command and read. Of the app feed (`subscribe_app`), whose first frames carry the whole matter
+and thread lists since 0023, a window other than `main` gets `settings_changed` alone: the
+bridge drops every other app event before it is sent or counted toward acks (`AppEvents` in
+`bridge/pump/feeds.rs`, an allow-list keyed on the label, so an app event the host adds later
+stays out). A settings section that needs more (plans, matters) widens these lists in its own
 change.
 
 **Command.** `open_settings`, no arguments, `Result<(), HostError>` (`internal` when the window
@@ -77,7 +81,8 @@ get no menu: it would be a bar on the undecorated window.
   Alt+Tab and the Mac's Window menu; it carries nothing to the host, opens nothing, and the
   page could already close `main` outright. `main`'s page cannot set any title.
 - XSS in the settings page reaches the settings and nothing else of the host: no matter, thread,
-  folder, file, link or permission answer.
+  folder, file, link or permission answer. That holds for the app feed because the bridge filters
+  the settings window's to `settings_changed`; U12 and U15 widen it when their sections read more.
 - Main-only behaviour stays keyed on `MAIN_WINDOW`: the scoreboard's capabilities, the limits
   subscription `open_stream` starts (`Bridge::open_stream` follows the limits for `main` alone)
   and the focus refresh (`on_window_event` in `lib.rs` dispatches `Shown` for `main` alone).

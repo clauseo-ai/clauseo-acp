@@ -121,7 +121,10 @@ fn the_settings_window_sets_and_reads_the_settings_only() {
     assert!(bridge.admit(SETTINGS, &set).is_ok());
     let cancel = command(json!({"cancel": {"thread": thread}}));
     let create = command(json!({"create_thread": {"matter": host.scratch(), "agent": "fake"}}));
-    for refused in [cancel, create] {
+    // The room's seen mark (H6) is main's alone: nothing in settings marks a thread seen.
+    let seen = command(json!({"mark_seen": {"thread": thread}}));
+    assert!(bridge.admit(MAIN, &seen).is_ok());
+    for refused in [cancel, create, seen] {
         let refusal = block_on(bridge.dispatch(SETTINGS, envelope(refused.clone()))).unwrap_err();
         assert_eq!(refusal.code(), ErrorCode::CommandInvalid, "{refused:?}");
     }

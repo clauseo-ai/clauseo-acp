@@ -28,9 +28,9 @@ use crate::frame::{self, Frame};
 mod feeds;
 
 use feeds::spawn_feed_restarts;
+pub(crate) use feeds::{AppEvents, follow_feed, follow_limits, forget_feed, start_feed};
 #[cfg(test)]
 pub(crate) use feeds::{count_feed_event, feed_dropped};
-pub(crate) use feeds::{follow_feed, follow_limits, forget_feed, start_feed};
 
 /// How often the watchdog reads the clock.
 const TICK: Duration = Duration::from_secs(1);
@@ -42,6 +42,8 @@ pub(crate) struct Window {
     opened: Instant,
     channel: Channel<Frame>,
     state: WindowState,
+    /// Which app-feed events its channel carries (0028).
+    app_events: AppEvents,
     /// The pump of each stream whose host subscription is live.
     pumps: HashMap<StreamId, JoinHandle<()>>,
     /// The pump of each feed whose host subscription is live.
@@ -73,12 +75,17 @@ fn now() -> Instant {
 
 impl Window {
     /// A window sending on `channel` what `host` publishes, its watchdog running.
-    pub(crate) fn open(host: HostHandle, channel: Channel<Frame>) -> Arc<Mutex<Window>> {
+    pub(crate) fn open(
+        host: HostHandle,
+        channel: Channel<Frame>,
+        app_events: AppEvents,
+    ) -> Arc<Mutex<Window>> {
         let window = Arc::new(Mutex::new(Window {
             host,
             opened: now(),
             channel,
             state: WindowState::new(),
+            app_events,
             pumps: HashMap::new(),
             feed_pumps: BTreeMap::new(),
             #[cfg(test)]
