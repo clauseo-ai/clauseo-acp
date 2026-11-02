@@ -170,3 +170,6 @@ crates/sandbox/src/denial.rs SystemClock::new clippy::disallowed_methods
 crates/sandbox/src/test_support.rs - clippy::disallowed_methods
 crates/sandbox/src/detect.rs seatbelt::run clippy::disallowed_methods
 crates/sandbox/src/links/tests.rs walk_of_fifty_thousand_files clippy::disallowed_methods
+# Added by S14 (macOS): the agent's TMPDIR in its state folder, the jail tests' file setup.
+crates/sandbox/src/macos/launcher.rs make_tmpdir clippy::disallowed_methods
+crates/sandbox/tests/jail/support.rs - clippy::disallowed_methods

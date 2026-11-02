@@ -1,0 +1,240 @@
+---
+source: crates/sandbox/src/macos/profile/tests.rs
+expression: w.render(&policy)
+---
+(version 1)
+(deny default (with message "clauseo-4242-7"))
+
+; Clauseo's Seatbelt base: what every jailed agent may use beyond the policy's own paths. It
+; follows `(version 1)` and `(deny default (with message "<tag>"))`, which profile.rs writes,
+; and holds only allow rules. No user path is in it: `/Users`, `/private/var/folders`,
+; `/private/tmp` and `/Volumes` are not readable, and the policy's paths come in as parameters.
+;
+; Adapted from Codex's codex-rs/sandboxing/src/seatbelt_base_policy.sbpl and
+; seatbelt_read_only_platform_defaults.sbpl, commit 1a604d58da344c84528fecd5b5154105f597d70b
+; (https://github.com/openai/codex), Copyright OpenAI, licensed under the Apache License 2.0
+; (https://www.apache.org/licenses/LICENSE-2.0). Changes: Codex's base gives full read access and
+; this file lists system locations instead; no tty but the controlling one and the jail's own
+; ptys; no syslog socket; no DNS (agents reach hosts through the proxy, which resolves names).
+
+; Processes. Children inherit the jail, so running any program is allowed; what it can touch
+; is not.
+(allow process-exec)
+(allow process-fork)
+(allow signal (target same-sandbox))
+(allow process-info* (target same-sandbox))
+
+; sysctl reads, Codex's list: CPU, memory and OS facts runtimes ask for at start.
+(allow sysctl-read
+  (sysctl-name "hw.activecpu")
+  (sysctl-name "hw.busfrequency_compat")
+  (sysctl-name "hw.byteorder")
+  (sysctl-name "hw.cacheconfig")
+  (sysctl-name "hw.cachelinesize_compat")
+  (sysctl-name "hw.cpufamily")
+  (sysctl-name "hw.cpufrequency_compat")
+  (sysctl-name "hw.cputype")
+  (sysctl-name "hw.l1dcachesize_compat")
+  (sysctl-name "hw.l1icachesize_compat")
+  (sysctl-name "hw.l2cachesize_compat")
+  (sysctl-name "hw.l3cachesize_compat")
+  (sysctl-name "hw.logicalcpu_max")
+  (sysctl-name "hw.machine")
+  (sysctl-name "hw.model")
+  (sysctl-name "hw.memsize")
+  (sysctl-name "hw.ncpu")
+  (sysctl-name "hw.nperflevels")
+  (sysctl-name-prefix "hw.optional.arm.")
+  (sysctl-name-prefix "hw.optional.armv8_")
+  (sysctl-name "hw.packages")
+  (sysctl-name "hw.pagesize_compat")
+  (sysctl-name "hw.pagesize")
+  (sysctl-name "hw.physicalcpu")
+  (sysctl-name "hw.physicalcpu_max")
+  (sysctl-name "hw.logicalcpu")
+  (sysctl-name "hw.cpufrequency")
+  (sysctl-name "hw.tbfrequency_compat")
+  (sysctl-name "hw.vectorunit")
+  (sysctl-name "machdep.cpu.brand_string")
+  (sysctl-name "kern.argmax")
+  (sysctl-name "kern.hostname")
+  (sysctl-name "kern.maxfilesperproc")
+  (sysctl-name "kern.maxproc")
+  (sysctl-name "kern.osproductversion")
+  (sysctl-name "kern.osrelease")
+  (sysctl-name "kern.ostype")
+  (sysctl-name "kern.osvariant_status")
+  (sysctl-name "kern.osversion")
+  (sysctl-name "kern.secure_kernel")
+  (sysctl-name "kern.sysv.semmns")
+  (sysctl-name "kern.usrstack64")
+  (sysctl-name "kern.version")
+  (sysctl-name "sysctl.proc_cputype")
+  (sysctl-name "vm.loadavg")
+  (sysctl-name-prefix "hw.perflevel")
+  (sysctl-name-prefix "kern.proc.pgrp.")
+  (sysctl-name-prefix "kern.proc.pid.")
+  (sysctl-name-prefix "net.routetable."))
+
+; Power management, Codex's base: libraries take sleep assertions through it.
+(allow iokit-open (iokit-registry-entry-class "RootDomainUserClient"))
+
+; Mach services the system libraries a shell, git and Node call need.
+(allow mach-lookup
+  ; User and group lookups (getpwuid): Node's os.userInfo, git, the shell.
+  (global-name "com.apple.system.opendirectoryd.libinfo")
+  ; Group membership lookups, which git makes.
+  (global-name "com.apple.system.opendirectoryd.membership")
+  ; notify(3): time zone and locale change notices in libc.
+  (global-name "com.apple.system.notification_center")
+  ; os_log from system libraries.
+  (global-name "com.apple.logd")
+  (global-name "com.apple.diagnosticd")
+  ; Power assertions, Codex's base.
+  (global-name "com.apple.PowerManagement.control"))
+; notify(3)'s shared page.
+(allow ipc-posix-shm-read-data (ipc-posix-name "apple.shm.notification_center"))
+; POSIX semaphores, Codex's base: Python's multiprocessing locks.
+(allow ipc-posix-sem)
+
+; The root folder. Without it `/bin/cat` aborts under `(deny default)` (the spike).
+(allow file-read* (literal "/"))
+
+; The links at the root (`/etc`, `/tmp`, `/var`) and the folders above the system paths below:
+; metadata only, so paths resolve and nothing is listed.
+(allow file-read-metadata
+  (literal "/etc")
+  (literal "/tmp")
+  (literal "/var")
+  (literal "/private")
+  (literal "/private/var")
+  (literal "/private/var/db")
+  (literal "/Library")
+  (literal "/Library/Preferences")
+  (literal "/Applications")
+  (literal "/opt")
+  (literal "/usr")
+  (literal "/dev"))
+
+; System locations, read.
+(allow file-read*
+  ; Frameworks and the dyld shared cache and its cryptexes. A path under
+  ; `/System/Volumes/Data` resolves to its firmlinked name, so this reaches no user file.
+  (subpath "/System")
+  ; Libraries, dyld and the system's tools: the shells, git's shim, cat, ln, nc.
+  (subpath "/usr/lib")
+  (subpath "/usr/bin")
+  (subpath "/usr/sbin")
+  (subpath "/usr/libexec")
+  (subpath "/bin")
+  (subpath "/sbin")
+  ; Locale, ICU and terminfo data and the time zone names.
+  (subpath "/usr/share")
+  ; System frameworks outside /System.
+  (subpath "/Library/Apple")
+  ; The Command Line Tools, and the frameworks the git and xcrun shims load under Xcode.
+  (subpath "/Library/Developer")
+  ; hosts, passwd, shells, TLS roots (/private/etc/ssl).
+  (subpath "/private/etc")
+  ; The time zone database `/etc/localtime` points into.
+  (subpath "/private/var/db/timezone")
+  ; Where xcode-select points the shims, and the shell `/bin/sh` runs.
+  (literal "/private/var/db/xcode_select_link")
+  (subpath "/private/var/select")
+  ; The unified log's filter settings, which every process that logs reads.
+  (subpath "/Library/Preferences/Logging")
+  ; The system's locale defaults, which CoreFoundation reads.
+  (literal "/Library/Preferences/.GlobalPreferences.plist")
+  ; The Xcode licence record the git shim checks before it runs git.
+  (literal "/Library/Preferences/com.apple.dt.Xcode.plist"))
+
+; Mapping system libraries as code.
+(allow file-map-executable
+  (subpath "/System")
+  (subpath "/usr/lib")
+  (subpath "/Library/Apple")
+  (subpath "/Library/Developer"))
+
+; Devices: randomness, zeros and the automounter's no-wait node, read.
+(allow file-read*
+  (literal "/dev/random")
+  (literal "/dev/urandom")
+  (literal "/dev/zero")
+  (literal "/dev/autofs_nowait"))
+; The null device, the controlling terminal and the DTrace helper Node opens at start.
+(allow file-read* file-write-data file-ioctl
+  (literal "/dev/null")
+  (literal "/dev/tty")
+  (literal "/dev/dtracehelper"))
+; The process's own descriptors (a shell's process substitution).
+(allow file-read-data file-write-data (subpath "/dev/fd"))
+; ptys the jail opens itself (openpty): never a terminal the lawyer has open.
+(allow pseudo-tty)
+(allow file-read* file-write* file-ioctl (literal "/dev/ptmx"))
+(allow file-read* file-write* file-ioctl
+  (require-all
+    (regex #"^/dev/ttys[0-9]+$")
+    (extension "com.apple.sandbox.pty")))
+
+; The matter and the state folder: read and write.
+(allow file-read* file-write*
+  (subpath (param "MATTER"))
+  (subpath (param "STATE")))
+
+; The folders above every allowed path: metadata only, so paths resolve.
+(allow file-read-metadata
+  (path-ancestors (param "MATTER"))
+  (path-ancestors (param "STATE")))
+
+; Read-only in the matter: protected names, every .git, over-cap files.
+(deny file-write*
+  (subpath (param "READ_ONLY_0"))
+  (subpath (param "READ_ONLY_1"))
+  (subpath (param "READ_ONLY_2"))
+  (subpath (param "READ_ONLY_3"))
+  (subpath (param "READ_ONLY_4"))
+  (subpath (param "READ_ONLY_5"))
+  (subpath (param "READ_ONLY_6"))
+  (with message "clauseo-4242-7"))
+; Their folders cannot be renamed, which would carry them out of their rules.
+(deny file-write-unlink
+  (require-all (vnode-type DIRECTORY) (path-ancestors (param "READ_ONLY_0")))
+  (require-all (vnode-type DIRECTORY) (path-ancestors (param "READ_ONLY_1")))
+  (require-all (vnode-type DIRECTORY) (path-ancestors (param "READ_ONLY_2")))
+  (require-all (vnode-type DIRECTORY) (path-ancestors (param "READ_ONLY_3")))
+  (require-all (vnode-type DIRECTORY) (path-ancestors (param "READ_ONLY_4")))
+  (require-all (vnode-type DIRECTORY) (path-ancestors (param "READ_ONLY_5")))
+  (require-all (vnode-type DIRECTORY) (path-ancestors (param "READ_ONLY_6")))
+  (with message "clauseo-4242-7"))
+
+; Hidden paths: the data dir, other matters and state folders, refused folders.
+(deny file-read* file-write*
+  (subpath (param "HIDDEN_0"))
+  (with message "clauseo-4242-7"))
+
+; Allowed again after the hidden paths: the state folder, notes, the credential
+; link, the Claude store's names, the runtime and read paths.
+(allow file-read* file-write*
+  (subpath (param "STATE")))
+(allow file-read-metadata
+  (path-ancestors (param "STATE")))
+
+; Network: the proxy's loopback ports only; no DNS (the proxy resolves names).
+(allow network-outbound
+  (remote unix-socket (subpath (param "BROWSER_RUN"))))
+; agent-browser's daemon, in the jail, makes its socket there.
+(allow network-bind
+  (local unix-socket (subpath (param "BROWSER_RUN"))))
+
+;; parameters
+MATTER = <root>/matter
+STATE = <root>/data/agent-state/m1/codex
+READ_ONLY_0 = <root>/matter/.agents
+READ_ONLY_1 = <root>/matter/.claude
+READ_ONLY_2 = <root>/matter/.clauseo
+READ_ONLY_3 = <root>/matter/.codex
+READ_ONLY_4 = <root>/matter/.mcp.json
+READ_ONLY_5 = <root>/matter/AGENTS.md
+READ_ONLY_6 = <root>/matter/CLAUDE.md
+HIDDEN_0 = <root>/data
+BROWSER_RUN = <root>/data/agent-state/m1/codex/browser/run

@@ -17,9 +17,29 @@ serde = { workspace = true, features = ["derive"] }
 # clippy.toml bans std's canonicalize in favour of dunce's.
 dunce = { workspace = true }
 
-[dev-dependencies]
-# The denials' JSON shape.
+# The watcher (src/macos/watch.rs): `log stream` started as a child, its ndjson lines read on a
+# thread of its own with a once-a-second tick, each line parsed as JSON.
+[target.'cfg(target_os = "macos")'.dependencies]
+async-process = { workspace = true }
+async-io = { workspace = true }
+futures = { workspace = true }
 serde_json = { workspace = true }
+
+[dev-dependencies]
+# The denials' JSON shape, and `run_sandboxed --print-spec`.
+serde_json = { workspace = true }
+# The Seatbelt profile snapshots.
+insta = { workspace = true }
+# The jail tests run fake_agent through the launcher.
+clauseo-fake_agent = { path = "../fake_agent" }
+# ManualTimer, so the shutdown test decides when the ladder's waits end.
+clauseo-process = { path = "../process", features = ["test-support"] }
+
+# The jail tests drive the launched programs, and wait for a jailed tree's exits with kqueue.
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+async-io = { workspace = true }
+futures = { workspace = true }
+nix = { workspace = true, features = ["event"] }
 
 [lints]
 workspace = true
