@@ -203,29 +203,39 @@ fn emit(line: &[u8], on_line: &mut impl FnMut(&str)) {
 ///
 /// It redacts the last 16 KiB, opened on a whole line (after its first `\n`, unless the byte
 /// before the window is a `\n` or the window holds stderr's start), then keeps the last [`TAIL`]
-/// bytes the same way, cut at a char boundary. A window with no whole line to open on first
-/// leaves out what may be the end of a secret cut off at its start ([`open_window`]), even when
-/// the secret is longer than the window; ordinary text there loses its leading run of
-/// bearer-token chars (letters, digits, `-._~+/=`) and any start that matches the end of a secret
-/// value. Redacting before cutting means no part of a secret survives at the start. When the
-/// redacted text is shorter than [`TAIL`] while the ring holds more, the window doubles. When
-/// opening on a whole line would leave nothing (one line longer than the cut), the text starts
-/// mid-line instead of coming out empty.
+/// bytes the same way, cut at a char boundary. Unless the window holds stderr's start, it first
+/// leaves out what may be the end of a secret cut off at the window's start ([`open_window`]),
+/// even when the secret is longer than the window: a cut char's last bytes, the end of a secret
+/// value (at a line start, one that follows a `\n` of the value), and mid-line the end of a key
+/// or a bearer token. So ordinary text at a mid-line window start loses its leading run of
+/// bearer-token chars (letters, digits, `-._~+/=`); after a run that could end the word
+/// `Bearer`, or none, a space and the word after it too; and at any start, text that matches
+/// the end of a secret value. Redacting before cutting means no part of a secret survives at
+/// the start. When the redacted text is shorter than [`TAIL`] while the ring holds more, the
+/// window doubles. When opening on a whole line would leave nothing (one line longer than the
+/// cut), the text starts mid-line instead of coming out empty.
 pub(crate) fn tail(ring: &Mutex<Ring>, redactor: &Redactor) -> String {
     let mut window = WINDOW;
     let mut bytes = Vec::new();
     loop {
         // Only the copy holds the lock, so the pump never waits for the redaction.
-        let (whole, on_line) = {
+        let (whole, starts, on_line) = {
             let ring = ring.lock().unwrap_or_else(PoisonError::into_inner);
             ring.last(window, &mut bytes);
             let whole = bytes.len() == ring.len();
-            let on_line =
-                (whole && ring.holds_start()) || ring.byte_before_last(window) == Some(b'\n');
-            (whole, on_line)
+            let starts = whole && ring.holds_start();
+            let on_line = starts || ring.byte_before_last(window) == Some(b'\n');
+            (whole, starts, on_line)
         };
-        let text = String::from_utf8_lossy(&bytes);
-        let text = open_window(&text, on_line, redactor);
+        // A window that starts inside a char would decode it as U+FFFD, which no secret's end
+        // matches, so that char's last bytes are left out.
+        let skip = if on_line {
+            0
+        } else {
+            continuation_bytes(&bytes)
+        };
+        let text = String::from_utf8_lossy(&bytes[skip..]);
+        let text = open_window(&text, starts, on_line, redactor);
         let redacted = redactor.redact(text);
         if redacted.len() >= TAIL || whole {
             return keep_last(&redacted, TAIL).to_owned();
@@ -234,15 +244,26 @@ pub(crate) fn tail(ring: &Mutex<Ring>, redactor: &Redactor) -> String {
     }
 }
 
-/// `text` from its first whole line (see [`open_on_line`]). When it has none to open on, so it
-/// starts mid-line, it first leaves out what may be the end of a secret whose start was cut off,
-/// which redaction would no longer know ([`Redactor::without_cut_secret`]).
-fn open_window<'t>(text: &'t str, on_line: bool, redactor: &Redactor) -> &'t str {
-    let opened = open_on_line(text, on_line);
-    if on_line || opened.len() < text.len() {
-        return opened;
+/// The UTF-8 continuation bytes `bytes` starts with, at most 3: the end of a char cut off.
+fn continuation_bytes(bytes: &[u8]) -> usize {
+    bytes
+        .iter()
+        .take(3)
+        .take_while(|&&byte| byte & 0xC0 == 0x80)
+        .count()
+}
+
+/// `text` from its first whole line (see [`open_on_line`]), without what may be the end of a
+/// secret whose start was cut off ([`Redactor::without_cut_secret`]), unless it holds stderr's
+/// start (`starts`). The line it opens on may follow a `\n` inside a secret value; with no line
+/// to open on, it starts mid-line, inside a key, a token or a value.
+fn open_window<'t>(text: &'t str, starts: bool, on_line: bool, redactor: &Redactor) -> &'t str {
+    if starts {
+        return text;
     }
-    redactor.without_cut_secret(text)
+    let opened = open_on_line(text, on_line);
+    let mid_line = !on_line && opened.len() == text.len();
+    redactor.without_cut_secret(opened, mid_line)
 }
 
 /// `text` from its first whole line: all of it when `on_line` says it opens on one, else what

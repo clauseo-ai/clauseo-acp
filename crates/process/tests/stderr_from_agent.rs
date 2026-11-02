@@ -147,3 +147,70 @@ fn a_secret_value_longer_than_the_window_leaves_no_end_in_the_tail() {
     assert!(tail.starts_with(" [redacted] [redacted]"), "{tail:?}");
     assert_eq!(tail.trim_start_matches(" [redacted]"), " done\n");
 }
+
+/// The ring's size (`RING` in `src/stderr.rs`).
+const RING: usize = 256 * 1024;
+
+/// The tail when stderr is `x`s, `before`, then exactly the ring's size of `start`, a space,
+/// an `sk-` key and ` done\n`: the ring holds `start` on, cut from `before`, so the tail's
+/// window starts there, and the key redacts to 10 bytes, so nothing hides that start.
+#[cfg(test)]
+fn tail_cut_at(before: &[u8], start: &[u8], env: BTreeMap<OsString, OsString>) -> String {
+    let end = b" done\n";
+    let key = RING - start.len() - " sk-".len() - end.len();
+    let mut stderr = b"x".repeat(1_000);
+    stderr.extend_from_slice(before);
+    stderr.extend_from_slice(start);
+    stderr.extend_from_slice(b" sk-");
+    stderr.extend(std::iter::repeat_n(b'k', key));
+    stderr.extend_from_slice(end);
+    tail_with_env(&stderr, env)
+}
+
+/// One secret variable.
+#[cfg(test)]
+fn secret(name: &str, value: &str) -> BTreeMap<OsString, OsString> {
+    BTreeMap::from([(OsString::from(name), OsString::from(value))])
+}
+
+/// A window that starts inside `Bearer `, or just after it, leaves out the token after it.
+#[test]
+fn a_cut_bearer_marker_leaves_no_token_in_the_tail() {
+    for split in [1, 3, 5, 6] {
+        let (before, after) = "Authorization: Bearer ".split_at("Authorization: ".len() + split);
+        let start = format!("{after}SECRETTOK123");
+        let tail = tail_cut_at(before.as_bytes(), start.as_bytes(), BTreeMap::new());
+        assert_eq!(tail, " [redacted] done\n", "cut after {before:?}");
+    }
+}
+
+/// A window that starts inside a char of a secret value leaves out the value's end: a cut
+/// after the first of `ä`'s two bytes, or of `€`'s three.
+#[test]
+fn a_secret_value_cut_inside_a_char_leaves_no_end_in_the_tail() {
+    for value in ["pässwörd: horse battery", "p€sswörd: horse battery"] {
+        let (before, start) = value.as_bytes().split_at(2);
+        let tail = tail_cut_at(before, start, secret("AGENT_PASSWORD", value));
+        assert_eq!(tail, " [redacted] done\n", "{value:?}");
+    }
+}
+
+/// A value with a `\n`, as in a PEM key, cut so the window opens on the line after it, or
+/// starts before that `\n` and opens after it, leaves out the value's last line.
+#[test]
+fn a_secret_value_cut_at_its_newline_leaves_no_end_in_the_tail() {
+    let value = "first line pw\nsecond half secret!";
+    for cut in ["first line pw\n".len(), "first li".len()] {
+        let (before, start) = value.as_bytes().split_at(cut);
+        let tail = tail_cut_at(before, start, secret("AGENT_TOKEN", value));
+        assert_eq!(tail, " [redacted] done\n", "cut at {cut}");
+    }
+}
+
+/// Bytes that are not UTF-8 at stderr's very start still show as U+FFFD: only a window cut
+/// from what came before leaves out a char's last bytes.
+#[test]
+fn a_stray_byte_at_the_start_of_stderr_shows_as_a_replacement_char() {
+    let tail = tail_of(b"\x80 starts mid-char\n");
+    assert_eq!(tail, "\u{FFFD} starts mid-char\n");
+}
