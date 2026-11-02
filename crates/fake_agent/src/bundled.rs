@@ -27,6 +27,7 @@ macro_rules! bundled {
 bundled! {
     scenarios: [
         "auth-required",
+        "auth-required-titled",
         "cancel-late-updates",
         "cancel-unanswered",
         "codex-auth-required",
