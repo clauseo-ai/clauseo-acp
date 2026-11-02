@@ -40,7 +40,8 @@ export type Who =
    * made in the same minute stay apart. */
   | { kind: "undo"; of: string }
   /** The papers first brought into the matter. */
-  | { kind: "import"; n: number }
+  /** n: how many documents, or null where the count isn't known. */
+  | { kind: "import"; n: number | null }
   /** A restore to the version with id `to`. Its time and day are read from that version when shown, as undo's are. */
   | { kind: "restore"; to: string }
   /** An undo of the restore with id `of`. Its time and day are read from that restore when shown. */
@@ -129,7 +130,11 @@ export function whoOf(lang: Lang, cal: Calendar, v: Version, all: readonly Versi
         : vt(lang, "Undo of the change at {time} on {date}", when(lang, cal, of));
     }
     case "import":
-      return vt(lang, "Imported {n} documents", { n: w.n });
+      return w.n === null
+        ? vt(lang, "Imported the matter's documents")
+        : w.n === 1
+          ? vt(lang, "Imported 1 document")
+          : vt(lang, "Imported {n} documents", { n: w.n });
     case "restore": {
       const to = all.find((x) => x.id === w.to);
       // the version restored isn't in the history passed in: say what it is without its time

@@ -23,6 +23,8 @@ import type {
   ViewPatchBody,
 } from "../transport/protocol.ts";
 import type { Entry } from "./entry.ts";
+import { detailed, fakeNext } from "../room/fake-next.ts";
+import { NO_STAND_INS, type StandIns } from "../room/versions/stand-ins.ts";
 import { RoomClicking } from "./states.tsx";
 import { versionWords, type WordsRef } from "./words.ts";
 
@@ -97,6 +99,13 @@ type Matter = {
   compare?: FileChange[];
   /** preview_restore's answer, past its changes. */
   kept?: string[];
+  added?: string[];
+  /** The unsaved change was made this many days ago (today by default). */
+  unsavedDays?: number;
+  /** How many documents the import brought in; null: the header doesn't say. */
+  imported?: number | null;
+  /** H8's papers, with H11's open_file passed to the room: the sheet can open the file now. */
+  openable?: boolean;
 };
 
 /** The matter's history: its papers brought in three days ago, a turn of the conversation's that morning, the
@@ -112,7 +121,13 @@ function versionsHost(m: Matter): FakeTransport {
   const steps = [
     stepEntry(9, { files, checkpoint_after: "cp2" }),
     ...(m.unsaved === true
-      ? [stepEntry(19, { turn: UNSAVED_TURN, files: [file(REPLY)], ts: today(20) })]
+      ? [
+          stepEntry(19, {
+            turn: UNSAVED_TURN,
+            files: [file(REPLY)],
+            ts: m.unsavedDays === undefined ? today(20) : atLocal(-m.unsavedDays, 11, 15),
+          }),
+        ]
       : []),
   ];
   const matterReset: ViewPatchBody = {
@@ -124,7 +139,9 @@ function versionsHost(m: Matter): FakeTransport {
             matter: MATTER,
             name: THE_MATTER.name,
             kind: "folder",
-            import: { files: 3, bytes: 1000, cloud_only: 0 },
+            ...(m.imported === null
+              ? {}
+              : { import: { files: m.imported ?? 3, bytes: 1000, cloud_only: 0 } }),
           },
         },
         entries: versions,
@@ -135,11 +152,20 @@ function versionsHost(m: Matter): FakeTransport {
   const status = m.running === true ? "running" : "idle";
   const preview: RestorePreview = {
     changes: [file(NOTICE)],
-    added_since: [],
+    added_since: m.added ?? [],
     kept: m.kept ?? [],
     locked: [],
   };
+  const papers = (m.compare ?? []).map((f, i) => ({
+    file: `ref-${i}`,
+    path: f.path,
+    size: f.size_bytes,
+    modified: today(0),
+  }));
   const transport: FakeTransport = new FakeTransport({
+    ...(m.openable === true
+      ? { next: fakeNext({ matters: () => [detailed(THE_MATTER)], papers, parts: ["papers"] }) }
+      : {}),
     query: (query) => {
       if (query === "list_matters") return { matters: [THE_MATTER] };
       if (typeof query !== "object") throw new Error(`not scripted: ${JSON.stringify(query)}`);
@@ -213,10 +239,20 @@ const state = (id: string, words: WordsRef, m: Matter, clicks: readonly string[]
   words,
   screen: "room/versions",
   ...WINDOW,
-  render: () => <RoomClicking host={() => versionsHost(m)} clicks={clicks} />,
+  render: () => (
+    <RoomClicking
+      host={() => versionsHost(m)}
+      clicks={clicks}
+      standIns={m.openable === true ? OPENS : NO_STAND_INS}
+    />
+  ),
 });
 
 const SHEET = [file(NOTICE)];
+/** A PDF, whose sheet shows both sides and says a PDF shows only whether it changed. */
+const PDF_SHEET = [file("Annexure 3.pdf")];
+/** H11's open_file, standing in on the review page: it opens nothing. */
+const OPENS: StandIns = { openFile: async () => undefined };
 
 /** U8's entries, each id written as it is: an id never moves when an entry is added or taken out. */
 export const U8: Entry[] = [
@@ -230,7 +266,9 @@ export const U8: Entry[] = [
   ),
   state(
     "U8-03",
-    versionWords("Clauseo changed {paper}, and the change couldn't be kept as a version."),
+    versionWords(
+      "Clauseo changed {paper} at {time}, and the change couldn't be kept as a version. {paper} stands as Clauseo left it.",
+    ),
     { unsaved: true },
     [OPEN],
   ),
@@ -247,12 +285,12 @@ export const U8: Entry[] = [
     TODAY,
     COMPARE,
   ]),
-  state("U8-09", versionWords("As it was at {time} on {date}"), { compare: SHEET }, [
+  state("U8-09", versionWords("As it was at {time} on {date}"), { compare: PDF_SHEET }, [
     OPEN,
     EARLIER,
     COMPARE,
   ]),
-  state("U8-10", versionWords("As it was at {time} today"), { compare: SHEET }, [
+  state("U8-10", versionWords("As it was at {time} today"), { compare: PDF_SHEET }, [
     OPEN,
     TODAY,
     COMPARE,
@@ -266,7 +304,7 @@ export const U8: Entry[] = [
   // the undo dialog's rows for a document that may hold the lawyer's own edits
   state(
     "U8-12",
-    versionWords("It may hold your own edits"),
+    versionWords("Changed during the answer, though Clauseo didn't say it was changing it."),
     { files: [file(NOTICE, true), file(REPLY)] },
     [OPEN, EARLIER, UNDO],
   ),
@@ -288,5 +326,38 @@ export const U8: Entry[] = [
     versionWords("Choose for each document."),
     { files: [file(NOTICE, true), file(REPLY)], outside: [file(REPLY)] },
     [OPEN, EARLIER, UNDO],
+  ),
+  // a change that couldn't be kept, two days ago: the line says its day
+  state(
+    "U8-16",
+    versionWords(
+      "Clauseo changed {paper} at {time} on {day}, and the change couldn't be kept as a version. {paper} stands as Clauseo left it.",
+    ),
+    { unsaved: true, unsavedDays: 2 },
+    [OPEN],
+  ),
+  state("U8-17", versionWords("Imported 1 document"), { imported: 1 }, [OPEN]),
+  state("U8-18", versionWords("Imported the matter's documents"), { imported: null }, [OPEN]),
+  state("U8-19", versionWords("A PDF shows only whether it changed."), { compare: PDF_SHEET }, [
+    OPEN,
+    EARLIER,
+    COMPARE,
+  ]),
+  state("U8-20", versionWords("Open each to read it."), { compare: PDF_SHEET, openable: true }, [
+    OPEN,
+    EARLIER,
+    COMPARE,
+  ]),
+  state(
+    "U8-21",
+    versionWords("'{papers}' can't be restored and stay as they are."),
+    { kept: ["Annexure 3.pdf", "Annexure 4.pdf"] },
+    [OPEN, EARLIER, RESTORE],
+  ),
+  state(
+    "U8-22",
+    versionWords("'{papers}', added since, stay."),
+    { added: ["Rejoinder.docx", "Synopsis.docx"] },
+    [OPEN, EARLIER, RESTORE],
   ),
 ];

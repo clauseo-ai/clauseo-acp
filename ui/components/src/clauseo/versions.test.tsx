@@ -352,6 +352,32 @@ test("the sheets: the blackline keeps the lawyer's weight, a PDF says only chang
   expect(document.querySelectorAll(".ver-dates [data-change]").length).toBe(3);
 });
 
+test("a PDF's sheet asks the lawyer to open each only where it can open them, and a bare document shows its title alone", async () => {
+  const side = { head: "As it was at 3:42 pm on 9 March", facts: "", saved: "" };
+  const now = { ...side, head: "As it is now" };
+  const sheet = (over: Partial<Parameters<typeof PdfSheet>[0]>) => (
+    <PdfSheet
+      title="Exhibit"
+      changed
+      state="Changed since 3:42 pm on 9 March"
+      then={side}
+      now={now}
+      {...over}
+    />
+  );
+  await show(sheet({}));
+  expect(words()).toContain("A PDF shows only whether it changed.");
+  expect(words()).not.toContain("Open each to read it.");
+  expect(document.querySelectorAll(".ver-pdf-side")).toHaveLength(2);
+  await act(async () => root?.render(sheet({ onOpen: () => undefined })));
+  expect(words()).toContain("A PDF shows only whether it changed. Open each to read it.");
+  // a document whose words can't be compared yet, with nothing to say of either side: the title and the state alone
+  await act(async () => root?.render(sheet({ pdf: false })));
+  expect(document.querySelectorAll(".ver-pdf-side")).toHaveLength(0);
+  expect(one(".ver-pdf-state").textContent).toBe("Changed since 3:42 pm on 9 March");
+  expect(words()).not.toContain("A PDF shows");
+});
+
 const MATTER: MatterData = {
   papers: [
     { id: "plaint", title: "Plaint", pb: { from: 1, to: 6 }, kind: "pleading" },

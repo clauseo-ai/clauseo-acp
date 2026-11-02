@@ -40,6 +40,9 @@ const HI = {
   "Undo of a change": "बदलाव पूर्ववत किया गया",
   "Undo of the change at {time} on {date}": "{date} को {time} बजे का बदलाव पूर्ववत किया गया",
   "Imported {n} documents": "{n} दस्तावेज़ आयात किए गए",
+  "Imported 1 document": "1 दस्तावेज़ आयात किया गया",
+  // an import whose count the matter's header doesn't give
+  "Imported the matter's documents": "मामले के दस्तावेज़ आयात किए गए",
   "Restore to {time} on {date}": "{date}, {time} बजे पर पुनर्स्थापित",
   "Restore to {time} today": "आज {time} बजे पर पुनर्स्थापित",
   "Undo of a restore": "पुनर्स्थापन पूर्ववत किया गया",
@@ -60,6 +63,9 @@ const HI = {
   "Documents that differ from now": "जो दस्तावेज़ अब अलग हैं",
   "A PDF shows only whether it changed. Open each to read it.":
     "PDF के बारे में केवल इतना दिखता है कि वह बदला या नहीं। पढ़ने के लिए हर एक को खोलें।",
+  // the sentence in two, its second half only where the sheet has a way to open the file
+  "A PDF shows only whether it changed.": "PDF के बारे में केवल इतना दिखता है कि वह बदला या नहीं।",
+  "Open each to read it.": "पढ़ने के लिए हर एक को खोलें।",
   "As it is now": "जैसा अभी है",
   "Open as it was": "जैसा था वैसा खोलें",
   "Open now": "अभी वाला खोलें",
@@ -85,8 +91,11 @@ const HI = {
   "Nothing will change. The matter already stands as it did then.":
     "कुछ नहीं बदलेगा। मामला पहले से वैसा ही है जैसा तब था।",
   "'{papers}', added since, stays.": "बाद में जोड़ा गया '{papers}' बना रहेगा।",
+  "'{papers}', added since, stay.": "बाद में जोड़े गए '{papers}' बने रहेंगे।",
   "'{papers}' can't be restored and stays as it is.":
     "'{papers}' पुनर्स्थापित नहीं हो सकता और जैसा है वैसा ही रहेगा।",
+  "'{papers}' can't be restored and stay as they are.":
+    "'{papers}' पुनर्स्थापित नहीं हो सकते और जैसे हैं वैसे ही रहेंगे।",
   "Close '{file}' in Word to restore it.": "पुनर्स्थापित करने के लिए Word में '{file}' बंद करें।",
   "Close '{file}' in Word to undo the change.": "बदलाव पूर्ववत करने के लिए Word में '{file}' बंद करें।",
   "Word holds the file while it is open. Nothing has changed yet.":
@@ -123,16 +132,19 @@ const HI = {
   "Changed by you, outside Clauseo, at {time}": "आपने Clauseo के बाहर {time} बजे बदला",
   "Changed by Clauseo at {time}": "Clauseo ने {time} बजे बदला",
   "For {title}": "{title} के लिए",
-  // a document the watcher saw change during the answer with no edit of Clauseo's: kept unless the lawyer says
-  "It may hold your own edits": "इसमें आपके अपने बदलाव हो सकते हैं",
+  // a document the watcher saw change during the answer with no edit of Clauseo's to match: kept unless the lawyer says
+  "Changed during the answer, though Clauseo didn't say it was changing it.":
+    "जवाब के दौरान बदला गया, हालाँकि Clauseo ने इसे बदलने की बात नहीं कही।",
   "1 document may hold your own edits.": "1 दस्तावेज़ में आपके अपने बदलाव हो सकते हैं।",
   "{n} documents may hold your own edits.": "{n} दस्तावेज़ों में आपके अपने बदलाव हो सकते हैं।",
   "Choose for each document.": "हर दस्तावेज़ के लिए चुनें।",
   "Undid the change at {time}. {papers} went back, and the undo is a version of its own.":
     "{time} बजे का बदलाव पूर्ववत किया गया। {papers} पहले जैसे हो गए, और यह पूर्ववत करना एक अलग संस्करण है।",
   // a version that couldn't be saved
-  "Clauseo changed {paper}, and the change couldn't be kept as a version.":
-    "Clauseo ने {paper} बदला, पर यह बदलाव संस्करण के रूप में नहीं रखा जा सका।",
+  "Clauseo changed {paper} at {time}, and the change couldn't be kept as a version. {paper} stands as Clauseo left it.":
+    "Clauseo ने {time} बजे {paper} बदला, पर यह बदलाव संस्करण के रूप में नहीं रखा जा सका। {paper} वैसा ही है जैसा Clauseo ने छोड़ा।",
+  "Clauseo changed {paper} at {time} on {day}, and the change couldn't be kept as a version. {paper} stands as Clauseo left it.":
+    "Clauseo ने {day} को {time} बजे {paper} बदला, पर यह बदलाव संस्करण के रूप में नहीं रखा जा सका। {paper} वैसा ही है जैसा Clauseo ने छोड़ा।",
   "Not kept as a version.": "संस्करण के रूप में नहीं रखा गया।",
   // where the history lives
   "Where versions are kept": "संस्करण कहाँ रखे जाते हैं",

@@ -3,6 +3,7 @@
 // matter, a name, Change, Create), or after one control in the thread is pressed.
 import { useEffect, useRef, useState } from "react";
 import { Room } from "../room/room.tsx";
+import type { StandIns } from "../room/versions/stand-ins.ts";
 import { frameBatch } from "../store/batch.ts";
 import { StoreContext } from "../store/hooks.ts";
 import { createViewStore } from "../store/store.ts";
@@ -10,12 +11,19 @@ import type { FakeTransport } from "../transport/fake-transport.ts";
 import type { Step } from "./hosts.ts";
 
 /** The room over the transport `host` builds, built once for the frame's life. */
-export function RoomOver({ host }: { host: () => FakeTransport }) {
+export function RoomOver({
+  host,
+  standIns,
+}: {
+  host: () => FakeTransport;
+  /** Optional: what Versions can do once host changes land, passed to the room as the page wants it. */
+  standIns?: StandIns;
+}) {
   const [transport] = useState(host);
   const [store] = useState(() => createViewStore(transport, { batch: () => frameBatch }));
   return (
     <StoreContext value={store}>
-      <Room transport={transport} />
+      <Room transport={transport} standIns={standIns} />
     </StoreContext>
   );
 }
@@ -92,9 +100,11 @@ export function RoomPressing({ host, press }: { host: () => FakeTransport; press
 export function RoomClicking({
   host,
   clicks,
+  standIns,
 }: {
   host: () => FakeTransport;
   clicks: readonly string[];
+  standIns?: StandIns;
 }) {
   // how far along, kept across Strict Mode's second run, so no control is pressed twice
   const done = useRef(0);
@@ -117,7 +127,7 @@ export function RoomClicking({
       watch.disconnect();
     };
   }, [clicks]);
-  return <RoomOver host={host} />;
+  return <RoomOver host={host} {...(standIns === undefined ? {} : { standIns })} />;
 }
 
 /** The room over `host`, then `steps` taken in order as the lawyer would, each once the last has settled. */

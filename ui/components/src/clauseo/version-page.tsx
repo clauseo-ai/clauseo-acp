@@ -192,6 +192,10 @@ export function PdfSheet({
       )}
     </div>
   );
+  // a document whose words can't be compared yet, with nothing to say of either side and no way to open it: its title
+  // and whether it changed alone
+  const bare = (s: PdfSide) => s.facts === "" && s.saved === "";
+  const pair = pdf || onOpen !== undefined || !bare(then) || !bare(now);
   return (
     <article className="ver-pdf" aria-label={title}>
       <header className="ver-pdf-head">
@@ -207,13 +211,22 @@ export function PdfSheet({
           </span>
         </span>
       </header>
-      <div className="ver-pdf-pair">
-        {side(then, "then")}
-        {changed && side(now, "now")}
-      </div>
+      {pair && (
+        <div className="ver-pdf-pair">
+          {side(then, "then")}
+          {changed && side(now, "now")}
+        </div>
+      )}
       {pdf && (
         <p className="ver-pdf-note">
-          <Say>{w.v("A PDF shows only whether it changed. Open each to read it.")}</Say>
+          <Say>{w.v("A PDF shows only whether it changed.")}</Say>
+          {/* the way to read each stands only where the sheet can open them */}
+          {onOpen !== undefined && (
+            <>
+              {" "}
+              <Say>{w.v("Open each to read it.")}</Say>
+            </>
+          )}
         </p>
       )}
     </article>
