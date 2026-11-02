@@ -1,6 +1,7 @@
 //! The allow-lists of `dispatch` and `query` (`Bridge::admit`): every call the R12 window
 //! (`ui/app/src/internal/session.ts`) and the room make today passes, and every command the
-//! bridge refuses is refused before any window has opened its stream.
+//! bridge refuses is refused before any window has opened its stream. The settings window
+//! sends `SetUiSettings` and reads `GetSettings`, nothing else; another label nothing (0028).
 
 use clauseo_protocol::{MatterId, ThreadId};
 use serde_json::json;
@@ -49,7 +50,7 @@ fn every_command_and_read_the_windows_send_today_is_admitted() {
         json!({"refresh_limits": {"agent": null, "why": "try_again"}}),
     ];
     for body in commands {
-        let admitted = bridge.admit(&command(body.clone()));
+        let admitted = bridge.admit(MAIN, &command(body.clone()));
         assert!(admitted.is_ok(), "{body}: {admitted:?}");
     }
     // Every read the windows make answers through the bridge, with no window open.
@@ -63,7 +64,7 @@ fn every_command_and_read_the_windows_send_today_is_admitted() {
         json!("list_agents"),
     ];
     for body in reads {
-        let answer = block_on(bridge.query(read(body.clone())));
+        let answer = block_on(bridge.query(MAIN, read(body.clone())));
         assert!(answer.is_ok(), "{body}: {answer:?}");
     }
 }
@@ -92,7 +93,7 @@ fn every_refused_command_is_refused_before_open_stream() {
         ),
     ];
     for refused in refused {
-        let refusal = block_on(bridge.dispatch(envelope(refused.clone()))).unwrap_err();
+        let refusal = block_on(bridge.dispatch(MAIN, envelope(refused.clone()))).unwrap_err();
         assert_eq!(
             refusal.code(),
             ErrorCode::CommandInvalid,
@@ -100,9 +101,46 @@ fn every_refused_command_is_refused_before_open_stream() {
         );
     }
     assert!(bridge.window(MAIN).is_err(), "no window opened its stream");
-    let matters = block_on(bridge.query(HostQuery::ListMatters)).unwrap();
+    let matters = block_on(bridge.query(MAIN, HostQuery::ListMatters)).unwrap();
     let QueryResult::Matters(matters) = matters else {
         panic!("{matters:?}");
     };
     assert_eq!(matters.len(), 1, "only the Scratch matter: {matters:?}");
+}
+
+/// The settings window may send `SetUiSettings` and read `GetSettings`, and is refused every
+/// other command and read with `command.invalid`, before the host sees it. A window of any other
+/// label is refused everything.
+#[test]
+fn the_settings_window_sets_and_reads_the_settings_only() {
+    let scratch = Scratch::new("admit-settings", &[]);
+    let host = scratch.start(Vec::new());
+    let thread = host.thread();
+    let bridge = host.bridge();
+    let set = command(json!({"set_ui_settings": {"patch": {"theme": "dark"}}}));
+    assert!(bridge.admit(SETTINGS, &set).is_ok());
+    let cancel = command(json!({"cancel": {"thread": thread}}));
+    let create = command(json!({"create_thread": {"matter": host.scratch(), "agent": "fake"}}));
+    for refused in [cancel, create] {
+        let refusal = block_on(bridge.dispatch(SETTINGS, envelope(refused.clone()))).unwrap_err();
+        assert_eq!(refusal.code(), ErrorCode::CommandInvalid, "{refused:?}");
+    }
+    let outcome = block_on(bridge.dispatch(SETTINGS, envelope(set.clone())));
+    assert!(outcome.is_ok(), "{outcome:?}");
+    let read_settings = block_on(bridge.query(SETTINGS, HostQuery::GetSettings));
+    assert!(
+        matches!(read_settings, Ok(QueryResult::Settings(_))),
+        "{read_settings:?}"
+    );
+    for body in [
+        json!("list_matters"),
+        json!({"list_threads": {"matter": host.scratch()}}),
+    ] {
+        let refusal = block_on(bridge.query(SETTINGS, read(body.clone()))).unwrap_err();
+        assert_eq!(refusal.code(), ErrorCode::CommandInvalid, "{body}");
+    }
+    let other = bridge.admit("other", &set).unwrap_err();
+    assert_eq!(other.code(), ErrorCode::CommandInvalid);
+    let other = block_on(bridge.query("other", HostQuery::GetSettings)).unwrap_err();
+    assert_eq!(other.code(), ErrorCode::CommandInvalid);
 }

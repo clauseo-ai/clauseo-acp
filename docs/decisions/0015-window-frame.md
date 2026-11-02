@@ -80,11 +80,14 @@ windowed controller (`CreateCoreWebView2Controller`, `wry/src/webview2/mod.rs`),
   no command sets a window's size, position, title, decorations or any other property, and none
   reaches another plugin.
 - Tauri's window commands take an optional `label`, so script in the page can aim them at any
-  window of the app. `main` is the only window, and a test fails when the app builds another. A
-  second window (H14's settings window) must not be reachable that way: it either gets these
-  commands through label-free commands of our own, or its record shows why reaching it is
-  harmless.
-- A closed window goes through the same exit path as the OS close button.
+  window of the app. The app builds `main` and, since [0028](0028-settings-window.md), `settings`,
+  which has the same frame and the same grants; a test fails when it builds a third. Each page
+  can so drag, zoom, minimise, maximise or close the other. 0028 records why that is harmless:
+  neither window holds state the bridge or the host does not keep, closing `settings` only
+  destroys it, and closing `main` was already in the page's reach and ends the app as its own
+  close button does. No command reaches a window's size, position, content or another plugin.
+- A closed window goes through the same exit path as the OS close button. Destroying `main`
+  destroys `settings` too, so the app still ends when `main` closes.
 - The frame's native code is Windows-only and lives in `crates/desktop/src/window_frame/`.
 - The double-click on the Mac zooms, as Tauri's drag script does. It does not follow the system's
   "Double-click a window's title bar to" preference (`AppleActionOnDoubleClick`: zoom, fill,

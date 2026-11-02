@@ -49,7 +49,7 @@ fn a_query_sent_while_the_host_starts_waits_and_is_answered() {
     let scratch = Scratch::new("held-start", &[]);
     let (cell, bridge, release) = held_start(scratch.config(Vec::new()));
 
-    let mut query = Box::pin(bridge.query(HostQuery::ListMatters));
+    let mut query = Box::pin(bridge.query(crate::MAIN_WINDOW, HostQuery::ListMatters));
     assert!(
         (&mut query).now_or_never().is_none(),
         "answered before the host started"
@@ -71,13 +71,13 @@ fn after_a_failed_start_every_call_gets_its_store_code() {
     let first = scratch.start(Vec::new());
     let (cell, bridge, release) = held_start(scratch.config(Vec::new()));
 
-    let mut waiting = Box::pin(bridge.query(HostQuery::ListMatters));
+    let mut waiting = Box::pin(bridge.query(crate::MAIN_WINDOW, HostQuery::ListMatters));
     assert!((&mut waiting).now_or_never().is_none());
     release.send(()).unwrap();
     let refusal = block_on(waiting).unwrap_err();
     assert_eq!(refusal.code(), ErrorCode::StoreLocked, "{refusal:?}");
 
-    let later = block_on(bridge.query(HostQuery::GetSettings)).unwrap_err();
+    let later = block_on(bridge.query(crate::MAIN_WINDOW, HostQuery::GetSettings)).unwrap_err();
     assert_eq!(later.code(), ErrorCode::StoreLocked, "{later:?}");
     let (channel, _messages) = collector();
     let stream = block_on(bridge.open_stream("main", channel)).unwrap_err();
@@ -109,7 +109,7 @@ fn exit_while_the_host_starts_waits_for_it_then_stops_it() {
     assert!(matches!(cell.started.get(), Some(Ok(_))));
     // The host thread was joined, and the host answers no more: shut down, not unstarted.
     assert!(lock(&cell.join).is_none());
-    let after = block_on(bridge.query(HostQuery::ListMatters)).unwrap_err();
+    let after = block_on(bridge.query(crate::MAIN_WINDOW, HostQuery::ListMatters)).unwrap_err();
     assert_eq!(after.code(), ErrorCode::Internal, "{after:?}");
     assert_ne!(after.message(), NO_OUTCOME, "{after:?}");
 }
@@ -153,7 +153,8 @@ fn a_reload_while_the_host_starts_keeps_the_new_pages_channel() {
         }
 
         // A subscription reaches the new page's channel, and nothing the dead one.
-        let QueryResult::Matters(matters) = block_on(bridge.query(HostQuery::ListMatters)).unwrap()
+        let QueryResult::Matters(matters) =
+            block_on(bridge.query(crate::MAIN_WINDOW, HostQuery::ListMatters)).unwrap()
         else {
             panic!("no matter list");
         };

@@ -1,4 +1,6 @@
-use super::{DAY_GROUND, NIGHT_GROUND, WINDOW_SIZE, fitted, ground, state_denylist};
+use super::{
+    DAY_GROUND, NIGHT_GROUND, SETTINGS_SIZE, WINDOW_SIZE, fit, fitted, ground, state_denylist,
+};
 use std::path::Path;
 
 /// `actual` and `expected` are equal to within a hundredth of a pixel.
@@ -24,11 +26,23 @@ fn a_small_work_area_takes_ninety_percent_per_dimension() {
 }
 
 #[test]
-fn the_state_denylist_holds_main_only_in_the_e2e_build() {
+fn the_settings_window_fits_its_own_size_the_same_way() {
+    assert_eq!(SETTINGS_SIZE, (960.0, 700.0));
+    assert_eq!(fit(SETTINGS_SIZE, None), SETTINGS_SIZE);
+    assert_eq!(fit(SETTINGS_SIZE, Some((1920.0, 1080.0))), SETTINGS_SIZE);
+    assert!(close(
+        fit(SETTINGS_SIZE, Some((1024.0, 738.0))),
+        (921.6, 664.2)
+    ));
+}
+
+/// `settings` is never restored (it opens at its size, centred); `main` only in the e2e build.
+#[test]
+fn the_state_denylist_holds_settings_always_and_main_in_the_e2e_build() {
     if cfg!(feature = "e2e") {
-        assert_eq!(state_denylist(), &["main"]);
+        assert_eq!(state_denylist(), &["main", "settings"]);
     } else {
-        assert_eq!(state_denylist(), [] as [&str; 0]);
+        assert_eq!(state_denylist(), &["settings"]);
     }
 }
 

@@ -170,10 +170,10 @@ fn the_page_puts_its_caption_buttons_where_the_native_window_stands() {
     );
 }
 
-/// `file`'s capability, after checking it grants to `main` alone, and its core permissions.
-fn core_permissions(file: &str) -> (Value, BTreeSet<String>) {
+/// `file`'s capability, after checking it grants to `windows` alone, and its core permissions.
+fn core_permissions(file: &str, windows: &[&str]) -> (Value, BTreeSet<String>) {
     let capability: Value = serde_json::from_str(&read(file)).unwrap();
-    assert_eq!(capability["windows"], json!(["main"]), "{file}");
+    assert_eq!(capability["windows"], json!(windows), "{file}");
     let core = capability["permissions"]
         .as_array()
         .unwrap()
@@ -190,16 +190,23 @@ fn set(list: &[&str]) -> BTreeSet<String> {
         .collect()
 }
 
+/// Both windows have the room's frame (0028): each grants the drag pair, and frame.json the
+/// caption buttons' four to both.
 #[test]
-fn main_grants_the_drag_permissions_and_frame_the_caption_ones_on_windows_and_linux() {
-    let (_main, core) = core_permissions("capabilities/main.json");
+fn main_and_settings_grant_the_drag_permissions_and_frame_the_caption_ones_on_windows_and_linux() {
+    let (_main, core) = core_permissions("capabilities/main.json", &["main"]);
     assert_eq!(core, set(DRAG_PERMISSIONS), "capabilities/main.json");
-    let (frame, core) = core_permissions("capabilities/frame.json");
+    let (_settings, core) = core_permissions("capabilities/settings.json", &["settings"]);
+    assert_eq!(core, set(DRAG_PERMISSIONS), "capabilities/settings.json");
+    let (frame, core) = core_permissions("capabilities/frame.json", &["main", "settings"]);
     assert_eq!(core, set(CAPTION_PERMISSIONS), "capabilities/frame.json");
     assert_eq!(frame["platforms"], json!(["windows", "linux"]));
-    // Only main is in the context; grant_caption_commands adds frame at setup.
+    // main and settings are in the context; grant_caption_commands adds frame at setup.
     let config: Value = serde_json::from_str(&read("tauri.conf.json")).unwrap();
-    assert_eq!(config["app"]["security"]["capabilities"], json!(["main"]));
+    assert_eq!(
+        config["app"]["security"]["capabilities"],
+        json!(["main", "settings"])
+    );
     for permission in DRAG_PERMISSIONS.iter().chain(CAPTION_PERMISSIONS) {
         // One command each, of the window plugin: no default set, no scope, nothing that sets a
         // window's properties or reaches another plugin.
@@ -252,10 +259,17 @@ fn denied(answer: &Result<Value, Value>) -> bool {
 /// never on the Mac, and a command no capability names never.
 #[test]
 fn the_caption_commands_answer_only_with_the_frame_capability() {
+    for label in ["main", "settings"] {
+        caption_commands_answer_only_with_the_frame_capability(label);
+    }
+}
+
+/// [`the_caption_commands_answer_only_with_the_frame_capability`] for the window `label`.
+fn caption_commands_answer_only_with_the_frame_capability(label: &str) {
     let app = mock_builder()
         .build(crate::context::<MockRuntime>())
         .unwrap();
-    let window = WebviewWindowBuilder::new(&app, "main", WebviewUrl::default())
+    let window = WebviewWindowBuilder::new(&app, label, WebviewUrl::default())
         .build()
         .unwrap();
     for command in ["start_dragging", "internal_toggle_maximize"] {
@@ -311,10 +325,12 @@ fn sources(dir: &Path, out: &mut Vec<(String, String)>) {
     }
 }
 
-/// Tauri's window commands take a `label` and act on any window of the app, so the page's grant
-/// reaches every window there is. `main` must stay the only one until a record says otherwise.
+/// Tauri's window commands take a `label` and act on any window of the app, so a page's grant
+/// reaches every window there is. The app builds `main` (`lib.rs`) and `settings`
+/// (`settings_window.rs`), whose mutual reach 0028 records as harmless; any other window needs
+/// a record first.
 #[test]
-fn main_is_the_only_window_the_app_builds() {
+fn main_and_settings_are_the_only_windows_the_app_builds() {
     let mut files = Vec::new();
     sources(&manifest_dir().join("src"), &mut files);
     let builders: Vec<String> = files
@@ -336,11 +352,20 @@ fn main_is_the_only_window_the_app_builds() {
         .collect();
     assert_eq!(
         builders.len(),
-        1,
-        "{builders:?}: the app builds a window besides main. The page's window commands \
-         (capabilities/main.json, frame.json) take a label and would reach it: read \
-         docs/decisions/0015-window-frame.md, and give the new window label-free commands or \
-         record why reaching it is harmless"
+        2,
+        "{builders:?}: the app builds a window besides main and settings. The pages' window \
+         commands (capabilities/main.json, settings.json, frame.json) take a label and would \
+         reach it: read docs/decisions/0015-window-frame.md and 0028-settings-window.md, and \
+         give the new window label-free commands or record why reaching it is harmless"
     );
-    assert!(builders[0].ends_with("lib.rs"), "{builders:?}");
+    let mut places: Vec<&str> = builders.iter().map(String::as_str).collect();
+    places.sort_unstable();
+    assert!(
+        places[0].ends_with("lib.rs") && places[1].ends_with("settings_window.rs"),
+        "{builders:?}"
+    );
+    let lib = read("src/lib.rs");
+    assert!(lib.contains("WebviewWindowBuilder::new(app, MAIN_WINDOW,"));
+    let settings = read("src/settings_window.rs");
+    assert!(settings.contains("WebviewWindowBuilder::new(manager, SETTINGS_WINDOW,"));
 }

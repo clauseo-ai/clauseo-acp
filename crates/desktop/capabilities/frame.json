@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "frame",
-  "description": "Added at setup by grant_caption_commands in src/window_frame.rs, on Windows and Linux, and tauri.conf.json does not name it. Grants the main window the caption buttons' window commands, CAPTION_PERMISSIONS in src/window_frame.rs (docs/decisions/0015-window-frame.md): minimise, maximise or restore, close, and whether it is maximised. The Mac's own traffic lights need none of them.",
-  "windows": ["main"],
+  "description": "Added at setup by grant_caption_commands in src/window_frame.rs, on Windows and Linux, and tauri.conf.json does not name it. Grants the main and settings windows the caption buttons' window commands, CAPTION_PERMISSIONS in src/window_frame.rs (docs/decisions/0015-window-frame.md): minimise, maximise or restore, close, and whether it is maximised. The Mac's own traffic lights need none of them.",
+  "windows": ["main", "settings"],
   "platforms": ["windows", "linux"],
   "permissions": [
     "core:window:allow-minimize",

@@ -1,4 +1,4 @@
-//! The limits on each window's channel (`open_stream` follows them), and the refresh the main
+//! The limits on `main`'s channel (`open_stream` follows them there alone), and the refresh the main
 //! window's focus asks for (`on_window_event` in `lib.rs`, then `Bridge::shown`). A scripted
 //! reader stands in for the limits readers: it records each read and answers only when the test
 //! says, so no reader process starts.
@@ -20,10 +20,7 @@ use tauri::{Manager as _, WebviewUrl, WebviewWindow, WebviewWindowBuilder, Windo
 
 use super::*;
 use crate::host_start::{HostCell, stop};
-use crate::test_support::{Messages, Running};
-
-/// The second window's label.
-const SECOND: &str = "second";
+use crate::test_support::{Messages, Running, collector};
 
 /// How long a test waits for the host to start a read. A bound, not a sleep.
 const READ_WAIT: Duration = Duration::from_secs(20);
@@ -109,22 +106,39 @@ fn next_view(messages: &Messages) -> LimitsView {
     view(messages.next_limits())
 }
 
-/// Each window's channel gets the current view at open and then each change, and those
-/// messages count toward its acks like any other.
+/// `main`'s channel gets the current view at open and then each change, and those messages
+/// count toward its acks like any other. The settings window's channel gets no limits at all:
+/// no subscription, so no view and no change (0028).
 #[test]
-fn each_window_gets_the_limits_view_then_each_change_and_acks_count_them() {
+fn only_main_gets_the_limits_view_then_each_change_and_acks_count_them() {
     let scratch = Scratch::with_limits("limits-windows");
     let (host, reads, _clock) = start(&scratch);
     let bridge = host.bridge();
-    // `open` checks each window's first message is the view.
+    // `open` checks the window's first message is the view.
     let main = open(&bridge, MAIN);
-    let second = open(&bridge, SECOND);
+    let (channel, settings) = collector();
+    block_on(bridge.open_stream(SETTINGS, channel)).unwrap();
+    let settings_window = bridge.window(SETTINGS).unwrap();
+    assert_eq!(
+        lock(&settings_window)
+            .state()
+            .feeds()
+            .restart_id(Feed::Limits),
+        None,
+        "the settings window follows the limits"
+    );
 
     // The start-up read answers: no account is signed in, which changes the view.
     reads.answer(ReadOutcome::SignedOut);
     let changed = next_view(&main);
     assert!(changed.0.contains_key(&AgentKind::Claude), "{changed:?}");
-    assert_eq!(next_view(&second), changed);
+    // `main` got the change, so the settings window would have by now.
+    assert_eq!(settings.drain(), Vec::<String>::new());
+    assert_eq!(
+        settings.limits_received(),
+        0,
+        "the settings window got limits"
+    );
 
     // Two messages each: the view at open and the change.
     let window = bridge.window(MAIN).unwrap();
@@ -134,7 +148,6 @@ fn each_window_gets_the_limits_view_then_each_change_and_acks_count_them() {
     block_on(bridge.ack(MAIN, Vec::new(), 2)).unwrap();
     assert_eq!(lock(&window).state().unacked_bytes(), 0);
     assert_eq!(main.drain(), Vec::<String>::new());
-    assert_eq!(second.drain(), Vec::<String>::new());
 }
 
 /// The watchdog, with the view unacknowledged for 5 s, renews the limits subscription: the new
@@ -187,8 +200,8 @@ fn a_focus_refresh_reads_limits_older_than_five_minutes() {
 }
 
 /// The app's window-event handler, on the mock runtime: only the `main` window's
-/// `Focused(true)` dispatches the refresh, and it reads once. Focus lost, or another window's
-/// focus, starts no task.
+/// `Focused(true)` dispatches the refresh, and it reads once. Focus lost, or the settings
+/// window's focus, starts no task.
 #[test]
 fn only_the_main_window_s_focus_dispatches_a_shown_refresh() {
     let scratch = Scratch::with_limits("limits-focus-event");
@@ -206,7 +219,7 @@ fn only_the_main_window_s_focus_dispatches_a_shown_refresh() {
             .build()
             .unwrap()
     };
-    let (main, other) = (window(crate::MAIN_WINDOW), window("other"));
+    let (main, other) = (window(crate::MAIN_WINDOW), window(SETTINGS));
     let focus = |window: &WebviewWindow<MockRuntime>, focused: bool| {
         crate::on_window_event(&window.as_ref().window(), &WindowEvent::Focused(focused))
     };
@@ -218,7 +231,7 @@ fn only_the_main_window_s_focus_dispatches_a_shown_refresh() {
     );
     assert!(
         focus(&other, true).is_none(),
-        "another window dispatches nothing"
+        "the settings window's focus dispatches nothing"
     );
     let task = focus(&main, true).expect("the main window's focus dispatches");
     block_on(task).unwrap();

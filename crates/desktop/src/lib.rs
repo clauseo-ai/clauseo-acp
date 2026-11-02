@@ -1,7 +1,13 @@
-//! The Tauri shell: one `main` window showing `ui/app`, the fixed plugin set, and the bridge
-//! from the window's commands to the session host (`clauseo-host`).
+//! The Tauri shell: the `main` window showing `ui/app`, the `settings` window showing its
+//! `settings.html` when opened, the fixed plugin set, and the bridge from the windows' commands
+//! to the session host (`clauseo-host`).
 //!
 //! Contract:
+//! - Two windows, both built in code (`tauri.conf.json` has none): `main` at setup, and
+//!   `settings` on `open_settings` or, on the Mac, the app menu's "Settings…" on Cmd+,
+//!   (`settings_window.rs`, `docs/decisions/0028-settings-window.md`). `settings` is made on
+//!   open and destroyed on close; a window's destruction drops its stream, and `main`'s
+//!   destroys `settings`, so closing `main` still ends the app.
 //! - Setup opens the window first, then starts the host on a thread of its own
 //!   (`host_start.rs`), so the webview never waits for the store; a command sent before the host
 //!   is ready waits for it, and after a failed start gets that start's error. The host runs with
@@ -11,26 +17,32 @@
 //!   `HostHandle::shutdown` and `HostJoin::join`, on their own thread, then exits.
 //! - The host's pre-write guard hook runs this executable with `--pre-write-guard`, which `main`
 //!   answers before anything starts ([`guard_requested`], `pre_write_guard.rs`).
-//! - Thirteen async commands (`commands.rs`), each granted by its own permission in
+//! - Fourteen async commands (`commands.rs`), each granted by its own permission in
 //!   `capabilities/main.json` and listed in `build.rs`'s `AppManifest`. Beside them that file
 //!   grants only the two window commands of Tauri's drag script, and `window_frame.rs` adds
-//!   the caption buttons' four on Windows and Linux (0015).
+//!   the caption buttons' four on Windows and Linux (0015). `capabilities/settings.json`
+//!   grants the settings window six of the commands (`dispatch`, `query`, `open_stream`,
+//!   `subscribe_app`, `ack`, `display_info`) and the same drag pair, and the bridge admits
+//!   from it only `SetUiSettings` and `GetSettings` (0028).
 //!   Every argument is checked in Rust first, and every host call runs as `LocalDesktop`.
 //!   The `e2e` build adds `perf_channel_bytes` (`e2e.rs`, granted by `capabilities/e2e.json`),
 //!   and the `marks` build `marks_memory` and `marks_finish` (`marks.rs`,
-//!   `capabilities/marks.json`). `tauri.conf.json` names only `main`: those builds add the
-//!   two at setup (`e2e::grant_scoreboard`), and the default build has neither.
+//!   `capabilities/marks.json`), granted to `main` alone. `tauri.conf.json` names `main`
+//!   and `settings`: those builds add the two at setup (`e2e::grant_scoreboard`), and the
+//!   default build has neither.
 //! - One `ipc::Channel` per window carries its stream (`bridge/`): each message an event's JSON
 //!   as the host encoded it, a fragment of one, or a stream failure, always below 8 KB (and in
 //!   the `e2e` build an event with its receive time, `timed`). At most
-//!   256 KB unacknowledged per window; a 5 s watchdog that fires once per stall.
+//!   256 KB unacknowledged per window; a 5 s watchdog that fires once per stall. A window's
+//!   channel lives until the window is destroyed (`Bridge::close_window`).
 //!   `docs/decisions/0012-desktop-bridge.md` records the commands, the capability and the message
-//!   format. Never Tauri events. Opening a window's channel follows the limits on it
+//!   format. Never Tauri events. Opening `main`'s channel follows the limits on it
 //!   (`HostHandle::subscribe_limits`), counted and restarted like the window's other messages;
-//!   a restart sends the current view only, never the account changes it missed.
+//!   a restart sends the current view only, never the account changes it missed. The
+//!   `settings` window follows no limits.
 //! - The `main` window's native focus dispatches `RefreshLimits { agent: None, why: Shown }`
-//!   from Rust; the host throttles it.
-//! - The `main` window's scripts carry `app.security.csp` like its page, the colouring worker's
+//!   from Rust; the host throttles it. The `settings` window's focus dispatches nothing.
+//! - Both windows' scripts carry `app.security.csp` like its page, the colouring worker's
 //!   included: Tauri sends the header with `.html` only (`csp.rs`).
 //! - No command takes a path: folders come from the native dialog drawn in Rust (`dialogs.rs`),
 //!   files are named by the refs the host issued, and `reveal` names a matter or the app data
@@ -59,6 +71,7 @@ mod open;
 mod picked;
 mod pre_write_guard;
 mod rust_only;
+mod settings_window;
 #[cfg(test)]
 mod test_support;
 mod window_frame;
@@ -83,7 +96,7 @@ use tauri::{
 /// Bumped by `cargo xtask buildtime` to time an edit to this crate. Nothing reads it.
 pub const BUILDTIME_MARKER: u64 = 0;
 
-/// The label of the one window. `capabilities/main.json` grants by this label
+/// The label of the main window. `capabilities/main.json` grants by this label
 /// (`"windows": ["main"]`), so rename both together: a window whose label no capability names
 /// gets no IPC at all.
 pub(crate) const MAIN_WINDOW: &str = "main";
@@ -111,7 +124,14 @@ pub fn run() -> tauri::Result<()> {
     #[cfg(feature = "e2e")]
     e2e::mark_start();
     let context = context::<tauri::Wry>();
-    let app = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // The Mac's app menu, with "Settings…" (settings_window.rs). Windows and Linux get none: a
+    // menu would be a bar on the undecorated window.
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .menu(settings_window::app_menu)
+        .on_menu_event(|app, event| settings_window::on_menu_event(app, event.id().as_ref()));
+    let app = builder
         // First, so a second launch ends before any other plugin starts.
         .plugin_rust_only(tauri_plugin_single_instance::init(
             |app, _args, _cwd| {
@@ -153,6 +173,7 @@ pub fn run() -> tauri::Result<()> {
             commands::open_external,
             commands::open_file,
             commands::reveal,
+            commands::open_settings,
             #[cfg(feature = "e2e")]
             e2e::perf_channel_bytes,
             #[cfg(feature = "marks")]
@@ -294,14 +315,17 @@ fn open_main_window(app: &App) -> tauri::Result<()> {
     // The page's perf globals, before any page script.
     #[cfg(feature = "e2e")]
     let builder = builder.initialization_script(e2e::init_script());
+    let built = settings_window::number_build(app, MAIN_WINDOW);
     let window = builder.build()?;
     window_size::paint_first_frame(&window);
     window_frame::after_build(&window);
+    // Destroyed: the bridge drops main's stream, and the settings window goes too.
+    settings_window::on_destroyed(&window, built);
     Ok(())
 }
 
-/// A window event: the `main` window's focus, the only window with a channel and so the only
-/// one showing limits, asks the host to read the limits older than 5 minutes (`Bridge::shown`),
+/// A window event: the `main` window's focus, the only window following the limits (the
+/// `settings` window follows none, 0028), asks the host to read the limits older than 5 minutes (`Bridge::shown`),
 /// in a task, so the event loop never waits on the host: a focus before the host has started
 /// waits in its task for the start, then dispatches once. Focus lost does nothing. Returns the
 /// task, for tests. A failed dispatch (a failed start) is dropped: the desktop has no log yet.

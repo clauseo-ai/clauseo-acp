@@ -1,13 +1,16 @@
-//! The `main` window's size, and the colour its first frame paints before the page draws.
+//! The windows' sizes, and the colour their first frame paints before the page draws.
 //!
 //! Contract:
 //! - The window opens at [`WINDOW_SIZE`], 1280 by 800 logical px, which the room needs for its
 //!   three columns; below 1000 px the room scrolls the page itself. The e2e and marks builds
 //!   open at it unfitted, so the speed scoreboard is the same everywhere. The release build
 //!   fits it to the primary monitor's work area ([`fitted`]) and centres it.
-//! - window-state restores the lawyer's own size on later launches, in the release build. The
-//!   e2e and marks builds deny `main` in window-state ([`state_denylist`]), so they neither
-//!   restore nor save the real app's state.
+//! - The `settings` window opens at [`SETTINGS_SIZE`], 960 by 700, fitted and centred the same
+//!   way (`settings_window.rs`, 0028).
+//! - window-state restores the lawyer's own size of `main` on later launches, in the release
+//!   build. The e2e and marks builds deny `main` in window-state ([`state_denylist`]), so they
+//!   neither restore nor save the real app's state. Every build denies `settings`: it opens at
+//!   its own size, centred, each time.
 //! - The first frame is painted in the room's ground, night or day as the OS says
 //!   ([`paint_first_frame`]), so the webview is never white before the page draws.
 
@@ -21,6 +24,9 @@ mod tests;
 /// ([`fitted`]).
 pub(crate) const WINDOW_SIZE: (f64, f64) = (1280.0, 800.0);
 
+/// The `settings` window's size in logical px: the design's settings window.
+pub(crate) const SETTINGS_SIZE: (f64, f64) = (960.0, 700.0);
+
 /// The share of the work area the release window may take, per dimension.
 const FIT_SHARE: f64 = 0.9;
 
@@ -28,11 +34,17 @@ const FIT_SHARE: f64 = 0.9;
 /// when there is no monitor): [`WINDOW_SIZE`], but no more than [`FIT_SHARE`] of the work area
 /// in each dimension.
 pub(crate) fn fitted(work_area: Option<(f64, f64)>) -> (f64, f64) {
+    fit(WINDOW_SIZE, work_area)
+}
+
+/// `size` for a primary monitor's work area `work_area` (logical px, `None` when there is no
+/// monitor): no more than [`FIT_SHARE`] of the work area in each dimension.
+pub(crate) fn fit(size: (f64, f64), work_area: Option<(f64, f64)>) -> (f64, f64) {
     match work_area {
-        None => WINDOW_SIZE,
+        None => size,
         Some((width, height)) => (
-            WINDOW_SIZE.0.min(FIT_SHARE * width),
-            WINDOW_SIZE.1.min(FIT_SHARE * height),
+            size.0.min(FIT_SHARE * width),
+            size.1.min(FIT_SHARE * height),
         ),
     }
 }
@@ -49,13 +61,14 @@ pub(crate) fn primary_work_area<R: Runtime>(app: &AppHandle<R>) -> Option<(f64, 
     ))
 }
 
-/// The labels window-state leaves alone: `main` in the e2e and marks builds, which open at
-/// [`WINDOW_SIZE`] whatever the lawyer's saved state says; none in the release build.
+/// The labels window-state leaves alone: `settings` in every build, which opens at
+/// [`SETTINGS_SIZE`] centred each time; and `main` in the e2e and marks builds, which open at
+/// [`WINDOW_SIZE`] whatever the lawyer's saved state says.
 pub(crate) const fn state_denylist() -> &'static [&'static str] {
     if cfg!(feature = "e2e") {
-        &[crate::MAIN_WINDOW]
+        &[crate::MAIN_WINDOW, crate::settings_window::SETTINGS_WINDOW]
     } else {
-        &[]
+        &[crate::settings_window::SETTINGS_WINDOW]
     }
 }
 

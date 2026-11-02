@@ -1,9 +1,11 @@
-//! The `main` window's frame: the page's toolbar is the title bar, on every OS.
+//! The windows' frame, `main`'s and `settings`'s alike: the page's toolbar (the settings
+//! page's bar) is the title bar, on every OS.
 //!
 //! Contract:
-//! - The window is built with its frame, so nothing flashes at start. The room is the only page
-//!   (`ui/app`), so every build gets this frame: [`with_frame`] always applies it, and nothing
-//!   else chooses the window's decorations.
+//! - A window is built with its frame, so nothing flashes at start. Both pages (`ui/app`'s room
+//!   and its settings page) draw the same lights' box and caption buttons, so every build gets
+//!   this frame: [`with_frame`] always applies it, and nothing else chooses a window's
+//!   decorations.
 //! - On the Mac: an overlay title bar with no title, and the native traffic lights moved to
 //!   where the toolbar's corner lights stand ([`TRAFFIC_LIGHTS`]).
 //! - On Windows and Linux: no OS decorations; Tauri keeps the system shadow and the resize
@@ -11,15 +13,17 @@
 //!   maximise button and answers `WM_NCHITTEST` with `HTMAXBUTTON`, so hovering it shows Snap
 //!   Layouts (`windows.rs`, `docs/decisions/0015-window-frame.md`).
 //! - The page drags its window with the two core window permissions `capabilities/main.json`
-//!   grants ([`DRAG_PERMISSIONS`]). On Windows and Linux it also minimises, maximises or
-//!   restores and closes it, and asks whether it is maximised, with the four of
-//!   `capabilities/frame.json` ([`CAPTION_PERMISSIONS`]), which [`grant_caption_commands`] adds
-//!   at setup. Nothing here adds a command.
+//!   and `capabilities/settings.json` grant ([`DRAG_PERMISSIONS`]). On Windows and Linux it
+//!   also minimises, maximises or restores and closes it, and asks whether it is maximised, with
+//!   the four of `capabilities/frame.json` ([`CAPTION_PERMISSIONS`]), which
+//!   [`grant_caption_commands`] adds at setup. Nothing here adds a command.
 //! - The native controls stand at fixed places, so the page keeps its side: the toolbar stays
 //!   at the window's top at every size, the caption buttons flush top right, the lights' box
 //!   fixed (`responsive.css`, `data-frame="own"`; 0015).
-//! - Tauri's window commands take a `label`, so they reach every window of the app: `main` must
-//!   stay the only one until the record says otherwise (0015; a test counts the builders).
+//! - Tauri's window commands take a `label`, so they reach every window of the app: each page
+//!   can drag, zoom, minimise or close the other. 0028 records why that is harmless between
+//!   `main` and `settings`; no third window without a record (0015; a test counts the
+//!   builders).
 
 #[cfg(any(windows, test))]
 mod caption;
@@ -29,7 +33,8 @@ mod windows;
 
 use tauri::{Runtime, WebviewWindow, WebviewWindowBuilder};
 
-/// The core permissions `capabilities/main.json` grants for the frame, in every build: Tauri's
+/// The core permissions `capabilities/main.json` and `settings.json` grant for the frame, in
+/// every build: Tauri's
 /// drag script answers a press on `data-tauri-drag-region` with `start_dragging` and a
 /// double-click with `internal_toggle_maximize` (maximise or restore on Windows and Linux, zoom
 /// on the Mac). A test holds the file to this list.
@@ -50,10 +55,10 @@ pub(crate) const CAPTION_PERMISSIONS: &[&str] = &[
     "core:window:allow-is-maximized",
 ];
 
-/// Grants `main` the caption buttons' window commands, `capabilities/frame.json`. Added at
-/// setup, as `e2e::grant_scoreboard` adds `e2e.json`: `tauri.conf.json` names only `main`, so
-/// the window has them only through this call, and the file's `platforms` leave out the Mac,
-/// whose own traffic lights need no permission.
+/// Grants `main` and `settings` the caption buttons' window commands,
+/// `capabilities/frame.json`. Added at setup, as `e2e::grant_scoreboard` adds `e2e.json`:
+/// `tauri.conf.json` does not name it, so the windows have them only through this call, and
+/// the file's `platforms` leave out the Mac, whose own traffic lights need no permission.
 pub(crate) fn grant_caption_commands<R: Runtime, M: tauri::Manager<R>>(
     manager: &M,
 ) -> tauri::Result<()> {
@@ -120,7 +125,8 @@ fn own<R: Runtime, M: tauri::Manager<R>>(
 }
 
 /// What the frame needs once the window exists: on Windows, the native window over the maximise
-/// button. Best effort: without it the button still works from the page, with no Snap Layouts.
+/// button. Call it on the window's thread (the main thread). Best effort: without it the button
+/// still works from the page, with no Snap Layouts.
 #[cfg(windows)]
 pub(crate) fn after_build<R: Runtime>(window: &WebviewWindow<R>) {
     windows::cover_maximise(window);
