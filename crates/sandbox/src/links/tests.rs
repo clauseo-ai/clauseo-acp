@@ -111,6 +111,19 @@ fn a_git_file_names_its_folder_inside_the_matter_only() {
     assert_eq!(scan.git_dirs(), [matter.join(".bare/worktrees/a")]);
 }
 
+#[cfg(unix)]
+#[test]
+fn a_git_link_to_a_folder_in_the_matter_names_that_folder() {
+    let dir = TempDir::new("links-gitlink");
+    dir.dir("matter/.realgit");
+    dir.symlink("matter/.git", Path::new(".realgit"));
+    let scan = scan_matter(&dir.path().join("matter")).unwrap();
+    let matter = canon(&dir.path().join("matter"));
+    assert_eq!(scan.links().len(), 0);
+    assert_eq!(scan.git(), [matter.join(".git")]);
+    assert_eq!(scan.git_dirs(), [matter.join(".realgit")]);
+}
+
 /// The walk on a generated 50,000-file matter: 50 folders of 1,000 files, some nested. Run by
 /// hand with `cargo nextest run -p clauseo-sandbox --run-ignored only walk_of` and read the
 /// time it prints. Not in CI: it writes 50,000 files.
