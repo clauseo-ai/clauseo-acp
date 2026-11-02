@@ -22,7 +22,7 @@ which check ids and bounded values as they decode; the bridge then checks what d
 |---|---|---|---|
 | `dispatch` | `command: CommandEnvelope` | `CommandOutcome` | `CommandEnvelope::validate`; refuses `AnswerPermission`, `SetMode`, `SetConfigOption`, and a `CreateMatter` whose folder ref this run's `pick_folder` did not issue (`command.invalid`) |
 | `query` | `query: HostQuery` | `QueryResult` | decoding (`PageLimit`, `ReadLen` bounds) |
-| `open_stream` | `channel: Channel<StreamMessage>` | `()` | one channel per window; a second call replaces it and drops its subscriptions |
+| `open_stream` | `channel: Channel<StreamMessage>` | `()` | one channel per window; a second call replaces it and drops its subscriptions; waits for the host's start and, after a failed start, returns that start's error; of calls that waited together (a reload while the host starts) the last to arrive is kept |
 | `subscribe` | `stream: StreamId, after: ViewPosition \| null` | `()` | needs `open_stream` first |
 | `unsubscribe` | `stream: StreamId` | `()` | needs `open_stream` first |
 | `ack` | `positions: Ack[], messages: u32` | `()` | `messages` at most what the window was sent; no stream named twice (both refused whole, `command.invalid`); a position of a stream the window does not follow is dropped |

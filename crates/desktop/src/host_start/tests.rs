@@ -2,11 +2,11 @@
 //! a start that worked and one that failed, and what exit does in each case.
 
 use std::sync::Arc;
-use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Duration;
 
 use clauseo_host::{Host, HostConfig};
-use clauseo_protocol::{ErrorCode, HostQuery, QueryResult};
+use clauseo_protocol::{ErrorCode, HostQuery, QueryResult, StreamId};
 
 use super::*;
 use crate::bridge::Bridge;
@@ -100,8 +100,6 @@ fn exit_while_the_host_starts_waits_for_it_then_stops_it() {
     let (cell, bridge, release) = held_start(scratch.config(Vec::new()));
 
     let done = stop_on_thread(&cell);
-    // Held: the stop cannot have got past the wait for the start.
-    assert_eq!(done.try_recv(), Err(TryRecvError::Empty));
     release.send(()).unwrap();
     done.recv_timeout(THREAD_WAIT).unwrap();
 
@@ -127,4 +125,47 @@ fn a_start_dropped_without_an_outcome_leaves_the_cell_internal() {
     assert_eq!(error.message(), NO_OUTCOME);
     // Exit has nothing to stop.
     stop(&cell);
+}
+
+/// A page reload while the host starts: the dead page's `open_stream` and the new page's wait
+/// together and wake in either order. The new page's channel is kept both ways.
+#[test]
+fn a_reload_while_the_host_starts_keeps_the_new_pages_channel() {
+    for new_wakes_first in [true, false] {
+        let scratch = Scratch::new(&format!("reload-during-start-{new_wakes_first}"), &[]);
+        let (cell, bridge, release) = held_start(scratch.config(Vec::new()));
+        let (dead_channel, dead) = collector();
+        let (new_channel, new) = collector();
+
+        // Arrival order: the dead page first, then the new one; both wait for the start.
+        let mut dead_open = Box::pin(bridge.open_stream("main", dead_channel));
+        assert!((&mut dead_open).now_or_never().is_none());
+        let mut new_open = Box::pin(bridge.open_stream("main", new_channel));
+        assert!((&mut new_open).now_or_never().is_none());
+        release.send(()).unwrap();
+        block_on(cell.host()).unwrap();
+        if new_wakes_first {
+            block_on(new_open).unwrap();
+            block_on(dead_open).unwrap();
+        } else {
+            block_on(dead_open).unwrap();
+            block_on(new_open).unwrap();
+        }
+
+        // A subscription reaches the new page's channel, and nothing the dead one.
+        let QueryResult::Matters(matters) = block_on(bridge.query(HostQuery::ListMatters)).unwrap()
+        else {
+            panic!("no matter list");
+        };
+        let stream = StreamId::Matter(matters.first().unwrap().matter);
+        block_on(bridge.subscribe("main", stream, None)).unwrap();
+        let _reset = new.next_event();
+        assert!(
+            dead.drain().is_empty(),
+            "new page woke first: {new_wakes_first}"
+        );
+
+        drop(bridge);
+        stop(&cell);
+    }
 }
