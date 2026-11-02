@@ -7,7 +7,7 @@
 import { act, createElement, memo, Profiler, type ProfilerOnRenderCallback } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
-import { agentText, reset, THREAD, userMessage, uuid } from "../testing/stream-script.ts";
+import { agentText, reset, THREAD, upsert, userMessage, uuid } from "../testing/stream-script.ts";
 import type {
   EntryId,
   HostCommand,
@@ -135,6 +135,37 @@ test("Queue waits for words, then sends send_prompt for the open conversation ex
   ]);
   // the words went, as after Ask: the field is empty and Queue waits for words again
   expect((h.one("composer") as HTMLTextAreaElement).value).toBe("");
+});
+
+test("the wait stays mounted from Queue through starting to queued behind the other", async () => {
+  h = await mountWith("running");
+  h.deliver([reset([], headerOf(THREAD, "idle"))]);
+  await h.settle();
+  const node = wait();
+  expect(node).not.toBeNull();
+  await h.type("Does the lease allow a sublet?");
+  await h.click(queueButton());
+  expect(h.sent("send_prompt")).toHaveLength(1);
+  expect(wait()).toBe(node);
+  // the reducer's order: the user_message makes it starting, then the host's TurnQueued queued { behind }
+  h.deliver([upsert(headerOf(THREAD, "starting"))]);
+  await h.settle();
+  expect(wait()).toBe(node);
+  expect(head()).toBe(`Waiting for '${TITLE}' to finish.`);
+  expect(queueButton()).toBeNull();
+  await h.click(h.one("stop-other"));
+  expect(h.sent("cancel")).toEqual([{ thread: OTHER }]);
+  h.deliver([upsert(headerOf(THREAD, { queued: { behind: OTHER } }))]);
+  await h.settle();
+  expect(wait()).toBe(node);
+  expect(head()).toBe(`Waiting for '${TITLE}' to finish.`);
+});
+
+test("starting with no other conversation running shows no wait", async () => {
+  h = await mountWith("idle");
+  h.deliver([reset([], headerOf(THREAD, "starting"))]);
+  await h.settle();
+  expect(wait()).toBeNull();
 });
 
 test("Stop the other sends cancel for the thread it waits behind, never for the open one", async () => {
