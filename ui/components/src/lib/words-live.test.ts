@@ -38,6 +38,7 @@ const NEW_THREAD: readonly ThreadKey[] = [
   "Answer this question.",
   "This answer doesn't fit the question.",
   "Choose an answer to send, or Decline to go on without one.",
+  "This question can't be shown here. Decline, or Stop the answer.",
 ];
 const LIMITS: readonly LimitKey[] = [
   "Resets {time}",
