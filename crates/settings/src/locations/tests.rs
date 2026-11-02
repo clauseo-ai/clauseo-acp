@@ -169,6 +169,30 @@ fn under_root_reads_nothing() {
 }
 
 #[test]
+fn agent_home_is_under_the_data_folder_never_the_temp_folder() {
+    for (os, dirs) in [
+        (Os::Windows, windows_dirs()),
+        (Os::Mac, home_dirs()),
+        (Os::Linux, home_dirs()),
+    ] {
+        let at = Locations::resolve_for(os, &dirs, &FakeEnv::default()).unwrap();
+        let home = at.agent_home("codex-acp");
+        assert_eq!(home, at.data_dir().join("agents/codex-acp/home"), "{os:?}");
+    }
+    // This machine's own folders (paths only: nothing is read or made).
+    let at = Locations::resolve(&crate::SystemDirs, &FakeEnv::default()).unwrap();
+    let home = at.agent_home("codex-acp");
+    let temp = std::env::temp_dir();
+    assert!(home.starts_with(at.data_dir()), "{}", home.display());
+    assert!(
+        !home.starts_with(&temp),
+        "{} is under the temp folder {}",
+        home.display(),
+        temp.display()
+    );
+}
+
+#[test]
 fn resolve_uses_this_os() {
     let dirs = FakeDirs {
         home: Some(PathBuf::from("/h")),
