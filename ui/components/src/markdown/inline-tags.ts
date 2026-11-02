@@ -100,8 +100,9 @@ const BLOCKS = new Set([
 
 /** Whether a tag before `node` can never pair with one after it: a block sibling, or a new paragraph. */
 function isBarrier(node: ElementContent): boolean {
+  if (PARAGRAPH_START.has(node)) return true;
   if (node.type === "element") return BLOCKS.has(node.tagName);
-  return PARAGRAPH_START.has(node) || (node.type === "text" && BLOCK_HTML.has(node));
+  return node.type === "text" && BLOCK_HTML.has(node);
 }
 
 type Tag = { name: string; close: boolean; selfClosed: boolean };
