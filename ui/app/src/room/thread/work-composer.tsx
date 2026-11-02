@@ -16,11 +16,13 @@ import {
 import type { WorkingState } from "@clauseo/components/clauseo/working-line.tsx";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { frame } from "@clauseo/components/lib/words-frame.ts";
+import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type { EntryId, ErrorCode } from "../../transport/protocol.ts";
 import type { Conversations } from "../conversations.ts";
 import { OtherWait } from "../queue.tsx";
+import { useOtherWait } from "../queue-model.ts";
 import type { BreakLine } from "../thread-break.ts";
 import { useAgentPlan } from "./agent-plan.ts";
 import type { Drafts } from "./session.ts";
@@ -96,19 +98,34 @@ export function WorkComposer({
     () => (draftKey === null ? "" : (drafts.get(draftKey) ?? "")).trim() === "",
   );
   const emptyNow = useRef(empty);
+  // U7: another conversation holding the matter, and whether Ask has raised its wait (design state.ts's `waiting`):
+  // Ask then sends nothing, Queue sends; emptying the field lowers it
+  const wait = useOtherWait(others?.conversations ?? null, draftKey);
+  const [raised, setRaised] = useState(false);
+  if (raised && wait === null) setRaised(false);
   // the field holds the words, not React: each change goes straight to the conversation's draft
   const keep = (text: string) => {
     const isEmpty = text.trim() === "";
     if (emptyNow.current !== isEmpty) {
       emptyNow.current = isEmpty;
       setEmpty(isEmpty);
+      if (isEmpty) setRaised(false);
     }
     if (draftKey === null) return;
     if (text === "") drafts.delete(draftKey);
     else drafts.set(draftKey, text);
   };
-  // Enter comes here busy or empty too, and sends nothing then: it never breaks the line
+  // Enter comes here busy or empty too, and sends nothing then: it never breaks the line; while another conversation
+  // holds the matter, it raises the wait instead, whose Queue sends
   const ask = (asked: string) => {
+    if (disabled || busy || asked.trim() === "") return;
+    if (wait !== null && !wait.sent) {
+      setRaised(true);
+      return;
+    }
+    send(asked);
+  };
+  const send = (asked: string) => {
     if (disabled || busy || asked.trim() === "") return;
     void onAsk(asked).then((ok) => {
       if (!ok) return;
@@ -121,8 +138,8 @@ export function WorkComposer({
       if (draftKey !== null && drafts.get(draftKey) === asked) drafts.delete(draftKey);
     });
   };
-  // U7's Queue: the field's words, sent as Ask sends them
-  const queueNow = () => ask(field.current?.text() ?? "");
+  // U7's Queue: the field's words, sent as Ask sends them (send_prompt with no `delivery`, the wire's queue)
+  const queueNow = () => send(field.current?.text() ?? "");
   // the stopped question, once per break, and only into an empty field: words typed since keep their place, and fill
   // never moves the lawyer's focus or breaks a composition
   const refilled = useRef<EntryId | null>(null);
@@ -146,9 +163,21 @@ export function WorkComposer({
           },
           testId: "error",
         }
-      : busy
-        ? { state: answering, testId: "working" }
-        : stopped);
+      : wait?.sent === true
+        ? {
+            // sent and waiting behind the other: the design's wait (room.tsx), never "Answering."
+            state: {
+              kind: "wait",
+              words: mt(w.lang, "Waiting for '{title}' to finish.", {
+                title: wait.title ?? mt(w.lang, "New conversation"),
+              }),
+              pill: null,
+            },
+            testId: "working",
+          }
+        : busy
+          ? { state: answering, testId: "working" }
+          : stopped);
   return (
     <Composer
       ref={field}
@@ -165,14 +194,14 @@ export function WorkComposer({
       onInput={keep}
       onAsk={ask}
       queue={
-        others === null ? null : (
+        others === null || wait === null || !(wait.sent || raised || busy) ? null : (
           <OtherWait
             transport={others.transport}
-            conversations={others.conversations}
-            conversationKey={draftKey}
+            wait={wait}
             busy={busy}
             empty={empty}
             onQueue={queueNow}
+            onFocusField={() => field.current?.focus()}
             onRefused={others.onRefused}
           />
         )

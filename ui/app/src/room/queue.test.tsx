@@ -9,6 +9,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { agentText, reset, THREAD, upsert, userMessage, uuid } from "../testing/stream-script.ts";
 import type {
+  CommandOutcome,
   EntryId,
   HostCommand,
   StreamId,
@@ -70,7 +71,7 @@ const headerOf = (thread: string, status: ThreadStatus): ViewEntry => ({
 
 const mountWith = (
   other: ThreadStatus,
-  dispatch?: (c: HostCommand) => ReturnType<typeof defaultOutcome>,
+  dispatch?: (c: HostCommand) => CommandOutcome | Promise<CommandOutcome>,
 ) =>
   mountRoom({
     threads: [row(THREAD, "idle", "Lease notice"), row(OTHER, other, TITLE)],
@@ -109,41 +110,84 @@ test("the title is the one the host names in behind, though another conversation
   expect(head()).toBe(`Waiting for '${TITLE}' to finish.`);
 });
 
-test("before sending: shown while another runs, needs the lawyer or starts, and not while it is idle", async () => {
+/** Words in the field, then Ask's Enter: with another conversation holding the matter, this raises the wait. */
+const QUESTION = "Does the lease allow a sublet?";
+async function raise(text = QUESTION) {
+  await h!.type(text);
+  await h!.key({ key: "Enter", keyCode: 13 });
+}
+const field = () => h!.one("composer") as HTMLTextAreaElement;
+const said = () => h!.one("other-wait-said")?.textContent ?? null;
+const READY = "One conversation changes a matter's papers at a time. Your message is ready to go.";
+/** What the composer's one status region says of its working line. */
+const composerSaid = () =>
+  h!.host.querySelector('[data-composer] .room-entry > [role="status"]')?.textContent ?? "";
+
+test("before sending: Ask raises the wait while another runs, needs the lawyer or starts, and sends nothing", async () => {
   for (const status of ["running", "needs_you", "starting"] as const) {
     h = await mountWith(status);
+    // nothing over an empty field: "Your message is ready to go." is true only once there is one
+    expect(wait(), status).toBeNull();
+    await raise();
     expect(head(), status).toBe(`Waiting for '${TITLE}' to finish.`);
     expect(queueButton(), status).not.toBeNull();
+    expect(h.sent("send_prompt"), status).toEqual([]);
+    // the words stay in the field until Queue
+    expect(field().value, status).toBe(QUESTION);
     await h.unmount();
     h = null;
   }
-  h = await mountWith("idle");
-  expect(wait()).toBeNull();
-  expect(queueButton()).toBeNull();
 });
 
-test("Queue waits for words, then sends send_prompt for the open conversation exactly as Ask does", async () => {
-  h = await mountWith("running");
-  expect(disabled(queueButton())).toBe(true);
-  await h.click(queueButton());
+test("with the other idle, Ask sends at once and no wait shows", async () => {
+  h = await mountWith("idle");
+  await raise();
+  expect(wait()).toBeNull();
+  expect(h.sent("send_prompt")).toHaveLength(1);
+});
+
+test("an exited agent's conversation, whose next message starts it again, raises the wait too", async () => {
+  h = await mountRoom({ threads: [row(THREAD, "agent_exited"), row(OTHER, "running", TITLE)] });
+  await raise();
+  expect(head()).toBe(`Waiting for '${TITLE}' to finish.`);
   expect(h.sent("send_prompt")).toEqual([]);
-  await h.type("Does the lease allow a sublet?");
+});
+
+test("emptying the field lowers the raised wait", async () => {
+  h = await mountWith("running");
+  await raise();
+  expect(wait()).not.toBeNull();
+  await h.type("");
+  expect(wait()).toBeNull();
+});
+
+test("Queue sends send_prompt for the open conversation exactly as Ask does, with no delivery (the wire's queue)", async () => {
+  h = await mountWith("running");
+  await raise();
   expect(disabled(queueButton())).toBe(false);
   await h.click(queueButton());
   expect(h.sent("send_prompt")).toEqual([
-    { thread: THREAD, content: [{ text: { text: "Does the lease allow a sublet?" } }] },
+    { thread: THREAD, content: [{ text: { text: QUESTION } }] },
   ]);
-  // the words went, as after Ask: the field is empty and Queue waits for words again
-  expect((h.one("composer") as HTMLTextAreaElement).value).toBe("");
+  // the words went, as after Ask
+  expect(field().value).toBe("");
+});
+
+test("after Queue the focus is on Stop the other, never the page", async () => {
+  h = await mountWith("running");
+  await raise();
+  queueButton()!.focus();
+  await h.click(queueButton());
+  expect(document.activeElement).toBe(h.one("stop-other"));
 });
 
 test("the wait stays mounted from Queue through starting to queued behind the other", async () => {
   h = await mountWith("running");
   h.deliver([reset([], headerOf(THREAD, "idle"))]);
   await h.settle();
+  await raise();
   const node = wait();
   expect(node).not.toBeNull();
-  await h.type("Does the lease allow a sublet?");
   await h.click(queueButton());
   expect(h.sent("send_prompt")).toHaveLength(1);
   expect(wait()).toBe(node);
@@ -153,19 +197,51 @@ test("the wait stays mounted from Queue through starting to queued behind the ot
   expect(wait()).toBe(node);
   expect(head()).toBe(`Waiting for '${TITLE}' to finish.`);
   expect(queueButton()).toBeNull();
-  await h.click(h.one("stop-other"));
-  expect(h.sent("cancel")).toEqual([{ thread: OTHER }]);
   h.deliver([upsert(headerOf(THREAD, { queued: { behind: OTHER } }))]);
   await h.settle();
   expect(wait()).toBe(node);
   expect(head()).toBe(`Waiting for '${TITLE}' to finish.`);
 });
 
-test("starting with no other conversation running shows no wait", async () => {
+test("once sent, the working line says the wait, never Answering.", async () => {
+  h = await mountWith("running");
+  h.deliver([reset([], headerOf(THREAD, { queued: { behind: OTHER } }))]);
+  await h.settle();
+  const line = h.one("working")?.textContent?.replace(/\u00a0/g, " ") ?? "";
+  expect(line).toContain(`Waiting for '${TITLE}' to finish.`);
+  expect(line).not.toContain("Answering.");
+  // and through the starting hand-off
+  h.deliver([upsert(headerOf(THREAD, "starting"))]);
+  await h.settle();
+  expect(h.one("working")?.textContent).not.toContain("Answering.");
+});
+
+test("starting while the other is only starting too keeps the wait, so it doesn't go and come back", async () => {
+  h = await mountWith("starting");
+  h.deliver([reset([], headerOf(THREAD, "starting"))]);
+  await h.settle();
+  expect(head()).toBe(`Waiting for '${TITLE}' to finish.`);
+  expect(queueButton()).toBeNull();
+});
+
+test("starting with no other conversation holding shows no wait", async () => {
   h = await mountWith("idle");
   h.deliver([reset([], headerOf(THREAD, "starting"))]);
   await h.settle();
   expect(wait()).toBeNull();
+});
+
+test("the status region mounts empty and is filled as the wait comes; once queued the composer's line says it", async () => {
+  h = await mountWith("running");
+  await raise();
+  expect(said()).toBe(`Waiting for '${TITLE}' to finish. ${READY}`);
+  // no name on the section repeating the words
+  expect(wait()?.getAttribute("aria-label")).toBeNull();
+  await h.click(queueButton());
+  h.deliver([reset([], headerOf(THREAD, { queued: { behind: OTHER } }))]);
+  await h.settle();
+  expect(said()).toBe("");
+  expect(composerSaid()).toContain(`Waiting for '${TITLE}' to finish.`);
 });
 
 test("Stop the other sends cancel for the thread it waits behind, never for the open one", async () => {
@@ -174,16 +250,44 @@ test("Stop the other sends cancel for the thread it waits behind, never for the 
   await h.settle();
   await h.click(h.one("stop-other"));
   expect(h.sent("cancel")).toEqual([{ thread: OTHER }]);
+  expect(h.sent("send_prompt")).toEqual([]);
 });
 
-test("a refused Stop the other shows its code's words, never the host's message", async () => {
+test("Stop the other before the message went stops the other, then sends the message (design's stopOther)", async () => {
+  h = await mountWith("running");
+  await raise();
+  await h.click(h.one("stop-other"));
+  expect(h.sent("cancel")).toEqual([{ thread: OTHER }]);
+  // with the next frame's flush (#253)
+  await act(async () => h!.store.flush());
+  await h.settle();
+  expect(h.sent("send_prompt")).toEqual([
+    { thread: THREAD, content: [{ text: { text: QUESTION } }] },
+  ]);
+});
+
+test("a second press while the cancel is on its way sends nothing", async () => {
+  h = await mountWith("running", (command) =>
+    command.cancel !== undefined ? new Promise<never>(() => {}) : defaultOutcome(command),
+  );
+  h.deliver([reset([], headerOf(THREAD, { queued: { behind: OTHER } }))]);
+  await h.settle();
+  await h.click(h.one("stop-other"));
+  await h.click(h.one("stop-other"));
+  expect(h.sent("cancel")).toHaveLength(1);
+});
+
+test("a refused Stop the other shows its code's words with the next frame's flush, never the host's message", async () => {
   h = await mountWith("running", (command) => {
     if (command.cancel !== undefined)
       throw { code: "command.unknown_thread", message: "raw host text", retryable: false };
     return defaultOutcome(command);
   });
+  h.deliver([reset([], headerOf(THREAD, { queued: { behind: OTHER } }))]);
+  await h.settle();
   await h.click(h.one("stop-other"));
-  // the reply's set waits for the next frame's flush (#253)
+  // the reply has landed, and its set waits for the frame: no commit of its own beside the stream's (#253)
+  expect(h.one("error")).toBeNull();
   await act(async () => h!.store.flush());
   expect(h.one("error")?.textContent).toContain(errorWords("en", "command.unknown_thread"));
   expect(h.host.textContent).not.toContain("raw host text");
@@ -208,6 +312,7 @@ test("the other conversation's status changing renders no row of the open transc
   rowCommits.clear();
   h.deliverOn(otherStream, [reset([], headerOf(OTHER, "running"))]);
   await h.settle();
+  await raise();
   expect(head()).toBe(`Waiting for '${TITLE}' to finish.`);
   h.deliverOn(otherStream, [reset([], headerOf(OTHER, "idle"))]);
   await h.settle();
