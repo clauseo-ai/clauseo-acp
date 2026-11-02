@@ -28,21 +28,22 @@ Words: "agent" means the lawyer's ACP agent (Claude Code, Codex). "You" is the c
 ## Map
 
 - `crates/acp`: the ACP client over the agent's pipes; agent traffic as events. Scenarios in `tests/scenarios/`.
+- `crates/agents`: installs the ACP adapters and Node.
 - `crates/codex_appserver`: Codex app-server types, a JSON-RPC client and the schema drift test.
 - `crates/desktop`: the Tauri shell and the host bridge.
-- `crates/fake_agent`: scripted ACP agent for tests; scenarios and their format in `crates/fake_agent/scenarios/` (README.md).
+- `crates/fake_agent`: scripted ACP agent for tests; scenarios and their format in `scenarios/` (README.md).
 - `crates/host`: the session host thread.
 - `crates/limits`: plan usage readers (Claude helper, Codex reader) and the limits model.
 - `crates/mcp`: the `clauseo-mcp` sidecar, the browser guard.
 - `crates/matters`: matter folders and their shadow git history (checkpoints, undo). See `docs/decisions/0007-matter-history-format.md`.
 - `crates/process`: starts an agent in its own process tree, shuts it down and kills the tree; the `Launcher` seam.
 - `crates/protocol`: types crossing the host boundary, no I/O. See `docs/decisions/`, `docs/ui-states.md`.
-- `crates/reducer`: the pure fold from events to state and view changes, and snapshots; its gungraun bench is `crates/reducer_bench` (Linux).
+- `crates/reducer`: the pure fold from events to state and view changes, and snapshots; gungraun bench: `crates/reducer_bench` (Linux).
 - `crates/sandbox`: the agent jail: policy, link scan, tiers, denials, launchers.
 - `crates/settings`: settings, data folders and the policy layer.
 - `crates/store`: the event log, snapshots, blobs and receipts in one SQLite file.
-- `ui/app`: the React app, the room (`src/room/`); `ui/components`: tokens, words, parts. New strings: `ui/app/src/review/registry.tsx`. Tauri APIs only in `ui/app/src/transport`.
-- `ui/e2e`: Playwright tests of the real app over CDP on Windows, and the speed scoreboard's code. `cargo xtask check` typechecks it and runs its unit tests; no lint or write rule yet (#86).
+- `ui/app`: the React app, the room (`src/room/`); `ui/components`: tokens, words, parts. New strings: `src/review/registry.tsx`. Tauri APIs only in `src/transport`.
+- `ui/e2e`: Playwright tests of the real app over CDP on Windows, and the speed scoreboard. `cargo xtask check` typechecks and unit-tests it; no lint or write rule yet (#86).
 - `xtask`: checks, build timing, budgets. Builds without any app crate. Frozen: no new checks (exceptions: its main.rs).
 
 ## Never
