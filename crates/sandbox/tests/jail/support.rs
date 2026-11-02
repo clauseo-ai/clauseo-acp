@@ -232,49 +232,44 @@ pub(crate) fn run_outside(program: &str, args: &[&str], cwd: &Path) -> Output {
     run(&launcher, program, args, cwd, &[])
 }
 
-/// The variables that point git at another repository. A spawned process inherits the test's
-/// environment, and git sets `GIT_DIR` for its hooks, so a test run from a pre-push hook would
-/// otherwise run these git commands against the repository being pushed.
-const GIT_REDIRECTS: [&str; 9] = [
-    "GIT_DIR",
-    "GIT_WORK_TREE",
-    "GIT_INDEX_FILE",
-    "GIT_OBJECT_DIRECTORY",
-    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-    "GIT_COMMON_DIR",
-    "GIT_NAMESPACE",
-    "GIT_CEILING_DIRECTORIES",
-    "GIT_PREFIX",
-];
-
 /// The `PATH` the jail's shell and git get: the jail inherits no variable, and the test
 /// process's own `PATH` would make the tests depend on the machine.
 const PATH: (&str, &str) = ("PATH", "/usr/bin:/bin");
 
-/// `/usr/bin/git args` through `launcher` in `cwd`, started by `/usr/bin/env` with every
-/// variable in [`GIT_REDIRECTS`] removed, so git works on the repository in `cwd` only. `env`
-/// plus [`PATH`].
+/// `/usr/bin/git args` through `launcher` in `cwd`, in an environment of exactly `env` plus
+/// [`PATH`] and `GIT_CONFIG_NOSYSTEM=1`. The launcher must clear the inherited environment
+/// (`SeatbeltLauncher` always does; [`git_outside`] sets `SpawnOptions::clear_env`): git sets
+/// `GIT_DIR` and `GIT_CONFIG_PARAMETERS` for its hooks, and a test run from lefthook's
+/// pre-push hook once ran `git init` against the repository being pushed (which set its
+/// `core.bare`). Before git runs, `/usr/bin/env` is run the same way, and the test fails if
+/// any `GIT_*` variable other than the ones passed here reaches it.
 pub(crate) fn git(
     launcher: &dyn Launcher,
     args: &[&str],
     cwd: &Path,
     env: &[(&str, &str)],
 ) -> Output {
-    let mut all = Vec::new();
-    for name in GIT_REDIRECTS {
-        all.extend(["-u", name]);
-    }
-    all.push("/usr/bin/git");
-    all.extend_from_slice(args);
     let mut env = env.to_vec();
     env.push(PATH);
-    run(launcher, "/usr/bin/env", &all, cwd, &env)
+    env.push(("GIT_CONFIG_NOSYSTEM", "1"));
+    let seen = run(launcher, "/usr/bin/env", &[], cwd, &env);
+    let leaked: Vec<&str> = seen
+        .assert_ok()
+        .stdout
+        .lines()
+        .filter(|line| line.starts_with("GIT_"))
+        .filter(|line| !env.iter().any(|(k, v)| *line == format!("{k}={v}")))
+        .collect();
+    assert!(leaked.is_empty(), "GIT_* variables reached git: {leaked:?}");
+    run(launcher, "/usr/bin/git", args, cwd, &env)
 }
 
-/// [`git`] outside the jail.
+/// [`git`] outside the jail, with the inherited environment cleared and `HOME` set to `cwd`
+/// (so no global git config of the machine is read).
 pub(crate) fn git_outside(args: &[&str], cwd: &Path) -> Output {
-    let launcher = PassthroughLauncher::new(SpawnOptions::new());
-    git(&launcher, args, cwd, &[])
+    let launcher = PassthroughLauncher::new(SpawnOptions::new().clear_env());
+    let home = cwd.to_str().expect("a UTF-8 temp path");
+    git(&launcher, args, cwd, &[("HOME", home)])
 }
 
 /// `/bin/sh -c script` through `launcher` in `cwd`, with `args` as `$1`, `$2`, ..., and
