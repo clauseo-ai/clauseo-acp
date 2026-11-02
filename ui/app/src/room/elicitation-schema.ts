@@ -56,13 +56,22 @@ export type Field =
       maximum: number | null;
       initial: string;
     })
-  | (Common & { kind: "boolean"; initial: boolean });
+  | (Common & {
+      kind: "boolean";
+      /** Its default; null with none, so an untouched box is not yet an answer. */
+      initial: boolean | null;
+    });
 
 export type Form = { fields: Field[] };
 
+/** A number field whose words the input can't read as a number ("1e", "abc"): the input reports "" for them, so the
+ * draft keeps this instead, and the field doesn't hold. */
+export const BAD_NUMBER = { badInput: true } as const;
+export type BadNumber = typeof BAD_NUMBER;
+
 /** What a field holds while the lawyer fills it in: a choice's option index, a multi's option indexes in schema order,
- * a text or number field's words, a boolean's tick. */
-export type FieldValue = number | null | readonly number[] | string | boolean;
+ * a text or number field's words (or BAD_NUMBER), a boolean's tick (null until touched, with no default). */
+export type FieldValue = number | null | readonly number[] | string | boolean | BadNumber;
 export type Draft = Readonly<Record<string, FieldValue>>;
 
 /** Why a field doesn't hold: empty though required, or not what it asks for. */
@@ -166,7 +175,12 @@ function fieldOf(key: string, p: unknown, required: boolean): Field | null {
       initial: d === null ? "" : String(d),
     };
   }
-  if (type === "boolean") return { ...common, kind: "boolean", initial: p["default"] === true };
+  if (type === "boolean")
+    return {
+      ...common,
+      kind: "boolean",
+      initial: typeof p["default"] === "boolean" ? p["default"] : null,
+    };
   return null;
 }
 
@@ -233,7 +247,7 @@ function validUrl(s: string): boolean {
   }
 }
 
-/** Whether a field holds something the lawyer put there (or that the agent defaulted). */
+/** Whether a field holds something the lawyer put there (or that the agent defaulted); words of spaces are nothing. */
 function filled(f: Field, v: FieldValue | undefined): boolean {
   switch (f.kind) {
     case "choice":
@@ -241,10 +255,12 @@ function filled(f: Field, v: FieldValue | undefined): boolean {
     case "multi":
       return Array.isArray(v) && v.length > 0;
     case "text":
-    case "number":
       return typeof v === "string" && v.trim() !== "";
+    case "number":
+      return v === BAD_NUMBER || (typeof v === "string" && v.trim() !== "");
     case "boolean":
-      return v === true;
+      // touched, or defaulted: false is an answer too
+      return typeof v === "boolean";
   }
 }
 
@@ -259,16 +275,17 @@ export function problemOf(f: Field, v: FieldValue | undefined): FieldProblem | n
       return null;
     }
     case "text": {
-      const s = v as string;
+      const s = (v as string).trim();
       const n = chars(s);
       if (f.minLength !== null && n < f.minLength) return "invalid";
       if (f.maxLength !== null && n > f.maxLength) return "invalid";
-      if (f.input === "email" && !EMAIL.test(s.trim())) return "invalid";
-      if (f.input === "url" && !validUrl(s.trim())) return "invalid";
-      if (f.input === "date" && !DATE.test(s.trim())) return "invalid";
+      if (f.input === "email" && !EMAIL.test(s)) return "invalid";
+      if (f.input === "url" && !validUrl(s)) return "invalid";
+      if (f.input === "date" && !DATE.test(s)) return "invalid";
       return null;
     }
     case "number": {
+      if (v === BAD_NUMBER) return "invalid";
       const n = Number((v as string).trim());
       if (!Number.isFinite(n) || (f.integer && !Number.isInteger(n))) return "invalid";
       if (f.minimum !== null && n < f.minimum) return "invalid";
@@ -298,8 +315,8 @@ export const anyFilled = (form: Form, draft: Draft): boolean =>
 export const canSend = (form: Form, draft: Draft): boolean =>
   problems(form, draft).size === 0 && anyFilled(form, draft);
 
-/** The values answer_elicitation sends: a choice's const as given, a multi's consts in schema order, words as typed
- * (left out when empty), a number as a number (left out when empty), a boolean always. */
+/** The values answer_elicitation sends: a choice's const as given, a multi's consts in schema order, words trimmed
+ * (left out when empty), a number as a number (left out when empty), a boolean always (false when untouched). */
 export function content(form: Form, draft: Draft): Record<string, RawPayload> {
   const out: Record<string, RawPayload> = {};
   for (const f of allFields(form)) {
@@ -314,7 +331,7 @@ export function content(form: Form, draft: Draft): Record<string, RawPayload> {
           out[f.key] = f.choices.flatMap((c, i) => (v.includes(i) ? [c.value as RawPayload] : []));
         break;
       case "text":
-        if (typeof v === "string" && v.trim() !== "") out[f.key] = v;
+        if (typeof v === "string" && v.trim() !== "") out[f.key] = v.trim();
         break;
       case "number":
         if (typeof v === "string" && v.trim() !== "") out[f.key] = Number(v.trim());
@@ -335,6 +352,8 @@ export const ELICITATION_TEST_IDS = {
   stop: "elicitation-stop",
   hint: "elicitation-hint",
   error: "elicitation-error",
+  /** The line on a schema the form can't show. */
+  unsupported: "elicitation-unsupported",
   /** A field's wrapper (a fieldset for a question), by its key. */
   field: (key: string) => `elicitation-field-${key}`,
   /** A text, number or boolean field's control, or a question's Other, by its key. */

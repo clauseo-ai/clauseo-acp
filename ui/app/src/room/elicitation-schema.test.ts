@@ -5,6 +5,7 @@ import type { RawPayload } from "../transport/protocol.ts";
 import { ONE_QUESTION, TWO_QUESTIONS } from "./elicitation-fixtures.ts";
 import {
   anyFilled,
+  BAD_NUMBER,
   canSend,
   content,
   initialDraft,
@@ -53,7 +54,7 @@ test("two AskUserQuestions: a choice and a multi-select, each with its question'
   expect(b?.kind === "multi" && b.other?.key).toBe("question_1_custom");
 });
 
-test("the values: a choice's const, a multi's consts in schema order, an Other as typed, empties left out", () => {
+test("the values: a choice's const, a multi's consts in schema order, an Other trimmed, empties left out", () => {
   const f = form(TWO_QUESTIONS.schema);
   const empty = initialDraft(f);
   expect(content(f, empty)).toEqual({});
@@ -64,7 +65,7 @@ test("the values: a choice's const, a multi's consts in schema order, an Other a
   expect(content(f, d)).toEqual({
     question_0: "Stay the proceedings",
     question_1: ["Notice to the bank", "Bank statement, March 2001"],
-    question_1_custom: "  Affidavit ",
+    question_1_custom: "Affidavit",
   });
   // an Other alone is an answer; one of spaces is nothing
   expect(content(f, { ...empty, question_0_custom: "Both, in that order" })).toEqual({
@@ -155,8 +156,36 @@ test("a boolean is always sent, its default or false", () => {
     },
   });
   const d = initialDraft(f);
-  expect(d).toEqual({ a: false, b: true, t: "" });
+  expect(d).toEqual({ a: null, b: true, t: "" });
   expect(content(f, d)).toEqual({ a: false, b: true });
+});
+
+test("a boolean is filled once touched or defaulted, so a form of one box can send false", () => {
+  const f = form({ type: "object", properties: { a: { type: "boolean" } } });
+  expect(canSend(f, initialDraft(f))).toBe(false);
+  expect(canSend(f, { a: false })).toBe(true);
+  expect(content(f, { a: false })).toEqual({ a: false });
+  const d = form({ type: "object", properties: { a: { type: "boolean", default: false } } });
+  expect(canSend(d, initialDraft(d))).toBe(true);
+});
+
+test("a number the input can't read (BAD_NUMBER) is filled but doesn't hold, required or not", () => {
+  const f = form({
+    type: "object",
+    properties: { n: { type: "number" }, m: { type: "integer" } },
+    required: ["m"],
+  });
+  expect(anyFilled(f, { n: BAD_NUMBER, m: "" })).toBe(true);
+  expect(problems(f, { n: BAD_NUMBER, m: "2" }).get("n")).toBe("invalid");
+  expect(problems(f, { n: "", m: BAD_NUMBER }).get("m")).toBe("invalid");
+  expect(canSend(f, { n: BAD_NUMBER, m: "2" })).toBe(false);
+  expect(content(f, { n: " 1e3 ", m: "2" })).toEqual({ n: 1000, m: 2 });
+});
+
+test("words are trimmed before their length is counted and before they are sent", () => {
+  const f = form({ type: "object", properties: { s: { type: "string", maxLength: 3 } } });
+  expect(problems(f, { s: "  abc  " }).size).toBe(0);
+  expect(content(f, { s: "  abc  " })).toEqual({ s: "abc" });
 });
 
 test("required: an empty required field stops Send, and its problem is required", () => {
