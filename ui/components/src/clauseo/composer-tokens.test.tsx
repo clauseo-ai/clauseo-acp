@@ -190,14 +190,128 @@ test("Backspace right after a token, or Delete right before it, takes it whole, 
   await put(4);
   expect(await key("Delete")).toBe(true);
   expect(field().value).toBe("ask  ");
-  // not with a modifier held: that is the engine's own word delete
+  // never while an input method composes
   await undo();
   await put(11);
-  expect(await key("Backspace", { altKey: true })).toBe(false);
-  // and never while an input method composes
   expect(await key("Backspace", { isComposing: true })).toBe(false);
   expect(await key("Backspace", { keyCode: 229 })).toBe(false);
   expect(field().value).toBe("ask /review ");
+});
+
+test("a word delete, Option or Ctrl with Backspace or Delete, that would cut into a token takes it whole, through the engine", async () => {
+  lay();
+  const { undo } = engine();
+  await mount(composer());
+  await focus();
+  await pickReview("ask ");
+  // the engine would leave a bare slash: the token goes whole, with the space before the caret
+  await edit("ask /review  now", 12);
+  for (const init of [{ altKey: true }, { ctrlKey: true }]) {
+    await put(12);
+    expect(await key("Backspace", init)).toBe(true);
+    expect(field().value).toBe("ask  now");
+    expect(boxes()).toEqual([]);
+    await undo();
+    expect(field().value).toBe("ask /review  now");
+    expect(starts()).toEqual([4]);
+    await put(3);
+    expect(await key("Delete", init)).toBe(true);
+    expect(field().value).toBe("ask  now");
+    await undo();
+  }
+  // a word that isn't the token's is the engine's own to delete
+  await put(16);
+  expect(await key("Backspace", { altKey: true })).toBe(false);
+  // Cmd with Backspace deletes to the line's start: whole tokens only, the engine's own
+  await put(12);
+  expect(await key("Backspace", { metaKey: true })).toBe(false);
+});
+
+test("macOS's Ctrl+H is Backspace: right after a token it takes the token whole", async () => {
+  lay();
+  engine();
+  vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
+  await mount(composer());
+  await focus();
+  await pickReview("ask ");
+  await put(11);
+  expect(await key("h", { ctrlKey: true })).toBe(true);
+  expect(field().value).toBe("ask  ");
+});
+
+test("Shift with an arrow takes a token in whole, and lets it go again on the way back", async () => {
+  lay();
+  engine();
+  await mount(composer());
+  await focus();
+  await pickReview("ask ");
+  await edit("ask /review now", 15);
+  await put(15);
+  // Shift+Left, step by step, from the end: into the token, and it is taken in whole
+  for (const at of [14, 13, 12, 11, 10]) await put(at, 15);
+  expect(caret()).toEqual([4, 15]);
+  // Shift+Right: the token is let go, the selection shrinks
+  await put(5, 15);
+  expect(caret()).toEqual([11, 15]);
+  await put(12, 15);
+  expect(caret()).toEqual([12, 15]);
+});
+
+test("an input method's composition beside a token leaves it whole, moved by what was composed before it", async () => {
+  lay();
+  engine();
+  await mount(composer());
+  await focus();
+  await pickReview();
+  const compose = async (steps: [string, number][]) => {
+    await act(async () => {
+      field().dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true, data: "" }));
+    });
+    for (const [value, at] of steps) await edit(value, at, "insertCompositionText");
+    await act(async () => {
+      field().dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: "" }));
+    });
+    await act(settled);
+  };
+  // after it, Hindi Transliteration's candidates growing, then committed
+  await compose([
+    ["/review क", 9],
+    ["/review कि", 10],
+    ["/review किराया", 14],
+  ]);
+  expect(starts()).toEqual([0]);
+  // before it, at the field's start
+  await put(0);
+  await compose([
+    ["प/review किराया", 1],
+    ["प्र /review किराया", 4],
+  ]);
+  expect(field().value).toBe("प्र /review किराया");
+  expect(starts()).toEqual([4]);
+  // and right against its end, no space between: the token's characters still stand
+  await compose([["प्र /reviewक किराया", 12]]);
+  expect(starts()).toEqual([4]);
+});
+
+test("Tamil99 and Anjal's replacement edits right after a token leave it whole", async () => {
+  lay();
+  engine();
+  await mount(composer());
+  await focus();
+  await pickReview();
+  // a consonant, then the vowel sign that replaces it with the syllable, never composing
+  await edit("/review க", 9);
+  await edit("/review கா", 10, "insertReplacementText");
+  expect(starts()).toEqual([0]);
+  // Anjal's: two characters replaced by three
+  await edit("/review கால", 11);
+  await edit("/review காலை", 12, "insertReplacementText");
+  expect(field().value).toBe("/review காலை");
+  expect(starts()).toEqual([0]);
+  // right against the token's end, no space: replaced too, and the token stands
+  await edit("/reviewக காலை", 8);
+  await edit("/reviewகா காலை", 9, "insertReplacementText");
+  expect(starts()).toEqual([0]);
 });
 
 test("the caret steps over a token and never rests inside one; a selection grows to whole tokens", async () => {
@@ -314,6 +428,8 @@ test("the overlay copies the field's face, padding, line height and transform, t
   expect(o.style.paddingTop).toBe("1px");
   expect(o.style.transform).toBe("translateY(1.5px)");
   expect(o.style.width).toBe("480px");
+  // line breaks and runs of spaces kept, as the field keeps them
+  expect(getComputedStyle(o).whiteSpace).toBe("pre-wrap");
   expect(o.style.height).toBe("156px");
   // at the six lines' cap the field scrolls, and the overlay with it
   await act(async () => {

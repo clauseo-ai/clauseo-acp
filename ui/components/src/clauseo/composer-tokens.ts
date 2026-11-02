@@ -20,6 +20,7 @@ import {
   tokenEndingAt,
   tokenStartingAt,
   withPick,
+  wordDelete,
   type Token,
 } from "./composer-tokens-logic.ts";
 
@@ -68,6 +69,9 @@ export function holdTokens(
       for (const p of FACE) overlay.style[p] = style[p];
       overlay.style.transform = style.transform;
     }
+    // as a textarea keeps them: line breaks and runs of spaces stand, so a box after Shift+Enter or two spaces is
+    // drawn where the words are (the stylesheet says so too)
+    overlay.style.whiteSpace = "pre-wrap";
     const bx = px(style?.borderLeftWidth ?? "") + px(style?.borderRightWidth ?? "");
     const by = px(style?.borderTopWidth ?? "") + px(style?.borderBottomWidth ?? "");
     overlay.style.left = `${field.offsetLeft}px`;
@@ -122,8 +126,11 @@ export function holdTokens(
     read(kind === "historyUndo" || kind === "historyRedo");
   };
 
-  /** Selects the token and deletes it through the engine, so undo brings it back. */
-  const remove = (t: Token, kind: "deleteContentBackward" | "deleteContentForward") => {
+  /** Selects the range and deletes it through the engine, so undo brings it back. */
+  const remove = (
+    t: { start: number; end: number },
+    kind: "deleteContentBackward" | "deleteContentForward",
+  ) => {
     const was = field.value;
     field.setSelectionRange(t.start, t.end);
     const ok = typeof doc.execCommand === "function" && doc.execCommand("delete");
@@ -133,12 +140,32 @@ export function holdTokens(
       field.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: kind }));
     }
   };
+  const mac = /Mac|iPhone|iPad/.test(view?.navigator.platform ?? "");
 
   const onKey = (e: KeyboardEvent) => {
     if (composing.current || e.isComposing || e.keyCode === 229 || e.defaultPrevented) return;
-    if (e.altKey || e.metaKey || e.ctrlKey) return;
     const at = field.selectionStart;
     if (at !== field.selectionEnd) return;
+    // a word delete, Option or Ctrl with Backspace or Delete, that would cut into a token takes it whole, as
+    // Backspace does; macOS's Ctrl+H is Backspace. Cmd with Backspace deletes to the line's start, whole tokens only
+    if ((e.altKey || e.ctrlKey) && !e.metaKey && (e.key === "Backspace" || e.key === "Delete")) {
+      const forward = e.key === "Delete";
+      const r = wordDelete(value, tokens, at, forward);
+      if (r === null) return;
+      e.preventDefault();
+      remove(r, forward ? "deleteContentForward" : "deleteContentBackward");
+      return;
+    }
+    const ctrlH = mac && e.ctrlKey && !e.altKey && !e.metaKey && e.key.toLowerCase() === "h";
+    if (ctrlH) {
+      const t = tokenEndingAt(tokens, at);
+      if (t !== undefined) {
+        e.preventDefault();
+        remove(t, "deleteContentBackward");
+      }
+      return;
+    }
+    if (e.altKey || e.metaKey || e.ctrlKey) return;
     const before = tokenEndingAt(tokens, at);
     const after = tokenStartingAt(tokens, at);
     if (e.key === "Backspace" && before !== undefined) {
@@ -156,14 +183,19 @@ export function holdTokens(
     }
   };
 
-  /** The caret out of any token it stands in, a selection out to whole tokens. */
+  // the selection as it last rested, so an end that moves into a token goes on the way it was going
+  let last: { start: number; end: number } | null = null;
+  /** The caret out of any token it stands in, a selection's ends out of tokens the way they travelled. */
   const snap = () => {
-    if (composing.current || doc.activeElement !== field || tokens.length === 0) return;
-    // a selection change can come before the input event that moved the words under it
-    if (field.value !== value) read(false);
-    const to = snapped(tokens, field.selectionStart, field.selectionEnd);
-    if (to !== null)
-      field.setSelectionRange(to.start, to.end, field.selectionDirection ?? undefined);
+    if (composing.current || doc.activeElement !== field) return;
+    if (tokens.length > 0) {
+      // a selection change can come before the input event that moved the words under it
+      if (field.value !== value) read(false);
+      const to = snapped(tokens, field.selectionStart, field.selectionEnd, last);
+      if (to !== null)
+        field.setSelectionRange(to.start, to.end, field.selectionDirection ?? undefined);
+    }
+    last = { start: field.selectionStart, end: field.selectionEnd };
   };
 
   const onScroll = () => {

@@ -10,6 +10,7 @@ import {
   tokenEndingAt,
   tokenStartingAt,
   withPick,
+  wordDelete,
   type Token,
 } from "./composer-tokens-logic.ts";
 
@@ -94,4 +95,32 @@ test("the caret goes to a token's nearer edge, its end at a tie; a selection gro
   expect(snapped(t, 0, 4)).toEqual({ start: 0, end: 9 });
   expect(snapped(t, 4, 11)).toEqual({ start: 2, end: 11 });
   expect(snapped(t, 0, 11)).toBeNull();
+});
+
+test("a selection's end that moves into a token goes on the way it travelled, so Shift+Arrow can let a token go", () => {
+  const v = "ask /review now";
+  const t = [tok(v, "/review")];
+  // Shift+Left from the end, a step into the token: the token is taken in whole
+  expect(snapped(t, 10, 15, { start: 11, end: 15 })).toEqual({ start: 4, end: 15 });
+  // Shift+Right from there: the token is let go, not pushed back out to its start
+  expect(snapped(t, 5, 15, { start: 4, end: 15 })).toEqual({ start: 11, end: 15 });
+  // the other way round, the end moving
+  expect(snapped(t, 0, 6, { start: 0, end: 4 })).toEqual({ start: 0, end: 11 });
+  expect(snapped(t, 0, 10, { start: 0, end: 11 })).toEqual({ start: 0, end: 4 });
+  // a new selection, or one from a caret: outward
+  expect(snapped(t, 6, 15, { start: 15, end: 15 })).toEqual({ start: 4, end: 15 });
+  expect(snapped(t, 1, 6, null)).toEqual({ start: 1, end: 11 });
+});
+
+test("a word delete that would cut into a token takes the token whole and the spaces up to the caret", () => {
+  const v = "ask /review  now";
+  const t = [tok(v, "/review")];
+  expect(wordDelete(v, t, 11, false)).toEqual({ start: 4, end: 11 });
+  expect(wordDelete(v, t, 13, false)).toEqual({ start: 4, end: 13 });
+  expect(wordDelete(v, t, 4, true)).toEqual({ start: 4, end: 11 });
+  expect(wordDelete(v, t, 3, true)).toEqual({ start: 3, end: 11 });
+  // a word that isn't the token's: the engine's own delete
+  expect(wordDelete(v, t, 16, false)).toBeNull();
+  expect(wordDelete(v, t, 2, false)).toBeNull();
+  expect(wordDelete(v, t, 11, true)).toBeNull();
 });

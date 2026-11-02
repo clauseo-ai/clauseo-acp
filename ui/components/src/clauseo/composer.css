@@ -167,6 +167,7 @@
     z-index: -1;
     margin: 0;
     overflow: hidden;
+    white-space: pre-wrap;
     color: transparent;
     pointer-events: none;
     user-select: none;
