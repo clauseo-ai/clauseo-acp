@@ -9,16 +9,25 @@ import { CASES } from "./hostile-cases.ts";
 //
 // Why 8 times: without the limits in nesting.ts, the cases this guards against cost about 28 to 140 times
 // the prose baseline in Node (round 2 of PR #107's review: 10 KB of nesting through tabs 2.2 s, 5,000 `*`
-// a side 1.4 s, 5,000 short runs 0.56 s), while every case now stays within about 3.5 times (the
-// 20,000-character line, and the tab-nested list whose depth micromark checks on every line). An absolute limit in milliseconds fails on a loaded CI machine and says nothing
-// about size; a frame (16.7 ms) is the real target, measured in real engines by the private harness.
+// a side 1.4 s, 5,000 short runs 0.56 s), while every case above the floor now stays within about 5.6
+// times (extras-definitions; long-line and extras-superscripts-6000 about 4 to 5), quiet or at load 10.
+// An absolute limit in milliseconds fails on a loaded CI machine and says nothing about size; a frame
+// (16.7 ms) is the real target, measured in real engines by the private harness.
 //
 // Times are this thread's CPU time, not wall time: with other suites running at once (load about 10),
-// wall time counted the time the thread waited for a core, and 4 of 6 runs failed; thread CPU time
-// passed 6 of 6 at that load and still fails with the nesting limits removed (round 1 of PR #115's review).
+// wall time counted the time the thread waited for a core, and 4 of 6 runs failed (round 1 of PR #115's
+// review). Even CPU time grows on a busy machine (shared caches and cores, clock changes), and one timing of
+// the prose against one of the case still failed in CI (footnote-many-labels, 43 ms against 40 ms). So the
+// prose, the finished case and the slowest streamed deltas are each timed in ROUNDS interleaved rounds and
+// the least of each is compared: a spike inflates a round, not all of them, and a real freeze is slow in
+// every round.
 const RATIO = 8;
 const FLOOR_MS = 20;
 const DELTA = 16;
+/** Interleaved rounds of timing; each figure is the least of its rounds. */
+const ROUNDS = 4;
+/** The slowest deltas of the first streaming pass that the rounds time again. */
+const WORST = 2;
 const PROSE =
   "Lorem ipsum dolor sit amet, **consectetur** adipiscing elit, sed do _eiusmod_ tempor. ";
 
@@ -35,15 +44,18 @@ function now(): number {
   return (user + system) / 1000;
 }
 
-/** The fastest of three timings of `update`, so one scheduler hiccup does not count. */
-function fastest(update: () => void): number {
-  const times: number[] = [];
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const start = now();
-    update();
-    times.push(now() - start);
-  }
-  return Math.min(...times);
+/** The CPU time one call of `update` takes. */
+function time(update: () => void): number {
+  const start = now();
+  update();
+  return now() - start;
+}
+
+/** The CPU time of the streamed update to `end`, by a model that has just been updated to `previous`. */
+function streamedTo(markdown: string, previous: number, end: number): number {
+  const answer = createAnswer("r");
+  if (previous > 0) answer.update(markdown.slice(0, previous), true);
+  return time(() => answer.update(markdown.slice(0, end), true));
 }
 
 test.each(CASES.map((c) => [c.id, c] as const))(
@@ -53,24 +65,38 @@ test.each(CASES.map((c) => [c.id, c] as const))(
       0,
       c.markdown.length,
     );
-    const limit = Math.max(FLOOR_MS, RATIO * fastest(() => createAnswer("p").update(prose, false)));
-    const finished = fastest(() => createAnswer("t").update(c.markdown, false));
-    let streaming = 0;
+    // Round one times the prose, the finished case and every streamed delta. Each later round, interleaved,
+    // times the prose, the finished case and only the slowest deltas of round one again. Each figure is the
+    // least of its rounds: what the code costs, without the time a busy machine stole from any one round.
+    let baseline = time(() => createAnswer("p").update(prose, false));
+    let finished = time(() => createAnswer("t").update(c.markdown, false));
     const answer = createAnswer("s");
-    for (const end of ends(c.markdown.length)) {
-      const start = now();
-      answer.update(c.markdown.slice(0, end), true);
-      const took = now() - start;
-      // Over the limit: measured again from a fresh model at that length, to tell a hiccup from a slow update.
-      streaming = Math.max(
-        streaming,
-        took < limit
-          ? took
-          : fastest(() => createAnswer("r").update(c.markdown.slice(0, end), true)),
+    const worst = ends(c.markdown.length)
+      .map((end, i, all) => ({
+        previous: all[i - 1] ?? 0,
+        end,
+        least: time(() => answer.update(c.markdown.slice(0, end), true)),
+      }))
+      .sort((x, y) => y.least - x.least)
+      .slice(0, WORST);
+    for (let round = 1; round < ROUNDS; round++) {
+      baseline = Math.min(
+        baseline,
+        time(() => createAnswer("p").update(prose, false)),
       );
+      finished = Math.min(
+        finished,
+        time(() => createAnswer("t").update(c.markdown, false)),
+      );
+      for (const delta of worst)
+        delta.least = Math.min(delta.least, streamedTo(c.markdown, delta.previous, delta.end));
     }
+    const streaming = Math.max(0, ...worst.map(({ least }) => least));
+    const limit = Math.max(FLOOR_MS, RATIO * baseline);
     expect(finished, "finished").toBeLessThan(limit);
     expect(streaming, "streaming").toBeLessThan(limit);
   },
-  60_000,
+  // A guard against a hang, not a check of the cost: the largest case takes about 20 s alone and 50 s with
+  // three suites and a build beside it.
+  180_000,
 );
