@@ -23,6 +23,7 @@ import {
   ThreadActionsContext,
   useRefused,
   useThreadSession,
+  type AskHow,
   type ConversationLink,
   type Drafts,
 } from "./session.ts";
@@ -125,9 +126,9 @@ export function Work({
   useEffect(() => onThread?.(session.thread), [onThread, session.thread]);
   // U7: a refused Stop the other, by its code, on the composer's line until the next press or Ask
   const [otherRefused, refuseOther] = useRefused();
-  const ask = (text: string) => {
+  const ask = (text: string, how?: AskHow) => {
     refuseOther(null);
-    return session.ask(text);
+    return session.ask(text, how);
   };
   // the thread's chunk, in memory before the first view or the first answer, with a matter or without
   useEffect(() => void loadThread(), []);
@@ -179,6 +180,9 @@ export function Work({
         others={
           conversations === undefined ? null : { transport, conversations, onRefused: refuseOther }
         }
+        transport={transport}
+        stream={stream}
+        thread={session.thread}
       />
     </>
   );

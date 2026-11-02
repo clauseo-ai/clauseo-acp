@@ -5,6 +5,7 @@
 import { createContext, use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ViewStore } from "../../store/store.ts";
 import { streamOf } from "../../store/view.ts";
+import { dispatchH9 } from "../../transport/h9-pending.ts";
 import { internalError, toHostError, type HostTransport } from "../../transport/host-transport.ts";
 import type {
   ErrorCode,
@@ -19,6 +20,7 @@ import type {
   Timestamp,
   TurnId,
 } from "../../transport/protocol.ts";
+import { queueCountPick } from "../queue-entries.ts";
 import { turnRunning } from "./live.ts";
 import { loadThread } from "./chunk.ts";
 
@@ -80,6 +82,11 @@ export function useThreadActions(): ThreadActions {
   return actions;
 }
 
+/** How a question goes (U7, H9): `behind`, sent while Clauseo works, so the host queues it (send_prompt with no
+ * `delivery`) or, with `delivery: "steer"`, gives it to the running answer or stops that answer for it. A question
+ * that goes behind a turn, or into a held or waiting queue, is not the sent turn: busy follows the status for it. */
+export type AskHow = { behind?: boolean; delivery?: "steer" };
+
 export type ThreadSession = {
   /** The open thread, or null before the first Ask makes one, while list_threads runs, or before the thread's chunk is
    * in. */
@@ -89,7 +96,7 @@ export type ThreadSession = {
   /** The code of the last refused send or Stop, until the next Ask; else the matter's refused list. */
   readonly refused: ErrorCode | null;
   /** Sends a question, making the thread first if there is none. True once send_prompt is accepted. Never rejects. */
-  ask: (text: string) => Promise<boolean>;
+  ask: (text: string, how?: AskHow) => Promise<boolean>;
   stop: () => void;
   actions: ThreadActions;
 };
@@ -143,7 +150,7 @@ export function useThreadSession(
   );
 
   const ask = useCallback(
-    async (text: string): Promise<boolean> => {
+    async (text: string, how: AskHow = {}): Promise<boolean> => {
       if (matter === null || key === null || sending.current) return false;
       sending.current = true;
       refuse(null);
@@ -156,10 +163,25 @@ export function useThreadSession(
           if (open.current !== id) setMade(id);
           open.current = id;
         }
-        headerAtSend.current = store.view(streamOf(id))?.header ?? null;
-        const sent = await command({ send_prompt: { thread: id, content: [{ text: { text } }] } });
-        if (typeof sent !== "string" && sent.prompt_accepted !== undefined)
+        const view = store.view(streamOf(id));
+        // only a question sent while nothing runs or waits is the sent turn: one queued behind the running turn, or
+        // behind a held queue's messages, would hold busy past the running turn's end (live.ts, useBusy)
+        const track =
+          how.behind !== true &&
+          how.delivery === undefined &&
+          view?.header?.header?.queue_held !== true &&
+          queueCountPick(view) === 0;
+        const header = view?.header ?? null;
+        const content = [{ text: { text } }];
+        const sent = await (how.delivery === undefined
+          ? command({ send_prompt: { thread: id, content } })
+          : dispatchH9(transport, {
+              send_prompt: { thread: id, content, delivery: how.delivery },
+            }));
+        if (track && typeof sent !== "string" && sent.prompt_accepted !== undefined) {
+          headerAtSend.current = header;
           setSentTurn(sent.prompt_accepted.turn);
+        }
         onSent(id, text);
         return true;
       } catch (e) {
@@ -169,7 +191,7 @@ export function useThreadSession(
         sending.current = false;
       }
     },
-    [matter, key, create, onSent, command, store, refuse],
+    [matter, key, create, onSent, command, store, refuse, transport],
   );
 
   // The sent turn holds busy until its step or limit stop is in the view (live.ts, useBusy). A turn can end without

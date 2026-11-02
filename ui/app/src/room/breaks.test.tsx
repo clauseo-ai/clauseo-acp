@@ -31,7 +31,10 @@ test("a refused send shows its code's line on the working line for every code, n
     await h.click(h.one("send"));
     const line = h.one("error");
     expect(line?.dataset["code"]).toBe(code);
-    expect(line?.textContent).toContain(errorWords("en", code));
+    // U7: a full queue says the cap, matters/queue-full's line, in place of U3's words
+    expect(line?.textContent).toContain(
+      code === "thread.queue_full" ? "The queue holds 10." : errorWords("en", code),
+    );
     expect(h.host.textContent).not.toContain(SECRET);
     if (code === "store.melted" || code === "unknown")
       expect(line?.textContent).toContain(errorWords("en", "internal"));

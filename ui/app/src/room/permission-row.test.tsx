@@ -107,12 +107,14 @@ test("Enter in the empty composer answers allow_once; the prompt stays busy unti
   expect(answers()).toEqual([]);
 });
 
-test("with words in the field, Enter answers nothing and the composer keeps its words; Shift+Enter never answers", async () => {
+test("with words in the field, Enter answers nothing and queues the words (U7, QU.9 a); Shift+Enter never answers", async () => {
   h = await room([perm(3, 1)]);
   await h.type("and the lease");
   await h.key({ key: "Enter" });
   expect(answered()).toEqual([]);
-  expect(h.one("composer")).toHaveProperty("value", "and the lease");
+  expect(h.sent("send_prompt").map((c) => c.content)).toEqual([
+    [{ text: { text: "and the lease" } }],
+  ]);
   await h.type("");
   await h.key({ key: "Enter", shiftKey: true });
   expect(answered()).toEqual([]);
