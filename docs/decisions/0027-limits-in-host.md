@@ -39,9 +39,12 @@ user-facing words: U5 replaced R12's window, and U12 builds the limit screens.
   the settings entries, then one read per agent. With no `claude-acp` or `codex-acp` entry there
   is no model, no read, and the view is empty.
 - **Inputs.** A permission or elicitation recomputes, from state, whether that agent kind has any
-  question pending, and feeds `Asking` only when the answer changes. A turn end feeds `TurnEnded`,
+  question pending, and feeds `Asking` only when the answer changes. An accepted URL elicitation
+  counts as pending until the agent sends `elicitation/complete`. A turn end feeds `TurnEnded`,
   with `read_now` for an `AtLimit` stop. One host timer runs at `Limits::next_deadline()`,
-  re-armed after every input. With no subscriber the model gives no deadline, so no timer is armed.
+  re-armed after every input. With no subscriber the model gives no deadline, so no timer is armed,
+  and a fire that comes while nobody watches is ignored. The timer counts monotonic time, which
+  stops while the computer sleeps, so every input first sweeps a deadline whose wall time passed.
 - **Focus throttle.** `RefreshWhy::Shown` is throttled by S13's model rule alone: it reads only
   when the last read started 5 minutes ago or more (`SHOWN_AFTER_MS`, `policy/triggers.rs`). The
   host adds no second number. A throttled `Shown` publishes nothing.
@@ -49,8 +52,11 @@ user-facing words: U5 replaced R12's window, and U12 builds the limit screens.
   None`, the end commit holds `TurnEnded { AtLimit }` and no `TurnStoppedAtLimit`. The host asks
   for a read and, on that agent's next `ReadDone`, logs one `TurnStoppedAtLimit` in its own
   commit. `window` and `resets_at` come from `Limits::at_limit(agent, now)`, both `None` when it
-  answers `None` or the read failed; `reason` comes from the turn's limit signal. A stop whose
-  signal has a reset time keeps R11's single commit, then a read.
+  answers `None` or the read failed; `reason` comes from the turn's limit signal. With no
+  `ReadDone` within 10 s (`LIMIT_READ_WAIT`), `at_limit` as it stands then decides. The stop is
+  logged only once the end commit is durable, and stays pending, keeping the thread's stream
+  loaded, until its own commit is; a failed commit is retried. A stop whose signal has a reset
+  time keeps R11's single commit, then a read.
 - **The no-kind rule.** An agent id with no `AgentKind`, or a kind the model does not have, keeps
   the stop in the end commit, since no read will come.
 - **R11 change 2, signals outside a turn.** A `LimitSignal::RateLimit` outside a turn feeds the
@@ -78,8 +84,10 @@ user-facing words: U5 replaced R12's window, and U12 builds the limit screens.
 ## Consequences
 
 - Limit ticks never reach the log; `store` keeps the last `AccountLimits` per account.
-- Known gap: a stop sent between a failed end commit and its retry fails against the blocked
-  stream and is only warned. The next start's repair logs it, with no window or reset time.
+- A stop whose turn's end never becomes durable (its retry failed too) is not logged in that run;
+  the next start ends that turn, as 0011 says.
+- The agent list and the reader are fixed at start-up, so a `claude-acp` or `codex-acp` entry
+  added later gets limits after a restart.
 - A Codex turn failing with a JSON-RPC error ends up to 10 s later than before.
 - U12 builds the screens on `LimitsViewChanged`, `next_read_at` and `provider`; the settings page
   and meters dispatch `RefreshLimits { why: Shown }` when they open.
