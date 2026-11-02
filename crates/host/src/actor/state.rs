@@ -44,6 +44,9 @@ pub(crate) struct ThreadEntry {
     pub(crate) row: ThreadRow,
     /// The header as of the last time the stream was unloaded, for `ListThreads`.
     pub(crate) header: Option<clauseo_protocol::HeaderEntry>,
+    /// How and when its last turn ended, for the matter's status: from the loaded state's last
+    /// step when the stream is unloaded, and from each durable `TurnEnded`.
+    pub(crate) last_stop: Option<(clauseo_protocol::StopReason, clauseo_protocol::Timestamp)>,
     pub(crate) turn: turn::TurnState,
 }
 

@@ -1,6 +1,6 @@
 ---
 source: crates/protocol/tests/snapshots.rs
-expression: "HostCommand::CreateMatter\n{\n    name: \"Smith v Jones\".to_owned(), source: MatterSource::NewFolder\n    { folder: folder_ref_id(1) },\n}"
+expression: "HostCommand::CreateMatter\n{\n    name: title(\"Smith v Jones\"), source: MatterSource::NewFolder\n    { folder: folder_ref_id(1) }, client:\n    Some(ClientName::new(\"Rathi Steels\").unwrap()), next_date:\n    Some(\"2026-11-20\".parse::<Date>().unwrap()),\n}"
 ---
 {
   "create_matter": {
@@ -9,6 +9,8 @@ expression: "HostCommand::CreateMatter\n{\n    name: \"Smith v Jones\".to_owned(
       "new_folder": {
         "folder": "01900000-0000-7000-8000-000000000001"
       }
-    }
+    },
+    "client": "Rathi Steels",
+    "next_date": "2026-11-20"
   }
 }

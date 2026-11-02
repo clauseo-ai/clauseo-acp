@@ -9,7 +9,7 @@ use std::thread::JoinHandle;
 
 use async_channel::{Receiver, Sender};
 use clauseo_protocol::{
-    AccountLimits, BlobHash, CheckpointId, CommandId, Envelope, MatterId, Seq, StreamId,
+    AccountLimits, BlobHash, CheckpointId, CommandId, Envelope, MatterId, Seq, StreamId, Timestamp,
 };
 use futures::channel::oneshot;
 use rusqlite::Connection;
@@ -97,6 +97,9 @@ enum ReadRequest {
     },
     Matters {
         reply: oneshot::Sender<Result<Vec<MatterRow>, Error>>,
+    },
+    TailTimes {
+        reply: oneshot::Sender<Result<Vec<(StreamId, Timestamp)>, Error>>,
     },
     Threads {
         matter: MatterId,
@@ -265,6 +268,13 @@ impl Store {
     /// Every matter in the registry, oldest first.
     pub async fn matters(&self) -> Result<Vec<MatterRow>, Error> {
         self.read(|reply| ReadRequest::Matters { reply }).await
+    }
+
+    /// The `ts` of the last event of every stream that has events, in no set order: one key
+    /// lookup per stream, decoding only each envelope's `ts`. For the host's matter list at
+    /// start-up, which keeps the times current itself from then on.
+    pub async fn tail_times(&self) -> Result<Vec<(StreamId, Timestamp)>, Error> {
+        self.read(|reply| ReadRequest::TailTimes { reply }).await
     }
 
     /// The threads of `matter`, most recently updated first.
@@ -468,6 +478,7 @@ fn serve(
             reply,
         } => answer(reply, blob::read(conn, hash, offset, len)),
         ReadRequest::Matters { reply } => answer(reply, read::matters(conn)),
+        ReadRequest::TailTimes { reply } => answer(reply, read::tail_times(conn)),
         ReadRequest::Threads { matter, reply } => answer(reply, read::threads(conn, matter)),
         ReadRequest::Checkpoint { id, reply } => answer(reply, read::checkpoint(conn, id)),
         ReadRequest::AccountLimits { reply } => answer(reply, read::account_limits(conn)),

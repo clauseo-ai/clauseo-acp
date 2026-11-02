@@ -220,8 +220,19 @@ its step card, and compare (below) lists the files between any two versions.
 | Scratch matter, created on first start | `ViewEntry::MatterHeader` with `MatterKind::Scratch` | name |
 | New folder | `MatterKind::Folder` from `MatterSource::NewFolder` | name, import summary |
 | Existing folder | `MatterKind::Folder` from `MatterSource::ExistingFolder` | name, import summary: files, bytes, cloud-only files |
-| Folder refused (drive root, home or system folder) | `ErrorCode::MatterFolderRefused` | choose another folder |
-| Matter list | `HostQuery::ListMatters` returns `QueryResult::Matters` | name, kind per matter |
+| New folder in the default location, no picker | `MatterKind::Folder` from `MatterSource::DefaultLocation` | name |
+| Where new matters go, before a pick | `HostQuery::GetDefaultLocation` returns `QueryResult::DefaultLocation` | `display`, the folder below home |
+| Folder refused, one code per reason (`matter.folder_refused` before decision record 0022) | `ErrorCode::MatterFolderIsDrive`, `ErrorCode::MatterFolderIsHome`, `ErrorCode::MatterFolderIsSystem`, `ErrorCode::MatterFolderUnreadable`, `ErrorCode::MatterFolderInMattersRoot` | choose another folder |
+| Folder is already a matter's, or nested with one | `ErrorCode::MatterFolderIsMatter` | `HostError.matter`, the matter to name and offer to open |
+| Matter list | `HostQuery::ListMatters` returns `QueryResult::Matters` | name, kind, client, next date, pinned, last opened, last activity, folder display and status per matter |
+| Matter idle | `MatterStatus::Idle` | nothing runs, nothing to read |
+| Matter working | `MatterStatus::Working` | a thread's turn starts, runs or waits for the writer |
+| Matter needs a permission | `MatterStatus::NeedsPermission` | outranks every other status |
+| Matter needs an answer | `MatterStatus::NeedsAnswer` | an elicitation waits |
+| Matter answer ready | `MatterStatus::Ready` | a turn finished after the matter was last opened |
+| Matter stopped | `MatterStatus::Stopped` | `at`, when the turn stopped short |
+| Matter paused at the limit | `MatterStatus::PausedAtLimit` | `resets_at`, the earliest reset, when known |
+| Matter details changed, opened, forgotten | `HostCommand::UpdateMatter`, `HostCommand::OpenMatter`, `HostCommand::ForgetMatter` | `Done`; forgetting deletes nothing |
 | Thread list | `HostQuery::ListThreads` returns `QueryResult::Threads` | title, agent, status per thread |
 | Papers (the folder as it is now; asked again after a `checkpoint_recorded` or `outside_edits`) | `HostQuery::ListPapers` returns `QueryResult::Papers` | per file Clauseo versions: `FileRefId`, path, size, modified; sorted by path |
 | Files Clauseo does not version | `QueryResult::Papers` `skipped` | path and `SkippedFileReason` (over the size cap, cloud-only) |
@@ -277,7 +288,8 @@ retried as they are; the others need the lawyer or a fix first. Meanings are in 
 | Store | `ErrorCode::StoreIo` | yes |
 | Store | `ErrorCode::StoreDiskFull`, `ErrorCode::StoreCorrupt`, `ErrorCode::StoreLocked`, `ErrorCode::StoreNewerVersion` | no |
 | Matter | `ErrorCode::MatterCheckpointFailed`, `ErrorCode::MatterFileLocked`, `ErrorCode::MatterTurnRunning` | yes |
-| Matter | `ErrorCode::MatterFolderMissing`, `ErrorCode::MatterFolderRefused`, `ErrorCode::MatterCodexFolder` | no |
+| Matter | `ErrorCode::MatterFolderMissing`, `ErrorCode::MatterCodexFolder`; `ErrorCode::MatterFolderRefused` only from a host before decision record 0022 | no |
+| Matter folder refused (0022) | `ErrorCode::MatterFolderIsDrive`, `ErrorCode::MatterFolderIsHome`, `ErrorCode::MatterFolderIsSystem`, `ErrorCode::MatterFolderUnreadable`, `ErrorCode::MatterFolderIsMatter`, `ErrorCode::MatterFolderInMattersRoot` | no |
 | Transport | `ErrorCode::TransportUnauthorized`, `ErrorCode::TransportTooLarge` | no |
 | Settings | `ErrorCode::SettingsLocked` | no |
 | A code from a newer Clauseo | `ErrorCode::Unknown` | no |
@@ -294,7 +306,7 @@ These arrive later as additive events and commands.
 | Onboarding: choose the agent | planned: the `agents` crate | the two agents, an API key or an account the firm provides |
 | Onboarding: sign in, waiting, cancelled, timed out, no plan, network failure | planned: the `agents` crate | sign-in progress and its failure |
 | Onboarding: matter protection, sandbox unavailable | planned: the `sandbox` crate | the protection level; the ask-before-each-change fallback |
-| Onboarding: first matter, folder unreadable | planned: the `agents` crate (flow); `ErrorCode::MatterFolderRefused` exists | folder state |
+| Onboarding: first matter, folder unreadable | planned: the `agents` crate (flow); `ErrorCode::MatterFolderUnreadable` exists | folder state |
 | Onboarding: first question, sign-in expired | planned: the `agents` crate; `ErrorCode::AgentAuthRequired` exists | example prompts from the matter's files |
 | Protection status: protected | planned: the `sandbox` crate | the protection level, what the agent can reach |
 | Protection status: Not protected | planned: the `sandbox` crate | the matter runs without the sandbox; persistent on the matter |

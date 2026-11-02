@@ -45,6 +45,8 @@ fn create(name: &str, source: MatterSource) -> HostCommand {
     HostCommand::CreateMatter {
         name: title(name),
         source,
+        client: None,
+        next_date: None,
     }
 }
 

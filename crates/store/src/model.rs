@@ -3,8 +3,9 @@
 use std::path::PathBuf;
 
 use clauseo_protocol::{
-    AgentId, AgentSessionId, BlobHash, BlobRef, CheckpointId, CommandId, CommandOutcome, Count,
-    Envelope, MatterId, MatterKind, Seq, StreamId, ThreadId, Timestamp,
+    AgentId, AgentSessionId, BlobHash, BlobRef, CheckpointId, ClientName, CommandId,
+    CommandOutcome, Count, Date, Envelope, MatterId, MatterKind, Seq, StreamId, ThreadId,
+    Timestamp,
 };
 
 use crate::blob::preview;
@@ -163,6 +164,17 @@ pub struct MatterRow {
     pub shadow_repo_path: String,
     /// When it was made.
     pub created: Timestamp,
+    /// The client it is for, once set (schema 2; `NULL` before).
+    pub client: Option<ClientName>,
+    /// Its next date, once set (schema 2).
+    pub next_date: Option<Date>,
+    /// Whether it is pinned to the top of the rail (schema 2; `false` before).
+    pub pinned: bool,
+    /// When the lawyer last opened it, once they have (schema 2).
+    pub last_opened: Option<Timestamp>,
+    /// When `ForgetMatter` took it off the list; `None` while it is on it (schema 2). The row,
+    /// its threads, checkpoints and log stay, so the matter can come back.
+    pub forgotten: Option<Timestamp>,
 }
 
 /// A thread's summary row.

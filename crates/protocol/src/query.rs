@@ -8,9 +8,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 use crate::open_enum::open_unit_enum;
 use crate::{
-    AgentId, AgentKind, BlobHash, CheckpointId, CompactString, Count, Error, FileChange, FileRefId,
-    MatterId, MatterKind, MatterPath, RestoreRequest, Seq, SettingsView, SkippedFile, StreamId,
-    ThreadId, ThreadStatus, Timestamp, ViewEntry,
+    AgentId, AgentKind, BlobHash, CheckpointId, ClientName, CompactString, Count, Date, Error,
+    FileChange, FileRefId, MatterId, MatterKind, MatterPath, MatterStatus, RestoreRequest, Seq,
+    SettingsView, SkippedFile, StreamId, ThreadId, ThreadStatus, Timestamp, ViewEntry,
 };
 
 /// Most entries one `PageEntries` returns: the size of a `Reset`'s view window (about 200 recent
@@ -89,7 +89,7 @@ bounded_u32! {
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 pub enum HostQuery {
-    /// Every matter.
+    /// Every matter on Clauseo's list (a forgotten matter is not), oldest first.
     ListMatters,
     /// The threads of one matter.
     ListThreads {
@@ -145,6 +145,9 @@ pub enum HostQuery {
     },
     /// The agents in the settings, for a new thread's choice of agent.
     ListAgents,
+    /// Where `MatterSource::DefaultLocation` makes new matters, for display: the form's folder
+    /// line before a pick. JSON: `"get_default_location"`.
+    GetDefaultLocation,
 }
 
 /// A query's answer.
@@ -185,6 +188,8 @@ pub enum QueryResult {
     },
     /// For `ListAgents`: one per settings agent whose id is a valid [`AgentId`], sorted by id.
     Agents(Vec<AgentSummary>),
+    /// For `GetDefaultLocation`. JSON: `{"default_location": {"display": "..."}}`.
+    DefaultLocation(DefaultLocation),
 }
 
 /// One file of a matter's folder, as `ListPapers` lists it.
@@ -211,6 +216,18 @@ pub struct AgentSummary {
     /// `fake-agent`. Left out of the JSON when `None`.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub kind: Option<AgentKind>,
+}
+
+/// Where new matters go, for `GetDefaultLocation`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct DefaultLocation {
+    /// The folder for display only, as `MatterSummary::folder_display` writes a matter's: below
+    /// the home folder the part after it (`Documents/Clauseo`, no `~`), elsewhere the whole
+    /// path. It is `matters.default_location`, or `Documents/Clauseo` when that is not set; a
+    /// `DefaultLocation` create makes `<this>/<name>`.
+    pub display: String,
 }
 
 /// What a restore would do now, for `PreviewRestore`. Each list is sorted by path.
@@ -242,6 +259,32 @@ pub struct MatterSummary {
     pub name: String,
     /// How it was made.
     pub kind: MatterKind,
+    /// The time of the newest event in the matter's stream or any of its threads' streams;
+    /// missing only when none has one (never, for a matter made by this version).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub last_activity: Option<Timestamp>,
+    /// The client it is for, once set.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub client: Option<ClientName>,
+    /// Its next date, once set.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub next_date: Option<Date>,
+    /// Whether it is pinned to the top of the rail; missing reads as `false`.
+    #[serde(default)]
+    pub pinned: bool,
+    /// When the lawyer last opened it (`OpenMatter`), once they have.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub last_opened: Option<Timestamp>,
+    /// What it is doing over all its threads, computed when asked. This host always writes
+    /// it; missing (an older host's answer) reads as `idle`.
+    #[serde(default = "MatterStatus::idle")]
+    pub status: MatterStatus,
+    /// Its folder for display only, never a path to act on: below the home folder, the part
+    /// after it (`Documents/Clauseo/State v. Kunal Desai`, no `~`, the system's separators);
+    /// elsewhere the whole path. This host always writes it; missing (an older host's
+    /// answer) reads as empty, which the UI shows as no folder line.
+    #[serde(default)]
+    pub folder_display: String,
     /// Whether its folder is where the host last recorded it, as of this list; missing reads
     /// as `found`.
     #[serde(default)]

@@ -35,6 +35,9 @@ mod log;
 #[path = "store/log_model.rs"]
 mod log_model;
 #[cfg(test)]
+#[path = "store/matters.rs"]
+mod matters;
+#[cfg(test)]
 #[path = "store/reopen.rs"]
 mod reopen;
 #[cfg(test)]

@@ -1,7 +1,7 @@
 //! The stored forms: the `events` key, the `MessagePack` envelope, and the text of ids and rows.
 
 use clauseo_protocol::{
-    Envelope, EnvelopeRead, MAX_MSGPACK_DEPTH, MatterKind, SCHEMA_VERSION, Seq, StreamId,
+    Envelope, EnvelopeRead, MAX_MSGPACK_DEPTH, MatterKind, SCHEMA_VERSION, Seq, StreamId, Timestamp,
 };
 use serde::Deserialize;
 
@@ -66,6 +66,20 @@ pub(crate) fn decode_envelope(bytes: &[u8], stream: StreamId, seq: u64) -> Resul
             supported: SCHEMA_VERSION,
         }),
     }
+}
+
+/// The `ts` of a stored envelope of `stream`, without decoding the rest: the other fields
+/// are skipped.
+pub(crate) fn decode_ts(bytes: &[u8], stream: StreamId) -> Result<Timestamp, Error> {
+    #[derive(Deserialize)]
+    struct TsOnly {
+        ts: Timestamp,
+    }
+    let mut deserializer = rmp_serde::Deserializer::from_read_ref(bytes);
+    deserializer.set_max_depth(MAX_MSGPACK_DEPTH);
+    TsOnly::deserialize(&mut deserializer)
+        .map(|read| read.ts)
+        .map_err(|error| Error::corrupt(format!("the last envelope of {stream}: {error}")))
 }
 
 /// A `Seq` read back from a row.

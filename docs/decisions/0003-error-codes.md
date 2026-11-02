@@ -27,6 +27,11 @@ must therefore stay stable across versions.
 - Retryable means the same call may succeed if made again later with nothing else changed. A
   retryable failure may be retried by the client; any other needs the lawyer or a code fix first.
   `HostError.retryable` carries the value below.
+- `HostError.matter` (optional, left out when empty) names the matter a failure is about, for the
+  codes whose meaning says so (`matter.folder_is_matter`), so the UI can name it and offer to
+  open it without reading `message`. Added by decision record 0022.
+- `matter.folder_refused` stays, with its meaning: since 0022 the host answers `CreateMatter` with
+  one of the six `matter.folder_*` codes after it instead, one per reason.
 
 One row per code. The `error_codes_match_record` test reads this table and compares it with
 `ErrorCode::ALL`: the code strings, the meaning column with `ErrorCode::meaning()`, and retryable
@@ -63,6 +68,12 @@ as `yes` or `no`. The meaning is also each variant's doc comment in `error_code.
 | `matter.codex_folder` | The matter folder holds a `.codex` folder, whose settings Codex would load. | no | host (a Codex agent's launch and each of its prompts; decision record 0025) |
 | `matter.file_locked` | A file the operation needs is locked by another program, such as an open document. | yes | matters |
 | `matter.turn_running` | A turn is running in the matter, so undo or restore waits. | yes | host, matters |
+| `matter.folder_is_drive` | The folder may not be a matter: it is the root of a drive or a mounted volume. | no | host (from matters' refusal; decision record 0022) |
+| `matter.folder_is_home` | The folder may not be a matter: it is the home folder, or holds it. | no | host (0022) |
+| `matter.folder_is_system` | The folder may not be a matter: it is a system folder or a folder of app data or keys, or holds one. | no | host (0022) |
+| `matter.folder_unreadable` | Clauseo may not read the folder, or its `.clauseo/matter.json` does not read, so it may belong to a matter. | no | host (0022) |
+| `matter.folder_is_matter` | The folder is a matter's folder, or sits inside one or holds one; the error's `matter` names that matter when it is on Clauseo's list. | no | host (0022) |
+| `matter.folder_in_matters_root` | The folder is or holds Clauseo's data folder, or is, holds or sits inside the matters' history folder in it. | no | host (0022) |
 | `transport.unauthorized` | The client is not allowed to make this call. | no | transport_ws, desktop |
 | `transport.too_large` | The message is larger than the transport accepts. | no | transport_ws, desktop |
 | `settings.locked` | The change names a setting that the firm's policy sets, so the lawyer cannot change it; nothing was changed. | no | host (`SetUiSettings`; decision record 0017) |

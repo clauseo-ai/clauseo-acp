@@ -3,10 +3,11 @@
 //!
 //! # Owns
 //!
-//! `state.sqlite` in the folder the caller passes: schema version 1 and its numbered
-//! migrations (`PRAGMA user_version`), the pragmas, the stored `MessagePack` envelope, the
-//! exclusive lock (`state.sqlite.lock`), the private file mode, and the mapping of every disk
-//! failure to `store.disk_full`, `store.corrupt` or `store.io`.
+//! `state.sqlite` in the folder the caller passes: schema version 2 and its numbered
+//! migrations (`PRAGMA user_version`; `0002_matter_details.sql` adds a matter's details), the
+//! pragmas, the stored `MessagePack` envelope, the exclusive lock (`state.sqlite.lock`), the
+//! private file mode, and the mapping of every disk failure to `store.disk_full`,
+//! `store.corrupt` or `store.io`.
 //! `docs/decisions/0006-store-format.md` records the format and the reason for each choice.
 //!
 //! # Interface
@@ -18,9 +19,10 @@
 //! resolves when durable) and a [`Commit`]: events, blobs ([`BlobIn`]), a [`Receipt`], a
 //! [`ThreadRow`], a [`MatterRow`], [`CheckpointRow`]s and a [`SnapshotIn`]. Read with
 //! [`Store::heads`], [`Store::read_after`], [`Store::reopen`] ([`Reopen`], [`Snapshot`]),
-//! [`Store::receipt`], [`Store::read_blob`], [`Store::matters`], [`Store::threads`],
-//! [`Store::checkpoint`] and [`Store::account_limits`]; [`Store::put_account_limits`] keeps
-//! the last [`AccountLimits`](clauseo_protocol::AccountLimits) per account. [`blob_ref`] and
+//! [`Store::receipt`], [`Store::read_blob`], [`Store::matters`], [`Store::tail_times`] (each
+//! stream's last event time), [`Store::threads`], [`Store::checkpoint`] and
+//! [`Store::account_limits`]; [`Store::put_account_limits`] keeps the last
+//! [`AccountLimits`](clauseo_protocol::AccountLimits) per account. [`blob_ref`] and
 //! [`command_hash`] are the hashes the host puts in events and receipts. [`Error`] maps to
 //! [`ErrorCode`](clauseo_protocol::ErrorCode) with [`Error::code`]. [`Store::close`] checkpoints,
 //! closes the file and joins both threads; dropping the last clone does the same, unreported, and

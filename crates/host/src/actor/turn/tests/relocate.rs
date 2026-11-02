@@ -1,12 +1,14 @@
 //! A turn sent while a `RelocateMatter` holds the matter's writer: it queues behind the
-//! relocate, a second relocate and an undo are refused, and once the relocate is durable the
-//! turn's agent, started in the old folder, starts again in the new one before the turn runs.
+//! relocate, a second relocate, an undo and a forget are refused, and once the relocate is
+//! durable the turn's agent, started in the old folder, starts again in the new one before the
+//! turn runs.
 
 use std::path::PathBuf;
 
 use clauseo_protocol::{
     CommandEnvelope, CommandOutcome, DetachReason, DomainEvent, ErrorCode, FileChoice,
-    FileDecision, FolderRefId, HostCommand, MatterPath, PromptBlock, StopReason, ThreadId, TurnId,
+    FileDecision, FolderRefId, HostCommand, MatterPath, MatterSource, PromptBlock, StopReason,
+    ThreadId, Title, TurnId,
 };
 use futures::channel::oneshot;
 
@@ -87,6 +89,19 @@ fn a_turn_sent_during_a_relocate_waits_and_runs_in_the_new_folder() {
         Some(Holder::Relocate)
     );
 
+    // `ForgetMatter` waits for the relocate too. The rig's matter is the Scratch matter, which
+    // forget refuses before anything else, so it is a folder matter for this one command.
+    let set_kind = |rig: &mut Rig, kind| {
+        if let Some(entry) = rig.actor.matters.get_mut(&matter) {
+            entry.row.kind = kind;
+        }
+    };
+    set_kind(&mut rig, clauseo_protocol::MatterKind::Folder);
+    let forget = rig.dispatch(19, HostCommand::ForgetMatter { matter });
+    set_kind(&mut rig, clauseo_protocol::MatterKind::Scratch);
+    assert_eq!(forget.unwrap_err().code(), ErrorCode::MatterTurnRunning);
+    assert!(rig.actor.matters.contains_key(&matter), "still listed");
+
     // Meanwhile: a turn queues behind the relocate; another relocate and an undo are refused.
     let second = send_prompt(&mut rig, 21, thread);
     rig.run_until("the turn queued", |actor| {
@@ -158,6 +173,85 @@ fn a_turn_sent_during_a_relocate_waits_and_runs_in_the_new_folder() {
         rig.matter_log()
             .iter()
             .any(|event| matches!(event, DomainEvent::MatterRelocated(_)))
+    );
+    rig.finish();
+}
+
+#[test]
+fn a_folder_a_relocate_is_moving_a_matter_to_counts_against_new_matters() {
+    let mut rig = Rig::start("relocate-target-claimed", ANSWER);
+    let matter = rig.matter();
+    let old = PathBuf::from(&rig.actor.matters[&matter].row.folder_path);
+    let moved = old.with_file_name("Scratch target");
+    crate::write::create_dir_all(&moved.join(".clauseo")).unwrap();
+    let marker = std::fs::read(old.join(".clauseo/matter.json")).unwrap();
+    crate::write::write_file(&moved.join(".clauseo/matter.json"), &marker).unwrap();
+    let now = rig.actor.now().wall;
+    let folder: FolderRefId = rig.actor.ids.mint(now).unwrap();
+    rig.actor.folders.insert(folder, moved.clone());
+    let target: FolderRefId = rig.actor.ids.mint(now).unwrap();
+    rig.actor.folders.insert(target, moved.clone());
+
+    // The relocate to `moved` is held in flight: `moved` is the folder a matter is moving to.
+    let (reply, mut answer) = oneshot::channel();
+    let command = CommandEnvelope {
+        command_id: command_id(20),
+        command: HostCommand::RelocateMatter { matter, folder },
+    };
+    rig.actor.on_request(Request::Dispatch { command, reply });
+    rig.hold_next("the locate's answer", |_, input| {
+        matches!(
+            input,
+            Input::Matter {
+                tag: MatterTag::Relocate { .. },
+                ..
+            }
+        )
+    });
+
+    // Importing that folder is refused, as is a new folder inside it.
+    let import = rig.dispatch(
+        21,
+        HostCommand::CreateMatter {
+            name: Title::new("Smith v Jones").unwrap(),
+            source: MatterSource::ExistingFolder { folder: target },
+            client: None,
+            next_date: None,
+        },
+    );
+    assert_eq!(
+        import.unwrap_err().code(),
+        ErrorCode::MatterFolderIsMatter,
+        "the import of the relocate's target"
+    );
+    let inside = rig.dispatch(
+        22,
+        HostCommand::CreateMatter {
+            name: Title::new("Appeal").unwrap(),
+            source: MatterSource::NewFolder { folder: target },
+            client: None,
+            next_date: None,
+        },
+    );
+    assert_eq!(
+        inside.unwrap_err().code(),
+        ErrorCode::MatterFolderIsMatter,
+        "a new folder inside the relocate's target"
+    );
+    assert!(!moved.join("Appeal").exists(), "nothing was made");
+
+    rig.release_held();
+    let mut got = None;
+    rig.run_until("the relocate's answer", |_| {
+        if let Ok(Some(result)) = answer.try_recv() {
+            got = Some(result);
+        }
+        got.is_some()
+    });
+    assert_eq!(got.unwrap().unwrap(), CommandOutcome::Done);
+    assert_eq!(
+        rig.actor.matters[&matter].row.folder_path,
+        moved.to_string_lossy()
     );
     rig.finish();
 }

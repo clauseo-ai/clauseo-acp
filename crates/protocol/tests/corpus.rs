@@ -87,6 +87,48 @@ const ADDED_AFTER_V1: &[Corpus] = &[
         (357, 0x48d1_4ed4_b6a4_4245),
         (259, 0x5cce_ad89_d5a3_ae0a),
     ),
+    (
+        "added/turn_failed-MatterFolderIsDrive",
+        include_bytes!("corpus/added/turn_failed-MatterFolderIsDrive.jsonl"),
+        include_bytes!("corpus/added/turn_failed-MatterFolderIsDrive.msgpack"),
+        (338, 0xea5f_d047_8374_8993),
+        (239, 0xacde_0a37_dec2_baec),
+    ),
+    (
+        "added/turn_failed-MatterFolderIsHome",
+        include_bytes!("corpus/added/turn_failed-MatterFolderIsHome.jsonl"),
+        include_bytes!("corpus/added/turn_failed-MatterFolderIsHome.msgpack"),
+        (335, 0x528e_9e42_e8e0_c558),
+        (236, 0x74f7_b746_a02c_c194),
+    ),
+    (
+        "added/turn_failed-MatterFolderIsSystem",
+        include_bytes!("corpus/added/turn_failed-MatterFolderIsSystem.jsonl"),
+        include_bytes!("corpus/added/turn_failed-MatterFolderIsSystem.msgpack"),
+        (345, 0xfd09_5ac3_9878_a575),
+        (246, 0xe721_7be2_4850_b119),
+    ),
+    (
+        "added/turn_failed-MatterFolderUnreadable",
+        include_bytes!("corpus/added/turn_failed-MatterFolderUnreadable.jsonl"),
+        include_bytes!("corpus/added/turn_failed-MatterFolderUnreadable.msgpack"),
+        (340, 0x609d_fd63_1e91_303d),
+        (241, 0x4307_7d36_35a9_497c),
+    ),
+    (
+        "added/turn_failed-MatterFolderIsMatter",
+        include_bytes!("corpus/added/turn_failed-MatterFolderIsMatter.jsonl"),
+        include_bytes!("corpus/added/turn_failed-MatterFolderIsMatter.msgpack"),
+        (338, 0xc535_6d66_b7c6_d00a),
+        (239, 0x6530_f87b_c94e_023b),
+    ),
+    (
+        "added/turn_failed-MatterFolderInMattersRoot",
+        include_bytes!("corpus/added/turn_failed-MatterFolderInMattersRoot.jsonl"),
+        include_bytes!("corpus/added/turn_failed-MatterFolderInMattersRoot.msgpack"),
+        (350, 0x0485_5c65_a3c5_28ee),
+        (251, 0xc4fe_70c7_6452_5b8b),
+    ),
 ];
 
 /// V1, then every file in [`ADDED_AFTER_V1`].

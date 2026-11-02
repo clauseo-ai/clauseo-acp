@@ -53,6 +53,16 @@ pub(crate) fn check_folder(folder: &Path, refused: &[PathBuf]) -> Result<(), Err
     Ok(())
 }
 
+/// The place check alone, before anything is read inside `folder`: refuses a drive root and an
+/// entry of `refused` or an ancestor of one, as [`Matter::import`](crate::Matter::import) does
+/// first (`Error::FolderRefused` with `Refusal::DriveRoot` or `Refusal::Listed`;
+/// `Error::FolderMissing` for a folder that does not exist). For the host, which checks its
+/// registry (a folder holding or inside another matter's) after this and before the import, so
+/// a refused place is named for what it is even when it holds a matter.
+pub fn check_place(folder: &Path, refused: &[PathBuf]) -> Result<(), Error> {
+    check_folder(folder, refused)
+}
+
 /// Refuses `folder` if it already holds a `.clauseo/matter.json` (it belongs to a matter;
 /// importing it again would take it from that matter), or for its place as
 /// [`check_outside_root`] does. Called after [`check_folder`].

@@ -77,6 +77,14 @@ pub(crate) enum AfterCommand {
     Turn(turn::TurnTag),
     /// The commit logging a restore of this matter.
     Restore(MatterId),
+    /// A matter row changed when the commit was sent; put `before` back if it fails.
+    MatterRow {
+        before: Box<clauseo_store::MatterRow>,
+    },
+    /// `ForgetMatter` of this matter, already moved to `Actor::forgotten`.
+    Forget(MatterId),
+    /// A forgotten matter coming back with this row: on the list once durable.
+    Unforget(Box<clauseo_store::MatterRow>),
 }
 
 /// `dispatch`: shape, principal, then the receipt lookup (or joining a duplicate).
@@ -170,10 +178,14 @@ pub(crate) fn finish_command(
     let Some(first) = waiters.next() else {
         return;
     };
-    let shared = result
-        .as_ref()
-        .map(|outcome| *outcome)
-        .map_err(|error| HostError::new(error.code(), error.to_string()));
+    // A refusal keeps all it carries, `HostError::matter` included.
+    let shared = result.as_ref().map(|outcome| *outcome).map_err(|error| {
+        if let Error::Refused(refusal) = error {
+            refusal.clone()
+        } else {
+            HostError::new(error.code(), error.to_string())
+        }
+    });
     let _gone = first.send(result);
     for waiter in waiters {
         let _gone = waiter.send(shared.clone().map_err(Error::Refused));
@@ -183,8 +195,32 @@ pub(crate) fn finish_command(
 /// The state checks and the work of one command.
 fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
     match command {
-        HostCommand::CreateMatter { name, source } => {
-            super::matters::create_matter(actor, ctx, &name, source);
+        HostCommand::CreateMatter {
+            name,
+            source,
+            client,
+            next_date,
+        } => {
+            super::matters::create_matter(actor, ctx, &name, source, (client, next_date));
+        }
+        HostCommand::UpdateMatter {
+            matter,
+            client,
+            next_date,
+            pinned,
+        } => {
+            let update = super::matter_details::Update {
+                client,
+                next_date,
+                pinned,
+            };
+            super::matter_details::update_matter(actor, ctx, matter, update);
+        }
+        HostCommand::OpenMatter { matter } => {
+            super::matter_details::open_matter(actor, ctx, matter);
+        }
+        HostCommand::ForgetMatter { matter } => {
+            super::matter_details::forget_matter(actor, ctx, matter);
         }
         HostCommand::RelocateMatter { matter, folder } => {
             super::relocate::relocate_matter(actor, ctx, matter, folder);
@@ -269,7 +305,7 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
 
 /// A turn command for a known thread goes to the turn path; an unknown one is refused.
 fn turn_command(actor: &mut Actor, ctx: &CommandCtx, thread: ThreadId, command: TurnCommand) {
-    match actor.check_thread(thread) {
+    match listed_thread(actor, thread) {
         Ok(_) => turn::command(actor, ctx, thread, command),
         Err(error) => actor.finish_command(ctx.id, Err(error)),
     }
@@ -298,11 +334,21 @@ pub(super) fn command_committed(
         (AfterCommand::Relocated { matter, folder }, outcome) => {
             super::relocate::committed(actor, matter, folder, outcome.is_ok());
         }
+        (AfterCommand::MatterRow { before }, Err(_)) => {
+            super::matter_details::row_failed(actor, *before);
+        }
+        (AfterCommand::Forget(matter), outcome) => {
+            super::matter_details::forget_committed(actor, matter, outcome.is_ok());
+        }
+        (AfterCommand::Unforget(row), outcome) => {
+            super::matter_details::unforget_committed(actor, *row, outcome.is_ok());
+        }
         (
             AfterCommand::Nothing
             | AfterCommand::Matter(_)
             | AfterCommand::Thread(_)
-            | AfterCommand::Row { .. },
+            | AfterCommand::Row { .. }
+            | AfterCommand::MatterRow { .. },
             _,
         ) => {}
         (AfterCommand::Turn(tag), outcome) => turn::committed(actor, tag, outcome),
@@ -324,6 +370,20 @@ pub(crate) fn check_thread(actor: &Actor, thread: ThreadId) -> Result<&ThreadEnt
             format!("no thread {thread}"),
         )
     })
+}
+
+/// The thread `thread` of a matter on the list, for a command that names it:
+/// `command.unknown_thread` for an unknown thread or one of a forgotten matter.
+fn listed_thread(actor: &Actor, thread: ThreadId) -> Result<&ThreadEntry, Error> {
+    let entry = actor.check_thread(thread)?;
+    if actor.matters.contains_key(&entry.row.matter) {
+        Ok(entry)
+    } else {
+        Err(Error::refused(
+            ErrorCode::CommandUnknownThread,
+            format!("thread {thread} is in a forgotten matter"),
+        ))
+    }
 }
 
 /// The matter `matter`, or `command.unknown_matter`.
@@ -384,6 +444,7 @@ fn create_thread(
     let entry = ThreadEntry {
         row,
         header: None,
+        last_stop: None,
         turn: turn::TurnState::default(),
     };
     let tag = Tag::Command {
@@ -397,7 +458,7 @@ fn create_thread(
 /// `RenameThread` and `ArchiveThread`: the thread's stream is loaded first, so its header
 /// stays current for `ListThreads`.
 fn thread_command(actor: &mut Actor, ctx: &CommandCtx, thread: ThreadId, change: ThreadChange) {
-    if let Err(error) = actor.check_thread(thread) {
+    if let Err(error) = listed_thread(actor, thread) {
         actor.finish_command(ctx.id, Err(error));
         return;
     }

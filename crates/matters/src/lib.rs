@@ -19,7 +19,8 @@
 //! - [`Matter`]: [`Matter::create`], [`Matter::import`] and [`Matter::open`] make one;
 //!   [`Matter::locate`] opens one from the folder the lawyer picked after it moved, and
 //!   [`Matter::relink`] writes a deleted or damaged `matter.json` again where the history says
-//!   the folder is; [`same_or_nested`] compares two folders as the refused-folder check does;
+//!   the folder is; [`same_or_nested`] compares two folders as the refused-folder check does,
+//!   and [`check_place`] runs import's place check (drive root, refused list) alone;
 //!   [`Matter::before_turn`] and [`Matter::after_turn`] take checkpoints ([`Checkpoint`], with
 //!   its [`CommitId`]; [`Matter::commit_of`] gives any checkpoint's, the root one's included);
 //!   [`Matter::edited_since`] and [`Matter::undo`] undo a step ([`UndoRequest`], [`Undone`]);
@@ -124,7 +125,7 @@ pub use locks::{HeldOpen, held_open, held_open_at, matter_path_in};
 pub use matter::Matter;
 pub use papers::{Paper, PaperList};
 pub use probe::{OsProbe, PlaceholderProbe};
-pub use refuse::same_or_nested;
+pub use refuse::{check_place, same_or_nested};
 pub use scan::scan;
 pub use types::{
     Checkpoint, CheckpointOutcome, CommitId, CompareSide, DEFAULT_MARKER, FILE_CAP_BYTES,

@@ -2,7 +2,9 @@
 
 use std::collections::HashMap;
 
-use clauseo_protocol::{AccountLimits, AgentKind, AgentSessionId, Seq, StreamId};
+use clauseo_protocol::{
+    AccountLimits, AgentKind, AgentSessionId, ClientName, Seq, StreamId, Timestamp,
+};
 use rusqlite::{Connection, params};
 
 use super::StreamState;
@@ -181,10 +183,14 @@ fn put_rows(conn: &Connection, commit: &Commit) -> Result<(), Error> {
     if let Some(matter) = &commit.matter {
         conn.prepare_cached(
             "INSERT INTO matters (id, name, kind, folder_path, folder_locator, shadow_repo_path, \
-             created_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ON CONFLICT (id) DO UPDATE SET \
-             name = excluded.name, kind = excluded.kind, folder_path = excluded.folder_path, \
+             created_ms, client, next_date, pinned, last_opened_ms, forgotten_ms) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12) ON CONFLICT (id) DO UPDATE \
+             SET name = excluded.name, kind = excluded.kind, folder_path = excluded.folder_path, \
              folder_locator = excluded.folder_locator, \
-             shadow_repo_path = excluded.shadow_repo_path, created_ms = excluded.created_ms",
+             shadow_repo_path = excluded.shadow_repo_path, created_ms = excluded.created_ms, \
+             client = excluded.client, next_date = excluded.next_date, \
+             pinned = excluded.pinned, last_opened_ms = excluded.last_opened_ms, \
+             forgotten_ms = excluded.forgotten_ms",
         )?
         .execute(params![
             matter.id.to_string(),
@@ -194,6 +200,11 @@ fn put_rows(conn: &Connection, commit: &Commit) -> Result<(), Error> {
             matter.folder_locator,
             matter.shadow_repo_path,
             matter.created.as_millis(),
+            matter.client.as_ref().map(ClientName::as_str),
+            matter.next_date.map(|date| date.to_string()),
+            matter.pinned,
+            matter.last_opened.map(Timestamp::as_millis),
+            matter.forgotten.map(Timestamp::as_millis),
         ])?;
     }
     if let Some(thread) = &commit.thread {

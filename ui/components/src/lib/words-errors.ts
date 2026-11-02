@@ -39,6 +39,12 @@ export type ErrorCode =
   | "matter.codex_folder"
   | "matter.file_locked"
   | "matter.turn_running"
+  | "matter.folder_is_drive"
+  | "matter.folder_is_home"
+  | "matter.folder_is_system"
+  | "matter.folder_unreadable"
+  | "matter.folder_is_matter"
+  | "matter.folder_in_matters_root"
   | "transport.unauthorized"
   | "transport.too_large"
   | "settings.locked"
@@ -85,6 +91,13 @@ const HI = {
   "A paper is open in another program. Close it, then try again.":
     "कोई दस्तावेज़ किसी दूसरे प्रोग्राम में खुला है। उसे बंद करें, फिर दोबारा प्रयास करें।",
   "Wait for the answer to finish first.": "पहले उत्तर पूरा होने दें।",
+  "A whole drive can't be a matter.": "पूरी ड्राइव मामला नहीं बन सकती।",
+  "Your home folder can't be a matter.": "आपका होम फ़ोल्डर मामला नहीं बन सकता।",
+  "A system folder can't be a matter.": "कोई सिस्टम फ़ोल्डर मामला नहीं बन सकता।",
+  "Clauseo can't read that folder.": "Clauseo वह फ़ोल्डर नहीं पढ़ पा रहा।",
+  "That folder is already a matter's, or inside one.":
+    "वह फ़ोल्डर पहले से किसी मामले का है, या किसी मामले के भीतर है।",
+  "That folder holds Clauseo's own data.": "उस फ़ोल्डर में Clauseo का अपना डेटा है।",
   "That wasn't allowed, so nothing changed.": "इसकी अनुमति नहीं थी, इसलिए कुछ नहीं बदला।",
   "That is too large to send.": "यह भेजने के लिए बहुत बड़ा है।",
   "Your organisation manages that setting, so it can't be changed.":
@@ -131,6 +144,12 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
     "This matter's folder holds a .codex folder. Rename or remove it to use Codex here.",
   "matter.file_locked": "A paper is open in another program. Close it, then try again.",
   "matter.turn_running": "Wait for the answer to finish first.",
+  "matter.folder_is_drive": "A whole drive can't be a matter.",
+  "matter.folder_is_home": "Your home folder can't be a matter.",
+  "matter.folder_is_system": "A system folder can't be a matter.",
+  "matter.folder_unreadable": "Clauseo can't read that folder.",
+  "matter.folder_is_matter": "That folder is already a matter's, or inside one.",
+  "matter.folder_in_matters_root": "That folder holds Clauseo's own data.",
   "transport.unauthorized": "That wasn't allowed, so nothing changed.",
   "transport.too_large": "That is too large to send.",
   "settings.locked": "Your organisation manages that setting, so it can't be changed.",

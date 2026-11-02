@@ -29,15 +29,22 @@ fn user_version(conn: &Connection) -> i64 {
         .unwrap()
 }
 
-/// Decision 0006 quotes schema version 1 in full; the quote must be the migration file, byte for
+/// Decision 0006 quotes every migration in full, in order; each quote must be its file, byte for
 /// byte, so the two never drift.
 #[test]
 fn decision_record_quotes_the_migration() {
     let record = include_str!("../../../../docs/decisions/0006-store-format.md");
-    let migration = include_str!("../../src/migrations/0001_init.sql");
-    let start = record.find("```sql\n").expect("0006 has an sql block") + "```sql\n".len();
-    let len = record[start..].find("```\n").expect("the sql block ends");
-    assert_eq!(&record[start..start + len], migration);
+    let migrations = [
+        include_str!("../../src/migrations/0001_init.sql"),
+        include_str!("../../src/migrations/0002_matter_details.sql"),
+    ];
+    let mut rest = record;
+    for migration in migrations {
+        let start = rest.find("```sql\n").expect("0006 has an sql block") + "```sql\n".len();
+        let len = rest[start..].find("```\n").expect("the sql block ends");
+        assert_eq!(&rest[start..start + len], migration);
+        rest = &rest[start + len..];
+    }
 }
 
 #[test]

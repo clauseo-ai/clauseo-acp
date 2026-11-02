@@ -153,8 +153,9 @@ fn assert_snake_case(ts: &str) {
     }
 }
 
-/// Left-out optional fields are `field?: T`. The only `null`s are JSON's own, in a JSON value;
-/// floats are `Finite`, never `null`.
+/// Left-out optional fields are `field?: T`. The only `null`s are JSON's own, in a JSON value,
+/// and `UpdateMatter`'s two fields where `null` clears the detail (`FieldChange`); floats are
+/// `Finite`, never `null`.
 fn assert_optional(ts: &str) {
     assert_block(ts, "Envelope", |b| {
         b.contains("\tcommand_id?: CommandId,\n")
@@ -167,7 +168,9 @@ fn assert_optional(ts: &str) {
     });
     for line in code_lines(ts).filter(|line| line.contains("null")) {
         let allowed = line.starts_with("export type JsonValue = null | ")
-            || line.starts_with("export type RawPayload = null | ");
+            || line.starts_with("export type RawPayload = null | ")
+            || line.trim() == "client?: ClientName | null,"
+            || line.trim() == "next_date?: Date | null,";
         assert!(allowed, "unexpected `null` in: {line}");
     }
 }

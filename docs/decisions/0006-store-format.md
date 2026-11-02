@@ -73,6 +73,23 @@ CREATE TABLE account_limits (agent TEXT NOT NULL, account TEXT NOT NULL, limits 
   PRIMARY KEY (agent, account)) WITHOUT ROWID;
 ```
 
+### Schema version 2
+
+`crates/store/src/migrations/0002_matter_details.sql`, verbatim (the same test checks this copy
+too); decision record 0022 gives the reasons:
+
+```sql
+-- Schema version 2: a matter's details for the rail and its place on the list.
+-- docs/decisions/0022-matters-for-the-rail.md gives the reason for each column.
+-- Frozen: a later change is a new numbered file in this folder, never an edit here.
+
+ALTER TABLE matters ADD COLUMN client TEXT /* trimmed, 1 to 200 characters */;
+ALTER TABLE matters ADD COLUMN next_date TEXT /* YYYY-MM-DD */;
+ALTER TABLE matters ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE matters ADD COLUMN last_opened_ms INTEGER;
+ALTER TABLE matters ADD COLUMN forgotten_ms INTEGER /* ForgetMatter's time; NULL while listed */;
+```
+
 In the table columns, ids are stored as lowercase hyphenated UUID text and times as milliseconds
 since the Unix epoch. Inside `events.envelope`, the envelope's own encoding applies: ids are
 16-byte MessagePack bin, as `docs/decisions/0002-event-schema.md` says, and `stream` is its text.
@@ -173,7 +190,12 @@ since the Unix epoch. Inside `events.envelope`, the envelope's own encoding appl
 
 - `matters` is the matter registry. `kind` is `scratch` or `folder`; a kind this build does not
   know reads back as `MatterKind::Unknown`. `folder_locator` is written later. `matters` the crate
-  never depends on `store`; the host writes the rows.
+  never depends on `store`; the host writes the rows. Since schema 2 the row also holds the
+  matter's details for the rail: `client` (trimmed, 1 to 200 characters), `next_date`
+  (`YYYY-MM-DD`), `pinned`, `last_opened_ms`, and `forgotten_ms`: when `ForgetMatter` took the
+  matter off Clauseo's list, `NULL` while it is on it. A forgotten matter keeps its row, threads,
+  checkpoints and log; the host lists none of it until an import of its folder clears
+  `forgotten_ms`. A bad `client` or `next_date` read back is `store.corrupt`.
 - `threads` holds each thread's summary row, listed per matter by `updated_ms`, newest first.
 - A commit's matter and thread rows insert or replace the row with that id.
 - `checkpoints` keeps only the id, the matter, the shadow repository's commit id and the `seq` of
@@ -291,6 +313,7 @@ Corruption is reported when a read meets it.
 - Never edit `0001_init.sql` or any merged migration. Never alter a table and ignore the error.
 - An event shape change is an upcaster in `protocol`, not a rewrite of `events` rows.
 - A file whose `user_version` is newer than `SCHEMA` is refused with `store.newer_version`.
+- Migrations so far: `0002_matter_details.sql` (schema 2), quoted above.
 
 ### Interface decisions taken in this task
 
