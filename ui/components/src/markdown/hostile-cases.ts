@@ -36,6 +36,12 @@ const DATA_HTML =
 const LONG_LINE = "**clause** _term_ `code` [ref](https://a.example/x) ~~old~~ <b>x</b> "
   .repeat(300)
   .slice(0, 20_000);
+/** An ordinary answer's section: a heading, a paragraph with emphasis and code, and a list. */
+const SECTION = (n: number) =>
+  `## Clause ${n}\n\nThe party shall *notify* the other within \`${n}\` days of the **event**.\n\n- first duty\n- second duty\n\n`;
+/** SECTIONs `from` to `to`, numbered from 1: 450 of them are 52 KB. */
+const sections = (from: number, to: number) =>
+  Array.from({ length: to - from + 1 }, (_, index) => SECTION(from + index)).join("");
 
 export const CASES: HostileCase[] = [
   {
@@ -308,5 +314,13 @@ export const CASES: HostileCase[] = [
   { id: "footnote-deeper-list", markdown: `[^a]: ${"- ".repeat(3000)}` },
   // Every streamed answer starts empty; #115 made the streaming render of "" throw.
   { id: "empty", markdown: "" },
+  // An HTML block of kinds 1 to 5 runs on to its end marker across blank lines: left open, it took in
+  // the rest of the answer, as raw text in one block parsed whole on every update (nesting.ts).
+  {
+    id: "html-block-unclosed",
+    markdown: `<!-- the agent's note, never closed\n\n${sections(1, 225)}<pre>\n\n${sections(226, 450)}`,
+    text: ["<!-- the agent's note", "<pre>"],
+    tags: { h2: 450, ul: 450, strong: 450 },
+  },
   ...TAG_CASES,
 ];
