@@ -61,7 +61,7 @@ export type VersionsSlots = {
   toolbar: { onVersions: () => void; versionsOpen: boolean; onUndo: () => void; writing: boolean };
   /** Whether Versions may close: false while its dialog asks or a restore or undo runs. Always true when shut. */
   canLeave: boolean;
-  /** Closes Versions through its controller (VersionsController.leave): the rail comes back. While a dialog asks or an
+  /** Closes Versions through its controller, as Back to now goes (look(null)): the rail comes back. While a dialog asks or an
    * act runs it does nothing and says false; true once Versions is shut. */
   close: () => boolean;
 };
@@ -145,12 +145,19 @@ export function useVersions({
     );
   };
   // one function while Versions stays open or shut, so the room's New conversation key needn't listen again each render
+  // Versions may end while no dialog asks and no act runs: ending it then would drop the dialog, or a running restore
+  // or undo along with the line saying what it did
+  const leavable = useCallback(
+    () => live === null || (live.controller.snapshot().ask === null && !live.controller.busy),
+    [live],
+  );
+  // it ends as Back to now goes, through the controller (a pending toolbar Undo and late answers dropped), then unmounts
   const close = useCallback(() => {
-    if (live?.controller.leave() === false) return false;
+    if (!leavable()) return false;
+    live?.controller.look(null);
     setSession(null);
     return true;
-  }, [live]);
-  const leavable = () => live?.controller.canLeave() ?? true;
+  }, [live, leavable]);
   const canLeave = useSyncExternalStore(watch, leavable, leavable);
   // whether the open Versions found nothing to undo: the toolbar's Undo waits
   const nothing = () => {

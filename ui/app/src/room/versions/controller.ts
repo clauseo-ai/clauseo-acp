@@ -439,21 +439,9 @@ export class VersionsController {
     return false;
   }
 
-  /** Whether Versions may end now: no dialog asks and no act runs. Ending it under a dialog would drop the dialog, or
-   * a running restore or undo along with the line saying what it did. */
-  canLeave = (): boolean => this.#snap.ask === null && !this.#acting;
-
-  /** Versions ends (New conversation, Matters, the toolbar's Versions, Cancel out of the toolbar's Undo), unless a
-   * dialog asks or an act runs: false then, and nothing changes. Otherwise, as Back to now does, a pending Undo from the
-   * toolbar is dropped, and a preview or comparison still on its way is dropped when it comes; the caller then
-   * unmounts Versions, whose start() stop lets go of the streams it held. */
-  leave(): boolean {
-    if (!this.canLeave()) return false;
-    this.#undoNewest = false;
-    this.#fromToolbar = null;
-    this.#asked += 1;
-    this.#compared += 1;
-    return true;
+  /** A restore or undo runs: the room ends Versions only once it is done (use-versions.ts's canLeave). */
+  get busy(): boolean {
+    return this.#acting;
   }
 
   /** Goes ahead with what the dialog asks. */
@@ -554,8 +542,7 @@ export class VersionsController {
       return { kind: "refused", code: toHostError(e).code, current: asked === this.#asked };
     } finally {
       this.#acting = false;
-      // whether Versions may be left changed, though the snapshot may not have: the room's New conversation hears it
-      for (const fn of this.#listeners) fn();
+      this.#set({}); // busy changed, though nothing else may have: the room's New conversation hears it
     }
   }
 
