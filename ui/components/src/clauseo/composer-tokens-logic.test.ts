@@ -4,6 +4,7 @@ import { expect, test } from "vitest";
 import {
   scanTokens,
   shiftTokens,
+  standing,
   snapped,
   stillListed,
   tokenAround,
@@ -50,7 +51,7 @@ test("an edit inside a token, or across it, drops it; the others stand, even whe
 });
 
 test("undo's text is read again: the agent's commands that stand alone are tokens, the kept ones stay", () => {
-  const names = ["review", "compact", "rev"];
+  const names = ["/review", "/compact", "/rev"];
   const v = "/review the lease, then /compact. a/review x /reviewed /rev";
   const found = scanTokens(v, names, []);
   expect(found.map((t) => [t.text, t.start])).toEqual([
@@ -66,13 +67,49 @@ test("undo's text is read again: the agent's commands that stand alone are token
   const kept = tok(v, "/review");
   expect(scanTokens(v, names, [kept]).filter((t) => t.start === 0)).toHaveLength(1);
   // with the command gone from the list, the text is plain
-  expect(scanTokens("/review", ["compact"], [])).toEqual([]);
+  expect(scanTokens("/review", ["/compact"], [])).toEqual([]);
+});
+
+test("a mention picked here, quoted or not, is found again after undo standing alone; a bare @ path is not", () => {
+  const texts = ["@Notice.pdf", '@"Pleadings/Board minutes.pdf"'];
+  const v = 'see @"Pleadings/Board minutes.pdf" and @Notice.pdf\n@Notice.pdfx @Other.pdf';
+  expect(scanTokens(v, texts, []).map((t) => [t.text, t.start])).toEqual([
+    ['@"Pleadings/Board minutes.pdf"', 4],
+    ["@Notice.pdf", v.indexOf("@Notice.pdf")],
+  ]);
+});
+
+test("a token typed against, at its end or its start, doesn't count while it is; with the space back it does", () => {
+  const v = "see @b.pdf now";
+  const t = [tok(v, "@b.pdf")];
+  const after = "see @b.pdfx now";
+  const before = "see y@b.pdf now";
+  // still tracked, so an input method composing beside it never loses it (PR 3), but it counts for nothing
+  expect(standing(after, shiftTokens(v, after, t))).toEqual([]);
+  expect(standing(before, shiftTokens(v, before, t))).toEqual([]);
+  expect(standing(v, shiftTokens(after, v, shiftTokens(v, after, t)))).toEqual(t);
+  // at the field's edges a token stands alone
+  expect(standing("@b.pdf", [tok("@b.pdf", "@b.pdf")])).toHaveLength(1);
+  expect(standing(v, t)).toEqual(t);
+});
+
+test("undo's scan never finds a picked text inside a longer quoted name; with both picked the quoted one is the token", () => {
+  const v = 'see @"x @b.pdf y" now';
+  // only @b.pdf was picked: the quoted run is someone else's name, so nothing is found in it
+  expect(scanTokens(v, ["@b.pdf"], [])).toEqual([]);
+  // both picked, the shorter listed first: the quoted name is the token
+  expect(scanTokens(v, ["@b.pdf", '@"x @b.pdf y"'], []).map((x) => [x.text, x.start])).toEqual([
+    ['@"x @b.pdf y"', 4],
+  ]);
+  // outside the quotes it is a token as ever, and a quote inside a quoted name ends nothing early
+  const w = '@b.pdf and @"Say"so".pdf"';
+  expect(scanTokens(w, ["@b.pdf", '@"Say"so".pdf"'], []).map((x) => x.start)).toEqual([0, 11]);
 });
 
 test("a command the agent no longer lists is plain text; a pick is a token once the field holds it", () => {
   const v = "/review and /compact";
   const both = [tok(v, "/review"), tok(v, "/compact")];
-  expect(stillListed(both, ["compact"])).toEqual([both[1]]);
+  expect(stillListed(both, ["/compact"])).toEqual([both[1]]);
   const pick = { start: 0, end: 7, text: "/review" };
   expect(withPick(v, [both[1]!], pick)).toEqual(both);
   expect(withPick("/rev and /compact", [], pick)).toEqual([]);

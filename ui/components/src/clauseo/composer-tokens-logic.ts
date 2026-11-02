@@ -2,8 +2,13 @@
 // a range, so it deletes as one unit, the caret never rests inside it, and the overlay can draw a box behind it.
 // G1a's spike (measurements/g1a-indic-input/spike/src/mentions/logic.ts in the private repo) is the reference:
 // - an edit moves the ranges after it, found by diffing the old value and the new (common prefix and suffix); a token
-//   the edit cuts into is no token any more, and an insertion at a token's edge keeps it;
-// - undo and redo bring text back without a pick, so the value is read again then for the agent's commands;
+//   the edit cuts into is no token any more, and an insertion at a token's edge keeps it, so an input method's
+//   composition beside it never loses it;
+// - but a token counts (its box, delete as one unit, the caret kept out, a paper sent) only while it stands alone,
+//   whitespace or the field's edge on both sides, as a pick leaves it: typed against (`see @b.pdfx`) it reads as
+//   plain text until the space is back (`standing`);
+// - undo and redo bring text back without a pick, so the value is read again then for the tokens' texts: the agent's
+//   commands (`/review`) and the papers picked in this field (`@Notice.pdf`);
 // - a command the agent no longer lists is plain text, not a token.
 
 const WS = /\s/u;
@@ -11,7 +16,13 @@ const WS = /\s/u;
 /** A token: its text in the field (`/review`), from `start` to `end` (exclusive). */
 export type Token = { start: number; end: number; text: string };
 
-/** Moves the tokens across the edit that turned `prev` into `next`. */
+/** Whether a token may stand at `start` to `end`: at the field's start or after whitespace, and followed by
+ * whitespace or the field's end, as the menu puts one in. */
+const standsAlone = (value: string, start: number, end: number) =>
+  (start === 0 || WS.test(value[start - 1] ?? "")) &&
+  (end >= value.length || WS.test(value[end] ?? ""));
+
+/** Moves the tokens across the edit that turned `prev` into `next`; a token the edit cut into is dropped. */
 export function shiftTokens(prev: string, next: string, tokens: readonly Token[]): Token[] {
   if (prev === next) return [...tokens];
   const max = Math.min(prev.length, next.length);
@@ -37,34 +48,58 @@ export function shiftTokens(prev: string, next: string, tokens: readonly Token[]
   return out.filter((t) => next.slice(t.start, t.end) === t.text);
 }
 
-/** Whether a token may stand at `start` to `end`: at the field's start or after whitespace, and followed by
- * whitespace or the field's end, as the menu puts one in. */
-const standsAlone = (value: string, start: number, end: number) =>
-  (start === 0 || WS.test(value[start - 1] ?? "")) &&
-  (end >= value.length || WS.test(value[end] ?? ""));
+/** The tokens that count in `value`: those standing alone. One typed against is plain text while it is. */
+export function standing(value: string, tokens: readonly Token[]): Token[] {
+  return tokens.filter((t) => standsAlone(value, t.start, t.end));
+}
 
-/** The tokens `keep`, and every other command of `names` the value holds standing alone: after undo or redo, or as
- * the menu's chunk arrives over words already there. */
+/** The quoted runs a value holds: `@"` at a run's start, up to the next `"` with whitespace or the field's end after
+ * it. A token's text found starting inside one is part of a longer quoted name, never a token of its own. */
+function quotedRuns(value: string): { start: number; end: number }[] {
+  const runs: { start: number; end: number }[] = [];
+  for (let i = 0; i < value.length - 1; i += 1) {
+    if (value[i] !== "@" || value[i + 1] !== '"' || (i > 0 && !WS.test(value[i - 1] ?? "")))
+      continue;
+    let j = i + 2;
+    while (
+      j < value.length &&
+      !(value[j] === '"' && (j + 1 >= value.length || WS.test(value[j + 1] ?? "")))
+    )
+      j += 1;
+    if (j >= value.length) break;
+    runs.push({ start: i, end: j + 1 });
+    i = j;
+  }
+  return runs;
+}
+
+/** The tokens `keep`, and every other of `texts` (`/review`, `@Notice.pdf`) the value holds standing alone: after
+ * undo or redo, or as the menu's chunk arrives over words already there. A text that starts inside a quoted run (`@b.pdf` in
+ * `@"x @b.pdf y"`) is none: an unquoted text holds no whitespace, so it can stand alone inside no other text but a
+ * quoted one. */
 export function scanTokens(
   value: string,
-  names: readonly string[],
+  texts: readonly string[],
   keep: readonly Token[],
 ): Token[] {
   const found: Token[] = [...keep];
   const free = (s: number, e: number) => !found.some((t) => s < t.end && e > t.start);
-  for (const name of names) {
-    const text = `/${name}`;
+  const quoted = quotedRuns(value);
+  const inQuotes = (s: number) => quoted.some((q) => s > q.start && s < q.end);
+  for (const text of texts) {
+    if (text === "") continue;
     for (let i = value.indexOf(text); i !== -1; i = value.indexOf(text, i + 1)) {
       const e = i + text.length;
-      if (standsAlone(value, i, e) && free(i, e)) found.push({ start: i, end: e, text });
+      if (standsAlone(value, i, e) && free(i, e) && !inQuotes(i))
+        found.push({ start: i, end: e, text });
     }
   }
   return found.sort((a, b) => a.start - b.start);
 }
 
-/** The tokens whose command the agent still lists. */
-export function stillListed(tokens: readonly Token[], names: readonly string[]): Token[] {
-  const listed = new Set(names.map((n) => `/${n}`));
+/** The tokens whose text is still one of `texts`: a command the agent still lists, a paper picked here. */
+export function stillListed(tokens: readonly Token[], texts: readonly string[]): Token[] {
+  const listed = new Set(texts);
   return tokens.filter((t) => listed.has(t.text));
 }
 

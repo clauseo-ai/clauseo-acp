@@ -87,6 +87,16 @@ const HI = {
   // and said politely as the menu opens, for a screen reader
   "1 command": "1 कमांड",
   "{n} commands": "{n} कमांड",
+  // the composer's `@` menu, the matter's papers: its name for assistive technology, the count said as it opens, and
+  // the lines under its rows (loading, a list that couldn't be read, more matches than rows, a list that stops short;
+  // a matter with none says words.ts's "No papers yet.")
+  Papers: "दस्तावेज़",
+  "1 paper": "1 दस्तावेज़",
+  "{n} papers": "{n} दस्तावेज़",
+  "Loading papers…": "दस्तावेज़ लोड हो रहे हैं…",
+  "Couldn't read this matter's papers.": "इस मामले के दस्तावेज़ पढ़े नहीं जा सके।",
+  "First {shown} of {n}. Type to narrow.": "{n} में से पहले {shown}। सूची छोटी करने के लिए आगे टाइप करें।",
+  "Not every file in this folder is listed.": "इस फ़ोल्डर की सभी फ़ाइलें सूची में नहीं हैं।",
   // the plan in the status line, for a plan other than Claude
   "Uses your {name} plan": "आपके {name} प्लान का उपयोग करता है",
   // empty states

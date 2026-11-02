@@ -1,8 +1,11 @@
 // @vitest-environment happy-dom
 // Each matter's draft outlives its Work: the room keeps the drafts above Work's key (room.tsx), so leaving a matter and
-// coming back finds the words where the lawyer left them, as a refused send's "Your question is kept." promises.
-import { act } from "react";
+// coming back finds the words where the lawyer left them, as a refused send's "Your question is kept." promises. A
+// picked paper or command comes back at least as its own words, never dropped.
+import { act, createRef } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { settled } from "@clauseo/components/lib/late.ts";
+import type { ComposerHandle, Mentions } from "@clauseo/components/clauseo/composer.tsx";
 import { afterEach, expect, test } from "vitest";
 import type { MatterId } from "../../transport/protocol.ts";
 import type { Drafts } from "./session.ts";
@@ -105,4 +108,68 @@ test("a question accepted after the lawyer left its matter doesn't come back as 
   await act(async () => accept(false));
   await show(A);
   expect(field().value).toBe("And clause ten?");
+});
+
+test("tokens survive a visit to another conversation as their own words: a paper's @\"path\" and a command's /name", async () => {
+  const drafts: Drafts = new Map();
+  host = document.createElement("div");
+  document.body.append(host);
+  root = createRoot(host);
+  const handle = createRef<ComposerHandle>();
+  const mentions: Mentions = {
+    load: async () => ({
+      items: [
+        {
+          id: "f-1",
+          label: "Board minutes.pdf",
+          detail: "Pleadings",
+          text: "Pleadings/Board minutes.pdf",
+        },
+      ],
+    }),
+  };
+  const show = (key: MatterId) =>
+    act(async () =>
+      root!.render(
+        <WorkComposer
+          key={key}
+          ref={handle}
+          drafts={drafts}
+          draftKey={key}
+          commands={[{ name: "review", description: "Review the changes" }]}
+          mentions={mentions}
+          disabled={false}
+          busy={false}
+          refused={null}
+          failed={null}
+          onAsk={async () => false}
+          onStop={() => {}}
+        />,
+      ),
+    );
+  /** Words typed with the caret at their end, as an engine's insertion. */
+  const insert = (text: string) =>
+    act(async () => {
+      Reflect.set(HTMLTextAreaElement.prototype, "value", text, field());
+      field().setSelectionRange(text.length, text.length);
+      field().dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }));
+    });
+  await show(A);
+  await act(async () => field().focus());
+  await act(settled);
+  // a command and a paper, each picked from its menu with Enter
+  await insert("/re");
+  await enter();
+  await insert("/review compare @bo");
+  await enter();
+  const words = '/review compare @"Pleadings/Board minutes.pdf" ';
+  expect(field().value).toBe(words);
+  expect(handle.current?.mentioned().map((m) => m.id)).toEqual(["f-1"]);
+  expect(drafts.get(A)).toBe(words);
+  // to another conversation and back: the words exactly, the tokens' text in them
+  await show(B);
+  expect(field().value).toBe("");
+  await show(A);
+  expect(drafts.get(A)).toBe(words);
+  expect(field().value).toBe(words);
 });

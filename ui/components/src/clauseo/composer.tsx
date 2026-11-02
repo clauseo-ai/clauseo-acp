@@ -35,10 +35,27 @@ export type { PlanChoice, ReadyHint } from "./status-line.tsx";
  * (`HeaderEntry.commands`, passed as it is): its name without the slash, what it does, and a hint for its input. */
 export type SlashCommand = { name: string; description: string; input_hint?: string };
 
-/** The `/` menu, its filtering and its caret measurement: one late chunk, loaded as the field is first focused. */
-const CommandMenu = lazy(() =>
-  late(import("./composer-menu.tsx").then((m) => ({ default: m.CommandMenu }))),
+/** One thing `@` can mention, as the room gives it: a paper of the matter. `id` is what a send names it by (the
+ * paper's FileRefId), `label` the row's first line (its file name), `detail` its second (its folder), and `text` what
+ * the token reads after its `@` (its path in the matter folder), quoted when it holds a space, a bracket or a quote.
+ * The composer knows nothing more of it. */
+export type MentionItem = { id: string; label: string; detail?: string | undefined; text: string };
+
+/** What a load gives: the things, and whether the list stops short of all there are (H8's 2,000 cap). */
+export type MentionList = { items: readonly MentionItem[]; partial?: boolean | undefined };
+
+/** Where the `@` menu's things come from. `load` is called each time `@` opens the menu; the room caches, so a call
+ * may answer at once. Until the first answer the menu says it is loading; a rejection, with nothing loaded before,
+ * says the list couldn't be read. */
+export type Mentions = { load: () => Promise<MentionList> };
+
+/** The `/` and `@` menus, their filtering and caret measurement, and the tokens: one late chunk, loaded as the
+ * field is first focused. */
+const ComposerMenu = lazy(() =>
+  late(import("./composer-menu.tsx").then((m) => ({ default: m.ComposerMenu }))),
 );
+
+const NO_COMMANDS: readonly SlashCommand[] = [];
 
 /** A paper added to the question, as a small raised pill on the field's well: the paper book page glyph, its short
  * title and page, and a press to take it off again. */
@@ -83,6 +100,9 @@ export type ComposerHandle = {
    * it takes the focus only where clear may (mayTakeFocus), and anywhere else the words go in place. While an input
    * method composes it waits for the composition's end, and fills then only if the field is still empty. */
   fill: (text: string) => void;
+  /** The things the field's `@` tokens mention now, in the order they first stand in it, each once: what a send of
+   * its words names alongside them. A token edited or deleted mentions nothing. */
+  mentioned: () => readonly MentionItem[];
 };
 
 export type ComposerProps<V extends string = string> = {
@@ -119,7 +139,7 @@ export type ComposerProps<V extends string = string> = {
   line?: ReactNode | false;
   /** No matter open: the field, Add papers and Ask take nothing. */
   disabled?: boolean;
-  /** data-testid on the field, Ask, Stop, the working line's row, and the `/` menu and each of its rows. */
+  /** data-testid on the field, Ask, Stop, the working line's row, and the `/` or `@` menu and each of its rows. */
   testIds?: {
     field?: string;
     ask?: string;
@@ -131,6 +151,10 @@ export type ComposerProps<V extends string = string> = {
   /** The agent's commands, for the `/` menu: `/` at the field's start or after a space opens it at the caret, and a
    * list replaced while it is open is read again. Without them `/` is only a character. */
   commands?: readonly SlashCommand[];
+  /** The things `@` can mention, for the `@` menu: `@` at the field's start or after a space opens it at the caret,
+   * loading them then. A pick is a token, and `mentioned` on the handle says which stand in the field. Without them
+   * `@` is only a character. */
+  mentions?: Mentions | undefined;
   /** Questions drawn from the matter's papers, offered over an empty field: a press puts one in the field. */
   prompts?: { label: string; items: readonly { text: string }[] };
   /** A quiet note under the field, above the room's line, such as the plan running low. Optional. */
@@ -174,6 +198,7 @@ export function Composer<V extends string = string>({
   disabled = false,
   testIds,
   commands,
+  mentions,
   prompts,
   notice,
   queue,
@@ -205,14 +230,16 @@ export function Composer<V extends string = string>({
   const [shown, setShown] = useState<MenuShown>(null);
   // the menu's chunk reads the field again through this after an edit made in place, so its tokens follow
   const tokenSync = useRef<(() => void) | null>(null);
+  // the menu's chunk answers the handle's `mentioned` through this; before it lands there are no tokens
+  const picks = useRef<(() => readonly MentionItem[]) | null>(null);
   const hasCommands = commands !== undefined && commands.length > 0;
+  const hasMenu = hasCommands || mentions !== undefined;
   // commands that arrive while the field already has the focus arm it too, but with nothing to read as the chunk
   // lands: a `/re` run typed before the list came is old words, and only the next insertion opens the menu
   useEffect(() => {
     const a = area.current;
-    if (hasCommands && a !== null && a.ownerDocument.activeElement === a)
-      setArmed((was) => was ?? a);
-  }, [hasCommands]);
+    if (hasMenu && a !== null && a.ownerDocument.activeElement === a) setArmed((was) => was ?? a);
+  }, [hasMenu]);
   const gated = gate !== undefined;
   // the room's field is the one the lawyer can see: hidden under a gate, it is no field for the room's keys or focus
   const fieldRef = useCallback(
@@ -317,6 +344,7 @@ export function Composer<V extends string = string>({
     setText: put,
     clear: (only) => clear(only),
     fill: (text) => fill(text),
+    mentioned: () => picks.current?.() ?? [],
   }));
   // the room keeps the composer's height, so what scrolls into view on a phone stands above it, and the turned page
   // stands clear of it
@@ -400,15 +428,15 @@ export function Composer<V extends string = string>({
             disabled={disabled}
             data-testid={testIds?.field}
             placeholder={placeholder ?? w.t("Ask about this matter")}
-            // the `/` menu: a textarea takes no combobox role and no aria-expanded (ARIA in HTML; axe's
+            // the `/` and `@` menus: a textarea takes no combobox role and no aria-expanded (ARIA in HTML; axe's
             // aria-allowed-role and aria-allowed-attr), so it says it has a list and, while open, which row is lit
-            aria-autocomplete={hasCommands ? "list" : undefined}
-            aria-haspopup={hasCommands ? "listbox" : undefined}
+            aria-autocomplete={hasMenu ? "list" : undefined}
+            aria-haspopup={hasMenu ? "listbox" : undefined}
             aria-controls={shown?.list}
             aria-activedescendant={shown?.active}
             data-menu={shown !== null ? "" : undefined}
             onFocus={(e) => {
-              if (armed !== null || !hasCommands) return;
+              if (armed !== null || !hasMenu) return;
               held.current = e.currentTarget.value;
               setArmed(e.currentTarget);
             }}
@@ -448,15 +476,17 @@ export function Composer<V extends string = string>({
               onAsk?.(e.currentTarget.value);
             }}
           />
-          {armed !== null && commands !== undefined && hasCommands && !gated && !disabled && (
+          {armed !== null && hasMenu && !gated && !disabled && (
             <Suspense fallback={null}>
-              <CommandMenu
+              <ComposerMenu
                 field={armed}
-                commands={commands}
+                commands={commands ?? NO_COMMANDS}
+                mentions={mentions}
                 composing={composing}
                 held={held}
                 onShown={setShown}
                 sync={tokenSync}
+                picks={picks}
                 testIds={{ menu: testIds?.menu, item: testIds?.menuItem }}
               />
             </Suspense>

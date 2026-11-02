@@ -8,6 +8,7 @@ import { streamOf } from "../../store/view.ts";
 import { internalError, toHostError, type HostTransport } from "../../transport/host-transport.ts";
 import type {
   ErrorCode,
+  FileRefId,
   HostCommand,
   MatterId,
   MessageId,
@@ -22,6 +23,7 @@ import type {
 import { queueCountPick } from "../queue-entries.ts";
 import { turnRunning } from "./live.ts";
 import { loadThread } from "./chunk.ts";
+import { promptContent } from "./paper-mentions.ts";
 
 /** The code of a refused command, and its setter, which makes no set to the code already held: React drops such a
  * set at once but keeps it queued at its lane (Ask's click: sync), and the next render of Work at another lane (a
@@ -83,8 +85,10 @@ export function useThreadActions(): ThreadActions {
 
 /** How a question goes (U7, H9): `behind`, sent while Clauseo works, so the host queues it (send_prompt with no
  * `delivery`) or, with `delivery: "steer"`, gives it to the running answer or stops that answer for it. A question
- * that goes behind a turn, or into a held or waiting queue, is not the sent turn: busy follows the status for it. */
-export type AskHow = { behind?: boolean; delivery?: "steer" };
+ * that goes behind a turn, or into a held or waiting queue, is not the sent turn: busy follows the status for it.
+ * `files`, however it goes: the papers its `@` tokens mention, a `File` block each after its text, each once
+ * (paper-mentions.ts); the host keeps them with a queued prompt, through an edit of its text too. */
+export type AskHow = { behind?: boolean; delivery?: "steer"; files?: readonly FileRefId[] };
 
 export type ThreadSession = {
   /** The open thread, or null before the first Ask makes one, while list_threads runs, or before the thread's chunk is
@@ -171,7 +175,7 @@ export function useThreadSession(
           view?.header?.header?.queue_held !== true &&
           queueCountPick(view) === 0;
         const header = view?.header ?? null;
-        const content = [{ text: { text } }];
+        const content = promptContent(text, how.files ?? []);
         const sent = await command({
           send_prompt: {
             thread: id,
