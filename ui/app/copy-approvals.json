@@ -603,12 +603,12 @@
     "note": "Rohan, on the review page (built from U3 53b4ca5d, approved as U3-46)"
   },
   "U3-err-unknown": {
-    "en": "Something went wrong.",
-    "hi": "कुछ गड़बड़ हो गई।",
+    "en": "Something went wrong inside Clauseo.",
+    "hi": "Clauseo के भीतर कुछ गड़बड़ हो गई।",
     "status": "approved",
     "at": "2026-11-02",
     "by": "Rohan",
-    "note": "Rohan, on the review page (built from U3 53b4ca5d, approved as U3-47)"
+    "note": "U10: unknown reads as internal's line, approved as U3-err-internal"
   },
   "U3-err-command.unknown_thread": {
     "en": "This conversation is no longer in Clauseo.",

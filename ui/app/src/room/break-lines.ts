@@ -12,22 +12,25 @@ import { stamp } from "./thread/clock.ts";
 
 /** The working line for a stopped answer: agent.exited with its time, or, once the host restarts (H10), any code
  * Restart mends, with Restart; with H10 and agent.exited, the details say what Restart does. Null otherwise: the step
- * row's words say the rest. */
+ * row's words say the rest. A refused Restart says its refusal's words, offers Restart again only when the refusal
+ * says another try may work, and folds open no details. */
 export function stoppedLine(
   lang: Lang,
   brk: Break,
   now: number,
-  restart: { onRestart: () => void; refused: string | null } | null,
+  restart: { onRestart: () => void; refused: HostError | null } | null,
 ): BreakLine | null {
   const mends = restart !== null && RESTARTS.has(brk.code);
   if (brk.code !== TIMED && !mends) return null;
-  const code = restart?.refused ?? brk.code;
+  const refused = restart?.refused ?? null;
+  const code = refused?.code ?? brk.code;
   const words =
-    (restart === null || restart.refused === null) && brk.code === TIMED
+    refused === null && brk.code === TIMED
       ? say(lang, "The answer stopped at {time}. Your question and the answer so far are kept.", {
           time: stamp(lang, brk.step.ts, now),
         })
       : errorWords(lang, code);
+  const offers = mends && (refused === null || refused.retryable);
   return {
     testId: "agent-stopped",
     state: {
@@ -35,10 +38,10 @@ export function stoppedLine(
       words,
       pill: null,
       code,
-      ...(mends
+      ...(offers
         ? {
             actions: createElement(RestartButton, { lang, onRestart: restart.onRestart }),
-            ...(brk.code === TIMED
+            ...(refused === null && brk.code === TIMED
               ? {
                   details: say(
                     lang,
@@ -59,7 +62,7 @@ export function streamFailedLine(lang: Lang, error: HostError, onRetry: () => vo
     testId: "stream-failed",
     state: {
       kind: "wait",
-      words: streamFailedWords(lang, error.code),
+      words: streamFailedWords(lang, error.code, error.retryable),
       pill: null,
       code: error.code,
       ...(error.retryable

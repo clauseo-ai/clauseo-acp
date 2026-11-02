@@ -99,6 +99,10 @@ export type ComposerHandle = {
    * only while the field holds exactly that. While an input method composes it waits for the composition's end and
    * clears then if the field still holds what it held. */
   clear: (only?: string) => void;
+  /** Puts `text` into the field only while it is empty, as one undoable step, and never moves the lawyer's focus:
+   * it takes the focus only where clear may (mayTakeFocus), and anywhere else the words go in place. While an input
+   * method composes it waits for the composition's end, and fills then only if the field is still empty. */
+  fill: (text: string) => void;
 };
 
 /** Replaces all the field holds with `text` through the engine's editing, so undo takes it back; where the engine
@@ -239,6 +243,8 @@ export function Composer<V extends string = string>({
   // a clear asked for while an input method composed: what the field held then, cleared at the composition's end
   // only if the field still holds it
   const clearAfter = useRef<string | null>(null);
+  // a fill asked for while an input method composed: put in at the composition's end, if the field is empty then
+  const fillAfter = useRef<string | null>(null);
   const fitRef = useRef<() => void>(() => {});
   const entry = useRef<HTMLDivElement>(null);
   const room = useRoom();
@@ -305,11 +311,27 @@ export function Composer<V extends string = string>({
     if (inPlace) a.value = "";
     if (inPlace || !replaceAll(a, "", mayTakeFocus(a))) changed();
   };
-  // the held clear, once the composition is over; in place when the field is losing focus, which it never takes back
+  const fill = (text: string, inPlace = false) => {
+    const a = area.current;
+    if (a === null) return;
+    if (composing.current) {
+      // inserting inside a composition would break it: wait for its end
+      fillAfter.current = text;
+      return;
+    }
+    if (a.value !== "") return;
+    if (inPlace) a.value = text;
+    if (inPlace || !replaceAll(a, text, mayTakeFocus(a))) changed();
+  };
+  // the held clear and fill, once the composition is over; in place when the field is losing focus, which it never
+  // takes back
   const settle = (inPlace: boolean) => {
     const held = clearAfter.current;
     clearAfter.current = null;
     if (held !== null) clear(held, inPlace);
+    const filling = fillAfter.current;
+    fillAfter.current = null;
+    if (filling !== null) fill(filling, inPlace);
   };
   // made anew each render, as changed reads the caller's onInput: the composer renders rarely, never per keystroke
   useImperativeHandle(ref, () => ({
@@ -317,6 +339,7 @@ export function Composer<V extends string = string>({
     text: () => area.current?.value ?? "",
     setText: put,
     clear: (only) => clear(only),
+    fill: (text) => fill(text),
   }));
   // the room keeps the composer's height, so what scrolls into view on a phone stands above it, and the turned page
   // stands clear of it
@@ -406,7 +429,8 @@ export function Composer<V extends string = string>({
               composing.current = false;
               // a clear held for the composition runs once the engine has settled the value, as the spike's
               // triggers do
-              if (clearAfter.current !== null) setTimeout(() => settle(false), 0);
+              if (clearAfter.current !== null || fillAfter.current !== null)
+                setTimeout(() => settle(false), 0);
             }}
             onBlur={() => {
               // a composition the engine ended without its compositionend must not hold Enter, or a clear, for

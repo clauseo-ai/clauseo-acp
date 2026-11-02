@@ -149,19 +149,26 @@ export function WorkingLine({
 }) {
   const wd = useThreadWords();
   const { words, pill, actions, details } = useParts(state);
+  // what assistive technology hears: one status region that stays mounted while the line does, its words changing in
+  // place (Answering., then the break's), so each change is said once. The row's own words are seen, not read twice;
+  // a row with details renders through Suspense and would mount a region anew
+  const said = (
+    <span className="sr-only" role="status">
+      {words}
+      {pill !== null && ` ${pill}`}
+    </span>
+  );
   const row = (more: ReactNode) => (
     <div
       className="working"
       data-kind={state.kind}
       data-code={state.kind === "wait" ? state.code : undefined}
       data-testid={testId}
-      role="status"
     >
       <IconChecking size={16} className="working-icon" />
-      <span className="working-text">
+      <span className="working-text" aria-hidden="true">
         <span>
           <Say>{words}</Say>
-          {pill !== null && <span className="sr-only"> {pill}</span>}
         </span>
       </span>
       {pill !== null && <TimePill place="row">{pill}</TimePill>}
@@ -173,18 +180,27 @@ export function WorkingLine({
       )}
     </div>
   );
-  if (details === null) return row(null);
+  if (details === null)
+    return (
+      <>
+        {said}
+        {row(null)}
+      </>
+    );
   // until the fold is in, its trigger stands as a plain button of the same look
   return (
-    <Suspense
-      fallback={row(
-        <Button kind="quiet" size="small" className="working-more">
-          <span className="deva-nudge">{wd.th("Details")}</span>
-          <IconFold size={12} className="work-chev" />
-        </Button>,
-      )}
-    >
-      <WorkingDetails row={row} details={details} />
-    </Suspense>
+    <>
+      {said}
+      <Suspense
+        fallback={row(
+          <Button kind="quiet" size="small" className="working-more">
+            <span className="deva-nudge">{wd.th("Details")}</span>
+            <IconFold size={12} className="work-chev" />
+          </Button>,
+        )}
+      >
+        <WorkingDetails row={row} details={details} />
+      </Suspense>
+    </>
   );
 }

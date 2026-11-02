@@ -23,7 +23,7 @@ import {
   uuid,
 } from "../../testing/stream-script.ts";
 import type { FileChange, HostError, StepEntry, ViewEntry } from "../../transport/protocol.ts";
-import { clockTime, stamp } from "./clock.ts";
+import { clockTime, whenOf } from "./clock.ts";
 import { defaultOutcome, mountRoom, type Harness } from "./harness.ts";
 
 let h: Harness | null = null;
@@ -411,7 +411,10 @@ test("reopening a failed turn keeps the question and the answer so far (the brie
   // agent.exited's step has a true time, so the thread marks where it stopped (U10; stopped-mark.tsx)
   expect(h.one("turn-stopped")?.dataset["failure"]).toBe("agent.exited");
   expect(h.one("turn-stopped")?.textContent).toBe(
-    brk("en", "The answer stopped here at {time}", { time: stamp("en", 7000, Date.now()) }),
+    brk("en", "The answer stopped here on {day} at {time}", {
+      day: whenOf("en", 7000, Date.now()).day ?? "",
+      time: whenOf("en", 7000, Date.now()).time,
+    }),
   );
 });
 

@@ -88,6 +88,31 @@ test("Claude stopping mid-answer: the stopped line with its time and no Restart,
   expect(h.one("working")).not.toBeNull();
 });
 
+test("the question comes back without moving the lawyer's focus from a field elsewhere", async () => {
+  h = await asked();
+  const elsewhere = document.createElement("input");
+  document.body.append(elsewhere);
+  elsewhere.focus();
+  h.deliver(failed("agent.exited"));
+  await h.settle();
+  expect(field().value).toBe(QUESTION);
+  expect(document.activeElement).toBe(elsewhere);
+  elsewhere.remove();
+});
+
+test("the break is said once: one status region in the composer, the same node from Answering. to the stopped line", async () => {
+  h = await asked();
+  const regions = () => [...h!.host.querySelectorAll('.room-entry [role="status"]')];
+  expect(regions()).toHaveLength(1);
+  const before = regions()[0];
+  expect(before?.textContent).toContain("Answering.");
+  h.deliver(failed("agent.exited"));
+  await h.settle();
+  expect(regions()).toHaveLength(1);
+  expect(regions()[0]).toBe(before);
+  expect(before?.textContent).toContain("The answer stopped at");
+});
+
 test("words typed before the break keep their place: the question comes back only into an empty field", async () => {
   h = await asked();
   await h.type("And clause ten?");
@@ -125,6 +150,8 @@ test("with H10 faked: Restart for agent.exited, agent.launch_failed and thread.i
     const line = h.one("agent-stopped");
     expect(line?.dataset["code"]).toBe(code);
     if (code !== "agent.exited") expect(line?.textContent).toContain(errorWords("en", code));
+    // Restart asks the question itself, so the field stays empty: no second ask waits there
+    expect(field().value).toBe("");
     await h.click(h.one("restart"));
     expect(h.sent("restart_agent")).toEqual([{ thread: THREAD }]);
     // accepted: the line steps aside while the host asks again
@@ -168,4 +195,22 @@ test("Restart is hidden while a turn runs again", async () => {
   h.deliver([upsert(status("running"))]);
   await h.settle();
   expect(h.one("restart")).toBeNull();
+});
+
+test("with H10 faked, an interrupted turn already in the view when the thread opens offers Restart", async () => {
+  h = await mountRoom({ next: H10 });
+  h.deliver([
+    reset(
+      [
+        userMessage(5, 1, QUESTION),
+        agentText(6, 1, "Clause nine"),
+        step(9, { stop: "failed", failure: "thread.interrupted" }),
+      ],
+      status("idle"),
+    ),
+  ]);
+  await h.settle();
+  expect(h.one("agent-stopped")?.dataset["code"]).toBe("thread.interrupted");
+  expect(h.one("restart")).not.toBeNull();
+  expect(field().value).toBe("");
 });

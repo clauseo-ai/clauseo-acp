@@ -10,13 +10,48 @@ const BANNED_EN = /\bI\b|[\u2013\u2014]|\b(pencil|ink|step|git|token|session|ter
 const BANNED_HI = /पेंसिल|स्याही|चरण|कदम|(^|\s)मैं(\s|$)/;
 
 test("a stream that failed says the thread stopped coming in, then its code's sentence, in both languages", () => {
-  expect(streamFailedWords("en", "store.io")).toBe(
+  expect(streamFailedWords("en", "store.io", true)).toBe(
     "This conversation stopped updating in this window. Clauseo couldn't read or write its data. Try again.",
   );
-  expect(streamFailedWords("hi", "store.io")).toBe(
+  expect(streamFailedWords("hi", "store.io", true)).toBe(
     `यह बातचीत इस विंडो में अपडेट होना बंद हो गई। ${errorWords("hi", "store.io")}`,
   );
-  expect(streamFailedWords("en", "store.melted")).toContain(errorWords("en", "internal"));
+  expect(streamFailedWords("en", "store.melted", false)).toContain(errorWords("en", "internal"));
+});
+
+test("with no Try again, a stream that failed never says to try again; with it, the code's own sentence", () => {
+  expect(streamFailedWords("en", "store.disk_full", false)).toBe(
+    "This conversation stopped updating in this window. The computer's disk is full. Free some space.",
+  );
+  expect(streamFailedWords("hi", "store.disk_full", false)).toBe(
+    "यह बातचीत इस विंडो में अपडेट होना बंद हो गई। कंप्यूटर की डिस्क भर गई है। कुछ जगह खाली करें।",
+  );
+  expect(streamFailedWords("en", "store.disk_full", true)).toContain("then try again.");
+  // no code that isn't retryable on the wire says "try again" once its stream fails
+  const notRetryable: ErrorCode[] = [
+    "store.disk_full",
+    "store.corrupt",
+    "store.newer_version",
+    "internal",
+    "unknown",
+  ];
+  for (const code of notRetryable)
+    expect(streamFailedWords("en", code, false).toLowerCase()).not.toContain("try again");
+});
+
+test("a stopped mark on another day names it: on {day} at {time}", () => {
+  expect(
+    brk("en", "The answer stopped here on {day} at {time}", {
+      day: "Monday",
+      time: clock("en", "4:31 pm"),
+    }),
+  ).toBe("The answer stopped here on Monday at 4:31 pm");
+  expect(
+    brk("hi", "The answer stopped here on {day} at {time}", {
+      day: "सोमवार",
+      time: clock("hi", "4:31 pm"),
+    }),
+  ).toBe("उत्तर सोमवार को शाम 4:31 बजे यहाँ रुका");
 });
 
 test("every code's sentence is its own words, never empty", () => {
