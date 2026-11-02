@@ -226,8 +226,9 @@ for (const theme of THEMES) {
                 );
                 expect(rows[0]?.dataset["confirming"], name).toBeDefined();
                 expect(rows[0]?.querySelector(".perm-confirming"), name).not.toBeNull();
-                // the answers wait, dimmed, while the OS asks
-                expect(rows[0]?.querySelector(".perm-actions[inert]"), name).not.toBeNull();
+                // the answers wait, dimmed and held (aria-disabled, never inert), while the OS asks
+                expect(rows[0]?.querySelector(".perm-actions[inert]"), name).toBeNull();
+                expect(rows[0]?.querySelector('[aria-disabled="true"]'), name).not.toBeNull();
               }
               // the command's prompt asks, with its title beneath
               if (scene.thread.some((e) => e.tool_call?.kind === "execute"))
