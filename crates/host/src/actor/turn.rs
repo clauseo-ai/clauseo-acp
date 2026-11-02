@@ -58,10 +58,6 @@ pub(crate) use route::{TurnCommand, command};
 /// How long a cancelled turn waits for the agent's answer before the host stops the agent.
 const CANCEL_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// How long a Codex turn whose prompt failed waits for a limits read before it ends: the Codex
-/// reader's own timeout.
-pub(crate) const LIMIT_READ_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
-
 /// A thread's turn state: its current turn, its agent, its text buffers and its undo note. One
 /// per thread, made with `Default` when the thread is loaded from the store or created.
 #[derive(Debug, Default)]
@@ -420,18 +416,24 @@ pub(crate) fn reconcile_skipped(actor: &mut Actor, thread: ThreadId) {
 }
 
 /// Shutdown, after the host stopped taking commands: a turn whose end waits for a limits read
-/// stops waiting, then every running turn is cancelled through the Cancel path and every agent
-/// stops. The actor closes the store once [`busy`] is false and every commit has returned.
+/// stops waiting, every running turn is cancelled through the Cancel path and every agent
+/// stops, and every stop at the limit still waiting for a read is decided and logged. The actor
+/// closes the store once [`busy`] is false and every commit has returned.
 pub(crate) fn shutdown(actor: &mut Actor) {
     end::stop_waiting_for_reads(actor);
     cancel::shutdown(actor);
+    super::limits::decide_stops_now(actor);
 }
 
 /// Whether the turn path has work that start-up (reconciliation) or shutdown (cancels, agent
-/// stops) must wait for. Only scanned while starting or stopping; serving never waits on it.
+/// stops, stops at the limit not logged yet) must wait for. Only scanned while starting or
+/// stopping; serving never waits on it.
 pub(crate) fn busy(actor: &Actor) -> bool {
     if matches!(actor.phase, HostPhase::Serving) {
         return false;
+    }
+    if host_stopping(actor) && super::limits::stops_busy(actor) {
+        return true;
     }
     actor.threads.values().any(|entry| {
         let state = &entry.turn;

@@ -1,0 +1,9 @@
+{"scenario":"session-failure-temporary","description":"One turn that fails with an AIR sessionFailure whose actions are [\"retry\"], a temporary limit with no reset time","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1"}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Checking the clause. "}}}}
+{"update":{"update":{"sessionUpdate":"session_info_update","_meta":{"jetbrains":{"air":{"version":1,"sessionFailure":{"id":"t1:error","revision":1,"category":"limit","severity":"error","title":"You've hit your usage limit.","actions":["retry"]}}}}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn","_meta":{"jetbrains":{"air":{"version":1,"sessionFailure":{"id":"t1:error","revision":1,"category":"limit","severity":"error","title":"You've hit your usage limit.","actions":["retry"]}}}}}}}
