@@ -1,7 +1,7 @@
 import { build, createServer, resolveConfig, type Rolldown } from "vite";
 import { afterEach, expect, test, vi } from "vitest";
 import tauriConf from "../../../crates/desktop/tauri.conf.json" with { type: "json" };
-import { devCsp, metaCsp, unwrapPreloads } from "../vite.config.ts";
+import { BARE_CHUNKS, devCsp, metaCsp, unwrapPreloads } from "../vite.config.ts";
 
 /** A test that runs a whole Vite build: several seconds on a CI runner, past vitest's 5 s default. */
 const BUILD = { timeout: 60_000 };
@@ -62,17 +62,11 @@ test("the build's only input is index.html, so the dev-only gallery stays out of
 // chunk, and the entity table in its own, imported with a bare import() from the chunk that decodes entities: neither
 // goes through Vite's preload helper, whose call would wrap it in an arrow (vite.config.ts's bareDynamicImports).
 test(
-  "the release build keeps the perf module and the entity table in lazy chunks, each imported without a preload",
+  "the release build keeps the perf module, the entity table and the room's lazy parts in chunks of their own, each imported without a preload",
   BUILD,
   async () => {
-    const out = (await build({
-      configFile: "vite.config.ts",
-      logLevel: "silent",
-      build: { write: false },
-    })) as Rolldown.RolldownOutput | Rolldown.RolldownOutput[];
-    const chunks = (Array.isArray(out) ? out : [out])
-      .flatMap((o) => o.output)
-      .filter((c): c is Rolldown.OutputChunk => c.type === "chunk");
+    // as `vite build` runs it (builtWith): under vitest's NODE_ENV=test the build would be a dev one, with the hooks
+    const { chunks } = await builtWith();
     const entry = chunks.find((c) => c.isEntry);
     const perf = chunks.find((c) => c.fileName.startsWith("assets/perf-"));
     expect(entry).toBeDefined();
@@ -86,6 +80,33 @@ test(
     expect(decoders.length).toBe(1);
     expect(decoders[0]!.code).toMatch(/[^>]import\(`\.\/character-entities-[\w-]+\.js`\)\.then\(/);
     expect(entry!.code).not.toContain("startStream");
+    // no preload list anywhere: every dynamic import in the build is a bare one. (The helper itself stays in the entry,
+    // exported, since the chunks are linked before renderChunk unwraps its calls.)
+    for (const chunk of chunks) expect(chunk.code, chunk.fileName).not.toContain("__vite__mapDeps");
+    // and unwrapping lost no preload: each bare chunk imports only what is loaded by the time it loads, the first
+    // load and the chunk that imports it with what that one imports
+    const byName = new Map(chunks.map((c) => [c.fileName, c]));
+    const closure = (name: string, into = new Set<string>()) => {
+      if (into.has(name)) return into;
+      into.add(name);
+      for (const next of byName.get(name)?.imports ?? []) closure(next, into);
+      return into;
+    };
+    const first = closure(entry!.fileName);
+    const bare = chunks.filter((c) =>
+      BARE_CHUNKS.some((name) => c.fileName.startsWith(`assets/${name}-`)),
+    );
+    expect(bare.length).toBeGreaterThanOrEqual(BARE_CHUNKS.length);
+    for (const chunk of bare) {
+      expect(chunk.isDynamicEntry, chunk.fileName).toBe(true);
+      const importers = chunks.filter((c) => c.dynamicImports.includes(chunk.fileName));
+      expect(importers.length, chunk.fileName).toBeGreaterThan(0);
+      for (const importer of importers) {
+        const loaded = new Set([...first, ...closure(importer.fileName)]);
+        for (const dep of chunk.imports)
+          expect(loaded.has(dep), `${chunk.fileName}: ${dep}`).toBe(true);
+      }
+    }
   },
 );
 
