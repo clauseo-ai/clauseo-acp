@@ -27,13 +27,13 @@ Words: "agent" means the lawyer's ACP agent (Claude Code, Codex). "You" is the c
 
 ## Map
 
-<!-- One line per crate or package that exists. Planned crates are in ARCHITECTURE.md. -->
 - `crates/acp`: the ACP client over the agent's pipes; agent traffic as events. Scenarios in `tests/scenarios/`.
 - `crates/codex_appserver`: Codex app-server types, a JSON-RPC client and the schema drift test.
 - `crates/desktop`: the Tauri shell and the host bridge.
 - `crates/fake_agent`: scripted ACP agent for tests; scenarios and their format in `crates/fake_agent/scenarios/` (README.md).
 - `crates/host`: the session host thread.
 - `crates/limits`: plan usage readers (Claude helper, Codex reader) and the limits model.
+- `crates/mcp`: the `clauseo-mcp` sidecar, the browser guard.
 - `crates/matters`: matter folders and their shadow git history (checkpoints, undo). See `docs/decisions/0007-matter-history-format.md`.
 - `crates/process`: starts an agent in its own process tree, shuts it down and kills the tree; the `Launcher` seam.
 - `crates/protocol`: types crossing the host boundary, no I/O. See `docs/decisions/`, `docs/ui-states.md`.

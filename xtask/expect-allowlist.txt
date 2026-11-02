@@ -197,3 +197,14 @@ crates/sandbox/src/links/tests.rs walk_of_fifty_thousand_files clippy::disallowe
 # Added by S14 (macOS): the agent's TMPDIR in its state folder, the jail tests' file setup.
 crates/sandbox/src/macos/launcher.rs make_tmpdir clippy::disallowed_methods
 crates/sandbox/tests/jail/support.rs - clippy::disallowed_methods
+# clauseo-mcp (S27): main's one stderr print of a mode's failure, the write module (the guard's
+# folders), the guard's one child start (agent-browser), the echo stub's log file, and the tests'
+# write module, guard starts and cargo metadata run.
+crates/mcp/src/main.rs main clippy::print_stderr
+crates/mcp/src/write.rs - clippy::disallowed_methods
+crates/mcp/src/browser_guard/relay.rs spawn_child clippy::disallowed_methods
+crates/mcp/examples/echo_stub.rs open_log clippy::disallowed_methods
+crates/mcp/tests/guard/write.rs - clippy::disallowed_methods
+crates/mcp/tests/guard/support.rs run clippy::disallowed_methods
+crates/mcp/tests/guard/support.rs Guard::start clippy::disallowed_methods
+crates/mcp/tests/guard/deps.rs metadata clippy::disallowed_methods
