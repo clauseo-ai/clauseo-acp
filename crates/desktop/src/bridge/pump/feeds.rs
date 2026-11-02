@@ -7,6 +7,7 @@
 //!   though it missed events (0017's subscribe-then-read rule). H4's `matters_changed` and
 //!   `threads_changed` (not merged) go through as they come; when they land, the restart also
 //!   needs their current lists, unless the host makes a subscription's first frame `all: true`.
+//!   A window other than `main` gets `settings_changed` alone of it ([`AppEvents`], 0028).
 //! - The limits (`HostHandle::subscribe_limits`), which `open_stream` follows. The host starts
 //!   every limits subscription with the current `limits_view_changed`, so a restart needs no
 //!   read and nothing is replayed. After a pause or a watchdog renewal the window so gets only
@@ -26,6 +27,38 @@ use tauri::async_runtime;
 
 use super::{Feed, Forward, Window};
 use crate::bridge::{PRINCIPAL, lock};
+
+/// Which app-feed events a window's channel carries: an allow-list keyed on its label (0028).
+/// `main` carries them all; any other window `settings_changed` alone, so the settings window
+/// never gets the matter and thread lists (0023), nor an app event the host adds later.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AppEvents {
+    /// Every app event: `main`.
+    All,
+    /// `settings_changed` only: the settings window, and any other label.
+    SettingsOnly,
+}
+
+impl AppEvents {
+    /// The app events the window `label` carries.
+    pub(crate) fn of(label: &str) -> Self {
+        if label == crate::MAIN_WINDOW {
+            Self::All
+        } else {
+            Self::SettingsOnly
+        }
+    }
+
+    /// Whether an event of `feed`, as the host encoded it, goes on the channel. Checked before
+    /// it is counted, so an ack counts only what the window received. The host writes each
+    /// event as its one key first (`{"settings_changed":...}`), so the key's prefix names it.
+    fn carries(self, feed: Feed, json: &str) -> bool {
+        match (feed, self) {
+            (Feed::Limits, _) | (Feed::App, Self::All) => true,
+            (Feed::App, Self::SettingsOnly) => json.starts_with(r#"{"settings_changed":"#),
+        }
+    }
+}
 
 /// Follows `feed`. Returns the restart id of the subscription [`start_feed`] starts; a current
 /// one's events are dropped from now on.
@@ -143,7 +176,7 @@ pub(crate) async fn start_feed(
     if guard.state.is_paused() || !guard.state.feeds().is_current(feed, restart_id) {
         return Ok(());
     }
-    if let Some(first) = first {
+    if let Some(first) = first.filter(|first| guard.app_events.carries(feed, first)) {
         let elapsed = guard.opened.elapsed();
         if let Forward::Send { messages, pause } =
             guard.state.forward_feed(feed, restart_id, &first, elapsed)
@@ -192,6 +225,9 @@ async fn pump_feed(
             return;
         };
         let mut window = lock(&window);
+        if !window.app_events.carries(feed, event.json()) {
+            continue;
+        }
         let elapsed = window.opened.elapsed();
         match window
             .state

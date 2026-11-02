@@ -295,7 +295,7 @@ impl Bridge {
         // Numbered before the wait: the order the calls arrived in, not the order they wake.
         let number = self.opens.fetch_add(1, Ordering::Relaxed);
         let host = self.host().await?;
-        let window = Window::open(host.clone(), channel);
+        let window = Window::open(host.clone(), channel, pump::AppEvents::of(label));
         let mut windows = lock(&self.windows);
         let newer = windows.get(label).is_some_and(|(kept, _)| *kept > number);
         let dead = lock(&self.closed)
