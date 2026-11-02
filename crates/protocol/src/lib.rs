@@ -245,6 +245,7 @@ wire_types! {
         NoticeEntry, PermissionEntry, PermissionState, StepEntry, ThreadStatus, ToolCallEntry,
         UserMessageEntry, UserMessageStatus, VersionEntry, ViewEntry,
     },
+    view::{ClauseoTool, ToolAvailability, ToolState, ToolsUnavailableReason},
 }
 
 // Re-exports that are not wire types: constants, functions, and types that never cross the

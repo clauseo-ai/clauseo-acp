@@ -441,6 +441,15 @@ export type CheckpointRecorded = {
 	turn?: TurnId,
 };
 
+/**  One of Clauseo's own tools. */
+export type ClauseoTool = 
+/**  Web search and reading web pages. */
+"web_search" | 
+/**  Clauseo's browser. */
+"browser" | 
+/**  A value from a newer Clauseo that this version does not know. */
+"unknown";
+
 /**
  *  The client a matter is for, as the lawyer typed it: trimmed of surrounding whitespace, then
  *  held to the title rules ([`check_display_title`]): 1 to
@@ -1337,6 +1346,12 @@ export type HeaderEntry = {
 	 *  first session attaches, then from that session's capabilities. Missing reads as `false`.
 	 */
 	steer_joins_turn?: boolean,
+	/**
+	 *  Clauseo's own tools and whether the agent has each in this session. Filled by the host at
+	 *  each session start, as `queue_held` is. Missing reads as empty, and empty is left out, so
+	 *  a header written before the field still decodes and compares equal.
+	 */
+	tools?: ToolState[],
 	/**  The agent's current mode, if it reported one. */
 	mode_id?: string,
 	/**  The agent's config options (mode, model, thought level, others). */
@@ -3179,6 +3194,18 @@ export type Timestamp = number;
  */
 export type Title = string;
 
+/**  Whether the agent has a tool in this session. */
+export type ToolAvailability = 
+/**  The agent has it. */
+"available" | 
+/**  The agent does not have it. */
+{ unavailable: {
+	/**  Why not. */
+	reason: ToolsUnavailableReason,
+} } | 
+/**  An availability from a newer Clauseo; written back as the plain string `kind`. */
+string;
+
 /**
  *  Content in a tool call, as ACP v1's `ToolCallContent`: `Text` for a text block, `Content`
  *  for the other block kinds, `Diff` for a file edit. There is no terminal content: Clauseo
@@ -3392,6 +3419,42 @@ export type ToolLocation =
 } }) & { inside?: never } | 
 /**  A place from a newer Clauseo; written back as the plain string `kind`. */
 string;
+
+/**  One of Clauseo's own tools and whether the agent has it in this session. */
+export type ToolState = {
+	/**  The tool. */
+	tool: ClauseoTool,
+	/**  Whether the agent has it. */
+	availability: ToolAvailability,
+};
+
+/**  Why the agent does not have a tool. */
+export type ToolsUnavailableReason = 
+/**  The lawyer turned it off. */
+"off" | 
+/**  Firm policy turned it off, or a policy source could not be read. */
+"locked_off" | 
+/**
+ *  Web search only: this login has no web search (Bedrock); reading web pages still
+ *  works.
+ */
+"no_search_on_this_login" | 
+/**
+ *  The browser (and other MCP servers): the firm manages the agent's MCP servers (Claude
+ *  Code's managed MCP), so the host sends none.
+ */
+"managed_by_firm" | 
+/**  The browser only: no egress proxy for this session. */
+"no_proxy" | 
+/**  The browser only: no browser is installed. */
+"browser_not_installed" | 
+/**
+ *  The browser only: the machine already runs as many browser sessions as its memory
+ *  allows.
+ */
+"too_many_browsers" | 
+/**  A value from a newer Clauseo that this version does not know. */
+"unknown";
 
 /**
  *  A turn ended: exactly one per turn, including errors, cancels and a queued turn cancelled

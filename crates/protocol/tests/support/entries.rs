@@ -47,6 +47,7 @@ pub fn header_entry() -> HeaderEntry {
         status: ThreadStatus::Idle,
         queue_held: true,
         steer_joins_turn: true,
+        tools: vec![],
         mode_id: Some(short("plan")),
         config_options: vec![],
         commands: vec![],

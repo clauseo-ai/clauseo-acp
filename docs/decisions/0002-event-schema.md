@@ -524,6 +524,9 @@ as the room left by the blocks before it allows, so a block past the limit comes
   `ViewEntry` variant, is additive: it needs a decision record and the code owner's approval, and no
   `schema_version` bump. Renaming, removing or retyping one of these needs the same, plus a plan for
   the clients that use it.
+- A view header may carry host-composed fields that are never logged: the host lays them over the
+  header it sends (patches and `Reset` windows) and the reducer never sees them, so replaying the
+  log gives the same state with or without them. The first is `HeaderEntry::tools` (0030).
 - `HostQuery::PreviewRestore` and `QueryResult::RestorePreview` are recorded with the host's
   versions rules in `0011-host-turn-lifecycle.md` (Versions); their limits are in the table above.
 - "Additive" for view and client-to-host types holds only because the desktop app and the cli

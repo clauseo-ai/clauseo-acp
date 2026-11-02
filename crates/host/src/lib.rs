@@ -24,7 +24,10 @@
 //!   `docs/decisions/0023-seen-marks-and-app-lists.md`.
 //! - The profile hook: [`ProfileHook`], with [`NoProfile`] as the default. Its `_meta` goes on
 //!   `session/new` and `session/load`, and its variables into each launch, with the host's
-//!   switches over them.
+//!   switches over them; its servers after the lawyer's, its `CODEX_CONFIG` keys and its skill
+//!   files, with the per-session placeholders filled (`agent/loads/profile.rs`,
+//!   `agent/loads/browser.rs`; decision record 0030). The tools each thread's header shows are
+//!   an unlogged overlay (`actor/header_tools.rs`).
 //! - What a session loads (`agent/loads.rs`): only the MCP servers the lawyer turned on, under
 //!   Claude Code's strict MCP config with `settingSources: ["user"]` and claude.ai connectors
 //!   off. When Claude Code's enterprise `managed-mcp.json` is present, none of its servers and
@@ -129,9 +132,9 @@
 //! # Depends on
 //!
 //! `protocol`, `reducer`, `store`, `matters`, `process`, `acp`, `settings`, `limits` (its
-//! model, its readers and `CODEX_OVERRIDES`), `async-channel`, `async-io`, `futures`, `uuid`,
-//! `serde_json`, `tracing`, `thiserror`, `dunce` and `sha2` (the Codex hook's trust hash, 0024).
-//! Never `tauri`, `tokio` or `agents`.
+//! model, its readers and `CODEX_OVERRIDES`), `profile` (the placeholders and the skill writes,
+//! 0030), `async-channel`, `async-io`, `futures`, `uuid`, `serde_json`, `tracing`, `thiserror`,
+//! `dunce` and `sha2` (the Codex hook's trust hash, 0024). Never `tauri`, `tokio` or `agents`.
 //!
 //! # Start reading
 //!
@@ -153,6 +156,7 @@
 mod actor;
 mod agent;
 mod blob_read;
+mod browser;
 mod build;
 mod clock;
 mod coalesce;
@@ -176,10 +180,13 @@ mod write;
 
 pub use agent::loads::codex_hook_config;
 pub use agent::session_folder;
+pub use clauseo_acp::McpServer;
 #[cfg(feature = "test-support")]
 pub use clock::ManualClock;
 pub use clock::{Clock, Now, SystemClock};
-pub use config::{HostConfig, NoProfile, ProfileHook};
+#[cfg(feature = "test-support")]
+pub use config::TestProxy;
+pub use config::{EgressProxy, HostConfig, NoProfile, ProfileHook, SessionKey};
 pub use encode::EncodedEvent;
 pub use error::Error;
 pub use handle::{

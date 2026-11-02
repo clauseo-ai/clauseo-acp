@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clauseo_process::LaunchSpec;
 use clauseo_settings::AgentLaunch;
@@ -27,6 +27,9 @@ use crate::error::Error;
 /// child inherits anyway; they are in the map because the process crate's redactor takes its
 /// secrets only from the spec's env, by its own name rule, so every inherited key or token stays
 /// out of the stderr tail. Never `Debug`-print the spec: it holds those secrets.
+///
+/// `path_prepend` (`HostConfig::with_agent_path_prepend`, stetdoc's folder) goes first on the
+/// merged `PATH` ([`prepend_path`]).
 pub(crate) fn launch_spec(
     agent: &AgentLaunch,
     mut hook_env: BTreeMap<OsString, OsString>,
@@ -34,6 +37,7 @@ pub(crate) fn launch_spec(
     dropped: &[&str],
     inherited: impl Iterator<Item = (OsString, OsString)>,
     cwd: PathBuf,
+    path_prepend: Option<&Path>,
 ) -> Result<LaunchSpec, Error> {
     let drops = |name: &OsStr| dropped.iter().any(|drop| same(OsStr::new(drop), name));
     hook_env.retain(|name, _| !names(&forced, name) && !drops(name));
@@ -55,6 +59,9 @@ pub(crate) fn launch_spec(
     env.extend(own);
     env.extend(hook_env);
     env.extend(forced);
+    if let Some(folder) = path_prepend {
+        prepend_path(&mut env, folder);
+    }
     let args = agent.args.iter().map(OsString::from).collect();
     Ok(LaunchSpec::new(
         PathBuf::from(&agent.command),
@@ -62,6 +69,35 @@ pub(crate) fn launch_spec(
         env,
         cwd,
     )?)
+}
+
+/// Puts `folder` first on `env`'s `PATH`: the one the merge kept (the hook's, else the agent's
+/// settings, else the inherited one), found ignoring ASCII case and written back under its own
+/// name (`Path` on Windows stays `Path`), or a new `PATH` holding only `folder`. A folder
+/// that cannot be joined (it holds the separator) is left out with a warning.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the agent's PATH value is split once, to put stetdoc's folder first; nothing is looked up on it"
+)]
+pub(crate) fn prepend_path(env: &mut BTreeMap<OsString, OsString>, folder: &Path) {
+    let name = env
+        .keys()
+        .find(|key| same(key, OsStr::new("PATH")))
+        .cloned()
+        .unwrap_or_else(|| OsString::from("PATH"));
+    let rest = env.get(&name).cloned().unwrap_or_default();
+    let parts = std::iter::once(folder.to_path_buf())
+        .chain(std::env::split_paths(&rest).filter(|part| !part.as_os_str().is_empty()));
+    match std::env::join_paths(parts) {
+        Ok(joined) => {
+            env.insert(name, joined);
+        }
+        Err(error) => tracing::warn!(
+            folder = %folder.display(),
+            %error,
+            "the stetdoc folder cannot go on the agent's PATH"
+        ),
+    }
 }
 
 /// Whether `name` is a `GIT_*` variable, ignoring ASCII case (Windows does).

@@ -7,7 +7,7 @@
 //! one `Reset` at the current cursor. A `Reset` is encoded for the subscriber that needs it and
 //! never kept.
 
-use clauseo_protocol::{Cursor, StreamId, ViewEpoch, ViewPatch, ViewPatchBody};
+use clauseo_protocol::{Cursor, StreamId, ToolState, ViewEpoch, ViewPatch, ViewPatchBody};
 use clauseo_reducer::{StreamState, ViewChange, view_snapshot};
 
 use crate::encode::{BatchWriter, EncodedEvent, Encoder, batch_prefix};
@@ -22,6 +22,9 @@ pub(crate) struct StreamView {
     /// The JSON every batch of this stream starts with (stream and epoch).
     prefix: Box<[u8]>,
     window: PatchWindow,
+    /// The tools a thread's header shows, laid over each header patch
+    /// (`actor::header_tools`): never logged.
+    tools: Vec<ToolState>,
 }
 
 impl StreamView {
@@ -36,7 +39,13 @@ impl StreamView {
             cursor: Cursor::ZERO,
             prefix: batch_prefix(stream, epoch)?,
             window: PatchWindow::new(window_cap),
+            tools: Vec::new(),
         })
+    }
+
+    /// The tools the header shows from now on (`actor::header_tools`).
+    pub(crate) fn set_tools(&mut self, tools: Vec<ToolState>) {
+        self.tools = tools;
     }
 
     /// The epoch every cursor of this view belongs to.
@@ -73,10 +82,11 @@ impl StreamView {
         let mut batch = BatchWriter::new(&mut enc.scratch, &self.prefix);
         for change in changes {
             let cursor = self.cursor.next().map_err(|err| cursor_error(&err))?;
-            let patch = ViewPatch {
+            let mut patch = ViewPatch {
                 cursor,
                 body: patch_body(change),
             };
+            crate::actor::header_tools::overlay(&self.tools, &mut patch.body);
             let json = batch.push(&patch)?;
             self.window.push(json);
             self.cursor = cursor;
@@ -109,10 +119,11 @@ impl StreamView {
         enc: &mut Encoder,
     ) -> Result<EncodedEvent, Error> {
         let view_window = Box::new(view_snapshot(state));
-        let patch = ViewPatch {
+        let mut patch = ViewPatch {
             cursor: self.cursor,
             body: ViewPatchBody::Reset { view_window },
         };
+        crate::actor::header_tools::overlay(&self.tools, &mut patch.body);
         let mut batch = BatchWriter::new(&mut enc.scratch, &self.prefix);
         batch.push(&patch)?;
         let mut events = batch.finish()?;

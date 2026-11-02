@@ -194,3 +194,71 @@ fn reset_carries_the_view_snapshot_at_the_cursor() {
         "the reset is not kept"
     );
 }
+
+/// R21's header tools are an unlogged overlay: a header upsert and a `Reset` carry them, while
+/// the reducer's state (folded from the log, and through a snapshot round trip) is the same
+/// with or without them.
+#[test]
+fn the_header_tools_overlay_never_touches_the_reducer_state() {
+    use clauseo_protocol::{
+        AgentId, ClauseoTool, DomainEvent, Envelope, EventId, MatterId, Seq, StreamHeader,
+        ThreadCreated, ToolAvailability, ToolState, ToolsUnavailableReason, ViewEntry,
+    };
+    use clauseo_reducer::Snapshot;
+
+    use crate::pipeline::tests::support::{id, thread_stream, ts};
+
+    let created = Envelope::new(
+        id::<EventId>(101),
+        thread_stream(),
+        Seq::new(1).unwrap(),
+        ts(0),
+        None,
+        DomainEvent::ThreadCreated(ThreadCreated {
+            matter: id::<MatterId>(2),
+            agent: AgentId::new("claude-acp").unwrap(),
+            title: None,
+        }),
+    );
+    let fold = || {
+        let mut state = StreamState::new(thread_stream());
+        let applied = clauseo_reducer::apply(&mut state, &created).unwrap();
+        (state, applied.changes)
+    };
+    let (plain, _) = fold();
+    let (state, changes) = fold();
+    let tools = vec![ToolState {
+        tool: ClauseoTool::Browser,
+        availability: ToolAvailability::Unavailable {
+            reason: ToolsUnavailableReason::NoProxy,
+        },
+    }];
+    let mut view = StreamView::new(thread_stream(), epoch(), 64 * 1024).unwrap();
+    view.set_tools(tools.clone());
+    let mut enc = Encoder::new();
+    let published = view.publish(changes, &mut enc).unwrap();
+    let reset = view.reset(&state, &mut enc).unwrap();
+    let mut headers: Vec<Vec<ToolState>> = Vec::new();
+    for event in published.iter().chain(std::iter::once(&reset)) {
+        let HostEvent::Patches(batch) = event.decode().unwrap() else {
+            continue;
+        };
+        for patch in batch.patches {
+            if let ViewPatchBody::Upsert { entry } = &patch.body
+                && let ViewEntry::Header(header) = entry.as_ref()
+            {
+                headers.push(header.tools.clone());
+            } else if let ViewPatchBody::Reset { view_window } = &patch.body
+                && let Some(StreamHeader::Thread(header)) = &view_window.header
+            {
+                headers.push(header.tools.clone());
+            }
+        }
+    }
+    assert_eq!(headers, [tools.clone(), tools]);
+    assert_eq!(state, plain, "the overlay leaves the folded state alone");
+    assert_eq!(state.as_thread().unwrap().header().unwrap().tools, []);
+    let bytes = Snapshot::of(&state).to_bytes().unwrap();
+    let back = Snapshot::from_bytes(&bytes).unwrap().into_state().unwrap();
+    assert_eq!(back, plain, "a snapshot round trip gives the same state");
+}

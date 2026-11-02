@@ -3,7 +3,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use clauseo_protocol::ErrorCode;
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 use super::{
     config, guard_trusted, home_config, launch_env, make_home, prepare_launch, refuse_codex_folder,
@@ -31,7 +31,7 @@ fn switches() -> Value {
 
 #[test]
 fn config_nests_every_limits_override() {
-    let built = Value::Object(config(&BTreeMap::new(), None));
+    let built = Value::Object(config(&BTreeMap::new(), Map::new(), None));
     assert_eq!(built, switches());
     assert_eq!(clauseo_limits::CODEX_OVERRIDES.len(), 6);
 }
@@ -55,11 +55,15 @@ fn settings_config_gives_only_the_model() {
     let mut expected = switches();
     expected["model"] = json!("gpt-6-luna");
     expected["model_reasoning_effort"] = json!("low");
-    assert_eq!(Value::Object(config(&settings, None)), expected);
+    assert_eq!(Value::Object(config(&settings, Map::new(), None)), expected);
     // Not JSON, or a model that is not a string: nothing is taken.
     for text in ["model = 'x'", r#"{"model": 5}"#, "[]"] {
         let settings = BTreeMap::from([("CODEX_CONFIG".to_owned(), text.to_owned())]);
-        assert_eq!(Value::Object(config(&settings, None)), switches(), "{text}");
+        assert_eq!(
+            Value::Object(config(&settings, Map::new(), None)),
+            switches(),
+            "{text}"
+        );
     }
 }
 
@@ -73,7 +77,7 @@ fn hooks_go_in_whole() {
     let Value::Object(object) = hooks.clone() else {
         panic!("an object");
     };
-    let built = config(&BTreeMap::new(), Some(object));
+    let built = config(&BTreeMap::new(), Map::new(), Some(object));
     assert_eq!(built.get("hooks"), Some(&hooks));
 }
 
@@ -92,7 +96,7 @@ fn launch_env_forces_mode_home_config_and_no_filtering() {
             "false".to_owned(),
         ),
     ]);
-    let env = launch_env(home, &settings, None);
+    let env = launch_env(home, &settings, Map::new(), None);
     let get = |name: &str| env.get(&OsString::from(name)).cloned();
     assert_eq!(get("INITIAL_AGENT_MODE"), Some("workspace-write".into()));
     assert_eq!(get("CODEX_HOME"), Some(home.as_os_str().to_owned()));

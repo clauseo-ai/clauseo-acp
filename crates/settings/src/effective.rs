@@ -6,11 +6,13 @@ mod mcp_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
+mod tools_tests;
+#[cfg(test)]
 mod ui_patch_tests;
 
 use crate::error::Error;
 use crate::files::Files;
-use crate::leaf::{self, Leaf};
+use crate::leaf;
 use crate::locations::Locations;
 use crate::policy::{PolicyRead, PolicySource, PolicyStatus};
 use crate::schema::{AgentLaunch, McpServerLaunch, Settings};
@@ -40,10 +42,10 @@ impl Effective {
     /// `policy` lists the sources strongest first: a key the first source sets is not taken
     /// from a later one. A policy value replaces the user's value for its key, and an agent's
     /// replaces the user's whole entry for that id; each such key is locked. A policy value for a
-    /// known key that does not type locks the key at its default (an agent: no entry), with a
-    /// warning: fail closed (Rohan, 2026-10-31). A source that cannot be read also locks each
-    /// security-relevant key (`leaf::SECURITY_KEYS`) at its default, with a warning, since its
-    /// value is unknown (2026-11-02).
+    /// known key that does not type locks the key at its default (an agent: no entry), or off for
+    /// a security key (`leaf::SECURITY_KEYS`), with a warning: fail closed (Rohan, 2026-10-31). A
+    /// source that cannot be read also locks each security key off (`mcp.servers` empty, each
+    /// `tools` key `false`), with a warning, since its value is unknown (2026-11-02, R21).
     pub fn load(
         locations: &Locations,
         files: &dyn Files,
@@ -71,7 +73,7 @@ impl Effective {
                     warnings.extend(source_warnings);
                     for leaf in leaves {
                         if locked.insert(leaf.key()) {
-                            leaf.apply(&mut settings);
+                            leaf.apply_policy(&mut settings);
                         }
                     }
                 }
@@ -178,9 +180,9 @@ impl Effective {
     }
 }
 
-/// Locks each security-relevant key a stronger source has not set at its default, for the
+/// Locks each security key a stronger source has not set off ([`leaf::refuse`]), for the
 /// unreadable source `name`: what it held for the key is unknown, so the user's value must not
-/// stand in for it.
+/// stand in for it, and the default may be on.
 fn lock_security_keys(
     name: &str,
     settings: &mut Settings,
@@ -189,15 +191,14 @@ fn lock_security_keys(
 ) {
     for key in leaf::SECURITY_KEYS {
         if locked.insert(key.to_owned()) {
-            Leaf::Refused(key.to_owned()).apply(settings);
+            leaf::refuse(key, settings);
             warnings.push(Warning {
                 origin: Origin::Store {
                     name: name.to_owned(),
                 },
                 kind: WarningKind::InvalidValue {
                     key: key.to_owned(),
-                    message: "the policy source could not be read, so this is locked at its \
-                              default"
+                    message: "the policy source could not be read, so this is locked off"
                         .to_owned(),
                 },
             });

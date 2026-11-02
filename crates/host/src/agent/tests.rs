@@ -65,6 +65,7 @@ fn run_agent(
         &[],
         inherited.into_iter(),
         std::env::temp_dir(),
+        None,
     )
     .unwrap();
     let pool = LocalPool::new();
@@ -126,6 +127,7 @@ fn launch_spec_layers_inherited_then_agent_then_hook() {
         &[],
         inherited.into_iter(),
         std::env::temp_dir(),
+        None,
     )
     .unwrap();
     let env: Vec<_> = spec
@@ -145,7 +147,8 @@ fn launch_spec_layers_inherited_then_agent_then_hook() {
             BTreeMap::new(),
             &[],
             std::iter::empty(),
-            std::env::temp_dir()
+            std::env::temp_dir(),
+            None,
         )
         .is_err()
     );
@@ -191,6 +194,7 @@ fn launch_spec_drops_inherited_git_and_forced_wins() {
         &[],
         inherited.into_iter(),
         std::env::temp_dir(),
+        None,
     )
     .unwrap();
     let env: Vec<_> = spec
@@ -238,6 +242,7 @@ fn launch_spec_leaves_out_dropped_names_from_every_source() {
         &crate::agent::codex::DROPPED_VARS,
         inherited.into_iter(),
         std::env::temp_dir(),
+        None,
     )
     .unwrap();
     let names: Vec<_> = spec.env().keys().map(|k| k.to_str().unwrap()).collect();
@@ -270,6 +275,7 @@ fn launch_spec_keeps_one_variable_per_name_ignoring_case() {
         &[],
         inherited.into_iter(),
         std::env::temp_dir(),
+        None,
     )
     .unwrap();
     let env: Vec<_> = spec
@@ -461,4 +467,66 @@ fn session_folder_of_a_local_folder_is_not_verbatim() {
         "{folder:?}"
     );
     assert!(folder.is_absolute(), "{folder:?}");
+}
+
+/// R21: stetdoc's folder goes first on the merged `PATH`: the settings env's when it set one,
+/// else the inherited one, matched ignoring case and kept under its own name.
+#[test]
+fn the_path_prepend_goes_first_on_the_merged_path() {
+    use std::path::Path;
+    let sep = if cfg!(windows) { ";" } else { ":" };
+    let folder = Path::new(if cfg!(windows) {
+        r"C:\stetdoc"
+    } else {
+        "/app/stetdoc"
+    });
+    let agent = |env: &[(&str, &str)]| AgentLaunch {
+        command: std::env::temp_dir()
+            .join("agent")
+            .to_str()
+            .unwrap()
+            .to_owned(),
+        args: Vec::new(),
+        env: env
+            .iter()
+            .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+            .collect(),
+    };
+    let run = |launch: &AgentLaunch, inherited: Vec<(&str, &str)>| {
+        let spec = launch_spec(
+            launch,
+            BTreeMap::new(),
+            BTreeMap::new(),
+            &[],
+            inherited
+                .into_iter()
+                .map(|(name, value)| (OsString::from(name), OsString::from(value))),
+            std::env::temp_dir(),
+            Some(folder),
+        )
+        .unwrap();
+        spec.env()
+            .iter()
+            .filter(|(name, _)| name.eq_ignore_ascii_case("PATH"))
+            .map(|(name, value)| {
+                (
+                    name.to_str().unwrap().to_owned(),
+                    value.to_str().unwrap().to_owned(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let first = folder.to_str().unwrap();
+    assert_eq!(
+        run(&agent(&[]), vec![("Path", "/usr/bin")]),
+        [("Path".to_owned(), format!("{first}{sep}/usr/bin"))]
+    );
+    assert_eq!(
+        run(&agent(&[("PATH", "/opt/bin")]), vec![("Path", "/usr/bin")]),
+        [("PATH".to_owned(), format!("{first}{sep}/opt/bin"))]
+    );
+    assert_eq!(
+        run(&agent(&[]), vec![]),
+        [("PATH".to_owned(), first.to_owned())]
+    );
 }

@@ -17,7 +17,9 @@
 //!   key or differs from the names the writer saves: `the_keys_are_the_names_the_writer_saves`
 //!   and `the_keys_a_patch_sets_are_the_ui_policy_keys_in_field_order`;
 //! - a sample value in `leaf/tests.rs`' `every_fixed_key_types_and_the_kinds_agree`, and a
-//!   value that is not the default in `a_refused_key_goes_back_to_its_default`.
+//!   value that is not the default in `a_refused_key_goes_back_to_its_default`;
+//! - for a key that decides what an agent can reach, its name in [`SECURITY_KEYS`] and its
+//!   arm in [`refuse`], which sets the value it is locked at when its policy is unknown.
 //!
 //! `schema::tests::the_keys_and_their_kinds_are_the_schemas` fails when the schema and [`KEYS`]
 //! disagree, and the two samples tests fail when [`KEYS`] has a row without a sample.
@@ -28,6 +30,7 @@ mod tests;
 use crate::policy::{Kind, kind_of};
 use crate::schema::{
     AgentLaunch, Density, FontSize, Language, Lite, McpServerLaunch, Motion, Settings, Theme,
+    ToolsSettings,
 };
 use crate::warning::{Origin, Warning, WarningKind};
 use serde::de::DeserializeOwned;
@@ -37,7 +40,7 @@ use std::path::{Path, PathBuf};
 
 /// Every key with a fixed name, and its kind. An agent's key is `agents.<id>`, an object.
 /// `schema::tests::the_keys_and_their_kinds_are_the_schemas` holds this to the schema.
-pub(crate) const KEYS: [(&str, Kind); 8] = [
+pub(crate) const KEYS: [(&str, Kind); 10] = [
     ("matters.default_location", Kind::String),
     ("mcp.servers", Kind::Object),
     ("ui.theme", Kind::String),
@@ -46,11 +49,20 @@ pub(crate) const KEYS: [(&str, Kind); 8] = [
     ("ui.language", Kind::String),
     ("ui.lite", Kind::String),
     ("ui.motion", Kind::String),
+    ("tools.web_search", Kind::Boolean),
+    ("tools.browser", Kind::Boolean),
 ];
 
 /// The keys that decide what an agent can reach. A policy source that cannot be read locks each
-/// at its default (ADR 0009): its value there is unknown, and the user's must not stand in.
-pub(crate) const SECURITY_KEYS: [&str; 1] = ["mcp.servers"];
+/// off with [`refuse`] (ADR 0009, R21): its value there is unknown, and the user's must not stand
+/// in. Off is not always the default: both `tools` keys default to on, and locking them at their
+/// default would fail open.
+pub(crate) const SECURITY_KEYS: [&str; 3] = ["mcp.servers", "tools.web_search", "tools.browser"];
+
+/// The MCP server name Clauseo keeps for its own browser tool. An `mcp.servers` entry of this
+/// name, in any case, in `settings.json` or a policy, is left out with a warning; the host adds its
+/// own entry under it.
+pub const RESERVED_MCP_SERVER: &str = "browser";
 
 /// The fields an [`AgentLaunch`] reads; any other is an unknown key.
 const AGENT_FIELDS: [&str; 3] = ["command", "args", "env"];
@@ -82,9 +94,12 @@ pub(crate) enum Leaf {
     Language(Language),
     Lite(Lite),
     Motion(Motion),
+    WebSearch(bool),
+    Browser(bool),
     /// A known key whose value does not type, or that a policy source refused. Applied, it puts
     /// the key back at its default; for `agents.<id>`, the entry for that id is dropped. A
-    /// policy also locks the key (fail closed, Rohan, 2026-10-31).
+    /// policy also locks the key (fail closed, Rohan, 2026-10-31), and applies it with
+    /// [`Leaf::apply_policy`], which locks a security key off rather than at its default.
     Refused(String),
 }
 
@@ -128,7 +143,7 @@ pub(crate) fn typed(
 
 /// [`typed`] for a policy source that lists its own keys (`policy.json` and the registry; macOS
 /// managed preferences are read key by key, by exact name, so they use [`typed`]). A
-/// security-relevant key is also refused, so locked at its default (ADR 0009), when the source
+/// security-relevant key is also refused, so locked off (ADR 0009, [`refuse`]), when the source
 /// names its topic in a form this version cannot read: its section that is not an object
 /// (`"mcp": "off"`), or any unknown key whose name holds the section's name in any case
 /// (`"mcp.servers"` at the top of `policy.json`, `"MCP"`, `"mcpServers"`, `mcp.Servers`,
@@ -147,7 +162,7 @@ pub(crate) fn typed_policy(
                 key: key.to_owned(),
                 message: format!(
                     "the policy names {found}, which this version cannot read, so {key} is \
-                     locked at its default; set it as {}",
+                     locked off; set it as {}",
                     right_shape(key)
                 ),
             },
@@ -245,6 +260,8 @@ impl Leaf {
             "ui.language" => typed_value(key, value).map(Leaf::Language),
             "ui.lite" => typed_value(key, value).map(Leaf::Lite),
             "ui.motion" => typed_value(key, value).map(Leaf::Motion),
+            "tools.web_search" => typed_value(key, value).map(Leaf::WebSearch),
+            "tools.browser" => typed_value(key, value).map(Leaf::Browser),
             _ => match agent_id(key) {
                 Some(id) => agent(key, id, value, unknown),
                 None => Err(WarningKind::UnknownKey {
@@ -266,6 +283,8 @@ impl Leaf {
             Leaf::Language(_) => "ui.language".to_owned(),
             Leaf::Lite(_) => "ui.lite".to_owned(),
             Leaf::Motion(_) => "ui.motion".to_owned(),
+            Leaf::WebSearch(_) => "tools.web_search".to_owned(),
+            Leaf::Browser(_) => "tools.browser".to_owned(),
             Leaf::Refused(key) => key.clone(),
         }
     }
@@ -290,9 +309,43 @@ impl Leaf {
             Leaf::Language(language) => settings.ui.language = language,
             Leaf::Lite(lite) => settings.ui.lite = lite,
             Leaf::Motion(motion) => settings.ui.motion = motion,
+            Leaf::WebSearch(on) => settings.tools.web_search = on,
+            Leaf::Browser(on) => settings.tools.browser = on,
             Leaf::Refused(key) => reset(&key, settings),
         }
     }
+
+    /// [`Leaf::apply`] for a policy source's value: a refused security key is locked off with
+    /// [`refuse`], not put back at its default; any other leaf applies as from `settings.json`.
+    pub(crate) fn apply_policy(self, settings: &mut Settings) {
+        match self {
+            Leaf::Refused(key) if refuse(&key, settings) => {}
+            leaf => leaf.apply(settings),
+        }
+    }
+}
+
+/// Locks each security key `key` names at its refused value: `mcp.servers` empty, each
+/// `tools` key `false`. Kept apart from [`reset`], which restores the default, since a security
+/// key's default can be on. `key` is one of [`SECURITY_KEYS`], or a prefix ending in `.`
+/// (`tools.`) that names every security key under it; stage C adds keys under `plans.`.
+/// Returns whether `key` named any security key; when it did not, nothing changes.
+pub(crate) fn refuse(key: &str, settings: &mut Settings) -> bool {
+    let named = |security: &str| match key.strip_suffix('.') {
+        Some(_) => security.starts_with(key),
+        None => security == key,
+    };
+    let mut any = false;
+    for security in SECURITY_KEYS.into_iter().filter(|security| named(security)) {
+        any = true;
+        match security {
+            "mcp.servers" => settings.mcp.servers.clear(),
+            "tools.web_search" => settings.tools.web_search = false,
+            "tools.browser" => settings.tools.browser = false,
+            other => unreachable!("security key {other} has no refused value"),
+        }
+    }
+    any
 }
 
 /// Puts the setting `key` back to its default; for `agents.<id>`, drops that agent.
@@ -306,6 +359,8 @@ fn reset(key: &str, settings: &mut Settings) {
         "ui.language" => settings.ui.language = Language::default(),
         "ui.lite" => settings.ui.lite = Lite::default(),
         "ui.motion" => settings.ui.motion = Motion::default(),
+        "tools.web_search" => settings.tools.web_search = ToolsSettings::default().web_search,
+        "tools.browser" => settings.tools.browser = ToolsSettings::default().browser,
         _ => {
             if let Some(id) = agent_id(key) {
                 settings.agents.remove(id);
@@ -343,8 +398,9 @@ fn agent(
 }
 
 /// The `mcp.servers` list. A value that is not an object refuses the key (a policy's locks the
-/// list empty). Inside it, an entry with a bad name, a value that does not type or a relative
-/// `command` is left out with a warning in `dropped`, and the other entries load.
+/// list empty). Inside it, an entry with a bad name, the reserved name [`RESERVED_MCP_SERVER`], a
+/// value that does not type or a relative `command` is left out with a warning in `dropped`, and
+/// the other entries load.
 fn mcp_servers(
     key: &str,
     value: Value,
@@ -363,6 +419,15 @@ fn mcp_servers(
             dropped.push(WarningKind::InvalidValue {
                 key: entry_key,
                 message: format!("a server name is 1 to {MCP_NAME_MAX} letters, digits, _ or -"),
+            });
+            continue;
+        }
+        if name.eq_ignore_ascii_case(RESERVED_MCP_SERVER) {
+            dropped.push(WarningKind::InvalidValue {
+                key: entry_key,
+                message: format!(
+                    "the server name {RESERVED_MCP_SERVER} is reserved for Clauseo's own browser"
+                ),
             });
             continue;
         }

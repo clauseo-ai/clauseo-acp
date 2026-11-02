@@ -1,7 +1,8 @@
-use super::{KEYS, Leaf, Raw, agent_id, typed};
+use super::{KEYS, Leaf, RESERVED_MCP_SERVER, Raw, SECURITY_KEYS, agent_id, refuse, typed};
 use crate::policy::kind_of;
 use crate::schema::{
     AgentLaunch, Density, FontSize, Language, Lite, McpServerLaunch, Motion, Settings, Theme,
+    ToolsSettings,
 };
 use crate::testing::{abs, abs_str};
 use crate::warning::{Origin, Warning, WarningKind};
@@ -275,6 +276,8 @@ fn key_names_each_leaf_and_apply_sets_it() {
         (Leaf::Language(Language::Hi), "ui.language"),
         (Leaf::Lite(Lite::On), "ui.lite"),
         (Leaf::Motion(Motion::Reduce), "ui.motion"),
+        (Leaf::WebSearch(false), "tools.web_search"),
+        (Leaf::Browser(true), "tools.browser"),
     ];
     let mut settings = Settings::default();
     for (leaf, key) in leaves {
@@ -290,6 +293,8 @@ fn key_names_each_leaf_and_apply_sets_it() {
     assert_eq!(settings.ui.language, Language::Hi);
     assert_eq!(settings.ui.lite, Lite::On);
     assert_eq!(settings.ui.motion, Motion::Reduce);
+    assert!(!settings.tools.web_search);
+    assert!(settings.tools.browser);
 }
 
 #[test]
@@ -303,6 +308,8 @@ fn every_fixed_key_types_and_the_kinds_agree() {
         json!("en"),
         json!("automatic"),
         json!("system"),
+        json!(true),
+        json!(false),
     ];
     // One sample per row, so a new row cannot go unchecked.
     assert_eq!(samples.len(), KEYS.len());
@@ -328,6 +335,8 @@ fn a_refused_key_goes_back_to_its_default() {
         json!("hi"),
         json!("off"),
         json!("full"),
+        json!(!ToolsSettings::default().web_search),
+        json!(!ToolsSettings::default().browser),
     ];
     assert_eq!(samples.len(), KEYS.len());
     for ((key, _), sample) in KEYS.iter().zip(samples) {
@@ -445,4 +454,132 @@ fn an_mcp_list_that_is_not_an_object_is_refused() {
     );
     Leaf::Refused("mcp.servers".to_owned()).apply(&mut settings);
     assert!(settings.mcp.servers.is_empty());
+}
+
+#[test]
+fn each_tools_key_is_a_boolean() {
+    assert_eq!(
+        one("tools.web_search", json!(false)),
+        Ok(Leaf::WebSearch(false))
+    );
+    assert_eq!(one("tools.browser", json!(true)), Ok(Leaf::Browser(true)));
+    for key in ["tools.web_search", "tools.browser"] {
+        for value in [json!("yes"), json!(1), json!(null), json!({})] {
+            assert!(
+                matches!(&one(key, value.clone()).unwrap_err()[..], [WarningKind::InvalidValue { key: k, .. }] if k == key),
+                "{key}: {value}"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_security_keys() {
+    insta::assert_json_snapshot!("security_keys", SECURITY_KEYS);
+}
+
+// A security key fails closed: refused, it is locked off, not at its default, which for both
+// tools keys can be on (R21).
+#[test]
+fn refuse_locks_each_security_key_off() {
+    let on = || {
+        let mut settings = Settings::default();
+        settings.tools.web_search = true;
+        settings.tools.browser = true;
+        settings.mcp.servers.insert(
+            "s".to_owned(),
+            serde_json::from_value(json!({"command": abs_str("s"), "enabled": true})).unwrap(),
+        );
+        settings
+    };
+    let mut settings = on();
+    assert!(refuse("tools.web_search", &mut settings));
+    assert!(!settings.tools.web_search);
+    assert!(settings.tools.browser);
+    assert_eq!(settings.mcp.servers.len(), 1);
+
+    let mut settings = on();
+    assert!(refuse("tools.browser", &mut settings));
+    assert!(settings.tools.web_search);
+    assert!(!settings.tools.browser);
+
+    let mut settings = on();
+    assert!(refuse("mcp.servers", &mut settings));
+    assert!(settings.mcp.servers.is_empty());
+    assert!(settings.tools.web_search && settings.tools.browser);
+
+    // A prefix ending in `.` refuses every security key under it, and only those.
+    let mut settings = on();
+    assert!(refuse("tools.", &mut settings));
+    assert!(!settings.tools.web_search && !settings.tools.browser);
+    assert_eq!(settings.mcp.servers.len(), 1);
+
+    // Any other key, a prefix of no security key, or a prefix without its dot names nothing.
+    for key in [
+        "ui.theme",
+        "agents.x",
+        "plans.",
+        "tools",
+        "tool.",
+        "tools.web",
+    ] {
+        let mut settings = on();
+        assert!(!refuse(key, &mut settings), "{key}");
+        assert_eq!(settings, on(), "{key}");
+    }
+}
+
+#[test]
+fn a_policy_refusal_locks_a_security_key_off_and_any_other_at_its_default() {
+    let mut settings = Settings::default();
+    settings.tools.web_search = true;
+    settings.tools.browser = true;
+    settings.ui.theme = Theme::Dark;
+    for key in ["tools.web_search", "tools.browser", "ui.theme"] {
+        Leaf::Refused(key.to_owned()).apply_policy(&mut settings);
+    }
+    assert!(!settings.tools.web_search);
+    assert!(!settings.tools.browser);
+    assert_eq!(settings.ui.theme, Theme::default());
+    // A value from policy applies as any value does.
+    Leaf::WebSearch(true).apply_policy(&mut settings);
+    assert!(settings.tools.web_search);
+}
+
+#[test]
+fn the_reserved_mcp_server_name_is_left_out_and_the_rest_load() {
+    assert_eq!(RESERVED_MCP_SERVER, "browser");
+    let command = abs_str("bin/s");
+    let value = json!({
+        "browser": {"command": command, "enabled": true},
+        "Browser": {"command": command, "enabled": true},
+        "clauseo": {"command": command, "enabled": true},
+        "other": {"command": command},
+    });
+    let mut warnings = Vec::new();
+    let raw = Raw {
+        key: "mcp.servers".to_owned(),
+        value,
+        origin: origin(),
+    };
+    let leaves = typed(vec![raw], Vec::new(), &mut warnings);
+    let Some(Leaf::McpServers(servers)) = leaves.first() else {
+        panic!("{leaves:?}");
+    };
+    assert_eq!(
+        servers.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["clauseo", "other"]
+    );
+    let mut keys: Vec<String> = warnings
+        .into_iter()
+        .map(|warning| match warning.kind {
+            WarningKind::InvalidValue { key, message } => {
+                assert!(message.contains("browser is reserved"), "{message}");
+                key
+            }
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    keys.sort();
+    assert_eq!(keys, ["mcp.servers.Browser", "mcp.servers.browser"]);
 }

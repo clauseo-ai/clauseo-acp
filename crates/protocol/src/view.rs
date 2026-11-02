@@ -17,6 +17,7 @@ use crate::{
 };
 
 mod entry;
+mod tools;
 
 pub use entry::{
     AgentContentEntry, AgentTextEntry, BackgroundMark, ElicitationEntry, ElicitationState,
@@ -24,6 +25,7 @@ pub use entry::{
     PermissionEntry, PermissionState, StepEntry, ToolCallEntry, UserMessageEntry,
     UserMessageStatus, VersionEntry,
 };
+pub use tools::{ClauseoTool, ToolAvailability, ToolState, ToolsUnavailableReason};
 
 enum_with_names! {
     /// Where a thread stands, for the sidebar dot and the header. `NeedsYou` means a permission or

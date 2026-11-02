@@ -182,24 +182,14 @@ pub(super) fn new_session(actor: &mut Actor, thread: ThreadId) {
 
 /// The `_meta` and MCP servers for `thread`'s `session/new` or `session/load`, the same for
 /// both: the profile hook's `_meta` with the host's switches over it, and the servers the
-/// lawyer turned on (none when the firm's `managed-mcp.json` is present). See
-/// `agent/loads.rs`.
+/// lawyer turned on, then the hook's (none when the firm's `managed-mcp.json` is present). See
+/// `agent/loads.rs` and `profile_loads.rs`.
 fn session_loads(
-    actor: &Actor,
+    actor: &mut Actor,
     thread: ThreadId,
 ) -> Result<(serde_json::Map<String, serde_json::Value>, Vec<McpServer>), Error> {
-    let agent = &actor.check_thread(thread)?.row.agent;
-    let control = agent::loads::mcp_control(&actor.managed_mcp);
     let matter = folder(actor, thread)?;
-    let guard = actor
-        .pre_write_guard
-        .as_deref()
-        .map(|program| agent::loads::GuardHook {
-            program,
-            matter: &matter,
-        });
-    let meta = agent::loads::session_meta(actor.profile.session_meta(agent), control, guard);
-    Ok((meta, agent::loads::mcp_servers(&actor.effective, control)))
+    super::profile_loads::session_loads(actor, thread, &matter)
 }
 
 fn folder(actor: &Actor, thread: ThreadId) -> Result<PathBuf, Error> {

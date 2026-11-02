@@ -170,6 +170,9 @@ fn assert_optional(ts: &str) {
     assert_block(ts, "UserMessage", |b| {
         b.contains("\tdelivery?: Delivery,\n")
     });
+    assert_block(ts, "HeaderEntry", |b| {
+        b.contains("\ttools?: ToolState[],\n")
+    });
     assert_block(ts, "UserMessageEntry", |b| {
         b.contains("\tdelivery?: Delivery,\n")
     });

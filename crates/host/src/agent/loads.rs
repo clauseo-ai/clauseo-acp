@@ -6,12 +6,18 @@
 //! [`CLAUDE_AI_MCP_VAR`] means nothing to them. Each merge runs once per session start.
 //!
 //! The profile hook is Clauseo's own code, not the user's. Anything else it puts under
-//! `claudeCode.options` (servers in `mcpServers`, flags in `extraArgs`, a `settings` object) is
-//! kept as it is: a deliberate Clauseo choice. Only the keys [`session_meta`] lists are forced
-//! over it or taken out: the hook cannot widen `settingSources` (clauseo-acp-private#185), not
-//! even through `extraArgs`.
+//! `claudeCode.options` (flags in `extraArgs`, a `settings` object) is kept as it is: a
+//! deliberate Clauseo choice. Only the keys [`session_meta`] lists are forced over it or taken
+//! out: the hook cannot widen `settingSources` (clauseo-acp-private#185), not even through
+//! `extraArgs`, and its `mcpServers` is removed in every control mode, since servers come only
+//! through `ProfileHook::mcp_servers` ([`browser`]). What the launch profile adds per agent kind
+//! is in [`profile`].
 
+pub(crate) mod browser;
 mod codex;
+pub(crate) mod profile;
+#[cfg(test)]
+mod profile_tests;
 #[cfg(test)]
 mod tests;
 
@@ -97,8 +103,11 @@ pub(crate) fn mcp_control(managed: &Path) -> McpControl {
 /// - Under [`McpControl::Clauseo`]: `strictMcpConfig: true` and `settingSources`
 ///   [`CLAUDE_SETTING_SOURCES`].
 /// - Under [`McpControl::Managed`]: `strictMcpConfig: false`, `settingSources`
-///   [`CLAUDE_MANAGED_SETTING_SOURCES`], no `mcpServers`, and no `mcp-config` or
-///   `strict-mcp-config` in `extraArgs` (either makes Claude Code refuse to start there).
+///   [`CLAUDE_MANAGED_SETTING_SOURCES`], and no `mcp-config` or `strict-mcp-config` in
+///   `extraArgs` (either makes Claude Code refuse to start there).
+/// - In every mode: no `mcpServers`. A hook cannot add servers through `_meta`.
+/// - With `keys` (a Claude agent): [`profile::claude_options`], before the guard's entry, so
+///   the guard's `hooks` and `disableAllHooks` go over whatever settings it merged.
 /// - With a `guard` ([`GuardHook`]): [`guard_entry`] appended to
 ///   `claudeCode.options.settings.hooks.PreToolUse`, after any entries the hook put there, and
 ///   `settings.disableAllHooks: false`, so a user's own `disableAllHooks` (user settings load)
@@ -110,6 +119,7 @@ pub(crate) fn session_meta(
     hook: Option<Map<String, Value>>,
     control: McpControl,
     guard: Option<GuardHook<'_>>,
+    keys: Option<&profile::ClaudeKeys<'_>>,
 ) -> Map<String, Value> {
     let mut meta = hook.unwrap_or_default();
     let mut claude = take_object(&mut meta, "claudeCode");
@@ -129,11 +139,12 @@ pub(crate) fn session_meta(
             !taken_out
         });
     }
-    if control == McpControl::Managed {
-        options.remove("mcpServers");
-    }
+    options.remove("mcpServers");
     options.insert("strictMcpConfig".to_owned(), Value::Bool(strict));
     options.insert("settingSources".to_owned(), Value::from(sources.to_vec()));
+    if let Some(keys) = keys {
+        profile::claude_options(&mut options, keys);
+    }
     if let Some(entry) = guard.and_then(|guard| guard_entry(guard.program, guard.matter)) {
         let mut settings = take_object(&mut options, "settings");
         let mut hooks = take_object(&mut settings, "hooks");
@@ -229,7 +240,7 @@ pub(crate) fn guard_entry(program: &Path, matter: &Path) -> Option<Value> {
 }
 
 /// The object at `key`, taken out of `map`; empty when it is missing or not an object.
-fn take_object(map: &mut Map<String, Value>, key: &str) -> Map<String, Value> {
+pub(crate) fn take_object(map: &mut Map<String, Value>, key: &str) -> Map<String, Value> {
     match map.remove(key) {
         Some(Value::Object(inner)) => inner,
         _ => Map::new(),

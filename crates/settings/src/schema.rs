@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 /// The top-level keys of `settings.json`, each an object.
-pub(crate) const SECTIONS: [&str; 4] = ["matters", "agents", "mcp", "ui"];
+pub(crate) const SECTIONS: [&str; 5] = ["matters", "agents", "mcp", "ui", "tools"];
 
 /// Every setting, as `Effective::settings` gives it: the defaults, then `settings.json`, then
 /// the policy layer.
@@ -32,6 +32,8 @@ pub struct Settings {
     pub mcp: McpSettings,
     /// How the app looks. The webview changes these only through a `UiPatch`.
     pub ui: UiSettings,
+    /// Clauseo's own tools an agent may use. Read at start-up; a change applies after a restart.
+    pub tools: ToolsSettings,
 }
 
 /// The `matters` section.
@@ -81,6 +83,27 @@ pub struct McpServerLaunch {
     /// Whether the agent gets it. Off unless set.
     #[serde(default)]
     pub enabled: bool,
+}
+
+/// The `tools` section: Clauseo's own tools. Both keys are security keys: a policy source that
+/// cannot be read, or a policy value that does not type, locks each `false`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(default)]
+pub struct ToolsSettings {
+    /// Whether the agent may search the web and read web pages. On by default.
+    pub web_search: bool,
+    /// Whether the agent gets Clauseo's browser. On by default on macOS; off elsewhere, and on
+    /// Windows until G17 passes.
+    pub browser: bool,
+}
+
+impl Default for ToolsSettings {
+    fn default() -> Self {
+        ToolsSettings {
+            web_search: true,
+            browser: cfg!(target_os = "macos"),
+        }
+    }
 }
 
 /// The `ui` section. Design may change these values before M4 without a decision record.

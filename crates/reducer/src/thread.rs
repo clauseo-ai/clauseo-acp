@@ -210,6 +210,7 @@ fn thread_created(state: &mut ThreadState, seq: Seq, event: &ThreadCreated, out:
         status: ThreadStatus::Idle,
         queue_held: false,
         steer_joins_turn: queue::steer_joins_by_kind(&event.agent),
+        tools: Vec::new(),
         mode_id: None,
         config_options: Vec::new(),
         commands: Vec::new(),

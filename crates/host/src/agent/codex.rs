@@ -55,9 +55,10 @@ pub(crate) const MODEL_KEYS: [&str; 2] = ["model", "model_reasoning_effort"];
 pub(crate) fn launch_env(
     home: &Path,
     settings_env: &BTreeMap<String, String>,
+    profile: Map<String, Value>,
     hooks: Option<Map<String, Value>>,
 ) -> BTreeMap<OsString, OsString> {
-    let config = Value::Object(config(settings_env, hooks)).to_string();
+    let config = Value::Object(config(settings_env, profile, hooks)).to_string();
     BTreeMap::from([
         (OsString::from(MODE_VAR), OsString::from(ASK_MODE)),
         (OsString::from(HOME_VAR), home.as_os_str().to_owned()),
@@ -69,10 +70,12 @@ pub(crate) fn launch_env(
 /// The `CODEX_CONFIG` object: [`MODEL_KEYS`] from a settings `CODEX_CONFIG` that parses as a
 /// JSON object, then every one of `clauseo_limits::CODEX_OVERRIDES` (apps, plugins, skill MCP
 /// installs, cloud skills and bundled skills off, and no skills instructions) as nested keys
-/// over them, then `hooks`, the object the [hooks seam](crate::actor::turn) gives, when there is
-/// one.
+/// over them, then the launch profile's keys (`agent::loads::profile::codex_keys`) merged
+/// add-only ([`merge_add_only`]: a profile key never replaces one already there), then `hooks`,
+/// the object the [hooks seam](crate::actor::turn) gives, when there is one, over everything.
 pub(crate) fn config(
     settings_env: &BTreeMap<String, String>,
+    profile: Map<String, Value>,
     hooks: Option<Map<String, Value>>,
 ) -> Map<String, Value> {
     let mut config = Map::new();
@@ -90,10 +93,50 @@ pub(crate) fn config(
             insert_dotted(&mut config, key, toml_value(value));
         }
     }
+    merge_add_only(&mut config, profile);
     if let Some(hooks) = hooks {
         config.insert("hooks".to_owned(), Value::Object(hooks));
     }
     config
+}
+
+/// Merges `keys` into `config` without replacing anything: objects on both sides merge key by
+/// key, arrays on both sides gain the items they lack, and any other value already there stays
+/// (the new one is dropped with a warning). A dotted key, which codex reads as a path, clashes
+/// with its first part: it goes in only when `config` has no key of that first part.
+pub(crate) fn merge_add_only(config: &mut Map<String, Value>, keys: Map<String, Value>) {
+    for (key, value) in keys {
+        if let Some((first, _)) = key.split_once('.') {
+            if config.contains_key(first) || config.contains_key(&key) {
+                tracing::warn!(
+                    key,
+                    "a dotted CODEX_CONFIG key clashes with one already set"
+                );
+            } else {
+                config.insert(key, value);
+            }
+            continue;
+        }
+        match (config.get_mut(&key), value) {
+            (None, value) => {
+                config.insert(key, value);
+            }
+            (Some(Value::Object(held)), Value::Object(value)) => merge_add_only(held, value),
+            (Some(Value::Array(held)), Value::Array(value)) => {
+                for item in value {
+                    if !held.contains(&item) {
+                        held.push(item);
+                    }
+                }
+            }
+            (Some(_), _) => {
+                tracing::warn!(
+                    key,
+                    "a CODEX_CONFIG key already set is kept over the profile's"
+                );
+            }
+        }
+    }
 }
 
 /// Sets `value` at the dotted `key` (`a.b.c`), making each object on the way and replacing any
