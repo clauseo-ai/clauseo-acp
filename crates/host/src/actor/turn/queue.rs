@@ -169,6 +169,7 @@ fn route(
     delivery: DeliveryRequest,
 ) -> Result<(), Error> {
     steps::refuse_unsendable(actor, thread)?;
+    refuse_stuck(actor, thread)?;
     if delivery == DeliveryRequest::Steer
         && let Some(target) = steer::target(actor, thread)
     {
@@ -193,6 +194,21 @@ fn route(
             steps::accept(actor, ctx, thread, blocks, delivery.into())
         }
     }
+}
+
+/// `thread.turn_running` while the last turn's end failed twice: nothing starts until the next
+/// start ends that turn, so a queued prompt would wait unseen.
+fn refuse_stuck(actor: &mut Actor, thread: ThreadId) -> Result<(), Error> {
+    let stuck = state(actor, thread)
+        .and_then(|state| state.closing.as_ref())
+        .is_some_and(|closing| closing.retried);
+    if stuck {
+        return Err(Error::refused(
+            ErrorCode::ThreadTurnRunning,
+            "the last turn of this thread could not be saved; it ends at the next start",
+        ));
+    }
+    Ok(())
 }
 
 /// A prompt joins the end of the queue: one commit of `UserMessage { Queue }`, `TurnQueued`
