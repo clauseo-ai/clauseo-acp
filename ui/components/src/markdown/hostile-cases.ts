@@ -1,8 +1,9 @@
 // The hostile corpus, from the G4 bake-off: the webview security research's list plus G4's own. Each case
 // renders in its own container, so a failure names the case. Payloads call window.__g4pwn(<case>) if they
-// ever run. One home: these tests (hostile.test.tsx, in happy-dom) and the private real-browser harness
-// (Chromium, WebKitGTK, WebView2, WKWebView) import this same file. The cases for the inline-tag allowlist
-// and the syntax extras live in hostile-tags-fixture.ts and are appended here.
+// ever run. One home: these tests (hostile-all.test.tsx and hostile-stream-*.test.tsx in happy-dom,
+// hostile-blocks.test.ts, hostile-time-*.timed.test.ts) and the private real-browser harness (Chromium,
+// WebKitGTK, WebView2, WKWebView) import this same file. The cases for the inline-tag allowlist and the
+// syntax extras live in hostile-tags-fixture.ts and are appended here.
 import { TAG_CASES } from "./hostile-tags-fixture.ts";
 
 export type HostileCase = {

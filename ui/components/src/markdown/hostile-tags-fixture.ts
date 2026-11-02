@@ -282,7 +282,7 @@ export const TAG_CASES: HostileCase[] = [
     absent: ["<style>", "<iframe", "<svg>"],
     tags: { "p *": 0 },
   },
-  // Denial of service: each must stay within hostile-time.test.ts's ratio to ordinary prose.
+  // Denial of service: each must stay within hostile-time-fixture.ts's ratio to ordinary prose.
   {
     id: "tags-nested-5000",
     markdown: "<sup>".repeat(5000) + "x" + "</sup>".repeat(5000),

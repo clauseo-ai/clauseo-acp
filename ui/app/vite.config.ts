@@ -1,8 +1,9 @@
-/// <reference types="vitest/config" />
 import babel from "@rolldown/plugin-babel";
 import tailwindcss from "@tailwindcss/vite";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
+import { configDefaults } from "vitest/config";
+import { BaseSequencer, type TestSpecification } from "vitest/node";
 import tauriConf from "../../crates/desktop/tauri.conf.json" with { type: "json" };
 
 /** The directives the dev policy loosens, and what each gets, for a dev server on `port`. */
@@ -210,6 +211,37 @@ function bareDynamicImports(): Plugin {
   };
 }
 
+/** The test files that time the code: vitest's components-timed project, a group of its own. */
+const TIMED = "src/**/*.timed.test.ts";
+/** The sequence.groupOrder of every other project: after components-timed (0) has finished. */
+const AFTER_TIMED = 1;
+
+/**
+ * The test files that take longest, by their path under ui/: 7 to 35 s each on a 4-vCPU machine, against under 4 s for
+ * nearly every other (hostile-stream-<k> and hostile-all are the hostile DOM tests, split so they run in parallel).
+ * Not room/axe.test.tsx (about 18 s): beside these its first test took 3.5 to 5.1 s against its 5 s limit, and
+ * failed 2 runs in 5; where vitest puts it, 1.5 to 1.9 s.
+ */
+export const SLOW_TESTS = [
+  /\/components\/src\/markdown\/hostile-(?:all|stream-\d+)\.test\.tsx$/,
+  /\/app\/src\/vite-config\.test\.ts$/,
+  /\/components\/src\/markdown\/(?:split|repair|spec)\.test\.ts$/,
+];
+
+/**
+ * Vitest's order with the slowest files (SLOW_TESTS) first. Without a results cache (CI starts from none) vitest
+ * runs the app project's files before ui/components' and the larger files first, so the small files that stream the
+ * hostile cases started last: the whole run waited about 50 s on one hostile file that began 60 s in.
+ */
+export class SlowFirst extends BaseSequencer {
+  override async sort(files: TestSpecification[]): Promise<TestSpecification[]> {
+    const sorted = await super.sort(files);
+    const slow = (file: TestSpecification) =>
+      SLOW_TESTS.some((pattern) => pattern.test(file.moduleId));
+    return [...sorted.filter(slow), ...sorted.filter((file) => !slow(file))];
+  }
+}
+
 export default defineConfig(({ mode }) => {
   const probe = mode === PROBE;
   return {
@@ -255,6 +287,7 @@ export default defineConfig(({ mode }) => {
     // grammar into the worker: 862 KB.
     worker: { format: "es" },
     test: {
+      sequence: { sequencer: SlowFirst },
       projects: [
         {
           extends: true,
@@ -264,6 +297,7 @@ export default defineConfig(({ mode }) => {
             environment: "node",
             // each test waits for its late imports (ui/components/src/lib/late.ts)
             setupFiles: ["../components/src/testing/setup.ts"],
+            sequence: { groupOrder: AFTER_TIMED },
           },
         },
         {
@@ -274,8 +308,26 @@ export default defineConfig(({ mode }) => {
             // vitest runs from here, so the environment resolves here.
             root: "../components",
             include: ["src/**/*.test.{ts,tsx}"],
+            exclude: [...configDefaults.exclude, TIMED],
             environment: "node",
             setupFiles: ["src/testing/setup.ts"],
+            sequence: { groupOrder: AFTER_TIMED },
+          },
+        },
+        {
+          extends: true,
+          test: {
+            // ui/components' tests that time the code against itself (hostile-time-fixture.ts: each hostile case
+            // against ordinary prose of its length, in thread CPU time). A group of their own, run before any other
+            // test file starts, so they never share the machine with the DOM tests, and at most three at once, so
+            // on a 4-vCPU CI runner each has a core. About 12 s on a 4-vCPU machine.
+            name: "components-timed",
+            root: "../components",
+            include: [TIMED],
+            environment: "node",
+            setupFiles: ["src/testing/setup.ts"],
+            sequence: { groupOrder: 0 },
+            maxWorkers: 3,
           },
         },
       ],
