@@ -1,4 +1,3 @@
-import type { Element, ElementContent } from "hast";
 import { useContext } from "react";
 import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
 import { useWords } from "../lib/words.ts";
@@ -13,8 +12,8 @@ type LinkProps = {
   /** A footnote back-reference's number (`1`, `1-2`), for its label. */
   "data-footnote-backref"?: string | undefined;
   children?: ReactNode;
-  /** The link's hast element (passNode), for its whole text whatever markup is inside. */
-  node?: Element | undefined;
+  /** The link's whole text, whatever markup is inside (to-react.ts): what spoofedHost compares with. */
+  text?: string | undefined;
 };
 
 /** The href a link may carry: an allowed URL, or a fragment mapped to the id it targets; else none. */
@@ -52,16 +51,6 @@ function decoded(url: string): string {
   } catch {
     return url;
   }
-}
-
-/** The text of hast nodes, through any markup (`**good.com**`, `` `good.com` ``). */
-function textOf(nodes: readonly ElementContent[]): string {
-  let text = "";
-  for (const node of nodes) {
-    if (node.type === "text") text += node.value;
-    else if (node.type === "element") text += textOf(node.children);
-  }
-  return text;
 }
 
 /** Characters that show nothing or reorder text: zero-width, bidi controls, soft hyphen, BOM. */
@@ -110,7 +99,7 @@ function spoofedHost(text: string, href: string | undefined): string | undefined
  * last block. Of the sanitised attributes it keeps the id and the reference's aria-describedby; a
  * footnote back-reference gets its label in the page's language.
  */
-export function Link({ href, id, children, node, ...rest }: LinkProps) {
+export function Link({ href, id, children, text, ...rest }: LinkProps) {
   const words = useWords();
   const backref = rest["data-footnote-backref"];
   const host = useContext(MarkdownHostContext);
@@ -126,7 +115,7 @@ export function Link({ href, id, children, node, ...rest }: LinkProps) {
     }
     host.openExternal(url);
   };
-  const realHost = spoofedHost(node ? textOf(node.children) : "", url);
+  const realHost = spoofedHost(text ?? "", url);
   return (
     <a
       href={url}
