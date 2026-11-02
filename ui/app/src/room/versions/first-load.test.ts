@@ -82,8 +82,16 @@ test("the room's first load reaches use-versions.ts and none of Versions' chunk"
     "components/src/clauseo/version-panel.tsx",
     "components/src/clauseo/version-band.tsx",
     "components/src/clauseo/restore-dialog.tsx",
+    "components/src/clauseo/version-page.tsx",
+    "components/src/clauseo/version-where.tsx",
     "app/src/room/versions/versions-parts.tsx",
     "app/src/room/versions/versions-chunk.ts",
+    "app/src/room/versions/controller.ts",
+    "app/src/room/versions/conversations.ts",
+    "app/src/room/versions/reading.ts",
+    "app/src/room/versions/timeline.ts",
+    "app/src/room/versions/words.ts",
+    "app/src/room/versions/state.ts",
   ])
     expect(names.has(kept), kept).toBe(false);
 });

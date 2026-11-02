@@ -4,7 +4,6 @@
 @reference "../../styles/system.css";
 @import "@clauseo/components/clauseo/versions.css";
 @import "@clauseo/components/clauseo/version-page.css";
-@import "@clauseo/components/clauseo/edge.css";
 
 @layer components {
   /* the band and the comparison stand over the work, the thread under them */
