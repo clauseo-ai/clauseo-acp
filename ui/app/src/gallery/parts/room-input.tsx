@@ -1,6 +1,5 @@
 // The composer where the lawyer asks, and the lines that stand over its field: the status line with the time taken and
 // the ready hint, and the working line in each state Clauseo can be in while it answers.
-import { useState } from "react";
 import { Composer, type ComposerProps } from "@clauseo/components/clauseo/composer.tsx";
 import { StatusLine } from "@clauseo/components/clauseo/status-line.tsx";
 import { WorkingLine, type WorkingState } from "@clauseo/components/clauseo/working-line.tsx";
@@ -10,31 +9,20 @@ import { CHECKING, PLANS, PROMPTS, READY_HINT, nothing } from "./room-data.ts";
 
 const PLAN = "Uses your Claude plan";
 
-/** The composer with its own words held in state, so the field types and the questions fill it. */
+/** The composer starting from its sample's words; the field keeps what is typed, and a question fills it. */
 function ComposerSample({
   start,
   questions = [],
   ...rest
-}: Omit<ComposerProps, "text" | "onText" | "prompts"> & {
+}: Omit<ComposerProps, "initialText" | "prompts"> & {
   start: string;
   questions?: readonly string[];
 }) {
-  const [text, setText] = useState(start);
   const prompts =
     questions.length === 0
       ? undefined
-      : {
-          label: "Questions to ask",
-          items: questions.map((q) => ({ text: q, onPick: () => setText(q) })),
-        };
-  return (
-    <Composer
-      {...rest}
-      text={text}
-      onText={setText}
-      {...(prompts === undefined ? {} : { prompts })}
-    />
-  );
+      : { label: "Questions to ask", items: questions.map((q) => ({ text: q })) };
+  return <Composer {...rest} initialText={start} {...(prompts === undefined ? {} : { prompts })} />;
 }
 
 const CHECK_WORKING: WorkingState = {

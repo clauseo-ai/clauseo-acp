@@ -59,7 +59,7 @@ const button = (label: string) =>
 test("the composer's test ids land on the field, Ask and the working line's row", async () => {
   await mount(
     composer({
-      text: "What did the bank know?",
+      initialText: "What did the bank know?",
       testIds: IDS,
       working: { kind: "wait", words: "Answering.", pill: null },
     }),
@@ -82,7 +82,7 @@ test("while busy the Stop test id lands on Stop", async () => {
 test("disabled, the field, Add papers and Ask take nothing, whatever the field holds", async () => {
   await mount(
     composer({
-      text: "What did the bank know?",
+      initialText: "What did the bank know?",
       disabled: true,
       testIds: IDS,
       onAddPapers: () => {},
@@ -144,19 +144,16 @@ test("the field scrolls only past its six lines: a line a few px over, or a grow
   const proto = HTMLTextAreaElement.prototype;
   Object.defineProperty(proto, "clientHeight", { configurable: true, get: () => 26 });
   Object.defineProperty(proto, "scrollHeight", { configurable: true, get: () => words });
+  // the words typed: the field fits itself to each change
   const shown = async (text: string) =>
-    act(async () =>
-      root?.render(
-        <StrictMode>
-          <TooltipProvider>
-            <RoomScopeProvider>{composer({ text, testIds: IDS })}</RoomScopeProvider>
-          </TooltipProvider>
-        </StrictMode>,
-      ),
-    );
+    act(async () => {
+      const area = byId("composer") as HTMLTextAreaElement;
+      Reflect.set(HTMLTextAreaElement.prototype, "value", text, area);
+      area.dispatchEvent(new Event("input", { bubbles: true }));
+    });
   try {
     // Hindi's empty field: its placeholder's line 3 px over the one line, inside the fit's slack
-    await mount(composer({ text: "", testIds: IDS }), "hi");
+    await mount(composer({ initialText: "", testIds: IDS }), "hi");
     const area = byId("composer") as HTMLTextAreaElement;
     expect(area.style.height).toBe("");
     expect(area.style.overflowY).toBe("hidden");
