@@ -168,6 +168,7 @@ impl Bridge {
             | HostQuery::PreviewRestore { .. }
             | HostQuery::ReadBlob { .. }
             | HostQuery::GetSettings
+            | HostQuery::ListAgents
             // H8's wall (#131): reads the folder's stats, and names files by refs.
             | HostQuery::ListPapers { .. } => {}
         }

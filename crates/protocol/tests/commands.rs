@@ -1,7 +1,7 @@
 //! Commands and queries: unknown fields refused, the shape limits `validate()` checks, the
 //! public limits. How a prompt's delivery is read is in `commands/delivery.rs`, typed fields and
 //! name rules in `commands/names.rs`, file lists in `commands/files.rs`, the display settings'
-//! wire form in `commands/settings.rs`.
+//! wire form in `commands/settings.rs`, `list_agents` in `commands/agents.rs`.
 
 #![forbid(clippy::disallowed_methods, clippy::disallowed_types)]
 
@@ -28,6 +28,10 @@ mod delivery;
 #[cfg(test)]
 #[path = "commands/settings.rs"]
 mod settings;
+
+#[cfg(test)]
+#[path = "commands/agents.rs"]
+mod agents;
 
 use std::str::FromStr;
 

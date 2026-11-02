@@ -59,7 +59,8 @@ fn matters(host: &HostHandle) -> Vec<(MatterId, MatterKind)> {
         | QueryResult::RestorePreview(_)
         | QueryResult::Blob(_)
         | QueryResult::Settings(_)
-        | QueryResult::Papers { .. }) => panic!("not matters: {other:?}"),
+        | QueryResult::Papers { .. }
+        | QueryResult::Agents(_)) => panic!("not matters: {other:?}"),
     }
 }
 
