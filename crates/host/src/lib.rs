@@ -20,6 +20,14 @@
 //!   Claude Code's strict MCP config with `settingSources: ["user"]` and claude.ai connectors
 //!   off. When Claude Code's enterprise `managed-mcp.json` is present, none of its servers and
 //!   no strict config go: the firm controls MCP there.
+//! - What a Codex agent is launched with (`agent/codex.rs`): its ask mode
+//!   (`INITIAL_AGENT_MODE=workspace-write`), its home under the data folder as `CODEX_HOME`, a
+//!   `CODEX_CONFIG` with `clauseo_limits::CODEX_OVERRIDES` and the hooks seam's object, and no
+//!   MCP filtering, over any settings value; its refusal in a folder holding `.codex` (#184);
+//!   and, before its first prompt, `session/set_mode` to the ask mode and the guard's trust check.
+//!   No agent inherits a `GIT_*` variable. `docs/decisions/0025-codex-in-acp-and-host.md`.
+//! - The session start: `session/load` when the agent offers it, else `session/resume`, else
+//!   `session/new`.
 //!
 //! # Interface
 //!
@@ -41,6 +49,7 @@
 //!   [`EncodedEvent::decode`] gives the type back. [`EventSubscription`] yields typed
 //!   `HostEvent`s: the replay, one `CaughtUp`, then live `Events`. [`AppSubscription`]
 //!   yields the app-wide events of no stream as [`EncodedEvent`]s: `SettingsChanged` today.
+//! - `HostQuery::ListAgents` lists the settings agents with their kinds.
 //! - The display settings: `HostQuery::GetSettings` reads them and `HostCommand::SetUiSettings`
 //!   changes them through `Effective::apply_ui_patch`, on the actor; a patch naming a key policy
 //!   locks is `settings.locked`. `docs/decisions/0017-settings-over-the-wire.md` records it.
@@ -51,6 +60,7 @@
 //! - [`Clock`] ([`SystemClock`], [`Now`]) and [`IdSource`] ([`RandomV7`]) are the host's only
 //!   sources of time and ids. The `test-support` feature adds `ManualClock`, `SequentialIds`,
 //!   `HostConfig::with_patch_window_bytes`, `HostConfig::with_app_subscription_capacity`,
+//!   `HostConfig::with_codex_hooks`,
 //!   `EncodedEvent::ptr_eq` and
 //!   `HostHandle::abort_for_test`, which ends the thread with no flush and no graceful stop.
 //! - Stage B's `limits` plugs in as a new actor input and publishes the existing
@@ -76,7 +86,8 @@
 //!
 //! # Depends on
 //!
-//! `protocol`, `reducer`, `store`, `matters`, `process`, `acp`, `settings`, `async-channel`,
+//! `protocol`, `reducer`, `store`, `matters`, `process`, `acp`, `settings`, `limits` (its
+//! `CODEX_OVERRIDES`), `async-channel`,
 //! `async-io`, `futures`, `uuid`, `serde_json`, `tracing` and `thiserror`. Never `tauri`,
 //! `tokio` or `agents`.
 //!
