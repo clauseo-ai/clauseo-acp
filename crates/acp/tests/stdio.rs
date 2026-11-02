@@ -34,3 +34,7 @@ mod limits;
 #[cfg(test)]
 #[path = "stdio/tools.rs"]
 mod tools;
+
+#[cfg(test)]
+#[path = "stdio/steer.rs"]
+mod steer;

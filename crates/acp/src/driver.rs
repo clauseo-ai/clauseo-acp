@@ -13,6 +13,7 @@ use clauseo_protocol::{AgentChoiceId, AgentSessionId, CompactString, ConfigValue
 use futures::future::Either;
 
 mod answers;
+mod steer;
 
 use crate::Error;
 use crate::client::{Command, Reply};
@@ -98,6 +99,11 @@ fn execute(cx: &ConnectionTo<Agent>, shared: &Arc<Shared>, command: Command) {
             }
         }
         Command::Cancel { session, reply } => answer(reply, answers::cancel(cx, shared, &session)),
+        Command::Steer {
+            session,
+            content,
+            reply,
+        } => steer::steer(cx, shared, &session, content, reply),
         Command::AnswerPermission {
             key,
             option_id,
@@ -217,6 +223,7 @@ fn initialize(cx: &ConnectionTo<Agent>, shared: &Arc<Shared>, reply: Reply<crate
         let info = map::agent_info(response);
         let mut locked = state.state();
         locked.prompt_capabilities = info.capabilities.prompt;
+        locked.steering = info.capabilities.steering;
         locked.auth_methods.clone_from(&info.auth_methods);
         Ok(info)
     });

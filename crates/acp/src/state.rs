@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use agent_client_protocol::Responder;
-use clauseo_protocol::{CompactString, PromptCapabilities, TurnId};
+use clauseo_protocol::{CompactString, PromptCapabilities, SteeringCapability, TurnId};
 
 use crate::Error;
 use crate::event::{AcpEvent, FrameDirection, Origin, PendingKey, RawFrame};
@@ -112,6 +112,8 @@ pub(crate) struct State {
     next_key: u64,
     /// From `initialize`: what the prompt may carry.
     pub(crate) prompt_capabilities: PromptCapabilities,
+    /// From `initialize`: how the agent takes a steer, when it can.
+    pub(crate) steering: Option<SteeringCapability>,
     /// From `initialize`: the auth methods, for `Error::AuthRequired` and `authenticate`.
     pub(crate) auth_methods: Vec<AuthMethod>,
 }

@@ -198,7 +198,7 @@ pub(crate) fn stop_reason(reason: acp::StopReason) -> StopReason {
     }
 }
 
-/// What `initialize` told. `steering` stays `None` until steer is built.
+/// What `initialize` told. `steering` is `Some` when the agent advertises native steering.
 pub(crate) fn agent_info(response: acp::InitializeResponse) -> AgentInfo {
     let capabilities = response.agent_capabilities;
     let prompt = capabilities.prompt_capabilities;
@@ -222,7 +222,10 @@ pub(crate) fn agent_info(response: acp::InitializeResponse) -> AgentInfo {
                 resume: session.resume.is_some(),
                 close: session.close.is_some(),
             },
-            steering: None,
+            steering: crate::steering::capability(
+                response.meta.as_ref(),
+                capabilities.meta.as_ref(),
+            ),
         },
         auth_methods: response
             .auth_methods

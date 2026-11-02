@@ -26,7 +26,7 @@ pub struct AgentInfo {
     pub version: Option<String>,
     /// `agentInfo.title`; `None` when the agent sent no `agentInfo` or no title.
     pub title: Option<String>,
-    /// What it supports. `steering` stays `None` until steer is built.
+    /// What it supports. `steering` is `Some` when the agent advertises native steering.
     pub capabilities: AgentCapabilities,
     /// How it signs in, in its order.
     pub auth_methods: Vec<AuthMethod>,
@@ -142,7 +142,8 @@ pub struct PromptEnd {
     pub limit: Option<LimitSignal>,
 }
 
-/// What `steer()` did. Steer is not built yet: `steer()` returns `Error::SteerUnsupported`.
+/// What `steer()` did. `steer()` gives `Error::SteerUnsupported`, sending nothing, unless the
+/// agent steers natively and falls back to the host when idle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SteerResult {
     /// The text joined the running turn.

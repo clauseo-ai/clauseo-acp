@@ -1,0 +1,14 @@
+{"scenario":"steer-outcome-failed","description":"claude-agent-acp steering while prompt 1 runs, answered three ways: an error response, an outcome the driver does not know, and a result with no outcome. Each steer must come back Failed; prompt 1 then ends end_turn after the third","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true,"_meta":{"claudeCode":{"promptQueueing":true}}},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"},"_meta":{"steering":{"supported":true}}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}","mcpServers":[]}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1"}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"The clause "}}}}
+{"expect":{"method":"_session/steering","as":"s1","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"Focus on clause 4"}]}}}
+{"respond":{"to":"s1","error":{"code":-32603,"message":"steering refused"}}}
+{"expect":{"method":"_session/steering","as":"s2","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"Focus on clause 4"}]}}}
+{"respond":{"to":"s2","result":{"outcome":"somethingNewer"},"raw":true}}
+{"expect":{"method":"_session/steering","as":"s3","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"Focus on clause 4"}]}}}
+{"respond":{"to":"s3","result":{},"raw":true}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
