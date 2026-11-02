@@ -1,6 +1,6 @@
-//! What the desktop's `open_file` and `reveal` ask the host (`docs/decisions/0026-open-and-reveal.md`):
-//! the file a ref names, checked at call time against the matter that owns it, and a matter's
-//! folder.
+//! What the desktop's `open_file` and `reveal` ask the host
+//! (`docs/decisions/0026-open-and-reveal.md`): the file a ref names, checked at call time against
+//! the matter that owns it, and a matter's folder.
 
 use std::path::PathBuf;
 
