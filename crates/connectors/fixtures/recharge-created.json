@@ -1,0 +1,13 @@
+{
+  "recharge_id": "rch_example0001",
+  "status": "awaiting_payment",
+  "url": "https://data.clauseo.chat/pay/rch_example0001",
+  "amount": {
+    "net_inr": "20.00",
+    "gst_inr": "3.60",
+    "gross_inr": "23.60"
+  },
+  "credits": 200,
+  "expires_at": "2026-11-02T12:30:00Z",
+  "account_id": "acct_example0001"
+}

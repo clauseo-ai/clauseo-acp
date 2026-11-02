@@ -127,6 +127,21 @@ sha2 = { version = "0.10.9", default-features = false }
 serde_json_lenient = "0.2"
 schemars = { version = "1.2", default-features = false }
 objc2-core-foundation = "0.3.2"
+# clauseo-connectors: blocking HTTPS (ureq 3, no async runtime) over rustls with the OS trust store
+# (ureq's platform-verifier feature brings rustls-platform-verifier 0.7, already in the tree), the
+# `ring` provider passed to ureq by the crate (it builds on aarch64-pc-windows-msvc without extra
+# tools); the OS keychain (keyring 4, macOS and Windows stores only: Linux is not a product target);
+# PKCE and random values; the secret buffers' zeroing. Features go on the crate's own lines.
+ureq = { version = "3.4", default-features = false }
+rustls = { version = "0.23", default-features = false }
+keyring = { version = "4", default-features = false }
+sha2 = "0.10"
+base64 = "0.22"
+rand = "0.9"
+zeroize = "1.9"
+# clauseo-connectors' leak test only: captures tracing events and ureq's and rustls's log records.
+tracing-subscriber = { version = "0.3", default-features = false }
+tracing-log = { version = "0.2", default-features = false }
 
 [workspace.lints.rust]
 unsafe_code = "deny"               # deny, not forbid: an FFI module overrides with #[expect(unsafe_code, reason = "…")]

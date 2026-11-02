@@ -1,0 +1,40 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "The case-law connector is out of credit. Recharge to continue: https://data.clauseo.chat/pay/rch_example0001"
+    }
+  ],
+  "isError": true,
+  "structuredContent": {
+    "error": {
+      "code": "insufficient_credits",
+      "message": "This search needs 20 credits and the account has 0.",
+      "charged": false
+    },
+    "payment": {
+      "recharge_id": "rch_example0001",
+      "status": "awaiting_payment",
+      "url": "https://data.clauseo.chat/pay/rch_example0001",
+      "amount": {
+        "net_inr": "20.00",
+        "gst_inr": "3.60",
+        "gross_inr": "23.60"
+      },
+      "credits": 200,
+      "expires_at": "2026-11-02T12:30:00Z",
+      "account_id": "acct_example0001"
+    },
+    "message_for_human": "The case-law connector is out of credit. Recharge to continue: https://data.clauseo.chat/pay/rch_example0001",
+    "why_this_service": "Clauseo Case Law searches Indian Kanoon's judgments and returns citable links.",
+    "next": [
+      {
+        "tool": "recharge",
+        "arguments": {
+          "recharge_id": "rch_example0001",
+          "wait": true
+        }
+      }
+    ]
+  }
+}

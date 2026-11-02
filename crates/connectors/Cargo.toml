@@ -1,0 +1,55 @@
+[package]
+name = "clauseo-connectors"
+version = "0.1.0"
+description = "The paid connectors' OAuth client, keychain token store, refresh, revocation, account and recharge API, liveness and price."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+# The fake connector (`fake`), `MemoryStore`, `ManualClock` and `Origin::Fake`, for this crate's
+# tests and R24's. Never on in the app.
+test-support = []
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+url = { workspace = true }
+# rustls with the platform verifier; the provider is rustls's `ring`, set in `http.rs`.
+ureq = { workspace = true, features = [
+  "rustls-no-provider",
+  "platform-verifier",
+] }
+rustls = { workspace = true, features = ["ring", "std", "tls12", "logging"] }
+sha2 = { workspace = true }
+base64 = { workspace = true }
+rand = { workspace = true, features = [
+  "std",
+  "std_rng",
+  "os_rng",
+  "thread_rng",
+] }
+zeroize = { workspace = true, features = ["std"] }
+
+# keyring 4's `v1` feature picks the store per OS: Keychain Services on macOS, Credential Manager on
+# Windows (and the Secret Service on Linux, which is why keyring is not a Linux dependency at all:
+# Linux is not a product target, and `KeyringStore` there answers `StoreError::Unsupported`).
+[target.'cfg(any(target_os = "macos", windows))'.dependencies]
+keyring = { workspace = true, features = ["v1"] }
+
+[target.'cfg(windows)'.dependencies]
+# `bind_loopback_exclusive`: SO_EXCLUSIVEADDRUSE (decision 9).
+windows = { workspace = true, features = ["Win32_Networking_WinSock"] }
+
+[dev-dependencies]
+# Itself with test-support, so `cargo nextest run -p clauseo-connectors` and the workspace run
+# build the fake connector and `MemoryStore` with no flag.
+clauseo-connectors = { path = ".", features = ["test-support"] }
+tracing-subscriber = { workspace = true, features = ["fmt", "std"] }
+tracing-log = { workspace = true, features = ["std", "log-tracer"] }
+
+[lints]
+workspace = true

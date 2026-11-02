@@ -1,0 +1,17 @@
+{
+  "client_id": "https://data.clauseo.chat/oauth/clients/clauseo-desktop.json",
+  "client_name": "Clauseo",
+  "client_uri": "https://clauseo.chat",
+  "redirect_uris": [
+    "http://127.0.0.1/oauth/callback"
+  ],
+  "grant_types": [
+    "authorization_code",
+    "refresh_token"
+  ],
+  "response_types": [
+    "code"
+  ],
+  "token_endpoint_auth_method": "none",
+  "scope": "case-law offline_access"
+}

@@ -1,0 +1,14 @@
+{
+  "resource": "https://data.clauseo.chat/mcp/case-law",
+  "authorization_servers": [
+    "https://data.clauseo.chat"
+  ],
+  "scopes_supported": [
+    "case-law",
+    "offline_access"
+  ],
+  "bearer_methods_supported": [
+    "header"
+  ],
+  "resource_name": "Clauseo Case Law"
+}

@@ -283,6 +283,14 @@ jobs:
         if: env.BUILD == 'true' && matrix.native && runner.os != 'Linux'
         run: cargo nextest run --workspace --profile ci --no-tests=pass
 
+      # The OS keychain for real: clauseo-connectors' ignored keychain_smoke test writes, reads and
+      # deletes a 2,000-byte item (Keychain Services on macOS, Credential Manager on Windows) under
+      # a fresh account name, on every native macOS and Windows entry, Windows ARM64 included.
+      # Linux has no keychain store in the crate (not a product target).
+      - name: Keychain smoke test (clauseo-connectors)
+        if: env.BUILD == 'true' && matrix.native && runner.os != 'Linux'
+        run: cargo nextest run -p clauseo-connectors --profile ci --run-ignored only -E 'test(keychain_smoke)'
+
       # The desktop crate's tests with the marks feature (the speed scoreboard's build), here on
       # main where a failure turns the run red, with their macOS-only cases. On a pull request the
       # Linux job runs them, off the macOS runner (ci-perfmax's notes: up to about 60 s there).

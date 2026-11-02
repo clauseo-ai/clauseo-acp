@@ -1,0 +1,7 @@
+{
+  "access_token": "at_fixture_0000000000000000000000000002",
+  "token_type": "Bearer",
+  "expires_in": 3600,
+  "refresh_token": "rt_fixture_0000000000000000000000000002",
+  "scope": "case-law offline_access"
+}
