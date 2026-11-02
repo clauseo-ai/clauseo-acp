@@ -1,6 +1,7 @@
-import type { FocusEvent, KeyboardEvent, MouseEvent, PointerEvent } from "react";
+import type { FocusEvent, KeyboardEvent, MouseEvent, PointerEvent, ReactElement } from "react";
 import { Button } from "../ui/button.tsx";
 import { Chip } from "../ui/chip.tsx";
+import { Tooltip } from "../ui/tooltip.tsx";
 import { useWords } from "../lib/words.ts";
 import { useCarded, useDraftHolders, useInHand, type Target } from "./hand.ts";
 import { useWide } from "./layout.ts";
@@ -33,14 +34,20 @@ export type PaperTileProps = {
   /** What the tile says beyond its visible words, for assistive technology: its role in words, or what a press
    * does. Its visible numeral, title and chip are its name. */
   label?: string;
-  /** A sighted hint, where the room gives one. */
+  /** A sighted hint, where the room gives one, on hover. */
   hint?: string;
+  /** A sighted hint shown on hover and on keyboard focus alike, in the tooltip, in place of `hint`: for a tile whose
+   * press does something its face doesn't say, such as opening the paper in Word. `label` carries it for assistive
+   * technology. */
+  tip?: string;
   /** Whether a press puts its excerpt card in hand: papers the answer cites, with an excerpt. */
   card?: boolean;
   /** For the prepared draft: a press turns to it. */
   onTurn?: () => void;
   /** Versions: the paper at an earlier time. gone, it wasn't in the matter yet; touched, that version changed it. */
   era?: "gone" | "touched" | undefined;
+  /** Optional: test ids for the e2e specs: on the face, the button a press lands on. */
+  testIds?: { face?: string };
 };
 
 /** One paper on the wall. Uncited it lies flat; cited it fills with its role's colour and stays lit. Hover lifts it
@@ -53,9 +60,11 @@ export function PaperTile({
   title,
   label,
   hint,
+  tip,
   card = false,
   onTurn,
   era,
+  testIds,
 }: PaperTileProps) {
   const w = useWords();
   const wide = useWide();
@@ -102,48 +111,52 @@ export function PaperTile({
       inert={era === "gone" ? true : undefined}
       aria-hidden={era === "gone" ? true : undefined}
     >
-      <button
-        type="button"
-        ref={nodes.keep("face", id, card)}
-        className={card ? "tile-face card-trigger" : "tile-face"}
-        aria-describedby={label === undefined ? undefined : room.id(`paper-${id}-more`)}
-        title={hint}
-        data-card={card ? `paper:${id}` : undefined}
-        onPointerEnter={onPointerEnter}
-        onPointerLeave={onPointerLeave}
-        onFocus={onFocus}
-        onBlur={card ? hand.leave : undefined}
-        onClick={onClick}
-        onKeyDown={onKeyDown}
-      >
-        {numeral !== undefined && (
-          <span className="tile-no">
-            {"word" in numeral ? (
-              <span className="tile-num" data-word="">
-                {numeral.word}
-              </span>
-            ) : (
-              <>
-                <span className="tile-num">{numeral.from}</span>
-                {numeral.to !== numeral.from && (
-                  <span className="tile-to">{w.t("to {n}", { n: numeral.to })}</span>
-                )}
-              </>
-            )}
+      {wrapTip(
+        tip,
+        <button
+          type="button"
+          data-testid={testIds?.face}
+          ref={nodes.keep("face", id, card)}
+          className={card ? "tile-face card-trigger" : "tile-face"}
+          aria-describedby={label === undefined ? undefined : room.id(`paper-${id}-more`)}
+          title={tip === undefined ? hint : undefined}
+          data-card={card ? `paper:${id}` : undefined}
+          onPointerEnter={onPointerEnter}
+          onPointerLeave={onPointerLeave}
+          onFocus={onFocus}
+          onBlur={card ? hand.leave : undefined}
+          onClick={onClick}
+          onKeyDown={onKeyDown}
+        >
+          {numeral !== undefined && (
+            <span className="tile-no">
+              {"word" in numeral ? (
+                <span className="tile-num" data-word="">
+                  {numeral.word}
+                </span>
+              ) : (
+                <>
+                  <span className="tile-num">{numeral.from}</span>
+                  {numeral.to !== numeral.from && (
+                    <span className="tile-to">{w.t("to {n}", { n: numeral.to })}</span>
+                  )}
+                </>
+              )}
+            </span>
+          )}
+          <span className="tile-title" lang={latin ? "en" : undefined}>
+            {latin ? title : <Say>{title}</Say>}
           </span>
-        )}
-        <span className="tile-title" lang={latin ? "en" : undefined}>
-          {latin ? title : <Say>{title}</Say>}
-        </span>
-        {state !== "uncited" && (
-          <span className="tile-foot">
-            <Chip
-              role={state}
-              ground={state === "relied" || state === "accepted" ? "surface" : "tile"}
-            />
-          </span>
-        )}
-      </button>
+          {state !== "uncited" && (
+            <span className="tile-foot">
+              <Chip
+                role={state}
+                ground={state === "relied" || state === "accepted" ? "surface" : "tile"}
+              />
+            </span>
+          )}
+        </button>,
+      )}
       {label !== undefined && (
         <span className="sr-only" id={room.id(`paper-${id}-more`)}>
           {label}
@@ -151,6 +164,11 @@ export function PaperTile({
       )}
     </li>
   );
+}
+
+/** The face in the tooltip, where the tile has one. */
+function wrapTip(tip: string | undefined, face: ReactElement): ReactElement {
+  return tip === undefined ? face : <Tooltip content={tip}>{face}</Tooltip>;
 }
 
 /* ---------- the wall of papers ---------- */

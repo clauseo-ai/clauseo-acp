@@ -1,7 +1,7 @@
 // fake_agent `files-one-turn`, as versions.spec.ts. Word holds brief.txt open: its owner file
 // `~$brief.txt` sits beside it. Restore to the import version is refused and writes nothing, and the
-// dialog says which file holds it and offers Try again. Once the owner file is gone, Try again
-// restores the matter.
+// dialog says a paper is open in another program and offers Try again. Once the owner file is gone,
+// Try again restores the matter.
 
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -22,8 +22,6 @@ const RESTORED = { ...BEFORE, "notes/a.txt": "Alpha\n" };
  * each file name between Unicode isolates (U+2068, U+2069), so the name is matched with them.
  */
 const STAYS_LINE = /'\u2068?a\.txt\u2069?', added since, stays\./;
-/** The refusal's line for the file Word holds (restore-dialog.tsx), isolates as above. */
-const HELD_LINE = /Close '\u2068?brief\.txt\u2069?' in Word to restore it\./;
 /** Word's owner file for brief.txt: `~$` and the whole name (locks.rs `owner_names`). */
 const OWNER = "~$brief.txt";
 const OWNER_BYTES = "owner file: open in Word";
@@ -58,10 +56,9 @@ test("Restore waits while Word holds a file, then lands once it is closed", asyn
   await expect(w.dialog).toContainText(STAYS_LINE);
   await w.dialogConfirm.click();
 
-  // Refused: the dialog names the file, offers Try again, and the lock line shows; nothing moved.
+  // Refused: the dialog shows the lock line and offers Try again; nothing moved.
   await expect(w.dialogTryAgain).toBeVisible();
-  await expect(w.dialog).toContainText(HELD_LINE);
-  await expect(app.page.getByText(LOCKED_LINE)).toBeVisible();
+  await expect(w.dialog).toContainText(LOCKED_LINE);
   expect(readFileSync(brief, "utf8")).toBe(AFTER["brief.txt"]);
   expect(readTree(scratch.matterDir)).toEqual({ ...AFTER, [OWNER]: OWNER_BYTES });
 

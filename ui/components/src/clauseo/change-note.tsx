@@ -1,5 +1,6 @@
 // The change note. After Clauseo changes papers, the thread says so in one line, with the papers named and two ways
-// on: Compare, and Undo, each when the caller gives it. A refused undo says why in a quiet line beside Undo. When a
+// on: Compare, and Undo, each when the caller gives it, and a way to open a paper where the caller gives one ("Open in
+// Word"). A refused undo says why in a quiet line beside Undo. When a
 // paper was edited after Clauseo's change, Undo asks first, in the alert dialog, with Keep current as the safe choice.
 import { Fragment, lazy, Suspense, useState } from "react";
 import { late } from "../lib/late.ts";
@@ -34,6 +35,7 @@ export function ChangeNote({
   state: held,
   onUndo,
   onCompare,
+  open,
   undoDisabled = false,
   error = null,
   testIds,
@@ -48,11 +50,13 @@ export function ChangeNote({
   onUndo?: () => void;
   /** Compare shows only when given. */
   onCompare?: () => void;
+  /** Opens a paper the note names, in the program the label says: shows only when given, while the changes stand. */
+  open?: { label: string; onOpen: () => void };
   /** Undo can't be pressed for now, such as while Clauseo answers. */
   undoDisabled?: boolean;
   /** A refused undo: its words, in the language, and its code, as a quiet line beside Undo. */
   error?: { words: string; code: string } | null;
-  testIds?: { paper?: string; undo?: string; error?: string };
+  testIds?: { paper?: string; undo?: string; error?: string; open?: string };
 }) {
   const w = useThreadWords();
   const counts = useCounts(papers.length);
@@ -112,6 +116,12 @@ export function ChangeNote({
           <Button kind="quiet" size="small" onClick={onCompare}>
             <IconOpen size={16} />
             <span className="deva-nudge">{w.th("Compare")}</span>
+          </Button>
+        )}
+        {open !== undefined && (
+          <Button kind="quiet" size="small" onClick={open.onOpen} data-testid={testIds?.open}>
+            <IconOpen size={16} />
+            <span className="deva-nudge">{open.label}</span>
           </Button>
         )}
         {onUndo !== undefined && (

@@ -1,10 +1,14 @@
 // Versions' chunk: what the room loads the first time the lawyer opens Versions or presses Undo, with its own sheet.
 // The room's first load carries only use-versions.tsx, which imports this with a bare import() (vite.config.ts's
-// BARE_CHUNKS): every module it shares with the room is in the first load already.
+// BARE_CHUNKS): every module it shares with the room is in the first load already. The thread's change note loads it
+// too, for the lock's lines, the first time a program holds a file an Undo must write.
 import sheet from "./versions.css?url";
 
 export { VersionsController } from "./controller.ts";
 export { VersionsCentre, VersionsRail } from "./versions-parts.tsx";
+// the change note's lock lines (word/word-lock.tsx) share Versions' words: the thread loads them from here, so the words
+// stay in one chunk
+export { WordLock } from "../word/word-lock.tsx";
 
 let loading: Promise<void> | null = null;
 

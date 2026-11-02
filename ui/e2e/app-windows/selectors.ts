@@ -96,6 +96,12 @@ export const ids = {
   dialogConfirm: "dialog-confirm",
   /** The dialog's Try again, after a refusal such as Word holding a file. */
   dialogTryAgain: "dialog-try-again",
+  /** The lock block under the change note, when a program holds a file the undo would write. */
+  wordLock: "word-lock",
+  /** Try again in the lock block, once the file is closed in Word. */
+  wordLockRetry: "word-lock-retry",
+  /** Open in Word: a .doc or .docx paper's tile on the wall, or the change note's button. */
+  openInWord: "open-in-word",
 } as const;
 
 /** The `data-kind` of a version row: the matter's CheckpointKind in snake_case. */
@@ -203,6 +209,11 @@ export function window(page: Page) {
     dialog: page.getByRole("dialog"),
     dialogConfirm: id(ids.dialogConfirm),
     dialogTryAgain: id(ids.dialogTryAgain),
+    /** The lock block: the line that says a paper is open in another program, and its Try again. */
+    wordLock: id(ids.wordLock),
+    wordLockRetry: id(ids.wordLockRetry),
+    /** Open in Word, on a Word paper's tile or the change note. */
+    openInWord: id(ids.openInWord),
   };
 }
 

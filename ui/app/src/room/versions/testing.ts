@@ -17,7 +17,7 @@ import {
   TURN,
   uuid,
 } from "../../testing/stream-script.ts";
-import { FakeTransport } from "../../transport/fake-transport.ts";
+import { FakeTransport, type FakeHost } from "../../transport/fake-transport.ts";
 import type {
   CheckpointKind,
   CommandOutcome,
@@ -167,6 +167,8 @@ export type Script = {
   standIns?: StandIns;
   /** Methods the transport carries beyond HostTransport's, as a host change might add them. */
   carries?: object;
+  /** The host rows it fakes beyond today's host (room/host-next.ts), such as H8's papers. */
+  next?: FakeHost["next"];
   /** The display the room starts with, as connectRoom's override takes it: the language, say. */
   display?: Partial<UiSettings>;
 };
@@ -218,6 +220,7 @@ export async function mountVersions(
       throw new Error(`not scripted: ${JSON.stringify(query)}`);
     },
     dispatch: (envelope) => script.dispatch?.(envelope.command) ?? "done",
+    ...(script.next === undefined ? {} : { next: script.next }),
   });
   // a wide window, past the room's 1200 px breakpoint, where Versions' panel stands beside the work
   (

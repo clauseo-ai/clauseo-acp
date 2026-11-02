@@ -186,7 +186,7 @@ test("Word holding a file: the dialog names it with Try again, the page says why
           changes: [file("brief.txt"), file("notes.docx")],
           added_since: [],
           kept: [],
-          locked: ["brief.txt"],
+          locked: ["notes.docx"],
         },
       },
     }),
@@ -200,7 +200,7 @@ test("Word holding a file: the dialog names it with Try again, the page says why
   await h.click(h.one("version-restore"));
   await h.click(h.one("dialog-confirm"));
   expect(h.sent("restore_version")).toHaveLength(1);
-  expect(dialog()?.textContent).toContain("Close '\u2068brief.txt\u2069' in Word to restore it.");
+  expect(dialog()?.textContent).toContain("Close '\u2068notes.docx\u2069' in Word to restore it.");
   expect(h.one("dialog-try-again")).not.toBeNull();
   expect(h.one("dialog-confirm")).toBeNull();
   // under the dialog, the page says why by the refusal's code

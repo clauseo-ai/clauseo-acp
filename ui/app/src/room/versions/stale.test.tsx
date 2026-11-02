@@ -68,7 +68,7 @@ test("the matter moving while the restore dialog asks re-reads the preview, and 
 });
 
 test("Try again after Word let go goes back to the dialog when what the restore writes has changed", async () => {
-  let preview = previewOf(["brief.txt", "notes.docx"], ["brief.txt"]);
+  let preview = previewOf(["brief.txt", "notes.docx"], ["notes.docx"]);
   let held = true;
   h = await mountVersions(VERSIONS, STEPS, {
     query: answering({ preview_restore: () => ({ restore_preview: preview }) }),
@@ -81,7 +81,7 @@ test("Try again after Word let go goes back to the dialog when what the restore 
   await h.lookAt("cp2");
   await h.click(h.one("version-restore"));
   await h.click(h.one("dialog-confirm"));
-  expect(dialog()?.textContent).toContain("Close '\u2068brief.txt\u2069' in Word to restore it.");
+  expect(dialog()?.textContent).toContain("Close '\u2068notes.docx\u2069' in Word to restore it.");
   held = false;
   preview = previewOf(["brief.txt", "notes.docx", "memo.docx"]);
   await h.click(h.one("dialog-try-again"));

@@ -178,7 +178,8 @@ test("a paper edited since asks first: Keep current sends nothing, Undo anyway u
 });
 
 test("a refused Undo shows its words beside Undo, by code", async () => {
-  const refused: HostError = { code: "matter.file_locked", message: "for logs", retryable: true };
+  // a lock shows its own lines under the note instead (word/change-note-lock.test.tsx)
+  const refused: HostError = { code: "store.io", message: "for logs", retryable: true };
   h = await mountRoom({
     dispatch: (command) => {
       if (command.undo_step !== undefined) throw refused;
@@ -188,8 +189,8 @@ test("a refused Undo shows its words beside Undo, by code", async () => {
   h.deliver([reset([changed()])]);
   await h.click(h.one("undo"));
   const error = h.one("files-changed")?.querySelector<HTMLElement>('[data-testid="error"]');
-  expect(error?.dataset["code"]).toBe("matter.file_locked");
-  expect(error?.textContent).toBe(errorWords("en", "matter.file_locked"));
+  expect(error?.dataset["code"]).toBe("store.io");
+  expect(error?.textContent).toBe(errorWords("en", "store.io"));
   // not on the working line
   expect(h.host.querySelector('.working[data-testid="error"]')).toBeNull();
 });
