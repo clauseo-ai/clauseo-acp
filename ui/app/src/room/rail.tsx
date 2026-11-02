@@ -17,12 +17,8 @@ import { isolate } from "@clauseo/components/lib/bidi.ts";
 import type { MatterId } from "../transport/protocol.ts";
 import type { MatterInfo } from "./host-next.ts";
 import { planName } from "./agent.ts";
-import {
-  rowWords,
-  type ConversationRow,
-  type Conversations,
-  type ConversationsView,
-} from "./conversations.ts";
+import { rowWords } from "./conversation-status.ts";
+import type { ConversationRow, Conversations, ConversationsView } from "./conversations.ts";
 import type { Matters, MattersView, RowStatus } from "./matters.ts";
 import { clockOf, dayOf, groupMatters } from "./when.ts";
 
