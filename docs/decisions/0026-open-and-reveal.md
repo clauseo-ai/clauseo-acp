@@ -25,7 +25,7 @@ added: the dialog and opener plugins are called from Rust, as before.
     labels of at most 63, never `localhost` or a name under it, nor a loopback, private,
     link-local, unspecified or broadcast address (IPv4, IPv6, or IPv4 written as IPv6);
   - `mailto` to one or more addresses, each `local@domain` with both parts non-empty in RFC
-    5322's atext and `.`, at most 254 bytes in all, with at most a `subject` and a `body` (keys
+    5322's atext and `.` (less `? & = % /`, which could read as a header), at most 254 bytes in all, with at most a `subject` and a `body` (keys
     without case, each once). Any other header (`to`, `cc`, `bcc`, `attach`, `from`, ...) or a
     fragment is refused, since it would add a recipient or an attachment the confirm does not
     name.
@@ -36,9 +36,12 @@ added: the dialog and opener plugins are called from Rust, as before.
   one, or the mail addresses. Its words follow the app's language (`ui.language`, read from the
   host when the dialog opens), in English and Hindi (`open/words.rs`, copy H11-01 to H11-07).
   Cancel is the first button, so it is the default and focused one (Return and Enter, and Space
-  on Windows) and a stray key never accepts; only a press of the open button accepts, and Escape,
-  closing the dialog or the app closing declines (`dialogs::confirm`, which U4's "always allow"
-  confirm uses too). The dialog sits over the main window. One confirm at a time: a second call
+  on Windows) and a stray key never accepts. The confirm is drawn with rfd directly
+  (`dialogs::confirm`, which U4's "always allow" confirm uses too), not through the dialog
+  plugin's message dialog, which turns rfd's plain `Cancel` into the second button's label: with
+  Cancel first, that would make Escape or closing the dialog accept. Only rfd's answer for a press
+  of the open button accepts; Escape, Alt+F4 and the close button (Windows), a stopped sheet
+  (macOS), a dialog that failed, or the app closing all decline. The dialog sits over the main window. One confirm at a time: a second call
   while one is open, or within a second of a decline, is `command.conflict` before anything is
   drawn. Declined, nothing opens and the call fails with `transport.unauthorized`, which the
   window does not show. Accepted, the OS opens the URL as the `url` crate wrote it back, in the
@@ -48,15 +51,17 @@ added: the dialog and opener plugins are called from Rust, as before.
   matter that owns it, refusing a ref it did not issue and a file outside that matter's folder at
   call time. The desktop checks again, then opens the file with its default app, by its resolved
   path: the file and the folder resolve (symlinks and `..` followed), the file lies in the folder,
-  it is a regular file (so never a folder or an app bundle), it has no execute bit (macOS and
-  Linux), and its type is one of `DOCUMENT_TYPES`: documents, sheets, slides and images. Not on
+  it is a regular file (so never a folder or an app bundle), it has no execute bit (Linux only:
+  macOS names the type's app instead, and its SMB and exFAT volumes mark every file executable),
+  and its type is one of `DOCUMENT_TYPES`: documents, sheets, slides and images. Not on
   the list: programs, scripts, shortcuts, web pages, SVG and Office files with macros by name
   (`docm`, `xlsm`, `pptm`, `dotm`). On macOS the file opens in the default app for the type
   that was checked, named (`open -a <app> -- <file>`; the app from
   `LSCopyDefaultApplicationURLForContentType` for the extension's type, `open/mac_app.rs`), so a file swapped for a link after the checks,
   or one with its own "Open With" setting, opens as a document in that app and never as a program.
   On Windows the shell picks the app by the extension of the name, which was checked. One open at
-  a time and at most one a second (`command.conflict`). Refusals are `command.invalid`, or
+  a time and at most one document opened a second (`command.conflict`; a refused call does not
+  count). Refusals are `command.invalid`, or
   `matter.folder_missing` when the folder is gone; a failure of the OS to open, or a type macOS
   has no app for, is `internal`. No confirm: the lawyer clicked one of their own documents.
 - **`reveal { target }`.** `target` is `{ "matter": MatterId }` or `"app_data"`, never a path.
@@ -96,11 +101,11 @@ added: the dialog and opener plugins are called from Rust, as before.
   file itself does; either way the shell opens by the checked extension, so the gap is the same: a
   document of a listed type outside the matter. A Windows lookup of the type's app
   (`AssocQueryString`) would not narrow it further, and is not built.
-- A file with an execute bit does not open, even a real document; files on volumes that mark
-  every file executable (FAT, exFAT, some network shares) cannot be opened from Clauseo on macOS.
+- Host names are checked as text: a public name that resolves to this computer or the local
+  network (`127.0.0.1.nip.io`, `localtest.me`) passes, since the check does not resolve names.
 - On macOS, Escape cancels a confirm whose cancel button macOS recognises by its English title
-  ("Cancel"); in Hindi Escape may do nothing (the dialog stays, nothing opens), since the dialog
-  plugin cannot give the button its key.
+  ("Cancel"); in Hindi Escape may do nothing (the dialog stays, nothing opens), since rfd cannot
+  give the button its key.
 - A new type in `DOCUMENT_TYPES`, a new scheme, a confirm that is skipped, or a new reveal target
   needs a new record.
 

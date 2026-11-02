@@ -8,7 +8,6 @@ use std::path::{Path, PathBuf};
 use clauseo_host::HostHandle;
 use clauseo_protocol::{ErrorCode, FileRefId, HostError, MatterId, Principal};
 use tauri::{AppHandle, Runtime};
-use tauri_plugin_dialog::MessageDialogKind;
 use tauri_plugin_opener::OpenerExt as _;
 
 use super::{LinkConfirm, LinkWords, Locate, LocatedFile, Opener};
@@ -30,7 +29,7 @@ impl<R: Runtime> LinkConfirm for NativeLinkConfirm<R> {
     fn confirm_link(&self, words: LinkWords) -> BoxFuture<'_, bool> {
         crate::dialogs::confirm(
             &self.app,
-            MessageDialogKind::Info,
+            rfd::MessageLevel::Info,
             words.title,
             words.message,
             words.ok,

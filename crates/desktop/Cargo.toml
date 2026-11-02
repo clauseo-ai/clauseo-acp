@@ -38,6 +38,8 @@ tauri-plugin-opener.workspace = true
 tauri-plugin-os.workspace = true
 tauri-plugin-notification.workspace = true
 serde_json.workspace = true
+# The confirms (src/dialogs.rs), as tauri-plugin-dialog builds rfd; it is that plugin's own copy.
+rfd.workspace = true
 serde = { workspace = true, features = ["derive"] }
 # The session host and what starting it takes: settings, the launcher, the boundary types.
 clauseo-host = { path = "../host" }
