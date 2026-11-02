@@ -611,19 +611,27 @@
     "note": "Rohan, on the review page (built from U3 53b4ca5d, approved as U3-47)"
   },
   "U3-err-command.unknown_thread": {
-    "en": "This thread is no longer in Clauseo.",
+    "en": "This conversation is no longer in Clauseo.",
     "hi": "यह बातचीत अब Clauseo में नहीं है।",
     "status": "approved",
     "at": "2026-11-02",
     "by": "Rohan",
-    "note": "Rohan, on the review page (built from U3 53b4ca5d, approved as U3-23)"
+    "note": "Rohan, on the review page (built from U3 2ef845cc)"
   },
   "U3-err-thread.queue_full": {
-    "en": "Too many questions are waiting in this thread.",
+    "en": "Too many questions are waiting in this conversation.",
     "hi": "इस बातचीत में बहुत अधिक प्रश्न प्रतीक्षा में हैं।",
     "status": "approved",
     "at": "2026-11-02",
     "by": "Rohan",
-    "note": "Rohan, on the review page (built from U3 53b4ca5d, approved as U3-26)"
+    "note": "Rohan, on the review page (built from U3 2ef845cc)"
+  },
+  "U3-48": {
+    "en": "Reset not given.",
+    "hi": "रीसेट का समय नहीं बताया गया।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U3 2ef845cc)"
   }
 }
