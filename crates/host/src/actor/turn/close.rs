@@ -223,3 +223,12 @@ pub(crate) fn log_limit_stop(
     out.push(actor, stopped)?;
     out.send(actor, super::Then::LimitStop(turn))
 }
+
+/// Whether the commit holding `turn`'s `TurnEnded` is not durable yet (`thread`'s closing
+/// record is that turn's).
+pub(crate) fn closing(actor: &Actor, thread: ThreadId, turn: TurnId) -> bool {
+    actor.threads.get(&thread).is_some_and(|entry| {
+        let closing = entry.turn.closing.as_ref();
+        closing.is_some_and(|closing| closing.close.turn == turn)
+    })
+}

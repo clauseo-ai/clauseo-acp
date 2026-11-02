@@ -23,7 +23,7 @@ use crate::pipeline::Failure;
 
 /// Whether `thread`'s stream is blocked by a failed commit; its unblock comes once every
 /// commit in flight has returned.
-pub(super) fn blocked(actor: &Actor, thread: ThreadId) -> bool {
+pub(crate) fn blocked(actor: &Actor, thread: ThreadId) -> bool {
     actor.pipeline.blocked(StreamId::Thread(thread)).is_some()
 }
 

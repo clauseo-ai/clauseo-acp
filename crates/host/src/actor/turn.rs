@@ -46,8 +46,9 @@ use crate::matter_worker::MatterReply;
 use crate::pipeline::Failure;
 
 pub(crate) use asks::asks_pending;
-pub(crate) use close::log_limit_stop;
+pub(crate) use close::{closing, log_limit_stop};
 pub(crate) use end::limits_read;
+pub(crate) use failure::blocked as stream_blocked;
 pub(crate) use inputs::{AgentReply, LogFor, TurnInput};
 pub(crate) use out::flush_text;
 pub(crate) use restore::{
@@ -234,8 +235,7 @@ enum Then {
     },
 }
 
-/// A turn timer: the display and durable batches, the rate window, the cancel fallback, the
-/// wait for a limits read.
+/// A turn timer: the display and durable batches, the rate window, the cancel, a limits read.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct TurnTimer {
     thread: ThreadId,
@@ -415,42 +415,39 @@ pub(crate) fn reconcile_skipped(actor: &mut Actor, thread: ThreadId) {
     reconcile::skipped(actor, thread);
 }
 
-/// Shutdown, after the host stopped taking commands: a turn whose end waits for a limits read
-/// stops waiting, every running turn is cancelled through the Cancel path and every agent
-/// stops, and every stop at the limit still waiting for a read is decided and logged. The actor
-/// closes the store once [`busy`] is false and every commit has returned.
+/// Shutdown, after the host stopped taking commands: turns stop waiting for limits reads, every
+/// running turn is cancelled (the Cancel path), every agent stops, every pending stop at the
+/// limit is logged. The actor closes the store once [`busy`] is false and commits returned.
 pub(crate) fn shutdown(actor: &mut Actor) {
     end::stop_waiting_for_reads(actor);
     cancel::shutdown(actor);
     super::limits::decide_stops_now(actor);
 }
 
-/// Whether the turn path has work that start-up (reconciliation) or shutdown (cancels, agent
-/// stops, stops at the limit not logged yet) must wait for. Only scanned while starting or
-/// stopping; serving never waits on it.
+/// Whether start-up (reconciliation) or shutdown (cancels, agent stops, unlogged stops at the
+/// limit) must wait for the turn path. Scanned only while starting or stopping.
 pub(crate) fn busy(actor: &Actor) -> bool {
     if matches!(actor.phase, HostPhase::Serving) {
         return false;
     }
-    if host_stopping(actor) && super::limits::stops_busy(actor) {
-        return true;
-    }
-    actor.threads.values().any(|entry| {
-        let state = &entry.turn;
-        state.reconciling
-            || state.agent.is_some()
-            || state.preparing.is_some()
-            || state.current.as_ref().is_some_and(|current| {
-                matches!(
-                    current.phase,
-                    TurnPhase::Checkpointing
-                        | TurnPhase::Starting
-                        | TurnPhase::Prompting
-                        | TurnPhase::FallbackStop
-                        | TurnPhase::Ending
-                )
-            })
-    })
+    let stops = host_stopping(actor) && super::limits::stops_busy(actor);
+    stops
+        || actor.threads.values().any(|entry| {
+            let state = &entry.turn;
+            state.reconciling
+                || state.agent.is_some()
+                || state.preparing.is_some()
+                || state.current.as_ref().is_some_and(|current| {
+                    matches!(
+                        current.phase,
+                        TurnPhase::Checkpointing
+                            | TurnPhase::Starting
+                            | TurnPhase::Prompting
+                            | TurnPhase::FallbackStop
+                            | TurnPhase::Ending
+                    )
+                })
+        })
 }
 
 /// Whether `thread` has a current turn, or a last turn whose end is not durable yet
@@ -509,8 +506,7 @@ pub(crate) fn release_relocate(actor: &mut Actor, matter: MatterId) {
     }
 }
 
-/// Whether `thread`'s stream must stay loaded: a live agent, an open turn, a repair, an end
-/// that may still be retried, a stop at the limit not logged yet.
+/// Whether `thread`'s stream stays loaded: an agent, open turn, repair, retriable end, limit stop.
 pub(crate) fn keeps_loaded(actor: &Actor, thread: ThreadId) -> bool {
     actor.threads.get(&thread).is_some_and(|entry| {
         let state = &entry.turn;
@@ -523,20 +519,6 @@ pub(crate) fn keeps_loaded(actor: &Actor, thread: ThreadId) -> bool {
                 .as_ref()
                 .is_some_and(|closing| !closing.retried)
     }) || super::limits::holds_stop(actor, thread)
-}
-
-/// Whether the commit holding `turn`'s `TurnEnded` is not durable yet (`thread`'s closing
-/// record is that turn's).
-pub(crate) fn closing(actor: &Actor, thread: ThreadId, turn: TurnId) -> bool {
-    actor.threads.get(&thread).is_some_and(|entry| {
-        let closing = entry.turn.closing.as_ref();
-        closing.is_some_and(|closing| closing.close.turn == turn)
-    })
-}
-
-/// Whether `thread`'s stream is blocked by a failed commit.
-pub(crate) fn stream_blocked(actor: &Actor, thread: ThreadId) -> bool {
-    failure::blocked(actor, thread)
 }
 
 /// Whether `matter`'s stream, once loaded to check a reused checkpoint, stays loaded: while a
