@@ -47,6 +47,8 @@ const HI = {
   "Tried: {title}.": "कोशिश की गई: {title}।",
   // a row's state, after its words, while it waits or once it carried on behind a steer
   Waiting: "प्रतीक्षा में",
+  // a step whose state this version can't read (a newer Clauseo's): neither done nor failed, said as such
+  "State not known": "स्थिति ज्ञात नहीं",
   // the folded line: one sentence for each kind of work, the most done first
   "1 paper read.": "1 दस्तावेज़ पढ़ा गया।",
   "{n} papers read.": "{n} दस्तावेज़ पढ़े गए।",

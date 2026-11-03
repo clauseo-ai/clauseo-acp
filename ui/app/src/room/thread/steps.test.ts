@@ -281,6 +281,32 @@ describe("friendly names", () => {
     );
   });
 
+  test("a step in a state this version can't read is neither done nor failed: no break, no trouble, out of the count, the line and the row agree", () => {
+    const lease = {
+      locations: [{ inside: { path: "papers/Lease.pdf" } }],
+    } as Partial<ToolCallEntry>;
+    const unknown = call("read", "unknown", lease);
+    expect(restOf("en", [unknown])).toEqual({
+      kinds: ["read"],
+      line: "Reading Lease.pdf.",
+      trouble: "",
+    });
+    expect(doneOf("en", unknown)).toBe("Reading Lease.pdf.");
+    expect(markOf("en", unknown)).toBe("State not known");
+    expect(markOf("hi", unknown)).toBe("स्थिति ज्ञात नहीं");
+    // beside one done and one failed: counted in neither
+    const mixed = [call("read", "completed", lease), unknown, call("fetch", "failed")];
+    expect(restOf("en", mixed)).toEqual({
+      kinds: ["read"],
+      line: "1 paper read.",
+      trouble: "1 of them failed.",
+    });
+    // beside one failed and none done: the failure alone is what was tried
+    expect(restOf("en", [unknown, call("read", "failed", lease)]).trouble).toBe(
+      "Tried to read Lease.pdf.",
+    );
+  });
+
   test("a web address in a title is no path: it stays whole in the words and on hover", () => {
     expect(titleOf("Fetch https://example.com/a/b")).toBe("Fetch https://example.com/a/b");
     expect(titleOf("Open file:///Users/x/a.pdf")).toBe("Open file:///Users/x/a.pdf");

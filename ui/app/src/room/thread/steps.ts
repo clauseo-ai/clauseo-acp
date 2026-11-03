@@ -81,6 +81,9 @@ export function segmentsPick(
   };
 }
 
+/** Whether a step's state is one this version can't read (a newer Clauseo's): neither done nor failed. */
+const unknownState = (c: ToolCallEntry) => c.status === "unknown";
+
 /** The words of a summary sentence for a kind, one and many. */
 const COUNTED: Record<Exclude<StepKind, "think">, [one: StepKey, many: StepKey]> = {
   read: ["1 paper read.", "{n} papers read."],
@@ -149,8 +152,14 @@ export function restOf(
       line: doingOf(lang, waiting),
       trouble: troubleOf(lang, calls),
     };
-  const out = calls.slice(0, NAMED).map((c) => doneOf(lang, c));
-  const rest = calls.length - NAMED;
+  // a step whose state is not known (a newer Clauseo's) is neither done nor failed: with nothing tried and not done,
+  // the newest of them says what it set out to do, as its row does, with no break
+  const tried = calls.filter((c) => c.status === "failed" || c.status === "cancelled");
+  const unread = [...calls].reverse().find(unknownState);
+  if (tried.length === 0 && unread !== undefined)
+    return { kinds: iconsOf([unread]), line: doingOf(lang, unread), trouble: "" };
+  const out = tried.slice(0, NAMED).map((c) => doneOf(lang, c));
+  const rest = tried.length - NAMED;
   if (rest > 0) out.push(counted(lang, ["And 1 more.", "And {n} more."], rest));
   // the break leads what was tried, alone: a kind icon before it would mark the one step twice
   return { kinds: [], line: "", trouble: out.join(" ") };
@@ -190,7 +199,8 @@ export function doneSoFar(lang: Lang, calls: readonly ToolCallEntry[]): string {
 /** A row's words: what it did once done ("Read Lease.pdf."), what it set out to do once it failed or was stopped
  * ("Tried to read Lease.pdf.", its mark saying how it ended), and what it is doing while it waits or runs. */
 export function doneOf(lang: Lang, entry: ToolCallEntry): string {
-  if (unsettled(entry)) return doingOf(lang, entry);
+  // still to finish, or in a state this version can't read: what it set out to do, never told as done or tried
+  if (unsettled(entry) || unknownState(entry)) return doingOf(lang, entry);
   const tried = entry.status !== "completed";
   const say = (done: StepKey, attempt: StepKey, vars?: Record<string, string>) =>
     steps(lang, tried ? attempt : done, vars);
@@ -254,6 +264,7 @@ export function markOf(lang: Lang, call: ToolCallEntry): string | null {
   if (call.status === "cancelled") return th(lang, "Stopped");
   if (call.background !== undefined) return mt(lang, "In the background");
   if (call.status === "pending") return steps(lang, "Waiting");
+  if (unknownState(call)) return steps(lang, "State not known");
   return null;
 }
 
