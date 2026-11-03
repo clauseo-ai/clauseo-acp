@@ -210,12 +210,18 @@ export const queueScene = (lang: Lang, n: number, over: Partial<QueueScene> = {}
   ...over,
 });
 
-/** matters/held and held-failed: the answer stopped (or failed) at 4:32 pm with three messages queued. */
+/** matters/held and held-failed: the answer stopped (or failed, as Claude exited: the code with its own mark, not the
+ * unknown failure's "Something went wrong") at 4:32 pm with three messages queued. */
 export const heldScene = (lang: Lang, how: "stopped" | "failed"): QueueScene => ({
   title: say(lang, SAY.summoning),
   entries: [
     ...asked(lang),
-    ended(3, T1, pm(32), { stop: how === "stopped" ? "cancelled" : "failed" }),
+    ended(
+      3,
+      T1,
+      pm(32),
+      how === "stopped" ? { stop: "cancelled" } : { stop: "failed", failure: "agent.exited" },
+    ),
     ...queued(lang, 3),
   ],
   status: "idle",
