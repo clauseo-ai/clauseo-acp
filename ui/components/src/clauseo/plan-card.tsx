@@ -34,7 +34,10 @@ export type PlanCardProps = {
   preparing?: { title: string; text: string; link?: ReactNode } | null;
   /** "At the limit, Claude stops where it is...". Null where there's no limit to reach, billed by use. */
   foot: string | null;
-  manage: { label: string; href: string };
+  /** Optional: Manage plan or Manage billing, the vendor's own page. Left out until the host can open it (H11). */
+  manage?: { label: string; href: string } | null;
+  /** Optional: a test id on the card's body. */
+  testId?: string;
 };
 
 function WindowRow({ w, stale }: { w: PlanWindow; stale: boolean }) {
@@ -80,9 +83,10 @@ export function PlanCard({
   preparing,
   foot,
   manage,
+  testId,
 }: PlanCardProps) {
   return (
-    <div className="plan-card-body">
+    <div className="plan-card-body" data-testid={testId}>
       {/* a div, not a header: in the popup's portal a header would read as a second banner beside the toolbar's */}
       <div className="plan-card-head">
         <p className="plan-card-name">
@@ -124,19 +128,23 @@ export function PlanCard({
           </p>
         </div>
       )}
-      <div className="plan-card-foot">
-        {foot !== null && (
-          <p>
-            <Say>{foot}</Say>
-          </p>
-        )}
-        <a className="plan-card-manage" href={manage.href} target="_blank" rel="noreferrer">
-          <span className="deva-nudge">
-            <Say>{manage.label}</Say>
-          </span>
-          <IconOpen size={14} />
-        </a>
-      </div>
+      {(foot !== null || manage != null) && (
+        <div className="plan-card-foot">
+          {foot !== null && (
+            <p>
+              <Say>{foot}</Say>
+            </p>
+          )}
+          {manage != null && (
+            <a className="plan-card-manage" href={manage.href} target="_blank" rel="noreferrer">
+              <span className="deva-nudge">
+                <Say>{manage.label}</Say>
+              </span>
+              <IconOpen size={14} />
+            </a>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -28,7 +28,7 @@ export function PlanMeter({
   value: number;
   /** The value in words: "62 percent of the plan left". */
   valueText: string;
-  /** "Plenty left until the 9:40 pm reset" */
+  /** "Plenty left until the 9:40 pm reset"; "" or null for no line, as while the first read runs. */
   status: ReactNode;
   state?: PlanState;
   /** Optional: false where there's no share to draw, an account billed by use or a plan whose figures
@@ -66,12 +66,14 @@ export function PlanMeter({
           </BaseMeter.Track>
         )}
       </BaseMeter.Root>
-      <p
-        className={cn(state !== "plenty" && "text-primary font-chip")}
-        data-tauri-drag-region={drag}
-      >
-        {status}
-      </p>
+      {status !== "" && status !== null && (
+        <p
+          className={cn(state !== "plenty" && "text-primary font-chip")}
+          data-tauri-drag-region={drag}
+        >
+          {status}
+        </p>
+      )}
     </div>
   );
 }
