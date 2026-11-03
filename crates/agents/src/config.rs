@@ -1,0 +1,147 @@
+//! What [`crate::Agents`] is started with: the data folder, the snapshot, the platform, the firm's
+//! install settings, the ids policy manages, where to look for the user's Node, and a clock.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::ffi::OsString;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::{Duration, SystemTime};
+
+use clauseo_protocol::AgentId;
+
+use crate::platform::Platform;
+use crate::snapshot::Snapshot;
+
+/// Everything an `Agents` needs, read once at start.
+#[derive(Clone)]
+#[non_exhaustive]
+pub struct AgentsConfig {
+    /// `Locations::data_dir`: every folder this crate writes is under `<data_dir>/agents`.
+    pub data_dir: PathBuf,
+    /// The agents and Node this build installs: [`Snapshot::embedded`] outside tests.
+    pub snapshot: Snapshot,
+    /// The platform packages and Node are chosen for: [`Platform::current`] outside tests.
+    pub platform: Platform,
+    /// The firm's install settings.
+    pub install: InstallConfig,
+    /// The ids whose `agents.<id>` entry policy sets: IT's runtime. Nothing is installed for
+    /// them, and they report `Managed`.
+    pub managed: BTreeSet<AgentId>,
+    /// Where to look for a Node the user already has.
+    pub node_search: NodeSearch,
+    /// The receipt's install time and the progress throttle's clock.
+    pub clock: Arc<dyn Clock>,
+}
+
+impl AgentsConfig {
+    /// The embedded snapshot for `platform`, with no firm settings, nothing managed, the user's
+    /// Node searched for as [`NodeSearch::from_env`] finds it, and the system clock.
+    pub fn new(data_dir: PathBuf, platform: Platform) -> AgentsConfig {
+        AgentsConfig {
+            data_dir,
+            snapshot: Snapshot::embedded(),
+            platform,
+            install: InstallConfig::default(),
+            managed: BTreeSet::new(),
+            node_search: NodeSearch::from_env(),
+            clock: Arc::new(SystemClock),
+        }
+    }
+}
+
+impl std::fmt::Debug for AgentsConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AgentsConfig")
+            .field("data_dir", &self.data_dir)
+            .field("platform", &self.platform)
+            .field("install", &self.install)
+            .field("managed", &self.managed)
+            .field("node_search", &self.node_search)
+            .finish_non_exhaustive()
+    }
+}
+
+/// A firm's install settings (R20's `install.*` keys and R17's `network.*` keys). With none
+/// set, packages come from the snapshot's registry and Node from its download host, through
+/// `HTTPS_PROXY` when the environment sets it.
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct InstallConfig {
+    /// `install.registry`: a firm npm mirror. Each tarball URL's registry prefix is replaced by
+    /// this base before the download; the lock's integrity check is unchanged.
+    pub registry: Option<String>,
+    /// `install.bundle`: an offline bundle folder (`node/<archive>`, `npm/<sha512 hex>.tgz`),
+    /// read instead of the network, with the same checks.
+    pub bundle: Option<PathBuf>,
+    /// The proxy: `network.upstream_proxy`, else `HTTPS_PROXY` from the environment (the caller
+    /// resolves which), else none.
+    pub proxy: Option<String>,
+    /// `network.ca_certs`: an agent's extra CA file (PEM), given to the downloads, to npm
+    /// (`--cafile`) and to Node (`NODE_EXTRA_CA_CERTS`).
+    pub ca_certs: BTreeMap<AgentId, PathBuf>,
+    /// Tests only: resolves host names instead of the OS, so a test can be offline and come
+    /// back, and can see every host a download looked up.
+    #[cfg(feature = "test-support")]
+    pub resolver: Option<crate::TestResolver>,
+}
+
+/// Where to look for a Node the user already has: each folder of `path` (the `PATH` value),
+/// and on Windows `<program_files>\nodejs`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct NodeSearch {
+    /// The `PATH` value to search, or `None` to search nothing on it.
+    pub path: Option<OsString>,
+    /// `%ProgramFiles%` (Windows), or `None`.
+    pub program_files: Option<PathBuf>,
+}
+
+impl NodeSearch {
+    /// `PATH` and `ProgramFiles` from this process's environment.
+    pub fn from_env() -> NodeSearch {
+        NodeSearch {
+            path: std::env::var_os("PATH"),
+            program_files: std::env::var_os("ProgramFiles").map(PathBuf::from),
+        }
+    }
+
+    /// Searches nothing: the user's Node is never found, and Node is always downloaded.
+    pub fn none() -> NodeSearch {
+        NodeSearch::default()
+    }
+}
+
+/// The time sources the crate reads. `std`'s clocks are banned in the workspace
+/// (`clippy.toml`); [`SystemClock`] is the one place this crate reads them.
+pub trait Clock: Send + Sync {
+    /// The wall-clock time, for the receipt's `installed_at`.
+    fn now(&self) -> SystemTime;
+    /// A monotonic reading, for the 250 ms progress throttle. Only differences matter.
+    fn monotonic(&self) -> Duration;
+}
+
+/// The real clocks.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SystemClock;
+
+impl Clock for SystemClock {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the receipt's install time; agents reads the wall clock here alone"
+    )]
+    fn now(&self) -> SystemTime {
+        SystemTime::now()
+    }
+
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the progress throttle; agents reads the monotonic clock here alone"
+    )]
+    fn monotonic(&self) -> Duration {
+        use std::sync::OnceLock;
+        use std::time::Instant;
+        static START: OnceLock<Instant> = OnceLock::new();
+        let start = *START.get_or_init(Instant::now);
+        Instant::now().saturating_duration_since(start)
+    }
+}

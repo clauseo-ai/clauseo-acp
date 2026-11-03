@@ -1,0 +1,68 @@
+[package]
+name = "clauseo-agents"
+version = "0.1.0"
+description = "Installs the agents' ACP adapters with no terminal: Node, resumable checked downloads, npm ci, receipts."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+# Tests only: `InstallConfig::resolver`, a host-name resolver standing in for the OS's. Only this
+# crate's own dev-dependency below turns it on. It also brings rcgen, which `testing`'s
+# TLS-inspecting proxy uses to make its CA and leaf certificates at test time.
+test-support = ["dep:rcgen"]
+
+[dependencies]
+clauseo-protocol = { path = "../protocol" }
+clauseo-process = { path = "../process" }
+clauseo-settings = { path = "../settings" }
+async-channel = { workspace = true }
+async-io = { workspace = true }
+base64 = "0.22.1"
+dunce = { workspace = true }
+flate2 = "1.1.10"
+futures = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha2 = { workspace = true, features = ["std"] }
+tar = { version = "0.4.46", default-features = false }
+thiserror = { workspace = true }
+ureq = { version = "3.5.0", default-features = false, features = [
+  "rustls",
+  "platform-verifier",
+] }
+zip = { version = "9.2.2", default-features = false, features = [
+  "deflate-flate2",
+] }
+
+# The rustls ureq already uses (0.23.46): a TLS failure reaches `download` as an io error
+# wrapping `rustls::Error`, and `testing`'s proxy terminates TLS with its server side.
+rustls = { version = "0.23.46", default-features = false, features = [
+  "ring",
+  "std",
+] }
+# Test support only (see the feature above): MIT OR Apache-2.0.
+rcgen = { version = "0.14.10", optional = true, default-features = false, features = [
+  "crypto",
+  "pem",
+  "ring",
+] }
+
+[target.'cfg(unix)'.dependencies]
+nix = { workspace = true, features = ["fs"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = [
+  "Win32_Storage_FileSystem",
+  # sysproxy: Internet Settings' ProxyEnable and ProxyServer.
+  "Win32_System_Registry",
+] }
+
+[dev-dependencies]
+# Itself with test-support, so the tests reach `InstallConfig::resolver` with no flag.
+clauseo-agents = { path = ".", features = ["test-support"] }
+clauseo-process = { path = "../process", features = ["test-support"] }
+
+[lints]
+workspace = true

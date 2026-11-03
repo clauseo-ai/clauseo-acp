@@ -1,0 +1,143 @@
+//! The std calls that change files: the one place in `agents` that may call them. The workspace
+//! `clippy.toml` bans each of them everywhere else, and the expect below covers only this file.
+//!
+//! Everything written is under `<data_dir>/agents`: downloads, the npm cache's folder, the
+//! runtime, install folders and receipts. Callers pass paths they built from the data folder.
+
+#![expect(
+    clippy::disallowed_methods,
+    reason = "agents writes files here alone; clippy.toml bans std's writes elsewhere"
+)]
+
+use std::fs::{File, OpenOptions};
+use std::io::{self, Write as _};
+use std::path::Path;
+
+pub(crate) mod extract;
+
+pub(crate) use extract::{ArchiveKind, ExtractError, extract};
+
+/// `fs::create_dir_all`.
+pub(crate) fn create_dir_all(path: &Path) -> io::Result<()> {
+    std::fs::create_dir_all(path)
+}
+
+/// Opens `path` to append, making it if missing: a partial download resumed.
+pub(crate) fn open_append(path: &Path) -> io::Result<File> {
+    OpenOptions::new().create(true).append(true).open(path)
+}
+
+/// Opens `path` empty, making it if missing and truncating it if not: a download started over.
+pub(crate) fn open_truncate(path: &Path) -> io::Result<File> {
+    OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(path)
+}
+
+/// `fs::rename`: `from` replaces `to` (a file), or moves a folder to a free name.
+pub(crate) fn rename(from: &Path, to: &Path) -> io::Result<()> {
+    std::fs::rename(from, to)
+}
+
+/// Removes the file at `path`; a missing file is fine.
+pub(crate) fn remove_file(path: &Path) -> io::Result<()> {
+    match std::fs::remove_file(path) {
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+        other => other,
+    }
+}
+
+/// Removes the folder at `path` and everything in it, never following a link out of it; a
+/// missing folder is fine.
+pub(crate) fn remove_dir_all(path: &Path) -> io::Result<()> {
+    match std::fs::remove_dir_all(path) {
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+        other => other,
+    }
+}
+
+/// Writes `bytes` to `path` atomically: into `.<name>.tmp` beside it, synced, then renamed
+/// over `path`. A crash leaves the old file or none, never half of the new one.
+pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let name = path
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no file name"))?;
+    let mut tmp_name = std::ffi::OsString::from(".");
+    tmp_name.push(name);
+    tmp_name.push(".tmp");
+    let tmp = path.with_file_name(tmp_name);
+    let written = (|| {
+        let mut file = open_truncate(&tmp)?;
+        file.write_all(bytes)?;
+        file.sync_all()
+    })();
+    match written.and_then(|()| std::fs::rename(&tmp, path)) {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            drop(remove_file(&tmp));
+            Err(err)
+        }
+    }
+}
+
+/// Removes `path` whatever it is: a folder with everything in it, or a file or link (never
+/// what a link points to). A missing path is fine.
+pub(crate) fn remove_any(path: &Path) -> io::Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.is_dir() => remove_dir_all(path),
+        Ok(_) => remove_file(path),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err),
+    }
+}
+
+/// Tests only: sets `path`'s Unix mode.
+#[cfg(all(test, unix))]
+pub(crate) fn set_mode(path: &Path, mode: u32) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt as _;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+}
+
+/// Tests only: makes a symbolic link at `link` to `target`.
+#[cfg(all(test, unix))]
+pub(crate) fn symlink(target: &Path, link: &Path) -> io::Result<()> {
+    std::os::unix::fs::symlink(target, link)
+}
+
+/// Tests only: a fresh folder under the temp folder, removed on drop.
+#[cfg(test)]
+pub(crate) struct TestDir(pub(crate) std::path::PathBuf);
+
+#[cfg(test)]
+impl TestDir {
+    /// A new empty folder named for `tag`, this process and a counter.
+    pub(crate) fn new(tag: &str) -> TestDir {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let n = NEXT.fetch_add(1, Ordering::Relaxed);
+        let path =
+            std::env::temp_dir().join(format!("clauseo-agents-{tag}-{}-{n}", std::process::id()));
+        drop(remove_dir_all(&path));
+        std::fs::create_dir_all(&path).unwrap();
+        TestDir(path)
+    }
+
+    /// Writes `contents` to `rel` (`/`-separated) under the folder, making its folders.
+    pub(crate) fn file(&self, rel: &str, contents: &[u8]) -> std::path::PathBuf {
+        let path = rel
+            .split('/')
+            .fold(self.0.clone(), |path, part| path.join(part));
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, contents).unwrap();
+        path
+    }
+}
+
+#[cfg(test)]
+impl Drop for TestDir {
+    fn drop(&mut self) {
+        drop(remove_dir_all(&self.0));
+    }
+}
