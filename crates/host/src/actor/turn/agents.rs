@@ -46,6 +46,11 @@ pub(super) enum Stage {
     Loading,
     /// Its session is attached.
     Attached,
+    /// It was attached and a call to it came back `Closed`: its connection is gone and
+    /// `Ended` is on its way. The owner posts a call's answer before `Ended`, so work can
+    /// come between the two (Windows reports a process exit later than Unix does); that work
+    /// waits for a new agent instead of going to the closed connection.
+    Closed,
     /// The shutdown ladder runs; `Ended` follows.
     Stopping,
 }
@@ -117,6 +122,12 @@ pub(super) fn ensure(actor: &mut Actor, thread: ThreadId, waiting: Waiting) {
             None => start(actor, thread, vec![waiting]),
         },
         Some(agent) => match agent.stage {
+            Stage::Closed => {
+                // `Ended` is due; the stop only ends one whose process outlived its pipes.
+                agent.link.stop();
+                agent.stage = Stage::Stopping;
+                agent.after_stop.push(waiting);
+            }
             Stage::Attached => run_waiting(actor, thread, waiting),
             Stage::Initializing | Stage::Loading => agent.waiting.push(waiting),
             Stage::Stopping => agent.after_stop.push(waiting),
@@ -329,6 +340,26 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
     let same = state(actor, thread)
         .and_then(|state| state.agent.as_deref())
         .is_some_and(|agent| agent.id == id);
+    let closed = matches!(
+        &reply,
+        AgentReply::Prompt {
+            result: Err(clauseo_acp::Error::Closed),
+            ..
+        } | AgentReply::Config {
+            result: Err(clauseo_acp::Error::Closed),
+            ..
+        } | AgentReply::Mode {
+            result: Err(clauseo_acp::Error::Closed),
+            ..
+        }
+    );
+    if same
+        && closed
+        && let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut())
+        && agent.stage == Stage::Attached
+    {
+        agent.stage = Stage::Closed;
+    }
     match reply {
         AgentReply::Prompt { turn, result } => end::on_prompt_done(actor, thread, turn, result),
         AgentReply::Config { ctx, result } => {
