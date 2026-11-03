@@ -1070,6 +1070,7 @@ dependencies = [
  "clauseo-profile",
  "clauseo-protocol",
  "clauseo-reducer",
+ "clauseo-search",
  "clauseo-settings",
  "clauseo-store",
  "criterion",

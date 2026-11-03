@@ -6,7 +6,8 @@ use std::path::PathBuf;
 
 use clauseo_protocol::{
     CommandEnvelope, CommandId, CommandOutcome, Cursor, Envelope, FileRefId, FolderRefId,
-    HostQuery, MatterId, Principal, QueryResult, Seq, StreamId, ThreadId, ViewEpoch,
+    HostQuery, MatterId, Principal, QueryResult, SearchAnswer, SearchRequest, Seq, StreamId,
+    ThreadId, ViewEpoch,
 };
 use clauseo_store::{Committed, Receipt, Reopen, SnapshotIn};
 use futures::channel::oneshot;
@@ -37,6 +38,13 @@ pub(crate) enum Request {
         principal: Principal,
         query: HostQuery,
         reply: Reply<QueryResult>,
+    },
+    /// A search from `window`, superseded by a newer one from the same window.
+    Search {
+        principal: Principal,
+        window: String,
+        request: SearchRequest,
+        reply: Reply<SearchAnswer>,
     },
     Subscribe {
         principal: Principal,

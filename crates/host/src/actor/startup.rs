@@ -4,7 +4,7 @@
 
 use std::collections::BTreeMap;
 use std::rc::Rc;
-use std::sync::mpsc;
+use std::sync::{Arc, mpsc};
 
 use clauseo_protocol::{MatterKind, StreamId};
 use clauseo_store::{Store, StoreOptions};
@@ -33,7 +33,14 @@ pub(super) async fn open(
     write::create_dir_all(&data_dir).map_err(|error| Error::Store(error.into()))?;
     write::create_dir_all(&matter_settings(&data_dir).matters_root)
         .map_err(|error| Error::Store(error.into()))?;
-    let store = Store::open(StoreOptions::new(data_dir)).await?;
+    let store = Store::open(StoreOptions::new(data_dir.clone())).await?;
+    // The index opens (or rebuilds) on its own thread: start-up does not wait for it.
+    let search = crate::search::Search::start(
+        data_dir,
+        store.clone(),
+        Arc::clone(&parts.clock),
+        parts.search.clone(),
+    )?;
     let heads = store.heads().await?;
     let tails = store.tail_times().await?.into_iter().collect();
     let mut matters = BTreeMap::new();
@@ -88,6 +95,7 @@ pub(super) async fn open(
         pipeline: Pipeline::new(heads),
         feeder,
         snapshots,
+        search,
         effective: parts.effective,
         launcher: parts.launcher,
         profile: parts.profile,

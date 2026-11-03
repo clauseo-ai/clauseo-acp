@@ -98,6 +98,13 @@ pub(super) fn query(
             };
             matter_query(actor, matter, vec![checkpoint], job, reply);
         }
+        HostQuery::Search(ref request) => actor.search.query(
+            crate::search::QUERY_WINDOW,
+            request.clone(),
+            Box::new(move |answer| {
+                let _gone = reply.send(answer.map(QueryResult::Search));
+            }),
+        ),
         HostQuery::GetDefaultLocation => {
             let display = super::rail::folder_display(
                 actor.effective.default_matters_dir(),

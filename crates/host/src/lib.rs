@@ -14,6 +14,11 @@
 //!   short-lived `clauseo-stat` thread per `ListMatters` that reads each matter's folder state,
 //!   and a short-lived `clauseo-scan` thread per `ScanFolder` (one at a time) that walks the
 //!   folder before it becomes a matter and posts its counts back.
+//! - The `clauseo-search` thread (`search.rs`, decision 0043): it owns `search.sqlite` in the
+//!   data folder, opens it (or rebuilds it from the log through the store) without holding up
+//!   start-up, and indexes each returned commit's envelopes, which the actor hands over a bounded
+//!   channel with `try_send` and never waits for; a full channel makes it catch up from its
+//!   per-stream watermarks. A forgotten matter's rows are deleted; its import indexes it again.
 //! - The Scratch matter: a first start creates it.
 //! - The matter rail (`actor/rail.rs`, `actor/matter_details.rs`): each matter's details on
 //!   its row (`UpdateMatter`, `OpenMatter`), its status computed from its threads, its last
@@ -71,6 +76,8 @@
 //!   [`HostHandle::subscribe`], [`HostHandle::subscribe_events`],
 //!   [`HostHandle::subscribe_app`], [`HostHandle::subscribe_limits`], [`HostHandle::ack`],
 //!   [`HostHandle::register_folder`], [`HostHandle::register_file`],
+//!   [`HostHandle::search`] (or `HostQuery::Search`; a newer `generation` from the same
+//!   window answers an older search `Cancelled`, interrupting it if it runs),
 //!   [`HostHandle::locate_file`] and [`HostHandle::matter_folder`] (the desktop's `open_file`
 //!   and `reveal`, 0026; the local desktop only), and [`HostHandle::shutdown`]. Each call is
 //!   one request over a `bounded(256)` channel with a `futures` oneshot for the reply.
@@ -104,7 +111,8 @@
 //! - [`Clock`] ([`SystemClock`], [`Now`]) and [`IdSource`] ([`RandomV7`]) are the host's only
 //!   sources of time and ids. The `test-support` feature adds `ManualClock`, `SequentialIds`,
 //!   `HostConfig::with_patch_window_bytes`, `HostConfig::with_app_subscription_capacity`,
-//!   `HostConfig::with_codex_hooks`,
+//!   `HostConfig::with_codex_hooks`, `HostConfig::with_search_channel_capacity` and
+//!   `HostConfig::with_search_holds` (with [`SearchHold`]),
 //!   `EncodedEvent::ptr_eq` and
 //!   `HostHandle::abort_for_test`, which ends the thread with no flush and no graceful stop.
 //! - [`codex_hook_config`]: the `hooks` value for Codex's config that runs the same guard,
@@ -144,11 +152,11 @@
 //! - No clock read outside `SystemClock::now`; every delay runs on the host's [`Clock`].
 //! - Agents start only through the [`Launcher`](clauseo_process::Launcher) in the config.
 //! - No `tokio` and no `tauri`. Matter work runs on the `clauseo-matter` threads and zstd on
-//!   `clauseo-snapshot`, never on the actor.
+//!   `clauseo-snapshot`, never on the actor. The actor never touches the search index.
 //!
 //! # Depends on
 //!
-//! `protocol`, `reducer`, `store`, `matters`, `process`, `acp`, `settings`, `limits` (its
+//! `protocol`, `reducer`, `store`, `matters`, `process`, `acp`, `settings`, `search`, `limits` (its
 //! model, its readers and `CODEX_OVERRIDES`), `profile` (the placeholders and the skill writes,
 //! 0030), `counts` (the usage counts, 0036), `async-channel`, `async-io`, `futures`, `uuid`,
 //! `serde_json`, `tracing`, `thiserror`, `dunce` and `sha2` (the Codex hook's trust hash,
@@ -189,6 +197,7 @@ mod pipeline;
 pub mod pre_write_guard;
 mod principal;
 mod rate;
+mod search;
 mod sent;
 mod snapshot;
 mod sources;
@@ -214,3 +223,4 @@ pub use handle::{
 #[cfg(feature = "test-support")]
 pub use ids::SequentialIds;
 pub use ids::{IdSource, RandomV7};
+pub use search::SearchHold;

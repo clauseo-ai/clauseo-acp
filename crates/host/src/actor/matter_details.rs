@@ -127,6 +127,7 @@ fn forget(actor: &mut Actor, ctx: &CommandCtx, matter: MatterId) -> Result<(), E
 /// list with its row as it was.
 pub(super) fn forget_committed(actor: &mut Actor, matter: MatterId, durable: bool) {
     if durable {
+        actor.search.forget(matter);
         actor.folder_states.remove(&matter);
         turn::stop_agents(actor, matter);
         return;
@@ -181,6 +182,7 @@ pub(super) fn unforget(
 /// otherwise it stays forgotten as it was.
 pub(super) fn unforget_committed(actor: &mut Actor, row: MatterRow, durable: bool) {
     if durable && let Some(mut entry) = actor.forgotten.remove(&row.id) {
+        actor.search.reindex(row.id);
         entry.row = row;
         // A new worker opens the folder where it is now, on first use.
         entry.worker = None;
