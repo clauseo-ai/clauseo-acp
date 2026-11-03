@@ -365,6 +365,18 @@ impl HostConfig {
         self
     }
 
+    /// The profile hook set, for tests of a caller's wiring (`crates/desktop`'s `host_config`).
+    #[cfg(feature = "test-support")]
+    pub fn profile_hook(&self) -> &dyn ProfileHook {
+        self.profile.as_ref()
+    }
+
+    /// The folder set by [`Self::with_agent_path_prepend`], for tests of a caller's wiring.
+    #[cfg(feature = "test-support")]
+    pub fn agent_path_prepend(&self) -> Option<&std::path::Path> {
+        self.wiring.path_prepend.as_deref()
+    }
+
     /// Takes the config apart.
     pub(crate) fn into_parts(self) -> ConfigParts {
         ConfigParts {

@@ -12,8 +12,9 @@
 //!   (`host_start.rs`), so the webview never waits for the store; a command sent before the host
 //!   is ready waits for it, and after a failed start gets that start's error. The host runs with
 //!   the effective settings (`Locations::resolve`, so `CLAUSEO_DATA_DIR` moves the data folder;
-//!   `Effective::load` with the system policy sources), the `PassthroughLauncher`, and the
-//!   refused folders of `refused_folders`. Exit waits for the start, then for
+//!   `Effective::load` with the system policy sources), the `PassthroughLauncher`, the
+//!   refused folders of `refused_folders`, and the launch profile (`profile.rs`, built on that
+//!   thread; with none when it cannot be built). Exit waits for the start, then for
 //!   `HostHandle::shutdown` and `HostJoin::join`, on their own thread, then exits.
 //! - On Windows, `run` first checks the `WebView2` runtime; when it is missing or older than
 //!   `minimumWebview2Version`, a task dialog says so and `run` returns without building the app
@@ -74,6 +75,7 @@ mod marks;
 mod open;
 mod picked;
 mod pre_write_guard;
+mod profile;
 mod rust_only;
 mod settings_window;
 #[cfg(test)]
@@ -93,6 +95,7 @@ use clauseo_settings::{
 };
 use host_start::{HostCell, HostStart};
 pub use pre_write_guard::guard_requested;
+use profile::DesktopProfile;
 use rust_only::PluginRustOnly;
 use tauri::{
     App, AppHandle, Manager, RunEvent, Runtime, WebviewUrl, WebviewWindowBuilder, WindowEvent,
@@ -233,9 +236,46 @@ pub fn run() -> tauri::Result<()> {
 }
 
 /// Starts the session host on its own thread (`Host::start` blocks until the store opens),
-/// its outcome going into the bridge's cell through `start`.
+/// its outcome going into the bridge's cell through `start`. The launch profile is built on
+/// that thread too (it runs stetdoc and reads files), before the host starts.
 fn start_host(start: HostStart, locations: Locations) -> std::io::Result<()> {
-    host_start::start_on_thread(start, move || Host::start(host_config(&locations)))
+    host_start::start_on_thread(start, move || {
+        let profile = DesktopProfile::build(&locations)
+            .map_err(|err| tracing::warn!(%err, "no launch profile: agents start without it"))
+            .ok();
+        Host::start(with_profile(host_config(&locations), profile))
+    })
+}
+
+/// `config` with the launch profile as its hook and stetdoc's folder first on the agents'
+/// `PATH` (when stetdoc was found), or unchanged (`NoProfile`) when the profile could not be
+/// built. No egress proxy yet: stage C's is not wired, so the browser shows `NoProxy` (0030).
+fn with_profile(config: HostConfig, profile: Option<DesktopProfile>) -> HostConfig {
+    let Some(profile) = profile else {
+        return config;
+    };
+    let config = match profile.path_prepend().and_then(absolute_folder) {
+        Some(folder) => config.with_agent_path_prepend(folder),
+        None => config,
+    };
+    config.with_profile_hook(Box::new(profile))
+}
+
+/// `folder` when it is absolute. The host takes the agents' `PATH` folder as given, and a
+/// relative one would name a folder under each agent's working folder, so a relative folder is
+/// a bug (a debug build stops on it) and a release build logs it and prepends nothing.
+fn absolute_folder(folder: std::path::PathBuf) -> Option<std::path::PathBuf> {
+    debug_assert!(
+        folder.is_absolute(),
+        "the agents' PATH folder must be absolute: {}",
+        folder.display()
+    );
+    if folder.is_absolute() {
+        Some(folder)
+    } else {
+        tracing::warn!(folder = %folder.display(), "a relative folder does not go on the agents' PATH");
+        None
+    }
 }
 
 /// The host's config: the effective settings under `locations` with the system policy
