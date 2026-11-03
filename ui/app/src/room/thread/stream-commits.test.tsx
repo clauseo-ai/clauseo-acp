@@ -36,6 +36,7 @@ import { connectRoom } from "../start.ts";
 import { defaultOutcome, summary, THE_MATTER } from "./harness.ts";
 import { stubFonts } from "./testing.ts";
 import { loadThread } from "./chunk.ts";
+import { sameIds } from "./ids.ts";
 
 // Each row gets its own Profiler, inside a memo boundary that matches the real row's, so a row's onRender fires only
 // when that row's subtree renders.
@@ -55,6 +56,49 @@ vi.mock("./rows.tsx", async (load) => {
     }),
   };
 });
+
+// and each step group its own, by its ids and whether it is the running one's place (`tail`): a group counts as
+// changed when a frame touches one of its rows, and as settled when it stops being the running group
+const GROUP = "group:";
+vi.mock("./step-group-live.tsx", async (load) => {
+  const real = await load<typeof import("./step-group-live.tsx")>();
+  return {
+    ...real,
+    LiveStepGroup: memo(function ProfiledGroup(props: GroupProps) {
+      return createElement(
+        Profiler,
+        { id: `${GROUP}${props.tail} ${props.ids.join(" ")}`, onRender: countRow },
+        createElement(real.LiveStepGroup, props),
+      );
+    }, sameGroup),
+  };
+});
+
+type GroupProps = {
+  ids: readonly EntryId[];
+  stream: StreamId;
+  paged: ReadonlyMap<EntryId, ViewEntry>;
+  tail: boolean;
+};
+
+/** The real group's own memo test: the same ids, stream, older pages and place. */
+const sameGroup = (a: GroupProps, b: GroupProps) =>
+  a.stream === b.stream && a.tail === b.tail && a.paged === b.paged && sameIds(a.ids, b.ids);
+
+/** A group's commit: changed when the frame touched one of its rows, settled when its `tail` went from what the
+ * group of the same first row had, or null for a row's. */
+function groupCommit(
+  id: string,
+  touched: ReadonlySet<string>,
+  tails: Map<string, string>,
+): "changed" | "settled" | "unchanged" | null {
+  if (!id.startsWith(GROUP)) return null;
+  const [tail, ...ids] = id.slice(GROUP.length).split(" ");
+  const was = tails.get(ids[0]!);
+  tails.set(ids[0]!, tail!);
+  if (ids.some((i) => touched.has(i))) return "changed";
+  return was !== undefined && was !== tail ? "settled" : "unchanged";
+}
 
 beforeAll(() => {
   stubLayout();
@@ -145,6 +189,7 @@ test("500 chunks and 20 tool calls into the room's thread: one commit a frame, n
   let settledRowCommits = 0;
   let cursor = 2;
   const seen = new Set<string>([entryIdOf(prompt)]);
+  const tails = new Map<string, string>();
   for (let i = 0; i < bodies.length; i += PER_FRAME) {
     const slice = bodies.slice(i, i + PER_FRAME);
     for (const body of slice) transport.deliver(JSON.stringify(event(batch(cursor++, [body]))));
@@ -155,7 +200,8 @@ test("500 chunks and 20 tool calls into the room's thread: one commit a frame, n
     phases.length = 0;
     frame();
     // an answer that stops being the latest output renders once more, settled (#123's final render: its code
-    // coloured, its links live); its own part changed, so it counts apart from the unchanged rows
+    // coloured, its links live); its own part changed, so it counts apart from the unchanged rows. So does a step
+    // group that stops being the running one as the next answer starts after it (groupCommit)
     const streamingAfter = store.view(stream!)?.latestOutput ?? null;
     const settled =
       streamingBefore !== streamingAfter && streamingBefore?.startsWith("agent_text:") === true
@@ -165,7 +211,11 @@ test("500 chunks and 20 tool calls into the room's thread: one commit a frame, n
     maxCommits = Math.max(maxCommits, phases.length);
     if (phases.length > 1) framesOverOneCommit += 1;
     for (const [id, n] of rowCommits) {
-      if (touched.has(id)) changedRowCommits += n;
+      const group = groupCommit(id, touched, tails);
+      if (group === "changed") changedRowCommits += n;
+      else if (group === "settled") settledRowCommits += n;
+      else if (group === "unchanged") unchangedRowCommits += n;
+      else if (touched.has(id)) changedRowCommits += n;
       else if (id === settled) settledRowCommits += n;
       else unchangedRowCommits += n;
     }
@@ -208,7 +258,7 @@ test("500 chunks and 20 tool calls into the room's thread: one commit a frame, n
       "frames": 194,
       "framesOverOneCommit": 0,
       "maxCommits": 1,
-      "settledRowCommits": 6,
+      "settledRowCommits": 12,
       "unchangedRowCommits": 0,
     }
   `);
@@ -282,7 +332,10 @@ test("a pending permission while an answer streams: one commit a frame, and the 
     maxCommits = Math.max(maxCommits, phases.length);
     expect(rowCommits.get(permissionId), `frame ${i}`).toBeUndefined();
     const touched = touchedBy(bodies);
-    expect([...rowCommits.keys()].filter((id) => !touched.has(id))).toEqual([]);
+    const rowsOf = (id: string) => (id.startsWith(GROUP) ? id.split(" ").slice(1) : [id]);
+    expect([...rowCommits.keys()].filter((id) => !rowsOf(id).some((r) => touched.has(r)))).toEqual(
+      [],
+    );
   }
   expect(maxCommits).toBe(1);
   // the tool call it is about changing renders it, as it should

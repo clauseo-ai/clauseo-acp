@@ -1,7 +1,8 @@
 // The open thread, in its own chunk with the Markdown renderer it shows answers through (chunk.ts): Thread's log and
 // scroller, the older pages above, and the exchanges, grouped by turn (exchanges.ts, rebuilt only as the id list or a
-// user message's place changes), each row reading its own entry (rows.tsx), so while an answer streams one frame
-// commits once and renders only the row whose text grew.
+// user message's place changes), each row reading its own entry (rows.tsx) and each run of tool calls and thoughts in
+// an answer folded into a step group (step-groups.tsx), so while an answer streams one frame commits once and renders
+// only the row whose text grew.
 // Nothing here is needed for the room's first paint: Work, the session and the composer are in the room's own chunk.
 import { memo, useCallback, useMemo, useState, type ReactNode } from "react";
 import { Who } from "@clauseo/components/clauseo/answer.tsx";
@@ -18,8 +19,9 @@ import { exchangesPick, latestAsked } from "./exchanges.ts";
 import { sameIds } from "./ids.ts";
 import { useHasOlder, useQuestionWords } from "./live.ts";
 import { useOlder } from "./older.ts";
-import { PagedRow, Row } from "./rows.tsx";
+import { RowOf } from "./row-of.tsx";
 import { SteerNotesOf } from "./steer-rows.tsx";
+import { LiveAnswerRows } from "./step-groups.tsx";
 
 /** The composer's limit warning, carried in this chunk with the stop's note (limits/limit-warning.tsx loads it). */
 export { WarningNote } from "./limit-warning-note.tsx";
@@ -129,28 +131,6 @@ function Sections({
 const USER = "user_message:";
 const TOOL = "tool_call:";
 
-/** One row: a live one by id, or an older page's by its entry. */
-function RowOf({
-  id,
-  stream,
-  paged,
-  sentNow,
-}: {
-  id: EntryId;
-  stream: StreamId;
-  paged: ReadonlyMap<EntryId, ViewEntry>;
-  sentNow: boolean;
-}) {
-  const entry = paged.get(id);
-  if (entry !== undefined)
-    return sentNow ? (
-      <PagedRow entry={entry} stream={stream} sentNow />
-    ) : (
-      <PagedRow entry={entry} stream={stream} />
-    );
-  return sentNow ? <Row id={id} stream={stream} sentNow /> : <Row id={id} stream={stream} />;
-}
-
 /** One exchange, its rows live or from an older page: a turn can start on a page and go on in the window. */
 const LiveExchange = memo(
   function LiveExchange({
@@ -175,11 +155,15 @@ const LiveExchange = memo(
   }) {
     const rest = asked ? ids.slice(1) : ids;
     const answer =
-      rest.length === 0
-        ? null
-        : rest.map((id) => (
-            <RowOf key={id} id={id} stream={stream} paged={paged} sentNow={id === sentNow} />
-          ));
+      rest.length === 0 ? null : (
+        <LiveAnswerRows
+          ids={rest}
+          stream={stream}
+          paged={paged}
+          sentNow={sentNow}
+          latest={latest}
+        />
+      );
     // a steer's mark in the answer (a user message there) is where a tool call can carry on in the background
     const notes = rest.some((id) => id.startsWith(USER)) && rest.some((id) => id.startsWith(TOOL));
     const step = rest.find((id) => id.startsWith(STEP));
