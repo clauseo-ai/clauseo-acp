@@ -245,8 +245,36 @@ pub(crate) fn keys_by(path: &Path, fold: Fold) -> Vec<Vec<OsString>> {
         .components()
         .map(|component| component_key(component, fold))
         .collect();
+    if cfg!(target_os = "macos") {
+        with_data_volume(key)
+    } else {
+        vec![key]
+    }
+}
+
+/// The comparison keys of `path` by the macOS rule whatever this OS is: [`spellings`] as macOS
+/// makes them (each component lowercased and composed (NFC) when UTF-8, and a
+/// `/System/Volumes/Data` key twice), for the macOS rules that run in every OS's tests
+/// (`place::mac_place`).
+#[cfg(any(test, target_os = "macos"))]
+pub(crate) fn mac_spellings(path: &Path) -> Vec<Vec<OsString>> {
+    let key = path
+        .components()
+        .map(|component| {
+            let name = component.as_os_str();
+            name.to_str().map_or_else(
+                || name.to_owned(),
+                |text| OsString::from(text.to_lowercase().nfc().collect::<String>()),
+            )
+        })
+        .collect();
+    with_data_volume(key)
+}
+
+/// `key`, and first, when it starts with `/system/volumes/data` (macOS's data volume, where
+/// `/Users` also lives), `key` without those three parts.
+fn with_data_volume(key: Vec<OsString>) -> Vec<Vec<OsString>> {
     let mut keys = Vec::with_capacity(2);
-    #[cfg(target_os = "macos")]
     if let [_root, system, volumes, data, ..] = key.as_slice()
         && system == "system"
         && volumes == "volumes"

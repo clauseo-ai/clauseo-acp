@@ -9,7 +9,7 @@
 
 use std::path::Path;
 
-#[cfg(any(test, windows))]
+#[cfg(any(test, windows, target_os = "macos"))]
 use crate::refuse;
 
 #[cfg(windows)]
@@ -83,19 +83,20 @@ fn mac_local_mount(folder: &Path) -> Option<bool> {
 
 #[cfg(any(test, target_os = "macos"))]
 /// The macOS rule. Synced: `folder` is under `<home>/Library/CloudStorage/<name>` (service
-/// from `<name>`) or `<home>/Library/Mobile Documents` (iCloud Drive). Else network when
-/// `local_mount` is `Some(false)` (no `MNT_LOCAL`). Else local.
+/// from `<name>`) or `<home>/Library/Mobile Documents` (iCloud Drive), compared by their
+/// macOS spellings (`refuse::mac_spellings`: without case, and `/System/Volumes/Data/Users/..`
+/// as `/Users/..`). Else network when `local_mount` is `Some(false)` (no `MNT_LOCAL`). Else
+/// local.
 pub(crate) fn mac_place(folder: &Path, home: Option<&Path>, local_mount: Option<bool>) -> Place {
-    if let Some(library) = home.map(|home| home.join("Library")) {
-        if let Ok(rest) = folder.strip_prefix(library.join("CloudStorage"))
-            && let Some(name) = rest.components().next()
+    if let Some(home) = home {
+        if let Some(rest) = mac_rest(folder, home, &["library", "cloudstorage"])
+            && let Some(name) = rest.first()
         {
-            let name = name.as_os_str().to_string_lossy();
             return Place::Synced {
-                service: service_name(&name),
+                service: service_name(name),
             };
         }
-        if folder.starts_with(library.join("Mobile Documents")) {
+        if mac_rest(folder, home, &["library", "mobile documents"]).is_some() {
             return Place::Synced {
                 service: ICLOUD_DRIVE.to_owned(),
             };
@@ -106,6 +107,30 @@ pub(crate) fn mac_place(folder: &Path, home: Option<&Path>, local_mount: Option<
     } else {
         Place::Local
     }
+}
+
+#[cfg(any(test, target_os = "macos"))]
+/// When `folder` is, or is under, `home` joined with `tail` (lowercase parts), by any pair of
+/// their macOS spellings: the parts of `folder` below that, as `folder` spells them.
+fn mac_rest(folder: &Path, home: &Path, tail: &[&str]) -> Option<Vec<String>> {
+    let parts: Vec<_> = folder.components().collect();
+    for key in refuse::mac_spellings(folder) {
+        // A key without the data volume's three parts is shorter than `parts` by three.
+        let offset = parts.len() - key.len();
+        for home_key in refuse::mac_spellings(home) {
+            let mut prefix = home_key;
+            prefix.extend(tail.iter().map(std::ffi::OsString::from));
+            if key.starts_with(&prefix) {
+                let below = parts.iter().skip(offset + prefix.len());
+                return Some(
+                    below
+                        .map(|part| part.as_os_str().to_string_lossy().into_owned())
+                        .collect(),
+                );
+            }
+        }
+    }
+    None
 }
 
 #[cfg(any(test, windows))]
@@ -139,15 +164,19 @@ pub(crate) fn windows_place(folder: &str, onedrive_roots: &[String], remote: boo
 }
 
 #[cfg(any(test, windows))]
-/// A Windows path made comparable: `/` as `\`, no `\\?\` before a drive letter, no trailing
-/// `\`, lower case.
+/// A Windows path made comparable: `/` as `\`, the verbatim forms made plain (`\\?\C:\..` as
+/// `C:\..`, `\\?\UNC\server\share\..` as `\\server\share\..`), no trailing `\`, lower case.
 fn windows_key(path: &str) -> String {
     let path = path.replace('/', "\\");
-    let path = match path.strip_prefix(r"\\?\") {
-        Some(rest) if !refuse::is_unc_text(&path) => rest.to_owned(),
-        _ => path,
+    let plain = match path.strip_prefix(r"\\?\") {
+        Some(rest) => match rest.get(..4).zip(rest.get(4..)) {
+            Some((head, share)) if head.eq_ignore_ascii_case(r"UNC\") => format!(r"\\{share}"),
+            _ if rest.as_bytes().get(1) == Some(&b':') => rest.to_owned(),
+            _ => path.clone(),
+        },
+        None => path,
     };
-    path.trim_end_matches('\\').to_lowercase()
+    plain.trim_end_matches('\\').to_lowercase()
 }
 
 #[cfg(any(test, target_os = "macos", windows))]
