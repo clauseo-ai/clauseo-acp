@@ -67,8 +67,9 @@ function leadOf(state: WorkingState): "pen" | "break" | "question" | "wait" {
   return state.kind === "wait" && state.code !== undefined ? "break" : "wait";
 }
 
-/** The row's lead, by leadOf, in one fixed slot whatever it is (the pen's box: 20 px by 110/36 of it, scaled with the
- * text size but not with the language's line), so the words start at the same place when the lead changes. */
+/** The row's lead, by leadOf: an icon at its own 16 px, so the words start over the field's own as the prototype has
+ * them, or the pen in its fixed box (20 px by 110/36 of it, scaled with the text size, never with the language's line),
+ * so nothing moves while it writes. */
 function Lead({ state }: { state: WorkingState }) {
   const lead = leadOf(state);
   return (

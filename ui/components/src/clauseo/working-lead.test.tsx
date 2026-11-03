@@ -83,20 +83,28 @@ test.each(STATES)("the working line on %s leads with its own mark", async (_, st
   expect(slot.contains(icon)).toBe(true);
 });
 
-test("the lead's slot and the pen are one box, fixed by the text size alone, never by the language's line", () => {
+test("an icon lead keeps its 16 px, so the words start at the prototype's x 48; the pen's box is fixed and the same in either language", () => {
   const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "live.css"), "utf8");
   const rule = (selector: string) => {
     const at = css.indexOf(`\n  ${selector} {`);
     expect(at, selector).toBeGreaterThan(-1);
     return css.slice(at, css.indexOf("}", at));
   };
+  const px: Record<string, number> = { "var(--s2)": 8, "var(--s4)": 16 };
+  // the prototype's working line: the wait icon at x 16, the words at x 48, over the field's own
+  const row = rule(".working");
+  const padStart = /padding: 0 var\(--s1-5\) 0 (var\(--s4\));/.exec(row)?.[1];
+  const gap = /column-gap: (var\(--s2\));/.exec(row)?.[1];
+  const lead = rule(".working-lead");
+  const after = /margin-right: (var\(--s2\));/.exec(lead)?.[1];
+  expect(lead).not.toMatch(/width|height/);
+  expect(px[padStart!]! + 16 + px[after!]! + px[gap!]!).toBe(48);
+  // the pen's box: fixed by the text size alone, never by Hindi's taller line, and the pen fills it
   const box = (r: string) => [/width: ([^;]+);/.exec(r)?.[1], /height: ([^;]+);/.exec(r)?.[1]];
-  const slot = box(rule(".working-lead"));
-  expect(slot).toEqual(["calc(var(--s5) * var(--k) * 110 / 36)", "calc(var(--s5) * var(--k))"]);
-  expect(box(rule(".pen-mark"))).toEqual(slot);
-  // Hindi's taller line (--lh-small-row) never sizes either
-  expect(rule(".working-lead") + rule(".pen-mark")).not.toContain("--lh-");
-  // the gap after the lead is the slot's own, not the icon's, so it is the same for every lead
+  const pen = box(rule('.working-lead[data-lead="pen"]'));
+  expect(pen).toEqual(["calc(var(--s5) * var(--k) * 110 / 36)", "calc(var(--s5) * var(--k))"]);
+  expect(box(rule(".pen-mark"))).toEqual(pen);
+  expect(rule('.working-lead[data-lead="pen"]') + rule(".pen-mark")).not.toContain("--lh-");
   expect(rule(".working-icon")).not.toContain("margin");
 });
 
