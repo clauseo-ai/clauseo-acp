@@ -19,7 +19,7 @@ use windows::Win32::Security::{
     TOKEN_USER, TokenIsAppContainer, TokenRestrictedSids, TokenUser,
 };
 use windows::Win32::System::Registry::{
-    HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RRF_SUBKEY_WOW6464KEY, RegGetValueW,
+    HKEY_LOCAL_MACHINE, RRF_NOEXPAND, RRF_RT_REG_SZ, RRF_SUBKEY_WOW6464KEY, RegGetValueW,
 };
 use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 use windows::core::{HRESULT, HSTRING, PCWSTR, w};
@@ -45,10 +45,11 @@ pub(super) fn sandbox_user_sid() -> Result<Option<String>, Failure> {
 }
 
 /// The `REG_SZ` `value` of `HKLM\<subkey>`, read in the 64-bit view (`RRF_SUBKEY_WOW6464KEY`,
-/// `RegGetValueW`'s `KEY_WOW64_64KEY`). Missing key or value: `Ok(None)`. Another type:
-/// [`Failure::WrongType`]. Refused: [`Failure::Denied`]. Not UTF-16: [`Failure::NotASid`].
+/// `RegGetValueW`'s `KEY_WOW64_64KEY`). Missing key or value: `Ok(None)`. Another type, a
+/// `REG_EXPAND_SZ` included (refused unexpanded, `RRF_NOEXPAND`): [`Failure::WrongType`]. Refused:
+/// [`Failure::Denied`]. Not UTF-16: [`Failure::NotASid`].
 fn read_string(subkey: PCWSTR, value: PCWSTR) -> Result<Option<String>, Failure> {
-    let flags = RRF_RT_REG_SZ | RRF_SUBKEY_WOW6464KEY;
+    let flags = RRF_RT_REG_SZ | RRF_NOEXPAND | RRF_SUBKEY_WOW6464KEY;
     let mut size = 0u32;
     // SAFETY: the key and value names are NUL-terminated literals; no data pointer asks only for
     // the size, written to `size`.
@@ -219,8 +220,12 @@ impl Drop for Token {
 struct LocalSid(PSID);
 
 impl LocalSid {
-    /// The SID `sid` spells; [`Failure::NotASid`] when `ConvertStringSidToSidW` fails.
+    /// The SID `sid` spells in the `S-1-…` form; [`Failure::NotASid`] for anything else, an alias
+    /// such as `BA` included, or when `ConvertStringSidToSidW` fails.
     fn parse(sid: &str) -> Result<Self, Failure> {
+        if !sid.starts_with("S-") {
+            return Err(Failure::NotASid);
+        }
         let mut parsed = PSID::default();
         // SAFETY: the HSTRING is NUL-terminated and lives for the call; `parsed` is a live
         // out-pointer.

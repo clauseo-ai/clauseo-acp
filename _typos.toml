@@ -24,6 +24,9 @@ extend-ignore-re = ["U\\+[0-9A-Fa-f]{4,6}(?:-[0-9A-Fa-f]{4,6})?"]
 curren = "curren"
 # Win32's TrackMouseEvent flags (TME_LEAVE, TME_NONCLIENT), in crates/desktop/src/window_frame/.
 TME = "TME"
+# The SID string alias for the built-in Administrators group (BA), in crates/desktop/src/jailed/
+# and the ADR that describes the sandbox record: it must be told apart from a real SID.
+BA = "BA"
 # The ordinal suffix in "2nd" (the legal extras' superscripts, `2^nd^`), and Unicode's Nd (decimal number)
 # category in the slug pattern of ui/components/src/markdown/slugs.ts.
 nd = "nd"

@@ -18,12 +18,13 @@
 //!   is an `AppContainer` (`TokenIsAppContainer`), has restricting SIDs
 //!   (`GetTokenInformation(TokenRestrictedSids)`, a non-empty list), or its user
 //!   (`TokenUser`) is S15's sandbox user, compared with `EqualSid` against the SID S15's set-up
-//!   records in `HKLM\SOFTWARE\Clauseo\Sandbox`, value `UserSid` (`REG_SZ`, 64-bit view;
-//!   missing means no sandbox user). `ERROR_ACCESS_DENIED` on the token or the record, a record
-//!   that is not a `REG_SZ`, or one that is not a valid SID, also counts as sandboxed; any other
-//!   failure fails open as above. On macOS `sandbox_check(getpid(), NULL, SANDBOX_FILTER_NONE)`
-//!   is non-zero (its -1 error counts as sandboxed). Linux has no check: the Linux agent jail is
-//!   not a target.
+//!   records in `HKLM\SOFTWARE\Clauseo\Sandbox`, value `UserSid` (a `REG_SZ` holding a SID in the
+//!   `S-1-…` form, read unexpanded, 64-bit view; missing means no sandbox user).
+//!   `ERROR_ACCESS_DENIED` on the token or the record, a record that is not a `REG_SZ` (a
+//!   `REG_EXPAND_SZ` included), or one that is not an `S-1-…` SID (an alias such as `BA` is not),
+//!   also counts as sandboxed; any other failure fails open as above. On macOS
+//!   `sandbox_check(getpid(), NULL, SANDBOX_FILTER_NONE)` is non-zero (its -1 error counts as
+//!   sandboxed). Linux has no check: the Linux agent jail is not a target.
 //! - Known revisit: a sandboxed packaging of Clauseo itself (the Mac App Store, or MSIX with an
 //!   `AppContainer`) would trip this check (`docs/decisions/0012-desktop-bridge.md`).
 
