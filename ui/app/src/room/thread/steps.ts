@@ -131,6 +131,20 @@ export function summaryOf(lang: Lang, calls: readonly ToolCallEntry[]): string {
   return out.join(" ");
 }
 
+/** The folded line's words for a group at rest: the summary counts only the steps that finished, so a step still
+ * waiting, or one that failed or was stopped, is never told as done. With none finished, the newest step still to
+ * finish says what it is doing; otherwise what was tried, up to three ("Tried to read Lease.pdf."), the rest as more. */
+export function restLine(lang: Lang, calls: readonly ToolCallEntry[]): string {
+  const done = calls.filter((c) => c.status === "completed");
+  if (done.length > 0) return summaryOf(lang, done);
+  const waiting = [...calls].reverse().find(unsettled);
+  if (waiting !== undefined) return doingOf(lang, waiting);
+  const out = calls.slice(0, NAMED).map((c) => doneOf(lang, c));
+  const rest = calls.length - NAMED;
+  if (rest > 0) out.push(counted(lang, ["And 1 more.", "And {n} more."], rest));
+  return out.join(" ");
+}
+
 /** What failed or was stopped in a group, in words for the folded line; "" when nothing did. */
 export function troubleOf(lang: Lang, calls: readonly ToolCallEntry[]): string {
   const failed = calls.filter((c) => c.status === "failed").length;
@@ -239,7 +253,7 @@ export function lineOf(lang: Lang, entries: readonly (ViewEntry | undefined)[], 
   const kinds = iconsOf(calls);
   const trouble = troubleOf(lang, calls);
   const aside = backgroundLine(lang, calls);
-  if (!live) return { kinds, line: summaryOf(lang, calls), more: aside, trouble };
+  if (!live) return { kinds, line: restLine(lang, calls), more: aside, trouble };
   // the newest of what is still to finish, or a thought after the last of them
   let now: ToolCallEntry | "thought" | null = null;
   for (let i = entries.length - 1; i >= 0 && now === null; i -= 1) {
@@ -248,7 +262,7 @@ export function lineOf(lang: Lang, entries: readonly (ViewEntry | undefined)[], 
     else if (e?.tool_call !== undefined && unsettled(e.tool_call)) now = e.tool_call;
     else if (e?.tool_call !== undefined) break;
   }
-  if (now === null) return { kinds, line: summaryOf(lang, calls), more: aside, trouble };
+  if (now === null) return { kinds, line: restLine(lang, calls), more: aside, trouble };
   return {
     kinds: now === "thought" ? ["think"] : [now.kind as string],
     line: now === "thought" ? stepLive(lang, "Thinking it through.") : doingOf(lang, now),

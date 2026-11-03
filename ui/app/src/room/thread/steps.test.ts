@@ -15,6 +15,7 @@ import {
   kindsOf,
   lineOf,
   markOf,
+  restLine,
   segmentsOf,
   summaryOf,
   troubleOf,
@@ -110,6 +111,33 @@ describe("the folded line", () => {
     expect(lineOf("en", [{ tool_call: call("switch_mode") }], false).kinds).toEqual([
       "switch_mode",
     ]);
+  });
+
+  test("at rest the summary counts only finished steps: a step still waiting, failed or stopped is never told as done", () => {
+    const lease = raw({ path: "a/Lease deed.pdf" });
+    // UTC-17: one read done, one change still waiting on the lawyer
+    expect(restLine("en", [call("read"), call("edit", "pending", lease)])).toBe("1 paper read.");
+    expect(
+      restLine("en", [call("read"), call("fetch", "failed"), call("search", "cancelled")]),
+    ).toBe("1 paper read.");
+    // none done: the step still to finish says what it is doing; else what was tried
+    expect(restLine("en", [call("edit", "pending", lease)])).toBe("Changing Lease deed.pdf.");
+    expect(restLine("en", [call("read", "failed", lease)])).toBe("Tried to read Lease deed.pdf.");
+    expect(
+      restLine("en", [
+        call("read", "failed", lease),
+        ...Array.from({ length: 4 }, () => call("edit", "cancelled")),
+      ]),
+    ).toBe(
+      "Tried to read Lease deed.pdf. Tried to change a paper. Tried to change a paper. And 2 more.",
+    );
+    expect(
+      lineOf(
+        "en",
+        [{ tool_call: call("read") }, { tool_call: call("edit", "pending", lease) }],
+        false,
+      ).line,
+    ).toBe("1 paper read.");
   });
 
   test("a failure stays on the line: a group of one, or one of many; a stop too", () => {
