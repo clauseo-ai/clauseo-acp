@@ -19,7 +19,6 @@ import type { Queued } from "./queue-entries.ts";
 import { heldPick, queuedPick } from "./queue-picks.ts";
 import type { QueueSlotProps } from "./queue-slot.tsx";
 import { useAgentPlan } from "./thread/agent-plan.ts";
-import { clockTime } from "./thread/clock.ts";
 
 const TEST_IDS = {
   row: "queued",
@@ -36,6 +35,15 @@ const GONE = "thread.turn_not_queued";
 const NEXT = "next";
 
 const NONE: readonly Queued[] = [];
+
+/** A step's time on the lawyer's clock, in English ("4:31 pm"), which the part puts in the language: thread/clock.ts's
+ * clockTime in English, written out here so the strip's chunk shares no module with the thread's list (a shared one
+ * becomes a chunk of its own, and the strip's import would need a preload; vite-config.test.ts). */
+function clockOf(ts: number): string {
+  const at = new Date(ts);
+  const h = at.getHours();
+  return `${h % 12 === 0 ? 12 : h % 12}:${String(at.getMinutes()).padStart(2, "0")} ${h < 12 ? "am" : "pm"}`;
+}
 
 /** A refused press: its code, and the queue as it stood then; the words show while the queue stands so. */
 type Refusal = { code: string; queue: readonly Queued[] };
@@ -66,7 +74,7 @@ export function LiveQueueStrip({ transport, stream, thread, onFocusField }: Queu
         : held.kind === "held"
           ? held
           : // the step's time on the lawyer's clock, in English: the part puts it in the language
-            { kind: held.kind, at: clockTime("en", held.at) },
+            { kind: held.kind, at: clockOf(held.at) },
     [held],
   );
   const turnOf = (id: string): TurnId | undefined => queue.find((q) => q.id === id)?.turn;
