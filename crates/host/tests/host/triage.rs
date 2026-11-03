@@ -166,14 +166,14 @@ fn the_morning_sweep_marks_exactly_the_quiet_threads_once() {
     // A permission waits.
     let asking = host.create_thread(perm_matter, PERM);
     let mut perm_events = host.events(StreamId::Thread(asking));
-    host.prompt(asking, "Edit the brief.");
+    let (asking_turn, _) = host.prompt(asking, "Edit the brief.");
     perm_events.until("a permission request", |e| {
         !e.permission_requests().is_empty()
     });
     // A turn runs.
     let running = host.create_thread(slow_matter, SLOW);
     let mut slow_events = host.events(StreamId::Thread(running));
-    host.prompt(running, "Read the clause.");
+    let (running_turn, _) = host.prompt(running, "Read the clause.");
     slow_events.until("the turn's start", |e| {
         e.count(|event| matches!(event, DomainEvent::TurnStarted(_))) > 0
     });
@@ -248,5 +248,51 @@ fn the_morning_sweep_marks_exactly_the_quiet_threads_once() {
     for thread in [fresh, seen, woken] {
         assert_eq!(swept(&host, thread), 1, "{thread}");
     }
-    host.shutdown_past_cancel();
+    // Both live turns end before the shutdown, each by its 5 s cancel fallback (neither agent
+    // answers the cancel), so the shutdown has no fallback of its own to wait for: with two
+    // fallbacks armed at different moments, moving the clock once could miss the second.
+    host.ok(HostCommand::Cancel { thread: running });
+    host.ok(HostCommand::Cancel { thread: asking });
+    host.wait_armed(Duration::from_secs(5));
+    host.wait_armed(Duration::from_secs(5));
+    host.clock.advance(Duration::from_secs(5));
+    slow_events.until_turn_ended(running_turn);
+    perm_events.until_turn_ended(asking_turn);
+    host.shutdown();
+}
+
+#[test]
+fn the_sweep_never_marks_an_archived_thread_done() {
+    let dir = Dir::new(
+        "triage_sweep_archived",
+        &[(FAKE, Scenario::Bundled("prompt-stream"))],
+    );
+    let host = dir.start(0);
+    let (matter, archived, _) = matter_with_thread(&dir, &host, "m", &[("a.txt", "x\n")], FAKE);
+    let quiet = host.create_thread(matter, FAKE);
+    host.ok(HostCommand::ArchiveThread { thread: archived });
+    host.clock.advance(Duration::from_secs(60));
+    host.settle();
+    let day_start = at(START_MS + 30_000);
+    host.ok(HostCommand::SweepDone { day_start });
+    host.settle();
+    assert!(
+        row(&host, matter, quiet).done,
+        "the quiet thread is not swept"
+    );
+    assert!(
+        !row(&host, matter, archived).done,
+        "the archived thread was swept"
+    );
+    assert_eq!(swept(&host, archived), 0);
+    host.shutdown();
+
+    // After a restart its header is not known until something loads it; still not swept.
+    let host = dir.start(1);
+    let day_start = at(START_MS + 3_600_000 + 30_000);
+    host.clock.advance(Duration::from_secs(60));
+    host.ok(HostCommand::SweepDone { day_start });
+    host.settle();
+    assert_eq!(swept(&host, archived), 0);
+    host.shutdown();
 }

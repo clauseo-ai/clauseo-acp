@@ -169,11 +169,13 @@ fn sweeps(actor: &Actor, thread: ThreadId, day_start: Timestamp, now: Timestamp)
         && super::rail::seen(entry)
 }
 
-/// Whether `thread`, in a listed matter, has no header the host knows yet (created and never
-/// loaded since the host started): the sweep loads it to find out.
+/// Whether `thread`, in a listed matter and not archived, has no header the host knows yet
+/// (created and never loaded since the host started): the sweep loads it to find out. An
+/// archived thread is never swept, so it is never loaded for the sweep.
 fn unknown(actor: &Actor, thread: ThreadId) -> bool {
     actor.threads.get(&thread).is_some_and(|entry| {
-        actor.matters.contains_key(&entry.row.matter)
+        !entry.row.archived
+            && actor.matters.contains_key(&entry.row.matter)
             && entry.header.is_none()
             && actor.loaded(StreamId::Thread(thread)).is_none()
     })

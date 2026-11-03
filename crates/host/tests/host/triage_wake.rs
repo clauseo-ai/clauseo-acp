@@ -5,11 +5,16 @@
 
 use std::time::Duration;
 
-use clauseo_protocol::{DomainEvent, HostEvent, SnoozeBy, StreamId, ThreadId, Timestamp};
+use clauseo_host::AppSubscription;
+use clauseo_protocol::{
+    DomainEvent, HostCommand, HostEvent, SnoozeBy, StreamId, ThreadId, ThreadSummary, Timestamp,
+};
+use futures::StreamExt;
 
+use crate::matters::{created, import};
 use crate::observe::Events;
-use crate::settings::{ready, subscribe_app};
-use crate::support::{Dir, FAKE, Running, START_MS, Scenario, matter_with_thread};
+use crate::settings::{decode, ready, subscribe_app};
+use crate::support::{Dir, FAKE, Running, START_MS, Scenario, matter_with_thread, wait};
 use crate::triage::{row, snooze};
 
 const MINUTE: Duration = Duration::from_secs(60);
@@ -30,6 +35,28 @@ fn caught_up(host: &Running, thread: ThreadId) -> Events {
     let mut events = host.events(StreamId::Thread(thread));
     events.until_caught_up();
     events
+}
+
+/// Waits until `sub` sends a row of `thread` that `done` accepts.
+fn until_row(
+    sub: &mut AppSubscription,
+    thread: ThreadId,
+    what: &str,
+    done: impl Fn(&ThreadSummary) -> bool,
+) {
+    wait(what, async {
+        while let Some(item) = sub.next().await {
+            if let HostEvent::ThreadsChanged(changed) = decode(&item)
+                && changed
+                    .threads
+                    .iter()
+                    .any(|row| row.thread == thread && done(row))
+            {
+                return;
+            }
+        }
+        panic!("the app subscription ended");
+    });
 }
 
 #[test]
@@ -147,5 +174,66 @@ fn a_snooze_that_ended_while_the_host_was_down_wakes_at_start_up() {
         Some(Timestamp::new(ahead).unwrap())
     );
     assert_eq!(wakes(&caught_up(&host, later)), 0);
+    host.shutdown();
+}
+
+// The reviewer's two repros (review of the H-triage pull request): a matter off the list and
+// brought back has its threads loaded again, so its rows show their triage and a snooze that
+// ended meanwhile wakes.
+
+#[test]
+fn review_a_snooze_that_ended_while_forgotten_wakes_at_import() {
+    let dir = dir("review_snooze_import");
+    let host = dir.start(0);
+    let (matter, thread, folder) = matter_with_thread(&dir, &host, "m", &[("a.txt", "x\n")], FAKE);
+    let until = START_MS + 10 * 60_000;
+    host.ok(snooze(thread, Some(until)));
+    host.settle();
+    host.wait_armed(10 * MINUTE);
+    host.ok(HostCommand::ForgetMatter { matter });
+    host.settle();
+    host.clock.advance(15 * MINUTE);
+    host.settle();
+    assert_eq!(
+        wakes(&caught_up(&host, thread)),
+        0,
+        "woken while off the list"
+    );
+    let back = created(import(&host, "m", &folder, (None, None)));
+    assert_eq!(back, matter);
+    caught_up(&host, thread).until("the wake after the import", |e| wakes(e) == 1);
+    host.settle();
+    assert_eq!(
+        row(&host, matter, thread).snoozed_until,
+        None,
+        "past-due snooze {:?} not woken after import",
+        Timestamp::new(until).unwrap()
+    );
+    assert_eq!(host.clock.armed(), 0, "a timer is still armed");
+    host.shutdown();
+}
+
+#[test]
+fn review_done_shows_on_the_row_after_restart_and_import() {
+    let dir = dir("review_done_import");
+    let host = dir.start(0);
+    let (matter, thread, folder) = matter_with_thread(&dir, &host, "m", &[("a.txt", "x\n")], FAKE);
+    host.ok(HostCommand::MarkThreadDone { thread, done: true });
+    host.settle();
+    assert!(row(&host, matter, thread).done);
+    host.ok(HostCommand::ForgetMatter { matter });
+    host.settle();
+    host.shutdown();
+    let host = dir.start(1);
+    let (mut sub, _) = subscribe_app(&host);
+    let back = created(import(&host, "m", &folder, (None, None)));
+    assert_eq!(back, matter);
+    until_row(&mut sub, thread, "the row done after the import", |row| {
+        row.done
+    });
+    assert!(
+        row(&host, matter, thread).done,
+        "done lost on the row after import"
+    );
     host.shutdown();
 }

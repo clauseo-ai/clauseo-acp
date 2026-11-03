@@ -186,7 +186,33 @@ pub(super) fn unforget_committed(actor: &mut Actor, row: MatterRow, durable: boo
         entry.row = row;
         // A new worker opens the folder where it is now, on first use.
         entry.worker = None;
-        actor.matters.insert(entry.row.id, entry);
+        let matter = entry.row.id;
+        actor.matters.insert(matter, entry);
+        load_threads(actor, matter);
+    }
+}
+
+/// Loads each thread of `matter` not archived, then lets it go, as start-up does for a listed
+/// matter: its header is known again (its row shows its title, snooze and done), and the snooze
+/// timer sees a snooze that ended while the matter was off the list (0045).
+fn load_threads(actor: &mut Actor, matter: MatterId) {
+    let threads: Vec<_> = actor
+        .threads
+        .values()
+        .filter(|thread| thread.row.matter == matter && !thread.row.archived)
+        .map(|thread| thread.row.id)
+        .collect();
+    for thread in threads {
+        let stream = StreamId::Thread(thread);
+        actor.with_loaded(
+            stream,
+            Box::new(move |actor: &mut Actor, loaded: Result<(), Error>| {
+                if let Err(error) = loaded {
+                    tracing::warn!(%error, %thread, "a returned matter's thread did not load");
+                }
+                actor.release(stream);
+            }),
+        );
     }
 }
 
