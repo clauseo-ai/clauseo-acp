@@ -42,6 +42,14 @@ fn job(url: &str, bytes: &[u8], dest: PathBuf) -> FetchJob {
     }
 }
 
+/// Settings that let the fetcher reach the plain-HTTP test registry.
+fn plain() -> InstallConfig {
+    InstallConfig {
+        allow_http_for_tests: true,
+        ..InstallConfig::default()
+    }
+}
+
 fn fetcher(install: &InstallConfig, data: &Path) -> Fetcher {
     Fetcher::new(install, &agent(), None, data).unwrap()
 }
@@ -56,7 +64,7 @@ fn setup(label: &str) -> (TestRegistry, Vec<u8>, TempDir, Fetcher) {
     let bytes = fixture();
     registry.route(PATH, bytes.clone());
     let dir = TempDir::new(label).unwrap();
-    let fetcher = fetcher(&InstallConfig::default(), dir.path());
+    let fetcher = fetcher(&plain(), dir.path());
     (registry, bytes, dir, fetcher)
 }
 
@@ -169,7 +177,7 @@ fn a_failed_lookup_is_offline_and_a_refused_port_failed() {
     let bytes = fixture();
     let install = InstallConfig {
         resolver: Some(offline_resolver()),
-        ..InstallConfig::default()
+        ..plain()
     };
     let offline = fetcher(&install, dir.path());
     let url = "http://registry.test/pkg.tgz";
@@ -181,7 +189,7 @@ fn a_failed_lookup_is_offline_and_a_refused_port_failed() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         listener.local_addr().unwrap().port()
     };
-    let plain = fetcher(&InstallConfig::default(), dir.path());
+    let plain = fetcher(&plain(), dir.path());
     let url = format!("http://127.0.0.1:{port}/pkg.tgz");
     let err = fetch(&plain, &job_at(&url, &bytes, &dir)).unwrap_err();
     assert_eq!(err.kind, FetchKind::Failed, "{err:?}");
@@ -194,7 +202,7 @@ fn a_mirror_s_user_name_and_password_never_reach_the_error() {
     let (resolver, _) = resolve_all_to(registry.addr());
     let install = InstallConfig {
         resolver: Some(resolver),
-        ..InstallConfig::default()
+        ..plain()
     };
     let fetcher = fetcher(&install, dir.path());
     let url = mirror_url(
@@ -221,7 +229,7 @@ fn with_a_mirror_every_request_goes_to_the_mirror() {
     let (resolver, lookups) = resolve_all_to(registry.addr());
     let install = InstallConfig {
         resolver: Some(resolver),
-        ..InstallConfig::default()
+        ..plain()
     };
     let fetcher = fetcher(&install, dir.path());
     let resolved = [
@@ -387,7 +395,7 @@ fn through_a_tls_inspecting_proxy_the_ca_file_is_trusted_and_without_it_blocked(
 
     let mut install = InstallConfig {
         proxy: Some(registry.proxy_url()),
-        ..InstallConfig::default()
+        ..plain()
     };
     let untrusting = fetcher(&install, dir.path());
     let err = fetch(&untrusting, &job_at(&url, &bytes, &dir)).unwrap_err();
@@ -416,7 +424,7 @@ fn a_ca_file_with_no_certificate_or_a_bad_proxy_fails_to_build() {
     write_file(&ca, b"no certificates here\n").unwrap();
     let install = InstallConfig {
         ca_certs: [(agent(), ca)].into(),
-        ..InstallConfig::default()
+        ..plain()
     };
     let err = Fetcher::new(&install, &agent(), None, dir.path()).unwrap_err();
     assert_eq!(err.kind, FetchKind::Failed);
@@ -428,13 +436,35 @@ fn a_ca_file_with_no_certificate_or_a_bad_proxy_fails_to_build() {
 
     let install = InstallConfig {
         proxy: Some("http://user:pw@:not a proxy".to_owned()),
-        ..InstallConfig::default()
+        ..plain()
     };
     let err = Fetcher::new(&install, &agent(), None, dir.path()).unwrap_err();
     assert_eq!(
         err.detail,
         "the proxy setting is not usable: invalid proxy url"
     );
+}
+
+#[test]
+fn outside_tests_plain_http_and_an_http_mirror_are_refused() {
+    let (registry, bytes, dir, _) = setup("https-only");
+    let strict = fetcher(&InstallConfig::default(), dir.path());
+    let err = fetch(&strict, &job_at(&registry.url(PATH), &bytes, &dir)).unwrap_err();
+    assert_eq!(err.kind, FetchKind::Failed, "{err:?}");
+    assert_eq!(registry.requests(), []);
+
+    let install = InstallConfig {
+        registry: Some("http://ann:pw@mirror.firm.example/npm/".to_owned()),
+        ..InstallConfig::default()
+    };
+    let err = Fetcher::new(&install, &agent(), None, dir.path()).unwrap_err();
+    assert_eq!(err.kind, FetchKind::Failed);
+    assert_eq!(err.detail, "the mirror setting is not an https:// URL");
+    let install = InstallConfig {
+        registry: Some("HTTPS://mirror.firm.example/npm/".to_owned()),
+        ..InstallConfig::default()
+    };
+    assert!(Fetcher::new(&install, &agent(), None, dir.path()).is_ok());
 }
 
 #[test]

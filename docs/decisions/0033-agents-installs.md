@@ -103,6 +103,9 @@ present), the crate fetches `resolved` itself:
   The body as a whole has no time limit, since a slow link may need minutes.
 - TLS uses rustls with the OS's trust store (the platform verifier), so a CA that IT installed is
   trusted. With an agent's `network.ca_certs` file, that file's certificates are the roots.
+- Every request and redirect must be https (ureq's `https_only`). An `http://` mirror is refused
+  before any request, with a detail naming the mirror setting. Only the `test-support` feature's
+  `InstallConfig::allow_http_for_tests` lets the tests' plain-HTTP loopback registry through.
 
 The crate then runs `node <npm-cli.js> cache add <absolute paths…>` in batches of 40. Next comes
 `node <npm-cli.js> ci` in `install/.tmp-<hash>-<n>`. Both get `--cache <npm-cache> --userconfig
