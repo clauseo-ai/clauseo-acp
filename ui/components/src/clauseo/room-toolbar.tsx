@@ -41,8 +41,16 @@ export type RoomToolbarProps = {
     status: string;
     state?: PlanState;
     /** Optional: how the plan's figures stand. stale: the last read is old or failed, so the figures go
-     * muted; none: no figures to show, the meter an empty track; bare: an account billed by use, with no meter. */
-    look?: "stale" | "none" | "bare";
+     * muted; none: no figures to show, the meter an empty track; bare: an account billed by use, with no meter;
+     * loading: the first read still running, the plan's name alone, with no meter and no line. */
+    look?: "stale" | "none" | "bare" | "loading";
+    /** Optional: what the host says of the plan, carried as data-tone and data-freshness on the plan, for the specs. */
+    tone?: string;
+    freshness?: string;
+    /** Optional: a test id on the plan. */
+    testId?: string;
+    /** Optional: the card opened: the room asks the host for fresh figures. */
+    onCardOpen?: () => void;
     /** Optional: the plan's card, every window with its reset, opened by pressing the plan. */
     card?: ReactNode;
     /** The plan pressed: what pressing it does, "Show the plan's limits". Its accessible name starts with the words it
@@ -98,6 +106,9 @@ export type RoomToolbarProps = {
   testIds?: { title?: string; rail?: string };
   /** Optional: Matters' button, so focus can go back to it when the folded rail closes. */
   railRef?: Ref<HTMLButtonElement>;
+  /** Optional: the plan in its own part, in `plan`'s place, so what changes the plan renders the plan alone (it draws
+   * ToolbarPlan itself). */
+  planSlot?: ReactNode;
 };
 
 /** The plan's state from the share left, where the host hasn't said. */
@@ -283,7 +294,7 @@ export function RoomToolbar(p: RoomToolbarProps) {
             )}
           </Toolbar>
         )}
-        {p.plan !== null && <ToolbarPlan plan={p.plan} />}
+        {p.planSlot ?? (p.plan !== null && <ToolbarPlan plan={p.plan} />)}
       </div>
       {captions && (
         // flush with the window's top right: beside the plan on a wide window, on the first row of tools on a narrow
@@ -299,38 +310,49 @@ export function RoomToolbar(p: RoomToolbarProps) {
 
 /** The plan in the toolbar: the meter and its line, and, where the plan has a card, a press that opens it under the
  * plan, its right edge on the plan's. Pressed or not, the plan holds the width of its widest state. */
-function ToolbarPlan({ plan }: { plan: NonNullable<RoomToolbarProps["plan"]> }) {
+export function ToolbarPlan({ plan }: { plan: NonNullable<RoomToolbarProps["plan"]> }) {
   const w = useWords();
   const nameText = plan.look === "bare" ? plan.name : w.t("{name} plan", { name: plan.name });
+  const figureless = plan.look === "none" || plan.look === "bare" || plan.look === "loading";
+  const data = {
+    "data-testid": plan.testId,
+    "data-tone": plan.tone,
+    "data-freshness": plan.freshness,
+  };
   const meter = (
     <PlanMeter
       name={<Say>{nameText}</Say>}
-      value={plan.look === "none" || plan.look === "bare" ? 0 : Math.round(plan.left * 100)}
+      value={figureless ? 0 : Math.round(plan.left * 100)}
       valueText={plan.valueText}
       status={plan.status}
       state={plan.state ?? planState(plan.left)}
-      track={plan.look !== "none" && plan.look !== "bare"}
+      track={!figureless}
       inButton={plan.card !== undefined}
       dragRegion
       className={cn("room-plan", plan.card !== undefined && "room-plan-in")}
     />
   );
   if (plan.card === undefined) {
-    return plan.look === undefined ? (
+    return plan.look === undefined && plan.testId === undefined ? (
       meter
     ) : (
-      <div className="room-plan room-plan-look" data-look={plan.look}>
+      <div className="room-plan room-plan-look" data-look={plan.look} {...data}>
         {meter}
       </div>
     );
   }
   return (
-    <Popover.Root {...(plan.cardOpen === true ? { defaultOpen: true } : {})}>
+    <Popover.Root
+      {...(plan.cardOpen === true ? { defaultOpen: true } : {})}
+      onOpenChange={(open) => {
+        if (open) plan.onCardOpen?.();
+      }}
+    >
       {/* named by its own words, the plan's name and its line, as they show, so speech input can say what it sees; what
           pressing does follows them, for assistive technology only */}
-      <Popover.Trigger className="room-plan room-plan-press" data-look={plan.look}>
+      <Popover.Trigger className="room-plan room-plan-press" data-look={plan.look} {...data}>
         {meter}
-        <span className="sr-only">{`${/[.\u0964]$/.test(plan.status) ? "" : "."} ${plan.valueText}${plan.cardLabel === undefined ? "" : `. ${plan.cardLabel}`}`}</span>
+        <span className="sr-only">{`${plan.status === "" || /[.\u0964]$/.test(plan.status) ? "" : "."} ${plan.valueText}${plan.cardLabel === undefined ? "" : `. ${plan.cardLabel}`}`}</span>
       </Popover.Trigger>
       {/* over the work and the wall, as Versions stands: its right edge on the plan's, 8 px below */}
       <Popover.Portal>
