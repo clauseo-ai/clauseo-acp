@@ -14,6 +14,13 @@ import type {
 } from "../../transport/protocol.ts";
 import { fakeNext } from "../fake-next.ts";
 import { mountRoom, type Harness } from "../thread/harness.ts";
+import { preloadPlanCard } from "./plan-card-load.ts";
+
+// the card's preload, watched: the same function, counted
+vi.mock("./plan-card-load.ts", async (actual) => {
+  const real = await actual<typeof import("./plan-card-load.ts")>();
+  return { preloadPlanCard: vi.fn(real.preloadPlanCard) };
+});
 
 let h: Harness | null = null;
 afterEach(async () => {
@@ -289,6 +296,21 @@ test("the hidden plan-state marker: none before a view and for fake-agent, loadi
   await view({ claude: entry(30) });
   expect(marker()?.dataset["freshness"]).toBe("none");
   expect(plan()).toBeNull();
+});
+
+test("focus on the plan starts loading its card before any press; the card stays closed", async () => {
+  await room();
+  await view({ claude: entry(30) });
+  const preload = vi.mocked(preloadPlanCard);
+  preload.mockClear();
+  await act(async () => plan()?.focus());
+  expect(preload).toHaveBeenCalledTimes(1);
+  expect(document.querySelector('[data-testid="plan-card"]')).toBeNull();
+  await act(async () => {
+    await vi.dynamicImportSettled();
+  });
+  const card = await openCard();
+  expect(card?.textContent).toContain("Claude Max");
 });
 
 test("missing_scope and live_only: no line", async () => {

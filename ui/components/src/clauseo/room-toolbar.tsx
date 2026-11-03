@@ -52,6 +52,9 @@ export type RoomToolbarProps = {
     testId?: string;
     /** Optional: the card opened: the room asks the host for fresh figures. */
     onCardOpen?: () => void;
+    /** Optional: the pointer came over the plan or focus reached it, before any press: the room starts loading the
+     * card, so the first press finds it ready. */
+    onCardWarm?: () => void;
     /** Optional: the plan's card, every window with its reset, opened by pressing the plan. */
     card?: ReactNode;
     /** The plan pressed: what pressing it does, "Show the plan's limits". Its accessible name starts with the words it
@@ -356,6 +359,8 @@ export function ToolbarPlan({ plan }: { plan: NonNullable<RoomToolbarProps["plan
       <Popover.Trigger
         className="room-plan room-plan-press"
         data-look={plan.look}
+        onPointerEnter={plan.onCardWarm}
+        onFocus={plan.onCardWarm}
         aria-label={sentences(w.lang, [
           nameText,
           plan.status,
