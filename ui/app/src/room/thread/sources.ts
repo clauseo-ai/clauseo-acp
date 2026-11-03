@@ -12,7 +12,9 @@
 // the browser (`via: browser`).
 import { createContext, useSyncExternalStore } from "react";
 import type { EnvelopeSource, HostTransport } from "../../transport/host-transport.ts";
+import type { StreamView } from "../../store/view.ts";
 import type {
+  EntryId,
   Envelope,
   PageVia,
   PageVisited,
@@ -20,6 +22,7 @@ import type {
   StreamId,
   ToolCallEntry,
   ToolCallId,
+  ViewEntry,
   WebSearchRecorded,
 } from "../../transport/protocol.ts";
 import { LINK_PREFIXES } from "@clauseo/components/markdown/schema.ts";
@@ -148,6 +151,20 @@ export function sourcesOf(transport: HostTransport): SourcesStore {
   let store = stores.get(transport);
   if (store === undefined) stores.set(transport, (store = new SourcesStore(transport)));
   return store;
+}
+
+/** The picker of an exchange's tool calls (list.tsx): the tool call ids of its tool call entries, from an older page or
+ * the window, in order, joined by line breaks so a flush that leaves them as they were renders nothing. `tools` are
+ * the exchange's tool call entry ids alone, taken once per id list. */
+export function toolCallsPick(
+  tools: readonly EntryId[],
+  paged: ReadonlyMap<EntryId, ViewEntry>,
+): (v: StreamView | undefined) => string {
+  return (v) =>
+    tools
+      .map((id) => (paged.get(id) ?? v?.entries.get(id))?.tool_call?.tool_call)
+      .filter((call) => call !== undefined)
+      .join("\n");
 }
 
 /** A thread's tool calls' web, by tool call id; the same empty map for a thread with none. */
