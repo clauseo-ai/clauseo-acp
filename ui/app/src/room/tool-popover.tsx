@@ -1,6 +1,7 @@
 // The tool line's popover: one row per tool the open conversation's header speaks for, its name in primary, where it
-// stands in a muted line, and the act it offers: Open Settings for a tool the lawyer turned off, and under the browser
-// with no Chrome, the download (Download Chrome is the consent; its progress stands here, the bar under its words).
+// stands in a muted line, and the act it offers: under the browser with no Chrome, the download (Download Chrome is
+// the consent; its progress stands here, the bar under its words). A tool the lawyer turned off is turned on in
+// Settings: one Open Settings at the popover's foot, however many rows offer it, with what a change reaches.
 // Its own chunk, loaded as the status line first shows the tool line (tool-line.tsx).
 import { useSyncExternalStore } from "react";
 import { Button } from "@clauseo/components/ui/button.tsx";
@@ -48,16 +49,20 @@ export function ToolPopover({
           ? "Download Chrome"
           : "Try again",
     );
+  const rows = tools.map((tool) => ({
+    tool,
+    row: toolRow(w.lang, tool, {
+      plan: room.plan,
+      settings: room.openSettings !== undefined,
+      install,
+    }),
+  }));
+  const settings = rows.some(({ row }) => row.action === "settings");
   return (
     <ToolLinePopover summary={summary}>
       <ul className="grid gap-s1">
-        {tools.map((tool) => {
-          const row = toolRow(w.lang, tool, {
-            plan: room.plan,
-            settings: room.openSettings !== undefined,
-            install,
-          });
-          const action = row.action;
+        {rows.map(({ tool, row }) => {
+          const action = row.action === "settings" ? null : row.action;
           return (
             <li
               key={tool.tool}
@@ -95,6 +100,21 @@ export function ToolPopover({
           );
         })}
       </ul>
+      {settings && (
+        <div className="grid gap-s1 px-s3 pt-s1 pb-s2" data-testid="tool-settings-foot">
+          <p className="text-small text-muted">{w.t("Changes apply to new conversations.")}</p>
+          <span className="mt-s1">
+            <Button
+              kind="tone"
+              size="small"
+              data-testid={ACTION_IDS.settings}
+              onClick={() => act("settings")}
+            >
+              {actionWords("settings")}
+            </Button>
+          </span>
+        </div>
+      )}
     </ToolLinePopover>
   );
 }

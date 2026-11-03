@@ -3,15 +3,44 @@
 // only FakeTransport plays the reports (its `appEvent`, as `browser_install`) and takes the call (`installBrowser`),
 // and the desktop transport does neither, so the real app has no state and shows no download.
 //
-// The planned host event says a failure as `Failed { message }`. The app shows words by code, never a host's message,
-// so this model takes `failed { code }`, and the host is asked for a code in its place.
+// A failure comes as `Failed { code, message }` (stage E): the app shows words by `code`, an open enum it reads as
+// `unknown` when it doesn't know the value, and `message` is the host's, for the log only, never on screen. A second
+// InstallBrowser while one runs is refused as a command, not reported as a failure.
 import { useSyncExternalStore } from "react";
 import type { HostTransport } from "../transport/host-transport.ts";
 import { nextHostOf, type AppEvent } from "./host-next.ts";
 
-/** Why the download failed: no room (about 1 GB needed), a host the network refused, a size or signature that
- * didn't match, or anything else. */
-export type InstallFailCode = "disk" | "refused" | "check" | "other";
+/** Why the download failed: the connection dropped, a size or signature that didn't match, under about 1 GB free, a
+ * host the network refused, an archive that wouldn't unpack, a computer that can't download it (no system curl,
+ * ditto or tar, or Windows on ARM64), a download stopped; `unknown` for any value this version doesn't know. */
+export type InstallFailCode =
+  | "network"
+  | "size_mismatch"
+  | "disk_space"
+  | "host_refused"
+  | "signature"
+  | "unpack"
+  | "unsupported"
+  | "cancelled"
+  | "unknown";
+
+const FAIL_CODES: ReadonlySet<string> = new Set<InstallFailCode>([
+  "network",
+  "size_mismatch",
+  "disk_space",
+  "host_refused",
+  "signature",
+  "unpack",
+  "unsupported",
+  "cancelled",
+]);
+
+/** A failure as the app keeps it: the code it has words for, and the host's message, for the log only. */
+export type InstallFailure = { code: InstallFailCode; message: string };
+
+/** The host's code, read: one this version doesn't know is `unknown`. */
+export const failCodeOf = (code: unknown): InstallFailCode =>
+  typeof code === "string" && FAIL_CODES.has(code) ? (code as InstallFailCode) : "unknown";
 
 /** What the host reports about installing Chrome: whether it can download it (and its size), or not at all (Windows
  * on ARM64, where the lawyer installs Google Chrome); then the download's own events. */
@@ -21,14 +50,14 @@ export type BrowserInstallReport =
   | { downloading: { bytes: number; total: number } }
   | "unpacking"
   | "done"
-  | { failed: { code: InstallFailCode } };
+  | { failed: { code: string; message: string } };
 
 /** Where a download stands, once one is asked for. */
 export type InstallProgress =
   | { downloading: { bytes: number; total: number } }
   | "unpacking"
   | "done"
-  | { failed: { code: InstallFailCode } };
+  | { failed: InstallFailure };
 
 /** The install as the browser row reads it: the offer the host last reported, and the download's progress. Null in
  * the store until the host says anything. */
@@ -69,14 +98,18 @@ export class BrowserInstallStore {
     return () => this.#heard.delete(listener);
   };
 
-  /** The lawyer's consent: Download Chrome or Try again. Asks the host once; nothing while a download runs. */
+  /** The lawyer's consent: Download Chrome or Try again. Asks the host once; nothing while a download runs. A
+   * refused command (one already runs, as another window may have started it) is no failure: the row goes back to
+   * where it stood before the press, unless the host's events have said where it stands since. */
   install(): void {
     const state = this.#state;
     if (state === null || installRunning(state) || !installs(this.#transport)) return;
     const total = state.offer?.offer === "download" ? state.offer.bytes : 0;
-    this.#set({ ...state, progress: { downloading: { bytes: 0, total } } });
+    const pressed: InstallProgress = { downloading: { bytes: 0, total } };
+    this.#set({ ...state, progress: pressed });
     this.#transport.installBrowser().catch(() => {
-      this.#set({ ...(this.#state ?? state), progress: { failed: { code: "other" } } });
+      const now = this.#state;
+      if (now !== null && now.progress === pressed) this.#set({ ...now, progress: state.progress });
     });
   }
 
@@ -85,6 +118,16 @@ export class BrowserInstallStore {
     const report = event.browser_install;
     const was = this.#state ?? { offer: null, progress: null };
     if (typeof report === "object" && "offer" in report) this.#set({ ...was, offer: report });
+    else if (typeof report === "object" && "failed" in report)
+      this.#set({
+        ...was,
+        progress: {
+          failed: {
+            code: failCodeOf(report.failed.code),
+            message: typeof report.failed.message === "string" ? report.failed.message : "",
+          },
+        },
+      });
     else this.#set({ ...was, progress: report });
   }
 

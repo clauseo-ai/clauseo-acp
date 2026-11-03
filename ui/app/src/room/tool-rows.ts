@@ -3,8 +3,8 @@
 // with the popover only.
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { st } from "@clauseo/components/lib/words-settings.ts";
-import { tw } from "@clauseo/components/lib/words-tools.ts";
-import type { BrowserInstall } from "./browser-install.ts";
+import { tw, type ToolsKey } from "@clauseo/components/lib/words-tools.ts";
+import type { BrowserInstall, InstallFailCode } from "./browser-install.ts";
 import type { KnownTool } from "./tools.ts";
 
 /** What a row offers: Open Settings, Download Chrome, or Try again after a failed download. */
@@ -30,15 +30,33 @@ export type ToolRowRoom = {
 
 const mb = (bytes: number) => Math.round(bytes / 1e6);
 
-/** The download's part of the browser row, under "Off. There's no Chrome on this computer."; nothing without a state
- * from the host. */
+/** What a failed download says, by the host's code; never the host's own message. */
+const FAILED: Record<InstallFailCode, ToolsKey> = {
+  network: "The connection dropped before Chrome finished downloading.",
+  size_mismatch: "The download didn't match the file Google published, so Clauseo deleted it.",
+  signature: "The download didn't match the file Google published, so Clauseo deleted it.",
+  disk_space: "Chrome couldn't be downloaded. It needs about 1\u00a0GB free on this computer.",
+  host_refused: "Your network is blocking the download.",
+  unpack: "Chrome downloaded but couldn't be unpacked.",
+  unsupported:
+    "This computer can't download Chrome for Clauseo. Install Google Chrome to use the browser.",
+  cancelled: "The download stopped before it finished.",
+  unknown: "Chrome couldn't be downloaded.",
+};
+
+const NO_CHROME = "Off. There's no Chrome on this computer.";
+
+/** The browser row with no Chrome, by the download's state: no Chrome and the offer or the failure under it; while it
+ * downloads or unpacks, off until it is downloaded, then its progress; once done, only that Chrome is ready. Without
+ * a state from the host, only that there's no Chrome. */
 function downloadPart(lang: Lang, install: BrowserInstall | null): Omit<ToolRowWords, "name"> {
-  const none = { lines: [], progress: null, action: null };
+  const none = { lines: [tw(lang, NO_CHROME)], progress: null, action: null };
   if (install === null) return none;
   const p = install.progress;
+  const waiting = tw(lang, "Off until Chrome is downloaded.");
   if (p === "unpacking")
     return {
-      lines: [],
+      lines: [waiting],
       progress: { value: 1, max: 1, label: tw(lang, "Unpacking Chrome.") },
       action: null,
     };
@@ -47,11 +65,11 @@ function downloadPart(lang: Lang, install: BrowserInstall | null): Omit<ToolRowW
   if (p !== null && "downloading" in p) {
     const { bytes, total } = p.downloading;
     return {
-      lines: [],
+      lines: [waiting],
       progress: {
         value: Math.min(bytes, total),
         max: Math.max(total, 1),
-        label: tw(lang, "Downloading Chrome. {done} of {total} MB.", {
+        label: tw(lang, "Downloading Chrome. {done} of {total}\u00a0MB.", {
           done: mb(bytes),
           total: mb(total),
         }),
@@ -61,29 +79,29 @@ function downloadPart(lang: Lang, install: BrowserInstall | null): Omit<ToolRowW
   }
   if (p !== null) {
     const code = p.failed.code;
-    const line =
-      code === "disk"
-        ? tw(lang, "Chrome couldn't be downloaded. It needs about 1 GB free on this computer.")
-        : code === "refused"
-          ? tw(lang, "Your network is blocking the download.")
-          : code === "check"
-            ? tw(lang, "The download didn't match Google's, so Clauseo deleted it.")
-            : tw(lang, "Chrome couldn't be downloaded.");
-    return { lines: [line], progress: null, action: "retry" };
+    return {
+      lines: [...none.lines, tw(lang, FAILED[code])],
+      progress: null,
+      action: code === "unsupported" ? null : "retry",
+    };
   }
   if (install.offer?.offer === "download")
     return {
       lines: [
+        ...none.lines,
         tw(
           lang,
-          "Clauseo can download its own Chrome from Google, about 200 MB, once for all conversations. It needs about 1 GB free.",
+          "Clauseo can download its own Chrome from Google, about 200\u00a0MB, once for all conversations. It needs about 1\u00a0GB free.",
         ),
       ],
       progress: null,
       action: "download",
     };
   if (install.offer?.offer === "none")
-    return { ...none, lines: [tw(lang, "Install Google Chrome to use the browser.")] };
+    return {
+      ...none,
+      lines: [...none.lines, tw(lang, "Install Google Chrome to use the browser.")],
+    };
   return none;
 }
 
@@ -116,9 +134,11 @@ export function toolRow(lang: Lang, tool: KnownTool, room: ToolRowRoom): ToolRow
         return managed();
       case "no_search_on_this_login":
         return say(
-          tw(lang, "This {name} login can't search the web. Clauseo can still read web pages.", {
-            name: room.plan,
-          }),
+          tw(
+            lang,
+            "Off. This {name} login can't search the web. Clauseo can still read web pages.",
+            { name: room.plan },
+          ),
         );
     }
   }
@@ -133,7 +153,7 @@ export function toolRow(lang: Lang, tool: KnownTool, room: ToolRowRoom): ToolRow
       return say(
         tw(
           lang,
-          "Off. Your organisation chooses the tools {name} has on this computer, so Clauseo adds none.",
+          "Off. Your organisation chooses the tools {name} has on this computer, so Clauseo can't add its browser.",
           { name: room.plan },
         ),
       );
@@ -146,13 +166,7 @@ export function toolRow(lang: Lang, tool: KnownTool, room: ToolRowRoom): ToolRow
           "Off. Other conversations are using every browser this computer can run. One frees up when another conversation closes.",
         ),
       );
-    case "browser_not_installed": {
-      const part = downloadPart(lang, room.install);
-      return {
-        name,
-        ...part,
-        lines: [tw(lang, "Off. There's no Chrome on this computer."), ...part.lines],
-      };
-    }
+    case "browser_not_installed":
+      return { name, ...downloadPart(lang, room.install) };
   }
 }

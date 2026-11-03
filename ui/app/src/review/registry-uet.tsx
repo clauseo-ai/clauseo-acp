@@ -2,12 +2,17 @@
 // the size limit: each string in the real room over FakeTransport, its thread's header carrying the tools in the
 // state that shows it, the tool line pressed so its popover stands open. The Chrome download is faked: the host
 // plays its `browser_install` reports (room/browser-install.ts) once the thread's view is in.
+import { Composer } from "@clauseo/components/clauseo/composer.tsx";
+import { RoomScopeProvider } from "@clauseo/components/clauseo/room-scope-provider.tsx";
+import type { Lang } from "@clauseo/components/lib/display.ts";
 import { toolsLine, type ToolsLineKey } from "@clauseo/components/lib/words-tools-line.ts";
 import { tw, type ToolsKey } from "@clauseo/components/lib/words-tools.ts";
 import { batch, event, header, reset, THREAD } from "../testing/stream-script.ts";
 import { FakeTransport } from "../transport/fake-transport.ts";
 import type { ToolState } from "../transport/protocol.ts";
 import type { BrowserInstallReport } from "../room/browser-install.ts";
+import { toolsSegment } from "../room/tool-line-room.ts";
+import { knownTools } from "../room/tools.ts";
 import type { Entry } from "./entry.ts";
 import { MATTER } from "./hosts.ts";
 import { RoomPressing } from "./states.tsx";
@@ -76,11 +81,33 @@ const entry = (
   render: () => <RoomPressing host={() => toolsHost(tools, install)} press="tool-line" />,
 });
 
+/** The status line at its fullest, for its fit: the time taken, the plan, the tool line and the ready hint together,
+ * on the composer as the room draws it. The room shows no ready hint yet, so the line stands on the composer alone,
+ * its fixtures in English. At 1100 px the hint gives up its words first; at 390 px the line wraps to two. */
+const statusFit = (lang: Lang) => (
+  <RoomScopeProvider>
+    <div className="flex min-h-dvh flex-col justify-end">
+      <Composer
+        took="Took 38 seconds"
+        plan="Uses your Claude plan"
+        hint={{
+          what: "Draft reply ready",
+          label: "Draft reply, ready and not yet opened",
+          state: "ready",
+          onTurn: () => {},
+        }}
+        tools={toolsSegment(lang, knownTools([web(), browser()]))}
+      />
+    </div>
+  </RoomScopeProvider>
+);
+
 const NONE = [browser("browser_not_installed")];
 const OFFER: BrowserInstallReport = { offer: "download", bytes: 201_000_000 };
-const failed = (code: "disk" | "refused" | "check" | "other"): BrowserInstallReport[] => [
+/** A failed download by the host's code; its message is the log's, and never shows. */
+const failed = (code: string): BrowserInstallReport[] => [
   OFFER,
-  { failed: { code } },
+  { failed: { code, message: `review: ${code}` } },
 ];
 
 /** UET's tool line entries, each id written as it is: an id never moves when an entry is added or taken out. */
@@ -101,7 +128,7 @@ export const UET: Entry[] = [
   entry("UET-11", popWords("On. Clauseo can search the web and read pages."), [web()]),
   entry(
     "UET-12",
-    popWords("This {name} login can't search the web. Clauseo can still read web pages."),
+    popWords("Off. This {name} login can't search the web. Clauseo can still read web pages."),
     [web("no_search_on_this_login")],
   ),
   entry("UET-13", popWords("Off. You turned it off in Settings."), [web("off"), browser("off")]),
@@ -111,7 +138,7 @@ export const UET: Entry[] = [
   entry(
     "UET-17",
     popWords(
-      "Off. Your organisation chooses the tools {name} has on this computer, so Clauseo adds none.",
+      "Off. Your organisation chooses the tools {name} has on this computer, so Clauseo can't add its browser.",
     ),
     [browser("managed_by_firm")],
   ),
@@ -129,14 +156,14 @@ export const UET: Entry[] = [
   entry(
     "UET-21",
     popWords(
-      "Clauseo can download its own Chrome from Google, about 200 MB, once for all conversations. It needs about 1 GB free.",
+      "Clauseo can download its own Chrome from Google, about 200\u00a0MB, once for all conversations. It needs about 1\u00a0GB free.",
     ),
     NONE,
     [OFFER],
   ),
   entry("UET-22", popWords("Download Chrome"), NONE, [OFFER]),
   entry("UET-23", popWords("Install Google Chrome to use the browser."), NONE, [{ offer: "none" }]),
-  entry("UET-24", popWords("Downloading Chrome. {done} of {total} MB."), NONE, [
+  entry("UET-24", popWords("Downloading Chrome. {done} of {total}\u00a0MB."), NONE, [
     OFFER,
     { downloading: { bytes: 64_400_000, total: 201_000_000 } },
   ]),
@@ -147,17 +174,45 @@ export const UET: Entry[] = [
   ]),
   entry(
     "UET-27",
-    popWords("Chrome couldn't be downloaded. It needs about 1 GB free on this computer."),
+    popWords("Chrome couldn't be downloaded. It needs about 1\u00a0GB free on this computer."),
     NONE,
-    failed("disk"),
+    failed("disk_space"),
   ),
-  entry("UET-28", popWords("Your network is blocking the download."), NONE, failed("refused")),
+  entry("UET-28", popWords("Your network is blocking the download."), NONE, failed("host_refused")),
   entry(
     "UET-29",
-    popWords("The download didn't match Google's, so Clauseo deleted it."),
+    popWords("The download didn't match the file Google published, so Clauseo deleted it."),
     NONE,
-    failed("check"),
+    failed("signature"),
   ),
-  entry("UET-30", popWords("Chrome couldn't be downloaded."), NONE, failed("other")),
-  entry("UET-31", popWords("Try again"), NONE, failed("refused")),
+  // a code this version doesn't know reads as unknown
+  entry("UET-30", popWords("Chrome couldn't be downloaded."), NONE, failed("a_newer_code")),
+  entry("UET-31", popWords("Try again"), NONE, failed("host_refused")),
+  entry("UET-32", popWords("Off until Chrome is downloaded."), NONE, [
+    OFFER,
+    { downloading: { bytes: 64_400_000, total: 201_000_000 } },
+  ]),
+  entry("UET-33", popWords("Changes apply to new conversations."), [web("off"), browser("off")]),
+  entry(
+    "UET-34",
+    popWords("The connection dropped before Chrome finished downloading."),
+    NONE,
+    failed("network"),
+  ),
+  entry("UET-35", popWords("Chrome downloaded but couldn't be unpacked."), NONE, failed("unpack")),
+  entry(
+    "UET-36",
+    popWords(
+      "This computer can't download Chrome for Clauseo. Install Google Chrome to use the browser.",
+    ),
+    NONE,
+    failed("unsupported"),
+  ),
+  entry("UET-37", popWords("The download stopped before it finished."), NONE, failed("cancelled")),
+  {
+    id: "UET-38",
+    words: lineWords("Web search and browser on"),
+    screen: "room/status",
+    render: statusFit,
+  },
 ];

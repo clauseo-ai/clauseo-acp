@@ -2,7 +2,13 @@
 // states, and each popover row's words for every ToolState and every Chrome download state.
 import { expect, test } from "vitest";
 import type { ToolState } from "../transport/protocol.ts";
-import type { BrowserInstall } from "./browser-install.ts";
+import { FakeTransport } from "../transport/fake-transport.ts";
+import {
+  BrowserInstallStore,
+  failCodeOf,
+  type BrowserInstall,
+  type InstallFailCode,
+} from "./browser-install.ts";
 import { toolRow, type ToolRowRoom } from "./tool-rows.ts";
 import {
   knownTools,
@@ -114,10 +120,10 @@ test("each web search row's words, and Open Settings only for Off with the setti
     action: null,
   });
   expect(w("no_search_on_this_login").lines).toEqual([
-    "This Claude login can't search the web. Clauseo can still read web pages.",
+    "Off. This Claude login can't search the web. Clauseo can still read web pages.",
   ]);
   expect(w("no_search_on_this_login", { plan: "ChatGPT" }).lines[0]).toContain(
-    "This ChatGPT login",
+    "Off. This ChatGPT login",
   );
 });
 
@@ -128,7 +134,7 @@ test("each browser row's words", () => {
     off: "Off. You turned it off in Settings.",
     locked_off: "Off. Managed by your organisation.",
     managed_by_firm:
-      "Off. Your organisation chooses the tools Claude has on this computer, so Clauseo adds none.",
+      "Off. Your organisation chooses the tools Claude has on this computer, so Clauseo can't add its browser.",
     no_proxy: "Off until Clauseo can check each website the browser opens.",
     too_many_browsers:
       "Off. Other conversations are using every browser this computer can run. One frees up when another conversation closes.",
@@ -148,6 +154,8 @@ const missing = (install: BrowserInstall | null) =>
   words({ tool: "browser", state: "browser_not_installed" }, { install });
 const NO_CHROME = "Off. There's no Chrome on this computer.";
 
+const NB = "\u00a0";
+
 test("no Chrome: the download's words for every install state", () => {
   expect(missing(null)).toMatchObject({ lines: [NO_CHROME], action: null, progress: null });
   expect(missing({ offer: null, progress: null })).toMatchObject({
@@ -157,7 +165,7 @@ test("no Chrome: the download's words for every install state", () => {
   expect(missing({ offer: OFFER, progress: null })).toMatchObject({
     lines: [
       NO_CHROME,
-      "Clauseo can download its own Chrome from Google, about 200 MB, once for all conversations. It needs about 1 GB free.",
+      `Clauseo can download its own Chrome from Google, about 200${NB}MB, once for all conversations. It needs about 1${NB}GB free.`,
     ],
     action: "download",
   });
@@ -165,36 +173,131 @@ test("no Chrome: the download's words for every install state", () => {
     lines: [NO_CHROME, "Install Google Chrome to use the browser."],
     action: null,
   });
+});
+
+test("while Chrome downloads or unpacks, the first line says what it waits for; once done, only that it's ready", () => {
   expect(
     missing({ offer: OFFER, progress: { downloading: { bytes: 64_400_000, total: 201_000_000 } } }),
   ).toEqual({
     name: "Browser",
-    lines: [NO_CHROME],
-    progress: { value: 64_400_000, max: 201_000_000, label: "Downloading Chrome. 64 of 201 MB." },
+    lines: ["Off until Chrome is downloaded."],
+    progress: {
+      value: 64_400_000,
+      max: 201_000_000,
+      label: `Downloading Chrome. 64 of 201${NB}MB.`,
+    },
     action: null,
   });
   expect(missing({ offer: OFFER, progress: "unpacking" })).toMatchObject({
-    lines: [NO_CHROME],
+    lines: ["Off until Chrome is downloaded."],
     progress: { value: 1, max: 1, label: "Unpacking Chrome." },
     action: null,
   });
-  expect(missing({ offer: OFFER, progress: "done" })).toMatchObject({
-    lines: [NO_CHROME, "Chrome is ready. New conversations get the browser."],
+  expect(missing({ offer: OFFER, progress: "done" })).toEqual({
+    name: "Browser",
+    lines: ["Chrome is ready. New conversations get the browser."],
     progress: null,
     action: null,
   });
-  const failed = {
-    disk: "Chrome couldn't be downloaded. It needs about 1 GB free on this computer.",
-    refused: "Your network is blocking the download.",
-    check: "The download didn't match Google's, so Clauseo deleted it.",
-    other: "Chrome couldn't be downloaded.",
-  } as const;
-  for (const code of ["disk", "refused", "check", "other"] as const)
-    expect(missing({ offer: OFFER, progress: { failed: { code } } })).toMatchObject({
-      lines: [NO_CHROME, failed[code]],
-      progress: null,
-      action: "retry",
+});
+
+const FAILED: Record<InstallFailCode, string> = {
+  network: "The connection dropped before Chrome finished downloading.",
+  size_mismatch: "The download didn't match the file Google published, so Clauseo deleted it.",
+  signature: "The download didn't match the file Google published, so Clauseo deleted it.",
+  disk_space: `Chrome couldn't be downloaded. It needs about 1${NB}GB free on this computer.`,
+  host_refused: "Your network is blocking the download.",
+  unpack: "Chrome downloaded but couldn't be unpacked.",
+  unsupported:
+    "This computer can't download Chrome for Clauseo. Install Google Chrome to use the browser.",
+  cancelled: "The download stopped before it finished.",
+  unknown: "Chrome couldn't be downloaded.",
+};
+
+test("a failed download's words by its code, Try again for all but unsupported, never the host's message", () => {
+  for (const code of Object.keys(FAILED) as InstallFailCode[]) {
+    const row = missing({
+      offer: OFFER,
+      progress: { failed: { code, message: "curl: (56) Recv failure" } },
     });
+    expect(row).toEqual({
+      name: "Browser",
+      lines: [NO_CHROME, FAILED[code]],
+      progress: null,
+      action: code === "unsupported" ? null : "retry",
+    });
+    expect(JSON.stringify(row)).not.toContain("curl");
+  }
+});
+
+test("the host's failure code is an open enum: a value this version doesn't know is unknown", () => {
+  for (const code of Object.keys(FAILED)) expect(failCodeOf(code)).toBe(code);
+  expect(failCodeOf("disk")).toBe("unknown");
+  expect(failCodeOf("a_newer_code")).toBe("unknown");
+  expect(failCodeOf(undefined)).toBe("unknown");
+  expect(failCodeOf(7)).toBe("unknown");
+});
+
+test("every number before MB or GB in the download's words is held to its unit by a non-breaking space", () => {
+  const all = [
+    missing({ offer: OFFER, progress: null }),
+    missing({ offer: OFFER, progress: { downloading: { bytes: 1e6, total: 201_000_000 } } }),
+    missing({ offer: OFFER, progress: { failed: { code: "disk_space", message: "" } } }),
+  ].flatMap((r) => [...r.lines, r.progress?.label ?? ""]);
+  const joined = all.join(" ");
+  expect(joined).toMatch(/\d\u00a0(MB|GB)/);
+  expect(joined).not.toMatch(/\d[ \t\n](MB|GB)/);
+});
+
+/** A store over FakeTransport whose installBrowser is refused as a command, as the host refuses a second one. */
+function refusing() {
+  const transport = new FakeTransport({
+    query: () => {
+      throw new Error("no query");
+    },
+    next: { parts: ["app"], query: () => Promise.reject(new Error("not scripted")) },
+  });
+  let refuse: (error: Error) => void = () => {};
+  transport.installBrowser = () =>
+    new Promise<void>((_, reject) => {
+      refuse = reject;
+    });
+  return { transport, store: new BrowserInstallStore(transport), refuse: (e: Error) => refuse(e) };
+}
+
+test("a refused InstallBrowser is no failure: the row goes back to where it stood before the press", async () => {
+  const { transport, store, refuse } = refusing();
+  transport.appEvent({ browser_install: OFFER });
+  store.install();
+  expect(store.get()?.progress).toEqual({ downloading: { bytes: 0, total: 201_000_000 } });
+  refuse(new Error("already running"));
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(store.get()).toEqual({ offer: OFFER, progress: null });
+  // after a failure, a refused Try again goes back to that failure, not to a new one
+  transport.appEvent({ browser_install: { failed: { code: "network", message: "reset" } } });
+  store.install();
+  refuse(new Error("already running"));
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(store.get()?.progress).toEqual({ failed: { code: "network", message: "reset" } });
+});
+
+test("a refused InstallBrowser leaves alone what the host's events said since the press", async () => {
+  const { transport, store, refuse } = refusing();
+  transport.appEvent({ browser_install: OFFER });
+  store.install();
+  transport.appEvent({ browser_install: { downloading: { bytes: 50e6, total: 201e6 } } });
+  refuse(new Error("already running"));
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(store.get()?.progress).toEqual({ downloading: { bytes: 50e6, total: 201e6 } });
+});
+
+test("a failure's code is read and its message kept for the log", () => {
+  const { transport, store } = refusing();
+  transport.appEvent({ browser_install: { failed: { code: "what_is_this", message: "m" } } });
+  expect(store.get()?.progress).toEqual({ failed: { code: "unknown", message: "m" } });
 });
 
 test("the download's words leave the other browser states alone", () => {
