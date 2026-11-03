@@ -9,6 +9,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import axe from "axe-core";
 import { ToolKindIcon } from "@clauseo/components/clauseo/tool-kind-icons.tsx";
+import { IconNeedsPermission } from "@clauseo/components/icons/icons.tsx";
 import { renderToStaticMarkup } from "react-dom/server";
 import { frame } from "@clauseo/components/lib/words-frame.ts";
 import { afterEach, beforeAll, expect, test } from "vitest";
@@ -291,6 +292,12 @@ test("while a permission prompt or a question waits on the lawyer, the working l
   const groupLine = () => lineOf(groups()[0])?.textContent ?? "";
   expect(groupLine()).toContain(`${frame("en", "Needs your permission")}.`);
   expect(groupLine()).not.toContain("Changing");
+  // and leads with the permission's shield, as the working line does, not the edit's icon
+  const icons = lineOf(groups()[0])!.querySelectorAll(".step-group-icons svg");
+  expect(icons).toHaveLength(1);
+  expect(icons[0]!.outerHTML).toBe(
+    renderToStaticMarkup(<IconNeedsPermission size={14} className="step-icon" />),
+  );
   expect(groups()[0]!.dataset["live"]).toBe("true");
   // answered, the turn runs again and the pen with it
   h.deliver([upsert(call(8, 202, "edit", "in_progress", reply)), upsert(header("running"))]);

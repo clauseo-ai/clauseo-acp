@@ -188,6 +188,11 @@ describe("the folded line", () => {
     const asked = lineOf("en", [done, edit], true, "permission");
     expect(asked.line).toBe("Needs your permission.");
     expect(asked.more).toBe("1 done so far.");
+    // led by the wait's own icon, never the edit's
+    expect(asked.kinds).toEqual([]);
+    expect(asked.asks).toBe("permission");
+    expect(lineOf("en", [done, edit], true, "question").asks).toBe("question");
+    expect(lineOf("en", [done, edit], true).asks).toBeUndefined();
     expect(lineOf("en", [done, edit], true, "question").line).toBe("A question for you.");
     expect(lineOf("hi", [done, edit], true, "permission").line).not.toMatch(/बदल/);
     // with nothing asked it says what the step is doing

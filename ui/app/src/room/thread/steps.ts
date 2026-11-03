@@ -305,7 +305,10 @@ export function lineOf(
   }
   if (now === null) return { ...restOf(lang, calls), more: aside };
   return {
-    kinds: now === "thought" ? ["think"] : [now.kind as string],
+    // waiting on the lawyer, the line leads with the wait's own icon (the shield, the question mark), as the working
+    // line does, never the kind of the step that waits
+    ...(asks === null ? {} : { asks }),
+    kinds: asks !== null ? [] : now === "thought" ? ["think"] : [now.kind as string],
     line:
       asks !== null
         ? asksWords(lang, asks)

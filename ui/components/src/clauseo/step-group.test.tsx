@@ -7,6 +7,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, test } from "vitest";
 import {
   IconBreak,
+  IconNeedsPermission,
+  IconQuestion,
   IconToolDelete,
   IconToolEdit,
   IconToolExecute,
@@ -215,4 +217,28 @@ test("off the meta line the line keeps no title and its chevron follows the last
   expect(line.querySelector(".step-group-words")?.lastElementChild?.classList).toContain(
     "step-group-chev",
   );
+});
+
+test("live, a step waiting on the lawyer leads the line with the permission's shield or the question mark, never a kind icon", async () => {
+  for (const [asks, Glyph] of [
+    ["permission", IconNeedsPermission],
+    ["question", IconQuestion],
+  ] as const) {
+    host = document.createElement("div");
+    document.body.append(host);
+    root = createRoot(host);
+    await act(async () =>
+      root!.render(
+        <StepGroup id="tool_call:1" kinds={[]} asks={asks} line="Needs your permission." live>
+          {null}
+        </StepGroup>,
+      ),
+    );
+    const icons = host.querySelectorAll(".step-group-icons svg");
+    expect(icons).toHaveLength(1);
+    expect(icons[0]!.outerHTML).toBe(svg(Glyph, "step-icon"));
+    await act(async () => root?.unmount());
+    host.remove();
+  }
+  host = root = null;
 });
