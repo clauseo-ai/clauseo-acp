@@ -74,7 +74,9 @@ jobs:
     # artifact still run (job_minutes), and both stay well under GitHub's 6 hours.
     # - process: 71 mutants, ~55 min (its tests start and stop real processes);
     # - matters: 200, ~90 min;  matters-settings: 219, ~100 min;  macos: 276, ~70 min.
-    # The first run (41563489415, 2026-11-03) took 7, 52, 34 and 45 minutes.
+    # The first run (41563489415, 2026-11-03) took 7, 52, 34 and 45 minutes, process at 2 workers;
+    # process now runs at 1 (its entry says why), which at twice its measured time still sits far
+    # inside its 140 minutes.
     timeout-minutes: ${{ matrix.job_minutes }}
     strategy:
       fail-fast: false
@@ -86,8 +88,9 @@ jobs:
             minutes: 140
             job_minutes: 160
             # One at a time: `resume`'s mutants (os/windows.rs) can resume the suspended threads
-            # of every process on the runner, so a second worker frees the other's hung agents
-            # and turns a caught mutant into a missed one (run 41563489415, os/windows.rs:140).
+            # of every process on the runner, so one worker's mutant can resume the other worker's
+            # hung agents and turn a caught mutant into a missed one (run 41563489415,
+            # os/windows.rs:140).
             jobs: 1
             fake_agent: true
             packages: clauseo-process
