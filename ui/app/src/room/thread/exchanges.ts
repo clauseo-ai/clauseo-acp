@@ -36,7 +36,8 @@ type Building = {
   stopped: boolean;
 };
 
-const turnOf = (e: ViewEntry): TurnId | undefined =>
+/** The turn an entry other than a user message ran in. */
+export const turnOf = (e: ViewEntry): TurnId | undefined =>
   e.agent_text?.turn ??
   e.tool_call?.turn ??
   e.agent_content?.turn ??
