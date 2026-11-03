@@ -26,6 +26,7 @@ pub fn account_limits() -> AccountLimits {
             resets_at: Some(Timestamp::new(1_760_000_000_000).unwrap()),
             duration_mins: Some(300),
             warning: true,
+            model: None,
         }],
         at_limit: AtLimitBehaviour::Pauses,
         source: LimitSource::Fresh {
@@ -45,6 +46,7 @@ pub fn limits_view() -> LimitsView {
             id: "five_hour".to_owned(),
             kind: WindowKind::Session,
             label: "5-hour".to_owned(),
+            model: None,
             used_percent: Some(finite(82.5)),
             tone: MeterTone::Near,
             resets_at: Some(Timestamp::new(1_760_000_000_000).unwrap()),

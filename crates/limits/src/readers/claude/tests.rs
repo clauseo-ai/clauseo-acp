@@ -31,6 +31,14 @@ fn limits(line: &str) -> AccountLimits {
     }
 }
 
+/// `window` counting `model`.
+fn of(model: &str, window: LimitWindow) -> LimitWindow {
+    LimitWindow {
+        model: Some(model.to_owned()),
+        ..window
+    }
+}
+
 fn window(
     id: &str,
     kind: WindowKind,
@@ -47,6 +55,7 @@ fn window(
         resets_at: resets_at.map(|ms| Timestamp::new(ms).unwrap()),
         duration_mins: Some(mins),
         warning: false,
+        model: None,
     }
 }
 
@@ -89,13 +98,16 @@ fn max_has_its_windows_one_model_window_and_extra_usage_on() {
                     Some(NOV_6_0900),
                     WEEK
                 ),
-                window(
-                    "seven_day_overage_included",
-                    WindowKind::Model,
-                    "Fable weekly limit",
-                    12.0,
-                    Some(NOV_6_0900),
-                    WEEK
+                of(
+                    "Fable",
+                    window(
+                        "seven_day_overage_included",
+                        WindowKind::Model,
+                        "Fable weekly limit",
+                        12.0,
+                        Some(NOV_6_0900),
+                        WEEK
+                    )
                 ),
             ],
             at_limit: AtLimitBehaviour::ExtraUsage { enabled: true },
@@ -131,13 +143,16 @@ fn pro_reads_offsets_null_resets_and_extra_usage_off() {
                     None,
                     WEEK
                 ),
-                window(
-                    "seven_day_sonnet",
-                    WindowKind::Model,
-                    "Sonnet weekly limit",
-                    20.0,
-                    Some(NOV_6_0900),
-                    WEEK
+                of(
+                    "Sonnet",
+                    window(
+                        "seven_day_sonnet",
+                        WindowKind::Model,
+                        "Sonnet weekly limit",
+                        20.0,
+                        Some(NOV_6_0900),
+                        WEEK
+                    )
                 ),
             ],
             at_limit: AtLimitBehaviour::ExtraUsage { enabled: false },
@@ -174,21 +189,27 @@ fn team_sorts_its_windows_and_numbers_two_model_windows_and_a_scoped_opus_replac
                     at,
                     WEEK
                 ),
-                window(
-                    "model_scoped:0",
-                    WindowKind::Model,
-                    "Fable weekly limit",
-                    7.0,
-                    at,
-                    WEEK
+                of(
+                    "Fable",
+                    window(
+                        "model_scoped:0",
+                        WindowKind::Model,
+                        "Fable weekly limit",
+                        7.0,
+                        at,
+                        WEEK
+                    )
                 ),
-                window(
-                    "model_scoped:1",
-                    WindowKind::Model,
-                    "Opus weekly limit",
-                    8.5,
-                    at,
-                    WEEK
+                of(
+                    "Opus",
+                    window(
+                        "model_scoped:1",
+                        WindowKind::Model,
+                        "Opus weekly limit",
+                        8.5,
+                        at,
+                        WEEK
+                    )
                 ),
                 window(
                     "seven_day_oauth_apps",
@@ -368,13 +389,16 @@ fn a_bad_window_is_dropped_alone() {
                 None,
                 WEEK
             ),
-            window(
-                "model_scoped:2",
-                WindowKind::Model,
-                "Big Model weekly limit",
-                2.0,
-                None,
-                WEEK
+            of(
+                "Big Model",
+                window(
+                    "model_scoped:2",
+                    WindowKind::Model,
+                    "Big Model weekly limit",
+                    2.0,
+                    None,
+                    WEEK
+                )
             ),
             window(
                 "seven_day_oauth_apps",
@@ -434,6 +458,21 @@ fn a_fixed_model_window_gives_way_only_to_a_scoped_row_of_the_same_model() {
             pair("model_scoped:0", "Fable weekly limit"),
             pair("model_scoped:1", "Lyric 2 weekly limit"),
         ]
+    );
+}
+
+#[test]
+fn a_model_window_carries_the_bare_model_name_and_others_none() {
+    let models: Vec<Option<String>> = windows_of(
+        r#"{"five_hour":{"utilization":1},"seven_day_sonnet":{"utilization":2},
+            "model_scoped":[{"display_name":"\u202e Fable\u200b ","utilization":3}]}"#,
+    )
+    .into_iter()
+    .map(|window| window.model)
+    .collect();
+    assert_eq!(
+        models,
+        [None, Some("Sonnet".to_owned()), Some("Fable".to_owned())]
     );
 }
 

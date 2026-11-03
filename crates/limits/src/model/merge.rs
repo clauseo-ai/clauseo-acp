@@ -255,6 +255,7 @@ fn live_row(agent: AgentKind, id: String, signal: &LiveSignal, now: Timestamp) -
         resets_at: signal.resets_at,
         duration_mins: None,
         warning: signal.status == LiveStatus::Warning,
+        model: None,
     };
     Some(Row {
         rejected: signal.status == LiveStatus::Rejected,

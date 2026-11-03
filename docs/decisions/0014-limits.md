@@ -138,7 +138,10 @@ the windows are `five_hour` (session), `seven_day` (weekly), `seven_day_opus` an
 server's own list replaces it, and no two rows share a label. Both pinned sources prefer the list:
 claude-agent-acp 0.89.1's usage text shows `model_scoped` and the two fixed windows only when it
 is empty (`dist/usage-markdown.js:127-134`), and Claude Code 2.1.293's usage dialog never shows
-`seven_day_opus` and lists each `model_scoped` entry by its `display_name`. `extra_usage` gives
+`seven_day_opus` and lists each `model_scoped` entry by its `display_name`. A per-model window
+also carries `model`, the bare name ("Opus", "Sonnet", or the cleaned `display_name`), and so
+does its row in the view, so the app can build the label in its own language; every other window,
+and every Codex window, has none. `extra_usage` gives
 `ExtraUsage { enabled }`. The plan names are "Claude Pro", "Claude Max", "Claude Team" and
 "Claude Enterprise", and an unknown plan gives none. `AccountRef` is the reported email when it
 looks like one. Otherwise it is a fixed ref: `api-key`, `bedrock`, `vertex`, or `plan`. It is

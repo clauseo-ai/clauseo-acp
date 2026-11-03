@@ -225,8 +225,9 @@ fn assert_scalars(ts: &str) {
     });
     assert_block(ts, "Cost", |b| b.contains("\tamount: Finite,\n"));
     assert_block(ts, "LimitWindowView", |b| {
-        b.contains("\tused_percent?: Finite,\n")
+        b.contains("\tused_percent?: Finite,\n") && b.contains("\tmodel?: string,\n")
     });
+    assert_block(ts, "LimitWindow", |b| b.contains("\tmodel?: string,\n"));
     assert_block(ts, "ConfigOption", |b| b.contains("\tid: string,\n"));
     assert!(!ts.contains("bigint") && !ts.contains("BigInt"));
     assert!(!ts.contains("CompactString"));

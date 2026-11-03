@@ -56,6 +56,7 @@ fn tone_is_near_when_the_agent_warns() {
     assert_eq!(
         tone_of(LimitWindow {
             warning: true,
+            model: None,
             ..five_hour(10.0)
         }),
         MeterTone::Near
@@ -173,6 +174,21 @@ fn plan_label_and_plan_billing_are_copied() {
     let view = view_of(&read_once(account(CLAUDE, vec![])), CLAUDE, t0());
     assert_eq!(view.plan.as_deref(), Some("Max"));
     assert_eq!(view.billing, BillingKind::Plan);
+}
+
+#[test]
+fn a_model_row_carries_its_model_and_other_rows_none() {
+    let fable = LimitWindow {
+        model: Some("Fable".to_owned()),
+        ..window("model_scoped:0", WindowKind::Model, 10.0)
+    };
+    let view = view_of(
+        &read_once(account(CLAUDE, vec![five_hour(5.0), fable])),
+        CLAUDE,
+        t0(),
+    );
+    assert_eq!(row(&view, "model_scoped:0").model.as_deref(), Some("Fable"));
+    assert_eq!(row(&view, "five_hour").model, None);
 }
 
 #[test]
