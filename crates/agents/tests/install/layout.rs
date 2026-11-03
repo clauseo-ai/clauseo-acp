@@ -200,6 +200,46 @@ mod node_20 {
         );
     }
 
+    /// With an offline bundle, Node's archive is copied into `downloads/` as it is hashed and
+    /// only the copy is unpacked; nothing touches the network, and the bundle stays as it was.
+    #[test]
+    fn a_bundled_node_installs_from_its_copy_with_no_network_call() {
+        use sha2::Digest as _;
+        let mut fx = Fixture::new("bundle-node");
+        fx.config.node_search = clauseo_agents::NodeSearch::none();
+        let archive = wrapper_archive();
+        let entry = node_entry(Some(&archive));
+        let name = entry.archive(platform()).unwrap().name().to_owned();
+        fx.config.snapshot = snapshot(BASE, entry, 10_000);
+        let bundle = clauseo_agents::testing::TempDir::new("bundle-node-files").unwrap();
+        write::write(&bundle.path().join("node").join(&name), &archive).unwrap();
+        for package in A_PACKAGES {
+            let bytes = &fx.tarballs[package];
+            let hex = crate::support::to_hex(&sha2::Sha512::digest(bytes));
+            write::write(&bundle.path().join("npm").join(format!("{hex}.tgz")), bytes).unwrap();
+        }
+        fx.config.install.bundle = Some(bundle.path().to_owned());
+
+        let (agents, events) = fx.start();
+        events.first_states();
+        let installed = install_ready(&agents, &events, &agent_a());
+        let runtime = fx
+            .data
+            .path()
+            .join("agents/runtime")
+            .join(format!("node-v{NODE_VERSION}-{}", platform().node_name()));
+        assert_eq!(installed.node, runtime.join("bin/node"));
+        assert!(runtime.join("clauseo-runtime.json").is_file());
+        assert_eq!(fx.lookups.names(), Vec::<String>::new());
+        assert_eq!(fx.registry.requests(), []);
+        // The copy is gone after Ready; the bundle's archive stays.
+        assert!(!fx.data.path().join("agents/downloads").join(&name).exists());
+        assert_eq!(
+            std::fs::read(bundle.path().join("node").join(&name)).unwrap(),
+            archive
+        );
+    }
+
     fn node_path_of(fx: &Fixture) -> String {
         node_path(fx.config.snapshot.node())
     }

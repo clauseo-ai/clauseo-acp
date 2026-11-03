@@ -263,8 +263,11 @@ pub(crate) fn runtime_valid(dir: &Path, archive: &NodeArchive, os: Os) -> bool {
         && is_file(&runtime_npm_cli(dir, os))
 }
 
-/// Unpacks the checked archive at `archive_path` into `dir`: into `.tmp-<folder name>` beside
-/// it first (any old one removed), then renamed into place over any incomplete folder, and
+/// Unpacks the archive at `archive_path` into `dir`. The archive is read once into memory (at
+/// most its snapshot size, about 60 MB) and its SHA-256 checked on those bytes, which are the
+/// ones unpacked: nothing is opened again by path after the check. A mismatch deletes the
+/// archive. The bytes go into `.tmp-<folder name>` beside `dir` first (any old one removed),
+/// then `node` is synced, the folder renamed into place over any incomplete one, and
 /// `clauseo-runtime.json` written last.
 pub(crate) fn install_runtime(
     archive_path: &Path,
@@ -278,6 +281,7 @@ pub(crate) fn install_runtime(
             "the runtime folder has no parent".into(),
         ));
     };
+    let bytes = read_checked(archive_path, archive)?;
     let mut tmp_name = OsString::from(".tmp-");
     tmp_name.push(name);
     let tmp = parent.join(tmp_name);
@@ -287,10 +291,11 @@ pub(crate) fn install_runtime(
     } else {
         ArchiveKind::TarGz
     };
-    let unpacked = write::extract(archive_path, kind, &tmp).and_then(|()| {
+    let unpacked = write::extract(&bytes, kind, &tmp).and_then(|()| {
         let complete = runtime_program(&tmp, os).is_file() && runtime_npm_cli(&tmp, os).is_file();
         if complete {
-            Ok(())
+            // After a power cut a receipt must not sit beside a truncated `node`.
+            write::sync_file(&runtime_program(&tmp, os)).map_err(ExtractError::Io)
         } else {
             Err(ExtractError::Malformed(
                 "the archive holds no node and npm".into(),
@@ -312,6 +317,26 @@ pub(crate) fn install_runtime(
         .map_err(|err| ExtractError::Malformed(err.to_string()))?;
     write::write_atomic(&dir.join(RUNTIME_RECEIPT), &bytes)?;
     Ok(())
+}
+
+/// The bytes of the archive at `path`, once they are exactly `archive`'s size and SHA-256. A
+/// file that is not is deleted, so the next try fetches it again.
+fn read_checked(path: &Path, archive: &NodeArchive) -> Result<Vec<u8>, ExtractError> {
+    use std::io::Read as _;
+    let size = archive.size();
+    let mut bytes = Vec::with_capacity(usize::try_from(size).unwrap_or(0));
+    write::open_read(path)?
+        .take(size.saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    let mut hasher = archive.expected().hasher();
+    hasher.update(&bytes);
+    if u64::try_from(bytes.len()).ok() == Some(size) && hasher.matches(archive.expected()) {
+        return Ok(bytes);
+    }
+    drop(write::remove_file(path));
+    Err(ExtractError::Malformed(
+        "Node's archive no longer matches its pinned checksum; it was deleted".into(),
+    ))
 }
 
 #[cfg(test)]
