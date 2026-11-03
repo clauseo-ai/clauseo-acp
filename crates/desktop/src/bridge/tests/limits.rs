@@ -1,7 +1,8 @@
 //! The limits on `main`'s and the settings window's channels (`open_stream` follows them there
-//! alone), and the refresh either window's focus asks for (`on_window_event` in `lib.rs`, then
-//! `Bridge::shown`). A scripted reader stands in for the limits readers: it records each read and
-//! answers only when the test says, so no reader process starts.
+//! alone), the refresh either window's focus asks for (`on_window_event` in `lib.rs`, then
+//! `Bridge::shown`), and the settings window's refreshes, throttled. A scripted reader stands in
+//! for the limits readers: it records each read and answers only when the test says, so no
+//! reader process starts.
 
 use std::collections::VecDeque;
 use std::future::Future;
@@ -11,7 +12,10 @@ use std::time::Duration;
 
 use clauseo_host::{Host, ManualClock};
 use clauseo_limits::{ReadFailure, ReadLimits, ReadOutcome};
-use clauseo_protocol::{AgentKind, LimitsView, Timestamp};
+use clauseo_protocol::{
+    AccountLimits, AccountRef, AgentKind, AtLimitBehaviour, Billing, Finite, LimitSource,
+    LimitWindow, LimitsView, PlanLabel, Timestamp, WindowKind,
+};
 use futures::FutureExt as _;
 use futures::StreamExt as _;
 use futures::channel::oneshot;
@@ -19,6 +23,7 @@ use tauri::test::{MockRuntime, mock_builder};
 use tauri::{Manager as _, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 
 use super::*;
+use crate::bridge::throttle::REFRESH_GAP;
 use crate::host_start::{HostCell, stop};
 use crate::test_support::{Messages, Running, collector};
 
@@ -309,4 +314,128 @@ fn a_focus_before_the_host_starts_refreshes_once_it_has() {
     drop(views);
     drop(app);
     stop(&cell);
+}
+
+/// `used` as a window's share.
+fn usage_percent(used: usize) -> Finite {
+    Finite::new(f64::from(u32::try_from(used).unwrap())).unwrap()
+}
+
+/// A good read of a Claude plan whose one window is `used` percent full.
+fn usage(used: usize) -> ReadOutcome {
+    let used = usage_percent(used);
+    let window = LimitWindow {
+        id: "five_hour".to_owned(),
+        kind: WindowKind::Session,
+        label: "5-hour limit".to_owned(),
+        used_percent: used,
+        resets_at: None,
+        duration_mins: Some(300),
+        warning: false,
+    };
+    let limits = AccountLimits {
+        agent: AgentKind::Claude,
+        account: AccountRef("ada@example.com".to_owned()),
+        plan: Some(PlanLabel("Max".to_owned())),
+        billing: Billing::Plan,
+        windows: vec![window],
+        at_limit: AtLimitBehaviour::Pauses,
+        source: LimitSource::Fresh {
+            checked_at: Timestamp::new(1_790_000_000_000).unwrap(),
+        },
+    };
+    ReadOutcome::Usage {
+        limits,
+        reached: None,
+    }
+}
+
+/// A `TryAgain` refresh for `agent`, as Plan and usage's button sends it.
+fn try_again(agent: Option<AgentKind>) -> CommandEnvelope {
+    envelope(HostCommand::RefreshLimits {
+        agent,
+        why: RefreshWhy::TryAgain,
+    })
+}
+
+/// The settings window's refreshes, at most one per agent per 10 s (0028's 2026-11-03
+/// amendment): a second for Claude within 10 s answers `Done` and reads nothing, one for every
+/// agent (another key) passes, and one 10 s after the first passes. `main`'s are not throttled.
+/// Time is given, never slept.
+#[test]
+fn the_settings_window_refreshes_an_agent_at_most_once_in_ten_seconds() {
+    let scratch = Scratch::with_limits("limits-throttle");
+    let (host, reads, _clock) = start(&scratch);
+    let bridge = host.bridge();
+    let messages = open(&bridge, MAIN);
+    // Each read ends (the host publishes its account's share) before the next refresh: the
+    // host starts no read while one is in flight. Read n answers n% used.
+    let answer = || {
+        let used = reads.count();
+        reads.answer(usage(used));
+        let wanted = usage_percent(used);
+        while !matches!(messages.next_limits(), HostEvent::AccountLimitsChanged(read)
+            if read.windows[0].used_percent == wanted)
+        {}
+    };
+    answer();
+    let start = pump::now();
+    let at = |secs| start + Duration::from_secs(secs);
+    let claude = Some(AgentKind::Claude);
+    let dispatch = |label, agent, now| block_on(bridge.dispatch_at(label, try_again(agent), now));
+
+    // The host starts a read as it takes the command, so the count is final once it answers.
+    assert_eq!(
+        dispatch(SETTINGS, claude, at(0)).unwrap(),
+        CommandOutcome::Done
+    );
+    assert_eq!(reads.count(), 2);
+    answer();
+    assert_eq!(
+        dispatch(SETTINGS, claude, at(9)).unwrap(),
+        CommandOutcome::Done
+    );
+    assert_eq!(
+        reads.count(),
+        2,
+        "a second refresh of Claude within 10 s read"
+    );
+    assert_eq!(
+        dispatch(SETTINGS, None, at(9)).unwrap(),
+        CommandOutcome::Done
+    );
+    assert_eq!(reads.count(), 3, "a refresh of every agent is its own key");
+    answer();
+    assert_eq!(
+        dispatch(SETTINGS, claude, at(10)).unwrap(),
+        CommandOutcome::Done
+    );
+    assert_eq!(
+        reads.count(),
+        4,
+        "a refresh of Claude 10 s after the last did not read"
+    );
+    for count in [5, 6] {
+        answer();
+        assert_eq!(
+            dispatch(MAIN, claude, at(10)).unwrap(),
+            CommandOutcome::Done
+        );
+        assert_eq!(reads.count(), count, "main's refresh was throttled");
+    }
+}
+
+/// The throttle keeps each agent apart: Codex and every agent pass while Claude is held back,
+/// and Claude passes again at exactly 10 s, which restarts its 10 s.
+#[test]
+fn the_refresh_throttle_keeps_each_agent_apart() {
+    let throttle = throttle::RefreshThrottle::default();
+    let start = pump::now();
+    let claude = Some(AgentKind::Claude);
+    assert!(throttle.pass(claude, start));
+    assert!(!throttle.pass(claude, start + Duration::from_millis(9_999)));
+    assert!(throttle.pass(Some(AgentKind::Codex), start + Duration::from_secs(1)));
+    assert!(throttle.pass(None, start + Duration::from_secs(1)));
+    assert!(throttle.pass(claude, start + REFRESH_GAP));
+    assert!(!throttle.pass(claude, start + REFRESH_GAP + Duration::from_secs(9)));
 }

@@ -13,6 +13,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{MAIN_SEPARATOR, Path};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::Instant;
 
 use clauseo_host::HostHandle;
 use clauseo_protocol::{
@@ -30,9 +31,11 @@ use crate::picked::{self, PickedFolder};
 use crate::settings_window::SETTINGS_WINDOW;
 
 mod pump;
+mod throttle;
 mod window;
 
 use pump::Window;
+use throttle::RefreshThrottle;
 use window::{AckError, Feed};
 
 /// The principal of every call: the desktop app on this computer.
@@ -70,6 +73,8 @@ pub(crate) struct Bridge {
     closed: Mutex<HashMap<String, u64>>,
     /// The folder refs `pick_folder` issued in this run; `CreateMatter` takes no other.
     issued: Mutex<HashSet<FolderRefId>>,
+    /// The settings window's `RefreshLimits`, at most one per agent per 10 s.
+    refreshes: RefreshThrottle,
 }
 
 /// Locks `mutex`, taking the data of one a panicking holder left: every critical section here
@@ -108,6 +113,7 @@ impl Bridge {
             builds: Mutex::new(HashMap::new()),
             closed: Mutex::new(HashMap::new()),
             issued: Mutex::new(HashSet::new()),
+            refreshes: RefreshThrottle::default(),
         }
     }
 
@@ -140,8 +146,25 @@ impl Bridge {
         label: &str,
         command: CommandEnvelope,
     ) -> Result<CommandOutcome, HostError> {
+        self.dispatch_at(label, command, pump::now()).await
+    }
+
+    /// `dispatch` at `now`. A `RefreshLimits` from the settings window that its throttle holds
+    /// back (`throttle.rs`) answers `Done` and reaches no host.
+    async fn dispatch_at(
+        &self,
+        label: &str,
+        command: CommandEnvelope,
+        now: Instant,
+    ) -> Result<CommandOutcome, HostError> {
         let checked = command.validate().map_err(HostError::invalid_command)?;
         self.admit(label, checked.command())?;
+        if label == SETTINGS_WINDOW
+            && let HostCommand::RefreshLimits { agent, .. } = checked.command()
+            && !self.refreshes.pass(*agent, now)
+        {
+            return Ok(CommandOutcome::Done);
+        }
         self.host().await?.dispatch(checked.into_envelope()).await
     }
 
@@ -169,7 +192,7 @@ impl Bridge {
 
     /// Whether the window `label` may send `command`: `main` what `admit_main` admits, the
     /// `settings` window `SetUiSettings` and, for its Plan and usage, `RefreshLimits` (0028,
-    /// U12), any other window nothing.
+    /// U12; `dispatch_at` throttles it), any other window nothing.
     fn admit(&self, label: &str, command: &HostCommand) -> Result<(), HostError> {
         match label {
             crate::MAIN_WINDOW => self.admit_main(command),

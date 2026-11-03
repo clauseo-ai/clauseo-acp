@@ -69,7 +69,7 @@ impl Drop for Window {
     clippy::disallowed_methods,
     reason = "the bridge driver's one clock read; window.rs takes time as an argument"
 )]
-fn now() -> Instant {
+pub(super) fn now() -> Instant {
     Instant::now()
 }
 
