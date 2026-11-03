@@ -73,8 +73,11 @@ function siteOf(url: string): { name: string; where: string } | null {
   }
 }
 
-/** An absolute path, Unix or Windows, as a run of non-space characters. */
-const ABSOLUTE = /(?:[A-Za-z]:\\|\/)[^\s"'`]*[/\\][^\s"'`]+/g;
+/** An absolute path, Unix or Windows, as a run of non-space characters. Never a slash inside a word or after a colon
+ * or another slash, so a web address ("https://indiankanoon.org/doc/1/") is no path and stays whole. */
+const ABSOLUTE = /(?<![\w:/\\.])(?:[A-Za-z]:\\|\/)[^\s"'`]*[/\\][^\s"'`]+/g;
+/** A web address in a title. */
+const WEB = /\bhttps?:\/\/[^\s"'`]+/;
 
 /** The agent's title with each absolute path cut to its file name: the fallback when nothing else names the step. */
 export const titleOf = (title: string): string =>
@@ -109,10 +112,10 @@ export function placeOf(entry: ToolCallEntry): StepPlace {
     place.where = site.where;
   } else {
     // nothing names it but the agent's title, whose paths the row cuts to their file names: the first one's folder is
-    // the hover, so where the paper is stays a pointer away
+    // the hover, so where the paper is stays a pointer away; with no path, a web address in it, whole
     const named = entry.title.match(ABSOLUTE)?.[0];
     const folder = named === undefined ? "" : splitPath(named).folder;
-    place.where = folder === "" ? null : folder;
+    place.where = folder === "" ? (entry.title.match(WEB)?.[0] ?? null) : folder;
   }
   places.set(entry, place);
   return place;

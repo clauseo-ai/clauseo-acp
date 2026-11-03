@@ -258,6 +258,19 @@ describe("friendly names", () => {
       "Edit Reply.docx.",
     );
     expect(hoverOf(titled("search", "grep notice period"))).toBeNull();
+  });
+
+  test("a web address in a title is no path: it stays whole in the words and on hover", () => {
+    expect(titleOf("Fetch https://example.com/a/b")).toBe("Fetch https://example.com/a/b");
+    expect(titleOf("Open file:///Users/x/a.pdf")).toBe("Open file:///Users/x/a.pdf");
+    const open = call("other", "in_progress", { title: "Open https://indiankanoon.org/doc/123/" });
+    expect(doingOf("en", open)).toBe("Open https://indiankanoon.org/doc/123/.");
+    expect(doingOf("en", open)).not.toContain("https:123");
+    expect(hoverOf(open)).toBe("https://indiankanoon.org/doc/123/");
+    // a path after a word's slash or a colon is no path either; a real one beside an address is still cut
+    expect(titleOf("Compare https://x.org/a/b with /Users/x/Lease.pdf")).toBe(
+      "Compare https://x.org/a/b with Lease.pdf",
+    );
     // with no title either, the generic sentence
     expect(doneOf("en", call("read"))).toBe("Read the papers.");
     expect(hoverOf(call("read"))).toBeNull();
