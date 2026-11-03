@@ -5,7 +5,7 @@
 // by its file name, its folder on hover) and, where it didn't simply finish, its state. No animation, and no card.
 // The words come in made by the caller, in the language; the rows are the caller's StepRow and StepThought.
 import { useId, useState, type ReactElement, type ReactNode } from "react";
-import { IconBreak, IconFold } from "../icons/icons.tsx";
+import { IconBreak, IconFold, IconNeedsPermission, IconQuestion } from "../icons/icons.tsx";
 import { Say } from "./say.tsx";
 import { ToolKindIcon } from "./tool-kind-icons.tsx";
 
@@ -22,6 +22,9 @@ export type StepGroupProps = {
   trouble?: string;
   /** Whether the group is the running one. */
   live?: boolean;
+  /** Live, the step in hand waits on the lawyer: the line leads with the permission's shield or the question mark,
+   * as the working line does, in place of the kind icons. */
+  asks?: "permission" | "question" | undefined;
   /** Opened when it mounts (the gallery's open state). */
   defaultOpen?: boolean;
   /** Wraps the line where it stands: an answer's first group puts it on the answer's meta line, after the name and
@@ -41,6 +44,7 @@ export function StepGroup({
   more = "",
   trouble = "",
   live = false,
+  asks,
   defaultOpen = false,
   head,
   children,
@@ -74,6 +78,15 @@ export function StepGroup({
           onClick={() => setOpen((o) => !o)}
         >
           {/* none when nothing finished and the trouble leads: the break alone stands first */}
+          {asks !== undefined && (
+            <span className="step-group-icons" data-asks={asks}>
+              {asks === "permission" ? (
+                <IconNeedsPermission size={14} className="step-icon" />
+              ) : (
+                <IconQuestion size={14} className="step-icon" />
+              )}
+            </span>
+          )}
           {kinds.length > 0 && (
             <span className="step-group-icons">
               {kinds.slice(0, live ? 1 : 3).map((kind) => (
