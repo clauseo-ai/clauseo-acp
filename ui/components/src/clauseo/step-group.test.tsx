@@ -134,7 +134,7 @@ test("the line is a button that opens its rows in place and folds them, with ari
   expect(host.querySelector("ol")).toBeNull();
 });
 
-test("a group whose every step is over with none finished says what was tried once, as its trouble, with no words before it", async () => {
+test("a group whose every step is over with none finished says what was tried once, as its trouble, led by the break alone", async () => {
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -142,7 +142,7 @@ test("a group whose every step is over with none finished says what was tried on
     root!.render(
       <StepGroup
         id="tool_call:1"
-        kinds={["fetch"]}
+        kinds={[]}
         line=""
         trouble="Tried to read indiankanoon.org online."
       >
@@ -154,4 +154,9 @@ test("a group whose every step is over with none finished says what was tried on
   expect(line.textContent).toBe("Tried to read indiankanoon.org online.");
   expect(host.querySelector(".step-group-now")).toBeNull();
   expect(host.querySelector('[data-testid="step-group-trouble"] svg')).not.toBeNull();
+  // no icons before the words: the break is the line's first glyph, the chevron its only other
+  expect(host.querySelector(".step-group-icons")).toBeNull();
+  const glyphs = [...line.querySelectorAll("svg")];
+  expect(glyphs).toHaveLength(2);
+  expect(glyphs[0]!.closest(".step-trouble-icon")).not.toBeNull();
 });

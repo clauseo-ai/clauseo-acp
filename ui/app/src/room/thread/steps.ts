@@ -152,7 +152,8 @@ export function restOf(
   const out = calls.slice(0, NAMED).map((c) => doneOf(lang, c));
   const rest = calls.length - NAMED;
   if (rest > 0) out.push(counted(lang, ["And 1 more.", "And {n} more."], rest));
-  return { kinds: iconsOf(calls), line: "", trouble: out.join(" ") };
+  // the break leads what was tried, alone: a kind icon before it would mark the one step twice
+  return { kinds: [], line: "", trouble: out.join(" ") };
 }
 
 /** What failed or was stopped in a group with a step that finished or is still to, in words for the folded line; ""
