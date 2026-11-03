@@ -78,7 +78,9 @@ Amended by H9 (2026-11-02), the brief's "Later" list. The code is `actor/turn/qu
   (send now, `SendQueuedNow`, a requeued steer), else only after `EndTurn`. Any other stop holds
   it, `AtLimit` included (taken from `TurnEnded`, never from a later `TurnStoppedAtLimit`), until
   `ResumeQueue`, `SendQueuedNow` or a new `SendPrompt`. While a steer request is out the queue
-  waits for its answer. A head goes to step 2 as any turn does; a wait for another thread's
+  waits for its answer, and while the thread's own undo holds the matter's writer nothing
+  starts: the undo's end moves the queue on, so a prompt never goes out before the undo's note.
+  A head goes to step 2 as any turn does; a wait for another thread's
   writer logs its second `TurnQueued` there. The held flag is in memory only: the view shows it
   as `queue_held` (set by the host through `clauseo_reducer::set_queue_held`, written `false` in
   snapshots), true only while turns wait.
@@ -93,18 +95,24 @@ Amended by H9 (2026-11-02), the brief's "Later" list. The code is `actor/turn/qu
   `Injected` logs `SteerResolved { Injected }` with `aside`, the running turn's tool calls not yet
   finished (the view marks them as carried on in the background); `promptRequired`, a failure or
   `startedNewTurn` (cancelled at once) log `SteerResolved { Requeued }` and a `TurnQueued` behind
-  the steered turn, and the new turn takes the head with the steered content.
+  the steered turn, and the new turn takes the head with the steered content. An answer that
+  does not come within 30 s counts as a failure, so an agent that never answers cannot freeze
+  the queue (a later answer is ignored).
 - `EditQueuedPrompt { thread, turn, text }` replaces the prompt's first text block, drops its other
   text blocks and keeps its file blocks (`QueuedPromptEdited`); empty text for a prompt without
   files is `command.invalid`. `RemoveQueuedPrompt` logs `TurnEnded { Cancelled }` without holding
-  or moving the queue. `SendQueuedNow` moves the turn to the head, logs only the receipt and
+  or moving the queue; the turn leaves the queue when that commit is durable and goes back to
+  its place if the commit fails. `SendQueuedNow` moves the turn to the head, logs only the receipt and
   cancels the current turn. These three also take the current turn while it is still launching
   or waiting for another thread's writer, since the view shows it queued until `TurnStarted`;
   anything else is `thread.turn_not_queued`. `ResumeQueue` logs only the receipt. `ArchiveThread`
   is refused `thread.turn_running` while turns wait.
 - The queue is in the log, so it survives a restart: start-up reconciliation rebuilds it from the
   whole log (edits applied, requeued steers in their new turns) and holds it; the started open
-  turn is the one the fold shows running, no longer the last prompt. A send now or a
+  turn is the one the fold shows running, no longer the last prompt, and a held queue is found
+  behind a later turn that ended (the newest prompt without a step counts, not the last one). A
+  steer saved but never answered before the stop moves to a new held queued turn
+  (`SteerResolved { Requeued }` and its `TurnQueued`), as a failed answer would have moved it. A send now or a
   `SendQueuedNow` move not yet started when the host stops is lost; the turn stays queued, held.
 
 The undo note (QR11.1) is not logged. Its words: "Note from Clauseo: since your last turn, the

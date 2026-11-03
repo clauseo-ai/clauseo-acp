@@ -9,7 +9,7 @@ use super::super::super::commands::{AfterCommand, CommandCtx};
 use super::super::super::{Actor, Tag};
 use super::super::out::Out;
 use super::super::{TurnPhase, cancel, lost, state};
-use super::{After, command_tag, drop_turn, move_on, queue, sync_held, with_stream};
+use super::{After, command_tag, move_on, queue, sync_held, with_stream};
 use crate::build;
 use crate::error::Error;
 
@@ -189,14 +189,43 @@ fn remove_loaded(
     let stream = Some(StreamId::Thread(thread));
     out.draft
         .receipt(ctx.receipt(stream, CommandOutcome::Done, now));
-    out.send_tagged(actor, done_tag(ctx))?;
-    drop_turn(actor, thread, turn);
-    if let Some(queue) = queue(actor, thread)
-        && queue.is_empty()
-    {
-        queue.held = false;
+    // Out of the queue while the commit is in flight, so it cannot start meanwhile; gone once
+    // the commit is durable, back in its place if it fails.
+    let queue = queue(actor, thread).ok_or_else(|| lost("a thread"))?;
+    let at = queue.position(turn).ok_or_else(|| lost("the turn"))?;
+    let queued = queue.turns.remove(at).ok_or_else(|| lost("the turn"))?;
+    queue.removing.push((at, queued));
+    let tag = command_tag(ctx, CommandOutcome::Done, thread, After::Removed(turn));
+    let sent = out.send_tagged(actor, tag);
+    if sent.is_err() {
+        removed(actor, thread, turn, false);
     }
-    Ok(())
+    sent
+}
+
+/// The commit removing `turn` returned: durable, the turn is gone (an emptied queue is no
+/// longer held); failed, the turn goes back to its place.
+pub(super) fn removed(actor: &mut Actor, thread: ThreadId, turn: TurnId, ok: bool) {
+    let Some(queue) = queue(actor, thread) else {
+        return;
+    };
+    let Some(index) = queue
+        .removing
+        .iter()
+        .position(|(_, queued)| queued.turn == turn)
+    else {
+        return;
+    };
+    let (at, queued) = queue.removing.remove(index);
+    if ok {
+        if queue.is_empty() {
+            queue.held = false;
+        }
+    } else {
+        let at = at.min(queue.turns.len());
+        queue.turns.insert(at, queued);
+    }
+    sync_held(actor, thread);
 }
 
 fn done_tag(ctx: CommandCtx) -> Tag {

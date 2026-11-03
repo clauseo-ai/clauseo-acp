@@ -117,7 +117,9 @@ pub(super) fn reconcile(actor: &mut Actor, thread: ThreadId) {
     let needs = actor
         .loaded(stream)
         .and_then(|loaded| loaded.state.as_thread())
-        .is_some_and(|state| open_turn(state).is_some() || has_pending(state));
+        .is_some_and(|state| {
+            open_turn(state).is_some() || has_pending(state) || steer_unresolved(state)
+        });
     if !needs {
         looked_at(actor, thread);
         return;
@@ -138,25 +140,44 @@ pub(super) fn reconcile(actor: &mut Actor, thread: ThreadId) {
     });
 }
 
-/// The open turn: the started turn without a step, else the last `UserMessage` not removed and
-/// without a step (a queued turn), and whether it started.
+/// The open turn: the started turn without a step, else the newest `UserMessage` not removed
+/// whose turn has no step (a queued turn: the last prompt may be a later turn that ended, sent
+/// now ahead of held ones), and whether it started.
 fn open_turn(state: &ThreadState) -> Option<(TurnId, bool)> {
     if let Some(running) = state.running() {
         return Some((running, true));
     }
-    let mut stepped: BTreeSet<TurnId> = BTreeSet::new();
-    let mut last = None;
-    for entry in state.entries().values() {
-        if let ViewEntry::Step(step) = entry {
-            stepped.insert(step.turn);
-        } else if let ViewEntry::UserMessage(message) = entry
+    let stepped: BTreeSet<TurnId> = state
+        .entries()
+        .values()
+        .filter_map(|entry| {
+            if let ViewEntry::Step(step) = entry {
+                Some(step.turn)
+            } else {
+                None
+            }
+        })
+        .collect();
+    let turn = state.entries().values().rev().find_map(|entry| {
+        if let ViewEntry::UserMessage(message) = entry
             && !matches!(message.status, UserMessageStatus::Removed)
+            && !stepped.contains(&message.turn)
         {
-            last = Some(message.turn);
+            Some(message.turn)
+        } else {
+            None
         }
-    }
-    let turn = last.filter(|turn| !stepped.contains(turn))?;
+    })?;
     Some((turn, false))
+}
+
+/// Whether a steer was saved and never answered (the host stopped first): start-up moves it to
+/// a held queued turn (`queue::restore`).
+fn steer_unresolved(state: &ThreadState) -> bool {
+    state.entries().values().any(|entry| {
+        matches!(entry, ViewEntry::UserMessage(message)
+            if message.delivery == clauseo_protocol::Delivery::Steer && message.steer.is_none())
+    })
 }
 
 /// The turns of the thread's steps that stopped `AtLimit` with no `TurnStoppedAtLimit`, in the
@@ -245,6 +266,8 @@ pub(super) fn on_log(
             let logged = (|| -> Result<(), Error> {
                 let mut out = Out::new(actor, thread, None)?;
                 pending.expiries().push_into(actor, &mut out)?;
+                // A steer never answered still comes back, held.
+                queue::restore(actor, thread, &log, &mut out)?;
                 detach(actor, &mut out, &pending)?;
                 out.send(actor, Then::Nothing)
             })();

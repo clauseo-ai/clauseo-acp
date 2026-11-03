@@ -262,6 +262,8 @@ enum TimerKind {
     Rate,
     Cancel(TurnId),
     LimitRead(TurnId),
+    /// A steer's answer did not come in time (`queue/steer.rs`).
+    Steer(clauseo_protocol::MessageId),
 }
 
 /// What a matter job of a turn (a checkpoint, an undo) continues with.
@@ -320,6 +322,7 @@ pub(crate) fn timer(actor: &mut Actor, timer: TurnTimer) {
         TimerKind::Rate => updates::on_rate_timer(actor, thread),
         TimerKind::Cancel(turn) => cancel::on_cancel_timer(actor, thread, turn),
         TimerKind::LimitRead(turn) => end::on_limit_read_timer(actor, thread, turn),
+        TimerKind::Steer(message) => queue::on_steer_timer(actor, thread, message),
     }
 }
 
