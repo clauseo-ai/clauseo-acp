@@ -127,10 +127,13 @@ fn the_settings_window_sets_and_reads_the_settings_and_refreshes_the_limits_only
         bridge.admit("other", &tools).unwrap_err().code(),
         ErrorCode::CommandInvalid
     );
-    // The main window admits `SetUiSettings` today, so it admits `SetToolSettings` too; what
-    // it refuses, it still refuses.
+    // The main window admits `SetUiSettings` (the room changes theme and text size itself) but
+    // not `SetToolSettings`: the switches live in the settings window only.
     assert!(bridge.admit(MAIN, &set).is_ok());
-    assert!(bridge.admit(MAIN, &tools).is_ok());
+    assert_eq!(
+        bridge.admit(MAIN, &tools).unwrap_err().code(),
+        ErrorCode::CommandInvalid
+    );
     let refused_from_main = command(json!({"set_mode": {"thread": thread, "mode_id": "x"}}));
     assert_eq!(
         bridge.admit(MAIN, &refused_from_main).unwrap_err().code(),
