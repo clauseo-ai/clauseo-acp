@@ -30,7 +30,7 @@ import type {
 } from "../transport/protocol.ts";
 import { loadQueueStrip } from "./queue-chunk.ts";
 import { QueueSlot } from "./queue-slot.tsx";
-import { clockTime } from "./thread/clock.ts";
+import { clockTime, stamp } from "./thread/clock.ts";
 import { defaultOutcome, mountRoom, type Harness } from "./thread/harness.ts";
 
 // each transcript row inside its own Profiler, behind a memo like the real row's (queue.test.tsx's way)
@@ -149,10 +149,98 @@ test("nothing shows over an empty queue that isn't held, nor over a held one wit
   await mount();
   h!.deliver([reset([userMessage(1, 1, "Q1")], header("running"))]);
   await h!.settle();
-  expect(host!.innerHTML).toBe("");
+  expect(host!.querySelector("section")).toBeNull();
+  expect(one("queue-said")?.textContent).toBe("");
   h!.deliver([upsert(held())]);
   await h!.settle();
   expect(host!.querySelector("section")).toBeNull();
+  expect(one("queue-said")?.textContent).toBe("");
+});
+
+test("the status region is mounted empty before the first entry, so its first line is said as it comes", async () => {
+  await mount();
+  h!.deliver([reset([userMessage(1, 1, "Q1")], header("running"))]);
+  await h!.settle();
+  const region = one("queue-said");
+  expect(region?.getAttribute("role")).toBe("status");
+  expect(region?.textContent).toBe("");
+  h!.deliver([upsert(queued(5, 2, "A."))]);
+  await h!.settle();
+  expect(one("queue-said")).toBe(region);
+  expect(region?.textContent).toBe("1 queued, sent once this answer is done.");
+  // the one region: the visible head holds none of its own
+  expect(host!.querySelectorAll('[role="status"]')).toHaveLength(1);
+  h!.deliver([upsert(as(queued(5, 2, "A."), { status: "removed" }))]);
+  await h!.settle();
+  expect(one("queue-said")).toBe(region);
+  expect(region?.textContent).toBe("");
+});
+
+test("an accepted Send now or Remove isn't sent again before the flush takes the row away", async () => {
+  await mount();
+  h!.deliver([reset([queued(5, 2, "A."), queued(6, 3, "B.")], header("running"))]);
+  await h!.settle();
+  await h!.click(inRow(0, "queued-send-now"));
+  await h!.click(inRow(0, "queued-send-now"));
+  await h!.click(inRow(1, "queued-remove"));
+  await h!.click(inRow(1, "queued-remove"));
+  expect(h!.sent("send_queued_now")).toEqual([{ thread: THREAD, turn: uuid(2, 4) }]);
+  expect(h!.sent("remove_queued_prompt")).toEqual([{ thread: THREAD, turn: uuid(3, 4) }]);
+  expect(one("queue-error")).toBeNull();
+});
+
+test("a refused edit opens the field again with the lawyer's words", async () => {
+  await mount((c) => {
+    if (c.edit_queued_prompt !== undefined)
+      throw { code: "thread.not_found", message: "raw host text", retryable: false };
+    return defaultOutcome(c);
+  });
+  h!.deliver([reset([queued(5, 2, "A.")], header("running"))]);
+  await h!.settle();
+  await h!.click(inRow(0, "queued-edit"));
+  const field = host!.querySelector<HTMLTextAreaElement>(".queue-edit")!;
+  await act(async () => {
+    Reflect.set(HTMLTextAreaElement.prototype, "value", "A, and the deed.", field);
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await h!.click([...host!.querySelectorAll("button")].find((b) => txt(b) === "Save"));
+  expect(host!.querySelector(".queue-edit")).toBeNull();
+  const before = stripCommits;
+  await flush();
+  expect(stripCommits).toBe(before + 1);
+  expect(host!.querySelector<HTMLTextAreaElement>(".queue-edit")?.value).toBe("A, and the deed.");
+  expect(txt(one("queue-error"))).toBe(errorWords("en", "thread.not_found"));
+});
+
+test("a refused Remove forgets the press: the row going later moves no focus", async () => {
+  await mount((c) => {
+    if (c.remove_queued_prompt !== undefined)
+      throw { code: "thread.not_found", message: "raw host text", retryable: false };
+    return defaultOutcome(c);
+  });
+  h!.deliver([reset([queued(5, 2, "A."), queued(6, 3, "B.")], header("running"))]);
+  await h!.settle();
+  inRow(0, "queued-remove")!.focus();
+  await h!.click(inRow(0, "queued-remove"));
+  await flush();
+  // the lawyer has gone back to the page, and the queue drains
+  (document.activeElement as HTMLElement).blur();
+  h!.deliver([upsert(as(queued(5, 2, "A."), { status: "sent" }))]);
+  await h!.settle();
+  expect(document.activeElement).toBe(document.body);
+  expect(fieldFocused).toBe(0);
+});
+
+test("held after a Stop on another day: the head puts the day before the time", async () => {
+  await mount();
+  const ts = Date.now() - 3 * 86_400_000;
+  h!.deliver([reset([step(2, { stop: "cancelled", ts }), queued(5, 2, "A.")], held())]);
+  await h!.settle();
+  const when = stamp("en", ts, Date.now());
+  expect(when).toMatch(/^[A-Z][a-z]+day \d/);
+  expect(say()).toBe(
+    `The queue is held. You stopped the answer at ${when}, so nothing more is sent until you send.`,
+  );
 });
 
 test("Edit sends the new text alone for its turn; a message with a file shows its words", async () => {

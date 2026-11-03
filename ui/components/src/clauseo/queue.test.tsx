@@ -171,7 +171,8 @@ describe("the queue over the composer", () => {
       field?.dispatchEvent(new Event("input", { bubbles: true }));
     });
     await press("Save");
-    expect(edits).toEqual([["q1", "Check the annexures."]]);
+    // the words as written, as Ask sends them
+    expect(edits).toEqual([["q1", " Check the annexures. "]]);
     expect(document.querySelector(".queue-edit")).toBeNull();
   });
 });
@@ -285,6 +286,68 @@ describe("the queue's hooks, the held queue with no stop to name, a refused pres
     byId("queued-edit")[0]!.focus();
     await act(async () => root?.render(strip([])));
     expect(out).toBe(1);
+  });
+});
+
+describe("editing a queued message", () => {
+  const editFirst = async (onEdit: (id: string, text: string, refused: () => void) => void) => {
+    await mount(
+      <QueueStrip
+        items={messages(1)}
+        onEdit={onEdit}
+        onRemove={none}
+        onSendNow={none}
+        onSendNext={none}
+        testIds={IDS}
+      />,
+    );
+    await act(async () => byId("queued-edit")[0]!.click());
+    return document.querySelector<HTMLTextAreaElement>(".queue-edit")!;
+  };
+  const typeIn = (field: HTMLTextAreaElement, v: string) =>
+    act(async () => {
+      Reflect.set(HTMLTextAreaElement.prototype, "value", v, field);
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  const key = (field: HTMLTextAreaElement, init: KeyboardEventInit) =>
+    act(async () => {
+      field.dispatchEvent(
+        new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init }),
+      );
+    });
+
+  test("Enter while an input method composes saves nothing; Enter after it does", async () => {
+    const edits: string[] = [];
+    const field = await editFirst((_id, text) => edits.push(text));
+    await typeIn(field, "Check the सम्मन");
+    await key(field, { key: "Enter", isComposing: true });
+    await key(field, { key: "Enter", keyCode: 229 });
+    expect(edits).toEqual([]);
+    expect(document.querySelector(".queue-edit")).not.toBeNull();
+    await key(field, { key: "Enter" });
+    expect(edits).toEqual(["Check the सम्मन"]);
+  });
+
+  test("after Save or Escape the focus is back on the row's Edit", async () => {
+    let field = await editFirst(none);
+    await typeIn(field, "New words.");
+    await key(field, { key: "Enter" });
+    expect(document.activeElement).toBe(byId("queued-edit")[0]);
+    await act(async () => byId("queued-edit")[0]!.click());
+    field = document.querySelector<HTMLTextAreaElement>(".queue-edit")!;
+    expect(document.activeElement).toBe(field);
+    await key(field, { key: "Escape" });
+    expect(document.activeElement).toBe(byId("queued-edit")[0]);
+  });
+
+  test("a refused edit opens the field again holding the words", async () => {
+    let refuse = () => {};
+    const field = await editFirst((_id, _text, refused) => (refuse = refused));
+    await typeIn(field, "Kept words.");
+    await key(field, { key: "Enter" });
+    expect(document.querySelector(".queue-edit")).toBeNull();
+    await act(async () => refuse());
+    expect(document.querySelector<HTMLTextAreaElement>(".queue-edit")?.value).toBe("Kept words.");
   });
 });
 

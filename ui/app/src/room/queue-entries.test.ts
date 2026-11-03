@@ -103,6 +103,24 @@ test("held: after Stop the step's time, after a failure its code, after a restar
   expect(heldPick()(ended.view)).toEqual({ kind: "held" });
 });
 
+test("a turn that ended at a limit after an earlier Stop holds with no stop to name", () => {
+  const limit: ViewEntry = {
+    limit_stop: { order: 8, turn: uuid(9, 4), reason: "plan_window", ts: 9000 },
+  };
+  const { view } = viewOf(
+    reset(
+      [
+        step(4, { stop: "cancelled", ts: 4000 }),
+        userMessage(6, 6, "Q2"),
+        limit,
+        queued(10, 2, "Q"),
+      ],
+      heldHeader,
+    ),
+  );
+  expect(heldPick()(view)).toEqual({ kind: "held" });
+});
+
 test("not held: null, whatever the steps say", () => {
   const { view, apply } = viewOf(reset([step(4, { stop: "cancelled" })], header("idle")));
   const pick = heldPick();
