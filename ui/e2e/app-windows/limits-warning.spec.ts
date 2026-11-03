@@ -18,9 +18,14 @@ test.use({ scenario: "limit-warning" });
 test("a near-limit warning shows under the field, and sending stays open", async ({ app }) => {
   const w = window(app.page);
   await openMatter(w);
+  // The start-up read runs in the background, and the plan line shows `loading` while it runs
+  // (live-plan.tsx renders the plan with data-freshness "loading"). A live signal that arrives
+  // during that read is dropped (the model's Loading rule), so the send waits until the line has
+  // left: the read is over and the view is live_only, which has no line.
+  await expect(w.plan).toHaveCount(0);
   await sendPrompt(w, "Check the last clause");
   await expectTurnEnded(w, "end_turn");
-  // the warning carries the near state while the plan line is hidden (LiveOnly, see the header)
+  // the warning carries the near state while the plan line stays hidden (LiveOnly, see the header)
   await expect(w.limitWarning).toBeVisible();
   await expect(w.plan).toHaveCount(0);
   // Ask is enabled by words in the field (composer-field.tsx), never by the limit.
