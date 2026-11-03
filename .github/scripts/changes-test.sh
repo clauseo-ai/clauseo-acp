@@ -60,6 +60,11 @@ check "$T $T $F $T" crates/limits/src/lib.rs
 check "$T $T $F $T" crates/codex_appserver/src/lib.rs
 # Rust outside the app: the build matrix, no smoke.
 check "$T $F $F $T" crates/reducer_bench/benches/apply.rs
+# A crate's assets, Markdown included, are built into it (include_str!): not prose. A crate's
+# README stays prose (above).
+check "$T $T $F $T" crates/desktop/assets/legal.md
+check "$T $T $F $T" crates/host/assets/skills/review/SKILL.md
+check "$T $F $F $T" crates/reducer_bench/assets/notes.md
 check "$T $F $F $F" xtask/src/main.rs
 check "$T $F $F $F" .config/nextest.toml
 check "$T $F $F $T" budgets.toml
