@@ -99,6 +99,7 @@ fn row_view(row: &Row, source: &LimitSource, now: Timestamp) -> LimitWindowView 
         id: row.window.id.clone(),
         kind: row.window.kind,
         label: row.window.label.clone(),
+        model: row.window.model.clone(),
         used_percent: (!row.reset_passed).then_some(row.window.used_percent),
         tone: row_tone(row),
         resets_at: row.window.resets_at,

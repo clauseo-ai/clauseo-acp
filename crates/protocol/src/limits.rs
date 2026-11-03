@@ -127,6 +127,10 @@ pub struct LimitWindow {
     pub duration_mins: Option<u32>,
     /// The agent warned that the limit is near (Claude's `allowed_warning`).
     pub warning: bool,
+    /// The model a per-model window counts, as the agent names it ("Opus", "Fable"), so a label
+    /// can be built in any language; `None` for every other window.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub model: Option<String>,
 }
 
 /// What a usage window counts.
@@ -365,6 +369,9 @@ pub struct LimitWindowView {
     pub kind: WindowKind,
     /// Its label.
     pub label: String,
+    /// The model a per-model window counts, matching [`LimitWindow::model`].
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub model: Option<String>,
     /// How much is used, 0 to 100; `None` while loading or once its reset time passed, so an
     /// old percentage is never shown as current.
     #[serde(skip_serializing_if = "Option::is_none", default)]

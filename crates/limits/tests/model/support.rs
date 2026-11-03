@@ -44,6 +44,7 @@ pub(crate) fn window(id: &str, kind: WindowKind, used: f64) -> LimitWindow {
         resets_at: None,
         duration_mins: None,
         warning: false,
+        model: None,
     }
 }
 

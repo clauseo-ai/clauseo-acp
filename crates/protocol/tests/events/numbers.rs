@@ -225,6 +225,7 @@ fn finite_fields_refuse_nan_and_infinities() {
         resets_at: None,
         duration_mins: None,
         warning: false,
+        model: None,
     });
     finite_only(|used_percent| LimitMeter {
         tone: MeterTone::Near,
@@ -236,6 +237,7 @@ fn finite_fields_refuse_nan_and_infinities() {
         id: "five_hour".to_owned(),
         kind: WindowKind::Session,
         label: "5-hour".to_owned(),
+        model: None,
         used_percent: Some(used_percent),
         tone: MeterTone::Neutral,
         resets_at: None,

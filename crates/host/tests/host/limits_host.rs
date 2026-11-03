@@ -176,6 +176,7 @@ pub(crate) fn plan(agent: AgentKind, used: f64, resets_at: Option<Timestamp>) ->
             resets_at,
             duration_mins: Some(300),
             warning: false,
+            model: None,
         }],
         at_limit: AtLimitBehaviour::Pauses,
         source: LimitSource::Fresh { checked_at: at(0) },

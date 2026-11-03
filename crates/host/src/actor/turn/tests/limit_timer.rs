@@ -64,6 +64,7 @@ fn plan(checked_at: Timestamp, resets_at: Timestamp) -> AccountLimits {
             resets_at: Some(resets_at),
             duration_mins: Some(300),
             warning: false,
+            model: None,
         }],
         at_limit: AtLimitBehaviour::Pauses,
         source: LimitSource::Fresh { checked_at },

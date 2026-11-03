@@ -332,6 +332,7 @@ fn usage(used: usize) -> ReadOutcome {
         resets_at: None,
         duration_mins: Some(300),
         warning: false,
+        model: None,
     };
     let limits = AccountLimits {
         agent: AgentKind::Claude,

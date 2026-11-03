@@ -141,6 +141,7 @@ fn limit_window(id: &str, window: &RateLimitWindow, plan_type: &PlanType) -> Opt
             .and_then(|ms| Timestamp::new(ms).ok()),
         duration_mins: mins.and_then(|mins| u32::try_from(mins).ok()),
         warning: false,
+        model: None,
     })
 }
 

@@ -53,6 +53,7 @@ fn window(
         resets_at: reset.map(|secs| Timestamp::new(secs * 1000).unwrap()),
         duration_mins: mins,
         warning: false,
+        model: None,
     }
 }
 

@@ -322,6 +322,7 @@ fn windows(rate_limits: Option<&Map<String, Value>>) -> Vec<LimitWindow> {
                 fixed.kind,
                 fixed.label,
                 fixed.duration_mins,
+                fixed.model.map(str::to_owned),
             )
         })
         .collect();
@@ -360,6 +361,7 @@ fn model_scoped(rate_limits: &Map<String, Value>) -> Vec<(String, LimitWindow)> 
                 WindowKind::Model,
                 &label,
                 words::CLAUDE_MODEL_SCOPED_MINS,
+                Some(name.clone()),
             )?;
             Some((name, window))
         })
@@ -367,15 +369,16 @@ fn model_scoped(rate_limits: &Map<String, Value>) -> Vec<(String, LimitWindow)> 
         .collect()
 }
 
-/// One window from its `{utilization, resets_at}` object; `None` when `value` is not an object
-/// or its utilization is not a number. Utilization is clamped to 0 to 100; a reset time that is
-/// not RFC 3339 is left out.
+/// One window from its `{utilization, resets_at}` object, with `model` when it counts one model;
+/// `None` when `value` is not an object or its utilization is not a number. Utilization is clamped
+/// to 0 to 100; a reset time that is not RFC 3339 is left out.
 fn window(
     value: &Value,
     id: String,
     kind: WindowKind,
     label: &str,
     duration_mins: u32,
+    model: Option<String>,
 ) -> Option<LimitWindow> {
     let value = value.as_object()?;
     let utilization = value.get("utilization")?.as_f64()?;
@@ -398,6 +401,7 @@ fn window(
         resets_at,
         duration_mins: Some(duration_mins),
         warning: false,
+        model,
     })
 }
 
