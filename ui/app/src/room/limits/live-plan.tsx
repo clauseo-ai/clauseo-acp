@@ -1,21 +1,20 @@
 // The plan in the toolbar, live (U12): the open conversation's agent's plan from the limits store, its line by the
-// share used, and the card it opens (its own chunk, loaded on the first open, which also asks the host for fresh
-// figures: `refresh_limits`, `shown`). An agent of no kind (fake-agent) has no plan, and no line stands before the
+// share used, and the card it opens: its own chunk, loaded as the pointer comes over the plan or focus reaches it, or at
+// the latest on the first press, its head naming the plan while it lands; opening it asks the host for fresh figures
+// (`refresh_limits`, `shown`). An agent of no kind (fake-agent) has no plan, and no line stands before the
 // first view names the agent's kind. A part of its own, so a new view renders the plan alone, not the room.
 import { lazy, Suspense } from "react";
 import { ToolbarPlan } from "@clauseo/components/clauseo/room-toolbar.tsx";
-import { late } from "@clauseo/components/lib/late.ts";
 import { lim } from "@clauseo/components/lib/words-limits.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { useAgentLimits, useLimitsStore, useNow } from "../../store/limits.ts";
 import type { AgentId } from "../../transport/protocol.ts";
 import { kindOf } from "../agent.ts";
 import type { AgentSummary } from "../host-next.ts";
+import { preloadPlanCard } from "./plan-card-load.ts";
 import { planLine } from "./plan-model.ts";
 
-const LivePlanCard = lazy(() =>
-  late(import("./plan-card-view.tsx")).then((m) => ({ default: m.LivePlanCard })),
-);
+const LivePlanCard = lazy(() => preloadPlanCard().then((m) => ({ default: m.LivePlanCard })));
 
 export function LivePlan({
   agent,
@@ -52,12 +51,26 @@ export function LivePlan({
             ? {}
             : {
                 card: (
-                  <Suspense fallback={null}>
+                  // while the chunk lands, the card's head with the plan's name, as the card names it
+                  <Suspense
+                    fallback={
+                      <div className="plan-card-body">
+                        <div className="plan-card-head">
+                          <p className="plan-card-name">
+                            {line.look === "bare"
+                              ? line.name
+                              : (entry.plan ?? w.t("{name} plan", { name: line.name }))}
+                          </p>
+                        </div>
+                      </div>
+                    }
+                  >
                     <LivePlanCard kind={kind} />
                   </Suspense>
                 ),
                 cardLabel: lim(w.lang, "Show the plan's limits"),
                 onCardOpen: () => store?.refresh(kind, "shown"),
+                onCardWarm: () => void preloadPlanCard(),
               }),
         }}
       />
