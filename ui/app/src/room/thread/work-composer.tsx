@@ -10,7 +10,10 @@
 // U7: while Clauseo works, Enter queues the field's words (the host queues a send during a turn, H9), and the line above
 // the field offers Send now and Queue (composer-steer.tsx); at QUEUE_CAP Enter queues nothing and keeps the words, and a
 // send refused as `thread.queue_full` says the cap. The queue's strip sits over the field for every conversation
-// with a thread (queue-slot.tsx), under the wait for another conversation (queue.tsx).
+// with a thread (queue-slot.tsx), under the wait for another conversation (queue.tsx). After the hint's Send now or Queue
+// the focus goes back to the field, so the emptied words can be undone. An edit the strip couldn't make because its
+// message, the last queued, had already gone comes back into the field (after the words there, a blank line between)
+// and the working line says so until the next send.
 import {
   use,
   useCallback,
@@ -145,6 +148,15 @@ export function WorkComposer({
     stopWanted.current = wanted;
   }, []);
   if (raised && wait === null) setRaised(false);
+  // an edit lost as its message went (the strip's onEditLost): the working line says so until the next send; the ref
+  // keeps a send from setting the false already there (a second commit in the reply's frame, #253)
+  const [lost, setLost] = useState(false);
+  const lostNow = useRef(false);
+  const markLost = (next: boolean) => {
+    if (lostNow.current === next) return;
+    lostNow.current = next;
+    setLost(next);
+  };
   // the field holds the words, not React: each change goes straight to the conversation's draft
   const keep = (text: string) => {
     const isEmpty = text.trim() === "";
@@ -181,8 +193,12 @@ export function WorkComposer({
     if (disabled || asked.trim() === "") return;
     // idle, Ask waits for the turn it sent; Queue (another's wait) and the hint's buttons go behind or steer
     if (how === undefined && busy) return;
+    markLost(false);
     void onAsk(asked, how).then((ok) => {
       if (!ok) return;
+      // pressed on the hint's Send now or Queue, which sit outside the field's row: the focus goes back to the field
+      // first, so the clear is one step Cmd/Ctrl+Z takes back, and not lost with the hint as it goes
+      if (field.current?.text() === asked && inHint(document.activeElement)) field.current.focus();
       // words typed while it went keep their place; the emptied field's change drops the draft, and Cmd/Ctrl+Z
       // brings the question back
       // (while an input method composes, the composer holds the clear for the composition's end)
@@ -197,6 +213,19 @@ export function WorkComposer({
   // the hint's Queue, as Enter; its Send now steers the running answer
   const queueField = () => queue(field.current?.text() ?? "");
   const focusField = useCallback(() => field.current?.focus(), []);
+  // the strip's lost edit: into an empty field as it is, else after the words there with a blank line between; never
+  // over them
+  const editLost = useCallback((text: string) => {
+    const f = field.current;
+    if (f === null) return;
+    const there = f.text();
+    if (there === "") f.fill(text);
+    else f.setText(`${there}\n\n${text}`);
+    if (!lostNow.current) {
+      lostNow.current = true;
+      setLost(true);
+    }
+  }, []);
   const steerField = () => send(field.current?.text() ?? "", { behind: true, delivery: "steer" });
   // the stopped question, once per break, and only into an empty field: words typed since keep their place, and fill
   // never moves the lawyer's focus or breaks a composition
@@ -232,22 +261,32 @@ export function WorkComposer({
           },
           testId: "error",
         }
-      : wait !== null && (wait.sent || busy)
+      : lost
         ? {
-            // sent (or accepted, before the row says starting) and waiting behind the other: the design's wait
-            // (room.tsx), never "Answering."
             state: {
               kind: "wait",
-              words: mt(w.lang, "Waiting for '{title}' to finish.", {
-                title: waitTitle,
-              }),
+              words: mt(w.lang, "That message had already gone."),
               pill: null,
+              code: "thread.turn_not_queued",
             },
-            testId: "working",
+            testId: "error",
           }
-        : busy
-          ? { state: answering, testId: "working" }
-          : stopped);
+        : wait !== null && (wait.sent || busy)
+          ? {
+              // sent (or accepted, before the row says starting) and waiting behind the other: the design's wait
+              // (room.tsx), never "Answering."
+              state: {
+                kind: "wait",
+                words: mt(w.lang, "Waiting for '{title}' to finish.", {
+                  title: waitTitle,
+                }),
+                pill: null,
+              },
+              testId: "working",
+            }
+          : busy
+            ? { state: answering, testId: "working" }
+            : stopped);
   return (
     <Composer
       ref={field}
@@ -304,6 +343,7 @@ export function WorkComposer({
               stream={stream}
               thread={thread}
               onFocusField={focusField}
+              onEditLost={editLost}
             />
           )}
         </>
@@ -320,4 +360,9 @@ export function WorkComposer({
       }}
     />
   );
+}
+
+/** Whether the focus stands on the steer hint's line (its Send now or Queue). */
+function inHint(at: Element | null): boolean {
+  return at instanceof HTMLElement && at.closest(".steer-hint") !== null;
 }
