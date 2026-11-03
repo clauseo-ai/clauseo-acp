@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::{FetchError, FetchKind, hash_file, host_of};
+use super::{FetchError, FetchKind, hash_read, host_of};
 use crate::integrity::Expected;
 use crate::log::redact_url;
 
@@ -74,11 +74,14 @@ pub(crate) fn bundle_file(
         return Err(fail(&format!("the offline bundle has no {label}")));
     }
     let mut hasher = expected.hasher();
-    hash_file(&path, &mut hasher).map_err(|err| {
-        fail(&format!(
-            "the offline bundle's {label} could not be read: {err}"
-        ))
-    })?;
+    // The firm's folder: a link there is the firm's choice, so it is followed.
+    std::fs::File::open(&path)
+        .and_then(|file| hash_read(file, &mut hasher))
+        .map_err(|err| {
+            fail(&format!(
+                "the offline bundle's {label} could not be read: {err}"
+            ))
+        })?;
     if !hasher.matches(expected) {
         return Err(fail(&format!(
             "the offline bundle's {label} does not match its pinned checksum"

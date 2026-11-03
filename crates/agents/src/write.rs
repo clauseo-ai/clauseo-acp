@@ -22,18 +22,43 @@ pub(crate) fn create_dir_all(path: &Path) -> io::Result<()> {
     std::fs::create_dir_all(path)
 }
 
-/// Opens `path` to append, making it if missing: a partial download resumed.
+/// Opens `path` to append, making it if missing: a partial download resumed. A link at `path`
+/// is refused, never followed.
 pub(crate) fn open_append(path: &Path) -> io::Result<File> {
-    OpenOptions::new().create(true).append(true).open(path)
+    open_no_follow(OpenOptions::new().create(true).append(true), path)
 }
 
 /// Opens `path` empty, making it if missing and truncating it if not: a download started over.
+/// A link at `path` is refused, never followed.
 pub(crate) fn open_truncate(path: &Path) -> io::Result<File> {
-    OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(path)
+    open_no_follow(
+        OpenOptions::new().create(true).write(true).truncate(true),
+        path,
+    )
+}
+
+/// Opens `path` to read, refusing a link: a download or archive this crate wrote, about to be
+/// hashed or unpacked. (A read changes nothing; it lives here beside the writes' link rule.)
+pub(crate) fn open_read(path: &Path) -> io::Result<File> {
+    open_no_follow(OpenOptions::new().read(true), path)
+}
+
+/// Opens `path` with `options`, never through a link: `O_NOFOLLOW` on Unix (the open itself
+/// fails on a link, with no gap), and on Windows a link found by `symlink_metadata` is refused.
+fn open_no_follow(options: &mut OpenOptions, path: &Path) -> io::Result<File> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.custom_flags(nix::libc::O_NOFOLLOW);
+    }
+    #[cfg(not(unix))]
+    if std::fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink()) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "a link stands where a file goes",
+        ));
+    }
+    options.open(path)
 }
 
 /// `fs::rename`: `from` replaces `to` (a file), or moves a folder to a free name.
