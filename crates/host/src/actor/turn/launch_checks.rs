@@ -36,6 +36,7 @@ use super::{TurnInput, host_stopping, state};
 use futures::task::LocalSpawnExt;
 
 use crate::agent::{codex, data_folder};
+use crate::browser::chrome::ChromeRoots;
 use crate::config::SessionKey;
 use crate::error::Error;
 
@@ -77,6 +78,10 @@ pub(crate) struct RunFolders {
     /// `{matter_notes}`, `<data>/agent-state/<matter id>/notes`: the matter's, shared by its
     /// agents, kept when a session ends.
     pub(crate) notes: PathBuf,
+    /// `{browser_executable}`: the Chrome the launch prep found for this session
+    /// (`browser::chrome::find`), or none (`BrowserNotInstalled`). Not a folder, but the
+    /// session's like them, and found on the same thread.
+    pub(crate) chrome: Option<PathBuf>,
 }
 
 impl RunFolders {
@@ -89,6 +94,7 @@ impl RunFolders {
             browser: root.join("browser"),
             notes: notes_dir(data, key.matter),
             root,
+            chrome: None,
         }
     }
 
@@ -295,7 +301,8 @@ pub(super) fn prepare(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>
         Ok((stored, locations.data_dir().to_owned(), home, run, skills))
     })();
     let sweep = actor.run_sweep.clone();
-    let (stored, data, home, run, skills) = match paths {
+    let chrome = chrome_search(actor);
+    let (stored, data, home, mut run, skills) = match paths {
         Ok(paths) => paths,
         Err(error) => {
             agents::fail_all(actor, thread, waiting, &error);
@@ -324,6 +331,7 @@ pub(super) fn prepare(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>
                     None => None,
                 };
                 run.make(&data, &sweep)?;
+                run.chrome = chrome.find(&data);
                 let skills_written = write_skills(&skills);
                 Ok(Prepared {
                     stored,
@@ -355,6 +363,41 @@ fn write_skills(writes: &[SkillWrite]) -> Option<SkillsWritten> {
         }
     }
     first
+}
+
+/// How the launch prep picks the session's Chrome.
+enum ChromeSearch {
+    /// No browser can go to this session (`tools.browser` off, or no proxy): no search.
+    Skip,
+    /// The Chrome the tests forced.
+    Forced(PathBuf),
+    /// Search these roots; `None` is this machine's, with the data folder as app data.
+    Roots(Option<ChromeRoots>),
+}
+
+impl ChromeSearch {
+    /// The Chrome found. File system calls: off the actor.
+    fn find(self, data: &Path) -> Option<PathBuf> {
+        match self {
+            Self::Skip => None,
+            Self::Forced(chrome) => Some(chrome),
+            Self::Roots(roots) => {
+                let roots = roots.unwrap_or_else(|| ChromeRoots::system(data));
+                crate::browser::chrome::find(&roots)
+            }
+        }
+    }
+}
+
+/// What the launch prep does to find Chrome, from the actor's state.
+fn chrome_search(actor: &Actor) -> ChromeSearch {
+    if !actor.effective.settings().tools.browser || actor.wiring.proxy.is_none() {
+        return ChromeSearch::Skip;
+    }
+    match &actor.wiring.browser_executable {
+        Some(chrome) => ChromeSearch::Forced(chrome.clone()),
+        None => ChromeSearch::Roots(actor.wiring.chrome_roots.clone()),
+    }
 }
 
 /// Phase two: the checks `id` answered. The agent launches with what they found, or the
@@ -407,8 +450,10 @@ pub(super) fn on_prepared(
     }
 }
 
-/// Removes `run` (`thread`'s launch's run folder) off the actor; the notes folder stays.
+/// Removes `run` (`thread`'s launch's run folder) off the actor; the notes folder stays. The
+/// session has ended or never started, so its browser slot, if it held one, is free.
 fn discard(actor: &mut Actor, thread: ThreadId, run: RunFolders) {
+    actor.wiring.browser_slots.release(run.key);
     let clock = std::sync::Arc::clone(&actor.clock);
     let spawned = actor.spawner.spawn_local(async move {
         let removed = codex::prepare::off_actor(clock, move || {

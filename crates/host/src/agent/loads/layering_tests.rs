@@ -163,7 +163,7 @@ fn a_hook_meta_setting_a_switch_or_the_guards_key_loses_both() {
         web_search: ON,
         login: Login::FirstParty,
         folders: folders(),
-        seed_sites: &SEED_SITES,
+        seed_sites: SEED_SITES,
     };
     let meta = session_meta(
         hook.as_object().cloned(),

@@ -21,20 +21,14 @@ use crate::write;
 
 /// The `allowedTools` a Claude session gets with no hook and web search on.
 fn seeded(web_search: bool) -> Vec<String> {
-    let hosts = [
-        "sci.gov.in",
-        "egazette.gov.in",
-        "cci.gov.in",
-        "sebi.gov.in",
-        "rbi.org.in",
-        "ibbi.gov.in",
-        "mca.gov.in",
-        "indiacode.nic.in",
-    ];
     web_search
         .then(|| "WebSearch".to_owned())
         .into_iter()
-        .chain(hosts.map(|host| format!("WebFetch(domain:{host})")))
+        .chain(
+            clauseo_host::browser::seed_sites::SEED_SITES
+                .iter()
+                .map(|host| format!("WebFetch(domain:{host})")),
+        )
         .collect()
 }
 

@@ -6,7 +6,7 @@
 use std::path::Path;
 
 use clauseo_acp::McpServer;
-use clauseo_protocol::{AgentKind, ErrorCode, ThreadId};
+use clauseo_protocol::{AgentKind, ErrorCode, ThreadId, ToolAvailability};
 use serde_json::{Map, Value};
 
 use super::super::Actor;
@@ -88,7 +88,7 @@ pub(super) fn session_loads(
         web_search,
         login,
         folders,
-        seed_sites: &SEED_SITES,
+        seed_sites: SEED_SITES,
     });
     let guard = actor
         .pre_write_guard
@@ -105,13 +105,13 @@ pub(super) fn session_loads(
     let inputs = BrowserInputs {
         switch: browser_switch,
         control,
-        slots: actor.wiring.browser_slots,
+        slot_free: actor.wiring.browser_slots.free_for(run.key),
         port: actor
             .wiring
             .proxy
             .as_ref()
             .and_then(|proxy| proxy.port_for(run.key)),
-        executable: actor.wiring.browser_executable.as_deref(),
+        executable: run.chrome.as_deref(),
         browser_dir: &run.browser,
         session_id: &session_id,
     };
@@ -119,6 +119,13 @@ pub(super) fn session_loads(
     let (hook_servers, browser_state) =
         browser::hook_servers(actor.profile.mcp_servers(&agent_id), &inputs);
     servers.extend(hook_servers);
+    if browser_state
+        .as_ref()
+        .is_some_and(|state| state.availability == ToolAvailability::Available)
+    {
+        // The session holds its slot until it ends (`launch_checks::discard`).
+        actor.wiring.browser_slots.take(run.key);
+    }
     let tools = profile::web_search_state(kind, web_search, login)
         .into_iter()
         .chain(browser_state)

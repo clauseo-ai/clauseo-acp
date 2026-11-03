@@ -83,7 +83,7 @@ fn inputs<'a>(browser_dir: &'a Path, chrome: Option<&'a Path>) -> BrowserInputs<
     BrowserInputs {
         switch: ON,
         control: McpControl::Clauseo,
-        slots: (2, 0),
+        slot_free: true,
         port: Some(8123),
         executable: chrome,
         browser_dir,
@@ -179,7 +179,7 @@ fn each_reason_drops_the_browser_in_order() {
         ),
         (
             BrowserInputs {
-                slots: (2, 2),
+                slot_free: false,
                 port: None,
                 ..base
             },
@@ -235,7 +235,7 @@ fn keys(web_search: Switch, login: Login) -> ClaudeKeys<'static> {
         web_search,
         login,
         folders: folders(),
-        seed_sites: &SEED_SITES,
+        seed_sites: SEED_SITES,
     }
 }
 

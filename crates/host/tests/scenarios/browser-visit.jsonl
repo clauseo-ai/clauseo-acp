@@ -1,0 +1,15 @@
+{"scenario":"browser-visit","description":"S27's PageVisited: a browser open of https://sci.gov.in/judgments that completes with the page title, a click that completes, and an open that fails","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1"}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-open","title":"mcp__browser__agent_browser_open","name":"mcp__browser__agent_browser_open","kind":"other","status":"pending","rawInput":{}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-open","status":"in_progress","rawInput":{"url":"https://sci.gov.in/judgments#top"}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-open","status":"completed","content":[{"type":"content","content":{"type":"text","text":"Judgments | Supreme Court of India"}}]}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-click","title":"mcp__browser__agent_browser_click","name":"mcp__browser__agent_browser_click","kind":"other","status":"in_progress","rawInput":{"selector":"@e3","url":"https://sci.gov.in/other"}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-click","status":"completed","content":[{"type":"content","content":{"type":"text","text":"Clicked"}}]}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-open-2","title":"mcp__browser__agent_browser_open","name":"mcp__browser__agent_browser_open","kind":"other","status":"in_progress","rawInput":{"url":"https://unreachable.example/"}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-open-2","status":"failed","content":[{"type":"content","content":{"type":"text","text":"net::ERR_TUNNEL_CONNECTION_FAILED"}}]}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"The judgment is on the Supreme Court's site."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

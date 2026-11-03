@@ -9,8 +9,8 @@ publish.workspace = true
 
 [features]
 # Exports `ManualClock`, `SequentialIds`, `HostConfig::with_patch_window_bytes`,
-# `HostHandle::abort_for_test`, `TestProxy` and the browser stand-ins for this crate's tests and
-# its dependents' tests.
+# `HostHandle::abort_for_test`, `TestProxy` and `HostConfig::with_browser_executable` for this
+# crate's tests and its dependents' tests.
 test-support = []
 
 [dependencies]

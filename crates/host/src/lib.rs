@@ -156,7 +156,7 @@
 mod actor;
 mod agent;
 mod blob_read;
-mod browser;
+pub mod browser;
 mod build;
 mod clock;
 mod coalesce;
@@ -173,6 +173,7 @@ mod principal;
 mod rate;
 mod sent;
 mod snapshot;
+mod sources;
 mod undo_note;
 mod view;
 mod window;

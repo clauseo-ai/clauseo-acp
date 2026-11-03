@@ -13,6 +13,9 @@ use clauseo_protocol::{AgentId, MatterId, ThreadId};
 use clauseo_settings::{Effective, PlatformDirs as _, SystemDirs};
 use serde_json::{Map, Value};
 
+use crate::browser::chrome::ChromeRoots;
+use crate::browser::limits::BrowserSlots;
+use crate::browser::{BrowserLaunch, UnsupportedLaunch};
 use crate::clock::{Clock, SystemClock};
 use crate::ids::{IdSource, RandomV7};
 
@@ -112,14 +115,20 @@ impl EgressProxy for TestProxy {
 }
 
 /// What the browser entry and the agents' `PATH` need beyond the hook: the proxy, stetdoc's
-/// folder, and (until S27's host PR) the Chrome and the slot count as plain inputs.
+/// folder, where to look for Chrome, and the browser slots.
 #[derive(Clone)]
 pub(crate) struct LaunchWiring {
     pub(crate) proxy: Option<Arc<dyn EgressProxy>>,
     pub(crate) path_prepend: Option<PathBuf>,
+    /// A Chrome the tests force, in place of the search.
     pub(crate) browser_executable: Option<PathBuf>,
-    /// Browsers allowed at once, and browsers open now.
-    pub(crate) browser_slots: (usize, usize),
+    /// Where the launch prep looks for Chrome; `None` is this machine's roots
+    /// (`ChromeRoots::system` with the data folder as app data).
+    pub(crate) chrome_roots: Option<ChromeRoots>,
+    /// The browser slots: the limit from the machine's memory, and the sessions holding one.
+    pub(crate) browser_slots: BrowserSlots,
+    /// Where Chrome runs: only `InJail` is built.
+    pub(crate) browser_launch: BrowserLaunch,
 }
 
 impl Default for LaunchWiring {
@@ -128,7 +137,9 @@ impl Default for LaunchWiring {
             proxy: None,
             path_prepend: None,
             browser_executable: None,
-            browser_slots: (usize::MAX, 0),
+            chrome_roots: None,
+            browser_slots: BrowserSlots::new(None),
+            browser_launch: BrowserLaunch::InJail,
         }
     }
 }
@@ -139,7 +150,9 @@ impl std::fmt::Debug for LaunchWiring {
             .field("proxy", &self.proxy.is_some())
             .field("path_prepend", &self.path_prepend)
             .field("browser_executable", &self.browser_executable)
+            .field("chrome_roots", &self.chrome_roots)
             .field("browser_slots", &self.browser_slots)
+            .field("browser_launch", &self.browser_launch)
             .finish()
     }
 }
@@ -279,20 +292,39 @@ impl HostConfig {
         self
     }
 
-    /// The Chrome the browser entry runs (`{browser_executable}`), a stand-in for S27's choice
-    /// (default: none, `BrowserNotInstalled`).
+    /// A Chrome every session's browser entry runs (`{browser_executable}`), in place of the
+    /// launch prep's search (`browser::chrome::find`), for tests. `None` keeps the search.
     #[cfg(feature = "test-support")]
     pub fn with_browser_executable(mut self, chrome: Option<PathBuf>) -> Self {
         self.wiring.browser_executable = chrome;
         self
     }
 
-    /// Browsers allowed at once and browsers open now, a stand-in for S27's slot count (default:
-    /// no limit). With `open >= limit` the browser is `TooManyBrowsers`.
-    #[cfg(feature = "test-support")]
-    pub fn with_browser_slots(mut self, limit: usize, open: usize) -> Self {
-        self.wiring.browser_slots = (limit, open);
+    /// Where the launch prep looks for Chrome (default: this machine's places, with the data
+    /// folder as the app data folder that holds Chrome for Testing). Tests pass fixture folders.
+    pub fn with_chrome_roots(mut self, roots: ChromeRoots) -> Self {
+        self.wiring.chrome_roots = Some(roots);
         self
+    }
+
+    /// The machine's total memory in bytes, which sets how many sessions get the browser at once
+    /// (`browser::limits::slot_limit`: 2 at 8 GB or less, 4 above). Default: unknown, so 2.
+    /// The desktop fills it.
+    pub fn with_machine_memory(mut self, bytes: u64) -> Self {
+        self.wiring.browser_slots = BrowserSlots::new(Some(bytes));
+        self
+    }
+
+    /// Where Chrome runs (default: [`BrowserLaunch::InJail`]). Only `InJail` is built:
+    /// `OutsideJail`, stage C's switch, is refused for now.
+    pub fn with_browser_launch(mut self, launch: BrowserLaunch) -> Result<Self, UnsupportedLaunch> {
+        match launch {
+            BrowserLaunch::InJail => {
+                self.wiring.browser_launch = launch;
+                Ok(self)
+            }
+            BrowserLaunch::OutsideJail { cdp_port } => Err(UnsupportedLaunch { cdp_port }),
+        }
     }
 
     /// The clock (default: [`SystemClock`]).
