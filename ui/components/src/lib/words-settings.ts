@@ -57,7 +57,7 @@ const HI = {
   "Clauseo can open web pages in its own browser, on this computer.": null,
   "A change applies to new conversations. Ones already open keep what they had.": null,
   "To the websites Clauseo visits": null,
-  "Clauseo visits each page it reads, and each one it opens in its browser, from this computer. Each website sees that visit, as it sees any browser's.":
+  "When Clauseo reads a page on this computer or opens one in its browser, the website sees the visit, as it sees any browser's.":
     null,
   // a locked switch's reason, in its note's place: the room's popover says "Off. Managed by your organisation."
   "Managed by your organisation.": null,
