@@ -314,11 +314,14 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
         HostCommand::ResumeQueue { thread } => {
             turn_command(actor, ctx, thread, TurnCommand::ResumeQueue);
         }
-        HostCommand::RestartAgent { .. } => {
-            let refusal = Error::refused(ErrorCode::CommandInvalid, "not built yet");
-            actor.finish_command(ctx.id, Err(refusal));
-        }
+        HostCommand::RestartAgent { .. } => not_built(actor, ctx),
     }
+}
+
+/// A command the host does not run yet (`RestartAgent`): `command.invalid`.
+fn not_built(actor: &mut Actor, ctx: &CommandCtx) {
+    let refusal = Error::refused(ErrorCode::CommandInvalid, "not built yet");
+    actor.finish_command(ctx.id, Err(refusal));
 }
 
 /// A turn command for a known thread goes to the turn path; an unknown one is refused.

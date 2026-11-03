@@ -18,7 +18,7 @@ use super::super::{Actor, Tag};
 use super::out::Out;
 use super::{
     Holder, JobKind, LogFor, Then, TurnInput, TurnJob, TurnTag, end, failure, lost, matter_of,
-    prompt, state,
+    prompt, queue, state,
 };
 use crate::error::Error;
 use crate::matter_worker::{MatterJob, UndoJob};
@@ -200,14 +200,14 @@ fn send_undo(actor: &mut Actor, thread: ThreadId, ask: UndoAsk) {
     match sent {
         Ok(()) => actor.work.matter_jobs += 1,
         Err(error) => {
-            end::release_writer(actor, matter, thread);
+            release(actor, matter, thread);
             actor.finish_command(ctx.id, Err(error));
         }
     }
 }
 
 fn give_up(actor: &mut Actor, thread: ThreadId, ask: &UndoAsk, error: Error) {
-    end::release_writer(actor, ask.matter, thread);
+    release(actor, ask.matter, thread);
     actor.finish_command(ask.ctx.id, Err(error));
 }
 
@@ -349,7 +349,7 @@ fn send_log(actor: &mut Actor, thread: ThreadId, log: UndoLog) {
     let sent = log_commit(actor, thread, &log);
     let (ctx, matter) = (log.ctx, log.matter);
     let Some(state) = state(actor, thread) else {
-        end::release_writer(actor, matter, thread);
+        release(actor, matter, thread);
         return;
     };
     state.undo = Some(Box::new(log));
@@ -377,7 +377,7 @@ pub(super) fn on_logged(actor: &mut Actor, thread: ThreadId) {
             }
         }
     }
-    end::release_writer(actor, log.matter, thread);
+    release(actor, log.matter, thread);
 }
 
 /// The commit logging the undo failed: the unblock sends it once more; a retry that fails too
@@ -395,7 +395,7 @@ pub(super) fn on_failed(actor: &mut Actor, thread: ThreadId) {
     if let Some(state) = state(actor, thread) {
         state.undo = None;
     }
-    end::release_writer(actor, matter, thread);
+    release(actor, matter, thread);
 }
 
 /// The thread's stream drained after a failure: send a failed undo commit once more.
@@ -418,4 +418,12 @@ pub(super) fn retry(actor: &mut Actor, thread: ThreadId) {
         tracing::warn!(%thread, %error, "an undo was not logged");
         on_failed(actor, thread);
     }
+}
+
+/// The undo lets go of the matter's writer; a queue the lawyer moved meanwhile (`ResumeQueue`,
+/// `SendQueuedNow`) starts now, after the undo and its note.
+fn release(actor: &mut Actor, matter: MatterId, thread: ThreadId) {
+    end::release_writer(actor, matter, thread);
+    queue::move_on(actor, thread);
+    queue::sync_held(actor, thread);
 }

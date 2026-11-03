@@ -95,6 +95,9 @@ mod queue;
 #[path = "host/queue_moves.rs"]
 mod queue_moves;
 #[cfg(test)]
+#[path = "host/queue_restart.rs"]
+mod queue_restart;
+#[cfg(test)]
 #[path = "host/rail.rs"]
 mod rail;
 #[cfg(test)]

@@ -26,7 +26,7 @@ use clauseo_protocol::{
 use super::super::commands::{AfterCommand, CommandCtx};
 use super::super::{Actor, Tag};
 use super::out::Out;
-use super::{Current, Then, TurnTag, cancel, host_stopping, lost, state, steps};
+use super::{Current, Holder, Then, TurnTag, cancel, host_stopping, lost, matter_of, state, steps};
 use crate::build;
 use crate::error::Error;
 
@@ -35,7 +35,7 @@ pub(super) use commands::{edit, remove, resume, send_now};
 pub(crate) use held::queue_held;
 pub(super) use held::sync_held;
 pub(super) use restore::restore;
-pub(super) use steer::{Steered, on_steered};
+pub(super) use steer::{Steered, on_steer_timer, on_steered};
 
 /// A thread's queued turns, in the order they start, and what moves them.
 #[derive(Debug, Default)]
@@ -45,12 +45,15 @@ pub(crate) struct ThreadQueue {
     /// or the host started again.
     held: bool,
     /// Real steer requests not answered yet; the queue waits for them.
-    steers: usize,
+    steers: Vec<steer::Pending>,
     /// A current turn the lawyer removed before it started: its end neither holds nor moves
     /// the queue differently from the turn before it.
     removed: Option<TurnId>,
     /// The `queue_held` last shown.
     shown: bool,
+    /// Queued turns whose `RemoveQueuedPrompt` commit is in flight, with their place: gone
+    /// once it is durable, back in their place if it fails, and never started meanwhile.
+    removing: Vec<(usize, Queued)>,
 }
 
 /// A queued turn: its prompt, as step 5 will send it.
@@ -74,6 +77,20 @@ impl ThreadQueue {
     }
 }
 
+/// The queued turns of `thread`, in order.
+#[cfg(test)]
+pub(super) fn queued_turns(actor: &Actor, thread: ThreadId) -> Vec<TurnId> {
+    actor.threads.get(&thread).map_or_else(Vec::new, |entry| {
+        entry
+            .turn
+            .queue
+            .turns
+            .iter()
+            .map(|queued| queued.turn)
+            .collect()
+    })
+}
+
 /// What a queue command's commit continues with.
 #[derive(Debug)]
 pub(crate) enum After {
@@ -90,6 +107,8 @@ pub(crate) enum After {
     Steer(Box<steer::Ask>),
     /// A requeued steer's turn joined the head.
     Requeued(TurnId),
+    /// A queued turn's removal (`TurnEnded { Cancelled }`).
+    Removed(TurnId),
 }
 
 pub(super) fn queue(actor: &mut Actor, thread: ThreadId) -> Option<&mut ThreadQueue> {
@@ -356,6 +375,7 @@ pub(super) fn committed(actor: &mut Actor, thread: ThreadId, after: After, ok: b
         }
         (After::Requeued(_) | After::Edited { .. }, true) => move_on(actor, thread),
         (After::Steer(ask), true) => steer::send(actor, thread, *ask),
+        (After::Removed(turn), ok) => commands::removed(actor, thread, turn, ok),
         (After::Appended(turn) | After::Jumped(turn) | After::Requeued(turn), false) => {
             drop_turn(actor, thread, turn);
         }
@@ -393,14 +413,24 @@ pub(super) fn move_on(actor: &mut Actor, thread: ThreadId) {
         return;
     };
     let queue = &state.queue;
-    let idle = state.current.is_none() && state.closing.is_none() && queue.steers == 0;
+    let idle = state.current.is_none() && state.closing.is_none() && queue.steers.is_empty();
     let starts = queue
         .turns
         .front()
         .is_some_and(|head| head.forced || !queue.held);
-    if idle && starts {
+    if idle && starts && !own_undo(actor, thread) {
         start_head(actor, thread);
     }
+}
+
+/// Whether the thread holds its matter's writer with no turn: its undo runs. A turn started
+/// now would take that writer as its own and go out before the undo's note; the undo's end
+/// moves the queue on instead (`undo.rs`).
+fn own_undo(actor: &Actor, thread: ThreadId) -> bool {
+    matter_of(actor, thread)
+        .ok()
+        .and_then(|matter| actor.matters.get(&matter))
+        .is_some_and(|entry| entry.turns.holder == Some(Holder::Thread(thread)))
 }
 
 /// The head becomes the current turn and goes to step 2.
