@@ -107,6 +107,12 @@ export function placeOf(entry: ToolCallEntry): StepPlace {
   } else if (site !== null) {
     place.name = site.name;
     place.where = site.where;
+  } else {
+    // nothing names it but the agent's title, whose paths the row cuts to their file names: the first one's folder is
+    // the hover, so where the paper is stays a pointer away
+    const named = entry.title.match(ABSOLUTE)?.[0];
+    const folder = named === undefined ? "" : splitPath(named).folder;
+    place.where = folder === "" ? null : folder;
   }
   places.set(entry, place);
   return place;
