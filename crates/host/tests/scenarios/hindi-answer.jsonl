@@ -1,0 +1,15 @@
+{"scenario":"hindi-answer","description":"Claude-shaped: a model option at default with a Haiku 5.5 choice, which the test's first SetConfigOption picks; one read allowed once, then a Hindi answer naming the planted tenant, deposit and date and the two papers holding them","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1","configOptions":[{"id":"model","name":"Model","category":"model","type":"select","currentValue":"default","options":[{"value":"default","name":"Default (recommended)"},{"value":"claude-haiku-5-5","name":"Haiku 5.5"}]}]}}}
+{"note":"The test's first SetConfigOption starts the session and asks for the model by its id.","expect":{"method":"session/set_config_option","as":"model","params":{"sessionId":"sess-1","configId":"model","value":"claude-haiku-5-5"}}}
+{"respond":{"to":"model","result":{"configOptions":[{"id":"model","name":"Model","category":"model","type":"select","currentValue":"claude-haiku-5-5","options":[{"value":"default","name":"Default (recommended)"},{"value":"claude-haiku-5-5","name":"Haiku 5.5"}]}]}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-read-1","title":"Read kirayanama.pdf","kind":"read","status":"pending","rawInput":{"file_path":"kirayanama.pdf"}}}}
+{"request":{"id":"perm-1","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"tc-read-1","title":"Read kirayanama.pdf","kind":"read","status":"pending"},"options":[{"optionId":"allow-once","name":"Allow once","kind":"allow_once"},{"optionId":"reject-once","name":"Reject","kind":"reject_once"}]}}}
+{"expect_response":{"id":"perm-1","result":{"outcome":{"outcome":"selected","optionId":"allow-once"}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-read-1","status":"completed"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"किरायेदार श्रीमती सुरेखा भार्गव हैं। उन्"}}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"होंने ₹3,47,215 की जमानत राशि जमा की, और किरायानामा 17 मार्च 2024 को हुआ। यह जानकारी kirayanama.pdf और patra.docx में मिली।"}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
