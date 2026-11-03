@@ -329,6 +329,10 @@ test("a matter with no papers says so; more than 50 matches show 50 with the cou
   expect(lines.every((p) => menu()?.contains(p) === false)).toBe(true);
   expect(menu()?.classList.contains("overflow-y-auto")).toBe(true);
   expect(menu()?.parentElement?.classList.contains("overflow-hidden")).toBe(true);
+  // in their own space under the rows, parted from them by the menus' divide
+  const foot = menu()?.nextElementSibling;
+  expect(foot?.firstElementChild?.classList.contains("bg-divide-mid")).toBe(true);
+  expect(lines.every((p) => foot?.contains(p))).toBe(true);
 });
 
 test("a paper token typed against at its end or its start is plain text: no box, and no paper for the send", async () => {

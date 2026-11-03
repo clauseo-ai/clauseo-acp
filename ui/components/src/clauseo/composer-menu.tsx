@@ -26,6 +26,7 @@ import { cn } from "../lib/cn.ts";
 import { Mixed } from "../lib/mixed.tsx";
 import { useThreadWords } from "../lib/words-thread.ts";
 import { useLayer } from "../ui/layer-context.ts";
+import { separator } from "../ui/recipes-controls.ts";
 import { raised, row, rowNote } from "../ui/recipes-overlays.ts";
 import type { MentionItem, Mentions, SlashCommand } from "./composer.tsx";
 import {
@@ -589,11 +590,20 @@ export function ComposerMenu({
                     ))}
               </div>
             )}
-            {notes.map((n) => (
-              <p key={n} className={cn(rowNote, "shrink-0 px-s3 py-s1-5")}>
-                {n}
-              </p>
-            ))}
+            {notes.length > 0 && (
+              // the lines' own space under the rows' scroll, parted from it by the menus' divide (MenuSeparator's),
+              // so a row cut at the scroll's foot never reads as under them; the rows give up the room they take
+              <div className="shrink-0">
+                {open.items.length > 0 && (
+                  <div aria-hidden="true" className={cn(separator.horizontal, "my-s1-5")} />
+                )}
+                {notes.map((n) => (
+                  <p key={n} className={cn(rowNote, "px-s3 py-s1-5")}>
+                    {n}
+                  </p>
+                ))}
+              </div>
+            )}
           </div>,
           // inside the field's landmark when no layer is given (the room's main has none), so the open menu is
           // content of the page's regions (axe's region rule); fixed, it stands at the caret wherever it mounts, bounded by
