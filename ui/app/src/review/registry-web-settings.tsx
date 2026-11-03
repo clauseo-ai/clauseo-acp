@@ -1,7 +1,10 @@
 // The web brief's copy review entries for Settings' Privacy section, apart from registry.tsx to keep that file under the size
 // limit: each new string in the real window (settings-app.tsx) over FakeTransport, open at Privacy, at the window's
 // size. The plans' rows show both plans while the window knows none, Claude's alone with Claude's limits only; the
-// tools' switches show only when the host sends them (app-local today): on, web search off, or both locked.
+// tools' switches show only when the host sends them (app-local today): on, web search off, or both locked and off
+// as a firm's policy sends them. The websites' row shows always but with both tools off; the Browser switch's reason
+// (no website check) while it is on.
+import { tw, type ToolsKey } from "@clauseo/components/lib/words-tools.ts";
 import type { ToolSettings } from "../room/host-next.ts";
 import type { AgentLimitsView, LimitsView } from "../transport/protocol.ts";
 import type { Entry } from "./entry.ts";
@@ -15,6 +18,15 @@ const WINDOW = { width: 960, height: 700 } as const;
 type State = { tools?: ToolSettings; locked?: string[]; limits?: LimitsView };
 
 const ON: ToolSettings = { web_search: true, browser: true };
+const OFF: ToolSettings = { web_search: false, browser: false };
+
+/** A line of the room's tools' words that Settings says too. */
+const toolWords = (key: ToolsKey): WordsRef => ({
+  file: "lib/words-tools.ts",
+  key,
+  text: (lang) => tw(lang, key),
+  later: tw.hi[key] === null,
+});
 
 /** Claude's plan alone, so the rows name Claude only. */
 const CLAUDE: AgentLimitsView = {
@@ -77,9 +89,21 @@ export const WEB_SETTINGS: Entry[] = [
       tools: ON,
     },
   ),
-  // the managed line on the tools' switches, both locked by a firm's policy (U11-07's words). The ids are UEP-nn: status.ts's form wants digits after the dash
-  entry("UEP-13", settingsWords("Managed by your organisation"), {
-    tools: ON,
+  // the lock's reason in a locked switch's note's place, both locked off by a firm's policy: U11-07's words with the
+  // room's period, so a new string under the same id. The ids are UEP-nn: status.ts's form wants digits after the dash
+  entry("UEP-13", settingsWords("Managed by your organisation."), {
+    tools: OFF,
     locked: ["tools.web_search", "tools.browser"],
+  }),
+  entry("UEP-14", settingsWords("To the websites Clauseo visits")),
+  entry(
+    "UEP-15",
+    settingsWords(
+      "Clauseo visits each page it reads, and each one it opens in its browser, from this computer. Each website sees that visit, as it sees any browser's.",
+    ),
+  ),
+  // the Browser switch on, and no website check yet: the room's UET-18 words
+  entry("UEP-16", toolWords("Off until Clauseo can check each website the browser opens."), {
+    tools: ON,
   }),
 ];
