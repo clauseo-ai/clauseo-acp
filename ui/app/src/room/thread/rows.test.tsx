@@ -63,8 +63,9 @@ test("tool calls: one row each in their step group, opened, with its id and stat
     `Read file 200. · ${steps("en", "Waiting")}`,
     "Read file 201.",
     "Read file 202.",
-    `Read file 203. · ${th("en", "Failed")}`,
-    `Read file 204. · ${th("en", "Stopped")}`,
+    // tried and not done: the title after the attempt, never told as done
+    `Tried: Read file 203. · ${th("en", "Failed")}`,
+    `Tried: Read file 204. · ${th("en", "Stopped")}`,
   ]);
   // an update renders in place
   h.deliver([upsert(toolCall(10, 200, "completed"))]);

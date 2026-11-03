@@ -76,6 +76,14 @@ function siteOf(url: string): { name: string; where: string } | null {
 /** An absolute path, Unix or Windows, as a run of non-space characters. Never a slash inside a word or after a colon
  * or another slash, so a web address ("https://indiankanoon.org/doc/1/") is no path and stays whole. */
 const ABSOLUTE = /(?<![\w:/\\.])(?:[A-Za-z]:\\|\/)[^\s"'`]*[/\\][^\s"'`]+/g;
+/** The kinds whose title names the paper they touched. */
+const PAPER_KINDS: ReadonlySet<string> = new Set(["read", "edit", "delete", "move"]);
+/** The paper's whole path in a title, from where `named` (its first run without a space) starts up to its file's
+ * extension; `named` itself with no extension after it. */
+function paperIn(title: string, named: string): string {
+  const rest = title.slice(title.indexOf(named));
+  return /^.*?\.[A-Za-z0-9]{1,5}(?=[\s,;:)]|$)/.exec(rest)?.[0] ?? named;
+}
 /** A web address in a title. */
 const WEB = /\bhttps?:\/\/[^\s"'`]+/;
 
@@ -115,6 +123,10 @@ export function placeOf(entry: ToolCallEntry): StepPlace {
     // the hover, so where the paper is stays a pointer away; with no path, a web address in it, whole
     const named = entry.title.match(ABSOLUTE)?.[0];
     const folder = named === undefined ? "" : splitPath(named).folder;
+    // a paper's own step names the paper the title names, so its words (and their tried form) are the room's own: the
+    // path runs on past a space to the paper's extension ("Form DIR-12.pdf")
+    const file = named === undefined ? "" : splitPath(paperIn(entry.title, named)).name;
+    if (PAPER_KINDS.has(entry.kind) && file !== "") place.name = file;
     place.where = folder === "" ? (entry.title.match(WEB)?.[0] ?? null) : folder;
   }
   places.set(entry, place);

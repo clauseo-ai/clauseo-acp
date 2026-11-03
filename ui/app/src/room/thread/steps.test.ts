@@ -254,10 +254,31 @@ describe("friendly names", () => {
       "Read Form DIR-12.pdf.",
     ]);
     expect(reads.map(hoverOf)).toEqual(["/Users/x/Matters/Sharma", "/Users/x/Matters/Sharma"]);
+    // a paper's step takes the paper its title names, so it reads in the room's own words
     expect(doneOf("en", titled("edit", "Edit C:\\Matters\\Sharma\\Reply.docx"))).toBe(
-      "Edit Reply.docx.",
+      "Changed Reply.docx.",
     );
     expect(hoverOf(titled("search", "grep notice period"))).toBeNull();
+  });
+
+  test("a step tried and not done never reads as done, even when only its title or a task's description names it", () => {
+    const lease = { title: "Read /Users/x/Matters/Lease.pdf" };
+    expect(doneOf("en", call("read", "failed", lease))).toBe("Tried to read Lease.pdf.");
+    expect(doneOf("hi", call("read", "failed", lease))).toBe("Lease.pdf पढ़ने की कोशिश की गई।");
+    expect(restOf("en", [call("read", "failed", lease)]).trouble).toBe("Tried to read Lease.pdf.");
+    expect(doneOf("en", call("other", "cancelled", { title: "Check the cause list" }))).toBe(
+      "Tried: Check the cause list.",
+    );
+    expect(doneOf("hi", call("other", "cancelled", { title: "Check the cause list." }))).toBe(
+      "कोशिश की गई: Check the cause list।",
+    );
+    const count = raw({ command: "x", description: "Count the pages" });
+    expect(doneOf("en", call("execute", "failed", count))).toBe("Tried: Count the pages.");
+    // done, the agent's own words as they are
+    expect(doneOf("en", call("execute", "completed", count))).toBe("Count the pages.");
+    expect(doneOf("en", call("other", "completed", { title: "Check the cause list" }))).toBe(
+      "Check the cause list.",
+    );
   });
 
   test("a web address in a title is no path: it stays whole in the words and on hover", () => {

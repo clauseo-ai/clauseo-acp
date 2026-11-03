@@ -11,7 +11,7 @@ import { stepKindOf, type StepKind } from "@clauseo/components/clauseo/tool-kind
 import type { StreamView } from "../../store/view.ts";
 import type { EntryId, ToolCallEntry, ViewEntry } from "../../transport/protocol.ts";
 import { sameIds } from "./ids.ts";
-import { doingOf, placeOf, sentenceOf, titled, unsettled } from "./step-names.ts";
+import { doingOf, placeOf, sentenceOf, titleOf, unsettled } from "./step-names.ts";
 
 /** One part of an answer: a row on its own, or a group of rows folded into one line. */
 export type Segment =
@@ -196,26 +196,35 @@ export function doneOf(lang: Lang, entry: ToolCallEntry): string {
     steps(lang, tried ? attempt : done, vars);
   const p = placeOf(entry);
   const name = p.name;
+  // the agent's own words where nothing else names it: as they are once done, after the attempt once not
+  const titled = (plain: string) => {
+    const own = titleOf(entry.title);
+    return own === "" ? plain : agentWords(own);
+  };
+  const agentWords = (own: string) =>
+    tried
+      ? steps(lang, "Tried: {title}.", { title: own.replace(/[.!?।…]+$/, "") })
+      : sentenceOf(own);
   switch (entry.kind) {
     case "read":
       return name === null
-        ? titled(entry, say("Read the papers.", "Tried to read the papers."))
+        ? titled(say("Read the papers.", "Tried to read the papers."))
         : say("Read {name}.", "Tried to read {name}.", { name });
     case "edit":
       return name === null
-        ? titled(entry, say("Changed a paper.", "Tried to change a paper."))
+        ? titled(say("Changed a paper.", "Tried to change a paper."))
         : say("Changed {name}.", "Tried to change {name}.", { name });
     case "delete":
       return name === null
-        ? titled(entry, say("Deleted a paper.", "Tried to delete a paper."))
+        ? titled(say("Deleted a paper.", "Tried to delete a paper."))
         : say("Deleted {name}.", "Tried to delete {name}.", { name });
     case "move":
       return name === null
-        ? titled(entry, say("Moved a paper.", "Tried to move a paper."))
+        ? titled(say("Moved a paper.", "Tried to move a paper."))
         : say("Moved {name}.", "Tried to move {name}.", { name });
     case "search":
       return p.query === null
-        ? titled(entry, say("Searched the papers.", "Tried to search the papers."))
+        ? titled(say("Searched the papers.", "Tried to search the papers."))
         : say("Searched for '{query}'.", "Tried to search for '{query}'.", { query: p.query });
     case "fetch":
       return p.query !== null
@@ -224,13 +233,13 @@ export function doneOf(lang: Lang, entry: ToolCallEntry): string {
           })
         : name !== null
           ? say("Read {name} online.", "Tried to read {name} online.", { name })
-          : titled(entry, say("Looked online.", "Tried to look online."));
+          : titled(say("Looked online.", "Tried to look online."));
     case "execute":
-      return p.what === null ? say("Ran a task.", "Tried to run a task.") : sentenceOf(p.what);
+      return p.what === null ? say("Ran a task.", "Tried to run a task.") : agentWords(p.what);
     case "think":
       return say("Thought it through.", "Tried to think it through.");
     default:
-      return titled(entry, say("Did one other thing.", "Tried one other thing."));
+      return titled(say("Did one other thing.", "Tried one other thing."));
   }
 }
 
