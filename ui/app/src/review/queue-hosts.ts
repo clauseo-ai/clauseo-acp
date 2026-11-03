@@ -74,6 +74,8 @@ const SAY = {
     "The board minutes of 3 March 2023 record him present when the supply contract was approved.",
     "3 मार्च 2023 की बोर्ड बैठक के कार्यवृत्त में आपूर्ति अनुबंध के अनुमोदन के समय उनकी उपस्थिति दर्ज है।",
   ],
+  summoning: ["Summoning order", "समन आदेश"],
+  mandate: ["Bank mandate", "बैंक मैंडेट"],
   search: [
     "Searched Indian Kanoon for judgments that cite S.M.S. Pharmaceuticals",
     "S.M.S. Pharmaceuticals का हवाला देने वाले निर्णय Indian Kanoon पर खोजे",
@@ -143,6 +145,8 @@ const queued = (lang: Lang, n: number): ViewEntry[] =>
 /** A thread's state for these screens. */
 export type QueueScene = {
   entries: ViewEntry[];
+  /** The conversation's title, as the rail lists it. */
+  title: string;
   /** claude-acp by default; codex-acp for ChatGPT. */
   agent?: AgentId;
   status?: ThreadStatus;
@@ -177,9 +181,7 @@ export function queueHost(scene: QueueScene): FakeTransport {
       if (query === "list_matters") return { matters: [MATTER] };
       if (typeof query === "object" && query.list_threads !== undefined)
         return {
-          threads: [
-            { thread: THREAD, matter: MATTER.matter, agent, status, title: "Summoning order" },
-          ],
+          threads: [{ thread: THREAD, matter: MATTER.matter, agent, status, title: scene.title }],
         };
       throw new Error(`the review's host doesn't answer ${JSON.stringify(query)}`);
     },
@@ -203,12 +205,14 @@ export function queueHost(scene: QueueScene): FakeTransport {
 /** matters/queue: `n` messages queued while the answer runs. */
 export const queueScene = (lang: Lang, n: number, over: Partial<QueueScene> = {}): QueueScene => ({
   entries: [...asked(lang), ...queued(lang, n)],
+  title: say(lang, SAY.summoning),
   joins: true,
   ...over,
 });
 
 /** matters/held and held-failed: the answer stopped (or failed) at 4:32 pm with three messages queued. */
 export const heldScene = (lang: Lang, how: "stopped" | "failed"): QueueScene => ({
+  title: say(lang, SAY.summoning),
   entries: [
     ...asked(lang),
     ended(3, T1, pm(32), { stop: how === "stopped" ? "cancelled" : "failed" }),
@@ -220,6 +224,7 @@ export const heldScene = (lang: Lang, how: "stopped" | "failed"): QueueScene => 
 
 /** matters/steer-claude, after Send now: the words stand in the running answer, taken in at 4:31 pm. */
 export const steerMarkScene = (lang: Lang): QueueScene => ({
+  title: say(lang, SAY.summoning),
   entries: [
     ...asked(lang),
     ask(3, 2, say(lang, SAY.steerClaude), T1, pm(31), {
@@ -233,6 +238,7 @@ export const steerMarkScene = (lang: Lang): QueueScene => ({
 
 /** matters/steer-claude, the answer ending as the words came: they head the next exchange and say why. */
 export const requeuedScene = (lang: Lang): QueueScene => ({
+  title: say(lang, SAY.summoning),
   entries: [
     ...asked(lang),
     ended(3, T1, pm(31)),
@@ -253,6 +259,7 @@ const mandate = (lang: Lang): ViewEntry[] => [
 
 /** matters/steer-chatgpt before Send now: Codex, whose answer runs. */
 export const chatgptScene = (lang: Lang): QueueScene => ({
+  title: say(lang, SAY.mandate),
   entries: mandate(lang),
   agent: "codex-acp",
   joins: false,
@@ -260,6 +267,7 @@ export const chatgptScene = (lang: Lang): QueueScene => ({
 
 /** matters/steer-chatgpt after Send now: the answer stopped at 4:32 pm and kept, the words sent first. */
 export const sentNowScene = (lang: Lang): QueueScene => ({
+  title: say(lang, SAY.mandate),
   entries: [
     ...mandate(lang),
     ask(3, 2, say(lang, SAY.steerChatgpt), T2, pm(32), {
@@ -288,6 +296,7 @@ export const asideScene = (lang: Lang): QueueScene => {
     background,
   };
   return {
+    title: say(lang, SAY.summoning),
     entries: [
       ask(1, 1, say(lang, SAY.question), T1, pm(28)),
       answer(2, 1, say(lang, SAY.answer), T1),
