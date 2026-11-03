@@ -28,8 +28,8 @@ export function Who({
 }: {
   name: string;
   time?: string | undefined;
-  /** The clock times the time's place is kept wide enough for, with or without a time yet: unseen and unheard (drawn
-   * by CSS, so in no text), so what follows the time stands in one place before the time comes and after. */
+  /** Times the time's place is kept at least as wide as, unseen and unheard (drawn by CSS, so in no text): a live
+   * answer's start, so its end time, shorter, can't pull what follows left. */
   held?: readonly string[] | undefined;
   ref?: Ref<HTMLParagraphElement>;
 }) {

@@ -2,7 +2,7 @@
 // month further off (U2's clockOf rule), Hindi through clock().
 import { clock } from "@clauseo/components/lib/words.ts";
 import { expect, test, vi } from "vitest";
-import { clockTime, clockWidest, isoOf, stamp, whenOf } from "./clock.ts";
+import { clockTime, isoOf, stamp, whenOf } from "./clock.ts";
 
 // local times, so the checks hold in any zone the tests run in (the suite pins its zone to UTC: vite.config.ts)
 const at = (day: number, h: number, m: number) => new Date(2026, 10, day, h, m).getTime();
@@ -75,17 +75,5 @@ test("the weekday shows exactly when the instant is on another local day, read i
     if (zone === undefined) delete process.env["TZ"];
     else process.env["TZ"] = zone;
     vi.resetModules();
-  }
-});
-
-test("the widest clock time of each form the language has, a two-digit hour, for the meta line's kept time", () => {
-  expect(clockWidest("en")).toEqual(["10:00 am", "10:00 pm"]);
-  const hi = clockWidest("hi");
-  expect(hi.length).toBeGreaterThan(1);
-  for (const form of hi) expect(form).toMatch(/10:00/);
-  // every time today has one of these forms
-  for (let h = 0; h < 24; h += 1) {
-    const t = clockTime("hi", new Date(2000, 0, 1, h, 7).getTime());
-    expect(hi).toContain(t.replace(/\d{1,2}:\d\d/, "10:00"));
   }
 });

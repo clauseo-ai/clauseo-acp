@@ -39,6 +39,8 @@ export const LiveStepGroup = memo(
     tail,
     meta = false,
     step,
+    asked,
+    before,
     latest = false,
   }: {
     ids: readonly EntryId[];
@@ -47,6 +49,8 @@ export const LiveStepGroup = memo(
     tail: boolean;
     meta?: boolean;
     step?: EntryId | undefined;
+    asked?: EntryId | undefined;
+    before?: EntryId | undefined;
     latest?: boolean;
   }) {
     const { lang } = useDisplay();
@@ -62,11 +66,18 @@ export const LiveStepGroup = memo(
     );
     const head = useCallback(
       (line: ReactElement) => (
-        <AnswerMeta step={step} stream={stream} paged={paged} latest={latest}>
+        <AnswerMeta
+          step={step}
+          asked={asked}
+          before={before}
+          stream={stream}
+          paged={paged}
+          latest={latest}
+        >
           {line}
         </AnswerMeta>
       ),
-      [step, stream, paged, latest],
+      [step, asked, before, stream, paged, latest],
     );
     return (
       <StepGroup id={ids[0]!} {...words} live={live} head={meta ? head : undefined}>
@@ -88,6 +99,8 @@ export const LiveStepGroup = memo(
     a.paged === b.paged &&
     a.meta === b.meta &&
     a.step === b.step &&
+    a.asked === b.asked &&
+    a.before === b.before &&
     a.latest === b.latest &&
     sameIds(a.ids, b.ids),
 );
