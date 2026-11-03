@@ -5,7 +5,14 @@
 // comes back into the field, after any words there, with the working line saying the message had gone.
 import { act } from "react";
 import { afterEach, expect, test } from "vitest";
-import { header, reset, upsert, userMessage, uuid } from "../../testing/stream-script.ts";
+import {
+  agentText,
+  header,
+  reset,
+  upsert,
+  userMessage,
+  uuid,
+} from "../../testing/stream-script.ts";
 import type { CommandOutcome, HostCommand, ViewEntry } from "../../transport/protocol.ts";
 import { loadQueueStrip } from "../queue-chunk.ts";
 import { defaultOutcome, mountRoom, type Harness } from "./harness.ts";
@@ -139,4 +146,32 @@ test("an edit refused while other messages still wait comes back into the field 
   expect(h!.one("queue-error")?.textContent).toBe("That message had already gone.");
   expect(h!.one("error")).toBeNull();
   expect(h!.host.textContent).not.toContain("raw host text");
+});
+
+test.each([
+  ["the header goes from starting to running", "status"],
+  ["the message's turn starts answering", "output"],
+])("after a lost edit on the last row, the line says Answering. again once %s", async (_, how) => {
+  const save = await lastQueued();
+  await save();
+  const sent = upsert({
+    user_message: { ...queued(5, 2, "Check the lease.").user_message!, status: "sent" },
+  });
+  if (how === "status") {
+    h!.deliver([sent, upsert({ header: { ...running().header!, status: "starting" } })]);
+    await h!.settle();
+    expect(h!.one("error")?.textContent).toBe("That message had already gone.");
+    h!.deliver([upsert(running())]);
+  } else {
+    h!.deliver([sent]);
+    await h!.settle();
+    expect(h!.one("error")?.textContent).toBe("That message had already gone.");
+    h!.deliver([upsert(agentText(7, 8, "Looking at the lease."))]);
+  }
+  await h!.settle();
+  expect(h!.one("error")).toBeNull();
+  expect(h!.one("working")?.textContent).toContain("Answering.");
+  expect(h!.host.textContent).not.toContain("That message had already gone.");
+  // the words stay in the field
+  expect(field().value).toBe("Check the lease and the deed.");
 });
