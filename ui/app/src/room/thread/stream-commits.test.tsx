@@ -229,6 +229,16 @@ test("500 chunks and 20 tool calls into the room's thread: one commit a frame, n
   expect(framesOverOneCommit).toBe(0);
   expect(unchangedRowCommits).toBe(0);
 
+  // the pen writes in the working line while the turn runs, on frames of its own: a second of them commits nothing
+  const pen = container.querySelector<SVGElement>(".working-pen");
+  expect(pen).not.toBeNull();
+  const asked = vi.spyOn(window, "requestAnimationFrame");
+  phases.length = 0;
+  await act(() => vi.advanceTimersByTimeAsync(1000));
+  expect(asked.mock.calls.length).toBeGreaterThan(30);
+  expect(phases).toEqual([]);
+  asked.mockRestore();
+
   // at rest: the turn ended; once the one-shot work of the end has run (the entity table's fetch), nothing waits on
   // a timer or a frame, and five seconds pass without a commit
   transport.deliver(
