@@ -17,3 +17,10 @@ test("the opened rows sit on the well, inset by the work list's padding and corn
   expect(rows).toMatch(/border-radius: var\(--r-control\);/);
   expect(rows).toMatch(/margin: var\(--s2\) 0 var\(--s1\);/);
 });
+
+test("a failure on the folded line is in primary ink at the line's own weight, the prototype chip's 450, never bolder", () => {
+  const trouble = rule(".step-group-trouble");
+  expect(trouble).toMatch(/color: var\(--primary\);/);
+  expect(trouble).toMatch(/font-weight: var\(--w-ui\);/);
+  expect(steps).not.toMatch(/font-weight: (5|6|7)\d\d/);
+});
