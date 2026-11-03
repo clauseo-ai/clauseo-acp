@@ -74,7 +74,9 @@ awk -v files="$FILES" '
 # Stale skip regexes: each must match a mutant of the job's listing under the config without the
 # skip list. Matched with perl, whose syntax covers what the regexes use (\d, escapes, groups,
 # classes, \x27), not with cargo-mutants' `--re`: 27.1.0 applies neither `--re` nor `exclude_re`
-# to its "delete field" mutants, so with `--re` a stale regex would still list one there.
+# to its "delete field" mutants, so with `--re` a stale regex would still list one there. Those
+# mutants are left out of the count too: `exclude_re` cannot remove them, so a regex that names only
+# them skips nothing and is as stale as one that names no mutant.
 stale=0
 if [ "${#skips[@]}" -gt 0 ]; then
   status=0
@@ -85,7 +87,7 @@ if [ "${#skips[@]}" -gt 0 ]; then
   fi
   listed=$(printf '%s\n' "$listed" | tr -d '\r')
   for regex in "${skips[@]}"; do
-    count=$(printf '%s\n' "$listed" | SKIP="$regex" perl -ne '$n++ if /$ENV{SKIP}/; END { print $n + 0 }') || {
+    count=$(printf '%s\n' "$listed" | SKIP="$regex" perl -ne 'next if /: delete field /; $n++ if /$ENV{SKIP}/; END { print $n + 0 }') || {
       echo "::error::skip regex '$regex' is not a regex perl can read"
       exit 1
     }
