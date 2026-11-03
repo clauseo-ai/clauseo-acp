@@ -3,7 +3,7 @@
 import { expect, test } from "vitest";
 import { partsOf, sourcesSummary, src } from "./words-sources.ts";
 
-test("the summary counts the open list's rows, the singular apart", () => {
+test("the summary counts the distinct pages, the singular apart", () => {
   expect(sourcesSummary("en", 5)).toBe("5 sources");
   expect(sourcesSummary("en", 1)).toBe("1 source");
   expect(sourcesSummary("en", 2)).toBe("2 sources");
@@ -29,6 +29,7 @@ test("the whole set: no sentence of round 2 is left", () => {
       "{name} doesn't list its pages",
       "Opened on OpenAI's side",
       "Opened in the browser",
+      "Searches",
     ].sort(),
   );
 });
