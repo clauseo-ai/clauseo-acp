@@ -20,11 +20,19 @@
 //! fail, or the agent ends ([`remove_run`]). No launch
 //! removes another's folder: a prep that came late can only take its own.
 //!
+//! For a session that can get the browser, the same thread checks that the browser entry's
+//! sidecars (`clauseo-mcp` and agent-browser) exist, finds its Chrome, and claims its ports and,
+//! on macOS and Linux, its socket folder ([`BrowserSession`]); a missing sidecar or a failed
+//! claim leaves the browser out (`BrowserNotInstalled`) with a log line, and the launch goes
+//! on. The claims ride on [`RunFolders`] and drop with the run folder, off the actor, once the
+//! agent's process tree has been killed (or the agent never started).
+//!
 //! At the first launch, before any folder is made, `<data>/run` from an earlier run is set
 //! aside in one rename and deleted on a thread of its own ([`RunSweep`]). Nothing is made or
 //! swept through a link at `<data>/run` or `<data>/agent-state`.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use clauseo_profile::{SkillWrite, SkillsWritten};
 use clauseo_protocol::{AgentKind, MatterId, ThreadId};
@@ -36,7 +44,7 @@ use super::{TurnInput, host_stopping, state};
 use futures::task::LocalSpawnExt;
 
 use crate::agent::{codex, data_folder};
-use crate::browser::chrome::ChromeRoots;
+use crate::browser::session::BrowserSession;
 use crate::config::SessionKey;
 use crate::error::Error;
 
@@ -63,8 +71,8 @@ pub(crate) struct Prepared {
     pub(super) skills_written: Option<SkillsWritten>,
 }
 
-/// The folders a session gets, all under the data folder.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// The folders a session gets, all under the data folder, and its browser claims.
+#[derive(Debug, Clone)]
 pub(crate) struct RunFolders {
     /// The session.
     pub(crate) key: SessionKey,
@@ -82,6 +90,14 @@ pub(crate) struct RunFolders {
     /// (`browser::chrome::find`), or none (`BrowserNotInstalled`). Not a folder, but the
     /// session's like them, and found on the same thread.
     pub(crate) chrome: Option<PathBuf>,
+    /// The session's browser ports, socket folder and agent-browser name
+    /// ([`BrowserSession`]), claimed on the launch-prep thread; none when the session cannot
+    /// get the browser. The one holder is the thread's turn state; clones elsewhere are
+    /// short-lived, so the last reference drops in [`discard`]'s off-actor removal, after the
+    /// agent's tree was killed. Stage C's R17 builds the session's jail policy from it:
+    /// `PolicyBuilder::browser_socket_dir(&session.socket_dir)` and
+    /// `Loopback::Ports(session.ports.loopback())`.
+    pub(crate) browser_session: Option<Arc<BrowserSession>>,
 }
 
 impl RunFolders {
@@ -95,6 +111,7 @@ impl RunFolders {
             notes: notes_dir(data, key.matter),
             root,
             chrome: None,
+            browser_session: None,
         }
     }
 
@@ -298,11 +315,18 @@ pub(super) fn prepare(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>
             Some(_) => actor.profile.launch_writes(&row.agent),
             None => Vec::new(),
         };
-        Ok((stored, locations.data_dir().to_owned(), home, run, skills))
+        let browser = browser_prep(actor, &row.agent, key);
+        Ok((
+            stored,
+            locations.data_dir().to_owned(),
+            home,
+            run,
+            skills,
+            browser,
+        ))
     })();
     let sweep = actor.run_sweep.clone();
-    let chrome = chrome_search(actor);
-    let (stored, data, home, mut run, skills) = match paths {
+    let (stored, data, home, mut run, skills, browser) = match paths {
         Ok(paths) => paths,
         Err(error) => {
             agents::fail_all(actor, thread, waiting, &error);
@@ -331,7 +355,7 @@ pub(super) fn prepare(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>
                     None => None,
                 };
                 run.make(&data, &sweep)?;
-                run.chrome = chrome.find_with_config(&data);
+                (run.chrome, run.browser_session) = browser.prepare(&data, &run.key.id());
                 let skills_written = write_skills(&skills);
                 Ok(Prepared {
                     stored,
@@ -363,59 +387,6 @@ fn write_skills(writes: &[SkillWrite]) -> Option<SkillsWritten> {
         }
     }
     first
-}
-
-/// How the launch prep picks the session's Chrome.
-enum ChromeSearch {
-    /// No browser can go to this session (`tools.browser` off, or no proxy): no search.
-    Skip,
-    /// The Chrome the tests forced.
-    Forced(PathBuf),
-    /// Search these roots; `None` is this machine's, with the data folder as app data.
-    Roots(Option<ChromeRoots>),
-}
-
-impl ChromeSearch {
-    /// The Chrome found. File system calls: off the actor.
-    fn find(self, data: &Path) -> Option<PathBuf> {
-        match self {
-            Self::Skip => None,
-            Self::Forced(chrome) => Some(chrome),
-            Self::Roots(roots) => {
-                let roots = roots.unwrap_or_else(|| ChromeRoots::system(data));
-                crate::browser::chrome::find(&roots)
-            }
-        }
-    }
-
-    /// The Chrome found, once agent-browser's config file is in place
-    /// (`browser::write_config`). Without the file the guard cannot start, so a failure to
-    /// write it leaves the browser out (`BrowserNotInstalled`), with a warning; the launch goes
-    /// on. File system calls: off the actor.
-    fn find_with_config(self, data: &Path) -> Option<PathBuf> {
-        let chrome = self.find(data)?;
-        match crate::browser::write_config(data) {
-            Ok(_) => Some(chrome),
-            Err(error) => {
-                let file = data
-                    .join(crate::browser::CONFIG_DIR)
-                    .join(crate::browser::CONFIG_FILE);
-                tracing::warn!(file = %file.display(), %error, "agent-browser's config file was not written; the session has no browser");
-                None
-            }
-        }
-    }
-}
-
-/// What the launch prep does to find Chrome, from the actor's state.
-fn chrome_search(actor: &Actor) -> ChromeSearch {
-    if !actor.effective.settings().tools.browser || actor.wiring.proxy.is_none() {
-        return ChromeSearch::Skip;
-    }
-    match &actor.wiring.browser_executable {
-        Some(chrome) => ChromeSearch::Forced(chrome.clone()),
-        None => ChromeSearch::Roots(actor.wiring.chrome_roots.clone()),
-    }
 }
 
 /// Phase two: the checks `id` answered. The agent launches with what they found, or the
@@ -468,14 +439,18 @@ pub(super) fn on_prepared(
     }
 }
 
-/// Removes `run` (`thread`'s launch's run folder) off the actor; the notes folder stays. The
-/// session has ended or never started, so its browser slot, if it held one, is free.
+/// Removes `run` (`thread`'s launch's run folder) off the actor and drops its browser claims
+/// there; the notes folder stays. The session has ended (its agent's tree killed) or never
+/// started, so its browser slot, if it held one, is free.
 fn discard(actor: &mut Actor, thread: ThreadId, run: RunFolders) {
     actor.wiring.browser_slots.release(run.key);
     let clock = std::sync::Arc::clone(&actor.clock);
     let spawned = actor.spawner.spawn_local(async move {
         let removed = codex::prepare::off_actor(clock, move || {
             run.remove();
+            // The browser claims go here, off the actor and after the agent's tree was killed:
+            // the socket folder is removed and the ports are free for the next session.
+            drop(run);
             Ok(())
         })
         .await;
@@ -495,6 +470,9 @@ pub(super) fn remove_run(actor: &mut Actor, thread: ThreadId) {
         discard(actor, thread, run);
     }
 }
+
+mod browser;
+use browser::browser_prep;
 
 #[cfg(test)]
 mod tests;

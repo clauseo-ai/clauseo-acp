@@ -12,7 +12,7 @@ use serde_json::{Map, Value};
 use super::super::Actor;
 use super::launch_checks::{Prepared, RunFolders};
 use crate::agent::loads;
-use crate::agent::loads::browser::{self, BrowserInputs, Switch};
+use crate::agent::loads::browser::{self, BrowserInputs, Claims, Switch};
 use crate::agent::loads::profile::{self, ClaudeKeys, Folders, Login};
 use crate::browser::seed_sites::SEED_SITES;
 use crate::error::Error;
@@ -101,7 +101,6 @@ pub(super) fn session_loads(
         claude.as_ref(),
     );
     profile::fill_meta(&mut meta, folders)?;
-    let session_id = run.key.id();
     let inputs = BrowserInputs {
         switch: browser_switch,
         control,
@@ -113,7 +112,7 @@ pub(super) fn session_loads(
             .and_then(|proxy| proxy.port_for(run.key)),
         executable: run.chrome.as_deref(),
         browser_dir: &run.browser,
-        session_id: &session_id,
+        claims: run.browser_session.as_deref().map(Claims::of),
     };
     let mut servers = loads::mcp_servers(&actor.effective, control);
     let (hook_servers, browser_state) =

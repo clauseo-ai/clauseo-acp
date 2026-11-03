@@ -28,6 +28,11 @@ clauseo-profile = { path = "../profile" }
 # The anonymous usage counts' call sites and the privacy switches (decision record 0036).
 clauseo-counts = { path = "../counts" }
 clauseo-search = { path = "../search" }
+# The browser's per-session socket folder and loopback port claims, and the start-up sweep
+# (decision record 0029, stage C's `BrowserSocketDir` and `ports`).
+clauseo-sandbox = { path = "../sandbox" }
+# Random agent-browser session names on Windows (`browser/session.rs`).
+getrandom = { workspace = true }
 async-channel = { workspace = true, features = ["std"] }
 async-io = { workspace = true }
 # `executor` for `LocalPool` (QR11.2); the root line's default features include it already.

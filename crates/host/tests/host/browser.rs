@@ -14,6 +14,8 @@ use clauseo_protocol::{
 };
 use serde_json::json;
 
+use clauseo_host::McpServer;
+
 use crate::profile_rig::{
     CLAUDE, Hook, Wired, agent_lines, agents, browser_server, filled_browser, first_frame_tools,
     settings, template, turn,
@@ -235,6 +237,185 @@ fn the_chrome_the_prep_finds_fills_the_entry() {
         browser_reason(&first_frame_tools(&host, thread)),
         Some(ToolsUnavailableReason::BrowserNotInstalled)
     );
+    host.shutdown();
+}
+
+/// The browser state one `CLAUDE` session shows with `entry` as the hook's browser entry.
+fn reason_with_entry(test: &str, entry: McpServer) -> Option<ToolsUnavailableReason> {
+    let dir = Dir::new(test, &[]);
+    let generic = template(
+        &dir,
+        "generic",
+        &agent_lines("generic", "session/new", &json!({"mcpServers": []}), &[]),
+    );
+    settings(
+        &dir,
+        agents(&[(CLAUDE, &generic, json!({}))]),
+        json!({"tools": {"browser": true, "web_search": false}}),
+    );
+    let hook = Hook {
+        servers: vec![entry],
+        ..Hook::default()
+    };
+    let host = dir.start_launching(0, Wired::new(&dir), move |config| {
+        config
+            .with_profile_hook(Box::new(hook))
+            .with_egress_proxy(Arc::new(TestProxy(8123)))
+            .with_browser_executable(Some(PathBuf::from("/chrome")))
+    });
+    let matter = host.create_matter("m", &dir.folder("m", &[]));
+    let thread = host.create_thread(matter, CLAUDE);
+    turn(&host, thread);
+    let reason = browser_reason(&first_frame_tools(&host, thread));
+    host.shutdown();
+    reason
+}
+
+/// A development build has no agent-browser: when the entry's `clauseo-mcp` or agent-browser
+/// file is missing, the launch prep leaves the browser out with `BrowserNotInstalled`, and the
+/// session starts without it.
+#[test]
+fn a_missing_sidecar_leaves_the_browser_out() {
+    let missing = std::env::temp_dir().join("clauseo-no-such-sidecar");
+    let McpServer::Stdio {
+        name,
+        command,
+        args,
+        env,
+    } = browser_server();
+    let no_guard = McpServer::Stdio {
+        name: name.clone(),
+        command: missing.clone(),
+        args: args.clone(),
+        env: env.clone(),
+    };
+    let mut no_agent_browser_args = args;
+    no_agent_browser_args[2] = missing.to_str().unwrap().to_owned();
+    let no_agent_browser = McpServer::Stdio {
+        name,
+        command,
+        args: no_agent_browser_args,
+        env,
+    };
+    let not_installed = Some(ToolsUnavailableReason::BrowserNotInstalled);
+    assert_eq!(
+        reason_with_entry("browser_no_guard", no_guard),
+        not_installed
+    );
+    assert_eq!(
+        reason_with_entry("browser_no_agent_browser", no_agent_browser),
+        not_installed
+    );
+}
+
+/// The `clauseo-ab-*` folders and lock files in `root`.
+#[cfg(unix)]
+fn socket_entries(root: &Path) -> Vec<PathBuf> {
+    let mut found: Vec<PathBuf> = std::fs::read_dir(root)
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("clauseo-ab-"))
+        })
+        .collect();
+    found.sort();
+    found
+}
+
+/// macOS and Linux: the launch prep makes one socket folder per session (mode 0700, with its
+/// lock file beside it) and fills `{socket_dir}` with it; it is there while the agent runs, and
+/// goes, lock file and all, once the agent's tree has exited.
+#[cfg(unix)]
+#[test]
+fn the_socket_folder_lives_until_the_agents_tree_has_exited() {
+    use std::os::unix::fs::MetadataExt;
+
+    let dir = Dir::new("browser_socket_life", &[]);
+    let sockets = dir.data().join("sockets");
+    write::create_dir_all(&sockets);
+    let claude = template(
+        &dir,
+        "claude",
+        &agent_lines("claude", "session/new", &json!({}), &[]),
+    );
+    settings(
+        &dir,
+        agents(&[(CLAUDE, &claude, json!({}))]),
+        json!({"tools": {"browser": true, "web_search": false}}),
+    );
+    let McpServer::Stdio {
+        name,
+        command,
+        args,
+        mut env,
+    } = browser_server();
+    env.push((
+        "AGENT_BROWSER_SOCKET_DIR".to_owned(),
+        "{socket_dir}".to_owned(),
+    ));
+    let hook = Hook {
+        servers: vec![McpServer::Stdio {
+            name,
+            command,
+            args,
+            env,
+        }],
+        ..Hook::default()
+    };
+    let launcher = Wired::new(&dir);
+    let root = sockets.clone();
+    let host = dir.start_launching(0, Arc::<Wired>::clone(&launcher), move |config| {
+        config
+            .with_profile_hook(Box::new(hook))
+            .with_egress_proxy(Arc::new(TestProxy(8123)))
+            .with_browser_executable(Some(PathBuf::from("/chrome")))
+            .with_browser_socket_root(root)
+    });
+    let matter = host.create_matter("m", &dir.folder("m", &[]));
+    let thread = host.create_thread(matter, CLAUDE);
+    turn(&host, thread);
+    assert_eq!(browser_reason(&first_frame_tools(&host, thread)), None);
+    // The agent still runs: its folder and lock file are there.
+    let live = socket_entries(&sockets);
+    assert_eq!(live.len(), 2, "{live:?}");
+    let folder = &live[0];
+    let meta = std::fs::symlink_metadata(folder).unwrap();
+    assert!(meta.is_dir());
+    assert_eq!(meta.mode() & 0o7777, 0o700);
+    assert_eq!(live[1], PathBuf::from(format!("{}.lock", folder.display())));
+    // The shutdown stops the agent and kills its tree; then the claims go.
+    host.shutdown();
+    assert_eq!(socket_entries(&sockets), Vec::<PathBuf>::new());
+}
+
+/// macOS and Linux: socket folders an earlier host left (with their unlocked lock files) are
+/// swept when the host starts, before any launch; a name that is not one of the host's stays.
+#[cfg(unix)]
+#[test]
+fn stale_socket_folders_are_swept_at_start() {
+    let dir = Dir::new("browser_socket_sweep", &[]);
+    let sockets = dir.data().join("sockets");
+    let stale = sockets.join("clauseo-ab-0123456789abcdef");
+    write::create_dir_all(&stale);
+    write::set_mode(&stale, 0o700);
+    write::write(&stale.join("s.sock"), b"");
+    let lock = sockets.join("clauseo-ab-0123456789abcdef.lock");
+    write::write(&lock, b"");
+    let other = sockets.join("clauseo-ab-not-ours");
+    write::create_dir_all(&other);
+    let host = dir.start_with(0, |config| config.with_browser_socket_root(sockets));
+    assert!(
+        std::fs::symlink_metadata(&stale).is_err(),
+        "the stale folder went"
+    );
+    assert!(
+        std::fs::symlink_metadata(&lock).is_err(),
+        "its lock file went"
+    );
+    assert!(other.is_dir(), "a name not of the host's form stays");
     host.shutdown();
 }
 
