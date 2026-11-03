@@ -99,6 +99,7 @@ impl Launcher for Wired {
                     .replace("@BROWSER@", &escaped(&path_text(&run.join("browser"))))
                     .replace("@SESSION@", &escaped(session));
                 write::write(Path::new(scenario.as_ref()), text.as_bytes());
+                FILLED.lock().unwrap().push(text);
             }
         }
         self.seen.lock().unwrap().push(Seen {
@@ -107,6 +108,24 @@ impl Launcher for Wired {
         });
         self.inner.launch(spec)
     }
+}
+
+/// Every scenario [`Wired`] filled in this process, for [`turn`]'s failure message. nextest
+/// runs each test in a process of its own, so these are the failing test's.
+static FILLED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// The `expect` lines of every scenario [`Wired`] filled: when an agent exits before its
+/// session attaches, its mismatch never reaches the log, so this is what it was waiting for.
+fn filled_expectations() -> String {
+    FILLED
+        .lock()
+        .unwrap()
+        .iter()
+        .flat_map(|text| text.lines())
+        .filter(|line| line.starts_with("{\"expect\""))
+        .map(str::to_owned)
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// `path` as text, `\\?\` and all, as the host fills it.
@@ -327,7 +346,13 @@ pub(crate) fn turn(host: &Running, thread: ThreadId) {
     let (turn, _) = host.prompt(thread, "Go.");
     let ended = events.until_turn_ended(turn);
     events.assert_no_mismatch();
-    assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+    assert_eq!(
+        ended.stop,
+        StopReason::EndTurn,
+        "{}\nthe filled scenarios expected:\n{}",
+        events.dump(),
+        filled_expectations()
+    );
 }
 
 /// The tools the header of `thread` shows on a new subscriber's first frame.

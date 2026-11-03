@@ -43,10 +43,9 @@ fn work_folder_substituted() {
     });
     let matter = host.create_matter("m", &folder);
     let notes = path_text(&notes(&dir, matter));
-    let expected = format!(
-        "Work in `@WORK@`; the brief is {}/matter-brief.md.",
-        escaped(&notes)
-    );
+    // Plain text: `json!` escapes it for the scenario (a Windows path's backslashes once).
+    // `@WORK@` is filled into the scenario's JSON text, so the rig escapes that one itself.
+    let expected = format!("Work in `@WORK@`; the brief is {notes}/matter-brief.md.");
     template(
         &dir,
         "wf-claude",

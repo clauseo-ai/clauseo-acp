@@ -1347,9 +1347,10 @@ export type HeaderEntry = {
 	 */
 	steer_joins_turn?: boolean,
 	/**
-	 *  Clauseo's own tools and whether the agent has each in this session. Filled by the host at
-	 *  each session start, as `queue_held` is. Missing reads as empty, and empty is left out, so
-	 *  a header written before the field still decodes and compares equal.
+	 *  Clauseo's own tools and whether the agent has each in this session. The reducer never
+	 *  sets it: the host fills it at the view layer when each session answers. Missing reads as
+	 *  empty, and empty is left out, so a header written before the field still decodes and
+	 *  compares equal.
 	 */
 	tools?: ToolState[],
 	/**  The agent's current mode, if it reported one. */
