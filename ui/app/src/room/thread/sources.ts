@@ -22,6 +22,7 @@ import type {
   ToolCallId,
   WebSearchRecorded,
 } from "../../transport/protocol.ts";
+import { LINK_PREFIXES } from "@clauseo/components/markdown/schema.ts";
 
 /**
  * What a tool call found on the web, the shape the host is planned to give `ToolCallEntry` as `web` (stage E folds
@@ -158,3 +159,13 @@ export function useToolCallWeb(
   const pick = () => store.folded.get(stream) ?? NONE;
   return useSyncExternalStore(store.subscribe, pick, pick);
 }
+
+/** The schemes a source may link to: the web only, as an answer's links allow it (markdown/link.tsx) but without
+ * mailto. The host logs a page's address as the agent gave it, so a data:, file: or javascript: address can come. */
+const WEB_PREFIXES = LINK_PREFIXES.filter((prefix) => prefix.startsWith("http"));
+
+/** Whether an address may sit under a link: http or https only. */
+export const linkable = (url: string): boolean => {
+  const lower = url.trimStart().toLowerCase();
+  return WEB_PREFIXES.some((prefix) => lower.startsWith(prefix));
+};

@@ -143,6 +143,40 @@ test("a link press opens the address through open_external, never the webview", 
   ]);
 });
 
+test("an address that isn't http or https sits under no link: a data: page and a file: result are plain text", async () => {
+  await answered([
+    visited(1, "data:text/html,<script>alert(1)</script>"),
+    visited(2, "JavaScript:alert(1)", { title: "Looks fine" }),
+    searched(3, "notice period", [
+      { title: "Calculator", url: "file:///C:/Windows/System32/calc.exe" },
+      { title: "India Code", url: "https://www.indiacode.nic.in/" },
+    ]),
+  ]);
+  await open();
+  const hrefs = [...h!.host.querySelectorAll("[data-testid=web-sources] a")].map((a) =>
+    a.getAttribute("href"),
+  );
+  expect(hrefs).toEqual(["https://www.indiacode.nic.in/"]);
+  // the words still show, as text
+  const text = h!.one("web-sources")!.textContent ?? "";
+  expect(text).toContain("data:text/html,<script>alert(1)</script>");
+  expect(text).toContain("Looks fine");
+  expect(text).toContain("Calculator");
+});
+
+test("a middle click on a source link is cancelled and opens through open_external", async () => {
+  await answered([visited(1, "https://example.com/aux", { title: "Aux" })]);
+  await open();
+  const link = h!.one("web-source-link") as HTMLAnchorElement;
+  const press = new MouseEvent("auxclick", { bubbles: true, cancelable: true, button: 1 });
+  await act(async () => link.dispatchEvent(press));
+  await h!.settle();
+  expect(press.defaultPrevented).toBe(true);
+  expect(h!.transport.only("open_external")).toEqual([
+    { call: "open_external", url: "https://example.com/aux" },
+  ]);
+});
+
 test("a Hindi title and query are marked Hindi, an English one isn't, and each is isolated", async () => {
   await answered([
     searched(1, "किराया नियंत्रण अधिनियम नोटिस"),

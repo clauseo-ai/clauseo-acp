@@ -4,7 +4,7 @@
 // real app today. Links open through the host's open_external (its own confirm names the site); none navigates the
 // webview. Queries, titles and addresses are isolated runs, marked Hindi when most of their letters are Devanagari,
 // and an address wraps anywhere rather than being cut.
-import { use, useState, type ReactNode } from "react";
+import { use, useState, type MouseEvent, type ReactNode } from "react";
 import { IconFold, IconToolFetch, IconToolSearch } from "@clauseo/components/icons/icons.tsx";
 import { useSourcesWords, type SourcesKey } from "@clauseo/components/lib/words-sources.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
@@ -12,6 +12,7 @@ import type { AgentId, StreamId, ToolCallId, WebResult } from "../../transport/p
 import { kindOf, planName } from "../agent.ts";
 import { quietly } from "../open.ts";
 import {
+  linkable,
   pagesShown,
   SourcesOpenAtFirst,
   SourcesTransport,
@@ -48,18 +49,24 @@ function Run({ text }: { text: string }) {
   );
 }
 
-/** A page's title as a link, or its address when it has none. */
+/** A page's title as a link, or its address when it has none. A click or a middle click never navigates the webview:
+ * it is cancelled and the address goes to the host's open_external. An address that isn't http or https is plain
+ * text, with no link. */
 function PageLink({ url, title }: { url: string; title: string | null }) {
   const transport = use(SourcesTransport);
+  if (!linkable(url)) return <Run text={title ?? url} />;
+  const open = (e: MouseEvent<HTMLAnchorElement>) => {
+    e.preventDefault();
+    if (transport !== null) void quietly("open_external", transport.openExternal(url));
+  };
   return (
     <a
       href={url}
+      rel="noreferrer noopener"
       data-testid="web-source-link"
       className="text-primary underline underline-offset-2"
-      onClick={(e) => {
-        e.preventDefault();
-        if (transport !== null) void quietly("open_external", transport.openExternal(url));
-      }}
+      onClick={open}
+      onAuxClick={open}
     >
       <Run text={title ?? url} />
     </a>
