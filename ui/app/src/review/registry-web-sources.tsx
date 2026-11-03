@@ -1,14 +1,16 @@
 // The copy review entries for the web sources at the end of an answer (room/thread/sources.tsx), apart from
 // registry.tsx. Ids are WEB-01 on, since the registry's id rule (review/status.ts) takes a dash then digits. Each is the real room over FakeTransport: one question, the tool calls that
 // searched and read, the answer, and the envelopes that fill those tool calls' web (sources.ts's fold, until the host puts `web` on the entry
-// itself). The summary's entries show the list shut; every row's entry opens it, as a press on the summary would.
+// itself). WEB-01 shows the list shut, as an answer first does; every other entry shows it open from the start
+// (SourcesOpenAtFirst), so its row's words are there without a click.
 import { src, type SourcesKey } from "@clauseo/components/lib/words-sources.ts";
 import { agentText, step, userMessage } from "../testing/stream-script.ts";
-import { callOf, eventsOf, searched, visited, webCall } from "../testing/web-sources.ts";
+import { eventsOf, searched, visited, webCallsFor } from "../testing/web-sources.ts";
 import type { AgentId, Envelope, ViewEntry } from "../transport/protocol.ts";
 import type { Entry } from "./entry.ts";
 import { threadHost } from "./hosts.ts";
-import { RoomOver, RoomPressing } from "./states.tsx";
+import { SourcesOpenAtFirst } from "../room/thread/sources.ts";
+import { RoomOver } from "./states.tsx";
 import type { WordsRef } from "./words.ts";
 
 /** A string of words-sources.ts, hi: later while its Hindi is null. */
@@ -39,19 +41,17 @@ const RESULTS = [
   { title: "Notice to quit under the Rent Control Act", url: "https://www.livelaw.in/rent-notice" },
 ];
 
-/** The thread's view: the question, a tool call for each one the envelopes name, the answer and its step. */
-function entriesFor(envelopes: Envelope[]): ViewEntry[] {
-  const calls = [...new Set(envelopes.map(callOf))];
-  return [
-    QUESTION,
-    ...calls.map((call, i) => webCall(10 + i, call, "Web", "fetch")),
-    ANSWER,
-    step(50),
-  ];
-}
+/** The thread's view: the question, a tool call for each one the envelopes name, titled as the agent's adapter
+ * titles it, the answer and its step. */
+const entriesFor = (envelopes: Envelope[], agent: AgentId): ViewEntry[] => [
+  QUESTION,
+  ...webCallsFor(envelopes, agent),
+  ANSWER,
+  step(50),
+];
 
 const hostFor = (envelopes: Envelope[], agent: AgentId) => () => {
-  const transport = threadHost({ entries: entriesFor(envelopes), agent });
+  const transport = threadHost({ entries: entriesFor(envelopes, agent), agent });
   // the fake keeps them and plays them to the list as it mounts
   transport.deliver(eventsOf(envelopes));
   return transport;
@@ -61,10 +61,14 @@ const hostFor = (envelopes: Envelope[], agent: AgentId) => () => {
 const shut =
   (envelopes: Envelope[], agent: AgentId = "claude-acp") =>
   () => <RoomOver host={hostFor(envelopes, agent)} />;
-/** The list opened. */
+/** The list open from the start, as the review shows a row's words: the room's own default stays shut. */
 const opened =
   (envelopes: Envelope[], agent: AgentId = "claude-acp") =>
-  () => <RoomPressing host={hostFor(envelopes, agent)} press="web-sources-toggle" />;
+  () => (
+    <SourcesOpenAtFirst value>
+      <RoomOver host={hostFor(envelopes, agent)} />
+    </SourcesOpenAtFirst>
+  );
 
 const MANY: Envelope[] = [
   searched(1, "Delhi Rent Control Act notice period", RESULTS),
@@ -87,13 +91,13 @@ export const WEB_SOURCES: Entry[] = [
     id: "WEB-02",
     words: sourcesWords("{n} pages read."),
     screen: SCREEN,
-    render: shut(MANY),
+    render: opened(MANY),
   },
   {
     id: "WEB-03",
     words: sourcesWords("1 web search."),
     screen: SCREEN,
-    render: shut([
+    render: opened([
       searched(1, "Delhi Rent Control Act notice period", RESULTS),
       visited(2, IK, { title: RESULTS[0]!.title }),
     ]),
@@ -102,7 +106,7 @@ export const WEB_SOURCES: Entry[] = [
     id: "WEB-04",
     words: sourcesWords("1 page read."),
     screen: SCREEN,
-    render: shut([visited(1, IK, { title: RESULTS[0]!.title })]),
+    render: opened([visited(1, IK, { title: RESULTS[0]!.title })]),
   },
   {
     id: "WEB-05",

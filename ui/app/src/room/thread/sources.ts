@@ -104,6 +104,10 @@ export function foldWebSources(envelopes: readonly Envelope[]): WebSources {
   return out;
 }
 
+/** Whether each answer's list starts open: false in the room, which shows it shut until pressed; the copy review sets
+ * it so a reviewer reads the rows without a click (a press in its StrictMode render ran twice and shut it again). */
+export const SourcesOpenAtFirst = createContext(false);
+
 /** The transport the sources come from and their links open through: ThreadList's. */
 export const SourcesTransport = createContext<HostTransport | null>(null);
 

@@ -6,14 +6,7 @@
 import { act } from "react";
 import { afterEach, expect, test } from "vitest";
 import { agentText, reset, step, userMessage } from "../../testing/stream-script.ts";
-import {
-  callOf,
-  eventsOf,
-  headerOf,
-  searched,
-  visited,
-  webCall,
-} from "../../testing/web-sources.ts";
+import { eventsOf, headerOf, searched, visited, webCallsFor } from "../../testing/web-sources.ts";
 import type { AgentId, Envelope } from "../../transport/protocol.ts";
 import { FakeTransport } from "../../transport/fake-transport.ts";
 import { mountRoom, type Harness } from "./harness.ts";
@@ -27,12 +20,11 @@ afterEach(async () => {
 /** A turn answered by `agent`, with a tool call entry for each tool call the envelopes name (ToolCallWeb's owner). */
 async function answered(envelopes: Envelope[] | null, agent: AgentId = "claude-acp") {
   h = await mountRoom();
-  const calls = [...new Set((envelopes ?? []).map(callOf))];
   h.deliver([
     reset(
       [
         userMessage(5, 1, "What is the notice period under the Rent Control Act?"),
-        ...calls.map((call, i) => webCall(10 + i, call)),
+        ...webCallsFor(envelopes ?? [], agent),
         agentText(40, 1, "Thirty days, in writing."),
         step(50),
       ],
