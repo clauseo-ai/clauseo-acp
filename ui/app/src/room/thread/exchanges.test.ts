@@ -5,7 +5,7 @@ import { expect, test } from "vitest";
 import { agentText, step, TURN, userMessage, uuid } from "../../testing/stream-script.ts";
 import type { StreamView } from "../../store/view.ts";
 import { entryIdOf } from "../../store/view.ts";
-import type { UserMessageEntryH9 } from "../../transport/h9-pending.ts";
+import type { UserMessageEntry } from "../../transport/protocol.ts";
 import type { EntryId, TurnId, ViewEntry } from "../../transport/protocol.ts";
 import { exchangesPick, groupExchanges, latestAsked } from "./exchanges.ts";
 
@@ -17,7 +17,7 @@ const ask = (
   order: number,
   n: number,
   turn: TurnId,
-  over: Partial<UserMessageEntryH9> = {},
+  over: Partial<UserMessageEntry> = {},
 ): ViewEntry => ({
   user_message: { ...userMessage(order, n, `q${n}`).user_message!, turn, ...over },
 });

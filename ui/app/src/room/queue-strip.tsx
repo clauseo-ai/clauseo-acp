@@ -15,9 +15,8 @@ import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { useStreamPart, useViewStore } from "../store/hooks.ts";
-import { dispatchH9, type HostCommandH9 } from "../transport/h9-pending.ts";
 import { toHostError } from "../transport/host-transport.ts";
-import type { TurnId } from "../transport/protocol.ts";
+import type { HostCommand, TurnId } from "../transport/protocol.ts";
 import type { Queued } from "./queue-entries.ts";
 import { heldPick, queuedPick } from "./queue-picks.ts";
 import type { QueueStripProps } from "./queue-slot.tsx";
@@ -99,7 +98,7 @@ export function LiveQueueStrip({
    * the message had already gone. */
   const send = (
     key: string,
-    command: HostCommandH9,
+    command: HostCommand,
     keep: Keep,
     refused?: () => void,
     gone?: (left: readonly Queued[]) => boolean,
@@ -107,7 +106,7 @@ export function LiveQueueStrip({
     if (pending.current.has(key)) return;
     pending.current.set(key, keep);
     refuse(null);
-    dispatchH9(transport, command).then(
+    transport.dispatch({ command_id: crypto.randomUUID(), command }).then(
       () => {
         if (keep === "no") pending.current.delete(key);
       },
@@ -126,7 +125,7 @@ export function LiveQueueStrip({
     );
   };
   const onRow =
-    (command: (thread: string, turn: TurnId) => HostCommandH9) =>
+    (command: (thread: string, turn: TurnId) => HostCommand) =>
     (id: string, refused: () => void): void => {
       const turn = turnOf(id);
       if (thread !== null && turn !== undefined) send(turn, command(thread, turn), "turn", refused);

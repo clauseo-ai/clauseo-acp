@@ -12,7 +12,6 @@
 import { askedAs, injectedTurn, outcomeOf, runningIn, shapeOf } from "./steer.ts";
 import { entryIdOf, orderOf, type StreamView } from "../../store/view.ts";
 import type { EntryId, TurnId, ViewEntry } from "../../transport/protocol.ts";
-import type { UserMessageEntryH9 } from "../../transport/h9-pending.ts";
 
 /** One exchange: its ids in order, the question first when it has one. */
 export type Exchange = {
@@ -87,7 +86,7 @@ export function groupExchanges(
   };
   items.forEach(([id, e], at) => {
     if (e === undefined) return;
-    const m = e.user_message as UserMessageEntryH9 | undefined;
+    const m = e.user_message;
     if (m !== undefined) {
       const as = askedAs(m, running);
       if (as === "hidden") return;
@@ -179,7 +178,7 @@ export function exchangesPick(
         const e = v.entries.get(users[i]!);
         if (e === seen[i]) continue;
         seen[i] = e;
-        const shape = shapeOf(e?.user_message as UserMessageEntryH9 | undefined);
+        const shape = shapeOf(e?.user_message);
         if (shape !== shapes[i]) {
           shapes[i] = shape;
           stale = true;
@@ -189,7 +188,7 @@ export function exchangesPick(
     ids = v.ids;
     running = run;
     seen = users.map((id) => v.entries.get(id));
-    shapes = seen.map((e) => shapeOf(e?.user_message as UserMessageEntryH9 | undefined));
+    shapes = seen.map((e) => shapeOf(e?.user_message));
     const head = v.ids[0] === undefined ? undefined : v.entries.get(v.ids[0]);
     const below = head === undefined ? null : orderOf(head);
     const shown = below === null ? older : older.filter((e) => orderOf(e) < below);

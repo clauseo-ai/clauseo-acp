@@ -12,7 +12,6 @@ import { Image } from "@clauseo/components/markdown/image.tsx";
 import { Markdown } from "@clauseo/components/markdown/markdown.tsx";
 import { useEntry, useStreamPart, useText, useViewStore } from "../../store/hooks.ts";
 import { entryIdOf, textKey } from "../../store/view.ts";
-import type { UserMessageEntryH9 } from "../../transport/h9-pending.ts";
 import type {
   AgentContentEntry,
   ContentBlock,
@@ -118,7 +117,7 @@ function UnresolvedSteer({
   question,
 }: {
   stream: StreamId;
-  entry: UserMessageEntryH9;
+  entry: UserMessageEntry;
   mark: ReactNode;
   question: ReactNode;
 }) {
@@ -133,7 +132,7 @@ function LiveUserMessage({
 }: {
   id: EntryId;
   stream: StreamId;
-  entry: UserMessageEntryH9;
+  entry: UserMessageEntry;
 }) {
   const as = askedAs(entry, true);
   if (as === "hidden") return null;
@@ -306,7 +305,7 @@ export const PagedRow = memo(function PagedRow({
 }) {
   const id = entryIdOf(entry);
   if (entry.user_message !== undefined) {
-    const m: UserMessageEntryH9 = entry.user_message;
+    const m: UserMessageEntry = entry.user_message;
     const as = askedAs(m, true);
     if (as === "hidden") return null;
     const text = questionText(id, m, undefined);
