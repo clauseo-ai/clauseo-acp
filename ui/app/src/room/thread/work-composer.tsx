@@ -32,6 +32,7 @@ import {
   type PlanChoice,
   type SlashCommand,
 } from "@clauseo/components/clauseo/composer.tsx";
+import { sentence } from "@clauseo/components/clauseo/matter.ts";
 import type { WorkingState } from "@clauseo/components/clauseo/working-line.tsx";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { frame } from "@clauseo/components/lib/words-frame.ts";
@@ -65,6 +66,7 @@ export function WorkComposer({
   disabled,
   busy,
   doing = null,
+  asks = null,
   refused,
   failed,
   stopped = null,
@@ -97,6 +99,9 @@ export function WorkComposer({
   busy: boolean;
   /** What the running step is doing ("Reading Lease.pdf."), said in place of "Answering."; null for none. */
   doing?: string | null;
+  /** A permission prompt or a question waiting on the lawyer: said in place of what the step in hand is doing, led by
+   * the question mark, the pen stopped; null for none. */
+  asks?: "permission" | "question" | null;
   /** The code of a refused command, until the next Ask. */
   refused: string | null;
   /** The lost stream's line, until Try again brings it back. */
@@ -272,12 +277,18 @@ export function WorkComposer({
   // while the turn runs the pen writes in the icon's place (working-line.tsx); the line is gone, and the pen with it,
   // once the turn ends. A single read stays a wait in its own words: check and series say "Checking" and "judgments",
   // which a plain read isn't
-  const answering: WorkingState = {
-    kind: "wait",
-    words: doing ?? frame(w.lang, "Answering."),
-    pill: null,
-    working: true,
-  };
+  const answering: WorkingState =
+    asks === null
+      ? { kind: "wait", words: doing ?? frame(w.lang, "Answering."), pill: null, working: true }
+      : {
+          kind: "wait",
+          words: sentence(
+            w.lang,
+            frame(w.lang, asks === "permission" ? "Needs your permission" : "A question for you"),
+          ),
+          pill: null,
+          asks: true,
+        };
   const line: BreakLine | null =
     failed ??
     (refused !== null

@@ -190,3 +190,12 @@ export function doingPick(lang: Lang): (v: StreamView | undefined) => string | n
     return null;
   };
 }
+
+/** While the turn waits on the lawyer (needs_you): a pending permission prompt, or else a question; null otherwise. The
+ * working line says so in place of what the step in hand is doing, and the pen stops. */
+export function asksPick(v: StreamView | undefined): "permission" | "question" | null {
+  if (v?.header?.header?.status !== "needs_you") return null;
+  for (const entry of v.entries.values())
+    if (entry.permission !== undefined && entry.permission.state === "pending") return "permission";
+  return "question";
+}
