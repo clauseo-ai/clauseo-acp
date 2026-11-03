@@ -13,6 +13,7 @@ import { lockKey, type LiveSettings } from "./use-settings.ts";
 import { About } from "./sections/about.tsx";
 import { Appearance } from "./sections/appearance.tsx";
 import { Language } from "./sections/language.tsx";
+import { Usage } from "./sections/usage.tsx";
 
 /** Every section the design has, in its order; only those with an entry in SECTIONS show. */
 export const SECTION_ORDER = [
@@ -58,6 +59,12 @@ export type SectionEntry = {
 
 /** The sections built so far, in SECTION_ORDER's order. */
 export const SECTIONS: readonly SectionEntry[] = [
+  {
+    id: "usage",
+    name: "Plan and usage",
+    lead: "What each plan has left, and when it resets.",
+    Body: Usage,
+  },
   {
     id: "language",
     name: "Language",

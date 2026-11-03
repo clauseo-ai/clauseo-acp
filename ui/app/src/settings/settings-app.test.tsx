@@ -107,31 +107,26 @@ const side = (el: HTMLElement, group: string, label: string) =>
   );
 const saved = () => JSON.parse(localStorage.getItem(DISPLAY_KEY) ?? "null") as unknown;
 
-test("the sections are Language, Appearance and About, in the design's order; no later section renders", async () => {
+test("the sections are Plan and usage, Language, Appearance and About, in the design's order; no later section renders", async () => {
   const { el } = await mount();
-  expect(navNames(el)).toEqual(["Language", "Appearance", "About"]);
-  for (const later of [
-    "Plans",
-    "Plan and usage",
-    "Indian Kanoon",
-    "Matters",
-    "Safe workspace",
-    "Updates",
-    "Privacy",
-  ])
+  expect(navNames(el)).toEqual(["Plan and usage", "Language", "Appearance", "About"]);
+  for (const later of ["Plans", "Indian Kanoon", "Matters", "Safe workspace", "Updates", "Privacy"])
     expect(el.textContent).not.toContain(later);
   // the first opens, as the pane's h2, under the window's one h1
-  expect(el.querySelector('[aria-current="page"] .set-nav-name')?.textContent).toBe("Language");
-  expect(el.querySelector(".set-pane h2")?.textContent).toBe("Language");
+  expect(el.querySelector('[aria-current="page"] .set-nav-name')?.textContent).toBe(
+    "Plan and usage",
+  );
+  expect(el.querySelector(".set-pane h2")?.textContent).toBe("Plan and usage");
   expect(el.querySelectorAll("h1")).toHaveLength(1);
   expect(document.title).toBe("Settings");
   expect(el.querySelector(".set-pane-lead")?.textContent).toBe(
-    "The language of every word on screen. Papers, quotes and case names stay as filed.",
+    "What each plan has left, and when it resets.",
   );
 });
 
 test("the native window title names the window in its language, at open and on every change of language", async () => {
   localStorage.setItem(DISPLAY_KEY, JSON.stringify({ language: "en" }));
+  history.replaceState(null, "", "/settings.html#language");
   const { el } = await mount();
   expect(setWindowTitle.mock.calls).toEqual([["Settings"]]);
   await press(side(el, "Language", "हिन्दी"));
@@ -161,7 +156,7 @@ test("the address's hash opens its section, and a section pressed goes into the 
 test("an unknown or later section's hash opens the first", async () => {
   history.replaceState(null, "", "/settings.html#updates");
   const { el } = await mount();
-  expect(el.querySelector(".set-pane h2")?.textContent).toBe("Language");
+  expect(el.querySelector(".set-pane h2")?.textContent).toBe("Plan and usage");
 });
 
 test("without a host each choice moves <html> and writes clauseo.display, one key at a time", async () => {
