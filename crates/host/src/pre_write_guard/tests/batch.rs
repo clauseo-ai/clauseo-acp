@@ -73,7 +73,8 @@ fn a_batch_command_over_a_wildcard_matching_a_held_name_is_refused() {
     );
     refused(&fx, "PowerShell", &[r"Copy-Item Revised\* ."]);
     let into_matter = format!("cp Revised/*.docx {}", fx.path("m"));
-    let dotdot = format!("cp Revised/*.docx {}/../m", fx.path("out"));
+    let dotdot = format!("cp Revised/*.docx {}/../m", fx.outside());
+    let copy_out = format!("cp *.docx {}", fx.outside());
     refused(
         &fx,
         "Bash",
@@ -84,13 +85,15 @@ fn a_batch_command_over_a_wildcard_matching_a_held_name_is_refused() {
         "Bash",
         &[
             "cp Revised/*.txt .",
-            "cp *.docx /tmp",
+            &copy_out,
             "cp Revised/[!C]*.docx .",
             "cat *.docx | head",
             "ls -l *.docx",
             "echo hi > notes.txt",
         ],
     );
+    #[cfg(unix)]
+    allowed(&fx, "Bash", &["cp *.docx /tmp"]);
 }
 
 /// Finding 3: textutil writes its input's name with the new extension beside it, held or not
@@ -130,7 +133,7 @@ fn textutil_writing_a_held_file_by_its_default_name_is_refused() {
 #[test]
 fn harmless_reads_and_copies_away_go_on() {
     let fx = Fixture::new("batch-reads");
-    let unzip_out = format!("unzip -o Contract.docx -d {}", fx.path("out"));
+    let unzip_out = format!("unzip -o Contract.docx -d {}", fx.outside());
     allowed(
         &fx,
         "Bash",
@@ -148,10 +151,11 @@ fn harmless_reads_and_copies_away_go_on() {
             "zipinfo Contract.docx",
             "diff Contract.docx Free.docx",
             "cmp Contract.docx Free.docx",
-            "unzip -q Contract.docx -d/tmp",
             &unzip_out,
         ],
     );
+    #[cfg(unix)]
+    allowed(&fx, "Bash", &["unzip -q Contract.docx -d/tmp"]);
     allowed(
         &fx,
         "PowerShell",
@@ -206,8 +210,37 @@ fn unzip_into_the_matter_is_refused() {
             "unzip -o Contract.docx -d unpacked",
         ],
     );
-    let out = format!("unzip -o Revised.zip Contract.docx -d {}", fx.path("out"));
-    allowed(&fx, "Bash", &[&out, "unzip -o Contract.docx -d /tmp"]);
+    let out = format!("unzip -o Revised.zip Contract.docx -d {}", fx.outside());
+    allowed(&fx, "Bash", &[&out]);
+    #[cfg(unix)]
+    allowed(&fx, "Bash", &["unzip -o Contract.docx -d /tmp"]);
+}
+
+/// On Windows a folder outside the matter is recognised only as a drive path (`C:/…`, or
+/// `C:\…` in quotes): `/tmp` or Git Bash's `/c/…` is no absolute path there, so a copy or
+/// extraction into it is judged like one into the matter (refused, the safe side).
+#[cfg(windows)]
+#[test]
+fn on_windows_an_outside_folder_is_a_drive_path() {
+    let fx = Fixture::new("batch-windows");
+    let forward = fx.outside();
+    let quoted = format!("unzip -o Contract.docx -d '{}'", fx.path("out"));
+    let copy = format!("cp *.docx {forward}");
+    let extract = format!("unzip -o Contract.docx -d {forward}");
+    allowed(&fx, "Bash", &[&copy, &extract, &quoted]);
+    let git_bash = format!(
+        "cp *.docx /{}",
+        forward.replacen(':', "", 1).to_ascii_lowercase()
+    );
+    refused(
+        &fx,
+        "Bash",
+        &[
+            "cp *.docx /tmp",
+            "unzip -o Contract.docx -d /tmp",
+            &git_bash,
+        ],
+    );
 }
 
 /// Review round 5: a quoted pattern a search program matches itself is no file operand, so it

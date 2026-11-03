@@ -93,9 +93,12 @@
 //!   but readers of its output acts on what it finds. So, while a `.docx` is held, harmless
 //!   commands over `*.docx` are refused: `echo *.docx`, a `for f in *.docx` loop even when its
 //!   body only reads, `tar`/`zip` of `*.docx`, `git add *.docx`, `du -sh *`, `grep -l x *`,
-//!   `python3 x.py *.docx`, `mkdir -p out && cp *.docx out/`. Under Codex, a `.codex` folder
-//!   named by a glob (`cd .cod?`) is not caught. A command given as an argument list (a shape
-//!   Codex used before) is judged read-only as its parts quoted and joined into one line.
+//!   `python3 x.py *.docx`, `mkdir -p out && cp *.docx out/`. On Windows a folder outside the
+//!   matter (for `cp` and `unzip -d`) is recognised only as a drive path (`C:/…`, or `C:\…` in
+//!   quotes), not `/tmp` or Git Bash's `/c/…`, which are refused (the safe side). Under Codex, a
+//!   `.codex` folder named by a glob (`cd .cod?`) is not caught. A command given as an argument
+//!   list (a shape Codex used before) is judged read-only as its parts quoted and joined into one
+//!   line.
 //!
 //! The matter folder is the `--matter` argument when the hook passes one (Claude Code's entry
 //! does, `agent/loads.rs`: Claude Code's `cwd` follows the agent's `cd`), else the input's

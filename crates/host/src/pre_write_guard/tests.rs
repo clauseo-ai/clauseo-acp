@@ -55,6 +55,12 @@ impl Fixture {
         })
     }
 
+    /// The fixture's `out` folder (beside the matter, outside it) as a shell word: forward
+    /// slashes, so on Windows it reads `C:/…`, an absolute path the shell keeps as written.
+    fn outside(&self) -> String {
+        self.path("out").replace('\\', "/")
+    }
+
     fn path(&self, relative: &str) -> String {
         relative
             .split('/')
@@ -203,13 +209,17 @@ fn bash_naming_a_held_file_is_refused_quoted_or_not() {
 #[test]
 fn bash_not_naming_a_held_file_is_let_through() {
     let fx = Fixture::new("bash-free");
-    for command in [
+    let copy_out = format!("cp *.docx {}", fx.outside());
+    let commands = [
         "ls -la",
         "rm Free.docx sub/Note.txt",
         "cat Contract",
         "echo 'Contract is open'",
-        "cp *.docx /tmp",
-    ] {
+        &copy_out,
+    ];
+    // `/tmp` is an absolute folder outside the matter only on Unix.
+    let tmp = cfg!(unix).then_some("cp *.docx /tmp");
+    for command in commands.into_iter().chain(tmp) {
         assert_eq!(
             guard_json(&fx.hook("Bash", &json!({"command": command}))),
             "",
