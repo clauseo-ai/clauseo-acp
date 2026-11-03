@@ -133,12 +133,6 @@ const NAMED = 3;
 /** The folded line's summary: one sentence for each of the three kinds done most, "4 papers read. Searched 2 times.
  * Ran 1 task.", the rest counted as "And 3 more.". */
 export function summaryOf(lang: Lang, calls: readonly ToolCallEntry[]): string {
-  return summaryParts(lang, calls).join(" ");
-}
-
-/** summaryOf's sentences, the most important first: the kinds done most, then "And 3 more.". The meta line drops
- * them from the end when they don't fit. */
-export function summaryParts(lang: Lang, calls: readonly ToolCallEntry[]): string[] {
   const kinds = kindsOf(calls);
   const out = kinds
     .slice(0, NAMED)
@@ -147,7 +141,7 @@ export function summaryParts(lang: Lang, calls: readonly ToolCallEntry[]): strin
     );
   const rest = kinds.slice(NAMED).reduce((sum, k) => sum + k.n, 0);
   if (rest > 0) out.push(counted(lang, ["And 1 more.", "And {n} more."], rest));
-  return out;
+  return out.join(" ");
 }
 
 /** The folded line for a group at rest. Its words and its icons count only the steps that finished, so a step still
@@ -157,12 +151,10 @@ export function summaryParts(lang: Lang, calls: readonly ToolCallEntry[]): strin
 export function restOf(
   lang: Lang,
   calls: readonly ToolCallEntry[],
-): { kinds: string[]; line: string; trouble: string; parts?: string[] } {
+): { kinds: string[]; line: string; trouble: string } {
   const done = calls.filter((c) => c.status === "completed");
-  if (done.length > 0) {
-    const parts = summaryParts(lang, done);
-    return { kinds: iconsOf(done), line: parts.join(" "), parts, trouble: troubleOf(lang, calls) };
-  }
+  if (done.length > 0)
+    return { kinds: iconsOf(done), line: summaryOf(lang, done), trouble: troubleOf(lang, calls) };
   const waiting = [...calls].reverse().find(unsettled);
   if (waiting !== undefined)
     return {
@@ -290,12 +282,11 @@ export function markOf(lang: Lang, call: ToolCallEntry): string | null {
   return null;
 }
 
-/** The group's line as StepGroup takes it: icons, words (and the summary's sentences, `parts`), the muted aside, the
- * trouble, and live, what the step in hand waits on. */
+/** The group's line as StepGroup takes it: icons, words, the muted aside, the trouble, and live, what the step in hand
+ * waits on. */
 export type GroupLine = {
   kinds: string[];
   line: string;
-  parts?: string[];
   more: string;
   trouble: string;
   asks?: "permission" | "question";

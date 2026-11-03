@@ -150,7 +150,7 @@ const did = (order: number, id: number, kind: ToolKind, aside = false): ViewEntr
   };
 };
 
-test("in Hindi with three kinds, and in English with a background note, the line stays on the meta line, its whole summary its name and its title", async () => {
+test("in Hindi with three kinds, and in English with a background note, the line stands on the meta line whole: nothing cut, no hover needed, its whole summary its name, the chevron held to its last word", async () => {
   const cases = [
     {
       language: "hi" as const,
@@ -179,10 +179,18 @@ test("in Hindi with three kinds, and in English with a background note, the line
     // the name and the time, then the line: nothing else, and nothing in a row of its own
     expect(meta.children).toHaveLength(2);
     expect(line.querySelectorAll(".step-group-icons svg")).toHaveLength(icons);
-    expect(line.title).not.toBe("");
-    expect(line.title).toBe(line.textContent);
-    if (language === "en") expect(line.title).toContain("2 of them went on in the background.");
-    else expect(line.title).toContain("और 2 काम।");
+    // every word is on screen, so there's no hover copy, and the name reads the whole summary
+    expect(line.hasAttribute("title")).toBe(false);
+    expect(line.querySelector(".step-part-dropped, .step-part-cut")).toBeNull();
+    if (language === "en")
+      expect(line.textContent).toBe(
+        "2 papers read. Searched once. 2 of them went on in the background.",
+      );
+    else expect(line.textContent).toContain("और 2 काम।");
+    // the chevron never stands alone at a line's start: it shares a no-wrap span with the last word
+    const chev = line.querySelector(".step-group-chev")!;
+    expect(chev.parentElement?.classList.contains("glued")).toBe(true);
+    expect(chev.parentElement?.textContent).toBe(language === "en" ? "background." : "काम।");
     await h.unmount();
     h = null;
     document.body.replaceChildren();

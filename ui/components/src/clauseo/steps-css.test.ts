@@ -43,30 +43,35 @@ test("the folded line's hover eases its well and ink over --dur-quick on the arr
   expect(steps).not.toMatch(/\.step-group-chev[^}]*transition/);
 });
 
-test("on the answer's meta line the line never wraps to a row of its own: the meta line keeps one line, the words cut with an ellipsis, the name and the time keep their width", () => {
-  expect(rule(".meta:has(> .step-group-line)")).toMatch(/flex-wrap: nowrap;/);
-  expect(rule(".meta > :not(.step-group-line)")).toMatch(/flex: none;/);
-  const line = rule(".meta > .step-group-line");
-  expect(line).toMatch(/flex: 0 1 auto;/);
-  expect(line).toMatch(/min-width: 0;/);
-  const words = rule(".meta > .step-group-line .step-group-words");
-  expect(words).toMatch(/white-space: nowrap;/);
-  expect(words).toMatch(/overflow: hidden;/);
-  expect(words).toMatch(/text-overflow: ellipsis;/);
-  expect(rule(".meta > .step-group-line .step-group-chev")).toMatch(/flex: none;/);
+test("nothing on the line is ever cut: no nowrap meta line, no ellipsis, no clipping; the words wrap, a long name with no spaces too", () => {
+  expect(steps).not.toMatch(/text-overflow/);
+  expect(steps).not.toMatch(/overflow: hidden/);
+  expect(steps).not.toMatch(/flex-wrap: nowrap/);
+  expect(steps).not.toMatch(/step-part|step-group-kept/);
+  const words = rule(".step-group-words");
+  expect(words).toMatch(/overflow-wrap: anywhere;/);
+  expect(words).toMatch(/min-width: 0;/);
+  // on the meta line the line may shrink below its words' width, so it wraps under the name and the time and its
+  // words wrap inside it
+  expect(rule(".meta > .step-group-line")).toMatch(/min-width: 0;/);
+  expect(rule(".step-group-line")).toMatch(/max-width: 100%;/);
 });
 
-test("a sentence dropped to fit the meta line is out of sight but stays in the button's name", () => {
-  expect(rule(".step-part-dropped")).toMatch(/@apply sr-only;/);
-  // the "…" in no text, unseen and out of the flow until wanted
-  expect(rule(".step-part-cut::after")).toMatch(/content: " …";/);
-  expect(rule(".step-part-cut:not([data-cut])")).toMatch(/position: absolute;/);
-  expect(rule(".step-part-cut:not([data-cut])")).toMatch(/visibility: hidden;/);
+test("when the words wrap, the icons stand on their first line; one line keeps the chip's 24 px with the words in its middle", () => {
+  const line = rule(".step-group-line");
+  expect(line).toMatch(/align-items: flex-start;/);
+  expect(line).toMatch(/min-height: calc\(var\(--s6\) \* var\(--k\)\);/);
+  expect(line).toMatch(/padding: calc\(\(var\(--s6\) - var\(--lh-small\)\) \* var\(--k\) \/ 2\)/);
+  expect(rule(".step-group-icons")).toMatch(/height: calc\(var\(--lh-small\) \* var\(--k\)\);/);
 });
 
-test("on the meta line the aside and the trouble stand in their own slot that never shrinks, so a cut falls on the summary alone", () => {
-  const kept = rule(".meta > .step-group-line .step-group-kept");
-  expect(kept).toMatch(/flex: none;/);
-  expect(kept).toMatch(/white-space: nowrap;/);
-  expect(kept).not.toMatch(/overflow/);
+test("an icon held to its word wraps with it, never alone at a line's start", () => {
+  expect(rule(".glued")).toMatch(/white-space: nowrap;/);
+});
+
+test("the chevron takes the line's own ink wherever it stands among the words, the trouble's or the aside's too", () => {
+  expect(rule(".step-group-chev")).toMatch(/color: var\(--line-ink\);/);
+  const line = rule(".step-group-line");
+  expect(line).toMatch(/--line-ink: var\(--muted\);/);
+  expect(steps).toMatch(/@variant is-hover \{\s*--line-ink: var\(--primary\);/);
 });

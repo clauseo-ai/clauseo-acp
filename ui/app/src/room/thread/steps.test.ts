@@ -120,7 +120,6 @@ describe("the folded line", () => {
     expect(restOf("en", [call("read"), call("edit", "pending", lease)])).toEqual({
       kinds: ["read"],
       line: "1 paper read.",
-      parts: ["1 paper read."],
       trouble: "",
     });
     expect(
@@ -128,7 +127,6 @@ describe("the folded line", () => {
     ).toEqual({
       kinds: ["read"],
       line: "1 paper read.",
-      parts: ["1 paper read."],
       trouble: "1 failed. 1 stopped.",
     });
     // none done: the step still to finish says what it is doing, with its own icon
@@ -354,7 +352,6 @@ describe("friendly names", () => {
     expect(restOf("en", mixed)).toEqual({
       kinds: ["read"],
       line: "1 paper read.",
-      parts: ["1 paper read."],
       trouble: "1 failed.",
     });
     // beside one failed and none done: the failure alone is what was tried
