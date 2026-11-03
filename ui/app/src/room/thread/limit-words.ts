@@ -36,8 +36,8 @@ export function atLimitWords(lang: Lang, resets: Timestamp | undefined, now: num
  * pause was read, as the day its words format against (a new view of the header reads it again). */
 export type Paused = { resets: Timestamp | undefined; stopped: Timestamp | null; now: number };
 
-/** The composer's line while paused: "Stopped at 4:52 pm, at the plan's limit" with the stop's time, the toolbar's
- * at-limit words without it. */
+/** The composer's line while paused: "Stopped at 4:52 pm, at the plan's limit" with a plan window's stop's time, the
+ * toolbar's at-limit words without it or for a stop of another reason. */
 export function pausedLine(lang: Lang, paused: Paused): string {
   const { now } = paused;
   if (paused.stopped === null) return atLimitWords(lang, paused.resets, now);
@@ -73,7 +73,8 @@ export function pausedPick(): (view: StreamView | undefined) => Paused | null {
     if (last !== null && last.status === status && last.stop === stop) return last.paused;
     const paused: Paused = {
       resets: status.paused_at_limit.resets_at,
-      stopped: stop === undefined ? null : stopTimeOf(stop),
+      // only the plan's own window says "at the plan's limit": a workspace's or a temporary stop keeps the at-limit words
+      stopped: stop?.reason === "plan_window" ? stopTimeOf(stop) : null,
       now: Date.now(),
     };
     last = { status, stop, paused };
