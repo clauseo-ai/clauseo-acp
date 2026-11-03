@@ -609,27 +609,29 @@ source = "doc 17 §3.4"
 [[budget]]
 id = "release_binary_size"
 metric = "release binary size, Linux, stripped"
-limit = 15.0
+limit = 25.1
 unit = "MB"
 gate = "release"
 measured_by = "file size of the release binary"
-# 25,872,168 bytes: usr/bin/Clauseo in the first dry run's .deb (release.yml run 41604836104, 2026-11-03).
-# Over the limit, which stays as the plan set it until Rohan decides (S20 follow-up).
+# 23,844,616 bytes: usr/bin/Clauseo in the Linux dry run's .deb (release.yml run 41660337744, 2026-11-03),
+# the limit is that plus 5%. Rohan chose performance over size (2026-11-03): opt-level 3 everywhere;
+# the Linux build drops the unused updater plugin.
 status = "measured"
-measured = 25.87
+measured = 23.84
 measured_on = "linux-x86_64-gha"
 source = "doc 17 §3.4"
 
 [[budget]]
 id = "deb_size"
 metric = ".deb package size"
-limit = 8.0
+limit = 11.5
 unit = "MB"
 gate = "release"
 measured_by = "file size of the .deb"
-# 11,921,922 bytes: Clauseo_0.0.0_amd64.deb from the same run.
+# 10,897,866 bytes: Clauseo_0.0.0_amd64.deb from run 41660337744; the limit is that plus 5%. Rohan chose
+# performance over size (2026-11-03): opt-level 3 everywhere; the Linux build drops the unused updater plugin.
 status = "measured"
-measured = 11.92
+measured = 10.90
 measured_on = "linux-x86_64-gha"
 source = "doc 17 §3.4"
 

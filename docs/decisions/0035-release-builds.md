@@ -138,6 +138,16 @@ for a pull request.
 - The binary is called `Clauseo` only in release builds; dev and CI builds keep `clauseo-desktop`, so
   the other workflows' paths stay as they are.
 
+## Linux and sizes (S20 follow-up, 2026-11-03)
+
+- Rohan chose performance over size: `[profile.release]` stays at opt-level 3 for every package. The
+  Linux build drops `tauri-plugin-updater`, which Linux never uses (R23: Linux updates through its
+  package manager). The plugin is a dependency outside Linux (`crates/desktop/Cargo.toml`) and is
+  registered only there (`crates/desktop/src/lib.rs`); `tauri.conf.json`'s `plugins.updater` stays.
+- The Linux budgets are the first Linux dry run's sizes plus 5% (`budgets.toml`, release run
+  41660337744): `release_binary_size` 23.84 MB measured, limit 25.1 MB; `deb_size` 10.90 MB measured,
+  limit 11.5 MB. Windows and macOS have no size rows.
+
 ## Status
 
 proposed
