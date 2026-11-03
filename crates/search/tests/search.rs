@@ -26,6 +26,9 @@ mod hostile;
 #[path = "search/language.rs"]
 mod language;
 #[cfg(test)]
+#[path = "search/normal.rs"]
+mod normal;
+#[cfg(test)]
 #[path = "search/open.rs"]
 mod open;
 #[cfg(test)]

@@ -65,6 +65,19 @@ fn another_format_or_tokenizer_needs_a_rebuild_and_is_emptied() {
 }
 
 #[test]
+fn an_index_of_the_previous_format_needs_a_rebuild() {
+    // Format 1 was the index before the text was normalised: its rows are not searched again.
+    let dir = TestDir::new("open-previous-format");
+    let mut index = index(&dir);
+    answer(&mut index, 1, 1, 1, "stored before normalisation");
+    drop(index);
+    set_meta(&dir, "format", "1");
+    let (index, state) = SearchIndex::open(dir.path()).unwrap();
+    assert!(state.needs_rebuild);
+    assert_eq!(count(&index, "stored ", Mode::Ranked), 0);
+}
+
+#[test]
 fn a_file_that_is_not_a_database_needs_a_rebuild() {
     let dir = TestDir::new("open-garbage");
     write::write(&dir.path().join(FILE_NAME), &[0x5a; 8192]);
