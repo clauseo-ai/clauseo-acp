@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use clauseo_protocol::{MatterId, Seq, ThreadId, Timestamp};
+use clauseo_protocol::{MatterId, Seq, StreamId, ThreadId, Timestamp};
 use rusqlite::{Connection, ToSql, Transaction, params};
 
 use crate::query::{self, Page, Progress, Query};
@@ -171,6 +171,24 @@ impl SearchIndex {
     /// Runs `query`.
     pub fn query(&self, query: &Query) -> Result<Page, Error> {
         query::run(&self.conn, query, self.progress)
+    }
+
+    /// Every stream's watermark: the last `seq` of it that the index reflects, as
+    /// [`Batch::set_watermark`] wrote it. A stream text that does not read is skipped.
+    pub fn watermarks(&self) -> Result<Vec<(StreamId, Seq)>, Error> {
+        let mut statement = self.conn.prepare("SELECT stream, seq FROM watermarks")?;
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        let mut marks = Vec::new();
+        for row in rows {
+            let (stream, seq) = row?;
+            let seq = u64::try_from(seq).ok().and_then(|seq| Seq::new(seq).ok());
+            if let (Ok(stream), Some(seq)) = (stream.parse::<StreamId>(), seq) {
+                marks.push((stream, seq));
+            }
+        }
+        Ok(marks)
     }
 
     /// A handle that interrupts this index's running query from another thread.
@@ -355,6 +373,28 @@ impl Batch<'_> {
         self.tx
             .prepare_cached("DELETE FROM matters WHERE matter = ?1")?
             .execute([&matter_text])?;
+        Ok(())
+    }
+
+    /// Records that the index reflects `stream` up to `seq`, in the same transaction as the
+    /// batch's rows; `None` forgets the stream's watermark.
+    pub fn set_watermark(&mut self, stream: StreamId, seq: Option<Seq>) -> Result<(), Error> {
+        let stream = stream.to_string();
+        match seq {
+            Some(seq) => {
+                self.tx
+                    .prepare_cached(
+                        "INSERT INTO watermarks(stream, seq) VALUES (?1, ?2)
+                         ON CONFLICT(stream) DO UPDATE SET seq = excluded.seq",
+                    )?
+                    .execute(params![stream, seq_sql(seq)?])?;
+            }
+            None => {
+                self.tx
+                    .prepare_cached("DELETE FROM watermarks WHERE stream = ?1")?
+                    .execute([stream])?;
+            }
+        }
         Ok(())
     }
 
