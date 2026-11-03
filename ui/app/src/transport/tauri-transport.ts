@@ -22,6 +22,7 @@ import {
 } from "./host-transport.ts";
 import type {
   AgentChoiceId,
+  LimitsView,
   CommandEnvelope,
   CommandOutcome,
   FileRefId,
@@ -35,6 +36,7 @@ import type {
   ThreadId,
   ViewPosition,
 } from "./protocol.ts";
+import { LimitsFeed, limitsOf, type LimitsSource } from "./limits-feed.ts";
 import { Subscriptions } from "./subscriptions.ts";
 
 type Answer<T> = { status: "ok"; data: T } | { status: "error"; error: unknown };
@@ -58,7 +60,7 @@ export type TauriOptions = {
   nextFrame?: (run: () => void) => void;
 };
 
-export class TauriTransport implements HostTransport, AppFeedSource {
+export class TauriTransport implements HostTransport, AppFeedSource, LimitsSource {
   readonly kind = "tauri";
   readonly #reader: ChannelReader;
   readonly #subs: Subscriptions;
@@ -83,11 +85,14 @@ export class TauriTransport implements HostTransport, AppFeedSource {
   readonly #appListeners = new Set<(event: HostEvent) => void>();
   /** The `subscribe_app` call for the channel open now: null before the first listener, and after it failed. */
   #appReady: Promise<void> | null = null;
+  /** The limits view the channel carries from `open_stream` on (R16): the last one, and its listeners. */
+  readonly #limits: LimitsFeed;
 
   constructor(options: TauriOptions = {}) {
     const warn = options.warn ?? ((m: string) => console.warn(m));
     this.#warn = warn;
     this.#nextFrame = options.nextFrame ?? ((run) => requestAnimationFrame(() => run()));
+    this.#limits = new LimitsFeed(warn);
     this.#subs = new Subscriptions(
       {
         subscribe: async (stream, after) => {
@@ -108,6 +113,11 @@ export class TauriTransport implements HostTransport, AppFeedSource {
           this.#subs.fail(failed.stream, toHostError(failed.error));
         } else if ("patches" in event && event.patches !== undefined) {
           this.#carried = this.#subs.deliver(event.patches) > 0;
+        } else if ("limits_view_changed" in event) {
+          // no stream and no position either: processed at once, as settings_changed is
+          const view = limitsOf(event);
+          if (view === null) warn("limits_view_changed carried no view");
+          else this.#limits.deliver(view);
         } else if ("settings_changed" in event && event.settings_changed !== undefined) {
           // app-wide: no stream and no position, so the message counts as processed at once (#onMessage)
           for (const listener of this.#appListeners) {
@@ -171,6 +181,12 @@ export class TauriTransport implements HostTransport, AppFeedSource {
         this.#appListeners.delete(listener);
       },
     };
+  }
+
+  /** Hears each limits view (R16); one that comes after the first view hears the last one at once. The channel
+   * carries them from `open_stream` on, so nothing is subscribed here. */
+  onLimits(listener: (view: LimitsView) => void): () => void {
+    return this.#limits.onLimits(listener);
   }
 
   #onMessage(): void {
