@@ -352,3 +352,7 @@ fn make_parents(
     }
     Ok(at)
 }
+
+#[cfg(test)]
+#[cfg(target_os = "macos")]
+mod macos_tests;
