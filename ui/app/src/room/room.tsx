@@ -5,7 +5,7 @@
 // draws its own frame
 // (H19): the toolbar is the title bar, with the caption buttons wired to the window off the Mac and macOS's own traffic
 // lights over the corner lights' place on it, inside the desktop app; elsewhere (tests, the probe, a browser) the
-// buttons log their presses and the lights are painted. Until U12 there is no plan, until a host query no search, and
+// buttons log their presses and the lights are painted. The plan is the open conversation's agent's (limits/live-plan.tsx, U12); until a host query no search, and
 // until H5 nothing under a matter's title (the scratch matter's line stands). The wall
 // lists H8's papers (host-next.ts's papers part, which the desktop gives through host-wire.ts). Folded, the rail closes
 // on Escape and on opening a matter or making one, and focus goes back to Matters; opening a conversation or starting
@@ -43,6 +43,7 @@ import { LayerProvider } from "@clauseo/components/ui/layer.tsx";
 import { PartsRoot } from "@clauseo/components/ui/root.tsx";
 import { frameBatch } from "../store/batch.ts";
 import { StoreContext } from "../store/hooks.ts";
+import { LimitsContext, limitsStoreOf } from "../store/limits.ts";
 import { createViewStore } from "../store/store.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import type { MatterId } from "../transport/protocol.ts";
@@ -51,6 +52,7 @@ import type { AgentName } from "@clauseo/components/lib/words-errors.ts";
 import { kindOf, knownPlan } from "./agent.ts";
 import { AgentPlanContext, useThreadAgentName } from "./thread/agent-plan.ts";
 import { Conversations } from "./conversations.ts";
+import { LivePlan } from "./limits/live-plan.tsx";
 import { Matters, type MattersView } from "./matters.ts";
 import { NewMatter } from "./new-matter.tsx";
 import { AnswerHost, quietly, type ListedPapers } from "./open.ts";
@@ -140,7 +142,10 @@ export function Room({
   return (
     <RoomScopeProvider>
       <PartsRoot>
-        <RoomFrame transport={transport} windowControls={windowControls} standIns={standIns} />
+        {/* the limits view (U12): the toolbar's plan and the composer's warning read it */}
+        <LimitsContext value={limitsStoreOf(transport)}>
+          <RoomFrame transport={transport} windowControls={windowControls} standIns={standIns} />
+        </LimitsContext>
       </PartsRoot>
     </RoomScopeProvider>
   );
@@ -323,6 +328,9 @@ function RoomFrame({
         versions={open !== null}
         {...versions.toolbar}
         plan={null}
+        planSlot={
+          <LivePlan agent={agentPlan === undefined ? null : openAgent} agents={talks.agents} />
+        }
         title={title}
         titleLang={open !== null && !scratch ? "en" : w.lang}
         titleHint=""
