@@ -27,6 +27,10 @@ fn turn_ended(agent: AgentKind, read_now: bool) -> Input {
     Input::TurnEnded { agent, read_now }
 }
 
+fn try_again(agent: Option<AgentKind>) -> Input {
+    Input::TryAgain { agent }
+}
+
 #[test]
 fn new_turns_cached_values_stale_aged_and_asks_one_read_per_agent() {
     let claude = AccountLimits {
@@ -338,4 +342,120 @@ fn inputs_for_an_agent_not_given_do_nothing() {
     }
     assert!(!model.view(at(30)).0.contains_key(&CODEX));
     assert_eq!(model.next_read_at(CODEX), None);
+}
+
+#[test]
+fn two_tries_a_second_apart_read_once() {
+    let mut model = idle(CLAUDE);
+    assert_eq!(
+        model.input(try_again(Some(CLAUDE)), at_ms(11 * SECOND)),
+        vec![Action::Read(CLAUDE)]
+    );
+    model.input(
+        done(CLAUDE, usage(account(CLAUDE, vec![]))),
+        at_ms(12 * SECOND),
+    );
+    assert_eq!(
+        model.input(try_again(Some(CLAUDE)), at_ms(12 * SECOND)),
+        vec![Action::ViewChanged],
+        "the read started a second ago: none starts, the view is published again"
+    );
+}
+
+#[test]
+fn try_again_eleven_seconds_after_the_last_read_started_reads_again() {
+    let mut model = idle(CLAUDE);
+    model.input(try_again(Some(CLAUDE)), at_ms(11 * SECOND));
+    model.input(
+        done(CLAUDE, usage(account(CLAUDE, vec![]))),
+        at_ms(12 * SECOND),
+    );
+    assert_eq!(
+        model.input(try_again(Some(CLAUDE)), at_ms(22 * SECOND)),
+        vec![Action::Read(CLAUDE)]
+    );
+}
+
+#[test]
+fn try_again_within_ten_seconds_of_a_turn_end_read_starts_none() {
+    let mut model = idle(CLAUDE);
+    assert_eq!(
+        model.input(turn_ended(CLAUDE, true), at_ms(20 * SECOND)),
+        vec![Action::Read(CLAUDE)]
+    );
+    model.input(
+        done(CLAUDE, usage(account(CLAUDE, vec![]))),
+        at_ms(21 * SECOND),
+    );
+    assert_eq!(
+        model.input(try_again(Some(CLAUDE)), at_ms(22 * SECOND)),
+        vec![Action::ViewChanged]
+    );
+}
+
+#[test]
+fn try_again_within_ten_seconds_of_a_shown_read_starts_none() {
+    let mut model = idle(CLAUDE);
+    assert_eq!(
+        model.input(shown(CLAUDE), at(5)),
+        vec![Action::Read(CLAUDE)]
+    );
+    model.input(
+        done(CLAUDE, usage(account(CLAUDE, vec![]))),
+        at_ms(5 * MINUTE + SECOND),
+    );
+    assert_eq!(
+        model.input(try_again(Some(CLAUDE)), at_ms(5 * MINUTE + 2 * SECOND)),
+        vec![Action::ViewChanged]
+    );
+}
+
+#[test]
+fn try_again_while_a_read_is_in_flight_joins_it_without_a_second_read() {
+    let mut model = idle(CLAUDE);
+    assert_eq!(
+        model.input(try_again(Some(CLAUDE)), at_ms(11 * SECOND)),
+        vec![Action::Read(CLAUDE)]
+    );
+    assert_eq!(
+        model.input(try_again(Some(CLAUDE)), at_ms(30 * SECOND)),
+        vec![],
+        "in flight and past the window: joined, nothing published"
+    );
+    assert_eq!(
+        model.input(try_again(Some(CLAUDE)), at_ms(16 * SECOND)),
+        vec![Action::ViewChanged],
+        "in flight and within the window: none starts, the view is published again"
+    );
+}
+
+#[test]
+fn try_again_for_every_agent_throttles_only_the_recent_one_and_publishes_once() {
+    let (mut model, _) = Limits::new(Vec::new(), &[CLAUDE, CODEX], t0());
+    model.input(done(CLAUDE, usage(account(CLAUDE, vec![]))), t0());
+    model.input(done(CODEX, usage(account(CODEX, vec![]))), t0());
+    assert_eq!(
+        model.input(turn_ended(CLAUDE, true), at_ms(5 * SECOND)),
+        vec![Action::Read(CLAUDE)]
+    );
+    model.input(
+        done(CLAUDE, usage(account(CLAUDE, vec![]))),
+        at_ms(6 * SECOND),
+    );
+    assert_eq!(
+        model.input(try_again(None), at_ms(11 * SECOND)),
+        vec![Action::Read(CODEX), Action::ViewChanged],
+        "Claude's read started 6 s ago: only Codex reads, and one view goes out"
+    );
+}
+
+#[test]
+fn try_again_for_every_agent_within_the_window_publishes_one_view() {
+    let (mut model, _) = Limits::new(Vec::new(), &[CLAUDE, CODEX], t0());
+    model.input(done(CLAUDE, usage(account(CLAUDE, vec![]))), t0());
+    model.input(done(CODEX, usage(account(CODEX, vec![]))), t0());
+    assert_eq!(
+        model.input(try_again(None), at_ms(SECOND)),
+        vec![Action::ViewChanged]
+    );
 }

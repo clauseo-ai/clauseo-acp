@@ -39,6 +39,8 @@ fn asked(test: &str, scenario: Scenario) -> Asked {
     reads.answer(AgentKind::Claude, usage(AgentKind::Claude, 10.0, None));
     feed.changed("the start-up read");
     drop(feed);
+    // The question comes later than the start-up read: a try again within 10 s of it starts none.
+    host.clock.advance(Duration::from_secs(11));
     let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], CLAUDE);
     let mut events = host.events(StreamId::Thread(thread));
     let (turn, _) = host.prompt(thread, "Edit the clause.");

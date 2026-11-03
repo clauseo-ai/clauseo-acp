@@ -368,8 +368,9 @@ pub enum HostCommand {
         patch: UiPatch,
     },
     /// Refresh account limits. Answers `Done` and logs nothing. `Shown` reads only data older
-    /// than 5 minutes; `TryAgain` reads now unless a read is in flight. No read starts while the
-    /// agent has a permission or an elicitation pending; it starts once that is answered.
+    /// than 5 minutes; `TryAgain` reads now unless a read is in flight or the last read started
+    /// less than 10 s ago (it then re-emits the view). No read starts while the agent has a
+    /// permission or an elicitation pending; it starts once that is answered.
     /// `agent: None` means every agent. JSON: `{"refresh_limits": {"why": "shown"}}`, with
     /// `"agent": "claude"` (or `"codex"`) when one agent is named.
     RefreshLimits {

@@ -263,7 +263,7 @@ in no stream. The mapping from `AccountLimits` to `LimitsView` (freshness needs 
 | Reset time passed, one row | `WindowFreshness::ResetPassed` | the reset time, refreshing; never the old percentage |
 | Next refresh on the settings page, planned copy "Refreshes at the 4:45 pm reset" | `AgentLimitsView.next_read_at` | the next shown reset time; left out when no reset is pending |
 | Refresh when a window gets focus, or a meter or the settings page opens | `HostCommand::RefreshLimits` with `RefreshWhy::Shown` | reads only data older than 5 minutes; answers `Done` and logs nothing; `agent` left out means every agent |
-| Try again | `HostCommand::RefreshLimits` with `RefreshWhy::TryAgain` | reads now unless a read is in flight; no read while that agent has a permission or elicitation pending, it starts once answered |
+| Try again | `HostCommand::RefreshLimits` with `RefreshWhy::TryAgain` | reads now unless a read is in flight or the last read started under 10 s ago (then it re-emits the view); no read while that agent has a permission or elicitation pending, it starts once answered |
 | At the limit, the agent pauses | `AtLimitBehaviour::Pauses` | `at_limit_text`, which the planned `limits` crate writes from the behaviour |
 | At the limit, extra usage | `AtLimitBehaviour::ExtraUsage` | as above (whether extra usage is on is folded into the text) |
 | At the limit, credits | `AtLimitBehaviour::Credits` | as above (whether the plan has credits is folded into the text) |

@@ -1574,8 +1574,9 @@ export type HostCommand =
 } }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; forget_matter?: never; mark_seen?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; undo_step?: never; update_matter?: never } | 
 /**
  *  Refresh account limits. Answers `Done` and logs nothing. `Shown` reads only data older
- *  than 5 minutes; `TryAgain` reads now unless a read is in flight. No read starts while the
- *  agent has a permission or an elicitation pending; it starts once that is answered.
+ *  than 5 minutes; `TryAgain` reads now unless a read is in flight or the last read started
+ *  less than 10 s ago (it then re-emits the view). No read starts while the agent has a
+ *  permission or an elicitation pending; it starts once that is answered.
  *  `agent: None` means every agent. JSON: `{"refresh_limits": {"why": "shown"}}`, with
  *  `"agent": "claude"` (or `"codex"`) when one agent is named.
  */

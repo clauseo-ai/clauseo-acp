@@ -89,6 +89,9 @@ get no menu: it would be a bar on the undecorated window.
   The settings window's channel carries no limits, and its focus reads none (the amendment to
   [0027](0027-limits-in-host.md): U12 opens the limits for Settings when Plan and usage reads
   them). Closing a window drops its limits pump with the rest of its feeds.
+- Settings' "Try again" (`RefreshLimits { why: TryAgain }`) reaches the limits model from either
+  window: the model ignores a TryAgain within 10 s of the last read's start, whatever window sent
+  it, and re-emits the view; the bridge's throttle on this window is defence in depth.
 - The mock runtime never removes a destroyed window, so the reopen after a close is tested at the
   bridge (`bridge/tests/app.rs`), not through Tauri. The window itself, its frame and the menu are
   checked by hand on each OS.

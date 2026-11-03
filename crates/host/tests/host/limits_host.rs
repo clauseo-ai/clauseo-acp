@@ -386,6 +386,8 @@ fn refresh_shown_reads_old_data_and_try_again_reads_unless_in_flight() {
     let mut feed = Feed::new(&host);
     feed.view("the current view");
 
+    // Past the 10 s window, so the try joins the read in flight and publishes nothing.
+    host.clock.advance(Duration::from_secs(11));
     refresh(&host, RefreshWhy::TryAgain);
     assert_eq!(
         reads.count(AgentKind::Claude),
@@ -394,8 +396,13 @@ fn refresh_shown_reads_old_data_and_try_again_reads_unless_in_flight() {
     );
     reads.answer(AgentKind::Claude, usage(AgentKind::Claude, 10.0, None));
     feed.changed("the start-up read");
+    host.clock.advance(Duration::from_secs(11));
     refresh(&host, RefreshWhy::TryAgain);
-    assert_eq!(reads.count(AgentKind::Claude), 2, "try again reads now");
+    assert_eq!(
+        reads.count(AgentKind::Claude),
+        2,
+        "try again reads once the start-up read is 10 s old"
+    );
     reads.answer(AgentKind::Claude, usage(AgentKind::Claude, 11.0, None));
     feed.changed("the try-again read");
 

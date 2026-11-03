@@ -365,7 +365,7 @@ fn try_again(agent: Option<AgentKind>) -> CommandEnvelope {
 #[test]
 fn the_settings_window_refreshes_an_agent_at_most_once_in_ten_seconds() {
     let scratch = Scratch::with_limits("limits-throttle");
-    let (host, reads, _clock) = start(&scratch);
+    let (host, reads, clock) = start(&scratch);
     let bridge = host.bridge();
     let messages = open(&bridge, MAIN);
     // Each read ends (the host publishes its account's share) before the next refresh: the
@@ -383,8 +383,14 @@ fn the_settings_window_refreshes_an_agent_at_most_once_in_ten_seconds() {
     let at = |secs| start + Duration::from_secs(secs);
     let claude = Some(AgentKind::Claude);
     let dispatch = |label, agent, now| block_on(bridge.dispatch_at(label, try_again(agent), now));
+    // The host's own rule (its model ignores a Try again within 10 s of the last read's start)
+    // runs on the host clock, which `dispatch_at`'s time does not move. Advance it past 10 s
+    // before each press the bridge lets through, so each read the test expects is one the host
+    // allows; the bridge's throttle is what the test checks.
+    let host_moves_on = || clock.advance(Duration::from_secs(11));
 
     // The host starts a read as it takes the command, so the count is final once it answers.
+    host_moves_on();
     assert_eq!(
         dispatch(SETTINGS, claude, at(0)).unwrap(),
         CommandOutcome::Done
@@ -400,12 +406,14 @@ fn the_settings_window_refreshes_an_agent_at_most_once_in_ten_seconds() {
         2,
         "a second refresh of Claude within 10 s read"
     );
+    host_moves_on();
     assert_eq!(
         dispatch(SETTINGS, None, at(9)).unwrap(),
         CommandOutcome::Done
     );
     assert_eq!(reads.count(), 3, "a refresh of every agent is its own key");
     answer();
+    host_moves_on();
     assert_eq!(
         dispatch(SETTINGS, claude, at(10)).unwrap(),
         CommandOutcome::Done
@@ -417,6 +425,7 @@ fn the_settings_window_refreshes_an_agent_at_most_once_in_ten_seconds() {
     );
     for count in [5, 6] {
         answer();
+        host_moves_on();
         assert_eq!(
             dispatch(MAIN, claude, at(10)).unwrap(),
             CommandOutcome::Done

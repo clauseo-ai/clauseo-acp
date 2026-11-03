@@ -242,6 +242,7 @@ fn a_read_that_began_before_the_stop_does_not_decide_it() {
     feed.changed("the start-up read");
     drop(feed);
     // A read starts before the turn and still runs when the turn stops at the limit.
+    host.clock.advance(Duration::from_secs(11));
     refresh(&host, RefreshWhy::TryAgain);
     reads.until_count(AgentKind::Claude, 2);
     let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], CLAUDE);
