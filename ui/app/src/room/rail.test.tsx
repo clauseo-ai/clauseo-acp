@@ -2,7 +2,7 @@
 // status words (none on the open matter's), date groups across a Sunday, finding by name only without a NextHost and
 // by client with one, each saying so, Pinned and Recent (five), no Find on an empty rail, Remove from the list, Show in
 // Finder and the open matter's chevron, isolated folder paths, matters_changed updating a row, and a left matter's thread waiting on a
-// permission.
+// permission, and U12's paused rail.
 // @vitest-environment happy-dom
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -356,6 +356,32 @@ test("a refused Show in Finder only goes to the console; the rail stays as it wa
   expect(warn).toHaveBeenCalledWith(expect.stringContaining("reveal failed"));
   expect(names()).toEqual(before);
   warn.mockRestore();
+});
+
+test("U12's paused rail: the at-limit words muted, never yellow or red; a new view formats against its own today", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  // Monday 2 November 2026, 11 pm: the reset is tomorrow's, at 9 am
+  vi.setSystemTime(new Date(2026, 10, 2, 23, 0));
+  const resets = new Date(2026, 10, 3, 9, 0).getTime();
+  const paused = (over: Partial<MatterInfo> = {}) => [
+    detailed(A, { status: { paused_at_limit: { resets_at: resets } }, ...over }),
+    detailed(B),
+  ];
+  const transport = await mount(withNext(() => paused()));
+  const row = () => rowOf(A.name);
+  expect(row()?.dataset["state"]).toBe("limit");
+  expect(said(A.name)).toContain("Limit reached until Tuesday 9:00 am");
+  const line = row()?.querySelector(".text-small");
+  expect(line?.classList.contains("text-muted")).toBe(true);
+  expect(line?.querySelector("i")?.className).toContain("bg-muted");
+  expect(row()?.outerHTML).not.toMatch(/yellow|red|danger|destructive/);
+  // past midnight, the next view reads today again: the same reset is now today's, with no day
+  vi.setSystemTime(new Date(2026, 10, 3, 0, 30));
+  await act(async () =>
+    transport.appEvent({ matters_changed: { matters: paused({ pinned: true }) } }),
+  );
+  expect(said(A.name)).toContain("Limit reached until 9:00 am");
+  expect(said(A.name)).not.toContain("Tuesday");
 });
 
 test("matters_changed updates a row in place", async () => {
