@@ -127,3 +127,32 @@ fn a_rebuild_reports_conversations_done_of_total() {
     assert_eq!(index.progress(), None);
     assert_eq!(find(&index, "rebuilt ", Mode::Ranked).indexing, None);
 }
+
+#[test]
+fn watermarks_land_with_their_rows_and_a_failed_batch_keeps_neither() {
+    use clauseo_protocol::StreamId;
+
+    use crate::common::{seq, thread};
+    let dir = TestDir::new("open-watermarks");
+    let mut index = index(&dir);
+    let stream = StreamId::Thread(thread(1));
+    index
+        .batch(|b| {
+            b.set_watermark(stream, Some(seq(7)))?;
+            Ok(())
+        })
+        .unwrap();
+    let failed: Result<(), clauseo_search::Error> = index.batch(|b| {
+        b.set_watermark(stream, Some(seq(9)))?;
+        Err(clauseo_search::Error::Corrupt("stop".into()))
+    });
+    assert!(failed.is_err());
+    assert_eq!(index.watermarks().unwrap(), vec![(stream, seq(7))]);
+    drop(index);
+    let (index, state) = SearchIndex::open(dir.path()).unwrap();
+    assert!(!state.needs_rebuild);
+    assert_eq!(index.watermarks().unwrap(), vec![(stream, seq(7))]);
+    let mut index = index;
+    index.batch(|b| b.set_watermark(stream, None)).unwrap();
+    assert_eq!(index.watermarks().unwrap().len(), 0);
+}

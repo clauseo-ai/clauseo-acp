@@ -16,7 +16,9 @@
 //! [`SearchIndex::put_matter_title`], [`SearchIndex::put_file_names`],
 //! [`SearchIndex::set_archived`], [`SearchIndex::delete_entries`] (an undone step),
 //! [`SearchIndex::delete_thread`] and [`SearchIndex::delete_matter`], each its own transaction,
-//! or many in one through [`SearchIndex::batch`] and a [`Batch`]. A rebuild runs between
+//! or many in one through [`SearchIndex::batch`] and a [`Batch`]. [`Batch::set_watermark`]
+//! records, in the same transaction as the rows, the last `seq` of a stream the index reflects;
+//! [`SearchIndex::watermarks`] reads them back, for a caller that catches up from the log. A rebuild runs between
 //! [`SearchIndex::start_rebuild`] and [`SearchIndex::finish_rebuild`]; each batch counts its
 //! conversations with [`Batch::conversation_done`], and [`Progress`] reports them.
 //! Read with [`SearchIndex::query`]: a [`Query`] gives a [`Page`] of [`Hit`]s, each with a

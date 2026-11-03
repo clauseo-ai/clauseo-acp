@@ -52,6 +52,7 @@ CREATE TABLE threads (
   archived INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX threads_matter ON threads(matter);
+CREATE TABLE watermarks (stream TEXT PRIMARY KEY, seq INTEGER NOT NULL);
 ";
 
 /// Opens the index in `folder`, or creates it empty; the flag is `needs_rebuild`.
