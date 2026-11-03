@@ -1,8 +1,8 @@
 // The step group: everything Clauseo did between two of its texts, folded into one quiet line in the thread. Folded,
 // the line names the work in lawyers' words with the icons of what was done most, "4 papers read. Searched 2 times.",
-// and keeps a failure in view, led by the break; live, it says what is being done now. A press opens it in place to its rows, one line
-// each: the icon of what it did, its words (a paper by its file name, its folder on hover) and, where it didn't
-// simply finish, its state. No surface and no animation: it is a line between the answer's paragraphs, not a card.
+// and keeps a failure in view, led by the break; live, it says what is being done now. A press opens it in place to
+// its rows, one line each, set into the well as the design's work list is: the icon of what it did, its words (a paper
+// by its file name, its folder on hover) and, where it didn't simply finish, its state. No animation, and no card.
 // The words come in made by the caller, in the language; the rows are the caller's StepRow and StepThought.
 import { useId, useState, type ReactNode } from "react";
 import { IconBreak, IconFold } from "../icons/icons.tsx";

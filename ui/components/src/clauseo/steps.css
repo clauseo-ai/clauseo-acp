@@ -1,7 +1,7 @@
 /* The step group: what Clauseo did between two of its texts, as one quiet line that opens in place to its rows
    (step-group.tsx). Its line is the work chip's look (thread.css .work-done): small words in the muted tone, the
-   icons before them, the chevron after, the well's tone under the pointer. No surface, open or closed, and nothing
-   animates: the chevron turns at once. A failure stays on the line in the primary ink, never red. */
+   icons before them, the chevron after, the well's tone under the pointer. Opened, its rows sit on the well, like
+   the work list's; nothing animates: the chevron turns at once. A failure stays on the line in the primary ink, never red. */
 
 @layer components {
   .step-group {
@@ -58,11 +58,15 @@
   .step-group-line[aria-expanded="true"] .step-group-chev {
     transform: rotate(90deg);
   }
+  /* opened, the rows stand set into the well, as the design's work list does (thread.css .work-list): inset from the
+     answer's edge, so they read as the work behind it and not as more lines of the answer */
   .step-group-rows {
     display: grid;
     gap: var(--s1);
-    margin: var(--s1) 0 var(--s2);
-    padding: 0;
+    margin: var(--s2) 0 var(--s1);
+    padding: var(--s2) var(--s3);
+    background: var(--well);
+    border-radius: var(--r-control);
     list-style: none;
   }
   .step-row {
