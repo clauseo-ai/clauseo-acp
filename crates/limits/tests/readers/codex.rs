@@ -1,17 +1,16 @@
-//! Codex reads against `fake_agent`: exit, timeout and an empty answer, the spec the reader
-//! built (with `CODEX_HOME` forced), and where `codex.js` is found.
+//! Codex reads against `fake_agent`: one full app-server exchange, exit, timeout and an empty
+//! answer, the spec the reader built (with `CODEX_HOME` forced), and where `codex.js` is found.
 //!
-//! No test plays a full app-server exchange: `fake_agent` takes only client lines carrying
-//! `"jsonrpc": "2.0"`, which `codex_appserver` never writes, and its `expect` cannot match the
-//! `initialized` notification. `src/readers/codex/tests/talk.rs` plays the protocol over
-//! in-memory pipes instead.
+//! The full exchange runs over real pipes with `fake_agent` in an app-server scenario
+//! (`codex-plus`). `src/readers/codex/tests/talk.rs` plays the protocol's other answers over
+//! in-memory pipes.
 
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::time::Duration;
 
 use clauseo_limits::{ReadFailure, ReadLimits, ReadOutcome};
-use clauseo_protocol::AgentKind;
+use clauseo_protocol::{AccountRef, AgentKind, Billing, Finite, PlanLabel};
 use futures::executor::block_on;
 use futures::future::join;
 
@@ -34,6 +33,50 @@ fn read_once(setup: &Setup, play: Play) -> (ReadOutcome, std::sync::Arc<TestLaun
     let reader = setup.readers(&launcher, &SharedTimer::default());
     let outcome = block_on(reader.read(AgentKind::Codex));
     (outcome, launcher)
+}
+
+#[test]
+fn a_full_app_server_exchange_reads_the_plus_plan() {
+    let (setup, _) = codex_setup();
+    let (outcome, launcher) = read_once(&setup, Play::Scenario("codex-plus"));
+    let ReadOutcome::Usage { limits, reached } = outcome else {
+        panic!("no usage: {outcome:?}");
+    };
+    assert_eq!(reached, None);
+    assert_eq!(limits.agent, AgentKind::Codex);
+    assert_eq!(
+        limits.account,
+        AccountRef("plus.user@example.com".to_owned())
+    );
+    assert_eq!(limits.plan, Some(PlanLabel("ChatGPT Plus".to_owned())));
+    assert_eq!(limits.billing, Billing::Plan);
+    let used: Vec<_> = limits
+        .windows
+        .iter()
+        .map(|window| (window.id.as_str(), window.used_percent))
+        .collect();
+    let percent = |value| Finite::new(value).unwrap();
+    assert_eq!(
+        used,
+        [("primary", percent(25.0)), ("secondary", percent(40.0))]
+    );
+    // fake_agent ends only when the reader closes its stdin after the last answer.
+    launcher.wait_stdout_closed();
+}
+
+#[test]
+fn codex_plus_answers_with_the_plus_fixture() {
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("../../fixtures/codex/plus.json")).unwrap();
+    let answer = |to: &str| {
+        include_str!("../scenarios/codex-plus.jsonl")
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .find(|step| step["respond"]["to"] == to)
+            .map(|step| step["respond"]["result"].clone())
+    };
+    assert_eq!(answer("account").as_ref(), Some(&fixture["accountRead"]));
+    assert_eq!(answer("limits").as_ref(), Some(&fixture["rateLimitsRead"]));
 }
 
 #[test]

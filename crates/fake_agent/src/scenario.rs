@@ -16,6 +16,7 @@ pub struct Scenario {
     /// The scenario name, equal to the file stem.
     name: String,
     pub(crate) on_stdin_close: OnStdinClose,
+    pub(crate) protocol: Protocol,
     pub(crate) steps: Vec<Step>,
     /// Where an error after the last step points: the last step, or the header.
     pub(crate) end: Loc,
@@ -30,6 +31,20 @@ pub(crate) enum OnStdinClose {
     Exit,
     /// Write `fake_agent: stdin closed, holding` to stderr and park forever.
     Hang,
+}
+
+/// Which protocol the agent plays: the header's `protocol`, `"acp"` when left out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum Protocol {
+    /// An ACP v1 agent: every line carries `"jsonrpc": "2.0"`, and sent messages are checked
+    /// against the SDK's schema.
+    #[default]
+    Acp,
+    /// A Codex app-server: client lines may leave out `"jsonrpc"`, the agent's lines carry
+    /// none, an `expect` without a label is a notification, and nothing is checked against the
+    /// SDK.
+    AppServer,
 }
 
 /// A file name and 1-based line, for messages, and for a line of an included file, the
@@ -235,7 +250,8 @@ fn parse(name: &str, text: &str, includes: &Includes<'_>) -> Result<Scenario, Er
     let Some((header_at, header)) = lines.next().transpose()? else {
         return Err(Loc::new(&file, 1).load_error("empty file; line 1 must be the header"));
     };
-    let on_stdin_close = body::header(name, header).map_err(|m| header_at.load_error(m))?;
+    let (on_stdin_close, protocol) =
+        body::header(name, header).map_err(|m| header_at.load_error(m))?;
     let mut steps = Vec::new();
     for line in lines {
         let (at, value) = line?;
@@ -250,10 +266,11 @@ fn parse(name: &str, text: &str, includes: &Includes<'_>) -> Result<Scenario, Er
         }
     }
     let end = steps.last().map_or(header_at, |step| step.at.clone());
-    checks::check(&steps)?;
+    checks::check(&steps, protocol)?;
     Ok(Scenario {
         name: name.to_owned(),
         on_stdin_close,
+        protocol,
         steps,
         end,
     })

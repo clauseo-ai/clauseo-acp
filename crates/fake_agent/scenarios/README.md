@@ -2,8 +2,9 @@
 
 A scenario is a `.jsonl` file that `fake_agent` plays over stdio, one line at a time. It stands
 in for a real ACP v1 agent in tests: it waits for the client lines the scenario expects, and
-sends the lines the scenario writes. It never waits for anything but the next client line: no
-timers, no sleeps. The one exception is `--pace-ms`, which the speed scoreboard uses (see
+sends the lines the scenario writes. With `"protocol": "app-server"` in its header it stands in
+for `codex app-server` instead (see [App-server scenarios](#app-server-scenarios)). It never
+waits for anything but the next client line: no timers, no sleeps. The one exception is `--pace-ms`, which the speed scoreboard uses (see
 [Running](#running)); it adds no timer to a scenario.
 
 This file is the full reference. The code behind a rule is sometimes named in parentheses, such
@@ -19,6 +20,7 @@ The code lives in `crates/fake_agent/src/`.
 - [Branches: `one_of`](#branches-one_of)
 - [Includes](#includes)
 - [`raw` and SDK validation](#raw-and-sdk-validation)
+- [App-server scenarios](#app-server-scenarios)
 - [Running](#running)
 - [Exit codes](#exit-codes)
 - [Generated scenarios](#generated-scenarios)
@@ -45,6 +47,7 @@ The code lives in `crates/fake_agent/src/`.
 | `scenario` | yes | The scenario name. | Must equal the file stem (`tool-calls` for `tool-calls.jsonl`). |
 | `description` | yes | One line saying what the scenario does and what the test must do. | Must not be empty or only spaces. |
 | `on_stdin_close` | no, default `"exit"` | What happens when stdin closes: `"exit"` or `"hang"`. See [Running](#running). | Must be one of the two strings. |
+| `protocol` | no, default `"acp"` | Which protocol the agent plays: `"acp"` or `"app-server"`. See [App-server scenarios](#app-server-scenarios). | Must be one of the two strings. |
 
 No other keys are allowed in the header (`body.rs`, `Header`).
 
@@ -160,7 +163,8 @@ system, terminal and subagent capabilities out, or turned off:
 - **`as`** names a client request so a later `respond` can answer it. It is required on every
   `expect` except for the two notifications the client sends, `session/cancel` and
   `$/cancel_request`, which must not have one. Without `as`, an `expect` matches only a
-  notification; with it, only a request. Labels are unique in the scenario, includes counted:
+  notification; with it, only a request. An app-server scenario drops the rule: there, `as`
+  alone says which an `expect` waits for. Labels are unique in the scenario, includes counted:
   a scenario that includes `handshake.jsonl` cannot reuse `init` or `new`. The branches of a
   `one_of` are the exception: see [Branches](#branches-one_of).
 - A label need not be answered. Leaving a request unanswered is how `cancel-unanswered` tests
@@ -270,6 +274,21 @@ Nothing checks `expect` and `expect_response` patterns against the SDK, and noth
 `send_line`. A pattern with a typo loads fine and fails only when a real client line does not
 match it.
 
+## App-server scenarios
+
+`"protocol": "app-server"` in the header makes the agent a stand-in for `codex app-server`,
+whose JSON-RPC lines carry no `"jsonrpc"` member (its schema has none). It changes four things:
+
+- A client line may leave out `"jsonrpc"`. When it is there, it must still be `"2.0"`.
+- The agent's own lines (`respond`, `notify`, `request`) carry no `"jsonrpc"`.
+- An `expect` waits for a notification when it has no `as`, and for a request when it has one,
+  whatever its method: `{"expect":{"method":"initialized"}}` waits for the client's
+  `initialized` notification.
+- Nothing is checked against the ACP SDK, so no step needs `raw`. `"raw": true` fails at load,
+  and so does `update`, which sends ACP's `session/update`.
+
+Every other rule holds: patterns, labels, ids, branches, includes, file steps and exit codes.
+
 ## Running
 
 ```sh
@@ -287,6 +306,7 @@ scenarios themselves stay timer-free, and only the tests of the flag itself pass
 
 - Each client line must end with `\n` (a `\r` before it is dropped) and be a JSON-RPC 2.0
   request, notification or response, with a string or number `id`. Anything else is a mismatch.
+  Only an app-server scenario lets the line leave out `"jsonrpc"`.
 - A client line that does not match the step waiting for it is a mismatch: `fake_agent` writes
   one stderr line `fake_agent: <file>:<line>: <what>` and exits 3.
 - Every line the agent sends is one line on stdout, flushed at once. Stdout carries nothing
