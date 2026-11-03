@@ -42,3 +42,16 @@ test("the folded line's hover eases its well and ink over --dur-quick on the arr
   // the chevron still turns at once
   expect(steps).not.toMatch(/\.step-group-chev[^}]*transition/);
 });
+
+test("on the answer's meta line the line never wraps to a row of its own: the meta line keeps one line, the words cut with an ellipsis, the name and the time keep their width", () => {
+  expect(rule(".meta:has(> .step-group-line)")).toMatch(/flex-wrap: nowrap;/);
+  expect(rule(".meta > :not(.step-group-line)")).toMatch(/flex: none;/);
+  const line = rule(".meta > .step-group-line");
+  expect(line).toMatch(/flex: 0 1 auto;/);
+  expect(line).toMatch(/min-width: 0;/);
+  const words = rule(".meta > .step-group-line .step-group-words");
+  expect(words).toMatch(/white-space: nowrap;/);
+  expect(words).toMatch(/overflow: hidden;/);
+  expect(words).toMatch(/text-overflow: ellipsis;/);
+  expect(rule(".meta > .step-group-line .step-group-chev")).toMatch(/flex: none;/);
+});

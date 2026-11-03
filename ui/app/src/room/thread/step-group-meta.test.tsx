@@ -13,8 +13,10 @@ import {
   reset,
   step,
   toolCall,
+  upsert,
   userMessage,
 } from "../../testing/stream-script.ts";
+import type { ToolKind, ViewEntry } from "../../transport/protocol.ts";
 import { mountRoom, type Harness } from "./harness.ts";
 
 let metaRenders = 0;
@@ -132,4 +134,79 @@ test("the running group stands on the meta line too, and a flush of the answer's
   expect(metaRenders).toBe(settled);
   // the group stayed on the meta line, the answer's words under it
   expect(answer().firstElementChild).toBe(group);
+});
+
+/** A finished step of this kind; `aside`: a steer moved it to the background. */
+const did = (order: number, id: number, kind: ToolKind, aside = false): ViewEntry => {
+  const call = toolCall(order, id, "completed").tool_call!;
+  return {
+    tool_call: {
+      ...call,
+      kind,
+      ...(aside ? { background: { steer: ASKED.user_message!.message } } : {}),
+    },
+  };
+};
+
+test("in Hindi with three kinds, and in English with a background note, the line stays on the meta line, its whole summary its name and its title", async () => {
+  const cases = [
+    {
+      language: "hi" as const,
+      calls: [
+        did(7, 201, "read"),
+        did(8, 202, "read"),
+        did(9, 203, "search"),
+        did(10, 204, "edit"),
+        did(11, 205, "fetch"),
+        did(12, 206, "move"),
+      ],
+      icons: 3,
+    },
+    {
+      language: "en" as const,
+      calls: [did(7, 201, "search"), did(8, 202, "read", true), did(9, 203, "read", true)],
+      icons: 2,
+    },
+  ];
+  for (const { language, calls, icons } of cases) {
+    h = await mountRoom({ display: { language } });
+    h.deliver([reset([ASKED, ...calls, agentText(20, 1, "ठीक।"), step(21)])]);
+    const meta = metas()[0]!;
+    expect(meta.parentElement).toBe(h.one("step-group"));
+    const line = meta.querySelector<HTMLButtonElement>(":scope > button")!;
+    // the name and the time, then the line: nothing else, and nothing in a row of its own
+    expect(meta.children).toHaveLength(2);
+    expect(line.querySelectorAll(".step-group-icons svg")).toHaveLength(icons);
+    expect(line.title).not.toBe("");
+    expect(line.title).toBe(line.textContent);
+    if (language === "en") expect(line.title).toContain("2 of them went on in the background.");
+    else expect(line.title).toContain("और 2 काम।");
+    await h.unmount();
+    h = null;
+    document.body.replaceChildren();
+  }
+});
+
+test("live and folded, the line stands in the one place on the meta line: the same line, still there as the turn ends", async () => {
+  h = await mountRoom();
+  h.deliver([
+    reset([ASKED, did(7, 201, "read"), toolCall(8, 202, "in_progress")], header("running")),
+  ]);
+  const meta = metas()[0]!;
+  const line = meta.querySelector(":scope > button")!;
+  expect(line.textContent).toBe("Read file 202. 1 done so far.");
+  // the turn ends: the step finishes, the answer's words come, the turn's step and the idle header
+  h.deliver([
+    upsert(toolCall(8, 202, "completed")),
+    upsert(agentText(9, 1, "Clause nine.")),
+    upsert(step(10)),
+    upsert(header("idle")),
+  ]);
+  await h.settle();
+  expect(h.one("step-group")!.dataset["live"]).toBeUndefined();
+  // the same meta line and the same button, the summary in place of the live words
+  expect(metas()[0]).toBe(meta);
+  expect(meta.querySelector(":scope > button")).toBe(line);
+  expect(line.textContent).toBe("2 papers read.");
+  expect(meta.children).toHaveLength(2);
 });

@@ -68,6 +68,29 @@
   .step-group-chev {
     margin-inline-start: var(--s1-5);
   }
+  /* on the answer's meta line, the line stays on that line, on one line, live and folded alike, so the answer below
+     never moves when the turn ends (in Hindi with three kinds, or with a background note, it would wrap to a row of
+     its own, 26 px lower): the name and the time keep their width, the words take what is left and cut with an
+     ellipsis, the chevron stays after them. The button's title holds the whole summary */
+  .meta:has(> .step-group-line) {
+    flex-wrap: nowrap;
+  }
+  .meta > :not(.step-group-line) {
+    flex: none;
+  }
+  .meta > .step-group-line {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+  .meta > .step-group-line .step-group-words {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .meta > .step-group-line .step-group-chev {
+    flex: none;
+    margin-inline-start: 0;
+  }
   .step-group-line[aria-expanded="true"] .step-group-chev svg {
     transform: rotate(90deg);
   }

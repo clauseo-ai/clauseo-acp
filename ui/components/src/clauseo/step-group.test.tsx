@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // The step group's parts: the icon pass's glyph for each tool kind (other for the rest, the break for a failure), the line a real button that
 // opens and folds the rows with aria-expanded, a failure on the line, and a row's paper with its folder on hover.
-import { act, type ReactNode } from "react";
+import { act, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, test } from "vitest";
@@ -166,4 +166,53 @@ test("a group whose every step is over with none finished says what was tried on
   const glyphs = [...line.querySelectorAll("svg")];
   expect(glyphs).toHaveLength(2);
   expect(glyphs[0]!.closest(".step-trouble-icon")).not.toBeNull();
+});
+
+test("on the meta line the line keeps one line: at most three kind icons, the chevron after the words so an ellipsis never cuts it, the whole summary its name and its title", async () => {
+  host = document.createElement("div");
+  document.body.append(host);
+  root = createRoot(host);
+  const head = (line: ReactElement) => <div className="meta">{line}</div>;
+  const words = "2 दस्तावेज़ पढ़े गए। एक बार खोजा गया। 1 दस्तावेज़ बदला गया। और 2 काम।";
+  await act(async () =>
+    root!.render(
+      <StepGroup
+        id="tool_call:1"
+        kinds={["read", "search", "edit", "fetch", "move"]}
+        line={words}
+        more="उनमें से 1 पृष्ठभूमि में चलता रहा।"
+        trouble="1 विफल रहा।"
+        head={head}
+      >
+        {null}
+      </StepGroup>,
+    ),
+  );
+  const line = host.querySelector<HTMLButtonElement>(".meta > button")!;
+  const full = `${words} उनमें से 1 पृष्ठभूमि में चलता रहा। 1 विफल रहा।`;
+  // its name, read from its words, all still in the button however the ellipsis cuts them; the hover says it too
+  expect(line.textContent).toBe(full);
+  expect(line.title).toBe(full);
+  expect(line.querySelectorAll(".step-group-icons svg")).toHaveLength(3);
+  // the chevron after the words, the button's last part, not among the words
+  expect(line.lastElementChild?.classList.contains("step-group-chev")).toBe(true);
+  expect(line.querySelector(".step-group-words .step-group-chev")).toBeNull();
+});
+
+test("off the meta line the line keeps no title and its chevron follows the last word", async () => {
+  host = document.createElement("div");
+  document.body.append(host);
+  root = createRoot(host);
+  await act(async () =>
+    root!.render(
+      <StepGroup id="tool_call:1" kinds={["read"]} line="1 paper read.">
+        {null}
+      </StepGroup>,
+    ),
+  );
+  const line = host.querySelector("button")!;
+  expect(line.hasAttribute("title")).toBe(false);
+  expect(line.querySelector(".step-group-words")?.lastElementChild?.classList).toContain(
+    "step-group-chev",
+  );
 });
