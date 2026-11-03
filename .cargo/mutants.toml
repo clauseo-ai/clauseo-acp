@@ -161,4 +161,43 @@ exclude_re = [
   # crates/store/src/writer.rs, `Writer::commit_group`: a lone commit in a savepoint fails the same way and
   # reaches the same replies and the same file; only the statements run differ.
   'crates/store/src/writer\.rs:\d+:\d+: replace > with >= in Writer::commit_group$',
+  #
+  # Platform code (clauseo-acp-private#139). Mutants of the Windows-only and macOS-only code that
+  # mutants-platform.yml tests on its own OS, which no OS's tests can tell apart: equivalent, or
+  # unobservable, on every OS that compiles the code. A mutant missed only because of one job's OS
+  # (not compiled there, or caught on another OS) goes in that job's `skip_re` in
+  # mutants-platform.yml instead, never here. Each comment gives the reason in one line.
+  #
+  # crates/process/src/os/windows.rs (Windows only), `prepare`: CREATE_SUSPENDED and CREATE_NO_WINDOW share no bit.
+  'crates/process/src/os/windows\.rs:\d+:47: replace \| with \^ in prepare$',
+  # `resume`: `running` is read only when no thread resumed, and a suspended child has no running thread.
+  'crates/process/src/os/windows\.rs:\d+:47: replace \+= with (-=|\*=) in resume$',
+  # `resume`, `resumed == 0 && running > 0`: running is 0 in a suspended child, so it is false either way.
+  'crates/process/src/os/windows\.rs:\d+:\d+: replace && with \|\| in resume$',
+  # `resume`, the `running > 0` above: it differs only on the no-thread-resumed path, which no test reaches.
+  'crates/process/src/os/windows\.rs:\d+:\d+: replace > with (==|<|>=) in resume$',
+  # `resume`, the `resumed == 0` above, as for `&&`; the line pin keeps the two other `==` of `resume` mutated.
+  'crates/process/src/os/windows\.rs:198:16: replace == with != in resume$',
+  # `resume_thread`: ResumeThread fails only on a bad handle, and returns 0 only for a running thread.
+  'crates/process/src/os/windows\.rs:\d+:\d+: delete match arm (u32::MAX|0) in resume_thread$',
+  # crates/matters/src/no_download.rs, `Debug for NoDownload`: a fixed word that nothing formats.
+  'crates/matters/src/no_download\.rs:\d+:\d+: replace <impl std::fmt::Debug for NoDownload<\x27_>>::fmt -> std::fmt::Result with Ok\(Default::default\(\)\)$',
+  # crates/matters/src/no_download/macos.rs (macOS only), `turn_off`: only which refusal is logged changes.
+  'crates/matters/src/no_download/macos\.rs:\d+:\d+: delete ! in turn_off$',
+  # crates/matters/src/probe.rs, Windows block: RECALL_ON_DATA_ACCESS and OFFLINE share no bit, so `|` is `^`.
+  'crates/matters/src/probe\.rs:\d+:\d+: replace \| with \^ in <impl PlaceholderProbe for OsProbe>::is_cloud_only$',
+  # crates/matters/src/write.rs, `hidden_attributes`: that branch runs only with HIDDEN clear, so `|` is `^`.
+  'crates/matters/src/write\.rs:\d+:\d+: replace \| with \^ in hidden_attributes$',
+  # crates/matters/src/matter/json.rs, `remove`: it returns nothing; only which failure is logged changes.
+  'crates/matters/src/matter/json\.rs:\d+:\d+: replace != with == in remove$',
+  # crates/matters/src/history/blob.rs, `same_file` (Unix): it differs only in a race between open and stat.
+  'crates/matters/src/history/blob\.rs:\d+:\d+: replace same_file -> bool with true$',
+  # `same_file`, `&&` to `||`: within one folder the device matches, so this is the same race.
+  'crates/matters/src/history/blob\.rs:\d+:\d+: replace && with \|\| in same_file$',
+  # `Blobs::streamed`: a read of a regular file never fails with Interrupted, so the retry never runs.
+  'crates/matters/src/history/blob\.rs:\d+:\d+: replace match guard err\.kind\(\) == io::ErrorKind::Interrupted with false in Blobs::streamed$',
+  # crates/matters/src/history/durable.rs, `present` (Windows): NotFound from the remove needs a race; the pin spares line 105's, which Unix catches.
+  'crates/matters/src/history/durable\.rs:121:21: replace match guard err\.kind\(\) == io::ErrorKind::NotFound with false in present$',
+  # crates/matters/src/locks.rs, `relative_to`: `>=` adds only the folder itself, whose matter path is None.
+  'crates/matters/src/locks\.rs:\d+:\d+: replace > with >= in relative_to$',
 ]
