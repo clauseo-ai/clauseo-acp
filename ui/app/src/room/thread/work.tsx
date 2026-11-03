@@ -31,8 +31,7 @@ import {
 import { paperMentions } from "./paper-mentions.ts";
 import { WorkComposer } from "./work-composer.tsx";
 import { ArchivedLine } from "../archived.tsx";
-import { knownTools, sameTools, type KnownTool } from "../tools.ts";
-import { toolsSegment } from "../tool-line-room.ts";
+import { useToolsSegment } from "../tool-line-load.ts";
 
 const NO_COMMANDS: readonly AvailableCommand[] = [];
 
@@ -49,16 +48,6 @@ function commandsPick(): (v: StreamView | undefined) => readonly AvailableComman
   return (v) => {
     const next = v?.header?.header?.commands ?? NO_COMMANDS;
     if (next.length !== last.length || next.some((c, i) => !sameCommand(last[i], c))) last = next;
-    return last;
-  };
-}
-
-/** The header's tools the tool line speaks for, the same array for as long as they read the same. */
-function toolsPick(): (v: StreamView | undefined) => readonly KnownTool[] {
-  let last: readonly KnownTool[] = [];
-  return (v) => {
-    const next = knownTools(v?.header?.header?.tools);
-    if (!sameTools(last, next)) last = next;
     return last;
   };
 }
@@ -117,14 +106,14 @@ export function Work({
   // the agent's commands for the composer's `/` menu, as the thread's header has them
   const [pickCommands] = useState(commandsPick);
   const commands = useStreamPart(store, stream, pickCommands);
-  // the tool line on the status line, from the open thread's header: none for a draft, or a header without tools
-  const [pickTools] = useState(toolsPick);
-  const tools = useStreamPart(store, stream, pickTools);
   // U12: the thread paused at the plan's limit, for the composer's status line
   const [pickPaused] = useState(pausedPick);
   const paused = useStreamPart(store, stream, pickPaused);
   // U10: an answer Claude stopped giving, and Restart once the host has it (H10)
   const { lang } = useWords();
+  // the tool line on the status line, from the open thread's header: none for a draft, or a header without tools
+  // (tool-line-load.ts: its chunk loads once a header has tools, and until then the line has no tool segment)
+  const tools = useToolsSegment(store, stream, lang);
   // what the running step is doing, for the working line in place of "Answering."
   const pickDoing = useMemo(() => doingPick(lang), [lang]);
   const doing = useStreamPart(store, stream, pickDoing);
@@ -185,7 +174,7 @@ export function Work({
           draftKey={draftKey}
           choice={choice}
           plan={plan}
-          tools={toolsSegment(lang, tools)}
+          tools={tools}
           commands={commands}
           mentions={mentions}
           disabled={matter === null}

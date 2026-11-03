@@ -69,6 +69,9 @@ export type BrowserInstall = {
 /** A transport whose host takes the install call. Only FakeTransport is one; asked for by duck type. */
 export interface BrowserInstallSource {
   installBrowser(): Promise<void>;
+  /** The reports played before this store was made, which it reads first: the room makes it only once the tool
+   * line's chunk is in (tool-line-load.ts), after the reports a thread's first view brought. */
+  installReports?(): readonly BrowserInstallReport[];
 }
 
 const installs = (transport: object): transport is BrowserInstallSource =>
@@ -88,7 +91,11 @@ export class BrowserInstallStore {
 
   constructor(transport: HostTransport) {
     this.#transport = transport;
-    nextHostOf(transport).app?.subscribeApp((event) => this.#hear(event));
+    const app = nextHostOf(transport).app;
+    if (!app) return;
+    const played = (transport as Partial<BrowserInstallSource>).installReports?.() ?? [];
+    for (const report of played) this.#hear({ browser_install: report });
+    app.subscribeApp((event) => this.#hear(event));
   }
 
   get = (): BrowserInstall | null => this.#state;

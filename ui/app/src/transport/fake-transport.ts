@@ -15,6 +15,7 @@ import type {
   Settings,
 } from "../room/host-next.ts";
 import { NO_NEXT, WIRE } from "../room/host-next.ts";
+import type { BrowserInstallReport } from "../room/browser-install.ts";
 import { ChannelReader, envelopesOf, streamFailedOf, type ChannelEvent } from "./channel.ts";
 import {
   internalError,
@@ -118,6 +119,8 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
   readonly #dispatched = new Set<(command: CommandEnvelope) => void>();
   readonly #settingsHeard = new Set<(settings: Settings) => void>();
   readonly #appHeard = new Set<(event: AppEvent) => void>();
+  /** The `browser_install` app events played so far (room/browser-install.ts). */
+  readonly #installs: BrowserInstallReport[] = [];
   readonly #limits = new LimitsFeed((problem) => this.problems.push(problem));
   /** Every `events` arm's envelopes delivered so far, and who hears the next. */
   readonly #envelopes: Envelope[] = [];
@@ -315,8 +318,15 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
     this.calls.push({ call: "install_browser" });
   }
 
+  /** Not the host's yet: the `browser_install` reports played so far, for an install store made after them
+   * (room/browser-install.ts). */
+  installReports(): readonly BrowserInstallReport[] {
+    return this.#installs;
+  }
+
   /** Plays one app event (H4) as the host would send it to every window. */
   appEvent(event: AppEvent): void {
+    if ("browser_install" in event) this.#installs.push(event.browser_install);
     for (const listener of this.#appHeard) listener(event);
   }
 
