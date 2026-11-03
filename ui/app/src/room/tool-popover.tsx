@@ -1,16 +1,29 @@
-// The tool line's popover: one row per tool the open conversation's header speaks for, its name in primary, where it
-// stands in a muted line, and the act it offers: under the browser with no Chrome, the download (Download Chrome is
-// the consent; its progress stands here, the bar under its words). A tool the lawyer turned off is turned on in
-// Settings: one Open Settings at the popover's foot, however many rows offer it, with what a change reaches.
-// Its own chunk, loaded as the status line first shows the tool line (tool-line.tsx).
-import { useSyncExternalStore } from "react";
-import { Button } from "@clauseo/components/ui/button.tsx";
-import { ToolLinePopover } from "@clauseo/components/clauseo/tool-line-popover.tsx";
-import { Progress } from "@clauseo/components/ui/progress.tsx";
+// The tool line's popover: one row per tool the open conversation's header speaks for, its glyph and name, an On or
+// Off chip, and only when off, the reason in a few words (DESIGN.md §Icons). Under the browser with no Chrome, the
+// download: Download Chrome is the consent, then its bar, then Chrome ready or what went wrong with Try again. A tool
+// the lawyer turned off is turned on in Settings: one Open Settings at the popover's foot, however many rows are off
+// there, its tooltip saying what a change reaches. Its own chunk, loaded as the status line first shows the tool line
+// (tool-line.tsx).
+import { useId, useSyncExternalStore, type ReactElement, type ReactNode } from "react";
+import {
+  DownloadBar,
+  LineTip,
+  ToolLinePopover,
+} from "@clauseo/components/clauseo/tool-line-popover.tsx";
+import {
+  IconBreak,
+  IconDownload,
+  IconTick,
+  IconTryAgain,
+} from "@clauseo/components/icons/icons.tsx";
+import { ToolGlyph } from "@clauseo/components/icons/tool-glyph.tsx";
+import { cn } from "@clauseo/components/lib/cn.ts";
 import { useToolsWords } from "@clauseo/components/lib/words-tools.ts";
+import { Button } from "@clauseo/components/ui/button.tsx";
+import { chip } from "@clauseo/components/ui/recipes.ts";
 import type { BrowserInstall, BrowserInstallStore } from "./browser-install.ts";
 import type { ToolLineRoom } from "./tool-line-room.ts";
-import { toolRow, type ToolAction } from "./tool-rows.ts";
+import { toolRow, type DownloadPart } from "./tool-rows.ts";
 import type { KnownTool } from "./tools.ts";
 
 const nothing = () => () => {};
@@ -20,102 +33,156 @@ function useInstall(store: BrowserInstallStore | null): BrowserInstall | null {
   return useSyncExternalStore(store?.subscribe ?? nothing, store?.get ?? none, store?.get ?? none);
 }
 
-const ACTION_IDS: Record<ToolAction, string> = {
-  settings: "tool-settings",
-  download: "tool-download",
-  retry: "tool-retry",
-};
+/** A button whose tooltip says more than its words, the same words its description, for assistive technology. */
+function Described({ tip, children }: { tip: string; children: (id: string) => ReactElement }) {
+  const id = useId();
+  return (
+    <>
+      <LineTip content={tip}>{children(id)}</LineTip>
+      <span id={id} hidden>
+        {tip}
+      </span>
+    </>
+  );
+}
+
+function Download({ part, onInstall }: { part: DownloadPart; onInstall: () => void }) {
+  const w = useToolsWords();
+  switch (part.kind) {
+    case "offer":
+      return (
+        <div className="tool-row-sub flex items-center gap-s2">
+          <Described tip={part.tip}>
+            {(id) => (
+              <Button
+                kind="tone"
+                size="small"
+                data-testid="tool-download"
+                aria-describedby={id}
+                onClick={onInstall}
+              >
+                <IconDownload size={16} />
+                {part.button}
+              </Button>
+            )}
+          </Described>
+          <span className="text-small text-muted" data-testid="tool-download-size">
+            {part.size}
+          </span>
+        </div>
+      );
+    case "none":
+      return (
+        <p className="tool-row-sub text-small text-muted" data-testid="tool-row-note">
+          {part.line}
+        </p>
+      );
+    case "progress":
+      return (
+        <DownloadBar
+          value={part.value}
+          max={part.max}
+          text={part.text}
+          name={part.name}
+          className="tool-row-sub"
+        />
+      );
+    case "done":
+      return (
+        <p
+          className="tool-row-sub flex items-center gap-s2 text-small text-primary"
+          data-testid="tool-row-note"
+        >
+          <IconTick size={14} />
+          {part.line}
+        </p>
+      );
+    case "failed":
+      return (
+        <div className="tool-row-sub flex items-center gap-s2 text-small text-primary">
+          <IconBreak size={14} />
+          <span data-testid="tool-row-note">{part.cause}</span>
+          {part.retry && (
+            <LineTip content={w.t("Try again")}>
+              <Button
+                kind="quiet"
+                size="small"
+                shape="icon"
+                aria-label={w.t("Try again")}
+                data-testid="tool-retry"
+                onClick={onInstall}
+              >
+                <IconTryAgain size={16} />
+              </Button>
+            </LineTip>
+          )}
+        </div>
+      );
+  }
+}
 
 export function ToolPopover({
-  summary,
+  label,
+  glyphs,
   tools,
   room,
 }: {
-  summary: string;
+  label: string;
+  glyphs: ReactNode;
   tools: readonly KnownTool[];
   room: ToolLineRoom;
 }) {
   const w = useToolsWords();
   const install = useInstall(room.install);
-  const act = (action: ToolAction) => {
-    if (action === "settings") room.openSettings?.();
-    else room.install?.install();
-  };
-  const actionWords = (action: ToolAction) =>
-    w.t(
-      action === "settings"
-        ? "Open Settings"
-        : action === "download"
-          ? "Download Chrome"
-          : "Try again",
-    );
-  const rows = tools.map((tool) => ({
-    tool,
-    row: toolRow(w.lang, tool, {
-      plan: room.plan,
-      settings: room.openSettings !== undefined,
-      install,
-    }),
-  }));
-  const settings = rows.some(({ row }) => row.action === "settings");
+  const rows = tools.map((tool) =>
+    toolRow(w.lang, tool, { settings: room.openSettings !== undefined, install }),
+  );
+  const settings = rows.some((row) => row.settings);
+  const onInstall = () => room.install?.install();
   return (
-    <ToolLinePopover summary={summary}>
-      <ul className="grid gap-s1">
-        {rows.map(({ tool, row }) => {
-          const action = row.action === "settings" ? null : row.action;
-          return (
-            <li
-              key={tool.tool}
-              className="grid gap-s1 px-s3 py-s2"
-              data-testid="tool-row"
-              data-tool={tool.tool}
+    <ToolLinePopover label={label} glyphs={glyphs}>
+      <ul className="grid">
+        {rows.map((row) => (
+          <li key={row.tool} className="tool-row" data-testid="tool-row" data-tool={row.tool}>
+            <ToolGlyph
+              glyph={row.tool === "web_search" ? "web" : "browser"}
+              state={row.glyph}
+              size={16}
+            />
+            <p className="text-ui font-ui text-primary deva-nudge" data-testid="tool-row-name">
+              {row.name}
+            </p>
+            <span
+              className={cn(chip({ role: "for" }), row.on && "text-primary")}
+              data-testid="tool-row-chip"
+              data-on={row.on}
             >
-              <p className="text-ui font-ui text-primary deva-nudge">{row.name}</p>
-              {row.lines.map((line) => (
-                <p key={line} className="text-small text-muted" data-testid="tool-row-line">
-                  {line}
-                </p>
-              ))}
-              {row.progress !== null && (
-                <Progress
-                  value={row.progress.value}
-                  max={row.progress.max}
-                  label={row.progress.label}
-                  className="mt-s1"
-                />
-              )}
-              {action !== null && (
-                <span className="mt-s1">
-                  <Button
-                    kind="tone"
-                    size="small"
-                    data-testid={ACTION_IDS[action]}
-                    onClick={() => act(action)}
-                  >
-                    {actionWords(action)}
-                  </Button>
-                </span>
-              )}
-            </li>
-          );
-        })}
+              <span className="cap-trim">{row.chip}</span>
+            </span>
+            {row.reason !== null && (
+              <p className="tool-row-sub text-small text-muted" data-testid="tool-row-reason">
+                {row.reason}
+              </p>
+            )}
+            {row.download !== null && <Download part={row.download} onInstall={onInstall} />}
+          </li>
+        ))}
       </ul>
       {settings && (
-        <div
-          className="tool-pop-foot grid gap-s1 px-s3 pt-s2 pb-s2"
-          data-testid="tool-settings-foot"
-        >
-          <p className="text-small text-muted">{w.t("Changes apply to new conversations.")}</p>
-          <span className="mt-s1">
-            <Button
-              kind="tone"
-              size="small"
-              data-testid={ACTION_IDS.settings}
-              onClick={() => act("settings")}
-            >
-              {actionWords("settings")}
-            </Button>
-          </span>
+        <div className="tool-pop-foot px-s3 py-s2" data-testid="tool-settings-foot">
+          <Described tip={w.t("Changes apply to new conversations.")}>
+            {(id) => (
+              <Button
+                kind="tone"
+                size="small"
+                data-testid="tool-settings"
+                aria-describedby={id}
+                onClick={() => room.openSettings?.()}
+              >
+                {w.t("Open Settings")}
+              </Button>
+            )}
+          </Described>
         </div>
       )}
     </ToolLinePopover>
