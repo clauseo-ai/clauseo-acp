@@ -306,9 +306,9 @@ impl Bridge {
         let old = if newer || dead {
             Some(window)
         } else {
-            // Only the kept window follows the limits: a dropped one's channel is dead. Only
-            // `main` shows them: the settings window gets no limits subscription (0028).
-            if label == crate::MAIN_WINDOW {
+            // Only the kept window follows the limits: a dropped one's channel is dead. `main`
+            // and the settings window (its Plan and usage, U12) show them; no other label does.
+            if crate::follows_limits(label) {
                 pump::follow_limits(host, &window);
             }
             windows

@@ -202,11 +202,11 @@ fn a_reload_drops_the_limits_feed() {
 
 /// `main` and `settings` each follow the app feed on their own channel, and a change the
 /// settings window makes reaches both. `main` gets every app event: the three first frames and
-/// the thread list's changes. The settings window gets `settings_changed` alone (0028): the
-/// first frame's settings and each change, never a matter or thread list, and its acks count
-/// only those.
+/// the thread list's changes. The settings window gets `settings_changed` alone of the app feed
+/// (0028): the first frame's settings and each change, never a matter or thread list. Both get
+/// the limits (U12), and the settings window's acks count its settings and limits messages.
 #[test]
-fn both_windows_get_the_settings_change_and_only_main_the_lists() {
+fn both_windows_get_the_settings_change_and_the_limits_and_only_main_the_lists() {
     let scratch = Scratch::new("app-two-windows", &[]);
     let host = scratch.start(Vec::new());
     let bridge = host.bridge();
@@ -235,10 +235,19 @@ fn both_windows_get_the_settings_change_and_only_main_the_lists() {
     // In order: had a list change reached the settings window, it would come before this.
     assert_eq!(settings(settings_page.next_event()).ui.theme, Theme::Dark);
     assert_eq!(settings_page.drain(), Vec::<String>::new());
-    // Two messages sent: the first frame and the change.
-    let refusal = block_on(bridge.ack(SETTINGS, Vec::new(), 3)).unwrap_err();
+    // The limits pass on both channels since U12: each starts with the current view.
+    for (label, page) in [("main", &main), ("settings", &settings_page)] {
+        let view = page.next_limits();
+        assert!(
+            matches!(view, HostEvent::LimitsViewChanged(_)),
+            "{label}: {view:?}"
+        );
+    }
+    // Three messages sent: the first frame, the change and the limits view.
+    assert_eq!(settings_page.limits_received(), 1);
+    let refusal = block_on(bridge.ack(SETTINGS, Vec::new(), 4)).unwrap_err();
     assert_eq!(refusal.code(), ErrorCode::CommandInvalid, "{refusal:?}");
-    block_on(bridge.ack(SETTINGS, Vec::new(), 2)).unwrap();
+    block_on(bridge.ack(SETTINGS, Vec::new(), 3)).unwrap();
     let window = bridge.window(SETTINGS).unwrap();
     assert_eq!(lock(&window).state().unacked_bytes(), 0);
 }
