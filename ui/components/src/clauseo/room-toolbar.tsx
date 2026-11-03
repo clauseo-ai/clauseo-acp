@@ -330,7 +330,8 @@ export function ToolbarPlan({ plan }: { plan: NonNullable<RoomToolbarProps["plan
       track={!figureless}
       muted={plan.look === "stale"}
       inButton={plan.card !== undefined}
-      dragRegion
+      // a plan that opens its card is a press: a press on it opens the card, never drags the window
+      dragRegion={plan.card === undefined}
       className={cn("room-plan", plan.card !== undefined && "room-plan-in")}
     />
   );
