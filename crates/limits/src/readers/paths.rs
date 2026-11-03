@@ -9,9 +9,12 @@
 //!
 //! Claude's install folder must hold the SDK the helper imports,
 //! `node_modules/@anthropic-ai/claude-agent-sdk/package.json`, by the same rule. Without it node
-//! would climb to any parent `node_modules` and run some other SDK. A global npm install, whose
-//! install folder is `<prefix>/lib` with the SDK nested under the adapter, is refused too: the
-//! helper could not import the adapter's SDK from there.
+//! would climb to any parent `node_modules` and run some other SDK. The entry file that
+//! `package.json` names (`entry.rs` says how) passes the rule too, so a linked `sdk.mjs` cannot
+//! load code from outside the install. The SDK's other files, which the entry imports in turn,
+//! are not walked. A global npm install, whose install folder is `<prefix>/lib` with the SDK
+//! nested under the adapter, is refused too: the helper could not import the adapter's SDK from
+//! there.
 
 use std::io;
 use std::path::{Component, Path, PathBuf};
@@ -19,6 +22,8 @@ use std::path::{Component, Path, PathBuf};
 use clauseo_settings::AgentLaunch;
 
 use crate::error::Error;
+
+mod entry;
 
 /// Claude's settings id.
 pub(crate) const CLAUDE_ID: &str = "claude-acp";
@@ -43,9 +48,10 @@ pub(crate) struct Located {
 }
 
 /// Claude's program and the helper's path in its install folder. The install folder's
-/// `node_modules/@anthropic-ai/claude-agent-sdk/package.json` must be a regular file reached
-/// through no link. The helper may be missing (the read writes it), but when something is there
-/// it must be a regular file, not a link or a folder.
+/// `node_modules/@anthropic-ai/claude-agent-sdk/package.json`, and each file it names as the
+/// entry an `import` loads, must be a regular file reached through no link. The helper may be
+/// missing (the read writes it), but when something is there it must be a regular file, not a
+/// link or a folder.
 pub(crate) fn claude(launch: &AgentLaunch) -> Result<(Located, PathBuf), Error> {
     let located = locate(CLAUDE_ID, launch)?;
     let modules = located.install.join("node_modules");
@@ -69,6 +75,27 @@ pub(crate) fn claude(launch: &AgentLaunch) -> Result<(Located, PathBuf), Error> 
                 agent: CLAUDE_ID,
                 rule,
             });
+        }
+    }
+    for file in entry::entry_files(&sdk).map_err(|rule| Error::Refused {
+        agent: CLAUDE_ID,
+        rule,
+    })? {
+        match walk(&located.install, &file) {
+            Ok(()) => {}
+            Err(Walk::Missing) => {
+                return Err(refused(
+                    CLAUDE_ID,
+                    &file,
+                    "(the SDK's entry in its package.json) does not exist",
+                ));
+            }
+            Err(Walk::Refused(rule)) => {
+                return Err(Error::Refused {
+                    agent: CLAUDE_ID,
+                    rule,
+                });
+            }
         }
     }
     let helper = located.install.join(CLAUDE_HELPER);

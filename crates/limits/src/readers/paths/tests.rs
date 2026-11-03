@@ -16,7 +16,12 @@ const CLAUDE_SCRIPT: &str =
     "install/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js";
 const CODEX_SCRIPT: &str = "install/node_modules/@agentclientprotocol/codex-acp/dist/index.js";
 const CLAUDE_SDK: &str = "install/node_modules/@anthropic-ai/claude-agent-sdk/package.json";
-const SDK_PACKAGE: &str = r#"{"name":"@anthropic-ai/claude-agent-sdk","version":"0.3.293"}"#;
+/// The SDK's own folder under the scratch folder.
+const SDK_DIR: &str = "install/node_modules/@anthropic-ai/claude-agent-sdk";
+/// The fields of the pinned SDK's `package.json` that name its entry, `sdk.mjs`.
+const SDK_PACKAGE: &str = r#"{"name":"@anthropic-ai/claude-agent-sdk","version":"0.3.293",
+"type":"module","main":"sdk.mjs",
+"exports":{".":{"types":"./sdk.d.ts","default":"./sdk.mjs"},"./core":{"default":"./core.mjs"}}}"#;
 
 fn node() -> String {
     if cfg!(windows) {
@@ -34,6 +39,12 @@ fn launch(script: &Path) -> AgentLaunch {
     }
 }
 
+/// The SDK under `scratch`'s install folder: its `package.json` and its entry, `sdk.mjs`.
+fn sdk(scratch: &Scratch) {
+    scratch.file(CLAUDE_SDK, SDK_PACKAGE);
+    scratch.file(&format!("{SDK_DIR}/sdk.mjs"), "");
+}
+
 fn rule(result: Result<impl std::fmt::Debug, Error>) -> String {
     match result {
         Err(Error::Refused { rule, .. }) => rule,
@@ -45,7 +56,7 @@ fn rule(result: Result<impl std::fmt::Debug, Error>) -> String {
 fn the_install_folder_is_above_the_nearest_node_modules() {
     let scratch = Scratch::new("paths-ok");
     let script = scratch.file(CLAUDE_SCRIPT, "");
-    scratch.file(CLAUDE_SDK, SDK_PACKAGE);
+    sdk(&scratch);
     let located = locate(CLAUDE_ID, &launch(&script)).unwrap();
     assert_eq!(
         located,
@@ -108,12 +119,12 @@ fn dot_parts_are_found_as_written() {
 fn something_at_the_helper_path_must_be_a_regular_file() {
     let scratch = Scratch::new("paths-helper");
     let script = scratch.file(CLAUDE_SCRIPT, "");
-    scratch.file(CLAUDE_SDK, SDK_PACKAGE);
+    sdk(&scratch);
     scratch.file(&format!("install/{CLAUDE_HELPER}"), "old helper");
     assert!(claude(&launch(&script)).is_ok());
     let other = Scratch::new("paths-helper-dir");
     let script = other.file(CLAUDE_SCRIPT, "");
-    other.file(CLAUDE_SDK, SDK_PACKAGE);
+    sdk(&other);
     other.dir(&format!("install/{CLAUDE_HELPER}"));
     assert!(rule(claude(&launch(&script))).contains("exists and is not a regular file"));
 }
@@ -153,7 +164,7 @@ fn a_link_under_the_install_folder_is_refused_and_above_it_allowed() {
 fn a_link_at_the_helper_path_is_refused() {
     let scratch = Scratch::new("paths-helper-link");
     let script = scratch.file(CLAUDE_SCRIPT, "");
-    scratch.file(CLAUDE_SDK, SDK_PACKAGE);
+    sdk(&scratch);
     let elsewhere = scratch.file("elsewhere.mjs", "keep me");
     scratch.link(&format!("install/{CLAUDE_HELPER}"), &elsewhere);
     assert!(rule(claude(&launch(&script))).contains("exists and is not a regular file"));
@@ -177,7 +188,7 @@ fn claude_needs_the_sdk_as_a_regular_file_in_its_install_folder() {
     assert!(rule(claude(&launch(&script))).contains("is not a regular file"));
     let other = Scratch::new("paths-sdk-ok");
     let script = other.file(CLAUDE_SCRIPT, "");
-    other.file(CLAUDE_SDK, SDK_PACKAGE);
+    sdk(&other);
     assert!(claude(&launch(&script)).is_ok());
 }
 
@@ -270,3 +281,5 @@ fn a_linked_run_folder_or_limits_folder_is_refused() {
     let err = check_run_dir(&scratch.path("data2/limits/run")).unwrap_err();
     assert!(err.to_string().contains("data2/limits is a link"), "{err}");
 }
+
+mod entry;

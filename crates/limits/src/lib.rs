@@ -5,7 +5,8 @@
 //!
 //! - Plan usage readers: the Claude usage helper (`helper/claude-usage.mjs`, embedded and written
 //!   into claude-agent-acp's install folder, which must hold the Claude Agent SDK as a regular
-//!   `node_modules/@anthropic-ai/claude-agent-sdk/package.json`) and the Codex reader
+//!   `node_modules/@anthropic-ai/claude-agent-sdk/package.json` and the regular entry file it
+//!   names) and the Codex reader
 //!   (`codex app-server` through `codex_appserver`'s client). Each runs the vendor's binary with
 //!   the agent's settings environment, so the vendor reads its own login. Clauseo reads no token
 //!   and calls no usage endpoint.

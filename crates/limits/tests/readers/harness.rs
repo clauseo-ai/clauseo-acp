@@ -19,8 +19,11 @@ use crate::write;
 pub(crate) const SCRIPT: &str = "node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js";
 /// The Claude Agent SDK's `package.json` under the fake install.
 const SDK: &str = "node_modules/@anthropic-ai/claude-agent-sdk/package.json";
-/// What the fake SDK's `package.json` holds.
-const SDK_PACKAGE: &str = r#"{"name":"@anthropic-ai/claude-agent-sdk","version":"0.3.293"}"#;
+/// What the fake SDK's `package.json` holds: the pinned SDK's entry, `sdk.mjs`.
+const SDK_PACKAGE: &str = r#"{"name":"@anthropic-ai/claude-agent-sdk","version":"0.3.293",
+"type":"module","main":"sdk.mjs","exports":{".":{"types":"./sdk.d.ts","default":"./sdk.mjs"}}}"#;
+/// The fake SDK's entry file under the fake install.
+const SDK_ENTRY: &str = "node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs";
 /// The helper's file name in the install folder.
 pub(crate) const HELPER: &str = "clauseo-claude-usage.mjs";
 /// A fake 20-character key the test sets in settings env; `claude-crash` echoes it.
@@ -168,8 +171,8 @@ pub(crate) struct Setup {
 }
 
 impl Setup {
-    /// A fresh folder with a fake install (the adapter's script and the SDK's `package.json`)
-    /// and an empty data folder.
+    /// A fresh folder with a fake install (the adapter's script, the SDK's `package.json` and its
+    /// entry) and an empty data folder.
     pub(crate) fn new() -> Setup {
         let n = NEXT_DIR.fetch_add(1, Ordering::Relaxed);
         let root =
@@ -178,6 +181,7 @@ impl Setup {
         write::create_dir_all(&setup.data()).unwrap();
         Setup::file(&setup.script(), "");
         Setup::file(&under(&setup.install(), SDK), SDK_PACKAGE);
+        Setup::file(&under(&setup.install(), SDK_ENTRY), "");
         setup
     }
 
