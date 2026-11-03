@@ -1,12 +1,11 @@
 // What the room gives the tool line (tool-line.tsx), and the status line's tool segment for a thread's tools: the
-// phrase it says, and the line itself. The phrase is in the first paint; the popover is not.
+// glyphs, and the words that name them. Both are in the first paint; the popover is not.
 import { createContext, createElement } from "react";
 import type { ToolsSegment } from "@clauseo/components/clauseo/composer.tsx";
 import type { Lang } from "@clauseo/components/lib/display.ts";
-import { toolsLine } from "@clauseo/components/lib/words-tools-line.ts";
 import type { BrowserInstallStore } from "./browser-install.ts";
 import { ToolLine } from "./tool-line.tsx";
-import { toolsSummary, type KnownTool } from "./tools.ts";
+import { toolsLabel, type KnownTool } from "./tools.ts";
 
 /** What the room gives the tool line: the plan's name, as the status line names it ("Claude"), Settings where the
  * host has the window, and the app's Chrome download. */
@@ -22,10 +21,10 @@ export const ToolLineContext = createContext<ToolLineRoom>({
   install: null,
 });
 
-/** The status line's tool segment for these tools; null with none to speak for. */
+/** The status line's tool segment for these tools; null with none to speak for. Its summary is the line's name, so
+ * the status line measures its fit again when a tool's state changes. */
 export function toolsSegment(lang: Lang, tools: readonly KnownTool[]): ToolsSegment | null {
-  const key = toolsSummary(tools);
-  if (key === null) return null;
-  const summary = toolsLine(lang, key);
-  return { summary, node: createElement(ToolLine, { summary, tools }) };
+  const label = toolsLabel(lang, tools);
+  if (label === null) return null;
+  return { summary: label, node: createElement(ToolLine, { label, tools }) };
 }

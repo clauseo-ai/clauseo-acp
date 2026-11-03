@@ -1,27 +1,41 @@
-// The words of each row in the tool line's popover: the tool's name, where it stands, and the act it offers, with the
-// Chrome download under the browser's row when there's no Chrome. Pure, so the tests can read every state; loaded
-// with the popover only.
+// Each row of the tool line's popover, in the fewest words (DESIGN.md §Icons): the tool's glyph and name, an On or
+// Off chip, the reason in a few words only when off, and under the browser with no Chrome, the download. Pure, so the
+// tests can read every state; loaded with the popover only.
 import type { Lang } from "@clauseo/components/lib/display.ts";
-import { st } from "@clauseo/components/lib/words-settings.ts";
 import { tw, type ToolsKey } from "@clauseo/components/lib/words-tools.ts";
+import { toolsLine } from "@clauseo/components/lib/words-tools-line.ts";
+import type { ToolGlyphState } from "@clauseo/components/icons/tool-glyph.tsx";
 import type { BrowserInstall, InstallFailCode } from "./browser-install.ts";
-import type { KnownTool } from "./tools.ts";
+import { glyphState, reasonOf, toolName, type KnownTool } from "./tools.ts";
 
-/** What a row offers: Open Settings, Download Chrome, or Try again after a failed download. */
-export type ToolAction = "settings" | "download" | "retry";
+/** The Chrome download as the browser row shows it, its words resolved. */
+export type DownloadPart =
+  /** [download] Download Chrome, its size muted beside it, its tooltip and description `tip`. */
+  | { kind: "offer"; button: string; size: string; tip: string }
+  /** This computer can't download it: a muted line. */
+  | { kind: "none"; line: string }
+  /** [download] the bar, and how far in words, which say it for screen readers too. */
+  | { kind: "progress"; value: number; max: number; text: string; name: string }
+  /** [tick] Chrome ready. */
+  | { kind: "done"; line: string }
+  /** [break] the cause in a few words, and Try again unless this computer can't download it. */
+  | { kind: "failed"; cause: string; retry: boolean };
 
 export type ToolRowWords = {
+  tool: KnownTool["tool"];
+  glyph: ToolGlyphState;
   name: string;
-  /** Muted lines under the name, in order. */
-  lines: string[];
-  /** The download's bar: how far, and its words, which say it for screen readers too. */
-  progress: { value: number; max: number; label: string } | null;
-  action: ToolAction | null;
+  on: boolean;
+  /** The chip's word: On or Off. */
+  chip: string;
+  /** Why it's off, a few words; null while on, and once Chrome is ready. */
+  reason: string | null;
+  /** Off in Settings, with the settings window to turn it on: the popover's foot offers Open Settings. */
+  settings: boolean;
+  download: DownloadPart | null;
 };
 
 export type ToolRowRoom = {
-  /** The plan's name, as the status line names it: "Claude". */
-  plan: string;
   /** Whether the host has the settings window, for Open Settings. */
   settings: boolean;
   /** The app's Chrome download; null when the host reports none. */
@@ -31,141 +45,69 @@ export type ToolRowRoom = {
 const mb = (bytes: number) => Math.round(bytes / 1e6);
 
 /** What a failed download says, by the host's code; never the host's own message. */
-const FAILED: Record<InstallFailCode, ToolsKey> = {
-  network: "The connection dropped before Chrome finished downloading.",
-  size_mismatch: "The download didn't match the file Google published, so Clauseo deleted it.",
-  signature: "The download didn't match the file Google published, so Clauseo deleted it.",
-  disk_space: "Chrome couldn't be downloaded. It needs about 1\u00a0GB free on this computer.",
-  host_refused: "Your network is blocking the download.",
-  unpack: "Chrome downloaded but couldn't be unpacked.",
-  unsupported: "Clauseo can't download Chrome itself. Install Google Chrome to use the browser.",
-  cancelled: "The download stopped before it finished.",
-  unknown: "Chrome couldn't be downloaded.",
+export const FAILED: Record<InstallFailCode, ToolsKey> = {
+  network: "Connection dropped",
+  size_mismatch: "File didn't match",
+  signature: "File didn't match",
+  disk_space: "Needs 1\u00a0GB free",
+  host_refused: "Network blocked it",
+  unpack: "Couldn't unpack",
+  unsupported: "Install Chrome to use it",
+  cancelled: "Download stopped",
+  unknown: "Download failed",
 };
 
-const NO_CHROME = "Off. There's no Chrome on this computer.";
-
-/** The browser row with no Chrome, by the download's state: no Chrome and the offer or the failure under it; while it
- * downloads or unpacks, off until it is downloaded, then its progress; once done, only that Chrome is ready. Without
- * a state from the host, only that there's no Chrome. */
-function downloadPart(lang: Lang, install: BrowserInstall | null): Omit<ToolRowWords, "name"> {
-  const none = { lines: [tw(lang, NO_CHROME)], progress: null, action: null };
-  if (install === null) return none;
+/** The download under the browser row with no Chrome, by its state; null without a state from the host. */
+export function downloadPart(lang: Lang, install: BrowserInstall | null): DownloadPart | null {
+  if (install === null) return null;
   const p = install.progress;
-  const waiting = tw(lang, "Off until Chrome is downloaded.");
+  const name = tw(lang, "Download Chrome");
   if (p === "unpacking")
-    return {
-      lines: [waiting],
-      progress: { value: 1, max: 1, label: tw(lang, "Unpacking Chrome.") },
-      action: null,
-    };
-  if (p === "done")
-    return { ...none, lines: [tw(lang, "Chrome is ready. New conversations get the browser.")] };
+    return { kind: "progress", value: 1, max: 1, text: tw(lang, "Unpacking"), name };
+  if (p === "done") return { kind: "done", line: tw(lang, "Chrome ready") };
   if (p !== null && "downloading" in p) {
     const { bytes, total } = p.downloading;
     return {
-      lines: [waiting],
-      progress: {
-        value: Math.min(bytes, total),
-        max: Math.max(total, 1),
-        label: tw(lang, "Downloading Chrome. {done} of {total}\u00a0MB.", {
-          done: mb(bytes),
-          total: mb(total),
-        }),
-      },
-      action: null,
+      kind: "progress",
+      value: Math.min(bytes, total),
+      max: Math.max(total, 1),
+      text: tw(lang, "{done} of {total}\u00a0MB", { done: mb(bytes), total: mb(total) }),
+      name,
     };
   }
   if (p !== null) {
     const code = p.failed.code;
-    return {
-      lines: [...none.lines, tw(lang, FAILED[code])],
-      progress: null,
-      action: code === "unsupported" ? null : "retry",
-    };
+    return { kind: "failed", cause: tw(lang, FAILED[code]), retry: code !== "unsupported" };
   }
   if (install.offer?.offer === "download")
     return {
-      lines: [
-        ...none.lines,
-        tw(
-          lang,
-          "Clauseo can download its own Chrome from Google, about 200\u00a0MB, once for all conversations. It needs about 1\u00a0GB free.",
-        ),
-      ],
-      progress: null,
-      action: "download",
+      kind: "offer",
+      button: name,
+      size: tw(lang, "200\u00a0MB"),
+      tip: tw(lang, "About 200\u00a0MB from Google, once. Needs about 1\u00a0GB free."),
     };
   if (install.offer?.offer === "none")
-    return {
-      ...none,
-      lines: [...none.lines, tw(lang, "Install Google Chrome to use the browser.")],
-    };
-  return none;
+    return { kind: "none", line: tw(lang, "Install Chrome to use it") };
+  return null;
 }
 
-/** One row's words, for a tool the line speaks for. */
+/** One row, for a tool the line speaks for. */
 export function toolRow(lang: Lang, tool: KnownTool, room: ToolRowRoom): ToolRowWords {
-  const off = (): ToolRowWords => ({
-    name,
-    lines: [tw(lang, "Off. You turned it off in Settings.")],
-    progress: null,
-    action: room.settings ? "settings" : null,
-  });
-  const say = (line: string): ToolRowWords => ({
-    name,
-    lines: [line],
-    progress: null,
-    action: null,
-  });
-  // while the sentence's Hindi is still to come (hi: later), its English takes its slot's English too
-  const slotLang = tw.hi["Off. {managed}."] === null ? "en" : lang;
-  const managed = () =>
-    say(tw(lang, "Off. {managed}.", { managed: st(slotLang, "Managed by your organisation") }));
-  const name = tw(lang, tool.tool === "web_search" ? "Web search" : "Browser");
-  if (tool.tool === "web_search") {
-    switch (tool.state) {
-      case "available":
-        return say(tw(lang, "On. Clauseo can search the web and read pages."));
-      case "off":
-        return off();
-      case "locked_off":
-        return managed();
-      case "no_search_on_this_login":
-        return say(
-          tw(
-            lang,
-            "Off. This {name} login can't search the web. Clauseo can still read web pages.",
-            { name: room.plan },
-          ),
-        );
-    }
-  }
-  switch (tool.state) {
-    case "available":
-      return say(tw(lang, "On. Clauseo can open web pages in its own browser."));
-    case "off":
-      return off();
-    case "locked_off":
-      return managed();
-    case "managed_by_firm":
-      return say(
-        tw(
-          lang,
-          "Off. Your organisation chooses the tools {name} has on this computer, so Clauseo can't add its browser.",
-          { name: room.plan },
-        ),
-      );
-    case "no_proxy":
-      return say(tw(lang, "Off until Clauseo can check each website the browser opens."));
-    case "too_many_browsers":
-      return say(
-        tw(
-          lang,
-          "Off. Other conversations are using every browser this computer can run. One frees up when another conversation closes.",
-        ),
-      );
-    case "browser_not_installed":
-      return { name, ...downloadPart(lang, room.install) };
-  }
+  const on = tool.state === "available";
+  const reason = reasonOf(tool);
+  const download =
+    tool.tool === "browser" && tool.state === "browser_not_installed"
+      ? downloadPart(lang, room.install)
+      : null;
+  return {
+    tool: tool.tool,
+    glyph: glyphState(tool),
+    name: toolsLine(lang, toolName(tool)),
+    on,
+    chip: tw(lang, on ? "On" : "Off"),
+    // once Chrome is ready, needing it is no longer so
+    reason: reason === null || download?.kind === "done" ? null : toolsLine(lang, reason),
+    settings: tool.state === "off" && room.settings,
+    download,
+  };
 }

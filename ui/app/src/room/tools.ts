@@ -1,7 +1,10 @@
-// The tool line's reading of the open thread's header: which of Clauseo's own tools the conversation has, and the one
-// phrase the status line says for them. A tool this version doesn't know, an availability it can't read, or a
-// reason it has no words for says nothing: it is left out, and with nothing left the line has no tool segment.
-import type { ToolsLineKey } from "@clauseo/components/lib/words-tools-line.ts";
+// The tool line's reading of the open thread's header: which of Clauseo's own tools the conversation has, the state
+// each glyph shows, and the words that say it, as the line's accessible name and tooltip. A tool this version
+// doesn't know, an availability it can't read, or a reason it has no words for says nothing: it is left out, and with
+// nothing left the line has no tool segment.
+import type { Lang } from "@clauseo/components/lib/display.ts";
+import { toolsLine, type ToolsLineKey } from "@clauseo/components/lib/words-tools-line.ts";
+import type { ToolGlyphState } from "@clauseo/components/icons/tool-glyph.tsx";
 import type { ToolState } from "../transport/protocol.ts";
 
 /** Where web search stands, in the words the popover has. */
@@ -64,16 +67,51 @@ export function knownTools(tools: readonly ToolState[] | undefined): KnownTool[]
   return [web, browser].filter((t): t is KnownTool => t !== null);
 }
 
-/** The status line's phrase for the tools; null with none to speak for. */
-export function toolsSummary(tools: readonly KnownTool[]): ToolsLineKey | null {
-  const web = tools.find((t) => t.tool === "web_search")?.state ?? null;
-  const browser = tools.find((t) => t.tool === "browser")?.state ?? null;
-  const browserOn = browser === "available";
-  if (web === null) return browser === null ? null : browserOn ? "Browser on" : "Browser off";
-  if (web === "available") return browserOn ? "Web search and browser on" : "Web search on";
-  if (web === "no_search_on_this_login")
-    return browserOn ? "Web pages and browser on" : "Web pages only";
-  return browserOn ? "Browser on, no web search" : "Web search off";
+/** The state a tool's glyph shows: on as drawn, the firm's lock for a tool the firm holds off, every other off
+ * slashed (a login with no search shows web search off: it can't search here). */
+export function glyphState(t: KnownTool): ToolGlyphState {
+  if (t.state === "available") return "on";
+  return t.state === "locked_off" || t.state === "managed_by_firm" ? "locked" : "off";
+}
+
+const REASON: Record<Exclude<WebState | BrowserState, "available">, ToolsLineKey> = {
+  off: "Off in Settings",
+  locked_off: "Managed by firm",
+  managed_by_firm: "Managed by firm",
+  no_search_on_this_login: "Can't search on this login",
+  no_proxy: "Not available yet",
+  too_many_browsers: "Too many browsers open",
+  browser_not_installed: "Needs Chrome",
+};
+
+/** Why a tool is off, in a few words; null while it's on. */
+export const reasonOf = (t: KnownTool): ToolsLineKey | null =>
+  t.state === "available" ? null : REASON[t.state];
+
+/** A tool's name. */
+export const toolName = (t: KnownTool): ToolsLineKey =>
+  t.tool === "web_search" ? "Web search" : "Browser";
+
+/** A reason inside a sentence: its first letter in lower case, unless the first two letters are both capitals. */
+const midSentence = (s: string) =>
+  /^\p{Lu}\p{Ll}/u.test(s) ? s.charAt(0).toLocaleLowerCase("en") + s.slice(1) : s;
+
+/** The tool line's accessible name and tooltip: one sentence per tool, "Web search: on. Browser: off, needs
+ * Chrome."; null with no tools to speak for. Off in Settings says it once: "Web search: off in Settings." */
+export function toolsLabel(lang: Lang, tools: readonly KnownTool[]): string | null {
+  if (tools.length === 0) return null;
+  return tools
+    .map((t) => {
+      const reason = reasonOf(t);
+      const state =
+        reason === null
+          ? toolsLine(lang, "on")
+          : reason === "Off in Settings"
+            ? midSentence(toolsLine(lang, reason))
+            : toolsLine(lang, "off, {reason}", { reason: midSentence(toolsLine(lang, reason)) });
+      return toolsLine(lang, "{tool}: {state}.", { tool: toolsLine(lang, toolName(t)), state });
+    })
+    .join(" ");
 }
 
 /** The same tools, read the same: a header that changes for its status or usage keeps its tools' array. */

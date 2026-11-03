@@ -170,14 +170,17 @@ export const ids = {
   steerMark: "steer-mark",
   /** Where a steered message went, with `data-outcome` ("requeued" or "sent_now"). */
   steerOutcome: "steer-outcome",
-  /** The status line's tool line, after the plan: the conversation's tools in one phrase, which opens the popover. */
+  /** The status line's tool line, after the plan: the conversation's tools as glyphs, named in words (aria-label),
+   * which opens the popover. */
   toolLine: "tool-line",
   /** The tool line's popover. */
   toolPopover: "tool-popover",
   /** One tool's row in the popover, with `data-tool` ("web_search" or "browser"). */
   toolRow: "tool-row",
-  /** A muted line under a tool's name in its row: where it stands, then the Chrome download's words. */
-  toolRowLine: "tool-row-line",
+  /** A tool's On or Off chip in its row. */
+  toolRowChip: "tool-row-chip",
+  /** Why a tool is off, in a few words, under its name; none while it is on. */
+  toolRowReason: "tool-row-reason",
 } as const;
 
 /** The settings window's page: the last part of its URL path (crates/desktop's settings window). */
@@ -277,14 +280,16 @@ export function window(page: Page) {
      * part's class, not a test id, like folderLine).
      */
     statusPlan: page.locator(".room-status-plan"),
-    /** The tool line, once its popover's chunk is in (before, its words stand with no test id). */
+    /** The tool line, once its popover's chunk is in (before, its glyphs stand with no test id). */
     toolLine: id(ids.toolLine),
     toolPopover: id(ids.toolPopover),
     /** The popover's row for `tool`, "web_search" or "browser". */
     toolRow: (tool: "web_search" | "browser"): Locator =>
       page.locator(`[data-testid="${ids.toolRow}"][data-tool="${tool}"]`),
-    /** The muted lines of a tool's row, in order. */
-    toolRowLines: (row: Locator): Locator => row.getByTestId(ids.toolRowLine),
+    /** A tool row's On or Off chip. */
+    toolRowChip: (row: Locator): Locator => row.getByTestId(ids.toolRowChip),
+    /** A tool row's reason, when off. */
+    toolRowReason: (row: Locator): Locator => row.getByTestId(ids.toolRowReason),
     error: id(ids.error),
     composer: id(ids.composer),
     send: id(ids.send),

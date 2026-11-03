@@ -15,7 +15,7 @@
 // settings_changed. A change applies from the next conversation's start; one already open keeps its tools.
 // The locks are real already: `locked` may list `tools.web_search` and `tools.browser`.
 import { useSettingsWords } from "@clauseo/components/lib/words-settings.ts";
-import { tw } from "@clauseo/components/lib/words-tools.ts";
+import { toolsLine } from "@clauseo/components/lib/words-tools-line.ts";
 import { SettingRow } from "@clauseo/components/ui/settings-row.tsx";
 import { PLAN_NAME } from "../../room/limits/plan-model.ts";
 import type { ToolSettings } from "../../room/host-next.ts";
@@ -141,9 +141,7 @@ export function Privacy({ ctx }: { ctx: SectionContext }) {
             label={w.s("Browser")}
             note={w.s("Clauseo can open web pages in its own browser, on this computer.")}
             reason={
-              tools.browser && !websiteCheck
-                ? tw(w.lang, "Off until Clauseo can check each website the browser opens.")
-                : undefined
+              tools.browser && !websiteCheck ? toolsLine(w.lang, "Not available yet") : undefined
             }
           />
         </Group>

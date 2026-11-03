@@ -4,7 +4,7 @@
 // tools' switches show only when the host sends them (app-local today): on, web search off, or both locked and off
 // as a firm's policy sends them. The websites' row shows always but with both tools off; the Browser switch's reason
 // (no website check) while it is on.
-import { tw, type ToolsKey } from "@clauseo/components/lib/words-tools.ts";
+import { toolsLine, type ToolsLineKey } from "@clauseo/components/lib/words-tools-line.ts";
 import type { ToolSettings } from "../room/host-next.ts";
 import type { AgentLimitsView, LimitsView } from "../transport/protocol.ts";
 import type { Entry } from "./entry.ts";
@@ -21,11 +21,11 @@ const ON: ToolSettings = { web_search: true, browser: true };
 const OFF: ToolSettings = { web_search: false, browser: false };
 
 /** A line of the room's tools' words that Settings says too. */
-const toolWords = (key: ToolsKey): WordsRef => ({
-  file: "lib/words-tools.ts",
+const toolWords = (key: ToolsLineKey): WordsRef => ({
+  file: "lib/words-tools-line.ts",
   key,
-  text: (lang) => tw(lang, key),
-  later: tw.hi[key] === null,
+  text: (lang) => toolsLine(lang, key),
+  later: toolsLine.hi[key] === null,
 });
 
 /** Claude's plan alone, so the rows name Claude only. */
@@ -102,7 +102,7 @@ export const WEB_SETTINGS: Entry[] = [
     ),
   ),
   // the Browser switch on, and no website check yet: the room's UET-18 words
-  entry("UEP-16", toolWords("Off until Clauseo can check each website the browser opens."), {
+  entry("UEP-16", toolWords("Not available yet"), {
     tools: ON,
   }),
 ];

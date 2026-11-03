@@ -168,7 +168,7 @@ test("with the tools, each switch shows its value, and a flip sends set_tool_set
 
 const SEARCH_NOTE = "Clauseo can search the web and read pages. On unless you turn it off.";
 const LOCKED = "Managed by your organisation";
-const NO_CHECK = "Off until Clauseo can check each website the browser opens.";
+const NO_CHECK = "Not available yet";
 
 test("a locked key's switch is disabled, shows the host's value, gives the lock's reason for its note, and a press sends nothing", async () => {
   const { el, transport } = await mount({
