@@ -8,10 +8,10 @@ import { use, useState, type ReactNode } from "react";
 import { IconFold, IconToolFetch, IconToolSearch } from "@clauseo/components/icons/icons.tsx";
 import { useSourcesWords, type SourcesKey } from "@clauseo/components/lib/words-sources.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
-import type { AgentId, StreamId, TurnId, WebResult } from "../../transport/protocol.ts";
+import type { AgentId, StreamId, ToolCallId, WebResult } from "../../transport/protocol.ts";
 import { kindOf, planName } from "../agent.ts";
 import { quietly } from "../open.ts";
-import { SourcesTransport, useWebSources, type WebSource } from "./sources.ts";
+import { SourcesTransport, useToolCallWeb, type ToolCallWeb } from "./sources.ts";
 
 const DEVANAGARI = /\p{Script=Devanagari}/gu;
 const LETTER = /\p{L}/gu;
@@ -106,40 +106,43 @@ function Results({ results }: { results: readonly WebResult[] }) {
   );
 }
 
-function SearchRow({ source }: { source: Extract<WebSource, { kind: "search" }> }) {
+type Page = ToolCallWeb["pages"][number];
+
+/** A search's row: its query, then each result on a line of its own, or what the agent doesn't tell. */
+function SearchRow({
+  query,
+  results,
+  codex,
+  name,
+}: {
+  query: string;
+  results: readonly WebResult[];
+  codex: boolean;
+  name: string;
+}) {
   const w = useSourcesWords();
-  const codex = kindOf(source.agent, []) === "codex";
-  const name = planName(source.agent);
-  const query = (
-    <Slotted k="Searched the web for {query}." slot="query">
-      <Run text={source.query} />
-    </Slotted>
-  );
   return (
     <>
       <p>
-        {query}
+        <Slotted k="Searched the web for {query}." slot="query">
+          <Run text={query} />
+        </Slotted>
         {codex
           ? ` ${w.src("{name} doesn't report which pages it found.", { name })}`
-          : source.results.length === 0
+          : results.length === 0
             ? ` ${w.src("No results.")}`
             : null}
       </p>
-      {!codex && source.results.length > 0 && <Results results={source.results} />}
+      {!codex && results.length > 0 && <Results results={results} />}
     </>
   );
 }
 
-function PageRow({
-  source,
-  agent,
-}: {
-  source: Extract<WebSource, { kind: "page" }>;
-  agent: AgentId | undefined;
-}) {
+/** A page's row, by how it was opened. */
+function PageRow({ page, name }: { page: Page; name: string }) {
   const w = useSourcesWords();
-  const link = <PageLink url={source.url} title={source.title} />;
-  if (source.via === "browser")
+  const link = <PageLink url={page.url} title={page.title ?? null} />;
+  if (page.via === "browser")
     return (
       <p>
         <Slotted k="Opened {page} in the browser." slot="page">
@@ -154,10 +157,7 @@ function PageRow({
       </Slotted>
     </p>
   );
-  if (source.via !== "codex_open_page") return read;
-  // only Codex opens a page this way: the thread's own plan names it, ChatGPT's when the thread's agent isn't known
-  const name =
-    agent !== undefined && kindOf(agent, []) === "codex" ? planName(agent) : planName("codex-acp");
+  if (page.via !== "codex_open_page") return read;
   return (
     <>
       {read}
@@ -168,39 +168,71 @@ function PageRow({
   );
 }
 
-/** The sources of one turn's answer, at its end; nothing for a turn with none. `agent`: the thread's. */
+/** One row of the open list. */
+type Item =
+  | { key: string; kind: "search"; query: string; results: readonly WebResult[] }
+  | { key: string; kind: "page"; page: Page };
+
+/** The rows of a turn's tool calls' web, in the tool calls' order: each one's search, then its pages. */
+function itemsOf(webs: readonly (readonly [ToolCallId, ToolCallWeb])[]): Item[] {
+  return webs.flatMap(([call, web]) => [
+    ...(web.query === undefined
+      ? []
+      : [
+          {
+            key: `${call}:search`,
+            kind: "search" as const,
+            query: web.query,
+            results: web.results,
+          },
+        ]),
+    ...web.pages.map((page, i) => ({ key: `${call}:${i}`, kind: "page" as const, page })),
+  ]);
+}
+
+/** The web sources at the end of one turn's answer: its tool calls' web, by id, in order; nothing when none found
+ * anything. `agent`: the thread's, which ran every search and page (ToolCallWeb names none). */
 export function WebSources({
   stream,
-  turn,
+  calls,
   agent,
 }: {
   stream: StreamId;
-  turn: TurnId | undefined;
+  calls: readonly ToolCallId[];
   agent: AgentId | undefined;
 }) {
   const transport = use(SourcesTransport);
-  if (transport === null || turn === undefined) return null;
-  return <SourcesOf transport={transport} stream={stream} turn={turn} agent={agent} />;
+  if (transport === null || calls.length === 0) return null;
+  return <SourcesOf transport={transport} stream={stream} calls={calls} agent={agent} />;
 }
 
 function SourcesOf({
   transport,
   stream,
-  turn,
+  calls,
   agent,
 }: {
   transport: HostTransport;
   stream: StreamId;
-  turn: TurnId;
+  calls: readonly ToolCallId[];
   agent: AgentId | undefined;
 }) {
   const w = useSourcesWords();
-  const sources = useWebSources(transport, stream, turn);
+  const webs = useToolCallWeb(transport, stream);
   // each answer's own, while it is mounted; shut at first
   const [open, setOpen] = useState(false);
-  if (sources.length === 0) return null;
-  const searches = sources.filter((s) => s.kind === "search").length;
-  const pages = sources.length - searches;
+  const items = itemsOf(
+    calls.flatMap((call) => {
+      const web = webs.get(call);
+      return web === undefined ? [] : [[call, web] as const];
+    }),
+  );
+  if (items.length === 0) return null;
+  const searches = items.filter((s) => s.kind === "search").length;
+  const pages = items.length - searches;
+  const codex = agent !== undefined && kindOf(agent, []) === "codex";
+  // the thread's plan names it; a page opened on OpenAI's computers is always ChatGPT's
+  const name = agent === undefined ? planName("codex-acp") : planName(agent);
   return (
     <div data-testid="web-sources" className="not-first:mt-(--s3)">
       <button
@@ -218,11 +250,11 @@ function SourcesOf({
       </button>
       {open && (
         <ol className="work-list">
-          {sources.map((s) => (
+          {items.map((s) => (
             <li
-              key={s.seq}
+              key={s.key}
               data-testid="web-source"
-              data-kind={s.kind === "search" ? "search" : s.via}
+              data-kind={s.kind === "search" ? "search" : s.page.via}
               className="flex items-start gap-(--s2)"
             >
               <span className="mt-(--s0-5) shrink-0">
@@ -230,9 +262,12 @@ function SourcesOf({
               </span>
               <div className="min-w-0">
                 {s.kind === "search" ? (
-                  <SearchRow source={s} />
+                  <SearchRow query={s.query} results={s.results} codex={codex} name={name} />
                 ) : (
-                  <PageRow source={s} agent={agent} />
+                  <PageRow
+                    page={s.page}
+                    name={s.page.via === "codex_open_page" && !codex ? planName("codex-acp") : name}
+                  />
                 )}
               </div>
             </li>

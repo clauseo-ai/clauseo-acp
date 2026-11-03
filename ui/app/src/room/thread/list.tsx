@@ -15,7 +15,7 @@ import type { HostTransport } from "../../transport/host-transport.ts";
 import type { EntryId, StreamId, Timestamp, ViewEntry } from "../../transport/protocol.ts";
 import { AnswerMeta } from "./answer-meta.tsx";
 import { stamp } from "./clock.ts";
-import { exchangesPick, latestAsked, turnOf } from "./exchanges.ts";
+import { exchangesPick, latestAsked } from "./exchanges.ts";
 import { sameIds } from "./ids.ts";
 import { useHasOlder, useQuestionWords } from "./live.ts";
 import { useJumpLanding, useJumpOrder } from "./jump-entry.ts";
@@ -23,9 +23,9 @@ import { useOlder } from "./older.ts";
 import { RowOf } from "./row-of.tsx";
 import { SourcesTransport } from "./sources.ts";
 import { WebSources } from "./sources.tsx";
-import { pickQueued, useTimeOf } from "./time-of.ts";
 import { SteerNotesOf } from "./steer-rows.tsx";
 import { LiveAnswerRows } from "./step-groups.tsx";
+import { pickQueued, useTimeOf } from "./time-of.ts";
 
 /** The composer's limit warning, carried in this chunk with the stop's note (limits/limit-warning.tsx loads it). */
 export { WarningNote } from "./limit-warning-note.tsx";
@@ -127,8 +127,8 @@ function Sections({
 const USER = "user_message:";
 const TOOL = "tool_call:";
 
-/** The web sources of an exchange's turn (sources.tsx), read off its first entry with a turn, with the thread's agent
- * from its header. */
+/** The web sources of an exchange's turn (sources.tsx): what its tool calls found, by their ids in order, with the
+ * thread's agent from its header. */
 function ExchangeSources({
   ids,
   stream,
@@ -138,20 +138,20 @@ function ExchangeSources({
   stream: StreamId;
   paged: ReadonlyMap<EntryId, ViewEntry>;
 }) {
+  // one string, so a flush that leaves the tool calls as they were renders nothing
   const pick = useMemo(
-    () => (v: StreamView | undefined) => {
-      for (const id of ids) {
-        const e = paged.get(id) ?? v?.entries.get(id);
-        const turn = e === undefined ? undefined : (e.user_message?.turn ?? turnOf(e));
-        if (turn !== undefined) return turn;
-      }
-      return undefined;
-    },
+    () => (v: StreamView | undefined) =>
+      ids
+        .filter((id) => id.startsWith(TOOL))
+        .map((id) => (paged.get(id) ?? v?.entries.get(id))?.tool_call?.tool_call)
+        .filter((call) => call !== undefined)
+        .join("\n"),
     [ids, paged],
   );
-  const turn = useStreamPart(useViewStore(), stream, pick);
+  const joined = useStreamPart(useViewStore(), stream, pick);
+  const calls = useMemo(() => (joined === "" ? [] : joined.split("\n")), [joined]);
   const agent = useStreamPart(useViewStore(), stream, pickAgent);
-  return <WebSources stream={stream} turn={turn} agent={agent} />;
+  return <WebSources stream={stream} calls={calls} agent={agent} />;
 }
 
 const pickAgent = (v: StreamView | undefined) => v?.header?.header?.agent;
