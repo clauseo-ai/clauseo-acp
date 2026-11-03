@@ -47,6 +47,15 @@ export function StepGroup({
 }: StepGroupProps) {
   const [open, setOpen] = useState(defaultOpen);
   const rows = useId();
+  // on the meta line the line keeps one line, live and folded alike, so the answer never moves as the turn ends: its
+  // words cut with an ellipsis where they don't fit, the chevron after them, and the whole summary on hover (its words,
+  // all still in the button, are its name)
+  const oneLine = head !== undefined;
+  const chev = (
+    <span className="step-inline-icon step-group-chev">
+      <IconFold size={12} />
+    </span>
+  );
   return (
     <div
       className="step-group"
@@ -61,6 +70,7 @@ export function StepGroup({
           className="step-group-line"
           aria-expanded={open}
           aria-controls={open ? rows : undefined}
+          title={oneLine ? [line, more, trouble].filter((s) => s !== "").join(" ") : undefined}
           onClick={() => setOpen((o) => !o)}
         >
           {/* none when nothing finished and the trouble leads: the break alone stands first */}
@@ -98,10 +108,10 @@ export function StepGroup({
               </>
             )}
             {/* the chevron follows the last word, so it stays beside the words when they wrap */}
-            <span className="step-inline-icon step-group-chev">
-              <IconFold size={12} />
-            </span>
+            {!oneLine && chev}
           </span>
+          {/* on one line, after the words, so an ellipsis never cuts it */}
+          {oneLine && chev}
         </button>,
       )}
       {open && (
