@@ -3,11 +3,13 @@
 # `cfg(windows)` or `cfg(target_os = "macos")` mutant builds the same binary as the code and comes
 # back missed. Here those files are mutated where they compile.
 #
-# - Weekly, Sundays at 02:07 UTC, and by hand (workflow_dispatch, which needs write access). No pull
-#   request or push event, so it never takes a runner from a pull request: the org has 20 job
-#   slots and 5 macOS runners. 02:07 is after fuzz.yml's nightly (01:23, about 25 minutes) and
-#   before ci.yml's at 03:17. The longer jobs run past 03:17; then ci.yml (2 macOS jobs) and
-#   scoreboard.yml (1) plus this workflow's one macOS job still fit the 5.
+# - Weekly, Sundays at 02:07 UTC, and by hand (workflow_dispatch, which needs write access). A
+#   dispatch can run one job (`only`), to check a pull request's tests against that job's
+#   mutants; the other jobs then run on ubuntu and skip every step, so they hold no Windows or
+#   macOS runner. No pull request or push event, so it never takes a runner from a pull request:
+#   the org has 20 job slots and 5 macOS runners. 02:07 is after fuzz.yml's nightly (01:23, about
+#   25 minutes) and before ci.yml's at 03:17. The longer jobs run past 03:17; then ci.yml (2 macOS
+#   jobs) and scoreboard.yml (1) plus this workflow's one macOS job still fit the 5.
 # - Four jobs, each one runner and one cargo-mutants run over the files in its matrix entry
 #   (`--file`), with `--jobs 2`: three on windows-2025 (the runner of e2e-windows.yml's smoke
 #   test), one on macos-15 (ci.yml's). Each file list comes from a grep of `cfg(windows)`,
@@ -38,6 +40,12 @@ on:
   schedule:
     - cron: "7 2 * * 0"
   workflow_dispatch:
+    inputs:
+      only:
+        description: One job to run, or all
+        type: choice
+        default: all
+        options: [all, windows-process, windows-matters, windows-matters-settings, macos]
 
 permissions: {}
 
@@ -49,7 +57,10 @@ concurrency:
 jobs:
   mutants:
     name: mutants (${{ matrix.name }})
-    runs-on: ${{ matrix.runner }}
+    # The same test as PICKED below, which job-level `if` cannot make: it has no matrix context.
+    runs-on: >-
+      ${{ ((inputs.only || 'all') == 'all' || inputs.only == matrix.name)
+      && matrix.runner || 'ubuntu-24.04' }}
     permissions:
       contents: read
     # Timeouts, from an estimate. CI's Linux runner (4 vCPU) took 7 to 24 s per mutant at 2 jobs
@@ -60,6 +71,7 @@ jobs:
     # artifact still run (job_minutes), and both stay well under GitHub's 6 hours.
     # - process: 71 mutants, ~55 min (its tests start and stop real processes);
     # - matters: 200, ~90 min;  matters-settings: 219, ~100 min;  macos: 276, ~70 min.
+    # The first run (41563489415, 2026-11-03) took 7, 52, 34 and 45 minutes.
     timeout-minutes: ${{ matrix.job_minutes }}
     strategy:
       fail-fast: false
@@ -133,21 +145,26 @@ jobs:
     env:
       PACKAGES: ${{ matrix.packages }}
       FILES: ${{ matrix.files }}
+      # 'true' unless a dispatch asked for another job (`only`); every step checks it.
+      PICKED: ${{ (inputs.only || 'all') == 'all' || inputs.only == matrix.name }}
     defaults:
       run:
         shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: env.PICKED == 'true'
         with:
           persist-credentials: false
 
       - name: Install the Rust toolchain from rust-toolchain.toml
+        if: env.PICKED == 'true'
         run: rustup toolchain install
 
       # cargo-mutants runs each mutant's tests with nextest (`test_tool` in .cargo/mutants.toml).
       # `./`, as in ci.yml: actionlint 1.7.12 rejects the `$/` form zizmor's self-repository audit
       # asks for, and the checkout above is this run's own commit.
       - name: Install cargo-mutants and nextest at their pins
+        if: env.PICKED == 'true'
         uses: ./.github/actions/install-pinned-tools # zizmor: ignore[self-repository]
         with:
           tools: cargo-mutants cargo-nextest
@@ -155,7 +172,7 @@ jobs:
       # process's tests start fake_agent, which `-p clauseo-process` does not build. The binary
       # stays in this tree's target/, which the mutants' copies leave out, so it is named by path.
       - name: Build fake_agent for process's tests
-        if: matrix.fake_agent
+        if: matrix.fake_agent && env.PICKED == 'true'
         env:
           EXE: ${{ runner.os == 'Windows' && '.exe' || '' }}
         run: |
@@ -166,19 +183,23 @@ jobs:
           echo "CLAUSEO_FAKE_AGENT_BIN=$bin" >> "$GITHUB_ENV"
 
       - name: Write the config and list the mutants per file
+        if: env.PICKED == 'true'
         run: .github/scripts/mutants-platform.sh "$RUNNER_TEMP/mutants.toml"
 
       # $PACKAGES and $FILES are split on purpose, into one -p and one --file per word.
       - name: cargo mutants
         id: mutants
+        if: env.PICKED == 'true'
         timeout-minutes: ${{ matrix.minutes }}
         run: |
           set -uo pipefail
           args=()
           for package in $PACKAGES; do args+=(-p "$package"); done
           for file in $FILES; do args+=(--file "$file"); done
-          cargo mutants --config "$RUNNER_TEMP/mutants.toml" --jobs 2 "${args[@]}"
-          code=$?
+          # `|| code=$?`: GitHub runs `shell: bash` with -e, so a bare non-zero exit (2 when a
+          # mutant is missed) would end the step here and fail it before the case below.
+          code=0
+          cargo mutants --config "$RUNNER_TEMP/mutants.toml" --jobs 2 "${args[@]}" || code=$?
           case "$code" in
             0) echo "every mutant caught" ;;
             2) echo "some mutants missed (reported, not a failure)" ;;
@@ -188,7 +209,7 @@ jobs:
           esac
 
       - name: Summarise the mutants
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && env.PICKED == 'true' }}
         env:
           NAME: ${{ matrix.name }}
           OUTCOME: ${{ steps.mutants.outcome }}
@@ -218,7 +239,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && env.PICKED == 'true' }}
         with:
           name: mutants-platform-${{ matrix.name }}
           path: mutants.out
