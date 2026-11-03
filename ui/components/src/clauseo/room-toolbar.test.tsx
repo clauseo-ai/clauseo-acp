@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
-// The room's title bar drags the window through its plan: the plan's meter carries the drag region on its four
-// elements, and the plan's card, when it has one, is a press that does not drag.
+// The room's title bar drags the window through its plan: a plan without a card carries the drag region on its meter's
+// four elements, and the plan's card, when it has one, is a press that does not drag.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, test, vi } from "vitest";
@@ -82,7 +82,7 @@ test("the room's tools stay on one line, where the search folds instead of wrapp
   expect(bar?.classList.contains("flex-wrap")).toBe(false);
 });
 
-test("a plan with a card keeps the drag region on the meter inside its press", async () => {
+test("a plan with a card has no drag region: a press on it opens the card, never drags the window", async () => {
   await mount({
     name: "Claude",
     left: 0.5,
@@ -92,7 +92,8 @@ test("a plan with a card keeps the drag region on the meter inside its press", a
     card: <p>Every window</p>,
   });
   const press = host?.querySelector(".room-plan-press");
-  expect(dragging(press)).toBe(4);
+  expect(press).not.toBeNull();
+  expect(dragging(press)).toBe(0);
 });
 
 test("a stale plan with a card mutes its fill, inside the press where the meter has no role; a fresh one doesn't", async () => {
