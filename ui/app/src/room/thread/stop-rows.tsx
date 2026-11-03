@@ -1,11 +1,15 @@
 // How a turn ended, in the thread: the step (its stop line, and the change note with Undo when it changed papers) and
-// the stop at the usage limit with its reset. An Undo refused because a program holds a file shows the lock's lines
-// under the note, with Try again in Undo's place (word/word-lock.tsx); a note naming one Word document the wall lists
-// offers "Open in Word" while its changes stand (word/open-in-word.ts), and says why in its error line when the open
-// fails. Focus follows the lock: to Try again when the lines come, back to Undo (or the note) when they go.
+// the stop at the usage limit, its mark and its note with the reset (U12). An Undo refused because a program holds a
+// file shows the lock's lines under the note, with Try again in Undo's place (word/word-lock.tsx); a note naming one
+// Word document the wall lists offers "Open in Word" while its changes stand (word/open-in-word.ts), and says why in
+// its error line when the open fails. Focus follows the lock: to Try again when the lines come, back to Undo (or the
+// note) when they go.
 import { lazy, Suspense, useLayoutEffect, useRef, useState } from "react";
 import { late } from "@clauseo/components/lib/late.ts";
 import { ChangeNote } from "@clauseo/components/clauseo/change-note.tsx";
+import { NoticeCard, StopMark } from "@clauseo/components/clauseo/limit-note.tsx";
+import { IconChecking } from "@clauseo/components/icons/icons.tsx";
+import type { Lang } from "@clauseo/components/lib/display.ts";
 import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { lim } from "@clauseo/components/lib/words-limits.ts";
@@ -14,9 +18,10 @@ import { useWords } from "@clauseo/components/lib/words.ts";
 import { toHostError } from "../../transport/host-transport.ts";
 import { StoppedMark } from "../stopped-mark.tsx";
 import { takesMark } from "../thread-break.ts";
-import type { EntryId, LimitStopEntry, StepEntry } from "../../transport/protocol.ts";
+import type { EntryId, LimitStopEntry, StepEntry, Timestamp } from "../../transport/protocol.ts";
 import { useAgentPlan } from "./agent-plan.ts";
 import { isoOf, whenOf } from "./clock.ts";
+import { planNameOf, stopTimeOf, windowLine } from "./limit-words.ts";
 import { useBusy } from "./live.ts";
 import { useThreadActions } from "./session.ts";
 import { resetPassed, stopLine } from "./stops.ts";
@@ -159,16 +164,46 @@ export function StepRow({ id, entry }: { id: EntryId; entry: StepEntry }) {
   );
 }
 
+/** The reset as the stop's line says it on its own: "Resets 6:10 pm", its day form, or, once gone by, when it reset. */
+function resetWords(lang: Lang, resets: Timestamp, now: number): string {
+  const { day, time } = whenOf(lang, resets, now);
+  const passed = resetPassed(resets, now);
+  return day === null
+    ? lim(lang, passed ? "The limit reset at {time}." : "Resets {time}", { time })
+    : lim(lang, passed ? "The limit reset on {day} at {time}." : "Resets {day} {time}", {
+        day,
+        time,
+      });
+}
+
+/** The stop at the usage limit (U12, the design's limits/hit, weekly and unknown, without Finished, Left or the ways
+ * on): a plan window's stop marks where the answer stopped, "Stopped here at 4:52 pm", and its note says the plan's
+ * limit was reached at that time, with the window's line, "The 5-hour limit. It resets at 6:10 pm."; without the
+ * stop's time the title stands alone and no mark shows. A workspace's credits or spend cap, a temporary rate limit and
+ * a reason this version doesn't know leave the plan as it was: the note says the usage limit, and the reset. Concrete,
+ * never red, and no clock runs: "now" is the moment the row first showed. */
 export function LimitStopRow({ id, entry }: { id: EntryId; entry: LimitStopEntry }) {
   const w = useWords();
-  // only a used-up plan window is the plan's limit: a temporary rate limit, or one this version doesn't know, leaves
-  // the plan as it was
+  const agent = useAgentPlan();
   const plan = entry.reason === "plan_window";
-  // "now" as the row first showed: no clock runs to move it
   const [now] = useState(Date.now);
   const resets = entry.resets_at;
-  const when = resets === undefined ? null : whenOf(w.lang, resets, now);
-  const passed = resets !== undefined && resetPassed(resets, now);
+  const stopped = plan ? stopTimeOf(entry) : null;
+  const name = planNameOf(agent);
+  const at = stopped === null ? null : whenOf(w.lang, stopped, now);
+  const title = !plan
+    ? lim(w.lang, "Usage limit reached")
+    : at === null
+      ? lim(w.lang, "{name} plan limit reached", { name })
+      : lim(w.lang, "{name} plan limit reached at {time}", {
+          name,
+          time: at.day === null ? at.time : `${at.day} ${at.time}`,
+        });
+  const line =
+    resets === undefined
+      ? lim(w.lang, "Reset not given.")
+      : ((plan ? windowLine(w.lang, entry.window, resets, now) : null) ??
+        resetWords(w.lang, resets, now));
   return (
     <div
       data-testid="limit-stop"
@@ -177,34 +212,29 @@ export function LimitStopRow({ id, entry }: { id: EntryId; entry: LimitStopEntry
       role="status"
       className={ROW}
     >
-      <p>
-        <Say>{plan ? w.t("Claude plan limit reached") : lim(w.lang, "Usage limit reached")}</Say>
-      </p>
-      {entry.resets_at === undefined && (
-        <p className={QUIET}>
-          <Say>{lim(w.lang, "Reset not given.")}</Say>
+      {at !== null && (
+        <p className="lim-stop-line" data-testid="limit-stopped-here">
+          <StopMark>
+            {at.day === null
+              ? lim(w.lang, "Stopped here at {time}", { time: at.time })
+              : lim(w.lang, "Stopped here on {day} at {time}", { day: at.day, time: at.time })}
+          </StopMark>
         </p>
       )}
-      {resets !== undefined && when !== null && (
-        <p className={QUIET}>
-          <time data-testid="limit-resets-at" dateTime={isoOf(resets)}>
-            <Say>
-              {when.day === null
-                ? lim(w.lang, passed ? "The limit reset at {time}." : "Resets {time}", {
-                    time: when.time,
-                  })
-                : lim(
-                    w.lang,
-                    passed ? "The limit reset on {day} at {time}." : "Resets {day} {time}",
-                    {
-                      day: when.day,
-                      time: when.time,
-                    },
-                  )}
-            </Say>
-          </time>
-        </p>
-      )}
+      <NoticeCard
+        icon={<IconChecking size={18} />}
+        label={title}
+        title={title}
+        sub={
+          resets === undefined ? (
+            line
+          ) : (
+            <time data-testid="limit-resets-at" dateTime={isoOf(resets)}>
+              <Say>{line}</Say>
+            </time>
+          )
+        }
+      />
     </div>
   );
 }

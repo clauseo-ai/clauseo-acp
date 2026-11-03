@@ -1,11 +1,10 @@
 // @vitest-environment happy-dom
-// The room's thread over FakeTransport, the rows' side: tool calls, each stop line, the change note and its Undo, the
-// limit stop, a notice, images and attachments, a failed turn reopened, older pages, and the clock
+// The room's thread over FakeTransport, the rows' side: tool calls, each stop line, the change note and its Undo, a
+// notice (the limit stop's are in limit-stop.test.tsx), images and attachments, a failed turn reopened, older pages, and the clock
 // times on questions and answers.
 import { act } from "react";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { brk } from "@clauseo/components/lib/words-breaks.ts";
-import { lim } from "@clauseo/components/lib/words-limits.ts";
 import { th } from "@clauseo/components/lib/words-thread.ts";
 import { t } from "@clauseo/components/lib/words.ts";
 import { afterEach, expect, test, vi } from "vitest";
@@ -244,87 +243,10 @@ process.env["TZ"] = "Asia/Kolkata";
 
 /** A fixed "now", Monday 2 November 2026 at 3 pm local, so a run that crosses midnight reads the same. */
 const NOW = new Date(2026, 10, 2, 15, 0);
-const local = (days: number, h: number, m: number) => new Date(2026, 10, 2 + days, h, m).getTime();
 const fixNow = () => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(NOW);
 };
-const limit = (n: number, reason: string, resets_at?: number): ViewEntry => ({
-  limit_stop: {
-    order: 10 + n,
-    turn: uuid(n, 4),
-    reason: reason as never,
-    ts: 10_000 + n,
-    ...(resets_at === undefined ? {} : { resets_at }),
-  },
-});
-const resetsAt = (row: HTMLElement | undefined) =>
-  row?.querySelector<HTMLTimeElement>('[data-testid="limit-resets-at"]') ?? null;
-
-test("the limit stop: the plan's words, its reset as a time today, with the weekday within six days, with the date further off", async () => {
-  fixNow();
-  h = await mountRoom();
-  h.deliver([
-    reset([
-      limit(1, "plan_window", local(0, 23, 59)),
-      limit(2, "workspace_credits", local(2, 9, 5)),
-      limit(3, "workspace_spend_cap", local(9, 8, 0)),
-    ]),
-  ]);
-  const [plan, credits, cap] = h.all("limit-stop");
-  expect(plan?.textContent).toContain(t("en", "Claude plan limit reached"));
-  expect(resetsAt(plan)?.dateTime).toBe(new Date(local(0, 23, 59)).toISOString());
-  expect(resetsAt(plan)?.textContent).toBe(lim("en", "Resets {time}", { time: "11:59 pm" }));
-  expect(credits?.textContent).toContain(lim("en", "Usage limit reached"));
-  // 4 November 2026 is a Wednesday
-  expect(resetsAt(credits)?.textContent).toBe(
-    lim("en", "Resets {day} {time}", { day: "Wednesday", time: "9:05 am" }),
-  );
-  expect(resetsAt(cap)?.textContent).toBe(
-    lim("en", "Resets {day} {time}", { day: "11 November", time: "8:00 am" }),
-  );
-});
-
-test("a reset gone by says when it reset, in its time element: two days ago, earlier today, exactly now, ten days back", async () => {
-  fixNow();
-  h = await mountRoom();
-  const gone = [local(-2, 9, 0), local(0, 8, 0), NOW.getTime(), local(-15, 8, 0)];
-  h.deliver([reset(gone.map((at, i) => limit(i + 1, "plan_window", at)))]);
-  const rows = h.all("limit-stop");
-  // 31 October 2026 is a Saturday; ten days and more back reads the date
-  const lines = [
-    lim("en", "The limit reset on {day} at {time}.", { day: "Saturday", time: "9:00 am" }),
-    lim("en", "The limit reset at {time}.", { time: "8:00 am" }),
-    lim("en", "The limit reset at {time}.", { time: "3:00 pm" }),
-    lim("en", "The limit reset on {day} at {time}.", { day: "18 October", time: "8:00 am" }),
-  ];
-  expect(rows).toHaveLength(4);
-  rows.forEach((row, i) => {
-    expect(resetsAt(row)?.dateTime).toBe(new Date(gone[i]!).toISOString());
-    expect(resetsAt(row)?.textContent).toBe(lines[i]);
-    expect(row.textContent).toBe(t("en", "Claude plan limit reached") + lines[i]);
-    expect(row.textContent).not.toContain("Resets");
-  });
-  expect(lines[3]).toBe("The limit reset on 18 October at 8:00 am.");
-});
-
-test("only a used-up plan window is the plan's limit; without a reset the row says its own Reset not given.", async () => {
-  fixNow();
-  h = await mountRoom();
-  h.deliver([
-    reset([limit(1, "temporary"), limit(2, "unknown", local(1, 9, 0)), limit(3, "plan_window")]),
-  ]);
-  const [temporary, unknown, plan] = h.all("limit-stop");
-  expect(temporary?.textContent).toBe(
-    lim("en", "Usage limit reached") + lim("en", "Reset not given."),
-  );
-  expect(unknown?.textContent).toContain(lim("en", "Usage limit reached"));
-  expect(unknown?.textContent).not.toContain(t("en", "Claude plan limit reached"));
-  expect(plan?.textContent).toBe(
-    t("en", "Claude plan limit reached") + lim("en", "Reset not given."),
-  );
-  expect(plan?.textContent).not.toContain("Limit reached.");
-});
 
 test("a notice is a quiet line; a marker shows nothing and breaks nothing; a permission shows its prompt", async () => {
   h = await mountRoom();
