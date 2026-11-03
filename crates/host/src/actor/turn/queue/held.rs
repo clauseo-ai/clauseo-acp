@@ -16,7 +16,8 @@ pub(crate) fn queue_held(actor: &Actor, thread: ThreadId) -> bool {
 }
 
 /// Shows `queue_held` when it changed: through the loaded view, or in the header kept for
-/// `ListThreads` when the stream is not loaded.
+/// `ListThreads` when the stream is not loaded; the app's thread rows compare it at the next
+/// flush.
 pub(in super::super) fn sync_held(actor: &mut Actor, thread: ThreadId) {
     let shown = queue_held(actor, thread);
     let Some(queue) = queue(actor, thread) else {
@@ -26,6 +27,8 @@ pub(in super::super) fn sync_held(actor: &mut Actor, thread: ThreadId) {
         return;
     }
     queue.shown = shown;
+    // The row `ListThreads` and `ThreadsChanged` carry shows it too.
+    actor.lists.touch_thread(thread);
     let stream = StreamId::Thread(thread);
     let Actor {
         threads,

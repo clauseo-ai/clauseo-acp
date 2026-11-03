@@ -303,6 +303,14 @@ export type AvailableCommand = {
 	input_hint?: string,
 };
 
+/**  A tool call that carried on in the background while its turn answered a steered message. */
+export type BackgroundMark = {
+	/**  The steered message it made way for. */
+	steer: MessageId,
+	/**  When it finished: the `ts` of the update that gave it a final status; `None` until then. */
+	finished_at?: Timestamp,
+};
+
 /**  How an account pays. */
 export type Billing = 
 /**  A subscription plan with usage windows. */
@@ -1318,6 +1326,15 @@ export type HeaderEntry = {
 	 *  Missing reads as `false`, so a header written before the field still decodes.
 	 */
 	queue_held?: boolean,
+	/**
+	 *  Whether a steered message joins the running turn (`SendPrompt` with `delivery: steer`):
+	 *  true only for an agent whose steer adds to the answer, which needs both of
+	 *  [`SteeringCapability`](crate::SteeringCapability)'s flags (claude-agent-acp). False
+	 *  means a steer cancels the running turn and sends the message as the next turn (the
+	 *  answer so far is kept). Known before the first send: from the agent's kind until its
+	 *  first session attaches, then from that session's capabilities. Missing reads as `false`.
+	 */
+	steer_joins_turn?: boolean,
 	/**  The agent's current mode, if it reported one. */
 	mode_id?: string,
 	/**  The agent's config options (mode, model, thought level, others). */
@@ -1421,15 +1438,25 @@ export type HostCommand =
 	 *  [`MAX_PROMPT_FILES`] `File` blocks.
 	 */
 	content: PromptBlock[],
+	/**
+	 *  How to deliver it while a turn runs; missing means queue, and queue is written as a
+	 *  missing field. A mode this version does not know is refused when the command decodes.
+	 */
+	delivery?: DeliveryRequest,
 } }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; forget_matter?: never; mark_seen?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_ui_settings?: never; undo_step?: never; update_matter?: never } | 
-/**  Replace a queued prompt's content; the turn keeps its id and its place. */
+/**  Replace a queued prompt's text; the turn keeps its id, its place and its file blocks. */
 ({ edit_queued_prompt: {
 	/**  The thread. */
 	thread: ThreadId,
 	/**  The queued turn. */
 	turn: TurnId,
-	/**  The new content, under the rules of `SendPrompt`'s `content`. */
-	content: PromptBlock[],
+	/**
+	 *  The new text: it replaces the prompt's first text block, its other text blocks are
+	 *  dropped, and every file block stays where it was. At most
+	 *  [`MAX_PROMPT_TEXT_BYTES`] UTF-8 bytes. Empty keeps only the files, so the host
+	 *  refuses it for a prompt without one (`command.invalid`).
+	 */
+	text: string,
 } }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; forget_matter?: never; mark_seen?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_ui_settings?: never; undo_step?: never; update_matter?: never } | 
 /**  Remove a queued prompt; its turn ends cancelled without starting. */
 ({ remove_queued_prompt: {
@@ -2830,6 +2857,13 @@ export type SteerResolved = {
 	message: MessageId,
 	/**  Where it went. */
 	outcome: SteerOutcome,
+	/**
+	 *  For an `Injected` steer, the running turn's tool calls that had not finished when the
+	 *  agent took it: an agent that pre-empts its answer for a steer (claude-agent-acp) lets
+	 *  them carry on in the background. Empty is written as a missing field, and a missing
+	 *  field reads as empty.
+	 */
+	aside?: ToolCallId[],
 };
 
 /**  How an agent takes a message steered into its running turn. `acp` fills both. */
@@ -3199,6 +3233,11 @@ export type ToolCallEntry = {
 	raw_output?: TextOrBlob,
 	/**  What it shows. */
 	content: ToolCallContent[],
+	/**
+	 *  Set when it had not finished as a steer joined its turn, so it carried on in the
+	 *  background (`SteerResolved`'s `aside`). Missing reads as `None`.
+	 */
+	background?: BackgroundMark,
 };
 
 /**
@@ -3499,6 +3538,11 @@ export type UserMessage = {
 	acp_message_id?: string,
 	/**  What it says. */
 	content: ContentBlock[],
+	/**
+	 *  How the lawyer asked it to be delivered. Queue is written as a missing field, and a
+	 *  missing field reads as queue.
+	 */
+	delivery?: Delivery,
 };
 
 /**  A prompt the lawyer sent. Entry id `user_message:<message>`. */
@@ -3517,6 +3561,11 @@ export type UserMessageEntry = {
 	 *  and its index add the rest of each cut block.
 	 */
 	content: ContentBlock[],
+	/**
+	 *  How it was asked to be delivered. Queue is written as a missing field, and a missing
+	 *  field reads as queue.
+	 */
+	delivery?: Delivery,
 	/**  Where it stands in the queue. */
 	status: UserMessageStatus,
 	/**  Whether it was edited while queued. */
