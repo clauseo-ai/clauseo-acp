@@ -124,6 +124,19 @@ test("the menu stands at the caret's x, below the field, or above it at the wind
   );
 });
 
+test("near the room column's right edge the menu keeps 8 px inside the column, left of the caret (#117 M2-ta3, WKWebView)", () => {
+  // the run's numbers: the column (.room-centre) ends at 935.6 px in a 1280 px window and at 794 px once 100 px
+  // narrower; the menu is 262 px wide; the caret on line 3 of the Tamil text stood at 711.1, then 552.4. The menu
+  // stood at 666, then 524: the column's clamp, not a caret measured wrong (the run's check knew only the window's)
+  const line = { top: 739, bottom: 765 };
+  const wide = { left: 200, top: 0, right: 935.6, bottom: 800 };
+  const narrow = { left: 12, top: 0, right: 794, bottom: 800 };
+  expect(placeMenu({ x: 711.1, ...line }, { width: 262, height: 412 }, wide).left).toBe(666);
+  expect(placeMenu({ x: 552.4, ...line }, { width: 262, height: 412 }, narrow).left).toBe(524);
+  // short of the clamp, at the caret
+  expect(placeMenu({ x: 600, ...line }, { width: 262, height: 412 }, wide).left).toBe(600);
+});
+
 test("the open menu is placed again as the field's own size changes, before that frame paints; closed, it watches no more", async () => {
   // the field's size observers, and the frames they ask for, held until the test runs them
   const watching: { cb: ResizeObserverCallback; targets: Element[]; gone: boolean }[] = [];
