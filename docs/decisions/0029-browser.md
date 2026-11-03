@@ -248,16 +248,29 @@ session that cannot get the browser makes no file system calls for it. In order:
 The Chrome for Testing download is added by a later S27 PR (part 3).
 
 Linux (development and CI only): `/usr/bin/google-chrome`, then `/usr/bin/chromium`. A path
-counts when it is a regular file, following links. Every root comes in through `ChromeRoots`
+counts when it is a regular file, following links (an installed Chrome may be one). In
+`<app data>/browsers/` a version folder must be a real folder (`file_type`, no link followed)
+and the binary, links resolved, must sit under the browsers folder, so a planted link picks
+nothing. That folder must stay outside what any agent can write (in tier C too). Every root comes in through `ChromeRoots`
 (`HostConfig::with_chrome_roots`; production uses `ChromeRoots::system`, which reads `HOME`,
 `ProgramFiles`, `ProgramFiles(x86)` and `LOCALAPPDATA`). The tests use one fixture folder per
 case (`browser/chrome/tests.rs`), ARM64 included, and `tests/host/browser.rs` checks that the
 Chrome found reaches `session/new`. `with_browser_executable` stays as a test-support override.
 
+**agent-browser's config file.** The guard refuses an `AGENT_BROWSER_CONFIG` that names no
+file, so the same prep, once it has found a Chrome, makes `<data>/browser/` (through no link
+below the data folder, 0700 on Unix) and writes `{}` to `agent-browser.json` there when it is
+absent (`browser::write_config`, through the host's write path; a link at the file's name is
+replaced, never followed; an existing file is kept). A failed write leaves the session without
+the browser (`BrowserNotInstalled`), with a warning. `tests/host/browser.rs` checks the file
+after a browser session starts and that its path is the one the profile's entry names. The
+smoke test writes its own config file, which stands in for this one.
+
 #### Slots and limits (`host/src/browser/limits.rs`)
 
-`slot_limit(total_memory_bytes)` is 2 at 8 GiB or less, 4 above. The constants: idle timeout
-600000 ms, default timeout 30000 ms, max output 25000 characters. PR-B's `with_browser_slots`
+`slot_limit(total_memory_bytes)` is 2 at 8 GiB or less, 4 above. The idle timeout (600000 ms),
+default timeout (30000 ms) and max output (25000 characters) are the guard's alone
+(`crates/mcp`); the host keeps no copy. PR-B's `with_browser_slots`
 stand-in is gone. The actor holds a `BrowserSlots` (the limit and the set of `SessionKey`s
 holding one). `profile_loads::session_loads` checks it before filling the entry
 (`TooManyBrowsers` when none is free; a session that already holds one keeps it, so its
@@ -314,7 +327,22 @@ machine outside India: all 25 resolve, and so do the eight national sites (`rbi.
 serves or a court or eCommittee listing. Bombay's and Kerala's sites did not answer HTTPS from
 that machine (DNS resolves); Bombay's host rests on a directory listing. Karnataka has no
 dedicated domain: `judiciary.karnataka.gov.in` serves "High Court of Karnataka". Madras's older
-`hcmadras.tn.nic.in` also resolves; the current `.gov.in` host is listed. Guessed hosts that do
+`hcmadras.tn.nic.in` also resolves; the current `.gov.in` host is listed.
+
+Re-checked on 2026-11-03 at 02:31 UTC after review, with `getent hosts` and `curl -sI` over
+HTTPS:
+- Kerala: `hckerala.gov.in` does not resolve; `highcourt.kerala.gov.in` resolves
+  (103.135.131.179) and answers HTTPS 200 with the title "HIGH COURT OF KERALA". Kept.
+- Madras: `hcmadras.tn.gov.in` resolves (103.59.64.38) and answers HTTPS 200 with the title
+  "Madras High Court": the court's home page, which links to everything else. `mhc.tn.gov.in`
+  resolves (164.100.134.181) and hosts the court's services (`/judis/` judgments and cause
+  lists, case status, recruitment), but its `/` redirects to `/recruitment/` and its
+  certificate chain did not verify from here (curl exit 60). Kept `hcmadras.tn.gov.in`; the
+  judgments host `mhc.tn.gov.in` is not seeded, so it asks once per matter. Whether to seed it
+  too is for G17.
+- Allahabad: `allahabadhighcourt.in` is the only seeded host on an openly registrable domain
+  (not `gov.in` or `nic.in`), so it alone could lapse or be squatted; a seed list bump must
+  re-check who holds it. Guessed hosts that do
 not resolve (`karnatakahighcourt.gov.in`, `nainitalhc.gov.in`, `sikkimhighcourt.nic.in`,
 `tripurahighcourt.nic.in`, `manipurhighcourt.gov.in`, `orissahighcourt.gov.in`,
 `highcourtofkerala.gov.in`) are not listed. Rules match exact hosts, so a site that redirects to
@@ -329,8 +357,10 @@ flags (`--disable-background-networking`, `--disable-component-update`, `--disab
 (`safebrowsing.googleapis.com`, `sb-ssl.google.com`; no `--safebrowsing-disable-auto-update`),
 the optimization guide (`optimizationguide-pa.googleapis.com`), autofill predictions
 (`content-autofill.googleapis.com`), the variations seed (`clientservices.googleapis.com`) and
-sign-in checks (`accounts.google.com`). Stage C's proxy reads both lists; the `browser` module
-is public for it.
+sign-in checks (`accounts.google.com`). The denial applies to browser sessions only, never to
+the agent's own traffic. `accounts.google.com` in particular is provisional for G17 item 5:
+denying it without a card breaks Google sign-in on every site. Stage C's proxy reads both
+lists; the `browser` module is public for it.
 
 ### Bundling agent-browser
 
@@ -348,12 +378,18 @@ The host records one `PageVisited { via: Browser }` per completed open, built wi
   (`:29520-29522`); the completed update repeats the input and carries `{ result, error }` as
   `rawOutput` (`:29507-29513`, `:29524`), with no title and no `content`.
 - **The URL** is the `url` of the last `rawInput` the host had for that tool call id (top level,
-  or under Codex's `arguments`), read when an update reports `completed`. An input stored as a
-  blob is passed over.
+  or under Codex's `arguments`), read when an update reports `completed`. A value with no `:`
+  gets `https://` in front, as agent-browser does; then only `http` and `https` URLs count, so
+  `about:blank` and other schemes write nothing. An input stored as a blob is passed over.
+- **An error result is no visit.** A completed call whose `rawOutput` has a non-null `error`
+  (Codex) or `isError: true` (at its top level or under `result`), or whose text starts with the
+  guard's "Clauseo does not allow", writes nothing.
 - **The title** is the tool result's text, its first line: the first text content (Claude), else
   the first text of `rawOutput`'s MCP result (`content`, or Codex's `result.content`). For an open
   agent-browser's text is the page's title (`cli/src/mcp.rs`, `response_text` takes `title` before
-  `url`). A text equal to the URL gives no title.
+  `url`). A text equal to the URL gives no title. Control characters and the bidi formatting
+  characters (U+202A to U+202E, U+2066 to U+2069) are taken out, so a page cannot spoof the
+  sources list.
 - **Only the live turn.** The open is followed on the current turn (`Current::browser_opens`);
   `Origin::Late` and `Origin::Replay` updates never reach it (`actor/turn/updates.rs` drops them
   first), so an agent's replay on `session/load` writes nothing. A failed, cancelled or unfinished
@@ -389,6 +425,16 @@ when the proxy log holds only `example.com:443`, `smoke.test:<port>` and `127.0.
 the pixel came through the proxy, no UDP `host` or `srflx` candidate was reported, and no
 `agent-browser-chrome-*` temp profile is left under `--cwd` (the test first checks one existed
 while Chrome ran). The guard's `url` check refuses loopback hosts, so the pages use `smoke.test`.
+The WebRTC page also reports `iceGatheringState` and whether its SDP has an `m=application`
+line; both must show gathering ran (`complete`, true), so an empty candidate list cannot pass
+because WebRTC never started. The page also `fetch`es `http://127.0.0.1:<port2>/pixel2`, and both
+loopback requests must carry the proxy's marker header.
+
+Limits: the proxy log sees only what reaches the proxy, so "no other host" cannot catch a
+connection that bypasses it; only the two loopback requests, which arrive marked by the proxy,
+prove the path. Hosts from `DENY_HOSTS` in the log are printed apart and do not fail the test:
+they are G17 item 5's finding (which background hosts Chrome still reaches), not a leak around
+the proxy.
 
 `crates/host/tests/browser_smoke.rs` (ignored in normal runs). Run it on the Mac mini and on the
 Windows VM:
@@ -424,6 +470,9 @@ The host part:
 - `seed_sites.rs`'s constant changes from `[&str; 8]` to `&[&str]`, and `browser` becomes a
   public module so stage C's proxy can read both lists.
 - `with_browser_executable` stays as a test-support override beside `with_chrome_roots`.
+- The host writes agent-browser's config file (`{}`) at the launch prep, only when a Chrome was
+  found; a failed write is reported as `BrowserNotInstalled`, the nearest existing reason.
+- `BrowserLaunch::InJail` is accepted and not stored: it is what the host does anyway.
 - This file is copied from PR #200's branch with the host part added; it merges with #200's copy
   when either lands.
 - The smoke test is longer than planned (about 790 lines: `browser_smoke.rs` and four modules in
