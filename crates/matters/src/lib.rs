@@ -74,6 +74,13 @@
 //!   that the folder spells otherwise (`sub/` for the history's `Sub/c.txt`) is written into
 //!   as the file system finds it, so the next checkpoint records `sub/c.txt`; no file is
 //!   replaced.
+//! - Names are kept byte for byte: a path is stored, listed and restored exactly as the file
+//!   system gave it, in whatever Unicode form. A match that refuses (owner files in
+//!   [`held_open`] and [`held_open_at`], refused folders, [`same_or_nested`]) compares names
+//!   composed (NFC) everywhere, with case ignored on macOS and Windows, so a name in either
+//!   form is caught. A match that allows ([`matter_path_in`], the folder relink writes into)
+//!   compares as the OS's file system does: byte for byte on Linux, ignoring case on Windows,
+//!   and case and Unicode form on macOS (decision 0007, Unicode names).
 //! - The API is synchronous; writes take `&mut Matter`. The writer lock, the turn queue and the
 //!   "turn running" check are the host's. No clock is read and no id is minted here.
 //!

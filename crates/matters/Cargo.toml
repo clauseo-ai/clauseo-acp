@@ -15,6 +15,9 @@ gix = { workspace = true, features = ["index", "revision", "sha1"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+# NFC for the safety matches on names: owner files and refused or claimed folders
+# (decision 0007, Unicode names).
+unicode-normalization = { workspace = true }
 tracing = { workspace = true }
 # clippy.toml bans std's canonicalize in favour of dunce's, for the refused-folder check.
 dunce = { workspace = true }

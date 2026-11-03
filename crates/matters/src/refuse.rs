@@ -8,12 +8,15 @@ use std::ffi::OsString;
 use std::io;
 use std::path::{Component, Path, PathBuf, Prefix};
 
+use unicode_normalization::UnicodeNormalization;
+
 use crate::matter::json;
 use crate::{Error, MissingReason, Refusal, Settings};
 
 /// Refuses `folder` if, once canonicalised, it is a drive root, or equals or contains an entry of
 /// `refused` (each canonicalised too, or taken as written when that fails). Paths are compared
-/// by components: ASCII- and Unicode-case-insensitively on macOS and Windows, exactly elsewhere.
+/// by components ([`spellings`]): composed (NFC) everywhere, and ASCII- and Unicode-case-
+/// insensitively on macOS and Windows.
 /// On macOS a path under `/System/Volumes/Data` is also compared without that prefix.
 pub(crate) fn check_folder(folder: &Path, refused: &[PathBuf]) -> Result<(), Error> {
     let canonical = dunce::canonicalize(folder).map_err(|err| {
@@ -108,7 +111,8 @@ pub(crate) fn check_outside_root(folder: &Path, settings: &Settings) -> Result<(
 
 /// Whether `a` and `b` are the same folder or one holds the other, compared as the refused-folder
 /// check compares paths: each canonicalised (taken as written when that fails, so a folder that
-/// has moved away still compares), by components, case-insensitively on macOS and Windows, and on
+/// has moved away still compares), by components, composed (NFC) everywhere, case-insensitively
+/// on macOS and Windows, and on
 /// macOS with and without `/System/Volumes/Data`. For the host's registry check before
 /// [`Matter::locate`](crate::Matter::locate) and [`Matter::relink`](crate::Matter::relink): a
 /// folder that is, contains or sits inside another registered matter's folder.
@@ -126,14 +130,17 @@ fn nested(a: &[Vec<OsString>], b: &[Vec<OsString>]) -> bool {
     })
 }
 
-/// Whether `a` and `b` name the same folder once canonicalised, compared as [`check_folder`]
-/// compares paths (case-insensitively on macOS and Windows, firmlink spellings on macOS). A path
-/// that does not canonicalise (it no longer exists) is the same as nothing.
+/// Whether `a` and `b` name the same folder once canonicalised, compared as this OS's default
+/// file system compares names ([`Fold::FileSystem`]: case-insensitively on macOS and Windows,
+/// and on macOS also across Unicode forms; firmlink spellings on macOS). Not the safety fold:
+/// [`Matter::relink`](crate::Matter::relink) writes into the folder this names, so a folder
+/// whose name only another Unicode form matches is another folder on ext4 and NTFS. A path that
+/// does not canonicalise (it no longer exists) is the same as nothing.
 pub(crate) fn same_folder(a: &Path, b: &Path) -> bool {
     let (Ok(a), Ok(b)) = (dunce::canonicalize(a), dunce::canonicalize(b)) else {
         return false;
     };
-    let (a, b) = (spellings(&a), spellings(&b));
+    let (a, b) = (keys_by(&a, Fold::FileSystem), keys_by(&b, Fold::FileSystem));
     a.iter().any(|key| b.contains(key))
 }
 
@@ -209,11 +216,35 @@ fn is_macos_volume_key(key: &[OsString]) -> bool {
     }
 }
 
-/// The comparison keys of `path`: its components, case-folded on macOS and Windows, with the
-/// Windows verbatim prefix forms made plain. On macOS a key starting with
-/// `/System/Volumes/Data` comes twice: as it is and without those three parts.
+/// How names are folded before two paths are compared.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Fold {
+    /// The safety matches, where a match refuses (refused folders, a folder holding or inside
+    /// another matter's, a path checked for an owner file): composed (NFC) everywhere, so
+    /// either Unicode form is caught, and lower case on macOS and Windows (decision 0007,
+    /// Unicode names).
+    Safety,
+    /// As this OS's default file system finds names: lower case and NFC on macOS (APFS), lower
+    /// case on Windows (NTFS), byte for byte elsewhere. For a match that allows something (the
+    /// folder relink writes into, a path counted inside the matter): ext4 and NTFS tell the
+    /// Unicode forms apart, so folding there would cover a sibling spelled in the other form.
+    FileSystem,
+}
+
+/// The comparison keys of `path` for the safety matches ([`Fold::Safety`]): its components,
+/// composed (NFC) and case-folded on macOS and Windows, with the Windows verbatim prefix forms
+/// made plain. On macOS a key starting with `/System/Volumes/Data` comes twice: as it is and
+/// without those three parts.
 pub(crate) fn spellings(path: &Path) -> Vec<Vec<OsString>> {
-    let key: Vec<OsString> = path.components().map(component_key).collect();
+    keys_by(path, Fold::Safety)
+}
+
+/// [`spellings`] folded by `fold`.
+pub(crate) fn keys_by(path: &Path, fold: Fold) -> Vec<Vec<OsString>> {
+    let key: Vec<OsString> = path
+        .components()
+        .map(|component| component_key(component, fold))
+        .collect();
     let mut keys = Vec::with_capacity(2);
     #[cfg(target_os = "macos")]
     if let [_root, system, volumes, data, ..] = key.as_slice()
@@ -230,7 +261,7 @@ pub(crate) fn spellings(path: &Path) -> Vec<Vec<OsString>> {
 }
 
 /// One component's comparison key.
-fn component_key(component: Component<'_>) -> OsString {
+fn component_key(component: Component<'_>, how: Fold) -> OsString {
     match component {
         Component::Prefix(prefix) => match prefix.kind() {
             Prefix::Disk(letter) | Prefix::VerbatimDisk(letter) => {
@@ -241,27 +272,32 @@ fn component_key(component: Component<'_>) -> OsString {
                 text.push(server);
                 text.push(r"\");
                 text.push(share);
-                fold(text)
+                fold(text, how)
             }
-            Prefix::Verbatim(_) | Prefix::DeviceNS(_) => fold(prefix.as_os_str().to_owned()),
+            Prefix::Verbatim(_) | Prefix::DeviceNS(_) => fold(prefix.as_os_str().to_owned(), how),
         },
         Component::RootDir => OsString::from("/"),
         Component::CurDir | Component::ParentDir | Component::Normal(_) => {
-            fold(component.as_os_str().to_owned())
+            fold(component.as_os_str().to_owned(), how)
         }
     }
 }
 
-/// `name` lowercased on the case-insensitive file systems (macOS, Windows) when it is UTF-8;
-/// as it is elsewhere.
-fn fold(name: OsString) -> OsString {
-    if cfg!(any(target_os = "macos", windows)) {
-        match name.to_str() {
-            Some(text) => OsString::from(text.to_lowercase()),
-            None => name,
-        }
-    } else {
-        name
+/// `name` folded as `how` says, when it is UTF-8: lower case on the case-insensitive file
+/// systems (macOS, Windows), composed (NFC) on macOS and, for [`Fold::Safety`], everywhere (ext4
+/// and NTFS tell the forms apart, and refusing there is the safe side). A name that is not
+/// UTF-8 is as it is.
+fn fold(name: OsString, how: Fold) -> OsString {
+    let Some(text) = name.to_str() else {
+        return name;
+    };
+    let lower = cfg!(any(target_os = "macos", windows));
+    let nfc = !text.is_ascii() && (how == Fold::Safety || cfg!(target_os = "macos"));
+    match (lower, nfc) {
+        (true, true) => OsString::from(text.to_lowercase().nfc().collect::<String>()),
+        (true, false) => OsString::from(text.to_lowercase()),
+        (false, true) => OsString::from(text.nfc().collect::<String>()),
+        (false, false) => name,
     }
 }
 

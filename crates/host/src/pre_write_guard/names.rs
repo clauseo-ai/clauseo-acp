@@ -92,15 +92,15 @@ pub(super) fn held_files(folder: &Path) -> Vec<Held> {
     held
 }
 
-/// `text` as the file system compares names: lower case on macOS and Windows, and on macOS also
-/// composed (NFC), since APFS finds a name typed in either Unicode form; as it is elsewhere.
+/// `text` as the safety matches compare names (decision 0007, Unicode names): composed (NFC)
+/// everywhere, so a held name typed in the other Unicode form is caught (APFS finds it; ext4
+/// and NTFS would make another file, and refusing is the safe side), and lower case on macOS
+/// and Windows, whose file systems ignore case.
 fn fold(text: &str) -> String {
-    if cfg!(target_os = "macos") {
+    if cfg!(any(target_os = "macos", windows)) {
         text.to_lowercase().nfc().collect()
-    } else if cfg!(windows) {
-        text.to_lowercase()
     } else {
-        text.to_owned()
+        text.nfc().collect()
     }
 }
 

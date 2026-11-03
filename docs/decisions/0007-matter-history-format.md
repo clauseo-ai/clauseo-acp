@@ -193,12 +193,42 @@ deletion never removes a file just put back. Neither writes a name the folder ho
 otherwise (another case or normalisation), which would replace that other file; a restore never
 deletes.
 
+### Unicode names
+
+Added 2026-11-03, when Hindi content became a requirement. A Devanagari name can be written in
+more than one Unicode form: `ऱ` is U+0931 composed (NFC) or `र` + nukta U+093C decomposed (NFD),
+and the nukta letters U+0958-095F (`क़`) are composition exclusions, so NFC writes them
+decomposed while a keyboard may type the precomposed letter. APFS (macOS) finds a name in any
+form; ext4 (Linux) and NTFS (Windows) keep each form a separate file.
+
+- `MatterPath` stays byte for byte (`crates/protocol/src/ids/strings.rs`): ids carry exactly
+  the name the file system gave. Listing papers, checkpoints, `files_at`, comparisons, undo and
+  restore store and return names as stored, never normalised. The crate walks the folder itself
+  and writes its own trees and config (no `core.precomposeunicode`, no git worktree code), so
+  the name a checkpoint records is the one `read_dir` returned, and undo and restore write those
+  bytes back: on macOS an NFD name comes back NFD.
+- Two names that differ only by form are two files on Linux and Windows and one on macOS; tests
+  assert each OS's answer (`crates/matters/tests/matters/devanagari.rs`).
+- A match that refuses compares names composed (NFC) on every OS, with case ignored on macOS and
+  Windows, so a name in either form is caught: Word's owner file (`~$…`) beside a document,
+  in `held_open` and `held_open_at` (a non-ASCII name the exact stats miss is looked for in the
+  folder's listing), the refused-folder check, `same_or_nested` ("already a matter", a nested
+  matter, the agents' data folder) and the host's pre-write guard. On Linux and Windows that may
+  refuse a sibling file that only shares the name's letters: the safe side.
+- A match that allows compares as the OS's file system does: byte for byte on Linux, ignoring
+  case on Windows, ignoring case and form on macOS. That is `matter_path_in` (a path counted as
+  the matter's, which joins a turn's paths and frees a folder for the guard's "outside" reads)
+  and the folder `Matter::relink` writes `matter.json` into; folding there would cover a sibling
+  spelled in the other form.
+
 ### `ARCHITECTURE.md`
 
 The `matters` row becomes: Owns "Shadow repos via gix: create and import, checkpoints, undo, restore,
 compare, file watching; retention after G9"; May depend on "protocol, gix, notify, serde, serde_json,
 tracing, dunce; nix (macOS only)"; Never depends on "tauri"; Status `exists`. `dunce` is the
 workspace's canonicalize (the root `clippy.toml` bans std's), used by the refused-folder check.
+Since the Unicode names section, also `unicode-normalization`, for the NFC of the refusing
+matches.
 
 ## Consequences
 
