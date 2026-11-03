@@ -37,12 +37,25 @@ function call(kind: ToolKind, status: ToolCallStatus = "completed", touch: Touch
   };
   return { tool_call: { ...entry, order: 10 + next } };
 }
-const many = (n: number, make: () => ViewEntry) => Array.from({ length: n }, make);
 
 const LEASE = { path: "papers/2019/Lease deed.pdf" };
 const SEARCH = { raw: { pattern: "notice period" } };
 const SITE = { raw: { url: "https://indiankanoon.org/doc/1/" } };
 const ONLINE = { raw: { query: "Section 138 NI Act" } };
+// the matter's papers as the agent names them, by their full paths (the row shows the file's name, its folder on
+// hover), and what it searched for: the frames with more than one step read like the prototype's list
+const SHARMA = "/Users/x/Matters/Sharma";
+const paper = (name: string): Touch => ({ raw: { file_path: `${SHARMA}/${name}` } });
+const COMPLAINT = paper("Complaint.pdf");
+const FORM = paper("Form DIR-12.pdf");
+const MANDATE = paper("Bank mandate.pdf");
+const MINUTES = paper("Board minutes, 3 March 2023.pdf");
+const REPLY = paper("Reply to the complaint.docx");
+const ANNEXURE = paper("Annexure P-3.pdf");
+const sought = (pattern: string): Touch => ({ raw: { pattern } });
+const LIVELAW = { raw: { url: "https://www.livelaw.in/supreme-court/" } };
+const task = (description: string): Touch => ({ raw: { command: "…", description } });
+const titled = (title: string): Touch => ({ title });
 
 /** The settled thread with these calls before the answer; `open` presses the group's line. */
 function settled(calls: ViewEntry[], open: boolean) {
@@ -97,7 +110,10 @@ export const UTC: Entry[] = [
   opened("UTC-15", "Thought it through.", [call("think")]),
   opened("UTC-16", "Did one other thing.", [call("other")]),
   // a row's state
-  opened("UTC-17", "Waiting", [call("read", "completed", LEASE), call("edit", "pending", LEASE)]),
+  opened("UTC-17", "Waiting", [
+    call("read", "completed", COMPLAINT),
+    call("edit", "pending", REPLY),
+  ]),
   // a row that failed or was stopped: what it set out to do, in the past
   opened("UTC-65", "Tried to read {name}.", [call("read", "failed", LEASE)]),
   opened("UTC-66", "Tried to read the papers.", [call("read", "failed")]),
@@ -121,88 +137,91 @@ export const UTC: Entry[] = [
   folded(
     "UTC-20",
     "{n} papers read.",
-    many(4, () => call("read", "completed", LEASE)),
+    [COMPLAINT, FORM, MANDATE, MINUTES].map((p) => call("read", "completed", p)),
   ),
-  folded("UTC-21", "1 paper changed.", [call("edit")]),
-  folded(
-    "UTC-22",
-    "{n} papers changed.",
-    many(2, () => call("edit")),
-  ),
-  folded("UTC-23", "1 paper deleted.", [call("delete")]),
-  folded(
-    "UTC-24",
-    "{n} papers deleted.",
-    many(2, () => call("delete")),
-  ),
-  folded("UTC-25", "1 paper moved.", [call("move")]),
-  folded(
-    "UTC-26",
-    "{n} papers moved.",
-    many(2, () => call("move")),
-  ),
+  folded("UTC-21", "1 paper changed.", [call("edit", "completed", REPLY)]),
+  folded("UTC-22", "{n} papers changed.", [
+    call("edit", "completed", REPLY),
+    call("edit", "completed", paper("List of dates.docx")),
+  ]),
+  folded("UTC-23", "1 paper deleted.", [call("delete", "completed", paper("Draft notes.docx"))]),
+  folded("UTC-24", "{n} papers deleted.", [
+    call("delete", "completed", paper("Draft notes.docx")),
+    call("delete", "completed", paper("Old reply.docx")),
+  ]),
+  folded("UTC-25", "1 paper moved.", [call("move", "completed", ANNEXURE)]),
+  folded("UTC-26", "{n} papers moved.", [
+    call("move", "completed", ANNEXURE),
+    call("move", "completed", paper("Annexure P-4.pdf")),
+  ]),
   folded("UTC-27", "Searched once.", [call("search", "completed", SEARCH)]),
   folded(
     "UTC-28",
     "Searched {n} times.",
-    many(3, () => call("search", "completed", SEARCH)),
+    ["S.M.S. Pharmaceuticals", "Pooja Ravinder Devidasani", "Sunita Palita"].map((q) =>
+      call("search", "completed", sought(q)),
+    ),
   ),
   folded("UTC-29", "Looked online once.", [call("fetch", "completed", SITE)]),
-  folded(
-    "UTC-30",
-    "Looked online {n} times.",
-    many(2, () => call("fetch", "completed", SITE)),
-  ),
-  folded("UTC-31", "Ran 1 task.", [call("execute")]),
-  folded(
-    "UTC-32",
-    "Ran {n} tasks.",
-    many(2, () => call("execute")),
-  ),
+  folded("UTC-30", "Looked online {n} times.", [
+    call("fetch", "completed", SITE),
+    call("fetch", "completed", LIVELAW),
+  ]),
+  folded("UTC-31", "Ran 1 task.", [call("execute", "completed", task("Count the pages"))]),
+  folded("UTC-32", "Ran {n} tasks.", [
+    call("execute", "completed", task("Count the pages")),
+    call("execute", "completed", task("Number the paper book")),
+  ]),
   folded("UTC-33", "Planned the work.", [call("think")]),
-  folded("UTC-34", "Did 1 other thing.", [call("other")]),
-  folded(
-    "UTC-35",
-    "Did {n} other things.",
-    many(2, () => call("other")),
-  ),
+  folded("UTC-34", "Did 1 other thing.", [
+    call("other", "completed", titled("Ask the court's records")),
+  ]),
+  folded("UTC-35", "Did {n} other things.", [
+    call("other", "completed", titled("Ask the court's records")),
+    call("other", "completed", titled("Check the cause list")),
+  ]),
   folded("UTC-36", "And 1 more.", [
-    call("read"),
-    call("read"),
-    call("search"),
-    call("edit"),
-    call("fetch"),
+    call("read", "completed", COMPLAINT),
+    call("read", "completed", FORM),
+    call("search", "completed", sought("S.M.S. Pharmaceuticals")),
+    call("edit", "completed", REPLY),
+    call("fetch", "completed", SITE),
   ]),
   folded("UTC-37", "And {n} more.", [
-    call("read"),
-    call("read"),
-    call("search"),
-    call("edit"),
-    call("fetch"),
-    call("move"),
+    call("read", "completed", COMPLAINT),
+    call("read", "completed", FORM),
+    call("search", "completed", sought("S.M.S. Pharmaceuticals")),
+    call("edit", "completed", REPLY),
+    call("fetch", "completed", SITE),
+    call("move", "completed", ANNEXURE),
   ]),
   // what failed or was stopped, kept on the folded line
   // UTC-38 and UTC-41 ("It failed.", "It was stopped.") are gone: a group of one that failed says what it tried, once
   folded("UTC-39", "1 of them failed.", [
-    call("read", "completed", LEASE),
+    call("read", "completed", COMPLAINT),
     call("fetch", "failed", SITE),
   ]),
   folded("UTC-40", "{n} of them failed.", [
-    call("read"),
-    ...many(2, () => call("fetch", "failed", SITE)),
+    call("read", "completed", COMPLAINT),
+    call("fetch", "failed", SITE),
+    call("fetch", "failed", LIVELAW),
   ]),
-  folded("UTC-42", "1 of them was stopped.", [call("read"), call("read", "cancelled", LEASE)]),
+  folded("UTC-42", "1 of them was stopped.", [
+    call("read", "completed", COMPLAINT),
+    call("read", "cancelled", FORM),
+  ]),
   folded("UTC-43", "{n} of them were stopped.", [
-    call("read"),
-    ...many(2, () => call("read", "cancelled")),
+    call("read", "completed", COMPLAINT),
+    call("read", "cancelled", FORM),
+    call("read", "cancelled", MANDATE),
   ]),
   // the live line's count
   live("UTC-44", stepWords("1 done so far."), [
-    call("read", "completed", LEASE),
+    call("read", "completed", COMPLAINT),
     call("search", "in_progress", SEARCH),
   ]),
   live("UTC-45", stepWords("{n} done so far."), [
-    ...many(3, () => call("read", "completed", LEASE)),
+    ...[COMPLAINT, FORM, MANDATE].map((p) => call("read", "completed", p)),
     call("search", "in_progress", SEARCH),
   ]),
   // what the running step is doing: the live group's line and the working line
@@ -228,10 +247,11 @@ export const UTC: Entry[] = [
   ]),
   folded("UTC-63", "1 of them went on in the background.", [
     call("search", "completed", SEARCH),
-    call("read", "completed", { ...LEASE, background: true }),
+    call("read", "completed", { ...COMPLAINT, background: true }),
   ]),
   folded("UTC-64", "{n} of them went on in the background.", [
     call("search", "completed", SEARCH),
-    ...many(2, () => call("read", "completed", { ...LEASE, background: true })),
+    call("read", "completed", { ...COMPLAINT, background: true }),
+    call("read", "completed", { ...FORM, background: true }),
   ]),
 ];

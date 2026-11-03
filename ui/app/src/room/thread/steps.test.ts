@@ -11,6 +11,7 @@ import { doingOf, doingPick, placeOf, splitPath, titleOf } from "./step-names.ts
 import {
   doneOf,
   doneSoFar,
+  hoverOf,
   iconsOf,
   kindsOf,
   lineOf,
@@ -240,6 +241,26 @@ describe("friendly names", () => {
     );
     expect(doneOf("en", call("other"))).toBe("Did one other thing.");
     expect(splitPath("papers/")).toEqual({ name: "papers", folder: "" });
+  });
+
+  test("no path or words but the title: the row reads the title, its path cut to the file name and its folder on hover, never the generic sentence again", () => {
+    const titled = (kind: ToolKind, title: string) => call(kind, "completed", { title });
+    const reads = [
+      titled("read", "Read /Users/x/Matters/Sharma/Complaint.pdf"),
+      titled("read", "Read /Users/x/Matters/Sharma/Form DIR-12.pdf"),
+    ];
+    expect(reads.map((c) => doneOf("en", c))).toEqual([
+      "Read Complaint.pdf.",
+      "Read Form DIR-12.pdf.",
+    ]);
+    expect(reads.map(hoverOf)).toEqual(["/Users/x/Matters/Sharma", "/Users/x/Matters/Sharma"]);
+    expect(doneOf("en", titled("edit", "Edit C:\\Matters\\Sharma\\Reply.docx"))).toBe(
+      "Edit Reply.docx.",
+    );
+    expect(hoverOf(titled("search", "grep notice period"))).toBeNull();
+    // with no title either, the generic sentence
+    expect(doneOf("en", call("read"))).toBe("Read the papers.");
+    expect(hoverOf(call("read"))).toBeNull();
   });
 
   test("a row's state where it didn't simply finish", () => {
