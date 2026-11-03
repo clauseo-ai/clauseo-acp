@@ -393,6 +393,15 @@ describe("steering the running answer", () => {
     expect(txt(document.querySelector(".steer-hint-text"))).toBe(
       "Send now gives your words to Clauseo while it writes.",
     );
+    // Send now carries the send arrow, 16 px and hidden from assistive technology; the word names the button
+    const sendNow = document.querySelector<HTMLButtonElement>(".steer-hint .mat-send-now");
+    const arrow = sendNow?.querySelector("svg");
+    expect(arrow?.getAttribute("aria-hidden")).toBe("true");
+    expect(arrow?.getAttribute("width")).toBe("16");
+    expect(arrow?.getAttribute("height")).toBe("16");
+    expect(sendNow?.querySelectorAll("svg")).toHaveLength(1);
+    expect(txt(sendNow).trim()).toBe("Send now");
+    expect(sendNow?.getAttribute("aria-label")).toBeNull();
     const queue = document.querySelector<HTMLButtonElement>(".steer-hint .mat-queue");
     expect(queue?.getAttribute("aria-keyshortcuts")).toBe("Enter");
     expect(queue?.className).not.toContain("bg-primary");
