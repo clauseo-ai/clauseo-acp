@@ -11,7 +11,7 @@
 // - A polite live region says how many rows the menu opened with (or that the papers are loading, then how many
 //   there are), then the highlighted one's name as the arrows move: a textarea takes no combobox role, and VoiceOver
 //   follows aria-activedescendant reliably only on one.
-// - It stands at the caret, placed again as the window resizes or anything scrolls while it is open.
+// - It stands at the caret, placed again as the window resizes, the field's size changes or anything scrolls while it is open.
 // - A pick is a token (composer-tokens.ts), held and drawn from this chunk as long as the menu lives; a trigger that
 //   starts a token is no trigger.
 // - `@`: the room's `load` is called each time the menu opens (the room caches); the last list answered stands in the
@@ -435,7 +435,10 @@ export function ComposerMenu({
     if (typeof hi?.scrollIntoView === "function") hi.scrollIntoView({ block: "nearest" });
   });
 
-  // and again as the window resizes or anything scrolls under it, the field included; the list's own scroll aside
+  // and again as the window resizes or anything scrolls under it, the field included; the list's own scroll aside.
+  // And as the field's own size changes: a narrower window rewraps the words and the field grows a line, but the
+  // window's resize comes before that grow (the composer fits the field from its own size observer), so a menu placed
+  // on the resize alone stood over the line's start (WebView2, M2 at 100 px narrower). Placed once per frame, after it.
   const isOpen = open !== null;
   useEffect(() => {
     const view = field.ownerDocument.defaultView;
@@ -445,9 +448,23 @@ export function ComposerMenu({
     };
     view.addEventListener("resize", again);
     view.addEventListener("scroll", again, { capture: true, passive: true });
+    let frame: number | null = null;
+    const grown =
+      typeof ResizeObserver === "function"
+        ? new ResizeObserver(() => {
+            if (frame !== null) return;
+            frame = view.requestAnimationFrame(() => {
+              frame = null;
+              placeRef.current();
+            });
+          })
+        : null;
+    grown?.observe(field);
     return () => {
       view.removeEventListener("resize", again);
       view.removeEventListener("scroll", again, { capture: true });
+      grown?.disconnect();
+      if (frame !== null) view.cancelAnimationFrame(frame);
     };
   }, [isOpen, field]);
 
