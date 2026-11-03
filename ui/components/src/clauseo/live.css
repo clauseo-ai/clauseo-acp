@@ -39,21 +39,24 @@
     row-gap: 0;
     /* one 36 px line; a second only when the words must wrap, never cut short */
     min-height: var(--size-control);
-    /* the lead stands over Add papers' icon. Every lead takes the pen's slot, so the words start in one place whatever
-       leads them, in either language; a wait's words so start a little right of the field's own (Rohan's call for the
-       pen, 2026-11) */
+    /* the lead stands over Add papers' icon. An icon lead (the clock, the break, the question) is 16 px, so the words
+       start over the field's own, as the prototype has them; only while the pen writes do they stand after its fixed
+       box. The words move only when the state, and its sentence, changes */
     padding: 0 var(--s1-5) 0 var(--s4);
     background: var(--well-strong);
     border-radius: var(--r-field) var(--r-field) 0 0;
   }
-  /* the lead's one slot: the pen's box, with the clock, the break or the question mark at its left */
+  /* the lead: the icon's own 16 px, or, while the pen writes, the pen's fixed box, the same in either language and for
+     as long as it writes */
   .working-lead {
     flex: none;
     display: flex;
     align-items: center;
+    margin-right: var(--s2);
+  }
+  .working-lead[data-lead="pen"] {
     width: calc(var(--s5) * var(--k) * 110 / 36);
     height: calc(var(--s5) * var(--k));
-    margin-right: var(--s2);
   }
   .working-icon {
     flex: none;
