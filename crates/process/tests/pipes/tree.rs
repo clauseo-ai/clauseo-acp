@@ -76,6 +76,9 @@ fn drop_kills_the_tree() {
         drop((stdin, stdout, handle));
         // On Windows the code says the handle's `Drop` killed the tree; closing the job, which
         // the handle's fields do next, would kill it too, with another code.
+        // That other code (KILL_ON_JOB_CLOSE's) has not been observed yet: it is assumed to
+        // differ from 0xC1A0, the crate's own. If this check fails on the first Windows run,
+        // read the code it shows against that assumption before suspecting `Drop`.
         wait_for_the_tree_kill(grandchild);
     };
     // Stderr ends once the agent is gone; the grandchild holds none of its pipes on Unix, and
