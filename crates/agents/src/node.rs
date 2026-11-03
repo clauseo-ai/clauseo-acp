@@ -286,8 +286,8 @@ pub(crate) fn runtime_valid(dir: &Path, archive: &NodeArchive, os: Os) -> bool {
 /// most its snapshot size, about 60 MB) and its SHA-256 checked on those bytes, which are the
 /// ones unpacked: nothing is opened again by path after the check. A mismatch deletes the
 /// archive. The bytes go into `.tmp-<folder name>` beside `dir` first (any old one removed),
-/// then `node` and `npm-cli.js` are synced, the folder renamed into place over any incomplete one, and
-/// `clauseo-runtime.json` written last.
+/// then `node` and `npm-cli.js` are synced, the folder renamed into place over any incomplete
+/// one, and `clauseo-runtime.json` written last.
 pub(crate) fn install_runtime(
     archive_path: &Path,
     entry: &NodeEntry,
