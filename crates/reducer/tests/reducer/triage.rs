@@ -45,7 +45,7 @@ fn header_upserts(changes: &[ViewChange]) -> Vec<&HeaderEntry> {
         .iter()
         .filter_map(|change| match change {
             ViewChange::Upsert(entry) => match &**entry {
-                ViewEntry::Header(header) => Some(header),
+                ViewEntry::Header(header) => Some(&**header),
                 _ => None,
             },
             _ => None,

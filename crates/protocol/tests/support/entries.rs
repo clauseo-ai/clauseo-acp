@@ -77,7 +77,7 @@ pub fn agent_text_entry() -> AgentTextEntry {
 fn thread_entries() -> Vec<ViewEntry> {
     let tool = tool_call_started();
     vec![
-        ViewEntry::Header(header_entry()),
+        ViewEntry::Header(Box::new(header_entry())),
         ViewEntry::UserMessage(UserMessageEntry {
             order: seq(2),
             message: message_id(5),

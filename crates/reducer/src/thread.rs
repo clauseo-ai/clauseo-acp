@@ -192,9 +192,9 @@ pub(super) fn update_header(
     };
     if change(header) {
         out.changes
-            .push(ViewChange::Upsert(Box::new(ViewEntry::Header(
+            .push(ViewChange::Upsert(Box::new(ViewEntry::Header(Box::new(
                 header.clone(),
-            ))));
+            )))));
     }
 }
 
@@ -235,9 +235,9 @@ fn thread_created(state: &mut ThreadState, seq: Seq, event: &ThreadCreated, out:
         usage: None,
     };
     out.changes
-        .push(ViewChange::Upsert(Box::new(ViewEntry::Header(
+        .push(ViewChange::Upsert(Box::new(ViewEntry::Header(Box::new(
             header.clone(),
-        ))));
+        )))));
     state.header = Some(header);
 }
 

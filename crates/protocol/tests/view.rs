@@ -163,7 +163,7 @@ fn entry_inline_len_sums_vec_items() {
 }
 
 fn header() -> ViewEntry {
-    ViewEntry::Header(header_entry())
+    ViewEntry::Header(Box::new(header_entry()))
 }
 
 #[test]

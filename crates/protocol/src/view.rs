@@ -169,7 +169,7 @@ view_entries! {
     /// per checkpoint (the Versions timeline).
     pub enum ViewEntry {
         /// The thread's header: title, agent, status, mode, options, commands, plan, usage.
-        Header(HeaderEntry, thread: ThreadId) = "header",
+        Header(Box<HeaderEntry>, thread: ThreadId) = "header",
         /// A prompt the lawyer sent.
         UserMessage(UserMessageEntry, message: MessageId) = "user_message",
         /// An answer or a thought, as one text.

@@ -61,8 +61,8 @@ pub(super) fn after_wake(state: &ThreadState, from: usize, out: &mut Applied) {
     });
     if !sent && let Some(header) = &state.header {
         out.changes
-            .push(ViewChange::Upsert(Box::new(ViewEntry::Header(
+            .push(ViewChange::Upsert(Box::new(ViewEntry::Header(Box::new(
                 header.clone(),
-            ))));
+            )))));
     }
 }
