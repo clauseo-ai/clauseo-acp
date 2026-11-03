@@ -98,7 +98,9 @@ present), the crate fetches `resolved` itself:
   mismatch deletes the file.
 - A body that starts with `<` or comes as `text/html`, where a gzip or zip file should be, is an
   HTML page.
-- At most 3 redirects. Connect timeout 30 s, read timeout 60 s.
+- At most 3 redirects. Connect timeout 30 s. The response headers, and each read of the body,
+  may take 60 s at most (ureq's `timeout_recv_response` and `timeout_per_read`): a stall timer.
+  The body as a whole has no time limit, since a slow link may need minutes.
 - TLS uses rustls with the OS's trust store (the platform verifier), so a CA that IT installed is
   trusted. With an agent's `network.ca_certs` file, that file's certificates are the roots.
 
