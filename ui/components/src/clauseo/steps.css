@@ -22,6 +22,10 @@
     border-radius: var(--r-chip);
     background: transparent;
     text-align: start;
+    /* the hover's well and ink ease in as the work chip's do; opening itself doesn't animate */
+    transition:
+      background-color var(--dur-quick) var(--ease-arrive),
+      color var(--dur-quick) var(--ease-arrive);
     @apply is-hover:bg-well is-hover:text-primary is-active:bg-well-strong;
   }
   .step-group-icons {

@@ -32,3 +32,11 @@ test("the live group's line is muted like the folded one, its count in --muted, 
   // primary ink is a failure's alone: no rule gives it to the line's words
   expect(steps).not.toMatch(/\.step-group-now \{[^}]*--primary/);
 });
+
+test("the folded line's hover eases its well and ink over --dur-quick on the arrive curve, as the prototype's chip does", () => {
+  const line = rule(".step-group-line");
+  expect(line).toMatch(/background-color var\(--dur-quick\) var\(--ease-arrive\)/);
+  expect(line).toMatch(/color var\(--dur-quick\) var\(--ease-arrive\)/);
+  // the chevron still turns at once
+  expect(steps).not.toMatch(/\.step-group-chev[^}]*transition/);
+});
