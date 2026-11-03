@@ -90,8 +90,7 @@ test("each Hindi sentence ends with the danda, and no banned word or Devanagari 
   for (const [en, hi] of Object.entries(settingsWords)) {
     if (hi === null) continue; // hi: later, no Hindi yet
     expect(hi, en).not.toMatch(/पेंसिल|स्याही|चरण|कदम|मैं|[\u0966-\u096F]/);
-    // a new line waiting for its Hindi (`// hi: later`) carries its English for now
-    if (hi === en) continue;
+    if (hi === null) continue; // hi: later, no Hindi yet
     if (en.endsWith(".")) expect(hi, en).toMatch(/।$/);
     else expect(hi, en).not.toMatch(/[।.]$/);
     // a slot in English is a slot in Hindi

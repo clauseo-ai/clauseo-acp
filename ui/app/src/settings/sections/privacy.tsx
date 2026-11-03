@@ -7,8 +7,9 @@
 //
 // The switches' values and writes are app-local (host-next.ts's ToolSettings, the fake's set_tool_settings): the host's
 // SettingsView carries `ui` and `locked` only, so the real window shows no "On the web" group. Host work that makes it
-// real: SettingsView.tools (the settings crate's ToolsSettings, `web_search` and `browser`) in get_settings and
-// settings_changed, and a command that patches `tools` (SetUiSettings naming `tools.*` keys, or a SetToolSettings).
+// real (stage E): SettingsView.tools, the effective `web_search` and `browser`, in get_settings and settings_changed,
+// and HostCommand::SetToolSettings { patch }, refused whole with settings.locked when it names a locked key, then
+// settings_changed. A change applies from the next conversation's start; one already open keeps its tools.
 // The locks are real already: `locked` may list `tools.web_search` and `tools.browser`.
 import { useSettingsWords } from "@clauseo/components/lib/words-settings.ts";
 import { SettingRow } from "@clauseo/components/ui/settings-row.tsx";
@@ -94,7 +95,7 @@ export function Privacy({ ctx }: { ctx: SectionContext }) {
       {tools !== undefined && (
         <Group
           title={w.s("On the web")}
-          note={w.s("A change applies to conversations started after it.")}
+          note={w.s("A change applies to new conversations. Ones already open keep what they had.")}
         >
           <ToolRow
             ctx={ctx}

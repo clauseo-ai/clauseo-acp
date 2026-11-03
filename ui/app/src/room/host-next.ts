@@ -178,7 +178,7 @@ export type RetryCommand = { retry_from: { thread: ThreadId; message: MessageId 
  * retry. */
 export type NextCommand =
   | { set_ui_settings: { patch: Partial<UiSettings> } }
-  | { set_tool_settings: { patch: { tools: Partial<ToolSettings> } } }
+  | { set_tool_settings: { patch: Partial<ToolSettings> } }
   | MattersCommand
   | RetryCommand;
 /** What a command did: `"done"`, create_matter's `{"matter_created": {"matter": ...}}`, or retry_from's

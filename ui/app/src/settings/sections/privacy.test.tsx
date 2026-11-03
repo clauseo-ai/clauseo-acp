@@ -143,7 +143,9 @@ test("without the tools from the host, no On the web group and no switch", async
 test("with the tools, each switch shows its value, and a flip sends set_tool_settings with its key", async () => {
   const { el, transport } = await mount({ tools: { web_search: false, browser: true } });
   expect(pane(el).textContent).toContain("On the web");
-  expect(pane(el).textContent).toContain("A change applies to conversations started after it.");
+  expect(pane(el).textContent).toContain(
+    "A change applies to new conversations. Ones already open keep what they had.",
+  );
   const search = switchNamed(el, "Web search");
   const browser = switchNamed(el, "Browser");
   expect(search?.getAttribute("aria-checked")).toBe("false");
@@ -153,8 +155,8 @@ test("with the tools, each switch shows its value, and a flip sends set_tool_set
   await act(async () => browser?.click());
   await act(async () => settled());
   expect(transport.only("next_command").map((c) => c.command)).toEqual([
-    { set_tool_settings: { patch: { tools: { web_search: true } } } },
-    { set_tool_settings: { patch: { tools: { browser: false } } } },
+    { set_tool_settings: { patch: { web_search: true } } },
+    { set_tool_settings: { patch: { browser: false } } },
   ]);
   expect(switchNamed(el, "Web search")?.getAttribute("aria-checked")).toBe("true");
   expect(switchNamed(el, "Browser")?.getAttribute("aria-checked")).toBe("false");
