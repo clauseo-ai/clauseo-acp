@@ -5,13 +5,10 @@
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { lim, type LimitKey } from "@clauseo/components/lib/words-limits.ts";
 import type { PlanState } from "@clauseo/components/ui/meter.tsx";
-import type {
-  AgentKind,
-  AgentLimitsView,
-  LimitMeter,
-  Timestamp,
-} from "../../transport/protocol.ts";
-import { stamp, whenOf } from "../thread/clock.ts";
+import type { AgentKind, AgentLimitsView, LimitMeter } from "../../transport/protocol.ts";
+import { stamp } from "../thread/clock.ts";
+// the at-limit words, said once for the toolbar and the paused composer, both on the first screen
+import { atLimitWords } from "../thread/limit-words.ts";
 
 /** Each kind's plan, as the toolbar names it. */
 export const PLAN_NAME: Record<AgentKind, string> = { claude: "Claude", codex: "ChatGPT" };
@@ -63,15 +60,6 @@ export function planTitle(lang: Lang, kind: AgentKind, look: PlanLook): string {
   return look === "payg" ? lim(lang, "{name}, pay as you go", { name }) : name;
 }
 
-/** The at-limit words with the reset, today's time or another day's; the no-reset form without one. */
-export function reachedLine(lang: Lang, resets: Timestamp | undefined, now: number): string {
-  if (resets === undefined) return lim(lang, "Limit reached. Reset not given.");
-  const { day, time } = whenOf(lang, resets, now);
-  return day === null
-    ? lim(lang, "Limit reached until {time}", { time })
-    : lim(lang, "Limit reached until {day} {time}", { day, time });
-}
-
 const WITH_RESET: Record<Exclude<Band, "reached">, [LimitKey, LimitKey]> = {
   plenty: ["Plenty left until the {time} reset", "Plenty left"],
   half: ["Under half left. Resets at {time}.", "Under half left."],
@@ -81,7 +69,7 @@ const WITH_RESET: Record<Exclude<Band, "reached">, [LimitKey, LimitKey]> = {
 /** The toolbar's line for a meter. */
 export function meterLine(lang: Lang, meter: LimitMeter, now: number): string {
   const band = bandOf(meter);
-  if (band === "reached") return reachedLine(lang, meter.resets_at, now);
+  if (band === "reached") return atLimitWords(lang, meter.resets_at, now);
   const [timed, bare] = WITH_RESET[band];
   return meter.resets_at === undefined
     ? lim(lang, bare)
