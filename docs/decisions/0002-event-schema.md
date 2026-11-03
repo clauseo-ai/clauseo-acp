@@ -222,9 +222,9 @@ from `SteeringCapability` (both flags). `HeaderEntry.queue_held` stays the host'
 flag: no event sets it, `clauseo_reducer::set_queue_held` does, and a snapshot writes it
 `false`. `steer_resolved.aside`, `ToolCallEntry.background` and `steer_joins_turn` are additive
 (missing reads as empty, `None`, `false`). `EditQueuedPrompt` now carries `text`, not
-`content` (it was refused as not built, so no client sent it). `REDUCER_SCHEMA_VERSION` goes from 3
-to 4: old snapshots are passed over and each thread's log is folded once at its next reopen, as for
-the bump above.
+`content` (it was refused as not built, so no client sent it). `REDUCER_SCHEMA_VERSION` goes from 4
+to 5, after 0042's 3 to 4: old snapshots are passed over and each thread's log is folded once at
+its next reopen, as for the bump above.
 
 A `Step` entry has no `undo_possible` field. The UI derives it from the step alone, as
 `checkpoint_after` exists and the step is not undone (`StepEntry::undo_possible` states the same
