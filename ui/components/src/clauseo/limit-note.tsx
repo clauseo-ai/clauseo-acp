@@ -191,7 +191,8 @@ export function NoticeCard({
   icon: ReactNode;
   waiting?: boolean;
   title: string;
-  sub?: string | null;
+  /** The line under the title: words, or a part that holds them, such as a `<time>`. */
+  sub?: ReactNode;
   rows?: readonly NoticeRow[];
   actions?: ReactNode;
   note?: string | null;
@@ -220,9 +221,7 @@ export function NoticeCard({
             <Say>{title}</Say>
           </p>
           {sub != null && sub !== "" && (
-            <p className="lim-note-sub">
-              <Say>{sub}</Say>
-            </p>
+            <p className="lim-note-sub">{typeof sub === "string" ? <Say>{sub}</Say> : sub}</p>
           )}
         </div>
       </header>
