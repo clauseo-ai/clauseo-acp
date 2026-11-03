@@ -214,9 +214,12 @@ The guard cannot enforce these; stage C's egress proxy and sandbox must.
 - **The proxy handles absolute-form requests.** For `http://` targets, Chrome and reqwest send
   `GET http://host/path` to the proxy, not `CONNECT`; the proxy must apply the same rules to
   those.
-- **The jail allows `/tmp/clauseo-ab-*`.** On Unix the guard and agent-browser make and use the
-  socket folder `/tmp/clauseo-ab-<16 characters>`, outside `--cwd`; the jail must let them
-  create and use it.
+- **The jail allows one socket folder, made by the host.** On Unix agent-browser keeps its
+  socket in a folder outside `--cwd` (the state path is over the 103-byte socket limit). Since
+  #257 the host makes it (`BrowserSocketDir`: `/tmp/clauseo-ab-<16 random>`, mode 0700,
+  lstat-checked, removed after the launch's process tree exits) and the jail may use only that
+  folder, not create it. Until the ports-and-socket follow-up lands, the guard's own `mkdir`
+  there is refused in the jail.
 - **`<state>/browser` and the browser's loopback ports, in the jail: the jail adds nothing
   beyond itself.** This restates stage C's two requirements that `--cwd` (`<state>/browser`)
   sit outside what the agent can write and that the agent's own tools be kept off the daemon's
