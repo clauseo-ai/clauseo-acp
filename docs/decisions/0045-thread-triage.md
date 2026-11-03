@@ -27,8 +27,9 @@ time-zone crate is not wanted; a snooze must still wake at its time with no clie
   `thread_snoozed { by: expired }` for every thread whose time has come, then arms for the next.
   It re-arms after any returned commit holding a snooze or a waking event and after each thread
   stream is loaded, so a snooze that ended while the host was down, or while its matter was off
-  the list, wakes at start-up or at import. Since the wake is logged, the view needs no clock and
-  the app sees a real change.
+  the list, wakes at start-up or at import: bringing a matter back loads each of its threads not
+  archived, as start-up does for a listed matter, so their rows show their triage again. Since
+  the wake is logged, the view needs no clock and the app sees a real change.
 - **Commands** (each answers `Done`; archived threads are allowed, since no command refuses an
   archived thread by code):
   - `snooze_thread { thread, until? }`: an `until` not after the host's now, or more than 366
@@ -41,8 +42,9 @@ time-zone crate is not wanted; a snooze must still wake at its time with no clie
     archived, not done, not snoozed past now, has nothing pending (no permission, question or
     limit choice), no turn running or queued, its last ending seen (`MarkSeen`), no commit in
     flight and its newest event before `day_start` gets `thread_done { done: true, by:
-    morning_sweep }`, all in one commit with the receipt. A second sweep the same day finds
-    every such thread done and logs nothing.
+    morning_sweep }`, all in one commit with the receipt. An archived thread is never swept, nor
+    loaded for the sweep. A second sweep the same day finds every such thread done and logs
+    nothing.
 - Snooze and done are independent: the reducer keeps both, and the app decides how a thread that
   is both shows.
 - Every snooze and done command is logged, a repeat too: the host decides on the durable state,
