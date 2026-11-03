@@ -16,7 +16,8 @@
 // With ?thread=commands, the thread is idle with the agent's commands in its header (COMMANDS below), so the composer's
 // `/` menu has items, and no turn runs; window.__clauseoProbeCalls is the fake transport's calls, for the page to read
 // what was sent. With ?papers=mixed as well, the matter's papers add MIXED's eight (Devanagari, Tamil, mixed scripts,
-// brackets, an `@` in a name), so one page has an idle composer, its commands and these papers for `@`. Not shipped.
+// brackets, an `@` in a name), so one page has an idle composer, its commands and these papers for `@`. With
+// ?papers=hindi, the wall holds HINDI's five long Devanagari names in place of the five, for its wrapping. Not shipped.
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "../App.tsx";
@@ -73,15 +74,33 @@ const MIXED = [
   "Letter to ravi@sharmalaw.pdf",
 ];
 
+/** ?papers=hindi: long Devanagari names on the wall (Hindi audit 3b), each one the wrapping has to keep whole: spaces,
+ * a comma and Latin digits; the nukta letter क़ as filed (U+0958, which NFC splits); one compound with no space, so the
+ * title wraps inside a word, through conjuncts (त्त, त्र, क्ष, ग्न); श्र, ज्ञ, ष्ट्र and a reph (र्ज़). */
+const HINDI = [
+  "अनुबंध की प्रमाणित प्रति, धारा 138 के अंतर्गत नोटिस का उत्तर.pdf",
+  "\u0958ानूनी नोटिस.docx",
+  "प्रत्युत्तरशपथपत्रक्षेत्राधिकारसंलग्नक.pdf",
+  "श्रीमती ज्ञानवती बनाम राष्ट्रीय कृषि बैंक, अपील संख्या 2481.pdf",
+  "परक्राम्य लिखत अधिनियम के अंतर्गत शिकायत की अर्ज़ी.docx",
+];
+
 const page = new URLSearchParams(location.search);
 const mixedPapers = page.get("papers") === "mixed";
+const hindiPapers = page.get("papers") === "hindi";
 
 /** ?word=…: the Word pages (word/probe-states.ts), in place of the scripted stream, with the petition on the wall. */
 const wordPage = wordPageOf(page.get("word"));
 const wording = wordPage === null ? null : wordHost(wordPage);
 
 const papers: PaperSummary[] = (
-  wordPage !== null ? wordFiles(FILES, wordPage) : mixedPapers ? [...FILES, ...MIXED] : FILES
+  wordPage !== null
+    ? wordFiles(FILES, wordPage)
+    : mixedPapers
+      ? [...FILES, ...MIXED]
+      : hindiPapers
+        ? HINDI
+        : FILES
 ).map((name, i) => ({
   file: uuid(i + 1, 8),
   path: `papers/${name}`,

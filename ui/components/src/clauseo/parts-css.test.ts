@@ -85,3 +85,22 @@ test("the folded rail opens from the window's top, just under Matters, and an em
     folded.indexOf("box-shadow: var(--e3)"),
   );
 });
+
+test("a tile's title, a long Devanagari name too, wraps anywhere a long name needs and is never clamped or clipped", () => {
+  // Devanagari words run long (a compound with no space, a name filed without spaces): the title wraps, as the
+  // engine's line breaker allows, which keeps a syllable whole; the row grows with it (.facade's grid-auto-rows). No
+  // clamp, ellipsis or hidden overflow cuts a name, so no syllable is ever half drawn. The real engines' line breaks
+  // are measured on the probe's ?papers=hindi wall (scripts/webkit-probe.swift).
+  const wall = readFileSync(new URL("wall.css", here), "utf8");
+  const rules = [...wall.matchAll(/([^{}]*\.tile-title[^{}]*)\{([^}]*)\}/g)];
+  expect(rules.length).toBeGreaterThan(0);
+  const base = rules.find((r) => r[1]?.trim() === ".tile-title")?.[2] ?? "";
+  expect(base).toMatch(/overflow-wrap: anywhere;/);
+  expect(base).toMatch(/display: block;/);
+  for (const [, selector, body] of rules) {
+    expect(body, selector).not.toMatch(
+      /line-clamp|text-overflow|overflow: hidden|white-space: nowrap|max-height/,
+    );
+  }
+  expect(wall).toMatch(/\.facade \{[^}]*grid-auto-rows: minmax\(var\(--tile-h\), auto\);/);
+});
