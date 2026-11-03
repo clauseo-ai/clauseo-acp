@@ -358,4 +358,6 @@ export const U12: Entry[] = [
     "limits/hit",
     stopped("five_hour", LATER_RESET, atLocal(-2, 16, 52)),
   ),
+  // a per-model window's label, the model as the host names it: a Max plan's Fable row (#236)
+  card("U12-44", planCardWords("{model} weekly limit"), "limits/plan-card", EVERY_WINDOW, 900),
 ];
