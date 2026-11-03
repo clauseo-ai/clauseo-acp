@@ -15,7 +15,8 @@
 // or the general line for two files), the note's "Open in Word", or the wall's Word tile, for its tooltip.
 // With ?thread=commands, the thread is idle with the agent's commands in its header (COMMANDS below), so the composer's
 // `/` menu has items, and no turn runs; window.__clauseoProbeCalls is the fake transport's calls, for the page to read
-// what was sent. Not shipped.
+// what was sent. With ?papers=mixed as well, the matter's papers add MIXED's eight (Devanagari, Tamil, mixed scripts,
+// brackets, an `@` in a name), so one page has an idle composer, its commands and these papers for `@`. Not shipped.
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "../App.tsx";
@@ -58,20 +59,34 @@ const FILES = [
   "Bank statement, March 2001.pdf",
 ];
 
+/** ?papers=mixed: names the `@` menu's real-engine rows type against (G1a's M5), after FILES, all under papers/:
+ * Devanagari (one with a space), Tamil, English with Devanagari, English with brackets, and one with an `@`. */
+const MIXED = [
+  "वकालतनामा.pdf",
+  "अनुबंध की प्रति.docx",
+  "शपथपत्र.pdf",
+  "தீர்ப்பு.pdf",
+  "ஒப்பந்தம்.docx",
+  "Annexure A अनुलग्नक.pdf",
+  "Exhibit (P-3) [certified].pdf",
+  "Letter to ravi@sharmalaw.pdf",
+];
+
 const page = new URLSearchParams(location.search);
+const mixedPapers = page.get("papers") === "mixed";
 
 /** ?word=…: the Word pages (word/probe-states.ts), in place of the scripted stream, with the petition on the wall. */
 const wordPage = wordPageOf(page.get("word"));
 const wording = wordPage === null ? null : wordHost(wordPage);
 
-const papers: PaperSummary[] = (wordPage === null ? FILES : wordFiles(FILES, wordPage)).map(
-  (name, i) => ({
-    file: uuid(i + 1, 8),
-    path: `papers/${name}`,
-    size: 40_000 + i * 1_000,
-    modified: 1_730_380_000_000 + i * 60_000,
-  }),
-);
+const papers: PaperSummary[] = (
+  wordPage !== null ? wordFiles(FILES, wordPage) : mixedPapers ? [...FILES, ...MIXED] : FILES
+).map((name, i) => ({
+  file: uuid(i + 1, 8),
+  path: `papers/${name}`,
+  size: 40_000 + i * 1_000,
+  modified: 1_730_380_000_000 + i * 60_000,
+}));
 
 /** ?thread=permission: the turn stops short of its step, waiting on the lawyer, at a pending prompt to save a new
  * version of a paper, above one answered once whose call completed. */
