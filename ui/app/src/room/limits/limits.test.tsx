@@ -2,6 +2,8 @@
 // The plan in the room over FakeTransport (U12): the toolbar's line for the open conversation's agent (claude-acp and
 // codex-acp, never fake-agent), its card and what opening it and Try again send, the composer's warning with the
 // host's reset in a <time>, Ask in every state, and nothing left on a timer once a view is shown.
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { act } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 import { reset } from "../../testing/stream-script.ts";
@@ -14,6 +16,7 @@ import type {
 } from "../../transport/protocol.ts";
 import { fakeNext } from "../fake-next.ts";
 import { mountRoom, type Harness } from "../thread/harness.ts";
+import { LIMIT_WARNING_FEED } from "./limit-warning-feed.ts";
 import { preloadPlanCard } from "./plan-card-load.ts";
 
 // the card's preload, watched: the same function, counted
@@ -299,25 +302,40 @@ test("the hidden plan-state marker: none before a view and for fake-agent, loadi
 });
 
 test("limit-warning's feed as claude-acp: the marker goes none, loading, unavailable, then live_only", async () => {
-  // fake_agent's reader fails, so the first read ends unavailable; the turn's usage_update (the agent's
-  // warning, five_hour at 96%) is the live signal that makes the view live_only (limits-warning.spec.ts)
+  // the host's own lines (limit-warning-feed.ts) through the channel's parse into the store: fake_agent's reader
+  // fails, so the first read ends unavailable; the turn's usage_update (the agent's warning, five_hour at 96%) is the
+  // live signal that makes the view live_only (limits-warning.spec.ts)
   await room();
   const seen: (string | undefined)[] = [];
-  const marker = () => h!.one("plan-state");
-  const note = () => seen.push(marker()?.dataset["freshness"]);
+  const note = () => seen.push(h!.one("plan-state")?.dataset["freshness"]);
   note();
-  await view({ claude: figureless({ freshness: "loading" }) });
-  note();
-  await view({ claude: figureless({ freshness: "unavailable" }) });
-  note();
-  await view({
-    claude: entry(96, { freshness: "live_only", meter: meter(96, { tone: "near" }) }),
-  });
-  note();
-  expect(seen).toEqual(["none", "loading", "unavailable", "live_only"]);
+  for (const line of LIMIT_WARNING_FEED) {
+    await act(async () => h!.transport.deliver(line));
+    await act(async () => {
+      await vi.dynamicImportSettled();
+    });
+    note();
+  }
+  expect(h!.transport.problems).toEqual([]);
+  expect([...new Set(seen)]).toEqual(["none", "loading", "unavailable", "live_only"]);
   expect(plan()).toBeNull();
   expect(h!.one("limit-warning")).not.toBeNull();
   expect(sendEnabled()).toBe(true);
+});
+
+test("limit-warning's feed carries the scenario's reset, and it is still ahead", () => {
+  // a reset already past makes the host drop the row's figure and the meter at once, so no warning shows (PR #228)
+  // the scenario the e2e plays, as fake_agent bundles it
+  const scenario = readFileSync(
+    join(import.meta.dirname, "../../../../../crates/fake_agent/scenarios/limit-warning.jsonl"),
+    "utf8",
+  );
+  const resetsAt = Number(/"resetsAt":(\d+)/.exec(scenario)?.[1]) * 1000;
+  expect(resetsAt).toBeGreaterThan(Date.now());
+  const live = LIMIT_WARNING_FEED.map(
+    (line) => JSON.parse(line) as { limits_view_changed: LimitsView },
+  ).find((line) => line.limits_view_changed.claude?.freshness === "live_only");
+  expect(live?.limits_view_changed.claude?.windows[0]?.resets_at).toBe(resetsAt);
 });
 
 test("focus on the plan starts loading its card before any press; the card stays closed", async () => {
