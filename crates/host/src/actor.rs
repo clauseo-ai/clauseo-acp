@@ -60,6 +60,7 @@ mod state;
 mod streams;
 mod subs;
 mod title_source;
+mod triage;
 pub(crate) mod turn;
 
 use commands::PendingCommand;
@@ -147,6 +148,8 @@ pub(crate) struct Actor {
     pub(crate) app_subs: Vec<app::AppSub>,
     /// The limits model, its reader, timer and subscribers (`limits.rs`).
     pub(crate) limits: limits::LimitsHost,
+    /// The rail's triage: streams it holds loaded and the snooze timer (`triage.rs`).
+    pub(crate) triage: triage::Triage,
     /// The matter and thread rows last sent to the app subscribers, and what changed since.
     pub(crate) lists: app_lists::Lists,
     pub(crate) commands: BTreeMap<CommandId, PendingCommand>,
@@ -275,6 +278,7 @@ async fn main_loop(
         match inputs.next().await {
             Some(Next::Request(request)) => {
                 actor.on_request(request);
+                triage::tick(actor);
                 app_lists::flush(actor);
             }
             // Every handle is gone (the internal channel never ends: the actor holds a sender).
@@ -283,6 +287,7 @@ async fn main_loop(
             Some(Next::Input(Input::Abort(reply))) => return Exit::Abort(reply),
             Some(Next::Input(input)) => {
                 actor.on_input(input);
+                triage::tick(actor);
                 app_lists::flush(actor);
             }
         }
@@ -538,6 +543,7 @@ impl Actor {
             Input::AppDrained { id } => app::on_drained(self, id),
             Input::AppUnsubscribed { id } => app::on_unsubscribed(self, id),
             Input::Limits(input) => limits::on_input(self, input),
+            Input::SnoozeWake { generation } => triage::on_wake(self, generation),
             Input::FolderStates(states) => query::on_folder_states(self, states),
             Input::Scan(input) => scan::on_input(self, input),
             // The loop handles an abort before it gets here.

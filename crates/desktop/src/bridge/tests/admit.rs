@@ -51,6 +51,11 @@ fn every_command_and_read_the_windows_send_today_is_admitted() {
         json!({"refresh_limits": {"agent": null, "why": "try_again"}}),
         // The scan before a matter (R20a): a cancel passes with any ref.
         json!({"cancel_scan": {"folder": folder}}),
+        // The rail's triage (H-triage, 0045): snooze, Done and the morning sweep.
+        json!({"snooze_thread": {"thread": thread, "until": 1_790_000_000_000_u64}}),
+        json!({"snooze_thread": {"thread": thread}}),
+        json!({"mark_thread_done": {"thread": thread, "done": true}}),
+        json!({"sweep_done": {"day_start": 1_790_000_000_000_u64}}),
     ];
     for body in commands {
         let admitted = bridge.admit(MAIN, &command(body.clone()));
@@ -157,7 +162,15 @@ fn the_settings_window_sets_and_reads_the_settings_and_refreshes_the_limits_only
     // The room's seen mark (H6) is main's alone: nothing in settings marks a thread seen.
     let seen = command(json!({"mark_seen": {"thread": thread}}));
     assert!(bridge.admit(MAIN, &seen).is_ok());
-    for refused in [cancel, create, seen] {
+    // The rail's triage (0045) is main's alone too.
+    let snooze =
+        command(json!({"snooze_thread": {"thread": thread, "until": 1_790_000_000_000_u64}}));
+    let done = command(json!({"mark_thread_done": {"thread": thread, "done": true}}));
+    let sweep = command(json!({"sweep_done": {"day_start": 1_790_000_000_000_u64}}));
+    for triage in [&snooze, &done, &sweep] {
+        assert!(bridge.admit(MAIN, triage).is_ok(), "{triage:?}");
+    }
+    for refused in [cancel, create, seen, snooze, done, sweep] {
         let refusal = block_on(bridge.dispatch(SETTINGS, envelope(refused.clone()))).unwrap_err();
         assert_eq!(refusal.code(), ErrorCode::CommandInvalid, "{refused:?}");
     }

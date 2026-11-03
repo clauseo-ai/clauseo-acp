@@ -155,6 +155,8 @@ pub(crate) enum Input {
     Agent { thread: ThreadId, input: AgentInput },
     /// A turn timer fired.
     Timer(TurnTimer),
+    /// The snooze timer armed with `generation` fired (`triage/wake.rs`).
+    SnoozeWake { generation: u64 },
     /// A turn task's result: an agent call or a log read.
     Turn(TurnInput),
     /// A subscription drained its channel after the actor found it full.
@@ -188,6 +190,7 @@ impl std::fmt::Debug for Input {
             Self::Snapshot(_) => "Snapshot",
             Self::Agent { .. } => "Agent",
             Self::Timer(_) => "Timer",
+            Self::SnoozeWake { .. } => "SnoozeWake",
             Self::Turn(_) => "Turn",
             Self::Drained { .. } => "Drained",
             Self::Unsubscribed { .. } => "Unsubscribed",

@@ -6,6 +6,8 @@
 //! A refused command stores no receipt. A failed commit answers with the stream's first
 //! failure.
 
+mod to_turn;
+
 use clauseo_protocol::{
     CommandEnvelope, CommandId, CommandOutcome, DomainEvent, ErrorCode, HostCommand, HostError,
     MatterId, Principal, StreamId, ThreadArchived, ThreadCreated, ThreadId, ThreadRenamed,
@@ -16,8 +18,7 @@ use clauseo_store::{Receipt, ThreadRow, command_hash};
 use super::input::Reply;
 use super::matters::PendingMatter;
 use super::settings::{first_act, set_privacy_settings, set_tool_settings, set_ui_settings};
-use super::turn::TurnCommand;
-use super::{Actor, MatterEntry, Tag, ThreadEntry, title_source, turn};
+use super::{Actor, MatterEntry, Tag, ThreadEntry, title_source, triage, turn};
 use crate::error::Error;
 use crate::pipeline::{Draft, Failure};
 use crate::principal::{Access, authorize};
@@ -230,6 +231,9 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
             super::relocate::relocate_matter(actor, ctx, matter, folder);
         }
         HostCommand::MarkSeen { thread } => super::seen::mark_seen(actor, ctx, thread),
+        HostCommand::SnoozeThread { thread, until } => triage::snooze(actor, ctx, thread, until),
+        HostCommand::MarkThreadDone { thread, done } => triage::mark_done(actor, ctx, thread, done),
+        HostCommand::SweepDone { day_start } => triage::sweep_done(actor, ctx, day_start),
         HostCommand::CreateThread { matter, agent } => {
             if let Err(error) = create_thread(actor, ctx, matter, agent) {
                 actor.finish_command(ctx.id, Err(error));
@@ -239,52 +243,17 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
         HostCommand::ArchiveThread { thread } => {
             thread_command(actor, ctx, thread, ThreadChange::Archive);
         }
-        HostCommand::SendPrompt {
-            thread,
-            content,
-            delivery,
-        } => turn_command(
-            actor,
-            ctx,
-            thread,
-            TurnCommand::SendPrompt { content, delivery },
-        ),
-        HostCommand::Cancel { thread } => turn_command(actor, ctx, thread, TurnCommand::Cancel),
-        HostCommand::AnswerPermission {
-            thread,
-            request,
-            option_id,
-        } => {
-            let command = TurnCommand::AnswerPermission { request, option_id };
-            turn_command(actor, ctx, thread, command);
-        }
-        HostCommand::AnswerElicitation {
-            thread,
-            elicitation,
-            response,
-        } => {
-            let command = TurnCommand::AnswerElicitation {
-                elicitation,
-                response,
-            };
-            turn_command(actor, ctx, thread, command);
-        }
-        HostCommand::SetConfigOption {
-            thread,
-            option_id,
-            value,
-        } => {
-            let command = TurnCommand::SetConfigOption { option_id, value };
-            turn_command(actor, ctx, thread, command);
-        }
-        HostCommand::SetMode { thread, mode_id } => {
-            turn_command(actor, ctx, thread, TurnCommand::SetMode { mode_id });
-        }
-        HostCommand::UndoStep {
-            thread,
-            turn,
-            files,
-        } => turn_command(actor, ctx, thread, TurnCommand::UndoStep { turn, files }),
+        command @ (HostCommand::SendPrompt { .. }
+        | HostCommand::Cancel { .. }
+        | HostCommand::AnswerPermission { .. }
+        | HostCommand::AnswerElicitation { .. }
+        | HostCommand::SetConfigOption { .. }
+        | HostCommand::SetMode { .. }
+        | HostCommand::UndoStep { .. }
+        | HostCommand::EditQueuedPrompt { .. }
+        | HostCommand::RemoveQueuedPrompt { .. }
+        | HostCommand::SendQueuedNow { .. }
+        | HostCommand::ResumeQueue { .. }) => to_turn::run_turn_command(actor, ctx, command),
         HostCommand::RestoreVersion {
             matter,
             checkpoint,
@@ -301,19 +270,6 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
             super::limits::refresh(actor, agent, why);
             actor.finish_command(ctx.id, Ok(CommandOutcome::Done));
         }
-        HostCommand::EditQueuedPrompt { thread, turn, text } => {
-            let command = TurnCommand::EditQueuedPrompt { turn, text };
-            turn_command(actor, ctx, thread, command);
-        }
-        HostCommand::RemoveQueuedPrompt { thread, turn } => {
-            turn_command(actor, ctx, thread, TurnCommand::RemoveQueuedPrompt { turn });
-        }
-        HostCommand::SendQueuedNow { thread, turn } => {
-            turn_command(actor, ctx, thread, TurnCommand::SendQueuedNow { turn });
-        }
-        HostCommand::ResumeQueue { thread } => {
-            turn_command(actor, ctx, thread, TurnCommand::ResumeQueue);
-        }
         HostCommand::RestartAgent { .. } => not_built(actor, ctx),
     }
 }
@@ -322,14 +278,6 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
 fn not_built(actor: &mut Actor, ctx: &CommandCtx) {
     let refusal = Error::refused(ErrorCode::CommandInvalid, "not built yet");
     actor.finish_command(ctx.id, Err(refusal));
-}
-
-/// A turn command for a known thread goes to the turn path; an unknown one is refused.
-fn turn_command(actor: &mut Actor, ctx: &CommandCtx, thread: ThreadId, command: TurnCommand) {
-    match listed_thread(actor, thread) {
-        Ok(_) => turn::command(actor, ctx, thread, command),
-        Err(error) => actor.finish_command(ctx.id, Err(error)),
-    }
 }
 
 /// A command's commit returned.

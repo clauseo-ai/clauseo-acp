@@ -179,6 +179,7 @@ fn finish_load(actor: &mut Actor, stream: StreamId, mut state: StreamState, tail
     }
     // The queue's held flag is the host's, never in the log or a snapshot.
     if let (StreamId::Thread(thread), Some(thread_state)) = (stream, state.as_thread_mut()) {
+        actor.triage.loaded();
         let _ = clauseo_reducer::set_queue_held(thread_state, turn::queue_held(actor, thread));
     }
     let loaded = Box::new(Loaded {
@@ -212,7 +213,7 @@ pub(crate) fn release(actor: &mut Actor, stream: StreamId) {
         return;
     }
     if let StreamId::Thread(thread) = stream
-        && turn::keeps_loaded(actor, thread)
+        && (turn::keeps_loaded(actor, thread) || super::triage::holds(actor, thread))
     {
         return;
     }
@@ -295,6 +296,7 @@ fn continue_commit(actor: &mut Actor, tag: Tag, outcome: Result<(), &Failure>) {
         }
         Tag::Turn(tag) => turn::committed(actor, tag, outcome),
         Tag::Restore(matter) => turn::restore_committed(actor, matter, outcome.is_ok()),
+        Tag::Wake => super::triage::wake_committed(actor, outcome),
     }
 }
 

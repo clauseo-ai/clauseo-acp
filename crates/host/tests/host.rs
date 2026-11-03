@@ -168,6 +168,12 @@ mod tools;
 #[path = "host/titles.rs"]
 mod titles;
 #[cfg(test)]
+#[path = "host/triage.rs"]
+mod triage;
+#[cfg(test)]
+#[path = "host/triage_wake.rs"]
+mod triage_wake;
+#[cfg(test)]
 #[path = "host/turn.rs"]
 mod turn;
 #[cfg(test)]

@@ -344,6 +344,14 @@ pub struct ThreadSummary {
     /// last `MarkSeen` (or none ended at all). Missing (an older host's answer) reads as `true`.
     #[serde(default = "seen_default")]
     pub seen: bool,
+    /// When its snooze ends, as [`HeaderEntry::snoozed_until`](crate::HeaderEntry::snoozed_until):
+    /// the host clears it when the time comes. Missing reads as `None`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub snoozed_until: Option<Timestamp>,
+    /// Whether it is marked done, as [`HeaderEntry::done`](crate::HeaderEntry::done); missing
+    /// reads as `false`.
+    #[serde(default)]
+    pub done: bool,
     /// How and when its last turn ended, once one has. Known for every thread the host has
     /// loaded since it started (at start-up, every thread not archived in a listed matter).
     #[serde(skip_serializing_if = "Option::is_none", default)]

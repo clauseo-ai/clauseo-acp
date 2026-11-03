@@ -55,6 +55,10 @@ mod web;
 #[path = "events/web_urls.rs"]
 mod web_urls;
 
+#[cfg(test)]
+#[path = "events/triage.rs"]
+mod triage;
+
 use clauseo_protocol::{
     DomainEvent, ElicitationRequest, ElicitationRequested, Envelope, MAX_RAW_DEPTH,
     MAX_RAW_ENCODE_DEPTH, PromptBlock, RawPayload, SCHEMA_VERSION, StopReason, StreamId,

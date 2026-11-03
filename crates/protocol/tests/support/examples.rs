@@ -13,19 +13,19 @@ use clauseo_protocol::{
     AvailableCommand, ChangeKind, CheckpointKind, CheckpointRecorded, CommandsAvailable,
     CompactionChanged, CompactionStatus, ConfigCategory, ConfigChoice, ConfigOption,
     ConfigOptionKind, ConfigOptionsReplaced, ContentAppended, ContentBlock, ContentId, Cost,
-    Deliverable, Delivery, DetachReason, DomainEvent, ElicitationExpired, ElicitationOutcome,
-    ElicitationRequest, ElicitationRequested, ElicitationResolved, ErrorCode, ExpiryReason,
-    FileChange, FilesChanged, ImportSummary, LimitStopReason, MatterCreated, MatterKind,
-    MatterRelocated, ModeChanged, Notice, NoticeLevel, OutsideEdits, PageVia, PageVisited,
-    PermissionChoice, PermissionExpired, PermissionKind, PermissionOption, PermissionRequested,
-    PermissionResolved, PlanEntry, PlanPriority, PlanReplaced, PlanStatus, Principal,
-    PromptCapabilities, QueuedPromptEdited, RawFrom, RenameSource, RestoreScope,
-    SessionCapabilities, SkippedFile, SkippedFileReason, SteerOutcome, SteerResolved,
+    Deliverable, Delivery, DetachReason, DomainEvent, DoneBy, ElicitationExpired,
+    ElicitationOutcome, ElicitationRequest, ElicitationRequested, ElicitationResolved, ErrorCode,
+    ExpiryReason, FileChange, FilesChanged, ImportSummary, LimitStopReason, MatterCreated,
+    MatterKind, MatterRelocated, ModeChanged, Notice, NoticeLevel, OutsideEdits, PageVia,
+    PageVisited, PermissionChoice, PermissionExpired, PermissionKind, PermissionOption,
+    PermissionRequested, PermissionResolved, PlanEntry, PlanPriority, PlanReplaced, PlanStatus,
+    Principal, PromptCapabilities, QueuedPromptEdited, RawFrom, RenameSource, RestoreScope,
+    SessionCapabilities, SkippedFile, SkippedFileReason, SnoozeBy, SteerOutcome, SteerResolved,
     SteeringCapability, StepUndone, StopReason, TextAppended, TextKind, TextOrBlob, ThreadArchived,
-    ThreadCreated, ThreadRenamed, Timestamp, ToolCallContent, ToolCallPatch, ToolCallStarted,
-    ToolCallStatus, ToolCallUpdated, ToolKind, ToolLocation, TurnEnded, TurnFailed, TurnQueued,
-    TurnStarted, TurnStoppedAtLimit, TurnUsage, UsageUpdated, UserMessage, VersionRestored,
-    WebResult, WebSearchRecorded,
+    ThreadCreated, ThreadDone, ThreadRenamed, ThreadSnoozed, Timestamp, ToolCallContent,
+    ToolCallPatch, ToolCallStarted, ToolCallStatus, ToolCallUpdated, ToolKind, ToolLocation,
+    TurnEnded, TurnFailed, TurnQueued, TurnStarted, TurnStoppedAtLimit, TurnUsage, UsageUpdated,
+    UserMessage, VersionRestored, WebResult, WebSearchRecorded,
 };
 
 use crate::fixtures::{
@@ -104,6 +104,16 @@ pub fn later_variants() -> Vec<DomainEvent> {
         ThreadRenamed {
             title: short("Read the lease"),
             by: RenameSource::Placeholder,
+        }
+        .into(),
+        ThreadSnoozed {
+            until: None,
+            by: SnoozeBy::Expired,
+        }
+        .into(),
+        ThreadDone {
+            done: false,
+            by: DoneBy::Lawyer,
         }
         .into(),
         TurnFailed {
@@ -219,6 +229,16 @@ fn thread_events() -> Vec<DomainEvent> {
         }
         .into(),
         ThreadArchived {}.into(),
+        ThreadSnoozed {
+            until: Some(Timestamp::new(1_760_086_400_000).unwrap()),
+            by: SnoozeBy::Lawyer,
+        }
+        .into(),
+        ThreadDone {
+            done: true,
+            by: DoneBy::MorningSweep,
+        }
+        .into(),
         AgentSessionAttached {
             session: "sess-1".parse().unwrap(),
             agent_version: Some("0.9.0".to_owned()),

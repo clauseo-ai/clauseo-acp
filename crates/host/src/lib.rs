@@ -28,7 +28,9 @@
 //!   `docs/decisions/0022-matters-for-the-rail.md` records the rules. Each thread's seen mark
 //!   (`MarkSeen`, `actor/seen.rs`) and last stop, and the matter list and thread lists sent to
 //!   app subscribers as their rows change (`actor/app_lists.rs`):
-//!   `docs/decisions/0023-seen-marks-and-app-lists.md`.
+//!   `docs/decisions/0023-seen-marks-and-app-lists.md`. Each thread's triage (`SnoozeThread`,
+//!   `MarkThreadDone`, the morning sweep `SweepDone`, and the snooze timer that logs a snooze's
+//!   wake at its time; `actor/triage.rs`): `docs/decisions/0045-thread-triage.md`.
 //! - The profile hook: [`ProfileHook`], with [`NoProfile`] as the default. Its `_meta` goes on
 //!   `session/new` and `session/load`, and its variables into each launch, with the host's
 //!   switches over them; its servers after the lawyer's, its `CODEX_CONFIG` keys and its skill

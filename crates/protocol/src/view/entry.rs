@@ -56,6 +56,16 @@ pub struct HeaderEntry {
     /// compares equal.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<ToolState>,
+    /// When the lawyer's snooze ends, from the last `ThreadSnoozed` not cleared since (by
+    /// `until` left out, which the host logs when the time comes, or by a waking event: the
+    /// lawyer's message, a permission request, an elicitation, a limit stop, a failed or ended
+    /// turn). Missing reads as `None`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub snoozed_until: Option<Timestamp>,
+    /// Whether the thread is marked done, from the last `ThreadDone` not cleared since by a
+    /// waking event (the same ones as for `snoozed_until`). Missing reads as `false`.
+    #[serde(default)]
+    pub done: bool,
     /// The agent's current mode, if it reported one.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     #[cfg_attr(feature = "specta", specta(type = Option<String>))]

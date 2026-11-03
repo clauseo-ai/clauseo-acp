@@ -83,8 +83,8 @@ fn write_the_added_pairs() {
             );
         }
         println!(
-            "row: (\"added/{name}\", include_bytes!(\"corpus/added/{name}.jsonl\"), \
-             include_bytes!(\"corpus/added/{name}.msgpack\"), ({}, {:#018x}), ({}, {:#018x})),",
+            "row: (\"added/{name}\", include_bytes!(\"added/{name}.jsonl\"), \
+             include_bytes!(\"added/{name}.msgpack\"), ({}, {:#018x}), ({}, {:#018x})),",
             json.len(),
             fnv1a(json.as_bytes()),
             packed.len(),

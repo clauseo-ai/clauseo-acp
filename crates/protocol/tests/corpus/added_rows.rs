@@ -121,4 +121,18 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (278, 0xba76_e746_8ef1_0482),
         (202, 0x28ae_babd_4580_6e30),
     ),
+    (
+        "added/thread_snoozed",
+        include_bytes!("added/thread_snoozed.jsonl"),
+        include_bytes!("added/thread_snoozed.msgpack"),
+        (519, 0x6be9_bb63_e71a_7e74),
+        (367, 0x4793_ca06_41ca_5e5c),
+    ),
+    (
+        "added/thread_done",
+        include_bytes!("added/thread_done.jsonl"),
+        include_bytes!("added/thread_done.msgpack"),
+        (522, 0x430b_5da0_4fe2_8085),
+        (364, 0x5f0d_bfef_f75c_c988),
+    ),
 ];

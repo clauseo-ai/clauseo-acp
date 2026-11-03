@@ -7,9 +7,11 @@
 
 mod asks;
 mod queue;
+mod triage;
 mod turn;
 
 pub(crate) use queue::set_queue_held;
+pub(crate) use triage::wakes;
 
 use clauseo_protocol::{
     AgentContentEntry, CompactionChanged, ContentAppended, ContextUsage, DomainEvent, EntryId,
@@ -26,6 +28,17 @@ use crate::text::text_appended;
 
 /// Folds one envelope of the thread's stream; the caller has checked its stream and `seq`.
 pub(crate) fn fold(state: &mut ThreadState, envelope: &Envelope, out: &mut Applied) {
+    if triage::wake(state, &envelope.event) {
+        let from = out.changes.len();
+        fold_event(state, envelope, out);
+        triage::after_wake(state, from, out);
+    } else {
+        fold_event(state, envelope, out);
+    }
+}
+
+/// Folds the event itself, after the wake rule ran.
+fn fold_event(state: &mut ThreadState, envelope: &Envelope, out: &mut Applied) {
     let seq = envelope.seq;
     let event_id = envelope.event_id;
     let ts = envelope.ts;
@@ -39,6 +52,8 @@ pub(crate) fn fold(state: &mut ThreadState, envelope: &Envelope, out: &mut Appli
         DomainEvent::ThreadArchived(_) => {
             set_status(state, "thread_archived", out, ThreadStatus::Archived);
         }
+        DomainEvent::ThreadSnoozed(event) => triage::snoozed(state, event, out),
+        DomainEvent::ThreadDone(event) => triage::done(state, *event, out),
         DomainEvent::AgentNamed(event) => {
             update_header(state, "agent_named", out, |h| {
                 set_some(&mut h.agent_name, &event.agent_name)
@@ -211,6 +226,8 @@ fn thread_created(state: &mut ThreadState, seq: Seq, event: &ThreadCreated, out:
         queue_held: false,
         steer_joins_turn: queue::steer_joins_by_kind(&event.agent),
         tools: Vec::new(),
+        snoozed_until: None,
+        done: false,
         mode_id: None,
         config_options: Vec::new(),
         commands: Vec::new(),

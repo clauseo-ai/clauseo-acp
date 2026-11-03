@@ -310,6 +310,8 @@ fn same_thread(a: &ThreadSummary, b: &ThreadSummary) -> bool {
         status,
         queue_held,
         seen,
+        snoozed_until,
+        done,
         last_stop,
         last_activity: _,
     } = a;
@@ -320,6 +322,8 @@ fn same_thread(a: &ThreadSummary, b: &ThreadSummary) -> bool {
         && *status == b.status
         && *queue_held == b.queue_held
         && *seen == b.seen
+        && *snoozed_until == b.snoozed_until
+        && *done == b.done
         && *last_stop == b.last_stop
 }
 

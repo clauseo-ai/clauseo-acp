@@ -215,7 +215,17 @@ impl HostCommand {
             | Self::OpenMatter { matter: _ }
             | Self::ForgetMatter { matter: _ }
             | Self::RefreshLimits { agent: _, why: _ }
-            | Self::MarkSeen { thread: _ } => Ok(()),
+            | Self::MarkSeen { thread: _ }
+            // The times are checked against the host's clock, by the host.
+            | Self::SnoozeThread {
+                thread: _,
+                until: _,
+            }
+            | Self::MarkThreadDone {
+                thread: _,
+                done: _,
+            }
+            | Self::SweepDone { day_start: _ } => Ok(()),
         }
     }
 }
