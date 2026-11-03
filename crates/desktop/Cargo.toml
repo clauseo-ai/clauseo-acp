@@ -46,6 +46,10 @@ clauseo-host = { path = "../host" }
 clauseo-protocol = { path = "../protocol" }
 clauseo-settings = { path = "../settings" }
 clauseo-process = { path = "../process" }
+# Clauseo's launch profile, adapted to the host's ProfileHook (src/profile.rs, 0030).
+clauseo-profile = { path = "../profile" }
+# The profile's start-up warnings (a skill left out, no profile).
+tracing = { workspace = true }
 # Polling host subscriptions on Tauri's runtime; the bridge's watchdog timer.
 futures = { workspace = true }
 async-io = { workspace = true }

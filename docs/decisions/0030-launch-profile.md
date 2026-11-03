@@ -324,7 +324,49 @@ The host thread set the conditions the profile must keep: Claude keeps `settingS
 
 ### The desktop adapter (PR-C)
 
-Added by a later R21 PR.
+`crates/desktop/src/profile.rs` holds `DesktopProfile`, the app's `ProfileHook`. Desktop gains
+two dependencies, `profile` and `tracing`.
+
+- **What is mapped.** The agent's kind is `AgentKind::of(agent)`. An agent with no kind
+  (neither `claude-acp` nor `codex-acp`) gets nothing from any method.
+  - `session_meta` is `ClauseoProfile::session_meta`, Claude's `_meta` fragment (the
+    instructions and the plugin folder).
+  - `launch_env` is `env()` (`STETDOC_AUTHOR`).
+  - `mcp_servers` maps each `ProfileServer` to `McpServer::Stdio`.
+  - `launch_writes` is `ClauseoProfile::launch_writes`, Claude's plugin first.
+  - `codex_config(agent, written)` calls `codex_keys(kind, token)` with a token, and
+    `codex_keys_without_index(kind)` without one. The adapter keeps no token and no state
+    between calls.
+- **Start-up.** The profile is built once, on the host-start thread (`host_start.rs`), before
+  `Host::start`, so neither the window nor the host thread waits on it. The build finds the
+  app's executable, runs stetdoc for its skill (`load_skill`, cached in the plugin's
+  `skills/` folder), and renders R22's built-ins. The hook's methods then only map what it
+  holds. The browser's sidecars are named beside the executable, where Tauri's `externalBin`
+  puts them (S27 bundles them). The author is `None`, so tracked changes carry `Clauseo`.
+- **Failure.** A stetdoc skill that fails, or a refused built-in, is left out with a warning,
+  and the profile is built without it. If the profile itself cannot be built (no executable
+  path, or `ProfilePaths::new` refuses a path), the app logs a warning and starts with no
+  hook (`NoProfile`), as before PR-C. The desktop installs no tracing subscriber yet, so
+  these warnings go nowhere until it has a log.
+- **stetdoc.** U13's sidecar is not bundled on this base. A debug build takes the first
+  `stetdoc` (with the OS's suffix) in an absolute folder of `PATH`. A release build treats
+  stetdoc as absent. When stetdoc is absent, `ProfilePaths` names U13's future path
+  (`<exe folder>/stetdoc/stetdoc`), which is neither run nor put on `PATH`. When stetdoc is
+  found, `with_agent_path_prepend` takes `ClauseoProfile::path_prepend()`, if there is one.
+  The folder must be absolute, since the host takes it as given: `with_profile` checks it
+  (`absolute_folder`), with a `debug_assert!` and, in a release build, a warning and no
+  prepend. `ProfilePaths::new` already refuses a relative stetdoc, so this guards a bug only.
+  The `PATH` walk is one `#[expect(clippy::disallowed_methods)]` (`first_on_path`), with
+  its line in `xtask/expect-allowlist.txt`.
+- **No proxy yet.** Production calls no `with_egress_proxy`: stage C's proxy (R17) is not
+  wired. The host drops the `browser` entry, and the header shows the browser unavailable
+  with `NoProxy`. Wiring the proxy is one builder call once stage C has it.
+- **Known limit (follow-up issue).** The host's `Folders::of` fails at every session start
+  when the data folder's path is not UTF-8, so such a data folder starts no agent session.
+  The fix is in the host, not here.
+- **Test seam.** Under `test-support`, `HostConfig` gains `profile_hook()` and
+  `agent_path_prepend()`, so the desktop's wiring (`with_profile`) is tested on a real
+  config.
 
 ### Deviations from the brief (PR-A)
 

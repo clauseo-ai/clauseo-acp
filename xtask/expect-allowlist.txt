@@ -31,6 +31,7 @@ crates/desktop/src/test_support.rs Scratch::dir clippy::disallowed_methods
 crates/desktop/src/test_support.rs Scratch::file clippy::disallowed_methods
 crates/desktop/src/test_support.rs Scratch::link clippy::disallowed_methods
 crates/desktop/src/lib.rs context clippy::disallowed_methods
+crates/desktop/src/profile.rs first_on_path clippy::disallowed_methods
 crates/desktop/src/lib.rs raise_main_window clippy::let_underscore_must_use
 crates/desktop/src/lib.rs stop_host_then_exit clippy::exit
 # R13: the speed scoreboard's e2e and marks builds (never in release), and build.rs's cleanup of
