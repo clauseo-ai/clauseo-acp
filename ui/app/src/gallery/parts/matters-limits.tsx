@@ -2,7 +2,7 @@
 // day's line and an earlier exchange folded to one line, the quiet note under the field, and the band across the work.
 import type { ReactNode } from "react";
 import { Button } from "@clauseo/components/ui/button.tsx";
-import { IconChecking } from "@clauseo/components/icons/icons.tsx";
+import { IconChecking, IconQuestion, IconTick } from "@clauseo/components/icons/icons.tsx";
 import {
   DayLine,
   DraftExcerpt,
@@ -73,7 +73,7 @@ export function LimitSamples() {
       <Sample name="Choice, waiting for the lawyer">
         <NoticeCard
           waiting
-          icon={<IconChecking size={16} />}
+          icon={<IconQuestion size={16} />}
           label="Choice"
           title="Which date should the plaint use?"
           sub="The notice's date or the bank's reply"
@@ -92,7 +92,7 @@ export function LimitSamples() {
       </Sample>
       <Sample name="Confirmation, the line before the actions">
         <NoticeCard
-          icon={<IconChecking size={16} />}
+          icon={<IconTick size={16} />}
           label="Saved"
           title="The changes are in the plaint"
           sub="Plaint draft.docx"
