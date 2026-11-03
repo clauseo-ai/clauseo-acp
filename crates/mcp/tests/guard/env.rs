@@ -102,13 +102,23 @@ fn expected(scratch: &Scratch) -> BTreeMap<String, String> {
     map
 }
 
+/// Variables Windows itself puts in a new process's environment whatever block it is given:
+/// on ARM64 the child gets `PROCESSOR_ARCHITECTURE`. The guard never passes them: the test sets
+/// a hostile value in the guard's env, and the child must not see it.
+const OS_SET: &[&str] = &["PROCESSOR_ARCHITECTURE"];
+
+/// The value the test gives `OS_SET`'s variables in the guard's env.
+const OS_SET_HOSTILE: &str = "clauseo-hostile";
+
 #[test]
 fn the_child_sees_exactly_the_allow_list_and_the_given_folder() {
     let scratch = Scratch::new("env");
     let args = ["mcp", "--tools", "core", "two words", "--x=y", "é"].map(OsStr::new);
     let mut command = guard_command(&scratch, &example("env_stub"), &args);
     command.envs(HOSTILE.iter().copied());
-    if !cfg!(windows) {
+    if cfg!(windows) {
+        command.env("PROCESSOR_ARCHITECTURE", OS_SET_HOSTILE);
+    } else {
         command.env("LANG", "en_IN.UTF-8").env("lang", "xx");
     }
     let mut guard = Guard::start(command);
@@ -123,6 +133,17 @@ fn the_child_sees_exactly_the_allow_list_and_the_given_folder() {
         .iter()
         .map(|(name, value)| (name.clone(), value.as_str().unwrap().to_owned()))
         .collect();
+    let mut env = env;
+    if cfg!(windows) {
+        for name in OS_SET {
+            if let Some(value) = env.remove(*name) {
+                assert_ne!(
+                    value, OS_SET_HOSTILE,
+                    "{name} came through from the guard's env"
+                );
+            }
+        }
+    }
     assert_eq!(env, expected(&scratch));
     let args: Vec<&str> = report["args"]
         .as_array()
