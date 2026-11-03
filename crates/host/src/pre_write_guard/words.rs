@@ -16,6 +16,9 @@ pub(crate) enum Escape {
 #[derive(Debug, Default)]
 pub(crate) struct Segment {
     pub(crate) words: Vec<String>,
+    /// For each of `words`, whether any part of it was quoted or escaped (so a wildcard in it is
+    /// not expanded).
+    pub(crate) quoted: Vec<bool>,
     pub(crate) command: bool,
     pub(crate) redirects: Vec<String>,
 }
@@ -48,6 +51,11 @@ impl Segments {
 
     /// Adds `word` to the last segment, unless it is full.
     pub(crate) fn push(&mut self, word: String) {
+        self.push_word(word, false);
+    }
+
+    /// Adds `word`, quoted or escaped in part or not, to the last segment, unless it is full.
+    fn push_word(&mut self, word: String, quoted: bool) {
         if self.full() {
             return;
         }
@@ -56,6 +64,7 @@ impl Segments {
         }
         if let Some(last) = self.list.last_mut() {
             last.words.push(word);
+            last.quoted.push(quoted);
             self.count += 1;
         }
     }
@@ -71,6 +80,7 @@ impl Segments {
             Some(last) if last.words.is_empty() => last.command = command,
             _ => self.list.push(Segment {
                 words: Vec::new(),
+                quoted: Vec::new(),
                 command,
                 redirects: Vec::new(),
             }),
@@ -117,6 +127,7 @@ pub(crate) fn shell_segments(command: &str, escape: Escape, segments: &mut Segme
         ansi_c: escape == '\\',
         word: String::new(),
         in_word: false,
+        quoted: false,
         awaiting_delimiter: None,
         redirecting: None,
         heredocs: Vec::new(),
@@ -133,6 +144,8 @@ struct Scanner<'a> {
     ansi_c: bool,
     word: String,
     in_word: bool,
+    /// Whether a quote or the escape character was part of the word being read.
+    quoted: bool,
     /// After `<<` or `<<-`: the next word is a heredoc's delimiter; whether tabs are stripped.
     awaiting_delimiter: Option<bool>,
     /// After `>`: the next word is a redirection's target; whether it duplicates a descriptor.
@@ -224,23 +237,17 @@ impl Scanner<'_> {
                     }
                 }
                 (Quote::None, c) if c.is_whitespace() => self.end_word(segments),
-                (Quote::None, '\'') => {
-                    quote = Quote::Single;
-                    self.in_word = true;
-                }
-                (Quote::None, '"') => {
-                    quote = Quote::Double;
-                    self.in_word = true;
-                }
+                (Quote::None, '\'') => quote = self.open(Quote::Single),
+                (Quote::None, '"') => quote = self.open(Quote::Double),
                 (Quote::None, '$') if self.ansi_c && self.chars.peek() == Some(&'\'') => {
                     self.chars.next();
-                    quote = Quote::AnsiC;
-                    self.in_word = true;
+                    quote = self.open(Quote::AnsiC);
                 }
                 (Quote::None, c) if c == self.escape => match self.chars.next() {
                     Some('\n') | None => {}
                     Some(next) => {
                         self.in_word = true;
+                        self.quoted = true;
                         self.word.push(next);
                     }
                 },
@@ -272,12 +279,20 @@ impl Scanner<'_> {
         self.end_word(segments);
     }
 
+    /// Opens `quote` in the word being read, which so counts as quoted.
+    fn open(&mut self, quote: Quote) -> Quote {
+        self.in_word = true;
+        self.quoted = true;
+        quote
+    }
+
     /// Ends the word being read, if any: a heredoc's delimiter is noted, any other word kept.
     fn end_word(&mut self, segments: &mut Segments) {
         if !self.in_word {
             return;
         }
         self.in_word = false;
+        let quoted = std::mem::take(&mut self.quoted);
         let word = std::mem::take(&mut self.word);
         if let Some(dash) = self.awaiting_delimiter.take() {
             self.heredocs.push((word, dash));
@@ -290,7 +305,7 @@ impl Scanner<'_> {
                 word.clone()
             });
         }
-        segments.push(word);
+        segments.push_word(word, quoted);
     }
 
     /// Reads the bodies of the heredocs the line just ended opened, each into a segment that is

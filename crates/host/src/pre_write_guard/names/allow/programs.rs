@@ -180,9 +180,11 @@ pub(super) fn cp_reads(
 }
 
 /// Whether `unzip` with `args` only lists or prints (`-l`, `-p`, `-v`, `-lv`, with `-q`,
-/// `-qq`), or extracts into a folder given by `-d DIR` (or `-dDIR`) that `writable` allows
-/// and that is not `.` or `..`, with no option but `-o`, `-n`, `-q`, `-qq`.
-pub(super) fn unzip_reads(args: &[String], writable: impl Fn(&str) -> bool) -> bool {
+/// `-qq`), or extracts into a folder given by `-d DIR` (or `-dDIR`) that is `outside` the
+/// matter, with no option but `-o`, `-n`, `-q`, `-qq`. An extraction into the matter could
+/// put a member on a held file (`unzip -o Revised.zip Contract.docx -d ../m`), so it is not a
+/// read.
+pub(super) fn unzip_reads(args: &[String], outside: impl Fn(&str) -> bool) -> bool {
     let options: Vec<&String> = args.iter().filter(|arg| arg.starts_with('-')).collect();
     let lists = options
         .iter()
@@ -204,8 +206,5 @@ pub(super) fn unzip_reads(args: &[String], writable: impl Fn(&str) -> bool) -> b
             _ => {}
         }
     }
-    folder.is_some_and(|folder| {
-        let trimmed = folder.trim_end_matches(['/', '\\']);
-        !matches!(trimmed, "" | "." | "..") && writable(folder)
-    })
+    folder.is_some_and(outside)
 }

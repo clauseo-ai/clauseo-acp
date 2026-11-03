@@ -130,6 +130,7 @@ fn textutil_writing_a_held_file_by_its_default_name_is_refused() {
 #[test]
 fn harmless_reads_and_copies_away_go_on() {
     let fx = Fixture::new("batch-reads");
+    let unzip_out = format!("unzip -o Contract.docx -d {}", fx.path("out"));
     allowed(
         &fx,
         "Bash",
@@ -147,8 +148,8 @@ fn harmless_reads_and_copies_away_go_on() {
             "zipinfo Contract.docx",
             "diff Contract.docx Free.docx",
             "cmp Contract.docx Free.docx",
-            "unzip -o Contract.docx -d unpacked",
-            "unzip -q Contract.docx -d/tmp/contract-parts",
+            "unzip -q Contract.docx -d/tmp",
+            &unzip_out,
         ],
     );
     allowed(
@@ -186,5 +187,60 @@ fn harmless_reads_and_copies_away_go_on() {
             "Get-Content x | Set-Content Contract.docx",
             "type x > Contract.docx",
         ],
+    );
+}
+
+/// Review round 5: `unzip -d` reads only when the folder is outside the matter; into it, a
+/// member can land on the held file.
+#[test]
+fn unzip_into_the_matter_is_refused() {
+    let fx = Fixture::new("batch-unzip");
+    let into_matter = format!("unzip -o Revised.zip Contract.docx -d {}", fx.path("m"));
+    refused(
+        &fx,
+        "Bash",
+        &[
+            &into_matter,
+            "unzip -o Revised.zip Contract.docx -d ../m",
+            "unzip -o Revised.zip Contract.docx -d sub/..",
+            "unzip -o Contract.docx -d unpacked",
+        ],
+    );
+    let out = format!("unzip -o Revised.zip Contract.docx -d {}", fx.path("out"));
+    allowed(&fx, "Bash", &[&out, "unzip -o Contract.docx -d /tmp"]);
+}
+
+/// Review round 5: a quoted pattern a search program matches itself is no file operand, so it
+/// does not count as naming the held file; unquoted, or with an action that writes, it still does.
+#[test]
+fn a_quoted_search_pattern_is_not_a_wildcard_operand() {
+    let fx = Fixture::new("batch-patterns");
+    allowed(
+        &fx,
+        "Bash",
+        &[
+            "find . -name '*.docx'",
+            "find . -iname \"*.DOCX\" | wc -l",
+            "rg --files -g '*.docx'",
+            "rg --files --glob='*.docx' | sort",
+            "grep -rl X --include='*.docx' .",
+        ],
+    );
+    allowed(&fx, "PowerShell", &["Get-ChildItem -Filter '*.docx'"]);
+    refused(
+        &fx,
+        "Bash",
+        &[
+            "find . -name *.docx -delete",
+            "find . -name '*.docx' -delete",
+            "find . -name '*.docx' -exec rm {} +",
+            "find . -name '*.docx' | xargs rm",
+            "rg --files -g '*.docx' | xargs rm",
+        ],
+    );
+    refused(
+        &fx,
+        "PowerShell",
+        &["Get-ChildItem -Filter '*.docx' | Remove-Item"],
     );
 }
