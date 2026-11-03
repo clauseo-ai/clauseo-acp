@@ -1,7 +1,7 @@
 /* The step group: what Clauseo did between two of its texts, as one quiet line that opens in place to its rows
    (step-group.tsx). Its line is the work chip's look (thread.css .work-done): small words in the muted tone, the
-   icons before them, the chevron after, the well's tone under the pointer. Opened, its rows sit on the well, like
-   the work list's; nothing animates: the chevron turns at once. A failure stays on the line in the primary ink, never red. */
+   icons before them, the chevron after, held to the last word, the well's tone under the pointer. Opened, its rows
+   sit on the well, like the work list's; nothing animates: the chevron turns at once. A failure stays on the line in the primary ink, never red. */
 
 @layer components {
   .step-group {
@@ -13,11 +13,14 @@
   .step-group-line {
     @apply text-small font-ui text-muted;
     display: inline-flex;
-    align-items: center;
+    /* the icons stand on the words' first line when the words wrap: both start at the top, the chip's 24 px kept by
+       padding its one line of words to the middle */
+    align-items: flex-start;
     gap: var(--s1-5);
     max-width: 100%;
     min-height: calc(var(--s6) * var(--k));
-    padding: 0 var(--s2) 0 var(--s1-5);
+    padding: calc((var(--s6) - var(--lh-small)) * var(--k) / 2) var(--s2)
+      calc((var(--s6) - var(--lh-small)) * var(--k) / 2) var(--s1-5);
     margin-left: calc(-1 * var(--s1-5));
     border-radius: var(--r-chip);
     background: transparent;
@@ -27,19 +30,32 @@
       background-color var(--dur-quick) var(--ease-arrive),
       color var(--dur-quick) var(--ease-arrive);
     @apply is-hover:bg-well is-hover:text-primary is-active:bg-well-strong;
+    /* the line's own ink, for the chevron wherever it stands among the words (after the aside or the trouble too) */
+    --line-ink: var(--muted);
+    @variant is-hover {
+      --line-ink: var(--primary);
+    }
   }
   .step-group-icons {
     display: inline-flex;
     align-items: center;
     gap: var(--s1);
     flex: none;
+    height: calc(var(--lh-small) * var(--k));
   }
   .step-icon {
     flex: none;
     color: var(--quiet);
   }
+  /* the words wrap, never cut (DESIGN, "Never truncate"): a long file name with no spaces breaks too, so nothing
+     ever pushes past its line, down to 320 px and at any text size */
   .step-group-words {
     min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  /* an icon and the word it is held to (glued.tsx): they wrap as one */
+  .glued {
+    white-space: nowrap;
   }
   /* live, the line is muted as the folded one is (DESIGN, the step group, "Live"), its count too: only a failure takes
      primary */
@@ -67,53 +83,12 @@
   }
   .step-group-chev {
     margin-inline-start: var(--s1-5);
+    color: var(--line-ink);
   }
-  /* on the answer's meta line, the line stays on that line, on one line, live and folded alike, so the answer below
-     never moves when the turn ends (in Hindi with three kinds, or with a background note, it would wrap to a row of
-     its own, 26 px lower): the name and the time keep their width, the words take what is left. Sentences that don't
-     fit drop from the end, "And 3 more." first, then the smallest counts, with "…" after the last kept (step-group.tsx
-     useFit); the aside and the trouble always stay, whole, in their own slot; a mid-word ellipsis only where one sentence alone won't fit. The
-     chevron stays after the words; the button's title and name hold the whole summary */
-  .meta:has(> .step-group-line) {
-    flex-wrap: nowrap;
-  }
-  .meta > :not(.step-group-line) {
-    flex: none;
-  }
+  /* on the answer's meta line, the line stands after the name and the time where it fits; where it doesn't, the whole
+     line wraps under them (the meta line wraps), and its words wrap inside it. Nothing is cut */
   .meta > .step-group-line {
-    flex: 0 1 auto;
     min-width: 0;
-  }
-  .meta > .step-group-line .step-group-words {
-    position: relative;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-  }
-  /* a sentence dropped to fit: out of sight, still in the button's name */
-  .step-part-dropped {
-    @apply sr-only;
-  }
-  /* the "…" after the last kept sentence, drawn by CSS so it is in no text; while nothing is dropped it stands unseen
-     out of the flow, at the words' start, so its width can be read */
-  .step-part-cut::after {
-    content: " …";
-    white-space: pre;
-  }
-  .step-part-cut:not([data-cut]) {
-    position: absolute;
-    inset-inline-start: 0;
-    visibility: hidden;
-  }
-  /* the aside and the trouble, after the summary in their own slot that never shrinks, so a cut falls on the summary
-     alone */
-  .meta > .step-group-line .step-group-kept {
-    flex: none;
-    white-space: nowrap;
-  }
-  .meta > .step-group-line .step-group-chev {
-    flex: none;
-    margin-inline-start: 0;
   }
   .step-group-line[aria-expanded="true"] .step-group-chev svg {
     transform: rotate(90deg);

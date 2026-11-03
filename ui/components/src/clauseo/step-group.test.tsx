@@ -127,10 +127,13 @@ test("the line is a button that opens its rows in place and folds them, with ari
   expect(trouble.querySelector(".step-inline-icon.step-trouble-icon > svg")?.outerHTML).toBe(
     svg(IconBreak),
   );
-  // the chevron follows the last word inside the words, so it stays beside them when the line wraps
-  const words = host.querySelector(".step-group-words")!;
-  expect(words.lastElementChild?.classList.contains("step-group-chev")).toBe(true);
-  expect(words.lastElementChild?.classList.contains("step-inline-icon")).toBe(true);
+  // the chevron is held to the last word, inside the words, so it stays beside them when the line wraps; the break to
+  // the trouble's first
+  const chev = host.querySelector(".step-group-words .step-group-chev.step-inline-icon")!;
+  expect(chev.parentElement?.className).toBe("glued");
+  expect(chev.parentElement?.textContent).toBe("failed.");
+  expect(chev.parentElement?.lastElementChild).toBe(chev);
+  expect(trouble.querySelector(".step-trouble-icon")?.parentElement?.textContent).toBe("1");
   expect(host.querySelector('[data-testid="tool-call"]')).toBeNull();
   await act(async () => line.click());
   expect(line.getAttribute("aria-expanded")).toBe("true");
@@ -170,7 +173,7 @@ test("a group whose every step is over with none finished says what was tried on
   expect(glyphs[0]!.closest(".step-trouble-icon")).not.toBeNull();
 });
 
-test("on the meta line the line keeps one line: at most three kind icons, the chevron after the words so an ellipsis never cuts it, the whole summary its name and its title", async () => {
+test("on the meta line nothing is cut: every word on screen in the words that wrap, at most three kind icons, the chevron held to the last word, the whole summary its name and no hover copy", async () => {
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -192,31 +195,46 @@ test("on the meta line the line keeps one line: at most three kind icons, the ch
   );
   const line = host.querySelector<HTMLButtonElement>(".meta > button")!;
   const full = `${words} उनमें से 1 पृष्ठभूमि में चलता रहा। 1 विफल रहा।`;
-  // its name, read from its words, all still in the button however the ellipsis cuts them; the hover says it too
+  // its name, read from its words, all on screen: nothing dropped, no "…", no title
   expect(line.textContent).toBe(full);
-  expect(line.title).toBe(full);
+  expect(line.hasAttribute("title")).toBe(false);
+  expect(line.querySelector(".step-part-dropped, .step-part-cut, .step-group-kept")).toBeNull();
   expect(line.querySelectorAll(".step-group-icons svg")).toHaveLength(3);
-  // the chevron after the words, the button's last part, not among the words
-  expect(line.lastElementChild?.classList.contains("step-group-chev")).toBe(true);
-  expect(line.querySelector(".step-group-words .step-group-chev")).toBeNull();
+  // the aside and the trouble among the words, as off the meta line; the chevron held to the very last word
+  const all = line.querySelector(".step-group-words")!;
+  expect(all.querySelector(".step-group-more")).not.toBeNull();
+  expect(all.querySelector(".step-group-trouble")).not.toBeNull();
+  const chev = all.querySelector(".step-group-chev")!;
+  expect(chev.parentElement?.className).toBe("glued");
+  expect(chev.parentElement?.textContent).toBe("रहा।");
+  expect(line.querySelectorAll(".step-group-chev")).toHaveLength(1);
 });
 
-test("off the meta line the line keeps no title and its chevron follows the last word", async () => {
+test("off the meta line the line keeps no title and its chevron is held to the last word, whichever part ends the words", async () => {
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
-  await act(async () =>
-    root!.render(
-      <StepGroup id="tool_call:1" kinds={["read"]} line="1 paper read.">
-        {null}
-      </StepGroup>,
-    ),
-  );
-  const line = host.querySelector("button")!;
-  expect(line.hasAttribute("title")).toBe(false);
-  expect(line.querySelector(".step-group-words")?.lastElementChild?.classList).toContain(
-    "step-group-chev",
-  );
+  const cases: [Partial<{ line: string; more: string; trouble: string }>, string][] = [
+    [{ line: "1 paper read." }, "read."],
+    [{ line: "Reading Lease.pdf.", more: "2 done so far." }, "far."],
+    [{ line: "", trouble: "Tried to read indiankanoon.org online." }, "online."],
+  ];
+  for (const [words, tail] of cases) {
+    await act(async () =>
+      root!.render(
+        <StepGroup id="tool_call:1" kinds={["read"]} line={words.line ?? ""} {...words}>
+          {null}
+        </StepGroup>,
+      ),
+    );
+    const line = host.querySelector("button")!;
+    expect(line.hasAttribute("title")).toBe(false);
+    const chev = line.querySelectorAll(".step-group-chev");
+    expect(chev).toHaveLength(1);
+    expect(chev[0]!.parentElement?.className).toBe("glued");
+    expect(chev[0]!.parentElement?.textContent).toBe(tail);
+    expect(chev[0]!.nextSibling).toBeNull();
+  }
 });
 
 test("live, a step waiting on the lawyer leads the line with the permission's shield or the question mark, never a kind icon", async () => {
@@ -241,132 +259,4 @@ test("live, a step waiting on the lawyer leads the line with the permission's sh
     host.remove();
   }
   host = root = null;
-});
-
-test("on the meta line, sentences that don't fit drop from the end at a sentence with '…', the aside and the trouble kept, the whole summary still the name; measured again when the meta line's width changes", async () => {
-  // a 5 px per character layout: the words' box is `room` wide, each part as wide as its text
-  let room = 300;
-  const PX = 5;
-  // the "…" is drawn by CSS: two characters
-  const wide = (e: Element) =>
-    e.classList.contains("step-part-cut") ? 2 * PX : (e.textContent ?? "").length * PX;
-  const shown = (el: Element) =>
-    [
-      ...el.querySelectorAll(
-        ".step-part:not(.step-part-dropped), .step-part-cut[data-cut], .step-group-more, .step-group-trouble",
-      ),
-    ].reduce((sum, e) => sum + wide(e), 0);
-  const proto = HTMLElement.prototype;
-  const saved = {
-    scroll: Object.getOwnPropertyDescriptor(proto, "scrollWidth"),
-    client: Object.getOwnPropertyDescriptor(proto, "clientWidth"),
-    rect: Object.getOwnPropertyDescriptor(Element.prototype, "getBoundingClientRect"),
-  };
-  Object.defineProperty(proto, "scrollWidth", {
-    configurable: true,
-    get(this: HTMLElement) {
-      return this.classList.contains("step-group-words") ? shown(this) : 0;
-    },
-  });
-  Object.defineProperty(proto, "clientWidth", {
-    configurable: true,
-    get(this: HTMLElement) {
-      if (!this.classList.contains("step-group-words")) return 0;
-      // the words' box takes what the aside and the trouble leave
-      const kept = this.parentElement?.querySelector(".step-group-kept");
-      return Math.min(room - (kept === null || kept === undefined ? 0 : wide(kept)), shown(this));
-    },
-  });
-  Object.defineProperty(proto, "getBoundingClientRect", {
-    configurable: true,
-    value(this: HTMLElement) {
-      return { width: wide(this) } as DOMRect;
-    },
-  });
-  let resized: (() => void) | null = null;
-  const RO = globalThis.ResizeObserver;
-  globalThis.ResizeObserver = class {
-    constructor(cb: ResizeObserverCallback) {
-      resized = () => cb([{ contentRect: { width: room } } as ResizeObserverEntry], this as never);
-    }
-    observe() {}
-    disconnect() {}
-    unobserve() {}
-  } as unknown as typeof ResizeObserver;
-  try {
-    host = document.createElement("div");
-    document.body.append(host);
-    root = createRoot(host);
-    const parts = ["2 papers read.", "Searched once.", "1 paper changed.", "And 2 more."];
-    const more = "2 of them went on in the background.";
-    await act(async () =>
-      root!.render(
-        <StepGroup
-          id="tool_call:1"
-          kinds={["read", "search", "edit"]}
-          line={parts.join(" ")}
-          parts={parts}
-          more={more}
-          trouble="1 failed."
-          head={(l) => <div className="meta">{l}</div>}
-        >
-          {null}
-        </StepGroup>,
-      ),
-    );
-    const line = host.querySelector<HTMLButtonElement>(".meta > button")!;
-    const seen = () =>
-      [...line.querySelectorAll(".step-part:not(.step-part-dropped)")].map((e) =>
-        e.textContent?.trim(),
-      );
-    const dropped = () =>
-      [...line.querySelectorAll(".step-part-dropped")].map((e) => e.textContent?.trim());
-    // 300 px: the aside, the trouble and the "…" take 245, so one sentence fits; the rest drop from the end
-    expect(seen()).toEqual(["2 papers read."]);
-    expect(dropped()).toEqual(["Searched once.", "1 paper changed.", "And 2 more."]);
-    expect(line.querySelector(".step-part-cut[data-cut]")?.getAttribute("aria-hidden")).toBe(
-      "true",
-    );
-    expect(line.querySelector(".step-group-more")?.textContent).toBe(more);
-    expect(line.querySelector(".step-group-trouble")?.textContent).toBe("1 failed.");
-    // the aside and the trouble stand outside the clipped words, in their own slot, before the chevron
-    const kept = line.querySelector(".step-group-kept")!;
-    expect(
-      line.querySelector(
-        ".step-group-words .step-group-more, .step-group-words .step-group-trouble",
-      ),
-    ).toBeNull();
-    expect(kept.querySelector(".step-group-more")).not.toBeNull();
-    expect(kept.querySelector('[data-testid="step-group-trouble"] svg')).not.toBeNull();
-    expect(kept.nextElementSibling?.classList.contains("step-group-chev")).toBe(true);
-    // the "…" follows the sentences, so on screen it stands after the last kept one (the dropped are out of the flow),
-    // before the aside
-    const order = [...line.querySelectorAll(".step-part, .step-part-cut")].map((e) => e.className);
-    expect(order.at(-1)).toBe("step-part-cut");
-    // the whole summary is still the hover and, unseen, in the name
-    const full = `${parts.join(" ")} ${more} 1 failed.`;
-    expect(line.title).toBe(full);
-    for (const p of parts) expect(line.textContent).toContain(p);
-    // wider: measured again, everything fits, no "…"
-    room = 700;
-    await act(async () => resized?.());
-    expect(seen()).toEqual(parts);
-    expect(line.querySelector(".step-part-cut[data-cut]")).toBeNull();
-    // very narrow: one sentence stays, cut mid-word by the CSS as a last resort
-    room = 100;
-    await act(async () => resized?.());
-    expect(seen()).toEqual(["2 papers read."]);
-  } finally {
-    if (saved.scroll) Object.defineProperty(proto, "scrollWidth", saved.scroll);
-    else delete (proto as { scrollWidth?: number }).scrollWidth;
-    if (saved.client) Object.defineProperty(proto, "clientWidth", saved.client);
-    else delete (proto as { clientWidth?: number }).clientWidth;
-    delete (proto as { getBoundingClientRect?: unknown }).getBoundingClientRect;
-    if (
-      saved.rect &&
-      Object.getOwnPropertyDescriptor(Element.prototype, "getBoundingClientRect") === undefined
-    )
-      Object.defineProperty(Element.prototype, "getBoundingClientRect", saved.rect);
-    globalThis.ResizeObserver = RO;
-  }
 });
