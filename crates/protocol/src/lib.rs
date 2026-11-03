@@ -148,6 +148,7 @@ mod open_enum;
 mod patch;
 mod query;
 mod raw;
+mod search;
 mod serde_util;
 mod session;
 mod settings;
@@ -229,6 +230,10 @@ wire_types! {
         QueryResult, ReadLen, RestorePreview, ThreadSummary,
     },
     raw::{RawPayload},
+    search::{
+        SearchAnswer, SearchHit, SearchKind, SearchMode, SearchPage, SearchProgress, SearchRequest,
+        SearchScope, SnippetPart,
+    },
     session::{
         AgentCapabilities, AvailableCommand, CompactionStatus, ConfigCategory, ConfigChoice,
         ConfigOption, ConfigOptionKind, Cost, DetachReason, NoticeLevel, PlanEntry, PlanPriority,
@@ -284,6 +289,7 @@ pub use number::MAX_SAFE;
 pub use open_enum::UnknownKind;
 pub use query::{MAX_BLOB_READ_BYTES, MAX_PAGE_ENTRIES, MAX_PAPERS};
 pub use raw::{MAX_MSGPACK_DEPTH, MAX_RAW_DEPTH, MAX_RAW_ENCODE_DEPTH};
+pub use search::{DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT};
 pub use text::{INLINE_LIMIT_BYTES, PREVIEW_BYTES, escaped_len, preview_of, utf16_len};
 pub use title::{MAX_TITLE_CHARS, check_display_title};
 pub use web::{

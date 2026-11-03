@@ -10,8 +10,8 @@ use crate::open_enum::open_unit_enum;
 use crate::{
     AgentId, AgentKind, BlobHash, CheckpointId, ClientName, CompactString, Count, Date, Error,
     FileChange, FileRefId, LastStop, MatterId, MatterKind, MatterPath, MatterStatus,
-    RestoreRequest, Seq, SettingsView, SkippedFile, StreamId, ThreadId, ThreadStatus, Timestamp,
-    ViewEntry,
+    RestoreRequest, SearchAnswer, SearchRequest, Seq, SettingsView, SkippedFile, StreamId,
+    ThreadId, ThreadStatus, Timestamp, ViewEntry,
 };
 
 /// Most entries one `PageEntries` returns: the size of a `Reset`'s view window (about 200 recent
@@ -149,6 +149,9 @@ pub enum HostQuery {
     /// Where `MatterSource::DefaultLocation` makes new matters, for display: the form's folder
     /// line before a pick. JSON: `"get_default_location"`.
     GetDefaultLocation,
+    /// Search inside matters and conversations (decision 0043). Answered
+    /// `QueryResult::Search`.
+    Search(SearchRequest),
 }
 
 /// A query's answer.
@@ -191,6 +194,9 @@ pub enum QueryResult {
     Agents(Vec<AgentSummary>),
     /// For `GetDefaultLocation`. JSON: `{"default_location": {"display": "..."}}`.
     DefaultLocation(DefaultLocation),
+    /// For `Search`: a page of hits, or `Cancelled` when a newer search from the same window
+    /// came first.
+    Search(SearchAnswer),
 }
 
 /// One file of a matter's folder, as `ListPapers` lists it.
