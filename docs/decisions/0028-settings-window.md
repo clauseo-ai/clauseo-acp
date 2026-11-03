@@ -104,6 +104,15 @@ limits events for it while its app feed stays `settings_changed` alone, `dispatc
 its button), and its focus dispatches `Shown` as `main`'s does. Any other label still follows
 no limits and sends nothing.
 
+The risk: `TryAgain` reads now whatever the last read's age, so Try again pressed over and over
+in Settings would have the host start a read for each press. The bridge throttles the settings
+window's `RefreshLimits` to one per agent per 10 s (`agent: None`, every agent, is a key of its
+own; `crates/desktop/src/bridge/throttle.rs`). One it holds back is dropped quietly: `dispatch`
+answers `Done` and sends the host nothing. No error code means "too soon", and the page's next
+limits view says what came of the last read anyway. `main`'s refreshes pass as before. Host issue
+#220 will have the host keep 10 s per agent kind between `TryAgain`s from any window, sending the
+current limits again so a spinner still settles; the bridge's throttle stays as defence in depth.
+
 ## Date
 
 2026-11-02
