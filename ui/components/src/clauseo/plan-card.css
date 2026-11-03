@@ -22,14 +22,8 @@
   .room-plan-in {
     min-width: 0;
   }
-  /* out of date: the figures go muted, the line says how old they are */
-  :is(.room-plan-press, .room-plan-look)[data-look="stale"] [role="meter"] > :last-child > * {
-    background: var(--flat-num);
-  }
-  /* no figures: the track stands empty; billed by use: no meter at all */
-  :is(.room-plan-press, .room-plan-look)[data-look="bare"] [role="meter"] > :last-child {
-    display: none;
-  }
+  /* out of date, the fill goes muted (PlanMeter's muted: bg-flat-num on the fill, which carries data-muted); with no
+     figures or billed by use, PlanMeter draws no track at all */
 
   /* ---------- the plan's card ---------- */
   .plan-card {

@@ -328,6 +328,7 @@ export function ToolbarPlan({ plan }: { plan: NonNullable<RoomToolbarProps["plan
       status={plan.status}
       state={plan.state ?? planState(plan.left)}
       track={!figureless}
+      muted={plan.look === "stale"}
       inButton={plan.card !== undefined}
       dragRegion
       className={cn("room-plan", plan.card !== undefined && "room-plan-in")}

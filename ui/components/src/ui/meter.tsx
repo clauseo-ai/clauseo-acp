@@ -20,6 +20,7 @@ export function PlanMeter({
   track = true,
   inButton = false,
   dragRegion = false,
+  muted = false,
   className,
 }: {
   /** "Claude plan" */
@@ -41,6 +42,9 @@ export function PlanMeter({
   /** Optional: the meter's four elements carry data-tauri-drag-region, so a press on them drags the window. Only a
    * title bar passes it; the control itself knows nothing of the host. */
   dragRegion?: boolean;
+  /** Optional: the figures are out of date, so the fill takes the muted numeral's tone (flat-num) in place of primary.
+   * The track and the fill carry data-muted, whatever role the meter has. */
+  muted?: boolean;
   className?: string;
 }) {
   const drag = dragRegion ? true : undefined;
@@ -61,8 +65,17 @@ export function PlanMeter({
           {name}
         </BaseMeter.Label>
         {track && (
-          <BaseMeter.Track className="relative block w-meter h-meter-h overflow-hidden rounded-meter bg-inset shadow-set-in-lights">
-            <BaseMeter.Indicator className="absolute inset-y-0 left-0 rounded-meter bg-primary" />
+          <BaseMeter.Track
+            className="relative block w-meter h-meter-h overflow-hidden rounded-meter bg-inset shadow-set-in-lights"
+            data-muted={muted ? "" : undefined}
+          >
+            <BaseMeter.Indicator
+              className={cn(
+                "absolute inset-y-0 left-0 rounded-meter",
+                muted ? "bg-flat-num" : "bg-primary",
+              )}
+              data-muted={muted ? "" : undefined}
+            />
           </BaseMeter.Track>
         )}
       </BaseMeter.Root>
