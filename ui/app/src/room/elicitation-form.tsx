@@ -20,6 +20,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import { useRoom } from "@clauseo/components/clauseo/room-scope.ts";
+import { IconArrowUp } from "@clauseo/components/icons/icons.tsx";
 import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { frame } from "@clauseo/components/lib/words-frame.ts";
@@ -310,6 +311,7 @@ export function ElicitationForm({ elicitation, message, schema }: Props) {
             aria-keyshortcuts="Enter"
             onClick={send}
           >
+            <IconArrowUp size={16} />
             <span className="deva-nudge">{w.th("Send")}</span>
           </Button>
         )}

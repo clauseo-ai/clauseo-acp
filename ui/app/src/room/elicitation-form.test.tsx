@@ -57,6 +57,8 @@ test("one question renders as radios with their lines, and Other beneath them in
   expect(held(T.send)).toBe(true);
   expect(el<HTMLElement>(T.send).hasAttribute("data-disabled")).toBe(true);
   expect(el<HTMLElement>(T.send).textContent).toBe(th("en", "Send"));
+  // its arrow up is hidden from assistive technology: the button is named by its word
+  expect(el<HTMLElement>(T.send).querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
   expect(el<HTMLElement>(T.decline).textContent).toBe(th("en", "Don't answer"));
   expect(el<HTMLElement>(T.decline).getAttribute("aria-keyshortcuts")).toBe("Escape");
   expect(el<HTMLElement>(T.decline).hasAttribute("data-disabled")).toBe(false);
