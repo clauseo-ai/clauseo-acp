@@ -2,7 +2,7 @@
 // steered words where they arrived, and the note on a search they moved to the background. The note
 // opens its list with a plain disclosure, not the base collapsible: the thread's chunk carries it, and a collapsible
 // there would become a chunk shared with the working line's details, loaded after the thread's (vite-config.test.ts).
-import { type ReactNode, useId, useState } from "react";
+import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { Button } from "../ui/button.tsx";
 import { IconChecking, IconFold } from "../icons/icons.tsx";
 import { useMatterWords } from "../lib/words-matters.ts";
@@ -23,6 +23,12 @@ export function SteerNote({
   const w = useMatterWords();
   const [open, setOpen] = useState(false);
   const list = useId();
+  const listRef = useRef<HTMLUListElement>(null);
+  // opened at the thread's foot, the list comes into view rather than opening below the fold
+  useEffect(() => {
+    const el = listRef.current;
+    if (open && typeof el?.scrollIntoView === "function") el.scrollIntoView({ block: "nearest" });
+  }, [open]);
   return (
     <div className="steer-note" data-testid={testId}>
       <div className="steer-note-row">
@@ -43,7 +49,7 @@ export function SteerNote({
           <IconFold size={12} className="work-chev" />
         </Button>
       </div>
-      <ul id={list} hidden={!open} className="work-list steer-note-list">
+      <ul ref={listRef} id={list} hidden={!open} className="work-list steer-note-list">
         {found.map((f, i) => (
           <li key={i} className="work-item">
             <span className="work-at">{f.at}</span>

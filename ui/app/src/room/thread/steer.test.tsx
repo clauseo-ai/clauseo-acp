@@ -295,15 +295,24 @@ test("a tool call moved to the background says so; the answer's note explains it
   expect(note?.querySelector(".steer-note-text")?.textContent).toBe(
     mt(
       "en",
-      "Your words at {time} came in during '{title}'. It carried on in the background, finished at {done}, and this answer uses what it found.",
+      "Your words at {time} came in before this had finished: {title}. It carried on in the background, finished at {done}, and the answer uses what it found.",
       { time: clockTime("en", AT), title: "Read file 1", done: clockTime("en", LATER) },
     ),
   );
   expect(note?.closest("section")?.className).toBe("step step-answer");
   const list = note!.querySelector("ul")!;
   expect(list.hidden).toBe(true);
+  const shown: Element[] = [];
+  const into = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(function (
+    this: HTMLElement,
+  ) {
+    shown.push(this);
+  });
   await h.click(note!.querySelector("button"));
   expect(list.hidden).toBe(false);
+  // opened at the thread's foot, the list comes into view
+  expect(shown).toContain(list);
+  into.mockRestore();
   expect([...list.querySelectorAll("li")].map((li) => li.textContent)).toEqual([
     `${clockTime("en", LATER)}Read file 1`,
   ]);
@@ -341,4 +350,74 @@ test("a queued message coming, being edited and going renders no row of the tran
   await h.settle();
   expect([...rowCommits.keys()]).toEqual([id("agent_text", 1, 6)]);
   await act(async () => {});
+});
+
+/** The room over a window that has older entries, page_entries answering from `page`. */
+async function paged(page: ViewEntry[], window: ViewEntry[]): Promise<Harness> {
+  const room = await mountRoom({
+    query: (query) =>
+      typeof query === "object" && query.page_entries !== undefined
+        ? { entries: page }
+        : { entries: [] },
+  });
+  const body = reset(window, header("idle"));
+  body.reset!.view_window.has_older = true;
+  room.deliver([body]);
+  await room.settle();
+  return room;
+}
+
+const sectionsOf = () => [...thread().querySelectorAll("section")].map((s) => s.className);
+
+test("a window that starts on a queued question, the earlier turn's tail after it: once the page is in, each turn under its question", async () => {
+  h = await paged(
+    [ask(1, 1, "Read clause nine.", T1), say(2, 1, "Clause nine says", T1)],
+    [
+      ask(3, 2, "Then the lease.", T2),
+      say(4, 3, " notice.", T1),
+      ended(5, T1),
+      say(6, 4, "The lease runs to 2027.", T2),
+    ],
+  );
+  expect(shownIds()).toEqual([
+    id("user_message", 1, 5),
+    id("agent_text", 1, 6),
+    id("agent_text", 3, 6),
+    `step:${T1}`,
+    id("user_message", 2, 5),
+    id("agent_text", 4, 6),
+  ]);
+  expect(sectionsOf()).toEqual([
+    "step step-question",
+    "step step-answer",
+    "step step-question",
+    "step step-answer",
+  ]);
+  expect(pinned()).toBe("Then the lease.");
+});
+
+test("a window that starts on a turn's tail, the next question on the page: once the page is in, the next answer goes under it", async () => {
+  h = await paged(
+    [
+      ask(1, 1, "Read clause nine.", T1),
+      say(2, 1, "Clause nine says", T1),
+      ask(3, 2, "Then the lease.", T2),
+    ],
+    [say(4, 3, " notice.", T1), ended(5, T1), say(6, 4, "The lease runs to 2027.", T2)],
+  );
+  expect(shownIds()).toEqual([
+    id("user_message", 1, 5),
+    id("agent_text", 1, 6),
+    id("agent_text", 3, 6),
+    `step:${T1}`,
+    id("user_message", 2, 5),
+    id("agent_text", 4, 6),
+  ]);
+  expect(sectionsOf()).toEqual([
+    "step step-question",
+    "step step-answer",
+    "step step-question",
+    "step step-answer",
+  ]);
+  expect(thread().querySelectorAll("section")[3]?.textContent).toContain("The lease runs to 2027.");
 });

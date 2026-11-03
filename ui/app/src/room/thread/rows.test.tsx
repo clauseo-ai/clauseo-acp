@@ -446,8 +446,8 @@ test("a question's Who line is You and the time it was sent; each answer's meta 
       sent(5, 1, "First", ASKED),
       agentText(6, 1, "One"),
       step(7, { ts: ENDED }),
-      sent(8, 2, "Second", ENDED),
-      agentText(9, 2, "Two so far"),
+      { user_message: { ...sent(8, 2, "Second", ENDED).user_message!, turn: uuid(2, 4) } },
+      { agent_text: { ...agentText(9, 2, "Two so far").agent_text!, turn: uuid(2, 4) } },
     ]),
   ]);
   const who = () => h!.all("message-user").map((m) => m.querySelector(".who")?.textContent);

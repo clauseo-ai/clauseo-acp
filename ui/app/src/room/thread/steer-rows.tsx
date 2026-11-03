@@ -2,7 +2,7 @@
 // running answer, as a mark where they arrived; the quiet line under a steer that came as the answer ended
 // (requeued); the line in a turn stopped to send the words first (sent now), in its step's place; and the note under
 // an answer whose tool calls a steer moved to the background.
-import { useCallback, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { SteerMark, SteerNote } from "@clauseo/components/clauseo/steer-marks.tsx";
 import { useMatterWords } from "@clauseo/components/lib/words-matters.ts";
@@ -18,7 +18,7 @@ import type {
 } from "../../transport/protocol.ts";
 import { stamp } from "./clock.ts";
 import { useQuestionText } from "./live.ts";
-import { backgroundOf, steerEntry, steerNotes, type SteerNoteData } from "./steer.ts";
+import { steerEntry, steerNotes, type SteerNoteData } from "./steer.ts";
 
 const QUIET = "text-small text-quiet";
 const ROW = "not-first:mt-(--s3)";
@@ -94,8 +94,12 @@ export function SteerNotes({ notes }: { notes: readonly SteerNoteData[] }) {
       <SteerNote
         testId="steer-note"
         text={w.m(
-          "Your words at {time} came in during '{title}'. It carried on in the background, finished at {done}, and this answer uses what it found.",
-          { time: stamp(w.lang, n.at, now), title: n.title, done: stamp(w.lang, n.done, now) },
+          "Your words at {time} came in before this had finished: {title}. It carried on in the background, finished at {done}, and the answer uses what it found.",
+          {
+            time: stamp(w.lang, n.at, now),
+            title: n.title.replace(TRAILING, ""),
+            done: stamp(w.lang, n.done, now),
+          },
         )}
         found={n.found.map((f) => ({ at: stamp(w.lang, f.at, now), what: f.what }))}
       />
@@ -103,54 +107,56 @@ export function SteerNotes({ notes }: { notes: readonly SteerNoteData[] }) {
   ));
 }
 
+/** A title's own closing stop: the line puts its own after it. */
+const TRAILING = /[\s.…।]+$/u;
+
 const NO_NOTES: readonly SteerNoteData[] = [];
 const TOOL = "tool_call:";
+const USER = "user_message:";
 
-const askedAtIn = (entries: ReadonlyMap<EntryId, ViewEntry>) => (steer: string) =>
-  entries.get(steerEntry(steer))?.user_message?.ts;
-
-/** The notes of a live answer: read from its tool calls on each flush, as one string, so a flush that leaves every
- * background mark the same renders nothing. */
-export function LiveSteerNotes({ ids, stream }: { ids: readonly EntryId[]; stream: StreamId }) {
-  const calls = useMemo(() => ids.filter((id) => id.startsWith(TOOL)), [ids]);
-  const pick = useCallback(
-    (v: StreamView | undefined) => {
-      if (v === undefined) return "";
-      let sig = "";
-      for (const id of calls) {
-        const call = v.entries.get(id)?.tool_call;
-        const mark = call === undefined ? undefined : backgroundOf(call);
-        if (mark === undefined) continue;
-        const at = v.entries.get(steerEntry(mark.steer))?.user_message?.ts ?? "";
-        sig += `${id}\u0000${mark.steer}\u0000${at}\u0000${mark.finished_at ?? ""}\u0000${call!.title}\u0001`;
-      }
-      return sig;
-    },
-    [calls],
-  );
-  const store = useViewStore();
-  const sig = useStreamPart(store, stream, pick);
-  const notes = useMemo(() => {
-    const v = sig === "" ? undefined : store.view(stream);
-    if (v === undefined) return NO_NOTES;
-    const own = calls
-      .map((id) => v.entries.get(id)?.tool_call)
-      .filter((c): c is ToolCallEntry => c !== undefined);
-    return steerNotes(own, askedAtIn(v.entries));
-  }, [sig, calls, store, stream]);
-  return notes.length === 0 ? null : <SteerNotes notes={notes} />;
-}
-
-/** The notes of an older answer, from its page's entries. */
-export function PagedSteerNotes({ entries }: { entries: readonly ViewEntry[] }) {
-  const notes = useMemo(() => {
+/** A pick of an answer's notes, kept by its entries' identity: one per id list (SteerNotesOf). */
+function notesPick(
+  ids: readonly EntryId[],
+  paged: ReadonlyMap<EntryId, ViewEntry>,
+): (v: StreamView | undefined) => readonly SteerNoteData[] {
+  const own = ids.filter((id) => id.startsWith(TOOL) || id.startsWith(USER));
+  let seen: (ViewEntry | undefined)[] = [];
+  let last = NO_NOTES;
+  let key = "";
+  const entryOf = (v: StreamView | undefined, id: EntryId) => paged.get(id) ?? v?.entries.get(id);
+  return (v: StreamView | undefined) => {
+    let same = seen.length === own.length;
+    for (let i = 0; same && i < own.length; i += 1) same = entryOf(v, own[i]!) === seen[i];
+    if (same) return last;
+    seen = own.map((id) => entryOf(v, id));
     const byId = new Map<EntryId, ViewEntry>();
     const calls: ToolCallEntry[] = [];
-    for (const e of entries) {
-      if (e.user_message !== undefined) byId.set(steerEntry(e.user_message.message), e);
-      if (e.tool_call !== undefined) calls.push(e.tool_call);
-    }
-    return steerNotes(calls, askedAtIn(byId));
-  }, [entries]);
+    seen.forEach((e, i) => {
+      if (e?.tool_call !== undefined) calls.push(e.tool_call);
+      else if (e !== undefined) byId.set(own[i]!, e);
+    });
+    const next = steerNotes(calls, (steer) => byId.get(steerEntry(steer))?.user_message?.ts);
+    const nextKey = JSON.stringify(next);
+    if (nextKey === key) return last;
+    key = nextKey;
+    return (last = next.length === 0 ? NO_NOTES : next);
+  };
+}
+
+/** The notes of an answer, from its entries in the window or on an older page (`paged`). The list mounts it only in an
+ * exchange that holds a steer's mark, where a background mark can come (a steer moves a call to the background only
+ * when the agent takes it in). Each flush compares the answer's tool call and message entries by identity, and reads
+ * them again only when one is new. */
+export function SteerNotesOf({
+  ids,
+  stream,
+  paged,
+}: {
+  ids: readonly EntryId[];
+  stream: StreamId;
+  paged: ReadonlyMap<EntryId, ViewEntry>;
+}) {
+  const pick = useMemo(() => notesPick(ids, paged), [ids, paged]);
+  const notes = useStreamPart(useViewStore(), stream, pick);
   return notes.length === 0 ? null : <SteerNotes notes={notes} />;
 }

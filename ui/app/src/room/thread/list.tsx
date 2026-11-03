@@ -10,16 +10,16 @@ import { Thread } from "@clauseo/components/clauseo/thread.tsx";
 import { th } from "@clauseo/components/lib/words-thread.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { useEntry, useStreamPart, useViewStore } from "../../store/hooks.ts";
-import { entryIdOf, orderOf, type StreamView } from "../../store/view.ts";
+import type { StreamView } from "../../store/view.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type { EntryId, StreamId, Timestamp, ViewEntry } from "../../transport/protocol.ts";
 import { stamp } from "./clock.ts";
-import { exchangesPick, groupExchanges, type Exchange } from "./exchanges.ts";
+import { exchangesPick, latestAsked } from "./exchanges.ts";
 import { sameIds } from "./ids.ts";
-import { useHasOlder, useLatestQuestion } from "./live.ts";
+import { useHasOlder, useQuestionWords } from "./live.ts";
 import { useOlder } from "./older.ts";
 import { PagedRow, Row } from "./rows.tsx";
-import { LiveSteerNotes, PagedSteerNotes } from "./steer-rows.tsx";
+import { SteerNotesOf } from "./steer-rows.tsx";
 
 /** The composer's limit warning, carried in this chunk with the stop's note (limits/limit-warning.tsx loads it). */
 export { WarningNote } from "./limit-warning-note.tsx";
@@ -86,47 +86,77 @@ function Sections({
   );
 }
 
+const USER = "user_message:";
 const TOOL = "tool_call:";
 
+/** One row: a live one by id, or an older page's by its entry. */
+function RowOf({
+  id,
+  stream,
+  paged,
+  sentNow,
+}: {
+  id: EntryId;
+  stream: StreamId;
+  paged: ReadonlyMap<EntryId, ViewEntry>;
+  sentNow: boolean;
+}) {
+  const entry = paged.get(id);
+  if (entry !== undefined)
+    return sentNow ? <PagedRow entry={entry} sentNow /> : <PagedRow entry={entry} />;
+  return sentNow ? <Row id={id} stream={stream} sentNow /> : <Row id={id} stream={stream} />;
+}
+
+/** One exchange, its rows live or from an older page: a turn can start on a page and go on in the window. */
 const LiveExchange = memo(
   function LiveExchange({
     ids,
     asked,
     sentNow,
     stream,
+    paged,
     latest,
   }: {
     ids: readonly EntryId[];
     asked: boolean;
     sentNow: EntryId | null;
     stream: StreamId;
+    paged: ReadonlyMap<EntryId, ViewEntry>;
     latest: boolean;
   }) {
     const rest = asked ? ids.slice(1) : ids;
     const answer =
       rest.length === 0
         ? null
-        : rest.map((id) =>
-            id === sentNow ? (
-              <Row key={id} id={id} stream={stream} sentNow />
-            ) : (
-              <Row key={id} id={id} stream={stream} />
-            ),
-          );
+        : rest.map((id) => (
+            <RowOf key={id} id={id} stream={stream} paged={paged} sentNow={id === sentNow} />
+          ));
+    // a steer's mark in the answer (a user message there) is where a tool call can carry on in the background
+    const notes = rest.some((id) => id.startsWith(USER)) && rest.some((id) => id.startsWith(TOOL));
+    const step = rest.find((id) => id.startsWith(STEP));
+    const pagedStep = step === undefined ? undefined : paged.get(step)?.step;
     return (
       <Sections
-        question={asked ? <Row id={ids[0]!} stream={stream} /> : null}
+        question={
+          asked ? <RowOf id={ids[0]!} stream={stream} paged={paged} sentNow={false} /> : null
+        }
         answer={
-          answer !== null && rest.some((id) => id.startsWith(TOOL)) ? (
+          answer !== null && notes ? (
             <>
               {answer}
-              <LiveSteerNotes ids={rest} stream={stream} />
+              <SteerNotesOf ids={rest} stream={stream} paged={paged} />
             </>
           ) : (
             answer
           )
         }
-        who={<LiveAnswerWho ids={rest} stream={stream} />}
+        who={
+          pagedStep !== undefined ? (
+            <AnswerWho time={pagedStep.ts} />
+          ) : (
+            <LiveAnswerWho ids={rest} stream={stream} />
+          )
+        }
         latest={latest}
       />
     );
@@ -136,58 +166,9 @@ const LiveExchange = memo(
     a.latest === b.latest &&
     a.asked === b.asked &&
     a.sentNow === b.sentNow &&
+    a.paged === b.paged &&
     sameIds(a.ids, b.ids),
 );
-
-function PagedExchange({
-  entries,
-  asked,
-  sentNow,
-}: {
-  entries: readonly ViewEntry[];
-  asked: boolean;
-  sentNow: EntryId | null;
-}) {
-  const first = entries[0]!;
-  const rest = asked ? entries.slice(1) : entries;
-  return (
-    <Sections
-      question={asked ? <PagedRow entry={first} /> : null}
-      answer={
-        rest.length === 0 ? null : (
-          <>
-            {rest.map((e) => {
-              const id = entryIdOf(e);
-              return id === sentNow ? (
-                <PagedRow key={id} entry={e} sentNow />
-              ) : (
-                <PagedRow key={id} entry={e} />
-              );
-            })}
-            <PagedSteerNotes entries={rest} />
-          </>
-        )
-      }
-      who={<AnswerWho time={rest.find((e) => e.step !== undefined)?.step?.ts ?? null} />}
-      latest={false}
-    />
-  );
-}
-
-/** The older pages, by exchange (by turn, as the live window's), less anything the live window now holds. */
-function OlderPages({ entries, below }: { entries: readonly ViewEntry[]; below: number | null }) {
-  const groups = useMemo(() => {
-    const shown = below === null ? entries : entries.filter((e) => orderOf(e) < below);
-    const byId = new Map(shown.map((e) => [entryIdOf(e), e] as const));
-    return groupExchanges([...byId], false).map((ex: Exchange) => ({
-      ex,
-      entries: ex.ids.map((id) => byId.get(id)!),
-    }));
-  }, [entries, below]);
-  return groups.map(({ ex, entries: own }) => (
-    <PagedExchange key={ex.key} entries={own} asked={ex.asked} sentNow={ex.sentNow} />
-  ));
-}
 
 /** Whether the view's first Reset is in. */
 const pickLanded = (v: StreamView | undefined) => v !== undefined && v.epoch !== null;
@@ -203,15 +184,15 @@ export const ThreadList = memo(function ThreadList({ transport, stream, busy }: 
   const w = useWords();
   const store = useViewStore();
   const { nodes } = useRoom();
-  const [pickShape] = useState(exchangesPick);
-  const { exchanges, first: firstId } = useStreamPart(store, stream, pickShape);
-  const question = useLatestQuestion(stream);
   const hasOlder = useHasOlder(stream);
   const scroller = useCallback(() => nodes.get("thread"), [nodes]);
   const older = useOlder(transport, store, stream, hasOlder, scroller);
+  // one grouping over the older pages and the window, built again as a page goes in
+  const pickShape = useMemo(() => exchangesPick(older.entries), [older.entries]);
+  const { exchanges, paged } = useStreamPart(store, stream, pickShape);
+  const asked = latestAsked(exchanges);
+  const question = useQuestionWords(stream, asked, asked === null ? undefined : paged.get(asked));
   const landed = useStreamPart(store, stream, pickLanded);
-  const first =
-    stream === null || firstId === null ? undefined : store.view(stream)?.entries.get(firstId);
   return (
     // it rests once there is something to rest on: a reopened thread's view arrives after the mount, and the thread
     // settles on its latest answer then. The log is busy until the first view lands and while an older page goes in,
@@ -223,9 +204,6 @@ export const ThreadList = memo(function ThreadList({ transport, stream, busy }: 
       resting={!busy && exchanges.length > 0}
       busy={(stream !== null && !landed) || older.loading}
     >
-      {older.entries.length > 0 && (
-        <OlderPages entries={older.entries} below={first === undefined ? null : orderOf(first)} />
-      )}
       {stream !== null &&
         exchanges.map((g, i) => (
           <LiveExchange
@@ -234,6 +212,7 @@ export const ThreadList = memo(function ThreadList({ transport, stream, busy }: 
             asked={g.asked}
             sentNow={g.sentNow}
             stream={stream}
+            paged={paged}
             latest={i === exchanges.length - 1}
           />
         ))}

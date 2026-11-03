@@ -129,7 +129,7 @@ test("the pick keeps its shape while only words or a queued message's text chang
   const v = viewOf([ask(1, 1, T1), say(2, 1, T1), queued]);
   const first = pick(v);
   expect(first.exchanges.map((ex) => ex.ids)).toEqual([[q(1), a(1)]]);
-  expect(latestAsked(first)).toBe(q(1));
+  expect(latestAsked(first.exchanges)).toBe(q(1));
   // an edit of the queued message: a new entry object, its words alone changed
   v.entries.set(q(2), {
     user_message: {
@@ -144,5 +144,47 @@ test("the pick keeps its shape while only words or a queued message's text chang
   const next = pick(v);
   expect(next).not.toBe(first);
   expect(next.exchanges[0]).toBe(first.exchanges[0]);
-  expect(latestAsked(next)).toBe(q(2));
+  expect(latestAsked(next.exchanges)).toBe(q(2));
+});
+
+test("a window that starts with a queued question then the earlier turn's tail: the tail opens its own exchange first", () => {
+  expect(group([ask(3, 2, T2), say(4, 1, T1), step(5, { turn: T1 }), say(6, 2, T2)])).toEqual([
+    { asked: false, ids: [a(1), s(T1)], sentNow: null },
+    { asked: true, ids: [q(2), a(2)], sentNow: null },
+  ]);
+});
+
+test("a window that starts with one turn's tail, the next turn's question on the page: two exchanges without one", () => {
+  expect(group([say(4, 1, T1), step(5, { turn: T1 }), say(6, 2, T2)])).toEqual([
+    { asked: false, ids: [a(1), s(T1)], sentNow: null },
+    { asked: false, ids: [a(2)], sentNow: null },
+  ]);
+});
+
+test("a steer sent now that came as a turn had ended stops none: that step keeps its own line", () => {
+  expect(
+    group([
+      ask(1, 1, T1),
+      say(2, 1, T1),
+      step(3, { turn: T1 }),
+      ask(4, 2, T2, { delivery: "steer", steer: { sent_now: { turn: T2 } } }),
+      say(5, 2, T2),
+    ]).map((ex) => ex.sentNow),
+  ).toEqual([null, null]);
+});
+
+test("the older pages and the window group as one: a turn begun on a page goes on in the window", () => {
+  const page = [ask(1, 1, T1), say(2, 1, T1), ask(3, 2, T2)];
+  const shape = exchangesPick(page)(viewOf([say(4, 3, T1), step(5, { turn: T1 }), say(6, 2, T2)]));
+  expect(shape.exchanges.map((ex) => ({ asked: ex.asked, ids: ex.ids }))).toEqual([
+    { asked: true, ids: [q(1), a(1), a(3), s(T1)] },
+    { asked: true, ids: [q(2), a(2)] },
+  ]);
+  expect([...shape.paged.keys()]).toEqual([q(1), a(1), q(2)]);
+  expect(latestAsked(shape.exchanges)).toBe(q(2));
+  // a page entry the window holds too (from its first order on) is the window's
+  const overlap = exchangesPick([...page, say(4, 3, T1)])(
+    viewOf([say(4, 3, T1), step(5, { turn: T1 })]),
+  );
+  expect([...overlap.paged.keys()]).toEqual([q(1), a(1), q(2)]);
 });
