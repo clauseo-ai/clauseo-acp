@@ -775,6 +775,31 @@
         "kind": "plain",
         "paragraph": "இந்த ஒப்பந்தம் <insert date> அன்று <Party A> மற்றும் <Party B> இடையே செய்யப்படுகிறது."
       }
+    },
+    {
+      "id": "X13-code-hi",
+      "feature": "X13",
+      "script": "hi",
+      "expect": {
+        "kind": "code-block",
+        "lang": "text",
+        "text": "पक्षकार अपने कर्म से हुई क्षति की पूर्ति करेगा, ज़मीन का किराया त्रैमासिक देगा, ज्ञापन और श्रम क़ानून का पालन करेगा, और संपत्ति की रक्‍षा करेगा।"
+      }
+    },
+    {
+      "id": "X13-inline-hi",
+      "feature": "X13",
+      "script": "hi",
+      "expect": {
+        "kind": "phrasing",
+        "paragraph": "चेक अनादरण का मामला धारा १३८ के अधीन आता है।",
+        "marks": [
+          {
+            "tag": "code",
+            "text": "धारा १३८"
+          }
+        ]
+      }
     }
   ]
 }
