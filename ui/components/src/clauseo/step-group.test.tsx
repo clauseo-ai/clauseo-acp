@@ -99,7 +99,7 @@ test("the line is a button that opens its rows in place and folds them, with ari
           toolCall="1"
           status="failed"
           kind="read"
-          text="Reading Lease.pdf."
+          text="Tried to read Lease.pdf."
           hover="papers/2019"
           mark="Failed"
         />
@@ -113,13 +113,16 @@ test("the line is a button that opens its rows in place and folds them, with ari
     "true",
   );
   expect(host.querySelectorAll(".step-group-icons svg")).toHaveLength(2);
+  // the failure on the line is led by the break, not only its weight
+  const trouble = host.querySelector('[data-testid="step-group-trouble"]')!;
+  expect(trouble.querySelector("svg")?.outerHTML).toBe(svg(IconBreak, "step-trouble-icon"));
   expect(host.querySelector('[data-testid="tool-call"]')).toBeNull();
   await act(async () => line.click());
   expect(line.getAttribute("aria-expanded")).toBe("true");
   const rows = host.querySelector("ol")!;
   expect(line.getAttribute("aria-controls")).toBe(rows.id);
   const row = rows.querySelector<HTMLElement>('[data-testid="tool-call"]')!;
-  expect(row.textContent).toBe("Reading Lease.pdf. · Failed");
+  expect(row.textContent).toBe("Tried to read Lease.pdf. · Failed");
   expect(row.querySelector("[title]")?.getAttribute("title")).toBe("papers/2019");
   await act(async () => line.click());
   expect(host.querySelector("ol")).toBeNull();
