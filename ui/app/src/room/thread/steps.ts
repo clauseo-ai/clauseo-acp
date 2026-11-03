@@ -181,9 +181,9 @@ export function troubleOf(lang: Lang, calls: readonly ToolCallEntry[]): string {
   const failed = calls.filter((c) => c.status === "failed").length;
   const stopped = calls.filter((c) => c.status === "cancelled").length;
   const out: string[] = [];
-  if (failed > 0) out.push(counted(lang, ["1 of them failed.", "{n} of them failed."], failed));
-  if (stopped > 0)
-    out.push(counted(lang, ["1 of them was stopped.", "{n} of them were stopped."], stopped));
+  // counted on their own: the line before counts only what finished, so "of them" would point at nothing it named
+  if (failed > 0) out.push(counted(lang, ["1 failed.", "{n} failed."], failed));
+  if (stopped > 0) out.push(counted(lang, ["1 stopped.", "{n} stopped."], stopped));
   return out.join(" ");
 }
 

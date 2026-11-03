@@ -127,13 +127,13 @@ describe("the folded line", () => {
     ).toEqual({
       kinds: ["read"],
       line: "1 paper read.",
-      trouble: "1 of them failed. 1 of them was stopped.",
+      trouble: "1 failed. 1 stopped.",
     });
     // none done: the step still to finish says what it is doing, with its own icon
     expect(restOf("en", [call("read", "failed", lease), call("edit", "pending", lease)])).toEqual({
       kinds: ["edit"],
       line: "Changing Lease deed.pdf.",
-      trouble: "1 of them failed.",
+      trouble: "1 failed.",
     });
     const line = (calls: ToolCallEntry[]) =>
       lineOf(
@@ -170,11 +170,26 @@ describe("the folded line", () => {
   });
 
   test("a failure stays on the line, one of many; a stop too", () => {
-    expect(troubleOf("en", [call("read"), call("fetch", "failed")])).toBe("1 of them failed.");
+    expect(troubleOf("en", [call("read"), call("fetch", "failed")])).toBe("1 failed.");
     expect(
       troubleOf("en", [call("read", "failed"), call("fetch", "failed"), call("read", "cancelled")]),
-    ).toBe("2 of them failed. 1 of them was stopped.");
-    expect(troubleOf("hi", [call("read"), call("fetch", "failed")])).toBe("उनमें से 1 विफल रहा।");
+    ).toBe("2 failed. 1 stopped.");
+    expect(troubleOf("hi", [call("read"), call("fetch", "failed")])).toBe("1 विफल रहा।");
+    expect(troubleOf("en", [call("read"), ...[1, 2].map(() => call("read", "cancelled"))])).toBe(
+      "2 stopped.",
+    );
+  });
+
+  test("the failed are counted on their own, never as 'of them' of a count that holds only what finished (UTC-40)", () => {
+    const calls = [call("read"), call("fetch", "failed"), call("fetch", "failed")];
+    const sentence = (lang: "en" | "hi") => {
+      const r = restOf(lang, calls);
+      return `${r.line} ${r.trouble}`;
+    };
+    expect(sentence("en")).toBe("1 paper read. 2 failed.");
+    expect(sentence("hi")).toBe("1 दस्तावेज़ पढ़ा गया। 2 विफल रहे।");
+    expect(sentence("en")).not.toContain("of them");
+    expect(sentence("hi")).not.toContain("उनमें से");
     expect(troubleOf("en", [call("read")])).toBe("");
   });
 
@@ -318,7 +333,7 @@ describe("friendly names", () => {
     expect(restOf("en", mixed)).toEqual({
       kinds: ["read"],
       line: "1 paper read.",
-      trouble: "1 of them failed.",
+      trouble: "1 failed.",
     });
     // beside one failed and none done: the failure alone is what was tried
     expect(restOf("en", [unknown, call("read", "failed", lease)]).trouble).toBe(
