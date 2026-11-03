@@ -2,8 +2,10 @@
 //! before off goes out under the new id, and an answer to a POST from before off matches no POST
 //! made after it.
 
+#[cfg(unix)]
+use clauseo_counts::Mode;
 use clauseo_counts::schema::{Crash, CrashKind, CrashProcess, Event, InstallId, TallyReport};
-use clauseo_counts::{Mode, Outcome, UploadPath};
+use clauseo_counts::{Outcome, UploadPath};
 
 use crate::support::*;
 
