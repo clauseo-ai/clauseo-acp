@@ -269,3 +269,35 @@ fn search_is_main_windows_alone() {
         "{answer:?}"
     );
 }
+
+/// REVIEW REPRO: a reload (a second `open_stream`) starts the page's generation count over;
+/// the reloaded page's searches must not be answered `Cancelled` for the old page's count.
+#[test]
+fn review_a_reloaded_main_window_can_search_again() {
+    let scratch = Scratch::new("admit-search-reload", &[]);
+    let host = scratch.start(Vec::new());
+    let bridge = host.bridge();
+    let search = |generation: u64| {
+        read(json!({"search": {
+            "query": "Scratch",
+            "scope": "all",
+            "include_archived": false,
+            "generation": generation
+        }}))
+    };
+    let _old = open(&bridge, MAIN);
+    let before = block_on(bridge.query(MAIN, search(5))).unwrap();
+    assert!(matches!(
+        before,
+        QueryResult::Search(clauseo_protocol::SearchAnswer::Page(_))
+    ));
+    let _new = open(&bridge, MAIN);
+    let after = block_on(bridge.query(MAIN, search(1))).unwrap();
+    assert!(
+        matches!(
+            after,
+            QueryResult::Search(clauseo_protocol::SearchAnswer::Page(_))
+        ),
+        "the reloaded page's first search: {after:?}"
+    );
+}
