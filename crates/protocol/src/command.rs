@@ -18,8 +18,8 @@ use crate::MatterPath;
 use crate::{
     AgentChoiceId, AgentId, AgentKind, CheckpointId, ClientName, CommandId, Date, Delivery,
     ElicitationId, ElicitationResponse, FieldChange, FileDecision, FolderRefId, MatterId,
-    MessageId, PermissionRequestId, PrivacyPatch, PromptBlock, RestoreScope, ThreadId, Title,
-    ToolsPatch, TurnId, UiPatch,
+    MessageId, PermissionRequestId, PrivacyPatch, PromptBlock, RestoreScope, ThreadId, Timestamp,
+    Title, ToolsPatch, TurnId, UiPatch,
 };
 #[cfg(doc)]
 use crate::{FileChoice, RawPayload};
@@ -35,6 +35,17 @@ pub use validate::{
 /// [`ErrorCode::ThreadQueueFull`](crate::ErrorCode::ThreadQueueFull) (the host's check, since the
 /// queue is state).
 pub const MAX_QUEUED_TURNS: usize = 10;
+
+/// How far ahead a `SnoozeThread` may snooze, in milliseconds (366 days). A later `until` is
+/// refused with [`ErrorCode::CommandInvalid`](crate::ErrorCode::CommandInvalid) (the host's
+/// check, since it needs the host's clock).
+pub const MAX_SNOOZE_AHEAD_MS: i64 = 366 * 24 * 60 * 60 * 1000;
+
+/// How far a `SweepDone`'s `day_start` may be from the host's now, either way, in
+/// milliseconds (26 hours: a day plus the widest gap between two time zones' midnights that a
+/// clock change can open). A `day_start` further away is refused with
+/// [`ErrorCode::CommandInvalid`](crate::ErrorCode::CommandInvalid) (the host's check).
+pub const MAX_DAY_START_SKEW_MS: i64 = 26 * 60 * 60 * 1000;
 
 /// One command as a client sends it. It names no principal: the surface that takes it (the
 /// desktop bridge, the transport, the cli) knows who sent it from its connection and passes the
@@ -228,6 +239,38 @@ pub enum HostCommand {
     MarkSeen {
         /// The thread.
         thread: ThreadId,
+    },
+    /// Snooze a thread until `until`, or clear its snooze by hand (`until` left out): logs
+    /// `thread_snoozed` and answers `Done`, archived threads included. The host refuses an
+    /// `until` not after its clock's now, or more than [`MAX_SNOOZE_AHEAD_MS`] ahead
+    /// (`command.invalid`). JSON: `{"snooze_thread": {"thread": "...", "until": 1760000000000}}`.
+    SnoozeThread {
+        /// The thread.
+        thread: ThreadId,
+        /// When the snooze ends; left out to clear it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        until: Option<Timestamp>,
+    },
+    /// Mark a thread done or not done by the lawyer: logs `thread_done` with `by: lawyer` and
+    /// answers `Done`, archived threads included.
+    MarkThreadDone {
+        /// The thread.
+        thread: ThreadId,
+        /// Done, or no longer done.
+        done: bool,
+    },
+    /// The morning sweep. The host knows no time zone, so the app sends this at its first moment
+    /// after 05:00 local each day (and at launch, when after 05:00), with `day_start` the local
+    /// midnight that began today. In every listed matter, each thread not archived, not done,
+    /// not snoozed past now, with nothing pending (no permission, question or limit choice), no
+    /// turn running or queued, its last ending seen (`MarkSeen`), no commit in flight and its
+    /// newest event before `day_start` is marked done (`thread_done`, `by: morning_sweep`), all
+    /// in one commit; answers `Done`. A second sweep the same day finds nothing new. The host
+    /// refuses a `day_start` more than [`MAX_DAY_START_SKEW_MS`] from its now
+    /// (`command.invalid`).
+    SweepDone {
+        /// Today's local midnight.
+        day_start: Timestamp,
     },
     /// Start a thread in a matter with an agent.
     CreateThread {
@@ -434,7 +477,8 @@ pub enum HostCommand {
 /// What a command did. The host's receipt stores it, so a repeated `command_id` returns the same
 /// outcome. The queue commands, `RestartAgent`, `SetUiSettings`, `SetToolSettings`,
 /// `SetPrivacySettings`, `FirstAct`, `UpdateMatter`, `OpenMatter`, `ForgetMatter`, `RefreshLimits`,
-/// `MarkSeen`, `ScanFolder` and `CancelScan` answer `Done`.
+/// `MarkSeen`, `ScanFolder`, `CancelScan`, `SnoozeThread`, `MarkThreadDone` and `SweepDone` answer
+/// `Done`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "specta", derive(specta::Type))]

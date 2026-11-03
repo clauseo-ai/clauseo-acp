@@ -1,0 +1,9 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "HostCommand::SweepDone\n{ day_start: Timestamp::new(1_759_968_000_000).unwrap(), }"
+---
+{
+  "sweep_done": {
+    "day_start": 1759968000000
+  }
+}

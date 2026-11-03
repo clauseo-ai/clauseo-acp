@@ -48,6 +48,8 @@ pub fn header_entry() -> HeaderEntry {
         queue_held: true,
         steer_joins_turn: true,
         tools: vec![],
+        snoozed_until: None,
+        done: false,
         mode_id: Some(short("plan")),
         config_options: vec![],
         commands: vec![],

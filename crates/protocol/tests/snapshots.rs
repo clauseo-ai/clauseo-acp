@@ -103,6 +103,17 @@ fn event(kind: &str) -> DomainEvent {
         .unwrap_or_else(|| panic!("no example of the kind {kind}"))
 }
 
+/// `insta::assert_json_snapshot!` into this target's `snapshots/`, whichever file asserts it, so
+/// a child module's snapshots sit beside the rest.
+macro_rules! snapshot {
+    ($name:expr, $value:expr) => {
+        insta::with_settings!(
+            { snapshot_path => concat!(env!("CARGO_MANIFEST_DIR"), "/tests/snapshots") },
+            { insta::assert_json_snapshot!($name, $value) }
+        )
+    };
+}
+
 /// Writes one golden test per row, named after the variant's `snake_case` name, and the function
 /// `$names` that names each variant's test. The match in `$names` lists every variant with no
 /// wildcard arm, so a variant without a row does not compile.
@@ -118,7 +129,7 @@ macro_rules! golden {
         $(
             #[test]
             fn $test() {
-                insta::assert_json_snapshot!(stringify!($test), $example);
+                snapshot!(stringify!($test), $example);
                 round_trips(&$example);
             }
         )+
@@ -172,6 +183,8 @@ mod domain_event {
         ThreadCreated => thread_created: event("thread_created");
         ThreadRenamed => thread_renamed: event("thread_renamed");
         ThreadArchived => thread_archived: event("thread_archived");
+        ThreadSnoozed => thread_snoozed: event("thread_snoozed");
+        ThreadDone => thread_done: event("thread_done");
         AgentSessionAttached => agent_session_attached: event("agent_session_attached");
         AgentNamed => agent_named: event("agent_named");
         AgentSessionDetached => agent_session_detached: event("agent_session_detached");
@@ -227,137 +240,8 @@ mod domain_event {
     }
 }
 
-mod host_command {
-    use super::*;
-
-    golden! { HostCommand::name_of {
-        CreateMatter => create_matter: HostCommand::CreateMatter {
-            name: title("Smith v Jones"),
-            source: MatterSource::NewFolder { folder: folder_ref_id(1) },
-            client: Some(ClientName::new("Rathi Steels").unwrap()),
-            next_date: Some("2026-11-20".parse::<Date>().unwrap()),
-        };
-        RelocateMatter => relocate_matter: HostCommand::RelocateMatter {
-            matter: matter_id(1),
-            folder: folder_ref_id(2),
-        };
-        UpdateMatter => update_matter: HostCommand::UpdateMatter {
-            matter: matter_id(1),
-            client: FieldChange::Set(ClientName::new("Rathi Steels").unwrap()),
-            next_date: FieldChange::Clear,
-            pinned: Some(true),
-        };
-        OpenMatter => open_matter: HostCommand::OpenMatter { matter: matter_id(1) };
-        ForgetMatter => forget_matter: HostCommand::ForgetMatter { matter: matter_id(1) };
-        MarkSeen => mark_seen: HostCommand::MarkSeen { thread: thread_id(2) };
-        CreateThread => create_thread: HostCommand::CreateThread {
-            matter: matter_id(1),
-            agent: agent("claude-acp"),
-        };
-        SendPrompt => send_prompt: HostCommand::SendPrompt {
-            thread: thread_id(2),
-            content: vec![
-                PromptBlock::Text { text: "Summarise".to_owned() },
-                PromptBlock::File { file: file_ref_id(3) },
-            ],
-            delivery: DeliveryRequest::SendNow,
-        };
-        EditQueuedPrompt => edit_queued_prompt: HostCommand::EditQueuedPrompt {
-            thread: thread_id(2),
-            turn: turn_id(3),
-            text: "Shorter".to_owned(),
-        };
-        RemoveQueuedPrompt => remove_queued_prompt: HostCommand::RemoveQueuedPrompt {
-            thread: thread_id(2),
-            turn: turn_id(3),
-        };
-        SendQueuedNow => send_queued_now: HostCommand::SendQueuedNow {
-            thread: thread_id(2),
-            turn: turn_id(3),
-        };
-        ResumeQueue => resume_queue: HostCommand::ResumeQueue { thread: thread_id(2) };
-        Cancel => cancel: HostCommand::Cancel { thread: thread_id(2) };
-        RestartAgent => restart_agent: HostCommand::RestartAgent { thread: thread_id(2) };
-        AnswerPermission => answer_permission: HostCommand::AnswerPermission {
-            thread: thread_id(2),
-            request: permission_request_id(10),
-            option_id: choice("allow"),
-        };
-        AnswerElicitation => answer_elicitation: HostCommand::AnswerElicitation {
-            thread: thread_id(2),
-            elicitation: elicitation_id(12),
-            response: ElicitationResponse::Accept { values: raw(r#"{"party":"Jones"}"#) },
-        };
-        SetConfigOption => set_config_option: HostCommand::SetConfigOption {
-            thread: thread_id(2),
-            option_id: choice("model"),
-            value: ConfigValue::Select(choice("opus")),
-        };
-        SetMode => set_mode: HostCommand::SetMode {
-            thread: thread_id(2),
-            mode_id: choice("plan"),
-        };
-        RenameThread => rename_thread: HostCommand::RenameThread {
-            thread: thread_id(2),
-            title: title("Draft SPA v2"),
-            placeholder: false,
-        };
-        ArchiveThread => archive_thread: HostCommand::ArchiveThread { thread: thread_id(2) };
-        UndoStep => undo_step: HostCommand::UndoStep {
-            thread: thread_id(2),
-            turn: turn_id(3),
-            files: vec![FileDecision { path: path("a.docx"), choice: FileChoice::Undo }],
-        };
-        RestoreVersion => restore_version: HostCommand::RestoreVersion {
-            matter: matter_id(1),
-            checkpoint: checkpoint_id(17),
-            scope: RestoreRequest::Files { paths: vec![path("a.docx")] },
-        };
-        SetUiSettings => set_ui_settings: HostCommand::SetUiSettings {
-            patch: UiPatch {
-                theme: Some(Theme::Dark),
-                font_size: Some(18),
-                lite: Some(Lite::On),
-                ..UiPatch::default()
-            },
-        };
-        SetToolSettings => set_tool_settings: HostCommand::SetToolSettings {
-            patch: ToolsPatch {
-                web_search: Some(false),
-                browser: Some(true),
-            },
-        };
-        SetPrivacySettings => set_privacy_settings: HostCommand::SetPrivacySettings {
-            patch: privacy::privacy_patch(),
-        };
-        FirstAct => first_act: HostCommand::FirstAct { counts: true };
-        RefreshLimits => refresh_limits: HostCommand::RefreshLimits {
-            agent: Some(AgentKind::Claude),
-            why: RefreshWhy::Shown,
-        };
-        ScanFolder => scan_folder: HostCommand::ScanFolder { folder: folder_ref_id(2) };
-        CancelScan => cancel_scan: HostCommand::CancelScan { folder: folder_ref_id(2) };
-    } }
-
-    /// `RefreshLimits` for every agent (no `agent` field), from a "Try again".
-    #[test]
-    fn refresh_limits_every_agent() {
-        let command = HostCommand::RefreshLimits {
-            agent: None,
-            why: RefreshWhy::TryAgain,
-        };
-        insta::assert_json_snapshot!("refresh_limits_every_agent", command);
-        round_trips(&command);
-    }
-
-    /// Each `RefreshWhy` value, in order.
-    #[test]
-    fn refresh_why() {
-        let whys = [RefreshWhy::Shown, RefreshWhy::TryAgain];
-        insta::assert_json_snapshot!("refresh_why", whys);
-        round_trips(&whys);
-    }
-}
+#[path = "snapshots/host_command.rs"]
+mod host_command;
 
 mod view_patch {
     use super::*;
@@ -483,6 +367,8 @@ mod host_event {
                 status: ThreadStatus::Idle,
                 queue_held: false,
                 seen: false,
+                snoozed_until: Some(Timestamp::new(1_760_086_400_000).unwrap()),
+                done: false,
                 last_stop: Some(LastStop { reason: StopReason::Cancelled, at: Timestamp::new(1_760_000_008_000).unwrap() }),
                 last_activity: Some(Timestamp::new(1_760_000_009_000).unwrap()),
             }],

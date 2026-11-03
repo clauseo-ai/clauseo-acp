@@ -150,6 +150,13 @@ pub fn apply(state: &mut StreamState, envelope: &Envelope) -> Result<Applied, Er
     Ok(out)
 }
 
+/// Whether `event` wakes its thread: it clears the header's `snoozed_until` and `done`
+/// (the lawyer's message, a permission request, an elicitation, a limit stop, a failed or ended
+/// turn). The host re-arms its snooze timer on these.
+pub const fn wakes_thread(event: &clauseo_protocol::DomainEvent) -> bool {
+    thread::wakes(event)
+}
+
 /// Sets the thread's `queue_held` ([`HeaderEntry::queue_held`](clauseo_protocol::HeaderEntry)),
 /// the host's in-memory flag that no event carries, and returns the header's `Upsert` when it
 /// changed. `None` also before `ThreadCreated`. A snapshot writes the flag `false`, so the

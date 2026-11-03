@@ -40,6 +40,8 @@ fn thread() -> ThreadSummary {
         status: ThreadStatus::Idle,
         queue_held: false,
         seen: true,
+        snoozed_until: None,
+        done: false,
         last_stop: None,
         last_activity: Some(at(1)),
     }

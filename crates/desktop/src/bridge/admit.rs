@@ -65,6 +65,10 @@ fn admit_main(bridge: &Bridge, command: &HostCommand) -> Result<(), HostError> {
         | HostCommand::ArchiveThread { .. }
         // H6: names a thread only.
         | HostCommand::MarkSeen { .. }
+        // The rail's triage: a thread and a time or a flag; the morning sweep a time.
+        | HostCommand::SnoozeThread { .. }
+        | HostCommand::MarkThreadDone { .. }
+        | HostCommand::SweepDone { .. }
         | HostCommand::UndoStep { .. }
         | HostCommand::RestoreVersion { .. }
         | HostCommand::SetUiSettings { .. }

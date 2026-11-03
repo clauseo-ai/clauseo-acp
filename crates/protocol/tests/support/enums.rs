@@ -86,7 +86,9 @@ macro_rules! logged_enums {
                 CompactionStatus,
                 LimitStopReason,
                 MatterKind,
-                PageVia;
+                PageVia,
+                DoneBy,
+                SnoozeBy;
             closed: TextOrBlob, RawPayload, StreamId;
         }
     };

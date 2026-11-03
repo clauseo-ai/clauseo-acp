@@ -123,6 +123,7 @@ pub(super) async fn open(
         event_subs: BTreeMap::new(),
         app_subs: Vec::new(),
         limits: super::limits::LimitsHost::new(limits_reader),
+        triage: super::triage::Triage::new(),
         lists: super::app_lists::Lists::default(),
         commands: BTreeMap::new(),
         folders: BTreeMap::new(),

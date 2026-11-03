@@ -200,7 +200,8 @@ wire_types! {
         ElicitationRequested, ElicitationResolved, FilesChanged, MatterCreated, MatterRelocated,
         ModeChanged, Notice, OutsideEdits, PageVisited, PermissionExpired, PermissionRequested,
         PermissionResolved, PlanReplaced, QueuedPromptEdited, SteerResolved, StepUndone,
-        TextAppended, ThreadArchived, ThreadCreated, ThreadRenamed, ToolCallStarted,
+        TextAppended, ThreadArchived, ThreadCreated, ThreadDone, ThreadRenamed, ThreadSnoozed,
+        ToolCallStarted,
         ToolCallUpdated, TurnEnded, TurnFailed, TurnQueued, TurnStarted, TurnStoppedAtLimit,
         UsageUpdated, UserMessage, VersionRestored, WebResult, WebSearchRecorded,
     },
@@ -236,7 +237,7 @@ wire_types! {
     },
     session::{
         AgentCapabilities, AvailableCommand, CompactionStatus, ConfigCategory, ConfigChoice,
-        ConfigOption, ConfigOptionKind, Cost, DetachReason, NoticeLevel, PlanEntry, PlanPriority,
+        ConfigOption, ConfigOptionKind, Cost, DetachReason, DoneBy, NoticeLevel, SnoozeBy, PlanEntry, PlanPriority,
         PlanStatus, PromptCapabilities, RenameSource, SessionCapabilities, SteeringCapability,
         TextKind, TurnUsage,
     },
@@ -264,6 +265,7 @@ wire_types! {
 // Re-exports that are not wire types: constants, functions, and types that never cross the
 // boundary.
 pub use command::{
+    MAX_DAY_START_SKEW_MS,
     MAX_ELICITATION_VALUES_BYTES,
     MAX_FILE_LIST,
     MAX_MATTER_NAME_BYTES,
@@ -272,6 +274,7 @@ pub use command::{
     MAX_PROMPT_FILES,
     MAX_PROMPT_TEXT_BYTES,
     MAX_QUEUED_TURNS,
+    MAX_SNOOZE_AHEAD_MS,
     // A checked command inside Rust; never serialised (the client sends `CommandEnvelope`).
     ValidatedCommand,
 };
