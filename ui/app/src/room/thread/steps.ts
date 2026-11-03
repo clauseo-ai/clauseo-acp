@@ -171,44 +171,50 @@ export function doneSoFar(lang: Lang, calls: readonly ToolCallEntry[]): string {
   return n === 0 ? "" : counted(lang, ["1 done so far.", "{n} done so far."], n);
 }
 
-/** A row's words: what it did once done ("Read Lease.pdf."), what it is doing while it runs or where it stopped. */
+/** A row's words: what it did once done ("Read Lease.pdf."), what it set out to do once it failed or was stopped
+ * ("Tried to read Lease.pdf.", its mark saying how it ended), and what it is doing while it waits or runs. */
 export function doneOf(lang: Lang, entry: ToolCallEntry): string {
-  if (entry.status !== "completed") return doingOf(lang, entry);
+  if (unsettled(entry)) return doingOf(lang, entry);
+  const tried = entry.status !== "completed";
+  const say = (done: StepKey, attempt: StepKey, vars?: Record<string, string>) =>
+    steps(lang, tried ? attempt : done, vars);
   const p = placeOf(entry);
   const name = p.name;
   switch (entry.kind) {
     case "read":
       return name === null
-        ? titled(entry, steps(lang, "Read the papers."))
-        : steps(lang, "Read {name}.", { name });
+        ? titled(entry, say("Read the papers.", "Tried to read the papers."))
+        : say("Read {name}.", "Tried to read {name}.", { name });
     case "edit":
       return name === null
-        ? titled(entry, steps(lang, "Changed a paper."))
-        : steps(lang, "Changed {name}.", { name });
+        ? titled(entry, say("Changed a paper.", "Tried to change a paper."))
+        : say("Changed {name}.", "Tried to change {name}.", { name });
     case "delete":
       return name === null
-        ? titled(entry, steps(lang, "Deleted a paper."))
-        : steps(lang, "Deleted {name}.", { name });
+        ? titled(entry, say("Deleted a paper.", "Tried to delete a paper."))
+        : say("Deleted {name}.", "Tried to delete {name}.", { name });
     case "move":
       return name === null
-        ? titled(entry, steps(lang, "Moved a paper."))
-        : steps(lang, "Moved {name}.", { name });
+        ? titled(entry, say("Moved a paper.", "Tried to move a paper."))
+        : say("Moved {name}.", "Tried to move {name}.", { name });
     case "search":
       return p.query === null
-        ? titled(entry, steps(lang, "Searched the papers."))
-        : steps(lang, "Searched for '{query}'.", { query: p.query });
+        ? titled(entry, say("Searched the papers.", "Tried to search the papers."))
+        : say("Searched for '{query}'.", "Tried to search for '{query}'.", { query: p.query });
     case "fetch":
       return p.query !== null
-        ? steps(lang, "Searched online for '{query}'.", { query: p.query })
+        ? say("Searched online for '{query}'.", "Tried to search online for '{query}'.", {
+            query: p.query,
+          })
         : name !== null
-          ? steps(lang, "Read {name} online.", { name })
-          : titled(entry, steps(lang, "Looked online."));
+          ? say("Read {name} online.", "Tried to read {name} online.", { name })
+          : titled(entry, say("Looked online.", "Tried to look online."));
     case "execute":
-      return p.what === null ? steps(lang, "Ran a task.") : sentenceOf(p.what);
+      return p.what === null ? say("Ran a task.", "Tried to run a task.") : sentenceOf(p.what);
     case "think":
-      return steps(lang, "Thought it through.");
+      return say("Thought it through.", "Tried to think it through.");
     default:
-      return titled(entry, steps(lang, "Did one other thing."));
+      return titled(entry, say("Did one other thing.", "Tried one other thing."));
   }
 }
 

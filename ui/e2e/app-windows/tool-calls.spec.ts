@@ -24,7 +24,7 @@ const CALLS = [
   ["tc-execute-1", "Ran a task.", "completed"],
   ["tc-think-1", "Thought it through.", "completed"],
   ["tc-switch-1", "Switch to plan mode.", "completed"],
-  ["tc-fetch-1", "Reading terms.html online.", "failed"],
+  ["tc-fetch-1", "Tried to read terms.html online.", "failed"],
   ["tc-other-1", "Ask the document service.", "completed"],
 ] as const;
 

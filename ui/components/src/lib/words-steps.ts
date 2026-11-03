@@ -24,6 +24,24 @@ const HI = {
   "Ran a task.": "एक काम चलाया गया।",
   "Thought it through.": "विचार किया गया।",
   "Did one other thing.": "एक अन्य काम किया गया।",
+  // a step that failed or was stopped: what it set out to do, in the past, never as if it were still going; the row's
+  // mark (Failed, Stopped) says how it ended
+  "Tried to read {name}.": "{name} पढ़ने की कोशिश की गई।",
+  "Tried to read the papers.": "दस्तावेज़ पढ़ने की कोशिश की गई।",
+  "Tried to change {name}.": "{name} बदलने की कोशिश की गई।",
+  "Tried to change a paper.": "एक दस्तावेज़ बदलने की कोशिश की गई।",
+  "Tried to delete {name}.": "{name} हटाने की कोशिश की गई।",
+  "Tried to delete a paper.": "एक दस्तावेज़ हटाने की कोशिश की गई।",
+  "Tried to move {name}.": "{name} की जगह बदलने की कोशिश की गई।",
+  "Tried to move a paper.": "एक दस्तावेज़ की जगह बदलने की कोशिश की गई।",
+  "Tried to search for '{query}'.": "'{query}' खोजने की कोशिश की गई।",
+  "Tried to search the papers.": "दस्तावेज़ों में खोजने की कोशिश की गई।",
+  "Tried to search online for '{query}'.": "ऑनलाइन '{query}' खोजने की कोशिश की गई।",
+  "Tried to read {name} online.": "{name} ऑनलाइन पढ़ने की कोशिश की गई।",
+  "Tried to look online.": "ऑनलाइन देखने की कोशिश की गई।",
+  "Tried to run a task.": "एक काम चलाने की कोशिश की गई।",
+  "Tried to think it through.": "विचार करने की कोशिश की गई।",
+  "Tried one other thing.": "एक अन्य काम करने की कोशिश की गई।",
   // a row's state, after its words, while it waits or once it carried on behind a steer
   Waiting: "प्रतीक्षा में",
   // the folded line: one sentence for each kind of work, the most done first

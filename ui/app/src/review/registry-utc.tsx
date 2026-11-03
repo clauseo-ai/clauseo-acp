@@ -98,6 +98,23 @@ export const UTC: Entry[] = [
   opened("UTC-16", "Did one other thing.", [call("other")]),
   // a row's state
   opened("UTC-17", "Waiting", [call("read", "completed", LEASE), call("edit", "pending", LEASE)]),
+  // a row that failed or was stopped: what it set out to do, in the past
+  opened("UTC-65", "Tried to read {name}.", [call("read", "failed", LEASE)]),
+  opened("UTC-66", "Tried to read the papers.", [call("read", "failed")]),
+  opened("UTC-67", "Tried to change {name}.", [call("edit", "failed", LEASE)]),
+  opened("UTC-68", "Tried to change a paper.", [call("edit", "cancelled")]),
+  opened("UTC-69", "Tried to delete {name}.", [call("delete", "failed", LEASE)]),
+  opened("UTC-70", "Tried to delete a paper.", [call("delete", "failed")]),
+  opened("UTC-71", "Tried to move {name}.", [call("move", "failed", LEASE)]),
+  opened("UTC-72", "Tried to move a paper.", [call("move", "failed")]),
+  opened("UTC-73", "Tried to search for '{query}'.", [call("search", "failed", SEARCH)]),
+  opened("UTC-74", "Tried to search the papers.", [call("search", "failed")]),
+  opened("UTC-75", "Tried to search online for '{query}'.", [call("fetch", "failed", ONLINE)]),
+  opened("UTC-76", "Tried to read {name} online.", [call("fetch", "failed", SITE)]),
+  opened("UTC-77", "Tried to look online.", [call("fetch", "failed")]),
+  opened("UTC-78", "Tried to run a task.", [call("execute", "failed")]),
+  opened("UTC-79", "Tried to think it through.", [call("think", "cancelled")]),
+  opened("UTC-80", "Tried one other thing.", [call("other", "failed")]),
   // UTC-18 was the row's "In the background": that word is U7-26's, one id for it
   // the folded line, one and many for each kind
   folded("UTC-19", "1 paper read.", [call("read", "completed", LEASE)]),

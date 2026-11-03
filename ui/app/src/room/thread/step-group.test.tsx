@@ -147,7 +147,7 @@ test("opened in place: its rows, each with its icon, the paper by its file name 
   expect(rows.map((r) => r.textContent)).toEqual([
     "Read Lease deed.pdf.",
     "Searched for 'notice period'.",
-    "Running a task. · Failed",
+    "Tried to run a task. · Failed",
   ]);
   expect(rows.map((r) => r.dataset["kind"])).toEqual(["read", "search", "execute"]);
   expect(rows[0]?.dataset["toolCallId"]).toBe(uuid(201, 7));
