@@ -128,6 +128,7 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
             Loopback::Ports(ports) => Loopback::Ports(sorted(ports)),
             other @ (Loopback::None | Loopback::Any) => other,
         },
+        browser_socket_dir: b.browser_socket_dir,
         keychain: b.keychain,
         over_cap,
         links,

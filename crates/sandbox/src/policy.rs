@@ -177,6 +177,7 @@ pub struct Policy {
     hidden: Vec<PathBuf>,
     proxy_ports: Vec<u16>,
     loopback: Loopback,
+    browser_socket_dir: Option<PathBuf>,
     keychain: bool,
     over_cap: Vec<PathBuf>,
     links: Vec<LinkFinding>,
@@ -201,6 +202,7 @@ pub struct PolicyBuilder {
     hidden: Vec<PathBuf>,
     proxy_ports: Vec<u16>,
     loopback: Loopback,
+    browser_socket_dir: Option<PathBuf>,
     keychain: bool,
     over_cap: Vec<PathBuf>,
     links: Vec<LinkFinding>,
@@ -292,6 +294,13 @@ impl Policy {
     /// The browser's loopback reach.
     pub fn loopback(&self) -> &Loopback {
         &self.loopback
+    }
+
+    /// The browser socket folder, canonical (`BrowserSocketDir::canonical`, Unix): the one
+    /// place the jail lets the agent make, bind and reach Unix sockets, and make, write, read
+    /// and remove files. `None`: no Unix socket anywhere.
+    pub fn browser_socket_dir(&self) -> Option<&Path> {
+        self.browser_socket_dir.as_deref()
     }
 
     /// Whether Claude's Keychain rules apply (macOS).
@@ -479,6 +488,24 @@ impl PolicyBuilder {
     /// The browser's loopback reach; [`Loopback::None`] unless set.
     pub fn loopback(mut self, loopback: Loopback) -> PolicyBuilder {
         self.loopback = loopback;
+        self
+    }
+
+    /// The browser socket folder the host made for this launch. The policy keeps its canonical
+    /// path; the jail then allows Unix-socket bind and connect, and file create, write, read
+    /// and unlink, under that one folder, but not making or removing the folder itself.
+    /// Without it the jail allows no Unix socket anywhere.
+    #[cfg(unix)]
+    pub fn browser_socket_dir(mut self, dir: &crate::BrowserSocketDir) -> PolicyBuilder {
+        self.browser_socket_dir = Some(dir.canonical().to_owned());
+        self
+    }
+
+    /// [`PolicyBuilder::browser_socket_dir`] by path, for the profile's snapshots on every
+    /// target.
+    #[cfg(test)]
+    pub(crate) fn browser_socket_path(mut self, path: PathBuf) -> PolicyBuilder {
+        self.browser_socket_dir = Some(path);
         self
     }
 

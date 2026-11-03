@@ -175,6 +175,25 @@ Departures from the brief:
 - The allowlists are inferred until G8b measures them; changes need Rohan's approval.
 - The "May depend on" cell of the `sandbox` row in `ARCHITECTURE.md` names the new crates.
 
+Amended 2026-11-03: port claims. The browser needs loopback ports that agent-browser's daemon and
+Chrome bind later, in the jail, so they cannot be listeners the host holds. `ports::claim_port`
+returns a `PortClaim`: on macOS and Linux the port a bind of `127.0.0.1:0` got (closed before it
+returns), on Windows a free port in 61080 to 61179 tested with the same `SO_EXCLUSIVEADDRUSE` bind.
+Each claim sits in a process-wide registry until it drops, and `bind_loopback`, `claim_port` and
+`claim_port_at` never hand out a registered port (on macOS and Linux a bind that lands on one is
+asked again, the rejected listeners held open meanwhile; on Windows registered ports are skipped).
+`ports::claim_port_at(port)` is for agent-browser's Windows daemon port, whose number is a hash of
+its session name: it refuses a port outside 61080 to 61179 on Windows (`InvalidInput`), and gives
+`AddrInUse` when the port is registered or a test bind fails, so the caller draws a new session
+name; it checks the registry before its test bind, so it never binds a claimed port. Interim,
+until agent-browser takes a port option upstream. The registry keeps this process's claims apart
+only; another process can still take a claimed port before its owner binds it, and the launch
+then fails with no fallback. On macOS and Linux a bind of port 0 learns its port only after the
+kernel picked it: if the kernel hands back a claimed port (it hands out only ports nobody holds),
+it is held for an instant under the registry lock and the bind asked again, and a launch binding
+that exact port in that instant fails, but cannot take it over. On Windows the candidate loop skips
+claimed ports before any bind.
+
 ## Status
 
 proposed

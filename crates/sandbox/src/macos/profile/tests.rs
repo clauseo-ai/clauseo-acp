@@ -92,6 +92,34 @@ fn with_a_credential_link() {
 }
 
 #[test]
+fn with_a_browser_socket_folder() {
+    let w = World::new("profile-browser-sockets");
+    let root = dunce::canonicalize(w.dir.path()).unwrap();
+    let policy = w
+        .builder()
+        .proxy_port(41_234)
+        .browser_socket_path(root.join("tmp/clauseo-ab-aaaaaaaaaaaaaaaa"))
+        .build()
+        .unwrap();
+    let text = w.render(&policy);
+    assert_eq!(text.matches("unix-socket").count(), 2, "{text}");
+    insta::assert_snapshot!(text);
+}
+
+#[test]
+fn no_browser_socket_folder_means_no_unix_socket() {
+    let w = World::new("profile-no-browser-sockets");
+    let policy = w.builder().proxy_port(41_234).build().unwrap();
+    let profile = SeatbeltProfile::new(&policy, TAG).unwrap();
+    assert!(
+        !profile.text().contains("unix-socket"),
+        "{}",
+        profile.text()
+    );
+    assert!(!profile.text().contains("BROWSER"), "{}", profile.text());
+}
+
+#[test]
 fn with_an_allowed_folder() {
     let w = World::new("profile-allowed-folder");
     w.dir.dir("elsewhere/Precedents");

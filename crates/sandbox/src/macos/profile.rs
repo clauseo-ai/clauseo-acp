@@ -24,6 +24,9 @@ pub(crate) const TAG_PREFIX: &str = "clauseo-";
 /// the last name, each letter in both cases (Seatbelt's regex has no case flag).
 const INSTRUCTIONS_REGEX: &str = "/[cC][lL][aA][uU][dD][eE]\\.[mM][dD]$";
 
+/// The parameter naming the browser socket folder.
+const BROWSER_SOCKETS: &str = "BROWSER_SOCKETS";
+
 /// The longest tag the profile takes.
 const TAG_MAX: usize = 64;
 
@@ -183,6 +186,7 @@ impl Writer {
         self.allow_again(&p);
         self.fixed_folders(&p);
         self.read_only_state(&p);
+        self.browser_sockets(policy);
         self.network(policy);
     }
 
@@ -358,17 +362,51 @@ impl Writer {
         self.rule("deny", "file-write-unlink", &parents);
     }
 
+    /// The browser socket folder the host made: regular files and sockets in it may be made,
+    /// and files in it written, read and removed; the folder itself is neither made nor
+    /// removed, and no folder, link or pipe is made in it. Nothing else in `/tmp`.
+    fn browser_sockets(&mut self, policy: &Policy) {
+        let Some(dir) = policy.browser_socket_dir() else {
+            return;
+        };
+        self.note("\n; The browser socket folder: agent-browser's socket and the files beside it.");
+        let dir = self.param(BROWSER_SOCKETS, dir);
+        self.rule(
+            "allow",
+            "file-read* file-write-data file-write-unlink",
+            &[subpath(&dir)],
+        );
+        self.note("; Only regular files and sockets are made there: no folder, link or pipe.");
+        // A swap (renamex_np, RENAME_SWAP) with a matter path can still bring a folder in;
+        // Seatbelt cannot refuse it without refusing the matter's renames (0038).
+        let made = ["REGULAR-FILE", "SOCKET"]
+            .map(|kind| format!("(require-all {} (vnode-type {kind}))", subpath(&dir)));
+        self.rule("allow", "file-write-create", &made);
+        self.note("; The folder itself: not removed, not replaced (the host owns it).");
+        self.rule(
+            "deny",
+            "file-write-create file-write-unlink",
+            &[literal(&dir)],
+        );
+        self.note("; The folders above it: metadata only, so its path resolves.");
+        self.rule("allow", "file-read-metadata", &[ancestors(&dir)]);
+    }
+
     fn network(&mut self, policy: &Policy) {
         self.note(
-            "\n; Network: the proxy's loopback ports only; no DNS (the proxy resolves names).",
+            "\n; Network: the proxy's loopback ports and the browser socket folder only; no DNS.",
         );
         let mut out: Vec<String> = policy
             .proxy_ports()
             .iter()
             .map(|port| format!("(remote ip \"localhost:{port}\")"))
             .collect();
-        let run = self.param("BROWSER_RUN", &policy.state().join("browser").join("run"));
-        out.push(format!("(remote unix-socket (subpath {run}))"));
+        let sockets = policy
+            .browser_socket_dir()
+            .map(|dir| self.param(BROWSER_SOCKETS, dir));
+        if let Some(dir) = &sockets {
+            out.push(format!("(remote unix-socket (subpath {dir}))"));
+        }
         let local: Vec<String> = match policy.loopback() {
             Loopback::None => Vec::new(),
             Loopback::Ports(ports) => ports
@@ -379,12 +417,14 @@ impl Writer {
         };
         out.extend(local.iter().map(|at| format!("(remote ip \"{at}\")")));
         self.rule("allow", "network-outbound", &out);
-        self.note("; agent-browser's daemon, in the jail, makes its socket there.");
-        self.rule(
-            "allow",
-            "network-bind",
-            &[format!("(local unix-socket (subpath {run}))")],
-        );
+        if let Some(dir) = &sockets {
+            self.note("; agent-browser's daemon, in the jail, makes its socket in its folder.");
+            self.rule(
+                "allow",
+                "network-bind",
+                &[format!("(local unix-socket (subpath {dir}))")],
+            );
+        }
         if !local.is_empty() {
             self.note("; The browser's loopback listeners.");
             let filters: Vec<String> = local
