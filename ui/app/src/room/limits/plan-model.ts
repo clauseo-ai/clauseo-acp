@@ -143,13 +143,20 @@ export function planLine(
 
 /** The composer's warning, as one string so a part renders again only when it changes: the window's label and its
  * reset, "" for none. A session window at 95% used or more, or the agent's own warning (tone `near` under 75% used,
- * which the share alone never gives). Never for an account billed by use. */
+ * which the share alone never gives). Never for an account billed by use, and never "close to" a limit already reached:
+ * the toolbar's meter at its limit, or the session window at 100%, where the toolbar says Limit reached. */
 export function warningKey(entry: AgentLimitsView | undefined): string {
   if (entry === undefined || lookOf(entry) === "payg") return "";
-  const session = entry.windows.find(
-    (w) => w.kind === "session" && w.used_percent !== undefined && w.used_percent >= 95,
-  );
   const meter = entry.meter;
+  if (meter !== undefined && bandOf(meter) === "reached") return "";
+  const session = entry.windows.find(
+    (w) =>
+      w.kind === "session" &&
+      w.used_percent !== undefined &&
+      w.used_percent >= 95 &&
+      w.used_percent < 100 &&
+      w.tone !== "at_limit",
+  );
   const hit =
     session !== undefined
       ? { label: session.label, resets: session.resets_at }

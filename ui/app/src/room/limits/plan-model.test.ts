@@ -218,6 +218,22 @@ describe("the warning", () => {
     );
   });
 
+  test("never close to a limit already reached: the meter at 100%, or the session window at it", () => {
+    expect(planLine("en", "claude", entry(100), NOW)?.status).toBe(
+      lim("en", "Limit reached until {time}", { time: "6:10 pm" }),
+    );
+    expect(warningKey(entry(100))).toBe("");
+    expect(warningKey(entry(120))).toBe("");
+    // the meter on the weekly window at its limit, the session close: the toolbar says Limit reached, no warning
+    const weekly = entry(100, {
+      meter: meter(100, { window_label: "Weekly limit" }),
+      windows: [row(97), row(100, { id: "seven_day", kind: "weekly" })],
+    });
+    expect(warningKey(weekly)).toBe("");
+    // the session window at 100% under a meter that isn't: still no "close to"
+    expect(warningKey(entry(60, { windows: [row(100)] }))).toBe("");
+  });
+
   test("never for an account billed by use", () => {
     expect(warningKey(entry(99, { billing: "pay_as_you_go" }))).toBe("");
   });
