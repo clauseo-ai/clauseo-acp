@@ -10,7 +10,10 @@ use clauseo_protocol::{AgentId, AgentKind};
 use clauseo_settings::Locations;
 use serde_json::Value;
 
-use super::{DesktopProfile, first_on_path, paths_for};
+use super::{DesktopProfile, paths_for};
+// Only the tests not built on macOS use it (`Scratch::executable` is not built there).
+#[cfg(not(target_os = "macos"))]
+use super::first_on_path;
 use crate::test_support::Scratch;
 
 const CLAUDE: &str = "claude-acp";
