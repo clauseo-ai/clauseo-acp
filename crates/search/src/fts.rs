@@ -3,6 +3,8 @@
 //! quoted string FTS5 only tokenizes. Words are what whitespace separates; the tokenizer then
 //! drops punctuation inside each one, so `s.` is `s` and `foo:bar` is the phrase `foo bar`.
 
+use crate::normal::normalise;
+
 /// At most this many words or phrases are kept; the rest of a long input is ignored.
 pub(crate) const MAX_TERMS: usize = 16;
 
@@ -45,28 +47,101 @@ struct Term<'a> {
 }
 
 /// The FTS5 query for `text`, or `None` when it holds no word. With `prefix_last`, the last
-/// word matches as a prefix (unless it ends a closed quote).
+/// word matches as a prefix (unless it ends a closed quote). The text is normalised first, as
+/// the stored text is. A term with digits in either script matches both spellings of them:
+/// `138` and `१३८` each find the other (`("138" OR "१३८")`).
 pub(crate) fn build(text: &str, prefix_last: bool) -> Option<String> {
-    let terms = terms(text);
+    let text = normalise(text);
+    let terms = terms(&text);
     let count = terms.len();
     let mut out = String::new();
+    // A group is not an implicit-AND operand in FTS5, so next to one the terms are joined by
+    // an explicit AND.
+    let mut after_group = false;
     for (i, term) in terms.into_iter().enumerate() {
+        let spellings = spellings(&term.words);
+        let group = spellings.len() > 1;
         if i > 0 {
-            out.push(' ');
+            out.push_str(if group || after_group { " AND " } else { " " });
         }
-        out.push('"');
-        for (j, word) in term.words.iter().enumerate() {
-            if j > 0 {
-                out.push(' ');
+        after_group = group;
+        let star = if prefix_last && i + 1 == count && !term.closed {
+            "*"
+        } else {
+            ""
+        };
+        if let [only] = spellings.as_slice() {
+            out.push_str(&quoted(only, star));
+        } else {
+            out.push('(');
+            for (j, spelling) in spellings.iter().enumerate() {
+                if j > 0 {
+                    out.push_str(" OR ");
+                }
+                out.push_str(&quoted(spelling, star));
             }
-            out.push_str(&word.replace('"', "\"\""));
-        }
-        out.push('"');
-        if prefix_last && i + 1 == count && !term.closed {
-            out.push('*');
+            out.push(')');
         }
     }
     (!out.is_empty()).then_some(out)
+}
+
+/// `content` in double quotes, with `star` (`*` for a prefix) after the closing quote.
+fn quoted(content: &str, star: &str) -> String {
+    format!("\"{content}\"{star}")
+}
+
+/// The phrase text of `words`, as one spelling when they hold no digit; with digits, in both
+/// spellings: the ASCII digits, then the Devanagari ones.
+fn spellings(words: &[&str]) -> Vec<String> {
+    if !words.iter().any(|word| word.chars().any(is_digit)) {
+        return vec![phrase(words.iter().copied())];
+    }
+    vec![
+        phrase(words.iter().map(|word| respell(word, true))),
+        phrase(words.iter().map(|word| respell(word, false))),
+    ]
+}
+
+/// The words joined by spaces, each with `"` doubled, for a quoted FTS5 string.
+fn phrase<S: AsRef<str>>(words: impl Iterator<Item = S>) -> String {
+    let mut out = String::new();
+    for (j, word) in words.enumerate() {
+        if j > 0 {
+            out.push(' ');
+        }
+        out.push_str(&word.as_ref().replace('"', "\"\""));
+    }
+    out
+}
+
+/// Whether `c` is a digit in either script.
+fn is_digit(c: char) -> bool {
+    c.is_ascii_digit() || devanagari_digit(c).is_some()
+}
+
+/// The value of a Devanagari digit (U+0966 to U+096F).
+fn devanagari_digit(c: char) -> Option<u32> {
+    ('\u{0966}'..='\u{096F}')
+        .contains(&c)
+        .then(|| u32::from(c) - 0x0966)
+}
+
+/// `word` with its digits in one script: ASCII when `ascii`, else Devanagari.
+fn respell(word: &str, ascii: bool) -> String {
+    word.chars()
+        .map(|c| {
+            if ascii {
+                devanagari_digit(c)
+                    .and_then(|digit| char::from_digit(digit, 10))
+                    .unwrap_or(c)
+            } else {
+                c.to_digit(10)
+                    .and_then(|digit| char::from_u32(0x0966 + digit))
+                    .unwrap_or(c)
+            }
+        })
+        .collect()
 }
 
 /// Splits `text` into terms: quoted runs are phrases, citation runs become phrases, and every
@@ -144,7 +219,7 @@ enum Part {
 
 fn citation_part(word: &str, previous: Option<&str>) -> Part {
     let plain = normal(word);
-    if word.chars().any(|c| c.is_ascii_digit()) {
+    if word.chars().any(is_digit) {
         return Part::Number;
     }
     let roman = !plain.is_empty()
@@ -190,15 +265,11 @@ mod tests {
     fn a_citation_run_becomes_one_phrase() {
         assert_eq!(
             build("rent (2019) 5 SCC 1", false).as_deref(),
-            Some("\"rent\" \"(2019) 5 SCC 1\"")
-        );
-        assert_eq!(
-            build("s. 138 notice", false).as_deref(),
-            Some("\"s. 138\" \"notice\"")
+            Some("\"rent\" AND (\"(2019) 5 SCC 1\" OR \"(२०१९) ५ SCC १\")")
         );
         assert_eq!(
             build("order xxxix rule 1", false).as_deref(),
-            Some("\"order xxxix rule 1\"")
+            Some("(\"order xxxix rule 1\" OR \"order xxxix rule १\")")
         );
         // A keyword with no number stays a word.
         assert_eq!(
@@ -236,7 +307,40 @@ mod tests {
         assert_eq!(build("\"a\0b\"", false).as_deref(), Some("\"a b\""));
         assert_eq!(
             build("x\u{1b}[0my", false).as_deref(),
-            Some("\"x\" \"[0my\"")
+            Some("\"x\" AND (\"[0my\" OR \"[०my\")")
+        );
+    }
+
+    #[test]
+    fn a_number_matches_both_digit_spellings_as_a_phrase() {
+        assert_eq!(
+            build("s. 138 notice", false).as_deref(),
+            Some("(\"s. 138\" OR \"s. १३८\") AND \"notice\"")
+        );
+        assert_eq!(
+            build("धारा १३८", false).as_deref(),
+            Some("(\"धारा 138\" OR \"धारा १३८\")")
+        );
+        assert_eq!(
+            build("\"धारा 138\"", false).as_deref(),
+            Some("(\"धारा 138\" OR \"धारा १३८\")")
+        );
+        // While typed, the last number is a prefix in both spellings.
+        assert_eq!(
+            build("धारा 13", true).as_deref(),
+            Some("(\"धारा 13\"* OR \"धारा १३\"*)")
+        );
+        // A word with no digit is not respelt.
+        assert_eq!(build("धारा", false).as_deref(), Some("\"धारा\""));
+    }
+
+    #[test]
+    fn joiners_are_removed_before_the_query_is_built() {
+        assert_eq!(build("क्\u{200D}षेत्र", false).as_deref(), Some("\"क्षेत्र\""));
+        // Decomposed nukta letters meet their composed spelling: the query is NFC.
+        assert_eq!(
+            build("\u{0928}\u{093C}ई", false).as_deref(),
+            Some("\"\u{0929}ई\"")
         );
     }
 

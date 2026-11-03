@@ -39,7 +39,26 @@ matter: 24–37 ms, or 1.4–1.6 s with secure-delete.
   way, `ना` gives false hits through `न`, prefixes mean nothing, and Devanagari queries run about
   3× slower. With `M*`, words stay whole: `न्यायालय` and the prefix `अनु*` match, a fragment does
   not. `remove_diacritics 2` still folds Latin accents, and punctuation is dropped, so the phrase
-  `"2019 5 scc 1"` matches `(2019) 5 SCC 1`.
+  `"2019 5 scc 1"` matches `(2019) 5 SCC 1`. It keeps the Devanagari marks: a test pins that a
+  vowel sign (`कि`, `कु`), the anusvara, the virama and the nukta each tell a word apart from the
+  word without it, so none is folded away.
+- **Normalisation.** One function, `normalise`, is applied to every text the index stores (prompts,
+  answers, tool titles, conversation and matter titles, file names) and to the query text before
+  the FTS5 query is built. It is Unicode NFC, with ZERO WIDTH NON-JOINER (U+200C) and ZERO WIDTH
+  JOINER (U+200D) removed first. NFC decomposes the nukta letters U+0958–095F into their base and
+  U+093C, and composes U+0929, U+0931 and U+0934, so a nukta letter is one word in either
+  encoding. The joiners are format characters, which the tokenizer treats as separators: a word
+  typed without its joiner (`क्षेत्र`) would not match the stored word with one (`क्‍षेत्र`), so
+  removing them makes both the same word. Snippets therefore show the normalised text: NFC, and
+  without the joiners, so an explicit half form renders as its unjoined letters, and an emoji's
+  joined sequence shows as its parts. A file's `path` keeps the name as it was put, since the host
+  opens files by the bytes it gave (the matter path is compared byte for byte); only the indexed
+  text (`body`) is normalised.
+- **Digits.** Stored text keeps the digits it was written with. A query term (a word, or a phrase
+  or citation run) with digits in either script matches both spellings: `138` finds `१३८` and
+  the other way round, and `धारा 138` finds `धारा १३८` (`("धारा 138" OR "धारा १३८")`). A Devanagari
+  number counts as a number in a citation run, so `धारा १३८` is a phrase. The rule is wider than
+  a word of only digits: a term with digits in either script gets both spellings.
 - **The file.** `search.sqlite` (with `-wal` and `-shm`) in the data folder beside
   `state.sqlite`. It is derived, outside 0006's frozen schema, and left out of backups and exports.
   It holds a plain-text copy of conversations, so it gets the store's protection: created with mode
@@ -72,8 +91,9 @@ matter: 24–37 ms, or 1.4–1.6 s with secure-delete.
 - **Results.** A page carries the hits, a cursor for the next page, the mode and a rebuild's
   progress (`done` of `total` conversations). A hit carries its kind, matter, thread, entry, path,
   time, the matter's and conversation's titles, and its snippet as segments (`text`, `hit`), at most
-  32 tokens and 240 characters. A match marks its whole token, a prefix match included. Segments
-  rather than offsets: the app never maps between UTF-8 and UTF-16.
+  32 tokens and 240 characters, all of the normalised text (see Normalisation). A match marks its
+  whole token, a prefix match included. Segments rather than offsets: the app never maps between
+  UTF-8 and UTF-16.
 - **Paging.** Newest first pages by rowid. Ranked pages are offsets into the window, pinned to the
   newest rowid and the time of the first page, so rows that arrive meanwhile do not shift them. A
   cursor travels as text (base64url of a small versioned record with an FNV-1a check of the
@@ -153,7 +173,11 @@ matter: 24–37 ms, or 1.4–1.6 s with secure-delete.
   writer.
 - It costs about 66 MB per 1,000 conversations, mostly the text copy kept for snippets. Keeping
   `items.body` compressed and building snippets in Rust is the lever if that matters.
-- Any change to the format or the tokenizer bumps `FORMAT` and triggers a rebuild.
+- Any change to the format or the tokenizer bumps `FORMAT` and triggers a rebuild. Format 2
+  (normalised text, see Normalisation): an index of format 1 reopens as needing a rebuild, and
+  the host rebuilds it from the log.
+- The normalisation is one step on every write and every query. It costs what NFC costs on a
+  few kilobytes of text per entry; the perf test records the typing numbers.
 - A new event that adds, changes or removes searchable text must reach the index; any new delete
   command must delete index rows.
 - Text of a running turn is not found until the turn ends; a file dropped into the folder is found

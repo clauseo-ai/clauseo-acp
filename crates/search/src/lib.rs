@@ -33,6 +33,10 @@
 //! - The file is derived: everything in it can be rebuilt from the store's log. A format or
 //!   tokenizer change bumps [`FORMAT`]; nothing is migrated, the file is emptied and rebuilt.
 //! - Text the lawyer typed never reaches `MATCH` as FTS5 syntax: every word is quoted.
+//! - The text the index stores and the query text pass through one normalisation (NFC, with
+//!   U+200C and U+200D removed), so both meet in one form. A term with digits matches both the
+//!   ASCII and the Devanagari spelling of them. Stored text is normalised, a file's path is kept
+//!   as it was put.
 //! - A row is keyed by what it shows: an entry or a tool title by (thread, entry), a title by
 //!   its thread or matter, file names by matter. A put replaces the row with the same key.
 //! - Deletes remove the text from the index too: FTS5 `secure-delete` and SQLite's
@@ -45,6 +49,7 @@ mod cursor;
 mod error;
 mod fts;
 mod index;
+mod normal;
 mod open;
 mod query;
 mod snippet;
@@ -141,7 +146,7 @@ pub struct Hit {
     pub thread: Option<ThreadId>,
     /// The entry's order (the seq of its first event), for a prompt or an answer.
     pub entry: Option<Seq>,
-    /// The document's path, for a file name.
+    /// The document's path, for a file name, as it was put.
     pub path: Option<String>,
     /// The matter's name as last put, if one was.
     pub matter_title: Option<String>,
