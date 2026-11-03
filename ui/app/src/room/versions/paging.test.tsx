@@ -50,4 +50,5 @@ test("after a Reset to a new epoch, the older versions are paged in again for th
   await h.settle();
   expect(h.queried("page_entries")).toHaveLength(2);
   expect(rows()).toEqual(["cp6", "cp5", "cp4", "cp3", "cp2", "cp1"]);
-});
+  // cold mount: the room and Versions' chunk load in this test, 0.8 s alone; 30 s for a loaded machine
+}, 30_000);
