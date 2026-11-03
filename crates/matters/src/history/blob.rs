@@ -34,6 +34,12 @@ pub(crate) fn is_already_compressed(head: &[u8]) -> bool {
         || head.get(4..8) == Some(b"ftyp".as_slice())
 }
 
+/// Appends to `head` what it still lacks of a file's first [`HEAD_BYTES`] from `chunk`, the
+/// next bytes read, so a streamed file's head stays that size however many chunks it takes.
+fn extend_head(head: &mut Vec<u8>, chunk: &[u8]) {
+    head.extend(chunk.iter().take(HEAD_BYTES - head.len()));
+}
+
 /// A byte count as `u64`.
 pub(super) fn count(bytes: usize) -> u64 {
     u64::try_from(bytes).unwrap_or(u64::MAX)
@@ -214,7 +220,7 @@ impl Blobs {
                 Err(err) => return Err(Error::io("read", path, err)),
             };
             let chunk = self.buffer.get(..n).unwrap_or_default();
-            head.extend(chunk.iter().take(HEAD_BYTES - head.len()));
+            extend_head(&mut head, chunk);
             hasher.update(chunk);
             read += count(n);
         }

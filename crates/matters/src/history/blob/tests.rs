@@ -5,7 +5,7 @@ use std::io;
 use std::io::Write as _;
 use std::path::Path;
 
-use super::{Blobs, Target};
+use super::{Blobs, HEAD_BYTES, Target, extend_head};
 use crate::Error;
 use crate::history::Oid;
 use crate::history::durable::NewObjects;
@@ -143,4 +143,19 @@ fn a_length_seen_over_the_cap_is_refused_before_the_read() {
         "{refused:?}"
     );
     assert!(is_empty(&objects), "an object was stored");
+}
+
+/// A streamed file's head, the first bytes that choose its zlib level, stays those first bytes
+/// however many chunks the file is read in, short or long: it never grows with the file, which
+/// would hold a large file in memory. (No test sees memory use, so it is checked here.)
+#[test]
+fn a_streamed_files_head_stays_its_first_bytes_over_many_chunks() {
+    let content = noise(64 * 1024);
+    for size in [1, 5, HEAD_BYTES, 1000] {
+        let mut head = Vec::new();
+        for chunk in content.chunks(size) {
+            extend_head(&mut head, chunk);
+        }
+        assert_eq!(head, content[..HEAD_BYTES], "chunks of {size} bytes");
+    }
 }
