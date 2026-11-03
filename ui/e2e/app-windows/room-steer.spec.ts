@@ -6,8 +6,9 @@
 //   mark. The answer then ends normally.
 // - steer-fallback (codex-acp, steering without claudeCode): Send now cancels the answer, which keeps its text, and
 //   sends the words as the next turn, with a `sent_now` steer outcome. Skipped: see the block below.
-// - send-now (no steering): no hint, since the agent cannot steer; a queued message's Send now cancels prompt 1,
-//   keeps its text, and runs prompt 2 ("Use the 2019 version instead") to the end.
+// - send-now (no steering): the hint's row shows Send now and Queue but no words, since the agent cannot steer; a
+//   queued message's Send now cancels prompt 1, keeps its text, and runs prompt 2 ("Use the 2019 version instead") to
+//   the end.
 
 import { expect } from "@playwright/test";
 import { test } from "./fixture.ts";
@@ -99,10 +100,11 @@ test.describe("send-now", () => {
     await sendPrompt(w, FIRST);
     await expect(w.agentMessages.last()).toHaveText("The clause caps liability at");
 
-    // This agent does not steer, so typed words get no hint; Enter queues them, and the queued row's
-    // Send now is the way to send them into the answer's place.
+    // This agent does not steer, so the hint's row has no words, only Send now and Queue; Enter queues them, and
+    // the queued row's Send now is the way to send them into the answer's place.
     await w.composer.fill("Use the 2019 version instead");
-    await expect(w.steerHint).toBeHidden();
+    await expect(w.steerHint).toBeVisible();
+    await expect(w.steerHint.locator(".steer-hint-text")).toHaveCount(0);
     await w.composer.press("Enter");
     await expect(w.queued).toHaveCount(1);
     await w.queuedSendNow(w.queued.first()).click();
