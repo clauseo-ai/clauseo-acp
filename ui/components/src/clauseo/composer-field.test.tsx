@@ -433,3 +433,13 @@ test("an edge prompt answers Enter from the empty composer ahead of it, and neve
   expect(onAllow).toHaveBeenCalledOnce();
   expect(onAsk).toHaveBeenCalledExactlyOnceWith("And clause ten?");
 });
+
+test("Ask's name is its word alone, and its arrow is hidden from assistive technology, in both languages", async () => {
+  await mount(composer({ initialText: "What did the bank know?" }));
+  expect(ask().textContent).toBe("Ask");
+  expect(ask().querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
+  expect(ask().querySelector("svg")?.hasAttribute("aria-label")).toBe(false);
+  await act(async () => showDisplay({ ...DEFAULT_DISPLAY, motion: "reduced", lang: "hi" }));
+  expect(ask().textContent).toBe("पूछें");
+  expect(ask().querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
+});
