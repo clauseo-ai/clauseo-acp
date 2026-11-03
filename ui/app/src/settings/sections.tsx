@@ -9,7 +9,7 @@ import {
   IconAppearance,
   IconLanguage,
   IconPlanLimit,
-  IconWebsite,
+  IconSafeWorkspace,
 } from "@clauseo/components/icons/icons.tsx";
 import type { Display, Lang } from "@clauseo/components/lib/display.ts";
 import { LANGUAGE_NAMES, st, type SettingsKey } from "@clauseo/components/lib/words-settings.ts";
@@ -111,7 +111,7 @@ export const SECTIONS: readonly SectionEntry[] = [
   {
     id: "privacy",
     name: "Privacy",
-    icon: IconWebsite,
+    icon: IconSafeWorkspace,
     lead: "What leaves this computer, and who sees it.",
     Body: Privacy,
   },

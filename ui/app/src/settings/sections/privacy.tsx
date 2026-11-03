@@ -2,6 +2,9 @@
 // Privacy), holding only what is true now. One row per plan the window knows, its words naming the web searches each
 // question may send, and for Claude the provider Anthropic lists for its web search. Then the tools' switches, web
 // search and the browser, each one patch, a locked one disabled with its managed line as Appearance's rows are.
+// Then a row for the websites Clauseo visits, unless the host's switches have both tools off. A locked switch shows the
+// host's value, and the lock's reason stands in place of its note. Under the Browser switch, while it is on and the app
+// has no website check, the reason the conversations give for its being off.
 // Left out until something stands behind them: Indian Kanoon's row, the row for Clauseo's anonymous counts, and the
 // anonymous counts and crash report switches.
 //
@@ -12,6 +15,7 @@
 // settings_changed. A change applies from the next conversation's start; one already open keeps its tools.
 // The locks are real already: `locked` may list `tools.web_search` and `tools.browser`.
 import { useSettingsWords } from "@clauseo/components/lib/words-settings.ts";
+import { tw } from "@clauseo/components/lib/words-tools.ts";
 import { SettingRow } from "@clauseo/components/ui/settings-row.tsx";
 import { PLAN_NAME } from "../../room/limits/plan-model.ts";
 import type { ToolSettings } from "../../room/host-next.ts";
@@ -51,18 +55,42 @@ function Dest({ kind }: { kind: AgentKind }) {
   );
 }
 
+/** Whether the app can check each website the browser opens. Nothing can yet, so every conversation's browser is off
+ * (the room's no_proxy). Stage C's proxy flips it. */
+const websiteCheck = false;
+
+/** The websites Clauseo visits: the pages it reads, and those its browser opens, go to them from this computer. */
+function WebsitesDest() {
+  const w = useSettingsWords();
+  return (
+    <div className="set-dest" data-testid="dest-websites">
+      <p className="set-dest-to">{w.say(w.s("To the websites Clauseo visits"))}</p>
+      <p className="set-dest-what">
+        {w.say(
+          w.s(
+            "Clauseo visits each page it reads, and each one it opens in its browser, from this computer. Each website sees that visit, as it sees any browser's.",
+          ),
+        )}
+      </p>
+    </div>
+  );
+}
+
 function ToolRow({
   ctx,
   tools,
   tool,
   label,
   note,
+  reason,
 }: {
   ctx: SectionContext;
   tools: ToolSettings;
   tool: keyof ToolSettings;
   label: string;
   note: string;
+  /** Optional: a further line under the note, such as why the tool can't run yet. */
+  reason?: string | undefined;
 }) {
   const w = useSettingsWords();
   const locked = ctx.toolLocked(tool);
@@ -72,10 +100,10 @@ function ToolRow({
         className="py-0"
         control="switch"
         label={label}
-        note={note}
+        note={locked ? w.s("Managed by your organisation.") : note}
         checked={tools[tool]}
         disabled={locked}
-        managed={locked ? w.s("Managed by your organisation") : undefined}
+        managed={reason}
         onCheckedChange={(on) => ctx.chooseTool(tool, on)}
       />
     </PlateRow>
@@ -85,12 +113,14 @@ function ToolRow({
 export function Privacy({ ctx }: { ctx: SectionContext }) {
   const w = useSettingsWords();
   const { tools } = ctx.settings;
+  const webOff = tools !== undefined && !tools.web_search && !tools.browser;
   return (
     <>
       <Group title={w.s("What leaves this computer")}>
         {plansOf(ctx).map((kind) => (
           <Dest key={kind} kind={kind} />
         ))}
+        {!webOff && <WebsitesDest />}
       </Group>
       {tools !== undefined && (
         <Group
@@ -110,6 +140,11 @@ export function Privacy({ ctx }: { ctx: SectionContext }) {
             tool="browser"
             label={w.s("Browser")}
             note={w.s("Clauseo can open web pages in its own browser, on this computer.")}
+            reason={
+              tools.browser && !websiteCheck
+                ? tw(w.lang, "Off until Clauseo can check each website the browser opens.")
+                : undefined
+            }
           />
         </Group>
       )}
