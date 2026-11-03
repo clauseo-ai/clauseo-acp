@@ -63,74 +63,74 @@ export const ICON_NAMES = [
   {
     component: "IconQuestion",
     source: "circleQuestionMark",
-    meaning: "A question for you, not used in the room yet",
+    meaning: "A question for you",
   },
   {
     component: "IconTryAgain",
     source: "rotateCcw",
-    meaning: "Try again, Restart, Retry now, Try now, not used in the room yet",
+    meaning: "Try again, Restart, Retry now, Try now",
   },
   {
     component: "IconStop",
     source: "square",
-    meaning: "Stop, and a stopped matter or conversation, not used in the room yet",
+    meaning: "Stop, and a stopped matter or conversation",
   },
   {
     component: "IconCross",
     source: "x",
-    meaning: "A cross: Don't allow, Not allowed, not used in the room yet",
+    meaning: "A cross: Don't allow, Not allowed",
   },
   {
     component: "IconConversation",
     source: "messageSquare",
-    meaning: "A conversation: a version Clauseo made in one, not used in the room yet",
+    meaning: "A conversation: a version Clauseo made in one",
   },
   {
     component: "IconAnswerReady",
     source: "messageSquareDot",
-    meaning: "Answer ready, not used in the room yet",
+    meaning: "Answer ready",
   },
   {
     component: "IconYourChange",
     source: "penLine",
-    meaning: "A change you made outside Clauseo, not used in the room yet",
+    meaning: "A change you made outside Clauseo",
   },
   {
     component: "IconImported",
     source: "fileInput",
-    meaning: "Papers imported, not used in the room yet",
+    meaning: "Papers imported",
   },
   {
     component: "IconCompare",
     source: "diff",
-    meaning: "Compare, Compare with now, not used in the room yet",
+    meaning: "Compare, Compare with now",
   },
   {
     component: "IconLanguage",
     source: "languages",
-    meaning: "Settings: Language, not used in the room yet",
+    meaning: "Settings: Language",
   },
   {
     component: "IconAppearance",
     source: "contrast",
-    meaning: "Settings: Appearance, not used in the room yet",
+    meaning: "Settings: Appearance",
   },
-  { component: "IconAbout", source: "info", meaning: "Settings: About, not used in the room yet" },
-  { component: "IconPin", source: "pin", meaning: "Pin to the top, not used in the room yet" },
+  { component: "IconAbout", source: "info", meaning: "Settings: About" },
+  { component: "IconPin", source: "pin", meaning: "Pin to the top" },
   {
     component: "IconShowInFinder",
     source: "folderOpen",
-    meaning: "Show in Finder, or in Explorer, not used in the room yet",
+    meaning: "Show in Finder, or in Explorer",
   },
   {
     component: "IconLocateFolder",
     source: "folderSearch",
-    meaning: "Locate folder, and a folder that moved, not used in the room yet",
+    meaning: "Locate folder, and a folder that moved",
   },
   {
     component: "IconRemoveFromList",
     source: "listX",
-    meaning: "Remove from the list, not used in the room yet",
+    meaning: "Remove from the list",
   },
   {
     component: "IconCommand",
@@ -140,12 +140,12 @@ export const ICON_NAMES = [
   {
     component: "IconNeedsPermission",
     source: "shieldQuestionMark",
-    meaning: "Needs your permission, not used in the room yet",
+    meaning: "Needs your permission",
   },
   {
     component: "IconPlanLimit",
     source: "gauge",
-    meaning: "The plan's limit, not used in the room yet",
+    meaning: "The plan's limit",
   },
   {
     component: "IconToolRead",
@@ -201,27 +201,26 @@ export const ICON_NAMES = [
   {
     component: "IconFileWord",
     source: "fileWord",
-    meaning: "A Word document (.docx, .doc): the page with W on its tab, not used in the room yet",
+    meaning: "A Word document (.docx, .doc): the page with W on its tab",
   },
   {
     component: "IconFilePdf",
     source: "filePdf",
-    meaning: "A PDF: the page with PDF on its tab, not used in the room yet",
+    meaning: "A PDF: the page with PDF on its tab",
   },
   {
     component: "IconFileMarkdown",
     source: "fileMarkdown",
-    meaning: "A Markdown file (.md): the page with MD on its tab, not used in the room yet",
+    meaning: "A Markdown file (.md): the page with MD on its tab",
   },
   {
     component: "IconFileEmail",
     source: "fileEmail",
-    meaning:
-      "An email (.eml, .msg): the page with an envelope on its tab, not used in the room yet",
+    meaning: "An email (.eml, .msg): the page with an envelope on its tab",
   },
   {
     component: "IconFileGeneric",
     source: "fileGeneric",
-    meaning: "Any other file: the page alone, not used in the room yet",
+    meaning: "Any other file: the page alone",
   },
 ] as const;

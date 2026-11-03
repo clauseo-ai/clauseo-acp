@@ -52,7 +52,7 @@ export function IconSafeWorkspace(props: IconProps) {
   );
 }
 
-/** A Word document (.docx, .doc): the page with W on its tab, not used in the room yet (source: fileWord) */
+/** A Word document (.docx, .doc): the page with W on its tab (source: fileWord) */
 export function IconFileWord(props: IconProps) {
   return (
     <Icon {...props}>
@@ -68,7 +68,7 @@ export function IconFileWord(props: IconProps) {
   );
 }
 
-/** A PDF: the page with PDF on its tab, not used in the room yet (source: filePdf) */
+/** A PDF: the page with PDF on its tab (source: filePdf) */
 export function IconFilePdf(props: IconProps) {
   return (
     <Icon {...props}>
@@ -84,7 +84,7 @@ export function IconFilePdf(props: IconProps) {
   );
 }
 
-/** A Markdown file (.md): the page with MD on its tab, not used in the room yet (source: fileMarkdown) */
+/** A Markdown file (.md): the page with MD on its tab (source: fileMarkdown) */
 export function IconFileMarkdown(props: IconProps) {
   return (
     <Icon {...props}>
@@ -100,7 +100,7 @@ export function IconFileMarkdown(props: IconProps) {
   );
 }
 
-/** An email (.eml, .msg): the page with an envelope on its tab, not used in the room yet (source: fileEmail) */
+/** An email (.eml, .msg): the page with an envelope on its tab (source: fileEmail) */
 export function IconFileEmail(props: IconProps) {
   return (
     <Icon {...props}>
@@ -116,7 +116,7 @@ export function IconFileEmail(props: IconProps) {
   );
 }
 
-/** Any other file: the page alone, not used in the room yet (source: fileGeneric) */
+/** Any other file: the page alone (source: fileGeneric) */
 export function IconFileGeneric(props: IconProps) {
   return (
     <Icon {...props}>

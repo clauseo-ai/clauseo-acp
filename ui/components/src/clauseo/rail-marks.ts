@@ -15,7 +15,9 @@ import type { ConversationState, MatterState } from "./rail-words.ts";
 
 export type Mark = { icon: ComponentType<IconProps>; waits: boolean };
 
-/** Each matter status's mark: yellow only where the matter waits for the lawyer's hand. */
+/** Each matter status's mark: yellow only where the matter waits for the lawyer's hand. The plan's limit, waiting on the
+ * reset or on the lawyer's choice, takes the gauge, not the clock, so it reads apart from an answer under way; working
+ * and a conversation waiting behind another share the clock. */
 export const MATTER_MARK: Record<Exclude<MatterState, "idle">, Mark> = {
   question: { icon: IconQuestion, waits: true },
   permission: { icon: IconNeedsPermission, waits: true },

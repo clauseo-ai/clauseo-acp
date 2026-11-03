@@ -5,6 +5,7 @@
 // the app's data folder.
 import "./moved.css";
 import { Button } from "@clauseo/components/ui/button.tsx";
+import { IconLocateFolder } from "@clauseo/components/icons/icons.tsx";
 import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { isolate } from "@clauseo/components/lib/bidi.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
@@ -41,6 +42,7 @@ export function MovedFolder({ folder, onLocate }: { folder?: string; onLocate: (
         </Say>
       </p>
       <Button kind="tone" className="room-moved-act" onClick={onLocate}>
+        <IconLocateFolder size={16} />
         {ui(lang, "Locate folder")}
       </Button>
     </div>
@@ -56,6 +58,7 @@ export function LocateGate({ onLocate }: { onLocate: () => void }) {
         <Say>{mt(lang, "Locate the folder to ask about this matter")}</Say>
       </span>
       <Button kind="tone" onClick={onLocate}>
+        <IconLocateFolder size={16} />
         {ui(lang, "Locate folder")}
       </Button>
     </div>
