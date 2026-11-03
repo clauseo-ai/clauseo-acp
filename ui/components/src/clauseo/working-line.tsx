@@ -2,7 +2,7 @@
 // field's own well, divided from the field by tone: the wait icon, what it's waiting for, and the clock time the
 // answer is expected, on a raised pill. Where the field has room, the pill stands beside Stop, so the words keep
 // one line. Its words and times change in place; no clock runs: it changes only when the host says something, and
-// nothing loops, shimmers or spins but the pen, which writes in the icon's place while Clauseo writes (pen-mark.tsx;
+// nothing loops, shimmers or spins but the pen, which writes after the words while Clauseo writes (pen-mark.tsx;
 // Rohan's call over the design's no-indicator rule, 2026-11). Errors stand on the same well, in concrete and never in
 // red, because red means the other side, and led by the break in the clock's place, so they look broken before
 // they're read (the icon pass, §12). The field below keeps what the lawyer wrote.
@@ -24,8 +24,8 @@ import { Say } from "./say.tsx";
 /** What the working line says. One check names what it reads; a series counts the judgments and names the one in
  * hand; queued waits for another answer in the matter; limit, retrying and stopped are the errors.
  *
- * `working`, optional on a check, a series and a wait: Clauseo is writing now. The pen writes in the wait icon's
- * place until it is false or the row goes, so the lawyer sees the answer is still coming. What is being done now is
+ * `working`, optional on a check, a series and a wait: Clauseo is writing now. The pen writes after the words, the
+ * icon's slot left empty, until it is false or the row goes, so the lawyer sees the answer is still coming. What is being done now is
  * the state's own words (a wait's `words`, such as "Answering." or "Reading the complaint."), so assistive technology
  * hears it too. Left out, the row shows the still wait icon, as before. */
 export type WorkingState =
@@ -51,7 +51,7 @@ export type WorkingState =
       kind: "wait";
       words: string;
       pill: string | null;
-      /** Optional: Clauseo is writing now, so the pen writes in the icon's place. */
+      /** Optional: Clauseo is writing now, so the pen writes after the words. */
       working?: boolean;
       /** Optional: the wait is on the lawyer, a permission prompt or a question: the permission's own shield leads a
        * permission, the question mark a question, never the pen. */
@@ -73,16 +73,14 @@ function leadOf(state: WorkingState): "pen" | "break" | "permission" | "question
   return state.kind === "wait" && state.code !== undefined ? "break" : "wait";
 }
 
-/** The row's lead, by leadOf: an icon at its own 16 px, so the words start over the field's own as the prototype has
- * them, or the pen in its fixed box (20 px by 110/36 of it, scaled with the text size, never with the language's line),
- * so nothing moves while it writes. */
+/** The row's lead, by leadOf: an icon at its own 16 px, so the words start at the prototype's x 48 from the well's
+ * edge. While the pen writes, the slot stands empty at the same 16 px and the pen writes after the last word
+ * (PenTail), so the words start in one place whatever leads them and never move when the lead changes. */
 function Lead({ state }: { state: WorkingState }) {
   const lead = leadOf(state);
   return (
     <span className="working-lead" data-lead={lead}>
-      {lead === "pen" ? (
-        <PenMark className="working-icon working-pen" />
-      ) : lead === "break" ? (
+      {lead === "pen" ? null : lead === "break" ? (
         <IconBreak size={16} className="working-icon" />
       ) : lead === "permission" ? (
         <IconNeedsPermission size={16} className="working-icon" />
@@ -233,6 +231,9 @@ export function WorkingLine({
       <span className="working-text" aria-hidden="true">
         <span>
           <Say>{words}</Say>
+          {/* the pen after the last word, in its fixed box (20 px by 110/36 of it, scaled with the text size, never
+              with the language's line), so nothing moves while it writes */}
+          {leadOf(state) === "pen" && <PenMark className="working-icon working-pen" />}
         </span>
       </span>
       {pill !== null && <TimePill place="row">{pill}</TimePill>}
