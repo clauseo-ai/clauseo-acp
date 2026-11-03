@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 
 use std::ffi::OsString;
 
-use super::{DENY, IGNORED, MAX_WORDS, run};
+use super::{DENY, IGNORED, MAX_WORDS, run_timed};
 use crate::write;
 
 /// A matter folder `m` holding `Contract.docx`, which Word has open (its owner file
@@ -83,7 +83,8 @@ impl Drop for Fixture {
 fn guard_with(args: &[&str], input: &[u8]) -> String {
     let args: Vec<OsString> = args.iter().map(OsString::from).collect();
     let mut errors = Vec::new();
-    let code = run(&args, input, &mut errors);
+    // Timings off whatever the environment says, so a shell with them on keeps the tests exact.
+    let code = run_timed(&args, input, &mut errors, false);
     let errors = String::from_utf8(errors).unwrap();
     let refused = !errors.is_empty() && !errors.starts_with(IGNORED);
     assert_eq!(code, if refused { DENY } else { 0 }, "{errors}");
@@ -352,7 +353,7 @@ fn stdin_that_fails_to_read_lets_the_tool_go_with_one_line() {
         }
     }
     let mut errors = Vec::new();
-    assert_eq!(run(&[], Broken, &mut errors), 0);
+    assert_eq!(run_timed(&[], Broken, &mut errors, false), 0);
     assert_eq!(
         String::from_utf8(errors).unwrap(),
         ignored("stdin could not be read")
@@ -480,3 +481,4 @@ mod codex;
 mod devanagari;
 mod fixtures;
 mod gaps;
+mod timings;

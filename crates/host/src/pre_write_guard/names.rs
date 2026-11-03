@@ -14,7 +14,7 @@ use unicode_normalization::UnicodeNormalization;
 
 use super::shell::script;
 use super::words::{Escape, Segments, ansi_c_char, candidates, shell_segments};
-use super::{MAX_WORDS, Refusal};
+use super::{MAX_WORDS, Refusal, timings};
 
 pub(super) use allow::{read_only, textutil_writes};
 pub(super) use stetdoc::{Stetdoc, stetdoc};
@@ -57,15 +57,19 @@ pub(super) fn held_files(folder: &Path) -> Vec<Held> {
     let mut held = Vec::new();
     let mut queue: std::collections::VecDeque<PathBuf> = std::iter::once(PathBuf::new()).collect();
     let mut entries = 0;
+    let mut walk = timings::Walk::default();
     while let Some(relative) = queue.pop_front() {
         let Ok(read) = std::fs::read_dir(root.join(&relative)) else {
             continue;
         };
+        walk.folders += 1;
         let mut files = Vec::new();
         let mut owners: Vec<String> = Vec::new();
         for entry in read.flatten() {
             entries += 1;
             if entries > MAX_ENTRIES {
+                walk.entries = MAX_ENTRIES;
+                timings::walked(walk);
                 return held;
             }
             let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
@@ -87,6 +91,8 @@ pub(super) fn held_files(folder: &Path) -> Vec<Held> {
         if owners.is_empty() {
             continue;
         }
+        walk.owner_folders += 1;
+        walk.checked += files.len();
         for name in files {
             if let Some(path) = MatterPath::from_relative(&relative.join(&name))
                 && clauseo_matters::held_open_beside(&root, &path, &owners).is_some()
@@ -95,6 +101,8 @@ pub(super) fn held_files(folder: &Path) -> Vec<Held> {
             }
         }
     }
+    walk.entries = entries;
+    timings::walked(walk);
     held
 }
 
@@ -377,6 +385,7 @@ pub(super) fn shell_refusal(
     hits: &[String],
 ) -> Option<Refusal> {
     let held = held_files(folder);
+    super::timings::mark("walk");
     let mut segments = Segments::new(MAX_WORDS);
     shell_segments(text, escape, &mut segments);
     for segment in segments.iter().filter(|segment| segment.command) {

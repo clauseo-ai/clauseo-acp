@@ -148,6 +148,7 @@
 mod codex;
 mod names;
 mod shell;
+pub mod timings;
 mod words;
 
 use std::ffi::OsString;
@@ -181,25 +182,40 @@ const MAX_INPUT: u64 = 16 * 1024 * 1024;
 /// The guard. `args` are the arguments after [`FLAG`] (`--matter <folder>`, or none); one hook
 /// input object comes from `input`. Returns the exit code: [`DENY`], with the reason and a newline
 /// on `errors`, when a target is refused; 0 with an [`IGNORED`] line when the input could not be
-/// read; else 0 with nothing written.
-pub fn run(args: &[OsString], input: impl Read, mut errors: impl Write) -> i32 {
+/// read; else 0 with nothing written. With [`timings::ENV`] set (not empty, not `0`), one more
+/// line follows, the phase timings ([`timings`]).
+pub fn run(args: &[OsString], input: impl Read, errors: impl Write) -> i32 {
+    let on = timings::wanted(std::env::var_os(timings::ENV).as_deref());
+    run_timed(args, input, errors, on)
+}
+
+/// [`run`], with the phase timings ([`timings`]) on or off; when on, their line follows any
+/// other line on `errors`.
+fn run_timed(args: &[OsString], input: impl Read, mut errors: impl Write, on: bool) -> i32 {
+    timings::start(on);
     let mut bytes = Vec::new();
     let found = match input.take(MAX_INPUT).read_to_end(&mut bytes) {
-        Ok(_) => refusal(&bytes, matter_arg(args).as_deref()),
+        Ok(_) => {
+            timings::mark("read");
+            refusal(&bytes, matter_arg(args).as_deref())
+        }
         Err(_) => Err(Ignored::Unreadable),
     };
+    timings::mark("decide");
     let (line, code) = match found {
-        Ok(None) => return 0,
-        Ok(Some(refusal)) => (refusal.reason(), DENY),
-        Err(ignored) => (ignored.line(), 0),
+        Ok(None) => (None, 0),
+        Ok(Some(refusal)) => (Some(refusal.reason()), DENY),
+        Err(ignored) => (Some(ignored.line()), 0),
     };
     // Nothing more can be done when the agent stopped reading; the exit code still decides.
-    drop(
-        errors
-            .write_all(line.as_bytes())
-            .and_then(|()| errors.write_all(b"\n"))
-            .and_then(|()| errors.flush()),
-    );
+    for line in line.into_iter().chain(timings::finish()) {
+        drop(
+            errors
+                .write_all(line.as_bytes())
+                .and_then(|()| errors.write_all(b"\n"))
+                .and_then(|()| errors.flush()),
+        );
+    }
     code
 }
 
@@ -291,6 +307,7 @@ fn refusal(bytes: &[u8], matter: Option<&Path>) -> Result<Option<Refusal>, Ignor
         return Err(Ignored::Empty);
     }
     let hook: Value = serde_json::from_slice(bytes).map_err(|_not_json| Ignored::NotJson)?;
+    timings::mark("parse");
     let cwd = hook
         .get("cwd")
         .and_then(Value::as_str)
@@ -309,6 +326,7 @@ fn refusal(bytes: &[u8], matter: Option<&Path>) -> Result<Option<Refusal>, Ignor
     let Some(targets) = targets(tool, input, &base)? else {
         return Ok(None);
     };
+    timings::mark("targets");
     let into_codex = match &targets {
         Targets::Named(_) => false,
         Targets::Patch(paths) => paths
@@ -332,7 +350,11 @@ fn refusal(bytes: &[u8], matter: Option<&Path>) -> Result<Option<Refusal>, Ignor
             .map(|(path, _)| path)
     };
     match &targets {
-        Targets::Named(paths) | Targets::Patch(paths) => Ok(held_at(paths).map(Refusal::HeldOpen)),
+        Targets::Named(paths) | Targets::Patch(paths) => {
+            let held = held_at(paths);
+            timings::mark("resolve");
+            Ok(held.map(Refusal::HeldOpen))
+        }
         Targets::Shell {
             files,
             patch,
@@ -342,6 +364,7 @@ fn refusal(bytes: &[u8], matter: Option<&Path>) -> Result<Option<Refusal>, Ignor
             ..
         } => {
             if let Some(path) = held_at(patch) {
+                timings::mark("resolve");
                 return Ok(Some(Refusal::HeldOpen(path)));
             }
             // The first held file the words name by path, and every word that names one.
@@ -355,6 +378,7 @@ fn refusal(bytes: &[u8], matter: Option<&Path>) -> Result<Option<Refusal>, Ignor
                     }
                 }
             }
+            timings::mark("resolve");
             Ok(names::shell_refusal(
                 text, line, *escape, &folder, found, &hits,
             ))
