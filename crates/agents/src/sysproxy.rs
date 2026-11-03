@@ -4,7 +4,7 @@
 //!
 //! The parsers are plain functions, tested on every OS; reading the OS is not.
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", all(test, unix)))]
 use std::time::Duration;
 
 use clauseo_process::{Launcher, Timer};
@@ -16,7 +16,7 @@ mod windows;
 #[cfg(target_os = "macos")]
 const SCUTIL_TIMEOUT: Duration = Duration::from_secs(5);
 /// The most of `scutil`'s output read.
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", all(test, unix)))]
 const OUTPUT_MAX: u64 = 256 * 1024;
 
 /// The OS's static HTTPS proxy as `host:port` (or `host`), or `None` when none is set.
@@ -59,7 +59,7 @@ pub(crate) async fn system_proxy<T: Timer>(launcher: &dyn Launcher, timer: &T) -
 /// Runs `program args` through `launcher` and returns its stdout, or `None` when it cannot
 /// start, exits non-zero or outlasts `limit` (the handle is dropped, which kills its tree).
 /// stderr's pump is driven beside the stdout read and the exit wait, as `limits`' readers do.
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", all(test, unix)))]
 async fn run_stdout<T: Timer>(
     launcher: &dyn Launcher,
     timer: &T,

@@ -149,7 +149,8 @@ pub(crate) fn node_entry(bytes: Option<&[u8]>) -> NodeEntry {
     NodeEntry::new(NODE_VERSION, NODE_BASE, vec![archive])
 }
 
-/// The registry path of Node's archive for this platform.
+/// The registry path of Node's archive for this platform. Only the Unix tests download Node.
+#[cfg(unix)]
 pub(crate) fn node_path(entry: &NodeEntry) -> String {
     let archive = entry.archive(platform()).unwrap();
     let url = entry.url(archive);

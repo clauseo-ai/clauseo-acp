@@ -1,7 +1,10 @@
 use std::io::Write as _;
 use std::path::Path;
 
+// The tests that start a program run on Unix alone (a fake `node` is a shell script).
+#[cfg(unix)]
 use clauseo_process::{AsyncIoTimer, PassthroughLauncher, SpawnOptions};
+#[cfg(unix)]
 use futures::executor::block_on;
 
 use super::*;
@@ -10,6 +13,7 @@ use crate::write::TestDir;
 
 const NPM_CLI: &str = "lib/node_modules/npm/bin/npm-cli.js";
 
+#[cfg(unix)]
 fn launcher() -> PassthroughLauncher {
     PassthroughLauncher::new(SpawnOptions::new())
 }
