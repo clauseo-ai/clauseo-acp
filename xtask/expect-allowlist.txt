@@ -138,6 +138,7 @@ crates/settings/src/files.rs SystemFiles::write_atomic clippy::disallowed_method
 crates/settings/tests/disk/write.rs - clippy::disallowed_methods
 crates/settings/src/policy/windows.rs - unsafe_code
 crates/settings/src/policy/macos/tests.rs UserDomain::set unsafe_code
+crates/settings/src/policy/macos/tests.rs UserDomain::drop clippy::disallowed_methods
 crates/settings/src/system/windows.rs - unsafe_code
 crates/settings/src/policy/macos.rs items unsafe_code
 crates/settings/src/policy/macos.rs entries unsafe_code

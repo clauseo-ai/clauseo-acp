@@ -1,5 +1,7 @@
 //! These read the real managed preferences. The only one they write is a throwaway user domain
-//! of their own, whose value [`UserDomain`] removes again; Clauseo's domain is never written.
+//! of their own, which [`UserDomain`] removes again, plist file included; Clauseo's domain is
+//! never written. A run killed before the drop (SIGKILL, such as a nextest timeout) can leave
+//! `~/Library/Preferences/ai.clauseo.desktop.shim-test-<pid>.plist` behind.
 
 use super::{ManagedPreferences, plist_value};
 use crate::policy::managed_prefs::PlistValue;
@@ -8,8 +10,10 @@ use objc2_core_foundation::{
     CFArray, CFBoolean, CFDictionary, CFNumber, CFPreferencesAppSynchronize,
     CFPreferencesSetAppValue, CFRetained, CFString, CFType,
 };
+use std::path::PathBuf;
 
-/// A user preferences domain only this test process writes. Dropping it removes what it wrote.
+/// A user preferences domain only this test process writes, named by its pid so parallel runs
+/// (`cargo mutants -j N`) do not share it. Dropping it removes what it wrote.
 struct UserDomain(CFRetained<CFString>);
 
 impl UserDomain {
@@ -19,21 +23,36 @@ impl UserDomain {
     }
 
     /// Sets `key` for the current user, as `defaults write` would: no root, and never forced.
+    /// `None` removes it. Whether the write reached the preferences store.
     #[expect(
         unsafe_code,
-        reason = "CFPreferencesSetAppValue is FFI with a typed value"
+        reason = "safe: the value is always a CFString, a property-list type"
     )]
-    /// `None` removes it. Whether the write reached the preferences store.
-    fn set(&self, key: &str, value: Option<&CFType>) -> bool {
-        // SAFETY: the value, when there is one, is a CFString, a property list type.
-        unsafe { CFPreferencesSetAppValue(&CFString::from_str(key), value, &self.0) };
+    fn set(&self, key: &str, value: Option<&CFString>) -> bool {
+        // SAFETY: the value, when there is one, is a CFString, a property-list type.
+        unsafe {
+            CFPreferencesSetAppValue(&CFString::from_str(key), value.map(AsRef::as_ref), &self.0);
+        };
         CFPreferencesAppSynchronize(&self.0)
+    }
+
+    /// The domain's plist file, which the preferences store may leave once the domain is empty.
+    fn plist(&self) -> Option<PathBuf> {
+        let home = std::env::var_os("HOME")?;
+        Some(PathBuf::from(home).join(format!("Library/Preferences/{}.plist", self.0)))
     }
 }
 
 impl Drop for UserDomain {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "a test removes the scratch plist file it made"
+    )]
     fn drop(&mut self) {
         let _removed = self.set("ui.theme", None);
+        if let Some(plist) = self.plist() {
+            let _deleted = std::fs::remove_file(plist);
+        }
     }
 }
 
@@ -72,7 +91,7 @@ fn managed_prefs_shim_reads_nothing_from_an_empty_domain() {
 #[test]
 fn managed_prefs_shim_reads_a_user_value_but_not_as_policy() {
     let domain = UserDomain::new();
-    assert!(domain.set("ui.theme", Some(CFString::from_str("dark").as_ref())));
+    assert!(domain.set("ui.theme", Some(&CFString::from_str("dark"))));
     let source = ManagedPreferences {
         domain: domain.0.to_string(),
     };
