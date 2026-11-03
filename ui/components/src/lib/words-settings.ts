@@ -19,6 +19,8 @@ const HI = {
   // what each section says beside its name, at a glance
   "{theme}, text size {n}": "{theme}, अक्षरों का आकार {n}",
   "Version {version}": "संस्करण {version}",
+  "{n}% of the 5-hour limit left": "5 घंटे की सीमा का {n}% बाकी",
+  "Pay as you go": "उपयोग के अनुसार भुगतान",
   // a row the firm's policy locks
   "Managed by your organisation": "आपके संगठन द्वारा प्रबंधित",
   // each section's one line
@@ -28,6 +30,8 @@ const HI = {
   "What each plan has left, and when it resets.": "हर प्लान में कितना बाकी है, और वह कब रीसेट होता है।",
   // plan and usage: the plan's own words are the limits' (words-limits.ts)
   "Updated at {time}": "{time} बजे अपडेट किया गया",
+  "No limits to show. Each question is billed to the key's account.":
+    "दिखाने को कोई सीमा नहीं। हर प्रश्न का शुल्क उसी key के खाते पर लगता है।",
   // language and appearance
   "Changes at once, and everything stays where it was.": "तुरंत बदलती है, और सब कुछ वहीं रहता है जहाँ था।",
   Day: "दिन",
