@@ -57,6 +57,8 @@ crates/desktop/src/window_frame/windows.rs - unsafe_code
 crates/desktop/src/webview2/windows.rs - unsafe_code
 crates/desktop/src/jailed/windows.rs - unsafe_code
 crates/desktop/src/jailed/macos.rs - unsafe_code
+crates/desktop/tests/jailed_windows.rs - unsafe_code
+crates/desktop/tests/jailed_macos.rs run clippy::disallowed_methods
 xtask/src/clock.rs timed clippy::disallowed_methods
 xtask/src/output.rs Printer::put clippy::let_underscore_must_use
 xtask/src/steps/run/tests.rs noisy_pass clippy::unnecessary_wraps

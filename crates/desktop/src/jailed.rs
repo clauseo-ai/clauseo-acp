@@ -12,16 +12,25 @@
 //! - Sandboxed: one line, [`REFUSAL`], on stderr (no path, no secret) and exit code
 //!   [`SANDBOXED_EXIT`]; no window, nothing else runs. Not sandboxed: the app starts.
 //! - The probe failing is not "sandboxed": one stderr line says the check failed and why, and
-//!   the app starts. Only a positive answer refuses, so a broken API never locks a lawyer out.
-//! - [`SystemProbe`]: on Windows the process token has restricting SIDs
-//!   (`GetTokenInformation(TokenRestrictedSids)`, a non-empty list) or is an `AppContainer`
-//!   (`TokenIsAppContainer`); on macOS `sandbox_check(getpid(), NULL, SANDBOX_FILTER_NONE)` is
-//!   non-zero. Linux has no check: the Linux agent jail is not a target.
+//!   the app starts, so a broken API never locks a lawyer out. What counts as a positive answer
+//!   rather than a failure is each OS's rule below.
+//! - [`SystemProbe`] on Windows (`signals.rs` decides, `windows.rs` reads): the process token
+//!   is an `AppContainer` (`TokenIsAppContainer`), has restricting SIDs
+//!   (`GetTokenInformation(TokenRestrictedSids)`, a non-empty list), or its user
+//!   (`TokenUser`) is S15's sandbox user, compared with `EqualSid` against the SID S15's set-up
+//!   records in `HKLM\SOFTWARE\Clauseo\Sandbox`, value `UserSid` (`REG_SZ`, 64-bit view;
+//!   missing means no sandbox user). `ERROR_ACCESS_DENIED` on the token or the record, a record
+//!   that is not a `REG_SZ`, or one that is not a valid SID, also counts as sandboxed; any other
+//!   failure fails open as above. On macOS `sandbox_check(getpid(), NULL, SANDBOX_FILTER_NONE)`
+//!   is non-zero (its -1 error counts as sandboxed). Linux has no check: the Linux agent jail is
+//!   not a target.
 //! - Known revisit: a sandboxed packaging of Clauseo itself (the Mac App Store, or MSIX with an
 //!   `AppContainer`) would trip this check (`docs/decisions/0012-desktop-bridge.md`).
 
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(any(windows, test))]
+mod signals;
 #[cfg(test)]
 mod tests;
 #[cfg(windows)]
