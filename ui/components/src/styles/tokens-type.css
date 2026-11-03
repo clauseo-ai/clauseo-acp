@@ -6,16 +6,25 @@
    Devanagari's letters stand 1.30 times Latin's x-height at one size, and need a taller line: an 18 px line needs
    31 px. Latin set inside Hindi (case names, citations, quotes from English papers) comes from 'Anek Latin Hi', the
    same file scaled to sit level with the Devanagari, with Devanagari's own ascent and descent so a mixed line never
-   grows. Numerals keep the Latin cut in both scripts. */
+   grows. Numerals keep the Latin cut in both scripts.
+   Papers, questions and answers may be Hindi whatever the interface's language, so every chain that can meet
+   Devanagari names the systems' own Devanagari faces after Anek's: Nirmala UI on Windows, Kohinoor Devanagari and
+   Devanagari Sangam MN on macOS. They stand after Segoe UI in the Latin chain, so Latin falls back as before. */
 
 :root {
-  --font-latin: "Anek Latin", "Anek Devanagari", "Segoe UI", system-ui, sans-serif;
+  --font-latin:
+    "Anek Latin", "Anek Devanagari", "Segoe UI", "Nirmala UI", "Kohinoor Devanagari",
+    "Devanagari Sangam MN", system-ui, sans-serif;
   --font-deva:
-    "Anek Devanagari", "Anek Latin Hi", "Nirmala UI", "Kohinoor Devanagari", system-ui, sans-serif;
+    "Anek Devanagari", "Anek Latin Hi", "Nirmala UI", "Kohinoor Devanagari", "Devanagari Sangam MN",
+    system-ui, sans-serif;
   --font-num: "Anek Latin", "Anek Devanagari", "Segoe UI", system-ui, sans-serif;
   --font: var(--font-latin);
-  /* code in an answer: the system's own monospace, the one place the page's face gives way */
-  --font-code: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+  /* code in an answer: the system's own monospace, the one place the page's face gives way; Devanagari in code
+     takes the system's Devanagari face, as no monospace face carries it */
+  --font-code:
+    ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, "Nirmala UI", "Kohinoor Devanagari",
+    "Devanagari Sangam MN", monospace;
 
   /* one fixed scale, in small increments, in rem on a 16 px root */
   --t12: 0.75rem; /* a chip's words */
