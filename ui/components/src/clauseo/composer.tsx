@@ -494,8 +494,8 @@ export function Composer<V extends string = string>({
                   disabled={disabled || empty}
                   data-testid={testIds?.ask}
                 >
-                  {w.t("Ask")}
                   <IconArrowUp size={16} />
+                  {w.t("Ask")}
                 </Button>
               )}
             </>
