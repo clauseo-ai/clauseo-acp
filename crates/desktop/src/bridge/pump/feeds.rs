@@ -7,7 +7,8 @@
 //!   though it missed events (0017's subscribe-then-read rule). H4's `matters_changed` and
 //!   `threads_changed` (not merged) go through as they come; when they land, the restart also
 //!   needs their current lists, unless the host makes a subscription's first frame `all: true`.
-//!   A window other than `main` gets `settings_changed` alone of it ([`AppEvents`], 0028).
+//!   The settings window gets `settings_changed` alone of it, and any other label none
+//!   ([`AppEvents`], 0028).
 //! - The limits (`HostHandle::subscribe_limits`), which `open_stream` follows for `main` and
 //!   the settings window (U12). The host starts
 //!   every limits subscription with the current `limits_view_changed`, so a restart needs no
@@ -30,26 +31,26 @@ use super::{Feed, Forward, Window};
 use crate::bridge::{PRINCIPAL, lock};
 
 /// Which feed events a window's channel carries: an allow-list keyed on its label (0028).
-/// `main` carries them all; any other window, of the app feed, `settings_changed` alone, so the
-/// settings window never gets the matter and thread lists (0023) or an app event the host adds
-/// later. Limits events pass on every window: `open_stream` follows the limits for `main` and
-/// the settings window alone (U12), so no other label has a limits feed to carry.
+/// `main` carries them all. The settings window carries the limits (U12) and, of the app feed,
+/// `settings_changed` alone, so it never gets the matter and thread lists (0023) or an app
+/// event the host adds later. Any other label carries neither, whatever it follows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AppEvents {
     /// Every app and limits event: `main`.
     All,
-    /// The app feed's `settings_changed` only, and the limits: the settings window, and any
-    /// other label.
-    SettingsOnly,
+    /// The app feed's `settings_changed` only, and the limits: the settings window.
+    SettingsAndLimits,
+    /// No app or limits event: any other label.
+    Nothing,
 }
 
 impl AppEvents {
     /// The app events the window `label` carries.
     pub(crate) fn of(label: &str) -> Self {
-        if label == crate::MAIN_WINDOW {
-            Self::All
-        } else {
-            Self::SettingsOnly
+        match label {
+            crate::MAIN_WINDOW => Self::All,
+            crate::settings_window::SETTINGS_WINDOW => Self::SettingsAndLimits,
+            _ => Self::Nothing,
         }
     }
 
@@ -58,8 +59,9 @@ impl AppEvents {
     /// event as its one key first (`{"settings_changed":...}`), so the key's prefix names it.
     pub(in crate::bridge) fn carries(self, feed: Feed, json: &str) -> bool {
         match (feed, self) {
-            (_, Self::All) | (Feed::Limits, Self::SettingsOnly) => true,
-            (Feed::App, Self::SettingsOnly) => json.starts_with(r#"{"settings_changed":"#),
+            (_, Self::All) | (Feed::Limits, Self::SettingsAndLimits) => true,
+            (Feed::App, Self::SettingsAndLimits) => json.starts_with(r#"{"settings_changed":"#),
+            (_, Self::Nothing) => false,
         }
     }
 }

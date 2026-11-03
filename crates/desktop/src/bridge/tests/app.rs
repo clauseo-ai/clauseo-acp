@@ -252,6 +252,46 @@ fn both_windows_get_the_settings_change_and_the_limits_and_only_main_the_lists()
     assert_eq!(lock(&window).state().unacked_bytes(), 0);
 }
 
+/// What each label's channel carries (`AppEvents`, 0028, U12): `main` every app and limits
+/// event, the settings window `settings_changed` and the limits, and any other label neither.
+/// So a window of another label that follows the app feed gets nothing of it, while the
+/// settings window gets each settings change.
+#[test]
+fn main_carries_every_feed_event_settings_its_own_and_the_limits_another_label_none() {
+    let settings_changed = r#"{"settings_changed":{}}"#;
+    let threads_changed = r#"{"threads_changed":{}}"#;
+    let limits = r#"{"limits_view_changed":{}}"#;
+    let carries = |label: &str, feed, json| pump::AppEvents::of(label).carries(feed, json);
+    for (feed, json) in [
+        (Feed::App, settings_changed),
+        (Feed::App, threads_changed),
+        (Feed::Limits, limits),
+    ] {
+        assert!(carries(MAIN, feed, json), "main: {json}");
+        assert!(!carries("other", feed, json), "other: {json}");
+    }
+    assert!(carries(SETTINGS, Feed::App, settings_changed));
+    assert!(!carries(SETTINGS, Feed::App, threads_changed));
+    assert!(carries(SETTINGS, Feed::Limits, limits));
+
+    let scratch = Scratch::new("app-other-label", &[]);
+    let host = scratch.start(Vec::new());
+    let bridge = host.bridge();
+    let (settings_channel, settings_page) = collector();
+    let (other_channel, other) = collector();
+    block_on(bridge.open_stream(SETTINGS, settings_channel)).unwrap();
+    block_on(bridge.open_stream("other", other_channel)).unwrap();
+    block_on(bridge.subscribe_app("other")).unwrap();
+    block_on(bridge.subscribe_app(SETTINGS)).unwrap();
+    assert_eq!(settings(settings_page.next_event()).ui.theme, Theme::System);
+    block_on(bridge.dispatch(SETTINGS, set_theme(Theme::Dark))).unwrap();
+    assert_eq!(settings(settings_page.next_event()).ui.theme, Theme::Dark);
+    // Subscribed first, the other window's pump has had the change at least as long; the table
+    // above pins the rule itself.
+    assert_eq!(other.drain(), Vec::<String>::new());
+    assert_eq!(other.limits_received(), 0);
+}
+
 /// A settings page reopened (a second `open_stream` from `settings`) replaces only its own
 /// channel: `main`'s stays, and keeps its app feed.
 #[test]
