@@ -1,0 +1,48 @@
+# The agent-browser sidecar the desktop bundles in release builds (ADR 0029, "Bundling (desktop)").
+#
+# Read by two things, both of which must agree with it:
+#   - crates/desktop/sidecars/agent-browser.mjs, `fetchAgentBrowser(triple, destPath)`, which the
+#     release script (.github/scripts/sidecars.mjs) calls once per target. It reads this file with
+#     its own small parser, so keep to the format below.
+#   - the `agent_browser_pin` test in crates/desktop (crates/desktop/src/agent_browser_pin.rs),
+#     which parses it with the toml crate.
+#
+# Format: `version` is the release's tag without the `v`. Each other table is one Rust target
+# triple, with exactly two keys: `url` (the release asset's download URL, which must start with
+# https://github.com/vercel-labs/agent-browser/releases/download/v<version>/) and `sha256` (the
+# asset's SHA-256, 64 lowercase hex characters). A triple with no build upstream holds
+# `none = true` instead, and the script then leaves that triple's sidecar out. Values are double
+# quoted strings or `true`; no other syntax (no inline tables, arrays or multi-line strings).
+#
+# Each asset is a raw binary (no archive). The hashes were taken from the release's downloads and
+# match the digests GitHub lists for the release assets (v0.41.1, Apache-2.0).
+#
+# Upstream ships no Windows ARM64 build. The aarch64-pc-windows-msvc entry is the x64 build, which
+# Windows on ARM runs under x64 emulation; it is pinned to the same asset and hash on purpose.
+
+version = "0.41.1"
+
+[aarch64-apple-darwin]
+url = "https://github.com/vercel-labs/agent-browser/releases/download/v0.41.1/agent-browser-darwin-arm64"
+sha256 = "63b0a97b85a54b4c9b2871318af74104c29b80abd507b53a30316884e062854b"
+
+[x86_64-apple-darwin]
+url = "https://github.com/vercel-labs/agent-browser/releases/download/v0.41.1/agent-browser-darwin-x64"
+sha256 = "7802f053e7fb25e10548ee10ca60d892c73d42ed2dbb7fc30c2d5925a5c82859"
+
+[x86_64-unknown-linux-gnu]
+url = "https://github.com/vercel-labs/agent-browser/releases/download/v0.41.1/agent-browser-linux-x64"
+sha256 = "2a89295b62ddd497986a9a80b52e1dbe4c1f6bd68ffde67eaae82eec2206af61"
+
+[aarch64-unknown-linux-gnu]
+url = "https://github.com/vercel-labs/agent-browser/releases/download/v0.41.1/agent-browser-linux-arm64"
+sha256 = "f0b3bdaa40abf2a5111ec08e6d242110aaf56045ef5108cbc633bacc8e53ca17"
+
+[x86_64-pc-windows-msvc]
+url = "https://github.com/vercel-labs/agent-browser/releases/download/v0.41.1/agent-browser-win32-x64.exe"
+sha256 = "ddab45e8bae84e5bc6aa1b084bceca9b579aff2e8272474d7d26953cf10965ee"
+
+# x64 build under emulation, see the header.
+[aarch64-pc-windows-msvc]
+url = "https://github.com/vercel-labs/agent-browser/releases/download/v0.41.1/agent-browser-win32-x64.exe"
+sha256 = "ddab45e8bae84e5bc6aa1b084bceca9b579aff2e8272474d7d26953cf10965ee"
