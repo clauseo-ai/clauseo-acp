@@ -387,8 +387,12 @@ test("macOS's smart quotes never rewrite a quoted paper's closing quote as it is
   // as Tamil99's vowel sign after a token, is let be
   expect(await replacing(11, 19, "Annex")).toBe(false);
   expect(await replacing(37, 38, "\u201d")).toBe(false);
+  // a later smart-quote pass asks as the pick's did, the caret after the space, collapsed (review of #117 M5): refused
+  expect(await replacing(39, 39, "\u201d")).toBe(false);
   expect(await replacing(38, 39, "x")).toBe(true);
   await edit(`${picked}க`);
+  // a curly quote at a caret with words between it and the token is the lawyer's own: let be
+  expect(await replacing(40, 40, "\u201d")).toBe(true);
   expect(await replacing(39, 40, "கா")).toBe(true);
   await edit(`${picked}கா`, { inputType: "insertReplacementText" });
   expect(boxes()).toHaveLength(1);

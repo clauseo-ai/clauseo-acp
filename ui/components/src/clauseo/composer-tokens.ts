@@ -28,6 +28,9 @@ import {
   type Token,
 } from "./composer-tokens-logic.ts";
 
+/** The curly quotes macOS's smart quotes put in place of a straight one. */
+const SMART_QUOTES = new Set(["\u2018", "\u2019", "\u201c", "\u201d"]);
+
 export type Tokens = {
   /** The tokens that count now, in order: those standing alone (one typed against is plain text while it is). */
   now: () => readonly Token[];
@@ -149,8 +152,23 @@ export function holdTokens(
     }
     const start = field.selectionStart;
     const end = field.selectionEnd;
-    if (start === end) return;
     if (field.value !== value) read(false);
+    if (start === end) {
+      // A collapsed caret: WebKit's smart quotes asked with the caret after the space that follows the token, not on
+      // the quote it replaces (the M5-hi log: the quote at 37, the caret at [39, 39]). A curly quote replacing, with
+      // only spaces between a quoted token's closing `"` and the caret, can only be that quote: refused. Any other
+      // replacement at a collapsed caret is let be (Tamil99's vowel signs, a spelling fix after the words typed).
+      const text = field.value;
+      if (
+        SMART_QUOTES.has(ev.data ?? "") &&
+        tokens.some(
+          (t) =>
+            t.end <= start && text[t.end - 1] === '"' && text.slice(t.end, start).trim() === "",
+        )
+      )
+        e.preventDefault();
+      return;
+    }
     if (tokens.some((t) => start < t.end && end > t.start)) e.preventDefault();
   };
 
