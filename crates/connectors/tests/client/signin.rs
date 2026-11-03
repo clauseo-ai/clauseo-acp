@@ -221,8 +221,11 @@ fn the_timeout_ends_finish_and_closes_the_port() {
     );
 }
 
+/// The listener looks at the flag every 20 ms, so a cancel normally ends `finish` within a tick.
+/// The bound is a second because shared CI runners stall (101 ms and 146 ms were seen against
+/// a 100 ms bound); against the 5 min sign-in timeout it still shows the flag acted.
 #[test]
-fn the_cancel_flag_ends_finish_within_100_ms() {
+fn the_cancel_flag_ends_finish_promptly() {
     let rig = rig();
     let pending = rig.handle.begin_sign_in(None).unwrap();
     let flag = pending.cancel_flag();
@@ -236,7 +239,7 @@ fn the_cancel_flag_ends_finish_within_100_ms() {
     let (result, ended_at) = finisher.join().unwrap();
     assert_eq!(result, Err(SignInError::Cancelled));
     let took = ended_at.duration_since(cancelled_at).unwrap_or_default();
-    assert!(took < Duration::from_millis(100), "{took:?}");
+    assert!(took < Duration::from_secs(1), "{took:?}");
 }
 
 #[test]

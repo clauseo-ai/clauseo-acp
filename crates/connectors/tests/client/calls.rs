@@ -195,6 +195,8 @@ fn wait_recharge_stops_at_the_deadline() {
         config.recharge_deadline = Duration::from_millis(300);
     });
     sign_in(&rig);
+    // A poll that ignored the deadline would be held for the fake's 10 s.
+    rig.fake.set_wait_cap(Duration::from_secs(10));
     let recharge = rig.handle.create_recharge("200").unwrap();
     let started = SystemClock.now();
     let result = rig
@@ -202,13 +204,15 @@ fn wait_recharge_stops_at_the_deadline() {
         .wait_recharge(&recharge.recharge_id, &CancelFlag::new());
     assert_eq!(result, Err(Error::RechargeTimedOut));
     let took = SystemClock.now().duration_since(started).unwrap();
-    assert!(took < Duration::from_secs(1), "{took:?}");
+    assert!(took < Duration::from_secs(3), "{took:?}");
 }
 
 #[test]
 fn the_cancel_flag_stops_wait_recharge() {
     let rig = rig();
     sign_in(&rig);
+    // A poll that ignored the flag would be held for the fake's 10 s.
+    rig.fake.set_wait_cap(Duration::from_secs(10));
     let recharge = rig.handle.create_recharge("200").unwrap();
     let cancel = CancelFlag::new();
     let handle = rig.handle;
@@ -218,7 +222,11 @@ fn the_cancel_flag_stops_wait_recharge() {
     let cancelled_at = SystemClock.now();
     cancel.cancel();
     assert_eq!(waiter.join().unwrap(), Err(Error::Cancelled));
-    assert!(SystemClock.now().duration_since(cancelled_at).unwrap() < Duration::from_millis(500));
+    let took = SystemClock
+        .now()
+        .duration_since(cancelled_at)
+        .unwrap_or_default();
+    assert!(took < Duration::from_secs(2), "{took:?}");
 }
 
 #[test]
@@ -298,16 +306,25 @@ fn the_cancel_flag_acts_at_once_during_the_gap_between_polls() {
     rig.fake.set_wait_cap(Duration::ZERO);
     let recharge = rig.handle.create_recharge("200").unwrap();
     let id = recharge.recharge_id;
+    let polls = format!("/v1/case-law/recharges/{id}");
     let cancel = CancelFlag::new();
     let flag = cancel.clone();
-    let handle = rig.handle;
+    let handle = rig.handle.clone();
     let waiter = thread::spawn(move || handle.wait_recharge(&id, &flag));
-    // The first poll is answered at once; the wait is now in its 2 s gap.
-    CancelFlag::new().wait_timeout(Duration::from_millis(500));
+    // The first poll is answered at once; once the fake has seen it, the wait is in its 2 s gap.
+    while rig.fake.requests_to(&polls).is_empty() {
+        thread::park_timeout(Duration::from_millis(10));
+    }
+    CancelFlag::new().wait_timeout(Duration::from_millis(100));
     let cancelled_at = SystemClock.now();
     cancel.cancel();
     assert_eq!(waiter.join().unwrap(), Err(Error::Cancelled));
-    assert!(SystemClock.now().duration_since(cancelled_at).unwrap() < Duration::from_millis(200));
+    // About 1.9 s of the gap is left, so a wait that ignored the flag would take longer than this.
+    let took = SystemClock
+        .now()
+        .duration_since(cancelled_at)
+        .unwrap_or_default();
+    assert!(took < Duration::from_secs(1), "{took:?}");
 }
 
 #[test]
