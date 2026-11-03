@@ -7,7 +7,7 @@
 // plan's name alone. No figures: the card's message and Try again (`refresh_limits`, `try_again`). Billed by use: who
 // bills, no figure. An agent whose state waits on its words (missing_scope, live_only) has no entry, and an agent of no
 // kind is never in the view. Opening the section asks the host for a read (`shown`), which reads only figures older
-// than 5 minutes. No timers: times are said against the last view's arrival, and the host sends a new view at each
+// than 5 minutes. No timers: times are said against the clock at each render, and the host sends a new view at each
 // shown reset. Not here until the host gives them: Manage plan and Manage billing (H11), the month's figure, the retry
 // lines and what the plan does at its limit (H16), and preparing ahead (later).
 import { lim } from "@clauseo/components/lib/words-limits.ts";
@@ -19,7 +19,7 @@ import { useEffect, useRef } from "react";
 import { PLAN_NAME, lookOf, planTitle } from "../../room/limits/plan-model.ts";
 import { windowOf, type WindowFigures } from "../../room/limits/plan-windows.ts";
 import { stamp } from "../../room/thread/clock.ts";
-import { useLimitsAt, useLimitsStore, useLimitsView } from "../../store/limits.ts";
+import { useLimitsStore, useLimitsView, useNow } from "../../store/limits.ts";
 import type { AgentKind, AgentLimitsView } from "../../transport/protocol.ts";
 import { Group, PlateRow } from "./parts.tsx";
 import { KINDS } from "./usage-note.ts";
@@ -70,8 +70,8 @@ function AgentUsage({ kind, entry }: { kind: AgentKind; entry: AgentLimitsView }
   const w = useSettingsWords();
   const words = useWords();
   const store = useLimitsStore();
-  // times against the view's arrival: the host sends a new view at each shown reset, nothing ticks here
-  const now = useLimitsAt();
+  // times against this render's clock: the host sends a new view at each shown reset, nothing ticks here
+  const now = useNow();
   const { lang } = w;
   const look = lookOf(entry);
   const name = PLAN_NAME[kind];

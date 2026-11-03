@@ -7,7 +7,7 @@ import { ToolbarPlan } from "@clauseo/components/clauseo/room-toolbar.tsx";
 import { late } from "@clauseo/components/lib/late.ts";
 import { lim } from "@clauseo/components/lib/words-limits.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
-import { useAgentLimits, useLimitsAt, useLimitsStore } from "../../store/limits.ts";
+import { useAgentLimits, useLimitsStore, useNow } from "../../store/limits.ts";
 import type { AgentId } from "../../transport/protocol.ts";
 import { kindOf } from "../agent.ts";
 import type { AgentSummary } from "../host-next.ts";
@@ -30,14 +30,14 @@ export function LivePlan({
   const kind = agent === null ? undefined : kindOf(agent, agents);
   const entry = useAgentLimits(kind);
   const store = useLimitsStore();
-  const now = useLimitsAt();
+  const now = useNow();
   // a hidden marker in every state, for the end-to-end specs to wait on: the entry's freshness ("live_only" while the
   // line is hidden), "none" before a view names the agent or for an agent of no kind; nothing shows, nothing is said
   const marker = (
     <span data-testid="plan-state" data-freshness={entry?.freshness ?? "none"} hidden />
   );
   if (kind === undefined || entry === undefined) return agent === null ? null : marker;
-  // times against the view's arrival: the host sends a new view at each shown reset, nothing ticks here
+  // times against this render's clock: the host sends a new view at each shown reset, nothing ticks here
   const line = planLine(w.lang, kind, entry, now);
   if (line === null) return marker;
   return (

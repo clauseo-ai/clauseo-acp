@@ -9,7 +9,7 @@ import { lim } from "@clauseo/components/lib/words-limits.ts";
 import { pc } from "@clauseo/components/lib/words-plan-card.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
-import { useAgentLimits, useLimitsAt, useLimitsStore } from "../../store/limits.ts";
+import { useAgentLimits, useLimitsStore, useNow } from "../../store/limits.ts";
 import type { AgentKind } from "../../transport/protocol.ts";
 import { stamp } from "../thread/clock.ts";
 import { PLAN_NAME, lookOf, planTitle } from "./plan-model.ts";
@@ -19,8 +19,8 @@ export function LivePlanCard({ kind }: { kind: AgentKind }) {
   const w = useWords();
   const entry = useAgentLimits(kind);
   const store = useLimitsStore();
-  // times against the view's arrival: the host sends a new view at each shown reset, nothing ticks here
-  const now = useLimitsAt();
+  // times against this render's clock: the host sends a new view at each shown reset, nothing ticks here
+  const now = useNow();
   if (entry === undefined) return null;
   const { lang } = w;
   const look = lookOf(entry);

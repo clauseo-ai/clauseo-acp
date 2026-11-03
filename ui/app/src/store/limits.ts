@@ -3,14 +3,15 @@
 // only when a view arrives, and then only for an agent whose entry changed: an unchanged entry keeps its object, so a
 // part that reads one agent renders again only when that agent's figures move. No timers: the host publishes a new
 // view at each shown reset and at the stale mark (and focus asks for a read), and the parts format their times
-// against the moment the last view arrived (`at`), so a render stays pure and a weekday is true as of that view.
+// against the clock at each render (useNow), so a later render, for whatever reason, names the day it renders on;
+// nothing renders on its own for the clock.
 //
 // For a part (the toolbar's plan, the composer's note, Settings' Plan and usage):
 //   const store = limitsStoreOf(transport)          one store per transport, made on first ask
 //   <LimitsContext value={store}>…</LimitsContext>  the room (and the settings window) provide it
 //   useAgentLimits(kind)                            one agent's entry, undefined before its first view
 //   useLimitsView()                                 every agent's entry, keyed by kind
-//   useLimitsAt()                                   when the last view arrived: the "now" times are said against
+//   useNow()                                        the clock as this render reads it: the "now" times are said against
 //   store.refresh(kind, "shown" | "try_again")      refresh_limits; undefined kind asks for every agent
 import { createContext, use, useCallback, useSyncExternalStore } from "react";
 import type { HostTransport } from "../transport/host-transport.ts";
@@ -22,8 +23,6 @@ export type LimitsStore = {
   subscribe: (listener: () => void) => () => void;
   /** Every agent's entry, keyed by kind: the same object until a view changes one. */
   view: () => LimitsView;
-  /** When the last view that changed anything arrived (ms since the epoch); 0 before the first. */
-  at: () => number;
   /** One agent's entry; undefined before a view names it. */
   agent: (kind: AgentKind) => AgentLimitsView | undefined;
   /** Asks the host to read the limits (`refresh_limits`): `shown` reads only figures older than 5 minutes,
@@ -36,7 +35,6 @@ const NONE: LimitsView = {};
 /** A store over a transport's limits; a transport that carries none (NullTransport) gives an empty store. */
 export function createLimitsStore(transport: HostTransport): LimitsStore {
   let view: LimitsView = NONE;
-  let at = 0;
   let keys: Partial<Record<AgentKind, string>> = {};
   const listeners = new Set<() => void>();
   const take = (next: LimitsView) => {
@@ -56,7 +54,6 @@ export function createLimitsStore(transport: HostTransport): LimitsStore {
     keys = nextKeys;
     if (!changed) return;
     view = kept;
-    at = Date.now();
     for (const listener of listeners) listener();
   };
   if (isLimitsSource(transport)) transport.onLimits(take);
@@ -68,7 +65,6 @@ export function createLimitsStore(transport: HostTransport): LimitsStore {
       };
     },
     view: () => view,
-    at: () => at,
     agent: (kind) => view[kind],
     refresh: (kind, why) => {
       transport
@@ -118,27 +114,22 @@ export function useLimitsView(): LimitsView {
   return useSyncExternalStore(store?.subscribe ?? nothing, get, get);
 }
 
-/** When the last view arrived (ms since the epoch), the moment the parts say their times against; 0 outside a
- * provider and before the first view. */
-export function useLimitsAt(): number {
-  const store = use(LimitsContext);
-  const get = useCallback(() => store?.at() ?? 0, [store]);
-  return useSyncExternalStore(store?.subscribe ?? nothing, get, get);
+/** The clock as this render reads it (ms since the epoch), the moment a part says its times against: read at each
+ * render, so a render on a later day names that day. A hook so the compiler treats it as changing on every render, never
+ * as a constant to keep; it subscribes to nothing and starts no timer. */
+export function useNow(): number {
+  return Date.now();
 }
 
-/** A value derived from one agent's entry and the last view's arrival, by `select`, which must give a value that
- * compares equal by Object.is while the facts it reads stay the same (a string or a number): the part renders again
- * only when it changes. */
+/** A value derived from one agent's entry by `select`, which must give a value that compares equal by Object.is while
+ * the facts it reads stay the same (a string or a number): the part renders again only when it changes. */
 export function useAgentSelect<T>(
   kind: AgentKind | undefined,
-  select: (entry: AgentLimitsView | undefined, at: number) => T,
+  select: (entry: AgentLimitsView | undefined) => T,
 ): T {
   const store = use(LimitsContext);
   const get = useCallback(
-    () =>
-      store === null || kind === undefined
-        ? select(undefined, 0)
-        : select(store.agent(kind), store.at()),
+    () => (store === null || kind === undefined ? select(undefined) : select(store.agent(kind))),
     [store, kind, select],
   );
   return useSyncExternalStore(store?.subscribe ?? nothing, get, get);
