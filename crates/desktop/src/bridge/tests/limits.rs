@@ -1,7 +1,7 @@
 //! The limits on `main`'s and the settings window's channels (`open_stream` follows them there
-//! alone), and the refresh either window's focus asks for (`on_window_event` in `lib.rs`, then `Bridge::shown`). A scripted
-//! reader stands in for the limits readers: it records each read and answers only when the test
-//! says, so no reader process starts.
+//! alone), and the refresh either window's focus asks for (`on_window_event` in `lib.rs`, then
+//! `Bridge::shown`). A scripted reader stands in for the limits readers: it records each read and
+//! answers only when the test says, so no reader process starts.
 
 use std::collections::VecDeque;
 use std::future::Future;
