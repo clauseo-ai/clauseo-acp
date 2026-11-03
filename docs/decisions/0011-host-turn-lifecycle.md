@@ -96,8 +96,10 @@ Amended by H9 (2026-11-02), the brief's "Later" list. The code is `actor/turn/qu
   finished (the view marks them as carried on in the background); `promptRequired`, a failure or
   `startedNewTurn` (cancelled at once) log `SteerResolved { Requeued }` and a `TurnQueued` behind
   the steered turn, and the new turn takes the head with the steered content. An answer that
-  does not come within 30 s counts as a failure, so an agent that never answers cannot freeze
-  the queue (a later answer is ignored).
+  has not come 30 s after the steered turn's end counts as a failure, so an agent that never
+  answers cannot freeze the queue (a later answer is ignored). The wait starts at the end, not
+  at the send: an agent may answer only once it takes the message in, and a steer requeued
+  while its turn runs would reach the agent twice.
 - `EditQueuedPrompt { thread, turn, text }` replaces the prompt's first text block, drops its other
   text blocks and keeps its file blocks (`QueuedPromptEdited`); empty text for a prompt without
   files is `command.invalid`. `RemoveQueuedPrompt` logs `TurnEnded { Cancelled }` without holding
@@ -112,7 +114,9 @@ Amended by H9 (2026-11-02), the brief's "Later" list. The code is `actor/turn/qu
   turn is the one the fold shows running, no longer the last prompt, and a held queue is found
   behind a later turn that ended (the newest prompt without a step counts, not the last one). A
   steer saved but never answered before the stop moves to a new held queued turn
-  (`SteerResolved { Requeued }` and its `TurnQueued`), as a failed answer would have moved it. A send now or a
+  (`SteerResolved { Requeued }` and its `TurnQueued`), as a failed answer would have moved it.
+  A restart restores the log's order: a requeued steer keeps its message's place, behind prompts
+  queued before it, and a send now or a requeue's place at the head is not kept. A send now or a
   `SendQueuedNow` move not yet started when the host stops is lost; the turn stays queued, held.
 
 The undo note (QR11.1) is not logged. Its words: "Note from Clauseo: since your last turn, the

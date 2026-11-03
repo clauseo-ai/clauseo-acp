@@ -1,0 +1,13 @@
+{"scenario":"steer-slow-answer","description":"claude-agent-acp steering: the steer is answered injected only after a permission the turn waits on, long after it was sent; the turn then ends once","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":false,"_meta":{"claudeCode":{"promptQueueing":true}}},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"},"_meta":{"steering":{"supported":true}}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}","mcpServers":[]}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1"}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"The clause "}}}}
+{"expect":{"method":"_session/steering","as":"steer","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"Focus on clause 4"}],"_meta":{"steering":{"idleBehavior":"promptRequired"}}}}}
+{"request":{"id":"perm-1","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"tc-perm-1","title":"Edit clause 4","kind":"edit","status":"pending"},"options":[{"optionId":"allow-once","name":"Allow once","kind":"allow_once"},{"optionId":"reject-once","name":"Reject","kind":"reject_once"}]}}}
+{"expect_response":{"id":"perm-1","result":"{{any}}"}}
+{"respond":{"to":"steer","result":{"outcome":"injected"},"raw":true}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"caps liability."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

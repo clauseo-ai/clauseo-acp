@@ -1,7 +1,8 @@
 //! The queue across a restart and a steer that is never answered: a held queue whose last prompt
 //! is a later turn that ended (sent now, then cancelled) comes back held and can be edited and
 //! removed; a steer saved but not answered before the host stops comes back as a held queued
-//! turn; a steer the agent never answers goes next once its wait runs out.
+//! turn; a steer the agent never answers goes next once its wait, which starts at its turn's
+//! end, runs out; a steer answered late in a long turn is not requeued meanwhile.
 
 use std::time::Duration;
 
@@ -9,7 +10,10 @@ use clauseo_protocol::{
     CommandOutcome, DeliveryRequest, DomainEvent, HostCommand, SteerOutcome, StopReason, StreamId,
 };
 
-use crate::queue::{DURABLE, edited, held, send, settle, starts, steer_resolved, until_queued};
+use crate::permissions::until_first_request;
+use crate::queue::{
+    DURABLE, allow, edited, held, send, settle, starts, steer_resolved, until_queued,
+};
 use crate::support::{Dir, FAKE, Scenario, matter_with_thread, text};
 
 /// How long the host waits for a steer's answer.
@@ -137,7 +141,8 @@ fn a_steer_with_no_answer_goes_next_when_its_wait_runs_out() {
     let (_, message) = send(&host, thread, text(STEER), DeliveryRequest::Steer);
     assert_eq!(events.until_turn_ended(first).stop, StopReason::EndTurn);
     settle(&host, &mut events);
-    // The queue waits for the steer's answer: nothing starts yet.
+    // The queue waits for the steer's answer: nothing starts yet. The wait was armed at the
+    // turn's end, so the clock moves on from there.
     assert!(
         steer_resolved(&events, message).is_none(),
         "{}",
@@ -156,5 +161,41 @@ fn a_steer_with_no_answer_goes_next_when_its_wait_runs_out() {
     assert_eq!(events.until_turn_ended(next).stop, StopReason::EndTurn);
     settle(&host, &mut events);
     assert_eq!(events.turn_text(next), "Focusing on clause 4.");
+    host.shutdown();
+}
+
+#[test]
+fn a_steer_answered_late_in_a_long_turn_is_not_requeued_meanwhile() {
+    let dir = Dir::new(
+        "a_steer_answered_late_in_a_long_turn_is_not_requeued_meanwhile",
+        &[(FAKE, Scenario::Local("steer-slow-answer"))],
+    );
+    let host = dir.start(0);
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], FAKE);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (first, _) = host.prompt(thread, "Summarise the clause.");
+    host.wait_armed(DURABLE);
+    let (_, message) = send(&host, thread, text(STEER), DeliveryRequest::Steer);
+    // The agent asks a permission after it got the steer; the turn runs on past the steer wait.
+    until_first_request(&mut events);
+    host.clock.advance(STEER_WAIT + Duration::from_secs(1));
+    settle(&host, &mut events);
+    assert!(
+        steer_resolved(&events, message).is_none(),
+        "{}",
+        events.dump()
+    );
+    assert!(events.turn_ended(first).is_none(), "{}", events.dump());
+
+    // Once asked, the agent takes the steer in: it joins the turn, which ends once.
+    allow(&host, &mut events, thread);
+    assert_eq!(events.until_turn_ended(first).stop, StopReason::EndTurn);
+    settle(&host, &mut events);
+    let (_, resolved) = steer_resolved(&events, message)
+        .unwrap_or_else(|| panic!("no SteerResolved: {}", events.dump()));
+    assert_eq!(resolved.outcome, SteerOutcome::Injected { turn: first });
+    let turns = events.count(|e| matches!(e, DomainEvent::TurnStarted(_)));
+    assert_eq!(turns, 1, "the steer went out once: {}", events.dump());
+    assert_eq!(events.turn_text(first), "The clause caps liability.");
     host.shutdown();
 }

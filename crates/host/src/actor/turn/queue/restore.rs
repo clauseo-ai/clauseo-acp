@@ -1,8 +1,10 @@
 //! Start-up: a thread's queue rebuilt from its whole log, held. Its queued turns are the
 //! prompts whose turn neither started nor ended, in the order they joined the queue (a prompt's
 //! `UserMessage`, a requeued steer's `SteerResolved`), with their edits applied. A steer saved
-//! and never answered (the host stopped first) moves to a new queued turn behind the turn it was
-//! sent into, as an answer other than `Injected` would have moved it, so it is not lost.
+//! and never answered (the host stopped first) moves to a new queued turn, so it is not lost; it
+//! keeps its message's place in the log, behind any prompt queued before it. That differs from a
+//! live requeue, which takes the head: a restart restores the log's order, and the queue comes
+//! back held, so nothing runs before the lawyer looks.
 
 use std::collections::{BTreeMap, BTreeSet};
 
