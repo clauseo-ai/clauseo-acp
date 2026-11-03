@@ -17,6 +17,10 @@ use crate::types::Settings;
 use crate::walk::{self, FoundKind};
 use crate::{Error, fsync, write};
 
+#[cfg(test)]
+#[cfg(windows)]
+mod windows_tests;
+
 /// One file operation on the folder.
 #[derive(Debug, Clone)]
 pub(crate) enum Op {
