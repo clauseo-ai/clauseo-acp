@@ -1,24 +1,31 @@
 // The working line. While Clauseo works, a row opens upward from the composer as the top of the
 // field's own well, divided from the field by tone: the wait icon, what it's waiting for, and the clock time the
 // answer is expected, on a raised pill. Where the field has room, the pill stands beside Stop, so the words keep
-// one line. Its words and times change in place; nothing loops, shimmers or spins, and no clock runs: it changes
-// only when the host says something. Errors stand on the same well, in concrete and never in red, because red means
-// the other side. The field below keeps what the lawyer wrote.
+// one line. Its words and times change in place; no clock runs: it changes only when the host says something, and
+// nothing loops, shimmers or spins but the pen, which writes in the icon's place while Clauseo writes (pen-mark.tsx;
+// Rohan's call over the design's no-indicator rule, 2026-11). Errors stand on the same well, in concrete and never in
+// red, because red means the other side. The field below keeps what the lawyer wrote.
 import { lazy, Suspense, type ReactNode } from "react";
 import { late } from "../lib/late.ts";
 import { Button } from "../ui/button.tsx";
 import { IconChecking, IconFold } from "../icons/icons.tsx";
 import { useThreadWords } from "../lib/words-thread.ts";
 import { sentence } from "./matter.ts";
+import { PenMark } from "./pen-mark.tsx";
 import { Say } from "./say.tsx";
 
 /** What the working line says. One check names what it reads; a series counts the judgments and names the one in
- * hand; queued waits for another answer in the matter; limit, retrying and stopped are the errors. */
+ * hand; queued waits for another answer in the matter; limit, retrying and stopped are the errors.
+ *
+ * `working`, optional on a check, a series and a wait: Clauseo is writing now. The pen writes in the wait icon's
+ * place until it is false or the row goes, so the lawyer sees the answer is still coming. What is being done now is
+ * the state's own words (a wait's `words`, such as "Answering." or "Reading the complaint."), so assistive technology
+ * hears it too. Left out, the row shows the still wait icon, as before. */
 export type WorkingState =
   /** name and waitingFor are the app's words, in the language: "Acme Ltd v. State", "judgments since 2001 that cite
    * it". */
-  | { kind: "check"; name: string; waitingFor: string; expected: string }
-  | { kind: "series"; total: number; current: string | null; expected: string }
+  | { kind: "check"; name: string; waitingFor: string; expected: string; working?: boolean }
+  | { kind: "series"; total: number; current: string | null; expected: string; working?: boolean }
   | { kind: "queued"; expected: string }
   | { kind: "limit"; resets: string }
   | { kind: "retrying"; at: string; lastReply: string; onRetry?: () => void }
@@ -30,6 +37,8 @@ export type WorkingState =
       kind: "wait";
       words: string;
       pill: string | null;
+      /** Optional: Clauseo is writing now, so the pen writes in the icon's place. */
+      working?: boolean;
       /** Optional: the wait's own ways on, such as a download's Try again, Restart or Sign in again. */
       actions?: ReactNode;
       /** Optional: the details those ways fold open. */
@@ -169,7 +178,11 @@ export function WorkingLine({
       data-code={state.kind === "wait" ? state.code : undefined}
       data-testid={testId}
     >
-      <IconChecking size={16} className="working-icon" />
+      {"working" in state && state.working === true ? (
+        <PenMark className="working-icon working-pen" />
+      ) : (
+        <IconChecking size={16} className="working-icon" />
+      )}
       <span className="working-text" aria-hidden="true">
         <span>
           <Say>{words}</Say>

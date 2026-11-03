@@ -87,6 +87,9 @@ export function InputSamples() {
       <Sample name="WorkingLine, checking one judgment">
         <WorkingLine state={CHECK_WORKING} />
       </Sample>
+      <Sample name="WorkingLine, Clauseo writing (the pen)">
+        <WorkingLine state={{ kind: "wait", words: "Answering.", pill: null, working: true }} />
+      </Sample>
       <Sample name="WorkingLine, a series of judgments">
         <WorkingLine
           state={{
