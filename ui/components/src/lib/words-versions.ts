@@ -281,7 +281,7 @@ const EDGE = {
 /** Every string of Versions, in English: the matter as it stood, and the edge of the matter. */
 const ALL = { ...TOOLBAR_WORDS, ...HI, ...EDGE } as const;
 /** Every string, English to Hindi, for the tests' banned-words screen. */
-export const VERSION_WORDS: Readonly<Record<string, string>> = ALL;
+export const VERSION_WORDS: Readonly<Record<string, string | null>> = ALL;
 export type VersionKey = keyof typeof ALL;
 
 /** A string of Versions in the language, its slots filled. */

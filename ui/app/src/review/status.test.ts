@@ -1,9 +1,12 @@
 import { expect, test } from "vitest";
+import { wordsOf } from "@clauseo/components/lib/words-core.ts";
 import { ERROR_WORDS } from "@clauseo/components/lib/words-errors.ts";
-import { currentOf } from "./entry.ts";
+import { currentOf, type Entry } from "./entry.ts";
 import { REGISTRY } from "./registry.tsx";
 import {
   duplicateIds,
+  laterIds,
+  laterLine,
   malformedIds,
   parseApprovals,
   pending,
@@ -13,9 +16,10 @@ import {
   type Approvals,
 } from "./status.ts";
 
-const approved = (en: string, hi: string): Approval => ({
+const approved = (en: string, hi: string | null): Approval => ({
   en,
   hi,
+  ...(hi === null ? { hi_status: "later" as const } : {}),
   status: "approved",
   at: "2026-11-02",
 });
@@ -127,4 +131,85 @@ test("approvals of the wrong shape are refused by id", () => {
   );
   expect(() => parseApprovals([])).toThrow();
   expect(parseApprovals({ "U1-01": approved("a", "b") })).toEqual({ "U1-01": approved("a", "b") });
+});
+
+// hi: later. A words list as a new screen's would hold it, one string with Hindi and two without, registered as the
+// registry does, so the gate reads them through currentOf and each WordsRef's later.
+const HEARING = {
+  "Decided {date}": "निर्णय दिनांक {date}",
+  "Hearing on {date}": null,
+  "Hearing moved": null,
+} as const;
+
+const entriesOf = (hi: Record<keyof typeof HEARING, string | null>): Entry[] => {
+  const say = wordsOf<keyof typeof HEARING>(hi);
+  return (Object.keys(hi) as (keyof typeof HEARING)[]).map((key, i) => ({
+    id: `T9-0${i + 1}`,
+    words: {
+      file: "lib/words-t9.ts",
+      key,
+      text: (lang) => say(lang, key),
+      later: say.hi[key] === null,
+    },
+    screen: "test/t9",
+    render: () => null,
+  }));
+};
+
+const laterApprovals = parseApprovals({
+  "T9-01": approved("Decided {date}", "निर्णय दिनांक {date}"),
+  "T9-02": approved("Hearing on {date}", null),
+  "T9-03": approved("Hearing moved", null),
+});
+
+test("the gate passes a string with null Hindi on an approval of its English with hi: null", () => {
+  const rows = entriesOf(HEARING).map(currentOf);
+  expect(rows.map((r) => r.hi)).toEqual(["निर्णय दिनांक {date}", null, null]);
+  expect(pending(rows, laterApprovals)).toEqual([]);
+  // the English is still approved: an English edit fails as before
+  const moved = rows.map((r) => (r.id === "T9-02" ? { ...r, en: "Hearing on {date}." } : r));
+  expect(pending(moved, laterApprovals)).toEqual([{ id: "T9-02", status: "changed" }]);
+  // with no approval at all it is new, like any string
+  const { "T9-02": _, ...rest } = laterApprovals;
+  expect(pending(rows, rest)).toEqual([{ id: "T9-02", status: "new" }]);
+});
+
+test("once the words gain Hindi, an approval of hi: null fails as a mismatch until the Hindi is approved", () => {
+  const rows = entriesOf({ ...HEARING, "Hearing on {date}": "सुनवाई {date} को" }).map(currentOf);
+  expect(pending(rows, laterApprovals)).toEqual([{ id: "T9-02", status: "changed" }]);
+  const now = { ...laterApprovals, "T9-02": approved("Hearing on {date}", "सुनवाई {date} को") };
+  expect(pending(rows, parseApprovals(now))).toEqual([]);
+});
+
+test("a string with Hindi still needs its Hindi approved: hi: null doesn't cover it, nor does other Hindi", () => {
+  const rows = entriesOf(HEARING).map(currentOf);
+  const nullFor01 = { ...laterApprovals, "T9-01": approved("Decided {date}", null) };
+  expect(pending(rows, parseApprovals(nullFor01))).toEqual([{ id: "T9-01", status: "changed" }]);
+  const other = { ...laterApprovals, "T9-01": approved("Decided {date}", "निर्णय {date}") };
+  expect(pending(rows, parseApprovals(other))).toEqual([{ id: "T9-01", status: "changed" }]);
+  // and Hindi taken away again, back to null, no longer matches the approved Hindi
+  const back = entriesOf({ ...HEARING, "Decided {date}": null }).map(currentOf);
+  expect(pending(back, laterApprovals)).toEqual([{ id: "T9-01", status: "changed" }]);
+});
+
+test("the gate lists the hi: later strings by id in one line", () => {
+  const rows = entriesOf(HEARING).map(currentOf);
+  expect(laterIds(rows)).toEqual(["T9-02", "T9-03"]);
+  expect(laterLine(rows)).toBe("hi: later: 2 strings: T9-02, T9-03");
+  expect(laterLine(rows.slice(0, 2))).toBe("hi: later: 1 string: T9-02");
+  expect(laterLine(rows.slice(0, 1))).toBe("hi: later: 0 strings");
+});
+
+test("an approval with hi: null needs hi_status later, and hi_status only goes with null Hindi", () => {
+  const at = { status: "approved", at: "2026-11-03" };
+  expect(() => parseApprovals({ "T9-02": { en: "a", hi: null, ...at } })).toThrow(/T9-02/);
+  expect(() =>
+    parseApprovals({ "T9-02": { en: "a", hi: "ब", hi_status: "later", ...at } }),
+  ).toThrow(/T9-02/);
+  expect(() =>
+    parseApprovals({ "T9-02": { en: "a", hi: null, hi_status: "soon", ...at } }),
+  ).toThrow(/T9-02/);
+  expect(parseApprovals({ "T9-02": { en: "a", hi: null, hi_status: "later", ...at } })).toEqual({
+    "T9-02": { en: "a", hi: null, hi_status: "later", ...at },
+  });
 });

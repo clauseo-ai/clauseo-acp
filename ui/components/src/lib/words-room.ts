@@ -2,7 +2,7 @@
 // built from parts. None of them uses मैं, पेंसिल, स्याही, चरण or
 // कदम, or "pencil", "ink" or "step".
 import type { Lang } from "./display.ts";
-import { wordsOf, type Slots } from "./words-core.ts";
+import { wordsOf, type Slots, type Hindi } from "./words-core.ts";
 import { t, type Key } from "./words.ts";
 
 const HI = {
@@ -19,7 +19,7 @@ const HI = {
 export type RoomKey = keyof typeof HI;
 
 /** The room's own strings, for the tests' banned-words screen. */
-export const roomHindi: Readonly<Record<RoomKey, string>> = HI;
+export const roomHindi: Hindi<RoomKey> = HI;
 
 const isRoomKey = (key: string): key is RoomKey => key in HI;
 const room = wordsOf<RoomKey>(HI);

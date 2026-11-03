@@ -7,7 +7,7 @@ import { clock, t as roomWords, type Key } from "./words.ts";
 import { ui, type UiKey } from "./words-ui.ts";
 import { frame, type FrameKey } from "./words-frame.ts";
 import { useDisplay } from "./display.ts";
-import { wordsOf, type Slots } from "./words-core.ts";
+import { wordsOf, type Slots, type Hindi } from "./words-core.ts";
 
 const HI = {
   /* ---------- the rail: finding a matter, a folder that moved ---------- */
@@ -140,7 +140,7 @@ export type MatterKey = keyof typeof HI;
 export const mt = wordsOf<MatterKey>(HI);
 
 /** Every key, for the banned-words screen in the tests. */
-export const matterWords: Readonly<Record<MatterKey, string>> = HI;
+export const matterWords: Hindi<MatterKey> = HI;
 
 /** The words of living in matters, bound to the page's language, with the shared, interface and frame words beside
  * them: const w = useMatterWords(); w.m("Send now"), w.t("Matters"), w.f("Pinned"). */

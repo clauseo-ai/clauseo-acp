@@ -7,7 +7,7 @@
 import { useDisplay, type Lang } from "./display.ts";
 import { frame, type FrameKey } from "./words-frame.ts";
 import { say, ui, type UiKey } from "./words-ui.ts";
-import { wordsOf, type Slots } from "./words-core.ts";
+import { wordsOf, type Slots, type Hindi } from "./words-core.ts";
 
 const HI = {
   // the window and its sections
@@ -50,7 +50,7 @@ export type SettingsKey = keyof typeof HI;
 export const st = wordsOf<SettingsKey>(HI);
 
 /** Every string, English and Hindi, for the tests that hold the voice. */
-export const settingsWords: Readonly<Record<SettingsKey, string>> = HI;
+export const settingsWords: Hindi<SettingsKey> = HI;
 
 /** Each language by its own name, the same in either language: the language switch's sides, and what Language says
  * beside its name. */

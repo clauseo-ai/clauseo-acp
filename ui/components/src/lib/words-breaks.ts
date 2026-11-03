@@ -6,7 +6,7 @@
 // a specialist's draft, waiting for a Hindi-speaking lawyer: the formal आप, the danda, Western digits, English names in
 // Latin script.
 import type { Lang } from "./display.ts";
-import { wordsOf } from "./words-core.ts";
+import { wordsOf, type Hindi } from "./words-core.ts";
 import { errorWords, type AgentName, type ErrorCode } from "./words-errors.ts";
 
 const HI = {
@@ -32,7 +32,7 @@ export type BreakKey = keyof typeof HI;
 export const brk = wordsOf<BreakKey>(HI);
 
 /** Every key, for the banned-words screen in the tests. */
-export const breakWords: Readonly<Record<BreakKey, string>> = HI;
+export const breakWords: Hindi<BreakKey> = HI;
 
 /** For a failed stream that offers no Try again: the codes whose own sentence says to try again, said without it. */
 const NO_TRY: Partial<Record<ErrorCode, BreakKey>> = {

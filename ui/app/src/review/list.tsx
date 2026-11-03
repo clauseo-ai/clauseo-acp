@@ -106,12 +106,13 @@ function Item({
         <dt>English</dt>
         <dd lang="en">{current.en}</dd>
         <dt>Hindi</dt>
-        <dd lang="hi">{current.hi}</dd>
+        <dd lang="hi">{current.hi ?? "hi: later"}</dd>
         {approval !== undefined && status === "changed" && (
           <>
             <dt>Approved as</dt>
             <dd>
-              <span lang="en">{approval.en}</span> / <span lang="hi">{approval.hi}</span>
+              <span lang="en">{approval.en}</span> /{" "}
+              <span lang="hi">{approval.hi ?? "hi: later"}</span>
             </dd>
           </>
         )}

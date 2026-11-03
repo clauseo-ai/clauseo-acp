@@ -343,6 +343,7 @@ test("no reader string says I, names a model, or uses a dash or a banned word", 
     );
   }
   for (const s of readerHindi) {
+    if (s === null) continue; // hi: later, no Hindi yet
     expect(s, s).not.toMatch(/पेंसिल|स्याही|चरण|कदम|(^|\s)मैं(\s|$)|[\u2013\u2014]|[\u0966-\u096F]/);
     expect(s, s).not.toMatch(/[\u0900-\u097F]\.$/);
   }

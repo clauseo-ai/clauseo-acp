@@ -1,7 +1,7 @@
 // The words of the new matter form, in English and Hindi. The form is a part of its own, opened by
 // the first launch and by the rail's New matter, so its words live apart from either screen.
 import { useDisplay } from "./display.ts";
-import { wordsOf } from "./words-core.ts";
+import { wordsOf, type Hindi } from "./words-core.ts";
 
 const HI = {
   "A new matter": "नया मामला",
@@ -22,7 +22,7 @@ const HI = {
 
 export type MatterFormKey = keyof typeof HI;
 /** Every string, English and Hindi, for the tests that hold the voice. */
-export const matterFormWords: Readonly<Record<MatterFormKey, string>> = HI;
+export const matterFormWords: Hindi<MatterFormKey> = HI;
 
 export const mf = wordsOf<MatterFormKey>(HI);
 

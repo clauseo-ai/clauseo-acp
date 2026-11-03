@@ -5,7 +5,7 @@
 // As in words.ts the English is the key, the exact string on screen. The Hindi is a specialist's draft, waiting for a
 // Hindi-speaking lawyer: the formal आप, the danda, Western digits, English names in Latin script.
 import type { Lang } from "./display.ts";
-import { wordsOf } from "./words-core.ts";
+import { wordsOf, type Hindi } from "./words-core.ts";
 import type { ErrorCode } from "./words-errors.ts";
 
 /** The codes a failed start brings to the window (H18). */
@@ -47,4 +47,4 @@ export const startupWords = (lang: Lang, code: StartupCode): string =>
   startup(lang, STARTUP_WORDS[code]);
 
 /** Every key, for the banned-words screen in the tests. */
-export const startupWordList: Readonly<Record<StartupKey, string>> = HI;
+export const startupWordList: Hindi<StartupKey> = HI;

@@ -22,9 +22,9 @@ export type Entry = {
  * 1200 px breakpoints, at the room's least height (--window-min-h). */
 export const DESKTOP = { width: 1100, height: 600 } as const;
 
-/** An entry's current text in both languages. */
+/** An entry's current text in both languages; null Hindi while its words file has none yet (hi: later). */
 export const currentOf = (e: Entry): Current => ({
   id: e.id,
   en: e.words.text("en"),
-  hi: e.words.text("hi"),
+  hi: e.words.later ? null : e.words.text("hi"),
 });
