@@ -36,3 +36,9 @@ export function startOf(
   if (asked === null || asked <= 0 || queued) return null;
   return before !== null && before > asked ? null : asked;
 }
+
+/** Whether the thread's turn waits behind another conversation of the matter (the header's `queued`). */
+export const pickQueued = (v: StreamView | undefined): boolean => {
+  const status = v?.header?.header?.status;
+  return typeof status === "object" && status.queued !== undefined;
+};
