@@ -48,10 +48,9 @@ const STEPS: ViewEntry[] = [
 async function violations(scene: string): Promise<string[]> {
   const results = await axe.run(document, {
     resultTypes: ["violations"],
-    // landmark-unique: the late step is a turn of its own, so the thread shows two exchanges, and every exchange's
-    // sections share their names ("Your question", "Clauseo's answer"): true of any thread of two exchanges, a
-    // follow-up for the thread's landmarks, not for Versions
-    rules: { "color-contrast": { enabled: false }, "landmark-unique": { enabled: false } },
+    // landmark-unique stays on: the late step is a turn of its own, so the thread shows two exchanges, each answer
+    // named with its step's time ("Clauseo's answer, 12:05 pm")
+    rules: { "color-contrast": { enabled: false } },
   });
   return results.violations.map(
     (v) => `${scene}: ${v.id} at ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`,

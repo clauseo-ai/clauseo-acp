@@ -9,7 +9,7 @@ import { useRoom } from "@clauseo/components/clauseo/room-scope.ts";
 import { Thread } from "@clauseo/components/clauseo/thread.tsx";
 import { th } from "@clauseo/components/lib/words-thread.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
-import { useEntry, useStreamPart, useViewStore } from "../../store/hooks.ts";
+import { useStreamPart, useViewStore } from "../../store/hooks.ts";
 import type { StreamView } from "../../store/view.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type { EntryId, StreamId, Timestamp, ViewEntry } from "../../transport/protocol.ts";
@@ -24,47 +24,71 @@ import { SteerNotesOf } from "./steer-rows.tsx";
 /** The composer's limit warning, carried in this chunk with the stop's note (limits/limit-warning.tsx loads it). */
 export { WarningNote } from "./limit-warning-note.tsx";
 
-/** The answer's meta line: "Clauseo", with its turn's time once the turn's step is in (the step's `ts`), alone
- * before it. */
-function AnswerWho({ time }: { time: Timestamp | null }) {
-  const w = useWords();
-  // "today" as the line first showed: no clock runs to move it
-  const [now] = useState(Date.now);
-  return <Who name={w.t("Clauseo")} time={time === null ? undefined : stamp(w.lang, time, now)} />;
-}
-
 const STEP = "step:";
 
-/** A live exchange's meta line, reading only its turn's step, so a flush of the answer's text doesn't render it. */
-function LiveAnswerWho({ ids, stream }: { ids: readonly EntryId[]; stream: StreamId }) {
-  const step = ids.find((id) => id.startsWith(STEP));
-  const entry = useEntry(useViewStore(), stream, step ?? STEP);
-  return <AnswerWho time={entry?.step?.ts ?? null} />;
+const timeIn = (e: ViewEntry | undefined): Timestamp | null =>
+  e?.user_message?.ts ?? e?.step?.ts ?? null;
+
+/** The time of a question or a step, by id, from an older page or the window; null with no id or while not in. A
+ * number, so a flush that leaves it as it was renders nothing. */
+function useTimeOf(
+  id: EntryId | undefined,
+  stream: StreamId,
+  paged: ReadonlyMap<EntryId, ViewEntry>,
+): Timestamp | null {
+  const pick = useMemo(
+    () => (v: StreamView | undefined) => (id === undefined ? null : timeIn(v?.entries.get(id))),
+    [id],
+  );
+  const live = useStreamPart(useViewStore(), stream, pick);
+  const page = id === undefined ? undefined : paged.get(id);
+  return page === undefined ? live : timeIn(page);
 }
 
-/** One exchange: the question's section and the answer's. The room's named nodes for the question and the answer
- * (the thread's scroll and its pinned question measure them) go on the latest exchange only. */
+/** One exchange: the question's section and the answer's, each named with its time so two exchanges' sections never
+ * share a name (axe's landmark-unique): the question's `ts`, and the answer's step's `ts`, the time it ended. A
+ * running answer has no step yet and keeps the plain name ("Clauseo's answer"): only one answer runs at a time. The
+ * answer's meta line shows the same time. The room's named nodes for the question and the answer (the thread's scroll
+ * and its pinned question measure them) go on the latest exchange only. Its rows are its props: a time coming in
+ * renders the sections, not the rows. */
 function Sections({
   question,
   answer,
-  who,
+  asked,
+  step,
+  stream,
+  paged,
   latest,
 }: {
   question: ReactNode | null;
   answer: ReactNode;
-  /** The answer's meta line. */
-  who: ReactNode;
+  /** The question's id and its step's, for their times. */
+  asked: EntryId | undefined;
+  step: EntryId | undefined;
+  stream: StreamId;
+  paged: ReadonlyMap<EntryId, ViewEntry>;
   latest: boolean;
 }) {
   const w = useWords();
   const { nodes } = useRoom();
+  // "today" as the sections first showed: no clock runs to move it
+  const [now] = useState(Date.now);
+  const askedAt = useTimeOf(asked, stream, paged);
+  const endedAt = useTimeOf(step, stream, paged);
+  const at = (ts: Timestamp | null) => (ts === null ? null : stamp(w.lang, ts, now));
+  const askedTime = at(askedAt);
+  const endedTime = at(endedAt);
   return (
     <>
       {question !== null && (
         <section
           className="step step-question"
           ref={latest ? nodes.slot("questionStep") : undefined}
-          aria-label={th(w.lang, "Your question")}
+          aria-label={
+            askedTime === null
+              ? th(w.lang, "Your question")
+              : th(w.lang, "Your question, {time}", { time: askedTime })
+          }
         >
           {question}
         </section>
@@ -73,11 +97,15 @@ function Sections({
         <section
           className="step step-answer"
           ref={latest ? nodes.slot("answerStep") : undefined}
-          aria-label={th(w.lang, "Clauseo's answer")}
+          aria-label={
+            endedTime === null
+              ? th(w.lang, "Clauseo's answer")
+              : th(w.lang, "Clauseo's answer, {time}", { time: endedTime })
+          }
         >
           {/* the design's meta line opens each answer: "Clauseo", and its turn's time once the step is in */}
           <div className="meta meta-live" ref={latest ? nodes.slot("meta") : undefined}>
-            {who}
+            <Who name={w.t("Clauseo")} time={endedTime ?? undefined} />
           </div>
           {answer}
         </section>
@@ -134,7 +162,6 @@ const LiveExchange = memo(
     // a steer's mark in the answer (a user message there) is where a tool call can carry on in the background
     const notes = rest.some((id) => id.startsWith(USER)) && rest.some((id) => id.startsWith(TOOL));
     const step = rest.find((id) => id.startsWith(STEP));
-    const pagedStep = step === undefined ? undefined : paged.get(step)?.step;
     return (
       <Sections
         question={
@@ -150,13 +177,10 @@ const LiveExchange = memo(
             answer
           )
         }
-        who={
-          pagedStep !== undefined ? (
-            <AnswerWho time={pagedStep.ts} />
-          ) : (
-            <LiveAnswerWho ids={rest} stream={stream} />
-          )
-        }
+        asked={asked ? ids[0] : undefined}
+        step={step}
+        stream={stream}
+        paged={paged}
         latest={latest}
       />
     );

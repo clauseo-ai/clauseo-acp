@@ -43,6 +43,10 @@ const HI = {
   // who said each row, for assistive technology ("You" is words.ts's)
   "Your question": "आपका प्रश्न",
   "Clauseo's answer": "Clauseo का उत्तर",
+  // the same, with the clock time each began (the question's) or ended (the answer's step), so every exchange's
+  // sections have names of their own; the plain ones above where no time is known yet
+  "Your question, {time}": "आपका प्रश्न, {time}",
+  "Clauseo's answer, {time}": "Clauseo का उत्तर, {time}",
   // content the thread can't show: a named attachment, or anything else
   "Attached: {name}": "संलग्न: {name}",
   "Something here can't be shown in the thread.": "यहाँ का कुछ हिस्सा बातचीत में नहीं दिखाया जा सकता।",
