@@ -19,7 +19,20 @@ const tracked = vi.hoisted(() => ({
   on: false,
   roots: [] as WeakRef<object>[],
   numberings: [] as WeakRef<object>[],
+  caches: [] as { size(): number }[],
 }));
+// Every cache made, in order: createAnswer's first is its mdast cache, `trees` (answer.ts)
+vi.mock("./cache.ts", async (original) => {
+  const real = await original<typeof import("./cache.ts")>();
+  return {
+    ...real,
+    createCache: <V,>() => {
+      const cache = real.createCache<V>();
+      tracked.caches.push(cache);
+      return cache;
+    },
+  };
+});
 vi.mock("./parse.ts", async (original) => {
   const real = await original<typeof import("./parse.ts")>();
   return {
@@ -168,17 +181,24 @@ test("no footnote numbering outlives its update: a note's view keeps only its ow
   expect(answer.update(NOTES, false)).toBe(views);
 });
 
-test("after the final render, and its views' hast read again, no block's mdast is kept", async () => {
+test("after the final render, and its views' hast read again, no block's mdast is kept", () => {
+  tracked.caches.length = 0;
   const answer = createAnswer("t");
+  const trees = tracked.caches[0];
+  if (trees === undefined) throw new Error("createAnswer made no cache");
   for (const text of prefixes(ANSWER)) answer.update(text, true);
+  // while it streams, the cache holds the tail's parses
+  expect(trees.size()).toBeGreaterThan(0);
   tracked.roots.length = 0;
   tracked.on = true;
   const views = answer.update(ANSWER, false);
   for (const view of viewsOf(views)) shownHast(view);
   tracked.on = false;
-  // The final render parsed the last block again, and every read of a view's hast parsed its input.
+  // The final render parsed the last block again, and every read of a view's hast parsed its input
   expect(tracked.roots.length).toBeGreaterThan(9);
-  expect(await aliveAfterGc(tracked.roots)).toBe(0);
+  // ... and none of those parses is kept: the mdast cache is empty. Read from the cache itself, not from GC,
+  // which may keep the last object alive a while (a WeakRef check failed 1 of N in CI, group run 41714510343)
+  expect(trees.size()).toBe(0);
   expect(answer.update(ANSWER, false)).toBe(views);
 });
 

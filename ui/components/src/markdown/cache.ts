@@ -28,6 +28,10 @@ export function createCache<V>() {
         for (const key of map.keys()) if (!used.has(key)) map.delete(key);
       used = new Set();
     },
+    /** How many entries it holds (what a test reads to see that nothing is kept, rather than waiting on GC). */
+    size(): number {
+      return map.size;
+    },
     /** Forget every entry but those of `keys`, whatever this update used (sweep's place for a strict cache). */
     retain(keys: ReadonlySet<string>) {
       for (const key of map.keys()) if (!keys.has(key)) map.delete(key);
