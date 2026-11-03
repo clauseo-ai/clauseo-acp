@@ -116,6 +116,9 @@ crates/matters/src/write.rs - clippy::disallowed_methods
 crates/matters/tests/matters/support.rs - clippy::disallowed_methods
 crates/matters/src/walk/tests.rs symlink clippy::disallowed_methods
 crates/matters/benches/common/mod.rs fs_setup clippy::disallowed_methods
+# matters' checkpoint_cost example: its clock, and its fixture writes (in checkpoint_cost/fixture.rs).
+crates/matters/examples/checkpoint_cost/main.rs now clippy::disallowed_methods
+crates/matters/examples/checkpoint_cost/main.rs fixture clippy::disallowed_methods
 crates/matters/src/fsync.rs sync_dir clippy::unnecessary_wraps
 crates/matters/src/fsync.rs barrier clippy::unnecessary_wraps
 crates/matters/src/fsync.rs full_flush clippy::unnecessary_wraps
