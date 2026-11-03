@@ -365,7 +365,7 @@ impl HostConfig {
         self
     }
 
-    /// The profile hook set, for tests of a caller's wiring (`crates/desktop`'s `host_config`).
+    /// The profile hook set, for tests of a caller's wiring (`crates/desktop`'s `with_profile`).
     #[cfg(feature = "test-support")]
     pub fn profile_hook(&self) -> &dyn ProfileHook {
         self.profile.as_ref()

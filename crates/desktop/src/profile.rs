@@ -10,13 +10,16 @@ use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use futures::future::Either;
 
 use clauseo_host::{McpServer, ProfileHook};
-use clauseo_process::{AsyncIoTimer, PassthroughLauncher, SpawnOptions};
+use clauseo_process::{AsyncIoTimer, PassthroughLauncher, SpawnOptions, Timer as _};
 use clauseo_profile::skills::stetdoc;
 use clauseo_profile::{
-    BrowserSidecars, ClauseoProfile, ProfileError, ProfilePaths, ProfileServer, SkillWrite,
-    SkillsWritten,
+    BrowserSidecars, ClauseoProfile, ProfileError, ProfilePaths, ProfileServer, SkillSource,
+    SkillWrite, SkillsWritten,
 };
 use clauseo_protocol::{AgentId, AgentKind};
 use clauseo_settings::Locations;
@@ -43,12 +46,18 @@ impl fmt::Display for BuildError {
     }
 }
 
-/// The launch profile as the host's hook: the profile, built once, and whether stetdoc was
-/// found (only then does its folder go on the agents' `PATH`).
+/// How long loading stetdoc's skill may take at start-up, both runs together (`--version`, then
+/// `skills get core` when the cached skill is stale). The host starts after it, and every
+/// command waits for the host, so this bounds how long a slow stetdoc delays the app.
+pub(crate) const STETDOC_START_LIMIT: Duration = Duration::from_secs(3);
+
+/// The launch profile as the host's hook: the profile, built once, and whether stetdoc's folder
+/// goes on the agents' `PATH` (stetdoc was found, its skill loaded, and its folder holds no
+/// other program).
 #[derive(Debug, Clone)]
 pub(crate) struct DesktopProfile {
     profile: ClauseoProfile,
-    stetdoc_found: bool,
+    prepend_stetdoc: bool,
 }
 
 impl DesktopProfile {
@@ -69,40 +78,117 @@ impl DesktopProfile {
         let exe = std::env::current_exe().map_err(BuildError::Exe)?;
         let found = stetdoc_program(path);
         let paths = paths_for(locations, exe, found.clone())?;
-        let skill = found.as_deref().and_then(|program| {
-            let launcher = PassthroughLauncher::new(SpawnOptions::new());
-            let loaded = async_io::block_on(stetdoc::load_skill(
-                &launcher,
-                &AsyncIoTimer,
-                program,
-                &paths.claude_skills(),
-            ));
-            loaded
-                .map_err(|err| tracing::warn!(%err, "stetdoc's skill is left out"))
-                .ok()
-        });
+        let skill = found
+            .as_deref()
+            .and_then(|program| load_stetdoc_skill(program, &paths.claude_skills()));
+        let prepend = skill.is_some() && found.as_deref().is_some_and(alone_in_its_folder);
         let (profile, refused) = ClauseoProfile::new(paths, None).with_builtin_skills(skill);
         for err in refused {
             tracing::warn!(%err, "a skill is left out of the profile");
         }
-        Ok(Self::new(profile, found.is_some()))
+        Ok(Self::new(profile, prepend))
     }
 
-    /// The hook over `profile`, built and rendered already.
-    pub(crate) fn new(profile: ClauseoProfile, stetdoc_found: bool) -> Self {
+    /// The hook over `profile`, built and rendered already; `prepend_stetdoc` says whether
+    /// stetdoc's folder may go on the agents' `PATH`.
+    pub(crate) fn new(profile: ClauseoProfile, prepend_stetdoc: bool) -> Self {
         Self {
             profile,
-            stetdoc_found,
+            prepend_stetdoc,
         }
     }
 
-    /// The folder for `HostConfig::with_agent_path_prepend`: stetdoc's, when stetdoc was found
-    /// and its folder holds no other program (`ProfilePaths::path_prepend`).
+    /// The folder for `HostConfig::with_agent_path_prepend`: stetdoc's, when it may go first
+    /// and holds no sidecar or the app (`ProfilePaths::path_prepend`).
     pub(crate) fn path_prepend(&self) -> Option<PathBuf> {
-        if !self.stetdoc_found {
+        if !self.prepend_stetdoc {
             return None;
         }
         self.profile.path_prepend().map(Path::to_path_buf)
+    }
+}
+
+/// stetdoc's skill from `program`, within [`STETDOC_START_LIMIT`] for both runs. On the
+/// deadline the run is dropped, and with it its process handle, which kills stetdoc's tree. A
+/// failure or the deadline leaves the skill out with a warning, and stetdoc is then treated as
+/// absent (its folder goes on no `PATH`).
+fn load_stetdoc_skill(program: &Path, cached: &Path) -> Option<SkillSource> {
+    let launcher = PassthroughLauncher::new(SpawnOptions::new());
+    let loaded = async_io::block_on(async {
+        let load = std::pin::pin!(stetdoc::load_skill(
+            &launcher,
+            &AsyncIoTimer,
+            program,
+            cached
+        ));
+        let deadline = std::pin::pin!(AsyncIoTimer.after(STETDOC_START_LIMIT));
+        match futures::future::select(load, deadline).await {
+            Either::Left((loaded, _)) => Some(loaded),
+            Either::Right(((), _)) => None,
+        }
+    });
+    match loaded {
+        Some(Ok(skill)) => Some(skill),
+        Some(Err(err)) => {
+            tracing::warn!(%err, "stetdoc's skill is left out; stetdoc is treated as absent");
+            None
+        }
+        None => {
+            tracing::warn!(
+                limit_secs = STETDOC_START_LIMIT.as_secs(),
+                "stetdoc took too long and was stopped; it is treated as absent"
+            );
+            None
+        }
+    }
+}
+
+/// Whether `program` is the only program in its folder. A folder found on `PATH` that holds
+/// others (`~/.cargo/bin`, `/usr/local/bin`) must not go first on the agents' `PATH`, ahead of
+/// the system's folders (`ProfilePaths::path_prepend`: it holds stetdoc alone); the agent still
+/// finds stetdoc through the `PATH` it inherits. An unreadable folder counts as shared.
+fn alone_in_its_folder(program: &Path) -> bool {
+    let Some(folder) = program.parent() else {
+        return false;
+    };
+    let Ok(entries) = std::fs::read_dir(folder) else {
+        return false;
+    };
+    let shared = entries.flatten().any(|entry| {
+        let path = entry.path();
+        path.file_name() != program.file_name() && is_program(&path)
+    });
+    if shared {
+        tracing::warn!(
+            folder = %folder.display(),
+            "stetdoc's folder holds other programs: it does not go first on the agents' PATH"
+        );
+    }
+    !shared
+}
+
+/// Whether `path` is a file the OS would run: on Unix, a file with an execute bit; on Windows,
+/// a file whose extension is in `PATHEXT` (default `.COM;.EXE;.BAT;.CMD`).
+fn is_program(path: &Path) -> bool {
+    let Ok(meta) = std::fs::metadata(path) else {
+        return false;
+    };
+    if !meta.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        meta.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        let exts = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_owned());
+        path.extension().is_some_and(|ext| {
+            let ext = format!(".{}", ext.to_string_lossy());
+            exts.split(';')
+                .any(|known| known.eq_ignore_ascii_case(&ext))
+        })
     }
 }
 
@@ -136,8 +222,11 @@ pub(crate) fn stetdoc_program(path: Option<&OsStr>) -> Option<PathBuf> {
     }
 }
 
-/// The first file named `name` (with the OS's executable suffix) in an absolute folder of
-/// `path`. A relative folder is skipped: the program path must be absolute.
+/// The first program named `name` (with the OS's executable suffix, `.exe` on Windows) in an
+/// absolute folder of `path`, as `which` finds it: a file that is not a program
+/// ([`is_program`], no execute bit on Unix) is skipped and the walk goes on. A relative folder
+/// is skipped too: the program path must be absolute. Only `.exe` is looked for on Windows,
+/// since stetdoc is started with no shell.
 #[expect(
     clippy::disallowed_methods,
     reason = "debug builds look stetdoc up on PATH until U13 bundles it; xtask's first_on_path is not reachable from the app"
@@ -147,7 +236,7 @@ pub(crate) fn first_on_path(name: &str, path: &OsStr) -> Option<PathBuf> {
     std::env::split_paths(path)
         .filter(|dir| dir.is_absolute())
         .map(|dir| dir.join(&file))
-        .find(|candidate| candidate.is_file())
+        .find(|candidate| is_program(candidate))
 }
 
 /// `server` as the host sends it.
