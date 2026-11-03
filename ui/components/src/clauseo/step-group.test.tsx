@@ -127,3 +127,25 @@ test("the line is a button that opens its rows in place and folds them, with ari
   await act(async () => line.click());
   expect(host.querySelector("ol")).toBeNull();
 });
+
+test("a group whose every step is over with none finished says what was tried once, as its trouble, with no words before it", async () => {
+  host = document.createElement("div");
+  document.body.append(host);
+  root = createRoot(host);
+  await act(async () =>
+    root!.render(
+      <StepGroup
+        id="tool_call:1"
+        kinds={["fetch"]}
+        line=""
+        trouble="Tried to read indiankanoon.org online."
+      >
+        {null}
+      </StepGroup>,
+    ),
+  );
+  const line = host.querySelector("button")!;
+  expect(line.textContent).toBe("Tried to read indiankanoon.org online.");
+  expect(host.querySelector(".step-group-now")).toBeNull();
+  expect(host.querySelector('[data-testid="step-group-trouble"] svg')).not.toBeNull();
+});

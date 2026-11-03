@@ -65,11 +65,9 @@ const HI = {
   // past the three kinds done most
   "And 1 more.": "और 1 काम।",
   "And {n} more.": "और {n} काम।",
-  // what failed or was stopped stays on the folded line: a group of one, or one of many
-  "It failed.": "यह विफल रहा।",
+  // what failed or was stopped stays on the folded line, one of many (a group of one says what it tried, once)
   "1 of them failed.": "उनमें से 1 विफल रहा।",
   "{n} of them failed.": "उनमें से {n} विफल रहे।",
-  "It was stopped.": "इसे रोका गया।",
   "1 of them was stopped.": "उनमें से 1 रोका गया।",
   "{n} of them were stopped.": "उनमें से {n} रोके गए।",
   // a step a steer moved to the background stays told on the folded line (its row says "In the background", U7's).

@@ -62,12 +62,14 @@ export function StepGroup({
           ))}
         </span>
         <span className="step-group-words">
-          <span className="step-group-now">
-            <Say>{line}</Say>
-          </span>
+          {line !== "" && (
+            <span className="step-group-now">
+              <Say>{line}</Say>
+            </span>
+          )}
           {more !== "" && (
             <>
-              {" "}
+              {line !== "" && " "}
               <span className="step-group-more">
                 <Say>{more}</Say>
               </span>
@@ -75,7 +77,7 @@ export function StepGroup({
           )}
           {trouble !== "" && (
             <>
-              {" "}
+              {(line !== "" || more !== "") && " "}
               <span className="step-group-trouble" data-testid="step-group-trouble">
                 {/* the break marks it before it's read, as on its row */}
                 <IconBreak size={14} className="step-trouble-icon" />

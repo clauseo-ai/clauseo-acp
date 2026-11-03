@@ -182,7 +182,7 @@ export const UTC: Entry[] = [
     call("move"),
   ]),
   // what failed or was stopped, kept on the folded line
-  folded("UTC-38", "It failed.", [call("fetch", "failed", SITE)]),
+  // UTC-38 and UTC-41 ("It failed.", "It was stopped.") are gone: a group of one that failed says what it tried, once
   folded("UTC-39", "1 of them failed.", [
     call("read", "completed", LEASE),
     call("fetch", "failed", SITE),
@@ -191,7 +191,6 @@ export const UTC: Entry[] = [
     call("read"),
     ...many(2, () => call("fetch", "failed", SITE)),
   ]),
-  folded("UTC-41", "It was stopped.", [call("read", "cancelled", LEASE)]),
   folded("UTC-42", "1 of them was stopped.", [call("read"), call("read", "cancelled", LEASE)]),
   folded("UTC-43", "{n} of them were stopped.", [
     call("read"),
