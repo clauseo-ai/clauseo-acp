@@ -35,10 +35,10 @@ pub(crate) enum ExtractError {
     Escapes(String),
 }
 
-/// Unpacks `archive` (the archive's bytes, already checked) into `dest` (made if missing), dropping each entry's first path part
-/// (the archive's top folder). Symbolic and hard links are skipped, as is any entry that is not
-/// a file or a folder. An absolute, drive or `..` entry fails the whole unpack. On Unix a file
-/// with any exec bit gets `0o755`, others `0o644`.
+/// Unpacks `archive` (the archive's bytes, already checked) into `dest` (made if missing),
+/// dropping each entry's first path part (the archive's top folder). Symbolic and hard links
+/// are skipped, as is any entry that is not a file or a folder. An absolute, drive or `..` entry
+/// fails the whole unpack. On Unix a file with any exec bit gets `0o755`, others `0o644`.
 pub(crate) fn extract(archive: &[u8], kind: ArchiveKind, dest: &Path) -> Result<(), ExtractError> {
     std::fs::create_dir_all(dest)?;
     match kind {

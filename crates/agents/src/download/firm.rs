@@ -151,3 +151,6 @@ pub(crate) fn copy_from_bundle(
     let part = part_path(&job.dest);
     write_checked(job, &part, file, &source, cancel, progress, &at)
 }
+
+#[cfg(test)]
+mod tests;
