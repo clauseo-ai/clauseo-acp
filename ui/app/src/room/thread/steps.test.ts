@@ -1,6 +1,7 @@
 // The step group's model and words: which rows fold into a group, the folded line's summary for each mix of kinds,
 // what failed kept on it, each row's words, and the paper named by its file, its folder kept for the hover.
 import { stepLive } from "@clauseo/components/lib/words-steps-live.ts";
+import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { steps } from "@clauseo/components/lib/words-steps.ts";
 import { describe, expect, test } from "vitest";
 import { agentText, header, toolCall } from "../../testing/stream-script.ts";
@@ -182,8 +183,9 @@ describe("friendly names", () => {
     expect(markOf("en", call("read", "failed"))).toBe("Failed");
     expect(markOf("en", call("read", "cancelled"))).toBe("Stopped");
     expect(markOf("en", call("read", "pending"))).toBe(steps("en", "Waiting"));
+    // the row's word is U7's, one string for it
     expect(markOf("en", call("read", "in_progress", { background: { steer: "m" } }))).toBe(
-      steps("en", "In the background"),
+      mt("en", "In the background"),
     );
     expect(markOf("en", call("read"))).toBeNull();
     // a row that didn't finish says what it was doing

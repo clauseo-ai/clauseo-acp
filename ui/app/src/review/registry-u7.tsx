@@ -278,7 +278,13 @@ export const U7: Entry[] = [
     id: "U7-26",
     words: matterWords("In the background"),
     screen: "matters/steer-aside",
-    render: (lang) => over(asideScene(lang)),
+    // the word is on the call's row, in its step group: opened (UTC)
+    render: (lang) => (
+      <RoomClicking
+        host={() => queueHost(asideScene(lang))}
+        clicks={['[data-testid="step-group"] button']}
+      />
+    ),
   },
   {
     id: "U7-27",

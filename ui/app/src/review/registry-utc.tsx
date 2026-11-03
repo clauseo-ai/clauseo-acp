@@ -98,9 +98,7 @@ export const UTC: Entry[] = [
   opened("UTC-16", "Did one other thing.", [call("other")]),
   // a row's state
   opened("UTC-17", "Waiting", [call("read", "completed", LEASE), call("edit", "pending", LEASE)]),
-  opened("UTC-18", "In the background", [
-    call("read", "in_progress", { ...LEASE, background: true }),
-  ]),
+  // UTC-18 was the row's "In the background": that word is U7-26's, one id for it
   // the folded line, one and many for each kind
   folded("UTC-19", "1 paper read.", [call("read", "completed", LEASE)]),
   folded(
@@ -208,4 +206,16 @@ export const UTC: Entry[] = [
   now("UTC-59", "Running a task.", [call("execute", "in_progress")]),
   now("UTC-60", "Thinking it through.", [call("think", "in_progress")]),
   now("UTC-61", "Working on it.", [call("other", "in_progress")]),
+  // a step a steer moved to the background, told on the folded line (its row's word is U7-26)
+  folded("UTC-62", "It went on in the background.", [
+    call("read", "completed", { ...LEASE, background: true }),
+  ]),
+  folded("UTC-63", "1 of them went on in the background.", [
+    call("search", "completed", SEARCH),
+    call("read", "completed", { ...LEASE, background: true }),
+  ]),
+  folded("UTC-64", "{n} of them went on in the background.", [
+    call("search", "completed", SEARCH),
+    ...many(2, () => call("read", "completed", { ...LEASE, background: true })),
+  ]),
 ];

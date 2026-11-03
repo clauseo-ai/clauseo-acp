@@ -5,6 +5,7 @@
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { steps, type StepKey } from "@clauseo/components/lib/words-steps.ts";
 import { stepLive } from "@clauseo/components/lib/words-steps-live.ts";
+import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { th } from "@clauseo/components/lib/words-thread.ts";
 import { stepKindOf, type StepKind } from "@clauseo/components/clauseo/tool-kinds.ts";
 import type { StreamView } from "../../store/view.ts";
@@ -144,6 +145,19 @@ export function troubleOf(lang: Lang, calls: readonly ToolCallEntry[]): string {
   return out.join(" ");
 }
 
+/** The folded line's muted words for the steps a steer moved to the background (U7); "" for none. */
+export function backgroundLine(lang: Lang, calls: readonly ToolCallEntry[]): string {
+  const n = calls.filter((c) => c.background !== undefined).length;
+  if (n === 0) return "";
+  return calls.length === 1
+    ? steps(lang, "It went on in the background.")
+    : counted(
+        lang,
+        ["1 of them went on in the background.", "{n} of them went on in the background."],
+        n,
+      );
+}
+
 /** The live line's count of the steps done so far; "" before the first. */
 export function doneSoFar(lang: Lang, calls: readonly ToolCallEntry[]): string {
   const n = calls.filter((c) => c.status === "completed").length;
@@ -200,7 +214,7 @@ export function hoverOf(entry: ToolCallEntry): string | null {
 export function markOf(lang: Lang, call: ToolCallEntry): string | null {
   if (call.status === "failed") return th(lang, "Failed");
   if (call.status === "cancelled") return th(lang, "Stopped");
-  if (call.background !== undefined) return steps(lang, "In the background");
+  if (call.background !== undefined) return mt(lang, "In the background");
   if (call.status === "pending") return steps(lang, "Waiting");
   return null;
 }
@@ -211,7 +225,8 @@ export function lineOf(lang: Lang, entries: readonly (ViewEntry | undefined)[], 
   for (const e of entries) if (e?.tool_call !== undefined) calls.push(e.tool_call);
   const kinds = kindsOf(calls).map((k) => k.kind as string);
   const trouble = troubleOf(lang, calls);
-  if (!live) return { kinds, line: summaryOf(lang, calls), more: "", trouble };
+  const aside = backgroundLine(lang, calls);
+  if (!live) return { kinds, line: summaryOf(lang, calls), more: aside, trouble };
   // the newest of what is still to finish, or a thought after the last of them
   let now: ToolCallEntry | "thought" | null = null;
   for (let i = entries.length - 1; i >= 0 && now === null; i -= 1) {
@@ -220,11 +235,11 @@ export function lineOf(lang: Lang, entries: readonly (ViewEntry | undefined)[], 
     else if (e?.tool_call !== undefined && unsettled(e.tool_call)) now = e.tool_call;
     else if (e?.tool_call !== undefined) break;
   }
-  if (now === null) return { kinds, line: summaryOf(lang, calls), more: "", trouble };
+  if (now === null) return { kinds, line: summaryOf(lang, calls), more: aside, trouble };
   return {
     kinds: now === "thought" ? ["think"] : [now.kind as string],
     line: now === "thought" ? stepLive(lang, "Thinking it through.") : doingOf(lang, now),
-    more: doneSoFar(lang, calls),
+    more: [doneSoFar(lang, calls), aside].filter((m) => m !== "").join(" "),
     trouble,
   };
 }
