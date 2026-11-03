@@ -47,20 +47,21 @@ const HI = {
   "What leaves this computer": "इस कंप्यूटर से क्या बाहर जाता है",
   "To {name}, on your plan": "{name} को, आपके प्लान से",
   // hi: later: the lines below ship in English, their Hindi null until it comes
-  "Each question, the parts of the papers it needs, and its web searches.": null,
+  // the plans' group note: what goes to each plan, said once
+  "Questions, the papers' parts they need, web searches.": null,
   // behind an info icon: the button's name, then what it holds
   "More about Brave Search": null,
   "Anthropic lists Brave Search as its web search subprocessor.": null,
   "To the websites Clauseo visits": null,
-  "More about the websites Clauseo visits": null,
-  "When Clauseo reads a page on this computer or opens one in its browser, the website sees the visit, as it sees any browser's.":
-    null,
-  // the tools' switches; the group's note and the browser's reason are the room's (words-tools.ts)
+  "About websites": null,
+  "Websites see Clauseo's visits, as they see any browser's.": null,
+  // the tools' switches; the group's note, the browser's reason and the lock's are the room's (words-tools.ts,
+  // words-tools-line.ts)
   "On the web": null,
   "Web search": null,
   "Search the web and read pages.": null,
   Browser: null,
-  "Clauseo's own browser, on this computer.": null,
+  "Runs on this computer.": null,
 } as const;
 
 /** Every string of the settings window, in English. */

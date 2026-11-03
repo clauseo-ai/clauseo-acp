@@ -1,10 +1,10 @@
 // Settings, Privacy: what leaves this computer, and who sees it (design/03-system/src/pages/settings/sections-c.tsx,
-// Privacy), holding only what is true now, icons first and in the fewest words (DESIGN.md §Icons). One row per plan
-// the window knows, its line naming the web searches each question may send; for Claude, the provider Anthropic lists
-// for its web search behind an info icon. Then a row for the websites Clauseo visits, its explanation behind an info
+// Privacy), holding only what is true now, icons first and in the fewest words (DESIGN.md §Icons). The group's note
+// says once what goes to a plan; then one row per plan the window knows, naming where; for Claude, the provider
+// Anthropic lists for its web search behind an info icon. Then a row for the websites Clauseo visits, its explanation behind an info
 // icon, unless the host's switches have both tools off. Then the tools' switches, web search and the browser, each led
 // by its glyph with the state on it, one helper line each, each flip one patch. A locked switch shows the host's value,
-// its glyph locked, and U11-07's managed line in its helper's place. While the Browser switch is on and the app has no
+// its glyph locked, and the room's lock reason, "Managed by firm", in its helper's place. While the Browser switch is on and the app has no
 // website check, the room's reason, "Not available yet", stands in its helper's place.
 // Left out until something stands behind them: Indian Kanoon's row, the row for Clauseo's anonymous counts, and the
 // anonymous counts and crash report switches.
@@ -38,7 +38,7 @@ function Dest({ kind }: { kind: AgentKind }) {
   const w = useSettingsWords();
   const name = PLAN_NAME[kind];
   return (
-    <div className="set-dest" data-testid={`dest-${kind}`}>
+    <div className="set-dest set-dest-alone" data-testid={`dest-${kind}`}>
       <p className="set-dest-to">
         <span>{w.say(w.s("To {name}, on your plan", { name }))}</span>
         {kind === "claude" && (
@@ -46,9 +46,6 @@ function Dest({ kind }: { kind: AgentKind }) {
             {w.say(w.s("Anthropic lists Brave Search as its web search subprocessor."))}
           </InfoTip>
         )}
-      </p>
-      <p className="set-dest-what">
-        {w.say(w.s("Each question, the parts of the papers it needs, and its web searches."))}
       </p>
     </div>
   );
@@ -65,12 +62,8 @@ function WebsitesDest() {
     <div className="set-dest set-dest-alone" data-testid="dest-websites">
       <p className="set-dest-to">
         <span>{w.say(w.s("To the websites Clauseo visits"))}</span>
-        <InfoTip label={w.s("More about the websites Clauseo visits")}>
-          {w.say(
-            w.s(
-              "When Clauseo reads a page on this computer or opens one in its browser, the website sees the visit, as it sees any browser's.",
-            ),
-          )}
+        <InfoTip label={w.s("About websites")}>
+          {w.say(w.s("Websites see Clauseo's visits, as they see any browser's."))}
         </InfoTip>
       </p>
     </div>
@@ -109,7 +102,7 @@ function ToolRow({
           />
         }
         label={label}
-        note={locked ? w.s("Managed by your organisation") : (reason ?? note)}
+        note={locked ? toolsLine(w.lang, "Managed by firm") : (reason ?? note)}
         checked={on}
         disabled={locked}
         onCheckedChange={(next) => ctx.chooseTool(tool, next)}
@@ -124,7 +117,11 @@ export function Privacy({ ctx }: { ctx: SectionContext }) {
   const webOff = tools !== undefined && !tools.web_search && !tools.browser;
   return (
     <>
-      <Group title={w.s("What leaves this computer")}>
+      {/* what goes to a plan, said once for every plan, as the group's note */}
+      <Group
+        title={w.s("What leaves this computer")}
+        note={w.s("Questions, the papers' parts they need, web searches.")}
+      >
         {plansOf(ctx).map((kind) => (
           <Dest key={kind} kind={kind} />
         ))}
@@ -144,7 +141,7 @@ export function Privacy({ ctx }: { ctx: SectionContext }) {
             tools={tools}
             tool="browser"
             label={w.s("Browser")}
-            note={w.s("Clauseo's own browser, on this computer.")}
+            note={w.s("Runs on this computer.")}
             reason={
               tools.browser && !websiteCheck ? toolsLine(w.lang, "Not available yet") : undefined
             }
