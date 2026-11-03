@@ -388,6 +388,27 @@ test("rows are named by their command: a list that puts another row under the hi
   expect(field().getAttribute("aria-activedescendant")).toBe(lit()?.id);
 });
 
+test("a command row's icon is hidden from assistive technology and adds no words; its text is the name and the note", async () => {
+  await mount(composer({}));
+  await focus();
+  await edit("/");
+  const icons = rows().map((r) => r.querySelector("svg"));
+  expect(icons).toHaveLength(3);
+  for (const svg of icons) {
+    expect(svg?.getAttribute("aria-hidden")).toBe("true");
+    expect(svg?.hasAttribute("aria-label")).toBe(false);
+    // muted, and the row's text colour once the row is highlighted (the row is the group)
+    expect(svg?.getAttribute("class")).toContain("group-data-highlighted:text-primary");
+  }
+  expect(rows().every((r) => r.classList.contains("group"))).toBe(true);
+  expect(rows().map((r) => r.textContent)).toEqual([
+    "/reviewReview the changes",
+    "/restartStart the session again",
+    "/compact what to keepCompact the conversation",
+  ]);
+  expect(names()).toEqual(["/review", "/restart", "/compact"]);
+});
+
 test("a polite live region says how many commands the menu opened with, then the lit one's name as the arrows move", async () => {
   await mount(composer({}));
   await focus();

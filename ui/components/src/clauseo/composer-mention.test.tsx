@@ -193,6 +193,15 @@ test("@ asks the room for its papers as it opens, says it is loading, then lists
   expect(notes()).toEqual([]);
 });
 
+test("a paper row has no icon; its name is as before", async () => {
+  const { mentions } = source();
+  await mount(composer({ mentions }));
+  await focus();
+  await edit("@");
+  expect(names()).toEqual(["Lease deed.pdf", "Board minutes.pdf", "Notice.pdf"]);
+  for (const r of rows()) expect(r.querySelector("svg")).toBeNull();
+});
+
 test("the filter narrows as the lawyer types; a query matching nothing closes it; an email address opens nothing", async () => {
   const { mentions, load } = source();
   await mount(composer({ mentions }));

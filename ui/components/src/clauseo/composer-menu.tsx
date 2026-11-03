@@ -465,7 +465,7 @@ export function ComposerMenu({
                     aria-selected={i === open.hi}
                     data-highlighted={i === open.hi ? "" : undefined}
                     data-testid={testIds?.item}
-                    className={cn(row, "items-start")}
+                    className={cn(row, "group items-start")}
                     // the field keeps the focus: a press picks, as Enter does
                     onPointerDown={(e) => {
                       e.preventDefault();
