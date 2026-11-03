@@ -77,7 +77,7 @@ to write instead.
 | `reducer_bench` | The gungraun instruction-count bench of `reducer`'s fold (Linux, CI) | none (dev: protocol, reducer, gungraun) | tauri | exists |
 | `store` | SQLite log, snapshots, blobs, receipts, writer thread | protocol, rusqlite, serde, serde_json, rmp-serde, blake3, zstd, async-channel, futures | tauri | exists |
 | `search` | `search.sqlite`, the derived FTS5 index of matter and thread titles, entries, tool titles and file names: its writes, the query text built from the lawyer's words, ranking, paging and snippets (0043) | protocol, rusqlite | tauri, host | exists |
-| `matters` | Shadow repos via gix: create and import, checkpoints, undo, restore, compare, file watching; retention after G9 | protocol, gix, notify, serde, serde_json, tracing, dunce; nix (macOS only); windows (Windows only) | tauri | exists |
+| `matters` | Shadow repos via gix: create and import, checkpoints, undo, restore, compare, file watching; retention after G9 | protocol, gix, notify, serde, serde_json, tracing, dunce, unicode-normalization; nix (macOS only); windows (Windows only) | tauri | exists |
 | `settings` | Settings schema and locations, the policy layer | serde, serde_json, serde_json_lenient, schemars; windows (Windows only); objc2-core-foundation (macOS only) | tauri | exists |
 | `process` | Spawning, graceful shutdown, process-tree kill, restart supervisor, the `Launcher` trait | protocol, async-process, async-io, futures, memchr; windows (Windows only); nix (Unix only) | tauri | exists |
 | `acp` | Wrapper over `agent-client-protocol` | protocol, agent-client-protocol, futures, async-channel, serde, serde_json, memchr | tauri, tokio | exists |

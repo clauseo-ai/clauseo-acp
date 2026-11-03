@@ -185,3 +185,32 @@ fn same_or_nested_holds_for_the_folder_its_parents_and_its_children() {
         ));
     }
 }
+
+/// Two sibling folders whose names differ only by Unicode form (`ऱ` composed, U+0931, and `र` +
+/// nukta U+093C): the refusal matches fold to NFC, so each is "the same or nested" for the
+/// other on every OS; the folder relink writes into is matched as the file system finds it, so
+/// on ext4 and NTFS, which keep the two apart, the sibling is not the matter's folder.
+#[test]
+fn a_sibling_in_another_unicode_form_is_refused_but_never_relinked() {
+    let dir = TestDir::new("refuse-forms");
+    let composed = dir
+        .path()
+        .join("\u{931}\u{93f}\u{92a}\u{94b}\u{930}\u{94d}\u{91f}");
+    let decomposed = dir
+        .path()
+        .join("\u{930}\u{93c}\u{93f}\u{92a}\u{94b}\u{930}\u{94d}\u{91f}");
+    write::create_dir_all(&composed).unwrap();
+    let apfs = decomposed.symlink_metadata().is_ok();
+    assert_eq!(apfs, cfg!(target_os = "macos"), "{}", dir.path().display());
+    if !apfs {
+        write::create_dir_all(&decomposed).unwrap();
+    }
+    assert!(same_or_nested(&composed, &decomposed));
+    assert!(same_or_nested(&decomposed, &composed));
+    assert!(check_folder(&decomposed, std::slice::from_ref(&composed)).is_err());
+    assert_eq!(
+        same_folder(&composed, &decomposed),
+        cfg!(target_os = "macos")
+    );
+    assert!(same_folder(&composed, &composed));
+}

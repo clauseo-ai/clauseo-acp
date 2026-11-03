@@ -477,5 +477,6 @@ mod allow;
 mod backstop;
 mod batch;
 mod codex;
+mod devanagari;
 mod fixtures;
 mod gaps;

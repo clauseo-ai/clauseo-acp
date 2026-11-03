@@ -105,3 +105,7 @@ mod drive_root;
 #[cfg(test)]
 #[path = "matters/papers.rs"]
 mod papers;
+
+#[cfg(test)]
+#[path = "matters/devanagari.rs"]
+mod devanagari;

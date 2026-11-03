@@ -36,9 +36,9 @@
 //!     breadth first, at most 20 000 entries, no hidden folder, no symlink followed), and a
 //!     command that holds one's name as a whole name (between the start, a folder separator,
 //!     whitespace, a quote or a shell metacharacter, and the end, whitespace, a quote or a
-//!     metacharacter; ignoring case on macOS and Windows, and Unicode form on macOS), in its text
-//!     (escaped newlines joined, `$'…'` decoded, comments kept) or in its words as the shell reads
-//!     them (quotes and escapes off: `Con""tract.docx`, `My\ Deal.docx`; and one level of
+//!     metacharacter; ignoring case on macOS and Windows, and Unicode form everywhere), in its
+//!     text (escaped newlines joined, `$'…'` decoded, comments kept) or in its words as the shell
+//!     reads them (quotes and escapes off: `Con""tract.docx`, `My\ Deal.docx`; and one level of
 //!     `sh -c` scripts), or has a word whose wildcard (`*`, `?`, `[…]`, in its last part) could
 //!     match one's name in any folder (`cp Revised/*.docx .`, `for f in *.docx`), is refused,
 //!     as is one whose words name a held file by path (a symlink, another case or form), unless

@@ -4,8 +4,9 @@
 use std::path::{Component, Path, PathBuf};
 
 use clauseo_protocol::MatterPath;
+use unicode_normalization::UnicodeNormalization;
 
-use crate::refuse::spellings;
+use crate::refuse::{Fold, keys_by};
 
 /// What shows that a file is open in another program.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,10 +18,13 @@ pub enum HeldOpen {
 }
 
 /// Whether `path` (relative to `folder`) looks open in another program, such as Word, and
-/// what shows it: an Office owner file beside it (see [`owner_names`]), checked first; on
-/// Windows also a sharing or lock violation when it exists and is opened with no sharing. A
-/// missing file with no owner file, and any other error, is `None`. One `symlink_metadata` per
-/// owner name (at most three), and on Windows one open. The rule undo and restore refuse by.
+/// what shows it: an Office owner file beside it (see [`owner_names`]), checked first, by its
+/// exact name and then, for a name that is not all ASCII, in any Unicode form
+/// ([`owner_in_another_form`]); on Windows also a sharing or lock violation when it exists and
+/// is opened with no sharing. A missing file with no owner file, and any other error, is `None`.
+/// One `symlink_metadata` per owner name (at most three), a `read_dir` of the parent for a
+/// non-ASCII name none of them finds, and on Windows one open. The rule undo and restore refuse
+/// by.
 pub fn held_open(folder: &Path, path: &MatterPath) -> Option<HeldOpen> {
     let absolute: PathBuf = path
         .as_str()
@@ -33,6 +37,9 @@ pub fn held_open(folder: &Path, path: &MatterPath) -> Option<HeldOpen> {
         .into_iter()
         .find(|owner| parent.join(owner).symlink_metadata().is_ok())
     {
+        return Some(HeldOpen::OwnerFile(owner));
+    }
+    if let Some(owner) = owner_in_another_form(parent, name) {
         return Some(HeldOpen::OwnerFile(owner));
     }
     #[cfg(windows)]
@@ -50,10 +57,12 @@ pub fn held_open(folder: &Path, path: &MatterPath) -> Option<HeldOpen> {
 }
 
 /// [`held_open`] for a path as an agent names it: absolute, or relative to `folder` (the
-/// session's working folder). The path counts only when it lies in `folder` ([`matter_path_in`]);
+/// session's working folder). The path counts only when it lies in `folder`, resolved as
+/// [`matter_path_in`] resolves it but with the folder's parts compared composed (NFC) everywhere
+/// ([`Fold::Safety`]): a match only refuses, so a folder spelled in another Unicode form counts;
 /// then the matter path it names and what shows it held open, if anything does.
 pub fn held_open_at(folder: &Path, path: &Path) -> Option<(MatterPath, HeldOpen)> {
-    let inside = matter_path_in(folder, path)?;
+    let inside = path_in(folder, path, Fold::Safety)?;
     let root = dunce::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
     held_open(&root, &inside).map(|held| (inside, held))
 }
@@ -61,16 +70,23 @@ pub fn held_open_at(folder: &Path, path: &Path) -> Option<(MatterPath, HeldOpen)
 /// The matter path `path` (absolute, or relative to `folder`) names in `folder`, or `None`
 /// when it lies outside. Both sides are resolved with `dunce::canonicalize` (symlinks, `..`,
 /// Windows' `\\?\` prefix), a missing file through its parent, and compared by components as
-/// refused folders are: ignoring case on macOS and Windows, exactly elsewhere. The rest of the
-/// path keeps the spelling the file system gave it. When either side does not resolve, the path's
+/// this OS's file system compares names ([`Fold::FileSystem`]: ignoring case on macOS and
+/// Windows, and Unicode form on macOS; byte for byte elsewhere, since ext4 and NTFS tell the
+/// forms apart and the answer lets a path count as the matter's). The rest of the path keeps the
+/// spelling the file system gave it. When either side does not resolve, the path's
 /// text is compared with the folder's instead: no `.` or `..` part, and the folder's text as a
 /// prefix. A `..` after a missing folder follows the OS, as a write through the path would:
 /// Windows drops the pair by its text (`sub/../x` is `x` even with no `sub`), so the path
 /// resolves; Unix needs `sub` to exist, so it does not, and the write would fail with ENOENT.
 pub fn matter_path_in(folder: &Path, path: &Path) -> Option<MatterPath> {
+    path_in(folder, path, Fold::FileSystem)
+}
+
+/// [`matter_path_in`] with the folder's parts compared by `fold`.
+fn path_in(folder: &Path, path: &Path, fold: Fold) -> Option<MatterPath> {
     let joined = folder.join(path);
     if let (Ok(root), Some(target)) = (dunce::canonicalize(folder), resolved(&joined)) {
-        return relative_to(&root, &target);
+        return relative_to(&root, &target, fold);
     }
     let relative = if path.is_absolute() {
         path.strip_prefix(folder).ok()?
@@ -96,11 +112,11 @@ fn resolved(path: &Path) -> Option<PathBuf> {
 }
 
 /// The matter path of the canonical `target` under the canonical `root`, compared by
-/// [`spellings`].
-fn relative_to(root: &Path, target: &Path) -> Option<MatterPath> {
+/// [`keys_by`] with `fold`.
+fn relative_to(root: &Path, target: &Path, fold: Fold) -> Option<MatterPath> {
     let parts: Vec<Component<'_>> = target.components().collect();
-    for outer in spellings(root) {
-        for key in spellings(target) {
+    for outer in keys_by(root, fold) {
+        for key in keys_by(target, fold) {
             if key.len() > outer.len() && key.starts_with(&outer) {
                 let rest = parts.get(parts.len().checked_sub(key.len() - outer.len())?..)?;
                 return MatterPath::from_relative(&rest.iter().collect::<PathBuf>());
@@ -121,6 +137,47 @@ pub(crate) fn locked(folder: &Path, paths: &[MatterPath]) -> Vec<MatterPath> {
     locked.sort_unstable_by(|a, b| a.as_str().as_bytes().cmp(b.as_str().as_bytes()));
     locked.dedup();
     locked
+}
+
+/// The owner file in `parent` that names `name` in another Unicode form, for a name that is not
+/// all ASCII: an entry starting `~$` whose composed (NFC) name, folded as [`fold_name`] does,
+/// is one of [`owner_names`] of the document's name as written, composed (NFC) or decomposed
+/// (NFD), each composed. Ext4 and NTFS tell the forms apart, so the exact stats miss an owner
+/// file that Word or a sync made in the other form (`क़` as U+0958 or as `क` + U+093C), and a
+/// write would race the program holding it. One `read_dir` of `parent`, only when the exact
+/// stats found nothing and the name holds a non-ASCII character; its first match by name.
+fn owner_in_another_form(parent: &Path, name: &str) -> Option<String> {
+    if name.is_ascii() {
+        return None;
+    }
+    let forms = [
+        name.to_owned(),
+        name.nfc().collect::<String>(),
+        name.nfd().collect::<String>(),
+    ];
+    let wanted: Vec<String> = forms
+        .iter()
+        .flat_map(|form| owner_names(form))
+        .map(|owner| fold_name(&owner))
+        .collect();
+    let mut found: Vec<String> = std::fs::read_dir(parent)
+        .ok()?
+        .flatten()
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter(|entry| entry.starts_with("~$") && wanted.contains(&fold_name(entry)))
+        .collect();
+    found.sort_unstable();
+    found.into_iter().next()
+}
+
+/// A name as the safety checks compare it: composed (NFC) everywhere, and lower case on the
+/// case-insensitive file systems (macOS, Windows).
+fn fold_name(name: &str) -> String {
+    if cfg!(any(target_os = "macos", windows)) {
+        name.to_lowercase().nfc().collect()
+    } else {
+        name.nfc().collect()
+    }
 }
 
 /// The owner files Office makes beside a file it has open: `~$` + the name, `~$` + the name

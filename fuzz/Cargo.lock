@@ -273,6 +273,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tracing",
+ "unicode-normalization",
  "windows",
 ]
 
