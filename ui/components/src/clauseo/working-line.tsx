@@ -4,11 +4,12 @@
 // one line. Its words and times change in place; no clock runs: it changes only when the host says something, and
 // nothing loops, shimmers or spins but the pen, which writes in the icon's place while Clauseo writes (pen-mark.tsx;
 // Rohan's call over the design's no-indicator rule, 2026-11). Errors stand on the same well, in concrete and never in
-// red, because red means the other side. The field below keeps what the lawyer wrote.
+// red, because red means the other side, and led by the break in the clock's place, so they look broken before
+// they're read (the icon pass, §12). The field below keeps what the lawyer wrote.
 import { lazy, Suspense, type ReactNode } from "react";
 import { late } from "../lib/late.ts";
 import { Button } from "../ui/button.tsx";
-import { IconChecking, IconFold } from "../icons/icons.tsx";
+import { IconBreak, IconChecking, IconFold } from "../icons/icons.tsx";
 import { useThreadWords } from "../lib/words-thread.ts";
 import { sentence } from "./matter.ts";
 import { PenMark } from "./pen-mark.tsx";
@@ -53,6 +54,22 @@ export type WorkingState =
       /** Optional: the error's code (an ErrorCode), when the wait is an error, set as the row's data-code. */
       code?: string;
     };
+
+/** What leads the row: the pen while Clauseo writes; the break on an error (a stop, not responding, or a wait that
+ * carries an error's code), so a broken line looks broken before it's read; the clock on every other wait. */
+function leadOf(state: WorkingState): "pen" | "break" | "wait" {
+  if ("working" in state && state.working === true) return "pen";
+  if (state.kind === "stopped" || state.kind === "retrying") return "break";
+  return state.kind === "wait" && state.code !== undefined ? "break" : "wait";
+}
+
+/** The row's lead icon, by leadOf. */
+function Lead({ state }: { state: WorkingState }) {
+  const lead = leadOf(state);
+  if (lead === "pen") return <PenMark className="working-icon working-pen" />;
+  if (lead === "break") return <IconBreak size={16} className="working-icon" />;
+  return <IconChecking size={16} className="working-icon" />;
+}
 
 type Parts = { words: string; pill: string | null; actions: ReactNode; details: string | null };
 
@@ -185,13 +202,10 @@ export function WorkingLine({
       className="working"
       data-kind={state.kind}
       data-code={state.kind === "wait" ? state.code : undefined}
+      data-lead={leadOf(state)}
       data-testid={testId}
     >
-      {"working" in state && state.working === true ? (
-        <PenMark className="working-icon working-pen" />
-      ) : (
-        <IconChecking size={16} className="working-icon" />
-      )}
+      <Lead state={state} />
       <span className="working-text" aria-hidden="true">
         <span>
           <Say>{words}</Say>

@@ -5,7 +5,7 @@
 // court yellow only where a choice waits for the lawyer's hand, everything else in concrete, and never red.
 import type { ReactNode } from "react";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible.tsx";
-import { IconChecking, IconGoodLaw, IconPaperBookPage } from "../icons/icons.tsx";
+import { IconChecking, IconGoodLaw, IconOffline, IconPaperBookPage } from "../icons/icons.tsx";
 import { cn } from "../lib/cn.ts";
 import { Who } from "./answer.tsx";
 import { keepIds } from "./matter.ts";
@@ -188,6 +188,8 @@ export function NoticeCard({
   className,
   noteFirst = false,
 }: {
+  /** The tile's lead, by what the note is (the icon pass, §8): IconQuestion for a choice waiting for the lawyer,
+   * IconTick for a finished change, the clock (IconChecking) for a wait only, such as the plan's reset. */
   icon: ReactNode;
   waiting?: boolean;
   title: string;
@@ -322,13 +324,13 @@ export function FieldNotice({
   );
 }
 
-/** A quiet band across the top of the work: what's going on in the whole room, such as being offline, and what
- * still works and what waits. */
+/** A quiet band across the top of the work: what's going on in the whole room, being offline, and what still works
+ * and what waits. It leads with the offline mark, not the clock, so it reads at a glance (the icon pass, §8). */
 export function RoomBand({ title, rows }: { title: string; rows: readonly NoticeRow[] }) {
   return (
     <section className="lim-band" aria-label={title} role="status">
       <p className="lim-band-title">
-        <IconChecking size={16} className="lim-band-icon" />
+        <IconOffline size={16} className="lim-band-icon" />
         <span className="deva-nudge">
           <Say>{title}</Say>
         </span>
