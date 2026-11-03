@@ -11,7 +11,7 @@
 // message's words changes none of those, so it renders no exchange and no row.
 import { turnRunning } from "./live.ts";
 import { askedAs, injectedTurn, outcomeOf, shapeOf } from "./steer.ts";
-import type { StreamView } from "../../store/view.ts";
+import { entryIdOf, orderOf, type StreamView } from "../../store/view.ts";
 import type { EntryId, TurnId, ViewEntry } from "../../transport/protocol.ts";
 import type { UserMessageEntryH9 } from "../../transport/h9-pending.ts";
 
@@ -72,11 +72,9 @@ export function groupExchanges(
     return ex;
   };
   const turned = (id: EntryId, turn: TurnId, at: number) => {
-    const known = byTurn.get(turn);
-    // a turn with no exchange: the window opened mid-turn (its question is on an older page) when nothing is before
-    // it; after an exchange, it is placed as an entry without a turn is
-    if (known === undefined && out.length > 0) return unturned(id, at);
-    const ex = known ?? opened(id, false, turn, at);
+    // a turn with no exchange yet: its question is on an older page, or it was asked after (a queued message that
+    // started later), so it opens one without a question, placed by its first entry
+    const ex = byTurn.get(turn) ?? opened(id, false, turn, at);
     ex.ids.push(id);
     if (ex.first === Infinity) ex.first = at;
     open = ex;
@@ -99,8 +97,14 @@ export function groupExchanges(
         else turned(id, into, at);
         return;
       }
-      // a steer sent now stopped the turn that ran as it arrived
-      if (outcomeOf(m) === "sent_now" && open !== null) open.stopped = true;
+      // a steer sent now stopped the turn that ran as it arrived; one that came as a turn had ended stopped none
+      if (
+        outcomeOf(m) === "sent_now" &&
+        open !== null &&
+        open.turn !== undefined &&
+        !ended.has(open.turn)
+      )
+        open.stopped = true;
       const again = byTurn.has(m.turn);
       const ex = opened(id, true, m.turn, at);
       ex.ids.push(id);
@@ -122,10 +126,16 @@ export function groupExchanges(
   }));
 }
 
-/** The live list's shape: its exchanges, and the window's first id (where older pages end). */
-export type Shape = { readonly exchanges: readonly Exchange[]; readonly first: EntryId | null };
+/** The list's shape: its exchanges, over the older pages' entries and the live window's ids together (a turn can
+ * start on a page and go on in the window), and the pages' entries it shows, by id (a row there shows its entry). */
+export type Shape = {
+  readonly exchanges: readonly Exchange[];
+  readonly paged: ReadonlyMap<EntryId, ViewEntry>;
+};
 
-const EMPTY: Shape = { exchanges: [], first: null };
+const NO_PAGED: ReadonlyMap<EntryId, ViewEntry> = new Map();
+const EMPTY: Shape = { exchanges: [], paged: NO_PAGED };
+const NO_OLDER: readonly ViewEntry[] = [];
 
 const USER = "user_message:";
 const userIdsOf = new WeakMap<readonly EntryId[], readonly EntryId[]>();
@@ -145,9 +155,12 @@ const sameExchange = (a: Exchange, b: Exchange) =>
   a.ids.length === b.ids.length &&
   a.ids.every((id, i) => id === b.ids[i]);
 
-/** A pick of the live list's shape, the same object while it reads the same: one per mount (useState(exchangesPick)).
- * A flush that only appends text reads the id list's identity and each user message's entry object, no more. */
-export function exchangesPick(): (v: StreamView | undefined) => Shape {
+/** A pick of the list's shape, the same object while it reads the same: one per set of older pages (useMemo). A flush
+ * that only appends text reads the id list's identity and each user message's entry object, no more. `older`: the
+ * pages' entries, oldest first; those from the window's first order on are the window's and left out. */
+export function exchangesPick(
+  older: readonly ViewEntry[] = NO_OLDER,
+): (v: StreamView | undefined) => Shape {
   let ids: readonly EntryId[] | null = null;
   let running = false;
   let seen: (ViewEntry | undefined)[] = [];
@@ -177,8 +190,13 @@ export function exchangesPick(): (v: StreamView | undefined) => Shape {
     running = run;
     seen = users.map((id) => v.entries.get(id));
     shapes = seen.map((e) => shapeOf(e?.user_message as UserMessageEntryH9 | undefined));
+    const head = v.ids[0] === undefined ? undefined : v.entries.get(v.ids[0]);
+    const below = head === undefined ? null : orderOf(head);
+    const shown = below === null ? older : older.filter((e) => orderOf(e) < below);
+    const paged =
+      shown.length === 0 ? NO_PAGED : new Map(shown.map((e) => [entryIdOf(e), e] as const));
     const built = groupExchanges(
-      v.ids.map((id) => [id, v.entries.get(id)] as const),
+      [...paged, ...v.ids.map((id) => [id, v.entries.get(id)] as const)],
       run,
     );
     // keep each exchange that reads the same, so its memoized rows don't render
@@ -187,20 +205,24 @@ export function exchangesPick(): (v: StreamView | undefined) => Shape {
       const o = before.get(ex.key);
       return o !== undefined && sameExchange(o, ex) ? o : ex;
     });
-    const first = v.ids[0] ?? null;
+    const samePaged =
+      paged.size === last.paged.size && [...paged].every(([id, e]) => last.paged.get(id) === e);
     if (
-      first === last.first &&
+      samePaged &&
       exchanges.length === last.exchanges.length &&
       exchanges.every((ex, i) => ex === last.exchanges[i])
     )
       return last;
-    return (last = exchanges.length === 0 && first === null ? EMPTY : { exchanges, first });
+    return (last =
+      exchanges.length === 0 && paged.size === 0
+        ? EMPTY
+        : { exchanges, paged: samePaged ? last.paged : paged });
   };
 }
 
-/** The question heading the newest exchange, or null. */
-export const latestAsked = (shape: Shape): EntryId | null => {
-  for (let i = shape.exchanges.length - 1; i >= 0; i -= 1)
-    if (shape.exchanges[i]!.asked) return shape.exchanges[i]!.key;
+/** The question heading the newest exchange, or null: the question pinned over the thread. */
+export const latestAsked = (exchanges: readonly Exchange[]): EntryId | null => {
+  for (let i = exchanges.length - 1; i >= 0; i -= 1)
+    if (exchanges[i]!.asked) return exchanges[i]!.key;
   return null;
 };

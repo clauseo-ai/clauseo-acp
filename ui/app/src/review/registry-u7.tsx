@@ -268,7 +268,7 @@ export const U7: Entry[] = [
   {
     id: "U7-25",
     words: matterWords(
-      "Your words at {time} came in during '{title}'. It carried on in the background, finished at {done}, and this answer uses what it found.",
+      "Your words at {time} came in before this had finished: {title}. It carried on in the background, finished at {done}, and the answer uses what it found.",
     ),
     screen: "matters/steer-aside",
     render: (lang) => over(asideScene(lang)),
