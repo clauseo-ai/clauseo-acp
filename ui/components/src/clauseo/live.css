@@ -72,6 +72,12 @@
     /* a mask reads only alpha, so any opaque tone serves */
     mask-image: linear-gradient(to right, transparent, var(--primary) 24%);
   }
+  /* by night the muted ink on the dark well loses its faded tail; the fade starts part way in, so the tail reads as it
+     does by day */
+  :root[data-theme="night"] .pen-mark {
+    /* from nothing 20% before the box's edge: the tail's first ink shows at about 45% */
+    mask-image: linear-gradient(to right, transparent -20%, var(--primary) 24%);
+  }
   .working-text {
     /* the words keep a readable column; when the time and the actions can't share their line, the actions go to a
        second line at the right rather than squeezing the words */

@@ -126,3 +126,14 @@ test("a choice waiting for the lawyer shows its question mark in the yellow tile
   expect(saved?.closest("[data-waiting]")).toBeNull();
   expect(saved?.innerHTML).toBe(markup(<IconTick size={16} />));
 });
+
+test("by night the pen's faded tail starts part way in, so it reads as it does by day", () => {
+  const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "live.css"), "utf8");
+  const at = css.indexOf(':root[data-theme="night"] .pen-mark {');
+  expect(at).toBeGreaterThan(-1);
+  const night = css.slice(at, css.indexOf("}", at));
+  // the day's fade starts from nothing; the night's from part of the ink
+  expect(night).toContain(
+    "mask-image: linear-gradient(to right, transparent -20%, var(--primary) 24%);",
+  );
+});
