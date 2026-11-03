@@ -21,6 +21,8 @@
 //!   and plain `http://` to 80 under an [`Allowlist`], a token on the agent listener, address
 //!   checks, the firm's upstream, refusals as [`Denial::Host`]. [`ports::bind_loopback`] binds
 //!   every per-launch loopback listener.
+//! - Unix: the browser's socket folder ([`BrowserSocketDir`]), `/tmp/clauseo-ab-<id>`, made
+//!   by the host for one launch, removed on drop, and swept at host start.
 //!
 //! # Interface
 //!
@@ -65,6 +67,10 @@
 //! - [`start_proxy`] with a [`ProxyConfig`] (lists, [`Upstream`], sink); the handle's ports,
 //!   `env()`, `allow` and `revoke`. [`builtin_allowlist`] per [`LoginKind`].
 //!   [`upstream_for`] routes the host's own HTTPS.
+//! - Unix: [`BrowserSocketDir::create`] (a `flock`ed lock file beside it, then one atomic
+//!   `mkdir` at 0700, checked with `lstat`), its `path`, `id` and `canonical`, and
+//!   [`BrowserSocketDir::sweep_stale`], which skips a folder whose lock a live process holds.
+//!   Drop it only after the launch's process tree has exited.
 //!
 //! # Invariants
 //!
@@ -97,7 +103,9 @@
 //! watcher), `dunce` (canonical paths without `\\?\`); the proxy's `async-executor`,
 //! `async-io`, `futures`, `blocking`, `httparse`, `url`, `psl`, `getrandom`, `base64` and
 //! `subtle`; on macOS, for the watcher, `async-process` (`log stream`) and `serde_json` (its
-//! lines); on Windows, `socket2` and `windows` (the proxy's listeners).
+//! lines); on Unix, `rustix` (the open-file limit, and the browser socket folder's effective
+//! user id, lock file and `flock`); on Windows, `socket2` and `windows` (the proxy's
+//! listeners).
 //!
 //! # Start reading
 //!
@@ -113,6 +121,8 @@
     clippy::wildcard_enum_match_arm
 )]
 
+#[cfg(unix)]
+mod browser_dir;
 mod denial;
 mod detect;
 mod error;
@@ -124,6 +134,8 @@ pub mod proxy;
 #[cfg(test)]
 mod test_support;
 
+#[cfg(unix)]
+pub use browser_dir::BrowserSocketDir;
 pub use denial::{
     Access, CappedSink, Clock, DENIAL_WINDOW, DENIALS_PER_WINDOW, Denial, DenialSink, HostRefusal,
     PathClass, Reachability, SystemClock,
