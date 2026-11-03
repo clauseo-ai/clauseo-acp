@@ -265,6 +265,22 @@ test("paused with no stop in view, the at-limit words; not paused, no limit line
   expect(send()?.disabled).toBe(false);
 });
 
+test("paused after a workspace's stop with its time: the at-limit words, never the plan's limit", async () => {
+  fixNow();
+  h = await mountRoom();
+  h.deliver([
+    reset(
+      [
+        userMessage(5, 1, "Q"),
+        limit(1, { turn: TURN, reason: "workspace_credits", resets_at: local(0, 18, 10) }),
+      ],
+      pausedHead(local(0, 18, 10)),
+    ),
+  ]);
+  expect(took()).toBe(lim("en", "Limit reached until {time}", { time: "6:10 pm" }));
+  expect(took()).not.toContain("plan's limit");
+});
+
 test("a newer question after the stop: the pause words don't take the old stop's time", async () => {
   fixNow();
   h = await mountRoom();
