@@ -47,6 +47,7 @@ import {
 import { installDevHooks, queryPatch } from "./dev-hooks.ts";
 import { detailed, fakeNext, railStates } from "./fake-next.ts";
 import type { MatterInfo, PaperSummary } from "./host-next.ts";
+import { probeThreads } from "./probe-threads.ts";
 import { connectRoom } from "./start.ts";
 import { versionsHost, versionsPageOf } from "./versions/probe-states.tsx";
 import { LOCKED, wordFiles, wordHost, wordPageOf } from "./word/probe-states.ts";
@@ -195,15 +196,12 @@ const transport = new FakeTransport({
     });
   },
   // the thread a matter lists: the host's next_query answers list_threads (the `query` above answers only the legacy
-  // HostQuery form), so ?thread=commands lists its idle thread here
+  // HostQuery form), so ?thread=permission lists its thread waiting on the lawyer, and ?thread=commands its idle one
   next: fakeNext({
     matters: () => matters,
     papers,
     location: "Documents/Clauseo",
-    threads: () =>
-      commanding
-        ? [{ thread: THREAD, matter: MATTER, agent: "claude-acp", status: "idle", seen: true }]
-        : (wording?.threads ?? []),
+    threads: () => probeThreads({ asking, commanding }, wording?.threads ?? []),
   }),
 });
 
