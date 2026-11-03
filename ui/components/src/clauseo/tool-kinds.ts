@@ -1,5 +1,5 @@
-// The kinds of step the thread draws (tool-kind-icons.tsx) and names: ACP's tool kinds, with switch_mode, unknown and
-// any kind from a newer agent drawn and counted as other.
+// The kinds of step the thread names and draws (tool-kind-icons.tsx): ACP's tool kinds, with switch_mode, unknown and
+// any kind from a newer agent counted as other (switch_mode draws a glyph of its own).
 
 /** The kinds a step is drawn for. */
 export type StepKind =

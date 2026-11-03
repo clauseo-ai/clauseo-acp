@@ -130,7 +130,7 @@ export function StepRow({
       data-kind={kind}
       data-background={background ? true : undefined}
     >
-      <ToolKindIcon kind={kind} size={14} className="step-icon" />
+      <ToolKindIcon kind={kind} failed={status === "failed"} size={14} className="step-icon" />
       <span className="step-row-text" title={hover ?? undefined}>
         <bdi>
           <Say>{text}</Say>

@@ -1,10 +1,24 @@
 // @vitest-environment happy-dom
-// The step group's parts: an icon of its own for each tool kind (other for the rest), the line a real button that
+// The step group's parts: the icon pass's glyph for each tool kind (other for the rest, the break for a failure), the line a real button that
 // opens and folds the rows with aria-expanded, a failure on the line, and a row's paper with its folder on hover.
-import { act } from "react";
+import { act, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, test } from "vitest";
+import {
+  IconBreak,
+  IconToolDelete,
+  IconToolEdit,
+  IconToolExecute,
+  IconToolFetch,
+  IconToolMove,
+  IconToolOther,
+  IconToolRead,
+  IconToolSearch,
+  IconToolSwitchMode,
+  IconToolThink,
+} from "../icons/icons.tsx";
+import type { IconProps } from "../icons/icon.tsx";
 import { StepGroup, StepRow } from "./step-group.tsx";
 import { ToolKindIcon } from "./tool-kind-icons.tsx";
 import { stepKindOf } from "./tool-kinds.ts";
@@ -19,28 +33,51 @@ afterEach(async () => {
   host = root = null;
 });
 
-const KINDS = [
-  "read",
-  "edit",
-  "delete",
-  "move",
-  "search",
-  "execute",
-  "think",
-  "fetch",
-  "other",
-] as const;
+/** Each kind and the icon pass's glyph it draws. */
+const GLYPHS: readonly [string, (p: IconProps) => ReactNode][] = [
+  ["read", IconToolRead],
+  ["edit", IconToolEdit],
+  ["delete", IconToolDelete],
+  ["move", IconToolMove],
+  ["search", IconToolSearch],
+  ["execute", IconToolExecute],
+  ["think", IconToolThink],
+  ["fetch", IconToolFetch],
+  ["switch_mode", IconToolSwitchMode],
+  ["other", IconToolOther],
+];
+const svg = (Glyph: (p: IconProps) => ReactNode, className?: string) =>
+  renderToStaticMarkup(<Glyph size={14} {...(className === undefined ? {} : { className })} />);
 
-test("each tool kind draws its own icon, hidden from assistive technology; any other kind draws other's", () => {
-  const drawn = KINDS.map((kind) => renderToStaticMarkup(<ToolKindIcon kind={kind} size={14} />));
-  expect(new Set(drawn).size).toBe(KINDS.length);
-  for (const svg of drawn) {
-    expect(svg).toContain('aria-hidden="true"');
-    expect(svg).toContain('stroke-width="1.5"');
+test("each tool kind draws its own glyph from the icon pass, hidden from assistive technology; an unknown kind draws other's, a failure the break", () => {
+  const drawn = GLYPHS.map(([kind]) =>
+    renderToStaticMarkup(<ToolKindIcon kind={kind} size={14} />),
+  );
+  expect(drawn).toEqual(GLYPHS.map(([, Glyph]) => svg(Glyph)));
+  expect(new Set(drawn).size).toBe(GLYPHS.length);
+  for (const one of drawn) {
+    expect(one).toContain('aria-hidden="true"');
+    expect(one).toContain('stroke-width="1.5"');
   }
-  const other = renderToStaticMarkup(<ToolKindIcon kind="other" size={14} />);
-  expect(renderToStaticMarkup(<ToolKindIcon kind="switch_mode" size={14} />)).toBe(other);
-  expect(renderToStaticMarkup(<ToolKindIcon kind="unknown" size={14} />)).toBe(other);
+  expect(renderToStaticMarkup(<ToolKindIcon kind="unknown" size={14} />)).toBe(svg(IconToolOther));
+  const failed = renderToStaticMarkup(<ToolKindIcon kind="read" failed size={14} />);
+  expect(failed).toBe(svg(IconBreak));
+  expect(new Set([...drawn, failed]).size).toBe(GLYPHS.length + 1);
+  // a failed row draws the break in its kind's place
+  const row = (status: string) =>
+    renderToStaticMarkup(
+      <StepRow
+        id="tool_call:1"
+        toolCall="1"
+        status={status}
+        kind="read"
+        text="Read Lease.pdf."
+        hover={null}
+        mark={null}
+      />,
+    );
+  expect(row("failed")).toContain(svg(IconBreak, "step-icon"));
+  expect(row("completed")).toContain(svg(IconToolRead, "step-icon"));
   expect(stepKindOf("fetch")).toBe("fetch");
   expect(stepKindOf("switch_mode")).toBe("other");
 });
