@@ -6,8 +6,9 @@ use clauseo_protocol::{
     LimitWindow, StaleReason, Timestamp, UnavailableReason,
 };
 
+use crate::kinds::kind_rules;
 use crate::model::{AgentState, LiveSignal, LiveStatus, Row, kind_rank};
-use crate::policy::{Action, kind_rules};
+use crate::policy::Action;
 use crate::readers::{ReadFailure, ReadOutcome};
 use crate::words::claude_live_window;
 

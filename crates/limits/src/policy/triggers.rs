@@ -3,8 +3,9 @@
 
 use clauseo_protocol::Timestamp;
 
+use crate::kinds::kind_rules;
 use crate::model::AgentState;
-use crate::policy::{Action, kind_rules};
+use crate::policy::Action;
 
 /// A window shown again reads when the last read started at least 5 minutes ago.
 const SHOWN_AFTER_MS: i64 = 5 * 60 * 1000;

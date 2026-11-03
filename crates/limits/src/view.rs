@@ -8,8 +8,9 @@ use clauseo_protocol::{
     LimitStopReason, LimitWindowView, MeterTone, Timestamp, UnavailableReason, WindowFreshness,
 };
 
+use crate::kinds::kind_rules;
 use crate::model::{AgentState, Row, STALE_AFTER_MS};
-use crate::policy::{kind_rules, next_read_at};
+use crate::policy::next_read_at;
 
 /// Used from this percentage, a window's tone is `Near`.
 const NEAR_PERCENT: f64 = 75.0;

@@ -52,11 +52,13 @@
 //!
 //! # Start reading
 //!
-//! `policy.rs` (the model's inputs and actions), then `model.rs` (the merge), `view.rs`, and
-//! `readers.rs` with `readers/paths.rs` (the install folder), `readers/run.rs` (one run under a
-//! deadline), `readers/claude.rs` and `readers/codex.rs` (with `readers/codex/map.rs`).
+//! `policy.rs` (the model's inputs and actions), `kinds.rs` (what differs per agent kind), then
+//! `model.rs` (the merge), `view.rs`, and `readers.rs` with `readers/paths.rs` (the install
+//! folder), `readers/run.rs` (one run under a deadline), `readers/claude.rs` and
+//! `readers/codex.rs` (with `readers/codex/map.rs`).
 
 mod error;
+mod kinds;
 mod model;
 mod policy;
 mod readers;
