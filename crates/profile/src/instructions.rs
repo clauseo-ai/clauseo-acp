@@ -4,7 +4,7 @@
 
 /// R21's tools part. It holds `{author}`, which [`Instructions::compose`] fills, and
 /// `{work_folder}`, which the host fills per session.
-pub const TOOLS: &str = include_str!("../assets/instructions/tools.md");
+pub const TOOLS: &str = include_str!("../assets/instructions/tools.txt");
 
 /// The token the profile fills with the author's name.
 pub const AUTHOR: &str = "{author}";
