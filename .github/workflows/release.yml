@@ -438,6 +438,25 @@ jobs:
 
       # budgets.toml's release_binary_size is the app binary alone; each sidecar is listed beside
       # it. deb_size is the .deb.
+      # minimumWebview2Version in tauri.conf.json is this runner's WebView2 major version as of
+      # when S20 landed, raised only on purpose. This line shows what the runner has now. It never
+      # fails the job.
+      - name: The runner's WebView2 version, beside minimumWebview2Version
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $id = '{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+          $keys = "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\$id",
+                  "HKLM:\SOFTWARE\Microsoft\EdgeUpdate\Clients\$id",
+                  "HKCU:\Software\Microsoft\EdgeUpdate\Clients\$id"
+          $pv = $keys | ForEach-Object { (Get-ItemProperty -Path $_ -ErrorAction SilentlyContinue).pv } |
+            Where-Object { $_ } | Select-Object -First 1
+          if (-not $pv) { $pv = 'not found' }
+          $min = (Get-Content crates/desktop/tauri.conf.json -Raw | ConvertFrom-Json).bundle.windows.minimumWebview2Version
+          "WebView2 Runtime on this runner: $pv; minimumWebview2Version: $min" |
+            Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+
+      # The sizes go to the log as well, where `gh run view --log` reads them.
       - name: Sizes to the job summary
         run: |
           set -euo pipefail
@@ -461,7 +480,7 @@ jobs:
                 esac
               done
             fi
-          } >> "$GITHUB_STEP_SUMMARY"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
 
   # The Windows exe, as built, signed (SignPath, S20a: v* only, once vars.SIGNPATH_ENABLED is
   # true; until then it passes through), then bundled into both installers without patching the

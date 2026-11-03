@@ -613,9 +613,11 @@ limit = 15.0
 unit = "MB"
 gate = "release"
 measured_by = "file size of the release binary"
-status = "unmeasured"
-measured = 6.8
-measured_on = "linux-x86_64-vm"
+# 25,872,168 bytes: usr/bin/Clauseo in the first dry run's .deb (release.yml run 41604836104, 2026-11-03).
+# Over the limit, which stays as the plan set it until Rohan decides (S20 follow-up).
+status = "measured"
+measured = 25.87
+measured_on = "linux-x86_64-gha"
 source = "doc 17 §3.4"
 
 [[budget]]
@@ -625,9 +627,10 @@ limit = 8.0
 unit = "MB"
 gate = "release"
 measured_by = "file size of the .deb"
-status = "unmeasured"
-measured = 3.1
-measured_on = "linux-x86_64-vm"
+# 11,921,922 bytes: Clauseo_0.0.0_amd64.deb from the same run.
+status = "measured"
+measured = 11.92
+measured_on = "linux-x86_64-gha"
 source = "doc 17 §3.4"
 
 [[budget]]
