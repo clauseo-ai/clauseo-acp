@@ -134,6 +134,7 @@ export const UTC: Entry[] = [
   opened("UTC-81", "Tried: {title}.", [call("other", "cancelled", titled("Check the cause list"))]),
   // a row whose state this version can't read
   opened("UTC-82", "State not known", [call("read", "unknown", COMPLAINT)]),
+  folded("UTC-83", "State not known.", [call("read", "unknown", COMPLAINT)]),
   // UTC-18 was the row's "In the background": that word is U7-26's, one id for it
   // the folded line, one and many for each kind
   folded("UTC-19", "1 paper read.", [call("read", "completed", LEASE)]),

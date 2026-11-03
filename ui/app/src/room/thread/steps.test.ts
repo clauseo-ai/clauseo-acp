@@ -281,19 +281,38 @@ describe("friendly names", () => {
     );
   });
 
-  test("a step in a state this version can't read is neither done nor failed: no break, no trouble, out of the count, the line and the row agree", () => {
+  test("a step in a state this version can't read is neither done nor failed nor running: no tense, no break, out of the counts, the line and the row agree", () => {
     const lease = {
       locations: [{ inside: { path: "papers/Lease.pdf" } }],
     } as Partial<ToolCallEntry>;
     const unknown = call("read", "unknown", lease);
+    const words = [
+      doneOf("en", unknown),
+      doneOf("en", call("other", "unknown", { title: "Check the cause list" })),
+      doneOf("en", call("search", "unknown", raw({ pattern: "notice period" }))),
+      doneOf("en", call("execute", "unknown")),
+      restOf("en", [unknown]).line,
+    ];
+    expect(words).toEqual([
+      "Lease.pdf.",
+      "Check the cause list.",
+      "'notice period'.",
+      "State not known.",
+      "State not known.",
+    ]);
+    // never the running words nor the done or tried ones
+    for (const w of words)
+      expect(w).not.toMatch(/\b\w+ing\b|^(Read|Changed|Searched|Ran|Did|Tried)\b/);
     expect(restOf("en", [unknown])).toEqual({
       kinds: ["read"],
-      line: "Reading Lease.pdf.",
+      line: "State not known.",
       trouble: "",
     });
-    expect(doneOf("en", unknown)).toBe("Reading Lease.pdf.");
+    expect(restOf("hi", [unknown]).line).toBe("स्थिति ज्ञात नहीं।");
     expect(markOf("en", unknown)).toBe("State not known");
     expect(markOf("hi", unknown)).toBe("स्थिति ज्ञात नहीं");
+    // a row nothing names says it once, with no mark after
+    expect(markOf("en", call("execute", "unknown"))).toBeNull();
     // beside one done and one failed: counted in neither
     const mixed = [call("read", "completed", lease), unknown, call("fetch", "failed")];
     expect(restOf("en", mixed)).toEqual({
