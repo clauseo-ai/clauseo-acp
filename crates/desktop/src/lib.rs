@@ -37,12 +37,12 @@
 //!   256 KB unacknowledged per window; a 5 s watchdog that fires once per stall. A window's
 //!   channel lives until the window is destroyed (`Bridge::close_window`).
 //!   `docs/decisions/0012-desktop-bridge.md` records the commands, the capability and the message
-//!   format. Never Tauri events. Opening `main`'s channel follows the limits on it
-//!   (`HostHandle::subscribe_limits`), counted and restarted like the window's other messages;
-//!   a restart sends the current view only, never the account changes it missed. The
-//!   `settings` window follows no limits.
-//! - The `main` window's native focus dispatches `RefreshLimits { agent: None, why: Shown }`
-//!   from Rust; the host throttles it. The `settings` window's focus dispatches nothing.
+//!   format. Never Tauri events. Opening `main`'s or the `settings` window's channel follows the
+//!   limits on it (`HostHandle::subscribe_limits`, `follows_limits`), counted and restarted like
+//!   the window's other messages; a restart sends the current view only, never the account
+//!   changes it missed. No other window follows the limits.
+//! - The native focus of `main` or the `settings` window dispatches
+//!   `RefreshLimits { agent: None, why: Shown }` from Rust; the host throttles it.
 //! - Both windows' scripts carry `app.security.csp` like its page, the colouring worker's
 //!   included: Tauri sends the header with `.html` only (`csp.rs`).
 //! - No command takes a path: folders come from the native dialog drawn in Rust (`dialogs.rs`),
@@ -325,17 +325,23 @@ fn open_main_window(app: &App) -> tauri::Result<()> {
     Ok(())
 }
 
-/// A window event: the `main` window's focus, the only window following the limits (the
-/// `settings` window follows none, 0028), asks the host to read the limits older than 5 minutes
-/// (`Bridge::shown`), in a task, so the event loop never waits on the host: a focus before the
-/// host has started waits in its task for the start, then dispatches once. Focus lost does
-/// nothing. Returns the task, for tests. A failed dispatch (a failed start) is dropped: the
-/// desktop has no log yet.
+/// Whether the window `label` follows the limits: `main` and the settings window (U12), whose
+/// channels `open_stream` subscribes to them and whose focus asks for a read.
+pub(crate) fn follows_limits(label: &str) -> bool {
+    label == MAIN_WINDOW || label == settings_window::SETTINGS_WINDOW
+}
+
+/// A window event: the focus of a window following the limits (`follows_limits`: `main`, and
+/// the `settings` window, whose Plan and usage shows them), asks the host to read the limits
+/// older than 5 minutes (`Bridge::shown`), in a task, so the event loop never waits on the host:
+/// a focus before the host has started waits in its task for the start, then dispatches once.
+/// Focus lost, or any other window's focus, does nothing. Returns the task, for tests. A failed
+/// dispatch (a failed start) is dropped: the desktop has no log yet.
 fn on_window_event<R: Runtime>(
     window: &tauri::Window<R>,
     event: &WindowEvent,
 ) -> Option<tauri::async_runtime::JoinHandle<()>> {
-    if window.label() != MAIN_WINDOW || !matches!(event, WindowEvent::Focused(true)) {
+    if !follows_limits(window.label()) || !matches!(event, WindowEvent::Focused(true)) {
         return None;
     }
     let app = window.app_handle().clone();

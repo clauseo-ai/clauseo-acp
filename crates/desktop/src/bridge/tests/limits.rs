@@ -1,5 +1,5 @@
-//! The limits on `main`'s channel (`open_stream` follows them there alone), and the refresh the
-//! main window's focus asks for (`on_window_event` in `lib.rs`, then `Bridge::shown`). A scripted
+//! The limits on `main`'s and the settings window's channels (`open_stream` follows them there
+//! alone), and the refresh either window's focus asks for (`on_window_event` in `lib.rs`, then `Bridge::shown`). A scripted
 //! reader stands in for the limits readers: it records each read and answers only when the test
 //! says, so no reader process starts.
 
@@ -106,76 +106,62 @@ fn next_view(messages: &Messages) -> LimitsView {
     view(messages.next_limits())
 }
 
-/// `main`'s channel gets the current view at open and then each change, and those messages
-/// count toward its acks like any other. The settings window's channel gets no limits at all:
-/// no subscription, so no view and no change, and nothing to ack (0027's amendment, 0028).
+/// `main`'s channel and the settings window's each get the current view at open and then each
+/// change, and those messages count toward each window's acks like any other. A window of any
+/// other label follows no limits (U12 opened them for Settings: 0027's amendment, 0028).
 #[test]
-fn only_main_gets_the_limits_view_then_each_change_and_acks_count_them() {
+fn main_and_settings_get_the_limits_view_then_each_change_and_acks_count_them() {
     let scratch = Scratch::with_limits("limits-windows");
     let (host, reads, _clock) = start(&scratch);
     let bridge = host.bridge();
     let (channel, main) = collector();
     block_on(bridge.open_stream(MAIN, channel)).unwrap();
-    // `main`: the view first.
-    let first = main.next_limits();
-    assert!(
-        matches!(first, HostEvent::LimitsViewChanged(_)),
-        "main's first message is not the view: {first:?}"
-    );
-    // A limits event never goes on a window other than main's, even were its feed followed
-    // there: the allow-list refuses it apart from `open_stream`'s label check.
-    let view_json = serde_json::to_string(&first).unwrap();
-    assert!(pump::AppEvents::of(MAIN).carries(Feed::Limits, &view_json));
-    assert!(
-        !pump::AppEvents::of(SETTINGS).carries(Feed::Limits, &view_json),
-        "a settings window's channel carries a limits event"
-    );
     let (channel, settings) = collector();
     block_on(bridge.open_stream(SETTINGS, channel)).unwrap();
-    let settings_window = bridge.window(SETTINGS).unwrap();
+    let (channel, other) = collector();
+    block_on(bridge.open_stream("other", channel)).unwrap();
+    // Each window following the limits: the view first.
+    for (label, messages) in [(MAIN, &main), (SETTINGS, &settings)] {
+        let first = messages.next_limits();
+        assert!(
+            matches!(first, HostEvent::LimitsViewChanged(_)),
+            "{label}'s first message is not the view: {first:?}"
+        );
+        let view_json = serde_json::to_string(&first).unwrap();
+        assert!(pump::AppEvents::of(label).carries(Feed::Limits, &view_json));
+    }
+    let other_window = bridge.window("other").unwrap();
     assert_eq!(
-        lock(&settings_window)
-            .state()
-            .feeds()
-            .restart_id(Feed::Limits),
+        lock(&other_window).state().feeds().restart_id(Feed::Limits),
         None,
-        "the settings window follows the limits"
+        "a window other than main and settings follows the limits"
     );
-    let settings_got_nothing = |after: &str| {
-        // `drain` keeps the limits messages aside and counts them: none, and nothing else.
-        assert_eq!(settings.drain(), Vec::<String>::new(), "after {after}");
-        assert_eq!(
-            settings.limits_received(),
-            0,
-            "the settings window got limits after {after}"
-        );
-        assert_eq!(
-            lock(&settings_window).state().unacked_bytes(),
-            0,
-            "the settings window has messages to ack after {after}"
-        );
-        // Not one message sent, so an ack of one is refused.
-        let refusal = block_on(bridge.ack(SETTINGS, Vec::new(), 1)).unwrap_err();
-        assert_eq!(refusal.code(), ErrorCode::CommandInvalid, "{refusal:?}");
-    };
-    settings_got_nothing("main's view");
 
     // The start-up read answers: no account is signed in, which changes the view.
     reads.answer(ReadOutcome::SignedOut);
-    let changed = next_view(&main);
-    assert!(changed.0.contains_key(&AgentKind::Claude), "{changed:?}");
-    // `main` got the change, so the settings window would have by now.
-    settings_got_nothing("the change");
-
-    // Two messages on main's channel: the view at open and the change.
-    assert_eq!(main.limits_received(), 2);
-    let window = bridge.window(MAIN).unwrap();
-    assert!(lock(&window).state().unacked_bytes() > 0);
-    let refusal = block_on(bridge.ack(MAIN, Vec::new(), 3)).unwrap_err();
-    assert_eq!(refusal.code(), ErrorCode::CommandInvalid, "{refusal:?}");
-    block_on(bridge.ack(MAIN, Vec::new(), 2)).unwrap();
-    assert_eq!(lock(&window).state().unacked_bytes(), 0);
-    assert_eq!(main.drain(), Vec::<String>::new());
+    for (label, messages) in [(MAIN, &main), (SETTINGS, &settings)] {
+        let changed = next_view(messages);
+        assert!(
+            changed.0.contains_key(&AgentKind::Claude),
+            "{label}: {changed:?}"
+        );
+        // Two messages on its channel: the view at open and the change.
+        assert_eq!(messages.limits_received(), 2, "{label}");
+        let window = bridge.window(label).unwrap();
+        assert!(lock(&window).state().unacked_bytes() > 0, "{label}");
+        let refusal = block_on(bridge.ack(label, Vec::new(), 3)).unwrap_err();
+        assert_eq!(
+            refusal.code(),
+            ErrorCode::CommandInvalid,
+            "{label}: {refusal:?}"
+        );
+        block_on(bridge.ack(label, Vec::new(), 2)).unwrap();
+        assert_eq!(lock(&window).state().unacked_bytes(), 0, "{label}");
+        assert_eq!(messages.drain(), Vec::<String>::new(), "{label}");
+    }
+    // `main` and settings got the change, so the other window would have by now.
+    assert_eq!(other.drain(), Vec::<String>::new());
+    assert_eq!(other.limits_received(), 0, "the other window got limits");
 }
 
 /// The watchdog, with the view unacknowledged for 5 s, renews the limits subscription: the new
@@ -227,11 +213,11 @@ fn a_focus_refresh_reads_limits_older_than_five_minutes() {
     );
 }
 
-/// The app's window-event handler, on the mock runtime: only the `main` window's
-/// `Focused(true)` dispatches the refresh, and it reads once. Focus lost, or the settings
-/// window's focus, starts no task.
+/// The app's window-event handler, on the mock runtime: the `main` and settings windows'
+/// `Focused(true)` each dispatch the refresh, which reads once. Focus lost, or another window's
+/// focus, starts no task.
 #[test]
-fn only_the_main_window_s_focus_dispatches_a_shown_refresh() {
+fn main_and_settings_focus_dispatch_a_shown_refresh_and_no_other_window_s() {
     let scratch = Scratch::with_limits("limits-focus-event");
     let (host, reads, clock) = start(&scratch);
     let bridge = host.bridge();
@@ -247,7 +233,11 @@ fn only_the_main_window_s_focus_dispatches_a_shown_refresh() {
             .build()
             .unwrap()
     };
-    let (main, other) = (window(crate::MAIN_WINDOW), window(SETTINGS));
+    let (main, settings, other) = (
+        window(crate::MAIN_WINDOW),
+        window(SETTINGS),
+        window("other"),
+    );
     let focus = |window: &WebviewWindow<MockRuntime>, focused: bool| {
         crate::on_window_event(&window.as_ref().window(), &WindowEvent::Focused(focused))
     };
@@ -259,12 +249,19 @@ fn only_the_main_window_s_focus_dispatches_a_shown_refresh() {
     );
     assert!(
         focus(&other, true).is_none(),
-        "the settings window's focus dispatches nothing"
+        "another window's focus dispatches nothing"
     );
     let task = focus(&main, true).expect("the main window's focus dispatches");
     block_on(task).unwrap();
     // The host starts the read as it takes the command, so the count is final once it answers.
     assert_eq!(reads.count(), 2, "one read for one focus");
+    // That read ends (its view, read later, shows it did) and is 5 minutes old by the next focus.
+    reads.answer(ReadOutcome::SignedOut);
+    let _changed = next_view(&messages);
+    clock.advance(SHOWN_AFTER);
+    let task = focus(&settings, true).expect("the settings window's focus dispatches");
+    block_on(task).unwrap();
+    assert_eq!(reads.count(), 3, "one read for the settings window's focus");
 }
 
 /// A focus before the host has started: the handler returns at once with a task that waits on
