@@ -354,6 +354,13 @@ jobs:
         if: env.BUILD == 'true' && matrix.native && !matrix.test_only
         run: cargo clippy --workspace --all-targets --target "$TARGET" -- -D warnings
 
+      # clauseo-agents alone, on its own features: the workspace build unifies them (acp turns on
+      # async-channel's std), which hid a macOS compile error in its install example (#258). The
+      # example is what the by-hand installs on the Mac mini and clauseo-win-01 run.
+      - name: clippy the agents crate on its own features, its example included
+        if: env.BUILD == 'true' && matrix.native
+        run: cargo clippy -p clauseo-agents --all-targets --target "$TARGET" -- -D warnings
+
       # The marks build's macOS code (src/marks.rs), which the speed scoreboard plays; that job
       # runs on pull requests only with the `scoreboard` label, so this keeps it compiling.
       - name: clippy the desktop crate with the marks feature

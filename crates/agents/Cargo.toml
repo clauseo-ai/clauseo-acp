@@ -16,7 +16,7 @@ test-support = ["dep:rcgen"]
 [dependencies]
 clauseo-protocol = { path = "../protocol" }
 clauseo-process = { path = "../process" }
-async-channel = { workspace = true }
+async-channel = { workspace = true, features = ["std"] }
 base64 = "0.22.1"
 dunce = { workspace = true }
 flate2 = "1.1.10"

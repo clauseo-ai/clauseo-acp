@@ -112,7 +112,12 @@ async fn follow(
 ) -> Fallible<Option<Installed>> {
     let mut last_print: Option<Duration> = None;
     loop {
-        let AgentsEvent::Install { agent: from, state } = events.recv().await? else {
+        // The channel closes only when the worker is gone.
+        let event = events
+            .recv()
+            .await
+            .map_err(|_closed| "the install worker stopped")?;
+        let AgentsEvent::Install { agent: from, state } = event else {
             continue;
         };
         if &from != agent {
