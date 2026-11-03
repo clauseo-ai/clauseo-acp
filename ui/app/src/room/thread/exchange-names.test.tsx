@@ -1,7 +1,9 @@
 // @vitest-environment happy-dom
 // Each exchange's sections are named with their times, so no two exchanges share a landmark's name (axe's
 // landmark-unique): "Your question, 4:31 pm" from the question's time, "Clauseo's answer, 4:33 pm" from its step's,
-// and the plain "Clauseo's answer" while the answer runs and has no step yet. In Hindi too.
+// and the plain "Clauseo's answer" while the answer runs and has no step yet. In Hindi too. Two exchanges in one minute
+// would share the names: the later one's sections go unnamed, so they are no landmarks and axe's landmark-unique passes.
+import axe from "axe-core";
 import { th } from "@clauseo/components/lib/words-thread.ts";
 import { afterEach, expect, test } from "vitest";
 import {
@@ -68,3 +70,41 @@ for (const lang of ["en", "hi"] as const) {
     expect(new Set(names()).size).toBe(6);
   });
 }
+
+test("a second exchange in the same minute leaves its sections unnamed, and axe's landmark-unique passes", async () => {
+  h = await mountRoom();
+  h.deliver([
+    reset(
+      [
+        ask(1, 1, "Who signed the cheque?", T1, pm(28)),
+        say(2, 1, "Mr. Mehta signed it.", T1),
+        step(3, { turn: T1, ts: pm(28) + 10_000 }),
+        ask(4, 2, "And who opened the account?", T2, pm(28) + 20_000),
+        say(5, 2, "His brother did.", T2),
+        step(6, { turn: T2, ts: pm(28) + 40_000 }),
+        ask(7, 3, "When?", T3, pm(31)),
+        say(8, 3, "On 3 May", T3),
+        step(9, { turn: T3, ts: pm(32) }),
+      ],
+      header("idle"),
+    ),
+  ]);
+  await h.settle();
+  const at = (minute: number) => ({ time: clockTime("en", pm(minute)) });
+  expect(names()).toEqual([
+    th("en", "Your question, {time}", at(28)),
+    th("en", "Clauseo's answer, {time}", at(28)),
+    null,
+    null,
+    th("en", "Your question, {time}", at(31)),
+    th("en", "Clauseo's answer, {time}", at(32)),
+  ]);
+  // an unnamed section is no region: the landmarks are the named ones alone, each once
+  const results = await axe.run(h.host, {
+    resultTypes: ["violations"],
+    runOnly: ["landmark-unique"],
+  });
+  expect(results.violations.map((v) => v.id)).toEqual([]);
+  const regions = h.host.querySelectorAll(".room-thread section[aria-label]");
+  expect(regions).toHaveLength(4);
+}, 30_000);

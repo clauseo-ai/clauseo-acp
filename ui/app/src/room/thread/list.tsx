@@ -50,7 +50,9 @@ function useTimeOf(
  * running answer has no step yet and keeps the plain name ("Clauseo's answer"): only one answer runs at a time. The
  * answer's meta line shows the same time. The room's named nodes for the question and the answer (the thread's scroll
  * and its pinned question measure them) go on the latest exchange only. Its rows are its props: a time coming in
- * renders the sections, not the rows. */
+ * renders the sections, not the rows. Two exchanges in one minute would share the names: a section whose name is the
+ * exchange before's (its question's and step's ids, `beforeAsked` and `beforeStep`; times only grow, so a repeat is always that one) goes
+ * unnamed, and so is no landmark (an unnamed section is no region). */
 function Sections({
   question,
   answer,
@@ -59,12 +61,17 @@ function Sections({
   stream,
   paged,
   latest,
+  beforeAsked,
+  beforeStep,
 }: {
   question: ReactNode | null;
   answer: ReactNode;
   /** The question's id and its step's, for their times. */
   asked: EntryId | undefined;
   step: EntryId | undefined;
+  /** The exchange before's, the same; none for the first. */
+  beforeAsked: EntryId | undefined;
+  beforeStep: EntryId | undefined;
   stream: StreamId;
   paged: ReadonlyMap<EntryId, ViewEntry>;
   latest: boolean;
@@ -78,17 +85,26 @@ function Sections({
   const at = (ts: Timestamp | null) => (ts === null ? null : stamp(w.lang, ts, now));
   const askedTime = at(askedAt);
   const endedTime = at(endedAt);
+  const askedName =
+    askedTime === null
+      ? th(w.lang, "Your question")
+      : th(w.lang, "Your question, {time}", { time: askedTime });
+  const endedName =
+    endedTime === null
+      ? th(w.lang, "Clauseo's answer")
+      : th(w.lang, "Clauseo's answer, {time}", { time: endedTime });
+  // the exchange before's times: a name it has already is left off
+  const askedBefore = at(useTimeOf(beforeAsked, stream, paged));
+  const endedBefore = at(useTimeOf(beforeStep, stream, paged));
+  const askedRepeats = askedTime !== null && askedBefore === askedTime;
+  const endedRepeats = endedTime !== null && endedBefore === endedTime;
   return (
     <>
       {question !== null && (
         <section
           className="step step-question"
           ref={latest ? nodes.slot("questionStep") : undefined}
-          aria-label={
-            askedTime === null
-              ? th(w.lang, "Your question")
-              : th(w.lang, "Your question, {time}", { time: askedTime })
-          }
+          aria-label={askedRepeats ? undefined : askedName}
         >
           {question}
         </section>
@@ -97,11 +113,7 @@ function Sections({
         <section
           className="step step-answer"
           ref={latest ? nodes.slot("answerStep") : undefined}
-          aria-label={
-            endedTime === null
-              ? th(w.lang, "Clauseo's answer")
-              : th(w.lang, "Clauseo's answer, {time}", { time: endedTime })
-          }
+          aria-label={endedRepeats ? undefined : endedName}
         >
           {/* the design's meta line opens each answer: "Clauseo", and its turn's time once the step is in */}
           <div className="meta meta-live" ref={latest ? nodes.slot("meta") : undefined}>
@@ -148,6 +160,8 @@ const LiveExchange = memo(
     stream,
     paged,
     latest,
+    beforeAsked,
+    beforeStep,
   }: {
     ids: readonly EntryId[];
     asked: boolean;
@@ -155,6 +169,9 @@ const LiveExchange = memo(
     stream: StreamId;
     paged: ReadonlyMap<EntryId, ViewEntry>;
     latest: boolean;
+    /** The exchange before's question and step, for the names it has taken (Sections). */
+    beforeAsked: EntryId | undefined;
+    beforeStep: EntryId | undefined;
   }) {
     const rest = asked ? ids.slice(1) : ids;
     const answer =
@@ -186,6 +203,8 @@ const LiveExchange = memo(
         stream={stream}
         paged={paged}
         latest={latest}
+        beforeAsked={beforeAsked}
+        beforeStep={beforeStep}
       />
     );
   },
@@ -195,6 +214,8 @@ const LiveExchange = memo(
     a.asked === b.asked &&
     a.sentNow === b.sentNow &&
     a.paged === b.paged &&
+    a.beforeAsked === b.beforeAsked &&
+    a.beforeStep === b.beforeStep &&
     sameIds(a.ids, b.ids),
 );
 
@@ -233,17 +254,22 @@ export const ThreadList = memo(function ThreadList({ transport, stream, busy }: 
       busy={(stream !== null && !landed) || older.loading}
     >
       {stream !== null &&
-        exchanges.map((g, i) => (
-          <LiveExchange
-            key={g.key}
-            ids={g.ids}
-            asked={g.asked}
-            sentNow={g.sentNow}
-            stream={stream}
-            paged={paged}
-            latest={i === exchanges.length - 1}
-          />
-        ))}
+        exchanges.map((g, i) => {
+          const b = i === 0 ? undefined : exchanges[i - 1];
+          return (
+            <LiveExchange
+              key={g.key}
+              ids={g.ids}
+              asked={g.asked}
+              sentNow={g.sentNow}
+              stream={stream}
+              paged={paged}
+              latest={i === exchanges.length - 1}
+              beforeAsked={b?.asked === true ? b.ids[0] : undefined}
+              beforeStep={b?.ids.find((id) => id.startsWith(STEP))}
+            />
+          );
+        })}
     </Thread>
   );
 });
