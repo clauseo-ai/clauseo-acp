@@ -169,7 +169,7 @@ test("Download Chrome is the consent: it sends InstallBrowser once and goes, the
   await openPopover();
   expect(words("browser")).toEqual([
     "Off. There's no Chrome on this computer.",
-    "Clauseo can download Chrome for its own use: about 200 MB from Google, once for every conversation. It needs about 1 GB free.",
+    "Clauseo can download its own Chrome from Google, about 200 MB, once for all conversations. It needs about 1 GB free.",
   ]);
   const download = inRow("browser", "tool-download");
   expect(download?.textContent).toBe("Download Chrome");
@@ -196,6 +196,50 @@ test("Download Chrome is the consent: it sends InstallBrowser once and goes, the
   expect(row("browser")?.querySelector('[role="progressbar"]')).toBeNull();
   // the phrase on the status line never changes for the download
   expect(line()?.textContent).toBe("Browser off");
+});
+
+/** Enter on the focused element, as a browser takes it: keydown, and on a button its click. */
+const pressEnter = async () => {
+  const at = document.activeElement;
+  await act(async () => {
+    at?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
+    );
+    if (at instanceof HTMLButtonElement) at.click();
+    at?.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", bubbles: true }));
+  });
+  await h!.settle();
+};
+const popup = () => document.body.querySelector<HTMLElement>('[data-testid="tool-popover"]');
+
+test("opened by a press, the popup itself takes the focus, named by the tool line's words, its button unfocused", async () => {
+  h = await open([web(off("off"))]);
+  await openPopover();
+  await h.settle();
+  expect(document.activeElement).toBe(popup());
+  expect(document.activeElement?.tagName).not.toBe("BUTTON");
+  expect(popup()?.getAttribute("tabindex")).toBe("-1");
+  expect(popup()?.getAttribute("aria-labelledby")).toBe(line()?.id);
+  expect(inRow("web_search", "tool-settings")).not.toBeNull();
+});
+
+test("opened by a key, the popup takes the focus too, and an Enter right after opening starts no download", async () => {
+  h = await open([browser(off("browser_not_installed"))]);
+  await play({ offer: "download", bytes: 201_000_000 });
+  line()!.focus();
+  await act(async () => {
+    line()!.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
+    );
+    line()!.click();
+  });
+  await act(() => settled());
+  await h.settle();
+  expect(document.activeElement).toBe(popup());
+  expect(inRow("browser", "tool-download")).not.toBeNull();
+  await pressEnter();
+  expect(h.transport.only("install_browser")).toEqual([]);
+  expect(inRow("browser", "tool-download")).not.toBeNull();
 });
 
 test.each([
