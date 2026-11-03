@@ -56,7 +56,10 @@ concurrency:
 
 jobs:
   mutants:
-    name: mutants (${{ matrix.name }})
+    # A job a dispatch did not pick says so in its name, so its green check reads as skipped.
+    name: >-
+      mutants (${{ matrix.name }})${{ (inputs.only || 'all') != 'all'
+      && inputs.only != matrix.name && ' (skipped)' || '' }}
     # The same test as PICKED below, which job-level `if` cannot make: it has no matrix context.
     runs-on: >-
       ${{ ((inputs.only || 'all') == 'all' || inputs.only == matrix.name)
