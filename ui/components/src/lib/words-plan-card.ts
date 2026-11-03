@@ -7,11 +7,11 @@
 import { wordsOf } from "./words-core.ts";
 
 const HI = {
-  // the windows, by the label the host gives; a label not here shows as the host gives it (the last five are U12's)
+  // the windows, by the label the host gives; a label not here shows as the host gives it (the last three are U12's)
   "5-hour limit": "5 घंटे की सीमा",
   "Weekly limit": "साप्ताहिक सीमा",
-  "Opus weekly limit": "Opus की साप्ताहिक सीमा",
-  "Sonnet weekly limit": "Sonnet की साप्ताहिक सीमा",
+  // a per-model window, {model} as the host names it, never written here (#236)
+  "{model} weekly limit": "{model} की साप्ताहिक सीमा",
   "Weekly limit for connected apps": "जुड़े हुए ऐप्स की साप्ताहिक सीमा",
   "Monthly limit": "मासिक सीमा",
   "Usage limit": "उपयोग की सीमा",

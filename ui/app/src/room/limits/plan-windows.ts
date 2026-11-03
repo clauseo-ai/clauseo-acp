@@ -14,15 +14,20 @@ import { bandOf, shareLeft } from "./plan-model.ts";
 const LABELS = new Set<string>([
   "5-hour limit",
   "Weekly limit",
-  "Opus weekly limit",
-  "Sonnet weekly limit",
   "Weekly limit for connected apps",
   "Monthly limit",
   "Usage limit",
 ]);
 
-export const windowLabel = (lang: Lang, label: string): string =>
-  LABELS.has(label) ? pc(lang, label as PlanCardKey) : label;
+/** A window's label: a per-model window's as "{model} weekly limit", the model as the host names it ("Opus", "Fable"),
+ * never read out of the English label; any other by the host's label, translated when the card knows it. The room's
+ * card, Settings' tiles and the side note all take it from here, through windowOf. */
+export const windowLabel = (lang: Lang, w: Pick<LimitWindowView, "label" | "model">): string =>
+  w.model !== undefined && w.model !== ""
+    ? pc(lang, "{model} weekly limit", { model: w.model })
+    : LABELS.has(w.label)
+      ? pc(lang, w.label as PlanCardKey)
+      : w.label;
 
 /** A window's reset: "Resets 6:10 pm" ahead, "The limit reset at 4:10 pm." once passed; "" without one. */
 export function resetOf(lang: Lang, w: LimitWindowView, now: number): string {
@@ -49,7 +54,7 @@ export function windowOf(lang: Lang, w: LimitWindowView, now: number): WindowFig
       ? null
       : bandOf({ tone: w.tone, used_percent: w.used_percent, window_label: w.label });
   return {
-    name: windowLabel(lang, w.label),
+    name: windowLabel(lang, w),
     left,
     leftText: left === null ? "" : pc(lang, "{n}% left", { n: left }),
     reset: resetOf(lang, w, now),

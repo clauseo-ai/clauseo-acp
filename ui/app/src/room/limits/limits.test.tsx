@@ -77,7 +77,7 @@ const figureless = (over: Partial<AgentLimitsView>): AgentLimitsView => {
 
 /** The room on a new conversation, whose agent is the one the host lists (R15): `agent`, of its kind where it has
  * one; with words in the field, so Ask stands enabled as long as nothing holds it. */
-async function room(agent = "claude-acp") {
+async function room(agent = "claude-acp", language: "en" | "hi" = "en") {
   const kind = agent.startsWith("claude")
     ? "claude"
     : agent.startsWith("codex")
@@ -90,6 +90,7 @@ async function room(agent = "claude-acp") {
       agents: [kind === undefined ? { id: agent } : { id: agent, kind }],
       parts: ["agents"],
     }),
+    display: { language },
   });
   h.deliver([reset([])]);
   await h.type("Summarise the notice to the bank.");
@@ -209,6 +210,46 @@ test("the card: As of, each window's share left, its bar and reset; opening it s
   expect(card?.textContent).toContain("Resets 6:10 pm");
   expect(card?.querySelectorAll(".plan-track")).toHaveLength(2);
   expect(h!.transport.refreshes()).toEqual([{ agent: "claude", why: "shown" }]);
+});
+
+/** A Max plan's per-model windows (#236): the scoped Fable one, the fixed Opus one, an unknown label, as the host sends
+ * them; the label is built from `model`, never read out of the English `label`. */
+const MODEL_ROWS: LimitWindowView[] = [
+  row(41, { id: "seven_day_overage_included", kind: "model", label: "x", model: "Fable" }),
+  row(12, { id: "seven_day_opus", kind: "model", label: "Opus weekly limit", model: "Opus" }),
+  row(5, { id: "monthly_plus", kind: "other", label: "Plus monthly cap" }),
+];
+
+test("a per-model window reads {model} weekly limit from the host's model; an unknown label as given (#236)", async () => {
+  await room();
+  await view({ claude: entry(30, { windows: MODEL_ROWS }) });
+  const names = [...(await openCard())!.querySelectorAll(".plan-window-name")].map(
+    (n) => n.textContent,
+  );
+  expect(names).toEqual(["Fable weekly limit", "Opus weekly limit", "Plus monthly cap"]);
+});
+
+test("a Codex window has no model: its label as the host gives it (#236)", async () => {
+  await room("codex-acp");
+  await view({
+    codex: entry(30, {
+      plan: "ChatGPT Plus",
+      windows: [row(30), row(10, { id: "seven_day", kind: "weekly", label: "Weekly limit" })],
+    }),
+  });
+  const names = [...(await openCard())!.querySelectorAll(".plan-window-name")].map(
+    (n) => n.textContent,
+  );
+  expect(names).toEqual(["5-hour limit", "Weekly limit"]);
+});
+
+test("Hindi: a Fable window reads Fable की साप्ताहिक सीमा (#236)", async () => {
+  await room("claude-acp", "hi");
+  await view({ claude: entry(30, { windows: MODEL_ROWS }) });
+  const card = await openCard();
+  expect(card?.textContent).toContain("Fable की साप्ताहिक सीमा");
+  expect(card?.textContent).toContain("Opus की साप्ताहिक सीमा");
+  expect(card?.textContent).toContain("Plus monthly cap");
 });
 
 test("a window whose reset passed shows no share and no bar, only when it reset", async () => {

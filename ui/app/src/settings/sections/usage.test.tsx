@@ -317,6 +317,40 @@ test("the note beside its name: Claude's 5-hour share left, else the first with 
   expect(usageNote()).toBeNull();
 });
 
+/** A Max plan's per-model windows (#236), and an unknown label, as the host sends them. */
+const MODEL_ROWS: LimitWindowView[] = [
+  row(41, { id: "seven_day_overage_included", kind: "model", label: "x", model: "Fable" }),
+  row(12, { id: "seven_day_opus", kind: "model", label: "Opus weekly limit", model: "Opus" }),
+  row(5, { id: "monthly_plus", kind: "other", label: "Plus monthly cap" }),
+];
+const tileLabels = (kind: "claude" | "codex") =>
+  [...card(kind)!.querySelectorAll(".set-window-label")].map((l) => l.textContent);
+
+test("a tile's label: {model} weekly limit from the host's model, else the label as given (#236)", async () => {
+  await mount();
+  await view({
+    claude: entry(30, { windows: MODEL_ROWS }),
+    codex: entry(10, { plan: "ChatGPT Plus" }),
+  });
+  expect(tileLabels("claude")).toEqual([
+    "Fable weekly limit",
+    "Opus weekly limit",
+    "Plus monthly cap",
+  ]);
+  expect(tileLabels("codex")).toEqual(["5-hour limit", "Weekly limit"]);
+});
+
+test("Hindi: a Fable tile reads Fable की साप्ताहिक सीमा (#236)", async () => {
+  localStorage.setItem("clauseo.display", JSON.stringify({ language: "hi" }));
+  await mount();
+  await view({ claude: entry(30, { windows: MODEL_ROWS }) });
+  expect(tileLabels("claude")).toEqual([
+    "Fable की साप्ताहिक सीमा",
+    "Opus की साप्ताहिक सीमा",
+    "Plus monthly cap",
+  ]);
+});
+
 test("Hindi: the section's words", async () => {
   localStorage.setItem("clauseo.display", JSON.stringify({ language: "hi" }));
   await mount();
