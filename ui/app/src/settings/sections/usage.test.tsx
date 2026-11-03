@@ -207,6 +207,44 @@ test("none: the message, and Try again sends try_again", async () => {
   ]);
 });
 
+test("Try again holds no pending state: answered with no view, or refused, it stays pressable and reads nothing", async () => {
+  await mount();
+  await view({ claude: figureless({ freshness: "unavailable" }) });
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const button = () =>
+    group("claude")?.querySelector<HTMLButtonElement>('[data-testid="plan-try-again"]') ?? null;
+  const idle = () => {
+    const b = button();
+    expect(b).not.toBeNull();
+    expect(b!.disabled).toBe(false);
+    expect(b!.getAttribute("aria-disabled")).not.toBe("true");
+    expect(b!.hasAttribute("aria-busy")).toBe(false);
+    expect(b!.hasAttribute("data-pending")).toBe(false);
+    expect(card("claude")?.hasAttribute("aria-busy")).toBe(false);
+    expect(card("claude")?.textContent).toContain("Usage isn't available right now.");
+  };
+  // dropped quietly: the command is done, and no view follows
+  transport.host.dispatch = () => "done";
+  await act(async () => button()?.click());
+  await act(async () => settled());
+  idle();
+  // refused: the throttle's refusal, and no view follows
+  transport.host.dispatch = () => {
+    throw new Error("refresh_limits throttled");
+  };
+  await act(async () => button()?.click());
+  await act(async () => settled());
+  await act(async () => Promise.resolve());
+  idle();
+  expect(transport.refreshes()).toEqual([
+    { agent: undefined, why: "shown" },
+    { agent: "claude", why: "try_again" },
+    { agent: "claude", why: "try_again" },
+  ]);
+  expect(warn).toHaveBeenCalledTimes(1);
+  warn.mockRestore();
+});
+
 test("pay as you go: who bills, no meter and no figure", async () => {
   await mount();
   await view({
