@@ -8,8 +8,9 @@
 //! from every folder it may be in), `resolve` (each target resolved canonically and checked for
 //! an owner file), `walk` (a shell command's listing of the matter's held files), `decide` (the
 //! rest: the name backstop, the read-only rule) and `total`. The counts: `entries` and `folders`
-//! the walk read, `owner_folders` the folders with an owner file in it, and `checked` the files
-//! looked up beside them.
+//! the walk read, `owner_folders` the folders with an owner file in it, `checked` the files
+//! beside them, and `probed` those looked up on disk (the ones an owner file may point at, and on
+//! Windows each other one a command names, opened then).
 
 use std::cell::RefCell;
 use std::time::Duration;
@@ -44,6 +45,7 @@ pub(super) struct Walk {
     pub(super) folders: usize,
     pub(super) owner_folders: usize,
     pub(super) checked: usize,
+    pub(super) probed: usize,
 }
 
 thread_local! {
@@ -92,6 +94,15 @@ pub(super) fn walked(walk: Walk) {
     });
 }
 
+/// Notes one more file the walk looked up (one it kept to open later, opened now).
+pub(super) fn probed() {
+    TIMINGS.with(|cell| {
+        if let Some(timings) = cell.borrow_mut().as_mut() {
+            timings.walk.probed += 1;
+        }
+    });
+}
+
 /// Ends the guard call's timing: its line (without a newline) when on.
 pub(super) fn finish() -> Option<String> {
     let timings = TIMINGS.with(|cell| cell.borrow_mut().take())?;
@@ -108,10 +119,11 @@ pub(super) fn finish() -> Option<String> {
         folders,
         owner_folders,
         checked,
+        probed,
     } = timings.walk;
     Some(format!(
         "{PREFIX} {} | entries={entries} folders={folders} owner_folders={owner_folders} \
-         checked={checked}",
+         checked={checked} probed={probed}",
         phases.join(" ")
     ))
 }

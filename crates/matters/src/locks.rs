@@ -8,6 +8,10 @@ use unicode_normalization::{UnicodeNormalization, is_nfc};
 
 use crate::refuse::{Fold, keys_by};
 
+mod beside;
+
+pub use beside::OwnersBeside;
+
 /// What shows that a file is open in another program.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HeldOpen {

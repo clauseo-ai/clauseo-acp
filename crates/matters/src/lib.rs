@@ -33,7 +33,8 @@
 //! - [`held_open`]: whether Word (or, on Windows, any program) has a file of the folder open
 //!   ([`HeldOpen`]), by the rule undo and restore refuse with; [`held_open_at`] takes a path
 //!   as an agent names it, resolved into the folder by [`matter_path_in`];
-//!   [`held_open_beside`] takes the parent folder's owner files from a caller that listed it.
+//!   [`held_open_beside`] takes the parent folder's owner files from a caller that listed it,
+//!   and [`OwnersBeside`] tells it, with no file-system call, which names to ask about.
 //!   The host asks them before letting an agent write a file.
 //! - [`scan`]: what importing a folder would take ([`ScanReport`]), before any write.
 //! - [`scan_folder`]: the folder scan before a matter, by the import's walk and rules, with
@@ -135,7 +136,9 @@ mod writeback;
 
 pub use error::{Error, MissingReason, Refusal};
 pub use folder_scan::{FolderScan, FolderTotals, ScanProgress, scan_folder};
-pub use locks::{HeldOpen, held_open, held_open_at, held_open_beside, matter_path_in};
+pub use locks::{
+    HeldOpen, OwnersBeside, held_open, held_open_at, held_open_beside, matter_path_in,
+};
 pub use matter::Matter;
 pub use papers::{Paper, PaperList};
 pub use place::{Place, place};
