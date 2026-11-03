@@ -349,4 +349,11 @@ export const U12: Entry[] = [
       claude: PAYG,
     },
   ),
+  // the stop's title on another day, stopped two days ago
+  stop(
+    "U12-43",
+    limitThreadWords("{name} plan limit reached on {day} at {time}"),
+    "limits/hit",
+    stopped("five_hour", LATER_RESET, atLocal(-2, 16, 52)),
+  ),
 ];
