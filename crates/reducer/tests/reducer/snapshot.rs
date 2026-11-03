@@ -4,10 +4,11 @@
 use std::collections::BTreeSet;
 
 use clauseo_protocol::{
-    AgentSessionDetached, CompactionChanged, CompactionStatus, ContentAppended, ContentBlock,
-    DetachReason, ElicitationOutcome, ElicitationRequest, ElicitationRequested,
-    ElicitationResolved, Envelope, ErrorCode, LimitStopReason, Notice, NoticeLevel, Principal,
-    StepUndone, TextKind, TextOrBlob, ToolCallStatus, TurnFailed, TurnStoppedAtLimit, ViewEntry,
+    AgentId, AgentSessionDetached, CompactionChanged, CompactionStatus, ContentAppended,
+    ContentBlock, DetachReason, ElicitationOutcome, ElicitationRequest, ElicitationRequested,
+    ElicitationResolved, Envelope, ErrorCode, LimitStopReason, Notice, NoticeLevel, PageVia,
+    PageVisited, Principal, StepUndone, TextKind, TextOrBlob, ToolCallStatus, TurnFailed,
+    TurnStoppedAtLimit, ViewEntry, WebResult, WebSearchRecorded,
 };
 use clauseo_reducer::{
     Error, REDUCER_SCHEMA_VERSION, Snapshot, SnapshotRef, StreamState, apply, view_snapshot,
@@ -108,6 +109,19 @@ fn every_entry_kind() -> Vec<Envelope> {
         kept: vec![],
     };
     log.push(undo).unwrap();
+    // The web the call ran and opened: its search and a page, so the shape pins both.
+    let agent = AgentId::new("claude-acp").unwrap();
+    let results = vec![WebResult::new("Lease act", "https://example.org/lease")];
+    let search = WebSearchRecorded::new(turn, tool_call, agent, "lease act", results);
+    log.push(search).unwrap();
+    let page = PageVisited::new(
+        turn,
+        tool_call,
+        "https://example.org/lease",
+        Some("Lease act".to_owned()),
+        PageVia::Browser,
+    );
+    log.push(page).unwrap();
     log.into_events()
 }
 

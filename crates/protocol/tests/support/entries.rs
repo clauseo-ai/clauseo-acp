@@ -12,10 +12,11 @@ use clauseo_protocol::{
     AgentContentEntry, AgentTextEntry, BackgroundMark, CheckpointKind, ContentBlock, ContextUsage,
     Deliverable, Delivery, ElicitationEntry, ElicitationRequest, ElicitationState, ExpiryReason,
     HeaderEntry, ImportSummary, LimitStopEntry, LimitStopReason, MarkerEntry, MarkerKind,
-    MatterHeaderEntry, MatterKind, NoticeEntry, NoticeLevel, PermissionChoice, PermissionEntry,
-    PermissionKind, PermissionOption, PermissionState, Principal, StepEntry, StopReason, TextKind,
-    TextOrBlob, ThreadStatus, Timestamp, ToolCallEntry, UserMessageEntry, UserMessageStatus,
-    VersionEntry, ViewEntry,
+    MatterHeaderEntry, MatterKind, NoticeEntry, NoticeLevel, PageVia, PermissionChoice,
+    PermissionEntry, PermissionKind, PermissionOption, PermissionState, Principal, StepEntry,
+    StopReason, TextKind, TextOrBlob, ThreadStatus, Timestamp, ToolCallEntry, ToolCallPage,
+    ToolCallSearch, ToolCallWeb, UserMessageEntry, UserMessageStatus, VersionEntry, ViewEntry,
+    WebResult,
 };
 
 use crate::examples::{file_changes, tool_call_started};
@@ -121,6 +122,20 @@ fn thread_entries() -> Vec<ViewEntry> {
             background: Some(Box::new(BackgroundMark {
                 steer: message_id(9),
                 finished_at: None,
+            })),
+            web: Some(Box::new(ToolCallWeb {
+                search: Some(ToolCallSearch {
+                    query: "limitation period contract".to_owned(),
+                    results: vec![WebResult::new(
+                        "Limitation Act 1980",
+                        "https://example.com/a",
+                    )],
+                }),
+                pages: vec![ToolCallPage {
+                    url: "https://example.com/a".to_owned(),
+                    title: Some("Limitation Act 1980".to_owned()),
+                    via: PageVia::Browser,
+                }],
             })),
         })),
     ]

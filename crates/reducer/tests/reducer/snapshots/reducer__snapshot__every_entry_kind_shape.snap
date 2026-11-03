@@ -4,11 +4,11 @@ description: "The snapshot shape changed: bump REDUCER_SCHEMA_VERSION (crates/re
 expression: "Snapshot::of(&every)"
 ---
 {
-  "reducer_schema": 7,
+  "reducer_schema": 8,
   "state": {
     "thread": {
       "thread": "01900000-0000-7000-8000-000c00000000",
-      "seq": 18,
+      "seq": 20,
       "header": {
         "order": 1,
         "thread": "01900000-0000-7000-8000-000c00000000",
@@ -103,7 +103,25 @@ expression: "Snapshot::of(&every)"
               }
             ],
             "content": [],
-            "started_at": 7000
+            "started_at": 7000,
+            "web": {
+              "search": {
+                "query": "lease act",
+                "results": [
+                  {
+                    "title": "Lease act",
+                    "url": "https://example.org/lease"
+                  }
+                ]
+              },
+              "pages": [
+                {
+                  "url": "https://example.org/lease",
+                  "title": "Lease act",
+                  "via": "browser"
+                }
+              ]
+            }
           }
         },
         {
