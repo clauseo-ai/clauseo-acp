@@ -78,6 +78,7 @@ export function StatusLine<V extends string>({
   const line = useRef<HTMLDivElement>(null);
   const tookRef = useRef<HTMLSpanElement>(null);
   const goRef = useRef<HTMLSpanElement>(null);
+  const toolsRef = useRef<HTMLSpanElement>(null);
   const hadTook = useRef(took !== null);
   const seg = useId();
   const { id, hand } = useRoom();
@@ -115,6 +116,14 @@ export function StatusLine<V extends string>({
         const cap = goRef.current?.lastElementChild ?? null;
         f = nextStatusFit(f, cap !== null && getComputedStyle(cap).display !== "none");
         b.dataset["fit"] = f;
+      }
+      // a line that wraps never starts a row with the tool line's dot: the dot parts two phrases on one row
+      const t = toolsRef.current;
+      if (t !== null) {
+        delete t.dataset["lead"];
+        const box = l.getBoundingClientRect();
+        const lead = box.width > 0 && t.getBoundingClientRect().left - box.left < 1;
+        if (lead && t.previousElementSibling !== null) t.dataset["lead"] = "";
       }
     };
     fit();
@@ -176,7 +185,7 @@ export function StatusLine<V extends string>({
           </Suspense>
         )}
         {tools !== null && (
-          <span className="room-status-tools">
+          <span className="room-status-tools" ref={toolsRef}>
             {(choice !== undefined || plan !== "" || took !== null) && (
               <i className="room-dot" aria-hidden="true" />
             )}
