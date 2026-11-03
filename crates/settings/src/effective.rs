@@ -1,10 +1,13 @@
 //! [`Effective`]: the settings `host` and `cli` run with. Read at start-up; the `ui` section
-//! changes at runtime through [`Effective::apply_ui_patch`].
+//! changes at runtime through [`Effective::apply_ui_patch`], the `tools` section through
+//! [`Effective::apply_tools_patch`].
 
 #[cfg(test)]
 mod mcp_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tools_patch_tests;
 #[cfg(test)]
 mod tools_tests;
 #[cfg(test)]
@@ -16,6 +19,7 @@ use crate::leaf;
 use crate::locations::Locations;
 use crate::policy::{PolicyRead, PolicySource, PolicyStatus};
 use crate::schema::{AgentLaunch, McpServerLaunch, Settings};
+use crate::tools::ToolsPatch;
 use crate::ui::UiPatch;
 use crate::user;
 use crate::warning::{Origin, Warning, WarningKind};
@@ -23,8 +27,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 /// The settings after the defaults, the user's `settings.json` and the policy layer, in that
-/// order: policy wins. The `ui` section changes at runtime only through
-/// [`Effective::apply_ui_patch`]; everything else takes effect on the next start.
+/// order: policy wins. The `ui` and `tools` sections change at runtime only through
+/// [`Effective::apply_ui_patch`] and [`Effective::apply_tools_patch`]; everything else takes
+/// effect on the next start. A session reads its `tools` at its start, so a change to them
+/// reaches the next session, not one already running.
 #[derive(Debug)]
 pub struct Effective {
     locations: Locations,
@@ -115,6 +121,32 @@ impl Effective {
         }
         user::write_user_settings(&self.locations, files, patch)?;
         self.settings.apply_ui_patch(patch);
+        Ok(())
+    }
+
+    /// Changes the `tools` section: saves the patch to `settings.json` through `files`, then
+    /// sets it in memory, as [`Effective::apply_ui_patch`] does for `ui`. A patch that names
+    /// `tools.web_search` or `tools.browser` while policy locks it is refused as a whole with
+    /// [`Error::Locked`], the first locked key in field order; nothing is written or changed.
+    /// An empty patch returns `Ok` without touching the file. A failed write returns the error
+    /// with nothing changed in memory. A session reads these switches at its start, so the
+    /// change reaches the next session started, not one running.
+    pub fn apply_tools_patch(
+        &mut self,
+        files: &dyn Files,
+        patch: &ToolsPatch,
+    ) -> Result<(), Error> {
+        let keys = patch.keys();
+        if let Some(key) = keys.iter().find(|key| self.is_locked(key)) {
+            return Err(Error::Locked {
+                key: (*key).to_owned(),
+            });
+        }
+        if keys.is_empty() {
+            return Ok(());
+        }
+        user::write_tools_settings(&self.locations, files, patch)?;
+        self.settings.tools.apply_patch(patch);
         Ok(())
     }
 
