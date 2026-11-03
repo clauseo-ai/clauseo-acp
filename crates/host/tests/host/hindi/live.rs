@@ -30,21 +30,30 @@ use crate::write;
 /// The variable naming the live test's own folder; it must exist, outside the app's data.
 pub(crate) const ROOT_VAR: &str = "CLAUSEO_HINDI_LIVE_DATA";
 
-/// One live run: `adapter_var` names the variable holding the adapter's absolute path, and
-/// `env` the settings entry's variables. Prints the record; fails unless the rule passes.
-pub(crate) fn run(wanted: Wanted, adapter_var: &str, env: BTreeMap<String, String>) {
+/// Where an agent's adapter may be found.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Adapter {
+    /// The variable that may name its executable, such as `CLAUSEO_HINDI_CLAUDE_ACP`.
+    pub(crate) var: &'static str,
+    /// Its package's script under an `npm ci` of the pins file, as G16 runs it.
+    pub(crate) script: &'static str,
+}
+
+/// The pins file the adapters' versions live in (one home: G16's).
+const PINS: &str = "crates/limits/tests/live";
+
+/// One live run of `adapter` with `env` as the settings entry's variables. Prints which way
+/// it found the adapter and the record; fails unless the rule passes.
+pub(crate) fn run(wanted: Wanted, adapter: Adapter, env: &BTreeMap<String, String>) {
     let root = root();
     let data = root.join("data");
     let matters = root.join("matters");
     write::create_dir_all(&data);
     write::remove_dir_all(&matters).unwrap();
     write::create_dir_all(&matters);
-    let adapter = std::env::var(adapter_var)
-        .ok()
-        .filter(|path| Path::new(path).is_absolute())
-        .unwrap_or_else(|| panic!("set {adapter_var} to the adapter's absolute path"));
+    let (command, args) = find(adapter, &root);
     let settings = serde_json::json!({
-        "agents": { wanted.agent: { "command": adapter, "env": env } }
+        "agents": { wanted.agent: { "command": command, "args": args, "env": env } }
     });
     write::write(
         &data.join("settings.json"),
@@ -90,6 +99,62 @@ pub(crate) fn run(wanted: Wanted, adapter_var: &str, env: BTreeMap<String, Strin
         asked.record()
     );
     assert!(asked.verdict.passed(), "{}", asked.verdict);
+}
+
+/// The adapter's command and arguments, the first way that works, printed:
+/// 1. the executable `adapter.var` names;
+/// 2. the pinned packages in `<root>/adapters` (an `npm ci` of [`PINS`]), run by `node`
+///    (`CLAUSEO_HINDI_NODE`);
+/// 3. none: the test fails with the steps for either. The app's own installer (S17,
+///    `clauseo-agents`, wired in by R20) is not on main, so the test cannot install through
+///    it; once it is, it becomes the second way.
+fn find(adapter: Adapter, root: &Path) -> (String, Vec<String>) {
+    if let Some(path) = std::env::var_os(adapter.var).map(PathBuf::from) {
+        assert!(
+            path.is_absolute() && path.is_file(),
+            "{} must name the adapter's executable by its absolute path; it names {}",
+            adapter.var,
+            path.display()
+        );
+        eprintln!("adapter (way 1, {}): {}", adapter.var, path.display());
+        return (path.display().to_string(), Vec::new());
+    }
+    let adapters = root.join("adapters");
+    let script = adapters.join("node_modules").join(adapter.script);
+    if script.is_file() {
+        let node = node().unwrap_or_else(|| {
+            panic!(
+                "{} exists but no node: set CLAUSEO_HINDI_NODE",
+                script.display()
+            )
+        });
+        eprintln!(
+            "adapter (way 2, the pinned install): {} {}",
+            node.display(),
+            script.display()
+        );
+        return (
+            node.display().to_string(),
+            vec![script.display().to_string()],
+        );
+    }
+    panic!(
+        "no adapter for {var}. The app's installer (S17) is not on main yet, so the test cannot \
+         install it. Either:\n  1. export {var}=/absolute/path/to/the/adapter, or\n  2. install \
+         the pinned adapters into the test's folder once (needs node and npm), from the \
+         repository root, and set CLAUSEO_HINDI_NODE=$(command -v node):\n     mkdir -p {dir} && cp {PINS}/package.json {PINS}/package-lock.json \
+         {dir}/ && npm ci --prefix {dir}",
+        var = adapter.var,
+        dir = adapters.display(),
+    );
+}
+
+/// `CLAUSEO_HINDI_NODE`, when it names a file by its absolute path. No `PATH` walk: the
+/// repository walks `PATH` in one place only (`xtask/src/process.rs`).
+fn node() -> Option<PathBuf> {
+    std::env::var_os("CLAUSEO_HINDI_NODE")
+        .map(PathBuf::from)
+        .filter(|node| node.is_absolute() && node.is_file())
 }
 
 /// `CLAUSEO_HINDI_LIVE_DATA`: an existing absolute folder that is not, does not hold and is

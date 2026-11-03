@@ -192,9 +192,12 @@ impl Steps<'_> {
         let wanted = self.wanted;
         let first = self.dispatch(set(thread, "model", wanted.model));
         if let Err(error) = &first {
-            if error.code() == ErrorCode::AgentAuthRequired {
-                panic!("{} is not signed in: {error}", wanted.agent);
-            }
+            assert_ne!(
+                error.code(),
+                ErrorCode::AgentAuthRequired,
+                "{} is not signed in: {error}",
+                wanted.agent
+            );
             eprintln!("the first SetConfigOption was refused ({error}); reading the options");
         }
         let attached = |e: &Events| e.attached();
@@ -217,7 +220,7 @@ impl Steps<'_> {
         category: ConfigCategory,
         want: &str,
     ) -> Option<String> {
-        let option = events.option(&category)?;
+        let option = events.option(category)?;
         let ConfigOptionKind::Select {
             current_value,
             options,
@@ -236,7 +239,7 @@ impl Steps<'_> {
         };
         let Some(choice) = options
             .iter()
-            .find(|choice| names(choice_text(choice), want))
+            .find(|choice| names(&choice_text(choice), want))
         else {
             panic!(
                 "the agent offers no {category:?} choice for {want}; it offers {:?}",
@@ -252,7 +255,7 @@ impl Steps<'_> {
             self.ok(set(thread, &id, &value));
             events.drain_ready();
             let now = events
-                .option(&category)
+                .option(category)
                 .and_then(|option| match option.kind {
                     ConfigOptionKind::Select { current_value, .. } => Some(current_value),
                     _ => None,
@@ -321,14 +324,14 @@ fn choice_text(choice: &clauseo_protocol::ConfigChoice) -> String {
 
 /// Whether `text` names `want`: both lowercased with spaces, dots and underscores as hyphens,
 /// so `claude-haiku-5-5` matches "Claude Haiku 5.5", and `gpt-6-luna` matches "GPT-6 Luna".
-pub(crate) fn names(text: String, want: &str) -> bool {
+pub(crate) fn names(text: &str, want: &str) -> bool {
     let fold = |text: &str| {
         text.to_lowercase()
             .chars()
             .map(|c| if matches!(c, ' ' | '.' | '_') { '-' } else { c })
             .collect::<String>()
     };
-    fold(&text).contains(&fold(want))
+    fold(text).contains(&fold(want))
 }
 
 /// The thread's events as they arrive.
@@ -374,12 +377,12 @@ impl Events {
     }
 
     /// The last reported option of `category`.
-    fn option(&self, category: &ConfigCategory) -> Option<ConfigOption> {
+    fn option(&self, category: ConfigCategory) -> Option<ConfigOption> {
         self.seen.iter().rev().find_map(|event| match event {
             DomainEvent::ConfigOptionsReplaced(replaced) => replaced
                 .options
                 .iter()
-                .find(|option| option.category == *category)
+                .find(|option| option.category == category)
                 .cloned(),
             _ => None,
         })
