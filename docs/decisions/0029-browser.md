@@ -115,8 +115,11 @@ note on stderr, so the agent never gets half a JSON message.
 The close is best-effort because agent-browser's daemon detaches. On Unix it is started with
 `setsid` (`connection.rs:947-951`): it leaves the guard's process group and is reparented, so
 the `process` crate's group kill and any process-tree kill miss it, and **the daemon and Chrome
-outlive a kill of the guard**. The host's session end must therefore kill the daemon from the
-`<session>.pid` file in the socket folder (S27's host PR does this), then remove the folder. On
+outlive a kill of the guard**. The host does **not** kill the daemon from the `<session>.pid`
+file: a PID read from a file can name a process the system reused, and AGENTS.md forbids killing
+by such a PID. The guard's close request on stdin EOF (above) is the normal end, and the idle
+timeout the backstop; how often a daemon outlives its session is a follow-up, measured in G17
+item 6 (host part, "No daemon kill by PID"). On
 Windows it is started with `CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS`
 (`connection.rs:963-983`), which does not leave a Job Object, so the job kill should still end
 it (not verified). A daemon nobody kills ends after the idle timeout, 10 minutes.
@@ -217,22 +220,217 @@ The guard cannot enforce these; stage C's egress proxy and sandbox must.
   authentication, `daemon.rs:548`).
 - **`--cwd` sits outside what the agent can write.** The guard checks its folders only at start
   (`browser_guard.rs`); an agent that can write `--cwd` could later swap one for a link.
-- **The host kills the daemon at session end** from the `.pid` file in the socket folder (above;
-  S27's host PR).
+- **A daemon that outlives its session** (a kill of the guard on Unix) ends only at the idle
+  timeout; the host does not kill it by PID (above). Follow-up: G17 item 6.
 
-### The host's Chrome choice and download
+### The host part (the second S27 pull request, `crates/host`)
 
-Added by a later S27 PR.
+#### Which Chrome (`host/src/browser/chrome.rs`)
+
+The launch-prep thread (`actor/turn/launch_checks.rs`), never the actor, picks each session's
+Chrome and keeps it on the session's `RunFolders` (`chrome`), which fills
+`{browser_executable}`. It looks only when `tools.browser` is on and there is a proxy, so a
+session that cannot get the browser makes no file system calls for it. In order:
+
+1. Google Chrome installed: on macOS `/Applications/Google Chrome.app/Contents/MacOS/Google
+   Chrome`, then the same under `~/Applications`; on Windows `%ProgramFiles%`,
+   `%ProgramFiles(x86)%`, then `%LOCALAPPDATA%`, each with `\Google\Chrome\Application\chrome.exe`.
+2. Windows only: Microsoft Edge (`%ProgramFiles(x86)%`, then `%ProgramFiles%`, with
+   `\Microsoft\Edge\Application\msedge.exe`), only while `EDGE_ALLOWED` is true. It is false
+   until G17 item 4.
+3. Chrome for Testing in `<app data>/browsers/chrome-<version>/`, highest dotted version first,
+   with the binary where the zip puts it: `chrome-mac-arm64/Google Chrome for
+   Testing.app/Contents/MacOS/Google Chrome for Testing` (and `chrome-mac-x64/...`),
+   `chrome-win64\chrome.exe`. A version folder without its binary is passed over. Skipped on
+   Windows ARM64. `<app data>` is the host's data folder.
+4. Otherwise none: `BrowserNotInstalled`.
+
+The Chrome for Testing download is added by a later S27 PR (part 3).
+
+Linux (development and CI only): `/usr/bin/google-chrome`, then `/usr/bin/chromium`. A path
+counts when it is a regular file, following links. Every root comes in through `ChromeRoots`
+(`HostConfig::with_chrome_roots`; production uses `ChromeRoots::system`, which reads `HOME`,
+`ProgramFiles`, `ProgramFiles(x86)` and `LOCALAPPDATA`). The tests use one fixture folder per
+case (`browser/chrome/tests.rs`), ARM64 included, and `tests/host/browser.rs` checks that the
+Chrome found reaches `session/new`. `with_browser_executable` stays as a test-support override.
+
+#### Slots and limits (`host/src/browser/limits.rs`)
+
+`slot_limit(total_memory_bytes)` is 2 at 8 GiB or less, 4 above. The constants: idle timeout
+600000 ms, default timeout 30000 ms, max output 25000 characters. PR-B's `with_browser_slots`
+stand-in is gone. The actor holds a `BrowserSlots` (the limit and the set of `SessionKey`s
+holding one). `profile_loads::session_loads` checks it before filling the entry
+(`TooManyBrowsers` when none is free; a session that already holds one keeps it, so its
+`session/load` after a `session/new` counts once), and takes the slot when the entry is filled.
+`launch_checks::discard`, which every way out of a session goes through (the agent's end, a failed
+launch, a stopping host), frees it. Total memory comes in through
+`HostConfig::with_machine_memory(bytes)`; the default, unknown, means 2. The workspace had no
+memory reader to reuse (searched for `sysinfo`, `total_memory`, `MemTotal`, `hw.memsize` and
+`GlobalMemoryStatus`); the desktop fills it in a later PR.
+
+#### Where Chrome runs (`BrowserLaunch`)
+
+`HostConfig::with_browser_launch` takes `BrowserLaunch::InJail` (the default, the only one
+built) or `OutsideJail { cdp_port }`, stage C's switch, under which the entry would carry
+`AGENT_BROWSER_CDP` instead of starting Chrome. `OutsideJail` is refused for now with
+`UnsupportedLaunch` ("... is not built yet"), tested in `config/tests.rs`.
+
+#### Seed and deny lists
+
+`host/src/browser/seed_sites.rs`, `SEED_SITES`: the eight national sites, then the 25 High
+Courts, each court's own site:
+
+| Court | Host | Resolves |
+|---|---|---|
+| Allahabad | `allahabadhighcourt.in` | 221.134.71.211 |
+| Andhra Pradesh | `aphc.gov.in` | 45.127.64.27 |
+| Bombay | `bombayhighcourt.nic.in` | 164.100.229.168 |
+| Calcutta | `calcuttahighcourt.gov.in` | 202.61.117.204 |
+| Chhattisgarh | `highcourt.cg.gov.in` | 103.195.217.193 |
+| Delhi | `delhihighcourt.nic.in` | 45.127.75.133 |
+| Gauhati | `ghconline.gov.in` | 157.20.175.29 |
+| Gujarat | `gujarathighcourt.nic.in` | 103.195.217.201 |
+| Himachal Pradesh | `hphighcourt.nic.in` | 164.100.138.103 |
+| Jammu & Kashmir and Ladakh | `jkhighcourt.nic.in` | 164.100.220.61 |
+| Jharkhand | `jharkhandhighcourt.nic.in` | 164.100.211.140 |
+| Karnataka | `judiciary.karnataka.gov.in` | 103.138.198.32 |
+| Kerala | `highcourt.kerala.gov.in` | 103.135.131.179 |
+| Madhya Pradesh | `mphc.gov.in` | 117.239.39.50 |
+| Madras | `hcmadras.tn.gov.in` | 103.59.64.38 |
+| Manipur | `hcmimphal.nic.in` | 164.100.188.18 |
+| Meghalaya | `meghalayahighcourt.nic.in` | 103.195.218.129 |
+| Orissa | `orissahighcourt.nic.in` | 103.195.219.33 |
+| Patna | `patnahighcourt.gov.in` | 117.244.242.24 |
+| Punjab and Haryana | `highcourtchd.gov.in` | 164.100.221.50 |
+| Rajasthan | `hcraj.nic.in` | 103.195.217.203 |
+| Sikkim | `hcs.gov.in` | 164.100.126.241 |
+| Telangana | `tshc.gov.in` | 164.164.39.3 |
+| Tripura | `thc.nic.in` | 164.100.178.45 |
+| Uttarakhand | `highcourtofuttarakhand.gov.in` | 164.100.52.170 |
+
+Checked with `getent hosts <host>` on 2026-11-03 between 01:09 and 01:12 UTC, from a Linux
+machine outside India: all 25 resolve, and so do the eight national sites (`rbi.org.in` and
+`indiacode.nic.in` gave IPv6 addresses only). Each host was matched to its court by the page it
+serves or a court or eCommittee listing. Bombay's and Kerala's sites did not answer HTTPS from
+that machine (DNS resolves); Bombay's host rests on a directory listing. Karnataka has no
+dedicated domain: `judiciary.karnataka.gov.in` serves "High Court of Karnataka". Madras's older
+`hcmadras.tn.nic.in` also resolves; the current `.gov.in` host is listed. Guessed hosts that do
+not resolve (`karnatakahighcourt.gov.in`, `nainitalhc.gov.in`, `sikkimhighcourt.nic.in`,
+`tripurahighcourt.nic.in`, `manipurhighcourt.gov.in`, `orissahighcourt.gov.in`,
+`highcourtofkerala.gov.in`) are not listed. Rules match exact hosts, so a site that redirects to
+`www.` will ask once for that host; G17 or stage C's proxy decides whether `www.` variants are
+seeded too. The unit tests never touch the network.
+
+`host/src/browser/deny_hosts.rs`, `DENY_HOSTS`, **provisional until G17 item 5**: Chrome's
+background hosts the proxy denies with no card, each with a one-line reason. agent-browser's
+flags (`--disable-background-networking`, `--disable-component-update`, `--disable-sync`,
+`chrome.rs:466-480`) leave the component updater (`update.googleapis.com`,
+`clients2.google.com`, `redirector.gvt1.com`, `edgedl.me.gvt1.com`), Safe Browsing
+(`safebrowsing.googleapis.com`, `sb-ssl.google.com`; no `--safebrowsing-disable-auto-update`),
+the optimization guide (`optimizationguide-pa.googleapis.com`), autofill predictions
+(`content-autofill.googleapis.com`), the variations seed (`clientservices.googleapis.com`) and
+sign-in checks (`accounts.google.com`). Stage C's proxy reads both lists; the `browser` module
+is public for it.
 
 ### Bundling agent-browser
 
 Added by a later S27 PR.
 
-### PageVisited
+#### `PageVisited` (`host/src/sources.rs`, `sources/browser.rs`)
 
-Added by a later S27 PR.
+The host records one `PageVisited { via: Browser }` per completed open, built with
+`PageVisited::new` (S26's caps and `logged_url`), committed after the tool call's own event:
+
+- **The tool, by name.** Claude: `mcp__browser__agent_browser_open`, in the call's `name` or
+  `title`. Codex: `mcp.browser.agent_browser_open`. codex-acp 2.2.2 titles an MCP call
+  `` `mcp.${item.server}.${item.tool}` `` with kind `execute` and no `name`
+  (`dist/index.js:29492-29503`); its `rawInput` is `{ server, tool, arguments }`
+  (`:29520-29522`); the completed update repeats the input and carries `{ result, error }` as
+  `rawOutput` (`:29507-29513`, `:29524`), with no title and no `content`.
+- **The URL** is the `url` of the last `rawInput` the host had for that tool call id (top level,
+  or under Codex's `arguments`), read when an update reports `completed`. An input stored as a
+  blob is passed over.
+- **The title** is the tool result's text, its first line: the first text content (Claude), else
+  the first text of `rawOutput`'s MCP result (`content`, or Codex's `result.content`). For an open
+  agent-browser's text is the page's title (`cli/src/mcp.rs`, `response_text` takes `title` before
+  `url`). A text equal to the URL gives no title.
+- **Only the live turn.** The open is followed on the current turn (`Current::browser_opens`);
+  `Origin::Late` and `Origin::Replay` updates never reach it (`actor/turn/updates.rs` drops them
+  first), so an agent's replay on `session/load` writes nothing. A failed, cancelled or unfinished
+  call writes nothing.
+
+The scenario `crates/host/tests/scenarios/browser-visit.jsonl` (`tests/host/browser.rs`,
+`a_completed_open_is_one_page_visited`) opens `https://sci.gov.in/judgments#top`, clicks, and
+fails a second open: one `PageVisited` with the URL (fragment dropped), the title, the turn and
+the open's tool call, after its completed update; none for the click or the failed open; and the
+reopened host's log replays the one page.
+
+#### No daemon kill by PID
+
+The host does not kill agent-browser's daemon from its `.pid` file (above): the guard's
+`agent_browser_close` on stdin EOF and the 10-minute idle timeout end it. A follow-up, measured in
+G17 item 6.
+
+#### Budgets
+
+`budgets.toml` gains `browser_cold_start_p95` (3 s) and `browser_session_memory_p95` (600 MB),
+both `alert` and `unmeasured`.
+
+#### The smoke test, by hand (`crates/host/tests/browser_smoke.rs`)
+
+`browser_smoke` is `#[ignore]`d, so normal runs skip it. It starts a logging proxy on loopback
+(`CONNECT` and absolute-form HTTP; `smoke.test` resolves to a page server the test runs), starts
+`clauseo-mcp browser-guard` with a temp `--cwd` and the four variables the entry sets, and speaks
+MCP: `initialize`, `tools/list`, `agent_browser_open` on `https://example.com`,
+`agent_browser_snapshot`, `agent_browser_open` on `http://smoke.test:<port>/`, then a WebRTC
+page on `smoke.test` that gathers ICE candidates, reports them with a `fetch` to `smoke.test`,
+and loads an image from `http://127.0.0.1:<port2>/pixel`; then `agent_browser_close`. It passes
+when the proxy log holds only `example.com:443`, `smoke.test:<port>` and `127.0.0.1:<port2>`,
+the pixel came through the proxy, no UDP `host` or `srflx` candidate was reported, and no
+`agent-browser-chrome-*` temp profile is left under `--cwd` (the test first checks one existed
+while Chrome ran). The guard's `url` check refuses loopback hosts, so the pages use `smoke.test`.
+
+`crates/host/tests/browser_smoke.rs` (ignored in normal runs). Run it on the Mac mini and on the
+Windows VM:
+
+1. Build `clauseo-mcp` from branch `s27-mcp-guard`: `cargo build -p clauseo-mcp --release`.
+2. Get agent-browser v0.41.1 (`npm i -g agent-browser@0.41.1`, or the release binary from
+   <https://github.com/vercel-labs/agent-browser/releases/tag/v0.41.1>) and Chrome.
+3. Set, each to an absolute path:
+   - `CLAUSEO_SMOKE_MCP`: the `clauseo-mcp` binary;
+   - `CLAUSEO_SMOKE_AGENT_BROWSER`: the agent-browser native binary;
+   - `CLAUSEO_SMOKE_CHROME`: the Chrome executable.
+4. Run `cargo nextest run -p clauseo-host --run-ignored only -E 'test(browser_smoke)'`.
+
+It needs the network (it opens `https://example.com`). It passes when every request Chrome made
+went through the test proxy (only `example.com:443`, `smoke.test:<port>` and the loopback pixel
+`127.0.0.1:<port>`), the WebRTC page reported no UDP `host` or `srflx` candidate, and no
+`agent-browser-chrome-*` temp profile is left under `--cwd` after the close. On failure it
+keeps its folder under the temp folder and prints the proxy log.
 
 ## Deviations from the S27 brief
+
+The host part:
+
+- The Codex open's name is `mcp.browser.agent_browser_open` (codex-acp's title), matched
+  beside Claude's `mcp__browser__agent_browser_open`; an open whose `tool_call` already says
+  `completed` is recorded too.
+- The slot is freed in `launch_checks::discard`, the one path every session end takes, rather than
+  at a separate "session ended" hook.
+- `HostConfig::with_browser_launch` returns a `Result`: `OutsideJail` is refused when the host is
+  configured, not at each session.
+- Chrome is searched only when `tools.browser` is on and a proxy is configured; production has no
+  proxy until stage C, so it never searches yet.
+- `seed_sites.rs`'s constant changes from `[&str; 8]` to `&[&str]`, and `browser` becomes a
+  public module so stage C's proxy can read both lists.
+- `with_browser_executable` stays as a test-support override beside `with_chrome_roots`.
+- This file is copied from PR #200's branch with the host part added; it merges with #200's copy
+  when either lands.
+- The smoke test is longer than planned (about 790 lines: `browser_smoke.rs` and four modules in
+  `browser_smoke/`, two with an allowlisted `#![expect(clippy::disallowed_methods)]`) and has never
+  run here: this machine has no agent-browser and no Chrome.
+
+The guard:
 
 - `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` (and lower case on Unix) are set, to Clauseo's proxy;
   the brief said none. The brief's aim, never passing the agent's values, holds.
@@ -269,15 +467,19 @@ Added by a later S27 PR.
   number formatting reaching agent-browser (an integer beyond `u64` becomes a float).
 - A child line over 64 MiB ends the session: a page large enough to produce one fails rather
   than exhausting the guard's memory.
-- A Unix daemon outlives a kill of the guard until the host kills it from its `.pid` file or the
-  idle timeout ends it.
+- A Unix daemon outlives a kill of the guard until the idle timeout ends it (10 minutes); the
+  host does not kill it by PID. G17 item 6 measures how often that happens.
 
 ## Not verified
 
 - Windows: compiled with `cargo clippy --target x86_64-pc-windows-gnu`, never run.
   `CREATE_NO_WINDOW`, the case-insensitive pass-through on a real environment block, and the
   daemon's end under the Job Object are unverified.
-- The guard in front of the real agent-browser (the smoke test is a later S27 PR).
+- The guard in front of the real agent-browser: `browser_smoke` exists but has not run yet (by
+  hand, on the Mac mini and the Windows VM).
+- Which Chrome on a real Mac or Windows machine: only fixture folders.
+- That every host in `DENY_HOSTS` is still contacted by Chrome with agent-browser's flags (G17
+  item 5).
 - reqwest's reading of the proxy variables is from its documented behaviour, not from a run.
 - The URL host reader follows the WHATWG URL standard as written; it was not compared with
   Chrome's or the `url` crate's parser on the same inputs.

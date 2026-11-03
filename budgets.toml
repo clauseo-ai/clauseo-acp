@@ -642,3 +642,23 @@ gate = "alert"
 measured_by = "crates/connectors/benches/signin.rs against the fake; R24's by-hand row for the real one"
 status = "unmeasured"
 source = "S28 brief, Performance"
+
+[[budget]]
+id = "browser_cold_start_p95"
+metric = "first agent_browser_open answered, from the guard's start (agent-browser and headless Chrome cold), p95"
+limit = 3.0
+unit = "s"
+gate = "alert"
+measured_by = "browser_smoke timings, by hand (Mac mini, Windows VM)"
+status = "unmeasured"
+source = "S27; decision record 0029"
+
+[[budget]]
+id = "browser_session_memory_p95"
+metric = "memory of one session's browser (guard, agent-browser and Chrome's process tree), p95"
+limit = 600.0
+unit = "MB"
+gate = "alert"
+measured_by = "G17 item 6, by hand"
+status = "unmeasured"
+source = "S27; decision record 0029"

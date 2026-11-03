@@ -172,8 +172,9 @@ The host thread set the conditions the profile must keep: Claude keeps `settingS
     3. No slot (`TooManyBrowsers`).
     4. No proxy port (`NoProxy`).
     5. No Chrome (`BrowserNotInstalled`).
-  - Until S27's host PR, the Chrome (`with_browser_executable`) and the slots
-    (`with_browser_slots(limit, open)`) are test-support inputs.
+  - S27's host PR (record 0029, "The host part") replaced the stand-ins: the launch prep finds
+    the Chrome (`with_browser_executable` stays as a test-support override), and the slots are
+    counted per session (`with_browser_slots` is gone; `with_machine_memory` sets the limit).
   - `HostConfig::with_egress_proxy(Arc<dyn EgressProxy>)`, with `port_for(SessionKey)`, and
     `SessionKey { matter, thread, launch }`, are added here as stage C's R17 names them. Tests
     use `TestProxy`. Production passes none, so production has no browser until stage C.
