@@ -1,14 +1,15 @@
 //! [`PolicyBuilder::build`]: canonicalising the inputs and the refusals.
 
-use std::collections::BTreeSet;
+use std::collections::HashSet;
 use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
 use super::links::{canonical_findings, covered_targets, fit_budget, split_linked};
-use super::{ClaudeStore, Loopback, PROTECTED_NAMES, PathRule, Policy, PolicyBuilder};
+use super::names::{Keys, path_key};
+use super::{ClaudeStore, Loopback, PROTECTED_NAMES, PathRule, Policy, PolicyBuilder, same, under};
 use crate::Error;
-use crate::links::scan_matter;
+use crate::links::{LinkFinding, scan_matter};
 
 /// The checks and the canonical policy.
 pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
@@ -40,7 +41,7 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
         .map(|p| folder_and_name(p, "credential link"))
         .transpose()?;
     if let Some(link) = &credential_link
-        && (!link.starts_with(&state) || link == &state)
+        && (!under(link, &state) || same(link, &state))
     {
         return refuse(format!(
             "the credential link must be inside the state folder {}: {}",
@@ -89,23 +90,21 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
         .chain(over_cap.iter().cloned().map(PathRule::Literal))
         .collect();
     read_only_in_matter.sort();
-    read_only_in_matter.dedup();
-    let mut links = canonical_findings(parts.links, &matter)?;
-    let found: BTreeSet<PathBuf> = links.iter().map(|f| f.path.clone()).collect();
-    links.extend(
-        split_linked(parts.linked, &matter, &read_only_in_matter)
-            .into_iter()
-            .filter(|finding| !found.contains(&finding.path)),
-    );
+    // One rule per path and kind, however its names are written (over-cap files come from the
+    // host).
+    let mut seen = HashSet::new();
+    read_only_in_matter
+        .retain(|rule| seen.insert((matches!(rule, PathRule::Literal(_)), path_key(rule.path()))));
+    let (mut links, found) = canonical_findings(parts.links, &matter)?;
+    let linked = split_linked(parts.linked, &matter, &read_only_in_matter);
+    add_new(&mut links, &found, linked);
     let mut allowed: Vec<&Path> = vec![state.as_path()];
     allowed.extend(runtime.iter().map(PathBuf::as_path));
     allowed.extend(read.iter().map(PathBuf::as_path));
     allowed.extend(allowed_folders.iter().map(PathBuf::as_path));
     allowed.extend(notes.as_deref());
     let allowed_exactly = |p: &Path| {
-        credential_link
-            .as_deref()
-            .is_some_and(|link| super::same(p, link))
+        credential_link.as_deref().is_some_and(|link| same(p, link))
             || claude_store.as_ref().is_some_and(|store| store.covers(p))
     };
     let link_targets = covered_targets(&links, &allowed, &allowed_exactly);
@@ -138,6 +137,17 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
     })
 }
 
+/// `extra` added to `links`, each unless a finding already there names its path: `found` holds
+/// their [`path_key`](super::names::path_key)s, so each check is one lookup.
+fn add_new(links: &mut Vec<LinkFinding>, found: &HashSet<PathBuf>, extra: Vec<LinkFinding>) {
+    let mut keys = Keys::default();
+    links.extend(
+        extra
+            .into_iter()
+            .filter(|finding| !found.contains(&keys.of(&finding.path))),
+    );
+}
+
 /// The folders that hold a `.git`, repositories' working trees: neither they nor a folder above
 /// them is ever a link folder.
 fn working_trees(git: &[PathBuf]) -> Vec<PathBuf> {
@@ -157,7 +167,7 @@ fn check_matter(
     if is_root(matter) {
         return refuse(format!("the matter may not be the root folder: {shown}"));
     }
-    if home.is_some_and(|home| home.starts_with(matter)) {
+    if home.is_some_and(|home| under(home, matter)) {
         return refuse(format!(
             "the matter may not equal or hold the home folder: {shown}"
         ));
@@ -174,7 +184,7 @@ fn check_matter(
             state.display()
         ));
     }
-    if let Some(h) = hidden.iter().find(|h| h.starts_with(state)) {
+    if let Some(h) = hidden.iter().find(|h| under(h, state)) {
         return refuse(format!(
             "the state folder may not equal or hold a hidden path: {} and {}",
             state.display(),
@@ -194,7 +204,7 @@ fn check_notes(notes: &Path, matter: &Path, hidden: &[PathBuf]) -> Result<(), Er
             matter.display()
         ));
     }
-    if let Some(h) = hidden.iter().find(|h| h.starts_with(notes)) {
+    if let Some(h) = hidden.iter().find(|h| under(h, notes)) {
         return refuse(format!(
             "the notes folder may not equal or hold a hidden path: {shown} and {}",
             h.display()
@@ -218,18 +228,18 @@ fn check_reallowed(
     if is_root(p) {
         return refuse(format!("{what} may not be the root folder: {shown}"));
     }
-    if home.is_some_and(|home| home.starts_with(p)) {
+    if home.is_some_and(|home| under(home, p)) {
         return refuse(format!(
             "{what} may not equal or hold the home folder: {shown}"
         ));
     }
-    if matter.starts_with(p) {
+    if under(matter, p) {
         return refuse(format!(
             "{what} may not equal or hold the matter: {shown} and {}",
             matter.display()
         ));
     }
-    if let Some(h) = hidden.iter().find(|h| h.starts_with(p)) {
+    if let Some(h) = hidden.iter().find(|h| under(h, p)) {
         return refuse(format!(
             "{what} may not equal or hold a hidden path: {shown} and {}",
             h.display()
@@ -257,7 +267,7 @@ fn all_inside(paths: &[PathBuf], root: &Path, what: &str) -> Result<Vec<PathBuf>
     let mut out = Vec::with_capacity(paths.len());
     for p in paths {
         let p = folder_and_name(p, what)?;
-        if !p.starts_with(root) {
+        if !under(&p, root) {
             return refuse(format!(
                 "the {what} must be inside {}: {}",
                 root.display(),
@@ -295,7 +305,7 @@ pub(super) fn check_allowed(
             "an allowed folder may not be the root folder: {shown}"
         ));
     }
-    if home.is_some_and(|home| home.starts_with(folder)) {
+    if home.is_some_and(|home| under(home, folder)) {
         return refuse(format!(
             "an allowed folder may not equal or hold the home folder: {shown}"
         ));
@@ -376,9 +386,9 @@ fn absolute(p: &Path, what: &str) -> Result<(), Error> {
     }
 }
 
-/// Whether `a` and `b` are the same or one holds the other.
+/// Whether `a` and `b` are the same or one holds the other, by [`under`].
 fn overlap(a: &Path, b: &Path) -> bool {
-    a.starts_with(b) || b.starts_with(a)
+    under(a, b) || under(b, a)
 }
 
 /// Whether `p` is a root (`/`, or a drive root on Windows).

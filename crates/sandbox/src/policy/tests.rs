@@ -4,6 +4,7 @@ use crate::test_support::TempDir;
 mod allowed;
 mod links;
 mod reallowed;
+mod unicode;
 
 /// A matter, a state folder, a home and a data dir side by side in a temp folder.
 struct World {

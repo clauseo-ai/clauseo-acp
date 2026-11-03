@@ -120,7 +120,10 @@ impl Writer {
         }
     }
 
-    /// `(param "NAME")` for `path`, adding the parameter the first time.
+    /// `(param "NAME")` for `path`, adding the parameter the first time. The path is the
+    /// policy's canonical one, in the Unicode form the volume stored the name in; Seatbelt matches
+    /// `literal` and `subpath` rules across NFC, NFD and mixed forms itself (measured on APFS,
+    /// 2026-11-03), so no variants are written. Windows must use the path its own API returns.
     fn param(&mut self, name: &str, path: &Path) -> String {
         if !self.params.iter().any(|(n, _)| n == name) {
             self.params.push((name.to_owned(), path.to_owned()));

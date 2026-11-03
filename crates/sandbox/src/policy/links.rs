@@ -15,11 +15,12 @@
 //! folder above one: either would hide the repository and the files beside it. A rule whose
 //! folder is one of those stays where it is. If the count still does not fit, `build` refuses.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use super::build::{beneath_existing, refuse};
-use super::{PathRule, instruction_file, under};
+use super::names::{Keys, path_key};
+use super::{PathRule, instruction_file, same, under};
 use crate::{Error, LinkFinding, LinkKind};
 
 /// The most link rules (finding paths, folders and targets) one profile holds.
@@ -28,15 +29,19 @@ pub const LINK_RULES_MAX: usize = 256;
 /// Each finding with its path canonical up to its own name and its target canonical as far as
 /// it exists; a finding whose path is not inside the matter is refused. A target that cannot be
 /// resolved (a broken link with `..` past its missing part) stays as written: it cannot be
-/// reached while that part is missing.
+/// reached while that part is missing. Findings are kept once by [`path_key`] of path and
+/// target, and a path written in two forms keeps its first form (the walk's, which comes first),
+/// so the later sets compare plain bytes. Returns the findings and the keys of their paths.
 pub(super) fn canonical_findings(
     findings: Vec<LinkFinding>,
     matter: &Path,
-) -> Result<Vec<LinkFinding>, Error> {
+) -> Result<(Vec<LinkFinding>, HashSet<PathBuf>), Error> {
     // The walk's findings share folders; each folder is resolved once.
     let mut folders: BTreeMap<PathBuf, PathBuf> = BTreeMap::new();
     let mut out: Vec<LinkFinding> = Vec::with_capacity(findings.len());
-    let mut seen: BTreeSet<(PathBuf, Option<PathBuf>)> = BTreeSet::new();
+    let mut seen: HashSet<(PathBuf, Option<PathBuf>)> = HashSet::new();
+    let mut first_form: HashMap<PathBuf, PathBuf> = HashMap::new();
+    let mut keys = Keys::default();
     for finding in findings {
         let LinkFinding { path, kind, target } = finding;
         if !path.is_absolute() {
@@ -64,7 +69,7 @@ pub(super) fn canonical_findings(
             canonical
         };
         let canonical = folder.join(name);
-        if !canonical.starts_with(matter) || canonical == matter {
+        if !under(&canonical, matter) || same(&canonical, matter) {
             return refuse(format!(
                 "a link finding must be inside the matter {}: {}",
                 matter.display(),
@@ -72,16 +77,13 @@ pub(super) fn canonical_findings(
             ));
         }
         let target = target.map(|t| beneath_existing(&t, "link target").unwrap_or(t));
-        let finding = LinkFinding {
-            path: canonical,
-            kind,
-            target,
-        };
-        if seen.insert((finding.path.clone(), finding.target.clone())) {
-            out.push(finding);
+        let key = keys.of(&canonical);
+        if seen.insert((key.clone(), target.as_deref().map(|t| keys.of(t)))) {
+            let path = first_form.entry(key).or_insert(canonical).clone();
+            out.push(LinkFinding { path, kind, target });
         }
     }
-    Ok(out)
+    Ok((out, first_form.into_keys().collect()))
 }
 
 /// Hard-link findings for the groups of [`MatterScan`](crate::MatterScan) whose every name is
@@ -126,9 +128,9 @@ pub(super) fn fit_budget(
     let mut paths: BTreeSet<PathBuf> = findings.iter().map(|f| f.path.clone()).collect();
     let mut folders: BTreeSet<PathBuf> = BTreeSet::new();
     let usable = |folder: &Path| {
-        folder != matter
-            && folder.starts_with(matter)
-            && !working_trees.iter().any(|tree| tree.starts_with(folder))
+        !same(folder, matter)
+            && under(folder, matter)
+            && !working_trees.iter().any(|tree| under(tree, folder))
     };
     loop {
         let mut count = paths.len() + folders.len() + targets.len();
@@ -198,11 +200,14 @@ pub(super) fn covered_targets(
     allowed_exactly: &dyn Fn(&Path) -> bool,
 ) -> Vec<PathBuf> {
     let targets: BTreeSet<&PathBuf> = findings.iter().filter_map(|f| f.target.as_ref()).collect();
+    // One rule per target, however its names are written (a broken link keeps its own text).
+    let mut keys = HashSet::new();
     targets
         .into_iter()
+        .filter(|target| keys.insert(path_key(target)))
         .filter(|target| {
             let covered = allowed.iter().any(|a| under(target, a)) || allowed_exactly(target);
-            let holds_allowed = allowed.iter().any(|a| a.starts_with(target));
+            let holds_allowed = allowed.iter().any(|a| under(a, target));
             covered && !holds_allowed
         })
         .cloned()
