@@ -16,8 +16,15 @@ import { parse, parseProbe } from "./parse.ts";
  * `_` `~` `=` `[` `]` `<` `>` `&` `#` `|` `+` `$` `^` `@`), nor nesting.ts's stand-ins.
  */
 const PLAIN = /^[\p{L}\p{M}\p{N} .,;:'"?!()/\u0964-]*$/u;
-/** The last character (a code point) is one of PLAIN's. */
-const PLAIN_LAST = /[\p{L}\p{M}\p{N} .,;:'"?!()/\u0964-]$/u;
+/**
+ * The last character (a code point) is one of PLAIN's. Taken out by code point and tested with PLAIN, not with
+ * an end-anchored class (`/[\p{L}…]$/u`): V8 14.6 (Node 26) misses an astral letter at the end with that form,
+ * so `Text 𝐀𝐁` read as not plain there and as plain on Node 24.
+ */
+function plainLast(text: string): boolean {
+  const last = Array.from(text.slice(-2)).at(-1);
+  return last !== undefined && PLAIN.test(last);
+}
 /**
  * A line inside a paragraph whose start this is starts no block, however it ends: a letter, after spaces and
  * at most three `*` or `_` or exactly two `~` (`**Clause 8.3** obliges`). A list marker needs a space or
@@ -89,7 +96,7 @@ export function appended(known: Parsed, source: string): Root | undefined {
   // - The paragraph's last child is a text node running to the end, so the delta joins that text, as
   //   micromark joins adjacent text; tail repair, the depth check, hast, tags and the sanitiser run after.
   if (delta === "" || lineStart === old.length || !PLAIN.test(delta)) return undefined;
-  if (!PLAIN_LAST.test(old)) return undefined;
+  if (!plainLast(old)) return undefined;
   const line = source.slice(lineStart);
   if (!SETTLED_START.test(line) || READS_ON.test(line)) return undefined;
   const { root } = known;

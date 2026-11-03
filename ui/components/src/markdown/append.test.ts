@@ -68,6 +68,7 @@ test("anything that may not be inert text falls back to a full parse", () => {
     ["A paragraph *", "x"], // the character before the delta is syntax
     ["Text &amp", ";"], // a character reference ends
     ["Text &amp; more", " text"], // `&` on the line
+    ["Text 𝐀\uD835", "\uDC02 more"], // a chunk boundary inside a surrogate pair
     ["Mail a@b.co", "m"], // an email literal's domain runs on
     ["Go to www", ".example.com"], // a www autolink
     ["Go to www.", "example.com"],
