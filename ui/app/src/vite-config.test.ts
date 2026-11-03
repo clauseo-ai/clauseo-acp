@@ -12,6 +12,7 @@ const BUILD = { timeout: 60_000 };
 // transforms App.tsx the way the dev server does, so it fails if the compiler is not wired in.
 // (`memo_cache_sentinel` in a bundle proves nothing: React's own runtime defines it.) The path is
 // relative to ui/app, where `pnpm -C ui/app run test` runs vitest.
+// The first test starts a Vite server and Babel cold: 6 s on a loaded runner, so 30 s of its own.
 test("vite.config.ts builds App.tsx with the React Compiler", async () => {
   const server = await createServer({
     configFile: "vite.config.ts",
@@ -25,7 +26,7 @@ test("vite.config.ts builds App.tsx with the React Compiler", async () => {
   } finally {
     await server.close();
   }
-});
+}, 30_000);
 
 test("the dev CSP is the production CSP plus inline script and style and Vite's websocket", () => {
   const production = tauriConf.app.security.csp;

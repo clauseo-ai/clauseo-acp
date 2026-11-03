@@ -68,6 +68,7 @@ const kinds = () =>
   h!.transport.only("dispatch").map((c) => Object.keys(c.command.command)[0] as keyof HostCommand);
 const streams = (call: "subscribe" | "unsubscribe") => h!.transport.only(call).map((c) => c.stream);
 
+// The file's first test mounts the room cold: 9.6 s on a loaded runner, and the rest of the file failed after it, so 30 s of its own.
 test("New conversation sends nothing; its first Enter runs create_thread, send_prompt, rename_thread, in that order", async () => {
   h = await mountRoom({
     threads: [thread(T1)],
@@ -93,7 +94,7 @@ test("New conversation sends nothing; its first Enter runs create_thread, send_p
   const current = rows().find((r) => r.getAttribute("aria-current") === "true");
   expect(current?.textContent).toContain(titleOf(question) ?? "");
   expect(rows()).toHaveLength(2);
-});
+}, 30_000);
 
 test("the rows under the open matter: the draft says New conversation, a thread its title, the current one marked, the plan only where it differs", async () => {
   h = await mountRoom({
