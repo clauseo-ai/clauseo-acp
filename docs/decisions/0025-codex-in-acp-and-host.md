@@ -103,6 +103,16 @@ agent message text to one that does not (`:29655-29658`, `:44519-44523`). It nev
   lists the skills. The only
   keys a settings `CODEX_CONFIG` contributes are `model` and `model_reasoning_effort`, so a
   by-hand check can pick the cheapest model while no settings value can undo a switch.
+- **On Windows, the unelevated sandbox (stage B with the orchestrator, 2026-11-03).** On Windows
+  `CODEX_CONFIG` also holds `windows.sandbox = "unelevated"`, set with R15's pins, so no
+  settings or profile value changes it. With no Windows sandbox set, codex `rust-v0.162.1` turns
+  `workspace-write` into read-only on Windows (`codex-rs/config/src/config_toml.rs:687-700`), and
+  #274's by-hand proof saw Codex ask before reading a skill file. This keeps Rohan's
+  `workspace-write` decision on Windows. Unelevated is Codex's restricted-token sandbox: it needs
+  no admin setup, and G8a verified it (clauseo-acp-private #281). It works only from the lawyer's
+  desktop session, since from session 0 Codex's sandbox cannot start PowerShell (G8a). It is
+  revisited when stage C's S15 (Clauseo's own Windows sandbox) lands: S15 chooses Codex's sandbox
+  inside its own or its own alone, and updates this record.
 - **Clauseo's skills (amended for record 0031).** codex `rust-v0.162.1` has no root-scoped
   skills key: `SkillsConfig` has only `bundled`, `include_instructions`, `max_context_tokens`
   and `config` (`codex-rs/config/src/skills_config.rs:41-56`), `[[skills.config]]` matches one
@@ -175,7 +185,8 @@ agent message text to one that does not (`:29655-29658`, `:44519-44523`). It nev
 - Wiring #162's hooks object is one line in `codex_hooks`; its trust check is already in place.
 - Clauseo advertises the `plan` capability, so codex-acp sends its markdown plans as
   `plan_update`, which shows nothing until markdown plans get a protocol type.
-- Stage C moves Codex to its `agent` mode inside the sandbox; the mode rule changes then.
+- Stage C moves Codex to its `agent` mode inside the sandbox; the mode rule changes then. On
+  Windows, S15 also settles the `windows.sandbox` key.
 
 ## Status
 

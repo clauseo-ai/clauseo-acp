@@ -204,18 +204,19 @@ fn codex_launch_variables_beat_the_settings_env() {
     );
     let config: Value = serde_json::from_str(&var(codex, "CODEX_CONFIG").unwrap()).unwrap();
     // R21's keys go beside R15's (decision record 0030): the search key and the writable roots,
-    // exactly.
-    assert_eq!(
-        config,
-        json!({
-            "model": "m",
-            "features": {"apps": false, "plugins": false, "skill_mcp_dependency_install": false},
-            "cloud": {"skills": {"enabled": false}},
-            "skills": {"bundled": {"enabled": false}, "include_instructions": false},
-            "web_search": "live",
-            "sandbox_workspace_write": {"writable_roots": [work, notes]},
-        })
-    );
+    // exactly; on Windows, also the unelevated sandbox (record 0025).
+    let mut expected = json!({
+        "model": "m",
+        "features": {"apps": false, "plugins": false, "skill_mcp_dependency_install": false},
+        "cloud": {"skills": {"enabled": false}},
+        "skills": {"bundled": {"enabled": false}, "include_instructions": false},
+        "web_search": "live",
+        "sandbox_workspace_write": {"writable_roots": [work, notes]},
+    });
+    if cfg!(windows) {
+        expected["windows"] = json!({"sandbox": "unelevated"});
+    }
+    assert_eq!(config, expected);
     for dropped in [
         "CODEX_PATH",
         "APP_SERVER_LOGS",
