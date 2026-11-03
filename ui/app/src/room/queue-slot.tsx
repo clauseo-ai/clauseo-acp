@@ -21,6 +21,9 @@ export type QueueSlotProps = {
   thread: ThreadId | null;
   /** Puts the focus back in the composer's field (after a row's Send now or Remove takes the row away). */
   onFocusField: () => void;
+  /** An edit refused as its message had already gone, with no other message left to show the strip: its words, for
+   * the composer to keep and say so. */
+  onEditLost?: ((text: string) => void) | undefined;
 };
 
 /** What the slot gives the strip: the contract's props, and where to say the strip's head. */

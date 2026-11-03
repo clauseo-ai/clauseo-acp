@@ -397,13 +397,42 @@ test("held after a failure: the failed line and Send next", async () => {
   expect(one("send-next")).not.toBeNull();
 });
 
-test("held after a restart (no step): the count line and Send next", async () => {
+test("held after a restart (no step): the count alone and Send next", async () => {
   await mount();
   h!.deliver([reset([queued(5, 2, "A."), queued(6, 3, "B.")], held())]);
   await h!.settle();
-  expect(say()).toBe("2 queued, sent in order.");
+  expect(say()).toBe("2 queued.");
+  expect(one("queue-said")?.textContent).toBe("2 queued.");
   expect(one("send-next")).not.toBeNull();
   expect(host!.querySelector(".queue")?.hasAttribute("data-held")).toBe(true);
+});
+
+test('held after an answer that ended well, with one message: "1 queued.", never "sent once this answer is done"', async () => {
+  await mount();
+  h!.deliver([
+    reset([userMessage(1, 1, "Q1"), step(2, { stop: "end_turn" }), queued(5, 2, "A.")], held()),
+  ]);
+  await h!.settle();
+  expect(say()).toBe("1 queued.");
+  expect(one("send-next")).not.toBeNull();
+});
+
+test("Remove pressed while the row's edit is on its way still goes", async () => {
+  await mount((c) =>
+    c.edit_queued_prompt !== undefined ? new Promise<never>(() => {}) : defaultOutcome(c),
+  );
+  h!.deliver([reset([queued(5, 2, "A."), queued(6, 3, "B.")], header("running"))]);
+  await h!.settle();
+  await h!.click(inRow(0, "queued-edit"));
+  const field = host!.querySelector<HTMLTextAreaElement>(".queue-edit")!;
+  await act(async () => {
+    Reflect.set(HTMLTextAreaElement.prototype, "value", "A, edited.", field);
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await h!.click([...host!.querySelectorAll("button")].find((b) => txt(b) === "Save"));
+  expect(h!.sent("edit_queued_prompt")).toHaveLength(1);
+  await h!.click(inRow(0, "queued-remove"));
+  expect(h!.sent("remove_queued_prompt")).toEqual([{ thread: THREAD, turn: uuid(2, 4) }]);
 });
 
 test("after Remove takes a row away the focus goes to the next row's Send now; after the last, to the field", async () => {

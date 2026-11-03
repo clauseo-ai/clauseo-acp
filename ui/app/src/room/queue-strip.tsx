@@ -5,7 +5,9 @@
 // not again until the row has gone. Replies land with
 // the next frame's flush (#253): a refusal shows its words under the head until the next press or until the queue
 // changes; `thread.turn_not_queued` says the message had already gone, and the strip follows the view, where it now
-// shows as sent. Never the host's message.
+// shows as sent. An edit refused so as the last queued message went (the strip gone or going with it) hands its words
+// to the composer (`onEditLost`), which says it there. Never the host's message. An edit's key is its own
+// (`edit:${turn}`), so Remove and Send now still go while it is on its way.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { QueueStrip } from "@clauseo/components/clauseo/queue.tsx";
 import type { QueueHold } from "@clauseo/components/clauseo/queue-model.ts";
@@ -50,6 +52,7 @@ export function LiveQueueStrip({
   stream,
   thread,
   onFocusField,
+  onEditLost,
   onSay,
 }: QueueStripProps) {
   const store = useViewStore();
@@ -94,7 +97,13 @@ export function LiveQueueStrip({
   /** Sends one press's command, once per key while it is on its way or kept (`keep`). A refusal lands with the next
    * frame's flush: its words, and `refused` (the part's: the edit opens again, the pressed row is forgotten) unless
    * the message had already gone. */
-  const send = (key: string, command: HostCommandH9, keep: Keep, refused?: () => void) => {
+  const send = (
+    key: string,
+    command: HostCommandH9,
+    keep: Keep,
+    refused?: () => void,
+    gone?: (left: readonly Queued[]) => boolean,
+  ) => {
     if (pending.current.has(key)) return;
     pending.current.set(key, keep);
     refuse(null);
@@ -107,7 +116,10 @@ export function LiveQueueStrip({
         const code = toHostError(e).code;
         store.inFrame(() => {
           // the queue as this frame's flush left it: the words stand until it changes
-          refuse({ code, queue: stream === null ? NONE : pickQueued(store.view(stream)) });
+          const left = stream === null ? NONE : pickQueued(store.view(stream));
+          // the message gone, and `gone` took the rest (an edit's words, to the composer): no words here
+          if (code === GONE && gone?.(left) === true) return;
+          refuse({ code, queue: left });
           if (code !== GONE) refused?.();
         });
       },
@@ -121,9 +133,14 @@ export function LiveQueueStrip({
     };
   const onEdit = (id: string, text: string, refused: () => void) => {
     const turn = turnOf(id);
-    // the text alone: the host keeps the message's file blocks
-    if (thread !== null && turn !== undefined)
-      send(turn, { edit_queued_prompt: { thread, turn, text } }, "no", refused);
+    // the text alone: the host keeps the message's file blocks; its own key, so the row's Remove and Send now still go
+    if (thread === null || turn === undefined) return;
+    send(`edit:${turn}`, { edit_queued_prompt: { thread, turn, text } }, "no", refused, (left) => {
+      // the last message went with the edit on its way: the strip is gone or going, so the words go to the composer
+      if (onEditLost === undefined || left.some((q) => q.turn !== turn)) return false;
+      onEditLost(text);
+      return true;
+    });
   };
   const onSendNext = () => {
     if (thread !== null) send(NEXT, { resume_queue: { thread } }, "change");
