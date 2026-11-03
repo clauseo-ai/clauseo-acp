@@ -1,0 +1,17 @@
+# Windows ARM64's required check on a pull request. Tier 2 waits for the merge (ci.yml's notes): on
+# a pull request ci.yml's build matrix leaves Windows ARM64 out, and this job reports its check
+# instead. Skipped by `if`, it takes no runner and reports as skipped, which satisfies a required
+# check. It is here and not in ci.yml so that it runs on pull requests only: in a merge group
+# ci.yml's matrix runs the ARM64 tests under the same check name, and only that result counts.
+name: tier 2 on pull requests
+on:
+  pull_request:
+permissions: {}
+jobs:
+  tier2-aarch64-pc-windows-msvc:
+    name: build (aarch64-pc-windows-msvc)
+    # Never true (no event is named never); actionlint rejects a constant `false`.
+    if: github.event_name == 'never'
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "Windows ARM64 is tier 2; its tests run in the merge queue, its build on push to main, nightly and on demand."
