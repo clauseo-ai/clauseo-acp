@@ -80,6 +80,20 @@ export const ids = {
   limitStop: "limit-stop",
   /** `<time dateTime="<ISO, UTC>">` inside limitStop. */
   limitResetsAt: "limit-resets-at",
+  /**
+   * The toolbar's plan line, with `data-tone` (the MeterTone: neutral, near, at_limit) and
+   * `data-freshness` (the Freshness: fresh, stale, loading, unavailable, missing_scope,
+   * not_applicable, live_only).
+   */
+  plan: "plan",
+  /** The plan card that the plan line opens, with the windows and their resets. */
+  planCard: "plan-card",
+  /** Try again in the plan card, which asks for a fresh read (`refresh_limits` with `try_again`). */
+  planTryAgain: "plan-try-again",
+  /** The warning in the composer's notice line under the field; never blocks sending. */
+  limitWarning: "limit-warning",
+  /** The Plan and usage section of the settings window. */
+  usageSection: "usage-section",
   /** A finished turn's Undo. */
   undo: "undo",
   /** The Versions panel, which stands where the rail of matters stood while it is open. */
@@ -223,6 +237,11 @@ export function window(page: Page) {
     notices: id(ids.notice),
     limitStop: id(ids.limitStop),
     limitResetsAt: id(ids.limitResetsAt),
+    /** The toolbar's plan line (`data-tone`, `data-freshness`). */
+    plan: id(ids.plan),
+    planCard: id(ids.planCard),
+    planTryAgain: id(ids.planTryAgain),
+    limitWarning: id(ids.limitWarning),
     undo: id(ids.undo),
     /** The Versions button on the toolbar, which opens the panel. */
     versionsButton: page.getByRole("button", { name: "Versions", exact: true }),
@@ -274,6 +293,8 @@ export type Window = ReturnType<typeof window>;
  * English names, as the settings sections (ui/app/src/settings/sections/) label them. */
 export function settingsWindow(page: Page) {
   return {
+    /** The Plan and usage section, shown once its channel carries the limits (U12). */
+    usage: page.getByTestId(ids.usageSection),
     /** Appearance in the section list. */
     appearance: page
       .getByRole("navigation", { name: "Sections", exact: true })
