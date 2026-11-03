@@ -104,14 +104,14 @@ const ROWS: [ToolState, string][] = [
   [web(off("locked_off")), "Off. Managed by your organisation."],
   [
     web(off("no_search_on_this_login")),
-    "This Claude login can't search the web. Clauseo can still read web pages.",
+    "Off. This Claude login can't search the web. Clauseo can still read web pages.",
   ],
   [browser("available"), "On. Clauseo can open web pages in its own browser."],
   [browser(off("off")), "Off. You turned it off in Settings."],
   [browser(off("locked_off")), "Off. Managed by your organisation."],
   [
     browser(off("managed_by_firm")),
-    "Off. Your organisation chooses the tools Claude has on this computer, so Clauseo adds none.",
+    "Off. Your organisation chooses the tools Claude has on this computer, so Clauseo can't add its browser.",
   ],
   [browser(off("no_proxy")), "Off until Clauseo can check each website the browser opens."],
   [
@@ -130,18 +130,37 @@ test.each(ROWS)("the popover's row for %o says its words", async (tool, said) =>
   expect(words(tool.tool)).toEqual([said]);
 });
 
-test("Off's Open Settings opens the settings window", async () => {
+const settingsButtons = () => [
+  ...document.body.querySelectorAll<HTMLElement>('[data-testid="tool-settings"]'),
+];
+const foot = () => document.body.querySelector<HTMLElement>('[data-testid="tool-settings-foot"]');
+
+test("both tools off: one Open Settings at the popover's foot, under what a change reaches, and it opens Settings", async () => {
   h = await open([web(off("off")), browser(off("off"))]);
   await openPopover();
-  expect(inRow("web_search", "tool-settings")?.textContent).toBe("Open Settings");
-  await h.click(inRow("browser", "tool-settings"));
+  expect(settingsButtons()).toHaveLength(1);
+  expect(row("web_search")?.querySelector("button")).toBeNull();
+  expect(row("browser")?.querySelector("button")).toBeNull();
+  expect(foot()?.querySelector("p")?.textContent).toBe("Changes apply to new conversations.");
+  expect(popup()?.lastElementChild).toBe(foot());
+  expect(settingsButtons()[0]?.textContent).toBe("Open Settings");
+  await h.click(settingsButtons()[0]);
   expect(h.transport.only("open_settings")).toHaveLength(1);
 });
 
-test("Off without the settings window offers no Open Settings; locked off never has a button", async () => {
+test("one tool off: the same foot, once", async () => {
+  h = await open([web(off("off"))]);
+  await openPopover();
+  expect(settingsButtons()).toHaveLength(1);
+  expect(foot()?.textContent).toContain("Changes apply to new conversations.");
+});
+
+test("Off without the settings window offers no Open Settings and no foot; locked off never has a button", async () => {
   h = await open([web(off("off")), browser(off("locked_off"))], false);
   await openPopover();
-  expect(inRow("web_search", "tool-settings")).toBeNull();
+  expect(settingsButtons()).toEqual([]);
+  expect(foot()).toBeNull();
+  expect(document.body.textContent).not.toContain("Changes apply to new conversations.");
   expect(row("browser")?.querySelector("button")).toBeNull();
 });
 
@@ -169,7 +188,7 @@ test("Download Chrome is the consent: it sends InstallBrowser once and goes, the
   await openPopover();
   expect(words("browser")).toEqual([
     "Off. There's no Chrome on this computer.",
-    "Clauseo can download its own Chrome from Google, about 200 MB, once for all conversations. It needs about 1 GB free.",
+    "Clauseo can download its own Chrome from Google, about 200\u00a0MB, once for all conversations. It needs about 1\u00a0GB free.",
   ]);
   const download = inRow("browser", "tool-download");
   expect(download?.textContent).toBe("Download Chrome");
@@ -178,21 +197,20 @@ test("Download Chrome is the consent: it sends InstallBrowser once and goes, the
   expect(inRow("browser", "tool-download")).toBeNull();
   download?.click();
   expect(h.transport.only("install_browser")).toHaveLength(1);
-  expect(row("browser")?.textContent).toContain("Downloading Chrome. 0 of 201 MB.");
+  expect(words("browser")).toEqual(["Off until Chrome is downloaded."]);
+  expect(row("browser")?.textContent).toContain("Downloading Chrome. 0 of 201\u00a0MB.");
   await play({ downloading: { bytes: 64_400_000, total: 201_000_000 } });
   const bar = row("browser")?.querySelector('[role="progressbar"]');
-  expect(bar?.getAttribute("aria-valuetext")).toBe("Downloading Chrome. 64 of 201 MB.");
-  expect(row("browser")?.textContent).toContain("Downloading Chrome. 64 of 201 MB.");
+  expect(bar?.getAttribute("aria-valuetext")).toBe("Downloading Chrome. 64 of 201\u00a0MB.");
+  expect(row("browser")?.textContent).toContain("Downloading Chrome. 64 of 201\u00a0MB.");
   expect(row("browser")?.querySelector("button")).toBeNull();
   await play("unpacking");
+  expect(words("browser")).toEqual(["Off until Chrome is downloaded."]);
   const full = row("browser")?.querySelector('[role="progressbar"]');
   expect(full?.getAttribute("aria-valuetext")).toBe("Unpacking Chrome.");
   expect(full?.getAttribute("aria-valuenow")).toBe(full?.getAttribute("aria-valuemax"));
   await play("done");
-  expect(words("browser")).toEqual([
-    "Off. There's no Chrome on this computer.",
-    "Chrome is ready. New conversations get the browser.",
-  ]);
+  expect(words("browser")).toEqual(["Chrome is ready. New conversations get the browser."]);
   expect(row("browser")?.querySelector('[role="progressbar"]')).toBeNull();
   // the phrase on the status line never changes for the download
   expect(line()?.textContent).toBe("Browser off");
@@ -220,7 +238,7 @@ test("opened by a press, the popup itself takes the focus, named by the tool lin
   expect(document.activeElement?.tagName).not.toBe("BUTTON");
   expect(popup()?.getAttribute("tabindex")).toBe("-1");
   expect(popup()?.getAttribute("aria-labelledby")).toBe(line()?.id);
-  expect(inRow("web_search", "tool-settings")).not.toBeNull();
+  expect(settingsButtons()).toHaveLength(1);
 });
 
 test("opened by a key, the popup takes the focus too, and an Enter right after opening starts no download", async () => {
@@ -242,20 +260,93 @@ test("opened by a key, the popup takes the focus too, and an Enter right after o
   expect(inRow("browser", "tool-download")).not.toBeNull();
 });
 
+const MESSAGE = "curl: (56) Recv failure: Connection reset by peer";
+
 test.each([
-  ["disk", "Chrome couldn't be downloaded. It needs about 1 GB free on this computer."],
-  ["refused", "Your network is blocking the download."],
-  ["check", "The download didn't match Google's, so Clauseo deleted it."],
-  ["other", "Chrome couldn't be downloaded."],
-] as const)("a failed download (%s) says why and offers Try again", async (code, said) => {
+  ["network", "The connection dropped before Chrome finished downloading."],
+  ["size_mismatch", "The download didn't match the file Google published, so Clauseo deleted it."],
+  ["signature", "The download didn't match the file Google published, so Clauseo deleted it."],
+  ["disk_space", "Chrome couldn't be downloaded. It needs about 1\u00a0GB free on this computer."],
+  ["host_refused", "Your network is blocking the download."],
+  ["unpack", "Chrome downloaded but couldn't be unpacked."],
+  ["cancelled", "The download stopped before it finished."],
+  ["a_newer_code", "Chrome couldn't be downloaded."],
+] as const)(
+  "a failed download (%s) says why and offers Try again, never the host's message",
+  async (code, said) => {
+    h = await open([browser(off("browser_not_installed"))]);
+    await play({ offer: "download", bytes: 200_000_000 });
+    await play({ failed: { code, message: MESSAGE } });
+    await openPopover();
+    expect(words("browser")).toEqual(["Off. There's no Chrome on this computer.", said]);
+    expect(document.body.textContent).not.toContain(MESSAGE);
+    expect(document.body.innerHTML).not.toContain("Recv failure");
+    const retry = inRow("browser", "tool-retry");
+    expect(retry?.textContent).toBe("Try again");
+    await h.click(retry);
+    expect(h.transport.only("install_browser")).toHaveLength(1);
+    expect(inRow("browser", "tool-retry")).toBeNull();
+  },
+);
+
+test("a computer that can't download Chrome says to install it, with no Try again", async () => {
   h = await open([browser(off("browser_not_installed"))]);
   await play({ offer: "download", bytes: 200_000_000 });
-  await play({ failed: { code } });
+  await play({ failed: { code: "unsupported", message: MESSAGE } });
   await openPopover();
-  expect(words("browser")).toEqual(["Off. There's no Chrome on this computer.", said]);
-  const retry = inRow("browser", "tool-retry");
-  expect(retry?.textContent).toBe("Try again");
-  await h.click(retry);
-  expect(h.transport.only("install_browser")).toHaveLength(1);
+  expect(words("browser")).toEqual([
+    "Off. There's no Chrome on this computer.",
+    "This computer can't download Chrome for Clauseo. Install Google Chrome to use the browser.",
+  ]);
+  expect(row("browser")?.querySelector("button")).toBeNull();
+  expect(document.body.textContent).not.toContain(MESSAGE);
+});
+
+test("a refused InstallBrowser shows no failure: the offer stands again as it stood before the press", async () => {
+  h = await open([browser(off("browser_not_installed"))]);
+  await play({ offer: "download", bytes: 201_000_000 });
+  h.transport.installBrowser = () => Promise.reject(new Error("a download is already running"));
+  await openPopover();
+  await h.click(inRow("browser", "tool-download"));
+  await h.settle();
+  expect(words("browser")).toEqual([
+    "Off. There's no Chrome on this computer.",
+    "Clauseo can download its own Chrome from Google, about 200\u00a0MB, once for all conversations. It needs about 1\u00a0GB free.",
+  ]);
+  expect(inRow("browser", "tool-download")).not.toBeNull();
   expect(inRow("browser", "tool-retry")).toBeNull();
+  expect(row("browser")?.textContent).not.toContain("couldn't");
+});
+
+test("the rendered download lines hold every number to its unit with a non-breaking space", async () => {
+  h = await open([browser(off("browser_not_installed"))]);
+  await play({ offer: "download", bytes: 201_000_000 });
+  await openPopover();
+  const said = () => row("browser")?.textContent ?? "";
+  const texts = [said()];
+  await play({ downloading: { bytes: 64_400_000, total: 201_000_000 } });
+  texts.push(said());
+  await play({ failed: { code: "disk_space", message: "" } });
+  texts.push(said());
+  for (const text of texts) {
+    expect(text).toMatch(/\d\u00a0(MB|GB)/);
+    expect(text).not.toMatch(/\d\s(?<!\u00a0)(MB|GB)/u);
+  }
+});
+
+test("the popover keeps one width through every download state", async () => {
+  h = await open([browser(off("browser_not_installed"))]);
+  await play({ offer: "download", bytes: 201_000_000 });
+  await openPopover();
+  const classes = [popup()?.className];
+  await play({ downloading: { bytes: 64_400_000, total: 201_000_000 } });
+  classes.push(popup()?.className);
+  await play("unpacking");
+  classes.push(popup()?.className);
+  await play("done");
+  classes.push(popup()?.className);
+  await play({ failed: { code: "network", message: "" } });
+  classes.push(popup()?.className);
+  expect(classes[0]?.split(" ")).toContain("w-card-tile");
+  expect(new Set(classes).size).toBe(1);
 });

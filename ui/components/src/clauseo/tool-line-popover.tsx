@@ -39,7 +39,8 @@ export function ToolLinePopover({
             initialFocus={popup}
             tabIndex={-1}
             aria-labelledby={trigger}
-            className={raised({ width: "menu" })}
+            // one width in every state, the widest the menu takes, so the plane never jumps as the download moves on
+            className={`${raised({ width: "menu" })} w-card-tile`}
             data-testid="tool-popover"
           >
             {children}

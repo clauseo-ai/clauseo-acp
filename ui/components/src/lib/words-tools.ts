@@ -14,30 +14,40 @@ const HI = {
   Browser: null,
   // where web search stands
   "On. Clauseo can search the web and read pages.": null,
-  "This {name} login can't search the web. Clauseo can still read web pages.": null,
+  "Off. This {name} login can't search the web. Clauseo can still read web pages.": null,
   // where either tool stands when it is off: {managed} is the settings window's "Managed by your organisation"
   "Off. You turned it off in Settings.": null,
   "Off. {managed}.": null,
   "Open Settings": null,
+  // under the rows when Open Settings is offered: a change in Settings never reaches the open conversation
+  "Changes apply to new conversations.": null,
   // where the browser stands
   "On. Clauseo can open web pages in its own browser.": null,
-  "Off. Your organisation chooses the tools {name} has on this computer, so Clauseo adds none.":
+  "Off. Your organisation chooses the tools {name} has on this computer, so Clauseo can't add its browser.":
     null,
   "Off until Clauseo can check each website the browser opens.": null,
   "Off. Other conversations are using every browser this computer can run. One frees up when another conversation closes.":
     null,
   "Off. There's no Chrome on this computer.": null,
-  // the Chrome download
-  "Clauseo can download its own Chrome from Google, about 200 MB, once for all conversations. It needs about 1 GB free.":
+  // while Chrome downloads or unpacks, the browser row's first line says what it waits for
+  "Off until Chrome is downloaded.": null,
+  // the Chrome download; a number and its unit are held together by a non-breaking space (\u00a0)
+  "Clauseo can download its own Chrome from Google, about 200\u00a0MB, once for all conversations. It needs about 1\u00a0GB free.":
     null,
   "Download Chrome": null,
   "Install Google Chrome to use the browser.": null,
-  "Downloading Chrome. {done} of {total} MB.": null,
+  "Downloading Chrome. {done} of {total}\u00a0MB.": null,
   "Unpacking Chrome.": null,
   "Chrome is ready. New conversations get the browser.": null,
-  "Chrome couldn't be downloaded. It needs about 1 GB free on this computer.": null,
+  // a failed download, by the host's code
+  "The connection dropped before Chrome finished downloading.": null,
+  "The download didn't match the file Google published, so Clauseo deleted it.": null,
+  "Chrome couldn't be downloaded. It needs about 1\u00a0GB free on this computer.": null,
   "Your network is blocking the download.": null,
-  "The download didn't match Google's, so Clauseo deleted it.": null,
+  "Chrome downloaded but couldn't be unpacked.": null,
+  "This computer can't download Chrome for Clauseo. Install Google Chrome to use the browser.":
+    null,
+  "The download stopped before it finished.": null,
   "Chrome couldn't be downloaded.": null,
   "Try again": null,
 } as const;
