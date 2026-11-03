@@ -13,7 +13,7 @@
 // with a thread (queue-slot.tsx), under the wait for another conversation (queue.tsx). After the hint's Send now or Queue
 // the focus goes back to the field, so the emptied words can be undone. An edit the strip couldn't make because its
 // message had already gone comes back into the field (after the words there, a blank line between); when it was the
-// last queued, the working line says so until the next send (else the strip does).
+// last queued, the working line says so until the next send or the drained turn starts (else the strip does).
 import {
   use,
   useCallback,
@@ -21,6 +21,7 @@ import {
   useImperativeHandle,
   useRef,
   useState,
+  useSyncExternalStore,
   type Ref,
 } from "react";
 import {
@@ -35,6 +36,7 @@ import { frame } from "@clauseo/components/lib/words-frame.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { StoreContext } from "../../store/hooks.ts";
+import type { StreamView } from "../../store/view.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type { EntryId, ErrorCode, StreamId, ThreadId } from "../../transport/protocol.ts";
 import type { Conversations } from "../conversations.ts";
@@ -148,15 +150,24 @@ export function WorkComposer({
     stopWanted.current = wanted;
   }, []);
   if (raised && wait === null) setRaised(false);
-  // an edit lost as its message went (the strip's onEditLost): the working line says so until the next send; the ref
-  // keeps a send from setting the false already there (a second commit in the reply's frame, #253)
-  const [lost, setLost] = useState(false);
-  const lostNow = useRef(false);
-  const markLost = (next: boolean) => {
-    if (lostNow.current === next) return;
-    lostNow.current = next;
-    setLost(next);
-  };
+  // an edit lost as its message went (the strip's onEditLost): the working line says so until the next send, or until
+  // the thread moves on (its status, or the agent's latest output: the drained turn has started), when it says
+  // "Answering." again. `lost` holds the thread's mark as the edit was lost, null for none; each clear checks it first,
+  // so a send never sets the null already there (a second commit in the reply's frame, #253)
+  const [lost, setLost] = useState<string | null>(null);
+  // the thread's mark, read from the store only while an edit is lost: otherwise no flush renders the composer
+  const watched = lost !== null && stream !== null ? stream : null;
+  const subscribe = useCallback(
+    (on: () => void) => (store === null || watched === null ? noop : store.subscribe(on)),
+    [store, watched],
+  );
+  const readMark = useCallback(
+    () => (store === null || watched === null ? null : markOf(store.view(watched))),
+    [store, watched],
+  );
+  const mark = useSyncExternalStore(subscribe, readMark, readMark);
+  // moved on: cleared in this render, so the line's change is the flush's own commit, not one after it
+  if (lost !== null && mark !== null && mark !== lost) setLost(null);
   // the field holds the words, not React: each change goes straight to the conversation's draft
   const keep = (text: string) => {
     const isEmpty = text.trim() === "";
@@ -193,7 +204,7 @@ export function WorkComposer({
     if (disabled || asked.trim() === "") return;
     // idle, Ask waits for the turn it sent; Queue (another's wait) and the hint's buttons go behind or steer
     if (how === undefined && busy) return;
-    markLost(false);
+    if (lost !== null) setLost(null);
     void onAsk(asked, how).then((ok) => {
       if (!ok) return;
       // pressed on the hint's Send now or Queue, which sit outside the field's row: the focus goes back to the field
@@ -215,18 +226,19 @@ export function WorkComposer({
   const focusField = useCallback(() => field.current?.focus(), []);
   // the strip's lost edit: into an empty field as it is, else after the words there with a blank line between; never
   // over them
-  const editLost = useCallback((text: string, say: boolean) => {
-    const f = field.current;
-    if (f === null) return;
-    const there = f.text();
-    if (there === "") f.fill(text);
-    else f.setText(`${there}\n\n${text}`);
-    // with other messages left, the strip says it had gone
-    if (say && !lostNow.current) {
-      lostNow.current = true;
-      setLost(true);
-    }
-  }, []);
+  const editLost = useCallback(
+    (text: string, say: boolean) => {
+      const f = field.current;
+      if (f === null) return;
+      const there = f.text();
+      if (there === "") f.fill(text);
+      else f.setText(`${there}\n\n${text}`);
+      // with other messages left, the strip says it had gone
+      if (say && lost === null)
+        setLost(markOf(stream === null ? undefined : store?.view(stream)) ?? "");
+    },
+    [lost, store, stream],
+  );
   const steerField = () => send(field.current?.text() ?? "", { behind: true, delivery: "steer" });
   // the stopped question, once per break, and only into an empty field: words typed since keep their place, and fill
   // never moves the lawyer's focus or breaks a composition
@@ -262,7 +274,7 @@ export function WorkComposer({
           },
           testId: "error",
         }
-      : lost
+      : lost !== null
         ? {
             state: {
               kind: "wait",
@@ -366,4 +378,15 @@ export function WorkComposer({
 /** Whether the focus stands on the steer hint's line (its Send now or Queue). */
 function inHint(at: Element | null): boolean {
   return at instanceof HTMLElement && at.closest(".steer-hint") !== null;
+}
+
+const noop = () => () => {};
+
+/** Where the thread stands, as one string: its status and the agent's latest output. A change means it has moved on
+ * from where it stood as an edit was lost. Null with no view. */
+function markOf(v: StreamView | undefined): string | null {
+  if (v === undefined) return null;
+  const status = v.header?.header?.status;
+  const said = status === undefined ? "" : typeof status === "string" ? status : "queued";
+  return `${said} ${v.latestOutput ?? ""}`;
 }
