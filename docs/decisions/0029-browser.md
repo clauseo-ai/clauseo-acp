@@ -27,10 +27,14 @@ runtime, no HTTP client; `crates/mcp/tests/guard/deps.rs` walks `Cargo.lock` and
 reqwest, hyper, hyper-util, h2, ureq, curl, isahc, attohttpc, rustls, native-tls, openssl,
 socket2, mio, tokio, async-std, smol or tauri becomes reachable.
 
-**The command line.** Exactly `clauseo-mcp browser-guard --agent-browser <file> --cwd <folder> --
-<args...>`, in that order. `<file>` must be an absolute path to an existing file and `<folder>`
-an absolute path to an existing folder. The child's arguments are passed exactly as given.
-Anything else exits 2 with a reason and the mode's usage line.
+**The command line.** Exactly `clauseo-mcp browser-guard --agent-browser <file> --cwd <folder>
+--cdp-port <port> -- <args...>`, in that order, and on Windows `--daemon-port <port>` after
+`--cdp-port` (required there, refused on macOS and Linux). `<file>` must be an absolute path to
+an existing file and `<folder>` an absolute path to an existing folder; each port is 1024 to
+65535 in plain decimal (no sign, no leading zero). Both ports are ones the host claimed for the
+session (host part, "Ports and socket folder"). The daemon port is an argument, not a variable,
+so it stays out of agent-browser's environment and the allow-list. The child's arguments are
+passed exactly as given. Anything else exits 2 with a reason and the mode's usage line.
 
 **The environment.** The child gets exactly this map (`env.rs`), nothing inherited:
 
@@ -40,13 +44,14 @@ Anything else exits 2 with a reason and the mode's usage line.
 | `AGENT_BROWSER_PROXY` | from the guard's environment; exactly `http://127.0.0.1:<port>`, port 1 to 65535, no leading zero |
 | `AGENT_BROWSER_SESSION` | from the guard's environment; 1 to 64 of `A-Z a-z 0-9 _ -` |
 | `AGENT_BROWSER_PROXY_BYPASS` | `<-loopback>`, so loopback goes through the proxy too |
-| `AGENT_BROWSER_ARGS` | `--force-webrtc-ip-handling-policy=disable_non_proxied_udp` |
+| `AGENT_BROWSER_ARGS` | `--force-webrtc-ip-handling-policy=disable_non_proxied_udp`, a newline, then `--remote-debugging-port=<--cdp-port>`: agent-browser splits the value at newlines (`flags.rs` `split_launch_args`) and puts it after its own `--remote-debugging-port=0`, and Chrome takes the last of a repeated switch |
 | `AGENT_BROWSER_IDLE_TIMEOUT_MS` | `600000` |
 | `AGENT_BROWSER_MAX_OUTPUT` | `25000` (characters; see below) |
 | `AGENT_BROWSER_DEFAULT_TIMEOUT` | `30000` |
 | `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` (and lower case on Unix) | the validated proxy URL; no `NO_PROXY` |
 | `AGENT_BROWSER_DOWNLOAD_PATH`, `_SCREENSHOT_DIR` | `<cwd>/downloads`, `<cwd>/screenshots` |
-| `AGENT_BROWSER_SOCKET_DIR` | Unix: `/tmp/clauseo-ab-<first 16 characters of the session>`; Windows: `<cwd>\run` |
+| `AGENT_BROWSER_SOCKET_DIR` | Unix: from the guard's environment, the folder the host made for the session (below); Windows: `<cwd>\run`, whatever the environment says |
+| `AGENT_BROWSER_STREAM_PORT` | from the guard's environment, set by the host; a port from 1024 to 65535, no leading zero |
 | Unix: `HOME`, `TMPDIR` | `<cwd>/home`, `<cwd>/tmp` |
 | Windows: `TEMP`, `TMP` | `<cwd>\tmp` |
 | `PATH` | Unix `/usr/bin:/bin:/usr/sbin:/sbin`; Windows `<SystemRoot>\System32;<SystemRoot>`, `C:\Windows` when `SystemRoot` is absent |
@@ -65,15 +70,28 @@ at `<socket dir>/namespaces/<ns>/run/<session>.sock` (`connection.rs:136-141`,
 socket path may hold (`connection.rs:902-913`), so the browser would never start on macOS. The
 socket folder, `HOME` and `TMPDIR` are per session already, so a namespace adds nothing.
 
-**The Unix socket folder.** `<cwd>/run` can be too long for a socket path, so on Unix the socket
-folder is `/tmp/clauseo-ab-<first 16 characters of the session>` (`browser_guard/socket.rs`).
-The guard makes it with mode 0700 through its write module. If it exists already, it must be a
-real folder (`symlink_metadata`, not a link) with mode 0700 and the same owner uid as `--cwd`;
-otherwise the guard exits 2 with a stderr line. Then `<socket folder>/<session>.sock` must be at
-most 103 bytes (it is at most 102 with a 64-character session), else exit 2. On Windows the
-socket folder stays `<cwd>\run`: agent-browser uses loopback TCP there, and the folder holds only
-`.port` and `.pid` files. Two sessions whose ids share their first 16 characters share the folder,
-each with its own socket file. The host removes the folder at session end.
+**The Unix socket folder.** `<cwd>/run` can be too long for a socket path, so on Unix the host
+makes a short folder per session, `/tmp/clauseo-ab-<16 random>` (stage C's `BrowserSocketDir`,
+mode 0700, with its lock file beside it), and passes it as `AGENT_BROWSER_SOCKET_DIR`. The guard
+makes nothing there: it checks the folder (`browser_guard/socket.rs`) and exits 2 with a stderr
+line unless the path is absolute, names a real folder under `symlink_metadata` (not a link),
+with mode exactly 0700 and the same owner uid as `--cwd`, and `<socket folder>/<session>.sock`
+is at most 103 bytes (with the host's 32-byte folder it is at most 102 for a 64-character
+session). It passes the same value to agent-browser. On Windows the socket folder stays
+`<cwd>\run`: agent-browser uses loopback TCP there, and the folder holds only `.port` and
+`.pid` files. The host removes the folder once the launch's process tree has exited.
+
+**The Windows daemon port.** On Windows agent-browser's daemon listens on loopback TCP at a port
+it derives from the session name, and when that port will not bind it silently takes an
+ephemeral one (`native/daemon.rs`, the `TcpListener::bind` fallback) and writes the port it got
+to `<cwd>\run\<session>.port`. The host draws the name so the port is one it claimed (host
+part), and passes that port as `--daemon-port`. After each line it relays from the child, the
+guard reads the `.port` file without following a link (`browser_guard/daemon_port.rs`): no file
+yet, or an empty one, means the daemon has not started (it starts on the agent's first browser
+call), so it checks again after the next line; the claimed port marks it verified and the
+guard reads no more; another port, text that is no port, a link, or anything but a regular
+file kills agent-browser, and the guard exits 1 with a stderr line. A daemon on another port
+would sit outside the ports the jail pins to the session.
 
 Why each value:
 - The proxy variables: `agent_browser_read` with a `url` fetches through the CLI's own reqwest
@@ -218,8 +236,8 @@ The guard cannot enforce these; stage C's egress proxy and sandbox must.
   socket in a folder outside `--cwd` (the state path is over the 103-byte socket limit). Since
   #257 the host makes it (`BrowserSocketDir`: `/tmp/clauseo-ab-<16 random>`, mode 0700,
   lstat-checked, removed after the launch's process tree exits) and the jail may use only that
-  folder, not create it. Until the ports-and-socket follow-up lands, the guard's own `mkdir`
-  there is refused in the jail.
+  folder, not create it. The guard makes nothing there: it checks the folder it is given and
+  refuses to start on a failed check.
 - **`<state>/browser` and the browser's loopback ports, in the jail: the jail adds nothing
   beyond itself.** This restates stage C's two requirements that `--cwd` (`<state>/browser`)
   sit outside what the agent can write and that the agent's own tools be kept off the daemon's
@@ -236,10 +254,12 @@ The guard cannot enforce these; stage C's egress proxy and sandbox must.
   `browser::write_config` refuses a linked folder and replaces a link at the file name),
   `DevToolsActivePort`, and downloads (the host reads neither yet; whoever adds the read keeps
   this rule).
-- **Stage C's `BrowserSocketDir` and `ports::claim_port` merged in #257.** The ports-and-socket
-  follow-up moves the socket folder's creation to the host
-  (`AGENT_BROWSER_SOCKET_DIR = BrowserSocketDir::path()`) and pins the CDP, stream and Windows
-  daemon ports.
+- **Stage C's `BrowserSocketDir` and `ports::claim_port` merged in #257.** The host makes the
+  socket folder per session (`AGENT_BROWSER_SOCKET_DIR = BrowserSocketDir::path()`) and claims
+  the CDP, stream and Windows daemon ports (host part, "Ports and socket folder"). The jail
+  policy is not built on main yet: R17 takes both from the launch's `RunFolders::browser_session`
+  where it builds the session's policy, `PolicyBuilder::browser_socket_dir(&session.socket_dir)`
+  and `Loopback::Ports(session.ports.loopback())` (CDP, stream, then the daemon's on Windows).
 - **A daemon that outlives its session** (a kill of the guard on Unix) ends only at the idle
   timeout; the host does not kill it by PID (above). Follow-up: G17 item 6.
 
@@ -289,6 +309,50 @@ still shows first. `BrowserNotInstalled` is the nearest existing reason; a reaso
 would be a protocol change. `tests/host/browser.rs` checks the file after a browser session
 starts and that its path is the one the profile's entry names. The smoke test writes its own
 config file, which stands in for this one.
+
+#### Ports and socket folder (`host/src/browser/session.rs`)
+
+For a session that can get the browser (`tools.browser` on, a proxy, a free slot, and a
+`browser` entry from the profile hook), the launch-prep thread, after finding its Chrome,
+claims a `BrowserSession`:
+
+- `BrowserPorts { cdp, stream, daemon }`, each a stage C `PortClaim`: `cdp` and `stream` from
+  `ports::claim_port()`, `daemon` on Windows only (below). No other session of this host is
+  handed them while they are held. They fill `{cdp_port}`, `{stream_port}` and `{daemon_port}`.
+- macOS and Linux: one `BrowserSocketDir` (`BrowserSocketDir::create()`), whose `path()`, the
+  `/tmp/...` form, fills `{socket_dir}`; never `canonical()`, which on macOS is 8 bytes longer
+  (`/private/tmp/...`) and counts against the socket path's 103 bytes.
+- agent-browser's session name, `{session_id}`: the session's id on macOS and Linux.
+
+The `BrowserSession` rides on the launch's `RunFolders` (in an `Arc`; the thread's turn state
+is its one lasting holder) and drops with the run folder in `launch_checks::discard`, off the
+actor: after the agent's process tree was killed (`clauseo-process` kills what is left of the
+tree however the agent ends), or when the agent never started. Dropping it releases the ports
+and removes the folder and its lock file. A claim that fails, or a token the claims cannot fill
+(`{socket_dir}` on Windows, `{daemon_port}` elsewhere), leaves the browser out with
+`BrowserNotInstalled` and a log line.
+
+At host start, once the store is open, `BrowserSocketDir::sweep_stale` removes the socket
+folders an earlier host left in `/tmp` (no id is kept: no launch is live yet; a folder whose
+lock another live host holds stays). `HostConfig::with_browser_socket_root` (test support)
+moves both the folders and the sweep to a test folder.
+
+**The Windows name search.** agent-browser derives its Windows daemon port from the session
+name (`connection.rs` `get_port_for_session`, no namespace): start with `h: i32 = 0`; for each
+character `c`, `h = (h << 5).wrapping_sub(h).wrapping_add(c as i32)`; the port is
+`49152 + (h.unsigned_abs() % 16383)`. The jail's Windows range is 61080 to 61179, so the
+remainder must be 11928 to 12027. The host draws random names of 16 characters from the guard's
+charset (`A-Z a-z 0-9 _ -`, from the OS's random source) until a name's port is in the range and
+`ports::claim_port_at(port)` claims it (`AddrInUse` draws again), at most 200,000 draws (a
+name lands in range about once in 164), then fails typed (`ClaimError::NameSearchExhausted`).
+That name is agent-browser's session name, and the port goes to the guard as `--daemon-port`,
+which checks the daemon's `.port` file (guard part, "The Windows daemon port"). Upstream issue
+vercel-labs/agent-browser#2313, a daemon port set by the caller, would remove the search.
+
+**Missing sidecars.** The same prep checks that the browser entry's `clauseo-mcp` (its command)
+and agent-browser (its `--agent-browser` argument) are files. A development build has no
+agent-browser: a missing one leaves the browser out with `BrowserNotInstalled` and a log line
+naming the file, and claims nothing.
 
 #### Slots and limits (`host/src/browser/limits.rs`)
 
@@ -561,8 +625,16 @@ The guard:
 - `serde` is not a direct dependency: `serde_json` alone does the work.
 - `AGENT_BROWSER_NAMESPACE` is not set; the brief set it to the session. With it, the Unix socket
   path is too long (above).
-- `AGENT_BROWSER_SOCKET_DIR` is `/tmp/clauseo-ab-<16 characters>` on Unix, not `<cwd>/run`, made
-  and checked by the guard; Windows keeps `<cwd>\run`.
+- `AGENT_BROWSER_SOCKET_DIR` is `/tmp/clauseo-ab-<16 random>` on Unix, not `<cwd>/run`, made by
+  the host and checked by the guard; Windows keeps `<cwd>\run`.
+- The ports-and-socket PR adds `--daemon-port <port>` (Windows only) to the guard, filled from
+  the Windows-only `{daemon_port}` token, so the guard can check agent-browser's `.port` file;
+  the brief listed only `--cdp-port`. The host does not see when the daemon starts (on the
+  agent's first browser call, inside the agent's MCP child), so the check sits in the guard.
+  The guard also takes an empty `.port` file as not written yet, so a reply relayed while the
+  daemon writes it cannot kill a good session.
+- The host depends on `clauseo-sandbox` (`BrowserSocketDir`, `ports`) and `getrandom` (the
+  Windows names); `ARCHITECTURE.md`'s row lists both.
 - `AGENT_BROWSER_CONFIG` and `AGENT_BROWSER_EXECUTABLE_PATH` must name existing files, and on
   Windows not network or device paths; the brief asked only for absolute paths. Windows also
   gets `SystemRoot` set when absent.
@@ -599,6 +671,10 @@ The guard:
 - The URL host reader follows the WHATWG URL standard as written; it was not compared with
   Chrome's or the `url` crate's parser on the same inputs.
 - The socket folder's owner and mode check ran on Linux only, not macOS.
+- The Windows name search and the `.port` check: their logic runs as pure-function tests on
+  Linux; the Windows wiring (`claim_port_at` in the jail's range, the `.port` read with
+  `FILE_FLAG_OPEN_REPARSE_POINT`) was not built or run. That Chrome honours the later
+  `--remote-debugging-port` over agent-browser's own `=0` is from Chrome's switch rule, not a run.
 
 ## Status
 
