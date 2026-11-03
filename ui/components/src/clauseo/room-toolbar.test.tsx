@@ -6,6 +6,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, test, vi } from "vitest";
 import { TooltipProvider } from "../ui/tooltip.tsx";
 import { RoomScopeProvider } from "./room-scope-provider.tsx";
+import { DEFAULT_DISPLAY, showDisplay } from "../lib/display.ts";
+import { sentences } from "../lib/sentences.ts";
 import { RoomToolbar, type RoomToolbarProps } from "./room-toolbar.tsx";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -91,6 +93,42 @@ test("a plan with a card keeps the drag region on the meter inside its press", a
   });
   const press = host?.querySelector(".room-plan-press");
   expect(dragging(press)).toBe(4);
+});
+
+test("the plan's press says its parts as sentences in the language: the danda in Hindi, no empty part", async () => {
+  expect(
+    sentences("en", [
+      "Claude plan",
+      "Plenty left",
+      "70 percent of the plan left",
+      "Show the plan's limits",
+    ]),
+  ).toBe("Claude plan. Plenty left. 70 percent of the plan left. Show the plan's limits");
+  expect(sentences("hi", ["Claude प्लान", "काफ़ी बाकी है", "", "प्लान की सीमाएँ दिखाएँ"])).toBe(
+    "Claude प्लान। काफ़ी बाकी है। प्लान की सीमाएँ दिखाएँ",
+  );
+  // a part that ends in its stop keeps it, never doubled
+  expect(sentences("hi", ["सीमा के करीब। 6 बजे रीसेट होगा।", "प्लान का 20 प्रतिशत बाकी है"])).toBe(
+    "सीमा के करीब। 6 बजे रीसेट होगा। प्लान का 20 प्रतिशत बाकी है",
+  );
+  showDisplay({ ...DEFAULT_DISPLAY, lang: "hi" });
+  try {
+    await mount({
+      name: "Claude",
+      left: 0.7,
+      valueText: "प्लान का 70 प्रतिशत बाकी है",
+      status: "काफ़ी बाकी है",
+      cardLabel: "प्लान की सीमाएँ दिखाएँ",
+      card: <p>Every window</p>,
+    });
+    const press = host?.querySelector(".room-plan-press");
+    expect(press?.getAttribute("aria-label")).toBe(
+      "Claude प्लान। काफ़ी बाकी है। प्लान का 70 प्रतिशत बाकी है। प्लान की सीमाएँ दिखाएँ",
+    );
+    expect(press?.getAttribute("aria-label")).not.toMatch(/\. /);
+  } finally {
+    showDisplay(DEFAULT_DISPLAY);
+  }
 });
 
 // The room's additive props: each leaves its part out only when asked, and draws today's toolbar at its default.

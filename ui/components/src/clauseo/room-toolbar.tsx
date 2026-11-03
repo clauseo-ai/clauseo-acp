@@ -12,6 +12,7 @@ import { useDisplay, type Lang, type Platform } from "../lib/display.ts";
 import { useWords } from "../lib/words.ts";
 import { rt } from "../lib/words-room.ts";
 import { useToolbarWords } from "../lib/words-toolbar.ts";
+import { sentences } from "../lib/sentences.ts";
 import { HistoryPanel } from "./history.tsx";
 import type { HistoryRow } from "./matter.ts";
 import { CaptionButtons, CornerLights, type CaptionWiring } from "./caption.tsx";
@@ -348,11 +349,20 @@ export function ToolbarPlan({ plan }: { plan: NonNullable<RoomToolbarProps["plan
         if (open) plan.onCardOpen?.();
       }}
     >
-      {/* named by its own words, the plan's name and its line, as they show, so speech input can say what it sees; what
-          pressing does follows them, for assistive technology only */}
-      <Popover.Trigger className="room-plan room-plan-press" data-look={plan.look} {...data}>
+      {/* named by its own words first, the plan's name and its line, as they show, so speech input can say what it sees;
+          the share in words and what pressing does follow them, each its own sentence in the language */}
+      <Popover.Trigger
+        className="room-plan room-plan-press"
+        data-look={plan.look}
+        aria-label={sentences(w.lang, [
+          nameText,
+          plan.status,
+          plan.valueText,
+          plan.cardLabel ?? "",
+        ])}
+        {...data}
+      >
         {meter}
-        <span className="sr-only">{`${plan.status === "" || /[.\u0964]$/.test(plan.status) ? "" : "."} ${plan.valueText}${plan.cardLabel === undefined ? "" : `. ${plan.cardLabel}`}`}</span>
       </Popover.Trigger>
       {/* over the work and the wall, as Versions stands: its right edge on the plan's, 8 px below */}
       <Popover.Portal>
