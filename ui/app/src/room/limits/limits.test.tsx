@@ -269,6 +269,28 @@ test("pay as you go: the title and who bills, no bar and no figure, in the toolb
   expect(card?.textContent).not.toMatch(/%/);
 });
 
+test("the hidden plan-state marker: none before a view and for fake-agent, loading, live_only with no line", async () => {
+  await room();
+  const marker = () => h!.one("plan-state");
+  expect(marker()?.dataset["freshness"]).toBe("none");
+  expect(marker()?.hidden).toBe(true);
+  await view({ claude: figureless({ freshness: "loading" }) });
+  expect(marker()?.dataset["freshness"]).toBe("loading");
+  expect(plan()).not.toBeNull();
+  await view({ claude: entry(30, { freshness: "live_only" }) });
+  expect(marker()?.dataset["freshness"]).toBe("live_only");
+  expect(marker()?.hidden).toBe(true);
+  expect(marker()?.textContent).toBe("");
+  expect(plan()).toBeNull();
+  await h!.unmount();
+  h = null;
+  document.body.replaceChildren();
+  await room("fake-agent");
+  await view({ claude: entry(30) });
+  expect(marker()?.dataset["freshness"]).toBe("none");
+  expect(plan()).toBeNull();
+});
+
 test("missing_scope and live_only: no line", async () => {
   await room();
   await view({ claude: figureless({ freshness: "missing_scope" }) });
