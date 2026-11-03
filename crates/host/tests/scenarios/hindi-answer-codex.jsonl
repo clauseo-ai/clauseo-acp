@@ -1,0 +1,19 @@
+{"scenario":"hindi-answer-codex","description":"Codex-shaped: model gpt-6-luna and effort medium offered as config options; the test asks for the model (already current), then sets the effort to low; one read allowed once, then a Hindi answer naming the planted tenant and deposit","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"@agentclientprotocol/codex-acp","title":"Codex","version":"2.2.2"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1","modes":{"currentModeId":"agent","availableModes":[{"id":"read-only","name":"Read-only"},{"id":"workspace-write","name":"Workspace access"},{"id":"agent","name":"Auto review"}]},"configOptions":[{"id":"model","name":"Model","category":"model","type":"select","currentValue":"gpt-6-luna","options":[{"value":"gpt-6-luna","name":"GPT-6 Luna"},{"value":"gpt-6","name":"GPT-6"}]},{"id":"reasoning_effort","name":"Reasoning effort","category":"thought_level","type":"select","currentValue":"medium","options":[{"value":"low","name":"Low"},{"value":"medium","name":"Medium"},{"value":"high","name":"High"}]}]}}}
+{"expect":{"method":"session/set_mode","as":"set-mode","params":{"sessionId":"sess-1","modeId":"workspace-write"}}}
+{"respond":{"to":"set-mode","result":{}}}
+{"expect":{"method":"session/set_config_option","as":"model","params":{"sessionId":"sess-1","configId":"model","value":"gpt-6-luna"}}}
+{"respond":{"to":"model","result":{"configOptions":[{"id":"model","name":"Model","category":"model","type":"select","currentValue":"gpt-6-luna","options":[{"value":"gpt-6-luna","name":"GPT-6 Luna"},{"value":"gpt-6","name":"GPT-6"}]},{"id":"reasoning_effort","name":"Reasoning effort","category":"thought_level","type":"select","currentValue":"medium","options":[{"value":"low","name":"Low"},{"value":"medium","name":"Medium"},{"value":"high","name":"High"}]}]}}}
+{"expect":{"method":"session/set_config_option","as":"effort","params":{"sessionId":"sess-1","configId":"reasoning_effort","value":"low"}}}
+{"respond":{"to":"effort","result":{"configOptions":[{"id":"model","name":"Model","category":"model","type":"select","currentValue":"gpt-6-luna","options":[{"value":"gpt-6-luna","name":"GPT-6 Luna"},{"value":"gpt-6","name":"GPT-6"}]},{"id":"reasoning_effort","name":"Reasoning effort","category":"thought_level","type":"select","currentValue":"low","options":[{"value":"low","name":"Low"},{"value":"medium","name":"Medium"},{"value":"high","name":"High"}]}]}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-read-1","title":"Read kirayanama.pdf","kind":"read","status":"pending","rawInput":{"file_path":"kirayanama.pdf"}}}}
+{"request":{"id":"perm-1","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"tc-read-1","title":"Read kirayanama.pdf","kind":"read","status":"pending"},"options":[{"optionId":"allow-once","name":"Allow once","kind":"allow_once"},{"optionId":"reject-once","name":"Reject","kind":"reject_once"}]}}}
+{"expect_response":{"id":"perm-1","result":{"outcome":{"outcome":"selected","optionId":"allow-once"}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-read-1","status":"completed"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"किरायेदार श्रीमती सुरेखा भार्गव हैं। उन्"}}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"होंने ₹3,47,215 की जमानत राशि जमा की, और किरायानामा 17 मार्च 2024 को हुआ। यह जानकारी kirayanama.pdf और patra.docx में मिली।"}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

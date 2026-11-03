@@ -1,0 +1,15 @@
+{"scenario":"hindi-answer-english","description":"As hindi-answer, but the answer is in English with the tenant's name also in Devanagari: it names the planted fact and still fails the Devanagari share","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1","configOptions":[{"id":"model","name":"Model","category":"model","type":"select","currentValue":"default","options":[{"value":"default","name":"Default (recommended)"},{"value":"claude-haiku-5-5","name":"Haiku 5.5"}]}]}}}
+{"note":"The test's first SetConfigOption starts the session and asks for the model by its id.","expect":{"method":"session/set_config_option","as":"model","params":{"sessionId":"sess-1","configId":"model","value":"claude-haiku-5-5"}}}
+{"respond":{"to":"model","result":{"configOptions":[{"id":"model","name":"Model","category":"model","type":"select","currentValue":"claude-haiku-5-5","options":[{"value":"default","name":"Default (recommended)"},{"value":"claude-haiku-5-5","name":"Haiku 5.5"}]}]}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-read-1","title":"Read kirayanama.pdf","kind":"read","status":"pending","rawInput":{"file_path":"kirayanama.pdf"}}}}
+{"request":{"id":"perm-1","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"tc-read-1","title":"Read kirayanama.pdf","kind":"read","status":"pending"},"options":[{"optionId":"allow-once","name":"Allow once","kind":"allow_once"},{"optionId":"reject-once","name":"Reject","kind":"reject_once"}]}}}
+{"expect_response":{"id":"perm-1","result":{"outcome":{"outcome":"selected","optionId":"allow-once"}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-read-1","status":"completed"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"The tenant is Surekha Bhargava (सुरेखा भ"}}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"ार्गव). She paid a deposit of Rs 3,47,215, and the lease was signed on 17 March 2024, as kirayanama.pdf and patra.docx say."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

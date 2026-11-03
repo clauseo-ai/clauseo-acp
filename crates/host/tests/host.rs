@@ -47,6 +47,9 @@ mod forget;
 #[path = "host/guard_hook.rs"]
 mod guard_hook;
 #[cfg(test)]
+#[path = "host/hindi.rs"]
+mod hindi;
+#[cfg(test)]
 #[path = "host/import.rs"]
 mod import;
 #[cfg(test)]
