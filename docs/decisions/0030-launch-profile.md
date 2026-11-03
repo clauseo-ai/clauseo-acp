@@ -338,7 +338,11 @@ two dependencies, `profile` and `tracing`.
     `codex_keys_without_index(kind)` without one. The adapter keeps no token and no state
     between calls.
 - **Start-up.** The profile is built once, on the host-start thread (`host_start.rs`), before
-  `Host::start`, so neither the window nor the host thread waits on it. The build finds the
+  `Host::start`. The window never waits on it, but the host starts after it, and every bridge
+  command waits for the host. So loading stetdoc's skill is bounded: both of stetdoc's runs
+  together get `STETDOC_START_LIMIT`, 3 s. Past it, the load is dropped, which kills
+  stetdoc's process tree, and stetdoc is treated as absent (no skill, no prepend, a warning).
+  The rest of the build is file reads and rendering. The build finds the
   app's executable, runs stetdoc for its skill (`load_skill`, cached in the plugin's
   `skills/` folder), and renders R22's built-ins. The hook's methods then only map what it
   holds. The browser's sidecars are named beside the executable, where Tauri's `externalBin`
@@ -350,9 +354,14 @@ two dependencies, `profile` and `tracing`.
   these warnings go nowhere until it has a log.
 - **stetdoc.** U13's sidecar is not bundled on this base. A debug build takes the first
   `stetdoc` (with the OS's suffix) in an absolute folder of `PATH`. A release build treats
-  stetdoc as absent. When stetdoc is absent, `ProfilePaths` names U13's future path
+  stetdoc as absent. The lookup matches `which`: a file that is not a program (no execute bit
+  on Unix) is skipped and the walk goes on, and on Windows only `stetdoc.exe` counts, since
+  stetdoc starts with no shell. When stetdoc is absent, `ProfilePaths` names U13's future path
   (`<exe folder>/stetdoc/stetdoc`), which is neither run nor put on `PATH`. When stetdoc is
-  found, `with_agent_path_prepend` takes `ClauseoProfile::path_prepend()`, if there is one.
+  found and its skill loaded, `with_agent_path_prepend` takes `ClauseoProfile::path_prepend()`,
+  but only when stetdoc is the only program in its folder. A folder found on `PATH` that holds
+  others (`~/.cargo/bin`, `/usr/local/bin`) is not put first (a warning says so), since it would
+  shadow the system's programs; the agent still finds stetdoc on the `PATH` it inherits.
   The folder must be absolute, since the host takes it as given: `with_profile` checks it
   (`absolute_folder`), with a `debug_assert!` and, in a release build, a warning and no
   prepend. `ProfilePaths::new` already refuses a relative stetdoc, so this guards a bug only.
@@ -367,6 +376,18 @@ two dependencies, `profile` and `tracing`.
 - **Test seam.** Under `test-support`, `HostConfig` gains `profile_hook()` and
   `agent_path_prepend()`, so the desktop's wiring (`with_profile`) is tested on a real
   config.
+
+### Deviations from the brief (PR-C)
+
+- **`tracing`** is a second new desktop dependency, beside `clauseo-profile` (the brief says
+  only one): the adapter's start-up warnings use it, as `profile` and `host` do.
+- **No tracing subscriber** exists in the desktop yet, so those warnings (a stetdoc skill left
+  out or stopped, a shared or relative `PATH` folder, no profile) are not visible anywhere
+  until one is installed.
+- **The stetdoc lookup matches `which`**, not only "a file named stetdoc": a non-program file
+  earlier on `PATH` is skipped. The brief's "found by `which`" left this open.
+- **A slow stetdoc is bounded at 3 s** at start-up (`STETDOC_START_LIMIT`), within stetdoc's own
+  10 s per run (`RUN_LIMIT`).
 
 ### Deviations from the brief (PR-A)
 

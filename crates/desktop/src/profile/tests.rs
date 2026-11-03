@@ -260,6 +260,70 @@ printf -- '---\\nname: stetdoc\\ndescription: Edits Word files.\\n---\\nUse it.\
     );
 }
 
+/// A stub stetdoc that answers both runs at once.
+#[cfg(all(unix, not(target_os = "macos"), debug_assertions))]
+const STUB: &[u8] = b"#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'stetdoc 9.9.9'; else\nprintf -- '---\\nname: stetdoc\\ndescription: Edits Word files.\\n---\\nUse it.\\n'; fi\n";
+
+/// D1: a stetdoc found in a folder holding other programs (`~/.cargo/bin`) is run for its skill,
+/// but its folder never goes first on the agents' PATH.
+#[cfg(all(unix, not(target_os = "macos"), debug_assertions))]
+#[test]
+fn a_shared_path_folder_is_not_prepended() {
+    let scratch = Scratch::new("profile-shared-folder", &["data", "shared"]);
+    scratch.file("shared/stetdoc", STUB);
+    scratch.executable("shared/stetdoc");
+    scratch.file("shared/git", b"#!/bin/sh\necho evil\n");
+    scratch.executable("shared/git");
+    let path = std::env::join_paths([PathBuf::from("/usr/bin"), scratch.dir("shared")]).unwrap();
+    let locations = Locations::under_root(&scratch.dir("data"));
+    let hook = DesktopProfile::build_with(&locations, Some(&path)).unwrap();
+    assert_eq!(hook.path_prepend(), None);
+    let token = write_skills(&hook.launch_writes(&agent(CODEX))[0]).unwrap();
+    assert!(token.root().join("stetdoc").join("SKILL.md").is_file());
+}
+
+/// D2: a `stetdoc` with no execute bit earlier on PATH is skipped, as `which` skips it, and the
+/// real one later on PATH is found and loads.
+#[cfg(all(unix, not(target_os = "macos"), debug_assertions))]
+#[test]
+fn a_non_executable_stetdoc_does_not_shadow_the_real_one() {
+    let scratch = Scratch::new("profile-non-executable", &["data", "a", "b"]);
+    scratch.file("a/stetdoc", b"not a program");
+    let real = scratch.file("b/stetdoc", STUB);
+    scratch.executable("b/stetdoc");
+    let path = std::env::join_paths([scratch.dir("a"), scratch.dir("b")]).unwrap();
+    assert_eq!(first_on_path("stetdoc", &path), Some(real));
+    let locations = Locations::under_root(&scratch.dir("data"));
+    let hook = DesktopProfile::build_with(&locations, Some(&path)).unwrap();
+    assert_eq!(hook.path_prepend(), Some(scratch.dir("b")));
+}
+
+/// D3: a stetdoc that hangs on `skills get core` is stopped within `STETDOC_START_LIMIT`: the
+/// build returns well before stetdoc's own 10 s limit, with no stetdoc skill and no prepend.
+#[cfg(all(unix, not(target_os = "macos"), debug_assertions))]
+#[test]
+fn a_slow_stetdoc_is_stopped_and_treated_as_absent() {
+    let scratch = Scratch::new("profile-slow-stetdoc", &["data", "slow"]);
+    scratch.file(
+        "slow/stetdoc",
+        b"#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'stetdoc 9.9.9'; else sleep 60; fi\n",
+    );
+    scratch.executable("slow/stetdoc");
+    let path = scratch.dir("slow").into_os_string();
+    let locations = Locations::under_root(&scratch.dir("data"));
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _sent = tx.send(DesktopProfile::build_with(&locations, Some(&path)));
+    });
+    let hook = rx
+        .recv_timeout(std::time::Duration::from_secs(7))
+        .expect("the build returns within 7 s")
+        .unwrap();
+    assert_eq!(hook.path_prepend(), None);
+    let token = write_skills(&hook.launch_writes(&agent(CODEX))[0]).unwrap();
+    assert!(!token.root().join("stetdoc").exists());
+}
+
 #[test]
 fn a_relative_program_path_fails_the_profile() {
     let scratch = Scratch::new("profile-relative", &[]);
@@ -268,11 +332,15 @@ fn a_relative_program_path_fails_the_profile() {
     assert!(paths_for(&locations, exe, Some(PathBuf::from("bin/stetdoc"))).is_err());
 }
 
+/// Not on macOS, where `Scratch::executable` is not built.
+#[cfg(not(target_os = "macos"))]
 #[test]
 fn stetdoc_is_found_on_path_only_in_an_absolute_folder() {
     let scratch = Scratch::new("profile-on-path", &["empty", "bin"]);
     let file = format!("stetdoc{}", std::env::consts::EXE_SUFFIX);
     let program = scratch.file(&format!("bin/{file}"), b"");
+    #[cfg(unix)]
+    scratch.executable(&format!("bin/{file}"));
     let path = std::env::join_paths([
         PathBuf::from("bin"),
         scratch.dir("empty"),
