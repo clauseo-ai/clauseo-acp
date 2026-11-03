@@ -6,14 +6,16 @@
 // `destPath`. The release script (.github/scripts/sidecars.mjs, stage F) calls it once per target
 // and writes `crates/desktop/binaries/agent-browser-<triple>[.exe]`. Nothing else calls it.
 //
-// Node built-ins only: no dependency to install. Redirects are followed; the hash, not the host
-// the bytes came from, is what makes the file trusted. The URL is checked before the request
-// (https, github.com, the pinned release's download prefix), so a wrong pin fails before any
-// download.
+// Node built-ins only: no dependency to install. The URL is checked before the request (https,
+// github.com, the pinned release's download prefix, one plain asset name with no `%` in it), so a
+// wrong pin fails before any download. The request follows redirects; the sha256 of the bytes
+// decides trust, not the host they came from. The download must answer HTTP 200 and stay within
+// 64 MB (a Content-Length over that, or a body that grows past it, is refused). A 120 s timeout
+// covers the whole download, body included.
 //
-// Tests: `agent-browser.test.mjs` next to this file, run with `node --test crates/desktop/sidecars/`.
-// CI does not run them: the xtask check is frozen, so they are run by hand, and a change here
-// names that run in its PR.
+// Tests: `agent-browser.test.mjs` next to this file, run with
+// `node --test 'crates/desktop/sidecars/*.test.mjs'`. CI does not run them: the xtask check is
+// frozen, so they are run by hand, and a change here names that run in its PR.
 
 import { createHash } from 'node:crypto';
 import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
@@ -107,6 +109,11 @@ export function parsePin(text) {
   return { version, triples };
 }
 
+/** The longest a download may take, body included. */
+const TIMEOUT_MS = 120_000;
+/** The largest asset we accept: the pinned binaries are about 18 MB. */
+const MAX_BYTES = 64 * 1024 * 1024;
+
 /** Throws unless `url` is https on github.com under the pinned release's download folder. */
 function checkUrl(url, version) {
   let parsed;
@@ -123,9 +130,43 @@ function checkUrl(url, version) {
     parsed.password === '';
   const prefix = RELEASE_PREFIX(version);
   const asset = parsed.pathname.slice(prefix.length);
-  if (!plain || !parsed.pathname.startsWith(prefix) || asset === '' || asset.includes('/')) {
+  // No `/` (a sub-folder), and no `%` (an encoded slash or dot, which the URL parser keeps).
+  const plainAsset = asset !== '' && !asset.includes('/') && !asset.includes('%');
+  if (!plain || !parsed.pathname.startsWith(prefix) || !plainAsset) {
     throw new Error(`agent-browser: pinned url must be https://${HOST}${prefix}<asset>: ${url}`);
   }
+}
+
+/**
+ * The response body, at most MAX_BYTES: refused up front when Content-Length says more, and
+ * while reading when the body grows past it.
+ */
+async function readCapped(response, triple) {
+  const tooBig = `agent-browser: download for ${triple} is over ${MAX_BYTES} bytes; nothing written`;
+  const declared = response.headers?.get('content-length');
+  if (declared !== null && declared !== undefined && Number(declared) > MAX_BYTES) {
+    await response.body?.cancel(); // drop the connection; nothing is read
+    throw new Error(tooBig);
+  }
+  if (!response.body) {
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (bytes.length > MAX_BYTES) throw new Error(tooBig);
+    return bytes;
+  }
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > MAX_BYTES) {
+      await reader.cancel();
+      throw new Error(tooBig);
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks, total);
 }
 
 /**
@@ -156,11 +197,14 @@ export async function fetchAgentBrowser(triple, destPath, options = {}) {
 
   checkUrl(entry.url, pin.version);
 
-  const response = await doFetch(entry.url, { redirect: 'follow' });
-  if (!response.ok) {
-    throw new Error(`agent-browser: download for ${triple} failed: HTTP ${response.status}`);
+  const response = await doFetch(entry.url, {
+    redirect: 'follow',
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+  });
+  if (response.status !== 200) {
+    throw new Error(`agent-browser: download for ${triple} answered HTTP ${response.status}, not 200`);
   }
-  const bytes = Buffer.from(await response.arrayBuffer());
+  const bytes = await readCapped(response, triple);
   const digest = createHash('sha256').update(bytes).digest('hex');
   if (digest !== entry.sha256) {
     throw new Error(

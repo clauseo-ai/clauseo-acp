@@ -395,20 +395,22 @@ the release fetches the pinned asset, checks its hash and writes it into the des
 
 - **The pin**, `crates/desktop/agent-browser.toml`: `version = "0.41.1"`, then one table per Rust
   target triple with `url` and `sha256` (lowercase hex) of the release's raw binary (no archive).
-  A triple with no build holds `none = true` and is left out explicitly; none does today. The
+  A triple with no build may hold `none = true` and be left out explicitly; none does today, and the Rust
+  and node pin tests refuse it, so a future `none` is a deliberate change to those tests. The
   file's header states the format. Each hash was taken from a download of the asset and matches
   the digest GitHub lists for it. `crates/desktop/src/agent_browser_pin.rs` (the
   `agent_browser_pin` test) checks the file: semver version, the six triples, each url under the
   pinned release with its asset name, each sha256 in shape.
 - **The fetch**, `crates/desktop/sidecars/agent-browser.mjs`: `fetchAgentBrowser(triple,
   destPath)`, Node built-ins only. It reads the pin, throws on a triple the pin does not name,
-  accepts only an https URL on `github.com/vercel-labs/agent-browser/releases/download/v<version>/`,
-  downloads it (redirects followed), and checks the SHA-256 of the bytes before anything is
-  written. A mismatch throws and writes nothing. Otherwise it writes `<destPath>.partial`, sets
-  mode 0755 on non-Windows and renames it into place. Its tests,
-  `sidecars/agent-browser.test.mjs`, stub the network: `node --test crates/desktop/sidecars/*.test.mjs`
-  (Node 24 does not take a folder argument). CI does not run them, because the xtask check is
-  frozen.
+  accepts only an https URL on `github.com/vercel-labs/agent-browser/releases/download/v<version>/`
+  whose asset name is one plain segment (no `/`, no `%`), and downloads it with a 120 s timeout.
+  The response must be HTTP 200 and at most 64 MB (a larger Content-Length is refused up front; a
+  larger body is refused while reading). Redirects are followed; the SHA-256 of the bytes decides
+  trust. A mismatch throws and writes nothing. Otherwise it writes `<destPath>.partial`, sets mode
+  0755 on non-Windows and renames it into place. Its tests, `sidecars/agent-browser.test.mjs`, stub
+  the network: `node --test 'crates/desktop/sidecars/*.test.mjs'` (Node 24 does not take a folder
+  argument). CI does not run them, because the xtask check is frozen.
 - **Stage F's script**, the release's sidecar script (not in this PR), calls `fetchAgentBrowser` once per release
   target and writes `crates/desktop/binaries/agent-browser-<triple>[.exe]`. It is not in this PR.
   The base Tauri config has no `externalBin`, and this PR does not add one.
