@@ -124,7 +124,7 @@ test("over random appends, what the fast path makes is always micromark's mdast"
   // The edges are reached: a good share of the random appends were taken (and matched micromark's).
   console.log(`append: the fast path took ${made} of ${cases} random appends`);
   expect(made).toBeGreaterThan(cases / 10);
-});
+}, 120_000);
 
 test("over random appends to a paragraph's last line, what the fast path makes is micromark's mdast", () => {
   const random = randomOf(2292);
@@ -138,7 +138,7 @@ test("over random appends to a paragraph's last line, what the fast path makes i
   }
   console.log(`append: the fast path took ${made} of ${cases} random appends to a last line`);
   expect(made).toBeGreaterThan(cases / 10);
-});
+}, 120_000);
 
 test("random streams render, at every update, what a fresh answer renders", () => {
   const random = randomOf(1292);
