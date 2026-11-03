@@ -24,6 +24,7 @@ import { U6F } from "./registry-u6f.tsx";
 import { ME } from "./registry-me.tsx";
 import { UTC } from "./registry-utc.tsx";
 import { WEB_SOURCES } from "./registry-web-sources.tsx";
+import { UET } from "./registry-uet.tsx";
 import {
   MATTER,
   NEW_MATTER,
@@ -357,6 +358,7 @@ export const REGISTRY: readonly Entry[] = [
   ...C117,
   ...U6F,
   ...WEB_SOURCES,
+  ...UET,
   ...ME,
   {
     id: "U2-01",
