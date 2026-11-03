@@ -10,6 +10,7 @@ import type {
   AvailableCommand,
   CommandOutcome,
   ErrorCode,
+  LimitsView,
   MatterSummary,
   ThreadStatus,
   ViewEntry,
@@ -70,6 +71,9 @@ export type ThreadState = {
   undoRefused?: ErrorCode;
   /** H8's papers, as list_papers lists them: the wall's tiles, and a change note's Open in Word (U9). */
   papers?: PaperSummary[];
+  /** The plan's limits the channel carries, as `limits_view_changed` sends them (U12): the toolbar's plan, its card,
+   * the composer's warning. */
+  limits?: LimitsView;
 };
 
 const refusal = (code: ErrorCode) => ({
@@ -146,6 +150,7 @@ export function threadHost(state: ThreadState): FakeTransport {
           }
         : {}),
   });
+  if (state.limits !== undefined) transport.limitsChanged(state.limits);
   if (state.hold === true) transport.answerPermission = () => new Promise<void>(() => {});
   return transport;
 }

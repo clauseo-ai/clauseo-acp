@@ -6,17 +6,21 @@ import { nextHostOf } from "../room/host-next.ts";
 import type { SectionId } from "../settings/sections.tsx";
 import { SettingsApp } from "../settings/settings-app.tsx";
 import { FakeTransport } from "../transport/fake-transport.ts";
+import type { LimitsView } from "../transport/protocol.ts";
 
-/** The window over a host holding the default settings in `lang`, with `locked` locked; the display stays the
- * frame's own (the review sets it per cell), so the store starts and shows nothing. */
+/** The window over a host holding the default settings in `lang`, with `locked` locked, and with `limits` the plan's
+ * limits its channel carries (U12); the display stays the frame's own (the review sets it per cell), so the store
+ * starts and shows nothing. */
 export function SettingsOver({
   section,
   lang,
   locked = [],
+  limits,
 }: {
   section: SectionId;
   lang: Lang;
   locked?: string[];
+  limits?: LimitsView;
 }) {
   const [made] = useState(() => {
     const transport = new FakeTransport({
@@ -28,6 +32,7 @@ export function SettingsOver({
         },
       },
     });
+    if (limits !== undefined) transport.limitsChanged(limits);
     const store = createDisplayStore({
       storage: null,
       matchMedia: null,
