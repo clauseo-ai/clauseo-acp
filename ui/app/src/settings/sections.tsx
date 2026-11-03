@@ -112,7 +112,7 @@ export const SECTIONS: readonly SectionEntry[] = [
     id: "privacy",
     name: "Privacy",
     icon: IconSend,
-    lead: "What leaves this computer, and who sees it.",
+    // no lead: the pane's first heading, "What leaves this computer", says it, and a lead would repeat it
     Body: Privacy,
   },
   {

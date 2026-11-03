@@ -1227,14 +1227,6 @@
     "by": "design",
     "note": "the design's approved words and Hindi (design/03-system words-settings.ts, privacy)"
   },
-  "UEP-02": {
-    "en": "What leaves this computer, and who sees it.",
-    "hi": "इस कंप्यूटर से क्या बाहर जाता है, और उसे कौन देखता है।",
-    "status": "approved",
-    "at": "2026-11-03",
-    "by": "design",
-    "note": "the design's approved words and Hindi (design/03-system words-settings.ts, privacy)"
-  },
   "UEP-03": {
     "en": "What leaves this computer",
     "hi": "इस कंप्यूटर से क्या बाहर जाता है",

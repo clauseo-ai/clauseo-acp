@@ -35,9 +35,6 @@ test("appearance's preview says the design's line, and its papers keep their fil
 
 test("privacy's design lines keep the design's Hindi; it says nothing of Indian Kanoon or anonymous counts", () => {
   expect(st("hi", "Privacy")).toBe("निजता");
-  expect(st("hi", "What leaves this computer, and who sees it.")).toBe(
-    "इस कंप्यूटर से क्या बाहर जाता है, और उसे कौन देखता है।",
-  );
   expect(st("hi", "To {name}, on your plan", { name: "Claude" })).toBe("Claude को, आपके प्लान से");
   for (const left of ["To Indian Kanoon", "To Clauseo", "Anonymous counts", "Send crash reports"])
     expect(Object.keys(settingsWords)).not.toContain(left);
