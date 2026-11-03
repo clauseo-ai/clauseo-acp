@@ -247,19 +247,26 @@ test("a question that waited shows no time while live: behind the turn before, o
   expect(timeOf(lastMeta())).toEqual({ who: "Clauseo", held: [] });
   await h.unmount();
   document.body.replaceChildren();
-  // waiting behind another conversation of the matter
+  // waiting behind another conversation of the matter: a queued turn has only its question
   h = await mountRoom();
   const queued: ViewEntry = {
     header: { ...header().header!, status: { queued: { behind: "thread:other" as never } } },
   };
-  h.deliver([reset([ASKED, toolCall(8, 202, "pending")], queued)]);
+  h.deliver([reset([ASKED], queued)]);
+  await h.settle();
   expect(timeOf(lastMeta())).toEqual({ who: "Clauseo", held: [] });
-  // the other conversation finishes and this turn runs: it still waited, so still no time while live
+  // the other conversation finishes and this turn runs, its first step in: the meta line moves onto the group, and
+  // the turn still waited, so still no time while live
   h.deliver([upsert(header("running")), upsert(toolCall(8, 202, "in_progress"))]);
+  await h.settle();
+  expect(lastMeta().parentElement).toBe(h.one("step-group"));
+  expect(timeOf(lastMeta())).toEqual({ who: "Clauseo", held: [] });
+  // its words come after the step: the meta line stands alone again, still no time
+  h.deliver([upsert(toolCall(8, 202, "completed")), upsert(agentText(9, 1, "Clause nine."))]);
   await h.settle();
   expect(timeOf(lastMeta())).toEqual({ who: "Clauseo", held: [] });
   // at the end, the time it ended
-  h.deliver([upsert(toolCall(8, 202, "completed")), upsert(step(10)), upsert(header("idle"))]);
+  h.deliver([upsert(step(10)), upsert(header("idle"))]);
   await h.settle();
   expect(timeOf(lastMeta()).who).toBe(`Clauseo, ${stamp("en", 10_000, Date.now())}`);
 });

@@ -8,18 +8,13 @@ import { Who } from "@clauseo/components/clauseo/answer.tsx";
 import { useRoom } from "@clauseo/components/clauseo/room-scope.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { useStreamPart, useViewStore } from "../../store/hooks.ts";
-import type { StreamView } from "../../store/view.ts";
 import type { EntryId, StreamId, ViewEntry } from "../../transport/protocol.ts";
 import { stamp } from "./clock.ts";
-import { startOf, useTimeOf } from "./time-of.ts";
-
-const pickQueued = (v: StreamView | undefined) => {
-  const status = v?.header?.header?.status;
-  return typeof status === "object" && status.queued !== undefined;
-};
+import { pickQueued, startOf, useTimeOf } from "./time-of.ts";
 
 /** The meta line that opens an answer. `step`: the turn's step, for its time; `asked` and `before`: its question and
- * the step of the exchange before, for when it started (startOf); `latest`: the thread's latest exchange, whose meta
+ * the step of the exchange before, for when it started (startOf), `asked` left out where the turn was seen waiting
+ * behind another conversation (LiveExchange keeps that, as this line remounts when the answer's first row comes); `latest`: the thread's latest exchange, whose meta
  * line the room measures; `children`: the chip after the name and the time. */
 export function AnswerMeta({
   step,
@@ -44,14 +39,10 @@ export function AnswerMeta({
   const [now] = useState(Date.now);
   const ended = useTimeOf(step, stream, paged);
   const queued = useStreamPart(useViewStore(), stream, pickQueued);
-  // a turn seen waiting behind another conversation's writer stays one that waited once it runs: the view keeps the
-  // wait only while it lasts (the header's `queued`), so the line remembers it for this answer, its question's id
-  const [waitedFor, setWaitedFor] = useState<EntryId | undefined | null>(null);
-  if (queued && ended === null && waitedFor !== asked) setWaitedFor(asked);
   const start = startOf(
     useTimeOf(asked, stream, paged),
     useTimeOf(before, stream, paged),
-    ended === null && (queued || waitedFor === asked),
+    ended === null && queued,
   );
   const started = start === null ? null : stamp(w.lang, start, now);
   return (

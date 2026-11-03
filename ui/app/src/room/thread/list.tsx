@@ -19,7 +19,7 @@ import { exchangesPick, latestAsked } from "./exchanges.ts";
 import { sameIds } from "./ids.ts";
 import { useHasOlder, useQuestionWords } from "./live.ts";
 import { useOlder } from "./older.ts";
-import { useTimeOf } from "./time-of.ts";
+import { pickQueued, useTimeOf } from "./time-of.ts";
 import { RowOf } from "./row-of.tsx";
 import { SteerNotesOf } from "./steer-rows.tsx";
 import { LiveAnswerRows } from "./step-groups.tsx";
@@ -41,6 +41,7 @@ function Sections({
   question,
   answer,
   asked,
+  since,
   step,
   stream,
   paged,
@@ -52,6 +53,8 @@ function Sections({
   answer: ReactNode;
   /** The question's id and its step's, for their times. */
   asked: EntryId | undefined;
+  /** The question's id for when the answer started, none where its turn waited (LiveExchange). */
+  since: EntryId | undefined;
   step: EntryId | undefined;
   /** The exchange before's, the same; none for the first. */
   beforeAsked: EntryId | undefined;
@@ -104,7 +107,7 @@ function Sections({
           {answer === null && (
             <AnswerMeta
               step={step}
-              asked={asked}
+              asked={since}
               before={beforeStep}
               stream={stream}
               paged={paged}
@@ -145,12 +148,21 @@ const LiveExchange = memo(
   }) {
     const rest = asked ? ids.slice(1) : ids;
     const step = rest.find((id) => id.startsWith(STEP));
+    const question = asked ? ids[0] : undefined;
+    // a turn seen waiting behind another conversation's writer stays one that waited once it runs: the view keeps the
+    // wait only while it lasts (the header's `queued`), and the meta line remounts as the answer's first row comes, so
+    // the exchange remembers it, by its question, and its meta line takes no start time from the question
+    const queued = useStreamPart(useViewStore(), stream, pickQueued);
+    const [waitedFor, setWaitedFor] = useState<EntryId | null>(null);
+    if (queued && latest && step === undefined && question !== undefined && waitedFor !== question)
+      setWaitedFor(question);
+    const since = question !== undefined && waitedFor === question ? undefined : question;
     const answer =
       rest.length === 0 ? null : (
         <LiveAnswerRows
           ids={rest}
           step={step}
-          asked={asked ? ids[0] : undefined}
+          asked={since}
           before={beforeStep}
           stream={stream}
           paged={paged}
@@ -175,7 +187,8 @@ const LiveExchange = memo(
             answer
           )
         }
-        asked={asked ? ids[0] : undefined}
+        asked={question}
+        since={since}
         step={step}
         stream={stream}
         paged={paged}
