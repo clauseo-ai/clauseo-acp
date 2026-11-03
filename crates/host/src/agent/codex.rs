@@ -67,12 +67,29 @@ pub(crate) fn launch_env(
     ])
 }
 
+/// The top-level keys `config` takes from the launch profile's side
+/// (`agent::loads::profile::codex_keys`): the profile's own [`PROFILE_KEYS`], and the host's
+/// `web_search` and `sandbox_workspace_write` (only its `writable_roots`, the session's work
+/// and notes folders). Any other key is refused with a warning: `hooks`, `mcp_servers`,
+/// `sandbox_mode`, `approval_policy`, `skills`, `features`, `projects`, `model_providers`,
+/// `profiles`, `notify` and the rest.
+const LAUNCH_KEYS: [&str; 3] = [
+    "developer_instructions",
+    "web_search",
+    "sandbox_workspace_write",
+];
+
+/// The `CODEX_CONFIG` keys the launch profile itself may supply: what R21 and R22 need, which
+/// is the instructions (`clauseo_profile::CodexConfig::with_instructions` emits nothing else).
+pub(crate) const PROFILE_KEYS: [&str; 1] = ["developer_instructions"];
+
 /// The `CODEX_CONFIG` object: [`MODEL_KEYS`] from a settings `CODEX_CONFIG` that parses as a
-/// JSON object, then every one of `clauseo_limits::CODEX_OVERRIDES` (apps, plugins, skill MCP
-/// installs, cloud skills and bundled skills off, and no skills instructions) as nested keys
-/// over them, then the launch profile's keys (`agent::loads::profile::codex_keys`) merged
-/// add-only ([`merge_add_only`]: a profile key never replaces one already there), then `hooks`,
-/// the object the [hooks seam](crate::actor::turn) gives, when there is one, over everything.
+/// JSON object; then the launch profile's keys (`agent::loads::profile::codex_keys`), only
+/// [`LAUNCH_KEYS`], merged add-only ([`merge_add_only`]); then every one of
+/// `clauseo_limits::CODEX_OVERRIDES` (apps, plugins, skill MCP installs, cloud skills and
+/// bundled skills off, and no skills instructions) as nested keys over them all, so R15's pins
+/// win; then `hooks`, the object the [hooks seam](crate::actor::turn) gives, when there is one,
+/// over everything. Nothing here reaches `<agent_home>/config.toml` ([`home_config`]).
 pub(crate) fn config(
     settings_env: &BTreeMap<String, String>,
     profile: Map<String, Value>,
@@ -88,12 +105,23 @@ pub(crate) fn config(
             config.insert(key, value);
         }
     }
+    let mut profile = profile;
+    profile.retain(|key, _| {
+        let allowed = LAUNCH_KEYS.contains(&key.as_str());
+        if !allowed {
+            tracing::warn!(
+                key,
+                "a CODEX_CONFIG key the launch profile may not set is refused"
+            );
+        }
+        allowed
+    });
+    merge_add_only(&mut config, profile);
     for set in clauseo_limits::CODEX_OVERRIDES {
         if let Some((key, value)) = set.split_once('=') {
             insert_dotted(&mut config, key, toml_value(value));
         }
     }
-    merge_add_only(&mut config, profile);
     if let Some(hooks) = hooks {
         config.insert("hooks".to_owned(), Value::Object(hooks));
     }

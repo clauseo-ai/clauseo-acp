@@ -15,6 +15,8 @@
 
 pub(crate) mod browser;
 mod codex;
+#[cfg(test)]
+mod layering_tests;
 pub(crate) mod profile;
 #[cfg(test)]
 mod profile_tests;

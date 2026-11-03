@@ -196,7 +196,10 @@ The host thread set the conditions the profile must keep: Claude keeps `settingS
     gives up, so each answer is either taken or undone);
   - an answer for an earlier launch, a stopping host, failed profile keys, or a failed
     `launch` (`launch_checks::discard`);
-  - the agent's end (`remove_run`).
+  - the agent's end (`remove_run`), once its process has exited.
+
+  The removal takes only the path the host built, `<data>/run/<session id>`, never
+  canonicalized, with `remove_dir_all`, which removes a link inside and never follows it.
 - **The start-up sweep.** The first launch prep, under a lock every prep takes before making
   its folders, renames `run` to `run.old-<n>` in one call, and a `clauseo-run-sweep` thread
   deletes every real `run.old-*` folder. No launch waits on the delete. A `run` or
@@ -217,17 +220,34 @@ The host thread set the conditions the profile must keep: Claude keeps `settingS
   - `settings` gains `disableSkillShellExecution: true`, and `skipWebFetchPreflight: true` when
     the merged launch env sets `CLAUDE_CODE_USE_BEDROCK`, `_VERTEX` or `_FOUNDRY` to a value
     that is not empty and not `0`.
-- **Codex.** The hook's keys, minus the reserved and every dotted key (as `CodexConfig::new`
-  does: codex reads a dotted key as a path, so one could replace the host's nested
-  `writable_roots`), then `web_search`
-  (`live` or `disabled`), the filled `developer_instructions`, and
-  `sandbox_workspace_write.writable_roots`. `agent::codex::config` merges them after
-  `CODEX_OVERRIDES` and before `hooks`, add-only:
-  - Objects merge key by key and arrays gain missing items.
-  - A value already there stays.
-  - A dotted key clashes with its first part.
+- **Codex** (stage B's conditions). Of the hook's keys only an allowlist goes in,
+  `agent::codex::PROFILE_KEYS`: `developer_instructions`, the one key `clauseo_profile` emits.
+  Every other key is refused with a warning, `hooks`, `mcp_servers`, `sandbox_mode`,
+  `sandbox_workspace_write`, `approval_policy`, `skills`, `features`, `projects`,
+  `model_providers`, `profiles` and `notify` among them, and `agent::codex::config` refuses
+  any key outside `developer_instructions`, `web_search` and `sandbox_workspace_write` again.
+  The host then adds its own `web_search` (`live` or `disabled`) and
+  `sandbox_workspace_write.writable_roots` (exactly the work folder and the matter's notes
+  folder, never a parent). `config` builds, in order:
+  1. the settings' model keys;
+  2. those keys, merged add-only;
+  3. R15's `CODEX_OVERRIDES` as nested keys over everything, so R15's pins win and the
+     writable roots merge beside them;
+  4. `hooks`, last.
 
-  So `hooks` stays one `PreToolUse` group, and the home's `config.toml` is untouched.
+  So `hooks` stays one `PreToolUse` group, and nothing from the profile reaches the home's
+  `config.toml`, which takes no profile input.
+- **`_meta` layering.** The hook's `_meta`, then the host's switches, then the guard. Each key
+  the host sets replaces the hook's whole: `strictMcpConfig`, `settingSources`, the connector
+  variable, `disableSkillShellExecution`, `disableAllHooks`. The one append is the guard's
+  `PreToolUse` entry, which goes after the hook's own entries, as the host thread pinned it.
+- **Substitution scope.** `{work_folder}`, `{matter_notes}` and the browser's tokens are
+  filled only in what the profile supplied: its instructions, its `systemPrompt.append` and
+  its `browser` entry. The lawyer's own MCP servers and a settings agent's `env` reach the
+  agent as written (`tests/host/profile.rs`, `tokens_are_filled_only_in_the_profiles_values`).
+- **The notes folder** is made at 0700 on Unix (an earlier one is set to 0700), and refused,
+  failing the launch with `agent.launch_failed` naming the link, when `agent-state`, the matter
+  folder or `notes` below the data folder is a link: the rule `agent_home` follows.
 - **`DISABLE_MCP_CONFIG_FILTERING=true`** does not change the browser entry (codex-acp 2.2.2,
   `dist/index.js`). The variable is read once, at `:35820`, into
   `shouldDeduplicateMcpConflicts()` (`:35821`), which `createSessionConfig` (`:35437`) uses at

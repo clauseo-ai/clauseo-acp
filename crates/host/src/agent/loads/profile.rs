@@ -7,11 +7,14 @@
 //!   site. `additionalDirectories` gains the work folder and the matter notes folder, after any
 //!   hook entries. `settings` gains `disableSkillShellExecution: true` always, and
 //!   `skipWebFetchPreflight: true` on a Bedrock, Vertex or Foundry login.
-//! - Codex ([`codex_keys`]): the hook's keys, less any whose first part is reserved
-//!   (`clauseo_profile::CodexConfig::RESERVED`), then `web_search` (`live` or `disabled`),
-//!   `developer_instructions` with its tokens filled, and both folders in
-//!   `sandbox_workspace_write.writable_roots`. `agent::codex::config` merges them add-only, so
-//!   no key of R15's is replaced.
+//! - Codex ([`codex_keys`]): of the hook's keys only `developer_instructions`
+//!   (`agent::codex::PROFILE_KEYS`), its tokens filled; then the host's `web_search` (`live` or
+//!   `disabled`) and both folders in `sandbox_workspace_write.writable_roots`.
+//!   `agent::codex::config` merges them add-only before R15's `CODEX_OVERRIDES`, so R15's pins
+//!   win.
+//! - Scope: the tokens are filled only in what the profile supplied (its instructions, its
+//!   `systemPrompt.append`, its `browser` entry), never in the lawyer's own MCP servers or a
+//!   settings agent's `env`.
 //! - Both: the instructions' tokens ([`fill_instructions`]). An unfillable token fails the
 //!   launch with `agent.launch_failed`, naming the token.
 //!
@@ -23,7 +26,6 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::Path;
 
-use clauseo_profile::CodexConfig;
 use clauseo_profile::placeholders::{self, IN_INSTRUCTIONS, MATTER_NOTES, WORK_FOLDER};
 use clauseo_protocol::{
     AgentKind, ClauseoTool, ErrorCode, ToolAvailability, ToolState, ToolsUnavailableReason,
@@ -177,9 +179,11 @@ fn is_web_rule(rule: &str) -> bool {
     })
 }
 
-/// The `CODEX_CONFIG` keys the profile and the host add for a Codex agent: the hook's (less the
-/// reserved and the dotted), then `web_search`, `developer_instructions` filled, and the
-/// writable folders.
+/// The `CODEX_CONFIG` keys the profile and the host add for a Codex agent: the hook's, only
+/// those in `codex::PROFILE_KEYS` (any other is refused with a warning), with
+/// `developer_instructions` filled; then the host's own `web_search` and
+/// `sandbox_workspace_write.writable_roots` (the work and notes folders), which no profile key
+/// supplies.
 pub(crate) fn codex_keys(
     hook: Map<String, Value>,
     web_search: Switch,
@@ -187,27 +191,22 @@ pub(crate) fn codex_keys(
 ) -> Result<Map<String, Value>, Error> {
     let mut keys = Map::new();
     for (key, value) in hook {
-        // Codex reads a dotted key as a path, so one could stand in for a nested key the host
-        // sets below (`sandbox_workspace_write.writable_roots`): every dotted key is dropped,
-        // as `CodexConfig::new` does.
-        if key.contains('.') || CodexConfig::RESERVED.contains(&key.as_str()) {
+        if crate::agent::codex::PROFILE_KEYS.contains(&key.as_str()) {
+            keys.insert(key, value);
+        } else {
             tracing::warn!(
                 key,
-                "a reserved or dotted CODEX_CONFIG key from the profile is dropped"
+                "a CODEX_CONFIG key the launch profile may not set is refused"
             );
-            continue;
         }
-        keys.insert(key, value);
     }
     if let Some(Value::String(text)) = keys.get_mut("developer_instructions") {
         *text = fill_instructions(text, folders)?;
     }
     let search = if web_search.on { "live" } else { "disabled" };
     keys.insert("web_search".to_owned(), Value::from(search));
-    let mut sandbox = take_object(&mut keys, "sandbox_workspace_write");
-    let mut roots = take_array(&mut sandbox, "writable_roots");
-    push_new(&mut roots, folders.work);
-    push_new(&mut roots, folders.notes);
+    let roots = vec![Value::from(folders.work), Value::from(folders.notes)];
+    let mut sandbox = Map::new();
     sandbox.insert("writable_roots".to_owned(), Value::Array(roots));
     keys.insert("sandbox_workspace_write".to_owned(), Value::Object(sandbox));
     Ok(keys)

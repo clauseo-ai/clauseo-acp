@@ -469,3 +469,52 @@ fn a_failed_session_start_shows_no_tools() {
     );
     host.shutdown();
 }
+
+/// Substitution scope: `{work_folder}`, `{matter_notes}` and `{browser_dir}` are filled only in
+/// what the profile supplied. The lawyer's own MCP server (its args and env) and a settings
+/// agent's `env` reach the agent literally, while the profile's instructions in the same
+/// session are filled.
+#[test]
+fn tokens_are_filled_only_in_the_profiles_values() {
+    let dir = Dir::new("profile_scope", &[]);
+    let bin = dir.folder("bin", &[]);
+    let alpha = bin.join("alpha").display().to_string();
+    let literal = json!([{"name": "alpha", "command": "{{any}}",
+        "args": ["--out", "{work_folder}", "{matter_notes}/x"],
+        "env": [{"name": "WHERE", "value": "{browser_dir}|{work_folder}"}]}]);
+    let new = template(
+        &dir,
+        "sc-new",
+        &agent_lines(
+            "sc-new",
+            "session/new",
+            &json!({"mcpServers": literal,
+                "_meta": {"systemPrompt": {"append": "Work in @WORK@."}}}),
+            &[],
+        ),
+    );
+    settings(
+        &dir,
+        agents(&[(CLAUDE, &new, json!({"LAWYER_DIR": "{work_folder}"}))]),
+        json!({"mcp": {"servers": {"alpha": {"command": alpha, "enabled": true,
+            "args": ["--out", "{work_folder}", "{matter_notes}/x"],
+            "env": {"WHERE": "{browser_dir}|{work_folder}"}}}}}),
+    );
+    let hook = Hook {
+        meta: json!({"systemPrompt": {"append": "Work in {work_folder}."}}),
+        ..Hook::default()
+    };
+    let launcher = Wired::new(&dir);
+    let host = dir.start_launching(0, Arc::<Wired>::clone(&launcher), |config| {
+        config.with_profile_hook(Box::new(hook))
+    });
+    let matter = host.create_matter("m", &dir.folder("m", &[]));
+    turn(&host, host.create_thread(matter, CLAUDE));
+    host.shutdown();
+    let seen = launcher.seen();
+    let env = &seen.last().expect("a launch").env;
+    assert_eq!(
+        env.get(&std::ffi::OsString::from("LAWYER_DIR")),
+        Some(&std::ffi::OsString::from("{work_folder}"))
+    );
+}

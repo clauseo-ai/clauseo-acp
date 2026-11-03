@@ -175,3 +175,77 @@ fn nothing_is_swept_or_made_through_a_linked_run_or_agent_state() {
         write::remove_dir_all(folder).unwrap();
     }
 }
+
+/// `{matter_notes}`: a notes path whose matter folder is a link is refused, as one whose
+/// `agent-state` is (above): the launch fails with `agent.launch_failed` naming the link, and
+/// nothing is made through it. A notes folder made earlier at another mode is set to 0700.
+#[cfg(unix)]
+#[test]
+fn the_notes_folder_is_private_and_never_made_through_a_linked_matter() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let data = scratch("notes-matter-link");
+    let outside = scratch("notes-matter-link-outside");
+    let launch = folders(&data, 1);
+    let matter = launch.notes.parent().unwrap().to_owned();
+    write::create_dir_all(matter.parent().unwrap()).unwrap();
+    write::symlink(&outside, &matter).unwrap();
+    let error = launch.make(&data, &RunSweep::default()).unwrap_err();
+    assert_eq!(error.code(), clauseo_protocol::ErrorCode::AgentLaunchFailed);
+    assert!(error.to_string().contains("link"), "{error}");
+    assert!(
+        error.to_string().contains(&matter.display().to_string()),
+        "{error}"
+    );
+    assert!(
+        names(&outside).is_empty(),
+        "nothing is made through the link"
+    );
+    assert!(!launch.root.exists(), "the run folder is taken back");
+
+    write::remove_file(&matter).unwrap();
+    write::create_dir_all(&launch.notes).unwrap();
+    write::set_mode(&launch.notes, 0o755).unwrap();
+    launch.make(&data, &RunSweep::default()).unwrap();
+    let mode = std::fs::symlink_metadata(&launch.notes)
+        .unwrap()
+        .permissions()
+        .mode();
+    assert_eq!(mode & 0o777, 0o700);
+    assert_eq!(
+        launch.notes,
+        data.join("agent-state")
+            .join(id::<MatterId>(7).to_string())
+            .join("notes"),
+        "exactly the matter's notes folder, never a parent"
+    );
+    for folder in [&data, &outside] {
+        write::remove_dir_all(folder).unwrap();
+    }
+}
+
+/// `remove_run`'s removal takes the run folder the host made, with a link inside it, and never
+/// follows the link: the file outside it survives.
+#[cfg(unix)]
+#[test]
+fn removing_a_run_folder_never_follows_a_link_inside_it() {
+    let data = scratch("remove-link");
+    let outside = scratch("remove-link-outside");
+    write::write_file(&outside.join("brief.md"), b"keep").unwrap();
+    let launch = folders(&data, 1);
+    launch.make(&data, &RunSweep::default()).unwrap();
+    write::symlink(&outside, &launch.work.join("linked")).unwrap();
+    write::symlink(&outside.join("brief.md"), &launch.browser.join("file-link")).unwrap();
+    launch.remove();
+    assert!(!launch.root.exists(), "the run folder is gone");
+    assert_eq!(std::fs::read(outside.join("brief.md")).unwrap(), b"keep");
+    assert!(launch.notes.is_dir(), "the notes folder stays");
+    // A path that is not a run folder the host built is never removed.
+    let mut stray = folders(&data, 2);
+    stray.root = outside.clone();
+    stray.remove();
+    assert!(outside.join("brief.md").exists());
+    for folder in [&data, &outside] {
+        write::remove_dir_all(folder).unwrap();
+    }
+}
