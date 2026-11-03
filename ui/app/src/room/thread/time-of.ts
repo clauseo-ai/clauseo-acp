@@ -32,6 +32,7 @@ export function startOf(
   before: Timestamp | null,
   queued: boolean,
 ): Timestamp | null {
-  if (asked === null || queued) return null;
+  // a question with no time (0, or none) gives none
+  if (asked === null || asked <= 0 || queued) return null;
   return before !== null && before > asked ? null : asked;
 }

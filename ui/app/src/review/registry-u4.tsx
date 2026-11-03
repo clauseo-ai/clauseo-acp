@@ -16,7 +16,13 @@ import { frameWords, shared, threadWords, uiWords } from "./words.ts";
 
 const thread = (state: ThreadState) => () => <RoomOver host={() => threadHost(state)} />;
 
-const TIGHTEN = userMessage(5, 1, "Tighten the notice to the bank.");
+/** The lawyer's question, sent at 4:31 pm today, the frame's minute: the live answer's meta line shows it. */
+const TIGHTEN: ViewEntry = (() => {
+  const d = new Date();
+  const ts = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 16, 31).getTime();
+  const q = userMessage(5, 1, "Tighten the notice to the bank.");
+  return { user_message: { ...q.user_message!, ts } };
+})();
 /** The thread with the lawyer's question and then `entries`, waiting on the lawyer, or with `status` as given. */
 const asked = (entries: ViewEntry[], status: ThreadState["status"] = "needs_you") =>
   thread({ entries: [TIGHTEN, ...entries], status });
