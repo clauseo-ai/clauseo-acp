@@ -3,7 +3,7 @@
 // popover chunk (the app's room/tool-popover.tsx), which is why it builds on Base UI's popover here rather than on
 // ui/popover.tsx: that one is History's, and sharing it would split a chunk off both.
 import { Popover as BasePopover } from "@base-ui/react/popover";
-import type { ReactNode } from "react";
+import { useId, useRef, type ReactNode } from "react";
 import { useLayer } from "../ui/layer-context.ts";
 import { raised } from "../ui/recipes-overlays.ts";
 
@@ -16,9 +16,13 @@ export function ToolLinePopover({
   children: ReactNode;
 }) {
   const layer = useLayer();
+  const trigger = useId();
+  // the popup itself takes the focus on open, by pointer or by key: no button stands focused or ringed (DESIGN.md's
+  // Quiet Start), and an Enter right after opening presses nothing, Download Chrome above all; Tab reaches the buttons
+  const popup = useRef<HTMLDivElement>(null);
   return (
     <BasePopover.Root>
-      <BasePopover.Trigger className="room-plan deva-nudge" data-testid="tool-line">
+      <BasePopover.Trigger id={trigger} className="room-plan deva-nudge" data-testid="tool-line">
         {summary}
       </BasePopover.Trigger>
       <BasePopover.Portal container={layer}>
@@ -30,7 +34,14 @@ export function ToolLinePopover({
           collisionPadding={8}
           className="z-20"
         >
-          <BasePopover.Popup className={raised({ width: "menu" })} data-testid="tool-popover">
+          <BasePopover.Popup
+            ref={popup}
+            initialFocus={popup}
+            tabIndex={-1}
+            aria-labelledby={trigger}
+            className={raised({ width: "menu" })}
+            data-testid="tool-popover"
+          >
             {children}
           </BasePopover.Popup>
         </BasePopover.Positioner>
