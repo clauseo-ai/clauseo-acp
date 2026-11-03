@@ -298,6 +298,28 @@ test("the hidden plan-state marker: none before a view and for fake-agent, loadi
   expect(plan()).toBeNull();
 });
 
+test("limit-warning's feed as claude-acp: the marker goes none, loading, unavailable, then live_only", async () => {
+  // fake_agent's reader fails, so the first read ends unavailable; the turn's usage_update (the agent's
+  // warning, five_hour at 96%) is the live signal that makes the view live_only (limits-warning.spec.ts)
+  await room();
+  const seen: (string | undefined)[] = [];
+  const marker = () => h!.one("plan-state");
+  const note = () => seen.push(marker()?.dataset["freshness"]);
+  note();
+  await view({ claude: figureless({ freshness: "loading" }) });
+  note();
+  await view({ claude: figureless({ freshness: "unavailable" }) });
+  note();
+  await view({
+    claude: entry(96, { freshness: "live_only", meter: meter(96, { tone: "near" }) }),
+  });
+  note();
+  expect(seen).toEqual(["none", "loading", "unavailable", "live_only"]);
+  expect(plan()).toBeNull();
+  expect(h!.one("limit-warning")).not.toBeNull();
+  expect(sendEnabled()).toBe(true);
+});
+
 test("focus on the plan starts loading its card before any press; the card stays closed", async () => {
   await room();
   await view({ claude: entry(30) });
