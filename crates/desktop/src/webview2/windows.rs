@@ -22,7 +22,7 @@ use super::DOWNLOAD_URL;
 use super::version::{MINIMUM, Verdict, Version, verdict};
 use super::words::{EN, Words};
 
-/// The "Download WebView2" button's id.
+/// The download button's id (W6).
 const DOWNLOAD: i32 = 100;
 
 /// The "Close" button's id. Esc and the title bar's close button answer `IDCANCEL` instead;
