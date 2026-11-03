@@ -30,7 +30,8 @@ use crate::write;
 const MAX_REDIRECTS: u32 = 3;
 /// The longest a connect may take.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
-/// The longest a wait for the response or for the next body bytes may take.
+/// The longest the response's headers, or any one read of the body, may take: a stall timer.
+/// The body as a whole has no limit (a slow link may take minutes); the size cap bounds it.
 const READ_TIMEOUT: Duration = Duration::from_secs(60);
 /// The size of each read and write.
 const CHUNK: usize = 64 * 1024;
@@ -118,7 +119,6 @@ impl Fetcher {
             .max_redirects(MAX_REDIRECTS)
             .timeout_connect(Some(CONNECT_TIMEOUT))
             .timeout_recv_response(Some(READ_TIMEOUT))
-            .timeout_recv_body(Some(READ_TIMEOUT))
             .timeout_per_read(Some(READ_TIMEOUT))
             .accept_encoding(AutoHeaderValue::None)
             .proxy(proxy)
