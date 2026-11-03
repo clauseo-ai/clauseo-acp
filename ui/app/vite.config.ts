@@ -155,7 +155,7 @@ function probeEntry(): Plugin {
  * nothing to preload. The perf module and the entity table import nothing the first load lacks; the room's lazy parts
  * (the thread's list, the plan trigger, the working line's details, the composer's `/` menu) import only chunks
  * index.html preloads, and the list's change-note question only those and the list; U6's retried line only those, and
- * the title rules nothing. vite-config.test.ts checks that, and that no chunk carries a preload list. */
+ * the title rules nothing; U7's queue strip only the first load. vite-config.test.ts checks that, and that no chunk carries a preload list. */
 export const BARE_CHUNKS = [
   "perf",
   "character-entities",
@@ -167,6 +167,7 @@ export const BARE_CHUNKS = [
   "retried-line",
   "conversation-title",
   "composer-menu",
+  "queue-strip",
 ];
 
 const HELPER = "__vitePreload(() => ";
