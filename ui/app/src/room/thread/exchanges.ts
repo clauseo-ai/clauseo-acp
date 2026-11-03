@@ -9,8 +9,7 @@
 // The live list reads this through one pick (exchangesPick) that builds the grouping again only when the id list
 // changes, a turn starts or stops running, or a user message's status, turn or steer changes; an edit of a queued
 // message's words changes none of those, so it renders no exchange and no row.
-import { turnRunning } from "./live.ts";
-import { askedAs, injectedTurn, outcomeOf, shapeOf } from "./steer.ts";
+import { askedAs, injectedTurn, outcomeOf, runningIn, shapeOf } from "./steer.ts";
 import { entryIdOf, orderOf, type StreamView } from "../../store/view.ts";
 import type { EntryId, TurnId, ViewEntry } from "../../transport/protocol.ts";
 import type { UserMessageEntryH9 } from "../../transport/h9-pending.ts";
@@ -47,7 +46,8 @@ const turnOf = (e: ViewEntry): TurnId | undefined =>
 
 const STEP = "step:";
 
-/** The exchanges of entries in order. `running`: whether a turn runs, for a steer not yet resolved. */
+/** The exchanges of entries in order. `running`: whether a turn runs (steer.ts runningIn), for a steer not yet
+ * resolved, on an older page or in the window alike: the rows place it by the same rule. */
 export function groupExchanges(
   items: readonly (readonly [EntryId, ViewEntry | undefined])[],
   running: boolean,
@@ -171,7 +171,7 @@ export function exchangesPick(
       ids = null;
       return (last = EMPTY);
     }
-    const run = turnRunning(v.header?.header?.status);
+    const run = runningIn(v);
     const users = userIds(v.ids);
     let stale = v.ids !== ids || run !== running;
     if (!stale)

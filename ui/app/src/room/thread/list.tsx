@@ -131,7 +131,11 @@ function RowOf({
 }) {
   const entry = paged.get(id);
   if (entry !== undefined)
-    return sentNow ? <PagedRow entry={entry} sentNow /> : <PagedRow entry={entry} />;
+    return sentNow ? (
+      <PagedRow entry={entry} stream={stream} sentNow />
+    ) : (
+      <PagedRow entry={entry} stream={stream} />
+    );
   return sentNow ? <Row id={id} stream={stream} sentNow /> : <Row id={id} stream={stream} />;
 }
 

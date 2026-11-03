@@ -265,7 +265,7 @@ test("a steer sent now: the stopped answer stays, says when it stopped and why, 
   expect(pinned()).toBe("Say too who opened the account.");
 });
 
-test("a tool call moved to the background says so; the answer's note explains it once it finished", async () => {
+test("a tool call moved to the background says so; the answer's note explains it once it finished and the answer ended", async () => {
   h = await mountRoom();
   const steerId = uuid(2, 5);
   const moved = call(3, 1, T1, { steer: steerId });
@@ -293,14 +293,21 @@ test("a tool call moved to the background says so; the answer's note explains it
   expect(h.one("steer-note")).toBeNull();
   h.deliver([upsert(call(3, 1, T1, { steer: steerId, finished_at: LATER }))]);
   await h.settle();
+  // finished, but the answer runs on: no step yet, so no note
+  expect(h.one("steer-note")).toBeNull();
+  h.deliver([upsert(ended(6, T1, { ts: LATER + 60_000 }))]);
+  await h.settle();
   const note = h.one("steer-note");
-  expect(note?.querySelector(".steer-note-text")?.textContent).toBe(
+  const text = note?.querySelector(".steer-note-text")?.textContent;
+  expect(text).toBe(
     mt(
       "en",
-      "Your words at {time} came in before this had finished: {title}. It carried on in the background, finished at {done}, and the answer uses what it found.",
-      { time: clockTime("en", AT), title: "Read file 1", done: clockTime("en", LATER) },
+      "Your words at {time} came in before a task had finished. It went on in the background and finished at {done}. The answer uses what it found.",
+      { time: clockTime("en", AT), done: clockTime("en", LATER) },
     ),
   );
+  // the call's own title is the list's, not the sentence's
+  expect(text).not.toContain("Read file 1");
   expect(note?.closest("section")?.className).toBe("step step-answer");
   const list = note!.querySelector("ul")!;
   expect(list.hidden).toBe(true);
@@ -355,14 +362,18 @@ test("a queued message coming, being edited and going renders no row of the tran
 });
 
 /** The room over a window that has older entries, page_entries answering from `page`. */
-async function paged(page: ViewEntry[], window: ViewEntry[]): Promise<Harness> {
+async function paged(
+  page: ViewEntry[],
+  window: ViewEntry[],
+  status: "idle" | "running" = "idle",
+): Promise<Harness> {
   const room = await mountRoom({
     query: (query) =>
       typeof query === "object" && query.page_entries !== undefined
         ? { entries: page }
         : { entries: [] },
   });
-  const body = reset(window, header("idle"));
+  const body = reset(window, header(status));
   body.reset!.view_window.has_older = true;
   room.deliver([body]);
   await room.settle();
@@ -422,4 +433,53 @@ test("a window that starts on a turn's tail, the next question on the page: once
     "step step-answer",
   ]);
   expect(thread().querySelectorAll("section")[3]?.textContent).toContain("The lease runs to 2027.");
+});
+
+test("a call that finished after its answer ended gives that answer no note", async () => {
+  h = await mountRoom();
+  const steerId = uuid(2, 5);
+  h.deliver([
+    reset(
+      [
+        ask(1, 1, "Read the petition.", T1),
+        call(2, 1, T1, { steer: steerId, finished_at: LATER + 60_000 }),
+        ask(3, 2, "Check section 149(12) as well.", T1, {
+          delivery: "steer",
+          steer: { injected: { turn: T1 } },
+          ts: AT,
+        }),
+        say(4, 3, "Section 149(12) asks", T1),
+        ended(5, T1, { ts: LATER }),
+      ],
+      header("idle"),
+    ),
+  ]);
+  await h.settle();
+  expect(h.one("steer-mark")).not.toBeNull();
+  expect(h.all("tool-call")[0]?.dataset["background"]).toBe("true");
+  expect(h.one("steer-note")).toBeNull();
+});
+
+test("a steer still unresolved on an older page is placed as a live one: a mark while a turn runs, else a question", async () => {
+  const page = [
+    ask(1, 1, "Who signed the cheque?", T1),
+    say(2, 1, "Mr. Mehta signed it.", T1),
+    ask(3, 2, "Say who opened the account.", T2, { delivery: "steer", ts: AT }),
+  ];
+  const window = [say(4, 3, " He signed on 3 May.", T1)];
+  const steerId = id("user_message", 2, 5);
+  h = await paged(page, window, "running");
+  // inside the one running answer, as its mark; never a question of its own
+  expect(h.one("steer-mark")?.dataset["entryId"]).toBe(steerId);
+  expect(h.one("steer-mark")?.closest("section")?.className).toBe("step step-answer");
+  expect(asked()).toEqual([id("user_message", 1, 5)]);
+  expect(sectionsOf()).toEqual(["step step-question", "step step-answer"]);
+  await h.unmount();
+  document.body.replaceChildren();
+  h = await paged(page, window, "idle");
+  // no turn runs: a question heading its own exchange, the grouping and the row agreeing
+  expect(h.one("steer-mark")).toBeNull();
+  expect(asked()).toEqual([id("user_message", 1, 5), steerId]);
+  const question = h.all("message-user").find((m) => m.dataset["entryId"] === steerId);
+  expect(question?.closest("section")?.className).toBe("step step-question");
 });

@@ -3,7 +3,7 @@
 // shows the entry it was given. Permissions and elicitations are permission-row.tsx's; markers, versions and compaction
 // show nothing yet. A queued or removed message shows nothing (the queue's strip holds it), and a steer taken into the
 // answer shows as its mark (steer.ts, steer-rows.tsx).
-import { memo, useState } from "react";
+import { memo, useState, type ReactNode } from "react";
 import { QuestionLine, Who } from "@clauseo/components/clauseo/answer.tsx";
 import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
@@ -11,7 +11,7 @@ import { useThreadWords } from "@clauseo/components/lib/words-thread.ts";
 import { Image } from "@clauseo/components/markdown/image.tsx";
 import { Markdown } from "@clauseo/components/markdown/markdown.tsx";
 import { useEntry, useStreamPart, useText, useViewStore } from "../../store/hooks.ts";
-import { entryIdOf, textKey, type StreamView } from "../../store/view.ts";
+import { entryIdOf, textKey } from "../../store/view.ts";
 import type { UserMessageEntryH9 } from "../../transport/h9-pending.ts";
 import type {
   AgentContentEntry,
@@ -26,8 +26,8 @@ import type {
 import { Elicitation, LivePermission, PagedPermission } from "../permission-row.tsx";
 import { stamp } from "./clock.ts";
 import { isolated, shownOf } from "./content.ts";
-import { questionText, turnRunning, useQuestionText, useStreaming } from "./live.ts";
-import { askedAs, backgroundOf, outcomeOf } from "./steer.ts";
+import { questionText, useQuestionText, useStreaming } from "./live.ts";
+import { askedAs, backgroundOf, outcomeOf, runningIn } from "./steer.ts";
 import { LiveSteerMark, RequeuedLine, SteerMarkRow } from "./steer-rows.tsx";
 import { LimitStopRow, StepRow } from "./stop-rows.tsx";
 
@@ -109,25 +109,21 @@ function LiveQuestion({
   );
 }
 
-const pickRunning = (v: StreamView | undefined) => turnRunning(v?.header?.header?.status);
-
-/** A steer not yet resolved: a mark in the running answer, a question when no turn runs (steer.ts askedAs), as the
- * thread's exchanges place it. */
+/** A steer not yet resolved, live or on an older page: a mark in the running answer, a question when no turn runs
+ * (steer.ts askedAs over runningIn, the rule the thread's exchanges place it by). */
 function UnresolvedSteer({
-  id,
   stream,
   entry,
+  mark,
+  question,
 }: {
-  id: EntryId;
   stream: StreamId;
   entry: UserMessageEntryH9;
+  mark: ReactNode;
+  question: ReactNode;
 }) {
-  const running = useStreamPart(useViewStore(), stream, pickRunning);
-  return askedAs(entry, running) === "mark" ? (
-    <LiveSteerMark id={id} stream={stream} entry={entry} />
-  ) : (
-    <LiveQuestion id={id} stream={stream} entry={entry} />
-  );
+  const running = useStreamPart(useViewStore(), stream, runningIn);
+  return askedAs(entry, running) === "mark" ? mark : question;
 }
 
 function LiveUserMessage({
@@ -143,7 +139,15 @@ function LiveUserMessage({
   if (as === "hidden") return null;
   if (outcomeOf(entry) === "injected")
     return <LiveSteerMark id={id} stream={stream} entry={entry} />;
-  if (as === "mark") return <UnresolvedSteer id={id} stream={stream} entry={entry} />;
+  if (as === "mark")
+    return (
+      <UnresolvedSteer
+        stream={stream}
+        entry={entry}
+        mark={<LiveSteerMark id={id} stream={stream} entry={entry} />}
+        question={<LiveQuestion id={id} stream={stream} entry={entry} />}
+      />
+    );
   return <LiveQuestion id={id} stream={stream} entry={entry} />;
 }
 
@@ -289,28 +293,33 @@ export const Row = memo(function Row({
   return <EntryRow id={id} entry={entry} sentNow={sentNow} />;
 });
 
-/** One older row, from a page of page_entries: settled, so nothing in it streams. */
+/** One older row, from a page of page_entries: nothing in it streams. A turn can start on a page and go on in the
+ * window, so a steer still unresolved there is placed as a live one is (UnresolvedSteer). */
 export const PagedRow = memo(function PagedRow({
   entry,
+  stream,
   sentNow,
 }: {
   entry: ViewEntry;
+  stream: StreamId;
   sentNow?: boolean;
 }) {
   const id = entryIdOf(entry);
   if (entry.user_message !== undefined) {
     const m: UserMessageEntryH9 = entry.user_message;
-    // a settled page: nothing in it runs, so a steer still unresolved there reads as a question
-    const as = askedAs(m, false);
+    const as = askedAs(m, true);
     if (as === "hidden") return null;
     const text = questionText(id, m, undefined);
-    if (as === "mark") return <SteerMarkRow id={id} entry={m} text={text} />;
-    return (
+    const question = (
       <>
         <Question id={id} entry={m} text={text} slots={false} />
         {outcomeOf(m) === "requeued" && <RequeuedLine />}
       </>
     );
+    if (as === "question") return question;
+    const mark = <SteerMarkRow id={id} entry={m} text={text} />;
+    if (outcomeOf(m) === "injected") return mark;
+    return <UnresolvedSteer stream={stream} entry={m} mark={mark} question={question} />;
   }
   if (entry.agent_text !== undefined) {
     const a = entry.agent_text;

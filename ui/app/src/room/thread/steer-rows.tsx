@@ -95,12 +95,8 @@ export function SteerNotes({ notes }: { notes: readonly SteerNoteData[] }) {
       <SteerNote
         testId="steer-note"
         text={w.m(
-          "Your words at {time} came in before this had finished: {title}. It carried on in the background, finished at {done}, and the answer uses what it found.",
-          {
-            time: stamp(w.lang, n.at, now),
-            title: n.title.replace(TRAILING, ""),
-            done: stamp(w.lang, n.done, now),
-          },
+          "Your words at {time} came in before a task had finished. It went on in the background and finished at {done}. The answer uses what it found.",
+          { time: stamp(w.lang, n.at, now), done: stamp(w.lang, n.done, now) },
         )}
         found={n.found.map((f) => ({ at: stamp(w.lang, f.at, now), what: f.what }))}
       />
@@ -108,19 +104,17 @@ export function SteerNotes({ notes }: { notes: readonly SteerNoteData[] }) {
   ));
 }
 
-/** A title's own closing stop: the line puts its own after it. */
-const TRAILING = /[\s.…।]+$/u;
-
 const NO_NOTES: readonly SteerNoteData[] = [];
 const TOOL = "tool_call:";
 const USER = "user_message:";
+const STEP = "step:";
 
 /** A pick of an answer's notes, kept by its entries' identity: one per id list (SteerNotesOf). */
 function notesPick(
   ids: readonly EntryId[],
   paged: ReadonlyMap<EntryId, ViewEntry>,
 ): (v: StreamView | undefined) => readonly SteerNoteData[] {
-  const own = ids.filter((id) => id.startsWith(TOOL) || id.startsWith(USER));
+  const own = ids.filter((id) => id.startsWith(TOOL) || id.startsWith(USER) || id.startsWith(STEP));
   let seen: (ViewEntry | undefined)[] = [];
   let last = NO_NOTES;
   let key = "";
@@ -132,11 +126,17 @@ function notesPick(
     seen = own.map((id) => entryOf(v, id));
     const byId = new Map<EntryId, ViewEntry>();
     const calls: ToolCallEntry[] = [];
+    let endedAt: Timestamp | undefined;
     seen.forEach((e, i) => {
       if (e?.tool_call !== undefined) calls.push(e.tool_call);
+      else if (e?.step !== undefined) endedAt = e.step.ts;
       else if (e !== undefined) byId.set(own[i]!, e);
     });
-    const next = steerNotes(calls, (steer) => byId.get(steerEntry(steer))?.user_message?.ts);
+    const next = steerNotes(
+      calls,
+      (steer) => byId.get(steerEntry(steer))?.user_message?.ts,
+      endedAt,
+    );
     const nextKey = JSON.stringify(next);
     if (nextKey === key) return last;
     key = nextKey;
@@ -144,9 +144,9 @@ function notesPick(
   };
 }
 
-/** The notes of an answer, from its entries in the window or on an older page (`paged`). The list mounts it only in an
+/** The notes of an answer, from its entries in the window or on an older page (`paged`), once its step is in. The list mounts it only in an
  * exchange that holds a steer's mark, where a background mark can come (a steer moves a call to the background only
- * when the agent takes it in). Each flush compares the answer's tool call and message entries by identity, and reads
+ * when the agent takes it in). Each flush compares the answer's tool call, message and step entries by identity, and reads
  * them again only when one is new. */
 export function SteerNotesOf({
   ids,

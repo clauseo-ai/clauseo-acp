@@ -15,6 +15,8 @@ import type {
   UserMessageEntry,
 } from "../../transport/protocol.ts";
 import type { ToolCallEntryH9, UserMessageEntryH9 } from "../../transport/h9-pending.ts";
+import type { StreamView } from "../../store/view.ts";
+import { turnRunning } from "./live.ts";
 
 export type AskedAs = "hidden" | "mark" | "question";
 
@@ -33,6 +35,12 @@ export function outcomeOf(m: UserMessageEntry): Outcome {
 export const injectedTurn = (m: UserMessageEntry): TurnId | undefined =>
   typeof m.steer === "object" ? m.steer.injected?.turn : undefined;
 
+/** Whether a turn runs in the view: the `running` every caller of askedAs passes, the grouping (exchanges.ts) and the
+ * rows, live or on an older page, alike. A steer not yet resolved is a mark while a turn runs, wherever its entry came
+ * from, else a question. */
+export const runningIn = (v: StreamView | undefined): boolean =>
+  turnRunning(v?.header?.header?.status);
+
 export function askedAs(m: UserMessageEntryH9, running: boolean): AskedAs {
   if (m.status === "queued" || m.status === "removed") return "hidden";
   const outcome = outcomeOf(m);
@@ -48,24 +56,26 @@ export const shapeOf = (m: UserMessageEntryH9 | undefined): string =>
 /** The tool call's background mark, when a steer moved it there. */
 export const backgroundOf = (call: ToolCallEntry) => (call as ToolCallEntryH9).background;
 
-/** One note under an answer: the steered words' time, the first call the steer moved to the background, when the
- * last of them finished, and each call with its finish time. */
+/** One note under an answer: the steered words' time, when the last call the steer moved to the background finished,
+ * and each call with its finish time (the note's list names them: the note itself names none). */
 export type SteerNoteData = {
   readonly steer: string;
   readonly at: Timestamp;
-  readonly title: string;
   readonly done: Timestamp;
   readonly found: readonly { readonly at: Timestamp; readonly what: string }[];
 };
 
 /** The notes of an answer's tool calls, one per steer, in the order of their first call. A steer shows its note only
- * once every call it moved has finished: until then each call's row says it carries on in the background, and the
- * note's "finished at" and "this answer uses what it found" would not yet be true. `askedAt`: the steered message's
- * time, or undefined when the window lacks it (no note then: its first words name that time). */
+ * once its answer has ended (`endedAt`, its step's time) and every call it moved finished at or before that time:
+ * until then each call's row says it carries on in the background, and the note's "the answer uses what it found"
+ * would not be true (an answer can use only what finished before it ended). `askedAt`: the steered message's time,
+ * or undefined when the window lacks it (no note then: its first words name that time). */
 export function steerNotes(
   calls: readonly ToolCallEntry[],
   askedAt: (steer: string) => Timestamp | undefined,
+  endedAt: Timestamp | undefined,
 ): SteerNoteData[] {
+  if (endedAt === undefined) return [];
   const bySteer = new Map<string, ToolCallEntry[]>();
   for (const call of calls) {
     const mark = backgroundOf(call);
@@ -77,12 +87,15 @@ export function steerNotes(
   const out: SteerNoteData[] = [];
   for (const [steer, own] of bySteer) {
     const at = askedAt(steer);
-    if (at === undefined || own.some((c) => backgroundOf(c)?.finished_at === undefined)) continue;
+    const used = own.every((c) => {
+      const done = backgroundOf(c)?.finished_at;
+      return done !== undefined && done <= endedAt;
+    });
+    if (at === undefined || !used) continue;
     const found = own.map((c) => ({ at: backgroundOf(c)!.finished_at!, what: c.title }));
     out.push({
       steer,
       at,
-      title: own[0]!.title,
       done: Math.max(...found.map((f) => f.at)),
       found,
     });
