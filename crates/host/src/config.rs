@@ -127,8 +127,6 @@ pub(crate) struct LaunchWiring {
     pub(crate) chrome_roots: Option<ChromeRoots>,
     /// The browser slots: the limit from the machine's memory, and the sessions holding one.
     pub(crate) browser_slots: BrowserSlots,
-    /// Where Chrome runs: only `InJail` is built.
-    pub(crate) browser_launch: BrowserLaunch,
 }
 
 impl Default for LaunchWiring {
@@ -139,7 +137,6 @@ impl Default for LaunchWiring {
             browser_executable: None,
             chrome_roots: None,
             browser_slots: BrowserSlots::new(None),
-            browser_launch: BrowserLaunch::InJail,
         }
     }
 }
@@ -152,7 +149,6 @@ impl std::fmt::Debug for LaunchWiring {
             .field("browser_executable", &self.browser_executable)
             .field("chrome_roots", &self.chrome_roots)
             .field("browser_slots", &self.browser_slots)
-            .field("browser_launch", &self.browser_launch)
             .finish()
     }
 }
@@ -317,12 +313,10 @@ impl HostConfig {
 
     /// Where Chrome runs (default: [`BrowserLaunch::InJail`]). Only `InJail` is built:
     /// `OutsideJail`, stage C's switch, is refused for now.
-    pub fn with_browser_launch(mut self, launch: BrowserLaunch) -> Result<Self, UnsupportedLaunch> {
+    pub fn with_browser_launch(self, launch: BrowserLaunch) -> Result<Self, UnsupportedLaunch> {
+        // `InJail` is what the host does anyway, so it is not stored.
         match launch {
-            BrowserLaunch::InJail => {
-                self.wiring.browser_launch = launch;
-                Ok(self)
-            }
+            BrowserLaunch::InJail => Ok(self),
             BrowserLaunch::OutsideJail { cdp_port } => Err(UnsupportedLaunch { cdp_port }),
         }
     }

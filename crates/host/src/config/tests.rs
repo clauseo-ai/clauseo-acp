@@ -68,13 +68,12 @@ fn config_moves_to_another_thread() {
 fn the_browser_outside_the_jail_is_refused_for_now() {
     use crate::browser::{BrowserLaunch, UnsupportedLaunch};
     let launcher = || Arc::new(PassthroughLauncher::new(SpawnOptions::new()));
-    let parts = HostConfig::new(effective(), launcher()).into_parts();
-    assert_eq!(parts.wiring.browser_launch, BrowserLaunch::InJail);
-    let parts = HostConfig::new(effective(), launcher())
-        .with_browser_launch(BrowserLaunch::InJail)
-        .unwrap()
-        .into_parts();
-    assert_eq!(parts.wiring.browser_launch, BrowserLaunch::InJail);
+    assert_eq!(BrowserLaunch::default(), BrowserLaunch::InJail);
+    assert!(
+        HostConfig::new(effective(), launcher())
+            .with_browser_launch(BrowserLaunch::InJail)
+            .is_ok()
+    );
     let Err(refused) = HostConfig::new(effective(), launcher())
         .with_browser_launch(BrowserLaunch::OutsideJail { cdp_port: 9222 })
     else {

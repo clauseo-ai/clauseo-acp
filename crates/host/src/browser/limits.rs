@@ -1,8 +1,8 @@
-//! How many browsers run at once, and the limits each session's agent-browser gets (S27,
-//! "Concurrency" and "The environment").
+//! How many browsers run at once (S27, "Concurrency"). The limits each agent-browser gets (idle
+//! timeout, default timeout, max output) are the guard's, set in `crates/mcp` alone.
 //!
 //! A session that got the `browser` entry holds a slot from its start until it ends: Chrome
-//! closes after [`IDLE_TIMEOUT_MS`] idle, but the slot stays, so a session never finds its
+//! closes after 10 minutes idle (the guard's `AGENT_BROWSER_IDLE_TIMEOUT_MS`), but the slot stays, so a session never finds its
 //! browser gone. The host counts at session start (`actor/turn/profile_loads.rs`) and frees the
 //! slot when the session's run folder goes (`actor/turn/launch_checks.rs`). Revisit after G17
 //! item 6 measures a session's memory.
@@ -19,15 +19,6 @@ pub const SMALL_MACHINE_SLOTS: usize = 2;
 
 /// Browsers at once on a larger machine.
 pub const LARGE_MACHINE_SLOTS: usize = 4;
-
-/// agent-browser's idle timeout, `AGENT_BROWSER_IDLE_TIMEOUT_MS`: 10 minutes.
-pub const IDLE_TIMEOUT_MS: u64 = 600_000;
-
-/// agent-browser's default timeout for one action, `AGENT_BROWSER_DEFAULT_TIMEOUT`.
-pub const DEFAULT_TIMEOUT_MS: u64 = 30_000;
-
-/// The most characters of one tool result agent-browser returns, `AGENT_BROWSER_MAX_OUTPUT`.
-pub const MAX_OUTPUT_CHARS: usize = 25_000;
 
 /// Browsers allowed at once on a machine with `total_memory_bytes` of memory.
 pub fn slot_limit(total_memory_bytes: u64) -> usize {

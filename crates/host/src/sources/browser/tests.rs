@@ -191,3 +191,149 @@ fn a_blob_input_is_passed_over() {
     opens.started(turn(), tool_id(), &started);
     assert_eq!(opens.updated(turn(), "tc-1", &completed(None)), None);
 }
+
+/// A completed open whose result is an error records nothing: Codex's `error`, `isError` at the
+/// top or under `result`, and the guard's refusal text.
+#[test]
+fn a_completed_open_with_an_error_result_writes_nothing() {
+    let outputs = [
+        json!({"result": null, "error": "tool failed"}),
+        json!({"result": {"content": [{"type": "text", "text": "x"}], "isError": true}, "error": null}),
+        json!({"content": [{"type": "text", "text": "x"}], "isError": true}),
+    ];
+    for output in outputs {
+        let mut opens = Opens::default();
+        opens.started(
+            turn(),
+            tool_id(),
+            &call(
+                CODEX_OPEN,
+                None,
+                &json!({"arguments": {"url": "https://x.example/"}}),
+            ),
+        );
+        let done = ToolCallPatch {
+            status: Some(ToolCallStatus::Completed),
+            raw_output: Some(inline(&output)),
+            ..ToolCallPatch::default()
+        };
+        assert_eq!(opens.updated(turn(), "tc-1", &done), None, "{output}");
+    }
+    let mut opens = Opens::default();
+    opens.started(
+        turn(),
+        tool_id(),
+        &call(CLAUDE_OPEN, None, &json!({"url": "https://x.example/"})),
+    );
+    let refused = completed(Some("Clauseo does not allow --proxy in the browser."));
+    assert_eq!(opens.updated(turn(), "tc-1", &refused), None);
+    // A result that only mentions an error is still a page.
+    let mut opens = Opens::default();
+    opens.started(
+        turn(),
+        tool_id(),
+        &call(CLAUDE_OPEN, None, &json!({"url": "https://x.example/"})),
+    );
+    let fine = ToolCallPatch {
+        raw_output: Some(inline(
+            &json!({"result": {"isError": false}, "error": null}),
+        )),
+        ..completed(Some("Errors and omissions"))
+    };
+    assert!(opens.updated(turn(), "tc-1", &fine).is_some());
+}
+
+/// Only web pages count: `about:blank` and other schemes are none, a value with no `:` gets
+/// `https://`, and a last input that names no page undoes an earlier one.
+#[test]
+fn only_web_urls_are_pages() {
+    let page = |url: &str| {
+        let mut opens = Opens::default();
+        opens.started(
+            turn(),
+            tool_id(),
+            &call(CLAUDE_OPEN, None, &json!({"url": url})),
+        );
+        opens
+            .updated(turn(), "tc-1", &completed(None))
+            .map(|page| page.url)
+    };
+    assert_eq!(
+        page("sci.gov.in/judgments"),
+        Some("https://sci.gov.in/judgments".to_owned())
+    );
+    assert_eq!(
+        page("  HTTP://x.example/ "),
+        Some("HTTP://x.example/".to_owned())
+    );
+    for none in [
+        "about:blank",
+        "file:///etc/passwd",
+        "javascript:alert(1)",
+        "data:text/html,x",
+        "https://",
+        "",
+    ] {
+        assert_eq!(page(none), None, "{none:?}");
+    }
+    let mut opens = Opens::default();
+    opens.started(
+        turn(),
+        tool_id(),
+        &call(CLAUDE_OPEN, None, &json!({"url": "https://x.example/"})),
+    );
+    let blank = ToolCallPatch {
+        raw_input: Some(inline(&json!({"url": "about:blank"}))),
+        ..completed(None)
+    };
+    assert_eq!(opens.updated(turn(), "tc-1", &blank), None);
+}
+
+/// A page's title loses control and bidi formatting characters.
+#[test]
+fn the_title_loses_control_and_bidi_characters() {
+    let mut opens = Opens::default();
+    opens.started(
+        turn(),
+        tool_id(),
+        &call(CLAUDE_OPEN, None, &json!({"url": "https://x.example/"})),
+    );
+    let text = "\u{202E}Court\u{0007} \u{2066}order\u{2069}\u{200B}\tdocx";
+    let page = opens
+        .updated(turn(), "tc-1", &completed(Some(text)))
+        .unwrap();
+    // U+200B is no control or bidi formatting character, so it stays.
+    assert_eq!(page.title.as_deref(), Some("Court order\u{200B}docx"));
+    let mut opens = Opens::default();
+    opens.started(
+        turn(),
+        tool_id(),
+        &call(CLAUDE_OPEN, None, &json!({"url": "https://x.example/"})),
+    );
+    let page = opens
+        .updated(turn(), "tc-1", &completed(Some("\u{202A}\u{0001} ")))
+        .unwrap();
+    assert_eq!(page.title, None);
+}
+
+/// The open is matched by its exact name: a name that holds it, or Codex's with more around it,
+/// is another tool.
+#[test]
+fn a_name_holding_the_open_is_not_the_open() {
+    for (title, name) in [
+        ("x", Some("xmcp__browser__agent_browser_open")),
+        ("x", Some("mcp__browser__agent_browser_open_v2")),
+        ("mcp__browser__agent_browser_open ", None),
+        ("mcp.browser.agent_browser_opener", None),
+        ("Run mcp.browser.agent_browser_open", None),
+    ] {
+        let mut opens = Opens::default();
+        let mut open = call(title, name, &json!({"url": "https://x.example/"}));
+        open.status = ToolCallStatus::Completed;
+        assert_eq!(
+            opens.started(turn(), tool_id(), &open),
+            None,
+            "{title} {name:?}"
+        );
+    }
+}

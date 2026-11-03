@@ -202,3 +202,53 @@ fn versions_compare_by_number() {
         assert_eq!(version(bad), None, "{bad:?}");
     }
 }
+
+#[test]
+fn windows_installed_chrome_beats_chrome_for_testing() {
+    let dir = TempDir::new("chrome-win-installed-cft");
+    touch(
+        dir.path(),
+        &format!("app/browsers/chrome-131.0.1/{CFT_WIN}"),
+    );
+    let chrome = touch(&dir.path().join("local"), WIN_CHROME);
+    assert_eq!(find(&roots(dir.path(), Platform::WindowsX64)), Some(chrome));
+}
+
+#[test]
+fn an_allowed_edge_beats_chrome_for_testing() {
+    let dir = TempDir::new("chrome-win-edge-cft");
+    touch(
+        dir.path(),
+        &format!("app/browsers/chrome-131.0.1/{CFT_WIN}"),
+    );
+    let edge = touch(&dir.path().join("pf"), WIN_EDGE);
+    let roots = roots(dir.path(), Platform::WindowsX64);
+    assert_eq!(find_with(&roots, true), Some(edge));
+    assert_ne!(find(&roots), find_with(&roots, true));
+}
+
+/// A link in the browsers folder picks nothing: a linked version folder, or a binary linked to a
+/// program outside the folder.
+#[cfg(unix)]
+#[test]
+fn a_link_in_the_browsers_folder_is_passed_over() {
+    let dir = TempDir::new("chrome-cft-links");
+    let real = touch(
+        dir.path(),
+        &format!("app/browsers/chrome-131.0.1/{CFT_WIN}"),
+    );
+    let elsewhere = touch(dir.path(), &format!("outside/chrome-999.0/{CFT_WIN}"));
+    write::symlink(
+        &dir.path().join("outside/chrome-999.0"),
+        &dir.path().join("app/browsers/chrome-999.0"),
+    )
+    .unwrap();
+    write::create_dir_all(&dir.path().join("app/browsers/chrome-500.0/chrome-win64")).unwrap();
+    write::symlink(
+        &elsewhere,
+        &dir.path()
+            .join(format!("app/browsers/chrome-500.0/{CFT_WIN}")),
+    )
+    .unwrap();
+    assert_eq!(find(&roots(dir.path(), Platform::WindowsX64)), Some(real));
+}

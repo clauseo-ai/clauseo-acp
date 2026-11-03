@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use clauseo_host::browser::chrome::{ChromeRoots, Platform};
+use clauseo_host::browser::{CONFIG_DIR, CONFIG_FILE};
 use clauseo_host::{HostConfig, TestProxy};
 use clauseo_protocol::{
     ClauseoTool, DomainEvent, PageVia, StopReason, StreamId, ToolsUnavailableReason,
@@ -207,6 +208,9 @@ fn the_chrome_the_prep_finds_fills_the_entry() {
     turn(&host, thread);
     assert_eq!(browser_reason(&first_frame_tools(&host, thread)), None);
     host.shutdown();
+    // The guard needs agent-browser's config file to exist: the launch prep wrote it.
+    let config = dir.data_dir().join(CONFIG_DIR).join(CONFIG_FILE);
+    assert_eq!(std::fs::read(&config).unwrap(), b"{}\n");
 
     let empty = roots(&dir.data().join("no-chrome"));
     let generic = template(
@@ -294,5 +298,77 @@ fn a_completed_open_is_one_page_visited() {
     let mut events = host.events(StreamId::Thread(thread));
     events.until_caught_up();
     assert_eq!(pages(&events), logged, "the reopened thread replays it");
+    host.shutdown();
+}
+
+/// The config file the host writes is the one the profile's `browser` entry names.
+#[test]
+fn the_config_file_is_the_one_the_entry_names() {
+    let root = std::env::temp_dir().join("clauseo-browser-config-path");
+    let locations = clauseo_settings::Locations::under_root(&root);
+    let paths = clauseo_profile::ProfilePaths::new(
+        &locations,
+        root.join("app").join("clauseo"),
+        root.join("stetdoc").join("stetdoc"),
+        clauseo_profile::BrowserSidecars {
+            clauseo_mcp: root.join("app").join("clauseo-mcp"),
+            agent_browser: root.join("app").join("agent-browser"),
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        paths.browser_config(),
+        locations.data_dir().join(CONFIG_DIR).join(CONFIG_FILE)
+    );
+}
+
+/// `browser-late`: an open that completes after its turn ended (`Origin::Late`) writes no page.
+#[test]
+fn a_late_completed_open_writes_nothing() {
+    let dir = Dir::new("browser_late", &[(FAKE, Scenario::Local("browser-late"))]);
+    let host = dir.start(0);
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[], FAKE);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (first, _) = host.prompt(thread, "Open it.");
+    assert_eq!(events.until_turn_ended(first).stop, StopReason::EndTurn);
+    let (second, _) = host.prompt(thread, "And then?");
+    assert_eq!(events.until_turn_ended(second).stop, StopReason::EndTurn);
+    host.settle();
+    events.drain_ready();
+    events.assert_no_mismatch();
+    assert!(
+        events.count(|event| matches!(event, DomainEvent::ToolCallStarted(s) if s.acp_id.as_str() == "tc-late")) == 1,
+        "{}",
+        events.dump()
+    );
+    assert_eq!(pages(&events), [], "{}", events.dump());
+    host.shutdown();
+}
+
+/// `browser-replay-load`: an agent's replay on `session/load` of completed opens
+/// (`Origin::Replay`) writes no page.
+#[test]
+fn a_replayed_open_writes_nothing() {
+    let dir = Dir::new(
+        "browser_replay",
+        &[(FAKE, Scenario::Local("browser-replay-seed"))],
+    );
+    let host = dir.start(0);
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[], FAKE);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (first, _) = host.prompt(thread, "First.");
+    assert_eq!(events.until_turn_ended(first).stop, StopReason::EndTurn);
+    host.shutdown();
+
+    dir.set_agents(&[(FAKE, Scenario::Local("browser-replay-load"))]);
+    let host = dir.start(1);
+    let mut events = host.events(StreamId::Thread(thread));
+    events.until_caught_up();
+    let (second, _) = host.prompt(thread, "Second.");
+    assert_eq!(events.until_turn_ended(second).stop, StopReason::EndTurn);
+    host.settle();
+    events.drain_ready();
+    events.assert_no_mismatch();
+    assert_eq!(pages(&events), [], "{}", events.dump());
     host.shutdown();
 }
