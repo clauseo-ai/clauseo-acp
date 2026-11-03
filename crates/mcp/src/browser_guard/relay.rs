@@ -14,6 +14,10 @@
 //! The child's lines are capped at [`CHILD_MAX_LINE_BYTES`]: a longer one kills the child and
 //! the guard exits 1 (fail closed). A last line cut off by the child's end is dropped, with a
 //! note on stderr, so the agent never gets half a JSON message.
+//!
+//! On Windows, after each line it relays, the stdout pump checks the daemon's `.port` file
+//! (`daemon_port.rs`) until it holds the claimed port; a daemon on any other port kills the
+//! child and the guard exits 1.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -28,6 +32,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 
+use super::daemon_port::{self, Expected, Status};
 use super::filter::{self, MAX_LINE_BYTES, RESERVED_ID as CLOSE_ID, Verdict};
 /// The request sent when the agent closes stdin.
 pub(crate) const CLOSE_REQUEST: &str = r#"{"jsonrpc":"2.0","id":"clauseo-guard-close","method":"tools/call","params":{"name":"agent_browser_close","arguments":{}}}"#;
@@ -57,6 +62,8 @@ enum Event {
     AgentEnded,
     /// The reply to the close request arrived.
     CloseAnswered,
+    /// The daemon is not on the claimed port; the reason.
+    DaemonPortRefused(String),
 }
 
 /// How the relay ended.
@@ -66,6 +73,9 @@ pub(crate) enum Outcome {
     Exited(i32),
     /// The child wrote a line over [`CHILD_MAX_LINE_BYTES`] and was killed.
     ChildLineTooLong,
+    /// Windows: the daemon's `.port` file named another port, or could not be trusted, and the
+    /// child was killed. The reason.
+    DaemonPortRefused(String),
 }
 
 /// What [`wait_for_end`] saw.
@@ -73,14 +83,17 @@ enum End {
     ChildEnded,
     ChildOversize,
     ExitTimedOut,
+    DaemonPortRefused(String),
 }
 
-/// Starts agent-browser and relays until it exits.
+/// Starts agent-browser and relays until it exits. With `port_check` (Windows), the daemon's
+/// port is checked after each relayed line until it is verified.
 pub(crate) fn run(
     program: &Path,
     args: &[OsString],
     cwd: &Path,
     env: &BTreeMap<String, OsString>,
+    port_check: Option<Expected>,
 ) -> io::Result<Outcome> {
     let mut child = spawn_child(program, args, cwd, env)?;
     let stdout = child
@@ -95,7 +108,7 @@ pub(crate) fn run(
     let child_pump = {
         let (out, closing, events) = (Arc::clone(&out), Arc::clone(&closing), events.clone());
         thread::spawn(move || {
-            let end = pump_child(BufReader::new(stdout), &out, &closing, &events);
+            let end = pump_child(BufReader::new(stdout), &out, &closing, &events, port_check);
             send(&events, end);
         })
     };
@@ -118,6 +131,10 @@ pub(crate) fn run(
         End::ChildOversize => {
             stop(&mut child)?;
             Ok(Outcome::ChildLineTooLong)
+        }
+        End::DaemonPortRefused(reason) => {
+            stop(&mut child)?;
+            Ok(Outcome::DaemonPortRefused(reason))
         }
         End::ExitTimedOut => {
             note(&format!(
@@ -173,6 +190,7 @@ fn wait_for_end(inbox: &mpsc::Receiver<Event>, to_child: &ToChild) -> End {
         match event {
             Event::ChildEnded => return End::ChildEnded,
             Event::ChildOversize => return End::ChildOversize,
+            Event::DaemonPortRefused(reason) => return End::DaemonPortRefused(reason),
             Event::AgentEnded => {
                 if phase == Phase::Running {
                     phase = Phase::Closing;
@@ -216,13 +234,16 @@ fn spawn_child(
     command.spawn()
 }
 
-/// Child to agent: each whole line as read, the reply to the close request excepted. Returns
-/// the event that ends it: [`Event::ChildEnded`] or [`Event::ChildOversize`].
+/// Child to agent: each whole line as read, the reply to the close request excepted. With
+/// `port_check`, after each line the daemon's port until it is verified. Returns the event
+/// that ends it: [`Event::ChildEnded`], [`Event::ChildOversize`] or
+/// [`Event::DaemonPortRefused`].
 fn pump_child(
     mut stdout: impl BufRead,
     out: &Out,
     closing: &AtomicBool,
     events: &mpsc::Sender<Event>,
+    mut port_check: Option<Expected>,
 ) -> Event {
     let mut line = Vec::new();
     // Once the agent stops reading, the child's output is still drained so it never blocks.
@@ -248,6 +269,13 @@ fn pump_child(
         line.push(b'\n');
         if agent_reads && emit(out, &line).is_err() {
             agent_reads = false;
+        }
+        if let Some(expected) = &port_check {
+            match daemon_port::judge(daemon_port::read(&expected.file), expected.port) {
+                Status::Pending => {}
+                Status::Verified => port_check = None,
+                Status::Refused(reason) => return Event::DaemonPortRefused(reason),
+            }
         }
     }
 }

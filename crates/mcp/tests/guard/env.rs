@@ -7,10 +7,12 @@ use std::path::Path;
 
 use serde_json::Value;
 
-use crate::support::{Guard, PROXY, Scratch, example, guard_command, host_env};
+use crate::support::{CDP_PORT, Guard, PROXY, Scratch, example, guard_command, host_env};
 use crate::write;
 
-/// What the agent's environment may hold that must never reach agent-browser.
+/// What the agent's environment may hold that must never reach agent-browser. The host's own
+/// inputs (`AGENT_BROWSER_SOCKET_DIR` on Unix, `AGENT_BROWSER_STREAM_PORT`) are not here: the
+/// host sets them on top, and `usage.rs` tests their refusals.
 const HOSTILE: &[(&str, &str)] = &[
     ("HTTP_PROXY", "http://evil:1"),
     ("https_proxy", "http://evil:2"),
@@ -23,7 +25,6 @@ const HOSTILE: &[(&str, &str)] = &[
     ("AGENT_BROWSER_DAEMON", "1"),
     ("AGENT_BROWSER_ENGINE", "lightpanda"),
     ("AGENT_BROWSER_NAMESPACE", "other"),
-    ("AGENT_BROWSER_SOCKET_DIR", "/elsewhere"),
     ("AGENT_BROWSER_PROXY_BYPASS", "*"),
     ("AGENT_BROWSER_IDLE_TIMEOUT_MS", "1"),
     ("AGENT_BROWSER_SCREENSHOT_DIR", "/elsewhere"),
@@ -42,10 +43,6 @@ fn expected(scratch: &Scratch) -> BTreeMap<String, String> {
     let mut map: BTreeMap<String, String> = host_env(scratch).into_iter().collect();
     let fixed = [
         ("AGENT_BROWSER_PROXY_BYPASS", "<-loopback>"),
-        (
-            "AGENT_BROWSER_ARGS",
-            "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
-        ),
         ("AGENT_BROWSER_IDLE_TIMEOUT_MS", "600000"),
         ("AGENT_BROWSER_MAX_OUTPUT", "25000"),
         ("AGENT_BROWSER_DEFAULT_TIMEOUT", "30000"),
@@ -56,6 +53,13 @@ fn expected(scratch: &Scratch) -> BTreeMap<String, String> {
     for (name, value) in fixed {
         map.insert(name.to_owned(), value.to_owned());
     }
+    // The WebRTC rule, then the host's CDP port, one per line.
+    map.insert(
+        "AGENT_BROWSER_ARGS".to_owned(),
+        format!(
+            "--force-webrtc-ip-handling-policy=disable_non_proxied_udp\n--remote-debugging-port={CDP_PORT}"
+        ),
+    );
     map.insert("AGENT_BROWSER_DOWNLOAD_PATH".to_owned(), under("downloads"));
     map.insert(
         "AGENT_BROWSER_SCREENSHOT_DIR".to_owned(),
