@@ -2167,5 +2167,13 @@
     "at": "2026-11-03",
     "by": "Rohan",
     "note": "Rohan, via the orchestrator"
+  },
+  "U12-44": {
+    "en": "{model} weekly limit",
+    "hi": "{model} की साप्ताहिक सीमा",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator (#236)"
   }
 }
