@@ -17,4 +17,7 @@ pre-commit:
     oxlint-components: { root: "ui/components/", glob: "**/*.{ts,tsx,js,mjs,cjs}", run: "for f in {staged_files}; do set -- \"$@\" \"components/$f\"; done; pnpm -C ../app run lint:types \"$@\"" }
 pre-push:
   commands:
-    check: { run: cargo xtask check --quick }
+    # CI mode, as fast-lane runs it, so a clippy warning fails the push as it fails CI (#210). CI mode
+    # also gives nextest the ci profile (one retry; a test that passes only on it shows as FLAKY) and
+    # runs the ui steps even where pnpm is missing. `CI=0 git push` runs the check in local mode.
+    check: { run: "CI=${CI:-1} cargo xtask check --quick" }
