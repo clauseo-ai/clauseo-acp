@@ -86,6 +86,12 @@ export const ids = {
    * not_applicable, live_only).
    */
   plan: "plan",
+  /**
+   * The hidden marker in the toolbar's plan slot (live-plan.tsx), present whenever the conversation's agent is
+   * known: `data-freshness` is the entry's freshness, "none" before any view, and "live_only" while the line is
+   * hidden. Attached, not visible.
+   */
+  planState: "plan-state",
   /** The plan card that the plan line opens, with the windows and their resets. */
   planCard: "plan-card",
   /** Try again in the plan card, which asks for a fresh read (`refresh_limits` with `try_again`). */
@@ -239,6 +245,7 @@ export function window(page: Page) {
     limitResetsAt: id(ids.limitResetsAt),
     /** The toolbar's plan line (`data-tone`, `data-freshness`). */
     plan: id(ids.plan),
+    planState: id(ids.planState),
     planCard: id(ids.planCard),
     planTryAgain: id(ids.planTryAgain),
     limitWarning: id(ids.limitWarning),
