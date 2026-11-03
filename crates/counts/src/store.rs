@@ -3,14 +3,15 @@
 //! guessed at.
 //!
 //! - `install_id`: the install id, as its 36 characters.
-//! - `today.json`: the open day's cells, its foreground seconds, the onboarding steps this install
-//!   has counted and the last day a day report was taken.
+//! - `today.json`: the install id it was counted under, the open day's cells, its foreground
+//!   seconds, the onboarding steps this install has counted and the last day a day report was
+//!   taken.
 //! - `queue/<YYYY-MM-DD>.json`: a closed day's report, waiting to be sent.
 //! - `tally/<YYYY-Www>.json`: a week's tally, open (still counting) or closed (waiting to be sent),
 //!   with the install id it was counted under (kept on disk only; the tally on the wire has none).
 //!
-//! A queued report or tally made under another install id (left by an off whose delete failed)
-//! is removed when the folder is read, never sent under the current id.
+//! `today.json`, a queued report or a tally made under another install id (left by an off whose
+//! delete failed part way) is removed when the folder is read, never adopted by the current id.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
@@ -29,9 +30,11 @@ pub(crate) const FOLDER: &str = "counts";
 pub(crate) const FIRST_ACT: &str = "first_act_done";
 
 /// `today.json`.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct TodayFile {
+    /// The install id it was counted under.
+    pub(crate) install: InstallId,
     /// The open day, once a tick has said which it is.
     pub(crate) day: Option<Day>,
     /// Its cells so far (without `time_open`, which the close makes).
@@ -103,8 +106,12 @@ impl Store {
         write::replace(&self.marker, b"")
     }
 
-    /// Deletes the counts folder and everything in it.
+    /// Deletes the counts folder and everything in it, `install_id` first: an off that fails
+    /// part way never leaves the id behind with no way to tell, and the next id made drops
+    /// every file left under the old one. While `install_id` cannot be removed, nothing else is.
     pub(crate) fn delete_all(&self) -> io::Result<()> {
+        remove_if_folder(&self.install_path())?;
+        write::remove_file(&self.install_path())?;
         write::remove_dir_all(&self.root)
     }
 
@@ -136,9 +143,14 @@ impl Store {
         write::replace(&self.install_path(), id.to_string().as_bytes())
     }
 
-    /// The saved open day; a missing or unreadable file reads as a new one.
-    pub(crate) fn read_today(&self) -> io::Result<TodayFile> {
-        Ok(read_json(&self.today_path())?.unwrap_or_default())
+    /// The saved open day counted under `install`; a missing or unreadable file, or one from
+    /// another id (removed), reads as none.
+    pub(crate) fn read_today(&self, install: InstallId) -> io::Result<Option<TodayFile>> {
+        match read_json::<TodayFile>(&self.today_path())? {
+            Some(today) if today.install == install => Ok(Some(today)),
+            Some(_) => write::remove_file(&self.today_path()).map(|()| None),
+            None => Ok(None),
+        }
     }
 
     pub(crate) fn write_today(&self, today: &TodayFile) -> io::Result<()> {
