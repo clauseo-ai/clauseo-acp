@@ -1,11 +1,12 @@
 // @vitest-environment happy-dom
-// The room's thread over FakeTransport, the rows' side: tool calls, each stop line, the change note and its Undo, a
+// The room's thread over FakeTransport, the rows' side: tool calls (their step group is step-group.test.tsx's), each stop line, the change note and its Undo, a
 // notice (the limit stop's are in limit-stop.test.tsx), images and attachments, a failed turn reopened, older pages, and the clock
 // times on questions and answers.
 import { act } from "react";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { brk } from "@clauseo/components/lib/words-breaks.ts";
 import { th } from "@clauseo/components/lib/words-thread.ts";
+import { steps } from "@clauseo/components/lib/words-steps.ts";
 import { t } from "@clauseo/components/lib/words.ts";
 import { afterEach, expect, test, vi } from "vitest";
 import {
@@ -47,27 +48,30 @@ const changed = (over: Partial<StepEntry> = {}): ViewEntry =>
     ...over,
   });
 
-test("tool calls: one quiet row each, the title isolated, with its id and status, Failed or Stopped where it ended so", async () => {
+test("tool calls: one row each in their step group, opened, with its id and status, Failed or Stopped where it ended so", async () => {
   h = await mountRoom();
   const statuses = ["pending", "in_progress", "completed", "failed", "cancelled"] as const;
   h.deliver([reset(statuses.map((s, i) => toolCall(10 + i, 200 + i, s)))]);
+  // folded into one group, its rows shown once it is opened
+  expect(h.all("tool-call")).toEqual([]);
+  await h.click(h.one("step-group")?.querySelector("button"));
   const rows = h.all("tool-call");
   expect(rows.map((r) => r.dataset["status"])).toEqual([...statuses]);
   expect(rows[0]?.dataset["toolCallId"]).toBe(uuid(200, 7));
-  expect(rows[0]?.querySelector("bdi")?.textContent).toBe("Read file 200");
+  expect(rows[0]?.querySelector("bdi")?.textContent).toBe("Read file 200.");
   expect(rows.map((r) => r.textContent)).toEqual([
-    "Read file 200",
-    "Read file 201",
-    "Read file 202",
-    `Read file 203 · ${th("en", "Failed")}`,
-    `Read file 204 · ${th("en", "Stopped")}`,
+    `Read file 200. · ${steps("en", "Waiting")}`,
+    "Read file 201.",
+    "Read file 202.",
+    `Read file 203. · ${th("en", "Failed")}`,
+    `Read file 204. · ${th("en", "Stopped")}`,
   ]);
   // an update renders in place
   h.deliver([upsert(toolCall(10, 200, "completed"))]);
   expect(h.all("tool-call")[0]?.dataset["status"]).toBe("completed");
 });
 
-test("the answer under a tool call stands the reply's space below it; first in its section, none of its own", async () => {
+test("the answer under a step group stands the reply's space below it; first in its section, none of its own", async () => {
   h = await mountRoom();
   h.deliver([
     reset([
@@ -80,16 +84,14 @@ test("the answer under a tool call stands the reply's space below it; first in i
   ]);
   const [first, after] = h.all("message-agent");
   // the design's .reply: var(--s4) above the answer, as Tailwind's not-first: variant, so the margin falls only where
-  // something stands above it in the answer's section: the meta line, or a tool call
-  expect(after?.previousElementSibling?.getAttribute("data-testid")).toBe("tool-call");
+  // something stands above it in the answer's section: the meta line, or a step group
+  expect(after?.previousElementSibling?.getAttribute("data-testid")).toBe("step-group");
   expect(first?.previousElementSibling?.className).toBe("meta meta-live");
   for (const a of [first, after]) {
     expect(a?.classList.contains("not-first:mt-(--s4)")).toBe(true);
     // the design's reply type: 17 px at Clauseo's weight (thread.css)
     expect(a?.classList.contains("reply-text")).toBe(true);
   }
-  // a row first in its section takes no space of its own: the gap between sections stands alone
-  expect(h.one("tool-call")?.className).toContain("not-first:mt-(--s3)");
 });
 
 test("each stop: always a turn-stopped row with its reason, and its line where it has one", async () => {

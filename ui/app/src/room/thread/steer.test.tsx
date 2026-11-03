@@ -286,9 +286,11 @@ test("a tool call moved to the background says so; the answer's note explains it
     ),
   ]);
   await h.settle();
+  // its row, in its step group opened, says so
+  await h.click(h.one("step-group")?.querySelector("button"));
   const row = h.all("tool-call")[0]!;
   expect(row.dataset["background"]).toBe("true");
-  expect(row.textContent).toBe(`Read file 1 · ${mt("en", "In the background")}`);
+  expect(row.textContent).toContain(mt("en", "In the background"));
   // still running: no note yet
   expect(h.one("steer-note")).toBeNull();
   h.deliver([upsert(call(3, 1, T1, { steer: steerId, finished_at: LATER }))]);
@@ -456,6 +458,7 @@ test("a call that finished after its answer ended gives that answer no note", as
   ]);
   await h.settle();
   expect(h.one("steer-mark")).not.toBeNull();
+  await h.click(h.one("step-group")?.querySelector("button"));
   expect(h.all("tool-call")[0]?.dataset["background"]).toBe("true");
   expect(h.one("steer-note")).toBeNull();
 });
