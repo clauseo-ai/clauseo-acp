@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 
 use proptest::prelude::*;
 use schemars::{JsonSchema, Schema, SchemaGenerator};
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 
 use super::sample::{Sample, Tape};
 use crate::schema::{
@@ -175,61 +175,167 @@ fn the_day_report_has_no_fleet_or_crash_field_and_the_tally_no_install() {
     );
 }
 
-/// Every string an `enum` or `const` in `schema` lists.
-fn enum_names(schema: &Value, names: &mut BTreeSet<String>) {
-    match schema {
-        Value::Object(object) => {
-            if let Some(Value::String(name)) = object.get("const") {
-                names.insert(name.clone());
-            }
-            if let Some(Value::Array(values)) = object.get("enum") {
-                names.extend(values.iter().filter_map(Value::as_str).map(str::to_owned));
-            }
-            object.values().for_each(|value| enum_names(value, names));
+/// `node` with its `$ref` followed into `root`'s `$defs`.
+fn resolve<'a>(root: &'a Value, node: &'a Value) -> &'a Value {
+    match node.get("$ref").and_then(Value::as_str) {
+        Some(reference) => {
+            let name = reference.trim_start_matches("#/$defs/");
+            resolve(root, &root["$defs"][name])
         }
-        Value::Array(items) => items.iter().for_each(|item| enum_names(item, names)),
-        _ => {}
+        None => node,
     }
 }
 
-/// The strings and numbers of a payload that are neither a known name nor a closed form.
-fn open_values(value: &Value, names: &BTreeSet<String>, at: &str, found: &mut Vec<String>) {
+/// Where `value` breaks the schema node `node` it travels under: a name its own field does not
+/// list, a number past its own field's `minimum` or `maximum`, a string of no fixed form, a
+/// field the node does not have or a required one missing. Each value is checked against its
+/// own node, so a change to one field's cap (`tries`, a text size, `schema`, `os_major`) is
+/// caught, not only the 9,999 of a count.
+fn breaks(root: &Value, node: &Value, value: &Value, at: &str, found: &mut Vec<String>) {
+    let node = resolve(root, node);
+    for key in ["oneOf", "anyOf"] {
+        if let Some(Value::Array(variants)) = node.get(key) {
+            let fits = variants.iter().any(|variant| {
+                let mut inner = Vec::new();
+                breaks(root, variant, value, at, &mut inner);
+                inner.is_empty()
+            });
+            if !fits {
+                found.push(format!("{at}: {value} fits no variant"));
+            }
+            return;
+        }
+    }
+    if let Some(constant) = node.get("const") {
+        if constant != value {
+            found.push(format!("{at}: {value} is not {constant}"));
+        }
+        return;
+    }
+    if let Some(Value::Array(names)) = node.get("enum") {
+        if !names.contains(value) {
+            found.push(format!("{at}: {value} is not one of its names"));
+        }
+        return;
+    }
+    let types: Vec<&str> = match node.get("type") {
+        Some(Value::String(one)) => vec![one.as_str()],
+        Some(Value::Array(many)) => many.iter().filter_map(Value::as_str).collect(),
+        _ => Vec::new(),
+    };
     match value {
-        Value::String(text) => {
-            let closed = names.contains(text)
-                || text.parse::<InstallId>().is_ok()
-                || text.parse::<Day>().is_ok()
-                || text.parse::<Week>().is_ok()
-                || text.parse::<Version>().is_ok();
+        Value::Null if types.contains(&"null") => {}
+        Value::Bool(_) if types.contains(&"boolean") => {}
+        Value::Number(number) if types.contains(&"integer") => {
+            let n = number.as_u64();
+            let min = node.get("minimum").and_then(Value::as_u64).unwrap_or(0);
+            match (n, node.get("maximum").and_then(Value::as_u64)) {
+                (Some(n), Some(max)) if (min..=max).contains(&n) => {}
+                (_, None) => found.push(format!("{at}: {number} under no maximum")),
+                _ => found.push(format!(
+                    "{at}: {number} outside {min}..={:?}",
+                    node["maximum"]
+                )),
+            }
+        }
+        Value::String(text) if types.contains(&"string") => {
+            let closed = node.get("pattern").is_some()
+                && (text.parse::<InstallId>().is_ok()
+                    || text.parse::<Day>().is_ok()
+                    || text.parse::<Week>().is_ok()
+                    || text.parse::<Version>().is_ok());
             if !closed {
-                found.push(format!("{at}: {text:?}"));
+                found.push(format!("{at}: {text:?} has no fixed form"));
             }
         }
-        Value::Number(number) => {
-            let capped = number.as_u64().is_some_and(|n| n <= u64::from(Count::MAX));
-            let counted = !at.ends_with("/n") || number.as_u64().is_some_and(|n| n >= 1);
-            if !(capped && counted) {
-                found.push(format!("{at}: {number}"));
-            }
-        }
-        Value::Object(object) => object_values(object, names, at, found),
-        Value::Array(items) => {
+        Value::Array(items) if types.contains(&"array") => {
             for (index, item) in items.iter().enumerate() {
-                open_values(item, names, &format!("{at}/{index}"), found);
+                breaks(root, &node["items"], item, &format!("{at}/{index}"), found);
             }
         }
-        Value::Bool(_) | Value::Null => {}
+        Value::Object(object) if types.contains(&"object") => {
+            let properties = node["properties"].as_object();
+            for (key, field) in object {
+                match properties.and_then(|properties| properties.get(key)) {
+                    Some(field_node) => {
+                        breaks(root, field_node, field, &format!("{at}/{key}"), found);
+                    }
+                    None => found.push(format!("{at}: no field {key}")),
+                }
+            }
+            for required in node["required"].as_array().into_iter().flatten() {
+                if let Some(key) = required.as_str()
+                    && !object.contains_key(key)
+                {
+                    found.push(format!("{at}: {key} missing"));
+                }
+            }
+        }
+        _ => found.push(format!("{at}: {value} is not {types:?}")),
     }
 }
 
-fn object_values(
-    object: &Map<String, Value>,
-    names: &BTreeSet<String>,
-    at: &str,
-    found: &mut Vec<String>,
-) {
-    for (key, value) in object {
-        open_values(value, names, &format!("{at}/{key}"), found);
+/// `breaks` from the schema's root.
+fn breaks_schema(schema: &Value, value: &Value) -> Vec<String> {
+    let mut found = Vec::new();
+    breaks(schema, schema, value, "", &mut found);
+    found
+}
+
+/// Sets every field named `key` in `value` to `to`; returns how many it set.
+fn set_all(value: &mut Value, key: &str, to: &Value) -> usize {
+    match value {
+        Value::Object(object) => {
+            let mut set = 0;
+            for (name, field) in object.iter_mut() {
+                if name == key {
+                    *field = to.clone();
+                    set += 1;
+                } else {
+                    set += set_all(field, key, to);
+                }
+            }
+            set
+        }
+        Value::Array(items) => items.iter_mut().map(|item| set_all(item, key, to)).sum(),
+        _ => 0,
+    }
+}
+
+#[test]
+fn each_number_is_checked_against_its_own_fields_cap() {
+    let mut tape = Tape::new((0..400).collect());
+    let mut day = arbitrary_day(&mut tape, 1);
+    day.cells.agent_install.clear();
+    let json = serde_json::to_value(Batch { days: vec![day] }).unwrap();
+    let schema = counts_schema();
+    assert_eq!(breaks_schema(&schema, &json), Vec::<String>::new());
+    // Each one under 9,999, so only its own cap can catch it.
+    for (key, past) in [("schema", 2), ("os_major", 27), ("n", 10_000), ("n", 0)] {
+        let mut broken = json.clone();
+        assert!(set_all(&mut broken, key, &json!(past)) > 0, "{key}");
+        assert_ne!(
+            breaks_schema(&schema, &broken),
+            Vec::<String>::new(),
+            "{key} = {past}"
+        );
+    }
+    let mut install = json.clone();
+    let cell = json!({ "agent": "claude", "result": "done", "tries": 4, "took": "lt_1s", "n": 1 });
+    install["days"][0]["cells"]["agent_install"] = json!([cell]);
+    let found = breaks_schema(&schema, &install);
+    assert_ne!(found, Vec::<String>::new());
+    let mut ok = install.clone();
+    ok["days"][0]["cells"]["agent_install"][0]["tries"] = json!(3);
+    assert_eq!(breaks_schema(&schema, &ok), Vec::<String>::new());
+    for (key, text) in [("language", "Mehra divorce"), ("code", "store.lockd")] {
+        let mut free = json.clone();
+        if key == "code" {
+            free["days"][0]["cells"]["error_shown"] = json!([{ "code": "internal", "n": 1 }]);
+            assert_eq!(breaks_schema(&schema, &free), Vec::<String>::new());
+        }
+        assert!(set_all(&mut free, key, &json!(text)) > 0, "{key}");
+        assert_ne!(breaks_schema(&schema, &free), Vec::<String>::new(), "{key}");
     }
 }
 
@@ -260,7 +366,7 @@ fn arbitrary_day(tape: &mut Tape, age: i64) -> DayReport {
 
 proptest! {
     #[test]
-    fn arbitrary_days_carry_only_known_names_ids_and_capped_numbers(
+    fn arbitrary_days_fit_their_schema_field_by_field(
         values in proptest::collection::vec(any::<u64>(), 0..400),
     ) {
         let mut tape = Tape::new(values);
@@ -270,11 +376,7 @@ proptest! {
         let batch = Batch { days };
         let json = serde_json::to_value(&batch).unwrap();
 
-        let mut names = BTreeSet::new();
-        enum_names(&counts_schema(), &mut names);
-        let mut found = Vec::new();
-        open_values(&json, &names, "", &mut found);
-        prop_assert_eq!(found, Vec::<String>::new());
+        prop_assert_eq!(breaks_schema(&counts_schema(), &json), Vec::<String>::new());
 
         let back: Batch = serde_json::from_value(json).unwrap();
         prop_assert_eq!(&back, &batch);
@@ -282,7 +384,7 @@ proptest! {
     }
 
     #[test]
-    fn arbitrary_tallies_carry_only_known_names_ids_and_capped_numbers(
+    fn arbitrary_tallies_fit_their_schema_field_by_field(
         values in proptest::collection::vec(any::<u64>(), 0..100),
     ) {
         let mut tape = Tape::new(values);
@@ -307,11 +409,7 @@ proptest! {
             cells: counter.to_cells(),
         };
         let json = serde_json::to_value(&tally).unwrap();
-        let mut names = BTreeSet::new();
-        enum_names(&tally_schema(), &mut names);
-        let mut found = Vec::new();
-        open_values(&json, &names, "", &mut found);
-        prop_assert_eq!(found, Vec::<String>::new());
+        prop_assert_eq!(breaks_schema(&tally_schema(), &json), Vec::<String>::new());
         let back: TallyReport = serde_json::from_value(json).unwrap();
         prop_assert_eq!(&back, &tally);
         prop_assert_eq!(tally.check(this_week), Ok(()));

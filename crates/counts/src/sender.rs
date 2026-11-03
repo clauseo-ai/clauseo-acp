@@ -143,7 +143,7 @@ struct InFlight {
     _cancel: oneshot::Sender<()>,
 }
 
-/// The sender's own state. Dropping it (counts off) cancels the POST in flight.
+/// The sender's own state. Resetting it (counts off) cancels the POST in flight.
 #[derive(Debug, Default)]
 pub(crate) struct Sender {
     /// When the next daily send may go; set at the first tick.
@@ -151,11 +151,22 @@ pub(crate) struct Sender {
     days: Option<Round>,
     tallies: BTreeMap<Week, Round>,
     in_flight: Option<InFlight>,
+    /// The next POST's number. It keeps counting across off, so post numbers never repeat in a
+    /// process and a late answer to a POST from before off cannot match one made after.
     next_id: u64,
     last_day_try: Option<Time>,
 }
 
 impl Sender {
+    /// Counts off: drops every round and the POST in flight (which cancels it), and keeps
+    /// counting post numbers.
+    pub(crate) fn reset(&mut self) {
+        *self = Sender {
+            next_id: self.next_id,
+            ..Sender::default()
+        };
+    }
+
     /// At the first tick: the daily send goes 0 to 10 minutes from now.
     pub(crate) fn start(&mut self, now: Time, rng: &mut Rng) {
         if self.next_daily.is_none() {
@@ -217,13 +228,18 @@ pub(crate) fn due(state: &mut State, now: Time) -> Option<Post> {
     tally_post(state, now, today)
 }
 
-/// The days the next day send may hold: closed, at most 14 days old, oldest first.
+/// The days the next day send may hold: closed, at most 14 days old, oldest first, and made
+/// under the current install id. A report is never given another id: one from before off (whose
+/// delete failed) waits under its own id until the age rule drops it, and is never sent.
 fn sendable(state: &State, today: Day) -> impl Iterator<Item = Day> + '_ {
     state
         .queue
-        .keys()
-        .copied()
-        .filter(move |&day| (1..=MAX_DAY_AGE).contains(&today.days_since(day)))
+        .iter()
+        .filter(move |&(&day, report)| {
+            (1..=MAX_DAY_AGE).contains(&today.days_since(day))
+                && Some(report.install) == state.install
+        })
+        .map(|(&day, _)| day)
 }
 
 fn day_try_due(state: &State, now: Time, today: Day) -> bool {
@@ -264,10 +280,6 @@ fn day_body(state: &mut State, today: Day) -> Option<(Vec<Day>, Vec<u8>)> {
             let reports = days
                 .iter()
                 .filter_map(|day| state.queue.get(day).cloned())
-                .map(|mut report| {
-                    report.install = state.install.unwrap_or(report.install);
-                    report
-                })
                 .collect();
             let json = serde_json::to_vec(&Batch { days: reports }).ok()?;
             let body = gzip(&json)?;

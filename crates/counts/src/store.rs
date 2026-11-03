@@ -6,7 +6,11 @@
 //! - `today.json`: the open day's cells, its foreground seconds, the onboarding steps this install
 //!   has counted and the last day a day report was taken.
 //! - `queue/<YYYY-MM-DD>.json`: a closed day's report, waiting to be sent.
-//! - `tally/<YYYY-Www>.json`: a week's tally, open (still counting) or closed (waiting to be sent).
+//! - `tally/<YYYY-Www>.json`: a week's tally, open (still counting) or closed (waiting to be sent),
+//!   with the install id it was counted under (kept on disk only; the tally on the wire has none).
+//!
+//! A queued report or tally made under another install id (left by an off whose delete failed)
+//! is removed when the folder is read, never sent under the current id.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
@@ -46,6 +50,8 @@ pub(crate) struct TodayFile {
 pub(crate) enum TallyFile {
     /// The week is still counting.
     Open {
+        /// The install id it was counted under.
+        install: InstallId,
         /// The week.
         week: Week,
         /// Its cells so far.
@@ -53,6 +59,8 @@ pub(crate) enum TallyFile {
     },
     /// The week has closed and its report waits for `send_at`.
     Closed {
+        /// The install id it was counted under.
+        install: InstallId,
         /// The report.
         report: TallyReport,
         /// When to send it.
@@ -65,6 +73,12 @@ impl TallyFile {
         match self {
             TallyFile::Open { week, .. } => *week,
             TallyFile::Closed { report, .. } => report.week,
+        }
+    }
+
+    fn install(&self) -> InstallId {
+        match self {
+            TallyFile::Open { install, .. } | TallyFile::Closed { install, .. } => *install,
         }
     }
 }
@@ -110,8 +124,10 @@ impl Store {
         self.root.join("tally").join(format!("{week}.json"))
     }
 
-    /// The saved install id, if there is a readable one.
+    /// The saved install id, if there is a readable one. A folder in its place is removed, so
+    /// the new id can be written.
     pub(crate) fn read_install(&self) -> Option<InstallId> {
+        remove_if_folder(&self.install_path()).ok()?;
         let bytes = std::fs::read(self.install_path()).ok()?;
         std::str::from_utf8(&bytes).ok()?.trim().parse().ok()
     }
@@ -129,13 +145,15 @@ impl Store {
         write_json(&self.today_path(), today)
     }
 
-    /// Every queued day whose file holds that day's report.
-    pub(crate) fn read_queue(&self) -> io::Result<BTreeMap<Day, DayReport>> {
+    /// Every queued day whose file holds that day's report, made under `install`.
+    pub(crate) fn read_queue(&self, install: InstallId) -> io::Result<BTreeMap<Day, DayReport>> {
         let mut queue = BTreeMap::new();
         for path in self.list("queue")? {
             let report: Option<DayReport> = read_json(&path)?;
             match report {
-                Some(report) if path == self.queue_path(report.day) => {
+                Some(report)
+                    if path == self.queue_path(report.day) && report.install == install =>
+                {
                     queue.insert(report.day, report);
                 }
                 _ => write::remove_file(&path)?,
@@ -152,13 +170,15 @@ impl Store {
         write::remove_file(&self.queue_path(day))
     }
 
-    /// Every tally whose file holds that week's tally.
-    pub(crate) fn read_tallies(&self) -> io::Result<BTreeMap<Week, TallyFile>> {
+    /// Every tally whose file holds that week's tally, counted under `install`.
+    pub(crate) fn read_tallies(&self, install: InstallId) -> io::Result<BTreeMap<Week, TallyFile>> {
         let mut tallies = BTreeMap::new();
         for path in self.list("tally")? {
             let tally: Option<TallyFile> = read_json(&path)?;
             match tally {
-                Some(tally) if path == self.tally_path(tally.week()) => {
+                Some(tally)
+                    if path == self.tally_path(tally.week()) && tally.install() == install =>
+                {
                     tallies.insert(tally.week(), tally);
                 }
                 _ => write::remove_file(&path)?,
@@ -176,7 +196,8 @@ impl Store {
     }
 
     /// The files in `<counts>/<folder>`, sorted; a missing folder has none. A leftover temp file
-    /// is removed.
+    /// is removed, and so is anything that is not a plain file (a folder, a link), which could
+    /// otherwise fail every read.
     fn list(&self, folder: &str) -> io::Result<Vec<PathBuf>> {
         let entries = match std::fs::read_dir(self.root.join(folder)) {
             Ok(entries) => entries,
@@ -185,12 +206,17 @@ impl Store {
         };
         let mut paths = Vec::new();
         for entry in entries {
-            let path = entry?.path();
+            let entry = entry?;
+            let path = entry.path();
+            let kind = entry.file_type()?;
             let temp = path
                 .file_name()
                 .is_some_and(|name| name.to_string_lossy().starts_with('.'));
-            if temp {
-                write::remove_file(&path)?;
+            if kind.is_dir() {
+                write::remove_dir_all(&path)?;
+            } else if temp || !kind.is_file() {
+                // A link to a folder is removed as a folder on Windows.
+                write::remove_file(&path).or_else(|_| write::remove_dir_all(&path))?;
             } else {
                 paths.push(path);
             }
@@ -200,9 +226,10 @@ impl Store {
     }
 }
 
-/// The file at `path` as `T`: `None` when it is missing, and when it cannot be read as `T`,
-/// in which case it is removed.
+/// The file at `path` as `T`: `None` when it is missing, and when it cannot be read as `T`
+/// (or is a folder), in which case it is removed.
 fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> io::Result<Option<T>> {
+    remove_if_folder(path)?;
     let bytes = match std::fs::read(path) {
         Ok(bytes) => bytes,
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -213,6 +240,14 @@ fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> io::Result<Option<T
     }
     write::remove_file(path)?;
     Ok(None)
+}
+
+/// Removes a folder where a file should be, which would otherwise fail every read and write.
+fn remove_if_folder(path: &Path) -> io::Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.is_dir() => write::remove_dir_all(path),
+        _ => Ok(()),
+    }
 }
 
 fn write_json<T: Serialize>(path: &Path, value: &T) -> io::Result<()> {
