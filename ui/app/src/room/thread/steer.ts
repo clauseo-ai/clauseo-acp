@@ -14,7 +14,6 @@ import type {
   TurnId,
   UserMessageEntry,
 } from "../../transport/protocol.ts";
-import type { ToolCallEntryH9, UserMessageEntryH9 } from "../../transport/h9-pending.ts";
 import type { StreamView } from "../../store/view.ts";
 import { turnRunning } from "./live.ts";
 
@@ -41,7 +40,7 @@ export const injectedTurn = (m: UserMessageEntry): TurnId | undefined =>
 export const runningIn = (v: StreamView | undefined): boolean =>
   turnRunning(v?.header?.header?.status);
 
-export function askedAs(m: UserMessageEntryH9, running: boolean): AskedAs {
+export function askedAs(m: UserMessageEntry, running: boolean): AskedAs {
   if (m.status === "queued" || m.status === "removed") return "hidden";
   const outcome = outcomeOf(m);
   if (outcome === "injected") return "mark";
@@ -50,11 +49,11 @@ export function askedAs(m: UserMessageEntryH9, running: boolean): AskedAs {
 }
 
 /** What of a user message the grouping reads, as one string: a change elsewhere (its words) changes nothing. */
-export const shapeOf = (m: UserMessageEntryH9 | undefined): string =>
+export const shapeOf = (m: UserMessageEntry | undefined): string =>
   m === undefined ? "" : `${m.status}|${m.turn}|${m.delivery ?? ""}|${outcomeOf(m) ?? ""}`;
 
 /** The tool call's background mark, when a steer moved it there. */
-export const backgroundOf = (call: ToolCallEntry) => (call as ToolCallEntryH9).background;
+export const backgroundOf = (call: ToolCallEntry) => call.background;
 
 /** One note under an answer: the steered words' time, when the last call the steer moved to the background finished,
  * and each call with its finish time (the note's list names them: the note itself names none). */

@@ -1,6 +1,6 @@
 // U7 part 2's review states (matters/queue, queue-full, held, held-failed, steer-claude, steer-chatgpt, steer-aside):
 // the real room over a host whose one thread runs, or ran, a turn with messages queued behind it or a steer sent into
-// it, as H9 shapes them (transport/h9-pending.ts). The host takes the queue's commands and can refuse one with a code,
+// it, as H9 shapes them. The host takes the queue's commands and can refuse one with a code,
 // as a message that had already gone, or a full queue. The lawyer's words are the design's demo lines (design
 // words-matters.ts), in the frame's language, so a Hindi frame reads as a Hindi lawyer's room.
 import type { Lang } from "@clauseo/components/lib/display.ts";
@@ -19,10 +19,10 @@ import {
 import { FakeTransport } from "../transport/fake-transport.ts";
 import type {
   BackgroundMark,
-  HeaderEntryH9,
-  ToolCallEntryH9,
-  UserMessageEntryH9,
-} from "../transport/h9-pending.ts";
+  HeaderEntry,
+  ToolCallEntry,
+  UserMessageEntry,
+} from "../transport/protocol.ts";
 import type {
   AgentId,
   CommandOutcome,
@@ -120,7 +120,7 @@ const ask = (
   text: string,
   turn: TurnId,
   ts: number,
-  over: Partial<UserMessageEntryH9> = {},
+  over: Partial<UserMessageEntry> = {},
 ): ViewEntry => ({
   user_message: { ...userMessage(order, n, text).user_message!, turn, ts, ...over },
 });
@@ -163,7 +163,7 @@ export function queueHost(scene: QueueScene): FakeTransport {
   const agent = scene.agent ?? "claude-acp";
   const status = scene.status ?? "running";
   const head = header();
-  const h: HeaderEntryH9 = {
+  const h: HeaderEntry = {
     ...head.header!,
     matter: MATTER.matter,
     agent,
@@ -290,7 +290,7 @@ export const sentNowScene = (lang: Lang): QueueScene => ({
 /** matters/steer-aside: a search the 4:31 pm steer moved to the background, finished at 4:32 pm, the answer done. */
 export const asideScene = (lang: Lang): QueueScene => {
   const background: BackgroundMark = { steer: uuid(2, 5), finished_at: pm(32) };
-  const search: ToolCallEntryH9 = {
+  const search: ToolCallEntry = {
     order: 3,
     tool_call: uuid(1, 7),
     turn: T1,

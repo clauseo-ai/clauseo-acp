@@ -5,7 +5,6 @@
 import { createContext, use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ViewStore } from "../../store/store.ts";
 import { streamOf } from "../../store/view.ts";
-import { dispatchH9 } from "../../transport/h9-pending.ts";
 import { internalError, toHostError, type HostTransport } from "../../transport/host-transport.ts";
 import type {
   ErrorCode,
@@ -173,11 +172,13 @@ export function useThreadSession(
           queueCountPick(view) === 0;
         const header = view?.header ?? null;
         const content = [{ text: { text } }];
-        const sent = await (how.delivery === undefined
-          ? command({ send_prompt: { thread: id, content } })
-          : dispatchH9(transport, {
-              send_prompt: { thread: id, content, delivery: how.delivery },
-            }));
+        const sent = await command({
+          send_prompt: {
+            thread: id,
+            content,
+            ...(how.delivery === undefined ? {} : { delivery: how.delivery }),
+          },
+        });
         if (track && typeof sent !== "string" && sent.prompt_accepted !== undefined) {
           headerAtSend.current = header;
           setSentTurn(sent.prompt_accepted.turn);
@@ -191,7 +192,7 @@ export function useThreadSession(
         sending.current = false;
       }
     },
-    [matter, key, create, onSent, command, store, refuse, transport],
+    [matter, key, create, onSent, command, store, refuse],
   );
 
   // The sent turn holds busy until its step or limit stop is in the view (live.ts, useBusy). A turn can end without

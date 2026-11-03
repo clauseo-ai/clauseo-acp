@@ -21,7 +21,7 @@ import {
   userMessage,
   uuid,
 } from "../../testing/stream-script.ts";
-import type { BackgroundMark, UserMessageEntryH9 } from "../../transport/h9-pending.ts";
+import type { BackgroundMark, UserMessageEntry } from "../../transport/protocol.ts";
 import type { EntryId, StepEntry, StreamId, TurnId, ViewEntry } from "../../transport/protocol.ts";
 import { clockTime } from "./clock.ts";
 import { mountRoom, type Harness } from "./harness.ts";
@@ -65,7 +65,7 @@ const ask = (
   n: number,
   text: string,
   turn: TurnId,
-  over: Partial<UserMessageEntryH9> = {},
+  over: Partial<UserMessageEntry> = {},
 ): ViewEntry => ({
   user_message: { ...userMessage(order, n, text).user_message!, turn, ...over },
 });

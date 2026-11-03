@@ -9,7 +9,6 @@ import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { useStreamPart, useViewStore } from "../../store/hooks.ts";
 import type { StreamView } from "../../store/view.ts";
-import type { HeaderEntryH9 } from "../../transport/h9-pending.ts";
 import type { StreamId } from "../../transport/protocol.ts";
 import { useAgentPlan } from "./agent-plan.ts";
 import { pickFull } from "./composer-queue.ts";
@@ -18,7 +17,7 @@ const TEST_IDS = { row: "steer-hint", sendNow: "steer-send-now", queue: "queue" 
 
 /** H9's steering flag on the thread's header: true, false, or undefined before the host says. */
 const pickJoins = (v: StreamView | undefined): boolean | undefined =>
-  (v?.header?.header as HeaderEntryH9 | undefined)?.steer_joins_turn;
+  v?.header?.header?.steer_joins_turn;
 
 export function ComposerSteer({
   stream,
