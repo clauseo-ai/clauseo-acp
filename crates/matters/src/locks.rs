@@ -4,7 +4,7 @@
 use std::path::{Component, Path, PathBuf};
 
 use clauseo_protocol::MatterPath;
-use unicode_normalization::UnicodeNormalization;
+use unicode_normalization::{UnicodeNormalization, is_nfc};
 
 use crate::refuse::{Fold, keys_by};
 
@@ -23,9 +23,30 @@ pub enum HeldOpen {
 /// ([`owner_in_another_form`]); on Windows also a sharing or lock violation when it exists and
 /// is opened with no sharing. A missing file with no owner file, and any other error, is `None`.
 /// One `symlink_metadata` per owner name (at most three), a `read_dir` of the parent for a
-/// non-ASCII name none of them finds, and on Windows one open. The rule undo and restore refuse
-/// by.
+/// non-ASCII name none of them finds (at most [`MAX_LISTED`] entries; an owner file past them,
+/// or a listing that fails, is not found: it fails open, as any other error does), and on
+/// Windows one open. The rule undo and restore refuse by.
 pub fn held_open(folder: &Path, path: &MatterPath) -> Option<HeldOpen> {
+    held_open_by(folder, path, None)
+}
+
+/// [`held_open`] for a caller that has listed the parent folder already: `owner_files` are its
+/// entries starting `~$`, and the lookup by another Unicode form compares against them instead
+/// of listing the folder again. The host's guard lists each folder once and asks for every file
+/// in it, so a folder of many non-ASCII names costs one listing, not one per file.
+pub fn held_open_beside(
+    folder: &Path,
+    path: &MatterPath,
+    owner_files: &[String],
+) -> Option<HeldOpen> {
+    held_open_by(folder, path, Some(owner_files))
+}
+
+/// The most entries the lookup by another Unicode form reads from one folder.
+const MAX_LISTED: usize = 20_000;
+
+/// [`held_open`], with the parent's owner files given (`Some`) or listed here (`None`).
+fn held_open_by(folder: &Path, path: &MatterPath, given: Option<&[String]>) -> Option<HeldOpen> {
     let absolute: PathBuf = path
         .as_str()
         .split('/')
@@ -39,7 +60,7 @@ pub fn held_open(folder: &Path, path: &MatterPath) -> Option<HeldOpen> {
     {
         return Some(HeldOpen::OwnerFile(owner));
     }
-    if let Some(owner) = owner_in_another_form(parent, name) {
+    if let Some(owner) = owner_in_another_form(parent, name, given) {
         return Some(HeldOpen::OwnerFile(owner));
     }
     #[cfg(windows)]
@@ -144,39 +165,81 @@ pub(crate) fn locked(folder: &Path, paths: &[MatterPath]) -> Vec<MatterPath> {
 /// is one of [`owner_names`] of the document's name as written, composed (NFC) or decomposed
 /// (NFD), each composed. Ext4 and NTFS tell the forms apart, so the exact stats miss an owner
 /// file that Word or a sync made in the other form (`क़` as U+0958 or as `क` + U+093C), and a
-/// write would race the program holding it. One `read_dir` of `parent`, only when the exact
-/// stats found nothing and the name holds a non-ASCII character; its first match by name.
-fn owner_in_another_form(parent: &Path, name: &str) -> Option<String> {
+/// write would race the program holding it. Compares against `given` (the parent's `~$`
+/// entries, listed by the caller) or else one `read_dir` of `parent` of at most [`MAX_LISTED`]
+/// entries, only when the exact stats found nothing and the name holds a non-ASCII character;
+/// its first match by name. A failed listing finds nothing (fails open).
+fn owner_in_another_form(parent: &Path, name: &str, given: Option<&[String]>) -> Option<String> {
     if name.is_ascii() {
         return None;
     }
-    let forms = [
-        name.to_owned(),
-        name.nfc().collect::<String>(),
-        name.nfd().collect::<String>(),
-    ];
-    let wanted: Vec<String> = forms
-        .iter()
-        .flat_map(|form| owner_names(form))
-        .map(|owner| fold_name(&owner))
+    let owners: Vec<(String, String)> = match given {
+        Some(owners) => owners
+            .iter()
+            .filter(|entry| entry.starts_with("~$"))
+            .map(|entry| (fold_name(entry), entry.clone()))
+            .collect(),
+        None => std::fs::read_dir(parent)
+            .ok()?
+            .take(MAX_LISTED)
+            .flatten()
+            .filter_map(|entry| entry.file_name().into_string().ok())
+            .filter(|entry| entry.starts_with("~$"))
+            .map(|entry| (fold_name(&entry), entry))
+            .collect(),
+    };
+    if owners.is_empty() {
+        return None;
+    }
+    // The name as written, composed and decomposed, each once: most names are NFC already, and
+    // a Devanagari name with no nukta letter is NFD too. Owner names cut from the NFC form are
+    // NFC already (a suffix of an NFC string is NFC), so off macOS and Windows they need no fold.
+    let composed: String = if is_nfc(name) {
+        name.to_owned()
+    } else {
+        name.nfc().collect()
+    };
+    let decomposed: String = name.nfd().collect();
+    let mut wanted: Vec<String> = owner_names(&composed)
+        .into_iter()
+        .map(|owner| {
+            if cfg!(any(target_os = "macos", windows)) {
+                fold_name(&owner)
+            } else {
+                owner
+            }
+        })
         .collect();
-    let mut found: Vec<String> = std::fs::read_dir(parent)
-        .ok()?
-        .flatten()
-        .filter_map(|entry| entry.file_name().into_string().ok())
-        .filter(|entry| entry.starts_with("~$") && wanted.contains(&fold_name(entry)))
+    for form in [name, decomposed.as_str()] {
+        if form != composed {
+            wanted.extend(owner_names(form).iter().map(|owner| fold_name(owner)));
+        }
+    }
+    let mut found: Vec<&String> = owners
+        .iter()
+        .filter(|(folded, _)| wanted.contains(folded))
+        .map(|(_, entry)| entry)
         .collect();
     found.sort_unstable();
-    found.into_iter().next()
+    found.first().map(|entry| (*entry).clone())
 }
 
 /// A name as the safety checks compare it: composed (NFC) everywhere, and lower case on the
 /// case-insensitive file systems (macOS, Windows).
 fn fold_name(name: &str) -> String {
-    if cfg!(any(target_os = "macos", windows)) {
-        name.to_lowercase().nfc().collect()
+    if name.is_ascii() {
+        case(name)
     } else {
-        name.nfc().collect()
+        case(name).nfc().collect()
+    }
+}
+
+/// A name lower case on the case-insensitive file systems (macOS, Windows); as it is elsewhere.
+fn case(name: &str) -> String {
+    if cfg!(any(target_os = "macos", windows)) {
+        name.to_lowercase()
+    } else {
+        name.to_owned()
     }
 }
 
