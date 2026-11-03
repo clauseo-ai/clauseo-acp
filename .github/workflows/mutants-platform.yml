@@ -11,12 +11,12 @@
 #   25 minutes) and before ci.yml's at 03:17. The longer jobs run past 03:17; then ci.yml (2 macOS
 #   jobs) and scoreboard.yml (1) plus this workflow's one macOS job still fit the 5.
 # - Four jobs, each one runner and one cargo-mutants run over the files in its matrix entry
-#   (`--file`), with `--jobs 2`: three on windows-2025 (the runner of e2e-windows.yml's smoke
-#   test), one on macos-15 (ci.yml's). Each file list comes from a grep of `cfg(windows)`,
-#   `cfg(not(unix))` and `cfg(target_os = "macos")`, outside tests, in the crates the issue
-#   names (process, matters, settings, store), plus the files whose mutants need a
-#   case-insensitive file system (writeback.rs, undo.rs, refuse.rs). A whole file is mutated, so
-#   mutants Linux already tests run again here; that keeps the lists simple. Left out:
+#   (`--file`), with `--jobs 2` (process: 1): three on windows-2025 (the runner of e2e-windows.yml's
+#   smoke test), one on macos-15 (ci.yml's). Each file list comes from a grep of `cfg(windows)`,
+#   `cfg(not(unix))` and `cfg(target_os = "macos")`, outside tests, in the crates the issue names
+#   (process, matters, settings, store), plus the files whose mutants need a case-insensitive file
+#   system (writeback.rs, undo.rs, refuse.rs). A whole file is mutated, so mutants Linux already
+#   tests run again here; that keeps the lists simple. Left out:
 #   crates/limits/src/readers/paths.rs's `cfg!(windows)` site, since limits was not in the issue.
 # - The config is .cargo/mutants.toml without its `exclude_globs` entries for the files mutated
 #   here (the settings OS shims, excluded on Linux because they are not compiled there), so the
@@ -85,6 +85,10 @@ jobs:
             runner: windows-2025
             minutes: 140
             job_minutes: 160
+            # One at a time: `resume`'s mutants (os/windows.rs) can resume the suspended threads
+            # of every process on the runner, so a second worker frees the other's hung agents
+            # and turns a caught mutant into a missed one (run 41563489415, os/windows.rs:140).
+            jobs: 1
             fake_agent: true
             packages: clauseo-process
             files: >-
@@ -150,6 +154,7 @@ jobs:
       FILES: ${{ matrix.files }}
       # 'true' unless a dispatch asked for another job (`only`); every step checks it.
       PICKED: ${{ (inputs.only || 'all') == 'all' || inputs.only == matrix.name }}
+      JOBS: ${{ matrix.jobs || 2 }}
     defaults:
       run:
         shell: bash
@@ -202,7 +207,7 @@ jobs:
           # `|| code=$?`: GitHub runs `shell: bash` with -e, so a bare non-zero exit (2 when a
           # mutant is missed) would end the step here and fail it before the case below.
           code=0
-          cargo mutants --config "$RUNNER_TEMP/mutants.toml" --jobs 2 "${args[@]}" || code=$?
+          cargo mutants --config "$RUNNER_TEMP/mutants.toml" --jobs "$JOBS" "${args[@]}" || code=$?
           case "$code" in
             0) echo "every mutant caught" ;;
             2) echo "some mutants missed (reported, not a failure)" ;;
