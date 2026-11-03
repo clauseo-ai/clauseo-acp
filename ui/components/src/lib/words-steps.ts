@@ -42,6 +42,9 @@ const HI = {
   "Tried to run a task.": "एक काम चलाने की कोशिश की गई।",
   "Tried to think it through.": "विचार करने की कोशिश की गई।",
   "Tried one other thing.": "एक अन्य काम करने की कोशिश की गई।",
+  // a step named only by the agent's own words (its title or a task's description), tried and not done: those words
+  // after the attempt, so the agent's imperative is never told as done; the words stay as the agent sent them
+  "Tried: {title}.": "कोशिश की गई: {title}।",
   // a row's state, after its words, while it waits or once it carried on behind a steer
   Waiting: "प्रतीक्षा में",
   // the folded line: one sentence for each kind of work, the most done first
