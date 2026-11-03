@@ -13,7 +13,9 @@ use clauseo_counts::schema::{
 use clauseo_counts::{About, Counts, Upload, UploadError, UploadPath, send_due};
 use futures::future::BoxFuture;
 
-pub(crate) use crate::write::{Scratch, plant};
+pub(crate) use crate::write::{Scratch, plant, remove};
+#[cfg(unix)]
+pub(crate) use crate::write::{can_write_in, set_read_only};
 
 pub(crate) const HOUR: u64 = 3600;
 pub(crate) const DAY: u64 = 86_400;

@@ -35,8 +35,32 @@ impl Drop for Scratch {
     }
 }
 
+/// Removes the file at `path`.
+pub(crate) fn remove(path: &Path) {
+    std::fs::remove_file(path).unwrap();
+}
+
 /// Writes `contents` at `path`, making its folders.
 pub(crate) fn plant(path: &Path, contents: &[u8]) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, contents).unwrap();
+}
+
+/// Makes the folder at `path` read-only (`0555`), or writable again (`0755`), so a delete in
+/// it fails.
+#[cfg(unix)]
+pub(crate) fn set_read_only(path: &Path, read_only: bool) {
+    use std::os::unix::fs::PermissionsExt as _;
+    let mode = if read_only { 0o555 } else { 0o755 };
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
+}
+
+/// Whether a file can be made in the folder at `path` (it can when the tests run as root, which
+/// ignores the folder's mode).
+#[cfg(unix)]
+pub(crate) fn can_write_in(path: &Path) -> bool {
+    let probe = path.join("probe");
+    let made = std::fs::write(&probe, b"").is_ok();
+    drop(std::fs::remove_file(&probe));
+    made
 }

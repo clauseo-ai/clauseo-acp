@@ -122,10 +122,10 @@ impl State {
             steps: today.steps,
             posted: today.posted,
         };
-        self.queue = self.store.read_queue()?;
+        self.queue = self.store.read_queue(install)?;
         self.tallies = self
             .store
-            .read_tallies()?
+            .read_tallies(install)?
             .into_iter()
             .map(|(week, file)| (week, Tally::from(file)))
             .collect();
@@ -156,8 +156,10 @@ impl State {
             steps: self.today.steps.clone(),
             posted: self.today.posted,
         })?;
-        for (&week, tally) in &self.tallies {
-            self.store.write_tally(&tally.to_file(week))?;
+        if let Some(install) = self.install {
+            for (&week, tally) in &self.tallies {
+                self.store.write_tally(&tally.to_file(week, install))?;
+            }
         }
         self.dirty = false;
         Ok(())
@@ -360,7 +362,7 @@ impl State {
     /// memory, and deletes the counts folder.
     pub(crate) fn turn_off(&mut self) -> io::Result<()> {
         self.mode = Mode::Off;
-        self.sender = Sender::default();
+        self.sender.reset();
         self.install = None;
         self.today = Today::default();
         self.unplaced.clear();
@@ -371,10 +373,15 @@ impl State {
         self.delete_folder()
     }
 
-    /// Turns counts on with a new id: saved after the first act, in memory before it.
+    /// Turns counts on with a new id: saved after the first act, in memory before it. A counts
+    /// folder whose delete failed is deleted first; while that fails, counts stay off and the
+    /// error comes back, so nothing from before off can sit beside the new id.
     pub(crate) fn turn_on(&mut self) -> io::Result<()> {
         if self.mode != Mode::Off {
             return Ok(());
+        }
+        if self.delete_pending {
+            self.delete_folder()?;
         }
         self.install = Some(InstallId::random());
         if self.consented {
@@ -405,13 +412,15 @@ impl State {
 }
 
 impl Tally {
-    fn to_file(&self, week: Week) -> TallyFile {
+    fn to_file(&self, week: Week, install: InstallId) -> TallyFile {
         match self {
             Tally::Open(counter) => TallyFile::Open {
+                install,
                 week,
                 cells: counter.to_cells(),
             },
             Tally::Closed { report, send_at } => TallyFile::Closed {
+                install,
                 report: report.clone(),
                 send_at: *send_at,
             },
@@ -427,7 +436,9 @@ impl From<TallyFile> for Tally {
                 counter.merge(&cells);
                 Tally::Open(counter)
             }
-            TallyFile::Closed { report, send_at } => Tally::Closed { report, send_at },
+            TallyFile::Closed {
+                report, send_at, ..
+            } => Tally::Closed { report, send_at },
         }
     }
 }

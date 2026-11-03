@@ -64,10 +64,13 @@ cells, the weekly tally, the queue and the sender. Its row bans `matters`, `acp`
 - **Files.** `<data_dir>/first_act_done` (written at the first act, never deleted) and
   `<data_dir>/counts/`: `install_id`, `today.json`, `queue/<day>.json`, `tally/<week>.json`. Each
   is written whole through a temp file and a rename, only in `src/write.rs`. A file that does not
-  read as its type is removed.
+  read as its type is removed, and so is a queued day or a tally made under another install id
+  (a tally file keeps its id on disk only). A report is never given another id.
 - **Modes.** Off (the switch or policy) counts nothing, deletes `<data_dir>/counts/`, and cancels
   a POST in flight, which is never retried. On before the first act counts in memory only. On
-  after it saves and sends. Turning counts on again makes a new install id.
+  after it saves and sends. Turning counts on again makes a new install id, once the old folder
+  is gone: while its delete fails, counts stay off. Post numbers never repeat in a process, so an
+  answer to a POST from before off matches nothing after it.
 - **The sender.** Time and randomness are inputs: `Counts::tick(now)`, and a seed given to
   `Counts::open`. One day send a UTC day, 0 to 10 minutes after the first tick and after each
   midnight. A failed try is retried 1, 3, 7, 11, 15, 19 and 23 hours after the first; then the days

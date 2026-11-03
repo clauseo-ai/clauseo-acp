@@ -20,6 +20,9 @@ mod cells;
 #[path = "counts/first_act.rs"]
 mod first_act;
 #[cfg(test)]
+#[path = "counts/off_on.rs"]
+mod off_on;
+#[cfg(test)]
 #[path = "counts/policy.rs"]
 mod policy;
 #[cfg(test)]
