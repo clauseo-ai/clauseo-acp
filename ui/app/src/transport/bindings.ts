@@ -3235,7 +3235,9 @@ export type ToolCallEntry = {
 	content: ToolCallContent[],
 	/**
 	 *  Set when it had not finished as a steer joined its turn, so it carried on in the
-	 *  background (`SteerResolved`'s `aside`). Missing reads as `None`.
+	 *  background (`SteerResolved`'s `aside`). Missing reads as `None`. Boxed: it is rare, and a
+	 *  tool call entry is copied on every update (unboxed, `tool_call_updated` cost 3.4% more
+	 *  instructions in the reducer bench; boxed, 0.4%).
 	 */
 	background?: BackgroundMark,
 };
