@@ -5,29 +5,28 @@
     reason = "FFI to the Win32 task dialog, DPI awareness, COM and ShellExecuteW"
 )]
 
+use windows::Win32::Foundation::{HINSTANCE, HMODULE};
 use windows::Win32::System::Com::{
     COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoInitializeEx,
 };
+use windows::Win32::System::LibraryLoader::{FindResourceW, GetModuleHandleW};
 use windows::Win32::UI::Controls::{
-    TASKDIALOG_BUTTON, TASKDIALOGCONFIG, TDF_ALLOW_DIALOG_CANCELLATION, TaskDialogIndirect,
+    TASKDIALOG_BUTTON, TASKDIALOGCONFIG, TASKDIALOGCONFIG_0, TDF_ALLOW_DIALOG_CANCELLATION,
+    TaskDialogIndirect,
 };
 use windows::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
 };
 use windows::Win32::UI::Shell::ShellExecuteW;
-use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+use windows::Win32::UI::WindowsAndMessaging::{
+    MB_ICONWARNING, MB_OK, MessageBoxW, RT_GROUP_ICON, SW_SHOWNORMAL,
+};
 use windows::core::{HSTRING, PCWSTR, w};
 
 use super::DOWNLOAD_URL;
+use super::dialog::{APP_ICON, CLOSE, DOWNLOAD, Next, main_icon, message_box_text, next};
 use super::version::{MINIMUM, Verdict, Version, verdict};
-use super::words::{EN, Words};
-
-/// The download button's id (W6).
-const DOWNLOAD: i32 = 100;
-
-/// The "Close" button's id. Esc and the title bar's close button answer `IDCANCEL` instead;
-/// both only close.
-const CLOSE: i32 = 101;
+use super::words::{EN, WIDTH, Words};
 
 /// Reads the runtime's version and, when it is missing or too old, shows the dialog and acts on
 /// its answer. `true` when the app must not start.
@@ -40,17 +39,29 @@ pub(super) fn check() -> bool {
     match verdict(installed.as_deref(), minimum) {
         Verdict::Start => false,
         Verdict::Missing | Verdict::TooOld => {
-            if show(&EN) == Some(DOWNLOAD) {
-                open_download_page();
+            match next(&show(&EN)) {
+                Next::Download => open_download_page(),
+                Next::Close => {}
+                Next::MessageBox => message_box(&EN),
             }
             true
         }
     }
 }
 
-/// Shows the dialog and returns the id of the button that closed it, `None` when it could not
-/// be shown.
-fn show(words: &Words) -> Option<i32> {
+/// The exe's module handle and the icon resource the dialog names, when the exe holds it.
+fn app_icon() -> Option<(HMODULE, u16)> {
+    // SAFETY: a plain call; `None` asks for this process's exe, which stays loaded.
+    let module = unsafe { GetModuleHandleW(None) }.ok()?;
+    let id = std::ptr::without_provenance::<u16>(usize::from(APP_ICON));
+    // SAFETY: `module` is this exe's handle; the name and type are integer resource ids.
+    let found = unsafe { FindResourceW(Some(module), PCWSTR(id), RT_GROUP_ICON) };
+    main_icon(!found.0.is_null()).map(|icon| (module, icon))
+}
+
+/// Shows the dialog and returns the id of the button that closed it, or the failure of
+/// `TaskDialogIndirect`.
+fn show(words: &Words) -> windows::core::Result<i32> {
     // Sharp text on a scaled display. The process exits after the dialog, before Tauri would
     // set its own awareness, so nothing else depends on it. Best effort: blurry text still reads.
     // SAFETY: a plain call with a predefined context value.
@@ -71,14 +82,27 @@ fn show(words: &Words) -> Option<i32> {
             pszButtonText: PCWSTR(close.as_ptr()),
         },
     ];
+    // Clauseo's icon as the main and title-bar icon, only when the exe holds it.
+    let (module, icon) = match app_icon() {
+        Some((module, id)) => (
+            HINSTANCE(module.0),
+            PCWSTR(std::ptr::without_provenance::<u16>(usize::from(id))),
+        ),
+        None => (HINSTANCE::default(), PCWSTR::null()),
+    };
     let config = TASKDIALOGCONFIG {
-        cbSize: u32::try_from(size_of::<TASKDIALOGCONFIG>()).ok()?,
+        // Both always fit in a u32.
+        cbSize: u32::try_from(size_of::<TASKDIALOGCONFIG>()).unwrap_or(u32::MAX),
+        hInstance: module,
+        Anonymous1: TASKDIALOGCONFIG_0 { pszMainIcon: icon },
+        // Wide enough for the main instruction on one line (words.rs).
+        cxWidth: WIDTH,
         dwFlags: TDF_ALLOW_DIALOG_CANCELLATION,
         pszWindowTitle: PCWSTR(title.as_ptr()),
         pszMainInstruction: PCWSTR(instruction.as_ptr()),
         pszContent: PCWSTR(content.as_ptr()),
         pszFooter: PCWSTR(footer.as_ptr()),
-        cButtons: u32::try_from(buttons.len()).ok()?,
+        cButtons: u32::try_from(buttons.len()).unwrap_or(u32::MAX),
         pButtons: buttons.as_ptr(),
         nDefaultButton: DOWNLOAD,
         ..TASKDIALOGCONFIG::default()
@@ -86,8 +110,25 @@ fn show(words: &Words) -> Option<i32> {
     let mut pressed = 0_i32;
     // SAFETY: `config` and every string and button it points to live until the call returns;
     // `pressed` is a valid out pointer. comctl32 6 (the app manifest) has TaskDialogIndirect.
-    unsafe { TaskDialogIndirect(&raw const config, Some(&raw mut pressed), None, None) }.ok()?;
-    Some(pressed)
+    unsafe { TaskDialogIndirect(&raw const config, Some(&raw mut pressed), None, None) }?;
+    Ok(pressed)
+}
+
+/// The plain fallback when the task dialog failed: the title, the main line and the body, with
+/// an OK button. Best effort: if it fails too, the app exits as it would anyway.
+fn message_box(words: &Words) {
+    let title = HSTRING::from(words.title);
+    let text = HSTRING::from(message_box_text(words));
+    // SAFETY: both strings are valid null-terminated wide strings that outlive the call; no
+    // owner window.
+    let _ = unsafe {
+        MessageBoxW(
+            None,
+            PCWSTR(text.as_ptr()),
+            PCWSTR(title.as_ptr()),
+            MB_OK | MB_ICONWARNING,
+        )
+    };
 }
 
 /// Opens [`DOWNLOAD_URL`] in the default browser. Best effort: if it fails, the dialog's words

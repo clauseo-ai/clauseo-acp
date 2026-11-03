@@ -3,26 +3,29 @@
 ; this file holds all of Tauri's messages: Clauseo's wording first, then Tauri's stock English.
 ; No byte order mark: the bundler adds one when it copies the file.
 
-; Clauseo's wording: the one line that differs from Tauri's (approved by Rohan, 2026-11-03).
+; Clauseo's wording: the one line whose words differ from Tauri's (approved by Rohan, 2026-11-03).
 ; deleteAppData labels the uninstaller's box (unticked) that removes the whole data folder, the
 ; store included; papers stay in their matter folders. The box is one line, 400 x 25 px: keep it
 ; short (a test holds it to 60 characters).
 LangString deleteAppData ${LANG_ENGLISH} "Also delete conversations, saved versions and settings"
 
 ; Tauri's stock English, as @tauri-apps/cli 2.12.2 ships it (crates/tauri-bundler/src/bundle/
-; windows/nsis/languages/English.nsh at tauri-cli-v2.12.2), deleteAppData aside. On a Tauri
-; upgrade, copy that file's lines here again; a key missing here has no English text.
+; windows/nsis/languages/English.nsh at tauri-cli-v2.12.2), deleteAppData aside, with one fix:
+; Tauri writes {{product_name}} in appRunning, appRunningOkKill and failedToKillApp, which NSIS
+; shows as it is (language files are included, not rendered); here they use ${PRODUCTNAME}. On a
+; Tauri upgrade, copy that file's lines here again and keep the fix; a key missing here has no
+; English text.
 LangString addOrReinstall ${LANG_ENGLISH} "Add/Reinstall components"
 LangString alreadyInstalled ${LANG_ENGLISH} "Already Installed"
 LangString alreadyInstalledLong ${LANG_ENGLISH} "${PRODUCTNAME} ${VERSION} is already installed. Select the operation you want to perform and click Next to continue."
-LangString appRunning ${LANG_ENGLISH} "{{product_name}} is running! Please close it first then try again."
-LangString appRunningOkKill ${LANG_ENGLISH} "{{product_name}} is running!$\nClick OK to kill it"
+LangString appRunning ${LANG_ENGLISH} "${PRODUCTNAME} is running! Please close it first then try again."
+LangString appRunningOkKill ${LANG_ENGLISH} "${PRODUCTNAME} is running!$\nClick OK to kill it"
 LangString chooseMaintenanceOption ${LANG_ENGLISH} "Choose the maintenance option to perform."
 LangString choowHowToInstall ${LANG_ENGLISH} "Choose how you want to install ${PRODUCTNAME}."
 LangString createDesktop ${LANG_ENGLISH} "Create desktop shortcut"
 LangString dontUninstall ${LANG_ENGLISH} "Do not uninstall"
 LangString dontUninstallDowngrade ${LANG_ENGLISH} "Do not uninstall (Downgrading without uninstall is disabled for this installer)"
-LangString failedToKillApp ${LANG_ENGLISH} "Failed to kill {{product_name}}. Please close it first then try again"
+LangString failedToKillApp ${LANG_ENGLISH} "Failed to kill ${PRODUCTNAME}. Please close it first then try again"
 LangString installingWebview2 ${LANG_ENGLISH} "Installing WebView2..."
 LangString newerVersionInstalled ${LANG_ENGLISH} "A newer version of ${PRODUCTNAME} is already installed! It is not recommended that you install an older version. If you really want to install this older version, it's better to uninstall the current version first. Select the operation you want to perform and click Next to continue."
 LangString older ${LANG_ENGLISH} "older"
