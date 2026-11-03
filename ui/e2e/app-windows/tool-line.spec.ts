@@ -10,21 +10,7 @@ import { expect, type Locator, type Page } from "@playwright/test";
 import { test } from "./fixture.ts";
 import { expectTurnEnded, newConversation, openMatter, sendPrompt } from "./flow.ts";
 import { window, type Window } from "./selectors.ts";
-
-/** The web search row's words while it is on (ui/components/src/lib/words-tools.ts). */
-const WEB_ON = "On. Clauseo can search the web and read pages.";
-
-/** Every first line the browser row can say (words-tools.ts), whatever the machine's browser state. */
-const BROWSER_LINES = [
-  "On. Clauseo can open web pages in its own browser.",
-  "Off. You turned it off in Settings.",
-  "Off. Managed by your organisation.",
-  "Off. Your organisation chooses the tools Claude has on this computer, so Clauseo adds none.",
-  "Off. Your organisation chooses the tools ChatGPT has on this computer, so Clauseo adds none.",
-  "Off until Clauseo can check each website the browser opens.",
-  "Off. Other conversations are using every browser this computer can run. One frees up when another conversation closes.",
-  "Off. There's no Chrome on this computer.",
-];
+import { BROWSER_LINES, WEB_ON } from "./tool-line-words.ts";
 
 /** The status line says web search is on, and its popover's rows say where each tool stands. */
 async function expectWebSearchOn(w: Window, page: Page): Promise<void> {
