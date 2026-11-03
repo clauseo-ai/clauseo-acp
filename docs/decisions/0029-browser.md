@@ -216,10 +216,27 @@ The guard cannot enforce these; stage C's egress proxy and sandbox must.
   those.
 - **The jail allows `/tmp/clauseo-ab-*`.** On Unix the guard and agent-browser make and use the
   socket folder `/tmp/clauseo-ab-<16 characters>`, outside `--cwd`; the jail must let them
-  create and use it, and should keep the agent's own tools out of it (the daemon's socket has no
-  authentication, `daemon.rs:548`).
-- **`--cwd` sits outside what the agent can write.** The guard checks its folders only at start
-  (`browser_guard.rs`); an agent that can write `--cwd` could later swap one for a link.
+  create and use it.
+- **`<state>/browser` and the browser's loopback ports, in the jail: the jail adds nothing
+  beyond itself.** This restates stage C's two requirements that `--cwd` (`<state>/browser`)
+  sit outside what the agent can write and that the agent's own tools be kept off the daemon's
+  socket and Chrome's CDP and stream ports (none has authentication, `daemon.rs:548`). On the
+  in-jail path neither can hold: one Seatbelt profile cannot tell the agent from the browser,
+  so everything Chrome may write or reach, the agent may too, and the guard, which checks its
+  folders only at start (`browser_guard.rs`), cannot stop a later swap of one for a link. What
+  keeps it safe is that a swapped link, or a direct CDP or stream call, reaches nothing beyond
+  the jail: Seatbelt checks resolved paths, and Chrome is jailed too. Real separation needs
+  Chrome in its own jail, the outside-jail fallback (`BrowserLaunch::OutsideJail`), which is a
+  row of G17 item 1.
+- **The host treats `<state>/browser` as agent-writable.** The host runs outside the jail, so it
+  follows no link there when it reads or writes: agent-browser's config file (already so:
+  `browser::write_config` refuses a linked folder and replaces a link at the file name),
+  `DevToolsActivePort`, and downloads (the host reads neither yet; whoever adds the read keeps
+  this rule).
+- **Stage C's `BrowserSocketDir` and `ports::claim_port` merged in #257.** The ports-and-socket
+  follow-up moves the socket folder's creation to the host
+  (`AGENT_BROWSER_SOCKET_DIR = BrowserSocketDir::path()`) and pins the CDP, stream and Windows
+  daemon ports.
 - **A daemon that outlives its session** (a kill of the guard on Unix) ends only at the idle
   timeout; the host does not kill it by PID (above). Follow-up: G17 item 6.
 
