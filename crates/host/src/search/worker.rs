@@ -19,10 +19,12 @@ use clauseo_store::{READ_PAGE_MAX, Store};
 use futures::executor::block_on;
 use futures::future::{Either, select};
 
+#[cfg(feature = "test-support")]
+use super::SearchSeams;
 use super::batch::{Failure, write_chunk};
 use super::files::Files;
 use super::fold::{ThreadMemo, Write, feed_matter};
-use super::{Control, SearchSeams, Shared};
+use super::{Control, Shared};
 use crate::clock::Clock;
 use crate::error::Error;
 use crate::matter_worker::matter_settings;
@@ -40,6 +42,7 @@ pub(super) struct Parts {
     pub(super) shared: Arc<Shared>,
     pub(super) commits: Receiver<Vec<Envelope>>,
     pub(super) control: Receiver<Control>,
+    #[cfg(feature = "test-support")]
     pub(super) seams: SearchSeams,
 }
 
@@ -65,6 +68,7 @@ struct Worker {
     shared: Arc<Shared>,
     commits: Receiver<Vec<Envelope>>,
     control: Receiver<Control>,
+    #[cfg(feature = "test-support")]
     seams: SearchSeams,
     files: Files,
     marks: BTreeMap<StreamId, Seq>,
@@ -88,6 +92,7 @@ pub(super) fn run(parts: Parts) {
         shared,
         commits,
         control,
+        #[cfg(feature = "test-support")]
         seams,
     } = parts;
     let (index, state) = match SearchIndex::open(&data_dir) {
@@ -107,6 +112,7 @@ pub(super) fn run(parts: Parts) {
         shared,
         commits,
         control,
+        #[cfg(feature = "test-support")]
         seams,
         files,
         marks: BTreeMap::new(),
@@ -227,7 +233,7 @@ impl Worker {
                 }
                 continue;
             }
-            let held = self.rebuild_held();
+            let held = rebuild_held(self);
             if !held && let Some(walk) = self.pending.pop_front() {
                 self.walk(walk);
                 continue;
@@ -248,30 +254,12 @@ impl Worker {
         }
     }
 
-    /// Whether the rebuild hold stops the next walk (test seam).
-    fn rebuild_held(&self) -> bool {
-        let next_counts = self.pending.front().is_some_and(|walk| walk.counts);
-        match &self.seams.rebuild_hold {
-            Some(hold) if self.rebuilding && next_counts && !hold.is_released() => {
-                hold.note_reached();
-                true
-            }
-            Some(_) | None => false,
-        }
-    }
-
     /// Waits for a control job, a commit or (when `held`) the hold's release.
     fn wait(&self, held: bool) -> Wake {
-        let hold = self.seams.rebuild_hold.clone().filter(|_| held);
+        let released = released(self, held);
         block_on(async {
             let control = pin!(self.control.recv());
             let commits = pin!(self.commits.recv());
-            let released = pin!(async move {
-                match hold {
-                    Some(hold) => hold.wait().await,
-                    None => futures::future::pending::<()>().await,
-                }
-            });
             match select(control, select(commits, released)).await {
                 Either::Left((job, _)) => job.map_or(Wake::Closed, Wake::Control),
                 Either::Right((Either::Left((batch, _)), _)) => {
@@ -395,6 +383,11 @@ impl Worker {
                 }
                 if let Some(matter) = memo.matter() {
                     self.thread_matter.insert(thread, matter);
+                    // A thread learned of in this fold may belong to a forgotten matter: its
+                    // events move the watermark and write nothing.
+                    if self.forgotten.contains(&matter) {
+                        writes.clear();
+                    }
                 }
             }
         }
@@ -550,4 +543,38 @@ impl Worker {
         }
         Ok(())
     }
+}
+
+/// Whether the rebuild hold stops the next walk (test seam).
+#[cfg(feature = "test-support")]
+fn rebuild_held(worker: &Worker) -> bool {
+    let next_counts = worker.pending.front().is_some_and(|walk| walk.counts);
+    match &worker.seams.rebuild_hold {
+        Some(hold) if worker.rebuilding && next_counts && !hold.is_released() => {
+            hold.note_reached();
+            true
+        }
+        Some(_) | None => false,
+    }
+}
+
+/// Without the test seams nothing holds the rebuild.
+#[cfg(not(feature = "test-support"))]
+const fn rebuild_held(_worker: &Worker) -> bool {
+    false
+}
+
+/// When `held`, the rebuild hold's release (test seam); otherwise never.
+#[cfg(feature = "test-support")]
+fn released(worker: &Worker, held: bool) -> futures::future::BoxFuture<'static, ()> {
+    match worker.seams.rebuild_hold.clone().filter(|_| held) {
+        Some(hold) => Box::pin(async move { hold.wait().await }),
+        None => Box::pin(futures::future::pending()),
+    }
+}
+
+/// Without the test seams the rebuild is never held.
+#[cfg(not(feature = "test-support"))]
+fn released(_worker: &Worker, _held: bool) -> futures::future::BoxFuture<'static, ()> {
+    Box::pin(futures::future::pending())
 }

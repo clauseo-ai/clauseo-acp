@@ -223,4 +223,5 @@ pub use handle::{
 #[cfg(feature = "test-support")]
 pub use ids::SequentialIds;
 pub use ids::{IdSource, RandomV7};
+#[cfg(feature = "test-support")]
 pub use search::SearchHold;

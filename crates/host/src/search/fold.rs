@@ -8,11 +8,11 @@
 //! `TextAppended` chunks joined in seq order, its kind the first chunk's, its order the first
 //! chunk's seq. Thoughts are not indexed.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use clauseo_protocol::{
-    CheckpointId, ContentBlock, DomainEvent, Envelope, MatterId, MessageId, Seq, TextAppended,
-    TextKind, ThreadId, Timestamp, ToolCallId, TurnId,
+    CheckpointId, ContentBlock, DomainEvent, Envelope, MatterId, MessageId, Seq, SteerOutcome,
+    SteerResolved, StopReason, TextAppended, TextKind, ThreadId, Timestamp, ToolCallId, TurnId,
 };
 use clauseo_search::EntryKind;
 
@@ -42,7 +42,7 @@ pub(super) enum Write {
         matter: MatterId,
         thread: ThreadId,
     },
-    /// An undone step's entries.
+    /// An undone step's entries, or a withdrawn queued prompt's.
     Undone {
         thread: ThreadId,
         entries: Vec<Seq>,
@@ -75,6 +75,10 @@ pub(super) struct ThreadMemo {
     tools: BTreeMap<ToolCallId, Seq>,
     open: BTreeMap<MessageId, Open>,
     turns: BTreeMap<TurnId, Vec<Seq>>,
+    /// Each prompt's turn, as the reducer last set it (a steer moves it).
+    prompt_turns: BTreeMap<MessageId, TurnId>,
+    /// Turns that started.
+    started: BTreeSet<TurnId>,
 }
 
 impl ThreadMemo {
@@ -86,6 +90,8 @@ impl ThreadMemo {
             tools: BTreeMap::new(),
             open: BTreeMap::new(),
             turns: BTreeMap::new(),
+            prompt_turns: BTreeMap::new(),
+            started: BTreeSet::new(),
         }
     }
 
@@ -123,6 +129,7 @@ impl ThreadMemo {
             }
         } else if let DomainEvent::UserMessage(event) = event {
             self.prompts.insert(event.message, seq);
+            self.prompt_turns.insert(event.message, event.turn);
             self.turns.entry(event.turn).or_default().push(seq);
             self.entry(out, seq, EntryKind::Prompt, at, prompt_text(&event.content));
         } else if let DomainEvent::QueuedPromptEdited(event) = event {
@@ -147,12 +154,57 @@ impl ThreadMemo {
             {
                 self.entry(out, order, EntryKind::ToolTitle, at, title.to_string());
             }
+        } else if let DomainEvent::SteerResolved(event) = event {
+            self.steer_resolved(event);
+        } else if let DomainEvent::TurnStarted(event) = event {
+            self.started.insert(event.turn);
         } else if let Some(turn) = turn_end(event) {
             self.turn_ended(turn, out);
+            let never_sent = matches!(event, DomainEvent::TurnEnded(ended) if ended.stop == StopReason::Cancelled);
+            if never_sent && !self.started.contains(&turn) {
+                self.withdrawn(turn, out);
+            }
         } else if let DomainEvent::StepUndone(event) = event
             && let Some(entries) = self.turns.remove(&event.turn)
         {
             out.push(Write::Undone { thread, entries });
+        }
+    }
+
+    /// A steer resolved: its prompt now answers the turn the outcome names, as the reducer sets
+    /// the prompt's `turn`, so an undo of that turn takes it.
+    fn steer_resolved(&mut self, event: &SteerResolved) {
+        let turn = match &event.outcome {
+            SteerOutcome::Injected { turn }
+            | SteerOutcome::Requeued { turn }
+            | SteerOutcome::SentNow { turn } => *turn,
+            SteerOutcome::Unknown { .. } => return,
+        };
+        let (Some(&order), Some(old)) = (
+            self.prompts.get(&event.message),
+            self.prompt_turns.insert(event.message, turn),
+        ) else {
+            return;
+        };
+        if old == turn {
+            return;
+        }
+        if let Some(entries) = self.turns.get_mut(&old) {
+            entries.retain(|entry| *entry != order);
+        }
+        self.turns.entry(turn).or_default().push(order);
+    }
+
+    /// A turn that ended cancelled without starting was a queued prompt taken back
+    /// (`RemoveQueuedPrompt`): it was never sent, so its prompt leaves the index.
+    fn withdrawn(&mut self, turn: TurnId, out: &mut Vec<Write>) {
+        if let Some(entries) = self.turns.remove(&turn)
+            && !entries.is_empty()
+        {
+            out.push(Write::Undone {
+                thread: self.thread,
+                entries,
+            });
         }
     }
 

@@ -97,9 +97,15 @@ matter: 24–37 ms, or 1.4–1.6 s with secure-delete.
   answers) is kept for the 64 most recently touched threads and folded again from the log
   otherwise. An answer is assembled as the reducer assembles an agent message (its
   `TextAppended` chunks in seq order, the first chunk's kind and seq), tested against the
-  reducer. File names are listed from the matter's history (`Matter::files_at`) at each
+  reducer. A steer's prompt follows the turn its `SteerResolved` names, as the reducer moves it,
+  so an undo takes exactly that turn's prompts; a queued prompt taken back before it was sent
+  (`RemoveQueuedPrompt`, a turn that ends cancelled without starting) leaves the index. A thread
+  whose matter is forgotten writes nothing, even when the fold only learns its matter then.
+  File names are listed from the matter's history (`Matter::files_at`) at each
   `CheckpointRecorded`, `OutsideEdits` and `VersionRestored`, on the search thread: a checkpoint
-  follows every change of files, so the listing replaces the per-change deltas. `ForgetMatter`
+  follows every change of files, so the listing replaces the per-change deltas. A reopen and
+  listing of a matter of 10,000 files and 1,000 checkpoints took 38 ms (11.5 ms on a matter
+  already open), measured on the review's request. `ForgetMatter`
   deletes the matter's rows (a forgotten matter must not show in search); importing it again
   indexes its streams from the whole log.
 - **Rebuilds in place.** The crate has no build-beside-and-rename step, so a rebuild runs in the
@@ -116,7 +122,8 @@ matter: 24–37 ms, or 1.4–1.6 s with secure-delete.
   `PageEntries` pages by (the index keys rows by it; it holds no entry ids). A newer
   `generation` from the same window interrupts that window's running query, answers its queued
   older ones `Cancelled`, and an older one that finishes late is answered `Cancelled` instead of
-  its page. The desktop sends the window's label; only the main window may search (the settings
+  its page. The desktop sends the window's label and its page's `open_stream` number, so a
+  reloaded page counts its generations afresh; only the main window may search (the settings
   window reads `GetSettings` alone, 0028).
 - **Release one answers.** Tool titles are indexed at a low weight and can be filtered by kind.
   Thoughts are out, with kind 8 reserved. Undone steps' rows are dropped. Hinglish matches exact

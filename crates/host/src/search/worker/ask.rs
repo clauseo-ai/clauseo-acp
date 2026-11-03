@@ -1,11 +1,7 @@
 //! The search thread's searches: one run with its generation checks, the query hold (a test
 //! seam), and the searches answered between two pages of a walk.
 
-use std::pin::pin;
-
 use clauseo_protocol::{SearchAnswer, SearchRequest};
-use futures::executor::block_on;
-use futures::future::{Either, select};
 
 use super::Worker;
 use crate::error::Error;
@@ -45,7 +41,13 @@ pub(super) fn answer(
 
 /// Stops before a query while the query hold is on (test seam). Jobs that come meanwhile
 /// wait their turn; a host that ends lets the thread go.
+#[cfg(feature = "test-support")]
 fn hold_query(worker: &mut Worker) {
+    use std::pin::pin;
+
+    use futures::executor::block_on;
+    use futures::future::{Either, select};
+
     let Some(hold) = worker.seams.query_hold.clone() else {
         return;
     };
@@ -68,6 +70,10 @@ fn hold_query(worker: &mut Worker) {
         }
     }
 }
+
+/// Without the test seams nothing holds a query.
+#[cfg(not(feature = "test-support"))]
+const fn hold_query(_worker: &mut Worker) {}
 
 /// Answers the searches queued now, keeping the other control jobs for later: a long walk
 /// does not hold searches up.

@@ -195,6 +195,12 @@ fn an_edited_queued_prompt_replaces_its_row() {
     let found = poll(&host, &request("Second ", 0), |p| p.hits.len() == 1);
     assert_eq!(found.hits[0].kind, SearchKind::Prompt);
     assert_eq!(page(search(&host, "main", request("Draft ", 0))).hits, []);
+    // Taken back before it was sent: its row goes, as the room hides it.
+    host.ok(HostCommand::RemoveQueuedPrompt {
+        thread,
+        turn: second,
+    });
+    poll(&host, &request("Second ", 0), |p| p.hits.is_empty());
 }
 
 /// The hits a query gives, without their order (a rebuild inserts conversations by their last

@@ -143,6 +143,9 @@ mod restart;
 #[path = "host/search.rs"]
 mod search;
 #[cfg(test)]
+#[path = "host/search_review.rs"]
+mod search_review;
+#[cfg(test)]
 #[path = "host/settings.rs"]
 mod settings;
 #[cfg(test)]
