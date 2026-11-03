@@ -3,8 +3,11 @@
 //! a walk that refuses any link, the rename to `<hash>` and the receipt, written last.
 //!
 //! Every npm run starts through the launcher as `node <npm-cli.js> …`, with `NODE_OPTIONS`
-//! empty, the private cache, an empty `agents/npmrc` as its user config, and the proxy and CA
-//! file when set. Its stderr pump and its stdout are driven to their end while its exit is
+//! empty, the private cache, and empty `agents/npmrc` and `agents/npmrc-global` files as its user
+//! and global config (npm refuses one file for both).
+//! No proxy or CA file is passed: npm never uses the network here (`cache add` reads local
+//! files and `ci` runs `--offline`), and a proxy's password on a command line is visible to
+//! other local users. Its stderr pump and its stdout are driven to their end while its exit is
 //! raced against a pause (the handle is dropped, which kills its tree) and 10 minutes. Nothing
 //! of its output reaches the log but npm's own `npm error code X` line, redacted.
 
@@ -85,6 +88,8 @@ pub(super) async fn install<T: Timer + Send + Sync>(
     write::create_dir_all(&cache).map_err(io("making the npm cache"))?;
     let npmrc = config.data_dir.join("agents").join("npmrc");
     write::write_atomic(&npmrc, b"").map_err(io("writing npmrc"))?;
+    let global = config.data_dir.join("agents").join("npmrc-global");
+    write::write_atomic(&global, b"").map_err(io("writing npmrc-global"))?;
     let root = install_root(&config.data_dir, agent);
     let tmp = root.join(format!(".tmp-{hash}-{}", run.attempts));
     write::remove_dir_all(&tmp).map_err(io("clearing the temp folder"))?;
@@ -93,8 +98,8 @@ pub(super) async fn install<T: Timer + Send + Sync>(
         job,
         program: &program,
         cli: &cli,
-        common: common_flags(config, job, &cache, &npmrc),
-        env: env(config, job),
+        common: common_flags(&cache, &npmrc, &global),
+        env: BTreeMap::from([(OsString::from("NODE_OPTIONS"), OsString::new())]),
     };
     let done = async {
         write::write_atomic(&tmp.join("package.json"), pins.package_json().as_bytes())
@@ -148,49 +153,19 @@ fn io_error<'a>(
     move |err| TryError::io(what, &err, config)
 }
 
-/// Flags every npm run gets: the private cache, the empty user config, no update check, no
-/// log files, and the proxy and CA file when set.
-fn common_flags<T>(
-    config: &AgentsConfig,
-    job: &Job<T>,
-    cache: &Path,
-    npmrc: &Path,
-) -> Vec<OsString> {
-    let mut flags: Vec<OsString> = vec![
+/// Flags every npm run gets: the private cache, the empty npmrc files as user and global config,
+/// no update check and no log files. Never a proxy or a CA file (see the module's comment).
+fn common_flags(cache: &Path, npmrc: &Path, global: &Path) -> Vec<OsString> {
+    vec![
         "--cache".into(),
         cache.as_os_str().to_owned(),
         "--userconfig".into(),
         npmrc.as_os_str().to_owned(),
+        "--globalconfig".into(),
+        global.as_os_str().to_owned(),
         "--update-notifier=false".into(),
         "--logs-max=0".into(),
-    ];
-    let proxy = match (config.install.proxy.as_deref(), job.system_proxy.as_deref()) {
-        (Some(proxy), _) => Some(proxy.to_owned()),
-        (None, Some(system)) if system.contains("://") => Some(system.to_owned()),
-        (None, Some(system)) => Some(format!("http://{system}")),
-        (None, None) => None,
-    };
-    if let Some(proxy) = proxy {
-        flags.extend([
-            "--proxy".into(),
-            OsString::from(&proxy),
-            "--https-proxy".into(),
-            OsString::from(proxy),
-        ]);
-    }
-    if let Some(ca) = config.install.ca_certs.get(&job.ticket.agent) {
-        flags.extend(["--cafile".into(), ca.as_os_str().to_owned()]);
-    }
-    flags
-}
-
-/// `NODE_OPTIONS` empty, and `NODE_EXTRA_CA_CERTS` when the agent has a CA file.
-fn env<T>(config: &AgentsConfig, job: &Job<T>) -> BTreeMap<OsString, OsString> {
-    let mut env = BTreeMap::from([(OsString::from("NODE_OPTIONS"), OsString::new())]);
-    if let Some(ca) = config.install.ca_certs.get(&job.ticket.agent) {
-        env.insert("NODE_EXTRA_CA_CERTS".into(), ca.as_os_str().to_owned());
-    }
-    env
+    ]
 }
 
 /// The first symbolic link or junction under `dir`, not following any.
