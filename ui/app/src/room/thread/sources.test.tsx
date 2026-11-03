@@ -56,7 +56,7 @@ test("envelopes delivered put the shut summary under that turn's answer, after i
   expect(list?.closest("section")?.classList.contains("step-answer")).toBe(true);
   const words = h!.one("message-agent")!;
   expect(words.compareDocumentPosition(list!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(toggle().textContent).toBe("1 web search. 2 pages read.");
+  expect(toggle().textContent).toBe("3 sources");
   expect(toggle().getAttribute("aria-expanded")).toBe("false");
   expect(toggle().querySelectorAll("svg[aria-hidden]").length).toBe(3);
   expect(rows()).toEqual([]);
@@ -76,13 +76,13 @@ test("opening shows one row per source, in order, and shuts again", async () => 
   await open();
   expect(toggle().getAttribute("aria-expanded")).toBe("true");
   expect(rows().map((r) => r.dataset["kind"])).toEqual(["search", "web_fetch"]);
-  expect(rows()[0]!.querySelector("p")?.textContent).toBe("Searched the web for notice period.");
+  expect(rows()[0]!.querySelector("p")?.textContent).toBe("Searched online for 'notice period'.");
   const results = h!.all("web-source-result").map((r) => r.textContent);
   expect(results).toEqual([
     "Rent Control Act, s. 14 indiacode.nic.in",
     "Notice to quit example.com",
   ]);
-  expect(rows()[1]!.textContent).toBe("Read A page. example.com");
+  expect(rows()[1]!.textContent).toBe("Read A page online. example.com");
   await open();
   expect(rows()).toEqual([]);
 });
@@ -92,22 +92,22 @@ test("a page opened twice in one tool call shows once", async () => {
     visited(1, "https://example.com/a", { call: "c" }),
     visited(2, "https://example.com/a", { call: "c", title: "A" }),
   ]);
-  expect(toggle().textContent).toBe("1 page read.");
+  expect(toggle().textContent).toBe("1 source");
   await open();
-  expect(rows().map((r) => r.textContent)).toEqual(["Read A. example.com"]);
+  expect(rows().map((r) => r.textContent)).toEqual(["Read A online. example.com"]);
 });
 
 test("a Claude search with no results says so", async () => {
   await answered([searched(1, "rare query")]);
   await open();
-  expect(rows()[0]!.textContent).toBe("Searched the web for rare query. No results.");
+  expect(rows()[0]!.textContent).toBe("Searched online for 'rare query'. No results.");
 });
 
 test("a Codex search says Codex doesn't report its pages, and shows no links", async () => {
   await answered([searched(1, "notice period", [], { agent: "codex-acp" })], "codex-acp");
   await open();
   expect(rows()[0]!.textContent).toBe(
-    "Searched the web for notice period. ChatGPT doesn't report which pages it found.",
+    "Searched online for 'notice period'. ChatGPT doesn't report which pages it found.",
   );
   expect(rows()[0]!.querySelector("a")).toBeNull();
 });
@@ -116,7 +116,7 @@ test("a page Codex opened says it was opened on OpenAI's computers", async () =>
   await answered([visited(1, "https://example.com/x", { via: "codex_open_page" })], "codex-acp");
   await open();
   expect(rows()[0]!.textContent).toBe(
-    "Read https://example.com/x. example.comChatGPT opened this page on OpenAI's computers, not on this one.",
+    "Read https://example.com/x online.ChatGPT opened this page on OpenAI's computers, not on this one.",
   );
 });
 
@@ -126,8 +126,38 @@ test("a page the browser opened says so, and an unknown way reads as a plain rea
     visited(2, "https://example.com/u", { via: "teleport" as never, title: "U" }),
   ]);
   await open();
-  expect(rows()[0]!.textContent).toBe("Opened B in the browser. example.com");
-  expect(rows()[1]!.textContent).toBe("Read U. example.com");
+  expect(rows()[0]!.textContent).toBe("Opened 'B' in the browser. example.com");
+  expect(rows()[1]!.textContent).toBe("Read U online. example.com");
+});
+
+test("the summary counts the open list's rows: each search once, whatever its results, and each page once", async () => {
+  await answered([
+    searched(1, "notice period", [
+      { title: "A", url: "https://example.com/a" },
+      { title: "B", url: "https://example.com/b" },
+    ]),
+    searched(2, "rare query"),
+    visited(3, "https://example.com/c", { call: "c" }),
+    visited(4, "https://example.com/c", { call: "c", title: "C" }),
+  ]);
+  expect(toggle().textContent).toBe("3 sources");
+  await open();
+  expect(rows().length).toBe(3);
+});
+
+test("a page with no title is its address, a link, with no site after it and no quotes in the browser", async () => {
+  await answered([
+    visited(1, "https://example.com/plain"),
+    visited(2, "https://example.com/opened", { via: "browser" }),
+    searched(3, "notice period", [{ title: "", url: "https://example.com/untitled" }]),
+  ]);
+  await open();
+  expect(rows()[0]!.textContent).toBe("Read https://example.com/plain online.");
+  expect(rows()[1]!.textContent).toBe("Opened https://example.com/opened in the browser.");
+  expect(h!.all("web-source-result").map((r) => r.textContent)).toEqual([
+    "https://example.com/untitled",
+  ]);
+  expect(h!.all("web-source-site")).toEqual([]);
 });
 
 test("a link press opens the address through open_external, never the webview", async () => {
