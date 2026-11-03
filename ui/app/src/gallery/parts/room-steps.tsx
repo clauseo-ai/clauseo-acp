@@ -13,7 +13,8 @@ import { PERMISSION_PAPER, nothing } from "./room-data.ts";
 const LEASE = "Lease deed.pdf";
 const NOTICE = "Notice to the bank.docx";
 
-/** The settled group's rows: two papers read, a search, a thought between them. */
+/** The settled group's rows: two papers read, a search, a thought between them; or, failed, the second read online
+ * tried and failed, said as the room says it (steps.ts doneOf). */
 function Rows({ failed = false }: { failed?: boolean }) {
   const { lang } = useDisplay();
   return (
@@ -47,7 +48,7 @@ function Rows({ failed = false }: { failed?: boolean }) {
           toolCall="3"
           status="failed"
           kind="fetch"
-          text={stepLive(lang, "Reading {name} online.", { name: "indiankanoon.org" })}
+          text={steps(lang, "Tried to read {name} online.", { name: "indiankanoon.org" })}
           hover="https://indiankanoon.org/doc/1/"
           mark={th(lang, "Failed")}
         />
@@ -100,8 +101,8 @@ function Failed() {
   return (
     <StepGroup
       id="tool_call:1"
-      kinds={["read", "search", "fetch"]}
-      line={`${steps(lang, "1 paper read.")} ${steps(lang, "Searched once.")} ${steps(lang, "Looked online once.")}`}
+      kinds={["read", "search"]}
+      line={`${steps(lang, "1 paper read.")} ${steps(lang, "Searched once.")}`}
       trouble={steps(lang, "1 of them failed.")}
       defaultOpen
     >
