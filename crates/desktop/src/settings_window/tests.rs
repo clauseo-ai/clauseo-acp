@@ -7,7 +7,7 @@
 use tauri::test::{MockRuntime, mock_builder};
 
 use super::*;
-use crate::test_support::{Scratch, collector};
+use crate::test_support::{Scratch, block_on, collector};
 
 /// An app on the mock runtime with the app's context and `bridge` managed.
 fn app(bridge: Option<Bridge>) -> tauri::App<MockRuntime> {
@@ -54,19 +54,19 @@ fn a_destroyed_window_drops_its_stream_only() {
     let bridge = app.state::<Bridge>();
     let main_built = Some(built(&bridge, MAIN_WINDOW));
     let (main_channel, _main) = collector();
-    futures::executor::block_on(bridge.open_stream(MAIN_WINDOW, main_channel)).unwrap();
+    block_on(bridge.open_stream(MAIN_WINDOW, main_channel)).unwrap();
     let built = Some(built(&bridge, SETTINGS_WINDOW));
     assert!(built > main_built, "{built:?} {main_built:?}");
     let (channel, _page) = collector();
-    futures::executor::block_on(bridge.open_stream(SETTINGS_WINDOW, channel)).unwrap();
+    block_on(bridge.open_stream(SETTINGS_WINDOW, channel)).unwrap();
 
     closed(&app, SETTINGS_WINDOW, built);
-    let refusal = futures::executor::block_on(bridge.subscribe_app(SETTINGS_WINDOW));
+    let refusal = block_on(bridge.subscribe_app(SETTINGS_WINDOW));
     assert!(refusal.is_err(), "the closed window kept its stream");
-    futures::executor::block_on(bridge.subscribe_app(MAIN_WINDOW)).unwrap();
+    block_on(bridge.subscribe_app(MAIN_WINDOW)).unwrap();
 
     closed(&app, MAIN_WINDOW, main_built);
-    assert!(futures::executor::block_on(bridge.subscribe_app(MAIN_WINDOW)).is_err());
+    assert!(block_on(bridge.subscribe_app(MAIN_WINDOW)).is_err());
 }
 
 /// Two opens at once (a double click, or the menu and Cmd+, together): the second build fails on
@@ -81,14 +81,14 @@ fn a_second_open_that_fails_leaves_the_first_windows_close_whole() {
     open_or_focus(&app).unwrap();
     let first = bridge.latest_build(SETTINGS_WINDOW).unwrap();
     let (channel, _page) = collector();
-    futures::executor::block_on(bridge.open_stream(SETTINGS_WINDOW, channel)).unwrap();
+    block_on(bridge.open_stream(SETTINGS_WINDOW, channel)).unwrap();
 
     // The other open's build, past its own check: the label is taken.
     assert!(build(&app).is_err(), "a second settings window was built");
     assert_eq!(bridge.latest_build(SETTINGS_WINDOW), Some(first));
 
     closed(&app, SETTINGS_WINDOW, Some(first));
-    let refusal = futures::executor::block_on(bridge.subscribe_app(SETTINGS_WINDOW));
+    let refusal = block_on(bridge.subscribe_app(SETTINGS_WINDOW));
     assert!(
         refusal.is_err(),
         "the first window's stream survived its close"

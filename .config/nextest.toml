@@ -14,6 +14,18 @@ fail-fast = false
 filter = 'package(clauseo-store)'
 slow-timeout = { period = "10s", terminate-after = 16 }
 
+# The desktop tests that start a host run at the disk's speed too: each first start makes the
+# store and the Scratch matter, 16 new files and 32 syncs. In run 41676394591 (merge group for
+# #282) the Windows runner's disk stalled for about 165 s from the start of the run (issue #83):
+# every test that touched the disk ran 30 to 110 times slower and the rest at their usual speed,
+# and seven of these tests, 0.3 to 0.5 s on a good run, passed 30 s on both tries. The store's
+# 160 s bound holds them too; each of their waits has its own 120 s bound
+# (`test_support::STEP_WAIT`), so a hung one fails naming its step before nextest kills it. The
+# rest of the crate keeps 30 s.
+[[profile.default.overrides]]
+filter = 'package(clauseo-desktop) & test(/^(bridge::tests|host_start::tests|settings_window::tests|commands::tests|test_support)::/)'
+slow-timeout = { period = "10s", terminate-after = 16 }
+
 # G16's live tests read real accounts: the Claude reader's own 25 s and the Codex reader's 10 s
 # timeouts, plus Node's and the vendor CLI's start-up, overrun 30 s; 90 s still ends a hung read.
 [[profile.default.overrides]]

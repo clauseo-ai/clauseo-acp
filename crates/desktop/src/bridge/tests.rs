@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use super::*;
 use crate::dialogs::BoxFuture;
-use crate::test_support::{Scratch, envelope, open, stream};
+use crate::test_support::{Scratch, block_on, envelope, open, stream};
 
 const MAIN: &str = "main";
 const SETTINGS: &str = "settings";
@@ -24,10 +24,6 @@ impl Picker for Picks {
         let folder = self.0.clone();
         Box::pin(async move { folder })
     }
-}
-
-fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
-    futures::executor::block_on(future)
 }
 
 /// The batch inside `event`.
@@ -270,8 +266,8 @@ fn a_refused_folder_is_rejected() {
     );
 
     // A folder outside the data folder works (one inside it is refused, as the matters root
-    // is); a cancelled pick is `None`. The other scratch's folder is outside this data folder.
-    let other = Scratch::new("refused-folder-other", &["work"]);
+    // is); a cancelled pick is `None`. The other scratch folder is outside this data folder.
+    let other = Scratch::folder("refused-folder-other", &["work"]);
     let work = other.path().join("work");
     let picked = block_on(bridge.pick_folder(&Picks(Some(work)), Some(other.path()))).unwrap();
     let picked = picked.unwrap();
