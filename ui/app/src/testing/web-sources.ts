@@ -94,3 +94,12 @@ export const headerOf = (agent: AgentId): ViewEntry => {
   head.header!.agent = agent;
   return head;
 };
+
+/** The tool call an envelope of either kind names; "" for any other event. */
+export const callOf = (e: Envelope): ToolCallId => {
+  const event = e.event as {
+    web_search_recorded?: { tool_call: ToolCallId };
+    page_visited?: { tool_call: ToolCallId };
+  };
+  return event.web_search_recorded?.tool_call ?? event.page_visited?.tool_call ?? "";
+};

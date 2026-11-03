@@ -34,7 +34,8 @@ test("each row's words, by kind and agent", () => {
   ]);
 });
 
-test("the Hindi is the English until it is written", () => {
+test("every string is hi: later, and the Hindi interface shows its English", () => {
+  expect(Object.values(src.hi).every((hi) => hi === null)).toBe(true);
   expect(sourcesSummary("hi", 2, 1)).toBe("2 web searches. 1 page read.");
   expect(partsOf("hi", "Read {page}.", "page")).toEqual(["Read ", "."]);
 });

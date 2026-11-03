@@ -2,28 +2,26 @@
 // open (app/src/room/thread/sources.tsx). As in words.ts the English is the key, the exact string on screen. A row's
 // {query} and {page} are filled by the row itself, a link or an isolated run, so the row splits its string at them
 // (partsOf); {name} is the plan's name, "Claude" or "ChatGPT".
-// The Hindi waits for #285 (null Hindi): every value here is its English, so each swaps to null by hand.
+// Every string ships English only: its Hindi is null (hi: later), so the Hindi interface shows the English.
 import { useDisplay } from "./display.ts";
 import type { Lang } from "./display.ts";
-import { wordsOf, type Slots } from "./words-core.ts";
+import { wordsOf, type Hindi, type Slots } from "./words-core.ts";
 
-// hi: later (every value below is its English text until #285 lands)
 const HI = {
   // the summary line, one sentence for the searches and one for the pages, the singular apart
-  "1 web search.": "1 web search.",
-  "{n} web searches.": "{n} web searches.",
-  "1 page read.": "1 page read.",
-  "{n} pages read.": "{n} pages read.",
+  "1 web search.": null,
+  "{n} web searches.": null,
+  "1 page read.": null,
+  "{n} pages read.": null,
   // a search, its results each on a line of their own under it
-  "Searched the web for {query}.": "Searched the web for {query}.",
-  "No results.": "No results.",
-  "{name} doesn't report which pages it found.": "{name} doesn't report which pages it found.",
+  "Searched the web for {query}.": null,
+  "No results.": null,
+  "{name} doesn't report which pages it found.": null,
   // a page, by how it was opened
-  "Read {page}.": "Read {page}.",
-  "{name} opened this page on OpenAI's computers, not on this one.":
-    "{name} opened this page on OpenAI's computers, not on this one.",
-  "Opened {page} in the browser.": "Opened {page} in the browser.",
-} as const;
+  "Read {page}.": null,
+  "{name} opened this page on OpenAI's computers, not on this one.": null,
+  "Opened {page} in the browser.": null,
+} as const satisfies Hindi<string>;
 
 /** Every string of the web sources, in English. */
 export type SourcesKey = keyof typeof HI;
