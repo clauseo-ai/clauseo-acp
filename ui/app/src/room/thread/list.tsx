@@ -18,6 +18,9 @@ import { useHasOlder, useLatestQuestion } from "./live.ts";
 import { useOlder } from "./older.ts";
 import { PagedRow, Row } from "./rows.tsx";
 
+/** The composer's limit warning, carried in this chunk with the stop's note (limits/limit-warning.tsx loads it). */
+export { WarningNote } from "./limit-warning-note.tsx";
+
 /** The answer's meta line: "Clauseo", with its turn's time once the turn's step is in (the step's `ts`), alone
  * before it. */
 function AnswerWho({ time }: { time: Timestamp | null }) {
