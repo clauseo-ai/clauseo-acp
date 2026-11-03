@@ -3,7 +3,10 @@
 //! `Handle`. The owner waits for the agent to exit or for a stop; on a stop it drops the `exited`
 //! future and runs the shutdown ladder, because `exited` borrows the handle and `shutdown`
 //! consumes it. Either way it then waits, at most [`PUMP_END_BOUND`], for the stderr pump and the
-//! event forwarder to end, reads the exit report, and posts [`Ended`] after the agent's last event.
+//! event forwarder to end and then for every call that took a [`AgentLink::fence`] to post its
+//! answer, reads the exit report, and posts [`Ended`] after the agent's last event and after
+//! those answers. So a prompt the agent answered just before it exited (a Codex limit error, then
+//! the exit) reaches the actor as the prompt's answer, never as the exit.
 
 pub(crate) mod codex;
 pub(crate) mod data_folder;
@@ -11,11 +14,13 @@ pub(crate) mod loads;
 mod spec;
 pub(crate) mod title;
 
+use std::cell::{Cell, RefCell};
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::pin;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::task::{Poll, Waker};
 use std::time::Duration;
 
 use clauseo_acp::{AcpClient, AcpEvent, ConnectOptions};
@@ -128,6 +133,8 @@ pub(crate) struct AgentLink {
     stop: Option<oneshot::Sender<()>>,
     /// The connection's event channel, read only to see whether it is empty ([`Self::fence`]).
     events: async_channel::Receiver<AcpEvent>,
+    /// The fenced calls in flight, which the owner waits for before it posts [`Ended`].
+    calls: Rc<Calls>,
 }
 
 impl AgentLink {
@@ -140,12 +147,18 @@ impl AgentLink {
     /// call's task awaits it before posting the call's result, so the result reaches the actor
     /// after every event the agent sent before its answer: the forwarder takes an event and posts
     /// it in one step on this thread, so an empty channel means all of them were posted.
+    ///
+    /// The call counts as in flight from this call until the fence ends or is dropped, and the
+    /// owner posts [`Ended`] only once no call is in flight (within [`PUMP_END_BOUND`]), so the
+    /// task must post its result in the same poll the fence ends in, as a spawned call does.
     pub(crate) fn fence(&self) -> impl Future<Output = ()> + 'static {
         let events = self.events.clone();
+        let call = InFlight::new(&self.calls);
         async move {
             while !events.is_empty() {
                 YieldNow(false).await;
             }
+            drop(call);
         }
     }
 
@@ -208,9 +221,13 @@ pub(crate) fn start(
         }
         drop(events_done);
     })?;
+    let calls = Rc::new(Calls::default());
+    let owner_calls = Rc::clone(&calls);
     let ends = async move {
         // An `Err(Canceled)` is the end itself: the task dropped its sender.
         let (_pump, _events) = join(pump_end, events_end).await;
+        // The connection is gone, so each call in flight has its answer or `Closed` by now.
+        owner_calls.idle().await;
     };
     spawn(spawner, own(handle, stop_asked, ends, clock, post))?;
     Ok(AgentLink {
@@ -218,7 +235,56 @@ pub(crate) fn start(
         pid,
         stop: Some(stop),
         events: fence_events,
+        calls,
     })
+}
+
+/// The count of fenced calls in flight, and the owner's waker while it waits for none.
+#[derive(Debug, Default)]
+struct Calls {
+    open: Cell<usize>,
+    waiting: RefCell<Option<Waker>>,
+}
+
+impl Calls {
+    /// Ends once no call is in flight.
+    fn idle(&self) -> impl Future<Output = ()> + '_ {
+        futures::future::poll_fn(move |cx| {
+            if self.open.get() == 0 {
+                return Poll::Ready(());
+            }
+            *self.waiting.borrow_mut() = Some(cx.waker().clone());
+            Poll::Pending
+        })
+    }
+
+    /// Whether the owner is waiting for a call (the pipes have ended).
+    #[cfg(test)]
+    fn owner_waits(&self) -> bool {
+        self.open.get() > 0 && self.waiting.borrow().is_some()
+    }
+}
+
+/// One fenced call in flight; dropping it wakes the owner when it was the last.
+struct InFlight(Rc<Calls>);
+
+impl InFlight {
+    fn new(calls: &Rc<Calls>) -> Self {
+        calls.open.set(calls.open.get() + 1);
+        Self(Rc::clone(calls))
+    }
+}
+
+impl Drop for InFlight {
+    fn drop(&mut self) {
+        let open = self.0.open.get().saturating_sub(1);
+        self.0.open.set(open);
+        if open == 0
+            && let Some(waker) = self.0.waiting.borrow_mut().take()
+        {
+            waker.wake();
+        }
+    }
 }
 
 /// Gives the pool's other tasks one turn before going on.

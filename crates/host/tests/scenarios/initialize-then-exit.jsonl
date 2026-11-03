@@ -1,0 +1,4 @@
+{"scenario":"initialize-then-exit","description":"Answers initialize, then exits at once: the answer and the exit race to the host","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":false},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"exit":{"code":0}}
