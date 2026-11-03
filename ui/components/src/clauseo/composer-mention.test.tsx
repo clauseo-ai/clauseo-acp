@@ -4,11 +4,19 @@
 // picks with Enter into a token (`@path`, quoted when the path holds a space), never opens while an input method
 // composes, and tells the handle which papers the field's tokens mention: each once, in order, none once deleted, again
 // after undo.
-import { act, createRef, StrictMode, type ReactNode } from "react";
+import { act, createRef, StrictMode, type ComponentType, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, test, vi } from "vitest";
 import { settled } from "../lib/late.ts";
 import { DEFAULT_DISPLAY, showDisplay } from "../lib/display.ts";
+import type { IconProps } from "../icons/icon.tsx";
+import {
+  IconFileEmail,
+  IconFileGeneric,
+  IconFileMarkdown,
+  IconFilePdf,
+  IconFileWord,
+} from "../icons/icons.tsx";
 import { TooltipProvider } from "../ui/tooltip.tsx";
 import {
   Composer,
@@ -193,14 +201,41 @@ test("@ asks the room for its papers as it opens, says it is loading, then lists
   expect(notes()).toEqual([]);
 });
 
-test("a paper row has no icon; its name is as before", async () => {
-  const { mentions } = source();
+test("a paper row's icon is its file type's, 20 px, hidden from assistive technology; its name is as before", async () => {
+  const { mentions } = source({
+    items: [
+      paper("f-1", "X.docx"),
+      paper("f-2", "X.pdf"),
+      paper("f-3", "x.MD"),
+      paper("f-4", "x.eml"),
+      paper("f-5", "x.bin"),
+    ],
+  });
   await mount(composer({ mentions }));
   await focus();
   await edit("@");
-  expect(names()).toEqual(["Lease deed.pdf", "Board minutes.pdf", "Notice.pdf"]);
-  for (const r of rows()) expect(r.querySelector("svg")).toBeNull();
+  expect(names()).toEqual(["X.docx", "X.pdf", "x.MD", "x.eml", "x.bin"]);
+  expect(rows().map((r) => r.textContent)).toEqual(["X.docx", "X.pdf", "x.MD", "x.eml", "x.bin"]);
+  const glyphs = [IconFileWord, IconFilePdf, IconFileMarkdown, IconFileEmail, IconFileGeneric];
+  for (const [i, r] of rows().entries()) {
+    const svg = r.querySelector("svg");
+    expect(svg?.getAttribute("aria-hidden")).toBe("true");
+    expect(svg?.hasAttribute("aria-label")).toBe(false);
+    expect(svg?.getAttribute("width")).toBe("20");
+    expect(svg?.getAttribute("class")).toContain("group-data-highlighted:text-primary");
+    expect(svg?.innerHTML).toBe(await drawn(glyphs[i]!));
+  }
 });
+
+/** A glyph's markup at 20 px, drawn the way the row draws it. */
+async function drawn(Glyph: ComponentType<IconProps>): Promise<string> {
+  const box = document.createElement("div");
+  const r = createRoot(box);
+  await act(async () => r.render(<Glyph size={20} />));
+  const html = box.querySelector("svg")?.innerHTML ?? "";
+  await act(async () => r.unmount());
+  return html;
+}
 
 test("the filter narrows as the lawyer types; a query matching nothing closes it; an email address opens nothing", async () => {
   const { mentions, load } = source();

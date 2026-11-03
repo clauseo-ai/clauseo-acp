@@ -1,7 +1,9 @@
 // The composer menu's rows' words: a command's, and a paper's. The row itself, its highlight and its press, is the
 // menu's (composer-menu.tsx).
+import type { ComponentType } from "react";
 import { cn } from "../lib/cn.ts";
 import { Mixed } from "../lib/mixed.tsx";
+import type { IconProps } from "../icons/icon.tsx";
 import { IconCommand } from "../icons/icons.tsx";
 import { rowNote } from "../ui/recipes-overlays.ts";
 import type { MentionItem, SlashCommand } from "./composer.tsx";
@@ -32,19 +34,28 @@ export function CommandRow({ c }: { c: SlashCommand | undefined }) {
   );
 }
 
-/** A paper's row: its name, and where it stands in the matter's folder. */
-export function PaperRow({ m }: { m: MentionItem | undefined }) {
+/** A paper's row: its file type's icon, its name, and where it stands in the matter's folder. */
+export function PaperRow({
+  m,
+  Icon,
+}: {
+  m: MentionItem | undefined;
+  Icon: ComponentType<IconProps>;
+}) {
   if (m === undefined) return null;
   return (
-    <span className="min-w-0">
-      <span className="block truncate">
-        <bdi>{m.label}</bdi>
-      </span>
-      {m.detail !== undefined && m.detail !== "" && (
-        <span className={cn(rowNote, "truncate")}>
-          <bdi>{m.detail}</bdi>
+    <>
+      <Icon size={20} className="text-muted group-data-highlighted:text-primary" />
+      <span className="min-w-0">
+        <span className="block truncate">
+          <bdi>{m.label}</bdi>
         </span>
-      )}
-    </span>
+        {m.detail !== undefined && m.detail !== "" && (
+          <span className={cn(rowNote, "truncate")}>
+            <bdi>{m.detail}</bdi>
+          </span>
+        )}
+      </span>
+    </>
   );
 }
