@@ -141,7 +141,7 @@ fn userinfo_end(rest: &str) -> Option<usize> {
             ch == '@' && !rest.get(..at).is_some_and(|before| before.ends_with('/'))
         })
         .map(|(at, _)| at)
-        .last()
+        .next_back()
 }
 
 /// Every absolute path in `text` replaced by `<path>` (see [`redact`]).

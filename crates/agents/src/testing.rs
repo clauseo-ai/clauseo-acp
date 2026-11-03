@@ -35,6 +35,8 @@ pub enum Behaviour {
     /// Headers and the first half of the body, then a wait for [`TestRegistry::release`]
     /// before the rest.
     Stall,
+    /// The bytes with no `Content-Length`: the body ends when the connection closes.
+    NoLength,
 }
 
 /// One request the registry saw.
@@ -356,6 +358,14 @@ fn respond(stream: &mut impl Write, shared: &Shared, request: &Request) -> io::R
         Behaviour::Html => {
             let page = b"<!DOCTYPE html><html><body>Blocked by policy</body></html>";
             write_status(stream, 200, "text/html; charset=utf-8", page)
+        }
+        Behaviour::NoLength => {
+            let head = format!(
+                "HTTP/1.1 {status} OK\r\nContent-Type: {kind}\r\n{range}Connection: close\r\n\r\n"
+            );
+            stream.write_all(head.as_bytes())?;
+            stream.write_all(body)?;
+            stream.flush()
         }
         Behaviour::Stall => {
             let (first, rest) = body.split_at(body.len() / 2);

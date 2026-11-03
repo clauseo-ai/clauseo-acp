@@ -39,6 +39,7 @@ fn job(url: &str, bytes: &[u8], dest: PathBuf) -> FetchJob {
         expected: expected(bytes),
         dest,
         magic: Magic::Gzip,
+        max_bytes: 1 << 30,
     }
 }
 
@@ -100,6 +101,67 @@ fn a_cut_download_resumes_by_range_to_the_full_verified_file() {
     assert!(seen.iter().all(|&(_, total)| total == full), "{seen:?}");
     assert!(seen.first().unwrap().0 > 70_000);
     assert_eq!(seen.last().unwrap().0, full);
+}
+
+#[test]
+fn a_content_length_over_the_cap_is_refused_before_writing_and_the_part_deleted() {
+    let (registry, bytes, dir, fetcher) = setup("cap-length");
+    let full = bytes.len() as u64;
+    let mut capped = job(&registry.url(PATH), &bytes, dir.path().join("pkg.tgz"));
+    capped.max_bytes = full - 1;
+    let err = fetch(&fetcher, &capped).unwrap_err();
+    assert_eq!(
+        (err.kind, err.status),
+        (FetchKind::Failed, Some(200)),
+        "{err:?}"
+    );
+    assert!(
+        err.detail.contains(&format!("more than the {}", full - 1)),
+        "{}",
+        err.detail
+    );
+    let part = part_path(&capped.dest);
+    assert!(!part.exists() && !capped.dest.exists());
+
+    // A resumed part counts too: 70 000 bytes kept, then the rest offered over the cap.
+    registry.then(PATH, Behaviour::CutAfter(70_000));
+    let open = job(&registry.url(PATH), &bytes, dir.path().join("pkg.tgz"));
+    fetch(&fetcher, &open).unwrap_err();
+    assert_eq!(len_of(&part), 70_000);
+    let err = fetch(&fetcher, &capped).unwrap_err();
+    assert_eq!(
+        (err.kind, err.status),
+        (FetchKind::Failed, Some(206)),
+        "{err:?}"
+    );
+    assert!(!part.exists() && !capped.dest.exists());
+}
+
+#[test]
+fn a_body_running_past_the_cap_is_cut_off_and_the_part_deleted() {
+    let (registry, bytes, dir, fetcher) = setup("cap-stream");
+    registry.then(PATH, Behaviour::NoLength);
+    let mut capped = job(&registry.url(PATH), &bytes, dir.path().join("pkg.tgz"));
+    capped.max_bytes = 100_000;
+    let mut most = 0;
+    let err = fetcher
+        .fetch(&capped, &Cancel::new(), &mut |received, _| {
+            most = most.max(received);
+        })
+        .unwrap_err();
+    assert_eq!(err.kind, FetchKind::Failed, "{err:?}");
+    assert!(
+        err.detail.contains("ran past the 100000 bytes"),
+        "{}",
+        err.detail
+    );
+    assert!(most <= 100_000, "{most}");
+    assert!(!part_path(&capped.dest).exists() && !capped.dest.exists());
+
+    // The same body under a cap it fits is fine.
+    registry.then(PATH, Behaviour::NoLength);
+    let fits = job(&registry.url(PATH), &bytes, dir.path().join("pkg.tgz"));
+    assert_eq!(fetch(&fetcher, &fits).unwrap(), bytes.len() as u64);
 }
 
 #[test]

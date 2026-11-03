@@ -73,6 +73,10 @@ pub(crate) struct FetchJob {
     pub(crate) dest: PathBuf,
     /// What its first bytes must be.
     pub(crate) magic: Magic,
+    /// The most bytes it may have. A larger `Content-Length` (with the resumed bytes) is refused
+    /// before anything is written, and a body that runs past it is cut off; either way the
+    /// `.part` is deleted and the fetch is `Failed`.
+    pub(crate) max_bytes: u64,
 }
 
 /// The HTTP client of one install: its proxy, its TLS roots and its timeouts.
@@ -269,6 +273,44 @@ fn receive(
     let total = header("content-length")
         .and_then(|length| length.trim().parse::<u64>().ok())
         .map_or(0, |length| length.saturating_add(offset));
+    if total > job.max_bytes {
+        write::remove_file(part).map_err(|err| at.io(&err))?;
+        return Err(at.fail(FetchKind::Failed, status, &too_big(job, Some(total))));
+    }
+    let reader = response.into_body().into_reader();
+    let source = Source {
+        status,
+        offset,
+        total,
+        read_error: &|err| at.ureq(&ureq::Error::from(err)),
+    };
+    write_checked(job, part, reader, &source, cancel, progress, at)
+}
+
+/// Where [`write_checked`]'s bytes come from: the HTTP status (none for a local file), the bytes
+/// already in the `.part` that they follow, the size once known (0 when not), and how a read
+/// error is reported.
+struct Source<'a> {
+    status: Option<u16>,
+    offset: u64,
+    total: u64,
+    read_error: &'a dyn Fn(io::Error) -> FetchError,
+}
+
+/// Writes `reader`'s bytes into `part` (after the `source.offset` bytes already there, which
+/// are hashed first), hashing each chunk as it is written, then checks the digest and renames
+/// `part` to the destination. The magic is checked on a fresh file's first bytes, `cancel`
+/// between chunks, and [`FetchJob::max_bytes`] before each write.
+fn write_checked(
+    job: &FetchJob,
+    part: &Path,
+    mut reader: impl io::Read,
+    source: &Source<'_>,
+    cancel: &Cancel,
+    progress: &mut dyn FnMut(u64, u64),
+    at: &Place<'_>,
+) -> Result<u64, FetchError> {
+    let (status, offset) = (source.status, source.offset);
     let mut hasher = job.expected.hasher();
     let mut file = if offset > 0 {
         hash_file(part, &mut hasher).map_err(|err| at.io(&err))?;
@@ -277,7 +319,6 @@ fn receive(
         write::open_truncate(part)
     }
     .map_err(|err| at.io(&err))?;
-    let mut reader = response.into_body().into_reader();
     let mut buf = vec![0; CHUNK];
     // The first bytes of a fresh file, held until there are enough to check the magic.
     let mut head: Option<Vec<u8>> = (offset == 0).then(Vec::new);
@@ -289,7 +330,7 @@ fn receive(
         let n = match reader.read(&mut buf) {
             Ok(n) => n,
             Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
-            Err(err) => return Err(at.ureq(&ureq::Error::from(err))),
+            Err(err) => return Err((source.read_error)(err)),
         };
         let chunk = buf.get(..n).unwrap_or_default();
         let chunk: Vec<u8> = match head.as_mut() {
@@ -318,10 +359,15 @@ fn receive(
         if cancel.is_cancelled() {
             return Err(at.cancelled());
         }
+        received = received.saturating_add(u64::try_from(chunk.len()).unwrap_or(u64::MAX));
+        if received > job.max_bytes {
+            drop(file);
+            write::remove_file(part).map_err(|err| at.io(&err))?;
+            return Err(at.fail(FetchKind::Failed, status, &too_big(job, None)));
+        }
         hasher.update(&chunk);
         file.write_all(&chunk).map_err(|err| at.io(&err))?;
-        received = received.saturating_add(u64::try_from(chunk.len()).unwrap_or(u64::MAX));
-        progress(received, total);
+        progress(received, source.total);
         if n == 0 {
             break;
         }
@@ -339,6 +385,20 @@ fn receive(
     }
     write::rename(part, &job.dest).map_err(|err| at.io(&err))?;
     Ok(received)
+}
+
+/// The detail for a file over its cap: the size offered when the server said it.
+fn too_big(job: &FetchJob, offered: Option<u64>) -> String {
+    let cap = job.max_bytes;
+    match offered {
+        Some(size) => format!(
+            "the file would be {size} bytes, more than the {cap} it may have; the partial file \
+             was deleted"
+        ),
+        None => {
+            format!("the file ran past the {cap} bytes it may have; the partial file was deleted")
+        }
+    }
 }
 
 /// Whether `url` starts with `https://`, in any case.
