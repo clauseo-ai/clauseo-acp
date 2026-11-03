@@ -223,7 +223,7 @@ describe("the queue's hooks, the held queue with no stop to name, a refused pres
     expect(document.querySelector("[data-testid]")).toBeNull();
   });
 
-  test("held with no stop to name: the count line, the cap line at ten, and Send next", async () => {
+  test("held with no stop to name: the count alone, the cap line at ten, and Send next", async () => {
     await mount(
       <QueueStrip
         items={messages(QUEUE_CAP)}
@@ -234,11 +234,40 @@ describe("the queue's hooks, the held queue with no stop to name, a refused pres
         onSendNext={none}
       />,
     );
-    expect(txt(document.querySelector(".queue-say"))).toBe(
-      "10 queued, sent in order. The queue holds 10.",
-    );
+    expect(txt(document.querySelector(".queue-say"))).toBe("10 queued. The queue holds 10.");
     expect(document.querySelector(".queue")?.hasAttribute("data-held")).toBe(true);
     expect(document.querySelector(".queue-next")).not.toBeNull();
+    // one held message: no "sent once this answer is done", as nothing goes until the lawyer sends
+    await act(async () =>
+      root?.render(
+        <QueueStrip
+          items={messages(1)}
+          held={{ kind: "held" }}
+          onEdit={none}
+          onRemove={none}
+          onSendNow={none}
+          onSendNext={none}
+        />,
+      ),
+    );
+    expect(txt(document.querySelector(".queue-say"))).toBe("1 queued.");
+    expect(document.querySelector(".queue-next")).not.toBeNull();
+  });
+
+  test("the fold row names the list it opens", async () => {
+    await mount(
+      <QueueStrip
+        items={messages(4)}
+        onEdit={none}
+        onRemove={none}
+        onSendNow={none}
+        onSendNext={none}
+      />,
+    );
+    const fold = document.querySelector(".queue-fold");
+    const list = document.querySelector(".queue-list");
+    expect(list?.id).not.toBe("");
+    expect(fold?.getAttribute("aria-controls")).toBe(list?.id);
   });
 
   test("a refused press's words join the head's status line with their code", async () => {
