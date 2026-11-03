@@ -8,6 +8,7 @@ import { userIds, type Held, type Queued } from "./queue-entries.ts";
 import { questionText } from "./thread/live.ts";
 
 const STEP = "step:";
+const LIMIT = "limit_stop:";
 
 const NONE: readonly Queued[] = [];
 
@@ -39,8 +40,8 @@ export function queuedPick(): (v: StreamView | undefined) => readonly Queued[] {
 
 const failedStops: readonly StopReason[] = ["failed", "max_tokens", "max_turn_requests", "refusal"];
 
-/** A pick of why the queue is held, or null while it isn't: the header's `queue_held`, and the latest step's stop and
- * time. The same object while it reads the same: one per mount. */
+/** A pick of why the queue is held, or null while it isn't: the header's `queue_held`, and how the latest turn ended:
+ * its step's stop and time, or held with nothing to name when it ended at a limit (a `limit_stop`, no step) or well. The same object while it reads the same: one per mount. */
 export function heldPick(): (v: StreamView | undefined) => Held | null {
   let last: Held | null = null;
   return (v) => {
@@ -48,6 +49,8 @@ export function heldPick(): (v: StreamView | undefined) => Held | null {
     let next: Held = { kind: "held" };
     for (let i = v.ids.length - 1; i >= 0; i--) {
       const id = v.ids[i]!;
+      // the newest turn's end: a stop at a limit names no stop of the lawyer's, nor an older step's
+      if (id.startsWith(LIMIT)) break;
       if (!id.startsWith(STEP)) continue;
       const step = v.entries.get(id)?.step;
       if (step === undefined) continue;

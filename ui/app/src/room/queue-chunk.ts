@@ -4,9 +4,9 @@
 import { createElement, use, type ComponentType } from "react";
 import { late } from "@clauseo/components/lib/late.ts";
 // a type alone: erased, so this file has no static dependency on the strip
-import type { QueueSlotProps } from "./queue-slot.tsx";
+import type { QueueStripProps } from "./queue-slot.tsx";
 
-type Loaded = ComponentType<QueueSlotProps>;
+type Loaded = ComponentType<QueueStripProps>;
 type Chunk = Promise<Loaded> & { status?: "fulfilled"; value?: Loaded };
 
 let chunk: Chunk | null = null;
@@ -37,6 +37,6 @@ export function loadQueueStrip(): Promise<Loaded> {
 }
 
 /** The strip, from its own chunk; suspends only while the chunk is still loading. */
-export function LazyQueueStrip(props: QueueSlotProps) {
+export function LazyQueueStrip(props: QueueStripProps) {
   return createElement(use(loadQueueStrip()), props);
 }

@@ -1,11 +1,12 @@
 // The queue over the composer, filled from the thread's view (U7, matters/queue, queue-full, held, held-failed): the
 // parts' QueueStrip with the queued messages in the order they go and why the queue holds. Its own chunk, which
 // queue-slot.tsx loads, so the room's first load carries none of it. Edit sends the new text alone (the host keeps a
-// message's file blocks), Remove, Send now and Send next their H9 commands, one at a time per row. Replies land with
+// message's file blocks), Remove, Send now and Send next their H9 commands, one at a time per row, and once accepted
+// not again until the row has gone. Replies land with
 // the next frame's flush (#253): a refusal shows its words under the head until the next press or until the queue
 // changes; `thread.turn_not_queued` says the message had already gone, and the strip follows the view, where it now
 // shows as sent. Never the host's message.
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { QueueStrip } from "@clauseo/components/clauseo/queue.tsx";
 import type { QueueHold } from "@clauseo/components/clauseo/queue-model.ts";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
@@ -17,8 +18,9 @@ import { toHostError } from "../transport/host-transport.ts";
 import type { TurnId } from "../transport/protocol.ts";
 import type { Queued } from "./queue-entries.ts";
 import { heldPick, queuedPick } from "./queue-picks.ts";
-import type { QueueSlotProps } from "./queue-slot.tsx";
+import type { QueueStripProps } from "./queue-slot.tsx";
 import { useAgentPlan } from "./thread/agent-plan.ts";
+import { stamp } from "./thread/clock.ts";
 
 const TEST_IDS = {
   row: "queued",
@@ -36,19 +38,20 @@ const NEXT = "next";
 
 const NONE: readonly Queued[] = [];
 
-/** A step's time on the lawyer's clock, in English ("4:31 pm"), which the part puts in the language: thread/clock.ts's
- * clockTime in English, written out here so the strip's chunk shares no module with the thread's list (a shared one
- * becomes a chunk of its own, and the strip's import would need a preload; vite-config.test.ts). */
-function clockOf(ts: number): string {
-  const at = new Date(ts);
-  const h = at.getHours();
-  return `${h % 12 === 0 ? 12 : h % 12}:${String(at.getMinutes()).padStart(2, "0")} ${h < 12 ? "am" : "pm"}`;
-}
-
 /** A refused press: its code, and the queue as it stood then; the words show while the queue stands so. */
 type Refusal = { code: string; queue: readonly Queued[] };
 
-export function LiveQueueStrip({ transport, stream, thread, onFocusField }: QueueSlotProps) {
+/** How a press's key is kept once the host accepts it: until its turn leaves the queue (Remove, Send now), until the
+ * queue or its hold changes (Send next), or not at all (Edit, whose turn stays). */
+type Keep = "turn" | "change" | "no";
+
+export function LiveQueueStrip({
+  transport,
+  stream,
+  thread,
+  onFocusField,
+  onSay,
+}: QueueStripProps) {
   const store = useViewStore();
   const { lang } = useWords();
   const plan = useAgentPlan();
@@ -66,49 +69,64 @@ export function LiveQueueStrip({ transport, stream, thread, onFocusField }: Queu
     setRefusal(next);
   };
   // one command per row at a time, by turn (Send next's by NEXT)
-  const pending = useRef(new Set<string>());
+  const pending = useRef(new Map<string, Keep>());
+  // an accepted press's key goes once its turn has left the queue, or the queue or its hold changed: a fast second
+  // press before the flush that takes the row away sends nothing
+  useEffect(() => {
+    for (const [key, keep] of pending.current) {
+      if (keep === "change" || (keep === "turn" && !queue.some((q) => q.turn === key)))
+        pending.current.delete(key);
+    }
+  }, [queue, held]);
+  // "now" as the strip first showed: no clock runs to move it
+  const [now] = useState(Date.now);
   const hold = useMemo<QueueHold | null>(
     () =>
       held === null
         ? null
         : held.kind === "held"
           ? held
-          : // the step's time on the lawyer's clock, in English: the part puts it in the language
-            { kind: held.kind, at: clockOf(held.at) },
-    [held],
+          : // the step's time, with its day when not today ("Monday 4:31 pm"), in the language
+            { kind: held.kind, at: stamp(lang, held.at, now) },
+    [held, lang, now],
   );
   const turnOf = (id: string): TurnId | undefined => queue.find((q) => q.id === id)?.turn;
-  const send = (key: string, command: HostCommandH9) => {
+  /** Sends one press's command, once per key while it is on its way or kept (`keep`). A refusal lands with the next
+   * frame's flush: its words, and `refused` (the part's: the edit opens again, the pressed row is forgotten) unless
+   * the message had already gone. */
+  const send = (key: string, command: HostCommandH9, keep: Keep, refused?: () => void) => {
     if (pending.current.has(key)) return;
-    pending.current.add(key);
+    pending.current.set(key, keep);
     refuse(null);
-    dispatchH9(transport, command)
-      .then(
-        () => {},
-        (e: unknown) => {
-          const code = toHostError(e).code;
-          store.inFrame(() =>
-            // the queue as this frame's flush left it: the words stand until it changes
-            refuse({ code, queue: stream === null ? NONE : pickQueued(store.view(stream)) }),
-          );
-        },
-      )
-      .finally(() => pending.current.delete(key));
+    dispatchH9(transport, command).then(
+      () => {
+        if (keep === "no") pending.current.delete(key);
+      },
+      (e: unknown) => {
+        pending.current.delete(key);
+        const code = toHostError(e).code;
+        store.inFrame(() => {
+          // the queue as this frame's flush left it: the words stand until it changes
+          refuse({ code, queue: stream === null ? NONE : pickQueued(store.view(stream)) });
+          if (code !== GONE) refused?.();
+        });
+      },
+    );
   };
   const onRow =
     (command: (thread: string, turn: TurnId) => HostCommandH9) =>
-    (id: string): void => {
+    (id: string, refused: () => void): void => {
       const turn = turnOf(id);
-      if (thread !== null && turn !== undefined) send(turn, command(thread, turn));
+      if (thread !== null && turn !== undefined) send(turn, command(thread, turn), "turn", refused);
     };
-  const onEdit = (id: string, text: string) => {
+  const onEdit = (id: string, text: string, refused: () => void) => {
     const turn = turnOf(id);
     // the text alone: the host keeps the message's file blocks
     if (thread !== null && turn !== undefined)
-      send(turn, { edit_queued_prompt: { thread, turn, text } });
+      send(turn, { edit_queued_prompt: { thread, turn, text } }, "no", refused);
   };
   const onSendNext = () => {
-    if (thread !== null) send(NEXT, { resume_queue: { thread } });
+    if (thread !== null) send(NEXT, { resume_queue: { thread } }, "change");
   };
   const note =
     refusal === null || refusal.queue !== queue
@@ -130,6 +148,7 @@ export function LiveQueueStrip({ transport, stream, thread, onFocusField }: Queu
       onSendNow={onRow((t, turn) => ({ send_queued_now: { thread: t, turn } }))}
       onSendNext={onSendNext}
       onFocusOut={onFocusField}
+      onSay={onSay}
       testIds={TEST_IDS}
     />
   );

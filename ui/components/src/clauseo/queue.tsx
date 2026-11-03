@@ -28,7 +28,7 @@ function QueueItem({
 }: {
   item: QueuedMessage;
   index: number;
-  onEdit: (id: string, text: string) => void;
+  onEdit: OnEdit;
   onRemove: (id: string) => void;
   onSendNow: (id: string) => void;
   testIds: QueueTestIds | undefined;
@@ -37,9 +37,31 @@ function QueueItem({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(item.text);
   const field = useRef<HTMLTextAreaElement>(null);
+  const editButton = useRef<HTMLButtonElement>(null);
+  // the edit closed by Save, Cancel or Escape: the focus goes back to the row's Edit, never to the page
+  const back = useRef(false);
   useEffect(() => {
     if (editing) field.current?.focus();
+    else if (back.current) {
+      back.current = false;
+      editButton.current?.focus();
+    }
   }, [editing]);
+  const close = () => {
+    back.current = true;
+    setEditing(false);
+  };
+  const cancel = () => {
+    setDraft(item.text);
+    close();
+  };
+  // the words as the lawyer wrote them, as Ask sends them (an empty edit can't be saved); refused, the field opens
+  // again with them
+  const save = () => {
+    if (draft.trim() === "") return;
+    onEdit(item.id, draft, () => setEditing(true));
+    close();
+  };
   if (editing) {
     return (
       <li className="queue-item" data-editing="" data-testid={testIds?.row} data-turn={item.turn}>
@@ -54,36 +76,20 @@ function QueueItem({
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Escape") {
-              setDraft(item.text);
-              setEditing(false);
-            } else if (e.key === "Enter" && !e.shiftKey) {
+            // a key while an input method composes is the method's, as in the composer (composer-keys.ts)
+            if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+            if (e.key === "Escape") cancel();
+            else if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
-              if (draft.trim() !== "") onEdit(item.id, draft.trim());
-              setEditing(false);
+              save();
             }
           }}
         />
         <span className="queue-acts">
-          <Button
-            kind="quiet"
-            size="small"
-            onClick={() => {
-              setDraft(item.text);
-              setEditing(false);
-            }}
-          >
+          <Button kind="quiet" size="small" onClick={cancel}>
             {w.ui("Cancel")}
           </Button>
-          <Button
-            kind="tone"
-            size="small"
-            disabled={draft.trim() === ""}
-            onClick={() => {
-              onEdit(item.id, draft.trim());
-              setEditing(false);
-            }}
-          >
+          <Button kind="tone" size="small" disabled={draft.trim() === ""} onClick={save}>
             {w.m("Save")}
           </Button>
         </span>
@@ -102,6 +108,7 @@ function QueueItem({
           size="small"
           className="queue-more-act"
           data-testid={testIds?.edit}
+          ref={editButton}
           onClick={() => {
             setDraft(item.text);
             setEditing(true);
@@ -132,6 +139,12 @@ function QueueItem({
   );
 }
 
+/** Edit saved: the message and its new words, and what to call should the host refuse them (the field opens again
+ * with the words), in the frame the refusal lands. */
+type OnEdit = (id: string, text: string, refused: () => void) => void;
+/** Remove or Send now pressed: the message, and what to call should the host refuse it with the row staying. */
+type OnRowPress = (id: string, refused: () => void) => void;
+
 /** How many slips the tray shows before "3 more": the answer stays the content, not the queue. */
 const SHOWN = 2;
 
@@ -149,16 +162,21 @@ export function QueueStrip({
   onSendNow,
   onSendNext,
   onFocusOut,
+  onSay,
   testIds,
 }: {
   items: readonly QueuedMessage[];
   held?: QueueHold | null;
   /** A refused press's words and its code, under the head; null for none. */
   note?: { words: string; code: string } | null;
-  onEdit: (id: string, text: string) => void;
-  onRemove: (id: string) => void;
-  onSendNow: (id: string) => void;
+  onEdit: OnEdit;
+  onRemove: OnRowPress;
+  onSendNow: OnRowPress;
   onSendNext: () => void;
+  /** Says the head (and a refused press's words) in a status region the host keeps mounted, empty, from before the
+   * strip shows, so the first line is said as it comes (a region that mounts holding words says nothing); "" as the
+   * strip empties or goes. With it the visible head holds no region of its own; without it, the head is the region. */
+  onSay?: ((said: string) => void) | undefined;
   /** Where the focus goes when a row it was on went and no row follows, as the composer's field. */
   onFocusOut?: (() => void) | undefined;
   testIds?: QueueTestIds | undefined;
@@ -170,8 +188,10 @@ export function QueueStrip({
   // the row a Remove or Send now was pressed on, and where it stood, until it goes
   const going = useRef<{ id: string; index: number } | null>(null);
   const focusOut = useRef(onFocusOut);
+  const sayTo = useRef(onSay);
   useLayoutEffect(() => {
     focusOut.current = onFocusOut;
+    sayTo.current = onSay;
   });
   const n = items.length;
   const rest = n - SHOWN;
@@ -206,11 +226,13 @@ export function QueueStrip({
     },
     [],
   );
-  const press = (id: string, then: (id: string) => void) => {
+  // a refusal with the row staying forgets the press, so a later drain moves no focus
+  const press = (id: string, then: OnRowPress) => {
     going.current = { id, index: items.findIndex((item) => item.id === id) };
-    then(id);
+    then(id, () => {
+      if (going.current?.id === id) going.current = null;
+    });
   };
-  if (n === 0) return null;
   const count = [
     n === 1
       ? w.m("1 queued, sent once this answer is done.")
@@ -228,6 +250,13 @@ export function QueueStrip({
             : "The queue is held. The answer failed at {time}, so nothing more is sent until you send.",
           { time: w.clock(held.at) },
         );
+  // what the host's region says: the head, then a refused press's words; nothing once the queue is empty
+  const said = n === 0 ? "" : note === null ? head : `${head} ${note.words}`;
+  useLayoutEffect(() => {
+    sayTo.current?.(said);
+  }, [said]);
+  useLayoutEffect(() => () => sayTo.current?.(""), []);
+  if (n === 0) return null;
   return (
     <section
       ref={section}
@@ -236,8 +265,13 @@ export function QueueStrip({
       data-held={held !== null ? "" : undefined}
     >
       <div className="queue-head">
-        {/* one status region: a refused press's words join the head's, so they are said as they come */}
-        <p className="queue-say" role="status" data-testid={testIds?.say}>
+        {/* one status region (the host's, else this): a refused press's words join the head's, so they are said as
+            they come */}
+        <p
+          className="queue-say"
+          role={onSay === undefined ? "status" : undefined}
+          data-testid={testIds?.say}
+        >
           <Say>{head}</Say>
           {note !== null && (
             <span className="queue-note" data-code={note.code} data-testid={testIds?.note}>

@@ -4,8 +4,9 @@
 // (queue-strip.tsx, with the parts' QueueStrip), so the room's first load carries neither. The chunk starts loading as
 // the slot mounts (queue-chunk.ts), as the thread's does as Work mounts, so it is in memory before the first message
 // can queue and the strip shows in the same frame as its first entry; a loaded chunk never suspends. Before it
-// arrives the slot shows nothing.
-import { Suspense, useEffect } from "react";
+// arrives the slot shows nothing. The slot keeps the strip's status region, empty and visually hidden, mounted for its
+// whole life: a region that mounts holding words says nothing, so the strip says its head there (QueueStrip's onSay).
+import { Suspense, useCallback, useEffect, useRef } from "react";
 import { useStreamPart, useViewStore } from "../store/hooks.ts";
 import type { StreamView } from "../store/view.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
@@ -22,6 +23,9 @@ export type QueueSlotProps = {
   onFocusField: () => void;
 };
 
+/** What the slot gives the strip: the contract's props, and where to say the strip's head. */
+export type QueueStripProps = QueueSlotProps & { onSay: (said: string) => void };
+
 const pickHeld = (v: StreamView | undefined) => v?.header?.header?.queue_held === true;
 
 export function QueueSlot(props: QueueSlotProps) {
@@ -29,10 +33,19 @@ export function QueueSlot(props: QueueSlotProps) {
   const count = useStreamPart(store, props.stream, queueCountPick);
   const held = useStreamPart(store, props.stream, pickHeld);
   useEffect(() => void loadQueueStrip(), []);
-  if (count === 0 && !held) return null;
+  // the strip's status region, mounted empty for the slot's life so the strip's first line is said as it comes
+  const region = useRef<HTMLParagraphElement>(null);
+  const say = useCallback((said: string) => {
+    if (region.current !== null) region.current.textContent = said;
+  }, []);
   return (
-    <Suspense fallback={null}>
-      <LazyQueueStrip {...props} />
-    </Suspense>
+    <>
+      <p ref={region} className="sr-only" role="status" data-testid="queue-said" />
+      {(count > 0 || held) && (
+        <Suspense fallback={null}>
+          <LazyQueueStrip {...props} onSay={say} />
+        </Suspense>
+      )}
+    </>
   );
 }
