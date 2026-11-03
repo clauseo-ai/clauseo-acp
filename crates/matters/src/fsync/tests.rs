@@ -40,3 +40,15 @@ fn syncing_a_folder_that_is_gone_fails() {
     super::sync_dir(dir.path()).unwrap();
     super::full_flush_dir(dir.path()).unwrap();
 }
+
+/// macOS: each sync call reports the OS's refusal instead of passing as done. A pipe is no
+/// file on a disk, so `fsync`, `F_BARRIERFSYNC` and `F_FULLFSYNC` all fail on it.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_sync_the_os_refuses_is_an_error() {
+    let (reader, _writer) = io::pipe().unwrap();
+    let pipe = std::fs::File::from(std::os::fd::OwnedFd::from(reader));
+    assert!(super::sync_file(&pipe).is_err());
+    assert!(super::barrier(&pipe).is_err());
+    assert!(super::full_flush(&pipe).is_err());
+}
