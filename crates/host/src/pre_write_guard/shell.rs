@@ -8,10 +8,9 @@ use std::path::{Component, Path, PathBuf};
 
 use serde_json::Value;
 
+use super::codex::{patch_targets, text_has_codex_part};
 use super::words::{Escape, Segments, candidates, shell_segments};
-use super::{
-    Ignored, MAX_WORDS, Targets, existing_resolved, lexical, patch_targets, text_has_codex_part,
-};
+use super::{Ignored, MAX_WORDS, Targets, existing_resolved, lexical};
 
 /// The most folders [`Folders`] keeps; past it, the folder is unknown.
 const MAX_FOLDERS: usize = 16;

@@ -1,9 +1,14 @@
 //! The read-only exemption of the name backstop ([`read_only`]): narrow, whole-command, and when
 //! in doubt not read-only (review round 3).
 
-use super::{Held, MAX_READ_WORDS, Stetdoc, named, program_name, stetdoc};
+mod programs;
+
+use std::path::Path;
+
+use super::{Held, MAX_READ_WORDS, Named, Stetdoc, names_word, program_name, stetdoc};
 use crate::pre_write_guard::shell::command_words;
 use crate::pre_write_guard::words::{Escape, Segment, Segments, shell_segments};
+use programs::{cp_reads, pandoc_reads, textutil_outputs, unzip_reads};
 
 /// Whether the shell command `command`, which names some of `held` (by name, or by the words in
 /// `hits`, which the path layer found resolving to a held file through a symlink, another case or
@@ -15,17 +20,26 @@ use crate::pre_write_guard::words::{Escape, Segment, Segments, shell_segments};
 /// - Every simple command (a heredoc's body is data) is, by a bare program name (no `/` or `\`,
 ///   no `NAME=value` before it; `time`, `command`, `!`, `{`, `then` and the like may come
 ///   first), one of:
-///   - a reader, which may name a held file: `cat`, `head`, `tail`, `wc`, `strings`, `file`
-///     (not `-C`), `unzip` with only `-l`, `-p`, `-v`, `-lv`, `-q`, `-qq`, `textutil` with
-///     `-stdout` and no `-output`, `pandoc` with no option that writes or runs code but a
-///     literal `-o` naming no held file ([`pandoc_reads`]), `stetdoc` in a form writing no held
-///     file ([`stetdoc()`]), `sh`/`bash`/`zsh`/`dash`/`ksh -c` whose script passes this rule and
-///     whose other words name no held file;
+///   - a reader, which may name a held file: `cat`, `head`, `tail`, `wc`, `strings`, `ls`,
+///     `stat`, `test`/`[`, `shasum`, `md5sum`, `sha1sum`, `sha256sum`, `sha512sum`,
+///     `zipinfo`, `diff`, `cmp`, PowerShell's `Get-Content`/`gc`/`type`, `Select-String`/`sls`
+///     and `Test-Path`; `file` (not `-C`); `unzip` listing or printing, or extracting into
+///     another folder with `-d` ([`unzip_reads`]); `textutil` whose output, given or derived
+///     from its inputs, names no held file ([`textutil_outputs`]); `cp` of one file to another
+///     file naming no held file, or into a folder outside the matter ([`cp_reads`]); `pandoc`
+///     with no option that writes or runs code but a literal `-o` naming no held file
+///     ([`pandoc_reads`]); `stetdoc` in a form writing no held file ([`stetdoc()`]);
+///     `sh`/`bash`/`zsh`/`dash`/`ksh -c` whose script passes this rule and whose other words
+///     name no held file;
 ///   - a filter, which must not name a held file: `grep`, `rg` (no `--pre`), `sed` (no `-i`,
 ///     `--in-place`), `sort` (no `-o`, `--output`, `--compress-program`), `uniq` (one file at
 ///     most), `cut`, `tr`, `nl`, `column`;
 ///   - neutral, which must not name a held file either: `cd`, `pushd`, `popd`, `echo`, `pwd`,
-///     `ls`, `true`.
+///     `true`.
+///
+/// Naming a held file means by name, by a wildcard that could match its name, or by a word the
+/// path layer found resolving to one (or a part of such a word: `Link.docx` of
+/// `--output=Link.docx`).
 /// - Every output redirection is `/dev/null`, `$null`, a duplication (`2>&1`, `>&2`, `>&-`), or
 ///   a literal path ([`literal`]) naming no held file; never `>&file`.
 pub(in crate::pre_write_guard) fn read_only(
@@ -33,20 +47,51 @@ pub(in crate::pre_write_guard) fn read_only(
     escape: Escape,
     held: &[Held],
     hits: &[String],
+    folder: &Path,
 ) -> bool {
-    Check { held, hits }.command(command, escape, 1)
+    Check { held, hits, folder }.command(command, escape, 1)
+}
+
+/// The held file a `textutil` segment `words` writes by its default output (an input's name
+/// with the `-convert` format as its extension, beside it), named or not: `textutil -convert docx
+/// Contract.txt` writes `Contract.docx` ([`textutil_outputs`]).
+pub(in crate::pre_write_guard) fn textutil_writes<'a>(
+    words: &[String],
+    held: &'a [Held],
+) -> Option<&'a Held> {
+    let (program, args) = command_words(words).split_first()?;
+    if program_name(program) != "textutil" {
+        return None;
+    }
+    textutil_outputs(args)?
+        .iter()
+        .find_map(|(out, _)| names_word(out, held, &[]).and_then(Named::file))
 }
 
 /// What [`read_only`] checks against.
 struct Check<'a> {
     held: &'a [Held],
     hits: &'a [String],
+    /// The matter folder.
+    folder: &'a Path,
 }
 
 impl Check<'_> {
-    /// Whether `word` names a held file, by name or as a path-layer hit.
+    /// Whether `word` names a held file: by name, by a wildcard that could match one, or as (a
+    /// part of) a path-layer hit ([`names_word`]).
     fn names(&self, word: &str) -> bool {
-        named(word, self.held).is_some() || self.hits.iter().any(|hit| hit == word)
+        names_word(word, self.held, self.hits).is_some()
+    }
+
+    /// Whether `target` is an existing folder outside the matter, where no held file can be:
+    /// literal, absolute, naming no held file, a folder now, and a child of it resolves outside
+    /// the matter.
+    fn outside(&self, target: &str) -> bool {
+        let path = Path::new(target);
+        self.writable(target)
+            && path.is_absolute()
+            && path.is_dir()
+            && clauseo_matters::matter_path_in(self.folder, &path.join("x")).is_none()
     }
 
     /// Whether `target`, written to, writes no held file: a literal path naming none.
@@ -83,23 +128,27 @@ impl Check<'_> {
         }
         let free = || !words.iter().any(|word| self.names(word));
         match program_name(program).as_str() {
-            "cat" | "head" | "tail" | "wc" | "strings" => true,
+            "cat" | "head" | "tail" | "wc" | "strings" | "ls" | "stat" | "test" | "["
+            | "shasum" | "md5sum" | "sha1sum" | "sha256sum" | "sha512sum" | "zipinfo" | "diff"
+            | "cmp" | "get-content" | "gc" | "type" | "select-string" | "sls" | "test-path" => true,
             "file" => !args
                 .iter()
                 .any(|arg| short_has(arg, 'C') || long_prefix(arg, "compile")),
-            "unzip" => {
-                let options: Vec<&String> =
-                    args.iter().filter(|arg| arg.starts_with('-')).collect();
-                options
-                    .iter()
-                    .any(|arg| matches!(arg.as_str(), "-l" | "-p" | "-v" | "-lv"))
-                    && options.iter().all(|arg| {
-                        matches!(arg.as_str(), "-l" | "-p" | "-v" | "-lv" | "-q" | "-qq")
-                    })
-            }
-            "textutil" => {
-                args.iter().any(|arg| arg == "-stdout") && !args.iter().any(|arg| arg == "-output")
-            }
+            "unzip" => unzip_reads(args, |folder| self.writable(folder)),
+            "textutil" => textutil_outputs(args).is_some_and(|outputs| {
+                outputs.iter().all(|(out, given)| {
+                    if *given {
+                        self.writable(out)
+                    } else {
+                        !out.contains(['$', '`']) && !self.names(out)
+                    }
+                })
+            }),
+            "cp" => cp_reads(
+                args,
+                |destination| self.writable(destination),
+                |destination| self.outside(destination),
+            ),
             "pandoc" => pandoc_reads(args, |out| self.writable(out)),
             "stetdoc" => stetdoc(words, self.held, self.hits) == Stetdoc::Fine,
             "sh" | "bash" | "zsh" | "dash" | "ksh" if depth > 0 => {
@@ -120,7 +169,7 @@ impl Check<'_> {
             }
             // Filters, then the neutral commands.
             "grep" | "cut" | "tr" | "nl" | "column" | "cd" | "pushd" | "popd" | "echo" | "pwd"
-            | "ls" | "true" => free(),
+            | "true" => free(),
             "rg" => {
                 free()
                     && !args
@@ -202,58 +251,6 @@ fn long_prefix(arg: &str, option: &str) -> bool {
     arg.strip_prefix("--")
         .map(|long| long.split('=').next().unwrap_or(long))
         .is_some_and(|name| !name.is_empty() && option.starts_with(name))
-}
-
-/// The pandoc options that write a file or run code; Haskell's `GetOpt` takes any prefix of a
-/// long option.
-const PANDOC_REFUSED: [&str; 8] = [
-    "extract-media",
-    "filter",
-    "lua-filter",
-    "defaults",
-    "data-dir",
-    "log",
-    "pdf-engine",
-    "pdf-engine-opt",
-];
-
-/// Whether pandoc with `args` only reads and writes stdout or a file `writable` allows: no
-/// option ([`PANDOC_REFUSED`], any prefix) that writes or runs code, no short group with `F`,
-/// `L` or `d`; each output (`--output`, any prefix, `=value` or the next word; a short group
-/// with `o`, the rest of the group or the next word) `writable`. `--` ends the options.
-fn pandoc_reads(args: &[String], writable: impl Fn(&str) -> bool) -> bool {
-    let mut iter = args.iter();
-    while let Some(arg) = iter.next() {
-        if arg == "--" {
-            break;
-        }
-        let output = if let Some(long) = arg.strip_prefix("--") {
-            let (name, value) = long.split_once('=').unwrap_or((long, ""));
-            if PANDOC_REFUSED.iter().any(|option| long_prefix(arg, option)) {
-                return false;
-            }
-            "output".starts_with(name).then_some(value)
-        } else if let Some(flags) = arg.strip_prefix('-').filter(|flags| !flags.is_empty()) {
-            if flags.contains(['F', 'L', 'd']) {
-                return false;
-            }
-            flags.split_once('o').map(|(_, value)| value)
-        } else {
-            None
-        };
-        let Some(value) = output else {
-            continue;
-        };
-        let value = if value.is_empty() {
-            iter.next().map_or("", String::as_str)
-        } else {
-            value
-        };
-        if !value.is_empty() && !writable(value) {
-            return false;
-        }
-    }
-    true
 }
 
 #[cfg(test)]

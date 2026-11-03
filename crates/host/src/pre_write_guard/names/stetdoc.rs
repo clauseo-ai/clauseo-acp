@@ -1,6 +1,6 @@
 //! What a `stetdoc` command writes, read with its real option arity (stetdoc v0.9.1's `cli.rs`).
 
-use super::{Held, named, program_name};
+use super::{Held, Named, named, names_word, program_name};
 use crate::pre_write_guard::shell::command_words;
 
 /// What a `stetdoc` segment does to held files.
@@ -149,12 +149,7 @@ pub(in crate::pre_write_guard) fn stetdoc<'a>(
     let Some((sub, rest)) = args.split_first() else {
         return Stetdoc::Fine;
     };
-    // `Some(None)` for a word the path layer found, `Some(Some(file))` for one naming `file`.
-    let names = |word: &str| -> Option<Option<&'a Held>> {
-        named(word, held)
-            .map(Some)
-            .or_else(|| hits.iter().any(|hit| hit == word).then_some(None))
-    };
+    let names = |word: &str| names_word(word, held, hits).map(Named::file);
     let names_any = args.iter().find_map(|arg| names(arg));
     let Some((valued, flags)) = options(sub) else {
         return match *sub {

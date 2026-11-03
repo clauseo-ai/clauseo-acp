@@ -208,8 +208,9 @@ fn redirections_continuations_and_ansi_c_quotes_name_a_held_file() {
 }
 
 /// Review round 1: a huge word, or a Write with a huge path, is read in time proportional to its
-/// length, well inside the hook's 10 s (measured in the PR body; the bound is loose for debug
-/// builds on a loaded runner).
+/// length. The six calls take 3.3–3.7 s in a debug build here; the quadratic resolution this
+/// guards against took 17.5–28 s. The 12 s bound leaves over 3× for a slow, shared runner and
+/// still fails the quadratic case.
 #[test]
 fn a_huge_word_or_path_is_read_quickly() {
     let (done, finished) = std::sync::mpsc::channel();
@@ -231,12 +232,12 @@ fn a_huge_word_or_path_is_read_quickly() {
         assert_refused(&fx, "Bash", &bash(&format!("echo hi > {back}")));
         done.send(()).unwrap();
     });
-    let outcome = finished.recv_timeout(std::time::Duration::from_secs(5));
+    let outcome = finished.recv_timeout(std::time::Duration::from_secs(12));
     if outcome.is_ok() || outcome == Err(std::sync::mpsc::RecvTimeoutError::Disconnected) {
         // Done, or a failed assertion: joining passes the panic on.
         worker.join().unwrap();
     }
-    assert_eq!(outcome, Ok(()), "the guard took over 5 s");
+    assert_eq!(outcome, Ok(()), "the guard took over 12 s");
 }
 
 /// Review round 1: a symlink in the matter pointing deeper into it. The OS reads `l/..` as the
