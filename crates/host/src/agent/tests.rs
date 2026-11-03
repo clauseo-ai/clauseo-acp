@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -346,6 +347,41 @@ fn stop_runs_the_ladder_and_reports_the_step() {
     assert_eq!((step, code), (StopStep::StdinClosed, Some(0)));
     link.stop();
     drop(clock);
+}
+
+/// A call the agent answered just before it exited posts its answer before `Ended`, however
+/// late its task runs: here the task, holding its fence, waits after the answer until the owner
+/// has seen the exit and the pipes end. Before the owner waited for fenced calls, `Ended` was
+/// posted then, ahead of the answer, and a Codex prompt's limit error read as the agent's exit.
+#[test]
+fn a_call_answered_before_the_exit_posts_before_ended() {
+    let (mut pool, link, clock, mut rx) =
+        run_agent(&fake_agent(scenario("initialize-then-exit")), Vec::new());
+    let answered = Rc::new(Cell::new(false));
+    let (client, fence, calls) = (link.client.clone(), link.fence(), Rc::clone(&link.calls));
+    let task_answered = Rc::clone(&answered);
+    pool.spawner()
+        .spawn_local(async move {
+            let info = client.initialize().await;
+            // Only once the owner is past the exit and the pipes, waiting for this call.
+            futures::future::poll_fn(|cx| {
+                if calls.owner_waits() {
+                    std::task::Poll::Ready(())
+                } else {
+                    cx.waker().wake_by_ref();
+                    std::task::Poll::Pending
+                }
+            })
+            .await;
+            fence.await;
+            assert!(info.is_ok(), "{info:?}");
+            task_answered.set(true);
+        })
+        .unwrap();
+    let ended = pool.run_until(ended(&mut rx));
+    assert!(answered.get(), "Ended came before the answer");
+    assert!(matches!(ended, Ended::Exited(_)), "{ended:?}");
+    drop((link, clock));
 }
 
 #[test]
