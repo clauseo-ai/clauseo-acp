@@ -1792,7 +1792,7 @@ export type HostQuery =
 ({ list_threads: {
 	/**  The matter. */
 	matter: MatterId,
-} }) & { compare_versions?: never; list_papers?: never; page_entries?: never; preview_restore?: never; read_blob?: never } | 
+} }) & { compare_versions?: never; list_papers?: never; page_entries?: never; preview_restore?: never; read_blob?: never; search?: never } | 
 /**
  *  Older entries of a stream's view, for scrolling back: up to `limit` entries with an
  *  `order` below `before_order`, newest last.
@@ -1804,7 +1804,7 @@ export type HostQuery =
 	before_order?: Seq,
 	/**  How many. */
 	limit: PageLimit,
-} }) & { compare_versions?: never; list_papers?: never; list_threads?: never; preview_restore?: never; read_blob?: never } | 
+} }) & { compare_versions?: never; list_papers?: never; list_threads?: never; preview_restore?: never; read_blob?: never; search?: never } | 
 /**
  *  The files that differ between two versions of a matter, or between a version and the
  *  matter's folder as it is now when `to` is `None` (nothing is stored).
@@ -1816,7 +1816,7 @@ export type HostQuery =
 	from: CheckpointId,
 	/**  The newer version; `None` (missing or `null` in JSON) is the folder now. */
 	to?: CheckpointId,
-} }) & { list_papers?: never; list_threads?: never; page_entries?: never; preview_restore?: never; read_blob?: never } | 
+} }) & { list_papers?: never; list_threads?: never; page_entries?: never; preview_restore?: never; read_blob?: never; search?: never } | 
 /**  What restoring a version would do now, file by file. Writes nothing. */
 ({ preview_restore: {
 	/**  The matter. */
@@ -1825,7 +1825,7 @@ export type HostQuery =
 	checkpoint: CheckpointId,
 	/**  The whole matter or chosen files, as `RestoreVersion` takes it. */
 	scope: RestoreRequest,
-} }) & { compare_versions?: never; list_papers?: never; list_threads?: never; page_entries?: never; read_blob?: never } | 
+} }) & { compare_versions?: never; list_papers?: never; list_threads?: never; page_entries?: never; read_blob?: never; search?: never } | 
 /**  Part of a blob's text. */
 ({ read_blob: {
 	/**  The blob. */
@@ -1834,21 +1834,26 @@ export type HostQuery =
 	offset: Count,
 	/**  How many bytes. */
 	len: ReadLen,
-} }) & { compare_versions?: never; list_papers?: never; list_threads?: never; page_entries?: never; preview_restore?: never } | 
+} }) & { compare_versions?: never; list_papers?: never; list_threads?: never; page_entries?: never; preview_restore?: never; search?: never } | 
 /**  The display settings in force, and the keys the firm's policy locks. */
 "get_settings" | 
 /**  The files of a matter's folder as it is now, for its file list (`QueryResult::Papers`). */
 ({ list_papers: {
 	/**  The matter. */
 	matter: MatterId,
-} }) & { compare_versions?: never; list_threads?: never; page_entries?: never; preview_restore?: never; read_blob?: never } | 
+} }) & { compare_versions?: never; list_threads?: never; page_entries?: never; preview_restore?: never; read_blob?: never; search?: never } | 
 /**  The agents in the settings, for a new thread's choice of agent. */
 "list_agents" | 
 /**
  *  Where `MatterSource::DefaultLocation` makes new matters, for display: the form's folder
  *  line before a pick. JSON: `"get_default_location"`.
  */
-"get_default_location";
+"get_default_location" | 
+/**
+ *  Search inside matters and conversations (decision 0043). Answered
+ *  `QueryResult::Search`.
+ */
+({ search: SearchRequest }) & { compare_versions?: never; list_papers?: never; list_threads?: never; page_entries?: never; preview_restore?: never; read_blob?: never };
 
 /**
  *  What the first checkpoint of a folder matter found. Counts are at most `u32::MAX`; `bytes`
@@ -2745,19 +2750,19 @@ export type PromptCapabilities = {
 /**  A query's answer. */
 export type QueryResult = 
 /**  For `ListMatters`. */
-({ matters: MatterSummary[] }) & { agents?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; papers?: never; restore_preview?: never; settings?: never; threads?: never } | 
+({ matters: MatterSummary[] }) & { agents?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; papers?: never; restore_preview?: never; search?: never; settings?: never; threads?: never } | 
 /**  For `ListThreads`. */
-({ threads: ThreadSummary[] }) & { agents?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; matters?: never; papers?: never; restore_preview?: never; settings?: never } | 
+({ threads: ThreadSummary[] }) & { agents?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; matters?: never; papers?: never; restore_preview?: never; search?: never; settings?: never } | 
 /**  For `PageEntries`, newest last; fewer than `limit` means none older is left. */
-({ entries: ViewEntry[] }) & { agents?: never; blob?: never; default_location?: never; file_changes?: never; matters?: never; papers?: never; restore_preview?: never; settings?: never; threads?: never } | 
+({ entries: ViewEntry[] }) & { agents?: never; blob?: never; default_location?: never; file_changes?: never; matters?: never; papers?: never; restore_preview?: never; search?: never; settings?: never; threads?: never } | 
 /**  For `CompareVersions`. */
-({ file_changes: FileChange[] }) & { agents?: never; blob?: never; default_location?: never; entries?: never; matters?: never; papers?: never; restore_preview?: never; settings?: never; threads?: never } | 
+({ file_changes: FileChange[] }) & { agents?: never; blob?: never; default_location?: never; entries?: never; matters?: never; papers?: never; restore_preview?: never; search?: never; settings?: never; threads?: never } | 
 /**  For `PreviewRestore`. */
-({ restore_preview: RestorePreview }) & { agents?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; matters?: never; papers?: never; settings?: never; threads?: never } | 
+({ restore_preview: RestorePreview }) & { agents?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; matters?: never; papers?: never; search?: never; settings?: never; threads?: never } | 
 /**  For `ReadBlob`. */
-({ blob: BlobRange }) & { agents?: never; default_location?: never; entries?: never; file_changes?: never; matters?: never; papers?: never; restore_preview?: never; settings?: never; threads?: never } | 
+({ blob: BlobRange }) & { agents?: never; default_location?: never; entries?: never; file_changes?: never; matters?: never; papers?: never; restore_preview?: never; search?: never; settings?: never; threads?: never } | 
 /**  For `GetSettings`. */
-({ settings: SettingsView }) & { agents?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; matters?: never; papers?: never; restore_preview?: never; threads?: never } | 
+({ settings: SettingsView }) & { agents?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; matters?: never; papers?: never; restore_preview?: never; search?: never; threads?: never } | 
 /**
  *  For `ListPapers`: the matter's folder as it is now, by the rules a checkpoint versions
  *  it by (the same excluded names, size cap and cloud-only files).
@@ -2782,11 +2787,16 @@ export type QueryResult =
 	 *  where `<folder>/` sorts).
 	 */
 	truncated: boolean,
-} }) & { agents?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; matters?: never; restore_preview?: never; settings?: never; threads?: never } | 
+} }) & { agents?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; matters?: never; restore_preview?: never; search?: never; settings?: never; threads?: never } | 
 /**  For `ListAgents`: one per settings agent whose id is a valid [`AgentId`], sorted by id. */
-({ agents: AgentSummary[] }) & { blob?: never; default_location?: never; entries?: never; file_changes?: never; matters?: never; papers?: never; restore_preview?: never; settings?: never; threads?: never } | 
+({ agents: AgentSummary[] }) & { blob?: never; default_location?: never; entries?: never; file_changes?: never; matters?: never; papers?: never; restore_preview?: never; search?: never; settings?: never; threads?: never } | 
 /**  For `GetDefaultLocation`. JSON: `{"default_location": {"display": "..."}}`. */
-({ default_location: DefaultLocation }) & { agents?: never; blob?: never; entries?: never; file_changes?: never; matters?: never; papers?: never; restore_preview?: never; settings?: never; threads?: never };
+({ default_location: DefaultLocation }) & { agents?: never; blob?: never; entries?: never; file_changes?: never; matters?: never; papers?: never; restore_preview?: never; search?: never; settings?: never; threads?: never } | 
+/**
+ *  For `Search`: a page of hits, or `Cancelled` when a newer search from the same window
+ *  came first.
+ */
+({ search: SearchAnswer }) & { agents?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; matters?: never; papers?: never; restore_preview?: never; settings?: never; threads?: never };
 
 /**  A queued prompt's content was replaced; the turn keeps its id and its place. */
 export type QueuedPromptEdited = {
@@ -2943,6 +2953,126 @@ export type RevealTarget =
 /**  Clauseo's app data folder: the event store, the version store and the settings. */
 "app_data";
 
+/**  A search's answer. */
+export type SearchAnswer = 
+/**  The hits. */
+{ page: SearchPage } | 
+/**
+ *  A newer search from the same window came first; this one has no hits. JSON:
+ *  `"cancelled"`.
+ */
+"cancelled";
+
+/**  One hit. */
+export type SearchHit = {
+	/**  What matched. */
+	kind: SearchKind,
+	/**  The matter it belongs to. */
+	matter: MatterId,
+	/**  The matter's name. */
+	matter_title?: string,
+	/**  The conversation, for every kind but a matter title and a file name. */
+	thread?: ThreadId,
+	/**  The conversation's title, when it has one. */
+	thread_title?: string,
+	/**
+	 *  For a prompt, an answer or a tool title: the `order` of its entry in the conversation's
+	 *  view (`ViewEntry`), which `PageEntries` pages by.
+	 */
+	order?: Seq,
+	/**  For a file name: the document's path in the matter folder. */
+	path?: string,
+	/**  When the text was written. */
+	at: Timestamp,
+	/**  The text around the match, in runs; joined in order they are the snippet. */
+	snippet: SnippetPart[],
+};
+
+/**  What a hit matched. */
+export type SearchKind = 
+/**  A matter's name. */
+"matter_title" | 
+/**  A conversation's title. */
+"thread_title" | 
+/**  The lawyer's prompt. */
+"prompt" | 
+/**  One agent message of kind answer, whole once its turn ended. */
+"answer" | 
+/**  A tool call's title. */
+"tool_title" | 
+/**  A document's path in the matter folder. */
+"file_name" | 
+/**  A value from a newer Clauseo that this version does not know. */
+"unknown";
+
+/**  How a page's hits are ordered. */
+export type SearchMode = 
+/**  Newest first: the last word was still being typed. */
+"newest_first" | 
+/**  Best first. */
+"ranked";
+
+/**  One page of hits. */
+export type SearchPage = {
+	/**  The hits, best first when ranked, newest first otherwise. */
+	hits: SearchHit[],
+	/**  The cursor for the next page, when there may be one. */
+	next?: string,
+	/**  How the hits are ordered. */
+	mode: SearchMode,
+	/**
+	 *  While the index is being built, how far it is: the hits come from what is indexed so
+	 *  far.
+	 */
+	indexing?: SearchProgress,
+};
+
+/**  A build of the search index, in conversations. */
+export type SearchProgress = {
+	/**  Conversations indexed so far. */
+	done: number,
+	/**  Conversations to index. */
+	total: number,
+};
+
+/**  One search, as the lawyer typed it. */
+export type SearchRequest = {
+	/**
+	 *  What the lawyer typed. While its last character is not whitespace the last word is
+	 *  still being typed: hits come newest first and that word matches as a prefix. Otherwise
+	 *  hits are ranked.
+	 */
+	query: string,
+	/**  Every matter, or one. */
+	scope: SearchScope,
+	/**  Whether archived conversations' hits are included. */
+	include_archived: boolean,
+	/**  Only these kinds; `None` (missing in JSON) is every kind. An empty list finds nothing. */
+	kinds?: SearchKind[],
+	/**
+	 *  Hits per page: [`DEFAULT_SEARCH_LIMIT`] when `None`, at most [`MAX_SEARCH_LIMIT`]
+	 *  (larger is cut to it, 0 is read as 1).
+	 */
+	limit?: number,
+	/**
+	 *  The `next` of the page before, for the page after it; `None` for the first page. A
+	 *  cursor the host cannot read, or one made for another query, gives the first page.
+	 */
+	cursor?: string,
+	/**
+	 *  The requesting window's count of searches, larger for each newer one. A newer search
+	 *  from the same window stops this one: it is answered `Cancelled`.
+	 */
+	generation: Count,
+};
+
+/**  Where a search looks. */
+export type SearchScope = 
+/**  Every matter on the list. JSON: `"all"`. */
+"all" | 
+/**  One matter. JSON: `{"matter": "<id>"}`. */
+{ matter: MatterId };
+
 /**  An event's position in its stream: gapless, starting at 1, assigned by the host at commit. */
 export type Seq = number;
 
@@ -2995,6 +3125,14 @@ export type SkippedFileReason =
 "cloud_only" | 
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
+
+/**  A run of a hit's snippet. */
+export type SnippetPart = {
+	/**  The text. */
+	text: string,
+	/**  Whether it matched a word of the query. */
+	hit: boolean,
+};
 
 /**  Why limits are stale. */
 export type StaleReason = 

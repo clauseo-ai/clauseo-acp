@@ -242,3 +242,30 @@ fn no_window_sends_the_privacy_switches_or_the_first_act_yet() {
         }
     }
 }
+
+/// Search (0043) is main's: the settings window and any other window are refused it before the
+/// host sees it, and main gets a page.
+#[test]
+fn search_is_main_windows_alone() {
+    let scratch = Scratch::new("admit-search", &[]);
+    let host = scratch.start(Vec::new());
+    let bridge = host.bridge();
+    let search = read(json!({"search": {
+        "query": "lease",
+        "scope": "all",
+        "include_archived": false,
+        "generation": 1
+    }}));
+    for label in [SETTINGS, "other"] {
+        let refusal = block_on(bridge.query(label, search.clone())).unwrap_err();
+        assert_eq!(refusal.code(), ErrorCode::CommandInvalid, "{label}");
+    }
+    let answer = block_on(bridge.query(MAIN, search)).unwrap();
+    assert!(
+        matches!(
+            answer,
+            QueryResult::Search(clauseo_protocol::SearchAnswer::Page(_))
+        ),
+        "{answer:?}"
+    );
+}
