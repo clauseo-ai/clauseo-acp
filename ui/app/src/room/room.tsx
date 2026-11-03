@@ -73,8 +73,7 @@ import type { Drafts } from "./thread/session.ts";
 import { Work } from "./thread/work.tsx";
 import { tauriWindowControls, type WindowControls } from "../transport/window-controls.ts";
 import { useWindowFrame } from "../window/use-window-frame.ts";
-import { browserInstallOf } from "./browser-install.ts";
-import { ToolLineContext } from "./tool-line-room.ts";
+import { ToolLineContext } from "./tool-line-context.ts";
 
 /** H13's line atop a retried conversation, loaded only when one opens. */
 const RetriedLine = lazy(() =>
@@ -325,11 +324,11 @@ function RoomFrame({
       ? undefined
       : { kind: kindOf(openAgent, talks.agents), name: threadName ?? openAgent };
   const plan = planOfOpen === null ? "" : th(w.lang, "Uses your {name} plan", { name: planOfOpen });
-  // the tool line's room: the plan's name its words use, Settings, and the app's Chrome download (browser-install.ts)
-  const [install] = useState(() => browserInstallOf(transport));
+  // the tool line's room: the plan's name its words use, Settings, and the transport whose Chrome download it offers
+  // (browser-install.ts, made by the line's chunk once it is in)
   const toolRoom = useMemo(
-    () => ({ plan: planOfOpen ?? "", openSettings, install }),
-    [planOfOpen, openSettings, install],
+    () => ({ plan: planOfOpen ?? "", openSettings, transport }),
+    [planOfOpen, openSettings, transport],
   );
   // a matter's name as filed is English in both languages, the scratch matter's is the room's own; with no matter, the
   // frame's words stand in its place
