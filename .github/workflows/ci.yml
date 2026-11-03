@@ -284,6 +284,22 @@ jobs:
         with:
           persist-credentials: false
 
+      # Windows: the temp folder on D:, beside the workspace and target. The runner's TEMP is on
+      # C:, the OS disk, about twice as slow at creating and deleting small files as D:, and every
+      # test that makes a temp folder (std::env::temp_dir reads TMP, then TEMP) pays for it: one
+      # run of the workspace's nextest took 223 s with TEMP on C: and 125 s with it on D:
+      # (win-disk-exp, run 41687473859). The disk stalls that time out Windows tests hit the tests
+      # that touch the disk; this moves their files off C:.
+      - name: Put the temp folder on drive D (Windows)
+        if: env.BUILD == 'true' && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $t = Join-Path $env:RUNNER_TEMP 't'
+          New-Item -ItemType Directory -Force $t | Out-Null
+          "TMP=$t" >> $env:GITHUB_ENV
+          "TEMP=$t" >> $env:GITHUB_ENV
+          "temp folder: $t"
+
       - name: Install the Rust toolchain from rust-toolchain.toml, and the target
         if: env.BUILD == 'true'
         run: |
