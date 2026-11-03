@@ -32,20 +32,26 @@ pub(super) struct Held {
     pub(super) path: MatterPath,
     /// Its last part, folded as [`fold`] does.
     name: String,
+    /// Its last part as stored, only case-folded ([`case`]): a `?` wildcard counts characters,
+    /// which composing changes, so wildcards are matched against this too.
+    stored: String,
 }
 
 impl Held {
     /// The held file at `path`.
     pub(super) fn new(path: MatterPath) -> Self {
-        let name = fold(path.as_str().rsplit('/').next().unwrap_or_default());
-        Self { path, name }
+        let last = path.as_str().rsplit('/').next().unwrap_or_default();
+        let (name, stored) = (fold(last), case(last));
+        Self { path, name, stored }
     }
 }
 
 /// The files of the matter `folder` held open by an Office owner file
-/// ([`clauseo_matters::held_open`], in each folder that has an owner file `~$…`), read breadth
-/// first: no folder whose name starts with `.`, no symlink followed, at most [`MAX_ENTRIES`]
-/// entries. A file held on Windows by a share mode alone (no owner file) is not found here.
+/// ([`clauseo_matters::held_open_beside`], in each folder that has an owner file `~$…`, given
+/// that folder's owner files from this one listing, so a folder of many non-ASCII names is not
+/// listed again per file), read breadth first: no folder whose name starts with `.`, no symlink
+/// followed, at most [`MAX_ENTRIES`] entries. A file held on Windows by a share mode alone (no
+/// owner file) is not found here.
 pub(super) fn held_files(folder: &Path) -> Vec<Held> {
     let root = dunce::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
     let mut held = Vec::new();
@@ -56,7 +62,7 @@ pub(super) fn held_files(folder: &Path) -> Vec<Held> {
             continue;
         };
         let mut files = Vec::new();
-        let mut owned = false;
+        let mut owners: Vec<String> = Vec::new();
         for entry in read.flatten() {
             entries += 1;
             if entries > MAX_ENTRIES {
@@ -73,17 +79,17 @@ pub(super) fn held_files(folder: &Path) -> Vec<Held> {
                     queue.push_back(relative.join(&name));
                 }
             } else if name.starts_with("~$") {
-                owned = true;
+                owners.push(name);
             } else {
                 files.push(name);
             }
         }
-        if !owned {
+        if owners.is_empty() {
             continue;
         }
         for name in files {
             if let Some(path) = MatterPath::from_relative(&relative.join(&name))
-                && clauseo_matters::held_open(&root, &path).is_some()
+                && clauseo_matters::held_open_beside(&root, &path, &owners).is_some()
             {
                 held.push(Held::new(path));
             }
@@ -97,10 +103,15 @@ pub(super) fn held_files(folder: &Path) -> Vec<Held> {
 /// and NTFS would make another file, and refusing is the safe side), and lower case on macOS
 /// and Windows, whose file systems ignore case.
 fn fold(text: &str) -> String {
+    case(text).nfc().collect()
+}
+
+/// `text` lower case on macOS and Windows, whose file systems ignore case; as it is elsewhere.
+fn case(text: &str) -> String {
     if cfg!(any(target_os = "macos", windows)) {
-        text.to_lowercase().nfc().collect()
+        text.to_lowercase()
     } else {
-        text.nfc().collect()
+        text.to_owned()
     }
 }
 
@@ -166,10 +177,13 @@ fn globbed<'a>(word: &str, held: &'a [Held]) -> Option<&'a Held> {
         if !last.contains(['*', '?', '[']) {
             return None;
         }
-        let pattern: Vec<char> = fold(last).chars().collect();
+        let patterns: [Vec<char>; 2] = [fold(last).chars().collect(), case(last).chars().collect()];
         held.iter().find(|file| {
-            let name: Vec<char> = file.name.chars().collect();
-            glob_matches(&pattern, &name)
+            let names: [Vec<char>; 2] =
+                [file.name.chars().collect(), file.stored.chars().collect()];
+            patterns
+                .iter()
+                .any(|pattern| names.iter().any(|name| glob_matches(pattern, name)))
         })
     })
 }

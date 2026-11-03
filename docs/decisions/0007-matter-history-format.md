@@ -212,7 +212,9 @@ form; ext4 (Linux) and NTFS (Windows) keep each form a separate file.
 - A match that refuses compares names composed (NFC) on every OS, with case ignored on macOS and
   Windows, so a name in either form is caught: Word's owner file (`~$…`) beside a document,
   in `held_open` and `held_open_at` (a non-ASCII name the exact stats miss is looked for in the
-  folder's listing), the refused-folder check, `same_or_nested` ("already a matter", a nested
+  folder's listing, read at most once per folder by the guard and capped at 20 000 entries; a
+  listing that fails, or an owner file past the cap, is not found: it fails open, as `held_open`
+  does for any other error), the refused-folder check, `same_or_nested` ("already a matter", a nested
   matter, the agents' data folder) and the host's pre-write guard. On Linux and Windows that may
   refuse a sibling file that only shares the name's letters: the safe side.
 - A match that allows compares as the OS's file system does: byte for byte on Linux, ignoring
