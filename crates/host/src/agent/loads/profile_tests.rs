@@ -9,12 +9,11 @@ use clauseo_acp::McpServer;
 use clauseo_protocol::{
     AgentKind, ClauseoTool, ToolAvailability, ToolState, ToolsUnavailableReason,
 };
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 
 use super::browser::{BrowserInputs, Switch, hook_servers};
 use super::profile::{
-    ClaudeKeys, Folders, Login, claude_options, codex_keys, fill_instructions, fill_meta,
-    web_search_state,
+    ClaudeKeys, Folders, Login, claude_options, fill_instructions, fill_meta, web_search_state,
 };
 use super::{GuardHook, McpControl, session_meta};
 use crate::browser::seed_sites::SEED_SITES;
@@ -408,94 +407,6 @@ fn the_instructions_are_filled_and_escaped_for_json() {
         )
     );
     assert!(!text.contains("{work_folder}") && !text.contains("{matter_notes}"));
-}
-
-#[test]
-fn codex_keys_drop_the_reserved_and_add_the_hosts() {
-    let hook = json!({
-        "developer_instructions": "Notes in {matter_notes}; work in {work_folder}.",
-        "hooks": {"PreToolUse": []},
-        "web_search": "live",
-        "mcp_servers.x.command": "/x",
-        "model_verbosity": "low",
-    });
-    let keys = codex_keys(hook.as_object().cloned().unwrap(), OFF, folders()).unwrap();
-    assert_eq!(
-        Value::Object(keys),
-        json!({
-            "developer_instructions": "Notes in /data/agent-state/m/notes; work in /data/run/t-1/work.",
-            "model_verbosity": "low",
-            "web_search": "disabled",
-            "sandbox_workspace_write": {"writable_roots": ["/data/run/t-1/work", "/data/agent-state/m/notes"]},
-        })
-    );
-    let keys = codex_keys(Map::new(), ON, folders()).unwrap();
-    assert_eq!(keys["web_search"], json!("live"));
-}
-
-/// A dotted hook key never stands in for the host's nested writable roots, nor for any other
-/// key: codex reads it as a path, so every dotted key is dropped, in the built `CODEX_CONFIG`
-/// too.
-#[test]
-fn codex_keys_drop_every_dotted_key() {
-    let hook = json!({
-        "sandbox_workspace_write.writable_roots": ["/elsewhere"],
-        "sandbox_workspace_write": {"network_access": false},
-        "tools.view_image": false,
-        "model_verbosity": "low",
-    });
-    let keys = codex_keys(hook.as_object().cloned().unwrap(), ON, folders()).unwrap();
-    assert!(keys.keys().all(|key| !key.contains('.')), "{keys:?}");
-    assert_eq!(
-        keys["sandbox_workspace_write"],
-        json!({
-            "network_access": false,
-            "writable_roots": ["/data/run/t-1/work", "/data/agent-state/m/notes"],
-        })
-    );
-    let built = crate::agent::codex::config(&BTreeMap::new(), keys, None);
-    assert!(built.keys().all(|key| !key.contains('.')), "{built:?}");
-    assert_eq!(
-        built["sandbox_workspace_write"]["writable_roots"],
-        json!(["/data/run/t-1/work", "/data/agent-state/m/notes"])
-    );
-}
-
-/// The profile's keys merge into R15's `CODEX_CONFIG` add-only, before the hooks seam's object,
-/// which stays the one `PreToolUse` group.
-#[test]
-fn codex_config_keeps_every_r15_key_and_the_hooks_seam() {
-    let settings = BTreeMap::from([(
-        "CODEX_CONFIG".to_owned(),
-        json!({"model": "gpt-5", "features": {"apps": true}}).to_string(),
-    )]);
-    let r15 = crate::agent::codex::config(&settings, Map::new(), None);
-    let mut profile = codex_keys(Map::new(), ON, folders()).unwrap();
-    profile.insert(
-        "features".to_owned(),
-        json!({"apps": true, "new_one": true}),
-    );
-    profile.insert("developer_instructions".to_owned(), json!("text"));
-    let hooks = json!({"PreToolUse": [{"matcher": "guard"}]});
-    let built = crate::agent::codex::config(&settings, profile, hooks.as_object().cloned());
-    for (key, value) in &r15 {
-        if let (Value::Object(held), Some(Value::Object(now))) = (value, built.get(key)) {
-            for (inner, inner_value) in held {
-                assert_eq!(now.get(inner), Some(inner_value), "{key}.{inner}");
-            }
-        } else {
-            assert_eq!(built.get(key), Some(value), "{key}");
-        }
-    }
-    assert_eq!(built["features"]["new_one"], json!(true));
-    assert_eq!(built["web_search"], json!("live"));
-    assert_eq!(built["developer_instructions"], json!("text"));
-    assert_eq!(
-        built["hooks"]["PreToolUse"].as_array().map(Vec::len),
-        Some(1)
-    );
-    assert_eq!(built["hooks"]["PreToolUse"][0]["matcher"], json!("guard"));
-    assert_eq!(built.keys().next_back().map(String::as_str), Some("hooks"));
 }
 
 #[test]

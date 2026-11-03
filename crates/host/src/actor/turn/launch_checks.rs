@@ -100,12 +100,33 @@ impl RunFolders {
                 ));
             }
         }
+        // The notes folder may be an earlier session's: it is set to 0700 whatever it was.
+        #[cfg(unix)]
+        if let Err(error) = crate::write::make_private_dir(&self.notes) {
+            self.remove();
+            return Err(Error::refused(
+                clauseo_protocol::ErrorCode::AgentLaunchFailed,
+                format!(
+                    "cannot make the folder {} private: {error}",
+                    self.notes.display()
+                ),
+            ));
+        }
         Ok(())
     }
 
     /// Removes this launch's run folder and all it holds, when it is a real folder; the notes
-    /// folder stays. File system calls: off the actor.
+    /// folder stays. Only the folder the host made: the path as built (`<data>/run/<session id>`),
+    /// never canonicalized, removed with `remove_dir_all`, which removes a link inside and never
+    /// follows it. Called once the agent's process has exited, or when it never started. File
+    /// system calls: off the actor.
     pub(crate) fn remove(&self) {
+        let ours = self.root.file_name() == Some(std::ffi::OsStr::new(&self.key.id()))
+            && self.root.parent().and_then(Path::file_name) == Some(std::ffi::OsStr::new("run"));
+        if !ours {
+            tracing::warn!(folder = %self.root.display(), "not a run folder the host made; it stays");
+            return;
+        }
         if crate::write::is_real_dir(&self.root) {
             remove_tree(&self.root);
         }
