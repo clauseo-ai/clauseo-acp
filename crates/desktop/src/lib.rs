@@ -140,7 +140,7 @@ pub fn run() -> tauri::Result<()> {
     let builder = builder
         .menu(settings_window::app_menu)
         .on_menu_event(|app, event| settings_window::on_menu_event(app, event.id().as_ref()));
-    let app = builder
+    let builder = builder
         // First, so a second launch ends before any other plugin starts.
         .plugin_rust_only(tauri_plugin_single_instance::init(
             |app, _args, _cwd| {
@@ -148,10 +148,13 @@ pub fn run() -> tauri::Result<()> {
             },
         ))
         // No URL scheme yet: the scheme is not decided.
-        .plugin_rust_only(tauri_plugin_deep_link::init())
-        // No endpoints, and an empty `pubkey` in tauri.conf.json: it never finds or installs an
-        // update.
-        .plugin_rust_only(tauri_plugin_updater::Builder::new().build())
+        .plugin_rust_only(tauri_plugin_deep_link::init());
+    // No endpoints, and an empty `pubkey` in tauri.conf.json: it never finds or installs an
+    // update. Linux is left out: it updates through its package manager (R23), so the plugin
+    // never runs there.
+    #[cfg(not(target_os = "linux"))]
+    let builder = builder.plugin_rust_only(tauri_plugin_updater::Builder::new().build());
+    let app = builder
         // Not decorations: the frame is the room's (window_frame.rs), never a saved one.
         .plugin_rust_only(
             tauri_plugin_window_state::Builder::new()
