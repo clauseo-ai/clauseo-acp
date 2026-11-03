@@ -83,6 +83,10 @@ pub struct InstallConfig {
     /// back, and can see every host a download looked up.
     #[cfg(feature = "test-support")]
     pub resolver: Option<crate::TestResolver>,
+    /// Tests only: lets downloads and the mirror use plain `http://`, for the loopback test
+    /// registry. Outside `test-support` the field does not exist, so every download is https.
+    #[cfg(feature = "test-support")]
+    pub allow_http_for_tests: bool,
 }
 
 /// Where to look for a Node the user already has: each folder of `path` (the `PATH` value),

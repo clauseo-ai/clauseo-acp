@@ -86,7 +86,9 @@ impl Fetcher {
     /// A client for `agent`'s install. The proxy is `install.proxy`, else `system_proxy` (the
     /// OS's static setting, `host:port`, when `retry` asked for it), else none: ureq's own read
     /// of `HTTPS_PROXY` is turned off, since the caller has already chosen. The TLS roots are
-    /// `install.ca_certs[agent]`'s certificates when it is set, else the OS's trust store.
+    /// `install.ca_certs[agent]`'s certificates when it is set, else the OS's trust store. Every
+    /// request and redirect must be https (ureq's `https_only`), and a mirror that is not https
+    /// is refused here.
     pub(crate) fn new(
         install: &InstallConfig,
         agent: &AgentId,
@@ -94,6 +96,16 @@ impl Fetcher {
         data_dir: &Path,
     ) -> Result<Fetcher, FetchError> {
         let fail = |detail: &str| FetchError::new(FetchKind::Failed, None, None, detail, data_dir);
+        #[cfg(feature = "test-support")]
+        let https_only = !install.allow_http_for_tests;
+        #[cfg(not(feature = "test-support"))]
+        let https_only = true;
+        if https_only
+            && let Some(mirror) = &install.registry
+            && !is_https(mirror)
+        {
+            return Err(fail("the mirror setting is not an https:// URL"));
+        }
         let proxy = match (install.proxy.as_deref(), system_proxy) {
             (Some(proxy), _) => Some(proxy.to_owned()),
             (None, Some(system)) if system.contains("://") => Some(system.to_owned()),
@@ -113,6 +125,7 @@ impl Fetcher {
         };
         let config = Config::builder()
             .http_status_as_error(false)
+            .https_only(https_only)
             .max_redirects(MAX_REDIRECTS)
             .timeout_connect(Some(CONNECT_TIMEOUT))
             .timeout_recv_response(Some(READ_TIMEOUT))
@@ -326,6 +339,13 @@ fn receive(
     }
     write::rename(part, &job.dest).map_err(|err| at.io(&err))?;
     Ok(received)
+}
+
+/// Whether `url` starts with `https://`, in any case.
+fn is_https(url: &str) -> bool {
+    url.trim()
+        .get(..8)
+        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("https://"))
 }
 
 /// The detail for a web page where a file should be.

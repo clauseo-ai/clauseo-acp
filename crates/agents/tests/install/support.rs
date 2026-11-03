@@ -288,6 +288,7 @@ impl Fixture {
         let mut config = AgentsConfig::new(data.path().to_owned(), platform());
         config.snapshot = snapshot(base, node_entry(None), 10_000);
         config.install.resolver = Some(resolver);
+        config.install.allow_http_for_tests = true;
         config.node_search = user_node_search();
         config.clock = Arc::new(StepClock::default());
         Fixture {
