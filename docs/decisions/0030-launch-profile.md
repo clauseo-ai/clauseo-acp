@@ -389,6 +389,25 @@ two dependencies, `profile` and `tracing`.
 - **A slow stetdoc is bounded at 3 s** at start-up (`STETDOC_START_LIMIT`), within stetdoc's own
   10 s per run (`RUN_LIMIT`).
 
+### Tool switches over the wire
+
+Added by the R21 follow-up. The lawyer's two switches, `tools.web_search` and `tools.browser`,
+change from the settings window as `ui` does.
+
+- **Command.** `HostCommand::SetToolSettings { patch: ToolsPatch }` sets the fields the patch
+  names, each optional, and leaves the rest. Unknown fields are refused. It answers `Done`, and
+  every app subscriber gets `SettingsChanged`. The settings window sends it, and the main window
+  admits it as it admits `SetUiSettings`.
+- **View.** `SettingsView.tools: ToolsSettingsView { web_search, browser }` carries the effective
+  values in `GetSettings` and `SettingsChanged`.
+- **Lock.** `Effective::apply_tools_patch` refuses the whole patch with `settings.locked` when it
+  names a tool key policy sets, and then writes nothing. Otherwise it writes the `tools` section
+  of `settings.json` (write first, then memory), as `apply_ui_patch` writes `ui`.
+- **Next session start.** A session reads the switches once, at its start (`switches` in
+  `actor/turn/profile_loads.rs`). A change reaches the next session started. A session already
+  running keeps its tools: its header keeps what it held (`actor/header_tools.rs`), and nothing
+  re-reads the switches mid-session.
+
 ### Deviations from the brief (PR-A)
 
 - **The skills API.** The brief's `write_skills(stetdoc, claude_dir, codex_home)` method is

@@ -79,6 +79,9 @@
 //! - The display settings: `HostQuery::GetSettings` reads them and `HostCommand::SetUiSettings`
 //!   changes them through `Effective::apply_ui_patch`, on the actor; a patch naming a key policy
 //!   locks is `settings.locked`. `docs/decisions/0017-settings-over-the-wire.md` records it.
+//!   The tool switches are `SetToolSettings` through `Effective::apply_tools_patch`, the same
+//!   way; a session reads them at its start, so a change reaches the next session
+//!   (`docs/decisions/0030-launch-profile.md`, "Tool switches over the wire").
 //! - [`session_folder`]: the canonical spelling of a matter folder that an agent session
 //!   works in (its process's folder and its `cwd`), for whatever else must compare with it.
 //! - [`Error`] wraps the errors of `protocol`, `store`, `matters`, `process`, `acp`, `reducer`

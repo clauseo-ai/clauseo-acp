@@ -6,6 +6,11 @@
 //! The wire types mirror `clauseo-settings`' `ui` section. Every conversion here is an
 //! exhaustive match, so a value added to one side and not the other does not compile; the
 //! mirror test in `tests/host/settings.rs` also holds the keys and the JSON names together.
+//! The tool switches (`tools`, `SetToolSettings`) are in `tools.rs`, beside this file's UI code.
+
+mod tools;
+
+pub(super) use tools::set_tool_settings;
 
 use clauseo_protocol::{
     CommandOutcome, ErrorCode, HostEvent, Language, Lite, Motion, SettingsView, Theme, UiPatch,
@@ -19,7 +24,7 @@ use super::{Actor, Tag};
 use crate::error::Error;
 use crate::pipeline::Draft;
 
-/// The display settings in force and every key policy locks, sorted.
+/// The display settings in force, the tool switches in force, and every key policy locks, sorted.
 pub(crate) fn view(effective: &Effective) -> SettingsView {
     let ui = &effective.settings().ui;
     SettingsView {
@@ -30,6 +35,7 @@ pub(crate) fn view(effective: &Effective) -> SettingsView {
             lite: lite_out(ui.lite),
             motion: motion_out(ui.motion),
         },
+        tools: tools::view(effective),
         locked: effective.locked().map(str::to_owned).collect(),
     }
 }
@@ -52,8 +58,12 @@ fn apply(actor: &mut Actor, ctx: &CommandCtx, patch: &UiPatch) -> Result<(), Err
         let changed = HostEvent::SettingsChanged(view(&actor.effective));
         super::app::publish(actor, &changed);
     }
-    // The receipt makes a repeat of the command answer `Done` without writing again. The
-    // settings live in `settings.json`, not the log, so the commit holds the receipt alone.
+    receipt(actor, ctx)
+}
+
+/// The receipt of a settings command: a repeat of the command answers `Done` without writing
+/// again. The settings live in `settings.json`, not the log, so the commit holds the receipt alone.
+pub(super) fn receipt(actor: &mut Actor, ctx: &CommandCtx) -> Result<(), Error> {
     let outcome = CommandOutcome::Done;
     let mut draft = Draft::new();
     draft.receipt(ctx.receipt(None, outcome, actor.now().wall));

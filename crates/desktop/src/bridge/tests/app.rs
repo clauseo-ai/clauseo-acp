@@ -4,7 +4,7 @@
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::Duration;
 
-use clauseo_protocol::{SettingsView, Theme, UiPatch};
+use clauseo_protocol::{SettingsView, Theme, ToolsPatch, ToolsSettingsView, UiPatch};
 
 use super::*;
 use crate::test_support::{Messages, STEP_WAIT, collector};
@@ -198,6 +198,38 @@ fn a_reload_drops_the_limits_feed() {
     );
     assert_eq!(old.limits_received(), 1);
     assert_eq!(old.drain(), Vec::<String>::new());
+}
+
+/// The settings window's `SetToolSettings` reaches both windows' app feeds as `settings_changed`
+/// carrying the switches, as a `SetUiSettings` does, and changes the switch it names alone. The
+/// settings window gets no list with it.
+#[test]
+fn a_tool_switch_from_the_settings_window_reaches_both_windows() {
+    let scratch = Scratch::new("app-tools", &[]);
+    let host = scratch.start(Vec::new());
+    let bridge = host.bridge();
+    let (main_channel, main) = collector();
+    let (settings_channel, settings_page) = collector();
+    block_on(bridge.open_stream(MAIN, main_channel)).unwrap();
+    block_on(bridge.open_stream(SETTINGS, settings_channel)).unwrap();
+    block_on(bridge.subscribe_app(MAIN)).unwrap();
+    block_on(bridge.subscribe_app(SETTINGS)).unwrap();
+    first_frames(&main);
+    let before = settings(settings_page.next_event()).tools;
+
+    let patch = ToolsPatch {
+        web_search: Some(!before.web_search),
+        ..ToolsPatch::default()
+    };
+    let command = HostCommand::SetToolSettings { patch };
+    block_on(bridge.dispatch(SETTINGS, envelope(command))).unwrap();
+    let expected = ToolsSettingsView {
+        web_search: !before.web_search,
+        browser: before.browser,
+    };
+    assert_eq!(settings(main.next_event()).tools, expected);
+    assert_eq!(settings(settings_page.next_event()).tools, expected);
+    assert_eq!(settings_page.drain(), Vec::<String>::new());
 }
 
 /// `main` and `settings` each follow the app feed on their own channel, and a change the

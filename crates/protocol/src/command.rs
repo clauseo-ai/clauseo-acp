@@ -18,7 +18,8 @@ use crate::MatterPath;
 use crate::{
     AgentChoiceId, AgentId, AgentKind, CheckpointId, ClientName, CommandId, Date, Delivery,
     ElicitationId, ElicitationResponse, FieldChange, FileDecision, FolderRefId, MatterId,
-    MessageId, PermissionRequestId, PromptBlock, RestoreScope, ThreadId, Title, TurnId, UiPatch,
+    MessageId, PermissionRequestId, PromptBlock, RestoreScope, ThreadId, Title, ToolsPatch, TurnId,
+    UiPatch,
 };
 #[cfg(doc)]
 use crate::{FileChoice, RawPayload};
@@ -367,6 +368,15 @@ pub enum HostCommand {
         /// The fields to change.
         patch: UiPatch,
     },
+    /// Change the tool switches (`tools.web_search`, `tools.browser`); answers `Done`, and every
+    /// app subscriber gets `HostEvent::SettingsChanged`. A patch naming a key the firm's policy
+    /// sets is refused whole with `settings.locked`; nothing changes. A session reads the
+    /// switches at its start, so the change applies to the next session started: a session
+    /// already running keeps the tools its header shows. Only the settings window sends it.
+    SetToolSettings {
+        /// The switches to change.
+        patch: ToolsPatch,
+    },
     /// Refresh account limits. Answers `Done` and logs nothing. `Shown` reads only data older
     /// than 5 minutes; `TryAgain` reads now unless a read is in flight or the last read started
     /// less than 10 s ago (it then re-emits the view). No read starts while the agent has a
@@ -383,8 +393,8 @@ pub enum HostCommand {
 }
 
 /// What a command did. The host's receipt stores it, so a repeated `command_id` returns the same
-/// outcome. The queue commands, `RestartAgent`, `SetUiSettings`, `UpdateMatter`, `OpenMatter`,
-/// `ForgetMatter`, `RefreshLimits` and `MarkSeen` answer `Done`.
+/// outcome. The queue commands, `RestartAgent`, `SetUiSettings`, `SetToolSettings`,
+/// `UpdateMatter`, `OpenMatter`, `ForgetMatter`, `RefreshLimits` and `MarkSeen` answer `Done`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "specta", derive(specta::Type))]

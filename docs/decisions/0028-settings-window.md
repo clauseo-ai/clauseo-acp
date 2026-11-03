@@ -48,7 +48,8 @@ beside `main`, so on Windows and Linux it gets the caption buttons' four. Not gr
 `unsubscribe`, `answer_permission`, `pick_folder`, `open_external`, `open_file`, `reveal`,
 `open_settings`, and the e2e and marks commands. `tauri.conf.json` names `main` and `settings`.
 
-**What the bridge admits.** From `settings`, `dispatch` takes only `SetUiSettings` and `query` only
+**What the bridge admits.** From `settings`, `dispatch` takes only `SetUiSettings`,
+`SetToolSettings` (0030, "Tool switches over the wire") and `RefreshLimits`, and `query` only
 `GetSettings` (`Bridge::admit`, `Bridge::query`, keyed on the calling webview's label); everything
 else is `command.invalid` before the host sees it. A window of any other label is refused every
 command and read. Of the app feed (`subscribe_app`), whose first frames carry the whole matter

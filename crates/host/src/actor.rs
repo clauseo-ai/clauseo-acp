@@ -88,7 +88,8 @@ pub(crate) struct Actor {
     pub(crate) feeder: FeederTx,
     pub(crate) snapshots: SnapshotWorker,
     /// The settings. Only the actor touches them, so it is the one lock their writes need:
-    /// `SetUiSettings` runs `Effective::apply_ui_patch` here, one command at a time.
+    /// `SetUiSettings` runs `Effective::apply_ui_patch` here, and `SetToolSettings`
+    /// `Effective::apply_tools_patch`, one command at a time.
     pub(crate) effective: Effective,
     pub(crate) launcher: Arc<dyn Launcher>,
     /// Called at each session start, for the `_meta` of `session/new` and `session/load`, and

@@ -1,6 +1,6 @@
 ---
 source: crates/protocol/tests/snapshots.rs
-expression: "HostEvent::SettingsChanged(SettingsView\n{\n    ui: UiSettings\n    {\n        theme: Theme::Dark, font_size: 18, language: Language::Hi, lite:\n        Lite::Automatic, motion: Motion::Reduce,\n    }, locked: vec![\"ui.font_size\".to_owned(), \"ui.theme\".to_owned()],\n})"
+expression: "HostEvent::SettingsChanged(SettingsView\n{\n    ui: UiSettings\n    {\n        theme: Theme::Dark, font_size: 18, language: Language::Hi, lite:\n        Lite::Automatic, motion: Motion::Reduce,\n    },\n    tools: ToolsSettingsView\n    {\n        web_search: false, browser: true,\n    }, locked: vec![\"ui.font_size\".to_owned(), \"ui.theme\".to_owned()],\n})"
 ---
 {
   "settings_changed": {
@@ -10,6 +10,10 @@ expression: "HostEvent::SettingsChanged(SettingsView\n{\n    ui: UiSettings\n   
       "language": "hi",
       "lite": "automatic",
       "motion": "reduce"
+    },
+    "tools": {
+      "web_search": false,
+      "browser": true
     },
     "locked": [
       "ui.font_size",

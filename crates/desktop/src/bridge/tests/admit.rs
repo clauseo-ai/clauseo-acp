@@ -1,8 +1,8 @@
 //! The allow-lists of `dispatch` and `query` (`Bridge::admit`): every call the R12 window
 //! (`ui/app/src/internal/session.ts`) and the room make today passes, and every command the
 //! bridge refuses is refused before any window has opened its stream. The settings window
-//! sends `SetUiSettings` and `RefreshLimits` (Plan and usage, U12) and reads `GetSettings`,
-//! nothing else; another label nothing (0028).
+//! sends `SetUiSettings`, `SetToolSettings` and `RefreshLimits` (Plan and usage, U12) and reads
+//! `GetSettings`, nothing else; another label nothing (0028).
 
 use clauseo_protocol::{MatterId, ThreadId};
 use serde_json::json;
@@ -109,9 +109,9 @@ fn every_refused_command_is_refused_before_open_stream() {
     assert_eq!(matters.len(), 1, "only the Scratch matter: {matters:?}");
 }
 
-/// The settings window may send `SetUiSettings` and, for Plan and usage (U12), `RefreshLimits`,
-/// and read `GetSettings`; it is refused every other command and read with `command.invalid`,
-/// before the host sees it. A window of any other label is refused everything.
+/// The settings window may send `SetUiSettings`, `SetToolSettings` and, for Plan and usage
+/// (U12), `RefreshLimits`, and read `GetSettings`; it is refused every other command and read with
+/// `command.invalid`, before the host sees it. A window of any other label is refused everything.
 #[test]
 fn the_settings_window_sets_and_reads_the_settings_and_refreshes_the_limits_only() {
     let scratch = Scratch::new("admit-settings", &[]);
@@ -120,6 +120,22 @@ fn the_settings_window_sets_and_reads_the_settings_and_refreshes_the_limits_only
     let bridge = host.bridge();
     let set = command(json!({"set_ui_settings": {"patch": {"theme": "dark"}}}));
     assert!(bridge.admit(SETTINGS, &set).is_ok());
+    // The tool switches: the settings window sends them, and a window of another label may not.
+    let tools = command(json!({"set_tool_settings": {"patch": {"browser": false}}}));
+    assert!(bridge.admit(SETTINGS, &tools).is_ok());
+    assert_eq!(
+        bridge.admit("other", &tools).unwrap_err().code(),
+        ErrorCode::CommandInvalid
+    );
+    // The main window admits `SetUiSettings` today, so it admits `SetToolSettings` too; what
+    // it refuses, it still refuses.
+    assert!(bridge.admit(MAIN, &set).is_ok());
+    assert!(bridge.admit(MAIN, &tools).is_ok());
+    let refused_from_main = command(json!({"set_mode": {"thread": thread, "mode_id": "x"}}));
+    assert_eq!(
+        bridge.admit(MAIN, &refused_from_main).unwrap_err().code(),
+        ErrorCode::CommandInvalid
+    );
     // Plan and usage: `shown` as it opens, `try_again` from its button, for one agent or all.
     let refreshes = [
         command(json!({"refresh_limits": {"agent": null, "why": "shown"}})),
@@ -140,6 +156,8 @@ fn the_settings_window_sets_and_reads_the_settings_and_refreshes_the_limits_only
         assert_eq!(refusal.code(), ErrorCode::CommandInvalid, "{refused:?}");
     }
     let outcome = block_on(bridge.dispatch(SETTINGS, envelope(set.clone())));
+    assert!(outcome.is_ok(), "{outcome:?}");
+    let outcome = block_on(bridge.dispatch(SETTINGS, envelope(tools)));
     assert!(outcome.is_ok(), "{outcome:?}");
     let outcome = block_on(bridge.dispatch(SETTINGS, envelope(refreshes[0].clone())));
     assert!(outcome.is_ok(), "{outcome:?}");

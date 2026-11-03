@@ -192,6 +192,10 @@ fn no_host_event_kind_takes_a_reserved_key() {
                 lite: clauseo_protocol::Lite::Automatic,
                 motion: clauseo_protocol::Motion::System,
             },
+            tools: clauseo_protocol::ToolsSettingsView {
+                web_search: true,
+                browser: false,
+            },
             locked: Vec::new(),
         }),
         HostEvent::MattersChanged(clauseo_protocol::MattersChanged {
