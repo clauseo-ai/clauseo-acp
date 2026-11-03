@@ -4,68 +4,18 @@
 // `try_again`); billed by use, it has its title and who bills, no bar and no figure. Its own chunk: only a lawyer who
 // opens the card needs it. Not here until the host gives them (H16, H11): the stale line's retry time, the month's
 // figure, what happens at the limit, Manage plan.
-import { PlanCard, type PlanWindow } from "@clauseo/components/clauseo/plan-card.tsx";
-import type { Lang } from "@clauseo/components/lib/display.ts";
+import { PlanCard } from "@clauseo/components/clauseo/plan-card.tsx";
 import { lim } from "@clauseo/components/lib/words-limits.ts";
-import { pc, type PlanCardKey } from "@clauseo/components/lib/words-plan-card.ts";
+import { pc } from "@clauseo/components/lib/words-plan-card.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
 import { useAgentLimits, useLimitsAt, useLimitsStore } from "../../store/limits.ts";
-import type { AgentKind, LimitWindowView } from "../../transport/protocol.ts";
-import { stamp, whenOf } from "../thread/clock.ts";
-import { PLAN_NAME, lookOf, planTitle, shareLeft } from "./plan-model.ts";
+import type { AgentKind } from "../../transport/protocol.ts";
+import { stamp } from "../thread/clock.ts";
+import { PLAN_NAME, lookOf, planTitle } from "./plan-model.ts";
+import { windowOf } from "./plan-windows.ts";
 
-/** The window labels the card's words translate; another shows as the host gives it, in English. */
-const LABELS = new Set<string>([
-  "5-hour limit",
-  "Weekly limit",
-  "Opus weekly limit",
-  "Sonnet weekly limit",
-  "Weekly limit for connected apps",
-  "Monthly limit",
-  "Usage limit",
-]);
-
-const windowLabel = (lang: Lang, label: string): string =>
-  LABELS.has(label) ? pc(lang, label as PlanCardKey) : label;
-
-/** A window's reset: "Resets 6:10 pm" ahead, "The limit reset at 4:10 pm." once passed; "" without one. */
-function resetOf(lang: Lang, w: LimitWindowView, now: number): string {
-  if (w.resets_at === undefined) return "";
-  const { day, time } = whenOf(lang, w.resets_at, now);
-  if (w.freshness === "reset_passed")
-    return day === null
-      ? lim(lang, "The limit reset at {time}.", { time })
-      : lim(lang, "The limit reset on {day} at {time}.", { day, time });
-  return day === null
-    ? lim(lang, "Resets {time}", { time })
-    : lim(lang, "Resets {day} {time}", { day, time });
-}
-
-/** A window as the card draws it: no share (and so no bar) while loading or once its reset passed. */
-function windowOf(lang: Lang, w: LimitWindowView, now: number): PlanWindow {
-  const figures = w.freshness !== "reset_passed" && w.freshness !== "loading";
-  const left = figures && w.used_percent !== undefined ? shareLeft(w.used_percent) : null;
-  return {
-    name: windowLabel(lang, w.label),
-    left,
-    leftText: left === null ? "" : pc(lang, "{n}% left", { n: left }),
-    reset: resetOf(lang, w, now),
-    valueText: left === null ? "" : lim(lang, "{n} percent of the plan left", { n: left }),
-  };
-}
-
-export function LivePlanCard({
-  kind,
-  updated,
-  testId = "plan-card",
-}: {
-  kind: AgentKind;
-  /** Optional: how the read's time is said; "As of {time}" when left out. Settings says "Updated at {time}". */
-  updated?: (time: string) => string;
-  /** Optional: the card's test id; "plan-card" when left out. */
-  testId?: string;
-}) {
+export function LivePlanCard({ kind }: { kind: AgentKind }) {
   const w = useWords();
   const entry = useAgentLimits(kind);
   const store = useLimitsStore();
@@ -102,15 +52,13 @@ export function LivePlanCard({
         : null;
   return (
     <PlanCard
-      testId={testId}
+      testId="plan-card"
       plan={
         look === "payg" ? planTitle(lang, kind, look) : (entry.plan ?? w.t("{name} plan", { name }))
       }
       updated={
         figures && entry.checked_at !== undefined
-          ? (updated ?? ((time) => pc(lang, "As of {time}", { time })))(
-              stamp(lang, entry.checked_at, now),
-            )
+          ? pc(lang, "As of {time}", { time: stamp(lang, entry.checked_at, now) })
           : null
       }
       stale={look === "stale"}
