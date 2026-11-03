@@ -43,7 +43,7 @@ Words: "agent" means the lawyer's ACP agent (Claude Code, Codex). "You" is the c
 - `crates/store`: the event log, snapshots, blobs and receipts in one SQLite file.
 - `ui/app`: the React app, the room (`src/room/`); `ui/components`: tokens, words, parts. New strings: `ui/app/src/review/registry.tsx`. Tauri APIs only in `ui/app/src/transport`.
 - `ui/e2e`: Playwright tests of the real app over CDP on Windows, and the speed scoreboard's code. `cargo xtask check` typechecks it and runs its unit tests; no lint or write rule yet (#86).
-- `xtask`: checks, build timing, budgets. Builds without any app crate. Frozen: no new checks.
+- `xtask`: checks, build timing, budgets. Builds without any app crate. Frozen: no new checks (exceptions: its main.rs).
 
 ## Never
 

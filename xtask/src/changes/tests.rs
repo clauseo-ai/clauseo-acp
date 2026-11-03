@@ -249,3 +249,130 @@ fn repo_files_fail_outside_a_git_repo_with_git_s_command_and_error() {
     );
     assert!(stderr.contains("not a git repository"), "{stderr}");
 }
+
+/// `member`, with a dependency on `clauseo-fake_agent` of `kind` (`None` normal, `"dev"`,
+/// `"build"`) at `crates/fake_agent`.
+fn with_fake_agent(mut member: Member, kind: Option<&str>) -> Member {
+    member.path_deps.push("crates/fake_agent".into());
+    member
+        .dependencies
+        .dependencies
+        .push(crate::workspace::CargoDependency {
+            name: "clauseo-fake_agent".into(),
+            rename: None,
+            kind: kind.map(str::to_owned),
+            target: None,
+            optional: false,
+            features: Vec::new(),
+            path: Some("/ws/crates/fake_agent".into()),
+            req: "*".into(),
+            source: None,
+        });
+    member
+}
+
+/// The real workspace in small: `clauseo-host` runs `clauseo-fake_agent` in its tests (a
+/// dev-dependency) and depends on `clauseo-matters`, `clauseo-desktop` depends on host, and
+/// `clauseo-store` and its dependent run no fake agent.
+fn fake_agent_workspace() -> Vec<Member> {
+    vec![
+        member("clauseo-fake_agent", "crates/fake_agent", &[]),
+        member("clauseo-matters", "crates/matters", &[]),
+        with_fake_agent(
+            member("clauseo-host", "crates/host", &["crates/matters"]),
+            Some("dev"),
+        ),
+        member("clauseo-desktop", "crates/desktop", &["crates/host"]),
+        member("clauseo-store", "crates/store", &[]),
+        member("clauseo-reducer", "crates/reducer", &["crates/store"]),
+    ]
+}
+
+#[test]
+fn a_change_to_a_package_that_runs_fake_agent_selects_fake_agent() {
+    let sel = select(&files(&["crates/host/src/lib.rs"]), &fake_agent_workspace());
+    assert_eq!(
+        sel,
+        Selection::Packages(vec![
+            "clauseo-desktop".into(),
+            "clauseo-fake_agent".into(),
+            "clauseo-host".into(),
+        ])
+    );
+}
+
+#[test]
+fn a_change_whose_dependents_run_fake_agent_selects_fake_agent() {
+    let changed = files(&["crates/matters/src/lib.rs"]);
+    let members = fake_agent_workspace();
+    assert_eq!(
+        select(&changed, &members),
+        Selection::Packages(vec![
+            "clauseo-desktop".into(),
+            "clauseo-fake_agent".into(),
+            "clauseo-host".into(),
+            "clauseo-matters".into(),
+        ])
+    );
+    assert_eq!(
+        built_for_tests(&with_dependents(&changed, &members), &members),
+        ["clauseo-fake_agent"]
+    );
+}
+
+#[test]
+fn a_change_to_packages_that_do_not_run_fake_agent_does_not_select_it() {
+    let changed = files(&["crates/store/src/lib.rs"]);
+    let members = fake_agent_workspace();
+    assert_eq!(
+        select(&changed, &members),
+        Selection::Packages(vec!["clauseo-reducer".into(), "clauseo-store".into()])
+    );
+    assert_eq!(
+        built_for_tests(&with_dependents(&changed, &members), &members),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn a_change_to_fake_agent_selects_it_as_changed_not_as_built_for_tests() {
+    let changed = files(&["crates/fake_agent/src/main.rs"]);
+    let members = fake_agent_workspace();
+    assert_eq!(
+        select(&changed, &members),
+        Selection::Packages(vec![
+            "clauseo-desktop".into(),
+            "clauseo-fake_agent".into(),
+            "clauseo-host".into(),
+        ])
+    );
+    assert_eq!(
+        built_for_tests(&with_dependents(&changed, &members), &members),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn a_normal_or_dev_dependency_on_fake_agent_counts_and_a_build_dependency_does_not() {
+    for (kind, built) in [(None, true), (Some("dev"), true), (Some("build"), false)] {
+        let members = vec![
+            member("clauseo-fake_agent", "crates/fake_agent", &[]),
+            with_fake_agent(member("user", "crates/user", &[]), kind),
+        ];
+        let selected = with_dependents(&files(&["crates/user/src/lib.rs"]), &members);
+        assert_eq!(
+            !built_for_tests(&selected, &members).is_empty(),
+            built,
+            "{kind:?}"
+        );
+    }
+}
+
+#[test]
+fn fake_agent_missing_from_the_workspace_is_not_selected() {
+    let members = vec![with_fake_agent(member("user", "crates/user", &[]), None)];
+    assert_eq!(
+        select(&files(&["crates/user/src/lib.rs"]), &members),
+        Selection::Packages(vec!["user".into()])
+    );
+}
