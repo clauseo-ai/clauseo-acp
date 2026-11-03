@@ -388,7 +388,39 @@ lists; the `browser` module is public for it.
 
 ### Bundling agent-browser
 
-Added by a later S27 PR.
+#### Bundling (desktop)
+
+A release build ships agent-browser as a sidecar binary for each target. Nothing is committed:
+the release fetches the pinned asset, checks its hash and writes it into the desktop crate.
+
+- **The pin**, `crates/desktop/agent-browser.toml`: `version = "0.41.1"`, then one table per Rust
+  target triple with `url` and `sha256` (lowercase hex) of the release's raw binary (no archive).
+  A triple with no build holds `none = true` and is left out explicitly; none does today. The
+  file's header states the format. Each hash was taken from a download of the asset and matches
+  the digest GitHub lists for it. `crates/desktop/src/agent_browser_pin.rs` (the
+  `agent_browser_pin` test) checks the file: semver version, the six triples, each url under the
+  pinned release with its asset name, each sha256 in shape.
+- **The fetch**, `crates/desktop/sidecars/agent-browser.mjs`: `fetchAgentBrowser(triple,
+  destPath)`, Node built-ins only. It reads the pin, throws on a triple the pin does not name,
+  accepts only an https URL on `github.com/vercel-labs/agent-browser/releases/download/v<version>/`,
+  downloads it (redirects followed), and checks the SHA-256 of the bytes before anything is
+  written. A mismatch throws and writes nothing. Otherwise it writes `<destPath>.partial`, sets
+  mode 0755 on non-Windows and renames it into place. Its tests,
+  `sidecars/agent-browser.test.mjs`, stub the network: `node --test crates/desktop/sidecars/*.test.mjs`
+  (Node 24 does not take a folder argument). CI does not run them, because the xtask check is
+  frozen.
+- **Stage F's script**, the release's sidecar script (not in this PR), calls `fetchAgentBrowser` once per release
+  target and writes `crates/desktop/binaries/agent-browser-<triple>[.exe]`. It is not in this PR.
+  The base Tauri config has no `externalBin`, and this PR does not add one.
+- **Windows ARM64** has no upstream build. `aarch64-pc-windows-msvc` takes the x64 asset, which
+  Windows on ARM runs under x64 emulation; the pin says so in a comment.
+- **The license**: `LICENSES/Apache-2.0-agent-browser.txt`, a copy of upstream's `LICENSE` (upstream
+  has no NOTICE file), listed in `LICENSES/README.md`.
+- **Machine memory**: the desktop reads the machine's total physical memory once at start-up
+  (macOS `hw.memsize`, Windows `GlobalMemoryStatusEx`, Linux `MemTotal`) and passes it with
+  `HostConfig::with_machine_memory`, so the browser limit is 2 sessions at 8 GB or less and 4
+  above. Before this, production took the 2-browser default. The read runs on the thread that
+  starts the host, before `Host::start`. If it fails, nothing is passed and a warning is logged.
 
 #### `PageVisited` (`host/src/sources.rs`, `sources/browser.rs`)
 
