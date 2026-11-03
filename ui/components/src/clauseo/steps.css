@@ -70,8 +70,10 @@
   }
   /* on the answer's meta line, the line stays on that line, on one line, live and folded alike, so the answer below
      never moves when the turn ends (in Hindi with three kinds, or with a background note, it would wrap to a row of
-     its own, 26 px lower): the name and the time keep their width, the words take what is left and cut with an
-     ellipsis, the chevron stays after them. The button's title holds the whole summary */
+     its own, 26 px lower): the name and the time keep their width, the words take what is left. Sentences that don't
+     fit drop from the end, "And 3 more." first, then the smallest counts, with "…" after the last kept (step-group.tsx
+     useFit); the aside and the trouble always stay; a mid-word ellipsis only where one sentence alone won't fit. The
+     chevron stays after the words; the button's title and name hold the whole summary */
   .meta:has(> .step-group-line) {
     flex-wrap: nowrap;
   }
@@ -83,9 +85,25 @@
     min-width: 0;
   }
   .meta > .step-group-line .step-group-words {
+    position: relative;
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
+  }
+  /* a sentence dropped to fit: out of sight, still in the button's name */
+  .step-part-dropped {
+    @apply sr-only;
+  }
+  /* the "…" after the last kept sentence, drawn by CSS so it is in no text; while nothing is dropped it stands unseen
+     out of the flow, at the words' start, so its width can be read */
+  .step-part-cut::after {
+    content: " …";
+    white-space: pre;
+  }
+  .step-part-cut:not([data-cut]) {
+    position: absolute;
+    inset-inline-start: 0;
+    visibility: hidden;
   }
   .meta > .step-group-line .step-group-chev {
     flex: none;

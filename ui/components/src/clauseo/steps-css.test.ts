@@ -55,3 +55,11 @@ test("on the answer's meta line the line never wraps to a row of its own: the me
   expect(words).toMatch(/text-overflow: ellipsis;/);
   expect(rule(".meta > .step-group-line .step-group-chev")).toMatch(/flex: none;/);
 });
+
+test("a sentence dropped to fit the meta line is out of sight but stays in the button's name", () => {
+  expect(rule(".step-part-dropped")).toMatch(/@apply sr-only;/);
+  // the "…" in no text, unseen and out of the flow until wanted
+  expect(rule(".step-part-cut::after")).toMatch(/content: " …";/);
+  expect(rule(".step-part-cut:not([data-cut])")).toMatch(/position: absolute;/);
+  expect(rule(".step-part-cut:not([data-cut])")).toMatch(/visibility: hidden;/);
+});
