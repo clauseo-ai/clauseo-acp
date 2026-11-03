@@ -84,6 +84,16 @@ export function segmentsPick(
 /** Whether a step's state is one this version can't read (a newer Clauseo's): neither done nor failed. */
 const unknownState = (c: ToolCallEntry) => c.status === "unknown";
 
+/** A step in a state this version can't read, in no tense: by its place ("Lease.pdf."), its words searched for, or
+ * the agent's own words cut down ("Check the cause list."); with none, that its state isn't known. */
+function namedOf(lang: Lang, entry: ToolCallEntry): string {
+  const p = placeOf(entry);
+  const own = p.name ?? (p.query === null ? null : `'${p.query}'`) ?? p.what;
+  const title = titleOf(entry.title);
+  if (own !== null) return sentenceOf(own);
+  return title === "" ? steps(lang, "State not known.") : sentenceOf(title);
+}
+
 /** The words of a summary sentence for a kind, one and many. */
 const COUNTED: Record<Exclude<StepKind, "think">, [one: StepKey, many: StepKey]> = {
   read: ["1 paper read.", "{n} papers read."],
@@ -152,12 +162,12 @@ export function restOf(
       line: doingOf(lang, waiting),
       trouble: troubleOf(lang, calls),
     };
-  // a step whose state is not known (a newer Clauseo's) is neither done nor failed: with nothing tried and not done,
-  // the newest of them says what it set out to do, as its row does, with no break
+  // a step whose state is not known (a newer Clauseo's) is neither done nor failed, nor running: with nothing tried
+  // and not done, the line says the state isn't known, in no tense, with no break
   const tried = calls.filter((c) => c.status === "failed" || c.status === "cancelled");
-  const unread = [...calls].reverse().find(unknownState);
-  if (tried.length === 0 && unread !== undefined)
-    return { kinds: iconsOf([unread]), line: doingOf(lang, unread), trouble: "" };
+  const unread = calls.filter(unknownState);
+  if (tried.length === 0 && unread.length > 0)
+    return { kinds: iconsOf(unread), line: steps(lang, "State not known."), trouble: "" };
   const out = tried.slice(0, NAMED).map((c) => doneOf(lang, c));
   const rest = tried.length - NAMED;
   if (rest > 0) out.push(counted(lang, ["And 1 more.", "And {n} more."], rest));
@@ -199,8 +209,8 @@ export function doneSoFar(lang: Lang, calls: readonly ToolCallEntry[]): string {
 /** A row's words: what it did once done ("Read Lease.pdf."), what it set out to do once it failed or was stopped
  * ("Tried to read Lease.pdf.", its mark saying how it ended), and what it is doing while it waits or runs. */
 export function doneOf(lang: Lang, entry: ToolCallEntry): string {
-  // still to finish, or in a state this version can't read: what it set out to do, never told as done or tried
-  if (unsettled(entry) || unknownState(entry)) return doingOf(lang, entry);
+  if (unsettled(entry)) return doingOf(lang, entry);
+  if (unknownState(entry)) return namedOf(lang, entry);
   const tried = entry.status !== "completed";
   const say = (done: StepKey, attempt: StepKey, vars?: Record<string, string>) =>
     steps(lang, tried ? attempt : done, vars);
@@ -264,7 +274,11 @@ export function markOf(lang: Lang, call: ToolCallEntry): string | null {
   if (call.status === "cancelled") return th(lang, "Stopped");
   if (call.background !== undefined) return mt(lang, "In the background");
   if (call.status === "pending") return steps(lang, "Waiting");
-  if (unknownState(call)) return steps(lang, "State not known");
+  // the mark, unless the row's words already say it
+  if (unknownState(call))
+    return namedOf(lang, call) === steps(lang, "State not known.")
+      ? null
+      : steps(lang, "State not known");
   return null;
 }
 

@@ -183,10 +183,10 @@ test("a step in a state this version can't read shows neither failed nor done: t
   const g = groups()[0]!;
   expect(g.dataset["trouble"]).toBeUndefined();
   expect(h.one("step-group-trouble")).toBeNull();
-  expect(lineOf(g)?.textContent).toBe("Reading Lease.pdf.");
+  expect(lineOf(g)?.textContent).toBe("State not known.");
   await h.click(lineOf(g));
   const row = h.all("tool-call")[0]!;
-  expect(row.textContent).toBe("Reading Lease.pdf. · State not known");
+  expect(row.textContent).toBe("Lease.pdf. · State not known");
   // its own kind's icon on both, never the break
   const icon = (el: Element) => el.querySelector("svg")?.outerHTML;
   expect(icon(row)).toBe(icon(lineOf(g)!.querySelector(".step-group-icons")!));
