@@ -27,6 +27,7 @@ import { kindOf, planName } from "../agent.ts";
 import { quietly } from "../open.ts";
 import {
   linkable,
+  linkText,
   pagesShown,
   SourcesOpenAtFirst,
   SourcesTransport,
@@ -46,9 +47,9 @@ function Run({ text }: { text: string }) {
   );
 }
 
-/** A page's title as a link, or its address when it has none. A click or a middle click never navigates the webview:
- * it is cancelled and the address goes to the host's open_external. An address that isn't http or https is plain
- * text, with no link. */
+/** A page's title as a link, or for an untitled page its file name or else its site (linkText), never its whole
+ * address. A click or a middle click never navigates the webview: it is cancelled and the address goes to the host's
+ * open_external. An address that isn't http or https is plain text, with no link. */
 function PageLink({ url, title }: { url: string; title: string | null }) {
   const transport = use(SourcesTransport);
   if (!linkable(url)) return <Run text={title ?? url} />;
@@ -65,16 +66,16 @@ function PageLink({ url, title }: { url: string; title: string | null }) {
       onClick={open}
       onAuxClick={open}
     >
-      <Run text={title ?? url} />
+      <Run text={linkText(url, title)} />
     </a>
   );
 }
 
-/** The site a page is on, muted after its link. Nothing for an address with no host, or for a page with no title,
- * whose link is already its address. */
+/** The site a page is on, muted after its link. Nothing for an address with no host, for one that is no link, or
+ * when the link's words are the site already. */
 function Site({ url, title }: { url: string; title: string | null }) {
-  const site = title === null ? null : siteHost(url);
-  return site === null ? null : (
+  const site = linkable(url) ? siteHost(url) : null;
+  return site === null || site === linkText(url, title) ? null : (
     <>
       {" "}
       <span className="text-muted" data-testid="web-source-site">
@@ -214,6 +215,16 @@ type Item =
   | { key: string; kind: "page"; page: Page };
 
 /** The rows of a turn's tool calls' web, in the tool calls' order: each one's search, then its pages. */
+/** Each answer's count: its distinct pages, the addresses its searches listed and the pages it read, an address in
+ * both counted once. A search itself is no page. */
+function pagesCount(items: readonly Item[]): number {
+  const urls = new Set<string>();
+  for (const item of items)
+    if (item.kind === "page") urls.add(item.page.url);
+    else for (const r of item.results) urls.add(r.url);
+  return urls.size;
+}
+
 function itemsOf(webs: readonly (readonly [ToolCallId, ToolCallWeb])[]): Item[] {
   return webs.flatMap(([call, web]) => [
     ...(web.search === undefined
@@ -295,6 +306,7 @@ function SourcesOf({
   );
   if (items.length === 0) return null;
   const codex = agent !== undefined && kindOf(agent, []) === "codex";
+  const pages = pagesCount(items);
   // the thread's plan names it
   const name = agent === undefined ? planName("codex-acp") : planName(agent);
   return (
@@ -307,10 +319,12 @@ function SourcesOf({
           className="work-done"
           data-testid="web-sources-toggle"
           aria-expanded={open}
+          // searches that list no page: no count to say, so the button is named for what it opens to
+          aria-label={pages === 0 ? w.src("Searches") : undefined}
           data-panel-open={open ? "" : undefined}
           onClick={() => setOpen((o) => !o)}
         >
-          {/* the sites' tiles lead; the words count the rows the list opens to */}
+          {/* the sites' tiles lead; the words count the distinct pages, none when there are none */}
           <span className="inline-flex items-center gap-(--s0-5)" data-testid="web-sources-marks">
             {marksOf(items, codex).map((m) =>
               m.kind === "search" ? (
@@ -320,7 +334,7 @@ function SourcesOf({
               ),
             )}
           </span>
-          <span data-testid="web-sources-count">{w.summary(items.length)}</span>
+          {pages > 0 && <span data-testid="web-sources-count">{w.summary(pages)}</span>}
           <IconFold size={12} className="work-chev" />
         </button>
         {open && (

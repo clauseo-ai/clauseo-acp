@@ -40,7 +40,7 @@ async function cell(id: string): Promise<HTMLElement> {
 
 const rows = (host: HTMLElement) => host.querySelectorAll('[data-testid="web-source"]');
 
-const FOLDED = ["WEB-12", "WEB-13"];
+const FOLDED = ["WEB-12", "WEB-13", "WEB-16"];
 /** What a reader reads: the text without the tiles' letters. */
 const words = (el: Element | null | undefined): string => {
   if (el === null || el === undefined) return "";
@@ -65,10 +65,10 @@ test.each(WEB_SOURCES.filter((e) => !FOLDED.includes(e.id)).map((e) => e.id))(
   },
 );
 
-test("WEB-12 shows the line folded: two sites' tiles and the search glyph, counting the five rows", async () => {
+test("WEB-12 shows the line folded: two sites' tiles and the search glyph, counting the three distinct pages", async () => {
   const host = await cell("WEB-12");
   const toggle = host.querySelector('[data-testid="web-sources-toggle"]');
-  expect(words(toggle)).toBe("5 sources");
+  expect(words(toggle)).toBe("3 sources");
   const marks = [...host.querySelector('[data-testid="web-sources-marks"]')!.children];
   expect(marks.map((m) => (m.classList.contains("site-tile") ? m.textContent : "search"))).toEqual([
     "I",
@@ -84,6 +84,22 @@ test("WEB-13 shows one tile and 1 source, folded", async () => {
   expect(words(host.querySelector('[data-testid="web-sources-toggle"]'))).toBe("1 source");
   expect(host.querySelectorAll('[data-testid="web-sources-marks"] .site-tile').length).toBe(1);
   expect(rows(host).length).toBe(0);
+});
+
+test("WEB-07, Codex's search, has no count: the search glyph and the chevron, named Searches", async () => {
+  const host = await cell("WEB-07");
+  const toggle = host.querySelector('[data-testid="web-sources-toggle"]');
+  expect(words(toggle)).toBe("");
+  expect(toggle?.textContent).not.toContain("source");
+  expect(toggle?.getAttribute("aria-label")).toBe("Searches");
+});
+
+test("WEB-16 shows Codex's search folded: the search glyph, no count, named Searches", async () => {
+  const host = await cell("WEB-16");
+  const toggle = host.querySelector('[data-testid="web-sources-toggle"]');
+  expect(toggle?.getAttribute("aria-expanded")).toBe("false");
+  expect(words(toggle)).toBe("");
+  expect(toggle?.getAttribute("aria-label")).toBe("Searches");
 });
 
 test("WEB-09 shows its info tip open, saying where the page was opened", async () => {
@@ -142,7 +158,7 @@ test("WEB-05's rows lead with icons: a quoted query, nested results, pages as li
   ]);
   expect([...rows(host)].slice(2).map((r) => words(r))).toEqual([
     "Section 14 in the Delhi Rent Control Act, 1958 indiacode.nic.in",
-    "https://delhihighcourt.nic.in/judgments/2019/rent-control-notice-period-eviction-petition.pdf",
+    "rent-control-notice-period-eviction-petition.pdf delhihighcourt.nic.in",
     "Notice to quit under the Rent Control Act livelaw.in",
   ]);
 });

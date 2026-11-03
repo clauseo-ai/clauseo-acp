@@ -104,7 +104,7 @@ export const WEB_SOURCES: Entry[] = [
     words: sourcesWords("'{query}'"),
     screen: SCREEN,
     // the whole list open: a search with its results nested as tiles, links and sites, a search with none, a titled
-    // page, a page with no title (its address the link, no site after it) and another titled page
+    // page, a page with no title (its file name the link, its site after it) and another titled page
     render: opened(MANY),
     // tall enough for every row under the answer
     height: 900,
@@ -162,7 +162,7 @@ export const WEB_SOURCES: Entry[] = [
     id: "WEB-12",
     words: sourcesWords("{n} sources"),
     screen: SCREEN,
-    // folded, as an answer first shows it: five rows, the first two sites' tiles and the search glyph
+    // folded, as an answer first shows it: three distinct pages, the first two sites' tiles and the search glyph
     render: shut(MANY),
   },
   {
@@ -171,5 +171,15 @@ export const WEB_SOURCES: Entry[] = [
     screen: SCREEN,
     // folded: one page, its one tile
     render: shut([visited(1, ACT, { title: RESULTS[0]!.title })]),
+  },
+  {
+    id: "WEB-16",
+    words: sourcesWords("Searches"),
+    screen: SCREEN,
+    // folded: a search that lists no page, so no count; the search glyph and the chevron, the button named Searches
+    render: shut(
+      [searched(1, "Delhi Rent Control Act notice period", [], { agent: "codex-acp" })],
+      "codex-acp",
+    ),
   },
 ];
