@@ -100,7 +100,11 @@ test("the scratch matter is never a row of the list: only the foot's row opens i
 });
 
 test("with a NextHost, a scratch matter with a date and a pin still stands only at the foot", async () => {
-  const next = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  // tomorrow on the computer's own calendar: the app's day is local, not UTC
+  const next = `${tomorrow.getFullYear()}-${pad(tomorrow.getMonth() + 1)}-${pad(tomorrow.getDate())}`;
   await mount(withNext(() => [detailed(SCRATCH, { pinned: true, next_date: next }), detailed(A)]));
   expect(names()).toEqual([A.name]);
   expect(headings()).not.toContain("Pinned");

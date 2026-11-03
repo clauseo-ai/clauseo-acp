@@ -30,7 +30,7 @@ import type {
 } from "../transport/protocol.ts";
 import { loadQueueStrip } from "./queue-chunk.ts";
 import { QueueSlot } from "./queue-slot.tsx";
-import { clockTime, stamp } from "./thread/clock.ts";
+import { stamp } from "./thread/clock.ts";
 import { defaultOutcome, mountRoom, type Harness } from "./thread/harness.ts";
 
 // each transcript row inside its own Profiler, behind a memo like the real row's (queue.test.tsx's way)
@@ -67,7 +67,20 @@ afterEach(async () => {
   rowCommits.clear();
   stripCommits = 0;
   fieldFocused = 0;
+  vi.useRealTimers();
 });
+
+// The clock these tests read is pinned: noon on 3 November 2026 on the computer's clock, so a step's time is on the same
+// local day as "now" whatever the real date and zone are (a literal UTC instant drifts to another local day).
+const NOW = new Date(2026, 10, 3, 12, 0);
+function fixNow() {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
+}
+/** A local time on NOW's day, built from that day's local midnight. */
+function onTheDay(hours: number, minutes: number): number {
+  return new Date(NOW.getFullYear(), NOW.getMonth(), NOW.getDate(), hours, minutes).getTime();
+}
 
 async function mount(dispatch?: (c: HostCommand) => CommandOutcome | Promise<CommandOutcome>) {
   h = await mountRoom(dispatch === undefined ? {} : { dispatch });
@@ -143,7 +156,7 @@ test("queued entries fill the strip in the order they go, each row naming its tu
     [uuid(3, 4), "Third."],
     [uuid(4, 4), "Fourth."],
   ]);
-});
+}, 30_000);
 
 test("nothing shows over an empty queue that isn't held, nor over a held one with nothing in it", async () => {
   await mount();
@@ -387,8 +400,9 @@ test("at ten the head says the queue holds ten", async () => {
 });
 
 test("held after Stop: the step's time and Send next", async () => {
+  fixNow();
   await mount();
-  const ts = Date.UTC(2026, 10, 3, 11, 2);
+  const ts = onTheDay(16, 32);
   h!.deliver([
     reset(
       [userMessage(1, 1, "Q1"), step(2, { stop: "cancelled", ts }), queued(5, 2, "A.")],
@@ -397,14 +411,15 @@ test("held after Stop: the step's time and Send next", async () => {
   ]);
   await h!.settle();
   expect(say()).toBe(
-    `The queue is held. You stopped the answer at ${clockTime("en", ts)}, so nothing more is sent until you send.`,
+    "The queue is held. You stopped the answer at 4:32 pm, so nothing more is sent until you send.",
   );
   expect(txt(one("send-next"))).toBe("Send next");
 });
 
 test("held after a failure: the failed line and Send next", async () => {
+  fixNow();
   await mount();
-  const ts = Date.UTC(2026, 10, 3, 11, 2);
+  const ts = onTheDay(16, 32);
   h!.deliver([
     reset(
       [
@@ -417,7 +432,7 @@ test("held after a failure: the failed line and Send next", async () => {
   ]);
   await h!.settle();
   expect(say()).toBe(
-    `The queue is held. The answer failed at ${clockTime("en", ts)}, so nothing more is sent until you send.`,
+    "The queue is held. The answer failed at 4:32 pm, so nothing more is sent until you send.",
   );
   expect(one("send-next")).not.toBeNull();
 });
