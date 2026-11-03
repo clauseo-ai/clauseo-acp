@@ -108,6 +108,8 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
     );
     this.#reader = new ChannelReader(
       (event: ChannelEvent) => {
+        // An `events` arm falls through unheard: the host subscribes no window to a thread's events. The web sources
+        // under an answer (room/thread/sources.ts) wait for that, or for a view entry from the reducer.
         const failed = streamFailedOf(event);
         if (failed !== null) {
           this.#subs.fail(failed.stream, toHostError(failed.error));

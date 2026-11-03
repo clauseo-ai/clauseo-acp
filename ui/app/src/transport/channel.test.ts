@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "vitest";
-import { ChannelReader, setTimedHook } from "./channel.ts";
+import { ChannelReader, envelopesOf, setTimedHook } from "./channel.ts";
+import { searched, visited } from "../testing/web-sources.ts";
 import type { ChannelEvent } from "./channel.ts";
 import type { HostEvent } from "./protocol.ts";
 
@@ -129,5 +130,17 @@ describe("ChannelReader with timed messages (e2e builds)", () => {
     const { r, events } = reader();
     r.receive(timed(EVENT, 5));
     expect(events).toEqual([{ timed: { received_ms: 5, event: EVENT } }]);
+  });
+});
+
+describe("the events arm", () => {
+  test("an events arm reads whole and gives its envelopes; any other event gives none", () => {
+    const { r, events, problems } = reader();
+    const envelopes = [searched(1, "notice period"), visited(2, "https://example.com")];
+    r.receive(JSON.stringify({ events: envelopes }));
+    expect(events).toHaveLength(1);
+    expect(envelopesOf(events[0]!)).toEqual(envelopes);
+    expect(envelopesOf(EVENT)).toBeNull();
+    expect(problems).toEqual([]);
   });
 });

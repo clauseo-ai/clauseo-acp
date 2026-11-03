@@ -7,7 +7,7 @@
 // is installed (`setTimedHook`, which main.tsx does only when the build's init script set `__CLAUSEO_PERF__`), hands
 // the event on as if it had come plain (one message, counted once), then reports it with its time to the hook. A
 // release page never installs the hook and never gets a timed message, so its only cost is one null check per event.
-import type { HostEvent, StreamFailed, StreamFailedMessage } from "./protocol.ts";
+import type { Envelope, HostEvent, StreamFailed, StreamFailedMessage } from "./protocol.ts";
 
 /** What a channel message carries once whole: a host event, or the bridge's report that it could not restart a
  * stream. */
@@ -16,6 +16,11 @@ export type ChannelEvent = HostEvent | StreamFailedMessage;
 /** The stream failure an event reports, or null for a host event. */
 export const streamFailedOf = (event: ChannelEvent): StreamFailed | null =>
   "stream_failed" in event && event.stream_failed !== undefined ? event.stream_failed : null;
+
+/** The envelopes an `events` arm carries (an event subscription's domain events), or null for any other event. The
+ * desktop host sends a window none today: only FakeTransport routes them (to the web sources, room/thread/sources.ts). */
+export const envelopesOf = (event: ChannelEvent): Envelope[] | null =>
+  "events" in event && Array.isArray(event.events) ? event.events : null;
 
 /** A piece of an event's JSON text that was over the frame limit. */
 export type Fragment = { id: number; index: number; count: number; text: string };
