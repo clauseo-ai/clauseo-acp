@@ -20,4 +20,7 @@ pre-push:
     # CI mode, as fast-lane runs it, so a clippy warning fails the push as it fails CI (#210). CI mode
     # also gives nextest the ci profile (one retry; a test that passes only on it shows as FLAKY) and
     # runs the ui steps even where pnpm is missing. `CI=0 git push` runs the check in local mode.
-    check: { run: "CI=${CI:-1} cargo xtask check --quick" }
+    # A push of deletes only (`git push origin --delete <branch>`) sends no commits and passes
+    # without it: the script reads git's ref lines, which `use_stdin` passes on. pre-push-test.sh
+    # tests both, through lefthook.
+    check: { use_stdin: true, run: "bash .github/scripts/pre-push.sh" }
