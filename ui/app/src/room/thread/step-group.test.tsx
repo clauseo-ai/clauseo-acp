@@ -247,6 +247,43 @@ test("while the agent works, the live group and the working line say what is bei
   expect(h.host.querySelector(".working-pen")).toBeNull();
 });
 
+test("while a permission prompt or a question waits on the lawyer, the working line says so, led by the question mark, and the pen stops", async () => {
+  h = await mountRoom();
+  const reply = { locations: [{ inside: { path: "a/Reply.docx" } }] };
+  h.deliver([
+    reset(
+      [ASKED, read(7, 201, "a/Lease.pdf"), call(8, 202, "edit", "in_progress", reply)],
+      header("running"),
+    ),
+  ]);
+  const working = () => h!.one("working")!;
+  const lead = () =>
+    working().querySelector<HTMLElement>(".working")?.dataset["lead"] ?? working().dataset["lead"];
+  expect(working().querySelector(".working-pen")).not.toBeNull();
+  expect(working().textContent).toContain("Changing Reply.docx.");
+  // the agent asks to change the paper: the turn waits on the lawyer
+  h.deliver([
+    upsert(call(8, 202, "edit", "pending", reply)),
+    upsert(permission(9, 202)),
+    upsert(header("needs_you")),
+  ]);
+  await h.settle();
+  expect(working().querySelector(".working-pen")).toBeNull();
+  expect(lead()).toBe("question");
+  expect(working().textContent).toContain(`${frame("en", "Needs your permission")}.`);
+  expect(working().textContent).not.toContain("Changing");
+  // answered, the turn runs again and the pen with it
+  h.deliver([upsert(call(8, 202, "edit", "in_progress", reply)), upsert(header("running"))]);
+  await h.settle();
+  expect(working().querySelector(".working-pen")).not.toBeNull();
+  // a question for the lawyer, with no permission pending
+  h.deliver([reset([ASKED, read(7, 201, "a/Lease.pdf"), elicitation(8)], header("needs_you"))]);
+  await h.settle();
+  expect(working().querySelector(".working-pen")).toBeNull();
+  expect(lead()).toBe("question");
+  expect(working().textContent).toContain(`${frame("en", "A question for you")}.`);
+});
+
 test("in Hindi, the line and the rows in Hindi, the paper's name as filed", async () => {
   h = await mountRoom({ display: { language: "hi" } });
   h.deliver([

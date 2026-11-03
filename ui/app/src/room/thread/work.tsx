@@ -19,7 +19,7 @@ import { useAgentPlan } from "./agent-plan.ts";
 import { LazyThreadList, loadThread } from "./chunk.ts";
 import { pausedPick } from "./limit-words.ts";
 import { useBusy } from "./live.ts";
-import { doingPick } from "./step-names.ts";
+import { asksPick, doingPick } from "./step-names.ts";
 import {
   ThreadActionsContext,
   useRefused,
@@ -109,6 +109,8 @@ export function Work({
   // what the running step is doing, for the working line in place of "Answering."
   const pickDoing = useMemo(() => doingPick(lang), [lang]);
   const doing = useStreamPart(store, stream, pickDoing);
+  // a permission prompt or a question waiting on the lawyer: the working line says so, and the pen stops
+  const asks = useStreamPart(store, stream, asksPick);
   const { brk, live } = useThreadBreak(store, stream);
   const restart = useMemo(() => nextHostOf(transport).restart, [transport]);
   const lines = useBreakLines();
@@ -165,6 +167,7 @@ export function Work({
         disabled={matter === null}
         busy={busy}
         doing={doing}
+        asks={asks}
         refused={session.refused ?? otherRefused}
         failed={
           failed === null

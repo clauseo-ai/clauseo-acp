@@ -33,7 +33,8 @@ const markup = (node: ReactNode) => renderToStaticMarkup(node);
 const CLOCK = markup(<IconChecking size={16} className="working-icon" />);
 const BREAK = markup(<IconBreak size={16} className="working-icon" />);
 
-const STATES: [string, WorkingState, "wait" | "break" | "pen"][] = [
+const QUESTION = markup(<IconQuestion size={16} className="working-icon" />);
+const STATES: [string, WorkingState, "wait" | "break" | "pen" | "question"][] = [
   [
     "a check",
     { kind: "check", name: "Acme", waitingFor: "the judgments", expected: "16:32" },
@@ -50,6 +51,11 @@ const STATES: [string, WorkingState, "wait" | "break" | "pen"][] = [
     { kind: "wait", words: "That failed.", pill: null, code: "agent.exited" },
     "break",
   ],
+  [
+    "the lawyer's turn",
+    { kind: "wait", words: "Needs your permission.", pill: null, asks: true },
+    "question",
+  ],
   ["Clauseo writing", { kind: "wait", words: "Answering.", pill: null, working: true }, "pen"],
   [
     "a check while writing",
@@ -64,7 +70,7 @@ test.each(STATES)("the working line on %s leads with its own mark", async (_, st
   expect(row.dataset["lead"]).toBe(lead);
   const icon = row.querySelector(".working-icon")!;
   if (lead === "pen") expect(icon.classList.contains("working-pen")).toBe(true);
-  else expect(icon.outerHTML).toBe(lead === "break" ? BREAK : CLOCK);
+  else expect(icon.outerHTML).toBe({ break: BREAK, question: QUESTION, wait: CLOCK }[lead]);
   expect(row.querySelectorAll(".working-icon")).toHaveLength(1);
 });
 
