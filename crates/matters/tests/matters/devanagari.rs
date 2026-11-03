@@ -239,10 +239,11 @@ fn an_owner_file_in_another_form_holds_the_document() {
             matches!(held, Some(HeldOpen::OwnerFile(_))),
             "{document:?} beside {owner:?}: {held:?}"
         );
+        // The name comes back as the file system gives it, which APFS may spell in either form.
         let at = clauseo_matters::held_open_at(&fx.folder, &fx.file(document));
         assert_eq!(
-            at.map(|(found, _)| found),
-            Some(path(document)),
+            at.map(|(found, _)| nfc(found.as_str())),
+            Some(nfc(document)),
             "{document:?}"
         );
     }
