@@ -69,6 +69,10 @@ test("a group before the answer's first words stands on its meta line after the 
   expect(who?.textContent).toMatch(/^Clauseo, /);
   expect(line?.tagName).toBe("BUTTON");
   expect(line?.textContent).toBe("2 papers read.");
+  // one control: the kind icon and the chevron are inside the button with the words
+  expect(line?.querySelector(".step-group-icons svg")).not.toBeNull();
+  expect(line?.querySelector(".step-group-chev svg")).not.toBeNull();
+  expect(meta.querySelectorAll("svg")).toHaveLength(line!.querySelectorAll("svg").length);
   await h.click(line);
   // opened: the rows under the meta line, then the answer's words
   const rows = h.one("step-group-rows")!;
