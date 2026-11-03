@@ -62,7 +62,7 @@ pub(crate) fn fold(state: &mut ThreadState, envelope: &Envelope, out: &mut Appli
         DomainEvent::TurnStarted(event) => turn::turn_started(state, event.turn, out),
         DomainEvent::TextAppended(event) => text_appended(state, seq, event, out),
         DomainEvent::ContentAppended(event) => content_appended(state, seq, event_id, event, out),
-        DomainEvent::ToolCallStarted(event) => tool_call_started(state, seq, event, out),
+        DomainEvent::ToolCallStarted(event) => tool_call_started(state, seq, ts, event, out),
         DomainEvent::ToolCallUpdated(event) => tool_call_updated(state, ts, event, out),
         DomainEvent::PermissionRequested(event) => {
             asks::permission_requested(state, seq, event, out);
@@ -298,6 +298,7 @@ fn content_appended(
 fn tool_call_started(
     state: &mut ThreadState,
     seq: Seq,
+    ts: Timestamp,
     event: &ToolCallStarted,
     out: &mut Applied,
 ) {
@@ -321,6 +322,8 @@ fn tool_call_started(
         raw_input: event.raw_input.clone(),
         raw_output: event.raw_output.clone(),
         content: event.content.clone(),
+        started_at: ts,
+        finished_at: queue::final_time(event.status, ts),
         background: None,
     };
     insert_new(state, seq, ViewEntry::ToolCall(Box::new(entry)), out);
@@ -355,6 +358,7 @@ fn tool_call_updated(
     }
     if let Some(status) = patch.status {
         changed |= set(&mut entry.status, status);
+        changed |= settle_finish(entry, ts);
         changed |= queue::background_finished(entry, ts);
     }
     if let Some(locations) = &patch.locations {
@@ -375,6 +379,16 @@ fn tool_call_updated(
                 entry.clone(),
             ))));
     }
+}
+
+/// Sets a tool call's finish time at `ts` when it has none and its status is final now. Says
+/// whether it changed.
+fn settle_finish(entry: &mut ToolCallEntry, ts: Timestamp) -> bool {
+    if entry.finished_at.is_some() {
+        return false;
+    }
+    entry.finished_at = queue::final_time(entry.status, ts);
+    entry.finished_at.is_some()
 }
 
 pub(super) fn insert_marker(

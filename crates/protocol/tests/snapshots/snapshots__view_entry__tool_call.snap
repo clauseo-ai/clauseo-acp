@@ -48,6 +48,8 @@ expression: "entry(\"tool_call\")"
         }
       }
     ],
+    "started_at": 1760000004000,
+    "finished_at": 1760000005000,
     "background": {
       "steer": "01900000-0000-7000-8000-000000000009"
     }

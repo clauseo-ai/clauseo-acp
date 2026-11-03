@@ -3216,8 +3216,8 @@ export type ToolCallContent =
 string;
 
 /**
- *  A tool call: `ToolCallStarted`'s fields after `acp_id`, with every update applied. Entry id
- *  `tool_call:<tool_call>`.
+ *  A tool call: `ToolCallStarted`'s fields after `acp_id`, with every update applied, and its start
+ *  and finish times. Entry id `tool_call:<tool_call>`.
  */
 export type ToolCallEntry = {
 	/**  The `seq` of `ToolCallStarted`. */
@@ -3242,6 +3242,17 @@ export type ToolCallEntry = {
 	raw_output?: TextOrBlob,
 	/**  What it shows. */
 	content: ToolCallContent[],
+	/**
+	 *  When it started: the `ts` of the `ToolCallStarted` envelope that opened the entry (the
+	 *  log's clock, so replays give the same time).
+	 */
+	started_at: Timestamp,
+	/**
+	 *  When it finished: the `ts` of the first event that gave it a final status (completed,
+	 *  failed or cancelled), the start included. `None` while it runs; later updates never move
+	 *  it. Display only.
+	 */
+	finished_at?: Timestamp,
 	/**
 	 *  Set when it had not finished as a steer joined its turn, so it carried on in the
 	 *  background (`SteerResolved`'s `aside`). Missing reads as `None`. Boxed: it is rare, and a

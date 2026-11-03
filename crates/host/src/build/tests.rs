@@ -95,6 +95,8 @@ fn tool_entry(
         raw_input,
         raw_output,
         content,
+        started_at: Timestamp::ZERO,
+        finished_at: None,
         background: None,
     }))
 }

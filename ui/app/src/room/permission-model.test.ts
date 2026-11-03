@@ -41,6 +41,7 @@ const entry = (over: Partial<PermissionEntry> = {}): PermissionEntry => ({
 
 const call = (over: Partial<ToolCallEntry> = {}): ToolCallEntry => ({
   order: 2,
+  started_at: 0,
   tool_call: "t1",
   turn: "turn",
   title: "Edit Notice.docx",

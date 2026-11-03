@@ -113,6 +113,8 @@ fn thread_entries() -> Vec<ViewEntry> {
             raw_input: tool.raw_input,
             raw_output: tool.raw_output,
             content: tool.content,
+            started_at: Timestamp::new(1_760_000_004_000).unwrap(),
+            finished_at: Some(Timestamp::new(1_760_000_005_000).unwrap()),
             background: Some(Box::new(BackgroundMark {
                 steer: message_id(9),
                 finished_at: None,

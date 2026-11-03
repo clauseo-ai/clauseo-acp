@@ -226,6 +226,14 @@ flag: no event sets it, `clauseo_reducer::set_queue_held` does, and a snapshot w
 to 5, after 0042's 3 to 4: old snapshots are passed over and each thread's log is folded once at
 its next reopen, as for the bump above.
 
+Tool calls carry their times (no event changes; the fold does). `ToolCallEntry.started_at` is the
+`ts` of the `tool_call_started` envelope that opened the entry, and `ToolCallEntry.finished_at` is
+the `ts` of the first event that gave it a final status (`None` while it runs; a later update does
+not move it). Both come from committed envelopes, so a replay gives the same times. The fields are
+additive for the log, and `started_at` is required in a view entry, so `REDUCER_SCHEMA_VERSION` goes
+from 5 to 6: old snapshots are passed over and each thread's log is folded once at its next reopen,
+as for the bump above.
+
 A `Step` entry has no `undo_possible` field. The UI derives it from the step alone, as
 `checkpoint_after` exists and the step is not undone (`StepEntry::undo_possible` states the same
 rule). Whether a turn runs is the header's `status` for this thread and the host's check at
