@@ -95,7 +95,7 @@ assertion_line: 16
       "properties": {
         "default_location": {
           "default": null,
-          "description": "The folder new matters go in, as an absolute path. When absent, `Documents/Clauseo`.",
+          "description": "The folder new matters go in, as an absolute path. When absent: `Documents/Clauseo`, or,\nwith `CLAUSEO_DATA_DIR` set, `<data dir>-matters` beside the data folder.",
           "type": [
             "string",
             "null"

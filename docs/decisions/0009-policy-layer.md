@@ -20,7 +20,9 @@ keys need no new mechanism. `clauseo-settings` reads it, and IT writes against t
     `/Library/Application Support/Clauseo/policy.json`.
   - Linux: `/etc/clauseo/policy.json`.
   - Only these count. `HKEY_CURRENT_USER`, roaming app data and user-writable files are never
-    policy, and no variable moves a source: `CLAUSEO_DATA_DIR` moves only the data folder.
+    policy, and no variable moves a source: `CLAUSEO_DATA_DIR` moves only the data folder and,
+    with it, the default matters folder, `<data dir>-matters` beside it (never inside: the
+    matters' refused trees hold the whole data folder).
 - **Keys** are the dotted keys of `settings.json`: `matters.default_location`, `ui.theme`,
   `ui.font_size`, `ui.density`, `ui.language`, `ui.lite`, `ui.motion` (the last two added by
   0017), `agents.<id>` for one agent's launch spec, and `mcp.servers` for the whole list of MCP

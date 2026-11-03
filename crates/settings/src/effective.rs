@@ -139,7 +139,9 @@ impl Effective {
             .map(|(name, server)| (name.as_str(), server))
     }
 
-    /// Where new matters go: `matters.default_location`, or else `Documents/Clauseo`.
+    /// Where new matters go: `matters.default_location` (user or policy), or else
+    /// [`Locations::default_matters_dir`]: `Documents/Clauseo`, or with `CLAUSEO_DATA_DIR` set the
+    /// sibling `<data dir>-matters`.
     pub fn default_matters_dir(&self) -> &Path {
         self.settings
             .matters

@@ -135,11 +135,57 @@ fn data_dir_override_from_env() {
         assert_eq!(at.data_dir(), abs("tmp/clauseo-ci"), "{os:?}");
         assert_eq!(at.settings_file(), abs("tmp/clauseo-ci/settings.json"));
     }
-    // The override moves only the data folder.
-    let at = Locations::resolve_for(Os::Windows, &windows_dirs(), &env).unwrap();
+    // The override moves the data folder and, beside it, the default matters folder: never
+    // Documents, and never inside the data folder (a matter there is refused).
+    for os in [Os::Windows, Os::Mac, Os::Linux] {
+        let at = Locations::resolve_for(os, &windows_dirs(), &env).unwrap();
+        assert_eq!(
+            at.default_matters_dir(),
+            abs("tmp/clauseo-ci-matters"),
+            "{os:?}"
+        );
+    }
+}
+
+#[test]
+fn data_dir_override_puts_new_matters_beside_the_data_folder() {
+    // A fresh scratch data folder keeps its matters out of the user's Documents, and out of
+    // the data folder itself, where every matter is refused.
+    let env = FakeEnv(vec![(DATA_DIR_VAR, abs_str("tmp/run-7/data"))]);
+    let at = Locations::resolve_for(Os::Linux, &home_dirs(), &env).unwrap();
+    assert_eq!(at.default_matters_dir(), abs("tmp/run-7/data-matters"));
+    assert!(!at.default_matters_dir().starts_with(at.data_dir()));
+    assert_ne!(
+        at.default_matters_dir(),
+        Path::new("/home/ada/Documents/Clauseo")
+    );
+}
+
+#[test]
+fn data_dir_override_at_a_root_keeps_documents() {
+    // A root has no name, so no sibling: the default stays Documents/Clauseo, not a refusal.
+    let root = if cfg!(windows) { r"C:\" } else { "/" };
+    let env = FakeEnv(vec![(DATA_DIR_VAR, root.to_owned())]);
+    let at = Locations::resolve_for(Os::Linux, &home_dirs(), &env).unwrap();
+    assert_eq!(at.data_dir(), Path::new(root));
+    assert_eq!(
+        at.default_matters_dir(),
+        Path::new("/home/ada/Documents/Clauseo")
+    );
+}
+
+#[test]
+fn no_override_keeps_documents_clauseo() {
+    // Without `CLAUSEO_DATA_DIR`, nothing changes: the known folder (Windows) or Documents.
+    let at = Locations::resolve_for(Os::Windows, &windows_dirs(), &FakeEnv::default()).unwrap();
     assert_eq!(
         at.default_matters_dir(),
         Path::new("/D/OneDrive/Documents/Clauseo")
+    );
+    let at = Locations::resolve_for(Os::Mac, &home_dirs(), &FakeEnv::default()).unwrap();
+    assert_eq!(
+        at.default_matters_dir(),
+        Path::new("/home/ada/Documents/Clauseo")
     );
 }
 

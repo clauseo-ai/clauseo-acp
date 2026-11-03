@@ -12,7 +12,10 @@ use std::path::{Path, PathBuf};
 /// and matches the identifier in the desktop crate's `tauri.conf.json`.
 pub const IDENTIFIER: &str = "ai.clauseo.desktop";
 
-/// The variable that moves the data folder, for `cli` and CI. It never moves a policy path.
+/// The variable that moves the data folder, for `cli`, CI and by-hand runs. It never moves a
+/// policy path. With it set, the default matters folder moves beside the data folder too (see
+/// [`Locations::default_matters_dir`]), so a run with a scratch data folder creates its matters
+/// there and not in the user's Documents.
 pub const DATA_DIR_VAR: &str = "CLAUSEO_DATA_DIR";
 
 /// The name of the user's settings file, in the data folder.
@@ -111,8 +114,13 @@ impl Locations {
         &self.settings_file
     }
 
-    /// Where new matters go when `matters.default_location` is not set: `Documents/Clauseo`.
-    /// `host` adds each matter's name.
+    /// Where new matters go when `matters.default_location` is not set. Without
+    /// `CLAUSEO_DATA_DIR`, that is `Documents/Clauseo`. With it, it is `<data dir>-matters`, a
+    /// sibling of the data folder (same parent, the data folder's name plus `-matters`): a matter
+    /// inside the data folder is always refused, since the matters' refused trees hold the whole
+    /// data folder, and the matters root is `<data dir>/matters`. A data folder with no name (a
+    /// root such as `/`) has no sibling, so it keeps `Documents/Clauseo`. `host` adds each
+    /// matter's name.
     pub fn default_matters_dir(&self) -> &Path {
         &self.default_matters_dir
     }
@@ -142,14 +150,18 @@ impl Locations {
         env: &dyn Env,
     ) -> Result<Locations, Error> {
         let home = || dirs.home().ok_or(Error::NoFolder { folder: "home" });
-        let data_dir = match env.var(DATA_DIR_VAR).filter(|value| !value.is_empty()) {
+        let overridden = match env.var(DATA_DIR_VAR).filter(|value| !value.is_empty()) {
             Some(value) => {
                 let path = PathBuf::from(value);
                 if !path.is_absolute() {
                     return Err(Error::RelativeDataDir { path });
                 }
-                path
+                Some(path)
             }
+            None => None,
+        };
+        let data_dir = match overridden.clone() {
+            Some(path) => path,
             None => match os {
                 Os::Windows => dirs
                     .known_folder(KnownFolder::LocalAppData)
@@ -180,7 +192,12 @@ impl Locations {
                 None => home()?.join("Documents"),
             },
         };
-        Ok(Self::with_data_dir(data_dir, documents.join("Clauseo")))
+        let documents_matters = documents.join("Clauseo");
+        let default_matters_dir = match overridden.as_deref().and_then(matters_beside) {
+            Some(beside) => beside,
+            None => documents_matters,
+        };
+        Ok(Self::with_data_dir(data_dir, default_matters_dir))
     }
 
     fn with_data_dir(data_dir: PathBuf, default_matters_dir: PathBuf) -> Locations {
@@ -190,6 +207,15 @@ impl Locations {
             default_matters_dir,
         }
     }
+}
+
+/// The default matters folder beside a data folder that `CLAUSEO_DATA_DIR` named:
+/// `<data dir>-matters`, in the same parent. `None` when the data folder has no name (a root), so
+/// the caller keeps `Documents/Clauseo`.
+fn matters_beside(data_dir: &Path) -> Option<PathBuf> {
+    let mut sibling = data_dir.file_name()?.to_owned();
+    sibling.push("-matters");
+    Some(data_dir.with_file_name(sibling))
 }
 
 /// A variable that holds an absolute path. The XDG rules say to ignore any other value.
