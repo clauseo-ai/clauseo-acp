@@ -108,6 +108,13 @@ test("the line is a button that opens its rows in place and folds them, with ari
   );
   const line = host.querySelector("button")!;
   expect(line.getAttribute("aria-expanded")).toBe("false");
+  // one control, as the design's chip: the lead icons, the words and the chevron all inside the button, so its focus
+  // ring and its hover well take in the whole line
+  expect(host.querySelectorAll("button")).toHaveLength(1);
+  expect(line.firstElementChild?.classList.contains("step-group-icons")).toBe(true);
+  expect(line.querySelectorAll(".step-group-icons svg")).toHaveLength(2);
+  expect(line.querySelector(".step-group-words")?.parentElement).toBe(line);
+  expect(line.querySelector(".step-group-chev svg")).not.toBeNull();
   expect(line.textContent).toBe("2 papers read. Searched once. 1 of them failed.");
   expect(host.querySelector('[data-testid="step-group"]')?.getAttribute("data-trouble")).toBe(
     "true",
