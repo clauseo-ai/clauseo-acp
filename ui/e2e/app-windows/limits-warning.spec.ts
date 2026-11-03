@@ -4,12 +4,13 @@
 // so no stop line or stop mark shows.
 //
 // Done-when 2's plan-tone check (the plan line's `data-tone` "near") waits for QU.8's words for
-// LiveOnly. With fake_agent registered as claude-acp the host's usage reader fails, the view goes
-// live_only, and lookOf hides the plan line ("no line" until QU.8's words, plan-model.ts). So this
-// spec asserts the warning shows and the plan line is absent, not its tone, until those words land.
-// The first read's end is a hidden marker, `plan-state` (live-plan.tsx), whose data-freshness is
-// "live_only" once the view is LiveOnly: the send waits for it, since a live signal that arrives
-// during the first read ("loading") is dropped (the model's Loading rule).
+// LiveOnly. With fake_agent registered as claude-acp the host's usage reader fails, so the first
+// read ends "unavailable" (limits merge.rs); the view goes live_only only when the live signal
+// arrives, the usage_update inside this turn. lookOf hides a live_only plan line ("no line" until
+// QU.8's words, plan-model.ts), so this spec asserts the warning shows and the plan line is absent,
+// not its tone, until those words land. The first read's end is a hidden marker, `plan-state`
+// (live-plan.tsx): the send waits for "unavailable", since a live signal that arrives during the
+// first read ("loading") is dropped (the model's Loading rule).
 
 import { expect } from "@playwright/test";
 import { test } from "./fixture.ts";
@@ -21,11 +22,13 @@ test.use({ scenario: "limit-warning" });
 test("a near-limit warning shows under the field, and sending stays open", async ({ app }) => {
   const w = window(app.page);
   await openMatter(w);
-  // The start-up read runs in the background: the send waits until the view is live_only.
+  // The start-up read runs in the background and fails for fake_agent: the send waits for its end.
   await expect(w.planState).toBeAttached();
-  await expect(w.planState).toHaveAttribute("data-freshness", "live_only");
+  await expect(w.planState).toHaveAttribute("data-freshness", "unavailable");
   await sendPrompt(w, "Check the last clause");
   await expectTurnEnded(w, "end_turn");
+  // the turn's usage_update is the live signal: the view is now live_only
+  await expect(w.planState).toHaveAttribute("data-freshness", "live_only");
   // the warning carries the near state while the plan line stays hidden (LiveOnly, see the header)
   await expect(w.limitWarning).toBeVisible();
   await expect(w.plan).toHaveCount(0);
