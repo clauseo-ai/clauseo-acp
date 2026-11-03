@@ -103,3 +103,36 @@ export const callOf = (e: Envelope): ToolCallId => {
   };
   return event.web_search_recorded?.tool_call ?? event.page_visited?.tool_call ?? "";
 };
+
+/** The title the real adapter gives the tool call an envelope records, by the thread's agent and the event:
+ * claude-agent-acp (src/tool-calls/reporters/web.ts, main on 2026-11-03) titles WebSearch `Search "<query>"` and
+ * WebFetch `Fetch <url>`; codex-acp (src/thread.rs update_web_search_query, main 296069e8) titles its web search
+ * `Searching for: <query>` and its open page `Opening: <url>`. The browser's tool call (#275) has no recorded title
+ * yet, so a browser page's tool call is titled by its address alone. */
+export function titleOf(e: Envelope, agent: AgentId): string {
+  const event = e.event as {
+    web_search_recorded?: { query: string };
+    page_visited?: { url: string; via: PageVia };
+  };
+  const codex = agent.startsWith("codex");
+  const search = event.web_search_recorded;
+  if (search !== undefined)
+    return codex ? `Searching for: ${search.query}` : `Search "${search.query}"`;
+  const page = event.page_visited;
+  if (page === undefined) return "";
+  if (page.via === "codex_open_page") return `Opening: ${page.url}`;
+  if (page.via === "browser") return page.url;
+  return `Fetch ${page.url}`;
+}
+
+/** One tool call entry for each tool call the envelopes name, in order from `order`, titled as the agent's adapter
+ * titles it (titleOf, from the tool call's first envelope). Both adapters give web tool calls the fetch kind. */
+export function webCallsFor(
+  envelopes: readonly Envelope[],
+  agent: AgentId,
+  order = 10,
+): ViewEntry[] {
+  const first = new Map<ToolCallId, Envelope>();
+  for (const e of envelopes) if (!first.has(callOf(e))) first.set(callOf(e), e);
+  return [...first].map(([call, e], i) => webCall(order + i, call, titleOf(e, agent), "fetch"));
+}

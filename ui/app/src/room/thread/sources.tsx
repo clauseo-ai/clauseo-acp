@@ -11,7 +11,13 @@ import type { HostTransport } from "../../transport/host-transport.ts";
 import type { AgentId, StreamId, ToolCallId, WebResult } from "../../transport/protocol.ts";
 import { kindOf, planName } from "../agent.ts";
 import { quietly } from "../open.ts";
-import { pagesShown, SourcesTransport, useToolCallWeb, type ToolCallWeb } from "./sources.ts";
+import {
+  pagesShown,
+  SourcesOpenAtFirst,
+  SourcesTransport,
+  useToolCallWeb,
+  type ToolCallWeb,
+} from "./sources.ts";
 
 const DEVANAGARI = /\p{Script=Devanagari}/gu;
 const LETTER = /\p{L}/gu;
@@ -224,7 +230,7 @@ function SourcesOf({
   const w = useSourcesWords();
   const webs = useToolCallWeb(transport, stream);
   // each answer's own, while it is mounted; shut at first
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(use(SourcesOpenAtFirst));
   const items = itemsOf(
     calls.flatMap((call) => {
       const web = webs.get(call);
