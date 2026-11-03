@@ -51,7 +51,8 @@ pub enum FolderScan {
 /// (the exclusion list, the settings' probe and size cap) under a [`NoDownload`] guard.
 /// `progress` gets the running counts and the file reached after each file. Returns
 /// [`FolderScan::Cancelled`] once `cancel` is set (the walk checks it before each folder, entry
-/// and stat). Opens no file and writes nothing; a cloud-only file is counted from its metadata.
+/// and stat). Opens no file of the folder's own and writes nothing: the refusal checks read only
+/// its `.clauseo/matter.json`, as import does, and a cloud-only file is counted from its metadata.
 pub fn scan_folder(
     folder: &Path,
     refused: &[PathBuf],
