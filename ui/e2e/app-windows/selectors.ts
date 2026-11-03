@@ -170,6 +170,14 @@ export const ids = {
   steerMark: "steer-mark",
   /** Where a steered message went, with `data-outcome` ("requeued" or "sent_now"). */
   steerOutcome: "steer-outcome",
+  /** The status line's tool line, after the plan: the conversation's tools in one phrase, which opens the popover. */
+  toolLine: "tool-line",
+  /** The tool line's popover. */
+  toolPopover: "tool-popover",
+  /** One tool's row in the popover, with `data-tool` ("web_search" or "browser"). */
+  toolRow: "tool-row",
+  /** A muted line under a tool's name in its row: where it stands, then the Chrome download's words. */
+  toolRowLine: "tool-row-line",
 } as const;
 
 /** The settings window's page: the last part of its URL path (crates/desktop's settings window). */
@@ -269,6 +277,14 @@ export function window(page: Page) {
      * part's class, not a test id, like folderLine).
      */
     statusPlan: page.locator(".room-status-plan"),
+    /** The tool line, once its popover's chunk is in (before, its words stand with no test id). */
+    toolLine: id(ids.toolLine),
+    toolPopover: id(ids.toolPopover),
+    /** The popover's row for `tool`, "web_search" or "browser". */
+    toolRow: (tool: "web_search" | "browser"): Locator =>
+      page.locator(`[data-testid="${ids.toolRow}"][data-tool="${tool}"]`),
+    /** The muted lines of a tool's row, in order. */
+    toolRowLines: (row: Locator): Locator => row.getByTestId(ids.toolRowLine),
     error: id(ids.error),
     composer: id(ids.composer),
     send: id(ids.send),
