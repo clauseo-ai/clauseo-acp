@@ -19,8 +19,10 @@
 #   and then the release app, full LTO, uploaded as clauseo-desktop-<target>.
 # - Tier 1 (macOS Apple silicon, Windows x64) and Linux build and test on every pull request that
 #   changes Rust. Tier 2 (Intel macOS, Windows ARM64) waits for the merge: on a pull request the
-#   matrix leaves it out and two jobs skipped by `if` report its checks without taking a runner;
-#   it builds in full on each push to main, nightly and on demand. The Apple silicon job checks on
+#   matrix leaves it out and jobs skipped by `if` report its checks without taking a runner (Intel
+#   macOS's below, Windows ARM64's in tier2-pr.yml); it builds in full on each push to main, nightly
+#   and on demand. In the merge queue Windows ARM64 runs its tests only (no clippy, no release
+#   app), so a failure only ARM64 shows cannot reach main. The Apple silicon job checks on
 #   each run that the workspace still compiles for Intel macOS.
 # - Rust caches are saved on main only (`save-if`); pull requests restore main's and save nothing,
 #   so they never evict main's entries from the 10 GB Actions cache. Tier 2 saves none: Intel macOS
@@ -215,18 +217,25 @@ jobs:
     timeout-minutes: 60
     strategy:
       fail-fast: false
-      # Tier 1 and Linux on every event; tier 2 (Intel macOS, Windows ARM64) on every event but a
-      # pull request, where the jobs tier2-x86_64-apple-darwin and tier2-aarch64-pc-windows-msvc
-      # below report their checks. `native`: built on its own OS, so linted and tested; Intel macOS
+      # Tier 1 and Linux on every event; tier 2 (Intel macOS, Windows ARM64) on push, nightly and on
+      # demand. On a pull request the job tier2-x86_64-apple-darwin below and tier2-pr.yml report
+      # their checks. In a merge group Windows ARM64 runs too, `test_only`: the Test step, which is
+      # all that its check needs there (about 9 minutes, cold: no Rust cache for it), while Intel
+      # macOS keeps the job below. `native`: built on its own OS, so linted and tested; Intel macOS
       # is cross-compiled on the arm64 runner, so it is built but not linted or tested. Linux is the
       # oldest glibc we support; release packages are built there later. One JSON list per case,
       # as in e2e-windows.yml's smoke.
       matrix:
         include: >-
-          ${{ fromJSON((github.event_name == 'pull_request' || github.event_name == 'merge_group')
+          ${{ fromJSON(github.event_name == 'pull_request'
             && '[{"target": "aarch64-apple-darwin", "runner": "macos-15", "native": true},
                  {"target": "x86_64-unknown-linux-gnu", "runner": "ubuntu-22.04", "native": true},
                  {"target": "x86_64-pc-windows-msvc", "runner": "windows-2025", "native": true}]'
+            || github.event_name == 'merge_group'
+            && '[{"target": "aarch64-apple-darwin", "runner": "macos-15", "native": true},
+                 {"target": "x86_64-unknown-linux-gnu", "runner": "ubuntu-22.04", "native": true},
+                 {"target": "x86_64-pc-windows-msvc", "runner": "windows-2025", "native": true},
+                 {"target": "aarch64-pc-windows-msvc", "runner": "windows-11-arm", "native": true, "test_only": true}]'
             || '[{"target": "aarch64-apple-darwin", "runner": "macos-15", "native": true},
                  {"target": "x86_64-apple-darwin", "runner": "macos-15", "native": false},
                  {"target": "x86_64-unknown-linux-gnu", "runner": "ubuntu-22.04", "native": true},
@@ -307,7 +316,7 @@ jobs:
 
       # cfg-gated code is linted only on its own OS.
       - name: clippy
-        if: env.BUILD == 'true' && matrix.native
+        if: env.BUILD == 'true' && matrix.native && !matrix.test_only
         run: cargo clippy --workspace --all-targets --target "$TARGET" -- -D warnings
 
       # The marks build's macOS code (src/marks.rs), which the speed scoreboard plays; that job
@@ -333,7 +342,7 @@ jobs:
       # a fresh account name, on every native macOS and Windows entry, Windows ARM64 included.
       # Linux has no keychain store in the crate (not a product target).
       - name: Keychain smoke test (clauseo-connectors)
-        if: env.BUILD == 'true' && matrix.native && runner.os != 'Linux'
+        if: env.BUILD == 'true' && matrix.native && runner.os != 'Linux' && !matrix.test_only
         run: cargo nextest run -p clauseo-connectors --profile ci --run-ignored only -E 'test(keychain_smoke)'
 
       # The desktop crate's tests with the marks feature (the speed scoreboard's build), here on
@@ -414,12 +423,13 @@ jobs:
           APP: target/${{ env.TARGET }}/release/${{ env.EXE }}
         run: .github/scripts/launch-xvfb.sh "$APP"
 
-  # Tier 2 waits for the merge. On a pull request the build matrix leaves these targets out, and
-  # these two jobs report their required checks instead: skipped by `if`, they take no runner (the
-  # org shares 20 concurrent jobs, 5 of them macOS) and report as skipped, which satisfies a
-  # required check. They never run: on every other event the matrix builds both targets under the
-  # same check names. Not in the matrix, so they report their real names; a skipped matrix job
-  # would report "build (${{ matrix.target }})" instead.
+  # Tier 2 waits for the merge. On a pull request and in a merge group the build matrix leaves Intel
+  # macOS out, and this job reports its required check instead: skipped by `if`, it takes no runner
+  # (the org shares 20 concurrent jobs, 5 of them macOS) and reports as skipped, which satisfies a
+  # required check. It never runs: on every other event the matrix builds the target under the same
+  # check name. Not in the matrix, so it reports its real name; a skipped matrix job would report
+  # "build (${{ matrix.target }})" instead. Windows ARM64's stand-in is in tier2-pr.yml, which runs
+  # on pull requests only, so that in a merge group the real ARM64 job alone reports its check.
   tier2-x86_64-apple-darwin:
     name: build (x86_64-apple-darwin)
     # Never true (no event is named never); actionlint rejects a constant `false`.
@@ -428,13 +438,6 @@ jobs:
     steps:
       - run: echo "Intel macOS is tier 2; it builds on push to main, nightly and on demand."
 
-  tier2-aarch64-pc-windows-msvc:
-    name: build (aarch64-pc-windows-msvc)
-    # Never true (no event is named never); actionlint rejects a constant `false`.
-    if: github.event_name == 'never'
-    runs-on: ubuntu-24.04
-    steps:
-      - run: echo "Windows ARM64 is tier 2; it builds on push to main, nightly and on demand."
 
   # cargo-mutants on main's changes of the last 24 hours, nightly and on demand. It only reports:
   # a missed mutant, or a run that reaches `MUTANTS_TIMEOUT` in xtask/src/mutants.rs, shows in the
