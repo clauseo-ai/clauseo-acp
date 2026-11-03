@@ -116,7 +116,12 @@ impl World {
     /// The policy for `m1`: its state folder and notes, the credential link, the Claude store,
     /// the data dir and the sibling matter hidden, and `extra` on top.
     pub(crate) fn builder(&self) -> PolicyBuilder {
-        Policy::builder(self.at("m1"), self.at("data/agent-state/m1/codex"))
+        self.builder_for("m1")
+    }
+
+    /// [`World::builder`] with the matter at `matter` (relative) in place of `m1`.
+    pub(crate) fn builder_for(&self, matter: &str) -> PolicyBuilder {
+        Policy::builder(self.at(matter), self.at("data/agent-state/m1/codex"))
             .home(self.at("home"))
             .notes(self.at("data/agent-state/m1/notes"))
             .credential_link(self.at("data/agent-state/m1/codex/auth.json"))
@@ -130,6 +135,11 @@ impl World {
 pub(crate) fn dir_at(path: &Path) -> PathBuf {
     std::fs::create_dir(path).unwrap();
     path.to_owned()
+}
+
+/// `mkdir path` outside the jail, its result returned: what the volume itself allows.
+pub(crate) fn try_dir_at(path: &Path) -> std::io::Result<()> {
+    std::fs::create_dir(path)
 }
 
 /// A symbolic link at `link` pointing at `target`, made outside the jail.

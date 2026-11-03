@@ -8,6 +8,7 @@ use crate::{Access, Error, PathClass};
 
 mod build;
 mod links;
+mod names;
 
 pub use links::LINK_RULES_MAX;
 
@@ -31,26 +32,29 @@ pub const PROTECTED_NAMES: [&str; 8] = [
 /// matter root" (decision 0038, for Rohan to confirm).
 pub const INSTRUCTIONS_AT_ANY_DEPTH: &str = "CLAUDE.md";
 
-/// Whether `path` is `prefix` or under it. On macOS, whose volumes are case-insensitive by
-/// default, names compare without ASCII case, as the kernel resolves them (`DATA/x` is under
-/// `data`); Unicode normalisation (NFD and NFC forms of one name) is not folded. Elsewhere the
-/// comparison is exact.
+/// Whether `path` is `prefix` or under it. On macOS names compare one by one by their
+/// [`names::name_key`], Unicode canonical caseless matching, the folding APFS documents for its
+/// case-insensitive volumes (`DATA/x` is under `data`, an NFD name matches its NFC form; the
+/// pairs checked against this Mac's volume are in the tests). Elsewhere the comparison is exact:
+/// NTFS and Linux file systems keep NFC and NFD names as two files.
 pub(crate) fn under(path: &Path, prefix: &Path) -> bool {
-    if cfg!(target_os = "macos") {
+    if path.starts_with(prefix) {
+        true
+    } else if cfg!(target_os = "macos") {
         let mut names = path.components();
         prefix.components().all(|want| {
             names
                 .next()
-                .is_some_and(|got| got.as_os_str().eq_ignore_ascii_case(want.as_os_str()))
+                .is_some_and(|got| names::same_name(got.as_os_str(), want.as_os_str()))
         })
     } else {
-        path.starts_with(prefix)
+        false
     }
 }
 
 /// Whether `a` and `b` are the same path, by [`under`]'s comparison.
 pub(crate) fn same(a: &Path, b: &Path) -> bool {
-    under(a, b) && a.components().count() == b.components().count()
+    a.components().count() == b.components().count() && under(a, b)
 }
 
 /// Whether `path` is a [`INSTRUCTIONS_AT_ANY_DEPTH`] file in `matter`, in any letter case.
@@ -108,8 +112,8 @@ impl PathRule {
         }
     }
 
-    /// Whether the rule covers `path`; on macOS names compare without ASCII case, as the
-    /// kernel resolves them on a case-insensitive volume.
+    /// Whether the rule covers `path`, by [`under`]: on macOS without case and in any Unicode
+    /// normalisation form, as the kernel resolves names on a case-insensitive volume.
     pub fn covers(&self, path: &Path) -> bool {
         match self {
             PathRule::Literal(rule) => same(path, rule),
@@ -343,7 +347,7 @@ impl Policy {
             !self
                 .link_folders
                 .iter()
-                .any(|folder| finding.path.starts_with(folder))
+                .any(|folder| under(&finding.path, folder))
         })
     }
 
@@ -363,8 +367,8 @@ impl Policy {
     /// [`PathClass::ReadOnly`] for a write to a read-only path (protected names, `.git`,
     /// over-cap files, nested `CLAUDE.md`, read-only paths in the state folder, allowed
     /// folders, runtime, read); otherwise [`PathClass::Outside`]. On macOS names compare
-    /// without ASCII case, as the kernel's checks do on a case-insensitive volume, so
-    /// `.GIT/config` is read-only and `DATA/x` hidden.
+    /// without case and Unicode normalisation ([`under`]), as the kernel's checks do on a
+    /// case-insensitive volume, so `.GIT/config` is read-only and `DATA/x` hidden.
     pub fn classify(&self, path: &Path, access: Access) -> PathClass {
         let on_link = self.links.iter().any(|finding| {
             under(path, &finding.path)

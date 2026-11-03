@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 use crate::Error;
+use crate::policy::{same, under};
 
 /// A `.git` file larger than this is not read for its `gitdir:` line; git writes one line.
 const GIT_FILE_MAX: u64 = 64 * 1024;
@@ -254,7 +255,7 @@ impl Walk {
 /// The finding for the symbolic link at `path`, if it leads outside `matter` or nowhere.
 fn symlink_finding(matter: &Path, path: &Path, kind: FileType) -> Option<LinkFinding> {
     let target = match dunce::canonicalize(path) {
-        Ok(target) if target.starts_with(matter) => return None,
+        Ok(target) if under(&target, matter) => return None,
         Ok(target) => target,
         Err(_) => {
             // Broken (or a loop): outside by rule. Keep where it says it leads.
@@ -312,7 +313,7 @@ fn git_dir_named(matter: &Path, git_file: &Path) -> Option<PathBuf> {
     };
     let dir = dunce::canonicalize(joined).ok()?;
     // The matter itself is left out: naming it would make the whole matter read-only.
-    (dir.starts_with(matter) && dir != matter).then_some(dir)
+    (under(&dir, matter) && !same(&dir, matter)).then_some(dir)
 }
 
 /// The text of `path` if it is at most [`GIT_FILE_MAX`] bytes.

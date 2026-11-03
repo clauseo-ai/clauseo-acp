@@ -16,6 +16,10 @@ tracing = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 # clippy.toml bans std's canonicalize in favour of dunce's.
 dunce = { workspace = true }
+# Path comparisons fold Unicode normalisation and case on macOS, as APFS does
+# (src/policy/names.rs): canonical caseless matching, NFD of the full case fold of NFD.
+unicode-normalization = { workspace = true }
+caseless = { workspace = true }
 # The egress proxy (src/proxy.rs): its thread runs async-io's block_on over an async-executor
 # LocalExecutor; DNS and the upstream lookup run on blocking's pool; httparse reads request and
 # response heads; url turns host names to ASCII (IDN) and parses http:// targets; psl refuses a

@@ -55,3 +55,8 @@ mod devices;
 #[cfg(target_os = "macos")]
 #[path = "jail/env.rs"]
 mod env;
+
+#[cfg(test)]
+#[cfg(target_os = "macos")]
+#[path = "jail/unicode.rs"]
+mod unicode;

@@ -251,6 +251,46 @@ session could meet a folder another local user made again at the same path after
 the host drops the value only after the launch's whole process tree has exited. The random
 16-letter names, the drop order and agent-browser's daemon living inside the launch narrow it.
 
+Amended 2026-11-03, Unicode normalisation in paths. Hindi content is a hard requirement (private
+measurements/hindi-content-audit.md row 3c): a matter named in Devanagari must work, and no deny
+rule may be missed because of the form its name is written in. Measured on APFS
+(case-insensitive) on 2026-11-03: a folder keeps the form it was made in, but its raw, NFC and
+NFD names open the same folder, so on APFS two siblings that differ only in normalisation cannot
+exist; `realpath` (behind `dunce::canonicalize`) returns the stored form whichever form it is
+given.
+- Rust-side comparisons (`policy::under` and `same`, which every policy path comparison goes
+  through, `classify` and the link scan included) compare names by one key on macOS: Unicode
+  canonical caseless matching, NFD of the full case fold (CaseFolding.txt C and F, not Turkic) of
+  NFD, from the `caseless` crate. Case folding is Unicode full folding, not ASCII only. A name
+  that is not UTF-8 folds ASCII case only. Elsewhere comparisons are exact. The policy's dedup
+  sets (link findings, link targets, read-only rules) use the same keys.
+- A test checks the key against this Mac's volume: for each pair a folder is made under one name
+  and opened by the other. APFS and the key agree on all 16: the raw, NFC and NFD Devanagari
+  name; É and é; Σ, σ and ς; ß and ss; ﬁ and fi; İ and i plus U+0307; K and the Kelvin sign; Å
+  and the Angstrom sign; ſ and s; a Hangul syllable and its jamo all match; क and क़, and
+  fullwidth Ａ and A, do not.
+- Kernel rules use the canonical stored form, with no variants. Seatbelt matches `literal` and
+  `subpath` rules across raw, NFC and NFD in every pairing of rule and access form, for existing
+  names and for a `literal` on a name not yet made (measured). The jail tests write through every
+  form of an NFD-made matter and are refused every form of a hidden folder and a nested
+  `CLAUDE.md`.
+- NTFS is normalisation-sensitive (an NFC and an NFD name are two files), as are Linux file
+  systems, so folding there would merge two folders. S15 uses the path Windows returns for the
+  opened handle, with no folding.
+
+Residual risks:
+- On FAT32 volumes two siblings can differ only in normalisation (U+0958 and U+0915 U+093C were
+  made as two folders on a FAT32 image; on an exFAT image the second form of each of U+0958, ऩ
+  and café reported "already exists", as on APFS). A Seatbelt rule that allows one then also
+  allows writes into the other, since Seatbelt folds normalisation itself. That kernel behaviour
+  predates this change, and the Rust-side folding agrees with it; it matters only for a matter on
+  a FAT32 volume.
+- `caseless` 0.2.2 folds by Unicode 16; this Mac's APFS folds Unicode 17 too. A check of every
+  code point found 56 pairs APFS opens as one folder that the key keeps apart (U+A7CE/CF,
+  U+A7D2-D5, and Beria Erfe U+16EA0-16EDx, all new in Unicode 17), and none the other way. For a
+  name in those letters the Rust side can label a denial wrongly or accept an overlap the kernel
+  still refuses, since Seatbelt applies the rule. Revisit when `caseless` moves to Unicode 17.
+
 ## Status
 
 proposed
