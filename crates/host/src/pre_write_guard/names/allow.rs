@@ -24,9 +24,10 @@ use programs::{cp_reads, pandoc_reads, textutil_outputs, unzip_reads};
 ///     `stat`, `test`/`[`, `shasum`, `md5sum`, `sha1sum`, `sha256sum`, `sha512sum`,
 ///     `zipinfo`, `diff`, `cmp`, PowerShell's `Get-Content`/`gc`/`type`, `Select-String`/`sls`
 ///     and `Test-Path`; `file` (not `-C`); `unzip` listing or printing, or extracting into
-///     another folder with `-d` ([`unzip_reads`]); `textutil` whose output, given or derived
-///     from its inputs, names no held file ([`textutil_outputs`]); `cp` of one file to another
-///     file naming no held file, or into a folder outside the matter ([`cp_reads`]); `pandoc`
+///     a folder outside the matter with `-d` ([`unzip_reads`]); `textutil` whose output, given
+///     or derived from its inputs, names no held file ([`textutil_outputs`]); `cp` of one file
+///     to another file naming no held file, or into a folder outside the matter ([`cp_reads`]);
+///     `pandoc`
 ///     with no option that writes or runs code but a literal `-o` naming no held file
 ///     ([`pandoc_reads`]); `stetdoc` in a form writing no held file ([`stetdoc()`]);
 ///     `sh`/`bash`/`zsh`/`dash`/`ksh -c` whose script passes this rule and whose other words
@@ -134,7 +135,7 @@ impl Check<'_> {
             "file" => !args
                 .iter()
                 .any(|arg| short_has(arg, 'C') || long_prefix(arg, "compile")),
-            "unzip" => unzip_reads(args, |folder| self.writable(folder)),
+            "unzip" => unzip_reads(args, |folder| self.outside(folder)),
             "textutil" => textutil_outputs(args).is_some_and(|outputs| {
                 outputs.iter().all(|(out, given)| {
                     if *given {

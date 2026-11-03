@@ -48,7 +48,7 @@
 //!     `NAME=value` before it), is a reader, which may name the held file (`cat`, `head`,
 //!     `tail`, `wc`, `strings`, `ls`, `stat`, `test`/`[`, checksums, `zipinfo`, `diff`,
 //!     `cmp`, PowerShell's `Get-Content`/`type`/`Select-String`/`Test-Path`, `file`, `unzip`
-//!     listing or extracting with `-d` into another folder, `textutil` and `pandoc` whose
+//!     listing, or extracting with `-d` outside the matter, `textutil` and `pandoc` whose
 //!     outputs name no held file and with no option that runs code, `cp` of one file to another
 //!     file naming no held file or into a folder outside the matter, a `stetdoc` form writing
 //!     no held file, `sh -c` whose script passes and whose other words name no held file), or
@@ -80,13 +80,20 @@
 //!   expansion (`Con{tract,x}.docx`), a value built at run time (`f=Con; > $f"tract.docx"`),
 //!   batch commands beyond that wildcard rule (`find … -exec` over `.`, `rsync -a Revised/ .`,
 //!   `unzip -o archive.zip` whose contents land on the held file, `soffice --convert-to docx
-//!   Contract.rtf`), a hard link to the held file, stetdoc's `-oLink.docx` through a symlink, a
-//!   script file the command runs or a `sed`/`rg` script read from a file, a reader's own code
-//!   paths (a program shadowing `cat` in a `PATH` set before the command, a shell profile); a
-//!   file held on Windows by a share mode alone (no owner file) reached by a route the path layer
-//!   misses; a held file past the 20 000 entries listed. The wildcard rule refuses on the safe
-//!   side: a wildcard matching a held name refuses wherever the command writes inside the
-//!   matter, quoted or not (`cp Revised/*.docx Archive/` too). Under Codex, a `.codex` folder
+//!   Contract.rtf`), a hard link to the held file, a glued short output through a symlink
+//!   (stetdoc's or pandoc's `-oLink.docx`), a script file the command runs or a `sed`/`rg`
+//!   script read from a file, a reader's own code paths (a program shadowing `cat` in a `PATH`
+//!   set before the command, a shell profile); a file held on Windows by a share mode alone (no
+//!   owner file) reached by a route the path layer misses; a held file past the 20 000 entries
+//!   listed. The wildcard rule refuses on the safe side: a wildcard matching a held name refuses
+//!   wherever the command writes inside the matter, quoted or not (`cp Revised/*.docx Archive/`
+//!   too). Only a quoted pattern that a search matches itself is left alone (`find -name`,
+//!   `-iname`, `-path` with no writing action, `rg -g`/`--glob`, `grep --include`/
+//!   `--exclude`, PowerShell `Get-ChildItem -Filter`/`-Include`), when nothing in the command
+//!   but readers of its output acts on what it finds. So, while a `.docx` is held, harmless
+//!   commands over `*.docx` are refused: `echo *.docx`, a `for f in *.docx` loop even when its
+//!   body only reads, `tar`/`zip` of `*.docx`, `git add *.docx`, `du -sh *`, `grep -l x *`,
+//!   `python3 x.py *.docx`, `mkdir -p out && cp *.docx out/`. Under Codex, a `.codex` folder
 //!   named by a glob (`cd .cod?`) is not caught. A command given as an argument list (a shape
 //!   Codex used before) is judged read-only as its parts quoted and joined into one line.
 //!

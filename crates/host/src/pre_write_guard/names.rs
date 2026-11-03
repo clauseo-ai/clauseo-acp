@@ -4,6 +4,7 @@
 //! and serving forms ([`stetdoc()`]).
 
 mod allow;
+mod patterns;
 mod stetdoc;
 
 use std::path::{Path, PathBuf};
@@ -301,12 +302,18 @@ fn named_in_words<'a>(
 ) -> Option<&'a Held> {
     let mut segments = Segments::new(MAX_READ_WORDS);
     shell_segments(command, escape, &mut segments);
+    let searching = patterns::only_searches(&segments.iter().collect::<Vec<_>>());
     segments.iter().find_map(|segment| {
         segment
             .words
             .iter()
-            .find_map(|word| {
-                named(word, held).or_else(|| globbed(word, held).filter(|_| segment.command))
+            .enumerate()
+            .find_map(|(at, word)| {
+                named(word, held).or_else(|| {
+                    globbed(word, held).filter(|_| {
+                        segment.command && !(searching && patterns::quoted_pattern(segment, at))
+                    })
+                })
             })
             .or_else(|| {
                 let (inner, inner_escape) =
