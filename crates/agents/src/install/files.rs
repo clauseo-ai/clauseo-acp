@@ -15,6 +15,10 @@ use crate::download::{FetchJob, Fetcher, Magic, part_path};
 use crate::state::InstallState;
 use crate::write;
 
+/// A package's size cap when the snapshot has no size row for the agent and platform (fixture
+/// snapshots): 512 MiB.
+const PACKAGE_CAP_FALLBACK: u64 = 512 * 1024 * 1024;
+
 /// The least time between two `Downloading` events.
 const PROGRESS_EVERY: Duration = Duration::from_millis(250);
 
@@ -147,6 +151,7 @@ fn items<T: Timer + Send + Sync>(job: &Job<T>, node: &NodeChoice) -> Result<Vec<
                 } else {
                     Magic::Gzip
                 },
+                max_bytes: archive.size(),
             }),
         };
         items.push(Item {
@@ -155,6 +160,14 @@ fn items<T: Timer + Send + Sync>(job: &Job<T>, node: &NodeChoice) -> Result<Vec<
             is_package: false,
         });
     }
+    // A package's cap is the agent's whole download for the platform (every package together),
+    // so it is a loose bound on any one tarball; it still stops a hostile mirror from filling the
+    // disk.
+    let package_cap = config
+        .snapshot
+        .agent(&job.ticket.agent)
+        .and_then(|entry| entry.sizes_for(config.platform))
+        .map_or(PACKAGE_CAP_FALLBACK, |row| row.download_bytes);
     for package in config.snapshot.packages(&job.ticket.agent, config.platform) {
         let short = package.name.rsplit('/').next().unwrap_or(&package.name);
         let label = format!("{short}-{}.tgz", package.version);
@@ -180,6 +193,7 @@ fn items<T: Timer + Send + Sync>(job: &Job<T>, node: &NodeChoice) -> Result<Vec<
                     expected: package.integrity.clone(),
                     dest,
                     magic: Magic::Gzip,
+                    max_bytes: package_cap,
                 }),
                 is_package: true,
             }

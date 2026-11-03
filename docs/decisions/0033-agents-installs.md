@@ -96,6 +96,10 @@ present), the crate fetches `resolved` itself:
   the bytes already there are hashed.
 - It hashes as it writes, checks the lock's SHA-512 at the end, and renames to `<hex>.tgz`. A
   mismatch deletes the file.
+- Each file has a size cap: Node's archive exactly its snapshot size, a package the agent's whole
+  download for the platform (a loose bound; 512 MiB for a snapshot with no size row). A
+  `Content-Length` (plus the resumed bytes) over the cap is refused before anything is written,
+  and a body that runs past it is cut off. Either way the `.part` is deleted and the try fails.
 - A body that starts with `<` or comes as `text/html`, where a gzip or zip file should be, is an
   HTML page.
 - At most 3 redirects. Connect timeout 30 s. The response headers, and each read of the body,
