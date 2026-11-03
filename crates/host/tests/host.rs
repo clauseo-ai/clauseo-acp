@@ -151,6 +151,10 @@ mod versions;
 #[cfg(test)]
 #[path = "host/word_open.rs"]
 mod word_open;
+
+#[cfg(test)]
+#[path = "host/word_round_trip.rs"]
+mod word_round_trip;
 #[cfg(test)]
 #[path = "host/writer.rs"]
 mod writer;

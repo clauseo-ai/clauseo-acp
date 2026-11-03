@@ -128,6 +128,10 @@ unicode-normalization = "0.1.26"
 # clauseo-sandbox: Unicode full case folding (CaseFolding.txt C and F) for the policy's path keys on
 # macOS, as a case-insensitive APFS volume folds names.
 caseless = "0.2.2"
+# The Word round trip test (crates/host/tests/host/word_round_trip.rs) reads a .docx's zip entry
+# (deflate, from flate2) and its word/document.xml (quick-xml). Both are already in the lock.
+flate2 = "1.1.10"
+quick-xml = "0.42.0"
 # clauseo-settings: JSONC (settings.json and policy.json take comments and trailing commas),
 # the settings JSON Schema, and macOS managed preferences (CFPreferencesCopyAppValue and
 # CFPreferencesAppValueIsForced). Features go on the crate's own lines.

@@ -48,6 +48,9 @@ clauseo-profile = { path = "../profile", features = ["test-support"] }
 # The reopen bench's fixture.
 clauseo-store = { path = "../store", features = ["test-support"] }
 proptest = { workspace = true }
+# The Word round trip test's reads of a .docx: its zip entry and the document's XML.
+flate2 = { workspace = true }
+quick-xml = { workspace = true }
 criterion = { workspace = true }
 
 [[bench]]
