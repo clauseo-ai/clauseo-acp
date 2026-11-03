@@ -111,6 +111,17 @@ const section = () => document.querySelector<HTMLElement>('[data-testid="usage-s
 const card = (kind: "claude" | "codex") =>
   document.querySelector<HTMLElement>(`[data-testid="usage-${kind}"]`);
 
+const group = (kind: "claude" | "codex") => card(kind)?.closest("section") ?? null;
+const heads = () => [...section()!.querySelectorAll("h3")].map((h) => h.textContent);
+const usageNote = () =>
+  [...document.querySelectorAll(".set-nav-row")]
+    .find((r) =>
+      ["Plan and usage", "प्लान और उपयोग"].includes(
+        r.querySelector(".set-nav-name")?.textContent ?? "",
+      ),
+    )
+    ?.querySelector(".set-nav-note")?.textContent ?? null;
+
 test("opening the section sends shown once, for every agent", async () => {
   await mount();
   expect(section()).not.toBeNull();
@@ -119,57 +130,76 @@ test("opening the section sends shown once, for every agent", async () => {
   expect(transport.refreshes()).toHaveLength(1);
 });
 
-test("each agent's plan: windows with what's left, a bar and the reset, and Updated at", async () => {
+test("each plan's head with Updated at, and each window a tile: the share left, a meter, the reset", async () => {
   await mount();
   await view({ claude: entry(62), codex: entry(10, { plan: "ChatGPT Plus" }) });
-  const groups = [...section()!.querySelectorAll("h3")].map((h) => h.textContent);
-  expect(groups).toEqual(["Claude", "ChatGPT"]);
-  const claude = card("claude");
-  expect(claude?.textContent).toContain("Claude Max");
-  expect(claude?.textContent).toContain("Updated at 12:05 am");
-  expect(claude?.textContent).not.toContain("As of");
-  expect(claude?.textContent).toContain("5-hour limit");
-  expect(claude?.textContent).toContain("38% left");
-  expect(claude?.textContent).toContain("Weekly limit");
-  expect(claude?.textContent).toContain("80% left");
-  expect(claude?.textContent).toContain("Resets 6:10 pm");
-  expect(claude?.querySelectorAll(".plan-track")).toHaveLength(2);
-  expect(card("codex")?.textContent).toContain("ChatGPT Plus");
-  expect(card("codex")?.textContent).toContain("90% left");
+  expect(heads()).toEqual(["Claude Max", "ChatGPT Plus"]);
+  expect(group("claude")?.querySelector(".set-aside-time")?.textContent).toBe(
+    "Updated at 12:05 am",
+  );
+  const tiles = [...card("claude")!.querySelectorAll<HTMLElement>(".set-window-tile")];
+  expect(tiles.map((t) => t.querySelector(".set-window-label")?.textContent)).toEqual([
+    "5-hour limit",
+    "Weekly limit",
+  ]);
+  expect(tiles.map((t) => t.querySelector(".set-numeral")?.textContent)).toEqual(["38%", "80%"]);
+  expect(tiles[0]?.querySelector(".set-window-word")?.textContent).toBe("left");
+  const meter = tiles[0]?.querySelector('[role="meter"]');
+  expect(meter?.getAttribute("aria-valuenow")).toBe("38");
+  expect(meter?.getAttribute("aria-valuetext")).toBe("38% left");
+  expect(tiles[0]?.querySelector(".set-window-reset")?.textContent).toBe("Resets 6:10 pm");
+  // 62% used is under the close band; the weekly's 20% too
+  expect(tiles.map((t) => t.dataset["state"])).toEqual(["plenty", "plenty"]);
+  expect(card("codex")?.querySelector(".set-numeral")?.textContent).toBe("90%");
+  expect(document.body.textContent).not.toMatch(/% used|ago/);
+});
+
+test("from the close band on, a tile speaks up: 75% used, or the window's own warning", async () => {
+  await mount();
+  await view({
+    claude: entry(75, {
+      windows: [row(75), row(20, { id: "seven_day", label: "Weekly limit", tone: "near" })],
+    }),
+  });
+  const tiles = [...card("claude")!.querySelectorAll<HTMLElement>(".set-window-tile")];
+  expect(tiles.map((t) => t.dataset["state"])).toEqual(["close", "close"]);
 });
 
 test("only the agents in the view get an entry: one with no kind (fake-agent) never does", async () => {
   await mount();
-  await view({ codex: entry(10) });
+  await view({ codex: entry(10, { plan: "ChatGPT Plus" }) });
   expect(card("claude")).toBeNull();
   expect(card("codex")).not.toBeNull();
-  expect([...section()!.querySelectorAll("h3")].map((h) => h.textContent)).toEqual(["ChatGPT"]);
+  expect(heads()).toEqual(["ChatGPT Plus"]);
 });
 
-test("stale: the figures kept and muted", async () => {
+test("stale: the figures kept, muted, and Updated at speaks up", async () => {
   await mount();
   await view({ claude: entry(30, { freshness: "stale" }) });
-  expect(card("claude")?.querySelector(".plan-card-stale")?.textContent).toBe(
+  expect(group("claude")?.querySelector(".set-aside-time[data-stale]")?.textContent).toBe(
     "Updated at 12:05 am",
   );
-  expect(card("claude")?.querySelector(".plan-window[data-stale]")).not.toBeNull();
+  expect(card("claude")?.querySelectorAll(".set-window-tile[data-stale]")).toHaveLength(2);
+  expect(card("claude")?.querySelector(".set-numeral")?.textContent).toBe("70%");
 });
 
-test("loading: the plan's name alone, no window and no time", async () => {
+test("loading: the plan's name alone, no figures, never blank", async () => {
   await mount();
   await view({ claude: figureless({ freshness: "loading" }) });
-  expect(card("claude")?.textContent).toBe("Claude Max");
-  expect(card("claude")?.querySelector(".plan-track")).toBeNull();
+  expect(heads()).toEqual(["Claude Max"]);
+  expect(group("claude")?.textContent).toBe("Claude Max");
+  expect(group("claude")?.querySelector('[role="meter"]')).toBeNull();
 });
 
 test("none: the message, and Try again sends try_again", async () => {
   await mount();
   await view({ claude: figureless({ freshness: "unavailable" }) });
+  expect(card("claude")?.textContent).toContain("Usage isn't available right now.");
   expect(card("claude")?.textContent).toContain(
     "Your Claude plan didn't send its limits this time. Asking still works as usual.",
   );
   await act(async () =>
-    card("claude")?.querySelector<HTMLElement>('[data-testid="plan-try-again"]')?.click(),
+    group("claude")?.querySelector<HTMLElement>('[data-testid="plan-try-again"]')?.click(),
   );
   expect(transport.refreshes()).toEqual([
     { agent: undefined, why: "shown" },
@@ -177,7 +207,7 @@ test("none: the message, and Try again sends try_again", async () => {
   ]);
 });
 
-test("pay as you go: the title and who bills, no bar and no figure", async () => {
+test("pay as you go: who bills, no meter and no figure", async () => {
   await mount();
   await view({
     claude: figureless({
@@ -186,22 +216,34 @@ test("pay as you go: the title and who bills, no bar and no figure", async () =>
       provider: "anthropic",
     }),
   });
-  expect(card("claude")?.textContent).toContain("Claude, pay as you go");
+  expect(heads()).toEqual(["Claude"]);
   expect(card("claude")?.textContent).toContain("Pay as you go, billed to your Anthropic account");
-  expect(card("claude")?.querySelector(".plan-track")).toBeNull();
-  expect(card("claude")?.textContent).not.toMatch(/%|percent/);
+  expect(card("claude")?.textContent).toContain(
+    "No limits to show. Each question is billed to the key's account.",
+  );
+  expect(group("claude")?.querySelector('[role="meter"]')).toBeNull();
+  expect(group("claude")?.textContent).not.toMatch(/%|percent/);
 });
 
-test("a window whose reset passed: no percentage, no track, its reset muted", async () => {
+test("pay as you go with another provider: the plan's title billed by use", async () => {
+  await mount();
+  await view({ codex: figureless({ freshness: "not_applicable", billing: "pay_as_you_go" }) });
+  expect(card("codex")?.textContent).toContain("ChatGPT, pay as you go");
+});
+
+test("a window whose reset passed: no percentage, no meter, its reset muted", async () => {
   await mount();
   await view({
     claude: entry(30, {
       windows: [row(undefined, { freshness: "reset_passed", resets_at: today(0, 1) })],
     }),
   });
-  expect(card("claude")?.textContent).not.toMatch(/%/);
-  expect(card("claude")?.querySelector(".plan-track")).toBeNull();
-  expect(card("claude")?.querySelector(".plan-window-reset")?.textContent).toBe(
+  const tile = card("claude")?.querySelector<HTMLElement>(".set-window-tile");
+  expect(tile?.textContent).not.toMatch(/%/);
+  expect(tile?.querySelector('[role="meter"]')).toBeNull();
+  expect(tile?.dataset["state"]).toBe("plenty");
+  expect(tile?.hasAttribute("data-passed")).toBe(true);
+  expect(tile?.querySelector(".set-window-reset")?.textContent).toBe(
     "The limit reset at 12:01 am.",
   );
 });
@@ -215,18 +257,42 @@ test("missing_scope and live_only: no entry", async () => {
   expect(card("codex")).not.toBeNull();
 });
 
-test("Hindi: Updated at in the section's words", async () => {
+test("the note beside its name: Claude's 5-hour share left, else the first with figures, Pay as you go, or nothing", async () => {
+  await mount();
+  expect(usageNote()).toBeNull();
+  await view({ claude: figureless({ freshness: "loading" }) });
+  expect(usageNote()).toBeNull();
+  await view({ claude: entry(38) });
+  expect(usageNote()).toBe("62% of the 5-hour limit left");
+  await view({ claude: figureless({ freshness: "unavailable" }), codex: entry(10) });
+  expect(usageNote()).toBe("90% of the 5-hour limit left");
+  await view({
+    claude: figureless({ freshness: "not_applicable", billing: "pay_as_you_go" }),
+    codex: entry(10),
+  });
+  expect(usageNote()).toBe("Pay as you go");
+  await view({
+    claude: entry(30, {
+      windows: [row(undefined, { freshness: "reset_passed" })],
+    }),
+  });
+  expect(usageNote()).toBeNull();
+});
+
+test("Hindi: the section's words", async () => {
   localStorage.setItem("clauseo.display", JSON.stringify({ language: "hi" }));
   await mount();
-  await view({ claude: entry(30) });
-  expect(card("claude")?.textContent).toContain("बजे अपडेट किया गया");
+  await view({ claude: entry(38) });
+  expect(group("claude")?.textContent).toContain("बजे अपडेट किया गया");
+  expect(usageNote()).toBe("5 घंटे की सीमा का 62% बाकी");
+  expect(card("claude")?.querySelector(".set-window-word")?.textContent).toBe("बाकी");
 });
 
 test("axe finds nothing with both plans, one of them stale and one with nothing sent", async () => {
   await mount();
   await view({
     claude: entry(30, { freshness: "stale" }),
-    codex: figureless({ freshness: "unavailable" }),
+    codex: figureless({ freshness: "unavailable", plan: "ChatGPT Plus" }),
   });
   const results = await axe.run(document, { resultTypes: ["violations"] });
   expect(results.violations.map((v) => v.id)).toEqual([]);

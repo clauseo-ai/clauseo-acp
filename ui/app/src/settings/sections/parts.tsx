@@ -11,12 +11,15 @@ import { useSettingsWords } from "@clauseo/components/lib/words-settings.ts";
 export function Group({
   title,
   note,
+  aside,
   children,
   plate = true,
 }: {
   /** The head; a group whose one setting names itself goes without. */
   title?: string;
   note?: string;
+  /** Optional: words at the head's end, such as "Updated at 4:29 pm". */
+  aside?: ReactNode;
   children: ReactNode;
   /** Whether the rows stand on a plate. */
   plate?: boolean;
@@ -25,11 +28,14 @@ export function Group({
   const id = useId();
   return (
     <section aria-labelledby={title === undefined ? undefined : id} className="set-group">
-      {title !== undefined && (
+      {(title !== undefined || aside !== undefined) && (
         <div className="set-group-head">
-          <Heading level={3} id={id} className="set-group-title">
-            {w.say(title)}
-          </Heading>
+          {title !== undefined && (
+            <Heading level={3} id={id} className="set-group-title">
+              {w.say(title)}
+            </Heading>
+          )}
+          {aside !== undefined && <div className="set-group-aside">{aside}</div>}
         </div>
       )}
       {note !== undefined && <p className="set-group-note">{w.say(note)}</p>}
