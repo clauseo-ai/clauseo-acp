@@ -13,9 +13,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use async_channel::{Receiver, TryRecvError};
-use clauseo_protocol::{
-    Envelope, MatterId, SearchAnswer, SearchRequest, Seq, StreamId, ThreadId, Timestamp,
-};
+use clauseo_protocol::{Envelope, MatterId, Seq, StreamId, ThreadId, Timestamp};
 use clauseo_search::SearchIndex;
 use clauseo_store::{READ_PAGE_MAX, Store};
 use futures::executor::block_on;
@@ -24,10 +22,12 @@ use futures::future::{Either, select};
 use super::batch::{Failure, write_chunk};
 use super::files::Files;
 use super::fold::{ThreadMemo, Write, feed_matter};
-use super::{Control, SearchReply, SearchSeams, Shared, answer};
+use super::{Control, SearchSeams, Shared};
 use crate::clock::Clock;
 use crate::error::Error;
 use crate::matter_worker::matter_settings;
+
+mod ask;
 
 /// Threads whose fold the thread keeps; another is folded again from the log when needed.
 const MEMO_CAP: usize = 64;
@@ -288,7 +288,7 @@ impl Worker {
                 window,
                 request,
                 reply,
-            } => self.answer(&window, &request, reply),
+            } => ask::answer(self, &window, &request, reply),
             Control::Forget(matter) => {
                 self.forgotten.insert(matter);
                 if let Err(failure) = self.drop_matter(matter) {
@@ -299,55 +299,6 @@ impl Worker {
                 if let Err(failure) = self.reindex(matter) {
                     tracing::warn!(%matter, %failure, "a matter was not indexed again");
                 }
-            }
-        }
-    }
-
-    /// Runs one search, unless a newer one from its window came first.
-    fn answer(&mut self, window: &str, request: &SearchRequest, reply: SearchReply) {
-        let generation = request.generation.get();
-        if !self.shared.generations().start(window, generation) {
-            reply(Ok(SearchAnswer::Cancelled));
-            return;
-        }
-        if let Some(hold) = &self.seams.query_hold
-            && !hold.is_released()
-        {
-            hold.note_reached();
-            block_on(hold.wait());
-        }
-        let query = answer::query(request, self.clock.now().wall);
-        let result = self.index.query(&query);
-        let superseded = {
-            let mut generations = self.shared.generations();
-            generations.finish();
-            generations.superseded(window, generation)
-        };
-        let answered = match result {
-            // A late answer to an older search is never delivered.
-            Ok(_) | Err(clauseo_search::Error::Interrupted) if superseded => {
-                Ok(SearchAnswer::Cancelled)
-            }
-            Err(clauseo_search::Error::Interrupted) => Ok(SearchAnswer::Cancelled),
-            Ok(page) => Ok(SearchAnswer::Page(answer::page(page))),
-            Err(error) => Err(Error::Internal(format!("search: {error}"))),
-        };
-        reply(answered);
-    }
-
-    /// Answers the searches queued now, keeping the other control jobs for later: a long walk
-    /// does not hold searches up.
-    fn answer_queued(&mut self) {
-        while let Ok(job) = self.control.try_recv() {
-            if let Control::Query {
-                window,
-                request,
-                reply,
-            } = job
-            {
-                self.answer(&window, &request, reply);
-            } else {
-                self.deferred.push_back(job);
             }
         }
     }
@@ -417,7 +368,11 @@ impl Worker {
             }
             let page: Vec<&Envelope> = page.iter().collect();
             self.fold_and_apply(stream, &page)?;
-            self.answer_queued();
+            if self.control.is_closed() {
+                // The host is ending: the rest is read at the next start.
+                return Ok(());
+            }
+            ask::answer_queued(self);
         }
     }
 

@@ -369,3 +369,34 @@ fn a_garbled_cursor_gives_the_first_page() {
     }
     host.shutdown();
 }
+
+/// Opens `path` in SQLite's exclusive locking mode with no busy wait: it fails while another
+/// connection has the database open.
+fn exclusive(path: &std::path::Path) -> rusqlite::Result<i64> {
+    let conn = rusqlite::Connection::open(path)?;
+    conn.busy_timeout(std::time::Duration::ZERO)?;
+    conn.execute_batch("PRAGMA locking_mode = EXCLUSIVE")?;
+    conn.query_row("SELECT count(*) FROM meta", [], |row| row.get(0))
+}
+
+#[test]
+fn an_aborted_host_closes_the_index_and_the_next_start_searches() {
+    let dir = files_dir("search_abort");
+    let host = dir.start(0);
+    poll(&host, &request("Scratch", 0), |p| {
+        p.indexing.is_none() && !p.hits.is_empty()
+    });
+    let index = dir.data_dir().join("search.sqlite");
+    assert!(
+        exclusive(&index).is_err(),
+        "the running host holds the index open"
+    );
+    host.abort();
+    assert!(
+        exclusive(&index).is_ok(),
+        "the aborted host left the index open"
+    );
+    let host = dir.start(1);
+    poll(&host, &request("Scratch", 0), |p| !p.hits.is_empty());
+    host.shutdown();
+}

@@ -54,6 +54,8 @@ proptest = { workspace = true }
 # The Word round trip test's reads of a .docx: its zip entry and the document's XML.
 flate2 = { workspace = true }
 quick-xml = { workspace = true }
+# The search test that checks an aborted host closed search.sqlite (no connection left open).
+rusqlite = { workspace = true }
 criterion = { workspace = true }
 
 [[bench]]
