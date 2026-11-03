@@ -22,6 +22,7 @@
 //   undo brings back mentions its paper again.
 import { useEffect, useId, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
+import { fileTypeIcon } from "../icons/file-type.ts";
 import { cn } from "../lib/cn.ts";
 import { useThreadWords } from "../lib/words-thread.ts";
 import { useLayer } from "../ui/layer-context.ts";
@@ -478,7 +479,7 @@ export function ComposerMenu({
                     {open.kind === "command" ? (
                       <CommandRow c={open.items[i]} />
                     ) : (
-                      <PaperRow m={open.items[i]} />
+                      <PaperRow m={open.items[i]} Icon={fileTypeIcon(open.items[i]?.label ?? "")} />
                     )}
                   </div>
                 ))}

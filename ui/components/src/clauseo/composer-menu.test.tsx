@@ -397,6 +397,7 @@ test("a command row's icon is hidden from assistive technology and adds no words
   for (const svg of icons) {
     expect(svg?.getAttribute("aria-hidden")).toBe("true");
     expect(svg?.hasAttribute("aria-label")).toBe(false);
+    expect(svg?.getAttribute("width")).toBe("16");
     // muted, and the row's text colour once the row is highlighted (the row is the group)
     expect(svg?.getAttribute("class")).toContain("group-data-highlighted:text-primary");
   }
