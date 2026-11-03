@@ -285,15 +285,21 @@ fn respond(stream: &mut TcpStream, status: u16, reason: &str) {
     write_response(stream, status, reason, None);
 }
 
+/// The policy both pages go out under: nothing loads, and the one style block runs only because
+/// its SHA-256 is named here. The two pages share that block byte for byte, so one hash covers
+/// both; editing it without updating this hash fails `the_page_policy_names_the_style_hash`.
+pub(super) const PAGE_CSP: &str = "default-src 'none'; \
+     style-src 'sha256-hck1SVO6a5kJkd0l4GCQ3jlobwVyjXVOzff2SnA7ioc='; img-src 'none'; \
+     base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+
 /// Writes one answer and closes the connection; a failed write is ignored (the browser left).
 fn write_response(stream: &mut TcpStream, status: u16, reason: &str, page: Option<&str>) {
     let body = page.unwrap_or_default();
     let mut head = format!("HTTP/1.1 {status} {reason}\r\n");
     if page.is_some() {
-        head.push_str(
-            "Content-Type: text/html; charset=utf-8\r\n\
-             Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'\r\n",
-        );
+        head.push_str("Content-Type: text/html; charset=utf-8\r\nContent-Security-Policy: ");
+        head.push_str(PAGE_CSP);
+        head.push_str("\r\n");
     }
     head.push_str(
         "Cache-Control: no-store\r\nReferrer-Policy: no-referrer\r\n\
