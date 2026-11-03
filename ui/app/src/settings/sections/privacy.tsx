@@ -1,10 +1,11 @@
 // Settings, Privacy: what leaves this computer, and who sees it (design/03-system/src/pages/settings/sections-c.tsx,
-// Privacy), holding only what is true now. One row per plan the window knows, its words naming the web searches each
-// question may send, and for Claude the provider Anthropic lists for its web search. Then the tools' switches, web
-// search and the browser, each one patch, a locked one disabled with its managed line as Appearance's rows are.
-// Then a row for the websites Clauseo visits, unless the host's switches have both tools off. A locked switch shows the
-// host's value, and the lock's reason stands in place of its note. Under the Browser switch, while it is on and the app
-// has no website check, the reason the conversations give for its being off.
+// Privacy), holding only what is true now, icons first and in the fewest words (DESIGN.md §Icons). One row per plan
+// the window knows, its line naming the web searches each question may send; for Claude, the provider Anthropic lists
+// for its web search behind an info icon. Then a row for the websites Clauseo visits, its explanation behind an info
+// icon, unless the host's switches have both tools off. Then the tools' switches, web search and the browser, each led
+// by its glyph with the state on it, one helper line each, each flip one patch. A locked switch shows the host's value,
+// its glyph locked, and U11-07's managed line in its helper's place. While the Browser switch is on and the app has no
+// website check, the room's reason, "Not available yet", stands in its helper's place.
 // Left out until something stands behind them: Indian Kanoon's row, the row for Clauseo's anonymous counts, and the
 // anonymous counts and crash report switches.
 //
@@ -15,7 +16,10 @@
 // settings_changed. A change applies from the next conversation's start; one already open keeps its tools.
 // The locks are real already: `locked` may list `tools.web_search` and `tools.browser`.
 import { useSettingsWords } from "@clauseo/components/lib/words-settings.ts";
+import { ToolGlyph } from "@clauseo/components/icons/tool-glyph.tsx";
+import { tw } from "@clauseo/components/lib/words-tools.ts";
 import { toolsLine } from "@clauseo/components/lib/words-tools-line.ts";
+import { InfoTip } from "@clauseo/components/ui/info-tip.tsx";
 import { SettingRow } from "@clauseo/components/ui/settings-row.tsx";
 import { PLAN_NAME } from "../../room/limits/plan-model.ts";
 import type { ToolSettings } from "../../room/host-next.ts";
@@ -35,22 +39,17 @@ function Dest({ kind }: { kind: AgentKind }) {
   const name = PLAN_NAME[kind];
   return (
     <div className="set-dest" data-testid={`dest-${kind}`}>
-      <p className="set-dest-to">{w.say(w.s("To {name}, on your plan", { name }))}</p>
-      <div>
-        <p className="set-dest-what">
-          {w.say(
-            w.s(
-              "Each question, the parts of the papers it needs, and its web searches. {name} sees what each question sends it.",
-              { name },
-            ),
-          )}
-        </p>
+      <p className="set-dest-to">
+        <span>{w.say(w.s("To {name}, on your plan", { name }))}</span>
         {kind === "claude" && (
-          <p className="set-note">
+          <InfoTip label={w.s("More about Brave Search")}>
             {w.say(w.s("Anthropic lists Brave Search as its web search subprocessor."))}
-          </p>
+          </InfoTip>
         )}
-      </div>
+      </p>
+      <p className="set-dest-what">
+        {w.say(w.s("Each question, the parts of the papers it needs, and its web searches."))}
+      </p>
     </div>
   );
 }
@@ -63,14 +62,16 @@ const websiteCheck = false;
 function WebsitesDest() {
   const w = useSettingsWords();
   return (
-    <div className="set-dest" data-testid="dest-websites">
-      <p className="set-dest-to">{w.say(w.s("To the websites Clauseo visits"))}</p>
-      <p className="set-dest-what">
-        {w.say(
-          w.s(
-            "When Clauseo reads a page on this computer or opens one in its browser, the website sees the visit, as it sees any browser's.",
-          ),
-        )}
+    <div className="set-dest set-dest-alone" data-testid="dest-websites">
+      <p className="set-dest-to">
+        <span>{w.say(w.s("To the websites Clauseo visits"))}</span>
+        <InfoTip label={w.s("More about the websites Clauseo visits")}>
+          {w.say(
+            w.s(
+              "When Clauseo reads a page on this computer or opens one in its browser, the website sees the visit, as it sees any browser's.",
+            ),
+          )}
+        </InfoTip>
       </p>
     </div>
   );
@@ -89,22 +90,29 @@ function ToolRow({
   tool: keyof ToolSettings;
   label: string;
   note: string;
-  /** Optional: a further line under the note, such as why the tool can't run yet. */
+  /** Optional: why the tool can't run yet, in the helper's place (one line at most). */
   reason?: string | undefined;
 }) {
   const w = useSettingsWords();
   const locked = ctx.toolLocked(tool);
+  const on = tools[tool];
   return (
     <PlateRow disabled={locked}>
       <SettingRow
         className="py-0"
         control="switch"
+        icon={
+          <ToolGlyph
+            glyph={tool === "web_search" ? "web" : "browser"}
+            state={locked ? "locked" : on ? "on" : "off"}
+            size={16}
+          />
+        }
         label={label}
-        note={locked ? w.s("Managed by your organisation") : note}
-        checked={tools[tool]}
+        note={locked ? w.s("Managed by your organisation") : (reason ?? note)}
+        checked={on}
         disabled={locked}
-        managed={reason}
-        onCheckedChange={(on) => ctx.chooseTool(tool, on)}
+        onCheckedChange={(next) => ctx.chooseTool(tool, next)}
       />
     </PlateRow>
   );
@@ -123,23 +131,20 @@ export function Privacy({ ctx }: { ctx: SectionContext }) {
         {!webOff && <WebsitesDest />}
       </Group>
       {tools !== undefined && (
-        <Group
-          title={w.s("On the web")}
-          note={w.s("A change applies to new conversations. Ones already open keep what they had.")}
-        >
+        <Group title={w.s("On the web")} note={tw(w.lang, "Changes apply to new conversations.")}>
           <ToolRow
             ctx={ctx}
             tools={tools}
             tool="web_search"
             label={w.s("Web search")}
-            note={w.s("Clauseo can search the web and read pages. On unless you turn it off.")}
+            note={w.s("Search the web and read pages.")}
           />
           <ToolRow
             ctx={ctx}
             tools={tools}
             tool="browser"
             label={w.s("Browser")}
-            note={w.s("Clauseo can open web pages in its own browser, on this computer.")}
+            note={w.s("Clauseo's own browser, on this computer.")}
             reason={
               tools.browser && !websiteCheck ? toolsLine(w.lang, "Not available yet") : undefined
             }

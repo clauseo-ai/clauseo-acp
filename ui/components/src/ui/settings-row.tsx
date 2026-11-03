@@ -1,6 +1,6 @@
 import { Field } from "@base-ui/react/field";
 import { Fieldset } from "@base-ui/react/fieldset";
-import { useId } from "react";
+import { useId, type ReactNode } from "react";
 import { cn } from "../lib/cn.ts";
 import { Mixed } from "../lib/mixed.tsx";
 import { Checkbox } from "./checkbox.tsx";
@@ -19,6 +19,7 @@ export function SettingRow({
   onCheckedChange,
   disabled = false,
   managed,
+  icon,
   className,
 }: {
   control: "switch" | "checkbox";
@@ -29,6 +30,9 @@ export function SettingRow({
   disabled?: boolean;
   /** Optional: a further line under the note that describes the control too, such as who manages a locked one. */
   managed?: string | undefined;
+  /** Optional: a glyph that leads the row, on the label's line, such as a tool's with its state on it. Hidden from
+   * assistive technology; the label and the control name it. */
+  icon?: ReactNode;
   className?: string;
 }) {
   const props = { checked, onCheckedChange, disabled };
@@ -44,6 +48,11 @@ export function SettingRow({
       {control === "checkbox" && (
         <span className="flex flex-none items-center h-ui-line">
           <Checkbox {...props} />
+        </span>
+      )}
+      {icon !== undefined && (
+        <span className="flex flex-none items-center self-start h-ui-line" data-part="icon">
+          {icon}
         </span>
       )}
       <div className="min-w-0 flex-1">
