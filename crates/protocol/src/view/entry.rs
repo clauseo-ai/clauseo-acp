@@ -50,9 +50,10 @@ pub struct HeaderEntry {
     /// first session attaches, then from that session's capabilities. Missing reads as `false`.
     #[serde(default)]
     pub steer_joins_turn: bool,
-    /// Clauseo's own tools and whether the agent has each in this session. Filled by the host at
-    /// each session start, as `queue_held` is. Missing reads as empty, and empty is left out, so
-    /// a header written before the field still decodes and compares equal.
+    /// Clauseo's own tools and whether the agent has each in this session. The reducer never
+    /// sets it: the host fills it at the view layer when each session answers. Missing reads as
+    /// empty, and empty is left out, so a header written before the field still decodes and
+    /// compares equal.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<ToolState>,
     /// The agent's current mode, if it reported one.
