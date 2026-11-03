@@ -42,9 +42,13 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 # windows crate, protocol, settings, proptest) in a target folder of its own before it compiles
 # each case. On the Windows runner that alone took 16 s and the whole test passed 30 s (PR #259,
 # run 41608436654, both tries); a cold local run on Linux took 215 s. 240 s still ends a hung one.
+# That build is a full cargo build, which takes every core it can get, so the test runs alone:
+# in the merge-group run 41712908024 on Windows it overlapped host's relaunch tests, which are
+# sensitive to timing, and starved them of CPU until both failed at relaunch.rs:97 on both tries.
 [[profile.default.overrides]]
 filter = 'package(clauseo-counts) & binary(closed)'
 slow-timeout = { period = "60s", terminate-after = 4 }
+threads-required = "num-cpus"
 
 [profile.ci]
 # One retry in CI only (local runs use the default profile and keep none), so a test that fails
