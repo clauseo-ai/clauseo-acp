@@ -1125,6 +1125,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "clauseo-search"
+version = "0.1.0"
+dependencies = [
+ "clauseo-protocol",
+ "rusqlite",
+]
+
+[[package]]
 name = "clauseo-settings"
 version = "0.1.0"
 dependencies = [

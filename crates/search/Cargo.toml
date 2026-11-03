@@ -1,0 +1,16 @@
+[package]
+name = "clauseo-search"
+version = "0.1.0"
+description = "Search inside matters and conversations: the derived SQLite FTS5 index `search.sqlite`, its writes and its queries."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+clauseo-protocol = { path = "../protocol" }
+# The same bundled SQLite as clauseo-store (FTS5 and JSON are compiled in).
+rusqlite = { workspace = true, features = ["bundled"] }
+
+[lints]
+workspace = true
