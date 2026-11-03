@@ -122,6 +122,22 @@ From U5 the room is the only page of `main` and the build-time switch between it
 window is gone; the commands, permissions and capabilities this record names serve the room. The
 settings window ([0028](0028-settings-window.md)) shows a second page with a subset of them.
 
+**Starting inside the agent sandbox.** The pre-write guard hook runs this executable from inside
+the agent sandbox, so the sandbox lets the agent start it: on Windows it grants read and execute
+on `Clauseo.exe`, and the macOS profile allows `process-exec`. A jailed agent could therefore
+start the whole app, whose window, settings and single-instance hand-off (a second launch passes
+its arguments, deep links included, to the running window) the sandbox exists to keep from it.
+So `main` (`crates/desktop/src/jailed.rs`) answers `--pre-write-guard` first, then asks
+whether the process is sandboxed before anything else starts; inside, it writes one line to
+stderr ("Clauseo will not start inside the agent sandbox.") and exits with code 77 (sysexits'
+`EX_NOPERM`). The checks: on Windows, the process token has restricting SIDs
+(`GetTokenInformation(TokenRestrictedSids)`) or is an `AppContainer` (`TokenIsAppContainer`);
+on macOS, `sandbox_check(getpid(), NULL, SANDBOX_FILTER_NONE)` is non-zero. Linux has no check:
+the Linux agent jail is not a target. Only a positive answer refuses: a check that fails is
+reported on stderr and the app starts, so a broken API never locks a lawyer out. Known revisit:
+a sandboxed packaging of Clauseo itself (the Mac App Store, or MSIX with an `AppContainer`)
+would trip this check, and needs a way to tell its own sandbox from the agent's.
+
 ## Consequences
 
 - In the default build the page reaches nine typed commands and no plugin; a tenth command needs a new record, a

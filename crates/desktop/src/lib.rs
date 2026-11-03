@@ -21,6 +21,9 @@
 //!   (`webview2.rs`).
 //! - The host's pre-write guard hook runs this executable with `--pre-write-guard`, which `main`
 //!   answers before anything starts ([`guard_requested`], `pre_write_guard.rs`).
+//! - Every other start first asks whether it runs inside the agent sandbox ([`launch`],
+//!   `jailed.rs`): inside, it prints one line and exits with [`SANDBOXED_EXIT`] before `run`,
+//!   so no window, no single-instance hand-off and no settings read.
 //! - Fourteen async commands (`commands.rs`), each granted by its own permission in
 //!   `capabilities/main.json` and listed in `build.rs`'s `AppManifest`. Beside them that file
 //!   grants only the two window commands of Tauri's drag script, and `window_frame.rs` adds
@@ -72,6 +75,7 @@ mod dialogs;
 mod e2e;
 mod frame;
 mod host_start;
+mod jailed;
 mod machine_memory;
 #[cfg(feature = "marks")]
 mod marks;
@@ -97,6 +101,9 @@ use clauseo_settings::{
     Effective, Locations, PlatformDirs as _, SystemDirs, SystemEnv, SystemFiles,
 };
 use host_start::{HostCell, HostStart};
+pub use jailed::{
+    AppStages, Launched, REFUSAL, SANDBOXED_EXIT, SandboxProbe, Stages, SystemProbe, launch,
+};
 pub use pre_write_guard::guard_requested;
 use profile::DesktopProfile;
 use rust_only::PluginRustOnly;
