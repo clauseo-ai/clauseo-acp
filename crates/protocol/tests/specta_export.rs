@@ -166,6 +166,19 @@ fn assert_optional(ts: &str) {
     assert_block(ts, "AgentCapabilities", |b| {
         b.contains("\tsteering?: SteeringCapability,\n")
     });
+    // Left out at their default, not `Option`s: they stay, as optional fields of their type.
+    assert_block(ts, "UserMessage", |b| {
+        b.contains("\tdelivery?: Delivery,\n")
+    });
+    assert_block(ts, "UserMessageEntry", |b| {
+        b.contains("\tdelivery?: Delivery,\n")
+    });
+    assert_block(ts, "SteerResolved", |b| {
+        b.contains("\taside?: ToolCallId[],\n")
+    });
+    assert_block(ts, "HostCommand", |b| {
+        b.contains("\tdelivery?: DeliveryRequest,\n")
+    });
     for line in code_lines(ts).filter(|line| line.contains("null")) {
         let allowed = line.starts_with("export type JsonValue = null | ")
             || line.starts_with("export type RawPayload = null | ")
@@ -280,6 +293,16 @@ struct Defaulted {
     note: Option<u32>,
 }
 
+/// Fields left out when they hold their default, of types that are not `Option`: a list and a
+/// plain value. They export as optional fields of their own type, not dropped.
+#[derive(serde::Serialize, specta::Type)]
+struct DefaultedPlain {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    items: Vec<u32>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    flag: bool,
+}
+
 /// A field left out when `None` but required on decode.
 #[derive(serde::Serialize, specta::Type)]
 struct Required {
@@ -328,4 +351,13 @@ fn a_skipped_field_is_optional_and_not_null_and_needs_default() {
     }
     let refused = mapped::<Required>().err().unwrap_or_default();
     assert!(refused.contains("without `default`"), "{refused}");
+}
+
+#[test]
+fn a_skipped_field_that_is_not_an_option_keeps_its_type() {
+    let ts = export(&Types::default().register::<DefaultedPlain>());
+    let ts = ts.unwrap_or_else(|err| panic!("export failed: {err}"));
+    assert_block(&ts, "DefaultedPlain", |b| {
+        b.contains("\titems?: number[],\n") && b.contains("\tflag?: boolean,\n")
+    });
 }
