@@ -74,7 +74,8 @@ pub enum Input {
         /// The agent, or `None` for every agent.
         agent: Option<AgentKind>,
     },
-    /// The lawyer asked to try again: one agent, or every one.
+    /// The lawyer asked to try again: one agent, or every one. A try within 10 s of an agent's
+    /// last read's start starts no read for it, whatever window sent it.
     TryAgain {
         /// The agent, or `None` for every agent.
         agent: Option<AgentKind>,
@@ -179,8 +180,12 @@ impl Limits {
                 }
             }
             Input::TryAgain { agent } => {
+                let mut throttled = false;
                 for state in self.targets(agent) {
-                    request_read(state, now, &mut actions);
+                    throttled |= triggers::try_again(state, now, &mut actions);
+                }
+                if throttled {
+                    actions.push(Action::ViewChanged);
                 }
             }
             Input::TurnEnded { agent, read_now } => {

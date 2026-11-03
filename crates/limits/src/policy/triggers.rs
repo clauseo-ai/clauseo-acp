@@ -9,6 +9,10 @@ use crate::policy::{Action, kind_rules};
 /// A window shown again reads when the last read started at least 5 minutes ago.
 const SHOWN_AFTER_MS: i64 = 5 * 60 * 1000;
 
+/// A "try again" within this long of the last read's start starts no read, whatever window
+/// sent it (the Settings window's loop must not launch one reader after another).
+const TRY_AGAIN_AFTER_MS: i64 = 10_000;
+
 /// One agent's read policy state.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Reads {
@@ -40,7 +44,15 @@ pub(crate) fn request_read(state: &mut AgentState, now: Timestamp, actions: &mut
 
 /// A window got focus, or a meter or the settings page opened.
 pub(crate) fn shown(state: &mut AgentState, now: Timestamp, actions: &mut Vec<Action>) {
-    read_if_older(state, SHOWN_AFTER_MS, now, actions);
+    let _ = read_if_older(state, SHOWN_AFTER_MS, now, actions);
+}
+
+/// A "try again" starts a read unless the last one started less than [`TRY_AGAIN_AFTER_MS`]
+/// ago. Returns `true` when it starts none for that reason (the caller then re-publishes the
+/// view). A read in flight is joined by [`request_read`] as before, and so is a read asked for
+/// while a question is pending.
+pub(crate) fn try_again(state: &mut AgentState, now: Timestamp, actions: &mut Vec<Action>) -> bool {
+    !read_if_older(state, TRY_AGAIN_AFTER_MS, now, actions)
 }
 
 /// A turn ended; `read_now` reads whatever the age, else the agent kind's age applies.
@@ -55,7 +67,7 @@ pub(crate) fn turn_ended(
         return;
     }
     let min_age = kind_rules(state.agent).turn_read_after_ms;
-    read_if_older(state, min_age, now, actions);
+    let _ = read_if_older(state, min_age, now, actions);
 }
 
 /// A question became pending, or was answered: the read asked for meanwhile starts now.
@@ -72,13 +84,14 @@ pub(crate) fn asking(
     }
 }
 
-/// Asks for a read when the last one started at least `min_age_ms` ago, or never.
+/// Asks for a read when the last one started at least `min_age_ms` ago, or never. Returns
+/// whether the age allowed it, whether or not [`request_read`] then started one.
 fn read_if_older(
     state: &mut AgentState,
     min_age_ms: i64,
     now: Timestamp,
     actions: &mut Vec<Action>,
-) {
+) -> bool {
     let due = state
         .reads
         .last_read_started
@@ -86,4 +99,5 @@ fn read_if_older(
     if due {
         request_read(state, now, actions);
     }
+    due
 }
