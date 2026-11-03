@@ -1,8 +1,9 @@
 //! The browser server's smoke test, run by hand: the real `clauseo-mcp browser-guard` in front of
 //! agent-browser v0.41.1 and a real Chrome, started as the host's browser entry starts it
 //! (`crates/profile/src/servers.rs`, fn `browser`; decision record 0029). It checks that every
-//! request Chrome makes goes through the session's proxy, loopback included; that WebRTC leaks
-//! no UDP `host` or `srflx` candidate; and that Chrome's temp profile is gone after the close.
+//! request Chrome makes goes through the session's proxy, loopback included; that WebRTC gathers
+//! (ICE gathering completes and the SDP has an `m=application` line) and leaks no UDP `host` or
+//! `srflx` candidate; and that Chrome's temp profile is gone after the close.
 //!
 //! The test stands in for the host's egress proxy with a logging proxy on `127.0.0.1` that
 //! tunnels `CONNECT` and forwards absolute-form `http://` requests. `smoke.test` resolves to a
@@ -40,11 +41,26 @@ mod scratch;
 mod smoke {
     use std::time::Duration;
 
+    use clauseo_host::browser::deny_hosts::DENY_HOSTS;
     use serde_json::{Value, json};
 
     use super::mcp::{self, Guard, poll};
     use super::pages::World;
     use super::scratch::{self, Scratch, env_file, profiles};
+
+    /// The host of a proxy log entry, which is `host:port`.
+    fn host_of(entry: &str) -> &str {
+        entry.rsplit_once(':').map_or(entry, |(host, _)| host)
+    }
+
+    /// Whether each request for `path` came through the proxy; empty when none came.
+    fn pixel_via(pixels: &[(String, bool)], path: &str) -> Vec<bool> {
+        pixels
+            .iter()
+            .filter(|(seen, _)| seen.as_str() == path)
+            .map(|(_, via)| *via)
+            .collect()
+    }
 
     /// The UDP `host` and `srflx` candidates in the report: the ones that would leak an address.
     fn leaking(candidates: &[String]) -> Vec<&String> {
@@ -56,6 +72,35 @@ mod smoke {
                     && (lower.contains(" typ host ") || lower.contains(" typ srflx "))
             })
             .collect()
+    }
+
+    /// The WebRTC report: the page ran, ICE gathering completed, the local SDP has an
+    /// `m=application` line, and no UDP `host` or `srflx` candidate would leak an address.
+    fn check_report(body: &str, log: &[String]) {
+        let report: Value = serde_json::from_str(body)
+            .unwrap_or_else(|error| panic!("report is not JSON ({error}): {body}"));
+        let candidates: Vec<String> = serde_json::from_value(report["candidates"].clone())
+            .unwrap_or_else(|error| panic!("report has no candidate list ({error}): {body}"));
+        println!("candidates: {candidates:?}");
+        println!("WebRTC report: {body}");
+        assert!(
+            !candidates.iter().any(|c| c.starts_with("error:")),
+            "the WebRTC page failed; report: {body}; proxy log: {log:?}"
+        );
+        assert_eq!(
+            report["gathering"], "complete",
+            "ICE gathering is not complete (the page waits 5 s at most); \
+             report: {body}; proxy log: {log:?}"
+        );
+        assert_eq!(
+            report["sdpHasApplication"], true,
+            "the local SDP has no m=application line; report: {body}; proxy log: {log:?}"
+        );
+        let leaks = leaking(&candidates);
+        assert!(
+            leaks.is_empty(),
+            "UDP host/srflx candidates {leaks:?}; report: {body}; proxy log: {log:?}"
+        );
     }
 
     /// `initialize`, `notifications/initialized` and `tools/list` (every page).
@@ -151,7 +196,8 @@ mod smoke {
             world.report.lock().expect("report").is_some()
         });
         poll(Duration::from_secs(5), || {
-            !world.pixel.lock().expect("pixel").is_empty()
+            let pixels = world.pixel.lock().expect("pixel").clone();
+            !pixel_via(&pixels, "/pixel").is_empty() && !pixel_via(&pixels, "/pixel2").is_empty()
         });
         guard.call("agent_browser_close", &json!({}), open);
         let status = guard.finish(Duration::from_secs(30));
@@ -164,7 +210,18 @@ mod smoke {
             format!("smoke.test:{}", world.port_a),
             format!("127.0.0.1:{}", world.port_b),
         ];
-        let others: Vec<&String> = log.iter().filter(|t| !allowed.contains(t)).collect();
+        // The proxy log cannot see a connection that bypasses the proxy. Only the loopback
+        // requests' `X-Smoke-Proxy` header proves the path (the pixel asserts below).
+        let (background, others): (Vec<&String>, Vec<&String>) = log
+            .iter()
+            .filter(|t| !allowed.contains(t))
+            .partition(|t| DENY_HOSTS.iter().any(|deny| deny.host == host_of(t)));
+        if !background.is_empty() {
+            eprintln!("Chrome background hosts (G17 item 5's finding; not a failure):");
+            for entry in &background {
+                eprintln!("  {entry}");
+            }
+        }
         assert!(
             others.is_empty(),
             "unexpected hosts {others:?}; proxy log: {log:?}"
@@ -175,11 +232,14 @@ mod smoke {
                 "{target} never reached the proxy; proxy log: {log:?}"
             );
         }
-        let pixel = world.pixel.lock().expect("pixel").clone();
-        assert!(
-            !pixel.is_empty() && pixel.iter().all(|&via| via),
-            "the pixel must be fetched, and only through the proxy: {pixel:?}; proxy log: {log:?}"
-        );
+        let pixels = world.pixel.lock().expect("pixel").clone();
+        for path in ["/pixel", "/pixel2"] {
+            let via = pixel_via(&pixels, path);
+            assert!(
+                !via.is_empty() && via.iter().all(|&through| through),
+                "{path} must be fetched, and only through the proxy: {pixels:?}; proxy log: {log:?}"
+            );
+        }
 
         assert!(reported, "no WebRTC report within 15 s; proxy log: {log:?}");
         let body = world
@@ -188,20 +248,7 @@ mod smoke {
             .expect("report")
             .clone()
             .unwrap_or_default();
-        let candidates: Vec<String> = serde_json::from_str::<Value>(&body)
-            .ok()
-            .and_then(|value| serde_json::from_value(value).ok())
-            .unwrap_or_else(|| panic!("report is not a list of strings: {body}"));
-        println!("candidates: {candidates:?}");
-        assert!(
-            !candidates.iter().any(|c| c.starts_with("error:")),
-            "the WebRTC page failed: {candidates:?}; proxy log: {log:?}"
-        );
-        let leaks = leaking(&candidates);
-        assert!(
-            leaks.is_empty(),
-            "UDP host/srflx candidates {leaks:?}; proxy log: {log:?}"
-        );
+        check_report(&body, &log);
 
         let gone = poll(Duration::from_secs(10), || profiles(&cwd).is_empty());
         assert!(
