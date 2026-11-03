@@ -66,3 +66,6 @@ fn an_exit_after_the_kill_is_killed() {
     assert_eq!(steps, every_step());
     assert_eq!(timer.fired() + 1, timer.armed());
 }
+
+#[cfg(windows)]
+mod windows;

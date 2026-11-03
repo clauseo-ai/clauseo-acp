@@ -38,9 +38,10 @@ serde_json = { workspace = true }
 [target.'cfg(unix)'.dev-dependencies]
 nix = { workspace = true, features = ["signal", "process", "event"] }
 
-# The exit watch on Windows: OpenProcess and WaitForSingleObject.
+# The exit watch on Windows: OpenProcess, WaitForSingleObject and GetExitCodeProcess; and the
+# console a test agent shares (tests/spawn_options.rs).
 [target.'cfg(windows)'.dev-dependencies]
-windows = { workspace = true }
+windows = { workspace = true, features = ["Win32_System_Console"] }
 
 [lints]
 workspace = true

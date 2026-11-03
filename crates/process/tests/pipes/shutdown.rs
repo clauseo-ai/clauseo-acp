@@ -143,9 +143,15 @@ fn sigterm_ignoring_agent_is_killed() {
 #[cfg(windows)]
 #[test]
 fn ignore_stdin_close_terminates_job() {
+    use std::pin::pin;
+
+    use async_io::Timer;
+    use futures::AsyncReadExt;
+    use futures::future::{Either, select};
+
     let dir = RunDir::new();
     let Launched {
-        stdout: _stdout,
+        mut stdout,
         stderr,
         handle,
         ..
@@ -159,6 +165,13 @@ fn ignore_stdin_close_terminates_job() {
         // No SIGTERM step, so no 3 s wait: the next is the 2 s wait for the exit after the job
         // ends, which the exit beats.
         assert_eq!(timer.next_armed().await, Duration::from_secs(2));
+        // Stdout closes when the agent dies. If it has not within 10 s, the kill missed it, and
+        // firing ends the ladder as Unresponsive: the test fails rather than hangs.
+        let mut out = Vec::new();
+        let closed = pin!(stdout.read_to_end(&mut out));
+        if let Either::Right(_) = select(closed, Timer::after(Duration::from_secs(10))).await {
+            timer.fire();
+        }
     };
     let (outcome, (), pumped) = block_on(async { join!(handle.shutdown(&timer), script, pumped) });
     let ShutdownOutcome::Killed(report) = outcome else {
@@ -203,6 +216,9 @@ fn exit_mid_turn_reports_code_and_tail() {
     pumped.unwrap();
     assert_eq!(report.code(), Some(1));
     assert_eq!(report.signal(), None);
+    // The report's Debug names its stderr source and shows none of its text.
+    let debug = format!("{report:?}");
+    assert!(debug.contains("stderr: StderrSource { .. }"), "{debug}");
     let tail = report.stderr_tail();
     assert!(tail.len() <= 4096, "{}", tail.len());
     // 200 lines of 40 bytes: the tail keeps the last whole ones, the 200th last.

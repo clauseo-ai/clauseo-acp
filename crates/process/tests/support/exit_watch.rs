@@ -7,9 +7,17 @@
 //!   agent's zombie, or the grandchild the kernel handed it in the same step), so `waitpid` never
 //!   finds none.
 //! - macOS: a kqueue `EVFILT_PROC` / `NOTE_EXIT` registration, made while the process is alive.
-//! - Windows: `OpenProcess(SYNCHRONIZE)`, then `WaitForSingleObject(INFINITE)`.
+//! - Windows: `OpenProcess(SYNCHRONIZE)`, then `WaitForSingleObject` for at most
+//!   `WINDOWS_DEADLINE_MS`, then `GetExitCodeProcess`.
 //!
-//! A survivor blocks the wait until nextest's slow-timeout ends the test.
+//! A survivor blocks the wait until nextest's slow-timeout ends the test, except on Windows,
+//! where it fails the test at the deadline: a hang there outlasts cargo-mutants' timeout, so a
+//! mutant that leaves the tree alive came back timed out instead of caught.
+
+/// How long a Windows wait gives the process to exit before it fails the test. The job's kill
+/// ends a process within milliseconds; the margin is for a loaded runner.
+#[cfg(windows)]
+const WINDOWS_DEADLINE_MS: u32 = 10_000;
 
 /// Makes this test process a child subreaper (Linux), before it launches the agent.
 pub(crate) fn before_launch() {
@@ -34,11 +42,20 @@ impl Watch {
     }
 
     /// Blocks until the process exits.
+    #[cfg(unix)]
     pub(crate) fn wait(mut self) {
         println!("grandchild {}", self.pid);
-        if let Some(os) = self.os.take() {
-            os::wait(&os, self.pid);
-        }
+        let os = self.os.take().expect("a watch is waited on once");
+        os::wait(&os, self.pid);
+    }
+
+    /// Blocks until the process exits, for at most `WINDOWS_DEADLINE_MS`, and returns its
+    /// exit code.
+    #[cfg(windows)]
+    pub(crate) fn wait(mut self) -> u32 {
+        println!("grandchild {}", self.pid);
+        let os = self.os.take().expect("a watch is waited on once");
+        os::wait(&os, self.pid)
     }
 }
 
@@ -145,14 +162,16 @@ mod os {
 mod os {
     #![expect(
         unsafe_code,
-        reason = "FFI to OpenProcess, WaitForSingleObject and TerminateProcess, for the tests"
+        reason = "FFI to OpenProcess, WaitForSingleObject, GetExitCodeProcess, TerminateProcess"
     )]
 
     use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0};
     use windows::Win32::System::Threading::{
-        INFINITE, OpenProcess, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE, TerminateProcess,
-        WaitForSingleObject,
+        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
+        PROCESS_TERMINATE, TerminateProcess, WaitForSingleObject,
     };
+
+    use super::WINDOWS_DEADLINE_MS;
 
     pub(super) struct Os(HANDLE);
 
@@ -164,16 +183,28 @@ mod os {
     }
 
     pub(super) fn watch(pid: u32) -> Os {
+        let rights = PROCESS_SYNCHRONIZE | PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION;
         // SAFETY: opening a process by id takes no pointer; `Os` closes the handle.
-        let process = unsafe { OpenProcess(PROCESS_SYNCHRONIZE | PROCESS_TERMINATE, false, pid) }
-            .expect("the watched process is running");
+        let process =
+            unsafe { OpenProcess(rights, false, pid) }.expect("the watched process is running");
         Os(process)
     }
 
-    pub(super) fn wait(os: &Os, _pid: u32) {
+    pub(super) fn wait(os: &Os, pid: u32) -> u32 {
         // SAFETY: `os.0` is a live process handle opened with SYNCHRONIZE.
-        let waited = unsafe { WaitForSingleObject(os.0, INFINITE) };
-        assert_eq!(waited, WAIT_OBJECT_0);
+        let waited = unsafe { WaitForSingleObject(os.0, WINDOWS_DEADLINE_MS) };
+        if waited != WAIT_OBJECT_0 {
+            // The watch was taken out of `Watch`, so its `Drop` will not kill the survivor.
+            kill_watched(os, pid);
+            panic!(
+                "process {pid} was still running {WINDOWS_DEADLINE_MS} ms after its tree's kill"
+            );
+        }
+        let mut code = 0_u32;
+        // SAFETY: `os.0` is a live process handle opened with QUERY_LIMITED_INFORMATION, and
+        // `code` a live u32 the call writes to.
+        unsafe { GetExitCodeProcess(os.0, &raw mut code) }.expect("read the exit code");
+        code
     }
 
     pub(super) fn kill_watched(os: &Os, _pid: u32) {
