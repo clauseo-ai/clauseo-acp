@@ -129,6 +129,10 @@ pub(crate) struct LaunchWiring {
     pub(crate) chrome_roots: Option<ChromeRoots>,
     /// The browser slots: the limit from the machine's memory, and the sessions holding one.
     pub(crate) browser_slots: BrowserSlots,
+    /// macOS and Linux: where the browser socket folders go and the start-up sweep looks;
+    /// `None` is `/tmp`. Tests pass a folder of their own.
+    #[cfg(unix)]
+    pub(crate) browser_socket_root: Option<PathBuf>,
 }
 
 impl Default for LaunchWiring {
@@ -139,6 +143,8 @@ impl Default for LaunchWiring {
             browser_executable: None,
             chrome_roots: None,
             browser_slots: BrowserSlots::new(None),
+            #[cfg(unix)]
+            browser_socket_root: None,
         }
     }
 }
@@ -151,7 +157,7 @@ impl std::fmt::Debug for LaunchWiring {
             .field("browser_executable", &self.browser_executable)
             .field("chrome_roots", &self.chrome_roots)
             .field("browser_slots", &self.browser_slots)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -316,6 +322,14 @@ impl HostConfig {
     #[cfg(feature = "test-support")]
     pub fn with_browser_executable(mut self, chrome: Option<PathBuf>) -> Self {
         self.wiring.browser_executable = chrome;
+        self
+    }
+
+    /// macOS and Linux: the folder the browser socket folders go in, and the start-up sweep of
+    /// stale ones looks in, in place of `/tmp`, for tests.
+    #[cfg(all(unix, feature = "test-support"))]
+    pub fn with_browser_socket_root(mut self, root: PathBuf) -> Self {
+        self.wiring.browser_socket_root = Some(root);
         self
     }
 

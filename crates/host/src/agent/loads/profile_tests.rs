@@ -11,7 +11,7 @@ use clauseo_protocol::{
 };
 use serde_json::{Value, json};
 
-use super::browser::{BrowserInputs, Switch, hook_servers};
+use super::browser::{BrowserInputs, Claims, Switch, hook_servers};
 use super::profile::{
     ClaudeKeys, Folders, Login, claude_options, fill_instructions, fill_meta, web_search_state,
 };
@@ -42,6 +42,8 @@ fn browser_server() -> McpServer {
             "/app/agent-browser",
             "--cwd",
             "{browser_dir}",
+            "--cdp-port",
+            "{cdp_port}",
             "--",
             "mcp",
             "--tools",
@@ -66,7 +68,26 @@ fn browser_server() -> McpServer {
                 "AGENT_BROWSER_EXECUTABLE_PATH".to_owned(),
                 "{browser_executable}".to_owned(),
             ),
+            (
+                "AGENT_BROWSER_STREAM_PORT".to_owned(),
+                "{stream_port}".to_owned(),
+            ),
+            (
+                "AGENT_BROWSER_SOCKET_DIR".to_owned(),
+                "{socket_dir}".to_owned(),
+            ),
         ],
+    }
+}
+
+/// A session's claims as the tests fill them: macOS and Linux's, with no daemon port.
+fn claims() -> Claims<'static> {
+    Claims {
+        name: "t-1",
+        cdp_port: 61_101,
+        stream_port: 61_100,
+        daemon_port: None,
+        socket_dir: Some(Path::new("/tmp/clauseo-ab-0123456789abcdef")),
     }
 }
 
@@ -87,7 +108,7 @@ fn inputs<'a>(browser_dir: &'a Path, chrome: Option<&'a Path>) -> BrowserInputs<
         port: Some(8123),
         executable: chrome,
         browser_dir,
-        session_id: "t-1",
+        claims: Some(claims()),
     }
 }
 
@@ -123,9 +144,12 @@ fn the_browser_entry_is_filled_per_session() {
             "/data/browser/agent-browser.json",
             "http://127.0.0.1:8123",
             "t-1",
-            "/Applications/Chrome"
+            "/Applications/Chrome",
+            "61100",
+            "/tmp/clauseo-ab-0123456789abcdef",
         ]
     );
+    assert_eq!(args[5..7], ["--cdp-port", "61101"]);
     // Another hook server goes as it came: only the browser's tokens are the host's.
     assert_eq!(servers[1], other_server());
 }
@@ -200,11 +224,91 @@ fn each_reason_drops_the_browser_in_order() {
             },
             ToolsUnavailableReason::BrowserNotInstalled,
         ),
+        (
+            BrowserInputs {
+                claims: None,
+                ..base
+            },
+            ToolsUnavailableReason::BrowserNotInstalled,
+        ),
     ];
     for (case, expected) in cases {
         let (servers, state) = hook_servers(vec![browser_server()], &case);
         assert_eq!(servers.len(), 0, "{expected:?}");
         assert_eq!(reason(state), Some(expected));
+    }
+}
+
+/// The Windows entry's `{daemon_port}` fills from the daemon claim; a token the session's claims
+/// cannot fill (`{daemon_port}` with no daemon claim, `{socket_dir}` with no folder) drops the
+/// entry with `BrowserNotInstalled`.
+#[test]
+fn the_port_tokens_fill_and_an_unfillable_one_drops_the_entry() {
+    let dir = PathBuf::from("/b");
+    let chrome = PathBuf::from("/chrome");
+    let windows_entry = || {
+        let McpServer::Stdio {
+            name,
+            command,
+            mut args,
+            mut env,
+        } = browser_server();
+        args.splice(
+            7..7,
+            ["--daemon-port".to_owned(), "{daemon_port}".to_owned()],
+        );
+        env.retain(|(key, _)| key != "AGENT_BROWSER_SOCKET_DIR");
+        McpServer::Stdio {
+            name,
+            command,
+            args,
+            env,
+        }
+    };
+    let windows_claims = Claims {
+        name: "Qx7_drawn-name00",
+        daemon_port: Some(61_102),
+        socket_dir: None,
+        ..claims()
+    };
+    let windows = BrowserInputs {
+        claims: Some(windows_claims),
+        ..inputs(&dir, Some(&chrome))
+    };
+    let (servers, state) = hook_servers(vec![windows_entry()], &windows);
+    assert_eq!(reason(state), None);
+    let McpServer::Stdio { args, env, .. } = &servers[0];
+    assert_eq!(
+        args[5..9],
+        ["--cdp-port", "61101", "--daemon-port", "61102"]
+    );
+    assert!(env.contains(&(
+        "AGENT_BROWSER_SESSION".to_owned(),
+        "Qx7_drawn-name00".to_owned()
+    )));
+
+    // The Windows entry with no daemon claim, and the Unix entry with no socket folder.
+    let no_daemon = BrowserInputs {
+        claims: Some(Claims {
+            daemon_port: None,
+            ..windows_claims
+        }),
+        ..windows
+    };
+    let no_folder = BrowserInputs {
+        claims: Some(Claims {
+            socket_dir: None,
+            ..claims()
+        }),
+        ..inputs(&dir, Some(&chrome))
+    };
+    for (entry, case) in [(windows_entry(), no_daemon), (browser_server(), no_folder)] {
+        let (servers, state) = hook_servers(vec![entry], &case);
+        assert_eq!(servers.len(), 0);
+        assert_eq!(
+            reason(state),
+            Some(ToolsUnavailableReason::BrowserNotInstalled)
+        );
     }
 }
 

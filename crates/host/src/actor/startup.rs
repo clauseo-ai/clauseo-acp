@@ -41,6 +41,8 @@ pub(super) async fn open(
         Arc::clone(&parts.clock),
         &parts.search,
     )?;
+    #[cfg(unix)]
+    crate::browser::session::sweep_stale(parts.wiring.browser_socket_root.as_deref());
     let heads = store.heads().await?;
     let tails = store.tail_times().await?.into_iter().collect();
     let mut matters = BTreeMap::new();

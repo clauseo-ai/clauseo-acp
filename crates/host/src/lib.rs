@@ -160,9 +160,10 @@
 //!
 //! `protocol`, `reducer`, `store`, `matters`, `process`, `acp`, `settings`, `search`, `limits` (its
 //! model, its readers and `CODEX_OVERRIDES`), `profile` (the placeholders and the skill writes,
-//! 0030), `counts` (the usage counts, 0036), `async-channel`, `async-io`, `futures`, `uuid`,
-//! `serde_json`, `tracing`, `thiserror`, `dunce` and `sha2` (the Codex hook's trust hash,
-//! 0024). Never `tauri`, `tokio` or `agents`.
+//! 0030), `counts` (the usage counts, 0036), `sandbox` (the browser's socket folder and port
+//! claims, 0029), `getrandom` (Windows browser session names), `async-channel`, `async-io`,
+//! `futures`, `uuid`, `serde_json`, `tracing`, `thiserror`, `dunce` and `sha2` (the Codex
+//! hook's trust hash, 0024). Never `tauri`, `tokio` or `agents`.
 //!
 //! # Start reading
 //!

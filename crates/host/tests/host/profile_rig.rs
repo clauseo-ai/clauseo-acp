@@ -193,17 +193,28 @@ impl ProfileHook for Hook {
     }
 }
 
-/// The `browser` entry as `clauseo_profile::servers::browser` builds it.
+/// The file the test entry names as both sidecars, `clauseo-mcp` and agent-browser: this test
+/// binary, so the launch prep's sidecar check finds them.
+pub(crate) fn sidecar() -> PathBuf {
+    std::env::current_exe().unwrap()
+}
+
+/// The `browser` entry as `clauseo_profile::servers::browser` builds it, with the tokens every
+/// OS's entry holds: `{socket_dir}` (macOS and Linux) and `{daemon_port}` (Windows) are left
+/// to the tests that need them, so one scenario serves every OS.
 pub(crate) fn browser_server() -> McpServer {
+    let agent_browser = path_text(&sidecar());
     McpServer::Stdio {
         name: "browser".to_owned(),
-        command: std::env::temp_dir().join("clauseo-mcp"),
+        command: sidecar(),
         args: [
             "browser-guard",
             "--agent-browser",
-            "/app/agent-browser",
+            agent_browser.as_str(),
             "--cwd",
             "{browser_dir}",
+            "--cdp-port",
+            "{cdp_port}",
             "--",
             "mcp",
             "--tools",
@@ -228,21 +239,26 @@ pub(crate) fn browser_server() -> McpServer {
                 "AGENT_BROWSER_EXECUTABLE_PATH".to_owned(),
                 "{browser_executable}".to_owned(),
             ),
+            (
+                "AGENT_BROWSER_STREAM_PORT".to_owned(),
+                "{stream_port}".to_owned(),
+            ),
         ],
     }
 }
 
 /// The `browser` entry `session/new` carries once filled, with the proxy on 8123 and Chrome at
-/// `/chrome`, for a template.
+/// `/chrome`, for a template. The claimed ports differ per run, so they match any value.
 pub(crate) fn filled_browser() -> Value {
     json!({"name": "browser", "command": "{{any}}",
-    "args": ["browser-guard", "--agent-browser", "/app/agent-browser", "--cwd", "@BROWSER@",
-        "--", "mcp", "--tools", "core"],
+    "args": ["browser-guard", "--agent-browser", path_text(&sidecar()), "--cwd", "@BROWSER@",
+        "--cdp-port", "{{any}}", "--", "mcp", "--tools", "core"],
     "env": [
         {"name": "AGENT_BROWSER_CONFIG", "value": "/cfg/agent-browser.json"},
         {"name": "AGENT_BROWSER_PROXY", "value": "http://127.0.0.1:8123"},
         {"name": "AGENT_BROWSER_SESSION", "value": "@SESSION@"},
         {"name": "AGENT_BROWSER_EXECUTABLE_PATH", "value": "/chrome"},
+        {"name": "AGENT_BROWSER_STREAM_PORT", "value": "{{any}}"},
     ]})
 }
 
