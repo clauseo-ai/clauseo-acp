@@ -28,3 +28,7 @@ mod refusals;
 #[cfg(test)]
 #[path = "readers/codex.rs"]
 mod codex;
+
+#[cfg(test)]
+#[path = "readers/agents_layout.rs"]
+mod agents_layout;

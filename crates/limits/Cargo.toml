@@ -27,6 +27,8 @@ tracing = { workspace = true }
 clauseo-limits = { path = ".", features = ["live-tap"] }
 clauseo-process = { path = "../process", features = ["test-support"] }
 clauseo-fake_agent = { path = "../fake_agent" }
+# The install layout `agents` writes, for the path rules' test (tests/readers/agents_layout.rs).
+clauseo-agents = { path = "../agents" }
 # Waits, without polling, for the end of a killed reader's stdout (tests/readers/harness.rs).
 async-io = { workspace = true }
 

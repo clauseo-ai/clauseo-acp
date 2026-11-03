@@ -252,3 +252,14 @@ crates/host/tests/browser_smoke/scratch.rs - clippy::disallowed_methods
 # and a durable test's handle that holds a file open without delete sharing.
 crates/matters/src/history/blob/windows_tests.rs symlink clippy::disallowed_methods
 crates/matters/src/history/durable/windows_tests.rs hold clippy::disallowed_methods
+# S17: clauseo-agents' write module, its one clock, the user-Node search, free disk space and
+# the Windows proxy registry read.
+crates/agents/src/write.rs - clippy::disallowed_methods
+crates/agents/src/config.rs SystemClock::now clippy::disallowed_methods
+crates/agents/src/config.rs SystemClock::monotonic clippy::disallowed_methods
+crates/agents/src/write/extract.rs - clippy::disallowed_methods
+crates/agents/src/node.rs candidates clippy::disallowed_methods
+crates/agents/src/disk.rs free_at unsafe_code
+crates/agents/src/sysproxy/windows.rs - unsafe_code
+crates/agents/src/sysproxy.rs system_proxy clippy::unused_async
+crates/agents/src/sysproxy.rs system_proxy clippy::unused_async
