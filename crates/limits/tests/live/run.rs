@@ -7,7 +7,9 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use clauseo_limits::{ProcessReaders, ReadFailure, ReadLimits, ReadOutcome, StdoutTap};
 use clauseo_process::{AsyncIoTimer, Launcher, PassthroughLauncher, SpawnOptions};
-use clauseo_protocol::{AccountLimits, AgentKind, Billing, BillingProvider, LimitSource};
+use clauseo_protocol::{
+    AccountLimits, AgentKind, Billing, BillingProvider, LimitSource, WindowKind,
+};
 use clauseo_settings::{Effective, Locations, SystemFiles};
 use futures::executor::block_on;
 
@@ -33,14 +35,16 @@ const RAW_MAX: usize = 4 * 1024 * 1024;
 /// A login kind, one per test.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Kind {
-    /// Claude, a Max plan.
-    ClaudeMax,
+    /// Claude, a Pro plan.
+    ClaudePro,
     /// Claude, a Team plan.
     ClaudeTeam,
     /// Claude, an Anthropic API key.
     ClaudeApi,
     /// Codex, a `ChatGPT` Plus plan.
     CodexPlus,
+    /// Codex, a `ChatGPT` Go plan.
+    CodexGo,
     /// Codex, an `OpenAI` API key.
     CodexApi,
 }
@@ -49,10 +53,11 @@ impl Kind {
     /// The test's name, which names its recording.
     fn name(self) -> &'static str {
         match self {
-            Kind::ClaudeMax => "claude_max",
+            Kind::ClaudePro => "claude_pro",
             Kind::ClaudeTeam => "claude_team",
             Kind::ClaudeApi => "claude_api",
             Kind::CodexPlus => "codex_plus",
+            Kind::CodexGo => "codex_go",
             Kind::CodexApi => "codex_api",
         }
     }
@@ -64,17 +69,18 @@ impl Kind {
 
     fn agent(self) -> AgentKind {
         match self {
-            Kind::ClaudeMax | Kind::ClaudeTeam | Kind::ClaudeApi => AgentKind::Claude,
-            Kind::CodexPlus | Kind::CodexApi => AgentKind::Codex,
+            Kind::ClaudePro | Kind::ClaudeTeam | Kind::ClaudeApi => AgentKind::Claude,
+            Kind::CodexPlus | Kind::CodexGo | Kind::CodexApi => AgentKind::Codex,
         }
     }
 
     /// A word the plan's name must hold, for a plan kind.
     fn plan_word(self) -> Option<&'static str> {
         match self {
-            Kind::ClaudeMax => Some("Max"),
+            Kind::ClaudePro => Some("Pro"),
             Kind::ClaudeTeam => Some("Team"),
             Kind::CodexPlus => Some("Plus"),
+            Kind::CodexGo => Some("Go"),
             Kind::ClaudeApi | Kind::CodexApi => None,
         }
     }
@@ -84,7 +90,7 @@ impl Kind {
         match self {
             Kind::ClaudeApi => Some(BillingProvider::Anthropic),
             Kind::CodexApi => Some(BillingProvider::OpenAi),
-            Kind::ClaudeMax | Kind::ClaudeTeam | Kind::CodexPlus => None,
+            Kind::ClaudePro | Kind::ClaudeTeam | Kind::CodexPlus | Kind::CodexGo => None,
         }
     }
 }
@@ -252,8 +258,8 @@ fn target_dir() -> PathBuf {
 /// Checks `outcome` against what S13's types expect for `kind`: a plan whose name holds the
 /// kind's word, with windows each 0 to 100 and a reset time on each one in use (S13's schema
 /// keeps a null `resets_at`, as `fixtures/claude/pro.json` has, and the reader drops one that
-/// is not RFC 3339); or pay as you go with no windows and `NotApplicable`. A mismatch names the
-/// shape it got, never the account.
+/// is not RFC 3339), and the window shape `expected_shape` gives a plan kind; or pay as you go
+/// with no windows and `NotApplicable`. A mismatch names the shape it got, never the account.
 fn expect(kind: Kind, outcome: &ReadOutcome, redactor: &mut Redactor) {
     let name = kind.name();
     let limits = match outcome {
@@ -299,8 +305,43 @@ fn expect(kind: Kind, outcome: &ReadOutcome, redactor: &mut Redactor) {
                 window.id
             );
         }
+        expected_shape(kind, limits, &shape);
     }
     println!("{name}: ok, {shape}");
+}
+
+/// The window shape a plan kind must have, checked after `expect`'s per-window checks:
+/// `ClaudePro` and `CodexPlus` have at least one session window and at least one weekly one;
+/// `CodexGo` has exactly one window, of kind `Other`, lasting 28 to 31 days (`40320..=44640`
+/// minutes; Go answered 43200). `ClaudeTeam` has no shape check: it stays fixture-only for the
+/// first release. A mismatch names the kind and the shape, never the account.
+fn expected_shape(kind: Kind, limits: &AccountLimits, shape: &str) {
+    let name = kind.name();
+    match kind {
+        Kind::ClaudePro | Kind::CodexPlus => {
+            for wanted in [WindowKind::Session, WindowKind::Weekly] {
+                assert!(
+                    limits.windows.iter().any(|window| window.kind == wanted),
+                    "{name}: no {wanted:?} window; {shape}"
+                );
+            }
+        }
+        Kind::CodexGo => {
+            let [window] = limits.windows.as_slice() else {
+                panic!(
+                    "{name}: expected one window, got {}; {shape}",
+                    limits.windows.len()
+                );
+            };
+            assert_eq!(window.kind, WindowKind::Other, "{name}: {shape}");
+            let mins = window.duration_mins;
+            assert!(
+                mins.is_some_and(|mins| (40320..=44640).contains(&mins)),
+                "{name}: window length {mins:?} minutes is not 28 to 31 days; {shape}"
+            );
+        }
+        Kind::ClaudeTeam | Kind::ClaudeApi | Kind::CodexApi => {}
+    }
 }
 
 /// The outcome's kind, with a failure's redacted text; never an account.

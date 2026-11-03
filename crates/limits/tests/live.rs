@@ -19,6 +19,9 @@
 //! secret check (`fixtures/check.rs`), whose findings are printed. The G16 owner copies a
 //! recording into `fixtures/recorded/` by hand once it passes (`fixtures/README.md`).
 //!
+//! The first release's plan tests are Claude Pro, `ChatGPT` Plus and `ChatGPT` Go; Claude Max and
+//! Team stay fixture-only for now (Rohan, 2026-11-03).
+//!
 //! Run: `cargo nextest run -p clauseo-limits --run-ignored only --no-capture`.
 
 #[cfg(test)]
@@ -41,9 +44,9 @@ mod run;
 use run::{Kind, live};
 
 #[test]
-#[ignore = "live: reads a real Claude Max login (CLAUSEO_G16_CLAUDE_MAX)"]
-fn claude_max() {
-    live(Kind::ClaudeMax);
+#[ignore = "live: reads a real Claude Pro login (CLAUSEO_G16_CLAUDE_PRO)"]
+fn claude_pro() {
+    live(Kind::ClaudePro);
 }
 
 #[test]
@@ -62,6 +65,12 @@ fn claude_api() {
 #[ignore = "live: reads a real ChatGPT Plus login for Codex (CLAUSEO_G16_CODEX_PLUS)"]
 fn codex_plus() {
     live(Kind::CodexPlus);
+}
+
+#[test]
+#[ignore = "live: reads a real ChatGPT Go login for Codex (CLAUSEO_G16_CODEX_GO)"]
+fn codex_go() {
+    live(Kind::CodexGo);
 }
 
 #[test]
