@@ -306,11 +306,11 @@ fn concurrent_writes_of_one_folder_all_succeed_with_no_false_drift() {
             .map(|handle| handle.join().unwrap().unwrap())
             .collect()
     });
-    assert!(reports.iter().all(|report| report.drifted.is_empty()));
+    assert!(reports.iter().all(|done| done.report().drifted.is_empty()));
     assert_eq!(
         reports
             .iter()
-            .map(|report| report.written.len())
+            .map(|done| done.report().written.len())
             .sum::<usize>(),
         2
     );

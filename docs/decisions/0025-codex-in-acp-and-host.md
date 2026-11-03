@@ -109,6 +109,8 @@ agent message text to one that does not (`:29655-29658`, `:44519-44523`). It nev
   exact path or name (`:103-130`), and `~/.agents/skills` comes from `HOME`
   (`codex-rs/ext/skills/src/host_roots.rs:35-36`, `:95-114`). So `include_instructions=false`
   stays, and Clauseo's skills reach Codex as an index in `developer_instructions` (record 0031).
+  The `HOME` root rules out turning the catalog on, since it would bring the lawyer's own skills
+  with Clauseo's, and plugin roots and extra roots only add roots; none removes one.
 - **The home's `config.toml`.** codex-acp gives `CODEX_CONFIG` only to the session and starts
   the app-server with `-c` for hooks alone (`dist/index.js:45590-45601`), so app-server starts
   from the home's own `config.toml`, where plugins are on by default. G8a saw every start sync a

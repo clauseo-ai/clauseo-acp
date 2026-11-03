@@ -225,9 +225,31 @@ fn a_codex_launch_writes_exactly_the_files_its_index_names() {
     assert_eq!(profile.launch_writes(None), Vec::new());
     assert_eq!(profile.launch_writes(Some(AgentKind::Claude)).len(), 1);
     let writes = profile.launch_writes(Some(AgentKind::Codex));
-    for each in &writes {
-        write_skills(each).unwrap();
-    }
+    let done: Vec<_> = writes
+        .iter()
+        .map(|each| write_skills(each).unwrap())
+        .collect();
+    // The Claude plugin's write is first; its token puts the index in Codex's keys.
+    let keys = profile.codex_keys(Some(AgentKind::Codex), &done[0]);
+    assert_eq!(
+        keys["developer_instructions"],
+        format!("{}\n\n{}", profile.instructions(), profile.skills_index()).as_str()
+    );
+    assert!(
+        profile
+            .codex_keys(Some(AgentKind::Claude), &done[0])
+            .is_empty()
+    );
+    // A token from another folder's write gives the instructions alone.
+    let other = Scratch::new("r22-codex-other");
+    let (elsewhere, _) =
+        ClauseoProfile::new(profile_paths(&other), None).with_builtin_skills(Some(stetdoc()));
+    let theirs = write_skills(&elsewhere.launch_writes(Some(AgentKind::Codex))[0]).unwrap();
+    let keys = profile.codex_keys(Some(AgentKind::Codex), &theirs);
+    assert_eq!(
+        keys["developer_instructions"],
+        profile.instructions().as_str()
+    );
     let mut written: Vec<std::path::PathBuf> = writes
         .iter()
         .flat_map(|each| files_under(each.root()))
