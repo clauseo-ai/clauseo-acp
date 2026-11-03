@@ -69,16 +69,14 @@ const entry = (id: string, words: WordsRef, state: State = {}): Entry => ({
 });
 
 /** Privacy's entries, each id written as it is: an id never moves when an entry is added or taken out. Retired in
- * round 3 (icons first): UEP-05, UEP-09, UEP-11, UEP-12. */
+ * round 3 (icons first): UEP-05, UEP-09, UEP-11, UEP-12; UEP-17 (each plan's own what-line, now UEP-23's one note). */
 export const WEB_SETTINGS: Entry[] = [
   entry("UEP-01", settingsWords("Privacy")),
   entry("UEP-02", settingsWords("What leaves this computer, and who sees it.")),
   entry("UEP-03", settingsWords("What leaves this computer")),
   entry("UEP-04", settingsWords("To {name}, on your plan")),
-  entry(
-    "UEP-17",
-    settingsWords("Each question, the parts of the papers it needs, and its web searches."),
-  ),
+  // what goes to a plan, once, as the group's note over both plans' rows
+  entry("UEP-23", settingsWords("Questions, the papers' parts they need, web searches.")),
   // behind Claude's info icon, the tip open
   entry("UEP-06", settingsWords("Anthropic lists Brave Search as its web search subprocessor."), {
     limits: CLAUDE_ONLY,
@@ -88,9 +86,13 @@ export const WEB_SETTINGS: Entry[] = [
     limits: CLAUDE_ONLY,
     tip: "More about Brave Search",
   }),
-  // the group as a firm locks it: both switches off, each glyph locked, each with U11-07's approved "Managed by your
-  // organisation" in its helper's place (that line is U11-07's, approved, so it takes no id here)
+  // the group as a firm locks it: both switches off, each glyph locked, each with the room's lock reason in its
+  // helper's place
   entry("UEP-07", settingsWords("On the web"), {
+    tools: OFF,
+    locked: ["tools.web_search", "tools.browser"],
+  }),
+  entry("UEP-24", lineWords("Managed by firm"), {
     tools: OFF,
     locked: ["tools.web_search", "tools.browser"],
   }),
@@ -99,21 +101,17 @@ export const WEB_SETTINGS: Entry[] = [
   entry("UEP-18", settingsWords("Search the web and read pages."), { tools: ON }),
   // the browser off: its window slashed, its helper shown (the no-check reason stands only while it is on)
   entry("UEP-10", settingsWords("Browser"), { tools: { ...ON, browser: false } }),
-  entry("UEP-19", settingsWords("Clauseo's own browser, on this computer."), {
+  entry("UEP-19", settingsWords("Runs on this computer."), {
     tools: { ...ON, browser: false },
   }),
   // the group's note, the room's words (UET's popover tooltip says them too)
   entry("UEP-20", toolWords("Changes apply to new conversations."), { tools: ON }),
   entry("UEP-14", settingsWords("To the websites Clauseo visits")),
-  entry(
-    "UEP-15",
-    settingsWords(
-      "When Clauseo reads a page on this computer or opens one in its browser, the website sees the visit, as it sees any browser's.",
-    ),
-    { tip: "More about the websites Clauseo visits" },
-  ),
-  entry("UEP-22", settingsWords("More about the websites Clauseo visits"), {
-    tip: "More about the websites Clauseo visits",
+  entry("UEP-15", settingsWords("Websites see Clauseo's visits, as they see any browser's."), {
+    tip: "About websites",
+  }),
+  entry("UEP-22", settingsWords("About websites"), {
+    tip: "About websites",
   }),
   // the Browser switch on, and no website check yet: the room's reason in its helper's place
   entry("UEP-16", lineWords("Not available yet"), { tools: ON }),

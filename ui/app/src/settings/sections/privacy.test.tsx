@@ -118,25 +118,36 @@ test("Privacy shows on the side, its pane headed and led in the design's words",
   );
 });
 
-const WHAT = "Each question, the parts of the papers it needs, and its web searches.";
+const WHAT = "Questions, the papers' parts they need, web searches.";
 const BRAVE = "Anthropic lists Brave Search as its web search subprocessor.";
-const VISIT =
-  "When Clauseo reads a page on this computer or opens one in its browser, the website sees the visit, as it sees any browser's.";
+const VISIT = "Websites see Clauseo's visits, as they see any browser's.";
 const tipButton = (el: HTMLElement, label: string) =>
   el.querySelector<HTMLElement>(`button[aria-label="${label}"]`);
 
-test("knowing no plan, both plans' rows show their one line; Brave Search waits behind Claude's info icon only", async () => {
+test("knowing no plan, both plans' rows show their to-line alone; Brave Search waits behind Claude's info icon only", async () => {
   const { el } = await mount();
   const claude = el.querySelector<HTMLElement>('[data-testid="dest-claude"]');
   const chatgpt = el.querySelector<HTMLElement>('[data-testid="dest-codex"]');
-  expect(claude?.textContent).toBe(`To Claude, on your plan${WHAT}`);
-  expect(chatgpt?.textContent).toBe(`To ChatGPT, on your plan${WHAT}`);
+  expect(claude?.textContent).toBe("To Claude, on your plan");
+  expect(chatgpt?.textContent).toBe("To ChatGPT, on your plan");
   expect(document.body.textContent).not.toContain(BRAVE);
   expect(tipButton(claude!, "More about Brave Search")).not.toBeNull();
   expect(chatgpt?.querySelector("button")).toBeNull();
   await act(async () => tipButton(claude!, "More about Brave Search")?.click());
   await act(async () => settled());
   expect(document.body.textContent).toContain(BRAVE);
+});
+
+test("with two plans, what goes to a plan shows once, as the group's note under its head", async () => {
+  const { el } = await mount();
+  expect(el.querySelectorAll('[data-testid^="dest-"]').length).toBeGreaterThanOrEqual(2);
+  const text = pane(el).textContent ?? "";
+  expect(text.split(WHAT).length - 1).toBe(1);
+  const note = [...el.querySelectorAll(".set-group-note")].find((n) => n.textContent === WHAT);
+  expect(note?.closest("section")?.querySelector("h3")?.textContent).toBe(
+    "What leaves this computer",
+  );
+  expect(text).not.toContain("Each question");
 });
 
 test("with Claude's limits alone, only Claude's row shows", async () => {
@@ -172,8 +183,9 @@ test("with the tools, each switch shows its value, and a flip sends set_tool_set
 });
 
 const SEARCH_NOTE = "Search the web and read pages.";
-const BROWSER_NOTE = "Clauseo's own browser, on this computer.";
-const LOCKED = "Managed by your organisation";
+const BROWSER_NOTE = "Runs on this computer.";
+// the room popover's lock wording, one for both
+const LOCKED = "Managed by firm";
 const NO_CHECK = "Not available yet";
 /** A tool row's leading glyph, and the state drawn on it: a slash for off, a lock for a firm's lock, neither for on. */
 const glyphOf = (row: Element | null | undefined) => {
@@ -194,9 +206,10 @@ test("a locked key's switch is disabled, shows the host's value, gives the lock'
   expect(search?.hasAttribute("data-disabled")).toBe(true);
   expect(search?.getAttribute("aria-checked")).toBe("false");
   expect(searchRow?.textContent).not.toContain(SEARCH_NOTE);
-  expect(searchRow?.textContent).toContain(LOCKED);
+  expect(searchRow?.textContent).toBe(`Web search${LOCKED}`);
+  expect(searchRow?.textContent).not.toContain("organisation");
   const browserRow = switchNamed(el, "Browser")?.closest(".set-row");
-  expect(browserRow?.textContent).not.toContain("Managed by your organisation");
+  expect(browserRow?.textContent).not.toContain(LOCKED);
   await act(async () => search?.click());
   await act(async () => settled());
   expect(transport.only("next_command")).toEqual([]);
@@ -207,7 +220,7 @@ test("unlocked, a switch keeps its note and gives no lock's reason", async () =>
   const { el } = await mount({ tools: ON });
   const searchRow = switchNamed(el, "Web search")?.closest(".set-row");
   expect(searchRow?.textContent).toContain(SEARCH_NOTE);
-  expect(searchRow?.textContent).not.toContain("Managed by your organisation");
+  expect(searchRow?.textContent).not.toContain(LOCKED);
 });
 
 test("the websites' row follows the plans' rows, and shows without the tools or with either on", async () => {
@@ -287,7 +300,7 @@ test("the websites' visit sentence waits behind its info icon", async () => {
   const row = el.querySelector<HTMLElement>('[data-testid="dest-websites"]');
   expect(row?.textContent).toBe("To the websites Clauseo visits");
   expect(document.body.textContent).not.toContain(VISIT);
-  await act(async () => tipButton(row!, "More about the websites Clauseo visits")?.click());
+  await act(async () => tipButton(row!, "About websites")?.click());
   await act(async () => settled());
   expect(document.body.textContent).toContain(VISIT);
 });
