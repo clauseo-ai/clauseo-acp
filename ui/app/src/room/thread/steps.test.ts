@@ -145,8 +145,9 @@ describe("the folded line", () => {
 
   test("every step over and none finished: what was tried is the trouble, said once, never followed by It failed.", () => {
     const lease = raw({ path: "a/Lease deed.pdf" });
+    // no kind icon: the break leads alone, so the one step isn't marked twice
     expect(restOf("en", [call("read", "failed", lease)])).toEqual({
-      kinds: ["read"],
+      kinds: [],
       line: "",
       trouble: "Tried to read Lease deed.pdf.",
     });

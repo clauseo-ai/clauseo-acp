@@ -56,11 +56,14 @@ export function StepGroup({
         aria-controls={open ? rows : undefined}
         onClick={() => setOpen((o) => !o)}
       >
-        <span className="step-group-icons">
-          {kinds.slice(0, live ? 1 : 3).map((kind) => (
-            <ToolKindIcon key={kind} kind={kind} size={14} className="step-icon" />
-          ))}
-        </span>
+        {/* none when nothing finished and the trouble leads: the break alone stands first */}
+        {kinds.length > 0 && (
+          <span className="step-group-icons">
+            {kinds.slice(0, live ? 1 : 3).map((kind) => (
+              <ToolKindIcon key={kind} kind={kind} size={14} className="step-icon" />
+            ))}
+          </span>
+        )}
         <span className="step-group-words">
           {line !== "" && (
             <span className="step-group-now">
