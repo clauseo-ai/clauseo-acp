@@ -12,10 +12,10 @@ use clauseo_protocol::MatterPath;
 use unicode_normalization::UnicodeNormalization;
 
 use super::shell::script;
-use super::words::{Escape, Segments, ansi_c_char, shell_segments};
+use super::words::{Escape, Segments, ansi_c_char, candidates, shell_segments};
 use super::{MAX_WORDS, Refusal};
 
-pub(super) use allow::read_only;
+pub(super) use allow::{read_only, textutil_writes};
 pub(super) use stetdoc::{Stetdoc, stetdoc};
 
 /// The most folder entries [`held_files`] reads; a larger matter is read in part, shallow folders
@@ -154,6 +154,132 @@ fn named<'a>(text: &str, held: &'a [Held]) -> Option<&'a Held> {
     held.iter().find(|file| holds(&text, &file.name))
 }
 
+/// The first of `held` whose name a wildcard in the shell word `word` could match: the last
+/// part (after `/` or `\`) of `word` or of one of its [`candidates`], when it has `*`, `?` or
+/// `[`, matched against each held name in any folder ([`glob_matches`]). A batch command such
+/// as `cp Revised/*.docx .` or `for f in *.docx` so counts as naming the held file; a wildcard
+/// in quotes counts too (the words come unquoted), a refusal on the safe side.
+fn globbed<'a>(word: &str, held: &'a [Held]) -> Option<&'a Held> {
+    candidates(word).find_map(|candidate| {
+        let last = candidate.rsplit(['/', '\\']).next().unwrap_or(candidate);
+        if !last.contains(['*', '?', '[']) {
+            return None;
+        }
+        let pattern: Vec<char> = fold(last).chars().collect();
+        held.iter().find(|file| {
+            let name: Vec<char> = file.name.chars().collect();
+            glob_matches(&pattern, &name)
+        })
+    })
+}
+
+/// Whether the shell wildcard `pattern` matches all of `name`: `*` any run, `?` any one
+/// character, `[…]` one of a set (ranges `a-z`, `!` or `^` first negates; an unclosed `[` is
+/// itself); a leading `.` is not matched by a wildcard, as the shell does. Linear backtracking
+/// on the last `*`, so a long pattern costs its length times the name's.
+fn glob_matches(pattern: &[char], name: &[char]) -> bool {
+    if name.first() == Some(&'.') && pattern.first() != Some(&'.') {
+        return false;
+    }
+    let (mut p, mut n) = (0, 0);
+    let mut star: Option<(usize, usize)> = None;
+    while let Some(&c) = name.get(n) {
+        let rest = pattern.get(p..).unwrap_or_default();
+        let step = match rest.first() {
+            Some('*') => {
+                star = Some((p, n));
+                p += 1;
+                continue;
+            }
+            Some('?') => Some(1),
+            Some('[') => class(rest, c),
+            Some(&literal) => (literal == c).then_some(1),
+            None => None,
+        };
+        match (step, star) {
+            (Some(width), _) => {
+                p += width;
+                n += 1;
+            }
+            (None, Some((at, from))) => {
+                p = at + 1;
+                n = from + 1;
+                star = Some((at, from + 1));
+            }
+            (None, None) => return false,
+        }
+    }
+    pattern
+        .get(p..)
+        .unwrap_or_default()
+        .iter()
+        .all(|c| *c == '*')
+}
+
+/// For a pattern starting at `[`: how many pattern characters its class takes when it matches
+/// `c`; `None` when it does not. An unclosed `[` is a plain character.
+fn class(pattern: &[char], c: char) -> Option<usize> {
+    let negated = matches!(pattern.get(1), Some('!' | '^'));
+    let start = if negated { 2 } else { 1 };
+    // A `]` right after the opening (or the negation) is a member, not the end.
+    let Some(end) = pattern
+        .iter()
+        .skip(start + 1)
+        .position(|ch| *ch == ']')
+        .map(|at| at + start + 1)
+    else {
+        return (c == '[').then_some(1);
+    };
+    let set = pattern.get(start..end).unwrap_or_default();
+    let mut found = false;
+    let mut members = set.iter().peekable();
+    while let Some(&low) = members.next() {
+        let mut ahead = members.clone();
+        if ahead.next() == Some(&'-')
+            && let Some(&high) = ahead.next()
+        {
+            found |= (low..=high).contains(&c);
+            members = ahead;
+        } else {
+            found |= low == c;
+        }
+    }
+    (found != negated).then_some(end + 1)
+}
+
+/// How a shell word names a held file ([`names_word`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Named<'a> {
+    /// By name ([`named`]) or by a wildcard that could match it ([`globbed`]).
+    File(&'a Held),
+    /// As a word the path layer found resolving to a held file (`hits`), or a part of one.
+    Hit,
+}
+
+impl<'a> Named<'a> {
+    /// The held file, when the word names it by name.
+    fn file(self) -> Option<&'a Held> {
+        match self {
+            Self::File(file) => Some(file),
+            Self::Hit => None,
+        }
+    }
+}
+
+/// What the word `word` of a command (not a heredoc body) names: a held file by name or
+/// wildcard, or a path-layer hit or a part of one ([`candidates`]: `Link.docx` of a hit
+/// `--output=Link.docx`).
+fn names_word<'a>(word: &str, held: &'a [Held], hits: &[String]) -> Option<Named<'a>> {
+    named(word, held)
+        .or_else(|| globbed(word, held))
+        .map(Named::File)
+        .or_else(|| {
+            hits.iter()
+                .any(|hit| hit == word || candidates(hit).any(|part| part == word))
+                .then_some(Named::Hit)
+        })
+}
+
 /// The first of `held` that the shell command `command` names: in its text with escaped newlines
 /// joined and, under [`Escape::Backslash`], `$'…'` decoded (comments are not dropped); or in one
 /// of its first [`MAX_READ_WORDS`] words as the shell reads them, quotes and escapes off
@@ -179,7 +305,9 @@ fn named_in_words<'a>(
         segment
             .words
             .iter()
-            .find_map(|word| named(word, held))
+            .find_map(|word| {
+                named(word, held).or_else(|| globbed(word, held).filter(|_| segment.command))
+            })
             .or_else(|| {
                 let (inner, inner_escape) =
                     script(&segment.words, escape).filter(|_| segment.command && depth > 0)?;
@@ -215,10 +343,10 @@ fn raw_text(command: &str, escape: Escape) -> String {
 
 /// Why the shell command `text` (as one line, `line`) is refused, if it is, with `found` the
 /// first held file its words name from the folders it may be in and `hits` the words that name
-/// one. `stetdoc mcp` and `init` are refused outright, and a `stetdoc` form that writes a held
-/// file (its default output included) is refused. Else the name backstop: a command naming a
-/// held file of `folder`, found by its words' paths or by its text and words ([`named_in`]), is
-/// refused unless the whole command only reads ([`read_only`]).
+/// one. `stetdoc mcp` and `init` are refused outright, and a `stetdoc` or `textutil` form that
+/// writes a held file (its default output included) is refused. Else the name backstop: a
+/// command naming a held file of `folder`, found by its words' paths or by its text and words
+/// ([`named_in`]), is refused unless the whole command only reads ([`read_only`]).
 pub(super) fn shell_refusal(
     text: &str,
     line: &str,
@@ -238,13 +366,16 @@ pub(super) fn shell_refusal(
             }
             Stetdoc::Writes(None) | Stetdoc::Fine | Stetdoc::Unknown => {}
         }
+        if let Some(file) = textutil_writes(&segment.words, &held) {
+            return Some(Refusal::HeldOpen(file.path.clone()));
+        }
     }
     let path = found.or_else(|| named_in(text, escape, &held).map(|file| file.path.clone()))?;
     let mut names_held = held;
     if !names_held.iter().any(|file| file.path == path) {
         names_held.push(Held::new(path.clone()));
     }
-    (!read_only(line, escape, &names_held, hits)).then_some(Refusal::HeldOpen(path))
+    (!read_only(line, escape, &names_held, hits, folder)).then_some(Refusal::HeldOpen(path))
 }
 
 /// A program word's name: its last path part, lower case, without `.exe`.

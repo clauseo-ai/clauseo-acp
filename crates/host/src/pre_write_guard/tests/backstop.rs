@@ -212,7 +212,7 @@ fn writing_a_held_file_through_the_shell_is_refused() {
         "python3 <<EOF\nopen('Contract.docx','w')\nEOF",
         "less -o Contract.docx x",
         "unzip Contract.docx",
-        "textutil -convert txt Contract.docx",
+        "textutil -convert docx Contract.txt",
     ] {
         assert_eq!(check(&fx, "Bash", command), contract, "{command}");
     }

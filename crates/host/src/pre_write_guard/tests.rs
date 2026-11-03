@@ -465,6 +465,7 @@ fn bash_punctuation_around_a_held_name_is_stripped() {
 
 mod allow;
 mod backstop;
+mod batch;
 mod codex;
 mod fixtures;
 mod gaps;
