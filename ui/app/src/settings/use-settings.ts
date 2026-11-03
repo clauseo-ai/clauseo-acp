@@ -3,14 +3,22 @@
 // controls always show what holds now. The display itself is read with useDisplay().
 import { useCallback, useRef, useSyncExternalStore } from "react";
 import type { DisplayStore } from "../room/display-store.ts";
-import type { UiSettings } from "../room/host-next.ts";
+import type { ToolSettings, UiSettings } from "../room/host-next.ts";
 
-export type LiveSettings = { ui: UiSettings; locked: readonly string[] };
+export type LiveSettings = {
+  ui: UiSettings;
+  locked: readonly string[];
+  /** The tools' switches, when the host sends them (app-local until it does). */
+  tools?: ToolSettings | undefined;
+};
 
 const KEYS = ["theme", "font_size", "language", "lite", "motion"] as const;
 
 const sameSettings = (a: LiveSettings, b: LiveSettings) =>
   KEYS.every((k) => a.ui[k] === b.ui[k]) &&
+  a.tools?.web_search === b.tools?.web_search &&
+  a.tools?.browser === b.tools?.browser &&
+  (a.tools === undefined) === (b.tools === undefined) &&
   a.locked.length === b.locked.length &&
   a.locked.every((key, i) => key === b.locked[i]);
 
@@ -19,7 +27,7 @@ export function useSettings(store: DisplayStore): LiveSettings {
   const last = useRef<LiveSettings | null>(null);
   const subscribe = useCallback((listener: () => void) => store.subscribe(listener), [store]);
   const read = useCallback((): LiveSettings => {
-    const next = { ui: store.ui(), locked: store.locked() };
+    const next = { ui: store.ui(), locked: store.locked(), tools: store.tools() };
     if (last.current !== null && sameSettings(last.current, next)) return last.current;
     last.current = next;
     return next;

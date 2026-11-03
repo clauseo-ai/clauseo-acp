@@ -64,7 +64,16 @@ export type UiSettings = {
 };
 
 /** `get_settings`'s answer, and what `settings_changed` carries: the settings, and the keys a policy locks. */
-export type Settings = { ui: UiSettings; locked: string[] };
+export type Settings = {
+  ui: UiSettings;
+  locked: string[];
+  /** The tools' switches (`tools.web_search`, `tools.browser`), app-local until the host's SettingsView carries them
+   * (it has `ui` and `locked` only); the real host never sends them yet, so Privacy's switches stay hidden. */
+  tools?: ToolSettings;
+};
+
+/** The settings' `tools` table, as the settings crate's ToolsSettings has it. */
+export type ToolSettings = { web_search: boolean; browser: boolean };
 
 /* ---------- H3, H5, H20: a matter's details ---------- */
 
@@ -169,6 +178,7 @@ export type RetryCommand = { retry_from: { thread: ThreadId; message: MessageId 
  * retry. */
 export type NextCommand =
   | { set_ui_settings: { patch: Partial<UiSettings> } }
+  | { set_tool_settings: { patch: { tools: Partial<ToolSettings> } } }
   | MattersCommand
   | RetryCommand;
 /** What a command did: `"done"`, create_matter's `{"matter_created": {"matter": ...}}`, or retry_from's
@@ -198,6 +208,8 @@ export const WIRE = {
   listPapers: "list_papers",
   getSettings: "get_settings",
   setUiSettings: "set_ui_settings",
+  /** App-local: no host command yet (SetUiSettings covers the `ui` keys only). */
+  setToolSettings: "set_tool_settings",
   settingsChanged: "settings_changed",
   listMatters: "list_matters",
   listThreads: "list_threads",
@@ -224,6 +236,8 @@ export interface PapersHost {
 export interface SettingsHost {
   getSettings(): Promise<Settings>;
   setUiSettings(patch: Partial<UiSettings>): Promise<void>;
+  /** The tools' switches; only the fake has it until the host takes a patch for `tools`. */
+  setToolSettings?(patch: Partial<ToolSettings>): Promise<void>;
   /** Hears each `settings_changed`. Returns the unsubscribe. */
   onSettingsChanged(listener: (settings: Settings) => void): () => void;
 }

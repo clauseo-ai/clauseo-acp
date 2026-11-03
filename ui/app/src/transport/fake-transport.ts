@@ -134,6 +134,9 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
       setUiSettings: async (patch) => {
         await this.#nextCommand({ [WIRE.setUiSettings]: { patch } });
       },
+      setToolSettings: async (patch) => {
+        await this.#nextCommand({ [WIRE.setToolSettings]: { patch: { tools: patch } } });
+      },
       onSettingsChanged: (listener) => {
         this.#settingsHeard.add(listener);
         return () => this.#settingsHeard.delete(listener);
