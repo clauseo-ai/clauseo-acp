@@ -20,23 +20,19 @@
 //   matter with no papers, a list that couldn't be read, more matches than the 50 rows shown and a list that stops
 //   short each get a line under the rows. The papers picked here are remembered by their token's text, so a token
 //   undo brings back mentions its paper again.
-import { useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useId, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "../lib/cn.ts";
-import { Mixed } from "../lib/mixed.tsx";
 import { useThreadWords } from "../lib/words-thread.ts";
 import { useLayer } from "../ui/layer-context.ts";
 import { separator } from "../ui/recipes-controls.ts";
 import { raised, row, rowNote } from "../ui/recipes-overlays.ts";
 import type { MentionItem, Mentions, SlashCommand } from "./composer.tsx";
 import {
-  caretOf,
-  clipOf,
   keepHighlight,
   keyIds,
   matching,
   runEnd,
-  placeMenu,
   triggerAt,
   type Trigger,
 } from "./composer-menu-logic.ts";
@@ -49,6 +45,8 @@ import {
   mentionText,
   type Folded,
 } from "./composer-mention-logic.ts";
+import { useMenuPlace } from "./composer-menu-place.ts";
+import { CommandRow, PaperRow } from "./composer-menu-rows.tsx";
 import { holdTokens, type Tokens } from "./composer-tokens.ts";
 
 /** What the field shows of the open menu: its list's id and the highlighted row's, for aria-controls and
@@ -416,71 +414,8 @@ export function ComposerMenu({
   // closed, the field shows nothing of it
   useEffect(() => () => onShown(null), [onShown]);
 
-  /** Puts the open menu at the caret's x, clear of the field above or below it, inside what clips it. Its height is
-   * read with its last bound let go: the rows up to their own cap, and the lines under them. */
-  const place = () => {
-    const el = plane.current;
-    if (el === null) return;
-    const box = (frame?.current ?? field).getBoundingClientRect();
-    el.style.maxHeight = "";
-    const at = placeMenu(
-      { x: caretOf(field).x, top: box.top, bottom: box.bottom },
-      { width: el.offsetWidth, height: el.offsetHeight },
-      clipOf(el),
-    );
-    el.style.left = `${at.left}px`;
-    el.style.top = `${at.top}px`;
-    el.style.maxHeight = `${at.maxHeight}px`;
-  };
-  const placeRef = useRef(place);
-  placeRef.current = place;
-
-  // at the caret, once drawn, and the highlighted row in view: the rows scroll by themselves, never the room's
-  // column under them, which scrollIntoView would move too
-  useLayoutEffect(() => {
-    if (plane.current === null || open === null) return;
-    place();
-    const rows = box.current;
-    const hi = rows?.children.item(open.hi);
-    if (rows === null || rows === undefined || hi === null || hi === undefined) return;
-    const r = hi.getBoundingClientRect();
-    const b = rows.getBoundingClientRect();
-    if (r.top < b.top) rows.scrollTop -= b.top - r.top;
-    else if (r.bottom > b.bottom) rows.scrollTop += Math.min(r.bottom - b.bottom, r.top - b.top);
-  });
-
-  // and again as the window resizes or anything scrolls under it, the field included; the rows' own scroll aside.
-  // And as the field's own size changes: a narrower window rewraps the words and the field grows a line, but the
-  // window's resize comes before that grow (the composer fits the field from its own size observer), so a menu placed
-  // on the resize alone stood over the line's start (WebView2, M2 at 100 px narrower). Placed once per frame, after it.
-  const isOpen = open !== null;
-  useEffect(() => {
-    const view = field.ownerDocument.defaultView;
-    if (!isOpen || view === null) return;
-    const again = (e: Event) => {
-      if (e.target !== plane.current && e.target !== box.current) placeRef.current();
-    };
-    view.addEventListener("resize", again);
-    view.addEventListener("scroll", again, { capture: true, passive: true });
-    let frame: number | null = null;
-    const grown =
-      typeof ResizeObserver === "function"
-        ? new ResizeObserver(() => {
-            if (frame !== null) return;
-            frame = view.requestAnimationFrame(() => {
-              frame = null;
-              placeRef.current();
-            });
-          })
-        : null;
-    grown?.observe(field);
-    return () => {
-      view.removeEventListener("resize", again);
-      view.removeEventListener("scroll", again, { capture: true });
-      grown?.disconnect();
-      if (frame !== null) view.cancelAnimationFrame(frame);
-    };
-  }, [isOpen, field]);
+  // at the caret, clear of the field, inside what clips it, and kept there while open
+  useMenuPlace({ field, frame, plane, rows: box, hi: open === null ? null : open.hi });
 
   const live = (
     <span className="sr-only" aria-live="polite" aria-atomic="true">
@@ -522,72 +457,31 @@ export function ComposerMenu({
                 aria-label={open.kind === "command" ? w.th("Commands") : w.th("Papers")}
                 data-testid={testIds?.menu}
               >
-                {open.kind === "command"
-                  ? open.items.map((c, i) => (
-                      <div
-                        key={ids[i]}
-                        id={ids[i]}
-                        role="option"
-                        aria-selected={i === open.hi}
-                        data-highlighted={i === open.hi ? "" : undefined}
-                        data-testid={testIds?.item}
-                        className={cn(row, "items-start")}
-                        // the field keeps the focus: a press picks, as Enter does
-                        onPointerDown={(e) => {
-                          e.preventDefault();
-                          pick(i);
-                        }}
-                        onPointerMove={() => {
-                          if (i !== open.hi) setOpen({ ...open, hi: i });
-                        }}
-                      >
-                        <span className="min-w-0">
-                          <span className="block">
-                            <bdi>/{c.name}</bdi>
-                            {c.input_hint !== undefined && c.input_hint !== "" && (
-                              <span className="text-muted">
-                                {" "}
-                                <Mixed>{c.input_hint}</Mixed>
-                              </span>
-                            )}
-                          </span>
-                          {c.description !== "" && (
-                            <span className={rowNote}>
-                              <Mixed>{c.description}</Mixed>
-                            </span>
-                          )}
-                        </span>
-                      </div>
-                    ))
-                  : open.items.map((m, i) => (
-                      <div
-                        key={ids[i]}
-                        id={ids[i]}
-                        role="option"
-                        aria-selected={i === open.hi}
-                        data-highlighted={i === open.hi ? "" : undefined}
-                        data-testid={testIds?.item}
-                        className={cn(row, "items-start")}
-                        onPointerDown={(e) => {
-                          e.preventDefault();
-                          pick(i);
-                        }}
-                        onPointerMove={() => {
-                          if (i !== open.hi) setOpen({ ...open, hi: i });
-                        }}
-                      >
-                        <span className="min-w-0">
-                          <span className="block truncate">
-                            <bdi>{m.label}</bdi>
-                          </span>
-                          {m.detail !== undefined && m.detail !== "" && (
-                            <span className={cn(rowNote, "truncate")}>
-                              <bdi>{m.detail}</bdi>
-                            </span>
-                          )}
-                        </span>
-                      </div>
-                    ))}
+                {ids.map((id, i) => (
+                  <div
+                    key={id}
+                    id={id}
+                    role="option"
+                    aria-selected={i === open.hi}
+                    data-highlighted={i === open.hi ? "" : undefined}
+                    data-testid={testIds?.item}
+                    className={cn(row, "items-start")}
+                    // the field keeps the focus: a press picks, as Enter does
+                    onPointerDown={(e) => {
+                      e.preventDefault();
+                      pick(i);
+                    }}
+                    onPointerMove={() => {
+                      if (i !== open.hi) setOpen({ ...open, hi: i });
+                    }}
+                  >
+                    {open.kind === "command" ? (
+                      <CommandRow c={open.items[i]} />
+                    ) : (
+                      <PaperRow m={open.items[i]} />
+                    )}
+                  </div>
+                ))}
               </div>
             )}
             {notes.length > 0 && (
@@ -606,8 +500,8 @@ export function ComposerMenu({
             )}
           </div>,
           // inside the field's landmark when no layer is given (the room's main has none), so the open menu is
-          // content of the page's regions (axe's region rule); fixed, it stands at the caret wherever it mounts, bounded by
-          // what clips it there (clipOf)
+          // content of the page's regions (axe's region rule); fixed, it stands at the caret wherever it mounts, bounded
+          // by what clips it there (clipOf)
           layer ?? field.closest("main, aside") ?? field.ownerDocument.body,
         )}
     </>
