@@ -9,7 +9,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import axe from "axe-core";
 import { ToolKindIcon } from "@clauseo/components/clauseo/tool-kind-icons.tsx";
-import { IconNeedsPermission } from "@clauseo/components/icons/icons.tsx";
+import { IconBreak, IconNeedsPermission } from "@clauseo/components/icons/icons.tsx";
 import { renderToStaticMarkup } from "react-dom/server";
 import { frame } from "@clauseo/components/lib/words-frame.ts";
 import { afterEach, beforeAll, expect, test } from "vitest";
@@ -160,6 +160,42 @@ test("opened in place: its rows, each with its icon, the paper by its file name 
   await h.click(line);
   expect(h.all("tool-call")).toHaveLength(0);
   expect(line.getAttribute("aria-expanded")).toBe("false");
+});
+
+test("a failed row's state follows a dot, Failed, with the break icon (DESIGN, the step group, Open), in either language; a stopped row keeps its kind's icon", async () => {
+  const glyph = (k: string) =>
+    renderToStaticMarkup(<ToolKindIcon kind={k} size={14} className="step-icon" />);
+  for (const [language, failed, stopped] of [
+    ["en", "Failed", "Stopped"],
+    ["hi", "विफल", "रोका गया"],
+  ] as const) {
+    h = await mountRoom({ display: { language } });
+    h.deliver([
+      reset([
+        ASKED,
+        read(7, 201, "papers/2019/Lease deed.pdf"),
+        call(8, 202, "execute", "failed"),
+        call(9, 203, "execute", "cancelled"),
+        agentText(10, 2, "Clause nine needs notice."),
+      ]),
+    ]);
+    await h.click(lineOf(groups()[0])!);
+    const [, bad, halted] = h.all("tool-call");
+    expect(bad?.dataset["status"]).toBe("failed");
+    expect(bad?.querySelector(".step-row-mark")?.textContent).toBe(failed);
+    expect(bad?.textContent?.endsWith(" · " + failed)).toBe(true);
+    // the break in the kind's place, its row's only glyph
+    const glyphs = bad!.querySelectorAll("svg");
+    expect(glyphs).toHaveLength(1);
+    expect(glyphs[0]!.outerHTML).toBe(
+      renderToStaticMarkup(<IconBreak size={14} className="step-icon" />),
+    );
+    expect(halted?.querySelector(".step-row-mark")?.textContent).toBe(stopped);
+    expect(halted?.querySelector("svg")?.outerHTML).toBe(glyph("execute"));
+    await h.unmount();
+    h = null;
+    document.body.replaceChildren();
+  }
 });
 
 test("a failure stays visible on the folded line", async () => {
