@@ -5,6 +5,8 @@
 //   (execCommand("delete")), so one undo brings it back. Left at a token's end goes to its start, Right at its start
 //   to its end; a caret put inside one any other way (a press, Up or Down) goes to its nearer edge, and a selection
 //   grows to whole tokens. Never while an input method composes, and never with Ctrl, Cmd or Alt held.
+// - A replacement the system makes in a token (macOS's smart quotes on a quoted paper's closing `"`) is refused at
+//   beforeinput; one at or after a token's end (Tamil99's vowel signs) is let be.
 // - Undo and redo read the value again for the tokens' texts (the agent's commands, the papers picked here), so a
 //   token they bring back is one again.
 // - The overlay is a copy of the field behind it: the field's face, padding, line height and transform (the
@@ -132,6 +134,26 @@ export function holdTokens(
     read(kind === "historyUndo" || kind === "historyRedo");
   };
 
+  /** A replacement the system makes in a token is refused: macOS's smart quotes turn a quoted paper's closing `"`
+   * into `”` as the pick puts it in, inside the pick's own insertText, and the token is lost (WKWebView, #117 M5).
+   * The range isn't read from target ranges (a textarea's are no offsets in its value, and the run logged none): while
+   * the pick's words stand in the field unread, a replacement can only be in them; otherwise it is the selection, as
+   * WebKit selects what it replaces (Tamil99's vowel signs, a spelling fix). One that starts at or after a token's end is let be. */
+  const onBeforeInput = (e: Event) => {
+    const ev = e as InputEvent;
+    if (ev.inputType !== "insertReplacementText" || composing.current || ev.isComposing) return;
+    const p = pending;
+    if (p !== null && field.value.slice(p.start, p.end) === p.text) {
+      e.preventDefault();
+      return;
+    }
+    const start = field.selectionStart;
+    const end = field.selectionEnd;
+    if (start === end) return;
+    if (field.value !== value) read(false);
+    if (tokens.some((t) => start < t.end && end > t.start)) e.preventDefault();
+  };
+
   /** Selects the range and deletes it through the engine, so undo brings it back. */
   const remove = (
     t: { start: number; end: number },
@@ -212,6 +234,7 @@ export function holdTokens(
   resized?.observe(field);
   const fonts = (doc as Document & { fonts?: FontFaceSet }).fonts;
 
+  field.addEventListener("beforeinput", onBeforeInput);
   field.addEventListener("input", onInput);
   field.addEventListener("keydown", onKey);
   field.addEventListener("keyup", snap);
@@ -236,6 +259,7 @@ export function holdTokens(
     },
     sync: () => read(false),
     stop: () => {
+      field.removeEventListener("beforeinput", onBeforeInput);
       field.removeEventListener("input", onInput);
       field.removeEventListener("keydown", onKey);
       field.removeEventListener("keyup", snap);
