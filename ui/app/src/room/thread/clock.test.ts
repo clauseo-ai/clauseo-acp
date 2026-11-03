@@ -1,10 +1,10 @@
 // The thread's clock times: the lawyer's own zone, "4:31 pm" today, the weekday within six days either way, the day and
 // month further off (U2's clockOf rule), Hindi through clock().
 import { clock } from "@clauseo/components/lib/words.ts";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { clockTime, isoOf, stamp, whenOf } from "./clock.ts";
 
-// local times, so the checks hold in any zone the tests run in
+// local times, so the checks hold in any zone the tests run in (the suite pins its zone to UTC: vite.config.ts)
 const at = (day: number, h: number, m: number) => new Date(2026, 10, day, h, m).getTime();
 const NOW = at(2, 12, 0);
 
@@ -54,4 +54,26 @@ test("never a relative time", () => {
 
 test("the ISO form is UTC", () => {
   expect(isoOf(Date.UTC(2026, 10, 2, 11, 1))).toBe("2026-11-02T11:01:00.000Z");
+});
+
+test("the weekday shows exactly when the instant is on another local day, read in Asia/Kolkata", async () => {
+  // the zone is set inside this test (Node honours a runtime change) and restored after
+  const zone = process.env["TZ"];
+  process.env["TZ"] = "Asia/Kolkata";
+  try {
+    // a fresh copy: clock.ts caches its Intl formats, and a format keeps the zone it was made in
+    vi.resetModules();
+    const inKolkata = await import("./clock.ts");
+    const now = Date.UTC(2026, 10, 2, 6, 30); // Monday 2 November, 12:00 in Kolkata
+    // 16:31 on the same day: the time alone
+    expect(inKolkata.stamp("en", Date.UTC(2026, 10, 2, 11, 1), now)).toBe("4:31 pm");
+    // 00:00 on Tuesday 3 November in Kolkata (18:30 UTC on the 2nd): a different local day
+    expect(inKolkata.stamp("en", Date.UTC(2026, 10, 2, 18, 30), now)).toBe("Tuesday 12:00 am");
+    // 23:59 on Sunday 1 November in Kolkata (18:29 UTC on the 1st): the day before
+    expect(inKolkata.stamp("en", Date.UTC(2026, 10, 1, 18, 29), now)).toBe("Sunday 11:59 pm");
+  } finally {
+    if (zone === undefined) delete process.env["TZ"];
+    else process.env["TZ"] = zone;
+    vi.resetModules();
+  }
 });

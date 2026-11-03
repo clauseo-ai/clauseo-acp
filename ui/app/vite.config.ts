@@ -333,6 +333,10 @@ export default defineConfig(({ mode }) => {
     worker: { format: "es" },
     test: {
       sequence: { sequencer: SlowFirst },
+      // One zone for every project and worker, whatever the shell's TZ, so local runs, CI and a machine in
+      // Kolkata agree. Checked by src/testing-zone.test.ts (app) and components' src/testing/zone.test.ts, which
+      // fail under a shell TZ=Asia/Kolkata without this line. clock.test.ts sets another zone inside one test, on purpose.
+      env: { TZ: "UTC" },
       projects: [
         {
           extends: true,
