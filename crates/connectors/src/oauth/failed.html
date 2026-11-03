@@ -2,11 +2,75 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>Clauseo</title>
-<style>body{font:16px/1.5 system-ui,sans-serif;margin:4em auto;max-width:32em;padding:0 1em;color:#222}</style>
+<style>/* Values from Clauseo's design system (ui/components/src/styles), copied because this page loads nothing. Each
+custom property is the token of the same name: colour and depth from tokens-colour.css (day :root, night
+[data-theme=night]), type from tokens-type.css, space, radii and motion from tokens-parts.css. */
+:root{
+--ground:#e5e2dc;--surface:#fdfcfa;--primary:#23201d;--muted:#48423b;--select:#e2d9c4;
+--green-tint:#e3eee6;--green-text:#22603a;--red-tint:#f6e3e0;--red-text:#9e2b22;
+--brand:#a3482f;--brand-night:#d07455;--divide-strong:rgba(56,44,30,.12);
+--e2:inset 0 1px 0 #fff,0 1px 2px rgba(56,44,30,.08),0 4px 10px -6px rgba(56,44,30,.12),0 30px 64px -30px rgba(56,44,30,.38),18px 26px 56px -30px rgba(56,44,30,.26);
+--font-latin:"Anek Latin","Anek Devanagari","Segoe UI",system-ui,sans-serif;
+--font-deva:"Anek Devanagari","Anek Latin Hi","Nirmala UI","Kohinoor Devanagari",system-ui,sans-serif;
+--t17:1.0625rem;--t18:1.125rem;--t22:1.375rem;--t26:1.625rem;
+--lh-reply:27px;--lh-read:29px;--lh-lead-narrow:30px;--lh-lead:34px;
+--w-ui:450;--w-chrome:560;--wd-wide:110%;--wd-read:104%;--tr-lead:-.014em;--tr-read:.002em;
+--s1:4px;--s2:8px;--s4:16px;--s6:24px;--s8:32px;--s10:40px;--r-surface:18px;
+--ease-arrive:cubic-bezier(.16,1,.3,1);--dur-arrive:220ms}
+/* night */
+@media (prefers-color-scheme:dark){:root{
+--ground:#1b1a18;--surface:#3d3c39;--primary:#ecebe9;--muted:#cbcac8;--select:#575552;
+--green-tint:#294433;--green-text:#a1dfb6;--red-tint:#55332f;--red-text:#f9c1ba;--divide-strong:rgba(255,255,255,.1);
+--e2:inset 0 1px 0 rgba(255,255,255,.13),0 1px 2px rgba(0,0,0,.32),0 4px 10px -6px rgba(0,0,0,.42),0 30px 64px -30px rgba(0,0,0,.8),18px 26px 56px -30px rgba(0,0,0,.66)}
+.comma{fill:var(--brand-night)}}
+/* Hindi: taller lines, no tracking (tokens-type.css :root:lang(hi)) */
+[lang=hi]{font-family:var(--font-deva);--lh-reply:29px;--lh-read:31px;--lh-lead-narrow:36px;--lh-lead:42px;--tr-lead:0;--tr-read:0}
+html{background:var(--ground);color:var(--primary);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;font-synthesis:none}
+body{box-sizing:border-box;min-height:100vh;margin:0;padding:var(--s6);display:grid;place-items:center;font:var(--w-ui) var(--t18)/var(--lh-read) var(--font-latin)}
+::selection{background:var(--select);color:var(--primary)}
+main{width:100%;max-width:46rem;margin-bottom:var(--s8)}
+.lockup{display:block;width:116px;height:auto;margin:0 0 var(--s6) var(--s10)}
+.word{fill:var(--primary)}
+.comma{fill:var(--brand)}
+.sheet{padding:var(--s10);border-radius:var(--r-surface);background:var(--surface);box-shadow:var(--e2)}
+.state{display:block;width:48px;height:48px;margin-bottom:var(--s8);border-radius:50%;fill:none;stroke-width:1.1;stroke-linecap:square}
+.ok .state{background:var(--green-tint);stroke:var(--green-text)}
+.no .state{background:var(--red-tint);stroke:var(--red-text);stroke-width:1.25;stroke-linecap:round}
+.langs{display:grid;grid-template-columns:1fr 1fr;align-items:baseline}
+.langs>div{padding-right:var(--s8)}
+.langs>[lang]{padding:0 0 0 var(--s8);box-shadow:inset 1px 0 0 var(--divide-strong)}
+h1,.lead{margin:0 0 var(--s2);font-size:var(--t26);line-height:var(--lh-lead);font-weight:var(--w-chrome);font-stretch:var(--wd-wide);letter-spacing:var(--tr-lead);color:var(--primary);text-wrap:balance}
+p{margin:0;color:var(--muted);font-stretch:var(--wd-read);letter-spacing:var(--tr-read);text-wrap:pretty}
+.no p{color:var(--primary)}
+@media (max-width:640px){
+.sheet{padding:var(--s8) var(--s6)}
+.lockup{margin-left:var(--s6)}
+.langs{grid-template-columns:1fr}
+.langs>div{padding:0 0 var(--s6)}
+.langs>[lang]{padding:var(--s6) 0 0;box-shadow:inset 0 1px 0 var(--divide-strong)}}
+@media (max-width:480px){
+body{padding:var(--s4)}
+h1,.lead{font-size:var(--t22);line-height:var(--lh-lead-narrow)}
+p{font-size:var(--t17);line-height:var(--lh-reply)}}
+/* the tick draws itself once (tokens-parts.css --dur-arrive) */
+@media (prefers-reduced-motion:no-preference){.ok .state path{stroke-dasharray:1;animation:draw var(--dur-arrive) var(--ease-arrive) .15s backwards}}
+@keyframes draw{from{stroke-dashoffset:1}}</style>
 </head>
-<body>
-<p>Sign-in didn't finish. Go back to Clauseo and try again.</p>
-<p lang="hi">साइन इन पूरा नहीं हुआ। Clauseo पर लौटें और फिर से कोशिश करें।</p>
+<body class="no">
+<main>
+<svg class="lockup" viewBox="0 0 8163 1639" role="img" aria-label="Clauseo"><path class="word" d="m662 1352q-329 0-496-162-166-163-166-458v-107q0-292 165-454 165-161 489-161 98 0 180 15 81 15 146 39 66 25 114 53l21 224q-81-47-186-82-105-35-245-35-208 0-314 106-105 106-105 296v102q0 191 106 298 107 107 328 107 133 0 240-34 106-35 188-83l-21 227q-48 28-114 53-66 25-149 40-82 16-181 16zm674-32v-1320h250v1320h-250zm1219 0l9-262-6-37v-250-41q0-104-69-157-70-52-221-52-129 0-237 32-109 32-198 72l25-197q50-26 117-49 67-24 151-40 83-15 183-15 140 0 236 32 95 32 152 89 56 57 81 134 25 77 25 168v573h-248zm-413 27q-173 0-267-74-94-75-94-210v-17q0-151 108-220 109-68 331-89l361-34 8 158-345 34q-121 12-169 40-48 28-48 89v9q0 57 47 88 48 31 145 31 97 0 168-27 70-28 115-75 44-46 62-101l37 142h-48q-19 69-66 127-46 58-130 93-83 36-215 36zm1130-994v531q0 74 23 132 23 58 76 92 54 33 147 33 85 0 146-28 62-28 101-75 40-48 57-106l34 157h-44q-19 70-67 129-49 58-129 94-80 35-198 35-138 0-226-50-87-49-128-144-41-95-41-231v-569h249zm791 0v967h-249l10-269-11-25v-673h250zm679 997q-152 0-267-27-114-27-194-61l-25-215q93 42 211 73 117 32 260 32 127 0 188-26 61-27 61-86v-2q0-40-26-63-27-23-91-37-64-14-177-27-162-19-256-56-93-36-132-96-39-59-39-147v-5q0-144 112-215 112-70 337-70 146 0 257 26 112 26 187 61l25 197q-88-39-201-66-112-26-244-26-88 0-139 12-50 12-71 33-21 22-21 54v2q0 35 22 58 21 23 81 38 61 15 176 29 162 19 260 50 98 31 142 89 44 58 44 157v5q0 159-119 234-120 75-361 75zm1188 0q-289 0-432-125-143-125-143-357v-65q0-229 137-355 136-127 393-127 175 0 292 56 117 56 176 158 59 102 59 241v17q0 32-3 65-3 33-8 60h-230q4-38 5-79 2-41 2-74 0-81-33-138-32-56-97-86-65-31-163-31-144 0-216 69-71 69-71 191v47l1 25v55q0 53 18 100 18 46 60 81 42 35 114 54 72 20 181 20 116 0 221-27 106-26 201-72l-24 197q-84 46-193 73-110 27-247 27zm-455-432v-168h878v168h-878zm1641 432q-271 0-413-125-142-125-142-357v-65q0-232 143-357 142-125 413-125 271 0 413 125 142 125 142 357v65q0 232-142 357-142 125-414 125zm1-198q146 0 226-72 79-72 79-208v-73q0-136-79-208-79-73-227-73-146 0-225 73-79 72-79 208v73q0 136 79 208 79 72 226 72z"/><path class="comma" d="m8162 1150c0 38-11 125-62 218-65 120-159 185-281 270l-59-84c83-58 143-123 174-206-106-15-181-111-171-217 10-106 102-186 208-181 107 5 191 93 191 200z"/></svg>
+<div class="sheet">
+<svg class="state" viewBox="0 0 20 20" aria-hidden="true"><path d="M10.21 5.75v5.5M10.21 14.5v.01"/></svg>
+<div class="langs">
+<div><h1>Sign-in didn't finish.</h1>
+<p>Go back to Clauseo and try again.</p></div>
+<div lang="hi"><p class="lead">साइन इन पूरा नहीं हुआ।</p>
+<p>Clauseo पर लौटें और फिर से कोशिश करें।</p></div>
+</div>
+</div>
+</main>
 </body>
 </html>

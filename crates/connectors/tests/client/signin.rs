@@ -270,7 +270,7 @@ fn the_success_page_is_fixed_with_no_script_and_no_store() {
         &page,
         200,
         "Signed in. You can close this tab and go back to Clauseo.",
-        "साइन इन हो गया",
+        "साइन इन हो गया। आप यह टैब बंद करके Clauseo पर लौट सकते हैं।",
         15..=40,
     );
 }
@@ -281,17 +281,15 @@ fn check_failure_page(page: &clauseo_connectors::fake::RawResponse) {
         page,
         400,
         "Sign-in didn't finish. Go back to Clauseo and try again.",
-        "साइन इन पूरा नहीं हुआ",
+        "साइन इन पूरा नहीं हुआ। Clauseo पर लौटें और फिर से कोशिश करें।",
         16..=30,
     );
-    let text = page.text();
-    let english = text.find("Sign-in didn't finish").unwrap();
-    let hindi = text.find("साइन इन पूरा नहीं हुआ").unwrap();
-    assert!(english < hindi, "English comes first");
 }
 
-/// A fixed page: the status, `text/html; charset=utf-8`, `no-store`, the text, no script and
-/// no external resource, and a word count in `words`.
+/// A fixed page: the status, `text/html; charset=utf-8`, `no-store`, a policy that allows only
+/// the page's own style block by its hash, no script and no external resource, and the shown
+/// text: the title, then `english`, then `hindi` and nothing else (each line may be split into
+/// a heading and a body at its sentence break), with a word count in `words`.
 fn check_page(
     page: &clauseo_connectors::fake::RawResponse,
     status: u16,
@@ -305,13 +303,20 @@ fn check_page(
         Some("text/html; charset=utf-8")
     );
     assert_eq!(page.header("cache-control"), Some("no-store"));
+    let text = page.text();
+    let (_, style) = text.split_once("<style>").unwrap();
+    let (style, _) = style.split_once("</style>").unwrap();
+    let hash = base64::engine::general_purpose::STANDARD.encode(sha2::Sha256::digest(style));
     assert_eq!(
         page.header("content-security-policy"),
-        Some("default-src 'none'; style-src 'unsafe-inline'")
+        Some(
+            format!(
+                "default-src 'none'; style-src 'sha256-{hash}'; img-src 'none'; \
+                 base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+            )
+            .as_str()
+        )
     );
-    let text = page.text();
-    assert!(text.contains(english), "{text}");
-    assert!(text.contains(hindi), "{text}");
     let lower = text.to_ascii_lowercase();
     for banned in [
         "<script", "src=", "href=", "http:", "https:", "url(", "@import",
@@ -324,6 +329,13 @@ fn check_page(
         .filter(|shown| !shown.trim().is_empty() && !shown.contains('{'))
         .collect::<Vec<_>>()
         .join(" ");
+    let shown = shown.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert_eq!(
+        shown,
+        format!("Clauseo {english} {hindi}"),
+        "English, then Hindi, and no more"
+    );
+    assert!(text.contains("<div lang=\"hi\">"), "the Hindi is marked");
     let count = shown.split_whitespace().count();
     assert!(words.contains(&count), "{count} words: {shown}");
 }

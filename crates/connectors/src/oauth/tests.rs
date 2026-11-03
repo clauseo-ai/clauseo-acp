@@ -64,6 +64,52 @@ fn the_success_page_has_no_script_and_no_external_resource() {
             assert!(!page.contains(banned), "{banned}");
         }
     }
-    assert!(SUCCESS_PAGE.contains("Signed in. You can close this tab and go back to Clauseo."));
-    assert!(FAILURE_PAGE.contains("Sign-in didn't finish. Go back to Clauseo and try again."));
+    // One style block and no style attribute: the policy allows that block by its hash only.
+    for page in [SUCCESS_PAGE, FAILURE_PAGE] {
+        assert_eq!(page.matches("<style>").count(), 1);
+        assert!(!page.contains("style="));
+    }
+    // Each approved line is split at its sentence break into a heading and a body line, English
+    // first, then the Hindi marked lang="hi".
+    for (page, lines) in [
+        (
+            SUCCESS_PAGE,
+            [
+                "<h1>Signed in.</h1>",
+                "<p>You can close this tab and go back to Clauseo.</p>",
+                "<div lang=\"hi\"><p class=\"lead\">साइन इन हो गया।</p>",
+                "<p>आप यह टैब बंद करके Clauseo पर लौट सकते हैं।</p>",
+            ],
+        ),
+        (
+            FAILURE_PAGE,
+            [
+                "<h1>Sign-in didn't finish.</h1>",
+                "<p>Go back to Clauseo and try again.</p>",
+                "<div lang=\"hi\"><p class=\"lead\">साइन इन पूरा नहीं हुआ।</p>",
+                "<p>Clauseo पर लौटें और फिर से कोशिश करें।</p>",
+            ],
+        ),
+    ] {
+        let at = lines.map(|line| page.find(line).unwrap_or_else(|| panic!("{line}")));
+        assert!(at.is_sorted(), "{lines:?}");
+    }
+}
+
+#[test]
+fn the_page_policy_names_the_style_hash() {
+    use base64::engine::general_purpose::STANDARD;
+    use sha2::{Digest as _, Sha256};
+    // CSP hashes are standard base64 with padding, not the URL-safe form PKCE uses.
+    for page in [SUCCESS_PAGE, FAILURE_PAGE] {
+        let (_, rest) = page.split_once("<style>").unwrap();
+        let (css, _) = rest.split_once("</style>").unwrap();
+        let hash = STANDARD.encode(Sha256::digest(css.as_bytes()));
+        assert!(
+            listener::PAGE_CSP.contains(&format!("style-src 'sha256-{hash}';")),
+            "the policy should name 'sha256-{hash}'"
+        );
+    }
+    assert!(!listener::PAGE_CSP.contains("unsafe"));
+    assert!(listener::PAGE_CSP.starts_with("default-src 'none'; "));
 }
