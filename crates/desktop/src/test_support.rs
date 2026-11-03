@@ -428,6 +428,7 @@ pub(crate) fn collector() -> (Channel<Frame>, Messages) {
             timed,
             held: RefCell::new(VecDeque::new()),
             limits_received: Cell::new(0),
+            limits_bytes: Cell::new(0),
         },
     )
 }
@@ -464,6 +465,8 @@ pub(crate) struct Messages {
     held: RefCell<VecDeque<String>>,
     /// The limits messages received so far.
     limits_received: Cell<u32>,
+    /// Their bytes.
+    limits_bytes: Cell<usize>,
 }
 
 impl Messages {
@@ -485,10 +488,11 @@ impl Messages {
         }
     }
 
-    /// Counts `text`, just received, when it is a limits message.
+    /// Counts `text`, just received, and its bytes, when it is a limits message.
     fn count(&self, text: &str) {
         if is_limits(text) {
             self.limits_received.set(self.limits_received.get() + 1);
+            self.limits_bytes.set(self.limits_bytes.get() + text.len());
         }
     }
 
@@ -507,6 +511,12 @@ impl Messages {
     /// every message.
     pub(crate) fn limits_received(&self) -> u32 {
         self.limits_received.get()
+    }
+
+    /// The bytes of the limits messages received so far, returned or not: the window counts them
+    /// toward its cap with every other message.
+    pub(crate) fn limits_bytes(&self) -> usize {
+        self.limits_bytes.get()
     }
 
     /// The next message, an event below the limit, decoded.

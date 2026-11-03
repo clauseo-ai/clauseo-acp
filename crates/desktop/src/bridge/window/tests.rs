@@ -30,7 +30,7 @@ fn pos(stream: StreamId, (epoch, cursor): Position) -> Ack {
 
 /// An event's text of `len` bytes, below the frame limit.
 fn event(len: usize) -> String {
-    format!("{{\"patches\":\"{}\"}}", "x".repeat(len - 15))
+    format!("{{\"patches\":\"{}\"}}", "x".repeat(len - 14))
 }
 
 const SECOND: Duration = Duration::from_secs(1);
@@ -433,4 +433,5 @@ fn a_timed_event_counts_as_one_message_of_its_wrapped_length() {
     assert_eq!(state.unacked_bytes(), 0);
 }
 
+mod cap;
 mod feeds;
