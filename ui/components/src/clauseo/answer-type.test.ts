@@ -70,6 +70,29 @@ test("paragraphs keep their rhythm, a heading stands apart at the section heads'
   expect(style("table").overflowX).toBe("auto");
 });
 
+test("a blockquote after a table or a list takes the block gap, --s3 above it, as the blocks before it do", () => {
+  const PARTS = read("../styles/tokens-parts.css");
+  const gap = PARTS.match(/--s3: (\d+px);/)?.[1];
+  if (gap === undefined) throw new Error("--s3 is not a px value in tokens-parts.css");
+  setUp([TOKENS, RESET, threadSheet()]);
+  document.querySelector('[data-clauseo="markdown"]')!.innerHTML = `
+    <table><tbody><tr><td>cell</td></tr></tbody></table>
+    <blockquote><p>After the table.</p></blockquote>
+    <ul><li>A point</li></ul>
+    <blockquote><p>After the list.</p><p>Last.</p></blockquote>`;
+  expect(style("table + blockquote").marginTop).toBe(gap);
+  expect(style("ul + blockquote").marginTop).toBe(gap);
+  // the quote's own first child takes no gap, and its last none at the foot: only children after a first are spaced
+  expect(style("blockquote > p").marginTop).toBe("0px");
+  expect(style("blockquote:last-child > p:last-child").marginBottom).toBe("0px");
+  // happy-dom does not model :is() specificity, so the computed gaps above pass with or without the reset's
+  // selector. In a browser the reset outranks the gap unless it is written with :where (Chromium: 0 px with :is,
+  // 12 px with :where), so the selector is pinned as written
+  expect(THREAD).toMatch(
+    /\[data-clauseo="markdown"\]\s*:where\(p, ul, ol, dl, blockquote, pre, table, hr, h1, h2, h3, h4, h5, h6\)\s*\{\s*margin: 0;/,
+  );
+});
+
 test("the answer is set in the reply type: 17 px at Clauseo's weight", () => {
   expect(THREAD).toMatch(/\.reply-text \{\s*@apply text-reply font-clauseo;/);
   const theme = THEME;

@@ -389,13 +389,17 @@
   .reply-text [data-clauseo="markdown"] {
     overflow-wrap: anywhere;
   }
+  /* the reset takes the browser's block margins away. :where keeps it at zero specificity, so the sibling gap below
+     outranks it (with :is, a block's own margin beat the gap: a blockquote after a table or a list touched it) */
   .reply-text
     [data-clauseo="markdown"]
-    :is(p, ul, ol, dl, blockquote, pre, table, hr, h1, h2, h3, h4, h5, h6) {
+    :where(p, ul, ol, dl, blockquote, pre, table, hr, h1, h2, h3, h4, h5, h6) {
     margin: 0;
   }
-  /* the rest of a paragraph cut into parts (a very long one, while it streams) reads on, no gap; :where keeps
-     the specificity, so the heading rule below still wins */
+  /* every block after the first takes the block gap above it (--s3), paragraphs, lists, code, tables and quotes
+     alike; the first block and the last take none, and a quote's own first child takes none, since only the
+     children after a first are spaced. The rest of a paragraph cut into parts (a very long one, while it streams)
+     reads on, no gap; :where keeps the specificity, so the heading rule below still wins */
   .reply-text [data-clauseo="markdown"] > * + :where(:not([data-clauseo-paragraph="continues"])),
   .reply-text [data-clauseo="markdown"] :is(li, blockquote, dd, .footnotes) > * + * {
     margin-top: var(--s3);
