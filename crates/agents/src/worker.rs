@@ -259,7 +259,8 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
                 drop(scan.and_then(|scan| receipt::remove_stale(&scan)));
             }
             if let Some(installed) =
-                install::ready_install(config, &*self.launcher, &*self.timer, &agent).await
+                install::ready_install(config, &*self.launcher, &*self.timer, &agent, user.as_ref())
+                    .await
             {
                 let version = installed.version.clone();
                 self.shared

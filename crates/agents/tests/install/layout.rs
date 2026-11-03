@@ -89,6 +89,34 @@ fn a_folder_with_no_receipt_is_redone() {
     assert_eq!(fx.registry.requests().len(), before);
 }
 
+/// A receipt naming a Node that is neither the runtime nor the one the `PATH` search finds now
+/// is not run: the agent is `Missing` at start, and an install redoes it with the found Node.
+#[cfg(unix)]
+#[test]
+fn a_receipt_naming_another_node_is_not_run_and_is_redone() {
+    let fx = Fixture::new("other-node");
+    let (agents, events) = fx.start();
+    events.first_states();
+    let installed = install_ready(&agents, &events, &agent_a());
+    drop(agents);
+    let elsewhere = fx.data.path().join("elsewhere");
+    let planted = elsewhere.join("bin/node");
+    write::write_executable(&planted, "#!/bin/sh\necho v24.0.0\n").unwrap();
+    write::write(&elsewhere.join("lib/node_modules/npm/bin/npm-cli.js"), "").unwrap();
+    let receipt_path = installed.folder.join("clauseo-receipt.json");
+    let mut receipt: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&receipt_path).unwrap()).unwrap();
+    receipt["node"] = planted.display().to_string().into();
+    write::write(&receipt_path, serde_json::to_vec(&receipt).unwrap()).unwrap();
+
+    let (again, events) = fx.start();
+    let (a, _) = events.first_states();
+    assert!(matches!(a, InstallState::Missing { .. }), "{a:?}");
+    assert_eq!(again.installed(&agent_a()), None);
+    let redone = install_ready(&again, &events, &agent_a());
+    assert_eq!(redone.node, installed.node);
+}
+
 #[test]
 fn no_install_folder_holds_a_link() {
     let fx = Fixture::new("links");
@@ -238,6 +266,36 @@ mod node_20 {
             std::fs::read(bundle.path().join("node").join(&name)).unwrap(),
             archive
         );
+    }
+
+    /// A runtime whose `node` no longer answers `--version` (cut short by a power cut, say) is
+    /// not trusted at start: the agent is `Missing`, and an install fetches Node again.
+    #[test]
+    fn a_runtime_node_that_does_not_run_is_fetched_again() {
+        let mut fx = Fixture::new("broken-runtime");
+        fx.config.node_search = clauseo_agents::NodeSearch::none();
+        let archive = wrapper_archive();
+        let entry = node_entry(Some(&archive));
+        fx.registry.route(&node_path(&entry), archive);
+        fx.config.snapshot = snapshot(BASE, entry, 10_000);
+        let (agents, events) = fx.start();
+        events.first_states();
+        let installed = install_ready(&agents, &events, &agent_a());
+        drop(agents);
+        write::write_executable(&installed.node, "#!/bin/sh\nexit 1\n").unwrap();
+
+        let (again, events) = fx.start();
+        let (a, _) = events.first_states();
+        assert!(matches!(a, InstallState::Missing { .. }), "{a:?}");
+        let redone = install_ready(&again, &events, &agent_a());
+        assert_eq!(redone.node, installed.node);
+        let node_requests = fx
+            .registry
+            .requests()
+            .iter()
+            .filter(|r| r.path == node_path_of(&fx))
+            .count();
+        assert_eq!(node_requests, 2);
     }
 
     fn node_path_of(fx: &Fixture) -> String {
