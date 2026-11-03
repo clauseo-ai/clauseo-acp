@@ -17,8 +17,8 @@ import type { EntryId, HostError, StepEntry, StreamId, ThreadId } from "../trans
 // a type alone: erased, so the first paint has no static dependency on the lines, which come with the thread's chunk
 import type * as Lines from "./break-lines.ts";
 import type { RestartHost } from "./host-next.ts";
-import { latestQuestion } from "./thread/ids.ts";
 import { questionText } from "./thread/live.ts";
+import { askedAs } from "./thread/steer.ts";
 
 /** The codes Restart can mend, once the host has it: a restart can't mend a protocol error or an unsupported version. */
 export const RESTARTS = new Set<string>([
@@ -48,23 +48,50 @@ export type Break = {
 };
 
 const ENDS = ["step:", "limit_stop:", "user_message:"];
-/** The last id that ends or starts a turn, and the latest question, per id list: the view replaces its id list on every
- * add or remove and never changes one in place, so a flush that only appends text reads this without a scan. */
-const lastEnds = new WeakMap<
-  readonly EntryId[],
-  { end: EntryId | null; question: EntryId | null }
->();
+const USER = "user_message:";
+/** The ids that end or start a turn, per id list: the view replaces its id list on every add or remove and never
+ * changes one in place, so a flush that only appends text reads this without a scan. */
+const endsByIds = new WeakMap<readonly EntryId[], readonly EntryId[]>();
 
-function endsOf(ids: readonly EntryId[]) {
-  let known = lastEnds.get(ids);
+function endsOf(ids: readonly EntryId[]): readonly EntryId[] {
+  let known = endsByIds.get(ids);
   if (known === undefined) {
-    let end: EntryId | null = null;
-    for (let i = ids.length - 1; i >= 0 && end === null; i -= 1)
-      if (ENDS.some((p) => ids[i]!.startsWith(p))) end = ids[i]!;
-    known = { end, question: latestQuestion(ids) };
-    lastEnds.set(ids, known);
+    known = ids.filter((id) => ENDS.some((p) => id.startsWith(p)));
+    endsByIds.set(ids, known);
   }
   return known;
+}
+
+/** Whether a user message starts a turn of its own in the thread: not one that waits in the queue or was taken back
+ * (the strip holds those, and a held queue keeps the break standing), nor a steer taken into an answer (thread/steer.ts). */
+const asks = (view: StreamView, id: EntryId): boolean => {
+  const m = view.entries.get(id)?.user_message;
+  return m !== undefined && askedAs(m, false) === "question";
+};
+
+/** The thread's last end, a step or a limit stop, or a question asked after it, and where it stands among the ends. */
+function lastEnd(view: StreamView): { end: EntryId | null; at: number } {
+  const ends = endsOf(view.ids);
+  for (let i = ends.length - 1; i >= 0; i -= 1) {
+    const id = ends[i]!;
+    if (!id.startsWith(USER) || asks(view, id)) return { end: id, at: i };
+  }
+  return { end: null, at: -1 };
+}
+
+/** The question a step answered: the latest asked before it on its turn. Read once per step (breaks below). */
+function questionOf(view: StreamView, step: StepEntry, at: number): EntryId | null {
+  const ends = endsOf(view.ids);
+  for (let i = at - 1; i >= 0; i -= 1) {
+    const id = ends[i]!;
+    if (
+      id.startsWith(USER) &&
+      view.entries.get(id)?.user_message?.turn === step.turn &&
+      asks(view, id)
+    )
+      return id;
+  }
+  return null;
 }
 
 /** One Break per step object (an upsert makes a new one), so the pick keeps its identity while nothing changes. */
@@ -73,12 +100,13 @@ const breaks = new WeakMap<StepEntry, Break>();
 /** The open thread's break: undefined before its view, null when its last turn didn't fail. Stable while unchanged. */
 export function pickBreak(view: StreamView | undefined): Break | null | undefined {
   if (view === undefined) return undefined;
-  const { end, question } = endsOf(view.ids);
+  const { end, at } = lastEnd(view);
   if (end === null || !end.startsWith("step:")) return null;
   const step = view.entries.get(end)?.step;
   if (step === undefined || step.stop !== "failed") return null;
   let found = breaks.get(step);
   if (found === undefined) {
+    const question = questionOf(view, step, at);
     const asked = question === null ? undefined : view.entries.get(question)?.user_message;
     found = {
       id: end,
