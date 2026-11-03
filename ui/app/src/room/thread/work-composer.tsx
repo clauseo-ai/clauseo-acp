@@ -12,8 +12,8 @@
 // send refused as `thread.queue_full` says the cap. The queue's strip sits over the field for every conversation
 // with a thread (queue-slot.tsx), under the wait for another conversation (queue.tsx). After the hint's Send now or Queue
 // the focus goes back to the field, so the emptied words can be undone. An edit the strip couldn't make because its
-// message, the last queued, had already gone comes back into the field (after the words there, a blank line between)
-// and the working line says so until the next send.
+// message had already gone comes back into the field (after the words there, a blank line between); when it was the
+// last queued, the working line says so until the next send (else the strip does).
 import {
   use,
   useCallback,
@@ -215,13 +215,14 @@ export function WorkComposer({
   const focusField = useCallback(() => field.current?.focus(), []);
   // the strip's lost edit: into an empty field as it is, else after the words there with a blank line between; never
   // over them
-  const editLost = useCallback((text: string) => {
+  const editLost = useCallback((text: string, say: boolean) => {
     const f = field.current;
     if (f === null) return;
     const there = f.text();
     if (there === "") f.fill(text);
     else f.setText(`${there}\n\n${text}`);
-    if (!lostNow.current) {
+    // with other messages left, the strip says it had gone
+    if (say && !lostNow.current) {
       lostNow.current = true;
       setLost(true);
     }

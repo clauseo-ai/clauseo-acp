@@ -5,8 +5,8 @@
 // not again until the row has gone. Replies land with
 // the next frame's flush (#253): a refusal shows its words under the head until the next press or until the queue
 // changes; `thread.turn_not_queued` says the message had already gone, and the strip follows the view, where it now
-// shows as sent. An edit refused so as the last queued message went (the strip gone or going with it) hands its words
-// to the composer (`onEditLost`), which says it there. Never the host's message. An edit's key is its own
+// shows as sent. An edit refused so hands its words to the composer (`onEditLost`), never lost; when it was the last
+// queued message (the strip gone or going with it) the composer also says it had gone. Never the host's message. An edit's key is its own
 // (`edit:${turn}`), so Remove and Send now still go while it is on its way.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { QueueStrip } from "@clauseo/components/clauseo/queue.tsx";
@@ -136,10 +136,12 @@ export function LiveQueueStrip({
     // the text alone: the host keeps the message's file blocks; its own key, so the row's Remove and Send now still go
     if (thread === null || turn === undefined) return;
     send(`edit:${turn}`, { edit_queued_prompt: { thread, turn, text } }, "no", refused, (left) => {
-      // the last message went with the edit on its way: the strip is gone or going, so the words go to the composer
-      if (onEditLost === undefined || left.some((q) => q.turn !== turn)) return false;
-      onEditLost(text);
-      return true;
+      // the message went with the edit on its way: its words are never lost, they go to the composer. With other
+      // messages left the strip stays and says it had gone; with none, the strip is gone or going and the composer says it
+      if (onEditLost === undefined) return false;
+      const strip = left.some((q) => q.turn !== turn);
+      onEditLost(text, !strip);
+      return !strip;
     });
   };
   const onSendNext = () => {

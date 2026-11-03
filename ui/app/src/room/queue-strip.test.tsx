@@ -289,6 +289,31 @@ test("Remove, Send now and Send next send their commands with the right turn", a
   expect(h!.sent("resume_queue")).toEqual([{ thread: THREAD }]);
 });
 
+test("a queued message whose turn is still launching offers Edit and Remove, which name its turn (H9: the view shows it queued)", async () => {
+  await mount();
+  // the thread's first turn launching its agent: the header says starting, its message stands queued
+  h!.deliver([
+    reset([queued(1, 2, "Check the lease.")], {
+      header: { ...header("running").header!, status: "starting" },
+    }),
+  ]);
+  await h!.settle();
+  expect(rows()).toHaveLength(1);
+  expect(inRow(0, "queued-edit")).not.toBeNull();
+  await h!.click(inRow(0, "queued-remove"));
+  expect(h!.sent("remove_queued_prompt")).toEqual([{ thread: THREAD, turn: uuid(2, 4) }]);
+  await h!.click(inRow(0, "queued-edit"));
+  const field = host!.querySelector<HTMLTextAreaElement>(".queue-edit")!;
+  await act(async () => {
+    Reflect.set(HTMLTextAreaElement.prototype, "value", "Check the deed.", field);
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await h!.click([...host!.querySelectorAll("button")].find((b) => txt(b) === "Save"));
+  expect(h!.sent("edit_queued_prompt")).toEqual([
+    { thread: THREAD, turn: uuid(2, 4), text: "Check the deed." },
+  ]);
+});
+
 test("one command per row at a time: a second press while the first is on its way sends nothing", async () => {
   await mount((c) =>
     c.remove_queued_prompt !== undefined ? new Promise<never>(() => {}) : defaultOutcome(c),
