@@ -1,4 +1,4 @@
-//! Opt-in phase timings for the guard (clauseo-ai/clauseo-acp-private#291): with [`ENV`] set to
+//! Opt-in phase timings for the guard (clauseo-ai/clauseo-acp#291): with [`ENV`] set to
 //! anything but empty or `0`, [`super::run`] ends by writing one more stderr line, starting
 //! [`PREFIX`], with the microseconds each phase took since the guard started and what the walk
 //! of held files read. Off by default; off, each mark is one thread-local read.
@@ -18,10 +18,10 @@ use std::time::Duration;
 use crate::clock::{Clock, SystemClock};
 
 /// The environment variable that turns the timings on.
-pub const ENV: &str = "CLAUSEO_GUARD_TIMINGS";
+pub(super) const ENV: &str = "CLAUSEO_GUARD_TIMINGS";
 
 /// The start of the timings line.
-pub const PREFIX: &str = "clauseo-guard-timings (us):";
+pub(super) const PREFIX: &str = "clauseo-guard-timings (us):";
 
 /// Whether the variable's value turns the timings on: set, not empty and not `0`.
 pub(super) fn wanted(value: Option<&std::ffi::OsStr>) -> bool {
