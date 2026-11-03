@@ -106,7 +106,14 @@ test("a stop on another day marks its day; a window it doesn't name keeps the re
   expect(mark(row)?.textContent).toBe(
     limThread("en", "Stopped here on {day} at {time}", { day: "Sunday", time: "4:00 pm" }),
   );
-  expect(title(row)).toBe("Claude plan limit reached at Sunday 4:00 pm");
+  expect(title(row)).toBe("Claude plan limit reached on Sunday at 4:00 pm");
+  expect(title(row)).toBe(
+    limThread("en", "{name} plan limit reached on {day} at {time}", {
+      name: "Claude",
+      day: "Sunday",
+      time: "4:00 pm",
+    }),
+  );
   expect(sub(row)).toBe(lim("en", "Resets {time}", { time: "8:00 pm" }));
 });
 

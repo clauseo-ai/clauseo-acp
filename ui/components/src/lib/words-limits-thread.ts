@@ -9,6 +9,7 @@ const HI = {
   // the stop: its title, with the time the answer stopped, or without one where the stop's time isn't known; {name} is
   // Claude, or ChatGPT for Codex
   "{name} plan limit reached at {time}": "{time} बजे {name} प्लान की सीमा पूरी हुई",
+  "{name} plan limit reached on {day} at {time}": "{day} को {time} बजे {name} प्लान की सीमा पूरी हुई",
   "{name} plan limit reached": "{name} प्लान की सीमा पूरी हो गई",
   // the window's line under the title: today's reset, or another day's; never a span, which would need a clock
   "The 5-hour limit. It resets at {time}.": "5 घंटे की सीमा। यह {time} बजे रीसेट होगी।",

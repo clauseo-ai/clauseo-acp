@@ -197,10 +197,13 @@ export function LimitStopRow({ id, entry }: { id: EntryId; entry: LimitStopEntry
     ? lim(w.lang, "Usage limit reached")
     : at === null
       ? limThread(w.lang, "{name} plan limit reached", { name })
-      : limThread(w.lang, "{name} plan limit reached at {time}", {
-          name,
-          time: at.day === null ? at.time : `${at.day} ${at.time}`,
-        });
+      : at.day === null
+        ? limThread(w.lang, "{name} plan limit reached at {time}", { name, time: at.time })
+        : limThread(w.lang, "{name} plan limit reached on {day} at {time}", {
+            name,
+            day: at.day,
+            time: at.time,
+          });
   const line =
     resets === undefined
       ? lim(w.lang, "Reset not given.")
