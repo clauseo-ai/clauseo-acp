@@ -86,8 +86,8 @@
     mask-image: linear-gradient(to right, transparent -20%, var(--primary) 24%);
   }
   /* in the words' flow after the last word, its gap the row's own; set at the line's top and drawn down to the
-     line's middle (relative, so the line keeps its height in either language); on a line too short for it, it goes to
-     the next line, never pushing the words */
+     line's middle (relative, so the line keeps its height in either language); held to the last word (glued.tsx), so
+     on a line too short for both they go to the next line together and the pen never stands alone */
   .working-pen {
     display: inline-block;
     vertical-align: top;
@@ -103,6 +103,8 @@
     display: flex;
     align-items: center;
     padding-block: var(--s2);
+    /* a long name with no spaces breaks, so the words and the pen held to the last of them never pass the row's edge */
+    overflow-wrap: anywhere;
   }
   /* the time stands in the row, and beside Stop where the field is empty and has room for it: the lawyer's own words
      always keep the field's whole width */

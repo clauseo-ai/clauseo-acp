@@ -110,12 +110,40 @@ test.each(STATES)("the working line on %s leads with its own mark", async (_, st
   const words = row.querySelector(".working-text > span")!;
   if (lead === "pen") {
     expect(slot.children).toHaveLength(0);
-    expect(words.lastElementChild).toBe(icon);
+    // held to the last word, in one no-wrap span, the words' last part
+    expect(words.lastElementChild).toBe(icon.parentElement);
+    expect(icon.parentElement?.className).toBe("glued");
+    expect(icon.nextSibling).toBeNull();
   } else {
     expect(slot.children).toHaveLength(1);
     expect(slot.contains(icon)).toBe(true);
     expect(words.querySelector(".working-icon")).toBeNull();
   }
+});
+
+test("the pen never stands alone on a line: it shares a no-wrap span with the sentence's last word, in either language, a long name's too, and the words read whole", async () => {
+  const name = "Written statement of respondent no. 2 to the complaint, final copy (12).pdf";
+  expect(name).toHaveLength(75);
+  for (const [words, last] of [
+    [`Reading ${name}.`, "(12).pdf."],
+    [`${name} पढ़ा जा रहा है।`, "है।"],
+    ["Answering.", "Answering."],
+    // a last word with no spaces keeps only its last letters with the pen, so the rest can break
+    ["Reading Written_statement_of_respondent_no_2_final.pdf.", "_final.pdf.".slice(-6)],
+  ] as const) {
+    await mount(<WorkingLine state={{ kind: "wait", words, pill: null, working: true }} />);
+    const text = host!.querySelector(".working-text > span")!;
+    const pen = text.querySelector(".working-pen")!;
+    expect(pen.parentElement?.className).toBe("glued");
+    expect(pen.parentElement?.textContent).toBe(last);
+    expect(text.textContent).toBe(words);
+    await act(async () => root?.unmount());
+    host?.remove();
+    host = null;
+    root = null;
+  }
+  const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "live.css"), "utf8");
+  expect(css).toMatch(/\.working-text \{[^}]*overflow-wrap: anywhere;/);
 });
 
 test("every lead is 16 px, the pen's empty slot too, so the words start at the prototype's x 48 in every state; the pen's box is fixed and the same in either language", () => {

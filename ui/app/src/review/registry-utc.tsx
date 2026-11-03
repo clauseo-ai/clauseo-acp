@@ -56,6 +56,10 @@ const sought = (pattern: string): Touch => ({ raw: { pattern } });
 const LIVELAW = { raw: { url: "https://www.livelaw.in/supreme-court/" } };
 const task = (description: string): Touch => ({ raw: { command: "…", description } });
 const titled = (title: string): Touch => ({ title });
+// a paper with a 75-character name: the working line's sentence wraps, and the pen keeps to its last word
+const LONG_NAME = paper(
+  "Written statement of respondent no. 2 to the complaint, final copy (12).pdf",
+);
 
 /** The settled thread with these calls before the answer; `open` presses the group's line. */
 function settled(calls: ViewEntry[], open: boolean) {
@@ -232,6 +236,8 @@ export const UTC: Entry[] = [
   ]),
   // what the running step is doing: the live group's line and the working line
   now("UTC-46", "Reading {name}.", [call("read", "in_progress", LEASE)]),
+  // the same words over a long name, where the sentence wraps and the pen goes with its last word
+  now("UTC-88", "Reading {name}.", [call("read", "in_progress", LONG_NAME)]),
   now("UTC-47", "Reading the papers.", [call("read", "in_progress")]),
   now("UTC-48", "Changing {name}.", [call("edit", "in_progress", LEASE)]),
   now("UTC-49", "Changing a paper.", [call("edit", "in_progress")]),

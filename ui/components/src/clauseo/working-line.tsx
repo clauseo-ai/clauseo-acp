@@ -18,6 +18,7 @@ import {
 } from "../icons/icons.tsx";
 import { useThreadWords } from "../lib/words-thread.ts";
 import { sentence } from "./matter.ts";
+import { Glued } from "./glued.tsx";
 import { PenMark } from "./pen-mark.tsx";
 import { Say } from "./say.tsx";
 
@@ -230,10 +231,14 @@ export function WorkingLine({
       <Lead state={state} />
       <span className="working-text" aria-hidden="true">
         <span>
-          <Say>{words}</Say>
           {/* the pen after the last word, in its fixed box (20 px by 110/36 of it, scaled with the text size, never
-              with the language's line), so nothing moves while it writes */}
-          {leadOf(state) === "pen" && <PenMark className="working-icon working-pen" />}
+              with the language's line), so nothing moves while it writes; held to that word, so a long name may wrap
+              the words but the pen never takes a line of its own */}
+          {leadOf(state) === "pen" ? (
+            <Glued after={<PenMark className="working-icon working-pen" />}>{words}</Glued>
+          ) : (
+            <Say>{words}</Say>
+          )}
         </span>
       </span>
       {pill !== null && <TimePill place="row">{pill}</TimePill>}
