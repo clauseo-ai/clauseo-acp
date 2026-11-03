@@ -79,7 +79,13 @@ export function SettingsApp({
           title={title}
           sections={shown.map((s) => {
             const note = s.note?.(ctx, w.lang);
-            return { id: s.id, name: w.s(s.name), ...(note === undefined ? {} : { note }) };
+            const Glyph = s.icon;
+            return {
+              id: s.id,
+              name: w.s(s.name),
+              icon: <Glyph size={16} />,
+              ...(note === undefined ? {} : { note }),
+            };
           })}
           current={open?.id ?? ""}
           onSection={onSection}

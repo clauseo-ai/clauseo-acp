@@ -1,4 +1,6 @@
 import type { FocusEvent, KeyboardEvent, MouseEvent, PointerEvent, ReactElement } from "react";
+import type { ComponentType } from "react";
+import type { IconProps } from "../icons/icon.tsx";
 import { Button } from "../ui/button.tsx";
 import { Chip } from "../ui/chip.tsx";
 import { Tooltip } from "../ui/tooltip.tsx";
@@ -48,12 +50,16 @@ export type PaperTileProps = {
   era?: "gone" | "touched" | undefined;
   /** Optional: test ids for the e2e specs: on the face, the button a press lands on. */
   testIds?: { face?: string };
+  /** Optional: the paper's file type's glyph (fileTypeIcon), at 24 px on the tile's top line, above its title. Hidden
+   * from assistive technology: the file's name says its type. */
+  fileIcon?: ComponentType<IconProps>;
 };
 
 /** One paper on the wall. Uncited it lies flat; cited it fills with its role's colour and stays lit. Hover lifts it
  * 1 px; in hand (pointed at, focused, tapped) it comes forward toward the work; under its card it stays on the wall
  * and its own words step out. */
 export function PaperTile({
+  fileIcon: FileIcon,
   id,
   state,
   numeral,
@@ -144,6 +150,7 @@ export function PaperTile({
               )}
             </span>
           )}
+          {FileIcon !== undefined && <FileIcon size={24} className="tile-glyph" />}
           <span className="tile-title" lang={latin ? "en" : undefined}>
             {latin ? title : <Say>{title}</Say>}
           </span>

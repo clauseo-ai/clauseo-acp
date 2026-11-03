@@ -14,7 +14,14 @@ import {
 } from "react";
 import { Button } from "../ui/button.tsx";
 import { SegmentedSwitch } from "../ui/segmented.tsx";
-import { IconFold } from "../icons/icons.tsx";
+import {
+  IconConversation,
+  IconFold,
+  IconHistory,
+  IconImported,
+  IconUndo,
+  IconYourChange,
+} from "../icons/icons.tsx";
 import { useVersionWords } from "../lib/words-versions.ts";
 import { cn } from "../lib/cn.ts";
 import { Heading } from "./heading.tsx";
@@ -44,6 +51,29 @@ export type Unsaved = { at?: string; day?: string; who: string; why: string };
 
 /** A clock time holds together on its line: "4:28 pm" never breaks before "pm". */
 const hold = (time: string) => time.replace(/ (am|pm)$/, "\u00a0$1");
+
+/** A version's icon, in the 14 px column at the row's start: who made it. Clauseo in a conversation, the lawyer outside
+ * Clauseo, papers imported, a restore (Versions' own shape) or an undo. Hidden from assistive technology: the row's
+ * words say who. An unknown maker gets an empty column, so the rows still line up. */
+function WhoMark({ who }: { who: Version["who"]["kind"] }) {
+  const Glyph =
+    who === "clauseo"
+      ? IconConversation
+      : who === "outside"
+        ? IconYourChange
+        : who === "import"
+          ? IconImported
+          : who === "restore"
+            ? IconHistory
+            : who === "undo" || who === "undoRestore"
+              ? IconUndo
+              : null;
+  return (
+    <span className="ver-entry-mark" aria-hidden="true">
+      {Glyph !== null && <Glyph size={14} />}
+    </span>
+  );
+}
 
 export function VersionPanel({
   history,
@@ -172,6 +202,7 @@ export function VersionPanel({
           onClick={() => onPick(i)}
         >
           {/* now says Now, and its clock time stands in the tooltip, never twice on the row */}
+          <WhoMark who={v.who.kind} />
           <span className="ver-entry-time">{i === last ? w.v("Now") : timeOf(w.lang, v)}</span>
           <span className="ver-entry-who">
             <Say>{whoOf(w.lang, calendar, v, history)}</Say>
@@ -234,6 +265,8 @@ export function VersionPanel({
           <section className="ver-group">
             <ul className="ver-entries">
               <li className="ver-unsaved">
+                {/* not a version, so no maker's icon: the column stays, so the rows line up */}
+                <span className="ver-entry-mark" aria-hidden="true" />
                 <span className="ver-entry-time">
                   {unsaved.at === undefined
                     ? ""

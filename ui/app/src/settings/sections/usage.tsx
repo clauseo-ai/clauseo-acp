@@ -10,6 +10,7 @@
 // than 5 minutes. No timers: times are said against the clock at each render, and the host sends a new view at each
 // shown reset. Not here until the host gives them: Manage plan and Manage billing (H11), the month's figure, the retry
 // lines and what the plan does at its limit (H16), and preparing ahead (later).
+import { IconTryAgain } from "@clauseo/components/icons/icons.tsx";
 import { lim } from "@clauseo/components/lib/words-limits.ts";
 import { pc } from "@clauseo/components/lib/words-plan-card.ts";
 import { useSettingsWords } from "@clauseo/components/lib/words-settings.ts";
@@ -121,6 +122,7 @@ function AgentUsage({ kind, entry }: { kind: AgentKind; entry: AgentLimitsView }
             data-testid="plan-try-again"
             onClick={() => store?.refresh(kind, "try_again")}
           >
+            <IconTryAgain size={16} />
             {lim(lang, "Try again")}
           </Button>
         </PlateRow>

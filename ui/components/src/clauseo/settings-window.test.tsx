@@ -121,3 +121,19 @@ test("a new section starts the pane at its top", async () => {
   expect(scrolled).toHaveBeenCalledWith({ top: 0 });
   expect(el.querySelector(".set-pane-title")?.textContent).toBe("Appearance");
 });
+
+test("a section given an icon shows it before its name, hidden from assistive technology; one without shows none", async () => {
+  const el = await mount(
+    frame({
+      sections: [
+        { id: "language", name: "Language", note: "English", icon: <svg data-mark="" /> },
+        { id: "about", name: "About" },
+      ],
+    }),
+  );
+  const [withIcon, without] = [...el.querySelectorAll(".set-nav-row")];
+  expect(withIcon?.querySelector(".set-nav-icon")?.getAttribute("aria-hidden")).toBe("true");
+  expect(withIcon?.querySelector(".set-nav-icon [data-mark]")).not.toBeNull();
+  expect(withIcon?.querySelector(".set-nav-name")?.textContent).toBe("Language");
+  expect(without?.querySelector(".set-nav-icon")).toBeNull();
+});

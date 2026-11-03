@@ -16,6 +16,7 @@
 // change note naming one, open it in Word (word/open-in-word.ts). Versions opens and shows files through the
 // transport's own open_file and reveal unless a test or the review page passes stand-ins. Settings opens in its own
 // window from the rail's foot and on Ctrl+, (⌘, on the Mac, settings-key.ts), where the host has that window.
+import { fileTypeIcon } from "@clauseo/components/icons/file-type.ts";
 import {
   lazy,
   Suspense,
@@ -453,7 +454,7 @@ function RoomFrame({
           ) : (
             // a Word tile's tooltip mounts at the end of the wall, inside its landmark, not at the end of the body
             <LayerProvider>
-              <ol className="facade facade-names">
+              <ol className="facade facade-names facade-files">
                 {papers.papers.map((paper) => {
                   const opener = word.openerFor(paper.path);
                   return (
@@ -462,6 +463,7 @@ function RoomFrame({
                       id={paper.file}
                       state="uncited"
                       title={fileName(paper.path)}
+                      fileIcon={fileTypeIcon(paper.path)}
                       {...(opener === null
                         ? {}
                         : {

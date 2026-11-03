@@ -9,6 +9,8 @@ import { DEFAULT_DISPLAY, showDisplay } from "../lib/display.ts";
 import { edgeDialogWords, type EdgeAsk } from "../lib/words-versions.ts";
 import { AllowedList, WorkspaceLine } from "./allowed.tsx";
 import { EdgePrompt, RefusalPause } from "./edge.tsx";
+import { IconCross, IconTick } from "../icons/icons.tsx";
+import { iconIn } from "../icons/icon-in.tsx";
 import { OsDialogPreview } from "./os-dialog.tsx";
 import { NotProtectedNote } from "./protection.tsx";
 import { RoomScopeProvider } from "./room-scope-provider.tsx";
@@ -447,4 +449,51 @@ test("after 3 refusals in a row, or 20 in all, Clauseo stops and asks", async ()
     />,
   );
   expect(one(".perm-done").textContent).toBe("You told Clauseo to go on inside the matter.");
+});
+
+test("a folder or website prompt's Allow carries the tick and Don't allow the cross, hidden; switching off carries none", async () => {
+  await show(
+    <EdgePrompt
+      kind="site"
+      place="example.org"
+      state={{ kind: "pending" }}
+      keys
+      onAllow={() => {}}
+      onRefuse={() => {}}
+    />,
+  );
+  const allow = iconIn(one(".edge-allow"), IconTick, 16);
+  const refuse = iconIn(one(".edge-refuse"), IconCross, 16);
+  expect(allow?.getAttribute("aria-hidden")).toBe("true");
+  expect(refuse?.getAttribute("aria-hidden")).toBe("true");
+  expect(one(".edge-allow").textContent).toContain("Allow");
+  expect(one(".edge-refuse").textContent).toContain("Don't allow");
+});
+
+test("switching protection off takes no tick or cross: neither answer is a plain yes or no", async () => {
+  await show(
+    <EdgePrompt
+      kind="off"
+      place=""
+      state={{ kind: "pending" }}
+      keys
+      onAllow={() => {}}
+      onRefuse={() => {}}
+    />,
+  );
+  expect(one(".edge-allow").querySelector("svg")).toBeNull();
+  expect(one(".edge-refuse").querySelector("svg")).toBeNull();
+});
+
+test("a refused edge prompt folds to its line behind a cross", async () => {
+  await show(
+    <EdgePrompt
+      kind="site"
+      place="example.org"
+      state={{ kind: "refused", remembered: false }}
+      onAllow={() => {}}
+      onRefuse={() => {}}
+    />,
+  );
+  expect(iconIn(one(".perm-done"), IconCross, 14, "perm-done-icon")).not.toBeNull();
 });

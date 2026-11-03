@@ -6,7 +6,7 @@
 import { Fragment, lazy, Suspense, useState } from "react";
 import { late } from "../lib/late.ts";
 import { Button } from "../ui/button.tsx";
-import { IconOpen, IconPaperBookPage, IconUndo } from "../icons/icons.tsx";
+import { IconCompare, IconOpen, IconPaperBookPage, IconUndo } from "../icons/icons.tsx";
 import { useThreadWords } from "../lib/words-thread.ts";
 import { Say } from "./say.tsx";
 
@@ -116,7 +116,7 @@ export function ChangeNote({
         )}
         {onCompare !== undefined && (
           <Button kind="quiet" size="small" onClick={onCompare}>
-            <IconOpen size={16} />
+            <IconCompare size={16} />
             <span className="deva-nudge">{w.th("Compare")}</span>
           </Button>
         )}

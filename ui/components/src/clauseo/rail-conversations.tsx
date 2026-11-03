@@ -1,13 +1,14 @@
 // The conversations inside the current matter, on the rail under the matter's own row. One line
 // each, so the rail sits back: the title, the plan only where it differs from the one the matter uses most, and,
-// while the lawyer looks at another, what it's doing as the same 8 px dot the matters carry: answering, a question for
-// the lawyer in court yellow, an answer ready, stopped, or waiting for another conversation, an open ring. Only a
+// while the lawyer looks at another, what it's doing as the same 14 px icon the matters carry (rail-mark.tsx): answering, a
+// question for the lawyer on a court-yellow disc, an answer ready, stopped, or waiting for another conversation. Only a
 // question for the lawyer says its words on the row; the rest say theirs under the pointer and to assistive
 // technology. The current one stands raised on the surface tone; its actions sit behind a quiet chevron at its end.
+import { RailMark } from "./rail-mark.tsx";
+import { CONVERSATION_MARK } from "./rail-marks.ts";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu.tsx";
 import { Button } from "../ui/button.tsx";
 import { IconMore, IconNewMatter } from "../icons/icons.tsx";
-import { cn } from "../lib/cn.ts";
 import { useDisplay } from "../lib/display.ts";
 import { useMatterWords } from "../lib/words-matters.ts";
 import { conversationStatus, type ConversationState } from "./rail-words.ts";
@@ -34,15 +35,6 @@ export type ConversationRowProps = {
   testId?: string | undefined;
 };
 
-/** Each status's dot: court yellow only where the conversation waits on the lawyer's hand. */
-const MARK: Record<Exclude<ConversationState, "idle">, string> = {
-  question: "bg-yellow",
-  ready: "bg-primary",
-  working: "bg-muted",
-  stopped: "bg-muted",
-  waiting: "room-dot-ring",
-};
-
 function ConversationRow({
   id,
   title,
@@ -58,7 +50,7 @@ function ConversationRow({
 }: ConversationRowProps & { plan?: boolean }) {
   const w = useMatterWords();
   const status = current ? null : conversationStatus(w.lang, state, at, behind);
-  // only a question for the lawyer says its words on the row; every other status is its dot, with its words under the
+  // only a question for the lawyer says its words on the row; every other status is its icon, with its words under the
   // pointer and to assistive technology
   const asks = status !== null && state === "question";
   const hint = [title, plan ? agent : null, status]
@@ -86,9 +78,9 @@ function ConversationRow({
             </span>
           )}
           {status !== null && (
-            <i
-              aria-hidden="true"
-              className={cn("room-conv-dot", MARK[state as Exclude<ConversationState, "idle">])}
+            <RailMark
+              mark={CONVERSATION_MARK[state as Exclude<ConversationState, "idle">]}
+              className="room-conv-mark"
             />
           )}
         </span>

@@ -63,6 +63,20 @@
   .facade-names .tile-face {
     padding-bottom: var(--tile-pad);
   }
+  /* the room's papers by name, each with its file type's glyph on its top line, above the title */
+  .facade-files {
+    --tile-h: calc(
+      var(--tile-pad) + var(--size-icon-file) + var(--s1) + var(--title-h) + var(--tile-pad)
+    );
+  }
+  .tile-glyph {
+    flex: none;
+    margin-bottom: var(--s1);
+    color: var(--quiet);
+  }
+  .tile:not([data-state="uncited"]) .tile-glyph {
+    color: inherit;
+  }
   .tile {
     position: relative;
   }

@@ -7,6 +7,19 @@ import { afterEach, describe, expect, test } from "vitest";
 import { DEFAULT_DISPLAY, showDisplay } from "../lib/display.ts";
 import { Rail, type FindableRow, type MatterRowProps, type RailGroup } from "./rail.tsx";
 import { matterStatus } from "./rail-words.ts";
+import {
+  IconAnswerReady,
+  IconChecking,
+  IconLocateFolder,
+  IconNeedsPermission,
+  IconPin,
+  IconPlanLimit,
+  IconQuestion,
+  IconRemoveFromList,
+  IconShowInFinder,
+  IconStop,
+} from "../icons/icons.tsx";
+import { iconIn } from "../icons/icon-in.tsx";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -79,10 +92,43 @@ describe("the rail's matters", () => {
     const open = row("Rao Family Trust");
     expect(set?.dataset["state"]).toBe("pausedSet");
     expect(txt(set)).toContain("Paused until 6:10 pm");
-    expect(set?.querySelector(".bg-yellow")).toBeNull();
+    expect(set?.querySelector(".room-mark[data-waits]")).toBeNull();
     expect(open?.dataset["state"]).toBe("paused");
     expect(txt(open)).toContain("Limit reached. Continue at 6:10 pm?");
-    expect(open?.querySelector(".bg-yellow")).not.toBeNull();
+    expect(open?.querySelector(".room-mark[data-waits]")).not.toBeNull();
+  });
+
+  test("each status is led by its own 14 px icon, on a yellow disc only where the matter waits on the lawyer", async () => {
+    const at = (state: NonNullable<MatterRowProps["state"]>): MatterRowProps => ({
+      name: `Matter ${state}`,
+      note: "",
+      hint: state,
+      state,
+      at: "6:10 pm",
+    });
+    const states = [
+      ["question", IconQuestion, true],
+      ["permission", IconNeedsPermission, true],
+      ["paused", IconPlanLimit, true],
+      ["ready", IconAnswerReady, false],
+      ["working", IconChecking, false],
+      ["stopped", IconStop, false],
+      ["pausedSet", IconPlanLimit, false],
+      ["limit", IconPlanLimit, false],
+      ["moved", IconLocateFolder, false],
+    ] as const;
+    await mount(<Rail open groups={[{ when: "Today", matters: states.map(([s]) => at(s)) }]} />);
+    for (const [state, Icon, waits] of states) {
+      const r = row(`Matter ${state}`);
+      const mark = r?.querySelector(".room-mark");
+      expect(mark?.getAttribute("aria-hidden"), state).toBe("true");
+      expect(mark?.hasAttribute("data-waits"), state).toBe(waits);
+      expect(iconIn(mark, Icon, waits ? 11 : 14), state).not.toBeNull();
+      // the words still say the state
+      expect(txt(r), state).toContain(
+        (matterStatus("en", state, "6:10 pm") ?? "").replace(/\u00a0/g, " "),
+      );
+    }
   });
 
   test("an idle matter has no status line, and the words name the state's time", () => {
@@ -215,7 +261,7 @@ describe("the rail's matters", () => {
       "Limit reached. Reset not given.",
     ]);
     for (const r of limits) {
-      expect(r.querySelector(".bg-muted")).not.toBeNull();
+      expect(r.querySelector(".room-mark:not([data-waits])")).not.toBeNull();
       expect(r.querySelector(".text-muted")).not.toBeNull();
     }
     expect(matterStatus("hi", "limit", "")).toBe("सीमा पूरी। रीसेट का समय नहीं बताया गया।");
@@ -323,6 +369,40 @@ describe("a matter's actions", () => {
     );
     await open();
     expect(menuLabels()).toEqual(["Pin to the top", "Locate folder", "Show in Finder"]);
+  });
+
+  test("each action carries its 16 px icon before its name, hidden, so the name still names the item", async () => {
+    await mount(
+      <Rail
+        open
+        groups={[
+          {
+            when: "Today",
+            matters: [
+              current({
+                state: "moved",
+                onLocate: () => {},
+                onReveal: () => {},
+                onPin: () => {},
+                onRemove: () => {},
+              }),
+            ],
+          },
+        ]}
+      />,
+    );
+    await open();
+    const items = [...document.querySelectorAll("[role=menuitem], [role=menuitemcheckbox]")];
+    const icons = [IconPin, IconLocateFolder, IconShowInFinder, IconRemoveFromList];
+    expect(items).toHaveLength(4);
+    items.forEach((item, i) => {
+      const svg = iconIn(item, icons[i] ?? IconPin, 16);
+      expect(svg).not.toBeNull();
+      expect(svg?.closest("[aria-hidden=true]")).not.toBeNull();
+    });
+    expect(menuLabels()[3]).toBe(
+      "Remove from the listThe folder and its papers stay where they are.",
+    );
   });
 });
 
@@ -475,4 +555,46 @@ describe("Settings at the rail's foot", () => {
     expect(document.querySelector(".room-settings")).toBeNull();
     expect(document.querySelector(".room-rail-foot")).toBeNull();
   });
+});
+
+test("a conversation's status ends its line as the matters' icon, on a yellow disc only for a question", async () => {
+  await mount(
+    <Rail
+      open
+      groups={[
+        {
+          when: "Today",
+          matters: [
+            {
+              ...acme,
+              current: true,
+              conversations: [
+                { id: "a", title: "Reply", agent: "Claude", current: true },
+                { id: "b", title: "Plaint", agent: "Claude", state: "question" },
+                { id: "c", title: "Limitation", agent: "Claude", state: "ready" },
+                { id: "d", title: "Annexures", agent: "Claude", state: "stopped", at: "4:31 pm" },
+                { id: "e", title: "Dates", agent: "Claude", state: "waiting", behind: "Plaint" },
+              ],
+            },
+          ],
+        },
+      ]}
+    />,
+  );
+  const conv = (id: string) => document.querySelector(`.room-conv[data-conversation="${id}"]`);
+  expect(conv("a")?.querySelector(".room-mark")).toBeNull();
+  const cases = [
+    ["b", IconQuestion, true],
+    ["c", IconAnswerReady, false],
+    ["d", IconStop, false],
+    ["e", IconChecking, false],
+  ] as const;
+  for (const [id, Icon, waits] of cases) {
+    const mark = conv(id)?.querySelector(".room-mark");
+    expect(mark?.getAttribute("aria-hidden"), id).toBe("true");
+    expect(mark?.hasAttribute("data-waits"), id).toBe(waits);
+    expect(iconIn(mark, Icon, waits ? 11 : 14), id).not.toBeNull();
+  }
+  // the words still reach assistive technology
+  expect(txt(conv("d"))).toContain("Stopped at 4:31 pm");
 });

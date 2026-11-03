@@ -2,6 +2,8 @@
 // The plan in the room over FakeTransport (U12): the toolbar's line for the open conversation's agent (claude-acp and
 // codex-acp, never fake-agent), its card and what opening it and Try again send, the composer's warning with the
 // host's reset in a <time>, Ask in every state, and nothing left on a timer once a view is shown.
+import { IconTryAgain } from "@clauseo/components/icons/icons.tsx";
+import { iconIn } from "@clauseo/components/icons/icon-in.tsx";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { act } from "react";
@@ -252,7 +254,11 @@ test("none: its line, and the card's Try again sends try_again", async () => {
   expect(card?.textContent).toContain(
     "Your Claude plan didn't send its limits this time. Asking still works as usual.",
   );
-  await h!.click(document.querySelector('[data-testid="plan-try-again"]'));
+  const tryAgain = document.querySelector('[data-testid="plan-try-again"]');
+  // the retry's icon leads its word, hidden; the word names the button
+  expect(iconIn(tryAgain, IconTryAgain, 16)?.getAttribute("aria-hidden")).toBe("true");
+  expect(tryAgain?.textContent).toBe("Try again");
+  await h!.click(tryAgain);
   expect(h!.transport.refreshes()).toEqual([
     { agent: "claude", why: "shown" },
     { agent: "claude", why: "try_again" },

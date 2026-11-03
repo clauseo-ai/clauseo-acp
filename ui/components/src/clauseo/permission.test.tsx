@@ -10,6 +10,8 @@ import { th, type ThreadKey } from "../lib/words-thread.ts";
 import { TooltipProvider } from "../ui/tooltip.tsx";
 import { PermissionPrompt } from "./permission.tsx";
 import type { PermissionAnswer } from "./permission-keys.ts";
+import { IconAccept, IconCross, IconTick } from "../icons/icons.tsx";
+import { iconIn } from "../icons/icon-in.tsx";
 import { RoomScopeProvider } from "./room-scope-provider.tsx";
 import { useRoom } from "./room-scope.ts";
 
@@ -498,4 +500,30 @@ test("the new words have Hindi, and the short folded lines open the long ones' H
   expect(th("hi", "Not allowed. Clauseo left {paper} as it was.", p)).toMatch(
     new RegExp(`^${th("hi", "Not allowed.")}`),
   );
+});
+
+test("a tick leads the two answers that allow and a cross the two that refuse, hidden; the words name each answer", async () => {
+  await show({ offered: ["once", "always", "deny", "never"], testIds });
+  const cases = [
+    ["perm-once", IconTick, "Allow once"],
+    ["perm-always", IconTick, "Always for this matter"],
+    ["perm-deny", IconCross, "Don't allow"],
+    ["perm-never", IconCross, "Don't allow for this matter"],
+  ] as const;
+  for (const [id, Icon, name] of cases) {
+    const b = $(`[data-testid="${id}"]`);
+    const svg = iconIn(b, Icon, 16);
+    expect(svg, id).not.toBeNull();
+    expect(svg?.getAttribute("aria-hidden"), id).toBe("true");
+    // the icon comes first, and the button's name is still its words (and its key cap's)
+    expect(b.firstElementChild, id).toBe(svg);
+    expect(b.querySelector(".deva-nudge")?.textContent, id).toBe(name);
+  }
+});
+
+test("a refused prompt folds to its line behind a cross, an allowed one behind the accept mark", async () => {
+  await show({ state: "deny" });
+  expect(iconIn($(".perm-done"), IconCross, 14, "perm-done-icon")).not.toBeNull();
+  await again({ state: "once" });
+  expect(iconIn($(".perm-done"), IconAccept, 14, "perm-done-icon")).not.toBeNull();
 });

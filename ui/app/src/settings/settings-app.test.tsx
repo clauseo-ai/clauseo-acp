@@ -16,6 +16,13 @@ import { stubFonts } from "../room/thread/testing.ts";
 import { FakeTransport } from "../transport/fake-transport.ts";
 import type { WindowControls } from "../transport/window-controls.ts";
 import { SettingsApp } from "./settings-app.tsx";
+import {
+  IconAbout,
+  IconAppearance,
+  IconLanguage,
+  IconPlanLimit,
+} from "@clauseo/components/icons/icons.tsx";
+import { iconIn } from "@clauseo/components/icons/icon-in.tsx";
 
 vi.mock("./version.ts", () => ({ APP_VERSION: "9.8.7" }));
 const setWindowTitle = vi.hoisted(() => vi.fn<(title: string) => void>());
@@ -378,3 +385,17 @@ for (const platform of ["mac", "windows"] as const) {
     }
   }
 }
+
+test("each section on the side carries its 16 px icon before its name, hidden; the name still names the section", async () => {
+  const { el } = await mount();
+  const rows = [...el.querySelectorAll<HTMLButtonElement>(".set-nav-row")];
+  const icons = [IconPlanLimit, IconLanguage, IconAppearance, IconAbout];
+  expect(rows).toHaveLength(icons.length);
+  rows.forEach((row, i) => {
+    const holder = row.querySelector(".set-nav-icon");
+    expect(holder?.getAttribute("aria-hidden")).toBe("true");
+    expect(iconIn(holder, icons[i] ?? IconAbout, 16)).not.toBeNull();
+    expect(row.firstElementChild).toBe(holder);
+  });
+  expect(navNames(el)).toEqual(["Plan and usage", "Language", "Appearance", "About"]);
+});
