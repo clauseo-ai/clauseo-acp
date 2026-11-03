@@ -118,7 +118,8 @@ the matter, state and notes folders themselves (literal: a subpath rule matches 
 an agent could otherwise remove its folder and leave a link for the next launch); write-deny on
 read-only paths in the state folder; the network. Every deny carries the tag. Network: outbound to
 `localhost:<port>` for each proxy port and nothing else (no DNS: the proxy resolves names), Unix
-sockets under `<state>/browser/run` (outbound, and bind for agent-browser's daemon), and by
+sockets in the browser socket folder only, when the host gives one (outbound, and bind for
+agent-browser's daemon; amended 2026-11-03, below), and by
 `Loopback` bind, inbound and outbound on the listed ports or `localhost:*`.
 
 The base is adapted from Codex's `seatbelt_base_policy.sbpl` and platform defaults (commit 1a604d58,
@@ -206,6 +207,49 @@ launch and keeps it alive for exactly that launch, dropping it when the agent en
   writes that must succeed; system tools (`cat`, `sh`, `ln`, `nc`, `git`, `logger`) run through the
   same launcher for every refusal and for the G8a cell.
 - The Keychain rules are broad until G7 row 17; missing allowances found by G8b become follow-ups.
+
+Amended 2026-11-03 (QD.4): the browser socket folder replaces `<state>/browser/run`. A Unix socket
+path is at most 103 bytes on macOS, and the matter's state path is longer than that, so
+agent-browser's daemon could not bind there. The host now makes `/tmp/clauseo-ab-<id>`
+(`BrowserSocketDir`, Unix: 16 letters of `a-z0-9` from the OS's randomness) with one atomic
+`mkdir` at 0700, never reusing a name that exists (a new id is drawn, at most 32 times), and
+checks it with `lstat`: a folder, not a link, owned by the effective user (`rustix`'s
+`geteuid`), mode exactly 0700; a failure after the `mkdir` removes what it made and fails the
+launch. Beside the folder, made first (`O_CREAT|O_EXCL|O_NOFOLLOW`, 0600) and held with `flock`
+for the folder's life, sits `/tmp/clauseo-ab-<id>.lock`, outside the folder so the jail cannot
+touch it. The lock is taken without blocking right after the open, and the name must then still
+point at the file locked (same device and inode, a regular file) before the `mkdir`; a sweep
+holding or replacing the new lock file in between costs a new id, not a failed launch. Dropping
+the value removes the folder, then the lock file, then releases the lock.
+`BrowserSocketDir::sweep_stale` removes, at host start, ours that a crashed host left: real
+folders we own with that name shape whose lock file is a regular file of ours that no live
+process holds (a non-blocking `flock` takes it, and the name still points at the file locked),
+then their lock files, and lone stale lock files the same way; never a link, and never a folder
+whose lock file is missing, a link or not ours (a crash cannot leave a folder without its lock
+file, which is made first and removed last). A stress test runs four creators against four
+sweepers in one folder: no live folder is swept and no create fails.
+`PolicyBuilder::browser_socket_dir` puts its canonical path (`/private/tmp/...`) in the policy;
+the profile then allows Unix-socket bind and connect, and file write, read and unlink, under that
+one folder, and creation there of regular files and sockets only (`vnode-type` filters on
+`file-write-create`, which Seatbelt honours on this Mac: `mkdir`, `ln -s` and `mkfifo` are
+refused there); it denies creating or removing the folder itself, and allows metadata on the
+folders above it. The creation limit is not a guarantee about what the folder holds: on some
+macOS versions a swap (`renamex_np` with `RENAME_SWAP`) of a matter path with a file in the
+folder can bring a folder in, with whatever it holds, links included. Seatbelt cannot refuse that without refusing
+renames the matter needs, and it gives the agent nothing beyond its own write access to the
+matter. The removal at drop (`remove_dir_all`) never follows a link; a jail test swaps in a
+matter folder holding a link to a file outside the matter (where the jail refuses the swap, the
+host plants the same structure), drops the value, and finds the folder gone and the outside file
+intact. Nothing else in `/tmp`. With no folder set the jail allows no Unix socket
+anywhere. The jail tests check a socket's whole life in the folder, and refusals in `/tmp`, in
+another `clauseo-ab-*` folder, in `<state>/browser/run`, of `rmdir`, `rename` and `chmod` on
+the folder, of a folder, link or pipe in it, of a link in it to a socket outside, and of a new
+folder or file in `/tmp`.
+
+Residual risk: the jail's rules match paths, not owners. A jailed process that outlived its
+session could meet a folder another local user made again at the same path after the drop, so
+the host drops the value only after the launch's whole process tree has exited. The random
+16-letter names, the drop order and agent-browser's daemon living inside the launch narrow it.
 
 ## Status
 

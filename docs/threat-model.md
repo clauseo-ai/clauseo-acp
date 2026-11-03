@@ -142,6 +142,16 @@ anything the agent starts.
   included (the walk counts names per inode), and a writable name of a file whose other name is
   read-only. Past 256 link rules the nearest folders are denied instead, and a matter that still
   does not fit is refused at launch. A file whose every name is in the matter stays readable
+- `built` (macOS): No Unix socket can be made or reached except in the browser socket folder the
+  host makes for one launch (`/tmp/clauseo-ab-<id>`: one atomic `mkdir` at 0700, checked with
+  `lstat`, removed at the end, stale ones swept at host start); nothing else in `/tmp` is
+  writable, the folder itself cannot be removed, renamed or replaced from the jail, and only
+  regular files and sockets can be made in it; on some macOS versions a swap (`renamex_np`,
+  `RENAME_SWAP`) with a matter path can bring a folder in, with whatever it holds, and the
+  removal at drop never follows a link. Its lock file, held for the launch, keeps another host's
+  sweep away. Gap: the rules match paths, not owners, so a jailed process that outlived
+  its session could meet a folder another local user made again at that path; the host drops
+  the folder only after the launch's process tree has exited, and names are random
 - `built` (macOS): A refused file read or write reaches a denial sink through the unified log
   watcher; `designed`: the denial event and card, and widening access restarts the agent only if
   the lawyer accepts (R18)
@@ -160,6 +170,10 @@ lawyer's documents somewhere.
 - `built`: The agent listener takes only its launch's token (32 random bytes, compared in
   constant time, never logged or sent upstream); the browser listener takes no token and is held
   to its matter by the jail's port rule
+- `built`: Loopback ports for the browser are claimed per session (`ports::claim_port`, and
+  `claim_port_at` for agent-browser's Windows daemon port) in a process-wide registry, so no two
+  launches of this host get the same port; gap: another process can take a claimed port before
+  the browser binds it, and the launch then fails with no fallback
 - `built`: After DNS it refuses a host if any address is loopback, private, link-local, shared,
   unspecified or multicast (IPv4 inside IPv6 included), and connects only to the addresses it
   checked. Through an upstream proxy the name goes on unresolved, and is refused if the

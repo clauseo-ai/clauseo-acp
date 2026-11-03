@@ -110,13 +110,7 @@ impl World {
     pub(crate) fn listen_unix(&self, rel: &str) -> PathBuf {
         let path = self.at(rel);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
-        std::thread::spawn(move || {
-            for stream in listener.incoming() {
-                drop(stream);
-            }
-        });
-        path
+        listen_unix_at(path)
     }
 
     /// The policy for `m1`: its state folder and notes, the credential link, the Claude store,
@@ -130,6 +124,29 @@ impl World {
             .hidden(self.at("data"))
             .hidden(self.at("m2"))
     }
+}
+
+/// The folder `path`, whose parent exists, made outside the jail.
+pub(crate) fn dir_at(path: &Path) -> PathBuf {
+    std::fs::create_dir(path).unwrap();
+    path.to_owned()
+}
+
+/// A symbolic link at `link` pointing at `target`, made outside the jail.
+pub(crate) fn symlink_at(target: &Path, link: &Path) -> PathBuf {
+    std::os::unix::fs::symlink(target, link).unwrap();
+    link.to_owned()
+}
+
+/// A Unix socket listening at `path`, whose folder exists, accepting in a thread of its own.
+pub(crate) fn listen_unix_at(path: PathBuf) -> PathBuf {
+    let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            drop(stream);
+        }
+    });
+    path
 }
 
 impl Drop for World {

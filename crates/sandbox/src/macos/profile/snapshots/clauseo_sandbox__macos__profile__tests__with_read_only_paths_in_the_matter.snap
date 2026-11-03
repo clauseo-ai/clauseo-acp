@@ -255,13 +255,6 @@ expression: w.render(&policy)
   (require-all (vnode-type DIRECTORY) (path-ancestors (param "STATE_READ_ONLY_0")))
   (with message "clauseo-4242-7"))
 
-; Network: the proxy's loopback ports only; no DNS (the proxy resolves names).
-(allow network-outbound
-  (remote unix-socket (subpath (param "BROWSER_RUN"))))
-; agent-browser's daemon, in the jail, makes its socket there.
-(allow network-bind
-  (local unix-socket (subpath (param "BROWSER_RUN"))))
-
 ;; parameters
 MATTER = <root>/matter
 STATE = <root>/data/agent-state/m1/codex
@@ -280,4 +273,3 @@ READ_ONLY_10 = <root>/matter/sub/.git
 LINK_0 = <root>/matter/to-secret
 HIDDEN_0 = <root>/data
 STATE_READ_ONLY_0 = <root>/data/agent-state/m1/codex/config.toml
-BROWSER_RUN = <root>/data/agent-state/m1/codex/browser/run

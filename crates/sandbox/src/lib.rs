@@ -20,7 +20,9 @@
 //! - The egress proxy, one per agent launch ([`start_proxy`], [`ProxyHandle`]): CONNECT to 443
 //!   and plain `http://` to 80 under an [`Allowlist`], a token on the agent listener, address
 //!   checks, the firm's upstream, refusals as [`Denial::Host`]. [`ports::bind_loopback`] binds
-//!   every per-launch loopback listener.
+//!   every per-launch loopback listener; [`ports::claim_port`] and [`ports::claim_port_at`]
+//!   hold a loopback port for a session in a process-wide registry ([`ports::PortClaim`]),
+//!   which no bind or claim of this process hands out again until the claim drops.
 //! - Unix: the browser's socket folder ([`BrowserSocketDir`]), `/tmp/clauseo-ab-<id>`, made
 //!   by the host for one launch, removed on drop, and swept at host start.
 //!
@@ -29,7 +31,8 @@
 //! - [`Policy::builder`]`(matter, state)`, then [`PolicyBuilder`]'s `runtime`, `read`,
 //!   `allowed_folder`, `read_only_in_state`, `notes`, `credential_link`, `claude_store`,
 //!   `hidden`, `proxy_port` (once per loopback listener), `loopback` ([`Loopback`]),
-//!   `keychain`, `over_cap`, `links`, `scan` (a [`MatterScan`] the caller already has),
+//!   `browser_socket_dir` (Unix; without it no Unix socket anywhere), `keychain`,
+//!   `over_cap`, `links`, `scan` (a [`MatterScan`] the caller already has),
 //!   `home`, and `build`. Accessors carry the builder's names, plus [`Policy::tmpdir`],
 //!   [`Policy::read_only_in_matter`] ([`PathRule`]s), [`Policy::link_folders`] and
 //!   [`Policy::links_outside_link_folders`]; [`Policy::claude_store`] gives a
