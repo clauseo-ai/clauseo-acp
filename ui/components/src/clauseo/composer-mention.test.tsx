@@ -307,6 +307,104 @@ test("a deleted token mentions nothing; undo brings it back, and its paper with 
   expect(handle.current?.mentioned()).toEqual([]);
 });
 
+/** The engine as WKWebView on macOS edits, smart quotes on (#117 M5-hi's log): insertText's beforeinput, then the words
+ * in, then, inside the same command, the closing `"` replaced by `”` with insertReplacementText (its own beforeinput,
+ * the caret at the words' end, no target ranges), then insertText's input and the replacement's. `cancelable: false`
+ * is an engine that never asks before it substitutes. */
+function smartQuotes({ cancelable = true } = {}) {
+  const exec = (command: string, _ui?: boolean, value?: string) => {
+    const a = document.activeElement;
+    if (!(a instanceof HTMLTextAreaElement) || command !== "insertText" || value === undefined)
+      return false;
+    const before = (inputType: string, data: string) =>
+      a.dispatchEvent(
+        new InputEvent("beforeinput", { bubbles: true, cancelable, inputType, data }),
+      );
+    if (!before("insertText", value)) return false;
+    const s = a.selectionStart;
+    const v = a.value.slice(0, s) + value + a.value.slice(a.selectionEnd);
+    Reflect.set(HTMLTextAreaElement.prototype, "value", v, a);
+    a.setSelectionRange(s + value.length, s + value.length);
+    const q = value.lastIndexOf('"');
+    const replaced = q > 0 && before("insertReplacementText", "\u201d");
+    if (replaced) {
+      const at = s + q;
+      const caret = a.selectionEnd;
+      Reflect.set(
+        HTMLTextAreaElement.prototype,
+        "value",
+        `${v.slice(0, at)}\u201d${v.slice(at + 1)}`,
+        a,
+      );
+      a.setSelectionRange(caret, caret);
+    }
+    a.dispatchEvent(
+      new InputEvent("input", { bubbles: true, inputType: "insertText", data: value }),
+    );
+    if (replaced)
+      a.dispatchEvent(
+        new InputEvent("input", {
+          bubbles: true,
+          inputType: "insertReplacementText",
+          data: "\u201d",
+        }),
+      );
+    return true;
+  };
+  Object.defineProperty(document, "execCommand", { value: exec, configurable: true });
+}
+const ANNEXURE = paper("f-a", "papers/Annexure A अनुलग्नक.pdf");
+/** A replacement asked for at beforeinput over `start` to `end` selected, as WebKit selects what it replaces:
+ * whether the composer let it be. */
+const replacing = (start: number, end: number, data: string) =>
+  act(async () => {
+    field().setSelectionRange(start, end);
+    const e = new InputEvent("beforeinput", {
+      bubbles: true,
+      cancelable: true,
+      inputType: "insertReplacementText",
+      data,
+    });
+    return field().dispatchEvent(e);
+  });
+
+test("macOS's smart quotes never rewrite a quoted paper's closing quote as it is picked (#117 M5-hi, WKWebView)", async () => {
+  lay();
+  smartQuotes();
+  const { mentions } = source({ items: [ANNEXURE, ...PAPERS] });
+  const handle = createRef<ComposerHandle>();
+  await mount(composer({ mentions, ref: handle }));
+  await focus();
+  await edit("आदेश @ann");
+  expect(names()).toEqual(["Annexure A अनुलग्नक.pdf"]);
+  await key("Tab");
+  const picked = 'आदेश @"papers/Annexure A अनुलग्नक.pdf" ';
+  expect(field().value).toBe(picked);
+  expect([field().selectionStart, field().selectionEnd]).toEqual([39, 39]);
+  expect(boxes()).toHaveLength(1);
+  expect(handle.current?.mentioned().map((m) => m.id)).toEqual(["f-a"]);
+  // a replacement over the token's characters (a spelling fix in its name) is refused; one at its end or after it,
+  // as Tamil99's vowel sign after a token, is let be
+  expect(await replacing(11, 19, "Annex")).toBe(false);
+  expect(await replacing(37, 38, "\u201d")).toBe(false);
+  expect(await replacing(38, 39, "x")).toBe(true);
+  await edit(`${picked}க`);
+  expect(await replacing(39, 40, "கா")).toBe(true);
+  await edit(`${picked}கா`, { inputType: "insertReplacementText" });
+  expect(boxes()).toHaveLength(1);
+  expect(handle.current?.mentioned().map((m) => m.id)).toEqual(["f-a"]);
+});
+
+test("an engine that substitutes without asking leaves the pick's words once, never part of them twice", async () => {
+  smartQuotes({ cancelable: false });
+  const { mentions } = source({ items: [ANNEXURE] });
+  await mount(composer({ mentions }));
+  await focus();
+  await edit("आदेश @ann");
+  await key("Tab");
+  expect(field().value).toBe('आदेश @"papers/Annexure A अनुलग्नक.pdf\u201d ');
+});
+
 test("no @ menu opens, and no papers are asked for, while an input method composes; an @ in it opens at its end", async () => {
   vi.useFakeTimers({ toFake: ["setTimeout"] });
   const { mentions, load } = source();
