@@ -54,8 +54,23 @@ test("off dims the glyph under a slash, the shape knocked out either side of it"
   expect(svg(el).getAttribute("width")).toBe("16");
 });
 
-test("locked dims the glyph under a small lock, knocked out behind it", async () => {
+test("locked dims the glyph and gives its lower right corner to a lock, knocked out under it", async () => {
   const el = await mount(<ToolGlyph glyph="browser" state="locked" size={11} />);
+  // big enough to read at 14 px: the lock (about 16.25 units drawn) scaled to 11 to 12 of the 20, at the lower right
+  const at = /translate\(([\d.]+) ([\d.]+)\) scale\(([\d.]+)\)/.exec(
+    el.querySelector("[data-part=lock]")?.getAttribute("transform") ?? "",
+  );
+  const [x, y, k] = [Number(at?.[1]), Number(at?.[2]), Number(at?.[3])];
+  expect(16.25 * k).toBeGreaterThanOrEqual(11);
+  expect(16.25 * k).toBeLessThanOrEqual(12);
+  // its body's right and bottom edges inside the grid, near its lower right corner
+  expect(17.25 * k + x).toBeGreaterThan(18);
+  expect(17.25 * k + x + 0.75).toBeLessThanOrEqual(20);
+  expect(18.25 * k + y).toBeGreaterThan(18);
+  expect(18.25 * k + y + 0.75).toBeLessThanOrEqual(20);
+  expect(el.querySelector("mask [data-part=knockout]")?.getAttribute("transform")).toBe(
+    el.querySelector("[data-part=lock]")?.getAttribute("transform"),
+  );
   expect(el.querySelector("[data-part=lock]")?.querySelectorAll("path").length).toBe(2);
   expect(el.querySelector("mask [data-part=knockout]")).not.toBeNull();
   expect(el.querySelector("g[mask]")?.classList.contains("text-muted")).toBe(true);
