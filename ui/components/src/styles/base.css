@@ -249,6 +249,11 @@
   [data-disabled] {
     cursor: default;
   }
+  /* Hindi inside an English page takes the face its own tokens turn (tokens-type.css); the body's resolved on the
+     body. :where keeps it under every rule that sets a face of its own, such as code's */
+  :where([lang="hi"]) {
+    font-family: var(--font);
+  }
   /* English standing alone inside Hindi, such as a matter's name as filed, keeps the Latin cut's own size */
   :root:lang(hi) [lang="en"].as-en {
     font-family: var(--font-latin);

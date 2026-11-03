@@ -75,8 +75,11 @@
   --tr-caps: 0.06em;
 }
 
-/* Hindi: the same sizes on taller lines and its own width for accepted text, for the whole page */
-:root:lang(hi) {
+/* Hindi: the same sizes on taller lines and its own width for accepted text, for the whole page, and for a Hindi
+   block inside an English page, such as an answer's paragraph (markdown/to-react.ts). What reads them there takes
+   them again on that element: base.css for the face, thread.css for an answer's line heights. */
+:root:lang(hi),
+[lang="hi"] {
   --font: var(--font-deva);
   --lh-tile: 18px;
   --lh-small: 20px;
