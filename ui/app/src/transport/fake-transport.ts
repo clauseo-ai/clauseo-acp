@@ -25,6 +25,9 @@ import {
 } from "./host-transport.ts";
 import type {
   AgentChoiceId,
+  AgentKind,
+  LimitsView,
+  RefreshWhy,
   CommandEnvelope,
   CommandOutcome,
   FileRefId,
@@ -38,6 +41,7 @@ import type {
   ThreadId,
   ViewPosition,
 } from "./protocol.ts";
+import { LimitsFeed, limitsOf, type LimitsSource } from "./limits-feed.ts";
 import { Subscriptions } from "./subscriptions.ts";
 
 /** One host call the fake saw, in order. */
@@ -92,7 +96,7 @@ export type FakeHost = {
   next?: FakeNextHost;
 };
 
-export class FakeTransport implements HostTransport, NextHostSource {
+export class FakeTransport implements HostTransport, NextHostSource, LimitsSource {
   readonly kind = "fake";
   readonly calls: FakeCall[] = [];
   /** Problems the channel reader reported. */
@@ -105,6 +109,7 @@ export class FakeTransport implements HostTransport, NextHostSource {
   readonly #dispatched = new Set<(command: CommandEnvelope) => void>();
   readonly #settingsHeard = new Set<(settings: Settings) => void>();
   readonly #appHeard = new Set<(event: AppEvent) => void>();
+  readonly #limits = new LimitsFeed((problem) => this.problems.push(problem));
   /** H14's settings window, when `host.openSettings` scripts it. */
   readonly openSettings: (() => Promise<void>) | undefined;
   readonly #parts: { [P in NextPart]-?: NonNullable<NextHost[P]> } = {
@@ -208,6 +213,11 @@ export class FakeTransport implements HostTransport, NextHostSource {
         if (failed !== null) this.#subs.fail(failed.stream, toHostError(failed.error));
         else if ("patches" in event && event.patches !== undefined)
           this.#subs.deliver(event.patches);
+        else if ("limits_view_changed" in event) {
+          const view = limitsOf(event);
+          if (view === null) this.problems.push("limits_view_changed carried no view");
+          else this.#limits.deliver(view);
+        }
       },
       (problem) => this.problems.push(problem),
     );
@@ -219,6 +229,23 @@ export class FakeTransport implements HostTransport, NextHostSource {
       typeof message === "string" ? message : JSON.stringify(message),
     ).length;
     this.#reader.receive(message);
+  }
+
+  /** Plays `limits_view_changed` on the channel, as the host sends it after `open_stream` and after each change. */
+  limitsChanged(view: LimitsView): void {
+    this.deliver({ limits_view_changed: view });
+  }
+
+  onLimits(listener: (view: LimitsView) => void): () => void {
+    return this.#limits.onLimits(listener);
+  }
+
+  /** The `refresh_limits` commands dispatched, in order: the agent (undefined for every agent) and why. */
+  refreshes(): { agent: AgentKind | undefined; why: RefreshWhy }[] {
+    return this.only("dispatch").flatMap(({ command }) => {
+      const refresh = command.command.refresh_limits;
+      return refresh === undefined ? [] : [{ agent: refresh.agent, why: refresh.why }];
+    });
   }
 
   /** The bridge's report that a stream failed, as its channel message would say. */

@@ -325,6 +325,31 @@ describe("TauriTransport", () => {
     expect(heard).toEqual(["two"]);
   });
 
+  test("limits_view_changed reaches every limits listener, a later one hears the last view, and it is acked on the next frame", async () => {
+    const { t, got, send, frame, acks } = await rig("a");
+    const heard: unknown[] = [];
+    const stop = t.onLimits((v) => heard.push(["one", v]));
+    const first = {
+      claude: { billing: "plan", windows: [], at_limit_text: "", freshness: "loading" },
+    };
+    send({ limits_view_changed: first });
+    expect(heard).toEqual([["one", first]]);
+    t.onLimits((v) => heard.push(["two", v]));
+    expect(heard).toEqual([
+      ["one", first],
+      ["two", first],
+    ]);
+    stop();
+    send({ limits_view_changed: {} });
+    expect(heard.at(-1)).toEqual(["two", {}]);
+    expect(heard).toHaveLength(3);
+    expect(got).toEqual([]);
+    // no subscribe: the channel carries the limits from open_stream on
+    expect(invoked.map((i) => i.command)).not.toContain("subscribe_limits");
+    await frame();
+    expect(acks()).toEqual([{ positions: [], messages: 2 }]);
+  });
+
   test("outside Tauri the page transport reaches nothing", async () => {
     const t = pageTransport();
     expect(t.kind).toBe("null");
