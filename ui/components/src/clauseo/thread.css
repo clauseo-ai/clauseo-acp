@@ -145,11 +145,12 @@
     @apply text-read tracking-read font-clauseo;
     margin-top: var(--para-gap);
   }
-  /* English runs inside Hindi keep their Latin tracking */
-  :root:lang(hi) .lead [lang="en"] {
+  /* English runs inside Hindi keep their Latin tracking: in the Hindi interface, and in a Hindi block of an English
+     page */
+  .lead:lang(hi) [lang="en"] {
     letter-spacing: var(--tr-lead);
   }
-  :root:lang(hi) :is(.para, .os-text) [lang="en"] {
+  :is(.para, .os-text):lang(hi) [lang="en"] {
     letter-spacing: var(--tr-read);
   }
   /* accepted: the lawyer's weight, set narrower by exactly what the weight adds, measured in this browser, so every
@@ -417,7 +418,12 @@
   }
   .reply-text [data-clauseo="markdown"] :is(h3, h4, h5, h6) {
     font-size: inherit;
-    line-height: inherit;
+    line-height: calc(var(--lh-reply) * var(--k));
+  }
+  /* a Hindi block in an English answer (markdown/to-react.ts) takes its line height again, on its own Hindi tokens:
+     the reply's resolves where .reply-text sets it. :where keeps it under the headings' and the cells' own */
+  .reply-text [data-clauseo="markdown"] :where([lang="hi"]) {
+    line-height: calc(var(--lh-reply) * var(--k));
   }
   .reply-text [data-clauseo="markdown"] :is(h5, h6) {
     color: var(--muted);
@@ -495,6 +501,7 @@
     min-width: var(--s12);
     vertical-align: top;
     text-align: start;
+    line-height: var(--lh-ui);
   }
   .reply-text [data-clauseo="markdown"] th {
     font-weight: var(--w-chip);

@@ -15,6 +15,7 @@ import { Image } from "./image.tsx";
 import { LinkOrReference } from "./link.tsx";
 import { Key, Table } from "./blocks.tsx";
 import { Superscript } from "./notes.tsx";
+import { langOfText } from "../lib/script.ts";
 
 /** hast property name to React prop name, per tag: the schema's attributes, and only those. */
 const ATTRIBUTES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
@@ -92,6 +93,25 @@ const TABLE_PARTS = new Set(["table", "thead", "tbody", "tfoot", "tr"]);
 /** The cell alignments mdast-util-to-hast produces. */
 const ALIGNMENTS = new Set(["left", "right", "center"]);
 const WHITESPACE = /^[ \t\n\f\r]*$/;
+/**
+ * The blocks that take lang="hi" when their letters are mostly Devanagari (lib/script.ts), in either interface
+ * language, so they set in the Hindi type (tokens-type.css). A list item reads its own words, not its sublists'.
+ */
+const TEXT_BLOCKS = new Set([
+  "p",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "li",
+  "th",
+  "td",
+  "dt",
+  "dd",
+]);
+const SUBLISTS = new Set(["ul", "ol"]);
 
 /** The tags and hast properties this mapper renders, for the schema test (every allowed one must be here). */
 export const MAPPED = {
@@ -164,12 +184,16 @@ function create(
   return make(type as never, props, key);
 }
 
-/** The text of hast nodes, through any markup (`**good.com**`, `` `good.com` ``). */
-function textOf(nodes: readonly ElementContent[]): string {
+/**
+ * The text of hast nodes, through any markup (`**good.com**`, `` `good.com` ``); with `skip`, not inside the
+ * elements it names.
+ */
+function textOf(nodes: readonly ElementContent[], skip?: ReadonlySet<string>): string {
   let text = "";
   for (const node of nodes) {
     if (node.type === "text") text += node.value;
-    else if (node.type === "element") text += textOf(node.children);
+    else if (node.type === "element" && !skip?.has(node.tagName))
+      text += textOf(node.children, skip);
   }
   return text;
 }
@@ -198,6 +222,11 @@ function elementOf(node: Element, key: string, continues = false): ReactNode {
   // A link's whole text, for its spoofed-host check (link.tsx); a code block's text and language.
   if (node.tagName === "a") props["text"] = textOf(node.children);
   else if (node.tagName === "pre") codeOf(node, props);
+  else if (TEXT_BLOCKS.has(node.tagName)) {
+    // Once per block as its elements are made: a finished block's are made once and kept (view.ts)
+    const lang = langOfText(textOf(node.children, node.tagName === "li" ? SUBLISTS : undefined));
+    if (lang !== undefined) props["lang"] = lang;
+  }
   // A code block's children would be built only to be thrown away.
   const children =
     VOID.has(node.tagName) || node.tagName === "pre"
