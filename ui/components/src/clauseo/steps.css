@@ -75,7 +75,7 @@
      answer's edge, so they read as the work behind it and not as more lines of the answer */
   .step-group-rows {
     display: grid;
-    gap: var(--s1);
+    gap: var(--s0-5);
     margin: var(--s2) 0 var(--s1);
     padding: var(--s2) var(--s3);
     background: var(--well);
