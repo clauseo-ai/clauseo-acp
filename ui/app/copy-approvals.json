@@ -2063,5 +2063,69 @@
     "status": "approved",
     "at": "2026-11-03",
     "by": "design"
+  },
+  "U7-16": {
+    "en": "That message had already gone.",
+    "hi": "वह संदेश पहले ही जा चुका था।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator"
+  },
+  "U7-24": {
+    "en": "Your words came as the answer ended, so they go next.",
+    "hi": "आपके शब्द उत्तर पूरा होते समय पहुँचे, इसलिए वे अगले भेजे जाएँगे।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator"
+  },
+  "U7-25": {
+    "en": "Your words at {time} came in before some work had finished. It went on in the background and finished at {done}. The answer uses what it found.",
+    "hi": "आपके {time} बजे के शब्द कुछ काम पूरा होने से पहले पहुँचे। वह काम पृष्ठभूमि में चलता रहा और {done} बजे पूरा हुआ। उत्तर में उससे मिली बातों का इस्तेमाल हुआ है।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator"
+  },
+  "U7-26": {
+    "en": "In the background",
+    "hi": "पृष्ठभूमि में",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator"
+  },
+  "U7-28": {
+    "en": "{n} queued.",
+    "hi": "{n} कतार में।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator"
+  },
+  "U7-29": {
+    "en": "1 queued.",
+    "hi": "1 कतार में।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator"
+  },
+  "U7-30": {
+    "en": "Your question, {time}",
+    "hi": "आपका प्रश्न, {time}",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator"
+  },
+  "U7-31": {
+    "en": "Clauseo's answer, {time}",
+    "hi": "Clauseo का उत्तर, {time}",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator"
   }
 }
