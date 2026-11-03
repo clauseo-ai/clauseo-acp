@@ -17,7 +17,8 @@ unsafe extern "C" {
 }
 
 /// Whether this process runs under a Seatbelt profile: `sandbox_check` with no operation is
-/// non-zero. The call has no error result it could tell apart from that, so this never fails.
+/// non-zero. It returns 1 when sandboxed, 0 when not, and -1 on an error; -1 is non-zero, so an
+/// error counts as sandboxed (the safe side), and this never fails open.
 pub(super) fn sandboxed() -> bool {
     // SAFETY: getpid takes nothing and always succeeds. sandbox_check reads no pointer when the
     // operation is null and the filter is SANDBOX_FILTER_NONE, which takes no variadic argument.

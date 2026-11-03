@@ -1,0 +1,186 @@
+use std::io;
+
+use super::{Failure, Token, decide};
+
+/// The fake process's user.
+const USER: &str = "S-1-5-21-1-2-3-1001";
+/// Another account's SID.
+const OTHER: &str = "S-1-5-21-1-2-3-1002";
+
+/// One read's answer, made fresh for each call (`Failure` holds an `io::Error`, which is not
+/// `Clone`).
+#[derive(Clone, Copy)]
+enum Answer {
+    Yes,
+    No,
+    Denied,
+    Broken,
+}
+
+impl Answer {
+    fn read(self) -> Result<bool, Failure> {
+        match self {
+            Self::Yes => Ok(true),
+            Self::No => Ok(false),
+            Self::Denied => Err(Failure::Denied),
+            Self::Broken => Err(Failure::Other(io::Error::other("broken"))),
+        }
+    }
+}
+
+/// A token with fixed answers. `user_is` compares with [`USER`] and, as
+/// `ConvertStringSidToSidW` would, says [`Failure::NotASid`] for a string not starting `S-1-`.
+#[derive(Clone, Copy)]
+struct Fake {
+    app_container: Answer,
+    restricted: Answer,
+    /// `None`: `user_is` compares; else this answer.
+    user: Option<Answer>,
+}
+
+/// An unjailed token.
+const PLAIN: Fake = Fake {
+    app_container: Answer::No,
+    restricted: Answer::No,
+    user: None,
+};
+
+impl Token for Fake {
+    fn app_container(&self) -> Result<bool, Failure> {
+        self.app_container.read()
+    }
+
+    fn restricted(&self) -> Result<bool, Failure> {
+        self.restricted.read()
+    }
+
+    fn user_is(&self, sid: &str) -> Result<bool, Failure> {
+        match self.user {
+            Some(answer) => answer.read(),
+            None if !sid.starts_with("S-1-") => Err(Failure::NotASid),
+            None => Ok(sid == USER),
+        }
+    }
+}
+
+/// A sandbox user record that names `sid`.
+fn record(sid: &'static str) -> impl FnOnce() -> Result<Option<String>, Failure> {
+    move || Ok(Some(sid.to_owned()))
+}
+
+/// No sandbox user record.
+fn no_record() -> impl FnOnce() -> Result<Option<String>, Failure> {
+    || Ok(None)
+}
+
+/// `decide` with `Ok(token)`, as a short string: "jailed", "free" or "error: <message>".
+fn verdict(token: Fake, record: impl FnOnce() -> Result<Option<String>, Failure>) -> String {
+    show(decide(Ok(token), record))
+}
+
+fn show(answer: io::Result<bool>) -> String {
+    match answer {
+        Ok(true) => "jailed".to_owned(),
+        Ok(false) => "free".to_owned(),
+        Err(error) => format!("error: {error}"),
+    }
+}
+
+#[test]
+fn no_signal_and_no_sandbox_user_record_is_not_sandboxed() {
+    assert_eq!(verdict(PLAIN, no_record()), "free");
+}
+
+#[test]
+fn the_sandbox_user_is_sandboxed_and_any_other_user_is_not() {
+    assert_eq!(verdict(PLAIN, record(USER)), "jailed");
+    assert_eq!(verdict(PLAIN, record(OTHER)), "free");
+}
+
+#[test]
+fn a_record_that_is_denied_the_wrong_type_or_not_a_sid_is_sandboxed() {
+    assert_eq!(verdict(PLAIN, || Err(Failure::Denied)), "jailed");
+    assert_eq!(verdict(PLAIN, || Err(Failure::WrongType)), "jailed");
+    assert_eq!(verdict(PLAIN, record("not a sid")), "jailed");
+    assert_eq!(verdict(PLAIN, record("")), "jailed");
+}
+
+#[test]
+fn any_other_record_failure_fails_open_with_its_error() {
+    let broken = || Err(Failure::Other(io::Error::other("registry broke")));
+    assert_eq!(verdict(PLAIN, broken), "error: registry broke");
+}
+
+#[test]
+fn an_app_container_or_restricting_sids_are_sandboxed_without_the_record() {
+    let read = std::cell::Cell::new(false);
+    let watched = || {
+        read.set(true);
+        Ok(None)
+    };
+    let container = Fake {
+        app_container: Answer::Yes,
+        ..PLAIN
+    };
+    assert_eq!(verdict(container, watched), "jailed");
+    let restricted = Fake {
+        restricted: Answer::Yes,
+        ..PLAIN
+    };
+    assert_eq!(verdict(restricted, no_record()), "jailed");
+    assert!(!read.get(), "a positive token signal needs no record");
+}
+
+#[test]
+fn a_token_that_cannot_be_opened_for_access_denied_is_sandboxed() {
+    assert_eq!(
+        show(decide::<Fake>(Err(Failure::Denied), no_record())),
+        "jailed"
+    );
+    assert_eq!(
+        show(decide::<Fake>(
+            Err(Failure::Other(io::Error::other("no token"))),
+            no_record()
+        )),
+        "error: no token"
+    );
+}
+
+#[test]
+fn each_token_read_denied_is_sandboxed() {
+    let denied_container = Fake {
+        app_container: Answer::Denied,
+        ..PLAIN
+    };
+    let denied_restricted = Fake {
+        restricted: Answer::Denied,
+        ..PLAIN
+    };
+    let denied_user = Fake {
+        user: Some(Answer::Denied),
+        ..PLAIN
+    };
+    assert_eq!(verdict(denied_container, no_record()), "jailed");
+    assert_eq!(verdict(denied_restricted, no_record()), "jailed");
+    assert_eq!(verdict(denied_user, record(OTHER)), "jailed");
+}
+
+#[test]
+fn a_broken_read_fails_open_only_when_no_other_signal_answers() {
+    let broken_container = Fake {
+        app_container: Answer::Broken,
+        ..PLAIN
+    };
+    assert_eq!(verdict(broken_container, no_record()), "error: broken");
+    assert_eq!(verdict(broken_container, record(USER)), "jailed");
+    let and_restricted = Fake {
+        restricted: Answer::Yes,
+        ..broken_container
+    };
+    assert_eq!(verdict(and_restricted, no_record()), "jailed");
+    let broken_user = Fake {
+        user: Some(Answer::Broken),
+        ..PLAIN
+    };
+    assert_eq!(verdict(broken_user, record(USER)), "error: broken");
+}
