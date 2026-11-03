@@ -39,23 +39,34 @@
     row-gap: 0;
     /* one 36 px line; a second only when the words must wrap, never cut short */
     min-height: var(--size-control);
-    /* the wait icon stands over Add papers' icon, and the words start over the field's own */
+    /* the lead stands over Add papers' icon. Every lead takes the pen's slot, so the words start in one place whatever
+       leads them, in either language; a wait's words so start a little right of the field's own (Rohan's call for the
+       pen, 2026-11) */
     padding: 0 var(--s1-5) 0 var(--s4);
     background: var(--well-strong);
     border-radius: var(--r-field) var(--r-field) 0 0;
   }
+  /* the lead's one slot: the pen's box, with the clock, the break or the question mark at its left */
+  .working-lead {
+    flex: none;
+    display: flex;
+    align-items: center;
+    width: calc(var(--s5) * var(--k) * 110 / 36);
+    height: calc(var(--s5) * var(--k));
+    margin-right: var(--s2);
+  }
   .working-icon {
     flex: none;
-    margin-right: var(--s2);
     color: var(--muted);
   }
-  /* the pen, in the wait icon's place while Clauseo writes: one line of the row's words tall, 110 by 36 design units,
-     so its box never changes as it writes. The writing fades in from the left as the paper carries it off. */
+  /* the pen, in the wait icon's place while Clauseo writes: 20 px tall at the text size, in either language, 110 by 36
+     design units, so its box never changes as it writes. The writing fades in from the left as the paper carries it
+     off. */
   .pen-mark {
     display: block;
     flex: none;
-    height: calc(var(--lh-small-row) * var(--k));
-    width: calc(var(--lh-small-row) * var(--k) * 110 / 36);
+    height: calc(var(--s5) * var(--k));
+    width: calc(var(--s5) * var(--k) * 110 / 36);
     overflow: hidden;
     color: var(--muted);
     /* a mask reads only alpha, so any opaque tone serves */
