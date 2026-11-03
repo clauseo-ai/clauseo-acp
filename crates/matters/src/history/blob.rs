@@ -344,5 +344,8 @@ impl Read for Checked<'_> {
 }
 
 #[cfg(test)]
+mod tests;
+
+#[cfg(test)]
 #[cfg(windows)]
 mod windows_tests;
