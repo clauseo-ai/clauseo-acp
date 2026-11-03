@@ -27,10 +27,23 @@
   .room-matter-match {
     @apply text-small text-muted;
   }
-  /* a folder that moved: an open ring, since nothing is there to fill it */
-  .room-dot-ring {
-    background: transparent;
-    box-shadow: inset 0 0 0 var(--underline-firm) var(--muted);
+  /* a status's mark (rail-mark.tsx): a 14 px icon in the status line's tone, or on a court-yellow disc where the matter
+     waits on the lawyer's hand */
+  .room-mark {
+    flex: none;
+    display: inline-grid;
+    place-items: center;
+    width: var(--size-icon-line);
+    height: var(--size-icon-line);
+  }
+  .room-mark[data-waits] {
+    border-radius: var(--r-round);
+    background: var(--yellow);
+    color: var(--on-yellow);
+  }
+  /* on the status line's first line, centred on its 20 px line */
+  .room-matter-mark {
+    margin-top: var(--icon-line-drop);
   }
 
   /* ---------- the current matter, opened: its row and its conversations on one raised plane ---------- */
@@ -100,8 +113,8 @@
   .room-conv[aria-current] .room-conv-title {
     @apply text-primary font-chip;
   }
-  /* one line: the title, the plan where it differs from the matter's first, and the status dot at the line's end, where
-     every row's dot lines up with the next */
+  /* one line: the title, the plan where it differs from the matter's first, and the status's icon at the line's end, where
+     every row's icon lines up with the next */
   .room-conv-line {
     display: flex;
     align-items: center;
@@ -116,11 +129,11 @@
     @apply text-small text-quiet;
     flex: none;
   }
-  .room-conv-dot {
-    flex: none;
-    width: var(--size-dot-hint);
-    height: var(--size-dot-hint);
-    border-radius: var(--r-round);
+  .room-conv-mark {
+    color: var(--muted);
+  }
+  .room-conv[data-state="ready"] .room-conv-mark:not([data-waits]) {
+    color: var(--primary);
   }
   /* a question for the lawyer, the one status said in words on the row */
   .room-conv-ask {

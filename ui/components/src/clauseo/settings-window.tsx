@@ -10,8 +10,9 @@ import { useSettingsWords } from "../lib/words-settings.ts";
 import { CaptionButtons, CornerLights, type CaptionWiring } from "./caption.tsx";
 import { Heading } from "./heading.tsx";
 
-/** A section as the window's side lists it: its name, and where it stands now. */
-export type SettingsNavItem = { id: string; name: string; note?: string };
+/** A section as the window's side lists it: its name, where it stands now, and its 16 px icon before the name (hidden
+ * from assistive technology: the name names the section). */
+export type SettingsNavItem = { id: string; name: string; note?: string; icon?: ReactNode };
 
 /** The window: on Windows and Linux a title bar with the caption buttons, on the Mac the corner lights; the sections
  * down the side, the open one marked; and the open section's head and body in the pane, which starts at its top each
@@ -83,6 +84,11 @@ export function SettingsWindow({
                 aria-current={s.id === current ? "page" : undefined}
                 onClick={() => onSection(s.id)}
               >
+                {s.icon !== undefined && (
+                  <span className="set-nav-icon" aria-hidden="true">
+                    {s.icon}
+                  </span>
+                )}
                 <span className="set-nav-name">{say(s.name)}</span>
                 {s.note !== undefined && <span className="set-nav-note">{say(s.note)}</span>}
               </button>

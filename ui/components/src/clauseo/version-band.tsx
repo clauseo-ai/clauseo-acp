@@ -12,7 +12,8 @@ import {
   IconAccept,
   IconBackToAnswer,
   IconChecking,
-  IconOpen,
+  IconCompare,
+  IconHistory,
   IconPaperBookPage,
   IconUndo,
 } from "../icons/icons.tsx";
@@ -202,7 +203,7 @@ export function VersionBand({
                 className="ver-compare"
                 onClick={onCompare}
               >
-                <IconOpen size={16} />
+                <IconCompare size={16} />
                 {w.v("Compare with now")}
               </Button>
               <WaitingButton
@@ -212,7 +213,8 @@ export function VersionBand({
                 describedBy={wait}
                 onClick={onRestore}
               >
-                <IconUndo size={16} />
+                {/* Versions' own shape: a restore goes back through Versions; Undo this change takes the undo arrow */}
+                <IconHistory size={16} />
                 {w.v("Restore this version")}
               </WaitingButton>
             </>
@@ -226,6 +228,7 @@ export function VersionBand({
               describedBy={wait}
               onClick={onUndo}
             >
+              <IconUndo size={16} />
               {w.v("Undo this change")}
             </WaitingButton>
           )}

@@ -4,6 +4,7 @@
 // `try_again`); billed by use, it has its title and who bills, no bar and no figure. Its own chunk: only a lawyer who
 // opens the card needs it. Not here until the host gives them (H16, H11): the stale line's retry time, the month's
 // figure, what happens at the limit, Manage plan.
+import { IconTryAgain } from "@clauseo/components/icons/icons.tsx";
 import { PlanCard } from "@clauseo/components/clauseo/plan-card.tsx";
 import { lim } from "@clauseo/components/lib/words-limits.ts";
 import { pc } from "@clauseo/components/lib/words-plan-card.ts";
@@ -43,6 +44,7 @@ export function LivePlanCard({ kind }: { kind: AgentKind }) {
               data-testid="plan-try-again"
               onClick={() => store?.refresh(kind, "try_again")}
             >
+              <IconTryAgain size={16} />
               {lim(lang, "Try again")}
             </Button>
           ),

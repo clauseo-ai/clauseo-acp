@@ -3,6 +3,13 @@
 // words-settings.ts, what it says beside its name, whether it shows on this computer now, and its body. A section with
 // no entry is hidden, never greyed: a greyed one would promise a date nobody has.
 import type { ComponentType } from "react";
+import type { IconProps } from "@clauseo/components/icons/icon.tsx";
+import {
+  IconAbout,
+  IconAppearance,
+  IconLanguage,
+  IconPlanLimit,
+} from "@clauseo/components/icons/icons.tsx";
 import type { Display, Lang } from "@clauseo/components/lib/display.ts";
 import { LANGUAGE_NAMES, st, type SettingsKey } from "@clauseo/components/lib/words-settings.ts";
 import type { DisplayStore } from "../room/display-store.ts";
@@ -52,6 +59,8 @@ export type SectionEntry = {
   id: SectionId;
   /** The section's name, on the side and as the pane's head. */
   name: SettingsKey;
+  /** Its icon, before the name on the side. */
+  icon: ComponentType<IconProps>;
   /** Optional: the line under the pane's head. */
   lead?: SettingsKey;
   /** Optional: where the section stands now, under its name on the side; nothing when it gives undefined. */
@@ -66,6 +75,7 @@ export const SECTIONS: readonly SectionEntry[] = [
   {
     id: "usage",
     name: "Plan and usage",
+    icon: IconPlanLimit,
     lead: "What each plan has left, and when it resets.",
     note: (ctx, lang) => usageNote(ctx.limits, lang),
     Body: Usage,
@@ -73,6 +83,7 @@ export const SECTIONS: readonly SectionEntry[] = [
   {
     id: "language",
     name: "Language",
+    icon: IconLanguage,
     lead: "The language of every word on screen. Papers, quotes and case names stay as filed.",
     note: (ctx) => LANGUAGE_NAMES[ctx.display.lang],
     Body: Language,
@@ -80,6 +91,7 @@ export const SECTIONS: readonly SectionEntry[] = [
   {
     id: "appearance",
     name: "Appearance",
+    icon: IconAppearance,
     lead: "How Clauseo looks on this computer.",
     note: (ctx, lang) =>
       st(lang, "{theme}, text size {n}", {
@@ -91,6 +103,7 @@ export const SECTIONS: readonly SectionEntry[] = [
   {
     id: "about",
     name: "About",
+    icon: IconAbout,
     note: (_ctx, lang) => st(lang, "Version {version}", { version: APP_VERSION }),
     Body: About,
   },

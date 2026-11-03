@@ -2,6 +2,7 @@
 // Word document (lock.ts), the error map's line for the code otherwise, and Try again. It rides in Versions' chunk
 // (versions-chunk.ts), which holds Versions' words: stop-rows.tsx loads it from there on the first lock, so the thread's
 // chunk carries none of those words and most notes never load them.
+import { IconTryAgain } from "@clauseo/components/icons/icons.tsx";
 import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
@@ -74,6 +75,7 @@ export function WordLock({
         data-testid={testIds?.retry}
         onClick={onRetry}
       >
+        <IconTryAgain size={16} />
         <span className="deva-nudge">{vt(lang, "Try again")}</span>
       </Button>
     </div>

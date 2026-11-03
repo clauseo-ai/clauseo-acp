@@ -9,6 +9,8 @@ import { TooltipProvider } from "../ui/tooltip.tsx";
 import { DEFAULT_DISPLAY, showDisplay } from "../lib/display.ts";
 import { QuestionLine, Who } from "./answer.tsx";
 import { ChangeNote } from "./change-note.tsx";
+import { IconCompare } from "../icons/icons.tsx";
+import { iconIn } from "../icons/icon-in.tsx";
 import { Composer, type ComposerProps } from "./composer.tsx";
 import { RoomScopeProvider } from "./room-scope-provider.tsx";
 import { Thread } from "./thread.tsx";
@@ -311,4 +313,12 @@ test("Who without a time says the name alone, no comma; with one, the name and t
   );
   const who = [...document.querySelectorAll(".who")].map((n) => txt(n));
   expect(who).toEqual(["You", "Clauseo, 4:31 pm"]);
+});
+
+test("the change note's Compare leads with the compare icon, hidden, not Open's arrow; the word names it", async () => {
+  await mount(<ChangeNote papers={PAPERS} testIds={NOTE_IDS} onCompare={() => {}} />);
+  const compare = [...document.querySelectorAll("button")].find((b) => b.textContent === "Compare");
+  const svg = iconIn(compare, IconCompare, 16);
+  expect(svg?.getAttribute("aria-hidden")).toBe("true");
+  expect(compare?.firstElementChild).toBe(svg);
 });

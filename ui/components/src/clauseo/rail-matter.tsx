@@ -15,7 +15,14 @@ import {
 } from "../ui/menu.tsx";
 import { useLayer } from "../ui/layer-context.ts";
 import { raised } from "../ui/recipes-overlays.ts";
-import { IconMore, IconNotProtected } from "../icons/icons.tsx";
+import {
+  IconLocateFolder,
+  IconMore,
+  IconNotProtected,
+  IconPin,
+  IconRemoveFromList,
+  IconShowInFinder,
+} from "../icons/icons.tsx";
 import { cn } from "../lib/cn.ts";
 import { useDisplay } from "../lib/display.ts";
 import { useWords } from "../lib/words.ts";
@@ -23,7 +30,9 @@ import { revealKey, ui } from "../lib/words-ui.ts";
 import { tbt } from "../lib/words-toolbar.ts";
 import { Say } from "./say.tsx";
 import { ConversationList, type ConversationRowProps } from "./rail-conversations.tsx";
-import { MATTER_MARK, matterStatus, type MatterState } from "./rail-words.ts";
+import { RailMark } from "./rail-mark.tsx";
+import { MATTER_MARK } from "./rail-marks.ts";
+import { matterStatus, type MatterState } from "./rail-words.ts";
 
 export type { MatterState };
 
@@ -114,13 +123,25 @@ function MatterActions({
           {onPin !== undefined && (
             <MenuCheckboxItem
               label={ui(lang, "Pin to the top")}
+              icon={<IconPin size={16} />}
               checked={pinned === true}
               onCheckedChange={(on) => onPin(on)}
             />
           )}
-          {locate !== undefined && <MenuItem label={ui(lang, "Locate folder")} onClick={locate} />}
+          {locate !== undefined && (
+            <MenuItem
+              label={ui(lang, "Locate folder")}
+              icon={<IconLocateFolder size={16} />}
+              onClick={locate}
+            />
+          )}
           {onReveal !== undefined && (
-            <MenuItem label={ui(lang, revealKey(platform))} disabled={moved} onClick={onReveal} />
+            <MenuItem
+              label={ui(lang, revealKey(platform))}
+              icon={<IconShowInFinder size={16} />}
+              disabled={moved}
+              onClick={onReveal}
+            />
           )}
         </MenuGroup>
       )}
@@ -128,6 +149,7 @@ function MatterActions({
       {onRemove !== undefined && (
         <MenuItem
           label={ui(lang, "Remove from the list")}
+          icon={<IconRemoveFromList size={16} />}
           note={ui(lang, "The folder and its papers stay where they are.")}
           onClick={onRemove}
         />
@@ -199,10 +221,7 @@ function RowWords({
             news ? "text-primary font-chip" : "text-muted",
           )}
         >
-          <i
-            aria-hidden="true"
-            className={cn("flex-none size-dot-hint mt-s1-5 rounded-full", MATTER_MARK[state])}
-          />
+          <RailMark mark={MATTER_MARK[state]} className="room-matter-mark" />
           <span className="min-w-0 deva-nudge">
             <Say>{status}</Say>
           </span>
@@ -213,8 +232,8 @@ function RowWords({
 }
 
 /** A matter on the rail: its name, its note beneath, and what it's doing, if anything, beneath that. The current
- * matter stands raised, its name at 520. Words carry every state, each led by the same dot in the same place; colour
- * comes in only where it means the court's thing: yellow for a matter waiting on the lawyer. */
+ * matter stands raised, its name at 520. Words carry every state, each led by its icon in the same place (rail-mark.tsx);
+ * colour comes in only where it means the court's thing: a yellow disc for a matter waiting on the lawyer. */
 export function MatterRow({
   name,
   note,

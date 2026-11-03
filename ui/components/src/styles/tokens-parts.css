@@ -147,7 +147,9 @@
   --size-band: 64px; /* an excerpt card's band, at least */
   --size-icon-chip: 11px; /* icons: in a chip */
   --size-icon-fold: 13px; /* in a fold */
-  --size-icon-line: 14px; /* the room's line, the accept mark, Open */
+  --size-icon-line: 14px; /* the room's line, the accept mark, Open, a rail status's mark, a version's maker */
+  --icon-line-drop: calc(3px * var(--k)); /* a 14 px icon on a 20 px line's middle */
+  --size-icon-file: 24px; /* a paper's file type, on its wall tile */
   --size-icon: 16px; /* buttons and the toolbar */
   --size-icon-card: 18px; /* a card's icon tile */
   --size-tile-icon: 36px; /* a card's icon tile */

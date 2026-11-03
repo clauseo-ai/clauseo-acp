@@ -373,7 +373,8 @@ test("U12's paused rail: the at-limit words muted, never yellow or red; a new vi
   expect(said(A.name)).toContain("Limit reached until Tuesday 9:00 am");
   const line = row()?.querySelector(".text-small");
   expect(line?.classList.contains("text-muted")).toBe(true);
-  expect(line?.querySelector("i")?.className).toContain("bg-muted");
+  // the plan's limit's own icon, in the line's muted tone, with no yellow disc: no choice is asked for
+  expect(line?.querySelector(".room-mark")?.hasAttribute("data-waits")).toBe(false);
   expect(row()?.outerHTML).not.toMatch(/yellow|red|danger|destructive/);
   // past midnight, the next view reads today again: the same reset is now today's, with no day
   vi.setSystemTime(new Date(2026, 10, 3, 0, 30));

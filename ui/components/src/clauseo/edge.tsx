@@ -11,10 +11,11 @@ import { CollapsiblePanel } from "../ui/collapsible.tsx";
 import { Kbd } from "../ui/kbd.tsx";
 import {
   IconAccept,
+  IconCross,
   IconFold,
   IconFolder,
-  IconNewMatter,
   IconNotProtected,
+  IconTick,
   IconWebsite,
 } from "../icons/icons.tsx";
 import { useDisplay } from "../lib/display.ts";
@@ -134,7 +135,7 @@ export function EdgePrompt({
     return (
       <p className="perm-done edge-done" data-state={state.kind}>
         {state.kind === "refused" ? (
-          <IconNewMatter size={14} className="perm-done-icon rotate-45" />
+          <IconCross size={14} className="perm-done-icon" />
         ) : (
           <IconAccept size={14} className="perm-done-icon" />
         )}
@@ -166,6 +167,8 @@ export function EdgePrompt({
       aria-keyshortcuts={keys && kind !== "off" ? "Enter" : undefined}
       onClick={onAllow}
     >
+      {/* the folder and the website take the permission row's tick and cross; switching protection off takes none */}
+      {kind !== "off" && <IconTick size={16} />}
       <span className="deva-nudge">{kind === "off" ? w.v("Switch off") : w.v("Allow")}</span>
       {keys && kind !== "off" && <Kbd className="perm-key">Enter</Kbd>}
     </Button>
@@ -178,6 +181,7 @@ export function EdgePrompt({
       aria-keyshortcuts={keys ? (kind === "off" ? "Enter Escape" : "Escape") : undefined}
       onClick={onRefuse}
     >
+      {kind !== "off" && <IconCross size={16} />}
       <span className="deva-nudge">
         {kind === "off" ? w.v("Keep protection") : w.v("Don't allow")}
       </span>

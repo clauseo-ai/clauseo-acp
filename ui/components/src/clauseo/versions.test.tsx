@@ -18,6 +18,15 @@ import { diffParagraphs, diffRows } from "./versions-diff.ts";
 import { CAL, DATES_REVS, DRAFT_REVS, HISTORY, ROWS, at, nameOf } from "./versions-fixture.ts";
 import { restoreWords, undoWords, waitingLine } from "./versions-lines.ts";
 import { asItStood, whoOf } from "./versions-model.ts";
+import {
+  IconCompare,
+  IconConversation,
+  IconHistory,
+  IconImported,
+  IconUndo,
+  IconYourChange,
+} from "../icons/icons.tsx";
+import { iconIn } from "../icons/icon-in.tsx";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 if (typeof globalThis.matchMedia !== "function") {
@@ -456,4 +465,54 @@ test("where the history lives: on this computer, never in a folder that syncs", 
   expect(words()).toContain("Never in OneDrive, Dropbox or any folder that syncs");
   expect(words()).toContain("~/Library/Application Support/clauseo");
   expect(words()).toContain("This matter's versions take 12 MB.");
+});
+
+test("each version leads with who made it, a 14 px icon in its own column, hidden; the words still say who", async () => {
+  await show(
+    <VersionPanel
+      history={HISTORY}
+      calendar={CAL}
+      name={nameOf}
+      at={last}
+      onPick={() => {}}
+      onClose={() => {}}
+    />,
+  );
+  const entries = [...document.querySelectorAll(".ver-entry")];
+  expect(entries.length).toBeGreaterThan(0);
+  const seen = new Set<string>();
+  for (const e of entries) {
+    const who = e.querySelector(".ver-entry-who")?.textContent ?? "";
+    const mark = e.querySelector(".ver-entry-mark");
+    // the mark is the row's first column, before the time
+    expect(e.firstElementChild).toBe(mark);
+    expect(mark?.getAttribute("aria-hidden")).toBe("true");
+    const Icon = who.startsWith("Clauseo")
+      ? IconConversation
+      : who.startsWith("You")
+        ? IconYourChange
+        : who.startsWith("Imported")
+          ? IconImported
+          : who.startsWith("Restored")
+            ? IconHistory
+            : who.startsWith("Undo")
+              ? IconUndo
+              : null;
+    if (Icon === null) continue;
+    seen.add(Icon.name);
+    expect(iconIn(mark, Icon, 14), who).not.toBeNull();
+  }
+  // the fixture's history holds more than one maker
+  expect(seen.size).toBeGreaterThan(1);
+});
+
+test("in the band, Compare with now takes the compare icon, Restore the history icon and Undo this change the undo arrow", async () => {
+  await show(<VersionBand {...band} look={look("v4")} waiting={null} />);
+  const compare = iconIn(one(".ver-compare"), IconCompare, 16);
+  const restore = iconIn(one(".ver-restore"), IconHistory, 16);
+  const undo = iconIn(one(".ver-undo-change"), IconUndo, 16);
+  for (const svg of [compare, restore, undo]) expect(svg?.getAttribute("aria-hidden")).toBe("true");
+  expect(one(".ver-restore").textContent).toBe("Restore this version");
+  expect(one(".ver-undo-change").textContent).toBe("Undo this change");
+  expect(iconIn(one(".ver-restore"), IconUndo, 16)).toBeNull();
 });

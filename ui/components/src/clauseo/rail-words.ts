@@ -1,4 +1,5 @@
-// What a matter and a conversation on the rail say they're doing, in the language, and the dot that leads each status.
+// What a matter and a conversation on the rail say they're doing, in the language. The mark that leads each status is
+// rail-mark.tsx's.
 import { clock } from "../lib/words.ts";
 import { frame } from "../lib/words-frame.ts";
 import { lim } from "../lib/words-limits.ts";
@@ -78,21 +79,6 @@ export function matterStatus(lang: Lang, state: MatterState, at: string, day = "
       return null;
   }
 }
-
-/** Each matter status's mark: one 8 px dot leading the status line, in one place for every status. Yellow only where
- * the matter waits for the lawyer's hand, as the prepared draft waits; an answer ready in primary, news to open;
- * working and stopped in the muted tone; a folder that moved as an open ring, since nothing is there to fill it. */
-export const MATTER_MARK: Record<Exclude<MatterState, "idle">, string> = {
-  question: "bg-yellow ring-yellow",
-  permission: "bg-yellow ring-yellow",
-  ready: "bg-primary",
-  working: "bg-muted",
-  stopped: "bg-muted",
-  paused: "bg-yellow ring-yellow",
-  pausedSet: "bg-muted",
-  limit: "bg-muted",
-  moved: "room-dot-ring",
-};
 
 /** A conversation's status line's words, in the language. `behind` is the title it waits behind. */
 export function conversationStatus(

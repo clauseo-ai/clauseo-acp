@@ -47,13 +47,32 @@ export function MenuPopup({
 }
 
 /** One action. note: a second line on what it leaves alone. The label alone is matched when a letter is typed. */
+/** A menu row's icon: 16 px before its name, in the muted tone, taking the row's own colour while it's highlighted.
+ * Hidden from assistive technology: the row's name names it. */
+function RowIcon({ children, top }: { children: ReactNode; top: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "flex-none inline-flex text-muted in-data-highlighted:text-current in-data-disabled:text-faint",
+        top && "mt-s0-5",
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
 export function MenuItem({
   label,
+  icon,
   note,
   disabled = false,
   onClick,
 }: {
   label: string;
+  /** Optional: a 16 px icon before the name, such as IconPin. */
+  icon?: ReactNode;
   note?: string;
   disabled?: boolean;
   onClick?: () => void;
@@ -65,6 +84,7 @@ export function MenuItem({
       className={cn(row, note !== undefined && "items-start")}
       {...(onClick === undefined ? {} : { onClick })}
     >
+      {icon !== undefined && <RowIcon top={note !== undefined}>{icon}</RowIcon>}
       <span className="min-w-0">
         <span className="block deva-nudge">
           <Mixed>{label}</Mixed>
@@ -83,11 +103,14 @@ export function MenuItem({
  * menu stays open so the change can be seen. */
 export function MenuCheckboxItem({
   label,
+  icon,
   checked,
   onCheckedChange,
   disabled = false,
 }: {
   label: string;
+  /** Optional: a 16 px icon before the name, as MenuItem's. */
+  icon?: ReactNode;
   checked: boolean;
   onCheckedChange: (checked: boolean) => void;
   disabled?: boolean;
@@ -101,7 +124,8 @@ export function MenuCheckboxItem({
       disabled={disabled}
       className={cn(row, "justify-between")}
     >
-      <span className="deva-nudge">
+      {icon !== undefined && <RowIcon top={false}>{icon}</RowIcon>}
+      <span className={cn("deva-nudge", icon !== undefined && "flex-1")}>
         <Mixed>{label}</Mixed>
       </span>
       <BaseMenu.CheckboxItemIndicator className="flex-none text-primary in-data-disabled:text-faint">

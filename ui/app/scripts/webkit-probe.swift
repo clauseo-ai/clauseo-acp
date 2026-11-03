@@ -86,9 +86,12 @@ let measured = """
     var faces = rows[top], css = getComputedStyle(faces[0]);
     var pad = parseFloat(css.paddingTop) + parseFloat(css.paddingBottom);
     var tallest = Math.max.apply(null, faces.map(function (f) { return f.querySelector('.tile-title').getBoundingClientRect().height; }));
+    // a file type's glyph on the tile's top line, above the title (wall.css, .tile-glyph)
+    var glyph = faces[0].querySelector('.tile-glyph');
+    var above = glyph ? glyph.getBoundingClientRect().height + parseFloat(getComputedStyle(glyph).marginBottom) : 0;
     var height = faces[0].getBoundingClientRect().height;
-    if (Math.abs(height - (tallest + pad)) > 4)
-      errs.push('layout: a row of tiles is ' + height.toFixed(1) + ' px, its title and padding ' + (tallest + pad).toFixed(1));
+    if (Math.abs(height - (tallest + pad + above)) > 4)
+      errs.push('layout: a row of tiles is ' + height.toFixed(1) + ' px, its glyph, title and padding ' + (tallest + pad + above).toFixed(1));
   });
   return errs;
 })()
@@ -161,10 +164,10 @@ let railMeasured = "(function () { var errs = " + measured + ", rail = document.
   " var line = document.querySelector('[role=\"dialog\"] [data-testid=\"matter-existing\"]');" +
   " if (line && line.parentElement && line.parentElement.getBoundingClientRect().height > 60)" +
   " errs.push('layout: the folder line is ' + line.parentElement.getBoundingClientRect().height.toFixed(0) + ' px tall');" +
-  // the moved folder's ring (matters.css loaded)
-  " var ring = rail && rail.querySelector('[data-state=\"moved\"] .room-dot-ring');" +
-  " if (rail && rail.querySelector('[data-state=\"moved\"]') && !(ring && /inset/.test(getComputedStyle(ring).boxShadow)))" +
-  " errs.push('layout: the moved row has no ring');" +
+  // the moved folder's mark, its icon at 14 px (matters.css loaded)
+  " var mark = rail && rail.querySelector('[data-state=\"moved\"] .room-mark');" +
+  " if (rail && rail.querySelector('[data-state=\"moved\"]') && !(mark && mark.querySelector('svg') && Math.round(mark.getBoundingClientRect().width) === 14))" +
+  " errs.push('layout: the moved row has no 14 px mark');" +
   " return errs; })()"
 let railRendered = { (theme: String, lang: String) in
   "document.querySelector('#root main.room-centre') !== null" +

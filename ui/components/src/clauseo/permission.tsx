@@ -7,7 +7,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef } from "react";
 import { Button } from "../ui/button.tsx";
 import { Kbd } from "../ui/kbd.tsx";
 import { useDisplay } from "../lib/display.ts";
-import { IconAccept, IconNewMatter, IconPaperBookPage } from "../icons/icons.tsx";
+import { IconAccept, IconCross, IconPaperBookPage, IconTick } from "../icons/icons.tsx";
 import { useThreadWords } from "../lib/words-thread.ts";
 import { useUiWords } from "../lib/words-ui.ts";
 import {
@@ -167,7 +167,7 @@ export function PermissionPrompt({
         {/* one quiet grammar in concrete: the accept glyph where it was allowed, a plain cross where it wasn't. Green
             means checked or supports, so it stays out */}
         {state === "gone" ? null : refused ? (
-          <IconNewMatter size={14} className="perm-done-icon rotate-45" />
+          <IconCross size={14} className="perm-done-icon" />
         ) : (
           <IconAccept size={14} className="perm-done-icon" />
         )}
@@ -241,6 +241,8 @@ export function PermissionPrompt({
               aria-disabled={busy || confirming ? true : undefined}
               onClick={() => answer(a)}
             >
+              {/* a tick on the two that allow, a cross on the two that refuse; the words name the answer */}
+              {a === "once" || a === "always" ? <IconTick size={16} /> : <IconCross size={16} />}
               <span className="deva-nudge">{w.th(LABEL[a])}</span>
               {withKey && <Kbd className="perm-key">{cap(a)}</Kbd>}
             </Button>

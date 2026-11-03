@@ -2,6 +2,8 @@
 // Settings, Plan and usage over FakeTransport (U12): each agent's plan, windows and "Updated at", in every state the
 // room shows (stale, loading, none with Try again, pay as you go, a window whose reset passed, missing_scope and
 // live_only with no entry); shown sent once on opening, try_again from the button, and nothing left on a timer.
+import { IconTryAgain } from "@clauseo/components/icons/icons.tsx";
+import { iconIn } from "@clauseo/components/icons/icon-in.tsx";
 import axe from "axe-core";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -198,6 +200,10 @@ test("none: the message, and Try again sends try_again", async () => {
   expect(card("claude")?.textContent).toContain(
     "Your Claude plan didn't send its limits this time. Asking still works as usual.",
   );
+  // the retry's icon leads its word, hidden; the word names the button
+  const tryAgain = group("claude")?.querySelector<HTMLElement>('[data-testid="plan-try-again"]');
+  expect(iconIn(tryAgain, IconTryAgain, 16)?.getAttribute("aria-hidden")).toBe("true");
+  expect(tryAgain?.textContent).toBe("Try again");
   await act(async () =>
     group("claude")?.querySelector<HTMLElement>('[data-testid="plan-try-again"]')?.click(),
   );

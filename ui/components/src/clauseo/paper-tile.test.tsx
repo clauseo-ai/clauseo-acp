@@ -5,6 +5,8 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, test } from "vitest";
 import { PaperTile, type PaperTileProps } from "./paper-tile.tsx";
+import { IconFilePdf } from "../icons/icons.tsx";
+import { iconIn } from "../icons/icon-in.tsx";
 import { RoomScopeProvider } from "./room-scope-provider.tsx";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -47,4 +49,24 @@ test("a tile with a numeral and a role keeps its page and its chip", async () =>
   const face = host?.querySelector(".tile-face");
   expect(face?.querySelector(".tile-no")?.textContent).toContain("1");
   expect(face?.querySelector(".tile-foot")).not.toBeNull();
+});
+
+test("given its file type's glyph, a tile shows it at 24 px on its top line, before the title, hidden", async () => {
+  await mount({
+    id: "f1",
+    state: "uncited",
+    title: "Notice to the bank.pdf",
+    fileIcon: IconFilePdf,
+  });
+  const face = host?.querySelector(".tile-face");
+  const svg = iconIn(face, IconFilePdf, 24, "tile-glyph");
+  expect(svg?.getAttribute("aria-hidden")).toBe("true");
+  expect(svg?.nextElementSibling?.classList.contains("tile-title")).toBe(true);
+  // the name still names the tile
+  expect(face?.textContent).toBe("Notice to the bank.pdf");
+});
+
+test("without a glyph a tile shows none, as the numbered tiles do", async () => {
+  await mount({ id: "f1", state: "uncited", title: "Notice to the bank.pdf" });
+  expect(host?.querySelector(".tile-face svg")).toBeNull();
 });

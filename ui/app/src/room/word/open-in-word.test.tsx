@@ -4,6 +4,8 @@
 // a change note naming it while the changes stand; never for a .pdf, a .txt or a paper the wall doesn't list. A second
 // press while an open is on its way sends nothing. A declined open is quiet; a failed one says why under the note, and
 // only in the console for a tile.
+import { IconFileGeneric, IconFilePdf, IconFileWord } from "@clauseo/components/icons/icons.tsx";
+import { iconIn } from "@clauseo/components/icons/icon-in.tsx";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -86,6 +88,18 @@ test("a .doc and a .docx tile open in Word, by their file refs; a .pdf and a .tx
   await h.click(faceOf("brief.txt"));
   await h.settle();
   expect(opened()).toEqual([uuid(1, 8), uuid(2, 8)]);
+});
+
+test("every tile carries its file type's glyph by extension, at 24 px, and the Word tiles still open in Word", async () => {
+  h = await withPapers();
+  const glyph = (name: string) => faceOf(name)?.querySelector(".tile-glyph");
+  expect(iconIn(faceOf("Reply.docx"), IconFileWord, 24, "tile-glyph")).not.toBeNull();
+  expect(iconIn(faceOf("Old notice.DOC"), IconFileWord, 24, "tile-glyph")).not.toBeNull();
+  expect(iconIn(faceOf("Exhibit.pdf"), IconFilePdf, 24, "tile-glyph")).not.toBeNull();
+  expect(iconIn(faceOf("brief.txt"), IconFileGeneric, 24, "tile-glyph")).not.toBeNull();
+  for (const name of ["Reply.docx", "Exhibit.pdf"])
+    expect(glyph(name)?.getAttribute("aria-hidden")).toBe("true");
+  expect(h.all("open-in-word").map((b) => b.textContent)).toEqual(["Reply.docx", "Old notice.DOC"]);
 });
 
 test("a Word tile says it opens in Word to screen readers, and keeps its hint out of the title", async () => {
