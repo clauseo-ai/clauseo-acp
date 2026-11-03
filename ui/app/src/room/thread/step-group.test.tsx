@@ -174,7 +174,7 @@ test("a failure stays visible on the folded line", async () => {
   const g = groups()[0]!;
   expect(g.dataset["trouble"]).toBe("true");
   expect(h.one("step-group-trouble")?.textContent).toBe("1 of them failed.");
-  expect(g.textContent).toBe("1 paper read. Looked online once. 1 of them failed.");
+  expect(g.textContent).toBe("1 paper read. 1 of them failed.");
 });
 
 test("a permission prompt and a question for the lawyer never fold: each stands between the groups", async () => {
