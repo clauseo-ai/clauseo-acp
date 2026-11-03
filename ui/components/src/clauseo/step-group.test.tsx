@@ -92,7 +92,7 @@ test("the line is a button that opens its rows in place and folds them, with ari
         id="tool_call:1"
         kinds={["read", "search"]}
         line="2 papers read. Searched once."
-        trouble="1 of them failed."
+        trouble="1 failed."
       >
         <StepRow
           id="tool_call:1"
@@ -115,7 +115,7 @@ test("the line is a button that opens its rows in place and folds them, with ari
   expect(line.querySelectorAll(".step-group-icons svg")).toHaveLength(2);
   expect(line.querySelector(".step-group-words")?.parentElement).toBe(line);
   expect(line.querySelector(".step-group-chev svg")).not.toBeNull();
-  expect(line.textContent).toBe("2 papers read. Searched once. 1 of them failed.");
+  expect(line.textContent).toBe("2 papers read. Searched once. 1 failed.");
   expect(host.querySelector('[data-testid="step-group"]')?.getAttribute("data-trouble")).toBe(
     "true",
   );

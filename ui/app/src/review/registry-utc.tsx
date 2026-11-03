@@ -200,21 +200,23 @@ export const UTC: Entry[] = [
     call("move", "completed", ANNEXURE),
   ]),
   // what failed or was stopped, kept on the folded line
-  // UTC-38 and UTC-41 ("It failed.", "It was stopped.") are gone: a group of one that failed says what it tried, once
-  folded("UTC-39", "1 of them failed.", [
+  // UTC-38 and UTC-41 ("It failed.", "It was stopped.") are gone: a group of one that failed says what it tried, once.
+  // UTC-39, -40, -42 and -43 ("1 of them failed." …) are gone too: the summary counts only what finished, so "of
+  // them" pointed at nothing it named; the failed and stopped are counted on their own, UTC-84..87
+  folded("UTC-84", "1 failed.", [
     call("read", "completed", COMPLAINT),
     call("fetch", "failed", SITE),
   ]),
-  folded("UTC-40", "{n} of them failed.", [
+  folded("UTC-85", "{n} failed.", [
     call("read", "completed", COMPLAINT),
     call("fetch", "failed", SITE),
     call("fetch", "failed", LIVELAW),
   ]),
-  folded("UTC-42", "1 of them was stopped.", [
+  folded("UTC-86", "1 stopped.", [
     call("read", "completed", COMPLAINT),
     call("read", "cancelled", FORM),
   ]),
-  folded("UTC-43", "{n} of them were stopped.", [
+  folded("UTC-87", "{n} stopped.", [
     call("read", "completed", COMPLAINT),
     call("read", "cancelled", FORM),
     call("read", "cancelled", MANDATE),

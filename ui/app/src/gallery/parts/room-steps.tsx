@@ -149,7 +149,7 @@ function Failed() {
       id="tool_call:1"
       kinds={["read", "search"]}
       line={`${steps(lang, "1 paper read.")} ${steps(lang, "Searched once.")}`}
-      trouble={steps(lang, "1 of them failed.")}
+      trouble={steps(lang, "1 failed.")}
       defaultOpen
     >
       <Rows failed />

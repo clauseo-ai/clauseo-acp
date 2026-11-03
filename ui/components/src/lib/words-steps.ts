@@ -72,13 +72,15 @@ const HI = {
   // past the three kinds done most
   "And 1 more.": "और 1 काम।",
   "And {n} more.": "और {n} काम।",
-  // what failed or was stopped stays on the folded line, one of many (a group of one says what it tried, once)
-  "1 of them failed.": "उनमें से 1 विफल रहा।",
-  "{n} of them failed.": "उनमें से {n} विफल रहे।",
-  "1 of them was stopped.": "उनमें से 1 रोका गया।",
-  "{n} of them were stopped.": "उनमें से {n} रोके गए।",
+  // what failed or was stopped stays on the folded line, counted on its own after the steps that finished, never as
+  // "of them" (the summary counts only what finished, so "of them" would point at nothing it named); a group with
+  // nothing finished says what it tried, once
+  "1 failed.": "1 विफल रहा।",
+  "{n} failed.": "{n} विफल रहे।",
+  "1 stopped.": "1 रोका गया।",
+  "{n} stopped.": "{n} रोके गए।",
   // a step a steer moved to the background stays told on the folded line (its row says "In the background", U7's).
-  // Hindi in the cut of the failed and stopped lines above, and in U7's own words for it ("वह काम पृष्ठभूमि में चलता रहा")
+  // Hindi in the cut the failed and stopped lines had, and in U7's own words for it ("वह काम पृष्ठभूमि में चलता रहा")
   "It went on in the background.": "यह पृष्ठभूमि में चलता रहा।",
   "1 of them went on in the background.": "उनमें से 1 पृष्ठभूमि में चलता रहा।",
   "{n} of them went on in the background.": "उनमें से {n} पृष्ठभूमि में चलते रहे।",

@@ -38,7 +38,7 @@ test("ten tool calls fold into one step group, which opens to their rows and las
   await expectTurnEnded(w, "end_turn");
   // folded: one line, the failure kept on it, and no rows until it is opened
   await expect(w.stepGroupLines).toHaveCount(1);
-  await expect(w.stepGroupLines).toContainText("1 of them failed.");
+  await expect(w.stepGroupLines).toContainText("1 failed.");
   await expect(w.toolCalls).toHaveCount(0);
   await w.stepGroupLines.click();
   await expect(w.stepGroupLines).toHaveAttribute("aria-expanded", "true");
