@@ -8,13 +8,17 @@ use super::http::{self, Request, Response, Shared};
 
 const HOME_PAGE: &str = "<!doctype html><title>Clauseo smoke</title><h1>Clauseo smoke</h1>";
 
-/// Gathers ICE candidates with a public STUN server for at most 5 s, then posts them.
-/// `PORT_A` and `PORT_B` are replaced with the page and pixel servers' ports.
+/// Gathers ICE candidates with a public STUN server for at most 5 s, then posts a report:
+/// `{candidates, gathering, sdpHasApplication}`, where `gathering` is `pc.iceGatheringState` at
+/// report time and `sdpHasApplication` says whether the local SDP has an `m=application` line.
+/// Before the report it fetches `/pixel2` from loopback with `no-cors`, a script-initiated
+/// request the proxy must see. `PORT_A` and `PORT_B` are replaced with the page and pixel
+/// servers' ports.
 const WEBRTC_PAGE: &str = r"<!doctype html><title>Clauseo smoke WebRTC</title>
 <img src='http://127.0.0.1:PORT_B/pixel'>
 <script>
-const report = (list) => fetch('http://smoke.test:PORT_A/report',
-  {method: 'POST', body: JSON.stringify(list)});
+const report = (body) => fetch('http://smoke.test:PORT_A/report',
+  {method: 'POST', body: JSON.stringify(body)});
 (async () => {
   const candidates = [];
   const pc = new RTCPeerConnection({iceServers: [{urls: 'stun:stun.l.google.com:19302'}]});
@@ -26,11 +30,15 @@ setTimeout(resolve, 5000);
   });
   await pc.setLocalDescription(await pc.createOffer());
   await done;
-  for (const line of (pc.localDescription.sdp || '').split(/\r?\n/)) {
+  const sdp = pc.localDescription.sdp || '';
+  const lines = sdp.split(/\r?\n/);
+  for (const line of lines) {
 if (line.startsWith('a=candidate:')) candidates.push(line.slice(2));
   }
-  await report(candidates);
-})().catch((e) => report(['error: ' + e]));
+  await fetch('http://127.0.0.1:PORT_B/pixel2', {mode: 'no-cors'}).catch(() => {});
+  await report({candidates: candidates, gathering: pc.iceGatheringState,
+sdpHasApplication: lines.some((line) => line.startsWith('m=application'))});
+})().catch((e) => report({candidates: ['error: ' + e], gathering: 'error', sdpHasApplication: false}));
 </script>";
 
 /// A 1x1 transparent GIF.
@@ -43,8 +51,9 @@ pub(crate) struct World {
     pub(crate) port_b: u16,
     pub(crate) log: Shared<Vec<String>>,
     pub(crate) report: Shared<Option<String>>,
-    /// One entry per pixel request: whether it came through the proxy.
-    pub(crate) pixel: Shared<Vec<bool>>,
+    /// One entry per pixel request: its path (`/pixel` or `/pixel2`) and whether it came
+    /// through the proxy.
+    pub(crate) pixel: Shared<Vec<(String, bool)>>,
 }
 
 fn bind() -> (TcpListener, u16) {
@@ -88,11 +97,14 @@ impl World {
         });
         let pixel = Arc::clone(&world.pixel);
         http::serve(listener_b, move |request: &Request| {
-            if request.target != "/pixel" {
+            if request.target != "/pixel" && request.target != "/pixel2" {
                 return Response::not_found();
             }
             let via_proxy = request.header("x-smoke-proxy") == Some("1");
-            pixel.lock().expect("pixel").push(via_proxy);
+            pixel
+                .lock()
+                .expect("pixel")
+                .push((request.target.clone(), via_proxy));
             Response::ok("image/gif", PIXEL)
         });
         http::proxy(listener_p, port_a, Arc::clone(&world.log));
