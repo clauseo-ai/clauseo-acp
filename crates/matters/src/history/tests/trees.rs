@@ -79,27 +79,45 @@ fn random_tree(state: &mut u64) -> Vec<TreeFile> {
     files
 }
 
+/// The trees [`changed_files_are_the_files_the_trees_do_not_share`] writes once and diffs in
+/// every pair: 300 pairs from 25 trees.
+const POOL: usize = 25;
+
+/// The most object files that test may write. A new loose object on Windows NTFS is a temp file
+/// created, written, closed (and scanned) and renamed: about 10 ms on the CI runner, and several
+/// times that while its disk stalls (issue #83). Writing two fresh trees per pair, 914 files,
+/// took 9.1 s there and timed out at 30 s in a stall; the pool writes 67.
+const MAX_OBJECT_FILES: usize = 120;
+
 #[test]
 fn changed_files_are_the_files_the_trees_do_not_share() {
     let dir = TestDir::new("history-tree-changed");
-    let (_git_dir, mut store) = new_store(&dir);
+    let (git_dir, mut store) = new_store(&dir);
     let mut state = 0x9e37_79b9_7f4a_7c15_u64;
-    for _ in 0..300 {
-        let (a, b) = (random_tree(&mut state), random_tree(&mut state));
-        let (a_id, b_id) = (store.write_tree(&a).unwrap(), store.write_tree(&b).unwrap());
-        let only = |x: &[TreeFile], y: &[TreeFile]| -> Vec<TreeFile> {
-            x.iter().filter(|file| !y.contains(file)).cloned().collect()
-        };
-        let (old, new) = store.changed_files(a_id, b_id).unwrap();
+    let trees: Vec<(Vec<TreeFile>, Oid)> = (0..POOL)
+        .map(|_| {
+            let files = random_tree(&mut state);
+            let id = store.write_tree(&files).unwrap();
+            (files, id)
+        })
+        .collect();
+    let written = files_under(&git_dir.join("objects")).len();
+    assert!(
+        written <= MAX_OBJECT_FILES,
+        "{written} object files, over {MAX_OBJECT_FILES}: too slow on Windows"
+    );
+    let only = |x: &[TreeFile], y: &[TreeFile]| -> Vec<TreeFile> {
+        x.iter().filter(|file| !y.contains(file)).cloned().collect()
+    };
+    for (i, (a, a_id)) in trees.iter().enumerate() {
         assert_eq!(
-            (&old, &new),
-            (&only(&a, &b), &only(&b, &a)),
-            "{a:?} -> {b:?}"
-        );
-        assert_eq!(
-            store.changed_files(a_id, a_id).unwrap(),
+            store.changed_files(*a_id, *a_id).unwrap(),
             (Vec::new(), Vec::new())
         );
+        for (b, b_id) in trees.iter().skip(i + 1) {
+            let (old, new) = store.changed_files(*a_id, *b_id).unwrap();
+            assert_eq!((&old, &new), (&only(a, b), &only(b, a)), "{a:?} -> {b:?}");
+        }
     }
 }
 
