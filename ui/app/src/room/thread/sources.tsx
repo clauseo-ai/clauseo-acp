@@ -6,6 +6,7 @@
 // and an address wraps anywhere rather than being cut.
 import { use, useState, type MouseEvent, type ReactNode } from "react";
 import { IconFold, IconToolFetch, IconToolSearch } from "@clauseo/components/icons/icons.tsx";
+import { langOfText } from "@clauseo/components/lib/script.ts";
 import { useSourcesWords, type SourcesKey } from "@clauseo/components/lib/words-sources.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type { AgentId, StreamId, ToolCallId, WebResult } from "../../transport/protocol.ts";
@@ -19,16 +20,6 @@ import {
   useToolCallWeb,
   type ToolCallWeb,
 } from "./sources.ts";
-
-const DEVANAGARI = /\p{Script=Devanagari}/gu;
-const LETTER = /\p{L}/gu;
-
-/** "hi" when most of the text's letters are Devanagari. Private until #287's langOfText lands, which it gives way to. */
-function langOfText(text: string): "hi" | undefined {
-  const letters = text.match(LETTER)?.length ?? 0;
-  const hindi = text.match(DEVANAGARI)?.length ?? 0;
-  return letters > 0 && hindi * 2 > letters ? "hi" : undefined;
-}
 
 /** The site an address is on, without its "www."; null for an address that doesn't parse. */
 function siteOf(url: string): string | null {
