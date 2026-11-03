@@ -67,13 +67,23 @@ function leadOf(state: WorkingState): "pen" | "break" | "question" | "wait" {
   return state.kind === "wait" && state.code !== undefined ? "break" : "wait";
 }
 
-/** The row's lead icon, by leadOf. */
+/** The row's lead, by leadOf, in one fixed slot whatever it is (the pen's box: 20 px by 110/36 of it, scaled with the
+ * text size but not with the language's line), so the words start at the same place when the lead changes. */
 function Lead({ state }: { state: WorkingState }) {
   const lead = leadOf(state);
-  if (lead === "pen") return <PenMark className="working-icon working-pen" />;
-  if (lead === "break") return <IconBreak size={16} className="working-icon" />;
-  if (lead === "question") return <IconQuestion size={16} className="working-icon" />;
-  return <IconChecking size={16} className="working-icon" />;
+  return (
+    <span className="working-lead" data-lead={lead}>
+      {lead === "pen" ? (
+        <PenMark className="working-icon working-pen" />
+      ) : lead === "break" ? (
+        <IconBreak size={16} className="working-icon" />
+      ) : lead === "question" ? (
+        <IconQuestion size={16} className="working-icon" />
+      ) : (
+        <IconChecking size={16} className="working-icon" />
+      )}
+    </span>
+  );
 }
 
 type Parts = { words: string; pill: string | null; actions: ReactNode; details: string | null };
