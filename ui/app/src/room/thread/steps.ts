@@ -107,6 +107,13 @@ export function kindsOf(calls: readonly ToolCallEntry[]): { kind: StepKind; n: n
   return [...by].map(([kind, n]) => ({ kind, n })).sort((a, b) => b.n - a.n);
 }
 
+/** The folded line's icons, by kindsOf: other draws switch_mode's own glyph when every step it counts switched the
+ * mode (the words still count it as other). */
+export function iconsOf(calls: readonly ToolCallEntry[]): string[] {
+  const modes = calls.every((c) => stepKindOf(c.kind) !== "other" || c.kind === "switch_mode");
+  return kindsOf(calls).map((k) => (k.kind === "other" && modes ? "switch_mode" : k.kind));
+}
+
 /** The most kinds the folded line names; the rest are "And 3 more.". */
 const NAMED = 3;
 
@@ -223,7 +230,7 @@ export function markOf(lang: Lang, call: ToolCallEntry): string | null {
 export function lineOf(lang: Lang, entries: readonly (ViewEntry | undefined)[], live: boolean) {
   const calls: ToolCallEntry[] = [];
   for (const e of entries) if (e?.tool_call !== undefined) calls.push(e.tool_call);
-  const kinds = kindsOf(calls).map((k) => k.kind as string);
+  const kinds = iconsOf(calls);
   const trouble = troubleOf(lang, calls);
   const aside = backgroundLine(lang, calls);
   if (!live) return { kinds, line: summaryOf(lang, calls), more: aside, trouble };

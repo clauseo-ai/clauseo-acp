@@ -8,6 +8,8 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import axe from "axe-core";
+import { ToolKindIcon } from "@clauseo/components/clauseo/tool-kind-icons.tsx";
+import { renderToStaticMarkup } from "react-dom/server";
 import { frame } from "@clauseo/components/lib/words-frame.ts";
 import { afterEach, beforeAll, expect, test } from "vitest";
 import {
@@ -98,6 +100,31 @@ test("everything between two of the agent's texts folds into one group: one line
   const line = lineOf(first)!;
   expect(line.getAttribute("type")).toBe("button");
   expect(line.getAttribute("aria-expanded")).toBe("false");
+});
+
+test("a mode switch on the folded line draws its own glyph, not other's, though its words count it with the rest", async () => {
+  h = await mountRoom();
+  h.deliver([
+    reset([
+      ASKED,
+      call(7, 201, "switch_mode"),
+      agentText(8, 1, "Planning first."),
+      read(9, 202, "papers/Lease deed.pdf"),
+      call(10, 203, "switch_mode"),
+    ]),
+  ]);
+  const glyph = (k: string) =>
+    renderToStaticMarkup(<ToolKindIcon kind={k} size={14} className="step-icon" />);
+  expect(glyph("switch_mode")).not.toBe(glyph("other"));
+  const [alone, mixed] = groups();
+  expect(alone?.textContent).toBe("Did 1 other thing.");
+  expect([...alone!.querySelectorAll(".step-group-icons svg")].map((e) => e.outerHTML)).toEqual([
+    glyph("switch_mode"),
+  ]);
+  expect([...mixed!.querySelectorAll(".step-group-icons svg")].map((e) => e.outerHTML)).toEqual([
+    glyph("read"),
+    glyph("switch_mode"),
+  ]);
 });
 
 test("opened in place: its rows, each with its icon, the paper by its file name and its folder on hover", async () => {

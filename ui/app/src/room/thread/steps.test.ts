@@ -11,7 +11,9 @@ import { doingOf, doingPick, placeOf, splitPath, titleOf } from "./step-names.ts
 import {
   doneOf,
   doneSoFar,
+  iconsOf,
   kindsOf,
+  lineOf,
   markOf,
   segmentsOf,
   summaryOf,
@@ -102,6 +104,12 @@ describe("the folded line", () => {
       "2 papers read. Searched once. 1 paper changed. And 2 more.",
     );
     expect(kindsOf(calls).map((k) => k.kind)).toEqual(["read", "search", "edit", "fetch", "move"]);
+    // switch_mode is counted as other but draws its own glyph, unless another kind shares other's count
+    expect(iconsOf([call("read"), call("switch_mode")])).toEqual(["read", "switch_mode"]);
+    expect(iconsOf([call("switch_mode"), call("unknown")])).toEqual(["other"]);
+    expect(lineOf("en", [{ tool_call: call("switch_mode") }], false).kinds).toEqual([
+      "switch_mode",
+    ]);
   });
 
   test("a failure stays on the line: a group of one, or one of many; a stop too", () => {
