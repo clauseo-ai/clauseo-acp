@@ -363,3 +363,24 @@ test("FakeTransport plays a new listener the envelopes delivered before it", () 
   transport.deliver(eventsOf([visited(3, "https://example.com/c")]));
   expect(heard).toEqual([[first], [second]]);
 });
+
+test("under the folded step chip, the sources line comes after the answer's words and repeats none of the chip's words", async () => {
+  await answered([
+    searched(1, "notice period rent control", [
+      { title: "Rent Control Act, s. 14", url: "https://example.org/act" },
+    ]),
+    visited(2, "https://example.com/a"),
+  ]);
+  const chip = h!.one("step-group")!;
+  const said = h!.one("message-agent")!;
+  const list = h!.one("web-sources")!;
+  // the chip, then the answer's words, then the sources line, all in the answer's section
+  expect(chip.compareDocumentPosition(said) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(said.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(list.closest("section")).toBe(chip.closest("section"));
+  // the chip counts the lookups ("Looked online 2 times."), the line the distinct pages: neither says the other's
+  const chipWords = words(chip.querySelector(".step-group-words"));
+  expect(chipWords).toMatch(/online/);
+  expect(chipWords).not.toMatch(/source/);
+  expect(words(toggle())).toBe("2 sources");
+});
