@@ -235,4 +235,11 @@ export const ICON_NAMES = [
     source: "fileGeneric",
     meaning: "Any other file: the page alone",
   },
+  {
+    component: "IconBrowser",
+    source: "appWindow",
+    meaning: "Browser: Clauseo's own browser, on this computer",
+  },
+  { component: "IconDownload", source: "download", meaning: "Download Chrome" },
+  { component: "IconInfo", source: "info", meaning: "More about it: an info tip" },
 ] as const;

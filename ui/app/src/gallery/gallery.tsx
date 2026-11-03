@@ -5,7 +5,10 @@ import {
   type Display,
 } from "@clauseo/components/lib/display.ts";
 import { useGalleryWords } from "./words.ts";
+import { SiteTile } from "@clauseo/components/clauseo/site-tile.tsx";
 import * as icons from "@clauseo/components/icons/icons.tsx";
+import { ToolGlyph } from "@clauseo/components/icons/tool-glyph.tsx";
+import { InfoTip } from "@clauseo/components/ui/info-tip.tsx";
 import { LayerProvider } from "@clauseo/components/ui/layer.tsx";
 import { SegmentedSwitch } from "@clauseo/components/ui/segmented.tsx";
 import { Select } from "@clauseo/components/ui/select.tsx";
@@ -13,7 +16,7 @@ import { Switch } from "@clauseo/components/ui/switch.tsx";
 import { ToastProvider } from "@clauseo/components/ui/toast.tsx";
 import type { ReactNode } from "react";
 import { Choices, Fields, Folds, Measures, Pressables, Settings } from "./controls.tsx";
-import { Section } from "./layout.tsx";
+import { Section, State } from "./layout.tsx";
 import { LANGS, PLATFORMS, SIZES, THEMES } from "./options.ts";
 import { Overlays } from "./overlays.tsx";
 
@@ -33,6 +36,7 @@ export function Gallery() {
             <Folds />
             <Overlays />
             <Icons />
+            <WebTools />
           </main>
         </div>
       </LayerProvider>
@@ -122,6 +126,69 @@ function Icons() {
           );
         })}
       </div>
+    </Section>
+  );
+}
+
+const NEW_GLYPHS = [
+  ["Browser", icons.IconBrowser],
+  ["Download", icons.IconDownload],
+  ["Info", icons.IconInfo],
+] as const;
+
+const SITES = [
+  "https://www.indiankanoon.org/doc/1/",
+  "https://main.sci.gov.in/judgments",
+  "https://भारत.सरकार/",
+  "about:blank",
+];
+
+/** The web tools' kit: the new glyphs, a tool's three states on its glyph, a website's tile and an info tip. */
+function WebTools() {
+  return (
+    <Section title="Web tools">
+      <State name="New glyphs, 20 / 16 / 14">
+        <div className="flex items-center gap-s4 text-primary">
+          {NEW_GLYPHS.map(([name, Glyph]) => (
+            <span key={name} className="flex items-center gap-s1-5">
+              <Glyph size={20} />
+              <Glyph size={16} />
+              <Glyph size={14} />
+              <span lang="en" className="font-en text-small text-muted">
+                {name}
+              </span>
+            </span>
+          ))}
+        </div>
+      </State>
+      {([16, 14] as const).map((size) => (
+        <State key={size} name={`Tool glyph at ${size}: on, off, locked`}>
+          <div className="grid grid-cols-3 gap-x-s4 gap-y-s2 text-primary">
+            {(["web", "browser"] as const).map((glyph) =>
+              (["on", "off", "locked"] as const).map((state) => (
+                <ToolGlyph key={glyph + state} glyph={glyph} state={state} size={size} />
+              )),
+            )}
+          </div>
+        </State>
+      ))}
+      {([14, 11] as const).map((size) => (
+        <State key={size} name={`Site tile at ${size}`}>
+          <div className="flex items-center gap-s2">
+            {SITES.map((url) => (
+              <SiteTile key={url} url={url} size={size} />
+            ))}
+          </div>
+        </State>
+      ))}
+      <State name="Info tip">
+        <span lang="en" className="flex items-center gap-s1-5 font-en text-small text-primary">
+          Brave Search
+          <InfoTip label="More about Brave Search">
+            Anthropic lists Brave Search as its web search subprocessor.
+          </InfoTip>
+        </span>
+      </State>
     </Section>
   );
 }
