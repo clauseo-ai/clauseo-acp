@@ -61,7 +61,6 @@ impl Current {
             cancelled: false,
             limit: None,
             tool_paths: crate::sent::TurnPaths::default(),
-            browser_opens: crate::sources::browser::Opens::default(),
             checkpoint_before: None,
             prompt_call: None,
             cancel_timer: None,

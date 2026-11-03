@@ -322,7 +322,9 @@ fn the_config_file_is_the_one_the_entry_names() {
     );
 }
 
-/// `browser-late`: an open that completes after its turn ended (`Origin::Late`) writes no page.
+/// `browser-late`: an open started in turn 1 and left running; the lawyer cancels, and its
+/// completion arrives after the cancel (`Origin::Late`): the thread still holds the open, and no
+/// page is written.
 #[test]
 fn a_late_completed_open_writes_nothing() {
     let dir = Dir::new("browser_late", &[(FAKE, Scenario::Local("browser-late"))]);
@@ -330,7 +332,14 @@ fn a_late_completed_open_writes_nothing() {
     let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[], FAKE);
     let mut events = host.events(StreamId::Thread(thread));
     let (first, _) = host.prompt(thread, "Open it.");
-    assert_eq!(events.until_turn_ended(first).stop, StopReason::EndTurn);
+    events.until("the open is logged", |events| {
+        events.count(|event| matches!(event, DomainEvent::ToolCallStarted(s) if s.acp_id.as_str() == "tc-late")) == 1
+    });
+    assert_eq!(
+        host.ok(clauseo_protocol::HostCommand::Cancel { thread }),
+        clauseo_protocol::CommandOutcome::Done
+    );
+    assert_eq!(events.until_turn_ended(first).stop, StopReason::Cancelled);
     let (second, _) = host.prompt(thread, "And then?");
     assert_eq!(events.until_turn_ended(second).stop, StopReason::EndTurn);
     host.settle();
@@ -345,30 +354,60 @@ fn a_late_completed_open_writes_nothing() {
     host.shutdown();
 }
 
-/// `browser-replay-load`: an agent's replay on `session/load` of completed opens
-/// (`Origin::Replay`) writes no page.
+/// Plays one scenario per launch, in order: the replay test's first agent, then its relaunch.
+struct Sequence {
+    inner: clauseo_process::PassthroughLauncher,
+    plays: std::sync::Mutex<Vec<Scenario>>,
+}
+
+impl clauseo_process::Launcher for Sequence {
+    fn launch(
+        &self,
+        spec: &clauseo_process::LaunchSpec,
+    ) -> Result<clauseo_process::Launched, clauseo_process::Error> {
+        let scenario = self.plays.lock().unwrap().remove(0);
+        let spec = clauseo_process::LaunchSpec::new(
+            spec.program().to_path_buf(),
+            vec!["--scenario".into(), scenario.arg().into()],
+            spec.env().clone(),
+            spec.cwd().to_path_buf(),
+        )?;
+        self.inner.launch(&spec)
+    }
+}
+
+/// An open left running when its agent exited, completed in the relaunched agent's replay on
+/// `session/load` (`Origin::Replay`): the thread still holds the open, and no page is written.
 #[test]
-fn a_replayed_open_writes_nothing() {
+fn a_replayed_completion_writes_nothing() {
     let dir = Dir::new(
         "browser_replay",
         &[(FAKE, Scenario::Local("browser-replay-seed"))],
     );
-    let host = dir.start(0);
+    let launcher = Arc::new(Sequence {
+        inner: dir.launcher(),
+        plays: std::sync::Mutex::new(vec![
+            Scenario::Local("browser-replay-seed"),
+            Scenario::Local("browser-replay-load"),
+        ]),
+    });
+    let host = dir.start_launching(0, launcher, |config| config);
     let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[], FAKE);
     let mut events = host.events(StreamId::Thread(thread));
-    let (first, _) = host.prompt(thread, "First.");
+    let (first, _) = host.prompt(thread, "Open it.");
     assert_eq!(events.until_turn_ended(first).stop, StopReason::EndTurn);
-    host.shutdown();
-
-    dir.set_agents(&[(FAKE, Scenario::Local("browser-replay-load"))]);
-    let host = dir.start(1);
-    let mut events = host.events(StreamId::Thread(thread));
-    events.until_caught_up();
-    let (second, _) = host.prompt(thread, "Second.");
+    events.until("the first agent's session ended", |events| {
+        events.count(|event| matches!(event, DomainEvent::AgentSessionDetached(_))) > 0
+    });
+    let (second, _) = host.prompt(thread, "And then?");
     assert_eq!(events.until_turn_ended(second).stop, StopReason::EndTurn);
     host.settle();
     events.drain_ready();
     events.assert_no_mismatch();
+    let opened = events.count(|event| {
+        matches!(event, DomainEvent::ToolCallStarted(s) if s.acp_id.as_str() == "tc-replayed")
+    });
+    assert_eq!(opened, 1, "{}", events.dump());
     assert_eq!(pages(&events), [], "{}", events.dump());
     host.shutdown();
 }
