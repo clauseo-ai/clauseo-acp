@@ -6,4 +6,5 @@ mod connect;
 mod harness;
 mod http;
 mod limits;
+mod private;
 mod upstream;

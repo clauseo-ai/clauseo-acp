@@ -6,6 +6,7 @@ use std::fmt;
 use std::net::IpAddr;
 
 use crate::Error;
+use crate::proxy::address::is_public;
 use crate::proxy::shared_hosts;
 
 /// The longest host name DNS carries, without the trailing dot.
@@ -99,6 +100,16 @@ impl Name {
         false
     }
 
+    /// True when the name can only mean this machine or a private network: an IP literal the
+    /// address check calls non-public, or `localhost` or a name under it (any case, a trailing
+    /// dot dropped, as [`Name::parse`] reads them). No allowlist entry lets one through.
+    pub(crate) fn is_private(&self) -> bool {
+        match self {
+            Name::Ip(ip) => !is_public(*ip),
+            Name::Domain(name) => name == "localhost" || name.ends_with(".localhost"),
+        }
+    }
+
     /// True when the name is a shared-hosting domain or under one (a warning on the card, not
     /// a refusal).
     pub(crate) fn is_shared_hosting(&self) -> bool {
@@ -120,7 +131,9 @@ impl fmt::Display for Name {
 /// Matching: case-insensitive, one trailing dot ignored, an IDN compared in its ASCII form. A
 /// `*.domain` entry ([`Allowlist::firm_suffix`]) matches every name under `domain`, not
 /// `domain` itself. An IP literal matches only an exact entry for that address, so an address
-/// is refused unless listed; a listed one still passes the proxy's address check.
+/// is refused unless listed; a listed one still passes the proxy's address check. The proxy
+/// refuses a non-public literal and `localhost` before it asks the list, so an entry for one
+/// never lets it through.
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct Allowlist {
     exact: BTreeSet<Name>,

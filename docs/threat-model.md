@@ -174,6 +174,8 @@ lawyer's documents somewhere.
   `claim_port_at` for agent-browser's Windows daemon port) in a process-wide registry, so no two
   launches of this host get the same port; gap: another process can take a claimed port before
   the browser binds it, and the launch then fails with no fallback
+- `built`: Before the allowlist it refuses an IP literal that is not public and `localhost` or
+  any name under it, on both listeners, so no allowlist entry lets one through
 - `built`: After DNS it refuses a host if any address is loopback, private, link-local, shared,
   unspecified or multicast (IPv4 inside IPv6 included), and connects only to the addresses it
   checked. Through an upstream proxy the name goes on unresolved, and is refused if the
