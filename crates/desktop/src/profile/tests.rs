@@ -172,7 +172,8 @@ fn every_agent_with_a_kind_gets_the_author_and_the_browser_entry() {
             .position(|arg| arg == "--agent-browser")
             .expect("--agent-browser");
         assert_eq!(args.get(at + 1).map(String::as_str), agent_browser.to_str());
-        assert_eq!(env.len(), 4);
+        // Five variables, and the socket folder's on macOS and Linux (decision record 0030).
+        assert_eq!(env.len(), if cfg!(windows) { 5 } else { 6 });
     }
 }
 
