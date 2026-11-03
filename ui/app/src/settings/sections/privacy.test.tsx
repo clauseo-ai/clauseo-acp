@@ -2,7 +2,9 @@
 // Settings, Privacy over FakeTransport: the section on the side; one row per plan the window knows (both while it
 // knows none, Claude's alone with Claude's limits only), Brave Search named on Claude's row only; the "On the web"
 // group only when the host sends the tools' switches (app-local today), each switch showing its value and a flip
-// sent as set_tool_settings with its key; a locked key's switch disabled with its managed line; no Indian Kanoon.
+// sent as set_tool_settings with its key; a locked key's switch disabled, showing the host's value, the lock's reason
+// in its note's place; the websites' row unless both tools are off; under an on Browser switch, the reason it can't run
+// yet (no website check); the nav's icon not the web's globe; no Indian Kanoon.
 import axe from "axe-core";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -14,6 +16,8 @@ import type { Settings, ToolSettings } from "../../room/host-next.ts";
 import { stubFonts } from "../../room/thread/testing.ts";
 import { FakeTransport } from "../../transport/fake-transport.ts";
 import type { AgentLimitsView, LimitsView } from "../../transport/protocol.ts";
+import { IconWebsite } from "@clauseo/components/icons/icons.tsx";
+import { SECTIONS } from "../sections.tsx";
 import { SettingsApp } from "../settings-app.tsx";
 
 vi.mock("../../transport/window-title.ts", () => ({ setWindowTitle: () => {} }));
@@ -162,20 +166,81 @@ test("with the tools, each switch shows its value, and a flip sends set_tool_set
   expect(switchNamed(el, "Browser")?.getAttribute("aria-checked")).toBe("false");
 });
 
-test("a locked key's switch is disabled, says it's managed, and a press sends nothing", async () => {
-  const { el, transport } = await mount({ tools: ON, locked: ["tools.web_search"] });
+const SEARCH_NOTE = "Clauseo can search the web and read pages. On unless you turn it off.";
+const LOCKED = "Managed by your organisation.";
+const NO_CHECK = "Off until Clauseo can check each website the browser opens.";
+
+test("a locked key's switch is disabled, shows the host's value, gives the lock's reason for its note, and a press sends nothing", async () => {
+  const { el, transport } = await mount({
+    tools: { web_search: false, browser: true },
+    locked: ["tools.web_search"],
+  });
   const search = switchNamed(el, "Web search");
   const searchRow = search?.closest(".set-row");
   expect(search?.hasAttribute("data-disabled")).toBe(true);
-  expect(searchRow?.querySelector('[data-testid="managed"]')?.textContent).toBe(
-    "Managed by your organisation",
-  );
+  expect(search?.getAttribute("aria-checked")).toBe("false");
+  expect(searchRow?.textContent).not.toContain(SEARCH_NOTE);
+  expect(searchRow?.textContent).toContain(LOCKED);
   const browserRow = switchNamed(el, "Browser")?.closest(".set-row");
-  expect(browserRow?.querySelector('[data-testid="managed"]')).toBeNull();
+  expect(browserRow?.textContent).not.toContain("Managed by your organisation");
   await act(async () => search?.click());
   await act(async () => settled());
   expect(transport.only("next_command")).toEqual([]);
-  expect(search?.getAttribute("aria-checked")).toBe("true");
+  expect(search?.getAttribute("aria-checked")).toBe("false");
+});
+
+test("unlocked, a switch keeps its note and gives no lock's reason", async () => {
+  const { el } = await mount({ tools: ON });
+  const searchRow = switchNamed(el, "Web search")?.closest(".set-row");
+  expect(searchRow?.textContent).toContain(SEARCH_NOTE);
+  expect(searchRow?.textContent).not.toContain("Managed by your organisation");
+});
+
+test("the websites' row follows the plans' rows, and shows without the tools or with either on", async () => {
+  for (const tools of [
+    undefined,
+    ON,
+    { web_search: false, browser: true },
+    { web_search: true, browser: false },
+  ]) {
+    const { el } = await mount(tools === undefined ? {} : { tools });
+    const row = el.querySelector('[data-testid="dest-websites"]');
+    expect(row?.textContent).toContain("To the websites Clauseo visits");
+    expect(row?.textContent).toContain("Each website sees that visit, as it sees any browser's.");
+    expect(row?.previousElementSibling?.getAttribute("data-testid")).toMatch(
+      /^dest-(claude|codex)$/,
+    );
+    await act(async () => root?.unmount());
+    host?.remove();
+    store?.dispose();
+    root = null;
+    host = null;
+    store = null;
+  }
+});
+
+test("with both tools off, no websites' row", async () => {
+  const { el } = await mount({ tools: { web_search: false, browser: false } });
+  expect(el.querySelector('[data-testid="dest-websites"]')).toBeNull();
+});
+
+test("an on Browser switch gives the reason it can't run yet, as the conversations do", async () => {
+  const { el } = await mount({ tools: ON });
+  const browserRow = switchNamed(el, "Browser")?.closest(".set-row");
+  expect(browserRow?.textContent).toContain(NO_CHECK);
+  const searchRow = switchNamed(el, "Web search")?.closest(".set-row");
+  expect(searchRow?.textContent).not.toContain(NO_CHECK);
+});
+
+test("an off Browser switch gives no such reason", async () => {
+  const { el } = await mount({ tools: { web_search: true, browser: false } });
+  expect(pane(el).textContent).not.toContain(NO_CHECK);
+});
+
+test("Privacy's nav icon is not the web's globe", () => {
+  const privacy = SECTIONS.find((s) => s.id === "privacy");
+  expect(privacy?.icon).toBeDefined();
+  expect(privacy?.icon).not.toBe(IconWebsite);
 });
 
 test("the section says nothing of Indian Kanoon, in either state", async () => {
