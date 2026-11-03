@@ -22,3 +22,16 @@ export function useTimeOf(
   const page = id === undefined ? undefined : paged.get(id);
   return page === undefined ? live : timeIn(page);
 }
+
+/** When an answer started, as far as the view can say it honestly: its question's time, when the question went
+ * straight to an agent that was free (the turn before had ended by then, and the turn doesn't wait in a queue now);
+ * null otherwise, since the view keeps no time for a turn's start, and a question that waited would claim the answer
+ * began earlier than it did. */
+export function startOf(
+  asked: Timestamp | null,
+  before: Timestamp | null,
+  queued: boolean,
+): Timestamp | null {
+  if (asked === null || queued) return null;
+  return before !== null && before > asked ? null : asked;
+}

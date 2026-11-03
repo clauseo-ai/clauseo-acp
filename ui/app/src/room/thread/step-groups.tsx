@@ -31,9 +31,14 @@ export const LiveAnswerRows = memo(
     sentNow,
     latest,
     step,
+    asked,
+    before,
   }: {
     ids: readonly EntryId[];
     step: EntryId | undefined;
+    /** The exchange's question and the step of the exchange before, for the meta line's time while live. */
+    asked?: EntryId | undefined;
+    before?: EntryId | undefined;
     stream: StreamId;
     paged: ReadonlyMap<EntryId, ViewEntry>;
     sentNow: EntryId | null;
@@ -54,6 +59,8 @@ export const LiveAnswerRows = memo(
           tail={latest && isTail(segments, i)}
           meta={i === 0}
           step={step}
+          asked={asked}
+          before={before}
           latest={latest}
         />
       ),
@@ -61,7 +68,14 @@ export const LiveAnswerRows = memo(
     if (chip) return rows;
     return (
       <>
-        <AnswerMeta step={step} stream={stream} paged={paged} latest={latest} />
+        <AnswerMeta
+          step={step}
+          asked={asked}
+          before={before}
+          stream={stream}
+          paged={paged}
+          latest={latest}
+        />
         {rows}
       </>
     );
@@ -71,6 +85,8 @@ export const LiveAnswerRows = memo(
     a.latest === b.latest &&
     a.sentNow === b.sentNow &&
     a.step === b.step &&
+    a.asked === b.asked &&
+    a.before === b.before &&
     a.paged === b.paged &&
     sameIds(a.ids, b.ids),
 );

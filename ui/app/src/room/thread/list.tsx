@@ -102,7 +102,14 @@ function Sections({
           {/* the design's meta line opens each answer: "Clauseo", and its turn's time once the step is in. The
               answer's rows put it in themselves, with its first step group on it as the chip (step-groups.tsx) */}
           {answer === null && (
-            <AnswerMeta step={step} stream={stream} paged={paged} latest={latest} />
+            <AnswerMeta
+              step={step}
+              asked={asked}
+              before={beforeStep}
+              stream={stream}
+              paged={paged}
+              latest={latest}
+            />
           )}
           {answer}
         </section>
@@ -143,6 +150,8 @@ const LiveExchange = memo(
         <LiveAnswerRows
           ids={rest}
           step={step}
+          asked={asked ? ids[0] : undefined}
+          before={beforeStep}
           stream={stream}
           paged={paged}
           sentNow={sentNow}

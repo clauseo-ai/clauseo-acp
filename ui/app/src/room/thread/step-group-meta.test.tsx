@@ -16,8 +16,10 @@ import {
   upsert,
   userMessage,
 } from "../../testing/stream-script.ts";
-import type { ToolKind, ViewEntry } from "../../transport/protocol.ts";
+import type { ToolKind, TurnId, ViewEntry } from "../../transport/protocol.ts";
 import { mountRoom, type Harness } from "./harness.ts";
+import { startOf } from "./time-of.ts";
+import { stamp } from "./clock.ts";
 
 let metaRenders = 0;
 const countMeta: ProfilerOnRenderCallback = () => {
@@ -187,19 +189,34 @@ test("in Hindi with three kinds, and in English with a background note, the line
   }
 });
 
-test("live and folded, the line stands in the one place on the meta line: the same line after the time's kept place, still there as the turn ends", async () => {
-  h = await mountRoom();
+/** The turn before's question and its step, ended at `ended` ms. */
+const T1 = "00000000-0000-4000-8000-0000000000t1" as TurnId;
+const turnBefore = (ended: number): ViewEntry[] => [
+  { user_message: { ...userMessage(2, 2, "And the deposit?").user_message!, turn: T1 } },
+  step(3, { turn: T1, ts: ended }),
+];
+const lastMeta = () => [...h!.host.querySelectorAll<HTMLElement>(".meta")].at(-1)!;
+
+/** The meta line's time and the start it keeps the place of. */
+const timeOf = (meta: HTMLElement) => ({
+  who: meta.querySelector(".who")?.textContent,
+  held: [...meta.querySelectorAll<HTMLElement>(".who-held-as")].map((e) => e.dataset["held"]),
+});
+
+test("live, the meta line shows when the answer started (its question's time, sent to a free agent); at the end the time it ended, in a place kept as wide, the same line and button", async () => {
+  h = await mountRoom({ display: { language: "en" } });
+  // the question at 5 s (order 5), the turn before ended at 3 s: the agent was free
   h.deliver([
-    reset([ASKED, did(7, 201, "read"), toolCall(8, 202, "in_progress")], header("running")),
+    reset(
+      [...turnBefore(3000), ASKED, did(7, 201, "read"), toolCall(8, 202, "in_progress")],
+      header("running"),
+    ),
   ]);
-  const meta = metas()[0]!;
+  const meta = lastMeta();
   const line = meta.querySelector(":scope > button")!;
   expect(line.textContent).toBe("Read file 202. 1 done so far.");
-  // the time's place is kept before the time comes: the widest clock forms, unseen, unheard and in no text
-  const held = () =>
-    [...meta.querySelectorAll<HTMLElement>(".who-held-as")].map((e) => e.dataset["held"]);
-  expect(held()).toEqual([", 10:00 am", ", 10:00 pm"]);
-  expect(meta.querySelector(".who")?.textContent).toBe("Clauseo");
+  const asked = stamp("en", ASKED.user_message!.ts, Date.now());
+  expect(timeOf(meta)).toEqual({ who: `Clauseo, ${asked}`, held: [`, ${asked}`] });
   for (const e of meta.querySelectorAll(".who-held-as"))
     expect(e.getAttribute("aria-hidden")).toBe("true");
   // the turn ends: the step finishes, the answer's words come, the turn's step and the idle header
@@ -212,12 +229,37 @@ test("live and folded, the line stands in the one place on the meta line: the sa
   await h.settle();
   expect(h.one("step-group")!.dataset["live"]).toBeUndefined();
   // the same meta line and the same button, the summary in place of the live words
-  expect(metas()[0]).toBe(meta);
+  expect(lastMeta()).toBe(meta);
   expect(meta.querySelector(":scope > button")).toBe(line);
   expect(line.textContent).toBe("2 papers read.");
   expect(meta.children).toHaveLength(2);
-  // the time in the same kept place, the same forms beside it, so the chip after it hasn't moved
-  expect(held()).toEqual([", 10:00 am", ", 10:00 pm"]);
-  expect(meta.querySelector(".who")?.textContent).toMatch(/^Clauseo, .*\d{1,2}:\d\d [ap]m$/);
-  expect(meta.querySelector(".who-held > :not(.who-held-as)")?.textContent).toMatch(/^, /);
+  // the time it ended, the start still keeping the place's width
+  const ended = stamp("en", 10_000, Date.now());
+  expect(timeOf(meta)).toEqual({ who: `Clauseo, ${ended}`, held: [`, ${asked}`] });
+});
+
+test("a question that waited shows no time while live: behind the turn before, or in the matter's queue", async () => {
+  // the turn before ended at 9 s, after the question was sent at 5 s: it waited in the thread's queue
+  h = await mountRoom();
+  h.deliver([
+    reset([...turnBefore(9000), ASKED, toolCall(8, 202, "in_progress")], header("running")),
+  ]);
+  expect(timeOf(lastMeta())).toEqual({ who: "Clauseo", held: [] });
+  await h.unmount();
+  document.body.replaceChildren();
+  // waiting behind another conversation of the matter
+  h = await mountRoom();
+  const queued: ViewEntry = {
+    header: { ...header().header!, status: { queued: { behind: "thread:other" as never } } },
+  };
+  h.deliver([reset([ASKED, toolCall(8, 202, "pending")], queued)]);
+  expect(timeOf(lastMeta())).toEqual({ who: "Clauseo", held: [] });
+});
+
+test("the start time is honest or none: startOf", () => {
+  expect(startOf(5000, 3000, false)).toBe(5000);
+  expect(startOf(5000, null, false)).toBe(5000);
+  expect(startOf(5000, 6000, false)).toBeNull();
+  expect(startOf(5000, 3000, true)).toBeNull();
+  expect(startOf(null, 3000, false)).toBeNull();
 });

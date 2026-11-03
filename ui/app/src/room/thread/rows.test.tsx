@@ -462,10 +462,11 @@ test("a question's Who line is You and the time it was sent; each answer's meta 
   ]);
   expect(who()[0]).toBe("You, 4:31 pm");
   expect(metas().map((m) => m?.className)).toEqual(["meta meta-live", "meta meta-live"]);
-  // the latest turn runs: its meta line is Clauseo alone until its step comes in
+  // the latest turn runs: its meta line shows when it started, its question's time (sent as the turn before ended),
+  // until its step comes in
   expect(metas().map((m) => m?.textContent)).toEqual([
     `${t("en", "Clauseo")}, ${clockTime("en", ENDED)}`,
-    t("en", "Clauseo"),
+    `${t("en", "Clauseo")}, ${clockTime("en", ENDED)}`,
   ]);
   h.deliver([upsert(step(10, { turn: uuid(2, 4), ts: ENDED + 60_000 }))]);
   expect(metas()[1]?.textContent).toBe("Clauseo, 4:34 pm");

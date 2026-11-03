@@ -236,9 +236,9 @@
   .meta-live {
     min-height: calc(var(--s6) * var(--k));
   }
-  /* and the time's width: its place is as wide as the widest clock time in the language (Who's held: each form,
-     "10:00 pm", "शाम 10:00", stacked unseen in one cell, in no text), its digits all one width, before the turn's time
-     comes and after, so the chip after it stands in one place live and folded */
+  /* and the time's width: live, the time the answer started; at its end, the time it ended in a place at least as wide
+     as the start's (Who's held: the start stacked unseen in the same cell, in no text), the digits all one width, so
+     the chip after it stands in one place live and folded */
   .who-held {
     display: inline-grid;
     font-variant-numeric: tabular-nums;
