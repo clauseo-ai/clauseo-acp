@@ -40,7 +40,17 @@ function windowOf(lang: Lang, w: LimitWindowView, now: number): PlanWindow {
   };
 }
 
-export function LivePlanCard({ kind }: { kind: AgentKind }) {
+export function LivePlanCard({
+  kind,
+  updated,
+  testId = "plan-card",
+}: {
+  kind: AgentKind;
+  /** Optional: how the read's time is said; "As of {time}" when left out. Settings says "Updated at {time}". */
+  updated?: (time: string) => string;
+  /** Optional: the card's test id; "plan-card" when left out. */
+  testId?: string;
+}) {
   const w = useWords();
   const entry = useAgentLimits(kind);
   const store = useLimitsStore();
@@ -77,13 +87,15 @@ export function LivePlanCard({ kind }: { kind: AgentKind }) {
         : null;
   return (
     <PlanCard
-      testId="plan-card"
+      testId={testId}
       plan={
         look === "payg" ? planTitle(lang, kind, look) : (entry.plan ?? w.t("{name} plan", { name }))
       }
       updated={
         figures && entry.checked_at !== undefined
-          ? lim(lang, "As of {time}", { time: stamp(lang, entry.checked_at, now) })
+          ? (updated ?? ((time) => lim(lang, "As of {time}", { time })))(
+              stamp(lang, entry.checked_at, now),
+            )
           : null
       }
       stale={look === "stale"}
