@@ -34,6 +34,29 @@ test("a Latin run inside Hindi keeps its tracking", () => {
   expect(latin?.decls.get("--tr-title")).toBe("-0.01em");
 });
 
+/** A font chain's faces, quotes and line breaks taken out. */
+const faces = (token: string) =>
+  (day.get(token) ?? "").split(",").map((f) => f.trim().replace(/^"(.*)"$/, "$1"));
+/** The systems' own Devanagari faces: Windows, then macOS's two. */
+const SYSTEM_DEVA = ["Nirmala UI", "Kohinoor Devanagari", "Devanagari Sangam MN"];
+
+test.each([
+  [
+    "--font-latin",
+    ["Anek Latin", "Anek Devanagari", "Segoe UI", ...SYSTEM_DEVA, "system-ui", "sans-serif"],
+  ],
+  ["--font-deva", ["Anek Devanagari", "Anek Latin Hi", ...SYSTEM_DEVA, "system-ui", "sans-serif"]],
+  [
+    "--font-code",
+    ["ui-monospace", "SF Mono", "Cascadia Mono", "Menlo", "Consolas", ...SYSTEM_DEVA, "monospace"],
+  ],
+])("%s falls back to a system Devanagari face when Anek's is missing", (token, chain) => {
+  // Hindi content can sit in the English interface and in code, and the Anek Devanagari file can fail to load. The
+  // system faces stand after every face that has no Devanagari of its own and before the generic families, so the
+  // OS never picks a Devanagari face at random.
+  expect(faces(token)).toEqual(chain);
+});
+
 test("the block reader finds a rule's custom properties and skips Tailwind's mappings", () => {
   const read = blocks(
     ":root { --a: 1px; } @theme { --color-x: red; } @media (x) { .b { --c: 2; } }",
