@@ -174,6 +174,11 @@ jobs:
       - name: Install the pinned tools
         uses: ./.github/actions/install-pinned-tools
 
+      # The pre-push hook's script, alone and through the pinned lefthook with a local remote: a
+      # push of deletes only passes without the check, every other push runs it.
+      - name: Test the pre-push hook
+        run: bash .github/scripts/pre-push-test.sh
+
       - name: cargo xtask check
         run: CI=1 cargo xtask check
 
