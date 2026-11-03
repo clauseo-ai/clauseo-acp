@@ -179,6 +179,10 @@ jobs:
       - name: Test the pre-push hook
         run: bash .github/scripts/pre-push-test.sh
 
+      # How reducer-bench reads the label bench-ok at run time, against a fake gh.
+      - name: Test reducer-bench's bench-ok read
+        run: bash .github/scripts/bench-ok-test.sh
+
       - name: cargo xtask check
         run: CI=1 cargo xtask check
 
@@ -550,8 +554,10 @@ jobs:
   # (`rust` of changes): the hard limits in crates/reducer_bench/benches/apply.rs always apply. On a
   # pull request whose merge-base on main has the bench, it first saves main's counts as the
   # baseline `main`, then fails the head on more than 2% more `ir` in any case (the soft limit in
-  # apply.rs) unless the pull request carries the label `bench-ok`. A label added after the run
-  # started takes effect when the job is re-run.
+  # apply.rs) unless the pull request carries the label `bench-ok` when the job starts. The job
+  # reads the labels through the API (.github/scripts/bench-ok.sh), not from the event, so adding
+  # the label and re-running the job works: a re-run keeps the event's payload, labels included
+  # (#276 failed its re-run at 2233 -> 2314 Ir with the label on).
   # - Both runs share one CARGO_TARGET_DIR: gungraun keeps baselines under it (`gungraun/`), and
   #   the head run reuses the base run's dependency builds.
   # - The soft limit is in apply.rs, not on the command line: gungraun's `--callgrind-limits`
@@ -572,6 +578,8 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: read
+      # The pull request's labels at run time (bench-ok.sh).
+      pull-requests: read
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
     steps:
@@ -606,6 +614,18 @@ jobs:
           echo "gungraun $version"
           cargo install --locked gungraun-runner --version "$version"
 
+      # Its own step, so the token is in no step that builds or runs the code. A failed API call
+      # falls back to the event's labels, with a warning.
+      - name: Read the label bench-ok now
+        id: label
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          BENCH_OK_EVENT: ${{ contains(github.event.pull_request.labels.*.name, 'bench-ok') }}
+        run: echo "bench_ok=$(bash .github/scripts/bench-ok.sh)" >> "$GITHUB_OUTPUT"
+
       # On a pull request, HEAD is the merge commit GitHub made of the head onto main, and
       # origin/main is main as fetched. While main has not moved since that merge, the merge-base
       # is the merge commit's first parent, the main the change lands on, so the comparison shows
@@ -619,7 +639,7 @@ jobs:
       - name: cargo bench (apply)
         env:
           EVENT: ${{ github.event_name }}
-          BENCH_OK: ${{ contains(github.event.pull_request.labels.*.name, 'bench-ok') }}
+          BENCH_OK: ${{ steps.label.outputs.bench_ok == 'true' }}
         run: |
           set -euo pipefail
           # A cached earlier run must not become the baseline.
