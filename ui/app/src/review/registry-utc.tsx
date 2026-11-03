@@ -27,8 +27,14 @@ type Touch = { path?: string; raw?: object; title?: string; background?: boolean
 let next = 0;
 function call(kind: ToolKind, status: ToolCallStatus = "completed", touch: Touch = {}): ViewEntry {
   next += 1;
+  // the host's stamps, inside the minute after the question: a few seconds apart, each taking three; none finished
+  // while it runs or waits
+  const started = atLocal(16, 31) + (next % 8) * 7_000;
+  const ends = status !== "pending" && status !== "in_progress";
   const entry: ToolCallEntry = {
     ...toolCall(10 + next, 300 + next, status).tool_call!,
+    started_at: started,
+    ...(ends ? { finished_at: started + 3_000 } : {}),
     kind,
     title: touch.title ?? "",
     locations: touch.path === undefined ? [] : [{ inside: { path: touch.path } }],

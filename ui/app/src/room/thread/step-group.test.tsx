@@ -145,7 +145,8 @@ test("opened in place: its rows, each with its icon, the paper by its file name 
   expect(line.getAttribute("aria-expanded")).toBe("true");
   const rows = h.all("tool-call");
   expect(line.getAttribute("aria-controls")).toBe(h.one("step-group-rows")?.id);
-  expect(rows.map((r) => r.textContent)).toEqual([
+  // the words, apart from the clock time at each row's end (step-times.test.tsx)
+  expect(rows.map((r) => r.querySelector(".step-row-text")?.textContent)).toEqual([
     "Read Lease deed.pdf.",
     "Searched for 'notice period'.",
     "Tried to run a task. · Failed",
@@ -183,7 +184,7 @@ test("a failed row's state follows a dot, Failed, with the break icon (DESIGN, t
     const [, bad, halted] = h.all("tool-call");
     expect(bad?.dataset["status"]).toBe("failed");
     expect(bad?.querySelector(".step-row-mark")?.textContent).toBe(failed);
-    expect(bad?.textContent?.endsWith(" · " + failed)).toBe(true);
+    expect(bad?.querySelector(".step-row-text")?.textContent?.endsWith(" · " + failed)).toBe(true);
     // the break in the kind's place, its row's only glyph
     const glyphs = bad!.querySelectorAll("svg");
     expect(glyphs).toHaveLength(1);
@@ -223,7 +224,7 @@ test("a step in a state this version can't read shows neither failed nor done: t
   expect(lineOf(g)?.textContent).toBe("State not known.");
   await h.click(lineOf(g));
   const row = h.all("tool-call")[0]!;
-  expect(row.textContent).toBe("Lease.pdf. · State not known");
+  expect(row.querySelector(".step-row-text")?.textContent).toBe("Lease.pdf. · State not known");
   // its own kind's icon on both, never the break
   const icon = (el: Element) => el.querySelector("svg")?.outerHTML;
   expect(icon(row)).toBe(icon(lineOf(g)!.querySelector(".step-group-icons")!));
@@ -362,7 +363,9 @@ test("in Hindi, the line and the rows in Hindi, the paper's name as filed", asyn
   ]);
   expect(lineOf(groups()[0])?.textContent).toBe("2 दस्तावेज़ पढ़े गए।");
   await h.click(lineOf(groups()[0]));
-  expect(h.all("tool-call")[0]?.textContent).toBe("Lease deed.pdf पढ़ा गया।");
+  expect(h.all("tool-call")[0]?.querySelector(".step-row-text")?.textContent).toBe(
+    "Lease deed.pdf पढ़ा गया।",
+  );
   expect(h.all("tool-call")[0]?.querySelector('[lang="en"]')?.textContent).toBe("Lease deed.pdf");
 });
 

@@ -9,7 +9,7 @@ import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { th } from "@clauseo/components/lib/words-thread.ts";
 import { stepKindOf, type StepKind } from "@clauseo/components/clauseo/tool-kinds.ts";
 import type { StreamView } from "../../store/view.ts";
-import type { EntryId, ToolCallEntry, ViewEntry } from "../../transport/protocol.ts";
+import type { EntryId, Timestamp, ToolCallEntry, ViewEntry } from "../../transport/protocol.ts";
 import { sameIds } from "./ids.ts";
 import { asksWords, doingOf, placeOf, sentenceOf, titleOf, unsettled } from "./step-names.ts";
 
@@ -280,6 +280,13 @@ export function markOf(lang: Lang, call: ToolCallEntry): string | null {
       ? null
       : steps(lang, "State not known");
   return null;
+}
+
+/** The time a row shows, from the host's two stamps alone: when it finished, else when it started; none while it is
+ * pending or running, since its state says enough. */
+export function timeOf(call: ToolCallEntry): Timestamp | null {
+  if (call.status === "pending" || call.status === "in_progress") return null;
+  return call.finished_at ?? call.started_at;
 }
 
 /** The group's line as StepGroup takes it: icons, words, the muted aside, the trouble, and live, what the step in hand

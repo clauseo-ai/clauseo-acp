@@ -59,7 +59,7 @@ test("tool calls: one row each in their step group, opened, with its id and stat
   expect(rows.map((r) => r.dataset["status"])).toEqual([...statuses]);
   expect(rows[0]?.dataset["toolCallId"]).toBe(uuid(200, 7));
   expect(rows[0]?.querySelector("bdi")?.textContent).toBe("Read file 200.");
-  expect(rows.map((r) => r.textContent)).toEqual([
+  expect(rows.map((r) => r.querySelector(".step-row-text")?.textContent)).toEqual([
     `Read file 200. · ${steps("en", "Waiting")}`,
     "Read file 201.",
     "Read file 202.",

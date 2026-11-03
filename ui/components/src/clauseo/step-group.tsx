@@ -2,7 +2,8 @@
 // the line names the work in lawyers' words with the icons of what was done most, "4 papers read. Searched 2 times.",
 // and keeps a failure in view, led by the break; live, it says what is being done now. A press opens it in place to
 // its rows, one line each, set into the well as the design's work list is: the icon of what it did, its words (a paper
-// by its file name, its folder on hover) and, where it didn't simply finish, its state. No animation, and no card.
+// by its file name, its folder on hover), where it didn't simply finish, its state, and at its end its clock time,
+// once it has one. No animation, and no card.
 // The words come in made by the caller, in the language; the rows are the caller's StepRow and StepThought.
 import { useId, useState, type ReactElement, type ReactNode } from "react";
 import { IconBreak, IconFold, IconNeedsPermission, IconQuestion } from "../icons/icons.tsx";
@@ -151,6 +152,8 @@ export type StepRowProps = {
   mark: string | null;
   /** It carried on in the background as a steer joined its turn. */
   background?: boolean;
+  /** Its clock time in the thread's words, at the row's end, and the ISO form for `<time>`; null while it runs. */
+  time?: { text: string; iso: string } | null;
 };
 
 /** One row of an open group. */
@@ -163,6 +166,7 @@ export function StepRow({
   hover,
   mark,
   background,
+  time = null,
 }: StepRowProps) {
   return (
     <li
@@ -188,6 +192,11 @@ export function StepRow({
           </>
         )}
       </span>
+      {time !== null && (
+        <time className="step-row-time" dateTime={time.iso}>
+          {time.text}
+        </time>
+      )}
     </li>
   );
 }
