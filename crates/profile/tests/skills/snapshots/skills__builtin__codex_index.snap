@@ -4,7 +4,7 @@ expression: index
 ---
 ## Skills
 
-Your skills are files on this computer. When a task fits one, read its SKILL.md with your file tools before you start, and the references it names, and follow it.
+Your skills are files on this computer. When a task fits one, read the file before you start, and the references it names, and follow it.
 
 - legal-drafting (drafting or revising a legal document, or marking up a draft): `<root>/profile/claude-plugin/skills/legal-drafting/SKILL.md`
 - legal-research (Indian legal research that needs more than one search): `<root>/profile/claude-plugin/skills/legal-research/SKILL.md`

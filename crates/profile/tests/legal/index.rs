@@ -25,12 +25,6 @@ fn the_index_lists_every_rendered_skill_within_150_words() {
             "{name}"
         );
     }
-    let codex = profile.codex_keys(Some(AgentKind::Codex));
-    let instructions = codex["developer_instructions"].as_str().unwrap();
-    assert_eq!(
-        instructions,
-        format!("{}\n\n{index}", profile.instructions())
-    );
     let claude = profile.claude_options().meta_fragment();
     assert!(
         !serde_json::to_string(&claude)
@@ -44,7 +38,11 @@ fn the_index_lists_every_rendered_skill_within_150_words() {
 fn no_skill_rendered_means_no_index() {
     let profile = ClauseoProfile::new(paths_under(Path::new("/data")), None);
     assert_eq!(profile.skills_index(), "");
-    assert_eq!(profile.codex_instructions(), profile.instructions());
+    let keys = profile.codex_keys_without_index(Some(AgentKind::Codex));
+    assert_eq!(
+        keys["developer_instructions"],
+        profile.instructions().as_str()
+    );
 }
 
 #[test]
@@ -89,7 +87,22 @@ fn a_path_holding_a_placeholder_or_a_line_break_is_left_out_of_the_index() {
     let rendered = render(&sources().unwrap()).unwrap();
     assert_eq!(codex_index(Path::new("/x/{work_folder}"), &rendered), "");
     for odd in [
-        "\n", "\r", "\u{0b}", "\u{0c}", "\u{85}", "\u{2028}", "\u{2029}", "\u{1b}",
+        "\n",
+        "\r",
+        "\u{0b}",
+        "\u{0c}",
+        "\u{85}",
+        "\u{2028}",
+        "\u{2029}",
+        "\u{1b}",
+        // Format (Cf) characters: bidi controls, zero-width, BOM, soft hyphen, a tag.
+        "\u{202e}",
+        "\u{2066}",
+        "\u{200b}",
+        "\u{200d}",
+        "\u{feff}",
+        "\u{ad}",
+        "\u{e0041}",
     ] {
         let root = format!("/x/a{odd}b");
         assert_eq!(codex_index(Path::new(&root), &rendered), "", "{odd:?}");
@@ -124,8 +137,8 @@ fn the_budgets_hold_for_a_long_macos_path_with_the_folders_filled() {
     };
     let shared = fill(&profile.instructions());
     assert!(word_count(&shared) <= 1500, "{} words", word_count(&shared));
-    let codex = profile.codex_keys(Some(AgentKind::Codex));
-    let codex = fill(codex["developer_instructions"].as_str().unwrap());
+    // What `codex_keys` sends after a successful write (checked on disk in `tests/skills`).
+    let codex = fill(&format!("{}\n\n{index}", profile.instructions()));
     assert!(word_count(&codex) <= 1500, "{} words", word_count(&codex));
 }
 

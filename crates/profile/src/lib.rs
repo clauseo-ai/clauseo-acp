@@ -142,27 +142,17 @@ impl ClauseoProfile {
         ClaudeOptions::new(self.instructions(), Some(self.paths.claude_plugin.clone()))
     }
 
-    /// Codex's keys: `developer_instructions` is [`Self::codex_instructions`].
+    /// Codex's keys with no skills index: `developer_instructions` is [`Self::instructions`].
+    /// The index goes in only through [`Self::codex_keys`], with a [`SkillsWritten`].
     pub fn codex_config(&self) -> CodexConfig {
-        CodexConfig::with_instructions(self.codex_instructions())
+        CodexConfig::with_instructions(self.instructions())
     }
 
-    /// Codex's instructions: [`Self::instructions`], then a blank line and the skills index
-    /// ([`Self::skills_index`]) when a skill is rendered. Codex gets no skills folder
-    /// ([`CODEX_SKILLS`]), so the index points it at the files Claude's plugin holds. Built on
-    /// each call.
-    pub fn codex_instructions(&self) -> String {
-        self.codex_instructions_with(true)
-    }
-
-    /// [`Self::codex_instructions`] with the index or without it.
-    fn codex_instructions_with(&self, index: bool) -> String {
+    /// Codex's instructions with the index: [`Self::instructions`], then a blank line and the
+    /// skills index ([`Self::skills_index`]) when a skill is rendered.
+    fn codex_instructions_with_index(&self) -> String {
         let text = self.instructions();
-        let index = if index {
-            self.skills_index()
-        } else {
-            String::new()
-        };
+        let index = self.skills_index();
         if index.is_empty() {
             text
         } else {
@@ -183,21 +173,35 @@ impl ClauseoProfile {
     }
 
     /// The `CODEX_CONFIG` keys for an agent of `kind`: Codex's for Codex, none otherwise, with
-    /// the skills index in `developer_instructions`. The host sends these only after every
-    /// [`Self::launch_writes`] write succeeded; otherwise [`Self::codex_keys_without_index`], so
-    /// the index never names files the write did not put there (decision record 0031).
-    pub fn codex_keys(&self, kind: Option<AgentKind>) -> Map<String, Value> {
-        self.codex_keys_with(kind, true)
+    /// the skills index in `developer_instructions`. `written` is what [`write_skills`] returned
+    /// for the Claude plugin's write (the first of [`Self::launch_writes`]): only a successful
+    /// write makes one, so after a failed write the host has only
+    /// [`Self::codex_keys_without_index`], and the index never names files the write did not put
+    /// there (decision record 0031). A token from another folder's write gives no index, with a
+    /// warning.
+    pub fn codex_keys(
+        &self,
+        kind: Option<AgentKind>,
+        written: &SkillsWritten,
+    ) -> Map<String, Value> {
+        if kind != Some(AgentKind::Codex) {
+            return Map::new();
+        }
+        if written.root != self.paths.claude_skills() {
+            tracing::warn!(
+                folder = %written.root.display(),
+                "a skills write of another folder: Codex gets no skills index"
+            );
+            return self.codex_config().into_keys();
+        }
+        CodexConfig::with_instructions(self.codex_instructions_with_index()).into_keys()
     }
 
-    /// [`Self::codex_keys`] with no skills index: for a launch whose skills write failed.
+    /// The `CODEX_CONFIG` keys for an agent of `kind` with no skills index: for a launch whose
+    /// skills write failed.
     pub fn codex_keys_without_index(&self, kind: Option<AgentKind>) -> Map<String, Value> {
-        self.codex_keys_with(kind, false)
-    }
-
-    fn codex_keys_with(&self, kind: Option<AgentKind>, index: bool) -> Map<String, Value> {
         if kind == Some(AgentKind::Codex) {
-            CodexConfig::with_instructions(self.codex_instructions_with(index)).into_keys()
+            self.codex_config().into_keys()
         } else {
             Map::new()
         }
@@ -298,7 +302,7 @@ const PLUGIN_MANIFEST_PATH: [&str; 2] = [".claude-plugin", "plugin.json"];
 /// The host logs an error from here as a warning and never fails a launch on it: the agent then
 /// runs with the skills the folder already holds, or none, and a Codex agent gets
 /// [`ClauseoProfile::codex_keys_without_index`].
-pub fn write_skills(skills: &SkillWrite) -> Result<RenderReport, ProfileError> {
+pub fn write_skills(skills: &SkillWrite) -> Result<SkillsWritten, ProfileError> {
     let _held = skills::write_lock();
     if let Some(plugin) = &skills.plugin {
         skills::no_links(plugin, &PLUGIN_MANIFEST_PATH)?;
@@ -312,5 +316,28 @@ pub fn write_skills(skills: &SkillWrite) -> Result<RenderReport, ProfileError> {
         &skills.root,
         &skills::builtin::RETIRED_BUILTINS,
     )?);
-    Ok(report)
+    Ok(SkillsWritten {
+        root: skills.root.clone(),
+        report,
+    })
+}
+
+/// Proof that [`write_skills`] wrote one skills folder: only it makes one. The Codex keys with
+/// the skills index take it ([`ClauseoProfile::codex_keys`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkillsWritten {
+    root: PathBuf,
+    report: RenderReport,
+}
+
+impl SkillsWritten {
+    /// The skills folder written.
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    /// What the write did.
+    pub fn report(&self) -> &RenderReport {
+        &self.report
+    }
 }

@@ -186,7 +186,7 @@ fn every_claude_session_turns_skill_shell_execution_off() {
 
 #[test]
 fn the_codex_fragment_is_the_instructions_alone() {
-    let keys = profile().codex_keys(Some(AgentKind::Codex));
+    let keys = profile().codex_keys_without_index(Some(AgentKind::Codex));
     insta::assert_snapshot!(pretty(&Value::Object(keys)));
 }
 
@@ -229,8 +229,12 @@ fn kind_specific_parts_go_only_to_their_kind() {
     let profile = profile();
     assert!(profile.session_meta(Some(AgentKind::Codex)).is_none());
     assert!(profile.session_meta(None).is_none());
-    assert!(profile.codex_keys(Some(AgentKind::Claude)).is_empty());
-    assert!(profile.codex_keys(None).is_empty());
+    assert!(
+        profile
+            .codex_keys_without_index(Some(AgentKind::Claude))
+            .is_empty()
+    );
+    assert!(profile.codex_keys_without_index(None).is_empty());
     assert!(profile.skill_files(None).is_none());
     for kind in [None, Some(AgentKind::Claude), Some(AgentKind::Codex)] {
         let names: Vec<String> = profile.servers(kind).into_iter().map(|s| s.name).collect();

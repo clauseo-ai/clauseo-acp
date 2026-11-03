@@ -64,8 +64,8 @@ const USES: [(&str, &str); 4] = [
 
 /// The index's heading and its one rule.
 const INDEX_HEAD: &str = "## Skills\n\nYour skills are files on this computer. When a task fits \
-                          one, read its SKILL.md with your file tools before you start, and the \
-                          references it names, and follow it.";
+                          one, read the file before you start, and the references it names, and \
+                          follow it.";
 
 /// The source files of `name`, one of [`BUILTIN`], as they are in `assets/skills/<name>/`.
 pub fn source_files(name: &str) -> Vec<SkillFile> {
@@ -118,11 +118,12 @@ pub fn use_of(name: &str) -> Option<&'static str> {
 /// under `skills_root` (the Claude plugin's `skills/`, where `write_rendered` puts it). Empty
 /// when nothing is rendered. Built per call, from the paths given, so nothing is cached.
 ///
-/// A path that is not UTF-8, holds a control character or a Unicode line or paragraph separator,
-/// or holds a placeholder the host fills in the instructions is left out with a warning: the
-/// first would not name the file, the second could break the list for a reader or a tokenizer,
-/// the third would be filled by the host. The code span only neutralises Markdown: the model
-/// still reads the path's words, which the lawyer's data folder chooses (decision record 0031).
+/// A path that is not UTF-8, holds a control or format character or a Unicode line or
+/// paragraph separator, or holds a placeholder the host fills in the instructions is left out
+/// with a warning: the first would not name the file, the second could break or hide part of
+/// the list for a reader or a tokenizer, the third would be filled by the host. The code span
+/// only neutralises Markdown: the model still reads the path's words, which the lawyer's data
+/// folder chooses (decision record 0031).
 pub fn codex_index(skills_root: &Path, rendered: &Rendered) -> String {
     let mut lines = Vec::new();
     for skill in rendered.skills() {
@@ -150,8 +151,36 @@ pub fn codex_index(skills_root: &Path, rendered: &Rendered) -> String {
 fn is_listable(path: &str) -> bool {
     !path
         .chars()
-        .any(|c| c.is_control() || matches!(c, '\u{2028}' | '\u{2029}'))
+        .any(|c| c.is_control() || matches!(c, '\u{2028}' | '\u{2029}') || is_format(c))
         && !IN_INSTRUCTIONS.iter().any(|token| path.contains(token))
+}
+
+/// Whether `c` is a Unicode format character (general category Cf): bidi controls, zero-width
+/// characters, the soft hyphen, the byte order mark, tags and the like. Unicode 16's list.
+fn is_format(c: char) -> bool {
+    matches!(c,
+        '\u{00AD}'
+        | '\u{0600}'..='\u{0605}'
+        | '\u{061C}'
+        | '\u{06DD}'
+        | '\u{070F}'
+        | '\u{0890}'..='\u{0891}'
+        | '\u{08E2}'
+        | '\u{180E}'
+        | '\u{200B}'..='\u{200F}'
+        | '\u{202A}'..='\u{202E}'
+        | '\u{2060}'..='\u{2064}'
+        | '\u{2066}'..='\u{206F}'
+        | '\u{FEFF}'
+        | '\u{FFF9}'..='\u{FFFB}'
+        | '\u{110BD}'
+        | '\u{110CD}'
+        | '\u{13430}'..='\u{1343F}'
+        | '\u{1BCA0}'..='\u{1BCA3}'
+        | '\u{1D173}'..='\u{1D17A}'
+        | '\u{E0001}'
+        | '\u{E0020}'..='\u{E007F}'
+    )
 }
 
 /// `text` as a Markdown code span: a backtick fence one longer than the longest backtick run in

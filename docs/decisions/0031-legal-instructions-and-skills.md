@@ -72,7 +72,7 @@ Two agents may edit the brief close together, and there is no lock. The `matter-
 | Each reference file | at most 1,000 words |
 | Codex's skills index | at most 150 words |
 
-Words are counted by splitting on whitespace, as `wc -w` does. At launch: `legal.md` 1,168 words, the whole (tools part and `legal.md`) 1,362, and Codex's index 86 with stetdoc's skill and a data folder at `/data`, so Codex's `developer_instructions` is 1,448 words there. A data folder whose path holds spaces adds those words once per index line, and the host's filled folders add theirs: with `/Users/Ann Mary/Library/Application Support/Clauseo` and the work and notes folders filled, the index is 94 words, the shared text 1,370 and Codex's whole 1,464, under 1,500 (`the_budgets_hold_for_a_long_macos_path_with_the_folders_filled`).
+Words are counted by splitting on whitespace, as `wc -w` does. At launch: `legal.md` 1,168 words, the whole (tools part and `legal.md`) 1,362, and Codex's index 82 with stetdoc's skill and a data folder at `/data`, so Codex's `developer_instructions` is 1,444 words there. A data folder whose path holds spaces adds those words once per index line, and the host's filled folders add theirs: with `/Users/Ann Mary/Library/Application Support/Clauseo` and the work and notes folders filled, the index is 90 words, the shared text 1,370 and Codex's whole 1,460, under 1,500 (`the_budgets_hold_for_a_long_macos_path_with_the_folders_filled`).
 
 ### The version lock
 
@@ -114,26 +114,34 @@ for name in ['legal-drafting', 'legal-research', 'matter-brief']:
 
 Codex 0.162.1 has no root-scoped skills key (decision record 0030, "Codex gets no skills"; amended into 0025), so `skills.include_instructions=false` stays and Codex gets no skills folder (`CODEX_SKILLS` is `false`, as R21's PR-A left it). Agreed with stage B and the host thread:
 
-- Codex's `developer_instructions` is the instructions, a blank line, then a short index (`ClauseoProfile::codex_instructions`, `skills_index`, `skills::builtin::codex_index`): a `## Skills` heading, one rule ("read its SKILL.md with your file tools before you start, and the references it names, and follow it"), then one line per rendered skill: its name, a one-line use, and the path of its rendered `SKILL.md` in the Claude plugin's `skills/` folder under app data (`ProfilePaths::claude_skills`).
+- Codex's `developer_instructions` is the instructions, a blank line, then a short index (`ClauseoProfile::codex_keys`, `skills_index`, `skills::builtin::codex_index`): a `## Skills` heading, one rule ("read the file before you start, and the references it names, and follow it"; Codex reads files through its shell, so the rule names no file tool), then one line per rendered skill: its name, a one-line use, and the path of its rendered `SKILL.md` in the Claude plugin's `skills/` folder under app data (`ProfilePaths::claude_skills`).
 - The index is generated from the same `Rendered` list `write_skills` writes, in its order (stetdoc's first when it loaded). A test writes the skills and checks that every listed path is exactly where the write put the file, with the same bytes.
-- Each path is a Markdown code span whose backtick fence is one longer than the longest backtick run in the path, with a space inside each fence when the path starts or ends with a backtick or a space. Tested with spaces, backticks, both quote marks and Windows backslashes. A path is left out with a warning when it is not UTF-8 (a lossy form would not name the file), holds a control character or U+2028/U+2029 (each can act as a line break for a reader or a tokenizer), or holds a placeholder the host fills in the instructions (`{work_folder}`, `{matter_notes}`), since the host's fill would rewrite it.
+- Each path is a Markdown code span whose backtick fence is one longer than the longest backtick run in the path, with a space inside each fence when the path starts or ends with a backtick or a space. Tested with spaces, backticks, both quote marks and Windows backslashes. A path is left out with a warning when it is not UTF-8 (a lossy form would not name the file), holds a control character, U+2028/U+2029 (each can act as a line break for a reader or a tokenizer) or a Unicode format (Cf) character (bidi controls and zero-width characters, which can hide or reorder what the model reads), or holds a placeholder the host fills in the instructions (`{work_folder}`, `{matter_notes}`), since the host's fill would rewrite it.
 - The code span only neutralises Markdown. The model still reads the path's words, so text in the data folder's path that reads like an instruction reaches it. The risk is low: the lawyer, not a third party, chooses that folder, and the untrusted-content rule covers what the agent reads. No filter on such words is added.
 - It is built each time the Codex keys are composed, from the profile's paths; nothing is cached across sessions. At most 150 words (test). Claude gets no index: it loads the plugin.
 - **The host writes before any agent starts, Codex included.** `ClauseoProfile::launch_writes(kind)` lists every skills write a launch needs: the Claude plugin for Claude, and the Claude plugin for Codex too, since its index names the files there (plus Codex's own folder once `CODEX_SKILLS` is on). The launch-prep thread runs `write_skills` on each. A test runs a Codex launch's writes and checks that they wrote exactly the `SKILL.md` files the index names. `skill_files(kind)` still means the agent's own folder.
-- **The index only after a successful write.** The host sends `codex_keys(kind)`, with the index, only when every `launch_writes` write succeeded; when one failed (logged, and the launch goes on), it sends `codex_keys_without_index(kind)`, the instructions alone, so the index never names files that may be missing or stale. The host PR wires this.
+- **The index only after a successful write, typed.** `write_skills` returns a `SkillsWritten` token (private fields; only a successful write makes one). The keys with the index are `codex_keys(kind, &SkillsWritten)`, taking the token of the Claude plugin's write (the first of `launch_writes`); a token from another folder's write gives no index, with a warning. Without a token the host has only `codex_keys_without_index(kind)`, the instructions alone, so a failed write (logged, and the launch goes on) can never send an index naming files that may be missing or stale. `codex_config()` is the instructions alone too. The host PR wires this.
 
 Sample, for a data folder at `/data`:
 
 ```markdown
 ## Skills
 
-Your skills are files on this computer. When a task fits one, read its SKILL.md with your file tools before you start, and the references it names, and follow it.
+Your skills are files on this computer. When a task fits one, read the file before you start, and the references it names, and follow it.
 
 - stetdoc (reading and editing Word files as tracked changes): `/data/profile/claude-plugin/skills/stetdoc/SKILL.md`
 - legal-drafting (drafting or revising a legal document, or marking up a draft): `/data/profile/claude-plugin/skills/legal-drafting/SKILL.md`
 - legal-research (Indian legal research that needs more than one search): `/data/profile/claude-plugin/skills/legal-research/SKILL.md`
 - matter-brief (reading and updating the matter brief when work starts and before a turn ends): `/data/profile/claude-plugin/skills/matter-brief/SKILL.md`
 ```
+
+### PR-B's merge condition: the by-hand proof
+
+R22 merges before the host PR (PR-B), so the Codex path has not yet run end to end. PR-B merges only after this by-hand proof passes on macOS and on Windows under the unelevated sandbox, each with the cheapest model and a fresh Codex home: after launch prep has written the plugin's skills, a Codex thread asked for a task that fits a skill reads the rendered `SKILL.md` named in its index (and a reference it names) with no approval prompt, and nothing is written: the rendered skills folder and its manifest are byte for byte unchanged after the turn, and no file appears in the matter folder, the work folder or the matter notes folder. PR-B records each run (OS, model, the file read, the folder hashes before and after).
+
+### The data folder is fixed for the app's run
+
+Stage B asked whether the profile is rebuilt when the data folder changes while the app runs. It never changes while the app runs. Desktop resolves `Locations` once, in setup (`crates/desktop/src/lib.rs:193`, `Locations::resolve(&SystemDirs, &SystemEnv)`), from the OS folders and `CLAUSEO_DATA_DIR` (`crates/settings/src/locations.rs:16`, `:145`), and hands it to the host start and to `open::AppData`. No setting, command or flow moves the data folder at runtime: `relocate_matter` moves a matter's folder, not the data folder. So the profile, built once at app start from those `Locations` (`ProfilePaths::new`), names the right folder for the whole run, and a new data folder takes a restart, which builds a new profile. If a runtime move is ever added, it must rebuild the profile and rewrite the skills before the next launch, since Codex's index holds absolute paths.
 
 ### Tests
 
@@ -149,7 +157,7 @@ Answered (a), public (Rohan, 2026-11-02). The instructions and skills live in th
 
 ### Deviations from the brief
 
-- **Codex reads the skills through an index (b′)**, not a copy in `$CODEX_HOME/skills`: no root-scoped key exists at codex 0.162.1. Codex's `developer_instructions` grows by the index (86 words at launch, 1,448 in all); the 1,500-word test covers the text both agents share, and the index has its own 150-word test.
+- **Codex reads the skills through an index (b′)**, not a copy in `$CODEX_HOME/skills`: no root-scoped key exists at codex 0.162.1. Codex's `developer_instructions` grows by the index (82 words at launch, 1,444 in all); the 1,500-word test covers the text both agents share, and the index has its own 150-word test.
 - **The Codex render snapshot** is Codex's index, with its skills folder checked empty, since Codex gets no folder; the Claude snapshot is the plugin's whole tree.
 - **The host-side tests move to the host PR** (list above), with the `{matter_notes}` folder, the writable folders, `disableSkillShellExecution` (already set by R21, record 0030) and the skills write before a Codex launch.
 - **`versions_lock` also checks the version**: the current hash must be listed under the version the skill's `metadata.clauseo.version` holds, so a text change with a new line but no version bump fails too.
