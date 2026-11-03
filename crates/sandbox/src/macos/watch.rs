@@ -7,10 +7,17 @@
 //! `logger` or `os_log`: only the kernel's Sandbox extension sends as `Sandbox`. The tag is the
 //! last line of the message, which the kernel appends after the report, so a path holding a
 //! newline and another tag cannot claim another launch.
+//!
+//! `log stream` prints its header before the kernel's lines reach it, so a denial in the first
+//! milliseconds after it starts can be missed. The watcher therefore counts as started only
+//! once it has seen a denial it caused itself: a probe, `sandbox-exec` under a profile that
+//! denies everything with a tag of its own (`clauseo-ready-<pid>-<n>`), which no launch
+//! registers and so is never reported.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
@@ -33,9 +40,22 @@ const PREDICATE: &str = r#"sender == "Sandbox" AND eventMessage CONTAINS "clause
 /// A watcher that fails to start or dies is started again at most this often.
 const RESTART_EVERY: Duration = Duration::from_secs(60);
 
-/// How long the first registration waits for `log stream` to say it is filtering, so the
-/// first launch's denials are not missed.
-const START_WAIT: Duration = Duration::from_secs(2);
+/// How long the first registration waits for the watcher to see its probe's denial, so the
+/// first launch's denials are not missed. Also how long the watcher keeps probing.
+const START_WAIT: Duration = Duration::from_secs(3);
+
+/// How often the watcher runs its probe again until the probe's denial comes back.
+const PROBE_EVERY: Duration = Duration::from_millis(100);
+
+/// The probe: `sandbox-exec` under a profile that denies everything, so its exec of `PROBE_PROGRAM`
+/// is refused and logged with the probe's tag.
+const SANDBOX_EXEC: &str = "/usr/bin/sandbox-exec";
+
+/// The program the probe's profile refuses to run.
+const PROBE_PROGRAM: &str = "/usr/bin/true";
+
+/// The counter in each probe's tag.
+static NEXT_PROBE: AtomicU64 = AtomicU64::new(0);
 
 /// How often every registered sink's rate cap is ticked.
 const TICK: Duration = Duration::from_secs(1);
@@ -91,8 +111,8 @@ impl Drop for Registration {
 }
 
 /// Registers the launch tagged `tag`. The first registration starts the watcher and waits up
-/// to two seconds for it to start filtering; a watcher that does not start is logged and
-/// tried again later, and the launch goes ahead either way.
+/// to three seconds for it to see its probe's denial; a watcher that does not start is logged
+/// and tried again later, and the launch goes ahead either way.
 pub(crate) fn register(tag: String, policy: Arc<Policy>, sink: Arc<LaunchSink>) -> Registration {
     let first = {
         let mut state = state();
@@ -183,35 +203,89 @@ fn start(generation: u64) -> std::io::Result<ChildStdout> {
 /// Reads lines until the stream ends, reporting each denial and ticking the sinks once a
 /// second. The tick is one interval timer for the whole read, so lines that arrive faster than
 /// once a second do not hold it back. The first line (`Filtering the log data using ...`)
+/// starts the probe, run again every 100 ms for up to [`START_WAIT`]; the probe's own denial
 /// tells the first registration the watcher is ready.
 fn read(stdout: ChildStdout, started: &mpsc::Sender<()>) {
     let mut lines = BufReader::new(stdout).lines();
     let mut ticks = async_io::Timer::interval(TICK);
+    // The probe's tag while its denial has not come back, and the probes left to run.
+    let mut awaiting: Option<String> = None;
+    let mut probes_left = START_WAIT.as_millis() / PROBE_EVERY.as_millis();
+    let mut probe_timer = async_io::Timer::never();
     async_io::block_on(async {
         loop {
             let next = lines.next();
-            let tick = ticks.next();
+            let timers = select(ticks.next(), probe_timer.next());
             pin_mut!(next);
-            match select(next, tick).await {
+            match select(next, timers).await {
                 Either::Left((Some(Ok(line)), _)) => {
                     if !line.starts_with('{') {
-                        // The header. A closed receiver (after the first start) is fine.
+                        // The header: `log stream` runs, but may not have the kernel's lines yet.
+                        let tag = probe_tag();
+                        probe(&tag);
+                        awaiting = Some(tag);
+                        probe_timer = async_io::Timer::interval(PROBE_EVERY);
+                        continue;
+                    }
+                    if let Some(tag) = &awaiting
+                        && parse(&line).is_some_and(|found| &found.tag == tag)
+                    {
+                        awaiting = None;
+                        probe_timer = async_io::Timer::never();
+                        // A closed receiver (after the first start) is fine.
                         if started.send(()).is_err() {
                             tracing::trace!("the Seatbelt denial watcher restarted");
                         }
                         continue;
                     }
+                    // The probe's later lines, like any unregistered tag, are not reported.
                     deliver(&line);
                 }
+                Either::Right((Either::Right(_), _)) => match &awaiting {
+                    Some(tag) if probes_left > 0 => {
+                        probes_left -= 1;
+                        probe(tag);
+                    }
+                    Some(_) => {
+                        tracing::warn!("the Seatbelt denial watcher never saw its probe's denial");
+                        awaiting = None;
+                        probe_timer = async_io::Timer::never();
+                    }
+                    None => probe_timer = async_io::Timer::never(),
+                },
                 Either::Left((Some(Err(error)), _)) => {
                     tracing::warn!(%error, "reading the Seatbelt denial watcher failed");
                     return;
                 }
                 Either::Left((None, _)) => return,
-                Either::Right((_, _)) => tick_all(),
+                Either::Right((Either::Left(_), _)) => tick_all(),
             }
         }
     });
+}
+
+/// A fresh probe tag: `clauseo-ready-<pid>-<n>`. No launch has it (a launch's tag is
+/// `clauseo-<pid>-<n>`), so its denials are never reported.
+fn probe_tag() -> String {
+    let n = NEXT_PROBE.fetch_add(1, Ordering::Relaxed);
+    format!("{TAG_PREFIX}ready-{}-{n}", std::process::id())
+}
+
+/// Runs the probe tagged `tag` and does not wait for it: `sandbox-exec` under a profile that
+/// denies everything, so the kernel refuses its exec and logs that with the tag. async-process
+/// reaps the dropped child.
+fn probe(tag: &str) {
+    // The tag holds only ASCII letters, digits and `-`, so it is safe inside the string.
+    let profile = format!(r#"(version 1)(deny default (with message "{tag}"))"#);
+    let spawned = Command::new(SANDBOX_EXEC)
+        .args(["-p", &profile, PROBE_PROGRAM])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn();
+    if let Err(error) = spawned {
+        tracing::warn!(%error, "the Seatbelt denial watcher's probe did not start");
+    }
 }
 
 /// Ticks every registered sink, outside the lock.

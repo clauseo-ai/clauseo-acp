@@ -53,10 +53,11 @@
 //!   registration belong to the launcher, shared by all its launches, so R17 makes one launcher
 //!   per agent launch and keeps it alive for exactly that launch. R17 builds the policy and calls
 //!   `launch` off the host's actor thread: `build` walks the matter, and a host's first launch
-//!   waits up to 2 s for the watcher to start. The watcher reports file-data reads and writes as
-//!   [`Denial::Path`], the log's folds of repeats as [`Denial::Dropped`], and only logs network
-//!   and device denials. A watcher that fails to start or dies is
-//!   logged and started again at most once a minute; launches run either way.
+//!   waits up to 3 s for the watcher to start, which it has once it sees a probe denial of its
+//!   own (`log stream` prints its header before the kernel's lines reach it). The watcher
+//!   reports file-data reads and writes as [`Denial::Path`], the log's folds of repeats as
+//!   [`Denial::Dropped`], and only logs network and device denials. A watcher that fails to
+//!   start or dies is logged and started again at most once a minute; launches run either way.
 //!
 //! # Invariants
 //!
