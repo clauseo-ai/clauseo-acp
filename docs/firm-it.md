@@ -25,13 +25,19 @@ Both Windows installers ship the same `Clauseo.exe` and use the stock NSIS pages
 
 - The per-machine installer raises a UAC prompt, installs `Clauseo.exe` and `uninstall.exe` in
   `C:\Program Files\Clauseo` and writes
-  `HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall\Clauseo` with `DisplayVersion`,
-  `Publisher=Clauseo`, `InstallLocation` and `UninstallString="C:\Program Files\Clauseo\uninstall.exe"`.
-  It writes nothing under `HKCU`. The app it starts at the end runs un-elevated (medium integrity).
+  `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Clauseo` (64-bit view) with `DisplayName` and
+  `Publisher` `Clauseo`, `DisplayVersion` `<v>`, `InstallLocation` `"C:\Program Files\Clauseo"` and
+  `UninstallString` `"C:\Program Files\Clauseo\uninstall.exe"` (both in quotes), `DisplayIcon`,
+  `MainBinaryName`, `NoModify` and `NoRepair` 1, and `EstimatedSize`. It also writes
+  `HKLM\SOFTWARE\Clauseo\Clauseo`, whose default value is the install folder; uninstalling leaves
+  that key. It makes two shortcuts for all users,
+  `C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Clauseo.lnk` and
+  `C:\Users\Public\Desktop\Clauseo.lnk`, also with `/S`. It writes nothing under `HKCU`. The app it starts at the end runs un-elevated (medium integrity).
 - The per-user installer raises no UAC prompt, installs in `%LOCALAPPDATA%\Clauseo` and writes
   `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\Clauseo`.
 - Uninstalling asks one question, an unticked box: "Also delete conversations, saved versions and
   settings". Left unticked, each user's data folder (`%LOCALAPPDATA%\ai.clauseo.desktop`) stays.
+  The silent `/S` uninstall asks nothing and always keeps it.
 
 ### Intune (Win32 app)
 
@@ -41,12 +47,21 @@ Both Windows installers ship the same `Clauseo.exe` and use the stock NSIS pages
 | Uninstall command | `"C:\Program Files\Clauseo\uninstall.exe" /S` |
 | Install behaviour | System |
 | Detection, registry | Key `HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Clauseo`, value `DisplayVersion`, string comparison, equals `<v>`; "Associated with a 32-bit app on 64-bit clients": No |
-| Detection, file (instead) | `C:\Program Files\Clauseo`, file `Clauseo.exe`, exists |
+| Detection, file (instead) | `C:\Program Files\Clauseo`, file `Clauseo.exe`, exists. If you compare the file's version instead, `Clauseo.exe`'s File version is `<v>`, read as `<v>.0` |
 
 Write the uninstall path out in full rather than `%ProgramFiles%`: Intune's management extension
 is a 32-bit process, where `%ProgramFiles%` means `C:\Program Files (x86)`. `/S` is NSIS's silent
-switch. The silent lines and the detection rule above have not yet been run on our test machine;
-this note goes when they have.
+switch. `uninstall.exe /S` hands over to a copy of itself in `%TEMP%` and returns before the files
+are gone. On our test machine the stub returned after 0.46 s and the folder was gone 0.26 s later.
+Windows PowerShell's `Start-Process -Wait` waits for that copy too. Either way it leaves each
+user's `%LOCALAPPDATA%\ai.clauseo.desktop` in place.
+
+Measured on Windows Server 2025 (build 26100), 2026-11-03, with the 0.0.0 dry-run installer, from an
+elevated PowerShell: install exit 0 in about 2 s, with no window and no UAC prompt; uninstall exit
+0; both detection forms find the install. Not yet run through Intune itself. If you try the install
+line by hand on a copy you downloaded with a browser, run `Unblock-File` on it first. Otherwise
+Windows shows "Open File - Security Warning" (Unknown Publisher) and waits, even from an elevated
+prompt, until someone presses Run.
 
 Never run Clauseo elevated: WebView2 can fail to start when its data folder belongs to another
 user ([tauri#13926](https://github.com/tauri-apps/tauri/issues/13926)).
@@ -86,7 +101,9 @@ user ([tauri#13926](https://github.com/tauri-apps/tauri/issues/13926)).
 Clauseo draws its window with Microsoft Edge WebView2, Evergreen.
 
 - **Install the Evergreen runtime per machine in your image.** If it is missing, the per-user
-  installer fetches it silently, per user (seen on the test machine: about 50 s, no window). On
+  installer fetches it silently, per user (seen on the test machine: about 50 s, no window). It
+  installs a per-user Edge Update too (`%LOCALAPPDATA%\Microsoft\EdgeUpdate`, with two scheduled
+  tasks `MicrosoftEdgeUpdateTaskUser<SID>Core` and `…UA`), which keeps that runtime updated. On
   non-persistent VDI a per-user runtime is gone at sign-out. Microsoft's guide:
   [WebView2 for enterprises](https://learn.microsoft.com/microsoft-edge/webview2/concepts/enterprise).
 - **Minimum version:** 155.0.0.0 (`minimumWebview2Version` in
@@ -149,7 +166,9 @@ Clauseo draws its window with Microsoft Edge WebView2, Evergreen.
 Nothing in `HKCU` or a user-writable file counts as policy. Policy is read once at start-up: a
 change applies on the next start.
 
-**What a policy value does.** It replaces the user's value and shows as locked in the app. A value
+**What a policy value does.** It replaces the user's value and shows as locked in the app: Settings
+shows the policy's value with its choices greyed out and the line "Managed by your organisation"
+(measured on Windows Server 2025, 2026-11-03, with `ui.theme` = `dark`). A value
 of the wrong type for a known key is a warning and **still locks the key, at its default**. A
 source that cannot be read at all (a `policy.json` that does not parse, a registry read that
 fails) is skipped and **locks each security key off**: `mcp.servers` empty, `tools.web_search`
@@ -161,7 +180,8 @@ serve mixed versions. (`Leaf::parse`, `refuse` and `SECURITY_KEYS` in
 **Formats.**
 
 - **Registry:** `REG_DWORD` for a number, or a boolean as 0 or 1; `REG_SZ` for a string, or JSON
-  text for an object (`agents.<id>`, `mcp.servers`). Value names ignore case; an agent id keeps
+  text for an object (`agents.<id>`, `mcp.servers`); `REG_MULTI_SZ` for a list of strings (no key in
+  the table below takes a list yet). Value names ignore case; an agent id keeps
   its case ([`crates/settings/src/policy/registry.rs`](../crates/settings/src/policy/registry.rs)).
 - **`policy.json`:** the shape of the user's `settings.json`: sections `matters`, `agents`, `mcp`,
   `ui` and `tools`, each an object; comments and trailing commas are allowed. Sample:
@@ -225,11 +245,15 @@ allows only the app's own content and its bridge (`app.security.csp` in
 | Host | Why | When |
 |---|---|---|
 | `github.com`, then `release-assets.githubusercontent.com` | Downloads and, for per-user installs, updates (`latest.json` on GitHub Releases, decision 0035) | A release asset URL on `github.com` answers 302 to `release-assets.githubusercontent.com` (`curl -sI`, 2026-11-03). The updater is not on yet: `plugins.updater.endpoints` is empty in `crates/desktop/tauri.conf.json` (task R23). Per-machine installs never update themselves |
-| `go.microsoft.com` (`/fwlink/p/?LinkId=2124703`), then `msedge.sf.dl.delivery.mp.microsoft.com` | WebView2 bootstrapper | Only when the runtime is missing at install, or when a user presses "Download WebView2". The fwlink answers 301 to that host (`curl -sI`, 2026-11-03). The hosts the bootstrapper then downloads the runtime from are not listed yet; a runtime in your image avoids them |
-| Your Edge Update hosts | WebView2 runtime updates | Microsoft's, as for Edge |
+| `go.microsoft.com` (`/fwlink/p/?LinkId=2124703`), then `msedge.sf.dl.delivery.mp.microsoft.com` | WebView2 bootstrapper | Only when the runtime is missing at install, or when a user presses "Download WebView2". The fwlink answers 301 to that host (`curl -sI`, 2026-11-03). The bootstrapper then fetches the runtime through Edge Update from `config.edge.skype.com`, `msedge.api.cdp.microsoft.com` and `msedge.f.tlu.dl.delivery.mp.microsoft.com` (DNS-Client log, measured on Windows Server 2025, 2026-11-03; the same three per user and per machine). A runtime in your image avoids them all |
+| Edge Update's hosts (`config.edge.skype.com`, `msedge.api.cdp.microsoft.com`, `msedge.f.tlu.dl.delivery.mp.microsoft.com` seen for installs) | WebView2 runtime updates | Microsoft's, as for Edge |
 | `api.anthropic.com`, `claude.ai`, `platform.claude.com` | Claude Code, signed in with a Claude plan | While the agent works. An API key needs only `api.anthropic.com` |
 | `api.openai.com`, `chatgpt.com`, `auth.openai.com` | Codex, signed in with ChatGPT | While the agent works. An API key needs only `api.openai.com` |
 | Sites the agent searches and opens | Web search and Clauseo's browser | Only while `tools.web_search` or `tools.browser` is on |
+
+Opening a downloaded installer also makes Windows check it with SmartScreen
+(`nav.smartscreen.microsoft.com`, `checkappexec.microsoft.com`,
+`data-edge.smartscreen.microsoft.com`). Those are Windows' hosts, not Clauseo's.
 
 The agents' hosts are Clauseo's starting list for its egress proxy (`builtin_allowlist` in
 `crates/sandbox/src/proxy/allowlist.rs`), inferred and not yet measured. The proxy chains to
