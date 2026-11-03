@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 // The clock time on an opened step group's rows (#263): the host's finished_at, else its started_at, in the thread's
-// clock words (clock.ts stamp: the weekday before it on another day); none while a step runs; never on the folded
+// clock words (clock.ts stamp: the weekday before it on another day), leading the row in the work list's clock
+// column; none while a step runs; never on the folded
 // line. The suite pins TZ=UTC, so every time here is built from a local midnight, never a literal UTC date.
 import { afterEach, expect, test } from "vitest";
 import { agentText, reset, toolCall, userMessage } from "../../testing/stream-script.ts";
@@ -50,7 +51,7 @@ async function opened(calls: ViewEntry[]) {
   return h.all("tool-call").map((r) => r.querySelector<HTMLTimeElement>("time.step-row-time"));
 }
 
-test("a finished row shows its finished time, at its end, from the thread's clock words", async () => {
+test("a finished row shows its finished time, first, from the thread's clock words", async () => {
   const started = local(0, 16, 30);
   const finished = local(0, 16, 32);
   const [time] = await opened([
@@ -59,7 +60,7 @@ test("a finished row shows its finished time, at its end, from the thread's cloc
   expect(time?.textContent).toBe("4:32 pm");
   expect(time?.textContent).toBe(stamp("en", finished, Date.now()));
   expect(time?.dateTime).toBe(new Date(finished).toISOString());
-  expect(time?.parentElement?.lastElementChild).toBe(time);
+  expect(time?.parentElement?.firstElementChild).toBe(time);
 });
 
 test("a finished row from a host with no finished_at falls back to its start", async () => {
