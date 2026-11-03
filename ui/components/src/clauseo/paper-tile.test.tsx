@@ -91,8 +91,8 @@ test.each([
   // never shortened, never normalised: the face is the name as the folder has it
   expect(name?.textContent).toBe(title);
   expect(points(name?.textContent ?? "")).toEqual(points(title));
-  // English interface: no lang of its own, so the page's script fallback shapes it
-  expect(name?.getAttribute("lang")).toBeNull();
+  // a Devanagari name takes lang="hi" in the English interface too, so the Hindi type follows it (1f)
+  expect(name?.getAttribute("lang")).toBe("hi");
 });
 
 test("a tile's hint carries the full Devanagari name as its tooltip, the comma and all", async () => {

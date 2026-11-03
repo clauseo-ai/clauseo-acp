@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
 import { useDisplay } from "../lib/display.ts";
+import { langOfText } from "../lib/script.ts";
 import { useWords } from "../lib/words.ts";
 import { isWide } from "./layout.ts";
 import { dur, ease } from "./motion.ts";
@@ -280,7 +281,7 @@ export function Thread({
       >
         <span className="room-pin-line">
           <span className="room-pin-who">{who}</span>
-          <span className="room-pin-text">
+          <span className="room-pin-text" lang={langOfText(question)}>
             <Say>{question}</Say>
           </span>
           <span className="sr-only">

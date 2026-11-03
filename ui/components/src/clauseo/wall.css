@@ -176,6 +176,11 @@
   .tile:not([data-state="uncited"]) .tile-title {
     color: currentColor;
   }
+  /* a Devanagari name in the English interface takes Hindi's taller tile line on its own element: the facade's
+     --title-h resolves on the facade, in the page's language */
+  .tile-title:where([lang="hi"]) {
+    line-height: calc(var(--lh-tile) * var(--k));
+  }
   .tile[data-state="accepted"] .tile-title {
     font-weight: var(--w-accepted);
   }

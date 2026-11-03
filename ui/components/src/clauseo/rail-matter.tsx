@@ -24,6 +24,7 @@ import {
   IconShowInFinder,
 } from "../icons/icons.tsx";
 import { cn } from "../lib/cn.ts";
+import { langOfText } from "../lib/script.ts";
 import { useDisplay } from "../lib/display.ts";
 import { useWords } from "../lib/words.ts";
 import { revealKey, ui } from "../lib/words-ui.ts";
@@ -196,9 +197,14 @@ function RowWords({
   return (
     <>
       <span className="room-matter-name">
-        <span className="as-en" lang="en">
-          {name}
-        </span>
+        {/* a matter's name as filed: English in both languages, unless it is written in Devanagari */}
+        {langOfText(name) === "hi" ? (
+          <span lang="hi">{name}</span>
+        ) : (
+          <span className="as-en" lang="en">
+            {name}
+          </span>
+        )}
         {unprotected === true && (
           <span className="room-matter-np" title={tbt(w.lang, "Not protected")}>
             <IconNotProtected size={14} />

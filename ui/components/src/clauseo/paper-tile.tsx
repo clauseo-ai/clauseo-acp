@@ -5,6 +5,7 @@ import { Button } from "../ui/button.tsx";
 import { Chip } from "../ui/chip.tsx";
 import { Tooltip } from "../ui/tooltip.tsx";
 import { useWords } from "../lib/words.ts";
+import { langOfText } from "../lib/script.ts";
 import { useCarded, useDraftHolders, useInHand, type Target } from "./hand.ts";
 import { useWide } from "./layout.ts";
 import {
@@ -151,7 +152,7 @@ export function PaperTile({
             </span>
           )}
           {FileIcon !== undefined && <FileIcon size={24} className="tile-glyph" />}
-          <span className="tile-title" lang={latin ? "en" : undefined}>
+          <span className="tile-title" lang={latin ? "en" : langOfText(title)}>
             {latin ? title : <Say>{title}</Say>}
           </span>
           {state !== "uncited" && (

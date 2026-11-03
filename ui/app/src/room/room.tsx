@@ -28,6 +28,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { late } from "@clauseo/components/lib/late.ts";
+import { langOfText } from "@clauseo/components/lib/script.ts";
 import { EmptyPapers } from "@clauseo/components/clauseo/empty.tsx";
 import { PaperTile } from "@clauseo/components/clauseo/paper-tile.tsx";
 import { useRoom } from "@clauseo/components/clauseo/room-scope.ts";
@@ -333,7 +334,7 @@ function RoomFrame({
           <LivePlan agent={agentPlan === undefined ? null : openAgent} agents={talks.agents} />
         }
         title={title}
-        titleLang={open !== null && !scratch ? "en" : w.lang}
+        titleLang={open !== null && !scratch ? (langOfText(title) ?? "en") : w.lang}
         titleHint=""
         subtitle={scratch ? mt(w.lang, "Quick questions, kept like any matter") : ""}
         nextDate=""
