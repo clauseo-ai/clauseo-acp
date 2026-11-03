@@ -118,16 +118,16 @@ present), the crate fetches `resolved` itself:
 The crate then runs `node <npm-cli.js> cache add <absolute paths…>` in batches of 40. Next comes
 `node <npm-cli.js> ci` in `install/.tmp-<hash>-<n>`. Both get `--cache <npm-cache> --userconfig
 <agents/npmrc> --globalconfig <agents/npmrc-global> --update-notifier=false --logs-max=0`, both
-files empty (npm refuses one file for both), so no npmrc of the user's or the machine's
-applies. `ci` adds `--offline --ignore-scripts --no-bin-links --no-audit --no-fund`, so it makes no network call. No proxy and no CA file reach
-npm (no `--proxy`, `--https-proxy`, `--cafile` or `NODE_EXTRA_CA_CERTS`): npm never uses the
-network here, and a proxy's password on a command line is visible to other local users. Each npm
-run gets `NODE_OPTIONS` set empty. Each run is raced against a pause and a
-10-minute timeout. Only npm's `npm error code X` line reaches the log, redacted. An `ENOSPC`
-code is `DiskFull`. The temp folder is renamed to `<hash>`, and the receipt is written last. npm
-runs as `node npm-cli.js`, never `npm.cmd`, which `LaunchSpec::new` refuses. Every child starts
-through the `process::Launcher` the crate is given. Just before `Ready` is sent, the install's
-tarballs, the Node archive and the npm cache are removed.
+files empty (npm refuses one file for both), so no npmrc of the user's or the machine's applies.
+`ci` adds `--offline --ignore-scripts --no-bin-links --no-audit --no-fund`, so it makes no network
+call. No proxy and no CA file reach npm (no `--proxy`, `--https-proxy`, `--cafile` or
+`NODE_EXTRA_CA_CERTS`): npm never uses the network here, and a proxy's password on a command line is
+visible to other local users. Each npm run gets `NODE_OPTIONS` set empty. Each run is raced against
+a pause and a 10-minute timeout. Only npm's `npm error code X` line reaches the log, redacted. An
+`ENOSPC` code is `DiskFull`. The temp folder is renamed to `<hash>`, and the receipt is written
+last. npm runs as `node npm-cli.js`, never `npm.cmd`, which `LaunchSpec::new` refuses. Every child
+starts through the `process::Launcher` the crate is given. Just before `Ready` is sent, the
+install's tarballs, the Node archive and the npm cache are removed.
 
 **The receipt** (`clauseo-receipt.json`) records schema 1, the agent id, the adapter version,
 the lock hash, the Node path and version, the platform, and `installed_at` in Unix seconds. A
