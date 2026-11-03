@@ -37,8 +37,10 @@
   .step-group-words {
     min-width: 0;
   }
-  .step-group[data-live] .step-group-now {
-    color: var(--primary);
+  /* live, the line is muted as the folded one is (DESIGN, the step group, "Live"), its count too: only a failure takes
+     primary */
+  .step-group[data-live] .step-group-more {
+    color: var(--muted);
   }
   .step-group-more {
     color: var(--quiet);

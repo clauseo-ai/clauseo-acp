@@ -24,3 +24,11 @@ test("a failure on the folded line is in primary ink at the line's own weight, t
   expect(trouble).toMatch(/font-weight: var\(--w-ui\);/);
   expect(steps).not.toMatch(/font-weight: (5|6|7)\d\d/);
 });
+
+test("the live group's line is muted like the folded one, its count in --muted, never in primary ink", () => {
+  expect(rule(".step-group-line")).toMatch(/text-muted/);
+  expect(steps).not.toMatch(/\[data-live\] \.step-group-now/);
+  expect(rule(".step-group[data-live] .step-group-more")).toMatch(/color: var\(--muted\);/);
+  // primary ink is a failure's alone: no rule gives it to the line's words
+  expect(steps).not.toMatch(/\.step-group-now \{[^}]*--primary/);
+});
