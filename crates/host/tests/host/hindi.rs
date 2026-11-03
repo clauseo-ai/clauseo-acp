@@ -243,6 +243,10 @@ fn the_live_folder_is_created_when_absent_and_an_overlapping_name_creates_nothin
     let dir = Dir::new("hindi-root", &[]);
     let app = dir.work_path("app-data");
     write::create_dir_all(&app);
+    // Canonical, as `same_or_nested` takes a path that does not exist yet (`app/hindi` below) as
+    // written: the temp folder is a symlink on macOS (`/var` to `/private/var`) and an 8.3 name
+    // on Windows CI (`RUNNER~1`), which canonicalising `app` alone would not match.
+    let app = dunce::canonicalize(&app).unwrap();
     let root = dir.work_path("live");
     assert!(!root.exists());
     let made = live_run::prepare_root(Some(root.clone().into_os_string()), &app).unwrap();
