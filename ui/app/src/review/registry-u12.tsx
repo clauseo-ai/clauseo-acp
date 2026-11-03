@@ -94,21 +94,24 @@ const bare = (over: Partial<AgentLimitsView>): AgentLimitsView => {
 const NONE = bare({ freshness: "unavailable" });
 const PAYG = bare({ freshness: "not_applicable", billing: "pay_as_you_go", provider: "anthropic" });
 
-/** Every label the card says in its own words, one past its reset (no share, no bar, its reset muted). */
+/** Every label the card says in its own words, one past its reset (no share, no bar, its reset muted). The per-model
+ * windows carry the model as the host names it: a Max plan's scoped Fable window, and the fixed Sonnet one (#236). */
 const EVERY_WINDOW = figures(62, {
   windows: [
     row(62),
     weekly(20),
     row(41, {
-      id: "seven_day_opus",
+      id: "seven_day_overage_included",
       kind: "model",
-      label: "Opus weekly limit",
+      label: "Fable weekly limit",
+      model: "Fable",
       resets_at: LATER_RESET,
     }),
     row(12, {
       id: "seven_day_sonnet",
       kind: "model",
       label: "Sonnet weekly limit",
+      model: "Sonnet",
       resets_at: LATER_RESET,
     }),
     row(5, {
@@ -227,11 +230,10 @@ export const U12: Entry[] = [
   // the meter's value for a screen reader, and the plan's name as a button
   toolbar("U12-10", limitWords("{n} percent of the plan left"), figures(30)),
   toolbar("U12-11", limitWords("Show the plan's limits"), figures(30)),
-  // the card, every label it knows, one window past its reset
+  // the card, every label it knows, one window past its reset; U12-14 and U12-15, the fixed Opus and Sonnet labels,
+  // are retired for U12-44's template (#236)
   card("U12-12", planCardWords("5-hour limit"), "limits/plan-card", EVERY_WINDOW, 900),
   card("U12-13", planCardWords("Weekly limit"), "limits/plan-card", EVERY_WINDOW, 900),
-  card("U12-14", planCardWords("Opus weekly limit"), "limits/plan-card", EVERY_WINDOW, 900),
-  card("U12-15", planCardWords("Sonnet weekly limit"), "limits/plan-card", EVERY_WINDOW, 900),
   card(
     "U12-16",
     planCardWords("Weekly limit for connected apps"),

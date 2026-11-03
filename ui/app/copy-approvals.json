@@ -1759,22 +1759,6 @@
     "at": "2026-11-03",
     "by": "design"
   },
-  "U12-14": {
-    "en": "Opus weekly limit",
-    "hi": "Opus की साप्ताहिक सीमा",
-    "status": "approved",
-    "at": "2026-11-03",
-    "by": "Rohan",
-    "note": "Rohan, via the orchestrator: 'yeah the copy is fine' (U12-14/15 option a)"
-  },
-  "U12-15": {
-    "en": "Sonnet weekly limit",
-    "hi": "Sonnet की साप्ताहिक सीमा",
-    "status": "approved",
-    "at": "2026-11-03",
-    "by": "Rohan",
-    "note": "Rohan, via the orchestrator: 'yeah the copy is fine' (U12-14/15 option a)"
-  },
   "U12-16": {
     "en": "Weekly limit for connected apps",
     "hi": "जुड़े हुए ऐप्स की साप्ताहिक सीमा",
