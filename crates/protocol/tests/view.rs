@@ -37,6 +37,7 @@ fn inline(text: &str) -> TextOrBlob {
     TextOrBlob::Inline(text.to_owned())
 }
 
+#[cfg(test)]
 fn tool_call() -> ToolCallEntry {
     ToolCallEntry {
         order: seq(5),
@@ -87,6 +88,8 @@ fn tool_call() -> ToolCallEntry {
                 },
             },
         ],
+        started_at: Timestamp::new(1_760_000_004_000).unwrap(),
+        finished_at: None,
         background: None,
     }
 }

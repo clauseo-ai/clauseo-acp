@@ -22,13 +22,13 @@ use crate::helpers::{fold, round_trip};
 /// A clock time for `seq` that no rule on `seq` gives: the fixtures' `seq * 1000` is replaced
 /// so a fold that took a time from the order, or from another event, shows a wrong value.
 #[cfg(test)]
-fn clock(seq: Seq) -> Timestamp {
+pub(super) fn clock(seq: Seq) -> Timestamp {
     let n = i64::try_from(seq.get()).unwrap();
     Timestamp::new(1_760_000_000_000 + n * n * 37 + 11).unwrap()
 }
 
 /// `events` with each `ts` replaced by [`clock`] of its `seq`.
-fn retimed(events: Vec<Envelope>) -> Vec<Envelope> {
+pub(super) fn retimed(events: Vec<Envelope>) -> Vec<Envelope> {
     events
         .into_iter()
         .map(|mut envelope| {

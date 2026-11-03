@@ -299,6 +299,8 @@ export const asideScene = (lang: Lang): QueueScene => {
     status: "completed",
     locations: [],
     content: [],
+    started_at: pm(31),
+    finished_at: pm(32),
     background,
   };
   return {

@@ -37,6 +37,8 @@ mod stream_kinds;
 mod text;
 #[path = "reducer/times.rs"]
 mod times;
+#[path = "reducer/tool_times.rs"]
+mod tool_times;
 #[path = "reducer/unstarted.rs"]
 mod unstarted;
 #[path = "reducer/view.rs"]

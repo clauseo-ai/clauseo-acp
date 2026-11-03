@@ -107,7 +107,9 @@ expression: fold(&scripted_turn().unwrap())
                 }
               }
             }
-          ]
+          ],
+          "started_at": 29000,
+          "finished_at": 31000
         }
       },
       {
@@ -150,7 +152,9 @@ expression: fold(&scripted_turn().unwrap())
                 }
               }
             }
-          ]
+          ],
+          "started_at": 57000,
+          "finished_at": 59000
         }
       },
       {
@@ -193,7 +197,9 @@ expression: fold(&scripted_turn().unwrap())
                 }
               }
             }
-          ]
+          ],
+          "started_at": 85000,
+          "finished_at": 87000
         }
       },
       {
@@ -236,7 +242,9 @@ expression: fold(&scripted_turn().unwrap())
                 }
               }
             }
-          ]
+          ],
+          "started_at": 113000,
+          "finished_at": 115000
         }
       },
       {
@@ -288,7 +296,9 @@ expression: fold(&scripted_turn().unwrap())
                 }
               }
             }
-          ]
+          ],
+          "started_at": 141000,
+          "finished_at": 143000
         }
       },
       {
@@ -331,7 +341,9 @@ expression: fold(&scripted_turn().unwrap())
                 }
               }
             }
-          ]
+          ],
+          "started_at": 170000,
+          "finished_at": 172000
         }
       },
       {
@@ -374,7 +386,9 @@ expression: fold(&scripted_turn().unwrap())
                 }
               }
             }
-          ]
+          ],
+          "started_at": 198000,
+          "finished_at": 200000
         }
       },
       {
@@ -417,7 +431,9 @@ expression: fold(&scripted_turn().unwrap())
                 }
               }
             }
-          ]
+          ],
+          "started_at": 226000,
+          "finished_at": 228000
         }
       },
       {
@@ -469,7 +485,9 @@ expression: fold(&scripted_turn().unwrap())
                 }
               }
             }
-          ]
+          ],
+          "started_at": 254000,
+          "finished_at": 258000
         }
       },
       {
@@ -539,7 +557,9 @@ expression: fold(&scripted_turn().unwrap())
                 }
               }
             }
-          ]
+          ],
+          "started_at": 284000,
+          "finished_at": 286000
         }
       },
       {
@@ -582,7 +602,9 @@ expression: fold(&scripted_turn().unwrap())
                 }
               }
             }
-          ]
+          ],
+          "started_at": 313000,
+          "finished_at": 315000
         }
       },
       {
@@ -625,7 +647,9 @@ expression: fold(&scripted_turn().unwrap())
                 }
               }
             }
-          ]
+          ],
+          "started_at": 341000,
+          "finished_at": 343000
         }
       },
       {
@@ -677,7 +701,9 @@ expression: fold(&scripted_turn().unwrap())
                 }
               }
             }
-          ]
+          ],
+          "started_at": 369000,
+          "finished_at": 371000
         }
       },
       {
@@ -720,7 +746,9 @@ expression: fold(&scripted_turn().unwrap())
                 }
               }
             }
-          ]
+          ],
+          "started_at": 397000,
+          "finished_at": 399000
         }
       },
       {
@@ -763,7 +791,9 @@ expression: fold(&scripted_turn().unwrap())
                 }
               }
             }
-          ]
+          ],
+          "started_at": 425000,
+          "finished_at": 427000
         }
       },
       {
@@ -806,7 +836,9 @@ expression: fold(&scripted_turn().unwrap())
                 }
               }
             }
-          ]
+          ],
+          "started_at": 454000,
+          "finished_at": 456000
         }
       },
       {
@@ -858,7 +890,9 @@ expression: fold(&scripted_turn().unwrap())
                 }
               }
             }
-          ]
+          ],
+          "started_at": 482000,
+          "finished_at": 484000
         }
       },
       {
@@ -901,7 +935,9 @@ expression: fold(&scripted_turn().unwrap())
                 }
               }
             }
-          ]
+          ],
+          "started_at": 510000,
+          "finished_at": 512000
         }
       },
       {
@@ -944,7 +980,9 @@ expression: fold(&scripted_turn().unwrap())
                 }
               }
             }
-          ]
+          ],
+          "started_at": 538000,
+          "finished_at": 540000
         }
       },
       {
@@ -987,7 +1025,9 @@ expression: fold(&scripted_turn().unwrap())
                 }
               }
             }
-          ]
+          ],
+          "started_at": 566000,
+          "finished_at": 568000
         }
       },
       {

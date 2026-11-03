@@ -57,6 +57,7 @@ const chose = (kind: PermissionOption["kind"]): PermissionEntry["state"] => ({
 const callEntry = (order: number, n: number, over: Partial<ToolCallEntry> = {}): ViewEntry => ({
   tool_call: {
     order,
+    started_at: 0,
     tool_call: uuid(n, 7),
     turn: TURN,
     title: "Edit Notice to the bank.docx",

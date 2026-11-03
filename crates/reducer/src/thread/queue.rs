@@ -186,6 +186,12 @@ fn is_final(status: ToolCallStatus) -> bool {
     }
 }
 
+/// `ts` when `status` is final, else `None`: the finish time an event at `ts` gives a tool call
+/// that takes `status`.
+pub(super) fn final_time(status: ToolCallStatus, ts: Timestamp) -> Option<Timestamp> {
+    is_final(status).then_some(ts)
+}
+
 /// `queue_held` as the host sets it (the fold never does: the host keeps the flag in memory
 /// and logs nothing for it). Returns the header's `Upsert` when it changed.
 pub(crate) fn set_queue_held(state: &mut ThreadState, held: bool) -> Option<ViewChange> {
