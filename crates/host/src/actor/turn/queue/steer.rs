@@ -3,7 +3,10 @@
 //! with the running turn before it is sent; the agent's answer decides where it went:
 //! `Injected` stays in the running turn (with the tool calls it set aside), anything else moves
 //! it to a new turn at the queue's head (`Requeued`). An answer that does not come within
-//! [`STEER_WAIT`] counts as `Failed`, so an agent that never answers cannot freeze the queue.
+//! [`STEER_WAIT`] after the steered turn ended counts as `Failed`, so an agent that never answers
+//! cannot freeze the queue. The wait starts at the turn's end, not at the send: while the turn
+//! runs the agent may answer only once it takes the message in (after a long tool call, say),
+//! and a steer timed out then would be requeued and reach the agent twice.
 //! Every other steer is a send now.
 
 use clauseo_acp::SteerResult;
@@ -24,14 +27,15 @@ use super::{After, Queued, command_tag, drop_turn, move_on, queue, sync_held};
 use crate::build;
 use crate::error::Error;
 
-/// How long a steer waits for the agent's answer before it moves to a new turn.
+/// How long a steer waits for the agent's answer, from the end of the turn it was sent into,
+/// before it moves to a new turn.
 const STEER_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
 
-/// A steer sent and not answered yet, with its answer's deadline.
+/// A steer sent and not answered yet, with its answer's deadline once its turn has ended.
 #[derive(Debug)]
 pub(crate) struct Pending {
     ask: Ask,
-    timer: futures::future::AbortHandle,
+    timer: Option<futures::future::AbortHandle>,
 }
 
 /// A steer, once its message is durable.
@@ -122,13 +126,18 @@ pub(super) fn send(actor: &mut Actor, thread: ThreadId, ask: Ask) {
     };
     let message = ask.message;
     let content = ask.content.clone();
-    let timer = actor.arm_timer(
-        STEER_WAIT,
-        TurnTimer {
-            thread,
-            kind: TimerKind::Steer(message),
-        },
-    );
+    // The wait starts now only if the steered turn has already ended; else at its end.
+    let running = state(actor, thread).is_some_and(|state| {
+        state
+            .current
+            .as_ref()
+            .is_some_and(|current| current.turn == ask.turn)
+            || state
+                .closing
+                .as_ref()
+                .is_some_and(|closing| closing.close.turn == ask.turn)
+    });
+    let timer = (!running).then(|| arm(actor, thread, message));
     if let Some(queue) = queue(actor, thread) {
         queue.steers.push(Pending { ask, timer });
     }
@@ -154,7 +163,9 @@ pub(in super::super) fn on_steered(actor: &mut Actor, thread: ThreadId, steered:
         tracing::debug!(%thread, "a steer answered after its wait ran out");
         return;
     };
-    timer.abort();
+    if let Some(timer) = timer {
+        timer.abort();
+    }
     match result {
         Ok(SteerResult::Injected) => {
             let logged = injected(actor, thread, &ask);
@@ -177,8 +188,44 @@ pub(in super::super) fn on_steered(actor: &mut Actor, thread: ThreadId, steered:
     sync_held(actor, thread);
 }
 
-/// The steer of `message` got no answer within [`STEER_WAIT`]: it moves to a new turn, as a
-/// failed steer does, and a later answer is ignored.
+/// Arms the wait for the steer of `message`'s answer.
+fn arm(actor: &mut Actor, thread: ThreadId, message: MessageId) -> futures::future::AbortHandle {
+    actor.arm_timer(
+        STEER_WAIT,
+        TurnTimer {
+            thread,
+            kind: TimerKind::Steer(message),
+        },
+    )
+}
+
+/// The end of `turn` is durable: each steer sent into it and still unanswered starts its wait.
+pub(super) fn turn_closed(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
+    let waiting: Vec<MessageId> = queue(actor, thread)
+        .map(|queue| {
+            queue
+                .steers
+                .iter()
+                .filter(|pending| pending.ask.turn == turn && pending.timer.is_none())
+                .map(|pending| pending.ask.message)
+                .collect()
+        })
+        .unwrap_or_default();
+    for message in waiting {
+        let timer = arm(actor, thread, message);
+        if let Some(pending) = queue(actor, thread).and_then(|queue| {
+            queue
+                .steers
+                .iter_mut()
+                .find(|pending| pending.ask.message == message)
+        }) {
+            pending.timer = Some(timer);
+        }
+    }
+}
+
+/// The steer of `message` got no answer within [`STEER_WAIT`] of its turn's end: it moves to a
+/// new turn, as a failed steer does, and a later answer is ignored.
 pub(in super::super) fn on_steer_timer(actor: &mut Actor, thread: ThreadId, message: MessageId) {
     let Some(Pending { ask, .. }) = take_pending(actor, thread, message) else {
         return;

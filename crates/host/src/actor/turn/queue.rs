@@ -388,6 +388,8 @@ pub(super) fn committed(actor: &mut Actor, thread: ThreadId, after: After, ok: b
 /// The commit ending the current turn `turn` is durable: a head sent now starts; else the
 /// queue moves on after `EndTurn` (or a removed turn) and holds after any other stop.
 pub(super) fn on_turn_closed(actor: &mut Actor, thread: ThreadId, turn: TurnId, stop: StopReason) {
+    // A steer of this turn still unanswered starts its wait now.
+    steer::turn_closed(actor, thread, turn);
     let Some(queue) = queue(actor, thread) else {
         return;
     };
