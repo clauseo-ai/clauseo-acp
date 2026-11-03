@@ -53,4 +53,98 @@ export const ICON_NAMES = [
   { component: "IconNotProtected", source: "notProtected", meaning: "Not protected" },
   { component: "IconFolder", source: "folder", meaning: "A folder beyond the matter" },
   { component: "IconWebsite", source: "website", meaning: "A website" },
+  {
+    component: "IconBreak",
+    source: "circleAlert",
+    meaning:
+      "A break: the working line's lead when an answer stopped or failed, not used in the room yet",
+  },
+  { component: "IconOffline", source: "wifiOff", meaning: "Offline, not used in the room yet" },
+  {
+    component: "IconQuestion",
+    source: "circleQuestionMark",
+    meaning: "A question for you, not used in the room yet",
+  },
+  {
+    component: "IconTryAgain",
+    source: "rotateCcw",
+    meaning: "Try again, Restart, Retry now, Try now, not used in the room yet",
+  },
+  {
+    component: "IconStop",
+    source: "square",
+    meaning: "Stop, and a stopped matter or conversation, not used in the room yet",
+  },
+  {
+    component: "IconCross",
+    source: "x",
+    meaning: "A cross: Don't allow, Not allowed, not used in the room yet",
+  },
+  {
+    component: "IconConversation",
+    source: "messageSquare",
+    meaning: "A conversation: a version Clauseo made in one, not used in the room yet",
+  },
+  {
+    component: "IconAnswerReady",
+    source: "messageSquareDot",
+    meaning: "Answer ready, not used in the room yet",
+  },
+  {
+    component: "IconYourChange",
+    source: "penLine",
+    meaning: "A change you made outside Clauseo, not used in the room yet",
+  },
+  {
+    component: "IconImported",
+    source: "fileInput",
+    meaning: "Papers imported, not used in the room yet",
+  },
+  {
+    component: "IconCompare",
+    source: "diff",
+    meaning: "Compare, Compare with now, not used in the room yet",
+  },
+  {
+    component: "IconLanguage",
+    source: "languages",
+    meaning: "Settings: Language, not used in the room yet",
+  },
+  {
+    component: "IconAppearance",
+    source: "contrast",
+    meaning: "Settings: Appearance, not used in the room yet",
+  },
+  { component: "IconAbout", source: "info", meaning: "Settings: About, not used in the room yet" },
+  { component: "IconPin", source: "pin", meaning: "Pin to the top, not used in the room yet" },
+  {
+    component: "IconShowInFinder",
+    source: "folderOpen",
+    meaning: "Show in Finder, or in Explorer, not used in the room yet",
+  },
+  {
+    component: "IconLocateFolder",
+    source: "folderSearch",
+    meaning: "Locate folder, and a folder that moved, not used in the room yet",
+  },
+  {
+    component: "IconRemoveFromList",
+    source: "listX",
+    meaning: "Remove from the list, not used in the room yet",
+  },
+  {
+    component: "IconCommand",
+    source: "squareSlash",
+    meaning: "An agent's command, in the / menu, not used in the room yet",
+  },
+  {
+    component: "IconNeedsPermission",
+    source: "shieldQuestionMark",
+    meaning: "Needs your permission, not used in the room yet",
+  },
+  {
+    component: "IconPlanLimit",
+    source: "gauge",
+    meaning: "The plan's limit, not used in the room yet",
+  },
 ] as const;
