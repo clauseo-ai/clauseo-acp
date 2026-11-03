@@ -52,6 +52,10 @@
     gap: var(--s2);
     flex: none;
   }
+  /* starting a row of its own, the tool line drops its dot */
+  .room-status-tools[data-lead] > .room-dot {
+    display: none;
+  }
   .room-status[data-fit="wrapped"] .room-status-tools {
     flex: 0 1 auto;
     min-width: 0;
