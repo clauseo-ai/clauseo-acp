@@ -302,7 +302,7 @@ test("a tool call moved to the background says so; the answer's note explains it
   expect(text).toBe(
     mt(
       "en",
-      "Your words at {time} came in before a task had finished. It went on in the background and finished at {done}. The answer uses what it found.",
+      "Your words at {time} came in before some work had finished. It went on in the background and finished at {done}. The answer uses what it found.",
       { time: clockTime("en", AT), done: clockTime("en", LATER) },
     ),
   );

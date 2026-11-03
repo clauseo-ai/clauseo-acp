@@ -122,8 +122,8 @@ const HI = {
   "Show what it found": "क्या मिला, देखें",
   // tool calls a steer moved to the background (any agent, any tool): the note under the answer once they finished
   // before it ended, naming none (its list "Show what it found" names each), and the mark on each call's row
-  "Your words at {time} came in before a task had finished. It went on in the background and finished at {done}. The answer uses what it found.":
-    "आपके {time} बजे के शब्द एक काम पूरा होने से पहले पहुँचे। वह काम पृष्ठभूमि में चलता रहा और {done} बजे पूरा हुआ। उत्तर में उससे मिली बातों का इस्तेमाल हुआ है।",
+  "Your words at {time} came in before some work had finished. It went on in the background and finished at {done}. The answer uses what it found.":
+    "आपके {time} बजे के शब्द कुछ काम पूरा होने से पहले पहुँचे। वह काम पृष्ठभूमि में चलता रहा और {done} बजे पूरा हुआ। उत्तर में उससे मिली बातों का इस्तेमाल हुआ है।",
   "In the background": "पृष्ठभूमि में",
   /* ---------- another conversation is changing the matter ---------- */
   "Waiting for '{title}' to finish, by {time}": "'{title}' के पूरा होने की प्रतीक्षा, {time} बजे तक",
