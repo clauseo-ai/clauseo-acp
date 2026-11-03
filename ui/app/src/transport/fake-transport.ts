@@ -92,6 +92,8 @@ export type FakeHost = {
   /** Answers each subscribe; throwing refuses it. */
   subscribe?: (stream: StreamId, after: ViewPosition | null) => void;
   platform?: DisplayInfo["platform"];
+  /** The release date display_info reports; null, the dev and CI build's, when left out. */
+  releaseDate?: DisplayInfo["release_date"];
   /** With it, the fake is a NextHost (room/host-next.ts): the rows the host doesn't have yet, answered from here. */
   next?: FakeNextHost;
 };
@@ -372,7 +374,7 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
   }
 
   async displayInfo(): Promise<DisplayInfo> {
-    return { platform: this.host.platform ?? "linux", release_date: null };
+    return { platform: this.host.platform ?? "linux", release_date: this.host.releaseDate ?? null };
   }
 
   subscribe(stream: StreamId, after: ViewPosition | null, subscriber: BatchSubscriber): () => void {

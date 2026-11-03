@@ -49,6 +49,8 @@ export type SectionContext = {
   display: Display;
   /** Every agent's limits, from the window's limits store: Plan and usage's note reads them. */
   limits: LimitsView;
+  /** The release date the host reports (`YYYY-MM-DD`), or null: About's line reads it. */
+  releaseDate: string | null;
   /** Whether a firm's policy locks this setting. */
   locked: (key: keyof UiSettings) => boolean;
   /** The lawyer's choice: one patch to the store, unless the key is locked or already holds the value. */
@@ -116,6 +118,7 @@ export function contextOf(
   settings: LiveSettings,
   display: Display,
   limits: LimitsView = {},
+  releaseDate: string | null = null,
 ): SectionContext {
   const locked = (key: keyof UiSettings) => settings.locked.includes(lockKey(key));
   return {
@@ -124,6 +127,7 @@ export function contextOf(
     settings,
     display,
     limits,
+    releaseDate,
     locked,
     choose: (key, value) => {
       if (locked(key) || settings.ui[key] === value) return;

@@ -19,6 +19,7 @@ const HI = {
   // what each section says beside its name, at a glance
   "{theme}, text size {n}": "{theme}, अक्षरों का आकार {n}",
   "Version {version}": "संस्करण {version}",
+  "Released {date}": "{date} को जारी",
   "{n}% of the 5-hour limit left": "5 घंटे की सीमा का {n}% बाकी",
   "Pay as you go": "उपयोग के अनुसार भुगतान",
   // a row the firm's policy locks

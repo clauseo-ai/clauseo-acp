@@ -19,6 +19,9 @@ const entry = (id: string, words: WordsRef, section: SectionId, locked?: string[
   ),
 });
 
+/** The release date the review shows About with: a release build's, as display_info reports it. */
+const RELEASE_DATE_SHOWN = "2026-11-03";
+
 /** U11's entries, each id written as it is: an id never moves when an entry is added or taken out. */
 export const U11: Entry[] = [
   entry("U11-01", settingsWords("Sections"), "language"),
@@ -58,4 +61,9 @@ export const U11: Entry[] = [
     settingsWords("A strong case, because the complaint names Mr. Sharma only as a director."),
     "appearance",
   ),
+  // About's release line, with a release date the host reports (a release build's; a dev build shows no line)
+  {
+    ...entry("U11-50", settingsWords("Released {date}"), "about"),
+    render: (lang) => <SettingsOver section="about" lang={lang} releaseDate={RELEASE_DATE_SHOWN} />,
+  },
 ];

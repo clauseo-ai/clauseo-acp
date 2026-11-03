@@ -10,20 +10,23 @@ import type { LimitsView } from "../transport/protocol.ts";
 
 /** The window over a host holding the default settings in `lang`, with `locked` locked, and with `limits` the plan's
  * limits its channel carries (U12); the display stays the frame's own (the review sets it per cell), so the store
- * starts and shows nothing. */
+ * starts and shows nothing. `releaseDate` is the release date the host reports (null, a dev build, when left out). */
 export function SettingsOver({
   section,
   lang,
   locked = [],
   limits,
+  releaseDate = null,
 }: {
   section: SectionId;
   lang: Lang;
   locked?: string[];
   limits?: LimitsView;
+  releaseDate?: string | null;
 }) {
   const [made] = useState(() => {
     const transport = new FakeTransport({
+      releaseDate,
       next: {
         query: (query) => {
           if (query === "get_settings")
@@ -41,6 +44,8 @@ export function SettingsOver({
       show: () => {},
       override: { language: lang },
     });
+    // what connectDisplay does with display_info's report, as the real window gets it
+    store.setReleaseDate(releaseDate);
     return { transport, store };
   });
   return (
