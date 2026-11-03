@@ -8,6 +8,7 @@ import { useSettingsWords } from "@clauseo/components/lib/words-settings.ts";
 import { PartsRoot } from "@clauseo/components/ui/root.tsx";
 import { useEffect, useMemo, useState } from "react";
 import type { DisplayStore } from "../room/display-store.ts";
+import { LimitsContext, limitsStoreOf } from "../store/limits.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import { tauriWindowControls, type WindowControls } from "../transport/window-controls.ts";
 import { setWindowTitle } from "../transport/window-title.ts";
@@ -32,6 +33,8 @@ export function SettingsApp({
   const w = useSettingsWords();
   const display = useDisplay();
   const settings = useSettings(store);
+  // the window's own limits store, over its channel's limits_view_changed: Plan and usage reads it
+  const [limits] = useState(() => limitsStoreOf(transport));
   const ctx = contextOf(store, transport, settings, display);
   const shown = shownSections(ctx);
   const [chosen, setChosen] = useState<SectionId | undefined>(() =>
@@ -69,22 +72,24 @@ export function SettingsApp({
   };
   return (
     <PartsRoot>
-      <SettingsWindow
-        platform={display.platform}
-        title={title}
-        sections={shown.map((s) => ({
-          id: s.id,
-          name: w.s(s.name),
-          ...(s.note === undefined ? {} : { note: s.note(ctx, w.lang) }),
-        }))}
-        current={open?.id ?? ""}
-        onSection={onSection}
-        lead={open?.lead === undefined ? undefined : w.s(open.lead)}
-        caption={caption}
-        nativeLights={controls !== null}
-      >
-        {open !== undefined && <open.Body ctx={ctx} />}
-      </SettingsWindow>
+      <LimitsContext value={limits}>
+        <SettingsWindow
+          platform={display.platform}
+          title={title}
+          sections={shown.map((s) => ({
+            id: s.id,
+            name: w.s(s.name),
+            ...(s.note === undefined ? {} : { note: s.note(ctx, w.lang) }),
+          }))}
+          current={open?.id ?? ""}
+          onSection={onSection}
+          lead={open?.lead === undefined ? undefined : w.s(open.lead)}
+          caption={caption}
+          nativeLights={controls !== null}
+        >
+          {open !== undefined && <open.Body ctx={ctx} />}
+        </SettingsWindow>
+      </LimitsContext>
     </PartsRoot>
   );
 }
