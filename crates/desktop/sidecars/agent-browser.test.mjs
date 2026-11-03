@@ -1,13 +1,13 @@
 // Tests for agent-browser.mjs. Plain Node, no install, and no network: the fetch is a stub, and
 // the pins are fixtures written to a temp folder (plus the real pin, read but never fetched).
 //
-//   node --test crates/desktop/sidecars/
+//   node --test 'crates/desktop/sidecars/*.test.mjs'
 //
 // CI does not run this file (the xtask check is frozen); see the header of agent-browser.mjs.
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, stat, readdir, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, test } from "node:test";
@@ -34,15 +34,29 @@ async function pinFile(url, digest, triple = "x86_64-unknown-linux-gnu") {
   return path;
 }
 
-/** A stub fetch: records the calls, answers with `body` and `status`. */
-function stubFetch(body = BODY, status = 200) {
+/**
+ * A stub fetch: records the calls and answers with `status`, `headers` and a body. `body` is a
+ * Buffer, a list of chunks (for a body that grows past the cap), or null (a body-less response).
+ */
+function stubFetch(body = BODY, status = 200, headers = {}) {
   const calls = [];
   const fetch = async (url, init) => {
     calls.push({ url, init });
+    const chunks = body === null ? null : Array.isArray(body) ? body : [body];
     return {
       ok: status >= 200 && status < 300,
       status,
-      arrayBuffer: async () => body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength),
+      headers: new Headers(headers),
+      body:
+        chunks === null
+          ? null
+          : new ReadableStream({
+              start(controller) {
+                for (const chunk of chunks) controller.enqueue(chunk);
+                controller.close();
+              },
+            }),
+      arrayBuffer: async () => BODY,
     };
   };
   return { fetch, calls };
@@ -106,6 +120,78 @@ describe("fetchAgentBrowser", () => {
     assert.equal(await exists(dest), false);
   });
 
+  test("a 204 with the right bytes throws and writes nothing: only 200 is a download", async () => {
+    const pinPath = await pinFile(`${PREFIX}/agent-browser-linux-x64`, sha(BODY));
+    const { fetch } = stubFetch(BODY, 204);
+    const dest = await destIn("agent-browser-linux-x64");
+    await assert.rejects(fetchAgentBrowser("x86_64-unknown-linux-gnu", dest, { fetch, pinPath }), /not 200/);
+    assert.equal(await exists(dest), false);
+    assert.equal(await exists(`${dest}.partial`), false);
+  });
+
+  test("an encoded slash, an encoded dot pair or a dot-dot path in the asset name is refused", async () => {
+    const bad = [
+      `${PREFIX}/..%2F..%2Fx`,
+      `${PREFIX}/a%2Fb`,
+      `${PREFIX}/../../x`,
+    ];
+    for (const url of bad) {
+      const pinPath = await pinFile(url, sha(BODY));
+      const { fetch, calls } = stubFetch(BODY);
+      const dest = await destIn("agent-browser-linux-x64");
+      await assert.rejects(fetchAgentBrowser("x86_64-unknown-linux-gnu", dest, { fetch, pinPath }), /pinned url/, url);
+      assert.equal(calls.length, 0, url);
+    }
+  });
+
+  test("the download carries a timeout signal", async () => {
+    const pinPath = await pinFile(`${PREFIX}/agent-browser-linux-x64`, sha(BODY));
+    const { fetch, calls } = stubFetch(BODY);
+    await fetchAgentBrowser("x86_64-unknown-linux-gnu", await destIn("agent-browser-linux-x64"), { fetch, pinPath });
+    assert.ok(calls[0].init.signal instanceof AbortSignal);
+    assert.equal(calls[0].init.signal.aborted, false);
+  });
+
+  test("a Content-Length over 64 MB is refused, and the body is cancelled unread", async () => {
+    const pinPath = await pinFile(`${PREFIX}/agent-browser-linux-x64`, sha(BODY));
+    let cancelled = false;
+    const fetch = async () => ({
+      status: 200,
+      headers: new Headers({ "content-length": String(64 * 1024 * 1024 + 1) }),
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue(BODY);
+          controller.close();
+        },
+        cancel() {
+          cancelled = true;
+        },
+      }),
+    });
+    const dest = await destIn("agent-browser-linux-x64");
+    await assert.rejects(fetchAgentBrowser("x86_64-unknown-linux-gnu", dest, { fetch, pinPath }), /over 67108864 bytes/);
+    assert.equal(cancelled, true);
+    assert.equal(await exists(dest), false);
+  });
+
+  test("a body that grows past 64 MB is refused and writes nothing", async () => {
+    const pinPath = await pinFile(`${PREFIX}/agent-browser-linux-x64`, sha(BODY));
+    const chunk = new Uint8Array(16 * 1024 * 1024);
+    const { fetch } = stubFetch([chunk, chunk, chunk, chunk, chunk]); // 80 MB, no Content-Length
+    const dest = await destIn("agent-browser-linux-x64");
+    await assert.rejects(fetchAgentBrowser("x86_64-unknown-linux-gnu", dest, { fetch, pinPath }), /over 67108864 bytes/);
+    assert.equal(await exists(dest), false);
+    assert.equal(await exists(`${dest}.partial`), false);
+  });
+
+  test("a body-less 200 is read through arrayBuffer and checked like any other", async () => {
+    const pinPath = await pinFile(`${PREFIX}/agent-browser-linux-x64`, sha(BODY));
+    const { fetch } = stubFetch(null);
+    const dest = await destIn("agent-browser-linux-x64");
+    await fetchAgentBrowser("x86_64-unknown-linux-gnu", dest, { fetch, pinPath });
+    assert.deepEqual(await readFile(dest), BODY);
+  });
+
   test("a matching sha256 writes the file, mode 0755, and no .partial", async (t) => {
     const pinPath = await pinFile(`${PREFIX}/agent-browser-linux-x64`, sha(BODY));
     const { fetch, calls } = stubFetch(BODY);
@@ -144,7 +230,7 @@ describe("fetchAgentBrowser", () => {
 });
 
 describe("parsePin", () => {
-  test("reads the real pin: six triples, all with a url and a sha256 or none", async () => {
+  test("reads the real pin: six triples, each with a url and a sha256, none used", async () => {
     const text = await readFile(new URL("../agent-browser.toml", import.meta.url), "utf8");
     const pin = parsePin(text);
     assert.equal(pin.version, VERSION);
@@ -160,7 +246,8 @@ describe("parsePin", () => {
       ],
     );
     for (const [triple, entry] of pin.triples) {
-      assert.ok(entry.none === true || /^[0-9a-f]{64}$/.test(entry.sha256), triple);
+      assert.equal(entry.none, undefined, `${triple} has no build upstream`);
+      assert.match(entry.sha256, /^[0-9a-f]{64}$/, triple);
     }
   });
 
