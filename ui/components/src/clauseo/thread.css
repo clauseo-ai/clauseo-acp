@@ -544,6 +544,10 @@
     line-height: var(--lh-small);
     color: var(--muted);
   }
+  /* a Hindi note keeps the notes' small line, on its own Hindi tokens, over the reply's line Hindi blocks take */
+  .reply-text [data-clauseo="markdown"] .footnotes :where([lang="hi"]) {
+    line-height: var(--lh-small);
+  }
   .reply-text [data-clauseo="markdown"] mark {
     background: var(--well-strong);
     color: inherit;
