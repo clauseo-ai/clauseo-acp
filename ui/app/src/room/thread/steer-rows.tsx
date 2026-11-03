@@ -95,7 +95,7 @@ export function SteerNotes({ notes }: { notes: readonly SteerNoteData[] }) {
       <SteerNote
         testId="steer-note"
         text={w.m(
-          "Your words at {time} came in before a task had finished. It went on in the background and finished at {done}. The answer uses what it found.",
+          "Your words at {time} came in before some work had finished. It went on in the background and finished at {done}. The answer uses what it found.",
           { time: stamp(w.lang, n.at, now), done: stamp(w.lang, n.done, now) },
         )}
         found={n.found.map((f) => ({ at: stamp(w.lang, f.at, now), what: f.what }))}
