@@ -15,7 +15,7 @@ import {
   kindsOf,
   lineOf,
   markOf,
-  restLine,
+  restOf,
   segmentsOf,
   summaryOf,
   troubleOf,
@@ -113,35 +113,61 @@ describe("the folded line", () => {
     ]);
   });
 
-  test("at rest the summary counts only finished steps: a step still waiting, failed or stopped is never told as done", () => {
+  test("at rest the line's words and icons count only finished steps: a step still waiting, failed or stopped is never told as done", () => {
     const lease = raw({ path: "a/Lease deed.pdf" });
-    // UTC-17: one read done, one change still waiting on the lawyer
-    expect(restLine("en", [call("read"), call("edit", "pending", lease)])).toBe("1 paper read.");
+    // UTC-17: one read done, one change still waiting on the lawyer: the words and the icons count the read alone
+    expect(restOf("en", [call("read"), call("edit", "pending", lease)])).toEqual({
+      kinds: ["read"],
+      line: "1 paper read.",
+      trouble: "",
+    });
     expect(
-      restLine("en", [call("read"), call("fetch", "failed"), call("search", "cancelled")]),
-    ).toBe("1 paper read.");
-    // none done: the step still to finish says what it is doing; else what was tried
-    expect(restLine("en", [call("edit", "pending", lease)])).toBe("Changing Lease deed.pdf.");
-    expect(restLine("en", [call("read", "failed", lease)])).toBe("Tried to read Lease deed.pdf.");
+      restOf("en", [call("read"), call("fetch", "failed"), call("search", "cancelled")]),
+    ).toEqual({
+      kinds: ["read"],
+      line: "1 paper read.",
+      trouble: "1 of them failed. 1 of them was stopped.",
+    });
+    // none done: the step still to finish says what it is doing, with its own icon
+    expect(restOf("en", [call("read", "failed", lease), call("edit", "pending", lease)])).toEqual({
+      kinds: ["edit"],
+      line: "Changing Lease deed.pdf.",
+      trouble: "1 of them failed.",
+    });
+    const line = (calls: ToolCallEntry[]) =>
+      lineOf(
+        "en",
+        calls.map((c) => ({ tool_call: c })),
+        false,
+      );
+    expect(line([call("read"), call("edit", "pending", lease)]).kinds).toEqual(["read"]);
+  });
+
+  test("every step over and none finished: what was tried is the trouble, said once, never followed by It failed.", () => {
+    const lease = raw({ path: "a/Lease deed.pdf" });
+    expect(restOf("en", [call("read", "failed", lease)])).toEqual({
+      kinds: ["read"],
+      line: "",
+      trouble: "Tried to read Lease deed.pdf.",
+    });
+    expect(restOf("hi", [call("read", "failed", lease)]).trouble).toBe(
+      "Lease deed.pdf पढ़ने की कोशिश की गई।",
+    );
     expect(
-      restLine("en", [
+      restOf("en", [
         call("read", "failed", lease),
         ...Array.from({ length: 4 }, () => call("edit", "cancelled")),
-      ]),
+      ]).trouble,
     ).toBe(
       "Tried to read Lease deed.pdf. Tried to change a paper. Tried to change a paper. And 2 more.",
     );
-    expect(
-      lineOf(
-        "en",
-        [{ tool_call: call("read") }, { tool_call: call("edit", "pending", lease) }],
-        false,
-      ).line,
-    ).toBe("1 paper read.");
+    for (const lang of ["en", "hi"] as const) {
+      const one = restOf(lang, [call("fetch", "failed")]);
+      expect(one.trouble).not.toContain(troubleOf(lang, [call("fetch", "failed")]));
+    }
   });
 
-  test("a failure stays on the line: a group of one, or one of many; a stop too", () => {
-    expect(troubleOf("en", [call("read", "failed")])).toBe("It failed.");
+  test("a failure stays on the line, one of many; a stop too", () => {
     expect(troubleOf("en", [call("read"), call("fetch", "failed")])).toBe("1 of them failed.");
     expect(
       troubleOf("en", [call("read", "failed"), call("fetch", "failed"), call("read", "cancelled")]),

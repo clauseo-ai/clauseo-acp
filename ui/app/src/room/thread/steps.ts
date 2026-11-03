@@ -131,38 +131,39 @@ export function summaryOf(lang: Lang, calls: readonly ToolCallEntry[]): string {
   return out.join(" ");
 }
 
-/** The folded line's words for a group at rest: the summary counts only the steps that finished, so a step still
+/** The folded line for a group at rest. Its words and its icons count only the steps that finished, so a step still
  * waiting, or one that failed or was stopped, is never told as done. With none finished, the newest step still to
- * finish says what it is doing; otherwise what was tried, up to three ("Tried to read Lease.pdf."), the rest as more. */
-export function restLine(lang: Lang, calls: readonly ToolCallEntry[]): string {
+ * finish says what it is doing. With every step over and none finished, what was tried ("Tried to read Lease.pdf.",
+ * up to three, the rest as more) is the trouble itself, said once and led by the break, never followed by "It failed.". */
+export function restOf(
+  lang: Lang,
+  calls: readonly ToolCallEntry[],
+): { kinds: string[]; line: string; trouble: string } {
   const done = calls.filter((c) => c.status === "completed");
-  if (done.length > 0) return summaryOf(lang, done);
+  if (done.length > 0)
+    return { kinds: iconsOf(done), line: summaryOf(lang, done), trouble: troubleOf(lang, calls) };
   const waiting = [...calls].reverse().find(unsettled);
-  if (waiting !== undefined) return doingOf(lang, waiting);
+  if (waiting !== undefined)
+    return {
+      kinds: iconsOf([waiting]),
+      line: doingOf(lang, waiting),
+      trouble: troubleOf(lang, calls),
+    };
   const out = calls.slice(0, NAMED).map((c) => doneOf(lang, c));
   const rest = calls.length - NAMED;
   if (rest > 0) out.push(counted(lang, ["And 1 more.", "And {n} more."], rest));
-  return out.join(" ");
+  return { kinds: iconsOf(calls), line: "", trouble: out.join(" ") };
 }
 
-/** What failed or was stopped in a group, in words for the folded line; "" when nothing did. */
+/** What failed or was stopped in a group with a step that finished or is still to, in words for the folded line; ""
+ * when nothing did. A group with every step over and none finished says what it tried instead (restOf). */
 export function troubleOf(lang: Lang, calls: readonly ToolCallEntry[]): string {
   const failed = calls.filter((c) => c.status === "failed").length;
   const stopped = calls.filter((c) => c.status === "cancelled").length;
-  const one = calls.length === 1;
   const out: string[] = [];
-  if (failed > 0)
-    out.push(
-      one
-        ? steps(lang, "It failed.")
-        : counted(lang, ["1 of them failed.", "{n} of them failed."], failed),
-    );
+  if (failed > 0) out.push(counted(lang, ["1 of them failed.", "{n} of them failed."], failed));
   if (stopped > 0)
-    out.push(
-      one
-        ? steps(lang, "It was stopped.")
-        : counted(lang, ["1 of them was stopped.", "{n} of them were stopped."], stopped),
-    );
+    out.push(counted(lang, ["1 of them was stopped.", "{n} of them were stopped."], stopped));
   return out.join(" ");
 }
 
@@ -250,10 +251,8 @@ export function markOf(lang: Lang, call: ToolCallEntry): string | null {
 export function lineOf(lang: Lang, entries: readonly (ViewEntry | undefined)[], live: boolean) {
   const calls: ToolCallEntry[] = [];
   for (const e of entries) if (e?.tool_call !== undefined) calls.push(e.tool_call);
-  const kinds = iconsOf(calls);
-  const trouble = troubleOf(lang, calls);
   const aside = backgroundLine(lang, calls);
-  if (!live) return { kinds, line: restLine(lang, calls), more: aside, trouble };
+  if (!live) return { ...restOf(lang, calls), more: aside };
   // the newest of what is still to finish, or a thought after the last of them
   let now: ToolCallEntry | "thought" | null = null;
   for (let i = entries.length - 1; i >= 0 && now === null; i -= 1) {
@@ -262,11 +261,11 @@ export function lineOf(lang: Lang, entries: readonly (ViewEntry | undefined)[], 
     else if (e?.tool_call !== undefined && unsettled(e.tool_call)) now = e.tool_call;
     else if (e?.tool_call !== undefined) break;
   }
-  if (now === null) return { kinds, line: restLine(lang, calls), more: aside, trouble };
+  if (now === null) return { ...restOf(lang, calls), more: aside };
   return {
     kinds: now === "thought" ? ["think"] : [now.kind as string],
     line: now === "thought" ? stepLive(lang, "Thinking it through.") : doingOf(lang, now),
     more: [doneSoFar(lang, calls), aside].filter((m) => m !== "").join(" "),
-    trouble,
+    trouble: troubleOf(lang, calls),
   };
 }
