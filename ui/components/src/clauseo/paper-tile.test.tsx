@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 // PaperTile for a file known only by its name: without a numeral it shows its title alone, and uncited it has no chip
-// slot. With a numeral and a role it draws both, as before.
+// slot. With a numeral and a role it draws both, as before. Hindi names: a long Devanagari title stays whole on the
+// face and in its tooltip, code point for code point (parts-css.test.ts pins that the wall wraps it, never clipping).
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, test } from "vitest";
@@ -69,4 +70,41 @@ test("given its file type's glyph, a tile shows it at 24 px on its top line, bef
 test("without a glyph a tile shows none, as the numbered tiles do", async () => {
   await mount({ id: "f1", state: "uncited", title: "Notice to the bank.pdf" });
   expect(host?.querySelector(".tile-face svg")).toBeNull();
+});
+
+/* ---------- Hindi names (Hindi audit 3b) ---------- */
+
+/** A long name with conjuncts (प्र, त्त), a comma and Latin digits. */
+const LONG_HI = "अनुबंध की प्रमाणित प्रति, धारा 138 के अंतर्गत नोटिस का उत्तर.pdf";
+/** A nukta name, precomposed: क़ is U+0958, which NFC splits into क + ़ (a composition exclusion). */
+const NUKTA_HI = "\u0958ानूनी नोटिस.docx";
+/** A string's code points, so a failure shows which mark moved. */
+const points = (s: string) => Array.from(s, (c) => c.codePointAt(0));
+
+test.each([
+  ["a long Devanagari name", LONG_HI],
+  ["a nukta name as filed (U+0958)", NUKTA_HI],
+  ["a nukta name in NFC (क + U+093C)", NUKTA_HI.normalize("NFC")],
+])("%s shows whole on the face, code point for code point", async (_, title) => {
+  await mount({ id: "f1", state: "uncited", title, fileIcon: IconFilePdf });
+  const name = host?.querySelector(".tile-title");
+  // never shortened, never normalised: the face is the name as the folder has it
+  expect(name?.textContent).toBe(title);
+  expect(points(name?.textContent ?? "")).toEqual(points(title));
+  // English interface: no lang of its own, so the page's script fallback shapes it
+  expect(name?.getAttribute("lang")).toBeNull();
+});
+
+test("a tile's hint carries the full Devanagari name as its tooltip, the comma and all", async () => {
+  await mount({ id: "f1", state: "uncited", title: "अनुबंध की प्रमाणित प्रति", hint: LONG_HI });
+  const face = host?.querySelector(".tile-face");
+  expect(face?.getAttribute("title")).toBe(LONG_HI);
+  expect(face?.querySelector(".tile-title")?.textContent).toBe("अनुबंध की प्रमाणित प्रति");
+});
+
+test("a tile's label carries the full Devanagari name for assistive technology", async () => {
+  await mount({ id: "f1", state: "uncited", title: "क़ानूनी नोटिस", label: NUKTA_HI });
+  const face = host?.querySelector(".tile-face");
+  const more = host?.querySelector(`#${face?.getAttribute("aria-describedby") ?? "none"}`);
+  expect(more?.textContent).toBe(NUKTA_HI);
 });

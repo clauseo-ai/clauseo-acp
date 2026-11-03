@@ -22,7 +22,8 @@
 // error or a CSP violation, or loses its content process. It answers once the room has its title, its wall's five
 // tiles, and the display the query asked for on <html>; then it is measured: the page never scrolls sideways, the title
 // is never cut off, and each row of file tiles is as tall as its tallest title and the tile's padding, with no room kept
-// for a numeral or a chip. One more page per look freezes Object.prototype in the main frame first, as Tauri's
+// for a numeral or a chip. The wall of long Devanagari names (?papers=hindi) is loaded at every width in both looks:
+// each title's lines must break between syllables, never clipped. One more page per look freezes Object.prototype in the main frame first, as Tauri's
 // freezePrototype does, and runs window.__clauseoAxe() there: it must resolve with no violation. The room with no
 // matters (?matters=none: "No matters yet" as its title, the empty rail) is loaded in night Hindi at text sizes 16
 // and 20. The rail in every state (?rail=states) is loaded at every width in both looks, folded and opened at 1100 px,
@@ -121,6 +122,35 @@ for (theme, lang) in looks {
     "false)) && Array.isArray(window.__axeOut)"
   runs.append(Run(name: "room \(theme) \(lang), frozen, axe", url: URL(string: "\(origin)/\(q)")!, width: 1280,
                   height: 800, rendered: axe, setup: "Object.freeze(Object.prototype);"))
+}
+// long Devanagari names on the wall (?papers=hindi, probe-main.tsx's HINDI): measured as every page is, and each title's
+// line breaks fall between syllables: a line never starts on a vowel sign, a nasal mark, a nukta or a virama, nor right
+// after a virama (the half form of a conjunct), so no syllable is split across lines (Hindi audit 3b)
+let syllablesWhole = "(function () { var errs = " + measured + ";" +
+  " var mark = /[\\u0900-\\u0903\\u093A-\\u093C\\u093E-\\u094F\\u0951-\\u0957\\u0962\\u0963\\u200C\\u200D]/;" +
+  " document.querySelectorAll('#root aside.room-pane .tile-title').forEach(function (t) {" +
+  " var text = t.textContent, walker = document.createTreeWalker(t, NodeFilter.SHOW_TEXT), n, at = 0, top = null;" +
+  " while ((n = walker.nextNode())) { for (var i = 0; i < n.data.length; i++, at++) {" +
+  " var r = document.createRange(); r.setStart(n, i); r.setEnd(n, i + 1); var box = r.getClientRects()[0];" +
+  " if (!box || n.data[i] === ' ') continue; var y = Math.round(box.top);" +
+  " if (top !== null && y > top + 2) {" +
+  " if (mark.test(text[at]) || text[at - 1] === '\\u094D') errs.push('layout: a tile title breaks inside a syllable at ' + at + ' in ' + text); }" +
+  " top = y; } }" +
+  " if (t.scrollHeight > t.clientHeight + 1 || t.scrollWidth > t.clientWidth + 1) errs.push('layout: a tile title is clipped: ' + text);" +
+  " }); return errs; })()"
+for (theme, lang) in looks {
+  let q = "?papers=hindi&theme=\(theme)&lang=\(lang)"
+  let rendered = "document.querySelector('#root main.room-centre') !== null" +
+    " && (document.querySelector('[data-testid=\"matter\"]')?.textContent ?? '') !== ''" +
+    " && document.querySelectorAll('#root aside.room-pane li.tile').length === 5" +
+    " && /[\\u0900-\\u097F]/.test(document.querySelector('#root aside.room-pane .tile-title')?.textContent ?? '')" +
+    " && document.documentElement.dataset.theme === '\(theme)' && document.documentElement.lang === '\(lang)'"
+  for (w, h) in sizes {
+    var run = Run(name: "papers hindi \(theme) \(lang)", url: URL(string: "\(origin)/\(q)")!, width: w, height: h,
+                  rendered: rendered, setup: "")
+    run.measure = syllablesWhole
+    runs.append(run)
+  }
 }
 // no matters: "No matters yet" in the title's place, in Hindi, at text sizes 16 and 20, and no wall of papers
 for size in [16, 20] {
