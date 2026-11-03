@@ -1,11 +1,11 @@
-//! The opt-in phase timings (clauseo-ai/clauseo-acp-private#291): one more stderr line after
+//! The opt-in phase timings (clauseo-ai/clauseo-acp#291): one more stderr line after
 //! the guard's own, naming each phase that ran and what the walk read; nothing when off.
 
 use std::ffi::{OsStr, OsString};
 
 use serde_json::{Value, json};
 
-use super::super::timings::{PREFIX, wanted};
+use super::super::timings::{ENV, PREFIX, wanted};
 use super::{DENY, Fixture, deny, run_timed};
 
 /// The exit code and the stderr lines of one guard call on `hook` with timings `on`.
@@ -106,6 +106,8 @@ fn ignored_input_is_timed_too() {
 
 #[test]
 fn only_a_value_other_than_empty_or_zero_turns_them_on() {
+    // `run`'s doc names the variable.
+    assert_eq!(ENV, "CLAUSEO_GUARD_TIMINGS");
     assert!(!wanted(None));
     assert!(!wanted(Some(OsStr::new(""))));
     assert!(!wanted(Some(OsStr::new("0"))));

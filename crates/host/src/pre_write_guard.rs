@@ -148,7 +148,7 @@
 mod codex;
 mod names;
 mod shell;
-pub mod timings;
+mod timings;
 mod words;
 
 use std::ffi::OsString;
@@ -182,8 +182,8 @@ const MAX_INPUT: u64 = 16 * 1024 * 1024;
 /// The guard. `args` are the arguments after [`FLAG`] (`--matter <folder>`, or none); one hook
 /// input object comes from `input`. Returns the exit code: [`DENY`], with the reason and a newline
 /// on `errors`, when a target is refused; 0 with an [`IGNORED`] line when the input could not be
-/// read; else 0 with nothing written. With [`timings::ENV`] set (not empty, not `0`), one more
-/// line follows, the phase timings ([`timings`]).
+/// read; else 0 with nothing written. With `CLAUSEO_GUARD_TIMINGS` set in the environment (not
+/// empty, not `0`), one more line follows, the phase timings (`timings.rs`).
 pub fn run(args: &[OsString], input: impl Read, errors: impl Write) -> i32 {
     let on = timings::wanted(std::env::var_os(timings::ENV).as_deref());
     run_timed(args, input, errors, on)
