@@ -25,10 +25,7 @@ use tauri::{Manager as _, WebviewUrl, WebviewWindow, WebviewWindowBuilder, Windo
 use super::*;
 use crate::bridge::throttle::REFRESH_GAP;
 use crate::host_start::{HostCell, stop};
-use crate::test_support::{Messages, Running, collector};
-
-/// How long a test waits for the host to start a read. A bound, not a sleep.
-const READ_WAIT: Duration = Duration::from_secs(20);
+use crate::test_support::{Messages, Running, STEP_WAIT, collector};
 
 /// The wait a `Shown` refresh has the host keep since the last read.
 const SHOWN_AFTER: Duration = Duration::from_mins(5);
@@ -61,7 +58,7 @@ impl Reads {
     fn until_count(&self, n: usize) {
         while self.count() < n {
             lock(&self.starts)
-                .recv_timeout(READ_WAIT)
+                .recv_timeout(STEP_WAIT)
                 .unwrap_or_else(|err| panic!("no limits read: {err}"));
         }
     }

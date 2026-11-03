@@ -7,7 +7,7 @@ use std::time::Duration;
 use clauseo_protocol::{SettingsView, Theme, UiPatch};
 
 use super::*;
-use crate::test_support::{Messages, collector};
+use crate::test_support::{Messages, STEP_WAIT, collector};
 
 /// A `SetUiSettings` of `theme`.
 fn set_theme(theme: Theme) -> CommandEnvelope {
@@ -129,7 +129,7 @@ fn a_reload_drops_the_app_feed() {
     let new = open(&bridge, MAIN);
     // The pump never sees another event, so only the abort can end it.
     assert_eq!(
-        dropped.recv_timeout(Duration::from_secs(20)),
+        dropped.recv_timeout(STEP_WAIT),
         Err(RecvTimeoutError::Disconnected),
         "the old window's app pump outlived the reload"
     );
@@ -192,7 +192,7 @@ fn a_reload_drops_the_limits_feed() {
     let _new = open(&bridge, MAIN);
     // The pump never sees another event, so only the abort can end it.
     assert_eq!(
-        dropped.recv_timeout(Duration::from_secs(20)),
+        dropped.recv_timeout(STEP_WAIT),
         Err(RecvTimeoutError::Disconnected),
         "the old window's limits pump outlived the reload"
     );
@@ -341,18 +341,19 @@ fn closing_a_window_drops_its_channel_app_pump_and_watchdog() {
 
     bridge.close_window(SETTINGS, built);
     assert_eq!(
-        dropped.recv_timeout(Duration::from_secs(20)),
+        dropped.recv_timeout(STEP_WAIT),
         Err(RecvTimeoutError::Disconnected),
         "the closed window's app pump outlived it"
     );
     // No task holds the window strongly: once the bridge lets go, it drops, and with it the
     // watchdog (`Window`'s `Drop`). A watchdog tick in flight holds it for that tick only.
     let (_keep, idle) = std::sync::mpsc::channel::<()>();
-    for _ in 0..2000 {
+    let tick = Duration::from_millis(10);
+    for _ in 0..STEP_WAIT.as_millis() / tick.as_millis() {
         if gone.strong_count() == 0 {
             break;
         }
-        let _tick = idle.recv_timeout(Duration::from_millis(10));
+        let _tick = idle.recv_timeout(tick);
     }
     assert_eq!(gone.strong_count(), 0, "the closed window is still alive");
     let refusal = block_on(bridge.subscribe_app(SETTINGS)).unwrap_err();
@@ -378,7 +379,7 @@ fn closing_main_drops_its_limits_feed() {
     bridge.close_window(MAIN, built);
     // The pump never sees another event, so only the abort can end it.
     assert_eq!(
-        dropped.recv_timeout(Duration::from_secs(20)),
+        dropped.recv_timeout(STEP_WAIT),
         Err(RecvTimeoutError::Disconnected),
         "the closed window's limits pump outlived it"
     );

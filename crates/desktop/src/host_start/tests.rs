@@ -3,21 +3,13 @@
 
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::time::Duration;
 
 use clauseo_host::{Host, HostConfig};
 use clauseo_protocol::{ErrorCode, HostQuery, QueryResult, StreamId};
 
 use super::*;
 use crate::bridge::Bridge;
-use crate::test_support::{Scratch, collector};
-
-/// How long a test waits for a thread it started. A bound, not a sleep.
-const THREAD_WAIT: Duration = Duration::from_secs(20);
-
-fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
-    futures::executor::block_on(future)
-}
+use crate::test_support::{STEP_WAIT, Scratch, block_on, collector};
 
 /// A bridge whose host starts with `config` on its own thread once the returned sender sends
 /// (or hangs up): the test's hold on the start.
@@ -84,7 +76,7 @@ fn after_a_failed_start_every_call_gets_its_store_code() {
     assert_eq!(stream.code(), ErrorCode::StoreLocked, "{stream:?}");
 
     // Exit after the failed start: nothing to stop, and it returns.
-    stop_on_thread(&cell).recv_timeout(THREAD_WAIT).unwrap();
+    stop_on_thread(&cell).recv_timeout(STEP_WAIT).unwrap();
     assert!(lock(&cell.join).is_none());
     // The other host was not touched.
     block_on(first.host.query(
@@ -101,7 +93,7 @@ fn exit_while_the_host_starts_waits_for_it_then_stops_it() {
 
     let done = stop_on_thread(&cell);
     release.send(()).unwrap();
-    done.recv_timeout(THREAD_WAIT).unwrap();
+    done.recv_timeout(STEP_WAIT).unwrap();
 
     // The start finished and worked: read past the cell's own wait, so a `host()` that skips
     // it cannot hide a stop that returned before the start.
