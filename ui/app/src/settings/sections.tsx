@@ -8,12 +8,14 @@ import { LANGUAGE_NAMES, st, type SettingsKey } from "@clauseo/components/lib/wo
 import type { DisplayStore } from "../room/display-store.ts";
 import type { UiSettings } from "../room/host-next.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
+import type { LimitsView } from "../transport/protocol.ts";
 import { APP_VERSION } from "./version.ts";
 import { lockKey, type LiveSettings } from "./use-settings.ts";
 import { About } from "./sections/about.tsx";
 import { Appearance } from "./sections/appearance.tsx";
 import { Language } from "./sections/language.tsx";
 import { Usage } from "./sections/usage.tsx";
+import { usageNote } from "./sections/usage-note.ts";
 
 /** Every section the design has, in its order; only those with an entry in SECTIONS show. */
 export const SECTION_ORDER = [
@@ -38,6 +40,8 @@ export type SectionContext = {
   transport: HostTransport;
   settings: LiveSettings;
   display: Display;
+  /** Every agent's limits, from the window's limits store: Plan and usage's note reads them. */
+  limits: LimitsView;
   /** Whether a firm's policy locks this setting. */
   locked: (key: keyof UiSettings) => boolean;
   /** The lawyer's choice: one patch to the store, unless the key is locked or already holds the value. */
@@ -50,8 +54,8 @@ export type SectionEntry = {
   name: SettingsKey;
   /** Optional: the line under the pane's head. */
   lead?: SettingsKey;
-  /** Optional: where the section stands now, under its name on the side. */
-  note?: (ctx: SectionContext, lang: Lang) => string;
+  /** Optional: where the section stands now, under its name on the side; nothing when it gives undefined. */
+  note?: (ctx: SectionContext, lang: Lang) => string | undefined;
   /** Optional: whether the section shows now; always, when left out. */
   shown?: (ctx: SectionContext) => boolean;
   Body: ComponentType<{ ctx: SectionContext }>;
@@ -63,6 +67,7 @@ export const SECTIONS: readonly SectionEntry[] = [
     id: "usage",
     name: "Plan and usage",
     lead: "What each plan has left, and when it resets.",
+    note: (ctx, lang) => usageNote(ctx.limits, lang),
     Body: Usage,
   },
   {
@@ -97,6 +102,7 @@ export function contextOf(
   transport: HostTransport,
   settings: LiveSettings,
   display: Display,
+  limits: LimitsView = {},
 ): SectionContext {
   const locked = (key: keyof UiSettings) => settings.locked.includes(lockKey(key));
   return {
@@ -104,6 +110,7 @@ export function contextOf(
     transport,
     settings,
     display,
+    limits,
     locked,
     choose: (key, value) => {
       if (locked(key) || settings.ui[key] === value) return;

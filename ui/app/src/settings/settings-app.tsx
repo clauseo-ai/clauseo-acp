@@ -6,7 +6,7 @@ import { SettingsWindow } from "@clauseo/components/clauseo/settings-window.tsx"
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { useSettingsWords } from "@clauseo/components/lib/words-settings.ts";
 import { PartsRoot } from "@clauseo/components/ui/root.tsx";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { DisplayStore } from "../room/display-store.ts";
 import { LimitsContext, limitsStoreOf } from "../store/limits.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
@@ -35,7 +35,8 @@ export function SettingsApp({
   const settings = useSettings(store);
   // the window's own limits store, over its channel's limits_view_changed: Plan and usage reads it
   const [limits] = useState(() => limitsStoreOf(transport));
-  const ctx = contextOf(store, transport, settings, display);
+  const limitsView = useSyncExternalStore(limits.subscribe, limits.view, limits.view);
+  const ctx = contextOf(store, transport, settings, display, limitsView);
   const shown = shownSections(ctx);
   const [chosen, setChosen] = useState<SectionId | undefined>(() =>
     sectionOf(section === undefined ? (globalThis.location?.hash ?? "") : `#${section}`, shown),
@@ -76,11 +77,10 @@ export function SettingsApp({
         <SettingsWindow
           platform={display.platform}
           title={title}
-          sections={shown.map((s) => ({
-            id: s.id,
-            name: w.s(s.name),
-            ...(s.note === undefined ? {} : { note: s.note(ctx, w.lang) }),
-          }))}
+          sections={shown.map((s) => {
+            const note = s.note?.(ctx, w.lang);
+            return { id: s.id, name: w.s(s.name), ...(note === undefined ? {} : { note }) };
+          })}
           current={open?.id ?? ""}
           onSection={onSection}
           lead={open?.lead === undefined ? undefined : w.s(open.lead)}
