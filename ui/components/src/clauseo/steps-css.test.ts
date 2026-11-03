@@ -63,3 +63,10 @@ test("a sentence dropped to fit the meta line is out of sight but stays in the b
   expect(rule(".step-part-cut:not([data-cut])")).toMatch(/position: absolute;/);
   expect(rule(".step-part-cut:not([data-cut])")).toMatch(/visibility: hidden;/);
 });
+
+test("on the meta line the aside and the trouble stand in their own slot that never shrinks, so a cut falls on the summary alone", () => {
+  const kept = rule(".meta > .step-group-line .step-group-kept");
+  expect(kept).toMatch(/flex: none;/);
+  expect(kept).toMatch(/white-space: nowrap;/);
+  expect(kept).not.toMatch(/overflow/);
+});

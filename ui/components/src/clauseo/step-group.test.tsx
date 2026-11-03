@@ -271,7 +271,10 @@ test("on the meta line, sentences that don't fit drop from the end at a sentence
   Object.defineProperty(proto, "clientWidth", {
     configurable: true,
     get(this: HTMLElement) {
-      return this.classList.contains("step-group-words") ? Math.min(room, shown(this)) : 0;
+      if (!this.classList.contains("step-group-words")) return 0;
+      // the words' box takes what the aside and the trouble leave
+      const kept = this.parentElement?.querySelector(".step-group-kept");
+      return Math.min(room - (kept === null || kept === undefined ? 0 : wide(kept)), shown(this));
     },
   });
   Object.defineProperty(proto, "getBoundingClientRect", {
@@ -326,6 +329,16 @@ test("on the meta line, sentences that don't fit drop from the end at a sentence
     );
     expect(line.querySelector(".step-group-more")?.textContent).toBe(more);
     expect(line.querySelector(".step-group-trouble")?.textContent).toBe("1 failed.");
+    // the aside and the trouble stand outside the clipped words, in their own slot, before the chevron
+    const kept = line.querySelector(".step-group-kept")!;
+    expect(
+      line.querySelector(
+        ".step-group-words .step-group-more, .step-group-words .step-group-trouble",
+      ),
+    ).toBeNull();
+    expect(kept.querySelector(".step-group-more")).not.toBeNull();
+    expect(kept.querySelector('[data-testid="step-group-trouble"] svg')).not.toBeNull();
+    expect(kept.nextElementSibling?.classList.contains("step-group-chev")).toBe(true);
     // the "…" follows the sentences, so on screen it stands after the last kept one (the dropped are out of the flow),
     // before the aside
     const order = [...line.querySelectorAll(".step-part, .step-part-cut")].map((e) => e.className);
