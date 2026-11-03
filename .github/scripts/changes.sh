@@ -21,12 +21,12 @@
 # pattern below; a new top-level file or folder needs a rule, or it runs everything.
 #
 # APP_CRATES is clauseo-desktop and every crate it reaches through path dependencies,
-# dev-dependencies included (fake_agent). changes-test.sh recomputes that closure from
-# crates/*/Cargo.toml and fails when this list differs.
+# dev-dependencies included (fake_agent; agents, limits' dev-dependency). changes-test.sh
+# recomputes that closure from crates/*/Cargo.toml and fails when this list differs.
 
 set -euo pipefail
 
-APP_CRATES="desktop host protocol settings process fake_agent reducer store matters acp limits codex_appserver profile"
+APP_CRATES="desktop host protocol settings process fake_agent reducer store matters acp limits codex_appserver profile agents"
 
 nl=$'\n'
 rust=false app=false ui=false product=false product_also=false unknown=""
