@@ -3,6 +3,7 @@
 //! `NotADirectory` for a file inside a file, so the Unix tests of these paths
 //! (`history/tests/io_errors.rs`) do not run here.
 
+use std::fs::File;
 use std::io;
 use std::path::Path;
 use std::sync::mpsc;
@@ -11,7 +12,6 @@ use std::time::Duration;
 use super::Blobs;
 use super::tests::{blob_id, guard, io_kind, is_empty, noise, objects, store, write_file};
 use crate::Error;
-use crate::no_download::fault;
 use crate::test_dir::TestDir;
 
 #[expect(
@@ -45,30 +45,36 @@ fn a_symlink_where_a_file_was_is_not_read_through() {
 }
 
 /// A read that fails while a large file is hashed in chunks is returned at once, not retried.
-/// The read runs on its own thread (faults are per thread) under a deadline, so a retry loop
-/// fails the test instead of hanging it.
+/// Another handle holds an exclusive lock on the whole file (`LockFileEx`), so the open and the
+/// stat succeed and every `ReadFile` fails with `ERROR_LOCK_VIOLATION`. That is a real read
+/// error from the chunk loop's `read`, which the test-only fault hook (returned before that
+/// `read`) is not. The read runs on its own thread under a deadline, so a retry loop fails the
+/// test instead of hanging it.
 #[test]
 fn a_failing_read_while_a_file_is_hashed_is_returned() {
+    let dir = TestDir::new("blob-win-hash-read-error");
+    let path = dir.path().join("big.bin");
+    write_file(&path, &noise(5000));
+    let holder = File::open(&path).unwrap();
+    holder.lock().unwrap();
+
     let (send, receive) = mpsc::channel();
     std::thread::spawn(move || {
-        let dir = TestDir::new("blob-win-hash-read-error");
-        let path = dir.path().join("big.bin");
-        write_file(&path, &noise(5000));
         let mut blobs = Blobs::new();
         blobs.set_stream_threshold(1024);
-        fault::fail(&path, 0, io::ErrorKind::Deadlock);
         let hashed = blobs.read(&path, 5000, u64::MAX, None, &guard());
-        let failed = fault::failed(&path);
-        fault::clear();
-        send.send((hashed.map_err(|err| err.is_not_downloaded()), failed))
-            .unwrap();
+        send.send(io_kind(&hashed)).unwrap();
     });
 
-    let (hashed, failed) = receive
+    let hashed = receive
         .recv_timeout(Duration::from_secs(60))
         .expect("the failing read was retried, not returned");
-    assert_eq!(hashed, Err(true), "not the read's error");
-    assert_eq!(failed, 1);
+    drop(holder);
+    // The read's own error, not the "kept changing" one (also "read", but `InvalidData`).
+    assert!(
+        matches!(hashed, Some(("read", kind)) if kind != io::ErrorKind::InvalidData),
+        "not the read's error: {hashed:?}"
+    );
 }
 
 /// A streamed file whose object cannot be written (a file stands where its `objects/xx`
