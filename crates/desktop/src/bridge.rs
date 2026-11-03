@@ -214,6 +214,12 @@ impl Bridge {
             | HostQuery::ListAgents
             // H8's wall (#131): reads the folder's stats, and names files by refs.
             | HostQuery::ListPapers { .. } => {}
+            // Search (0043): superseded per window, so the host hears which window asks.
+            HostQuery::Search(request) => {
+                let host = self.host().await?;
+                let answer = host.search(PRINCIPAL, label, request.clone()).await?;
+                return Ok(QueryResult::Search(answer));
+            }
         }
         self.host().await?.query(PRINCIPAL, query).await
     }
