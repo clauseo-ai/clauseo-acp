@@ -26,7 +26,7 @@ function threadSheet(): string {
 
 /** The token values the answer's rules use, so var() resolves. */
 const TOKENS =
-  ":root { --s1: 4px; --s3: 12px; --s5: 20px; --s6: 24px; --t22: 22px; --t18: 18px; --w-chip: 520; }";
+  ":root { --s1: 4px; --s3: 12px; --para-gap: 14px; --s5: 20px; --s6: 24px; --t22: 22px; --t18: 18px; --w-chip: 520; }";
 
 function setUp(sheets: string[]) {
   for (const css of sheets) {
@@ -64,30 +64,38 @@ test("in an answer, a numbered list keeps its numbers and its indent, and a bull
 
 test("paragraphs keep their rhythm, a heading stands apart at the section heads' weight, a table scrolls", () => {
   setUp([TOKENS, RESET, threadSheet()]);
-  expect(style("p + p").marginTop).toBe("12px");
+  expect(style("p + p").marginTop).toBe("14px");
   expect(style("h2").marginTop).toBe("20px");
   expect(style("h2").fontWeight).toBe("520");
   expect(style("table").overflowX).toBe("auto");
 });
 
-test("a blockquote after a table or a list takes the block gap, --s3 above it, as the blocks before it do", () => {
+test("every block after a paragraph, table, list, quote or code takes the paragraph gap, --para-gap (14 px) above it", () => {
   const PARTS = read("../styles/tokens-parts.css");
-  const gap = PARTS.match(/--s3: (\d+px);/)?.[1];
-  if (gap === undefined) throw new Error("--s3 is not a px value in tokens-parts.css");
+  const gap = PARTS.match(/--para-gap: (\d+px);/)?.[1];
+  if (gap !== "14px") throw new Error("--para-gap is not 14px in tokens-parts.css");
   setUp([TOKENS, RESET, threadSheet()]);
   document.querySelector('[data-clauseo="markdown"]')!.innerHTML = `
     <table><tbody><tr><td>cell</td></tr></tbody></table>
     <blockquote><p>After the table.</p></blockquote>
     <ul><li>A point</li></ul>
-    <blockquote><p>After the list.</p><p>Last.</p></blockquote>`;
+    <blockquote><p>After the list.</p><p>Last.</p></blockquote>
+    <p id="after-quote">After the quote.</p>
+    <pre><code>code</code></pre>
+    <p id="after-code">After the code.</p>
+    <p id="after-para">After a paragraph.</p>`;
   expect(style("table + blockquote").marginTop).toBe(gap);
   expect(style("ul + blockquote").marginTop).toBe(gap);
+  expect(style("#after-quote").marginTop).toBe(gap);
+  expect(style("pre").marginTop).toBe(gap);
+  expect(style("#after-code").marginTop).toBe(gap);
+  expect(style("#after-para").marginTop).toBe(gap);
   // the quote's own first child takes no gap, and its last none at the foot: only children after a first are spaced
   expect(style("blockquote > p").marginTop).toBe("0px");
-  expect(style("blockquote:last-child > p:last-child").marginBottom).toBe("0px");
+  expect(style("ul + blockquote > p:last-child").marginBottom).toBe("0px");
   // happy-dom does not model :is() specificity, so the computed gaps above pass with or without the reset's
   // selector. In a browser the reset outranks the gap unless it is written with :where (Chromium: 0 px with :is,
-  // 12 px with :where), so the selector is pinned as written
+  // 14 px with :where), so the selector is pinned as written
   expect(THREAD).toMatch(
     /\[data-clauseo="markdown"\]\s*:where\(p, ul, ol, dl, blockquote, pre, table, hr, h1, h2, h3, h4, h5, h6\)\s*\{\s*margin: 0;/,
   );
