@@ -1,7 +1,8 @@
 //! The allow-lists of `dispatch` and `query` (`Bridge::admit`): every call the R12 window
 //! (`ui/app/src/internal/session.ts`) and the room make today passes, and every command the
 //! bridge refuses is refused before any window has opened its stream. The settings window
-//! sends `SetUiSettings` and reads `GetSettings`, nothing else; another label nothing (0028).
+//! sends `SetUiSettings` and `RefreshLimits` (Plan and usage, U12) and reads `GetSettings`,
+//! nothing else; another label nothing (0028).
 
 use clauseo_protocol::{MatterId, ThreadId};
 use serde_json::json;
@@ -108,17 +109,27 @@ fn every_refused_command_is_refused_before_open_stream() {
     assert_eq!(matters.len(), 1, "only the Scratch matter: {matters:?}");
 }
 
-/// The settings window may send `SetUiSettings` and read `GetSettings`, and is refused every
-/// other command and read with `command.invalid`, before the host sees it. A window of any other
-/// label is refused everything.
+/// The settings window may send `SetUiSettings` and, for Plan and usage (U12), `RefreshLimits`,
+/// and read `GetSettings`; it is refused every other command and read with `command.invalid`,
+/// before the host sees it. A window of any other label is refused everything.
 #[test]
-fn the_settings_window_sets_and_reads_the_settings_only() {
+fn the_settings_window_sets_and_reads_the_settings_and_refreshes_the_limits_only() {
     let scratch = Scratch::new("admit-settings", &[]);
     let host = scratch.start(Vec::new());
     let thread = host.thread();
     let bridge = host.bridge();
     let set = command(json!({"set_ui_settings": {"patch": {"theme": "dark"}}}));
     assert!(bridge.admit(SETTINGS, &set).is_ok());
+    // Plan and usage: `shown` as it opens, `try_again` from its button, for one agent or all.
+    let refreshes = [
+        command(json!({"refresh_limits": {"agent": null, "why": "shown"}})),
+        command(json!({"refresh_limits": {"agent": "claude", "why": "try_again"}})),
+    ];
+    for refresh in &refreshes {
+        assert!(bridge.admit(SETTINGS, refresh).is_ok(), "{refresh:?}");
+        let other = bridge.admit("other", refresh).unwrap_err();
+        assert_eq!(other.code(), ErrorCode::CommandInvalid, "{refresh:?}");
+    }
     let cancel = command(json!({"cancel": {"thread": thread}}));
     let create = command(json!({"create_thread": {"matter": host.scratch(), "agent": "fake"}}));
     // The room's seen mark (H6) is main's alone: nothing in settings marks a thread seen.
@@ -129,6 +140,8 @@ fn the_settings_window_sets_and_reads_the_settings_only() {
         assert_eq!(refusal.code(), ErrorCode::CommandInvalid, "{refused:?}");
     }
     let outcome = block_on(bridge.dispatch(SETTINGS, envelope(set.clone())));
+    assert!(outcome.is_ok(), "{outcome:?}");
+    let outcome = block_on(bridge.dispatch(SETTINGS, envelope(refreshes[0].clone())));
     assert!(outcome.is_ok(), "{outcome:?}");
     let read_settings = block_on(bridge.query(SETTINGS, HostQuery::GetSettings));
     assert!(

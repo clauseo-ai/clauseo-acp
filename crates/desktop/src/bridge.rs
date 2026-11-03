@@ -168,13 +168,17 @@ impl Bridge {
     }
 
     /// Whether the window `label` may send `command`: `main` what `admit_main` admits, the
-    /// `settings` window `SetUiSettings` alone (0028), any other window nothing.
+    /// `settings` window `SetUiSettings` and, for its Plan and usage, `RefreshLimits` (0028,
+    /// U12), any other window nothing.
     fn admit(&self, label: &str, command: &HostCommand) -> Result<(), HostError> {
         match label {
             crate::MAIN_WINDOW => self.admit_main(command),
             SETTINGS_WINDOW => match command {
-                HostCommand::SetUiSettings { .. } => Ok(()),
-                _ => Err(invalid("the settings window sends only set_ui_settings")),
+                // Plan and usage sends `Shown` as it opens and `TryAgain` from its button.
+                HostCommand::SetUiSettings { .. } | HostCommand::RefreshLimits { .. } => Ok(()),
+                _ => Err(invalid(
+                    "the settings window sends only set_ui_settings and refresh_limits",
+                )),
             },
             _ => Err(invalid(format!("window {label} may send no command"))),
         }
