@@ -19,7 +19,9 @@
 // brackets, an `@` in a name), so one page has an idle composer, its commands and these papers for `@`. With
 // ?papers=hindi, the wall holds HINDI's five long Devanagari names in place of the five, for its wrapping. With
 // ?thread=hindi, the thread is a question asked in Hindi and a recorded Hindi answer (testing/hindi-answer.ts), finished,
-// for screenshots of Devanagari tables, ₹ and bold in the room. Not shipped.
+// for screenshots of Devanagari tables, ₹ and bold in the room. With ?thread=shaping, the thread is a question and a
+// fixed answer (testing/shaping-answer.ts), finished: the cells in every block type, for the Devanagari shaping audit's
+// 1a and 1d. Not shipped.
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "../App.tsx";
@@ -32,6 +34,7 @@ import type {
 } from "../transport/protocol.ts";
 import { type FakeCall, FakeTransport } from "../transport/fake-transport.ts";
 import { HINDI_ANSWER, HINDI_QUESTION } from "../testing/hindi-answer.ts";
+import { SHAPING_ANSWER, SHAPING_QUESTION } from "../testing/shaping-answer.ts";
 import {
   batch,
   chosen,
@@ -120,8 +123,11 @@ const holding = asking && page.get("confirm") === "1";
 const commanding = page.get("thread") === "commands";
 /** ?thread=hindi: an idle thread, a question in Hindi and Claude's recorded Hindi answer (Hindi audit 5c). */
 const hindiThread = page.get("thread") === "hindi";
+/** ?thread=shaping: an idle thread, a question and the fixed answer with the cells in every block type (Devanagari
+ * shaping audit 1a, 1d). */
+const shapingThread = page.get("thread") === "shaping";
 /** The pages whose matter lists one idle thread, which the room opens and subscribes to. */
-const idleThread = commanding || hindiThread;
+const idleThread = commanding || hindiThread || shapingThread;
 
 /** The agent's commands on ?thread=commands, in the order the composer's `/` menu lists them: the first six are the
  * spike's fixture (spike/src/mentions/fixtures.json), the last two match a name typed in Devanagari or Tamil. */
@@ -149,23 +155,30 @@ function stream(): HostEvent[] {
   const turn = scriptedTurn().bodies;
   const bodies: ViewPatchBody[] = hindiThread
     ? [reset([userMessage(2, 1, HINDI_QUESTION), agentText(3, 100, HINDI_ANSWER)], header("idle"))]
-    : commanding
+    : shapingThread
       ? [
           reset(
-            [
-              userMessage(2, 1, "When did the bank reply?"),
-              agentText(3, 100, "The bank replied on 12 March 2001."),
-            ],
-            header("idle", COMMANDS),
+            [userMessage(2, 1, SHAPING_QUESTION), agentText(3, 100, SHAPING_ANSWER)],
+            header("idle"),
           ),
         ]
-      : asking
+      : commanding
         ? [
-            reset([userMessage(2, 1, "Tighten the notice to the bank.")], header("needs_you")),
-            ...turn.slice(0, -1),
-            ...PERMISSIONS,
+            reset(
+              [
+                userMessage(2, 1, "When did the bank reply?"),
+                agentText(3, 100, "The bank replied on 12 March 2001."),
+              ],
+              header("idle", COMMANDS),
+            ),
           ]
-        : [reset([userMessage(2, 1, "When did the bank reply?")]), ...turn];
+        : asking
+          ? [
+              reset([userMessage(2, 1, "Tighten the notice to the bank.")], header("needs_you")),
+              ...turn.slice(0, -1),
+              ...PERMISSIONS,
+            ]
+          : [reset([userMessage(2, 1, "When did the bank reply?")]), ...turn];
   const events: HostEvent[] = [];
   for (let at = 0; at < bodies.length; at += 25) {
     events.push(event(batch(at + 1, bodies.slice(at, at + 25))));
@@ -207,8 +220,8 @@ const transport = new FakeTransport({
       return {
         threads: [{ thread: THREAD, matter: MATTER, agent: "claude-acp", status: "needs_you" }],
       };
-    // ?thread=commands and ?thread=hindi: the same thread, idle, so the room subscribes to it and shows its header's
-    // commands, or the Hindi answer
+    // ?thread=commands, ?thread=hindi and ?thread=shaping: the same thread, idle, so the room subscribes to it and
+    // shows its header's commands, the Hindi answer or the shaping answer
     if (idleThread && typeof query === "object" && query.list_threads !== undefined)
       return {
         threads: [{ thread: THREAD, matter: MATTER, agent: "claude-acp", status: "idle" }],
@@ -230,7 +243,11 @@ const transport = new FakeTransport({
     matters: () => matters,
     papers,
     location: "Documents/Clauseo",
-    threads: () => probeThreads({ asking, commanding: idleThread }, wording?.threads ?? []),
+    threads: () =>
+      probeThreads(
+        { asking, commanding: idleThread, shaping: shapingThread },
+        wording?.threads ?? [],
+      ),
   }),
 });
 
