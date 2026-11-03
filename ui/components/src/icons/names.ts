@@ -1,7 +1,7 @@
 // Every icon in icons.tsx, with the shape it was cut from and what it means on screen.
 
-/** Every icon icons.tsx exports (its Lucide shapes, and the glyphs it re-exports from glyphs.tsx), with the shape it
- * was cut from and what it means in the room. */
+/** Every icon icons.tsx exports (its Lucide shapes, the tool kinds' glyphs it re-exports from tool-kinds.tsx, and the
+ * glyphs it re-exports from glyphs.tsx), with the shape it was cut from and what it means in the room. */
 export const ICON_NAMES = [
   { component: "IconFold", source: "chevron", meaning: "A fold" },
   { component: "IconMore", source: "chevronDown", meaning: "N more" },
@@ -146,5 +146,56 @@ export const ICON_NAMES = [
     component: "IconPlanLimit",
     source: "gauge",
     meaning: "The plan's limit, not used in the room yet",
+  },
+  {
+    component: "IconToolRead",
+    source: "bookOpen",
+    meaning: "A tool call that reads files or data, not used in the room yet",
+  },
+  {
+    component: "IconToolDelete",
+    source: "trash2",
+    meaning: "A tool call that deletes files, not used in the room yet",
+  },
+  {
+    component: "IconToolMove",
+    source: "arrowRightLeft",
+    meaning: "A tool call that moves or renames files, not used in the room yet",
+  },
+  {
+    component: "IconToolExecute",
+    source: "terminal",
+    meaning: "A tool call that runs a command, not used in the room yet",
+  },
+  {
+    component: "IconToolThink",
+    source: "lightbulb",
+    meaning: "A tool call that thinks or plans, with no side effect, not used in the room yet",
+  },
+  {
+    component: "IconToolSwitchMode",
+    source: "toggleRight",
+    meaning: "A tool call that switches the session's mode, not used in the room yet",
+  },
+  {
+    component: "IconToolOther",
+    source: "wrench",
+    meaning: "Any other tool call, not used in the room yet",
+  },
+  {
+    component: "IconToolEdit",
+    source: "penLine",
+    meaning: "A tool call that edits files, not used in the room yet",
+  },
+  {
+    component: "IconToolSearch",
+    source: "search",
+    meaning: "A tool call that searches, not used in the room yet",
+  },
+  {
+    component: "IconToolFetch",
+    source: "website",
+    meaning:
+      "A tool call that fetches from the network, a web fetch or a web search, not used in the room yet",
   },
 ] as const;
