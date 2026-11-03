@@ -5,6 +5,9 @@
 // 03f11e2d6adc319ea21e9a1d5820a99cd3767257). Licence: LICENSES/ISC-lucide.txt. Clauseo's own glyphs, in the same
 // cut, are in glyphs.tsx under the repo's licence; they are re-exported here so every icon has one import. Every icon
 // is listed in names.ts, and icons.test.ts fails when the two disagree.
+// The icon pass's 21 (IconBreak to IconPlanLimit, at the end of this file) were cut from Lucide 1.66.0 (commit
+// a630cec77eac6568b989e87e4947a8bfe45caacd) on 3 Nov 2026, each drawn over its source at that release and checked
+// against it.
 import { Icon, type IconProps } from "./icon.tsx";
 
 export { IconAccept, IconPageTurn, IconPaperBookPage, IconSafeWorkspace } from "./glyphs.tsx";
@@ -226,6 +229,263 @@ export function IconWebsite(props: IconProps) {
         d="M10 2.75c-2.25 2-3.25 4.5-3.25 7.25s1 5.25 3.25 7.25c2.25-2 3.25-4.5 3.25-7.25S12.25 4.75 10 2.75z"
         vectorEffect="non-scaling-stroke"
       />
+    </Icon>
+  );
+}
+
+/** A break: the working line's lead when an answer stopped or failed, not used in the room yet (source: circleAlert,
+ * Lucide circle-alert at 1.66.0) */
+export function IconBreak(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <circle cx="10" cy="10" r="7.25" vectorEffect="non-scaling-stroke" />
+      <path d="M10 7.1V10" vectorEffect="non-scaling-stroke" />
+      <path d="M10 12.9h.01" vectorEffect="non-scaling-stroke" />
+    </Icon>
+  );
+}
+
+/** Offline, not used in the room yet (source: wifiOff, Lucide wifi-off at 1.66.0) */
+export function IconOffline(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M10 15.8h.01" vectorEffect="non-scaling-stroke" />
+      <path d="M7.45 13.2a3.625 3.625 0 0 1 5.1 0" vectorEffect="non-scaling-stroke" />
+      <path d="M4.95 10.6a7.25 7.25 0 0 1 3.75-1.95" vectorEffect="non-scaling-stroke" />
+      <path d="M15.05 10.6a7.25 7.25 0 0 0-1.45-1.1" vectorEffect="non-scaling-stroke" />
+      <path d="M2.75 7.7a10.875 10.875 0 0 1 3.05-1.9" vectorEffect="non-scaling-stroke" />
+      <path d="M17.25 7.7a10.875 10.875 0 0 0-8.2-2.75" vectorEffect="non-scaling-stroke" />
+      <path d="M2.75 2.75l14.5 14.5" vectorEffect="non-scaling-stroke" />
+    </Icon>
+  );
+}
+
+/** A question for you, not used in the room yet (source: circleQuestionMark, Lucide circle-question-mark at
+ * 1.66.0) */
+export function IconQuestion(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <circle cx="10" cy="10" r="7.25" vectorEffect="non-scaling-stroke" />
+      <path
+        d="M7.85 7.85a2.2 2.2 0 0 1 4.25.7c0 1.45-2.2 2.2-2.2 2.2"
+        vectorEffect="non-scaling-stroke"
+      />
+      <path d="M10 13.6h.01" vectorEffect="non-scaling-stroke" />
+    </Icon>
+  );
+}
+
+/** Try again, Restart, Retry now, Try now, not used in the room yet (source: rotateCcw, Lucide rotate-ccw at 1.66.0;
+ * the outline of IconHistory without its hands, so Try again and Restore read as one family) */
+export function IconTryAgain(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M3 10a7 7 0 1 0 2.05-4.95L3 7.1" vectorEffect="non-scaling-stroke" />
+      <path d="M3 3.25V7.1h3.85" vectorEffect="non-scaling-stroke" />
+    </Icon>
+  );
+}
+
+/** Stop, and a stopped matter or conversation, not used in the room yet (source: square, Lucide square at 1.66.0,
+ * filled, as Stop's pair to the arrow up: drawn at 9 of the 20 units, square cornered, since a solid shape weighs
+ * more than a stroked one) */
+export function IconStop(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M5.5 5.5h9v9h-9z" fill="currentColor" stroke="none" />
+    </Icon>
+  );
+}
+
+/** A cross: Don't allow, Not allowed, not used in the room yet (source: x, Lucide x at 1.66.0) */
+export function IconCross(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M14.35 5.65l-8.7 8.7" vectorEffect="non-scaling-stroke" />
+      <path d="M5.65 5.65l8.7 8.7" vectorEffect="non-scaling-stroke" />
+    </Icon>
+  );
+}
+
+/** A conversation: a version Clauseo made in one, not used in the room yet (source: messageSquare, Lucide message-
+ * square at 1.66.0) */
+export function IconConversation(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M2.75 3.5h14.5v11.55H5.65l-2.9 1.75z" vectorEffect="non-scaling-stroke" />
+    </Icon>
+  );
+}
+
+/** Answer ready, not used in the room yet (source: messageSquareDot, Lucide message-square-dot at 1.66.0) */
+export function IconAnswerReady(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M10.5 3.5H2.75v13.3l2.9-1.75h11.6V10.2" vectorEffect="non-scaling-stroke" />
+      <circle cx="15.05" cy="5.65" r="2.2" vectorEffect="non-scaling-stroke" />
+    </Icon>
+  );
+}
+
+/** A change you made outside Clauseo, not used in the room yet (source: penLine, Lucide pen-line at 1.66.0) */
+export function IconYourChange(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M10.75 16.5h5.8" vectorEffect="non-scaling-stroke" />
+      <path d="M13.5 3l3 3L6 16.5H3v-3z" vectorEffect="non-scaling-stroke" />
+    </Icon>
+  );
+}
+
+/** Papers imported, not used in the room yet (source: fileInput, Lucide file-input at 1.66.0) */
+export function IconImported(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M4.5 9.25V2.5h7l4 4v11h-11V15" vectorEffect="non-scaling-stroke" />
+      <path d="M11.5 2.5v4h4" vectorEffect="non-scaling-stroke" />
+      <path d="M2.75 12.2H9" vectorEffect="non-scaling-stroke" />
+      <path d="M7.85 10l2.2 2.2-2.2 2.2" vectorEffect="non-scaling-stroke" />
+    </Icon>
+  );
+}
+
+/** Compare, Compare with now, not used in the room yet (source: diff, Lucide diff at 1.66.0) */
+export function IconCompare(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M10 3.5v10.1" vectorEffect="non-scaling-stroke" />
+      <path d="M4.95 8.55h10.1" vectorEffect="non-scaling-stroke" />
+      <path d="M4.95 16.5h10.1" vectorEffect="non-scaling-stroke" />
+    </Icon>
+  );
+}
+
+/** Settings: Language, not used in the room yet (source: languages, Lucide languages at 1.66.0) */
+export function IconLanguage(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M4.95 7.1l4.35 4.35" vectorEffect="non-scaling-stroke" />
+      <path d="M4.2 11.45l4.35-4.35 1.45-2.15" vectorEffect="non-scaling-stroke" />
+      <path d="M2.75 4.95h8.7" vectorEffect="non-scaling-stroke" />
+      <path d="M6.4 2.75h.7" vectorEffect="non-scaling-stroke" />
+      <path d="M17.25 17.25L13.625 10 10 17.25" vectorEffect="non-scaling-stroke" />
+      <path d="M11.45 14.35h4.35" vectorEffect="non-scaling-stroke" />
+    </Icon>
+  );
+}
+
+/** Settings: Appearance, not used in the room yet (source: contrast, Lucide contrast at 1.66.0; the half disc is
+ * filled, as Lucide's 2 px stroke all but fills it) */
+export function IconAppearance(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <circle cx="10" cy="10" r="7.25" vectorEffect="non-scaling-stroke" />
+      <path
+        d="M10 14.35a4.35 4.35 0 0 0 0-8.7z"
+        fill="currentColor"
+        vectorEffect="non-scaling-stroke"
+      />
+    </Icon>
+  );
+}
+
+/** Settings: About, not used in the room yet (source: info, Lucide info at 1.66.0) */
+export function IconAbout(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <circle cx="10" cy="10" r="7.25" vectorEffect="non-scaling-stroke" />
+      <path d="M10 12.9V10" vectorEffect="non-scaling-stroke" />
+      <path d="M10 7.1h.01" vectorEffect="non-scaling-stroke" />
+    </Icon>
+  );
+}
+
+/** Pin to the top, not used in the room yet (source: pin, Lucide pin at 1.66.0) */
+export function IconPin(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M10 13.6v3.65" vectorEffect="non-scaling-stroke" />
+      <path
+        d="M7.8 5.65V9.1l-2.9 3.25v1.25h10.2v-1.25L12.2 9.1V5.65h.7v-2.9H7.1v2.9z"
+        vectorEffect="non-scaling-stroke"
+      />
+    </Icon>
+  );
+}
+
+/** Show in Finder, or in Explorer, not used in the room yet (source: folderOpen, Lucide folder-open at 1.66.0, on the
+ * set's folder (IconFolder's tab and frame) rather than Lucide's) */
+export function IconShowInFinder(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path
+        d="M5.25 13.5l2-4h10.25l-2.25 7H2.5v-12h5.25l1.75 2.25h6.25v2"
+        vectorEffect="non-scaling-stroke"
+      />
+    </Icon>
+  );
+}
+
+/** Locate folder, and a folder that moved, not used in the room yet (source: folderSearch, Lucide folder-search at
+ * 1.66.0, on the set's folder (IconFolder's tab and frame) rather than Lucide's) */
+export function IconLocateFolder(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M8.5 16.5h-6v-12h5.25l1.75 2.25h8v2.75" vectorEffect="non-scaling-stroke" />
+      <circle cx="13.25" cy="14.25" r="2.25" vectorEffect="non-scaling-stroke" />
+      <path d="M14.85 15.85l1.4 1.4" vectorEffect="non-scaling-stroke" />
+    </Icon>
+  );
+}
+
+/** Remove from the list, not used in the room yet (source: listX, Lucide list-x at 1.66.0) */
+export function IconRemoveFromList(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M12.9 4.95H3.5" vectorEffect="non-scaling-stroke" />
+      <path d="M9.25 10H3.5" vectorEffect="non-scaling-stroke" />
+      <path d="M12.9 15.05H3.5" vectorEffect="non-scaling-stroke" />
+      <path d="M12.55 8.2l3.6 3.6" vectorEffect="non-scaling-stroke" />
+      <path d="M16.15 8.2l-3.6 3.6" vectorEffect="non-scaling-stroke" />
+    </Icon>
+  );
+}
+
+/** An agent's command, in the / menu, not used in the room yet (source: squareSlash, Lucide square-slash at 1.66.0;
+ * the corners drawn square, as every rounded corner in the set is) */
+export function IconCommand(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M3.5 3.5h13v13h-13z" vectorEffect="non-scaling-stroke" />
+      <path d="M7.85 12.15l4.3-4.3" vectorEffect="non-scaling-stroke" />
+    </Icon>
+  );
+}
+
+/** Needs your permission, not used in the room yet (source: shieldQuestionMark, Lucide shield-question-mark at
+ * 1.66.0; its question mark is IconQuestion's) */
+export function IconNeedsPermission(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path
+        d="M15.8 10.75c0 3.6-2.55 5.4-5.8 6.55-3.25-1.15-5.8-2.95-5.8-6.55V4.95c1.45 0 3.55-.7 5.8-2.2 2.25 1.5 4.35 2.2 5.8 2.2z"
+        vectorEffect="non-scaling-stroke"
+      />
+      <path
+        d="M7.85 7.85a2.2 2.2 0 0 1 4.25.7c0 1.45-2.2 2.2-2.2 2.2"
+        vectorEffect="non-scaling-stroke"
+      />
+      <path d="M10 13.6h.01" vectorEffect="non-scaling-stroke" />
+    </Icon>
+  );
+}
+
+/** The plan's limit, not used in the room yet (source: gauge, Lucide gauge at 1.66.0) */
+export function IconPlanLimit(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M10 11.45l2.9-2.9" vectorEffect="non-scaling-stroke" />
+      <path d="M3.72 15.07a7.25 7.25 0 1 1 12.56 0" vectorEffect="non-scaling-stroke" />
     </Icon>
   );
 }
