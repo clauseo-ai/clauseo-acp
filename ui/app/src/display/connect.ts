@@ -1,8 +1,9 @@
 // A window's display, before its first render, for every entry that draws Clauseo's own frame (the room's index.html,
 // settings.html): its settings on <html> through the one display store (room/display-store.ts), data-frame="own" on
-// <html> for the frame contract (responsive.css), and the OS the host reports. Each entry calls it once per page.
+// <html> for the frame contract (responsive.css), and what the host reports (the OS, the release date). Each entry
+// calls it once per page.
 import { showDisplay, startDisplay } from "@clauseo/components/lib/display.ts";
-import { guessPlatform, hostPlatform } from "../platform.ts";
+import { guessPlatform, hostDisplayInfo } from "../platform.ts";
 import { createDisplayStore, type DisplayStore } from "../room/display-store.ts";
 import { nextHostOf, type UiSettings } from "../room/host-next.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
@@ -40,9 +41,13 @@ export function connectDisplay(
   });
   // the window draws its own frame: responsive.css's frame contract keys on this
   document.documentElement.dataset.frame = "own";
-  // The window's chrome follows the OS the host reports; nothing on the page waits for it.
-  hostPlatform(transport).then(
-    (platform) => store.setPlatform(platform),
+  // The window's chrome follows the OS the host reports, and About shows its release date; nothing on the page waits
+  // for either.
+  hostDisplayInfo(transport).then(
+    ({ platform, release_date }) => {
+      store.setPlatform(platform);
+      store.setReleaseDate(release_date);
+    },
     (error: unknown) => console.warn(`display_info failed: ${JSON.stringify(error)}`),
   );
   return { store };

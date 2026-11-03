@@ -64,9 +64,10 @@ const HOST: Settings = {
   locked: [],
 };
 
-/** A transport whose host has H7's settings, answering get_settings with `settings`. */
-const withHost = (settings: Settings = HOST) =>
+/** A transport whose host has H7's settings, answering get_settings with `settings`, and reports `releaseDate`. */
+const withHost = (settings: Settings = HOST, releaseDate: string | null = null) =>
   new FakeTransport({
+    releaseDate,
     next: {
       query: (query) => {
         if (query === "get_settings") return { settings };
@@ -342,6 +343,40 @@ test("About shows the build's version, and its line beside the section says it t
   expect(el.querySelector('[aria-current="page"] .set-nav-note')?.textContent).toBe(
     "Version 9.8.7",
   );
+});
+
+test("About's release line shows the host's release date in the language, with Latin digits", async () => {
+  history.replaceState(null, "", "/settings.html#about");
+  const { el } = await mount(new FakeTransport({ releaseDate: "2026-11-03" }));
+  expect(el.querySelector('[data-testid="settings-release-date"]')?.textContent).toBe(
+    "Released 3 November 2026",
+  );
+  // the version line stays where it was, above it
+  expect(el.querySelector('[data-testid="settings-version"]')?.nextElementSibling).toBe(
+    el.querySelector('[data-testid="settings-release-date"]'),
+  );
+});
+
+test("About's release line reads in Hindi when the language is Hindi", async () => {
+  history.replaceState(null, "", "/settings.html#about");
+  const hi = { ...HOST, ui: { ...HOST.ui, language: "hi" as const } };
+  const { el } = await mount(withHost(hi, "2026-11-03"));
+  expect(el.querySelector('[data-testid="settings-release-date"]')?.textContent).toBe(
+    "3 नवंबर 2026 को जारी",
+  );
+});
+
+test("About shows no release line where the host has no release date (a dev or CI build)", async () => {
+  history.replaceState(null, "", "/settings.html#about");
+  const { el } = await mount(new FakeTransport());
+  expect(el.querySelector('[data-testid="settings-version"]')).not.toBeNull();
+  expect(el.querySelector('[data-testid="settings-release-date"]')).toBeNull();
+});
+
+test("About shows no release line for a date that isn't YYYY-MM-DD", async () => {
+  history.replaceState(null, "", "/settings.html#about");
+  const { el } = await mount(new FakeTransport({ releaseDate: "3 November 2026" }));
+  expect(el.querySelector('[data-testid="settings-release-date"]')).toBeNull();
 });
 
 test("off the Mac the title bar's caption buttons work the window; on the Mac there are none", async () => {

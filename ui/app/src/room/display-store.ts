@@ -4,7 +4,8 @@
 // answer for the next start's first frame. Without a host, another window's write to localStorage (the settings window's,
 // the room's) applies here at once, through the `storage` event. Theme and motion follow the
 // computer's light and reduced-motion preferences, live, until set; lite's "automatic" means off until H7's display
-// report; English and text size 16 until set. The platform is the host's (platform.ts), never a setting.
+// report; English and text size 16 until set. The platform and the release date are the host's (platform.ts), never
+// a setting.
 import {
   DEFAULT_DISPLAY,
   TEXT_SIZES,
@@ -104,11 +105,15 @@ export interface DisplayStore {
   override(patch: Partial<UiSettings>): void;
   /** The host's OS, once it says. */
   setPlatform(platform: Platform): void;
+  /** The release date the host reports (`YYYY-MM-DD`, UTC), or null where it has none: a dev or CI build, no host. */
+  releaseDate(): string | null;
+  /** The host's release date, once it says; the listeners hear it, as they hear a settings change. */
+  setReleaseDate(date: string | null): void;
   /** When the view store applies what arrived: every 100 ms in lite, else once a frame. */
   batch(): Batch;
-  /** Hears each change to `ui()` or `locked()`: a set, an override, the host's answer, another window's write. Not the
-   * display alone (the computer's preferences, the platform): read that with display.ts's useDisplay. Returns the
-   * unsubscribe. */
+  /** Hears each change to `ui()`, `locked()` or `releaseDate()`: a set, an override, the host's answer, another
+   * window's write. Not the display alone (the computer's preferences, the platform): read that with display.ts's
+   * useDisplay. Returns the unsubscribe. */
   subscribe(listener: () => void): () => void;
   /** Stops following the computer's preferences, the host and the other windows. */
   dispose(): void;
@@ -141,6 +146,7 @@ export function createDisplayStore(env: DisplayEnv): DisplayStore {
   let stored = readStored(env.storage);
   let over: Partial<UiSettings> = uiPatchOf(env.override);
   let platform: Platform = env.platform ?? DEFAULT_DISPLAY.platform;
+  let releaseDate: string | null = null;
   const dark = env.matchMedia?.(DARK) ?? null;
   const reduced = env.matchMedia?.(REDUCED) ?? null;
   const ui = (): UiSettings => ({ ...stored, ...over });
@@ -245,6 +251,11 @@ export function createDisplayStore(env: DisplayEnv): DisplayStore {
     setPlatform(next) {
       platform = next;
       apply();
+    },
+    releaseDate: () => releaseDate,
+    setReleaseDate(next) {
+      releaseDate = next;
+      for (const listener of listeners) listener();
     },
     batch: () => (current.render === "lite" ? liteBatch : frameBatch),
     subscribe(listener) {

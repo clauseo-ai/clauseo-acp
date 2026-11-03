@@ -6,7 +6,7 @@ import { SettingsWindow } from "@clauseo/components/clauseo/settings-window.tsx"
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { useSettingsWords } from "@clauseo/components/lib/words-settings.ts";
 import { PartsRoot } from "@clauseo/components/ui/root.tsx";
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { DisplayStore } from "../room/display-store.ts";
 import { LimitsContext, limitsStoreOf } from "../store/limits.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
@@ -36,7 +36,14 @@ export function SettingsApp({
   // the window's own limits store, over its channel's limits_view_changed: Plan and usage reads it
   const [limits] = useState(() => limitsStoreOf(transport));
   const limitsView = useSyncExternalStore(limits.subscribe, limits.view, limits.view);
-  const ctx = contextOf(store, transport, settings, display, limitsView);
+  // the release date the host reports, which the store hears as it arrives
+  const subscribeRelease = useCallback(
+    (listener: () => void) => store.subscribe(listener),
+    [store],
+  );
+  const readRelease = useCallback(() => store.releaseDate(), [store]);
+  const releaseDate = useSyncExternalStore(subscribeRelease, readRelease, readRelease);
+  const ctx = contextOf(store, transport, settings, display, limitsView, releaseDate);
   const shown = shownSections(ctx);
   const [chosen, setChosen] = useState<SectionId | undefined>(() =>
     sectionOf(section === undefined ? (globalThis.location?.hash ?? "") : `#${section}`, shown),
