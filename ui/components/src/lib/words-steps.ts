@@ -26,7 +26,6 @@ const HI = {
   "Did one other thing.": "एक अन्य काम किया गया।",
   // a row's state, after its words, while it waits or once it carried on behind a steer
   Waiting: "प्रतीक्षा में",
-  "In the background": "पृष्ठभूमि में",
   // the folded line: one sentence for each kind of work, the most done first
   "1 paper read.": "1 दस्तावेज़ पढ़ा गया।",
   "{n} papers read.": "{n} दस्तावेज़ पढ़े गए।",
@@ -55,6 +54,10 @@ const HI = {
   "It was stopped.": "इसे रोका गया।",
   "1 of them was stopped.": "उनमें से 1 रोका गया।",
   "{n} of them were stopped.": "उनमें से {n} रोके गए।",
+  // a step a steer moved to the background stays told on the folded line (its row says "In the background", U7's)
+  "It went on in the background.": "यह पृष्ठभूमि में चलता रहा।",
+  "1 of them went on in the background.": "उनमें से 1 पृष्ठभूमि में चलता रहा।",
+  "{n} of them went on in the background.": "उनमें से {n} पृष्ठभूमि में चलते रहे।",
   // the live line, after what is being done now
   "1 done so far.": "अब तक 1 पूरा हुआ।",
   "{n} done so far.": "अब तक {n} पूरे हुए।",
