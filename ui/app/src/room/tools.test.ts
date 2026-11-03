@@ -208,8 +208,7 @@ const FAILED: Record<InstallFailCode, string> = {
   disk_space: `Chrome couldn't be downloaded. It needs about 1${NB}GB free on this computer.`,
   host_refused: "Your network is blocking the download.",
   unpack: "Chrome downloaded but couldn't be unpacked.",
-  unsupported:
-    "This computer can't download Chrome for Clauseo. Install Google Chrome to use the browser.",
+  unsupported: "Clauseo can't download Chrome itself. Install Google Chrome to use the browser.",
   cancelled: "The download stopped before it finished.",
   unknown: "Chrome couldn't be downloaded.",
 };

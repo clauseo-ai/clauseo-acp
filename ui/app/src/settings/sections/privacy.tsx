@@ -100,7 +100,7 @@ function ToolRow({
         className="py-0"
         control="switch"
         label={label}
-        note={locked ? w.s("Managed by your organisation.") : note}
+        note={locked ? w.s("Managed by your organisation") : note}
         checked={tools[tool]}
         disabled={locked}
         managed={reason}

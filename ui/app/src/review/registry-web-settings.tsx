@@ -69,7 +69,12 @@ export const WEB_SETTINGS: Entry[] = [
   entry("UEP-06", settingsWords("Anthropic lists Brave Search as its web search subprocessor."), {
     limits: CLAUDE_ONLY,
   }),
-  entry("UEP-07", settingsWords("On the web"), { tools: ON }),
+  // the group as a firm locks it: both switches off, each with U11-07's approved "Managed by your organisation" in its
+  // note's place (that line is U11-07's, approved, so it takes no id here)
+  entry("UEP-07", settingsWords("On the web"), {
+    tools: OFF,
+    locked: ["tools.web_search", "tools.browser"],
+  }),
   entry("UEP-08", settingsWords("Web search"), { tools: { ...ON, web_search: false } }),
   entry(
     "UEP-09",
@@ -89,12 +94,6 @@ export const WEB_SETTINGS: Entry[] = [
       tools: ON,
     },
   ),
-  // the lock's reason in a locked switch's note's place, both locked off by a firm's policy: U11-07's words with the
-  // room's period, so a new string under the same id. The ids are UEP-nn: status.ts's form wants digits after the dash
-  entry("UEP-13", settingsWords("Managed by your organisation."), {
-    tools: OFF,
-    locked: ["tools.web_search", "tools.browser"],
-  }),
   entry("UEP-14", settingsWords("To the websites Clauseo visits")),
   entry(
     "UEP-15",

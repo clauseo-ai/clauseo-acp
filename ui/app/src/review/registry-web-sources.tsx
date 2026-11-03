@@ -107,7 +107,7 @@ export const WEB_SOURCES: Entry[] = [
   },
   {
     id: "WEB-08",
-    words: sourcesWords("Read {page} online."),
+    words: sourcesWords("Read '{page}' online."),
     screen: SCREEN,
     // a fetched page with its title and its site, and one with none, whose long address wraps and isn't repeated
     render: opened([visited(1, ACT, { title: RESULTS[0]!.title }), visited(2, DHC)]),
@@ -129,7 +129,7 @@ export const WEB_SOURCES: Entry[] = [
   },
   {
     id: "WEB-11",
-    words: sourcesWords("Read {page} online."),
+    words: sourcesWords("Read '{page}' online."),
     screen: SCREEN,
     // a Hindi query and a Hindi page title, each marked Hindi
     render: opened([
@@ -158,5 +158,12 @@ export const WEB_SOURCES: Entry[] = [
     screen: SCREEN,
     // a page the browser opened with no title: its address, unquoted, with no site after it
     render: opened([visited(1, DHC, { via: "browser" })]),
+  },
+  {
+    id: "WEB-15",
+    words: sourcesWords("Read {page} online."),
+    screen: SCREEN,
+    // a fetched page with no title: its address, unquoted, as the link
+    render: opened([visited(1, DHC)]),
   },
 ];

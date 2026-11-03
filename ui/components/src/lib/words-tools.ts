@@ -45,8 +45,7 @@ const HI = {
   "Chrome couldn't be downloaded. It needs about 1\u00a0GB free on this computer.": null,
   "Your network is blocking the download.": null,
   "Chrome downloaded but couldn't be unpacked.": null,
-  "This computer can't download Chrome for Clauseo. Install Google Chrome to use the browser.":
-    null,
+  "Clauseo can't download Chrome itself. Install Google Chrome to use the browser.": null,
   "The download stopped before it finished.": null,
   "Chrome couldn't be downloaded.": null,
   "Try again": null,

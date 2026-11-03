@@ -82,7 +82,7 @@ test("opening shows one row per source, in order, and shuts again", async () => 
     "Rent Control Act, s. 14 indiacode.nic.in",
     "Notice to quit example.com",
   ]);
-  expect(rows()[1]!.textContent).toBe("Read A page online. example.com");
+  expect(rows()[1]!.textContent).toBe("Read 'A page' online. example.com");
   await open();
   expect(rows()).toEqual([]);
 });
@@ -94,7 +94,7 @@ test("a page opened twice in one tool call shows once", async () => {
   ]);
   expect(toggle().textContent).toBe("1 source");
   await open();
-  expect(rows().map((r) => r.textContent)).toEqual(["Read A online. example.com"]);
+  expect(rows().map((r) => r.textContent)).toEqual(["Read 'A' online. example.com"]);
 });
 
 test("a Claude search with no results says so", async () => {
@@ -127,7 +127,7 @@ test("a page the browser opened says so, and an unknown way reads as a plain rea
   ]);
   await open();
   expect(rows()[0]!.textContent).toBe("Opened 'B' in the browser. example.com");
-  expect(rows()[1]!.textContent).toBe("Read U online. example.com");
+  expect(rows()[1]!.textContent).toBe("Read 'U' online. example.com");
 });
 
 test("the summary counts the open list's rows: each search once, whatever its results, and each page once", async () => {

@@ -1251,14 +1251,6 @@
     "by": "design",
     "note": "the design's approved words and Hindi (design/03-system words-settings.ts, privacy)"
   },
-  "UEP-13": {
-    "en": "Managed by your organisation",
-    "hi": "आपके संगठन द्वारा प्रबंधित",
-    "status": "approved",
-    "at": "2026-11-03",
-    "by": "design",
-    "note": "the design's approved words and Hindi (design/03-system words-settings.ts, privacy)"
-  },
   "H11-01": {
     "en": "Open this link in your browser?",
     "hi": "यह कड़ी ब्राउज़र में खोलें?",

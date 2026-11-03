@@ -168,7 +168,7 @@ function PageRow({ page, name }: { page: Page; name: string }) {
     );
   const read = (
     <p>
-      <Slotted k="Read {page} online." slot="page">
+      <Slotted k={title === null ? "Read {page} online." : "Read '{page}' online."} slot="page">
         {link}
       </Slotted>
       {site}

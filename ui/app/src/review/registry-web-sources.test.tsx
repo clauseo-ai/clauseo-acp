@@ -96,7 +96,7 @@ test("WEB-05's search rows say the step list's words, the query quoted", async (
 test("WEB-08's page rows end their sentence after online, the site muted after a title only", async () => {
   const host = await cell("WEB-08");
   expect([...rows(host)].map((r) => r.textContent)).toEqual([
-    "Read Section 14 in the Delhi Rent Control Act, 1958 online. indiacode.nic.in",
+    "Read 'Section 14 in the Delhi Rent Control Act, 1958' online. indiacode.nic.in",
     "Read https://delhihighcourt.nic.in/judgments/2019/rent-control-notice-period-eviction-petition.pdf online.",
   ]);
 });

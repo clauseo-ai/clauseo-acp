@@ -202,9 +202,7 @@ export const UET: Entry[] = [
   entry("UET-35", popWords("Chrome downloaded but couldn't be unpacked."), NONE, failed("unpack")),
   entry(
     "UET-36",
-    popWords(
-      "This computer can't download Chrome for Clauseo. Install Google Chrome to use the browser.",
-    ),
+    popWords("Clauseo can't download Chrome itself. Install Google Chrome to use the browser."),
     NONE,
     failed("unsupported"),
   ),

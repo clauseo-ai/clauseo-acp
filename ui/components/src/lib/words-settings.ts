@@ -59,8 +59,6 @@ const HI = {
   "To the websites Clauseo visits": null,
   "When Clauseo reads a page on this computer or opens one in its browser, the website sees the visit, as it sees any browser's.":
     null,
-  // a locked switch's reason, in its note's place: the room's popover says "Off. Managed by your organisation."
-  "Managed by your organisation.": null,
 } as const;
 
 /** Every string of the settings window, in English. */
