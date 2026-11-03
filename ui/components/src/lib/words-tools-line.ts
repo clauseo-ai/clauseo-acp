@@ -15,8 +15,8 @@ const HI = {
   on: null,
   // {reason} is one of the reasons below, its first letter in lower case
   "off, {reason}": null,
-  // why a tool is off, a few words
-  "Off in Settings": null,
+  // why a tool is off, a few words; In Settings sits beside the Off chip, so it says only where
+  "In Settings": null,
   "Managed by firm": null,
   "Can't search on this login": null,
   "Not available yet": null,

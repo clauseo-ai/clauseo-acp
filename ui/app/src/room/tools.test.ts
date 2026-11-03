@@ -103,8 +103,8 @@ test("the line's name and tooltip: one sentence per tool, web search first, its 
     "Web search: on. Browser: off, needs Chrome.",
   );
   expect(label("available", "available")).toBe("Web search: on. Browser: on.");
-  expect(label("off", null)).toBe("Web search: off in Settings.");
-  expect(label(null, "off")).toBe("Browser: off in Settings.");
+  expect(label("off", null)).toBe("Web search: off, in Settings.");
+  expect(label(null, "off")).toBe("Browser: off, in Settings.");
   expect(label("locked_off", "managed_by_firm")).toBe(
     "Web search: off, managed by firm. Browser: off, managed by firm.",
   );
@@ -129,7 +129,7 @@ const words = (tool: KnownTool, room: Partial<ToolRowRoom> = {}) =>
 test("each row: its glyph, name, an On or Off chip, and the reason in a few words only when off", () => {
   const reasons: Record<string, string | null> = {
     available: null,
-    off: "Off in Settings",
+    off: "In Settings",
     locked_off: "Managed by firm",
     managed_by_firm: "Managed by firm",
     no_search_on_this_login: "Can't search on this login",
@@ -151,6 +151,9 @@ test("each row: its glyph, name, an On or Off chip, and the reason in a few word
       on,
       chip: on ? "On" : "Off",
       reason: reasons[tool.state],
+      // In Settings sits in the chip's row
+      beside: tool.state === "off",
+      reasonTip: null,
       settings: tool.state === "off",
       download: null,
     });
@@ -164,13 +167,13 @@ test("Open Settings is offered only for Off in Settings, with the settings windo
   expect(words({ tool: "browser", state: "no_proxy" }).settings).toBe(false);
 });
 
-const OFFER = { offer: "download", bytes: 201_000_000 } as const;
+const OFFER = { offer: "download", bytes: 200_000_000 } as const;
 const missing = (install: BrowserInstall | null) =>
   words({ tool: "browser", state: "browser_not_installed" }, { install });
 
 const NB = "\u00a0";
 
-test("no Chrome: the download for every install state, the reason staying until Chrome is ready", () => {
+test("no Chrome: the download for every install state, and a reason in every one", () => {
   expect(missing(null)).toMatchObject({ reason: "Needs Chrome", download: null });
   expect(missing({ offer: null, progress: null }).download).toBeNull();
   expect(missing({ offer: OFFER, progress: null })).toMatchObject({
@@ -179,7 +182,7 @@ test("no Chrome: the download for every install state, the reason staying until 
       kind: "offer",
       button: "Download Chrome",
       size: `200${NB}MB`,
-      tip: `About 200${NB}MB from Google, once. Needs about 1${NB}GB free.`,
+      tip: `From Google, once. Needs 1${NB}GB free.`,
     },
   });
   expect(missing({ offer: { offer: "none" }, progress: null })).toMatchObject({
@@ -187,28 +190,29 @@ test("no Chrome: the download for every install state, the reason staying until 
     download: { kind: "none", line: "Install Chrome to use it" },
   });
   expect(
-    missing({ offer: OFFER, progress: { downloading: { bytes: 64_400_000, total: 201_000_000 } } }),
+    missing({ offer: OFFER, progress: { downloading: { bytes: 64_400_000, total: 200_000_000 } } }),
   ).toMatchObject({
     reason: "Needs Chrome",
     download: {
       kind: "progress",
       value: 64_400_000,
-      max: 201_000_000,
-      text: `64 of 201${NB}MB`,
+      max: 200_000_000,
+      text: `64 of 200${NB}MB`,
       name: "Download Chrome",
     },
   });
+  // no bar while unpacking: DESIGN's bars are determinate only
   expect(missing({ offer: OFFER, progress: "unpacking" }).download).toEqual({
-    kind: "progress",
-    value: 1,
-    max: 1,
+    kind: "unpacking",
     text: "Unpacking",
-    name: "Download Chrome",
   });
+  // done keeps a reason: what Chrome is ready for, its tooltip saying when
   expect(missing({ offer: OFFER, progress: "done" })).toMatchObject({
-    reason: null,
+    reason: "Ready for new conversations",
+    reasonTip: "The browser comes with your next conversation.",
+    beside: false,
     chip: "Off",
-    download: { kind: "done", line: "Chrome ready" },
+    download: { kind: "done" },
   });
 });
 
@@ -252,7 +256,7 @@ test("the host's failure code is an open enum: a value this version doesn't know
 test("every number before MB or GB in the download's words is held to its unit by a non-breaking space", () => {
   const all = [
     missing({ offer: OFFER, progress: null }),
-    missing({ offer: OFFER, progress: { downloading: { bytes: 1e6, total: 201_000_000 } } }),
+    missing({ offer: OFFER, progress: { downloading: { bytes: 1e6, total: 200_000_000 } } }),
     missing({ offer: OFFER, progress: { failed: { code: "disk_space", message: "" } } }),
   ].map((r) => JSON.stringify(r.download));
   const joined = all.join(" ");
@@ -280,7 +284,7 @@ test("a refused InstallBrowser is no failure: the row goes back to where it stoo
   const { transport, store, refuse } = refusing();
   transport.appEvent({ browser_install: OFFER });
   store.install();
-  expect(store.get()?.progress).toEqual({ downloading: { bytes: 0, total: 201_000_000 } });
+  expect(store.get()?.progress).toEqual({ downloading: { bytes: 0, total: 200_000_000 } });
   refuse(new Error("already running"));
   await Promise.resolve();
   await Promise.resolve();

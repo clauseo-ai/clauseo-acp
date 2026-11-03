@@ -1,6 +1,7 @@
 // The tool line's popover: one row per tool the open conversation's header speaks for, its glyph and name, an On or
 // Off chip, and only when off, the reason in a few words (DESIGN.md §Icons). Under the browser with no Chrome, the
-// download: Download Chrome is the consent, then its bar, then Chrome ready or what went wrong with Try again. A tool
+// download: Download Chrome is the consent, then its bar, Unpacking, then the reason Ready for new conversations or what
+// went wrong with Try again. A tool
 // the lawyer turned off is turned on in Settings: one Open Settings at the popover's foot, however many rows are off
 // there, its tooltip saying what a change reaches. Its own chunk, loaded as the status line first shows the tool line
 // (tool-line.tsx).
@@ -33,12 +34,23 @@ function useInstall(store: BrowserInstallStore | null): BrowserInstall | null {
   return useSyncExternalStore(store?.subscribe ?? nothing, store?.get ?? none, store?.get ?? none);
 }
 
-/** A button whose tooltip says more than its words, the same words its description, for assistive technology. */
-function Described({ tip, children }: { tip: string; children: (id: string) => ReactElement }) {
+/** A button whose tooltip says more than its words, the same words its description, for assistive technology. The
+ * tooltip opens `side` of it, so it never covers its row. */
+function Described({
+  tip,
+  side,
+  children,
+}: {
+  tip: string;
+  side?: "top" | "bottom";
+  children: (id: string) => ReactElement;
+}) {
   const id = useId();
   return (
     <>
-      <LineTip content={tip}>{children(id)}</LineTip>
+      <LineTip content={tip} side={side}>
+        {children(id)}
+      </LineTip>
       <span id={id} hidden>
         {tip}
       </span>
@@ -52,7 +64,7 @@ function Download({ part, onInstall }: { part: DownloadPart; onInstall: () => vo
     case "offer":
       return (
         <div className="tool-row-sub flex items-center gap-s2">
-          <Described tip={part.tip}>
+          <Described tip={part.tip} side="bottom">
             {(id) => (
               <Button
                 kind="tone"
@@ -87,16 +99,20 @@ function Download({ part, onInstall }: { part: DownloadPart; onInstall: () => vo
           className="tool-row-sub"
         />
       );
-    case "done":
+    case "unpacking":
+      // no bar: DESIGN's bars are determinate only, and nothing spins
       return (
         <p
           className="tool-row-sub flex items-center gap-s2 text-small text-primary"
-          data-testid="tool-row-note"
+          data-testid="tool-progress-text"
         >
-          <IconTick size={14} />
-          {part.line}
+          <IconDownload size={14} />
+          {part.text}
         </p>
       );
+    case "done":
+      // the row's reason says it
+      return null;
     case "failed":
       return (
         <div className="tool-row-sub flex items-center gap-s2 text-small text-primary">
@@ -119,6 +135,32 @@ function Download({ part, onInstall }: { part: DownloadPart; onInstall: () => vo
         </div>
       );
   }
+}
+
+/** A reason on its own line under the row's name; once Chrome is in, a tick before it and a tooltip on when. */
+function Reason({ text, tip }: { text: string; tip: string | null }) {
+  if (tip === null)
+    return (
+      <p className="tool-row-sub text-small text-muted" data-testid="tool-row-reason">
+        {text}
+      </p>
+    );
+  return (
+    <Described tip={tip} side="bottom">
+      {(id) => (
+        // focusable, so the keyboard reaches its tooltip as the pointer does
+        <p
+          tabIndex={0}
+          aria-describedby={id}
+          className="tool-row-sub flex items-center gap-s2 justify-self-start rounded-ref text-small text-muted"
+          data-testid="tool-row-reason"
+        >
+          <IconTick size={14} />
+          {text}
+        </p>
+      )}
+    </Described>
+  );
 }
 
 export function ToolPopover({
@@ -152,18 +194,21 @@ export function ToolPopover({
             <p className="text-ui font-ui text-primary deva-nudge" data-testid="tool-row-name">
               {row.name}
             </p>
-            <span
-              className={cn(chip({ role: "for" }), row.on && "text-primary")}
-              data-testid="tool-row-chip"
-              data-on={row.on}
-            >
-              <span className="cap-trim">{row.chip}</span>
+            <span className="flex items-center gap-s2">
+              <span
+                className={cn(chip({ role: "for" }), row.on && "text-primary")}
+                data-testid="tool-row-chip"
+                data-on={row.on}
+              >
+                <span className="cap-trim">{row.chip}</span>
+              </span>
+              {row.reason !== null && row.beside && (
+                <span className="text-small text-muted" data-testid="tool-row-reason">
+                  {row.reason}
+                </span>
+              )}
             </span>
-            {row.reason !== null && (
-              <p className="tool-row-sub text-small text-muted" data-testid="tool-row-reason">
-                {row.reason}
-              </p>
-            )}
+            {row.reason !== null && !row.beside && <Reason text={row.reason} tip={row.reasonTip} />}
             {row.download !== null && <Download part={row.download} onInstall={onInstall} />}
           </li>
         ))}

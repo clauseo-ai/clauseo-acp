@@ -16,8 +16,10 @@ export type DownloadPart =
   | { kind: "none"; line: string }
   /** [download] the bar, and how far in words, which say it for screen readers too. */
   | { kind: "progress"; value: number; max: number; text: string; name: string }
-  /** [tick] Chrome ready. */
-  | { kind: "done"; line: string }
+  /** [download] Unpacking, with no bar: DESIGN's bars are determinate only, and nothing spins. */
+  | { kind: "unpacking"; text: string }
+  /** Chrome is in: the row's reason says so (ToolRowWords.reason), so nothing more under it. */
+  | { kind: "done" }
   /** [break] the cause in a few words, and Try again unless this computer can't download it. */
   | { kind: "failed"; cause: string; retry: boolean };
 
@@ -28,8 +30,12 @@ export type ToolRowWords = {
   on: boolean;
   /** The chip's word: On or Off. */
   chip: string;
-  /** Why it's off, a few words; null while on, and once Chrome is ready. */
+  /** Why it's off, a few words; null while on. Once Chrome is in (download.kind "done"), what it is ready for. */
   reason: string | null;
+  /** The reason sits in the chip's row, after it (In Settings), not on a line of its own. */
+  beside: boolean;
+  /** The reason's tooltip and description: once Chrome is in, when the browser comes; else null. */
+  reasonTip: string | null;
   /** Off in Settings, with the settings window to turn it on: the popover's foot offers Open Settings. */
   settings: boolean;
   download: DownloadPart | null;
@@ -62,9 +68,8 @@ export function downloadPart(lang: Lang, install: BrowserInstall | null): Downlo
   if (install === null) return null;
   const p = install.progress;
   const name = tw(lang, "Download Chrome");
-  if (p === "unpacking")
-    return { kind: "progress", value: 1, max: 1, text: tw(lang, "Unpacking"), name };
-  if (p === "done") return { kind: "done", line: tw(lang, "Chrome ready") };
+  if (p === "unpacking") return { kind: "unpacking", text: tw(lang, "Unpacking") };
+  if (p === "done") return { kind: "done" };
   if (p !== null && "downloading" in p) {
     const { bytes, total } = p.downloading;
     return {
@@ -84,7 +89,7 @@ export function downloadPart(lang: Lang, install: BrowserInstall | null): Downlo
       kind: "offer",
       button: name,
       size: tw(lang, "200\u00a0MB"),
-      tip: tw(lang, "About 200\u00a0MB from Google, once. Needs about 1\u00a0GB free."),
+      tip: tw(lang, "From Google, once. Needs 1\u00a0GB free."),
     };
   if (install.offer?.offer === "none")
     return { kind: "none", line: tw(lang, "Install Chrome to use it") };
@@ -105,8 +110,16 @@ export function toolRow(lang: Lang, tool: KnownTool, room: ToolRowRoom): ToolRow
     name: toolsLine(lang, toolName(tool)),
     on,
     chip: tw(lang, on ? "On" : "Off"),
-    // once Chrome is ready, needing it is no longer so
-    reason: reason === null || download?.kind === "done" ? null : toolsLine(lang, reason),
+    // once Chrome is in, needing it is no longer so: the reason says what it is ready for
+    reason:
+      reason === null
+        ? null
+        : download?.kind === "done"
+          ? tw(lang, "Ready for new conversations")
+          : toolsLine(lang, reason),
+    beside: tool.state === "off",
+    reasonTip:
+      download?.kind === "done" ? tw(lang, "The browser comes with your next conversation.") : null,
     settings: tool.state === "off" && room.settings,
     download,
   };

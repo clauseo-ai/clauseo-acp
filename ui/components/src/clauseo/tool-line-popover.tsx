@@ -17,14 +17,23 @@ import { IconDownload } from "../icons/icons.tsx";
 /** The tool line's tooltip, as ui/tooltip.tsx's, raised over the status line's thread and over the popover's plane:
  * the shared one stacks in the page's layer, under both. On the line's button, and on the popover's buttons whose
  * words are only a tooltip (Open Settings' reach, the download's size, Try again). */
-export function LineTip({ content, children }: { content: ReactNode; children: ReactElement }) {
+export function LineTip({
+  content,
+  side = "top",
+  children,
+}: {
+  content: ReactNode;
+  /** Where it opens: above by default; below for a control whose tooltip would cover its own row. */
+  side?: "top" | "bottom" | undefined;
+  children: ReactElement;
+}) {
   const layer = useLayer();
   return (
     <BaseTooltip.Root>
       <BaseTooltip.Trigger render={children} delay={500} />
       <BaseTooltip.Portal container={layer}>
         <BaseTooltip.Positioner
-          side="top"
+          side={side}
           sideOffset={8}
           collisionPadding={8}
           positionMethod="fixed"
@@ -102,7 +111,7 @@ export function DownloadBar({
 }: {
   value: number;
   max: number;
-  /** How far: "64 of 201 MB", or "Unpacking". */
+  /** How far: "64 of 200 MB". */
   text: string;
   /** The bar's name: "Download Chrome". */
   name: string;
