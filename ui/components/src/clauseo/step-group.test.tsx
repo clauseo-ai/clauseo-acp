@@ -115,7 +115,13 @@ test("the line is a button that opens its rows in place and folds them, with ari
   expect(host.querySelectorAll(".step-group-icons svg")).toHaveLength(2);
   // the failure on the line is led by the break, not only its weight
   const trouble = host.querySelector('[data-testid="step-group-trouble"]')!;
-  expect(trouble.querySelector("svg")?.outerHTML).toBe(svg(IconBreak, "step-trouble-icon"));
+  expect(trouble.querySelector(".step-inline-icon.step-trouble-icon > svg")?.outerHTML).toBe(
+    svg(IconBreak),
+  );
+  // the chevron follows the last word inside the words, so it stays beside them when the line wraps
+  const words = host.querySelector(".step-group-words")!;
+  expect(words.lastElementChild?.classList.contains("step-group-chev")).toBe(true);
+  expect(words.lastElementChild?.classList.contains("step-inline-icon")).toBe(true);
   expect(host.querySelector('[data-testid="tool-call"]')).toBeNull();
   await act(async () => line.click());
   expect(line.getAttribute("aria-expanded")).toBe("true");

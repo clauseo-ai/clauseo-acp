@@ -79,14 +79,19 @@ export function StepGroup({
             <>
               {(line !== "" || more !== "") && " "}
               <span className="step-group-trouble" data-testid="step-group-trouble">
-                {/* the break marks it before it's read, as on its row */}
-                <IconBreak size={14} className="step-trouble-icon" />
+                {/* the break marks it before it's read, as on its row, centred on the words' own line */}
+                <span className="step-inline-icon step-trouble-icon">
+                  <IconBreak size={14} />
+                </span>
                 <Say>{trouble}</Say>
               </span>
             </>
           )}
+          {/* the chevron follows the last word, so it stays beside the words when they wrap */}
+          <span className="step-inline-icon step-group-chev">
+            <IconFold size={12} />
+          </span>
         </span>
-        <IconFold size={12} className="step-group-chev" />
       </button>
       {open && (
         <ol id={rows} className="step-group-rows" data-testid="step-group-rows">
