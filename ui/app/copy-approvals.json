@@ -1391,6 +1391,62 @@
     "by": "Rohan",
     "note": "Rohan, via the orchestrator (main page, #182)"
   },
+  "C117-04": {
+    "en": "Papers",
+    "hi": "दस्तावेज़",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator"
+  },
+  "C117-05": {
+    "en": "1 paper",
+    "hi": "1 दस्तावेज़",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator"
+  },
+  "C117-06": {
+    "en": "{n} papers",
+    "hi": "{n} दस्तावेज़",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator"
+  },
+  "C117-07": {
+    "en": "Loading papers…",
+    "hi": "दस्तावेज़ लोड हो रहे हैं…",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator"
+  },
+  "C117-08": {
+    "en": "Couldn't read this matter's papers.",
+    "hi": "इस मामले के दस्तावेज़ पढ़े नहीं जा सके।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator"
+  },
+  "C117-09": {
+    "en": "First {shown} of {n}. Type to narrow.",
+    "hi": "{n} में से पहले {shown}। सूची छोटी करने के लिए आगे टाइप करें।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator"
+  },
+  "C117-10": {
+    "en": "Not every file in this folder is listed.",
+    "hi": "इस फ़ोल्डर की सभी फ़ाइलें सूची में नहीं हैं।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator"
+  },
   "U7-01": {
     "en": "Waiting for '{title}' to finish.",
     "hi": "'{title}' के पूरा होने की प्रतीक्षा है।",
