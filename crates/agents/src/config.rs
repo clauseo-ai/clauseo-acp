@@ -76,8 +76,8 @@ pub struct InstallConfig {
     /// The proxy: `network.upstream_proxy`, else `HTTPS_PROXY` from the environment (the caller
     /// resolves which), else none.
     pub proxy: Option<String>,
-    /// `network.ca_certs`: an agent's extra CA file (PEM), given to the downloads, to npm
-    /// (`--cafile`) and to Node (`NODE_EXTRA_CA_CERTS`).
+    /// `network.ca_certs`: an agent's extra CA file (PEM), the TLS roots of its downloads. npm
+    /// never gets it, since npm makes no network call here.
     pub ca_certs: BTreeMap<AgentId, PathBuf>,
     /// Tests only: resolves host names instead of the OS, so a test can be offline and come
     /// back, and can see every host a download looked up.
