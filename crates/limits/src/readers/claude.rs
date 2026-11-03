@@ -297,13 +297,23 @@ fn at_limit(rate_limits: Option<&Map<String, Value>>) -> AtLimitBehaviour {
 }
 
 /// The windows in `rate_limits`, sorted session, weekly, model, other, at most
-/// [`MAX_WINDOWS`]. A window whose utilization is missing or not a number is left out.
+/// [`MAX_WINDOWS`]. A window whose utilization is missing or not a number is left out, and so is
+/// a fixed per-model window (`seven_day_opus`, `seven_day_sonnet`) when a `model_scoped` window
+/// names the same model: the server's own list replaces it, so no two rows share a label.
 fn windows(rate_limits: Option<&Map<String, Value>>) -> Vec<LimitWindow> {
     let Some(rate_limits) = rate_limits else {
         return Vec::new();
     };
+    let scoped = model_scoped(rate_limits);
     let mut windows: Vec<LimitWindow> = CLAUDE_WINDOWS
         .iter()
+        .filter(|fixed| {
+            fixed.model.is_none_or(|model| {
+                !scoped
+                    .iter()
+                    .any(|(name, _)| name.eq_ignore_ascii_case(model))
+            })
+        })
         .filter_map(|fixed| {
             let value = rate_limits.get(fixed.key)?;
             window(
@@ -315,9 +325,25 @@ fn windows(rate_limits: Option<&Map<String, Value>>) -> Vec<LimitWindow> {
             )
         })
         .collect();
-    if let Some(Value::Array(models)) = rate_limits.get("model_scoped") {
-        let single = models.len() == 1;
-        let scoped = models.iter().enumerate().filter_map(|(n, entry)| {
+    windows.extend(scoped.into_iter().map(|(_, window)| window));
+    windows.sort_by_key(|window| kind_rank(window.kind));
+    windows.truncate(MAX_WINDOWS);
+    windows
+}
+
+/// The per-model weekly windows of `model_scoped`, at most [`MAX_WINDOWS`], each with the
+/// server's name for its model, which also labels it. An entry with no name or no number is left
+/// out. One entry's id is `seven_day_overage_included`, where the live signal of that
+/// `rateLimitType` lands; two or more are `model_scoped:<n>`.
+fn model_scoped(rate_limits: &Map<String, Value>) -> Vec<(String, LimitWindow)> {
+    let Some(Value::Array(models)) = rate_limits.get("model_scoped") else {
+        return Vec::new();
+    };
+    let single = models.len() == 1;
+    models
+        .iter()
+        .enumerate()
+        .filter_map(|(n, entry)| {
             let name = clean(entry.get("display_name")?.as_str()?);
             if name.is_empty() {
                 return None;
@@ -328,19 +354,17 @@ fn windows(rate_limits: Option<&Map<String, Value>>) -> Vec<LimitWindow> {
                 format!("{}{n}", words::CLAUDE_MODEL_SCOPED)
             };
             let label = words::claude_model_label(&name);
-            window(
+            let window = window(
                 entry,
                 id,
                 WindowKind::Model,
                 &label,
                 words::CLAUDE_MODEL_SCOPED_MINS,
-            )
-        });
-        windows.extend(scoped.take(MAX_WINDOWS));
-    }
-    windows.sort_by_key(|window| kind_rank(window.kind));
-    windows.truncate(MAX_WINDOWS);
-    windows
+            )?;
+            Some((name, window))
+        })
+        .take(MAX_WINDOWS)
+        .collect()
 }
 
 /// One window from its `{utilization, resets_at}` object; `None` when `value` is not an object

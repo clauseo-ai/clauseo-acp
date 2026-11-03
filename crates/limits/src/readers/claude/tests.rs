@@ -147,7 +147,7 @@ fn pro_reads_offsets_null_resets_and_extra_usage_off() {
 }
 
 #[test]
-fn team_sorts_its_windows_and_numbers_two_model_windows() {
+fn team_sorts_its_windows_and_numbers_two_model_windows_and_a_scoped_opus_replaces_the_fixed_one() {
     let limits = limits(include_str!("../../../fixtures/claude/team.json"));
     let at = Some(NOV_6_0900);
     assert_eq!(
@@ -171,14 +171,6 @@ fn team_sorts_its_windows_and_numbers_two_model_windows() {
                     WindowKind::Weekly,
                     "Weekly limit",
                     10.0,
-                    at,
-                    WEEK
-                ),
-                window(
-                    "seven_day_opus",
-                    WindowKind::Model,
-                    "Opus weekly limit",
-                    50.0,
                     at,
                     WEEK
                 ),
@@ -398,6 +390,50 @@ fn a_bad_window_is_dropped_alone() {
         windows
             .iter()
             .all(|window| window.used_percent.get().is_sign_positive())
+    );
+}
+
+#[test]
+fn a_fixed_model_window_gives_way_only_to_a_scoped_row_of_the_same_model() {
+    let ids_and_labels = |rate_limits: &str| -> Vec<(String, String)> {
+        windows_of(rate_limits)
+            .into_iter()
+            .map(|window| (window.id, window.label))
+            .collect()
+    };
+    let pair = |id: &str, label: &str| (id.to_owned(), label.to_owned());
+    // The same model, in another case: the scoped row stays, the fixed one goes. Sonnet, which
+    // no scoped row names, stays.
+    assert_eq!(
+        ids_and_labels(
+            r#"{"seven_day_opus":{"utilization":50},"seven_day_sonnet":{"utilization":20},
+                "model_scoped":[{"display_name":"opus","utilization":8}]}"#
+        ),
+        [
+            pair("seven_day_sonnet", "Sonnet weekly limit"),
+            pair("seven_day_overage_included", "opus weekly limit"),
+        ]
+    );
+    // A scoped entry with no number is no row, so it replaces nothing.
+    assert_eq!(
+        ids_and_labels(
+            r#"{"seven_day_opus":{"utilization":50},
+                "model_scoped":[{"display_name":"Opus","utilization":null}]}"#
+        ),
+        [pair("seven_day_opus", "Opus weekly limit")]
+    );
+    // A model the fixed windows never name gets its row from the server's name, beside them.
+    assert_eq!(
+        ids_and_labels(
+            r#"{"seven_day_opus":{"utilization":5},
+                "model_scoped":[{"display_name":"Fable","utilization":1},
+                                {"display_name":"Lyric 2","utilization":2}]}"#
+        ),
+        [
+            pair("seven_day_opus", "Opus weekly limit"),
+            pair("model_scoped:0", "Fable weekly limit"),
+            pair("model_scoped:1", "Lyric 2 weekly limit"),
+        ]
     );
 }
 

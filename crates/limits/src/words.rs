@@ -22,7 +22,7 @@ pub(crate) fn claude_live_window(id: &str) -> Option<(WindowKind, &'static str)>
 }
 
 /// One fixed window of Claude's usage read: its key in `rate_limits`, which is also its id, its
-/// kind, its label and its length in minutes.
+/// kind, its label, its length in minutes and, for a per-model window, its model.
 pub(crate) struct ClaudeWindow {
     /// The key in `rate_limits` and the window's id.
     pub(crate) key: &'static str,
@@ -32,6 +32,9 @@ pub(crate) struct ClaudeWindow {
     pub(crate) label: &'static str,
     /// Its length in minutes.
     pub(crate) duration_mins: u32,
+    /// The model a per-model window counts, as `model_scoped` would name it: a `model_scoped`
+    /// window of that name replaces this one.
+    pub(crate) model: Option<&'static str>,
 }
 
 /// A week, in minutes.
@@ -44,30 +47,35 @@ pub(crate) const CLAUDE_WINDOWS: [ClaudeWindow; 5] = [
         kind: WindowKind::Session,
         label: "5-hour limit",
         duration_mins: 5 * 60,
+        model: None,
     },
     ClaudeWindow {
         key: CLAUDE_SEVEN_DAY,
         kind: WindowKind::Weekly,
         label: "Weekly limit",
         duration_mins: WEEK_MINS,
+        model: None,
     },
     ClaudeWindow {
         key: "seven_day_opus",
         kind: WindowKind::Model,
         label: "Opus weekly limit",
         duration_mins: WEEK_MINS,
+        model: Some("Opus"),
     },
     ClaudeWindow {
         key: "seven_day_sonnet",
         kind: WindowKind::Model,
         label: "Sonnet weekly limit",
         duration_mins: WEEK_MINS,
+        model: Some("Sonnet"),
     },
     ClaudeWindow {
         key: "seven_day_oauth_apps",
         kind: WindowKind::Other,
         label: "Weekly limit for connected apps",
         duration_mins: WEEK_MINS,
+        model: None,
     },
 ];
 

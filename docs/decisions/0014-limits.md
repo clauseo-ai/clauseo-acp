@@ -132,7 +132,13 @@ and no windows. A subscription without rate limits is `Unavailable { MissingScop
 the windows are `five_hour` (session), `seven_day` (weekly), `seven_day_opus` and
 `seven_day_sonnet` (model), `seven_day_oauth_apps` (other), and `model_scoped[]` (model). A single
 `model_scoped` entry is named `seven_day_overage_included`, where the live signal of that
-`rateLimitType` lands. Two or more are `model_scoped:<n>`. `extra_usage` gives
+`rateLimitType` lands. Two or more are `model_scoped:<n>`. Each is labelled from its
+`display_name`, so a model this crate does not know still gets a row. A fixed `seven_day_opus` or
+`seven_day_sonnet` is left out when a `model_scoped` row names the same model (any case): the
+server's own list replaces it, and no two rows share a label. Both pinned sources prefer the list:
+claude-agent-acp 0.89.1's usage text shows `model_scoped` and the two fixed windows only when it
+is empty (`dist/usage-markdown.js:127-134`), and Claude Code 2.1.293's usage dialog never shows
+`seven_day_opus` and lists each `model_scoped` entry by its `display_name`. `extra_usage` gives
 `ExtraUsage { enabled }`. The plan names are "Claude Pro", "Claude Max", "Claude Team" and
 "Claude Enterprise", and an unknown plan gives none. `AccountRef` is the reported email when it
 looks like one. Otherwise it is a fixed ref: `api-key`, `bedrock`, `vertex`, or `plan`. It is
@@ -193,8 +199,9 @@ or `limits` is a symlink. Nothing in Clauseo writes there. An agent with no sett
 The model is a pure function of its inputs and `now`, tested offline. Every rule above has a test
 in `crates/limits/tests/model/`. The readers are tested against `fake_agent` and synthetic
 fixtures. G16 records real responses and replaces the fixtures. Where a recording differs, G16's
-code PR fixes this crate's schema. The helper's first real run, and whether the live signal for a
-per-model window really uses `seven_day_overage_included`, wait for G16. Stage D's `agents` takes
+code PR fixes this crate's schema. The helper's first real run waits for G16. The live signal for
+the per-model window does use `seven_day_overage_included`: Claude Code 2.1.293 calls it the
+"Fable limit". Stage D's `agents` takes
 over the helper's write and owns the install, which lifts the symlink limit. The sandbox's account
 probe policy joins in stage C. A change to the line contract changes the helper, the Rust schema
 and this record together.

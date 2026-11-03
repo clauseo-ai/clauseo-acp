@@ -14,7 +14,7 @@ with recordings from real accounts and marks each row `recorded`.
 |---|---|---|---|
 | `claude/max.json` | Max plan: `five_hour`, `seven_day`, one `model_scoped` entry (id `seven_day_overage_included`), `extra_usage` enabled, null fixed windows ignored, an RFC 3339 time with a fraction and `+00:00` | `SDKControlGetUsageResponse.rate_limits` (sdk.d.ts 4266-4477), `AccountInfo` (20-33) | synthetic |
 | `claude/pro.json` | Pro plan: an offset reset time, a null `resets_at`, `utilization` at 100, `seven_day_sonnet`, `extra_usage` off | as above | synthetic |
-| `claude/team.json` | Team plan with `account: null` (ref `plan`), all fixed windows, a window with `utilization: null` left out, two `model_scoped` entries (ids `model_scoped:0`, `model_scoped:1`), the sort (session, weekly, model, other), `extra_usage: null` | as above | synthetic |
+| `claude/team.json` | Team plan with `account: null` (ref `plan`), all fixed windows, a window with `utilization: null` left out, two `model_scoped` entries (ids `model_scoped:0`, `model_scoped:1`), the fixed `seven_day_opus` left out for the scoped Opus entry, the sort (session, weekly, model, other), `extra_usage: null` | as above | synthetic |
 | `claude/api-key.json` | API key, pay as you go via Anthropic (`apiProvider: firstParty`), ref `api-key` | `subscription_type` and `rate_limits_available` docs (sdk.d.ts 4266-4477), `AccountInfo.apiProvider` | synthetic |
 | `claude/bedrock.json` | Bedrock, pay as you go, ref `bedrock` | as above | synthetic |
 | `claude/vertex.json` | Vertex, pay as you go, ref `vertex` | as above | synthetic |
