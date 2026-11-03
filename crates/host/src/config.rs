@@ -8,7 +8,7 @@ use std::sync::Arc;
 use clauseo_acp::McpServer;
 use clauseo_limits::ReadLimits;
 use clauseo_process::Launcher;
-use clauseo_profile::SkillWrite;
+use clauseo_profile::{SkillWrite, SkillsWritten};
 use clauseo_protocol::{AgentId, MatterId, ThreadId};
 use clauseo_settings::{Effective, PlatformDirs as _, SystemDirs};
 use serde_json::{Map, Value};
@@ -33,11 +33,12 @@ use crate::window::PATCH_WINDOW_BYTES;
 ///   `tools.browser` off, or the firm's `managed-mcp.json`).
 /// - `codex_config` keys go into a Codex agent's `CODEX_CONFIG`, added only where R15's keys
 ///   and the host's own (`web_search`, `hooks`) leave room.
-/// - `skill_files` are written on the launch-prep thread before the agent starts.
+/// - `launch_writes` are written on the launch-prep thread before the agent starts; the first
+///   write's [`SkillsWritten`] goes to that launch's `codex_config` and to no other launch.
 ///
 /// Every method runs on the host thread, at each launch and session start, and must do no I/O:
 /// no file, network or process call, and nothing that blocks. It hands back data the adapter
-/// already holds; the host does any file work (writing `skill_files`) off that thread.
+/// already holds; the host does any file work (writing `launch_writes`) off that thread.
 pub trait ProfileHook: Send {
     /// The `_meta` object for `session/new` and `session/load` with `agent`, or `None` for none.
     fn session_meta(&self, agent: &AgentId) -> Option<Map<String, Value>>;
@@ -50,14 +51,24 @@ pub trait ProfileHook: Send {
     }
     /// Keys for a Codex agent's `CODEX_CONFIG`, as nested objects (default: none). Strings may
     /// hold `clauseo_profile::placeholders::IN_INSTRUCTIONS` tokens in `developer_instructions`.
-    fn codex_config(&self, _agent: &AgentId) -> Map<String, Value> {
+    /// `written` is this launch's own token, from writing the first of [`Self::launch_writes`]
+    /// on its launch-prep thread; `None` when that write failed or there was none. The desktop
+    /// adapter hands it to `ClauseoProfile::codex_keys`, and without it calls
+    /// `ClauseoProfile::codex_keys_without_index`, so the skills index names only files this
+    /// launch wrote (decision record 0031).
+    fn codex_config(
+        &self,
+        _agent: &AgentId,
+        _written: Option<&SkillsWritten>,
+    ) -> Map<String, Value> {
         Map::new()
     }
-    /// Skill files to write before `agent` starts (default: none). The desktop adapter hands
-    /// Claude's plugin skills for a Codex agent too, which Codex reads through the index in its
-    /// instructions. A write failure is a warning, never a failed launch.
-    fn skill_files(&self, _agent: &AgentId) -> Option<SkillWrite> {
-        None
+    /// The skills writes to run, in order, before `agent` starts (default: none), as
+    /// `ClauseoProfile::launch_writes` gives them: Claude's plugin first, for a Codex agent too,
+    /// since Codex reads its skills through the index in its instructions. A write failure is a
+    /// warning, never a failed launch.
+    fn launch_writes(&self, _agent: &AgentId) -> Vec<SkillWrite> {
+        Vec::new()
     }
 }
 

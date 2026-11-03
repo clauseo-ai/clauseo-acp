@@ -154,8 +154,8 @@ The host thread set the conditions the profile must keep: Claude keeps `settingS
 ### The host, settings and protocol (PR-B)
 
 - **The hook.** `ProfileHook` gains three methods, each defaulting to none, so `NoProfile`
-  is unchanged: `mcp_servers(agent)`, `codex_config(agent)` and `skill_files(agent) ->
-  Option<SkillWrite>`. The host re-exports `clauseo_acp::McpServer`. `host` now depends on
+  is unchanged: `mcp_servers(agent)`, `codex_config(agent, written)` and
+  `launch_writes(agent) -> Vec<SkillWrite>`. The host re-exports `clauseo_acp::McpServer`. `host` now depends on
   `profile`, for `placeholders::fill`, the token constants and `write_skills`. `profile`
   brings no external crate that `host` did not already have (`dunce`, `futures`,
   `serde_json`, `sha2`, `thiserror`, `tracing`), so ADR 0024's list does not change.
@@ -261,9 +261,13 @@ The host thread set the conditions the profile must keep: Claude keeps `settingS
   `mcp_servers.browser` with `command`, `args` and `env` only (`createMcpSeverConfig`,
   `:35519-35534`). codex-acp sends no per-server approval key, so Codex asks before each
   browser tool call that is not read-only.
-- **Skills.** At the prep, for an agent with a kind, the host writes `skill_files(agent)` with
-  `write_skills`. The desktop adapter (PR-C) hands Claude's plugin skills to Codex agents too,
-  for R22's (b′) index. A write failure is a warning, not a failed launch.
+- **Skills.** At the prep, for an agent with a kind, the host writes `launch_writes(agent)`, in
+  order, with `write_skills`. The desktop adapter (PR-C) hands Claude's plugin first, to Codex
+  agents too, for R22's (b′) index. A write failure is a warning, not a failed launch. The
+  first write's `SkillsWritten` rides in that launch's `Prepared` and goes to its
+  `codex_config(agent, Some(token))`, which the adapter hands to `ClauseoProfile::codex_keys`;
+  a failed write gives `None`, and the adapter calls `codex_keys_without_index` (0031). The
+  token is taken out when the keys are built, so no later launch can reuse it.
 - **PATH.** `HostConfig::with_agent_path_prepend` puts stetdoc's folder first on the merged
   `PATH` (`agent/spec.rs`, `prepend_path`), under the name the merge kept. It shadows nothing
   the host relies on: the guard's hooks run the desktop executable by absolute path.

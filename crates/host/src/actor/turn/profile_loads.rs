@@ -32,7 +32,8 @@ fn switches(actor: &Actor) -> (Switch, Switch) {
     )
 }
 
-/// A Codex agent's `CODEX_CONFIG` keys from the profile, filled into `prepared`. An unfillable
+/// A Codex agent's `CODEX_CONFIG` keys from the profile, filled into `prepared`. The hook gets
+/// this launch's own skills token, taken out of `prepared` so nothing keeps it. An unfillable
 /// instructions token, or a folder that is no UTF-8, fails the launch with
 /// `agent.launch_failed`.
 pub(super) fn launch_keys(
@@ -41,11 +42,12 @@ pub(super) fn launch_keys(
     prepared: &mut Prepared,
 ) -> Result<(), Error> {
     let agent_id = actor.check_thread(thread)?.row.agent.clone();
+    let written = prepared.skills_written.take();
     if let Some(codex) = prepared.codex.as_mut() {
         let folders = Folders::of(&prepared.run.work, &prepared.run.notes)?;
         let (web_search, _) = switches(actor);
-        codex.keys =
-            profile::codex_keys(actor.profile.codex_config(&agent_id), web_search, folders)?;
+        let keys = actor.profile.codex_config(&agent_id, written.as_ref());
+        codex.keys = profile::codex_keys(keys, web_search, folders)?;
     }
     Ok(())
 }
