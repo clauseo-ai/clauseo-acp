@@ -222,6 +222,9 @@ function elementOf(node: Element, key: string, continues = false): ReactNode {
   // A link's whole text, for its spoofed-host check (link.tsx); a code block's text and language.
   if (node.tagName === "a") props["text"] = textOf(node.children);
   else if (node.tagName === "pre") codeOf(node, props);
+  // A code element outside a code block (whose code CodeBlock draws) is inline code: the answer's styles key on it
+  // (thread.css, code[data-clauseo="inline-code"]); without it inline code was the browser's bare monospace
+  else if (node.tagName === "code") props["data-clauseo"] = "inline-code";
   else if (TEXT_BLOCKS.has(node.tagName)) {
     // Once per block as its elements are made: a finished block's are made once and kept (view.ts)
     const lang = langOfText(textOf(node.children, node.tagName === "li" ? SUBLISTS : undefined));
