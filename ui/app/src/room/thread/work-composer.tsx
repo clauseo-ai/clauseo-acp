@@ -24,6 +24,7 @@ import type { Conversations } from "../conversations.ts";
 import { OtherWait } from "../queue.tsx";
 import { useOtherWait } from "../queue-model.ts";
 import type { BreakLine } from "../thread-break.ts";
+import { LimitWarning } from "../limits/limit-warning.tsx";
 import { useAgentPlan } from "./agent-plan.ts";
 import type { Drafts } from "./session.ts";
 
@@ -196,6 +197,8 @@ export function WorkComposer({
   return (
     <Composer
       ref={field}
+      // the plan's warning under the field (U12); the paused line at the limit, once it lands here, goes first
+      notice={<LimitWarning />}
       took={null}
       plan={plan}
       {...(choice === undefined ? {} : { choice })}
