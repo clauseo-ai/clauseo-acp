@@ -345,7 +345,7 @@ fn an_agent_with_no_kind_gets_the_servers_and_nothing_else() {
         agents(&[(FAKE, &fake, json!({}))]),
         json!({"tools": {"browser": true}}),
     );
-    let skills = profile(dir.data()).skill_files(Some(AgentKind::Claude));
+    let skills = profile(dir.data()).launch_writes(Some(AgentKind::Claude));
     let hook = Hook {
         skills,
         ..browser_hook()
@@ -393,7 +393,7 @@ fn skills_are_written_before_the_launch_and_a_failure_is_no_failed_launch() {
         .join("skills")
         .join("stetdoc")
         .join("SKILL.md");
-    let skills = profile(dir.data()).skill_files(Some(AgentKind::Claude));
+    let skills = profile(dir.data()).launch_writes(Some(AgentKind::Claude));
     let host = dir.start_launching(0, Wired::new(&dir), |config| {
         config.with_profile_hook(Box::new(Hook {
             skills: skills.clone(),
@@ -470,4 +470,55 @@ fn stetdoc_goes_first_on_both_agents_path() {
             assert_eq!(parts.len(), 2);
         }
     }
+}
+
+/// A Codex launch's keys carry the skills index only from that launch's own write (0031):
+/// after a failed write its instructions have no index, and it never gets an earlier launch's
+/// token.
+#[test]
+fn a_failed_skills_write_gives_codex_no_index_and_no_earlier_token() {
+    let dir = Dir::new("tools_skills_token", &[]);
+    let codex = template(&dir, "token-codex", &codex_lines("token-codex", &json!({})));
+    settings(&dir, agents(&[(CODEX, &codex, json!({}))]), json!({}));
+    let profile = Arc::new(profile(dir.data()));
+    let index = profile.skills_index();
+    assert_ne!(index, "");
+    let hook = Hook {
+        skills: profile.launch_writes(Some(AgentKind::Codex)),
+        profile: Some(Arc::clone(&profile)),
+        ..Hook::default()
+    };
+    let tokens = Arc::clone(&hook.tokens);
+    let launcher = Wired::new(&dir);
+    let host = dir.start_launching(0, Arc::<Wired>::clone(&launcher), |config| {
+        config.with_profile_hook(Box::new(hook))
+    });
+    let matter = host.create_matter("m", &dir.folder("m", &[]));
+    turn(&host, host.create_thread(matter, CODEX));
+    // The skills folder made a file: the next launch's write fails.
+    let skills = dir
+        .data()
+        .join("profile")
+        .join("claude-plugin")
+        .join("skills");
+    write::remove_dir_all(&skills).unwrap();
+    write::write(&skills, b"not a folder");
+    turn(&host, host.create_thread(matter, CODEX));
+    host.shutdown();
+    let instructions: Vec<String> = launcher
+        .seen()
+        .iter()
+        .map(|seen| {
+            let config = seen.codex_config().expect("a CODEX_CONFIG");
+            config["developer_instructions"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(instructions.len(), 2);
+    assert!(instructions[0].contains(&index), "{}", instructions[0]);
+    assert!(!instructions[1].contains(&index), "{}", instructions[1]);
+    let tokens = tokens.lock().unwrap();
+    assert!(matches!(tokens.as_slice(), [Some(_), None]), "{tokens:?}");
 }

@@ -10,10 +10,10 @@ use std::sync::{Arc, Mutex};
 
 use clauseo_host::{McpServer, ProfileHook};
 use clauseo_process::{LaunchSpec, Launched, Launcher, PassthroughLauncher};
-use clauseo_profile::SkillWrite;
+use clauseo_profile::{ClauseoProfile, SkillWrite, SkillsWritten};
 use clauseo_protocol::{
-    AgentId, ClauseoTool, MatterId, StopReason, StreamHeader, StreamId, ThreadId, ToolAvailability,
-    ToolState, ToolsUnavailableReason, ViewPatchBody,
+    AgentId, AgentKind, ClauseoTool, MatterId, StopReason, StreamHeader, StreamId, ThreadId,
+    ToolAvailability, ToolState, ToolsUnavailableReason, ViewPatchBody,
 };
 use serde_json::{Map, Value, json};
 
@@ -128,14 +128,17 @@ pub(crate) fn notes(dir: &Dir, matter: MatterId) -> PathBuf {
         .join("notes")
 }
 
-/// A profile hook: `meta` for a Claude agent, `codex` keys for a Codex agent, and `servers` for
-/// every agent.
+/// A profile hook: `meta` for a Claude agent, `codex` keys for a Codex agent (or, with
+/// `profile`, that profile's keys for the launch's skills token), `servers` and `skills` for
+/// every agent. `tokens` records the token each Codex launch's keys were built from.
 #[derive(Clone, Default)]
 pub(crate) struct Hook {
     pub(crate) meta: Value,
     pub(crate) codex: Value,
     pub(crate) servers: Vec<McpServer>,
-    pub(crate) skills: Option<SkillWrite>,
+    pub(crate) skills: Vec<SkillWrite>,
+    pub(crate) profile: Option<Arc<ClauseoProfile>>,
+    pub(crate) tokens: Arc<Mutex<Vec<Option<SkillsWritten>>>>,
 }
 
 impl ProfileHook for Hook {
@@ -153,15 +156,20 @@ impl ProfileHook for Hook {
         self.servers.clone()
     }
 
-    fn skill_files(&self, _agent: &AgentId) -> Option<SkillWrite> {
+    fn launch_writes(&self, _agent: &AgentId) -> Vec<SkillWrite> {
         self.skills.clone()
     }
 
-    fn codex_config(&self, agent: &AgentId) -> Map<String, Value> {
-        if agent.as_str() == CODEX {
-            self.codex.as_object().cloned().unwrap_or_default()
-        } else {
-            Map::new()
+    fn codex_config(&self, agent: &AgentId, written: Option<&SkillsWritten>) -> Map<String, Value> {
+        if agent.as_str() != CODEX {
+            return Map::new();
+        }
+        self.tokens.lock().unwrap().push(written.cloned());
+        let codex = Some(AgentKind::Codex);
+        match (&self.profile, written) {
+            (Some(profile), Some(written)) => profile.codex_keys(codex, written),
+            (Some(profile), None) => profile.codex_keys_without_index(codex),
+            (None, _) => self.codex.as_object().cloned().unwrap_or_default(),
         }
     }
 }

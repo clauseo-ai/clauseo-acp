@@ -9,13 +9,15 @@
 //!
 //! After both refusals, the same thread makes the session's folders ([`RunFolders`]: its
 //! stand-in `run/<session id>` folder with `work` and `browser` under it, and the matter's
-//! notes folder) and, for an agent with a kind, writes the profile's skill files
-//! (`ProfileHook::skill_files`, `clauseo_profile::write_skills`). A skill write that fails is
-//! a warning, never a failed launch. The notes folder stays; the run folder is the launch's own
-//! (its id is in the name) and is removed off the actor on every way out: by the prep thread
-//! when nobody waits for its answer any more ([`codex::prepare::off_actor_or_undo`]), and
-//! otherwise from the actor ([`discard`]) when the answer is for an earlier launch, the host is
-//! stopping, the profile keys or the launch fail, or the agent ends ([`remove_run`]). No launch
+//! notes folder) and, for an agent with a kind, writes the profile's skills
+//! (`ProfileHook::launch_writes`, `clauseo_profile::write_skills`). A skill write that fails is
+//! a warning, never a failed launch. The first write's token goes in [`Prepared`], so only that
+//! launch's Codex keys carry the skills index; a failed write leaves none. The notes folder
+//! stays; the run folder is the launch's own (its id is in the name) and is removed off the
+//! actor on every way out: by the prep thread when nobody waits for its answer any more
+//! ([`codex::prepare::off_actor_or_undo`]), and otherwise from the actor ([`discard`]) when
+//! the answer is for an earlier launch, the host is stopping, the profile keys or the launch
+//! fail, or the agent ends ([`remove_run`]). No launch
 //! removes another's folder: a prep that came late can only take its own.
 //!
 //! At the first launch, before any folder is made, `<data>/run` from an earlier run is set
@@ -24,6 +26,7 @@
 
 use std::path::{Path, PathBuf};
 
+use clauseo_profile::{SkillWrite, SkillsWritten};
 use clauseo_protocol::{AgentKind, MatterId, ThreadId};
 
 use super::super::Actor;
@@ -54,6 +57,9 @@ pub(crate) struct Prepared {
     pub(super) codex: Option<CodexPrepared>,
     /// The session's folders, made.
     pub(super) run: RunFolders,
+    /// This launch's own token for its first skills write (Claude's plugin), taken by
+    /// `profile_loads::launch_keys`; `None` when that write failed or there was none.
+    pub(super) skills_written: Option<SkillsWritten>,
 }
 
 /// The folders a session gets, all under the data folder.
@@ -282,7 +288,10 @@ pub(super) fn prepare(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>
             launch: id,
         };
         let run = RunFolders::new(locations.data_dir(), key);
-        let skills = kind.and_then(|_| actor.profile.skill_files(&row.agent));
+        let skills = match kind {
+            Some(_) => actor.profile.launch_writes(&row.agent),
+            None => Vec::new(),
+        };
         Ok((stored, locations.data_dir().to_owned(), home, run, skills))
     })();
     let sweep = actor.run_sweep.clone();
@@ -299,31 +308,53 @@ pub(super) fn prepare(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>
     state.preparing = Some(Box::new(Preparing { id, waiting }));
     let clock = std::sync::Arc::clone(&actor.clock);
     actor.spawn_post(async move {
-        let result = codex::prepare::off_actor_or_undo(clock, move || {
-            data_folder::refuse_data_folder(&stored, &data)?;
-            let codex = match home {
-                Some(home) => {
-                    let folder = codex::prepare_launch(&stored, &data, &home)?;
-                    Some(CodexPrepared {
-                        folder,
-                        home,
-                        keys: serde_json::Map::new(),
-                    })
-                }
-                None => None,
-            };
-            run.make(&data, &sweep)?;
-            if let Some(skills) = skills
-                && let Err(error) = clauseo_profile::write_skills(&skills)
-            {
-                tracing::warn!(%error, "the profile's skills were not written; the agent starts with what the folder holds");
-            }
-            Ok(Prepared { stored, codex, run })
-        }, |late: Prepared| late.run.remove())
+        let result = codex::prepare::off_actor_or_undo(
+            clock,
+            move || {
+                data_folder::refuse_data_folder(&stored, &data)?;
+                let codex = match home {
+                    Some(home) => {
+                        let folder = codex::prepare_launch(&stored, &data, &home)?;
+                        Some(CodexPrepared {
+                            folder,
+                            home,
+                            keys: serde_json::Map::new(),
+                        })
+                    }
+                    None => None,
+                };
+                run.make(&data, &sweep)?;
+                let skills_written = write_skills(&skills);
+                Ok(Prepared {
+                    stored,
+                    codex,
+                    run,
+                    skills_written,
+                })
+            },
+            |late: Prepared| late.run.remove(),
+        )
         .await;
         let result = result.map(Box::new);
         Input::Turn(TurnInput::Prepared { thread, id, result })
     });
+}
+
+/// Writes `writes` in order, on the launch-prep thread; a failure is a warning. The first
+/// write's token, when it succeeded: the one the launch's Codex keys may take the index from.
+fn write_skills(writes: &[SkillWrite]) -> Option<SkillsWritten> {
+    let mut first = None;
+    for (at, write) in writes.iter().enumerate() {
+        match clauseo_profile::write_skills(write) {
+            Ok(written) if at == 0 => first = Some(written),
+            Ok(_) => {}
+            Err(error) => tracing::warn!(
+                %error,
+                "the profile's skills were not written; the agent starts with what the folder holds"
+            ),
+        }
+    }
+    first
 }
 
 /// Phase two: the checks `id` answered. The agent launches with what they found, or the
