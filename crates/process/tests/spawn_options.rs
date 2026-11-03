@@ -24,6 +24,9 @@ use futures::future::{Either, select};
 const PROBE_NAME: &str = "CLAUSEO_PROCESS_PROBE_NAME";
 /// The spec variable that holds this test process's pid.
 const PROBE_PARENT: &str = "CLAUSEO_PROCESS_PROBE_PARENT";
+/// The Windows variable the spec passes through even with `clear_env`: some system DLLs want
+/// it, and an agent that fails to start must not pass for one that inherited nothing.
+const SYSTEM_ROOT: &str = "SystemRoot";
 /// How long the agent has to say what it found. A bound, so an agent that never runs (left
 /// suspended on Windows) fails the test instead of hanging it.
 const DEADLINE: Duration = Duration::from_secs(10);
@@ -52,19 +55,26 @@ fn agent_reports_its_environment_and_console() {
     stderr.flush().expect("flush stderr");
 }
 
-/// Whether process `pid` is attached to this process's console. With no console, it is not.
-#[cfg(windows)]
+/// The processes attached to this process's console: empty with no console. A list longer
+/// than 1024 does not fit and comes back empty too.
+#[cfg(all(test, windows))]
 #[expect(
     unsafe_code,
-    reason = "FFI to GetConsoleProcessList, for the test agent"
+    reason = "FFI to GetConsoleProcessList, for the test and its agent"
 )]
-fn shares_console(pid: u32) -> bool {
+fn console_processes() -> Vec<u32> {
     let mut pids = vec![0_u32; 1024];
     // SAFETY: the slice is live and writable for its whole length, which the binding passes.
     let n = unsafe { windows::Win32::System::Console::GetConsoleProcessList(&mut pids) };
-    // A count past the slice means the list did not fit; then it is not checked.
     let n = usize::try_from(n).unwrap_or(usize::MAX);
-    n <= pids.len() && pids[..n].contains(&pid)
+    pids.truncate(if n <= pids.len() { n } else { 0 });
+    pids
+}
+
+/// Whether process `pid` is attached to this process's console. With no console, it is not.
+#[cfg(all(test, windows))]
+fn shares_console(pid: u32) -> bool {
+    console_processes().contains(&pid)
 }
 
 /// Off Windows there is no console to share.
@@ -87,7 +97,10 @@ fn inherited_name() -> OsString {
         .map(|(name, _)| name)
         .find(|name| {
             let text = name.to_string_lossy();
-            !text.is_empty() && !text.starts_with('=') && !text.starts_with("CLAUSEO_PROCESS_")
+            !text.is_empty()
+                && !text.starts_with('=')
+                && !text.starts_with("CLAUSEO_PROCESS_")
+                && !text.eq_ignore_ascii_case(SYSTEM_ROOT)
         })
         .expect("the test process has an environment")
 }
@@ -96,13 +109,30 @@ fn inherited_name() -> OsString {
 /// [`DEADLINE`] or exits other than 0.
 #[cfg(test)]
 fn seen_with(opts: &SpawnOptions) -> Seen {
-    let env = BTreeMap::from([
-        (OsString::from(PROBE_NAME), inherited_name()),
-        (
-            OsString::from(PROBE_PARENT),
-            OsString::from(std::process::id().to_string()),
-        ),
-    ]);
+    // The console checks catch a lost `CREATE_NO_WINDOW` only if this test has a console to
+    // share. CI's runner gives it one; fail there rather than pass without checking.
+    #[cfg(windows)]
+    if std::env::var_os("CI").is_some() {
+        assert!(
+            !console_processes().is_empty(),
+            "this test has no console, so the agent's console checks prove nothing"
+        );
+    }
+    let system_root = cfg!(windows)
+        .then(|| std::env::var_os(SYSTEM_ROOT))
+        .flatten()
+        .map(|root| (OsString::from(SYSTEM_ROOT), root));
+    let env = BTreeMap::from_iter(
+        [
+            (OsString::from(PROBE_NAME), inherited_name()),
+            (
+                OsString::from(PROBE_PARENT),
+                OsString::from(std::process::id().to_string()),
+            ),
+        ]
+        .into_iter()
+        .chain(system_root),
+    );
     let Launched {
         stdin,
         stdout: _stdout,
