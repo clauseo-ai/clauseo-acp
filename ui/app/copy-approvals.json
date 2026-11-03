@@ -1237,6 +1237,46 @@
     "by": "Rohan",
     "note": "Rohan, on the review page, 15:35 (built from U10 4cb9f249)"
   },
+  "UEP-01": {
+    "en": "Privacy",
+    "hi": "निजता",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design",
+    "note": "the design's approved words and Hindi (design/03-system words-settings.ts, privacy)"
+  },
+  "UEP-02": {
+    "en": "What leaves this computer, and who sees it.",
+    "hi": "इस कंप्यूटर से क्या बाहर जाता है, और उसे कौन देखता है।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design",
+    "note": "the design's approved words and Hindi (design/03-system words-settings.ts, privacy)"
+  },
+  "UEP-03": {
+    "en": "What leaves this computer",
+    "hi": "इस कंप्यूटर से क्या बाहर जाता है",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design",
+    "note": "the design's approved words and Hindi (design/03-system words-settings.ts, privacy)"
+  },
+  "UEP-04": {
+    "en": "To {name}, on your plan",
+    "hi": "{name} को, आपके प्लान से",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design",
+    "note": "the design's approved words and Hindi (design/03-system words-settings.ts, privacy)"
+  },
+  "UEP-13": {
+    "en": "Managed by your organisation",
+    "hi": "आपके संगठन द्वारा प्रबंधित",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design",
+    "note": "the design's approved words and Hindi (design/03-system words-settings.ts, privacy)"
+  },
   "H11-01": {
     "en": "Open this link in your browser?",
     "hi": "यह कड़ी ब्राउज़र में खोलें?",

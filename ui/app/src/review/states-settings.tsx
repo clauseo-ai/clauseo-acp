@@ -2,7 +2,7 @@
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { useState } from "react";
 import { createDisplayStore, DEFAULT_UI } from "../room/display-store.ts";
-import { nextHostOf } from "../room/host-next.ts";
+import { nextHostOf, type ToolSettings } from "../room/host-next.ts";
 import type { SectionId } from "../settings/sections.tsx";
 import { SettingsApp } from "../settings/settings-app.tsx";
 import { FakeTransport } from "../transport/fake-transport.ts";
@@ -17,12 +17,15 @@ export function SettingsOver({
   locked = [],
   limits,
   releaseDate = null,
+  tools,
 }: {
   section: SectionId;
   lang: Lang;
   locked?: string[];
   limits?: LimitsView;
   releaseDate?: string | null;
+  /** The tools' switches the host sends (app-local, Privacy's switches); none, today's host, when left out. */
+  tools?: ToolSettings;
 }) {
   const [made] = useState(() => {
     const transport = new FakeTransport({
@@ -30,7 +33,13 @@ export function SettingsOver({
       next: {
         query: (query) => {
           if (query === "get_settings")
-            return { settings: { ui: { ...DEFAULT_UI, language: lang }, locked } };
+            return {
+              settings: {
+                ui: { ...DEFAULT_UI, language: lang },
+                locked,
+                ...(tools === undefined ? {} : { tools }),
+              },
+            };
           throw new Error("not scripted");
         },
       },
