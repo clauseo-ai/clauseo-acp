@@ -157,7 +157,7 @@ test("no Chrome: the download's words for every install state", () => {
   expect(missing({ offer: OFFER, progress: null })).toMatchObject({
     lines: [
       NO_CHROME,
-      "Clauseo can download Chrome for its own use: about 200 MB from Google, once for every conversation. It needs about 1 GB free.",
+      "Clauseo can download its own Chrome from Google, about 200 MB, once for all conversations. It needs about 1 GB free.",
     ],
     action: "download",
   });

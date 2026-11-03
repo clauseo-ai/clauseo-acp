@@ -28,7 +28,7 @@ const HI = {
     null,
   "Off. There's no Chrome on this computer.": null,
   // the Chrome download
-  "Clauseo can download Chrome for its own use: about 200 MB from Google, once for every conversation. It needs about 1 GB free.":
+  "Clauseo can download its own Chrome from Google, about 200 MB, once for all conversations. It needs about 1 GB free.":
     null,
   "Download Chrome": null,
   "Install Google Chrome to use the browser.": null,
