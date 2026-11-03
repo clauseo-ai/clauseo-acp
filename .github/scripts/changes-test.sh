@@ -43,11 +43,13 @@ check "$F $F $F $F" fuzz/fuzz_targets/acp.rs fuzz/nightly.sh
 
 # ui-only: smoke runs, the Rust build matrix does not.
 check "$F $T $T $T" ui/app/src/App.tsx
-check "$F $T $T $T" ui/pnpm-lock.yaml ui/e2e/app-windows/smoke.spec.ts
+check "$F $T $T $T" ui/pnpm-lock.yaml ui/e2e/scoreboard/cli.ts
 check "$F $T $T $T" ui/components/button.tsx docs/ui.md
 # Read by Rust tests (the scan at the end finds every such file).
 check "$T $T $T $T" ui/app/src/transport/bindings.ts
 check "$T $T $T $T" ui/components/src/clauseo/shell.css
+check "$T $T $T $T" ui/e2e/app-windows/smoke.spec.ts
+check "$T $T $T $T" ui/e2e/app-windows/scenarios/word-one-docx.jsonl
 check "$T $F $F $F" docs/decisions/0006-store-format.md
 check "$T $F $F $F" docs/ui-states.md docs/other.md
 
