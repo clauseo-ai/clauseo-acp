@@ -25,6 +25,8 @@ const NEW_THREAD: readonly ThreadKey[] = [
   "The answer stopped. Your question and the answer so far are kept.",
   "Your question",
   "Clauseo's answer",
+  "Your question, {time}",
+  "Clauseo's answer, {time}",
   "Attached: {name}",
   "Something here can't be shown in the thread.",
   "Clauseo changed 1 paper.",
