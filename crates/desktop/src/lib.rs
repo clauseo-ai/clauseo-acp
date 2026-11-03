@@ -18,8 +18,10 @@
 //! - On Windows, `run` first checks the `WebView2` runtime; when it is missing or older than
 //!   `minimumWebview2Version`, a task dialog says so and `run` returns without building the app
 //!   (`webview2.rs`).
-//! - The host's pre-write guard hook runs this executable with `--pre-write-guard`, which `main`
-//!   answers before anything starts ([`guard_requested`], `pre_write_guard.rs`).
+//! - The host's pre-write guard hook runs the `clauseo-guard` sidecar beside this executable
+//!   (`clauseo_host::pre_write_guard::guard_program`), else this executable, with
+//!   `--pre-write-guard`, which `main` then answers before anything starts
+//!   (`clauseo_host::pre_write_guard::main_entry`, the sidecar's own `main`).
 //! - Fourteen async commands (`commands.rs`), each granted by its own permission in
 //!   `capabilities/main.json` and listed in `build.rs`'s `AppManifest`. Beside them that file
 //!   grants only the two window commands of Tauri's drag script, and `window_frame.rs` adds
@@ -73,7 +75,6 @@ mod host_start;
 mod marks;
 mod open;
 mod picked;
-mod pre_write_guard;
 mod rust_only;
 mod settings_window;
 #[cfg(test)]
@@ -92,7 +93,6 @@ use clauseo_settings::{
     Effective, Locations, PlatformDirs as _, SystemDirs, SystemEnv, SystemFiles,
 };
 use host_start::{HostCell, HostStart};
-pub use pre_write_guard::guard_requested;
 use rust_only::PluginRustOnly;
 use tauri::{
     App, AppHandle, Manager, RunEvent, Runtime, WebviewUrl, WebviewWindowBuilder, WindowEvent,
@@ -249,9 +249,10 @@ fn host_config(locations: &Locations) -> HostConfig {
     let launcher = PassthroughLauncher::new(spawn);
     let config = HostConfig::new(effective, Arc::new(launcher))
         .with_refused_folders(clauseo_settings::refused_folders(&SystemDirs));
-    // With no path to this executable no guard hook goes; the permission check remains.
+    // The sidecar beside this executable, else this executable in guard mode. With no path to
+    // this executable no guard hook goes; the permission check remains.
     match std::env::current_exe() {
-        Ok(exe) => config.with_pre_write_guard(exe),
+        Ok(exe) => config.with_pre_write_guard(clauseo_host::pre_write_guard::guard_program(&exe)),
         Err(_) => config,
     }
 }

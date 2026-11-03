@@ -161,8 +161,9 @@ use codex::{has_codex_part, in_codex_folder, patch_targets};
 use shell::{resolutions, shell_targets};
 use words::Escape;
 
-/// The first argument that makes the desktop binary run [`run`] on its stdin and stderr and
-/// exit, before anything else starts. The hook entry passes it (`agent/loads.rs`).
+/// The first argument that makes the `clauseo-guard` sidecar, or the desktop binary before
+/// anything else starts, run [`run`] on its stdin and stderr and exit ([`main_entry`]). The
+/// hook entry passes it (`agent/loads.rs`).
 pub const FLAG: &str = "--pre-write-guard";
 
 /// The argument after [`FLAG`] that names the matter folder, followed by the folder.
@@ -201,6 +202,47 @@ pub fn run(args: &[OsString], input: impl Read, mut errors: impl Write) -> i32 {
             .and_then(|()| errors.flush()),
     );
     code
+}
+
+/// What a binary's `main` does for the guard, the one copy both the `clauseo-guard` sidecar and
+/// the desktop binary's guard mode run: when the first of `args` (the arguments after the
+/// program) is exactly [`FLAG`], [`run`] on the rest with the process's stdin and stderr, and
+/// the exit code to end with; `None` for any other first argument, which is no guard call.
+pub fn main_entry(args: impl IntoIterator<Item = OsString>) -> Option<i32> {
+    let mut args = args.into_iter();
+    if args.next().as_deref() != Some(std::ffi::OsStr::new(FLAG)) {
+        return None;
+    }
+    let rest: Vec<OsString> = args.collect();
+    Some(run(
+        &rest,
+        std::io::stdin().lock(),
+        std::io::stderr().lock(),
+    ))
+}
+
+/// The guard sidecar's file name without the OS's executable suffix: package `clauseo-guard`,
+/// beside the app's executable (Tauri's `externalBin` in a release, `target/<profile>/` in a
+/// workspace build).
+pub const SIDECAR: &str = "clauseo-guard";
+
+/// The program the hook runs for an app whose executable is `exe`: the [`SIDECAR`] in `exe`'s
+/// folder when it is a file there, which starts in about a millisecond with no window toolkit
+/// loaded; else `exe` itself, whose `main` answers [`FLAG`] through [`main_entry`] too, with a
+/// warning (the caller asks once, at start-up).
+pub fn guard_program(exe: &Path) -> PathBuf {
+    let name = format!("{SIDECAR}{}", std::env::consts::EXE_SUFFIX);
+    if let Some(sidecar) = exe.parent().map(|folder| folder.join(&name))
+        && sidecar.is_file()
+    {
+        return sidecar;
+    }
+    tracing::warn!(
+        exe = %exe.display(),
+        "no {name} beside the app: the pre-write guard hook runs the app itself, which starts \
+         slower"
+    );
+    exe.to_path_buf()
 }
 
 /// The start of the stderr line saying the guard ignored its input ([`Ignored::line`]).

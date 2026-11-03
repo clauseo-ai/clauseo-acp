@@ -98,7 +98,9 @@
 //!   [`pre_write_guard::IGNORED`] when it could not read the input);
 //!   [`pre_write_guard::FLAG`] (then
 //!   `--matter <folder>`) is what the hook passes. It runs in the hook's own process, with no
-//!   host thread.
+//!   host thread: [`pre_write_guard::main_entry`] is the `main` of the `clauseo-guard` sidecar
+//!   and of the desktop's guard mode, and [`pre_write_guard::guard_program`] picks which of the
+//!   two the hook runs.
 //! - The limits (`actor/limits.rs`): the host owns the `clauseo_limits::Limits` model, starts
 //!   its reads on the actor's pool (the reader is [`HostConfig::with_limits_reader`]'s, by
 //!   default `clauseo_limits::ProcessReaders`), feeds it live rate-limit signals, turn ends,

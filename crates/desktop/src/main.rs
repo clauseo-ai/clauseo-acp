@@ -4,11 +4,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() -> tauri::Result<()> {
-    // The pre-write guard hook (`pre_write_guard.rs`): before Tauri, logging or settings.
-    if clauseo_desktop::guard_requested(std::env::args_os().nth(1).as_deref()) {
-        let args: Vec<std::ffi::OsString> = std::env::args_os().skip(2).collect();
-        let code =
-            clauseo_host::pre_write_guard::run(&args, std::io::stdin().lock(), std::io::stderr());
+    // The pre-write guard hook, when the `clauseo-guard` sidecar is missing (or a hook written
+    // before it shipped names this exe): before Tauri, logging or settings.
+    if let Some(code) = clauseo_host::pre_write_guard::main_entry(std::env::args_os().skip(1)) {
         std::process::exit(code);
     }
     clauseo_desktop::run()

@@ -959,6 +959,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "clauseo-guard"
+version = "0.0.0"
+dependencies = [
+ "async-process",
+ "clauseo-host",
+ "futures",
+ "serde_json",
+]
+
+[[package]]
 name = "clauseo-host"
 version = "0.1.0"
 dependencies = [

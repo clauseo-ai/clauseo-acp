@@ -254,8 +254,10 @@ impl HostConfig {
 
     /// The program Claude Code's `PreToolUse` hook runs, with the one argument
     /// [`pre_write_guard::FLAG`](crate::pre_write_guard::FLAG), before each file edit and shell
-    /// command (default: none, and no hook goes). The desktop passes its own executable, whose
-    /// `main` runs [`pre_write_guard::run`](crate::pre_write_guard::run) on that argument.
+    /// command (default: none, and no hook goes). The desktop passes
+    /// [`pre_write_guard::guard_program`](crate::pre_write_guard::guard_program): the
+    /// `clauseo-guard` sidecar beside it, else its own executable; the `main` of each runs
+    /// [`pre_write_guard::main_entry`](crate::pre_write_guard::main_entry) on that argument.
     /// `agent/loads.rs` builds the hook entry.
     pub fn with_pre_write_guard(mut self, program: PathBuf) -> Self {
         self.pre_write_guard = Some(program);

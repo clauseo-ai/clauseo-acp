@@ -1,0 +1,27 @@
+[package]
+name = "clauseo-guard"
+version = "0.0.0"
+description = "The clauseo-guard sidecar: the program an agent's PreToolUse hook runs, Clauseo's pre-write guard without the app's window toolkit."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "clauseo-guard"
+path = "src/main.rs"
+
+# The guard itself (clauseo_host::pre_write_guard); nothing else, so no tauri, webview or GTK
+# library loads when the hook starts it.
+[dependencies]
+clauseo-host = { path = "../host" }
+
+# The decisions test starts this binary over pipes.
+[dev-dependencies]
+async-process = { workspace = true }
+futures = { workspace = true }
+# The corpus's hook inputs.
+serde_json = { workspace = true }
