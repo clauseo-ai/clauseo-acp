@@ -6,8 +6,8 @@
 import { act } from "react";
 import { afterEach, expect, test } from "vitest";
 import { agentText, reset, step, userMessage } from "../../testing/stream-script.ts";
-import { eventsOf, searched, visited } from "../../testing/web-sources.ts";
-import type { Envelope } from "../../transport/protocol.ts";
+import { eventsOf, headerOf, searched, visited, webCall } from "../../testing/web-sources.ts";
+import type { AgentId, Envelope } from "../../transport/protocol.ts";
 import { FakeTransport } from "../../transport/fake-transport.ts";
 import { mountRoom, type Harness } from "./harness.ts";
 
@@ -17,18 +17,27 @@ afterEach(async () => {
   h = null;
 });
 
-async function answered(envelopes: Envelope[] | null) {
+/** A turn answered by `agent`, with a tool call entry for each tool call the envelopes name (ToolCallWeb's owner). */
+async function answered(envelopes: Envelope[] | null, agent: AgentId = "claude-acp") {
   h = await mountRoom();
+  const calls = [...new Set((envelopes ?? []).map(callOf))];
   h.deliver([
-    reset([
-      userMessage(5, 1, "What is the notice period under the Rent Control Act?"),
-      agentText(6, 1, "Thirty days, in writing."),
-      step(9),
-    ]),
+    reset(
+      [
+        userMessage(5, 1, "What is the notice period under the Rent Control Act?"),
+        ...calls.map((call, i) => webCall(10 + i, call)),
+        agentText(40, 1, "Thirty days, in writing."),
+        step(50),
+      ],
+      headerOf(agent),
+    ),
   ]);
   if (envelopes !== null) await act(async () => h!.transport.deliver(eventsOf(envelopes)));
   return h;
 }
+
+const callOf = (e: Envelope): string =>
+  e.event.web_search_recorded?.tool_call ?? e.event.page_visited?.tool_call ?? "";
 
 const toggle = () => h!.one("web-sources-toggle") as HTMLButtonElement;
 const rows = () => h!.all("web-source");
@@ -81,7 +90,7 @@ test("a Claude search with no results says so", async () => {
 });
 
 test("a Codex search says Codex doesn't report its pages, and shows no links", async () => {
-  await answered([searched(1, "notice period", [], { agent: "codex-acp" })]);
+  await answered([searched(1, "notice period", [], { agent: "codex-acp" })], "codex-acp");
   await open();
   expect(rows()[0]!.textContent).toBe(
     "Searched the web for notice period. ChatGPT doesn't report which pages it found.",
@@ -90,7 +99,7 @@ test("a Codex search says Codex doesn't report its pages, and shows no links", a
 });
 
 test("a page Codex opened says it was opened on OpenAI's computers", async () => {
-  await answered([visited(1, "https://example.com/x", { via: "codex_open_page" })]);
+  await answered([visited(1, "https://example.com/x", { via: "codex_open_page" })], "codex-acp");
   await open();
   expect(rows()[0]!.textContent).toBe(
     "Read https://example.com/x example.com.ChatGPT opened this page on OpenAI's computers, not on this one.",
@@ -129,6 +138,13 @@ test("a Hindi title and query are marked Hindi, an English one isn't, and each i
   await open();
   const bdis = rows().map((r) => r.querySelector("bdi"));
   expect(bdis.map((b) => b?.getAttribute("lang"))).toEqual(["hi", "hi", null]);
+});
+
+test("a source whose tool call isn't one of the turn's shows nothing", async () => {
+  h = await mountRoom();
+  h.deliver([reset([userMessage(5, 1, "Q?"), agentText(6, 1, "A."), step(9)])]);
+  await act(async () => h!.transport.deliver(eventsOf([searched(1, "elsewhere")])));
+  expect(h.one("web-sources")).toBeNull();
 });
 
 test("no envelopes: nothing under the answer", async () => {
