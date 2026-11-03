@@ -87,6 +87,7 @@ export const stepWords = (key: StepKey): WordsRef => ({
   file: "lib/words-steps.ts",
   key,
   text: (lang) => steps(lang, key),
+  later: steps.hi[key] === null,
 });
 
 /** A sentence of the step in hand (words-steps-live.ts). */
@@ -94,6 +95,7 @@ export const stepLiveWords = (key: StepLiveKey): WordsRef => ({
   file: "lib/words-steps-live.ts",
   key,
   text: (lang) => stepLive(lang, key),
+  later: stepLive.hi[key] === null,
 });
 
 /** A string of the plan's card (words-plan-card.ts). */
