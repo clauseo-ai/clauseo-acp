@@ -26,3 +26,17 @@ fn the_fixed_numbers_are_darwins() {
     let codes = [Errno::ENOTSUP, Errno::ENOTTY, Errno::EINVAL].map(|errno| errno as i32);
     assert_eq!(codes, DARWIN_NO_FULL_FLUSH);
 }
+
+/// macOS: syncing a folder that is gone fails; it is not passed as synced.
+#[cfg(target_os = "macos")]
+#[test]
+fn syncing_a_folder_that_is_gone_fails() {
+    let dir = crate::test_dir::TestDir::new("fsync-gone");
+    let gone = dir.path().join("gone");
+    let err = super::sync_dir(&gone).unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::NotFound, "{err}");
+    let err = super::full_flush_dir(&gone).unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::NotFound, "{err}");
+    super::sync_dir(dir.path()).unwrap();
+    super::full_flush_dir(dir.path()).unwrap();
+}
