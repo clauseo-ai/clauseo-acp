@@ -2,7 +2,7 @@
 // Settings, Privacy over FakeTransport: the section on the side; one row per plan the window knows (both while it
 // knows none, Claude's alone with Claude's limits only), Brave Search behind an info icon on Claude's row only; the
 // websites' row with its visit sentence behind an info icon, unless both tools are off; the "On the web" group only
-// when the host sends the tools' switches (app-local today), each row led by its tool's glyph with the state on it and
+// when the host sends the tools' switches (SettingsView.tools), each row led by its tool's glyph with the state on it and
 // one helper line at most, each switch showing its value and a flip sent as set_tool_settings with its key; a locked
 // key's switch disabled, showing the host's value, its glyph locked, U11-07's line in its helper's place; an on
 // Browser switch's helper giving way to the room's "Not available yet"; the nav's icon not the web's globe; no
@@ -14,10 +14,10 @@ import { settled } from "@clauseo/components/lib/late.ts";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { connectDisplay } from "../../display/connect.ts";
 import type { DisplayStore } from "../../room/display-store.ts";
-import type { Settings, ToolSettings } from "../../room/host-next.ts";
+import type { Settings } from "../../room/host-next.ts";
 import { stubFonts } from "../../room/thread/testing.ts";
 import { FakeTransport } from "../../transport/fake-transport.ts";
-import type { AgentLimitsView, LimitsView } from "../../transport/protocol.ts";
+import type { AgentLimitsView, LimitsView, ToolsSettingsView } from "../../transport/protocol.ts";
 import { IconSafeWorkspace, IconWebsite } from "@clauseo/components/icons/icons.tsx";
 import { SECTIONS } from "../sections.tsx";
 import { SettingsApp } from "../settings-app.tsx";
@@ -60,7 +60,7 @@ const UI: Settings["ui"] = {
   lite: "automatic",
   motion: "system",
 };
-const ON: ToolSettings = { web_search: true, browser: true };
+const ON: ToolsSettingsView = { web_search: true, browser: true };
 const PLAN: AgentLimitsView = {
   plan: "Claude Max",
   billing: "plan",
@@ -74,7 +74,7 @@ async function mount({
   locked = [],
   limits,
   refuse = false,
-}: { tools?: ToolSettings; locked?: string[]; limits?: LimitsView; refuse?: boolean } = {}) {
+}: { tools?: ToolsSettingsView; locked?: string[]; limits?: LimitsView; refuse?: boolean } = {}) {
   const settings: Settings = { ui: UI, locked, ...(tools === undefined ? {} : { tools }) };
   const transport = new FakeTransport({
     next: {

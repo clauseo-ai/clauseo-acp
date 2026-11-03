@@ -6,15 +6,14 @@
 // by its glyph with the state on it, one helper line each, each flip one patch. A locked switch shows the host's value,
 // its glyph locked, and the room's lock reason, "Managed by firm", in its helper's place. While the Browser switch is on and the app has no
 // website check, the room's reason, "Not available yet", stands in its helper's place.
-// Left out until something stands behind them: Indian Kanoon's row, the row for Clauseo's anonymous counts, and the
+// Left out until something stands behind them: a case-law source's row, the row for Clauseo's anonymous counts, and the
 // anonymous counts and crash report switches.
 //
-// The switches' values and writes are app-local (host-next.ts's ToolSettings, the fake's set_tool_settings): the host's
-// SettingsView carries `ui` and `locked` only, so the real window shows no "On the web" group. Host work that makes it
-// real (stage E): SettingsView.tools, the effective `web_search` and `browser`, in get_settings and settings_changed,
-// and HostCommand::SetToolSettings { patch }, refused whole with settings.locked when it names a locked key, then
-// settings_changed. A change applies from the next conversation's start; one already open keeps its tools.
-// The locks are real already: `locked` may list `tools.web_search` and `tools.browser`.
+// The switches are the host's: SettingsView.tools, the effective `web_search` and `browser`, in get_settings and
+// settings_changed, and a flip is HostCommand::SetToolSettings { patch }, refused whole with settings.locked when it
+// names a locked key, then settings_changed. Only the settings window sends it (the main window's host refuses it),
+// and this pane is the only place that does. A change applies from the next conversation's start; one already open
+// keeps its tools. `locked` may list `tools.web_search` and `tools.browser`.
 import { useSettingsWords } from "@clauseo/components/lib/words-settings.ts";
 import { ToolGlyph } from "@clauseo/components/icons/tool-glyph.tsx";
 import { tw } from "@clauseo/components/lib/words-tools.ts";
@@ -22,8 +21,7 @@ import { toolsLine } from "@clauseo/components/lib/words-tools-line.ts";
 import { InfoTip } from "@clauseo/components/ui/info-tip.tsx";
 import { SettingRow } from "@clauseo/components/ui/settings-row.tsx";
 import { PLAN_NAME } from "../../room/limits/plan-model.ts";
-import type { ToolSettings } from "../../room/host-next.ts";
-import type { AgentKind } from "../../transport/protocol.ts";
+import type { AgentKind, ToolsSettingsView } from "../../transport/protocol.ts";
 import type { SectionContext } from "../sections.tsx";
 import { Group, PlateRow } from "./parts.tsx";
 import { KINDS } from "./usage-note.ts";
@@ -79,8 +77,8 @@ function ToolRow({
   reason,
 }: {
   ctx: SectionContext;
-  tools: ToolSettings;
-  tool: keyof ToolSettings;
+  tools: ToolsSettingsView;
+  tool: keyof ToolsSettingsView;
   label: string;
   note: string;
   /** Optional: why the tool can't run yet, in the helper's place (one line at most). */

@@ -14,9 +14,9 @@ import {
 import type { Display, Lang } from "@clauseo/components/lib/display.ts";
 import { LANGUAGE_NAMES, st, type SettingsKey } from "@clauseo/components/lib/words-settings.ts";
 import type { DisplayStore } from "../room/display-store.ts";
-import type { ToolSettings, UiSettings } from "../room/host-next.ts";
+import type { UiSettings } from "../room/host-next.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
-import type { LimitsView } from "../transport/protocol.ts";
+import type { LimitsView, ToolsSettingsView } from "../transport/protocol.ts";
 import { APP_VERSION } from "./version.ts";
 import { lockKey, type LiveSettings } from "./use-settings.ts";
 import { About } from "./sections/about.tsx";
@@ -58,9 +58,9 @@ export type SectionContext = {
   /** The lawyer's choice: one patch to the store, unless the key is locked or already holds the value. */
   choose: <K extends keyof UiSettings>(key: K, value: UiSettings[K]) => void;
   /** Whether a firm's policy locks a tool's switch (`tools.web_search`, `tools.browser`). */
-  toolLocked: (key: keyof ToolSettings) => boolean;
+  toolLocked: (key: keyof ToolsSettingsView) => boolean;
   /** The lawyer's choice of a tool's switch: one patch, unless the key is locked or already holds the value. */
-  chooseTool: (key: keyof ToolSettings, value: boolean) => void;
+  chooseTool: (key: keyof ToolsSettingsView, value: boolean) => void;
 };
 
 export type SectionEntry = {
@@ -134,7 +134,7 @@ export function contextOf(
   releaseDate: string | null = null,
 ): SectionContext {
   const locked = (key: keyof UiSettings) => settings.locked.includes(lockKey(key));
-  const toolLocked = (key: keyof ToolSettings) => settings.locked.includes(`tools.${key}`);
+  const toolLocked = (key: keyof ToolsSettingsView) => settings.locked.includes(`tools.${key}`);
   return {
     store,
     transport,

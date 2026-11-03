@@ -91,7 +91,7 @@ const MOTIONS: [UiMotion, string][] = [
   ["reduced", "reduce"],
 ];
 
-test("get_settings maps every wire lite and motion to the room's, and keeps the locked keys as they came", async () => {
+test("get_settings maps every wire lite and motion to the room's, and keeps the tool switches and the locked keys as they came", async () => {
   for (const [lite, wireLite] of LITES) {
     for (const [motion, wireMotion] of MOTIONS) {
       const view = {
@@ -101,6 +101,7 @@ test("get_settings maps every wire lite and motion to the room's, and keeps the 
       const host = wireSettingsHost(fakeSource(() => view).source);
       await expect(host.getSettings()).resolves.toEqual({
         ui: { theme: "dark", font_size: 18, language: "hi", lite, motion },
+        tools: { web_search: true, browser: false },
         locked: ["ui.theme", "matters.default_location"],
       });
     }
@@ -125,6 +126,34 @@ test("set_ui_settings sends only the keys given, each lite and motion in the wir
     set_ui_settings: { patch: { theme: "light", font_size: 20, language: "en" } },
   });
   expect(new Set(commands.map((c) => c.command_id)).size).toBe(commands.length);
+});
+
+test("set_tool_settings sends only the switches given, as the wire spells them, with a fresh id", async () => {
+  const { source, commands } = fakeSource();
+  const host = wireSettingsHost(source);
+  await host.setToolSettings({ browser: true });
+  expect(commands.at(-1)?.command).toEqual({ set_tool_settings: { patch: { browser: true } } });
+  await host.setToolSettings({ web_search: false, browser: false });
+  expect(commands.at(-1)?.command).toEqual({
+    set_tool_settings: { patch: { web_search: false, browser: false } },
+  });
+  expect(new Set(commands.map((c) => c.command_id)).size).toBe(2);
+});
+
+test("a settings_changed carries the tool switches to the listeners", async () => {
+  const fake = fakeSource();
+  const host = wireSettingsHost(fake.source);
+  const heard: unknown[] = [];
+  host.onSettingsChanged((s) => heard.push(s.tools));
+  fake.emit({ ...VIEW, tools: { web_search: false, browser: true } });
+  expect(heard).toEqual([{ web_search: false, browser: true }]);
+});
+
+test("a refused tool switch rejects with the host's error", async () => {
+  const error = { code: "settings.locked", message: "locked", retryable: false };
+  const { source } = fakeSource();
+  const host = wireSettingsHost({ ...source, dispatch: () => Promise.reject(error) });
+  await expect(host.setToolSettings({ browser: true })).rejects.toEqual(error);
 });
 
 test("a refused set rejects with the host's error", async () => {

@@ -3,13 +3,14 @@
 // controls always show what holds now. The display itself is read with useDisplay().
 import { useCallback, useRef, useSyncExternalStore } from "react";
 import type { DisplayStore } from "../room/display-store.ts";
-import type { ToolSettings, UiSettings } from "../room/host-next.ts";
+import type { UiSettings } from "../room/host-next.ts";
+import type { ToolsSettingsView } from "../transport/protocol.ts";
 
 export type LiveSettings = {
   ui: UiSettings;
   locked: readonly string[];
-  /** The tools' switches, when the host sends them (app-local until it does). */
-  tools?: ToolSettings | undefined;
+  /** The tools' switches, when the host sends them (SettingsView.tools). */
+  tools?: ToolsSettingsView | undefined;
 };
 
 const KEYS = ["theme", "font_size", "language", "lite", "motion"] as const;

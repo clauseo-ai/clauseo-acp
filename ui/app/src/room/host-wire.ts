@@ -1,4 +1,4 @@
-// H7, H8, R15 and H3 to H6 over the desktop host: the room's SettingsHost (host-next.ts) from the transport's `query`,
+// H7, H8, R15 and H3 to H6 over the desktop host: the room's SettingsHost (host-next.ts, the tool switches included) from the transport's `query`,
 // `dispatch` and app feed (`onAppEvent`), its PapersHost from `query`'s `list_papers`, its AgentsHost from `query`'s
 // `list_agents`, its MattersHost from `list_matters`, `list_threads` and the matters' commands, and its AppHost from
 // the app feed's `matters_changed` and `threads_changed`. The room keeps its own spellings; this file is the one place
@@ -65,6 +65,7 @@ export function roomSettingsOf(view: SettingsView): Settings {
       lite: LITE_BACK[ui.lite],
       motion: MOTION_BACK[ui.motion],
     },
+    tools: view.tools,
     locked: view.locked,
   };
 }
@@ -112,6 +113,12 @@ export function wireSettingsHost(source: WireSettingsSource): SettingsHost {
       await source.dispatch({
         command_id: crypto.randomUUID(),
         command: { set_ui_settings: { patch: wirePatchOf(patch) } },
+      });
+    },
+    async setToolSettings(patch) {
+      await source.dispatch({
+        command_id: crypto.randomUUID(),
+        command: { set_tool_settings: { patch } },
       });
     },
     onSettingsChanged(listener) {

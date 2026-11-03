@@ -2,11 +2,11 @@
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { useState } from "react";
 import { createDisplayStore, DEFAULT_UI } from "../room/display-store.ts";
-import { nextHostOf, type ToolSettings } from "../room/host-next.ts";
+import { nextHostOf } from "../room/host-next.ts";
 import type { SectionId } from "../settings/sections.tsx";
 import { SettingsApp } from "../settings/settings-app.tsx";
 import { FakeTransport } from "../transport/fake-transport.ts";
-import type { LimitsView } from "../transport/protocol.ts";
+import type { LimitsView, ToolsSettingsView } from "../transport/protocol.ts";
 
 /** The window over a host holding the default settings in `lang`, with `locked` locked, and with `limits` the plan's
  * limits its channel carries (U12); the display stays the frame's own (the review sets it per cell), so the store
@@ -24,8 +24,8 @@ export function SettingsOver({
   locked?: string[];
   limits?: LimitsView;
   releaseDate?: string | null;
-  /** The tools' switches the host sends (app-local, Privacy's switches); none, today's host, when left out. */
-  tools?: ToolSettings;
+  /** The tools' switches the host sends (SettingsView.tools, Privacy's switches); none when left out. */
+  tools?: ToolsSettingsView;
 }) {
   const [made] = useState(() => {
     const transport = new FakeTransport({

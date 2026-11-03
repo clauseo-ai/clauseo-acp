@@ -137,7 +137,7 @@ const NEW_GLYPHS = [
 ] as const;
 
 const SITES = [
-  "https://www.indiankanoon.org/doc/1/",
+  "https://www.indiacode.nic.in/handle/1/",
   "https://main.sci.gov.in/judgments",
   "https://भारत.सरकार/",
   "about:blank",
