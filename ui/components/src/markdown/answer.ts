@@ -52,11 +52,12 @@ import {
   pairTags,
   paragraphNotingStart,
 } from "./inline-tags.ts";
+import { createAppender } from "./append.ts";
 import { endOf, parse } from "./parse.ts";
 import { repairTail } from "./repair.ts";
 import { CLOBBER_PREFIX, SCHEMA } from "./schema.ts";
 import { anchorHeadings, createSlugNumbering, headingId, withSlugs } from "./slugs.ts";
-import { createSplitter, joinParts } from "./split.ts";
+import { createSplitter, joinParts, MAX_PARAGRAPH } from "./split.ts";
 import type { BlockEnd } from "./split.ts";
 import { extrasHandlers } from "./syntax-extras.ts";
 import { noteViewRebuild } from "./note-view.ts";
@@ -145,14 +146,18 @@ export function createAnswer(scope: string): Answer {
   // The inputs parsed for the streaming last block this update: the only mdast the model keeps after it.
   const tailKeys = new Set<string>();
   let inTail = false;
+  // The tail's parses, each the last update's extended when only inert text was added (append.ts).
+  const appender = createAppender();
   const tree = (source: string) => {
     if (inTail) tailKeys.add(source);
-    return trees.get(source, () => {
+    const root = trees.get(source, () => {
       const misses = characterReferenceMisses();
-      const root = parse(source);
+      const root = inTail ? appender.parse(source) : parse(source);
       if (!entities && characterReferenceMisses() !== misses) missed = true;
       return root;
     });
+    if (inTail) appender.add(source, root);
+    return root;
   };
   // The views this update made, sealed as it ends.
   const made: BlockView[] = [];
@@ -364,6 +369,7 @@ export function createAnswer(scope: string): Answer {
     const repaired = repairs.get(raw.input, () => ({
       text: repairTail(raw.input, raw.from, tree),
     })).text;
+    if (repaired !== undefined) appender.pending();
     return repaired === undefined ? raw : entryOf(repaired, lines, defined, true);
   };
 
@@ -458,6 +464,7 @@ export function createAnswer(scope: string): Answer {
       if (!entities && characterEntitiesLoaded()) {
         // The full table arrived: blocks holding `&` are parsed again, the rest keep their views.
         entities = true;
+        appender.end(false); // and no tail parse from before it is extended
         if (missed) {
           for (const cache of [trees, owned, facts, repairs, views, tails]) cache.forget("&");
           lastLinesUsed = undefined;
@@ -478,6 +485,8 @@ export function createAnswer(scope: string): Answer {
         continues = [false];
       }
       const last = blocks.length - 1;
+      // No append fast path within a paragraph split.ts cuts, nor one long enough to be cut.
+      appender.open(streaming && !continues[last] && (blocks[last]?.length ?? 0) <= MAX_PARAGRAPH);
       const lines = documentOf(blocks, streaming ? last : blocks.length);
       const defined = documentNotesOf(blocks);
       // A block finished last time, unchanged, under the same definitions: its entry as it was.
@@ -561,6 +570,7 @@ export function createAnswer(scope: string): Answer {
       for (const cache of caches) cache.sweep();
       trees.retain(tailKeys);
       tailKeys.clear();
+      appender.end(streaming);
       joinOf.sweep();
       // Every view this update made lets its hast go; those it shows make their React elements first.
       // A stream makes a view or two an update, near the end: looked for from there.

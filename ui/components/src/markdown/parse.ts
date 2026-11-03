@@ -33,7 +33,20 @@ const OPTIONS_WITHOUT_LITERALS = {
 };
 const MAY_HOLD_LITERAL = /http|www/i;
 
+/**
+ * For the tests and benchmarks only: while `counts` is set, every parse adds one to `parses` and its length
+ * to `chars`, and every tail parse the append fast path makes instead (append.ts) one to `fast`.
+ */
+export const parseProbe: { counts: { parses: number; chars: number; fast: number } | undefined } = {
+  counts: undefined,
+};
+
 export function parse(source: string): Root {
+  const counts = parseProbe.counts;
+  if (counts) {
+    counts.parses++;
+    counts.chars += source.length;
+  }
   const literals = source.includes("@") || source.includes("&") || MAY_HOLD_LITERAL.test(source);
   return fromMarkdown(source, literals ? OPTIONS : OPTIONS_WITHOUT_LITERALS);
 }
