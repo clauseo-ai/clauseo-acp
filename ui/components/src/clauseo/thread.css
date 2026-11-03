@@ -397,13 +397,13 @@
     :where(p, ul, ol, dl, blockquote, pre, table, hr, h1, h2, h3, h4, h5, h6) {
     margin: 0;
   }
-  /* every block after the first takes the block gap above it (--s3), paragraphs, lists, code, tables and quotes
+  /* every block after the first takes the paragraph gap above it (--para-gap, 14 px: DESIGN's paragraphs 14 px apart, as the reader and the rest of the thread), paragraphs, lists, code, tables and quotes
      alike; the first block and the last take none, and a quote's own first child takes none, since only the
      children after a first are spaced. The rest of a paragraph cut into parts (a very long one, while it streams)
      reads on, no gap; :where keeps the specificity, so the heading rule below still wins */
   .reply-text [data-clauseo="markdown"] > * + :where(:not([data-clauseo-paragraph="continues"])),
   .reply-text [data-clauseo="markdown"] :is(li, blockquote, dd, .footnotes) > * + * {
-    margin-top: var(--s3);
+    margin-top: var(--para-gap);
   }
   .reply-text [data-clauseo="markdown"] :is(h1, h2, h3, h4, h5, h6) {
     font-weight: var(--w-chip);
