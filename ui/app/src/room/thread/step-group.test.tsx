@@ -117,7 +117,7 @@ test("a mode switch on the folded line draws its own glyph, not other's, though 
     renderToStaticMarkup(<ToolKindIcon kind={k} size={14} className="step-icon" />);
   expect(glyph("switch_mode")).not.toBe(glyph("other"));
   const [alone, mixed] = groups();
-  expect(alone?.textContent).toBe("Did 1 other thing.");
+  expect(lineOf(alone)?.textContent).toBe("Did 1 other thing.");
   expect([...alone!.querySelectorAll(".step-group-icons svg")].map((e) => e.outerHTML)).toEqual([
     glyph("switch_mode"),
   ]);
@@ -174,7 +174,7 @@ test("a failure stays visible on the folded line", async () => {
   const g = groups()[0]!;
   expect(g.dataset["trouble"]).toBe("true");
   expect(h.one("step-group-trouble")?.textContent).toBe("1 of them failed.");
-  expect(g.textContent).toBe("1 paper read. 1 of them failed.");
+  expect(lineOf(g)?.textContent).toBe("1 paper read. 1 of them failed.");
 });
 
 test("a permission prompt and a question for the lawyer never fold: each stands between the groups", async () => {
@@ -221,7 +221,7 @@ test("while the agent works, the live group and the working line say what is bei
   ]);
   const g = () => groups()[0]!;
   expect(g().dataset["live"]).toBe("true");
-  expect(g().textContent).toBe("Reading Notice.pdf. 1 done so far.");
+  expect(lineOf(g())?.textContent).toBe("Reading Notice.pdf. 1 done so far.");
   expect(h.one("working")?.textContent).toContain("Reading Notice.pdf.");
   // the pen writes in the wait icon's place while the turn runs; one read is a wait in its own words, never a check
   const pen = () => h!.one("working")?.querySelector(".working-pen") ?? null;
@@ -232,12 +232,12 @@ test("while the agent works, the live group and the working line say what is bei
     upsert(read(8, 202, "papers/Notice.pdf")),
     upsert(search(9, 203, "notice", "in_progress")),
   ]);
-  expect(g().textContent).toBe("Searching for 'notice'. 2 done so far.");
+  expect(lineOf(g())?.textContent).toBe("Searching for 'notice'. 2 done so far.");
   expect(h.one("working")?.textContent).toContain("Searching for 'notice'.");
   // the answer starts after it: the group settles to its summary, the working line to "Answering."
   h.deliver([upsert(search(9, 203, "notice")), upsert(agentText(10, 3, "Clause nine"))]);
   expect(g().dataset["live"]).toBeUndefined();
-  expect(g().textContent).toBe("2 papers read. Searched once.");
+  expect(lineOf(g())?.textContent).toBe("2 papers read. Searched once.");
   expect(h.one("working")?.textContent).toContain(frame("en", "Answering."));
   expect(pen()).not.toBeNull();
   // the turn ends: the working line goes, and the pen with it
@@ -294,7 +294,7 @@ test("in Hindi, the line and the rows in Hindi, the paper's name as filed", asyn
       agentText(9, 3, "ठीक।"),
     ]),
   ]);
-  expect(groups()[0]?.textContent).toBe("2 दस्तावेज़ पढ़े गए।");
+  expect(lineOf(groups()[0])?.textContent).toBe("2 दस्तावेज़ पढ़े गए।");
   await h.click(lineOf(groups()[0]));
   expect(h.all("tool-call")[0]?.textContent).toBe("Lease deed.pdf पढ़ा गया।");
   expect(h.all("tool-call")[0]?.querySelector('[lang="en"]')?.textContent).toBe("Lease deed.pdf");

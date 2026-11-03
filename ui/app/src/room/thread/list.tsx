@@ -5,7 +5,6 @@
 // only the row whose text grew.
 // Nothing here is needed for the room's first paint: Work, the session and the composer are in the room's own chunk.
 import { memo, useCallback, useMemo, useState, type ReactNode } from "react";
-import { Who } from "@clauseo/components/clauseo/answer.tsx";
 import { useRoom } from "@clauseo/components/clauseo/room-scope.ts";
 import { Thread } from "@clauseo/components/clauseo/thread.tsx";
 import { th } from "@clauseo/components/lib/words-thread.ts";
@@ -14,11 +13,13 @@ import { useStreamPart, useViewStore } from "../../store/hooks.ts";
 import type { StreamView } from "../../store/view.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type { EntryId, StreamId, Timestamp, ViewEntry } from "../../transport/protocol.ts";
+import { AnswerMeta } from "./answer-meta.tsx";
 import { stamp } from "./clock.ts";
 import { exchangesPick, latestAsked } from "./exchanges.ts";
 import { sameIds } from "./ids.ts";
 import { useHasOlder, useQuestionWords } from "./live.ts";
 import { useOlder } from "./older.ts";
+import { useTimeOf } from "./time-of.ts";
 import { RowOf } from "./row-of.tsx";
 import { SteerNotesOf } from "./steer-rows.tsx";
 import { LiveAnswerRows } from "./step-groups.tsx";
@@ -27,25 +28,6 @@ import { LiveAnswerRows } from "./step-groups.tsx";
 export { WarningNote } from "./limit-warning-note.tsx";
 
 const STEP = "step:";
-
-const timeIn = (e: ViewEntry | undefined): Timestamp | null =>
-  e?.user_message?.ts ?? e?.step?.ts ?? null;
-
-/** The time of a question or a step, by id, from an older page or the window; null with no id or while not in. A
- * number, so a flush that leaves it as it was renders nothing. */
-function useTimeOf(
-  id: EntryId | undefined,
-  stream: StreamId,
-  paged: ReadonlyMap<EntryId, ViewEntry>,
-): Timestamp | null {
-  const pick = useMemo(
-    () => (v: StreamView | undefined) => (id === undefined ? null : timeIn(v?.entries.get(id))),
-    [id],
-  );
-  const live = useStreamPart(useViewStore(), stream, pick);
-  const page = id === undefined ? undefined : paged.get(id);
-  return page === undefined ? live : timeIn(page);
-}
 
 /** One exchange: the question's section and the answer's, each named with its time so two exchanges' sections never
  * share a name (axe's landmark-unique): the question's `ts`, and the answer's step's `ts`, the time it ended. A
@@ -117,10 +99,11 @@ function Sections({
           ref={latest ? nodes.slot("answerStep") : undefined}
           aria-label={endedRepeats ? undefined : endedName}
         >
-          {/* the design's meta line opens each answer: "Clauseo", and its turn's time once the step is in */}
-          <div className="meta meta-live" ref={latest ? nodes.slot("meta") : undefined}>
-            <Who name={w.t("Clauseo")} time={endedTime ?? undefined} />
-          </div>
+          {/* the design's meta line opens each answer: "Clauseo", and its turn's time once the step is in. The
+              answer's rows put it in themselves, with its first step group on it as the chip (step-groups.tsx) */}
+          {answer === null && (
+            <AnswerMeta step={step} stream={stream} paged={paged} latest={latest} />
+          )}
           {answer}
         </section>
       )}
@@ -154,10 +137,12 @@ const LiveExchange = memo(
     beforeStep: EntryId | undefined;
   }) {
     const rest = asked ? ids.slice(1) : ids;
+    const step = rest.find((id) => id.startsWith(STEP));
     const answer =
       rest.length === 0 ? null : (
         <LiveAnswerRows
           ids={rest}
+          step={step}
           stream={stream}
           paged={paged}
           sentNow={sentNow}
@@ -166,7 +151,6 @@ const LiveExchange = memo(
       );
     // a steer's mark in the answer (a user message there) is where a tool call can carry on in the background
     const notes = rest.some((id) => id.startsWith(USER)) && rest.some((id) => id.startsWith(TOOL));
-    const step = rest.find((id) => id.startsWith(STEP));
     return (
       <Sections
         question={
