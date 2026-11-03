@@ -247,17 +247,21 @@ pub(crate) fn filled_browser() -> Value {
 }
 
 /// A generic agent's scenario: `initialize`, `method` (`session/new` or `session/load` of
-/// `sess-1`) matching `params` with `off` off, one prompt.
+/// `sess-1`) matching `params` with `off` off, one prompt. The answer carries claude-agent-acp
+/// 0.89.1's modes, in `default`, as a Claude agent's launch requires (`claude-handshake`).
 pub(crate) fn agent_lines(name: &str, method: &str, params: &Value, off: &[&str]) -> String {
     let label = if method == "session/new" {
         "new"
     } else {
         "load"
     };
+    let modes = json!({"currentModeId": "default", "availableModes": [
+        {"id": "default", "name": "Manual"}, {"id": "acceptEdits", "name": "Accept edits"},
+        {"id": "plan", "name": "Plan"}, {"id": "auto", "name": "Auto"}]});
     let respond = if method == "session/new" {
-        json!({"sessionId": "sess-1"})
+        json!({"sessionId": "sess-1", "modes": modes})
     } else {
-        json!({})
+        json!({"modes": modes})
     };
     [
         json!({"scenario": name, "description": "a launch profile test", "on_stdin_close": "exit"}),
