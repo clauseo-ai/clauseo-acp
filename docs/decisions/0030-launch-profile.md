@@ -56,11 +56,14 @@ The host thread set the conditions the profile must keep: Claude keeps `settingS
     root. Folders compare without regard to case or separator.
   - An agent with no kind (`fake-agent`) gets the servers and nothing kind-specific.
 - **The `browser` entry.** Command `clauseo-mcp`; arguments `browser-guard --agent-browser
-  <agent-browser> --cwd {browser_dir} -- mcp --tools core`; exactly four variables:
+  <agent-browser> --cwd {browser_dir} --cdp-port {cdp_port} -- mcp --tools core`, with
+  `--daemon-port {daemon_port}` after `--cdp-port` on Windows; five variables:
   `AGENT_BROWSER_CONFIG` (static), `AGENT_BROWSER_PROXY=http://127.0.0.1:{proxy_port}`,
-  `AGENT_BROWSER_SESSION={session_id}` and `AGENT_BROWSER_EXECUTABLE_PATH={browser_executable}`.
-  S27's guard derives the download, socket, screenshot, `HOME`, `TMPDIR` or `TEMP` and proxy
-  variables from `--cwd` and the proxy value, so the entry carries none of them. The guard's
+  `AGENT_BROWSER_SESSION={session_id}`, `AGENT_BROWSER_EXECUTABLE_PATH={browser_executable}` and
+  `AGENT_BROWSER_STREAM_PORT={stream_port}`, and on macOS and Linux a sixth,
+  `AGENT_BROWSER_SOCKET_DIR={socket_dir}` (S27's ports-and-socket PR, 0029). S27's guard derives
+  the download, screenshot, `HOME`, `TMPDIR` or `TEMP`, Windows socket and proxy variables from
+  `--cwd` and the proxy value, so the entry carries none of them. The guard's
   `--cwd` is the session's browser state folder, never the matter folder.
 - **Placeholders, and the host's contract** (`placeholders.rs`, the one home of the token
   strings and of `fill`, both public, documented API). The host depends on `profile` and calls
@@ -68,7 +71,10 @@ The host thread set the conditions the profile must keep: Claude keeps `settingS
   the host's row in `ARCHITECTURE.md`.
   - Instructions: `{work_folder}` and `{matter_notes}` (R22). An unfillable one is a host bug:
     the host fails the launch with `agent.launch_failed`, naming the token.
-  - `browser`: `{browser_dir}`, `{proxy_port}`, `{session_id}`, `{browser_executable}`.
+  - `browser`: `{browser_dir}`, `{proxy_port}`, `{session_id}`, `{browser_executable}`,
+    `{socket_dir}` (macOS and Linux), `{stream_port}`, `{cdp_port}` and `{daemon_port}`
+    (Windows), the last four from the session's claims (0029); an unfillable one of those
+    drops the entry with `BrowserNotInstalled`.
     `{browser_dir}` is one whole token, `<data>/run/<session id>/browser`, which the host joins
     with the platform's separators and fills with a `dunce`-simplified path (no `\\?\` prefix),
     so a Windows path never mixes separators. The
