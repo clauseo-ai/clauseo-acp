@@ -103,8 +103,15 @@ fn rewrite_field(field: &mut Field) -> Result<(), FormatError> {
         if !field.attributes.contains_key(DEFAULT) {
             return Err("`skip_serializing_if` without `default`".into());
         }
-        if let Some(DataType::Nullable(inner)) = field.ty.take() {
-            field.ty = Some(*inner);
+        // Only an `Option` (`Nullable`) loses its `null`; any other type (a `Delivery`, a list)
+        // stays as it is. Taking it out unconditionally left those fields with no type, which
+        // dropped them from the export.
+        if let Some(DataType::Nullable(inner)) = &mut field.ty {
+            let inner = std::mem::replace(
+                &mut **inner,
+                DataType::Primitive(specta::datatype::Primitive::bool),
+            );
+            field.ty = Some(inner);
         }
     }
     field.ty.as_mut().map_or(Ok(()), rewrite)
