@@ -1,0 +1,84 @@
+/* The step group: what Clauseo did between two of its texts, as one quiet line that opens in place to its rows
+   (step-group.tsx). Its line is the work chip's look (thread.css .work-done): small words in the muted tone, the
+   icons before them, the chevron after, the well's tone under the pointer. No surface, open or closed, and nothing
+   animates: the chevron turns at once. A failure stays on the line in the primary ink, never red. */
+
+@layer components {
+  .step-group {
+    max-width: var(--measure);
+  }
+  .step-group:not(:first-child) {
+    margin-top: var(--s3);
+  }
+  .step-group-line {
+    @apply text-small font-ui text-muted;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s1-5);
+    max-width: 100%;
+    min-height: calc(var(--s6) * var(--k));
+    padding: 0 var(--s2) 0 var(--s1-5);
+    margin-left: calc(-1 * var(--s1-5));
+    border-radius: var(--r-chip);
+    background: transparent;
+    text-align: start;
+    @apply is-hover:bg-well is-hover:text-primary is-active:bg-well-strong;
+  }
+  .step-group-icons {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s1);
+    flex: none;
+  }
+  .step-icon {
+    flex: none;
+    color: var(--quiet);
+  }
+  .step-group-words {
+    min-width: 0;
+  }
+  .step-group[data-live] .step-group-now {
+    color: var(--primary);
+  }
+  .step-group-more {
+    color: var(--quiet);
+  }
+  .step-group-trouble {
+    color: var(--primary);
+    font-weight: 560;
+  }
+  .step-group-chev {
+    flex: none;
+  }
+  .step-group-line[aria-expanded="true"] .step-group-chev {
+    transform: rotate(90deg);
+  }
+  .step-group-rows {
+    display: grid;
+    gap: var(--s1);
+    margin: var(--s1) 0 var(--s2);
+    padding: 0;
+    list-style: none;
+  }
+  .step-row {
+    @apply text-small-row text-muted;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: var(--s2);
+    align-items: baseline;
+  }
+  .step-row .step-icon {
+    align-self: center;
+  }
+  .step-row-text {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .step-row[data-status="failed"] .step-row-mark,
+  .step-row[data-status="cancelled"] .step-row-mark {
+    color: var(--primary);
+  }
+  .step-row-thought .step-row-text > * {
+    margin-top: 0;
+  }
+}
