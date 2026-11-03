@@ -15,6 +15,7 @@ mod answer;
 mod batch;
 mod files;
 mod fold;
+#[cfg(feature = "test-support")]
 mod hold;
 mod worker;
 
@@ -34,6 +35,7 @@ use clauseo_store::Store;
 use crate::clock::Clock;
 use crate::error::Error;
 
+#[cfg(feature = "test-support")]
 pub use hold::SearchHold;
 
 /// The name of the search thread.
@@ -51,8 +53,10 @@ pub(crate) const QUERY_WINDOW: &str = "query";
 pub(crate) struct SearchSeams {
     pub(crate) capacity: usize,
     /// Stops the rebuild before each conversation until released.
+    #[cfg(feature = "test-support")]
     pub(crate) rebuild_hold: Option<SearchHold>,
     /// Stops the thread before each query runs until released.
+    #[cfg(feature = "test-support")]
     pub(crate) query_hold: Option<SearchHold>,
 }
 
@@ -60,7 +64,9 @@ impl Default for SearchSeams {
     fn default() -> Self {
         Self {
             capacity: COMMIT_CAPACITY,
+            #[cfg(feature = "test-support")]
             rebuild_hold: None,
+            #[cfg(feature = "test-support")]
             query_hold: None,
         }
     }
@@ -168,7 +174,7 @@ impl Search {
         data_dir: PathBuf,
         store: Store,
         clock: Arc<dyn Clock>,
-        seams: SearchSeams,
+        seams: &SearchSeams,
     ) -> Result<Self, Error> {
         let (commits, commit_rx) = async_channel::bounded(seams.capacity.max(1));
         let (control, control_rx) = async_channel::unbounded();
@@ -180,7 +186,8 @@ impl Search {
             shared: Arc::clone(&shared),
             commits: commit_rx,
             control: control_rx,
-            seams,
+            #[cfg(feature = "test-support")]
+            seams: seams.clone(),
         };
         let thread = thread::Builder::new()
             .name(THREAD_NAME.to_owned())

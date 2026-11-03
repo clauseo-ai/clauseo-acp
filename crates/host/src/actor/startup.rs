@@ -39,7 +39,7 @@ pub(super) async fn open(
         data_dir,
         store.clone(),
         Arc::clone(&parts.clock),
-        parts.search.clone(),
+        &parts.search,
     )?;
     let heads = store.heads().await?;
     let tails = store.tail_times().await?.into_iter().collect();
