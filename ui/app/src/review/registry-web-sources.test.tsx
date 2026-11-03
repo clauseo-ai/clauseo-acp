@@ -122,12 +122,19 @@ test("WEB-10 shows the browser glyph focused, its tooltip saying how the page wa
 
 test("the cells' tool calls carry the adapters' titles, never \"Web\"", async () => {
   const host = await cell("WEB-05");
+  // UTC folds the tool calls into one step group: open it to read their rows
+  const groups = [...host.querySelectorAll<HTMLButtonElement>(".step-group-line")];
+  expect(groups.length).toBeGreaterThan(0);
+  await act(async () => {
+    for (const line of groups) line.click();
+  });
   const titles = [...host.querySelectorAll('[data-testid="tool-call"]')].map((e) => e.textContent);
   expect(titles.length).toBe(5);
   expect(titles).not.toContain("Web");
-  expect(titles[0]).toBe('Search "Delhi Rent Control Act notice period"');
+  // UTC's rows end each title with a full stop
+  expect(titles[0]).toBe('Search "Delhi Rent Control Act notice period".');
   expect(titles[2]).toBe(
-    "Fetch https://www.indiacode.nic.in/handle/123456789/1525/simple-search?query=section%2014",
+    "Fetch https://www.indiacode.nic.in/handle/123456789/1525/simple-search?query=section%2014.",
   );
 });
 
