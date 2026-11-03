@@ -1930,5 +1930,138 @@
     "at": "2026-11-03",
     "by": "Rohan",
     "note": "Rohan, via the orchestrator: 'yeah the copy is fine' (U12-14/15 option a)"
+  },
+  "U7-05": {
+    "en": "1 queued, sent once this answer is done.",
+    "hi": "1 कतार में, यह उत्तर पूरा होते ही जाएगा।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U7-06": {
+    "en": "{n} queued, sent in order.",
+    "hi": "{n} कतार में, क्रम से भेजे जाएँगे।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U7-07": {
+    "en": "The queue holds {n}.",
+    "hi": "कतार में {n} संदेश रह सकते हैं।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U7-08": {
+    "en": "{n} more",
+    "hi": "{n} और",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U7-09": {
+    "en": "Show fewer",
+    "hi": "कम दिखाएँ",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U7-10": {
+    "en": "Queued messages",
+    "hi": "कतार के संदेश",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U7-11": {
+    "en": "Edit",
+    "hi": "बदलें",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U7-12": {
+    "en": "Remove",
+    "hi": "हटाएँ",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U7-13": {
+    "en": "Send now",
+    "hi": "अभी भेजें",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U7-14": {
+    "en": "Edit queued message {n}",
+    "hi": "कतार का संदेश {n} बदलें",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U7-15": {
+    "en": "Save",
+    "hi": "सहेजें",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U7-17": {
+    "en": "The queue is held. You stopped the answer at {time}, so nothing more is sent until you send.",
+    "hi": "कतार रुकी है। आपने {time} बजे उत्तर रोका, इसलिए जब तक आप न भेजें, आगे कुछ नहीं भेजा जाएगा।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U7-18": {
+    "en": "The queue is held. The answer failed at {time}, so nothing more is sent until you send.",
+    "hi": "कतार रुकी है। {time} बजे उत्तर पूरा नहीं हो सका, इसलिए जब तक आप न भेजें, आगे कुछ नहीं भेजा जाएगा।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U7-19": {
+    "en": "Send next",
+    "hi": "अगला भेजें",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U7-20": {
+    "en": "Send now gives your words to Clauseo while it writes.",
+    "hi": "अभी भेजें से Clauseo लिखते समय ही आपके शब्द ले लेता है।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U7-21": {
+    "en": "ChatGPT can't take words mid-answer. Send now stops this answer, keeps what it wrote, and sends your words first.",
+    "hi": "ChatGPT उत्तर के बीच में शब्द नहीं ले सकता। अभी भेजें इस उत्तर को रोकता है, जितना लिखा गया वह रखता है, और आपके शब्द पहले भेजता है।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U7-22": {
+    "en": "You, {time}, while Clauseo answered",
+    "hi": "आप, {time}, जब Clauseo उत्तर दे रहा था",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U7-23": {
+    "en": "Stopped at {time} to send your words first. The answer so far is kept.",
+    "hi": "आपके शब्द पहले भेजने के लिए {time} बजे रोका गया। अब तक का उत्तर रखा गया है।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U7-27": {
+    "en": "Show what it found",
+    "hi": "क्या मिला, देखें",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
   }
 }
