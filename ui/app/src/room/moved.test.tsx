@@ -11,6 +11,8 @@ import { uuid } from "../testing/stream-script.ts";
 import { detailed, fakeNext } from "./fake-next.ts";
 import type { NextCommand } from "./host-next.ts";
 import { Matters } from "./matters.ts";
+import { IconLocateFolder } from "@clauseo/components/icons/icons.tsx";
+import { iconIn } from "@clauseo/components/icons/icon-in.tsx";
 import { LocateGate, MovedFolder } from "./moved.tsx";
 import { connectRoom } from "./start.ts";
 
@@ -88,3 +90,18 @@ test("the composer's gate says why it can't ask, with Locate folder", async () =
   await act(async () => host?.querySelector("button")?.click());
   expect(pressed).toBe(1);
 });
+
+test.each([
+  ["the moved folder's line", <MovedFolder key="line" onLocate={() => {}} />],
+  ["the composer's gate", <LocateGate key="gate" onLocate={() => {}} />],
+])(
+  "%s: Locate folder leads with the folder-search icon, hidden, as the matter's menu does",
+  async (_, node) => {
+    await render(node);
+    const button = host?.querySelector("button");
+    const svg = iconIn(button, IconLocateFolder, 16);
+    expect(svg?.getAttribute("aria-hidden")).toBe("true");
+    expect(button?.firstElementChild).toBe(svg);
+    expect(button?.textContent).toBe("Locate folder");
+  },
+);

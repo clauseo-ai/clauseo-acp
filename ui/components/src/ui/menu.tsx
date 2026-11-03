@@ -46,7 +46,6 @@ export function MenuPopup({
   );
 }
 
-/** One action. note: a second line on what it leaves alone. The label alone is matched when a letter is typed. */
 /** A menu row's icon: 16 px before its name, in the muted tone, taking the row's own colour while it's highlighted.
  * Hidden from assistive technology: the row's name names it. */
 function RowIcon({ children, top }: { children: ReactNode; top: boolean }) {
@@ -63,6 +62,7 @@ function RowIcon({ children, top }: { children: ReactNode; top: boolean }) {
   );
 }
 
+/** One action. note: a second line on what it leaves alone. The label alone is matched when a letter is typed. */
 export function MenuItem({
   label,
   icon,

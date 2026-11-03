@@ -280,7 +280,7 @@ export function IconOffline(props: IconProps) {
   );
 }
 
-/** A question for you, not used in the room yet (source: circleQuestionMark, Lucide circle-question-mark at
+/** A question for you (source: circleQuestionMark, Lucide circle-question-mark at
  * 1.66.0) */
 export function IconQuestion(props: IconProps) {
   return (
@@ -295,7 +295,7 @@ export function IconQuestion(props: IconProps) {
   );
 }
 
-/** Try again, Restart, Retry now, Try now, not used in the room yet (source: rotateCcw, Lucide rotate-ccw at 1.66.0;
+/** Try again, Restart, Retry now, Try now (source: rotateCcw, Lucide rotate-ccw at 1.66.0;
  * the outline of IconHistory without its hands, so Try again and Restore read as one family) */
 export function IconTryAgain(props: IconProps) {
   return (
@@ -306,7 +306,7 @@ export function IconTryAgain(props: IconProps) {
   );
 }
 
-/** Stop, and a stopped matter or conversation, not used in the room yet (source: square, Lucide square at 1.66.0,
+/** Stop, and a stopped matter or conversation (source: square, Lucide square at 1.66.0,
  * filled, as Stop's pair to the arrow up: drawn at 9 of the 20 units, square cornered, since a solid shape weighs
  * more than a stroked one) */
 export function IconStop(props: IconProps) {
@@ -317,7 +317,7 @@ export function IconStop(props: IconProps) {
   );
 }
 
-/** A cross: Don't allow, Not allowed, not used in the room yet (source: x, Lucide x at 1.66.0) */
+/** A cross: Don't allow, Not allowed (source: x, Lucide x at 1.66.0) */
 export function IconCross(props: IconProps) {
   return (
     <Icon {...props}>
@@ -327,7 +327,7 @@ export function IconCross(props: IconProps) {
   );
 }
 
-/** A conversation: a version Clauseo made in one, not used in the room yet (source: messageSquare, Lucide message-
+/** A conversation: a version Clauseo made in one (source: messageSquare, Lucide message-
  * square at 1.66.0) */
 export function IconConversation(props: IconProps) {
   return (
@@ -337,7 +337,7 @@ export function IconConversation(props: IconProps) {
   );
 }
 
-/** Answer ready, not used in the room yet (source: messageSquareDot, Lucide message-square-dot at 1.66.0) */
+/** Answer ready (source: messageSquareDot, Lucide message-square-dot at 1.66.0) */
 export function IconAnswerReady(props: IconProps) {
   return (
     <Icon {...props}>
@@ -347,7 +347,7 @@ export function IconAnswerReady(props: IconProps) {
   );
 }
 
-/** A change you made outside Clauseo, not used in the room yet (source: penLine, Lucide pen-line at 1.66.0) */
+/** A change you made outside Clauseo (source: penLine, Lucide pen-line at 1.66.0) */
 export function IconYourChange(props: IconProps) {
   return (
     <Icon {...props}>
@@ -357,7 +357,7 @@ export function IconYourChange(props: IconProps) {
   );
 }
 
-/** Papers imported, not used in the room yet (source: fileInput, Lucide file-input at 1.66.0) */
+/** Papers imported (source: fileInput, Lucide file-input at 1.66.0) */
 export function IconImported(props: IconProps) {
   return (
     <Icon {...props}>
@@ -369,7 +369,7 @@ export function IconImported(props: IconProps) {
   );
 }
 
-/** Compare, Compare with now, not used in the room yet (source: diff, Lucide diff at 1.66.0) */
+/** Compare, Compare with now (source: diff, Lucide diff at 1.66.0) */
 export function IconCompare(props: IconProps) {
   return (
     <Icon {...props}>
@@ -380,7 +380,7 @@ export function IconCompare(props: IconProps) {
   );
 }
 
-/** Settings: Language, not used in the room yet (source: languages, Lucide languages at 1.66.0) */
+/** Settings: Language (source: languages, Lucide languages at 1.66.0) */
 export function IconLanguage(props: IconProps) {
   return (
     <Icon {...props}>
@@ -394,7 +394,7 @@ export function IconLanguage(props: IconProps) {
   );
 }
 
-/** Settings: Appearance, not used in the room yet (source: contrast, Lucide contrast at 1.66.0; the half disc is
+/** Settings: Appearance (source: contrast, Lucide contrast at 1.66.0; the half disc is
  * filled, as Lucide's 2 px stroke all but fills it) */
 export function IconAppearance(props: IconProps) {
   return (
@@ -409,7 +409,7 @@ export function IconAppearance(props: IconProps) {
   );
 }
 
-/** Settings: About, not used in the room yet (source: info, Lucide info at 1.66.0) */
+/** Settings: About (source: info, Lucide info at 1.66.0) */
 export function IconAbout(props: IconProps) {
   return (
     <Icon {...props}>
@@ -420,7 +420,7 @@ export function IconAbout(props: IconProps) {
   );
 }
 
-/** Pin to the top, not used in the room yet (source: pin, Lucide pin at 1.66.0) */
+/** Pin to the top (source: pin, Lucide pin at 1.66.0) */
 export function IconPin(props: IconProps) {
   return (
     <Icon {...props}>
@@ -433,7 +433,7 @@ export function IconPin(props: IconProps) {
   );
 }
 
-/** Show in Finder, or in Explorer, not used in the room yet (source: folderOpen, Lucide folder-open at 1.66.0, on the
+/** Show in Finder, or in Explorer (source: folderOpen, Lucide folder-open at 1.66.0, on the
  * set's folder (IconFolder's tab and frame) rather than Lucide's) */
 export function IconShowInFinder(props: IconProps) {
   return (
@@ -446,7 +446,7 @@ export function IconShowInFinder(props: IconProps) {
   );
 }
 
-/** Locate folder, and a folder that moved, not used in the room yet (source: folderSearch, Lucide folder-search at
+/** Locate folder, and a folder that moved (source: folderSearch, Lucide folder-search at
  * 1.66.0, on the set's folder (IconFolder's tab and frame) rather than Lucide's) */
 export function IconLocateFolder(props: IconProps) {
   return (
@@ -458,7 +458,7 @@ export function IconLocateFolder(props: IconProps) {
   );
 }
 
-/** Remove from the list, not used in the room yet (source: listX, Lucide list-x at 1.66.0) */
+/** Remove from the list (source: listX, Lucide list-x at 1.66.0) */
 export function IconRemoveFromList(props: IconProps) {
   return (
     <Icon {...props}>
@@ -482,7 +482,7 @@ export function IconCommand(props: IconProps) {
   );
 }
 
-/** Needs your permission, not used in the room yet (source: shieldQuestionMark, Lucide shield-question-mark at
+/** Needs your permission (source: shieldQuestionMark, Lucide shield-question-mark at
  * 1.66.0; its question mark is IconQuestion's) */
 export function IconNeedsPermission(props: IconProps) {
   return (
@@ -500,7 +500,7 @@ export function IconNeedsPermission(props: IconProps) {
   );
 }
 
-/** The plan's limit, not used in the room yet (source: gauge, Lucide gauge at 1.66.0) */
+/** The plan's limit (source: gauge, Lucide gauge at 1.66.0) */
 export function IconPlanLimit(props: IconProps) {
   return (
     <Icon {...props}>
