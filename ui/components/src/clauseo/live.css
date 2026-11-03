@@ -39,15 +39,17 @@
     row-gap: 0;
     /* one 36 px line; a second only when the words must wrap, never cut short */
     min-height: var(--size-control);
-    /* the lead stands over Add papers' icon. An icon lead (the clock, the break, the question) is 16 px, so the words
-       start over the field's own, as the prototype has them; only while the pen writes do they stand after its fixed
-       box. The words move only when the state, and its sentence, changes */
+    /* the lead stands where the prototype's Add papers icon stands. Every lead is 16 px (the clock, the break, the
+       permission's shield, the question, or the empty slot while the pen writes), so the words start at the
+       prototype's x 48 from the well's edge in every state and never move when the lead changes; the pen writes after
+       the last word. (Our field has no Add papers icon, so its text starts 32 px left of the words: the composer's
+       gap, not this row's) */
     padding: 0 var(--s1-5) 0 var(--s4);
     background: var(--well-strong);
     border-radius: var(--r-field) var(--r-field) 0 0;
   }
-  /* the lead: the icon's own 16 px, or, while the pen writes, the pen's fixed box, the same in either language and for
-     as long as it writes */
+  /* the lead: the icon's own 16 px, or, while the pen writes, an empty slot of the same 16 px, so the words keep
+     their place */
   .working-lead {
     flex: none;
     display: flex;
@@ -55,16 +57,16 @@
     margin-right: var(--s2);
   }
   .working-lead[data-lead="pen"] {
-    width: calc(var(--s5) * var(--k) * 110 / 36);
-    height: calc(var(--s5) * var(--k));
+    width: var(--s4);
+    height: var(--s4);
   }
   .working-icon {
     flex: none;
     color: var(--muted);
   }
-  /* the pen, in the wait icon's place while Clauseo writes: 20 px tall at the text size, in either language, 110 by 36
-     design units, so its box never changes as it writes. The writing fades in from the left as the paper carries it
-     off. */
+  /* the pen, after the last word while Clauseo writes: 20 px tall at the text size, in either language, 110 by 36
+     design units, so its box never changes as it writes, and the words before it never move. The writing fades in
+     from the left as the paper carries it off. */
   .pen-mark {
     display: block;
     flex: none;
@@ -82,6 +84,16 @@
   :root[data-theme="night"] .pen-mark {
     /* from nothing 20% before the box's edge: the tail's first ink shows at about 45% */
     mask-image: linear-gradient(to right, transparent -20%, var(--primary) 24%);
+  }
+  /* in the words' flow after the last word, its gap the row's own; set at the line's top and drawn down to the
+     line's middle (relative, so the line keeps its height in either language); on a line too short for it, it goes to
+     the next line, never pushing the words */
+  .working-pen {
+    display: inline-block;
+    vertical-align: top;
+    position: relative;
+    top: calc((var(--lh-small-row) - var(--s5)) * var(--k) / 2);
+    margin-inline-start: var(--s2);
   }
   .working-text {
     /* the words keep a readable column; when the time and the actions can't share their line, the actions go to a

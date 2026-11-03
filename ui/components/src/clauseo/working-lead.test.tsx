@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
-// What leads each line above the field (the icon pass, §8 and §12): the clock for a wait only, the pen in its place
-// while Clauseo writes, the break on any error, the offline mark on the room's band, and a choice's question mark in
+// What leads each line above the field (the icon pass, §8 and §12): the clock for a wait only, the empty slot while
+// Clauseo writes and the pen after the words, the break on any error, the offline mark on the room's band, and a choice's question mark in
 // its yellow tile.
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -102,15 +102,23 @@ test.each(STATES)("the working line on %s leads with its own mark", async (_, st
       { break: BREAK, permission: PERMISSION, question: QUESTION, wait: CLOCK }[lead],
     );
   expect(row.querySelectorAll(".working-icon")).toHaveLength(1);
-  // every lead stands in the same slot, its first part, so the words start in one place whatever leads them
+  // every lead stands in the same slot, its first part, so the words start in one place whatever leads them; the
+  // pen leaves the slot empty and writes after the last word
   const slot = row.firstElementChild as HTMLElement;
   expect(slot.className).toBe("working-lead");
   expect(slot.dataset["lead"]).toBe(lead);
-  expect(slot.children).toHaveLength(1);
-  expect(slot.contains(icon)).toBe(true);
+  const words = row.querySelector(".working-text > span")!;
+  if (lead === "pen") {
+    expect(slot.children).toHaveLength(0);
+    expect(words.lastElementChild).toBe(icon);
+  } else {
+    expect(slot.children).toHaveLength(1);
+    expect(slot.contains(icon)).toBe(true);
+    expect(words.querySelector(".working-icon")).toBeNull();
+  }
 });
 
-test("an icon lead keeps its 16 px, so the words start at the prototype's x 48; the pen's box is fixed and the same in either language", () => {
+test("every lead is 16 px, the pen's empty slot too, so the words start at the prototype's x 48 in every state; the pen's box is fixed and the same in either language", () => {
   const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "live.css"), "utf8");
   const rule = (selector: string) => {
     const at = css.indexOf(`\n  ${selector} {`);
@@ -126,12 +134,20 @@ test("an icon lead keeps its 16 px, so the words start at the prototype's x 48; 
   const after = /margin-right: (var\(--s2\));/.exec(lead)?.[1];
   expect(lead).not.toMatch(/width|height/);
   expect(px[padStart!]! + 16 + px[after!]! + px[gap!]!).toBe(48);
-  // the pen's box: fixed by the text size alone, never by Hindi's taller line, and the pen fills it
+  // the pen's empty slot: an icon's 16 px
   const box = (r: string) => [/width: ([^;]+);/.exec(r)?.[1], /height: ([^;]+);/.exec(r)?.[1]];
-  const pen = box(rule('.working-lead[data-lead="pen"]'));
-  expect(pen).toEqual(["calc(var(--s5) * var(--k) * 110 / 36)", "calc(var(--s5) * var(--k))"]);
-  expect(box(rule(".pen-mark"))).toEqual(pen);
-  expect(rule('.working-lead[data-lead="pen"]') + rule(".pen-mark")).not.toContain("--lh-");
+  expect(box(rule('.working-lead[data-lead="pen"]'))).toEqual(["var(--s4)", "var(--s4)"]);
+  // the pen's box: fixed by the text size alone, never by Hindi's taller line
+  expect(box(rule(".pen-mark"))).toEqual([
+    "calc(var(--s5) * var(--k) * 110 / 36)",
+    "calc(var(--s5) * var(--k))",
+  ]);
+  expect(rule(".pen-mark")).not.toContain("--lh-");
+  // after the words, in their flow, moved down only relatively, so the line keeps its height
+  const tail = rule(".working-pen");
+  expect(tail).toContain("display: inline-block;");
+  expect(tail).toContain("position: relative;");
+  expect(tail).not.toMatch(/\bheight|width/);
   expect(rule(".working-icon")).not.toContain("margin");
 });
 
