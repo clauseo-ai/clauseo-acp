@@ -2,7 +2,7 @@
    sources, so their classes never reach the shipped CSS. A screen imports the sheets of the parts it shows, in
    clauseo/parts.css's order, so the app ships only what its screens use. The room imports it (src/room/entry.ts).
    The room's frame: the shell, the composer, the wall, the thread, the empty wall's words and the change note
-   (live.css) and the other widths; the rail and its rows (matters.css), and the new matter form (matter-form.css). */
+   (live.css) and the other widths; the rail and its rows (matters.css), and the new matter form (matter-form.css); a web source's site tile (site-tile.css). */
 @import "./system.css";
 @import "@clauseo/components/clauseo/shell.css";
 @import "@clauseo/components/clauseo/composer.css";
@@ -14,6 +14,7 @@
 @import "@clauseo/components/clauseo/matter-form.css";
 @import "@clauseo/components/clauseo/matters.css";
 @import "@clauseo/components/clauseo/triage.css";
+@import "@clauseo/components/clauseo/site-tile.css";
 @source "..";
 @source not "../gallery";
 @source not "../review";

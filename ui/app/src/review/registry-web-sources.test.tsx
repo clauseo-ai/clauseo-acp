@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
-// The web sources' copy review cells, rendered as the review renders them (in StrictMode): every cell but WEB-12 shows
-// its rows without a click, WEB-12 the shut summary alone; and the tool calls above the answer carry the titles the
-// real adapters send, never a made-up "Web".
+// The web sources' copy review cells, rendered as the review renders them (in StrictMode): every cell but WEB-12 and
+// WEB-13 shows its rows without a click, those two the folded line alone; WEB-09's info tip and WEB-10's tooltip show
+// their words; and the tool calls above the answer carry the titles the real adapters send, never a made-up "Web".
 import { readFileSync } from "node:fs";
 import { act, StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -40,7 +40,21 @@ async function cell(id: string): Promise<HTMLElement> {
 
 const rows = (host: HTMLElement) => host.querySelectorAll('[data-testid="web-source"]');
 
-test.each(WEB_SOURCES.filter((e) => e.id !== "WEB-12").map((e) => e.id))(
+const FOLDED = ["WEB-12", "WEB-13"];
+/** What a reader reads: the text without the tiles' letters. */
+const words = (el: Element | null | undefined): string => {
+  if (el === null || el === undefined) return "";
+  const copy = el.cloneNode(true) as Element;
+  for (const hidden of copy.querySelectorAll("[aria-hidden=true]")) hidden.remove();
+  return copy.textContent ?? "";
+};
+/** Frames run until `ready` holds, as the review page waits for a state's presses. */
+async function until(ready: () => boolean) {
+  for (let i = 0; i < 20 && !ready(); i += 1)
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
+}
+
+test.each(WEB_SOURCES.filter((e) => !FOLDED.includes(e.id)).map((e) => e.id))(
   "%s shows its rows without a click",
   async (id) => {
     const host = await cell(id);
@@ -51,13 +65,43 @@ test.each(WEB_SOURCES.filter((e) => e.id !== "WEB-12").map((e) => e.id))(
   },
 );
 
-test("WEB-12 shows the summary shut, counting the five rows", async () => {
+test("WEB-12 shows the line folded: two sites' tiles and the search glyph, counting the five rows", async () => {
   const host = await cell("WEB-12");
-  expect(host.querySelector('[data-testid="web-sources-toggle"]')?.textContent).toBe("5 sources");
-  expect(
-    host.querySelector('[data-testid="web-sources-toggle"]')?.getAttribute("aria-expanded"),
-  ).toBe("false");
+  const toggle = host.querySelector('[data-testid="web-sources-toggle"]');
+  expect(words(toggle)).toBe("5 sources");
+  const marks = [...host.querySelector('[data-testid="web-sources-marks"]')!.children];
+  expect(marks.map((m) => (m.classList.contains("site-tile") ? m.textContent : "search"))).toEqual([
+    "I",
+    "L",
+    "search",
+  ]);
+  expect(toggle?.getAttribute("aria-expanded")).toBe("false");
   expect(rows(host).length).toBe(0);
+});
+
+test("WEB-13 shows one tile and 1 source, folded", async () => {
+  const host = await cell("WEB-13");
+  expect(words(host.querySelector('[data-testid="web-sources-toggle"]'))).toBe("1 source");
+  expect(host.querySelectorAll('[data-testid="web-sources-marks"] .site-tile').length).toBe(1);
+  expect(rows(host).length).toBe(0);
+});
+
+test("WEB-09 shows its info tip open, saying where the page was opened", async () => {
+  await cell("WEB-09");
+  const said = () =>
+    [...document.querySelectorAll("[role=dialog]")].some(
+      (d) => d.textContent === "Opened on OpenAI's side",
+    );
+  await until(said);
+  expect(said()).toBe(true);
+});
+
+test("WEB-10 shows the browser glyph focused, its tooltip saying how the page was opened", async () => {
+  const host = await cell("WEB-10");
+  const glyph = () => host.querySelector('[data-testid="web-source-browser"]');
+  await until(() => document.activeElement === glyph());
+  expect(document.activeElement).toBe(glyph());
+  expect(glyph()?.getAttribute("aria-label")).toBe("Opened in the browser");
 });
 
 test("the cells' tool calls carry the adapters' titles, never \"Web\"", async () => {
@@ -85,34 +129,28 @@ test("each adapter's title for each kind of web tool call", () => {
   expect(calls.map((c) => c.tool_call?.title)).toEqual(['Search "q"', "Fetch https://a.example"]);
 });
 
-test("WEB-05's search rows say the step list's words, the query quoted", async () => {
+test("WEB-05's rows lead with icons: a quoted query, nested results, pages as link and site", async () => {
   const host = await cell("WEB-05");
-  expect([...rows(host)].map((r) => r.querySelector("p")?.textContent).slice(0, 2)).toEqual([
-    "Searched online for 'Delhi Rent Control Act notice period'.",
-    "Searched online for 'section 14 eviction notice thirty days'. No results.",
+  expect(
+    [...host.querySelectorAll('[data-testid="web-source-query"]')].map((q) => q.textContent),
+  ).toEqual(["'Delhi Rent Control Act notice period'", "'section 14 eviction notice thirty days'"]);
+  expect(
+    [...host.querySelectorAll('[data-testid="web-source-result"]')].map((r) => words(r)),
+  ).toEqual([
+    "Section 14 in the Delhi Rent Control Act, 1958 indiacode.nic.in",
+    "Notice to quit under the Rent Control Act livelaw.in",
+  ]);
+  expect([...rows(host)].slice(2).map((r) => words(r))).toEqual([
+    "Section 14 in the Delhi Rent Control Act, 1958 indiacode.nic.in",
+    "https://delhihighcourt.nic.in/judgments/2019/rent-control-notice-period-eviction-petition.pdf",
+    "Notice to quit under the Rent Control Act livelaw.in",
   ]);
 });
 
-test("WEB-08's page rows end their sentence after online, the site muted after a title only", async () => {
-  const host = await cell("WEB-08");
-  expect([...rows(host)].map((r) => r.textContent)).toEqual([
-    "Read 'Section 14 in the Delhi Rent Control Act, 1958' online. indiacode.nic.in",
-    "Read https://delhihighcourt.nic.in/judgments/2019/rent-control-notice-period-eviction-petition.pdf online.",
-  ]);
-});
-
-test("WEB-10's browser row quotes the title and puts the site after the whole sentence", async () => {
-  const host = await cell("WEB-10");
-  expect(rows(host)[0]?.textContent).toBe(
-    "Opened 'Delhi High Court: judgments' in the browser. delhihighcourt.nic.in",
-  );
-});
-
-test("WEB-14's browser row with no title is its address, unquoted, with no site", async () => {
-  const host = await cell("WEB-14");
-  expect(rows(host)[0]?.textContent).toBe(
-    "Opened https://delhihighcourt.nic.in/judgments/2019/rent-control-notice-period-eviction-petition.pdf in the browser.",
-  );
+test("the retired ids stay retired", () => {
+  const ids = WEB_SOURCES.map((e) => e.id);
+  for (const gone of ["WEB-01", "WEB-02", "WEB-03", "WEB-04", "WEB-08", "WEB-14", "WEB-15"])
+    expect(ids).not.toContain(gone);
 });
 
 // Nothing at launch names the judgment search the lead left out, the copy page included
