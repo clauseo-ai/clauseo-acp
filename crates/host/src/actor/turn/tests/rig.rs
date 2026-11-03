@@ -59,7 +59,16 @@ impl Rig {
     pub(super) fn start(test: &str, steps: &str) -> Self {
         let dir = TempDir::new(test);
         let root = dir.path();
-        Self::prepare(root, test, steps);
+        Self::prepare(root, test, steps, None);
+        Self::open(dir, 0, None)
+    }
+
+    /// [`Rig::start`], with the agent run as `/bin/sh -c script fake_agent <scenario>`, so
+    /// `script` sees the agent as `$0` and the scenario as `$1`.
+    #[cfg(unix)]
+    pub(super) fn start_wrapped(test: &str, steps: &str, script: &str) -> Self {
+        let dir = TempDir::new(test);
+        Self::prepare(dir.path(), test, steps, Some(script));
         Self::open(dir, 0, None)
     }
 
@@ -84,7 +93,7 @@ impl Rig {
     }
 
     /// The data folder: the agent's home, its scenario and the settings naming it.
-    fn prepare(root: &std::path::Path, test: &str, steps: &str) {
+    fn prepare(root: &std::path::Path, test: &str, steps: &str, wrap: Option<&str>) {
         crate::write::create_dir_all(&root.join("home")).unwrap();
         let scenario = root.join(format!("{test}.jsonl"));
         let header = format!(
@@ -93,9 +102,17 @@ impl Rig {
         let text = format!("{header}{HANDSHAKE}{steps}");
         crate::write::write_file(&scenario, text.as_bytes()).unwrap();
         let bin = clauseo_fake_agent::bin_path().expect("run cargo build -p clauseo-fake_agent");
+        let (bin, scenario) = (bin.display().to_string(), scenario.display().to_string());
+        let (command, args) = match wrap {
+            None => (bin, vec!["--scenario".to_owned(), scenario]),
+            Some(script) => (
+                "/bin/sh".to_owned(),
+                vec!["-c".to_owned(), script.to_owned(), bin, scenario],
+            ),
+        };
         let settings = serde_json::json!({ "agents": { "fake-agent": {
-            "command": bin.display().to_string(),
-            "args": ["--scenario", scenario.display().to_string()],
+            "command": command,
+            "args": args,
         }}});
         crate::write::write_file(&root.join("settings.json"), settings.to_string().as_bytes())
             .unwrap();

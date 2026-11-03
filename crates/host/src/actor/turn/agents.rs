@@ -55,6 +55,18 @@ pub(super) enum Stage {
     Stopping,
 }
 
+/// Why an agent is stopped, for the detach its `Ended::Stopped` logs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StopCause {
+    /// The host closed it (a stop, a failed launch): `Closed`.
+    Asked,
+    /// It starts again in its matter's new folder: `Restarting`.
+    Restarting,
+    /// Its connection was already gone when the stop came, which only ends a process that
+    /// outlived its pipes: the exit report's reason, as if it had exited first.
+    Closed,
+}
+
 /// A thread's agent as the actor holds it.
 #[derive(Debug)]
 pub(super) struct Agent {
@@ -68,9 +80,8 @@ pub(super) struct Agent {
     after_stop: Vec<Waiting>,
     /// The matter folder it was started in, its working directory.
     pub(super) folder: PathBuf,
-    /// It is being stopped to start again in its matter's new folder: its detach is
-    /// `Restarting`.
-    restarting: bool,
+    /// Why it is being stopped, which picks the detach a stop logs.
+    stop_cause: StopCause,
     /// The attached session.
     pub(super) session: Option<AgentSessionId>,
     pub(super) rate: RateCap<RatedUpdate>,
@@ -122,17 +133,25 @@ pub(super) fn ensure(actor: &mut Actor, thread: ThreadId, waiting: Waiting) {
             None => start(actor, thread, vec![waiting]),
         },
         Some(agent) => match agent.stage {
-            Stage::Closed => {
-                // `Ended` is due; the stop only ends one whose process outlived its pipes.
-                agent.link.stop();
-                agent.stage = Stage::Stopping;
-                agent.after_stop.push(waiting);
-            }
+            // Its connection is gone (a call came back `Closed`, or its stdout ended while
+            // idle): the work waits for a new agent (`stop_closed`).
+            Stage::Closed => stop_closed(agent, waiting),
+            Stage::Attached if agent.link.closed() => stop_closed(agent, waiting),
             Stage::Attached => run_waiting(actor, thread, waiting),
             Stage::Initializing | Stage::Loading => agent.waiting.push(waiting),
             Stage::Stopping => agent.after_stop.push(waiting),
         },
     }
+}
+
+/// Stops an agent whose connection is gone; `waiting` goes to the agent started after its
+/// `Ended`. The stop ends a process that outlived its pipes, and it can beat the owner's
+/// exit report (Windows reports an exit late): `on_ended` then logs the report's exit.
+fn stop_closed(agent: &mut Agent, waiting: Waiting) {
+    agent.link.stop();
+    agent.stage = Stage::Stopping;
+    agent.stop_cause = StopCause::Closed;
+    agent.after_stop.push(waiting);
 }
 
 /// Launches `thread`'s agent and sends `initialize`, its folder checks (and a Codex agent's
@@ -178,7 +197,7 @@ pub(super) fn launch_now(
         waiting,
         after_stop: Vec::new(),
         folder,
-        restarting: false,
+        stop_cause: StopCause::Asked,
         session: None,
         rate: RateCap::new(),
         rate_armed: false,
@@ -309,7 +328,7 @@ pub(super) fn restart_if_moved(actor: &mut Actor, thread: ThreadId, turn: TurnId
     tracing::info!(%thread, "the matter moved; its agent starts again in the new folder");
     agent.link.stop();
     agent.stage = Stage::Stopping;
-    agent.restarting = true;
+    agent.stop_cause = StopCause::Restarting;
     let waiting = std::mem::take(&mut agent.waiting);
     agent.after_stop.extend(waiting);
     agent.after_stop.push(Waiting::Turn(turn));
@@ -352,7 +371,7 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
             result: Err(clauseo_acp::Error::Closed),
             ..
         }
-    );
+    ) || matches!(&reply, AgentReply::Steer(steered) if steered.closed());
     if same
         && closed
         && let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut())
@@ -500,7 +519,7 @@ pub(super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: Ended) {
         session,
         waiting,
         after_stop,
-        restarting,
+        stop_cause,
         ..
     } = *agent;
     let reason = match ended {
@@ -509,10 +528,11 @@ pub(super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: Ended) {
             if step == StopStep::Unresponsive {
                 tracing::warn!(%thread, ?report, "the agent did not exit after its kill");
             }
-            if restarting {
-                DetachReason::Restarting
-            } else {
-                DetachReason::Closed
+            match stop_cause {
+                StopCause::Asked => DetachReason::Closed,
+                StopCause::Restarting => DetachReason::Restarting,
+                // It was gone before the stop: the exit is its own, not a close.
+                StopCause::Closed => report,
             }
         }
     };

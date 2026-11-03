@@ -54,6 +54,13 @@ pub(crate) struct Steered {
     result: Result<SteerResult, clauseo_acp::Error>,
 }
 
+impl Steered {
+    /// The steer came back `Closed`: the agent's connection is gone.
+    pub(in crate::actor::turn) fn closed(&self) -> bool {
+        matches!(self.result, Err(clauseo_acp::Error::Closed))
+    }
+}
+
 /// The running turn a steer can join: its prompt is in flight, it is not cancelled, and its
 /// agent's steer adds to the answer.
 pub(super) fn target(actor: &mut Actor, thread: ThreadId) -> Option<TurnId> {
