@@ -75,7 +75,7 @@ export function glyphState(t: KnownTool): ToolGlyphState {
 }
 
 const REASON: Record<Exclude<WebState | BrowserState, "available">, ToolsLineKey> = {
-  off: "Off in Settings",
+  off: "In Settings",
   locked_off: "Managed by firm",
   managed_by_firm: "Managed by firm",
   no_search_on_this_login: "Can't search on this login",
@@ -97,7 +97,7 @@ const midSentence = (s: string) =>
   /^\p{Lu}\p{Ll}/u.test(s) ? s.charAt(0).toLocaleLowerCase("en") + s.slice(1) : s;
 
 /** The tool line's accessible name and tooltip: one sentence per tool, "Web search: on. Browser: off, needs
- * Chrome."; null with no tools to speak for. Off in Settings says it once: "Web search: off in Settings." */
+ * Chrome."; null with no tools to speak for. Off in Settings: "Web search: off, in Settings." */
 export function toolsLabel(lang: Lang, tools: readonly KnownTool[]): string | null {
   if (tools.length === 0) return null;
   return tools
@@ -106,9 +106,7 @@ export function toolsLabel(lang: Lang, tools: readonly KnownTool[]): string | nu
       const state =
         reason === null
           ? toolsLine(lang, "on")
-          : reason === "Off in Settings"
-            ? midSentence(toolsLine(lang, reason))
-            : toolsLine(lang, "off, {reason}", { reason: midSentence(toolsLine(lang, reason)) });
+          : toolsLine(lang, "off, {reason}", { reason: midSentence(toolsLine(lang, reason)) });
       return toolsLine(lang, "{tool}: {state}.", { tool: toolsLine(lang, toolName(t)), state });
     })
     .join(" ");

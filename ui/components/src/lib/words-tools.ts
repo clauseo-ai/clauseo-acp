@@ -17,11 +17,13 @@ const HI = {
   // the Chrome download; a number and its unit are held together by a non-breaking space (\u00a0)
   "Download Chrome": null,
   "200\u00a0MB": null,
-  "About 200\u00a0MB from Google, once. Needs about 1\u00a0GB free.": null,
+  "From Google, once. Needs 1\u00a0GB free.": null,
   "Install Chrome to use it": null,
   "{done} of {total}\u00a0MB": null,
   Unpacking: null,
-  "Chrome ready": null,
+  // Chrome is in: the browser row's reason, and its tooltip on when the browser comes
+  "Ready for new conversations": null,
+  "The browser comes with your next conversation.": null,
   // a failed download, by the host's code
   "Connection dropped": null,
   "File didn't match": null,

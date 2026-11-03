@@ -12,7 +12,7 @@ export const OFF = "Off";
 
 /** Every reason the browser row can give when off, whatever the machine's browser state. */
 export const BROWSER_REASONS = [
-  "Off in Settings",
+  "In Settings",
   "Managed by firm",
   "Not available yet",
   "Too many browsers open",

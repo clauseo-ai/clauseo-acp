@@ -112,9 +112,9 @@ const statusFit = (lang: Lang) => (
 );
 
 const NONE = [browser("browser_not_installed")];
-const OFFER: BrowserInstallReport = { offer: "download", bytes: 201_000_000 };
+const OFFER: BrowserInstallReport = { offer: "download", bytes: 200_000_000 };
 const DOWNLOADING: BrowserInstallReport = {
-  downloading: { bytes: 64_400_000, total: 201_000_000 },
+  downloading: { bytes: 64_400_000, total: 200_000_000 },
 };
 /** A failed download by the host's code; its message is the log's, and never shows. */
 const failed = (code: string): BrowserInstallReport[] => [
@@ -123,7 +123,8 @@ const failed = (code: string): BrowserInstallReport[] => [
 ];
 
 /** UET's tool line entries, each id written as it is: an id never moves when an entry is added or taken out. Retired
- * in round 3 (icons first, DESIGN.md §Icons): UET-02 to UET-08, UET-16, UET-17, UET-32 and UET-36. */
+ * in round 3 (icons first, DESIGN.md §Icons): UET-02 to UET-08, UET-16, UET-17, UET-32 and UET-36. UET-26's words
+ * were Chrome ready, UET-13's Off in Settings and UET-21's longer; each keeps its id for its new words. */
 export const UET: Entry[] = [
   // the line's name and tooltip
   entry(
@@ -147,7 +148,8 @@ export const UET: Entry[] = [
   entry("UET-11", popWords("On"), [web(), browser()]),
   entry("UET-41", popWords("Off"), [web(), browser("off")]),
   entry("UET-12", lineWords("Can't search on this login"), [web("no_search_on_this_login")]),
-  entry("UET-13", lineWords("Off in Settings"), [web("off"), browser("off")]),
+  // beside the Off chip, in its row
+  entry("UET-13", lineWords("In Settings"), [web("off"), browser("off")]),
   entry("UET-14", lineWords("Managed by firm"), [web("locked_off"), browser("managed_by_firm")]),
   entry("UET-18", lineWords("Not available yet"), [browser("no_proxy")]),
   entry("UET-19", lineWords("Too many browsers open"), [browser("too_many_browsers")]),
@@ -166,17 +168,21 @@ export const UET: Entry[] = [
   // the download
   entry("UET-22", popWords("Download Chrome"), NONE, [OFFER]),
   entry("UET-42", popWords("200\u00a0MB"), NONE, [OFFER]),
-  entry(
-    "UET-21",
-    popWords("About 200\u00a0MB from Google, once. Needs about 1\u00a0GB free."),
-    NONE,
-    [OFFER],
-    { tip: "tool-download" },
-  ),
+  entry("UET-21", popWords("From Google, once. Needs 1\u00a0GB free."), NONE, [OFFER], {
+    tip: "tool-download",
+  }),
   entry("UET-23", popWords("Install Chrome to use it"), NONE, [{ offer: "none" }]),
   entry("UET-24", popWords("{done} of {total}\u00a0MB"), NONE, [OFFER, DOWNLOADING]),
   entry("UET-25", popWords("Unpacking"), NONE, [OFFER, "unpacking"]),
-  entry("UET-26", popWords("Chrome ready"), NONE, [OFFER, "done"]),
+  // Chrome is in: the reason it keeps, then its tooltip shown from the keyboard
+  entry("UET-26", popWords("Ready for new conversations"), NONE, [OFFER, "done"]),
+  entry(
+    "UET-43",
+    popWords("The browser comes with your next conversation."),
+    NONE,
+    [OFFER, "done"],
+    { tip: "tool-row-reason" },
+  ),
   entry("UET-34", popWords("Connection dropped"), NONE, failed("network")),
   entry("UET-29", popWords("File didn't match"), NONE, failed("signature")),
   entry("UET-27", popWords("Needs 1\u00a0GB free"), NONE, failed("disk_space")),
