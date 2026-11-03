@@ -240,6 +240,28 @@ impl Agent {
         ));
         self.expect_line(&json!({"jsonrpc": "2.0", "id": 1, "result": {"sessionId": "sess-1"}}));
     }
+
+    /// As [`Agent::handshake`], for a scenario on `common/claude-handshake.jsonl`: `session/new`
+    /// answers with claude-agent-acp's modes, in `default`.
+    pub(crate) fn claude_handshake(&mut self, cwd: &str) {
+        self.send(&request(
+            0,
+            "initialize",
+            json!({"protocolVersion": 1, "clientCapabilities": {}}),
+        ));
+        self.read_line();
+        self.send(&request(
+            1,
+            "session/new",
+            json!({"cwd": cwd, "mcpServers": []}),
+        ));
+        let answer = self.read_line();
+        assert_eq!(answer["result"]["sessionId"], "sess-1", "{answer}");
+        assert_eq!(
+            answer["result"]["modes"]["currentModeId"], "default",
+            "{answer}"
+        );
+    }
 }
 
 impl Drop for Agent {

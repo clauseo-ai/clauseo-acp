@@ -50,6 +50,9 @@ mod codex_plans;
 #[path = "host/commands.rs"]
 mod commands;
 #[cfg(test)]
+#[path = "host/e2e_scenarios.rs"]
+mod e2e_scenarios;
+#[cfg(test)]
 #[path = "host/forget.rs"]
 mod forget;
 #[cfg(test)]

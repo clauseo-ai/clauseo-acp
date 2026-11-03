@@ -1,5 +1,5 @@
 // A conversation asked with ChatGPT (U6, R15's done-when 3, left open after U5 replaced R12's window). With two
-// agents set up, `agents.claude-acp` (prompt-stream) and `agents.codex-acp` (fake_agent `codex-hook-trusted`: the
+// agents set up, `agents.claude-acp` (claude-prompt-stream) and `agents.codex-acp` (fake_agent `codex-hook-trusted`: the
 // host first sets its session to workspace-write, then, since the desktop app always runs its pre-write guard
 // (crates/desktop/src/lib.rs, host_config), asks `_codex/hooks/list` whether Codex trusts the guard's hook, which
 // `codex-handshake` never answers), a new conversation's status line offers the plan to ask
@@ -17,7 +17,7 @@ import { test } from "./fixture.ts";
 import { expectTurnEnded, newConversation, openMatter, sendPrompt } from "./flow.ts";
 import { window } from "./selectors.ts";
 
-test.use({ scenario: "prompt-stream", otherAgents: { "codex-acp": "codex-hook-trusted" } });
+test.use({ scenario: "claude-prompt-stream", otherAgents: { "codex-acp": "codex-hook-trusted" } });
 
 /** The Claude conversation's question: its title, 30 code points. */
 const FIRST = "Summarise the indemnity clause";

@@ -19,7 +19,7 @@ import { window } from "./selectors.ts";
 const FIRST = "Summarise the indemnity clause";
 
 test.describe("steer-injected", () => {
-  test.use({ scenario: "steer-injected" });
+  test.use({ scenario: "claude-steer-injected" });
 
   test("words typed during an answer are steered into it, and the answer goes on", async ({
     app,
@@ -51,7 +51,7 @@ test.describe("steer-injected", () => {
 });
 
 test.describe("steer-fallback", () => {
-  test.use({ scenario: "prompt-stream", otherAgents: { "codex-acp": "steer-fallback" } });
+  test.use({ scenario: "claude-prompt-stream", otherAgents: { "codex-acp": "steer-fallback" } });
 
   test("Send now on a ChatGPT answer keeps its text and runs the words next", async ({ app }) => {
     // steer-fallback launches as codex-acp with the shared codex handshake; its agent advertises steering
@@ -80,7 +80,7 @@ test.describe("steer-fallback", () => {
 });
 
 test.describe("send-now", () => {
-  test.use({ scenario: "send-now" });
+  test.use({ scenario: "claude-send-now" });
 
   test("Send now on a queued message keeps the answer so far and runs the words", async ({
     app,

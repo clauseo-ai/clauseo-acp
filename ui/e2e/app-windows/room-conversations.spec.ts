@@ -12,7 +12,7 @@ import { test } from "./fixture.ts";
 import { expectTurnEnded, newConversation, openMatter, sendPrompt, showRail } from "./flow.ts";
 import { window, type Window } from "./selectors.ts";
 
-test.use({ scenario: "prompt-stream" });
+test.use({ scenario: "claude-prompt-stream" });
 
 /** 30 code points: its own title. */
 const FIRST = "Summarise the indemnity clause";

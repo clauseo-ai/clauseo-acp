@@ -15,7 +15,7 @@ import { test } from "./fixture.ts";
 import { expectTurnEnded, openMatter, sendPrompt } from "./flow.ts";
 import { window } from "./selectors.ts";
 
-test.use({ scenario: "queue-two-prompts" });
+test.use({ scenario: "claude-queue-two-prompts" });
 
 /** Prompt 1: its title is the first conversation's. */
 const FIRST = "Edit clause 4 for the new lease";
@@ -60,7 +60,7 @@ test("a message sent while Clauseo works queues, and goes once the answer ends",
 });
 
 test.describe("a stopped answer holds the queue", () => {
-  test.use({ scenario: "send-now" });
+  test.use({ scenario: "claude-send-now" });
 
   test("after Stop the queue is held: the next message waits until Send next", async ({ app }) => {
     const w = window(app.page);

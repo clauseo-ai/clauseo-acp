@@ -1,4 +1,4 @@
-// fake_agent `files-one-turn`: one turn creates notes/a.txt, edits brief.txt and deletes old.txt in
+// fake_agent `claude-files-one-turn`: one turn creates notes/a.txt, edits brief.txt and deletes old.txt in
 // the matter folder. Versions lists the turn's version (`after_turn`) with its paper; Undo from that
 // version's band, confirmed in the dialog, puts the folder back as it was and adds an `undo` version.
 // While the panel is open the rail of matters stands out of the page; closing the panel brings it back.
@@ -13,7 +13,7 @@ import { window, type Window } from "./selectors.ts";
 /** The scenario's description asks for these two files first. */
 const BEFORE = { "brief.txt": "Clause 4 draft\n", "old.txt": "Old terms\n" };
 
-test.use({ scenario: "files-one-turn", matterFiles: BEFORE });
+test.use({ scenario: "claude-files-one-turn", matterFiles: BEFORE });
 
 /** Opens the matter and plays the scenario's one turn. */
 async function playTurn(w: Window): Promise<void> {

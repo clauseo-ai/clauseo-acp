@@ -67,6 +67,8 @@ pub(crate) enum Scenario {
     Bundled(&'static str),
     /// `crates/host/tests/scenarios/<name>.jsonl`.
     Local(&'static str),
+    /// `ui/e2e/app-windows/scenarios/<name>.jsonl`, a scenario the window's specs play by path.
+    Ui(&'static str),
     /// A scenario file the test wrote (the Unix symlink test, and the launch profile's tests,
     /// whose launcher fills in each session's folders).
     Written(PathBuf),
@@ -78,6 +80,11 @@ impl Scenario {
         match self {
             Self::Bundled(name) => (*name).to_owned(),
             Self::Written(path) => path.display().to_string(),
+            Self::Ui(name) => Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../ui/e2e/app-windows/scenarios")
+                .join(format!("{name}.jsonl"))
+                .display()
+                .to_string(),
             Self::Local(name) => Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("tests")
                 .join("scenarios")

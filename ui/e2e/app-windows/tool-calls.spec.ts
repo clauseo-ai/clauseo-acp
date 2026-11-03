@@ -1,4 +1,4 @@
-// fake_agent `tool-calls`: ten tool calls, one of each kind, each pending then in progress, nine
+// fake_agent `claude-tool-calls`: ten tool calls, one of each kind, each pending then in progress, nine
 // completed and one (the fetch) failed. They fold into one step group whose line keeps the failure in
 // view; opened, every row says what it did in the lawyer's words, a paper by its file name, with its
 // last status.
@@ -8,7 +8,7 @@ import { test } from "./fixture.ts";
 import { expectTurnEnded, openMatter, sendPrompt } from "./flow.ts";
 import { window } from "./selectors.ts";
 
-test.use({ scenario: "tool-calls" });
+test.use({ scenario: "claude-tool-calls" });
 
 /**
  * The scenario's tool calls: its id (a step name only), the row's words, last status. Rows are found
