@@ -7,6 +7,7 @@
 //! exclusion: NFC and NFD both write it `क` + U+093C.
 
 use serde_json::json;
+use unicode_normalization::UnicodeNormalization;
 
 use super::backstop::{add, check};
 use super::{Fixture, deny, guard_json};
@@ -24,6 +25,17 @@ const LAW_DECOMPOSED: &str = "\u{915}\u{93c}\u{93e}\u{928}\u{942}\u{928}.docx";
 /// `अनुबंध.docx`: another word, held by nothing.
 const FREE: &str = "\u{905}\u{928}\u{941}\u{92c}\u{902}\u{927}.docx";
 
+fn nfc(text: &str) -> String {
+    text.nfc().collect()
+}
+
+/// A refusal's message with its names composed. The guard names a held file as the file system
+/// gives it back: on APFS that is the spelling the file was stored with, which can be either
+/// Unicode form of the name the test typed, so the test compares both messages in NFC.
+fn refusal_naming(name: &str) -> String {
+    nfc(&deny(name))
+}
+
 #[test]
 fn a_held_devanagari_name_in_the_other_form_is_refused() {
     let fx = Fixture::new("dev-forms");
@@ -32,7 +44,11 @@ fn a_held_devanagari_name_in_the_other_form_is_refused() {
         format!("echo hi | tee {REPORT_NFD}"),
         format!("echo hi > {REPORT_NFC}"),
     ] {
-        assert_eq!(check(&fx, "Bash", &command), deny(REPORT_NFC), "{command}");
+        assert_eq!(
+            nfc(&check(&fx, "Bash", &command)),
+            refusal_naming(REPORT_NFC),
+            "{command}"
+        );
     }
     assert_eq!(check(&fx, "Bash", &format!("echo hi > {FREE}")), "");
 }
@@ -50,11 +66,15 @@ fn a_held_nukta_name_in_the_other_form_is_refused() {
         let fx = Fixture::new(&format!("dev-nukta-{n}"));
         add(&fx, &[held, &format!("~${held}")]);
         let command = format!("cp x {typed}");
-        assert_eq!(check(&fx, "Bash", &command), deny(held), "{command}");
+        assert_eq!(
+            nfc(&check(&fx, "Bash", &command)),
+            refusal_naming(held),
+            "{command}"
+        );
         let write = json!({"file_path": typed, "content": "new"});
         assert_eq!(
-            guard_json(&fx.hook("Write", &write)),
-            deny(typed),
+            nfc(&guard_json(&fx.hook("Write", &write))),
+            refusal_naming(typed),
             "{typed:?}"
         );
         let free = json!({"file_path": FREE, "content": "new"});
@@ -69,9 +89,15 @@ fn an_owner_file_in_the_other_form_holds_the_document() {
     let fx = Fixture::new("dev-owner");
     add(&fx, &[LAW_DECOMPOSED, &format!("~${LAW_PRECOMPOSED}")]);
     let write = json!({"file_path": LAW_DECOMPOSED, "content": "new"});
-    assert_eq!(guard_json(&fx.hook("Write", &write)), deny(LAW_DECOMPOSED));
+    assert_eq!(
+        nfc(&guard_json(&fx.hook("Write", &write))),
+        refusal_naming(LAW_DECOMPOSED)
+    );
     let command = format!("echo hi > {LAW_DECOMPOSED}");
-    assert_eq!(check(&fx, "Bash", &command), deny(LAW_DECOMPOSED));
+    assert_eq!(
+        nfc(&check(&fx, "Bash", &command)),
+        refusal_naming(LAW_DECOMPOSED)
+    );
 }
 
 /// A `?` wildcard counts characters, and composing changes the count: `??िपोर्ट.docx` matches
@@ -96,7 +122,11 @@ fn a_wildcard_matching_the_held_name_as_stored_is_refused() {
         let fx = Fixture::new(&format!("dev-glob-{n}"));
         add(&fx, &[held, &owner]);
         let command = format!("cp x {word}");
-        assert_eq!(check(&fx, "Bash", &command), deny(held), "{command}");
+        assert_eq!(
+            nfc(&check(&fx, "Bash", &command)),
+            refusal_naming(held),
+            "{command}"
+        );
     }
 }
 
