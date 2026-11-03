@@ -244,6 +244,13 @@ The rail's triage (0045) folds `thread_snoozed` into `HeaderEntry.snoozed_until`
 times' 5 to 6: old snapshots are passed over and each thread's log is folded once at its next
 reopen, as for the bumps above.
 
+Tool calls carry their web (0041; no event changes, the fold does). `ToolCallEntry.web` (a boxed
+`ToolCallWeb`, left out when none) holds the call's `WebSearchRecorded` as `search` and its
+`PageVisited` events as `pages`, matched by `tool_call`; a record for a call the thread does not hold
+is ignored, and the reducer keeps at most 50 pages per call. The new view types are additive, and
+`REDUCER_SCHEMA_VERSION` goes from 7 to 8, after the triage's 6 to 7: old snapshots are passed over
+and each thread's log is folded once at its next reopen, as for the bumps above.
+
 A `Step` entry has no `undo_possible` field. The UI derives it from the step alone, as
 `checkpoint_after` exists and the step is not undone (`StepEntry::undo_possible` states the same
 rule). Whether a turn runs is the header's `status` for this thread and the host's check at
