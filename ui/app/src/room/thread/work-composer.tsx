@@ -27,6 +27,7 @@ import { useOtherWait } from "../queue-model.ts";
 import type { BreakLine } from "../thread-break.ts";
 import { LimitWarning } from "../limits/limit-warning.tsx";
 import { useAgentPlan } from "./agent-plan.ts";
+import { useNow } from "../../store/limits.ts";
 import { pausedLine, type Paused } from "./limit-words.ts";
 import type { Drafts } from "./session.ts";
 
@@ -87,6 +88,8 @@ export function WorkComposer({
   paused?: Paused | null;
 }) {
   const w = useWords();
+  // the paused line's time against this render's clock (U12)
+  const now = useNow();
   const agentPlan = useAgentPlan();
   const field = useRef<ComposerHandle>(null);
   useImperativeHandle(
@@ -206,7 +209,7 @@ export function WorkComposer({
       // the plan's warning under the field (U12), quiet while paused at the limit, when the status line says it:
       // "Stopped at 4:52 pm, at the plan's limit", or the toolbar's at-limit words without the stop's time
       notice={paused === null ? <LimitWarning /> : null}
-      took={paused === null ? null : pausedLine(w.lang, paused)}
+      took={paused === null ? null : pausedLine(w.lang, paused, now)}
       plan={plan}
       {...(choice === undefined ? {} : { choice })}
       hint={null}

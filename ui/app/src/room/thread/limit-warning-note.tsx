@@ -8,7 +8,7 @@ import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { isoOf } from "./clock.ts";
 import { warningWords } from "./warning-words.ts";
 
-/** The note for a warning's key (plan-model.ts's warningKey), its time said against `now`, the view's arrival. */
+/** The note for a warning's key (plan-model.ts's warningKey), its time said against `now`, the render's clock. */
 export function WarningNote({ warning, now }: { warning: string; now: number }) {
   const { lang } = useDisplay();
   const words = warningWords(lang, warning, now);

@@ -1,7 +1,7 @@
 // The usage limit's words that the thread's stop and the composer share (U12): the plan's name, the stop's time, the
 // toolbar's at-limit words, and the composer's paused line. The window's line under the stop's title is the stop's
-// alone (stop-words.ts, in the thread's chunk). Each takes `now` as an input:
-// a render formats against the day it renders on, and nothing here runs a clock.
+// alone (stop-words.ts, in the thread's chunk). Each takes `now` as an input, the render's clock
+// (store/limits.ts's useNow): a render formats against the day it renders on, and nothing here runs a clock.
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import type { AgentName } from "@clauseo/components/lib/words-errors.ts";
 import { lim } from "@clauseo/components/lib/words-limits.ts";
@@ -32,14 +32,12 @@ export function atLimitWords(lang: Lang, resets: Timestamp | undefined, now: num
     : lim(lang, "Limit reached until {day} {time}", { day, time });
 }
 
-/** The open thread paused at the limit: the reset the header gives, the stop's time where known, and the moment the
- * pause was read, as the day its words format against (a new view of the header reads it again). */
-export type Paused = { resets: Timestamp | undefined; stopped: Timestamp | null; now: number };
+/** The open thread paused at the limit: the reset the header gives, and a plan window's stop's time where known. */
+export type Paused = { resets: Timestamp | undefined; stopped: Timestamp | null };
 
 /** The composer's line while paused: "Stopped at 4:52 pm, at the plan's limit" with a plan window's stop's time, the
  * toolbar's at-limit words without it or for a stop of another reason. */
-export function pausedLine(lang: Lang, paused: Paused): string {
-  const { now } = paused;
+export function pausedLine(lang: Lang, paused: Paused, now: number): string {
   if (paused.stopped === null) return atLimitWords(lang, paused.resets, now);
   const { day, time } = whenOf(lang, paused.stopped, now);
   return day === null
@@ -59,8 +57,8 @@ function lastStop(view: StreamView): LimitStopEntry | undefined {
 }
 
 /** A pick for useStreamPart: the open thread's pause, or null; the same object while the header's status and the
- * stop stay the same, so a streaming flush renders nothing for it. The moment is read here, in the store's snapshot,
- * as a new pause arrives, never in a render. */
+ * stop stay the same, so a streaming flush renders nothing for it. No clock here: the composer says it against its
+ * render's. */
 export function pausedPick(): (view: StreamView | undefined) => Paused | null {
   let last: { status: object; stop: LimitStopEntry | undefined; paused: Paused } | null = null;
   return (view) => {
@@ -75,7 +73,6 @@ export function pausedPick(): (view: StreamView | undefined) => Paused | null {
       resets: status.paused_at_limit.resets_at,
       // only the plan's own window says "at the plan's limit": a workspace's or a temporary stop keeps the at-limit words
       stopped: stop?.reason === "plan_window" ? stopTimeOf(stop) : null,
-      now: Date.now(),
     };
     last = { status, stop, paused };
     return paused;

@@ -4,11 +4,14 @@
 // thread is paused at the limit, send enabled in every state, and no timer left behind.
 import { lim } from "@clauseo/components/lib/words-limits.ts";
 import { limThread } from "@clauseo/components/lib/words-limits-thread.ts";
+import { act } from "react";
+import { createRoot } from "react-dom/client";
 import { afterEach, expect, test, vi } from "vitest";
 import { header, reset, step, TURN, userMessage, uuid } from "../../testing/stream-script.ts";
 import type { HeaderEntry, LimitStopEntry, ViewEntry } from "../../transport/protocol.ts";
 import { mountRoom, summary, type Harness } from "./harness.ts";
 import { atLimitWords, planNameOf } from "./limit-words.ts";
+import { LimitStopRow } from "./stop-rows.tsx";
 
 let h: Harness | null = null;
 afterEach(async () => {
@@ -314,6 +317,56 @@ test("the stop, the pause and their words start no timer: no interval, no delaye
   timeouts.mockRestore();
   intervals.mockRestore();
   frames.mockRestore();
+});
+
+test("past midnight, the next render names the day: the stop and the paused composer, with no timer", async () => {
+  fixNow();
+  // the stop on its own, rendered again with the same entry as a parent would
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const entry = (
+    limit(1, { window: "five_hour", resets_at: local(1, 9, 0) }) as { limit_stop: LimitStopEntry }
+  ).limit_stop;
+  const draw = () => act(async () => root.render(<LimitStopRow id="limit_stop:1" entry={entry} />));
+  await draw();
+  const row = () => host.querySelector<HTMLElement>('[data-testid="limit-stop"]') ?? undefined;
+  expect(mark(row())?.textContent).toBe(
+    limThread("en", "Stopped here at {time}", { time: "2:52 pm" }),
+  );
+  // Tuesday 3 November at 12:30 am: the stop was yesterday, Monday
+  vi.setSystemTime(new Date(local(1, 0, 30)));
+  await draw();
+  expect(mark(row())?.textContent).toBe(
+    limThread("en", "Stopped here on {day} at {time}", { day: "Monday", time: "2:52 pm" }),
+  );
+  expect(sub(row())).toBe("The 5-hour limit. It resets at 9:00 am.");
+  await act(async () => root.unmount());
+  host.remove();
+  // the paused composer: typing renders it again, against the new day
+  vi.setSystemTime(NOW);
+  h = await mountRoom();
+  h.deliver([
+    reset(
+      [
+        userMessage(5, 1, "Q"),
+        limit(1, { turn: TURN, window: "five_hour", resets_at: local(1, 9, 0) }),
+      ],
+      pausedHead(local(1, 9, 0)),
+    ),
+  ]);
+  expect(took()).toBe(lim("en", "Stopped at {time}, at the plan's limit", { time: "2:52 pm" }));
+  const intervals = vi.spyOn(globalThis, "setInterval");
+  vi.setSystemTime(new Date(local(1, 0, 30)));
+  await h.type("Continue");
+  expect(took()).toBe(
+    lim("en", "Stopped on {day} at {time}, at the plan's limit", {
+      day: "Monday",
+      time: "2:52 pm",
+    }),
+  );
+  expect(intervals).not.toHaveBeenCalled();
+  intervals.mockRestore();
 });
 
 test("the plan's name: ChatGPT for Codex, Claude for Claude or an agent not known, else the agent's own", () => {

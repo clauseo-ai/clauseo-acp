@@ -16,6 +16,7 @@ import { lim } from "@clauseo/components/lib/words-limits.ts";
 import { limThread } from "@clauseo/components/lib/words-limits-thread.ts";
 import { th } from "@clauseo/components/lib/words-thread.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
+import { useNow } from "../../store/limits.ts";
 import { toHostError } from "../../transport/host-transport.ts";
 import { StoppedMark } from "../stopped-mark.tsx";
 import { takesMark } from "../thread-break.ts";
@@ -183,12 +184,12 @@ function resetWords(lang: Lang, resets: Timestamp, now: number): string {
  * limit was reached at that time, with the window's line, "The 5-hour limit. It resets at 6:10 pm."; without the
  * stop's time the title stands alone and no mark shows. A workspace's credits or spend cap, a temporary rate limit and
  * a reason this version doesn't know leave the plan as it was: the note says the usage limit, and the reset. Concrete,
- * never red, and no clock runs: "now" is the moment the row first showed. */
+ * never red, and no clock runs: "now" is the clock at each render, so a later render names the day it renders on. */
 export function LimitStopRow({ id, entry }: { id: EntryId; entry: LimitStopEntry }) {
   const w = useWords();
   const agent = useAgentPlan();
   const plan = entry.reason === "plan_window";
-  const [now] = useState(Date.now);
+  const now = useNow();
   const resets = entry.resets_at;
   const stopped = plan ? stopTimeOf(entry) : null;
   const name = planNameOf(agent);

@@ -8,8 +8,7 @@
 // build's bare dynamic imports can't load (vite-config.test.ts).
 import { lazy, Suspense } from "react";
 import { late } from "@clauseo/components/lib/late.ts";
-import { useAgentSelect } from "../../store/limits.ts";
-import type { AgentLimitsView } from "../../transport/protocol.ts";
+import { useAgentSelect, useNow } from "../../store/limits.ts";
 import { useAgentPlan } from "../thread/agent-plan.ts";
 import { warningKey } from "./plan-model.ts";
 
@@ -18,22 +17,16 @@ const WarningNote = lazy(() =>
   late(import("../thread/list.tsx")).then((m) => ({ default: m.WarningNote })),
 );
 
-/** The warning's key with the moment its view arrived, the "now" its time is said against; "" for none. */
-const keyAt = (entry: AgentLimitsView | undefined, at: number): string => {
-  const key = warningKey(entry);
-  return key === "" ? "" : `${at} ${key}`;
-};
-
 /** The open conversation's agent's warning; nothing when there is none. */
 export function LimitWarning() {
   const plan = useAgentPlan();
-  const keyed = useAgentSelect(plan?.kind, keyAt);
-  if (keyed === "") return null;
-  // its time against the view's arrival: the host sends a new view at each shown reset, nothing ticks here
-  const space = keyed.indexOf(" ");
+  const key = useAgentSelect(plan?.kind, warningKey);
+  // its time against this render's clock: the host sends a new view at each shown reset, nothing ticks here
+  const now = useNow();
+  if (key === "") return null;
   return (
     <Suspense fallback={null}>
-      <WarningNote warning={keyed.slice(space + 1)} now={Number(keyed.slice(0, space))} />
+      <WarningNote warning={key} now={now} />
     </Suspense>
   );
 }
