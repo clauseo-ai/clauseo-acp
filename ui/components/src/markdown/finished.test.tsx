@@ -1,8 +1,6 @@
 // What a finished block keeps (#233): its React elements, its source and its footnote data, not its mdast or
 // hast. What later needs it parsed again (a note, the entity table, a link definition arriving) parses its
 // kept input, so the block still renders as a block rendered once would.
-import { setFlagsFromString } from "node:v8";
-import { runInNewContext } from "node:vm";
 import { isValidElement } from "react";
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -13,14 +11,26 @@ import { characterEntitiesLoaded, loadEntities } from "./entities.ts";
 import { CASES } from "./hostile-cases.ts";
 import { shownHast } from "./view-fixture.ts";
 
-// Every mdast root parsed, and every footnote numbering made, while `tracked.on`: held weakly, so a test can
-// tell whether anything still keeps them once the answer has ended.
+// Every mdast root parsed, and every footnote numbering made, while `tracked.on`: what the tests count, and
+// what they check the answer's caches and note views do not keep (read from those, not from GC).
 const tracked = vi.hoisted(() => ({
   on: false,
   roots: [] as WeakRef<object>[],
-  numberings: [] as WeakRef<object>[],
   caches: [] as { size(): number }[],
+  made: [] as object[],
+  rebuilds: [] as unknown[][],
 }));
+// Every note view's rebuild, as answer.ts asks note-view.ts to make it: what the view keeps after its update
+vi.mock("./note-view.ts", async (original) => {
+  const real = await original<typeof import("./note-view.ts")>();
+  return {
+    ...real,
+    noteViewRebuild: (...args: Parameters<typeof real.noteViewRebuild>) => {
+      if (tracked.on) tracked.rebuilds.push(args);
+      return real.noteViewRebuild(...args);
+    },
+  };
+});
 // Every cache made, in order: createAnswer's first is its mdast cache, `trees` (answer.ts)
 vi.mock("./cache.ts", async (original) => {
   const real = await original<typeof import("./cache.ts")>();
@@ -50,22 +60,11 @@ vi.mock("./footnotes.ts", async (original) => {
     ...real,
     numberFootnotes: (...args: Parameters<typeof real.numberFootnotes>) => {
       const numbering = real.numberFootnotes(...args);
-      if (tracked.on) tracked.numberings.push(new WeakRef(numbering));
+      if (tracked.on) tracked.made.push(numbering);
       return numbering;
     },
   };
 });
-
-setFlagsFromString("--expose-gc");
-const gc = runInNewContext("gc") as () => void;
-
-/** How many of `refs` are still alive after a full collection (a WeakRef holds its target to the job's end). */
-async function aliveAfterGc(refs: readonly WeakRef<object>[]): Promise<number> {
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  gc();
-  gc();
-  return refs.filter((ref) => ref.deref() !== undefined).length;
-}
 
 const FENCE = "```";
 
@@ -167,17 +166,25 @@ const NOTES =
     "",
   );
 
-test("no footnote numbering outlives its update: a note's view keeps only its own numbers", async () => {
-  tracked.numberings.length = 0;
+test("no footnote numbering outlives its update: a note's view keeps only its own numbers", () => {
+  tracked.made.length = 0;
+  tracked.rebuilds.length = 0;
   tracked.on = true;
   const answer = createAnswer("k");
   for (const text of prefixes(NOTES)) answer.update(text, true);
   const views = answer.update(NOTES, false);
   tracked.on = false;
   expect(views.at(-1)!.items).toHaveLength(12);
-  expect(tracked.numberings.length).toBeGreaterThan(20);
-  expect(await aliveAfterGc(tracked.numberings)).toBe(0);
-  // Still in use, so the collector could not take the views and their notes.
+  expect(tracked.made.length).toBeGreaterThan(20);
+  // Every note view's rebuild is made by note-view.ts from what it is given (a closure of its own), and none of
+  // what it is given is a numbering: so no view keeps one. Read from the calls, not from GC, whose timing let a
+  // WeakRef check of this kind fail in CI (#320)
+  expect(tracked.rebuilds.length).toBeGreaterThanOrEqual(12);
+  const numberings = new Set(tracked.made);
+  for (const args of tracked.rebuilds)
+    for (const arg of args) expect(numberings.has(arg as object)).toBe(false);
+  tracked.made.length = 0;
+  tracked.rebuilds.length = 0;
   expect(answer.update(NOTES, false)).toBe(views);
 });
 
