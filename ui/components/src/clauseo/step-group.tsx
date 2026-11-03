@@ -4,7 +4,7 @@
 // its rows, one line each, set into the well as the design's work list is: the icon of what it did, its words (a paper
 // by its file name, its folder on hover) and, where it didn't simply finish, its state. No animation, and no card.
 // The words come in made by the caller, in the language; the rows are the caller's StepRow and StepThought.
-import { useId, useState, type ReactNode } from "react";
+import { useId, useState, type ReactElement, type ReactNode } from "react";
 import { IconBreak, IconFold } from "../icons/icons.tsx";
 import { Say } from "./say.tsx";
 import { ToolKindIcon } from "./tool-kind-icons.tsx";
@@ -24,9 +24,14 @@ export type StepGroupProps = {
   live?: boolean;
   /** Opened when it mounts (the gallery's open state). */
   defaultOpen?: boolean;
+  /** Wraps the line where it stands: an answer's first group puts it on the answer's meta line, after the name and
+   * the time (the design's chip), and its rows open under that line. None: the line stands on its own. */
+  head?: ((line: ReactElement) => ReactNode) | undefined;
   /** The rows, shown while open. */
   children: ReactNode;
 };
+
+const same = (line: ReactElement) => line;
 
 /** The group: its line, a button that opens and folds it, and its rows under it while open. */
 export function StepGroup({
@@ -37,6 +42,7 @@ export function StepGroup({
   trouble = "",
   live = false,
   defaultOpen = false,
+  head,
   children,
 }: StepGroupProps) {
   const [open, setOpen] = useState(defaultOpen);
@@ -49,53 +55,55 @@ export function StepGroup({
       data-live={live ? true : undefined}
       data-trouble={trouble === "" ? undefined : true}
     >
-      <button
-        type="button"
-        className="step-group-line"
-        aria-expanded={open}
-        aria-controls={open ? rows : undefined}
-        onClick={() => setOpen((o) => !o)}
-      >
-        {/* none when nothing finished and the trouble leads: the break alone stands first */}
-        {kinds.length > 0 && (
-          <span className="step-group-icons">
-            {kinds.slice(0, live ? 1 : 3).map((kind) => (
-              <ToolKindIcon key={kind} kind={kind} size={14} className="step-icon" />
-            ))}
-          </span>
-        )}
-        <span className="step-group-words">
-          {line !== "" && (
-            <span className="step-group-now">
-              <Say>{line}</Say>
+      {(head ?? same)(
+        <button
+          type="button"
+          className="step-group-line"
+          aria-expanded={open}
+          aria-controls={open ? rows : undefined}
+          onClick={() => setOpen((o) => !o)}
+        >
+          {/* none when nothing finished and the trouble leads: the break alone stands first */}
+          {kinds.length > 0 && (
+            <span className="step-group-icons">
+              {kinds.slice(0, live ? 1 : 3).map((kind) => (
+                <ToolKindIcon key={kind} kind={kind} size={14} className="step-icon" />
+              ))}
             </span>
           )}
-          {more !== "" && (
-            <>
-              {line !== "" && " "}
-              <span className="step-group-more">
-                <Say>{more}</Say>
+          <span className="step-group-words">
+            {line !== "" && (
+              <span className="step-group-now">
+                <Say>{line}</Say>
               </span>
-            </>
-          )}
-          {trouble !== "" && (
-            <>
-              {(line !== "" || more !== "") && " "}
-              <span className="step-group-trouble" data-testid="step-group-trouble">
-                {/* the break marks it before it's read, as on its row, centred on the words' own line */}
-                <span className="step-inline-icon step-trouble-icon">
-                  <IconBreak size={14} />
+            )}
+            {more !== "" && (
+              <>
+                {line !== "" && " "}
+                <span className="step-group-more">
+                  <Say>{more}</Say>
                 </span>
-                <Say>{trouble}</Say>
-              </span>
-            </>
-          )}
-          {/* the chevron follows the last word, so it stays beside the words when they wrap */}
-          <span className="step-inline-icon step-group-chev">
-            <IconFold size={12} />
+              </>
+            )}
+            {trouble !== "" && (
+              <>
+                {(line !== "" || more !== "") && " "}
+                <span className="step-group-trouble" data-testid="step-group-trouble">
+                  {/* the break marks it before it's read, as on its row, centred on the words' own line */}
+                  <span className="step-inline-icon step-trouble-icon">
+                    <IconBreak size={14} />
+                  </span>
+                  <Say>{trouble}</Say>
+                </span>
+              </>
+            )}
+            {/* the chevron follows the last word, so it stays beside the words when they wrap */}
+            <span className="step-inline-icon step-group-chev">
+              <IconFold size={12} />
+            </span>
           </span>
-        </span>
-      </button>
+        </button>,
+      )}
       {open && (
         <ol id={rows} className="step-group-rows" data-testid="step-group-rows">
           {children}
