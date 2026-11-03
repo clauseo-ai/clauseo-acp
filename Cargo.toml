@@ -134,6 +134,9 @@ caseless = "0.2.2"
 serde_json_lenient = "0.2"
 schemars = { version = "1.2", default-features = false }
 objc2-core-foundation = "0.3.2"
+# clauseo-settings' tests only: reads the sample MDM profile in docs/firm-it/ (S25). 1.10.1 is
+# already in the lock through tauri; no serde needed for plist::Value.
+plist = { version = "1.10", default-features = false }
 # clauseo-connectors: blocking HTTPS (ureq 3, no async runtime) over rustls with the OS trust store
 # (ureq's platform-verifier feature brings rustls-platform-verifier 0.7, already in the tree), the
 # `ring` provider passed to ureq by the crate (it builds on aarch64-pc-windows-msvc without extra

@@ -31,6 +31,8 @@ objc2-core-foundation = { workspace = true, features = ["CFPreferences"] }
 
 [dev-dependencies]
 insta = { workspace = true, features = ["json", "redactions"] }
+# tests/firm_it.rs reads the sample configuration profile's payload.
+plist = { workspace = true }
 
 [lints]
 workspace = true

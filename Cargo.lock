@@ -1153,6 +1153,7 @@ version = "0.1.0"
 dependencies = [
  "insta",
  "objc2-core-foundation",
+ "plist",
  "schemars 1.2.3",
  "serde",
  "serde_json",
