@@ -1,8 +1,5 @@
 {"scenario":"steer-fallback","description":"codex-acp: steering is advertised without claudeCode, so the client cancels the turn and sends the steer text as prompt 2; a _session/steering request here is a mismatch","on_stdin_close":"exit"}
-{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
-{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"},"_meta":{"steering":{"supported":true}}}}}
-{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}","mcpServers":[]}}}
-{"respond":{"to":"new","result":{"sessionId":"sess-1"}}}
+{"include":"codex-handshake.jsonl"}
 {"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
 {"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"The clause "}}}}
 {"expect":{"method":"session/cancel","params":{"sessionId":"sess-1"}}}

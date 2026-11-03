@@ -6,6 +6,7 @@ use clauseo_protocol::{
     Delivery, DeliveryRequest, DomainEvent, SteerOutcome, StopReason, StreamId,
 };
 
+use crate::codex::CODEX;
 use crate::observe::{ended_with, started};
 use crate::queue::{DURABLE, send, settle, steer_resolved, user_message};
 use crate::support::{Dir, FAKE, Running, Scenario, matter_with_thread, text};
@@ -106,14 +107,21 @@ fn steer_after_the_end_goes_next() {
     host.shutdown();
 }
 
+/// A Codex agent (`codex-acp`, launched through the host's Codex path): its steer is native
+/// without `claudeCode.promptQueueing`, so the host cancels the running turn and sends the
+/// steer as the next turn, and the header says so before the first send.
 #[test]
 fn steer_falls_back_to_send_now() {
     let dir = Dir::new(
         "steer_falls_back_to_send_now",
-        &[(FAKE, Scenario::Bundled("steer-fallback"))],
+        &[(CODEX, Scenario::Bundled("steer-fallback"))],
     );
     let host = dir.start(0);
-    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], FAKE);
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], CODEX);
+    assert!(
+        !steer_joins_turn(&host, thread),
+        "known before the first send: codex-acp's steer does not join"
+    );
     let mut events = host.events(StreamId::Thread(thread));
     let (first, _) = host.prompt(thread, "Summarise the clause.");
     host.wait_armed(DURABLE);

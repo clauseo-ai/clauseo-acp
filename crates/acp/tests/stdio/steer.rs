@@ -135,6 +135,9 @@ fn steer_without_fallback_is_unsupported_and_sends_nothing() {
         );
         ctx.client.new_session(ctx.new_session()).await.unwrap();
         let session = sess1();
+        // codex-acp's handshake: the client picks its ask mode before the first prompt.
+        let mode = clauseo_protocol::AgentChoiceId::new("workspace-write").unwrap();
+        ctx.client.set_mode(&session, mode).await.unwrap();
         let (t1, t2) = (turn(1), turn(2));
         let prompt = ctx.client.prompt(&session, t1, text("Review the clause"));
         let send_now = async {
