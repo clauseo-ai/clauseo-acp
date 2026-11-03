@@ -20,6 +20,7 @@ import { MATTER } from "./hosts.ts";
 import {
   asideScene,
   chatgptScene,
+  heldRestartScene,
   heldScene,
   queueHost,
   queueScene,
@@ -31,7 +32,7 @@ import {
 } from "./queue-hosts.ts";
 import { RoomTyped } from "./room-typed.tsx";
 import { RoomAsking, RoomClicking, RoomOver, RoomPressing } from "./states.tsx";
-import { matterWords } from "./words.ts";
+import { matterWords, threadWords } from "./words.ts";
 
 /** The conversation that holds the matter; its id sorts below THREAD's, so the open one is THREAD. */
 const OTHER = uuid(0, 1);
@@ -284,5 +285,31 @@ export const U7: Entry[] = [
     words: matterWords("Show what it found"),
     screen: "matters/steer-aside",
     render: (lang) => over(asideScene(lang)),
+  },
+  // part 2, after the review's first round: the held queue with no stop to name (matters/held-restart), and the
+  // exchange's sections' names, which the review marks on the sections they name
+  {
+    id: "U7-28",
+    words: matterWords("{n} queued."),
+    screen: "matters/held-restart",
+    render: (lang) => over(heldRestartScene(lang, 3)),
+  },
+  {
+    id: "U7-29",
+    words: matterWords("1 queued."),
+    screen: "matters/held-restart-one",
+    render: (lang) => over(heldRestartScene(lang, 1)),
+  },
+  {
+    id: "U7-30",
+    words: threadWords("Your question, {time}"),
+    screen: "matters/held-restart",
+    render: (lang) => over(heldRestartScene(lang, 3)),
+  },
+  {
+    id: "U7-31",
+    words: threadWords("Clauseo's answer, {time}"),
+    screen: "matters/held-restart",
+    render: (lang) => over(heldRestartScene(lang, 3)),
   },
 ];
