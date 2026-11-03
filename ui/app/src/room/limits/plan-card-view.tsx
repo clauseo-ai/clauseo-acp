@@ -7,12 +7,27 @@
 import { PlanCard, type PlanWindow } from "@clauseo/components/clauseo/plan-card.tsx";
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { lim } from "@clauseo/components/lib/words-limits.ts";
+import { pc, type PlanCardKey } from "@clauseo/components/lib/words-plan-card.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
 import { useAgentLimits, useLimitsAt, useLimitsStore } from "../../store/limits.ts";
 import type { AgentKind, LimitWindowView } from "../../transport/protocol.ts";
 import { stamp, whenOf } from "../thread/clock.ts";
-import { PLAN_NAME, lookOf, planTitle, shareLeft, windowLabel } from "./plan-model.ts";
+import { PLAN_NAME, lookOf, planTitle, shareLeft } from "./plan-model.ts";
+
+/** The window labels the card's words translate; another shows as the host gives it, in English. */
+const LABELS = new Set<string>([
+  "5-hour limit",
+  "Weekly limit",
+  "Opus weekly limit",
+  "Sonnet weekly limit",
+  "Weekly limit for connected apps",
+  "Monthly limit",
+  "Usage limit",
+]);
+
+const windowLabel = (lang: Lang, label: string): string =>
+  LABELS.has(label) ? pc(lang, label as PlanCardKey) : label;
 
 /** A window's reset: "Resets 6:10 pm" ahead, "The limit reset at 4:10 pm." once passed; "" without one. */
 function resetOf(lang: Lang, w: LimitWindowView, now: number): string {
@@ -34,7 +49,7 @@ function windowOf(lang: Lang, w: LimitWindowView, now: number): PlanWindow {
   return {
     name: windowLabel(lang, w.label),
     left,
-    leftText: left === null ? "" : lim(lang, "{n}% left", { n: left }),
+    leftText: left === null ? "" : pc(lang, "{n}% left", { n: left }),
     reset: resetOf(lang, w, now),
     valueText: left === null ? "" : lim(lang, "{n} percent of the plan left", { n: left }),
   };
@@ -64,8 +79,8 @@ export function LivePlanCard({
   const message =
     look === "none"
       ? {
-          title: lim(lang, "Usage isn't available right now."),
-          body: lim(
+          title: pc(lang, "Usage isn't available right now."),
+          body: pc(
             lang,
             "Your {name} plan didn't send its limits this time. Asking still works as usual.",
             { name },
@@ -83,7 +98,7 @@ export function LivePlanCard({
           ),
         }
       : look === "payg" && entry.provider === "anthropic"
-        ? { title: lim(lang, "Pay as you go, billed to your Anthropic account") }
+        ? { title: pc(lang, "Pay as you go, billed to your Anthropic account") }
         : null;
   return (
     <PlanCard
@@ -93,7 +108,7 @@ export function LivePlanCard({
       }
       updated={
         figures && entry.checked_at !== undefined
-          ? (updated ?? ((time) => lim(lang, "As of {time}", { time })))(
+          ? (updated ?? ((time) => pc(lang, "As of {time}", { time })))(
               stamp(lang, entry.checked_at, now),
             )
           : null

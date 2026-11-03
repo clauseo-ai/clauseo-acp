@@ -1,5 +1,6 @@
-// The usage limit's words that the thread's stop and the composer share (U12): the plan's name, the window's line
-// under the stop's title, the toolbar's at-limit words, and the composer's paused line. Each takes `now` as an input:
+// The usage limit's words that the thread's stop and the composer share (U12): the plan's name, the stop's time, the
+// toolbar's at-limit words, and the composer's paused line. The window's line under the stop's title is the stop's
+// alone (stop-words.ts, in the thread's chunk). Each takes `now` as an input:
 // a render formats against the day it renders on, and nothing here runs a clock.
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import type { AgentName } from "@clauseo/components/lib/words-errors.ts";
@@ -7,7 +8,6 @@ import { lim } from "@clauseo/components/lib/words-limits.ts";
 import type { StreamView } from "../../store/view.ts";
 import type { LimitStopEntry, Timestamp } from "../../transport/protocol.ts";
 import { whenOf } from "./clock.ts";
-import { resetPassed } from "./stops.ts";
 
 /** The plan's name the limit's words take: ChatGPT for Codex, Claude for Claude or an agent not known, else the
  * agent's own name. */
@@ -22,27 +22,6 @@ export function planNameOf(agent: AgentName): string {
  * none, as one from before it may not. */
 export const stopTimeOf = (entry: LimitStopEntry): Timestamp | null =>
   typeof entry.ts === "number" && Number.isFinite(entry.ts) ? entry.ts : null;
-
-/** The window's line under a plan stop's title, "The 5-hour limit. It resets at 6:10 pm.", for the two windows it
- * names (Claude's `five_hour` and `seven_day`); null for another window, or no reset, or one gone by. */
-export function windowLine(
-  lang: Lang,
-  window: string | undefined,
-  resets: Timestamp | undefined,
-  now: number,
-): string | null {
-  if (resets === undefined || resetPassed(resets, now)) return null;
-  const { day, time } = whenOf(lang, resets, now);
-  if (window === "five_hour")
-    return day === null
-      ? lim(lang, "The 5-hour limit. It resets at {time}.", { time })
-      : lim(lang, "The 5-hour limit. It resets on {day} at {time}.", { day, time });
-  if (window === "seven_day")
-    return day === null
-      ? lim(lang, "The weekly limit. It resets at {time}.", { time })
-      : lim(lang, "The weekly limit. It resets on {day} at {time}.", { day, time });
-  return null;
-}
 
 /** The toolbar's at-limit words: "Limit reached until 6:10 pm", its day form, or that the reset wasn't given. */
 export function atLimitWords(lang: Lang, resets: Timestamp | undefined, now: number): string {

@@ -3,6 +3,7 @@
 // window's line, with and without a reset, a reset gone by, the workspace's reasons), the composer's line while the
 // thread is paused at the limit, send enabled in every state, and no timer left behind.
 import { lim } from "@clauseo/components/lib/words-limits.ts";
+import { limThread } from "@clauseo/components/lib/words-limits-thread.ts";
 import { afterEach, expect, test, vi } from "vitest";
 import { header, reset, step, TURN, userMessage, uuid } from "../../testing/stream-script.ts";
 import type { HeaderEntry, LimitStopEntry, ViewEntry } from "../../transport/protocol.ts";
@@ -76,9 +77,11 @@ test("a plan stop with its time: the mark, the title at that time, the window's 
     ]),
   ]);
   const [hit, past, weekly, tonight] = h.all("limit-stop");
-  expect(mark(hit)?.textContent).toBe(lim("en", "Stopped here at {time}", { time: "2:52 pm" }));
+  expect(mark(hit)?.textContent).toBe(
+    limThread("en", "Stopped here at {time}", { time: "2:52 pm" }),
+  );
   expect(title(hit)).toBe(
-    lim("en", "{name} plan limit reached at {time}", { name: "Claude", time: "2:52 pm" }),
+    limThread("en", "{name} plan limit reached at {time}", { name: "Claude", time: "2:52 pm" }),
   );
   expect(sub(hit)).toBe("The 5-hour limit. It resets at 6:10 pm.");
   expect(resetsAt(hit)?.dateTime).toBe(new Date(local(0, 18, 10)).toISOString());
@@ -101,7 +104,7 @@ test("a stop on another day marks its day; a window it doesn't name keeps the re
   const row = h.one("limit-stop") ?? undefined;
   // 1 November 2026 is a Sunday
   expect(mark(row)?.textContent).toBe(
-    lim("en", "Stopped here on {day} at {time}", { day: "Sunday", time: "4:00 pm" }),
+    limThread("en", "Stopped here on {day} at {time}", { day: "Sunday", time: "4:00 pm" }),
   );
   expect(title(row)).toBe("Claude plan limit reached at Sunday 4:00 pm");
   expect(sub(row)).toBe(lim("en", "Resets {time}", { time: "8:00 pm" }));
@@ -119,7 +122,7 @@ test("without the stop's time: the title alone and no mark; without a reset, Res
   ]);
   const [timeless, bare, noReset] = h.all("limit-stop");
   expect(mark(timeless)).toBeNull();
-  expect(title(timeless)).toBe(lim("en", "{name} plan limit reached", { name: "Claude" }));
+  expect(title(timeless)).toBe(limThread("en", "{name} plan limit reached", { name: "Claude" }));
   expect(sub(timeless)).toBe("The 5-hour limit. It resets at 6:10 pm.");
   expect(resetsAt(timeless)).not.toBeNull();
   expect(mark(bare)).toBeNull();
