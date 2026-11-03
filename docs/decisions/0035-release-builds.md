@@ -27,7 +27,7 @@ for a pull request.
     ref. Decided with Rohan's coordinator (2026-11-02): a dry run uses no environment and no secret.
     Each job that signs makes a throwaway updater key with a random password in its own runner and
     signs with it, and nothing is published: the assets, `latest.json` and `SHA256SUMS.txt` stay in
-    the run's artifact `release-assets`. Since a dry run holds nothing secret, it may start from any
+    the run's artifact `dist-assets`. Since a dry run holds nothing secret, it may start from any
     branch, so a fix can be dry-run before it merges (`gh workflow run release.yml --ref <branch>`).
 - **Jobs:** `check` (mode, tag against version and branch, the release overlays, no test feature in a
   `v*` build); `ui` (the ui built once for every leg, with hidden source maps moved out of
