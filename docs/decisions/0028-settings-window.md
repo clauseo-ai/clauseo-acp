@@ -101,9 +101,10 @@ Amended 2026-11-03: U12 opened the limits for the settings window's Plan and usa
 follows them on its channel as on `main`'s (`follows_limits` in `lib.rs`), `AppEvents` passes
 limits events for it while its app feed stays `settings_changed` alone, `dispatch` admits
 `RefreshLimits` from it beside `SetUiSettings` (`Shown` as the section opens, `TryAgain` from
-its button), and its focus dispatches `Shown` as `main`'s does. Any other label still follows
-no limits and sends nothing, and its channel carries no app or limits event (`AppEvents::Nothing`
-in `crates/desktop/src/bridge/pump/feeds.rs`), where before it got `settings_changed`.
+its button), and its focus dispatches `Shown` as `main`'s does. Any other window: nothing until
+its own ADR line opens it. It follows no limits, sends nothing, and its channel carries no app or
+limits event (`AppEvents::Nothing` in `crates/desktop/src/bridge/pump/feeds.rs`), where before
+it got `settings_changed`: fail-closed, as this record's allow-lists are.
 
 The risk: `TryAgain` reads now whatever the last read's age, so Try again pressed over and over
 in Settings would have the host start a read for each press. The bridge throttles the settings
