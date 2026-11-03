@@ -1,8 +1,8 @@
 // The words of the settings window: its sections' names, what each says beside its name, each section's one line,
 // and the words of the sections built so far (plan and usage, language, appearance, privacy, about). As in words.ts
-// the English is the key, the exact string on screen, and a key with slots fills them in either language. The Hindi is a specialist's draft,
-// waiting for a Hindi-speaking lawyer: the formal आप, the danda, Western digits, English names in Latin script. A
-// later section brings its own strings with it. The window's title, Settings, is words-ui.ts's; Theme, Text size and
+// the English is the key, the exact string on screen, and a key with slots fills them in either language. The Hindi
+// is a specialist's draft, waiting for a Hindi-speaking lawyer: the formal आप, the danda, Western digits, English
+// names in Latin script. A later section brings its own strings with it. The window's title, Settings, is words-ui.ts's; Theme, Text size and
 // Reduced motion are the frame's (words-frame.ts); Lite mode and its choices are words-ui.ts's.
 import { useDisplay, type Lang } from "./display.ts";
 import { frame, type FrameKey } from "./words-frame.ts";
@@ -46,20 +46,16 @@ const HI = {
   // privacy: what leaves this computer, and the tools' switches
   "What leaves this computer": "इस कंप्यूटर से क्या बाहर जाता है",
   "To {name}, on your plan": "{name} को, आपके प्लान से",
-  // hi: later, for the block below
+  // hi: later: the lines below ship in English, their Hindi null until it comes
   "Each question, the parts of the papers it needs, and its web searches. {name} sees what each question sends it.":
-    "Each question, the parts of the papers it needs, and its web searches. {name} sees what each question sends it.",
-  "Anthropic lists Brave Search as its web search subprocessor.":
-    "Anthropic lists Brave Search as its web search subprocessor.",
-  "On the web": "On the web",
-  "Web search": "Web search",
-  "Clauseo can search the web and read pages. On unless you turn it off.":
-    "Clauseo can search the web and read pages. On unless you turn it off.",
-  Browser: "Browser",
-  "Clauseo can open web pages in its own browser, on this computer.":
-    "Clauseo can open web pages in its own browser, on this computer.",
-  "A change applies to conversations started after it.":
-    "A change applies to conversations started after it.",
+    null,
+  "Anthropic lists Brave Search as its web search subprocessor.": null,
+  "On the web": null,
+  "Web search": null,
+  "Clauseo can search the web and read pages. On unless you turn it off.": null,
+  Browser: null,
+  "Clauseo can open web pages in its own browser, on this computer.": null,
+  "A change applies to new conversations. Ones already open keep what they had.": null,
 } as const;
 
 /** Every string of the settings window, in English. */

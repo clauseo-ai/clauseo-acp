@@ -70,9 +70,13 @@ export const WEB_SETTINGS: Entry[] = [
     settingsWords("Clauseo can open web pages in its own browser, on this computer."),
     { tools: ON },
   ),
-  entry("UEP-12", settingsWords("A change applies to conversations started after it."), {
-    tools: ON,
-  }),
+  entry(
+    "UEP-12",
+    settingsWords("A change applies to new conversations. Ones already open keep what they had."),
+    {
+      tools: ON,
+    },
+  ),
   // the managed line on the tools' switches, both locked by a firm's policy (U11-07's words). The ids are UEP-nn: status.ts's form wants digits after the dash
   entry("UEP-13", settingsWords("Managed by your organisation"), {
     tools: ON,
