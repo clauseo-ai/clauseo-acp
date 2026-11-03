@@ -23,9 +23,16 @@ import { Say } from "./say.tsx";
  * hears it too. Left out, the row shows the still wait icon, as before. */
 export type WorkingState =
   /** name and waitingFor are the app's words, in the language: "Acme Ltd v. State", "judgments since 2001 that cite
-   * it". */
-  | { kind: "check"; name: string; waitingFor: string; expected: string; working?: boolean }
-  | { kind: "series"; total: number; current: string | null; expected: string; working?: boolean }
+   * it". expected, on a check and a series, is the clock time the answer is expected, or null when the app has none:
+   * then the row has no pill. */
+  | { kind: "check"; name: string; waitingFor: string; expected: string | null; working?: boolean }
+  | {
+      kind: "series";
+      total: number;
+      current: string | null;
+      expected: string | null;
+      working?: boolean;
+    }
   | { kind: "queued"; expected: string }
   | { kind: "limit"; resets: string }
   | { kind: "retrying"; at: string; lastReply: string; onRetry?: () => void }
@@ -53,6 +60,8 @@ type Parts = { words: string; pill: string | null; actions: ReactNode; details: 
 function useParts(state: WorkingState): Parts {
   const w = useThreadWords();
   const s = (x: string) => sentence(w.lang, x);
+  const expectedBy = (at: string | null) =>
+    at === null ? null : w.t("Expected by {time}", { time: w.clock(at) });
   switch (state.kind) {
     case "check":
       return {
@@ -60,7 +69,7 @@ function useParts(state: WorkingState): Parts {
           name: state.name,
           waitingFor: state.waitingFor,
         }),
-        pill: w.t("Expected by {time}", { time: w.clock(state.expected) }),
+        pill: expectedBy(state.expected),
         actions: null,
         details: null,
       };
@@ -71,7 +80,7 @@ function useParts(state: WorkingState): Parts {
           state.current === null
             ? s(series)
             : `${s(series)} ${w.th("Now {name}.", { name: state.current })}`,
-        pill: w.t("Expected by {time}", { time: w.clock(state.expected) }),
+        pill: expectedBy(state.expected),
         actions: null,
         details: null,
       };

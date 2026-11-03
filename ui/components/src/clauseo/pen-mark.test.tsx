@@ -7,7 +7,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { DEFAULT_DISPLAY, showDisplay, type Display } from "../lib/display.ts";
 import { PenMark } from "./pen-mark.tsx";
 import { RoomScopeProvider } from "./room-scope-provider.tsx";
-import { WorkingLine } from "./working-line.tsx";
+import { WorkingLine, WorkingTime } from "./working-line.tsx";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -172,4 +172,50 @@ test("the working line writes with the pen only while working, and keeps its wor
   );
   expect(document.querySelector(".working .pen-mark")).toBeNull();
   expect(asking()).toBe(false);
+});
+
+test("a check and a series with no expected time have no pill, in the row or beside Stop", async () => {
+  await mount(
+    <>
+      <WorkingLine
+        state={{
+          kind: "check",
+          name: "Acme Ltd v. State",
+          waitingFor: "the judgments",
+          expected: null,
+        }}
+      />
+      <WorkingTime
+        state={{
+          kind: "check",
+          name: "Acme Ltd v. State",
+          waitingFor: "the judgments",
+          expected: null,
+        }}
+      />
+      <WorkingLine
+        state={{
+          kind: "series",
+          total: 4,
+          current: "Pooja Ravinder Devidasani",
+          expected: null,
+          working: true,
+        }}
+      />
+      <WorkingTime state={{ kind: "series", total: 4, current: null, expected: null }} />
+    </>,
+  );
+  expect(document.querySelectorAll(".working")).toHaveLength(2);
+  expect(document.querySelector(".working-time")).toBeNull();
+  expect(document.querySelectorAll(".working")[1]?.textContent).toContain(
+    "Pooja Ravinder Devidasani",
+  );
+  await act(async () =>
+    root?.render(
+      <RoomScopeProvider>
+        <WorkingLine state={{ kind: "series", total: 4, current: null, expected: "16:32" }} />
+      </RoomScopeProvider>,
+    ),
+  );
+  expect(document.querySelector(".working-time")?.textContent).toMatch(/Expected by/);
 });
