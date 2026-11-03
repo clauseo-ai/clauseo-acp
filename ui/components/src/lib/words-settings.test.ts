@@ -33,6 +33,16 @@ test("appearance's preview says the design's line, and its papers keep their fil
   ]);
 });
 
+test("privacy's design lines keep the design's Hindi; it says nothing of Indian Kanoon or anonymous counts", () => {
+  expect(st("hi", "Privacy")).toBe("निजता");
+  expect(st("hi", "What leaves this computer, and who sees it.")).toBe(
+    "इस कंप्यूटर से क्या बाहर जाता है, और उसे कौन देखता है।",
+  );
+  expect(st("hi", "To {name}, on your plan", { name: "Claude" })).toBe("Claude को, आपके प्लान से");
+  for (const left of ["To Indian Kanoon", "To Clauseo", "Anonymous counts", "Send crash reports"])
+    expect(Object.keys(settingsWords)).not.toContain(left);
+});
+
 test("the side's notes fill their slots in both languages", () => {
   expect(st("en", "{theme}, text size {n}", { theme: st("en", "Night"), n: 18 })).toBe(
     "Night, text size 18",
@@ -80,6 +90,8 @@ test("each Hindi sentence ends with the danda, and no banned word or Devanagari 
   for (const [en, hi] of Object.entries(settingsWords)) {
     if (hi === null) continue; // hi: later, no Hindi yet
     expect(hi, en).not.toMatch(/पेंसिल|स्याही|चरण|कदम|मैं|[\u0966-\u096F]/);
+    // a new line waiting for its Hindi (`// hi: later`) carries its English for now
+    if (hi === en) continue;
     if (en.endsWith(".")) expect(hi, en).toMatch(/।$/);
     else expect(hi, en).not.toMatch(/[।.]$/);
     // a slot in English is a slot in Hindi
@@ -91,7 +103,7 @@ test("each Hindi sentence ends with the danda, and no banned word or Devanagari 
 
 test("only the sections built so far bring their strings: no later section's name or line is here", () => {
   const src = readFileSync(new URL("./words-settings.ts", import.meta.url), "utf8");
-  for (const later of ["Plans", "Indian Kanoon", "Safe workspace", "Updates", "Privacy"])
+  for (const later of ["Plans", "Indian Kanoon", "Safe workspace", "Updates"])
     expect(Object.keys(settingsWords), later).not.toContain(later);
   // the design's facts (its version and date) stay in the design
   expect(src).not.toMatch(/3\.0\.4|October/);
