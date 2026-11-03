@@ -97,6 +97,13 @@ get no menu: it would be a bar on the undecorated window.
 
 proposed
 
+Amended 2026-11-03: U12 opened the limits for the settings window's Plan and usage. `open_stream`
+follows them on its channel as on `main`'s (`follows_limits` in `lib.rs`), `AppEvents` passes
+limits events for it while its app feed stays `settings_changed` alone, `dispatch` admits
+`RefreshLimits` from it beside `SetUiSettings` (`Shown` as the section opens, `TryAgain` from
+its button), and its focus dispatches `Shown` as `main`'s does. Any other label still follows
+no limits and sends nothing.
+
 ## Date
 
 2026-11-02

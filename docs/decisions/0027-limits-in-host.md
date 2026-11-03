@@ -121,6 +121,10 @@ proposed
 Amended 2026-11-03: since #185 (U11), only the `main` window's Channel follows limits; U12 opens
 it for Settings when Plan and usage reads it ([0028](0028-settings-window.md)).
 
+Amended 2026-11-03: U12 opened the limits for the Settings window: its Channel follows them as
+`main`'s does, it may send `refresh_limits`, and its focus dispatches `Shown` from Rust
+([0028](0028-settings-window.md)).
+
 ## Date
 
 2026-11-02
