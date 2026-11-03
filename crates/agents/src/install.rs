@@ -14,6 +14,7 @@
 mod files;
 mod npm;
 
+use std::fs::File;
 use std::io;
 use std::path::PathBuf;
 use std::pin::pin;
@@ -56,6 +57,9 @@ pub(crate) struct Job<T> {
     pub(crate) turn: Arc<Mutex<()>>,
     /// The OS's proxy, when a retry asked for it.
     pub(crate) system_proxy: Option<String>,
+    /// The lock on `agents/.lock` while the job works: `None` until taken, and given up before
+    /// the job's last event, so the next job (here or in another process) never meets it.
+    pub(crate) data_lock: Mutex<Option<File>>,
 }
 
 /// The job thread's body: waits for the job lock, then works unless paused meanwhile.
@@ -65,6 +69,8 @@ pub(crate) fn run<T: Timer + Send + Sync>(job: &Job<T>) {
         return;
     }
     futures::executor::block_on(job.work());
+    // Given up before the job lock, so the next job here never finds it held.
+    job.release_lock();
 }
 
 /// How a try ended badly, and what the job does next.
@@ -181,10 +187,85 @@ pub(crate) struct Run {
     pub(crate) total: u64,
 }
 
+impl Run {
+    fn new(agent: &AgentId) -> Run {
+        Run {
+            log: InstallLog::new(agent),
+            tries: 0,
+            attempts: 0,
+            received: 0,
+            total: 0,
+        }
+    }
+}
+
+impl<T> Job<T> {
+    /// Checks the data folder and the bundle are absolute, then takes `agents/.lock`. Another
+    /// process holding it (another Clauseo installing) fails the job at once: the single-instance
+    /// plugin makes that rare, and a retry once it is done works.
+    fn take_lock(&self) -> Result<(), TryError> {
+        let config = &self.config;
+        check_paths(config)?;
+        match crate::write::try_lock_agents(&config.data_dir) {
+            Ok(Some(file)) => {
+                *self
+                    .data_lock
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner) = Some(file);
+                Ok(())
+            }
+            Ok(None) => Err(TryError::new(
+                Next::Stop,
+                "another Clauseo is installing an agent now; try again once it is done",
+                config,
+            )),
+            Err(err) => Err(TryError::io("locking the agents folder", &err, config)),
+        }
+    }
+
+    /// Gives up `agents/.lock`, if held.
+    fn release_lock(&self) {
+        drop(
+            self.data_lock
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .take(),
+        );
+    }
+}
+
+/// The data folder, and the bundle when set, must be absolute paths: a relative one would
+/// resolve against whatever the current folder is.
+pub(crate) fn check_paths(config: &AgentsConfig) -> Result<(), TryError> {
+    if !config.data_dir.is_absolute() {
+        return Err(TryError::new(
+            Next::Stop,
+            "the data folder is not an absolute path",
+            config,
+        ));
+    }
+    if config
+        .install
+        .bundle
+        .as_ref()
+        .is_some_and(|bundle| !bundle.is_absolute())
+    {
+        return Err(TryError::new(
+            Next::Stop,
+            "the bundle setting is not an absolute path",
+            config,
+        ));
+    }
+    Ok(())
+}
+
 impl<T: Timer + Send + Sync> Job<T> {
     async fn work(&self) {
         let agent = &self.ticket.agent;
         let config = &self.config;
+        if let Err(err) = self.take_lock() {
+            return self.fail(FailureKind::Failed, &err, &Run::new(agent), None);
+        }
         let user = {
             let find = pin!(node::find_user_node(
                 &config.node_search,
@@ -202,13 +283,7 @@ impl<T: Timer + Send + Sync> Job<T> {
             self.ready(installed);
             return;
         }
-        let mut run = Run {
-            log: InstallLog::new(agent),
-            tries: 0,
-            attempts: 0,
-            received: 0,
-            total: 0,
-        };
+        let mut run = Run::new(agent);
         loop {
             if self.ticket.cancel.is_cancelled() {
                 return;
@@ -326,6 +401,7 @@ impl<T: Timer + Send + Sync> Job<T> {
     }
 
     fn ready(&self, installed: Installed) {
+        self.release_lock();
         let version = installed.version.clone();
         self.shared.emit_job(
             &self.ticket,
@@ -337,6 +413,7 @@ impl<T: Timer + Send + Sync> Job<T> {
 
     /// Sends the job's last state, `Failed` of `kind`, with its log.
     fn fail(&self, kind: FailureKind, err: &TryError, run: &Run, user: Option<&FoundNode>) {
+        self.release_lock();
         let mut log = run.log.clone();
         push_error(&mut log, err);
         finish_log(&mut log, run, kind);

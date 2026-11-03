@@ -61,7 +61,8 @@ impl fmt::Display for InstallLog {
 /// a CA file's path) in the first place.
 pub(crate) fn redact(text: &str, data_dir: &Path) -> String {
     let data = data_dir.to_string_lossy();
-    let text = if data.is_empty() {
+    // A relative data folder is refused before any install; it is not swapped in the text.
+    let text = if data.is_empty() || !data_dir.has_root() {
         text.to_owned()
     } else {
         text.replace(data.as_ref(), "<data>")

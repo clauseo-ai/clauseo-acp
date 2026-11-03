@@ -61,6 +61,23 @@ fn open_no_follow(options: &mut OpenOptions, path: &Path) -> io::Result<File> {
     options.open(path)
 }
 
+/// Takes the exclusive lock on `<data_dir>/agents/.lock` (made if missing) without waiting:
+/// `Ok(None)` when another process holds it, i.e. another Clauseo is installing. The lock lasts
+/// as long as the file it gives.
+pub(crate) fn try_lock_agents(data_dir: &Path) -> io::Result<Option<File>> {
+    let agents = data_dir.join("agents");
+    create_dir_all(&agents)?;
+    let file = open_no_follow(
+        OpenOptions::new().create(true).write(true).truncate(false),
+        &agents.join(".lock"),
+    )?;
+    match file.try_lock() {
+        Ok(()) => Ok(Some(file)),
+        Err(std::fs::TryLockError::WouldBlock) => Ok(None),
+        Err(std::fs::TryLockError::Error(err)) => Err(err),
+    }
+}
+
 /// Flushes `path`'s bytes to the disk (`fsync`): a file about to be vouched for by a receipt.
 pub(crate) fn sync_file(path: &Path) -> io::Result<()> {
     open_no_follow(OpenOptions::new().write(true), path)?.sync_all()

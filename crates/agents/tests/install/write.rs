@@ -33,3 +33,17 @@ pub(crate) fn on_path(name: &str) -> Option<PathBuf> {
         .map(|dir| dir.join(name))
         .find(|candidate| candidate.is_file())
 }
+
+/// Opens `path` (made if missing) and takes its exclusive lock, as another Clauseo would.
+pub(crate) fn hold_lock(path: &Path) -> io::Result<std::fs::File> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(path)?;
+    file.lock()?;
+    Ok(file)
+}

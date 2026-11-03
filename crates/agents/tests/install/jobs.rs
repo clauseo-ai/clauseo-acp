@@ -1,9 +1,11 @@
-//! One download at a time: a second `install` starts nothing, and a switch pauses.
+//! One download at a time: a second `install` starts nothing, a switch pauses, and another
+//! process holding `agents/.lock` stops both the start-up clean-up and an install.
 
 use clauseo_agents::InstallState;
 use clauseo_agents::testing::Behaviour;
 
 use crate::support::{Fixture, agent_a, agent_b, states_of, tarball_path};
+use crate::write;
 
 fn is_ready(state: &InstallState) -> bool {
     matches!(state, InstallState::Ready { .. })
@@ -75,4 +77,63 @@ fn a_switch_pauses_and_the_paused_install_resumes_by_range() {
         .map(|request| request.range)
         .collect();
     assert_eq!(ranges, [None, Some(format!("bytes={half}-"))]);
+}
+
+#[test]
+fn another_process_holding_the_lock_skips_the_clean_up_and_fails_the_install() {
+    let fx = Fixture::new("locked");
+    let hash = fx
+        .config
+        .snapshot
+        .install_hash(&agent_a(), fx.config.platform)
+        .unwrap();
+    let tmp = fx.install_root(&agent_a()).join(format!(".tmp-{hash}-1"));
+    write::write(&tmp.join("package.json"), "{}").unwrap();
+    let held = write::hold_lock(&fx.data.path().join("agents/.lock")).unwrap();
+
+    let (agents, events) = fx.start();
+    events.first_states();
+    assert!(tmp.exists(), "another Clauseo's temp folder is left alone");
+    agents.install(&agent_a());
+    let (_, last) = events.until_end(&agent_a());
+    let InstallState::Failed(failure) = last else {
+        panic!("not failed: {last:?}");
+    };
+    assert!(
+        failure
+            .log
+            .lines()
+            .iter()
+            .any(|line| line.contains("another Clauseo is installing")),
+        "{}",
+        failure.log
+    );
+    assert_eq!(fx.registry.requests(), []);
+
+    drop(held);
+    agents.retry(&agent_a(), false);
+    let (_, last) = events.until_end(&agent_a());
+    assert!(is_ready(&last), "{last:?}");
+}
+
+#[test]
+fn a_relative_bundle_path_fails_the_install_clearly() {
+    let mut fx = Fixture::new("relative");
+    fx.config.install.bundle = Some("bundle".into());
+    let (agents, events) = fx.start();
+    events.first_states();
+    agents.install(&agent_a());
+    let (_, last) = events.until_end(&agent_a());
+    let InstallState::Failed(failure) = last else {
+        panic!("not failed: {last:?}");
+    };
+    assert!(
+        failure
+            .log
+            .lines()
+            .iter()
+            .any(|line| line == "the bundle setting is not an absolute path"),
+        "{}",
+        failure.log
+    );
 }
