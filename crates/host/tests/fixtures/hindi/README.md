@@ -2,7 +2,9 @@
 
 Four papers in Hindi for the Hindi question test (`tests/host/hindi.rs`): the fake-agent
 variant copies them into a matter folder in CI, and the live variant asks Claude or Codex
-about them. `generate.py` makes all four; rerunning it gives the same bytes.
+about them. `generate.py` makes all four, and `patra-edited.docx` (the fifth file, below), which
+the Word round trip test (`tests/host/word_round_trip.rs`) uses. Rerunning it gives the same
+bytes.
 
 | File | What it is | Planted fact |
 |---|---|---|
@@ -10,6 +12,7 @@ about them. `generate.py` makes all four; rerunning it gives the same bytes.
 | `notice-legacy.pdf` | A "legacy-encoded" PDF: a legal notice made the same way with no `ActualText` and its ToUnicode map deleted. The glyphs still draw correctly, but text extraction gives the subset's one-byte codes (control characters and WinAnsi symbols such as `€†‡`; only the ASCII digits and commas survive): the failure a PDF set in Kruti Dev or a similar legacy font shows. No legacy font is used or copied: they are freeware with unclear redistribution terms. | No |
 | `affidavit-scan.pdf` | A scanned PDF: an affidavit (शपथपत्र) made as a Unicode page, rasterised at 110 dpi to one greyscale JPEG, with no text layer and no font. | No |
 | `patra.docx` | A Hindi Word letter from the tenant's advocate, in NFC. Its third paragraph holds nukta letters (ज़, क़, फ़), which NFC keeps as base letter + U+093C. | Yes: ₹३,४७,२१५, १७ मार्च २०२४, सुरेखा भार्गव (Devanagari digits) |
+| `patra-edited.docx` | `patra.docx` with one paragraph added before the signature (`संशोधन: यह पत्र १८ मार्च २०२४ को संशोधित किया गया।`). It stands in for the edit a stetdoc change makes to the Word document, in the round trip test only; the live test does not use it. | Yes, as `patra.docx` (the same letter) |
 
 The landlord, दीनदयाल मिश्र, appears in all four; only the tenant's name, the deposit and the
 lease date make the planted fact. The same values are in `generate.py` and in

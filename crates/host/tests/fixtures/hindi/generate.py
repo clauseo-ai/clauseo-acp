@@ -6,8 +6,8 @@ Run from anywhere:
     python3 generate.py /path/to/NotoSansDevanagari-Regular.ttf
 
 Needs Python 3.11 with reportlab 4.4 and uharfbuzz (the shaping), pikepdf (the legacy-encoded
-copy), PyMuPDF (the scan's rasterising), Pillow and python-docx. It writes the four papers next
-to itself and nothing else. The planted fact (TENANT, AMOUNT, DATE below) is also in
+copy), PyMuPDF (the scan's rasterising), Pillow and python-docx. It writes the five papers next
+to itself and nothing else. The docx ones need no font: `letter()` alone makes them. The planted fact (TENANT, AMOUNT, DATE below) is also in
 `crates/host/tests/host/hindi/verdict.rs`; a host test fails when the two disagree.
 """
 
@@ -70,6 +70,12 @@ LETTER = [
     "ज़मीन के क़ब्ज़े के बारे में अंतिम फ़ैसला अदालत करेगी।",
     "भवदीय, अधिवक्ता",
 ]
+
+
+# patra-edited.docx: the same letter with one paragraph added before the signature. It stands
+# in for the edit a stetdoc change makes in the Word document (tests/host/word_round_trip.rs).
+EDIT = "संशोधन: यह पत्र १८ मार्च २०२४ को संशोधित किया गया।"
+LETTER_EDITED = LETTER[:-1] + [EDIT] + LETTER[-1:]
 
 
 def nfc(lines):
@@ -177,6 +183,7 @@ def main():
         "notice-legacy.pdf": legacy(NOTICE),
         "affidavit-scan.pdf": scan(AFFIDAVIT),
         "patra.docx": letter(LETTER),
+        "patra-edited.docx": letter(LETTER_EDITED),
     }
     for name, data in papers.items():
         (HERE / name).write_bytes(data)

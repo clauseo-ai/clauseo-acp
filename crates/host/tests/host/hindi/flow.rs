@@ -13,8 +13,8 @@ use clauseo_host::{EventSubscription, HostHandle};
 use clauseo_protocol::{
     AgentChoiceId, AgentId, CommandEnvelope, CommandId, CommandOutcome, ConfigCategory,
     ConfigOption, ConfigOptionKind, ConfigValue, DeliveryRequest, DomainEvent, ErrorCode,
-    HostCommand, HostError, HostEvent, MatterSource, PermissionKind, Principal, PromptBlock,
-    StreamId, TextKind, ThreadId, Title, TurnId,
+    HostCommand, HostError, HostEvent, MatterSource, MessageId, PermissionKind, Principal,
+    PromptBlock, StreamId, TextKind, ThreadId, Title, TurnId,
 };
 use futures::StreamExt as _;
 use futures::future::Either;
@@ -388,19 +388,31 @@ impl Events {
         })
     }
 
-    /// `turn`'s answer text.
+    /// `turn`'s answer text: each agent message's text (its `TextAppended` batches joined in
+    /// order), with the messages in the order they began and a newline between them, so a
+    /// working sentence before a tool call does not run into the next message's first line.
     fn answer(&self, turn: TurnId) -> String {
-        self.seen
-            .iter()
-            .filter_map(|event| match event {
-                DomainEvent::TextAppended(appended)
-                    if appended.turn == turn && appended.kind == TextKind::Answer =>
-                {
-                    Some(appended.text.as_str())
-                }
-                _ => None,
-            })
-            .collect()
+        let mut messages: Vec<(MessageId, String)> = Vec::new();
+        for event in &self.seen {
+            let DomainEvent::TextAppended(appended) = event else {
+                continue;
+            };
+            if appended.turn != turn || appended.kind != TextKind::Answer {
+                continue;
+            }
+            match messages
+                .iter_mut()
+                .find(|(message, _)| *message == appended.message)
+            {
+                Some((_, text)) => text.push_str(&appended.text),
+                None => messages.push((appended.message, appended.text.clone())),
+            }
+        }
+        messages
+            .into_iter()
+            .map(|(_, text)| text)
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     /// The fixture papers that `turn`'s tool calls name in their locations, titles or inputs.
