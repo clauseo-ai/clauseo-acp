@@ -108,7 +108,12 @@ fn set_exec(file: &File, exec: bool) -> io::Result<()> {
     file.set_permissions(std::fs::Permissions::from_mode(mode))
 }
 
+/// Windows has no exec bit: a file's extension decides what runs.
 #[cfg(not(unix))]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "the Unix version's signature, which can fail; one call site serves both"
+)]
 fn set_exec(_file: &File, _exec: bool) -> io::Result<()> {
     Ok(())
 }
