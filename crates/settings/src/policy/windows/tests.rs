@@ -4,9 +4,11 @@
 use super::{NoProgramData, reg_value, values, wide_strings};
 use crate::Effective;
 use crate::error::Error;
+use crate::leaf;
 use crate::policy::registry::{KEY, RegValue};
 use crate::policy::{PolicyRead, system_policy_sources};
 use crate::testing::{MemFiles, locations};
+use crate::warning::{Origin, WarningKind};
 use windows::Win32::System::Registry::{REG_BINARY, REG_DWORD, REG_MULTI_SZ, REG_SZ};
 use windows::Win32::System::Threading::{GetCurrentProcess, GetProcessHandleCount};
 
@@ -70,6 +72,20 @@ fn a_missing_program_data_folder_is_reported_by_its_name() {
         ),
         "{errors:?}"
     );
+    // Fails closed: each security key is locked at its default, with a warning naming the source.
+    for key in leaf::SECURITY_KEYS {
+        assert!(effective.is_locked(key), "{key}");
+        assert!(
+            effective.warnings().iter().any(|warning| warning.origin
+                == Origin::Store {
+                    name: r"ProgramData\Clauseo\policy.json".to_owned()
+                }
+                && matches!(&warning.kind, WarningKind::InvalidValue { key: locked, .. }
+                    if locked == key)),
+            "{key}: {:?}",
+            effective.warnings()
+        );
+    }
 }
 
 /// The handles this process holds. Nextest runs each test in a process of its own.
