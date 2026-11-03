@@ -139,7 +139,7 @@ Your skills are files on this computer. When a task fits one, read the file befo
 
 R22 merges before the host PR (PR-B), so the Codex path has not yet run end to end. PR-B merges only after this by-hand proof passes on macOS and on Windows under the unelevated sandbox, each with the cheapest model and a fresh Codex home: after launch prep has written the plugin's skills, a Codex thread asked for a task that fits a skill reads the rendered `SKILL.md` named in its index (and a reference it names) with no approval prompt, and nothing is written: the rendered skills folder and its manifest are byte for byte unchanged after the turn, and no file appears in the matter folder, the work folder or the matter notes folder. PR-B records each run (OS, model, the file read, the folder hashes before and after).
 
-Stage B also asked the desktop adapter (R21 PR-C) to repeat a short check in the app itself, with the real `DesktopProfile` wired: a Codex thread reads one rendered `SKILL.md` named in its index with no approval prompt, and the skills folder is unchanged after the turn. It runs by hand on the Mac mini (and on Windows), so PR-C lists it as pending until it passes.
+Stage B also asked the desktop adapter (R21 PR-C) to repeat a short check in the app itself, with the real `DesktopProfile` wired: a Codex thread reads one rendered `SKILL.md` named in its index with no approval prompt, and the skills folder is unchanged after the turn. It runs by hand: on macOS before PR-C merges; on Windows after #296 (Codex's unelevated Windows sandbox key) merges, as a stage B follow-up recorded on PR-C (#278). A Windows failure is a bug against PR-C or #296, not a revert.
 
 ### The data folder is fixed for the app's run
 
