@@ -21,7 +21,7 @@ import { useHasOlder, useQuestionWords } from "./live.ts";
 import { useJumpLanding, useJumpOrder } from "./jump-entry.ts";
 import { useOlder } from "./older.ts";
 import { RowOf } from "./row-of.tsx";
-import { SourcesTransport } from "./sources.ts";
+import { SourcesTransport, toolCallsPick } from "./sources.ts";
 import { WebSources } from "./sources.tsx";
 import { SteerNotesOf } from "./steer-rows.tsx";
 import { LiveAnswerRows } from "./step-groups.tsx";
@@ -128,7 +128,8 @@ const USER = "user_message:";
 const TOOL = "tool_call:";
 
 /** The web sources of an exchange's turn (sources.tsx): what its tool calls found, by their ids in order, with the
- * thread's agent from its header. */
+ * thread's agent from its header. Its tool call ids are taken once per id list, and an exchange with none draws and
+ * subscribes to nothing. */
 function ExchangeSources({
   ids,
   stream,
@@ -138,16 +139,21 @@ function ExchangeSources({
   stream: StreamId;
   paged: ReadonlyMap<EntryId, ViewEntry>;
 }) {
+  const tools = useMemo(() => ids.filter((id) => id.startsWith(TOOL)), [ids]);
+  return tools.length === 0 ? null : <ToolSources tools={tools} stream={stream} paged={paged} />;
+}
+
+function ToolSources({
+  tools,
+  stream,
+  paged,
+}: {
+  tools: readonly EntryId[];
+  stream: StreamId;
+  paged: ReadonlyMap<EntryId, ViewEntry>;
+}) {
   // one string, so a flush that leaves the tool calls as they were renders nothing
-  const pick = useMemo(
-    () => (v: StreamView | undefined) =>
-      ids
-        .filter((id) => id.startsWith(TOOL))
-        .map((id) => (paged.get(id) ?? v?.entries.get(id))?.tool_call?.tool_call)
-        .filter((call) => call !== undefined)
-        .join("\n"),
-    [ids, paged],
-  );
+  const pick = useMemo(() => toolCallsPick(tools, paged), [tools, paged]);
   const joined = useStreamPart(useViewStore(), stream, pick);
   const calls = useMemo(() => (joined === "" ? [] : joined.split("\n")), [joined]);
   const agent = useStreamPart(useViewStore(), stream, pickAgent);
