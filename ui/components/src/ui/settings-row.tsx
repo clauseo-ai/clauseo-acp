@@ -18,6 +18,7 @@ export function SettingRow({
   checked,
   onCheckedChange,
   disabled = false,
+  managed,
   className,
 }: {
   control: "switch" | "checkbox";
@@ -26,6 +27,8 @@ export function SettingRow({
   checked: boolean;
   onCheckedChange: (checked: boolean) => void;
   disabled?: boolean;
+  /** Optional: a further line under the note that describes the control too, such as who manages a locked one. */
+  managed?: string | undefined;
   className?: string;
 }) {
   const props = { checked, onCheckedChange, disabled };
@@ -50,6 +53,11 @@ export function SettingRow({
         <Field.Description className={settingNote}>
           <Mixed>{note}</Mixed>
         </Field.Description>
+        {managed !== undefined && (
+          <Field.Description className={settingNote} data-testid="managed">
+            <Mixed>{managed}</Mixed>
+          </Field.Description>
+        )}
       </div>
       {control === "switch" && <Switch {...props} />}
     </Field.Root>

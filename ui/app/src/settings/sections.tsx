@@ -9,11 +9,12 @@ import {
   IconAppearance,
   IconLanguage,
   IconPlanLimit,
+  IconWebsite,
 } from "@clauseo/components/icons/icons.tsx";
 import type { Display, Lang } from "@clauseo/components/lib/display.ts";
 import { LANGUAGE_NAMES, st, type SettingsKey } from "@clauseo/components/lib/words-settings.ts";
 import type { DisplayStore } from "../room/display-store.ts";
-import type { UiSettings } from "../room/host-next.ts";
+import type { ToolSettings, UiSettings } from "../room/host-next.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import type { LimitsView } from "../transport/protocol.ts";
 import { APP_VERSION } from "./version.ts";
@@ -21,6 +22,7 @@ import { lockKey, type LiveSettings } from "./use-settings.ts";
 import { About } from "./sections/about.tsx";
 import { Appearance } from "./sections/appearance.tsx";
 import { Language } from "./sections/language.tsx";
+import { Privacy } from "./sections/privacy.tsx";
 import { Usage } from "./sections/usage.tsx";
 import { usageNote } from "./sections/usage-note.ts";
 
@@ -55,6 +57,10 @@ export type SectionContext = {
   locked: (key: keyof UiSettings) => boolean;
   /** The lawyer's choice: one patch to the store, unless the key is locked or already holds the value. */
   choose: <K extends keyof UiSettings>(key: K, value: UiSettings[K]) => void;
+  /** Whether a firm's policy locks a tool's switch (`tools.web_search`, `tools.browser`). */
+  toolLocked: (key: keyof ToolSettings) => boolean;
+  /** The lawyer's choice of a tool's switch: one patch, unless the key is locked or already holds the value. */
+  chooseTool: (key: keyof ToolSettings, value: boolean) => void;
 };
 
 export type SectionEntry = {
@@ -103,6 +109,13 @@ export const SECTIONS: readonly SectionEntry[] = [
     Body: Appearance,
   },
   {
+    id: "privacy",
+    name: "Privacy",
+    icon: IconWebsite,
+    lead: "What leaves this computer, and who sees it.",
+    Body: Privacy,
+  },
+  {
     id: "about",
     name: "About",
     icon: IconAbout,
@@ -121,6 +134,7 @@ export function contextOf(
   releaseDate: string | null = null,
 ): SectionContext {
   const locked = (key: keyof UiSettings) => settings.locked.includes(lockKey(key));
+  const toolLocked = (key: keyof ToolSettings) => settings.locked.includes(`tools.${key}`);
   return {
     store,
     transport,
@@ -132,6 +146,11 @@ export function contextOf(
     choose: (key, value) => {
       if (locked(key) || settings.ui[key] === value) return;
       store.set({ [key]: value });
+    },
+    toolLocked,
+    chooseTool: (key, value) => {
+      if (toolLocked(key) || settings.tools === undefined || settings.tools[key] === value) return;
+      store.setTools({ [key]: value });
     },
   };
 }
