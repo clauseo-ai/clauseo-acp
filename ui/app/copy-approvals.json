@@ -1608,5 +1608,159 @@
     "at": "2026-11-02",
     "by": "Rohan",
     "note": "Rohan, in the PR #185 design review: fits every locked row"
+  },
+  "U12-01": {
+    "en": "Plenty left until the {time} reset",
+    "hi": "{time} बजे के रीसेट तक काफ़ी बाकी है",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-02": {
+    "en": "Under half left. Resets at {time}.",
+    "hi": "आधे से कम बाकी। {time} बजे रीसेट।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-03": {
+    "en": "Close to the limit. Resets at {time}.",
+    "hi": "सीमा के करीब। {time} बजे रीसेट होगा।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-07": {
+    "en": "Usage not shown right now",
+    "hi": "अभी उपयोग नहीं दिख रहा",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-08": {
+    "en": "{name}, pay as you go",
+    "hi": "{name}, उपयोग के अनुसार भुगतान",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-09": {
+    "en": "Billed to your Anthropic account",
+    "hi": "आपके Anthropic खाते में शुल्क लगता है",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-10": {
+    "en": "{n} percent of the plan left",
+    "hi": "प्लान का {n} प्रतिशत बाकी है",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-11": {
+    "en": "Show the plan's limits",
+    "hi": "प्लान की सीमाएँ दिखाएँ",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-12": {
+    "en": "5-hour limit",
+    "hi": "5 घंटे की सीमा",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-13": {
+    "en": "Weekly limit",
+    "hi": "साप्ताहिक सीमा",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-19": {
+    "en": "{n}% left",
+    "hi": "{n}% बाकी",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-20": {
+    "en": "As of {time}",
+    "hi": "{time} बजे के आँकड़े",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-21": {
+    "en": "Usage isn't available right now.",
+    "hi": "अभी उपयोग की जानकारी उपलब्ध नहीं है।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-23": {
+    "en": "Pay as you go, billed to your Anthropic account",
+    "hi": "उपयोग के अनुसार भुगतान, आपके Anthropic खाते में शुल्क लगता है",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-32": {
+    "en": "The weekly limit. It resets on {day} at {time}.",
+    "hi": "साप्ताहिक सीमा। यह {day} को {time} बजे रीसेट होगी।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-33": {
+    "en": "Stopped here at {time}",
+    "hi": "{time} बजे यहाँ रुका",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-35": {
+    "en": "Stopped at {time}, at the plan's limit",
+    "hi": "{time} बजे, प्लान की सीमा पर रुका",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-37": {
+    "en": "Plan and usage",
+    "hi": "प्लान और उपयोग",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-38": {
+    "en": "{n}% of the 5-hour limit left",
+    "hi": "5 घंटे की सीमा का {n}% बाकी",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-39": {
+    "en": "Pay as you go",
+    "hi": "उपयोग के अनुसार भुगतान",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-41": {
+    "en": "Updated at {time}",
+    "hi": "{time} बजे अपडेट किया गया",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-42": {
+    "en": "No limits to show. Each question is billed to the key's account.",
+    "hi": "दिखाने को कोई सीमा नहीं। हर प्रश्न का शुल्क उसी key के खाते पर लगता है।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
   }
 }

@@ -4,6 +4,8 @@ import type { Lang } from "@clauseo/components/lib/display.ts";
 import { errorSentence, type ErrorKey } from "@clauseo/components/lib/words-errors.ts";
 import { frame, type FrameKey } from "@clauseo/components/lib/words-frame.ts";
 import { lim, type LimitKey } from "@clauseo/components/lib/words-limits.ts";
+import { limThread, type LimitThreadKey } from "@clauseo/components/lib/words-limits-thread.ts";
+import { pc, type PlanCardKey } from "@clauseo/components/lib/words-plan-card.ts";
 import { mf, type MatterFormKey } from "@clauseo/components/lib/words-matter-form.ts";
 import { mt, type MatterKey } from "@clauseo/components/lib/words-matters.ts";
 import { rt, type RoomKey } from "@clauseo/components/lib/words-room.ts";
@@ -59,6 +61,20 @@ export const limitWords = (key: LimitKey): WordsRef => ({
   file: "lib/words-limits.ts",
   key,
   text: (lang) => lim(lang, key),
+});
+
+/** A string of the limit the open thread brings (words-limits-thread.ts): the stop, the composer's warning. */
+export const limitThreadWords = (key: LimitThreadKey): WordsRef => ({
+  file: "lib/words-limits-thread.ts",
+  key,
+  text: (lang) => limThread(lang, key),
+});
+
+/** A string of the plan's card (words-plan-card.ts). */
+export const planCardWords = (key: PlanCardKey): WordsRef => ({
+  file: "lib/words-plan-card.ts",
+  key,
+  text: (lang) => pc(lang, key),
 });
 
 /** An error sentence of words-errors.ts. The one sentence it shares with words-thread.ts is that file's, and is
