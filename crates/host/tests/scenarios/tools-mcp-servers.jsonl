@@ -2,7 +2,7 @@
 {"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
 {"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
 {"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}","mcpServers":[{"name":"alpha","command":"{{any}}","args":["--stdio"],"env":[{"name":"REGION","value":"uk"}]},{"name":"gamma","command":"{{any}}","args":[],"env":[]},{"name":"browser","command":"{{any}}","args":["browser-guard","--agent-browser","/app/agent-browser","--cwd","{{any}}","--","mcp","--tools","core"],"env":[{"name":"AGENT_BROWSER_CONFIG","value":"/cfg/agent-browser.json"},{"name":"AGENT_BROWSER_PROXY","value":"http://127.0.0.1:8123"},{"name":"AGENT_BROWSER_SESSION","value":"{{any}}"},{"name":"AGENT_BROWSER_EXECUTABLE_PATH","value":"/chrome"}]}]},"off":["/mcpServers/0/type","/mcpServers/1/type","/mcpServers/2/type"]}}
-{"respond":{"to":"new","result":{"sessionId":"sess-1"}}}
+{"note":"claude-agent-acp 0.89.1 answers with its modes, in default (common/claude-handshake.jsonl), as a Claude launch requires","respond":{"to":"new","result":{"sessionId":"sess-1","modes":{"currentModeId":"default","availableModes":[{"id":"default","name":"Manual"},{"id":"acceptEdits","name":"Accept edits"},{"id":"plan","name":"Plan"},{"id":"auto","name":"Auto"}]}}}}
 {"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
 {"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"First answer."}}}}
 {"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
