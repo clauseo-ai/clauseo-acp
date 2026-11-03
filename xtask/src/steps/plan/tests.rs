@@ -138,7 +138,7 @@ fn expected_names(package: [&str; 5], ui: [&str; 8]) -> Vec<String> {
 #[test]
 fn an_empty_package_list_is_nothing_and_skips_every_package_step() {
     assert_eq!(Scope::packages(vec![]), Scope::Nothing);
-    let steps = plan(&Scope::Nothing, false, None, true);
+    let steps = plan(&Scope::Nothing, false, None, true, false);
     assert_eq!(
         step_names(&steps),
         expected_names(
@@ -167,7 +167,7 @@ fn an_empty_package_list_is_nothing_and_skips_every_package_step() {
 #[test]
 fn plan_runs_every_step_in_order_for_the_workspace() {
     assert_eq!(
-        step_names(&plan(&Scope::Workspace, false, None, true)),
+        step_names(&plan(&Scope::Workspace, false, None, true, false)),
         expected_names(PACKAGE, UI)
     );
 }
@@ -175,7 +175,13 @@ fn plan_runs_every_step_in_order_for_the_workspace() {
 #[test]
 fn plan_commands_for_the_workspace_in_both_modes() {
     assert_eq!(
-        tool_commands(&plan(&Scope::Workspace, false, Some("abc..HEAD"), true)),
+        tool_commands(&plan(
+            &Scope::Workspace,
+            false,
+            Some("abc..HEAD"),
+            true,
+            false
+        )),
         [
             "cargo fmt --all -- --check",
             "cargo clippy --workspace --all-targets --all-features --message-format=json-diagnostic-short",
@@ -198,7 +204,7 @@ fn plan_commands_for_the_workspace_in_both_modes() {
             "cargo test -p clauseo-protocol --doc --all-features",
         ]
     );
-    let ci = plan(&Scope::Workspace, true, Some("abc..HEAD"), true);
+    let ci = plan(&Scope::Workspace, true, Some("abc..HEAD"), true, false);
     assert_eq!(
         tool(&ci, "clippy-featureless").cmd.to_string(),
         "cargo clippy -p clauseo-protocol --all-targets --message-format=json-diagnostic-short -- -D warnings"
@@ -219,7 +225,7 @@ fn plan_commands_for_the_workspace_in_both_modes() {
 
 #[test]
 fn the_ui_steps_run_in_order_after_the_static_checks_and_before_nextest() {
-    let steps = plan(&Scope::Workspace, false, None, true);
+    let steps = plan(&Scope::Workspace, false, None, true, false);
     let names = step_names(&steps);
     let first = names.iter().position(|name| name == "pnpm-install");
     let last = names.iter().position(|name| name == "vite-build");
@@ -233,7 +239,7 @@ fn the_ui_steps_run_in_order_after_the_static_checks_and_before_nextest() {
 
 #[test]
 fn without_pnpm_locally_the_ui_steps_are_skipped_with_the_note() {
-    let steps = plan(&Scope::Workspace, false, None, false);
+    let steps = plan(&Scope::Workspace, false, None, false, false);
     assert_eq!(step_names(&steps), expected_names(PACKAGE, UI_SKIPPED));
     let ui_reasons: Vec<(&str, &str)> = skip_reasons(&steps)
         .into_iter()
@@ -249,7 +255,7 @@ fn without_pnpm_locally_the_ui_steps_are_skipped_with_the_note() {
 
 #[test]
 fn in_ci_the_ui_steps_run_even_without_pnpm() {
-    let steps = plan(&Scope::Workspace, true, None, false);
+    let steps = plan(&Scope::Workspace, true, None, false, false);
     assert_eq!(step_names(&steps), expected_names(PACKAGE, UI));
     assert_eq!(
         commands_named(&steps, &UI),
@@ -270,7 +276,7 @@ fn in_ci_the_ui_steps_run_even_without_pnpm() {
 fn clippy_command_for_named_packages() {
     let scope = Scope::packages(vec!["a".into(), "b".into()]);
     assert_eq!(
-        tool(&plan(&scope, false, None, true), "clippy")
+        tool(&plan(&scope, false, None, true, false), "clippy")
             .cmd
             .to_string(),
         "cargo clippy -p a -p b --all-targets --all-features --message-format=json-diagnostic-short"
@@ -280,7 +286,7 @@ fn clippy_command_for_named_packages() {
 #[test]
 fn clippy_repro_narrows_to_the_owning_package_in_ci() {
     let members = vec![member("xtask", "xtask")];
-    let steps = plan(&Scope::Workspace, true, None, true);
+    let steps = plan(&Scope::Workspace, true, None, true, false);
     let clippy = tool(&steps, "clippy");
     let output = "xtask/src/main.rs:4:9: error: unused variable: `unused`\n";
     let findings = (clippy.parse)(output, &context(members), &clippy.cmd);
@@ -300,6 +306,7 @@ fn clippy_repro_narrows_to_the_owning_package_without_ci() {
         false,
         None,
         true,
+        false,
     );
     let clippy = tool(&steps, "clippy");
     let output = "crates/a/src/lib.rs:1:1: warning: unused import\n";
@@ -319,6 +326,7 @@ fn clippy_keeps_the_selectors_when_no_package_owns_the_file() {
         false,
         None,
         true,
+        false,
     );
     let clippy = tool(&steps, "clippy");
     let output = "docs/x.md:3:1: warning: stray text\n";
@@ -332,7 +340,7 @@ fn clippy_keeps_the_selectors_when_no_package_owns_the_file() {
 
 #[test]
 fn the_specta_run_follows_the_featureless_run_and_fails_when_no_test_runs() {
-    let steps = plan(&Scope::Workspace, false, None, true);
+    let steps = plan(&Scope::Workspace, false, None, true, false);
     let names = step_names(&steps);
     let Some(at) = names.iter().position(|name| name == "nextest") else {
         panic!("the plan has a nextest step: {names:?}");
@@ -348,7 +356,7 @@ fn the_specta_run_follows_the_featureless_run_and_fails_when_no_test_runs() {
 
 #[test]
 fn the_specta_run_selects_its_two_targets_through_cargo_not_a_filter() {
-    let steps = plan(&Scope::Workspace, false, None, true);
+    let steps = plan(&Scope::Workspace, false, None, true, false);
     let args = tool(&steps, SPECTA_NAME).cmd.to_string();
     assert_eq!(
         args,
@@ -359,9 +367,21 @@ fn the_specta_run_selects_its_two_targets_through_cargo_not_a_filter() {
 
 #[test]
 fn the_featureless_clippy_is_scoped_to_protocol() {
-    let scoped = plan(&Scope::packages(vec![PROTOCOL.into()]), false, None, true);
+    let scoped = plan(
+        &Scope::packages(vec![PROTOCOL.into()]),
+        false,
+        None,
+        true,
+        false,
+    );
     tool(&scoped, FEATURELESS_CLIPPY_NAME);
-    let other = plan(&Scope::packages(vec!["xtask".into()]), false, None, true);
+    let other = plan(
+        &Scope::packages(vec!["xtask".into()]),
+        false,
+        None,
+        true,
+        false,
+    );
     let reasons: Vec<(&str, &str)> = skip_reasons(&other)
         .into_iter()
         .filter(|(name, _)| *name == FEATURELESS_CLIPPY_NAME)
@@ -373,7 +393,7 @@ fn the_featureless_clippy_is_scoped_to_protocol() {
 fn the_featureless_clippy_reproduce_line_drops_all_features() {
     let members = vec![member("clauseo-protocol", "crates/protocol")];
     let output = "crates/protocol/src/number.rs:4:5: error: unused import: `PhantomData`\n";
-    let steps = plan(&Scope::Workspace, true, None, true);
+    let steps = plan(&Scope::Workspace, true, None, true, false);
     let clippy = tool(&steps, FEATURELESS_CLIPPY_NAME);
     let findings = (clippy.parse)(output, &context(members.clone()), &clippy.cmd);
     assert_eq!(findings.len(), 1);
@@ -382,7 +402,7 @@ fn the_featureless_clippy_reproduce_line_drops_all_features() {
         findings[0].violation.fix.to_string(),
         "`cargo clippy -p clauseo-protocol --all-targets -- -D warnings` shows the full diagnostic and clippy's suggested change"
     );
-    let steps = plan(&Scope::Workspace, false, None, true);
+    let steps = plan(&Scope::Workspace, false, None, true, false);
     let clippy = tool(&steps, FEATURELESS_CLIPPY_NAME);
     let findings = (clippy.parse)(output, &context(members), &clippy.cmd);
     assert_eq!(
@@ -394,7 +414,7 @@ fn the_featureless_clippy_reproduce_line_drops_all_features() {
 #[test]
 fn the_featureless_clippy_denies_warnings_only_in_ci_like_the_main_clippy() {
     const DENY: &str = " -- -D warnings";
-    let ci = plan(&Scope::Workspace, true, None, true);
+    let ci = plan(&Scope::Workspace, true, None, true, false);
     assert!(
         tool(&ci, FEATURELESS_CLIPPY_NAME)
             .cmd
@@ -402,7 +422,7 @@ fn the_featureless_clippy_denies_warnings_only_in_ci_like_the_main_clippy() {
             .ends_with(DENY)
     );
     assert!(tool(&ci, "clippy").cmd.to_string().ends_with(DENY));
-    let local = plan(&Scope::Workspace, false, None, true);
+    let local = plan(&Scope::Workspace, false, None, true, false);
     assert!(
         !tool(&local, FEATURELESS_CLIPPY_NAME)
             .cmd
@@ -419,9 +439,16 @@ fn the_specta_run_is_scoped_to_protocol() {
         false,
         None,
         true,
+        false,
     );
     tool(&scoped, SPECTA_NAME);
-    let other = plan(&Scope::packages(vec!["xtask".into()]), false, None, true);
+    let other = plan(
+        &Scope::packages(vec!["xtask".into()]),
+        false,
+        None,
+        true,
+        false,
+    );
     let reasons: Vec<(&str, &str)> = skip_reasons(&other)
         .into_iter()
         .filter(|(name, _)| *name == SPECTA_NAME)
@@ -433,7 +460,7 @@ fn the_specta_run_is_scoped_to_protocol() {
 /// the specta run, whenever the other protocol steps run, and are skipped exactly when they are.
 #[test]
 fn the_doc_tests_run_after_the_specta_run_and_are_scoped_to_protocol() {
-    let steps = plan(&Scope::Workspace, true, None, true);
+    let steps = plan(&Scope::Workspace, true, None, true, false);
     let names = step_names(&steps);
     assert_eq!(names.last().map(String::as_str), Some(DOCTEST_NAME));
     let doctest = tool(&steps, DOCTEST_NAME);
@@ -450,9 +477,16 @@ fn the_doc_tests_run_after_the_specta_run_and_are_scoped_to_protocol() {
         false,
         None,
         true,
+        false,
     );
     tool(&scoped, DOCTEST_NAME);
-    let other = plan(&Scope::packages(vec!["xtask".into()]), false, None, true);
+    let other = plan(
+        &Scope::packages(vec!["xtask".into()]),
+        false,
+        None,
+        true,
+        false,
+    );
     let reasons: Vec<(&str, &str)> = skip_reasons(&other)
         .into_iter()
         .filter(|(name, _)| [SPECTA_NAME, FEATURELESS_CLIPPY_NAME, DOCTEST_NAME].contains(name))
@@ -482,5 +516,53 @@ fn nextest_points_at_setup_when_the_subcommand_is_missing() {
     assert_eq!(
         setup_or_reproduce(&cmd, Some("1 test failed")),
         "run `cargo nextest run` to reproduce"
+    );
+}
+
+/// `--skip-ui` skips exactly the eight ui steps, with `--skip-ui` as the reason, in CI or not and
+/// with pnpm or without it; every other step is as the same plan without it.
+#[test]
+fn skip_ui_skips_exactly_the_ui_steps_in_every_mode() {
+    for ci in [false, true] {
+        for pnpm_found in [false, true] {
+            let steps = plan(&Scope::Workspace, ci, None, pnpm_found, true);
+            assert_eq!(
+                step_names(&steps),
+                expected_names(PACKAGE, UI_SKIPPED),
+                "ci={ci} pnpm_found={pnpm_found}"
+            );
+            assert_eq!(skip_reasons(&steps), UI.map(|name| (name, "--skip-ui")));
+            let without = plan(&Scope::Workspace, ci, None, pnpm_found, false);
+            let not_ui = |commands: Vec<String>| -> Vec<String> {
+                commands
+                    .into_iter()
+                    .filter(|cmd| !cmd.starts_with("pnpm"))
+                    .collect()
+            };
+            assert_eq!(tool_commands(&steps), not_ui(tool_commands(&without)));
+        }
+    }
+}
+
+/// With no package in scope, `--skip-ui` changes the ui steps only: the package steps keep their
+/// own reason.
+#[test]
+fn skip_ui_leaves_the_package_steps_to_the_scope() {
+    let steps = plan(&Scope::Nothing, true, None, true, true);
+    let reasons = skip_reasons(&steps);
+    assert_eq!(
+        reasons
+            .iter()
+            .filter(|(_, reason)| *reason == NO_PACKAGES)
+            .count(),
+        5
+    );
+    assert_eq!(
+        reasons
+            .iter()
+            .filter(|(_, reason)| *reason == SKIP_UI)
+            .map(|(name, _)| *name)
+            .collect::<Vec<_>>(),
+        UI
     );
 }

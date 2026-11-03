@@ -27,11 +27,13 @@ const BUILD_TIMEOUT: Duration = Duration::from_mins(45);
 /// clippy and nextest commands.
 /// `gitleaks_range` is the git range gitleaks scans (`<base>..HEAD`), or `None` for all history.
 /// `pnpm_found` says whether pnpm starts: without it, the ui steps are skipped unless `ci`.
+/// `skip_ui` (`check --skip-ui`) skips the eight ui steps whatever `ci` and `pnpm_found` say.
 pub(crate) fn plan(
     scope: &Scope,
     ci: bool,
     gitleaks_range: Option<&str>,
     pnpm_found: bool,
+    skip_ui: bool,
 ) -> Vec<Step> {
     let selectors = scope.selectors();
     let mut steps = vec![Step::Tool(fmt_step())];
@@ -53,7 +55,7 @@ pub(crate) fn plan(
         .map(Step::Tool),
     );
     steps.extend(checks::ALL.iter().map(Step::Static));
-    steps.extend(ui_steps(pnpm_found, ci));
+    steps.extend(ui_steps(pnpm_found, ci, skip_ui));
     steps.push(match &selectors {
         Some(selectors) => Step::Tool(nextest_step(selectors, ci)),
         None => skipped("nextest"),
@@ -99,12 +101,21 @@ fn protocol_step(scope: &Scope, name: &'static str, tool: impl FnOnce() -> ToolS
     }
 }
 
-/// The ui steps. Without pnpm they are skipped locally; in CI they run, and fail there.
-fn ui_steps(pnpm_found: bool, ci: bool) -> Vec<Step> {
+/// Why the ui steps are skipped under `check --skip-ui`: the summary prints `(skipped: --skip-ui)`.
+const SKIP_UI: &str = "--skip-ui";
+
+/// The ui steps. With `skip_ui` they are skipped, in CI too. Otherwise, without pnpm they are
+/// skipped locally; in CI they run, and fail there.
+fn ui_steps(pnpm_found: bool, ci: bool, skip_ui: bool) -> Vec<Step> {
     ui::steps()
         .into_iter()
         .map(|tool| {
-            if pnpm_found || ci {
+            if skip_ui {
+                Step::Skipped {
+                    name: tool.name,
+                    reason: SKIP_UI,
+                }
+            } else if pnpm_found || ci {
                 Step::Tool(tool)
             } else {
                 Step::Skipped {

@@ -39,13 +39,50 @@ const DOC_OWNERS: &[(&str, &str)] = &[
     ("docs/decisions/0003-error-codes.md", "clauseo-protocol"),
 ];
 
-/// Pure selection: `changed` are repo-relative `/`-separated paths.
+/// Packages whose binary other packages' tests run, so a selection with one of those packages
+/// needs it too: cargo builds a package's `[[bin]]` for its integration tests, so only when the
+/// package itself is selected. `clauseo-fake_agent` is the scripted agent; a test that runs it
+/// without the binary built fails with "no such file".
+const TEST_BINARY_PACKAGES: &[&str] = &["clauseo-fake_agent"];
+
+/// Pure selection: `changed` are repo-relative `/`-separated paths. The changed packages, their
+/// dependents, and the packages `built_for_tests` adds for them.
 pub(crate) fn select(changed: &[String], members: &[Member]) -> Selection {
     for file in changed {
         if ALL_PACKAGES_FILES.contains(&file.as_str()) || file.starts_with(ALL_PACKAGES_DIR) {
             return Selection::All(format!("{file} changed"));
         }
     }
+    let mut selected = with_dependents(changed, members);
+    selected.extend(built_for_tests(&selected, members));
+    Selection::Packages(selected.into_iter().collect())
+}
+
+/// The members in `TEST_BINARY_PACKAGES` that `selected` lacks and a selected member depends on
+/// (a normal or dev-dependency), sorted: the quick selection adds them so their binaries are built
+/// for the tests that run them.
+pub(crate) fn built_for_tests(selected: &BTreeSet<String>, members: &[Member]) -> Vec<String> {
+    TEST_BINARY_PACKAGES
+        .iter()
+        .filter(|binary| !selected.contains(**binary))
+        .filter(|binary| members.iter().any(|member| member.name == **binary))
+        .filter(|binary| {
+            members
+                .iter()
+                .filter(|member| selected.contains(&member.name))
+                .flat_map(|member| &member.dependencies.dependencies)
+                .any(|dep| {
+                    dep.name == **binary
+                        && matches!(dep.kind.as_deref(), None | Some("normal" | "dev"))
+                })
+        })
+        .map(|binary| (*binary).to_owned())
+        .collect()
+}
+
+/// The members that own a changed file (`direct_members`) and every member that depends on one
+/// of them through path dependencies, transitively.
+pub(crate) fn with_dependents(changed: &[String], members: &[Member]) -> BTreeSet<String> {
     let mut selected: BTreeSet<String> = direct_members(changed, members).into_iter().collect();
     loop {
         let before = selected.len();
@@ -63,7 +100,7 @@ pub(crate) fn select(changed: &[String], members: &[Member]) -> Selection {
             break;
         }
     }
-    Selection::Packages(selected.into_iter().collect())
+    selected
 }
 
 /// Names of the members that own at least one changed file (before dependents are added). A

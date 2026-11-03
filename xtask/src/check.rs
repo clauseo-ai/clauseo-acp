@@ -11,12 +11,14 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 /// Runs the whole check on `ctx`: `quick` limits clippy and nextest to changed packages, `ci` is
-/// the CI mode, every tool command goes through `exec` and the pnpm probe through `quiet`.
+/// the CI mode, `skip_ui` skips the ui steps (`--skip-ui`), every tool command goes through
+/// `exec` and the pnpm probe through `quiet`. With `skip_ui` pnpm is not probed.
 /// `main.rs` passes the real runners, `process::capture` and `process::run_quiet`.
 pub(crate) fn run(
     ctx: &Context,
     quick: bool,
     ci: bool,
+    skip_ui: bool,
     exec: &mut Exec<'_>,
     quiet: &mut QuietRunner<'_>,
 ) -> ExitCode {
@@ -36,7 +38,8 @@ pub(crate) fn run(
         &scope,
         ci,
         range.as_deref(),
-        ci || pnpm_found(&ctx.root, quiet),
+        !skip_ui && (ci || pnpm_found(&ctx.root, quiet)),
+        skip_ui,
     );
     let results = steps::run_all(steps, ctx, &mut out, exec);
     out.summary(&results);
@@ -103,13 +106,20 @@ fn quick_scope<W: Write>(
                 out.note("quick: no changed packages");
             } else {
                 let direct = changes::direct_members(&files, members);
+                let built =
+                    changes::built_for_tests(&changes::with_dependents(&files, members), members);
                 let dependents: Vec<String> = names
                     .iter()
-                    .filter(|name| !direct.contains(name))
+                    .filter(|name| !direct.contains(name) && !built.contains(name))
                     .cloned()
                     .collect();
+                let built_segment = if built.is_empty() {
+                    String::new()
+                } else {
+                    format!("; built for their tests: {}", built.join(", "))
+                };
                 out.note(format!(
-                    "quick: packages {} (changed: {}; dependents: {})",
+                    "quick: packages {} (changed: {}; dependents: {}{built_segment})",
                     names.join(", "),
                     list_or_none(&direct),
                     list_or_none(&dependents),
@@ -146,7 +156,7 @@ mod tests {
     use super::*;
     use crate::process::Ran;
     use crate::scratch::Scratch;
-    use crate::workspace::{Context, Member, PackageDependencies};
+    use crate::workspace::{CargoDependency, Context, Member, PackageDependencies};
     use std::cell::RefCell;
     use std::io;
 
@@ -189,7 +199,7 @@ mod tests {
             Ok(Ran::exited(true, "9.15.0\n", String::new()))
         };
         assert_eq!(
-            run(&ctx, false, false, &mut exec, &mut quiet),
+            run(&ctx, false, false, false, &mut exec, &mut quiet),
             ExitCode::FAILURE
         );
         assert!(ran.borrow().iter().any(|cmd| cmd.starts_with("cargo fmt")));
@@ -203,7 +213,7 @@ mod tests {
         let mut quiet = |_: &Cmd, _: &Path| -> io::Result<Ran> {
             Ok(Ran::exited(true, "9.15.0\n", String::new()))
         };
-        run(&ctx, false, false, &mut exec, &mut quiet);
+        run(&ctx, false, false, false, &mut exec, &mut quiet);
         assert!(ran.borrow().iter().any(|cmd| cmd.starts_with("pnpm")));
     }
 
@@ -215,7 +225,7 @@ mod tests {
         let mut quiet = |_: &Cmd, _: &Path| -> io::Result<Ran> {
             Err(io::Error::from(io::ErrorKind::NotFound))
         };
-        run(&ctx, false, false, &mut exec, &mut quiet);
+        run(&ctx, false, false, false, &mut exec, &mut quiet);
         assert!(!ran.borrow().iter().any(|cmd| cmd.starts_with("pnpm")));
     }
 
@@ -229,9 +239,27 @@ mod tests {
             *probes.borrow_mut() += 1;
             Err(io::Error::from(io::ErrorKind::NotFound))
         };
-        run(&ctx, false, true, &mut exec, &mut quiet);
+        run(&ctx, false, true, false, &mut exec, &mut quiet);
         assert_eq!(*probes.borrow(), 0);
         assert!(ran.borrow().iter().any(|cmd| cmd.starts_with("pnpm")));
+    }
+
+    #[test]
+    fn skip_ui_runs_no_ui_step_and_probes_for_no_pnpm_in_ci_or_locally() {
+        for ci in [false, true] {
+            let (_root, ctx) = scratch_context("check-run-skip-ui");
+            let ran = RefCell::new(Vec::new());
+            let mut exec = |cmd: &Cmd, _: &mut dyn FnMut(&[u8])| Ok(record_and_fail(&ran, cmd));
+            let probes = RefCell::new(0);
+            let mut quiet = |_: &Cmd, _: &Path| -> io::Result<Ran> {
+                *probes.borrow_mut() += 1;
+                Ok(Ran::exited(true, "9.15.0\n", String::new()))
+            };
+            run(&ctx, false, ci, true, &mut exec, &mut quiet);
+            assert_eq!(*probes.borrow(), 0, "ci={ci}");
+            assert!(!ran.borrow().iter().any(|cmd| cmd.starts_with("pnpm")));
+            assert!(ran.borrow().iter().any(|cmd| cmd.starts_with("cargo fmt")));
+        }
     }
 
     /// A member at `dir` that depends on the members whose directories are `path_deps`.
@@ -279,6 +307,65 @@ mod tests {
         assert_eq!(
             printed(out),
             "quick: packages app (changed: app; dependents: none)\n"
+        );
+    }
+
+    /// `core` and `app`, with `clauseo-fake_agent`, whose binary `app`'s tests run (a
+    /// dev-dependency).
+    fn core_app_and_fake_agent() -> Vec<Member> {
+        let mut app = member("app", "crates/app", &["crates/core", "crates/fake_agent"]);
+        app.dependencies.dependencies.push(CargoDependency {
+            name: "clauseo-fake_agent".into(),
+            rename: None,
+            kind: Some("dev".into()),
+            target: None,
+            optional: false,
+            features: Vec::new(),
+            path: Some("/ws/crates/fake_agent".into()),
+            req: "*".into(),
+            source: None,
+        });
+        vec![
+            member("core", "crates/core", &[]),
+            app,
+            member("clauseo-fake_agent", "crates/fake_agent", &[]),
+        ]
+    }
+
+    #[test]
+    fn a_quick_check_names_fake_agent_as_built_for_the_tests_that_run_it() {
+        let (_root, mut ctx) = scratch_context("check-quick-fake-agent");
+        ctx.members = Ok(core_app_and_fake_agent());
+        let mut out = Printer::new(Vec::<u8>::new(), false);
+        let scope = quick_scope(&mut out, &ctx, Ok(vec!["crates/core/src/lib.rs".into()]));
+        assert_eq!(
+            printed(out),
+            "quick: packages app, clauseo-fake_agent, core (changed: core; dependents: app; \
+             built for their tests: clauseo-fake_agent)\n"
+        );
+        assert_eq!(
+            scope,
+            Scope::packages(vec![
+                "app".into(),
+                "clauseo-fake_agent".into(),
+                "core".into()
+            ])
+        );
+    }
+
+    #[test]
+    fn a_quick_check_of_a_fake_agent_change_names_it_as_changed_only() {
+        let (_root, mut ctx) = scratch_context("check-quick-fake-agent-changed");
+        ctx.members = Ok(core_app_and_fake_agent());
+        let mut out = Printer::new(Vec::<u8>::new(), false);
+        quick_scope(
+            &mut out,
+            &ctx,
+            Ok(vec!["crates/fake_agent/src/main.rs".into()]),
+        );
+        assert_eq!(
+            printed(out),
+            "quick: packages app, clauseo-fake_agent (changed: clauseo-fake_agent; dependents: app)\n"
         );
     }
 
