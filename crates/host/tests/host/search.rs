@@ -361,7 +361,22 @@ fn a_garbled_cursor_gives_the_first_page() {
     let dir = files_dir("search_cursor");
     let host = dir.start(0);
     one_turn(&dir, &host);
-    let first = poll(&host, &request("brief ", 0), |p| p.hits.len() >= 2);
+    // The index follows commits on its own thread, and the answer row lands only once the turn
+    // has ended, so a page with two hits can come before the rest. "brief " matches three rows
+    // once the index has settled: brief.txt (the import's file name), "Edit brief.txt" (the tool
+    // call's title) and the answer, which says "edited the brief". Wait for all three and for the
+    // rebuild to finish, so the garbled cursors are compared with a settled first page.
+    let first = poll(&host, &request("brief ", 0), |p| {
+        p.indexing.is_none()
+            && p.hits.len() == 3
+            && [
+                SearchKind::FileName,
+                SearchKind::ToolTitle,
+                SearchKind::Answer,
+            ]
+            .iter()
+            .all(|kind| !of_kind(p, *kind).is_empty())
+    });
     for cursor in ["not a cursor", "AAAA", ""] {
         let garbled = SearchRequest {
             cursor: Some(cursor.to_owned()),
