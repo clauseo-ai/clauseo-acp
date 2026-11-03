@@ -3,6 +3,21 @@ use std::path::Path;
 
 use super::{DARWIN_NO_FULL_FLUSH, settle_full_flush};
 
+/// Windows: `FlushFileBuffers` needs write access, which is why `write::open_to_sync` opens
+/// for writing there; a file opened read-only is refused, not passed as synced.
+#[cfg(windows)]
+#[test]
+fn syncing_a_file_opened_read_only_is_refused() {
+    let dir = crate::test_dir::TestDir::new("fsync-read-only");
+    let file = dir.path().join("a.txt");
+    drop(crate::write::create_new(&file).unwrap());
+    let read_only = std::fs::File::open(&file).unwrap();
+    let err = super::sync_file(&read_only).unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::PermissionDenied, "{err}");
+    drop(read_only);
+    super::sync_file(&crate::write::open_to_sync(&file).unwrap()).unwrap();
+}
+
 #[test]
 fn a_file_system_without_full_flush_settles_for_the_folder_syncs() {
     let dir = Path::new("/matter");

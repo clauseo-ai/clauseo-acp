@@ -43,3 +43,18 @@ fn hide_dir_sets_hidden_and_keeps_readonly() {
     // Writable again, so the test folder can be removed.
     super::windows::set_attributes(&target, attributes & !READONLY).unwrap();
 }
+
+/// Windows: staging into a folder that is not there fails as "not found" at once, not as
+/// "already exists" after trying every temp name.
+#[cfg(windows)]
+#[test]
+fn staging_into_a_missing_folder_fails_as_not_found() {
+    let dir = crate::test_dir::TestDir::new("write-stage-missing");
+    let target = dir.path().join("missing").join("a.txt");
+    let result = super::stage(&target, &mut |_| Ok(()));
+    assert!(
+        matches!(&result, Err(crate::Error::Io { source, .. })
+            if source.kind() == std::io::ErrorKind::NotFound),
+        "{result:?}"
+    );
+}
