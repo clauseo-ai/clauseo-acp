@@ -9,9 +9,11 @@ import type { Lang } from "./display.ts";
 import { wordsOf, type Hindi, type Slots } from "./words-core.ts";
 
 const HI = {
-  // the folded line: how many rows the open list has, the singular apart
+  // the folded line: how many distinct pages its searches listed and it read, the singular apart
   "1 source": null,
   "{n} sources": null,
+  // the folded line's name when its searches list no page, so it has no count
+  Searches: null,
   // a search: its query, quoted, after the search glyph; its results nested under it
   "'{query}'": null,
   "No results": null,
@@ -29,7 +31,7 @@ export type SourcesKey = keyof typeof HI;
 /** A string of the web sources in the language, its slots filled. */
 export const src = wordsOf<SourcesKey>(HI);
 
-/** The summary line: how many rows the open list has, "3 sources" or "1 source". */
+/** The summary line: how many distinct pages, "3 sources" or "1 source". */
 export function sourcesSummary(lang: Lang, rows: number): string {
   return rows === 1 ? src(lang, "1 source") : src(lang, "{n} sources", { n: rows });
 }

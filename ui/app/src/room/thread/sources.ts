@@ -26,6 +26,7 @@ import type {
   WebSearchRecorded,
 } from "../../transport/protocol.ts";
 import { LINK_PREFIXES } from "@clauseo/components/markdown/schema.ts";
+import { siteHost } from "@clauseo/components/clauseo/site-host.ts";
 
 /**
  * What a tool call found on the web, the shape the host is planned to give `ToolCallEntry` as `web` (stage E folds
@@ -186,3 +187,23 @@ export const linkable = (url: string): boolean => {
   const lower = url.trimStart().toLowerCase();
   return WEB_PREFIXES.some((prefix) => lower.startsWith(prefix));
 };
+
+/** The words of a page's link: its title, or for an untitled page the address's file name (its last path segment,
+ * percent-decoded), or else its site, so a link never reads as a whole address. An address with neither is itself. */
+export function linkText(url: string, title: string | null): string {
+  if (title !== null) return title;
+  const site = siteHost(url);
+  const path = /^[a-z][a-z\d+.-]*:\/\/[^/?#\\]*([^?#]*)/i.exec(url.trim())?.[1] ?? "";
+  const last = path
+    .split(/[/\\]/)
+    .filter((part) => part !== "")
+    .pop();
+  if (last !== undefined) {
+    try {
+      return decodeURIComponent(last);
+    } catch {
+      return last;
+    }
+  }
+  return site ?? url;
+}

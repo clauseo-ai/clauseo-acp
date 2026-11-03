@@ -81,7 +81,8 @@ test("envelopes delivered put the folded line under that turn's answer: tiles, t
   expect(said.compareDocumentPosition(list!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   // each site once, in order, at 11 px; the words are the count alone
   expect(marks()).toEqual(["I:11", "E:11"]);
-  expect(words(toggle())).toBe("3 sources");
+  // two pages: the search's result and the page read are one address
+  expect(words(toggle())).toBe("2 sources");
   expect(toggle().getAttribute("aria-expanded")).toBe("false");
   // the chevron and no other glyph
   expect(toggle().querySelectorAll(":scope > svg").length).toBe(1);
@@ -98,7 +99,8 @@ test("the folded line shows at most three marks, distinct, in order, the search 
     visited(6, "https://gamma.example/1", { title: "G" }),
   ]);
   expect(marks()).toEqual(["search", "A:11", "B:11"]);
-  expect(count()).toBe("6 sources");
+  // the four pages; the searches are no pages
+  expect(count()).toBe("4 sources");
 });
 
 test("a search's results lend the folded line their sites", async () => {
@@ -109,7 +111,7 @@ test("a search's results lend the folded line their sites", async () => {
     ]),
   ]);
   expect(marks()).toEqual(["Z:11", "Y:11"]);
-  expect(count()).toBe("1 source");
+  expect(count()).toBe("2 sources");
 });
 
 test("opening shows one row per source, in order, each led by its icon, and shuts again", async () => {
@@ -176,6 +178,10 @@ test("a Claude search with no results says so in two muted words", async () => {
 test("a Codex search: one muted line behind the info glyph, no links, the search glyph folded", async () => {
   await answered([searched(1, "notice period", [], { agent: "codex-acp" })], "codex-acp");
   expect(marks()).toEqual(["search"]);
+  // no page, so no count: the glyph and the chevron, the button named for what it opens to
+  expect(count()).toBeUndefined();
+  expect(words(toggle())).toBe("");
+  expect(toggle().getAttribute("aria-label")).toBe("Searches");
   await open();
   const note = h!.one("web-source-note")!;
   expect(note.textContent).toBe("ChatGPT doesn't list its pages");
@@ -187,7 +193,7 @@ test("a page Codex opened: its tile and link, and an info tip that says it was o
   await answered([visited(1, "https://example.com/x", { via: "codex_open_page" })], "codex-acp");
   await open();
   expect(lead(rows()[0]!)).toBe("tile:E");
-  expect(words(rows()[0]).trim()).toBe("https://example.com/x");
+  expect(words(rows()[0]).trim()).toBe("x example.com");
   const tip = rows()[0]!.querySelector<HTMLButtonElement>(
     'button[aria-label="Opened on OpenAI\'s side"]',
   );
@@ -219,32 +225,46 @@ test("a page the browser opened shows the browser glyph in its tile's place, nam
   expect(layer!.closest("main")).not.toBeNull();
 });
 
-test("the count is the open list's rows: each search once, whatever its results, and each page once", async () => {
+test("the count is the distinct pages: a search's results and the pages read, an address in both once, no search counted", async () => {
   await answered([
     searched(1, "notice period", [
       { title: "A", url: "https://example.com/a" },
       { title: "B", url: "https://example.com/b" },
     ]),
     searched(2, "rare query"),
-    visited(3, "https://example.com/c", { call: "c" }),
-    visited(4, "https://example.com/c", { call: "c", title: "C" }),
+    visited(3, "https://example.com/a", { title: "A" }),
+    visited(4, "https://example.com/c", { call: "c" }),
+    visited(5, "https://example.com/c", { call: "c", title: "C" }),
   ]);
   expect(count()).toBe("3 sources");
+  expect(toggle().getAttribute("aria-label")).toBeNull();
   await open();
-  expect(rows().length).toBe(3);
+  expect(rows().length).toBe(4);
 });
 
-test("a page with no title is its address, a link, with no site after it", async () => {
+test("searches with no pages have no count: the search glyph, the chevron, named Searches", async () => {
+  await answered([searched(1, "rare query"), searched(2, "rarer query")]);
+  expect(marks()).toEqual(["search"]);
+  expect(count()).toBeUndefined();
+  expect(words(toggle())).toBe("");
+  expect(toggle().getAttribute("aria-label")).toBe("Searches");
+});
+
+test("a page with no title never links its whole address: its file name, decoded, then its site; or its site alone", async () => {
   await answered([
-    visited(1, "https://example.com/plain"),
-    visited(2, "https://example.com/opened", { via: "browser" }),
-    searched(3, "notice period", [{ title: "", url: "https://example.com/untitled" }]),
+    visited(1, "https://example.com/docs/plain%20notice.pdf?x=1#p2"),
+    visited(2, "https://example.com/opened/", { via: "browser" }),
+    visited(3, "https://www.example.org/"),
+    searched(4, "notice period", [{ title: "", url: "https://example.com/untitled" }]),
   ]);
   await open();
-  expect(words(rows()[0])).toBe("https://example.com/plain");
-  expect(words(rows()[1])).toBe("https://example.com/opened");
-  expect(h!.all("web-source-result").map(words)).toEqual(["https://example.com/untitled"]);
-  expect(h!.all("web-source-site")).toEqual([]);
+  expect(words(rows()[0])).toBe("plain notice.pdf example.com");
+  expect(words(rows()[1])).toBe("opened example.com");
+  // the link is the site, so nothing after it
+  expect(words(rows()[2])).toBe("example.org");
+  expect(rows()[2]!.querySelector('[data-testid="web-source-site"]')).toBeNull();
+  expect(h!.all("web-source-result").map(words)).toEqual(["untitled example.com"]);
+  for (const link of h!.all("web-source-link")) expect(link.textContent).not.toContain("://");
 });
 
 test("no tile asks the web for anything: letters only, no image, no favicon address", async () => {
