@@ -61,7 +61,7 @@ pub(crate) enum NotUsed {
     TooOld(String),
 }
 
-/// The candidates [`find_user_node`] tries, in order: `node` (`node.exe` on Windows) in each
+/// The candidates [`search_user_node`] tries, in order: `node` (`node.exe` on Windows) in each
 /// absolute folder of `search.path`, then `<program_files>\nodejs\node.exe` on Windows.
 #[expect(
     clippy::disallowed_methods,
@@ -87,18 +87,37 @@ pub(crate) fn candidates(search: &NodeSearch) -> Vec<PathBuf> {
     found
 }
 
-/// The first candidate of `search` that qualifies, or `None`.
-pub(crate) async fn find_user_node<T: Timer>(
+/// What a search for the user's Node saw.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct UserSearch {
+    /// The first candidate that qualifies.
+    pub(crate) found: Option<FoundNode>,
+    /// Candidates before it (links resolved) whose `--version` took too long: not proven bad.
+    pub(crate) timed_out: Vec<PathBuf>,
+}
+
+/// The first candidate of `search` that qualifies, and the ones before it that timed out.
+pub(crate) async fn search_user_node<T: Timer>(
     search: &NodeSearch,
     launcher: &dyn Launcher,
     timer: &T,
-) -> Option<FoundNode> {
+) -> UserSearch {
+    let mut seen = UserSearch::default();
     for candidate in candidates(search) {
-        if let Ok(found) = check_node(&candidate, launcher, timer).await {
-            return Some(found);
+        match check_node(&candidate, launcher, timer).await {
+            Ok(found) => {
+                seen.found = Some(found);
+                break;
+            }
+            Err(NotUsed::TimedOut) => {
+                if let Ok(program) = dunce::canonicalize(&candidate) {
+                    seen.timed_out.push(program);
+                }
+            }
+            Err(_) => {}
         }
     }
-    None
+    seen
 }
 
 /// Checks one Node: the user's candidate, or a receipt's Node at start.
@@ -267,7 +286,7 @@ pub(crate) fn runtime_valid(dir: &Path, archive: &NodeArchive, os: Os) -> bool {
 /// most its snapshot size, about 60 MB) and its SHA-256 checked on those bytes, which are the
 /// ones unpacked: nothing is opened again by path after the check. A mismatch deletes the
 /// archive. The bytes go into `.tmp-<folder name>` beside `dir` first (any old one removed),
-/// then `node` is synced, the folder renamed into place over any incomplete one, and
+/// then `node` and `npm-cli.js` are synced, the folder renamed into place over any incomplete one, and
 /// `clauseo-runtime.json` written last.
 pub(crate) fn install_runtime(
     archive_path: &Path,
@@ -294,8 +313,12 @@ pub(crate) fn install_runtime(
     let unpacked = write::extract(&bytes, kind, &tmp).and_then(|()| {
         let complete = runtime_program(&tmp, os).is_file() && runtime_npm_cli(&tmp, os).is_file();
         if complete {
-            // After a power cut a receipt must not sit beside a truncated `node`.
-            write::sync_file(&runtime_program(&tmp, os)).map_err(ExtractError::Io)
+            // After a power cut a receipt must not sit beside a truncated `node` or npm. (The
+            // rest of npm's files are not synced: an npm that then fails to load its modules
+            // has the runtime removed and fetched again.)
+            write::sync_file(&runtime_program(&tmp, os))
+                .and_then(|()| write::sync_file(&runtime_npm_cli(&tmp, os)))
+                .map_err(ExtractError::Io)
         } else {
             Err(ExtractError::Malformed(
                 "the archive holds no node and npm".into(),

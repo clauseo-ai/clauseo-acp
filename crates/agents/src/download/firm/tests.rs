@@ -75,3 +75,21 @@ fn the_bundle_s_node_archive_is_copied_as_it_is_hashed_and_a_mismatch_leaves_not
     assert!(err.detail.contains("ran past"), "{}", err.detail);
     assert!(!part_path(&copy.dest).exists());
 }
+
+/// A link planted at the copy's `.part` is removed, never written through.
+#[cfg(unix)]
+#[test]
+fn a_link_at_the_copy_s_part_is_never_followed() {
+    let dir = TempDir::new("bundle-link").unwrap();
+    let bytes = fixture();
+    let from = dir.path().join("bundle").join("node").join("node.tar.gz");
+    write_file(&from, &bytes).unwrap();
+    let outside = dir.path().join("outside");
+    write_file(&outside, b"keep me").unwrap();
+    let copy = job("", &bytes, dir.path().join("downloads").join("node.tar.gz"));
+    crate::write::create_dir_all(copy.dest.parent().unwrap()).unwrap();
+    crate::write::symlink(&outside, &part_path(&copy.dest)).unwrap();
+    copy_from_bundle(&from, &copy, &Cancel::new(), &mut |_, _| {}, dir.path()).unwrap();
+    assert_eq!(std::fs::read(&outside).unwrap(), b"keep me");
+    assert_eq!(std::fs::read(&copy.dest).unwrap(), bytes);
+}

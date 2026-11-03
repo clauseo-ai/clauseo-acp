@@ -30,9 +30,9 @@ use crate::config::AgentsConfig;
 use crate::disk;
 use crate::download::{FetchError, FetchKind, write_kind};
 use crate::log::{InstallLog, redact};
-use crate::node::{self, FoundNode};
+use crate::node::{self, FoundNode, NotUsed, UserSearch};
 use crate::platform::Libc;
-use crate::receipt::{install_folder, read_receipt, script_path};
+use crate::receipt::{install_folder, read_receipt, script_path, write_receipt};
 use crate::state::{Failure, FailureKind, InstallState, Installed};
 use crate::worker::{Shared, Ticket};
 use crate::write::ExtractError;
@@ -266,23 +266,23 @@ impl<T: Timer + Send + Sync> Job<T> {
         if let Err(err) = self.take_lock() {
             return self.fail(FailureKind::Failed, &err, &Run::new(agent), None);
         }
-        let user = {
-            let find = pin!(node::find_user_node(
+        let search = {
+            let find = pin!(node::search_user_node(
                 &config.node_search,
                 &*self.launcher,
                 &*self.timer
             ));
             match select(find, pin!(self.ticket.cancel.cancelled())).await {
-                Either::Left((user, _)) => user,
+                Either::Left((search, _)) => search,
                 Either::Right(((), _)) => return,
             }
         };
         let (launcher, timer) = (&*self.launcher, &*self.timer);
-        if let Some(installed) = ready_install(config, launcher, timer, agent, user.as_ref()).await
-        {
+        if let Some(installed) = ready_install(config, launcher, timer, agent, &search).await {
             self.ready(installed);
             return;
         }
+        let user = search.found;
         let mut run = Run::new(agent);
         loop {
             if self.ticket.cancel.is_cancelled() {
@@ -358,7 +358,9 @@ impl<T: Timer + Send + Sync> Job<T> {
             None => {
                 let dir = node::runtime_dir(&config.data_dir, config.snapshot.node(), platform);
                 NodeChoice::Runtime {
-                    fetch: !runtime_ok(config, &*self.launcher, &*self.timer).await,
+                    fetch: !runtime_check(config, &*self.launcher, &*self.timer)
+                        .await
+                        .usable(),
                     dir,
                 }
             }
@@ -479,47 +481,100 @@ pub(crate) fn runtime_ready(config: &AgentsConfig) -> bool {
     node::runtime_valid(&dir, archive, config.platform.os)
 }
 
-/// Whether the downloaded Node is unpacked, complete and answers `--version` (v22 or later,
-/// through the launcher): a runtime cut short by a power cut is fetched again.
-pub(crate) async fn runtime_ok<T: Timer>(
+/// What the start's check of the downloaded Node found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RuntimeCheck {
+    /// Not unpacked, or its receipt is missing or for another archive.
+    Absent,
+    /// It answers `--version` with v22 or later.
+    Good,
+    /// `--version` took too long or would not start: not proof of a bad Node, so it is kept and
+    /// checked again at the next install or start.
+    Unsure,
+    /// A clear bad answer (a non-zero exit, no version, or one below 22): fetched again.
+    Bad,
+}
+
+impl RuntimeCheck {
+    /// Whether the runtime is used as it is.
+    pub(crate) fn usable(self) -> bool {
+        matches!(self, RuntimeCheck::Good | RuntimeCheck::Unsure)
+    }
+}
+
+/// Checks the downloaded Node: unpacked and complete, then `--version` through the launcher, so
+/// a runtime cut short by a power cut is fetched again.
+pub(crate) async fn runtime_check<T: Timer>(
     config: &AgentsConfig,
     launcher: &dyn Launcher,
     timer: &T,
-) -> bool {
+) -> RuntimeCheck {
     if !runtime_ready(config) {
-        return false;
+        return RuntimeCheck::Absent;
     }
     let dir = node::runtime_dir(&config.data_dir, config.snapshot.node(), config.platform);
     let program = node::runtime_program(&dir, config.platform.os);
-    node::check_node(&program, launcher, timer).await.is_ok()
+    match node::check_node(&program, launcher, timer).await {
+        Ok(_) => RuntimeCheck::Good,
+        Err(NotUsed::TimedOut | NotUsed::LaunchFailed(_)) => RuntimeCheck::Unsure,
+        Err(_) => RuntimeCheck::Bad,
+    }
 }
 
-/// `agent`'s finished install: a valid receipt in its `<hash>` folder whose Node is one this
-/// start would choose anyway. That is the downloaded runtime, complete and answering
-/// `--version`, or `user`, the Node the `PATH` search finds now. A receipt naming any other
-/// program is not run (the data folder is trusted at rest, but a receipt marks completeness,
-/// not which program may run), and the install is redone.
+/// `agent`'s finished install: a valid receipt in its `<hash>` folder, run with a Node this
+/// start would choose anyway. The receipt's Node is kept when it is the downloaded runtime and
+/// usable ([`RuntimeCheck::usable`]), or the Node the `PATH` search finds now, or one that
+/// search could not finish checking. Otherwise the receipt is rewritten (atomically) to name the
+/// Node found now, else the usable runtime, and stays ready: the adapter runs on any v22 or
+/// later. With neither, `None`, and the install is redone. A receipt never makes a program run
+/// that this start would not choose (the data folder is trusted at rest, but a receipt marks
+/// completeness, not which program may run).
 pub(crate) async fn ready_install<T: Timer>(
     config: &AgentsConfig,
     launcher: &dyn Launcher,
     timer: &T,
     agent: &AgentId,
-    user: Option<&FoundNode>,
+    user: &UserSearch,
 ) -> Option<Installed> {
     let entry = config.snapshot.agent(agent)?;
     let hash = config.snapshot.install_hash(agent, config.platform)?;
     let folder = install_folder(&config.data_dir, agent, &hash);
-    let receipt = read_receipt(&folder, agent, &hash, config.platform)?;
+    let mut receipt = read_receipt(&folder, agent, &hash, config.platform)?;
     let runtime = node::runtime_dir(&config.data_dir, config.snapshot.node(), config.platform);
-    let node_ok = if receipt.node == node::runtime_program(&runtime, config.platform.os) {
-        runtime_ok(config, launcher, timer).await
+    let runtime = node::runtime_program(&runtime, config.platform.os);
+    let mut runtime_usable = None;
+    let keep = if receipt.node == runtime {
+        let usable = runtime_check(config, launcher, timer).await.usable();
+        runtime_usable = Some(usable);
+        usable
     } else {
-        user.is_some_and(|found| found.program == receipt.node)
+        user.found
+            .as_ref()
+            .is_some_and(|found| found.program == receipt.node)
+            || user.timed_out.contains(&receipt.node)
     };
-    node_ok.then(|| Installed {
+    if !keep {
+        let (program, version) = if let Some(found) = &user.found {
+            (found.program.clone(), found.version.clone())
+        } else {
+            let usable = match runtime_usable {
+                Some(usable) => usable,
+                None => runtime_check(config, launcher, timer).await.usable(),
+            };
+            if !usable {
+                return None;
+            }
+            (runtime, format!("v{}", config.snapshot.node().version()))
+        };
+        receipt.node = program;
+        receipt.node_version = version;
+        // A receipt that will not be rewritten now is rewritten at the next start.
+        drop(write_receipt(&folder, &receipt));
+    }
+    Some(Installed {
         node: receipt.node.clone(),
         script: script_path(&folder, entry),
-        folder: folder.clone(),
-        version: receipt.version.clone(),
+        folder,
+        version: receipt.version,
     })
 }

@@ -98,6 +98,10 @@ pub(super) async fn install<T: Timer + Send + Sync>(
         job,
         program: &program,
         cli: &cli,
+        runtime: match node_choice {
+            NodeChoice::Runtime { dir, .. } => Some(dir.as_path()),
+            NodeChoice::User(_) => None,
+        },
         common: common_flags(&cache, &npmrc, &global),
         env: BTreeMap::from([(OsString::from("NODE_OPTIONS"), OsString::new())]),
     };
@@ -196,8 +200,21 @@ struct Npm<'a, T> {
     job: &'a Job<T>,
     program: &'a Path,
     cli: &'a Path,
+    /// The downloaded runtime's folder when npm runs from it: removed when npm cannot start or
+    /// cannot load its own modules, so the next try fetches Node again.
+    runtime: Option<&'a Path>,
     common: Vec<OsString>,
     env: BTreeMap<OsString, OsString>,
+}
+
+impl<T> Npm<'_, T> {
+    /// Removes the runtime npm ran from, if it did, and says so in `detail`.
+    fn drop_runtime(&self, detail: &mut String) {
+        if let Some(dir) = self.runtime {
+            drop(write::remove_dir_all(dir));
+            detail.push_str("; the downloaded Node is removed and will be fetched again");
+        }
+    }
 }
 
 impl<T: Timer + Send + Sync> Npm<'_, T> {
@@ -208,7 +225,9 @@ impl<T: Timer + Send + Sync> Npm<'_, T> {
         argv.extend(args);
         argv.extend(self.common.iter().cloned());
         let refused = |err: clauseo_process::Error| {
-            TryError::retry(&format!("npm {what} could not start: {err}"), config)
+            let mut detail = format!("npm {what} could not start: {err}");
+            self.drop_runtime(&mut detail);
+            TryError::retry(&detail, config)
         };
         let spec = LaunchSpec::new(
             self.program.to_owned(),
@@ -226,6 +245,7 @@ impl<T: Timer + Send + Sync> Npm<'_, T> {
         } = self.job.launcher.launch(&spec).map_err(refused)?;
         drop(stdin);
         let mut code_line: Option<String> = None;
+        let mut module_missing = false;
         let ran = {
             let work = pin!(async {
                 let read = async {
@@ -236,6 +256,12 @@ impl<T: Timer + Send + Sync> Npm<'_, T> {
                     let line = line.trim();
                     if code_line.is_none() && line.starts_with("npm error code ") {
                         code_line = Some(line.to_owned());
+                    }
+                    // Node's own report when npm-cli.js cannot load one of npm's files.
+                    if line.starts_with("Error: Cannot find module")
+                        || line.contains("MODULE_NOT_FOUND")
+                    {
+                        module_missing = true;
                     }
                 });
                 let ((), drained, report) = join3(read, lines, handle.exited()).await;
@@ -260,6 +286,9 @@ impl<T: Timer + Send + Sync> Npm<'_, T> {
                 if let Some(line) = &code_line {
                     detail.push_str(": ");
                     detail.push_str(line);
+                }
+                if module_missing && code_line.is_none() {
+                    self.drop_runtime(&mut detail);
                 }
                 let enospc = code_line.as_deref().is_some_and(|l| l.ends_with("ENOSPC"));
                 Err(TryError::npm(&detail, enospc, config))

@@ -89,32 +89,46 @@ fn a_folder_with_no_receipt_is_redone() {
     assert_eq!(fx.registry.requests().len(), before);
 }
 
-/// A receipt naming a Node that is neither the runtime nor the one the `PATH` search finds now
-/// is not run: the agent is `Missing` at start, and an install redoes it with the found Node.
+/// A receipt naming a Node other than the one the `PATH` search finds now (an nvm switch, or a
+/// planted path) is never run: the receipt is rewritten to name the Node found now and the agent
+/// stays `Ready`, with no download. With no usable Node at all, the install is redone.
 #[cfg(unix)]
 #[test]
-fn a_receipt_naming_another_node_is_not_run_and_is_redone() {
-    let fx = Fixture::new("other-node");
+fn a_receipt_naming_another_node_is_rewritten_to_the_one_found_now() {
+    let mut fx = Fixture::new("other-node");
     let (agents, events) = fx.start();
     events.first_states();
     let installed = install_ready(&agents, &events, &agent_a());
     drop(agents);
     let elsewhere = fx.data.path().join("elsewhere");
     let planted = elsewhere.join("bin/node");
-    write::write_executable(&planted, "#!/bin/sh\necho v24.0.0\n").unwrap();
+    let marker = fx.data.path().join("planted-ran");
+    let script = format!("#!/bin/sh\ntouch '{}'\necho v24.0.0\n", marker.display());
+    write::write_executable(&planted, script).unwrap();
     write::write(&elsewhere.join("lib/node_modules/npm/bin/npm-cli.js"), "").unwrap();
     let receipt_path = installed.folder.join("clauseo-receipt.json");
-    let mut receipt: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&receipt_path).unwrap()).unwrap();
+    let read = || -> serde_json::Value {
+        serde_json::from_slice(&std::fs::read(&receipt_path).unwrap()).unwrap()
+    };
+    let mut receipt = read();
     receipt["node"] = planted.display().to_string().into();
     write::write(&receipt_path, serde_json::to_vec(&receipt).unwrap()).unwrap();
 
+    let before = fx.registry.requests().len();
     let (again, events) = fx.start();
     let (a, _) = events.first_states();
+    assert!(matches!(a, InstallState::Ready { .. }), "{a:?}");
+    assert_eq!(again.installed(&agent_a()).unwrap().node, installed.node);
+    assert_eq!(read()["node"], installed.node.display().to_string());
+    assert!(!marker.exists(), "the planted Node never ran");
+    assert_eq!(fx.registry.requests().len(), before);
+    drop(again);
+
+    // No Node on PATH and no runtime: nothing usable, so the agent is Missing.
+    fx.config.node_search = clauseo_agents::NodeSearch::none();
+    let (_again, events) = fx.start();
+    let (a, _) = events.first_states();
     assert!(matches!(a, InstallState::Missing { .. }), "{a:?}");
-    assert_eq!(again.installed(&agent_a()), None);
-    let redone = install_ready(&again, &events, &agent_a());
-    assert_eq!(redone.node, installed.node);
 }
 
 #[test]
@@ -148,9 +162,11 @@ mod node_20 {
     use flate2::write::GzEncoder;
 
     use super::install_ready;
+    use std::time::Duration;
+
     use crate::support::{
-        A_PACKAGES, BASE, Fixture, NODE_VERSION, agent_a, node_entry, node_path, platform,
-        real_node, snapshot,
+        A_PACKAGES, BASE, Fixture, NODE_VERSION, SharedTimer, agent_a, agent_b, node_entry,
+        node_path, platform, real_node, snapshot,
     };
     use crate::write;
     use clauseo_agents::InstallState;
@@ -296,6 +312,74 @@ mod node_20 {
             .filter(|r| r.path == node_path_of(&fx))
             .count();
         assert_eq!(node_requests, 2);
+    }
+
+    /// A runtime whose `--version` takes past its 10 s limit at start is not proof of a bad
+    /// Node: the agent stays `Ready`, with no download.
+    #[test]
+    fn a_runtime_check_that_times_out_keeps_the_agent_ready() {
+        let mut fx = Fixture::new("slow-runtime");
+        fx.config.node_search = clauseo_agents::NodeSearch::none();
+        let archive = wrapper_archive();
+        let entry = node_entry(Some(&archive));
+        fx.registry.route(&node_path(&entry), archive);
+        fx.config.snapshot = snapshot(BASE, entry, 10_000);
+        let (agents, events) = fx.start();
+        events.first_states();
+        let installed = install_ready(&agents, &events, &agent_a());
+        drop(agents);
+        let real = std::fs::read(&installed.node).unwrap();
+        // It never answers (the launcher's handle kills it when the wait ends).
+        write::write_executable(&installed.node, "#!/bin/sh\nexec tail -f /dev/null\n").unwrap();
+        fx.timer = SharedTimer::default();
+        let before = fx.registry.requests().len();
+        let (again, events) = fx.start();
+        fx.timer.fire_next(Duration::from_secs(10));
+        let (a, _) = events.first_states();
+        assert!(matches!(a, InstallState::Ready { .. }), "{a:?}");
+        assert_eq!(again.installed(&agent_a()).unwrap().node, installed.node);
+        assert_eq!(fx.registry.requests().len(), before);
+        write::write_executable(&installed.node, real).unwrap();
+    }
+
+    /// An npm in the runtime that cannot load its own files has the runtime removed; the next
+    /// try fetches Node again and installs.
+    #[test]
+    fn a_runtime_npm_missing_its_modules_is_fetched_again() {
+        let mut fx = Fixture::new("broken-npm");
+        fx.config.node_search = clauseo_agents::NodeSearch::none();
+        let archive = wrapper_archive();
+        let entry = node_entry(Some(&archive));
+        fx.registry.route(&node_path(&entry), archive);
+        fx.config.snapshot = snapshot(BASE, entry, 10_000);
+        let (agents, events) = fx.start();
+        events.first_states();
+        let installed = install_ready(&agents, &events, &agent_a());
+        let runtime = installed
+            .node
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_owned();
+        let cli = runtime.join("lib/node_modules/npm/bin/npm-cli.js");
+        write::write(&cli, "require('./no-such-npm-file');\n").unwrap();
+
+        agents.install(&agent_b());
+        fx.timer.fire_next(Duration::from_secs(2));
+        let (_, last) = events.until_end(&agent_b());
+        assert!(matches!(last, InstallState::Ready { .. }), "{last:?}");
+        let node_requests = fx
+            .registry
+            .requests()
+            .iter()
+            .filter(|r| r.path == node_path_of(&fx))
+            .count();
+        assert_eq!(node_requests, 2);
+        assert_ne!(
+            std::fs::read_to_string(&cli).unwrap(),
+            "require('./no-such-npm-file');\n"
+        );
     }
 
     fn node_path_of(fx: &Fixture) -> String {
