@@ -19,6 +19,7 @@ import { useAgentPlan } from "./agent-plan.ts";
 import { LazyThreadList, loadThread } from "./chunk.ts";
 import { pausedPick } from "./limit-words.ts";
 import { useBusy } from "./live.ts";
+import { doingPick } from "./step-names.ts";
 import {
   ThreadActionsContext,
   useRefused,
@@ -105,6 +106,9 @@ export function Work({
   const paused = useStreamPart(store, stream, pickPaused);
   // U10: an answer Claude stopped giving, and Restart once the host has it (H10)
   const { lang } = useWords();
+  // what the running step is doing, for the working line in place of "Answering."
+  const pickDoing = useMemo(() => doingPick(lang), [lang]);
+  const doing = useStreamPart(store, stream, pickDoing);
   const { brk, live } = useThreadBreak(store, stream);
   const restart = useMemo(() => nextHostOf(transport).restart, [transport]);
   const lines = useBreakLines();
@@ -160,6 +164,7 @@ export function Work({
         mentions={mentions}
         disabled={matter === null}
         busy={busy}
+        doing={doing}
         refused={session.refused ?? otherRefused}
         failed={
           failed === null
