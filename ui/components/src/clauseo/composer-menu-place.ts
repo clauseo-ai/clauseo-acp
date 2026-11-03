@@ -156,7 +156,7 @@ export function useMenuPlace({
   // and again as the window resizes or anything scrolls under it, the field included; the rows' own scroll aside.
   // And as the field's own size changes: a narrower window rewraps the words and the field grows a line, but the
   // window's resize comes before that grow (the composer fits the field from its own size observer), so a menu placed
-  // on the resize alone stood over the line's start (WebView2, M2 at 100 px narrower). Placed once per frame, after it.
+  // on the resize alone stood over the line's start (WebView2, M2 at 100 px narrower). Placed again before that frame paints.
   const isOpen = hi !== null;
   useEffect(() => {
     const view = field.ownerDocument.defaultView;
@@ -169,23 +169,14 @@ export function useMenuPlace({
     };
     view.addEventListener("resize", again);
     view.addEventListener("scroll", again, { capture: true, passive: true });
-    let frameId: number | null = null;
-    const grown =
-      typeof ResizeObserver === "function"
-        ? new ResizeObserver(() => {
-            if (frameId !== null) return;
-            frameId = view.requestAnimationFrame(() => {
-              frameId = null;
-              place();
-            });
-          })
-        : null;
+    // In the observer's own callback, which runs after layout and before paint: deferring to the next frame left one
+    // painted frame with the grown field under the menu (WebView2, 3.3b hi3: -22 px for one frame, 4 runs of 4).
+    const grown = typeof ResizeObserver === "function" ? new ResizeObserver(place) : null;
     grown?.observe(field);
     return () => {
       view.removeEventListener("resize", again);
       view.removeEventListener("scroll", again, { capture: true });
       grown?.disconnect();
-      if (frameId !== null) view.cancelAnimationFrame(frameId);
     };
   }, [isOpen, field, frame, plane, rows]);
 }
