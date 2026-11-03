@@ -113,10 +113,10 @@ fn thread_entries() -> Vec<ViewEntry> {
             raw_input: tool.raw_input,
             raw_output: tool.raw_output,
             content: tool.content,
-            background: Some(BackgroundMark {
+            background: Some(Box::new(BackgroundMark {
                 steer: message_id(9),
                 finished_at: None,
-            }),
+            })),
         })),
     ]
 }

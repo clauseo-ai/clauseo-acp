@@ -153,10 +153,10 @@ fn set_aside(
     if is_final(entry.status) || entry.background.is_some() {
         return;
     }
-    entry.background = Some(clauseo_protocol::BackgroundMark {
+    entry.background = Some(Box::new(clauseo_protocol::BackgroundMark {
         steer,
         finished_at: None,
-    });
+    }));
     out.changes
         .push(ViewChange::Upsert(Box::new(ViewEntry::ToolCall(
             entry.clone(),
