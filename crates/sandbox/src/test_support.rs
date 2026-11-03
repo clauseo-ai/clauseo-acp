@@ -64,6 +64,13 @@ impl TempDir {
     }
 }
 
+/// Sets the permission bits of `path` to `mode`.
+#[cfg(unix)]
+pub(crate) fn set_mode(path: &Path, mode: u32) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
+}
+
 /// Removes the file at `path`.
 #[cfg(unix)]
 pub(crate) fn remove(path: &Path) {
