@@ -246,7 +246,6 @@ impl Bridge {
             | HostCommand::UndoStep { .. }
             | HostCommand::RestoreVersion { .. }
             | HostCommand::SetUiSettings { .. }
-            | HostCommand::SetToolSettings { .. }
             // The window's "Try again" sends it; a window's focus sends `Shown` from Rust
             // (`Bridge::shown`), not through here.
             | HostCommand::RefreshLimits { .. } => Ok(()),
@@ -258,6 +257,11 @@ impl Bridge {
             // That path does not exist yet, and the window never sends either.
             HostCommand::SetMode { .. } | HostCommand::SetConfigOption { .. } => Err(invalid(
                 "modes and config options are not settable from the window yet",
+            )),
+            // The tool switches live in the settings window only; the main window shows the
+            // tools and offers to open Settings, so it has no caller (least privilege).
+            HostCommand::SetToolSettings { .. } => Err(invalid(
+                "the tool switches are set from the settings window only",
             )),
         }
     }

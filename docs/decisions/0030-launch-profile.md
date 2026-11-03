@@ -396,8 +396,9 @@ change from the settings window as `ui` does.
 
 - **Command.** `HostCommand::SetToolSettings { patch: ToolsPatch }` sets the fields the patch
   names, each optional, and leaves the rest. Unknown fields are refused. It answers `Done`, and
-  every app subscriber gets `SettingsChanged`. The settings window sends it, and the main window
-  admits it as it admits `SetUiSettings`.
+  every app subscriber gets `SettingsChanged`. Only the settings window may send it: the main
+  window refuses it (`command.invalid`), since the switches live in Settings and the main window
+  only offers to open Settings (least privilege; the app thread's call).
 - **View.** `SettingsView.tools: ToolsSettingsView { web_search, browser }` carries the effective
   values in `GetSettings` and `SettingsChanged`.
 - **Lock.** `Effective::apply_tools_patch` refuses the whole patch with `settings.locked` when it
