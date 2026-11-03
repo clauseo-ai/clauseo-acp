@@ -177,6 +177,21 @@ test("a failure stays visible on the folded line", async () => {
   expect(lineOf(g)?.textContent).toBe("1 paper read. 1 of them failed.");
 });
 
+test("a step in a state this version can't read shows neither failed nor done: the folded line and its row agree", async () => {
+  h = await mountRoom();
+  h.deliver([reset([ASKED, read(7, 201, "a/Lease.pdf", "unknown"), agentText(9, 3, "Done.")])]);
+  const g = groups()[0]!;
+  expect(g.dataset["trouble"]).toBeUndefined();
+  expect(h.one("step-group-trouble")).toBeNull();
+  expect(lineOf(g)?.textContent).toBe("Reading Lease.pdf.");
+  await h.click(lineOf(g));
+  const row = h.all("tool-call")[0]!;
+  expect(row.textContent).toBe("Reading Lease.pdf. · State not known");
+  // its own kind's icon on both, never the break
+  const icon = (el: Element) => el.querySelector("svg")?.outerHTML;
+  expect(icon(row)).toBe(icon(lineOf(g)!.querySelector(".step-group-icons")!));
+});
+
 test("a permission prompt and a question for the lawyer never fold: each stands between the groups", async () => {
   h = await mountRoom();
   h.deliver([
