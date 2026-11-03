@@ -32,5 +32,9 @@ objc2-core-foundation = { workspace = true, features = ["CFPreferences"] }
 [dev-dependencies]
 insta = { workspace = true, features = ["json", "redactions"] }
 
+# The registry tests count this process' handles, to see each key closed.
+[target.'cfg(windows)'.dev-dependencies]
+windows = { workspace = true, features = ["Win32_System_Threading"] }
+
 [lints]
 workspace = true
