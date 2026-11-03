@@ -13,6 +13,7 @@
 // set, so a first paint never shows the whole scribble.
 import { useEffect, useRef } from "react";
 import { useDisplay } from "../lib/display.ts";
+import { inkLookup } from "./ink-lookup.ts";
 
 const N = (v: number) => +v.toFixed(2);
 
@@ -81,12 +82,14 @@ export function PenMark({ writing = true, className }: { writing?: boolean; clas
     const LEN = ink.getTotalLength();
     const PU = LEN / UNITS;
     const shift = PEN_REF - VIEW_W * PEN_AT;
+    // the clock stays in [4.35, 5.35] PU, so the table covers it with margin
+    const at = inkLookup((k) => ink.getPointAtLength(k), PU * 3.3, PU * 5.4);
     const c = (clock.current ??= {
       penK: PU * 4.35,
       paperX: ink.getPointAtLength(PU * 4.35).x - PEN_REF,
     });
     const draw = () => {
-      const p = ink.getPointAtLength(c.penK);
+      const p = at(c.penK);
       pan.setAttribute("transform", `translate(${N(-c.paperX - shift)} 0)`);
       ink.setAttribute("stroke-dasharray", `${N(c.penK)} ${N(LEN)}`);
       nib.setAttribute("transform", `translate(${N(p.x)} ${N(p.y)})`);

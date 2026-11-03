@@ -5,6 +5,7 @@ import { act, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { DEFAULT_DISPLAY, showDisplay, type Display } from "../lib/display.ts";
+import { inkLookup } from "./ink-lookup.ts";
 import { PenMark } from "./pen-mark.tsx";
 import { RoomScopeProvider } from "./room-scope-provider.tsx";
 import { WorkingLine, WorkingTime } from "./working-line.tsx";
@@ -218,4 +219,38 @@ test("a check and a series with no expected time have no pill, in the row or bes
     ),
   );
   expect(document.querySelector(".working-time")?.textContent).toMatch(/Expected by/);
+});
+
+test("each frame reads the nib's place from the table: the path is walked at setup only", async () => {
+  // happy-dom puts the geometry on SVGGeometryElement, so the stubs above do not reach a path: stub the path's own
+  const path = SVGPathElement.prototype as unknown as Record<string, unknown>;
+  const walk = vi.fn((k: number) => ({ x: k, y: 0 }));
+  path["getPointAtLength"] = walk;
+  path["getTotalLength"] = () => 1000;
+  try {
+    await mount(<PenMark />);
+    const nib = () => document.querySelector(".pen-mark > g > g")?.getAttribute("transform");
+    const setup = walk.mock.calls.length;
+    expect(setup).toBeGreaterThan(0);
+    const start = nib();
+    for (let i = 1; i <= 20; i++) tick(performance.now() + 40 * i);
+    expect(nib()).not.toBe(start);
+    expect(walk.mock.calls.length).toBe(setup);
+  } finally {
+    delete path["getPointAtLength"];
+    delete path["getTotalLength"];
+  }
+});
+
+test("the table reads the ink between its ends, and clamps outside them", () => {
+  const straight = inkLookup((k) => ({ x: k, y: 2 * k }), 330, 540);
+  expect(straight(400)).toEqual({ x: 400, y: 800 });
+  expect(straight(401.1).x).toBeCloseTo(401.1, 9);
+  expect(straight(330)).toEqual({ x: 330, y: 660 });
+  expect(straight(540)).toEqual({ x: 540, y: 1080 });
+  expect(straight(-5000)).toEqual(straight(330));
+  expect(straight(1e6)).toEqual(straight(540));
+
+  const curved = inkLookup((k) => ({ x: k, y: Math.sin(k) }), 330, 540);
+  expect(curved(400.1).y).toBeCloseTo(Math.sin(400.1), 1);
 });
