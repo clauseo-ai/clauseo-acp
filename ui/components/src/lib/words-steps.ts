@@ -54,7 +54,8 @@ const HI = {
   "It was stopped.": "इसे रोका गया।",
   "1 of them was stopped.": "उनमें से 1 रोका गया।",
   "{n} of them were stopped.": "उनमें से {n} रोके गए।",
-  // a step a steer moved to the background stays told on the folded line (its row says "In the background", U7's)
+  // a step a steer moved to the background stays told on the folded line (its row says "In the background", U7's).
+  // Hindi in the cut of the failed and stopped lines above, and in U7's own words for it ("वह काम पृष्ठभूमि में चलता रहा")
   "It went on in the background.": "यह पृष्ठभूमि में चलता रहा।",
   "1 of them went on in the background.": "उनमें से 1 पृष्ठभूमि में चलता रहा।",
   "{n} of them went on in the background.": "उनमें से {n} पृष्ठभूमि में चलते रहे।",
