@@ -16,6 +16,8 @@ test("the opened rows sit on the well, inset by the work list's padding and corn
   expect(rows).toMatch(/padding: var\(--s2\) var\(--s3\);/);
   expect(rows).toMatch(/border-radius: var\(--r-control\);/);
   expect(rows).toMatch(/margin: var\(--s2\) 0 var\(--s1\);/);
+  // 2 px between rows, the work list's rhythm
+  expect(rows).toMatch(/gap: var\(--s0-5\);/);
 });
 
 test("a failure on the folded line is in primary ink at the line's own weight, the prototype chip's 450, never bolder", () => {
