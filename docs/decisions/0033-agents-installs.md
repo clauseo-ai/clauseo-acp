@@ -70,7 +70,8 @@ snapshot refuses an agent id named `runtime`, `downloads`, `npm-cache` or `signi
   `clauseo-receipt.json`. `<hash>` is the first 16 hex digits of the SHA-256 over the agent id,
   its derived lock's bytes and the platform, each prefixed by its length. `limits` writes
   `clauseo-claude-usage.mjs` here too, and nothing here touches it.
-- `agents/downloads/` (`<sha512 hex>.tgz`, `.part` while partial), `agents/npm-cache/`.
+- `agents/downloads/` (`<sha512 hex>.tgz`, `.part` while partial), `agents/npm-cache/`,
+  `agents/npmrc` and `agents/npmrc-global` (empty), and `agents/.lock`.
   `agents/<id>/home/` and `agents/signin/` are S18's.
 - No links: npm runs with `--no-bin-links`, archives are extracted without their links, and
   each adapter runs as `node <script>`. After `npm ci`, the temp folder is walked, and a link or
@@ -214,6 +215,13 @@ setting, and start-up neither cleans nor reads anything under a relative data fo
 - R20 adds the four codes to `ErrorCode`, wires `Agents` into desktop, and writes `Installed` as
   the `agents.<id>` entry.
 - An install is not a hot path. Nothing runs once installs are done.
+- Accepted from the security review (S17), left as they are:
+  - The user's own Node is not checked against a digest (by design); the remaining risk is a
+    `PATH` folder that other accounts can write to.
+  - Windows reserved names (`CON`, `NUL`, `COM1`), trailing dots and size limits are not checked
+    when unpacking: the archive is pinned by SHA-256, checked on the bytes unpacked.
+  - A glibc Linux with musl also installed reads as musl, so the install fails and asks for the
+    user's own Node.
 
 ## Status
 

@@ -12,9 +12,9 @@
 //!   `peerDependencies`, so one agent's install fetches none of the other's packages.
 //! - The layout under `<data_dir>/agents`: `runtime/node-v<version>-<os>-<arch>/` (a downloaded
 //!   Node), `<id>/install/<hash>/` (`package.json`, `package-lock.json`, `node_modules/`,
-//!   `clauseo-receipt.json`), `downloads/` (files named by digest), `npm-cache/`. `<id>/home/`
-//!   and `signin/` are S18's. `limits` writes `clauseo-claude-usage.mjs` into Claude's install
-//!   folder; nothing here touches it.
+//!   `clauseo-receipt.json`), `downloads/` (files named by digest), `npm-cache/`, `npmrc`,
+//!   `npmrc-global` and `.lock`. `<id>/home/` and `signin/` are S18's. `limits` writes
+//!   `clauseo-claude-usage.mjs` into Claude's install folder; nothing here touches it.
 //! - Node: the user's when it is a regular file, reports v22 or later and has `npm-cli.js`
 //!   beside it; otherwise the pinned download, checked by SHA-256.
 //! - Downloads (Rust's): each tarball the derived lock lists for this platform, with `Range`
@@ -35,8 +35,8 @@
 //!
 //! # Invariants
 //!
-//! - Only `nodejs.org` and `registry.npmjs.org` are contacted, or the firm's mirror for
-//!   tarballs; an IT runtime and an offline bundle contact nothing.
+//! - Only `nodejs.org` and `registry.npmjs.org` are contacted, over https alone, or the firm's
+//!   https mirror for tarballs; an IT runtime and an offline bundle contact nothing.
 //! - Every downloaded byte is checked: SHA-512 from the lock, SHA-256 from the snapshot. A
 //!   mismatch deletes the file. A mirror cannot change a byte.
 //! - No install script runs, and no install folder holds a symbolic link or junction.
