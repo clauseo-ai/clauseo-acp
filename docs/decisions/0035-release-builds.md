@@ -116,9 +116,16 @@ for a pull request.
   data folder, store included, so its label says what goes: "Also delete conversations, saved
   versions and settings" (unticked, as Tauri draws it). `customLanguageFiles` replaces the
   bundler's whole English file, so `crates/desktop/windows/nsis/English.nsh` holds that line
-  first and Tauri's 26 other messages as 2.12.2 ships them. On a Tauri upgrade, copy its
-  `English.nsh` again; a test counts the 27 keys and holds the label to one line (60
-  characters; the box is 400 x 25 px).
+  first and Tauri's 26 other messages as 2.12.2 ships them, except that three name the product
+  with `${PRODUCTNAME}` where Tauri's file has a literal `{{product_name}}` (language files are
+  included, not rendered). On a Tauri upgrade, copy its `English.nsh` again and keep that fix;
+  tests count the 27 keys, refuse any `{{`, and hold the label to one line (60 characters; the
+  box is 400 x 25 px).
+- **The dialog's look** (from the Windows 11 VM's run): `cxWidth` 280 dialog units, so the main
+  instruction fits on one line, and the exe's own icon (tauri-build's
+  `WINDOWS_APP_ICON_RESOURCE_ID`) as its main and title-bar icon, named only when the exe holds
+  that resource. When `TaskDialogIndirect` fails, a plain message box says the title, the main
+  line and the body, with OK, and the app exits as after Close.
 
 ## Consequences
 

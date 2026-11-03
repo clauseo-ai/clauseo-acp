@@ -35,6 +35,20 @@ impl Words {
     }
 }
 
+/// The dialog's width in dialog units (`TASKDIALOGCONFIG::cxWidth`), which scale with the
+/// display: about 490 px at 100 %, 735 px at 150 %. At the default width the main instruction
+/// wrapped before "open" (the Windows 11 VM, 2026-11-03). A test holds it to `fits`.
+pub(super) const WIDTH: u32 = 280;
+
+/// Whether `width` dialog units fit `instruction` on one line, by a rough upper bound: the main
+/// instruction's larger font is under 5 dialog units a character, and the icon and margins take
+/// about 50.
+#[cfg(test)]
+pub(super) fn fits(instruction: &str, width: u32) -> bool {
+    u32::try_from(instruction.chars().count())
+        .is_ok_and(|chars| chars.saturating_mul(5).saturating_add(50) <= width)
+}
+
 /// The dialog's words.
 pub(super) const EN: Words = Words {
     title: "Clauseo",

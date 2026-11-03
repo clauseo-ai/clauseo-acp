@@ -1,6 +1,7 @@
 use super::DOWNLOAD_URL;
+use super::dialog::{APP_ICON, CLOSE, DOWNLOAD, Next, main_icon, message_box_text, next};
 use super::version::{MINIMUM, Verdict, Version, verdict};
-use super::words::EN;
+use super::words::{EN, WIDTH, fits};
 use serde_json::Value;
 use std::path::Path;
 
@@ -128,6 +129,62 @@ fn lang_strings(relative: &str) -> Vec<(String, String)> {
             (key, constant)
         })
         .collect()
+}
+
+#[test]
+fn the_download_button_downloads_and_every_other_answer_closes() {
+    assert_eq!(next::<()>(&Ok(DOWNLOAD)), Next::Download);
+    assert_eq!(next::<()>(&Ok(CLOSE)), Next::Close);
+    // IDCANCEL: Esc or the title bar's close button.
+    assert_eq!(next::<()>(&Ok(2)), Next::Close);
+    assert_eq!(next::<()>(&Ok(0)), Next::Close);
+}
+
+#[test]
+fn a_failed_task_dialog_falls_back_to_the_message_box() {
+    assert_eq!(next(&Err("E_INVALIDARG")), Next::MessageBox);
+}
+
+#[test]
+fn the_icon_is_named_only_when_the_exe_holds_it() {
+    assert_eq!(main_icon(true), Some(APP_ICON));
+    assert_eq!(main_icon(false), None);
+    // tauri-build's id, IDI_APPLICATION's value.
+    assert_eq!(APP_ICON, 32512);
+}
+
+#[test]
+fn the_message_box_says_the_main_line_then_the_body() {
+    assert_eq!(
+        message_box_text(&EN),
+        "Clauseo needs Microsoft Edge WebView2 to open\n\n\
+         If this computer is your firm's, its IT team may need to allow it."
+    );
+}
+
+#[test]
+fn the_dialog_is_wide_enough_for_the_main_line_and_no_wider_than_a_small_screen() {
+    assert!(fits(EN.instruction, WIDTH), "{WIDTH}");
+    assert!(!fits(EN.instruction, 200));
+    // 150 % on a 1366 px wide screen: about 1.75 px a dialog unit at 100 %.
+    assert!(f64::from(WIDTH) * 1.75 * 1.5 < 1366.0);
+}
+
+#[test]
+fn the_installer_english_file_names_the_product_through_nsis() {
+    let text = read(&english_file());
+    // Language files are included, not rendered, so a template mark would show as it is.
+    for line in text.lines().filter(|line| !line.starts_with(';')) {
+        assert!(!line.contains("{{"), "{line}");
+    }
+    for key in ["appRunning", "appRunningOkKill", "failedToKillApp"] {
+        let prefix = format!("LangString {key} ${{LANG_ENGLISH}} ");
+        let line = text
+            .lines()
+            .find_map(|line| line.strip_prefix(prefix.as_str()))
+            .unwrap();
+        assert!(line.contains("${PRODUCTNAME}"), "{key}: {line}");
+    }
 }
 
 /// The installer's English file, as `customLanguageFiles` names it.
