@@ -44,6 +44,14 @@ is_app_crate() {
   return 1
 }
 
+# A path in a crate: the Rust jobs, and the app's too when the crate is in clauseo-desktop's closure.
+crate_path() {
+  rust=true
+  local crate=${1#crates/}
+  crate=${crate%%/*}
+  if is_app_crate "$crate"; then app=true; fi
+}
+
 classify() {
   local p=$1
   # No rule is written for a path with a newline in it (a glob's * matches one), so it is unknown.
@@ -67,6 +75,8 @@ classify() {
     ui/components/src/clauseo/shell.css | ui/components/src/clauseo/room-toolbar.tsx) ui=true app=true rust=true ;;
     ui/components/src/clauseo/responsive.css | ui/components/src/styles/tokens-colour.css) ui=true app=true rust=true ;;
     ui/app/src/review/registry-h11.tsx) ui=true app=true rust=true ;;
+    # A crate's assets are built into it (include_str!), Markdown too, so they are not prose.
+    crates/*/assets/*) crate_path "$p" ;;
     # Prose. The fast lane still runs and checks it (links, typos, the docs rules).
     *.md | docs/* | LICENSE | LICENSES/* | cla/*) ;;
     # Read by the fast lane alone (formatting, typos, TOML style, licences, secrets, hooks).
@@ -82,12 +92,7 @@ classify() {
     # reducer-bench's limits and the scoreboard budgets.
     budgets.toml) rust=true product_also=true ;;
     xtask/*) rust=true ;;
-    crates/*/*)
-      rust=true
-      local crate=${p#crates/}
-      crate=${crate%%/*}
-      if is_app_crate "$crate"; then app=true; fi
-      ;;
+    crates/*/*) crate_path "$p" ;;
     ui/*) ui=true app=true ;;
     *)
       all
