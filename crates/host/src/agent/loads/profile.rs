@@ -178,7 +178,8 @@ fn is_web_rule(rule: &str) -> bool {
 }
 
 /// The `CODEX_CONFIG` keys the profile and the host add for a Codex agent: the hook's (less the
-/// reserved), then `web_search`, `developer_instructions` filled, and the writable folders.
+/// reserved and the dotted), then `web_search`, `developer_instructions` filled, and the
+/// writable folders.
 pub(crate) fn codex_keys(
     hook: Map<String, Value>,
     web_search: Switch,
@@ -186,9 +187,14 @@ pub(crate) fn codex_keys(
 ) -> Result<Map<String, Value>, Error> {
     let mut keys = Map::new();
     for (key, value) in hook {
-        let first = key.split('.').next().unwrap_or_default();
-        if CodexConfig::RESERVED.contains(&first) {
-            tracing::warn!(key, "a CODEX_CONFIG key the profile may not set is dropped");
+        // Codex reads a dotted key as a path, so one could stand in for a nested key the host
+        // sets below (`sandbox_workspace_write.writable_roots`): every dotted key is dropped,
+        // as `CodexConfig::new` does.
+        if key.contains('.') || CodexConfig::RESERVED.contains(&key.as_str()) {
+            tracing::warn!(
+                key,
+                "a reserved or dotted CODEX_CONFIG key from the profile is dropped"
+            );
             continue;
         }
         keys.insert(key, value);

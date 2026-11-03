@@ -6,8 +6,8 @@ use clauseo_protocol::ErrorCode;
 use serde_json::{Map, Value, json};
 
 use super::{
-    config, guard_trusted, home_config, launch_env, make_home, prepare_launch, refuse_codex_folder,
-    write_home_config,
+    config, guard_trusted, home_config, launch_env, make_home, merge_add_only, prepare_launch,
+    refuse_codex_folder, write_home_config,
 };
 use crate::write;
 
@@ -27,6 +27,68 @@ fn switches() -> Value {
         "cloud": {"skills": {"enabled": false}},
         "skills": {"bundled": {"enabled": false}, "include_instructions": false},
     })
+}
+
+fn object(value: Value) -> Map<String, Value> {
+    let Value::Object(object) = value else {
+        panic!("an object");
+    };
+    object
+}
+
+/// A dotted key goes in only when nothing of its first part is there: it never lands beside a
+/// nested key codex would read it over.
+#[test]
+fn merge_add_only_takes_a_dotted_key_only_where_nothing_clashes() {
+    let mut held = object(json!({
+        "sandbox_workspace_write": {"writable_roots": ["/work"]},
+        "a.b": 1,
+    }));
+    merge_add_only(
+        &mut held,
+        object(json!({
+            "sandbox_workspace_write.writable_roots": ["/elsewhere"],
+            "a.b": 2,
+            "fresh.key": true,
+        })),
+    );
+    assert_eq!(
+        Value::Object(held),
+        json!({
+            "sandbox_workspace_write": {"writable_roots": ["/work"]},
+            "a.b": 1,
+            "fresh.key": true,
+        })
+    );
+}
+
+/// Arrays on both sides gain only the items they lack, in order; a value of another type
+/// already there stays, and objects merge key by key.
+#[test]
+fn merge_add_only_extends_arrays_and_keeps_what_is_there() {
+    let mut held = object(json!({
+        "roots": ["/a", "/b"],
+        "mode": "on-request",
+        "nested": {"x": 1, "list": [1]},
+    }));
+    merge_add_only(
+        &mut held,
+        object(json!({
+            "roots": ["/b", "/c", "/a", "/d"],
+            "mode": ["never"],
+            "nested": {"x": 2, "y": 3, "list": [1, 2]},
+            "new": [1],
+        })),
+    );
+    assert_eq!(
+        Value::Object(held),
+        json!({
+            "roots": ["/a", "/b", "/c", "/d"],
+            "mode": "on-request",
+            "nested": {"x": 1, "list": [1, 2], "y": 3},
+            "new": [1],
+        })
+    );
 }
 
 #[test]

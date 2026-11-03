@@ -11,7 +11,6 @@ use serde_json::{Map, Value};
 
 use super::super::Actor;
 use super::launch_checks::{Prepared, RunFolders};
-use super::state;
 use crate::agent::loads;
 use crate::agent::loads::browser::{self, BrowserInputs, Switch};
 use crate::agent::loads::profile::{self, ClaudeKeys, Folders, Login};
@@ -33,14 +32,14 @@ fn switches(actor: &Actor) -> (Switch, Switch) {
     )
 }
 
-/// The launch's folders kept on the thread for its session start, and a Codex agent's
-/// `CODEX_CONFIG` keys from the profile, filled. An unfillable instructions token, or a folder
-/// that is no UTF-8, fails the launch with `agent.launch_failed`.
+/// A Codex agent's `CODEX_CONFIG` keys from the profile, filled into `prepared`. An unfillable
+/// instructions token, or a folder that is no UTF-8, fails the launch with
+/// `agent.launch_failed`.
 pub(super) fn launch_keys(
     actor: &mut Actor,
     thread: ThreadId,
-    mut prepared: Prepared,
-) -> Result<Prepared, Error> {
+    prepared: &mut Prepared,
+) -> Result<(), Error> {
     let agent_id = actor.check_thread(thread)?.row.agent.clone();
     if let Some(codex) = prepared.codex.as_mut() {
         let folders = Folders::of(&prepared.run.work, &prepared.run.notes)?;
@@ -48,17 +47,14 @@ pub(super) fn launch_keys(
         codex.keys =
             profile::codex_keys(actor.profile.codex_config(&agent_id), web_search, folders)?;
     }
-    if let Some(state) = state(actor, thread) {
-        state.run = Some(prepared.run.clone());
-    }
-    Ok(prepared)
+    Ok(())
 }
 
 /// The `_meta` and MCP servers for `thread`'s `session/new`, `session/load` or
 /// `session/resume`, whose matter folder is `matter`: the profile hook's `_meta` with the
 /// host's switches and keys over it and its tokens filled; the servers the lawyer turned on, then
-/// the hook's (none when the firm's `managed-mcp.json` is present). Shows the session's tool
-/// state in the thread's header.
+/// the hook's (none when the firm's `managed-mcp.json` is present). Holds the session's tool
+/// state for the thread's header until the session call answers ([`show_tools`]).
 pub(super) fn session_loads(
     actor: &mut Actor,
     thread: ThreadId,
@@ -125,6 +121,11 @@ pub(super) fn session_loads(
         .into_iter()
         .chain(browser_state)
         .collect();
-    super::super::header_tools::show(actor, thread, tools);
+    super::super::header_tools::hold(actor, thread, tools);
     Ok((meta, servers))
+}
+
+/// The session call answered: the tool state [`session_loads`] held shows in the header.
+pub(super) fn show_tools(actor: &mut Actor, thread: ThreadId) {
+    super::super::header_tools::show_held(actor, thread);
 }

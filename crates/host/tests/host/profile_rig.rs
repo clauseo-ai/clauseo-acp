@@ -17,7 +17,7 @@ use clauseo_protocol::{
 };
 use serde_json::{Map, Value, json};
 
-use crate::support::{Dir, FAKE, Running, Scenario};
+use crate::support::{Dir, Running, Scenario};
 use crate::write;
 
 pub(crate) const CLAUDE: &str = "claude-acp";

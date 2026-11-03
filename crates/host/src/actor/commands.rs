@@ -526,6 +526,7 @@ fn change_thread(
         ThreadChange::Archive if before.archived => None,
         ThreadChange::Archive => {
             row.archived = true;
+            super::header_tools::forget(actor, thread);
             Some(DomainEvent::ThreadArchived(ThreadArchived {}))
         }
     };

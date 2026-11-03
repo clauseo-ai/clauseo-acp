@@ -29,25 +29,51 @@ pub(crate) async fn off_actor<T: Send + 'static>(
     clock: Arc<dyn Clock>,
     work: impl FnOnce() -> Result<T, Error> + Send + 'static,
 ) -> Result<T, Error> {
+    off_actor_or_undo(clock, work, drop).await
+}
+
+/// [`off_actor`] for work that leaves something behind: when the caller has stopped waiting
+/// (past [`PREPARE_WAIT`]) by the time `work` answers `Ok`, `undo` gets that answer on the same
+/// thread, so what it made is taken back there and never on the actor. An answer is either
+/// taken by the caller or undone, never both and never neither: the caller closes the channel
+/// when it gives up, then takes an answer already sent.
+pub(crate) async fn off_actor_or_undo<T: Send + 'static>(
+    clock: Arc<dyn Clock>,
+    work: impl FnOnce() -> Result<T, Error> + Send + 'static,
+    undo: impl FnOnce(T) + Send + 'static,
+) -> Result<T, Error> {
     let (send, answer) = async_channel::bounded(1);
     let started = std::thread::Builder::new()
         .name(THREAD_NAME.to_owned())
         .spawn(move || {
-            // The caller stopped waiting: nobody is left to tell.
-            let _gone = send.send_blocking(work());
+            // The caller stopped waiting: nobody is left to tell, so what was made is undone.
+            if let Err(async_channel::SendError(Ok(made))) = send.send_blocking(work()) {
+                undo(made);
+            }
         });
     if let Err(error) = started {
         tracing::warn!(%error, "could not start {THREAD_NAME}");
         return Err(not_ready());
     }
-    let answer = std::pin::pin!(answer.recv());
-    match select(answer, clock.after(PREPARE_WAIT)).await {
-        Either::Left((Ok(result), _)) => result,
-        Either::Left((Err(_closed), _)) => {
+    let waited = {
+        let answer = std::pin::pin!(answer.recv());
+        match select(answer, clock.after(PREPARE_WAIT)).await {
+            Either::Left((received, _)) => Some(received),
+            Either::Right(((), _)) => None,
+        }
+    };
+    match waited {
+        Some(Ok(result)) => result,
+        Some(Err(_closed)) => {
             tracing::warn!("{THREAD_NAME} ended without an answer");
             Err(not_ready())
         }
-        Either::Right(((), _)) => {
+        None => {
+            // From here a send fails, and the thread undoes; one sent before is taken here.
+            answer.close();
+            if let Ok(result) = answer.try_recv() {
+                return result;
+            }
             tracing::warn!("the matter folder's checks did not answer in time; the call fails");
             Err(too_late())
         }

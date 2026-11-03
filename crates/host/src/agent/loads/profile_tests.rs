@@ -433,6 +433,34 @@ fn codex_keys_drop_the_reserved_and_add_the_hosts() {
     assert_eq!(keys["web_search"], json!("live"));
 }
 
+/// A dotted hook key never stands in for the host's nested writable roots, nor for any other
+/// key: codex reads it as a path, so every dotted key is dropped, in the built `CODEX_CONFIG`
+/// too.
+#[test]
+fn codex_keys_drop_every_dotted_key() {
+    let hook = json!({
+        "sandbox_workspace_write.writable_roots": ["/elsewhere"],
+        "sandbox_workspace_write": {"network_access": false},
+        "tools.view_image": false,
+        "model_verbosity": "low",
+    });
+    let keys = codex_keys(hook.as_object().cloned().unwrap(), ON, folders()).unwrap();
+    assert!(keys.keys().all(|key| !key.contains('.')), "{keys:?}");
+    assert_eq!(
+        keys["sandbox_workspace_write"],
+        json!({
+            "network_access": false,
+            "writable_roots": ["/data/run/t-1/work", "/data/agent-state/m/notes"],
+        })
+    );
+    let built = crate::agent::codex::config(&BTreeMap::new(), keys, None);
+    assert!(built.keys().all(|key| !key.contains('.')), "{built:?}");
+    assert_eq!(
+        built["sandbox_workspace_write"]["writable_roots"],
+        json!(["/data/run/t-1/work", "/data/agent-state/m/notes"])
+    );
+}
+
 /// The profile's keys merge into R15's `CODEX_CONFIG` add-only, before the hooks seam's object,
 /// which stays the one `PreToolUse` group.
 #[test]

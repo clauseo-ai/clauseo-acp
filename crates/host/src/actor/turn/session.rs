@@ -202,6 +202,7 @@ fn folder(actor: &Actor, thread: ThreadId) -> Result<PathBuf, Error> {
 /// The session is up. A Codex agent's session first runs [`prepare`]'s checks; any other
 /// attaches now.
 pub(super) fn on_started(actor: &mut Actor, thread: ThreadId, start: SessionStart, loaded: bool) {
+    super::profile_loads::show_tools(actor, thread);
     let codex = actor
         .threads
         .get(&thread)

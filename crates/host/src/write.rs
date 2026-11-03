@@ -28,14 +28,50 @@ pub(crate) fn create_private_dir(path: &Path) -> io::Result<()> {
     builder.create(path)
 }
 
-/// Creates `path` and every missing parent, each new one private to the user on Unix (0700):
-/// a session's run folder and a matter's notes folder (`actor/turn/launch_checks.rs`).
-pub(crate) fn create_private_dir_all(path: &Path) -> io::Result<()> {
-    let mut builder = std::fs::DirBuilder::new();
-    builder.recursive(true);
-    #[cfg(unix)]
-    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
-    builder.create(path)
+/// Creates `target` and every missing folder between `base` and it, each new one private to
+/// the user on Unix (0700), through no link: each part below `base` must be a real folder, or be
+/// made as one (`symlink_metadata`, which never follows a link, and on Windows counts a
+/// junction as a link). A link, or anything not a folder, below `base` fails with
+/// `InvalidInput`; `base` itself may be a link. A session's run folder and a matter's notes
+/// folder (`actor/turn/launch_checks.rs`).
+pub(crate) fn create_private_dirs_under(base: &Path, target: &Path) -> io::Result<()> {
+    let below = target
+        .strip_prefix(base)
+        .map_err(|_outside| io::Error::new(io::ErrorKind::InvalidInput, "not under its base"))?;
+    let mut at = base.to_owned();
+    for part in below.components() {
+        at.push(part);
+        match std::fs::symlink_metadata(&at) {
+            // Another launch may make it first: `AlreadyExists` is fine, and the check below
+            // still refuses a link or a file there.
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                match create_private_dir(&at) {
+                    Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+                    made => made?,
+                }
+            }
+            Err(error) => return Err(error),
+            Ok(_) => {}
+        }
+        if !is_real_dir(&at) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("{} is a link or not a folder", at.display()),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Whether `path` is a folder itself, not a link to one (nor, on Windows, a junction).
+pub(crate) fn is_real_dir(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|meta| meta.is_dir())
+}
+
+/// Renames the folder `from` to `to` in one call: the start-up sweep's `run` set aside
+/// (`actor/turn/launch_checks.rs`).
+pub(crate) fn rename_folder(from: &Path, to: &Path) -> io::Result<()> {
+    std::fs::rename(from, to)
 }
 
 /// Removes the folder `path` and everything under it; a missing folder is fine. A link inside
