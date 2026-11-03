@@ -13,6 +13,7 @@ import type { Lang } from "@clauseo/components/lib/display.ts";
 import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { lim } from "@clauseo/components/lib/words-limits.ts";
+import { limThread } from "@clauseo/components/lib/words-limits-thread.ts";
 import { th } from "@clauseo/components/lib/words-thread.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { toHostError } from "../../transport/host-transport.ts";
@@ -21,7 +22,8 @@ import { takesMark } from "../thread-break.ts";
 import type { EntryId, LimitStopEntry, StepEntry, Timestamp } from "../../transport/protocol.ts";
 import { useAgentPlan } from "./agent-plan.ts";
 import { isoOf, whenOf } from "./clock.ts";
-import { planNameOf, stopTimeOf, windowLine } from "./limit-words.ts";
+import { planNameOf, stopTimeOf } from "./limit-words.ts";
+import { windowLine } from "./stop-words.ts";
 import { useBusy } from "./live.ts";
 import { useThreadActions } from "./session.ts";
 import { resetPassed, stopLine } from "./stops.ts";
@@ -194,8 +196,8 @@ export function LimitStopRow({ id, entry }: { id: EntryId; entry: LimitStopEntry
   const title = !plan
     ? lim(w.lang, "Usage limit reached")
     : at === null
-      ? lim(w.lang, "{name} plan limit reached", { name })
-      : lim(w.lang, "{name} plan limit reached at {time}", {
+      ? limThread(w.lang, "{name} plan limit reached", { name })
+      : limThread(w.lang, "{name} plan limit reached at {time}", {
           name,
           time: at.day === null ? at.time : `${at.day} ${at.time}`,
         });
@@ -216,8 +218,11 @@ export function LimitStopRow({ id, entry }: { id: EntryId; entry: LimitStopEntry
         <p className="lim-stop-line" data-testid="limit-stopped-here">
           <StopMark>
             {at.day === null
-              ? lim(w.lang, "Stopped here at {time}", { time: at.time })
-              : lim(w.lang, "Stopped here on {day} at {time}", { day: at.day, time: at.time })}
+              ? limThread(w.lang, "Stopped here at {time}", { time: at.time })
+              : limThread(w.lang, "Stopped here on {day} at {time}", {
+                  day: at.day,
+                  time: at.time,
+                })}
           </StopMark>
         </p>
       )}

@@ -8,11 +8,10 @@
 // build's bare dynamic imports can't load (vite-config.test.ts).
 import { lazy, Suspense } from "react";
 import { late } from "@clauseo/components/lib/late.ts";
-import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { useAgentSelect } from "../../store/limits.ts";
 import type { AgentLimitsView } from "../../transport/protocol.ts";
 import { useAgentPlan } from "../thread/agent-plan.ts";
-import { warningKey, warningWords } from "./plan-model.ts";
+import { warningKey } from "./plan-model.ts";
 
 /** From the thread's chunk, which the open thread has loaded already. */
 const WarningNote = lazy(() =>
@@ -29,15 +28,12 @@ const keyAt = (entry: AgentLimitsView | undefined, at: number): string => {
 export function LimitWarning() {
   const plan = useAgentPlan();
   const keyed = useAgentSelect(plan?.kind, keyAt);
-  const { lang } = useDisplay();
   if (keyed === "") return null;
   // its time against the view's arrival: the host sends a new view at each shown reset, nothing ticks here
   const space = keyed.indexOf(" ");
-  const words = warningWords(lang, keyed.slice(space + 1), Number(keyed.slice(0, space)));
-  if (words === null) return null;
   return (
     <Suspense fallback={null}>
-      <WarningNote lead={words.lead} until={words.until} />
+      <WarningNote warning={keyed.slice(space + 1)} now={Number(keyed.slice(0, space))} />
     </Suspense>
   );
 }

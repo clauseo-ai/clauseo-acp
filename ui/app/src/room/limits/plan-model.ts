@@ -158,38 +158,3 @@ export function warningKey(entry: AgentLimitsView | undefined): string {
         : null;
   return hit === null ? "" : JSON.stringify([hit.label, hit.resets ?? null]);
 }
-
-/** The warning's two sentences from its key: the window, then the reset (null without one). */
-export function warningWords(
-  lang: Lang,
-  key: string,
-  now: number,
-): { lead: string; until: { text: string; at: Timestamp } | null } | null {
-  if (key === "") return null;
-  const [label, resets] = JSON.parse(key) as [string, Timestamp | null];
-  const lead =
-    label === "5-hour limit"
-      ? lim(lang, "Close to your 5-hour limit.")
-      : lim(lang, "Close to the limit.");
-  if (resets === null) return { lead, until: null };
-  const { day, time } = whenOf(lang, resets, now);
-  const text =
-    day === null
-      ? lim(lang, "Long tasks may pause until {time}.", { time })
-      : lim(lang, "Long tasks may pause until {day} {time}.", { day, time });
-  return { lead, until: { text, at: resets } };
-}
-
-/** The window labels the words translate; another shows as the host gives it, in English. */
-const LABELS = new Set<string>([
-  "5-hour limit",
-  "Weekly limit",
-  "Opus weekly limit",
-  "Sonnet weekly limit",
-  "Weekly limit for connected apps",
-  "Monthly limit",
-  "Usage limit",
-]);
-
-export const windowLabel = (lang: Lang, label: string): string =>
-  LABELS.has(label) ? lim(lang, label as LimitKey) : label;

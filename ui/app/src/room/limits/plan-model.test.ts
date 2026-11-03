@@ -10,15 +10,9 @@ import type {
   LimitWindowView,
   MeterTone,
 } from "../../transport/protocol.ts";
-import {
-  bandOf,
-  lookOf,
-  meterLine,
-  planLine,
-  shareLeft,
-  warningKey,
-  warningWords,
-} from "./plan-model.ts";
+import { bandOf, lookOf, meterLine, planLine, shareLeft, warningKey } from "./plan-model.ts";
+import { limThread } from "@clauseo/components/lib/words-limits-thread.ts";
+import { warningWords } from "../thread/warning-words.ts";
 
 const today = (h: number, m: number) => {
   const d = new Date();
@@ -220,7 +214,7 @@ describe("the warning", () => {
       until: null,
     });
     expect(warningWords("hi", warningKey(entry(97)), NOW)?.until?.text).toBe(
-      lim("hi", "Long tasks may pause until {time}.", { time: clock("hi", "6:10 pm") }),
+      limThread("hi", "Long tasks may pause until {time}.", { time: clock("hi", "6:10 pm") }),
     );
   });
 
