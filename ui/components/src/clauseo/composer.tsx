@@ -26,10 +26,10 @@ import type { MenuShown } from "./composer-menu.tsx";
 import { useRoom } from "./room-scope.ts";
 import { PaperChips } from "./paper-chips.tsx";
 import { Say } from "./say.tsx";
-import { StatusLine, type PlanChoice, type ReadyHint } from "./status-line.tsx";
+import { StatusLine, type PlanChoice, type ReadyHint, type ToolsSegment } from "./status-line.tsx";
 import { WorkingLine, WorkingSaid, WorkingTime, type WorkingState } from "./working-line.tsx";
 
-export type { PlanChoice, ReadyHint } from "./status-line.tsx";
+export type { PlanChoice, ReadyHint, ToolsSegment } from "./status-line.tsx";
 
 /** One of the agent's commands, as ACP's `available_commands_update` lists it and the session's header carries it
  * (`HeaderEntry.commands`, passed as it is): its name without the slash, what it does, and a hint for its input. */
@@ -127,6 +127,8 @@ export type ComposerProps<V extends string = string> = {
   papers?: readonly QuestionPaper[];
   onRemovePaper?: (id: string) => void;
   choice?: PlanChoice<V>;
+  /** The tool line on the status line, after the plan; none by default. */
+  tools?: ToolsSegment | null;
   /** Keys the field passes on first, before its own Enter. True when one was taken, and its default is prevented.
    * While an input method composes it hears nothing: every key is the input method's then. */
   onKeyCommand?: (e: KeyboardEvent<HTMLTextAreaElement>) => boolean;
@@ -194,6 +196,7 @@ export function Composer<V extends string = string>({
   papers = [],
   onRemovePaper,
   choice,
+  tools = null,
   onKeyCommand,
   id = "ask",
   gate,
@@ -422,8 +425,19 @@ export function Composer<V extends string = string>({
       )}
       {acts}
       {/* a status line with nothing to say isn't drawn: no time yet, no plan, no choice and no hint */}
-      {(took !== null || plan !== "" || choice !== undefined || hint !== null) && (
-        <StatusLine took={took} plan={plan} hint={hint} choice={choice} hidden={working !== null} />
+      {(took !== null ||
+        plan !== "" ||
+        choice !== undefined ||
+        hint !== null ||
+        tools !== null) && (
+        <StatusLine
+          took={took}
+          plan={plan}
+          hint={hint}
+          choice={choice}
+          tools={tools}
+          hidden={working !== null}
+        />
       )}
       {/* while Clauseo works the working line is the well's top row, and the field its foot: one set-in region */}
       <div className="room-entry" ref={entry} data-working={working !== null ? "" : undefined}>

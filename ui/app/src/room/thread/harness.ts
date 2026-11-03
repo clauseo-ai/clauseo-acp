@@ -57,6 +57,8 @@ export type Script = {
   onRender?: ProfilerOnRenderCallback;
   /** The host rows it fakes beyond today's host (room/host-next.ts), such as H10's restart. */
   next?: FakeHost["next"];
+  /** The settings window's open (FakeHost's openSettings): with it the room has Settings. */
+  openSettings?: FakeHost["openSettings"];
 };
 
 export const defaultOutcome = (command: HostCommand): CommandOutcome => {
@@ -122,6 +124,7 @@ export async function mountRoom(script: Script = {}): Promise<Harness> {
     },
     dispatch: (envelope) => (script.dispatch ?? defaultOutcome)(envelope.command),
     ...(script.next === undefined ? {} : { next: script.next }),
+    ...(script.openSettings === undefined ? {} : { openSettings: script.openSettings }),
   });
   connectRoom(transport, script.display ?? {});
   const manual = manualBatch();

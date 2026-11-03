@@ -32,6 +32,7 @@ import {
   wirePapersHost,
   wireSettingsHost,
 } from "./host-wire.ts";
+import type { BrowserInstallReport } from "./browser-install.ts";
 
 /* ---------- H8: a matter's papers ---------- */
 
@@ -200,8 +201,12 @@ export type { ThreadsChanged };
  * empty): the generated MattersChanged, its rows as the room reads them. */
 export type MattersChange = Omit<MattersChanged, "matters"> & { matters: MatterInfo[] };
 
-/** H4: the app's events, to every window: the matter rows that changed or left, and a matter's threads that changed. */
-export type AppEvent = { matters_changed: MattersChange } | { threads_changed: ThreadsChanged };
+/** H4: the app's events, to every window: the matter rows that changed or left, and a matter's threads that changed;
+ * and, not the host's yet, the Chrome download's state, played by FakeTransport only (browser-install.ts). */
+export type AppEvent =
+  | { matters_changed: MattersChange }
+  | { threads_changed: ThreadsChanged }
+  | { browser_install: BrowserInstallReport };
 
 /** The wire names, one home each: the reads, the commands and the events as the host will spell them. */
 export const WIRE = {
