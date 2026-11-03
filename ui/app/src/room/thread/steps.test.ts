@@ -196,8 +196,20 @@ describe("friendly names", () => {
       mt("en", "In the background"),
     );
     expect(markOf("en", call("read"))).toBeNull();
-    // a row that didn't finish says what it was doing
+    // a row that failed or was stopped says, in the past, what it set out to do; never as if it were still going
     expect(doneOf("en", call("read", "failed", raw({ path: "a/Lease.pdf" })))).toBe(
+      "Tried to read Lease.pdf.",
+    );
+    expect(
+      doneOf("en", call("fetch", "failed", raw({ url: "https://indiankanoon.org/doc/1/" }))),
+    ).toBe("Tried to read indiankanoon.org online.");
+    expect(doneOf("en", call("edit", "cancelled"))).toBe("Tried to change a paper.");
+    expect(doneOf("en", call("other", "failed"))).toBe("Tried one other thing.");
+    expect(doneOf("hi", call("read", "failed", raw({ path: "a/Lease.pdf" })))).toBe(
+      "Lease.pdf पढ़ने की कोशिश की गई।",
+    );
+    // a step that waits or runs still says what it is doing
+    expect(doneOf("en", call("read", "pending", raw({ path: "a/Lease.pdf" })))).toBe(
       "Reading Lease.pdf.",
     );
   });
