@@ -39,11 +39,12 @@ permissions:
   contents: read
 
 # A pull request keeps only its newest run, except that a run started by another label gets a
-# group of its own (its run id), so it never cancels a scoreboard in progress. Each push to main,
-# nightly run and run on demand has a group of its own, as in ci.yml.
+# group of its own (its run id), so it never cancels a scoreboard in progress. Pushes to main share
+# one group, one running and one waiting, the newest push replacing the waiting run, as in ci.yml;
+# each nightly run and run on demand has a group of its own.
 concurrency:
   group: >-
-    scoreboard-${{ github.event.pull_request.number || format('{0}-{1}', github.event_name, github.sha) }}${{
+    scoreboard-${{ github.event.pull_request.number || (github.event_name == 'push' && format('push-{0}', github.ref)) || format('{0}-{1}', github.event_name, github.sha) }}${{
     (github.event.action == 'labeled' && github.event.label.name != 'scoreboard') && format('-other-label-{0}', github.run_id) || '' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
