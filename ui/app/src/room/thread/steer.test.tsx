@@ -239,6 +239,8 @@ test("a steer sent now: the stopped answer stays, says when it stopped and why, 
   await h.settle();
   const line = h.one("steer-outcome");
   expect(line?.dataset["outcome"]).toBe("sent_now");
+  // the design's stop line type, as the note's text (matters.css)
+  expect(line?.className).toBe("text-small-row text-muted");
   expect(line?.textContent).toBe(
     mt("en", "Stopped at {time} to send your words first. The answer so far is kept.", {
       time: clockTime("en", LATER),

@@ -70,12 +70,13 @@ export function RequeuedLine() {
   );
 }
 
-/** In the step of a turn stopped for a steer sent now: when it stopped, and that its answer so far stays. */
+/** In the step of a turn stopped for a steer sent now: when it stopped, and that its answer so far stays. The design's
+ * stop line type (matters.css's `text-small-row text-muted`, as .steer-note-text). */
 export function SentNowLine({ ts }: { ts: Timestamp }) {
   const w = useMatterWords();
   const [now] = useState(Date.now);
   return (
-    <p className={QUIET} data-testid="steer-outcome" data-outcome="sent_now">
+    <p className="text-small-row text-muted" data-testid="steer-outcome" data-outcome="sent_now">
       <Say>
         {w.m("Stopped at {time} to send your words first. The answer so far is kept.", {
           time: stamp(w.lang, ts, now),

@@ -346,6 +346,8 @@
     padding: var(--s1-5) var(--s1-5) var(--s1-5) var(--s3);
     border-radius: var(--r-card);
     background: var(--well);
+    /* brought into view, it stands clear of the composer over the thread's foot, as its list does */
+    scroll-margin-bottom: calc(var(--composer-h, var(--composer-h-rest)) + var(--s3));
   }
   .steer-note-row {
     display: flex;
