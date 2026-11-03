@@ -95,6 +95,30 @@ test("a plan with a card keeps the drag region on the meter inside its press", a
   expect(dragging(press)).toBe(4);
 });
 
+test("a stale plan with a card mutes its fill, inside the press where the meter has no role; a fresh one doesn't", async () => {
+  const stale = {
+    name: "Claude",
+    left: 0.4,
+    valueText: "40 percent of the plan left",
+    status: "Plenty left",
+    look: "stale" as const,
+    cardLabel: "Show the plan's limits",
+    card: <p>Every window</p>,
+  };
+  await mount(stale);
+  const fill = () => host?.querySelector(".room-plan-press .rounded-meter > *");
+  expect(host?.querySelector('.room-plan-press [role="meter"]')).toBeNull();
+  expect(fill()?.hasAttribute("data-muted")).toBe(true);
+  expect(fill()?.classList.contains("bg-flat-num")).toBe(true);
+  expect(fill()?.classList.contains("bg-primary")).toBe(false);
+  await act(async () => root?.unmount());
+  host?.remove();
+  const { look: _, ...fresh } = stale;
+  await mount(fresh);
+  expect(fill()?.hasAttribute("data-muted")).toBe(false);
+  expect(fill()?.classList.contains("bg-primary")).toBe(true);
+});
+
 test("the plan's press says its parts as sentences in the language: the danda in Hindi, no empty part", async () => {
   expect(
     sentences("en", [
