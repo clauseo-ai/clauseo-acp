@@ -12,7 +12,7 @@
 # - dry: workflow_dispatch, from any ref (`gh workflow run release.yml --ref <branch>`). No
 #   environment and no secret: each job that signs makes a throwaway updater key with a random
 #   password in its own runner, and nothing is published. The assets end up in the run's artifact
-#   release-assets, with latest.json and SHA256SUMS.txt.
+#   dist-assets, with latest.json and SHA256SUMS.txt.
 # Nothing else starts this workflow: never a pull request, so never a fork's.
 #
 # - The app's version lives in crates/desktop/Cargo.toml and tauri.conf.json (the desktop test
@@ -594,7 +594,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   # The Release: latest.json, SHA256SUMS.txt, an attestation per asset, then a draft (release) or
-  # a public pre-release (test). A dry run stops at the artifact release-assets.
+  # a public pre-release (test). A dry run stops at the artifact dist-assets.
   assemble:
     name: assemble
     needs: [check, build, sign-windows]
@@ -675,7 +675,7 @@ jobs:
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: release-assets
+          name: dist-assets
           path: dist
           if-no-files-found: error
 

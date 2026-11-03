@@ -12,7 +12,8 @@
 // release.yml is read as text, line by line with its indentation, not with a YAML parser (none
 // ships with Node). It fails on a pull_request or pull_request_target trigger, a `uses:` not
 // pinned by a 40-character commit SHA (a local `./` action passes), a job with no `permissions:`,
-// and a `secrets.` reference anywhere but inside a step.
+// a mention of `secrets` anywhere but inside a step, and a job that downloads an artifact name it
+// also uploads (a re-run of that job would download its own earlier upload).
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -176,7 +177,8 @@ function lintWorkflow(text) {
   let block = null;
   const inStep = (path) => path[0] === "jobs" && path[2] === "steps" && path.length > 3;
   const checkSecrets = (n, path, line) => {
-    if (/\bsecrets\s*\.|\bsecrets\s*\[|^\s*secrets\s*:/.test(line) && !inStep(path)) {
+    // Any mention: `secrets.X`, `secrets[...]`, `secrets: inherit`, `toJSON(secrets)`.
+    if (/\bsecrets\b/.test(line) && !inStep(path)) {
       problems.push(`line ${n}: a secret outside a step (${path.join(".") || "top level"})`);
     }
   };
@@ -184,7 +186,7 @@ function lintWorkflow(text) {
     const n = index + 1;
     if (block !== null) {
       if (raw.trim() === "" || indentOf(raw) > block.indent) {
-        checkSecrets(n, block.path, raw.replace(/^\s*secrets\s*:/, ""));
+        checkSecrets(n, block.path, raw);
         return;
       }
       block = null;
@@ -198,6 +200,8 @@ function lintWorkflow(text) {
     while (stack.length > 0 && stack.at(-1).indent >= indent) {
       stack.pop();
     }
+    const startsStep =
+      stack.length === 3 && stack[0].key === "jobs" && stack[2].key === "steps" && rest.startsWith("- ");
     while (rest.startsWith("- ")) {
       stack.push({ indent, key: "-" });
       indent += 2;
@@ -214,14 +218,29 @@ function lintWorkflow(text) {
     if (path[0] === "on" && /\bpull_request(_target)?\b/.test(rest)) {
       problems.push(`line ${n}: a pull_request or pull_request_target trigger`);
     }
-    if (key === "uses") {
-      const ref = value.replace(/^["']|["']$/g, "");
+    // `uses:` as a key or inside a flow mapping (`- { uses: x@v4 }`).
+    for (const [, quoted] of rest.matchAll(/(?:^|[\s{,])uses\s*:\s*("[^"]*"|'[^']*'|[^\s,}]+)/g)) {
+      const ref = quoted.replace(/^["']|["']$/g, "");
       if (!ref.startsWith("./") && !/^[^@\s]+@[0-9a-f]{40}$/.test(ref)) {
         problems.push(`line ${n}: ${ref} is not pinned by a 40-character commit SHA`);
       }
     }
+    // Each step's action and its `with:` name or pattern, for the artifact rule below.
+    if (path[0] === "jobs" && path[2] === "steps" && jobs.has(path[1])) {
+      const job = jobs.get(path[1]);
+      if (startsStep) {
+        job.steps.push({ uses: "", name: null, pattern: null });
+      }
+      const step = job.steps.at(-1);
+      if (step !== undefined && path.length === 5 && key === "uses") {
+        step.uses = value;
+      }
+      if (step !== undefined && path.length === 6 && path[4] === "with" && (key === "name" || key === "pattern")) {
+        step[key] = { value: value.replace(/^["']|["']$/g, ""), line: n };
+      }
+    }
     if (path[0] === "jobs" && path.length === 2 && key !== null) {
-      jobs.set(key, { line: n, permissions: false });
+      jobs.set(key, { line: n, permissions: false, steps: [] });
     }
     if (path[0] === "jobs" && path.length === 3 && key === "permissions") {
       jobs.get(path[1]).permissions = true;
@@ -234,6 +253,28 @@ function lintWorkflow(text) {
   for (const [name, job] of jobs) {
     if (!job.permissions) {
       problems.push(`line ${job.line}: job ${name} has no permissions block`);
+    }
+    // A job's download must not pick up what the same job uploads: a re-run of the job would
+    // download its own earlier upload. An expression in a name or pattern stands for anything.
+    const action = (step, what) => step.uses.startsWith(`actions/${what}-artifact@`);
+    const uploads = job.steps.filter((step) => action(step, "upload") && step.name !== null);
+    for (const step of job.steps.filter((one) => action(one, "download"))) {
+      const wanted = step.pattern ?? step.name;
+      const glob = new RegExp(
+        `^${(wanted?.value ?? "*")
+          .split(/(\$\{\{.*?\}\}|\*)/)
+          .map((part, i) => (i % 2 === 1 ? ".*" : part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")))
+          .join("")}$`,
+      );
+      for (const upload of uploads) {
+        if (glob.test(upload.name.value.replace(/\$\{\{.*?\}\}/g, "x"))) {
+          const what = wanted?.value ?? "every artifact";
+          problems.push(
+            `line ${wanted?.line ?? upload.name.line}: job ${name} downloads ${what}, ` +
+              `which matches its own upload ${upload.name.value} (line ${upload.name.line})`,
+          );
+        }
+      }
     }
   }
   return problems;
@@ -289,6 +330,30 @@ test("the workflow lint fails each broken rule", () => {
   ]);
   assert.deepEqual(broken("    runs-on:", "    secrets: inherit\n    runs-on:"), [
     "line 9: a secret outside a step (jobs.one.secrets)",
+  ]);
+  assert.deepEqual(broken("    runs-on:", "    env:\n      ALL: ${{ toJSON(secrets) }}\n    runs-on:"), [
+    "line 10: a secret outside a step (jobs.one.env.ALL)",
+  ]);
+  assert.deepEqual(broken("      - name: Sign", "      - { uses: actions/checkout@v4 }\n      - name: Sign"), [
+    "line 13: actions/checkout@v4 is not pinned by a 40-character commit SHA",
+  ]);
+  // A job that downloads release-* and uploads under a name the pattern does not match passes;
+  // an upload the pattern matches (a re-run would download it) fails, expressions included.
+  const artifacts = [
+    "      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2",
+    "        with:",
+    "          pattern: release-*",
+    "      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2",
+    "        with:",
+    "          name: dist-assets",
+    "      - name: Sign",
+  ].join("\n");
+  assert.deepEqual(broken("      - name: Sign", artifacts), []);
+  assert.deepEqual(broken("      - name: Sign", artifacts.replace("dist-assets", "release-assets")), [
+    "line 15: job one downloads release-*, which matches its own upload release-assets (line 18)",
+  ]);
+  assert.deepEqual(broken("      - name: Sign", artifacts.replace("dist-assets", "release-${{ matrix.target }}")), [
+    "line 15: job one downloads release-*, which matches its own upload release-${{ matrix.target }} (line 18)",
   ]);
 });
 
