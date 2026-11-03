@@ -19,16 +19,50 @@ use crate::profile_rig::{
 use crate::support::{Dir, FAKE};
 use crate::write;
 
+/// The seeded hosts, written out: a change to the seed list changes Claude's allow rules, so it
+/// changes this test too.
+const SEEDED: [&str; 33] = [
+    "sci.gov.in",
+    "egazette.gov.in",
+    "cci.gov.in",
+    "sebi.gov.in",
+    "rbi.org.in",
+    "ibbi.gov.in",
+    "mca.gov.in",
+    "indiacode.nic.in",
+    "allahabadhighcourt.in",
+    "aphc.gov.in",
+    "bombayhighcourt.nic.in",
+    "calcuttahighcourt.gov.in",
+    "highcourt.cg.gov.in",
+    "delhihighcourt.nic.in",
+    "ghconline.gov.in",
+    "gujarathighcourt.nic.in",
+    "hphighcourt.nic.in",
+    "jkhighcourt.nic.in",
+    "jharkhandhighcourt.nic.in",
+    "judiciary.karnataka.gov.in",
+    "highcourt.kerala.gov.in",
+    "mphc.gov.in",
+    "hcmadras.tn.gov.in",
+    "hcmimphal.nic.in",
+    "meghalayahighcourt.nic.in",
+    "orissahighcourt.nic.in",
+    "patnahighcourt.gov.in",
+    "highcourtchd.gov.in",
+    "hcraj.nic.in",
+    "hcs.gov.in",
+    "tshc.gov.in",
+    "thc.nic.in",
+    "highcourtofuttarakhand.gov.in",
+];
+
 /// The `allowedTools` a Claude session gets with no hook and web search on.
 fn seeded(web_search: bool) -> Vec<String> {
     web_search
         .then(|| "WebSearch".to_owned())
         .into_iter()
-        .chain(
-            clauseo_host::browser::seed_sites::SEED_SITES
-                .iter()
-                .map(|host| format!("WebFetch(domain:{host})")),
-        )
+        .chain(SEEDED.map(|host| format!("WebFetch(domain:{host})")))
         .collect()
 }
 

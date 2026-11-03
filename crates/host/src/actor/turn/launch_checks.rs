@@ -331,7 +331,7 @@ pub(super) fn prepare(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>
                     None => None,
                 };
                 run.make(&data, &sweep)?;
-                run.chrome = chrome.find(&data);
+                run.chrome = chrome.find_with_config(&data);
                 let skills_written = write_skills(&skills);
                 Ok(Prepared {
                     stored,
@@ -384,6 +384,21 @@ impl ChromeSearch {
             Self::Roots(roots) => {
                 let roots = roots.unwrap_or_else(|| ChromeRoots::system(data));
                 crate::browser::chrome::find(&roots)
+            }
+        }
+    }
+
+    /// The Chrome found, once agent-browser's config file is in place
+    /// (`browser::write_config`). Without the file the guard cannot start, so a failure to
+    /// write it leaves the browser out (`BrowserNotInstalled`), with a warning; the launch goes
+    /// on. File system calls: off the actor.
+    fn find_with_config(self, data: &Path) -> Option<PathBuf> {
+        let chrome = self.find(data)?;
+        match crate::browser::write_config(data) {
+            Ok(_) => Some(chrome),
+            Err(error) => {
+                tracing::warn!(%error, "agent-browser's config file was not written; the session has no browser");
+                None
             }
         }
     }

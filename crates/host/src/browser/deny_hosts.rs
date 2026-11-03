@@ -1,5 +1,6 @@
 //! Hosts Chrome reaches on its own, not for a page the agent opened, which stage C's proxy denies
-//! silently: no "Allow this site?" card, since the lawyer could not tell what they are for.
+//! silently for browser sessions only (never for the agent's own traffic): no "Allow this site?"
+//! card, since the lawyer could not tell what they are for.
 //!
 //! **Provisional until G17 item 5**, which captures a session's real traffic through the proxy
 //! and settles the list. agent-browser v0.41.1 already starts Chrome with
@@ -58,7 +59,7 @@ pub const DENY_HOSTS: &[DenyHost] = &[
     },
     DenyHost {
         host: "accounts.google.com",
-        reason: "Chrome's sign-in checks; the fresh profile has no account",
+        reason: "Chrome's sign-in checks (fresh profile, no account); provisional for G17 item 5, since denying it breaks Google sign-in on every site",
     },
 ];
 

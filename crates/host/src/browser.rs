@@ -9,6 +9,31 @@ pub mod deny_hosts;
 pub mod limits;
 pub mod seed_sites;
 
+/// The app-wide folder under the data folder that holds agent-browser's config file.
+pub const CONFIG_DIR: &str = "browser";
+
+/// agent-browser's config file, `<data>/browser/agent-browser.json`: the path the profile's
+/// `browser` entry passes as `AGENT_BROWSER_CONFIG` (`clauseo_profile::ProfilePaths::browser_config`).
+pub const CONFIG_FILE: &str = "agent-browser.json";
+
+/// Makes `<data>/browser/` (through no link below `data`, 0700 on Unix) and writes `{}` to
+/// `agent-browser.json` there when it is absent, so the guard, which refuses a config path that
+/// names no file, can start. An existing file is left as it is; a link or anything not a file
+/// at that name is replaced. Returns the file's path. File system calls: off the actor (the
+/// launch prep).
+pub(crate) fn write_config(data: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
+    let folder = data.join(CONFIG_DIR);
+    crate::write::create_private_dirs_under(data, &folder)?;
+    #[cfg(unix)]
+    crate::write::make_private_dir(&folder)?;
+    let file = folder.join(CONFIG_FILE);
+    let is_file = std::fs::symlink_metadata(&file).is_ok_and(|meta| meta.is_file());
+    if !is_file {
+        crate::write::replace_private_file(&file, b"{}\n")?;
+    }
+    Ok(file)
+}
+
 /// Where the browser runs, a switch for stage C.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum BrowserLaunch {
@@ -35,3 +60,6 @@ pub struct UnsupportedLaunch {
     /// The port asked for.
     pub cdp_port: u16,
 }
+
+#[cfg(test)]
+mod tests;

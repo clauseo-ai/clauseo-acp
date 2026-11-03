@@ -194,17 +194,27 @@ fn find_with(roots: &ChromeRoots, edge_allowed: bool) -> Option<PathBuf> {
 }
 
 /// The highest-versioned Chrome for Testing under `<app data>/browsers/` whose binary is there.
+/// A version folder must be a real folder (a link is passed over, by `file_type`, which does not
+/// follow it), and the binary, links resolved, must still sit under the browsers folder, so a
+/// link planted in the folder cannot pick another program. The folder must be outside what an
+/// agent can write (record 0029).
 fn chrome_for_testing(roots: &ChromeRoots) -> Option<PathBuf> {
     let binary = roots.platform.cft_binary()?;
     let browsers = roots.app_data.join(BROWSERS_DIR);
+    let real_browsers = dunce::canonicalize(&browsers).ok()?;
     let mut found: Vec<(Vec<u64>, PathBuf)> = std::fs::read_dir(&browsers)
         .ok()?
         .flatten()
         .filter_map(|entry| {
+            if !entry.file_type().ok()?.is_dir() {
+                return None;
+            }
             let name = entry.file_name();
             let version = version(name.to_str()?.strip_prefix(CFT_PREFIX)?)?;
             let path = entry.path().join(&binary);
-            is_file(&path).then_some((version, path))
+            let inside =
+                dunce::canonicalize(&path).is_ok_and(|real| real.starts_with(&real_browsers));
+            (inside && is_file(&path)).then_some((version, path))
         })
         .collect();
     found.sort();
