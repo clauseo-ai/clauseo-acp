@@ -47,6 +47,11 @@
     color: var(--primary);
     font-weight: 560;
   }
+  .step-trouble-icon {
+    display: inline-block;
+    vertical-align: text-bottom;
+    margin-inline-end: var(--s1);
+  }
   .step-group-chev {
     flex: none;
   }
