@@ -7,7 +7,9 @@ mod allow;
 mod patterns;
 mod stetdoc;
 
+use std::cell::{Cell, OnceCell};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use clauseo_protocol::MatterPath;
 use unicode_normalization::UnicodeNormalization;
@@ -26,37 +28,122 @@ const MAX_ENTRIES: usize = 20_000;
 /// The most words [`read_only`] and [`named_in`] read; a longer command is not read-only.
 const MAX_READ_WORDS: usize = 4096;
 
-/// A file of the matter that is held open.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// A file of the matter that is held open, or (on Windows) may be: a file beside an owner file
+/// that points at another, which only opening it can tell, opened the first time a command's
+/// text or wildcard matches its name ([`Held::is_held`]).
+#[derive(Debug, Clone)]
 pub(super) struct Held {
     pub(super) path: MatterPath,
-    /// Its last part, folded as [`fold`] does.
-    name: String,
-    /// Its last part as stored, only case-folded ([`case`]): a `?` wildcard counts characters,
-    /// which composing changes, so wildcards are matched against this too.
-    stored: String,
+    /// Its last part folded as [`fold`] does, and as stored, only case-folded ([`case`]): a `?`
+    /// wildcard counts characters, which composing changes, so wildcards are matched against
+    /// both. Made on first use.
+    names: OnceCell<(String, String)>,
+    state: Cell<State>,
+    /// Where to look when `state` is [`State::Unknown`].
+    folder: Option<Rc<Listed>>,
+}
+
+/// Whether a [`Held`] file is held open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum State {
+    Held,
+    NotHeld,
+    /// Not looked at yet.
+    Unknown,
+}
+
+/// A listed folder with an owner file: the matter's canonical root and the folder's owner files,
+/// for [`clauseo_matters::held_open_beside`].
+#[derive(Debug)]
+struct Listed {
+    root: PathBuf,
+    owners: Vec<String>,
 }
 
 impl Held {
     /// The held file at `path`.
     pub(super) fn new(path: MatterPath) -> Self {
-        let last = path.as_str().rsplit('/').next().unwrap_or_default();
-        let (name, stored) = (fold(last), case(last));
-        Self { path, name, stored }
+        Self {
+            path,
+            names: OnceCell::new(),
+            state: Cell::new(State::Held),
+            folder: None,
+        }
+    }
+
+    /// The file at `path` in `folder`, held or not as [`clauseo_matters::held_open_beside`]
+    /// will say when asked.
+    fn unknown(path: MatterPath, folder: &Rc<Listed>) -> Self {
+        Self {
+            path,
+            names: OnceCell::new(),
+            state: Cell::new(State::Unknown),
+            folder: Some(Rc::clone(folder)),
+        }
+    }
+
+    /// Its last part, folded ([`fold`]), and as stored, case-folded ([`case`]).
+    fn names(&self) -> &(String, String) {
+        self.names.get_or_init(|| {
+            let last = self.path.as_str().rsplit('/').next().unwrap_or_default();
+            (fold(last), case(last))
+        })
+    }
+
+    /// Whether it is held open: known, or asked of [`clauseo_matters::held_open_beside`] once,
+    /// the answer kept.
+    fn is_held(&self) -> bool {
+        match self.state.get() {
+            State::Held => true,
+            State::NotHeld => false,
+            State::Unknown => {
+                timings::probed();
+                let held = self.folder.as_ref().is_some_and(|folder| {
+                    clauseo_matters::held_open_beside(&folder.root, &self.path, &folder.owners)
+                        .is_some()
+                });
+                self.state
+                    .set(if held { State::Held } else { State::NotHeld });
+                held
+            }
+        }
     }
 }
 
+/// Two are the same file when their paths are.
+impl PartialEq for Held {
+    fn eq(&self, other: &Self) -> bool {
+        self.path == other.path
+    }
+}
+
+impl Eq for Held {}
+
+/// Whether a file that no owner file beside it points at may still be held open, so the walk
+/// keeps it to open when a command names it ([`Held::is_held`]): on Windows, where
+/// [`clauseo_matters::held_open_beside`] also opens the file and a sharing violation counts.
+const SHARE_MODES: bool = cfg!(windows);
+
 /// The files of the matter `folder` held open by an Office owner file
 /// ([`clauseo_matters::held_open_beside`], in each folder that has an owner file `~$…`, given
-/// that folder's owner files from this one listing, so a folder of many non-ASCII names is not
-/// listed again per file), read breadth first: no folder whose name starts with `.`, no symlink
-/// followed, at most [`MAX_ENTRIES`] entries. A file held on Windows by a share mode alone (no
-/// owner file) is not found here.
+/// that folder's owner files from this one listing), read breadth first: no folder whose name
+/// starts with `.`, no symlink followed, at most [`MAX_ENTRIES`] entries. Each folder is listed
+/// once and its names matched against its owner files in memory
+/// ([`clauseo_matters::OwnersBeside`]); only a file one may point at is looked up, so a folder of
+/// thousands of files beside one owner file costs its listing and a few calls. On Windows a file
+/// beside an owner file that points at another is kept unknown, opened only when a command's
+/// text or wildcard matches its name ([`SHARE_MODES`]): the lookup there also finds a file a
+/// program holds by a share mode alone, and this keeps finding it in such a folder. A file so held
+/// in a folder with no owner file is not found here.
 pub(super) fn held_files(folder: &Path) -> Vec<Held> {
+    held_files_with(folder, SHARE_MODES)
+}
+
+/// [`held_files`], keeping the files no owner file points at to open later when `share_modes`.
+fn held_files_with(folder: &Path, share_modes: bool) -> Vec<Held> {
     let root = dunce::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
     let mut held = Vec::new();
     let mut queue: std::collections::VecDeque<PathBuf> = std::iter::once(PathBuf::new()).collect();
-    let mut entries = 0;
     let mut walk = timings::Walk::default();
     while let Some(relative) = queue.pop_front() {
         let Ok(read) = std::fs::read_dir(root.join(&relative)) else {
@@ -65,9 +152,11 @@ pub(super) fn held_files(folder: &Path) -> Vec<Held> {
         walk.folders += 1;
         let mut files = Vec::new();
         let mut owners: Vec<String> = Vec::new();
+        // Every `~$` entry, of any kind: the lookup's stats find a folder of that name too.
+        let mut tilde: Vec<String> = Vec::new();
         for entry in read.flatten() {
-            entries += 1;
-            if entries > MAX_ENTRIES {
+            walk.entries += 1;
+            if walk.entries > MAX_ENTRIES {
                 walk.entries = MAX_ENTRIES;
                 timings::walked(walk);
                 return held;
@@ -75,6 +164,9 @@ pub(super) fn held_files(folder: &Path) -> Vec<Held> {
             let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
                 continue;
             };
+            if name.starts_with("~$") {
+                tilde.push(name.clone());
+            }
             let Ok(kind) = entry.file_type() else {
                 continue;
             };
@@ -93,15 +185,29 @@ pub(super) fn held_files(folder: &Path) -> Vec<Held> {
         }
         walk.owner_folders += 1;
         walk.checked += files.len();
+        let beside = clauseo_matters::OwnersBeside::new(&tilde);
+        let listed = Rc::new(Listed {
+            root: root.clone(),
+            owners,
+        });
         for name in files {
-            if let Some(path) = MatterPath::from_relative(&relative.join(&name))
-                && clauseo_matters::held_open_beside(&root, &path, &owners).is_some()
-            {
-                held.push(Held::new(path));
+            let candidate = beside.may_hold(&name);
+            if !candidate && !share_modes {
+                continue;
+            }
+            let Some(path) = MatterPath::from_relative(&relative.join(&name)) else {
+                continue;
+            };
+            if candidate {
+                walk.probed += 1;
+                if clauseo_matters::held_open_beside(&root, &path, &listed.owners).is_some() {
+                    held.push(Held::new(path));
+                }
+            } else {
+                held.push(Held::unknown(path, &listed));
             }
         }
     }
-    walk.entries = entries;
     timings::walked(walk);
     held
 }
@@ -171,7 +277,8 @@ fn holds(text: &str, name: &str) -> bool {
 /// The first of `held` whose name `text` holds as a whole name.
 fn named<'a>(text: &str, held: &'a [Held]) -> Option<&'a Held> {
     let text = fold(text);
-    held.iter().find(|file| holds(&text, &file.name))
+    held.iter()
+        .find(|file| holds(&text, &file.names().0) && file.is_held())
 }
 
 /// The first of `held` whose name a wildcard in the shell word `word` could match: the last
@@ -187,11 +294,12 @@ fn globbed<'a>(word: &str, held: &'a [Held]) -> Option<&'a Held> {
         }
         let patterns: [Vec<char>; 2] = [fold(last).chars().collect(), case(last).chars().collect()];
         held.iter().find(|file| {
-            let names: [Vec<char>; 2] =
-                [file.name.chars().collect(), file.stored.chars().collect()];
+            let (name, stored) = file.names();
+            let names: [Vec<char>; 2] = [name.chars().collect(), stored.chars().collect()];
             patterns
                 .iter()
                 .any(|pattern| names.iter().any(|name| glob_matches(pattern, name)))
+                && file.is_held()
         })
     })
 }
@@ -402,8 +510,9 @@ pub(super) fn shell_refusal(
     }
     let path = found.or_else(|| named_in(text, escape, &held).map(|file| file.path.clone()))?;
     let mut names_held = held;
-    if !names_held.iter().any(|file| file.path == path) {
-        names_held.push(Held::new(path.clone()));
+    match names_held.iter().find(|file| file.path == path) {
+        Some(file) => file.state.set(State::Held),
+        None => names_held.push(Held::new(path.clone())),
     }
     (!read_only(line, escape, &names_held, hits, folder)).then_some(Refusal::HeldOpen(path))
 }

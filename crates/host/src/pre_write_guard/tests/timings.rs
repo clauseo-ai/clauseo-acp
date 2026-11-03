@@ -51,7 +51,7 @@ fn a_refused_write_has_its_reason_then_the_timings() {
     );
     // A file tool lists nothing.
     assert!(
-        lines[1].ends_with(" | entries=0 folders=0 owner_folders=0 checked=0"),
+        lines[1].ends_with(" | entries=0 folders=0 owner_folders=0 checked=0 probed=0"),
         "{}",
         lines[1]
     );
@@ -73,7 +73,7 @@ fn a_shell_command_times_the_walk_and_counts_what_it_read() {
         ]
     );
     assert!(
-        lines[0].ends_with(" | entries=5 folders=2 owner_folders=1 checked=2"),
+        lines[0].ends_with(" | entries=5 folders=2 owner_folders=1 checked=2 probed=1"),
         "{}",
         lines[0]
     );
