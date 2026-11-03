@@ -90,7 +90,7 @@ fn steer_fallback_steering_is_mismatch() {
     ));
     assert_eq!(
         agent.expect_exit(EXIT_MISMATCH).stderr,
-        "fake_agent: steer-fallback.jsonl:5: expected notification session/cancel, got \
+        "fake_agent: steer-fallback.jsonl:3: expected notification session/cancel, got \
          _session/steering\n"
     );
 }

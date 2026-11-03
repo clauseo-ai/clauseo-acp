@@ -117,20 +117,41 @@ fn steer_falls_back_to_send_now() {
         &[(CODEX, Scenario::Bundled("steer-fallback"))],
     );
     let host = dir.start(0);
-    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], CODEX);
+    steer_fallback(&dir, &host);
+    host.shutdown();
+}
+
+/// The same with the pre-write guard set, as the desktop app sets it: the Codex session start
+/// first checks the guard's hook is trusted (`_codex/hooks/list`), then the turn runs as above.
+#[test]
+fn steer_falls_back_to_send_now_with_the_guard() {
+    let dir = Dir::new(
+        "steer_falls_back_to_send_now_with_the_guard",
+        &[(CODEX, Scenario::Bundled("steer-fallback"))],
+    );
+    let guard = std::path::PathBuf::from("/opt/clauseo/clauseo-desktop");
+    let host = dir.start_with(0, |config| config.with_pre_write_guard(guard));
+    steer_fallback(&dir, &host);
+    host.shutdown();
+}
+
+/// Plays `steer-fallback` as `codex-acp` on `host`: the first answer's text is folded into the
+/// thread, the steer cancels it and runs as the next turn.
+fn steer_fallback(dir: &Dir, host: &Running) {
+    let (_, thread, _) = matter_with_thread(dir, host, "m", &[("brief.txt", "x\n")], CODEX);
     assert!(
-        !steer_joins_turn(&host, thread),
+        !steer_joins_turn(host, thread),
         "known before the first send: codex-acp's steer does not join"
     );
     let mut events = host.events(StreamId::Thread(thread));
     let (first, _) = host.prompt(thread, "Summarise the clause.");
     host.wait_armed(DURABLE);
 
-    let (second, message) = send(&host, thread, text(STEER), DeliveryRequest::Steer);
+    let (second, message) = send(host, thread, text(STEER), DeliveryRequest::Steer);
     assert_ne!(second, first, "a steer that cannot join is a new turn");
     assert_eq!(events.until_turn_ended(first).stop, StopReason::Cancelled);
     assert_eq!(events.until_turn_ended(second).stop, StopReason::EndTurn);
-    settle(&host, &mut events);
+    settle(host, &mut events);
 
     let (user_at, user) = user_message(&events, message);
     assert_eq!((user.turn, user.delivery), (second, Delivery::Steer));
@@ -145,13 +166,19 @@ fn steer_falls_back_to_send_now() {
     );
     let queued = events.last_queued(second).unwrap();
     assert_eq!(queued.behind_turn(), Some(first));
+    // The first answer's text is in the log and in the thread's view (the answer so far is kept).
     assert_eq!(events.turn_text(first), "The clause ");
     assert_eq!(events.turn_text(second), "Focusing on clause 4.");
+    let mut view = host.view(StreamId::Thread(thread), None);
+    view.until_items(1);
     assert!(
-        !steer_joins_turn(&host, thread),
+        view.mentions("The clause "),
+        "the first answer is not in the view"
+    );
+    assert!(
+        !steer_joins_turn(host, thread),
         "codex-acp's steer does not join"
     );
-    host.shutdown();
 }
 
 #[test]
