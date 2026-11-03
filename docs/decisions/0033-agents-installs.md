@@ -89,9 +89,9 @@ own Node. The archive is read once into memory (at most its snapshot size, about
 SHA-256 checked on those very bytes, which are the ones unpacked: nothing is opened again by path
 after a check, and a mismatch deletes the archive. It is extracted into a temp folder beside
 `runtime/<name>`, with the archive's top folder stripped and no link, absolute path or `..`
-entry; `node` is synced to disk, and the folder renamed into place. A runtime folder is complete
-only when its own `clauseo-runtime.json` (the archive's SHA-256, synced before its rename) is
-there.
+entry; `node` and `npm-cli.js` are synced to disk, and the folder renamed into place. A runtime
+folder is complete only when its own `clauseo-runtime.json` (the archive's SHA-256, synced before
+its rename) is there.
 
 **Downloads are Rust's, the install is npm's.** For each package the derived lock lists for this
 platform (npm's `os`, `cpu` and `libc` rule; libc on Linux only, musl when the musl loader is
@@ -118,8 +118,8 @@ present), the crate fetches `resolved` itself:
 The crate then runs `node <npm-cli.js> cache add <absolute paths…>` in batches of 40. Next comes
 `node <npm-cli.js> ci` in `install/.tmp-<hash>-<n>`. Both get `--cache <npm-cache> --userconfig
 <agents/npmrc> --globalconfig <agents/npmrc-global> --update-notifier=false --logs-max=0`, both
-files empty (npm refuses one file for both), so no npmrc of the user's or the machine's applies. `ci` adds `--offline --ignore-scripts
---no-bin-links --no-audit --no-fund`, so it makes no network call. No proxy and no CA file reach
+files empty (npm refuses one file for both), so no npmrc of the user's or the machine's
+applies. `ci` adds `--offline --ignore-scripts --no-bin-links --no-audit --no-fund`, so it makes no network call. No proxy and no CA file reach
 npm (no `--proxy`, `--https-proxy`, `--cafile` or `NODE_EXTRA_CA_CERTS`): npm never uses the
 network here, and a proxy's password on a command line is visible to other local users. Each npm
 run gets `NODE_OPTIONS` set empty. Each run is raced against a pause and a
@@ -134,9 +134,14 @@ the lock hash, the Node path and version, the platform, and `installed_at` in Un
 folder without a valid receipt is incomplete and is removed. So are temp folders and other
 `<hash>` folders of the same agent (old pins), at the next `Agents::start`, since nothing runs
 from them then. At start a receipt's Node is run only when it is the runtime under
-`agents/runtime/` (complete, and answering `--version` through the launcher, so a runtime cut
-short by a power cut is fetched again) or the very program the `PATH` search finds now. Any
-other Node, or one gone or below 22, means the install is redone. The data folder at rest is
+`agents/runtime/` (complete, and answering `--version` through the launcher) or the very program
+the `PATH` search finds now. A receipt naming any other Node (an nvm switch, say) is rewritten
+atomically to name the Node found now, else the usable runtime, and the agent stays ready; only
+with no usable Node is the install redone. A `--version` that times out or will not start is not
+proof of a bad Node: the agent stays ready and is checked again at the next install or start.
+Only a clear bad answer (a non-zero exit, or a version below 22) fetches the runtime again. If
+npm cannot start from the runtime, or cannot load its own modules, the runtime folder is removed
+so the next try fetches it. The data folder at rest is
 trusted (anyone who can write it can edit the adapter after a genuine install), so receipts mark
 completeness, not content.
 
@@ -215,7 +220,12 @@ setting, and start-up neither cleans nor reads anything under a relative data fo
 - R20 adds the four codes to `ErrorCode`, wires `Agents` into desktop, and writes `Installed` as
   the `agents.<id>` entry.
 - An install is not a hot path. Nothing runs once installs are done.
+- Release builds must build `clauseo-desktop` alone (`-p clauseo-desktop`, as `tauri build`
+  does): a combined build with this crate's tests would merge in `test-support`, which allows
+  plain-HTTP downloads.
 - Accepted from the security review (S17), left as they are:
+  - A download has no overall time limit, only the 60 s stall timer: its bytes are capped, and a
+    pause stops it.
   - The user's own Node is not checked against a digest (by design); the remaining risk is a
     `PATH` folder that other accounts can write to.
   - Windows reserved names (`CON`, `NUL`, `COM1`), trailing dots and size limits are not checked

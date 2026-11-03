@@ -245,7 +245,8 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
     /// Each snapshot agent's state at start.
     async fn first_states(&self) {
         let config = &self.config;
-        let user = node::find_user_node(&config.node_search, &*self.launcher, &*self.timer).await;
+        let search =
+            node::search_user_node(&config.node_search, &*self.launcher, &*self.timer).await;
         let agents: Vec<AgentId> = config.snapshot.agents().map(|e| e.id.clone()).collect();
         // The clean-up below runs only with `agents/.lock` held: another Clauseo installing now
         // may own the temp folders it would remove. A relative data folder is never touched.
@@ -271,21 +272,16 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
                 drop(scan.and_then(|scan| receipt::remove_stale(&scan)));
             }
             if paths_ok
-                && let Some(installed) = install::ready_install(
-                    config,
-                    &*self.launcher,
-                    &*self.timer,
-                    &agent,
-                    user.as_ref(),
-                )
-                .await
+                && let Some(installed) =
+                    install::ready_install(config, &*self.launcher, &*self.timer, &agent, &search)
+                        .await
             {
                 let version = installed.version.clone();
                 self.shared
                     .emit(&agent, InstallState::Ready { version }, Some(installed));
                 continue;
             }
-            let node_needed = user.is_none() && !install::runtime_ready(config);
+            let node_needed = search.found.is_none() && !install::runtime_ready(config);
             let download_bytes = config
                 .snapshot
                 .download_bytes(&agent, config.platform, node_needed)

@@ -40,7 +40,9 @@ fn a_node_below_22_is_passed_over_and_a_22_with_npm_is_used() {
     let old = fake_node(&dir, "old", "v20.11.0", true);
     let new = fake_node(&dir, "new", "v22.1.0", true);
     let path = std::env::join_paths([old.parent().unwrap(), new.parent().unwrap()]).unwrap();
-    let found = block_on(find_user_node(&search(&path), &launcher(), &AsyncIoTimer)).unwrap();
+    let found = block_on(search_user_node(&search(&path), &launcher(), &AsyncIoTimer))
+        .found
+        .unwrap();
     assert_eq!(found.program, dunce::canonicalize(&new).unwrap());
     assert_eq!(found.version, "v22.1.0");
     assert_eq!(
@@ -62,7 +64,7 @@ fn a_node_without_npm_beside_it_is_not_used() {
     );
     let path = std::ffi::OsString::from(lone.parent().unwrap());
     assert_eq!(
-        block_on(find_user_node(&search(&path), &launcher(), &AsyncIoTimer)),
+        block_on(search_user_node(&search(&path), &launcher(), &AsyncIoTimer)).found,
         None
     );
 }
@@ -75,11 +77,12 @@ fn a_symlinked_candidate_resolves_to_its_target() {
     let links = dir.0.join("homebrew").join("bin");
     write::create_dir_all(&links).unwrap();
     write::symlink(&real, &links.join("node")).unwrap();
-    let found = block_on(find_user_node(
+    let found = block_on(search_user_node(
         &search(links.as_os_str()),
         &launcher(),
         &AsyncIoTimer,
     ))
+    .found
     .unwrap();
     assert_eq!(found.program, dunce::canonicalize(&real).unwrap());
     assert!(

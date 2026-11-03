@@ -184,17 +184,16 @@ impl Fetcher {
             write::create_dir_all(parent).map_err(|err| at.io(&err))?;
         }
         let part = part_path(&job.dest);
-        // A link where the `.part` goes is removed (the link, not its target); the opens below
-        // refuse one that appears later.
-        if std::fs::symlink_metadata(&part).is_ok_and(|meta| meta.file_type().is_symlink()) {
-            write::remove_file(&part).map_err(|err| at.io(&err))?;
-        }
         let mut restarted = false;
         loop {
             if cancel.is_cancelled() {
                 return Err(at.cancelled());
             }
-            let offset = std::fs::symlink_metadata(&part).map_or(0, |meta| meta.len());
+            // A link at the `.part` counts as nothing there; `write_checked` removes it.
+            let offset = std::fs::symlink_metadata(&part)
+                .ok()
+                .filter(std::fs::Metadata::is_file)
+                .map_or(0, |meta| meta.len());
             let mut request = self.agent.get(&job.url);
             if offset > 0 {
                 request = request.header("Range", format!("bytes={offset}-"));
@@ -319,6 +318,11 @@ fn write_checked(
     at: &Place<'_>,
 ) -> Result<u64, FetchError> {
     let (status, offset) = (source.status, source.offset);
+    // A link where the `.part` goes is removed (the link, not its target); the opens below
+    // refuse one that appears later.
+    if std::fs::symlink_metadata(part).is_ok_and(|meta| meta.file_type().is_symlink()) {
+        write::remove_file(part).map_err(|err| at.io(&err))?;
+    }
     let mut hasher = job.expected.hasher();
     let mut file = if offset > 0 {
         hash_file(part, &mut hasher).map_err(|err| at.io(&err))?;
