@@ -26,7 +26,7 @@ afterEach(async () => {
 });
 
 test("the domain's first letter, uppercase, with www. dropped", () => {
-  expect(siteLetter("https://www.indiankanoon.org/doc/1/")).toBe("I");
+  expect(siteLetter("https://www.indiacode.nic.in/handle/1/")).toBe("I");
   expect(siteLetter("https://WWW.Example.com")).toBe("E");
   expect(siteLetter("http://user:pw@sci.gov.in:8080/x?y#z")).toBe("S");
   expect(siteLetter("livelaw.in/news")).toBe("L");

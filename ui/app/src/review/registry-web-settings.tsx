@@ -1,14 +1,13 @@
 // The web brief's copy review entries for Settings' Privacy section, apart from registry.tsx to keep that file under the size
 // limit: each new string in the real window (settings-app.tsx) over FakeTransport, open at Privacy, at the window's
 // size. The plans' rows show both plans while the window knows none, Claude's alone with Claude's limits only; the
-// tools' switches show only when the host sends them (app-local today): on, web search off, or both locked and off
+// tools' switches show only when the host sends them (SettingsView.tools): on, web search off, or both locked and off
 // as a firm's policy sends them. The websites' row shows always but with both tools off; the Browser switch's reason
 // (no website check) while it is on. An info tip's entries show the tip open, pressed once the page has it.
 import { st, type SettingsKey } from "@clauseo/components/lib/words-settings.ts";
 import { tw, type ToolsKey } from "@clauseo/components/lib/words-tools.ts";
 import { toolsLine, type ToolsLineKey } from "@clauseo/components/lib/words-tools-line.ts";
-import type { ToolSettings } from "../room/host-next.ts";
-import type { AgentLimitsView, LimitsView } from "../transport/protocol.ts";
+import type { AgentLimitsView, LimitsView, ToolsSettingsView } from "../transport/protocol.ts";
 import type { Entry } from "./entry.ts";
 import { OpenTip } from "./open-tip.tsx";
 import { SettingsOver } from "./states-settings.tsx";
@@ -18,10 +17,15 @@ import { settingsWords, type WordsRef } from "./words.ts";
 const WINDOW = { width: 960, height: 700 } as const;
 
 /** The state each entry shows Privacy in; `tip` names an info tip's button to press open once it shows. */
-type State = { tools?: ToolSettings; locked?: string[]; limits?: LimitsView; tip?: SettingsKey };
+type State = {
+  tools?: ToolsSettingsView;
+  locked?: string[];
+  limits?: LimitsView;
+  tip?: SettingsKey;
+};
 
-const ON: ToolSettings = { web_search: true, browser: true };
-const OFF: ToolSettings = { web_search: false, browser: false };
+const ON: ToolsSettingsView = { web_search: true, browser: true };
+const OFF: ToolsSettingsView = { web_search: false, browser: false };
 
 /** A line of the room's tool line words (words-tools-line.ts) that Settings says too. */
 const lineWords = (key: ToolsLineKey): WordsRef => ({

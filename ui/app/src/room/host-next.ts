@@ -24,6 +24,8 @@ import type {
   ThreadSummary,
   ThreadsChanged,
   Timestamp,
+  ToolsPatch,
+  ToolsSettingsView,
 } from "../transport/protocol.ts";
 import {
   wireAgentsHost,
@@ -68,13 +70,11 @@ export type UiSettings = {
 export type Settings = {
   ui: UiSettings;
   locked: string[];
-  /** The tools' switches (`tools.web_search`, `tools.browser`), app-local until the host's SettingsView carries them
-   * (it has `ui` and `locked` only); the real host never sends them yet, so Privacy's switches stay hidden. */
-  tools?: ToolSettings;
+  /** The tools' switches in force (`tools.web_search`, `tools.browser`), as SettingsView carries them. Absent only
+   * without a host (the settings then live in localStorage, and nothing would apply the switches), or from a fake that
+   * leaves them out; Privacy's switches show only with them. */
+  tools?: ToolsSettingsView;
 };
-
-/** The settings' `tools` table, as the settings crate's ToolsSettings has it. */
-export type ToolSettings = { web_search: boolean; browser: boolean };
 
 /* ---------- H3, H5, H20: a matter's details ---------- */
 
@@ -179,7 +179,7 @@ export type RetryCommand = { retry_from: { thread: ThreadId; message: MessageId 
  * retry. */
 export type NextCommand =
   | { set_ui_settings: { patch: Partial<UiSettings> } }
-  | { set_tool_settings: { patch: Partial<ToolSettings> } }
+  | { set_tool_settings: { patch: ToolsPatch } }
   | MattersCommand
   | RetryCommand;
 /** What a command did: `"done"`, create_matter's `{"matter_created": {"matter": ...}}`, or retry_from's
@@ -213,7 +213,7 @@ export const WIRE = {
   listPapers: "list_papers",
   getSettings: "get_settings",
   setUiSettings: "set_ui_settings",
-  /** App-local: no host command yet (SetUiSettings covers the `ui` keys only). */
+  /** HostCommand::SetToolSettings; only the settings window sends it, the main window's host refuses it. */
   setToolSettings: "set_tool_settings",
   settingsChanged: "settings_changed",
   listMatters: "list_matters",
@@ -241,8 +241,8 @@ export interface PapersHost {
 export interface SettingsHost {
   getSettings(): Promise<Settings>;
   setUiSettings(patch: Partial<UiSettings>): Promise<void>;
-  /** The tools' switches; only the fake has it until the host takes a patch for `tools`. */
-  setToolSettings?(patch: Partial<ToolSettings>): Promise<void>;
+  /** The tools' switches: only the keys that change, refused whole with `settings.locked` when one is locked. */
+  setToolSettings(patch: ToolsPatch): Promise<void>;
   /** Hears each `settings_changed`. Returns the unsubscribe. */
   onSettingsChanged(listener: (settings: Settings) => void): () => void;
 }

@@ -13,7 +13,8 @@ import {
   type Platform,
 } from "@clauseo/components/lib/display.ts";
 import { frameBatch, liteBatch, type Batch } from "../store/batch.ts";
-import type { Settings, SettingsHost, ToolSettings, UiSettings } from "./host-next.ts";
+import type { Settings, SettingsHost, UiSettings } from "./host-next.ts";
+import type { ToolsPatch, ToolsSettingsView } from "../transport/protocol.ts";
 
 /** The settings without a host; with one, a cache of the host's last answer, read only for the first frame. */
 export const DISPLAY_KEY = "clauseo.display";
@@ -99,9 +100,9 @@ export interface DisplayStore {
   /** The keys the firm's policy locks, dotted (`ui.theme`), as the host last said; none without a host. */
   locked(): readonly string[];
   /** The tools' switches as the host last said, or undefined while it sends none (today's host). */
-  tools(): ToolSettings | undefined;
+  tools(): ToolsSettingsView | undefined;
   /** The lawyer's change to a tool's switch, sent to the host as a patch; nothing without a host that takes one. */
-  setTools(patch: Partial<ToolSettings>): void;
+  setTools(patch: ToolsPatch): void;
   display(): Display;
   /** The lawyer's change: written to localStorage, or with a NextHost sent to the host as a patch. */
   set(patch: Partial<UiSettings>): void;
@@ -179,7 +180,7 @@ export function createDisplayStore(env: DisplayEnv): DisplayStore {
 
   const host = env.host;
   let locked: readonly string[] = [];
-  let tools: ToolSettings | undefined;
+  let tools: ToolsSettingsView | undefined;
   let stopHost = () => {};
   /** The settings_changed events heard: a read that one overtook is older than it, and dropped. */
   let heard = 0;
@@ -229,7 +230,7 @@ export function createDisplayStore(env: DisplayEnv): DisplayStore {
     locked: () => locked,
     tools: () => tools,
     setTools(patch) {
-      if (host === null || host.setToolSettings === undefined || tools === undefined) return;
+      if (host === null || tools === undefined) return;
       tools = { ...tools, ...patch };
       host.setToolSettings(patch).catch((error: unknown) => {
         console.warn(`set_tool_settings failed: ${JSON.stringify(error)}`);
