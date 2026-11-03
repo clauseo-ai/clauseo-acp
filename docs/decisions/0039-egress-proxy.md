@@ -32,7 +32,8 @@ code departs from the brief.
   (agent listener only; the 407's log line names the host asked for), form and scheme (405,
   `Scheme`; 400 with no denial when there is no host to name, or for a `host:port` target on a
   method other than CONNECT), silent list (403, no denial), port (403, `Port`: 443 for CONNECT,
-  80 for `http://`), allowlist (403, `NotAllowed`, `shared_hosting` from
+  80 for `http://`), a non-public IP literal or `localhost` name (403, `PrivateAddress`;
+  amended 2026-11-03, below), allowlist (403, `NotAllowed`, `shared_hosting` from
   `proxy/shared_hosts.rs`), route (under the connect timeout; a lookup that takes longer goes
   direct), address check (DNS under the connect timeout; 504), then a tunnel slot (64 per launch;
   the next gets 503 and no denial) and the connect (10 s; 502, or 504 on the timeout).
@@ -52,7 +53,8 @@ code departs from the brief.
 - **Names.** One helper reads list entries and requests alike: one trailing dot dropped, IDN to
   ASCII and case folded through `url`'s host parser, labels checked against DNS's shape, IPv4 in
   any form the URL standard reads. `*.domain` matches names under `domain`, not `domain` itself.
-  An IP literal matches only an exact entry and still goes through the address check.
+  An IP literal matches only an exact entry and still goes through the address check; a
+  non-public literal or `localhost` is refused before the list (amended 2026-11-03, below).
 - **Address check.** After DNS a host is refused if any of its addresses is not public (the list
   is in `proxy/address.rs`), and the proxy connects only to those addresses, in order, never
   resolving again. Through an upstream the name still goes to the upstream unresolved, but the
@@ -193,6 +195,16 @@ kernel picked it: if the kernel hands back a claimed port (it hands out only por
 it is held for an instant under the registry lock and the bind asked again, and a launch binding
 that exact port in that instant fails, but cannot take it over. On Windows the candidate loop skips
 claimed ports before any bind.
+
+Amended 2026-11-03: private-address refusals come before the allowlist. On both listeners and in
+both forms (CONNECT and absolute-form `http://`), a host that is an IP literal in any form the
+parser reads (dotted, hex, bracketed IPv6) whose address the address check calls non-public, or
+`localhost` or a name under it (any case, a trailing dot dropped), is refused with 403 and
+`Denial::Host { why: PrivateAddress }` right after the port check, before the allowlist, and is
+never resolved. Before, an unlisted private literal was `NotAllowed`, whose card offers to allow
+it, and a listed `localhost` was resolved and checked only by its answers. No allowlist entry can
+let a private literal or `localhost` through now. A public literal off the list stays
+`NotAllowed`, and a listed one still goes through the address check.
 
 ## Status
 

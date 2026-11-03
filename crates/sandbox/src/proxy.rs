@@ -8,10 +8,11 @@
 //!
 //! Each request passes these checks in order: the head, the token (agent listener only), the
 //! form and scheme (405, `Scheme`; 400 when there is no host to name), the silent list (403, no
-//! denial), the port (403, `Port`), the allowlist (403, `NotAllowed`), the route, the address
-//! check (403, `PrivateAddress`: every resolved address on a direct connection; through an
-//! upstream, an IP literal, or a name's local answers when local DNS gives any), then the
-//! connect.
+//! denial), the port (403, `Port`), an IP literal that is not public or a `localhost` name
+//! (403, `PrivateAddress`; no allowlist entry lets one through), the allowlist (403,
+//! `NotAllowed`), the route, the address check (403, `PrivateAddress`: every resolved address
+//! on a direct connection; through an upstream, an IP literal, or a name's local answers when
+//! local DNS gives any), then the connect.
 //!
 //! A sink or record callback runs on the proxy thread and must not block: one that blocks stalls
 //! every connection of the launch, and `ProxyHandle`'s drop, which joins the thread.

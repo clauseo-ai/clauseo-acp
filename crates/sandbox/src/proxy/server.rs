@@ -250,8 +250,9 @@ async fn handle(ctx: &Ctx, client: &Stream, exchange: &mut Exchange, pending: Pe
 }
 
 impl Ctx {
-    /// The checks that need no network: form and scheme, the silent list, port and the
-    /// allowlist. Fills the exchange's host, port and verdict; `Err` is the status to answer.
+    /// The checks that need no network: form and scheme, the silent list, port, a private IP
+    /// literal or `localhost` name, and the allowlist. Fills the exchange's host, port and
+    /// verdict; `Err` is the status to answer.
     fn check(&self, request: &Request, exchange: &mut Exchange) -> Result<Target, u16> {
         let target = classify(request).map_err(|refusal| {
             exchange.host.clone_from(&refusal.host);
@@ -276,6 +277,11 @@ impl Ctx {
         };
         if target.port != required {
             self.refuse(exchange, HostRefusal::Port, false);
+            return Err(403);
+        }
+        // Before the allowlist, so no entry can let a private literal or `localhost` through.
+        if target.name.is_private() {
+            self.refuse(exchange, HostRefusal::PrivateAddress, false);
             return Err(403);
         }
         if !self.shared.live().allow.contains_name(&target.name) {
