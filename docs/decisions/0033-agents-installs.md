@@ -132,8 +132,12 @@ tarballs, the Node archive and the npm cache are removed.
 the lock hash, the Node path and version, the platform, and `installed_at` in Unix seconds. A
 folder without a valid receipt is incomplete and is removed. So are temp folders and other
 `<hash>` folders of the same agent (old pins), at the next `Agents::start`, since nothing runs
-from them then. If the receipt's Node is gone or below 22 at start, the install is redone with a
-downloaded Node.
+from them then. At start a receipt's Node is run only when it is the runtime under
+`agents/runtime/` (complete, and answering `--version` through the launcher, so a runtime cut
+short by a power cut is fetched again) or the very program the `PATH` search finds now. Any
+other Node, or one gone or below 22, means the install is redone. The data folder at rest is
+trusted (anyone who can write it can edit the adapter after a genuine install), so receipts mark
+completeness, not content.
 
 **Progress** is bytes received and the total for the agent, with Node's archive inside the total
 and never named. The total adds Node's archive size from the snapshot, each package's size once

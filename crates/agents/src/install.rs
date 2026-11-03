@@ -185,10 +185,6 @@ impl<T: Timer + Send + Sync> Job<T> {
     async fn work(&self) {
         let agent = &self.ticket.agent;
         let config = &self.config;
-        if let Some(installed) = ready_install(config, &*self.launcher, &*self.timer, agent).await {
-            self.ready(installed);
-            return;
-        }
         let user = {
             let find = pin!(node::find_user_node(
                 &config.node_search,
@@ -200,6 +196,12 @@ impl<T: Timer + Send + Sync> Job<T> {
                 Either::Right(((), _)) => return,
             }
         };
+        let (launcher, timer) = (&*self.launcher, &*self.timer);
+        if let Some(installed) = ready_install(config, launcher, timer, agent, user.as_ref()).await
+        {
+            self.ready(installed);
+            return;
+        }
         let mut run = Run {
             log: InstallLog::new(agent),
             tries: 0,
@@ -281,7 +283,7 @@ impl<T: Timer + Send + Sync> Job<T> {
             None => {
                 let dir = node::runtime_dir(&config.data_dir, config.snapshot.node(), platform);
                 NodeChoice::Runtime {
-                    fetch: !runtime_ready(config),
+                    fetch: !runtime_ok(config, &*self.launcher, &*self.timer).await,
                     dir,
                 }
             }
@@ -400,13 +402,32 @@ pub(crate) fn runtime_ready(config: &AgentsConfig) -> bool {
     node::runtime_valid(&dir, archive, config.platform.os)
 }
 
-/// `agent`'s finished install: a valid receipt in its `<hash>` folder whose Node is still
-/// there (the downloaded one complete, or the user's still v22 or later).
+/// Whether the downloaded Node is unpacked, complete and answers `--version` (v22 or later,
+/// through the launcher): a runtime cut short by a power cut is fetched again.
+pub(crate) async fn runtime_ok<T: Timer>(
+    config: &AgentsConfig,
+    launcher: &dyn Launcher,
+    timer: &T,
+) -> bool {
+    if !runtime_ready(config) {
+        return false;
+    }
+    let dir = node::runtime_dir(&config.data_dir, config.snapshot.node(), config.platform);
+    let program = node::runtime_program(&dir, config.platform.os);
+    node::check_node(&program, launcher, timer).await.is_ok()
+}
+
+/// `agent`'s finished install: a valid receipt in its `<hash>` folder whose Node is one this
+/// start would choose anyway. That is the downloaded runtime, complete and answering
+/// `--version`, or `user`, the Node the `PATH` search finds now. A receipt naming any other
+/// program is not run (the data folder is trusted at rest, but a receipt marks completeness,
+/// not which program may run), and the install is redone.
 pub(crate) async fn ready_install<T: Timer>(
     config: &AgentsConfig,
     launcher: &dyn Launcher,
     timer: &T,
     agent: &AgentId,
+    user: Option<&FoundNode>,
 ) -> Option<Installed> {
     let entry = config.snapshot.agent(agent)?;
     let hash = config.snapshot.install_hash(agent, config.platform)?;
@@ -414,11 +435,9 @@ pub(crate) async fn ready_install<T: Timer>(
     let receipt = read_receipt(&folder, agent, &hash, config.platform)?;
     let runtime = node::runtime_dir(&config.data_dir, config.snapshot.node(), config.platform);
     let node_ok = if receipt.node == node::runtime_program(&runtime, config.platform.os) {
-        runtime_ready(config)
+        runtime_ok(config, launcher, timer).await
     } else {
-        node::check_node(&receipt.node, launcher, timer)
-            .await
-            .is_ok()
+        user.is_some_and(|found| found.program == receipt.node)
     };
     node_ok.then(|| Installed {
         node: receipt.node.clone(),
