@@ -44,10 +44,14 @@ export function AnswerMeta({
   const [now] = useState(Date.now);
   const ended = useTimeOf(step, stream, paged);
   const queued = useStreamPart(useViewStore(), stream, pickQueued);
+  // a turn seen waiting behind another conversation's writer stays one that waited once it runs: the view keeps the
+  // wait only while it lasts (the header's `queued`), so the line remembers it for this answer, its question's id
+  const [waitedFor, setWaitedFor] = useState<EntryId | undefined | null>(null);
+  if (queued && ended === null && waitedFor !== asked) setWaitedFor(asked);
   const start = startOf(
     useTimeOf(asked, stream, paged),
     useTimeOf(before, stream, paged),
-    queued && ended === null,
+    ended === null && (queued || waitedFor === asked),
   );
   const started = start === null ? null : stamp(w.lang, start, now);
   return (

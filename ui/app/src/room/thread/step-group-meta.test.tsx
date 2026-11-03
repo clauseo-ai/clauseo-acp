@@ -254,6 +254,14 @@ test("a question that waited shows no time while live: behind the turn before, o
   };
   h.deliver([reset([ASKED, toolCall(8, 202, "pending")], queued)]);
   expect(timeOf(lastMeta())).toEqual({ who: "Clauseo", held: [] });
+  // the other conversation finishes and this turn runs: it still waited, so still no time while live
+  h.deliver([upsert(header("running")), upsert(toolCall(8, 202, "in_progress"))]);
+  await h.settle();
+  expect(timeOf(lastMeta())).toEqual({ who: "Clauseo", held: [] });
+  // at the end, the time it ended
+  h.deliver([upsert(toolCall(8, 202, "completed")), upsert(step(10)), upsert(header("idle"))]);
+  await h.settle();
+  expect(timeOf(lastMeta()).who).toBe(`Clauseo, ${stamp("en", 10_000, Date.now())}`);
 });
 
 test("the start time is honest or none: startOf", () => {
