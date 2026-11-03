@@ -49,6 +49,18 @@
     margin-right: var(--s2);
     color: var(--muted);
   }
+  /* the pen, in the wait icon's place while Clauseo writes: one line of the row's words tall, 110 by 36 design units,
+     so its box never changes as it writes. The writing fades in from the left as the paper carries it off. */
+  .pen-mark {
+    display: block;
+    flex: none;
+    height: calc(var(--lh-small-row) * var(--k));
+    width: calc(var(--lh-small-row) * var(--k) * 110 / 36);
+    overflow: hidden;
+    color: var(--muted);
+    /* a mask reads only alpha, so any opaque tone serves */
+    mask-image: linear-gradient(to right, transparent, var(--primary) 24%);
+  }
   .working-text {
     /* the words keep a readable column; when the time and the actions can't share their line, the actions go to a
        second line at the right rather than squeezing the words */
