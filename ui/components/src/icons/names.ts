@@ -198,4 +198,30 @@ export const ICON_NAMES = [
     meaning:
       "A tool call that fetches from the network, a web fetch or a web search, not used in the room yet",
   },
+  {
+    component: "IconFileWord",
+    source: "fileWord",
+    meaning: "A Word document (.docx, .doc): the page with W on its tab, not used in the room yet",
+  },
+  {
+    component: "IconFilePdf",
+    source: "filePdf",
+    meaning: "A PDF: the page with PDF on its tab, not used in the room yet",
+  },
+  {
+    component: "IconFileMarkdown",
+    source: "fileMarkdown",
+    meaning: "A Markdown file (.md): the page with MD on its tab, not used in the room yet",
+  },
+  {
+    component: "IconFileEmail",
+    source: "fileEmail",
+    meaning:
+      "An email (.eml, .msg): the page with an envelope on its tab, not used in the room yet",
+  },
+  {
+    component: "IconFileGeneric",
+    source: "fileGeneric",
+    meaning: "Any other file: the page alone, not used in the room yet",
+  },
 ] as const;

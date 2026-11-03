@@ -11,7 +11,17 @@
 // reuse a shape already here (IconToolEdit, IconToolSearch, IconToolFetch) stay in this file.
 import { Icon, type IconProps } from "./icon.tsx";
 
-export { IconAccept, IconPageTurn, IconPaperBookPage, IconSafeWorkspace } from "./glyphs.tsx";
+export {
+  IconAccept,
+  IconFileEmail,
+  IconFileGeneric,
+  IconFileMarkdown,
+  IconFilePdf,
+  IconFileWord,
+  IconPageTurn,
+  IconPaperBookPage,
+  IconSafeWorkspace,
+} from "./glyphs.tsx";
 export {
   IconToolDelete,
   IconToolExecute,

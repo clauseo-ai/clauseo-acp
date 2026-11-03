@@ -12,10 +12,15 @@ test("names.ts lists every icon icons.tsx exports, once", () => {
 test("Clauseo's own glyphs live in glyphs.tsx, outside the Lucide file's licence", () => {
   expect(sorted(Object.keys(glyphs))).toEqual([
     "IconAccept",
+    "IconFileEmail",
+    "IconFileGeneric",
+    "IconFileMarkdown",
+    "IconFilePdf",
+    "IconFileWord",
     "IconPageTurn",
     "IconPaperBookPage",
     "IconSafeWorkspace",
   ]);
   const lucide = new Set(Object.keys(icons).filter((name) => !(name in glyphs)));
-  expect(lucide.size).toBe(ICON_NAMES.length - 4);
+  expect(lucide.size).toBe(ICON_NAMES.length - 9);
 });
