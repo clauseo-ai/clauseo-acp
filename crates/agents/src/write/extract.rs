@@ -35,11 +35,11 @@ pub(crate) enum ExtractError {
     Escapes(String),
 }
 
-/// Unpacks `archive` into `dest` (made if missing), dropping each entry's first path part
+/// Unpacks `archive` (the archive's bytes, already checked) into `dest` (made if missing), dropping each entry's first path part
 /// (the archive's top folder). Symbolic and hard links are skipped, as is any entry that is not
 /// a file or a folder. An absolute, drive or `..` entry fails the whole unpack. On Unix a file
 /// with any exec bit gets `0o755`, others `0o644`.
-pub(crate) fn extract(archive: &Path, kind: ArchiveKind, dest: &Path) -> Result<(), ExtractError> {
+pub(crate) fn extract(archive: &[u8], kind: ArchiveKind, dest: &Path) -> Result<(), ExtractError> {
     std::fs::create_dir_all(dest)?;
     match kind {
         ArchiveKind::TarGz => extract_tar_gz(archive, dest),
@@ -47,8 +47,8 @@ pub(crate) fn extract(archive: &Path, kind: ArchiveKind, dest: &Path) -> Result<
     }
 }
 
-fn extract_tar_gz(archive: &Path, dest: &Path) -> Result<(), ExtractError> {
-    let mut tar = tar::Archive::new(GzDecoder::new(File::open(archive)?));
+fn extract_tar_gz(archive: &[u8], dest: &Path) -> Result<(), ExtractError> {
+    let mut tar = tar::Archive::new(GzDecoder::new(archive));
     for entry in tar.entries()? {
         let mut entry = entry?;
         let kind = entry.header().entry_type();
@@ -68,9 +68,9 @@ fn extract_tar_gz(archive: &Path, dest: &Path) -> Result<(), ExtractError> {
     Ok(())
 }
 
-fn extract_zip(archive: &Path, dest: &Path) -> Result<(), ExtractError> {
+fn extract_zip(archive: &[u8], dest: &Path) -> Result<(), ExtractError> {
     let malformed = |err: zip::result::ZipError| ExtractError::Malformed(err.to_string());
-    let mut zip = zip::ZipArchive::new(File::open(archive)?).map_err(malformed)?;
+    let mut zip = zip::ZipArchive::new(io::Cursor::new(archive)).map_err(malformed)?;
     for index in 0..zip.len() {
         let mut file = zip.by_index(index).map_err(malformed)?;
         let name = file.name().map_err(malformed)?.into_owned();

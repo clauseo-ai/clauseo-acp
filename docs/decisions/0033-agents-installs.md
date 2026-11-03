@@ -84,10 +84,13 @@ snapshot refuses an agent id named `runtime`, `downloads`, `npm-cache` or `signi
 Otherwise the pinned archive is downloaded and checked by SHA-256. On Linux with musl and no
 usable Node of the user's, the install fails at once (kind `failed`, no retry). Its log says the
 downloaded Node is a glibc build and Node 22 or later must be installed. Musl users bring their
-own Node. It is extracted into a temp
-folder beside `runtime/<name>`, with the archive's top folder stripped and no link, absolute path
-or `..` entry, then renamed into place. A runtime folder is complete only when its own
-`clauseo-runtime.json` (the archive's SHA-256) is there.
+own Node. The archive is read once into memory (at most its snapshot size, about 60 MB) and its
+SHA-256 checked on those very bytes, which are the ones unpacked: nothing is opened again by path
+after a check, and a mismatch deletes the archive. It is extracted into a temp folder beside
+`runtime/<name>`, with the archive's top folder stripped and no link, absolute path or `..`
+entry; `node` is synced to disk, and the folder renamed into place. A runtime folder is complete
+only when its own `clauseo-runtime.json` (the archive's SHA-256, synced before its rename) is
+there.
 
 **Downloads are Rust's, the install is npm's.** For each package the derived lock lists for this
 platform (npm's `os`, `cpu` and `libc` rule; libc on Linux only, musl when the musl loader is
@@ -176,7 +179,11 @@ lock `pause` takes, and dropped once the job is paused or superseded.
    and it reports `Managed`.
 2. An offline bundle folder (`install.bundle`, R20's setting) holds `node/<Node's archive name>`
    and `npm/<sha512 hex>.tgz`. It is read instead of the network, with the same checks, and a
-   missing file fails the install. Making a bundle is S25's.
+   missing file fails the install. Node's archive is copied into `agents/downloads/` as it is
+   hashed (the download's own write path, with its size cap), and only the copy is unpacked, so a
+   share that serves other bytes to a second read cannot pick the Node that runs. An npm tarball
+   is checked where it sits; npm reads it again, but stores it by its computed SHA-512 and installs
+   by the lock's integrity, so a swapped file is `ENOTCACHED`. Making a bundle is S25's.
 3. A firm npm mirror (`install.registry`, R20's setting): `mirror_url` replaces each `resolved`
    URL's snapshot registry base (`https://registry.npmjs.org/` in the build) with the mirror's
    base. A URL off that base is refused. The integrity check is unchanged.

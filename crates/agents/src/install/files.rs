@@ -10,7 +10,7 @@ use clauseo_process::Timer;
 
 use super::{Job, NodeChoice, Run, TryError};
 use crate::config::AgentsConfig;
-use crate::download::firm::{BundleEntry, bundle_file, mirror_url};
+use crate::download::firm::{BundleEntry, bundle_file, bundle_path, copy_from_bundle, mirror_url};
 use crate::download::{FetchJob, Fetcher, Magic, part_path};
 use crate::state::InstallState;
 use crate::write;
@@ -36,8 +36,13 @@ pub(crate) struct Fetched {
 /// One file to have.
 enum Source {
     Fetch(FetchJob),
-    /// Already checked, in the offline bundle.
+    /// An npm tarball already checked, in the offline bundle.
     Bundle(PathBuf),
+    /// Node's archive in the offline bundle, copied into `downloads/` as it is hashed.
+    Copy {
+        from: PathBuf,
+        job: FetchJob,
+    },
 }
 
 struct Item {
@@ -88,6 +93,21 @@ pub(super) fn fetch_all<T: Timer + Send + Sync>(
                 progress.done(n, item.known.unwrap_or(0));
                 path
             }
+            Source::Copy { from, job: copy } => {
+                let size = copy_from_bundle(
+                    &from,
+                    &copy,
+                    job.cancel(),
+                    &mut |received, total| {
+                        progress.update(n, received, total);
+                        progress.tick(job, run, false);
+                    },
+                    &config.data_dir,
+                )?;
+                progress.done(n, size);
+                fetched.downloaded.push(copy.dest.clone());
+                copy.dest
+            }
             Source::Fetch(fetch_job) => {
                 if fetcher.is_none() {
                     fetcher = Some(Fetcher::new(
@@ -134,25 +154,29 @@ fn items<T: Timer + Send + Sync>(job: &Job<T>, node: &NodeChoice) -> Result<Vec<
                 config,
             ));
         };
+        let fetch_job = FetchJob {
+            url: entry.url(archive),
+            expected: archive.expected().clone(),
+            dest: downloads.join(archive.name()),
+            magic: if archive.is_zip() {
+                Magic::Zip
+            } else {
+                Magic::Gzip
+            },
+            max_bytes: archive.size(),
+        };
         let source = match &config.install.bundle {
-            Some(bundle) => Source::Bundle(bundle_file(
-                bundle,
-                BundleEntry::Node(archive.name()),
-                archive.expected(),
-                archive.name(),
-                data,
-            )?),
-            None => Source::Fetch(FetchJob {
-                url: entry.url(archive),
-                expected: archive.expected().clone(),
-                dest: downloads.join(archive.name()),
-                magic: if archive.is_zip() {
-                    Magic::Zip
-                } else {
-                    Magic::Gzip
-                },
-                max_bytes: archive.size(),
-            }),
+            Some(bundle) => Source::Copy {
+                from: bundle_path(
+                    bundle,
+                    BundleEntry::Node(archive.name()),
+                    archive.expected(),
+                    archive.name(),
+                    data,
+                )?,
+                job: fetch_job,
+            },
+            None => Source::Fetch(fetch_job),
         };
         items.push(Item {
             source,
@@ -172,7 +196,7 @@ fn items<T: Timer + Send + Sync>(job: &Job<T>, node: &NodeChoice) -> Result<Vec<
         let short = package.name.rsplit('/').next().unwrap_or(&package.name);
         let label = format!("{short}-{}.tgz", package.version);
         let item = if let Some(bundle) = &config.install.bundle {
-            let path = bundle_file(bundle, BundleEntry::Npm, &package.integrity, &label, data)?;
+            let path = bundle_file(bundle, &package.integrity, &label, data)?;
             Item {
                 known: size_of(&path),
                 source: Source::Bundle(path),

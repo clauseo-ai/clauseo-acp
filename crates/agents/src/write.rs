@@ -61,6 +61,11 @@ fn open_no_follow(options: &mut OpenOptions, path: &Path) -> io::Result<File> {
     options.open(path)
 }
 
+/// Flushes `path`'s bytes to the disk (`fsync`): a file about to be vouched for by a receipt.
+pub(crate) fn sync_file(path: &Path) -> io::Result<()> {
+    open_no_follow(OpenOptions::new().write(true), path)?.sync_all()
+}
+
 /// `fs::rename`: `from` replaces `to` (a file), or moves a folder to a free name.
 pub(crate) fn rename(from: &Path, to: &Path) -> io::Result<()> {
     std::fs::rename(from, to)

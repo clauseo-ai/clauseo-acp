@@ -166,7 +166,7 @@ fn a_tar_gz_unpacks_without_its_top_folder_or_links_and_keeps_exec_bits() {
     let archive = dir.0.join("a.tar.gz");
     tar_gz(&archive, &runtime_tar());
     let dest = dir.0.join("out");
-    write::extract(&archive, ArchiveKind::TarGz, &dest).unwrap();
+    write::extract(&std::fs::read(&archive).unwrap(), ArchiveKind::TarGz, &dest).unwrap();
     assert_eq!(
         std::fs::read(dest.join("bin").join("node")).unwrap(),
         b"elf"
@@ -195,7 +195,8 @@ fn a_tar_gz_entry_that_escapes_fails_the_unpack() {
         let archive = dir.0.join("a.tar.gz");
         tar_gz(&archive, &[(name, tar::EntryType::Regular, 0o644, b"x")]);
         let dest = dir.0.join("deep").join("out");
-        let err = write::extract(&archive, ArchiveKind::TarGz, &dest).unwrap_err();
+        let err = write::extract(&std::fs::read(&archive).unwrap(), ArchiveKind::TarGz, &dest)
+            .unwrap_err();
         assert!(matches!(err, ExtractError::Escapes(_)), "{name}: {err}");
         assert!(!dir.0.join("deep").join("escape").exists());
         assert!(!dir.0.join("escape").exists());
@@ -229,7 +230,7 @@ fn a_zip_unpacks_without_its_top_folder_or_links_and_refuses_an_escape() {
     let archive = dir.0.join("a.zip");
     zip_file(&archive, false);
     let dest = dir.0.join("out");
-    write::extract(&archive, ArchiveKind::Zip, &dest).unwrap();
+    write::extract(&std::fs::read(&archive).unwrap(), ArchiveKind::Zip, &dest).unwrap();
     assert_eq!(std::fs::read(dest.join("node.exe")).unwrap(), b"exe");
     assert!(runtime_npm_cli(&dest, Os::Win32).is_file());
     assert!(std::fs::symlink_metadata(dest.join("link")).is_err());
@@ -244,7 +245,12 @@ fn a_zip_unpacks_without_its_top_folder_or_links_and_refuses_an_escape() {
     }
     let bad = dir.0.join("bad.zip");
     zip_file(&bad, true);
-    let err = write::extract(&bad, ArchiveKind::Zip, &dir.0.join("out2")).unwrap_err();
+    let err = write::extract(
+        &std::fs::read(&bad).unwrap(),
+        ArchiveKind::Zip,
+        &dir.0.join("out2"),
+    )
+    .unwrap_err();
     assert!(matches!(err, ExtractError::Escapes(_)), "{err}");
     assert!(!dir.0.join("escape").exists());
 }
@@ -264,13 +270,17 @@ fn inside_of(name: &str) -> Option<PathBuf> {
     write::extract::inside(name).unwrap()
 }
 
-fn fixture_node(platform: Platform) -> (NodeEntry, NodeArchive) {
-    let sha = "ab".repeat(32);
+/// Node's entry and archive for the file at `tarball`: its real size and SHA-256.
+fn fixture_node(platform: Platform, tarball: &Path) -> (NodeEntry, NodeArchive) {
+    use sha2::Digest as _;
+    let bytes = std::fs::read(tarball).unwrap();
+    let sha = crate::integrity::to_hex(&sha2::Sha256::digest(&bytes));
+    let size = bytes.len() as u64;
     let archive = NodeArchive::new(
         platform.os,
         platform.arch,
         "node-v1-linux-x64.tar.gz",
-        1,
+        size,
         2,
         &sha,
     )
@@ -284,8 +294,10 @@ fn fixture_node(platform: Platform) -> (NodeEntry, NodeArchive) {
 #[test]
 fn a_runtime_is_valid_only_with_its_receipt() {
     let platform = Platform::new(Os::Linux, Arch::X64);
-    let (entry, archive) = fixture_node(platform);
     let data = TestDir::new("runtime");
+    let tarball = data.0.join("node.tar.gz");
+    tar_gz(&tarball, &runtime_tar());
+    let (entry, archive) = fixture_node(platform, &tarball);
     let dir = runtime_dir(&data.0, &entry, platform);
     assert_eq!(
         dir,
@@ -294,8 +306,6 @@ fn a_runtime_is_valid_only_with_its_receipt() {
             .join("runtime")
             .join("node-v1-linux-x64")
     );
-    let tarball = data.0.join("node.tar.gz");
-    tar_gz(&tarball, &runtime_tar());
     write::create_dir_all(dir.parent().unwrap()).unwrap();
     install_runtime(&tarball, &entry, &archive, &dir, Os::Linux).unwrap();
     assert!(runtime_valid(&dir, &archive, Os::Linux));
@@ -319,17 +329,37 @@ fn a_runtime_is_valid_only_with_its_receipt() {
 }
 
 #[test]
-fn an_archive_without_node_leaves_no_runtime() {
+fn an_archive_changed_after_its_check_is_deleted_and_nothing_unpacked() {
     let platform = Platform::new(Os::Linux, Arch::X64);
-    let (entry, archive) = fixture_node(platform);
-    let data = TestDir::new("runtime-empty");
+    let data = TestDir::new("runtime-swapped");
+    let tarball = data.0.join("node.tar.gz");
+    tar_gz(&tarball, &runtime_tar());
+    let (entry, archive) = fixture_node(platform, &tarball);
     let dir = runtime_dir(&data.0, &entry, platform);
     write::create_dir_all(dir.parent().unwrap()).unwrap();
+    // Same size, other bytes: what a swap after the download's check would leave.
+    let mut swapped = std::fs::read(&tarball).unwrap();
+    let last = swapped.len() - 1;
+    swapped[last] ^= 0xff;
+    write::write_atomic(&tarball, &swapped).unwrap();
+    let err = install_runtime(&tarball, &entry, &archive, &dir, Os::Linux).unwrap_err();
+    assert!(err.to_string().contains("no longer matches"), "{err}");
+    assert!(!tarball.exists(), "the archive is deleted");
+    assert_eq!(std::fs::read_dir(dir.parent().unwrap()).unwrap().count(), 0);
+}
+
+#[test]
+fn an_archive_without_node_leaves_no_runtime() {
+    let platform = Platform::new(Os::Linux, Arch::X64);
+    let data = TestDir::new("runtime-empty");
     let tarball = data.0.join("node.tar.gz");
     tar_gz(
         &tarball,
         &[("top/README", tar::EntryType::Regular, 0o644, b"x")],
     );
+    let (entry, archive) = fixture_node(platform, &tarball);
+    let dir = runtime_dir(&data.0, &entry, platform);
+    write::create_dir_all(dir.parent().unwrap()).unwrap();
     assert!(install_runtime(&tarball, &entry, &archive, &dir, Os::Linux).is_err());
     assert!(!dir.exists());
     assert_eq!(std::fs::read_dir(dir.parent().unwrap()).unwrap().count(), 0);
