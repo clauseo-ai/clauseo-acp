@@ -240,7 +240,8 @@ The host thread set the conditions the profile must keep: Claude keeps `settingS
 - **`_meta` layering.** The hook's `_meta`, then the host's switches, then the guard. Each key
   the host sets replaces the hook's whole: `strictMcpConfig`, `settingSources`, the connector
   variable, `disableSkillShellExecution`, `disableAllHooks`. The one append is the guard's
-  `PreToolUse` entry, which goes after the hook's own entries, as the host thread pinned it.
+  `PreToolUse` entry, which goes after the hook's own entries, as the host thread pinned it. The guard's entry sitting after the hook's is safe while Claude Code applies deny over allow
+  across hooks, and the hook is Clauseo's own profile, not the lawyer's.
 - **Substitution scope.** `{work_folder}`, `{matter_notes}` and the browser's tokens are
   filled only in what the profile supplied: its instructions, its `systemPrompt.append` and
   its `browser` entry. The lawyer's own MCP servers and a settings agent's `env` reach the
@@ -310,10 +311,11 @@ The host thread set the conditions the profile must keep: Claude keeps `settingS
   one rename there, and the delete runs on its own thread.
 - **The reserved server name `browser`** is matched ignoring case.
 - **Header tools** are shown when the session call answers, not when it is sent.
-- **`protocol/src/wire.rs`** is fixed in its own commit: without it the `tools` field
-  disappears from `bindings.ts` (restoring the `delivery?` fields is a side effect).
-- **Two lines in `xtask/expect-allowlist.txt`** (`prepend_path`, `StreamHeader`) need
-  code-owner approval.
+- **`protocol/src/wire.rs`** needs no change here: main's `bdf5c2b8` keeps a skipped field
+  that is not an `Option`, so `HeaderEntry`'s `tools?: ToolState[]` is in `bindings.ts`, and
+  `specta_export.rs` asserts it.
+- **One line in `xtask/expect-allowlist.txt`** (`prepend_path`) needs code-owner approval.
+  `StreamHeader` needs none: main boxes its thread header.
 
 ### The desktop adapter (PR-C)
 

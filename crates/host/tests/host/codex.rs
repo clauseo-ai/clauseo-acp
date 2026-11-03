@@ -170,6 +170,17 @@ fn codex_launch_variables_beat_the_settings_env() {
     let turn = run_turn(&host, &mut events, codex_thread);
     events.assert_no_mismatch();
     assert_eq!(events.turn_ended(turn).unwrap().stop, StopReason::EndTurn);
+    // The Codex session's run folder, while its agent lives: the only one yet.
+    let runs: Vec<_> = std::fs::read_dir(dir.data().join("run"))
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.path())
+        .collect();
+    let [run] = runs.as_slice() else {
+        panic!("one run folder, not {runs:?}");
+    };
+    let work = crate::profile_rig::path_text(&run.join("work"));
+    let notes = crate::profile_rig::path_text(&crate::profile_rig::notes(&dir, matter));
     let fake_thread = host.create_thread(matter, FAKE);
     let mut events = host.events(StreamId::Thread(fake_thread));
     let turn = run_turn(&host, &mut events, fake_thread);
@@ -191,12 +202,9 @@ fn codex_launch_variables_beat_the_settings_env() {
         var(codex, "DISABLE_MCP_CONFIG_FILTERING").as_deref(),
         Some("true")
     );
-    let mut config: Value = serde_json::from_str(&var(codex, "CODEX_CONFIG").unwrap()).unwrap();
-    // R21's keys go beside R15's (decision record 0030); `tests/host/profile.rs` checks them.
-    let added = config.as_object_mut().unwrap();
-    assert_eq!(added.remove("web_search"), Some(json!("live")));
-    let roots = added.remove("sandbox_workspace_write").unwrap();
-    assert_eq!(roots["writable_roots"].as_array().map(Vec::len), Some(2));
+    let config: Value = serde_json::from_str(&var(codex, "CODEX_CONFIG").unwrap()).unwrap();
+    // R21's keys go beside R15's (decision record 0030): the search key and the writable roots,
+    // exactly.
     assert_eq!(
         config,
         json!({
@@ -204,6 +212,8 @@ fn codex_launch_variables_beat_the_settings_env() {
             "features": {"apps": false, "plugins": false, "skill_mcp_dependency_install": false},
             "cloud": {"skills": {"enabled": false}},
             "skills": {"bundled": {"enabled": false}, "include_instructions": false},
+            "web_search": "live",
+            "sandbox_workspace_write": {"writable_roots": [work, notes]},
         })
     );
     for dropped in [
