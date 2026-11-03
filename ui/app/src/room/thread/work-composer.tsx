@@ -64,6 +64,7 @@ export function WorkComposer({
   mentions,
   disabled,
   busy,
+  doing = null,
   refused,
   failed,
   stopped = null,
@@ -94,6 +95,8 @@ export function WorkComposer({
   /** No matter is open. */
   disabled: boolean;
   busy: boolean;
+  /** What the running step is doing ("Reading Lease.pdf."), said in place of "Answering."; null for none. */
+  doing?: string | null;
   /** The code of a refused command, until the next Ask. */
   refused: string | null;
   /** The lost stream's line, until Try again brings it back. */
@@ -266,7 +269,11 @@ export function WorkComposer({
           "One conversation changes a matter's papers at a time. Your message is ready to go.",
         )}`
       : "";
-  const answering: WorkingState = { kind: "wait", words: frame(w.lang, "Answering."), pill: null };
+  const answering: WorkingState = {
+    kind: "wait",
+    words: doing ?? frame(w.lang, "Answering."),
+    pill: null,
+  };
   const line: BreakLine | null =
     failed ??
     (refused !== null
