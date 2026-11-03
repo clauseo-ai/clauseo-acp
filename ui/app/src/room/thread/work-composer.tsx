@@ -269,10 +269,14 @@ export function WorkComposer({
           "One conversation changes a matter's papers at a time. Your message is ready to go.",
         )}`
       : "";
+  // while the turn runs the pen writes in the icon's place (working-line.tsx); the line is gone, and the pen with it,
+  // once the turn ends. A single read stays a wait in its own words: check and series say "Checking" and "judgments",
+  // which a plain read isn't
   const answering: WorkingState = {
     kind: "wait",
     words: doing ?? frame(w.lang, "Answering."),
     pill: null,
+    working: true,
   };
   const line: BreakLine | null =
     failed ??

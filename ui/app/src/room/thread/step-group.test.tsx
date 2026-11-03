@@ -15,6 +15,7 @@ import {
   header,
   permission,
   reset,
+  step,
   toolCall,
   upsert,
   userMessage,
@@ -195,6 +196,10 @@ test("while the agent works, the live group and the working line say what is bei
   expect(g().dataset["live"]).toBe("true");
   expect(g().textContent).toBe("Reading Notice.pdf. 1 done so far.");
   expect(h.one("working")?.textContent).toContain("Reading Notice.pdf.");
+  // the pen writes in the wait icon's place while the turn runs; one read is a wait in its own words, never a check
+  const pen = () => h!.one("working")?.querySelector(".working-pen") ?? null;
+  expect(pen()).not.toBeNull();
+  expect(h.one("working")?.textContent).not.toContain("Checking");
   // the next step comes in: the line moves to it
   h.deliver([
     upsert(read(8, 202, "papers/Notice.pdf")),
@@ -207,6 +212,12 @@ test("while the agent works, the live group and the working line say what is bei
   expect(g().dataset["live"]).toBeUndefined();
   expect(g().textContent).toBe("2 papers read. Searched once.");
   expect(h.one("working")?.textContent).toContain(frame("en", "Answering."));
+  expect(pen()).not.toBeNull();
+  // the turn ends: the working line goes, and the pen with it
+  h.deliver([upsert(step(11)), upsert(header("idle"))]);
+  await h.settle();
+  expect(h.one("working")).toBeNull();
+  expect(h.host.querySelector(".working-pen")).toBeNull();
 });
 
 test("in Hindi, the line and the rows in Hindi, the paper's name as filed", async () => {
