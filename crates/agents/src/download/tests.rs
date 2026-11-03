@@ -164,6 +164,32 @@ fn a_body_running_past_the_cap_is_cut_off_and_the_part_deleted() {
     assert_eq!(fetch(&fetcher, &fits).unwrap(), bytes.len() as u64);
 }
 
+/// A link planted at the destination and at the `.part` is removed, never written through.
+#[cfg(unix)]
+#[test]
+fn a_link_at_the_part_or_the_destination_is_never_followed() {
+    let (registry, bytes, dir, fetcher) = setup("links");
+    let outside = dir.path().join("outside.tgz");
+    write_file(&outside, b"keep me").unwrap();
+    let job = job(&registry.url(PATH), &bytes, dir.path().join("pkg.tgz"));
+    let part = part_path(&job.dest);
+    crate::write::symlink(&outside, &job.dest).unwrap();
+    crate::write::symlink(&outside, &part).unwrap();
+    assert_eq!(fetch(&fetcher, &job).unwrap(), bytes.len() as u64);
+    assert_eq!(std::fs::read(&outside).unwrap(), b"keep me");
+    let meta = std::fs::symlink_metadata(&job.dest).unwrap();
+    assert!(meta.is_file(), "{meta:?}");
+    assert_eq!(std::fs::read(&job.dest).unwrap(), bytes);
+    assert_eq!(registry.requests()[0].range, None);
+
+    // The opens themselves refuse a link, should one appear after the check.
+    crate::write::symlink(&outside, &part).unwrap();
+    assert!(crate::write::open_append(&part).is_err());
+    assert!(crate::write::open_truncate(&part).is_err());
+    assert!(crate::write::open_read(&part).is_err());
+    assert_eq!(std::fs::read(&outside).unwrap(), b"keep me");
+}
+
 #[test]
 fn a_tampered_file_is_an_integrity_failure_and_leaves_no_file() {
     let (registry, bytes, dir, fetcher) = setup("tamper");

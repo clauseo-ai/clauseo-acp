@@ -181,12 +181,17 @@ impl Fetcher {
             write::create_dir_all(parent).map_err(|err| at.io(&err))?;
         }
         let part = part_path(&job.dest);
+        // A link where the `.part` goes is removed (the link, not its target); the opens below
+        // refuse one that appears later.
+        if std::fs::symlink_metadata(&part).is_ok_and(|meta| meta.file_type().is_symlink()) {
+            write::remove_file(&part).map_err(|err| at.io(&err))?;
+        }
         let mut restarted = false;
         loop {
             if cancel.is_cancelled() {
                 return Err(at.cancelled());
             }
-            let offset = std::fs::metadata(&part).map_or(0, |meta| meta.len());
+            let offset = std::fs::symlink_metadata(&part).map_or(0, |meta| meta.len());
             let mut request = self.agent.get(&job.url);
             if offset > 0 {
                 request = request.header("Range", format!("bytes={offset}-"));
@@ -455,10 +460,16 @@ pub(crate) fn part_path(dest: &Path) -> PathBuf {
     PathBuf::from(name)
 }
 
-/// The size of `dest` when it is there with the right digest; a wrong one is deleted.
+/// The size of `dest` when it is there with the right digest; a wrong one is deleted, and so is
+/// a link found there (the link itself, never what it points to).
 fn complete_size(dest: &Path, expected: &Expected) -> io::Result<Option<u64>> {
-    if !dest.is_file() {
-        return Ok(None);
+    match std::fs::symlink_metadata(dest) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            write::remove_file(dest)?;
+            return Ok(None);
+        }
+        Ok(meta) if meta.is_file() => {}
+        _ => return Ok(None),
     }
     let mut hasher = expected.hasher();
     let size = hash_file(dest, &mut hasher)?;
@@ -470,9 +481,13 @@ fn complete_size(dest: &Path, expected: &Expected) -> io::Result<Option<u64>> {
     }
 }
 
-/// Adds the bytes of `path` to `hasher`, returning how many there were.
+/// Adds the bytes of `path` to `hasher`, returning how many there were. A link is refused.
 pub(crate) fn hash_file(path: &Path, hasher: &mut crate::integrity::Hasher) -> io::Result<u64> {
-    let mut file = File::open(path)?;
+    hash_read(write::open_read(path)?, hasher)
+}
+
+/// Adds the bytes `file` has left to `hasher`, returning how many there were.
+pub(crate) fn hash_read(mut file: File, hasher: &mut crate::integrity::Hasher) -> io::Result<u64> {
     let mut buf = vec![0; CHUNK];
     let mut size = 0u64;
     loop {
