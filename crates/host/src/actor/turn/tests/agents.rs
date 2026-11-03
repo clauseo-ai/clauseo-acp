@@ -1,7 +1,6 @@
 //! The turn path with a real `fake_agent`: the prompt goes out only once `TurnStarted` is
 //! durable, updates the rate cap holds are logged when the agent exits, and an agent that
-//! exits while its turn waits for the writer is detached after the turn's `TurnEnded`, and a
-//! prompt that comes between a closed connection's answer and the agent's end starts a new agent.
+//! exits while its turn waits for the writer is detached after the turn's `TurnEnded`.
 
 use clauseo_protocol::{
     CommandOutcome, DomainEvent, HostCommand, PromptBlock, ThreadId, ToolCallStatus, TurnId,
@@ -22,12 +21,7 @@ const EXIT_AFTER_UPDATES: &str = r#"{"expect":{"method":"session/prompt","as":"p
 {"exit":{"code":1}}
 "#;
 
-/// The agent exits on the prompt without answering it.
-const EXIT_ON_PROMPT: &str = r#"{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
-{"exit":{"code":1}}
-"#;
-
-fn send_prompt(rig: &mut Rig, n: u128, thread: ThreadId) -> TurnId {
+pub(super) fn send_prompt(rig: &mut Rig, n: u128, thread: ThreadId) -> TurnId {
     let command = HostCommand::SendPrompt {
         thread,
         content: vec![PromptBlock::Text {
@@ -43,7 +37,7 @@ fn send_prompt(rig: &mut Rig, n: u128, thread: ThreadId) -> TurnId {
 }
 
 /// Handles inputs until `thread` has no turn, no agent and nothing in flight.
-fn until_settled(rig: &mut Rig, thread: ThreadId) {
+pub(super) fn until_settled(rig: &mut Rig, thread: ThreadId) {
     rig.run_until("the turn's end and the agent's", |actor| {
         let state = &actor.threads[&thread].turn;
         state.current.is_none()
@@ -163,77 +157,5 @@ fn an_agent_exit_while_queued_detaches_after_turn_ended() {
         panic!("{:?}", log.iter().map(kind).collect::<Vec<_>>());
     };
     assert_eq!(detached(&log), 1);
-    rig.finish();
-}
-
-/// The prompt's `Closed` answer reaches the actor before the agent's `Ended` (as designed), and
-/// on Windows the next prompt can come between the two (CI run 41712908024). That prompt must
-/// wait for a new agent, not go to the closed connection and fail with `agent.exited` at once.
-#[test]
-fn a_prompt_between_a_closed_answer_and_the_end_starts_a_new_agent() {
-    let mut rig = Rig::start("turn-closed-then-prompt", EXIT_ON_PROMPT);
-    let thread = rig.thread();
-    let ended = |_: &crate::actor::Actor, input: &Input| {
-        matches!(
-            input,
-            Input::Agent {
-                input: AgentInput::Ended(_),
-                ..
-            }
-        )
-    };
-    let first = send_prompt(&mut rig, 10, thread);
-    rig.run_holding("the first turn's end", ended, |actor| {
-        actor.threads[&thread].turn.current.is_none() && actor.work.commits == 0
-    });
-    assert!(
-        rig.actor.threads[&thread].turn.agent.is_some(),
-        "the agent's end is held"
-    );
-
-    let second = send_prompt(&mut rig, 11, thread);
-    rig.run_holding("the second turn waiting or ended", ended, |actor| {
-        let state = &actor.threads[&thread].turn;
-        state.current.is_none()
-            || state
-                .agent
-                .as_ref()
-                .is_some_and(|agent| agent.stage == Stage::Stopping)
-    });
-    let state = &rig.actor.threads[&thread].turn;
-    assert!(
-        state
-            .current
-            .as_ref()
-            .is_some_and(|current| current.turn == second && current.phase == TurnPhase::Launching),
-        "the second turn went to the closed connection: {:?}",
-        rig.log(thread).iter().map(kind).collect::<Vec<_>>()
-    );
-
-    rig.release_held();
-    until_settled(&mut rig, thread);
-    let log = rig.log(thread);
-    let kinds = || log.iter().map(kind).collect::<Vec<_>>();
-    let attached: Vec<usize> = log
-        .iter()
-        .enumerate()
-        .filter(|(_, event)| matches!(event, DomainEvent::AgentSessionAttached(_)))
-        .map(|(at, _)| at)
-        .collect();
-    let failed = |turn: TurnId| {
-        log.iter()
-            .position(|event| matches!(event, DomainEvent::TurnFailed(f) if f.turn == turn))
-    };
-    assert_eq!(attached.len(), 2, "{:?}", kinds());
-    assert!(
-        failed(first).is_some_and(|at| at < attached[1]),
-        "{:?}",
-        kinds()
-    );
-    assert!(
-        failed(second).is_some_and(|at| at > attached[1]),
-        "{:?}",
-        kinds()
-    );
     rig.finish();
 }

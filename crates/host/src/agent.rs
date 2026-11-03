@@ -162,6 +162,13 @@ impl AgentLink {
         }
     }
 
+    /// Whether the connection is gone: the event channel's only sender, held by R10's
+    /// connection state, is dropped once the driver has ended (the agent's stdout ended, or
+    /// a fatal error closed it). Every call then comes back `Closed`.
+    pub(crate) fn closed(&self) -> bool {
+        self.events.is_closed()
+    }
+
     /// Asks the owner task to stop the agent with the shutdown ladder. It posts
     /// [`Ended::Stopped`] when done, or [`Ended::Exited`] if the agent exited first. A second
     /// call does nothing.

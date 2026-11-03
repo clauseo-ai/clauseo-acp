@@ -1,6 +1,7 @@
 //! Unit tests of the turn path.
 
 mod agents;
+mod closed;
 mod failures;
 mod leading;
 mod limit_read;
