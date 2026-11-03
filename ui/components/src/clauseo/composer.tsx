@@ -13,7 +13,7 @@ import {
   type RefObject,
 } from "react";
 import { Button } from "../ui/button.tsx";
-import { IconAddPapers, IconSafeWorkspace } from "../icons/icons.tsx";
+import { IconAddPapers, IconArrowUp, IconSafeWorkspace } from "../icons/icons.tsx";
 import { motionAllowed, useDisplay } from "../lib/display.ts";
 import { late } from "../lib/late.ts";
 import { useThreadWords } from "../lib/words-thread.ts";
@@ -495,6 +495,7 @@ export function Composer<V extends string = string>({
                   data-testid={testIds?.ask}
                 >
                   {w.t("Ask")}
+                  <IconArrowUp size={16} />
                 </Button>
               )}
             </>
