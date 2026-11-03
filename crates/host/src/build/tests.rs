@@ -98,6 +98,7 @@ fn tool_entry(
         started_at: Timestamp::ZERO,
         finished_at: None,
         background: None,
+        web: None,
     }))
 }
 

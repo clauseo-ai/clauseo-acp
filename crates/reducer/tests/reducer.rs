@@ -45,3 +45,5 @@ mod triage;
 mod unstarted;
 #[path = "reducer/view.rs"]
 mod view;
+#[path = "reducer/web.rs"]
+mod web;

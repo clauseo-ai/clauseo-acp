@@ -269,7 +269,8 @@ wire_types! {
         ElicitationState,
         EntryId, HeaderEntry, LimitStopEntry, MarkerEntry, MarkerKind, MatterHeaderEntry,
         NoticeEntry, PermissionEntry, PermissionState, StepEntry, ThreadStatus, ToolCallEntry,
-        UserMessageEntry, UserMessageStatus, VersionEntry, ViewEntry,
+        ToolCallPage, ToolCallSearch, ToolCallWeb, UserMessageEntry, UserMessageStatus,
+        VersionEntry, ViewEntry,
     },
     view::{ClauseoTool, ToolAvailability, ToolState, ToolsUnavailableReason},
 }

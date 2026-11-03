@@ -163,10 +163,11 @@ fn without_seq(state: &StreamState) -> serde_json::Value {
     value
 }
 
-/// The web events are logged only: each one leaves the state as it was but for its `seq`, and
-/// the view as it was, so the reducer's state equals what it was before the event.
+/// A web record for a tool call the thread does not hold is ignored: each one leaves the state as
+/// it was but for its `seq`, and the view as it was, with no anomaly. The records for a call
+/// that does exist are in `web.rs`.
 #[test]
-fn web_events_change_no_state() {
+fn web_events_for_an_unknown_call_change_no_state() {
     let (mut log, mut state) = created(6);
     let turn = start_turn(&mut log, "Find the limitation period.").unwrap();
     catch_up(&log, &mut state);

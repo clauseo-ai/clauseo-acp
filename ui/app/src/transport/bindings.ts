@@ -4249,6 +4249,14 @@ export type ToolCallEntry = {
 	 *  instructions in the reducer bench; boxed, 0.4%).
 	 */
 	background?: BackgroundMark,
+	/**
+	 *  The web this call ran or opened (0041): its search and its pages, from the log's
+	 *  `WebSearchRecorded` and `PageVisited`, matched by `tool_call`. Missing and `None` both mean
+	 *  no web records, so a call without any is written as before. Boxed: most calls have none,
+	 *  and a tool call entry is copied on every update (as `background`; CI's reducer-bench
+	 *  measures the cost).
+	 */
+	web?: ToolCallWeb,
 };
 
 /**
@@ -4257,6 +4265,19 @@ export type ToolCallEntry = {
  * It must be a v7 UUID.
  */
 export type ToolCallId = string;
+
+/**
+ *  A page a tool call opened: its address, its title when the agent reported one, and how it was
+ *  opened.
+ */
+export type ToolCallPage = {
+	/**  The page's address, as the `PageVisited` event has it (after the log's URL rule). */
+	url: string,
+	/**  The page's title, when the agent reported one. Left out when there is none. */
+	title?: string,
+	/**  How the page was opened. An unknown value decodes as `PageVia::Unknown`. */
+	via: PageVia,
+};
 
 /**
  *  A change to a tool call: [`ToolCallStarted`](crate::ToolCallStarted)'s fields after
@@ -4285,6 +4306,17 @@ export type ToolCallPatch = {
 	raw_output?: TextOrBlob,
 	/**  The new content, replacing the old list. */
 	content?: ToolCallContent[],
+};
+
+/**  A web search a tool call ran: its query and the results the agent got, in their order. */
+export type ToolCallSearch = {
+	/**  The query text, as the `WebSearchRecorded` event has it. */
+	query: string,
+	/**
+	 *  The results, as the `WebSearchRecorded` event has them: the event's own type, with its caps
+	 *  applied by its constructor.
+	 */
+	results: WebResult[],
 };
 
 /**  A tool call the agent reported. */
@@ -4334,6 +4366,20 @@ export type ToolCallUpdated = {
 	tool_call: ToolCallId,
 	/**  What changed. */
 	patch: ToolCallPatch,
+};
+
+/**  What the web did for a tool call (0041): the search it ran and the pages it opened. */
+export type ToolCallWeb = {
+	/**
+	 *  The search the call ran, if it ran one. A later search record for the same call replaces
+	 *  it.
+	 */
+	search?: ToolCallSearch,
+	/**
+	 *  The pages it opened, in the order the log has them. Every record is kept, so a page opened
+	 *  twice is listed twice; the reducer keeps the first 50 and ignores the rest.
+	 */
+	pages: ToolCallPage[],
 };
 
 /**  What a tool call does, as ACP v1 names it. The UI picks an icon by kind. */
