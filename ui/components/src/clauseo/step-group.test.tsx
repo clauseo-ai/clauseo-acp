@@ -242,3 +242,118 @@ test("live, a step waiting on the lawyer leads the line with the permission's sh
   }
   host = root = null;
 });
+
+test("on the meta line, sentences that don't fit drop from the end at a sentence with '…', the aside and the trouble kept, the whole summary still the name; measured again when the meta line's width changes", async () => {
+  // a 5 px per character layout: the words' box is `room` wide, each part as wide as its text
+  let room = 300;
+  const PX = 5;
+  // the "…" is drawn by CSS: two characters
+  const wide = (e: Element) =>
+    e.classList.contains("step-part-cut") ? 2 * PX : (e.textContent ?? "").length * PX;
+  const shown = (el: Element) =>
+    [
+      ...el.querySelectorAll(
+        ".step-part:not(.step-part-dropped), .step-part-cut[data-cut], .step-group-more, .step-group-trouble",
+      ),
+    ].reduce((sum, e) => sum + wide(e), 0);
+  const proto = HTMLElement.prototype;
+  const saved = {
+    scroll: Object.getOwnPropertyDescriptor(proto, "scrollWidth"),
+    client: Object.getOwnPropertyDescriptor(proto, "clientWidth"),
+    rect: Object.getOwnPropertyDescriptor(Element.prototype, "getBoundingClientRect"),
+  };
+  Object.defineProperty(proto, "scrollWidth", {
+    configurable: true,
+    get(this: HTMLElement) {
+      return this.classList.contains("step-group-words") ? shown(this) : 0;
+    },
+  });
+  Object.defineProperty(proto, "clientWidth", {
+    configurable: true,
+    get(this: HTMLElement) {
+      return this.classList.contains("step-group-words") ? Math.min(room, shown(this)) : 0;
+    },
+  });
+  Object.defineProperty(proto, "getBoundingClientRect", {
+    configurable: true,
+    value(this: HTMLElement) {
+      return { width: wide(this) } as DOMRect;
+    },
+  });
+  let resized: (() => void) | null = null;
+  const RO = globalThis.ResizeObserver;
+  globalThis.ResizeObserver = class {
+    constructor(cb: ResizeObserverCallback) {
+      resized = () => cb([{ contentRect: { width: room } } as ResizeObserverEntry], this as never);
+    }
+    observe() {}
+    disconnect() {}
+    unobserve() {}
+  } as unknown as typeof ResizeObserver;
+  try {
+    host = document.createElement("div");
+    document.body.append(host);
+    root = createRoot(host);
+    const parts = ["2 papers read.", "Searched once.", "1 paper changed.", "And 2 more."];
+    const more = "2 of them went on in the background.";
+    await act(async () =>
+      root!.render(
+        <StepGroup
+          id="tool_call:1"
+          kinds={["read", "search", "edit"]}
+          line={parts.join(" ")}
+          parts={parts}
+          more={more}
+          trouble="1 failed."
+          head={(l) => <div className="meta">{l}</div>}
+        >
+          {null}
+        </StepGroup>,
+      ),
+    );
+    const line = host.querySelector<HTMLButtonElement>(".meta > button")!;
+    const seen = () =>
+      [...line.querySelectorAll(".step-part:not(.step-part-dropped)")].map((e) =>
+        e.textContent?.trim(),
+      );
+    const dropped = () =>
+      [...line.querySelectorAll(".step-part-dropped")].map((e) => e.textContent?.trim());
+    // 300 px: the aside, the trouble and the "…" take 245, so one sentence fits; the rest drop from the end
+    expect(seen()).toEqual(["2 papers read."]);
+    expect(dropped()).toEqual(["Searched once.", "1 paper changed.", "And 2 more."]);
+    expect(line.querySelector(".step-part-cut[data-cut]")?.getAttribute("aria-hidden")).toBe(
+      "true",
+    );
+    expect(line.querySelector(".step-group-more")?.textContent).toBe(more);
+    expect(line.querySelector(".step-group-trouble")?.textContent).toBe("1 failed.");
+    // the "…" follows the sentences, so on screen it stands after the last kept one (the dropped are out of the flow),
+    // before the aside
+    const order = [...line.querySelectorAll(".step-part, .step-part-cut")].map((e) => e.className);
+    expect(order.at(-1)).toBe("step-part-cut");
+    // the whole summary is still the hover and, unseen, in the name
+    const full = `${parts.join(" ")} ${more} 1 failed.`;
+    expect(line.title).toBe(full);
+    for (const p of parts) expect(line.textContent).toContain(p);
+    // wider: measured again, everything fits, no "…"
+    room = 700;
+    await act(async () => resized?.());
+    expect(seen()).toEqual(parts);
+    expect(line.querySelector(".step-part-cut[data-cut]")).toBeNull();
+    // very narrow: one sentence stays, cut mid-word by the CSS as a last resort
+    room = 100;
+    await act(async () => resized?.());
+    expect(seen()).toEqual(["2 papers read."]);
+  } finally {
+    if (saved.scroll) Object.defineProperty(proto, "scrollWidth", saved.scroll);
+    else delete (proto as { scrollWidth?: number }).scrollWidth;
+    if (saved.client) Object.defineProperty(proto, "clientWidth", saved.client);
+    else delete (proto as { clientWidth?: number }).clientWidth;
+    delete (proto as { getBoundingClientRect?: unknown }).getBoundingClientRect;
+    if (
+      saved.rect &&
+      Object.getOwnPropertyDescriptor(Element.prototype, "getBoundingClientRect") === undefined
+    )
+      Object.defineProperty(Element.prototype, "getBoundingClientRect", saved.rect);
+    globalThis.ResizeObserver = RO;
+  }
+});
