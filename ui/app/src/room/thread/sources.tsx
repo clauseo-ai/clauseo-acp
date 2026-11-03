@@ -11,7 +11,7 @@ import type { HostTransport } from "../../transport/host-transport.ts";
 import type { AgentId, StreamId, ToolCallId, WebResult } from "../../transport/protocol.ts";
 import { kindOf, planName } from "../agent.ts";
 import { quietly } from "../open.ts";
-import { SourcesTransport, useToolCallWeb, type ToolCallWeb } from "./sources.ts";
+import { pagesShown, SourcesTransport, useToolCallWeb, type ToolCallWeb } from "./sources.ts";
 
 const DEVANAGARI = /\p{Script=Devanagari}/gu;
 const LETTER = /\p{L}/gu;
@@ -176,17 +176,21 @@ type Item =
 /** The rows of a turn's tool calls' web, in the tool calls' order: each one's search, then its pages. */
 function itemsOf(webs: readonly (readonly [ToolCallId, ToolCallWeb])[]): Item[] {
   return webs.flatMap(([call, web]) => [
-    ...(web.query === undefined
+    ...(web.search === undefined
       ? []
       : [
           {
             key: `${call}:search`,
             kind: "search" as const,
-            query: web.query,
-            results: web.results,
+            query: web.search.query,
+            results: web.search.results,
           },
         ]),
-    ...web.pages.map((page, i) => ({ key: `${call}:${i}`, kind: "page" as const, page })),
+    ...pagesShown(web.pages).map((page, i) => ({
+      key: `${call}:${i}`,
+      kind: "page" as const,
+      page,
+    })),
   ]);
 }
 
