@@ -107,9 +107,14 @@
   .step-row {
     @apply text-small-row text-muted;
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-columns: auto minmax(0, 1fr) auto;
     column-gap: var(--s2);
     align-items: baseline;
+  }
+  /* its clock time at the end, as a version's row has it: 13 px, the digits one width, muted, never broken */
+  .step-row-time {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
   .step-row .step-icon {
     align-self: center;

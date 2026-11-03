@@ -1,6 +1,9 @@
 // @vitest-environment happy-dom
 // The step group's parts: the icon pass's glyph for each tool kind (other for the rest, the break for a failure), the line a real button that
 // opens and folds the rows with aria-expanded, a failure on the line, and a row's paper with its folder on hover.
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { act, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createRoot, type Root } from "react-dom/client";
@@ -259,4 +262,39 @@ test("live, a step waiting on the lawyer leads the line with the permission's sh
     host.remove();
   }
   host = root = null;
+});
+
+test("a row's clock time stands at its end in a <time>, its digits tabular (steps.css); none when the caller gives none", () => {
+  const row = (time?: { text: string; iso: string } | null) => {
+    const el = document.createElement("ol");
+    el.innerHTML = renderToStaticMarkup(
+      <StepRow
+        id="tool_call:1"
+        toolCall="1"
+        status="completed"
+        kind="read"
+        text="Read Lease.pdf."
+        hover={null}
+        mark={null}
+        {...(time === undefined ? {} : { time })}
+      />,
+    );
+    return el.querySelector("li")!;
+  };
+  const timed = row({ text: "4:32 pm", iso: "2026-11-04T11:02:00.000Z" });
+  const time = timed.lastElementChild;
+  expect(time?.tagName).toBe("TIME");
+  expect(time?.className).toBe("step-row-time");
+  expect(time?.getAttribute("datetime")).toBe("2026-11-04T11:02:00.000Z");
+  expect(time?.textContent).toBe("4:32 pm");
+  expect(row(null).querySelector("time")).toBeNull();
+  expect(row().querySelector("time")).toBeNull();
+  // the class carries the tabular figures, and the row a third column for it
+  const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "steps.css"), "utf8");
+  const rule = /\.step-row-time\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  expect(rule).toMatch(/font-variant-numeric:\s*tabular-nums/);
+  expect(rule).toMatch(/white-space:\s*nowrap/);
+  expect(
+    /\.step-row\s*\{[^}]*grid-template-columns:\s*auto minmax\(0, 1fr\) auto/.exec(css),
+  ).not.toBeNull();
 });
