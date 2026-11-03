@@ -7,10 +7,20 @@
 // is listed in names.ts, and icons.test.ts fails when the two disagree.
 // The icon pass's 21 (IconBreak to IconPlanLimit, at the end of this file) were cut from Lucide 1.66.0 (commit
 // a630cec77eac6568b989e87e4947a8bfe45caacd) on 3 Nov 2026, each drawn over its source at that release and checked
-// against it.
+// against it. The tool kinds' glyphs are in tool-kinds.tsx, cut the same way, and re-exported here; the three that
+// reuse a shape already here (IconToolEdit, IconToolSearch, IconToolFetch) stay in this file.
 import { Icon, type IconProps } from "./icon.tsx";
 
 export { IconAccept, IconPageTurn, IconPaperBookPage, IconSafeWorkspace } from "./glyphs.tsx";
+export {
+  IconToolDelete,
+  IconToolExecute,
+  IconToolMove,
+  IconToolOther,
+  IconToolRead,
+  IconToolSwitchMode,
+  IconToolThink,
+} from "./tool-kinds.tsx";
 
 /** A fold (source: chevron) */
 export function IconFold(props: IconProps) {
@@ -488,4 +498,22 @@ export function IconPlanLimit(props: IconProps) {
       <path d="M3.72 15.07a7.25 7.25 0 1 1 12.56 0" vectorEffect="non-scaling-stroke" />
     </Icon>
   );
+}
+
+/** A tool call that edits files, not used in the room yet (source: penLine, Lucide pen-line, as toolEdit: the shape
+ * IconYourChange draws, so it reuses it) */
+export function IconToolEdit(props: IconProps) {
+  return <IconYourChange {...props} />;
+}
+
+/** A tool call that searches, not used in the room yet (source: search, as toolSearch: the shape Search this matter
+ * draws, so it reuses it) */
+export function IconToolSearch(props: IconProps) {
+  return <IconSearch {...props} />;
+}
+
+/** A tool call that fetches from the network, a web fetch or a web search, not used in the room yet (source: website,
+ * Lucide globe, as toolFetch: the shape IconWebsite draws, so it reuses it) */
+export function IconToolFetch(props: IconProps) {
+  return <IconWebsite {...props} />;
 }
