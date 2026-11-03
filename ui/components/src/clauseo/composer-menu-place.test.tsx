@@ -124,7 +124,7 @@ test("the menu stands at the caret's x, below the field, or above it at the wind
   );
 });
 
-test("the open menu is placed again, once a frame, as the field's own size changes; closed, it watches no more", async () => {
+test("the open menu is placed again as the field's own size changes, before that frame paints; closed, it watches no more", async () => {
   // the field's size observers, and the frames they ask for, held until the test runs them
   const watching: { cb: ResizeObserverCallback; targets: Element[]; gone: boolean }[] = [];
   vi.stubGlobal(
@@ -151,12 +151,6 @@ test("the open menu is placed again, once a frame, as the field's own size chang
     return next;
   });
   vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
-  const run = () =>
-    act(async () => {
-      const due = [...frames.values()];
-      frames.clear();
-      for (const cb of due) cb(0);
-    });
   // the field's drawn box: 3 lines, then 4 as the window narrows and the field grows
   let tall = 80;
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
@@ -177,21 +171,16 @@ test("the open menu is placed again, once a frame, as the field's own size chang
     const mine = watching.slice(before).find((o) => o.targets.includes(field()));
     expect(mine).toBeDefined();
     const grow = () => act(async () => mine?.cb([], {} as ResizeObserver));
-    // the field grows a line: placed again in the next frame, and once, however many times it was told
+    // the field grows a line: placed again in the observer's own callback, which runs before the frame paints, with no
+    // frame of its own between (one such frame showed the grown field under the menu)
     tall = 106;
     await grow();
-    await grow();
-    expect(frames.size).toBe(1);
-    expect(top()).toBe("124px");
-    await run();
+    expect(frames.size).toBe(0);
     expect(top()).toBe("150px");
-    // told, then closed before its frame: the frame is dropped and the observer let go
-    tall = 132;
-    await grow();
+    // closed: the observer is let go
     expect(await key("Escape")).toBe(true);
     expect(menu()).toBeNull();
     expect(mine?.gone).toBe(true);
-    expect(frames.size).toBe(0);
   } finally {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
