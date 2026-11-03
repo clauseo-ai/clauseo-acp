@@ -48,6 +48,8 @@ crates/desktop/src/test_support.rs Scratch::drop clippy::disallowed_methods
 crates/desktop/src/window_frame.rs add_frame_capability clippy::disallowed_methods
 crates/desktop/src/window_frame/geometry.rs physical clippy::cast_possible_truncation
 crates/desktop/src/window_frame/windows.rs - unsafe_code
+# S20 PR 2: the WebView2 dialog's Win32 module (TaskDialogIndirect, ShellExecuteW, DPI, COM).
+crates/desktop/src/webview2/windows.rs - unsafe_code
 xtask/src/clock.rs timed clippy::disallowed_methods
 xtask/src/output.rs Printer::put clippy::let_underscore_must_use
 xtask/src/steps/run/tests.rs noisy_pass clippy::unnecessary_wraps

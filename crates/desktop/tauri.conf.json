@@ -35,7 +35,11 @@
       "allowDowngrades": false,
       "webviewInstallMode": { "type": "downloadBootstrapper", "silent": true },
       "minimumWebview2Version": "155.0.0.0",
-      "nsis": { "installMode": "currentUser", "languages": ["English", "Hindi"] }
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["English"],
+        "customLanguageFiles": { "English": "windows/nsis/English.nsh" }
+      }
     },
     "linux": {
       "deb": { "depends": [] },

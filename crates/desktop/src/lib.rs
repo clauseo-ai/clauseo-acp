@@ -15,6 +15,9 @@
 //!   `Effective::load` with the system policy sources), the `PassthroughLauncher`, and the
 //!   refused folders of `refused_folders`. Exit waits for the start, then for
 //!   `HostHandle::shutdown` and `HostJoin::join`, on their own thread, then exits.
+//! - On Windows, `run` first checks the `WebView2` runtime; when it is missing or older than
+//!   `minimumWebview2Version`, a task dialog says so and `run` returns without building the app
+//!   (`webview2.rs`).
 //! - The host's pre-write guard hook runs this executable with `--pre-write-guard`, which `main`
 //!   answers before anything starts ([`guard_requested`], `pre_write_guard.rs`).
 //! - Fourteen async commands (`commands.rs`), each granted by its own permission in
@@ -75,6 +78,7 @@ mod rust_only;
 mod settings_window;
 #[cfg(test)]
 mod test_support;
+mod webview2;
 mod window_frame;
 mod window_size;
 
@@ -121,6 +125,10 @@ struct Exit {
 
 /// Builds the app and runs it until it exits.
 pub fn run() -> tauri::Result<()> {
+    // On Windows, no window without a WebView2 runtime that can draw it (webview2.rs).
+    if webview2::stops_start() {
+        return Ok(());
+    }
     // The scoreboard's t0, before anything else the app does.
     #[cfg(feature = "e2e")]
     e2e::mark_start();
