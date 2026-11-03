@@ -353,7 +353,7 @@ fn stop_with_a_reset_stays_in_the_end_commit_then_reads() {
         [TurnStoppedAtLimit {
             turn,
             window: Some("five_hour".to_owned()),
-            resets_at: Some(Timestamp::new(1_792_310_400_000).unwrap()),
+            resets_at: Some(Timestamp::new(4_102_444_800_000).unwrap()),
             reason: LimitStopReason::PlanWindow,
         }]
     );

@@ -63,7 +63,7 @@ fn limit_rejected_ends_turn_at_limit() {
         [TurnStoppedAtLimit {
             turn,
             window: Some("five_hour".to_owned()),
-            resets_at: Some(Timestamp::new(1_792_310_400_000).unwrap()),
+            resets_at: Some(Timestamp::new(4_102_444_800_000).unwrap()),
             reason: LimitStopReason::PlanWindow,
         }]
     );

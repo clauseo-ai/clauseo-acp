@@ -11,13 +11,14 @@ use clauseo_protocol::{
 
 use crate::harness::{self, Ctx, chunk, inside, sess1, text, turn, update_event};
 
-/// Claude's rate limit, as the scenarios send it: five hours, reset at 1792310400 seconds.
+/// Claude's rate limit, as the scenarios send it: five hours, reset at 4102444800 seconds
+/// (2100, far ahead so the reset never passes during a run).
 fn five_hour(status: LimitStatus, used_percent: f64) -> LimitSignal {
     LimitSignal::RateLimit {
         window: Some("five_hour".to_owned()),
         status,
         used_percent: Some(Finite::new(used_percent).unwrap()),
-        resets_at: Some(Timestamp::new(1_792_310_400_000).unwrap()),
+        resets_at: Some(Timestamp::new(4_102_444_800_000).unwrap()),
     }
 }
 
