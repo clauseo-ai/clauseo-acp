@@ -44,7 +44,9 @@
 //!   a last value that does not type puts the key back at its default, with a warning.
 //! - A key this version does not know is a warning, never an error, so a firm's profile for a
 //!   newer version still loads.
-//! - No variable moves or hides a policy source: [`DATA_DIR_VAR`] moves only the data folder.
+//! - No variable moves or hides a policy source: [`DATA_DIR_VAR`] moves the data folder and, with
+//!   it, the default matters folder (`<data dir>-matters`, beside it, unless
+//!   `matters.default_location` is set); nothing else.
 //!   Only `HKEY_LOCAL_MACHINE` and forced managed preferences count as policy.
 //! - [`UiPatch`] holds only the `ui` fields and refuses any other key.
 //! - A [`UiPatch`] that names a locked key is refused with [`Error::Locked`], and nothing is

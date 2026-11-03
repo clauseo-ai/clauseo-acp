@@ -40,7 +40,8 @@ pub struct Settings {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(default)]
 pub struct MattersSettings {
-    /// The folder new matters go in, as an absolute path. When absent, `Documents/Clauseo`.
+    /// The folder new matters go in, as an absolute path. When absent: `Documents/Clauseo`, or,
+    /// with `CLAUSEO_DATA_DIR` set, `<data dir>-matters` beside the data folder.
     pub default_location: Option<PathBuf>,
 }
 

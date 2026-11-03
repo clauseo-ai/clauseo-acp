@@ -1,8 +1,11 @@
 use super::Effective;
 use crate::error::Error;
+use crate::locations::{DATA_DIR_VAR, Locations, Os};
 use crate::policy::{FilePolicy, PolicyRead, PolicySource};
 use crate::schema::{AgentLaunch, Density, FontSize, Theme};
-use crate::testing::{FakeSource, MemFiles, abs, abs_json, locations, policy, user};
+use crate::testing::{
+    FakeDirs, FakeEnv, FakeSource, MemFiles, abs, abs_json, abs_str, locations, policy, user,
+};
 use crate::warning::{Warning, WarningKind};
 use std::path::Path;
 
@@ -318,4 +321,74 @@ fn a_repeated_section_is_its_last_copy_on_load() {
         Some(abs("user/codex").display().to_string())
     );
     assert_eq!(effective.warnings(), []);
+}
+
+/// Locations for a run whose data folder `CLAUSEO_DATA_DIR` named: `tmp/clauseo-ci`.
+fn overridden() -> Locations {
+    let env = FakeEnv(vec![(DATA_DIR_VAR, abs_str("tmp/clauseo-ci"))]);
+    let dirs = FakeDirs {
+        home: Some(abs("home/ada")),
+        known: Vec::new(),
+    };
+    Locations::resolve_for(Os::Linux, &dirs, &env).unwrap()
+}
+
+/// `text` as the user's `settings.json` at the overridden data folder.
+fn user_at(locations: &Locations, text: &str) -> MemFiles {
+    MemFiles::with(locations.settings_file(), text)
+}
+
+#[test]
+fn data_dir_override_without_a_default_location_uses_beside_the_data_folder() {
+    let at = overridden();
+    let effective = Effective::load(&at, &MemFiles::default(), &[&absent()]);
+    assert_eq!(effective.data_dir(), abs("tmp/clauseo-ci"));
+    assert_eq!(
+        effective.default_matters_dir(),
+        abs("tmp/clauseo-ci-matters")
+    );
+}
+
+#[test]
+fn data_dir_override_with_a_user_default_location_uses_it() {
+    let at = overridden();
+    let text = format!(
+        r#"{{"matters": {{"default_location": "{}"}}}}"#,
+        abs_json("cases")
+    );
+    let effective = Effective::load(&at, &user_at(&at, &text), &[&absent()]);
+    assert_eq!(effective.default_matters_dir(), abs("cases"));
+}
+
+#[test]
+fn data_dir_override_with_a_policy_default_location_policy_wins() {
+    let at = overridden();
+    let user_text = format!(
+        r#"{{"matters": {{"default_location": "{}"}}}}"#,
+        abs_json("user-cases")
+    );
+    let firm = policy(
+        "firm",
+        format!(
+            r#"{{"matters": {{"default_location": "{}"}}}}"#,
+            abs_json("firm-cases")
+        ),
+    );
+    let effective = Effective::load(&at, &user_at(&at, &user_text), &[&firm]);
+    assert_eq!(effective.default_matters_dir(), abs("firm-cases"));
+    assert!(effective.is_locked("matters.default_location"));
+}
+
+#[test]
+fn no_data_dir_override_keeps_documents_clauseo() {
+    let dirs = FakeDirs {
+        home: Some(abs("home/ada")),
+        known: Vec::new(),
+    };
+    let locations = Locations::resolve_for(Os::Linux, &dirs, &FakeEnv::default()).unwrap();
+    let effective = Effective::load(&locations, &MemFiles::default(), &[&absent()]);
+    assert_eq!(
+        effective.default_matters_dir(),
+        abs("home/ada/Documents/Clauseo")
+    );
 }
