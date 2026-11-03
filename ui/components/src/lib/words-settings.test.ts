@@ -78,6 +78,7 @@ test("appearance's controls take the frame's and the controls' words", () => {
 
 test("each Hindi sentence ends with the danda, and no banned word or Devanagari digit appears", () => {
   for (const [en, hi] of Object.entries(settingsWords)) {
+    if (hi === null) continue; // hi: later, no Hindi yet
     expect(hi, en).not.toMatch(/पेंसिल|स्याही|चरण|कदम|मैं|[\u0966-\u096F]/);
     if (en.endsWith(".")) expect(hi, en).toMatch(/।$/);
     else expect(hi, en).not.toMatch(/[।.]$/);

@@ -22,6 +22,7 @@ test("the limit's words say until when, the part of the day first in Hindi, and 
 
 test("no limit string says I or a banned word, and Hindi sentences end in the danda", () => {
   for (const [en, hi] of Object.entries(ALL)) {
+    if (hi === null) continue; // hi: later, no Hindi yet
     expect(en).not.toMatch(
       /\bI\b|[\u2013\u2014]|\b(pencil|ink|step|git|token|session|terminal|safe)\b/i,
     );

@@ -14,6 +14,7 @@ const dialogWords = (en: string, hi: string): WordsRef => ({
   file: "crates/desktop/src/open/words.rs",
   key: en,
   text: (lang) => (lang === "en" ? en : hi),
+  later: false,
 });
 
 const WEB_TITLE = dialogWords("Open this link in your browser?", "यह कड़ी ब्राउज़र में खोलें?");

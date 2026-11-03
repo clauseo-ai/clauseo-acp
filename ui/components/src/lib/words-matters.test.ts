@@ -4,6 +4,7 @@ import { matterWords, mt } from "./words-matters.ts";
 
 test("no string of living in matters says I, names a model, or uses a dash or a banned word", () => {
   for (const s of Object.entries(matterWords).flat()) {
+    if (s === null) continue; // hi: later, no Hindi yet
     expect(s).not.toMatch(
       /\bI\b|\bI'm\b|[\u2013\u2014]|\b(pencil|ink|step|git|token|session|terminal|CLI|adapter|thread|safe)\b|agent process|Opus|Sonnet|Haiku|GPT-\d/i,
     );
@@ -13,6 +14,7 @@ test("no string of living in matters says I, names a model, or uses a dash or a 
 
 test("Hindi sentences end in the danda, never a full stop", () => {
   for (const [en, hi] of Object.entries(matterWords)) {
+    if (hi === null) continue; // hi: later, no Hindi yet
     expect(hi).not.toMatch(/[\u0900-\u097F]\.$/);
     if (en.endsWith(".")) expect(hi.endsWith("।")).toBe(true);
   }

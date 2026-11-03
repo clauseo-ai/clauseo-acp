@@ -148,7 +148,7 @@ export type ReaderKey = keyof typeof HI;
 export const rdt = wordsOf<ReaderKey>(HI);
 
 /** Every Hindi string here, for the tests' banned-words screen. */
-export const readerHindi: readonly string[] = Object.values(HI);
+export const readerHindi: readonly (string | null)[] = Object.values(HI);
 /** Every English key here, for the same screen. */
 export const readerEnglish: readonly string[] = Object.keys(HI);
 

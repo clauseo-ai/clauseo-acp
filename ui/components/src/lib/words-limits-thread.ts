@@ -3,7 +3,7 @@
 // in either language; {time} takes clock(), so Hindi puts the part of the day first. The Hindi is a specialist's draft,
 // waiting for a Hindi-speaking lawyer: the formal आप, the danda, Western digits, English names in Latin script. Nothing
 // here says I or मैं, git, token, session or terminal, or pencil, ink, step, पेंसिल, स्याही, चरण or कदम.
-import { wordsOf } from "./words-core.ts";
+import { wordsOf, type Hindi } from "./words-core.ts";
 
 const HI = {
   // the stop: its title, with the time the answer stopped, or without one where the stop's time isn't known; {name} is
@@ -35,4 +35,4 @@ export type LimitThreadKey = keyof typeof HI;
 export const limThread = wordsOf<LimitThreadKey>(HI);
 
 /** Every key, for the banned-words screen in the tests. */
-export const limitThreadWords: Readonly<Record<LimitThreadKey, string>> = HI;
+export const limitThreadWords: Hindi<LimitThreadKey> = HI;

@@ -4,7 +4,7 @@
 // key, the exact string on screen. The Hindi is a specialist's draft, waiting for a Hindi-speaking lawyer: the formal
 // आप, the danda, Western digits, English names in Latin script. Nothing here says मैं, पेंसिल, स्याही, चरण or कदम.
 import type { Lang } from "./display.ts";
-import { wordsOf } from "./words-core.ts";
+import { wordsOf, type Hindi } from "./words-core.ts";
 import { th } from "./words-thread.ts";
 
 /** Why a host call failed: the protocol's `ErrorCode` (ui/app/src/transport/bindings.ts), copied, since the parts
@@ -177,6 +177,9 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
 };
 
 const own = wordsOf<keyof typeof HI>(HI);
+
+/** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */
+export const errorHindi: Hindi<keyof typeof HI> = HI;
 
 /** An error sentence in the language. */
 export function errorSentence(lang: Lang, key: ErrorKey): string {

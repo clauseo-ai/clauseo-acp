@@ -4,7 +4,7 @@
 // in either language; {time} takes clock(), so Hindi puts the part of the day first. The Hindi is a specialist's draft,
 // waiting for a Hindi-speaking lawyer: the formal आप, the danda, Western digits, English names in Latin script. Nothing
 // here says I or मैं, git, token, session or terminal, or pencil, ink, step, पेंसिल, स्याही, चरण or कदम.
-import { wordsOf } from "./words-core.ts";
+import { wordsOf, type Hindi } from "./words-core.ts";
 
 const HI = {
   // the windows, by the label the host gives; a label not here shows as the host gives it (the last three are U12's)
@@ -33,4 +33,4 @@ export type PlanCardKey = keyof typeof HI;
 export const pc = wordsOf<PlanCardKey>(HI);
 
 /** Every key, for the banned-words screen in the tests. */
-export const planCardWords: Readonly<Record<PlanCardKey, string>> = HI;
+export const planCardWords: Hindi<PlanCardKey> = HI;

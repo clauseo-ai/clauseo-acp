@@ -8,7 +8,7 @@
 // step, पेंसिल, स्याही, चरण or कदम.
 import { clock } from "./words.ts";
 import { useDisplay } from "./display.ts";
-import { wordsOf, type Slots } from "./words-core.ts";
+import { wordsOf, type Slots, type Hindi } from "./words-core.ts";
 
 const HI = {
   // the thread: when the limit resets, today at a time, or on a day
@@ -55,7 +55,7 @@ export type LimitKey = keyof typeof HI;
 export const lim = wordsOf<LimitKey>(HI);
 
 /** Every key, for the banned-words screen in the tests. */
-export const limitWords: Readonly<Record<LimitKey, string>> = HI;
+export const limitWords: Hindi<LimitKey> = HI;
 
 /** The usage limit's words in the page's language, bound: const w = useLimitWords(); w.lim("Resets {time}", { time }). */
 export function useLimitWords() {
