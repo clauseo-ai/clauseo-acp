@@ -6,7 +6,14 @@
 import { act } from "react";
 import { afterEach, expect, test } from "vitest";
 import { agentText, reset, step, userMessage } from "../../testing/stream-script.ts";
-import { eventsOf, headerOf, searched, visited, webCall } from "../../testing/web-sources.ts";
+import {
+  callOf,
+  eventsOf,
+  headerOf,
+  searched,
+  visited,
+  webCall,
+} from "../../testing/web-sources.ts";
 import type { AgentId, Envelope } from "../../transport/protocol.ts";
 import { FakeTransport } from "../../transport/fake-transport.ts";
 import { mountRoom, type Harness } from "./harness.ts";
@@ -35,9 +42,6 @@ async function answered(envelopes: Envelope[] | null, agent: AgentId = "claude-a
   if (envelopes !== null) await act(async () => h!.transport.deliver(eventsOf(envelopes)));
   return h;
 }
-
-const callOf = (e: Envelope): string =>
-  e.event.web_search_recorded?.tool_call ?? e.event.page_visited?.tool_call ?? "";
 
 const toggle = () => h!.one("web-sources-toggle") as HTMLButtonElement;
 const rows = () => h!.all("web-source");
