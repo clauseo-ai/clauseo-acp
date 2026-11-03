@@ -1,5 +1,5 @@
 // A web tool's glyph with its state on it (DESIGN.md §Icons, icons first): on as drawn, off dimmed and slashed, a
-// firm's lock dimmed under a small lock. The words for the state go in the tooltip and the accessible name.
+// firm's lock dimmed, its lower right corner given to the lock. The words for the state go in the tooltip and the accessible name.
 import { useId } from "react";
 import { Icon } from "./icon.tsx";
 import { IconBrowser, IconWebsite } from "./icons.tsx";
@@ -20,8 +20,9 @@ export type ToolGlyphProps = {
 /** Twice the stroke's half and the 1.5 px gap either side: the knockout's width around the slash, in screen px. */
 const KNOCKOUT = 4.5;
 
-/** The lock IconSafeWorkspace draws, scaled to about 9 units and set at the glyph's lower right. */
-const LOCK = "translate(9.1 8.8) scale(0.55)";
+/** The lock IconSafeWorkspace draws, scaled to about 11.5 units tall and set in the glyph's lower right corner, which
+ * is knocked out under it, so it reads at 14 px: its body's sides land near x.75, on the pixel grid at 1x. */
+const LOCK = "translate(6.8 6) scale(0.7)";
 const LOCK_BODY = "M2.75 9.25h14.5v9h-14.5z";
 const LOCK_SHACKLE = "M6 9.25V6a4 4 0 0 1 8 0v3.25";
 
