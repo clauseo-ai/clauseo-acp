@@ -1,7 +1,7 @@
 // The copy review entries for the web sources at the end of an answer (room/thread/sources.tsx), apart from
 // registry.tsx. Ids are WEB-01 on, since the registry's id rule (review/status.ts) takes a dash then digits. Each is the real room over FakeTransport: one question, the tool calls that
 // searched and read, the answer, and the envelopes that fill those tool calls' web (sources.ts's fold, until the host puts `web` on the entry
-// itself). WEB-01 shows the list shut, as an answer first does; every other entry shows it open from the start
+// itself). WEB-12 shows the list shut, as an answer first does; every other entry shows it open from the start
 // (SourcesOpenAtFirst), so its row's words are there without a click.
 import { src, type SourcesKey } from "@clauseo/components/lib/words-sources.ts";
 import { agentText, step, userMessage } from "../testing/stream-script.ts";
@@ -80,40 +80,15 @@ const MANY: Envelope[] = [
   }),
 ];
 
+// WEB-01 to WEB-04 named the old summary's two sentences ("2 web searches. 3 pages read."), which repeated the step
+// chip's counts; they are retired, not reused. The summary's one line is WEB-12 and WEB-13.
 export const WEB_SOURCES: Entry[] = [
   {
-    id: "WEB-01",
-    words: sourcesWords("{n} web searches."),
-    screen: SCREEN,
-    render: shut(MANY),
-  },
-  {
-    id: "WEB-02",
-    words: sourcesWords("{n} pages read."),
-    screen: SCREEN,
-    render: opened(MANY),
-  },
-  {
-    id: "WEB-03",
-    words: sourcesWords("1 web search."),
-    screen: SCREEN,
-    render: opened([
-      searched(1, "Delhi Rent Control Act notice period", RESULTS),
-      visited(2, ACT, { title: RESULTS[0]!.title }),
-    ]),
-  },
-  {
-    id: "WEB-04",
-    words: sourcesWords("1 page read."),
-    screen: SCREEN,
-    render: opened([visited(1, ACT, { title: RESULTS[0]!.title })]),
-  },
-  {
     id: "WEB-05",
-    words: sourcesWords("Searched the web for {query}."),
+    words: sourcesWords("Searched online for '{query}'."),
     screen: SCREEN,
-    // Claude's search, its results as links with their sites
-    render: opened([searched(1, "Delhi Rent Control Act notice period", RESULTS)]),
+    // the whole list open: Claude's search with its results as links and their sites, a search with none, and pages
+    render: opened(MANY),
   },
   {
     id: "WEB-06",
@@ -132,9 +107,9 @@ export const WEB_SOURCES: Entry[] = [
   },
   {
     id: "WEB-08",
-    words: sourcesWords("Read {page}."),
+    words: sourcesWords("Read {page} online."),
     screen: SCREEN,
-    // a fetched page with its title, and one with none, whose long address wraps
+    // a fetched page with its title and its site, and one with none, whose long address wraps and isn't repeated
     render: opened([visited(1, ACT, { title: RESULTS[0]!.title }), visited(2, DHC)]),
   },
   {
@@ -148,13 +123,13 @@ export const WEB_SOURCES: Entry[] = [
   },
   {
     id: "WEB-10",
-    words: sourcesWords("Opened {page} in the browser."),
+    words: sourcesWords("Opened '{page}' in the browser."),
     screen: SCREEN,
     render: opened([visited(1, DHC, { title: "Delhi High Court: judgments", via: "browser" })]),
   },
   {
     id: "WEB-11",
-    words: sourcesWords("Read {page}."),
+    words: sourcesWords("Read {page} online."),
     screen: SCREEN,
     // a Hindi query and a Hindi page title, each marked Hindi
     render: opened([
@@ -163,5 +138,25 @@ export const WEB_SOURCES: Entry[] = [
       ]),
       visited(2, ACT, { title: "दिल्ली किराया नियंत्रण अधिनियम, 1958 की धारा 14" }),
     ]),
+  },
+  {
+    id: "WEB-12",
+    words: sourcesWords("{n} sources"),
+    screen: SCREEN,
+    // shut, as an answer first shows it: five rows
+    render: shut(MANY),
+  },
+  {
+    id: "WEB-13",
+    words: sourcesWords("1 source"),
+    screen: SCREEN,
+    render: opened([visited(1, ACT, { title: RESULTS[0]!.title })]),
+  },
+  {
+    id: "WEB-14",
+    words: sourcesWords("Opened {page} in the browser."),
+    screen: SCREEN,
+    // a page the browser opened with no title: its address, unquoted, with no site after it
+    render: opened([visited(1, DHC, { via: "browser" })]),
   },
 ];

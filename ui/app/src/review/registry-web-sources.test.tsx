@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
-// The web sources' copy review cells, rendered as the review renders them (in StrictMode): every cell but WEB-01 shows
-// its rows without a click, WEB-01 the shut summary alone; and the tool calls above the answer carry the titles the
+// The web sources' copy review cells, rendered as the review renders them (in StrictMode): every cell but WEB-12 shows
+// its rows without a click, WEB-12 the shut summary alone; and the tool calls above the answer carry the titles the
 // real adapters send, never a made-up "Web".
 import { readFileSync } from "node:fs";
 import { act, StrictMode } from "react";
@@ -40,7 +40,7 @@ async function cell(id: string): Promise<HTMLElement> {
 
 const rows = (host: HTMLElement) => host.querySelectorAll('[data-testid="web-source"]');
 
-test.each(WEB_SOURCES.filter((e) => e.id !== "WEB-01").map((e) => e.id))(
+test.each(WEB_SOURCES.filter((e) => e.id !== "WEB-12").map((e) => e.id))(
   "%s shows its rows without a click",
   async (id) => {
     const host = await cell(id);
@@ -51,8 +51,9 @@ test.each(WEB_SOURCES.filter((e) => e.id !== "WEB-01").map((e) => e.id))(
   },
 );
 
-test("WEB-01 shows the summary shut", async () => {
-  const host = await cell("WEB-01");
+test("WEB-12 shows the summary shut, counting the five rows", async () => {
+  const host = await cell("WEB-12");
+  expect(host.querySelector('[data-testid="web-sources-toggle"]')?.textContent).toBe("5 sources");
   expect(
     host.querySelector('[data-testid="web-sources-toggle"]')?.getAttribute("aria-expanded"),
   ).toBe("false");
@@ -60,7 +61,7 @@ test("WEB-01 shows the summary shut", async () => {
 });
 
 test("the cells' tool calls carry the adapters' titles, never \"Web\"", async () => {
-  const host = await cell("WEB-02");
+  const host = await cell("WEB-05");
   const titles = [...host.querySelectorAll('[data-testid="tool-call"]')].map((e) => e.textContent);
   expect(titles.length).toBe(5);
   expect(titles).not.toContain("Web");
@@ -84,18 +85,33 @@ test("each adapter's title for each kind of web tool call", () => {
   expect(calls.map((c) => c.tool_call?.title)).toEqual(['Search "q"', "Fetch https://a.example"]);
 });
 
-test("WEB-08's page rows end their sentence at the link, the site muted after it with no period", async () => {
-  const host = await cell("WEB-08");
-  expect([...rows(host)].map((r) => r.textContent)).toEqual([
-    "Read Section 14 in the Delhi Rent Control Act, 1958. indiacode.nic.in",
-    "Read https://delhihighcourt.nic.in/judgments/2019/rent-control-notice-period-eviction-petition.pdf. delhihighcourt.nic.in",
+test("WEB-05's search rows say the step list's words, the query quoted", async () => {
+  const host = await cell("WEB-05");
+  expect([...rows(host)].map((r) => r.querySelector("p")?.textContent).slice(0, 2)).toEqual([
+    "Searched online for 'Delhi Rent Control Act notice period'.",
+    "Searched online for 'section 14 eviction notice thirty days'. No results.",
   ]);
 });
 
-test("WEB-10's browser row puts the site after the whole sentence", async () => {
+test("WEB-08's page rows end their sentence after online, the site muted after a title only", async () => {
+  const host = await cell("WEB-08");
+  expect([...rows(host)].map((r) => r.textContent)).toEqual([
+    "Read Section 14 in the Delhi Rent Control Act, 1958 online. indiacode.nic.in",
+    "Read https://delhihighcourt.nic.in/judgments/2019/rent-control-notice-period-eviction-petition.pdf online.",
+  ]);
+});
+
+test("WEB-10's browser row quotes the title and puts the site after the whole sentence", async () => {
   const host = await cell("WEB-10");
   expect(rows(host)[0]?.textContent).toBe(
-    "Opened Delhi High Court: judgments in the browser. delhihighcourt.nic.in",
+    "Opened 'Delhi High Court: judgments' in the browser. delhihighcourt.nic.in",
+  );
+});
+
+test("WEB-14's browser row with no title is its address, unquoted, with no site", async () => {
+  const host = await cell("WEB-14");
+  expect(rows(host)[0]?.textContent).toBe(
+    "Opened https://delhihighcourt.nic.in/judgments/2019/rent-control-notice-period-eviction-petition.pdf in the browser.",
   );
 });
 

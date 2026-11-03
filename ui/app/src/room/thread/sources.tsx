@@ -1,6 +1,6 @@
 // The web sources at the end of an answer (sources.ts has where they come from): one quiet line, shut at first, that
-// sums them up like the step group's chip ("2 web searches. 3 pages read.", the kinds' icons, a chevron), and opened,
-// one row for each search or page in the order they ran. A turn with none draws nothing, which is every turn in the
+// counts the rows it opens to ("3 sources", the kinds' icons, a chevron) and so adds to the step chip's counts rather
+// than repeating them, and opened, one row for each search or page in the order they ran, in the step list's words. A turn with none draws nothing, which is every turn in the
 // real app today. Links open through the host's open_external (its own confirm names the site); none navigates the
 // webview. Queries, titles and addresses are isolated runs, marked Hindi when most of their letters are Devanagari,
 // and an address wraps anywhere rather than being cut.
@@ -65,9 +65,10 @@ function PageLink({ url, title }: { url: string; title: string | null }) {
 }
 
 /** The site a page is on, muted after a space, with no period of its own: after a result's link, or after a page row's
- * whole sentence. Nothing for an address that doesn't parse. */
-function Site({ url }: { url: string }) {
-  const site = siteOf(url);
+ * whole sentence. Nothing for an address that doesn't parse, or for a page with no title, whose link is already its
+ * address. */
+function Site({ url, title }: { url: string; title: string | null }) {
+  const site = title === null ? null : siteOf(url);
   return site === null ? null : (
     <>
       {" "}
@@ -107,7 +108,7 @@ function Results({ results }: { results: readonly WebResult[] }) {
       {results.map((r, i) => (
         <li key={`${i}:${r.url}`} data-testid="web-source-result">
           <PageLink url={r.url} title={r.title === "" ? null : r.title} />
-          <Site url={r.url} />
+          <Site url={r.url} title={r.title === "" ? null : r.title} />
         </li>
       ))}
     </ul>
@@ -132,7 +133,7 @@ function SearchRow({
   return (
     <>
       <p>
-        <Slotted k="Searched the web for {query}." slot="query">
+        <Slotted k="Searched online for '{query}'." slot="query">
           <Run text={query} />
         </Slotted>
         {codex
@@ -149,22 +150,28 @@ function SearchRow({
 /** A page's row, by how it was opened. */
 function PageRow({ page, name }: { page: Page; name: string }) {
   const w = useSourcesWords();
-  const link = <PageLink url={page.url} title={page.title ?? null} />;
+  const title = page.title === undefined || page.title === "" ? null : page.title;
+  const link = <PageLink url={page.url} title={title} />;
+  const site = <Site url={page.url} title={title} />;
   if (page.via === "browser")
     return (
       <p>
-        <Slotted k="Opened {page} in the browser." slot="page">
+        {/* a title is quoted, so it doesn't run into the sentence; an address alone needs no quotes */}
+        <Slotted
+          k={title === null ? "Opened {page} in the browser." : "Opened '{page}' in the browser."}
+          slot="page"
+        >
           {link}
         </Slotted>
-        <Site url={page.url} />
+        {site}
       </p>
     );
   const read = (
     <p>
-      <Slotted k="Read {page}." slot="page">
+      <Slotted k="Read {page} online." slot="page">
         {link}
       </Slotted>
-      <Site url={page.url} />
+      {site}
     </p>
   );
   if (page.via !== "codex_open_page") return read;
@@ -242,8 +249,9 @@ function SourcesOf({
     }),
   );
   if (items.length === 0) return null;
-  const searches = items.filter((s) => s.kind === "search").length;
-  const pages = items.length - searches;
+  // the icons say which kinds there are; the words count the rows the list opens to
+  const searches = items.some((s) => s.kind === "search");
+  const pages = items.some((s) => s.kind === "page");
   const codex = agent !== undefined && kindOf(agent, []) === "codex";
   // the thread's plan names it; a page opened on OpenAI's computers is always ChatGPT's
   const name = agent === undefined ? planName("codex-acp") : planName(agent);
@@ -257,9 +265,9 @@ function SourcesOf({
         data-panel-open={open ? "" : undefined}
         onClick={() => setOpen((o) => !o)}
       >
-        {searches > 0 && <IconToolSearch size={11} />}
-        {pages > 0 && <IconToolFetch size={11} />}
-        <span>{w.summary(searches, pages)}</span>
+        {searches && <IconToolSearch size={11} />}
+        {pages && <IconToolFetch size={11} />}
+        <span>{w.summary(items.length)}</span>
         <IconFold size={12} className="work-chev" />
       </button>
       {open && (
