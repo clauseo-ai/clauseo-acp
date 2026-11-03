@@ -9,10 +9,14 @@
 //!
 //! ```text
 //! CLAUSEO_HINDI_LIVE_DATA=$HOME/clauseo-hindi-live \
-//! CLAUSEO_HINDI_CLAUDE_ACP=/absolute/path/to/claude-agent-acp \
-//! CLAUSEO_HINDI_CODEX_ACP=/absolute/path/to/codex-acp \
 //! cargo test -p clauseo-host --test host hindi::live -- --ignored --nocapture --test-threads 1
 //! ```
+//!
+//! Each test finds its adapter the first way that works, and prints which: the executable
+//! `CLAUSEO_HINDI_CLAUDE_ACP` or `CLAUSEO_HINDI_CODEX_ACP` names; else the pinned packages
+//! in `$CLAUSEO_HINDI_LIVE_DATA/adapters` (an `npm ci` of `crates/limits/tests/live`), run
+//! by the `node` that `CLAUSEO_HINDI_NODE` names; else it fails with the steps for either
+//! (the app's own installer is not on main).
 //!
 //! `CLAUSEO_HINDI_LIVE_DATA` is an existing folder of the test's own (never the app's data
 //! folder, which the test refuses); the host's data folder is `data/` in it and each run's
@@ -145,12 +149,9 @@ fn the_rule_counts_devanagari_letters_and_finds_the_fact_in_either_digits() {
 
 #[test]
 fn model_names_match_loosely_and_never_another_version() {
-    assert!(names("Claude Haiku 5.5".to_owned(), "claude-haiku-5-5"));
-    assert!(names("GPT-6 Luna".to_owned(), "gpt-6-luna"));
-    assert!(!names(
-        "claude-haiku-4-5 Haiku 4.5".to_owned(),
-        "claude-haiku-5-5"
-    ));
+    assert!(names("Claude Haiku 5.5", "claude-haiku-5-5"));
+    assert!(names("GPT-6 Luna", "gpt-6-luna"));
+    assert!(!names("claude-haiku-4-5 Haiku 4.5", "claude-haiku-5-5"));
 }
 
 #[test]
@@ -191,7 +192,11 @@ mod live {
             ..super::CLAUDE
         };
         let env = BTreeMap::from([("ANTHROPIC_MODEL".to_owned(), wanted.model.to_owned())]);
-        live_run::run(wanted, "CLAUSEO_HINDI_CLAUDE_ACP", env);
+        let adapter = live_run::Adapter {
+            var: "CLAUSEO_HINDI_CLAUDE_ACP",
+            script: "@agentclientprotocol/claude-agent-acp/dist/index.js",
+        };
+        live_run::run(wanted, adapter, &env);
     }
 
     #[test]
@@ -206,6 +211,10 @@ mod live {
             "model_reasoning_effort": wanted.effort,
         });
         let env = BTreeMap::from([("CODEX_CONFIG".to_owned(), config.to_string())]);
-        live_run::run(wanted, "CLAUSEO_HINDI_CODEX_ACP", env);
+        let adapter = live_run::Adapter {
+            var: "CLAUSEO_HINDI_CODEX_ACP",
+            script: "@agentclientprotocol/codex-acp/dist/index.js",
+        };
+        live_run::run(wanted, adapter, &env);
     }
 }
