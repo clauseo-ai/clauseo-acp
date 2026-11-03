@@ -1,6 +1,8 @@
 // The permission prompt's keys in the room, under QU.9 (a): Enter, Ctrl with Enter and Escape
 // answer the waiting prompt from the composer only while its field is empty; with words in the
-// field Enter keeps its field job. fake_agent `permission-kinds` asks four times and takes only allow_once, allow_always,
+// field Enter keeps its field job, which while Clauseo works (a waiting permission included) is to queue them (U7):
+// the host holds the queued turn behind the running one, and the test removes it before answering, as
+// permission-kinds expects no second prompt. fake_agent `permission-kinds` asks four times and takes only allow_once, allow_always,
 // reject_once, reject_always in that order (any other answer ends it), so a wrong key fails the
 // next step. allow_always passes Rust's native confirm because the fixture sets
 // E2E_CONFIRM_ALWAYS=accept. fake_agent `permission-cancelled` leaves its request pending until
@@ -49,13 +51,17 @@ test.describe("permission-kinds", () => {
       await answered(card, "allow_once");
     });
 
-    await test.step("with words in the field, Enter does not answer", async () => {
+    await test.step("with words in the field, Enter queues them and does not answer", async () => {
       const card = await waiting(w, 1);
       await w.composer.fill("And clause ten?");
       await w.composer.press("Enter");
-      await expect(w.composer).toHaveValue("And clause ten?");
+      await expect(w.queued).toHaveCount(1);
+      await expect(w.composer).toHaveValue("");
       await expect(card).toHaveAttribute("data-state", "pending");
-      await w.composer.fill("");
+      // permission-kinds expects no second prompt: the queued message is removed before it could go
+      await w.queuedRemove(w.queued.first()).click();
+      await expect(w.queued).toHaveCount(0);
+      await w.composer.focus();
       await w.composer.press(process.platform === "darwin" ? "Meta+Enter" : "Control+Enter");
       await answered(card, "allow_always");
     });
