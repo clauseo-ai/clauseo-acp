@@ -1,5 +1,5 @@
 // The words of the settings window: its sections' names, what each says beside its name, each section's one line,
-// and the words of the sections built so far (language, appearance, about). As in words.ts the English is the key,
+// and the words of the sections built so far (plan and usage, language, appearance, about). As in words.ts the English is the key,
 // the exact string on screen, and a key with slots fills them in either language. The Hindi is a specialist's draft,
 // waiting for a Hindi-speaking lawyer: the formal आप, the danda, Western digits, English names in Latin script. A
 // later section brings its own strings with it. The window's title, Settings, is words-ui.ts's; Theme, Text size and
@@ -15,6 +15,7 @@ const HI = {
   Language: "भाषा",
   Appearance: "दिखावट",
   About: "परिचय",
+  "Plan and usage": "प्लान और उपयोग",
   // what each section says beside its name, at a glance
   "{theme}, text size {n}": "{theme}, अक्षरों का आकार {n}",
   "Version {version}": "संस्करण {version}",
@@ -24,6 +25,9 @@ const HI = {
   "The language of every word on screen. Papers, quotes and case names stay as filed.":
     "स्क्रीन के हर शब्द की भाषा। दस्तावेज़, उद्धरण और मामलों के नाम वैसे ही रहते हैं जैसे दर्ज हैं।",
   "How Clauseo looks on this computer.": "इस कंप्यूटर पर Clauseo कैसा दिखे।",
+  "What each plan has left, and when it resets.": "हर प्लान में कितना बाकी है, और वह कब रीसेट होता है।",
+  // plan and usage: the plan's own words are the limits' (words-limits.ts)
+  "Updated at {time}": "{time} बजे अपडेट किया गया",
   // language and appearance
   "Changes at once, and everything stays where it was.": "तुरंत बदलती है, और सब कुछ वहीं रहता है जहाँ था।",
   Day: "दिन",
