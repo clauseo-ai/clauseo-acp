@@ -178,6 +178,14 @@ starts its work only after a paused one has stopped. There is one worker thread 
 install, and a job lock makes the jobs run one after another. Every job event is sent under the
 lock `pause` takes, and dropped once the job is paused or superseded.
 
+Between processes, each job holds an exclusive lock on `agents/.lock` (`File::try_lock`) from
+its start until just before its last event. A lock another process holds means another Clauseo
+is installing: the job fails at once with a log line saying so, and a retry works once that one
+is done (the simpler choice; the single-instance plugin makes it rare). The start-up clean-up of
+stale install folders runs only with the lock held, and is skipped without it. The data folder
+and the bundle must be absolute paths; a relative one fails the install with a line naming the
+setting, and start-up neither cleans nor reads anything under a relative data folder.
+
 **Firm IT mode.**
 1. An id in `managed` (policy sets `agents.<id>`) is IT's runtime. Nothing is installed for it
    and it reports `Managed`.

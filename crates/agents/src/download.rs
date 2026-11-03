@@ -100,6 +100,9 @@ impl Fetcher {
         data_dir: &Path,
     ) -> Result<Fetcher, FetchError> {
         let fail = |detail: &str| FetchError::new(FetchKind::Failed, None, None, detail, data_dir);
+        if !data_dir.is_absolute() {
+            return Err(fail("the data folder is not an absolute path"));
+        }
         #[cfg(feature = "test-support")]
         let https_only = !install.allow_http_for_tests;
         #[cfg(not(feature = "test-support"))]

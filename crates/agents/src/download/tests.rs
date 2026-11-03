@@ -585,6 +585,13 @@ fn outside_tests_plain_http_and_an_http_mirror_are_refused() {
 }
 
 #[test]
+fn a_relative_data_folder_is_refused() {
+    let err = Fetcher::new(&plain(), &agent(), None, Path::new("data")).unwrap_err();
+    assert_eq!(err.kind, FetchKind::Failed);
+    assert_eq!(err.detail, "the data folder is not an absolute path");
+}
+
+#[test]
 fn the_head_check_finds_pages_and_wrong_kinds() {
     assert_eq!(check_head(b"\x1f\x8b\x08", Magic::Gzip), Ok(()));
     assert_eq!(check_head(b"PK\x03\x04", Magic::Zip), Ok(()));

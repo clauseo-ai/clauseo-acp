@@ -247,20 +247,38 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
         let config = &self.config;
         let user = node::find_user_node(&config.node_search, &*self.launcher, &*self.timer).await;
         let agents: Vec<AgentId> = config.snapshot.agents().map(|e| e.id.clone()).collect();
+        // The clean-up below runs only with `agents/.lock` held: another Clauseo installing now
+        // may own the temp folders it would remove. A relative data folder is never touched.
+        let paths_ok = install::check_paths(config).is_ok();
+        let lock = paths_ok
+            .then(|| {
+                crate::write::try_lock_agents(&config.data_dir)
+                    .ok()
+                    .flatten()
+            })
+            .flatten();
         for agent in agents {
             if config.managed.contains(&agent) {
                 self.shared.emit(&agent, InstallState::Managed, None);
                 continue;
             }
-            if let Some(hash) = config.snapshot.install_hash(&agent, config.platform) {
+            if lock.is_some()
+                && let Some(hash) = config.snapshot.install_hash(&agent, config.platform)
+            {
                 let scan = receipt::scan(&config.data_dir, &agent, &hash, config.platform);
                 // A folder that will not go now goes at the next start, or under the install's
                 // own rename.
                 drop(scan.and_then(|scan| receipt::remove_stale(&scan)));
             }
-            if let Some(installed) =
-                install::ready_install(config, &*self.launcher, &*self.timer, &agent, user.as_ref())
-                    .await
+            if paths_ok
+                && let Some(installed) = install::ready_install(
+                    config,
+                    &*self.launcher,
+                    &*self.timer,
+                    &agent,
+                    user.as_ref(),
+                )
+                .await
             {
                 let version = installed.version.clone();
                 self.shared
@@ -364,6 +382,7 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
             shared: Arc::clone(&self.shared),
             turn: Arc::clone(&self.job_lock),
             system_proxy: self.system_proxy.clone(),
+            data_lock: Mutex::new(None),
         };
         let spawned = std::thread::Builder::new()
             .name(format!("clauseo-install-{agent}"))
