@@ -3,12 +3,14 @@
 // against micromark; then random streams against a fresh answer at every update (append-fixture.ts).
 import { expect, test } from "vitest";
 import { createAnswer } from "./answer.ts";
-import { appended } from "./append.ts";
+import { appended, appendProbe } from "./append.ts";
 import {
   againstFresh,
   expectSame,
   BREAKS,
   deltasFor,
+  DELTAS,
+  lineText,
   MARKUP,
   newTotals,
   PLAIN_WORDS,
@@ -44,6 +46,7 @@ test("plain prose appended to a paragraph's last text extends it, as micromark p
     ["ஒப்பந்தம் விதிகள்", " பொருந்தும்."],
     ["Almost a link: ww", "w and http: and xmpp"],
     ["A [settled](/a) link then", " text"],
+    ["[a]: /b\n\nSee [a] then", " more"],
     ["Text 𝐀𝐁", "𝐂 more"],
     ["A first line\n*x and", " more"],
     ["A first line\n**x and", " more"],
@@ -75,6 +78,12 @@ test("anything that may not be inert text falls back to a full parse", () => {
     ["An escape \\", "("], // an escape
     ['A [link](b "title', '")'], // an inline link's title closes
     ["A [link](", "b)"],
+    ['x [a [b](c "t](d) more', '")'], // a link inside a link closes as its own
+    ["x ![a [b](c 't](d) more", "')"],
+    ['[a]: b\n"multi\nline', '"'], // a definition's title closes
+    ["[a]: b\n(multi\nline", ")"],
+    ["[a]: b\n'multi\nline", "'"],
+    ["[a]:\nb\n(multi\nline", ")"],
     ["[a]:\nb", ' "title"'], // a definition still arriving
     ['[a]:\nb "ti', 'tle"'],
     ["- an item", " goes on"], // not a paragraph
@@ -113,6 +122,20 @@ test("over random appends, what the fast path makes is always micromark's mdast"
   }
   // The edges are reached: a good share of the random appends were taken (and matched micromark's).
   console.log(`append: the fast path took ${made} of ${cases} random appends`);
+  expect(made).toBeGreaterThan(cases / 10);
+});
+
+test("over random appends to a paragraph's last line, what the fast path makes is micromark's mdast", () => {
+  const random = randomOf(2292);
+  let made = 0;
+  const cases = 6_000;
+  for (let index = 0; index < cases; index++) {
+    let delta = "";
+    for (let part = 1 + Math.floor(random() * 3); part > 0; part--)
+      delta += `${random() < 0.3 ? " " : ""}${DELTAS[Math.floor(random() * DELTAS.length)]!}`;
+    if (extend(lineText(random), delta)) made++;
+  }
+  console.log(`append: the fast path took ${made} of ${cases} random appends to a last line`);
   expect(made).toBeGreaterThan(cases / 10);
 });
 
@@ -230,4 +253,28 @@ test("a plain paragraph streams with no parse after its first update: one fast-p
   // An update whose delta ends in the space before a word is parsed whole only if its repair has something
   // pending; prose has none.
   expect(perUpdate.slice(1).every((one) => one.parses === 0 && one.fast === 1)).toBe(true);
+});
+
+test("the finished render never uses an mdast the fast path made", () => {
+  // A wrong one stands in for each: the streaming render shows it, the finished one must not.
+  appendProbe.replace = (root) => {
+    const wrong = structuredClone(root);
+    const paragraph = wrong.children.at(-1);
+    const text = paragraph?.type === "paragraph" ? paragraph.children.at(-1) : undefined;
+    if (text?.type === "text") text.value = "WRONG";
+    return wrong;
+  };
+  try {
+    // The last streaming update holds the whole text, so the finished one parses the same input.
+    const text = "The Supplier shall notify the Client within ten days, in writing.";
+    const answer = createAnswer("w");
+    let shown = "";
+    for (let end = 9; end < text.length + 9; end += 9)
+      shown = JSON.stringify(answer.update(text.slice(0, end), true).at(0)!.content);
+    expect(shown).toContain("WRONG");
+    const once = createAnswer("w").update(text, false);
+    expectSame(answer.update(text, false), once, "finished", true);
+  } finally {
+    appendProbe.replace = undefined;
+  }
 });

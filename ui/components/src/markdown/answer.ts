@@ -464,7 +464,7 @@ export function createAnswer(scope: string): Answer {
       if (!entities && characterEntitiesLoaded()) {
         // The full table arrived: blocks holding `&` are parsed again, the rest keep their views.
         entities = true;
-        appender.end(false); // and no tail parse from before it is extended
+        appender.forget(); // and no tail parse from before it is extended
         if (missed) {
           for (const cache of [trees, owned, facts, repairs, views, tails]) cache.forget("&");
           lastLinesUsed = undefined;
@@ -472,6 +472,9 @@ export function createAnswer(scope: string): Answer {
         }
       }
       if (raw === lastText && streaming === lastStreaming) return lastViews;
+      // The finished render parses afresh what the fast path made (append.ts), and what was read from it.
+      if (!streaming)
+        for (const made of appender.made()) for (const cache of [trees, facts]) cache.forget(made);
       const text = capNesting(raw.includes("\r") ? raw.replace(/\r\n?/g, "\n") : raw);
       let blocks: readonly string[];
       let continues: readonly boolean[];

@@ -63,6 +63,9 @@ export const PLAIN_WORDS = [
   "https",
   "𝐀𝐁",
   "naïve",
+  '")',
+  "')",
+  ")",
 ];
 
 /**
@@ -113,6 +116,11 @@ export const MARKUP = [
   "ww.w",
   "ww",
   "<",
+  "]",
+  "[x ",
+  "[y ",
+  '[a [b](c "t](d) ',
+  "![a [b](c 't](d) ",
 ];
 
 /**
@@ -148,7 +156,66 @@ export const BREAKS = [
   "\n***",
   "\n\n**Clause 8.3** obliges ",
   "\n    four spaces ",
+  '\n\n[x]: https://example.com/x\n"multi\n',
+  "\n\n[x]: https://example.com/x\n(multi ",
+  "\n\n[x]:\nhttps://example.com/x\n'multi ",
 ];
+
+/**
+ * What may stand before the paragraph an append extends: nothing, a line of it, a definition (with a blank
+ * line after it, or a title still arriving on the next lines), a note, a heading, a definition list.
+ */
+const CONTEXTS = [
+  "",
+  "A first line\n",
+  "[x]: https://example.com/x\n\n",
+  '[x]: https://example.com/x\n"multi\n',
+  "[x]: https://example.com/x\n(multi\n",
+  "[x]:\nhttps://example.com/x\n'multi\n",
+  "[^1]: The note.\n\n",
+  "# Heading\n\n",
+  "Term\n: definition\n\n",
+  "[y]: /y\n",
+];
+
+/** What an append may add: allowlisted words, and the syntax that would close or start something. */
+export const DELTAS = [
+  ...PLAIN_WORDS,
+  "]",
+  "](y)",
+  "] (y)",
+  "(y)",
+  ")",
+  '")',
+  "')",
+  '"',
+  "'",
+  "<",
+  "<b>",
+  ">",
+  "*",
+  "_",
+  "~~",
+  "`",
+  "[",
+  "&",
+  ";",
+  "@b.co",
+  "\\",
+  "\n",
+  "\nx",
+];
+
+/** The syntax on the line an append extends that keeps the fast path open (nothing READS_ON in append.ts). */
+const LINE_MARKUP = MARKUP.filter((markup) => !/[\\&@]|www\.|:\/|xmpp:|mailto:/i.test(markup));
+
+/** A paragraph's source, maybe after a context, whose last line starts with a letter: what the fast path extends. */
+export function lineText(random: () => number): string {
+  let line = pick(random, ["Some", "**Clause 8.3**", "_Term_", "अनुबंध", "Note"]);
+  for (let part = Math.floor(random() * 8); part > 0; part--)
+    line += `${random() < 0.7 ? " " : ""}${pick(random, random() < 0.5 ? PLAIN_WORDS : LINE_MARKUP)}`;
+  return pick(random, CONTEXTS) + (random() < 0.5 ? line.trimEnd() : line);
+}
 
 /** A random answer: mostly allowlisted words, with markup and block breaks between them. */
 export function streamText(random: () => number, length: number): string {
