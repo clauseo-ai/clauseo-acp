@@ -15,8 +15,13 @@ import type {
   ThreadStatus,
   ViewEntry,
 } from "../transport/protocol.ts";
-import { FakeTransport, type FakeHost } from "../transport/fake-transport.ts";
-import type { NextErrorCode, NextHostError, PaperSummary } from "../room/host-next.ts";
+import { FakeTransport, type FakeHost, type FakeNextHost } from "../transport/fake-transport.ts";
+import {
+  WIRE,
+  type NextErrorCode,
+  type NextHostError,
+  type PaperSummary,
+} from "../room/host-next.ts";
 import { detailed, fakeNext, railStates } from "../room/fake-next.ts";
 
 /** A matter as filed, for states that show one. */
@@ -71,6 +76,9 @@ export type ThreadState = {
   undoRefused?: ErrorCode;
   /** H8's papers, as list_papers lists them: the wall's tiles, and a change note's Open in Word (U9). */
   papers?: PaperSummary[];
+  /** How list_papers answers, for the `@` menu's states (with `papers`, or alone, the papers it lists): never (pending),
+   * refused, or with the list stopping short (truncated). Without it, the list answers in full. */
+  papersAnswer?: "pending" | "failed" | "truncated";
   /** The plan's limits the channel carries, as `limits_view_changed` sends them (U12): the toolbar's plan, its card,
    * the composer's warning. */
   limits?: LimitsView;
@@ -81,6 +89,27 @@ const refusal = (code: ErrorCode) => ({
   message: "the review's scripted refusal",
   retryable: false,
 });
+
+/** A NextHost of one matter, whose list_papers lists the state's papers, or answers as `papersAnswer` says. */
+function papersNext(state: ThreadState): FakeNextHost {
+  const listed = fakeNext({ matters: () => [detailed(MATTER)], parts: ["papers"] });
+  return {
+    ...listed,
+    query: (query) => {
+      if (typeof query === "string" || !(WIRE.listPapers in query)) return listed.query(query);
+      if (state.papersAnswer === "pending") return new Promise(() => {});
+      if (state.papersAnswer === "failed") throw new Error("the review's scripted refusal");
+      return {
+        papers: {
+          papers: state.papers ?? [],
+          skipped: [],
+          unread: [],
+          truncated: state.papersAnswer === "truncated",
+        },
+      };
+    },
+  };
+}
 
 /** A host with one matter and its one thread, whose view arrives as the room subscribes. */
 export function threadHost(state: ThreadState): FakeTransport {
@@ -136,14 +165,8 @@ export function threadHost(state: ThreadState): FakeTransport {
           );
         }
       }),
-    ...(state.papers !== undefined
-      ? {
-          next: fakeNext({
-            matters: () => [detailed(MATTER)],
-            papers: state.papers,
-            parts: ["papers"],
-          }),
-        }
+    ...(state.papers !== undefined || state.papersAnswer !== undefined
+      ? { next: papersNext(state) }
       : state.restart === true
         ? {
             next: { parts: ["restart"], query: () => ({ threads: [] }) } satisfies FakeHost["next"],
