@@ -50,8 +50,10 @@ export const ids = {
   userMessage: "message-user",
   agentMessage: "message-agent",
   thought: "thought",
-  /** A tool call row, with `data-tool-call-id` and `data-status`. */
+  /** A tool call row, with `data-tool-call-id` and `data-status`, shown once its step group is opened. */
   toolCall: "tool-call",
+  /** A step group: the tool calls and thoughts between two of the agent's texts, folded into one line. */
+  stepGroup: "step-group",
   /**
    * A permission request, with `data-state` (pending, resolved, expired) and, while it can be
    * answered, one button per offered option kind. An answered card stays, without buttons.
@@ -253,6 +255,8 @@ export function window(page: Page) {
     agentMessages: id(ids.agentMessage),
     thoughts: id(ids.thought),
     toolCalls: id(ids.toolCall),
+    /** The step groups' lines: each a button that opens its rows (`aria-expanded`). */
+    stepGroupLines: id(ids.stepGroup).locator("button"),
     toolCall: (toolCallId: string): Locator =>
       page.locator(`[data-testid="${ids.toolCall}"][data-tool-call-id="${toolCallId}"]`),
     /** The tool call rows whose text contains `title`. */
