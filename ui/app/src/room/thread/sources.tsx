@@ -48,31 +48,34 @@ function Run({ text }: { text: string }) {
   );
 }
 
-/** A page's title as a link, or its address when it has none, then its site, muted. */
+/** A page's title as a link, or its address when it has none. */
 function PageLink({ url, title }: { url: string; title: string | null }) {
   const transport = use(SourcesTransport);
-  const site = siteOf(url);
   return (
+    <a
+      href={url}
+      data-testid="web-source-link"
+      className="text-primary underline underline-offset-2"
+      onClick={(e) => {
+        e.preventDefault();
+        if (transport !== null) void quietly("open_external", transport.openExternal(url));
+      }}
+    >
+      <Run text={title ?? url} />
+    </a>
+  );
+}
+
+/** The site a page is on, muted after a space, with no period of its own: after a result's link, or after a page row's
+ * whole sentence. Nothing for an address that doesn't parse. */
+function Site({ url }: { url: string }) {
+  const site = siteOf(url);
+  return site === null ? null : (
     <>
-      <a
-        href={url}
-        data-testid="web-source-link"
-        className="text-primary underline underline-offset-2"
-        onClick={(e) => {
-          e.preventDefault();
-          if (transport !== null) void quietly("open_external", transport.openExternal(url));
-        }}
-      >
-        <Run text={title ?? url} />
-      </a>
-      {site !== null && (
-        <>
-          {" "}
-          <span className="text-muted">
-            <Run text={site} />
-          </span>
-        </>
-      )}
+      {" "}
+      <span className="text-muted" data-testid="web-source-site">
+        <Run text={site} />
+      </span>
     </>
   );
 }
@@ -106,6 +109,7 @@ function Results({ results }: { results: readonly WebResult[] }) {
       {results.map((r, i) => (
         <li key={`${i}:${r.url}`} data-testid="web-source-result">
           <PageLink url={r.url} title={r.title === "" ? null : r.title} />
+          <Site url={r.url} />
         </li>
       ))}
     </ul>
@@ -154,6 +158,7 @@ function PageRow({ page, name }: { page: Page; name: string }) {
         <Slotted k="Opened {page} in the browser." slot="page">
           {link}
         </Slotted>
+        <Site url={page.url} />
       </p>
     );
   const read = (
@@ -161,6 +166,7 @@ function PageRow({ page, name }: { page: Page; name: string }) {
       <Slotted k="Read {page}." slot="page">
         {link}
       </Slotted>
+      <Site url={page.url} />
     </p>
   );
   if (page.via !== "codex_open_page") return read;
