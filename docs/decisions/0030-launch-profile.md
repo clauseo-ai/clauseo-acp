@@ -184,11 +184,23 @@ The host thread set the conditions the profile must keep: Claude keeps `settingS
     deviation: R17 names `Agent::id`).
   - `agent-state/<matter id>/notes`.
 
-  A folder that cannot be made fails the launch. When the agent ends, the run folder is
-  removed on a launch-prep thread (`remove_run`); the notes folder stays. A start-up sweep
-  removes every `run/` folder a crash left: the host's first launch prep does it, under a lock
-  that every prep takes before making its folders, so no live folder is taken. A relaunch of
-  the same thread also removes that thread's earlier folders.
+  Each part below the data folder must be a real folder or be made as one
+  (`write::create_private_dirs_under`, by `symlink_metadata`): nothing is made through a link
+  at `run` or `agent-state`, and a folder that cannot be made fails the launch and takes its
+  run folder back. The notes folder stays when a session ends.
+- **The run folder's life.** Each launch removes only its own run folder, never a prefix of
+  folders, so a late prep cannot touch a newer launch's. It goes, off the actor, on every way
+  out:
+  - a prep the actor stopped waiting for (past `PREPARE_WAIT`) undoes its own folders on its
+    thread (`codex::prepare::off_actor_or_undo`: the actor closes the answer channel when it
+    gives up, so each answer is either taken or undone);
+  - an answer for an earlier launch, a stopping host, failed profile keys, or a failed
+    `launch` (`launch_checks::discard`);
+  - the agent's end (`remove_run`).
+- **The start-up sweep.** The first launch prep, under a lock every prep takes before making
+  its folders, renames `run` to `run.old-<n>` in one call, and a `clauseo-run-sweep` thread
+  deletes every real `run.old-*` folder. No launch waits on the delete. A `run` or
+  `run.old-*` that is a link is never swept through.
 - **Instructions.** `{work_folder}` and `{matter_notes}` are filled after `session_meta`, in
   `_meta.systemPrompt.append`, and at the launch in Codex's `developer_instructions`. An
   unfillable token, or a folder that is not UTF-8, fails the launch with
@@ -205,7 +217,9 @@ The host thread set the conditions the profile must keep: Claude keeps `settingS
   - `settings` gains `disableSkillShellExecution: true`, and `skipWebFetchPreflight: true` when
     the merged launch env sets `CLAUDE_CODE_USE_BEDROCK`, `_VERTEX` or `_FOUNDRY` to a value
     that is not empty and not `0`.
-- **Codex.** The hook's keys, minus any whose first part is reserved, then `web_search`
+- **Codex.** The hook's keys, minus the reserved and every dotted key (as `CodexConfig::new`
+  does: codex reads a dotted key as a path, so one could replace the host's nested
+  `writable_roots`), then `web_search`
   (`live` or `disabled`), the filled `developer_instructions`, and
   `sandbox_workspace_write.writable_roots`. `agent::codex::config` merges them after
   `CODEX_OVERRIDES` and before `hooks`, add-only:
@@ -240,6 +254,11 @@ The host thread set the conditions the profile must keep: Claude keeps `settingS
     `refuse`, separate from `reset`: `false` for the tools keys, empty for `mcp.servers`. The
     warning says "locked off". This departs from 0009's "locks at its default" for these two
     keys.
+  - A policy name under `tools` that this version cannot read refuses only the keys it could
+    stand for: `tools.websearch` refuses `tools.web_search` alone. A name that could stand for
+    either (`"tools": "off"`, `tools.brwser`, a `Tools` section) refuses both, except a
+    sibling the same source sets validly by its exact name, which keeps its value
+    (`leaf::could_stand_for`). An unreadable source still locks every security key off.
   - `mcp.servers.browser` is a reserved name, dropped with a warning from the user's file and
     from policy; `clauseo` loads like any other.
 - **Header tools** (`protocol`: `HeaderEntry::tools`, `ToolState`, `ClauseoTool`,
@@ -249,13 +268,32 @@ The host thread set the conditions the profile must keep: Claude keeps `settingS
     value in memory (as `folder_state` is kept for app rows). The thread's `StreamView` lays
     it over every header upsert and every `Reset` window, so a new subscriber's first frame
     carries it, and a relaunch replaces it.
-  - One entry point, `show`, so the shape can move. 0002 now says a header may carry
+  - Each session start works out the tools and holds them (`hold`); they show only once
+    `session/new`, `session/load` or `session/resume` answers (`show_held`, one line in
+    `session::on_started`), so a session that never starts shows none. Archiving a thread
+    drops its entries (the host deletes no thread). 0002 now says a header may carry
     host-composed, unlogged fields.
   - Web search appears for an agent with a kind; the browser appears when the hook offers one.
 - **Busy files touched.** `actor/turn/agents.rs`, three lines: the Codex keys into
   `codex::launch_env`, the `PATH` folder into `launch_spec`, and `remove_run` in `on_ended`.
   `actor/startup.rs`, three fields. `actor/turn/session.rs`: `session_loads` now calls
-  `turn/profile_loads.rs`.
+  `turn/profile_loads.rs`, and `on_started` shows the held tools (one line).
+  `actor/commands.rs`: archiving forgets the header's tools (one line).
+- **No I/O in the hook.** `ProfileHook`'s methods run on the host thread and must do no I/O;
+  its doc says so. Known follow-up, older than R21: `agent::loads::mcp_control` still stats
+  `managed-mcp.json` on the actor at each session start, and should move off it.
+
+### Deviations from the brief (PR-B)
+
+- **`SessionKey.launch`** is the launch prep's id, not `Agent::id`.
+- **The start-up sweep** runs at the first launch prep, under a lock, not at host start; it is
+  one rename there, and the delete runs on its own thread.
+- **The reserved server name `browser`** is matched ignoring case.
+- **Header tools** are shown when the session call answers, not when it is sent.
+- **`protocol/src/wire.rs`** is fixed in its own commit: without it the `tools` field
+  disappears from `bindings.ts` (restoring the `delivery?` fields is a side effect).
+- **Two lines in `xtask/expect-allowlist.txt`** (`prepend_path`, `StreamHeader`) need
+  code-owner approval.
 
 ### The desktop adapter (PR-C)
 

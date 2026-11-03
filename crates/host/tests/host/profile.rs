@@ -5,7 +5,9 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use clauseo_protocol::{ClauseoTool, ToolsUnavailableReason};
+use clauseo_protocol::{
+    ClauseoTool, StreamId, ToolState, ToolsUnavailableReason, ViewEntry, ViewPatchBody,
+};
 use serde_json::json;
 
 use crate::profile_rig::{
@@ -375,6 +377,95 @@ fn the_header_shows_the_tools_and_a_relaunch_replaces_them() {
             tool(ClauseoTool::WebSearch, None),
             tool(ClauseoTool::Browser, None)
         ]
+    );
+    host.shutdown();
+}
+
+/// The tools of each header upsert `view` received, in order.
+fn upserted_tools(view: &crate::observe::View) -> Vec<Vec<ToolState>> {
+    view.patches()
+        .filter_map(|patch| match &patch.body {
+            ViewPatchBody::Upsert { entry } => match entry.as_ref() {
+                ViewEntry::Header(header) => Some(header.tools.clone()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect()
+}
+
+/// Before its session starts a thread's header shows no tools; once `session/new` answers, a
+/// subscriber already open gets them in a header upsert, in the same host run.
+#[test]
+fn an_open_subscriber_gets_the_tools_once_the_session_starts() {
+    let dir = Dir::new("profile_header_live", &[]);
+    let new = template(
+        &dir,
+        "hl-new",
+        &agent_lines("hl-new", "session/new", &json!({"mcpServers": []}), &[]),
+    );
+    settings(
+        &dir,
+        agents(&[(CLAUDE, &new, json!({}))]),
+        json!({"tools": {"browser": true}}),
+    );
+    let hook = Hook {
+        servers: vec![browser_server()],
+        ..Hook::default()
+    };
+    let launcher = Wired::new(&dir);
+    let host = dir.start_launching(0, launcher, |config| {
+        config.with_profile_hook(Box::new(hook))
+    });
+    let matter = host.create_matter("m", &dir.folder("m", &[]));
+    let thread = host.create_thread(matter, CLAUDE);
+    assert_eq!(first_frame_tools(&host, thread), [], "no session, no tools");
+    let mut view = host.view(StreamId::Thread(thread), None);
+    view.until_items(1);
+    turn(&host, thread);
+    let shown = vec![
+        tool(ClauseoTool::WebSearch, None),
+        tool(ClauseoTool::Browser, Some(ToolsUnavailableReason::NoProxy)),
+    ];
+    view.until("the header's tools", |view| {
+        upserted_tools(view).last() == Some(&shown)
+    });
+    assert!(
+        upserted_tools(&view)
+            .iter()
+            .all(|tools| tools.is_empty() || *tools == shown),
+        "{}",
+        view.dump()
+    );
+    host.shutdown();
+}
+
+/// A session that never starts (`session/new` answers an error) shows no tools.
+#[test]
+fn a_failed_session_start_shows_no_tools() {
+    let dir = Dir::new("profile_header_failed", &[]);
+    settings(
+        &dir,
+        agents(&[(CLAUDE, &Scenario::Local("new-session-error"), json!({}))]),
+        json!({"tools": {"browser": true}}),
+    );
+    let hook = Hook {
+        servers: vec![browser_server()],
+        ..Hook::default()
+    };
+    let launcher = Wired::new(&dir);
+    let host = dir.start_launching(0, launcher, |config| {
+        config.with_profile_hook(Box::new(hook))
+    });
+    let matter = host.create_matter("m", &dir.folder("m", &[]));
+    let thread = host.create_thread(matter, CLAUDE);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (turn, _) = host.prompt(thread, "Go.");
+    events.until_turn_ended(turn);
+    assert_eq!(
+        first_frame_tools(&host, thread),
+        [],
+        "the failed start shows none"
     );
     host.shutdown();
 }

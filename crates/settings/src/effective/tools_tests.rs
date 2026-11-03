@@ -156,14 +156,75 @@ fn a_policy_value_of_the_wrong_type_locks_the_browser_off() {
 fn a_tools_section_policy_cannot_read_locks_both_off() {
     for text in [
         r#"{"tools": "off"}"#,
+        r#"{"tools": {"brwser": true}}"#,
+        r#"{"Tools": true}"#,
+        // A section of another spelling is not read inside: what it holds is unknown.
         r#"{"Tools": {"browser": true}}"#,
-        r#"{"tools": {"websearch": true}}"#,
+        r#"{"tools": {"web_search": "yes", "brwser": true}}"#,
     ] {
         let firm = policy("firm", text);
         let effective = Effective::load(&locations(), &all_on(), &[&firm]);
         for key in TOOLS {
             assert!(!tool(&effective, key), "{text}: {key}");
             assert!(effective.is_locked(key), "{text}: {key}");
+        }
+    }
+}
+
+/// A misnamed `tools` key refuses only the key it could stand for; one that could stand for
+/// either spares a sibling the policy sets validly by its exact name, which keeps its value.
+#[test]
+fn a_misnamed_tools_key_refuses_only_what_it_could_stand_for() {
+    // (policy, web_search's value, browser's value, the locked keys)
+    let cases: [(&str, bool, bool, &[&str]); 6] = [
+        (
+            r#"{"tools": {"websearch": true}}"#,
+            false,
+            true,
+            &["tools.web_search"],
+        ),
+        (
+            r#"{"tools": {"Browser": true}}"#,
+            true,
+            false,
+            &["tools.browser"],
+        ),
+        (
+            r#"{"tools": {"Web-Search": 1}}"#,
+            false,
+            true,
+            &["tools.web_search"],
+        ),
+        (
+            r#"{"tools": {"web_search": true, "brwser": true}}"#,
+            true,
+            false,
+            &["tools.web_search", "tools.browser"],
+        ),
+        (
+            r#"{"tools": {"browser": true, "brwser": false}}"#,
+            false,
+            true,
+            &["tools.web_search", "tools.browser"],
+        ),
+        (
+            r#"{"tools": {"web_search": true, "websearch": false}}"#,
+            false,
+            true,
+            &["tools.web_search"],
+        ),
+    ];
+    for (text, web_search, browser, locked) in cases {
+        let firm = policy("firm", text);
+        let effective = Effective::load(&locations(), &all_on(), &[&firm]);
+        assert_eq!(tool(&effective, "tools.web_search"), web_search, "{text}");
+        assert_eq!(tool(&effective, "tools.browser"), browser, "{text}");
+        for key in TOOLS {
+            assert_eq!(
+                effective.is_locked(key),
+                locked.contains(&key),
+                "{text}: {key}"
+            );
         }
     }
 }

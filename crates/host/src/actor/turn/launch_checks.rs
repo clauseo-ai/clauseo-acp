@@ -11,8 +11,16 @@
 //! stand-in `run/<session id>` folder with `work` and `browser` under it, and the matter's
 //! notes folder) and, for an agent with a kind, writes the profile's skill files
 //! (`ProfileHook::skill_files`, `clauseo_profile::write_skills`). A skill write that fails is
-//! a warning, never a failed launch. The run folder is removed off the actor when the agent
-//! ends ([`remove_run`]); the notes folder stays.
+//! a warning, never a failed launch. The notes folder stays; the run folder is the launch's own
+//! (its id is in the name) and is removed off the actor on every way out: by the prep thread
+//! when nobody waits for its answer any more ([`codex::prepare::off_actor_or_undo`]), and
+//! otherwise from the actor ([`discard`]) when the answer is for an earlier launch, the host is
+//! stopping, the profile keys or the launch fail, or the agent ends ([`remove_run`]). No launch
+//! removes another's folder: a prep that came late can only take its own.
+//!
+//! At the first launch, before any folder is made, `<data>/run` from an earlier run is set
+//! aside in one rename and deleted on a thread of its own ([`RunSweep`]). Nothing is made or
+//! swept through a link at `<data>/run` or `<data>/agent-state`.
 
 use std::path::{Path, PathBuf};
 
@@ -78,53 +86,130 @@ impl RunFolders {
         }
     }
 
-    /// Makes them. Before that, the host's first launch takes out every `run` folder a crash
-    /// left ([`RunSweep`]), and each launch takes out any an earlier launch of the same thread
-    /// left (one whose agent never started). File system calls: off the actor.
-    fn make(&self, data: &Path, sweep: &RunSweep) -> Result<(), Error> {
+    /// Makes them, each through no link below `data`. Before that, the host's first launch sets
+    /// aside the `run` folder an earlier run left ([`RunSweep`]). When one cannot be made, the
+    /// run folder is taken back. File system calls: off the actor.
+    pub(crate) fn make(&self, data: &Path, sweep: &RunSweep) -> Result<(), Error> {
         sweep.once(data);
-        let prefix = format!("{}-", self.key.thread);
-        sweep_run(data, |name| name.starts_with(&prefix));
         for folder in [&self.work, &self.browser, &self.notes] {
-            make_private(folder).map_err(|error| {
-                Error::refused(
+            if let Err(error) = crate::write::create_private_dirs_under(data, folder) {
+                self.remove();
+                return Err(Error::refused(
                     clauseo_protocol::ErrorCode::AgentLaunchFailed,
                     format!("cannot make the folder {}: {error}", folder.display()),
-                )
-            })?;
+                ));
+            }
         }
         Ok(())
+    }
+
+    /// Removes this launch's run folder and all it holds, when it is a real folder; the notes
+    /// folder stays. File system calls: off the actor.
+    pub(crate) fn remove(&self) {
+        if crate::write::is_real_dir(&self.root) {
+            remove_tree(&self.root);
+        }
     }
 }
 
 /// The start-up sweep of `<data>/run`, once per host start: no launch is live before the
-/// first, so every folder there is a crash's leftover. It runs on the first launch-prep thread,
-/// under a lock every launch's prep takes before making its folders, so no live folder is
-/// taken.
+/// first, so every folder there is an earlier run's leftover. The first launch-prep thread, under
+/// a lock every launch's prep takes before making its folders, renames `run` to
+/// `run.old-<n>` in one call, so no live folder is taken and no launch waits on a delete; a
+/// `clauseo-run-sweep` thread then deletes every `run.old-*` folder. A `run` that is a link
+/// is left as it is, and the launches refuse it.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct RunSweep(std::sync::Arc<std::sync::Mutex<bool>>);
+pub(crate) struct RunSweep(std::sync::Arc<std::sync::Mutex<Swept>>);
+
+/// Whether the start-up sweep ran, and (for the tests) its delete's thread.
+#[derive(Debug, Default)]
+struct Swept {
+    done: bool,
+    #[cfg(test)]
+    delete: Option<std::thread::JoinHandle<()>>,
+}
 
 impl RunSweep {
-    /// Takes out everything under `<data>/run` the first time; nothing after.
-    fn once(&self, data: &Path) {
-        let mut done = self
+    /// Sets `<data>/run` aside the first time and starts its delete; nothing after.
+    pub(crate) fn once(&self, data: &Path) {
+        let mut swept = self
             .0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if !*done {
-            sweep_run(data, |_| true);
-            *done = true;
+        if swept.done {
+            return;
+        }
+        swept.done = true;
+        set_aside(data);
+        let data = data.to_owned();
+        let started = std::thread::Builder::new()
+            .name("clauseo-run-sweep".to_owned())
+            .spawn(move || delete_set_aside(&data));
+        match started {
+            #[cfg(test)]
+            Ok(delete) => swept.delete = Some(delete),
+            #[cfg(not(test))]
+            Ok(_delete) => {}
+            Err(error) => {
+                tracing::warn!(%error, "the earlier run's folders stay until the next start");
+            }
+        }
+    }
+
+    /// Waits for the start-up sweep's delete, when it started.
+    #[cfg(test)]
+    pub(crate) fn join_delete(&self) {
+        let delete = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .delete
+            .take();
+        if let Some(delete) = delete {
+            delete.join().unwrap();
         }
     }
 }
 
-/// Removes each folder under `<data>/run` whose name `takes`.
-fn sweep_run(data: &Path, takes: impl Fn(&str) -> bool) {
-    if let Ok(entries) = std::fs::read_dir(run_dir(data)) {
-        for entry in entries.flatten() {
-            if entry.file_name().to_str().is_some_and(&takes) {
-                remove_tree(&entry.path());
-            }
+/// The prefix of a `run` folder set aside.
+const SET_ASIDE: &str = "run.old-";
+
+/// Renames `<data>/run` to the first free `run.old-<n>`, when it is a real folder.
+fn set_aside(data: &Path) {
+    let run = run_dir(data);
+    match std::fs::symlink_metadata(&run) {
+        Err(_) => return,
+        Ok(meta) if !meta.is_dir() => {
+            tracing::warn!(folder = %run.display(), "the run folder is a link or no folder; left as is");
+            return;
+        }
+        Ok(_) => {}
+    }
+    let free = (0..1000_u32)
+        .map(|n| data.join(format!("{SET_ASIDE}{n}")))
+        .find(|old| std::fs::symlink_metadata(old).is_err());
+    let renamed = match free {
+        Some(old) => crate::write::rename_folder(&run, &old),
+        None => Err(std::io::Error::other("no free run.old-<n> name")),
+    };
+    if let Err(error) = renamed {
+        tracing::warn!(folder = %run.display(), %error, "the earlier run's folders stay");
+    }
+}
+
+/// Deletes every real `run.old-*` folder under `data`; a link of that name is left alone.
+fn delete_set_aside(data: &Path) {
+    let Ok(entries) = std::fs::read_dir(data) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let named = entry
+            .file_name()
+            .to_str()
+            .is_some_and(|name| name.starts_with(SET_ASIDE));
+        if named && crate::write::is_real_dir(&path) {
+            remove_tree(&path);
         }
     }
 }
@@ -139,11 +224,6 @@ pub(crate) fn notes_dir(data: &Path, matter: MatterId) -> PathBuf {
     data.join("agent-state")
         .join(matter.to_string())
         .join("notes")
-}
-
-/// Makes `folder` and its parents, each new one private (`write::create_private_dir_all`).
-fn make_private(folder: &Path) -> std::io::Result<()> {
-    crate::write::create_private_dir_all(folder)
 }
 
 /// Removes `folder` and all it holds, through no link; a failure is a warning.
@@ -198,7 +278,7 @@ pub(super) fn prepare(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>
     state.preparing = Some(Box::new(Preparing { id, waiting }));
     let clock = std::sync::Arc::clone(&actor.clock);
     actor.spawn_post(async move {
-        let result = codex::prepare::off_actor(clock, move || {
+        let result = codex::prepare::off_actor_or_undo(clock, move || {
             data_folder::refuse_data_folder(&stored, &data)?;
             let codex = match home {
                 Some(home) => {
@@ -218,7 +298,7 @@ pub(super) fn prepare(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>
                 tracing::warn!(%error, "the profile's skills were not written; the agent starts with what the folder holds");
             }
             Ok(Prepared { stored, codex, run })
-        })
+        }, |late: Prepared| late.run.remove())
         .await;
         let result = result.map(Box::new);
         Input::Turn(TurnInput::Prepared { thread, id, result })
@@ -226,40 +306,61 @@ pub(super) fn prepare(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>
 }
 
 /// Phase two: the checks `id` answered. The agent launches with what they found, or the
-/// waiting work fails with their error; during shutdown it fails as closed.
+/// waiting work fails with their error; during shutdown it fails as closed. On every way that
+/// does not end in a launched agent, the launch's run folder is removed off the actor; an answer
+/// for an earlier launch removes only its own.
 pub(super) fn on_prepared(
     actor: &mut Actor,
     thread: ThreadId,
     id: u64,
     result: Result<Box<Prepared>, Error>,
 ) {
-    let Some(state) = state(actor, thread) else {
-        return;
-    };
-    let Some(preparing) = state.preparing.take_if(|preparing| preparing.id == id) else {
+    let preparing = state(actor, thread)
+        .and_then(|state| state.preparing.take_if(|preparing| preparing.id == id));
+    let Some(preparing) = preparing else {
+        if let Ok(stale) = result {
+            discard(actor, thread, stale.run);
+        }
         return;
     };
     let waiting = preparing.waiting;
-    match result {
-        Ok(_) if host_stopping(actor) => agents::fail_all(actor, thread, waiting, &Error::Closed),
-        Ok(prepared) => match super::profile_loads::launch_keys(actor, thread, *prepared) {
-            Ok(prepared) => agents::launch_now(actor, thread, waiting, prepared),
-            Err(error) => agents::fail_all(actor, thread, waiting, &error),
-        },
-        Err(error) => agents::fail_all(actor, thread, waiting, &error),
+    let mut prepared = match result {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            agents::fail_all(actor, thread, waiting, &error);
+            return;
+        }
+    };
+    if host_stopping(actor) {
+        discard(actor, thread, prepared.run);
+        agents::fail_all(actor, thread, waiting, &Error::Closed);
+        return;
+    }
+    if let Err(error) = super::profile_loads::launch_keys(actor, thread, &mut prepared) {
+        discard(actor, thread, prepared.run);
+        agents::fail_all(actor, thread, waiting, &error);
+        return;
+    }
+    let run = prepared.run.clone();
+    if let Some(state) = state(actor, thread) {
+        state.run = Some(run.clone());
+    }
+    agents::launch_now(actor, thread, waiting, *prepared);
+    let launched = state(actor, thread).is_some_and(|state| state.agent.is_some());
+    if !launched {
+        if let Some(state) = state(actor, thread) {
+            state.run = None;
+        }
+        discard(actor, thread, run);
     }
 }
 
-/// Removes `thread`'s run folder off the actor, once its agent has ended. The notes folder
-/// stays.
-pub(super) fn remove_run(actor: &mut Actor, thread: ThreadId) {
-    let Some(run) = state(actor, thread).and_then(|state| state.run.take()) else {
-        return;
-    };
+/// Removes `run` (`thread`'s launch's run folder) off the actor; the notes folder stays.
+fn discard(actor: &mut Actor, thread: ThreadId, run: RunFolders) {
     let clock = std::sync::Arc::clone(&actor.clock);
     let spawned = actor.spawner.spawn_local(async move {
         let removed = codex::prepare::off_actor(clock, move || {
-            remove_tree(&run.root);
+            run.remove();
             Ok(())
         })
         .await;
@@ -271,3 +372,14 @@ pub(super) fn remove_run(actor: &mut Actor, thread: ThreadId) {
         tracing::warn!(%thread, %error, "a session's run folder was not removed");
     }
 }
+
+/// Removes `thread`'s run folder off the actor, once its agent has ended or failed to launch.
+/// The notes folder stays.
+pub(super) fn remove_run(actor: &mut Actor, thread: ThreadId) {
+    if let Some(run) = state(actor, thread).and_then(|state| state.run.take()) {
+        discard(actor, thread, run);
+    }
+}
+
+#[cfg(test)]
+mod tests;

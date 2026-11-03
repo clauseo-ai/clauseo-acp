@@ -180,6 +180,12 @@ fn right_shape(key: &str) -> String {
 
 /// Each security-relevant key that `raws` or `warnings` name in a form that does not set it,
 /// once, with where and how it was first named.
+///
+/// A name refuses only the keys it could stand for ([`could_stand_for`]): `tools.websearch`
+/// refuses `tools.web_search`, not `tools.browser`. A name that could stand for any key of its
+/// section (`"tools": "off"`, `tools.brwser`) refuses each, except a sibling the same source
+/// sets validly by its exact name, which keeps its value. A source that cannot be read at all
+/// still locks every key off (`effective.rs`).
 fn security_keys_misnamed(
     raws: &[Raw],
     warnings: &[Warning],
@@ -196,6 +202,7 @@ fn security_keys_misnamed(
             kind_of(name).is_none()
                 && !name.starts_with("agents.")
                 && name.to_ascii_lowercase().contains(section)
+                && could_stand_for(name, key, raws)
         };
         let from_raws = raws
             .iter()
@@ -206,7 +213,9 @@ fn security_keys_misnamed(
                 WarningKind::UnknownKey { key: name } if about(name) || name == key => {
                     Some((warning.origin.clone(), name.clone()))
                 }
-                WarningKind::InvalidValue { key: name, .. } if name == section || about(name) => {
+                WarningKind::InvalidValue { key: name, .. }
+                    if (name == section && !set_validly(raws, key)) || about(name) =>
+                {
                     Some((warning.origin.clone(), name.clone()))
                 }
                 WarningKind::UnknownKey { .. }
@@ -221,6 +230,50 @@ fn security_keys_misnamed(
         }
     }
     found
+}
+
+/// Whether the unknown `name`, which holds `key`'s section, could stand for the security key
+/// `key`. What the name holds beyond the section, in any case and with no punctuation, is
+/// matched against each key of the section: it stands for the keys whose words it holds
+/// (`websearch`, `Web-Search`, `web` for `tools.web_search`). One that matches no key of
+/// the section, or holds nothing beyond it, could stand for any of them, except a sibling
+/// [`set_validly`] by `raws`. A section with one security key (`mcp`) is always it.
+fn could_stand_for(name: &str, key: &str, raws: &[Raw]) -> bool {
+    let section = key.split('.').next().unwrap_or(key);
+    let siblings: Vec<&str> = SECURITY_KEYS
+        .into_iter()
+        .filter(|other| other.split('.').next() == Some(section))
+        .collect();
+    if siblings.len() < 2 {
+        return true;
+    }
+    let rest: String = name
+        .to_ascii_lowercase()
+        .replacen(section, "", 1)
+        .chars()
+        .filter(char::is_ascii_alphanumeric)
+        .collect();
+    let holds = |other: &str| {
+        !rest.is_empty()
+            && other
+                .split_once('.')
+                .map_or("", |(_, leaf)| leaf)
+                .split('_')
+                .any(|word| !word.is_empty() && rest.contains(word))
+    };
+    if siblings.iter().any(|other| holds(other)) {
+        holds(key)
+    } else {
+        !set_validly(raws, key)
+    }
+}
+
+/// Whether `raws` set `key` by its exact name, the last time to a value that types.
+fn set_validly(raws: &[Raw], key: &str) -> bool {
+    raws.iter()
+        .rev()
+        .find(|raw| raw.key == key)
+        .is_some_and(|raw| Leaf::parse(key, raw.value.clone(), &mut Vec::new()).is_ok())
 }
 
 /// The last item of each key, in the order those last items came. A source that sets a key

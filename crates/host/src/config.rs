@@ -34,6 +34,10 @@ use crate::window::PATCH_WINDOW_BYTES;
 /// - `codex_config` keys go into a Codex agent's `CODEX_CONFIG`, added only where R15's keys
 ///   and the host's own (`web_search`, `hooks`) leave room.
 /// - `skill_files` are written on the launch-prep thread before the agent starts.
+///
+/// Every method runs on the host thread, at each launch and session start, and must do no I/O:
+/// no file, network or process call, and nothing that blocks. It hands back data the adapter
+/// already holds; the host does any file work (writing `skill_files`) off that thread.
 pub trait ProfileHook: Send {
     /// The `_meta` object for `session/new` and `session/load` with `agent`, or `None` for none.
     fn session_meta(&self, agent: &AgentId) -> Option<Map<String, Value>>;
