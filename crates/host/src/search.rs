@@ -246,8 +246,16 @@ impl Search {
     }
 
     /// Ends the thread after the job it is on and joins it. Shutdown calls it before it closes
-    /// the store.
-    pub(crate) fn stop(mut self) {
+    /// the store; dropping the handle (an abort) does the same.
+    pub(crate) fn stop(self) {
+        drop(self);
+    }
+}
+
+impl Drop for Search {
+    fn drop(&mut self) {
+        // Without `stop` (an abort) too: the thread ends at its next look at the channels, and
+        // is joined so its connection and its clone of the store are closed when the host ends.
         self.commits.close();
         self.control.close();
         if let Some(thread) = self.thread.take()
@@ -255,13 +263,5 @@ impl Search {
         {
             tracing::warn!("{THREAD_NAME} panicked");
         }
-    }
-}
-
-impl Drop for Search {
-    fn drop(&mut self) {
-        // Without `stop` (an abort): the thread ends at its next look at the channels.
-        self.commits.close();
-        self.control.close();
     }
 }
