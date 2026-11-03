@@ -35,7 +35,8 @@
 //! - What a Codex agent is launched with (`agent/codex.rs`): its ask mode
 //!   (`INITIAL_AGENT_MODE=workspace-write`), its home under the data folder as `CODEX_HOME` with a
 //!   `config.toml` of the same switches for app-server's start-up, a
-//!   `CODEX_CONFIG` with `clauseo_limits::CODEX_OVERRIDES` and the hooks seam's object, and no
+//!   `CODEX_CONFIG` with `clauseo_limits::CODEX_OVERRIDES` (and on Windows the unelevated
+//!   sandbox, record 0025) and the hooks seam's object, and no
 //!   MCP filtering, over any settings value; its refusal in a folder holding `.codex` (#184);
 //!   and, before its first prompt, `session/set_mode` to the ask mode and the guard's trust check.
 //!   No agent inherits a `GIT_*` variable. `docs/decisions/0025-codex-in-acp-and-host.md`.

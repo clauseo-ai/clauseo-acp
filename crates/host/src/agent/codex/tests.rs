@@ -6,8 +6,8 @@ use clauseo_protocol::ErrorCode;
 use serde_json::{Map, Value, json};
 
 use super::{
-    config, guard_trusted, home_config, launch_env, make_home, merge_add_only, prepare_launch,
-    refuse_codex_folder, write_home_config,
+    config, config_on, guard_trusted, home_config, launch_env, make_home, merge_add_only,
+    prepare_launch, refuse_codex_folder, write_home_config,
 };
 use crate::write;
 
@@ -27,6 +27,16 @@ fn switches() -> Value {
         "cloud": {"skills": {"enabled": false}},
         "skills": {"bundled": {"enabled": false}, "include_instructions": false},
     })
+}
+
+/// What [`config`] gives with nothing else on this platform: the switches, and on Windows the
+/// unelevated sandbox.
+fn pinned() -> Value {
+    let mut pinned = switches();
+    if cfg!(windows) {
+        pinned["windows"] = json!({"sandbox": "unelevated"});
+    }
+    pinned
 }
 
 fn object(value: Value) -> Map<String, Value> {
@@ -94,8 +104,37 @@ fn merge_add_only_extends_arrays_and_keeps_what_is_there() {
 #[test]
 fn config_nests_every_limits_override() {
     let built = Value::Object(config(&BTreeMap::new(), Map::new(), None));
-    assert_eq!(built, switches());
+    assert_eq!(built, pinned());
     assert_eq!(clauseo_limits::CODEX_OVERRIDES.len(), 6);
+}
+
+/// On Windows Codex gets the unelevated sandbox, without which codex 0.162.1 makes
+/// `workspace-write` read-only there and asks before every command; elsewhere there is no
+/// `windows` key. A settings or profile `windows` key changes neither.
+#[test]
+fn only_windows_gets_the_unelevated_sandbox() {
+    let mut on_windows = switches();
+    on_windows["windows"] = json!({"sandbox": "unelevated"});
+    let none = BTreeMap::new();
+    assert_eq!(
+        Value::Object(config_on(&none, Map::new(), None, true)),
+        on_windows
+    );
+    assert_eq!(
+        Value::Object(config_on(&none, Map::new(), None, false)),
+        switches()
+    );
+    let elevated = json!({"windows": {"sandbox": "elevated"}});
+    let settings = BTreeMap::from([("CODEX_CONFIG".to_owned(), elevated.to_string())]);
+    for windows in [true, false] {
+        let built = config_on(&settings, object(elevated.clone()), None, windows);
+        let expected = if windows { &on_windows } else { &switches() };
+        assert_eq!(&Value::Object(built), expected, "windows: {windows}");
+    }
+    assert_eq!(
+        config(&none, Map::new(), None),
+        config_on(&none, Map::new(), None, cfg!(windows))
+    );
 }
 
 /// A settings `CODEX_CONFIG` gives only the model and its effort; it cannot turn a switch back
@@ -114,7 +153,7 @@ fn settings_config_gives_only_the_model() {
         })
         .to_string(),
     )]);
-    let mut expected = switches();
+    let mut expected = pinned();
     expected["model"] = json!("gpt-6-luna");
     expected["model_reasoning_effort"] = json!("low");
     assert_eq!(Value::Object(config(&settings, Map::new(), None)), expected);
@@ -123,7 +162,7 @@ fn settings_config_gives_only_the_model() {
         let settings = BTreeMap::from([("CODEX_CONFIG".to_owned(), text.to_owned())]);
         assert_eq!(
             Value::Object(config(&settings, Map::new(), None)),
-            switches(),
+            pinned(),
             "{text}"
         );
     }
@@ -165,7 +204,7 @@ fn launch_env_forces_mode_home_config_and_no_filtering() {
     assert_eq!(get("DISABLE_MCP_CONFIG_FILTERING"), Some("true".into()));
     let text = get("CODEX_CONFIG").unwrap();
     let parsed: Value = serde_json::from_str(text.to_str().unwrap()).unwrap();
-    assert_eq!(parsed, switches());
+    assert_eq!(parsed, pinned());
     assert_eq!(env.len(), 4);
 }
 
