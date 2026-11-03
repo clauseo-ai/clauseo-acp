@@ -443,3 +443,16 @@ test("Ask's name is its word alone, and its arrow is hidden from assistive techn
   expect(ask().textContent).toBe("पूछें");
   expect(ask().querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
 });
+
+test("Stop's name is the answer's label, its word beside a square hidden from assistive technology, in both languages", async () => {
+  await mount(composer({ busy: true }));
+  const stop = () => document.querySelector<HTMLButtonElement>(".room-field-ask")!;
+  expect(stop().getAttribute("aria-label")).toBe("Stop the answer");
+  expect(stop().textContent).toBe("Stop");
+  expect(stop().querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
+  expect(stop().querySelector("svg")?.hasAttribute("aria-label")).toBe(false);
+  await act(async () => showDisplay({ ...DEFAULT_DISPLAY, motion: "reduced", lang: "hi" }));
+  expect(stop().getAttribute("aria-label")).toBe("उत्तर रोकें");
+  expect(stop().textContent).toBe("रोकें");
+  expect(stop().querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
+});

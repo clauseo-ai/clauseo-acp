@@ -2,6 +2,7 @@
 // menu's (composer-menu.tsx).
 import { cn } from "../lib/cn.ts";
 import { Mixed } from "../lib/mixed.tsx";
+import { IconCommand } from "../icons/icons.tsx";
 import { rowNote } from "../ui/recipes-overlays.ts";
 import type { MentionItem, SlashCommand } from "./composer.tsx";
 
@@ -9,22 +10,25 @@ import type { MentionItem, SlashCommand } from "./composer.tsx";
 export function CommandRow({ c }: { c: SlashCommand | undefined }) {
   if (c === undefined) return null;
   return (
-    <span className="min-w-0">
-      <span className="block">
-        <bdi>/{c.name}</bdi>
-        {c.input_hint !== undefined && c.input_hint !== "" && (
-          <span className="text-muted">
-            {" "}
-            <Mixed>{c.input_hint}</Mixed>
+    <>
+      <IconCommand size={16} className="mt-s0-5 text-muted group-data-highlighted:text-primary" />
+      <span className="min-w-0">
+        <span className="block">
+          <bdi>/{c.name}</bdi>
+          {c.input_hint !== undefined && c.input_hint !== "" && (
+            <span className="text-muted">
+              {" "}
+              <Mixed>{c.input_hint}</Mixed>
+            </span>
+          )}
+        </span>
+        {c.description !== "" && (
+          <span className={rowNote}>
+            <Mixed>{c.description}</Mixed>
           </span>
         )}
       </span>
-      {c.description !== "" && (
-        <span className={rowNote}>
-          <Mixed>{c.description}</Mixed>
-        </span>
-      )}
-    </span>
+    </>
   );
 }
 
