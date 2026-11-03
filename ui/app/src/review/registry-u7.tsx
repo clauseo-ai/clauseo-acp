@@ -14,9 +14,23 @@ import {
 } from "../testing/stream-script.ts";
 import type { ThreadStatus } from "../transport/protocol.ts";
 import { FakeTransport } from "../transport/fake-transport.ts";
+import type { Lang } from "@clauseo/components/lib/display.ts";
 import type { Entry } from "./entry.ts";
 import { MATTER } from "./hosts.ts";
-import { RoomAsking, RoomOver } from "./states.tsx";
+import {
+  asideScene,
+  chatgptScene,
+  heldScene,
+  queueHost,
+  queueScene,
+  requeuedScene,
+  sentNowScene,
+  steerMarkScene,
+  steerWords,
+  type QueueScene,
+} from "./queue-hosts.ts";
+import { RoomTyped } from "./room-typed.tsx";
+import { RoomAsking, RoomClicking, RoomOver, RoomPressing } from "./states.tsx";
 import { matterWords } from "./words.ts";
 
 /** The conversation that holds the matter; its id sorts below THREAD's, so the open one is THREAD. */
@@ -76,6 +90,19 @@ const before = () => (
 /** After sending: the open conversation's message waits behind the other. */
 const queued = () => <RoomOver host={() => heldHost({ queued: { behind: OTHER } })} />;
 
+/** Part 2's states (queue-hosts.tsx), each over its own host. */
+const over = (scene: QueueScene) => <RoomOver host={() => queueHost(scene)} />;
+const pressing = (scene: QueueScene, press: string) => (
+  <RoomPressing host={() => queueHost(scene)} press={press} />
+);
+const strip = (lang: Lang) => over(queueScene(lang, 3));
+const steerClaude = (lang: Lang) => (
+  <RoomTyped host={() => queueHost(queueScene(lang, 0))} words={steerWords.claude(lang)} />
+);
+const steerChatgpt = (lang: Lang) => (
+  <RoomTyped host={() => queueHost(chatgptScene(lang))} words={steerWords.chatgpt(lang)} />
+);
+
 /** U7's entries, each id written as it is: an id never moves when an entry is added or taken out. */
 export const U7: Entry[] = [
   {
@@ -103,5 +130,159 @@ export const U7: Entry[] = [
     words: matterWords("Queue"),
     screen: "matters/other",
     render: before,
+  },
+  // part 2: the queue's strip over the composer (matters/queue, queue-full, held, held-failed)
+  {
+    id: "U7-05",
+    words: matterWords("1 queued, sent once this answer is done."),
+    screen: "matters/queue",
+    render: (lang) => over(queueScene(lang, 1)),
+  },
+  {
+    id: "U7-06",
+    words: matterWords("{n} queued, sent in order."),
+    screen: "matters/queue",
+    render: strip,
+  },
+  {
+    id: "U7-07",
+    words: matterWords("The queue holds {n}."),
+    screen: "matters/queue-full",
+    render: (lang) => over(queueScene(lang, 10)),
+  },
+  {
+    id: "U7-08",
+    words: matterWords("{n} more"),
+    screen: "matters/queue",
+    render: strip,
+  },
+  {
+    id: "U7-09",
+    words: matterWords("Show fewer"),
+    screen: "matters/queue",
+    render: (lang) => (
+      <RoomClicking host={() => queueHost(queueScene(lang, 3))} clicks={[".queue-fold"]} />
+    ),
+  },
+  {
+    id: "U7-10",
+    words: matterWords("Queued messages"),
+    screen: "matters/queue",
+    render: strip,
+  },
+  {
+    id: "U7-11",
+    words: matterWords("Edit"),
+    screen: "matters/queue",
+    render: strip,
+  },
+  {
+    id: "U7-12",
+    words: matterWords("Remove"),
+    screen: "matters/queue",
+    render: strip,
+  },
+  {
+    id: "U7-13",
+    words: matterWords("Send now"),
+    screen: "matters/queue",
+    render: strip,
+  },
+  {
+    id: "U7-14",
+    words: matterWords("Edit queued message {n}"),
+    screen: "matters/queue",
+    render: (lang) => pressing(queueScene(lang, 3), "queued-edit"),
+  },
+  {
+    id: "U7-15",
+    words: matterWords("Save"),
+    screen: "matters/queue",
+    render: (lang) => pressing(queueScene(lang, 3), "queued-edit"),
+  },
+  {
+    id: "U7-16",
+    words: matterWords("That message had already gone."),
+    screen: "matters/queue",
+    render: (lang) =>
+      pressing(
+        queueScene(lang, 3, { refuse: { remove_queued_prompt: "thread.turn_not_queued" } }),
+        "queued-remove",
+      ),
+  },
+  {
+    id: "U7-17",
+    words: matterWords(
+      "The queue is held. You stopped the answer at {time}, so nothing more is sent until you send.",
+    ),
+    screen: "matters/held",
+    render: (lang) => over(heldScene(lang, "stopped")),
+  },
+  {
+    id: "U7-18",
+    words: matterWords(
+      "The queue is held. The answer failed at {time}, so nothing more is sent until you send.",
+    ),
+    screen: "matters/held-failed",
+    render: (lang) => over(heldScene(lang, "failed")),
+  },
+  {
+    id: "U7-19",
+    words: matterWords("Send next"),
+    screen: "matters/held",
+    render: (lang) => over(heldScene(lang, "stopped")),
+  },
+  // part 2: steering the running answer (matters/steer-claude, steer-chatgpt, steer-aside)
+  {
+    id: "U7-20",
+    words: matterWords("Send now gives your words to Clauseo while it writes."),
+    screen: "matters/steer-claude",
+    render: steerClaude,
+  },
+  {
+    id: "U7-21",
+    words: matterWords(
+      "ChatGPT can't take words mid-answer. Send now stops this answer, keeps what it wrote, and sends your words first.",
+    ),
+    screen: "matters/steer-chatgpt",
+    render: steerChatgpt,
+  },
+  {
+    id: "U7-22",
+    words: matterWords("You, {time}, while Clauseo answered"),
+    screen: "matters/steer-claude",
+    render: (lang) => over(steerMarkScene(lang)),
+  },
+  {
+    id: "U7-23",
+    words: matterWords("Stopped at {time} to send your words first. The answer so far is kept."),
+    screen: "matters/steer-chatgpt",
+    render: (lang) => over(sentNowScene(lang)),
+  },
+  {
+    id: "U7-24",
+    words: matterWords("Your words came as the answer ended, so they go next."),
+    screen: "matters/steer-claude",
+    render: (lang) => over(requeuedScene(lang)),
+  },
+  {
+    id: "U7-25",
+    words: matterWords(
+      "Your words at {time} came in during '{title}'. It carried on in the background, finished at {done}, and this answer uses what it found.",
+    ),
+    screen: "matters/steer-aside",
+    render: (lang) => over(asideScene(lang)),
+  },
+  {
+    id: "U7-26",
+    words: matterWords("In the background"),
+    screen: "matters/steer-aside",
+    render: (lang) => over(asideScene(lang)),
+  },
+  {
+    id: "U7-27",
+    words: matterWords("Show what it found"),
+    screen: "matters/steer-aside",
+    render: (lang) => over(asideScene(lang)),
   },
 ];
