@@ -2,6 +2,7 @@
 //! what the commands refuse. No agent runs.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use clauseo_protocol::{
     AgentChoiceId, ConfigValue, Cursor, ErrorCode, HostEvent, PatchBatch, PermissionRequestId,
@@ -11,7 +12,7 @@ use uuid::Uuid;
 
 use super::*;
 use crate::dialogs::BoxFuture;
-use crate::test_support::{Scratch, block_on, envelope, open, stream};
+use crate::test_support::{Messages, Running, Scratch, block_on, envelope, open, stream};
 
 const MAIN: &str = "main";
 const SETTINGS: &str = "settings";
@@ -163,15 +164,24 @@ fn a_resubscribe_from_an_older_cursor_gets_the_tail_in_the_same_epoch() {
     );
 }
 
-#[test]
-fn past_the_cap_the_driver_pauses_and_resubscribes_once_acks_catch_up() {
-    let scratch = Scratch::new("cap", &[]);
-    let host = scratch.start(Vec::new());
-    let thread = host.thread();
-    let bridge = host.bridge();
-    let messages = open(&bridge, MAIN);
-    let stream = stream(thread);
-    block_on(bridge.subscribe(MAIN, stream, None)).unwrap();
+/// Renames `thread`, followed on `MAIN` of `bridge` from its first `Reset`, until the window
+/// pauses, and returns the stream's messages sent: the `Reset` and every rename's. With
+/// `fire_at`, the watchdog fires after that many renames, as on a runner slow enough to go
+/// [`window::WATCHDOG`] without an ack while it fills the window: every stream and feed restarts,
+/// and the limits feed sends its view again.
+///
+/// The window counts every message toward its cap, the limits messages too: the limits view
+/// `open` waited for, and the one each watchdog fire resends. So the bytes the page received are
+/// the stream's messages' and the limits messages' together, and they must be the window's
+/// count exactly, and past the cap.
+fn fill_until_paused(
+    host: &Running,
+    bridge: &Bridge,
+    messages: &Messages,
+    thread: ThreadId,
+    fire_at: Option<u32>,
+) -> Vec<String> {
+    block_on(bridge.subscribe(MAIN, stream(thread), None)).unwrap();
     let mut sent = vec![messages.next_text()];
 
     // Long titles, so each rename's patch is large: renames until the window pauses.
@@ -183,13 +193,51 @@ fn past_the_cap_the_driver_pauses_and_resubscribes_once_acks_catch_up() {
         assert!(renames < 5000, "never paused");
         host.rename(thread, &format!("{renames} {long}"));
         sent.push(messages.next_text());
+        if Some(renames) == fire_at {
+            // Far past the watchdog's wait, whatever the window's clock reads. The restart's
+            // `Reset` comes in among the renames' messages, and the loop takes it as one.
+            pump::tick_at(&window, Duration::from_secs(3600));
+            // The limits view it resends. On a run slow enough that the window's own watchdog
+            // fired first, this one does not fire (no ack rearmed it), and that one resent it.
+            if messages.limits_received() < 2 {
+                let _view = messages.next_limits();
+            }
+        }
     }
     // A rename may make more than one message: take every one sent before the pause. The pump
-    // sends while holding the window's lock, so all of them are in the channel by now.
-    sent.extend(messages.drain());
+    // sends while holding the window's lock, so with the lock held every message the window
+    // counted is in the channel, and no other comes in.
+    let counted = {
+        let window = lock(&window);
+        sent.extend(messages.drain());
+        window.state().unacked_bytes()
+    };
     // In the e2e build each message the collector unwrapped was longer by its wrapper.
-    let unacked = sent.iter().map(String::len).sum::<usize>() + messages.timed_overhead();
-    assert!(unacked > 256 * 1024, "paused at {unacked} bytes");
+    let stream_bytes = sent.iter().map(String::len).sum::<usize>() + messages.timed_overhead();
+    let received = stream_bytes + messages.limits_bytes();
+    assert_eq!(
+        received as u64,
+        counted,
+        "the page got {stream_bytes} stream bytes and {} limits bytes in {} limits messages",
+        messages.limits_bytes(),
+        messages.limits_received()
+    );
+    assert!(
+        counted > window::UNACKED_CAP,
+        "paused at {counted} bytes, of which {stream_bytes} the stream's"
+    );
+    sent
+}
+
+#[test]
+fn past_the_cap_the_driver_pauses_and_resubscribes_once_acks_catch_up() {
+    let scratch = Scratch::new("cap", &[]);
+    let host = scratch.start(Vec::new());
+    let thread = host.thread();
+    let bridge = host.bridge();
+    let messages = open(&bridge, MAIN);
+    let stream = stream(thread);
+    let sent = fill_until_paused(&host, &bridge, &messages, thread, None);
     // The pause dropped the host subscription: a rename now reaches no message.
     host.rename(thread, "while paused");
 
@@ -227,6 +275,28 @@ fn past_the_cap_the_driver_pauses_and_resubscribes_once_acks_catch_up() {
         other => panic!("neither the tail nor a Reset: {other:?}"),
     };
     assert_eq!(header.title.as_deref(), Some("while paused"));
+}
+
+/// Issue #307: a watchdog fire while the window fills, as on a runner that takes more than
+/// [`window::WATCHDOG`] to make the renames, resends the limits view, which the window counts.
+/// When the test above counted the stream's bytes alone, it failed once in ten runs under
+/// `taskpolicy -c background` ("paused at 262143 bytes"); with this fire after 50 renames it
+/// failed every time.
+#[test]
+fn a_watchdog_fire_while_the_window_fills_counts_the_limits_view_it_resends() {
+    let scratch = Scratch::new("cap-watchdog", &[]);
+    let host = scratch.start(Vec::new());
+    let thread = host.thread();
+    let bridge = host.bridge();
+    let messages = open(&bridge, MAIN);
+    let _sent = fill_until_paused(&host, &bridge, &messages, thread, Some(50));
+    // The view at open and the one the fire resent; a fire of the window's own watchdog on a
+    // slow run may add one more.
+    assert!(
+        messages.limits_received() >= 2,
+        "{}",
+        messages.limits_received()
+    );
 }
 
 #[test]
