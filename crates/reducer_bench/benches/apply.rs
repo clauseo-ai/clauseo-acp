@@ -5,9 +5,10 @@
 //! Each case builds its events and its state in gungraun's `setup`, which Callgrind does not
 //! count, so only the fold is counted. Each setup ends by settling the heap (`settled`), so the
 //! allocator's work on the setup's garbage is not counted either. Hard limits are below; the
-//! soft limit (2% more `ir` than the `main` baseline) applies when the run passes
-//! `--baseline=main`, as CI's `reducer-bench` job does. On systems other than Linux, `main` says
-//! gungraun needs Valgrind and exits 0.
+//! soft limit (2% more `ir` than the `main` baseline) applies to the three large cases
+//! (`scripted_turn`, `replay_20k`, `view_snapshot_20k`) when the run compares with `main`, as
+//! CI's `reducer-bench` job does. On systems other than Linux, `main` says gungraun needs
+//! Valgrind and exits 0.
 
 #[cfg(target_os = "linux")]
 #[path = "../../reducer/tests/support/fixtures.rs"]
@@ -44,16 +45,32 @@ mod linux {
     /// Events in the long thread the one-event cases, `replay_20k` and `view_snapshot_20k` use.
     const LONG_THREAD_EVENTS: usize = 20_000;
 
-    /// The soft limit, in percent more `ir` than the baseline the run compares against.
+    /// The soft limit, in percent more `ir` than the baseline the run compares against. The large
+    /// cases carry it, the one-event and one-delta cases do not: on one binary, those (~2-11k
+    /// `ir`) move in steps of ~35-40 `ir` from one process to the next, 1.4-1.6% a step, and
+    /// two steps went past 2% on a pull request that changed no Rust (#276, `text_appended_256k`
+    /// 2233 -> 2314). Their hard limits always apply.
     const SOFT_IR_PERCENT: f64 = 2.0;
 
-    /// Callgrind with the soft limit and, when given, a hard limit on `ir`.
-    fn limits(hard_ir: Option<u64>) -> LibraryBenchmarkConfig {
+    /// A large case: the soft limit and, when given, a hard limit on `ir`.
+    fn soft_limit(hard_ir: Option<u64>) -> LibraryBenchmarkConfig {
         let mut callgrind = Callgrind::default();
         callgrind.soft_limits([(EventKind::Ir, SOFT_IR_PERCENT)]);
         if let Some(limit) = hard_ir {
             callgrind.hard_limits([(EventKind::Ir, limit)]);
         }
+        with_tool(callgrind)
+    }
+
+    /// A one-event or one-delta case: its hard limit on `ir` only (see [`SOFT_IR_PERCENT`]).
+    fn hard_limit(hard_ir: u64) -> LibraryBenchmarkConfig {
+        let mut callgrind = Callgrind::default();
+        callgrind.hard_limits([(EventKind::Ir, hard_ir)]);
+        with_tool(callgrind)
+    }
+
+    /// The config that runs `callgrind`.
+    fn with_tool(callgrind: Callgrind) -> LibraryBenchmarkConfig {
         let mut config = LibraryBenchmarkConfig::default();
         config.tool(callgrind);
         config
@@ -226,8 +243,8 @@ mod linux {
 
     // Folds every event; returns the input so that dropping it is not counted.
     #[library_benchmark]
-    #[bench::scripted_turn(setup = scripted_turn_input, config = limits(Some(SCRIPTED_TURN_IR)))]
-    #[bench::replay_20k(setup = replay_input, config = limits(None))]
+    #[bench::scripted_turn(setup = scripted_turn_input, config = soft_limit(Some(SCRIPTED_TURN_IR)))]
+    #[bench::replay_20k(setup = replay_input, config = soft_limit(None))]
     fn fold_events(mut input: Fold) -> Fold {
         for envelope in &input.events {
             let applied: Result<Applied, Error> = apply(&mut input.state, envelope);
@@ -238,11 +255,11 @@ mod linux {
 
     // Applies one event to the long thread.
     #[library_benchmark]
-    #[bench::text_appended_8k(setup = text_on_8k, config = limits(Some(IR_PER_EVENT)))]
-    #[bench::text_appended_256k(setup = text_on_256k, config = limits(Some(IR_PER_EVENT)))]
-    #[bench::tool_call_updated(setup = tool_call_updated, config = limits(Some(IR_PER_EVENT)))]
-    #[bench::permission_requested(setup = permission_requested, config = limits(Some(IR_PER_EVENT)))]
-    #[bench::turn_ended(setup = turn_ended, config = limits(Some(IR_PER_EVENT)))]
+    #[bench::text_appended_8k(setup = text_on_8k, config = hard_limit(IR_PER_EVENT))]
+    #[bench::text_appended_256k(setup = text_on_256k, config = hard_limit(IR_PER_EVENT))]
+    #[bench::tool_call_updated(setup = tool_call_updated, config = hard_limit(IR_PER_EVENT))]
+    #[bench::permission_requested(setup = permission_requested, config = hard_limit(IR_PER_EVENT))]
+    #[bench::turn_ended(setup = turn_ended, config = hard_limit(IR_PER_EVENT))]
     fn one_event_on_long_thread(mut input: OneEvent) -> (OneEvent, Result<Applied, Error>) {
         let applied = apply(&mut input.state, &input.next);
         (input, applied)
@@ -250,7 +267,7 @@ mod linux {
 
     // Applies one text delta to the long thread's open answer.
     #[library_benchmark]
-    #[bench::text_delta_256k(setup = delta_on_256k, config = limits(Some(IR_PER_EVENT)))]
+    #[bench::text_delta_256k(setup = delta_on_256k, config = hard_limit(IR_PER_EVENT))]
     fn text_delta_on_long_thread(mut input: OneDelta) -> (OneDelta, Result<Applied, Error>) {
         let delta = TextDelta {
             turn: input.turn,
@@ -268,7 +285,7 @@ mod linux {
 
     // The view snapshot of the long thread.
     #[library_benchmark]
-    #[bench::view_snapshot_20k(setup = long_state, config = limits(None))]
+    #[bench::view_snapshot_20k(setup = long_state, config = soft_limit(None))]
     fn view_snapshot_20k(state: StreamState) -> (StreamState, ViewWindow) {
         let window = view_snapshot(&state);
         (state, window)

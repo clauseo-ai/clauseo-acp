@@ -553,18 +553,20 @@ jobs:
   # clauseo-reducer's instruction counts under Valgrind (gungraun), on every run that changes Rust
   # (`rust` of changes): the hard limits in crates/reducer_bench/benches/apply.rs always apply. On a
   # pull request whose merge-base on main has the bench, it first saves main's counts as the
-  # baseline `main`, then fails the head on more than 2% more `ir` in any case (the soft limit in
-  # apply.rs) unless the pull request carries the label `bench-ok` when the job starts. The job
-  # reads the labels through the API (.github/scripts/bench-ok.sh), not from the event, so adding
-  # the label and re-running the job works: a re-run keeps the event's payload, labels included
-  # (#276 failed its re-run at 2233 -> 2314 Ir with the label on).
+  # baseline `main`, then fails the head on more than 2% more `ir` in a large case (the soft limit
+  # in apply.rs, on scripted_turn, replay_20k and view_snapshot_20k) unless the pull request
+  # carries the label `bench-ok` when the job starts. The job reads the labels through the API
+  # (.github/scripts/bench-ok.sh), not from the event, so adding the label and re-running the job
+  # works: a re-run keeps the event's payload, labels included (#276 failed its re-run at
+  # 2233 -> 2314 Ir with the label on). The one-event cases move by 1.4-1.6% a step from one
+  # process to the next on one binary, so they carry hard limits only.
   # - Both runs share one CARGO_TARGET_DIR: gungraun keeps baselines under it (`gungraun/`), and
   #   the head run reuses the base run's dependency builds.
   # - The soft limit is in apply.rs, not on the command line: gungraun's `--callgrind-limits`
-  #   replaces each case's own limits, hard ones included. A run without `--baseline` compares with
-  #   nothing, so it checks the hard limits only.
-  # - The head run saves each case's summary (`--save-summary=json`); the job keeps each case's
-  #   module path, id and Callgrind total `Ir` in one small JSON file and uploads it as
+  #   replaces each case's own limits, hard ones included. A run without a baseline
+  #   (GUNGRAUN_BASELINE) compares with nothing, so it checks the hard limits only.
+  # - The head run saves each case's summary (GUNGRAUN_SAVE_SUMMARY=json); the job keeps each
+  #   case's module path, id and Callgrind total `Ir` in one small JSON file and uploads it as
   #   reducer-bench-summary, even when the bench failed, so the scoreboard comment shows this
   #   run's counts next to main's (scoreboard-comment.yml). Both steps continue on error: the
   #   job's result stays the bench's.
