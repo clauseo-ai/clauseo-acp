@@ -17,6 +17,9 @@
 //   cells wrap; the wrapping itself needs layout (the private harness).
 // - Indian case citations stay plain text of their paragraph: no link, footnote, list, superscript,
 //   subscript, emphasis or strikethrough.
+// - Devanagari in code (a `text` fence and inline code) shows exactly as written: the same code points, in NFC,
+//   unescaped and unsplit. NFC keeps nukta letters decomposed (ज़ is U+091C U+093C: U+095B is a composition
+//   exclusion), and a ZWJ after a halant (U+094D U+200D) stays.
 import LEGAL_EXTRAS_MD from "./legal-extras.md?raw";
 import EXTRAS_JSON from "./legal-extras-spec.json";
 
@@ -53,7 +56,13 @@ export type ExtraExpect =
   /** A footnote reference after `before` in its paragraph, numbered `number`, whose note reads `note`. */
   | { kind: "footnote"; paragraph: string; number: string; note: string }
   /** A `br` element between the paragraphs `before` and `after`, outside any paragraph. */
-  | { kind: "block-break"; before: string; after: string };
+  | { kind: "block-break"; before: string; after: string }
+  /**
+   * One code block of the fence language `lang` whose text is exactly `text`, code point for code point (no
+   * normalising, no whitespace folding), in one text node of its `code` element: `lang` must be a language the
+   * colouring worker leaves plain, so the block is never split into token spans.
+   */
+  | { kind: "code-block"; lang: string; text: string };
 
 export type ExtraEntry = { id: string; feature: string; script: ExtraScript; expect: ExtraExpect };
 
@@ -76,7 +85,14 @@ export const EXTRA_FEATURES: Readonly<Record<string, string>> = {
   X10: "Indian case citations stay intact",
   X11: "keys, small print and line breaks (the rest of the allowlist)",
   X12: "tags not on the allowlist show as text (placeholders)",
+  X13: "Devanagari in a code block and in inline code keeps its exact code points",
 };
+
+/**
+ * Features whose rows are in Hindi only, outside the row-per-script rule: X13 pins Devanagari shaping input
+ * (conjuncts, reph, nukta, ZWJ), which has no English or Tamil counterpart to write.
+ */
+export const HINDI_ONLY: readonly string[] = ["X13"];
 
 /**
  * Text the finished extras answer must not show (raw syntax and allowlisted tags), outside the paragraphs

@@ -179,6 +179,20 @@ function check(root: Element, expect: ExtraExpect, fail: (message: string) => vo
         fail(`the line break is not followed by "${expect.after}"`);
       return;
     }
+    case "code-block": {
+      const blocks = all(root, "pre").filter(
+        (pre) => pre.getAttribute("data-lang") === expect.lang,
+      );
+      const block = blocks.find((pre) => pre.textContent === expect.text);
+      if (!block)
+        return fail(
+          `no ${expect.lang} code block reads exactly the text; found ${JSON.stringify(blocks.map((pre) => pre.textContent))}`,
+        );
+      const nodes = Array.from(block.querySelector("code")?.childNodes ?? []);
+      if (nodes.length !== 1 || nodes[0]!.nodeType !== 3)
+        fail(`the code is split into ${nodes.length} nodes, not one text node`);
+      return;
+    }
   }
 }
 
