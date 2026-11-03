@@ -7,6 +7,7 @@ import { memo, useState, type ReactNode } from "react";
 import { QuestionLine, Who } from "@clauseo/components/clauseo/answer.tsx";
 import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
+import { langOfText } from "@clauseo/components/lib/script.ts";
 import { useThreadWords } from "@clauseo/components/lib/words-thread.ts";
 import { Image } from "@clauseo/components/markdown/image.tsx";
 import { Markdown } from "@clauseo/components/markdown/markdown.tsx";
@@ -78,7 +79,7 @@ function Question({
       ) : (
         <>
           <Who name={w.t("You")} time={at} />
-          <p className="asked">
+          <p className="asked" lang={langOfText(text)}>
             <Say>{text}</Say>
           </p>
         </>

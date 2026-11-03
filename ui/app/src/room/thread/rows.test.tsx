@@ -467,3 +467,18 @@ test("a question's Who line is You and the time it was sent; each answer's meta 
   h.deliver([upsert(step(10, { turn: uuid(2, 4), ts: ENDED + 60_000 }))]);
   expect(metas()[1]?.textContent).toBe("Clauseo, 4:34 pm");
 });
+
+test("a question written in Devanagari takes lang=hi on its own line in the English room, an English one none (Hindi audit 1f)", async () => {
+  h = await mountRoom();
+  h.deliver([
+    reset([
+      userMessage(5, 1, "धारा 138 के अंतर्गत नोटिस का उत्तर क्या होगा?"),
+      agentText(6, 1, "Answer."),
+      userMessage(7, 2, "When did the bank reply?"),
+    ]),
+  ]);
+  const asked = h.all("message-user").map((m) => m.querySelector(".asked"));
+  expect(asked.length).toBe(2);
+  expect(asked[0]?.getAttribute("lang")).toBe("hi");
+  expect(asked[1]?.hasAttribute("lang")).toBe(false);
+});

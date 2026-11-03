@@ -104,6 +104,14 @@ test("the title is the newest matter's name, in English, with nothing under it",
   expect(host?.querySelector(".room-next")?.textContent).toBe("");
 });
 
+test("a matter named in Devanagari titles the room with lang=hi, in the English interface too (Hindi audit 1f)", async () => {
+  await mount(fake([{ ...NEWER, name: "शर्मा बनाम दिल्ली राज्य" }]), { language: "en" });
+  expect(title()?.textContent).toBe("शर्मा बनाम दिल्ली राज्य");
+  expect(title()?.getAttribute("lang")).toBe("hi");
+  // the Latin cut's own size is for English names standing in Hindi
+  expect(title()?.classList.contains("as-en")).toBe(false);
+});
+
 test("with no matters the title says so, in the page's language", async () => {
   await mount(fake([]), { language: "hi" });
   expect(title()?.textContent).toBe(frame("hi", "No matters yet"));

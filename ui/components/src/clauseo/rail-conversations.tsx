@@ -10,6 +10,7 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu.tsx";
 import { Button } from "../ui/button.tsx";
 import { IconMore, IconNewMatter } from "../icons/icons.tsx";
 import { useDisplay } from "../lib/display.ts";
+import { langOfText } from "../lib/script.ts";
 import { useMatterWords } from "../lib/words-matters.ts";
 import { conversationStatus, type ConversationState } from "./rail-words.ts";
 import { Say } from "./say.tsx";
@@ -69,7 +70,7 @@ function ConversationRow({
         onClick={onOpen}
       >
         <span className="room-conv-line">
-          <span className="room-conv-title">
+          <span className="room-conv-title" lang={langOfText(title)}>
             <Say>{title}</Say>
           </span>
           {plan && (
