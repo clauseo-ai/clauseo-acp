@@ -30,6 +30,7 @@ bundled! {
         "auth-required-titled",
         "cancel-late-updates",
         "cancel-unanswered",
+        "claude-hindi-answer",
         "codex-auth-required",
         "codex-files",
         "codex-handshake",

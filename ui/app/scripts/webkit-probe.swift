@@ -23,7 +23,8 @@
 // tiles, and the display the query asked for on <html>; then it is measured: the page never scrolls sideways, the title
 // is never cut off, and each row of file tiles is as tall as its tallest title and the tile's padding, with no room kept
 // for a numeral or a chip. The wall of long Devanagari names (?papers=hindi) is loaded at every width in both looks:
-// each title's lines must break between syllables, never clipped. One more page per look freezes Object.prototype in the main frame first, as Tauri's
+// each title's lines must break between syllables, never clipped; and a recorded Hindi answer in the thread
+// (?thread=hindi), whose answer must never scroll sideways. One more page per look freezes Object.prototype in the main frame first, as Tauri's
 // freezePrototype does, and runs window.__clauseoAxe() there: it must resolve with no violation. The room with no
 // matters (?matters=none: "No matters yet" as its title, the empty rail) is loaded in night Hindi at text sizes 16
 // and 20. The rail in every state (?rail=states) is loaded at every width in both looks, folded and opened at 1100 px,
@@ -149,6 +150,26 @@ for (theme, lang) in looks {
     var run = Run(name: "papers hindi \(theme) \(lang)", url: URL(string: "\(origin)/\(q)")!, width: w, height: h,
                   rendered: rendered, setup: "")
     run.measure = syllablesWhole
+    runs.append(run)
+  }
+}
+// a recorded Hindi answer in the thread (?thread=hindi, probe-main.tsx; testing/hindi-answer.ts): the question asked in
+// Hindi and Claude's answer, its Devanagari heading, table with ₹ amounts and bold, at every width in both looks,
+// measured as every page is and for a thread that never scrolls sideways (Hindi audit 5c)
+let hindiThreadMeasured = "(function () { var errs = " + measured + ";" +
+  " document.querySelectorAll('[data-testid=\"message-agent\"]').forEach(function (m) {" +
+  " if (m.scrollWidth > m.clientWidth + 1) errs.push('layout: the answer scrolls sideways, ' + m.scrollWidth + ' px in ' + m.clientWidth); });" +
+  " return errs; })()"
+for (theme, lang) in looks {
+  let q = "?thread=hindi&theme=\(theme)&lang=\(lang)"
+  let rendered = "document.querySelector('#root main.room-centre') !== null" +
+    " && (document.querySelector('[data-testid=\"matter\"]')?.textContent ?? '') !== ''" +
+    " && (document.querySelector('[data-testid=\"message-agent\"] table')?.textContent ?? '').indexOf('₹2,00,00,000') >= 0" +
+    " && document.documentElement.dataset.theme === '\(theme)' && document.documentElement.lang === '\(lang)'"
+  for (w, h) in sizes {
+    var run = Run(name: "thread hindi \(theme) \(lang)", url: URL(string: "\(origin)/\(q)")!, width: w, height: h,
+                  rendered: rendered, setup: "")
+    run.measure = hindiThreadMeasured
     runs.append(run)
   }
 }
