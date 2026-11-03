@@ -108,6 +108,32 @@ export function IconBackToAnswer(props: IconProps) {
   );
 }
 
+/** Send, the arrow right, not used in the room yet (source: arrow, as arrowRight: Lucide's arrow-right is the shape
+ * Turn to it already draws, so it reuses it) */
+export function IconArrowRight(props: IconProps) {
+  return <IconTurnToIt {...props} />;
+}
+
+/** Send, the arrow up, not used in the room yet (source: arrowUp) */
+export function IconArrowUp(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M10 16V6" vectorEffect="non-scaling-stroke" />
+      <path d="M5.5 9.5L10 5l4.5 4.5" vectorEffect="non-scaling-stroke" />
+    </Icon>
+  );
+}
+
+/** Send, the paper plane, not used in the room yet (source: send) */
+export function IconSend(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M17 3l-5 14-2.75-6.25L3 8z" vectorEffect="non-scaling-stroke" />
+      <path d="M15.75 4.25l-6.5 6.5" vectorEffect="non-scaling-stroke" />
+    </Icon>
+  );
+}
+
 /** Matters (source: panel) */
 export function IconMatters(props: IconProps) {
   return (

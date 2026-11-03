@@ -17,6 +17,21 @@ export const ICON_NAMES = [
   { component: "IconOpen", source: "open", meaning: "Open" },
   { component: "IconTurnToIt", source: "arrow", meaning: "Turn to it" },
   { component: "IconBackToAnswer", source: "back", meaning: "Back to the answer" },
+  {
+    component: "IconArrowRight",
+    source: "arrow",
+    meaning: "Send, the arrow right, not used in the room yet",
+  },
+  {
+    component: "IconArrowUp",
+    source: "arrowUp",
+    meaning: "Send, the arrow up, not used in the room yet",
+  },
+  {
+    component: "IconSend",
+    source: "send",
+    meaning: "Send, the paper plane, not used in the room yet",
+  },
   { component: "IconMatters", source: "panel", meaning: "Matters" },
   { component: "IconSearch", source: "search", meaning: "Search this matter" },
   { component: "IconHistory", source: "history", meaning: "Versions" },
