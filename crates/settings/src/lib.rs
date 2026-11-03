@@ -5,7 +5,8 @@
 //! The settings schema ([`Settings`] and its sections) and its JSON Schema; where the data
 //! folder, `settings.json` and new matters go on each OS ([`Locations`]); the folders a lawyer
 //! may not pick as a matter ([`refused_folders`]); reading `settings.json` (JSON with comments)
-//! and its one runtime write, [`Effective::apply_ui_patch`] of a [`UiPatch`]; and the policy
+//! and its runtime writes, [`Effective::apply_ui_patch`] of a [`UiPatch`] and
+//! [`Effective::apply_tools_patch`] of a [`ToolsPatch`]; and the policy
 //! layer a firm's IT pushes: the Windows registry, macOS managed preferences and a
 //! `policy.json`. Decision record `docs/decisions/0009-policy-layer.md` fixes the policy
 //! sources, paths, formats and the merge rule.
@@ -19,12 +20,15 @@
 //! readers go through that owner. It answers [`Effective::settings`], [`Effective::agent`],
 //! [`Effective::mcp_servers`], [`Effective::enabled_mcp_servers`],
 //! [`Effective::default_matters_dir`], [`Effective::data_dir`], [`Effective::locations`],
-//! [`Effective::policy`], [`Effective::is_locked`], [`Effective::warnings`] and
-//! [`Effective::apply_ui_patch`]. Every input is a trait: [`PlatformDirs`], [`Env`], [`Files`]
-//! and [`PolicySource`], with [`SystemDirs`], [`SystemEnv`] and [`SystemFiles`] over the OS. The
+//! [`Effective::policy`], [`Effective::is_locked`], [`Effective::warnings`],
+//! [`Effective::apply_ui_patch`] and [`Effective::apply_tools_patch`]. Every input is a trait:
+//! [`PlatformDirs`], [`Env`], [`Files`] and [`PolicySource`], with [`SystemDirs`], [`SystemEnv`]
+//! and [`SystemFiles`] over the OS. The
 //! parsers of each policy store are in [`policy`]. The webview's `ui` changes are a [`UiPatch`],
 //! applied with [`Effective::apply_ui_patch`]: the only write to `settings.json` and the only
-//! change to settings after `load`. Everything else takes effect on the next start.
+//! change to settings after `load`. The `tools` switches are a [`ToolsPatch`], applied with
+//! [`Effective::apply_tools_patch`] the same way; a session reads them at its start, so they
+//! take effect at the next session start. Everything else takes effect on the next start.
 //!
 //! # Invariants
 //!
@@ -51,6 +55,8 @@
 //! - [`UiPatch`] holds only the `ui` fields and refuses any other key.
 //! - A [`UiPatch`] that names a locked key is refused with [`Error::Locked`], and nothing is
 //!   written or changed in memory.
+//! - [`ToolsPatch`] holds only the `tools` fields and refuses any other key; one that names a
+//!   locked tool key is refused whole, as a [`UiPatch`] is.
 //! - An agent's `command` is an absolute path, or the agent is left out with a warning.
 //! - `mcp.servers` is one key: a policy value replaces the user's whole list, with each
 //!   server's `enabled`, and an invalid one locks the list empty. An entry with a bad name, a
@@ -80,6 +86,7 @@ mod schema;
 mod system;
 #[cfg(test)]
 mod testing;
+mod tools;
 mod ui;
 mod user;
 mod warning;
@@ -101,5 +108,6 @@ pub use schema::{
     Motion, Settings, Theme, ToolsSettings, UiSettings, json_schema,
 };
 pub use system::{SystemDirs, SystemEnv};
+pub use tools::ToolsPatch;
 pub use ui::UiPatch;
 pub use warning::{Origin, Position, Warning, WarningKind};

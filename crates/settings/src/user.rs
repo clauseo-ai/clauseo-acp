@@ -1,5 +1,6 @@
-//! The user's `settings.json`: reading it, and the write of a [`UiPatch`]. Only
-//! [`crate::Effective::apply_ui_patch`] calls that write, after it has checked policy locks.
+//! The user's `settings.json`: reading it, and the write of a [`UiPatch`] or a [`ToolsPatch`].
+//! Only [`crate::Effective::apply_ui_patch`] and [`crate::Effective::apply_tools_patch`] call
+//! those writes, after they have checked policy locks.
 
 #[cfg(test)]
 mod tests;
@@ -9,8 +10,10 @@ use crate::files::Files;
 use crate::json;
 use crate::leaf::{self, Leaf};
 use crate::locations::Locations;
+use crate::tools::ToolsPatch;
 use crate::ui::UiPatch;
 use crate::warning::{Origin, Warning, WarningKind};
+use serde::Serialize;
 use serde_json_lenient::{Map, Value};
 use std::path::Path;
 
@@ -66,6 +69,28 @@ pub(crate) fn write_user_settings(
     files: &dyn Files,
     patch: &UiPatch,
 ) -> Result<(), Error> {
+    write_section(locations, files, "ui", patch)
+}
+
+/// Saves a [`ToolsPatch`] to the user's `settings.json`, into its `tools` section, as
+/// [`write_user_settings`] does for `ui`. It does not check policy locks:
+/// [`crate::Effective::apply_tools_patch`] does, before it calls this.
+pub(crate) fn write_tools_settings(
+    locations: &Locations,
+    files: &dyn Files,
+    patch: &ToolsPatch,
+) -> Result<(), Error> {
+    write_section(locations, files, "tools", patch)
+}
+
+/// Saves the fields of `patch` that are set into the section `name` of the user's
+/// `settings.json`, the rest of the file as it is (see [`write_user_settings`]).
+fn write_section<P: Serialize>(
+    locations: &Locations,
+    files: &dyn Files,
+    name: &str,
+    patch: &P,
+) -> Result<(), Error> {
     let path = locations.settings_file();
     let io = |source| Error::Io {
         path: path.to_owned(),
@@ -75,18 +100,18 @@ pub(crate) fn write_user_settings(
         None => Map::new(),
         Some(bytes) => object(path, &bytes)?,
     };
-    let ui = document
-        .entry("ui")
-        .and_modify(|ui| {
-            if !ui.is_object() {
-                *ui = Value::Object(Map::new());
+    let section = document
+        .entry(name)
+        .and_modify(|section| {
+            if !section.is_object() {
+                *section = Value::Object(Map::new());
             }
         })
         .or_insert_with(|| Value::Object(Map::new()));
-    if let (Value::Object(ui), Ok(Value::Object(fields))) =
-        (ui, serde_json_lenient::to_value(patch))
+    if let (Value::Object(section), Ok(Value::Object(fields))) =
+        (section, serde_json_lenient::to_value(patch))
     {
-        ui.extend(fields);
+        section.extend(fields);
     }
     let mut bytes =
         serde_json_lenient::to_vec_pretty(&document).map_err(|error| io(error.into()))?;
