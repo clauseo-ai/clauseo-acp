@@ -1944,6 +1944,11 @@ export type LimitWindow = {
 	duration_mins?: number,
 	/**  The agent warned that the limit is near (Claude's `allowed_warning`). */
 	warning: boolean,
+	/**
+	 *  The model a per-model window counts, as the agent names it ("Opus", "Fable"), so a label
+	 *  can be built in any language; `None` for every other window.
+	 */
+	model?: string,
 };
 
 /**  One window's row in the popover and on the settings page. */
@@ -1954,6 +1959,8 @@ export type LimitWindowView = {
 	kind: WindowKind,
 	/**  Its label. */
 	label: string,
+	/**  The model a per-model window counts, matching [`LimitWindow::model`]. */
+	model?: string,
 	/**
 	 *  How much is used, 0 to 100; `None` while loading or once its reset time passed, so an
 	 *  old percentage is never shown as current.
