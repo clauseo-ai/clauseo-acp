@@ -72,7 +72,7 @@
      never moves when the turn ends (in Hindi with three kinds, or with a background note, it would wrap to a row of
      its own, 26 px lower): the name and the time keep their width, the words take what is left. Sentences that don't
      fit drop from the end, "And 3 more." first, then the smallest counts, with "…" after the last kept (step-group.tsx
-     useFit); the aside and the trouble always stay; a mid-word ellipsis only where one sentence alone won't fit. The
+     useFit); the aside and the trouble always stay, whole, in their own slot; a mid-word ellipsis only where one sentence alone won't fit. The
      chevron stays after the words; the button's title and name hold the whole summary */
   .meta:has(> .step-group-line) {
     flex-wrap: nowrap;
@@ -104,6 +104,12 @@
     position: absolute;
     inset-inline-start: 0;
     visibility: hidden;
+  }
+  /* the aside and the trouble, after the summary in their own slot that never shrinks, so a cut falls on the summary
+     alone */
+  .meta > .step-group-line .step-group-kept {
+    flex: none;
+    white-space: nowrap;
   }
   .meta > .step-group-line .step-group-chev {
     flex: none;

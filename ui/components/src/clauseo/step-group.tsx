@@ -70,6 +70,31 @@ export function StepGroup({
   const oneLine = head !== undefined;
   const sentences = parts ?? (line === "" ? [] : [line]);
   const { words, keep } = useFit(oneLine, sentences, more, trouble);
+  // the muted aside and the trouble, after the line's words
+  const aside = (
+    <>
+      {more !== "" && (
+        <>
+          {line !== "" && " "}
+          <span className="step-group-more">
+            <Say>{more}</Say>
+          </span>
+        </>
+      )}
+      {trouble !== "" && (
+        <>
+          {(line !== "" || more !== "") && " "}
+          <span className="step-group-trouble" data-testid="step-group-trouble">
+            {/* the break marks it before it's read, as on its row, centred on the words' own line */}
+            <span className="step-inline-icon step-trouble-icon">
+              <IconBreak size={14} />
+            </span>
+            <Say>{trouble}</Say>
+          </span>
+        </>
+      )}
+    </>
+  );
   const chev = (
     <span className="step-inline-icon step-group-chev">
       <IconFold size={12} />
@@ -115,30 +140,15 @@ export function StepGroup({
                 {oneLine ? <Sentences sentences={sentences} keep={keep} /> : <Say>{line}</Say>}
               </span>
             )}
-            {more !== "" && (
-              <>
-                {line !== "" && " "}
-                <span className="step-group-more">
-                  <Say>{more}</Say>
-                </span>
-              </>
-            )}
-            {trouble !== "" && (
-              <>
-                {(line !== "" || more !== "") && " "}
-                <span className="step-group-trouble" data-testid="step-group-trouble">
-                  {/* the break marks it before it's read, as on its row, centred on the words' own line */}
-                  <span className="step-inline-icon step-trouble-icon">
-                    <IconBreak size={14} />
-                  </span>
-                  <Say>{trouble}</Say>
-                </span>
-              </>
-            )}
+            {!oneLine && aside}
             {/* the chevron follows the last word, so it stays beside the words when they wrap */}
             {!oneLine && chev}
           </span>
-          {/* on one line, after the words, so an ellipsis never cuts it */}
+          {/* on one line the aside and the trouble stand in their own slot after the summary, never clipped: a cut
+              falls on the summary alone; the chevron after them */}
+          {oneLine && (more !== "" || trouble !== "") && (
+            <span className="step-group-kept">{aside}</span>
+          )}
           {oneLine && chev}
         </button>,
       )}
@@ -176,7 +186,8 @@ function Sentences({ sentences, keep }: { sentences: readonly string[]; keep: nu
   );
 }
 
-/** How many of the summary's sentences fit on the meta line, after the aside and the trouble, which always stay: all,
+/** How many of the summary's sentences fit on the meta line, before the aside and the trouble, which always stay in
+ * their own slot: all,
  * or fewer, dropped from the end with "…" after the last kept; at least one (a narrower line cuts it mid-word, the
  * CSS ellipsis, as a last resort). Measured when the words change and when the meta line's width does (a
  * ResizeObserver), never as the answer's text streams; a line that fits commits nothing more, and one that doesn't one
@@ -199,13 +210,20 @@ function useFit(
   useLayoutEffect(() => {
     const el = words.current;
     if (!on || el === null || measured.current === key) return;
+    // one sentence has nothing to drop; a hidden page measures when the words or the width next change
+    if (n < 2) {
+      measured.current = key;
+      return;
+    }
+    if (document.visibilityState === "hidden") return;
     measured.current = key;
-    if (el.scrollWidth <= el.clientWidth + 0.5 || n < 2) return;
+    if (el.scrollWidth <= el.clientWidth + 0.5) return;
     // the "…" stands unseen out of the flow until it's wanted, so its width is there to read
     const cut = el.querySelector<HTMLElement>(".step-part-cut")?.getBoundingClientRect().width ?? 0;
     const widths = [...el.querySelectorAll<HTMLElement>(".step-part")].map(
       (p) => p.getBoundingClientRect().width,
     );
+    // the words' box holds the summary alone; what isn't a sentence (spaces) and the "…" take the rest
     let used = el.scrollWidth - widths.reduce((x, y) => x + y, 0) + cut;
     let k = 0;
     while (k < n - 1 && used + widths[k]! <= el.clientWidth) used += widths[k++]!;
