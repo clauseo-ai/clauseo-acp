@@ -632,10 +632,12 @@ jobs:
       # the pull request's change alone; if main has moved, it is an older main commit. A push
       # to main, the nightly run and a run on demand have no baseline.
       # The base is benched in this same checkout (the merge-base checked out, then HEAD again),
-      # with the same command line: a ~2.4k-Ir case moves by tens of instructions with the length
-      # of the paths the bench process sees (argv, the manifest dir, PWD), which shifts its heap and
-      # stack layout. From a worktree in $RUNNER_TEMP, turn_ended read 2360 against the head's 2434
-      # (+3.1%, over the 2% soft limit) on a pull request that changed no Rust (run 41394700908).
+      # with the same command line (the mode goes in GUNGRAUN_SAVE_BASELINE, GUNGRAUN_BASELINE and
+      # GUNGRAUN_SAVE_SUMMARY, not in flags): a ~2.4k-Ir case moves by tens of instructions with the
+      # length of the paths the bench process sees (argv, the manifest dir, PWD), which shifts its
+      # heap and stack layout. From a worktree in $RUNNER_TEMP, turn_ended read 2360 against the
+      # head's 2434 (+3.1%, over the 2% soft limit) on a pull request that changed no Rust (run
+      # 41394700908).
       - name: cargo bench (apply)
         env:
           EVENT: ${{ github.event_name }}
@@ -644,7 +646,7 @@ jobs:
           set -euo pipefail
           # A cached earlier run must not become the baseline.
           rm -rf "$CARGO_TARGET_DIR/gungraun"
-          bench=(cargo bench --locked -p clauseo-reducer_bench --bench apply --)
+          bench=(cargo bench --locked -p clauseo-reducer_bench --bench apply)
           baseline=false
           if [ "$EVENT" = pull_request ]; then
             head=$(git rev-parse HEAD)
@@ -655,7 +657,7 @@ jobs:
               trap 'git checkout -q --detach "$head"' EXIT
               git checkout -q --detach "$base"
               rustup toolchain install
-              "${bench[@]}" --save-baseline=main
+              GUNGRAUN_SAVE_BASELINE=main "${bench[@]}"
               git checkout -q --detach "$head"
               rustup toolchain install
               baseline=true
@@ -664,12 +666,12 @@ jobs:
             fi
           fi
           if [ "$baseline" = true ] && [ "$BENCH_OK" != true ]; then
-            "${bench[@]}" --baseline=main --save-summary=json
+            GUNGRAUN_BASELINE=main GUNGRAUN_SAVE_SUMMARY=json "${bench[@]}"
           else
             if [ "$BENCH_OK" = true ]; then
               echo "Label bench-ok: hard limits only"
             fi
-            "${bench[@]}" --save-summary=json
+            GUNGRAUN_SAVE_SUMMARY=json "${bench[@]}"
           fi
 
       # One small file for the artifact, `{"schema": 1, "cases": [{"module_path", "id", "ir"}]}`,
