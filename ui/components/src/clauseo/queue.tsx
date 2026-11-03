@@ -3,7 +3,7 @@
 // The queue sends the next message once an answer finishes; after the lawyer stops an answer, or an answer fails, it
 // holds until the lawyer sends. Here too: the wait for another conversation in the same matter, and the note an answer
 // carries when the lawyer's words moved a running search aside.
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "../ui/button.tsx";
 import { IconFold } from "../icons/icons.tsx";
 import { useMatterWords } from "../lib/words-matters.ts";
@@ -150,8 +150,8 @@ const SHOWN = 2;
 
 /** The queue over the composer: one line on what it holds, or why it holds, then the messages in the order they go,
  * the next at the top. Two show, then a row that opens the rest; opened, the list scrolls and casts an edge where it
- * is cut. Nothing in it is numbered: the order is the order they stand in. Held with no stop to name, the head keeps
- * its count line and offers Send next. A refused press's words stand under the head while the host gives them.
+ * is cut. Nothing in it is numbered: the order is the order they stand in. Held with no stop to name, the head says
+ * only how many wait ("2 queued.", nothing sent until the lawyer sends) and offers Send next. A refused press's words stand under the head while the host gives them.
  * After Remove or Send now takes a row away, the focus goes to the next row's Send now, or out (`onFocusOut`). */
 export function QueueStrip({
   items,
@@ -183,6 +183,7 @@ export function QueueStrip({
 }) {
   const w = useMatterWords();
   const [open, setOpen] = useState(false);
+  const listId = useId();
   const section = useRef<HTMLElement>(null);
   const list = useRef<HTMLOListElement>(null);
   // the row a Remove or Send now was pressed on, and where it stood, until it goes
@@ -233,10 +234,15 @@ export function QueueStrip({
       if (going.current?.id === id) going.current = null;
     });
   };
+  // held with no stop to name, nothing goes until the lawyer sends: the count alone
   const count = [
-    n === 1
-      ? w.m("1 queued, sent once this answer is done.")
-      : w.m("{n} queued, sent in order.", { n }),
+    held?.kind === "held"
+      ? n === 1
+        ? w.m("1 queued.")
+        : w.m("{n} queued.", { n })
+      : n === 1
+        ? w.m("1 queued, sent once this answer is done.")
+        : w.m("{n} queued, sent in order.", { n }),
     n >= QUEUE_CAP ? w.m("The queue holds {n}.", { n: QUEUE_CAP }) : null,
   ]
     .filter((x) => x !== null)
@@ -291,7 +297,7 @@ export function QueueStrip({
           </Button>
         )}
       </div>
-      <ol className="queue-list" ref={list} data-open={open ? "" : undefined}>
+      <ol id={listId} className="queue-list" ref={list} data-open={open ? "" : undefined}>
         {showing.map((item, i) => (
           <QueueItem
             key={item.id}
@@ -309,6 +315,7 @@ export function QueueStrip({
           type="button"
           className="queue-fold"
           aria-expanded={open}
+          aria-controls={listId}
           onClick={() => setOpen((o) => !o)}
         >
           <IconFold size={12} className="queue-fold-icon" />

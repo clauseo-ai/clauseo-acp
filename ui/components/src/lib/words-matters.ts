@@ -102,6 +102,10 @@ const HI = {
   "Send next": "अगला भेजें",
   // a queued message's Edit, Remove or Send now refused with thread.turn_not_queued: it had gone as it was pressed
   "That message had already gone.": "वह संदेश पहले ही जा चुका था।",
+  // held with no stop to name (a restart, a limit, an answer that ended well): the count alone, nothing sent until
+  // the lawyer sends
+  "{n} queued.": "{n} कतार में।",
+  "1 queued.": "1 कतार में।",
   /* ---------- steering the running answer: the words a host gives SteerHint, SteerMark and SteerNote ---------- */
   "Send now gives your words to Clauseo while it writes.":
     "अभी भेजें से Clauseo लिखते समय ही आपके शब्द ले लेता है।",
