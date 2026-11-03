@@ -168,6 +168,9 @@
   --delay-words: 70ms; /* a card's words wait for its shape to be about 60% grown */
   /* The controls in ui/. Sizes holding words scale with the text size */
   --size-menu: 224px; /* a menu's least width, the rail's own width */
+  --size-menu-list: calc(
+    400px * var(--k)
+  ); /* the composer's `/` and `@` rows at most: eight two-line rows of 50 px */
   --size-dialog: 440px; /* a dialog: its title in two lines at most */
   --size-switch-w: calc(36px * var(--k)); /* a switch's track */
   --size-switch-h: calc(20px * var(--k));

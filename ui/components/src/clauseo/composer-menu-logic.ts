@@ -83,22 +83,27 @@ export function picked(command: SlashCommand, following: string | undefined): st
 /** The caret's line on the page: its x, and its line's top and bottom, in viewport px. */
 export type Caret = { x: number; top: number; bottom: number };
 
-/** Where the menu stands: its left edge at the caret's x and 4 px below the caret's line, or 4 px above it when the
- * window has no room below, as at the room's foot; kept 8 px inside the window, and as tall as the room it has. */
+/** A box on the page, in viewport px. */
+export type Bounds = { left: number; top: number; right: number; bottom: number };
+
+/** Where the menu stands: its left edge at the caret's x, and 4 px below the field, or 4 px above it when there is no
+ * room below, as at the room's foot (`at` is the caret's x with the field's top and bottom, so it never covers the
+ * field); kept 8 px inside the box that clips it (the window, or the room's column it mounts in), and as tall as the
+ * room it has there. */
 export function placeMenu(
-  caret: Caret,
+  at: Caret,
   menu: { width: number; height: number },
-  view: { width: number; height: number },
+  bounds: Bounds,
 ): { left: number; top: number; maxHeight: number } {
   const gap = 4;
   const edge = 8;
-  const below = view.height - edge - (caret.bottom + gap);
-  const above = caret.top - gap - edge;
+  const below = bounds.bottom - edge - (at.bottom + gap);
+  const above = at.top - gap - (bounds.top + edge);
   const down = menu.height <= below || below >= above;
   const maxHeight = Math.max(0, Math.floor(down ? below : above));
   const height = Math.min(menu.height, maxHeight);
-  const top = down ? caret.bottom + gap : caret.top - gap - height;
-  const left = Math.max(edge, Math.min(caret.x, view.width - edge - menu.width));
+  const top = down ? at.bottom + gap : at.top - gap - height;
+  const left = Math.max(bounds.left + edge, Math.min(at.x, bounds.right - edge - menu.width));
   return { left: Math.round(left), top: Math.round(top), maxHeight };
 }
 
@@ -172,4 +177,34 @@ export function caretOf(field: HTMLTextAreaElement): Caret {
   const r = mark.getBoundingClientRect();
   copy.remove();
   return { x: r.left, top: r.top, bottom: r.bottom };
+}
+
+/** The box a fixed plane mounted in `el` is seen in: the window, cut by each ancestor that clips its overflow (the
+ * room's centre column clips, so a menu taller than the room above the field would lose its top rows behind it). The
+ * root and body pass their overflow to the window, and a box drawn as its children only (display: contents) clips
+ * nothing. */
+export function clipOf(el: Element): Bounds {
+  const doc = el.ownerDocument;
+  const view = doc.defaultView;
+  const b: Bounds = {
+    left: 0,
+    top: 0,
+    right: view?.innerWidth ?? 0,
+    bottom: view?.innerHeight ?? 0,
+  };
+  const clips = (v: string) => v !== "" && v !== "visible";
+  for (
+    let p = el.parentElement;
+    p !== null && p !== doc.body && p !== doc.documentElement;
+    p = p.parentElement
+  ) {
+    const s = getComputedStyle(p);
+    if (s.display === "contents" || ![s.overflow, s.overflowX, s.overflowY].some(clips)) continue;
+    const r = p.getBoundingClientRect();
+    b.left = Math.max(b.left, r.left);
+    b.top = Math.max(b.top, r.top);
+    b.right = Math.min(b.right, r.right);
+    b.bottom = Math.min(b.bottom, r.bottom);
+  }
+  return b;
 }

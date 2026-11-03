@@ -227,6 +227,7 @@
   --spacing-dot-hint: var(--size-dot-hint);
   --spacing-dot-otherside: var(--size-dot-otherside);
   --spacing-menu: var(--size-menu);
+  --spacing-menu-list: var(--size-menu-list);
   --spacing-dialog: var(--size-dialog);
   --spacing-switch-w: var(--size-switch-w);
   --spacing-switch-h: var(--size-switch-h);

@@ -11,7 +11,8 @@
 // - A polite live region says how many rows the menu opened with (or that the papers are loading, then how many
 //   there are), then the highlighted one's name as the arrows move: a textarea takes no combobox role, and VoiceOver
 //   follows aria-activedescendant reliably only on one.
-// - It stands at the caret, placed again as the window resizes, the field's size changes or anything scrolls while it is open.
+// - It stands at the caret's x, 4 px clear of the field, inside what clips it (the room's column), its rows scrolling
+//   under about eight; placed again as the window resizes, the field's size changes or anything scrolls while open.
 // - A pick is a token (composer-tokens.ts), held and drawn from this chunk as long as the menu lives; a trigger that
 //   starts a token is no trigger.
 // - `@`: the room's `load` is called each time the menu opens (the room caches); the last list answered stands in the
@@ -29,6 +30,7 @@ import { raised, row, rowNote } from "../ui/recipes-overlays.ts";
 import type { MentionItem, Mentions, SlashCommand } from "./composer.tsx";
 import {
   caretOf,
+  clipOf,
   keepHighlight,
   keyIds,
   matching,
@@ -99,6 +101,7 @@ export function ComposerMenu({
   sync,
   picks,
   testIds,
+  frame,
 }: {
   field: HTMLTextAreaElement;
   commands: readonly SlashCommand[];
@@ -116,6 +119,8 @@ export function ComposerMenu({
   /** Where the composer's handle finds the papers the field's tokens mention now. */
   picks?: { current: (() => readonly MentionItem[]) | null } | undefined;
   testIds?: { menu?: string | undefined; item?: string | undefined } | undefined;
+  /** The field's drawn box, which the menu stands clear of; the field itself without it. */
+  frame?: RefObject<HTMLElement | null> | undefined;
 }) {
   const w = useThreadWords();
   const layer = useLayer();
@@ -410,15 +415,17 @@ export function ComposerMenu({
   // closed, the field shows nothing of it
   useEffect(() => () => onShown(null), [onShown]);
 
-  /** Puts the open menu at the caret. */
+  /** Puts the open menu at the caret's x, clear of the field above or below it, inside what clips it. Its height is
+   * read with its last bound let go: the rows up to their own cap, and the lines under them. */
   const place = () => {
     const el = plane.current;
     if (el === null) return;
-    const view = field.ownerDocument.defaultView;
+    const box = (frame?.current ?? field).getBoundingClientRect();
+    el.style.maxHeight = "";
     const at = placeMenu(
-      caretOf(field),
-      { width: el.offsetWidth, height: el.scrollHeight },
-      { width: view?.innerWidth ?? 0, height: view?.innerHeight ?? 0 },
+      { x: caretOf(field).x, top: box.top, bottom: box.bottom },
+      { width: el.offsetWidth, height: el.offsetHeight },
+      clipOf(el),
     );
     el.style.left = `${at.left}px`;
     el.style.top = `${at.top}px`;
@@ -427,15 +434,21 @@ export function ComposerMenu({
   const placeRef = useRef(place);
   placeRef.current = place;
 
-  // at the caret, once drawn, and the highlighted row in view
+  // at the caret, once drawn, and the highlighted row in view: the rows scroll by themselves, never the room's
+  // column under them, which scrollIntoView would move too
   useLayoutEffect(() => {
     if (plane.current === null || open === null) return;
     place();
-    const hi = box.current?.children.item(open.hi);
-    if (typeof hi?.scrollIntoView === "function") hi.scrollIntoView({ block: "nearest" });
+    const rows = box.current;
+    const hi = rows?.children.item(open.hi);
+    if (rows === null || rows === undefined || hi === null || hi === undefined) return;
+    const r = hi.getBoundingClientRect();
+    const b = rows.getBoundingClientRect();
+    if (r.top < b.top) rows.scrollTop -= b.top - r.top;
+    else if (r.bottom > b.bottom) rows.scrollTop += Math.min(r.bottom - b.bottom, r.top - b.top);
   });
 
-  // and again as the window resizes or anything scrolls under it, the field included; the list's own scroll aside.
+  // and again as the window resizes or anything scrolls under it, the field included; the rows' own scroll aside.
   // And as the field's own size changes: a narrower window rewraps the words and the field grows a line, but the
   // window's resize comes before that grow (the composer fits the field from its own size observer), so a menu placed
   // on the resize alone stood over the line's start (WebView2, M2 at 100 px narrower). Placed once per frame, after it.
@@ -444,7 +457,7 @@ export function ComposerMenu({
     const view = field.ownerDocument.defaultView;
     if (!isOpen || view === null) return;
     const again = (e: Event) => {
-      if (e.target !== plane.current) placeRef.current();
+      if (e.target !== plane.current && e.target !== box.current) placeRef.current();
     };
     view.addEventListener("resize", again);
     view.addEventListener("scroll", again, { capture: true, passive: true });
@@ -493,11 +506,17 @@ export function ComposerMenu({
       {overlay}
       {open !== null &&
         createPortal(
-          <div ref={plane} className={cn(raised({ width: "menu" }), "fixed z-20")}>
+          // the rows scroll inside, up to about eight; the lines under them (the count past 50, a list that stops
+          // short) stay in view below them
+          <div
+            ref={plane}
+            className={cn(raised({ width: "menu" }), "fixed z-20 flex flex-col overflow-hidden")}
+          >
             {open.items.length > 0 && (
               <div
                 ref={box}
                 id={list}
+                className="min-h-0 max-h-menu-list overflow-y-auto"
                 role="listbox"
                 aria-label={open.kind === "command" ? w.th("Commands") : w.th("Papers")}
                 data-testid={testIds?.menu}
@@ -571,13 +590,14 @@ export function ComposerMenu({
               </div>
             )}
             {notes.map((n) => (
-              <p key={n} className={cn(rowNote, "px-s3 py-s1-5")}>
+              <p key={n} className={cn(rowNote, "shrink-0 px-s3 py-s1-5")}>
                 {n}
               </p>
             ))}
           </div>,
           // inside the field's landmark when no layer is given (the room's main has none), so the open menu is
-          // content of the page's regions (axe's region rule); fixed, it stands at the caret wherever it mounts
+          // content of the page's regions (axe's region rule); fixed, it stands at the caret wherever it mounts, bounded by
+          // what clips it there (clipOf)
           layer ?? field.closest("main, aside") ?? field.ownerDocument.body,
         )}
     </>

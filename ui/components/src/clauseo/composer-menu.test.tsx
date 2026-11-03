@@ -441,13 +441,13 @@ test("the open menu is placed again, once a frame, as the field's own size chang
       frames.clear();
       for (const cb of due) cb(0);
     });
-  // the caret's mark, where the field's words put it: 3 lines, then 4 as the window narrows and the field grows
-  let caretTop = 100;
+  // the field's drawn box: 3 lines, then 4 as the window narrows and the field grows
+  let tall = 80;
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
     this: HTMLElement,
   ) {
-    return this.textContent === "\u200b"
-      ? new DOMRect(40, caretTop, 1, 20)
+    return this.classList.contains("room-field")
+      ? new DOMRect(0, 40, 600, tall)
       : new DOMRect(0, 0, 0, 0);
   });
   // the plane the list stands in, which the menu places
@@ -462,7 +462,7 @@ test("the open menu is placed again, once a frame, as the field's own size chang
     expect(mine).toBeDefined();
     const grow = () => act(async () => mine?.cb([], {} as ResizeObserver));
     // the field grows a line: placed again in the next frame, and once, however many times it was told
-    caretTop = 126;
+    tall = 106;
     await grow();
     await grow();
     expect(frames.size).toBe(1);
@@ -470,7 +470,7 @@ test("the open menu is placed again, once a frame, as the field's own size chang
     await run();
     expect(top()).toBe("150px");
     // told, then closed before its frame: the frame is dropped and the observer let go
-    caretTop = 152;
+    tall = 132;
     await grow();
     expect(await key("Escape")).toBe(true);
     expect(menu()).toBeNull();
@@ -479,5 +479,61 @@ test("the open menu is placed again, once a frame, as the field's own size chang
   } finally {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  }
+});
+
+test("a menu taller than the room above the field is bound by the column that clips it, 4 px above the field; its rows alone scroll the lit one into view", async () => {
+  const many: SlashCommand[] = Array.from({ length: 20 }, (_, i) => ({
+    name: `step${String(i).padStart(2, "0")}`,
+    description: "",
+  }));
+  // the room's centre column clips from y=64 to 764; the field's box stands at 600 to 660; the rows are 48 px each,
+  // under the list's top at 80, its foot at 580, moved by its scroll
+  const rect = function (this: HTMLElement) {
+    if (this.tagName === "MAIN") return new DOMRect(0, 64, 1280, 700);
+    if (this.classList.contains("room-field")) return new DOMRect(0, 600, 800, 60);
+    if (this.getAttribute("role") === "listbox") return new DOMRect(0, 80, 300, 500);
+    if (this.getAttribute("role") === "option") {
+      const list = this.parentElement!;
+      const i = [...list.children].indexOf(this);
+      return new DOMRect(0, 80 + i * 48 - list.scrollTop, 300, 48);
+    }
+    return new DOMRect(0, 0, 0, 0);
+  };
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(rect);
+  // the plane's own height, unbound: all twenty rows
+  vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function (
+    this: HTMLElement,
+  ) {
+    return this.classList.contains("fixed") ? 20 * 48 : 0;
+  });
+  const into = vi.fn();
+  Object.defineProperty(Element.prototype, "scrollIntoView", { value: into, configurable: true });
+  const plane = () => menu()?.closest<HTMLElement>(".fixed");
+  try {
+    await mount(<main style={{ overflow: "hidden" }}>{composer({ commands: many })}</main>);
+    await focus();
+    await edit("/");
+    expect(plane()?.parentElement?.tagName).toBe("MAIN");
+    // from the column's top, 8 px in, to 4 px above the field: not from the window's top
+    expect(plane()?.style.maxHeight).toBe(`${600 - 4 - (64 + 8)}px`);
+    expect(plane()?.style.top).toBe("72px");
+    // the lit row, the last after ArrowUp, is scrolled into the rows' view, and back to the first
+    const list = menu()!;
+    expect(list.scrollTop).toBe(0);
+    await key("ArrowUp");
+    expect(lit()?.textContent).toContain("/step19");
+    expect(list.scrollTop).toBe(80 + 19 * 48 + 48 - 580);
+    await key("ArrowUp");
+    expect(list.scrollTop).toBe(80 + 19 * 48 + 48 - 580);
+    await key("ArrowDown");
+    await key("ArrowDown");
+    expect(lit()?.textContent).toContain("/step00");
+    expect(list.scrollTop).toBe(0);
+    // never through scrollIntoView, which would scroll the clipping column too
+    expect(into).not.toHaveBeenCalled();
+  } finally {
+    vi.restoreAllMocks();
+    Reflect.deleteProperty(Element.prototype, "scrollIntoView");
   }
 });
