@@ -270,4 +270,7 @@ test("the start time is honest or none: startOf", () => {
   expect(startOf(5000, 6000, false)).toBeNull();
   expect(startOf(5000, 3000, true)).toBeNull();
   expect(startOf(null, 3000, false)).toBeNull();
+  // a question with no time of its own gives none
+  expect(startOf(0, null, false)).toBeNull();
+  expect(startOf(-1, null, false)).toBeNull();
 });
