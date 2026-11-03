@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>PayloadContent</key>
+  <array>
+    <dict>
+      <key>PayloadType</key>
+      <string>ai.clauseo.desktop</string>
+      <key>PayloadIdentifier</key>
+      <string>ai.clauseo.desktop.policy.sample.settings</string>
+      <key>PayloadUUID</key>
+      <string>2204F103-7F87-4294-A878-B90AE110D932</string>
+      <key>PayloadVersion</key>
+      <integer>1</integer>
+      <key>PayloadDisplayName</key>
+      <string>Clauseo settings</string>
+      <key>matters.default_location</key>
+      <string>/Users/Shared/Matters</string>
+      <key>agents</key>
+      <dict>
+        <key>claude</key>
+        <dict>
+          <key>command</key>
+          <string>/usr/local/bin/claude-agent-acp</string>
+          <key>args</key>
+          <array/>
+          <key>env</key>
+          <dict/>
+        </dict>
+      </dict>
+      <key>mcp.servers</key>
+      <dict>
+        <key>firm-docs</key>
+        <dict>
+          <key>command</key>
+          <string>/usr/local/bin/firm-docs-mcp</string>
+          <key>args</key>
+          <array>
+            <string>--read-only</string>
+          </array>
+          <key>env</key>
+          <dict/>
+          <key>enabled</key>
+          <true/>
+        </dict>
+      </dict>
+      <key>ui.theme</key>
+      <string>dark</string>
+      <key>ui.font_size</key>
+      <integer>16</integer>
+      <key>ui.density</key>
+      <string>comfortable</string>
+      <key>ui.language</key>
+      <string>en</string>
+      <key>ui.lite</key>
+      <string>automatic</string>
+      <key>ui.motion</key>
+      <string>system</string>
+      <key>tools.web_search</key>
+      <true/>
+      <key>tools.browser</key>
+      <false/>
+    </dict>
+  </array>
+  <key>PayloadType</key>
+  <string>Configuration</string>
+  <key>PayloadIdentifier</key>
+  <string>ai.clauseo.desktop.policy.sample</string>
+  <key>PayloadUUID</key>
+  <string>C2FA611B-F40A-459F-84CC-89273780E26B</string>
+  <key>PayloadVersion</key>
+  <integer>1</integer>
+  <key>PayloadDisplayName</key>
+  <string>Clauseo policy (sample)</string>
+  <key>PayloadDescription</key>
+  <string>A sample that sets every Clauseo policy key. Remove the keys your firm does not mean to lock.</string>
+  <key>PayloadScope</key>
+  <string>System</string>
+</dict>
+</plist>
