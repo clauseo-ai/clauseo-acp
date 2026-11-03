@@ -34,6 +34,10 @@ crates/desktop/src/lib.rs context clippy::disallowed_methods
 crates/desktop/src/profile.rs first_on_path clippy::disallowed_methods
 crates/desktop/src/lib.rs raise_main_window clippy::let_underscore_must_use
 crates/desktop/src/lib.rs stop_host_then_exit clippy::exit
+# The machine's total memory (src/machine_memory.rs): sysctlbyname on macOS, GlobalMemoryStatusEx
+# on Windows. Each module's FFI call, under its own #![expect].
+crates/desktop/src/machine_memory.rs mac unsafe_code
+crates/desktop/src/machine_memory.rs win unsafe_code
 # R13: the speed scoreboard's e2e and marks builds (never in release), and build.rs's cleanup of
 # the permission files tauri-build wrote for them.
 crates/desktop/build.rs remove_permissions clippy::disallowed_methods

@@ -62,6 +62,8 @@
 //! - The TypeScript bindings in `ui/app/src/transport/bindings.ts` are written by a unit test
 //!   (`src/commands/bindings.rs`); tauri-specta and specta are dev-dependencies only.
 
+#[cfg(test)]
+mod agent_browser_pin;
 mod bridge;
 mod commands;
 mod csp;
@@ -70,6 +72,7 @@ mod dialogs;
 mod e2e;
 mod frame;
 mod host_start;
+mod machine_memory;
 #[cfg(feature = "marks")]
 mod marks;
 mod open;
@@ -237,13 +240,19 @@ pub fn run() -> tauri::Result<()> {
 
 /// Starts the session host on its own thread (`Host::start` blocks until the store opens),
 /// its outcome going into the bridge's cell through `start`. The launch profile is built on
-/// that thread too (it runs stetdoc and reads files), before the host starts.
+/// that thread too (it runs stetdoc and reads files), and so is the machine's memory, which the
+/// host's browser limit takes (`machine_memory`), before the host starts.
 fn start_host(start: HostStart, locations: Locations) -> std::io::Result<()> {
     host_start::start_on_thread(start, move || {
         let profile = DesktopProfile::build(&locations)
             .map_err(|err| tracing::warn!(%err, "no launch profile: agents start without it"))
             .ok();
-        Host::start(with_profile(host_config(&locations), profile))
+        let config = machine_memory::pass_to(
+            host_config(&locations),
+            machine_memory::total_bytes,
+            HostConfig::with_machine_memory,
+        );
+        Host::start(with_profile(config, profile))
     })
 }
 
