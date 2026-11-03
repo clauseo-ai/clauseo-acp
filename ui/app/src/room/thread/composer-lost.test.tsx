@@ -76,8 +76,9 @@ test.each([
   },
 );
 
-/** The room with one queued message, and the strip's chunk loaded; its edit refused as the message had gone. */
-async function lastQueued() {
+/** The room with one queued message (or `more` after it), and the strip's chunk loaded; the first one's edit refused
+ * as the message had gone. */
+async function lastQueued(more: readonly ViewEntry[] = []) {
   h = await mountRoom({
     dispatch: (c) => {
       if (c.edit_queued_prompt !== undefined)
@@ -85,10 +86,12 @@ async function lastQueued() {
       return defaultOutcome(c);
     },
   });
-  h.deliver([reset([userMessage(1, 1, "Q"), queued(5, 2, "Check the lease.")], running())]);
+  h.deliver([
+    reset([userMessage(1, 1, "Q"), queued(5, 2, "Check the lease."), ...more], running()),
+  ]);
   await act(async () => void (await loadQueueStrip()));
   await h.settle();
-  await h.click(h.one("queued-edit"));
+  await h.click(h.all("queued-edit")[0]!);
   const edit = h.host.querySelector<HTMLTextAreaElement>(".queue-edit")!;
   await act(async () => {
     Reflect.set(HTMLTextAreaElement.prototype, "value", "Check the lease and the deed.", edit);
@@ -119,4 +122,21 @@ test("a lost edit never overwrites the field's words: it follows them after a bl
   await act(async () => h!.store.flush());
   expect(field().value).toBe("My own words.\n\nCheck the lease and the deed.");
   expect(h!.one("error")?.textContent).toBe("That message had already gone.");
+});
+
+test("an edit refused while other messages still wait comes back into the field too, and the strip says it had gone", async () => {
+  const save = await lastQueued([queued(6, 3, "Then the deed.")]);
+  await save();
+  // the first message went as its edit was on its way; the second still waits
+  h!.deliver([
+    upsert({ user_message: { ...queued(5, 2, "Check the lease.").user_message!, status: "sent" } }),
+  ]);
+  await h!.settle();
+  expect(h!.all("queued")).toHaveLength(1);
+  // the words are never lost: in the field, as with the last message
+  expect(field().value).toBe("Check the lease and the deed.");
+  // the strip, still there, says it; the composer's line doesn't say it again
+  expect(h!.one("queue-error")?.textContent).toBe("That message had already gone.");
+  expect(h!.one("error")).toBeNull();
+  expect(h!.host.textContent).not.toContain("raw host text");
 });
