@@ -135,14 +135,16 @@ stderr ("Clauseo will not start inside the agent sandbox.") and exits with code 
 (`GetTokenInformation(TokenRestrictedSids)` is not empty); or its user (`TokenUser`) is S15's
 sandbox user, the separate local account tier B runs the agent as (ADR 0038), which has neither of
 the first two. S15 owns that account and the record of its SID: its elevated set-up writes the SID
-string to `HKLM\SOFTWARE\Clauseo\Sandbox`, value `UserSid` (`REG_SZ`, readable by everyone).
-The app reads it in the 64-bit view (`KEY_WOW64_64KEY`) and compares with `EqualSid` after
-`ConvertStringSidToSidW`, never by account name; a missing key or value means no sandbox user on
-this machine. One function, `sandbox_user_sid()`, names the record; when S15 lands it moves into
-`clauseo-sandbox` beside the writer. `ERROR_ACCESS_DENIED` on opening or reading the token, or on
+string to `HKLM\SOFTWARE\Clauseo\Sandbox`, value `UserSid` (`REG_SZ`, a SID in the `S-1-…` form,
+readable by everyone). The app reads it in the 64-bit view (`KEY_WOW64_64KEY`), unexpanded
+(`RRF_NOEXPAND`, so a `REG_EXPAND_SZ` is refused as another type), and compares with `EqualSid`
+after `ConvertStringSidToSidW`, never by account name; an alias such as `BA` is not a SID here. A
+missing key or value means no sandbox user on this machine. One function, `sandbox_user_sid()`,
+names the record; when S15 lands it moves into `clauseo-sandbox` beside the writer.
+`ERROR_ACCESS_DENIED` on opening or reading the token, or on
 reading the record, also refuses: an unjailed process can always read both, and a hostile agent
 could deny them (its own default DACL) to slip past. So does a record that is not a `REG_SZ` or
-not a valid SID, since only S15's set-up writes there. On macOS,
+not an `S-1-…` SID, since only S15's set-up writes there. On macOS,
 `sandbox_check(getpid(), NULL, SANDBOX_FILTER_NONE)` is non-zero (its -1 error result counts as
 sandboxed). Linux has no check: the Linux agent jail is not a target. Any other failure (another
 token or registry error, such as `ERROR_MORE_DATA`) is reported on stderr and the app starts, so a

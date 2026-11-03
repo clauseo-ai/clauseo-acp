@@ -6,7 +6,7 @@ use windows::Win32::Security::{TOKEN_USER, TokenUser};
 use windows::core::{PWSTR, w};
 
 use super::super::signals::{Failure, Token as _};
-use super::{Token, read_string, sandbox_user_sid};
+use super::{LocalSid, Token, read_string, sandbox_user_sid};
 
 /// This process's user SID, spelled as `ConvertSidToStringSidW` spells it.
 fn own_sid(token: &Token) -> String {
@@ -64,7 +64,26 @@ fn the_registry_read_tells_missing_wrong_type_and_a_string_apart() {
     assert!(matches!(missing_value, Ok(None)), "{missing_value:?}");
     let dword = read_string(version, w!("InstallDate"));
     assert!(matches!(dword, Err(Failure::WrongType)), "{dword:?}");
+    // REG_EXPAND_SZ is refused unexpanded: without RRF_NOEXPAND it would come back expanded, e.g.
+    // `C:\Program Files`, and the environment (which the agent controls) would choose the text.
+    let expand = read_string(
+        w!("SOFTWARE\\Microsoft\\Windows\\CurrentVersion"),
+        w!("ProgramFilesPath"),
+    );
+    assert!(matches!(expand, Err(Failure::WrongType)), "{expand:?}");
     // The real record: a CI runner has none, a developer's machine may.
     let record = sandbox_user_sid();
     assert!(record.is_ok(), "{record:?}");
+}
+
+#[test]
+fn only_the_s_form_of_a_sid_parses() {
+    // Aliases ConvertStringSidToSidW accepts name a group, not one account's SID.
+    for alias in ["BA", "WD"] {
+        assert!(
+            matches!(LocalSid::parse(alias), Err(Failure::NotASid)),
+            "{alias:?}"
+        );
+    }
+    assert!(LocalSid::parse("S-1-5-32-544").is_ok());
 }
