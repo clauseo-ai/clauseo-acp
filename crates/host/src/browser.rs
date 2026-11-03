@@ -13,7 +13,8 @@ pub mod seed_sites;
 pub const CONFIG_DIR: &str = "browser";
 
 /// agent-browser's config file, `<data>/browser/agent-browser.json`: the path the profile's
-/// `browser` entry passes as `AGENT_BROWSER_CONFIG` (`clauseo_profile::ProfilePaths::browser_config`).
+/// `browser` entry passes as `AGENT_BROWSER_CONFIG`
+/// (`clauseo_profile::ProfilePaths::browser_config`).
 pub const CONFIG_FILE: &str = "agent-browser.json";
 
 /// Makes `<data>/browser/` (through no link below `data`, 0700 on Unix) and writes `{}` to
