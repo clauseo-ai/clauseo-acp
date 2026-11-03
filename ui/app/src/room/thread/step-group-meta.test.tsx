@@ -187,7 +187,7 @@ test("in Hindi with three kinds, and in English with a background note, the line
   }
 });
 
-test("live and folded, the line stands in the one place on the meta line: the same line, still there as the turn ends", async () => {
+test("live and folded, the line stands in the one place on the meta line: the same line after the time's kept place, still there as the turn ends", async () => {
   h = await mountRoom();
   h.deliver([
     reset([ASKED, did(7, 201, "read"), toolCall(8, 202, "in_progress")], header("running")),
@@ -195,6 +195,13 @@ test("live and folded, the line stands in the one place on the meta line: the sa
   const meta = metas()[0]!;
   const line = meta.querySelector(":scope > button")!;
   expect(line.textContent).toBe("Read file 202. 1 done so far.");
+  // the time's place is kept before the time comes: the widest clock forms, unseen, unheard and in no text
+  const held = () =>
+    [...meta.querySelectorAll<HTMLElement>(".who-held-as")].map((e) => e.dataset["held"]);
+  expect(held()).toEqual([", 10:00 am", ", 10:00 pm"]);
+  expect(meta.querySelector(".who")?.textContent).toBe("Clauseo");
+  for (const e of meta.querySelectorAll(".who-held-as"))
+    expect(e.getAttribute("aria-hidden")).toBe("true");
   // the turn ends: the step finishes, the answer's words come, the turn's step and the idle header
   h.deliver([
     upsert(toolCall(8, 202, "completed")),
@@ -209,4 +216,8 @@ test("live and folded, the line stands in the one place on the meta line: the sa
   expect(meta.querySelector(":scope > button")).toBe(line);
   expect(line.textContent).toBe("2 papers read.");
   expect(meta.children).toHaveLength(2);
+  // the time in the same kept place, the same forms beside it, so the chip after it hasn't moved
+  expect(held()).toEqual([", 10:00 am", ", 10:00 pm"]);
+  expect(meta.querySelector(".who")?.textContent).toMatch(/^Clauseo, .*\d{1,2}:\d\d [ap]m$/);
+  expect(meta.querySelector(".who-held > :not(.who-held-as)")?.textContent).toMatch(/^, /);
 });

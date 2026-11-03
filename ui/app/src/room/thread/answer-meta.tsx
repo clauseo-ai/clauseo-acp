@@ -6,7 +6,7 @@ import { Who } from "@clauseo/components/clauseo/answer.tsx";
 import { useRoom } from "@clauseo/components/clauseo/room-scope.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import type { EntryId, StreamId, ViewEntry } from "../../transport/protocol.ts";
-import { stamp } from "./clock.ts";
+import { clockWidest, stamp } from "./clock.ts";
 import { useTimeOf } from "./time-of.ts";
 
 /** The meta line that opens an answer. `step`: the turn's step, for its time; `latest`: the thread's latest exchange,
@@ -31,7 +31,13 @@ export function AnswerMeta({
   const ended = useTimeOf(step, stream, paged);
   return (
     <div className="meta meta-live" ref={latest ? nodes.slot("meta") : undefined}>
-      <Who name={w.t("Clauseo")} time={ended === null ? undefined : stamp(w.lang, ended, now)} />
+      {/* the time's place is kept as wide as the widest clock time in the language, before the turn's time comes and
+          after, so the chip after it stands in one place live and folded */}
+      <Who
+        name={w.t("Clauseo")}
+        time={ended === null ? undefined : stamp(w.lang, ended, now)}
+        held={clockWidest(w.lang)}
+      />
       {children}
     </div>
   );

@@ -236,6 +236,21 @@
   .meta-live {
     min-height: calc(var(--s6) * var(--k));
   }
+  /* and the time's width: its place is as wide as the widest clock time in the language (Who's held: each form,
+     "10:00 pm", "शाम 10:00", stacked unseen in one cell, in no text), its digits all one width, before the turn's time
+     comes and after, so the chip after it stands in one place live and folded */
+  .who-held {
+    display: inline-grid;
+    font-variant-numeric: tabular-nums;
+  }
+  .who-held > * {
+    grid-area: 1 / 1;
+    white-space: nowrap;
+  }
+  .who-held-as::after {
+    content: attr(data-held);
+    visibility: hidden;
+  }
 
   /* ---------- the work behind an answer: a plain list, each line with its time ---------- */
   .work-item {

@@ -23,17 +23,30 @@ import { Heading } from "./heading.tsx";
 export function Who({
   name,
   time,
+  held,
   ref,
 }: {
   name: string;
   time?: string | undefined;
+  /** The clock times the time's place is kept wide enough for, with or without a time yet: unseen and unheard (drawn
+   * by CSS, so in no text), so what follows the time stands in one place before the time comes and after. */
+  held?: readonly string[] | undefined;
   ref?: Ref<HTMLParagraphElement>;
 }) {
   const w = useWords();
   return (
     <p className="who" ref={ref}>
       <b lang={w.lang === "hi" && isLatinOnly(name) ? "en" : undefined}>{name}</b>
-      {time !== undefined && `, ${time}`}
+      {held !== undefined ? (
+        <span className="who-time who-held">
+          {time !== undefined && <span>{`, ${time}`}</span>}
+          {held.map((h) => (
+            <span key={h} className="who-held-as" aria-hidden="true" data-held={`, ${h}`} />
+          ))}
+        </span>
+      ) : (
+        time !== undefined && <span className="who-time">{`, ${time}`}</span>
+      )}
     </p>
   );
 }

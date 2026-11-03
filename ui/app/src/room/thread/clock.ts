@@ -40,6 +40,24 @@ export function clockTime(lang: Lang, ts: Timestamp): string {
   return clock(lang, `${h % 12 === 0 ? 12 : h % 12}:${minutes} ${h < 12 ? "am" : "pm"}`);
 }
 
+const widest = new Map<Lang, readonly string[]>();
+/** A clock time of each form the language has, with a two-digit hour ("10:00 pm", "शाम 10:00"): one of them is as wide
+ * as any time today, its digits all one width (tabular). For the meta line, whose time's place is kept that wide before
+ * the turn's time comes and after. */
+export function clockWidest(lang: Lang): readonly string[] {
+  let out = widest.get(lang);
+  if (out === undefined) {
+    const forms = new Set<string>();
+    for (let h = 0; h < 24; h += 1)
+      forms.add(
+        clockTime(lang, new Date(2000, 0, 1, h, 0).getTime()).replace(/\d{1,2}:\d\d/, "10:00"),
+      );
+    out = [...forms];
+    widest.set(lang, out);
+  }
+  return out;
+}
+
 /** A time and its day: null today, the weekday within six days either way, the day and month further off. */
 export function whenOf(
   lang: Lang,
