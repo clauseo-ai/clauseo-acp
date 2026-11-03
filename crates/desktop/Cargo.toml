@@ -61,10 +61,14 @@ uuid = { workspace = true, features = ["v7"] }
 # The native window over the room's maximise button, for Snap Layouts
 # (src/window_frame/windows.rs): the window and its class, the top-level window's subclass, mouse
 # capture and leave tracking, the window's DPI, and this module's handle. Gdi for WNDCLASSEXW.
+# The WebView2 dialog (src/webview2/windows.rs): Controls for TaskDialogIndirect, HiDpi for its
+# DPI awareness, Com and Shell for ShellExecuteW.
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [
   "Win32_Graphics_Gdi",
+  "Win32_System_Com",
   "Win32_System_LibraryLoader",
+  "Win32_UI_Controls",
   "Win32_UI_HiDpi",
   "Win32_UI_Input_KeyboardAndMouse",
   "Win32_UI_Shell",

@@ -55,7 +55,7 @@ for a pull request.
   targets, `createUpdaterArtifacts: true`, macOS 13 and the hardened runtime, the WebView2 bootstrapper
   (silent) with `minimumWebview2Version` `155.0.0.0` (Microsoft Edge 155.0.4283.62 on the
   `windows-2025` image 20261021.299.1, actions/runner-images `Windows2025-Readme.md`; raised only on
-  purpose), NSIS `currentUser` in English and Hindi, `allowDowngrades: false`.
+  purpose), NSIS `currentUser` in English, `allowDowngrades: false`.
 - **Release overlays,** in `crates/desktop/release/`, passed with `--config`:
   `release.conf.json` (`mainBinaryName: "Clauseo"`, and no `beforeBuildCommand`, since the legs embed
   the `ui` job's build); `windows.conf.json` (`bundle.windows.nsis.installerHooks`, the uninstall hook
@@ -93,6 +93,32 @@ for a pull request.
   `ui-sourcemaps-<version>`, for the crash reports' symbols job; neither is ever bundled or released.
 - **Who may tag and use the secrets:** Rohan, as repository admin, applies a tag ruleset (only he
   creates `v*` and `test-v*` tags) and the environments' branch and tag rules.
+
+### PR 2: the WebView2 dialog and the installer's words (Rohan, 2026-11-03)
+
+- **The WebView2 dialog** (`crates/desktop/src/webview2.rs`). On Windows, `run` first reads the
+  installed runtime's version (`tauri::webview_version`, wry's call to
+  `GetAvailableCoreWebView2BrowserVersionString`; no new crate). When it is missing or older than
+  `minimumWebview2Version`, a task dialog shows the copy page's W1 (title), W2 (main instruction),
+  W4 (content) and W5 (footer), with W6 "Download WebView2" (opens
+  `https://go.microsoft.com/fwlink/p/?LinkId=2124703` in the default browser, then exits) and W7
+  "Close" (exits); `run` returns without building the app, so there is never a blank window. W3,
+  the line with a time estimate, waits for QU.8. The minimum lives in `tauri.conf.json`; the
+  module's copy is held to it by a test. A version string it cannot read lets the app start, so
+  the check never refuses a runtime that may work.
+- **English only.** The dialog and the installer ship in English; new words are English-only for
+  now. The installer's `languages` is `["English"]` (Hindi, in PR 1, is dropped): Tauri 2.12.2
+  has no Hindi for its own 27 messages, and the Hindi drafts are deferred. No language picker.
+- **Stock installer pages.** Tauri's MUI pages as they come, no custom `installer.nsi`: page
+  words of our own would need a template kept in step with every Tauri upgrade. The words list's
+  per-machine lines are parked with it. The uninstall-declined line is S15a's.
+- **One installer line of our own.** Tauri's "Delete the application data" box removes the whole
+  data folder, store included, so its label says what goes: "Also delete conversations, saved
+  versions and settings" (unticked, as Tauri draws it). `customLanguageFiles` replaces the
+  bundler's whole English file, so `crates/desktop/windows/nsis/English.nsh` holds that line
+  first and Tauri's 26 other messages as 2.12.2 ships them. On a Tauri upgrade, copy its
+  `English.nsh` again; a test counts the 27 keys and holds the label to one line (60
+  characters; the box is 400 x 25 px).
 
 ## Consequences
 
