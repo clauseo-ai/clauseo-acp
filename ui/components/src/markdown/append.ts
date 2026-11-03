@@ -6,7 +6,7 @@
 // it does on a parse, so the views stay what a fresh render makes; the tests hold the two equal over random
 // streams. Any doubt is a full parse. The caller keeps it to the tail: not a part of a paragraph split.ts
 // cut, nor one long enough to be cut, and never after an update whose tail repair found something pending.
-import type { Nodes, Paragraph, Root, Text } from "mdast";
+import type { Paragraph, Root, Text } from "mdast";
 import { parse, parseProbe } from "./parse.ts";
 
 /**
@@ -43,11 +43,13 @@ type Point = NonNullable<Root["position"]>["start"];
 
 /**
  * For the tests only: while `off`, every tail parse is a full one (the oracle the fast path must equal);
- * `check`, when set, sees each mdast the fast path makes, with its source.
+ * `check`, when set, sees each mdast the fast path makes, with its source; `replace`, when set, stands in
+ * for it (a wrong one, to show the finished render never uses it).
  */
 export const appendProbe: {
   off: boolean;
   check?: ((source: string, root: Root) => void) | undefined;
+  replace?: ((root: Root) => Root) | undefined;
 } = {
   off: false,
 };
@@ -58,28 +60,6 @@ const along = (point: Point, offset: number): Point => ({
   column: point.column + offset - (point.offset ?? 0),
   offset,
 });
-
-/**
- * Whether every `](` in the paragraph from `from` is inside one of its links or images: else an inline
- * link may still be arriving (`[a](b "title` waits for `")`, which the allowlist lets in).
- */
-function linksSettled(paragraph: Paragraph, source: string, from: number): boolean {
-  let at = source.indexOf("](", from);
-  if (at < 0) return true;
-  const spans: [number, number][] = [];
-  const stack: Nodes[] = [...paragraph.children];
-  for (let node = stack.pop(); node; node = stack.pop()) {
-    if (node.type === "link" || node.type === "image") {
-      const { start, end } = node.position ?? {};
-      if (start?.offset === undefined || end?.offset === undefined) return false;
-      spans.push([start.offset, end.offset]);
-    }
-    if ("children" in node) stack.push(...node.children);
-  }
-  for (; at >= 0; at = source.indexOf("](", at + 1))
-    if (!spans.some(([start, end]) => start <= at && at + 2 <= end)) return false;
-  return true;
-}
 
 /**
  * The mdast of `source`, which is `known.source` and more, as `known.root` with its last paragraph's last
@@ -93,8 +73,7 @@ export function appended(known: Parsed, source: string): Root | undefined {
   // - Blocks: the delta holds no line ending, and the last line it joins was in the paragraph before and
   //   starts with a letter, maybe after spaces and a short emphasis run (SETTLED_START): no list marker
   //   (it needs a space after it), thematic break or setext underline (markers and spaces only), fence
-  //   (three `~` or backticks) or other block start, so the paragraph stays one. It does not start with
-  //   `[` (MAY_DEFINE), so it is no definition still arriving.
+  //   (three `~` or backticks) or other block start, so the paragraph stays one.
   // - Emphasis, strikethrough, highlight, superscript, code spans: the delta holds no delimiter (`*_~=^`,
   //   a backtick), so no opener in the paragraph gains a closer, and a run's flanking (CommonMark 6.2) reads
   //   only the characters on either side of it: the one character whose next character changes is the
@@ -102,8 +81,11 @@ export function appended(known: Parsed, source: string): Root | undefined {
   // - Escapes, character references, literal autolinks: what reads on past itself (READS_ON) is nowhere
   //   on the last line, so nothing earlier swallows the delta, and the delta starts none.
   // - Links, images, tags, autolinks in angle brackets: the delta holds no `[` `]` `<` `>`, so it closes
-  //   only an inline link's destination or title (`)`, a quote), and every `](` of the paragraph is
-  //   inside a link or image already (linksSettled).
+  //   only an inline link's destination or title, and that only with a `)`: no `)` in the delta when the
+  //   paragraph holds a `](`. Settled links do not settle it: `x [a [b](c "t](d) more` + `")` is a link to
+  //   c, inside what was a link to d.
+  // - Definitions: the paragraph does not start with `[` (MAY_DEFINE), and does not start on the line
+  //   after a definition (`[a]: b\n"multi\nline` + `"` is that definition's title).
   // - The paragraph's last child is a text node running to the end, so the delta joins that text, as
   //   micromark joins adjacent text; tail repair, the depth check, hast, tags and the sanitiser run after.
   if (delta === "" || lineStart === old.length || !PLAIN.test(delta)) return undefined;
@@ -124,7 +106,10 @@ export function appended(known: Parsed, source: string): Root | undefined {
   const gap = old.slice(textEnd);
   if (!SPACES.test(gap) || MAY_DEFINE.test(old.slice(p.start.offset, p.start.offset + 8)))
     return undefined;
-  if (!linksSettled(paragraph, old, p.start.offset)) return undefined;
+  if (delta.includes(")") && old.includes("](", p.start.offset)) return undefined;
+  const before = root.children.at(-2);
+  if (before?.type === "definition" && (before.position?.end.line ?? Infinity) >= p.start.line - 1)
+    return undefined;
   const value = (text.value + gap + delta).replace(/ +$/, "");
   const end = textEnd + value.length - text.value.length;
   const extended: Text = {
@@ -153,6 +138,8 @@ export function createAppender() {
   let now: Parsed[] = [];
   let open = false;
   let pending = false;
+  const fast = new WeakSet<Root>();
+  let kept: readonly string[] = [];
   return {
     /** Whether this update's tail may extend the last update's (the caller's limits, above). */
     open(may: boolean) {
@@ -172,18 +159,29 @@ export function createAppender() {
             one.source.length > (known?.source.length ?? -1)
           )
             known = one;
-      const root = known && appended(known, source);
-      if (!root) return parse(source);
+      const made = known && appended(known, source);
+      if (!made) return parse(source);
       const counts = parseProbe.counts;
       if (counts) counts.fast++;
-      appendProbe.check?.(source, root);
+      appendProbe.check?.(source, made);
+      const root = appendProbe.replace ? appendProbe.replace(made) : made;
+      fast.add(root);
       return root;
     },
     add(source: string, root: Root) {
       if (now.at(-1)?.source !== source) now.push({ source, root });
     },
+    /** The sources of the tail parses the fast path made that the last update kept (the tree cache may too). */
+    made(): readonly string[] {
+      return kept;
+    },
+    /** No tail parse kept so far is extended (the entity table has arrived). */
+    forget() {
+      before = [];
+    },
     /** The update has ended; the next extends its tail parses only if it streamed and nothing was pending. */
     end(streaming: boolean) {
+      kept = now.filter((one) => fast.has(one.root)).map((one) => one.source);
       before = streaming && !pending ? now : [];
       now = [];
       open = false;
