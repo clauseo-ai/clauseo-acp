@@ -16,6 +16,7 @@ import { U6 } from "./registry-u6.tsx";
 import { U7 } from "./registry-u7.tsx";
 import { C117 } from "./registry-c117.tsx";
 import { U6F } from "./registry-u6f.tsx";
+import { UTC } from "./registry-utc.tsx";
 import {
   MATTER,
   NEW_MATTER,
@@ -339,6 +340,7 @@ export const REGISTRY: readonly Entry[] = [
   ...H11,
   ...U6,
   ...U7,
+  ...UTC,
   ...C117,
   ...U6F,
   {

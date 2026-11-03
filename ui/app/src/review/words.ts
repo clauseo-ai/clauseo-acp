@@ -13,6 +13,8 @@ import { rdt, type ReaderKey } from "@clauseo/components/lib/words-reader.ts";
 import { brk, type BreakKey } from "@clauseo/components/lib/words-breaks.ts";
 import { st, type SettingsKey } from "@clauseo/components/lib/words-settings.ts";
 import { startup, type StartupKey } from "@clauseo/components/lib/words-startup.ts";
+import { steps, type StepKey } from "@clauseo/components/lib/words-steps.ts";
+import { stepLive, type StepLiveKey } from "@clauseo/components/lib/words-steps-live.ts";
 import { th, type ThreadKey } from "@clauseo/components/lib/words-thread.ts";
 import { ui, type UiKey } from "@clauseo/components/lib/words-ui.ts";
 import { vt, type VersionKey } from "@clauseo/components/lib/words-versions.ts";
@@ -78,6 +80,20 @@ export const limitThreadWords = (key: LimitThreadKey): WordsRef => ({
   key,
   text: (lang) => limThread(lang, key),
   later: limThread.hi[key] === null,
+});
+
+/** A string of a settled step group (words-steps.ts). */
+export const stepWords = (key: StepKey): WordsRef => ({
+  file: "lib/words-steps.ts",
+  key,
+  text: (lang) => steps(lang, key),
+});
+
+/** A sentence of the step in hand (words-steps-live.ts). */
+export const stepLiveWords = (key: StepLiveKey): WordsRef => ({
+  file: "lib/words-steps-live.ts",
+  key,
+  text: (lang) => stepLive(lang, key),
 });
 
 /** A string of the plan's card (words-plan-card.ts). */
