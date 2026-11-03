@@ -313,6 +313,15 @@ export const asideScene = (lang: Lang): QueueScene => {
   };
 };
 
+/** matters/held-restart: the answer ended well (or a restart, a limit), so the queue waits for the lawyer with `n`
+ * messages behind it, and no stop to name: the head says the count alone. */
+export const heldRestartScene = (lang: Lang, n: number): QueueScene => ({
+  title: say(lang, SAY.summoning),
+  entries: [...asked(lang), ended(3, T1, pm(32)), ...queued(lang, n)],
+  status: "idle",
+  held: true,
+});
+
 /** The words the steer screens type into the field. */
 export const steerWords = {
   claude: (lang: Lang) => say(lang, SAY.steerClaude),
