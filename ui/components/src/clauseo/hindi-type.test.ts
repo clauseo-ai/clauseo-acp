@@ -103,6 +103,18 @@ test("a Hindi item and quote take the reply's Hindi line, a Hindi cell the table
   expect(face("#td")).toBe('"Anek Devanagari"');
 });
 
+test.each(["en", "hi"] as const)(
+  "in the %s interface, a Hindi note keeps the notes' small line, Hindi's 20 px",
+  (lang) => {
+    setUp(
+      lang,
+      `<section class="footnotes"><ol><li id="li" lang="hi"><p id="p" lang="hi">नोटिस देखें।</p></li></ol></section>`,
+    );
+    expect(line("#li")).toBe("20px");
+    expect(line("#p")).toBe("20px");
+  },
+);
+
 test("in the Hindi interface, an English block is left with the page's own Hindi settings", () => {
   setUp("hi", `<p id="en" class="tracked">Notice.</p>`);
   expect(face("#en")).toBe('"Anek Devanagari"');

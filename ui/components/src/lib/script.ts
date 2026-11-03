@@ -39,8 +39,8 @@ function kindOf(code: number, char: string): Kind {
 /**
  * "hi" when Devanagari letters (U+0900 to U+097F and Devanagari Extended, U+A8E0 to U+A8FF) are more than half of
  * the text's letters, otherwise undefined (no letter at all, digits only and an empty string included). A mark
- * counts with the letter it sits on, whatever block the mark is in; one with no letter before it counts for
- * nothing. It walks the text by code point and tests each one alone: no end-anchored class, which V8 14.6 gets
+ * counts as a letter of the letter it sits on, whatever block the mark is in; one with no letter before it counts
+ * for nothing. Devanagari's vowel signs and viramas so weigh it about 1.6 times its letters in the vote. It walks the text by code point and tests each one alone: no end-anchored class, which V8 14.6 gets
  * wrong for astral letters (#248).
  */
 export function langOfText(text: string): "hi" | undefined {
