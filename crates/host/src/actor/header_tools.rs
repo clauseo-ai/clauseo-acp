@@ -78,7 +78,7 @@ fn show(actor: &mut Actor, thread: ThreadId, tools: Vec<ToolState>) {
     else {
         return;
     };
-    let change = ViewChange::Upsert(Box::new(ViewEntry::Header(header)));
+    let change = ViewChange::Upsert(Box::new(ViewEntry::Header(Box::new(header))));
     match loaded.view.publish(vec![change], &mut actor.encoder) {
         Ok(events) => {
             for event in &events {

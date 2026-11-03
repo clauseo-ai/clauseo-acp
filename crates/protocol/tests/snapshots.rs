@@ -319,7 +319,7 @@ mod view_entry {
             agent_name: Some(short("Gemini CLI")),
             ..entries::header_entry()
         };
-        let entry = ViewEntry::Header(header);
+        let entry = ViewEntry::Header(Box::new(header));
         insta::assert_json_snapshot!("header_with_agent_name", entry);
         round_trips(&entry);
     }

@@ -264,7 +264,7 @@ fn past_the_cap_the_driver_pauses_and_resubscribes_once_acks_catch_up() {
                 (last.epoch, cursor.get() + 1)
             );
             match entry.as_ref() {
-                ViewEntry::Header(header) => header.clone(),
+                ViewEntry::Header(header) => (**header).clone(),
                 other => panic!("not the header: {other:?}"),
             }
         }

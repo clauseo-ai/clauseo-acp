@@ -270,7 +270,7 @@ impl Model {
         for entry in self.0.values() {
             match entry {
                 ViewEntry::Header(h) => {
-                    header = Some(StreamHeader::Thread(Box::new(h.clone())));
+                    header = Some(StreamHeader::Thread(h.clone()));
                 }
                 other => entries.push(other.clone()),
             }
