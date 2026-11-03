@@ -407,3 +407,77 @@ test("a polite live region says how many commands the menu opened with, then the
   await edit("/c /comp");
   expect(live()?.textContent).toBe("1 command");
 });
+
+test("the open menu is placed again, once a frame, as the field's own size changes; closed, it watches no more", async () => {
+  // the field's size observers, and the frames they ask for, held until the test runs them
+  const watching: { cb: ResizeObserverCallback; targets: Element[]; gone: boolean }[] = [];
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      seen: { cb: ResizeObserverCallback; targets: Element[]; gone: boolean };
+      constructor(cb: ResizeObserverCallback) {
+        this.seen = { cb, targets: [], gone: false };
+        watching.push(this.seen);
+      }
+      observe(t: Element) {
+        this.seen.targets.push(t);
+      }
+      unobserve() {}
+      disconnect() {
+        this.seen.gone = true;
+      }
+    },
+  );
+  const frames = new Map<number, FrameRequestCallback>();
+  let next = 0;
+  vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+    frames.set(++next, cb);
+    return next;
+  });
+  vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
+  const run = () =>
+    act(async () => {
+      const due = [...frames.values()];
+      frames.clear();
+      for (const cb of due) cb(0);
+    });
+  // the caret's mark, where the field's words put it: 3 lines, then 4 as the window narrows and the field grows
+  let caretTop = 100;
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+    this: HTMLElement,
+  ) {
+    return this.textContent === "\u200b"
+      ? new DOMRect(40, caretTop, 1, 20)
+      : new DOMRect(0, 0, 0, 0);
+  });
+  // the plane the list stands in, which the menu places
+  const top = () => menu()?.closest<HTMLElement>(".fixed")?.style.top;
+  try {
+    await mount(composer({}));
+    await focus();
+    const before = watching.length;
+    await edit("/");
+    expect(top()).toBe("124px");
+    const mine = watching.slice(before).find((o) => o.targets.includes(field()));
+    expect(mine).toBeDefined();
+    const grow = () => act(async () => mine?.cb([], {} as ResizeObserver));
+    // the field grows a line: placed again in the next frame, and once, however many times it was told
+    caretTop = 126;
+    await grow();
+    await grow();
+    expect(frames.size).toBe(1);
+    expect(top()).toBe("124px");
+    await run();
+    expect(top()).toBe("150px");
+    // told, then closed before its frame: the frame is dropped and the observer let go
+    caretTop = 152;
+    await grow();
+    expect(await key("Escape")).toBe(true);
+    expect(menu()).toBeNull();
+    expect(mine?.gone).toBe(true);
+    expect(frames.size).toBe(0);
+  } finally {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  }
+});
