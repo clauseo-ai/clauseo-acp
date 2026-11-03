@@ -77,6 +77,35 @@ impl Tree {
         unsafe { TerminateJobObject(self.job(), TERMINATED) }.is_ok()
     }
 
+    /// A tree whose kill Windows refuses: a new, empty job's handle with no access rights, so
+    /// `TerminateJobObject` fails. For the test of the ladder's kill when the job will not end.
+    #[cfg(test)]
+    pub(crate) fn that_will_not_end() -> Tree {
+        use windows::Win32::Foundation::{DUPLICATE_HANDLE_OPTIONS, DuplicateHandle};
+        use windows::Win32::System::Threading::GetCurrentProcess;
+
+        let full = Tree::new().expect("create a job");
+        let mut bare = HANDLE::default();
+        // SAFETY: `full.job()` is the job handle `full` owns, open for this call; `bare` is a
+        // live HANDLE the call writes the duplicate to, owned below by the `OwnedHandle`.
+        unsafe {
+            DuplicateHandle(
+                GetCurrentProcess(),
+                full.job(),
+                GetCurrentProcess(),
+                &raw mut bare,
+                0,
+                false,
+                DUPLICATE_HANDLE_OPTIONS(0),
+            )
+        }
+        .expect("duplicate the job handle with no access");
+        // SAFETY: `bare` is the open handle DuplicateHandle just returned, which nothing else
+        // owns; the `OwnedHandle` closes it once, on drop.
+        let job = unsafe { OwnedHandle::from_raw_handle(bare.0) };
+        Tree { job }
+    }
+
     /// The job handle, borrowed for a Win32 call.
     fn job(&self) -> HANDLE {
         HANDLE(self.job.as_raw_handle())

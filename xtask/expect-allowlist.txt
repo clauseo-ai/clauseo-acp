@@ -131,6 +131,7 @@ crates/process/src/os/windows.rs - unsafe_code
 crates/process/tests/pipes/shutdown.rs launch_ignoring_sigterm unsafe_code
 crates/process/tests/pipes/write.rs - clippy::disallowed_methods
 crates/process/tests/support/exit_watch.rs os unsafe_code
+crates/process/tests/spawn_options.rs shares_console unsafe_code
 
 # Added with clauseo-settings: its one file write, its disk tests' write module, and its FFI to
 # the registry, the known folders and the property list containers of managed preferences.
