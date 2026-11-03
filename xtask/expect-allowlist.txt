@@ -126,6 +126,8 @@ crates/matters/src/fsync.rs full_flush clippy::unnecessary_wraps
 crates/matters/src/write/windows.rs - unsafe_code
 # matters' macOS tests: their folder setup.
 crates/matters/tests/matters_macos.rs - clippy::disallowed_methods
+# matters' Windows tests: their folder setup, and files held open without sharing.
+crates/matters/tests/matters_windows.rs - clippy::disallowed_methods
 
 # clauseo-acp: its stdio tests' write module (each run's own folder).
 crates/acp/tests/stdio/write.rs - clippy::disallowed_methods
