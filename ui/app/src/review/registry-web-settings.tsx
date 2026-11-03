@@ -99,7 +99,7 @@ export const WEB_SETTINGS: Entry[] = [
   entry(
     "UEP-15",
     settingsWords(
-      "Clauseo visits each page it reads, and each one it opens in its browser, from this computer. Each website sees that visit, as it sees any browser's.",
+      "When Clauseo reads a page on this computer or opens one in its browser, the website sees the visit, as it sees any browser's.",
     ),
   ),
   // the Browser switch on, and no website check yet: the room's UET-18 words

@@ -206,7 +206,9 @@ test("the websites' row follows the plans' rows, and shows without the tools or 
     const { el } = await mount(tools === undefined ? {} : { tools });
     const row = el.querySelector('[data-testid="dest-websites"]');
     expect(row?.textContent).toContain("To the websites Clauseo visits");
-    expect(row?.textContent).toContain("Each website sees that visit, as it sees any browser's.");
+    expect(row?.textContent).toContain(
+      "When Clauseo reads a page on this computer or opens one in its browser, the website sees the visit, as it sees any browser's.",
+    );
     expect(row?.previousElementSibling?.getAttribute("data-testid")).toMatch(
       /^dest-(claude|codex)$/,
     );

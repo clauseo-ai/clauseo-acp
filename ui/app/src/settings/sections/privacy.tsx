@@ -68,7 +68,7 @@ function WebsitesDest() {
       <p className="set-dest-what">
         {w.say(
           w.s(
-            "Clauseo visits each page it reads, and each one it opens in its browser, from this computer. Each website sees that visit, as it sees any browser's.",
+            "When Clauseo reads a page on this computer or opens one in its browser, the website sees the visit, as it sees any browser's.",
           ),
         )}
       </p>
