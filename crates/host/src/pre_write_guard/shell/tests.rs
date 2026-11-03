@@ -1,9 +1,13 @@
+#[cfg(unix)]
 use std::path::PathBuf;
 
-use super::{Escape, Folders, command_words, moved, script};
+use super::{Escape, command_words, script};
+#[cfg(unix)]
+use super::{Folders, moved};
 
 /// The folders after each of `segments` (words split at spaces), from `/m`, which does not
 /// exist, so resolving through symlinks changes nothing.
+#[cfg(unix)]
 fn walk(segments: &[&str], escape: Escape) -> Folders {
     let mut folders = Folders {
         reached: vec![PathBuf::from("/m")],
@@ -20,10 +24,12 @@ fn walk(segments: &[&str], escape: Escape) -> Folders {
 }
 
 /// Reached `paths`, in order, and whether the folder is unknown.
+#[cfg(unix)]
 fn reached(paths: &[&str], unknown: bool) -> (Vec<PathBuf>, bool) {
     (paths.iter().map(PathBuf::from).collect(), unknown)
 }
 
+#[cfg(unix)]
 fn without_pushes(folders: Folders) -> (Vec<PathBuf>, bool) {
     (folders.reached, folders.unknown)
 }
