@@ -28,17 +28,43 @@ pub const BROWSER_DIR: &str = "{browser_dir}";
 /// The egress proxy's port for the session. Unfillable (no proxy): the host drops `browser`
 /// and shows `NoProxy`.
 pub const PROXY_PORT: &str = "{proxy_port}";
-/// The session's id, as agent-browser's session name.
+/// agent-browser's session name: the session's id on macOS and Linux; on Windows a name the
+/// host draws so that agent-browser's daemon port, a hash of the name, is one it claimed.
 pub const SESSION_ID: &str = "{session_id}";
 /// The Chrome the host picked for this session. Unfillable (none installed): the host drops
 /// `browser` and shows `BrowserNotInstalled`.
 pub const BROWSER_EXECUTABLE: &str = "{browser_executable}";
 
+/// macOS and Linux only: the session's browser socket folder, `/tmp/clauseo-ab-<16 random>`,
+/// which the host makes for the session (mode 0700) and removes once the launch's process tree
+/// has exited, as `AGENT_BROWSER_SOCKET_DIR`. Unfillable (the folder could not be made): the
+/// host drops `browser` and shows `BrowserNotInstalled`.
+pub const SOCKET_DIR: &str = "{socket_dir}";
+/// The loopback port the host claimed for the session's stream server, as
+/// `AGENT_BROWSER_STREAM_PORT`. Unfillable (no port claimed): the host drops `browser`.
+pub const STREAM_PORT: &str = "{stream_port}";
+/// The loopback port the host claimed for the session's Chrome debugging endpoint, as the
+/// guard's `--cdp-port`. Unfillable (no port claimed): the host drops `browser`.
+pub const CDP_PORT: &str = "{cdp_port}";
+/// Windows only: the loopback port the host claimed for agent-browser's daemon, as the guard's
+/// `--daemon-port`. Unfillable (no port claimed): the host drops `browser`.
+pub const DAEMON_PORT: &str = "{daemon_port}";
+
 /// The tokens the host fills in the instructions. An unfillable one is a host bug: the host
 /// fails the launch with `agent.launch_failed`, naming the token ([`Unfilled`]'s message).
 pub const IN_INSTRUCTIONS: [&str; 2] = [WORK_FOLDER, MATTER_NOTES];
-/// The tokens the host fills in the `browser` entry.
-pub const IN_SERVERS: [&str; 4] = [BROWSER_DIR, PROXY_PORT, SESSION_ID, BROWSER_EXECUTABLE];
+/// The tokens the host fills in the `browser` entry. The entry holds [`SOCKET_DIR`] on macOS
+/// and Linux only and [`DAEMON_PORT`] on Windows only; the host fills whichever it finds.
+pub const IN_SERVERS: [&str; 8] = [
+    BROWSER_DIR,
+    PROXY_PORT,
+    SESSION_ID,
+    BROWSER_EXECUTABLE,
+    SOCKET_DIR,
+    STREAM_PORT,
+    CDP_PORT,
+    DAEMON_PORT,
+];
 
 /// A token in `tokens` that [`fill`] had no value for.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -109,6 +135,28 @@ mod tests {
             .as_deref(),
             Ok("wm")
         );
+    }
+
+    #[test]
+    fn the_port_and_socket_tokens_fill_in_one_pass() {
+        let values = [
+            (SOCKET_DIR, "/tmp/clauseo-ab-0123456789abcdef"),
+            (STREAM_PORT, "61100"),
+            (CDP_PORT, "{stream_port}"),
+            (DAEMON_PORT, "61102"),
+        ];
+        assert_eq!(
+            fill(
+                "{socket_dir} {stream_port} {cdp_port} {daemon_port}",
+                &IN_SERVERS,
+                &values
+            )
+            .as_deref(),
+            Ok("/tmp/clauseo-ab-0123456789abcdef 61100 {stream_port} 61102")
+        );
+        for token in [SOCKET_DIR, STREAM_PORT, CDP_PORT, DAEMON_PORT] {
+            assert_eq!(fill(token, &IN_SERVERS, &[]), Err(Unfilled(token)));
+        }
     }
 
     #[test]

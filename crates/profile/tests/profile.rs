@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use clauseo_profile::claude::{OPTION_KEYS, SETTINGS_KEYS};
 use clauseo_profile::instructions::{TOOLS, word_count};
 use clauseo_profile::placeholders::{
-    self, BROWSER_DIR, BROWSER_EXECUTABLE, IN_INSTRUCTIONS, IN_SERVERS, MATTER_NOTES, PROXY_PORT,
-    SESSION_ID, WORK_FOLDER,
+    self, BROWSER_DIR, BROWSER_EXECUTABLE, CDP_PORT, DAEMON_PORT, IN_INSTRUCTIONS, IN_SERVERS,
+    MATTER_NOTES, PROXY_PORT, SESSION_ID, SOCKET_DIR, STREAM_PORT, WORK_FOLDER,
 };
 use clauseo_profile::{
     BrowserSidecars, ClauseoProfile, CodexConfig, Instructions, ProfileError, ProfilePaths,
@@ -243,50 +243,52 @@ fn kind_specific_parts_go_only_to_their_kind() {
 }
 
 #[test]
-fn the_browser_entry_runs_the_guard_with_four_variables() {
+fn the_browser_entry_runs_the_guard_with_its_ports_and_variables() {
     let [browser] = profile()
         .servers(Some(AgentKind::Claude))
         .try_into()
         .unwrap();
     assert_eq!(browser.command, abs("/app/clauseo-mcp"));
     let agent_browser = abs("/app/agent-browser").to_string_lossy().into_owned();
-    assert_eq!(
-        browser.args,
-        [
-            "browser-guard",
-            "--agent-browser",
-            agent_browser.as_str(),
-            "--cwd",
-            "{browser_dir}",
-            "--",
-            "mcp",
-            "--tools",
-            "core",
-        ]
-    );
+    let mut args = vec![
+        "browser-guard",
+        "--agent-browser",
+        agent_browser.as_str(),
+        "--cwd",
+        "{browser_dir}",
+        "--cdp-port",
+        "{cdp_port}",
+    ];
+    if cfg!(windows) {
+        args.extend(["--daemon-port", "{daemon_port}"]);
+    }
+    args.extend(["--", "mcp", "--tools", "core"]);
+    assert_eq!(browser.args, args);
     let env: Vec<(&str, String)> = browser
         .env
         .iter()
         .map(|(name, value)| (name.as_str(), value.replace('\\', "/")))
         .collect();
-    assert_eq!(
-        env,
-        [
-            (
-                "AGENT_BROWSER_CONFIG",
-                "/data/browser/agent-browser.json".to_owned()
-            ),
-            (
-                "AGENT_BROWSER_EXECUTABLE_PATH",
-                "{browser_executable}".to_owned()
-            ),
-            (
-                "AGENT_BROWSER_PROXY",
-                "http://127.0.0.1:{proxy_port}".to_owned()
-            ),
-            ("AGENT_BROWSER_SESSION", "{session_id}".to_owned()),
-        ]
-    );
+    let mut expected = vec![
+        (
+            "AGENT_BROWSER_CONFIG",
+            "/data/browser/agent-browser.json".to_owned(),
+        ),
+        (
+            "AGENT_BROWSER_EXECUTABLE_PATH",
+            "{browser_executable}".to_owned(),
+        ),
+        (
+            "AGENT_BROWSER_PROXY",
+            "http://127.0.0.1:{proxy_port}".to_owned(),
+        ),
+        ("AGENT_BROWSER_SESSION", "{session_id}".to_owned()),
+    ];
+    if cfg!(unix) {
+        expected.push(("AGENT_BROWSER_SOCKET_DIR", "{socket_dir}".to_owned()));
+    }
+    expected.push(("AGENT_BROWSER_STREAM_PORT", "{stream_port}".to_owned()));
+    assert_eq!(env, expected);
 }
 
 #[test]
@@ -321,6 +323,10 @@ fn a_folder_named_like_a_token_stays_literal_and_json_escapes_it() {
             (SESSION_ID, "s1"),
             (PROXY_PORT, "1"),
             (BROWSER_EXECUTABLE, "/c"),
+            (SOCKET_DIR, "/tmp/clauseo-ab-0123456789abcdef"),
+            (STREAM_PORT, "61100"),
+            (CDP_PORT, "61101"),
+            (DAEMON_PORT, "61102"),
         ]
     };
     let filled = placeholders::fill("{browser_dir}", &IN_SERVERS, &values(folder)).unwrap();
