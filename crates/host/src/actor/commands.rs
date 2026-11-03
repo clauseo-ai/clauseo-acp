@@ -15,6 +15,7 @@ use clauseo_store::{Receipt, ThreadRow, command_hash};
 
 use super::input::Reply;
 use super::matters::PendingMatter;
+use super::settings::set_tool_settings;
 use super::turn::TurnCommand;
 use super::{Actor, MatterEntry, Tag, ThreadEntry, turn};
 use crate::error::Error;
@@ -296,6 +297,7 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
         HostCommand::SetUiSettings { patch } => {
             super::settings::set_ui_settings(actor, ctx, &patch);
         }
+        HostCommand::SetToolSettings { patch } => set_tool_settings(actor, ctx, &patch),
         // No receipt and no event: a repeated id asks the model again, under its read rules.
         HostCommand::RefreshLimits { agent, why } => {
             super::limits::refresh(actor, agent, why);

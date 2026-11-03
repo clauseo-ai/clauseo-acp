@@ -4,7 +4,7 @@
 
 use clauseo_protocol::{
     CommandEnvelope, HostCommand, HostQuery, Language, Lite, Motion, QueryResult, SettingsView,
-    Theme, UiPatch, UiSettings,
+    Theme, ToolsPatch, ToolsSettingsView, UiPatch, UiSettings,
 };
 
 use super::Validate;
@@ -25,11 +25,15 @@ fn get_settings_is_a_plain_string_and_answers_settings() {
             lite: Lite::Automatic,
             motion: Motion::System,
         },
+        tools: ToolsSettingsView {
+            web_search: true,
+            browser: false,
+        },
         locked: vec!["ui.theme".to_owned()],
     });
     assert_eq!(
         serde_json::to_string(&answer).unwrap(),
-        r#"{"settings":{"ui":{"theme":"system","font_size":16,"language":"en","lite":"automatic","motion":"system"},"locked":["ui.theme"]}}"#
+        r#"{"settings":{"ui":{"theme":"system","font_size":16,"language":"en","lite":"automatic","motion":"system"},"tools":{"web_search":true,"browser":false},"locked":["ui.theme"]}}"#
     );
     round_trips(&answer);
 }
@@ -85,6 +89,49 @@ fn patch_command(patch: &str) -> String {
         r#"{{"command_id":"{}","command":{{"set_ui_settings":{{"patch":{patch}}}}}}}"#,
         command_id(1)
     )
+}
+
+/// A `set_tool_settings` command's JSON around `patch`.
+fn tool_patch_command(patch: &str) -> String {
+    format!(
+        r#"{{"command_id":"{}","command":{{"set_tool_settings":{{"patch":{patch}}}}}}}"#,
+        command_id(1)
+    )
+}
+
+#[test]
+fn a_tool_patch_writes_only_the_switch_it_sets_and_passes_validate() {
+    let command = HostCommand::SetToolSettings {
+        patch: ToolsPatch {
+            browser: Some(false),
+            ..ToolsPatch::default()
+        },
+    };
+    assert_eq!(
+        serde_json::to_string(&command).unwrap(),
+        r#"{"set_tool_settings":{"patch":{"browser":false}}}"#
+    );
+    round_trips(&command);
+    assert!(command.validate().is_ok());
+}
+
+#[test]
+fn a_tool_patch_refuses_unknown_fields_and_values() {
+    for patch in [
+        r#"{"web_search":"no"}"#,
+        r#"{"browser":1}"#,
+        r#"{"density":"compact"}"#,
+        r#"{"tools":{}}"#,
+        r#"{"ui":{"theme":"dark"}}"#,
+    ] {
+        let json = tool_patch_command(patch);
+        assert!(
+            serde_json::from_str::<CommandEnvelope>(&json).is_err(),
+            "{patch} decoded"
+        );
+    }
+    let json = tool_patch_command(r#"{"web_search":false}"#);
+    assert!(serde_json::from_str::<CommandEnvelope>(&json).is_ok());
 }
 
 /// Each value's JSON string, in order.

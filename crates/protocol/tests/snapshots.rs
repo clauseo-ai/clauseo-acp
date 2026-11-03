@@ -72,6 +72,8 @@ use clauseo_protocol::{
     Timestamp,
     ToolCallContent,
     ToolLocation,
+    ToolsPatch,
+    ToolsSettingsView,
     UiPatch,
     UiSettings,
     ViewEntry,
@@ -316,6 +318,12 @@ mod host_command {
                 ..UiPatch::default()
             },
         };
+        SetToolSettings => set_tool_settings: HostCommand::SetToolSettings {
+            patch: ToolsPatch {
+                web_search: Some(false),
+                browser: Some(true),
+            },
+        };
         RefreshLimits => refresh_limits: HostCommand::RefreshLimits {
             agent: Some(AgentKind::Claude),
             why: RefreshWhy::Shown,
@@ -445,6 +453,10 @@ mod host_event {
                 language: Language::Hi,
                 lite: Lite::Automatic,
                 motion: Motion::Reduce,
+            },
+            tools: ToolsSettingsView {
+                web_search: false,
+                browser: true,
             },
             locked: vec!["ui.font_size".to_owned(), "ui.theme".to_owned()],
         });

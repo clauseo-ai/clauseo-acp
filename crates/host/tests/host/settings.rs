@@ -1,6 +1,6 @@
-//! The display settings over the wire: `GetSettings`, `SetUiSettings` and `settings.locked`,
-//! and the app subscription that carries `SettingsChanged` to every window and to no stream,
-//! starting with the settings as they are.
+//! The display settings over the wire: `GetSettings`, `SetUiSettings`, `SetToolSettings` and
+//! `settings.locked`, and the app subscription that carries `SettingsChanged` to every window and
+//! to no stream, starting with the settings as they are.
 //! The mirror test holds the wire types to `clauseo-settings`, key for key and value for value.
 
 use std::collections::BTreeSet;
@@ -8,7 +8,8 @@ use std::collections::BTreeSet;
 use clauseo_host::{AppSubscription, EncodedEvent};
 use clauseo_protocol::{
     CommandOutcome, ErrorCode, HostCommand, HostEvent, HostQuery, Language, Lite, Motion,
-    Principal, QueryResult, SettingsView, StreamId, Theme, UiPatch, UiSettings,
+    Principal, QueryResult, SettingsView, StreamId, Theme, ToolsPatch, ToolsSettingsView, UiPatch,
+    UiSettings,
 };
 use futures::{FutureExt, StreamExt};
 use serde_json::Value;
@@ -26,6 +27,11 @@ fn settings(host: &Running) -> SettingsView {
 /// `SetUiSettings` with `patch`.
 fn set(patch: UiPatch) -> HostCommand {
     HostCommand::SetUiSettings { patch }
+}
+
+/// `SetToolSettings` with `patch`.
+fn set_tools(patch: ToolsPatch) -> HostCommand {
+    HostCommand::SetToolSettings { patch }
 }
 
 /// An app subscription as the local desktop, and its first frames: the current state.
@@ -64,6 +70,15 @@ pub(crate) fn decode(item: &EncodedEvent) -> HostEvent {
         .unwrap_or_else(|e| panic!("{e}: {}", item.json()))
 }
 
+/// The tool switches' defaults, as `clauseo-settings` has them: web search on, the browser on
+/// only where it is on by default (macOS).
+fn tool_defaults() -> ToolsSettingsView {
+    ToolsSettingsView {
+        web_search: true,
+        browser: cfg!(target_os = "macos"),
+    }
+}
+
 /// The defaults, as `clauseo-settings` has them.
 fn defaults() -> UiSettings {
     UiSettings {
@@ -83,6 +98,7 @@ fn get_settings_gives_the_defaults_and_no_locked_key() {
         settings(&host),
         SettingsView {
             ui: defaults(),
+            tools: tool_defaults(),
             locked: Vec::new(),
         }
     );
@@ -147,6 +163,7 @@ fn a_patch_reaches_every_app_subscriber_and_no_stream() {
             lite: Lite::Off,
             motion: Motion::Reduce,
         },
+        tools: tool_defaults(),
         locked: Vec::new(),
     };
     assert_eq!(settings(&host), expected);
@@ -231,6 +248,135 @@ fn a_patch_naming_a_locked_key_is_refused_whole() {
     assert_eq!(view.ui.theme, Theme::Light);
     assert_eq!(view.locked, ["ui.theme"]);
     host.shutdown();
+}
+
+#[test]
+fn a_tool_patch_reaches_every_app_subscriber_the_file_and_a_restart() {
+    let dir = Dir::new("settings_tool_patch", &[]);
+    let host = dir.start(0);
+    let mut first = app(&host);
+    let mut second = app(&host);
+    let before = settings(&host);
+    assert_eq!(before.tools, tool_defaults());
+
+    // Only web search is named: the browser switch stays as it was.
+    let id = command_id();
+    let patch = ToolsPatch {
+        web_search: Some(false),
+        browser: None,
+    };
+    assert_eq!(
+        host.dispatch_as(id, set_tools(patch.clone())).unwrap(),
+        CommandOutcome::Done
+    );
+    let expected = SettingsView {
+        ui: defaults(),
+        tools: ToolsSettingsView {
+            web_search: false,
+            browser: before.tools.browser,
+        },
+        locked: Vec::new(),
+    };
+    assert_eq!(settings(&host), expected);
+    host.settle();
+    for sub in [&mut first, &mut second] {
+        assert_eq!(ready(sub), [HostEvent::SettingsChanged(expected.clone())]);
+    }
+
+    // The write reached settings.json as the one field named.
+    let saved: Value = serde_json::from_str(&dir.settings_json()).unwrap();
+    assert_eq!(saved["tools"], serde_json::json!({"web_search": false}));
+    // A repeat of the same command answers from its receipt: nothing is sent again.
+    assert_eq!(
+        host.dispatch_as(id, set_tools(patch)).unwrap(),
+        CommandOutcome::Done
+    );
+    // An empty patch writes nothing and tells nobody.
+    assert_eq!(
+        host.ok(set_tools(ToolsPatch::default())),
+        CommandOutcome::Done
+    );
+    host.settle();
+    assert_eq!(ready(&mut first), []);
+    host.shutdown();
+
+    // A fresh load from disk agrees with what the host answered.
+    let host = dir.start(1);
+    assert_eq!(settings(&host), expected);
+    host.shutdown();
+}
+
+#[test]
+fn a_tool_patch_naming_a_locked_key_is_refused_whole() {
+    let dir = Dir::new("settings_tool_locked", &[]);
+    let host = dir.start_with_policy(0, r#"{"tools": {"browser": false}}"#);
+    let mut sub = app(&host);
+    let before = dir.settings_json();
+
+    // The web search switch alone would be allowed; with the locked browser the patch fails
+    // whole, and the web search switch is not written.
+    let error = host.refused(
+        set_tools(ToolsPatch {
+            web_search: Some(false),
+            browser: Some(true),
+        }),
+        ErrorCode::SettingsLocked,
+    );
+    assert!(!error.retryable());
+    assert!(error.message().contains("tools.browser"), "{error}");
+    assert_eq!(dir.settings_json(), before);
+    let view = settings(&host);
+    assert_eq!(
+        view.tools,
+        ToolsSettingsView {
+            web_search: true,
+            browser: false,
+        }
+    );
+    assert_eq!(view.locked, ["tools.browser"]);
+    host.settle();
+    assert_eq!(ready(&mut sub), []);
+
+    // The unlocked switch still changes, and its event carries the locked list.
+    host.ok(set_tools(ToolsPatch {
+        web_search: Some(false),
+        ..ToolsPatch::default()
+    }));
+    host.settle();
+    let changed = ready(&mut sub);
+    let [HostEvent::SettingsChanged(view)] = changed.as_slice() else {
+        panic!("expected one SettingsChanged: {changed:?}");
+    };
+    assert_eq!(
+        view.tools,
+        ToolsSettingsView {
+            web_search: false,
+            browser: false,
+        }
+    );
+    assert_eq!(view.locked, ["tools.browser"]);
+    host.shutdown();
+}
+
+/// The tool switches as `clauseo-settings` has them and the wire has them: the same keys, the
+/// same values, and the same patch JSON.
+#[test]
+fn the_tool_switches_mirror_the_settings_crate() {
+    let settings_tools = serde_json::to_value(clauseo_settings::ToolsSettings::default()).unwrap();
+    let wire_tools = serde_json::to_value(tool_defaults()).unwrap();
+    assert_eq!(settings_tools, wire_tools);
+    let settings_patch = clauseo_settings::ToolsPatch {
+        web_search: Some(false),
+        browser: Some(true),
+    };
+    let wire_patch = ToolsPatch {
+        web_search: Some(false),
+        browser: Some(true),
+    };
+    assert_eq!(
+        serde_json::to_value(settings_patch).unwrap(),
+        serde_json::to_value(wire_patch).unwrap()
+    );
 }
 
 #[test]

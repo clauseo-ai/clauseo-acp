@@ -191,16 +191,19 @@ impl Bridge {
     }
 
     /// Whether the window `label` may send `command`: `main` what `admit_main` admits, the
-    /// `settings` window `SetUiSettings` and, for its Plan and usage, `RefreshLimits` (0028,
-    /// U12; `dispatch_at` throttles it), any other window nothing.
+    /// `settings` window `SetUiSettings`, `SetToolSettings` and, for its Plan and usage,
+    /// `RefreshLimits` (0028, U12; `dispatch_at` throttles it), any other window nothing.
     fn admit(&self, label: &str, command: &HostCommand) -> Result<(), HostError> {
         match label {
             crate::MAIN_WINDOW => self.admit_main(command),
             SETTINGS_WINDOW => match command {
                 // Plan and usage sends `Shown` as it opens and `TryAgain` from its button.
-                HostCommand::SetUiSettings { .. } | HostCommand::RefreshLimits { .. } => Ok(()),
+                HostCommand::SetUiSettings { .. }
+                | HostCommand::SetToolSettings { .. }
+                | HostCommand::RefreshLimits { .. } => Ok(()),
                 _ => Err(invalid(
-                    "the settings window sends only set_ui_settings and refresh_limits",
+                    "the settings window sends only set_ui_settings, set_tool_settings \
+                     and refresh_limits",
                 )),
             },
             _ => Err(invalid(format!("window {label} may send no command"))),
@@ -243,6 +246,7 @@ impl Bridge {
             | HostCommand::UndoStep { .. }
             | HostCommand::RestoreVersion { .. }
             | HostCommand::SetUiSettings { .. }
+            | HostCommand::SetToolSettings { .. }
             // The window's "Try again" sends it; a window's focus sends `Shown` from Rust
             // (`Bridge::shown`), not through here.
             | HostCommand::RefreshLimits { .. } => Ok(()),
