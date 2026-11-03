@@ -475,7 +475,7 @@ The host part:
 - `BrowserLaunch::InJail` is accepted and not stored: it is what the host does anyway.
 - This file is copied from PR #200's branch with the host part added; it merges with #200's copy
   when either lands.
-- The smoke test is longer than planned (about 790 lines: `browser_smoke.rs` and four modules in
+- The smoke test is longer than planned (about 840 lines: `browser_smoke.rs` and four modules in
   `browser_smoke/`, two with an allowlisted `#![expect(clippy::disallowed_methods)]`) and has never
   run here: this machine has no agent-browser and no Chrome.
 
