@@ -2,7 +2,9 @@
 //! that cannot be made. Windows gives `NotFound`, not `NotADirectory`, for a path through a
 //! file, so the Unix tests of these errors (`history/tests/io_errors.rs`) do not run here.
 
-use std::io;
+use std::fs::{File, OpenOptions};
+use std::os::windows::fs::OpenOptionsExt;
+use std::path::Path;
 
 use gix::objs::Kind;
 
@@ -13,33 +15,44 @@ use crate::history::{Oid, TIMELINE_REF};
 use crate::test_dir::TestDir;
 use crate::write;
 
-/// A torn object that Windows will not remove (read-only, so `DeleteFileW` is refused) is an
-/// error naming the remove. Windows skips gix's rename onto an existing file, so writing over it
-/// without the remove would leave the torn file in place under a write that seemed to succeed.
+/// `FILE_SHARE_READ`: other opens may read the file, but not delete or write it.
+const FILE_SHARE_READ: u32 = 0x1;
+
+/// Opens the file `path` as a program that keeps it open does, sharing reads only: the store's
+/// check can still read it, but no one can delete it until the handle drops.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the durable test holds a file open without delete sharing; it writes nothing"
+)]
+fn hold(path: &Path) -> File {
+    OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ)
+        .open(path)
+        .unwrap()
+}
+
+/// A torn object that Windows will not remove (another program holds it open without delete
+/// sharing) is an error naming the remove. Windows skips gix's rename onto an existing file, so
+/// writing over it without the remove would leave the torn file in place under a write that
+/// seemed to succeed.
 #[test]
 fn a_torn_object_that_cannot_be_removed_is_an_error() {
-    let dir = TestDir::new("durable-win-torn-read-only");
+    let dir = TestDir::new("durable-win-torn-held");
     let objects = objects(&dir);
     let data = b"the signed lease\n";
     let id = blob_id(data);
     make_folder(&objects, &id);
     let object = objects.deflated().object_path(&id);
     write_file(&object, b"not zlib at all");
-    let writable = std::fs::metadata(&object).unwrap().permissions();
-    let mut read_only = writable.clone();
-    read_only.set_readonly(true);
-    write::set_permissions(&object, read_only).unwrap();
+    let holder = hold(&object);
 
     let mut new_objects = NewObjects::default();
     let stored = put(objects.deflated(), &mut new_objects, Kind::Blob, data, id);
-    write::set_permissions(&object, writable).unwrap();
+    drop(holder);
 
     assert!(
-        matches!(
-            &stored,
-            Err(Error::Io { op: "remove", path, source })
-                if *path == object && source.kind() == io::ErrorKind::PermissionDenied
-        ),
+        matches!(&stored, Err(Error::Io { op: "remove", path, .. }) if *path == object),
         "{stored:?}"
     );
     assert_eq!(std::fs::read(&object).unwrap(), b"not zlib at all");
