@@ -14,6 +14,15 @@
   .set-dest-to {
     @apply text-ui font-chip text-primary;
   }
+  /* the info icon follows the words' last line, as a word would */
+  .set-dest-to > button {
+    margin-inline-start: var(--s1-5);
+    vertical-align: -2px;
+  }
+  /* a row whose what waits behind its info icon: the where runs across both columns, on one line */
+  .set-dest-alone .set-dest-to {
+    grid-column: 1 / -1;
+  }
   .set-dest-what {
     @apply text-ui text-muted;
   }
