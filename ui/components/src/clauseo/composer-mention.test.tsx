@@ -324,6 +324,11 @@ test("a matter with no papers says so; more than 50 matches show 50 with the cou
     "First 50 of 2000. Type to narrow.",
     "Not every file in this folder is listed.",
   ]);
+  // the lines stand under the rows, out of their scroll: only the rows scroll
+  const lines = [...document.querySelectorAll(".fixed.z-20 p")];
+  expect(lines.every((p) => menu()?.contains(p) === false)).toBe(true);
+  expect(menu()?.classList.contains("overflow-y-auto")).toBe(true);
+  expect(menu()?.parentElement?.classList.contains("overflow-hidden")).toBe(true);
 });
 
 test("a paper token typed against at its end or its start is plain text: no box, and no paper for the send", async () => {

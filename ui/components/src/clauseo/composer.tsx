@@ -251,6 +251,8 @@ export function Composer<V extends string = string>({
     [room, gated],
   );
   const entry = useRef<HTMLDivElement>(null);
+  // the field's drawn box: the menu stands 4 px clear of it
+  const frameRef = useRef<HTMLDivElement>(null);
   const fieldId = room.id(id);
   const isWorking = working !== null;
   useOpening(entry, isWorking && opening);
@@ -398,6 +400,7 @@ export function Composer<V extends string = string>({
         </span>
         {working !== null && <WorkingLine state={working} testId={testIds?.working} />}
         <div
+          ref={frameRef}
           className="room-field"
           data-papers={papers.length > 0 ? "" : undefined}
           data-gate={gate !== undefined ? "" : undefined}
@@ -488,6 +491,7 @@ export function Composer<V extends string = string>({
                 sync={tokenSync}
                 picks={picks}
                 testIds={{ menu: testIds?.menu, item: testIds?.menuItem }}
+                frame={frameRef}
               />
             </Suspense>
           )}

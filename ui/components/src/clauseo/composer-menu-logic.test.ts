@@ -56,8 +56,8 @@ test("a pick puts the slash and the name in, and a space unless whitespace follo
   expect(picked(COMMANDS[0]!, "\n")).toBe("/review");
 });
 
-test("the menu stands at the caret's x, below its line, or above it at the window's foot, inside the window", () => {
-  const view = { width: 1000, height: 600 };
+test("the menu stands at the caret's x, below the field, or above it at the window's foot, inside what clips it", () => {
+  const view = { left: 0, top: 0, right: 1000, bottom: 600 };
   // room below: 4 px under the line
   expect(placeMenu({ x: 120, top: 100, bottom: 126 }, { width: 240, height: 200 }, view)).toEqual({
     left: 120,
@@ -77,6 +77,16 @@ test("the menu stands at the caret's x, below its line, or above it at the windo
   // a menu taller than either side: the larger side, cut to it
   const tall = placeMenu({ x: 10, top: 200, bottom: 226 }, { width: 240, height: 900 }, view);
   expect(tall).toEqual({ left: 10, top: 230, maxHeight: 600 - 8 - 230 });
+  // the room's column clips from y=64: the room above the field runs from its top, 8 px in, and the menu ends 4 px
+  // above the field; at the column's left, 8 px in from it
+  const column = { left: 300, top: 64, right: 1000, bottom: 588 };
+  expect(placeMenu({ x: 290, top: 500, bottom: 560 }, { width: 240, height: 900 }, column)).toEqual(
+    {
+      left: 308,
+      top: 72,
+      maxHeight: 500 - 4 - 72,
+    },
+  );
 });
 
 test("a pick's run ends at the next whitespace or the field's end", () => {
