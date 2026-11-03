@@ -69,6 +69,8 @@
     width: calc(var(--s5) * var(--k) * 110 / 36);
     overflow: hidden;
     color: var(--muted);
+    /* its own layer: each frame re-rasters only the pen's box, not the row behind it */
+    will-change: transform;
     /* a mask reads only alpha, so any opaque tone serves */
     mask-image: linear-gradient(to right, transparent, var(--primary) 24%);
   }
