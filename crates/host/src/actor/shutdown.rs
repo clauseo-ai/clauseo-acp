@@ -27,11 +27,14 @@ pub(super) async fn close(actor: Actor) -> Result<(), Error> {
     let Actor {
         store,
         snapshots,
+        search,
         matters,
         forgotten,
         feeder,
         ..
     } = actor;
+    // Before the store closes: the search thread reads it.
+    search.stop();
     if let Err(error) = snapshots.stop() {
         tracing::warn!(%error, "the snapshot thread ended badly");
     }

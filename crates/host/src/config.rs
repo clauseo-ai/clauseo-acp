@@ -19,6 +19,7 @@ use crate::browser::limits::BrowserSlots;
 use crate::browser::{BrowserLaunch, UnsupportedLaunch};
 use crate::clock::{Clock, SystemClock};
 use crate::ids::{IdSource, RandomV7};
+use crate::search::SearchSeams;
 
 use crate::handle::SUBSCRIPTION_CAPACITY;
 use crate::window::PATCH_WINDOW_BYTES;
@@ -187,6 +188,7 @@ pub struct HostConfig {
     wiring: LaunchWiring,
     scan_walk: crate::actor::scan::Walk,
     counts: Option<Counts>,
+    search: SearchSeams,
 }
 
 /// A `HostConfig` taken apart by the host thread.
@@ -209,6 +211,8 @@ pub(crate) struct ConfigParts {
     pub(crate) scan_walk: crate::actor::scan::Walk,
     /// The usage counts a caller set; `None` counts nothing.
     pub(crate) counts: Option<Counts>,
+    /// The search thread's test seams.
+    pub(crate) search: SearchSeams,
 }
 
 impl HostConfig {
@@ -232,6 +236,7 @@ impl HostConfig {
             wiring: LaunchWiring::default(),
             scan_walk: crate::actor::scan::os_walk(),
             counts: None,
+            search: SearchSeams::default(),
         }
     }
 
@@ -403,6 +408,27 @@ impl HostConfig {
         self
     }
 
+    /// The capacity of the commit channel to the search thread (default 1,024), for tests
+    /// that make it lag and catch up from the store.
+    #[cfg(feature = "test-support")]
+    pub fn with_search_channel_capacity(mut self, capacity: usize) -> Self {
+        self.search.capacity = capacity.max(1);
+        self
+    }
+
+    /// Holds that stop the search thread: `rebuild` before each conversation of a rebuild,
+    /// `query` before each search runs, each until released.
+    #[cfg(feature = "test-support")]
+    pub fn with_search_holds(
+        mut self,
+        rebuild: Option<crate::SearchHold>,
+        query: Option<crate::SearchHold>,
+    ) -> Self {
+        self.search.rebuild_hold = rebuild;
+        self.search.query_hold = query;
+        self
+    }
+
     /// Takes the config apart.
     pub(crate) fn into_parts(self) -> ConfigParts {
         ConfigParts {
@@ -422,6 +448,7 @@ impl HostConfig {
             wiring: self.wiring,
             scan_walk: self.scan_walk,
             counts: self.counts,
+            search: self.search,
         }
     }
 }

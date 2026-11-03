@@ -85,6 +85,39 @@ matter: 24–37 ms, or 1.4–1.6 s with secure-delete.
   reported as needing a rebuild. Nothing is migrated. The host reopens threads through the store
   and the reducer, so entries are assembled as the views assemble them, inserts in time order and ends with an `optimize`. At 5,000 conversations the FTS
   part takes 12–13 s, measured; the whole rebuild is estimated at 30–60 s.
+- **The host's wiring.** A `clauseo-search` thread owns the index; the actor never touches it.
+  At the end of applying each returned commit the actor `try_send`s the commit's envelopes on a
+  bounded channel (1,024 commits) and never waits; when it is full the actor sets a lagged flag
+  and the thread reads every stream whose head is past its watermark from the store. A
+  watermark (table `watermarks`, the last `seq` of each stream the index reflects) is written in
+  the same transaction as the rows it covers, so the thread only ever indexes durable events and
+  a crash replays at most what the last transaction did not cover. A commit that does not follow
+  on from its stream's watermark makes the thread read that stream from the store too. Each
+  thread's fold (prompt and tool-call orders, each turn's entries, the text of running turns'
+  answers) is kept for the 64 most recently touched threads and folded again from the log
+  otherwise. An answer is assembled as the reducer assembles an agent message (its
+  `TextAppended` chunks in seq order, the first chunk's kind and seq), tested against the
+  reducer. File names are listed from the matter's history (`Matter::files_at`) at each
+  `CheckpointRecorded`, `OutsideEdits` and `VersionRestored`, on the search thread: a checkpoint
+  follows every change of files, so the listing replaces the per-change deltas. `ForgetMatter`
+  deletes the matter's rows (a forgotten matter must not show in search); importing it again
+  indexes its streams from the whole log.
+- **Rebuilds in place.** The crate has no build-beside-and-rename step, so a rebuild runs in the
+  emptied `search.sqlite` and a search meanwhile answers from what is indexed so far, with
+  `indexing: { done, total }` in conversations. The thread walks every matter's stream, then
+  every conversation least recently active first, so the newest conversations get the highest
+  row ids (newest first pages by row id); rows within a conversation keep their time order. The
+  host serves at once: the index opens and rebuilds on its own thread, and searches are answered
+  between two conversations of the rebuild.
+- **The query.** `HostQuery::Search` (or `HostHandle::search`, which names the window) answers
+  `QueryResult::Search`: a `SearchPage` or `Cancelled`. The host picks newest first while the
+  query's last character is not whitespace and ranked otherwise; a cursor that does not decode
+  gives the first page. A hit carries its entry's `order` in the conversation's view, which
+  `PageEntries` pages by (the index keys rows by it; it holds no entry ids). A newer
+  `generation` from the same window interrupts that window's running query, answers its queued
+  older ones `Cancelled`, and an older one that finishes late is answered `Cancelled` instead of
+  its page. The desktop sends the window's label; only the main window may search (the settings
+  window reads `GetSettings` alone, 0028).
 - **Release one answers.** Tool titles are indexed at a low weight and can be filtered by kind.
   Thoughts are out, with kind 8 reserved. Undone steps' rows are dropped. Hinglish matches exact
   spellings; spelling variants and matching across scripts need transliteration, a later design.

@@ -90,6 +90,8 @@ pub(crate) struct Actor {
     pub(crate) pipeline: Pipeline<Tag>,
     pub(crate) feeder: FeederTx,
     pub(crate) snapshots: SnapshotWorker,
+    /// The search thread (`search.rs`): each returned commit goes to it, and searches.
+    pub(crate) search: crate::search::Search,
     /// The settings. Only the actor touches them, so it is the one lock their writes need:
     /// `SetUiSettings` runs `Effective::apply_ui_patch` here, `SetToolSettings`
     /// `Effective::apply_tools_patch` and `SetPrivacySettings` `Effective::apply_privacy_patch`,
@@ -429,6 +431,23 @@ impl Actor {
                 query,
                 reply,
             } => query::query(self, &principal, &query, reply),
+            Request::Search {
+                principal,
+                window,
+                request,
+                reply,
+            } => match authorize(&principal, Access::Query) {
+                Ok(()) => self.search.query(
+                    &window,
+                    request,
+                    Box::new(move |answer| {
+                        let _gone = reply.send(answer);
+                    }),
+                ),
+                Err(error) => {
+                    let _gone = reply.send(Err(error));
+                }
+            },
             Request::Subscribe {
                 principal,
                 stream,

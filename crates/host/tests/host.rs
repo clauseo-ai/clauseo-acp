@@ -140,6 +140,9 @@ mod relocate;
 #[path = "host/restart.rs"]
 mod restart;
 #[cfg(test)]
+#[path = "host/search.rs"]
+mod search;
+#[cfg(test)]
 #[path = "host/settings.rs"]
 mod settings;
 #[cfg(test)]

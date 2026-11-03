@@ -337,6 +337,8 @@ fn apply_commit(actor: &mut Actor, envelopes: Vec<Envelope>, touched: &mut Vec<S
             None => {}
         }
     }
+    // The search thread takes the durable events too; the actor never waits for it.
+    actor.search.offer(&envelopes);
     // The batch is built once per stream; a commit of one stream hands over its own.
     if let [stream] = streams.as_slice() {
         super::subs::deliver_events(actor, *stream, envelopes);
