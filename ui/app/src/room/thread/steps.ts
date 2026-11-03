@@ -11,7 +11,7 @@ import { stepKindOf, type StepKind } from "@clauseo/components/clauseo/tool-kind
 import type { StreamView } from "../../store/view.ts";
 import type { EntryId, ToolCallEntry, ViewEntry } from "../../transport/protocol.ts";
 import { sameIds } from "./ids.ts";
-import { doingOf, placeOf, sentenceOf, titleOf, unsettled } from "./step-names.ts";
+import { asksWords, doingOf, placeOf, sentenceOf, titleOf, unsettled } from "./step-names.ts";
 
 /** One part of an answer: a row on its own, or a group of rows folded into one line. */
 export type Segment =
@@ -282,8 +282,15 @@ export function markOf(lang: Lang, call: ToolCallEntry): string | null {
   return null;
 }
 
-/** The group's line: the summary, or live what is being done now with the count done so far. */
-export function lineOf(lang: Lang, entries: readonly (ViewEntry | undefined)[], live: boolean) {
+/** The group's line: the summary, or live what is being done now with the count done so far. `asks`: the turn waits
+ * on the lawyer (asksPick), so the step in hand is told as waiting for them ("Needs your permission."), never as
+ * underway. */
+export function lineOf(
+  lang: Lang,
+  entries: readonly (ViewEntry | undefined)[],
+  live: boolean,
+  asks: "permission" | "question" | null = null,
+) {
   const calls: ToolCallEntry[] = [];
   for (const e of entries) if (e?.tool_call !== undefined) calls.push(e.tool_call);
   const aside = backgroundLine(lang, calls);
@@ -299,7 +306,12 @@ export function lineOf(lang: Lang, entries: readonly (ViewEntry | undefined)[], 
   if (now === null) return { ...restOf(lang, calls), more: aside };
   return {
     kinds: now === "thought" ? ["think"] : [now.kind as string],
-    line: now === "thought" ? stepLive(lang, "Thinking it through.") : doingOf(lang, now),
+    line:
+      asks !== null
+        ? asksWords(lang, asks)
+        : now === "thought"
+          ? stepLive(lang, "Thinking it through.")
+          : doingOf(lang, now),
     more: [doneSoFar(lang, calls), aside].filter((m) => m !== "").join(" "),
     trouble: troubleOf(lang, calls),
   };

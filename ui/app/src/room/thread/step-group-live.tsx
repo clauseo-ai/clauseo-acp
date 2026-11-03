@@ -11,6 +11,7 @@ import { AnswerMeta } from "./answer-meta.tsx";
 import { sameIds } from "./ids.ts";
 import { turnRunning } from "./live.ts";
 import { lineOf } from "./steps.ts";
+import { asksPick } from "./step-names.ts";
 import { RowOf } from "./row-of.tsx";
 import { CallRow } from "./step-group-parts.tsx";
 
@@ -53,8 +54,12 @@ export const LiveStepGroup = memo(
     const pick = useMemo(() => entriesPick(ids, paged), [ids, paged]);
     const entries = useStreamPart(store, stream, pick);
     const running = useStreamPart(store, stream, pickRunning);
+    const asks = useStreamPart(store, stream, asksPick);
     const live = tail && running;
-    const words = useMemo(() => lineOf(lang, entries, live), [lang, entries, live]);
+    const words = useMemo(
+      () => lineOf(lang, entries, live, live ? asks : null),
+      [lang, entries, live, asks],
+    );
     const head = useCallback(
       (line: ReactElement) => (
         <AnswerMeta step={step} stream={stream} paged={paged} latest={latest}>

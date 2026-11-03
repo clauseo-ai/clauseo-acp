@@ -6,6 +6,8 @@
 // first chunk with the working line: small, with nothing of the settled group's words.
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { stepLive } from "@clauseo/components/lib/words-steps-live.ts";
+import { frame } from "@clauseo/components/lib/words-frame.ts";
+import { sentence } from "@clauseo/components/clauseo/matter.ts";
 import type { StreamView } from "../../store/view.ts";
 import type { ToolCallEntry } from "../../transport/protocol.ts";
 import { turnRunning } from "./live.ts";
@@ -220,3 +222,12 @@ export function asksPick(v: StreamView | undefined): "permission" | "question" |
     if (entry.permission !== undefined && entry.permission.state === "pending") return "permission";
   return "question";
 }
+
+/** What a turn waiting on the lawyer says, on the working line and on the live group's line alike, in place of what
+ * the step in hand is doing: the step waits for the lawyer, it isn't underway. "Needs your permission." or "A question
+ * for you.". */
+export const asksWords = (lang: Lang, asks: "permission" | "question"): string =>
+  sentence(
+    lang,
+    frame(lang, asks === "permission" ? "Needs your permission" : "A question for you"),
+  );

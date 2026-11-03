@@ -180,6 +180,20 @@ describe("the folded line", () => {
     );
   });
 
+  test("live, a step waiting on the lawyer is told as waiting for them, never as underway", () => {
+    const edit = {
+      tool_call: call("edit", "pending", { title: "/Users/x/Notice to the bank.docx" }),
+    };
+    const done = { tool_call: call("read") };
+    const asked = lineOf("en", [done, edit], true, "permission");
+    expect(asked.line).toBe("Needs your permission.");
+    expect(asked.more).toBe("1 done so far.");
+    expect(lineOf("en", [done, edit], true, "question").line).toBe("A question for you.");
+    expect(lineOf("hi", [done, edit], true, "permission").line).not.toMatch(/बदल/);
+    // with nothing asked it says what the step is doing
+    expect(lineOf("en", [done, edit], true).line).toMatch(/^Changing /);
+  });
+
   test("the failed are counted on their own, never as 'of them' of a count that holds only what finished (UTC-40)", () => {
     const calls = [call("read"), call("fetch", "failed"), call("fetch", "failed")];
     const sentence = (lang: "en" | "hi") => {
