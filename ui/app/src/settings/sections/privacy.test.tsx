@@ -108,14 +108,14 @@ const switchNamed = (el: HTMLElement, label: string) => {
   return row?.querySelector<HTMLElement>('[role="switch"]') ?? null;
 };
 
-test("Privacy shows on the side, its pane headed and led in the design's words", async () => {
+test("Privacy shows on the side, its pane headed, with no lead that repeats its first heading", async () => {
   const { el } = await mount();
   const names = [...el.querySelectorAll(".set-nav-name")].map((n) => n.textContent);
   expect(names).toContain("Privacy");
   expect(el.querySelector(".set-pane h2")?.textContent).toBe("Privacy");
-  expect(el.querySelector(".set-pane-lead")?.textContent).toBe(
-    "What leaves this computer, and who sees it.",
-  );
+  expect(el.querySelector(".set-pane-lead")).toBeNull();
+  const text = pane(el).textContent ?? "";
+  expect(text.split("What leaves this computer").length - 1).toBe(1);
 });
 
 const WHAT = "Questions, the papers' parts they need, web searches.";

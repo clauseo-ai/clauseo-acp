@@ -69,10 +69,10 @@ const entry = (id: string, words: WordsRef, state: State = {}): Entry => ({
 });
 
 /** Privacy's entries, each id written as it is: an id never moves when an entry is added or taken out. Retired in
- * round 3 (icons first): UEP-05, UEP-09, UEP-11, UEP-12; UEP-17 (each plan's own what-line, now UEP-23's one note). */
+ * round 3 (icons first): UEP-05, UEP-09, UEP-11, UEP-12; UEP-17 (each plan's own what-line, now UEP-23's one note);
+ * UEP-02 (the pane's lead, which repeated its first heading). */
 export const WEB_SETTINGS: Entry[] = [
   entry("UEP-01", settingsWords("Privacy")),
-  entry("UEP-02", settingsWords("What leaves this computer, and who sees it.")),
   entry("UEP-03", settingsWords("What leaves this computer")),
   entry("UEP-04", settingsWords("To {name}, on your plan")),
   // what goes to a plan, once, as the group's note over both plans' rows

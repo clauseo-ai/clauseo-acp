@@ -30,7 +30,6 @@ const HI = {
     "स्क्रीन के हर शब्द की भाषा। दस्तावेज़, उद्धरण और मामलों के नाम वैसे ही रहते हैं जैसे दर्ज हैं।",
   "How Clauseo looks on this computer.": "इस कंप्यूटर पर Clauseo कैसा दिखे।",
   "What each plan has left, and when it resets.": "हर प्लान में कितना बाकी है, और वह कब रीसेट होता है।",
-  "What leaves this computer, and who sees it.": "इस कंप्यूटर से क्या बाहर जाता है, और उसे कौन देखता है।",
   // plan and usage: the plan's own words are the limits' (words-limits.ts)
   "Updated at {time}": "{time} बजे अपडेट किया गया",
   "No limits to show. Each question is billed to the key's account.":
