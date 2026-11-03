@@ -47,7 +47,9 @@ matter. Each new command needs a ruling in `Bridge::admit` (0019).
   actor. Progress goes through one slot the thread overwrites, so at most one progress input
   per scan waits in the actor's channel. The actor publishes at most one event per 250 ms on
   the host clock (a timer sends what it held), and always the last. Only the current scan's
-  progress goes out; a cancelled scan only says it ended. On shutdown every flag is set and
+  progress goes out; a cancelled scan only says it ended, and a superseded scan's end is
+  dropped (not published, not kept for the catch-up) once a newer scan of the same folder has
+  started; its command is still answered. On shutdown every flag is set and
   nothing waits for the thread; one stuck on a hung network stat ends when the stat returns.
 - **The bridge.** `ScanFolder` passes `admit` only for a folder ref this run's `pick_folder`
   issued, as `CreateMatter` and `RelocateMatter`; `CancelScan` always passes, since it starts

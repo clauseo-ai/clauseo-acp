@@ -6,7 +6,8 @@
 //!
 //! One scan at a time: a `ScanFolder` sets the cancel flag of the scan running before it starts
 //! its own. A cancelled scan's thread stops at the walk's next check (before each folder, entry
-//! and stat) and its last event says `cancelled`. Progress reaches the actor through one slot
+//! and stat) and its last event says `cancelled`, unless a newer scan of the same folder has
+//! started: then it ends without an event (`ended`). Progress reaches the actor through one slot
 //! the thread overwrites, so at most one progress input per scan waits in the channel however
 //! fast the walk runs. The actor publishes at most one event per [`THROTTLE`] on the host clock
 //! and always the last (`done`), which also answers the scan's command. On shutdown every flag
@@ -89,6 +90,9 @@ pub(crate) struct Scans {
     next: u64,
     current: Option<u64>,
     running: BTreeMap<u64, Scan>,
+    /// The newest scan started of each folder that still has a scan running, so a superseded
+    /// scan of the same folder ends without a word ([`ended`]).
+    newest: BTreeMap<FolderRefId, u64>,
     /// The last event published, for an app subscriber that lagged ([`catch_up`]).
     last: Option<FolderScanned>,
 }
@@ -213,6 +217,7 @@ fn start(actor: &mut Actor, ctx: &CommandCtx, folder: FolderRefId) -> Result<(),
         throttle: Throttle::default(),
     };
     actor.scans.running.insert(id, scan);
+    actor.scans.newest.insert(folder, id);
     actor.scans.current = Some(id);
     Ok(())
 }
@@ -314,13 +319,30 @@ fn progressed(actor: &mut Actor, id: u64) {
     }
 }
 
-/// Scan `id`'s walk ended: its last event, then its command's answer.
+/// Scan `id`'s walk ended: its last event, then its command's answer. Once a newer scan of the
+/// same folder has started, this one's end is not published and the catch-up keeps the newer
+/// one's events: `FolderScanned` names no scan, so a late cancelled end would read as that
+/// folder's last word. Its command is answered either way.
 fn ended(actor: &mut Actor, id: u64, result: Result<FolderScan, clauseo_matters::Error>) {
     let Some(mut scan) = actor.scans.running.remove(&id) else {
         return;
     };
     if actor.scans.current == Some(id) {
         actor.scans.current = None;
+    }
+    let folder = scan.event.folder;
+    let superseded = actor
+        .scans
+        .newest
+        .get(&folder)
+        .is_some_and(|newest| *newest > id);
+    if !actor
+        .scans
+        .running
+        .values()
+        .any(|running| running.event.folder == folder)
+    {
+        actor.scans.newest.remove(&folder);
     }
     take_latest(&mut scan);
     let mut event = scan.event;
@@ -337,7 +359,9 @@ fn ended(actor: &mut Actor, id: u64, result: Result<FolderScan, clauseo_matters:
         }
         Err(error) => Err(Error::from(error)),
     };
-    publish(actor, event);
+    if !superseded {
+        publish(actor, event);
+    }
     actor.finish_command(scan.command, answer);
 }
 
