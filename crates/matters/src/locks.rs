@@ -258,3 +258,7 @@ pub(crate) fn owner_names(name: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[cfg(windows)]
+mod windows_tests;

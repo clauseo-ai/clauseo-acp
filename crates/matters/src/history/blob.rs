@@ -342,3 +342,7 @@ impl Read for Checked<'_> {
         Ok(n)
     }
 }
+
+#[cfg(test)]
+#[cfg(windows)]
+mod windows_tests;

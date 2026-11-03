@@ -195,3 +195,7 @@ pub(super) fn move_ref(git_dir: &Path, commit: Oid, expected: Option<Oid>) -> Re
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[cfg(windows)]
+mod windows_tests;
