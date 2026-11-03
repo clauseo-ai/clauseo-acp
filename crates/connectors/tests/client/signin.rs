@@ -153,10 +153,14 @@ fn another_path_gets_404_and_a_wrong_state_400_and_the_listener_keeps_waiting() 
     );
 }
 
+/// Wrong-state callbacks get 400 and leave the sign-in waiting; only the timeout ends it. The
+/// clock is manual, so the deadline passes when the test says and not when a busy runner gets
+/// there: with a 400 ms deadline on the system clock, the macOS merge-queue runner was still
+/// sending the third callback when the wait ended, and that connection was reset.
 #[test]
 fn a_wrong_state_never_ends_the_sign_in_before_the_timeout() {
-    let rig = rig_with(FakeOptions::default(), false, |config| {
-        config.signin_timeout = Duration::from_millis(400);
+    let rig = rig_with(FakeOptions::default(), true, |config| {
+        config.signin_timeout = Duration::from_secs(60);
     });
     let pending = rig.handle.begin_sign_in(None).unwrap();
     let port = port_of(pending.authorize_url());
@@ -164,6 +168,9 @@ fn a_wrong_state_never_ends_the_sign_in_before_the_timeout() {
     for _ in 0..3 {
         assert_eq!(callback(port, "code=x&state=nope").status, 400);
     }
+    // Each 400 came from the running wait, so its deadline is set, and the clock has not moved.
+    assert!(!finisher.is_finished(), "a wrong state ended the sign-in");
+    rig.clock().advance(Duration::from_secs(60));
     assert_eq!(finisher.join().unwrap(), Err(SignInError::TimedOut));
     assert!(rig.store.peek("case-law").is_none());
     assert_eq!(rig.handle.status(), CredentialStatus::NotAdded);
