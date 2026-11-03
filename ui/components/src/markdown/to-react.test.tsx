@@ -65,7 +65,7 @@ test("unknown properties, event handlers and inner HTML never reach React", () =
   );
   expect(html(tree)).toBe(
     // A heading's id is its anchor (the sanitiser has prefixed it by now); nothing else of it is kept.
-    '<p>para</p><blockquote>quote</blockquote><h1 id="clobber">head</h1><td>cell</td><code class="language-ts">c</code>',
+    '<p>para</p><blockquote>quote</blockquote><h1 id="clobber">head</h1><td>cell</td><code class="language-ts" data-clauseo="inline-code">c</code>',
   );
   const [first] = elements(toReact(tree));
   expect(Object.keys(first?.props ?? {})).toEqual(["children"]);
@@ -76,11 +76,11 @@ test("properties named like Object.prototype's own are not mapped", () => {
     element("ol", { constructor: "x", toString: "y", hasOwnProperty: "w" } as never),
     element("code", { constructor: "x", valueOf: "v", className: ["language-a"] } as never),
   );
-  expect(html(tree)).toBe('<ol></ol><code class="language-a"></code>');
+  expect(html(tree)).toBe('<ol></ol><code class="language-a" data-clauseo="inline-code"></code>');
   // React drops an invalid prop name from the markup, so the props themselves are checked.
   const [, ol, code] = elements(toReact(tree));
   expect(Object.keys(ol?.props ?? {})).toEqual([]);
-  expect(Object.keys(code?.props ?? {})).toEqual(["className"]);
+  expect(Object.keys(code?.props ?? {})).toEqual(["className", "data-clauseo"]);
 });
 
 test("values that are not strings, numbers, booleans or lists of them are dropped", () => {
@@ -145,4 +145,12 @@ test("keys are the tag and its count among its siblings, the same on every rende
   const keys = (tree: Root) => elements(toReact(tree)).map((node) => node.key);
   expect(keys(view!.hast)).toEqual([null, "p-0", "em-0", "em-1", "strong-0", "code-0"]);
   expect(keys(structuredClone(view!.hast))).toEqual(keys(view!.hast));
+});
+
+test("inline code carries data-clauseo=\"inline-code\", which the answer's styles key on; a code block's code does not", () => {
+  // the WebView2 shaping run found inline code unstyled: thread.css styles code[data-clauseo="inline-code"], and
+  // nothing set it
+  const out = render("See `धारा १३८` here.\n\n```text\nक्ष त्र\n```");
+  expect(out).toContain('<code data-clauseo="inline-code">धारा १३८</code>');
+  expect(out.match(/data-clauseo="inline-code"/g)?.length).toBe(1);
 });

@@ -60,7 +60,9 @@ test("an open fence while streaming asks nothing; once closed and followed by mo
   expect(pre?.querySelector(".text-code-keyword")?.textContent).toBe("const");
   expect(pre?.textContent).toBe("const a = 1;");
   // Inline code stays a plain <code>, uncoloured.
-  expect(host.querySelector("p code")?.outerHTML).toBe("<code>inline code</code>");
+  expect(host.querySelector("p code")?.outerHTML).toBe(
+    '<code data-clauseo="inline-code">inline code</code>',
+  );
 });
 
 test("a finished answer colours its blocks, an unclosed last fence included", async () => {

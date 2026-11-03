@@ -47,9 +47,21 @@ function check(root: Element, expect: ExtraExpect, fail: (message: string) => vo
       const want = expect.marks.map((mark) => ({ tag: mark.tag, text: norm(mark.text) }));
       if (JSON.stringify(marks) !== JSON.stringify(want))
         fail(`elements ${JSON.stringify(marks)}, expected ${JSON.stringify(want)}`);
-      for (const el of all(block, TAGS))
-        if (el.tagName !== "KBD" && el.getAttributeNames().length > 0)
-          fail(`<${el.tagName.toLowerCase()}> has attributes ${el.getAttributeNames().join(", ")}`);
+      for (const el of all(block, TAGS)) {
+        // inline code carries the one attribute the answer's styles key on (to-react.ts)
+        const names = el
+          .getAttributeNames()
+          .filter(
+            (name) =>
+              !(
+                el.tagName === "CODE" &&
+                name === "data-clauseo" &&
+                el.getAttribute(name) === "inline-code"
+              ),
+          );
+        if (el.tagName !== "KBD" && names.length > 0)
+          fail(`<${el.tagName.toLowerCase()}> has attributes ${names.join(", ")}`);
+      }
       return;
     }
     case "plain": {

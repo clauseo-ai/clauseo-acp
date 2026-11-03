@@ -26,7 +26,7 @@ function threadSheet(): string {
 
 /** The token values the answer's rules use, so var() resolves. */
 const TOKENS =
-  ":root { --s1: 4px; --s3: 12px; --para-gap: 14px; --s5: 20px; --s6: 24px; --t22: 22px; --t18: 18px; --w-chip: 520; }";
+  ":root { --s1: 4px; --s3: 12px; --para-gap: 14px; --s5: 20px; --s6: 24px; --t22: 22px; --t18: 18px; --t15: 15px; --w-chip: 520; --well: rgb(243, 241, 237); --font-code: monospace; }";
 
 function setUp(sheets: string[]) {
   for (const css of sheets) {
@@ -109,4 +109,12 @@ test("the answer is set in the reply type: 17 px at Clauseo's weight", () => {
   expect(theme).toMatch(/--font-weight-clauseo: var\(--w-clauseo\);/);
   expect(type).toMatch(/--t17: 1\.0625rem;/);
   expect(type).toMatch(/--w-clauseo: 400;/);
+});
+
+test('inline code in an answer is set on the well at 15 px, as thread.css has it for code[data-clauseo="inline-code"]', () => {
+  setUp([TOKENS, RESET, threadSheet()]);
+  document.querySelector('[data-clauseo="markdown"]')!.innerHTML =
+    '<p>See <code data-clauseo="inline-code">धारा १३८</code> here.</p>';
+  expect(style("code").fontSize).toBe("15px");
+  expect(style("code").backgroundColor).toBe("rgb(243, 241, 237)");
 });
