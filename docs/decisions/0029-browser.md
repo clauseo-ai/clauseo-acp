@@ -259,12 +259,16 @@ Chrome found reaches `session/new`. `with_browser_executable` stays as a test-su
 
 **agent-browser's config file.** The guard refuses an `AGENT_BROWSER_CONFIG` that names no
 file, so the same prep, once it has found a Chrome, makes `<data>/browser/` (through no link
-below the data folder, 0700 on Unix) and writes `{}` to `agent-browser.json` there when it is
-absent (`browser::write_config`, through the host's write path; a link at the file's name is
-replaced, never followed; an existing file is kept). A failed write leaves the session without
-the browser (`BrowserNotInstalled`), with a warning. `tests/host/browser.rs` checks the file
-after a browser session starts and that its path is the one the profile's entry names. The
-smoke test writes its own config file, which stands in for this one.
+below the data folder, 0700 on Unix) and writes `{}` to `agent-browser.json` there, atomically,
+at every such launch (`browser::write_config`, through the host's write path). What was there is
+never kept: a planted file could set agent-browser's `provider` or `profile`. A link at the
+file's name is replaced, never followed. A failed write is logged with the file's path and the
+session gets no Chrome, so the entry drops with `BrowserNotInstalled`; since the Chrome is the
+last of the drop reasons, an off switch, the firm's `managed-mcp.json`, no slot or no proxy
+still shows first. `BrowserNotInstalled` is the nearest existing reason; a reason of its own
+would be a protocol change. `tests/host/browser.rs` checks the file after a browser session
+starts and that its path is the one the profile's entry names. The smoke test writes its own
+config file, which stands in for this one.
 
 #### Slots and limits (`host/src/browser/limits.rs`)
 
@@ -390,9 +394,11 @@ The host records one `PageVisited { via: Browser }` per completed open, built wi
   `url`). A text equal to the URL gives no title. Control characters and the bidi formatting
   characters (U+202A to U+202E, U+2066 to U+2069) are taken out, so a page cannot spoof the
   sources list.
-- **Only the live turn.** The open is followed on the current turn (`Current::browser_opens`);
-  `Origin::Late` and `Origin::Replay` updates never reach it (`actor/turn/updates.rs` drops them
-  first), so an agent's replay on `session/load` writes nothing. A failed, cancelled or unfinished
+- **Only the live turn.** The thread keeps its unfinished opens across turns and agent restarts
+  (`TurnState::browser_opens`, at most 64), but records a page only for a completion in the live
+  turn: `Origin::Late` (after a cancel) and `Origin::Replay` (an agent's replay on `session/load`)
+  are dropped by their origin first (`actor/turn/updates.rs`). The tests leave an open running,
+  then send its completion late or in a replay, and see no page. A failed, cancelled or unfinished
   call writes nothing.
 
 The scenario `crates/host/tests/scenarios/browser-visit.jsonl` (`tests/host/browser.rs`,
@@ -470,8 +476,8 @@ The host part:
 - `seed_sites.rs`'s constant changes from `[&str; 8]` to `&[&str]`, and `browser` becomes a
   public module so stage C's proxy can read both lists.
 - `with_browser_executable` stays as a test-support override beside `with_chrome_roots`.
-- The host writes agent-browser's config file (`{}`) at the launch prep, only when a Chrome was
-  found; a failed write is reported as `BrowserNotInstalled`, the nearest existing reason.
+- The host writes agent-browser's config file (`{}`) at every launch prep that found a Chrome;
+  a failed write is reported as `BrowserNotInstalled`, the nearest existing reason.
 - `BrowserLaunch::InJail` is accepted and not stored: it is what the host does anyway.
 - This file is copied from PR #200's branch with the host part added; it merges with #200's copy
   when either lands.

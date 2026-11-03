@@ -1,11 +1,11 @@
-//! agent-browser's config file: written once as `{}`, kept when there, never through a link.
+//! agent-browser's config file: `{}` written at every launch, never through a link.
 
 use super::{CONFIG_DIR, CONFIG_FILE, write_config};
 use crate::pipeline::tests::support::TempDir;
 use crate::write;
 
 #[test]
-fn the_config_file_is_written_once_and_kept() {
+fn the_config_file_is_written_as_empty_at_every_launch() {
     let dir = TempDir::new("browser-config");
     let file = write_config(dir.path()).unwrap();
     assert_eq!(file, dir.path().join(CONFIG_DIR).join(CONFIG_FILE));
@@ -17,10 +17,10 @@ fn the_config_file_is_written_once_and_kept() {
         assert_eq!(mode(&dir.path().join(CONFIG_DIR)) & 0o777, 0o700);
         assert_eq!(mode(&file) & 0o777, 0o600);
     }
-    // A file already there, the lawyer's or a later Clauseo's, is left as it is.
-    write::write_file(&file, b"{\"x\":1}").unwrap();
+    // A planted file is replaced at the next launch: it could choose a cloud browser.
+    write::write_file(&file, br#"{"provider":"browserbase"}"#).unwrap();
     write_config(dir.path()).unwrap();
-    assert_eq!(std::fs::read(&file).unwrap(), b"{\"x\":1}");
+    assert_eq!(std::fs::read(&file).unwrap(), b"{}\n");
 }
 
 /// The folder is refused when it is a link; a link at the file's name is replaced, not followed.

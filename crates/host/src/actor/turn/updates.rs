@@ -320,8 +320,7 @@ fn tool_call(
         current.tool_paths.note(&call.locations, &call.content);
     }
     let id = actor.ids.mint(actor.clock.now().wall)?;
-    let page =
-        current(actor, thread).and_then(|current| current.browser_opens.started(turn, id, &call));
+    let page = state(actor, thread).and_then(|state| state.browser_opens.started(turn, id, &call));
     let (built, _fields) = build::tool_call_started(turn, id, call);
     commit(actor, thread, [built.value.into()], built.blobs)?;
     page_visited(actor, thread, page)
@@ -363,8 +362,9 @@ fn tool_update(
                 let locations = patch.locations.as_deref().unwrap_or_default();
                 let content = patch.content.as_deref().unwrap_or_default();
                 current.tool_paths.note(locations, content);
-                page = current.browser_opens.updated(turn, acp_id, &patch);
             }
+            page = state(actor, thread)
+                .and_then(|state| state.browser_opens.updated(turn, acp_id, &patch));
         }
         Context::Outside { replay: false } => {}
     }

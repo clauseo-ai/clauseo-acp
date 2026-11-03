@@ -397,7 +397,10 @@ impl ChromeSearch {
         match crate::browser::write_config(data) {
             Ok(_) => Some(chrome),
             Err(error) => {
-                tracing::warn!(%error, "agent-browser's config file was not written; the session has no browser");
+                let file = data
+                    .join(crate::browser::CONFIG_DIR)
+                    .join(crate::browser::CONFIG_FILE);
+                tracing::warn!(file = %file.display(), %error, "agent-browser's config file was not written; the session has no browser");
                 None
             }
         }

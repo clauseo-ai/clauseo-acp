@@ -33,7 +33,12 @@ pub(crate) const CLAUDE_OPEN: &str = "mcp__browser__agent_browser_open";
 /// The same tool as codex-acp 2.2.2 titles it (`dist/index.js:29492-29503`).
 pub(crate) const CODEX_OPEN: &str = "mcp.browser.agent_browser_open";
 
-/// The browser opens of the live turn that have not finished, by the agent's tool call id.
+/// The most unfinished opens a thread keeps; past it they are dropped, so opens an agent never
+/// finished cannot pile up for the host's life.
+const MAX_OPENS: usize = 64;
+
+/// A thread's browser opens that have not finished, by the agent's tool call id. Kept across
+/// turns and agent restarts; only completions in the live turn are recorded.
 #[derive(Debug, Default)]
 pub(crate) struct Opens(BTreeMap<CompactString, Open>);
 
@@ -66,6 +71,10 @@ impl Opens {
             }
             ToolCallStatus::Failed | ToolCallStatus::Cancelled => None,
             ToolCallStatus::Pending | ToolCallStatus::InProgress | ToolCallStatus::Unknown => {
+                if self.0.len() >= MAX_OPENS {
+                    // Opens that never finished (an agent that died mid-call) are let go.
+                    self.0.clear();
+                }
                 self.0.insert(call.acp_id.clone(), open);
                 None
             }

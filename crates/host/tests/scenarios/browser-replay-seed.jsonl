@@ -1,8 +1,10 @@
-{"scenario":"browser-replay-seed","description":"S27's PageVisited, run 0 of the replay test: one plain turn in session sess-1","on_stdin_close":"exit"}
+{"scenario":"browser-replay-seed","description":"S27's PageVisited, the first launch of the replay test: a turn opens tc-replayed and leaves it running, then the agent exits","on_stdin_close":"exit"}
 {"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
 {"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
 {"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
 {"respond":{"to":"new","result":{"sessionId":"sess-1"}}}
 {"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
-{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-1","content":{"type":"text","text":"First answer."}}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-replayed","title":"mcp__browser__agent_browser_open","name":"mcp__browser__agent_browser_open","kind":"other","status":"in_progress","rawInput":{"url":"https://sci.gov.in/replayed"}}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-1","content":{"type":"text","text":"Opening."}}}}
 {"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
+{"exit":{"code":0}}

@@ -80,6 +80,10 @@ pub(crate) struct TurnState {
     run: Option<launch_checks::RunFolders>,
     /// The thread's current turn: accepted and not ended.
     current: Option<Box<Current>>,
+    /// The browser opens of the thread's turns that have not finished, for `PageVisited`. Kept
+    /// past a turn's end, so a completion that comes late or in a replay finds its open and is
+    /// still not recorded (`updates.rs` drops it by its origin).
+    browser_opens: crate::sources::browser::Opens,
     /// Text not durable yet.
     text: ThreadText,
     /// The files put back since the last `TurnStarted`; `None` until first needed, then
@@ -151,8 +155,6 @@ struct Current {
     limit: Option<LimitMark>,
     /// The places the turn's tool calls named, for the after-turn checkpoint.
     tool_paths: crate::sent::TurnPaths,
-    /// The turn's browser opens that have not finished, for `PageVisited`.
-    browser_opens: crate::sources::browser::Opens,
     /// The before-turn checkpoint, once step 4 has it.
     checkpoint_before: Option<clauseo_protocol::CheckpointId>,
     /// Drops the prompt's call (the cancel fallback).
