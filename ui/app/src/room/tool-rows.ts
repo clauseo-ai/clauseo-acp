@@ -101,8 +101,10 @@ export function toolRow(lang: Lang, tool: KnownTool, room: ToolRowRoom): ToolRow
     progress: null,
     action: null,
   });
+  // while the sentence's Hindi is still to come (hi: later), its English takes its slot's English too
+  const slotLang = tw.hi["Off. {managed}."] === null ? "en" : lang;
   const managed = () =>
-    say(tw(lang, "Off. {managed}.", { managed: st(lang, "Managed by your organisation") }));
+    say(tw(lang, "Off. {managed}.", { managed: st(slotLang, "Managed by your organisation") }));
   const name = tw(lang, tool.tool === "web_search" ? "Web search" : "Browser");
   if (tool.tool === "web_search") {
     switch (tool.state) {
