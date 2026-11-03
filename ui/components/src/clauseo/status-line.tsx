@@ -1,6 +1,14 @@
 // The status line on the composer's top edge: how long the answer took, the plan the questions go to, and the
 // prepared draft's hint while its Ready card is out of view.
-import { lazy, Suspense, useId, useLayoutEffect, useRef, type PointerEvent } from "react";
+import {
+  lazy,
+  Suspense,
+  useId,
+  useLayoutEffect,
+  useRef,
+  type PointerEvent,
+  type ReactNode,
+} from "react";
 import { late } from "../lib/late.ts";
 import { Kbd } from "../ui/kbd.tsx";
 import { SegmentedSwitch } from "../ui/segmented.tsx";
@@ -31,6 +39,11 @@ export type PlanChoice<V extends string = string> = {
   segmented?: readonly { value: V; label: string }[];
 };
 
+/** The tool line, after the plan: what Clauseo's tools can do in the open conversation, one phrase, and the control
+ * that opens where each tool stands. `summary` is the phrase it says, for the fit: the line measures again when it
+ * changes. */
+export type ToolsSegment = { summary: string; node: ReactNode };
+
 /** The plan's select, loaded only for a status line that offers a choice. Until it is in, the plan stands as the
  * status line's own words, as the select's trigger does at rest. */
 const PlanTrigger = lazy(() =>
@@ -46,12 +59,15 @@ export function StatusLine<V extends string>({
   plan,
   hint,
   choice,
+  tools = null,
   hidden = false,
 }: {
   took: string | null;
   plan: string;
   hint: ReadyHint | null;
   choice?: PlanChoice<V> | undefined;
+  /** The tool line, parted from the plan by the dot; null for none. */
+  tools?: ToolsSegment | null;
   /** While the working line stands in its place. It stays mounted, so the plan's select keeps its state. */
   hidden?: boolean;
 }) {
@@ -66,6 +82,7 @@ export function StatusLine<V extends string>({
   const seg = useId();
   const { id, hand } = useRoom();
   const hintState = hint?.state ?? "none";
+  const toolsSaid = tools?.summary ?? null;
 
   // the time it took arrives as the working line closes: it comes up 4 px into place over 200 ms
   useLayoutEffect(() => {
@@ -110,7 +127,7 @@ export function StatusLine<V extends string>({
     });
     ro.observe(host);
     return () => ro.disconnect();
-  }, [lang, textSize, wide, hintState, took, hidden]);
+  }, [lang, textSize, wide, hintState, took, hidden, toolsSaid]);
 
   const hold = (on: boolean) => (e?: PointerEvent) => {
     if (e?.pointerType !== "touch") hand.holdDraft("hint", on);
@@ -157,6 +174,14 @@ export function StatusLine<V extends string>({
           >
             <PlanTrigger plan={plan} choice={choice} />
           </Suspense>
+        )}
+        {tools !== null && (
+          <span className="room-status-tools">
+            {(choice !== undefined || plan !== "" || took !== null) && (
+              <i className="room-dot" aria-hidden="true" />
+            )}
+            {tools.node}
+          </span>
         )}
       </div>
       {hint !== null && (

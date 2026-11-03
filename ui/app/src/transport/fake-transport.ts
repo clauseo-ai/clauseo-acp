@@ -65,7 +65,9 @@ export type FakeCall =
   | { call: "reveal"; target: RevealTarget }
   | { call: "open_settings" }
   | { call: "next_query"; query: NextQuery }
-  | { call: "next_command"; command: NextCommand };
+  | { call: "next_command"; command: NextCommand }
+  /** Not the host's yet: the Chrome download (room/browser-install.ts). */
+  | { call: "install_browser" };
 
 /** Scripted answers to the calls the host doesn't have yet (room/host-next.ts). */
 export type FakeNextHost = {
@@ -305,6 +307,12 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
   /** Plays `settings_changed` as the host would send it. */
   settingsChanged(settings: Settings): void {
     for (const listener of this.#settingsHeard) listener(settings);
+  }
+
+  /** Not the host's yet: starts the Chrome download (room/browser-install.ts); its progress comes back as
+   * `browser_install` app events, which a test plays. */
+  async installBrowser(): Promise<void> {
+    this.calls.push({ call: "install_browser" });
   }
 
   /** Plays one app event (H4) as the host would send it to every window. */

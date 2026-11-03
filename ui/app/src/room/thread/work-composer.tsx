@@ -31,6 +31,7 @@ import {
   type Mentions,
   type PlanChoice,
   type SlashCommand,
+  type ToolsSegment,
 } from "@clauseo/components/clauseo/composer.tsx";
 import type { WorkingState } from "@clauseo/components/clauseo/working-line.tsx";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
@@ -61,6 +62,7 @@ export function WorkComposer({
   draftKey,
   choice,
   plan = "",
+  tools = null,
   commands,
   mentions,
   disabled,
@@ -90,6 +92,8 @@ export function WorkComposer({
   choice?: PlanChoice | undefined;
   /** The status line's plan words, "Uses your Claude plan"; "" for none. Not drawn while the choice stands. */
   plan?: string;
+  /** The tool line after the plan, from the open thread's header's tools (tool-line.tsx); null for none. */
+  tools?: ToolsSegment | null;
   /** The agent's commands for the `/` menu, from the open thread's header; [] before there are any. */
   commands: readonly SlashCommand[];
   /** The matter's papers for the `@` menu; none with no matter open, or without H8. */
@@ -346,6 +350,7 @@ export function WorkComposer({
       notice={paused === null ? <LimitWarning /> : null}
       took={paused === null ? null : pausedLine(w.lang, paused, now)}
       plan={plan}
+      tools={tools}
       {...(choice === undefined ? {} : { choice })}
       hint={null}
       commands={commands}

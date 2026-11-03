@@ -73,6 +73,8 @@ import type { Drafts } from "./thread/session.ts";
 import { Work } from "./thread/work.tsx";
 import { tauriWindowControls, type WindowControls } from "../transport/window-controls.ts";
 import { useWindowFrame } from "../window/use-window-frame.ts";
+import { browserInstallOf } from "./browser-install.ts";
+import { ToolLineContext } from "./tool-line-room.ts";
 
 /** H13's line atop a retried conversation, loaded only when one opens. */
 const RetriedLine = lazy(() =>
@@ -323,6 +325,12 @@ function RoomFrame({
       ? undefined
       : { kind: kindOf(openAgent, talks.agents), name: threadName ?? openAgent };
   const plan = planOfOpen === null ? "" : th(w.lang, "Uses your {name} plan", { name: planOfOpen });
+  // the tool line's room: the plan's name its words use, Settings, and the app's Chrome download (browser-install.ts)
+  const [install] = useState(() => browserInstallOf(transport));
+  const toolRoom = useMemo(
+    () => ({ plan: planOfOpen ?? "", openSettings, install }),
+    [planOfOpen, openSettings, install],
+  );
   // a matter's name as filed is English in both languages, the scratch matter's is the room's own; with no matter, the
   // frame's words stand in its place
   const scratch = open?.kind === "scratch";
@@ -465,20 +473,22 @@ function RoomFrame({
             <MarkdownHostContext value={answers}>
               <WordOpenContext value={word}>
                 <AgentPlanContext value={agentPlan}>
-                  <Work
-                    key={talks.open ?? open?.matter ?? "none"}
-                    transport={transport}
-                    matter={open}
-                    drafts={drafts}
-                    draftKey={talks.open}
-                    conversation={link}
-                    choice={choice}
-                    plan={plan}
-                    focus={talks.focus?.n ?? null}
-                    archived={talks.archived}
-                    onThread={matters.onThread}
-                    conversations={conversations}
-                  />
+                  <ToolLineContext value={toolRoom}>
+                    <Work
+                      key={talks.open ?? open?.matter ?? "none"}
+                      transport={transport}
+                      matter={open}
+                      drafts={drafts}
+                      draftKey={talks.open}
+                      conversation={link}
+                      choice={choice}
+                      plan={plan}
+                      focus={talks.focus?.n ?? null}
+                      archived={talks.archived}
+                      onThread={matters.onThread}
+                      conversations={conversations}
+                    />
+                  </ToolLineContext>
                 </AgentPlanContext>
               </WordOpenContext>
             </MarkdownHostContext>

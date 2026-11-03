@@ -257,7 +257,8 @@
     flex-wrap: wrap;
     row-gap: 0;
   }
-  .room-status-plan {
+  .room-status-plan,
+  .room-status-tools {
     flex: 0 1 auto;
     min-width: 0;
     white-space: normal;

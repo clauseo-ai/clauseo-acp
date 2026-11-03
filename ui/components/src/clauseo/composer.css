@@ -45,6 +45,17 @@
   .room-status-plan {
     flex: none;
   }
+  /* the tool line, after the plan and its dot: a quiet button in the line's own words */
+  .room-status-tools {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s2);
+    flex: none;
+  }
+  .room-status[data-fit="wrapped"] .room-status-tools {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
   /* nothing on the line is ever cut short: tight, the hint keeps only its key cap; wrapped, the line takes two */
   .room-status:is([data-fit="tight"], [data-fit="wrapped"]) .room-hint-turn {
     display: none;
