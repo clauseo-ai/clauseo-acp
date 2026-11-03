@@ -1,4 +1,4 @@
-// fake_agent `limit-warning`: a turn whose usage_update carries claude-agent-acp's rate-limit
+// fake_agent `claude-limit-warning`: a turn whose usage_update carries claude-agent-acp's rate-limit
 // warning (`allowed_warning`, `five_hour`, utilization 0.96), then end_turn. The warning is not a
 // stop: the composer's notice line shows the warning, and Ask stays enabled. The turn ends normally,
 // so no stop line or stop mark shows.
@@ -17,7 +17,7 @@ import { test } from "./fixture.ts";
 import { expectTurnEnded, openMatter, sendPrompt } from "./flow.ts";
 import { window } from "./selectors.ts";
 
-test.use({ scenario: "limit-warning" });
+test.use({ scenario: "claude-limit-warning" });
 
 test("a near-limit warning shows under the field, and sending stays open", async ({ app }) => {
   const w = window(app.page);

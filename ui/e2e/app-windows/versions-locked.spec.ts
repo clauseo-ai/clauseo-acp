@@ -1,4 +1,4 @@
-// fake_agent `files-one-turn`, as versions.spec.ts. Word holds brief.txt open: its owner file
+// fake_agent `claude-files-one-turn`, as versions.spec.ts. Word holds brief.txt open: its owner file
 // `~$brief.txt` sits beside it. Restore to the import version is refused and writes nothing, and the
 // dialog says a paper is open in another program and offers Try again. Once the owner file is gone,
 // Try again restores the matter.
@@ -28,7 +28,7 @@ const OWNER_BYTES = "owner file: open in Word";
 /** matter.file_locked's line (words-errors.ts). */
 const LOCKED_LINE = "A paper is open in another program. Close it, then try again.";
 
-test.use({ scenario: "files-one-turn", matterFiles: BEFORE });
+test.use({ scenario: "claude-files-one-turn", matterFiles: BEFORE });
 
 test("Restore waits while Word holds a file, then lands once it is closed", async ({
   app,

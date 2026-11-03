@@ -1,4 +1,4 @@
-// fake_agent `exit-mid-turn`: one prompt, one answer chunk, then the agent's process exits 1
+// fake_agent `claude-exit-mid-turn`: one prompt, one answer chunk, then the agent's process exits 1
 // mid-turn. The chunk stays in the transcript, the turn ends failed with agent.exited, the
 // working line says the answer stopped (with no Restart until the host has it, H10), and the
 // question is back in the field, so asking again starts a new turn. fake_agent
@@ -16,7 +16,7 @@ const CHUNK = "Starting on the answer.";
 const SECOND = "Second answer.";
 
 test.describe("on exit-mid-turn", () => {
-  test.use({ scenario: "exit-mid-turn" });
+  test.use({ scenario: "claude-exit-mid-turn" });
 
   test("an agent that exits mid-answer leaves the answer so far, and asking again starts a new turn", async ({
     app,
@@ -47,7 +47,7 @@ test.describe("on exit-mid-turn", () => {
 });
 
 test.describe("on exit-mid-turn-then-load", () => {
-  test.use({ scenario: "exit-mid-turn-then-load" });
+  test.use({ scenario: "claude-exit-mid-turn-then-load" });
 
   test("asking again relaunches the agent, and the new turn answers and ends", async ({ app }) => {
     const w = window(app.page);

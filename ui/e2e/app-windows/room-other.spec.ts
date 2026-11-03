@@ -17,7 +17,7 @@ import { test } from "./fixture.ts";
 import { expectTurnEnded, newConversation, openMatter, sendPrompt, showRail } from "./flow.ts";
 import { window, type Window } from "./selectors.ts";
 
-test.use({ scenario: "cancel-unanswered" });
+test.use({ scenario: "claude-cancel-unanswered" });
 
 /** 30 code points: the first conversation's own title. */
 const FIRST = "Summarise the indemnity clause";

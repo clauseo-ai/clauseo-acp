@@ -48,7 +48,7 @@ const WORD_LINE = /Close '\u2068?Petition\.docx\u2069?' in Word to undo the chan
 const WORD_NOTE = "Word holds the file while it is open. Nothing has changed yet.";
 
 test.describe("files-one-turn", () => {
-  test.use({ scenario: "files-one-turn", matterFiles: BEFORE });
+  test.use({ scenario: "claude-files-one-turn", matterFiles: BEFORE });
 
   test("Undo waits while Word holds a file, then lands once it is closed", async ({
     app,
