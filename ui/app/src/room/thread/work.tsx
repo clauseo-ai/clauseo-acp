@@ -17,6 +17,7 @@ import { KeyedRequestContext, keyedRequest } from "../permission-keyed.ts";
 import { refillOf, useBreakLines, useStoppedLine, useThreadBreak } from "../thread-break.ts";
 import { useAgentPlan } from "./agent-plan.ts";
 import { LazyThreadList, loadThread } from "./chunk.ts";
+import { pausedPick } from "./limit-words.ts";
 import { useBusy } from "./live.ts";
 import {
   ThreadActionsContext,
@@ -97,6 +98,9 @@ export function Work({
   // the agent's commands for the composer's `/` menu, as the thread's header has them
   const [pickCommands] = useState(commandsPick);
   const commands = useStreamPart(store, stream, pickCommands);
+  // U12: the thread paused at the plan's limit, for the composer's status line
+  const [pickPaused] = useState(pausedPick);
+  const paused = useStreamPart(store, stream, pickPaused);
   // U10: an answer Claude stopped giving, and Restart once the host has it (H10)
   const { lang } = useWords();
   const { brk, live } = useThreadBreak(store, stream);
@@ -171,6 +175,7 @@ export function Work({
         refill={refillOf(brk, live, restart)}
         onAsk={ask}
         onStop={session.stop}
+        paused={paused}
         others={
           conversations === undefined ? null : { transport, conversations, onRefused: refuseOther }
         }

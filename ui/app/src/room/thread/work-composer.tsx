@@ -5,7 +5,8 @@
 // refused command, then "Answering.", then an answer Claude stopped giving (thread-break.ts). The stopped question comes
 // back into the field when the field is empty. Each conversation keeps its own words (the drafts, by its key); on a new
 // conversation the status line offers the plan to ask with, until its first question fixes it, and otherwise names the
-// plan the conversation uses. `/` opens the menu of the agent's commands, as the thread's header lists them.
+// plan the conversation uses; paused at the plan's limit, it says where the answer stopped (U12). `/` opens the menu
+// of the agent's commands, as the thread's header lists them.
 import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
 import {
   Composer,
@@ -26,6 +27,7 @@ import { useOtherWait } from "../queue-model.ts";
 import type { BreakLine } from "../thread-break.ts";
 import { LimitWarning } from "../limits/limit-warning.tsx";
 import { useAgentPlan } from "./agent-plan.ts";
+import { pausedLine, type Paused } from "./limit-words.ts";
 import type { Drafts } from "./session.ts";
 
 export function WorkComposer({
@@ -44,6 +46,7 @@ export function WorkComposer({
   onAsk,
   onStop,
   others = null,
+  paused = null,
 }: {
   /** The composer's handle, for the room to put the focus in the field. */
   ref?: Ref<ComposerHandle>;
@@ -79,6 +82,9 @@ export function WorkComposer({
     conversations: Conversations;
     onRefused: (code: ErrorCode | null) => void;
   } | null;
+  /** U12: the open thread paused at the plan's limit (limit-words.ts's pausedPick), for the status line's words; null
+   * while it isn't. Send stays enabled: no limits state holds a question back. */
+  paused?: Paused | null;
 }) {
   const w = useWords();
   const agentPlan = useAgentPlan();
@@ -197,9 +203,10 @@ export function WorkComposer({
   return (
     <Composer
       ref={field}
-      // the plan's warning under the field (U12); the paused line at the limit, once it lands here, goes first
-      notice={<LimitWarning />}
-      took={null}
+      // the plan's warning under the field (U12), quiet while paused at the limit, when the status line says it:
+      // "Stopped at 4:52 pm, at the plan's limit", or the toolbar's at-limit words without the stop's time
+      notice={paused === null ? <LimitWarning /> : null}
+      took={paused === null ? null : pausedLine(w.lang, paused)}
       plan={plan}
       {...(choice === undefined ? {} : { choice })}
       hint={null}
