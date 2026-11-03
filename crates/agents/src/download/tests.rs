@@ -420,14 +420,21 @@ fn a_ca_file_with_no_certificate_or_a_bad_proxy_fails_to_build() {
     };
     let err = Fetcher::new(&install, &agent(), None, dir.path()).unwrap_err();
     assert_eq!(err.kind, FetchKind::Failed);
-    assert!(err.detail.contains("<data>"), "{}", err.detail);
+    // The setting is named, never its value: no path, not even the data folder's.
+    assert_eq!(
+        err.detail,
+        "the CA file for claude-acp holds no certificate"
+    );
 
     let install = InstallConfig {
         proxy: Some("http://user:pw@:not a proxy".to_owned()),
         ..InstallConfig::default()
     };
     let err = Fetcher::new(&install, &agent(), None, dir.path()).unwrap_err();
-    assert!(!err.detail.contains("pw"), "{}", err.detail);
+    assert_eq!(
+        err.detail,
+        "the proxy setting is not usable: invalid proxy url"
+    );
 }
 
 #[test]

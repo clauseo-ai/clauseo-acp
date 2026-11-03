@@ -34,10 +34,7 @@ pub(crate) fn mirror_url(
     };
     let base = mirror.trim().trim_end_matches('/');
     if !base.contains("://") {
-        return Err(refuse(&format!(
-            "the mirror {} is not a URL",
-            redact_url(base)
-        )));
+        return Err(refuse("the mirror setting is not a URL"));
     }
     Ok(format!("{base}/{path}"))
 }

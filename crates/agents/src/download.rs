@@ -23,7 +23,6 @@ pub(crate) use error::{
 use crate::cancel::Cancel;
 use crate::config::InstallConfig;
 use crate::integrity::Expected;
-use crate::log::redact_url;
 use crate::write;
 
 /// The most redirects one fetch follows.
@@ -102,16 +101,14 @@ impl Fetcher {
             (None, None) => None,
         };
         let proxy = match proxy {
-            Some(proxy) => Some(ureq::Proxy::new(&proxy).map_err(|err| {
-                fail(&format!(
-                    "the proxy {} is not usable: {err}",
-                    redact_url(&proxy)
-                ))
-            })?),
+            Some(proxy) => Some(
+                ureq::Proxy::new(&proxy)
+                    .map_err(|err| fail(&format!("the proxy setting is not usable: {err}")))?,
+            ),
             None => None,
         };
         let roots = match install.ca_certs.get(agent) {
-            Some(file) => read_roots(file).map_err(|detail| fail(&detail))?,
+            Some(file) => read_roots(file, agent).map_err(|detail| fail(&detail))?,
             None => RootCerts::PlatformVerifier,
         };
         let config = Config::builder()
@@ -411,23 +408,21 @@ pub(crate) fn hash_file(path: &Path, hasher: &mut crate::integrity::Hasher) -> i
     }
 }
 
-/// The certificates of a PEM file, as the only TLS roots; an error line when it holds none.
-fn read_roots(file: &Path) -> Result<RootCerts, String> {
+/// The certificates of `agent`'s PEM file, as the only TLS roots; an error line when it holds
+/// none. The line names the agent, never the file's path.
+fn read_roots(file: &Path, agent: &AgentId) -> Result<RootCerts, String> {
     let pem = std::fs::read(file)
-        .map_err(|err| format!("the CA file {} could not be read: {err}", file.display()))?;
+        .map_err(|err| format!("the CA file for {agent} could not be read: {err}"))?;
     let mut certs = Vec::new();
     for item in ureq::tls::parse_pem(&pem) {
         match item {
             Ok(PemItem::Certificate(cert)) => certs.push(cert),
             Ok(_) => {}
-            Err(err) => return Err(format!("the CA file {} is not PEM: {err}", file.display())),
+            Err(err) => return Err(format!("the CA file for {agent} is not PEM: {err}")),
         }
     }
     if certs.is_empty() {
-        return Err(format!(
-            "the CA file {} holds no certificate",
-            file.display()
-        ));
+        return Err(format!("the CA file for {agent} holds no certificate"));
     }
     Ok(RootCerts::new_with_certs(&certs))
 }
