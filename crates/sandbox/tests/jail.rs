@@ -18,6 +18,11 @@ mod agent;
 
 #[cfg(test)]
 #[cfg(target_os = "macos")]
+#[path = "jail/guard.rs"]
+mod guard;
+
+#[cfg(test)]
+#[cfg(target_os = "macos")]
 #[path = "jail/files.rs"]
 mod files;
 

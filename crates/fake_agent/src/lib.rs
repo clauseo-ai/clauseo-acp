@@ -15,7 +15,8 @@
 //! - [`bin_path`]: the built binary, for another crate's tests. [`Error`]: every failure.
 //! - [`cli`]: the command line, for the binary's `main` only.
 //! - The exit codes: [`EXIT_OK`] 0, [`EXIT_WRITE`] 1, [`EXIT_LOAD`] 2, [`EXIT_MISMATCH`] 3.
-//! - The binary: `fake_agent --scenario <name or path> [--pace-ms <n>]`, `--check <path>...`
+//! - The binary: `fake_agent --scenario <name or path> [--pace-ms <n>]`, `--scenario hook` (reads
+//!   stdin to its end and prints `hook ok <byte count>`, a stand-in hook), `--check <path>...`
 //!   (prints `ok <count>`), `--list`, `--hold`. Exit [`EXIT_OK`] when stdin closes, [`EXIT_LOAD`]
 //!   for bad arguments or a scenario that fails to load, [`EXIT_MISMATCH`] for a mismatch,
 //!   [`EXIT_WRITE`] when `--list` or `--check` cannot write its result to stdout, or an `exit`
