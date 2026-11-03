@@ -320,8 +320,23 @@ fn tool_call(
         current.tool_paths.note(&call.locations, &call.content);
     }
     let id = actor.ids.mint(actor.clock.now().wall)?;
+    let page =
+        current(actor, thread).and_then(|current| current.browser_opens.started(turn, id, &call));
     let (built, _fields) = build::tool_call_started(turn, id, call);
-    commit(actor, thread, [built.value.into()], built.blobs)
+    commit(actor, thread, [built.value.into()], built.blobs)?;
+    page_visited(actor, thread, page)
+}
+
+/// Logs the page a browser open visited (`sources/browser.rs`), after its tool call's event.
+fn page_visited(
+    actor: &mut Actor,
+    thread: ThreadId,
+    page: Option<clauseo_protocol::PageVisited>,
+) -> Result<(), Error> {
+    match page {
+        Some(page) => commit(actor, thread, [page.into()], Vec::new()),
+        None => Ok(()),
+    }
 }
 
 fn tool_update(
@@ -340,19 +355,22 @@ fn tool_update(
         tracing::debug!(%thread, %acp_id, "an update for an unknown tool call was dropped");
         return Ok(());
     };
+    let mut page = None;
     match context {
         Context::Outside { replay: true } => return Ok(()),
-        Context::Live(_) => {
+        Context::Live(turn) => {
             if let Some(current) = current(actor, thread) {
                 let locations = patch.locations.as_deref().unwrap_or_default();
                 let content = patch.content.as_deref().unwrap_or_default();
                 current.tool_paths.note(locations, content);
+                page = current.browser_opens.updated(turn, acp_id, &patch);
             }
         }
         Context::Outside { replay: false } => {}
     }
     let (built, _fields) = build::tool_call_updated(id, patch, fields);
-    commit(actor, thread, [built.value.into()], built.blobs)
+    commit(actor, thread, [built.value.into()], built.blobs)?;
+    page_visited(actor, thread, page)
 }
 
 /// The tool call ACP knows as `acp_id` in `session`, if the host has it.

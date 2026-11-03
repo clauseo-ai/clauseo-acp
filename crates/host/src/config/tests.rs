@@ -62,3 +62,42 @@ fn config_moves_to_another_thread() {
     fn is_send<T: Send>() {}
     is_send::<HostConfig>();
 }
+
+/// Stage C's switch: only `InJail` is built; `OutsideJail` is refused with a clear error for now.
+#[test]
+fn the_browser_outside_the_jail_is_refused_for_now() {
+    use crate::browser::{BrowserLaunch, UnsupportedLaunch};
+    let launcher = || Arc::new(PassthroughLauncher::new(SpawnOptions::new()));
+    let parts = HostConfig::new(effective(), launcher()).into_parts();
+    assert_eq!(parts.wiring.browser_launch, BrowserLaunch::InJail);
+    let parts = HostConfig::new(effective(), launcher())
+        .with_browser_launch(BrowserLaunch::InJail)
+        .unwrap()
+        .into_parts();
+    assert_eq!(parts.wiring.browser_launch, BrowserLaunch::InJail);
+    let Err(refused) = HostConfig::new(effective(), launcher())
+        .with_browser_launch(BrowserLaunch::OutsideJail { cdp_port: 9222 })
+    else {
+        panic!("OutsideJail was accepted");
+    };
+    assert_eq!(refused, UnsupportedLaunch { cdp_port: 9222 });
+    let message = refused.to_string();
+    assert!(
+        message.contains("OutsideJail") && message.contains("not built"),
+        "{message}"
+    );
+}
+
+/// The machine's memory sets the slots: 2 by default (unknown memory) and at 8 GB, 4 above.
+#[test]
+fn machine_memory_sets_the_browser_slots() {
+    use crate::browser::limits::BrowserSlots;
+    const GB: u64 = 1024 * 1024 * 1024;
+    let launcher = || Arc::new(PassthroughLauncher::new(SpawnOptions::new()));
+    let parts = HostConfig::new(effective(), launcher()).into_parts();
+    assert_eq!(parts.wiring.browser_slots, BrowserSlots::new(Some(8 * GB)));
+    let parts = HostConfig::new(effective(), launcher())
+        .with_machine_memory(16 * GB)
+        .into_parts();
+    assert_eq!(parts.wiring.browser_slots, BrowserSlots::new(Some(32 * GB)));
+}

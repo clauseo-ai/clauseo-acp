@@ -1,0 +1,170 @@
+//! `PageVisited { via: Browser }`: one per browser open that completed (S27, "The record";
+//! decision record 0029, "`PageVisited`").
+//!
+//! The open tool is looked up by name, as each agent reports it:
+//! - Claude: [`CLAUDE_OPEN`], `mcp__<server>__<tool>`, in the tool call's `name` or `title`;
+//! - Codex: [`CODEX_OPEN`]. codex-acp 2.2.2 titles an MCP call `` `mcp.${server}.${tool}` ``
+//!   and sends no `name` (`dist/index.js:29492-29503`); its `rawInput` is
+//!   `{ server, tool, arguments }` (`:29520-29522`), and the completed update carries the MCP
+//!   result as `rawOutput` `{ result, error }` (`:29507-29513`, `:29524`), with no `content`.
+//!
+//! The URL is the `url` of the last `rawInput` the host had for the call (at its top level, or
+//! under Codex's `arguments`), taken when an update reports it `completed` in the live turn. The
+//! title is the tool result's text, which agent-browser makes the page's title for an open
+//! (`cli/src/mcp.rs`, `response_text`), when there is one and it is not the URL. A failed,
+//! cancelled or unfinished call writes nothing, and so does an update the host does not log in
+//! the live turn: `Origin::Late` and `Origin::Replay` never reach here (`actor/turn/updates.rs`).
+
+use std::collections::BTreeMap;
+
+use clauseo_acp::ToolCall;
+use clauseo_protocol::{
+    CompactString, PageVia, PageVisited, TextOrBlob, ToolCallContent, ToolCallId, ToolCallPatch,
+    ToolCallStatus, TurnId,
+};
+use serde_json::Value;
+
+/// agent-browser's open tool as Claude names it: server `browser`, tool `agent_browser_open`.
+pub(crate) const CLAUDE_OPEN: &str = "mcp__browser__agent_browser_open";
+
+/// The same tool as codex-acp 2.2.2 titles it (`dist/index.js:29492-29503`).
+pub(crate) const CODEX_OPEN: &str = "mcp.browser.agent_browser_open";
+
+/// The browser opens of the live turn that have not finished, by the agent's tool call id.
+#[derive(Debug, Default)]
+pub(crate) struct Opens(BTreeMap<CompactString, Open>);
+
+/// One open: the host's id for the call and the URL its last input named.
+#[derive(Debug)]
+struct Open {
+    tool_call: ToolCallId,
+    url: Option<String>,
+}
+
+impl Opens {
+    /// A tool call started in `turn` as `tool_call`: an open is followed until it ends, or
+    /// recorded at once when it started completed.
+    pub(crate) fn started(
+        &mut self,
+        turn: TurnId,
+        tool_call: ToolCallId,
+        call: &ToolCall,
+    ) -> Option<PageVisited> {
+        if !is_open(&call.title, call.tool_name.as_deref()) {
+            return None;
+        }
+        let open = Open {
+            tool_call,
+            url: call.raw_input.as_ref().and_then(url_of),
+        };
+        match call.status {
+            ToolCallStatus::Completed => {
+                visited(turn, open, &call.content, call.raw_output.as_ref())
+            }
+            ToolCallStatus::Failed | ToolCallStatus::Cancelled => None,
+            ToolCallStatus::Pending | ToolCallStatus::InProgress | ToolCallStatus::Unknown => {
+                self.0.insert(call.acp_id.clone(), open);
+                None
+            }
+        }
+    }
+
+    /// An update of the call the agent knows as `acp_id`, logged in `turn`: its input replaces
+    /// the URL; `completed` records the page, `failed` or `cancelled` forgets the call.
+    pub(crate) fn updated(
+        &mut self,
+        turn: TurnId,
+        acp_id: &str,
+        patch: &ToolCallPatch,
+    ) -> Option<PageVisited> {
+        let open = self.0.get_mut(acp_id)?;
+        if let Some(url) = patch.raw_input.as_ref().and_then(url_of) {
+            open.url = Some(url);
+        }
+        match patch.status? {
+            ToolCallStatus::Completed => {
+                let open = self.0.remove(acp_id)?;
+                let content = patch.content.as_deref().unwrap_or_default();
+                visited(turn, open, content, patch.raw_output.as_ref())
+            }
+            ToolCallStatus::Failed | ToolCallStatus::Cancelled => {
+                self.0.remove(acp_id);
+                None
+            }
+            ToolCallStatus::Pending | ToolCallStatus::InProgress | ToolCallStatus::Unknown => None,
+        }
+    }
+}
+
+/// Whether a tool call is the browser's open, by its name or, failing that, its title.
+fn is_open(title: &str, tool_name: Option<&str>) -> bool {
+    [Some(title), tool_name]
+        .into_iter()
+        .flatten()
+        .any(|name| name == CLAUDE_OPEN || name == CODEX_OPEN)
+}
+
+/// The page an open that completed visited, when its input named a URL.
+fn visited(
+    turn: TurnId,
+    open: Open,
+    content: &[ToolCallContent],
+    raw_output: Option<&TextOrBlob>,
+) -> Option<PageVisited> {
+    let Some(url) = open.url else {
+        tracing::debug!(tool_call = %open.tool_call, "a browser open without a url is not recorded");
+        return None;
+    };
+    let title = title_of(content, raw_output).filter(|title| *title != url);
+    Some(PageVisited::new(
+        turn,
+        open.tool_call,
+        &url,
+        title,
+        PageVia::Browser,
+    ))
+}
+
+/// The `url` of a tool input: at its top level (Claude), or under `arguments` (Codex). An input
+/// held as a blob is too large to be an open's and is passed over.
+fn url_of(raw_input: &TextOrBlob) -> Option<String> {
+    let TextOrBlob::Inline(text) = raw_input else {
+        return None;
+    };
+    let input: Value = serde_json::from_str(text).ok()?;
+    let url = |value: &Value| value.get("url")?.as_str().map(str::to_owned);
+    url(&input).or_else(|| input.get("arguments").and_then(url))
+}
+
+/// The tool result's text: its first text content (Claude), else the first text of the MCP result
+/// in `rawOutput` (`content`, or Codex's `result.content`). Trimmed to its first line; none when
+/// empty.
+fn title_of(content: &[ToolCallContent], raw_output: Option<&TextOrBlob>) -> Option<String> {
+    let from_content = content.iter().find_map(|item| {
+        if let ToolCallContent::Text {
+            text: TextOrBlob::Inline(text),
+        } = item
+        {
+            Some(text.clone())
+        } else {
+            None
+        }
+    });
+    let text = from_content.or_else(|| {
+        let TextOrBlob::Inline(raw) = raw_output? else {
+            return None;
+        };
+        let output: Value = serde_json::from_str(raw).ok()?;
+        let result = output.get("result").unwrap_or(&output);
+        result
+            .get("content")?
+            .as_array()?
+            .iter()
+            .find_map(|item| item.get("text")?.as_str().map(str::to_owned))
+    })?;
+    let line = text.lines().next()?.trim();
+    (!line.is_empty()).then(|| line.to_owned())
+}
+
+#[cfg(test)]
+mod tests;

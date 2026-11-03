@@ -54,8 +54,8 @@ pub(crate) struct BrowserInputs<'a> {
     pub(crate) switch: Switch,
     /// Who controls MCP on this machine.
     pub(crate) control: McpControl,
-    /// Browsers allowed at once, and browsers open now (S27's count, a stand-in for now).
-    pub(crate) slots: (usize, usize),
+    /// Whether this session holds a browser slot or one is free (`browser::limits`).
+    pub(crate) slot_free: bool,
     /// The proxy's port for this session, if there is a proxy.
     pub(crate) port: Option<u16>,
     /// The Chrome picked for this session, if any.
@@ -108,8 +108,7 @@ fn browser_entry(
     if inputs.control == McpControl::Managed {
         return Err(ToolsUnavailableReason::ManagedByFirm);
     }
-    let (limit, open) = inputs.slots;
-    if open >= limit {
+    if !inputs.slot_free {
         return Err(ToolsUnavailableReason::TooManyBrowsers);
     }
     let port = inputs

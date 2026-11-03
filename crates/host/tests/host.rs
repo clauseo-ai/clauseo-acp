@@ -26,6 +26,9 @@ mod agent_name;
 #[path = "host/blobs.rs"]
 mod blobs;
 #[cfg(test)]
+#[path = "host/browser.rs"]
+mod browser;
+#[cfg(test)]
 #[path = "host/cancel.rs"]
 mod cancel;
 #[cfg(test)]

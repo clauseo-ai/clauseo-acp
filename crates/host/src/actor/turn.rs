@@ -151,6 +151,8 @@ struct Current {
     limit: Option<LimitMark>,
     /// The places the turn's tool calls named, for the after-turn checkpoint.
     tool_paths: crate::sent::TurnPaths,
+    /// The turn's browser opens that have not finished, for `PageVisited`.
+    browser_opens: crate::sources::browser::Opens,
     /// The before-turn checkpoint, once step 4 has it.
     checkpoint_before: Option<clauseo_protocol::CheckpointId>,
     /// Drops the prompt's call (the cancel fallback).
