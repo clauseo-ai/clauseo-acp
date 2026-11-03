@@ -83,6 +83,16 @@ test("opening shows one row per source, in order, and shuts again", async () => 
   expect(rows()).toEqual([]);
 });
 
+test("a page opened twice in one tool call shows once", async () => {
+  await answered([
+    visited(1, "https://example.com/a", { call: "c" }),
+    visited(2, "https://example.com/a", { call: "c", title: "A" }),
+  ]);
+  expect(toggle().textContent).toBe("1 page read.");
+  await open();
+  expect(rows().map((r) => r.textContent)).toEqual(["Read A example.com."]);
+});
+
 test("a Claude search with no results says so", async () => {
   await answered([searched(1, "rare query")]);
   await open();

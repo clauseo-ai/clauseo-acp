@@ -5,7 +5,7 @@ import { expect, test } from "vitest";
 import { STREAM, uuid } from "../../testing/stream-script.ts";
 import { searched, visited } from "../../testing/web-sources.ts";
 import type { Envelope } from "../../transport/protocol.ts";
-import { foldWebSources } from "./sources.ts";
+import { foldWebSources, MAX_PAGES, pagesShown } from "./sources.ts";
 
 const OTHER_STREAM = `thread:${uuid(2, 1)}`;
 const webOf = (envelopes: Envelope[], call: string, stream = STREAM) =>
@@ -18,8 +18,7 @@ test("a tool call's search and pages come in seq order, whatever order they arri
     visited(2, "https://example.com/a", { title: "A", call: "c" }),
   ];
   expect(webOf(envelopes, "c")).toEqual({
-    query: "notice period",
-    results: [{ title: "A", url: "https://example.com/a" }],
+    search: { query: "notice period", results: [{ title: "A", url: "https://example.com/a" }] },
     pages: [
       { url: "https://example.com/a", title: "A", via: "web_fetch" },
       { url: "https://example.com/b", via: "web_fetch" },
@@ -38,10 +37,13 @@ test("each tool call and each thread has its own", () => {
     visited(2, "https://example.com"),
     searched(1, "elsewhere", [], { stream: OTHER_STREAM }),
   ]);
-  expect(folded.get(STREAM)?.get("call-1")).toEqual({ query: "first", results: [], pages: [] });
-  expect(folded.get(STREAM)?.get("call-2")?.query).toBeUndefined();
+  expect(folded.get(STREAM)?.get("call-1")).toEqual({
+    search: { query: "first", results: [] },
+    pages: [],
+  });
+  expect(folded.get(STREAM)?.get("call-2")?.search).toBeUndefined();
   // the same seq on another stream is another envelope
-  expect(folded.get(OTHER_STREAM)?.get("call-1")?.query).toBe("elsewhere");
+  expect(folded.get(OTHER_STREAM)?.get("call-1")?.search?.query).toBe("elsewhere");
 });
 
 test("a way of opening a page this version doesn't know reads as unknown", () => {
@@ -61,4 +63,46 @@ test("every other event, and a kind this version doesn't know, is passed over", 
   ]);
   expect([...(folded.get(STREAM)?.keys() ?? [])]).toEqual(["call-3"]);
   expect(foldWebSources([other(1, { thread_renamed: { title: "Lease" } })]).size).toBe(0);
+});
+
+test("a later search on the same tool call replaces the earlier one", () => {
+  const web = webOf(
+    [
+      searched(1, "first", [{ title: "A", url: "https://a.example" }], { call: "c" }),
+      searched(2, "second", [], { call: "c" }),
+    ],
+    "c",
+  );
+  expect(web?.search).toEqual({ query: "second", results: [] });
+});
+
+test("pages append in order with a page opened twice kept twice, the first 50 only", () => {
+  const twice = [
+    visited(1, "https://a.example", { call: "c" }),
+    visited(2, "https://a.example", { call: "c", title: "A" }),
+  ];
+  expect(webOf(twice, "c")?.pages.map((p) => p.url)).toEqual([
+    "https://a.example",
+    "https://a.example",
+  ]);
+  const many = Array.from({ length: MAX_PAGES + 5 }, (_, i) =>
+    visited(i + 1, `https://example.com/${i}`, { call: "c" }),
+  );
+  const pages = webOf(many, "c")?.pages ?? [];
+  expect(pages).toHaveLength(50);
+  expect(pages.at(-1)?.url).toBe("https://example.com/49");
+});
+
+test("the list shows each address once, where it first came, with the first title or a later one for none", () => {
+  expect(
+    pagesShown([
+      { url: "https://a.example", via: "web_fetch" },
+      { url: "https://b.example", title: "B", via: "web_fetch" },
+      { url: "https://a.example", title: "A", via: "browser" },
+      { url: "https://b.example", title: "B again", via: "web_fetch" },
+    ]),
+  ).toEqual([
+    { url: "https://a.example", title: "A", via: "web_fetch" },
+    { url: "https://b.example", title: "B", via: "web_fetch" },
+  ]);
 });

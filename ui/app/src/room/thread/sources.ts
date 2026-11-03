@@ -20,7 +20,6 @@ import type {
   StreamId,
   ToolCallEntry,
   ToolCallId,
-  WebResult,
   WebSearchRecorded,
 } from "../../transport/protocol.ts";
 
@@ -31,13 +30,29 @@ import type {
  * names no agent: the thread's agent ran it.
  */
 export type ToolCallWeb = {
-  /** The search's query, for a tool call that searched. */
-  query?: string;
-  /** The search's results, in the order the agent got them; empty for none (and always for Codex). */
-  results: WebResult[];
-  /** The pages it opened, in order. */
+  /** The tool call's search, when it searched: a later search on the same tool call replaces it. Its results come in
+   * the order the agent got them; none for none (and always none for Codex). */
+  search?: { query: string; results: { title: string; url: string }[] };
+  /** The pages it opened, appended in order, a page opened twice kept twice (pagesShown says each once); at most
+   * MAX_PAGES. */
   pages: { url: string; title?: string; via: PageVia }[];
 };
+
+/** The most pages a tool call keeps, as the host's fold does: the first ones. */
+export const MAX_PAGES = 50;
+
+/** A tool call's pages as the list shows them: each address once, where it first came, with the first title, or a
+ * later one when the first had none. */
+export function pagesShown(pages: ToolCallWeb["pages"]): ToolCallWeb["pages"] {
+  const byUrl = new Map<string, ToolCallWeb["pages"][number]>();
+  for (const page of pages) {
+    const first = byUrl.get(page.url);
+    if (first === undefined) byUrl.set(page.url, page);
+    else if (first.title === undefined && page.title !== undefined)
+      byUrl.set(page.url, { ...first, title: page.title });
+  }
+  return [...byUrl.values()];
+}
 
 /** A tool call entry as it will read once the host fills `web`. */
 export type ToolCallView = ToolCallEntry & { web?: ToolCallWeb };
@@ -61,7 +76,7 @@ export function foldWebSources(envelopes: readonly Envelope[]): WebSources {
     const calls = new Map<ToolCallId, ToolCallWeb>();
     const webOf = (call: ToolCallId) => {
       let web = calls.get(call);
-      if (web === undefined) calls.set(call, (web = { results: [], pages: [] }));
+      if (web === undefined) calls.set(call, (web = { pages: [] }));
       return web;
     };
     for (const e of [...seen.values()].sort((a, b) => a.seq - b.seq)) {
@@ -71,14 +86,13 @@ export function foldWebSources(envelopes: readonly Envelope[]): WebSources {
         page_visited?: PageVisited;
       };
       const search = event.web_search_recorded;
-      if (search !== undefined) {
-        const web = webOf(search.tool_call);
-        web.query = search.query;
-        web.results = search.results;
-      }
+      // a later search replaces the earlier one
+      if (search !== undefined)
+        webOf(search.tool_call).search = { query: search.query, results: search.results };
       const page = event.page_visited;
-      if (page !== undefined)
-        webOf(page.tool_call).pages.push({
+      const pages = page === undefined ? null : webOf(page.tool_call).pages;
+      if (page !== undefined && pages !== null && pages.length < MAX_PAGES)
+        pages.push({
           url: page.url,
           ...(page.title === undefined ? {} : { title: page.title }),
           // a way from a newer Clauseo reads as unknown, which the row says as a plain read
