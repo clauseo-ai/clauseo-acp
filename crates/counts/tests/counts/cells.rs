@@ -1,7 +1,8 @@
 //! Cells: the cap, `time_open`, `onboarding_step`, the UTC day and the 14-day and 4-week limits.
 
 use clauseo_counts::schema::{
-    Count, Crash, CrashKind, CrashProcess, Event, Onboarding, OnboardingStep, TimeOpenBucket,
+    Agent, AnswerEnded, AnswerOutcome, Count, Crash, CrashKind, CrashProcess, Event, Onboarding,
+    OnboardingStep, TimeOpenBucket, Took,
 };
 
 use crate::support::*;
@@ -138,4 +139,31 @@ fn a_tally_older_than_4_weeks_is_dropped() {
     assert!(files(&tally).contains(&"2026-W45.json".to_owned()));
     counts.tick(at(2 + 35, 60)).unwrap();
     assert!(!files(&tally).contains(&"2026-W45.json".to_owned()));
+}
+
+#[test]
+fn an_answer_stopped_before_its_first_words_has_no_first_words() {
+    let scratch = Scratch::new("first-words");
+    let counts = saving(&scratch);
+    counts.tick(at(2, HOUR)).unwrap();
+    counts.bump(Event::AnswerEnded(AnswerEnded {
+        agent: Agent::Claude,
+        outcome: AnswerOutcome::StoppedByLawyer,
+        took: Took::Lt3s,
+        first_words: None,
+    }));
+    let cells = counts.today().answer_ended;
+    assert_eq!(cells.len(), 1);
+    assert_eq!(cells[0].key.first_words, None);
+    counts.tick(at(3, 0)).unwrap();
+    let upload = FakeUpload::answering(&[Ok(200)]);
+    let sent = run(&counts, &upload, at(3, 0), at(3, HOUR), 60);
+    let json: serde_json::Value = serde_json::from_slice(&gunzip(&sent[0].1.body)).unwrap();
+    let cell = &json["days"][0]["cells"]["answer_ended"][0];
+    assert_eq!(
+        cell,
+        &serde_json::json!({
+            "agent": "claude", "outcome": "stopped_by_lawyer", "took": "lt_3s", "n": 1
+        })
+    );
 }

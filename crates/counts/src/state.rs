@@ -112,16 +112,17 @@ impl State {
             id
         };
         self.install = Some(install);
-        let today = self.store.read_today()?;
-        let mut counter = DayCounter::default();
-        counter.merge(&today.cells);
-        self.today = Today {
-            day: today.day,
-            counter,
-            foreground_secs: today.foreground_secs,
-            steps: today.steps,
-            posted: today.posted,
-        };
+        if let Some(today) = self.store.read_today(install)? {
+            let mut counter = DayCounter::default();
+            counter.merge(&today.cells);
+            self.today = Today {
+                day: today.day,
+                counter,
+                foreground_secs: today.foreground_secs,
+                steps: today.steps,
+                posted: today.posted,
+            };
+        }
         self.queue = self.store.read_queue(install)?;
         self.tallies = self
             .store
@@ -146,20 +147,22 @@ impl State {
 
     /// Writes `today.json` and every tally file when something changed and the mode saves.
     pub(crate) fn save(&mut self) -> io::Result<()> {
+        let Some(install) = self.install else {
+            return Ok(());
+        };
         if self.mode != Mode::Saving || !self.dirty {
             return Ok(());
         }
         self.store.write_today(&TodayFile {
+            install,
             day: self.today.day,
             cells: self.today.counter.to_cells(),
             foreground_secs: self.today.foreground_secs,
             steps: self.today.steps.clone(),
             posted: self.today.posted,
         })?;
-        if let Some(install) = self.install {
-            for (&week, tally) in &self.tallies {
-                self.store.write_tally(&tally.to_file(week, install))?;
-            }
+        for (&week, tally) in &self.tallies {
+            self.store.write_tally(&tally.to_file(week, install))?;
         }
         self.dirty = false;
         Ok(())

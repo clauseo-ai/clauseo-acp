@@ -61,6 +61,12 @@ cells, the weekly tally, the queue and the sender. Its row bans `matters`, `acp`
       "active_week": [ { "n": 1 } ] } }
   ```
 
+- **`answer_ended.first_words` is optional** (decided 2026-11-03). An answer can end before any
+  words (stopped at once, a failed launch, offline, a limit), and no duration bucket can say so
+  without inventing a time, so the field is left out then. Research 37 §2.2 is amended to match
+  (private repo, 3c5e861). The schema stays 1, defined with the field optional: no build has
+  ever sent schema 1 (the release endpoint is empty and nothing calls the first act yet), so no
+  older client reads it the other way.
 - **Files.** `<data_dir>/first_act_done` (written at the first act, never deleted) and
   `<data_dir>/counts/`: `install_id`, `today.json`, `queue/<day>.json`, `tally/<week>.json`. Each
   is written whole through a temp file and a rename, only in `src/write.rs`. A file that does not
@@ -86,6 +92,14 @@ cells, the weekly tally, the queue and the sender. Its row bans `matters`, `acp`
   sends it, and to the Worker before that, as for error codes. The snapshot test shows the diff.
 - `setting_changed` has no `preparing_ahead` or `keep_versions` yet; their settings do not exist.
   They are added, append-only, with those settings.
+- **A rule for the host, in two halves.** (1) Off is recorded in settings (`privacy.counts`
+  false, in `settings.json`, outside `counts/`) even when `Counts::set_enabled(false)` fails to
+  delete the folder, so the next start opens counts off, sends nothing and tries the delete
+  again. (2) While `Counts::set_enabled(true)` returns an error (the old folder still cannot be
+  deleted), on is refused: settings stay false. The crate deletes `install_id` first and drops
+  `today.json`, queued days and tallies made under another id, which covers an off that failed
+  part way; but when `counts/` itself cannot be changed, the old id cannot be removed, and only
+  these two halves keep it from being resumed.
 - The host and desktop wiring (the settings keys, `FirstAct`, the call sites, the `reqwest`
   upload) comes in S21's next pull request; until then nothing calls this crate.
 

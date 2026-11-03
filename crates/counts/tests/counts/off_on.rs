@@ -51,6 +51,70 @@ fn on_again_stays_off_while_the_old_folder_cannot_be_deleted() {
     assert_eq!(days_sent(&sent), Vec::<String>::new());
 }
 
+#[cfg(unix)]
+#[test]
+fn a_restart_after_a_failed_off_makes_a_new_id_and_takes_nothing_old() {
+    let scratch = Scratch::new("restart-after-off");
+    let counts = saving(&scratch);
+    fill_days(&counts, 2, 3);
+    counts.bump(COLD);
+    counts.tick(at(4, 60)).unwrap();
+    let old_id = counts.install_id().unwrap();
+    let dir = counts_dir(&scratch);
+    let queue = dir.join("queue");
+    set_read_only(&queue, true);
+    if can_write_in(&queue) {
+        set_read_only(&queue, false);
+        eprintln!("skipped: running as root, a read-only folder does not stop the delete");
+        return;
+    }
+    assert!(counts.set_enabled(false).is_err());
+    assert!(counts.set_enabled(true).is_err());
+    // The id went first; the old days are still on disk.
+    assert!(!dir.join("install_id").exists());
+    assert_eq!(files(&queue).len(), 2);
+    drop(counts);
+    set_read_only(&queue, false);
+    // The next start with counts still on (the host must not let that happen, 0036; this is the
+    // crate's own guard): a new id, and nothing counted under the old one is taken.
+    let counts = saving(&scratch);
+    counts.tick(at(4, 120)).unwrap();
+    assert_ne!(counts.install_id(), Some(old_id));
+    assert_eq!(counts.queued_days().len(), 0);
+    assert_eq!(counts.today().app_opened.len(), 0);
+    let upload = FakeUpload::answering(&[Ok(200)]);
+    let sent = run(&counts, &upload, at(4, 180), at(4, DAY - 1), 60);
+    assert_eq!(days_sent(&sent), Vec::<String>::new());
+}
+
+#[test]
+fn a_today_file_from_another_id_or_none_is_not_adopted() {
+    let scratch = Scratch::new("orphan-today");
+    let dir = counts_dir(&scratch);
+    let other = InstallId::random();
+    let from_other = format!(
+        r#"{{"install":"{other}","day":"2026-11-02","cells":{{"app_opened":[{{"launch":"cold","n":5}}]}},"foreground_secs":0,"steps":["welcome_shown"],"posted":null}}"#
+    );
+    let without_id = r#"{"day":"2026-11-02","cells":{"app_opened":[{"launch":"cold","n":5}]},"foreground_secs":0,"steps":["welcome_shown"],"posted":null}"#;
+    for planted in [from_other.as_str(), without_id] {
+        plant(&dir.join("today.json"), planted.as_bytes());
+        let counts = saving(&scratch);
+        counts.tick(at(2, 60)).unwrap();
+        assert_eq!(counts.today().app_opened.len(), 0, "{planted}");
+        assert_eq!(counts.today().onboarding_step.len(), 0);
+        let saved = std::fs::read_to_string(dir.join("today.json")).unwrap_or_default();
+        assert!(!saved.contains("\"n\":5"), "{saved}");
+    }
+    // Its own id's file is read back.
+    let counts = saving(&scratch);
+    counts.tick(at(2, 120)).unwrap();
+    counts.bump(COLD);
+    counts.tick(at(2, 180)).unwrap();
+    drop(counts);
+    let counts = saving(&scratch);
+    assert_eq!(counts.today().app_opened[0].n.get(), 1);
+}
+
 #[test]
 fn a_day_or_tally_left_under_another_id_is_removed_and_never_sent() {
     let scratch = Scratch::new("other-id");
