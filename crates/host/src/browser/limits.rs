@@ -2,10 +2,10 @@
 //! timeout, default timeout, max output) are the guard's, set in `crates/mcp` alone.
 //!
 //! A session that got the `browser` entry holds a slot from its start until it ends: Chrome
-//! closes after 10 minutes idle (the guard's `AGENT_BROWSER_IDLE_TIMEOUT_MS`), but the slot stays, so a session never finds its
-//! browser gone. The host counts at session start (`actor/turn/profile_loads.rs`) and frees the
-//! slot when the session's run folder goes (`actor/turn/launch_checks.rs`). Revisit after G17
-//! item 6 measures a session's memory.
+//! closes after 10 minutes idle (the guard's `AGENT_BROWSER_IDLE_TIMEOUT_MS`), but the slot
+//! stays, so a session never finds its browser gone. The host counts at session start
+//! (`actor/turn/profile_loads.rs`) and frees the slot when the session's run folder goes
+//! (`actor/turn/launch_checks.rs`). Revisit after G17 item 6 measures a session's memory.
 
 use std::collections::BTreeSet;
 
