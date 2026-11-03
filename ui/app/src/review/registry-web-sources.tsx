@@ -33,11 +33,11 @@ const ANSWER = agentText(
   "Section 14 asks for **notice in writing**, and the courts read it as at least thirty days.",
 );
 
-const IK = "https://indiankanoon.org/doc/1755638/";
+const ACT = "https://www.indiacode.nic.in/handle/123456789/1525/simple-search?query=section%2014";
 const DHC =
   "https://delhihighcourt.nic.in/judgments/2019/rent-control-notice-period-eviction-petition.pdf";
 const RESULTS = [
-  { title: "Section 14 in the Delhi Rent Control Act, 1958", url: IK },
+  { title: "Section 14 in the Delhi Rent Control Act, 1958", url: ACT },
   { title: "Notice to quit under the Rent Control Act", url: "https://www.livelaw.in/rent-notice" },
 ];
 
@@ -73,7 +73,7 @@ const opened =
 const MANY: Envelope[] = [
   searched(1, "Delhi Rent Control Act notice period", RESULTS),
   searched(2, "section 14 eviction notice thirty days"),
-  visited(3, IK, { title: "Section 14 in the Delhi Rent Control Act, 1958" }),
+  visited(3, ACT, { title: "Section 14 in the Delhi Rent Control Act, 1958" }),
   visited(4, DHC),
   visited(5, "https://www.livelaw.in/rent-notice", {
     title: "Notice to quit under the Rent Control Act",
@@ -99,14 +99,14 @@ export const WEB_SOURCES: Entry[] = [
     screen: SCREEN,
     render: opened([
       searched(1, "Delhi Rent Control Act notice period", RESULTS),
-      visited(2, IK, { title: RESULTS[0]!.title }),
+      visited(2, ACT, { title: RESULTS[0]!.title }),
     ]),
   },
   {
     id: "WEB-04",
     words: sourcesWords("1 page read."),
     screen: SCREEN,
-    render: opened([visited(1, IK, { title: RESULTS[0]!.title })]),
+    render: opened([visited(1, ACT, { title: RESULTS[0]!.title })]),
   },
   {
     id: "WEB-05",
@@ -135,14 +135,14 @@ export const WEB_SOURCES: Entry[] = [
     words: sourcesWords("Read {page}."),
     screen: SCREEN,
     // a fetched page with its title, and one with none, whose long address wraps
-    render: opened([visited(1, IK, { title: RESULTS[0]!.title }), visited(2, DHC)]),
+    render: opened([visited(1, ACT, { title: RESULTS[0]!.title }), visited(2, DHC)]),
   },
   {
     id: "WEB-09",
     words: sourcesWords("{name} opened this page on OpenAI's computers, not on this one."),
     screen: SCREEN,
     render: opened(
-      [visited(1, IK, { title: RESULTS[0]!.title, via: "codex_open_page" })],
+      [visited(1, ACT, { title: RESULTS[0]!.title, via: "codex_open_page" })],
       "codex-acp",
     ),
   },
@@ -159,9 +159,9 @@ export const WEB_SOURCES: Entry[] = [
     // a Hindi query and a Hindi page title, each marked Hindi
     render: opened([
       searched(1, "दिल्ली किराया नियंत्रण अधिनियम बेदखली नोटिस", [
-        { title: "दिल्ली किराया नियंत्रण अधिनियम, 1958 की धारा 14", url: IK },
+        { title: "दिल्ली किराया नियंत्रण अधिनियम, 1958 की धारा 14", url: ACT },
       ]),
-      visited(2, IK, { title: "दिल्ली किराया नियंत्रण अधिनियम, 1958 की धारा 14" }),
+      visited(2, ACT, { title: "दिल्ली किराया नियंत्रण अधिनियम, 1958 की धारा 14" }),
     ]),
   },
 ];

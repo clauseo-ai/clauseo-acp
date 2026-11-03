@@ -2,6 +2,7 @@
 // The web sources' copy review cells, rendered as the review renders them (in StrictMode): every cell but WEB-01 shows
 // its rows without a click, WEB-01 the shut summary alone; and the tool calls above the answer carry the titles the
 // real adapters send, never a made-up "Web".
+import { readFileSync } from "node:fs";
 import { act, StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, test } from "vitest";
@@ -64,7 +65,9 @@ test("the cells' tool calls carry the adapters' titles, never \"Web\"", async ()
   expect(titles.length).toBe(5);
   expect(titles).not.toContain("Web");
   expect(titles[0]).toBe('Search "Delhi Rent Control Act notice period"');
-  expect(titles[2]).toBe("Fetch https://indiankanoon.org/doc/1755638/");
+  expect(titles[2]).toBe(
+    "Fetch https://www.indiacode.nic.in/handle/123456789/1525/simple-search?query=section%2014",
+  );
 });
 
 test("each adapter's title for each kind of web tool call", () => {
@@ -79,4 +82,37 @@ test("each adapter's title for each kind of web tool call", () => {
   );
   const calls = webCallsFor([searched(1, "q"), visited(2, "https://a.example")], "claude-acp");
   expect(calls.map((c) => c.tool_call?.title)).toEqual(['Search "q"', "Fetch https://a.example"]);
+});
+
+test("WEB-08's page rows end their sentence at the link, the site muted after it with no period", async () => {
+  const host = await cell("WEB-08");
+  expect([...rows(host)].map((r) => r.textContent)).toEqual([
+    "Read Section 14 in the Delhi Rent Control Act, 1958. indiacode.nic.in",
+    "Read https://delhihighcourt.nic.in/judgments/2019/rent-control-notice-period-eviction-petition.pdf. delhihighcourt.nic.in",
+  ]);
+});
+
+test("WEB-10's browser row puts the site after the whole sentence", async () => {
+  const host = await cell("WEB-10");
+  expect(rows(host)[0]?.textContent).toBe(
+    "Opened Delhi High Court: judgments in the browser. delhihighcourt.nic.in",
+  );
+});
+
+// Nothing at launch names the judgment search the lead left out, the copy page included
+test("no fixture or cell of the web sources names the left-out judgment search", () => {
+  const files = [
+    "./registry-web-sources.tsx",
+    "./registry-web-sources.test.tsx",
+    "../testing/web-sources.ts",
+    "../room/thread/sources.test.tsx",
+    "../room/thread/sources.test.ts",
+  ];
+  for (const file of files) {
+    const text = readFileSync(new URL(file, import.meta.url), "utf8").toLowerCase();
+    // split so this test's own words don't match
+    expect(text.includes("indian" + "kanoon"), file).toBe(false);
+    expect(text.includes("indian" + " kanoon"), file).toBe(false);
+  }
+  for (const id of WEB_SOURCES.map((e) => e.id)) expect(id).toMatch(/^WEB-\d\d$/);
 });

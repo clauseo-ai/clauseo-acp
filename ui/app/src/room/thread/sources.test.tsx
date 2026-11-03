@@ -42,9 +42,14 @@ const open = async () => h!.click(toggle());
 test("envelopes delivered put the shut summary under that turn's answer, after its words", async () => {
   await answered([
     searched(1, "notice period rent control", [
-      { title: "Rent Control Act, s. 14", url: "https://indiankanoon.org/doc/1/" },
+      {
+        title: "Rent Control Act, s. 14",
+        url: "https://www.indiacode.nic.in/handle/123456789/1525",
+      },
     ]),
-    visited(2, "https://indiankanoon.org/doc/1/", { title: "Rent Control Act, s. 14" }),
+    visited(2, "https://www.indiacode.nic.in/handle/123456789/1525", {
+      title: "Rent Control Act, s. 14",
+    }),
     visited(3, "https://example.com/a"),
   ]);
   const list = h!.one("web-sources");
@@ -60,7 +65,10 @@ test("envelopes delivered put the shut summary under that turn's answer, after i
 test("opening shows one row per source, in order, and shuts again", async () => {
   await answered([
     searched(1, "notice period", [
-      { title: "Rent Control Act, s. 14", url: "https://www.indiankanoon.org/doc/1/" },
+      {
+        title: "Rent Control Act, s. 14",
+        url: "https://www.indiacode.nic.in/handle/123456789/1525",
+      },
       { title: "Notice to quit", url: "https://example.com/notice" },
     ]),
     visited(2, "https://example.com/page", { title: "A page" }),
@@ -71,10 +79,10 @@ test("opening shows one row per source, in order, and shuts again", async () => 
   expect(rows()[0]!.querySelector("p")?.textContent).toBe("Searched the web for notice period.");
   const results = h!.all("web-source-result").map((r) => r.textContent);
   expect(results).toEqual([
-    "Rent Control Act, s. 14 indiankanoon.org",
+    "Rent Control Act, s. 14 indiacode.nic.in",
     "Notice to quit example.com",
   ]);
-  expect(rows()[1]!.textContent).toBe("Read A page example.com.");
+  expect(rows()[1]!.textContent).toBe("Read A page. example.com");
   await open();
   expect(rows()).toEqual([]);
 });
@@ -86,7 +94,7 @@ test("a page opened twice in one tool call shows once", async () => {
   ]);
   expect(toggle().textContent).toBe("1 page read.");
   await open();
-  expect(rows().map((r) => r.textContent)).toEqual(["Read A example.com."]);
+  expect(rows().map((r) => r.textContent)).toEqual(["Read A. example.com"]);
 });
 
 test("a Claude search with no results says so", async () => {
@@ -108,7 +116,7 @@ test("a page Codex opened says it was opened on OpenAI's computers", async () =>
   await answered([visited(1, "https://example.com/x", { via: "codex_open_page" })], "codex-acp");
   await open();
   expect(rows()[0]!.textContent).toBe(
-    "Read https://example.com/x example.com.ChatGPT opened this page on OpenAI's computers, not on this one.",
+    "Read https://example.com/x. example.comChatGPT opened this page on OpenAI's computers, not on this one.",
   );
 });
 
@@ -118,8 +126,8 @@ test("a page the browser opened says so, and an unknown way reads as a plain rea
     visited(2, "https://example.com/u", { via: "teleport" as never, title: "U" }),
   ]);
   await open();
-  expect(rows()[0]!.textContent).toBe("Opened B example.com in the browser.");
-  expect(rows()[1]!.textContent).toBe("Read U example.com.");
+  expect(rows()[0]!.textContent).toBe("Opened B in the browser. example.com");
+  expect(rows()[1]!.textContent).toBe("Read U. example.com");
 });
 
 test("a link press opens the address through open_external, never the webview", async () => {
