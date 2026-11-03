@@ -21,7 +21,7 @@ import {
   IconAppearance,
   IconLanguage,
   IconPlanLimit,
-  IconSafeWorkspace,
+  IconSend,
 } from "@clauseo/components/icons/icons.tsx";
 import { iconIn } from "@clauseo/components/icons/icon-in.tsx";
 
@@ -425,7 +425,7 @@ for (const platform of ["mac", "windows"] as const) {
 test("each section on the side carries its 16 px icon before its name, hidden; the name still names the section", async () => {
   const { el } = await mount();
   const rows = [...el.querySelectorAll<HTMLButtonElement>(".set-nav-row")];
-  const icons = [IconPlanLimit, IconLanguage, IconAppearance, IconSafeWorkspace, IconAbout];
+  const icons = [IconPlanLimit, IconLanguage, IconAppearance, IconSend, IconAbout];
   expect(rows).toHaveLength(icons.length);
   rows.forEach((row, i) => {
     const holder = row.querySelector(".set-nav-icon");

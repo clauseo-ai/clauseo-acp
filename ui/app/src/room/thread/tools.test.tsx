@@ -143,6 +143,9 @@ test("both tools off: one Open Settings at the popover's foot, under what a chan
   expect(row("browser")?.querySelector("button")).toBeNull();
   expect(foot()?.querySelector("p")?.textContent).toBe("Changes apply to new conversations.");
   expect(popup()?.lastElementChild).toBe(foot());
+  // parted from the rows by a hairline, outside every row, so it reads as the whole popover's
+  expect(foot()?.classList.contains("tool-pop-foot")).toBe(true);
+  expect(foot()?.closest('[data-testid="tool-row"]')).toBeNull();
   expect(settingsButtons()[0]?.textContent).toBe("Open Settings");
   await h.click(settingsButtons()[0]);
   expect(h.transport.only("open_settings")).toHaveLength(1);
@@ -296,7 +299,7 @@ test("a computer that can't download Chrome says to install it, with no Try agai
   await openPopover();
   expect(words("browser")).toEqual([
     "Off. There's no Chrome on this computer.",
-    "This computer can't download Chrome for Clauseo. Install Google Chrome to use the browser.",
+    "Clauseo can't download Chrome itself. Install Google Chrome to use the browser.",
   ]);
   expect(row("browser")?.querySelector("button")).toBeNull();
   expect(document.body.textContent).not.toContain(MESSAGE);

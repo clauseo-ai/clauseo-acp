@@ -19,6 +19,7 @@ const HI = {
   // a page, by how it was opened; a page the browser opened is quoted by its title, and a page with no title is its
   // own address, a link, and needs no quotes
   "Read {page} online.": null,
+  "Read '{page}' online.": null,
   "{name} opened this page on OpenAI's computers, not on this one.": null,
   "Opened '{page}' in the browser.": null,
   "Opened {page} in the browser.": null,

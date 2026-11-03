@@ -101,7 +101,10 @@ export function ToolPopover({
         })}
       </ul>
       {settings && (
-        <div className="grid gap-s1 px-s3 pt-s1 pb-s2" data-testid="tool-settings-foot">
+        <div
+          className="tool-pop-foot grid gap-s1 px-s3 pt-s2 pb-s2"
+          data-testid="tool-settings-foot"
+        >
           <p className="text-small text-muted">{w.t("Changes apply to new conversations.")}</p>
           <span className="mt-s1">
             <Button

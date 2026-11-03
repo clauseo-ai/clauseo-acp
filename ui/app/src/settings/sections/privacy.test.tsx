@@ -16,7 +16,7 @@ import type { Settings, ToolSettings } from "../../room/host-next.ts";
 import { stubFonts } from "../../room/thread/testing.ts";
 import { FakeTransport } from "../../transport/fake-transport.ts";
 import type { AgentLimitsView, LimitsView } from "../../transport/protocol.ts";
-import { IconWebsite } from "@clauseo/components/icons/icons.tsx";
+import { IconSafeWorkspace, IconWebsite } from "@clauseo/components/icons/icons.tsx";
 import { SECTIONS } from "../sections.tsx";
 import { SettingsApp } from "../settings-app.tsx";
 
@@ -167,7 +167,7 @@ test("with the tools, each switch shows its value, and a flip sends set_tool_set
 });
 
 const SEARCH_NOTE = "Clauseo can search the web and read pages. On unless you turn it off.";
-const LOCKED = "Managed by your organisation.";
+const LOCKED = "Managed by your organisation";
 const NO_CHECK = "Off until Clauseo can check each website the browser opens.";
 
 test("a locked key's switch is disabled, shows the host's value, gives the lock's reason for its note, and a press sends nothing", async () => {
@@ -239,10 +239,11 @@ test("an off Browser switch gives no such reason", async () => {
   expect(pane(el).textContent).not.toContain(NO_CHECK);
 });
 
-test("Privacy's nav icon is not the web's globe", () => {
+test("Privacy's nav icon is neither the web's globe nor the Safe workspace's lock", () => {
   const privacy = SECTIONS.find((s) => s.id === "privacy");
   expect(privacy?.icon).toBeDefined();
   expect(privacy?.icon).not.toBe(IconWebsite);
+  expect(privacy?.icon).not.toBe(IconSafeWorkspace);
 });
 
 test("the section says nothing of Indian Kanoon, in either state", async () => {
