@@ -1,7 +1,7 @@
 //! The command line: `--scenario`, `--pace-ms`, `--check`, `--list` and `--hold`, parsed by hand.
 
 use std::ffi::OsString;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use crate::{EXIT_LOAD, EXIT_OK, EXIT_WRITE, Error, Scenario, bundled, diagnostic};
@@ -24,6 +24,7 @@ pub fn cli(args: Vec<OsString>) -> i32 {
     match args.as_slice() {
         ["--list"] => list(),
         ["--hold"] => hold(),
+        ["--scenario", "hook"] => hook(),
         ["--scenario", target] => scenario(target, 0),
         _ if args.contains(&"--pace-ms") => paced(&args),
         ["--check", paths @ ..] if !paths.is_empty() => check(paths),
@@ -59,6 +60,24 @@ fn pace_ms(text: &str) -> Option<u32> {
         return None;
     }
     text.parse().ok().filter(|ms| *ms <= MAX_PACE_MS)
+}
+
+/// `--scenario hook`: reads stdin to its end and prints `hook ok <byte count>`. It stands in for
+/// a hook a host runs with one JSON object on stdin, so the sandbox tests can run it as a sidecar.
+fn hook() -> i32 {
+    hook_to(&mut std::io::stdin().lock(), &mut std::io::stdout().lock())
+}
+
+/// [`hook`] with its input and output passed in. A failed read is one stderr line and
+/// [`EXIT_LOAD`], and nothing reaches `out`.
+fn hook_to(input: &mut impl Read, out: &mut impl Write) -> i32 {
+    let mut bytes = Vec::new();
+    if let Err(error) = input.read_to_end(&mut bytes) {
+        return fail(&diagnostic(format_args!(
+            "hook: reading stdin failed: {error}"
+        )));
+    }
+    print_to(out, &format!("hook ok {}\n", bytes.len()))
 }
 
 /// Writes `fake_agent: holding` to stderr, so a test that reads that line knows the process is
@@ -199,6 +218,30 @@ mod tests {
         fn flush(&mut self) -> std::io::Result<()> {
             Ok(())
         }
+    }
+
+    /// A stdin whose read fails.
+    struct Broken;
+
+    impl Read for Broken {
+        fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+            Err(std::io::ErrorKind::BrokenPipe.into())
+        }
+    }
+
+    #[test]
+    fn hook_prints_the_byte_count_of_its_stdin() {
+        let json = r#"{"tool_name":"Write"}"#;
+        let mut out = Vec::new();
+        assert_eq!(hook_to(&mut json.as_bytes(), &mut out), EXIT_OK);
+        assert_eq!(out, format!("hook ok {}\n", json.len()).as_bytes());
+    }
+
+    #[test]
+    fn hook_refuses_an_unreadable_stdin_and_prints_nothing() {
+        let mut out = Vec::new();
+        assert_eq!(hook_to(&mut Broken, &mut out), EXIT_LOAD);
+        assert_eq!(out, b"");
     }
 
     #[test]

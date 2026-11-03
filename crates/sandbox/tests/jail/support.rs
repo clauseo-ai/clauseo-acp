@@ -90,6 +90,15 @@ impl World {
         path
     }
 
+    /// Copies `from`, a file outside the jail such as a built binary, to `rel`, keeping its
+    /// execute bit. The folder of `rel` is made first.
+    pub(crate) fn copy_in(&self, from: &Path, rel: &str) -> PathBuf {
+        let path = self.at(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::copy(from, &path).unwrap();
+        path
+    }
+
     pub(crate) fn hard_link(&self, original: &str, link: &str) -> PathBuf {
         let path = self.at(link);
         std::fs::hard_link(self.at(original), &path).unwrap();
