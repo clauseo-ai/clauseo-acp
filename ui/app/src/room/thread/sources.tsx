@@ -1,13 +1,26 @@
-// The web sources at the end of an answer (sources.ts has where they come from): one quiet line, shut at first, that
-// counts the rows it opens to ("3 sources", the kinds' icons, a chevron) and so adds to the step chip's counts rather
-// than repeating them, and opened, one row for each search or page in the order they ran, in the step list's words. A turn with none draws nothing, which is every turn in the
-// real app today. Links open through the host's open_external (its own confirm names the site); none navigates the
-// webview. Queries, titles and addresses are isolated runs, marked Hindi when most of their letters are Devanagari,
-// and an address wraps anywhere rather than being cut.
+// The web sources at the end of an answer (sources.ts has where they come from), icons first (DESIGN.md §Icons). Folded,
+// one quiet line: up to three of its sites' tiles (the search glyph for a search that lists no pages), the count and a
+// chevron. Open, one row for each search or page in the order they ran, each led by its icon: a search's glyph and its
+// query in quotes, its results nested under it as tile, title and site; a page's tile, title and site, with the browser
+// glyph in the tile's place for a page the browser opened and an info tip for one Codex opened on OpenAI's side. A turn
+// with none draws nothing, which is every turn in the real app today. Links open through the host's open_external (its
+// own confirm names the site); none navigates the webview. Tiles are letters, never favicons: nothing here makes a
+// request. Queries, titles and addresses are isolated runs, marked Hindi when most of their letters are Devanagari, and
+// an address wraps anywhere rather than being cut.
 import { use, useState, type MouseEvent, type ReactNode } from "react";
-import { IconFold, IconToolFetch, IconToolSearch } from "@clauseo/components/icons/icons.tsx";
+import { siteHost } from "@clauseo/components/clauseo/site-host.ts";
+import { SiteTile } from "@clauseo/components/clauseo/site-tile.tsx";
+import {
+  IconBrowser,
+  IconFold,
+  IconInfo,
+  IconToolSearch,
+} from "@clauseo/components/icons/icons.tsx";
 import { langOfText } from "@clauseo/components/lib/script.ts";
-import { useSourcesWords, type SourcesKey } from "@clauseo/components/lib/words-sources.ts";
+import { useSourcesWords } from "@clauseo/components/lib/words-sources.ts";
+import { InfoTip } from "@clauseo/components/ui/info-tip.tsx";
+import { LayerProvider } from "@clauseo/components/ui/layer.tsx";
+import { Tooltip } from "@clauseo/components/ui/tooltip.tsx";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type { AgentId, StreamId, ToolCallId, WebResult } from "../../transport/protocol.ts";
 import { kindOf, planName } from "../agent.ts";
@@ -21,15 +34,8 @@ import {
   type ToolCallWeb,
 } from "./sources.ts";
 
-/** The site an address is on, without its "www."; null for an address that doesn't parse. */
-function siteOf(url: string): string | null {
-  try {
-    const host = new URL(url).host;
-    return host === "" ? null : host.replace(/^www\./, "");
-  } catch {
-    return null;
-  }
-}
+/** The most marks the folded line shows. */
+const MAX_MARKS = 3;
 
 /** Words the agent or the web wrote: isolated, marked Hindi when they are. */
 function Run({ text }: { text: string }) {
@@ -64,11 +70,10 @@ function PageLink({ url, title }: { url: string; title: string | null }) {
   );
 }
 
-/** The site a page is on, muted after a space, with no period of its own: after a result's link, or after a page row's
- * whole sentence. Nothing for an address that doesn't parse, or for a page with no title, whose link is already its
- * address. */
+/** The site a page is on, muted after its link. Nothing for an address with no host, or for a page with no title,
+ * whose link is already its address. */
 function Site({ url, title }: { url: string; title: string | null }) {
-  const site = title === null ? null : siteOf(url);
+  const site = title === null ? null : siteHost(url);
   return site === null ? null : (
     <>
       {" "}
@@ -79,36 +84,51 @@ function Site({ url, title }: { url: string; title: string | null }) {
   );
 }
 
-/** A string with one slot filled by an element. */
-function Slotted({
-  k,
-  slot,
-  name,
-  children,
-}: {
-  k: SourcesKey;
-  slot: string;
-  name?: string;
-  children: ReactNode;
-}) {
+/** A row's leading icon, 14 px, on the first line of its words. */
+function Lead({ children }: { children: ReactNode }) {
+  return <span className="mt-(--s0-5) inline-flex shrink-0">{children}</span>;
+}
+
+/** The browser glyph in a page's tile's place: named, with its name as a tooltip. */
+function BrowserMark() {
   const w = useSourcesWords();
-  const [before, after] = w.parts(k, slot, name === undefined ? undefined : { name });
+  const label = w.src("Opened in the browser");
   return (
-    <>
-      {before}
-      {children}
-      {after}
-    </>
+    <Tooltip content={label}>
+      {/* focusable, so the keyboard reaches its tooltip as the pointer does */}
+      <span
+        role="img"
+        aria-label={label}
+        tabIndex={0}
+        data-testid="web-source-browser"
+        className="inline-flex rounded-ref"
+      >
+        <IconBrowser size={14} />
+      </span>
+    </Tooltip>
   );
 }
+
+/** A title from the web, null when it is empty. */
+const titleOf = (title: string | undefined): string | null =>
+  title === undefined || title === "" ? null : title;
 
 function Results({ results }: { results: readonly WebResult[] }) {
   return (
     <ul className="mt-(--s0-5) grid gap-(--s0-5)">
       {results.map((r, i) => (
-        <li key={`${i}:${r.url}`} data-testid="web-source-result">
-          <PageLink url={r.url} title={r.title === "" ? null : r.title} />
-          <Site url={r.url} title={r.title === "" ? null : r.title} />
+        <li
+          key={`${i}:${r.url}`}
+          data-testid="web-source-result"
+          className="flex items-start gap-(--s1-5)"
+        >
+          <Lead>
+            <SiteTile url={r.url} size={14} />
+          </Lead>
+          <p className="min-w-0">
+            <PageLink url={r.url} title={titleOf(r.title)} />
+            <Site url={r.url} title={titleOf(r.title)} />
+          </p>
         </li>
       ))}
     </ul>
@@ -117,7 +137,7 @@ function Results({ results }: { results: readonly WebResult[] }) {
 
 type Page = ToolCallWeb["pages"][number];
 
-/** A search's row: its query, then each result on a line of its own, or what the agent doesn't tell. */
+/** A search's row: its query in quotes, then its results nested under it, or a muted word on what it doesn't list. */
 function SearchRow({
   query,
   results,
@@ -130,56 +150,59 @@ function SearchRow({
   name: string;
 }) {
   const w = useSourcesWords();
+  const [before, after] = w.parts("'{query}'", "query");
   return (
     <>
-      <p>
-        <Slotted k="Searched online for '{query}'." slot="query">
+      <Lead>
+        <IconToolSearch size={14} />
+      </Lead>
+      <div className="min-w-0">
+        <p className="text-primary" data-testid="web-source-query">
+          {before}
           <Run text={query} />
-        </Slotted>
-        {codex
-          ? ` ${w.src("{name} doesn't report which pages it found.", { name })}`
-          : results.length === 0
-            ? ` ${w.src("No results.")}`
-            : null}
-      </p>
-      {!codex && results.length > 0 && <Results results={results} />}
+          {after}
+        </p>
+        {codex ? (
+          <p className="mt-(--s0-5) flex items-start gap-(--s1-5)" data-testid="web-source-note">
+            <Lead>
+              <IconInfo size={14} />
+            </Lead>
+            <span>{w.src("{name} doesn't list its pages", { name })}</span>
+          </p>
+        ) : results.length === 0 ? (
+          <p className="mt-(--s0-5)" data-testid="web-source-note">
+            {w.src("No results")}
+          </p>
+        ) : (
+          <Results results={results} />
+        )}
+      </div>
     </>
   );
 }
 
-/** A page's row, by how it was opened. */
-function PageRow({ page, name }: { page: Page; name: string }) {
+/** A page's row: its tile (the browser glyph for a page the browser opened), its link and its site, and for a page
+ * Codex opened, an info tip on where. */
+function PageRow({ page }: { page: Page }) {
   const w = useSourcesWords();
-  const title = page.title === undefined || page.title === "" ? null : page.title;
-  const link = <PageLink url={page.url} title={title} />;
-  const site = <Site url={page.url} title={title} />;
-  if (page.via === "browser")
-    return (
-      <p>
-        {/* a title is quoted, so it doesn't run into the sentence; an address alone needs no quotes */}
-        <Slotted
-          k={title === null ? "Opened {page} in the browser." : "Opened '{page}' in the browser."}
-          slot="page"
-        >
-          {link}
-        </Slotted>
-        {site}
-      </p>
-    );
-  const read = (
-    <p>
-      <Slotted k={title === null ? "Read {page} online." : "Read '{page}' online."} slot="page">
-        {link}
-      </Slotted>
-      {site}
-    </p>
-  );
-  if (page.via !== "codex_open_page") return read;
+  const title = titleOf(page.title);
+  const side = w.src("Opened on OpenAI's side");
   return (
     <>
-      {read}
-      <p className="text-muted">
-        {w.src("{name} opened this page on OpenAI's computers, not on this one.", { name })}
+      <Lead>
+        {page.via === "browser" ? <BrowserMark /> : <SiteTile url={page.url} size={14} />}
+      </Lead>
+      <p className="min-w-0">
+        <PageLink url={page.url} title={title} />
+        <Site url={page.url} title={title} />
+        {page.via === "codex_open_page" && (
+          <>
+            {" "}
+            <InfoTip label={side} className="align-[-2px]">
+              {side}
+            </InfoTip>
+          </>
+        )}
       </p>
     </>
   );
@@ -209,6 +232,28 @@ function itemsOf(webs: readonly (readonly [ToolCallId, ToolCallWeb])[]): Item[] 
       page,
     })),
   ]);
+}
+
+/** A mark of the folded line: a site's tile, or the search glyph. */
+type Mark = { kind: "site"; url: string } | { kind: "search" };
+
+/** The folded line's marks, in the rows' order: each site once (a search's by its results), the search glyph once
+ * for a search that lists no pages, at most MAX_MARKS. */
+function marksOf(items: readonly Item[], codex: boolean): Mark[] {
+  const marks: Mark[] = [];
+  const seen = new Set<string>();
+  const add = (key: string, mark: Mark) => {
+    if (seen.has(key) || marks.length >= MAX_MARKS) return;
+    seen.add(key);
+    marks.push(mark);
+  };
+  const site = (url: string) => add(`site:${siteHost(url) ?? url}`, { kind: "site", url });
+  for (const item of items) {
+    if (item.kind === "page") site(item.page.url);
+    else if (codex || item.results.length === 0) add("search", { kind: "search" });
+    else for (const r of item.results) site(r.url);
+  }
+  return marks;
 }
 
 /** The web sources at the end of one turn's answer: its tool calls' web, by id, in order; nothing when none found
@@ -249,53 +294,54 @@ function SourcesOf({
     }),
   );
   if (items.length === 0) return null;
-  // the icons say which kinds there are; the words count the rows the list opens to
-  const searches = items.some((s) => s.kind === "search");
-  const pages = items.some((s) => s.kind === "page");
   const codex = agent !== undefined && kindOf(agent, []) === "codex";
-  // the thread's plan names it; a page opened on OpenAI's computers is always ChatGPT's
+  // the thread's plan names it
   const name = agent === undefined ? planName("codex-acp") : planName(agent);
   return (
-    <div data-testid="web-sources" className="not-first:mt-(--s3)">
-      <button
-        type="button"
-        className="work-done"
-        data-testid="web-sources-toggle"
-        aria-expanded={open}
-        data-panel-open={open ? "" : undefined}
-        onClick={() => setOpen((o) => !o)}
-      >
-        {searches && <IconToolSearch size={11} />}
-        {pages && <IconToolFetch size={11} />}
-        <span>{w.summary(items.length)}</span>
-        <IconFold size={12} className="work-chev" />
-      </button>
-      {open && (
-        <ol className="work-list">
-          {items.map((s) => (
-            <li
-              key={s.key}
-              data-testid="web-source"
-              data-kind={s.kind === "search" ? "search" : s.page.via}
-              className="flex items-start gap-(--s2)"
-            >
-              <span className="mt-(--s0-5) shrink-0">
-                {s.kind === "search" ? <IconToolSearch size={14} /> : <IconToolFetch size={14} />}
-              </span>
-              <div className="min-w-0">
+    // the info tip and the browser glyph's tooltip mount here, inside the thread, which stands in front of the end of
+    // the body (.room-centre's z-index): mounted there they would open behind it, unseen
+    <LayerProvider>
+      <div data-testid="web-sources" className="not-first:mt-(--s3)">
+        <button
+          type="button"
+          className="work-done"
+          data-testid="web-sources-toggle"
+          aria-expanded={open}
+          data-panel-open={open ? "" : undefined}
+          onClick={() => setOpen((o) => !o)}
+        >
+          {/* the sites' tiles lead; the words count the rows the list opens to */}
+          <span className="inline-flex items-center gap-(--s0-5)" data-testid="web-sources-marks">
+            {marksOf(items, codex).map((m) =>
+              m.kind === "search" ? (
+                <IconToolSearch key="search" size={11} />
+              ) : (
+                <SiteTile key={m.url} url={m.url} size={11} />
+              ),
+            )}
+          </span>
+          <span data-testid="web-sources-count">{w.summary(items.length)}</span>
+          <IconFold size={12} className="work-chev" />
+        </button>
+        {open && (
+          <ol className="work-list">
+            {items.map((s) => (
+              <li
+                key={s.key}
+                data-testid="web-source"
+                data-kind={s.kind === "search" ? "search" : s.page.via}
+                className="flex items-start gap-(--s2)"
+              >
                 {s.kind === "search" ? (
                   <SearchRow query={s.query} results={s.results} codex={codex} name={name} />
                 ) : (
-                  <PageRow
-                    page={s.page}
-                    name={s.page.via === "codex_open_page" && !codex ? planName("codex-acp") : name}
-                  />
+                  <PageRow page={s.page} />
                 )}
-              </div>
-            </li>
-          ))}
-        </ol>
-      )}
-    </div>
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
+    </LayerProvider>
   );
 }

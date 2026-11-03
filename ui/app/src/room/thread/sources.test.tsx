@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
-// The web sources at the end of an answer, in the real room over FakeTransport: envelopes on the channel's events arm
-// put a shut summary under their turn's answer, which opens to one row per search or page; Codex's search and open
-// page say what Codex doesn't tell; a link opens through open_external; a Hindi title is marked Hindi; and a turn with
-// none draws nothing.
+// The web sources at the end of an answer, in the real room over FakeTransport, icons first: envelopes on the channel's
+// events arm put a folded line under their turn's answer (up to three sites' tiles or the search glyph, the count, a
+// chevron), which opens to one row per search or page led by its icon; Codex's search and open page say what Codex
+// doesn't tell in a few muted words or an info tip; a browser page shows the browser glyph, named; a link opens through
+// open_external; a Hindi title is marked Hindi; no tile fetches anything; and a turn with none draws nothing.
 import { act } from "react";
 import { afterEach, expect, test } from "vitest";
 import { agentText, reset, step, userMessage } from "../../testing/stream-script.ts";
@@ -38,8 +39,30 @@ async function answered(envelopes: Envelope[] | null, agent: AgentId = "claude-a
 const toggle = () => h!.one("web-sources-toggle") as HTMLButtonElement;
 const rows = () => h!.all("web-source");
 const open = async () => h!.click(toggle());
+/** What a reader reads: an element's text without what is hidden from assistive technology (the tiles' letters). */
+const words = (el: Element | null | undefined): string => {
+  if (el === null || el === undefined) return "";
+  const copy = el.cloneNode(true) as Element;
+  for (const hidden of copy.querySelectorAll("[aria-hidden=true]")) hidden.remove();
+  return copy.textContent ?? "";
+};
+const count = () => h!.one("web-sources-count")?.textContent;
+/** The folded line's marks: a tile's letter, or "search" for the search glyph. */
+const marks = () =>
+  [...h!.one("web-sources-marks")!.children].map((m) =>
+    m.classList.contains("site-tile")
+      ? `${m.textContent}:${m.getAttribute("data-size")}`
+      : "search",
+  );
+/** A row's leading mark: its tile's letter, "search", "browser" or "info". */
+const lead = (row: Element) => {
+  const first = row.querySelector(":scope > span");
+  if (first?.querySelector(".site-tile") != null) return `tile:${first.textContent}`;
+  if (first?.querySelector('[role="img"]') != null) return "browser";
+  return first?.querySelector("svg") == null ? "none" : "glyph";
+};
 
-test("envelopes delivered put the shut summary under that turn's answer, after its words", async () => {
+test("envelopes delivered put the folded line under that turn's answer: tiles, the count, nothing else", async () => {
   await answered([
     searched(1, "notice period rent control", [
       {
@@ -54,15 +77,42 @@ test("envelopes delivered put the shut summary under that turn's answer, after i
   ]);
   const list = h!.one("web-sources");
   expect(list?.closest("section")?.classList.contains("step-answer")).toBe(true);
-  const words = h!.one("message-agent")!;
-  expect(words.compareDocumentPosition(list!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(toggle().textContent).toBe("3 sources");
+  const said = h!.one("message-agent")!;
+  expect(said.compareDocumentPosition(list!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  // each site once, in order, at 11 px; the words are the count alone
+  expect(marks()).toEqual(["I:11", "E:11"]);
+  expect(words(toggle())).toBe("3 sources");
   expect(toggle().getAttribute("aria-expanded")).toBe("false");
-  expect(toggle().querySelectorAll("svg[aria-hidden]").length).toBe(3);
+  // the chevron and no other glyph
+  expect(toggle().querySelectorAll(":scope > svg").length).toBe(1);
   expect(rows()).toEqual([]);
 });
 
-test("opening shows one row per source, in order, and shuts again", async () => {
+test("the folded line shows at most three marks, distinct, in order, the search glyph for a search with none", async () => {
+  await answered([
+    searched(1, "rare query"),
+    visited(2, "https://www.alpha.example/1", { title: "A" }),
+    visited(3, "https://alpha.example/2", { title: "A2" }),
+    searched(4, "second rare query"),
+    visited(5, "https://beta.example/1", { title: "B" }),
+    visited(6, "https://gamma.example/1", { title: "G" }),
+  ]);
+  expect(marks()).toEqual(["search", "A:11", "B:11"]);
+  expect(count()).toBe("6 sources");
+});
+
+test("a search's results lend the folded line their sites", async () => {
+  await answered([
+    searched(1, "notice", [
+      { title: "Z", url: "https://zeta.example/z" },
+      { title: "Y", url: "https://yota.example/y" },
+    ]),
+  ]);
+  expect(marks()).toEqual(["Z:11", "Y:11"]);
+  expect(count()).toBe("1 source");
+});
+
+test("opening shows one row per source, in order, each led by its icon, and shuts again", async () => {
   await answered([
     searched(1, "notice period", [
       {
@@ -76,15 +126,33 @@ test("opening shows one row per source, in order, and shuts again", async () => 
   await open();
   expect(toggle().getAttribute("aria-expanded")).toBe("true");
   expect(rows().map((r) => r.dataset["kind"])).toEqual(["search", "web_fetch"]);
-  expect(rows()[0]!.querySelector("p")?.textContent).toBe("Searched online for 'notice period'.");
-  const results = h!.all("web-source-result").map((r) => r.textContent);
-  expect(results).toEqual([
+  expect(rows().map(lead)).toEqual(["glyph", "tile:E"]);
+  // the query is a quoted run, no sentence
+  expect(h!.one("web-source-query")?.textContent).toBe("'notice period'");
+  const results = h!.all("web-source-result");
+  expect(results.map(words)).toEqual([
     "Rent Control Act, s. 14 indiacode.nic.in",
     "Notice to quit example.com",
   ]);
-  expect(rows()[1]!.textContent).toBe("Read 'A page' online. example.com");
+  expect(results.map(lead)).toEqual(["tile:I", "tile:E"]);
+  expect(results.every((r) => r.querySelector('.site-tile[data-size="14"]') !== null)).toBe(true);
+  expect(words(rows()[1])).toBe("A page example.com");
   await open();
   expect(rows()).toEqual([]);
+});
+
+test("no row says round 2's sentences", async () => {
+  await answered([
+    searched(1, "notice period", [{ title: "A", url: "https://example.com/a" }]),
+    searched(2, "rare query"),
+    visited(3, "https://example.com/b", { title: "B" }),
+    visited(4, "https://example.com/c", { via: "browser", title: "C" }),
+    visited(5, "https://example.com/d"),
+  ]);
+  await open();
+  const text = words(h!.one("web-sources"));
+  for (const gone of ["Searched online", "Read ", "online.", "in the browser", "Opened"])
+    expect(text, gone).not.toContain(gone);
 });
 
 test("a page opened twice in one tool call shows once", async () => {
@@ -92,45 +160,66 @@ test("a page opened twice in one tool call shows once", async () => {
     visited(1, "https://example.com/a", { call: "c" }),
     visited(2, "https://example.com/a", { call: "c", title: "A" }),
   ]);
-  expect(toggle().textContent).toBe("1 source");
+  expect(count()).toBe("1 source");
   await open();
-  expect(rows().map((r) => r.textContent)).toEqual(["Read 'A' online. example.com"]);
+  expect(rows().map(words)).toEqual(["A example.com"]);
 });
 
-test("a Claude search with no results says so", async () => {
+test("a Claude search with no results says so in two muted words", async () => {
   await answered([searched(1, "rare query")]);
   await open();
-  expect(rows()[0]!.textContent).toBe("Searched online for 'rare query'. No results.");
+  expect(h!.one("web-source-query")?.textContent).toBe("'rare query'");
+  expect(h!.one("web-source-note")?.textContent).toBe("No results");
+  expect(h!.all("web-source-result")).toEqual([]);
 });
 
-test("a Codex search says Codex doesn't report its pages, and shows no links", async () => {
+test("a Codex search: one muted line behind the info glyph, no links, the search glyph folded", async () => {
   await answered([searched(1, "notice period", [], { agent: "codex-acp" })], "codex-acp");
+  expect(marks()).toEqual(["search"]);
   await open();
-  expect(rows()[0]!.textContent).toBe(
-    "Searched online for 'notice period'. ChatGPT doesn't report which pages it found.",
-  );
+  const note = h!.one("web-source-note")!;
+  expect(note.textContent).toBe("ChatGPT doesn't list its pages");
+  expect(note.querySelector("svg[aria-hidden]")).not.toBeNull();
   expect(rows()[0]!.querySelector("a")).toBeNull();
 });
 
-test("a page Codex opened says it was opened on OpenAI's computers", async () => {
+test("a page Codex opened: its tile and link, and an info tip that says it was opened on OpenAI's side", async () => {
   await answered([visited(1, "https://example.com/x", { via: "codex_open_page" })], "codex-acp");
   await open();
-  expect(rows()[0]!.textContent).toBe(
-    "Read https://example.com/x online.ChatGPT opened this page on OpenAI's computers, not on this one.",
+  expect(lead(rows()[0]!)).toBe("tile:E");
+  expect(words(rows()[0]).trim()).toBe("https://example.com/x");
+  const tip = rows()[0]!.querySelector<HTMLButtonElement>(
+    'button[aria-label="Opened on OpenAI\'s side"]',
   );
+  expect(tip).not.toBeNull();
+  await act(async () => tip!.click());
+  const popup = [...document.querySelectorAll("[role=dialog]")].find(
+    (d) => d.textContent === "Opened on OpenAI's side",
+  );
+  expect(popup).toBeDefined();
+  // it opens inside the room's main landmark, in front of the thread, not at the end of the body behind it
+  expect(popup!.closest("main")).not.toBeNull();
 });
 
-test("a page the browser opened says so, and an unknown way reads as a plain read", async () => {
+test("a page the browser opened shows the browser glyph in its tile's place, named; an unknown way reads as a plain page", async () => {
   await answered([
     visited(1, "https://example.com/b", { via: "browser", title: "B" }),
     visited(2, "https://example.com/u", { via: "teleport" as never, title: "U" }),
   ]);
   await open();
-  expect(rows()[0]!.textContent).toBe("Opened 'B' in the browser. example.com");
-  expect(rows()[1]!.textContent).toBe("Read 'U' online. example.com");
+  expect(rows().map(lead)).toEqual(["browser", "tile:E"]);
+  const glyph = rows()[0]!.querySelector('[role="img"]')!;
+  expect(glyph.getAttribute("aria-label")).toBe("Opened in the browser");
+  expect(rows()[0]!.querySelector(".site-tile")).toBeNull();
+  expect(words(rows()[0])).toBe("B example.com");
+  expect(words(rows()[1])).toBe("U example.com");
+  // its tooltip's layer is inside the room's main landmark, so it opens in front of the thread
+  const layer = h!.one("web-sources")!.parentElement!.querySelector("[data-layer]");
+  expect(layer).not.toBeNull();
+  expect(layer!.closest("main")).not.toBeNull();
 });
 
-test("the summary counts the open list's rows: each search once, whatever its results, and each page once", async () => {
+test("the count is the open list's rows: each search once, whatever its results, and each page once", async () => {
   await answered([
     searched(1, "notice period", [
       { title: "A", url: "https://example.com/a" },
@@ -140,24 +229,35 @@ test("the summary counts the open list's rows: each search once, whatever its re
     visited(3, "https://example.com/c", { call: "c" }),
     visited(4, "https://example.com/c", { call: "c", title: "C" }),
   ]);
-  expect(toggle().textContent).toBe("3 sources");
+  expect(count()).toBe("3 sources");
   await open();
   expect(rows().length).toBe(3);
 });
 
-test("a page with no title is its address, a link, with no site after it and no quotes in the browser", async () => {
+test("a page with no title is its address, a link, with no site after it", async () => {
   await answered([
     visited(1, "https://example.com/plain"),
     visited(2, "https://example.com/opened", { via: "browser" }),
     searched(3, "notice period", [{ title: "", url: "https://example.com/untitled" }]),
   ]);
   await open();
-  expect(rows()[0]!.textContent).toBe("Read https://example.com/plain online.");
-  expect(rows()[1]!.textContent).toBe("Opened https://example.com/opened in the browser.");
-  expect(h!.all("web-source-result").map((r) => r.textContent)).toEqual([
-    "https://example.com/untitled",
-  ]);
+  expect(words(rows()[0])).toBe("https://example.com/plain");
+  expect(words(rows()[1])).toBe("https://example.com/opened");
+  expect(h!.all("web-source-result").map(words)).toEqual(["https://example.com/untitled"]);
   expect(h!.all("web-source-site")).toEqual([]);
+});
+
+test("no tile asks the web for anything: letters only, no image, no favicon address", async () => {
+  await answered([
+    searched(1, "notice", [{ title: "A", url: "https://example.com/a" }]),
+    visited(2, "https://example.org/b", { title: "B" }),
+  ]);
+  await open();
+  const list = h!.one("web-sources")!;
+  expect(list.querySelectorAll(".site-tile").length).toBeGreaterThan(0);
+  expect(list.querySelectorAll("img, image, picture, source, link").length).toBe(0);
+  expect(list.innerHTML).not.toContain("favicon");
+  expect(list.innerHTML).not.toMatch(/url\(/);
 });
 
 test("a link press opens the address through open_external, never the webview", async () => {
@@ -215,6 +315,7 @@ test("a Hindi title and query are marked Hindi, an English one isn't, and each i
   ]);
   await open();
   const bdis = rows().map((r) => r.querySelector("bdi"));
+  // the query, then each title
   expect(bdis.map((b) => b?.getAttribute("lang"))).toEqual(["hi", "hi", null]);
 });
 

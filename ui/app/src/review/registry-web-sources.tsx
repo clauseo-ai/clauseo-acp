@@ -1,8 +1,9 @@
 // The copy review entries for the web sources at the end of an answer (room/thread/sources.tsx), apart from
-// registry.tsx. Ids are WEB-01 on, since the registry's id rule (review/status.ts) takes a dash then digits. Each is the real room over FakeTransport: one question, the tool calls that
-// searched and read, the answer, and the envelopes that fill those tool calls' web (sources.ts's fold, until the host puts `web` on the entry
-// itself). WEB-12 shows the list shut, as an answer first does; every other entry shows it open from the start
-// (SourcesOpenAtFirst), so its row's words are there without a click.
+// registry.tsx. Ids are WEB-01 on, since the registry's id rule (review/status.ts) takes a dash then digits. Each is the
+// real room over FakeTransport: one question, the tool calls that searched and read, the answer, and the envelopes that
+// fill those tool calls' web (sources.ts's fold, until the host puts `web` on the entry itself). WEB-12 and WEB-13 show
+// the list folded, as an answer first does; every other entry shows it open from the start (SourcesOpenAtFirst), so its
+// row is there without a click, and WEB-09 and WEB-10 show the words behind their icon, its tip open.
 import { src, type SourcesKey } from "@clauseo/components/lib/words-sources.ts";
 import { agentText, step, userMessage } from "../testing/stream-script.ts";
 import { eventsOf, searched, visited, webCallsFor } from "../testing/web-sources.ts";
@@ -10,7 +11,7 @@ import type { AgentId, Envelope, ViewEntry } from "../transport/protocol.ts";
 import type { Entry } from "./entry.ts";
 import { threadHost } from "./hosts.ts";
 import { SourcesOpenAtFirst } from "../room/thread/sources.ts";
-import { RoomOver } from "./states.tsx";
+import { RoomClicking, RoomFocusing, RoomOver } from "./states.tsx";
 import type { WordsRef } from "./words.ts";
 
 /** A string of words-sources.ts, hi: later while its Hindi is null. */
@@ -70,6 +71,19 @@ const opened =
     </SourcesOpenAtFirst>
   );
 
+/** The list open, then the control `selector` names pressed once it shows: for words behind an info tip. */
+const pressing = (envelopes: Envelope[], agent: AgentId, selector: string) => () => (
+  <SourcesOpenAtFirst value>
+    <RoomClicking host={hostFor(envelopes, agent)} clicks={[selector]} />
+  </SourcesOpenAtFirst>
+);
+/** The list open, then the element `selector` names focused from the keyboard: for words in an icon's tooltip. */
+const focusing = (envelopes: Envelope[], agent: AgentId, selector: string) => () => (
+  <SourcesOpenAtFirst value>
+    <RoomFocusing host={hostFor(envelopes, agent)} focus={selector} />
+  </SourcesOpenAtFirst>
+);
+
 const MANY: Envelope[] = [
   searched(1, "Delhi Rent Control Act notice period", RESULTS),
   searched(2, "section 14 eviction notice thirty days"),
@@ -81,24 +95,29 @@ const MANY: Envelope[] = [
 ];
 
 // WEB-01 to WEB-04 named the old summary's two sentences ("2 web searches. 3 pages read."), which repeated the step
-// chip's counts; they are retired, not reused. The summary's one line is WEB-12 and WEB-13.
+// chip's counts; they are retired, not reused. Round 3 (icons first) retired the rows' sentences: WEB-08 and WEB-15
+// ("Read '{page}' online.", "Read {page} online.") and WEB-14 ("Opened {page} in the browser."), whose rows are now a
+// tile, a link and a site, with no words; WEB-05, 06, 07, 09, 10 and 11 keep their ids for their lines' new words.
 export const WEB_SOURCES: Entry[] = [
   {
     id: "WEB-05",
-    words: sourcesWords("Searched online for '{query}'."),
+    words: sourcesWords("'{query}'"),
     screen: SCREEN,
-    // the whole list open: Claude's search with its results as links and their sites, a search with none, and pages
+    // the whole list open: a search with its results nested as tiles, links and sites, a search with none, a titled
+    // page, a page with no title (its address the link, no site after it) and another titled page
     render: opened(MANY),
+    // tall enough for every row under the answer
+    height: 900,
   },
   {
     id: "WEB-06",
-    words: sourcesWords("No results."),
+    words: sourcesWords("No results"),
     screen: SCREEN,
     render: opened([searched(1, "rent control notice Karol Bagh 1987")]),
   },
   {
     id: "WEB-07",
-    words: sourcesWords("{name} doesn't report which pages it found."),
+    words: sourcesWords("{name} doesn't list its pages"),
     screen: SCREEN,
     render: opened(
       [searched(1, "Delhi Rent Control Act notice period", [], { agent: "codex-acp" })],
@@ -106,32 +125,32 @@ export const WEB_SOURCES: Entry[] = [
     ),
   },
   {
-    id: "WEB-08",
-    words: sourcesWords("Read '{page}' online."),
-    screen: SCREEN,
-    // a fetched page with its title and its site, and one with none, whose long address wraps and isn't repeated
-    render: opened([visited(1, ACT, { title: RESULTS[0]!.title }), visited(2, DHC)]),
-  },
-  {
     id: "WEB-09",
-    words: sourcesWords("{name} opened this page on OpenAI's computers, not on this one."),
+    words: sourcesWords("Opened on OpenAI's side"),
     screen: SCREEN,
-    render: opened(
+    // Codex's open page, its info tip pressed open
+    render: pressing(
       [visited(1, ACT, { title: RESULTS[0]!.title, via: "codex_open_page" })],
       "codex-acp",
+      `button[aria-label="${src("en", "Opened on OpenAI's side")}"]`,
     ),
   },
   {
     id: "WEB-10",
-    words: sourcesWords("Opened '{page}' in the browser."),
+    words: sourcesWords("Opened in the browser"),
     screen: SCREEN,
-    render: opened([visited(1, DHC, { title: "Delhi High Court: judgments", via: "browser" })]),
+    // the browser glyph in the tile's place, its tooltip shown from the keyboard
+    render: focusing(
+      [visited(1, DHC, { title: "Delhi High Court: judgments", via: "browser" })],
+      "claude-acp",
+      '[data-testid="web-source-browser"]',
+    ),
   },
   {
     id: "WEB-11",
-    words: sourcesWords("Read '{page}' online."),
+    words: sourcesWords("'{query}'"),
     screen: SCREEN,
-    // a Hindi query and a Hindi page title, each marked Hindi
+    // a Hindi query, a Hindi result and a Hindi page title, each marked Hindi
     render: opened([
       searched(1, "दिल्ली किराया नियंत्रण अधिनियम बेदखली नोटिस", [
         { title: "दिल्ली किराया नियंत्रण अधिनियम, 1958 की धारा 14", url: ACT },
@@ -143,27 +162,14 @@ export const WEB_SOURCES: Entry[] = [
     id: "WEB-12",
     words: sourcesWords("{n} sources"),
     screen: SCREEN,
-    // shut, as an answer first shows it: five rows
+    // folded, as an answer first shows it: five rows, the first two sites' tiles and the search glyph
     render: shut(MANY),
   },
   {
     id: "WEB-13",
     words: sourcesWords("1 source"),
     screen: SCREEN,
-    render: opened([visited(1, ACT, { title: RESULTS[0]!.title })]),
-  },
-  {
-    id: "WEB-14",
-    words: sourcesWords("Opened {page} in the browser."),
-    screen: SCREEN,
-    // a page the browser opened with no title: its address, unquoted, with no site after it
-    render: opened([visited(1, DHC, { via: "browser" })]),
-  },
-  {
-    id: "WEB-15",
-    words: sourcesWords("Read {page} online."),
-    screen: SCREEN,
-    // a fetched page with no title: its address, unquoted, as the link
-    render: opened([visited(1, DHC)]),
+    // folded: one page, its one tile
+    render: shut([visited(1, ACT, { title: RESULTS[0]!.title })]),
   },
 ];

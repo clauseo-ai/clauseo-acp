@@ -1,28 +1,26 @@
-// The words of the web sources at the end of an answer: the one quiet line that counts them, and each row once it is
-// open (app/src/room/thread/sources.tsx). As in words.ts the English is the key, the exact string on screen. A row's
-// {query} and {page} are filled by the row itself, a link or an isolated run, so the row splits its string at them
-// (partsOf); {name} is the plan's name, "Claude" or "ChatGPT". The rows' verbs and quoting are the step list's
-// (words-steps.ts on UTC): "Searched online for '{query}'." and "Read {page} online." are its English, word for word.
+// The words of the web sources at the end of an answer (app/src/room/thread/sources.tsx), the fewest that still read:
+// the rows lead with icons (a site's tile, the search glyph, the browser glyph), so the words are the count when it is
+// folded, a search's query in quotes, and a few muted words where an icon can't say it. As in words.ts the English is
+// the key, the exact string on screen. A search's {query} is filled by an isolated run, so the row splits its string at
+// it (partsOf); {name} is the plan's name, "Claude" or "ChatGPT".
 // Every string ships English only: its Hindi is null (hi: later), so the Hindi interface shows the English.
 import { useDisplay } from "./display.ts";
 import type { Lang } from "./display.ts";
 import { wordsOf, type Hindi, type Slots } from "./words-core.ts";
 
 const HI = {
-  // the summary line: how many rows the open list has, the singular apart
+  // the folded line: how many rows the open list has, the singular apart
   "1 source": null,
   "{n} sources": null,
-  // a search, its results each on a line of their own under it
-  "Searched online for '{query}'.": null,
-  "No results.": null,
-  "{name} doesn't report which pages it found.": null,
-  // a page, by how it was opened; a page the browser opened is quoted by its title, and a page with no title is its
-  // own address, a link, and needs no quotes
-  "Read {page} online.": null,
-  "Read '{page}' online.": null,
-  "{name} opened this page on OpenAI's computers, not on this one.": null,
-  "Opened '{page}' in the browser.": null,
-  "Opened {page} in the browser.": null,
+  // a search: its query, quoted, after the search glyph; its results nested under it
+  "'{query}'": null,
+  "No results": null,
+  // Codex's search: its pages aren't told, after the info glyph
+  "{name} doesn't list its pages": null,
+  // a page Codex opened: its info tip's name and text
+  "Opened on OpenAI's side": null,
+  // a page the browser opened: the browser glyph's name and tooltip, in the tile's place
+  "Opened in the browser": null,
 } as const satisfies Hindi<string>;
 
 /** Every string of the web sources, in English. */
@@ -49,7 +47,7 @@ export function partsOf(
   return at < 0 ? [text, ""] : [text.slice(0, at), text.slice(at + slot.length + 2)];
 }
 
-/** The web sources' words of the page's language, bound: const w = useSourcesWords(); w.src("No results."). */
+/** The web sources' words of the page's language, bound: const w = useSourcesWords(); w.src("No results"). */
 export function useSourcesWords() {
   const { lang } = useDisplay();
   return {
