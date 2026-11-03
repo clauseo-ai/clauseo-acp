@@ -176,19 +176,7 @@ impl Running {
 
     /// The next `FolderScanned`, skipping the other app events.
     fn next_scan(&mut self) -> FolderScanned {
-        loop {
-            match block_on(self.app.next()).unwrap().decode().unwrap() {
-                HostEvent::FolderScanned(event) => return event,
-                HostEvent::SettingsChanged(_)
-                | HostEvent::MattersChanged(_)
-                | HostEvent::ThreadsChanged(_) => {}
-                other @ (HostEvent::Patches(_)
-                | HostEvent::Events(_)
-                | HostEvent::CaughtUp { .. }
-                | HostEvent::AccountLimitsChanged(_)
-                | HostEvent::LimitsViewChanged(_)) => panic!("unexpected {other:?}"),
-            }
-        }
+        next_scan_of(&mut self.app)
     }
 
     /// The scan events already in the app channel, without waiting.
@@ -218,6 +206,23 @@ impl Running {
     fn shutdown(self) {
         block_on(self.host.shutdown()).unwrap();
         self.join.join().unwrap();
+    }
+}
+
+/// The next `FolderScanned` on `app`, skipping the other app events.
+fn next_scan_of(app: &mut AppSubscription) -> FolderScanned {
+    loop {
+        match block_on(app.next()).unwrap().decode().unwrap() {
+            HostEvent::FolderScanned(event) => return event,
+            HostEvent::SettingsChanged(_)
+            | HostEvent::MattersChanged(_)
+            | HostEvent::ThreadsChanged(_) => {}
+            other @ (HostEvent::Patches(_)
+            | HostEvent::Events(_)
+            | HostEvent::CaughtUp { .. }
+            | HostEvent::AccountLimitsChanged(_)
+            | HostEvent::LimitsViewChanged(_)) => panic!("unexpected {other:?}"),
+        }
     }
 }
 
@@ -274,6 +279,7 @@ fn progress_is_throttled_to_one_event_per_window_on_the_host_clock() {
     host.shutdown();
 }
 
+/// A scan of another folder cancels the first, whose cancelled end is still published.
 #[test]
 fn a_second_scan_cancels_the_first() {
     let (walk, harness) = Harness::new();
@@ -311,6 +317,47 @@ fn a_second_scan_cancels_the_first() {
         (second, true, false)
     );
     done(two);
+    host.shutdown();
+}
+
+/// A scan of a folder superseded by a newer scan of the same folder ends without a word, even
+/// when it ends after the newer one (stuck on a hung stat): the folder's last event stays the
+/// newer scan's `done`, live and in a new subscriber's catch-up, and the older command is still
+/// answered.
+#[test]
+fn a_superseded_scan_of_the_same_folder_ends_without_an_event() {
+    let (walk, harness) = Harness::new();
+    let mut host = Running::start("scan-same-folder", Some(walk));
+    let (_, folder) = host.folder("m", &[]);
+    let one = host.send(1, scan(folder));
+    let first_call = harness.next();
+    assert_eq!(host.next_scan().folder, folder);
+
+    let two = host.send(2, scan(folder));
+    let second_call = harness.next();
+    let placed = host.next_scan();
+    assert!(!placed.done, "{placed:?}");
+    second_call.steps.send(Step::End).unwrap();
+    let last = host.next_scan();
+    assert_eq!(
+        (last.folder, last.done, last.cancelled),
+        (folder, true, false)
+    );
+    done(two);
+
+    // The first walk returns only now, cancelled.
+    assert!(first_call.step(Step::Check));
+    done(one);
+    assert_eq!(
+        host.ready_scans(),
+        [],
+        "a superseded scan published its end"
+    );
+
+    // A window that subscribes now catches up on the newer scan's end.
+    let mut late = block_on(host.host.subscribe_app(Principal::LocalDesktop)).unwrap();
+    let caught = next_scan_of(&mut late);
+    assert_eq!(caught, last);
     host.shutdown();
 }
 
