@@ -43,9 +43,10 @@
   .step-group-more {
     color: var(--quiet);
   }
+  /* the failure in primary ink at the line's own weight (the chip's 450): the ink and the break mark it, no bolder */
   .step-group-trouble {
     color: var(--primary);
-    font-weight: 560;
+    font-weight: var(--w-ui);
   }
   /* an icon among the words: centred on the words' own line, in either language's line height, as the kind icons are
      centred on the line */
