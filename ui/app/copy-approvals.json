@@ -2175,5 +2175,13 @@
     "at": "2026-11-03",
     "by": "Rohan",
     "note": "Rohan, via the orchestrator (#236)"
+  },
+  "U11-50": {
+    "en": "Released {date}",
+    "hi": "{date} को जारी",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator (U11 release date)"
   }
 }
