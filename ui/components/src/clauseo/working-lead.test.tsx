@@ -9,7 +9,14 @@ import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, expect, test } from "vitest";
-import { IconBreak, IconChecking, IconOffline, IconQuestion, IconTick } from "../icons/icons.tsx";
+import {
+  IconBreak,
+  IconChecking,
+  IconNeedsPermission,
+  IconOffline,
+  IconQuestion,
+  IconTick,
+} from "../icons/icons.tsx";
 import { NoticeCard, RoomBand } from "./limit-note.tsx";
 import { RoomScopeProvider } from "./room-scope-provider.tsx";
 import { WorkingLine, type WorkingState } from "./working-line.tsx";
@@ -37,7 +44,8 @@ const CLOCK = markup(<IconChecking size={16} className="working-icon" />);
 const BREAK = markup(<IconBreak size={16} className="working-icon" />);
 
 const QUESTION = markup(<IconQuestion size={16} className="working-icon" />);
-const STATES: [string, WorkingState, "wait" | "break" | "pen" | "question"][] = [
+const PERMISSION = markup(<IconNeedsPermission size={16} className="working-icon" />);
+const STATES: [string, WorkingState, "wait" | "break" | "pen" | "permission" | "question"][] = [
   [
     "a check",
     { kind: "check", name: "Acme", waitingFor: "the judgments", expected: "16:32" },
@@ -55,9 +63,25 @@ const STATES: [string, WorkingState, "wait" | "break" | "pen" | "question"][] = 
     "break",
   ],
   [
-    "the lawyer's turn",
-    { kind: "wait", words: "Needs your permission.", pill: null, asks: true },
+    "a permission waiting on the lawyer",
+    { kind: "wait", words: "Needs your permission.", pill: null, asks: "permission" },
+    "permission",
+  ],
+  [
+    "a question waiting on the lawyer",
+    { kind: "wait", words: "A question for you.", pill: null, asks: "question" },
     "question",
+  ],
+  [
+    "a permission while the pen would write",
+    {
+      kind: "wait",
+      words: "Needs your permission.",
+      pill: null,
+      asks: "permission",
+      working: true,
+    },
+    "permission",
   ],
   ["Clauseo writing", { kind: "wait", words: "Answering.", pill: null, working: true }, "pen"],
   [
@@ -73,7 +97,10 @@ test.each(STATES)("the working line on %s leads with its own mark", async (_, st
   expect(row.dataset["lead"]).toBe(lead);
   const icon = row.querySelector(".working-icon")!;
   if (lead === "pen") expect(icon.classList.contains("working-pen")).toBe(true);
-  else expect(icon.outerHTML).toBe({ break: BREAK, question: QUESTION, wait: CLOCK }[lead]);
+  else
+    expect(icon.outerHTML).toBe(
+      { break: BREAK, permission: PERMISSION, question: QUESTION, wait: CLOCK }[lead],
+    );
   expect(row.querySelectorAll(".working-icon")).toHaveLength(1);
   // every lead stands in the same slot, its first part, so the words start in one place whatever leads them
   const slot = row.firstElementChild as HTMLElement;

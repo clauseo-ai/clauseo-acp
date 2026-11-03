@@ -32,7 +32,6 @@ import {
   type PlanChoice,
   type SlashCommand,
 } from "@clauseo/components/clauseo/composer.tsx";
-import { sentence } from "@clauseo/components/clauseo/matter.ts";
 import type { WorkingState } from "@clauseo/components/clauseo/working-line.tsx";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { frame } from "@clauseo/components/lib/words-frame.ts";
@@ -53,6 +52,7 @@ import { useNow } from "../../store/limits.ts";
 import { pausedLine, type Paused } from "./limit-words.ts";
 import { pickFull, queueFullLine } from "./composer-queue.ts";
 import { ComposerSteer } from "./composer-steer.tsx";
+import { asksWords } from "./step-names.ts";
 import type { AskHow, Drafts } from "./session.ts";
 
 export function WorkComposer({
@@ -280,15 +280,7 @@ export function WorkComposer({
   const answering: WorkingState =
     asks === null
       ? { kind: "wait", words: doing ?? frame(w.lang, "Answering."), pill: null, working: true }
-      : {
-          kind: "wait",
-          words: sentence(
-            w.lang,
-            frame(w.lang, asks === "permission" ? "Needs your permission" : "A question for you"),
-          ),
-          pill: null,
-          asks: true,
-        };
+      : { kind: "wait", words: asksWords(w.lang, asks), pill: null, asks };
   const line: BreakLine | null =
     failed ??
     (refused !== null

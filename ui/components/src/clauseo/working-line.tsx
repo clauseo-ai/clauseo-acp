@@ -9,7 +9,13 @@
 import { lazy, Suspense, type ReactNode } from "react";
 import { late } from "../lib/late.ts";
 import { Button } from "../ui/button.tsx";
-import { IconBreak, IconChecking, IconFold, IconQuestion } from "../icons/icons.tsx";
+import {
+  IconBreak,
+  IconChecking,
+  IconFold,
+  IconNeedsPermission,
+  IconQuestion,
+} from "../icons/icons.tsx";
 import { useThreadWords } from "../lib/words-thread.ts";
 import { sentence } from "./matter.ts";
 import { PenMark } from "./pen-mark.tsx";
@@ -47,9 +53,9 @@ export type WorkingState =
       pill: string | null;
       /** Optional: Clauseo is writing now, so the pen writes in the icon's place. */
       working?: boolean;
-      /** Optional: the wait is on the lawyer, a permission prompt or a question: the question mark leads, never the
-       * pen. */
-      asks?: boolean;
+      /** Optional: the wait is on the lawyer, a permission prompt or a question: the permission's own shield leads a
+       * permission, the question mark a question, never the pen. */
+      asks?: "permission" | "question";
       /** Optional: the wait's own ways on, such as a download's Try again, Restart or Sign in again. */
       actions?: ReactNode;
       /** Optional: the details those ways fold open. */
@@ -58,10 +64,10 @@ export type WorkingState =
       code?: string;
     };
 
-/** What leads the row: the question mark while it waits on the lawyer; the pen while Clauseo writes; the break on an error (a stop, not responding, or a wait that
+/** What leads the row: the permission's shield or the question mark while it waits on the lawyer; the pen while Clauseo writes; the break on an error (a stop, not responding, or a wait that
  * carries an error's code), so a broken line looks broken before it's read; the clock on every other wait. */
-function leadOf(state: WorkingState): "pen" | "break" | "question" | "wait" {
-  if (state.kind === "wait" && state.asks === true) return "question";
+function leadOf(state: WorkingState): "pen" | "break" | "permission" | "question" | "wait" {
+  if (state.kind === "wait" && state.asks !== undefined) return state.asks;
   if ("working" in state && state.working === true) return "pen";
   if (state.kind === "stopped" || state.kind === "retrying") return "break";
   return state.kind === "wait" && state.code !== undefined ? "break" : "wait";
@@ -78,6 +84,8 @@ function Lead({ state }: { state: WorkingState }) {
         <PenMark className="working-icon working-pen" />
       ) : lead === "break" ? (
         <IconBreak size={16} className="working-icon" />
+      ) : lead === "permission" ? (
+        <IconNeedsPermission size={16} className="working-icon" />
       ) : lead === "question" ? (
         <IconQuestion size={16} className="working-icon" />
       ) : (

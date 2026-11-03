@@ -262,7 +262,7 @@ test("while the agent works, the live group and the working line say what is bei
   expect(h.host.querySelector(".working-pen")).toBeNull();
 });
 
-test("while a permission prompt or a question waits on the lawyer, the working line says so, led by the question mark, and the pen stops", async () => {
+test("while a permission prompt or a question waits on the lawyer, the working line and the live group's line say so, the permission led by its shield, the question by the question mark, and the pen stops", async () => {
   h = await mountRoom();
   const reply = { locations: [{ inside: { path: "a/Reply.docx" } }] };
   h.deliver([
@@ -284,19 +284,27 @@ test("while a permission prompt or a question waits on the lawyer, the working l
   ]);
   await h.settle();
   expect(working().querySelector(".working-pen")).toBeNull();
-  expect(lead()).toBe("question");
+  expect(lead()).toBe("permission");
   expect(working().textContent).toContain(`${frame("en", "Needs your permission")}.`);
   expect(working().textContent).not.toContain("Changing");
+  // the live group's line tells the step as waiting for the lawyer too, never as underway
+  const groupLine = () => lineOf(groups()[0])?.textContent ?? "";
+  expect(groupLine()).toContain(`${frame("en", "Needs your permission")}.`);
+  expect(groupLine()).not.toContain("Changing");
+  expect(groups()[0]!.dataset["live"]).toBe("true");
   // answered, the turn runs again and the pen with it
   h.deliver([upsert(call(8, 202, "edit", "in_progress", reply)), upsert(header("running"))]);
   await h.settle();
   expect(working().querySelector(".working-pen")).not.toBeNull();
+  expect(groupLine()).toContain("Changing Reply.docx.");
   // a question for the lawyer, with no permission pending
   h.deliver([reset([ASKED, read(7, 201, "a/Lease.pdf"), elicitation(8)], header("needs_you"))]);
   await h.settle();
   expect(working().querySelector(".working-pen")).toBeNull();
   expect(lead()).toBe("question");
   expect(working().textContent).toContain(`${frame("en", "A question for you")}.`);
+  // no step is in hand here, so the group says what finished
+  expect(groupLine()).toBe("1 paper read.");
 });
 
 test("in Hindi, the line and the rows in Hindi, the paper's name as filed", async () => {
