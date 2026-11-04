@@ -4,7 +4,9 @@
 //!
 //! One job model runs every sign-in, sign-out and status check (`signin/job.rs`): one job per
 //! agent at a time, on its own thread, which reports through `SigninHub::emit_job` and is
-//! silenced once superseded. The job hands its task to the agent's flow: Claude's `auth login`
+//! silenced once superseded. A task that starts a login run first waits, `Queued`, until the
+//! install is `Ready` and the sign-in host resolves (`signin/queue.rs`). The job hands its task
+//! to the agent's flow: Claude's `auth login`
 //! with the `BROWSER` shim (`signin/claude.rs`, `signin/shim.rs`); Codex's `login` and
 //! `--device-auth`, after the port 1455 probe (`signin/codex.rs`); detection
 //! (`signin/detect.rs`), the status check and the lawyer's choices about a login they already
@@ -35,6 +37,7 @@ pub(crate) mod env;
 pub(crate) mod found;
 pub(crate) mod job;
 pub(crate) mod marker;
+pub(crate) mod queue;
 pub(crate) mod reuse;
 pub(crate) mod run;
 pub(crate) mod shim;

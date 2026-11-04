@@ -9,6 +9,7 @@
 //!
 //! Sign-in jobs (`signin`) run beside the installs, one per agent, on the model in
 //! [`crate::signin::job`]: the calls reserve the agent's job slot, the worker starts the job.
+//! Every install `Ready` kicks the agent's queued sign-in, if any (`SigninHub::install_ready`).
 
 use std::collections::BTreeMap;
 use std::sync::mpsc;
@@ -135,7 +136,26 @@ impl Agents {
 
     /// `agent`'s finished install, when it is `Ready`.
     pub fn installed(&self, agent: &AgentId) -> Option<Installed> {
-        self.shared.lock().installed.get(agent).cloned()
+        self.shared.installed(agent)
+    }
+
+    /// Tests only: ends `agent`'s install as an install job would, through the same emit,
+    /// `Ready` with `installed` or, for `None`, `Failed` (kind `Failed`, an empty log), so a
+    /// test can see what a queued sign-in does when an install finishes.
+    #[cfg(feature = "test-support")]
+    pub fn finish_install_for_tests(&self, agent: &AgentId, installed: Option<Installed>) {
+        let state = match &installed {
+            Some(installed) => InstallState::Ready {
+                version: installed.version.clone(),
+            },
+            None => InstallState::Failed(Failure {
+                kind: FailureKind::Failed,
+                need_mb: None,
+                free_mb: None,
+                log: InstallLog::new(agent),
+            }),
+        };
+        self.shared.emit(agent, state, installed);
     }
 
     /// Signs `agent` in with `method` (Claude `ClaudeAi` or `Console`, Codex `Browser` or
@@ -143,9 +163,11 @@ impl Agents {
     /// Codex's `DeviceCode`) and then `SignedIn` or `Failed`, with `OpenUrl` for the page
     /// Claude would open (Codex opens its own). Codex's `Browser` first checks that port 1455 is
     /// free, else `Failed { code: PortBusy }` and no run. A sign-in or sign-out already going
-    /// for `agent` is stopped first, silently: "Didn't open?" is a new sign-in. Refused when
-    /// the agent is unknown, the method is another agent's, the caller gave it no home, or its
-    /// install is not `Ready`.
+    /// for `agent` is stopped first, silently: "Didn't open?" is a new sign-in. While the
+    /// install is not `Ready`, or the agent's sign-in host does not resolve (offline, looked up
+    /// again every 30 s), the state is `Queued` and the run starts by itself once both hold;
+    /// `cancel_sign_in` ends the wait. Refused when the agent is unknown, the method is another
+    /// agent's, or the caller gave it no home.
     pub fn sign_in(&self, agent: &AgentId, method: Method) -> Result<(), SigninError> {
         let start = self
             .shared
@@ -156,22 +178,22 @@ impl Agents {
 
     /// Codex's "Try again" after `signin.port_busy`: probes port 1455 every 2 s and starts the
     /// browser sign-in once it is free, as `sign_in(agent, Browser)` then does. The state is
-    /// unchanged while it waits; `cancel_sign_in` stops the wait. Refused for Claude (it has
-    /// no callback port) and as `sign_in` is.
+    /// unchanged while it waits; `cancel_sign_in` stops the wait. Queued as `sign_in` is.
+    /// Refused for Claude (it has no callback port) and as `sign_in` is.
     pub fn try_again(&self, agent: &AgentId) -> Result<(), SigninError> {
         let start = self.shared.signin.try_again(agent, self.installed(agent));
         self.start_signin(start)
     }
 
-    /// Cancels `agent`'s sign-in run: its child's tree is killed and the state becomes
-    /// `Failed { code: Cancelled }`. Refused when no sign-in run is going.
+    /// Cancels `agent`'s sign-in run, or its queued sign-in: a child's tree is killed and the
+    /// state becomes `Failed { code: Cancelled }`. Refused when no sign-in is going or queued.
     pub fn cancel_sign_in(&self, agent: &AgentId) -> Result<(), SigninError> {
         self.shared.signin.cancel(agent)
     }
 
     /// Writes `code` and a newline to `agent`'s login run's stdin (Claude's paste route), then
     /// drops it, zeroed. It is never stored, logged or shown. Refused when no sign-in run is
-    /// going.
+    /// going (a queued sign-in has no run yet).
     pub fn paste_code(&self, agent: &AgentId, code: PasteCode) -> Result<(), SigninError> {
         self.shared.signin.paste(agent, code)
     }
@@ -224,8 +246,8 @@ impl Agents {
 
     /// "Sign in with a different account": writes `no-reuse` and starts Clauseo's own sign-in
     /// (Claude's `--claudeai`, Codex's browser), reported as `sign_in` reports; the lawyer's CLI
-    /// login is untouched. Refused for a reused login (`stop_using_login` first) and as
-    /// `sign_in` is.
+    /// login is untouched. Queued as `sign_in` is. Refused for a reused login
+    /// (`stop_using_login` first) and as `sign_in` is.
     pub fn use_different_account(&self, agent: &AgentId) -> Result<(), SigninError> {
         let start = self
             .shared
@@ -288,10 +310,18 @@ impl Shared {
         self.inner.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    /// `agent`'s finished install, when it is `Ready`.
+    pub(crate) fn installed(&self, agent: &AgentId) -> Option<Installed> {
+        self.lock().installed.get(agent).cloned()
+    }
+
     /// Records and sends `state` for `agent`: the worker's own events.
     fn emit(&self, agent: &AgentId, state: InstallState, installed: Option<Installed>) {
-        let mut inner = self.lock();
-        Inner::set(&mut inner, &self.events, agent, state, installed);
+        let ready = matches!(state, InstallState::Ready { .. });
+        Inner::set(&mut self.lock(), &self.events, agent, state, installed);
+        if ready {
+            self.signin.install_ready(agent);
+        }
     }
 
     /// Records and sends `state` for the job of `ticket`, unless it was paused or superseded:
@@ -316,7 +346,13 @@ impl Shared {
         {
             inner.current = None;
         }
+        let ready = matches!(state, InstallState::Ready { .. });
         Inner::set(&mut inner, &self.events, &ticket.agent, state, installed);
+        drop(inner);
+        // After the lock: a queued sign-in reads the install again once kicked.
+        if ready {
+            self.signin.install_ready(&ticket.agent);
+        }
         true
     }
 }

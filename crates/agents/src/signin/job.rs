@@ -16,8 +16,11 @@
 //! Reuse (piece 5) adds the lawyer's choices about a login they already have as tasks
 //! ([`super::found`]), and the status check becomes the start check: reuse first, then
 //! Clauseo's own login, then detection. A sign-in of Clauseo's own that ends signed in records
-//! `login-source` `own`. The queued start (piece 6) reserves the slot early and starts the same
-//! job once the install is ready and the network is up.
+//! `login-source` `own`.
+//! - A task that starts a login run ([`Task::queues`]) first waits in [`super::queue`] until
+//!   the install is `Ready` and the sign-in host resolves, reporting `Queued` meanwhile; the
+//!   call took the slot at once, so a cancel or a new sign-in reaches the queued job as it
+//!   reaches a running one.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -30,6 +33,7 @@ use clauseo_process::{Launcher, Timer};
 use crate::config::AgentsConfig;
 use crate::signin::env::{EnvInputs, RunKind, Shim, Vendor, run_env};
 use crate::signin::marker::{self, LoginSource};
+use crate::signin::queue::{self, Gate, Queue};
 use crate::signin::run::RunSpec;
 use crate::signin::{
     Found, Method, PasteCode, SigninCode, SigninNote, SigninState, Source, claude, codex, found,
@@ -73,6 +77,13 @@ impl Task {
             Task::SignIn(_) | Task::TryAgain | Task::UseFound | Task::UseDifferent
         )
     }
+
+    /// Whether the task starts a login run, so it queues until the install is ready and the
+    /// network is up. Every other task (the status check, detection, reuse, sign-out) runs the
+    /// local CLI only and is refused with `NotReady` while there is no install.
+    pub(crate) fn queues(self) -> bool {
+        matches!(self, Task::SignIn(_) | Task::TryAgain | Task::UseDifferent)
+    }
 }
 
 /// Everything one job needs, moved onto its thread.
@@ -81,8 +92,9 @@ pub(crate) struct SigninJob<T> {
     pub(crate) task: Task,
     pub(crate) vendor: Vendor,
     pub(crate) config: AgentsConfig,
-    /// The agent's install: `node` runs `script`.
-    pub(crate) installed: Installed,
+    /// The agent's install: `node` runs `script`. `None` only for a queued task until its
+    /// install is `Ready` ([`run`] fills it in before any run).
+    pub(crate) installed: Option<Installed>,
     /// The agent's home, `SigninConfig::homes`' text.
     pub(crate) home: PathBuf,
     /// The shim's path, when the worker wrote it (macOS and Linux sign-ins).
@@ -94,8 +106,31 @@ pub(crate) struct SigninJob<T> {
     pub(crate) paste: Option<async_channel::Receiver<PasteCode>>,
 }
 
-/// The job thread's body: the flow, then its last state.
-pub(crate) fn run<T: Timer + Send + Sync>(mut job: SigninJob<T>) {
+/// The job thread's body: for a task that queues, the wait for the install and the network;
+/// then the flow, then its last state. `kick` is the slot's kick on each install `Ready`.
+pub(crate) fn run<T: Timer + Send + Sync>(
+    mut job: SigninJob<T>,
+    kick: Option<async_channel::Receiver<()>>,
+) {
+    if let Some(kick) = kick {
+        let queue = Queue {
+            ticket: &job.ticket,
+            config: &job.config,
+            shared: &job.shared,
+            timer: &*job.timer,
+            kick: &kick,
+        };
+        match futures::executor::block_on(queue::until_startable(&queue)) {
+            Gate::Start(installed) => job.installed = Some(installed),
+            Gate::Stop => {
+                // Sent only while the job is still the agent's: after `cancel_sign_in`, not once
+                // superseded or stopped.
+                let cancelled = job.failed(SigninCode::Cancelled);
+                job.shared.signin.emit_job(&job.ticket, cancelled, true);
+                return;
+            }
+        }
+    }
     let paste = job.paste.take();
     let last = futures::executor::block_on(job.work(paste));
     if job.task.signs_in()
@@ -216,9 +251,15 @@ impl<T: Timer + Send + Sync> SigninJob<T> {
         env: BTreeMap<OsString, OsString>,
         limit: Duration,
     ) -> RunSpec {
+        // Always set by now: a task without an install is refused or waits in `run`.
+        let (node, script) = self
+            .installed
+            .as_ref()
+            .map(|installed| (installed.node.clone(), installed.script.clone()))
+            .unwrap_or_default();
         RunSpec {
-            node: self.installed.node.clone(),
-            script: self.installed.script.clone(),
+            node,
+            script,
             args: args.into_iter().map(Into::into).collect(),
             env,
             cwd: self.home.clone(),

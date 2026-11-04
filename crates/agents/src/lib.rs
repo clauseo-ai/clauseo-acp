@@ -29,6 +29,8 @@
 //!   that starts one and keeps its output in a 64 KB ring never logged (`signin/run.rs`), the
 //!   status parsers (`status.rs`) and file identity (`fileid.rs`); one job model for every
 //!   sign-in, sign-out and status check (`signin/job.rs`, one job per agent on its own thread);
+//!   the queued start (`signin/queue.rs`: a sign-in pressed before the install is `Ready` or
+//!   while its sign-in host does not resolve is `Queued`, and starts by itself once both hold);
 //!   Claude's flow (`signin/claude.rs`: hidden `auth login`, status polled every 1.5 s, the
 //!   nudge at 30 s, expiry at 10 minutes, the paste route, sign-out) and its `BROWSER` shim on
 //!   macOS and Linux (`signin/shim.rs`); Codex's flow (`signin/codex.rs`: the port 1455 probe
@@ -62,7 +64,9 @@
 //! # Invariants
 //!
 //! - Only `nodejs.org` and `registry.npmjs.org` are contacted, over https alone, or the firm's
-//!   https mirror for tarballs; an IT runtime and an offline bundle contact nothing.
+//!   https mirror for tarballs; an IT runtime and an offline bundle contact nothing. Sign-in's
+//!   own network use is one name lookup before a login run (the agent's first sign-in host, or
+//!   the proxy's); the vendors' CLIs make the sign-in's connections themselves.
 //! - Every downloaded byte is checked: SHA-512 from the lock, SHA-256 from the snapshot. A
 //!   mismatch deletes the file. A mirror cannot change a byte.
 //! - No install script runs, and no install folder holds a symbolic link or junction.
