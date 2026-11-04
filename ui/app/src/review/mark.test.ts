@@ -26,6 +26,12 @@ test("the innermost element whose whole text is the string is marked, even split
   expect(markText(el, "Answering.")).toBe(1);
 });
 
+test("a string held in a longer line is marked only as whole words", () => {
+  const el = root("<p>Needs your permission</p><h3>Needs you</h3><span>Sent. Needs you now</span>");
+  expect(markText(el, "Needs you")).toBe(2);
+  expect(marked(el)).toEqual(["h3", "span"]);
+});
+
 test("an accessible name or tooltip counts, and a string that isn't there marks nothing", () => {
   const el = root('<section aria-label="Your question"><p>What?</p></section><i title="Stop"></i>');
   expect(markText(el, "Your question")).toBe(1);
