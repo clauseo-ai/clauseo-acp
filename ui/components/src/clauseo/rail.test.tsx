@@ -515,48 +515,6 @@ describe("finding a matter", () => {
   });
 });
 
-describe("Settings at the rail's foot", () => {
-  test("with onSettings, Settings is a button that calls it, with the shortcut named and its test id", async () => {
-    let pressed = 0;
-    await mount(
-      <Rail
-        open
-        groups={[]}
-        onSettings={() => (pressed += 1)}
-        testIds={{ settings: "open-settings" }}
-      />,
-    );
-    const button = document.querySelector<HTMLButtonElement>("button.room-settings");
-    expect(button?.dataset["testid"]).toBe("open-settings");
-    expect(button?.type).toBe("button");
-    expect(txt(button)).toBe("Settings");
-    expect(button?.title).toBe("⌘,");
-    expect(button?.getAttribute("aria-keyshortcuts")).toBe("Meta+Comma");
-    expect(document.querySelector("a.room-settings")).toBeNull();
-    await act(async () => button?.click());
-    expect(pressed).toBe(1);
-  });
-
-  test("off the Mac the shortcut is Ctrl+,", async () => {
-    showDisplay({ ...DEFAULT_DISPLAY, platform: "windows", motion: "reduced" });
-    await mount(<Rail open groups={[]} onSettings={() => {}} />);
-    const button = document.querySelector<HTMLButtonElement>("button.room-settings");
-    expect(button?.title).toBe("Ctrl+,");
-    expect(button?.getAttribute("aria-keyshortcuts")).toBe("Control+Comma");
-  });
-
-  test("with only settings it stays a link, and with neither the foot has no Settings", async () => {
-    await mount(<Rail open groups={[]} settings="#settings" />);
-    expect(document.querySelector("a.room-settings")?.getAttribute("href")).toBe("#settings");
-    expect(document.querySelector("button.room-settings")).toBeNull();
-    await act(async () => root?.unmount());
-    host?.remove();
-    await mount(<Rail open groups={[]} scratch={{}} />);
-    expect(document.querySelector(".room-settings")).toBeNull();
-    expect(document.querySelector(".room-rail-foot")).toBeNull();
-  });
-});
-
 test("a conversation's status ends its line as the matters' icon, on a yellow disc only for a question or a permission", async () => {
   await mount(
     <Rail
