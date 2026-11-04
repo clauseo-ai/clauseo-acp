@@ -74,6 +74,7 @@ import { Work } from "./thread/work.tsx";
 import { tauriWindowControls, type WindowControls } from "../transport/window-controls.ts";
 import { useWindowFrame } from "../window/use-window-frame.ts";
 import { ToolLineContext } from "./tool-line-context.ts";
+import { hasSetup } from "./first-run/hold.ts";
 
 /** H13's line atop a retried conversation, loaded only when one opens. */
 const RetriedLine = lazy(() =>
@@ -84,6 +85,11 @@ const RetriedLine = lazy(() =>
 const loadNewMatter = () => late(import("./new-matter.tsx"));
 const NewMatter = lazy(() => loadNewMatter().then((m) => ({ default: m.NewMatter })));
 const preloadNewMatter = () => void loadNewMatter();
+
+/** UD1's first run: its screen with no matter yet, and its hold on the composer, where the host has the setup wire. */
+const FirstRun = lazy(() =>
+  late(import("./first-run/first-run.tsx")).then((m) => ({ default: m.FirstRun })),
+);
 
 /** The matter's papers from H8, or null: before they arrive, without H8, or when the read fails. */
 function usePapers(next: PapersHost | null, matter: MatterId | null): ListedPapers {
@@ -238,6 +244,12 @@ function RoomFrame({
     [talks.drafting, talks.options, talks.agent, conversations],
   );
   const open = view.open;
+  const setup = hasSetup(transport);
+  const welcome =
+    setup &&
+    view.phase === "ready" &&
+    open === null &&
+    view.matters.every((m) => m.kind === "scratch");
   const listed = usePapers(matters.next.papers, open?.matter ?? null);
   const papers = listed?.papers ?? null;
   const answers = useAnswerHost(transport, open?.matter ?? null, listed);
@@ -428,7 +440,19 @@ function RoomFrame({
         </Suspense>
       )}
       <main className="room-centre" ref={nodes.slot("centre")}>
-        {open !== null && view.folderMissing ? (
+        {setup && (
+          <Suspense fallback={null}>
+            <FirstRun
+              transport={transport}
+              matters={matters}
+              conversations={conversations}
+              talks={talks}
+              zone={view.zone}
+              welcome={welcome}
+            />
+          </Suspense>
+        )}
+        {welcome ? null : open !== null && view.folderMissing ? (
           // the folder moved (H3): its line in the thread's place, and Locate folder as the composer's gate
           <>
             <MovedFolder

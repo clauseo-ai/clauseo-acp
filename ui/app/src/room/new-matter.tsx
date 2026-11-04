@@ -5,7 +5,10 @@
 // said in the form by its code (matter-form-check.ts), never its message. Made, the new matter opens, the dialog
 // closes and focus goes back to New matter (or, where the room folded the rail on onMade, to Matters). A folder that is
 // already a matter (matter.folder_is_matter) names that matter when the list has it, and Open it opens it, as the rail does.
+// The first screen (UD1's first run) takes the same form in place, titled, with Back (FirstMatter), and says a folder
+// its Open the folder couldn't make a matter of by the same code's words (RefusedLine); both load with this chunk.
 import { useEffect, useState, type RefObject } from "react";
+import { NewMatterForm } from "@clauseo/components/clauseo/matter-form.tsx";
 import { NewMatterDialog } from "@clauseo/components/clauseo/new-matter-dialog.tsx";
 import { createErrorLine } from "@clauseo/components/clauseo/matter-form-check.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
@@ -139,4 +142,86 @@ export function NewMatter({
       finalFocus={finalFocus}
     />
   );
+}
+
+/** The first screen's new matter (UD1): the form in place of the question, titled, Back going back to it. Its folder as
+ * New matter's dialog makes it; `onAct` hears the first act just before the matter is made. */
+export function FirstMatter({
+  matters,
+  onAct,
+  onBack,
+}: {
+  matters: Matters;
+  onAct: () => void;
+  onBack: () => void;
+}) {
+  const w = useWords();
+  const detailed = matters.view().detailed;
+  const [existing, setExisting] = useState<Picked | null>(null);
+  const [location, setLocation] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!detailed) return;
+    let live = true;
+    void matters.defaultLocation().then((display) => {
+      if (live) setLocation(display);
+    });
+    return () => {
+      live = false;
+    };
+  }, [detailed, matters]);
+  const create = async (name: string, client: string, nextDate: string | null) => {
+    setError(null);
+    let source: NextMatterSource;
+    let path = existing?.display;
+    if (existing !== null) source = { existing_folder: { folder: existing.folder } };
+    else if (detailed && location !== null) source = "default_location";
+    else {
+      const parent = await matters.pickFolder();
+      if (parent === null) return false;
+      path = parent.display;
+      source = { new_folder: { folder: parent.folder } };
+    }
+    onAct();
+    const details = detailed
+      ? {
+          ...(client.trim() === "" ? {} : { client: client.trim() }),
+          ...(nextDate === null ? {} : { next_date: nextDate }),
+        }
+      : {};
+    try {
+      await matters.create(name, source, details);
+    } catch (thrown) {
+      setError(createErrorLine(w.lang, toHostError(thrown).code, path));
+      return false;
+    }
+    return true;
+  };
+  return (
+    <NewMatterForm
+      titled
+      details={detailed}
+      {...(existing !== null
+        ? { folder: existing.display }
+        : location !== null && detailed
+          ? { folderFor: (name: string) => under(location, name) }
+          : { folder: null })}
+      pickFolder={async () => {
+        const picked = await matters.pickFolder();
+        if (picked === null) return null;
+        setExisting(picked);
+        return picked.display;
+      }}
+      error={error}
+      onCreate={(name, client, _next, nextDate) => create(name, client, nextDate)}
+      onCancel={onBack}
+      testIds={{ name: "matter-name", existing: "matter-existing", create: "create-matter" }}
+    />
+  );
+}
+
+/** A folder the first screen's Open the folder couldn't make a matter of, said by the refusal's code. */
+export function RefusedLine({ code, path }: { code: string; path: string }) {
+  const w = useWords();
+  return <>{createErrorLine(w.lang, code, path)}</>;
 }

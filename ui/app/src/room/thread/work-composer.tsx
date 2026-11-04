@@ -54,6 +54,7 @@ import { pausedLine, type Paused } from "./limit-words.ts";
 import { pickFull, queueFullLine } from "./composer-queue.ts";
 import { ComposerSteer } from "./composer-steer.tsx";
 import { asksWords } from "./step-names.ts";
+import { useHold } from "../first-run/hold.ts";
 import type { AskHow, Drafts } from "./session.ts";
 
 export function WorkComposer({
@@ -139,6 +140,9 @@ export function WorkComposer({
   // the paused line's time against this render's clock (U12)
   const now = useNow();
   const agentPlan = useAgentPlan();
+  // UD1: the first run's hold, while the plan isn't signed in: its gate stands in the field's row, and nothing sends
+  const hold = useHold(transport);
+  const gated = hold?.gate !== undefined;
   const field = useRef<ComposerHandle>(null);
   // the words an Ask sent while nothing ran, until the host answers; and the stopped question held for that answer,
   // its turn stopped before the answer cleared the field (the refill below)
@@ -206,7 +210,7 @@ export function WorkComposer({
   // words, but not past the cap, when they stay in the field; while another conversation holds the matter, it raises
   // the wait instead, whose Queue sends
   const ask = (asked: string) => {
-    if (disabled || asked.trim() === "") return;
+    if (disabled || gated || asked.trim() === "") return;
     if (busy) {
       queue(asked);
       return;
@@ -223,7 +227,7 @@ export function WorkComposer({
     send(asked, { behind: true });
   };
   const send = (asked: string, how?: AskHow) => {
-    if (disabled || asked.trim() === "") return;
+    if (disabled || gated || asked.trim() === "") return;
     // idle, Ask waits for the turn it sent; Queue (another's wait) and the hint's buttons go behind or steer
     if (how === undefined && busy) return;
     if (lost !== null) setLost(null);
@@ -349,13 +353,15 @@ export function WorkComposer({
       // "Stopped at 4:52 pm, at the plan's limit", or the toolbar's at-limit words without the stop's time
       notice={paused === null ? <LimitWarning /> : null}
       took={paused === null ? null : pausedLine(w.lang, paused, now)}
-      plan={plan}
+      // under the gate the plan is the gate's to name: the status line says nothing of it
+      plan={gated ? "" : plan}
       tools={tools}
       {...(choice === undefined ? {} : { choice })}
       hint={null}
       commands={commands}
       mentions={mentions}
-      working={line?.state ?? null}
+      working={line?.state ?? hold?.working ?? null}
+      {...(gated ? { gate: hold?.gate } : {})}
       opening
       busy={busy}
       onStop={onStop}
@@ -406,7 +412,7 @@ export function WorkComposer({
         </>
       }
       disabled={disabled}
-      line={false}
+      line={hold?.line ?? false}
       testIds={{
         field: "composer",
         ask: "send",
