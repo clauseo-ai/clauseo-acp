@@ -3,7 +3,9 @@
 //! learnt of it (a call's `Closed` answer, or the connection's end while the agent was idle),
 //! and the stop that ends it keeps the agent's own exit as the detach.
 
-use clauseo_protocol::{DetachReason, DomainEvent, TurnId};
+#[cfg(unix)]
+use clauseo_protocol::DetachReason;
+use clauseo_protocol::{DomainEvent, TurnId};
 
 use super::agents::{send_prompt, until_settled};
 use super::rig::{Rig, kind};
@@ -143,8 +145,7 @@ fn a_prompt_after_an_idle_agent_s_connection_ended_starts_a_new_agent() {
 #[cfg(unix)]
 #[test]
 fn a_stopped_agent_whose_connection_was_gone_detaches_with_its_own_exit() {
-    let script = r#""$0" --scenario "$1"; exec >&- 2>&-; sleep 1; exit 7"#;
-    let mut rig = Rig::start_wrapped("turn-closed-keeps-exit", EXIT_ON_PROMPT, script);
+    let mut rig = Rig::start_wrapped("turn-closed-keeps-exit", EXIT_ON_PROMPT, OUTLIVES_PIPES);
     let thread = rig.thread();
     let _first = send_prompt(&mut rig, 10, thread);
     rig.run_until("the first turn's end", |actor| {
@@ -152,8 +153,26 @@ fn a_stopped_agent_whose_connection_was_gone_detaches_with_its_own_exit() {
     });
     let _second = send_prompt(&mut rig, 11, thread);
     until_settled(&mut rig, thread);
-    let detaches: Vec<DetachReason> = rig
-        .log(thread)
+    let detaches = detaches(&mut rig, thread);
+    assert!(
+        matches!(
+            detaches.first(),
+            Some(DetachReason::Exited { code: Some(7), .. })
+        ),
+        "{detaches:?}"
+    );
+    rig.finish();
+}
+
+/// The script that runs the agent and then outlives its pipes: it closes them, then exits 7 a
+/// second later.
+#[cfg(unix)]
+const OUTLIVES_PIPES: &str = r#""$0" --scenario "$1"; exec >&- 2>&-; sleep 1; exit 7"#;
+
+/// Every detach in `thread`'s log, in order.
+#[cfg(unix)]
+fn detaches(rig: &mut Rig, thread: clauseo_protocol::ThreadId) -> Vec<DetachReason> {
+    rig.log(thread)
         .into_iter()
         .filter_map(|event| {
             if let DomainEvent::AgentSessionDetached(detached) = event {
@@ -162,11 +181,26 @@ fn a_stopped_agent_whose_connection_was_gone_detaches_with_its_own_exit() {
                 None
             }
         })
-        .collect();
+        .collect()
+}
+
+/// A shutdown that stops an agent whose connection is already gone keeps the agent's own exit
+/// as its detach, as the next prompt's stop does.
+#[cfg(unix)]
+#[test]
+fn a_shutdown_after_a_closed_connection_detaches_with_the_agent_s_own_exit() {
+    let mut rig = Rig::start_wrapped("turn-closed-shutdown", EXIT_ON_PROMPT, OUTLIVES_PIPES);
+    let thread = rig.thread();
+    let _first = send_prompt(&mut rig, 10, thread);
+    rig.run_until("the first turn's end", |actor| {
+        actor.threads[&thread].turn.current.is_none() && actor.work.commits == 0
+    });
+    rig.shut_down();
+    let detaches = detaches(&mut rig, thread);
     assert!(
         matches!(
-            detaches.first(),
-            Some(DetachReason::Exited { code: Some(7), .. })
+            detaches.as_slice(),
+            [DetachReason::Exited { code: Some(7), .. }]
         ),
         "{detaches:?}"
     );

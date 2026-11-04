@@ -46,10 +46,8 @@ pub(super) enum Stage {
     Loading,
     /// Its session is attached.
     Attached,
-    /// It was attached and a call to it came back `Closed`: its connection is gone and
-    /// `Ended` is on its way. The owner posts a call's answer before `Ended`, so work can
-    /// come between the two (Windows reports a process exit later than Unix does); that work
-    /// waits for a new agent instead of going to the closed connection.
+    /// It was attached and a call to it came back `Closed`, so `Ended` is due: work that comes
+    /// first (Windows reports an exit late) waits for a new agent (`stop_closed`).
     Closed,
     /// The shutdown ladder runs; `Ended` follows.
     Stopping,
@@ -497,6 +495,9 @@ pub(super) fn stop(actor: &mut Actor, thread: ThreadId) {
         return;
     }
     agent.link.stop();
+    if agent.stage == Stage::Closed || agent.link.closed() {
+        agent.stop_cause = StopCause::Closed;
+    }
     agent.stage = Stage::Stopping;
     let waiting = std::mem::take(&mut agent.waiting);
     for item in waiting {
