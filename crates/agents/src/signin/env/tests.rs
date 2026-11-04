@@ -231,3 +231,21 @@ fn the_shim_is_claude_s_alone() {
     );
     assert_eq!(get(&codex, "CLAUSEO_SIGNIN_URL_FILE"), None);
 }
+
+/// S18 security review, drift: `EnvInputs`' `Debug` names the variables and never prints a
+/// value, so a proxy password in the environment or the proxy setting stays out of any log.
+#[test]
+fn env_inputs_debug_prints_names_never_values() {
+    let mut base = base();
+    base.insert(
+        OsString::from("HTTPS_PROXY"),
+        OsString::from("http://user:hunter2-env@proxy.example:3128"),
+    );
+    let mut inputs = inputs(&base, Vendor::Codex, RunKind::Detect);
+    inputs.proxy = Some("http://user:hunter2-set@proxy.example:3128");
+    let printed = format!("{inputs:?}");
+    for secret in ["hunter2-env", "hunter2-set", "sk-stray", "/home/lawyer"] {
+        assert!(!printed.contains(secret), "{printed}");
+    }
+    assert!(printed.contains("HTTPS_PROXY"), "{printed}");
+}

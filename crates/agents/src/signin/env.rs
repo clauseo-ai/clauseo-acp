@@ -74,8 +74,9 @@ pub(crate) struct Shim<'a> {
     pub(crate) url_file: &'a Path,
 }
 
-/// Everything one run's environment is built from.
-#[derive(Debug, Clone, Copy)]
+/// Everything one run's environment is built from. Its `Debug` names the base environment's
+/// variables and never prints a value, nor the proxy setting (which may hold a password).
+#[derive(Clone, Copy)]
 pub(crate) struct EnvInputs<'a> {
     /// The app's environment: [`crate::SigninConfig::base_env`].
     pub(crate) base: &'a BTreeMap<OsString, OsString>,
@@ -92,6 +93,20 @@ pub(crate) struct EnvInputs<'a> {
     /// The `BROWSER` shim, for Claude's login runs on macOS and Linux; ignored for Codex,
     /// which opens its own browser.
     pub(crate) shim: Option<Shim<'a>>,
+}
+
+impl std::fmt::Debug for EnvInputs<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EnvInputs")
+            .field("base", &self.base.keys().collect::<Vec<_>>())
+            .field("vendor", &self.vendor)
+            .field("kind", &self.kind)
+            .field("os", &self.os)
+            .field("proxy", &self.proxy.map(|_| "<set>"))
+            .field("ca_file", &self.ca_file)
+            .field("shim", &self.shim)
+            .finish()
+    }
 }
 
 /// Names dropped by prefix: every `SSH_*`.

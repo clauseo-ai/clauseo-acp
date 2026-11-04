@@ -168,3 +168,18 @@ fn a_program_that_cannot_start_is_an_error() {
     ));
     assert!(started.is_err());
 }
+
+/// S18 security review, drift: `RunSpec`'s `Debug` names the child's variables and never
+/// prints a value, so a proxy password in the environment stays out of any log.
+#[test]
+fn run_spec_debug_prints_names_never_values() {
+    let dir = TestDir::new("run-debug");
+    let mut spec = spec(&dir, "exit 0\n");
+    spec.env.insert(
+        OsString::from("HTTPS_PROXY"),
+        OsString::from("http://user:hunter2@proxy.example:3128"),
+    );
+    let printed = format!("{spec:?}");
+    assert!(!printed.contains("hunter2"), "{printed}");
+    assert!(printed.contains("HTTPS_PROXY"), "{printed}");
+}

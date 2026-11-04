@@ -32,8 +32,9 @@ pub(crate) const RING_BYTES: usize = 64 * 1024;
 /// stderr.
 const LINE_MAX: usize = 16 * 1024;
 
-/// One run.
-#[derive(Debug, Clone)]
+/// One run. Its `Debug` names the environment's variables and never prints a value (a proxy's
+/// password, an inherited key).
+#[derive(Clone)]
 pub(crate) struct RunSpec {
     /// Node: `Installed::node`.
     pub(crate) node: PathBuf,
@@ -47,6 +48,19 @@ pub(crate) struct RunSpec {
     pub(crate) cwd: PathBuf,
     /// Past this the run is killed: 5 s for a status, 10 minutes for a login.
     pub(crate) limit: Duration,
+}
+
+impl std::fmt::Debug for RunSpec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RunSpec")
+            .field("node", &self.node)
+            .field("script", &self.script)
+            .field("args", &self.args)
+            .field("env", &self.env.keys().collect::<Vec<_>>())
+            .field("cwd", &self.cwd)
+            .field("limit", &self.limit)
+            .finish()
+    }
 }
 
 /// How a run ended.
