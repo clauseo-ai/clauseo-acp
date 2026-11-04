@@ -35,7 +35,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use clauseo_profile::{SkillWrite, SkillsWritten};
-use clauseo_protocol::{AgentKind, MatterId, ThreadId};
+use clauseo_protocol::{AgentKind, FolderSupportKind, MatterId, ThreadId};
 
 use super::super::Actor;
 use super::super::input::Input;
@@ -288,6 +288,8 @@ fn remove_tree(folder: &Path) {
 pub(crate) struct CodexPrepared {
     /// The matter folder resolved through links: `_codex/hooks/list` names it.
     pub(super) folder: PathBuf,
+    /// The folder check's answer at this launch (`agent/folder_support.rs`), for the row.
+    pub(super) folder_support: Option<FolderSupportKind>,
     /// The agent's home, made and checked, as `CODEX_HOME`.
     pub(super) home: PathBuf,
     /// The launch profile's `CODEX_CONFIG` keys, filled on the actor
@@ -338,6 +340,7 @@ pub(super) fn prepare(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>
         return;
     };
     state.preparing = Some(Box::new(Preparing { id, waiting }));
+    let matter = run.key.matter;
     let clock = std::sync::Arc::clone(&actor.clock);
     actor.spawn_post(async move {
         let result = codex::prepare::off_actor_or_undo(
@@ -347,9 +350,11 @@ pub(super) fn prepare(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>
                 data_folder::refuse_data_folder(&stored, &data)?;
                 let codex = match home {
                     Some(home) => {
-                        let folder = codex::prepare_launch(&stored, &data, &home)?;
+                        let (folder, folder_support) =
+                            codex::prepare_launch(matter, &stored, &data, &home)?;
                         Some(CodexPrepared {
                             folder,
+                            folder_support,
                             home,
                             keys: serde_json::Map::new(),
                         })
@@ -372,6 +377,30 @@ pub(super) fn prepare(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>
         let result = result.map(Box::new);
         Input::Turn(TurnInput::Prepared { thread, id, result })
     });
+}
+
+/// A Codex launch's folder check answered (`agent/folder_support.rs`): its answer goes to the
+/// matter's row, and so does a refusal it made. Any other agent, and a launch that failed
+/// before or without the check's refusal, leaves the row as it was.
+fn remember_folder_support(
+    actor: &mut Actor,
+    thread: ThreadId,
+    result: &Result<Box<Prepared>, Error>,
+) {
+    let support = match result {
+        Ok(prepared) => match &prepared.codex {
+            Some(codex) => codex.folder_support,
+            None => return,
+        },
+        Err(error) => match crate::agent::folder_support::of_refusal(error.code()) {
+            Some(kind) => Some(kind),
+            None => return,
+        },
+    };
+    let Some(matter) = actor.threads.get(&thread).map(|entry| entry.row.matter) else {
+        return;
+    };
+    crate::actor::query::on_folder_support(actor, matter, support);
 }
 
 /// Writes `writes` in order, on the launch-prep thread; a failure is a warning. The first
@@ -410,6 +439,7 @@ pub(super) fn on_prepared(
         return;
     };
     let waiting = preparing.waiting;
+    remember_folder_support(actor, thread, &result);
     let mut prepared = match result {
         Ok(prepared) => prepared,
         Err(error) => {

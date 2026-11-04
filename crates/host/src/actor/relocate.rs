@@ -212,6 +212,8 @@ pub(super) fn committed(actor: &mut Actor, matter: MatterId, folder: String, dur
         }
         // The folder the lawyer just picked is there: `found` until a list reads it again.
         actor.folder_states.remove(&matter);
+        // The new folder is unchecked until the matter's next agent launch.
+        actor.folder_supports.remove(&matter);
     } else {
         reopen_recorded(actor, matter);
     }

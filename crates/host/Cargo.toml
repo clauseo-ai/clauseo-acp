@@ -29,7 +29,8 @@ clauseo-profile = { path = "../profile" }
 clauseo-counts = { path = "../counts" }
 clauseo-search = { path = "../search" }
 # The browser's per-session socket folder and loopback port claims, and the start-up sweep
-# (decision record 0029, stage C's `BrowserSocketDir` and `ports`).
+# (decision record 0029, stage C's `BrowserSocketDir` and `ports`), and the Windows folder check
+# of a matter folder (src/agent/folder_support.rs).
 clauseo-sandbox = { path = "../sandbox" }
 # Random agent-browser session names on Windows (`browser/session.rs`).
 getrandom = { workspace = true }
@@ -64,6 +65,10 @@ quick-xml = { workspace = true }
 # The search test that checks an aborted host closed search.sqlite (no connection left open).
 rusqlite = { workspace = true }
 criterion = { workspace = true }
+
+# The host's Windows folder-check tests give a folder a protected DACL (`windows::test_dacl`).
+[target.'cfg(windows)'.dev-dependencies]
+clauseo-sandbox = { path = "../sandbox", features = ["test-support"] }
 
 [[bench]]
 name = "reopen"

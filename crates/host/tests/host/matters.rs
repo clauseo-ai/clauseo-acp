@@ -86,6 +86,7 @@ fn a_create_keeps_its_details_and_list_matters_shows_every_field() {
             status: MatterStatus::Idle,
             folder_display: work.join("State v. Kunal Desai").display().to_string(),
             folder_state: FolderState::Found,
+            folder_support: None,
         }
     );
     // The Scratch matter is listed first (oldest), with no details, and outside this home it

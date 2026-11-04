@@ -150,6 +150,12 @@ error_codes! {
     MatterFolderInMattersRoot = "matter.folder_in_matters_root", retryable: false, meaning: "The \
         folder is or holds Clauseo's data folder, or is, holds or sits inside the matters' \
         history folder in it.";
+    MatterFolderNetwork = "matter.folder_network", retryable: false, meaning: "The matter \
+        folder is on a network drive, where Codex's sandbox can neither read nor write, so Codex \
+        is not started there.";
+    MatterFolderNoPermissions = "matter.folder_no_permissions", retryable: false,
+        meaning: "The matter folder is on a drive that keeps no file permissions (FAT, exFAT), \
+        which Codex's sandbox needs, so Codex is not started there.";
     TransportUnauthorized = "transport.unauthorized", retryable: false, meaning: "The client is \
         not allowed to make this call.";
     TransportTooLarge = "transport.too_large", retryable: false, meaning: "The message is larger \

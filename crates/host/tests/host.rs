@@ -62,6 +62,9 @@ mod counts;
 #[path = "host/e2e_scenarios.rs"]
 mod e2e_scenarios;
 #[cfg(test)]
+#[path = "host/folder_support.rs"]
+mod folder_support;
+#[cfg(test)]
 #[path = "host/forget.rs"]
 mod forget;
 #[cfg(test)]

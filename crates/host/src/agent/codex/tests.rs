@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use clauseo_protocol::ErrorCode;
+use clauseo_protocol::{ErrorCode, MatterId};
 use serde_json::{Map, Value, json};
 
 use super::{
@@ -399,12 +399,18 @@ fn prepare_launch_checks_then_makes_the_home() {
     write::create_dir_all(&data).unwrap();
     let matter = root.join("matter");
     write::create_dir_all(&matter.join(".codex")).unwrap();
-    let error = prepare_launch(&matter, &data, &home_in(&data)).unwrap_err();
+    let id = MatterId::new(uuid::Uuid::from_u128(
+        0x0190_0000_0000_7000_8000_0000_0000_0001,
+    ))
+    .unwrap();
+    let error = prepare_launch(id, &matter, &data, &home_in(&data)).unwrap_err();
     assert_eq!(error.code(), ErrorCode::MatterCodexFolder);
     assert!(!data.join("agents").exists());
     write::remove_dir_all(&matter.join(".codex")).unwrap();
-    let folder = prepare_launch(&matter, &data, &home_in(&data)).unwrap();
+    let (folder, support) = prepare_launch(id, &matter, &data, &home_in(&data)).unwrap();
     assert_eq!(folder, dunce::canonicalize(&matter).unwrap());
+    // A folder the test made is fine on Windows, and off Windows nothing is checked.
+    assert_eq!(support, None);
     assert!(home_in(&data).join("config.toml").is_file());
     write::remove_dir_all(&root).unwrap();
 }

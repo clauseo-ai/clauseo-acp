@@ -13,10 +13,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use clauseo_matters::{CommitId, DEFAULT_MARKER, NewMatter, Refusal};
+use clauseo_matters::{DEFAULT_MARKER, NewMatter, Refusal};
 use clauseo_protocol::{
-    ClientName, CommandOutcome, Date, ErrorCode, HostError, ImportSummary, MatterId, MatterKind,
-    MatterSource, Title,
+    ClientName, CommandOutcome, Date, ErrorCode, HostError, MatterId, MatterKind, MatterSource,
+    Title,
 };
 
 use super::commands::{AfterCommand, CommandCtx};
@@ -24,8 +24,8 @@ use super::input::{Input, MatterTag};
 use super::{Actor, MatterEntry, Tag, turn};
 use crate::error::Error;
 use crate::matter_worker::{
-    Claim, Claimed, ImportEnd, MatterJob, MatterReply, MatterWorker, Registry, Relink,
-    check_registry, matter_settings,
+    Claim, Claimed, MatterJob, MatterReply, MatterWorker, Registry, Relink, check_registry, made,
+    matter_settings,
 };
 use crate::pipeline::Failure;
 
@@ -389,7 +389,7 @@ pub(super) fn on_matter_reply(
                     })
                 }
                 Err(error) => Err(error),
-                Ok(import) => {
+                Ok((import, support)) => {
                     // Made on disk from here: a failure discards it before the answer.
                     let opened = super::counting::matter_created(import.1.as_ref(), folder);
                     let sent = matter_commit(actor, *pending, import, Some((id, outcome)))
@@ -398,7 +398,12 @@ pub(super) fn on_matter_reply(
                             actor.send_commit(draft, Tag::Command { id, outcome, after })
                         });
                     match sent {
-                        Ok(_) => super::counting::on_commit(actor, id, opened),
+                        Ok(_) => {
+                            // Kept once the commit is sent, so a matter discarded before it has
+                            // no entry; a store failure after it drops it in the discard.
+                            super::query::on_folder_support(actor, minted, support);
+                            super::counting::on_commit(actor, id, opened);
+                        }
                         Err(error) => {
                             made::discard(actor, Some(id), minted, error, made::Stage::Commit);
                         }
@@ -417,7 +422,7 @@ pub(super) fn on_matter_reply(
                 return;
             };
             match made(reply) {
-                Ok(import) => {
+                Ok((import, _)) => {
                     let sent =
                         matter_commit(actor, *pending, import, None).and_then(|(draft, entry)| {
                             actor.send_commit(draft, Tag::Scratch(Box::new(entry)))
@@ -489,40 +494,5 @@ pub(super) fn cancel_imports(actor: &Actor) {
         if let Some(matter) = &pending.matter {
             matter.cancel.store(true, Ordering::Relaxed);
         }
-    }
-}
-
-/// The root checkpoint's commit and the import summary of a create or import that succeeded,
-/// `None` for a new folder.
-fn made(reply: MatterReply) -> Result<(CommitId, Option<ImportSummary>), Error> {
-    match reply {
-        MatterReply::Created(result) => result.map(|commit| (commit, None)),
-        MatterReply::Imported(result) => match result? {
-            ImportEnd::Done {
-                commit,
-                summary,
-                warnings,
-            } => {
-                for warning in &warnings {
-                    tracing::info!(?warning, "import warning");
-                }
-                Ok((commit, Some(summary)))
-            }
-            ImportEnd::Cancelled => Err(Error::Closed),
-        },
-        MatterReply::Opened(_)
-        | MatterReply::Located(_)
-        | MatterReply::BeforeTurn(_)
-        | MatterReply::AfterTurn(_)
-        | MatterReply::Undone(_)
-        | MatterReply::Restored(_)
-        | MatterReply::Compared(_)
-        | MatterReply::Previewed(_)
-        | MatterReply::EditedSince(_)
-        | MatterReply::HeldOpen(_)
-        | MatterReply::Papers(_)
-        | MatterReply::Discarded(_) => Err(Error::Internal(
-            "a matter's create got another job's reply".to_owned(),
-        )),
     }
 }

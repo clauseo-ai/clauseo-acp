@@ -19,6 +19,7 @@
 
 pub(crate) mod codex;
 pub(crate) mod data_folder;
+pub(crate) mod folder_support;
 pub(crate) mod leftovers;
 pub(crate) mod loads;
 mod spec;

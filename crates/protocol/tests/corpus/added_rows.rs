@@ -73,6 +73,20 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (251, 0xc4fe_70c7_6452_5b8b),
     ),
     (
+        "added/turn_failed-MatterFolderNetwork",
+        include_bytes!("added/turn_failed-MatterFolderNetwork.jsonl"),
+        include_bytes!("added/turn_failed-MatterFolderNetwork.msgpack"),
+        (338, 0x9928_63a8_9590_d4a8),
+        (239, 0x5da8_c529_0552_1ac5),
+    ),
+    (
+        "added/turn_failed-MatterFolderNoPermissions",
+        include_bytes!("added/turn_failed-MatterFolderNoPermissions.jsonl"),
+        include_bytes!("added/turn_failed-MatterFolderNoPermissions.msgpack"),
+        (346, 0x4004_a70d_1a65_3281),
+        (247, 0x6183_35df_db2e_e546),
+    ),
+    (
         "added/agent_named",
         include_bytes!("added/agent_named.jsonl"),
         include_bytes!("added/agent_named.msgpack"),

@@ -17,8 +17,8 @@ use clauseo_matters::{
     matter_path_in,
 };
 use clauseo_protocol::{
-    CheckpointId, FileChange, FileDecision, ImportSummary, MatterId, MatterPath, RestoreRequest,
-    ThreadId, Timestamp, TurnId,
+    CheckpointId, FileChange, FileDecision, FolderSupportKind, ImportSummary, MatterId, MatterPath,
+    RestoreRequest, ThreadId, Timestamp, TurnId,
 };
 
 use crate::error::Error;
@@ -174,16 +174,58 @@ pub(crate) enum ImportEnd {
         commit: CommitId,
         summary: ImportSummary,
         warnings: Vec<ImportWarning>,
+        /// The folder check's answer (`agent/folder_support.rs`), made on this thread.
+        folder_support: Option<FolderSupportKind>,
     },
     /// The cancel flag was set; nothing was kept.
     Cancelled,
 }
 
+/// A made matter's root commit and import summary, and its folder check's answer.
+pub(crate) type Made = ((CommitId, Option<ImportSummary>), Option<FolderSupportKind>);
+
+/// The root checkpoint's commit and the import summary of a create or import that succeeded
+/// (`None` for a new folder), and the folder check's answer.
+pub(crate) fn made(reply: MatterReply) -> Result<Made, Error> {
+    match reply {
+        MatterReply::Created(result) => result.map(|(commit, support)| ((commit, None), support)),
+        MatterReply::Imported(result) => match result? {
+            ImportEnd::Done {
+                commit,
+                summary,
+                warnings,
+                folder_support,
+            } => {
+                for warning in &warnings {
+                    tracing::info!(?warning, "import warning");
+                }
+                Ok(((commit, Some(summary)), folder_support))
+            }
+            ImportEnd::Cancelled => Err(Error::Closed),
+        },
+        MatterReply::Opened(_)
+        | MatterReply::Located(_)
+        | MatterReply::BeforeTurn(_)
+        | MatterReply::AfterTurn(_)
+        | MatterReply::Undone(_)
+        | MatterReply::Restored(_)
+        | MatterReply::Compared(_)
+        | MatterReply::Previewed(_)
+        | MatterReply::EditedSince(_)
+        | MatterReply::HeldOpen(_)
+        | MatterReply::Papers(_)
+        | MatterReply::Discarded(_) => Err(Error::Internal(
+            "a matter's create got another job's reply".to_owned(),
+        )),
+    }
+}
+
 /// One job's result, one variant per [`MatterJob`] kind.
 #[derive(Debug)]
 pub(crate) enum MatterReply {
-    /// The root checkpoint's commit.
-    Created(Result<CommitId, Error>),
+    /// The root checkpoint's commit, and the folder check's answer (`agent/folder_support.rs`),
+    /// made on this thread.
+    Created(Result<(CommitId, Option<FolderSupportKind>), Error>),
     Imported(Result<ImportEnd, Error>),
     /// The open matter's last checkpoint.
     Opened(Result<Option<CheckpointId>, Error>),
@@ -318,14 +360,15 @@ fn run<T>(
 fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
     match job {
         MatterJob::Create(new) => {
-            let root = new.checkpoint;
+            let (root, id, folder) = (new.checkpoint, new.id, new.folder.clone());
             MatterReply::Created(
                 Matter::create(settings.clone(), new)
                     .map_err(Error::from)
                     .and_then(|matter| {
                         let commit = root_commit(&matter, root)?;
+                        let support = crate::agent::folder_support::check(id, &folder);
                         *slot = Slot::Open(Box::new(matter));
-                        Ok(commit)
+                        Ok((commit, support))
                     }),
             )
         }
@@ -442,7 +485,7 @@ fn import(
     refused: &[PathBuf],
     cancel: &AtomicBool,
 ) -> Result<ImportEnd, Error> {
-    let root = new.checkpoint;
+    let (root, id, folder) = (new.checkpoint, new.id, new.folder.clone());
     match Matter::import(settings.clone(), new, refused, &mut |_progress| {}, cancel)? {
         Imported::Done {
             matter,
@@ -450,11 +493,13 @@ fn import(
             warnings,
         } => {
             let commit = root_commit(&matter, root)?;
+            let folder_support = crate::agent::folder_support::check(id, &folder);
             *slot = Slot::Open(matter);
             Ok(ImportEnd::Done {
                 commit,
                 summary,
                 warnings,
+                folder_support,
             })
         }
         Imported::Cancelled => Ok(ImportEnd::Cancelled),

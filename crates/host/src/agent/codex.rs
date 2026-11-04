@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use clauseo_protocol::ErrorCode;
+use clauseo_protocol::{ErrorCode, FolderSupportKind, MatterId};
 use serde_json::{Map, Value};
 
 use crate::error::Error;
@@ -439,14 +439,21 @@ pub(crate) fn make_home(data: &Path, home: &Path) -> Result<(), Error> {
 /// ([`prepare::off_actor`]), after every agent's data-folder refusal
 /// (`agent/data_folder.rs`, which covers every agent's home): the matter folder `stored`
 /// resolved through links ([`crate::agent::session_folder`], the spelling the agent runs in),
-/// the `.codex` refusal, the home made under `data`, then `config.toml`. The resolved folder
-/// comes back.
-pub(crate) fn prepare_launch(stored: &Path, data: &Path, home: &Path) -> Result<PathBuf, Error> {
+/// the `.codex` refusal, `matter`'s Windows folder check (`agent/folder_support.rs`: Codex is
+/// refused on a network drive or a drive without permissions), the home made under `data`,
+/// then `config.toml`. The resolved folder comes back, with the folder check's answer.
+pub(crate) fn prepare_launch(
+    matter: MatterId,
+    stored: &Path,
+    data: &Path,
+    home: &Path,
+) -> Result<(PathBuf, Option<FolderSupportKind>), Error> {
     let folder = crate::agent::session_folder(stored);
     refuse_codex_folder(&folder)?;
+    let support = crate::agent::folder_support::refuse_unsupported_folder(matter, &folder)?;
     make_home(data, home)?;
     write_home_config(home)?;
-    Ok(folder)
+    Ok((folder, support))
 }
 
 pub(crate) mod prepare;

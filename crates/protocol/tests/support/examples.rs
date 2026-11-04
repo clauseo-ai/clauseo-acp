@@ -180,6 +180,18 @@ pub fn later_variants() -> Vec<DomainEvent> {
             detail: Some("inside the data folder".to_owned()),
         }
         .into(),
+        TurnFailed {
+            turn: turn_id(3),
+            code: ErrorCode::MatterFolderNetwork,
+            detail: Some("on a network drive".to_owned()),
+        }
+        .into(),
+        TurnFailed {
+            turn: turn_id(3),
+            code: ErrorCode::MatterFolderNoPermissions,
+            detail: Some("no file permissions".to_owned()),
+        }
+        .into(),
     ]
     .into_iter()
     .chain(setup_codes().map(|code| {

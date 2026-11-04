@@ -233,7 +233,7 @@ wire_types! {
         ViewPatch, ViewPatchBody, ViewPosition, ViewWindow,
     },
     query::{
-        AgentSummary, BlobRange, DefaultLocation, FolderState, HostQuery, MatterSummary, PageLimit, PaperSummary,
+        AgentSummary, BlobRange, DefaultLocation, FolderState, FolderSupportKind, HostQuery, MatterSummary, PageLimit, PaperSummary,
         QueryResult, ReadLen, RestorePreview, ThreadSummary, UndoPreview,
     },
     raw::{RawPayload},

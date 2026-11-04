@@ -153,8 +153,10 @@ fn keep(actor: &mut Actor, matter: MatterId, why: &'static str) {
     }
 }
 
-/// Sends `matter`'s worker its discard; the answer comes in [`discarded`].
+/// Sends `matter`'s worker its discard; the answer comes in [`discarded`]. The folder check's
+/// answer for it is dropped here (a matter kept keeps it): no row will show it.
 fn send_discard(actor: &mut Actor, matter: MatterId) {
+    actor.folder_supports.remove(&matter);
     let Some(made) = actor.made.get(&matter) else {
         return;
     };

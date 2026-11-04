@@ -1182,6 +1182,10 @@ export type ErrorCode =
 "matter.folder_is_matter" | 
 /** The folder is or holds Clauseo's data folder, or is, holds or sits inside the matters' history folder in it. */
 "matter.folder_in_matters_root" | 
+/** The matter folder is on a network drive, where Codex's sandbox can neither read nor write, so Codex is not started there. */
+"matter.folder_network" | 
+/** The matter folder is on a drive that keeps no file permissions (FAT, exFAT), which Codex's sandbox needs, so Codex is not started there. */
+"matter.folder_no_permissions" | 
 /** The client is not allowed to make this call. */
 "transport.unauthorized" | 
 /** The message is larger than the transport accepts. */
@@ -1366,6 +1370,30 @@ export type FolderState =
  *  "Locate folder" (`RelocateMatter`).
  */
 "missing" | 
+/**  A value from a newer Clauseo that this version does not know. */
+"unknown";
+
+/**
+ *  Why Codex's sandbox can't work fully in a matter's folder on Windows: the sandbox adds
+ *  permission entries to the folder before Codex may write there. A folder with none of
+ *  these has no value.
+ */
+export type FolderSupportKind = 
+/**
+ *  The lawyer can't change the folder's permissions: Codex starts, but asks before every
+ *  file edit, and its shell's writes there fail.
+ */
+"cant_change_permissions" | 
+/**
+ *  The folder is on a network drive: Codex can neither read nor write it, so it is not
+ *  started there (`matter.folder_network`).
+ */
+"network" | 
+/**
+ *  The folder's drive keeps no permissions (FAT, exFAT): Codex is not started there
+ *  (`matter.folder_no_permissions`).
+ */
+"no_permissions" | 
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
 
@@ -2547,6 +2575,13 @@ export type MatterSummary = {
 	 *  `found`.
 	 */
 	folder_state?: FolderState,
+	/**
+	 *  What keeps Codex's sandbox from working fully in its folder, on Windows, as the host last
+	 *  checked it: when the matter was made and at each agent launch (an in-memory reading, not
+	 *  state in the log). Missing when the folder is fine, before any check since the host
+	 *  started, and off Windows.
+	 */
+	folder_support?: FolderSupportKind,
 };
 
 /**

@@ -392,5 +392,7 @@ fn os_error(error: &windows::core::Error) -> io::Error {
     io::Error::from_raw_os_error(error.code().0 & 0xFFFF)
 }
 
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_dacl;
 #[cfg(test)]
 mod tests;
