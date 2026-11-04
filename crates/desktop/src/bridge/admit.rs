@@ -1,27 +1,32 @@
 //! What a window may send to the host, by its label (`Bridge::admit`). `main` gets the
 //! allow-list of decision record 0019 (`admit_main`: one arm per host command and no catch-all),
 //! and the settings window its own settings commands only (0028, U12): `SetUiSettings`,
-//! `SetToolSettings` and `RefreshLimits`, the last throttled in `dispatch_at`. Any other window
-//! sends nothing.
+//! `SetToolSettings`, `SetPrivacySettings` and `RefreshLimits`, the last throttled in
+//! `dispatch_at`. Any other window sends nothing. Of the usage counts' two commands (0036), each
+//! window gets the one its screen sends: `main` the welcome's `FirstAct`, the settings window
+//! the privacy switches.
 
 use clauseo_protocol::{FolderRefId, HostCommand, HostError, MatterSource};
 
 use super::{Bridge, SETTINGS_WINDOW, invalid, lock};
 
 /// Whether the window `label` may send `command`: `main` what `admit_main` admits, the
-/// `settings` window `SetUiSettings`, `SetToolSettings` and, for its Plan and usage,
-/// `RefreshLimits` (0028, U12; `dispatch_at` throttles it), any other window nothing.
+/// `settings` window `SetUiSettings`, `SetToolSettings`, `SetPrivacySettings` and, for its
+/// Plan and usage, `RefreshLimits` (0028, U12; `dispatch_at` throttles it), any other window
+/// nothing.
 pub(super) fn admit(bridge: &Bridge, label: &str, command: &HostCommand) -> Result<(), HostError> {
     match label {
         crate::MAIN_WINDOW => admit_main(bridge, command),
         SETTINGS_WINDOW => match command {
             // Plan and usage sends `Shown` as it opens and `TryAgain` from its button.
+            // Privacy (UF): the switches, which before the first act are the first act too.
             HostCommand::SetUiSettings { .. }
             | HostCommand::SetToolSettings { .. }
+            | HostCommand::SetPrivacySettings { .. }
             | HostCommand::RefreshLimits { .. } => Ok(()),
             _ => Err(invalid(
-                "the settings window sends only set_ui_settings, set_tool_settings \
-                 and refresh_limits",
+                "the settings window sends only set_ui_settings, set_tool_settings, \
+                 set_privacy_settings and refresh_limits",
             )),
         },
         _ => Err(invalid(format!("window {label} may send no command"))),
@@ -69,6 +74,8 @@ fn admit_main(bridge: &Bridge, command: &HostCommand) -> Result<(), HostError> {
         | HostCommand::RestoreVersion { .. }
         | HostCommand::SetUiSettings { .. }
         | HostCommand::CancelScan { .. }
+        // The welcome's button (UD1), and QF.11's notice for installs from before S21 (0036).
+        | HostCommand::FirstAct { .. }
         // The window's "Try again" sends it; a window's focus sends `Shown` from Rust
         // (`Bridge::shown`), not through here.
         | HostCommand::RefreshLimits { .. } => Ok(()),
@@ -86,11 +93,10 @@ fn admit_main(bridge: &Bridge, command: &HostCommand) -> Result<(), HostError> {
         HostCommand::SetToolSettings { .. } => Err(invalid(
             "the tool switches are set from the settings window only",
         )),
-        // The privacy switches and the first act (decision record 0036): which window may
-        // send them is S21's next pull request, with the welcome and the settings page.
-        // Until then no window does, so nothing is saved or sent.
-        HostCommand::SetPrivacySettings { .. } | HostCommand::FirstAct { .. } => Err(invalid(
-            "the privacy switches are not settable from the window yet",
+        // The privacy switches live in the settings window only (UF's privacy page), as the
+        // tool switches do (least privilege, 0036).
+        HostCommand::SetPrivacySettings { .. } => Err(invalid(
+            "the privacy switches are set from the settings window only",
         )),
     }
 }

@@ -1,8 +1,9 @@
 //! The allow-lists of `dispatch` and `query` (`Bridge::admit`): every call the R12 window
 //! (`ui/app/src/internal/session.ts`) and the room make today passes, and every command the
 //! bridge refuses is refused before any window has opened its stream. The settings window
-//! sends `SetUiSettings`, `SetToolSettings` and `RefreshLimits` (Plan and usage, U12) and reads
-//! `GetSettings`, nothing else; another label nothing (0028).
+//! sends `SetUiSettings`, `SetToolSettings`, `SetPrivacySettings` and `RefreshLimits` (Plan and
+//! usage, U12) and reads `GetSettings`, nothing else; `FirstAct` comes from `main` only; another
+//! label sends nothing (0028, 0036).
 
 use clauseo_protocol::{MatterId, ThreadId};
 use serde_json::json;
@@ -221,24 +222,48 @@ fn scan_folder_needs_a_picked_folder_and_cancel_scan_starts_nothing() {
     }
 }
 
-/// The privacy switches and the first act (decision record 0036) are refused from every window
-/// until S21's next pull request rules on them, so no window can start the usage counts yet.
+/// `privacy.counts` as the settings window reads it.
+fn counts_switch(bridge: &Bridge) -> bool {
+    match block_on(bridge.query(SETTINGS, HostQuery::GetSettings)) {
+        Ok(QueryResult::Settings(view)) => view.privacy.counts,
+        other => panic!("{other:?}"),
+    }
+}
+
+/// The welcome's `FirstAct` (0036) comes from `main` only: the settings window, and a window of
+/// any other label, is refused it before the host sees it.
 #[test]
-fn no_window_sends_the_privacy_switches_or_the_first_act_yet() {
+fn the_first_act_comes_from_the_main_window_only() {
+    let scratch = Scratch::new("admit-first-act", &[]);
+    let host = scratch.start(Vec::new());
+    let bridge = host.bridge();
+    let first_act = command(json!({"first_act": {"counts": false}}));
+    assert!(bridge.admit(MAIN, &first_act).is_ok());
+    for window in [SETTINGS, "other"] {
+        let refusal = block_on(bridge.dispatch(window, envelope(first_act.clone()))).unwrap_err();
+        assert_eq!(refusal.code(), ErrorCode::CommandInvalid, "{window}");
+    }
+    let outcome = block_on(bridge.dispatch(MAIN, envelope(first_act)));
+    assert!(outcome.is_ok(), "{outcome:?}");
+}
+
+/// The privacy switches (0036) are set from the settings window only, as the tool switches are:
+/// `main`, and a window of any other label, is refused them before the host sees them, and the
+/// switch stays as it was.
+#[test]
+fn the_privacy_switches_come_from_the_settings_window_only() {
     let scratch = Scratch::new("admit-privacy", &[]);
     let host = scratch.start(Vec::new());
     let bridge = host.bridge();
-    for body in [
-        json!({"set_privacy_settings": {"patch": {"counts": true}}}),
-        json!({"first_act": {"counts": true}}),
-    ] {
-        let refused = command(body);
-        for window in [MAIN, SETTINGS, "other"] {
-            assert_eq!(
-                bridge.admit(window, &refused).unwrap_err().code(),
-                ErrorCode::CommandInvalid,
-                "{window}: {refused:?}"
-            );
-        }
+    let off = command(json!({"set_privacy_settings": {"patch": {"counts": false}}}));
+    assert!(bridge.admit(SETTINGS, &off).is_ok());
+    assert!(counts_switch(&bridge));
+    for window in [MAIN, "other"] {
+        let refusal = block_on(bridge.dispatch(window, envelope(off.clone()))).unwrap_err();
+        assert_eq!(refusal.code(), ErrorCode::CommandInvalid, "{window}");
     }
+    assert!(counts_switch(&bridge), "a refused patch changed nothing");
+    let outcome = block_on(bridge.dispatch(SETTINGS, envelope(off)));
+    assert!(outcome.is_ok(), "{outcome:?}");
+    assert!(!counts_switch(&bridge));
 }

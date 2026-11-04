@@ -97,7 +97,8 @@ pub(crate) struct DisplayInfo {
 
 /// Runs a command. Refuses `AnswerPermission` (that goes through `answer_permission`) and a
 /// `CreateMatter` whose folder ref this run's `pick_folder` did not issue; from the settings
-/// window, everything but `SetUiSettings` and `SetToolSettings`.
+/// window, everything but `SetUiSettings`, `SetToolSettings`, `SetPrivacySettings` and
+/// `RefreshLimits`; from `main`, `SetToolSettings` and `SetPrivacySettings`.
 #[tauri::command]
 #[cfg_attr(test, specta::specta)]
 pub(crate) async fn dispatch<R: Runtime>(
