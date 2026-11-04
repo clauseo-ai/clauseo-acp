@@ -96,6 +96,63 @@ fn a_symlinked_candidate_resolves_to_its_target() {
     );
 }
 
+/// Homebrew's layout: `bin/node` links to a Cellar binary, and npm sits in `lib/` beside `bin/`,
+/// not beside the Cellar binary.
+#[cfg(unix)]
+fn homebrew_layout(dir: &TestDir, cellar_npm: bool) -> (PathBuf, PathBuf) {
+    let cellar = fake_node(dir, "cellar/node/1", "v24.0.0", cellar_npm);
+    let bin = dir.0.join("bin");
+    write::create_dir_all(&bin).unwrap();
+    let link = bin.join("node");
+    write::symlink(&cellar, &link).unwrap();
+    (cellar, link)
+}
+
+#[cfg(unix)]
+#[test]
+fn a_homebrew_link_finds_npm_beside_the_path_entry() {
+    let dir = TestDir::new("node-brew");
+    let (cellar, link) = homebrew_layout(&dir, false);
+    dir.file(NPM_CLI, b"");
+    let found = block_on(check_node(&link, &launcher(), &AsyncIoTimer)).unwrap();
+    assert_eq!(found.program, dunce::canonicalize(&cellar).unwrap());
+    assert_eq!(found.version, "v24.0.0");
+    assert_eq!(
+        found.npm_cli,
+        dunce::canonicalize(dir.0.join(NPM_CLI)).unwrap()
+    );
+    let path = std::ffi::OsString::from(link.parent().unwrap());
+    let via_path = block_on(search_user_node(&search(&path), &launcher(), &AsyncIoTimer))
+        .found
+        .unwrap();
+    assert_eq!(via_path, found);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_homebrew_link_without_npm_in_either_place_is_not_used() {
+    let dir = TestDir::new("node-brew-nonpm");
+    let (_cellar, link) = homebrew_layout(&dir, false);
+    assert_eq!(
+        block_on(check_node(&link, &launcher(), &AsyncIoTimer)),
+        Err(NotUsed::NoNpm)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn npm_beside_the_resolved_binary_wins_over_the_path_entry() {
+    let dir = TestDir::new("node-brew-both");
+    let (cellar, link) = homebrew_layout(&dir, true);
+    dir.file(NPM_CLI, b"");
+    let found = block_on(check_node(&link, &launcher(), &AsyncIoTimer)).unwrap();
+    assert_eq!(found.program, dunce::canonicalize(&cellar).unwrap());
+    assert_eq!(
+        found.npm_cli,
+        dunce::canonicalize(dir.0.join("cellar/node/1").join(NPM_CLI)).unwrap()
+    );
+}
+
 #[test]
 fn candidates_skip_relative_path_folders() {
     let dir = TestDir::new("node-cands");

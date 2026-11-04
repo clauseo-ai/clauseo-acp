@@ -4,7 +4,10 @@
 //! The user's Node is searched in each folder on `PATH`, then `%ProgramFiles%\nodejs` on
 //! Windows. A candidate is resolved through its links (`dunce::canonicalize`) and is used only
 //! if the result is a regular file with npm's `npm-cli.js` beside it and `node --version`
-//! (through the launcher, 10 s at most) reports v22 or later.
+//! (through the launcher, 10 s at most) reports v22 or later. npm is looked for beside the
+//! resolved binary first, then beside the path as found on `PATH`: Homebrew links
+//! `bin/node` to a binary in its Cellar, and npm sits in `lib/` beside the link, not beside the
+//! Cellar binary.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -120,7 +123,8 @@ pub(crate) async fn search_user_node<T: Timer>(
     seen
 }
 
-/// Checks one Node: the user's candidate, or a receipt's Node at start.
+/// Checks one Node: the user's candidate, or a receipt's Node at start. `candidate` is the path
+/// as found (on `PATH`, or a known location); `FoundNode.program` is its resolved form.
 pub(crate) async fn check_node<T: Timer>(
     candidate: &Path,
     launcher: &dyn Launcher,
@@ -131,10 +135,7 @@ pub(crate) async fn check_node<T: Timer>(
         return Err(NotUsed::NotAFile);
     }
     let os = if cfg!(windows) { Os::Win32 } else { Os::Linux };
-    let npm_cli = npm_cli_beside(&program, os).ok_or(NotUsed::NoNpm)?;
-    if !npm_cli.is_file() {
-        return Err(NotUsed::NoNpm);
-    }
+    let npm_cli = npm_cli_for(&program, candidate, os).ok_or(NotUsed::NoNpm)?;
     let version = node_version(&program, launcher, timer).await?;
     match parse_version(&version) {
         Some((major, _, _)) if major >= MIN_MAJOR => Ok(FoundNode {
@@ -231,6 +232,16 @@ fn npm_cli_beside(program: &Path, os: Os) -> Option<PathBuf> {
             .join("bin")
             .join("npm-cli.js"),
     )
+}
+
+/// npm's `npm-cli.js` for the Node at `program` (resolved) as `candidate` (the path as found):
+/// beside `program` first, then beside `candidate`, each by [`npm_cli_beside`]'s rule. Whichever
+/// is found is canonicalised, and must be a regular file.
+fn npm_cli_for(program: &Path, candidate: &Path, os: Os) -> Option<PathBuf> {
+    [program, candidate].into_iter().find_map(|node| {
+        let cli = dunce::canonicalize(npm_cli_beside(node, os)?).ok()?;
+        cli.is_file().then_some(cli)
+    })
 }
 
 /// The downloaded Node's folder: `<data_dir>/agents/runtime/node-v<version>-<os>-<arch>`.

@@ -51,26 +51,33 @@ pub(crate) fn platform() -> Platform {
     Platform::current().expect("a platform Clauseo installs on")
 }
 
-/// The real Node's program and npm's `npm-cli.js` beside it, from `PATH`.
+/// The real Node's program and npm's `npm-cli.js` beside it, from `PATH`. npm is looked for
+/// beside the resolved program first, then beside the path as found (Homebrew's `bin/node` links
+/// into its Cellar), as the agents' Node search does.
 pub(crate) fn real_node() -> (PathBuf, PathBuf) {
     let name = if cfg!(windows) { "node.exe" } else { "node" };
-    let program = write::on_path(name)
-        .and_then(|program| dunce::canonicalize(program).ok())
-        .expect(
-            "these tests need Node 22 or later with npm on PATH (CI's build jobs have Node 24): \
-             no node found",
-        );
-    let dir = program.parent().unwrap();
-    let cli = if cfg!(windows) {
-        dir.join("node_modules/npm/bin/npm-cli.js")
-    } else {
-        dir.join("../lib/node_modules/npm/bin/npm-cli.js")
-    };
-    assert!(
-        cli.is_file(),
-        "these tests need npm beside the node on PATH; {} has none",
-        program.display()
+    let found = write::on_path(name).expect(
+        "these tests need Node 22 or later with npm on PATH (CI's build jobs have Node 24): \
+         no node found",
     );
+    let program = dunce::canonicalize(&found).expect("the Node on PATH resolves");
+    let beside = |node: &Path| {
+        let dir = node.parent().unwrap();
+        if cfg!(windows) {
+            dir.join("node_modules/npm/bin/npm-cli.js")
+        } else {
+            dir.join("../lib/node_modules/npm/bin/npm-cli.js")
+        }
+    };
+    let cli = [beside(&program), beside(&found)]
+        .into_iter()
+        .find(|cli| cli.is_file())
+        .unwrap_or_else(|| {
+            panic!(
+                "these tests need npm beside the node on PATH; {} has none",
+                found.display()
+            )
+        });
     (program, dunce::canonicalize(cli).unwrap())
 }
 
