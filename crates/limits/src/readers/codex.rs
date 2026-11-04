@@ -24,7 +24,7 @@ use futures::future::join;
 use futures::future::{Either, select};
 use futures::{AsyncRead, AsyncWrite};
 
-use super::env::spec_env;
+use super::env::{CODEX_DROPPED, spec_env};
 use super::paths;
 use super::run::{Ran, Stdout, run};
 use super::tap::{StdoutTap, tapped};
@@ -184,7 +184,7 @@ pub(crate) fn prepare(
     write::create_dir_all(run_dir).map_err(|err| err.to_string())?;
     paths::check_run_dir(run_dir).map_err(|err| err.to_string())?;
     let forced = (OsStr::new(CODEX_HOME), codex_home.as_os_str());
-    let env = spec_env(&launch.env, inherited, Some(forced));
+    let env = spec_env(&launch.env, inherited, Some(forced), &CODEX_DROPPED);
     let mut args = vec![codex_js.into_os_string()];
     for set in CODEX_OVERRIDES {
         args.extend([OsString::from("-c"), OsString::from(set)]);

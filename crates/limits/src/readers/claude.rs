@@ -105,7 +105,7 @@ fn prepare(launch: &AgentLaunch, run_dir: &Path) -> Result<LaunchSpec, String> {
     write::replace_if_differs(&helper, HELPER.as_bytes()).map_err(|err| err.to_string())?;
     write::create_dir_all(run_dir).map_err(|err| err.to_string())?;
     paths::check_run_dir(run_dir).map_err(|err| err.to_string())?;
-    let env = spec_env(&launch.env, std::env::vars_os(), None);
+    let env = spec_env(&launch.env, std::env::vars_os(), None, &[]);
     LaunchSpec::new(
         located.program,
         vec![helper.into_os_string()],
