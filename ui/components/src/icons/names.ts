@@ -205,6 +205,11 @@ export const ICON_NAMES = [
   },
   { component: "IconArchived", source: "archive", meaning: "Archived: a conversation set aside" },
   {
+    component: "IconSnooze",
+    source: "alarmClock",
+    meaning: "Snooze: a conversation set aside until a time, on the rail",
+  },
+  {
     component: "IconFileWord",
     source: "fileWord",
     meaning: "A Word document (.docx, .doc): the page with W on its tab",
