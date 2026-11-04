@@ -53,7 +53,10 @@ test.describe("Claude", () => {
 });
 
 test.describe("Codex", () => {
-  test.use({ scenario: "prompt-stream", otherAgents: { "codex-acp": "codex-hook-trusted" } });
+  test.use({
+    scenario: "claude-prompt-stream",
+    otherAgents: { "codex-acp": "codex-hook-trusted" },
+  });
 
   test("a conversation asked with ChatGPT says web search is on too", async ({ app }) => {
     const w = window(app.page);
