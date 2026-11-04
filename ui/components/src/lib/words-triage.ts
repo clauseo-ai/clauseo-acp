@@ -5,11 +5,6 @@
 import { wordsOf } from "./words-core.ts";
 
 const HI = {
-  // RO-13: a conversation's two buttons, and its menu
-  Snooze: null,
-  "Mark as done": null,
-  // RO-15: a matter's menu, with RO-07's "Snooze until" on its submenu's row
-  "Mark all done": null,
   // RO-02: the shelf's heading, with its count
   Snoozed: null,
   // RO-03: under the folded shelf; {when} is "6:00 pm", "tomorrow 9:00 am" or "Monday 9:00 am"

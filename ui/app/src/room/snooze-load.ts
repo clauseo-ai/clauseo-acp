@@ -7,7 +7,7 @@ import { createElement, use, type ComponentType, type ReactNode } from "react";
 type PointProps = { at: { x: number; y: number }; onClose: () => void; children: ReactNode };
 import { late } from "@clauseo/components/lib/late.ts";
 // types alone: erased, so this file has no static dependency on the chunk
-import type { ItemsProps, PickerProps, ShelfOpenProps, SnoozeMenuProps } from "./snooze-late.tsx";
+import type { ItemsProps, PickerProps, ShelfProps, SnoozeMenuProps } from "./snooze-late.tsx";
 import type { Acts, Line } from "./snooze-acts.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import type { Triage } from "@clauseo/components/clauseo/rail-triage.tsx";
@@ -16,7 +16,7 @@ import type { DoneRow } from "@clauseo/components/clauseo/rail-done-rows.tsx";
 type Parts = {
   SnoozeMenu: ComponentType<SnoozeMenuProps>;
   Picker: ComponentType<PickerProps>;
-  ShelfOpen: ComponentType<ShelfOpenProps>;
+  Shelf: ComponentType<ShelfProps>;
   DoneRows: ComponentType<{ rows: readonly DoneRow[] }>;
   Items: ComponentType<ItemsProps>;
   Line: ComponentType<{ text: string; onUndo: () => void }>;
@@ -32,7 +32,7 @@ const NOOP = () => {};
 const NONE: Parts = {
   SnoozeMenu: NOTHING,
   Picker: NOTHING,
-  ShelfOpen: NOTHING,
+  Shelf: NOTHING,
   DoneRows: NOTHING,
   Items: NOTHING,
   Line: NOTHING,
@@ -52,7 +52,7 @@ export function preloadSnooze(): Promise<Parts> {
     ([m, a]): Parts => ({
       SnoozeMenu: m.SnoozeMenu,
       Picker: m.Picker,
-      ShelfOpen: m.ShelfOpen,
+      Shelf: m.Shelf,
       DoneRows: m.DoneRows,
       Items: m.TriageItems,
       Line: m.RailLine,
@@ -79,8 +79,7 @@ export function preloadSnooze(): Promise<Parts> {
 export const LazySnoozeMenu = (p: SnoozeMenuProps) =>
   createElement(use(preloadSnooze()).SnoozeMenu, p);
 export const LazyPicker = (p: PickerProps) => createElement(use(preloadSnooze()).Picker, p);
-export const LazyShelfOpen = (p: ShelfOpenProps) =>
-  createElement(use(preloadSnooze()).ShelfOpen, p);
+export const LazyShelf = (p: ShelfProps) => createElement(use(preloadSnooze()).Shelf, p);
 export const LazyDoneRows = (p: { rows: readonly DoneRow[] }) =>
   createElement(use(preloadSnooze()).DoneRows, p);
 export const LazyItems = (p: ItemsProps) => createElement(use(preloadSnooze()).Items, p);

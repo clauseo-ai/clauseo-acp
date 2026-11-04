@@ -4,6 +4,7 @@
 import { useState, type ReactNode } from "react";
 import { DoneRows } from "@clauseo/components/clauseo/rail-done-rows.tsx";
 import { ShelfRows, type ShelfRow } from "@clauseo/components/clauseo/rail-shelf-rows.tsx";
+import { RailShelf } from "@clauseo/components/clauseo/rail-shelf.tsx";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { t } from "@clauseo/components/lib/words.ts";
 import { TriageItems } from "@clauseo/components/clauseo/rail-triage-items.tsx";
@@ -14,7 +15,9 @@ import { SnoozeItems, SnoozePicker } from "@clauseo/components/clauseo/snooze-me
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import type { MatterId, ThreadSummary, Timestamp } from "../transport/protocol.ts";
 import { whenWords, type ShelfOpens, type SnoozeCtx } from "./rail-snooze.tsx";
-import { type Shelved, snoozed } from "./triage.ts";
+import { shelf, type Shelved } from "./shelf.ts";
+import { snoozed, type Group } from "./triage.ts";
+import type { MatterInfo } from "./host-next.ts";
 import { snoozeChoices } from "./snooze-choices.ts";
 import { MOST_AHEAD, pickedAt, pickerValue } from "./snooze-times.ts";
 
@@ -66,7 +69,30 @@ export function Picker({ zone, onPick, onCancel }: PickerProps) {
   );
 }
 
-export type ShelfOpenProps = {
+export type ShelfProps = {
+  c: SnoozeCtx;
+  matters: readonly MatterInfo[];
+  lists: ReadonlyMap<MatterId, readonly ThreadSummary[]>;
+  open: ShelfOpens;
+  group: ReadonlyMap<MatterId, Group>;
+};
+
+/** The Snoozed shelf: folded, how many and when the next is back; open, its rows. Nothing with nothing on it. */
+export function Shelf({ c, matters, lists, open, group }: ShelfProps) {
+  const shelved = shelf(matters, lists, c.now, group);
+  const first = shelved[0];
+  if (first === undefined) return null;
+  return (
+    <RailShelf
+      count={shelved.length}
+      next={whenWords(first.until, c.now, c.zone, c.lang)}
+      rows={() => <ShelfOpen c={c} shelved={shelved} lists={lists} open={open} />}
+      testId="rail-shelf"
+    />
+  );
+}
+
+type ShelfOpenProps = {
   c: SnoozeCtx;
   shelved: readonly Shelved[];
   lists: ReadonlyMap<MatterId, readonly ThreadSummary[]>;
@@ -74,7 +100,7 @@ export type ShelfOpenProps = {
 };
 
 /** The open shelf: each conversation with its matter, or the matter snoozed whole, when it's back, and Wake now. */
-export function ShelfOpen({ c, shelved, lists, open }: ShelfOpenProps) {
+function ShelfOpen({ c, shelved, lists, open }: ShelfOpenProps) {
   const when = (at: Timestamp) => whenWords(at, c.now, c.zone, c.lang);
   const rows = shelved.map(({ matter, thread, until }): ShelfRow => {
     const name = matter.kind === "scratch" ? t(c.lang, "Scratch matter") : matter.name;

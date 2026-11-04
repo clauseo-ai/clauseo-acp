@@ -6,7 +6,8 @@ import type { ThreadSummary } from "../transport/protocol.ts";
 import { uuid } from "../testing/stream-script.ts";
 import { detailed } from "./fake-next.ts";
 import type { MatterInfo } from "./host-next.ts";
-import { shelf, triage, wholly } from "./triage.ts";
+import { shelf } from "./shelf.ts";
+import { triage, wholly } from "./triage.ts";
 
 const NOW = Date.UTC(2026, 10, 3, 17, 0);
 const LATER = NOW + 3_600_000;

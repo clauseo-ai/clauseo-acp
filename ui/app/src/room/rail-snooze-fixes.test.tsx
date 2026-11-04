@@ -14,6 +14,9 @@ import { railView } from "./rail-lists.ts";
 import {
   A,
   arm,
+  focusWindow,
+  hover,
+  needs,
   B,
   C,
   D,
@@ -277,5 +280,105 @@ test("a conversation's context menu, opened where it was asked for, holds Snooze
   expect(menuItems().map((i) => i.textContent)).toEqual(["Snooze", "Mark as done"]);
   await press(item("Mark as done"));
   expect(sent(transport, "mark_thread_done")).toEqual([{ thread: T_A.thread, done: true }]);
+  expect(menuItems()).toEqual([]);
+});
+
+test("the open conversation's chevron is drawn from the first render, its menu loaded when pressed", async () => {
+  await mount({ lists: withA([T_A, T_LIST]) });
+  // no pointer, no focus: the chevron already stands, so the title's room never changes under the pointer
+  const chevron = actions("List of dates");
+  expect(chevron).not.toBeNull();
+  expect(chevron?.closest(".room-conv-item")?.querySelector(".room-conv-more")).toBe(chevron);
+  await press(chevron);
+  expect(menuItems().map((i) => i.textContent)).toEqual(["Snooze", "Mark as done"]);
+});
+
+test("the later chunk is warmed once, when the page is idle after the rail mounts", async () => {
+  const asked: (() => void)[] = [];
+  const idle = vi.fn((run: () => void) => asked.push(run));
+  vi.stubGlobal("requestIdleCallback", idle);
+  vi.stubGlobal("cancelIdleCallback", vi.fn());
+  try {
+    await mount();
+    expect(idle).toHaveBeenCalledTimes(1);
+    await act(async () => asked[0]?.());
+    await act(async () => settled());
+    // nothing asks again: it fired and is gone
+    await hover(true);
+    await hover(false);
+    expect(idle).toHaveBeenCalledTimes(1);
+    await unmount();
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+test("a line that arrives once the pointer and the focus have left the rail never shows, and the groups move on", async () => {
+  let answer: (() => void) | null = null;
+  const transport = await mount({
+    dispatch: (c) =>
+      "snooze_thread" in c.command
+        ? new Promise<"done">((resolve) => (answer = () => resolve("done")))
+        : "done",
+  });
+  await hover(true);
+  const row = [
+    ...(needs()?.querySelectorAll<HTMLElement>('[data-testid="matter-row"]') ?? []),
+  ].find((r) => r.textContent?.includes(C.name));
+  await act(async () =>
+    row?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })),
+  );
+  await press(item("Snooze until"));
+  await press(item("Tomorrow 9:00 am"));
+  await hover(false);
+  // the host answers only now
+  await act(async () => answer?.());
+  await act(async () => settled());
+  expect(line()).toBeNull();
+  await act(async () => {
+    transport.appEvent({
+      threads_changed: {
+        matter: C.matter,
+        threads: [{ ...T_READY, snoozed_until: TOMORROW }],
+        removed: [],
+        all: false,
+      },
+    });
+  });
+  expect(names(needs())).not.toContain(C.name);
+});
+
+test("the window coming back clears a line", async () => {
+  await mount({ lists: withA([T_A, T_LIST]) });
+  await hover(true);
+  const row = await arm("Bail conditions");
+  await press(row?.querySelector('[data-testid="mark-done"]'));
+  expect(line()).not.toBeNull();
+  await focusWindow();
+  expect(line()).toBeNull();
+});
+
+test("a row's context menu, its row losing Snooze while open, closes for good and doesn't come back with the row", async () => {
+  const transport = await mount({ lists: withA([T_A, T_LIST]) });
+  const row = (await arm("Bail conditions"))?.querySelector<HTMLElement>(".room-conv");
+  await act(async () =>
+    row?.dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 300 }),
+    ),
+  );
+  await act(async () => settled());
+  expect(menuItems().map((i) => i.textContent)).toEqual(["Snooze", "Mark as done"]);
+  const change = (done: boolean) =>
+    act(async () => {
+      transport.appEvent({
+        threads_changed: { matter: A.matter, threads: [{ ...T_A, done }], removed: [], all: false },
+      });
+    });
+  // done elsewhere: the row goes to the fold, the menu with it
+  await change(true);
+  expect(menuItems()).toEqual([]);
+  // not done again: the row comes back, the menu doesn't
+  await change(false);
+  await act(async () => settled());
   expect(menuItems()).toEqual([]);
 });
