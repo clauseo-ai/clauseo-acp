@@ -180,15 +180,18 @@ pub(crate) fn run(mode: Mode, args: &[OsString]) -> i32 {
 }
 
 /// One run: the environment's settings, then the command. An error is a failed write to stdout
-/// or stdin, or a missing `HOME`; a bad command is [`usage`].
+/// or stdin, or a missing home ([`user_home`]); a bad command is [`usage`].
 fn session(mode: Mode, args: &[OsString]) -> io::Result<i32> {
     write_env_names()?;
     let script = Script::parse(&std::env::var("FAKE_SIGNIN").unwrap_or_default());
-    let Some(home) = std::env::var_os("HOME") else {
-        stderr_write(&diagnostic("HOME is not set"));
+    let Some(home) = user_home(|name| std::env::var_os(name), cfg!(windows)) else {
+        stderr_write(&diagnostic(if cfg!(windows) {
+            "USERPROFILE and HOME are not set"
+        } else {
+            "HOME is not set"
+        }));
         return Ok(FAILED);
     };
-    let home = PathBuf::from(home);
     let folder = match mode {
         Mode::Claude => claude_home(
             std::env::var_os("CLAUDE_SECURESTORAGE_CONFIG_DIR")
@@ -221,6 +224,20 @@ fn usage(mode: Mode) -> i32 {
         Mode::Codex => CODEX_USAGE,
     }));
     EXIT_LOAD
+}
+
+/// The user's home folder, where the real CLIs find `.codex` and `.claude`, from `var`, the
+/// environment's lookup: on Windows (`windows`) `USERPROFILE` as Codex and Claude Code read it,
+/// else `HOME` when `USERPROFILE` is unset or empty; elsewhere `HOME`.
+pub(crate) fn user_home(var: impl Fn(&str) -> Option<OsString>, windows: bool) -> Option<PathBuf> {
+    if windows {
+        var("USERPROFILE")
+            .filter(|home| !home.is_empty())
+            .or_else(|| var("HOME").filter(|home| !home.is_empty()))
+            .map(PathBuf::from)
+    } else {
+        var("HOME").map(PathBuf::from)
+    }
 }
 
 /// Where Claude Code keeps its login: `CLAUDE_SECURESTORAGE_CONFIG_DIR` when set (`""` is
@@ -537,3 +554,6 @@ fn stderr_write(text: &str) {
     let mut stderr = io::stderr().lock();
     stderr.write_all(text.as_bytes()).unwrap_or_default();
 }
+
+#[cfg(test)]
+mod tests;
