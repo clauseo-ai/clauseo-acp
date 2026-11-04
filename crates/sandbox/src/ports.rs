@@ -3,13 +3,20 @@
 //! daemon and Chrome's debugging port).
 //!
 //! macOS and Linux bind `127.0.0.1` on a port the OS picks. Windows binds a free port in
-//! [`WINDOWS_PORTS`], the only loopback range S15's filters leave the sandbox user, starting at
-//! a random offset, with `SO_EXCLUSIVEADDRUSE` set before each bind so no other process can
-//! bind the same port.
+//! [`WINDOWS_PORTS`], the range that set-up's filters leave open and that each launch's dynamic
+//! permit narrows to that launch's own ports (S15), starting at a random offset, with
+//! `SO_EXCLUSIVEADDRUSE` set before each bind so no other process can bind the same port.
 //!
 //! A [`PortClaim`] holds a port in a process-wide registry until it drops. Nothing is bound
 //! while it is held, so the registry keeps this process's own listeners and claims apart:
 //! [`bind_loopback`], [`claim_port`] and [`claim_port_at`] never hand out a claimed port.
+//!
+//! On macOS and Linux a dropped claim retires its port instead of freeing it. Retired ports
+//! join a second registry that is never cleared, and those three functions never hand them out
+//! again for the life of the process. The host's tree kill is `killpg`, which misses a jailed
+//! child that called `setsid`; that child keeps its Seatbelt rules, and they still allow the
+//! port. A port handed to the next session would then reach that child. Windows frees the port
+//! on drop: its range is 100 ports, and its tree kill is a Job Object, so nothing survives it.
 
 use std::collections::BTreeSet;
 use std::io;
@@ -24,22 +31,64 @@ pub const WINDOWS_PORTS: std::ops::RangeInclusive<u16> = 61080..=61179;
 /// The ports claimed now, by live [`PortClaim`]s.
 static CLAIMED: Mutex<BTreeSet<u16>> = Mutex::new(BTreeSet::new());
 
+/// The ports of dropped claims on macOS and Linux, never handed out again for the life of the
+/// process.
+#[cfg(not(windows))]
+static RETIRED: Mutex<BTreeSet<u16>> = Mutex::new(BTreeSet::new());
+
 /// The registry, locked. A panic while it was held leaves a set that is still whole.
 fn claimed() -> MutexGuard<'static, BTreeSet<u16>> {
     CLAIMED.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// The retired registry, locked, with the same poison handling as [`claimed`].
+#[cfg(not(windows))]
+fn retired() -> MutexGuard<'static, BTreeSet<u16>> {
+    RETIRED.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// The ports this process will not hand out, locked: the claimed ones and, on macOS and Linux,
+/// the retired ones. Both are locked together, in this order, so a port moves from claimed to
+/// retired with no gap in which a bind could take it.
+struct Held {
+    claimed: MutexGuard<'static, BTreeSet<u16>>,
+    #[cfg(not(windows))]
+    retired: MutexGuard<'static, BTreeSet<u16>>,
+}
+
+impl Held {
+    fn lock() -> Self {
+        Self {
+            claimed: claimed(),
+            #[cfg(not(windows))]
+            retired: retired(),
+        }
+    }
+
+    /// Whether `port` is claimed, or retired on macOS and Linux.
+    fn contains(&self, port: u16) -> bool {
+        #[cfg(not(windows))]
+        if self.retired.contains(&port) {
+            return true;
+        }
+        self.claimed.contains(&port)
+    }
+}
+
 /// A free loopback port held for a session: no [`bind_loopback`], [`claim_port`] or
-/// [`claim_port_at`] of this process hands it out until the claim drops. Nothing is bound;
+/// [`claim_port_at`] of this process hands it out while the claim lives. Nothing is bound;
 /// whoever the port is for binds it.
 ///
 /// A claim holds only inside this process. Another local process can still bind the port
 /// before Chrome or agent-browser does; the launch then fails, with no fallback to another
 /// port. On macOS and Linux [`bind_loopback`] and [`claim_port`] bind port 0, so the kernel
-/// picks the port and it is known only after the bind: if the kernel hands back a claimed
-/// port (it hands out only ports nobody holds), it is held for an instant, under the registry
-/// lock, and the bind asked again. A launch binding that exact port in that instant fails; it
-/// cannot take the port over. On Windows a claimed port is never bound.
+/// picks the port and it is known only after the bind: if the kernel hands back a claimed or
+/// retired port (it hands out only ports nobody holds), it is held for an instant, under the
+/// registry lock, and the bind asked again. A launch binding that exact port in that instant
+/// fails; it cannot take the port over. On Windows a claimed port is never bound.
+///
+/// On macOS and Linux a dropped claim retires its port for the life of the process; see the
+/// module header. On Windows the port is freed when the claim drops.
 #[derive(Debug)]
 pub struct PortClaim {
     port: u16,
@@ -54,31 +103,41 @@ impl PortClaim {
 
 impl Drop for PortClaim {
     fn drop(&mut self) {
+        // Windows frees the port: its tree kill is a Job Object, so no jailed child outlives it.
+        #[cfg(windows)]
         claimed().remove(&self.port);
+        #[cfg(not(windows))]
+        {
+            let mut held = Held::lock();
+            held.claimed.remove(&self.port);
+            held.retired.insert(self.port);
+        }
     }
 }
 
-/// Binds a listener on `127.0.0.1` for one launch, never on a claimed port. On Windows, when
-/// no port in [`WINDOWS_PORTS`] binds, the error names the range and says what may hold it.
+/// Binds a listener on `127.0.0.1` for one launch, never on a claimed or retired port. On
+/// Windows, when no port in [`WINDOWS_PORTS`] binds, the error names the range and says what
+/// may hold it.
 pub fn bind_loopback() -> io::Result<TcpListener> {
-    imp::bind(&claimed())
+    imp::bind(&Held::lock())
 }
 
 /// Claims a free loopback port for the session. macOS and Linux: the port the OS gives a bind
-/// of `127.0.0.1:0`, asked again when it is already claimed. Windows: a free port in
+/// of `127.0.0.1:0`, asked again when it is already claimed or retired. Windows: a free port in
 /// [`WINDOWS_PORTS`] that is not claimed, tested with the same `SO_EXCLUSIVEADDRUSE` bind as
 /// [`bind_loopback`]. The test listener is closed before this returns.
 pub fn claim_port() -> io::Result<PortClaim> {
-    let mut set = claimed();
-    let port = imp::bind(&set)?.local_addr()?.port();
-    set.insert(port);
+    let mut held = Held::lock();
+    let port = imp::bind(&held)?.local_addr()?.port();
+    held.claimed.insert(port);
     Ok(PortClaim { port })
 }
 
 /// Claims `port`, for a port whose number someone else chose (agent-browser's Windows daemon
 /// port, a hash of its session name). [`io::ErrorKind::InvalidInput`] for port 0, and on
 /// Windows for a port outside [`WINDOWS_PORTS`]; [`io::ErrorKind::AddrInUse`] when it is
-/// claimed already or a test bind of it fails. The caller picks another (a new session name).
+/// claimed or retired, or a test bind of it fails. The caller picks another (a new session
+/// name).
 pub fn claim_port_at(port: u16) -> io::Result<PortClaim> {
     if port == 0 {
         return Err(io::Error::new(
@@ -106,11 +165,11 @@ fn claim_at_with(
     port: u16,
     bind_port: impl FnOnce(u16) -> io::Result<TcpListener>,
 ) -> io::Result<PortClaim> {
-    let mut set = claimed();
-    if set.contains(&port) {
+    let mut held = Held::lock();
+    if held.contains(port) {
         return Err(io::Error::new(
             io::ErrorKind::AddrInUse,
-            format!("loopback port {port} is claimed already"),
+            format!("loopback port {port} is claimed or retired"),
         ));
     }
     drop(bind_port(port).map_err(|error| {
@@ -119,21 +178,21 @@ fn claim_at_with(
             format!("loopback port {port} cannot be bound: {error}"),
         )
     })?);
-    set.insert(port);
+    held.claimed.insert(port);
     Ok(PortClaim { port })
 }
 
-/// The first of `candidates` that `claimed` does not hold and `bind_port` binds. A claimed
-/// port is skipped before any bind; a port another socket holds (`AddrInUse`, or
+/// The first of `candidates` that `held` does not hold and `bind_port` binds. A claimed or
+/// retired port is skipped before any bind; a port another socket holds (`AddrInUse`, or
 /// `PermissionDenied` for a reserved one) is passed over; any other error ends the search.
 #[cfg(any(windows, test))]
 fn first_free(
     candidates: impl Iterator<Item = u16>,
-    claimed: &BTreeSet<u16>,
+    held: &Held,
     mut bind_port: impl FnMut(u16) -> io::Result<TcpListener>,
 ) -> io::Result<TcpListener> {
     let mut last = io::Error::new(io::ErrorKind::AddrInUse, "no free port in 61080 to 61179");
-    for port in candidates.filter(|port| !claimed.contains(port)) {
+    for port in candidates.filter(|port| !held.contains(*port)) {
         match bind_port(port) {
             Ok(listener) => return Ok(listener),
             Err(error)
@@ -167,37 +226,37 @@ fn range_exhausted(last: &io::Error) -> io::Error {
 
 #[cfg(not(windows))]
 mod imp {
-    use super::{BTreeSet, Ipv4Addr, SocketAddr, TcpListener, io};
+    use super::{Held, Ipv4Addr, SocketAddr, TcpListener, io};
 
-    /// How many binds may land on a claimed port before [`bind`] gives up.
+    /// How many binds may land on a claimed or retired port before [`bind`] gives up.
     const TRIES: usize = 64;
 
-    /// A listener on a port the OS picks that `claimed` does not hold.
-    pub(super) fn bind(claimed: &BTreeSet<u16>) -> io::Result<TcpListener> {
-        first_unclaimed(claimed, || bind_port(0))
+    /// A listener on a port the OS picks that `held` does not hold.
+    pub(super) fn bind(held: &Held) -> io::Result<TcpListener> {
+        first_unheld(held, || bind_port(0))
     }
 
     pub(super) fn bind_port(port: u16) -> io::Result<TcpListener> {
         TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, port)))
     }
 
-    /// The first listener from `next` on a port `claimed` does not hold. Listeners on claimed
-    /// ports stay open until one is found, so the OS cannot hand the same port back.
-    pub(super) fn first_unclaimed(
-        claimed: &BTreeSet<u16>,
+    /// The first listener from `next` on a port `held` does not hold. Listeners on held ports
+    /// stay open until one is found, so the OS cannot hand the same port back.
+    pub(super) fn first_unheld(
+        held: &Held,
         mut next: impl FnMut() -> io::Result<TcpListener>,
     ) -> io::Result<TcpListener> {
-        let mut held = Vec::new();
+        let mut rejected = Vec::new();
         for _ in 0..TRIES {
             let listener = next()?;
-            if !claimed.contains(&listener.local_addr()?.port()) {
+            if !held.contains(listener.local_addr()?.port()) {
                 return Ok(listener);
             }
-            held.push(listener);
+            rejected.push(listener);
         }
         Err(io::Error::new(
             io::ErrorKind::AddrInUse,
-            format!("{TRIES} loopback binds in a row landed on claimed ports"),
+            format!("{TRIES} loopback binds in a row landed on claimed or retired ports"),
         ))
     }
 }
@@ -213,19 +272,19 @@ mod imp {
         SO_EXCLUSIVEADDRUSE, SOCKET, SOL_SOCKET, setsockopt,
     };
 
-    use super::{BTreeSet, WINDOWS_PORTS, first_free};
+    use super::{Held, WINDOWS_PORTS, first_free};
 
     /// The backlog of each listener.
     const BACKLOG: i32 = 128;
 
-    /// A listener on a free port of [`WINDOWS_PORTS`] that `claimed` does not hold.
-    pub(super) fn bind(claimed: &BTreeSet<u16>) -> io::Result<TcpListener> {
+    /// A listener on a free port of [`WINDOWS_PORTS`] that `held` does not hold.
+    pub(super) fn bind(held: &Held) -> io::Result<TcpListener> {
         let count = WINDOWS_PORTS.len();
         let mut random = [0u8; 2];
         getrandom::fill(&mut random).map_err(|error| io::Error::other(error.to_string()))?;
         let offset = usize::from(u16::from_le_bytes(random)) % count;
         let ports = WINDOWS_PORTS.skip(offset).chain(WINDOWS_PORTS.take(offset));
-        first_free(ports, claimed, bind_port)
+        first_free(ports, held, bind_port)
     }
 
     pub(super) fn bind_port(port: u16) -> io::Result<TcpListener> {
@@ -317,21 +376,51 @@ mod tests {
         let claim = claim_port().unwrap();
         // The claim binds nothing, so the test can put a listener on its port.
         let mut listeners = vec![imp::bind_port(claim.port()).unwrap()].into_iter();
-        let got = imp::first_unclaimed(&claimed(), || {
+        let got = imp::first_unheld(&Held::lock(), || {
             listeners.next().map_or_else(|| imp::bind_port(0), Ok)
         })
         .unwrap();
         assert_ne!(got.local_addr().unwrap().port(), claim.port());
-        let all_claimed = imp::first_unclaimed(&claimed(), || imp::bind_port(claim.port()));
+        let all_claimed = imp::first_unheld(&Held::lock(), || imp::bind_port(claim.port()));
         assert!(all_claimed.is_err(), "the port was bound twice");
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn a_released_claim_is_not_handed_out_again() {
+        let claim = claim_port().unwrap();
+        let port = claim.port();
+        drop(claim);
+        let error = claim_port_at(port).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::AddrInUse, "{error}");
+        for _ in 0..200 {
+            let next = claim_port().unwrap();
+            assert_ne!(next.port(), port);
+        }
+        // The OS may hand the port back to a bind of port 0; the retired port is asked again.
+        for _ in 0..200 {
+            let listener = bind_loopback().unwrap();
+            assert_ne!(listener.local_addr().unwrap().port(), port);
+        }
     }
 
     #[test]
     fn the_candidate_loop_never_binds_a_claimed_port() {
         let claim = claim_port().unwrap();
-        // A copy: the hook must not wait on the registry's lock.
-        let held = claimed().clone();
-        let other = claim.port().wrapping_add(1).max(1);
+        // The lock is held across the loop: the hook binds a socket and never touches the
+        // registry.
+        let held = Held::lock();
+        // A free port other than the claim's, so the loop's only skip is the claimed one.
+        let other = loop {
+            let port = TcpListener::bind("127.0.0.1:0")
+                .unwrap()
+                .local_addr()
+                .unwrap()
+                .port();
+            if port != claim.port() && !held.contains(port) {
+                break port;
+            }
+        };
         let mut tried = Vec::new();
         let got = first_free([claim.port(), other].into_iter(), &held, |port| {
             tried.push(port);
@@ -375,6 +464,7 @@ mod tests {
         assert_eq!(error.kind(), io::ErrorKind::InvalidInput, "{error}");
     }
 
+    #[cfg(windows)]
     #[test]
     fn dropping_a_claim_frees_its_port() {
         let claim = claim_port().unwrap();
