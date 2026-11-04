@@ -187,6 +187,13 @@ export const U16A_FIND: readonly Entry[] = [
     render: found(HITS, { indexing: { done: 120, total: 480 } }),
   },
   {
+    id: "RO-32",
+    words: findWords("Some may not show yet."),
+    screen: "matters/rail-find",
+    ...RAIL,
+    render: found(HITS, { indexing: { done: 120, total: 480 } }),
+  },
+  {
     id: "RO-28",
     words: findWords("Archived"),
     screen: "matters/rail-find",
