@@ -127,7 +127,13 @@ or in the offline bundle), and runs `node <npm-cli.js> ci` there. Every other by
 `file://` and the absolute path with a leading `/`: `file:///home/u/…`, and on Windows
 `file:///C:/Users/u/…` (backslashes turned to `/`, a `\\?\` prefix dropped), the form
 npm-package-arg reads back as the same absolute path on every OS. npm checks each tarball it
-reads against the entry's `integrity`, on top of the download's own check. The run gets `--cache
+reads against the entry's `integrity`, on top of the download's own check. Entries for other
+platforms keep their registry `resolved`; they are inert, since npm skips them and `--offline`
+would refuse to fetch them. An entry npm installs on this platform without a tarball stops the
+try (npm would skip a missing optional one and still succeed), as a failure no retry can help.
+On Windows a data folder on a share (`\\server\share\…`) is refused before any download, with
+no retry: npm reads its tarballs' `file:` URLs from the wrong path (see firm IT mode). The run
+gets `--cache
 <npm-cache> --userconfig <agents/npmrc> --globalconfig <agents/npmrc-global>
 --update-notifier=false --logs-max=0`, both files empty (npm refuses one file for both), so no
 npmrc of the user's or the machine's applies. `ci` adds `--offline --ignore-scripts

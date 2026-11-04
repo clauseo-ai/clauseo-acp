@@ -121,14 +121,27 @@ impl AgentPins {
     /// The derived lock as one install writes it: each entry named in `tarballs` (lock entry path
     /// to that entry's checked tarball) gets a `resolved` of [`file_url`]`(tarball, os)`, so
     /// `npm ci` reads the file in place and checks it against the entry's `integrity`. Every
-    /// other byte is [`Self::lock`]'s: the root entry, versions, `integrity` and key order. A
-    /// path the lock does not hold, or a tarball path that is not UTF-8, is
-    /// [`PinsError::Malformed`].
+    /// other byte is [`Self::lock`]'s: the root entry, versions, `integrity` and key order.
+    /// Entries for other platforms keep their registry `resolved`: npm skips them, and
+    /// `--offline` would refuse to fetch them. [`PinsError::Malformed`] when an entry npm
+    /// installs on `platform` has no tarball (under `--offline` npm would skip an optional one
+    /// and still succeed), when a path is one the lock does not hold, or when a tarball path is
+    /// not UTF-8.
     pub(crate) fn lock_with_tarballs(
         &self,
         tarballs: &BTreeMap<String, PathBuf>,
-        os: Os,
+        platform: Platform,
     ) -> Result<String, PinsError> {
+        if let Some(missing) = self
+            .packages_for(platform)
+            .into_iter()
+            .find(|package| !tarballs.contains_key(&package.path))
+        {
+            return Err(malformed(&format!(
+                "{} is installed on this platform but has no tarball",
+                missing.path
+            )));
+        }
         let mut lock: Value = parse(&self.lock, "the derived lock")?;
         let entries = lock
             .get_mut("packages")
@@ -143,7 +156,10 @@ impl AgentPins {
             let tarball = tarball
                 .to_str()
                 .ok_or_else(|| malformed(&format!("{path}'s tarball path is not UTF-8")))?;
-            entry.insert("resolved".into(), Value::String(file_url(tarball, os)));
+            entry.insert(
+                "resolved".into(),
+                Value::String(file_url(tarball, platform.os)),
+            );
         }
         Ok(canonical(&lock))
     }

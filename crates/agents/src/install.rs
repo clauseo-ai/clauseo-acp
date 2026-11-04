@@ -101,6 +101,11 @@ pub(crate) struct TryError {
 }
 
 impl TryError {
+    /// A failure no retry can help: the job stops now as `Failed`, with `detail` redacted.
+    pub(crate) fn stop(detail: &str, config: &AgentsConfig) -> TryError {
+        TryError::new(Next::Stop, detail, config)
+    }
+
     /// A try to count, with `detail` redacted.
     pub(crate) fn retry(detail: &str, config: &AgentsConfig) -> TryError {
         TryError::new(Next::Retry, detail, config)
@@ -235,8 +240,15 @@ impl<T> Job<T> {
 }
 
 /// The data folder, and the bundle when set, must be absolute paths: a relative one would
-/// resolve against whatever the current folder is.
+/// resolve against whatever the current folder is. On Windows the data folder must not be on a
+/// share, which npm cannot install from ([`files::data_dir_on_share`]).
 pub(crate) fn check_paths(config: &AgentsConfig) -> Result<(), TryError> {
+    if files::data_dir_on_share(&config.data_dir.to_string_lossy(), config.platform.os) {
+        return Err(TryError::stop(
+            "the data folder is on a network share; npm cannot install from there",
+            config,
+        ));
+    }
     if !config.data_dir.is_absolute() {
         return Err(TryError::new(
             Next::Stop,

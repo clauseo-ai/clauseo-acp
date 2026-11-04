@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use clauseo_agents::testing::npm_tarball;
-use clauseo_agents::{FailureKind, InstallState};
+use clauseo_agents::{Arch, FailureKind, InstallState, Os, Platform};
 use serde_json::Value;
 
 use crate::support::{A_PACKAGES, Fixture, agent_a};
@@ -148,4 +148,29 @@ fn a_tarball_changed_after_its_check_fails_npm_ci_with_eintegrity() {
         .map(|entries| entries.flatten().map(|entry| entry.file_name()).collect())
         .unwrap_or_default();
     assert_eq!(left, Vec::<std::ffi::OsString>::new(), "nothing installed");
+}
+
+#[test]
+fn a_windows_data_folder_on_a_share_fails_at_once_without_a_retry_or_a_download() {
+    let mut fx = Fixture::new("share");
+    let share = PathBuf::from(r"\\srv\share\Clauseo");
+    fx.config.data_dir = share.clone();
+    fx.config.platform = Platform::new(Os::Win32, Arch::X64);
+    let (agents, events) = fx.start();
+    events.first_states();
+    agents.install(&agent_a());
+    let (_, last) = events.until_end(&agent_a());
+    let InstallState::Failed(failure) = last else {
+        panic!("not failed: {last:?}");
+    };
+    assert_eq!(failure.kind, FailureKind::Failed);
+    let log = failure.log.to_string();
+    assert!(
+        log.contains("the data folder is on a network share; npm cannot install from there"),
+        "{log}"
+    );
+    assert_eq!(fx.registry.requests(), []);
+    assert_eq!(fx.timer.install_waits(), Vec::<Duration>::new());
+    // Nothing was made under the share's name (a relative path off Windows).
+    assert!(!share.exists() || cfg!(windows));
 }

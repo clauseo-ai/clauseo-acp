@@ -5,8 +5,11 @@
 //!
 //! `npm ci` reads each tarball in place (in `downloads/`, or in the offline bundle) and checks
 //! it against the entry's `integrity`, on top of the download's own check: a file swapped in
-//! between is `EINTEGRITY`. Every other byte of the lock is the snapshot's, so the receipt's
-//! `<hash>` is unchanged. There is no `npm cache add` step (decision 0033, 2026-11-04).
+//! between is `EINTEGRITY`. Every entry npm installs on this platform must have its tarball,
+//! or the try stops (a deterministic failure, not retried). Entries for other platforms keep
+//! their registry `resolved`: they are inert, since npm skips them and `--offline` would refuse
+//! to fetch them. Every other byte of the lock is the snapshot's, so the receipt's `<hash>` is
+//! unchanged. There is no `npm cache add` step (decision 0033, 2026-11-04).
 //!
 //! Every npm run starts through the launcher as `node <npm-cli.js> …`, with `NODE_OPTIONS`
 //! empty, the private cache, and empty `agents/npmrc` and `agents/npmrc-global` files as its user
@@ -115,8 +118,8 @@ pub(super) async fn install<T: Timer + Send + Sync>(
     };
     let done = async {
         let lock = pins
-            .lock_with_tarballs(&fetched.tarballs, platform.os)
-            .map_err(|err| TryError::retry(&err.to_string(), config))?;
+            .lock_with_tarballs(&fetched.tarballs, platform)
+            .map_err(|err| TryError::stop(&err.to_string(), config))?;
         write::write_atomic(&tmp.join("package.json"), pins.package_json().as_bytes())
             .map_err(io("writing package.json"))?;
         write::write_atomic(&tmp.join("package-lock.json"), lock.as_bytes())

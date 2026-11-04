@@ -45,6 +45,8 @@ enum Source {
     /// `downloads/` as it is hashed.
     Copy {
         from: PathBuf,
+        /// The file's name in failure details.
+        label: String,
         job: FetchJob,
     },
 }
@@ -98,9 +100,14 @@ pub(super) fn fetch_all<T: Timer + Send + Sync>(
                 progress.done(n, item.known.unwrap_or(0));
                 path
             }
-            Source::Copy { from, job: copy } => {
+            Source::Copy {
+                from,
+                label,
+                job: copy,
+            } => {
                 let size = copy_from_bundle(
                     &from,
+                    &label,
                     &copy,
                     job.cancel(),
                     &mut |received, total| {
@@ -180,6 +187,7 @@ fn items<T: Timer + Send + Sync>(job: &Job<T>, node: &NodeChoice) -> Result<Vec<
                     archive.name(),
                     data,
                 )?,
+                label: archive.name().to_owned(),
                 job: fetch_job,
             },
             None => Source::Fetch(fetch_job),
@@ -211,6 +219,7 @@ fn items<T: Timer + Send + Sync>(job: &Job<T>, node: &NodeChoice) -> Result<Vec<
                     known: size_of(&from),
                     source: Source::Copy {
                         from,
+                        label,
                         job: FetchJob {
                             url: package.resolved.clone(),
                             expected: package.integrity.clone(),
@@ -347,6 +356,13 @@ pub(crate) fn is_unc(path: &str) -> bool {
         return rest.starts_with(r"UNC\");
     }
     path.starts_with(r"\\")
+}
+
+/// Whether an install must refuse the data folder `data_dir` on `os`: a Windows share
+/// ([`is_unc`]), whose tarballs' `file:` URLs npm 11 reads from the wrong path, so no retry
+/// can help. A plain function, so its rule is tested on every OS.
+pub(crate) fn data_dir_on_share(data_dir: &str, os: Os) -> bool {
+    os == Os::Win32 && is_unc(data_dir)
 }
 
 /// `<data_dir>/agents/npm-cache`.
