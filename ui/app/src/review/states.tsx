@@ -208,3 +208,19 @@ export function RoomAfter({ host, steps }: { host: () => FakeTransport; steps: r
   }, [steps]);
   return <Room transport={transport} />;
 }
+
+/** The room over `host`, Find typed into with `words`, then its first conversation found pressed once it shows: Find
+ * answers after its debounce, later than RoomAfter's next step would press. */
+export function RoomFound({ host, words }: { host: () => FakeTransport; words: string }) {
+  useEffect(() => {
+    const poll = setInterval(() => {
+      const row = document.querySelector<HTMLElement>('[data-testid="find-conversation"]');
+      if (row === null) return;
+      clearInterval(poll);
+      row.click();
+    }, 50);
+    return () => clearInterval(poll);
+  }, []);
+  const [steps] = useState(() => [{ find: words }]);
+  return <RoomAfter host={host} steps={steps} />;
+}

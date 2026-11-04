@@ -468,6 +468,7 @@ function RoomFrame({
                     choice={choice}
                     plan={plan}
                     focus={talks.focus?.n ?? null}
+                    archived={talks.archived}
                     onThread={matters.onThread}
                     conversations={conversations}
                   />

@@ -13,6 +13,7 @@ import { U11 } from "./registry-u11.tsx";
 import { U12 } from "./registry-u12.tsx";
 import { U16A_RAIL } from "./registry-u16a-rail.tsx";
 import { U16A_FIND } from "./registry-u16a-find.tsx";
+import { ARCHIVED } from "./registry-archived.tsx";
 import { U8 } from "./registry-u8.tsx";
 import { U9 } from "./registry-u9.tsx";
 import { U6 } from "./registry-u6.tsx";
@@ -342,6 +343,7 @@ export const REGISTRY: readonly Entry[] = [
   ...U12,
   ...U16A_RAIL,
   ...U16A_FIND,
+  ...ARCHIVED,
   ...U8,
   ...U9,
   ...H11,

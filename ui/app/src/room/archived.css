@@ -1,0 +1,11 @@
+/* an archived conversation (U16a's Find opens one): read only, so one quiet line stands in the composer's place, on
+   the composer's surface and after the thread in either layout (the composer's order is 2, and 3 below 1000 px) */
+.room-archived {
+  order: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s2);
+  padding: var(--s4) var(--gutter) var(--s5);
+  background: var(--surface);
+}
