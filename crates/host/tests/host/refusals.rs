@@ -200,3 +200,43 @@ fn a_marker_naming_a_matter_this_install_never_had_names_no_matter() {
     );
     host.shutdown();
 }
+
+/// "New matter" on a folder that is already this install's matter, picked by another spelling
+/// of its path (as `Z:\n1` and `\\server\share\n1` on Windows): the import is refused with
+/// `matter.folder_is_matter` naming that matter, and nothing is made: no second matter on the
+/// list, no second history, the folder's `matter.json` unchanged.
+#[cfg(unix)]
+#[test]
+fn a_matters_folder_by_another_spelling_is_folder_is_matter_and_makes_nothing() {
+    let dir = Dir::new("refuse_is_matter_spelled", &[]);
+    let folder = dir.folder("Smith v Jones", &[("a.txt", "x\n")]);
+    let parent = folder.parent().unwrap().to_owned();
+    let link = parent.join("Alias");
+    write::symlink(&folder, &link);
+    let host = dir.start(0);
+    let matter = imported(&host, &folder);
+    let marker = std::fs::read(folder.join(".clauseo/matter.json")).unwrap();
+    let histories = || {
+        std::fs::read_dir(dir.data().join("matters"))
+            .unwrap()
+            .count()
+    };
+    let made = histories();
+    let listed = host.matters().len();
+    for (case, path) in [
+        ("through a symlink", link),
+        ("with `..`", folder.join("..").join("Smith v Jones")),
+        ("with `.`", parent.join(".").join("Smith v Jones").join(".")),
+    ] {
+        let error = refused(&host, &path, ErrorCode::MatterFolderIsMatter);
+        assert_eq!(error.matter(), Some(matter), "{case}: {error}");
+        assert_eq!(host.matters().len(), listed, "{case}: no second matter");
+        assert_eq!(histories(), made, "{case}: no second history");
+        assert_eq!(
+            std::fs::read(folder.join(".clauseo/matter.json")).unwrap(),
+            marker,
+            "{case}: matter.json unchanged"
+        );
+    }
+    host.shutdown();
+}
