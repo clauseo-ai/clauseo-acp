@@ -186,10 +186,12 @@ same walk. Otherwise Node would climb to a parent `node_modules` and run some ot
 npm install, where the SDK sits nested under the adapter, is refused for the same reason. The install folder and its parents may be symlinks.
 In practice an npm-installed adapter passes, since npm puts real files under `node_modules`. A
 pnpm or linked install puts symlinks on that path, so it reads as "no limits" until stage D's
-`agents` owns the install. A reader's environment is the inherited one, minus every name the
-agent's settings `env` names (ignoring ASCII case), then the settings variables, as
-`crates/host/src/agent/spec.rs` builds an agent's. The inherited secrets are in the spec, so
-`process` redacts them from the stderr tail. The Codex reader then sets `CODEX_HOME` to the
+`agents` owns the install. A reader's spec env is the inherited one, minus every name the agent's
+settings `env` names (ignoring ASCII case) and minus the host's drops: `GIT_*`, `SSH_*`,
+`NO_BROWSER`, `CLAUDE_CODE_REMOTE`, plus Codex's dropped names for the Codex reader. Then come the
+settings variables, as `crates/host/src/agent/spec.rs` builds an agent's. The map is the child's
+**whole** environment, because desktop's launcher clears. The inherited secrets are in the spec,
+so `process` redacts them from the stderr tail. The Codex reader then sets `CODEX_HOME` to the
 Clauseo-owned home, after removing every other spelling of that name. codex-acp merges the user's
 `~/.codex/config.toml` (MCP servers, plugins, hooks, rules) unless `CODEX_HOME` points elsewhere,
 so Clauseo owns one and Codex signs in separately inside Clauseo (#160). The reader never reads
