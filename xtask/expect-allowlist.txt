@@ -247,6 +247,7 @@ crates/host/src/agent/spec.rs prepend_path clippy::disallowed_methods
 # S27's by-hand browser smoke test: it starts the guard, writes its own folder and waits on the wall clock.
 crates/host/tests/browser_smoke/mcp.rs - clippy::disallowed_methods
 crates/host/tests/browser_smoke/scratch.rs - clippy::disallowed_methods
+crates/host/src/actor/turn/tests/closed.rs closed_answer_then_prompt clippy::disallowed_methods
 
 # Added by the matters Windows tests (#139 follow-up): a blob test's symlink, not read through,
 # and a durable test's handle that holds a file open without delete sharing.
