@@ -34,6 +34,7 @@
 //! - [`InstallState`], [`Failure`], [`FailureKind`] (with its error code), [`InstallLog`] and
 //!   [`Installed`].
 //! - [`Snapshot`] and [`Platform`].
+//! - [`keys`]: each agent's API key in the OS keychain (`store`, `load`, `clear`, `available`).
 //!
 //! # Invariants
 //!
@@ -49,12 +50,14 @@
 //! - Callers never wait on I/O: the work runs on the worker thread and one thread per install.
 //!   Installs run one after another, and a paused install sends nothing after its `Paused`.
 //! - Nothing runs while the app is idle once installs are done.
+//! - An API key lives only in the OS keychain: never in a file, a log, a `Debug` or an error.
 //!
 //! # Depends on
 //!
 //! `protocol` (`AgentId`), `process`, `serde`, `serde_json`, `futures`, `async-channel`,
 //! `ureq` (rustls, blocking, on the install's own thread), `rustls`, `sha2`, `base64`, `flate2`,
-//! `tar`, `zip`, `thiserror`, `dunce`; `nix` on Unix and `windows` on Windows (free disk space,
+//! `tar`, `zip`, `thiserror`, `dunce`, `zeroize` (the API keys); `keyring` on macOS and Windows
+//! only (the keychain; none on Linux); `nix` on Unix and `windows` on Windows (free disk space,
 //! the Windows proxy setting); `rcgen` with `test-support` only. Never `sandbox`, `tauri` or
 //! `tokio`.
 //!
@@ -69,6 +72,7 @@ mod disk;
 mod download;
 mod install;
 mod integrity;
+pub mod keys;
 mod log;
 mod node;
 mod pins;
