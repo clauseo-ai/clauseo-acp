@@ -11,6 +11,7 @@ import { fieldLabel, textControl } from "../ui/recipes-controls.ts";
 import { IconFolder } from "../icons/icons.tsx";
 import { cn } from "../lib/cn.ts";
 import { useDisplay } from "../lib/display.ts";
+import { mt } from "../lib/words-matters.ts";
 import { useMatterFormWords } from "../lib/words-matter-form.ts";
 import { nextDateError, parseNextDate } from "./matter-form-check.ts";
 import { Heading } from "./heading.tsx";
@@ -45,8 +46,11 @@ export type NewMatterFormProps = {
   /** Optional: the next date's line, from the caller. Left out, the form reads the date itself and, where it doesn't
    * read, says how to write it and holds Create back. */
   nextError?: string | null | undefined;
-  /** Optional: test ids for the name field, Change and Create the matter. */
-  testIds?: { name?: string; existing?: string; create?: string } | undefined;
+  /** Optional: for a line that names a matter on the list (matter.folder_is_matter), Open it sits under the line and
+   * calls this, which opens that matter. Left out, the line has no button. */
+  openMatter?: (() => void) | undefined;
+  /** Optional: test ids for the name field, Change, Create the matter and Open it. */
+  testIds?: { name?: string; existing?: string; create?: string; open?: string } | undefined;
   /** Whether the form carries its own heading, "A new matter". */
   titled?: boolean;
   /** Optional: in a dialog, the form's buttons stand as a dialog's do, at its end with the one
@@ -121,6 +125,7 @@ export function NewMatterForm({
   pickFolder,
   error,
   nextError,
+  openMatter,
   testIds,
   titled = true,
   inDialog = false,
@@ -261,9 +266,22 @@ export function NewMatterForm({
         </Button>
       </div>
       {error !== undefined && error !== null && (
-        <p role="alert" className="matter-form-error">
-          <Say>{error}</Say>
-        </p>
+        <div className="matter-form-refusal">
+          <p role="alert" className="matter-form-error">
+            <Say>{error}</Say>
+          </p>
+          {openMatter !== undefined && (
+            <Button
+              kind="quiet"
+              size="small"
+              className="matter-form-open"
+              data-testid={testIds?.open}
+              onClick={() => openMatter()}
+            >
+              <span className="deva-nudge">{mt(lang, "Open it")}</span>
+            </Button>
+          )}
+        </div>
       )}
       {inDialog ? (
         <span className="flex flex-wrap justify-end gap-s2 mt-s2">

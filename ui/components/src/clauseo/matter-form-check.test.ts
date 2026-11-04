@@ -55,3 +55,37 @@ test("a refusal says why in the form's words, never the host's message", () => {
     "Clauseo couldn't create the matter. Try again, or choose another folder.",
   );
 });
+
+test("a folder already a matter names that matter, with Open it beside the line; without a name, no name is said", () => {
+  // the matter's name is isolated in the line, as a path is
+  expect(createErrorLine("en", "matter.folder_is_matter", "Z:\\Acme", "Acme Ltd v. State")).toBe(
+    "This folder is already a matter: \u2068Acme Ltd v. State\u2069.",
+  );
+  expect(createErrorLine("en", "matter.folder_is_matter", "Z:\\Acme")).toBe(
+    "This folder is already a matter.",
+  );
+  expect(createErrorLine("en", "matter.folder_is_matter", "Z:\\Acme", "")).toBe(
+    "This folder is already a matter.",
+  );
+  expect(createErrorLine("en", "matter.folder_is_matter")).toBe("This folder is already a matter.");
+  // a name with right-to-left marks can't reorder the full stop
+  expect(createErrorLine("en", "matter.folder_is_matter", "", "a\u202Efdp.exe")).toBe(
+    "This folder is already a matter: \u2068a\u202Efdp.exe\u2069.",
+  );
+  // Hindi, English until the Hindi comes (hi: later)
+  expect(createErrorLine("hi", "matter.folder_is_matter", "", "Acme")).toBe(
+    "This folder is already a matter: \u2068Acme\u2069.",
+  );
+});
+
+test("a folder in Clauseo's matters folder is a choose-another refusal, with its path when the form has it", () => {
+  expect(createErrorLine("en", "matter.folder_in_matters_root", "Documents/Clauseo/Matters")).toBe(
+    "\u2068Documents/Clauseo/Matters\u2069 is the folder Clauseo keeps matters in. Choose the folder for one matter.",
+  );
+  expect(createErrorLine("en", "matter.folder_in_matters_root")).toBe(
+    "That folder is where Clauseo keeps matters. Choose the folder for one matter.",
+  );
+  expect(createErrorLine("en", "matter.folder_in_matters_root", "")).toBe(
+    "That folder is where Clauseo keeps matters. Choose the folder for one matter.",
+  );
+});

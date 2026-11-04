@@ -243,6 +243,11 @@ function RoomFrame({
     setRailOpen(false);
     railToggle.current?.focus();
   };
+  // a matter made or opened from New matter folds the rail, and the dialog's focus goes back to Matters if it was open
+  const foldForNew = () => {
+    madeFolded.current = railOpen;
+    setRailOpen(false);
+  };
   // New conversation's key, while a matter's conversations are in and no dialog holds the keys; an input method's
   // composing key is its own
   const mac = platform === "mac";
@@ -388,10 +393,8 @@ function RoomFrame({
             detailed={view.detailed}
             open={newOpen}
             onOpenChange={setNewOpen}
-            onMade={() => {
-              madeFolded.current = railOpen;
-              setRailOpen(false);
-            }}
+            onMade={foldForNew}
+            onOpened={foldForNew}
             finalFocus={newFocus}
           />
         </Suspense>
