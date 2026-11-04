@@ -121,7 +121,11 @@ it. `SignIn::Failed` may carry it.
 **`SettingsView.plans`.** `SettingsView` gains `plans`, each agent's firm plan by agent id,
 left out when empty: a `PlanView` of `endpoint` (an `https` URL), `provider` (`PlanProvider`:
 `anthropic`, `bedrock`, `vertex`) and `env_names`, the names of the extra variables. It holds
-no variable's value and no key; the type has nowhere to put one. Firm secrets stay with IT's own
+no variable's value and no key. Each name is an `EnvName`, 1 to 255 characters of
+`[A-Za-z0-9_]`, whose constructor and decoder refuse anything else, so `KEY=value` text cannot
+ride in one; that the host maps only names into the view, never values, is its own rule and its
+tests'. On the wire an `EnvName` is a plain string. The `endpoint` is a URL, and the settings
+crate refuses one with a user name, password, query or fragment. Firm secrets stay with IT's own
 tools (an AWS profile, Google's application default credentials).
 
 **No `RefreshWhy::LoginChanged`.** "Read the limits now, past the back-off" after a login change
@@ -173,16 +177,41 @@ No setup payload reaches `tracing`: no key, pasted code, email, URL, device code
 install log line. Desktop logs a setup action by its `SetupAction`, the agent id and, on failure,
 the code.
 
-**Settings and limits keys.** *To be filled by P2 (`settings`, `limits`).* Each key gets its
-safe value, the value in force when the policy cannot be read:
+**Settings and limits keys.** Each key gets its safe value, the value in force when a policy
+source cannot be read:
 
 | key | what it is | safe value |
 |---|---|---|
-| `plans.<id>.endpoint` | the firm's gateway, an `https` URL; policy-lockable | (P2) no user-chosen endpoint |
-| `plans.<id>.provider` | `anthropic`, `bedrock` or `vertex`; policy-lockable | (P2) |
-| `plans.<id>.env` | extra variables, never secret-shaped (`KEY`, `TOKEN`, `SECRET`, `PASSWORD` refused) | (P2) |
-| `install.bundle` | an offline bundle folder; policy-lockable | (P2) unset |
-| `install.registry` | a firm npm mirror; policy-lockable | (P2) unset |
+| `plans.<id>` | one agent's firm plan, one object (like `agents.<id>`); a policy that sets it locks the whole entry | no plan: the lawyer's `plans.<id>` is dropped |
+| `plans.<id>.endpoint` | the firm's gateway: `https`, a host, no user name, password, query or fragment | none, so no endpoint the lawyer chose stands in for the firm's |
+| `plans.<id>.provider` | `anthropic`, `bedrock` or `vertex` | none: the plan login; the `firm-policy` marker below refuses it in a firm |
+| `plans.<id>.env` | extra variables; a name is `[A-Za-z_][A-Za-z0-9_]*` and never holds `KEY`, `TOKEN`, `SECRET` or `PASSWORD` in any case | none |
+| `install.bundle` | an offline bundle folder, an absolute path | unset |
+| `install.registry` | a firm npm mirror: `https`, a host, no user name, password, query or fragment | unset: the pinned public hosts with their integrity checks |
+
+All five are security keys. An unreadable source locks `plans.` (every `plans.<id>`, listed in
+`SettingsView.locked` as `plans.`) and both `install` keys; a plan or install key a stronger
+source set stands. A policy `plans` section that is no object (or a managed-preferences `plans`
+that is no dictionary) locks `plans.` the same way. A secret-shaped or malformed variable name
+is dropped with a warning naming it, in `settings.json` and in every policy source alike; the
+rest of the plan loads. No warning or error quotes a value: endpoint, mirror or variable.
+
+The host writes these through `settings`: `Effective::set_plan` (refused with `settings.locked`
+for a locked id, and whole for a banned name or a bad endpoint) and
+`Effective::set_agent_launch`, which writes only Clauseo's own installs (a command or script
+under `<data_dir>/agents/`), refuses a locked id, and leaves the lawyer's or the firm's own
+entry as it is.
+
+`limits` takes the stored key at each read through `ProcessReaders::with_launch_env`, as
+`ANTHROPIC_API_KEY` (Claude) or `CODEX_API_KEY` (Codex) over the entry's empty placeholder, so a
+key sign-in reads as pay-as-you-go and the stderr tail redacts the key. `ProcessReaders::hold`
+stops an agent's reads (resolving once none runs) until `resume`; the host holds around a
+sign-in, a sign-out or a key change, then sends `Input::LoginChanged`, which reads at once past
+the back-off and reads again after a read that was in flight. `CODEX_OVERRIDES` gains
+`cli_auth_credentials_store="file"` (the login stays in `CODEX_HOME/auth.json`, never the OS
+keyring) and `shell_environment_policy.ignore_default_excludes=false` (Codex's shell tools do
+not see `*KEY*`, `*SECRET*`, `*TOKEN*` variables). `claude_plan` and `codex_plan` are public
+for desktop's sign-in line.
 
 With the policy unreadable and the agent's `<data_dir>/agents/<id>/firm-policy` marker present,
 sign-in and launch for that agent are refused with `signin.policy_unreadable`.
