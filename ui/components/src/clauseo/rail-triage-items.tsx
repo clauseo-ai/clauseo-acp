@@ -8,7 +8,6 @@ import { MenuItem } from "../ui/menu.tsx";
 import { raised, row } from "../ui/recipes-overlays.ts";
 import { IconFold, IconSnooze, IconTick, IconUndo } from "../icons/icons.tsx";
 import { useDisplay } from "../lib/display.ts";
-import { tw } from "../lib/words-triage.ts";
 import { twl } from "../lib/words-triage-late.ts";
 
 export function TriageItems({
@@ -27,7 +26,7 @@ export function TriageItems({
 }) {
   const { lang } = useDisplay();
   const layer = useLayer();
-  const snooze = matter ? twl(lang, "Snooze until") : tw(lang, "Snooze");
+  const snooze = matter ? twl(lang, "Snooze until") : twl(lang, "Snooze");
   return (
     <>
       <BaseMenu.SubmenuRoot>
@@ -44,7 +43,9 @@ export function TriageItems({
       </BaseMenu.SubmenuRoot>
       <MenuItem
         label={
-          done ? twl(lang, "Mark as not done") : tw(lang, matter ? "Mark all done" : "Mark as done")
+          done
+            ? twl(lang, "Mark as not done")
+            : twl(lang, matter ? "Mark all done" : "Mark as done")
         }
         icon={done ? <IconUndo size={16} /> : <IconTick size={16} />}
         onClick={onDone}

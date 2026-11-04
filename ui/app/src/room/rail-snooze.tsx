@@ -4,12 +4,11 @@
 // shelf. A line shows only once the host has answered Done for every thread; one refused (a time past, or more than
 // 366 days ahead) puts back those it took and leaves the rows as they were. What opens later (the menu's times, the
 // picker, the open shelf and fold) is snooze-late.tsx's, loaded by snooze-load.ts.
-import { Suspense, useState, type ReactNode } from "react";
+import { Suspense, useEffect, useState, type ReactNode } from "react";
 import type { ConversationRowProps } from "@clauseo/components/clauseo/rail-conversations.tsx";
 import type { DoneRow } from "@clauseo/components/clauseo/rail-done-rows.tsx";
 import type { MatterRowProps } from "@clauseo/components/clauseo/rail.tsx";
 import type { Triage } from "@clauseo/components/clauseo/rail-triage.tsx";
-import { RailShelf } from "@clauseo/components/clauseo/rail-shelf.tsx";
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { tw } from "@clauseo/components/lib/words-triage.ts";
 import { clock } from "@clauseo/components/lib/words.ts";
@@ -24,12 +23,12 @@ import {
   LazyLine,
   LazyPicker,
   LazyPoint,
-  LazyShelfOpen,
+  LazyShelf,
   LazySnoozeMenu,
   preloadSnooze,
 } from "./snooze-load.ts";
 import type { Acts, Held, Line } from "./snooze-acts.ts";
-import { shelf, snoozed, wholly, type Group } from "./triage.ts";
+import { snoozed, wholly, type Group } from "./triage.ts";
 import { clockOf, dayOf } from "./when.ts";
 
 const NO_LINES: ReadonlyMap<string, Line> = new Map();
@@ -47,10 +46,29 @@ export function whenWords(at: Timestamp, now: Timestamp, zone: string, lang: Lan
 
 /** The rail's snooze and Done: the lines standing in rows' places (by thread, or by matter), the row whose picker is
  * open, and the acts. */
-export function useSnooze(transport: HostTransport) {
+export function useSnooze(transport: HostTransport, onRail: () => boolean) {
   const [lines, setLines] = useState(NO_LINES);
   const [picking, setPicking] = useState<{ key: string; threads: readonly Held[] } | null>(null);
-  const show = (key: string, line: Line) => setLines((was) => new Map(was).set(key, line));
+  // a line comes only while the pointer or the focus is on the rail: one that arrives after both have left would never
+  // be cleared, and would hold the rows where they stand
+  const show = (key: string, line: Line) => {
+    if (onRail()) setLines((was) => new Map(was).set(key, line));
+  };
+  // the window coming back clears the lines, as the pointer or the focus leaving the rail does
+  useEffect(() => {
+    const clear = () => {
+      if (document.visibilityState === "visible") setLines(NO_LINES);
+    };
+    const focused = (e: FocusEvent) => {
+      if (!(e.target instanceof Node)) setLines(NO_LINES);
+    };
+    window.addEventListener("focus", focused);
+    document.addEventListener("visibilitychange", clear);
+    return () => {
+      window.removeEventListener("focus", focused);
+      document.removeEventListener("visibilitychange", clear);
+    };
+  }, []);
   // the commands come with the later chunk, in or on its way since the pointer came over the rail
   const acts = (run: (acts: Acts) => void) =>
     void preloadSnooze().then((parts) => run(parts.acts(transport, show)));
@@ -254,7 +272,7 @@ export type ShelfOpens = {
   matter: (m: MatterId) => void;
 };
 
-/** The Snoozed shelf, or nothing with nothing snoozed; its open rows are snooze-late.tsx's. */
+/** The Snoozed shelf (snooze-late.tsx's, loaded with the later chunk), or nothing with no conversation snoozed. */
 export function snoozedShelf(
   c: SnoozeCtx,
   matters: readonly MatterInfo[],
@@ -262,19 +280,13 @@ export function snoozedShelf(
   open: ShelfOpens,
   group: ReadonlyMap<MatterId, Group>,
 ): ReactNode {
-  const shelved = shelf(matters, lists, c.now, group);
-  const first = shelved[0];
-  if (first === undefined) return undefined;
+  if (
+    ![...lists.values()].some((l) => l.some((th) => th.status !== "archived" && snoozed(th, c.now)))
+  )
+    return undefined;
   return (
-    <RailShelf
-      count={shelved.length}
-      next={whenWords(first.until, c.now, c.zone, c.lang)}
-      rows={() => (
-        <Suspense fallback={null}>
-          <LazyShelfOpen c={c} shelved={shelved} lists={lists} open={open} />
-        </Suspense>
-      )}
-      testId="rail-shelf"
-    />
+    <Suspense fallback={null}>
+      <LazyShelf c={c} matters={matters} lists={lists} open={open} group={group} />
+    </Suspense>
   );
 }

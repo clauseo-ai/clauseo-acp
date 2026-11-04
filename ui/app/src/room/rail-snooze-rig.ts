@@ -41,6 +41,9 @@ export async function mount({
   root = createRoot(host);
   await act(async () => root?.render(createElement(Room, { transport })));
   await settle();
+  // the shelf comes with the later chunk
+  await act(async () => settled());
+  await settle();
   return transport;
 }
 

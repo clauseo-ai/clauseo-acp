@@ -20,8 +20,12 @@ const HI = {
   "Wake now": null,
   // RO-04: behind the open shelf's info icon
   "Back sooner if Clauseo needs you or an answer finishes.": null,
-  // RO-13: a done conversation's button
+  // RO-13: a conversation's two buttons and its menu's items, and a done conversation's button
+  Snooze: null,
+  "Mark as done": null,
   "Mark as not done": null,
+  // RO-15: a matter's menu, with RO-07's "Snooze until" on its submenu's row
+  "Mark all done": null,
   // RO-17: behind the open fold's info icon
   "Conversations you've read, with nothing waiting, move here each morning.": null,
 } as const;

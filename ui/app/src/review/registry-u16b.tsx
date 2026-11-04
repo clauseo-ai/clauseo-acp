@@ -87,12 +87,12 @@ export const U16B: Entry[] = [
     <RoomTriage acts={[...SHELF, { focus: '[data-testid="wake-now"]' }]} />
   )),
   // a row's two buttons with the focus; Mark as not done on a done row, the fold open
-  entry("RO-13", joined([w("Snooze"), w("Mark as done"), wl("Mark as not done")]), () => (
+  entry("RO-13", joined([wl("Snooze"), wl("Mark as done"), wl("Mark as not done")]), () => (
     <RoomTriage acts={ARM} />
   )),
   entry("RO-14", joined([w("Marked as done"), undo]), () => <RoomTriage acts={MARKED} />),
   // a matter's menu
-  entry("RO-15", joined([wl("Snooze until"), w("Mark all done")]), () => (
+  entry("RO-15", joined([wl("Snooze until"), wl("Mark all done")]), () => (
     <RoomTriage acts={MATTER_MENU} />
   )),
   // the Done fold, folded, then open with its explanation behind the info icon

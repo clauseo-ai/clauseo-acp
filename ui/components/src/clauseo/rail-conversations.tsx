@@ -76,8 +76,11 @@ function ConversationRow({
   // mid-turn costs no menu's own commits, and a long list carries no menus nobody opened
   const [armed, setArmed] = useState(false);
   const arm = triage === undefined || armed ? undefined : () => setArmed(true);
-  // the open one's actions behind its chevron: its other plan, and Snooze and Done once armed
-  const more = current && (other !== undefined || (armed && triage !== undefined));
+  // the open one's actions behind its chevron: its other plan, and Snooze and Done. The chevron is drawn whenever the
+  // row has them, so the title keeps its room; its menu mounts once the row is armed (or the chevron pressed first)
+  const more = current && (other !== undefined || triage !== undefined);
+  const menuNow = other !== undefined || armed;
+  const [openNow, setOpenNow] = useState(false);
   if (replace !== undefined) return <li className="room-conv-item">{replace}</li>;
   const status = current ? null : (snoozed ?? conversationStatus(w.lang, state, at, behind, day));
   // only a question for the lawyer says its words on the row; every other status is its icon, with its words under the
@@ -136,8 +139,24 @@ function ConversationRow({
           </span>
         )}
       </button>
-      {more && (
-        <Menu>
+      {more && !menuNow && (
+        <Button
+          kind="quiet"
+          size="small"
+          shape="icon"
+          className="room-conv-more"
+          aria-label={w.m("Actions for {title}", { title })}
+          aria-haspopup="menu"
+          onClick={() => {
+            setOpenNow(true);
+            setArmed(true);
+          }}
+        >
+          <IconMore size={16} />
+        </Button>
+      )}
+      {more && menuNow && (
+        <Menu defaultOpen={openNow}>
           <MenuTrigger
             render={
               <Button
@@ -195,6 +214,8 @@ export function ConversationList({
   // mid-turn mounts no menu of its own
   const [at, setAt] = useState<{ id: string; x: number; y: number } | null>(null);
   const triage = conversations.find((c) => c.id === at?.id)?.triage;
+  // the row it was opened on lost its Snooze (gone, or done) while open: the menu is gone for good, not back with it
+  if (at !== null && triage === undefined) setAt(null);
   // the plan is named only on a conversation whose plan differs from the matter's own: the one most of its
   // conversations use; given no plan, the most common here, the first listed on a tie
   const count = (a: string) => conversations.filter((c) => c.agent === a).length;

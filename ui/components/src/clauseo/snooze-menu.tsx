@@ -7,7 +7,6 @@ import { Button } from "../ui/button.tsx";
 import { MenuGroup, MenuGroupLabel, MenuItem, MenuSeparator } from "../ui/menu.tsx";
 import { IconCross } from "../icons/icons.tsx";
 import { useDisplay } from "../lib/display.ts";
-import { tw } from "../lib/words-triage.ts";
 import { twl } from "../lib/words-triage-late.ts";
 import { ui } from "../lib/words-ui.ts";
 
@@ -90,7 +89,7 @@ export function SnoozePicker({
       />
       <span className="room-picker-acts">
         <Button kind="tone" size="small" type="submit" disabled={!valid(value)}>
-          {tw(lang, "Snooze")}
+          {twl(lang, "Snooze")}
         </Button>
         <Button
           kind="quiet"

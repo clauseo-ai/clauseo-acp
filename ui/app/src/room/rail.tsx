@@ -9,7 +9,7 @@
 // (U16b) are rail-snooze.tsx's: a row's buttons and menus, its line, the done fold and the Snoozed shelf; the morning
 // sweep is sweep.ts's. Snoozes are compared with the newest of the views' times and the moment the pointer came or went,
 // or the window came back, so a snooze whose time has come ends at the next render with no timer.
-import { Suspense, useState, useSyncExternalStore, type Ref } from "react";
+import { Suspense, useEffect, useRef, useState, useSyncExternalStore, type Ref } from "react";
 import {
   Rail,
   type FindSearch,
@@ -162,7 +162,15 @@ export function RoomRail({
   // whether the focus is inside the rail: rows hold their groups while it is, as under the pointer
   const [focused, setFocused] = useState(false);
   const now = Math.max(view.now, every.now, stamp);
-  const snooze = useSnooze(transport);
+  // where the pointer and the focus are, as the last events said, for a line that arrives later (rail-snooze.tsx)
+  const onRail = useRef({ pointer: false, focus: false });
+  const snooze = useSnooze(transport, () => onRail.current.pointer || onRail.current.focus);
+  // Snooze and Done's later chunk, warmed once the rail is up and the page is idle (none where there's no idle callback)
+  useEffect(() => {
+    if (typeof requestIdleCallback !== "function") return;
+    const idle = requestIdleCallback(() => void preloadSnooze());
+    return () => cancelIdleCallback(idle);
+  }, []);
   const sc = { snooze, now, zone, lang: w.lang };
   const detailed = view.detailed;
   const [triager] = useState(() => new RailTriage());
@@ -375,17 +383,20 @@ export function RoomRail({
         placed.group,
       )}
       onHover={(on) => {
+        onRail.current.pointer = on;
         setOver(on);
         setStamp(Date.now());
         if (on) void preloadSnooze();
         else {
           // the pointer leaving lets the rows go where they now belong, as before; the focus holds them only from the
           // keyboard
+          onRail.current.focus = false;
           setFocused(false);
           snooze.leave();
         }
       }}
       onFocusMove={(inside, elsewhere) => {
+        onRail.current.focus = inside;
         setFocused(inside);
         if (inside) void preloadSnooze();
         if (elsewhere) snooze.leave();

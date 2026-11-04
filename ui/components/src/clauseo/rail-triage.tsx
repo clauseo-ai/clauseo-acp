@@ -8,7 +8,7 @@ import { Button } from "../ui/button.tsx";
 import { Menu, MenuPopup, MenuTrigger } from "../ui/menu.tsx";
 import { IconSnooze, IconTick } from "../icons/icons.tsx";
 import { useDisplay } from "../lib/display.ts";
-import { tw } from "../lib/words-triage.ts";
+import { twl } from "../lib/words-triage-late.ts";
 
 /** A row's snooze and done: the snooze menu's content, drawn as the menu opens; a context menu's or a matter menu's
  * two items (`matter`: Snooze until… and Mark all done), drawn as it opens; and Mark as done pressed. */
@@ -25,8 +25,8 @@ export type Triage = {
 /** A conversation's two buttons at its line's end, shown under the pointer or with focus; named with its title. */
 export function RowTriage({ triage, title }: { triage: Triage; title: string }) {
   const { lang } = useDisplay();
-  const snooze = tw(lang, "Snooze");
-  const done = tw(lang, "Mark as done");
+  const snooze = twl(lang, "Snooze");
+  const done = twl(lang, "Mark as done");
   return (
     <span className="room-conv-acts">
       <Menu>
