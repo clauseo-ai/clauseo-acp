@@ -9,6 +9,7 @@ import { settled } from "@clauseo/components/lib/late.ts";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { entryIdOf, orderOf } from "../store/view.ts";
 import { agentText, MATTER, reset, THREAD, userMessage, uuid } from "../testing/stream-script.ts";
+import type { MatterSummary, ThreadSummary } from "../transport/protocol.ts";
 import { FakeTransport, type FakeHost } from "../transport/fake-transport.ts";
 import type {
   HostQuery,
@@ -175,6 +176,120 @@ test("a paper found by its file name opens its matter and the paper, by its File
   await act(async () => row?.click());
   await h.settle();
   expect(h.transport.only("open_file")).toEqual([{ call: "open_file", file: FILE }]);
+});
+
+/** An archived conversation's found entry and its thread's window: its header, a question (order 2), its answer (3). */
+const T3 = uuid(3, 1);
+const archivedHit = (matter: MatterSummary) =>
+  hit({
+    kind: "answer",
+    matter: matter.matter,
+    matter_title: matter.name,
+    thread: T3,
+    thread_title: "Old bail order",
+    order: 3,
+  });
+const archivedWindow = (matter: MatterSummary) =>
+  reset([userMessage(2, 2, "Was bail refused?"), agentText(3, 3, "Yes, on 2 March.")], {
+    header: {
+      order: 1,
+      thread: T3,
+      matter: matter.matter,
+      agent: "claude-acp",
+      status: "archived",
+      config_options: [],
+      commands: [],
+      plan: [],
+    },
+  });
+const subscribed = () => h?.transport.only("subscribe").map((c) => c.stream) ?? [];
+const titles = () => h?.all("conversation").map((c) => c.textContent ?? "") ?? [];
+
+/** Presses the archived result, then gives its thread's window: its entries show, at the one found, and the rail lists
+ * no row for it. */
+async function openArchived(matter: MatterSummary) {
+  const shown = vi.fn<(this: Element) => void>(function (this: Element) {});
+  Element.prototype.scrollIntoView = shown;
+  await find("bail");
+  const row = h?.one("find-conversation");
+  expect(row?.querySelector(".room-find-archived")).not.toBeNull();
+  await act(async () => row?.click());
+  await h?.settle();
+  expect(subscribed()).toContain(`thread:${T3}`);
+  h?.deliverOn(`thread:${T3}`, [archivedWindow(matter)]);
+  await h?.settle();
+  expect(h?.all("message-user").map((m) => m.textContent)).toEqual([
+    expect.stringContaining("Was bail refused?"),
+  ]);
+  expect(shown.mock.contexts.map((el) => (el as HTMLElement).dataset["entryId"])).toContain(
+    entryIdOf(agentText(3, 3, "")),
+  );
+  expect(titles().some((t) => t.includes("Old bail order"))).toBe(false);
+  expect(document.querySelector(".room-find-results")).toBeNull();
+}
+
+test("an archived conversation found in the open matter opens at its entry, though the host's list leaves it out", async () => {
+  h = await mountRoom({
+    // as the host lists a matter's threads: the archived one left out
+    threads: [summary()],
+    query: (q) => {
+      if (searchOf(q) !== undefined) return page([archivedHit(THE_MATTER)]);
+      throw new Error("not scripted");
+    },
+  });
+  await h.deliverAwaited([reset([userMessage(2, 2, "Draft the surety affidavit")])]);
+  await h.settle();
+  await openArchived(THE_MATTER);
+  // the conversation open before is no longer the one shown
+  expect(h.all("conversation").some((c) => c.getAttribute("aria-current") === "true")).toBe(false);
+});
+
+test("an archived conversation found in another matter opens there at its entry, not the one that would reopen", async () => {
+  const OTHER: MatterSummary = {
+    matter: uuid(8, 2),
+    name: "Rao v. Union of India",
+    kind: "folder",
+  };
+  const T4 = uuid(4, 1);
+  const live: ThreadSummary = {
+    thread: T4,
+    matter: OTHER.matter,
+    agent: "claude-acp",
+    status: "idle",
+    title: "Stay application",
+  };
+  const archived: ThreadSummary = {
+    ...live,
+    thread: T3,
+    title: "Old bail order",
+    status: "archived",
+  };
+  // every matter's threads, archived ones included, as the app feed gives them
+  const fed = fakeNext({
+    matters: () => [detailed(THE_MATTER, { last_opened: NOW }), detailed(OTHER)],
+    threads: (m) => (m === OTHER.matter ? [live, archived] : [summary()]),
+    frames: true,
+  });
+  h = await mountRoom({
+    next: {
+      ...fed,
+      // list_threads leaves the archived thread out, as the host's does
+      query: (q) =>
+        typeof q === "object" && "list_threads" in q && q.list_threads.matter === OTHER.matter
+          ? { threads: [live] }
+          : fed.query(q),
+    },
+    query: (q) => {
+      if (searchOf(q) !== undefined) return page([archivedHit(OTHER)]);
+      throw new Error("not scripted");
+    },
+  });
+  await openArchived(OTHER);
+  expect(subscribed()).not.toContain(`thread:${T4}`);
+  // the matter's live conversation is listed, not open
+  const rows = h.all("conversation");
+  expect(rows.map((r) => r.textContent)).toEqual([expect.stringContaining("Stay application")]);
+  expect(rows[0]?.getAttribute("aria-current")).toBeNull();
 });
 
 /** The room alone, on `platform`, with one matter. */

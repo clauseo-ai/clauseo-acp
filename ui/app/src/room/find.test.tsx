@@ -225,7 +225,8 @@ test("missing titles show the room's own words; an unknown matter's line keeps i
         said({ kind: "thread_title", thread: T3, thread_title: "Old bail order" }),
         said({ kind: "unknown" }),
       ]),
-    [summary(), summary(T2), summary(T3, "archived")],
+    // T3 archived: the host's list leaves it out
+    [summary(), summary(T2)],
   );
   await find("bail");
   const rows = [...(results()?.querySelectorAll('[data-testid="find-conversation"]') ?? [])];

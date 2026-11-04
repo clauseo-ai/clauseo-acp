@@ -8,6 +8,7 @@ import type {
   ThreadStatus,
   Timestamp,
 } from "../transport/protocol.ts";
+import { agentFor, planOptions } from "./agent.ts";
 import type { AgentSummary, ThreadInfo } from "./host-next.ts";
 
 /** A thread as a row knows it: the list's summary, with H6's marks where given. */
@@ -58,3 +59,35 @@ export type ConversationsView = {
    * question's time. Until H13 says it on the thread, a restart forgets it. */
   retried: { from: string; title?: string; at: Timestamp } | null;
 };
+
+/** Whether a thread is at rest: not starting, answering or waiting on the lawyer. */
+export const resting = (s: ThreadStatus) =>
+  !(s === "starting" || s === "running" || s === "needs_you");
+
+/** Newest activity first: H6's last activity, else the newest created (v7 ids sort by creation). */
+export const newestFirst = (a: Known, b: Known) => {
+  const at = (b.last_activity ?? -Infinity) - (a.last_activity ?? -Infinity);
+  if (at !== 0 && !Number.isNaN(at)) return at;
+  return a.thread < b.thread ? 1 : a.thread > b.thread ? -1 : 0;
+};
+
+/** The view with no matter open. */
+export const noMatter = (
+  agents: readonly AgentSummary[],
+  canRetry: boolean,
+): ConversationsView => ({
+  matter: null,
+  phase: "loading",
+  refused: null,
+  rows: [],
+  open: null,
+  thread: null,
+  drafting: false,
+  plan: undefined,
+  agents,
+  options: planOptions(agents),
+  agent: agentFor({ chosen: null, setting: null, threads: [], agents }),
+  focus: null,
+  canRetry,
+  retried: null,
+});

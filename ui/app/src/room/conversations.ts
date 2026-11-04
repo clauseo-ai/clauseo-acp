@@ -22,30 +22,21 @@ import { pickReopenThread } from "../store/reopen.ts";
 import type { ViewStore } from "../store/store.ts";
 import { streamOf } from "../store/view.ts";
 import { internalError, toHostError, type HostTransport } from "../transport/host-transport.ts";
-import type {
-  AgentId,
-  MatterId,
-  MessageId,
-  ThreadId,
-  ThreadStatus,
-  Timestamp,
-} from "../transport/protocol.ts";
+import type { AgentId, MatterId, MessageId, ThreadId, Timestamp } from "../transport/protocol.ts";
 import { agentFor, matterPlan, planOptions } from "./agent.ts";
-import { freshState, type MatterState } from "./conversations-state.ts";
-import type { ConversationRow, ConversationsView, Known } from "./conversations-view.ts";
+import { freshState, keepKept, type MatterState } from "./conversations-state.ts";
+import {
+  newestFirst,
+  noMatter,
+  resting,
+  type ConversationRow,
+  type ConversationsView,
+  type Known,
+} from "./conversations-view.ts";
 import type { AgentSummary, AppEvent, NextHost, ThreadsChanged } from "./host-next.ts";
 import type { Matters } from "./matters.ts";
 
 export type { ConversationRow, ConversationsView } from "./conversations-view.ts";
-
-const resting = (s: ThreadStatus) => !(s === "starting" || s === "running" || s === "needs_you");
-
-/** Newest activity first: H6's last activity, else the newest created (v7 ids sort by creation). */
-const newestFirst = (a: Known, b: Known) => {
-  const at = (b.last_activity ?? -Infinity) - (a.last_activity ?? -Infinity);
-  if (at !== 0 && !Number.isNaN(at)) return at;
-  return a.thread < b.thread ? 1 : a.thread > b.thread ? -1 : 0;
-};
 
 export class Conversations {
   readonly #transport: HostTransport;
@@ -61,8 +52,8 @@ export class Conversations {
   #current: MatterState | null = null;
   #n = 0;
   #focus: { key: string; n: number } | null = null;
-  /** A conversation to open once its matter opens (openThread). */
-  #target: { matter: MatterId; thread: ThreadId } | null = null;
+  /** A conversation to open once its matter opens (openThread), with its summary where the list leaves it out. */
+  #target: { matter: MatterId; thread: ThreadId; known?: Known } | null = null;
   /** Each held thread's header as last read: what changed, and which views went. */
   #seenHeaders = new Map<ThreadId, unknown>();
   #view: ConversationsView;
@@ -135,15 +126,23 @@ export class Conversations {
   }
 
   /** Opens the thread `thread` of `matter`: now, when the matter is open; else once matters.ts opens it, in place of
-   * the conversation that would reopen there. Its list need not be in: the thread opens when it lists it. */
-  openThread(matter: MatterId, thread: ThreadId): void {
+   * the conversation that would reopen there. Its list need not be in: the thread opens when it lists it. An archived
+   * thread, which the host's list leaves out, comes with its summary (`known`, Find's): it opens at once, and stays
+   * open over the list's reads while it is the one open, though it never takes a row. */
+  openThread(matter: MatterId, thread: ThreadId, known?: Known): void {
     const m = this.#current;
     if (m !== null && m.matter === matter) {
       this.#target = null;
+      if (known !== undefined) this.#keep(m, known);
       this.open(m.keys.get(thread) ?? thread);
       return;
     }
-    this.#target = { matter, thread };
+    this.#target = known === undefined ? { matter, thread } : { matter, thread, known };
+  }
+
+  #keep(m: MatterState, known: Known): void {
+    m.kept = known;
+    if (!m.threads.has(known.thread)) m.threads.set(known.thread, known);
   }
 
   #focusOn(key: string): void {
@@ -289,11 +288,13 @@ export class Conversations {
       m = freshState(matter);
       this.#by.set(matter, m);
     }
-    const target = this.#target?.matter === matter ? this.#target.thread : null;
+    const asked = this.#target?.matter === matter ? this.#target : null;
+    const target = asked?.thread ?? null;
     this.#target = null;
+    if (asked?.known !== undefined) this.#keep(m, asked.known);
     if (target !== null) {
-      // the conversation asked for, under its own key; until the list holds it, a key that waits for it
-      const listed = m.phase === "ready" && m.threads.has(target);
+      // the conversation asked for, under its own key; until the list holds it (or Find gave it), a key that waits
+      const listed = (m.phase === "ready" || m.kept?.thread === target) && m.threads.has(target);
       m.open = m.keys.get(target) ?? (listed ? target : this.#key());
       if (!listed && !m.keys.has(target)) m.keys.set(target, m.open);
       m.pending = listed ? null : m.open;
@@ -328,6 +329,7 @@ export class Conversations {
           const known = m.threads.get(made);
           if (!listed.has(made) && known !== undefined) listed.set(made, known);
         }
+        keepKept(m, listed);
         m.threads = listed;
         m.phase = "ready";
         m.refused = null;
@@ -353,7 +355,10 @@ export class Conversations {
     if (key === null || m.draft?.key === key) return;
     const thread = this.#threadOf(m, key);
     const pending = m.pending === key;
-    if (thread !== null && m.threads.get(thread)?.status !== "archived") {
+    const live =
+      thread !== null &&
+      (m.threads.get(thread)?.status !== "archived" || m.kept?.thread === thread);
+    if (live) {
       // a conversation asked for (openThread), now listed: it opens, and H6 hears it seen
       if (pending) {
         m.pending = null;
@@ -482,6 +487,7 @@ export class Conversations {
         const known = m.threads.get(made);
         if (!threads.has(made) && known !== undefined) threads.set(made, known);
       }
+    keepKept(m, threads);
     for (const gone of change.removed) {
       threads.delete(gone);
       m.made.delete(gone);
@@ -520,24 +526,11 @@ export class Conversations {
   #make(): ConversationsView {
     const m = this.#current;
     const agents = this.#agents;
-    if (m === null)
-      return {
-        matter: null,
-        phase: "loading",
-        refused: null,
-        rows: [],
-        open: null,
-        thread: null,
-        drafting: false,
-        plan: undefined,
-        agents,
-        options: planOptions(agents),
-        agent: agentFor({ chosen: null, setting: null, threads: [], agents }),
-        focus: null,
-        canRetry: this.#next.retry !== null,
-        retried: null,
-      };
-    const listed = [...m.threads.values()].filter((t) => t.status !== "archived").sort(newestFirst);
+    if (m === null) return noMatter(agents, this.#next.retry !== null);
+    // an archived thread kept open (Find's) takes no row, whatever its header says
+    const listed = [...m.threads.values()]
+      .filter((t) => t.status !== "archived" && t.thread !== m.kept?.thread)
+      .sort(newestFirst);
     const options = planOptions(agents, listed);
     const rows: ConversationRow[] = listed.map((t) => ({
       key: m.keys.get(t.thread) ?? t.thread,
