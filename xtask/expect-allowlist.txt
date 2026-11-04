@@ -114,6 +114,9 @@ crates/store/benches/commit.rs - clippy::unwrap_used
 # Added by S16: the upstream lookup's FFI to CFNetwork (macOS) and WinHTTP (Windows).
 crates/sandbox/src/proxy/upstream/macos.rs - unsafe_code
 crates/sandbox/src/proxy/upstream/windows.rs - unsafe_code
+# The folder check (src/windows.rs): its Win32 calls, and its test's DACL setup.
+crates/sandbox/src/windows.rs - unsafe_code
+crates/sandbox/src/windows/tests.rs - unsafe_code
 
 # clauseo-search: its write module (the private index file, and removing one to rebuild), its
 # tests' write module (each test's folder, damaged files), and the measurement's clock.
@@ -250,6 +253,7 @@ crates/profile/tests/skills/write.rs - clippy::disallowed_methods
 crates/sandbox/src/proxy/server.rs accept clippy::infinite_loop
 crates/sandbox/src/ports.rs imp::exclusive unsafe_code
 crates/sandbox/examples/proxy.rs open_log clippy::disallowed_methods
+crates/sandbox/examples/folder_support.rs measure clippy::disallowed_methods
 # R21 PR-B: the agent's PATH split once to put stetdoc's folder first.
 crates/host/src/agent/spec.rs prepend_path clippy::disallowed_methods
 
