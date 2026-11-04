@@ -133,6 +133,9 @@ pub(crate) struct LaunchWiring {
     /// `None` is `/tmp`. Tests pass a folder of their own.
     #[cfg(unix)]
     pub(crate) browser_socket_root: Option<PathBuf>,
+    /// The environment an agent's spec starts from, in place of the host's own
+    /// (`std::env::vars_os` at launch), for tests; `None` reads the host's.
+    pub(crate) inherited_env: Option<Vec<(OsString, OsString)>>,
 }
 
 impl Default for LaunchWiring {
@@ -145,6 +148,7 @@ impl Default for LaunchWiring {
             browser_slots: BrowserSlots::new(None),
             #[cfg(unix)]
             browser_socket_root: None,
+            inherited_env: None,
         }
     }
 }
@@ -157,6 +161,8 @@ impl std::fmt::Debug for LaunchWiring {
             .field("browser_executable", &self.browser_executable)
             .field("chrome_roots", &self.chrome_roots)
             .field("browser_slots", &self.browser_slots)
+            // Names and values stay out: the environment holds secrets.
+            .field("inherited_env", &self.inherited_env.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -224,6 +230,13 @@ pub(crate) struct ConfigParts {
 impl HostConfig {
     /// A config with the settings, the launcher that starts agents, and every default: no
     /// profile, no refused folders, the OS's home folder, the system clock and random ids.
+    ///
+    /// The launcher must clear the environment (`SpawnOptions::clear_env`, or a launcher that
+    /// always does, such as the sandbox's): an agent's spec is its whole environment, the host's
+    /// own minus the variables no agent may get (`GIT_*`, `SSH_*`, `NO_BROWSER`,
+    /// `CLAUDE_CODE_REMOTE`, and Codex's dropped names), and a launcher that lets the child
+    /// inherit the host's environment gives every dropped variable back. The plan readers'
+    /// specs (`clauseo_limits`) also carry the inherited environment whole.
     pub fn new(effective: Effective, launcher: Arc<dyn Launcher>) -> Self {
         Self {
             effective,
@@ -314,6 +327,14 @@ impl HostConfig {
     /// hooks run the desktop executable by its absolute path, never through `PATH`.
     pub fn with_agent_path_prepend(mut self, folder: PathBuf) -> Self {
         self.wiring.path_prepend = Some(folder);
+        self
+    }
+
+    /// The environment every agent's spec starts from, in place of the host's own, for tests
+    /// that check what reaches the child without changing this process's environment.
+    #[cfg(feature = "test-support")]
+    pub fn with_inherited_env(mut self, env: Vec<(OsString, OsString)>) -> Self {
+        self.wiring.inherited_env = Some(env);
         self
     }
 
