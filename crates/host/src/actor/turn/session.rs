@@ -12,8 +12,8 @@ use std::sync::Arc;
 use clauseo_acp::{AcpClient, AgentInfo, LoadSession, McpServer, NewSession, SessionStart};
 use clauseo_protocol::{
     AgentChoiceId, AgentKind, AgentNamed, AgentSessionAttached, CompactString,
-    ConfigOptionsReplaced, Envelope, ErrorCode, ModeChanged, Notice, NoticeLevel, StreamId,
-    ThreadId, ViewEntry,
+    ConfigOptionsReplaced, Envelope, ErrorCode, MatterId, ModeChanged, Notice, NoticeLevel,
+    StreamId, ThreadId, ViewEntry,
 };
 
 use super::super::Actor;
@@ -79,6 +79,7 @@ pub(super) fn on_replay_log(
     let cwd = folder(actor, thread);
     let loads = session_loads(actor, thread);
     let clock = Arc::clone(&actor.clock);
+    let matter = matter_of(actor, thread);
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };
@@ -92,7 +93,11 @@ pub(super) fn on_replay_log(
         Err(error) => tracing::warn!(%thread, %error, "no log for replay dedupe"),
     }
     let (id, client, fence) = (agent.id, agent.link.client.clone(), agent.link.fence());
-    let check = codex::prepare::recheck(clock, agent.codex.is_some().then(|| agent.folder.clone()));
+    let check = codex::prepare::recheck(
+        clock,
+        matter,
+        agent.codex.is_some().then(|| agent.folder.clone()),
+    );
     call(actor, thread, id, async move {
         if let Err(error) = check.await {
             return AgentReply::Refused(error);
@@ -124,11 +129,16 @@ fn resume_session(actor: &mut Actor, thread: ThreadId) {
         return;
     };
     let clock = Arc::clone(&actor.clock);
+    let matter = matter_of(actor, thread);
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref()) else {
         return;
     };
     let (id, client, fence) = (agent.id, agent.link.client.clone(), agent.link.fence());
-    let check = codex::prepare::recheck(clock, agent.codex.is_some().then(|| agent.folder.clone()));
+    let check = codex::prepare::recheck(
+        clock,
+        matter,
+        agent.codex.is_some().then(|| agent.folder.clone()),
+    );
     call(actor, thread, id, async move {
         if let Err(error) = check.await {
             return AgentReply::Refused(error);
@@ -158,11 +168,16 @@ pub(super) fn new_session(actor: &mut Actor, thread: ThreadId) {
         }
     };
     let clock = Arc::clone(&actor.clock);
+    let matter = matter_of(actor, thread);
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref()) else {
         return;
     };
     let (id, client, fence) = (agent.id, agent.link.client.clone(), agent.link.fence());
-    let check = codex::prepare::recheck(clock, agent.codex.is_some().then(|| agent.folder.clone()));
+    let check = codex::prepare::recheck(
+        clock,
+        matter,
+        agent.codex.is_some().then(|| agent.folder.clone()),
+    );
     call(actor, thread, id, async move {
         if let Err(error) = check.await {
             return AgentReply::Refused(error);
@@ -179,6 +194,11 @@ pub(super) fn new_session(actor: &mut Actor, thread: ThreadId) {
             result,
         }
     });
+}
+
+/// `thread`'s matter, for the log of its `.codex` re-check.
+fn matter_of(actor: &Actor, thread: ThreadId) -> Option<MatterId> {
+    actor.threads.get(&thread).map(|entry| entry.row.matter)
 }
 
 /// The `_meta` and MCP servers for `thread`'s `session/new` or `session/load`, the same for

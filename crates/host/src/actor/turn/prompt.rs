@@ -53,10 +53,11 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     let (abort, registration) = AbortHandle::new_pair();
     current.prompt_call = Some(abort);
     let clock = std::sync::Arc::clone(&actor.clock);
+    let matter = actor.threads.get(&thread).map(|entry| entry.row.matter);
     let call = Abortable::new(
         async move {
             // A Codex agent's matter folder is checked for `.codex` again first, off the actor.
-            if let Err(error) = codex::prepare::recheck(clock, check).await {
+            if let Err(error) = codex::prepare::recheck(clock, matter, check).await {
                 return AgentReply::PromptRefused { turn, error };
             }
             let result = client.prompt(&session, turn, content).await;
