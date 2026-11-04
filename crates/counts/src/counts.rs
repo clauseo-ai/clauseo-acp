@@ -202,6 +202,7 @@ impl Counts {
     /// a POST in flight, forgets everything and deletes `<data_dir>/counts/`; on makes a new id.
     pub fn set_enabled(&self, on: bool) -> io::Result<()> {
         let mut disk = self.disk();
+        self.state().switches += 1;
         if on {
             let state = self.state();
             if state.mode != crate::Mode::Off {
@@ -225,6 +226,7 @@ impl Counts {
     /// `counts` false, counts turn off. Once the marker exists, it changes nothing.
     pub fn first_act(&self, counts: bool) -> io::Result<()> {
         let mut disk = self.disk();
+        self.state().switches += 1;
         if self.state().consented {
             return Ok(());
         }
@@ -243,6 +245,13 @@ impl Counts {
     /// `counts_started`.
     pub fn consented(&self) -> bool {
         self.state().consented
+    }
+
+    /// How many times the switch has been set (`set_enabled` or `first_act`, by anyone). A
+    /// reader of the switch's setting takes it before the read: when it has moved by the time the
+    /// value is used, the value may be older than the switch, and must not turn counts off.
+    pub fn switch_generation(&self) -> u64 {
+        self.state().switches
     }
 
     /// Whether counts are off, in memory or saving.

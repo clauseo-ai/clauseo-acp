@@ -182,7 +182,10 @@ cells, the weekly tally, the queue and the sender. Its row bans `matters`, `acp`
 ## The desktop (S21's third pull request)
 
 - **Opening.** Desktop opens the counts on the host's start thread, before `Host::start`
-  (`crates/desktop/src/counts.rs`), with `privacy.counts` after policy, whether
+  (`crates/desktop/src/counts.rs`), with `privacy.counts` after policy (off, too, when the
+  user's `settings.json` exists but is unreadable, is not JSON or holds a `privacy` value that
+  does not type: `Effective::load` takes the defaults then, and the default would resume counts
+  the lawyer may have turned off; the other settings keep their defaults), whether
   `<data_dir>/first_act_done` exists, a seed from the OS random source (`os_seed`) and the
   envelope (`counts/about.rs`): desktop's `CARGO_PKG_VERSION`; `channel` `stable`, a build
   constant; macOS's major version, or on Windows `11` from build 22000 and `10` before it (from
@@ -191,11 +194,16 @@ cells, the weekly tally, the queue and the sender. Its row bans `matters`, `acp`
   machine the schema has no value for (an OS version outside it, another CPU) gets no counts that
   run: nothing is counted, saved, sent or deleted. The handle goes to the host through
   `HostConfig::with_counts`.
-- **The tick task.** One task on Tauri's runtime ticks every 60 s: `Counts::tick`, then
-  `send_due`, whose switch reads `privacy.counts` after policy from the settings files and policy
-  sources again before anything is due and before each POST, so an off or a policy that appeared
-  since start sends nothing and deletes the folder. The exit ticks once more, after the host has
-  stopped. The clock is read in `counts.rs` alone, under `#[expect]`.
+- **The tick task.** One task on Tauri's runtime ticks every 60 s: `Counts::tick` on a
+  blocking thread, then `send_due`. Just before, it asks the host for `privacy.counts` after
+  policy (`GetSettings`): the value `SetPrivacySettings` and `FirstAct` switch the counts by,
+  answered between commands. A host that did not start or does not answer reads as off. The
+  switch's generation (`Counts::switch_generation`, which `set_enabled` and `first_act` move) is
+  taken before the read; an off read while it moved is older than the switch (the host turned
+  counts on and its settings write had not landed) and turns nothing off that tick. The host
+  reads policy at start, so a policy that appears later takes effect at the next start, as
+  everywhere in the app. The exit ticks once more, after the host has stopped. The clock is read
+  in `counts.rs` alone, under `#[expect]`.
 - **`time_open`** is the foreground time of the `main` and `settings` windows (either holding the
   focus), through `Counts::set_foreground`. **`app_opened`** stays the host's (above); desktop
   adds none.
@@ -231,7 +239,16 @@ cells, the weekly tally, the queue and the sender. Its row bans `matters`, `acp`
 - **The lock.** `Counts` makes its file changes with its state's lock released: the state queues
   them, and a second, disk lock orders them. `bump` takes the state's lock alone and never waits
   on the disk, and an off waits for a write under way before it deletes the folder.
-- **No document text in a payload** is shown end to end by `crates/desktop/tests/canary.rs`.
+- **No document text in a payload** is shown end to end by `crates/desktop/tests/canary.rs`. Its
+  session runs in a child process whose own environment holds the canary (`HOME`, `USER`,
+  `CLAUSEO_DATA_DIR`, a variable), and on a machine the schema has no value for it uses a fixed
+  envelope, so it never depends on the runner's OS version.
+- **`os_major` takes macOS 13 to 40** (was 26; decided 2026-11-04 in review). macOS 27 shipped in
+  2026, and macOS is numbered by year since 26, so 40 is the 2039 release: headroom for any build
+  sent today, with a schema change well before then. Windows stays 10 or 11. The cap is in the
+  shared schema (`OsMajor`, `Platform`, `MACOS_LAST`), so S23's Worker reads it from the same
+  types; the snapshots and the per-field cap test move with it. No build has sent schema 1 yet, so
+  the schema stays 1.
 - **Follow-up:** the envelope is read once at start. A change of `ui.language` or of policy
   reaches the next day report or tally after a restart; calling `Counts::set_about` when either
   changes is a later pull request.

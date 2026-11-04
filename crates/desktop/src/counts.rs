@@ -3,15 +3,18 @@
 //! into the same handle (`HostConfig::with_counts`). Here:
 //!
 //! - Opening ([`open`]), on the host's start thread before the host starts (`lib.rs`): with
-//!   `privacy.counts` after policy, whether `<data_dir>/first_act_done` exists, the envelope
-//!   values ([`about`]) and a seed from the OS random source. A machine the schema cannot
-//!   describe (an OS version or a CPU it has no value for) gets no counts this run: nothing is
-//!   counted, saved, sent or deleted.
+//!   `privacy.counts` after policy ([`counts_on`]: off when the user's settings file did not
+//!   read whole, since the default would turn counts back on), whether
+//!   `<data_dir>/first_act_done` exists, the envelope values ([`about`]) and a seed from the OS
+//!   random source. A machine the schema cannot describe (an OS version or a CPU it has no value
+//!   for) gets no counts this run: nothing is counted, saved, sent or deleted.
 //! - The tick task ([`spawn_ticker`]): one task on Tauri's runtime that every 60 s saves the
-//!   counts and makes the POST that is due (`send_due`). Before each POST it reads
-//!   `privacy.counts` after policy from the settings files again ([`effective_on`]), so a policy
-//!   that appeared since start, or an off, sends nothing and deletes the counts folder. The exit
-//!   saves once more ([`CountsState::save`]). The clock is read here and nowhere else.
+//!   counts (on a blocking thread) and makes the POST that is due (`send_due`). Just before, it
+//!   asks the host for `privacy.counts` after policy ([`host_counts_on`], the value the host
+//!   switches by), so an off sends nothing and deletes the counts folder; a host that did not
+//!   start or does not answer reads as off. An off read before the switch last moved is stale and
+//!   turns nothing off ([`tick_once`]). The exit saves once more ([`CountsState::save`]). The
+//!   clock is read here and nowhere else.
 //! - `time_open`: the foreground time of the `main` and `settings` windows, through
 //!   `Counts::set_foreground` ([`on_window_event`]).
 //! - `count_ui`'s events ([`UiCount`]): only what the webview alone sees.
@@ -24,14 +27,18 @@ mod about;
 mod ui;
 mod upload;
 
+use std::future::Future;
 use std::path::Path;
-use std::sync::{Mutex, OnceLock, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
 
 use clauseo_counts::schema::Time;
-use clauseo_counts::{Counts, Upload, send_due};
-use clauseo_settings::{Effective, Locations};
+use clauseo_counts::{About, Counts, Upload, send_due};
+use clauseo_protocol::{HostQuery, Principal, QueryResult};
+use clauseo_settings::{Effective, Locations, Origin, WarningKind};
 use tauri::{Manager as _, Runtime, WindowEvent};
+
+use crate::host_start::HostCell;
 
 pub use about::about;
 pub(crate) use ui::UiCount;
@@ -104,48 +111,88 @@ impl CountsState {
 /// Opens the counts of `locations`' data folder with the effective settings, for an app whose
 /// executable is `exe`; none when the schema cannot describe this machine ([`about`]).
 pub fn open(locations: &Locations, effective: &Effective, exe: Option<&Path>) -> Option<Counts> {
-    let about = about(effective, exe)?;
-    let data_dir = locations.data_dir();
-    let consented = data_dir.join(clauseo_counts::FIRST_ACT).exists();
-    Some(Counts::open(
-        data_dir,
-        about,
-        effective.settings().privacy.counts,
-        consented,
-        clauseo_counts::os_seed(),
-    ))
+    Some(open_with(locations, effective, about(effective, exe)?))
 }
 
-/// `privacy.counts` after policy, read from the settings files and the policy sources now.
-pub(crate) fn effective_on(locations: &Locations) -> bool {
-    crate::load_effective(locations).settings().privacy.counts
+/// [`open`] with the envelope given.
+pub fn open_with(locations: &Locations, effective: &Effective, about: About) -> Counts {
+    let data_dir = locations.data_dir();
+    let consented = data_dir.join(clauseo_counts::FIRST_ACT).exists();
+    Counts::open(
+        data_dir,
+        about,
+        counts_on(effective),
+        consented,
+        clauseo_counts::os_seed(),
+    )
+}
+
+/// `privacy.counts` after policy, for opening the counts: off too when the user's settings file
+/// exists but could not be read, is not valid JSON, or holds a `privacy` value that does not
+/// type. `Effective::load` takes the defaults then, and the default (on) would resume counts the
+/// lawyer may have turned off; the other settings keep their defaults as usual.
+pub fn counts_on(effective: &Effective) -> bool {
+    let settings_file = effective.locations().settings_file();
+    let damaged = effective.warnings().iter().any(|warning| {
+        let ours = matches!(&warning.origin, Origin::File { path, .. } if path == settings_file);
+        let lost = match &warning.kind {
+            WarningKind::Unreadable { .. } | WarningKind::Syntax { .. } => true,
+            WarningKind::InvalidValue { key, .. } => key.starts_with("privacy"),
+            _ => false,
+        };
+        ours && lost
+    });
+    effective.settings().privacy.counts && !damaged
+}
+
+/// `privacy.counts` after policy as the host holds it now (`GetSettings`): the value its
+/// `SetPrivacySettings` and `FirstAct` switch the counts by, answered between commands. Off
+/// when the host did not start or does not answer.
+pub(crate) async fn host_counts_on(cell: &HostCell) -> bool {
+    let Ok(host) = cell.host().await else {
+        return false;
+    };
+    matches!(
+        host.query(Principal::LocalDesktop, HostQuery::GetSettings).await,
+        Ok(QueryResult::Settings(view)) if view.privacy.counts
+    )
 }
 
 /// Starts the task that ticks `counts` every 60 s and makes the POSTs that are due through
-/// `upload`, reading `privacy.counts` from `locations`' settings before each.
-pub(crate) fn spawn_ticker(counts: Counts, upload: HttpsUpload, locations: Locations) {
+/// `upload`, asking the host in `cell` for `privacy.counts` before each.
+pub(crate) fn spawn_ticker(counts: Counts, upload: HttpsUpload, cell: Arc<HostCell>) {
     drop(tauri::async_runtime::spawn(async move {
         loop {
-            let now = now();
-            tick_once(&counts, &upload, now, &|| effective_on(&locations)).await;
+            tick_once(&counts, &upload, now(), host_counts_on(&cell)).await;
             async_io::Timer::after(TICK).await;
         }
     }));
 }
 
-/// One tick at `now`: saves, then makes the POST that is due, if any, asking `effective_on`
-/// before it. A save that fails is tried again on the next tick.
+/// One tick at `now`: saves on a blocking thread, then reads `effective_on` and makes the POST
+/// that is due, if any. A save that fails is tried again on the next tick.
+///
+/// The switch's generation is taken before `effective_on` is read. An off read while the
+/// switch moved (the host turned counts on, and its settings write had not landed when the
+/// read was answered) is older than the switch, so it turns nothing off this tick.
 pub async fn tick_once(
     counts: &Counts,
     upload: &dyn Upload,
     now: Time,
-    effective_on: &(dyn Fn() -> bool + Sync),
+    effective_on: impl Future<Output = bool>,
 ) {
-    if let Err(err) = counts.tick(now) {
+    let saving = counts.clone();
+    let saved = tauri::async_runtime::spawn_blocking(move || saving.tick(now)).await;
+    if let Ok(Err(err)) = saved {
         // The kind alone: the error's text could hold a path.
         tracing::debug!(kind = %err.kind(), "the usage counts were not all saved; the next tick tries again");
     }
-    send_due(counts, upload, now, effective_on).await;
+    let since = counts.switch_generation();
+    let on = effective_on.await;
+    send_due(counts, upload, now, &|| {
+        on || counts.switch_generation() != since
+    })
+    .await;
 }
 
 /// The focus of `main` or the `settings` window, for `time_open`.

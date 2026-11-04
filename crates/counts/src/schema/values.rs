@@ -15,7 +15,7 @@ closed_enum! {
 closed_enum! {
     "The operating system. Its major version travels beside it as `os_major`."
     pub enum Os {
-        "macOS, `os_major` 13 to 26."
+        "macOS, `os_major` 13 to 40."
         Macos = "macos",
         "Windows, `os_major` 10 or 11."
         Windows = "windows",

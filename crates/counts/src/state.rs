@@ -66,6 +66,8 @@ pub(crate) struct State {
     pub(crate) open_error: Option<io::Error>,
     /// The file changes made since `Counts` last applied them, in order.
     pub(crate) pending: Vec<Op>,
+    /// How many times the switch was set (`set_enabled`, `first_act`).
+    pub(crate) switches: u64,
 }
 
 impl State {
@@ -95,6 +97,7 @@ impl State {
             dirty: false,
             open_error: None,
             pending: Vec::new(),
+            switches: 0,
         };
         let result = match (on, consented) {
             (false, _) => state.delete_folder(),

@@ -124,7 +124,7 @@ pub const BUILDTIME_MARKER: u64 = 0;
 /// Not an interface.
 #[doc(hidden)]
 pub mod counts_for_tests {
-    pub use crate::counts::{about, open, tick_once};
+    pub use crate::counts::{about, counts_on, open, open_with, tick_once};
 }
 
 /// The label of the main window. `capabilities/main.json` grants by this label
@@ -283,7 +283,7 @@ fn start_host<R: Runtime>(
         let config = host_config(effective);
         let config = match counts {
             Some(counts) => {
-                start_counts(&app, counts.clone(), locations.clone());
+                start_counts(&app, counts.clone());
                 config.with_counts(counts)
             }
             None => config,
@@ -328,20 +328,19 @@ fn absolute_folder(folder: std::path::PathBuf) -> Option<std::path::PathBuf> {
     }
 }
 
-/// Puts `counts` in `app`'s `CountsState` and starts their task.
-fn start_counts<R: Runtime>(
-    app: &AppHandle<R>,
-    counts: clauseo_counts::Counts,
-    locations: Locations,
-) {
+/// Puts `counts` in `app`'s `CountsState` and starts their task, which asks the bridge's host
+/// for the switch.
+fn start_counts<R: Runtime>(app: &AppHandle<R>, counts: clauseo_counts::Counts) {
     if let Some(state) = app.try_state::<counts::CountsState>() {
         state.start(counts.clone());
     }
-    counts::spawn_ticker(counts, counts::HttpsUpload::new(), locations);
+    if let Some(bridge) = app.try_state::<Bridge>() {
+        counts::spawn_ticker(counts, counts::HttpsUpload::new(), bridge.cell());
+    }
 }
 
 /// The effective settings under `locations`, with the system policy sources.
-pub(crate) fn load_effective(locations: &Locations) -> Effective {
+fn load_effective(locations: &Locations) -> Effective {
     let sources = clauseo_settings::system_policy_sources();
     let sources: Vec<&dyn clauseo_settings::PolicySource> =
         sources.iter().map(AsRef::as_ref).collect();

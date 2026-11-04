@@ -90,7 +90,7 @@ fn an_unknown_name_or_a_number_past_its_cap_is_refused() {
         ("/cells/setting_changed/1/setting", json!("matters_folder")),
         ("/cells/error_shown/0/code", json!("unknown")),
         ("/cells/error_shown/0/code", json!("agent.made_up")),
-        ("/os_major", json!(27)),
+        ("/os_major", json!(41)),
         ("/schema", json!(2)),
         ("/channel", json!("nightly")),
         ("/language", json!("fr")),
@@ -186,6 +186,9 @@ fn the_rules_beyond_the_types_hold() {
         assert_eq!(batch(day).unwrap_err(), want);
     }
     assert!(batch(edited("/day", json!("2026-10-19"))).is_ok());
+    // macOS 27, current when the cap was raised, to the cap itself.
+    assert!(batch(edited("/os_major", json!(27))).is_ok());
+    assert!(batch(edited("/os_major", json!(40))).is_ok());
     let mut linux = day_json();
     linux["os"] = json!("linux");
     assert_eq!(batch(linux.clone()).unwrap_err(), Invalid::Platform);
