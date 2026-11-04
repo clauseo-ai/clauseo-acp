@@ -257,6 +257,8 @@ until `StepUndone` is durable; a failed undo commit is retried once, as a turn's
   inherited secret from stderr tails. An inherited name an agent or hook variable also names,
   ignoring case, is left out: on Windows `Path` and `PATH` are one variable, and the inherited
   one must not win.
+- The agent's launch spec is the child's whole environment, so the caller's launcher must clear
+  the environment (#384).
 - A prompt's file must resolve to a path inside the thread's matter folder, else
   `command.invalid`; it goes to the agent as a percent-encoded `file://` URI.
 
