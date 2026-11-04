@@ -210,7 +210,7 @@ its step card, and compare (below) lists the files between any two versions.
 | Preview a restore | `HostQuery::PreviewRestore` returns `QueryResult::RestorePreview` | `changes` (files written), `added_since` (left in place), `kept` (left as they are), `locked` (open in another program) |
 | Restore the whole matter | `RestoreRequest::Matter` | `HostCommand::RestoreVersion` |
 | Restore some files | `RestoreRequest::Files` | the chosen paths |
-| Restore refused: a file is open in another program | `ErrorCode::MatterFileLocked` | retryable |
+| Restore or undo refused: a file is open in another program | `ErrorCode::MatterFileLocked` | retryable; `HostError.files`, the files to close |
 | Restore refused: a turn runs in the matter | `ErrorCode::MatterTurnRunning` | retryable |
 | Folder missing (the locate-folder flow) | `ErrorCode::MatterFolderMissing` | the matter's name |
 | Checkpoint failed | `ErrorCode::MatterCheckpointFailed` | the turn is refused before it starts |
