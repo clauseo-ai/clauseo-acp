@@ -144,7 +144,10 @@ fn every_agent_with_a_kind_gets_the_author_and_the_browser_entry() {
         let servers = hook.mcp_servers(&agent(id));
         let [
             McpServer::Stdio {
-                name, command, env, ..
+                name,
+                command,
+                args,
+                env,
             },
         ] = servers.as_slice()
         else {
@@ -158,6 +161,17 @@ fn every_agent_with_a_kind_gets_the_author_and_the_browser_entry() {
                 .join("app")
                 .join(format!("clauseo-mcp{}", std::env::consts::EXE_SUFFIX))
         );
+        // The release bundles it under the clauseo- prefix (.github/scripts/sidecars.mjs), since
+        // the .deb and .rpm put sidecars in /usr/bin beside other programs.
+        let agent_browser = scratch.path().join("app").join(format!(
+            "clauseo-agent-browser{}",
+            std::env::consts::EXE_SUFFIX
+        ));
+        let at = args
+            .iter()
+            .position(|arg| arg == "--agent-browser")
+            .expect("--agent-browser");
+        assert_eq!(args.get(at + 1).map(String::as_str), agent_browser.to_str());
         assert_eq!(env.len(), 4);
     }
 }

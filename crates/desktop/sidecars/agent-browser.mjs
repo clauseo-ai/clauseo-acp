@@ -4,7 +4,7 @@
 // `fetchAgentBrowser(triple, destPath)` downloads the pinned release asset for one Rust target
 // triple, checks its SHA-256 against `crates/desktop/agent-browser.toml`, and writes it to
 // `destPath`. The release script (.github/scripts/sidecars.mjs, stage F) calls it once per target
-// and writes `crates/desktop/binaries/agent-browser-<triple>[.exe]`. Nothing else calls it.
+// and writes `crates/desktop/binaries/clauseo-agent-browser-<triple>[.exe]`. Nothing else calls it.
 //
 // Node built-ins only: no dependency to install. The URL is checked before the request (https,
 // github.com, the pinned release's download prefix, one plain asset name with no `%` in it), so a

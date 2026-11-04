@@ -13,7 +13,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, test } from "node:test";
-import { RELEASE_TARGETS, SIDECARS, placeSidecars } from "./sidecars.mjs";
+import { PREFIX, RELEASE_TARGETS, SIDECARS, overlayProblem, placeSidecars } from "./sidecars.mjs";
 
 const scratch = await mkdtemp(join(tmpdir(), "sidecars-test-"));
 after(() => rm(scratch, { recursive: true, force: true }));
@@ -65,30 +65,54 @@ async function setup(pinOptions) {
   return { root, run, overlay, binaries, cargoCalls, fetchCalls };
 }
 
-test("the table ships clauseo-mcp and agent-browser on every release target, guard parked", () => {
+test("the table ships clauseo-mcp and clauseo-agent-browser on every release target, guard parked", () => {
   assert.deepEqual(
     SIDECARS.map((s) => [s.name, s.targets]),
     [
       ["clauseo-mcp", RELEASE_TARGETS],
-      ["agent-browser", RELEASE_TARGETS],
+      ["clauseo-agent-browser", RELEASE_TARGETS],
     ],
   );
+});
+
+// The .deb and .rpm install sidecars into /usr/bin, where a bare agent-browser would collide.
+test("every overlay entry starts with binaries/clauseo-, on every target", async () => {
+  assert.equal(PREFIX, "clauseo-");
+  for (const triple of RELEASE_TARGETS) {
+    const env = await setup();
+    await env.run(triple);
+    const { externalBin } = (await env.overlay()).bundle;
+    assert.ok(externalBin.length > 0, triple);
+    for (const entry of externalBin) assert.match(entry, /^binaries\/clauseo-/, `${triple}: ${entry}`);
+    assert.equal(overlayProblem(await env.overlay()), null, triple);
+    for (const file of await env.binaries()) assert.match(file, /^clauseo-/, `${triple}: ${file}`);
+  }
+});
+
+test("a sidecar named without the clauseo- prefix fails before anything is placed", async () => {
+  const env = await setup();
+  const sidecars = [{ name: "agent-browser", targets: RELEASE_TARGETS, place: async () => null }];
+  await assert.rejects(
+    placeSidecars("x86_64-unknown-linux-gnu", { root: env.root, sidecars }),
+    /agent-browser does not start with clauseo-/,
+  );
+  await assert.rejects(env.overlay(), { code: "ENOENT" });
 });
 
 for (const triple of RELEASE_TARGETS) {
   test(`${triple}: the overlay lists both sidecars, and the copies are named for the target`, async () => {
     const env = await setup();
-    assert.deepEqual(await env.run(triple), ["binaries/clauseo-mcp", "binaries/agent-browser"]);
+    assert.deepEqual(await env.run(triple), ["binaries/clauseo-mcp", "binaries/clauseo-agent-browser"]);
     assert.deepEqual(await env.overlay(), {
-      bundle: { externalBin: ["binaries/clauseo-mcp", "binaries/agent-browser"] },
+      bundle: { externalBin: ["binaries/clauseo-mcp", "binaries/clauseo-agent-browser"] },
     });
     const ext = triple.includes("-windows-") ? ".exe" : "";
-    assert.deepEqual(await env.binaries(), [`agent-browser-${triple}${ext}`, `clauseo-mcp-${triple}${ext}`].sort());
+    assert.deepEqual(await env.binaries(), [`clauseo-agent-browser-${triple}${ext}`, `clauseo-mcp-${triple}${ext}`].sort());
     assert.deepEqual(env.cargoCalls, [["build", "--release", "--locked", "-p", "clauseo-mcp", "--target", triple]]);
     assert.deepEqual(env.fetchCalls, [ASSET]);
     const bin = join(env.root, "crates", "desktop", "binaries");
     assert.equal(await readFile(join(bin, `clauseo-mcp-${triple}${ext}`), "utf8"), "fake clauseo-mcp\n");
-    assert.deepEqual(await readFile(join(bin, `agent-browser-${triple}${ext}`)), BODY);
+    assert.deepEqual(await readFile(join(bin, `clauseo-agent-browser-${triple}${ext}`)), BODY);
   });
 }
 
@@ -131,8 +155,30 @@ test("this target's copies from an earlier run are removed first, other targets'
   const env = await setup({ none: ["x86_64-unknown-linux-gnu"] });
   const bin = join(env.root, "crates", "desktop", "binaries");
   await mkdir(bin, { recursive: true });
-  await writeFile(join(bin, "agent-browser-x86_64-unknown-linux-gnu"), "old\n");
-  await writeFile(join(bin, "agent-browser-aarch64-apple-darwin"), "another target's\n");
+  await writeFile(join(bin, "clauseo-agent-browser-x86_64-unknown-linux-gnu"), "old\n");
+  await writeFile(join(bin, "clauseo-agent-browser-x86_64-unknown-linux-gnu.partial"), "a cut-off download\n");
+  await writeFile(join(bin, "clauseo-agent-browser-aarch64-apple-darwin"), "another target's\n");
   await env.run("x86_64-unknown-linux-gnu");
-  assert.deepEqual(await env.binaries(), ["agent-browser-aarch64-apple-darwin", "clauseo-mcp-x86_64-unknown-linux-gnu"]);
+  assert.deepEqual(await env.binaries(), [
+    "clauseo-agent-browser-aarch64-apple-darwin",
+    "clauseo-mcp-x86_64-unknown-linux-gnu",
+  ]);
+});
+
+test("the overlay check refuses any other key, a non-list, and a name without the prefix", () => {
+  const ok = { bundle: { externalBin: ["binaries/clauseo-mcp", "binaries/clauseo-agent-browser"] } };
+  assert.equal(overlayProblem(ok), null);
+  assert.equal(overlayProblem({ bundle: { externalBin: [] } }), null);
+  for (const bad of [
+    null,
+    [],
+    {},
+    { bundle: { externalBin: [] }, identifier: "x" },
+    { bundle: { externalBin: [], resources: [] } },
+    { bundle: { externalBin: "binaries/clauseo-mcp" } },
+  ]) {
+    assert.equal(overlayProblem(bad), "it may hold only bundle.externalBin, a list", JSON.stringify(bad));
+  }
+  assert.match(overlayProblem({ bundle: { externalBin: ["binaries/agent-browser"] } }), /binaries\/clauseo-/);
+  assert.match(overlayProblem({ bundle: { externalBin: ["../clauseo-mcp"] } }), /binaries\/clauseo-/);
 });
