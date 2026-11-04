@@ -4,7 +4,23 @@
 //! fast agent title is not undone by the app's first-words rename. The source of the title is
 //! on the thread's row (`ThreadRow::title_source`, store schema 4).
 
-use clauseo_protocol::RenameSource;
+use clauseo_protocol::{HostCommand, RenameSource};
+
+use super::Actor;
+use super::commands::{CommandCtx, ThreadChange, thread_command};
+
+/// `RenameThread`: the app's placeholder when its flag is set, else a title the lawyer typed.
+pub(super) fn rename_thread(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
+    let HostCommand::RenameThread {
+        thread,
+        title,
+        placeholder,
+    } = command
+    else {
+        return;
+    };
+    thread_command(actor, ctx, thread, ThreadChange::Rename(title, placeholder));
+}
 
 /// The source of a `RenameThread`: the app's first-words placeholder, or a title the lawyer typed.
 pub(crate) fn rename_source(placeholder: bool) -> RenameSource {
