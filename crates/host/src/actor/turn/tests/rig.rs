@@ -3,6 +3,7 @@
 //! `fake_agent` scenario written into the folder. A test can hold inputs back (a commit's
 //! result, an agent's end) to put the actor in the order it wants.
 
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -200,6 +201,24 @@ impl Rig {
             }
         }
         panic!("never reached {what}");
+    }
+
+    /// Runs the host's tasks (an agent's, a call's), handling no input, until `done` ends,
+    /// under the watchdog.
+    pub(super) fn run_tasks_until<T>(&mut self, what: &str, done: impl Future<Output = T>) -> T {
+        let waited = self.pool.run_until(async {
+            let done = std::pin::pin!(done);
+            match futures::future::select(done, async_io::Timer::after(WATCHDOG)).await {
+                Either::Left((done, _)) => Some(done),
+                Either::Right(_) => None,
+            }
+        });
+        waited.unwrap_or_else(|| panic!("never reached {what} in {WATCHDOG:?}"))
+    }
+
+    /// Runs the host's tasks, handling no input, until none can go on.
+    pub(super) fn run_tasks_until_stalled(&mut self) {
+        self.pool.run_until_stalled();
     }
 
     /// Handles inputs until `hold` picks one, which is held back.
