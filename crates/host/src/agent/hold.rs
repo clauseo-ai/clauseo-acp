@@ -1,15 +1,18 @@
-//! A test seam on the agent's stdout: once a given number of lines has passed, the reader's
-//! wakes are held back until the test releases them, as a host thread that has not got round to
-//! the reader yet holds them. Reads still pass through, so whatever polls the reader reads what
-//! the pipe holds; only the wake that would poll it is late.
+//! A test seam on an agent's connection: once a given number of lines has been written to its
+//! stdin, the wakes of the task that runs its [`Driver`] are held back until the test releases
+//! them, as a host thread that has not got round to that task yet holds them. Every wake is
+//! held (the stdout reader's, and the one `ReadProgress::mark` sends), and nothing else changes:
+//! a poll still reads what the pipe holds.
 
 use std::cell::RefCell;
+use std::future::Future;
 use std::io;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::task::{Context, Poll, Wake, Waker};
 
-use futures::io::AsyncRead;
+use clauseo_acp::{AcpClient, AcpEvent, ConnectOptions, Driver};
+use futures::io::{AsyncRead, AsyncWrite};
 
 thread_local! {
     /// The hold the next agent started on this thread takes.
@@ -17,12 +20,12 @@ thread_local! {
 }
 
 /// The test's handle on a hold.
-pub(crate) struct StdoutHold(Arc<Shared>);
+pub(crate) struct ConnectionHold(Arc<Shared>);
 
-impl StdoutHold {
-    /// Holds the wakes of the next agent this thread starts once `lines` lines of its stdout
-    /// have been read.
-    pub(crate) fn after_lines(lines: usize) -> Self {
+impl ConnectionHold {
+    /// Holds the connection task's wakes of the next agent this thread starts once `lines`
+    /// lines have been written to its stdin.
+    pub(crate) fn after_written(lines: usize) -> Self {
         let shared = Arc::new(Shared {
             state: Mutex::new(State {
                 lines_left: lines,
@@ -35,8 +38,8 @@ impl StdoutHold {
         Self(shared)
     }
 
-    /// Ends once the reader was woken and the wake is held.
-    pub(crate) fn wake_held(&self) -> impl std::future::Future<Output = ()> + '_ {
+    /// Ends once the connection task was woken and the wake is held.
+    pub(crate) fn wake_held(&self) -> impl Future<Output = ()> + '_ {
         futures::future::poll_fn(|cx| {
             let mut state = self.0.lock();
             if state.woken {
@@ -52,8 +55,8 @@ impl StdoutHold {
         let task = {
             let mut state = self.0.lock();
             state.lines_left = usize::MAX;
-            state.woken = false;
-            state.task.take()
+            let woken = std::mem::take(&mut state.woken);
+            state.task.take().filter(|_| woken)
         };
         if let Some(task) = task {
             task.wake();
@@ -66,9 +69,9 @@ struct Shared {
 }
 
 struct State {
-    /// Lines still to pass before wakes are held; 0 holds them, `usize::MAX` never does.
+    /// Lines still to write before wakes are held; 0 holds them, `usize::MAX` never does.
     lines_left: usize,
-    /// The reader task's waker, from its last poll.
+    /// The connection task's waker, from its last poll.
     task: Option<Waker>,
     /// A wake came while held.
     woken: bool,
@@ -84,55 +87,88 @@ impl Shared {
 
 impl Wake for Shared {
     fn wake(self: Arc<Self>) {
-        let task = {
+        let (task, watcher) = {
             let mut state = self.lock();
             if state.lines_left == 0 {
                 state.woken = true;
-                state.watcher.take()
+                (None, state.watcher.take())
             } else {
-                state.task.take()
+                (state.task.clone(), None)
             }
         };
-        if let Some(task) = task {
-            task.wake();
+        for waker in [task, watcher].into_iter().flatten() {
+            waker.wake();
         }
     }
 }
 
-/// The stdout an agent started on this thread reads through: held when a test set a hold.
-pub(crate) struct Held<R> {
-    reader: R,
+/// `acp`'s `connect`, with the hold set on this thread (taken: one agent per hold), if any.
+pub(crate) fn connect<W, R>(
+    stdin: W,
+    stdout: R,
+) -> (AcpClient, async_channel::Receiver<AcpEvent>, HeldTask)
+where
+    W: AsyncWrite + Send + Unpin + 'static,
+    R: AsyncRead + Send + Unpin + 'static,
+{
+    let hold = NEXT.with(|next| next.borrow_mut().take());
+    let stdin = Counted {
+        writer: stdin,
+        hold: hold.clone(),
+    };
+    let (client, events, driver) = clauseo_acp::connect(stdin, stdout, ConnectOptions::default());
+    (client, events, HeldTask { driver, hold })
+}
+
+/// The agent's stdin, counting the lines written toward the hold.
+struct Counted<W> {
+    writer: W,
     hold: Option<Arc<Shared>>,
 }
 
-/// `stdout`, with the hold set on this thread, if any (taken: one agent per hold).
-pub(crate) fn held<R>(stdout: R) -> Held<R> {
-    Held {
-        reader: stdout,
-        hold: NEXT.with(|next| next.borrow_mut().take()),
-    }
-}
-
-impl<R: AsyncRead + Unpin> AsyncRead for Held<R> {
-    fn poll_read(
+impl<W: AsyncWrite + Unpin> AsyncWrite for Counted<W> {
+    fn poll_write(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buf: &mut [u8],
+        buf: &[u8],
     ) -> Poll<io::Result<usize>> {
         let this = self.get_mut();
-        let Some(hold) = &this.hold else {
-            return Pin::new(&mut this.reader).poll_read(cx, buf);
-        };
-        hold.lock().task = Some(cx.waker().clone());
-        let proxy = Waker::from(Arc::clone(hold));
-        let read = Pin::new(&mut this.reader).poll_read(&mut Context::from_waker(&proxy), buf);
-        if let Poll::Ready(Ok(n)) = &read {
+        let written = Pin::new(&mut this.writer).poll_write(cx, buf);
+        if let (Some(hold), Poll::Ready(Ok(n))) = (&this.hold, &written) {
             let lines = buf.iter().take(*n).filter(|byte| **byte == b'\n').count();
             let mut state = hold.lock();
             if state.lines_left != usize::MAX {
                 state.lines_left = state.lines_left.saturating_sub(lines);
             }
         }
-        read
+        written
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.get_mut().writer).poll_flush(cx)
+    }
+
+    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.get_mut().writer).poll_close(cx)
+    }
+}
+
+/// The [`Driver`], polled with a waker the hold can hold back.
+pub(crate) struct HeldTask {
+    driver: Driver,
+    hold: Option<Arc<Shared>>,
+}
+
+impl Future for HeldTask {
+    type Output = <Driver as Future>::Output;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+        let Some(hold) = &this.hold else {
+            return Pin::new(&mut this.driver).poll(cx);
+        };
+        hold.lock().task = Some(cx.waker().clone());
+        let proxy = Waker::from(Arc::clone(hold));
+        Pin::new(&mut this.driver).poll(&mut Context::from_waker(&proxy))
     }
 }

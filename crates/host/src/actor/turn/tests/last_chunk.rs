@@ -7,7 +7,7 @@ use super::agents::{send_prompt, until_settled};
 use super::rig::{Rig, kind};
 use crate::actor::turn::TurnPhase;
 use crate::agent::PUMP_END_BOUND;
-use crate::agent::hold::StdoutHold;
+use crate::agent::hold::ConnectionHold;
 
 /// The agent answers the prompt with one chunk and exits 1 without a response.
 const CHUNK_THEN_EXIT: &str = r#"{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
@@ -15,20 +15,22 @@ const CHUNK_THEN_EXIT: &str = r#"{"expect":{"method":"session/prompt","as":"p1",
 {"exit":{"code":1}}
 "#;
 
-/// The lines the agent writes to stdout before the prompt: its `initialize` and `session/new`
-/// answers.
-const HANDSHAKE_LINES: usize = 2;
+/// The lines the host writes to the agent's stdin up to the prompt: `initialize`,
+/// `session/new` and `session/prompt`.
+const LINES_TO_THE_PROMPT: usize = 3;
 
-/// The chunk's wake is held (the host thread has not got round to the reader) while the owner
-/// sees the exit and its bound passes, as the window scenarios' clock mover moved the clock 5 s
-/// at once (a launch check's timer) and lost `claude-exit-mid-turn`'s only chunk. Before the
-/// owner checked that the agent's output was all posted, it posted `Ended` then: the turn failed
-/// `agent.exited` with no `TextAppended`, and the chunk came after the agent was gone.
+/// The connection task's wakes are held from the prompt on (the host thread has not got round
+/// to that task: neither to the chunk's wake nor to the one the owner's mark sends) while the
+/// owner sees the exit and its bound passes, as the window scenarios' clock mover moved the
+/// clock 5 s at once (a launch check's timer) and lost `claude-exit-mid-turn`'s only chunk.
+/// Before the owner checked that the agent's output was all posted, it posted `Ended` then: the
+/// turn failed `agent.exited` with no `TextAppended`, and the chunk came after the agent was
+/// gone.
 #[test]
 fn a_chunk_read_after_the_exit_is_logged_before_the_turn_fails() {
     let mut rig = Rig::start("turn-last-chunk", CHUNK_THEN_EXIT);
     let thread = rig.thread();
-    let hold = StdoutHold::after_lines(HANDSHAKE_LINES);
+    let hold = ConnectionHold::after_written(LINES_TO_THE_PROMPT);
     let turn = send_prompt(&mut rig, 10, thread);
     rig.run_until("the prompt", |actor| {
         actor.threads[&thread]
