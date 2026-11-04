@@ -1,6 +1,7 @@
 use clauseo_protocol::MatterPath;
+use unicode_normalization::UnicodeNormalization;
 
-use super::{HeldOpen, held_open, locked, owner_names};
+use super::{HeldOpen, fold_name, held_open, locked, owner_in_another_form, owner_names};
 use crate::test_dir::TestDir;
 use crate::write;
 
@@ -138,4 +139,56 @@ fn nfd_owner_file_found_by_nfc_name() {
         drop(write::create_new(&root.join(name)).unwrap());
     }
     assert_eq!(locked(root, &[path(document)]), [path(document)]);
+}
+
+/// `ऱानून.docx` as NFC (U+0931 …) and as NFD (U+0930 U+093C …), in that order. The nukta letter
+/// sits in the first characters, so the owner names cut from the two forms differ. (`क़` is not
+/// used: U+0958 is a composition exclusion, so its NFC form is the decomposed one.)
+fn nukta_names() -> (String, String) {
+    let composed = "\u{931}\u{93e}\u{928}\u{942}\u{928}.docx";
+    (composed.nfc().collect(), composed.nfd().collect())
+}
+
+/// `~$` and the NFD name without its base letter: the owner name Word makes when the cut lands
+/// after the base letter, so it starts with a lone combining mark. It is in the decomposed
+/// name's owner names and in none of the composed name's, as [`fold_name`] folds them.
+fn owner_only_in_decomposed(composed: &str, decomposed: &str) -> String {
+    let owner = String::from("~$\u{93c}\u{93e}\u{928}\u{942}\u{928}.docx");
+    assert!(owner_names(decomposed).contains(&owner));
+    assert!(
+        !owner_names(composed)
+            .iter()
+            .any(|name| fold_name(name) == owner)
+    );
+    owner
+}
+
+/// An Office owner file cut from the decomposed (NFD) name is found for the composed (NFC) name,
+/// through the decomposed form that `owner_in_another_form` builds from it. The owner file is
+/// given, not on disk (the folder is empty), so the match comes from the names alone.
+#[test]
+fn an_owner_file_cut_from_the_decomposed_name_is_found_for_the_composed_name() {
+    let dir = TestDir::new("locks-decomposed-owner");
+    let (composed, decomposed) = nukta_names();
+    assert_ne!(composed, decomposed);
+    assert_ne!(owner_names(&composed), owner_names(&decomposed));
+    let owner = owner_only_in_decomposed(&composed, &decomposed);
+    assert_eq!(
+        owner_in_another_form(dir.path(), &composed, Some(std::slice::from_ref(&owner))),
+        Some(owner)
+    );
+}
+
+/// The same through the other direction: the decomposed name is the name as written, and the
+/// owner file cut from it is found for that name. Its owner names come from the loop over the
+/// name as written and its decomposed form, not from the composed name's list.
+#[test]
+fn an_owner_file_cut_from_the_decomposed_name_is_found_for_the_decomposed_name() {
+    let dir = TestDir::new("locks-decomposed-written");
+    let (composed, decomposed) = nukta_names();
+    let owner = owner_only_in_decomposed(&composed, &decomposed);
+    assert_eq!(
+        owner_in_another_form(dir.path(), &decomposed, Some(std::slice::from_ref(&owner))),
+        Some(owner)
+    );
 }
