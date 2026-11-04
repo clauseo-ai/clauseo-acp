@@ -15,8 +15,8 @@ use futures::future::{pending, ready};
 use futures::task::LocalSpawnExt;
 
 use super::{
-    AgentInput, AgentLink, Ended, PUMP_END_BOUND, StopStep, keep_canonical, launch_spec,
-    session_folder, settle, start,
+    AgentInput, AgentLink, Ended, PUMP_END_BOUND, PUMP_END_ROUNDS, StopStep, keep_canonical,
+    launch_spec, session_folder, settle, start,
 };
 use crate::clock::ManualClock;
 
@@ -398,7 +398,7 @@ fn settle_waits_for_the_pipes_at_most_the_bound() {
     let task_clock = clock.clone();
     pool.spawner()
         .spawn_local(async move {
-            tx.unbounded_send(settle(pending(), &task_clock).await)
+            tx.unbounded_send(settle(pending(), || true, &task_clock).await)
                 .unwrap();
         })
         .unwrap();
@@ -416,7 +416,52 @@ fn settle_waits_for_the_pipes_at_most_the_bound() {
     assert!(!rx.try_recv().unwrap());
 
     // Pipes that end first settle at once, with no time passing.
-    assert!(pool.run_until(settle(ready(()), &clock)));
+    assert!(pool.run_until(settle(ready(()), || false, &clock)));
+}
+
+/// While what the agent wrote before it ended is still on its way, the bound passing does not
+/// settle: each bound waits one more, up to the last.
+#[test]
+fn settle_waits_past_the_bound_while_the_output_is_on_its_way() {
+    let mut pool = LocalPool::new();
+    let clock = ManualClock::new(Timestamp::ZERO);
+    let (tx, mut rx) = mpsc::unbounded();
+    let posted = Rc::new(Cell::new(false));
+    let (task_clock, task_posted) = (clock.clone(), Rc::clone(&posted));
+    pool.spawner()
+        .spawn_local(async move {
+            tx.unbounded_send(settle(pending(), || task_posted.get(), &task_clock).await)
+                .unwrap();
+        })
+        .unwrap();
+    pool.run_until_stalled();
+    for _ in 1..PUMP_END_ROUNDS {
+        clock.advance(PUMP_END_BOUND);
+        pool.run_until_stalled();
+        assert!(rx.try_recv().is_err(), "settled with the output on its way");
+        assert_eq!(clock.armed(), 1, "no bound armed again");
+    }
+    clock.advance(PUMP_END_BOUND);
+    pool.run_until_stalled();
+    assert!(!rx.try_recv().unwrap(), "past the last bound");
+
+    // Once the output is posted, the next bound settles.
+    let (tx, mut rx) = mpsc::unbounded();
+    let (task_clock, task_posted) = (clock.clone(), Rc::clone(&posted));
+    pool.spawner()
+        .spawn_local(async move {
+            tx.unbounded_send(settle(pending(), || task_posted.get(), &task_clock).await)
+                .unwrap();
+        })
+        .unwrap();
+    pool.run_until_stalled();
+    clock.advance(PUMP_END_BOUND);
+    pool.run_until_stalled();
+    assert!(rx.try_recv().is_err(), "settled with the output on its way");
+    posted.set(true);
+    clock.advance(PUMP_END_BOUND);
+    pool.run_until_stalled();
+    assert!(!rx.try_recv().unwrap());
 }
 
 /// A folder reached through a symlink gives its real path; one that does not exist gives back

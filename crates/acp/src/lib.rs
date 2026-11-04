@@ -21,6 +21,8 @@
 //! [`connect`] takes the agent's stdin and stdout and gives an [`AcpClient`] (one async method
 //! per ACP call the first app needs), the event receiver, and the [`Driver`] future the host
 //! spawns. Events carry an [`Origin`]; agent requests carry a [`PendingKey`] to answer with.
+//! [`AcpClient::read_progress`] tells a host whose agent exited whether all the agent wrote to
+//! stdout before then has reached the event channel ([`ReadProgress`]).
 //! Every failure is an [`Error`] with [`Error::code`].
 //!
 //! # Invariants
@@ -97,6 +99,7 @@ pub use event::{
     AcpEvent, AgentUpdate, FrameDirection, LimitSignal, LimitStatus, MessageRole, Origin,
     PendingKey, ProtocolWarning, RawFrame, ToolCall,
 };
+pub use line::{ReadMark, ReadProgress};
 pub use types::{
     AgentInfo, AuthKind, AuthMethod, ConnectOptions, LoadSession, McpServer, NewSession, PromptEnd,
     SessionMode, SessionModes, SessionStart, SteerResult,
@@ -130,6 +133,7 @@ where
         line::LineSink::new(writer, Arc::clone(&shared)),
         line::incoming(reader, Arc::clone(&shared)),
     );
+    let gate = Arc::clone(&shared.gate);
     let on_close = Arc::clone(&shared);
     let looping = Arc::clone(&shared);
     let connection = Client
@@ -150,5 +154,9 @@ where
             Err(_) => Err(shared.fatal().unwrap_or(Error::Closed)),
         }
     }));
-    (AcpClient::new(commands, frames_dropped), receiver, driver)
+    (
+        AcpClient::new(commands, frames_dropped, gate),
+        receiver,
+        driver,
+    )
 }

@@ -2,11 +2,18 @@
 //! R10's `Driver`, the event forwarder, S7's stderr pump, and the owner task that holds S7's
 //! `Handle`. The owner waits for the agent to exit or for a stop; on a stop it drops the `exited`
 //! future and runs the shutdown ladder, because `exited` borrows the handle and `shutdown`
-//! consumes it. Either way it then waits, at most [`PUMP_END_BOUND`], for the stderr pump and the
-//! event forwarder to end and then for every call that took a [`AgentLink::fence`] to post its
-//! answer, reads the exit report, and posts [`Ended`] after the agent's last event and after
-//! those answers. So a prompt the agent answered just before it exited (a Codex limit error, then
-//! the exit) reaches the actor as the prompt's answer, never as the exit.
+//! consumes it. Either way it then waits for the stderr pump and the event forwarder to end and
+//! then for every call that took a [`AgentLink::fence`] to post its answer, reads the exit
+//! report, and posts [`Ended`] after the agent's last event and after those answers. So a prompt
+//! the agent answered just before it exited (a Codex limit error, then the exit) reaches the actor
+//! as the prompt's answer, never as the exit, and the last chunk it wrote before it exited is
+//! posted before its `Ended`.
+//!
+//! A helper the agent left holding a pipe would hold that wait open, so it gives up once
+//! [`PUMP_END_BOUND`] has passed with all the agent wrote to stdout before the exit posted
+//! (`acp`'s [`ReadProgress`]), and at the latest after [`PUMP_END_ROUNDS`] bounds. It never
+//! gives up on the bound alone: a host thread that ran late (or a test clock moved on) must not
+//! leave the agent's last chunk unposted behind its `Ended`.
 
 pub(crate) mod codex;
 pub(crate) mod data_folder;
@@ -23,7 +30,7 @@ use std::sync::Arc;
 use std::task::{Poll, Waker};
 use std::time::Duration;
 
-use clauseo_acp::{AcpClient, AcpEvent, ConnectOptions};
+use clauseo_acp::{AcpClient, AcpEvent, ConnectOptions, ReadProgress};
 use clauseo_process::{Handle, LaunchSpec, Launched, Launcher, ShutdownOutcome};
 use clauseo_protocol::DetachReason;
 use futures::channel::oneshot;
@@ -38,8 +45,13 @@ pub(crate) use spec::launch_spec;
 
 /// How long the owner waits, after the agent is gone, for its stderr pipe and its stdout to end,
 /// so the exit report's tail holds the last lines and [`Ended`] follows every event. A helper the
-/// agent left holding a pipe cannot hold the report back longer than this.
+/// agent left holding a pipe holds the report back this long, or one bound more each time the
+/// bound passes with what the agent wrote before it exited still on its way.
 pub(crate) const PUMP_END_BOUND: Duration = Duration::from_secs(1);
+
+/// The most bounds the owner waits: past them it posts [`Ended`] even with the agent's stdout
+/// still being read, so a helper that keeps writing to it cannot hold the report back for good.
+pub(crate) const PUMP_END_ROUNDS: u32 = 10;
 
 /// The one spelling of matter folder `stored` an agent works in, as its process's working
 /// folder and its session's `cwd`: its canonical path (`dunce::canonicalize`: symlinks and `..`
@@ -202,7 +214,14 @@ pub(crate) fn start(
         ..
     } = launcher.launch(spec)?;
     let pid = handle.pid();
+    // Tests hold back the reader's wakes here (`hold.rs`); with no hold it passes through.
+    #[cfg(test)]
+    let stdout = hold::held(stdout);
     let (client, events, driver) = clauseo_acp::connect(stdin, stdout, ConnectOptions::default());
+    let output = Output {
+        progress: client.read_progress(),
+        events: events.clone(),
+    };
     // Each sender is dropped when its task ends, which wakes its receiver.
     let (pump_done, pump_end) = oneshot::channel::<()>();
     let (events_done, events_end) = oneshot::channel::<()>();
@@ -236,7 +255,7 @@ pub(crate) fn start(
         // The connection is gone, so each call in flight has its answer or `Closed` by now.
         owner_calls.idle().await;
     };
-    spawn(spawner, own(handle, stop_asked, ends, clock, post))?;
+    spawn(spawner, own(handle, stop_asked, ends, output, clock, post))?;
     Ok(AgentLink {
         client,
         pid,
@@ -244,6 +263,23 @@ pub(crate) fn start(
         events: fence_events,
         calls,
     })
+}
+
+/// What the owner reads to tell whether all the agent wrote before a mark has been posted.
+struct Output {
+    progress: ReadProgress,
+    /// The connection's event channel, read only to see whether it is empty or closed.
+    events: async_channel::Receiver<AcpEvent>,
+}
+
+impl Output {
+    /// Whether every event from what the agent wrote to stdout before `mark` has been posted:
+    /// the channel is empty, and either nothing more can come (the connection is gone) or the
+    /// reader has read it all and has nothing between it and the channel. The forwarder takes
+    /// an event and posts it in one step on this thread, as [`AgentLink::fence`] relies on.
+    fn posted_since(&self, mark: clauseo_acp::ReadMark) -> bool {
+        self.events.is_empty() && (self.events.is_closed() || self.progress.drained_since(mark))
+    }
 }
 
 /// The count of fenced calls in flight, and the owner's waker while it waits for none.
@@ -324,6 +360,7 @@ async fn own(
     mut handle: Handle,
     stop_asked: oneshot::Receiver<()>,
     ends: impl Future<Output = ()>,
+    output: Output,
     clock: Arc<dyn Clock>,
     post: Rc<dyn Fn(AgentInput)>,
 ) {
@@ -337,7 +374,9 @@ async fn own(
         }
     };
     let ended = if let Some(report) = exited {
-        settle(ends, &*clock).await;
+        // The agent is gone: all it wrote is in its stdout or already read.
+        let mark = output.progress.mark();
+        settle(ends, || output.posted_since(mark), &*clock).await;
         Ended::Exited(report.detach_reason())
     } else {
         let outcome = handle.shutdown(&ProcessTimer(Arc::clone(&clock))).await;
@@ -348,7 +387,8 @@ async fn own(
                 "the agent did not exit after its kill; it is reaped later"
             );
         }
-        settle(ends, &*clock).await;
+        let mark = output.progress.mark();
+        settle(ends, || output.posted_since(mark), &*clock).await;
         Ended::Stopped {
             step,
             report: outcome.report().detach_reason(),
@@ -357,16 +397,32 @@ async fn own(
     post(AgentInput::Ended(ended));
 }
 
-/// Waits for `ends` at most [`PUMP_END_BOUND`] on the host clock; true when it ended in time.
-async fn settle(ends: impl Future<Output = ()>, clock: &dyn Clock) -> bool {
-    match select(pin!(ends), clock.after(PUMP_END_BOUND)).await {
-        Either::Left(_) => true,
-        Either::Right(_) => {
-            tracing::warn!("the agent's pipes stayed open after it ended; reporting without them");
-            false
+/// Waits for `ends` on the host clock; true when it ended. Each time [`PUMP_END_BOUND`] passes
+/// it gives up if `posted` holds (what the agent wrote before it ended is all posted), and
+/// otherwise waits one bound more, up to [`PUMP_END_ROUNDS`] bounds.
+async fn settle(
+    ends: impl Future<Output = ()>,
+    posted: impl Fn() -> bool,
+    clock: &dyn Clock,
+) -> bool {
+    let mut ends = pin!(ends);
+    for _ in 0..PUMP_END_ROUNDS {
+        match select(ends.as_mut(), clock.after(PUMP_END_BOUND)).await {
+            Either::Left(_) => return true,
+            Either::Right(_) if posted() => {
+                tracing::warn!(
+                    "the agent's pipes stayed open after it ended; reporting without them"
+                );
+                return false;
+            }
+            Either::Right(_) => {}
         }
     }
+    tracing::warn!("the agent's stdout was still being read long after it ended; reporting now");
+    false
 }
 
+#[cfg(test)]
+pub(crate) mod hold;
 #[cfg(test)]
 mod tests;
