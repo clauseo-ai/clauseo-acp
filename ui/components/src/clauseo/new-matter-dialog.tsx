@@ -27,6 +27,7 @@ export function NewMatterDialog({
   pickFolder,
   error,
   nextError,
+  openMatter,
   testIds,
   finalFocus,
 }: {
@@ -47,6 +48,7 @@ export function NewMatterDialog({
   pickFolder?: NewMatterFormProps["pickFolder"];
   error?: NewMatterFormProps["error"];
   nextError?: NewMatterFormProps["nextError"];
+  openMatter?: NewMatterFormProps["openMatter"];
   testIds?: NewMatterFormProps["testIds"];
   /** Optional: where focus goes when it closes, New matter's button. Left out, the element focused before it opened. */
   finalFocus?: RefObject<HTMLElement | null>;
@@ -74,6 +76,7 @@ export function NewMatterDialog({
             pickFolder={pickFolder}
             error={error}
             nextError={nextError}
+            openMatter={openMatter}
             testIds={testIds}
             {...(name === undefined ? {} : { name })}
             {...(client === undefined ? {} : { client })}

@@ -39,6 +39,8 @@ const type = async (input: HTMLInputElement | undefined, value: string) => {
   });
 };
 const folderFor = (name: string) => `Documents/Clauseo/${name}`;
+const byTestId = (id: string) =>
+  document.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`) ?? undefined;
 
 test("Create the matter waits for a name, then gives the host the words trimmed", async () => {
   const made: (string | null)[][] = [];
@@ -211,6 +213,45 @@ test("Create stands pressed while the create runs, and the caller's error shows 
   expect(calls).toBe(1);
   await act(async () => run.reject(new Error("refused")));
   expect(button("Create the matter")?.disabled).toBe(false);
+});
+
+test("Open it sits under the line only when the caller gives it, and presses through to the caller", async () => {
+  const line = "This folder is already a matter: Acme.";
+  let opened = 0;
+  const onCreate = () => {};
+  await mount(
+    <NewMatterForm
+      name="Acme"
+      folder={null}
+      error={line}
+      onCreate={onCreate}
+      openMatter={() => {
+        opened += 1;
+      }}
+      testIds={{ open: "open-matter" }}
+    />,
+  );
+  expect(document.querySelector("[role=alert]")?.textContent).toBe(line);
+  await act(async () => byTestId("open-matter")?.click());
+  expect(opened).toBe(1);
+  // a line with no matter to open: no button
+  await act(async () => root?.unmount());
+  host?.remove();
+  await mount(<NewMatterForm name="Acme" folder={null} error={line} onCreate={onCreate} />);
+  expect(button("Open it")).toBeUndefined();
+  // no line, no button, even with a matter to open
+  await act(async () => root?.unmount());
+  host?.remove();
+  await mount(
+    <NewMatterForm
+      name="Acme"
+      folder={null}
+      onCreate={onCreate}
+      openMatter={() => {}}
+      testIds={{ open: "open-matter" }}
+    />,
+  );
+  expect(byTestId("open-matter")).toBeUndefined();
 });
 
 test("the dialog closes only when an async create succeeds", async () => {

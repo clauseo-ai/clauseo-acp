@@ -45,6 +45,12 @@
   .matter-form-error {
     @apply text-small-row text-primary;
   }
+  /* the line, and Open it under it when the line names a matter on the list */
+  .matter-form-refusal {
+    display: grid;
+    justify-items: start;
+    gap: var(--s2);
+  }
   .matter-form-change {
     flex: none;
     margin-top: calc(-1 * var(--s1));

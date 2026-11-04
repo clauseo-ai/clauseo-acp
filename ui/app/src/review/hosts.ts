@@ -196,9 +196,20 @@ export const railHost = (): FakeTransport =>
   });
 
 /** A host that refuses create_matter with `code`, its picker giving `display`. With `next`, a NextHost with the
- * default location "Documents/Clauseo", so Create sends default_location and the line names no folder. */
-export function refusingHost(code: NextErrorCode, display = "", next = false): FakeTransport {
-  const refusal: NextHostError = { code, message: "a detail for logs", retryable: false };
+ * default location "Documents/Clauseo", so Create sends default_location and the line names no folder. `matter` is
+ * the refusal's matter (HostError.matter), for matter.folder_is_matter. */
+export function refusingHost(
+  code: NextErrorCode,
+  display = "",
+  next = false,
+  matter?: string,
+): FakeTransport {
+  const refusal: NextHostError = {
+    code,
+    message: "a detail for logs",
+    retryable: false,
+    ...(matter === undefined ? {} : { matter }),
+  };
   const refuse = () => {
     throw refusal;
   };

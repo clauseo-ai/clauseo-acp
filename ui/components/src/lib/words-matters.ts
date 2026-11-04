@@ -50,6 +50,14 @@ const HI = {
   "Clauseo couldn't create the matter. Try again, or choose another folder.":
     "Clauseo मामला नहीं बना सका। फिर से प्रयास करें, या दूसरा फ़ोल्डर चुनें।",
   "Write the date as 30 October 2026.": "तारीख इस तरह लिखें: 30 अक्टूबर 2026।",
+  // matter.folder_is_matter: the folder is already a matter, by any spelling or nested with one; the matter's name when
+  // the list has it, and Open it beside the line
+  "This folder is already a matter: {name}.": null,
+  "This folder is already a matter.": null,
+  // matter.folder_in_matters_root: the folder Clauseo keeps matters in, a choose-another refusal
+  "{path} is the folder Clauseo keeps matters in.": null,
+  "That folder is where Clauseo keeps matters.": null,
+  "Choose the folder for one matter.": null,
   /* ---------- a matter whose folder has moved ---------- */
   "This matter's folder has moved.": "इस मामले का फ़ोल्डर कहीं और ले जाया गया है।",
   "It was at {path}. Find it where it is now, and the matter opens as you left it.":
