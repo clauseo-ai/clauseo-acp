@@ -1,11 +1,13 @@
-//! What `Agents` reports: one [`InstallState`] per agent, sent as [`AgentsEvent`]s, and the
-//! [`Installed`] adapter R20 turns into the `agents.<id>` settings entry.
+//! What `Agents` reports: one [`InstallState`] and one [`SigninState`] per agent, sent as
+//! [`AgentsEvent`]s, and the [`Installed`] adapter R20 turns into the `agents.<id>` settings
+//! entry.
 
 use std::path::PathBuf;
 
 use clauseo_protocol::AgentId;
 
 use crate::log::InstallLog;
+use crate::signin::SigninState;
 
 /// An event on the channel `Agents::start` returns.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,6 +19,22 @@ pub enum AgentsEvent {
         agent: AgentId,
         /// Its new state.
         state: InstallState,
+    },
+    /// An agent's sign-in state changed.
+    Signin {
+        /// The agent.
+        agent: AgentId,
+        /// Its new state.
+        state: SigninState,
+    },
+    /// Open `url` in the lawyer's browser: an address the `BROWSER` shim captured, or a device
+    /// code's page, whose host is one of the snapshot's sign-in hosts. Sent once per address;
+    /// an address read only from a run's output is never sent.
+    OpenUrl {
+        /// The agent signing in.
+        agent: AgentId,
+        /// The address to open.
+        url: String,
     },
 }
 

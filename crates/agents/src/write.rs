@@ -153,6 +153,19 @@ pub(crate) fn symlink(target: &Path, link: &Path) -> io::Result<()> {
     std::os::unix::fs::symlink(target, link)
 }
 
+/// Tests only: makes a hard link at `link` to `original`: one file under two names.
+#[cfg(test)]
+pub(crate) fn hard_link(original: &Path, link: &Path) -> io::Result<()> {
+    std::fs::hard_link(original, link)
+}
+
+/// Tests only: makes a symbolic link at `link` to the file `target`. Err when this account may
+/// not make one (no Developer Mode or privilege).
+#[cfg(all(test, windows))]
+pub(crate) fn symlink_file(target: &Path, link: &Path) -> io::Result<()> {
+    std::os::windows::fs::symlink_file(target, link)
+}
+
 /// Tests only: a fresh folder under the temp folder, removed on drop.
 #[cfg(test)]
 pub(crate) struct TestDir(pub(crate) std::path::PathBuf);
