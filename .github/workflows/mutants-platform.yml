@@ -137,8 +137,6 @@ jobs:
               - 'crates/matters/src/refuse\.rs:\d+:\d+: (replace is_mount_point -> .*|.* in is_mount_point)$'
               # `is_macos_volume_key` is macOS only, not compiled here.
               - 'crates/matters/src/refuse\.rs:\d+:\d+: (replace is_macos_volume_key -> .*|.* in is_macos_volume_key)$'
-              # The macOS `/System/Volumes/Data` block of `keys_by`, not compiled here.
-              - 'crates/matters/src/refuse\.rs:\d+:\d+: replace == with != in keys_by$'
               # The `cfg(unix)` line of `same_entry`, not compiled here; line 176's `==` is Windows' own.
               - 'crates/matters/src/writeback\.rs:171:\d+: replace (&& with \|\||== with !=) in same_entry$'
           # Files with one Windows-only branch each, and settings' policy and folders.
