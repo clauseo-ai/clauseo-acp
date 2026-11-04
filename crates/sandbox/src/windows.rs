@@ -48,7 +48,9 @@ pub enum FolderSupport {
 ///
 /// Every handle is closed on every path. A path over `MAX_PATH` goes to the Win32 calls in the
 /// `\\?\` form; no test makes one yet. The answer is for this process's token, which the agent
-/// inherits.
+/// inherits. A token with `SeBackupPrivilege` or `SeRestorePrivilege` enabled would pass step 4
+/// whatever the folder's DACL says (`FILE_FLAG_BACKUP_SEMANTICS`); Clauseo never enables them, and
+/// an administrator's token has them disabled.
 pub fn folder_support(path: &Path) -> io::Result<FolderSupport> {
     let wide = verbatim_wide(path)?;
     let folder = open(&wide, FILE_READ_ATTRIBUTES.0).map_err(|error| os_error(&error))?;
