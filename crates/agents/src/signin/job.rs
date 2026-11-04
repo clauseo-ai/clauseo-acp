@@ -166,7 +166,10 @@ impl<T: Timer + Send + Sync> SigninJob<T> {
         }
         // Every run but detection starts in the home, so it must be there; a failure shows as
         // the run not starting.
-        drop(crate::write::create_dir_all(&self.home));
+        drop(crate::write::create_private_dirs_under(
+            &self.config.data_dir,
+            &self.home,
+        ));
         match (self.vendor, self.task) {
             (Vendor::Claude, Task::SignIn(method)) => {
                 Some(claude::sign_in(self, method == Method::Console, paste).await)

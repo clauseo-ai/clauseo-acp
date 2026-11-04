@@ -3,13 +3,16 @@
 //! name Codex's login file, and it never opens or reads it (`tests/credential_names.rs`).
 //!
 //! Every operation here on a login file's name, for the security review:
-//! - `std::fs::symlink_metadata` (an `lstat`, which opens nothing) to see whether a name is
-//!   there and is a plain file;
+//! - `std::fs::symlink_metadata` to see whether a name is there and is a plain file: an `lstat`
+//!   on Unix, which opens nothing; on Windows `std` opens a handle with desired access 0 and
+//!   `FILE_FLAG_OPEN_REPARSE_POINT`, which can query attributes but cannot read a byte of
+//!   contents;
 //! - [`crate::same_file`], which compares file ids (an `lstat` on Unix; on Windows a handle with
-//!   access 0, which cannot read a byte; `fileid.rs`);
-//! - `crate::write::hard_link` (`std::fs::hard_link`), which opens neither file;
+//!   access 0 likewise, which cannot read a byte; `fileid.rs`);
+//! - `crate::write::hard_link` (`std::fs::hard_link`), which opens neither file for its
+//!   contents;
 //! - `crate::write::remove_file` (`std::fs::remove_file`), which removes the home's name and
-//!   opens nothing.
+//!   never reads it.
 //!
 //! Claude needs nothing here: its reuse is an environment (`CLAUDE_SECURESTORAGE_CONFIG_DIR=""`
 //! with Clauseo's `CLAUDE_CONFIG_DIR`, `signin/env.rs`), and "Claude needs no link anywhere".
@@ -93,13 +96,41 @@ pub fn codex_link_holds(codex_home: &Path, lawyer_home: &Path) -> CodexLink {
 /// the lawyer's file, and Codex's `logout` "revokes the tokens and deletes the lawyer's login".
 /// S18 calls it before each of its own `login` and `logout` runs; R20 before codex-acp's
 /// `authenticate`.
+///
+/// It fails closed. Only two cases let the run go ahead (false): the home has no login file,
+/// or both names are plain files (never a symbolic link or other reparse point) with different
+/// file ids. A missing lawyer's file is the second case's kin: there is nothing to share. Any
+/// other answer is true, refuse: the home's name is a link (Codex would read the lawyer's tokens
+/// through a symbolic link to revoke them) or not a plain file, the lawyer's name is a link or
+/// not a plain file, the ids agree, or a stat fails for any reason but "not found".
 pub fn codex_login_shared(codex_home: &Path, lawyer_home: &Path) -> bool {
-    same_file(&home_file(codex_home), &lawyer_file(lawyer_home)).unwrap_or(false)
+    let ours = home_file(codex_home);
+    match std::fs::symlink_metadata(&ours) {
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return false,
+        Err(_) => return true,
+        Ok(meta) if !plain_file(&meta) => return true,
+        Ok(_) => {}
+    }
+    let lawyer = lawyer_file(lawyer_home);
+    match std::fs::symlink_metadata(&lawyer) {
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return false,
+        Err(_) => return true,
+        Ok(meta) if !plain_file(&meta) => return true,
+        Ok(_) => {}
+    }
+    same_file(&ours, &lawyer).unwrap_or(true)
+}
+
+/// Whether `meta` (from `symlink_metadata`) is a plain file: not a folder, and not a symbolic
+/// link or any other reparse point.
+fn plain_file(meta: &std::fs::Metadata) -> bool {
+    meta.file_type().is_file() && !crate::write::is_reparse_point(meta)
 }
 
 /// The leave order's unlink step. From the brief: "Leaving a reused Codex login follows R20's
 /// order (no-reuse, stop, unlink, then the new login, then relaunch); S18 supplies the steps and
-/// removes the home's link with `remove_file`, which opens nothing." Removes the login file's
+/// removes the home's link with `remove_file`, which opens nothing." (`remove_file` never reads
+/// the file; on Windows the OS opens it for deletion only.) Removes the login file's
 /// name in `codex_home`; the lawyer's own name, and so their login, stay. A missing name is
 /// fine. Call it once every Codex process using `codex_home` has stopped (R20's "stop"), so
 /// none writes the name again; [`crate::Agents::stop_using_login`] calls it for the agent's own
@@ -110,7 +141,8 @@ pub fn unlink_reused_login(codex_home: &Path) -> io::Result<()> {
 
 /// Detection's stat: whether the lawyer's login file is there ("a stat (never an open) of
 /// `~/.codex/auth.json`: present is a file-mode login, reusable; absent is a keyring or
-/// Windows secrets login").
+/// Windows secrets login"). On Windows `symlink_metadata` opens a handle with access 0, which
+/// cannot read the contents.
 pub(crate) fn lawyer_login_present(lawyer_home: &Path) -> bool {
     std::fs::symlink_metadata(lawyer_file(lawyer_home)).is_ok()
 }
@@ -126,12 +158,18 @@ pub(crate) fn codex_reused(source: Option<&LoginSource>, codex_home: &Path) -> b
 }
 
 /// Makes the reused login: the home's login file becomes a hard link to the lawyer's, "one file
-/// under two names" (`std::fs::hard_link`, which opens nothing), only on the lawyer's "Use it".
+/// under two names" (`std::fs::hard_link`, which opens neither file for its contents), only on
+/// the lawyer's "Use it".
 /// A home name that is already the lawyer's file is kept. Err for anything else: the lawyer's
 /// name is not a plain file (a link is never linked), the home's name is taken, another volume,
 /// or the new name does not compare as one file with the lawyer's (it is then removed). The
-/// caller then falls back to Clauseo's own sign-in, logged.
-pub(crate) fn link_reused_login(codex_home: &Path, lawyer_home: &Path) -> io::Result<()> {
+/// caller then falls back to Clauseo's own sign-in, logged. The home is made under `data_dir`
+/// through no link (`crate::write::create_private_dirs_under`).
+pub(crate) fn link_reused_login(
+    data_dir: &Path,
+    codex_home: &Path,
+    lawyer_home: &Path,
+) -> io::Result<()> {
     let lawyer = lawyer_file(lawyer_home);
     let ours = home_file(codex_home);
     if !std::fs::symlink_metadata(&lawyer)?.file_type().is_file() {
@@ -140,7 +178,7 @@ pub(crate) fn link_reused_login(codex_home: &Path, lawyer_home: &Path) -> io::Re
             "the lawyer's login is not a plain file",
         ));
     }
-    crate::write::create_dir_all(codex_home)?;
+    crate::write::create_private_dirs_under(data_dir, codex_home)?;
     if same_file(&ours, &lawyer).unwrap_or(false) {
         return Ok(());
     }

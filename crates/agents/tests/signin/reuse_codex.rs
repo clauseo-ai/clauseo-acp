@@ -12,7 +12,7 @@ use clauseo_agents::{
     codex_link_holds, codex_login_shared, same_file, unlink_reused_login,
 };
 
-use crate::support::{Events, Fixture, Launch, claude, codex, now};
+use crate::support::{Events, Fixture, Launch, claude, codex, eventually, now};
 
 /// Codex's login file's name. Tests may name it; `src` names it only in `signin/reuse.rs`.
 const LOGIN_FILE: &str = "auth.json";
@@ -187,8 +187,9 @@ fn stop_using_login_with_a_reason_clears_the_record_without_no_reuse() {
     assert_eq!(events.state(), found());
 }
 
-/// "a failed link falls back to the sign-in run": a folder stands where the link goes, so
-/// `hard_link` fails; the `codex_link_failed` note, then Clauseo's own browser sign-in.
+/// "a failed link falls back to the sign-in run": another plain file stands where the link
+/// goes, so `hard_link` fails; the `codex_link_failed` note, then Clauseo's own browser sign-in,
+/// which the guard lets run (two plain files, two file ids).
 #[test]
 fn a_failed_link_falls_back_to_the_sign_in_run() {
     let fx = Fixture::new("reuse-codex-link-fails", "ok-after:0");
@@ -196,7 +197,7 @@ fn a_failed_link_falls_back_to_the_sign_in_run() {
     let (agents, events) = start(&fx);
     agents.check_status(&codex()).unwrap();
     assert_eq!(events.state(), found());
-    write_file(&home_file(&fx).join("in-the-way"), b"").unwrap();
+    write_file(&home_file(&fx), b"").unwrap();
     agents.use_found_login(&codex()).unwrap();
     let (_, last) = events.until_end();
     assert!(
@@ -351,4 +352,184 @@ fn codex_runs_but_detection_get_clauseo_s_home_and_claude_runs_never() {
         }
     }
     assert!(seen.0 > 0 && seen.1 > 0 && seen.2 > 0, "{seen:?}");
+}
+
+/// The lawyer's file-mode login whose `account/read` names no email (an API-key account, by the
+/// fake's dummy marker): detection gives `LoginFound { email: None }`.
+fn plant_lawyer_without_email(fx: &Fixture) {
+    write_file(&lawyer_file(fx), br#"{"authMethod": "apikey"}"#).unwrap();
+}
+
+fn found_without_email() -> SigninState {
+    SigninState::LoginFound {
+        from: LoginFrom::Codex,
+        email: None,
+    }
+}
+
+/// Whether the home holds no name of Codex's login file and no `reused` record.
+fn nothing_reused(fx: &Fixture) -> bool {
+    let source = std::fs::read_to_string(fx.marker(&codex(), "login-source")).unwrap_or_default();
+    std::fs::symlink_metadata(home_file(fx)).is_err() && !source.starts_with("reused")
+}
+
+/// Waits until `count` app-servers have started.
+fn until_app_servers(fx: &Fixture, count: usize) {
+    eventually("an app-server started", || {
+        fx.codex_runs(&["app-server"]).len() >= count
+    });
+}
+
+/// S18 security review, Medium 1, first repro: "Use it" whose detection's `account/read` is cut
+/// short by a cancel. The cut-short read is not "no email", so it never matches the `None` the
+/// lawyer was shown: the job ends `signin.cancelled`, with no link and no `reused` record.
+#[cfg(unix)]
+#[test]
+fn cancelling_use_it_during_its_account_read_makes_no_link() {
+    let fx = Fixture::new("reuse-codex-cancel-race", "ok-after:0");
+    plant_lawyer_without_email(&fx);
+    let (agents, events) = start(&fx);
+    agents.check_status(&codex()).unwrap();
+    assert_eq!(events.state(), found_without_email());
+    let before = fx.codex_runs(&["app-server"]).len();
+    fx.stall(Some("app-server"));
+    agents.use_found_login(&codex()).unwrap();
+    until_app_servers(&fx, before + 1);
+    agents.cancel_sign_in(&codex()).unwrap();
+    let (_, last) = events.until_end();
+    assert_eq!(
+        last,
+        SigninState::Failed {
+            code: SigninCode::Cancelled,
+            at: now()
+        }
+    );
+    assert!(nothing_reused(&fx));
+    assert_eq!(agents.signin_state(&codex()), Some(last));
+}
+
+/// S18 security review, Medium 1, second repro: `use_different_account` while "Use it" waits on
+/// its `account/read`. "Use it" is replaced and links nothing; Clauseo's own sign-in runs and
+/// ends signed in, with no link and no `reused` record, and the next start keeps it.
+#[cfg(unix)]
+#[test]
+fn use_different_account_racing_use_it_makes_no_link() {
+    let fx = Fixture::new("reuse-codex-different-race", "ok-after:0");
+    plant_lawyer_without_email(&fx);
+    let (agents, events) = start(&fx);
+    agents.check_status(&codex()).unwrap();
+    assert_eq!(events.state(), found_without_email());
+    let before = fx.codex_runs(&["app-server"]).len();
+    fx.stall(Some("app-server"));
+    agents.use_found_login(&codex()).unwrap();
+    until_app_servers(&fx, before + 1);
+    // "Use it"'s app-server is stalled already; the sign-in's own may answer.
+    fx.stall(None);
+    agents.use_different_account(&codex()).unwrap();
+    let (_, last) = events.until_end();
+    assert!(
+        matches!(
+            last,
+            SigninState::SignedIn {
+                source: Source::Own,
+                ..
+            }
+        ),
+        "{last:?}"
+    );
+    assert_eq!(fx.codex_runs(&["login"]).len(), 1);
+    assert!(nothing_reused(&fx));
+    drop(agents);
+    let (agents, events) = start(&fx);
+    agents.check_status(&codex()).unwrap();
+    assert!(
+        matches!(
+            events.state(),
+            SigninState::SignedIn {
+                source: Source::Own,
+                ..
+            }
+        ),
+        "the lawyer's choice holds"
+    );
+    assert!(nothing_reused(&fx));
+}
+
+/// A cancel during "Use it"'s detection, when the lawyer was shown an email, ends the job
+/// `signin.cancelled` (not `LoginFound` with no email, nor `signin.failed`).
+#[cfg(unix)]
+#[test]
+fn cancelling_use_it_during_its_detection_gives_cancelled() {
+    let fx = Fixture::new("reuse-codex-cancel-detect", "ok-after:0");
+    plant_lawyer(&fx);
+    let (agents, events) = start(&fx);
+    agents.check_status(&codex()).unwrap();
+    assert_eq!(events.state(), found());
+    let before = fx.codex_runs(&["app-server"]).len();
+    fx.stall(Some("app-server"));
+    agents.use_found_login(&codex()).unwrap();
+    until_app_servers(&fx, before + 1);
+    agents.cancel_sign_in(&codex()).unwrap();
+    assert_eq!(
+        events.state(),
+        SigninState::Failed {
+            code: SigninCode::Cancelled,
+            at: now()
+        }
+    );
+    assert!(nothing_reused(&fx));
+}
+
+/// An app-server that never answers during detection is not "no email": the status check can
+/// not tell, so the state stays as it was and no `LoginFound { email: None }` is shown for it.
+#[cfg(target_os = "linux")]
+#[test]
+fn an_unanswered_account_read_is_never_login_found_without_an_email() {
+    let fx = Fixture::new("reuse-codex-unanswered", "ok-after:0");
+    plant_lawyer(&fx);
+    let (agents, events) = start(&fx);
+    fx.stall(Some("app-server"));
+    agents.check_status(&codex()).unwrap();
+    fx.timer.fire(std::time::Duration::from_secs(10));
+    let app_server = fx.codex_runs(&["app-server"]).pop().unwrap();
+    assert!(crate::support::gone(app_server.pid));
+    for _ in 0..20 {
+        crate::support::pause();
+    }
+    let sent: Vec<_> = events
+        .drain()
+        .into_iter()
+        .filter(|event| matches!(event, clauseo_agents::AgentsEvent::Signin { .. }))
+        .collect();
+    assert_eq!(sent, []);
+    assert_eq!(agents.signin_state(&codex()), None);
+}
+
+/// S18 security review, Low 2: the guard refuses when the home's login file is a symbolic link
+/// (to the lawyer's file, which Codex would read through it), and on any error other than a
+/// missing file for either path.
+#[cfg(unix)]
+#[test]
+fn the_guard_refuses_a_linked_home_file_and_any_stat_error() {
+    let fx = Fixture::new("reuse-codex-guard-link", "ok-after:0");
+    plant_lawyer(&fx);
+    write_file(&home(&fx).join("keep"), b"").unwrap();
+    // A symbolic link to the lawyer's file.
+    clauseo_agents::testing::symlink(&lawyer_file(&fx), &home_file(&fx)).unwrap();
+    assert!(codex_login_shared(&home(&fx), &fx.user_home()));
+    remove_file(&home_file(&fx)).unwrap();
+    // The home's own plain file, another file than the lawyer's: the run may go ahead.
+    write_file(&home_file(&fx), b"").unwrap();
+    assert!(!codex_login_shared(&home(&fx), &fx.user_home()));
+    // The home's folder is a file: the stat fails with "not a folder", not "missing".
+    let blocked = fx.data.path().join("blocked-home");
+    write_file(&blocked, b"").unwrap();
+    assert!(codex_login_shared(&blocked, &fx.user_home()));
+    // The lawyer's `.codex` is a file: their path's stat fails the same way.
+    let lawyer = fx.data.path().join("blocked-lawyer");
+    write_file(&lawyer.join(".codex"), b"").unwrap();
+    assert!(codex_login_shared(&home(&fx), &lawyer));
+    // A home with no file: the run may go ahead.
+    remove_file(&home_file(&fx)).unwrap();
+    assert!(!codex_login_shared(&home(&fx), &fx.user_home()));
 }

@@ -193,7 +193,8 @@ impl Agents {
 
     /// Writes `code` and a newline to `agent`'s login run's stdin (Claude's paste route), then
     /// drops it, zeroed. It is never stored, logged or shown. Refused when no sign-in run is
-    /// going (a queued sign-in has no run yet).
+    /// going (a queued sign-in has no run yet), and with `WrongMethod` for Codex, whose logins
+    /// read no code.
     pub fn paste_code(&self, agent: &AgentId, code: PasteCode) -> Result<(), SigninError> {
         self.shared.signin.paste(agent, code)
     }

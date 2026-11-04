@@ -124,9 +124,17 @@ struct Said {
     port_busy: AtomicBool,
 }
 
-/// The login run (`device`: `--device-auth`), watched to its end.
+/// The login run (`device`: `--device-auth`), watched to its end. The lock on Codex's login
+/// files is taken first and held to the end, so the guard looks only once any "Use it" this job
+/// replaced has finished or undone its link, and no "Use it" links while this login runs.
 async fn login<T: Timer + Send + Sync>(job: &SigninJob<T>, device: bool) -> SigninState {
-    if crate::write::create_dir_all(&job.home).is_err() || home_shares_lawyers_login(job) {
+    let _files = job.shared.signin.codex_files().await;
+    if !job.shared.signin.is_live(&job.ticket) {
+        return job.failed(SigninCode::Cancelled);
+    }
+    if crate::write::create_private_dirs_under(&job.config.data_dir, &job.home).is_err()
+        || home_shares_lawyers_login(job)
+    {
         return job.failed(SigninCode::Failed);
     }
     let kind = RunKind::Own { home: &job.home };
@@ -299,10 +307,16 @@ pub(crate) async fn status_run<T: Timer + Send + Sync>(
 /// [`home_shares_lawyers_login`]): Codex's logout revokes the tokens and deletes the login. The
 /// job then runs the status check instead.
 pub(crate) async fn sign_out<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Option<SigninState> {
+    // Held from the checks to the logout's end, as for a login.
+    let files = job.shared.signin.codex_files().await;
+    if !job.shared.signin.is_live(&job.ticket) {
+        return None;
+    }
     if job.shared.signin.source(&job.ticket.agent) == Some(Source::Reused)
         || super::found::is_reused(job)
         || home_shares_lawyers_login(job)
     {
+        drop(files);
         return super::found::check(job).await;
     }
     let kind = RunKind::Own { home: &job.home };
@@ -319,6 +333,7 @@ pub(crate) async fn sign_out<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Opti
         |_: &str| {},
     )
     .await;
+    drop(files);
     if cancel.is_cancelled() {
         return None;
     }

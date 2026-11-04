@@ -14,7 +14,7 @@ use std::path::Path;
 /// missing file included).
 ///
 /// Unix reads `symlink_metadata` (`lstat`), which opens nothing. Windows has no such call in
-/// `std`, so it opens a handle to each path with `CreateFileW` and desired access 0 (no read,
+/// `std` (its `symlink_metadata` itself opens a handle with access 0, as below), so it opens a handle to each path with `CreateFileW` and desired access 0 (no read,
 /// write or execute right: the handle can query attributes and ids but cannot read a byte of
 /// contents), sharing read, write and delete so no other program is blocked, with
 /// `FILE_FLAG_OPEN_REPARSE_POINT` so a link is opened as itself, never followed. The handle is

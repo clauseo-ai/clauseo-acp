@@ -128,6 +128,10 @@ async fn claude_session<T: Timer + Send + Sync>(
         return Some(stop(job, None));
     };
     if record {
+        // Cancelled or replaced while status ran: no record of a reuse nobody chose to keep.
+        if !job.shared.signin.is_live(&job.ticket) {
+            return Some(job.failed(SigninCode::Cancelled));
+        }
         let source = LoginSource::Reused {
             email: email.clone(),
         };
@@ -184,8 +188,12 @@ pub(crate) async fn find_login<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Op
 
 /// `use_found_login` (the lawyer's "Use it"): "R20 writes Claude's env, or S18 makes Codex's
 /// link; then `login-source` `reused` with the accepted email; then `SignedIn { source: Reused
-/// }`." Detection runs again first: an account other than the one shown is shown again as
-/// `LoginFound`, and nothing is reused until the lawyer chooses it.
+/// }`." Detection runs again first, and "Use it" goes on only when it names an email and that
+/// email is the one the lawyer was shown. Otherwise nothing is linked or recorded and the new
+/// detection is the state (`LoginFound` again, or what was seen): an account other than the one
+/// shown, or one with no email, is never reused on a choice the lawyer made about another.
+/// Detection that could not tell ends the job: `signin.cancelled` when it was cancelled (or the
+/// job replaced), else `signin.failed`.
 pub(crate) async fn use_found<T: Timer + Send + Sync>(job: &SigninJob<T>) -> SigninState {
     let cancel = &job.ticket.cancel;
     let shown = match job.shared.signin.state(&job.ticket.agent) {
@@ -196,19 +204,42 @@ pub(crate) async fn use_found<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Sig
         Vendor::Claude => detect::claude(job, cancel).await,
         Vendor::Codex => detect::codex(job, cancel).await,
     };
+    if !job.shared.signin.is_live(&job.ticket) {
+        return job.failed(SigninCode::Cancelled);
+    }
     let Some(found) = found else {
         return job.failed(SigninCode::Failed);
     };
     let email = match &found.state {
-        SigninState::LoginFound { email, .. } if *email == shown => email.clone(),
+        SigninState::LoginFound {
+            email: Some(email), ..
+        } if shown.as_deref() == Some(email.as_str()) => email.clone(),
         other => return other.clone(),
     };
     match job.vendor {
-        Vendor::Claude => claude_session(job, email, found, true)
+        Vendor::Claude => claude_session(job, Some(email), found, true)
             .await
-            .unwrap_or_else(|| job.failed(SigninCode::Failed)),
+            .unwrap_or_else(|| {
+                if cancel.is_cancelled() {
+                    job.failed(SigninCode::Cancelled)
+                } else {
+                    job.failed(SigninCode::Failed)
+                }
+            }),
         Vendor::Codex => use_codex(job, email, found).await,
     }
+}
+
+/// How Codex's link step ended.
+enum Linked {
+    /// The link and the `reused` record are made.
+    Done,
+    /// The job was cancelled or replaced: nothing is left linked or recorded.
+    Stopped,
+    /// The link could not be made: the fallback runs.
+    LinkFailed,
+    /// The record could not be written: the link was removed again.
+    RecordFailed,
 }
 
 /// Codex's "Use it": the link (`reuse::link_reused_login`), then the record. "Another volume, or
@@ -216,33 +247,66 @@ pub(crate) async fn use_found<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Sig
 /// browser sign-in).
 async fn use_codex<T: Timer + Send + Sync>(
     job: &SigninJob<T>,
-    email: Option<String>,
+    email: String,
     found: Detected,
 ) -> SigninState {
+    match link_and_record(job, &email).await {
+        Linked::Done => reused_signed_in(job, Some(email), found.identity.plan),
+        Linked::Stopped => job.failed(SigninCode::Cancelled),
+        Linked::RecordFailed => job.failed(SigninCode::Failed),
+        Linked::LinkFailed => {
+            // The lock is let go by now: the browser sign-in takes it for its own run.
+            job.note(SigninNote::CodexLinkFailed);
+            codex::sign_in(job, Method::Browser).await
+        }
+    }
+}
+
+/// The link and the record, under the lock on Codex's login files. The job must still be the
+/// agent's and not cancelled right before the link and again right before the record. Cancelled
+/// or replaced before the link: nothing was done, nothing is undone. After it: Clauseo's own
+/// name goes again (`remove_file` of the home's name, never the lawyer's), and no `reused` is
+/// written. A newer job's Codex login or `use_different_account` waits for this lock, so it
+/// never runs while this step could still leave the files linked.
+async fn link_and_record<T: Timer + Send + Sync>(job: &SigninJob<T>, email: &str) -> Linked {
+    let _files = job.shared.signin.codex_files().await;
+    let hub = &job.shared.signin;
+    if !hub.is_live(&job.ticket) {
+        return Linked::Stopped;
+    }
     let linked = job
         .config
         .signin
         .lawyer_home()
         .ok_or_else(|| std::io::Error::other("no lawyer's home folder"))
-        .and_then(|lawyer| reuse::link_reused_login(&job.home, &lawyer));
+        .and_then(|lawyer| reuse::link_reused_login(&job.config.data_dir, &job.home, &lawyer));
     if linked.is_err() {
-        job.note(SigninNote::CodexLinkFailed);
-        return codex::sign_in(job, Method::Browser).await;
+        return Linked::LinkFailed;
+    }
+    if !hub.is_live(&job.ticket) {
+        drop(reuse::unlink_reused_login(&job.home));
+        return Linked::Stopped;
     }
     let source = LoginSource::Reused {
-        email: email.clone(),
+        email: Some(email.to_owned()),
     };
     if marker::write_source(&job.config.data_dir, &job.ticket.agent, &source).is_err() {
         // The link alone would read as reused; it goes, and nothing is reused.
         drop(reuse::unlink_reused_login(&job.home));
-        return job.failed(SigninCode::Failed);
+        return Linked::RecordFailed;
     }
-    reused_signed_in(job, email, found.identity.plan)
+    Linked::Done
 }
 
 /// `use_different_account` ("Sign in with a different account"): "writes `no-reuse` and starts
 /// Clauseo's own sign-in; the CLI's login is untouched." Claude's `--claudeai` login, or Codex's
 /// browser one (device code is offered, never started first).
+///
+/// For Codex the order is explicit, so `codex login` never runs while the home's login file is
+/// the lawyer's: (1) taking the job's slot set the cancel of any running "Use it" and made it no
+/// longer the agent's; (2) [`clear_replaced_reuse`] waits for the lock on Codex's login files,
+/// so that "Use it" has either linked nothing or finished, and removes any reused name it left;
+/// (3) the login takes the lock again and runs its guard, as every Codex login does.
 pub(crate) async fn use_different<T: Timer + Send + Sync>(
     job: &SigninJob<T>,
     paste: Option<async_channel::Receiver<PasteCode>>,
@@ -252,8 +316,36 @@ pub(crate) async fn use_different<T: Timer + Send + Sync>(
     }
     match job.vendor {
         Vendor::Claude => claude::sign_in(job, false, paste).await,
-        Vendor::Codex => codex::sign_in(job, Method::Browser).await,
+        Vendor::Codex => {
+            if let Some(stopped) = clear_replaced_reuse(job).await {
+                return stopped;
+            }
+            codex::sign_in(job, Method::Browser).await
+        }
     }
+}
+
+/// Under the lock on Codex's login files: a reused name in the home (a "Use it" that recorded
+/// just before this job replaced it) goes, Clauseo's own name only, with its record. The call
+/// is refused while the state is `SignedIn { Reused }`, so any such name is one the lawyer
+/// chose against. `Some` ends the job: cancelled or replaced meanwhile, or a removal failed.
+async fn clear_replaced_reuse<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Option<SigninState> {
+    let _files = job.shared.signin.codex_files().await;
+    if !job.shared.signin.is_live(&job.ticket) {
+        return Some(job.failed(SigninCode::Cancelled));
+    }
+    let data = &job.config.data_dir;
+    let agent = &job.ticket.agent;
+    let source = marker::read_source(data, agent);
+    let reused =
+        source != Some(LoginSource::Own) && reuse::codex_reused(source.as_ref(), &job.home);
+    if reused
+        && (reuse::unlink_reused_login(&job.home).is_err()
+            || marker::clear_source(data, agent).is_err())
+    {
+        return Some(job.failed(SigninCode::Failed));
+    }
+    None
 }
 
 /// `stop_using_login(why)`: [`stop`], unless the record says the login is Clauseo's own (then

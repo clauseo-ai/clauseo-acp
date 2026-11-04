@@ -49,17 +49,18 @@ pub(crate) async fn read<T: Timer + Send + Sync>(job: &SigninJob<T>, cancel: &Ca
 
 /// `account/read` with `kind`'s environment and store argument, in `cwd`: detection's (no
 /// store argument, the lawyer's own `~/.codex`, an empty Clauseo folder) or a reused session's.
-/// `None` when there is no `ChatGPT` account to read, or no answer.
+/// `None` when there was no answer: the app-server did not start, answered with an error, or
+/// was cut short by its 10 s limit or by Cancel. An answer with no `ChatGPT` account (an API
+/// key, say) is `Some` with neither email nor plan: "no email" is told apart from "the read
+/// failed", and detection never takes a failed read for a login with no email.
 pub(crate) async fn read_as<T: Timer + Send + Sync>(
     job: &SigninJob<T>,
     cancel: &Cancel,
     kind: RunKind<'_>,
     cwd: &Path,
 ) -> Option<Identity> {
-    account(job, cancel, kind, cwd)
-        .await
-        .as_ref()
-        .and_then(codex_identity)
+    let answered = account(job, cancel, kind, cwd).await?;
+    Some(codex_identity(&answered).unwrap_or_default())
 }
 
 /// The arguments after `codex.js`: the store argument, the overrides, then `app-server`.

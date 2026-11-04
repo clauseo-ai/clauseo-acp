@@ -296,3 +296,30 @@ fn the_run_time_fallback_logs_and_offers_clauseo_s_own_sign_in() {
     assert_eq!(events.notes(), [SigninNote::ClaudeReuseFallback]);
     assert!(lawyer_signed_in(&fx));
 }
+
+/// A cancel during "Use it"'s detection (Claude's status run, stalled) ends the job
+/// `signin.cancelled`, not `signin.failed`, and nothing is reused.
+#[cfg(unix)]
+#[test]
+fn cancelling_use_it_during_its_detection_gives_cancelled() {
+    let fx = Fixture::new("reuse-claude-cancel-detect", "ok-after:0");
+    plant_lawyer(&fx, "claude.ai", EMAIL);
+    let (agents, events) = fx.start();
+    agents.check_status(&claude()).unwrap();
+    assert_eq!(events.state(), found(EMAIL));
+    let before = fx.runs_of("status").len();
+    fx.stall(Some("status"));
+    agents.use_found_login(&claude()).unwrap();
+    crate::support::eventually("Use it's detection started", || {
+        fx.runs_of("status").len() > before
+    });
+    agents.cancel_sign_in(&claude()).unwrap();
+    assert_eq!(
+        events.state(),
+        SigninState::Failed {
+            code: clauseo_agents::SigninCode::Cancelled,
+            at: now()
+        }
+    );
+    assert!(!fx.marker(&claude(), "login-source").exists());
+}

@@ -76,7 +76,7 @@ pub(crate) async fn sign_in<T: Timer + Send + Sync>(
     console: bool,
     paste: Option<async_channel::Receiver<PasteCode>>,
 ) -> SigninState {
-    if crate::write::create_dir_all(&job.home).is_err() {
+    if crate::write::create_private_dirs_under(&job.config.data_dir, &job.home).is_err() {
         return job.failed(SigninCode::Failed);
     }
     let url_file = match url_file(job) {

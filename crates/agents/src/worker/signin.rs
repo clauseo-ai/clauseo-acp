@@ -26,6 +26,12 @@ pub(crate) struct SigninHub {
     agents: BTreeMap<AgentId, SigninAgent>,
     inner: Mutex<Inner>,
     events: async_channel::Sender<AgentsEvent>,
+    /// Held while anything may write Codex's login file in an agent's home: a Codex `login` or
+    /// `logout` run from its guard to its end (the process gone), and "Use it" from its last
+    /// check through the link to the `login-source` record. So a "Use it" that a newer job
+    /// replaced either finished (and undid) its link before that job's guard looks, or sees it
+    /// was replaced and links nothing; and no link is made while a replaced login still runs.
+    codex_files: futures::lock::Mutex<()>,
 }
 
 /// An agent the snapshot has and Clauseo signs in to.
@@ -87,6 +93,7 @@ impl SigninHub {
             agents,
             inner: Mutex::new(Inner::default()),
             events,
+            codex_files: futures::lock::Mutex::new(()),
         }
     }
 
@@ -219,8 +226,16 @@ impl SigninHub {
         }
     }
 
-    /// Hands `code` to `agent`'s sign-in run, which writes it to the login's stdin.
+    /// Hands `code` to `agent`'s sign-in run, which writes it to the login's stdin. Codex's
+    /// logins read no code (the paste route is Claude's `claude.ai` and console logins), so a
+    /// code for Codex is refused with `WrongMethod`, never taken and dropped.
     pub(super) fn paste(&self, agent: &AgentId, code: PasteCode) -> Result<(), SigninError> {
+        if self.vendor(agent)? == Vendor::Codex {
+            return Err(SigninError::WrongMethod {
+                agent: agent.clone(),
+                method: Method::ClaudeAi,
+            });
+        }
         let inner = self.lock();
         // No run reads stdin while the sign-in is queued.
         let queued = inner.states.get(agent) == Some(&SigninState::Queued);
@@ -325,6 +340,18 @@ impl SigninHub {
             // Full means a kick already waits; closed means the job is gone.
             let _sent = kick.try_send(());
         }
+    }
+
+    /// Waits for, then holds, the lock on Codex's login files ([`SigninHub::codex_files`]'s
+    /// field docs).
+    pub(crate) async fn codex_files(&self) -> futures::lock::MutexGuard<'_, ()> {
+        self.codex_files.lock().await
+    }
+
+    /// Whether `ticket`'s job is still its agent's running job, and not cancelled: the check
+    /// made right before a step that cannot wait for the job's end (a link, a record).
+    pub(crate) fn is_live(&self, ticket: &Ticket) -> bool {
+        !ticket.cancel.is_cancelled() && self.is_job(ticket)
     }
 
     /// Whether `ticket`'s job is still its agent's running job.
