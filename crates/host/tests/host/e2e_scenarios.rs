@@ -3,8 +3,16 @@
 //! pre-write guard set) and answers the first prompt. The list is read from the specs, so a new
 //! spec's scenario is checked too: a scenario that misses the Claude launch (no modes, or none
 //! in `default`, in its `session/new` answer) fails here, not on the Windows runner.
+//!
+//! The scenarios run in parallel, at most [`MAX_PARALLEL`] at a time (fewer on a machine with
+//! fewer cores): each on its own thread, with its own folder, host and clock, so none shares
+//! state with another. A failing scenario does not stop the rest. The test fails once, at the
+//! end, listing every failure by its scenario and spec.
 
+use std::any::Any;
+use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use clauseo_host::ManualClock;
@@ -18,6 +26,9 @@ use crate::support::{Dir, Scenario, matter_with_thread};
 
 /// The agent id the specs' `settings.json` gives `fake_agent` (`scratch.ts`).
 const CLAUDE: &str = "claude-acp";
+
+/// The most scenarios played at once. A CI runner with 2 to 4 cores is not oversubscribed.
+const MAX_PARALLEL: usize = 4;
 
 /// The matter files the specs seed (`matterFiles`), all in every matter: files-one-turn's
 /// `BEFORE` and word-locked's `PETITION_BEFORE`.
@@ -140,47 +151,114 @@ fn ended(events: &Events) -> bool {
         .any(|event| matches!(event, DomainEvent::TurnEnded(_)))
 }
 
+/// Plays `scenario`, from `spec`, as the Claude launch and answers its first prompt. It panics
+/// at the first expectation it misses. Its folder is `e2e_scenarios_{n}`.
+fn play(n: usize, spec: &str, scenario: &Scenario) {
+    let arg = scenario.arg();
+    let dir = Dir::new(&format!("e2e_scenarios_{n}"), &[(CLAUDE, scenario.clone())]);
+    let host = dir.start_with(0, |config| {
+        config.with_pre_write_guard(PathBuf::from(PROGRAM))
+    });
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", MATTER_FILES, CLAUDE);
+    let mut events = host.events(StreamId::Thread(thread));
+    events.until_caught_up();
+    host.prompt(thread, "Go");
+    events.until(&format!("{arg} ({spec}): attached or failed"), |e| {
+        e.events().any(|event| {
+            matches!(
+                event,
+                DomainEvent::AgentSessionAttached(_)
+                    | DomainEvent::TurnFailed(_)
+                    | DomainEvent::TurnEnded(_)
+            )
+        })
+    });
+    assert!(
+        events
+            .events()
+            .any(|event| matches!(event, DomainEvent::AgentSessionAttached(_))),
+        "{arg} ({spec}) failed its launch:{}",
+        events.dump()
+    );
+    let mover = Mover::start(host.clock.clone());
+    events.until(&format!("{arg} ({spec}): a first answer"), |e| {
+        e.events().any(answered)
+    });
+    events.assert_no_mismatch();
+    // A turn still running (a permission asked, a cancel never answered) is cancelled and
+    // reaches its end, by the 5 s fallback at the latest, before the host stops.
+    drop(host.dispatch(HostCommand::Cancel { thread }));
+    events.until(&format!("{arg} ({spec}): the turn's end"), ended);
+    drop(mover);
+    host.shutdown();
+}
+
+/// The message of a caught panic.
+fn panic_text(payload: &(dyn Any + Send)) -> String {
+    payload
+        .downcast_ref::<String>()
+        .cloned()
+        .or_else(|| {
+            payload
+                .downcast_ref::<&str>()
+                .map(|text| (*text).to_owned())
+        })
+        .unwrap_or_else(|| "panicked without a message".to_owned())
+}
+
+/// Plays every scenario, each on its own thread. The threads take the next scenario from a
+/// shared index, [`MAX_PARALLEL`] at most or one per core, whichever is fewer. A scenario that
+/// panics is caught and reported under its name, the others go on. Returns one line per failed
+/// scenario, in the order of `scenarios`.
+fn play_all(scenarios: &[(String, Scenario)]) -> Vec<String> {
+    let workers = std::thread::available_parallelism()
+        .map_or(1, std::num::NonZero::get)
+        .min(MAX_PARALLEL);
+    let next = AtomicUsize::new(0);
+    let mut failures: Vec<(usize, String)> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..workers)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut failed = Vec::new();
+                    loop {
+                        let n = next.fetch_add(1, Ordering::Relaxed);
+                        let Some((spec, scenario)) = scenarios.get(n) else {
+                            break;
+                        };
+                        let played = catch_unwind(AssertUnwindSafe(|| play(n, spec, scenario)));
+                        if let Err(payload) = played {
+                            let message = panic_text(payload.as_ref());
+                            failed.push((n, format!("{} ({spec}): {message}", scenario.arg())));
+                        }
+                    }
+                    failed
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .flat_map(|handle| {
+                handle
+                    .join()
+                    .unwrap_or_else(|payload| resume_unwind(payload))
+            })
+            .collect()
+    });
+    failures.sort_by_key(|(n, _)| *n);
+    failures.into_iter().map(|(_, line)| line).collect()
+}
+
 #[test]
 fn every_scenario_the_window_specs_play_launches_as_claude_and_answers() {
     let scenarios = spec_scenarios();
     assert!(scenarios.len() >= 10, "{} scenarios", scenarios.len());
-    for (n, (spec, scenario)) in scenarios.into_iter().enumerate() {
-        let arg = scenario.arg();
-        let dir = Dir::new(&format!("e2e_scenarios_{n}"), &[(CLAUDE, scenario)]);
-        let host = dir.start_with(0, |config| {
-            config.with_pre_write_guard(PathBuf::from(PROGRAM))
-        });
-        let (_, thread, _) = matter_with_thread(&dir, &host, "m", MATTER_FILES, CLAUDE);
-        let mut events = host.events(StreamId::Thread(thread));
-        events.until_caught_up();
-        host.prompt(thread, "Go");
-        events.until(&format!("{arg} ({spec}): attached or failed"), |e| {
-            e.events().any(|event| {
-                matches!(
-                    event,
-                    DomainEvent::AgentSessionAttached(_)
-                        | DomainEvent::TurnFailed(_)
-                        | DomainEvent::TurnEnded(_)
-                )
-            })
-        });
-        assert!(
-            events
-                .events()
-                .any(|event| matches!(event, DomainEvent::AgentSessionAttached(_))),
-            "{arg} ({spec}) failed its launch:{}",
-            events.dump()
-        );
-        let mover = Mover::start(host.clock.clone());
-        events.until(&format!("{arg} ({spec}): a first answer"), |e| {
-            e.events().any(answered)
-        });
-        events.assert_no_mismatch();
-        // A turn still running (a permission asked, a cancel never answered) is cancelled and
-        // reaches its end, by the 5 s fallback at the latest, before the host stops.
-        drop(host.dispatch(HostCommand::Cancel { thread }));
-        events.until(&format!("{arg} ({spec}): the turn's end"), ended);
-        drop(mover);
-        host.shutdown();
-    }
+    let failures = play_all(&scenarios);
+    let listed: Vec<String> = failures.iter().map(|line| format!("- {line}")).collect();
+    assert!(
+        failures.is_empty(),
+        "{} of {} scenarios failed:\n{}",
+        failures.len(),
+        scenarios.len(),
+        listed.join("\n")
+    );
 }
