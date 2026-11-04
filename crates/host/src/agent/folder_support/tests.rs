@@ -2,9 +2,16 @@ use std::sync::{Arc, Mutex, mpsc};
 
 use clauseo_protocol::{ErrorCode, FolderSupportKind, MatterId, Timestamp};
 
-use super::{decide, of_refusal};
+use super::{Answer, CheckSource, FolderCheck, decide, of_refusal};
 use crate::ManualClock;
 use crate::agent::codex::prepare::{Job, LAUNCH_WAIT, off_actor};
+
+fn windows_check() -> FolderCheck {
+    FolderCheck {
+        matter: matter(),
+        source: CheckSource::Windows,
+    }
+}
 
 fn matter() -> MatterId {
     MatterId::new(uuid::Uuid::from_u128(
@@ -54,11 +61,16 @@ fn off_windows_there_is_no_check_and_no_answer() {
     let missing = std::env::temp_dir()
         .join("clauseo-folder-support-none")
         .join("x");
-    assert_eq!(super::check(matter(), &missing), None);
-    assert_eq!(super::check(matter(), &std::env::temp_dir()), None);
+    assert_eq!(super::check(matter(), &missing), Answer::Known(None));
     assert_eq!(
-        super::refuse_unsupported_folder(matter(), &std::env::temp_dir()).unwrap(),
-        None
+        super::check(matter(), &std::env::temp_dir()),
+        Answer::Known(None)
+    );
+    assert_eq!(
+        windows_check()
+            .refuse_unsupported(&std::env::temp_dir())
+            .unwrap(),
+        Answer::Known(None)
     );
 }
 
@@ -67,13 +79,12 @@ fn off_windows_there_is_no_check_and_no_answer() {
 #[test]
 fn a_folder_the_user_made_has_no_answer() {
     let folder = std::env::temp_dir();
-    assert_eq!(super::check(matter(), &folder), None);
-    // A missing folder is left to the other folder checks: no answer, no refusal.
+    assert_eq!(super::check(matter(), &folder), Answer::Known(None));
+    // A missing folder is a failed check: no refusal, nothing on the row.
     let missing = folder.join("clauseo-folder-support-missing").join("x");
-    assert_eq!(
-        super::refuse_unsupported_folder(matter(), &missing).unwrap(),
-        None
-    );
+    let answer = windows_check().refuse_unsupported(&missing).unwrap();
+    assert_eq!(answer, Answer::Failed);
+    assert_eq!(answer.kind(), None);
 }
 
 /// A folder check that hangs (a share that does not answer) ends as the preparation's deadline
@@ -100,4 +111,32 @@ fn a_hung_check_is_never_a_folder_code() {
     assert_ne!(code, ErrorCode::MatterFolderNoPermissions);
     assert_eq!(of_refusal(code), None, "{code}");
     drop(release);
+}
+
+/// A fixed answer (tests only) stands in for the Windows check, on every OS.
+#[test]
+fn a_fixed_answer_stands_in_for_the_check() {
+    let fixed = FolderCheck {
+        matter: matter(),
+        source: CheckSource::Fixed(Answer::Known(Some(FolderSupportKind::Network))),
+    };
+    let folder = std::env::temp_dir();
+    assert_eq!(
+        fixed.run(&folder),
+        Answer::Known(Some(FolderSupportKind::Network))
+    );
+    let error = fixed.refuse_unsupported(&folder).unwrap_err();
+    assert_eq!(error.code(), ErrorCode::MatterFolderNetwork);
+}
+
+/// A failed check is no refusal for Codex, and the row shows nothing.
+#[test]
+fn a_failed_check_refuses_nothing_and_shows_nothing() {
+    let failed = FolderCheck {
+        matter: matter(),
+        source: CheckSource::Fixed(Answer::Failed),
+    };
+    let answer = failed.refuse_unsupported(&std::env::temp_dir()).unwrap();
+    assert_eq!(answer, Answer::Failed);
+    assert_eq!(answer.kind(), None);
 }

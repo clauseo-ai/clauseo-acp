@@ -195,6 +195,7 @@ pub struct HostConfig {
     managed_mcp: PathBuf,
     app_capacity: usize,
     codex_hooks: Option<serde_json::Map<String, serde_json::Value>>,
+    folder_check: crate::agent::folder_support::CheckSource,
     pre_write_guard: Option<PathBuf>,
     limits_reader: Option<Arc<dyn ReadLimits>>,
     wiring: LaunchWiring,
@@ -216,6 +217,7 @@ pub(crate) struct ConfigParts {
     pub(crate) managed_mcp: PathBuf,
     pub(crate) app_capacity: usize,
     pub(crate) codex_hooks: Option<serde_json::Map<String, serde_json::Value>>,
+    pub(crate) folder_check: crate::agent::folder_support::CheckSource,
     pub(crate) pre_write_guard: Option<PathBuf>,
     /// The limits reader a caller set; `None` builds the default at start-up.
     pub(crate) limits_reader: Option<Arc<dyn ReadLimits>>,
@@ -250,6 +252,7 @@ impl HostConfig {
             app_capacity: SUBSCRIPTION_CAPACITY,
             managed_mcp: crate::agent::loads::managed_mcp_path(),
             codex_hooks: None,
+            folder_check: crate::agent::folder_support::CheckSource::default(),
             pre_write_guard: None,
             limits_reader: None,
             wiring: LaunchWiring::default(),
@@ -431,6 +434,31 @@ impl HostConfig {
         self
     }
 
+    /// A fixed answer for every launch's folder check (`agent/folder_support.rs`) in place of
+    /// the Windows check, so tests of what follows from it (Codex refused, Claude's forced ask)
+    /// run on every OS. `None` is a fine folder. Matter creation still runs the real check.
+    #[cfg(feature = "test-support")]
+    pub fn with_folder_support(
+        mut self,
+        kind: Option<clauseo_protocol::FolderSupportKind>,
+    ) -> Self {
+        self.folder_check = crate::agent::folder_support::CheckSource::Fixed(
+            crate::agent::folder_support::Answer::Known(kind),
+        );
+        self
+    }
+
+    /// A failed folder check for every launch (an io error on Windows), as
+    /// [`Self::with_folder_support`] fixes an answer: Claude fails closed into forced ask, Codex
+    /// is not refused, the row shows nothing.
+    #[cfg(feature = "test-support")]
+    pub fn with_folder_check_failed(mut self) -> Self {
+        self.folder_check = crate::agent::folder_support::CheckSource::Fixed(
+            crate::agent::folder_support::Answer::Failed,
+        );
+        self
+    }
+
     /// The profile hook set, for tests of a caller's wiring (`crates/desktop`'s `with_profile`).
     #[cfg(feature = "test-support")]
     pub fn profile_hook(&self) -> &dyn ProfileHook {
@@ -486,6 +514,7 @@ impl HostConfig {
             app_capacity: self.app_capacity,
             managed_mcp: self.managed_mcp,
             codex_hooks: self.codex_hooks,
+            folder_check: self.folder_check,
             pre_write_guard: self.pre_write_guard,
             limits_reader: self.limits_reader,
             wiring: self.wiring,

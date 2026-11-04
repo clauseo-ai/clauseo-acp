@@ -158,12 +158,17 @@ fn a_hook_meta_setting_a_switch_or_the_guards_key_loses_both() {
     }}});
     let program = Path::new("/app/clauseo");
     let matter = Path::new("/m");
-    let guard = Some(GuardHook { program, matter });
+    let guard = Some(GuardHook {
+        program,
+        matter,
+        ask_all: false,
+    });
     let keys = ClaudeKeys {
         web_search: ON,
         login: Login::FirstParty,
         folders: folders(),
         seed_sites: SEED_SITES,
+        forced_ask: false,
     };
     let meta = session_meta(
         hook.as_object().cloned(),
@@ -190,4 +195,53 @@ fn a_hook_meta_setting_a_switch_or_the_guards_key_loses_both() {
     assert_eq!(entries.len(), 2);
     assert_eq!(entries[0]["matcher"], json!("Read"));
     assert_eq!(entries[1]["matcher"], json!(super::GUARD_MATCHER));
+}
+
+/// Forced ask (`agent/forced_ask.rs`): no `allowedTools` at all, not the host's web rules and
+/// not the hook's own; the guard runs before every tool (`*`, MCP tools included) with
+/// `--ask-all` last. Without it the same inputs keep both as before.
+#[test]
+fn forced_ask_drops_every_allow_rule_and_hooks_every_tool() {
+    let hook = json!({"claudeCode": {"options": {"allowedTools": ["Bash(git status)"]}}});
+    let meta_for = |forced_ask: bool| {
+        let guard = Some(GuardHook {
+            program: Path::new("/app/clauseo"),
+            matter: Path::new("/m"),
+            ask_all: forced_ask,
+        });
+        let keys = ClaudeKeys {
+            web_search: ON,
+            login: Login::FirstParty,
+            folders: folders(),
+            seed_sites: SEED_SITES,
+            forced_ask,
+        };
+        session_meta(
+            hook.as_object().cloned(),
+            McpControl::Clauseo,
+            guard,
+            Some(&keys),
+        )
+    };
+    let forced = meta_for(true);
+    let options = &forced["claudeCode"]["options"];
+    assert_eq!(options.get("allowedTools"), None, "{options}");
+    let guard = &options["settings"]["hooks"]["PreToolUse"][0];
+    assert_eq!(guard["matcher"], json!("*"));
+    assert_eq!(
+        guard["hooks"][0]["args"],
+        json!(["--pre-write-guard", "--matter", "/m", "--ask-all"])
+    );
+
+    let plain = meta_for(false);
+    let options = &plain["claudeCode"]["options"];
+    let allowed = options["allowedTools"].as_array().unwrap();
+    assert!(allowed.contains(&json!("Bash(git status)")), "{options}");
+    assert!(allowed.contains(&json!("WebSearch")), "{options}");
+    let guard = &options["settings"]["hooks"]["PreToolUse"][0];
+    assert_eq!(guard["matcher"], json!(super::GUARD_MATCHER));
+    assert_eq!(
+        guard["hooks"][0]["args"],
+        json!(["--pre-write-guard", "--matter", "/m"])
+    );
 }

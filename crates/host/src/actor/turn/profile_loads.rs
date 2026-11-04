@@ -84,16 +84,25 @@ pub(super) fn session_loads(
         &settings_env,
         |name| std::env::var_os(name),
     );
+    // This launch's own folder answer decided it (`agent/forced_ask.rs`).
+    let forced_ask = super::state(actor, thread)
+        .and_then(|state| state.agent.as_deref())
+        .is_some_and(|agent| agent.forced_ask);
     let claude = (kind == Some(AgentKind::Claude)).then_some(ClaudeKeys {
         web_search,
         login,
         folders,
         seed_sites: SEED_SITES,
+        forced_ask,
     });
     let guard = actor
         .pre_write_guard
         .as_deref()
-        .map(|program| loads::GuardHook { program, matter });
+        .map(|program| loads::GuardHook {
+            program,
+            matter,
+            ask_all: forced_ask,
+        });
     let mut meta = loads::session_meta(
         actor.profile.session_meta(&agent_id),
         control,

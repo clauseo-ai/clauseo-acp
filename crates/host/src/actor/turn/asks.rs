@@ -43,18 +43,24 @@ pub(super) struct HeldOpenCheck {
 /// answered `cancelled`. In it, when it names a path (or, naming none, its tool call has matter
 /// paths), the matter thread first resolves the paths into the matter folder and checks whether
 /// a program holds one open ([`on_held_open`]); otherwise, or when the check cannot be sent, it
-/// is logged `Live` for the lawyer at once.
+/// is logged `Live` for the lawyer at once. In forced ask it first loses the options
+/// `agent::forced_ask::keep_option` drops.
 pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
     let AcpEvent::PermissionRequested {
         session,
         key,
         acp_tool_call_id,
-        options,
+        mut options,
         mut paths,
     } = event
     else {
         return;
     };
+    // Forced ask (`agent/forced_ask.rs`): no option that would stop later asks is offered, so
+    // an answer naming one is refused as one the agent did not offer.
+    if agent(actor, thread).is_some_and(|agent| agent.forced_ask) {
+        options.retain(crate::agent::forced_ask::keep_option);
+    }
     let ask = PermissionAsk {
         session,
         key,

@@ -84,7 +84,7 @@ fn guard_with(args: &[&str], input: &[u8]) -> String {
     let args: Vec<OsString> = args.iter().map(OsString::from).collect();
     let mut errors = Vec::new();
     // Timings off whatever the environment says, so a shell with them on keeps the tests exact.
-    let code = run_timed(&args, input, &mut errors, false);
+    let code = run_timed(&args, input, (Vec::new(), &mut errors), false);
     let errors = String::from_utf8(errors).unwrap();
     let refused = !errors.is_empty() && !errors.starts_with(IGNORED);
     assert_eq!(code, if refused { DENY } else { 0 }, "{errors}");
@@ -353,7 +353,7 @@ fn stdin_that_fails_to_read_lets_the_tool_go_with_one_line() {
         }
     }
     let mut errors = Vec::new();
-    assert_eq!(run_timed(&[], Broken, &mut errors, false), 0);
+    assert_eq!(run_timed(&[], Broken, (Vec::new(), &mut errors), false), 0);
     assert_eq!(
         String::from_utf8(errors).unwrap(),
         ignored("stdin could not be read")
@@ -475,6 +475,7 @@ fn bash_punctuation_around_a_held_name_is_stripped() {
 }
 
 mod allow;
+mod ask;
 mod backstop;
 mod batch;
 mod codex;

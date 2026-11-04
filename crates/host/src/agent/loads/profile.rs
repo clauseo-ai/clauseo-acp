@@ -4,7 +4,8 @@
 //! - Claude ([`claude_options`]): `disallowedTools` always holds `WebSearch` and `WebFetch`
 //!   when `tools.web_search` is off, whatever the hook sent; when it is on, `allowedTools` gains
 //!   `WebSearch` (not on a Bedrock login, which has none) and one `WebFetch(domain:…)` per seed
-//!   site. `additionalDirectories` gains the work folder and the matter notes folder, after any
+//!   site; in forced ask (`agent/forced_ask.rs`) there is no `allowedTools` at all, the hook's
+//!   included. `additionalDirectories` gains the work folder and the matter notes folder, after any
 //!   hook entries. `settings` gains `disableSkillShellExecution: true` always, and
 //!   `skipWebFetchPreflight: true` on a Bedrock, Vertex or Foundry login.
 //! - Codex ([`codex_keys`]): of the hook's keys only `developer_instructions`
@@ -132,6 +133,9 @@ pub(crate) struct ClaudeKeys<'a> {
     pub(crate) folders: Folders<'a>,
     /// The hosts seeded as `WebFetch(domain:…)` rules.
     pub(crate) seed_sites: &'a [&'a str],
+    /// The session runs in forced ask (`agent/forced_ask.rs`): no `allowedTools` at all, the
+    /// hook's included.
+    pub(crate) forced_ask: bool,
 }
 
 /// Adds [`ClaudeKeys`] to `claudeCode.options` (see the module doc).
@@ -154,7 +158,9 @@ pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys
     if !disallowed.is_empty() {
         options.insert("disallowedTools".to_owned(), Value::Array(disallowed));
     }
-    options.insert("allowedTools".to_owned(), Value::Array(allowed));
+    if !keys.forced_ask {
+        options.insert("allowedTools".to_owned(), Value::Array(allowed));
+    }
     let mut directories = take_array(options, "additionalDirectories");
     push_new(&mut directories, keys.folders.work);
     push_new(&mut directories, keys.folders.notes);

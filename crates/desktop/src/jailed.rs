@@ -78,12 +78,13 @@ pub trait Stages {
     fn app(&mut self) -> tauri::Result<()>;
 }
 
-/// The real stages: `clauseo_host::pre_write_guard::run` on stdin and stderr, and [`crate::run`].
+/// The real stages: `clauseo_host::pre_write_guard::run` on stdin, stdout and stderr, and
+/// [`crate::run`].
 pub struct AppStages;
 
 impl Stages for AppStages {
     fn guard(&mut self, args: &[OsString]) -> i32 {
-        clauseo_host::pre_write_guard::run(args, io::stdin().lock(), io::stderr())
+        clauseo_host::pre_write_guard::run(args, io::stdin().lock(), io::stdout(), io::stderr())
     }
 
     fn app(&mut self) -> tauri::Result<()> {

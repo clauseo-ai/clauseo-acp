@@ -100,6 +100,9 @@ pub(super) struct Agent {
     /// The programs of the MCP servers its session was given: a cancelled turn's sweep leaves
     /// a process running one of them (`agent/leftovers.rs`).
     pub(super) mcp_commands: Vec<PathBuf>,
+    /// A Claude agent whose launch's folder check found a network drive or a drive without
+    /// permissions: it runs in forced ask (`agent/forced_ask.rs`).
+    pub(super) forced_ask: bool,
 }
 
 /// What a Codex agent's launch recorded.
@@ -160,6 +163,13 @@ pub(super) fn launch_now(
     waiting: Vec<Waiting>,
     prepared: Prepared,
 ) {
+    // Only a Claude launch has a folder answer without a Codex preparation.
+    let forced_ask =
+        prepared.codex.is_none() && prepared.folder.is_some_and(agent::forced_ask::applies);
+    if forced_ask {
+        let matter = prepared.run.key.matter;
+        tracing::info!(%matter, forced_ask, "Claude runs in forced ask: the matter folder is unprotected");
+    }
     let (link, folder, codex) = match launch(actor, thread, prepared) {
         Ok(launched) => launched,
         Err(error) => {
@@ -196,6 +206,7 @@ pub(super) fn launch_now(
         preparing: false,
         codex,
         mcp_commands: Vec::new(),
+        forced_ask,
     };
     if let Some(state) = state(actor, thread) {
         state.agent = Some(Box::new(agent));
@@ -379,6 +390,9 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
             end::on_prompt_refused(actor, thread, turn, &error);
         }
         AgentReply::Steer(steered) => super::queue::on_steered(actor, thread, *steered),
+        AgentReply::ModeReset(result) => {
+            super::forced_mode::on_mode_reset(actor, thread, same, result);
+        }
         AgentReply::Initialized(_)
         | AgentReply::Session { .. }
         | AgentReply::Prepared { .. }
@@ -427,7 +441,7 @@ pub(super) fn run_waiting(actor: &mut Actor, thread: ThreadId, waiting: Waiting)
         fail_waiting(actor, thread, &waiting, &lost("the agent"));
         return;
     };
-    let (id, client) = (agent.id, agent.link.client.clone());
+    let (id, client, forced) = (agent.id, agent.link.client.clone(), agent.forced_ask);
     let Some(session) = agent.session.clone() else {
         fail_waiting(actor, thread, &waiting, &lost("the agent's session"));
         return;
@@ -438,6 +452,16 @@ pub(super) fn run_waiting(actor: &mut Actor, thread: ThreadId, waiting: Waiting)
             let result = client.set_config_option(&session, option, value).await;
             AgentReply::Config { ctx, result }
         }),
+        Waiting::Mode(ctx, mode) if forced && !agent::forced_ask::mode_allowed(mode.as_str()) => {
+            let error = Error::refused(
+                ErrorCode::CommandInvalid,
+                format!(
+                    "mode {mode} would approve changes without asking, and this matter's folder \
+                     is unprotected: only \"default\" and \"plan\" may be set"
+                ),
+            );
+            actor.finish_command(ctx.id, Err(error));
+        }
         Waiting::Mode(ctx, mode) => call(actor, thread, id, async move {
             let result = client.set_mode(&session, mode.clone()).await;
             AgentReply::Mode { ctx, mode, result }
