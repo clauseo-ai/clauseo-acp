@@ -64,9 +64,14 @@ export class Search {
     return () => this.#listeners.delete(listener);
   };
 
-  /** Hears answers until the returned stop; an answer that lands after it is dropped. */
+  /** Hears answers until the returned stop; an answer that lands after it is dropped. Started again (StrictMode's
+   * second mount, with the words already set), it asks again for what the stop dropped: the words not yet answered,
+   * or the page of more on its way. */
   start(): () => void {
     this.#live = true;
+    const s = this.#state;
+    if (!s.settled) this.#ask(s.query, null);
+    else if (s.paging && s.next !== null) this.#ask(s.query, s.next);
     return () => {
       this.#live = false;
       this.#wanted = 0;
