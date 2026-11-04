@@ -184,7 +184,7 @@ impl<T: Timer + Send + Sync> SigninJob<T> {
             (_, Task::FindLogin) => found::find_login(self).await,
             (_, Task::UseFound) => Some(found::use_found(self).await),
             (_, Task::UseDifferent) => Some(found::use_different(self, paste).await),
-            (_, Task::StopUsing(why)) => found::stop_using(self, why),
+            (_, Task::StopUsing(why)) => found::stop_using(self, why).await,
         }
     }
 

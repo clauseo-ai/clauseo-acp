@@ -533,3 +533,47 @@ fn the_guard_refuses_a_linked_home_file_and_any_stat_error() {
     remove_file(&home_file(&fx)).unwrap();
     assert!(!codex_login_shared(&home(&fx), &fx.user_home()));
 }
+
+/// S18 re-review, Medium: a login whose `account/read` answers with no email (an API key) is
+/// shown with `email: None` and "Use it" reuses it: `None` re-detected equals `None` shown.
+#[test]
+fn use_it_reuses_a_login_with_no_email() {
+    let fx = Fixture::new("reuse-codex-no-email", "ok-after:0");
+    plant_lawyer_without_email(&fx);
+    let (agents, events) = start(&fx);
+    agents.check_status(&codex()).unwrap();
+    assert_eq!(events.state(), found_without_email());
+    agents.use_found_login(&codex()).unwrap();
+    let last = events.state();
+    assert_eq!(
+        last,
+        SigninState::SignedIn {
+            email: None,
+            plan: None,
+            source: Source::Reused,
+            at: now(),
+        }
+    );
+    assert!(same_file(&home_file(&fx), &lawyer_file(&fx)).unwrap());
+    assert_eq!(
+        std::fs::read_to_string(fx.marker(&codex(), "login-source")).unwrap(),
+        "reused\n"
+    );
+    assert_eq!(fx.codex_runs(&["login"]), []);
+}
+
+/// Shown with no email, re-detected with one: another account than the one the lawyer chose,
+/// so nothing is reused and the new `LoginFound` is shown.
+#[test]
+fn use_it_shown_without_an_email_but_found_with_one_reuses_nothing() {
+    let fx = Fixture::new("reuse-codex-none-then-some", "ok-after:0");
+    plant_lawyer_without_email(&fx);
+    let (agents, events) = start(&fx);
+    agents.check_status(&codex()).unwrap();
+    assert_eq!(events.state(), found_without_email());
+    plant_lawyer(&fx);
+    agents.use_found_login(&codex()).unwrap();
+    assert_eq!(events.state(), found());
+    assert!(nothing_reused(&fx));
+    assert_eq!(fx.codex_runs(&["login"]), []);
+}
