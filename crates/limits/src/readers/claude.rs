@@ -96,7 +96,9 @@ fn line_outcome(talked: Line, code: Option<i32>, stderr_tail: String) -> ReadOut
 /// The helper's spec: settings `command` running the helper, in `run_dir`, with the agent's
 /// environment. Writes the helper (only when it differs) and makes `run_dir` if it is missing
 /// (nothing in Clauseo writes there); on a refused path or run folder it writes nothing. The run
-/// folder is checked again once made, in case a link appeared meanwhile.
+/// folder is checked again once made, in case a link appeared meanwhile. The helper runs in
+/// `run_dir`, where Claude Code reads a project `.claude/settings.json`, but passes
+/// `settingSources: []`, so no such file there can change the account or provider it reads.
 fn prepare(launch: &AgentLaunch, run_dir: &Path) -> Result<LaunchSpec, String> {
     let (located, helper) = paths::claude(launch).map_err(|err| err.to_string())?;
     paths::check_run_dir(run_dir).map_err(|err| err.to_string())?;

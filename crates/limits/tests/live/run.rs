@@ -85,6 +85,11 @@ impl Kind {
         }
     }
 
+    /// Whether the kind is a Claude plan, which reads its usage from the run folder.
+    fn claude_plan(self) -> bool {
+        matches!(self, Kind::ClaudePro | Kind::ClaudeTeam)
+    }
+
     /// The pay-as-you-go provider of an API-key kind; `None` for a plan.
     fn pay_as_you_go(self) -> Option<BillingProvider> {
         match self {
@@ -109,6 +114,9 @@ pub(crate) fn live(kind: Kind) {
     write::create_dir_all(&data).unwrap();
     let settings = settings(kind, &install, &node, &login);
     write::write(&data.join("settings.json"), settings.to_string()).unwrap();
+    if kind.claude_plan() {
+        plant_project_settings(&data.join("limits").join("run"));
+    }
     let effective = Effective::load(&Locations::under_root(&data), &SystemFiles, &[]);
     // Claude's reader ignores the home; Codex's reads its login from it.
     let codex_home = match kind.agent() {
@@ -218,6 +226,24 @@ fn settings(
         AgentKind::Codex => "codex-acp",
     };
     serde_json::json!({ "agents": { id: entry } })
+}
+
+/// Writes a project `.claude/settings.json` into the reader's run folder, the one the Claude helper
+/// runs in, before the read. It sets Vertex as the provider and a project that does not exist, so
+/// a read that followed the file would show Vertex, not the plan. The helper passes
+/// `settingSources: []`, so the Pro and Team reads must still show a plan; the existing checks in
+/// `expect` prove that.
+fn plant_project_settings(run_dir: &Path) {
+    let claude = run_dir.join(".claude");
+    write::create_dir_all(&claude).unwrap();
+    let settings = serde_json::json!({
+        "env": {
+            "CLAUDE_CODE_USE_VERTEX": "1",
+            "ANTHROPIC_VERTEX_PROJECT_ID": "clauseo-g16-not-a-project",
+            "CLOUD_ML_REGION": "us-east5",
+        }
+    });
+    write::write(&claude.join("settings.json"), settings.to_string()).unwrap();
 }
 
 /// Writes `raw`, redacted line by line, to `<target>/g16/<kind>.jsonl`, then fails the test
