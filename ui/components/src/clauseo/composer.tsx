@@ -401,6 +401,9 @@ export function Composer<V extends string = string>({
     ro.observe(form);
     return () => ro.disconnect();
   }, [room]);
+  // the status line: what the last answer took, the plan, the hint, the plan choice or the tool line
+  const said = took !== null || plan !== "" || hint !== null;
+  const status = said || choice !== undefined || tools !== null;
   return (
     <form
       ref={room.nodes.slot("composer")}
@@ -425,20 +428,7 @@ export function Composer<V extends string = string>({
       )}
       {acts}
       {/* a status line with nothing to say isn't drawn: no time yet, no plan, no choice and no hint */}
-      {(took !== null ||
-        plan !== "" ||
-        choice !== undefined ||
-        hint !== null ||
-        tools !== null) && (
-        <StatusLine
-          took={took}
-          plan={plan}
-          hint={hint}
-          choice={choice}
-          tools={tools}
-          hidden={working !== null}
-        />
-      )}
+      {status && <StatusLine {...{ took, plan, hint, choice, tools }} hidden={working !== null} />}
       {/* while Clauseo works the working line is the well's top row, and the field its foot: one set-in region */}
       <div className="room-entry" ref={entry} data-working={working !== null ? "" : undefined}>
         {/* what assistive technology hears of the working line: one status region, mounted as long as the composer

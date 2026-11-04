@@ -8,9 +8,9 @@
 // The icon pass's 21 (IconBreak to IconPlanLimit, at the end of this file) were cut from Lucide 1.66.0 (commit
 // a630cec77eac6568b989e87e4947a8bfe45caacd) on 3 Nov 2026, each drawn over its source at that release and checked
 // against it. IconArchived was cut from Lucide 1.66.0's archive (same commit) on 4 Nov 2026, the same way. The tool kinds' glyphs are in tool-kinds.tsx, cut the same way, and re-exported here; the three that
-// reuse a shape already here (IconToolEdit, IconToolSearch, IconToolFetch) stay in this file. The web tools' three
-// (IconBrowser, IconDownload, IconInfo, at the end of this file) were cut from Lucide 1.66.0 on 3 Nov 2026 the same
-// way; IconInfo reuses the shape IconAbout draws.
+// reuse a shape already here (IconToolEdit, IconToolSearch, IconToolFetch) stay in this file. The web tools'
+// IconBrowser and IconDownload are in web-tools.tsx, cut from Lucide 1.66.0 on 3 Nov 2026 the same way and re-exported
+// here; IconInfo, at the end of this file, reuses the shape IconAbout draws.
 // IconFailed was cut from Lucide 1.66.0 (triangle-alert, the same commit) on 4 Nov 2026 for U16a, the same way: its
 // rounded corners drawn square, its triangle drawn in from the edge so the miter joins stay inside the 20 px box.
 // IconSnooze was cut from Lucide 1.66.0's alarm-clock (the same commit) on 5 Nov 2026 for U16b: its points scaled about
@@ -37,6 +37,7 @@ export {
   IconToolSwitchMode,
   IconToolThink,
 } from "./tool-kinds.tsx";
+export { IconBrowser, IconDownload } from "./web-tools.tsx";
 
 /** A fold (source: chevron) */
 export function IconFold(props: IconProps) {
@@ -568,32 +569,6 @@ export function IconSnooze(props: IconProps) {
       <path d="M17.25 5.65l-2.2-2.15" vectorEffect="non-scaling-stroke" />
       <path d="M5.9 14.85L4.2 16.55" vectorEffect="non-scaling-stroke" />
       <path d="M14.1 14.85l1.7 1.7" vectorEffect="non-scaling-stroke" />
-    </Icon>
-  );
-}
-
-/** The browser, Clauseo's own on this computer (source: appWindow, Lucide app-window at 1.66.0: a window with its top
- * bar, corners drawn square; the bar's ticks at x.75, so each 1.5 px stroke starts on a pixel at 1x) */
-export function IconBrowser(props: IconProps) {
-  return (
-    <Icon {...props}>
-      <path d="M2.75 4.25h14.5v11.5H2.75z" vectorEffect="non-scaling-stroke" />
-      <path d="M2.75 7.25h14.5" vectorEffect="non-scaling-stroke" />
-      <path d="M5.75 4.25v3" vectorEffect="non-scaling-stroke" />
-      <path d="M8.75 4.25v3" vectorEffect="non-scaling-stroke" />
-    </Icon>
-  );
-}
-
-/** Download, the browser's one download (source: download, Lucide download at 1.66.0: an arrow into a tray, the
- * shaft stopping short of the head; the shaft and the tray's sides at x.75 and its floor at y.75, so each 1.5 px
- * stroke starts on a pixel at 1x, the arrow centred over the tray) */
-export function IconDownload(props: IconProps) {
-  return (
-    <Icon {...props}>
-      <path d="M9.75 3.5V11" vectorEffect="non-scaling-stroke" />
-      <path d="M6.25 8.5L9.75 12l3.5-3.5" vectorEffect="non-scaling-stroke" />
-      <path d="M3.75 12.25v4.5h12v-4.5" vectorEffect="non-scaling-stroke" />
     </Icon>
   );
 }
