@@ -31,6 +31,9 @@ export type MatterState = {
   /** Threads this room made whose first question the host hasn't accepted yet (send_prompt refused): left with
    * nothing typed, they are archived, so no empty thread stays on the list. */
   unsent: Set<ThreadId>;
+  /** A thread opened with its summary (Find's archived result) that the host's list leaves out: kept among the
+   * threads, over the list's reads, while it is the one open. */
+  kept: Known | null;
 };
 
 /** A matter visited for the first time: nothing open yet, its list on its way. */
@@ -50,4 +53,14 @@ export const freshState = (matter: MatterId): MatterState => ({
   retried: new Map(),
   made: new Set(),
   unsent: new Set(),
+  kept: null,
 });
+
+/** A list just read or heard (`threads`) keeps the thread opened with its summary, while it is still the one open; once
+ * another opens it is let go. */
+export function keepKept(m: MatterState, threads: Map<ThreadId, Known>): void {
+  const kept = m.kept;
+  if (kept === null) return;
+  if (m.open !== (m.keys.get(kept.thread) ?? kept.thread)) m.kept = null;
+  else if (!threads.has(kept.thread)) threads.set(kept.thread, kept);
+}

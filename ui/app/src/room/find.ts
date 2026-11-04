@@ -11,7 +11,13 @@ import type { Lang } from "@clauseo/components/lib/display.ts";
 import { fw } from "@clauseo/components/lib/words-find.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { t } from "@clauseo/components/lib/words.ts";
-import type { MatterId, SnippetPart, ThreadId } from "../transport/protocol.ts";
+import type {
+  AgentId,
+  MatterId,
+  SnippetPart,
+  ThreadId,
+  ThreadSummary,
+} from "../transport/protocol.ts";
 import type { SearchState } from "../store/search.ts";
 import type { AllThreadsView } from "./all-threads.ts";
 import type { ConversationsView } from "./conversations-view.ts";
@@ -175,6 +181,18 @@ export function findView(input: FindInput): FindView {
     conversations,
     nothing: answered && matters.length === 0 && papers.length === 0 && conversations.length === 0,
   };
+}
+
+/** An archived hit's thread as the conversations take it (openThread), the host's list leaving it out: its summary
+ * from every matter's list, else the least that opens it, archived, run by `agent` until its header says. */
+export function archivedSummary(
+  every: AllThreadsView,
+  matter: MatterId,
+  thread: ThreadId,
+  agent: AgentId,
+): ThreadSummary {
+  const known = every.lists.get(matter)?.find((t) => t.thread === thread);
+  return known ?? { thread, matter, agent, status: "archived" };
 }
 
 /** Whether a hit's thread is archived, as the room knows it: a hit carries no archived flag, so every matter's list

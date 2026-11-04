@@ -76,7 +76,8 @@ const answer =
 
 async function findIn(theme: "light" | "dark", hits: SearchHit[], words: string) {
   h = await mountRoom({
-    threads: [summary(), summary(T2), summary(T3, "archived")],
+    // T3 archived: the host's list leaves it out
+    threads: [summary(), summary(T2)],
     query: answer(hits),
     display: { theme, language: "en" },
   });

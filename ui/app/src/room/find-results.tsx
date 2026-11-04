@@ -31,7 +31,13 @@ import { streamOf } from "../store/view.ts";
 import { toHostError, type HostTransport } from "../transport/host-transport.ts";
 import type { MatterId, SnippetPart } from "../transport/protocol.ts";
 import type { Conversations, ConversationsView } from "./conversations.ts";
-import { archivedIn, findView, type FoundConversation, type FoundPaper } from "./find.ts";
+import {
+  archivedIn,
+  archivedSummary,
+  findView,
+  type FoundConversation,
+  type FoundPaper,
+} from "./find.ts";
 import type { Matters, MattersView } from "./matters.ts";
 import { openConversation } from "./open-conversation.ts";
 import type { AllThreadsView } from "./all-threads.ts";
@@ -194,7 +200,10 @@ export function FindResults({
   const openTalk = (found: FoundConversation) => () => {
     // asked before it opens, so the thread's first rows already page back to the entry
     if (found.order !== undefined) jumpTo(streamOf(found.thread), found.order);
-    openConversation({ matters, conversations }, found.matter, found.thread);
+    const known = found.archived
+      ? archivedSummary(every, found.matter, found.thread, talks.agent)
+      : undefined;
+    openConversation({ matters, conversations }, found.matter, found.thread, known);
     field.leave();
     onConversation();
   };
