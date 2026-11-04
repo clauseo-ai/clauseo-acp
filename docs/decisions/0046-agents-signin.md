@@ -144,9 +144,8 @@ fails if `reuse.rs` calls `File::open`, any `fs::read*`, `OpenOptions` or the cr
   Claude takes the first two, Codex the last two.
 - `cancel_sign_in(agent)`, `paste_code(agent, PasteCode)`, `sign_out(agent)`,
   `check_status(agent)` (R20's "a window shows Plans") and `signin_state(agent)`.
-- `SigninError` covers an unknown agent, another agent's method, a flow not built yet (Codex
-  until piece 4), no home in `SigninConfig::homes`, an install not `Ready`, no run to cancel
-  or paste into, and a reused login asked to sign out. No variant carries a code, an email or a
+- `SigninError` covers an unknown agent, another agent's method, no home in
+  `SigninConfig::homes`, an install not `Ready`, no run to cancel or paste into, and a reused login asked to sign out. No variant carries a code, an email or a
   path.
 - Which CLI signs an agent in comes from its id: `claude-acp` is Claude, `codex-acp` is Codex.
 
@@ -239,10 +238,77 @@ wait by its duration, so the 30 s nudge and the 10 minute expiry are tested with
 The base environment seam stands in for "set in the test's own environment". The launcher is
 `PassthroughLauncher` with `clear_env`, as R20 must give. `fake_agent` must be built first.
 
-### Codex's sign-in (to come: S18 piece 4)
+### Codex's sign-in (S18 piece 4)
 
-The port 1455 probe, the browser and device-code runs, and `account/read` through
-`codex app-server`.
+**The runs.** `node <install>/node_modules/@openai/codex/bin/codex.js` with the Own environment
+(`CODEX_HOME` and, on macOS and Linux, `HOME` set to the agent's home; `CODEX_API_KEY=""`;
+`SSL_CERT_FILE` for the agent's CA; `HTTPS_PROXY`), in the home, and
+`-c cli_auth_credentials_store="file"` before the subcommand, where Codex takes its `-c`
+overrides:
+- `login` (`Method::Browser`), 10 minute limit;
+- `login --device-auth` (`Method::DeviceCode`), 20 minute limit, so the code's own 15 minutes
+  end it first;
+- `login status`, 5 s limit, exit code only (its output is never read);
+- `logout`, 30 s limit;
+- `app-server`, 10 s limit, with `limits`' six `-c` overrides as well (plugins off stops its
+  start-up git sync, #203). It is asked `initialize` and `account/read` through
+  `codex_appserver`'s `Client`, then its client is dropped and its tree killed.
+
+The calls are the same as Claude's. `SigninError::NotBuilt` is gone. `Agents::try_again(agent)`
+is new: "Try again" after `signin.port_busy`, refused for Claude with `WrongMethod`.
+
+**Port 1455.** Before a browser run the job binds `127.0.0.1:1455` and lets go at once. If
+the bind fails, no run starts, and the state is `Failed { code: PortBusy, at }`. `try_again`
+probes at once and then every 2 s, through the `Timer`. The state stays as it was while it
+waits, and `cancel_sign_in` ends the wait with `signin.cancelled`. Once the port is free, the
+browser run starts as above. A Codex run that loses the race anyway and prints a line naming
+`1455` and `in use` also ends with `signin.port_busy`. Tests move the port with
+`SigninConfig::callback_port` (test-support only, in the style of `InstallConfig::resolver`),
+so they can hold it with a listener and run side by side. Production always probes 1455.
+
+**No `OpenUrl`.** Codex opens the browser from its own process. The job writes no shim, and
+the addresses Codex prints (the callback, the device page) are never sent as `OpenUrl`.
+
+**The device code** is read from the run's output, strictly:
+- terminal escapes are dropped first (Codex colours the URL and the code), then each
+  whitespace-separated token is checked, with surrounding punctuation trimmed;
+- the URL must be exactly `https://auth.openai.com/codex/device`, and it must also pass the
+  shim's address check against the snapshot's Codex sign-in hosts;
+- the code must be `XXXX-XXXX`, each `X` an ASCII capital or digit, and it counts only after
+  the URL;
+- the first pair wins and is sent once as `DeviceCode { url, code, expires_at }`, where
+  `expires_at` is the clock's now, when the code was read, plus 15 minutes.
+
+The 15 minutes are a `Timer` wait started when the code is read. When it ends, the run is killed
+and the state is `Failed { code: LinkExpired, at }`. Codex's refusal, a line that says
+`Enable device code` and `Security Settings`, gives `signin.device_code_off` when the run
+exits.
+
+**Confirming.** While a login runs, the state is `Waiting { since, nudge: false }`. Codex has no
+nudge: the screen offers "Use a code instead" from the start. `login status` is polled every
+1.5 s, as for Claude, and exit 0 is signed in. The first such poll kills the login. Then one
+`account/read` gives `SignedIn { email, plan: plan_type, source: Own, at }`. If the app-server
+does not answer, `email` and `plan` are `None`: status already said signed in. Otherwise the run
+ends as Claude's does:
+- Cancel or a newer job: `signin.cancelled`;
+- the run's limit: `signin.link_expired`;
+- exit 0: one more status run decides;
+- any other exit: `signin.device_code_off`, `signin.port_busy` or `signin.cancelled` (the
+  `OAuth error` and `access_denied` pattern) from the lines, else `signin.failed`.
+
+The login, its polls and the app-server are gone before the last state is sent. `check_status`
+is one status run, and `account/read` when it says signed in.
+
+**Sign-out.** `logout`, then status, as for Claude, never while the source is `Reused`. The
+brief also refuses any Codex `login` or `logout` while the home's login file and the lawyer's
+`~/.codex` one are the same file. That check is reuse's (piece 5). Its hook,
+`codex::home_shares_lawyers_login`, is called before every login and logout, and returns false
+until then, since no link exists before reuse.
+
+**Refresh race.** `is_sign_in_again` already classifies `refresh_token_reused`. A Codex-shaped
+error text is now tested through the public API.
+
+Detection runs, without the store argument, come with piece 5.
 
 ### Detection and reuse (to come: S18 piece 5)
 
