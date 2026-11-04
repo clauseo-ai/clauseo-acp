@@ -48,6 +48,17 @@ export type ErrorCode =
   | "transport.unauthorized"
   | "transport.too_large"
   | "settings.locked"
+  | "agent.install_offline"
+  | "agent.install_blocked"
+  | "agent.install_disk_full"
+  | "agent.install_failed"
+  | "signin.cancelled"
+  | "signin.link_expired"
+  | "signin.no_plan"
+  | "signin.device_code_off"
+  | "signin.port_busy"
+  | "signin.failed"
+  | "signin.policy_unreadable"
   | "unknown";
 
 const HI = {
@@ -121,6 +132,18 @@ const HI = {
   "That is too large to send.": "यह भेजने के लिए बहुत बड़ा है।",
   "Your organisation manages that setting, so it can't be changed.":
     "यह सेटिंग आपका संगठन संभालता है, इसलिए इसे बदला नहीं जा सकता।",
+  "You're offline. Setting up waits for the connection.": null,
+  "Your network is blocking the download.": null,
+  "There isn't enough free space on this computer for the download.": null,
+  "Setting up didn't finish. Try again.": null,
+  "Sign-in was cancelled in the browser.": null,
+  "The sign-in link expired. Try again.": null,
+  "This account has no plan that works with Clauseo.": null,
+  "Sign-in with a code is turned off for this ChatGPT account.": null,
+  "Another program on this computer is using ChatGPT's sign-in.": null,
+  "Sign-in didn't finish. Try again.": null,
+  "Clauseo can't read your firm's sign-in settings, so it won't sign in until they can be read.":
+    null,
 } as const;
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
@@ -172,6 +195,18 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   "transport.unauthorized": "That wasn't allowed, so nothing changed.",
   "transport.too_large": "That is too large to send.",
   "settings.locked": "Your organisation manages that setting, so it can't be changed.",
+  "agent.install_offline": "You're offline. Setting up waits for the connection.",
+  "agent.install_blocked": "Your network is blocking the download.",
+  "agent.install_disk_full": "There isn't enough free space on this computer for the download.",
+  "agent.install_failed": "Setting up didn't finish. Try again.",
+  "signin.cancelled": "Sign-in was cancelled in the browser.",
+  "signin.link_expired": "The sign-in link expired. Try again.",
+  "signin.no_plan": "This account has no plan that works with Clauseo.",
+  "signin.device_code_off": "Sign-in with a code is turned off for this ChatGPT account.",
+  "signin.port_busy": "Another program on this computer is using ChatGPT's sign-in.",
+  "signin.failed": "Sign-in didn't finish. Try again.",
+  "signin.policy_unreadable":
+    "Clauseo can't read your firm's sign-in settings, so it won't sign in until they can be read.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };
