@@ -12,9 +12,9 @@ use clauseo_agents::{
     codex_link_holds, codex_login_shared, same_file, unlink_reused_login,
 };
 
+use crate::support::{Events, Fixture, Launch, codex, now};
 #[cfg(unix)]
-use crate::support::claude;
-use crate::support::{Events, Fixture, Launch, codex, eventually, now};
+use crate::support::{claude, eventually};
 
 /// Codex's login file's name. Tests may name it; `src` names it only in `signin/reuse.rs`.
 const LOGIN_FILE: &str = "auth.json";
