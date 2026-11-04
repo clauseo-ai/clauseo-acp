@@ -101,16 +101,24 @@ fn codex_detection_runs_without_codex_home_or_the_store_argument() {
         !names.iter().any(|name| name == "CLAUDE_CONFIG_DIR"),
         "{names:?}"
     );
+    // Detection runs are the ones without `CODEX_HOME`: Clauseo's own-store runs always set it,
+    // and on Windows they keep the inherited `HOME`, so `HOME` alone cannot tell them apart.
+    let home = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
     let detection: Vec<Launch> = fx
         .launches()
         .into_iter()
-        .filter(|run| run.env.get(OsStr::new("HOME")) == Some(&fx.user_home().into()))
+        .filter(|run| !run.env.contains_key(OsStr::new("CODEX_HOME")))
         .collect();
     let commands: Vec<Vec<&str>> = detection.iter().map(Launch::command).collect();
     assert_eq!(commands, [vec!["login", "status"], vec!["app-server"]]);
     for run in &detection {
         assert!(!has_store(run), "{:?}", run.args);
-        assert!(!run.env.contains_key(OsStr::new("CODEX_HOME")));
+        assert_eq!(
+            run.env.get(OsStr::new(home)),
+            Some(&fx.user_home().into()),
+            "{:?}",
+            run.args
+        );
     }
 }
 
