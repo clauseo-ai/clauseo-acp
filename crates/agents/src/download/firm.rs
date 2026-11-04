@@ -115,9 +115,12 @@ pub(crate) fn bundle_file(
 /// to `job.dest` in `agents/downloads/`, hashing the bytes as they are written, through the same
 /// path as a download: the magic, the size cap, the digest, then the rename. Only the copy is
 /// unpacked or handed to npm, so a share that hands different bytes to a second read cannot
-/// change what runs. A copy already there with the right digest is kept.
+/// change what runs. A copy already there with the right digest is kept. Each failure's detail
+/// names `label` (the archive's or the package's file name, such as `sdk-0.1.0.tgz`), never the
+/// bundle's `<hex>.tgz`.
 pub(crate) fn copy_from_bundle(
     from: &Path,
+    label: &str,
     job: &FetchJob,
     cancel: &Cancel,
     progress: &mut dyn FnMut(u64, u64),
@@ -134,12 +137,11 @@ pub(crate) fn copy_from_bundle(
     if let Some(parent) = job.dest.parent() {
         write::create_dir_all(parent).map_err(|err| at.io(&err))?;
     }
-    let name = from.file_name().unwrap_or_default().to_string_lossy();
     let read_error = |err: io::Error| {
         at.fail(
             FetchKind::Failed,
             None,
-            &format!("the offline bundle's {name} could not be read: {err}"),
+            &format!("the offline bundle's {label} could not be read: {err}"),
         )
     };
     let file = std::fs::File::open(from).map_err(read_error)?;
@@ -150,7 +152,12 @@ pub(crate) fn copy_from_bundle(
         read_error: &read_error,
     };
     let part = part_path(&job.dest);
-    write_checked(job, &part, file, &source, cancel, progress, &at)
+    write_checked(job, &part, file, &source, cancel, progress, &at).map_err(|mut err| {
+        if err.kind != FetchKind::Cancelled {
+            err.detail = format!("the offline bundle's {label}: {}", err.detail);
+        }
+        err
+    })
 }
 
 #[cfg(test)]

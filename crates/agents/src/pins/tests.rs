@@ -202,10 +202,14 @@ fn file_urls_have_three_slashes_forward_slashes_and_no_percent_encoding() {
     );
 }
 
-#[test]
-fn the_install_lock_changes_only_the_mapped_resolved_urls() {
-    let pins = derive(&manifest(), &lock(false), "a", REGISTRY).unwrap();
-    let tarballs = BTreeMap::from([
+/// macOS on arm64: `d` (Linux x64 only) is not installed there.
+fn mac() -> Platform {
+    Platform::new(Os::Darwin, crate::platform::Arch::Arm64)
+}
+
+/// A tarball for each of `a`'s entries installed on macOS.
+fn mac_tarballs() -> BTreeMap<String, PathBuf> {
+    BTreeMap::from([
         (
             "node_modules/a".to_owned(),
             PathBuf::from("/d/downloads/aa.tgz"),
@@ -214,8 +218,14 @@ fn the_install_lock_changes_only_the_mapped_resolved_urls() {
             "node_modules/a/node_modules/c".to_owned(),
             PathBuf::from("/bundle/npm/cc.tgz"),
         ),
-    ]);
-    let written = pins.lock_with_tarballs(&tarballs, Os::Linux).unwrap();
+        ("node_modules/alias".to_owned(), PathBuf::from("/d/z z.tgz")),
+    ])
+}
+
+#[test]
+fn the_install_lock_changes_only_the_mapped_resolved_urls() {
+    let pins = derive(&manifest(), &lock(false), "a", REGISTRY).unwrap();
+    let written = pins.lock_with_tarballs(&mac_tarballs(), mac()).unwrap();
     let expected = pins
         .lock()
         .replace(
@@ -225,23 +235,57 @@ fn the_install_lock_changes_only_the_mapped_resolved_urls() {
         .replace(
             &format!("\"{REGISTRY}node_modules/a/node_modules/c.tgz\""),
             "\"file:///bundle/npm/cc.tgz\"",
+        )
+        .replace(
+            &format!("\"{REGISTRY}node_modules/alias.tgz\""),
+            "\"file:///d/z z.tgz\"",
         );
     assert_ne!(expected, pins.lock());
     assert_eq!(written, expected);
+}
+
+#[test]
+fn an_entry_for_another_platform_keeps_its_registry_url() {
+    let pins = derive(&manifest(), &lock(false), "a", REGISTRY).unwrap();
+    let written = pins.lock_with_tarballs(&mac_tarballs(), mac()).unwrap();
+    let lock: Value = serde_json::from_str(&written).unwrap();
     assert_eq!(
-        pins.lock_with_tarballs(&BTreeMap::new(), Os::Linux)
-            .unwrap(),
-        pins.lock()
+        lock["packages"]["node_modules/d"]["resolved"],
+        format!("{REGISTRY}node_modules/d.tgz")
     );
+}
+
+#[test]
+fn an_installed_entry_without_a_tarball_is_refused() {
+    let pins = derive(&manifest(), &lock(false), "a", REGISTRY).unwrap();
+    let linux = Platform::new(Os::Linux, crate::platform::Arch::X64);
+    // `d` is optional and installed on Linux x64: under `--offline` npm would skip it and
+    // still succeed, so its missing tarball is refused here.
+    let err = pins.lock_with_tarballs(&mac_tarballs(), linux).unwrap_err();
+    assert!(
+        matches!(&err, PinsError::Malformed(detail) if detail.contains("node_modules/d")),
+        "{err:?}"
+    );
+    let mut one_short = mac_tarballs();
+    one_short.remove("node_modules/alias");
+    assert!(matches!(
+        pins.lock_with_tarballs(&one_short, mac()),
+        Err(PinsError::Malformed(_))
+    ));
+    assert!(matches!(
+        pins.lock_with_tarballs(&BTreeMap::new(), mac()),
+        Err(PinsError::Malformed(_))
+    ));
 }
 
 #[test]
 fn the_install_lock_refuses_a_path_it_does_not_hold() {
     let pins = derive(&manifest(), &lock(false), "a", REGISTRY).unwrap();
     for path in ["node_modules/b", ""] {
-        let tarballs = BTreeMap::from([(path.to_owned(), PathBuf::from("/d/b.tgz"))]);
+        let mut tarballs = mac_tarballs();
+        tarballs.insert(path.to_owned(), PathBuf::from("/d/b.tgz"));
         assert!(matches!(
-            pins.lock_with_tarballs(&tarballs, Os::Linux),
+            pins.lock_with_tarballs(&tarballs, mac()),
             Err(PinsError::Malformed(_))
         ));
     }
