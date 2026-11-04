@@ -1,6 +1,6 @@
 use clauseo_protocol::{FolderSupportKind, PermissionKind, PermissionOption};
 
-use super::{applies, keep_option, mode_allowed};
+use super::{applies, config_allowed, keep_option, mode_allowed};
 use crate::agent::folder_support::Answer;
 
 fn option(id: &str, kind: PermissionKind) -> PermissionOption {
@@ -43,23 +43,58 @@ fn only_default_and_plan_may_be_set() {
     }
 }
 
-/// claude-agent-acp's plan exit (`ExitPlanMode`): "Yes, and auto-accept edits" (`acceptEdits`,
-/// `allow_always`) goes; "Yes, and manually approve edits" (`default`) and "No, keep planning"
-/// (`plan`) stay. A bypass option, offered when bypass is allowed, goes even as `allow_once`.
+/// claude-agent-acp 0.89.1's plan exit (`ExitPlanMode`), every option it can offer
+/// (`permissions/options/tools.js`, ids from `shared.js`): all but "Yes, manually approve edits"
+/// (`exit-plan-default`) and "No, keep planning" (`reject`) switch to a skipping mode, and all
+/// of those are `allow_always`. The review's
+/// `rev_real_plan_exit_options_keep_only_manual_and_reject`.
 #[test]
-fn the_plan_exit_loses_its_auto_accept_option() {
+fn real_plan_exit_options_keep_only_manual_and_reject() {
     let options = [
-        option("acceptEdits", PermissionKind::AllowAlways),
-        option("bypassPermissions", PermissionKind::AllowOnce),
-        option("default", PermissionKind::AllowOnce),
-        option("plan", PermissionKind::RejectOnce),
+        option("exit-plan-clear-auto", PermissionKind::AllowAlways),
+        option("exit-plan-clear-bypass", PermissionKind::AllowAlways),
+        option("exit-plan-clear-accept-edits", PermissionKind::AllowAlways),
+        option("exit-plan-auto", PermissionKind::AllowAlways),
+        option("exit-plan-bypass", PermissionKind::AllowAlways),
+        option("exit-plan-accept-edits", PermissionKind::AllowAlways),
+        option("exit-plan-default", PermissionKind::AllowOnce),
+        option("reject", PermissionKind::RejectOnce),
     ];
     let kept: Vec<&str> = options
         .iter()
         .filter(|option| keep_option(option))
         .map(|option| option.option_id.as_str())
         .collect();
-    assert_eq!(kept, ["default", "plan"]);
+    assert_eq!(kept, ["exit-plan-default", "reject"]);
+}
+
+/// The id list is the second check: a skipping option that came as `allow_once` goes too.
+#[test]
+fn a_skipping_plan_exit_option_goes_whatever_its_kind() {
+    for id in [
+        "exit-plan-auto",
+        "exit-plan-bypass",
+        "exit-plan-accept-edits",
+    ] {
+        assert!(!keep_option(&option(id, PermissionKind::AllowOnce)), "{id}");
+    }
+}
+
+/// `SetConfigOption` for the mode takes only `default` and `plan`; any other option any value.
+#[test]
+fn the_mode_config_option_takes_only_the_ask_modes() {
+    assert!(config_allowed("mode", Some("default")));
+    assert!(config_allowed("mode", Some("plan")));
+    for value in [
+        Some("acceptEdits"),
+        Some("bypassPermissions"),
+        Some("auto"),
+        None,
+    ] {
+        assert!(!config_allowed("mode", value), "{value:?}");
+    }
+    assert!(config_allowed("model", Some("claude-haiku-5-5")));
+    assert!(config_allowed("fast", None));
 }
 
 #[test]
