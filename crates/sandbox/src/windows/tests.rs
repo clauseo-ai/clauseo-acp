@@ -29,6 +29,9 @@ use crate::test_support::TempDir;
 /// `WRITE_DAC` that an owner otherwise has. `0x1301bf` is Modify (`DELETE` included).
 const OWNER_RIGHTS_MODIFY: &str = "D:P(A;OICI;0x1301bf;;;OW)";
 
+/// `OWNER RIGHTS` with Full access: the owner keeps `WRITE_DAC`, granted by this ACE.
+const OWNER_RIGHTS_FULL: &str = "D:P(A;OICI;FA;;;OW)";
+
 #[test]
 fn a_folder_the_user_made_is_ok() {
     let temp = TempDir::new("folder-ok");
@@ -44,6 +47,15 @@ fn a_folder_whose_owner_rights_exclude_write_dac_cant_change_permissions() {
         folder_support(&folder).unwrap(),
         FolderSupport::CantChangePermissions
     );
+}
+
+#[test]
+fn a_folder_with_an_explicit_full_control_grant_is_ok() {
+    // The owner's full access is granted by name: AccessCheck says yes when the DACL does.
+    let temp = TempDir::new("folder-full-control");
+    let folder = temp.dir("full-control");
+    protect_with(&folder, OWNER_RIGHTS_FULL);
+    assert_eq!(folder_support(&folder).unwrap(), FolderSupport::Ok);
 }
 
 #[test]
