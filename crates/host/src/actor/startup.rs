@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::{Arc, mpsc};
 
-use clauseo_protocol::{MatterKind, StreamId};
+use clauseo_protocol::{MatterId, MatterKind, StreamId, ThreadId};
 use clauseo_store::{Store, StoreOptions};
 use futures::executor::LocalSpawner;
 
@@ -45,35 +45,11 @@ pub(super) async fn open(
     crate::browser::session::sweep_stale(parts.wiring.browser_socket_root.as_deref());
     let heads = store.heads().await?;
     let tails = store.tail_times().await?.into_iter().collect();
-    let mut matters = BTreeMap::new();
-    let mut forgotten = BTreeMap::new();
-    let mut threads = BTreeMap::new();
-    for row in store.matters().await? {
-        for thread in store.threads(row.id).await? {
-            threads.insert(
-                thread.id,
-                ThreadEntry {
-                    row: thread,
-                    header: None,
-                    last_stop: None,
-                    turn: turn::TurnState::default(),
-                },
-            );
-        }
-        let list = if row.forgotten.is_some() {
-            &mut forgotten
-        } else {
-            &mut matters
-        };
-        list.insert(
-            row.id,
-            MatterEntry {
-                row,
-                worker: None,
-                turns: turn::MatterTurns::default(),
-            },
-        );
-    }
+    let Registry {
+        matters,
+        forgotten,
+        threads,
+    } = registry(&store).await?;
     let commits = post.clone();
     let feeder_post: Post = Rc::new(move |ticket, result| {
         let _gone = commits.try_send(Input::Committed { ticket, result });
@@ -189,4 +165,49 @@ pub(super) fn begin_startup(actor: &mut Actor) {
             }),
         );
     }
+}
+
+/// The store's matters (forgotten ones apart) and every thread, as the actor holds them.
+struct Registry {
+    matters: BTreeMap<MatterId, MatterEntry>,
+    forgotten: BTreeMap<MatterId, MatterEntry>,
+    threads: BTreeMap<ThreadId, ThreadEntry>,
+}
+
+/// Reads the [`Registry`] from the store.
+async fn registry(store: &Store) -> Result<Registry, Error> {
+    let mut matters = BTreeMap::new();
+    let mut forgotten = BTreeMap::new();
+    let mut threads = BTreeMap::new();
+    for row in store.matters().await? {
+        for thread in store.threads(row.id).await? {
+            threads.insert(
+                thread.id,
+                ThreadEntry {
+                    row: thread,
+                    header: None,
+                    last_stop: None,
+                    turn: turn::TurnState::default(),
+                },
+            );
+        }
+        let list = if row.forgotten.is_some() {
+            &mut forgotten
+        } else {
+            &mut matters
+        };
+        list.insert(
+            row.id,
+            MatterEntry {
+                row,
+                worker: None,
+                turns: turn::MatterTurns::default(),
+            },
+        );
+    }
+    Ok(Registry {
+        matters,
+        forgotten,
+        threads,
+    })
 }
