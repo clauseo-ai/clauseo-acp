@@ -85,8 +85,14 @@ pub(super) fn on_prompt_done(
             if current.limit.is_none() {
                 current.limit = answer.limit.as_ref().and_then(asks::limit_mark);
             }
+            // The agent cancelled the turn on the lawyer's refusal, not on a Stop.
+            let stop = if answer.stop == StopReason::Cancelled && current.refused {
+                StopReason::NotAllowed
+            } else {
+                answer.stop
+            };
             End {
-                stop: answer.stop,
+                stop,
                 failure: None,
                 expiry: ExpiryReason::TurnEnded,
                 detach: None,

@@ -106,13 +106,16 @@ fn permission_kind() {
 
 #[test]
 fn stop_reason() {
-    use StopReason::{AtLimit, Cancelled, EndTurn, Failed, MaxTokens, MaxTurnRequests, Refusal};
+    use StopReason::{
+        AtLimit, Cancelled, EndTurn, Failed, MaxTokens, MaxTurnRequests, NotAllowed, Refusal,
+    };
     let cases = [
         (EndTurn, "end_turn"),
         (MaxTokens, "max_tokens"),
         (MaxTurnRequests, "max_turn_requests"),
         (Refusal, "refusal"),
         (Cancelled, "cancelled"),
+        (NotAllowed, "not_allowed"),
         (AtLimit, "at_limit"),
         (Failed, "failed"),
     ];

@@ -100,10 +100,17 @@ pub fn file_changes() -> Vec<FileChange> {
 }
 
 /// Events that hold a value added after v1 that no example in [`every_event`] holds, so the
-/// corpus writer finds a holder for it: error codes no example turn fails with, and the page
-/// vias no example opens a page with.
+/// corpus writer finds a holder for it: error codes no example turn fails with, the page vias
+/// no example opens a page with, and the stop reasons no example turn ends with.
 pub fn later_variants() -> Vec<DomainEvent> {
     vec![
+        TurnEnded {
+            turn: turn_id(3),
+            stop: StopReason::NotAllowed,
+            usage: None,
+            checkpoint_after: Some(checkpoint_id(14)),
+        }
+        .into(),
         ThreadRenamed {
             title: short("Read the lease"),
             by: RenameSource::Placeholder,

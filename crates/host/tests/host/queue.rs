@@ -1,7 +1,7 @@
 //! The thread's queue at the interface: a prompt sent while a turn runs waits and starts after
-//! an `EndTurn`; the cap; every other stop (a cancel, the usage limit, the agent exiting) holds
-//! the queue until `ResumeQueue`; archive waits for the queue. The helpers here serve
-//! `queue_moves.rs` and `steer.rs` too.
+//! an `EndTurn`; the cap; every other stop (a cancel, a refusal that ended the turn, the usage
+//! limit, the agent exiting) holds the queue until `ResumeQueue`; archive waits for the queue.
+//! The helpers here serve `queue_moves.rs` and `steer.rs` too.
 
 use std::time::Duration;
 
@@ -11,6 +11,7 @@ use clauseo_protocol::{
     StopReason, StreamId, ThreadId, TurnId, UserMessage,
 };
 
+use crate::codex::CODEX;
 use crate::observe::{Events, ended_with, started};
 use crate::permissions::{answer_from, until_first_request};
 use crate::support::{Dir, FAKE, Running, Scenario, matter_with_thread, send_prompt};
@@ -216,26 +217,52 @@ fn queue_full_at_the_limit() {
     host.shutdown();
 }
 
-#[test]
-fn held_after_cancel_until_resume_queue() {
-    let dir = Dir::new(
-        "held_after_cancel_until_resume_queue",
-        &[(FAKE, Scenario::Bundled("send-now"))],
-    );
+/// How the first turn of [`held_until_resume_queue`] ends.
+#[derive(Debug, Clone, Copy)]
+enum FirstEnd {
+    /// The lawyer presses Stop: `Cancelled`.
+    Stop,
+    /// The lawyer refuses Codex's permission request and Codex ends the turn: `NotAllowed`.
+    Deny,
+}
+
+/// The first turn ends by `end` with `stop` while a second prompt waits: the queue holds
+/// until `ResumeQueue`, which starts the second (answered `text`); on an empty queue
+/// `ResumeQueue` logs nothing.
+fn held_until_resume_queue(
+    test: &str,
+    agent: &str,
+    scenario: &'static str,
+    end: FirstEnd,
+    stop: StopReason,
+    text: &str,
+) {
+    let dir = Dir::new(test, &[(agent, Scenario::Bundled(scenario))]);
     let host = dir.start(0);
-    let (matter, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], FAKE);
+    let (matter, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], agent);
     let mut events = host.events(StreamId::Thread(thread));
     let (first, _) = host.prompt(thread, "Find the cap.");
-    host.wait_armed(DURABLE);
+    match end {
+        FirstEnd::Stop => host.wait_armed(DURABLE),
+        FirstEnd::Deny => until_first_request(&mut events),
+    }
     let (second, _) = host.prompt(thread, "Use the 2019 version instead");
     until_queued(&mut events, second);
     assert!(!held(&host, matter, thread), "held before any stop");
 
+    match end {
+        FirstEnd::Stop => assert_eq!(
+            host.ok(HostCommand::Cancel { thread }),
+            CommandOutcome::Done
+        ),
+        FirstEnd::Deny => answer_from(&host, &mut events, thread, 0, &["cancel"]),
+    }
     assert_eq!(
-        host.ok(HostCommand::Cancel { thread }),
-        CommandOutcome::Done
+        events.until_turn_ended(first).stop,
+        stop,
+        "{}",
+        events.dump()
     );
-    assert_eq!(events.until_turn_ended(first).stop, StopReason::Cancelled);
     settle(&host, &mut events);
     assert!(held(&host, matter, thread), "the queue is not held");
     assert_eq!(starts(&events, second), 0, "{}", events.dump());
@@ -246,7 +273,7 @@ fn held_after_cancel_until_resume_queue() {
     );
     assert_eq!(events.until_turn_ended(second).stop, StopReason::EndTurn);
     settle(&host, &mut events);
-    assert_eq!(events.turn_text(second), "Using the 2019 version. ");
+    assert_eq!(events.turn_text(second), text);
     assert!(!held(&host, matter, thread), "still held after the resume");
 
     // On an empty queue it answers Done and logs nothing (its receipt is not an event).
@@ -258,6 +285,31 @@ fn held_after_cancel_until_resume_queue() {
     settle(&host, &mut events);
     assert_eq!(events.head(), head, "{}", events.dump());
     host.shutdown();
+}
+
+#[test]
+fn held_after_cancel_until_resume_queue() {
+    held_until_resume_queue(
+        "held_after_cancel_until_resume_queue",
+        FAKE,
+        "send-now",
+        FirstEnd::Stop,
+        StopReason::Cancelled,
+        "Using the 2019 version. ",
+    );
+}
+
+/// A turn Codex ended on the lawyer's refusal holds the queue as a Stop does (private #361).
+#[test]
+fn held_after_not_allowed_until_resume_queue() {
+    held_until_resume_queue(
+        "held_after_not_allowed_until_resume_queue",
+        CODEX,
+        "codex-deny-ends-turn",
+        FirstEnd::Deny,
+        StopReason::NotAllowed,
+        "Working inside the matter instead. ",
+    );
 }
 
 #[test]

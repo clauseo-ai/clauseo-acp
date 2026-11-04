@@ -113,6 +113,9 @@ mod matters;
 #[path = "host/mcp.rs"]
 mod mcp;
 #[cfg(test)]
+#[path = "host/not_allowed.rs"]
+mod not_allowed;
+#[cfg(test)]
 #[path = "host/papers.rs"]
 mod papers;
 #[cfg(test)]
