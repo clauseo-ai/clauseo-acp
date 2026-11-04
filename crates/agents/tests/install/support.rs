@@ -2,6 +2,12 @@
 //! local test registry under the host name `registry.test`, the real Node and npm found on
 //! `PATH`, a shared `ManualTimer` that records every wait armed, and a clock whose monotonic
 //! reading moves 250 ms per call (so every progress tick is due).
+//!
+//! Every phase writes a timestamped line to stderr ([`trace`]): the fixture's set-up, each
+//! launch (`node --version`, `npm ci`) and how long the start took, each wait armed, each new
+//! state an agent reports, and the registry's accepts and responses. nextest shows a test's
+//! stderr when it times out, so a stall's output says where the time went (the Windows
+//! install-test stalls of S18). A launched process's end shows as the next event or launch.
 
 use std::collections::BTreeMap;
 use std::future::Future;
@@ -11,7 +17,9 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime};
 
 use clauseo_agents::testing::sha512_integrity;
-use clauseo_agents::testing::{Lookups, TempDir, TestRegistry, npm_tarball, resolve_all_to};
+use clauseo_agents::testing::{
+    Lookups, TempDir, TestRegistry, instant, millis_since, npm_tarball, resolve_all_to, trace,
+};
 use clauseo_agents::{
     AgentEntry, AgentSizes, Agents, AgentsConfig, AgentsEvent, Clock, InstallState, NodeArchive,
     NodeEntry, NodeSearch, Platform, Snapshot,
@@ -211,6 +219,7 @@ pub(crate) struct SharedTimer {
 
 impl Timer for SharedTimer {
     fn after(&self, duration: Duration) -> impl Future<Output = ()> + Send {
+        trace(format_args!("timer: a {duration:?} wait armed"));
         self.armed
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -288,6 +297,7 @@ impl Fixture {
 
     /// The fixture with tarball URLs on `base`; every host name resolves to the registry.
     pub(crate) fn with_base(label: &str, base: &str) -> Fixture {
+        trace(format_args!("fixture {label}: set-up starts"));
         let registry = TestRegistry::start().unwrap();
         let tarballs = tarballs();
         for (name, bytes) in &tarballs {
@@ -295,12 +305,17 @@ impl Fixture {
         }
         let (resolver, lookups) = resolve_all_to(registry.addr());
         let data = TempDir::new(label).unwrap();
+        trace(format_args!(
+            "fixture {label}: data folder {}",
+            data.path().display()
+        ));
         let mut config = AgentsConfig::new(data.path().to_owned(), platform());
         config.snapshot = snapshot(base, node_entry(None), 10_000);
         config.install.resolver = Some(resolver);
         config.install.allow_http_for_tests = true;
         config.node_search = user_node_search();
         config.clock = Arc::new(StepClock::default());
+        trace(format_args!("fixture {label}: set-up done"));
         Fixture {
             registry,
             lookups,
@@ -313,7 +328,11 @@ impl Fixture {
 
     /// Starts `Agents` on the fixture and reads each agent's first state.
     pub(crate) fn start(&self) -> (Agents, Events) {
-        let launcher: Arc<dyn Launcher> = Arc::new(PassthroughLauncher::new(SpawnOptions::new()));
+        let launcher: Arc<dyn Launcher> = Arc::new(Hooked {
+            inner: PassthroughLauncher::new(SpawnOptions::new()),
+            before: |_: &LaunchSpec| {},
+        });
+        trace(format_args!("fixture: Agents::start"));
         let (agents, events) = Agents::start(self.config.clone(), launcher, self.timer.clone());
         (agents, Events(events))
     }
@@ -328,6 +347,7 @@ impl Fixture {
             inner: PassthroughLauncher::new(SpawnOptions::new()),
             before,
         });
+        trace(format_args!("fixture: Agents::start, hooked"));
         let (agents, events) = Agents::start(self.config.clone(), launcher, self.timer.clone());
         (agents, Events(events))
     }
@@ -348,7 +368,7 @@ impl Fixture {
     }
 }
 
-/// The passthrough launcher, calling `before` with each spec first.
+/// The passthrough launcher, calling `before` with each spec first and tracing each start.
 struct Hooked<F> {
     inner: PassthroughLauncher,
     before: F,
@@ -357,8 +377,33 @@ struct Hooked<F> {
 impl<F: Fn(&LaunchSpec) + Send + Sync> Launcher for Hooked<F> {
     fn launch(&self, spec: &LaunchSpec) -> Result<Launched, clauseo_process::Error> {
         (self.before)(spec);
-        self.inner.launch(spec)
+        let what = launch_summary(spec);
+        trace(format_args!("launch: {what}"));
+        let start = instant();
+        let launched = self.inner.launch(spec);
+        let ms = millis_since(start);
+        match &launched {
+            Ok(_) => trace(format_args!("launch: started in {ms} ms: {what}")),
+            Err(err) => trace(format_args!("launch: failed in {ms} ms: {what}: {err}")),
+        }
+        launched
     }
+}
+
+/// A launch's program and arguments, each path cut to its file name: `node npm-cli.js ci …`.
+fn launch_summary(spec: &LaunchSpec) -> String {
+    let short = |arg: &std::ffi::OsStr| {
+        let path = Path::new(arg);
+        path.file_name()
+            .filter(|_| path.components().count() > 1)
+            .unwrap_or(arg)
+            .to_string_lossy()
+            .into_owned()
+    };
+    std::iter::once(short(spec.program().as_os_str()))
+        .chain(spec.args().iter().take(4).map(|arg| short(arg)))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// A search that finds the real Node on `PATH` and nothing else.
@@ -379,6 +424,7 @@ impl Events {
         let AgentsEvent::Install { agent, state } = event else {
             panic!("an event of another kind: {event:?}");
         };
+        trace_state(&agent, &state);
         (agent, state)
     }
 
@@ -428,6 +474,16 @@ impl Events {
             })
             .collect()
     }
+}
+
+/// Traces `agent`'s new state by its kind (`Downloading`, `Ready`, …), not its fields.
+fn trace_state(agent: &AgentId, state: &InstallState) {
+    let text = format!("{state:?}");
+    let kind = text
+        .split(|ch: char| !ch.is_alphanumeric())
+        .next()
+        .unwrap_or_default();
+    trace(format_args!("event: {agent} {kind}"));
 }
 
 /// `agent`'s states among `events`.

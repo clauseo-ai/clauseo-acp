@@ -7,6 +7,7 @@
 
 mod pack;
 mod tls;
+mod trace;
 
 use std::collections::{HashMap, VecDeque};
 use std::io::{self, Read, Write};
@@ -16,6 +17,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 
 pub use pack::{npm_tarball, sha512_integrity};
+pub use trace::{instant, millis_since, trace};
 
 use crate::TestResolver;
 
@@ -107,6 +109,7 @@ impl TestRegistry {
             ca,
         });
         let accepting = Arc::clone(&shared);
+        trace(format_args!("registry {addr}: listening"));
         std::thread::Builder::new()
             .name("test-registry".to_owned())
             .spawn(move || accept(&listener, &accepting))?;
@@ -201,6 +204,10 @@ fn accept(listener: &TcpListener, shared: &Arc<Shared>) {
             return;
         }
         let Ok(stream) = stream else { continue };
+        let peer = stream
+            .peer_addr()
+            .map_or_else(|_| "?".to_owned(), |a| a.to_string());
+        trace(format_args!("registry: accepted a connection from {peer}"));
         let shared = Arc::clone(shared);
         let spawned = std::thread::Builder::new()
             .name("test-registry-conn".to_owned())
@@ -221,7 +228,13 @@ fn connection(mut stream: TcpStream, shared: &Shared) {
         return;
     };
     if request.method != "CONNECT" {
-        drop(respond(&mut stream, shared, &request));
+        let start = instant();
+        let served = respond(&mut stream, shared, &request);
+        let ms = millis_since(start);
+        trace(format_args!(
+            "registry: {} {} served in {ms} ms: {served:?}",
+            request.method, request.path
+        ));
         return;
     }
     shared.lock().requests.push(request.clone());
@@ -253,7 +266,13 @@ fn connection(mut stream: TcpStream, shared: &Shared) {
     let Some(inner) = parse_head(&head, true) else {
         return;
     };
-    drop(respond(&mut tunnel, shared, &inner));
+    let start = instant();
+    let served = respond(&mut tunnel, shared, &inner);
+    let ms = millis_since(start);
+    trace(format_args!(
+        "registry: {} {} in the tunnel served in {ms} ms: {served:?}",
+        inner.method, inner.path
+    ));
     tunnel.conn.send_close_notify();
     drop(tunnel.flush());
 }
@@ -322,6 +341,10 @@ fn respond(stream: &mut impl Write, shared: &Shared, request: &Request) -> io::R
             route.queue.pop_front().unwrap_or(Behaviour::Normal),
         )
     };
+    trace(format_args!(
+        "registry: {} {} range {:?}: {behaviour:?}",
+        request.method, request.path, request.range
+    ));
     let len = bytes.len();
     let start = request
         .range

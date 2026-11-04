@@ -26,6 +26,20 @@ slow-timeout = { period = "10s", terminate-after = 16 }
 filter = 'package(clauseo-desktop) & test(/^(bridge::tests|host_start::tests|settings_window::tests|commands::tests|test_support)::/)'
 slow-timeout = { period = "10s", terminate-after = 16 }
 
+# The agents install tests are the first in the run to touch the disk and start processes
+# (node --version, npm ci): they start about 2 to 20 s into it, right after the test build. On
+# the Windows runner something stalls them all at once early in some runs and frees them all at
+# the same instant: in run 41840642164 (merge group, 4 slots all install tests) from 14:12:25 to
+# 14:15:56, so 11 tests passed 30 s on both tries; in runs 41766104932, 41779592803, 41784225212
+# and 41839450755 for 25 to 55 s, one retry each. low_disk_is_disk_full_before_any_request, which
+# makes no request and runs no npm, was among them; the same tests take 0.1 to 4.4 s on a good
+# Windows run (41834252183). It is the issue #83 shape, so the store's 160 s bound applies. Each
+# test's stderr names its phases with UTC times (`testing::trace`), so a timeout shows where the
+# time went.
+[[profile.default.overrides]]
+filter = 'package(clauseo-agents) & binary(install)'
+slow-timeout = { period = "10s", terminate-after = 16 }
+
 # G16's live tests read real accounts: the Claude reader's own 25 s and the Codex reader's 10 s
 # timeouts, plus Node's and the vendor CLI's start-up, overrun 30 s; 90 s still ends a hung read.
 [[profile.default.overrides]]
