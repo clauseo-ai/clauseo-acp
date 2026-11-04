@@ -65,7 +65,8 @@ pub(crate) const MAX_LINES_IN_FLIGHT: usize = 64;
 /// leave it counted; recheck this before turning the feature on or bumping the SDK.
 ///
 /// It also keeps what [`ReadProgress`] reads: how many times a read of the agent's stdout found
-/// it empty, and whether the last read did (or the stdout ended).
+/// it empty, whether the last read did (or the stdout ended), and the waker of a read that waits,
+/// which [`ReadProgress::mark`] wakes.
 #[derive(Debug, Default)]
 pub(crate) struct Gate {
     /// How many events are waiting for room.
@@ -78,6 +79,8 @@ pub(crate) struct Gate {
     waits: AtomicU64,
     /// The last read of the agent's stdout found it empty, or the stdout ended.
     idle: AtomicBool,
+    /// The read of the agent's stdout that waits, when one does.
+    stdout: AtomicWaker,
 }
 
 impl Gate {
@@ -111,6 +114,12 @@ impl Gate {
     fn is_open(&self) -> bool {
         self.blocked.load(Ordering::Acquire) == 0
             && self.in_flight.load(Ordering::Acquire) < MAX_LINES_IN_FLIGHT
+    }
+
+    /// A read of the agent's stdout found it empty and waits, to be woken by `waker` too.
+    fn stdout_waits(&self, waker: &std::task::Waker) {
+        self.stdout.register(waker);
+        self.stdout_empty();
     }
 
     /// A read of the agent's stdout found it empty.
@@ -160,9 +169,13 @@ pub struct ReadProgress(pub(crate) Arc<Gate>);
 
 impl ReadProgress {
     /// The reader's progress now. Taken once the agent has exited, everything it wrote is in
-    /// its stdout pipe or already read.
+    /// its stdout pipe or already read. A read that waits is woken to read again, so a reader
+    /// that found the pipe empty before the mark finds it so again after it (or reads what came
+    /// since) once the [`Driver`](crate::Driver) runs, and nothing else has to wake it.
     pub fn mark(&self) -> ReadMark {
-        ReadMark(self.0.waits.load(Ordering::Acquire))
+        let mark = ReadMark(self.0.waits.load(Ordering::Acquire));
+        self.0.stdout.wake();
+        mark
     }
 
     /// Whether everything in the agent's stdout at `mark` has been read and every
@@ -174,6 +187,10 @@ impl ReadProgress {
     /// Exact where a read waits only on an empty pipe, as `async-process`'s stdout does on
     /// Unix. On Windows that stdout is read by a thread, so a read can wait while the thread
     /// still holds bytes, and this can say `true` early.
+    ///
+    /// Only `session/update`s and malformed lines are counted ([`Gate`]): an agent request,
+    /// response or other notification read but not yet handled does not hold this back. A host
+    /// waits for a call's answer separately.
     pub fn drained_since(&self, mark: ReadMark) -> bool {
         let gate = &self.0;
         gate.idle.load(Ordering::Acquire)
@@ -199,7 +216,7 @@ impl<R: AsyncRead + Unpin> AsyncRead for Watched<R> {
         let this = self.get_mut();
         let read = Pin::new(&mut this.reader).poll_read(cx, buf);
         match &read {
-            Poll::Pending => this.gate.stdout_empty(),
+            Poll::Pending => this.gate.stdout_waits(cx.waker()),
             Poll::Ready(Ok(0)) if !buf.is_empty() => this.gate.stdout_ended(),
             Poll::Ready(_) => this.gate.stdout_read(),
         }

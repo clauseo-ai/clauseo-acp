@@ -19,7 +19,9 @@ fn chunk(agent: &Agent) {
 
 /// A line the reader has not read yet keeps the progress from saying drained, however long the
 /// reader waited before the mark; once the reader has read it (and found the pipe empty again)
-/// and its event is in the channel, it says drained.
+/// and its event is in the channel, it says drained. A reader that parked on the empty pipe
+/// before the mark is woken by it, so a pipe that stays empty reads as drained with nothing
+/// else waking the reader (a helper holding the agent's stdout open, writing nothing).
 #[test]
 fn a_line_written_before_the_mark_is_read_and_sent_before_it_is_drained() {
     let (client, events, driver, agent) = pipes();
@@ -29,13 +31,14 @@ fn a_line_written_before_the_mark_is_read_and_sent_before_it_is_drained() {
         .spawn_local(async move { drop(driver.await) })
         .unwrap();
     pool.run_until_stalled();
-    // The reader waits on the empty pipe, but only before the mark.
+    // The reader parked on the empty pipe before the mark: no read since it, until the
+    // mark's wake runs.
     let empty = progress.mark();
     assert!(!progress.drained_since(empty), "no read since the mark");
     pool.run_until_stalled();
     assert!(
-        !progress.drained_since(empty),
-        "a read that never ran counted"
+        progress.drained_since(empty),
+        "the mark did not wake the parked reader"
     );
 
     // The agent writes its last chunk; the host has not run the reader yet.

@@ -11,9 +11,10 @@
 //!
 //! A helper the agent left holding a pipe would hold that wait open, so it gives up once
 //! [`PUMP_END_BOUND`] has passed with all the agent wrote to stdout before the exit posted
-//! (`acp`'s [`ReadProgress`]), and at the latest after [`PUMP_END_ROUNDS`] bounds. It never
-//! gives up on the bound alone: a host thread that ran late (or a test clock moved on) must not
-//! leave the agent's last chunk unposted behind its `Ended`.
+//! (`acp`'s [`ReadProgress`], whose mark at the exit makes the reader read again, so a pipe
+//! that is only held open is found empty within the first bound), and at the latest after
+//! [`PUMP_END_ROUNDS`] bounds. It never gives up on the bound alone: a host thread that ran late
+//! (or a test clock moved on) must not leave the agent's last chunk unposted behind its `Ended`.
 
 pub(crate) mod codex;
 pub(crate) mod data_folder;
@@ -30,7 +31,7 @@ use std::sync::Arc;
 use std::task::{Poll, Waker};
 use std::time::Duration;
 
-use clauseo_acp::{AcpClient, AcpEvent, ConnectOptions, ReadProgress};
+use clauseo_acp::{AcpClient, AcpEvent, ReadProgress};
 use clauseo_process::{Handle, LaunchSpec, Launched, Launcher, ShutdownOutcome};
 use clauseo_protocol::DetachReason;
 use futures::channel::oneshot;
@@ -45,8 +46,8 @@ pub(crate) use spec::launch_spec;
 
 /// How long the owner waits, after the agent is gone, for its stderr pipe and its stdout to end,
 /// so the exit report's tail holds the last lines and [`Ended`] follows every event. A helper the
-/// agent left holding a pipe holds the report back this long, or one bound more each time the
-/// bound passes with what the agent wrote before it exited still on its way.
+/// agent left holding a pipe, writing nothing, holds the report back this long, or one bound
+/// more each time the bound passes with what the agent wrote before it exited still on its way.
 pub(crate) const PUMP_END_BOUND: Duration = Duration::from_secs(1);
 
 /// The most bounds the owner waits: past them it posts [`Ended`] even with the agent's stdout
@@ -214,10 +215,12 @@ pub(crate) fn start(
         ..
     } = launcher.launch(spec)?;
     let pid = handle.pid();
-    // Tests hold back the reader's wakes here (`hold.rs`); with no hold it passes through.
+    #[cfg(not(test))]
+    let (client, events, driver) =
+        clauseo_acp::connect(stdin, stdout, clauseo_acp::ConnectOptions::default());
+    // Tests can hold back the connection task's wakes (`hold.rs`); with no hold it is the same.
     #[cfg(test)]
-    let stdout = hold::held(stdout);
-    let (client, events, driver) = clauseo_acp::connect(stdin, stdout, ConnectOptions::default());
+    let (client, events, driver) = hold::connect(stdin, stdout);
     let output = Output {
         progress: client.read_progress(),
         events: events.clone(),
