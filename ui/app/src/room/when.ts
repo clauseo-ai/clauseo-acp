@@ -17,7 +17,7 @@ const DAY_MS = 86_400_000;
 
 const formats = new Map<string, Intl.DateTimeFormat>();
 /** One formatter per locale, zone and options, made once: making them is the slow part. */
-function format(locale: string, zone: string, options: Intl.DateTimeFormatOptions) {
+export function format(locale: string, zone: string, options: Intl.DateTimeFormatOptions) {
   const key = `${locale}|${zone}|${JSON.stringify(options)}`;
   let made = formats.get(key);
   if (made === undefined) {

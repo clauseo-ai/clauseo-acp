@@ -20,7 +20,7 @@ test("rowWords for every status, and H6's marks over idle", () => {
     words("idle", { seen: false, last_stop: { reason, at: 42 } });
   expect(unseen("end_turn")).toEqual({ state: "ready" });
   expect(unseen("cancelled")).toEqual({ state: "stopped", at: 42 });
-  expect(unseen("failed")).toEqual({ state: "idle" });
+  expect(unseen("failed")).toEqual({ state: "failed", at: 42 });
   expect(words("idle", { seen: true, last_stop: { reason: "end_turn", at: 42 } })).toEqual({
     state: "idle",
   });

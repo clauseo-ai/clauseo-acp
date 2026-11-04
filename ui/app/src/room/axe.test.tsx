@@ -32,7 +32,7 @@ import {
   uuid,
 } from "../testing/stream-script.ts";
 import { askEntry, ONE_QUESTION, TWO_QUESTIONS } from "./elicitation-fixtures.ts";
-import { detailed, fakeNext, railStates } from "./fake-next.ts";
+import { detailed, fakeNext, railStates, railThreads } from "./fake-next.ts";
 import type { PaperSummary, UiSettings } from "./host-next.ts";
 import { frameBatch } from "../store/batch.ts";
 import { StoreContext } from "../store/hooks.ts";
@@ -81,6 +81,8 @@ type Scene = {
   wait?: boolean;
   /** The open thread's message sent and queued behind another conversation's: the panel without its heading (U7). */
   queued?: boolean;
+  /** The rail's Recent, chosen on its switch (U16a). */
+  recent?: boolean;
 };
 
 const ASKED = userMessage(2, 1, "Tighten the notice to the bank.");
@@ -94,6 +96,8 @@ const SCENES: Record<string, Scene> = {
   failed: { matters: "fails", papers: undefined },
   // every rail state, every date group, Pinned and the scratch matter (fake-next.ts's railStates)
   "the rail in every state": { matters: "states", papers: PAPERS },
+  // U16a: every conversation in every matter, newest first, under its day
+  "the rail's Recent": { matters: "states", papers: PAPERS, recent: true },
   "the new matter dialog": { matters: "states", papers: PAPERS, dialog: true },
   "the new matter dialog without a NextHost": { matters: true, papers: undefined, dialog: true },
   // a prompt on one paper inside the matter, all four answers offered
@@ -219,7 +223,16 @@ function transportFor(scene: Scene): FakeTransport {
         }),
     ...(scene.papers === undefined
       ? {}
-      : { next: fakeNext({ matters: () => infos, papers: scene.papers }) }),
+      : {
+          next: fakeNext({
+            matters: () => infos,
+            papers: scene.papers,
+            // Needs you and Recent: every matter's threads, as the host's first frames give them
+            ...(scene.matters === "states"
+              ? { frames: true, threads: railThreads(OPEN, SCRATCH, Date.now()) }
+              : {}),
+          }),
+        }),
   });
   if (scene.confirming === true) transport.answerPermission = () => new Promise<void>(() => {});
   return transport;
@@ -248,6 +261,20 @@ for (const theme of THEMES) {
               await new Promise((resolve) => setTimeout(resolve, 0));
               await settled();
             });
+            // the switch holds its side for the session: each scene sets its own
+            if (scene.matters === "states") {
+              const side = scene.recent === true ? "recent" : "matters";
+              await act(async () =>
+                host
+                  ?.querySelector<HTMLButtonElement>(`[data-testid="rail-switch-${side}"]`)
+                  ?.click(),
+              );
+            }
+            if (scene.recent === true) {
+              expect(host.querySelector('[data-testid="recent-row"]'), name).not.toBeNull();
+            }
+            if (scene.matters === "states" && scene.recent !== true)
+              expect(host.querySelector('[data-testid="rail-needs-you"]'), name).not.toBeNull();
             if (scene.dialog === true) {
               await act(async () =>
                 host?.querySelector<HTMLButtonElement>('[data-testid="new-matter"]')?.click(),
@@ -333,7 +360,7 @@ for (const theme of THEMES) {
               if (scene.thread.some((e) => e.tool_call?.kind === "execute"))
                 expect(rows[0]?.textContent, name).toContain("Run ls papers");
             }
-            if (scene.matters === "states")
+            if (scene.matters === "states" && scene.recent !== true)
               expect(host.querySelectorAll('[data-testid="matter-row"]'), name).toHaveLength(13);
             // the display the case names is the one on <html>
             const html = document.documentElement;

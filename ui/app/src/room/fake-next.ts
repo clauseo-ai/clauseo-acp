@@ -33,6 +33,7 @@ export function fakeNext({
   agents = [],
   command,
   parts,
+  frames = false,
 }: {
   matters: () => readonly MatterInfo[];
   papers?: readonly PaperSummary[];
@@ -41,6 +42,8 @@ export function fakeNext({
   location?: string | null;
   command?: FakeNextHost["command"];
   parts?: readonly NextPart[];
+  /** Each app subscription starts with every matter's whole thread list, as the host's does (all-threads.ts). */
+  frames?: boolean;
 }): FakeNextHost {
   return {
     query: (query) => {
@@ -57,6 +60,19 @@ export function fakeNext({
     },
     ...(command === undefined ? {} : { command }),
     ...(parts === undefined ? {} : { parts }),
+    ...(frames
+      ? {
+          first: () =>
+            matters().map((m) => ({
+              threads_changed: {
+                matter: m.matter,
+                threads: [...threads(m.matter)],
+                removed: [],
+                all: true,
+              },
+            })),
+        }
+      : {}),
   };
 }
 
@@ -94,4 +110,97 @@ export function railStates(open: MatterSummary, scratch: MatterSummary, now: num
     m(11, "Nair v. Kerala State Electricity Board", { next_date: iso(-3) }),
     detailed(scratch),
   ];
+}
+
+/** railStates' threads, for Needs you and Recent: a conversation behind each matter that needs the lawyer (a question,
+ * a permission, an answer ready, a failure unseen), others working, stopped and read across today, yesterday and the
+ * days before, and one in the scratch matter. */
+export function railThreads(
+  open: MatterSummary,
+  scratch: MatterSummary,
+  now: number,
+): (matter: MatterId) => ThreadInfo[] {
+  const hour = 3_600_000;
+  const day = 24 * hour;
+  let n = 100;
+  const t = (matter: MatterId, title: string, over: Partial<ThreadInfo>): ThreadInfo => {
+    n += 1;
+    return {
+      thread: uuid(n, 3),
+      matter,
+      title,
+      agent: "claude-code",
+      status: "idle",
+      seen: true,
+      last_activity: now - hour,
+      ...over,
+    };
+  };
+  const id = (k: number) => uuid(k, 2);
+  const by = new Map<MatterId, ThreadInfo[]>([
+    [
+      open.matter,
+      [
+        t(open.matter, "Bail conditions for Mr. Sharma", {
+          status: "running",
+          last_activity: now - 60_000,
+        }),
+        t(open.matter, "Chronology from the FIR", { last_activity: now - 2 * day }),
+      ],
+    ],
+    [
+      id(2),
+      [
+        t(id(2), "Reply to the bank's notice", {
+          status: "needs_you",
+          last_activity: now - 20 * 60_000,
+        }),
+      ],
+    ],
+    [
+      id(3),
+      [t(id(3), "Draft rejoinder", { status: "needs_you", last_activity: now - 10 * 60_000 })],
+    ],
+    [
+      id(4),
+      [
+        t(id(4), "Limitation for the counterclaim", {
+          seen: false,
+          last_stop: { reason: "end_turn", at: now - 30 * 60_000 },
+          last_activity: now - 30 * 60_000,
+        }),
+      ],
+    ],
+    [
+      id(5),
+      [
+        t(id(5), "Judgments since 2005 that cite it", {
+          seen: false,
+          last_stop: { reason: "failed", at: now - 2 * hour },
+          last_activity: now - 2 * hour,
+        }),
+        t(id(5), "Stay application, grounds", {
+          seen: false,
+          last_stop: { reason: "cancelled", at: now - 3 * hour },
+          last_activity: now - 3 * hour,
+        }),
+      ],
+    ],
+    [
+      id(13),
+      [t(id(13), "Recovery suit, issues", { status: "running", last_activity: now - 5 * 60_000 })],
+    ],
+    [id(12), [t(id(12), "Maintenance, interim order", { last_activity: now - day })]],
+    [id(10), [t(id(10), "Reply to the show cause notice", { last_activity: now - 3 * day })]],
+    [id(11), [t(id(11), "Counter to the stay application", { last_activity: now - 6 * day })]],
+    [
+      scratch.matter,
+      [
+        t(scratch.matter, "Is a cheque bounce notice by email valid?", {
+          last_activity: now - day - hour,
+        }),
+      ],
+    ],
+  ]);
+  return (matter) => by.get(matter) ?? [];
 }
