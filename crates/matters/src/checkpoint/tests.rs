@@ -1,17 +1,19 @@
 //! Tests of [`Core`]: the stat cache's time after racy re-reads, a tip without a trailer, a file
-//! that grows over the cap while it is read, and which skipped files are listed again.
+//! that grows over the cap while it is read, which skipped files are listed again, and files
+//! that vanish while the walk runs.
 
+use std::collections::HashSet;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use clauseo_protocol::{
     ChangeKind, CheckpointId, CheckpointKind, MatterPath, SkippedFileReason, Timestamp,
 };
 
-use super::walk_folder::worth_listing;
+use super::walk_folder::{VANISHED_WAITS, pauses, worth_listing};
 use super::{Core, Spec};
 use crate::history::{GixStore, HistoryStore};
 use crate::stat::{CacheEntry, EntryState, FileTime, Stat, StatCache};
@@ -20,11 +22,17 @@ use crate::types::{Checkpoint, CheckpointOutcome, Limits, Retention, Settings, T
 use crate::{PlaceholderProbe, write};
 
 /// Never cloud-only; when `grow` names a file, appends to it once, the first time the walk
-/// asks about it (after the walk took its stat).
+/// asks about it (after the walk took its stat). Each file of `vanish` is removed the first
+/// time the walk asks about it (once only), so its read finds it gone; the first time the walk
+/// asks about one file of `vanish_other`, the other is removed, so its stat finds it gone.
 #[derive(Default)]
 struct Probe {
     grow: Option<(PathBuf, usize)>,
     grown: AtomicBool,
+    vanish: Vec<PathBuf>,
+    removed: Mutex<HashSet<PathBuf>>,
+    vanish_other: Option<[PathBuf; 2]>,
+    other_gone: AtomicBool,
 }
 
 impl PlaceholderProbe for Probe {
@@ -34,6 +42,17 @@ impl PlaceholderProbe for Probe {
             && !self.grown.swap(true, Ordering::Relaxed)
         {
             write::append(path, &vec![b'x'; *bytes]).unwrap();
+        }
+        if self.vanish.iter().any(|file| file == path)
+            && self.removed.lock().unwrap().insert(path.to_owned())
+        {
+            write::remove_file(path).unwrap();
+        }
+        if let Some([a, b]) = &self.vanish_other
+            && (path == a || path == b)
+            && !self.other_gone.swap(true, Ordering::Relaxed)
+        {
+            write::remove_file(if path == a { b } else { a }).unwrap();
         }
         false
     }
@@ -73,11 +92,7 @@ impl Setup {
     }
 
     fn put(&self, name: &str, bytes: &[u8]) {
-        write::replace(&self.folder.join(name), &mut |file| {
-            file.write_all(bytes).unwrap();
-            Ok(())
-        })
-        .unwrap();
+        put_at(&self.folder.join(name), bytes);
     }
 
     fn create(&self) -> Core {
@@ -107,6 +122,15 @@ impl Setup {
             .unwrap();
         (checkpoint, bytes)
     }
+}
+
+/// Writes `bytes` to `path` by a temp file and a rename, as Word's save swaps a file in.
+fn put_at(path: &Path, bytes: &[u8]) {
+    write::replace(path, &mut |file| {
+        file.write_all(bytes).unwrap();
+        Ok(())
+    })
+    .unwrap();
 }
 
 fn cid(n: u64) -> CheckpointId {
@@ -238,7 +262,7 @@ fn a_file_grown_over_the_cap_while_read_is_skipped() {
     let big = setup.folder.join("big.pdf");
     setup.settings.probe = Arc::new(Probe {
         grow: Some((big, 20)),
-        grown: AtomicBool::new(false),
+        ..Probe::default()
     });
     setup.put("big.pdf", b"small");
     setup.put("a.txt", b"one");
@@ -308,4 +332,120 @@ fn a_skipped_file_is_listed_again_only_for_size_or_mtime() {
         }
     ));
     assert!(worth_listing(None, &stat));
+}
+
+/// The changes of checkpoint `checkpoint` as (path, kind) pairs.
+fn kinds(checkpoint: &Checkpoint) -> Vec<(String, ChangeKind)> {
+    checkpoint
+        .changes
+        .iter()
+        .map(|change| (change.path().as_str().to_owned(), change.change().clone()))
+        .collect()
+}
+
+/// Word saves by swapping files with renames, so a document can be missing for a moment: one
+/// gone when the walk reads it and back, with new content, before the walk's first wait ends is
+/// changed, not deleted (clauseo-ai/clauseo-acp-private#224).
+#[test]
+fn a_file_swapped_in_while_the_walk_reads_it_is_changed_not_deleted() {
+    let mut setup = Setup::new("checkpoint-vanish-read-back", Probe::default(), u64::MAX);
+    setup.put("a.txt", b"a");
+    setup.put("doc.docx", b"one");
+    let mut core = setup.create();
+    setup.take(&mut core, 1, CheckpointKind::Import);
+    let doc = setup.folder.join("doc.docx");
+    setup.settings.probe = Arc::new(Probe {
+        vanish: vec![doc.clone()],
+        ..Probe::default()
+    });
+    let back = doc;
+    pauses::on_pause(move |_| {
+        if !back.exists() {
+            put_at(&back, b"two");
+        }
+    });
+
+    let checkpoint = setup.take(&mut core, 2, CheckpointKind::BeforeTurn);
+    assert_eq!(
+        kinds(&checkpoint),
+        [("doc.docx".to_owned(), ChangeKind::Modified)]
+    );
+    assert_eq!(checkpoint.outcome, CheckpointOutcome::Created(cid(2)));
+    assert_eq!(pauses::take().0, 1, "one wait, then it was back");
+}
+
+/// The same when the file is gone at its stat, before the walk reads it.
+#[test]
+fn a_file_swapped_in_while_the_walk_stats_it_is_changed_not_deleted() {
+    let mut setup = Setup::new("checkpoint-vanish-stat-back", Probe::default(), u64::MAX);
+    setup.put("a.txt", b"one");
+    setup.put("b.txt", b"one");
+    let mut core = setup.create();
+    setup.take(&mut core, 1, CheckpointKind::Import);
+    let (a, b) = (setup.folder.join("a.txt"), setup.folder.join("b.txt"));
+    setup.settings.probe = Arc::new(Probe {
+        vanish_other: Some([a.clone(), b.clone()]),
+        ..Probe::default()
+    });
+    pauses::on_pause(move |_| {
+        for file in [&a, &b] {
+            if !file.exists() {
+                put_at(file, b"two");
+            }
+        }
+    });
+
+    let checkpoint = setup.take(&mut core, 2, CheckpointKind::BeforeTurn);
+    let changes = kinds(&checkpoint);
+    assert_eq!(changes.len(), 1, "{changes:?}");
+    assert_eq!(changes[0].1, ChangeKind::Modified, "{changes:?}");
+    assert_eq!(pauses::take().0, 1);
+}
+
+/// A file gone for good is deleted, after every wait.
+#[test]
+fn a_file_gone_for_good_is_deleted_after_the_waits() {
+    let mut setup = Setup::new("checkpoint-vanish-gone", Probe::default(), u64::MAX);
+    setup.put("a.txt", b"a");
+    setup.put("doc.docx", b"one");
+    let mut core = setup.create();
+    setup.take(&mut core, 1, CheckpointKind::Import);
+    setup.settings.probe = Arc::new(Probe {
+        vanish: vec![setup.folder.join("doc.docx")],
+        ..Probe::default()
+    });
+
+    let checkpoint = setup.take(&mut core, 2, CheckpointKind::BeforeTurn);
+    let total: Duration = VANISHED_WAITS.iter().sum();
+    assert_eq!(pauses::take(), (VANISHED_WAITS.len(), total));
+    assert_eq!(
+        kinds(&checkpoint),
+        [("doc.docx".to_owned(), ChangeKind::Deleted)]
+    );
+}
+
+/// Many files gone for good cost the walk's waits once, not once per file: each wait is for
+/// every file still gone.
+#[test]
+fn many_files_gone_wait_no_longer_than_one() {
+    let mut setup = Setup::new("checkpoint-vanish-many", Probe::default(), u64::MAX);
+    let names: Vec<String> = (0..200).map(|n| format!("f{n:03}.txt")).collect();
+    for name in &names {
+        setup.put(name, name.as_bytes());
+    }
+    let mut core = setup.create();
+    setup.take(&mut core, 1, CheckpointKind::Import);
+    setup.settings.probe = Arc::new(Probe {
+        vanish: names.iter().map(|name| setup.folder.join(name)).collect(),
+        ..Probe::default()
+    });
+
+    let checkpoint = setup.take(&mut core, 2, CheckpointKind::BeforeTurn);
+    let (waits, waited) = pauses::take();
+    assert_eq!(waits, VANISHED_WAITS.len());
+    assert_eq!(waited, VANISHED_WAITS.iter().sum::<Duration>());
+    assert!(waited <= Duration::from_millis(300));
+    let changes = kinds(&checkpoint);
+    assert_eq!(changes.len(), 200);
+    assert!(changes.iter().all(|(_, kind)| *kind == ChangeKind::Deleted));
 }

@@ -84,7 +84,11 @@
 //!   compares as the OS's file system does: byte for byte on Linux, ignoring case on Windows,
 //!   and case and Unicode form on macOS (decision 0007, Unicode names).
 //! - The API is synchronous; writes take `&mut Matter`. The writer lock, the turn queue and the
-//!   "turn running" check are the host's. No clock is read and no id is minted here.
+//!   "turn running" check are the host's. No clock is read and no id is minted here. A walk
+//!   with the folder (checkpoint, import, preview, compare) that finds files gone after it
+//!   listed them sleeps up to 300 ms in all on the calling thread before taking them as
+//!   deleted (`checkpoint/walk_folder.rs`), so callers keep it off any thread that must stay
+//!   responsive (the host runs it on its matter thread).
 //!
 //! # Depends on
 //!
