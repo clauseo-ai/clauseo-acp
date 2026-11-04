@@ -10,7 +10,8 @@
 //   reads the list again, so the row doesn't stay "Answering." after the turn's end slipped past.
 // - New conversation is a draft row, the room's alone (U6, "Decided here"): nothing reaches the host until its first
 //   send, which runs `create_thread`, then `send_prompt` (the session's), then `rename_thread` with the title its
-//   first message gives (conversation-title.ts). Leaving a draft with nothing typed drops it.
+//   first message gives (conversation-title.ts), a placeholder the agent's own title replaces (#339). Leaving a
+//   draft with nothing typed drops it.
 // - Each conversation has a key: the work column's key and its composer draft's, so moving between conversations
 //   remounts the work and each keeps its own words. A thread's key is its id, unless the room opened it before knowing
 //   it (a matter just opened, before its list is in; a draft that became the thread): then it keeps that first key, so
@@ -238,21 +239,20 @@ export class Conversations {
   };
 
   #rename(m: MatterState, thread: ThreadId, title: string): void {
-    this.#transport
-      .dispatch({ command_id: crypto.randomUUID(), command: { rename_thread: { thread, title } } })
-      .then(
-        () => {
-          const now = m.threads.get(thread);
-          if (now === undefined || now.title !== undefined) return;
-          m.threads.set(thread, { ...now, title });
-          // with the next frame's flush, not a commit of its own beside it: the reply lands mid-stream (#253)
-          this.#store.inFrame(() => {
-            if (m === this.#current) this.#emit();
-          });
-        },
-        (error: unknown) =>
-          console.warn(`rename_thread failed: ${JSON.stringify(toHostError(error).code)}`),
-      );
+    const command = { rename_thread: { thread, title, placeholder: true } };
+    this.#transport.dispatch({ command_id: crypto.randomUUID(), command }).then(
+      () => {
+        const now = m.threads.get(thread);
+        if (now === undefined || now.title !== undefined) return;
+        m.threads.set(thread, { ...now, title });
+        // with the next frame's flush, not a commit of its own beside it: the reply lands mid-stream (#253)
+        this.#store.inFrame(() => {
+          if (m === this.#current) this.#emit();
+        });
+      },
+      (error: unknown) =>
+        console.warn(`rename_thread failed: ${JSON.stringify(toHostError(error).code)}`),
+    );
   }
 
   /** H13, Retry from here: a new thread from the question `message` of `thread`, asked again; it opens once the

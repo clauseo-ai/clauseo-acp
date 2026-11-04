@@ -202,14 +202,16 @@ test("the agent create_thread names: the plan chosen, else the one the matter us
 
 /* ---------- the title after the first send ---------- */
 
-test("sent: rename_thread with the title the message gives, once per thread", async () => {
+test("sent: rename_thread with the title the message gives, marked a placeholder, once per thread", async () => {
   const { talks, sent, settle } = await rig(today(() => []));
   const made = await talks.create(talks.view().open ?? "");
   const text = "What does   clause nine of the lease say about notice?";
   talks.sent(made, text);
   talks.sent(made, "And clause ten?");
   await settle();
-  expect(sent("rename_thread")).toEqual([{ thread: made, title: titleOf(text) }]);
+  expect(sent("rename_thread")).toEqual([
+    { thread: made, title: titleOf(text), placeholder: true },
+  ]);
   expect(talks.view().rows[0]?.title).toBe(titleOf(text));
 });
 
