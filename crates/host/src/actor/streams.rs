@@ -242,6 +242,15 @@ pub(super) fn on_committed(
     result: Result<Committed, clauseo_store::Error>,
 ) {
     actor.work.commits = actor.work.commits.saturating_sub(1);
+    // Tests: a stored commit reported as failed (`Actor::lost_replies`).
+    #[cfg(test)]
+    let result = match result {
+        Ok(_) if actor.lost_replies > 0 => {
+            actor.lost_replies -= 1;
+            Err(clauseo_store::Error::Closed)
+        }
+        result => result,
+    };
     let completed = actor.pipeline.on_result(ticket, result);
     let mut touched: Vec<StreamId> = Vec::new();
     // Every commit that returned `Ok` is folded first, then the sent views of drained streams

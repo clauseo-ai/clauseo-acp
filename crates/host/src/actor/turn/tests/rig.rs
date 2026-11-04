@@ -247,6 +247,11 @@ impl Rig {
         }
     }
 
+    /// Runs `future` (a store read) on the rig's pool.
+    pub(super) fn run<T>(&mut self, future: impl std::future::Future<Output = T>) -> T {
+        self.pool.run_until(future)
+    }
+
     /// Handles inputs until no commit is in flight.
     pub(super) fn settle_commits(&mut self) {
         self.run_until("no commit in flight", |actor| actor.work.commits == 0);

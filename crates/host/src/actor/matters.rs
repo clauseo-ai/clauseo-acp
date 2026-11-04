@@ -33,7 +33,7 @@ mod made;
 
 pub(crate) use made::Made;
 use made::matter_commit;
-pub(super) use made::{discard, recorded};
+pub(super) use made::{Stage, discard, recorded, row_checked};
 
 /// The Scratch matter's name.
 const SCRATCH: &str = "Scratch";
@@ -399,7 +399,9 @@ pub(super) fn on_matter_reply(
                         });
                     match sent {
                         Ok(_) => super::counting::on_commit(actor, id, opened),
-                        Err(error) => made::discard(actor, Some(id), minted, error, "commit"),
+                        Err(error) => {
+                            made::discard(actor, Some(id), minted, error, made::Stage::Commit);
+                        }
                     }
                     return;
                 }
@@ -421,10 +423,12 @@ pub(super) fn on_matter_reply(
                             actor.send_commit(draft, Tag::Scratch(Box::new(entry)))
                         });
                     if let Err(error) = sent {
-                        made::discard(actor, None, matter, error, "commit");
+                        made::discard(actor, None, matter, error, made::Stage::Commit);
                     }
                 }
-                Err(error) => tracing::warn!(%error, "could not create the Scratch matter"),
+                Err(error) => {
+                    tracing::warn!(code = %error.code(), "could not create the Scratch matter");
+                }
             }
         }
         MatterTag::Open => {
@@ -474,7 +478,7 @@ pub(super) fn scratch_committed(
         Ok(()) => made::recorded(actor, entry),
         Err(failure) => {
             let error = Error::Store(failure.error.clone());
-            made::discard(actor, None, entry.row.id, error, "store");
+            made::discard(actor, None, entry.row.id, error, made::Stage::Store);
         }
     }
 }

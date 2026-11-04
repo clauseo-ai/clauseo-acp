@@ -131,7 +131,7 @@ pub(crate) fn remove(folder: &Path, dir: bool) -> Result<(), Error> {
         && let Err(err) = write::remove_dir(&dir_path)
         && err.kind() != io::ErrorKind::NotFound
     {
-        tracing::debug!(path = %dir_path.display(), error = %err, ".clauseo kept");
+        tracing::debug!(kind = ?err.kind(), ".clauseo kept");
     }
     Ok(())
 }
