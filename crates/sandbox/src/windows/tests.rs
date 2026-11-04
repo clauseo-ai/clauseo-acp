@@ -84,6 +84,31 @@ fn a_unc_path_that_cant_be_opened_is_still_network() {
 }
 
 #[test]
+fn a_local_link_to_a_share_is_network() {
+    // A symlink in a local folder that points at a share: the path itself looks local, so only
+    // the final path (step 3) can tell. Making a symlink needs the privilege CI's admin runner
+    // has; elsewhere the test says so and passes, but on CI it must run.
+    let share = Path::new(r"\\localhost\C$\Windows");
+    let temp = TempDir::new("folder-link-to-share");
+    let link = temp.path().join("link");
+    if !share.is_dir() || std::os::windows::fs::symlink_dir(share, &link).is_err() {
+        assert!(
+            std::env::var_os("CI").is_none(),
+            "CI's Windows runners have the C$ share and may make symlinks, and this run can't"
+        );
+        eprintln!("skipped: no C$ share here, or no right to make a symlink");
+        return;
+    }
+    assert_eq!(folder_support(&link).unwrap(), FolderSupport::Network);
+}
+
+#[test]
+fn a_lowercase_unc_prefix_is_network() {
+    let share = Path::new(r"\\?\unc\clauseo-no-such-host.invalid\matters\client");
+    assert_eq!(folder_support(share).unwrap(), FolderSupport::Network);
+}
+
+#[test]
 fn a_unc_folder_under_a_parent_the_user_cant_list_is_network() {
     // The UNC path is answered before the folder is opened, so the parent's ACL never matters
     // here. The test pins that: it would fail if the open came first, and the admin token that

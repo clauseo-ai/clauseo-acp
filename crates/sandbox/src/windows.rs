@@ -51,11 +51,12 @@ pub enum FolderSupport {
 /// Asks whether the folder at `path` can take the agent's permission entries, in five steps (the
 /// first that answers wins):
 ///
-/// 1. `Network` when the path is a UNC path (`\\?\UNC\...`), or its drive letter is
+/// 1. `Network` when the path is a UNC path (`\\?\UNC\...`, any case), or its drive letter is
 ///    `DRIVE_REMOTE`. Asked before the folder is opened, so an unreachable server can't fail it.
 /// 2. Open the folder. A missing path is `NotFound`; a file is `InvalidInput`.
 /// 3. `Network` when the folder's final path, from `FILE_NAME_OPENED | VOLUME_NAME_DOS`, is a UNC
-///    path: a link to a share. If that call fails, this step is skipped, not an error.
+///    path (any case): a link to a share. If that call fails, the answer is an error, never a
+///    guess that the folder is local.
 /// 4. `NoPermissions` when the volume lacks `FILE_PERSISTENT_ACLS`.
 /// 5. `CantChangePermissions` when the folder's DACL, checked with `AccessCheck` for this
 ///    process's token, doesn't grant `WRITE_DAC`, or its permissions can't be read. Otherwise
@@ -79,7 +80,13 @@ pub fn folder_support(path: &Path) -> io::Result<FolderSupport> {
             format!("{} is not a folder", path.display()),
         ));
     }
-    if final_path(&folder).is_some_and(|final_path| is_share_path(&final_path)) {
+    // A folder reached through a link to a share shows it only in its final path. When that
+    // can't be read, the answer is an error rather than a guess: the host treats an error as
+    // "unprotected" for Claude, while a wrong `Ok` here would not be.
+    let Some(final_path) = final_path(&folder) else {
+        return Err(io::Error::other("the folder's final path can't be read"));
+    };
+    if is_share_path(&final_path) {
         return Ok(FolderSupport::Network);
     }
     if volume_flags(&folder)? & FILE_PERSISTENT_ACLS == 0 {
@@ -163,7 +170,18 @@ fn final_path(folder: &Handle) -> Option<Vec<u16>> {
 
 /// Whether `wide` (a verbatim path) is a UNC path, which names a network folder.
 fn is_share_path(wide: &[u16]) -> bool {
-    wide.starts_with(&wide_text(r"\\?\UNC\"))
+    // `\\?\UNC\` in any case: Windows treats `\\?\unc\` the same.
+    let prefix = wide_text(r"\\?\UNC\");
+    wide.len() >= prefix.len()
+        && wide
+            .iter()
+            .zip(&prefix)
+            .all(|(&unit, &want)| ascii_upper(unit) == want)
+}
+
+/// `unit` upper-cased when it is an ASCII letter.
+fn ascii_upper(unit: u16) -> u16 {
+    u8::try_from(unit).map_or(unit, |byte| u16::from(byte.to_ascii_uppercase()))
 }
 
 /// Whether the drive letter of `wide` (a verbatim path, so the letter is at index 4) is a
