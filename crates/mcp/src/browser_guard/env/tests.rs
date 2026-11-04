@@ -103,6 +103,18 @@ fn session_is_short_and_plain() {
     assert!(!is_session(OsStr::new(&"x".repeat(65))));
 }
 
+/// The Unix socket folder is absolute by Unix's rule, a leading `/`, on whatever OS models
+/// Unix: the same verdicts on a Windows machine as on a Unix one.
+#[test]
+fn the_unix_socket_folder_is_absolute_by_unixs_rule() {
+    assert!(super::is_unix_absolute(OsStr::new(
+        "/tmp/clauseo-ab-0123456789abcdef"
+    )));
+    for bad in ["", "tmp/clauseo-ab-x", "./tmp", "clauseo-ab-x"] {
+        assert!(!super::is_unix_absolute(OsStr::new(bad)), "{bad:?}");
+    }
+}
+
 #[test]
 fn ports_are_1024_to_65535_in_plain_decimal() {
     for good in ["1024", "8080", "61100", "65535"] {

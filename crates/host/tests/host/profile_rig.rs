@@ -248,15 +248,22 @@ pub(crate) fn browser_server() -> McpServer {
 }
 
 /// The `browser` entry `session/new` carries once filled, with the proxy on 8123 and Chrome at
-/// `/chrome`, for a template. The claimed ports differ per run, so they match any value.
+/// `/chrome`, for a template. The claimed ports differ per run, so they match any value, and so
+/// does the session name on Windows: there it is the name the host drew for agent-browser's
+/// daemon port (`browser::session`, tested there), not the session's id.
 pub(crate) fn filled_browser() -> Value {
+    let session = if cfg!(windows) {
+        "{{any}}"
+    } else {
+        "@SESSION@"
+    };
     json!({"name": "browser", "command": "{{any}}",
     "args": ["browser-guard", "--agent-browser", path_text(&sidecar()), "--cwd", "@BROWSER@",
         "--cdp-port", "{{any}}", "--", "mcp", "--tools", "core"],
     "env": [
         {"name": "AGENT_BROWSER_CONFIG", "value": "/cfg/agent-browser.json"},
         {"name": "AGENT_BROWSER_PROXY", "value": "http://127.0.0.1:8123"},
-        {"name": "AGENT_BROWSER_SESSION", "value": "@SESSION@"},
+        {"name": "AGENT_BROWSER_SESSION", "value": session},
         {"name": "AGENT_BROWSER_EXECUTABLE_PATH", "value": "/chrome"},
         {"name": "AGENT_BROWSER_STREAM_PORT", "value": "{{any}}"},
     ]})

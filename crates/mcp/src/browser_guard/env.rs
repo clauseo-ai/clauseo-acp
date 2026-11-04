@@ -225,7 +225,7 @@ pub(crate) fn build(
             source,
             os,
             SOCKET_DIR,
-            |v, _| Path::new(v).is_absolute(),
+            |v, _| is_unix_absolute(v),
             Problem::NotAbsolute,
         )?
         .to_owned(),
@@ -347,6 +347,14 @@ pub(crate) fn is_loopback_proxy(value: &OsStr) -> bool {
         && port.bytes().all(|b| b.is_ascii_digit())
         && !port.starts_with('0')
         && port.parse::<u32>().is_ok_and(|n| (1..=65_535).contains(&n))
+}
+
+/// Absolute by Unix's rule, a leading `/`, whatever OS reads it: `Path::has_root`, which on
+/// Unix is `Path::is_absolute`, so the guard's own check is unchanged there, and the tests that
+/// model Unix read `/tmp/...` the same way on a Windows machine (where `is_absolute` wants a
+/// drive).
+fn is_unix_absolute(value: &OsStr) -> bool {
+    Path::new(value).has_root()
 }
 
 /// A port from [`MIN_PORT`] to 65535, in decimal with no sign and no leading zero.
