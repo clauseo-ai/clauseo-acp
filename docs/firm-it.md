@@ -172,7 +172,8 @@ shows the policy's value with its choices greyed out and the line "Managed by yo
 of the wrong type for a known key is a warning and **still locks the key, at its default**. A
 source that cannot be read at all (a `policy.json` that does not parse, a registry read that
 fails) is skipped and **locks each security key off**: `mcp.servers` empty, `tools.web_search`,
-`tools.browser`, `privacy.counts` and `privacy.crash_reports` false. The two `privacy` keys can
+`tools.browser`, `privacy.counts` and `privacy.crash_reports` false, `install.bundle` and
+`install.registry` unset, and no `plans.<id>` at all. The two `privacy` keys can
 only be turned off by policy: a policy `true` for one is ignored with a warning, and the lawyer
 keeps their own switch. A key this version does not know is only a warning, so one profile can
 serve mixed versions. (`Leaf::parse`, `refuse` and `SECURITY_KEYS` in
@@ -182,14 +183,15 @@ serve mixed versions. (`Leaf::parse`, `refuse` and `SECURITY_KEYS` in
 **Formats.**
 
 - **Registry:** `REG_DWORD` for a number, or a boolean as 0 or 1; `REG_SZ` for a string, or JSON
-  text for an object (`agents.<id>`, `mcp.servers`); `REG_MULTI_SZ` for a list of strings (no key in
+  text for an object (`agents.<id>`, `plans.<id>`, `mcp.servers`); `REG_MULTI_SZ` for a list of strings (no key in
   the table below takes a list yet). Value names ignore case; an agent id keeps
   its case ([`crates/settings/src/policy/registry.rs`](../crates/settings/src/policy/registry.rs)).
 - **`policy.json`:** the shape of the user's `settings.json`: sections `matters`, `agents`, `mcp`,
-  `ui`, `tools` and `privacy`, each an object; comments and trailing commas are allowed. Sample:
+  `ui`, `tools`, `privacy`, `plans` and `install`, each an object; comments and trailing commas are allowed. Sample:
   [`docs/firm-it/policy.sample.json`](firm-it/policy.sample.json) (Windows paths).
 - **macOS profile:** a payload whose `PayloadType` is `ai.clauseo.desktop`, with the dotted keys as
-  its keys, except agents: one key `agents`, a dictionary from agent id to launch spec. Sample:
+  its keys, except agents and plans: one key `agents`, a dictionary from agent id to launch spec, and
+  one key `plans`, a dictionary from agent id to plan. Sample:
   [`docs/firm-it/ai.clauseo.desktop.mobileconfig`](firm-it/ai.clauseo.desktop.mobileconfig)
   (read by [`crates/settings/src/policy/managed_prefs.rs`](../crates/settings/src/policy/managed_prefs.rs)).
 
@@ -212,6 +214,9 @@ Clauseo's readers with no warning, and fails when this table misses a key.
 | `tools.browser` | boolean | true on macOS; false on Windows and Linux | `REG_DWORD` 0 or 1 | 0: agents do not get Clauseo's browser. **Security key** |
 | `privacy.counts` | boolean | true | `REG_DWORD` 0 or 1 | 0: Clauseo keeps and sends no anonymous usage counts, and deletes what it kept. Policy can only turn it off (1 is ignored with a warning). **Security key** |
 | `privacy.crash_reports` | boolean | false | `REG_DWORD` 0 or 1 | 0: Clauseo sends no crash reports. Policy can only turn it off (1 is ignored with a warning). **Security key** |
+| `plans.<id>` | object: `endpoint` (`https` URL with a host; no user name, password, query or fragment), `provider` (`anthropic`, `bedrock`, `vertex`), `env` (map) | none: the plan login | `REG_SZ`, JSON | value `plans.claude-acp` = `{"endpoint": "https://ai-gateway.firm.example/anthropic", "provider": "anthropic"}`. **Security key**: replaces the user's whole plan for that agent; an unreadable source leaves no plan at all. An `env` name holding `KEY`, `TOKEN`, `SECRET` or `PASSWORD` (any case) is dropped with a warning: keep secrets in your own tools (an AWS profile, Google's application default credentials) |
+| `install.bundle` | absolute path | none: download | `REG_SZ` | `D:\Clauseo\bundle`: an offline bundle folder. **Security key**: unset if a source is unreadable |
+| `install.registry` | `https` URL with a host; no user name, password, query or fragment | none: the public hosts | `REG_SZ` | `https://npm.firm.example/`: a firm npm mirror. **Security key**: unset if a source is unreadable |
 
 Sources: the key list and kinds are `KEYS` in `crates/settings/src/leaf.rs`; the values and
 defaults are in [`crates/settings/src/schema.rs`](../crates/settings/src/schema.rs).
@@ -236,8 +241,6 @@ it.
 |---|---|---|
 | `update.mode` (`auto`, `notify`, `none`) | R23 | `none` for managed fleets; locks at `none` if a policy source is unreadable. Per-machine installs never update themselves anyway |
 | `sandbox.required`, `sandbox.allow_unprotected_auto`, `network.upstream_proxy`, `network.ca_certs`, `network.allowed_domains` | R17 | Security keys |
-| `plans.<id>.endpoint`, `plans.<id>.provider` (`anthropic`, `bedrock`, `vertex`), `plans.<id>.env` | R20 | Security keys: your firm's own model endpoint; `env` refuses secret-shaped names |
-| `install.bundle`, `install.registry` | R20 | Security keys: an offline bundle folder, a firm npm mirror. Downloads use the `network.*` keys for proxy and CA |
 
 ## 7. Hosts Clauseo reaches
 

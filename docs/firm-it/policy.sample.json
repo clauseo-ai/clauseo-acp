@@ -34,5 +34,16 @@
   "privacy": {
     "counts": false,
     "crash_reports": false
+  },
+  "plans": {
+    "claude-acp": {
+      "endpoint": "https://ai-gateway.firm.example/anthropic",
+      "provider": "anthropic",
+      "env": {}
+    }
+  },
+  "install": {
+    "bundle": "D:\\Clauseo\\bundle",
+    "registry": "https://npm.firm.example/"
   }
 }

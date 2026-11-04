@@ -94,7 +94,10 @@ fn an_unreadable_policy_source_locks_every_security_key_off_with_a_warning_each(
     assert_eq!(
         effective.locked().collect::<Vec<_>>(),
         [
+            "install.bundle",
+            "install.registry",
             "mcp.servers",
+            "plans.",
             "privacy.counts",
             "privacy.crash_reports",
             "tools.browser",
@@ -129,7 +132,10 @@ fn an_unreadable_policy_source_locks_every_security_key_off_with_a_warning_each(
             "tools.browser",
             "privacy.counts",
             "privacy.crash_reports",
-            "update.mode"
+            "update.mode",
+            "install.bundle",
+            "install.registry",
+            "plans."
         ]
     );
 }

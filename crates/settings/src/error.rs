@@ -38,6 +38,16 @@ pub enum Error {
         /// The dotted key, such as `ui.theme`.
         key: String,
     },
+    /// A runtime write names a value this crate refuses: a secret-shaped plan variable, an
+    /// endpoint that is not an `https` URL, or an agent entry that is not Clauseo's own.
+    /// `reason` is fixed text: no value is ever quoted. Nothing was written.
+    #[error("{key}: {reason}")]
+    Refused {
+        /// The dotted key, such as `plans.claude-acp.env.API_KEY`.
+        key: String,
+        /// Why.
+        reason: &'static str,
+    },
     /// The OS gave no path for a folder this crate needs.
     #[error("the OS gives no {folder} folder")]
     NoFolder {

@@ -1,8 +1,9 @@
 //! The user's `settings.json`: reading it, and the write of a [`UiPatch`], a [`ToolsPatch`], a
-//! [`PrivacyPatch`] or an [`UpdateChoice`]. Only [`crate::Effective::apply_ui_patch`],
-//! [`crate::Effective::apply_tools_patch`], [`crate::Effective::apply_privacy_patch`] and
-//! [`crate::Effective::apply_update_mode`] call those writes, after they have checked policy
-//! locks.
+//! [`PrivacyPatch`] or an [`UpdateChoice`], or of one `agents.<id>` or `plans.<id>` entry.
+//! Only [`crate::Effective::apply_ui_patch`], [`crate::Effective::apply_tools_patch`],
+//! [`crate::Effective::apply_privacy_patch`], [`crate::Effective::apply_update_mode`],
+//! [`crate::Effective::set_agent_launch`] and [`crate::Effective::set_plan`] call those
+//! writes, after they have checked policy locks.
 
 #[cfg(test)]
 mod tests;
@@ -117,32 +118,92 @@ fn write_section<P: Serialize>(
     name: &str,
     patch: &P,
 ) -> Result<(), Error> {
+    let mut document = read_document(locations, files)?;
+    if let (Value::Object(section), Ok(Value::Object(fields))) = (
+        section_mut(&mut document, name),
+        serde_json_lenient::to_value(patch),
+    ) {
+        section.extend(fields);
+    }
+    save_document(locations, files, &document)
+}
+
+/// Saves one entry of the section `section` (`agents` or `plans`) in the user's
+/// `settings.json`: `entry` replaces the file's entry `id`, or `None` removes it, and every
+/// other key stays, as [`write_user_settings`] keeps them. When the file already holds an entry
+/// `id` and `keep` says it stays, nothing is written and the result is `Ok(false)`.
+pub(crate) fn write_entry(
+    locations: &Locations,
+    files: &dyn Files,
+    (section, id): (&str, &str),
+    entry: Option<Value>,
+    keep: impl Fn(&serde_json::Value) -> bool,
+) -> Result<bool, Error> {
+    let mut document = read_document(locations, files)?;
+    let Value::Object(entries) = section_mut(&mut document, section) else {
+        return Ok(false);
+    };
+    let held = entries
+        .get(id)
+        .and_then(|held| serde_json_lenient::from_value::<serde_json::Value>(held.clone()).ok());
+    if entries.contains_key(id) && held.as_ref().is_none_or(&keep) {
+        return Ok(false);
+    }
+    match entry {
+        Some(entry) => {
+            entries.insert(id.to_owned(), entry);
+        }
+        None => {
+            entries.remove(id);
+        }
+    }
+    save_document(locations, files, &document)?;
+    Ok(true)
+}
+
+/// The user's `settings.json` as one object: empty when the file is missing; an error, with
+/// the file left alone, when it does not parse.
+fn read_document(locations: &Locations, files: &dyn Files) -> Result<Map<String, Value>, Error> {
     let path = locations.settings_file();
-    let io = |source| Error::Io {
-        path: path.to_owned(),
-        source,
-    };
-    let mut document = match files.read(path).map_err(io)? {
-        None => Map::new(),
-        Some(bytes) => object(path, &bytes)?,
-    };
-    let section = document
+    match files.read(path).map_err(|source| io(path, source))? {
+        None => Ok(Map::new()),
+        Some(bytes) => object(path, &bytes),
+    }
+}
+
+/// The section `name` of `document`, made an empty object when it is missing or not one.
+fn section_mut<'a>(document: &'a mut Map<String, Value>, name: &str) -> &'a mut Value {
+    document
         .entry(name)
         .and_modify(|section| {
             if !section.is_object() {
                 *section = Value::Object(Map::new());
             }
         })
-        .or_insert_with(|| Value::Object(Map::new()));
-    if let (Value::Object(section), Ok(Value::Object(fields))) =
-        (section, serde_json_lenient::to_value(patch))
-    {
-        section.extend(fields);
-    }
+        .or_insert_with(|| Value::Object(Map::new()))
+}
+
+/// Writes `document` to the user's `settings.json` as plain JSON, atomically.
+fn save_document(
+    locations: &Locations,
+    files: &dyn Files,
+    document: &Map<String, Value>,
+) -> Result<(), Error> {
+    let path = locations.settings_file();
     let mut bytes =
-        serde_json_lenient::to_vec_pretty(&document).map_err(|error| io(error.into()))?;
+        serde_json_lenient::to_vec_pretty(document).map_err(|error| io(path, error.into()))?;
     bytes.push(b'\n');
-    files.write_atomic(path, &bytes).map_err(io)
+    files
+        .write_atomic(path, &bytes)
+        .map_err(|source| io(path, source))
+}
+
+/// An I/O error on `path`.
+fn io(path: &Path, source: std::io::Error) -> Error {
+    Error::Io {
+        path: path.to_owned(),
+        source,
+    }
 }
 
 /// The file's top-level object, or a parse error with its line and column. A file of only

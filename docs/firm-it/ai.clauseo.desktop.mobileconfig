@@ -65,6 +65,22 @@
       <false/>
       <key>privacy.crash_reports</key>
       <false/>
+      <key>plans</key>
+      <dict>
+        <key>claude-acp</key>
+        <dict>
+          <key>endpoint</key>
+          <string>https://ai-gateway.firm.example/anthropic</string>
+          <key>provider</key>
+          <string>anthropic</string>
+          <key>env</key>
+          <dict/>
+        </dict>
+      </dict>
+      <key>install.bundle</key>
+      <string>/Library/Application Support/Clauseo/bundle</string>
+      <key>install.registry</key>
+      <string>https://npm.firm.example/</string>
     </dict>
   </array>
   <key>PayloadType</key>

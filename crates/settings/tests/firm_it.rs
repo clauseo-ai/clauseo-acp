@@ -64,13 +64,18 @@ fn all_schema_keys() -> Option<BTreeSet<String>> {
     Some(keys)
 }
 
-/// The keys a source locks, an agent's as `agents.<id>`.
+/// The keys a source locks, an agent's as `agents.<id>` and a plan's as `plans.<id>`.
 fn locked(values: &PolicyValues) -> BTreeSet<String> {
     values
         .keys()
-        .map(|key| match key.strip_prefix("agents.") {
-            Some(_) => "agents.<id>".to_owned(),
-            None => key,
+        .map(|key| {
+            if key.starts_with("agents.") {
+                "agents.<id>".to_owned()
+            } else if key.starts_with("plans.") {
+                "plans.<id>".to_owned()
+            } else {
+                key
+            }
         })
         .collect()
 }
@@ -94,6 +99,7 @@ fn path_warnings() -> BTreeSet<String> {
         "matters.default_location",
         "agents.claude",
         "mcp.servers.firm-docs",
+        "install.bundle",
     ]
     .map(str::to_owned)
     .into()
