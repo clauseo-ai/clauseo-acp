@@ -8,11 +8,10 @@
 #   build entries take the quick skip on an ubuntu runner and report their required checks green.
 # - merge_group: the full OS matrix runs once, here (Linux, Windows x64, macOS ARM64), on what
 #   changes.sh says the queued changes need.
-# - push to main: only `build (aarch64-apple-darwin)`. The merge queue already tested the code; the
-#   one exception is macOS ARM64, temporarily not required in the merge queue (a GitHub runner
-#   shortage), so main's push is the only place it runs. Every other job skips on push. When the
-#   macOS ARM64 requirement is restored, delete the `push:` trigger and the matrix's push branch
-#   (both marked "push exception"); the `github.event_name != 'push'` guards can stay or go.
+# - push to main: nothing (Rohan's CI decision, 2026-11-04). The merge queue already tested the
+#   code. (macOS ARM64 ran on push from 17:20Z to 20:52Z that day, while a GitHub runner shortage
+#   kept it out of the merge-queue requirement.) The `github.event_name != 'push'` guards below are
+#   harmless without the trigger.
 # - schedule and workflow_dispatch: everything, tier 2, the release builds, the quarantine job,
 #   mutants and reducer-bench. The nightly run (ref main) saves the Rust caches.
 #
@@ -31,8 +30,7 @@
 #   on Linux a debug app that embeds ui/app/dist, launched under xvfb. No pull request or merge
 #   group job builds a release app; e2e-windows.yml's smoke test builds and drives the Windows one.
 #   The nightly run and a run on demand run the same steps (so main's Rust cache holds what merge
-#   groups build) and then the release app, full LTO, uploaded as clauseo-desktop-<target>; so does
-#   the push exception's macOS ARM64 job.
+#   groups build) and then the release app, full LTO, uploaded as clauseo-desktop-<target>.
 # - Tier 1 (macOS Apple silicon, Windows x64) and Linux build and test in the merge queue when the
 #   queued changes touch Rust. Tier 2 (Intel macOS, Windows ARM64) runs nightly and on demand only:
 #   on a pull request and in a merge group the matrix leaves it out, and jobs skipped by `if` report
@@ -48,7 +46,7 @@
 # - The Linux job runs the tests with the network cut off, so a test that reaches the network fails.
 # - The fast lane runs on the Node the runner image has cached that "engines.node" allows (the newest
 #   24.x today), but a developer's machine may have a newer major (Homebrew's), where a test can pass
-#   in CI and fail at pre-push. The vitest (newest Node) job runs ui/app's vitest, ui/components'
+#   in CI and fail locally. The vitest (newest Node) job runs ui/app's vitest, ui/components'
 #   tests included, on the newest Node release "engines.node" allows (setup-node's check-latest),
 #   on every pull request that changes ui/, nightly and on demand.
 # - reducer-bench counts clauseo-reducer's instructions under Valgrind, nightly and on demand only
@@ -65,10 +63,6 @@ on:
   # A pull request in main's merge queue: the full OS matrix, run on main plus the pull requests
   # queued ahead of it, so two green pull requests cannot break main together.
   merge_group:
-  # Push exception: only `build (aarch64-apple-darwin)` runs on push (see the header). Remove this
-  # trigger once macOS ARM64 is required in the merge queue again.
-  push:
-    branches: [main]
   # Nightly, on main: everything, the tier-2 builds and the mutants of the last 24 hours included.
   schedule:
     - cron: "17 3 * * *"
@@ -265,8 +259,6 @@ jobs:
       #   lints only (PR_LINT_ONLY below).
       # - merge_group: tier 1 and Linux in full. Windows ARM64 left the merge-group requirement
       #   (2026-11-04) for the nightly run; a break there goes to its owner.
-      # - push (the push exception): macOS ARM64 alone. Delete this branch, with the push trigger,
-      #   once macOS ARM64 is required in the merge queue again.
       # - schedule and workflow_dispatch: everything, tier 2 (Intel macOS, Windows ARM64) included.
       #   The job tier2-x86_64-apple-darwin below and tier2-pr.yml report tier 2's checks elsewhere.
       # `native`: built on its own OS, so linted and tested; Intel macOS is cross-compiled on the
@@ -278,8 +270,6 @@ jobs:
             && '[{"target": "aarch64-apple-darwin", "runner": "ubuntu-24.04", "native": true},
                  {"target": "x86_64-unknown-linux-gnu", "runner": "ubuntu-24.04", "native": true},
                  {"target": "x86_64-pc-windows-msvc", "runner": "windows-2025", "native": true}]'
-            || github.event_name == 'push'
-            && '[{"target": "aarch64-apple-darwin", "runner": "macos-15", "native": true}]'
             || github.event_name == 'merge_group'
             && '[{"target": "aarch64-apple-darwin", "runner": "macos-15", "native": true},
                  {"target": "x86_64-unknown-linux-gnu", "runner": "ubuntu-22.04", "native": true},
@@ -301,9 +291,8 @@ jobs:
       # keychain smoke, app build or other test, which wait for the merge queue. Every step past
       # clippy checks it, directly or through RELEASE, UI or the OS.
       PR_LINT_ONLY: ${{ github.event_name == 'pull_request' }}
-      # The full-LTO release app: nightly and on demand only. A merge group and the push exception's
-      # macOS job run the dev-profile steps (clippy and the tests), so the scarce macOS runner does
-      # the least it can while it is the only place macOS ARM64 is checked.
+      # The full-LTO release app: nightly and on demand only. A merge group runs the dev-profile
+      # steps (clippy and the tests).
       RELEASE: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
       # The ui is built for the release app, and on Linux for the debug app launched under xvfb.
       UI: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || contains(matrix.target, '-linux-') }}
