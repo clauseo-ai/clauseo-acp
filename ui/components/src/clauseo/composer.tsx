@@ -177,6 +177,9 @@ export type ComposerProps<V extends string = string> = {
 /** The composer: the status line or the working line, then a field set into the work's surface, Add papers as a
  * quiet icon button, the lawyer's own words at 17 on 26 at 600, and Ask, or Stop while Clauseo works; then the
  * room's line under it, with the lock. */
+/** How long typing pauses before a field only grown as words went in is fitted whole (ms). */
+const SETTLE_MS = 400;
+
 export function Composer<V extends string = string>({
   took,
   plan,
@@ -274,17 +277,23 @@ export function Composer<V extends string = string>({
       if (a.style.overflowY !== overflow) a.style.overflowY = overflow;
       if (!scrolls && a.scrollTop !== 0) a.scrollTop = 0;
     };
+    // a whole fit once typing pauses, after fits that only grew the field
+    let settle: ReturnType<typeof setTimeout> | undefined;
     const fit = (grow = false) => {
+      clearTimeout(settle);
+      settle = undefined;
       const was = fitted.current;
       fitted.current = a.value;
       // words only put in, as plain typing does: the field can only keep its height or grow, which its own scroll
       // height shows with no collapse. Collapsing it to measure, as the whole fit does, laid out the room's column
       // twice and repainted the thread above on every keystroke (Chromium trace, #117 L). A mark that joins a
-      // conjunct could in principle narrow a line enough to lose one; the next deletion or width change fits it whole
+      // conjunct can narrow a line enough to lose one, which a scroll height never shows: so once typing pauses, a
+      // field taller than one line is fitted whole
       if (grow && one > 0 && insertedOnly(was, a.value)) {
         const h = a.scrollHeight;
-        if (h <= a.clientHeight + (a.style.height === "" ? 4 : 0)) return;
-        set(`${Math.min(h, one * 6)}px`, h > one * 6);
+        if (h > a.clientHeight + (a.style.height === "" ? 4 : 0))
+          set(`${Math.min(h, one * 6)}px`, h > one * 6);
+        if (a.style.height !== "") settle = setTimeout(() => fit(), SETTLE_MS);
         return;
       }
       a.style.height = "";
@@ -310,7 +319,10 @@ export function Composer<V extends string = string>({
       fit();
     });
     ro.observe(a);
-    return () => ro.disconnect();
+    return () => {
+      ro.disconnect();
+      clearTimeout(settle);
+    };
   }, [lang, textSize]);
   // after every change to the words, typed, composed, undone or set through the handle: fit the field to them, say
   // whether it holds any, and tell the room
