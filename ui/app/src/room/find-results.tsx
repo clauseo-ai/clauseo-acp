@@ -125,37 +125,38 @@ function PaperRow({
   );
 }
 
+/** A conversation found. An archived one says so by its mark, named in its accessible words and in the app's tooltip,
+ * which the row itself opens under the pointer or the keyboard's focus: the mark can't take the focus inside it. */
 function ConversationRow({ found, onOpen }: { found: FoundConversation; onOpen: () => void }) {
   const { lang } = useDisplay();
-  return (
-    <li>
-      <button
-        type="button"
-        className="room-matter-row"
-        data-testid="find-conversation"
-        data-order={found.order}
-        onClick={onOpen}
-      >
-        <span className="room-matter-name">
-          <Own text={found.title} />
-          {found.archived && (
-            <span className="room-find-archived" title={fw(lang, "Archived")}>
-              <IconArchived size={14} />
-              <span className="sr-only">{fw(lang, "Archived")}</span>
-            </span>
-          )}
-        </span>
-        <span className="room-matter-note">
-          <Say>{found.where}</Say>
-        </span>
-        {found.parts !== undefined && (
-          <span className="room-matter-match room-find-said">
-            <span className="text-quiet">{found.who}</span> <Parts parts={found.parts} />
+  const row = (
+    <button
+      type="button"
+      className="room-matter-row"
+      data-testid="find-conversation"
+      data-order={found.order}
+      onClick={onOpen}
+    >
+      <span className="room-matter-name">
+        <Own text={found.title} />
+        {found.archived && (
+          <span className="room-find-archived">
+            <IconArchived size={14} />
+            <span className="sr-only">{fw(lang, "Archived")}</span>
           </span>
         )}
-      </button>
-    </li>
+      </span>
+      <span className="room-matter-note">
+        <Say>{found.where}</Say>
+      </span>
+      {found.parts !== undefined && (
+        <span className="room-matter-match room-find-said">
+          <span className="text-quiet">{found.who}</span> <Parts parts={found.parts} />
+        </span>
+      )}
+    </button>
   );
+  return <li>{found.archived ? <Tooltip content={fw(lang, "Archived")}>{row}</Tooltip> : row}</li>;
 }
 
 export function FindResults({
