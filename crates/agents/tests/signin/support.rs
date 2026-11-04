@@ -3,20 +3,22 @@
 //! (a script named `claude-cli` picks its Claude CLI mode, one named `codex.js` its Codex mode),
 //! Codex's callback port moved to one that is always free (port 0); a clearing launcher that
 //! records each run's arguments and pid; a timer whose waits the test ends one by one, by
-//! duration; and a fixed clock. The base environment holds the four remote hints, which must
+//! duration; a fixed clock; and a test resolver, online until the test says otherwise, which
+//! records each name looked up. The base environment holds the four remote hints, which must
 //! never reach the child.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime};
 
 use clauseo_agents::testing::{TempDir, installed, write_file};
 use clauseo_agents::{
-    Agents, AgentsConfig, AgentsEvent, Clock, InstallState, NodeSearch, Platform, SigninNote,
-    SigninState,
+    Agents, AgentsConfig, AgentsEvent, Clock, InstallState, Installed, NodeSearch, Platform,
+    SigninNote, SigninState, TestResolver,
 };
 use clauseo_process::{LaunchSpec, Launched, Launcher, PassthroughLauncher, SpawnOptions, Timer};
 use clauseo_protocol::AgentId;
@@ -209,6 +211,8 @@ pub(crate) struct Fixture {
     pub(crate) config: AgentsConfig,
     pub(crate) timer: KeyedTimer,
     launches: Arc<Mutex<Vec<Launch>>>,
+    online: Arc<AtomicBool>,
+    lookups: Arc<Mutex<Vec<String>>>,
 }
 
 impl Fixture {
@@ -257,12 +261,41 @@ impl Fixture {
             base.insert("PATH".into(), path);
         }
         config.signin.base_env = base;
+        let online = Arc::new(AtomicBool::new(true));
+        let lookups: Arc<Mutex<Vec<String>>> = Arc::default();
+        let (up, seen) = (Arc::clone(&online), Arc::clone(&lookups));
+        config.install.resolver = Some(TestResolver(Arc::new(move |name: &str| {
+            lock(&seen).push(name.to_owned());
+            if up.load(Ordering::SeqCst) {
+                Ok(vec![([127, 0, 0, 1], 0).into()])
+            } else {
+                Err(std::io::Error::new(std::io::ErrorKind::NotFound, "offline"))
+            }
+        })));
         Fixture {
             data,
             config,
             timer: KeyedTimer::default(),
             launches: Arc::default(),
+            online,
+            lookups,
         }
+    }
+
+    /// Takes `agent`'s install out of `ready_for_tests`, so it starts `Missing`, and gives the
+    /// install [`Agents::finish_install_for_tests`] can make `Ready` later.
+    pub(crate) fn not_installed(&mut self, agent: &AgentId) -> Installed {
+        self.config.ready_for_tests.remove(agent).unwrap()
+    }
+
+    /// Whether the resolver answers (online) or fails every lookup (offline).
+    pub(crate) fn set_online(&self, online: bool) {
+        self.online.store(online, Ordering::SeqCst);
+    }
+
+    /// The names looked up so far.
+    pub(crate) fn lookups(&self) -> Vec<String> {
+        lock(&self.lookups).clone()
     }
 
     /// Starts `Agents` and waits for Claude's install to report `Ready`.
@@ -273,6 +306,20 @@ impl Fixture {
     /// Starts `Agents` and waits for `agent`'s install to report `Ready`; the events are
     /// `agent`'s.
     pub(crate) fn start_for(&self, agent: AgentId) -> (Agents, Events) {
+        let (agents, events) = self.start_quiet(agent);
+        events.until_install_ready();
+        (agents, events)
+    }
+
+    /// Starts `Agents` and waits for `agent`'s first install state, whatever it is.
+    pub(crate) fn start_missing(&self, agent: AgentId) -> (Agents, Events) {
+        let (agents, events) = self.start_quiet(agent);
+        let first = events.install_state();
+        assert!(matches!(first, InstallState::Missing { .. }), "{first:?}");
+        (agents, events)
+    }
+
+    fn start_quiet(&self, agent: AgentId) -> (Agents, Events) {
         let launcher: Arc<dyn Launcher> = Arc::new(Recording {
             inner: PassthroughLauncher::new(SpawnOptions::new().clear_env()),
             launches: Arc::clone(&self.launches),
@@ -283,7 +330,6 @@ impl Fixture {
             agent,
             notes: Mutex::default(),
         };
-        events.until_install_ready();
         (agents, events)
     }
 
@@ -362,13 +408,18 @@ pub(crate) struct Events {
 
 impl Events {
     fn until_install_ready(&self) {
+        let state = self.install_state();
+        assert!(matches!(state, InstallState::Ready { .. }), "{state:?}");
+    }
+
+    /// The agent's next install state; sign-in events before it are dropped.
+    pub(crate) fn install_state(&self) -> InstallState {
         loop {
             let event = futures::executor::block_on(self.rx.recv()).expect("the events closed");
             if let AgentsEvent::Install { agent, state } = event
                 && agent == self.agent
             {
-                assert!(matches!(state, InstallState::Ready { .. }), "{state:?}");
-                return;
+                return state;
             }
         }
     }

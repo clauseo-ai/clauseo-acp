@@ -45,12 +45,14 @@ struct Inner {
     next_job: u64,
 }
 
-/// An agent's running job: its ticket, its task, and where pasted codes go.
+/// An agent's running job: its ticket, its task, where pasted codes go, and, for a task that
+/// may queue, its kick on each install `Ready`.
 #[derive(Debug)]
 struct Slot {
     ticket: Ticket,
     task: Task,
     paste: Option<async_channel::Sender<PasteCode>>,
+    kick: Option<async_channel::Sender<()>>,
 }
 
 /// A reserved job, for the worker to start.
@@ -59,9 +61,11 @@ pub(crate) struct SigninStart {
     ticket: Ticket,
     task: Task,
     vendor: Vendor,
-    installed: Installed,
+    /// The install when the call was made; a task that queues reads it again before it starts.
+    installed: Option<Installed>,
     home: PathBuf,
     paste: Option<async_channel::Receiver<PasteCode>>,
+    kick: Option<async_channel::Receiver<()>>,
 }
 
 impl SigninHub {
@@ -218,10 +222,12 @@ impl SigninHub {
     /// Hands `code` to `agent`'s sign-in run, which writes it to the login's stdin.
     pub(super) fn paste(&self, agent: &AgentId, code: PasteCode) -> Result<(), SigninError> {
         let inner = self.lock();
+        // No run reads stdin while the sign-in is queued.
+        let queued = inner.states.get(agent) == Some(&SigninState::Queued);
         let sender = inner
             .jobs
             .get(agent)
-            .filter(|slot| !slot.ticket.cancel.is_cancelled())
+            .filter(|slot| !queued && !slot.ticket.cancel.is_cancelled())
             .and_then(|slot| slot.paste.as_ref());
         match sender.map(|sender| sender.try_send(code)) {
             Some(Ok(())) => Ok(()),
@@ -242,9 +248,11 @@ impl SigninHub {
             .ok_or_else(|| SigninError::UnknownAgent(agent.clone()))
     }
 
-    /// Checks `agent` can run `task` now and takes its job slot. A sign-in or sign-out stops
-    /// the running job (silently: it is no longer the agent's); a status check with a job
-    /// running reserves nothing, since that job reports.
+    /// Checks `agent` can run `task` and takes its job slot. A sign-in or sign-out stops the
+    /// running job (silently: it is no longer the agent's); a status check with a job running
+    /// reserves nothing, since that job reports. A task that starts a login run
+    /// ([`Task::queues`]) takes the slot with no install ready, and queues; any other is refused
+    /// with `NotReady`.
     fn reserve(
         &self,
         agent: &AgentId,
@@ -257,7 +265,9 @@ impl SigninHub {
             .get(agent)
             .and_then(|known| known.home.clone())
             .ok_or_else(|| SigninError::NoHome(agent.clone()))?;
-        let installed = installed.ok_or_else(|| SigninError::NotReady(agent.clone()))?;
+        if installed.is_none() && !task.queues() {
+            return Err(SigninError::NotReady(agent.clone()));
+        }
         let mut inner = self.lock();
         if let Some(running) = inner.jobs.get(agent) {
             if !task.supersedes() {
@@ -277,12 +287,19 @@ impl SigninHub {
         } else {
             (None, None)
         };
+        let (kick, kicked) = if task.queues() {
+            let (kick, kicked) = async_channel::bounded(1);
+            (Some(kick), Some(kicked))
+        } else {
+            (None, None)
+        };
         inner.jobs.insert(
             agent.clone(),
             Slot {
                 ticket: ticket.clone(),
                 task,
                 paste: sender,
+                kick,
             },
         );
         Ok(Some(SigninStart {
@@ -292,7 +309,22 @@ impl SigninHub {
             installed,
             home,
             paste: receiver,
+            kick: kicked,
         }))
+    }
+
+    /// `agent`'s install is `Ready`: a queued sign-in waiting for it looks again. A kick
+    /// already waiting is enough, so a full channel drops this one.
+    pub(crate) fn install_ready(&self, agent: &AgentId) {
+        if let Some(kick) = self
+            .lock()
+            .jobs
+            .get(agent)
+            .and_then(|slot| slot.kick.as_ref())
+        {
+            // Full means a kick already waits; closed means the job is gone.
+            let _sent = kick.try_send(());
+        }
     }
 
     /// Whether `ticket`'s job is still its agent's running job.
@@ -385,6 +417,7 @@ pub(super) fn start_job<T: Timer + Send + Sync + 'static>(worker: &Worker<T>, st
         installed,
         home,
         paste,
+        kick,
     } = start;
     let hub = &worker.shared.signin;
     if !hub.is_job(&ticket) {
@@ -427,7 +460,7 @@ pub(super) fn start_job<T: Timer + Send + Sync + 'static>(worker: &Worker<T>, st
     };
     let spawned = std::thread::Builder::new()
         .name(format!("clauseo-signin-{}", ticket.agent))
-        .spawn(move || job::run(job));
+        .spawn(move || job::run(job, kick));
     if spawned.is_err() {
         fail(&ticket);
     }

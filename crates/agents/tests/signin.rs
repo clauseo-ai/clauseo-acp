@@ -16,6 +16,10 @@ mod claude;
 mod codex;
 
 #[cfg(test)]
+#[path = "signin/queued.rs"]
+mod queued;
+
+#[cfg(test)]
 #[path = "signin/reuse_claude.rs"]
 mod reuse_claude;
 
