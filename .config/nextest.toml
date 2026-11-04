@@ -101,19 +101,21 @@ junit = { path = "junit.xml" }
 #     on Windows x64 in run 41840642164 (stage D's #366 gives them 160 s)
 #   - host search supersede race: search.rs:323 before the index settles (host's fix in progress)
 #   - desktop bridge cap: flaky on 11-04
-default-filter = 'not (package(clauseo-host) & binary(host) & test(=search::a_newer_search_cancels_older_ones_and_a_late_answer_is_dropped) | package(clauseo-desktop) & test(=bridge::tests::past_the_cap_the_driver_pauses_and_resubscribes_once_acks_catch_up))'
+#   - xtask::bin/xtask buildtime::worktree::tests::parts::a_real_cargo_build_names_each_package_it_rebuilt_besides_the_one_asked: failed then passed on retry 1 time since 2026-11-04; first https://github.com/clauseo-ai/clauseo-acp/actions/runs/41909491298/job/126853033937 (autoquarantine)
+#   - xtask::bin/xtask process::tests::tree::a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does: failed then passed on retry 1 time since 2026-11-04; first https://github.com/clauseo-ai/clauseo-acp/actions/runs/41912294482/job/126862999903 (autoquarantine)
+default-filter = 'not (package(clauseo-host) & binary(host) & test(=search::a_newer_search_cancels_older_ones_and_a_late_answer_is_dropped) | package(clauseo-desktop) & test(=bridge::tests::past_the_cap_the_driver_pauses_and_resubscribes_once_acks_catch_up) | package(xtask) & binary(xtask) & test(=buildtime::worktree::tests::parts::a_real_cargo_build_names_each_package_it_rebuilt_besides_the_one_asked) | package(xtask) & binary(xtask) & test(=process::tests::tree::a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does))'
 # On Windows the agents install tests too (their stalls are the Windows runner's; Linux and macOS
 # keep gating them while their crate changes).
 [[profile.ci.overrides]]
 platform = 'cfg(windows)'
-default-filter = 'not (package(clauseo-host) & binary(host) & test(=search::a_newer_search_cancels_older_ones_and_a_late_answer_is_dropped) | package(clauseo-desktop) & test(=bridge::tests::past_the_cap_the_driver_pauses_and_resubscribes_once_acks_catch_up) | package(clauseo-agents) & binary(install))'
+default-filter = 'not (package(clauseo-host) & binary(host) & test(=search::a_newer_search_cancels_older_ones_and_a_late_answer_is_dropped) | package(clauseo-desktop) & test(=bridge::tests::past_the_cap_the_driver_pauses_and_resubscribes_once_acks_catch_up) | package(xtask) & binary(xtask) & test(=buildtime::worktree::tests::parts::a_real_cargo_build_names_each_package_it_rebuilt_besides_the_one_asked) | package(xtask) & binary(xtask) & test(=process::tests::tree::a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does) | package(clauseo-agents) & binary(install))'
 
 # The quarantined tests alone (see profile ci), run nightly by ci.yml's `quarantine` job, with the
 # ci profile's timeouts and retry, so a fixed one shows as passing.
 [profile.quarantine]
 retries = 1
 failure-output = "immediate-final"
-default-filter = 'package(clauseo-host) & binary(host) & test(=search::a_newer_search_cancels_older_ones_and_a_late_answer_is_dropped) | package(clauseo-desktop) & test(=bridge::tests::past_the_cap_the_driver_pauses_and_resubscribes_once_acks_catch_up)'
+default-filter = 'package(clauseo-host) & binary(host) & test(=search::a_newer_search_cancels_older_ones_and_a_late_answer_is_dropped) | package(clauseo-desktop) & test(=bridge::tests::past_the_cap_the_driver_pauses_and_resubscribes_once_acks_catch_up) | package(xtask) & binary(xtask) & test(=buildtime::worktree::tests::parts::a_real_cargo_build_names_each_package_it_rebuilt_besides_the_one_asked) | package(xtask) & binary(xtask) & test(=process::tests::tree::a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does)'
 [[profile.quarantine.overrides]]
 platform = 'cfg(windows)'
-default-filter = 'package(clauseo-host) & binary(host) & test(=search::a_newer_search_cancels_older_ones_and_a_late_answer_is_dropped) | package(clauseo-desktop) & test(=bridge::tests::past_the_cap_the_driver_pauses_and_resubscribes_once_acks_catch_up) | package(clauseo-agents) & binary(install)'
+default-filter = 'package(clauseo-host) & binary(host) & test(=search::a_newer_search_cancels_older_ones_and_a_late_answer_is_dropped) | package(clauseo-desktop) & test(=bridge::tests::past_the_cap_the_driver_pauses_and_resubscribes_once_acks_catch_up) | package(xtask) & binary(xtask) & test(=buildtime::worktree::tests::parts::a_real_cargo_build_names_each_package_it_rebuilt_besides_the_one_asked) | package(xtask) & binary(xtask) & test(=process::tests::tree::a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does) | package(clauseo-agents) & binary(install)'
