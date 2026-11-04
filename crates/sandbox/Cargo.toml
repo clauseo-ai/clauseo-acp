@@ -65,7 +65,9 @@ rustix = { workspace = true, features = ["fs", "process"] }
 # The upstream lookup's WinHTTP calls (src/proxy/upstream/windows.rs).
 # The folder check's file, volume and security calls (src/windows.rs and its tests): CreateFileW,
 # GetFinalPathNameByHandleW, GetVolumePathNameW, GetDriveTypeW (DRIVE_REMOTE), the volume's
-# FILE_PERSISTENT_ACLS flag, and the test's SDDL and SetNamedSecurityInfoW.
+# FILE_PERSISTENT_ACLS flag, GetFileSecurityW and AccessCheck on a duplicated token
+# (GetCurrentProcess and OpenProcessToken from Win32_System_Threading), and the test's SDDL and
+# SetNamedSecurityInfoW.
 [target.'cfg(windows)'.dependencies]
 socket2 = { workspace = true }
 windows = { workspace = true, features = [
@@ -76,6 +78,7 @@ windows = { workspace = true, features = [
   "Win32_Security_Authorization",
   "Win32_Storage_FileSystem",
   "Win32_System_SystemServices",
+  "Win32_System_Threading",
   "Win32_System_WindowsProgramming",
 ] }
 

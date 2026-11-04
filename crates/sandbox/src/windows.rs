@@ -11,23 +11,33 @@ use std::io;
 use std::os::windows::ffi::OsStrExt as _;
 use std::path::Path;
 
-use windows::Win32::Foundation::{CloseHandle, ERROR_ACCESS_DENIED, HANDLE};
+use windows::Win32::Foundation::{
+    CloseHandle, ERROR_ACCESS_DENIED, ERROR_INSUFFICIENT_BUFFER, HANDLE,
+};
+use windows::Win32::Security::{
+    AccessCheck, DACL_SECURITY_INFORMATION, DuplicateToken, GENERIC_MAPPING,
+    GROUP_SECURITY_INFORMATION, GetFileSecurityW, OWNER_SECURITY_INFORMATION, PRIVILEGE_SET,
+    PSECURITY_DESCRIPTOR, SecurityImpersonation, TOKEN_DUPLICATE, TOKEN_QUERY,
+};
 use windows::Win32::Storage::FileSystem::{
-    BY_HANDLE_FILE_INFORMATION, CreateFileW, FILE_ATTRIBUTE_DIRECTORY, FILE_FLAG_BACKUP_SEMANTICS,
+    BY_HANDLE_FILE_INFORMATION, CreateFileW, FILE_ALL_ACCESS, FILE_ATTRIBUTE_DIRECTORY,
+    FILE_FLAG_BACKUP_SEMANTICS, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, FILE_GENERIC_WRITE,
     FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, GetDriveTypeW,
     GetFileInformationByHandle, GetFinalPathNameByHandleW, GetVolumeInformationByHandleW,
-    GetVolumePathNameW, OPEN_EXISTING, READ_CONTROL, VOLUME_NAME_DOS, WRITE_DAC,
+    GetVolumePathNameW, OPEN_EXISTING, VOLUME_NAME_DOS, WRITE_DAC,
 };
 use windows::Win32::System::SystemServices::FILE_PERSISTENT_ACLS;
+use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 use windows::Win32::System::WindowsProgramming::DRIVE_REMOTE;
-use windows::core::PCWSTR;
+use windows::core::{BOOL, PCWSTR};
 
 /// Whether an agent sandbox that grants by ACL can prepare a folder on Windows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FolderSupport {
     /// A local volume with permissions, and the caller can change the folder's permissions.
     Ok,
-    /// The caller can't change the folder's permissions (an open for `WRITE_DAC` is denied).
+    /// The caller can't change the folder's permissions: the folder's DACL doesn't grant the
+    /// caller `WRITE_DAC`, or the permissions can't be read.
     CantChangePermissions,
     /// The folder is on a network drive: a UNC path, a mapped drive, or a link that resolves to
     /// one.
@@ -41,16 +51,17 @@ pub enum FolderSupport {
 ///
 /// 1. Open the folder. A missing path is `NotFound`; a file is `InvalidInput`.
 /// 2. `Network` when the folder's final path is a UNC path, or its volume's drive type is
-///    `DRIVE_REMOTE`.
+///    `DRIVE_REMOTE`. Network folders go no further: the server decides there.
 /// 3. `NoPermissions` when the volume lacks `FILE_PERSISTENT_ACLS`.
-/// 4. `CantChangePermissions` when opening the folder for `READ_CONTROL | WRITE_DAC` is denied
-///    (`ERROR_ACCESS_DENIED`); any other failure is an error. Otherwise `Ok`.
+/// 4. `CantChangePermissions` when the folder's DACL, checked with `AccessCheck` for this
+///    process's token, doesn't grant `WRITE_DAC`, or its permissions can't be read. Otherwise
+///    `Ok`.
 ///
 /// Every handle is closed on every path. A path over `MAX_PATH` goes to the Win32 calls in the
 /// `\\?\` form; no test makes one yet. The answer is for this process's token, which the agent
-/// inherits. A token with `SeBackupPrivilege` or `SeRestorePrivilege` enabled would pass step 4
-/// whatever the folder's DACL says (`FILE_FLAG_BACKUP_SEMANTICS`); Clauseo never enables them, and
-/// an administrator's token has them disabled.
+/// inherits. `AccessCheck` evaluates the DACL, the owner rights and the integrity label as
+/// `SetNamedSecurityInfoW` will meet them. Backup and restore privileges don't affect it, so a
+/// token that holds them gets the same answer as one that doesn't.
 pub fn folder_support(path: &Path) -> io::Result<FolderSupport> {
     let wide = verbatim_wide(path)?;
     let folder = open(&wide, FILE_READ_ATTRIBUTES.0).map_err(|error| os_error(&error))?;
@@ -67,15 +78,14 @@ pub fn folder_support(path: &Path) -> io::Result<FolderSupport> {
     if volume_flags(&folder)? & FILE_PERSISTENT_ACLS == 0 {
         return Ok(FolderSupport::NoPermissions);
     }
-    match open(&wide, READ_CONTROL.0 | WRITE_DAC.0) {
-        Ok(handle) => {
-            drop(handle);
-            Ok(FolderSupport::Ok)
-        }
-        Err(error) if error.code() == ERROR_ACCESS_DENIED.to_hresult() => {
-            Ok(FolderSupport::CantChangePermissions)
-        }
-        Err(error) => Err(os_error(&error)),
+    let Some(mut descriptor) = security_descriptor(&wide)? else {
+        return Ok(FolderSupport::CantChangePermissions);
+    };
+    let token = impersonation_token()?;
+    if grants_write_dac(&mut descriptor, token.0)? {
+        Ok(FolderSupport::Ok)
+    } else {
+        Ok(FolderSupport::CantChangePermissions)
     }
 }
 
@@ -84,7 +94,8 @@ struct Handle(HANDLE);
 
 impl Drop for Handle {
     fn drop(&mut self) {
-        // SAFETY: the handle came from a successful CreateFileW and is closed only here, once.
+        // SAFETY: the handle came from a successful CreateFileW, OpenProcessToken or
+        // DuplicateToken and is closed only here, once.
         if let Err(error) = unsafe { CloseHandle(self.0) } {
             tracing::debug!(code = error.code().0, "CloseHandle failed");
         }
@@ -174,6 +185,127 @@ fn volume_flags(folder: &Handle) -> io::Result<u32> {
     Ok(flags)
 }
 
+/// The folder's owner, group and DACL, as a self-relative security descriptor in u64 words, so
+/// its structures are aligned. `None` when the caller can't read them (`ERROR_ACCESS_DENIED`).
+fn security_descriptor(wide: &[u16]) -> io::Result<Option<Vec<u64>>> {
+    const INFORMATION: u32 =
+        OWNER_SECURITY_INFORMATION.0 | GROUP_SECURITY_INFORMATION.0 | DACL_SECURITY_INFORMATION.0;
+    let mut needed = 0_u32;
+    // SAFETY: `wide` is NUL-terminated and outlives the call; with no buffer the call only
+    // reports the size, into `needed`, a live out-pointer.
+    let sized =
+        unsafe { GetFileSecurityW(PCWSTR(wide.as_ptr()), INFORMATION, None, 0, &raw mut needed) };
+    if sized.as_bool() {
+        return Err(io::Error::other(
+            "GetFileSecurityW succeeded with no buffer",
+        ));
+    }
+    // The size call fails with ERROR_INSUFFICIENT_BUFFER; a denial here is the answer.
+    let error = windows::core::Error::from_thread();
+    if error.code() == ERROR_ACCESS_DENIED.to_hresult() {
+        return Ok(None);
+    }
+    if error.code() != ERROR_INSUFFICIENT_BUFFER.to_hresult() {
+        return Err(os_error(&error));
+    }
+    let mut descriptor = words_for(needed)?;
+    let mut returned = 0_u32;
+    // SAFETY: `wide` is NUL-terminated and outlives the call; `descriptor` is a writable buffer
+    // of `needed` bytes or more, and `returned` a live out-pointer.
+    let read = unsafe {
+        GetFileSecurityW(
+            PCWSTR(wide.as_ptr()),
+            INFORMATION,
+            Some(PSECURITY_DESCRIPTOR(descriptor.as_mut_ptr().cast())),
+            needed,
+            &raw mut returned,
+        )
+    };
+    if read.as_bool() {
+        return Ok(Some(descriptor));
+    }
+    let error = windows::core::Error::from_thread();
+    if error.code() == ERROR_ACCESS_DENIED.to_hresult() {
+        Ok(None)
+    } else {
+        Err(os_error(&error))
+    }
+}
+
+/// A duplicate of this process's token as an impersonation token, which `AccessCheck` takes. The
+/// process token and the duplicate are both closed on drop.
+fn impersonation_token() -> io::Result<Handle> {
+    let mut process = HANDLE::default();
+    // SAFETY: GetCurrentProcess returns a pseudo-handle that needs no close; `process` is a live
+    // out-pointer, and the token it receives is closed by `Handle` below.
+    unsafe {
+        OpenProcessToken(
+            GetCurrentProcess(),
+            TOKEN_DUPLICATE | TOKEN_QUERY,
+            &raw mut process,
+        )
+    }
+    .map_err(|error| os_error(&error))?;
+    let process = Handle(process);
+    let mut duplicate = HANDLE::default();
+    // SAFETY: `process.0` is the open token, which lives until `process` drops at the end of
+    // this function; `duplicate` is a live out-pointer.
+    unsafe { DuplicateToken(process.0, SecurityImpersonation, &raw mut duplicate) }
+        .map_err(|error| os_error(&error))?;
+    Ok(Handle(duplicate))
+}
+
+/// Whether `token` is granted `WRITE_DAC` by the security descriptor `descriptor`, from
+/// `AccessCheck`. The privilege-set buffer starts at 256 bytes; if `AccessCheck` reports it too
+/// small, it is sized to the length it reports and the check runs once more.
+fn grants_write_dac(descriptor: &mut [u64], token: HANDLE) -> io::Result<bool> {
+    let mapping = GENERIC_MAPPING {
+        GenericRead: FILE_GENERIC_READ.0,
+        GenericWrite: FILE_GENERIC_WRITE.0,
+        GenericExecute: FILE_GENERIC_EXECUTE.0,
+        GenericAll: FILE_ALL_ACCESS.0,
+    };
+    let mut privileges = words_for(PRIVILEGE_BYTES)?;
+    let mut length = PRIVILEGE_BYTES;
+    let mut granted = 0_u32;
+    let mut status = BOOL(0);
+    for attempt in 0..2 {
+        // SAFETY: `descriptor` and `privileges` are writable buffers that live for the call, and
+        // `length` is the size of the privilege set buffer; `mapping`, `granted` and `status`
+        // are live for the call too.
+        let call = unsafe {
+            AccessCheck(
+                PSECURITY_DESCRIPTOR(descriptor.as_mut_ptr().cast()),
+                token,
+                WRITE_DAC.0,
+                &raw const mapping,
+                Some(privileges.as_mut_ptr().cast::<PRIVILEGE_SET>()),
+                &raw mut length,
+                &raw mut granted,
+                &raw mut status,
+            )
+        };
+        match call {
+            Ok(()) => return Ok(status.as_bool()),
+            Err(error)
+                if attempt == 0 && error.code() == ERROR_INSUFFICIENT_BUFFER.to_hresult() =>
+            {
+                privileges = words_for(length)?;
+            }
+            Err(error) => return Err(os_error(&error)),
+        }
+    }
+    Err(io::Error::other(
+        "AccessCheck asked for a larger privilege set twice",
+    ))
+}
+
+/// A zeroed buffer of u64 words, enough for `bytes` bytes.
+fn words_for(bytes: u32) -> io::Result<Vec<u64>> {
+    let bytes = usize::try_from(bytes).map_err(io::Error::other)?;
+    Ok(vec![0_u64; bytes.div_ceil(size_of::<u64>())])
+}
+
 /// `path` as an absolute, NUL-terminated UTF-16 string in the `\\?\` form, which lifts the
 /// `MAX_PATH` limit. A UNC path becomes `\\?\UNC\...`.
 fn verbatim_wide(path: &Path) -> io::Result<Vec<u16>> {
@@ -216,6 +348,10 @@ fn plain_text(text: &[u16]) -> Vec<u16> {
 
 /// `MAX_PATH`, counted with the NUL.
 const MAX_PATH: usize = 260;
+
+/// The privilege-set buffer's first size, in bytes: enough for a token with no privileges to
+/// check, and `AccessCheck` names the size it needs when this is too small.
+const PRIVILEGE_BYTES: u32 = 256;
 
 /// The Win32 error that `error` carries, as an `io::Error`. The calls here report
 /// `HRESULT_FROM_WIN32(code)`, which keeps the code in its low 16 bits.
