@@ -1215,7 +1215,7 @@ expression: counts_schema()
       "oneOf": [
         {
           "const": "macos",
-          "description": "macOS, `os_major` 13 to 26.",
+          "description": "macOS, `os_major` 13 to 40.",
           "type": "string"
         },
         {
@@ -1231,7 +1231,7 @@ expression: counts_schema()
       ]
     },
     "OsMajor": {
-      "maximum": 26,
+      "maximum": 40,
       "minimum": 10,
       "type": "integer"
     },

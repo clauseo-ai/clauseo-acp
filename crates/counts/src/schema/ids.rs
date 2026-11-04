@@ -243,11 +243,15 @@ impl super::tests::sample::Sample for StrictErrorCode {
     }
 }
 
-/// The OS and its major version, as only the schema's pairs: macOS 13 to 26, Windows 10 or 11,
+/// The last macOS major version the schema takes. macOS is numbered by year since 26 (2025), so
+/// 40 is the 2039 release: headroom for any build sent today, and a schema change before then.
+pub const MACOS_LAST: u8 = 40;
+
+/// The OS and its major version, as only the schema's pairs: macOS 13 to 40, Windows 10 or 11,
 /// Linux with none.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Platform {
-    /// macOS, major version 13 to 26.
+    /// macOS, major version 13 to 40.
     Macos(OsMajor),
     /// Windows 10 or 11.
     Windows(OsMajor),
@@ -256,7 +260,7 @@ pub enum Platform {
 }
 
 impl Platform {
-    /// macOS `major`, or `None` outside 13 to 26.
+    /// macOS `major`, or `None` outside 13 to 40.
     pub fn macos(major: u8) -> Option<Platform> {
         Platform::from_parts(Os::Macos, OsMajor::new(major))
     }
@@ -270,7 +274,7 @@ impl Platform {
     pub fn from_parts(os: Os, major: Option<OsMajor>) -> Option<Platform> {
         let number = major.map(OsMajor::get);
         match (os, number) {
-            (Os::Macos, Some(13..=26)) => major.map(Platform::Macos),
+            (Os::Macos, Some(13..=MACOS_LAST)) => major.map(Platform::Macos),
             (Os::Windows, Some(10 | 11)) => major.map(Platform::Windows),
             (Os::Linux, None) => Some(Platform::Linux),
             _ => None,
@@ -298,7 +302,7 @@ impl Platform {
 #[cfg(test)]
 impl super::tests::sample::Sample for Platform {
     fn sample(tape: &mut super::tests::sample::Tape) -> Self {
-        let all: Vec<Platform> = (13..=26)
+        let all: Vec<Platform> = (13..=MACOS_LAST)
             .filter_map(Platform::macos)
             .chain([10, 11].into_iter().filter_map(Platform::windows))
             .chain([Platform::Linux])

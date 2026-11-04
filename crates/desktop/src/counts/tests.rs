@@ -4,8 +4,12 @@ use clauseo_counts::schema::{BreakKind, BreakThen, Feature, OnboardingStep, Stri
 use clauseo_protocol::ErrorCode;
 use serde_json::{Value, json};
 
+use clauseo_counts::Mode;
+use clauseo_settings::SystemFiles;
+
 use super::ui::{UiBreakKind, UiBreakThen, UiFeature, UiOnboardingStep};
 use super::*;
+use crate::test_support::{Scratch, block_on};
 
 fn parse(value: Value) -> Result<UiCount, serde_json::Error> {
     serde_json::from_value(value)
@@ -108,9 +112,8 @@ fn every_ui_value_is_the_counts_value_of_the_same_name() {
     }
 }
 
-/// Counts in memory (before the first act), in a data folder that is never written.
-fn in_memory() -> Counts {
-    let about = clauseo_counts::About {
+fn test_about() -> clauseo_counts::About {
+    clauseo_counts::About {
         version: "3.0.4".parse().unwrap(),
         channel: clauseo_counts::schema::Channel::Stable,
         platform: clauseo_counts::schema::Platform::Linux,
@@ -118,9 +121,94 @@ fn in_memory() -> Counts {
         language: clauseo_counts::schema::Language::En,
         install_type: clauseo_counts::schema::InstallType::PerUser,
         managed: false,
-    };
+    }
+}
+
+/// Counts in memory (before the first act), in a data folder that is never written.
+fn in_memory() -> Counts {
     let dir = std::env::temp_dir().join(format!("clauseo-desktop-counts-{}", std::process::id()));
-    Counts::open(&dir, about, true, false, 1)
+    Counts::open(&dir, test_about(), true, false, 1)
+}
+
+/// A data folder holding `settings` as its `settings.json` and the first-act marker.
+fn after_first_act(test: &str, settings: &[u8]) -> (Scratch, Locations) {
+    let scratch = Scratch::folder(test, &[]);
+    scratch.file("settings.json", settings);
+    scratch.file(clauseo_counts::FIRST_ACT, b"");
+    let locations = Locations::under_root(scratch.path());
+    (scratch, locations)
+}
+
+/// A settings file that does not read whole leaves counts off, though the default is on: no file
+/// under `counts/`, and a tick that reads the switch on still saves and sends nothing.
+#[test]
+fn a_damaged_settings_file_opens_the_counts_off() {
+    for (name, settings) in [
+        ("truncated", &br#"{"privacy":{"counts":false"#[..]),
+        ("not-json", &b"privacy = off"[..]),
+        ("mistyped", &br#"{"privacy":{"counts":"no"}}"#[..]),
+    ] {
+        let (scratch, locations) = after_first_act(&format!("damaged-{name}"), settings);
+        let effective = Effective::load(&locations, &SystemFiles, &[]);
+        assert!(
+            effective.settings().privacy.counts,
+            "{name}: the default stands"
+        );
+        assert!(!counts_on(&effective), "{name}");
+        let counts = open_with(&locations, &effective, test_about());
+        assert_eq!(counts.mode(), Mode::Off, "{name}");
+        counts.bump(clauseo_counts::schema::Event::FeatureUsed(
+            clauseo_counts::schema::FeatureUsed {
+                feature: Feature::Versions,
+            },
+        ));
+        let upload = HttpsUpload::to(None);
+        let noon = Time::from_unix_secs(1_793_793_600);
+        block_on(tick_once(&counts, &upload, noon, std::future::ready(true)));
+        assert_eq!(counts.mode(), Mode::Off, "{name}");
+        assert!(!scratch.path().join("counts").exists(), "{name}");
+    }
+    // Whole files read as written.
+    let (_on, locations) = after_first_act("whole-on", br#"{"privacy":{"counts":true}}"#);
+    assert!(counts_on(&Effective::load(&locations, &SystemFiles, &[])));
+    let (_off, locations) = after_first_act("whole-off", br#"{"privacy":{"counts":false}}"#);
+    assert!(!counts_on(&Effective::load(&locations, &SystemFiles, &[])));
+    let (_other, locations) = after_first_act("other-key", br#"{"ui":{"theme":7}}"#);
+    assert!(counts_on(&Effective::load(&locations, &SystemFiles, &[])));
+}
+
+/// The host turns counts on (`set_enabled(true)`, then its settings write). A tick whose read
+/// of the switch was answered before that write sees off: it must not turn the counts off again.
+/// An off read with the switch unmoved still turns them off.
+#[test]
+fn a_tick_never_turns_off_counts_switched_on_after_its_read() {
+    let scratch = Scratch::folder("tick-race", &[]);
+    let counts = Counts::open(scratch.path(), test_about(), true, true, 1);
+    let upload = HttpsUpload::to(None);
+    let noon = Time::from_unix_secs(1_793_793_600);
+    counts.set_enabled(false).unwrap();
+    assert_eq!(counts.mode(), Mode::Off);
+    // The read answers off (the settings still say false), then the host's on lands.
+    let host = counts.clone();
+    let stale_read = async move {
+        let answered = false;
+        host.set_enabled(true).unwrap();
+        answered
+    };
+    block_on(tick_once(&counts, &upload, noon, stale_read));
+    assert_eq!(
+        counts.mode(),
+        Mode::Saving,
+        "the stale off turned counts off"
+    );
+    // A fresh off, with no switch since the read, turns them off.
+    block_on(tick_once(
+        &counts,
+        &upload,
+        noon.plus(60),
+        std::future::ready(false),
+    ));
+    assert_eq!(counts.mode(), Mode::Off);
 }
 
 #[test]

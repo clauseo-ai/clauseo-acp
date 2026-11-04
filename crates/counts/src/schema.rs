@@ -31,8 +31,8 @@ pub use events::{
     SignIn, Stall, TimeOpen, Update,
 };
 pub use ids::{
-    BadText, InstallId, Platform, StrictErrorCode, TallyId, UUID_V4_PATTERN, VERSION_PATTERN,
-    Version,
+    BadText, InstallId, MACOS_LAST, Platform, StrictErrorCode, TallyId, UUID_V4_PATTERN,
+    VERSION_PATTERN, Version,
 };
 pub use numbers::{Count, One, OsMajor, OutOfRange, SchemaVersion, TextSize, Tries};
 pub use report::{

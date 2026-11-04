@@ -128,9 +128,9 @@ capped_int! {
 }
 
 capped_int! {
-    "The OS's major version: macOS 13 to 26, Windows 10 or 11 (none on Linux). Which pairs are"
+    "The OS's major version: macOS 13 to 40, Windows 10 or 11 (none on Linux). Which pairs are"
     "allowed is [`super::Platform`]'s rule."
-    pub struct OsMajor(u8), 10..=26;
+    pub struct OsMajor(u8), 10..=40;
 }
 
 capped_int! {

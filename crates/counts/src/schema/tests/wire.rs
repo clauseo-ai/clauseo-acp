@@ -311,7 +311,7 @@ fn each_number_is_checked_against_its_own_fields_cap() {
     let schema = counts_schema();
     assert_eq!(breaks_schema(&schema, &json), Vec::<String>::new());
     // Each one under 9,999, so only its own cap can catch it.
-    for (key, past) in [("schema", 2), ("os_major", 27), ("n", 10_000), ("n", 0)] {
+    for (key, past) in [("schema", 2), ("os_major", 41), ("n", 10_000), ("n", 0)] {
         let mut broken = json.clone();
         assert!(set_all(&mut broken, key, &json!(past)) > 0, "{key}");
         assert_ne!(

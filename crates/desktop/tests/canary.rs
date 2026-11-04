@@ -32,7 +32,7 @@ use clauseo_counts::schema::{
     Agent, AnswerOutcome, Batch, Day, Delivery, MatterKind, QuestionSent, Time,
 };
 use clauseo_counts::{Counts, Mode, UploadPath};
-use clauseo_desktop::counts_for_tests::{open, tick_once};
+use clauseo_desktop::counts_for_tests::{open, open_with, tick_once};
 use clauseo_host::{Host, HostConfig, HostHandle};
 use clauseo_process::{PassthroughLauncher, SpawnOptions};
 use clauseo_protocol::{
@@ -203,6 +203,20 @@ fn until_counted(counts: &Counts) {
     });
 }
 
+/// The envelope for a machine the schema has no value for: a macOS within it.
+fn fixed_about() -> clauseo_counts::About {
+    use clauseo_counts::schema::{Arch, Channel, InstallType, Language, Platform, Version};
+    clauseo_counts::About {
+        version: Version::new(0, 0, 0).unwrap(),
+        channel: Channel::Stable,
+        platform: Platform::macos(15).unwrap(),
+        arch: Arch::Aarch64,
+        language: Language::En,
+        install_type: InstallType::PerUser,
+        managed: false,
+    }
+}
+
 /// Ticks `counts` as the app's task does, every `step` seconds from `from` while before `to`.
 fn tick_through(
     counts: &Counts,
@@ -214,7 +228,7 @@ fn tick_through(
 ) {
     let mut now = from;
     while now.unix_secs() < to.unix_secs() {
-        futures::executor::block_on(tick_once(counts, upload, now, on));
+        futures::executor::block_on(tick_once(counts, upload, now, std::future::ready(on())));
         now = now.plus(step);
     }
 }
@@ -360,8 +374,10 @@ fn session_in_a_planted_environment() {
     // The counts, opened as the app opens them, ticked at a fixed day's noon: the counts take
     // time as an input, so the test moves it while the host keeps its real clock.
     let effective = Effective::load(&locations, &SystemFiles, &[]);
+    // On a machine the schema has no value for, desktop opens no counts; the session is still
+    // searched, with a fixed envelope, so the test never depends on the runner's OS version.
     let counts = open(&locations, &effective, Some(&exe))
-        .expect("the schema has a value for this OS and CPU");
+        .unwrap_or_else(|| open_with(&locations, &effective, fixed_about()));
     let upload = RecordingUpload::default();
     let on = || {
         Effective::load(&locations, &SystemFiles, &[])
@@ -370,7 +386,7 @@ fn session_in_a_planted_environment() {
             .counts
     };
     let noon = Day::from_ymd(2026, 11, 4).unwrap().start().plus(12 * HOUR);
-    futures::executor::block_on(tick_once(&counts, &upload, noon, &on));
+    futures::executor::block_on(tick_once(&counts, &upload, noon, std::future::ready(on())));
 
     let launcher = PassthroughLauncher::new(SpawnOptions::new().home(home.clone()));
     let config = HostConfig::new(effective, Arc::new(launcher))
