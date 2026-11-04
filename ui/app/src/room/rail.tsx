@@ -165,9 +165,10 @@ export function RoomRail({
   // where the pointer and the focus are, as the last events said, for a line that arrives later (rail-snooze.tsx)
   const onRail = useRef({ pointer: false, focus: false });
   const snooze = useSnooze(transport, () => onRail.current.pointer || onRail.current.focus);
-  // Snooze and Done's later chunk, warmed once the rail is up and the page is idle (none where there's no idle callback)
+  // Snooze and Done's later chunk, warmed once the rail is up and the page is idle (at mount where there's no idle callback)
   useEffect(() => {
-    if (typeof requestIdleCallback !== "function") return;
+    // no idle callback (WebKit's WKWebView): at mount, as the thread chunk is warmed
+    if (typeof requestIdleCallback !== "function") return void preloadSnooze();
     const idle = requestIdleCallback(() => void preloadSnooze());
     return () => cancelIdleCallback(idle);
   }, []);
