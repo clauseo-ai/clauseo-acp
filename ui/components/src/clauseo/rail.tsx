@@ -20,7 +20,8 @@ import { MatterRow, type MatterRowProps } from "./rail-matter.tsx";
 export type { MatterRowProps, MatterState } from "./rail-matter.tsx";
 export { MatterRow };
 
-export type RailGroup = { when: string; matters: readonly MatterRowProps[] };
+/** A group of rows under its heading; testId goes on its section. */
+export type RailGroup = { when: string; matters: readonly MatterRowProps[]; testId?: string };
 
 /** A matter the rail can find: its row, with its client and case number. */
 export type FindableRow = MatterRowProps & { client: string; caseNo: string };
@@ -160,6 +161,9 @@ export function Rail({
   newMatterRef,
   empty = true,
   onEscape,
+  aside,
+  list,
+  onHover,
 }: {
   groups: readonly RailGroup[];
   pinned?: readonly MatterRowProps[];
@@ -191,6 +195,12 @@ export function Rail({
   testIds?: { newMatter?: string; scratch?: string; find?: string; settings?: string };
   /** Optional: New matter's button, so a dialog it opens can give focus back to it on close. */
   newMatterRef?: Ref<HTMLButtonElement>;
+  /** Optional: what stands under Find on the head (Matters / Recent), hidden while Find has the focus or words. */
+  aside?: ReactNode;
+  /** Optional: a list in the groups' place (Recent), while Find has neither the focus nor words. */
+  list?: ReactNode;
+  /** Optional: the pointer came over the rail (true) or left it (false). */
+  onHover?: (over: boolean) => void;
 }) {
   const w = useWords();
   const room = useRoom();
@@ -326,6 +336,8 @@ export function Rail({
       id={room.id("rail")}
       aria-label={label === undefined ? w.t("Matters") : `${w.t("Matters")}, ${label}`}
       data-open={open ? "" : undefined}
+      onPointerEnter={onHover === undefined ? undefined : () => onHover(true)}
+      onPointerLeave={onHover === undefined ? undefined : () => onHover(false)}
       onPointerDownCapture={() => {
         pressing.current = true;
       }}
@@ -377,8 +389,11 @@ export function Rail({
             }}
           />
         )}
+        {!finding && aside}
       </div>
-      {shown !== "none" && shown.length === 0 ? (
+      {list !== undefined && !finding ? (
+        list
+      ) : shown !== "none" && shown.length === 0 ? (
         empty && <NoMatters />
       ) : shown === "none" ? (
         <div className="room-find-none" role="status">
@@ -395,7 +410,7 @@ export function Rail({
           data-finding={finding ? "" : undefined}
         >
           {shown.map((g) => (
-            <section key={g.when}>
+            <section key={g.when} data-testid={g.testId}>
               <Heading level={2} depth={1} className="room-when">
                 {g.when}
               </Heading>

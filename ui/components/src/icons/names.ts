@@ -54,6 +54,11 @@ export const ICON_NAMES = [
   { component: "IconFolder", source: "folder", meaning: "A folder beyond the matter" },
   { component: "IconWebsite", source: "website", meaning: "A website" },
   {
+    component: "IconFailed",
+    source: "triangleAlert",
+    meaning: "Failed: a conversation's answer failed, on the rail's status line",
+  },
+  {
     component: "IconBreak",
     source: "circleAlert",
     meaning:

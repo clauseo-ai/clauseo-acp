@@ -9,6 +9,8 @@
 // a630cec77eac6568b989e87e4947a8bfe45caacd) on 3 Nov 2026, each drawn over its source at that release and checked
 // against it. The tool kinds' glyphs are in tool-kinds.tsx, cut the same way, and re-exported here; the three that
 // reuse a shape already here (IconToolEdit, IconToolSearch, IconToolFetch) stay in this file.
+// IconFailed was cut from Lucide 1.66.0 (triangle-alert, the same commit) on 4 Nov 2026 for U16a, the same way: its
+// rounded corners drawn square, its triangle drawn in from the edge so the miter joins stay inside the 20 px box.
 import { Icon, type IconProps } from "./icon.tsx";
 
 export {
@@ -249,6 +251,18 @@ export function IconWebsite(props: IconProps) {
         d="M10 2.75c-2.25 2-3.25 4.5-3.25 7.25s1 5.25 3.25 7.25c2.25-2 3.25-4.5 3.25-7.25S12.25 4.75 10 2.75z"
         vectorEffect="non-scaling-stroke"
       />
+    </Icon>
+  );
+}
+
+/** Failed: a conversation's answer failed, on the rail's status line (source: triangleAlert, Lucide triangle-alert at
+ * 1.66.0) */
+export function IconFailed(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M10 3.25l7.5 13.5h-15z" vectorEffect="non-scaling-stroke" />
+      <path d="M10 8v3.5" vectorEffect="non-scaling-stroke" />
+      <path d="M10 14.15h.01" vectorEffect="non-scaling-stroke" />
     </Icon>
   );
 }

@@ -46,6 +46,79 @@
     margin-top: var(--icon-line-drop);
   }
 
+  /* Needs you (U16a): beneath the status's words, the conversation behind it, quiet, at the UI's weight */
+  .room-matter-where {
+    @apply block text-quiet font-ui;
+  }
+  /* a failure's words speak up, its mark stays in concrete: no red, no yellow */
+  .room-matter-row[data-state="failed"] .room-matter-mark {
+    color: var(--muted);
+  }
+
+  /* ---------- Matters / Recent (rail-switch.tsx): two segments under Find ---------- */
+  .room-switch {
+    flex: none;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    margin-top: var(--s2);
+    padding: var(--size-seg-pad);
+    height: var(--size-control-small);
+    border-radius: var(--r-control);
+    background: var(--inset);
+  }
+  .room-switch > button {
+    @apply text-small text-muted;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--r-chip);
+  }
+  @media (hover: hover) {
+    .room-switch > button:hover {
+      color: var(--primary);
+    }
+  }
+  .room-switch > button[aria-pressed="true"] {
+    @apply text-primary font-chip;
+    background: var(--surface);
+    box-shadow: var(--e0);
+  }
+
+  /* ---------- Recent (rail-recent.tsx): every conversation, newest first, under its day ---------- */
+  .room-recent-row {
+    width: 100%;
+    display: grid;
+    text-align: left;
+    padding: var(--s1-5) var(--s3);
+    border-radius: var(--r-tile);
+    background: transparent;
+    @apply is-hover:bg-hover is-active:bg-press;
+  }
+  .room-recent-row[aria-current] {
+    background: var(--surface);
+    box-shadow: var(--e0);
+  }
+  .room-recent-row .room-conv-line {
+    align-items: flex-start;
+  }
+  .room-recent-row .room-conv-title {
+    @apply text-ui text-muted;
+  }
+  .room-recent-row .room-conv-mark {
+    margin-top: var(--icon-line-drop);
+  }
+  @media (hover: hover) {
+    .room-recent-row:hover .room-conv-title {
+      color: var(--primary);
+    }
+  }
+  .room-recent-row[aria-current] .room-conv-title {
+    @apply text-primary font-chip;
+  }
+  .room-recent-row[data-state="ready"] .room-conv-mark:not([data-waits]) {
+    color: var(--primary);
+  }
+
   /* ---------- the current matter, opened: its row and its conversations on one raised plane ---------- */
   .room-house {
     border-radius: var(--r-tile);

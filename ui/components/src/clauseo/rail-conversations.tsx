@@ -28,6 +28,8 @@ export type ConversationRowProps = {
   at?: string;
   /** waiting: the title of the conversation it waits behind. */
   behind?: string;
+  /** failed: the failure's day, in the language, when it isn't today. */
+  day?: string;
   current?: boolean;
   onOpen?: () => void;
   /** The current conversation's actions: continue it with the other plan. */
@@ -43,6 +45,7 @@ function ConversationRow({
   state = "idle",
   at = "",
   behind = "",
+  day = "",
   current = false,
   onOpen,
   other,
@@ -50,7 +53,7 @@ function ConversationRow({
   plan = true,
 }: ConversationRowProps & { plan?: boolean }) {
   const w = useMatterWords();
-  const status = current ? null : conversationStatus(w.lang, state, at, behind);
+  const status = current ? null : conversationStatus(w.lang, state, at, behind, day);
   // only a question for the lawyer says its words on the row; every other status is its icon, with its words under the
   // pointer and to assistive technology
   const asks = status !== null && state === "question";
