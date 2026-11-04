@@ -16,12 +16,14 @@ import type {
   MatterId,
   MessageId,
   PermissionRequestId,
+  QueryResult,
   StepEntry,
   StreamHeader,
   StreamId,
   ThreadId,
   Timestamp,
   TurnId,
+  UndoPreview,
 } from "../../transport/protocol.ts";
 import { queueCountPick } from "../queue-entries.ts";
 import { turnRunning } from "./live.ts";
@@ -62,30 +64,23 @@ export type ConversationLink = {
   retry?: (thread: ThreadId, message: MessageId, at: Timestamp) => Promise<void>;
 };
 
-// swap for bindings.ts once the host's PreviewUndo merges: the query and its answer are declared here by hand, and
-// the query reaches transport.query through one cast until the generated HostQuery carries it.
+/** `{"preview_undo": {"thread", "turn"}}`, from the generated HostQuery: read-only; refused as command.unknown_thread,
+ * or command.invalid for a turn with no step or one already undone. */
+type PreviewUndoQuery = Extract<HostQuery, { preview_undo: unknown }>;
 
-/** `{"preview_undo": {"thread", "turn"}}`: read-only. Refused as command.unknown_thread, or command.invalid for a turn
- * with no step or one already undone. */
-export type PreviewUndoQuery = { preview_undo: { thread: ThreadId; turn: TurnId } };
-/** `{"undo_preview": {"edited_since": [...]}}`: the matter's paths edited since the turn's after-turn checkpoint, empty
- * when nothing changed. */
-export type PreviewUndoAnswer = { undo_preview: { edited_since: string[] } };
-
-/** The paths edited since a turn's after-turn checkpoint; rejects with the HostError when the host refuses. */
+/** The paths edited since a turn's after-turn checkpoint, from `{"undo_preview": {"edited_since": [...]}}`: empty when
+ * nothing changed. Rejects with the HostError when the host refuses, and with internal when its answer is another
+ * shape: an older host has no PreviewUndo, and the caller falls back. */
 export async function previewUndoOf(
   transport: Pick<HostTransport, "query">,
   thread: ThreadId,
   turn: TurnId,
-): Promise<string[]> {
+): Promise<UndoPreview["edited_since"]> {
   const query: PreviewUndoQuery = { preview_undo: { thread, turn } };
-  const answer = (await transport.query(query as unknown as HostQuery)) as unknown as {
-    undo_preview?: { edited_since?: unknown };
-  };
-  const edited = answer.undo_preview?.edited_since;
-  if (!Array.isArray(edited) || !edited.every((p) => typeof p === "string"))
+  const answer: QueryResult = await transport.query(query);
+  if (!("undo_preview" in answer) || answer.undo_preview === undefined)
     throw internalError("preview_undo answered something else");
-  return edited as string[];
+  return answer.undo_preview.edited_since;
 }
 
 /** What the rows can do and need to know: Undo, and the turn sent last (busy until its end is in the view). */
