@@ -1,6 +1,19 @@
-//! S18's sign-in through the public API. These are the foundations' tests: the config's agent
-//! homes and base environment, and the public helpers. The sign-in flows on the fakes add
-//! their modules here (`signin/<module>.rs`, each under `#[cfg(test)]`, as `install.rs` does).
+//! S18's sign-in through the public API: the config's agent homes and base environment and the
+//! public helpers here; the flows on the fake CLIs in `signin/<module>.rs`, each under
+//! `#[cfg(test)]`, as `install.rs` does. The flows need `fake_agent` built first
+//! (`cargo build -p clauseo-fake_agent`).
+
+#[cfg(test)]
+#[path = "signin/support.rs"]
+mod support;
+
+#[cfg(test)]
+#[path = "signin/claude.rs"]
+mod claude;
+
+#[cfg(test)]
+#[path = "signin/shim.rs"]
+mod shim;
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
