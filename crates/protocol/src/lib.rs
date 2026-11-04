@@ -19,7 +19,11 @@
 //! [`CommandOutcome`]) and read with a [`HostQuery`] ([`QueryResult`]). The display
 //! settings cross as [`SettingsView`] and [`UiPatch`], mirrors of `clauseo-settings`' `ui`
 //! section; the tool switches are a [`ToolsSettingsView`] and a [`ToolsPatch`], the privacy
-//! switches a [`PrivacySettings`] and a [`PrivacyPatch`]. A matter's rail
+//! switches a [`PrivacySettings`] and a [`PrivacyPatch`], each agent's firm plan a [`PlanView`].
+//! Sign-in and installs cross outside `HostCommand` and `HostEvent`, through desktop's own
+//! `setup` command and stream arm: a [`SetupCommand`] (a pasted code or a key inside it a
+//! [`Secret`], which never encodes) and a [`SetupEvent`] carrying [`InstallProgress`] and
+//! [`SignIn`] (decision record 0048). A matter's rail
 //! details are [`ClientName`], [`Date`] and [`MatterStatus`] on
 //! [`MatterSummary`], changed with [`FieldChange`]s; a thread's seen mark and [`LastStop`] are on
 //! [`ThreadSummary`], and app subscribers get both lists as [`MattersChanged`] and
@@ -88,7 +92,8 @@
 //!
 //! # Depends on
 //!
-//! `serde`, `serde_json`, `uuid`, `compact_str`, `thiserror`, and `specta` and `specta-serde`
+//! `serde`, `serde_json`, `uuid`, `compact_str`, `thiserror`, `zeroize` (a [`Secret`]'s text),
+//! and `specta` and `specta-serde`
 //! behind the `specta` feature.
 //! Never `tauri`, `tokio`, the file system, the network or processes (`ARCHITECTURE.md`).
 //!
@@ -99,9 +104,9 @@
 //! `number.rs` and `stream.rs` for the ids and numbers, `raw.rs` for unknown payloads, `text.rs`
 //! for inline costs, `title.rs` for the title rules, `open_enum.rs` for how unknown variants
 //! decode, `error.rs` and `error_code.rs` for errors and the codes, `limits.rs` for account
-//! limits, `command.rs` and `command/validate.rs` for commands and their limits, `query.rs`,
-//! `view.rs` (entries in `view/entry.rs`) and `patch.rs` for what subscribers receive, `wire.rs`
-//! for the TypeScript export's rules.
+//! limits, `command.rs` and `command/validate.rs` for commands and their limits, `setup.rs` for
+//! sign-in and installs, `query.rs`, `view.rs` (entries in `view/entry.rs`) and `patch.rs` for
+//! what subscribers receive, `wire.rs` for the TypeScript export's rules.
 //!
 //! Every event payload is in `event/payload/`; the value types inside them live by topic.
 //!
@@ -152,6 +157,7 @@ mod search;
 mod serde_util;
 mod session;
 mod settings;
+mod setup;
 mod stream;
 #[cfg(test)]
 mod test_support;
@@ -242,8 +248,12 @@ wire_types! {
         TextKind, TurnUsage,
     },
     settings::{
-        Language, Lite, Motion, PrivacyPatch, PrivacySettings, SettingsView, Theme, ToolsPatch,
-        ToolsSettingsView, UiPatch, UiSettings,
+        Language, Lite, Motion, PlanProvider, PlanView, PrivacyPatch, PrivacySettings,
+        SettingsView, Theme, ToolsPatch, ToolsSettingsView, UiPatch, UiSettings,
+    },
+    setup::{
+        FoundLogin, InstallLog, InstallProgress, LoginFrom, Secret, SetupCommand, SetupEvent,
+        SignIn, SignInMethod, SignInSource,
     },
     stream::{StreamId},
     text::{BlobRef, TextOrBlob},
@@ -293,6 +303,8 @@ pub use open_enum::UnknownKind;
 pub use query::{MAX_BLOB_READ_BYTES, MAX_PAGE_ENTRIES, MAX_PAPERS};
 pub use raw::{MAX_MSGPACK_DEPTH, MAX_RAW_DEPTH, MAX_RAW_ENCODE_DEPTH};
 pub use search::{DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT};
+// A setup command's variant without its fields, for desktop's allow-lists; never on the wire.
+pub use setup::{MAX_INSTALL_LOG_LINE_BYTES, MAX_INSTALL_LOG_LINES, MAX_SECRET_BYTES, SetupAction};
 pub use text::{INLINE_LIMIT_BYTES, PREVIEW_BYTES, escaped_len, preview_of, utf16_len};
 pub use title::{MAX_TITLE_CHARS, check_display_title};
 pub use web::{

@@ -4,13 +4,19 @@
 //! it, changed by a [`ToolsPatch`] in `HostCommand::SetToolSettings`. The privacy switches are a
 //! [`PrivacySettings`] inside it, changed by a [`PrivacyPatch`] in
 //! `HostCommand::SetPrivacySettings` and started by `HostCommand::FirstAct` (decision record 0036).
+//! Each agent's firm plan is a [`PlanView`]: its endpoint, provider and the names of its extra
+//! variables, never a value (decision record 0048); `SetupCommand::SetFirmEndpoint` changes it.
 //!
 //! These mirror the `ui` section of `clauseo-settings`, which this crate cannot depend on. That
 //! crate holds the rules (the font size range, which keys policy locks); the host turns these
 //! into its types and back. A test in `crates/host` fails when a key or a value is in one and
 //! not the other.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
+
+use crate::AgentId;
 
 /// The colour theme.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -118,6 +124,44 @@ pub struct SettingsView {
     /// refused with `settings.locked`. It can also name keys outside `ui`, `tools` and `privacy`
     /// (`matters.default_location`, `agents.<id>`).
     pub locked: Vec<String>,
+    /// Each agent's firm plan (`plans.<id>`), by agent id; left out when no agent has one.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub plans: BTreeMap<AgentId, PlanView>,
+}
+
+/// An agent's firm plan as a window sees it (`plans.<id>`): the endpoint, the provider and the
+/// names of the extra variables. It never holds a variable's value or a key; the settings crate
+/// refuses a secret-shaped variable name.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct PlanView {
+    /// The firm's gateway, an `https` URL (`plans.<id>.endpoint`); missing when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<String>,
+    /// Whose service the plan uses (`plans.<id>.provider`); missing when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<PlanProvider>,
+    /// The names of the extra variables (`plans.<id>.env`), sorted; never their values.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub env_names: Vec<String>,
+}
+
+/// Whose service a firm plan uses (`plans.<id>.provider`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub enum PlanProvider {
+    /// Anthropic's API, or a gateway that speaks it.
+    Anthropic,
+    /// Amazon Bedrock.
+    Bedrock,
+    /// Google Vertex AI.
+    Vertex,
+}
+
+impl PlanProvider {
+    /// Every value, in declaration order.
+    pub const ALL: [Self; 3] = [Self::Anthropic, Self::Bedrock, Self::Vertex];
 }
 
 /// The tool switches in force: the lawyer's, with policy's values over them.

@@ -72,7 +72,7 @@ to write instead.
 |---|---|---|---|---|
 | `xtask` | check, ci, buildtime, budgets, doc checks | none of ours | tauri | exists |
 | `desktop` | Tauri shell: fixed plugin set, AppManifest, capabilities, the thirteen commands and the Channel bridge (0012, 0019, 0026), the window frame (0015), the usage counts' tick task and HTTPS upload (0036) | host, protocol, settings, process, profile, counts, tauri, tracing, futures, async-io, reqwest, rustls, serde, serde_json, memchr, uuid, url, dunce, rfd, windows (Windows only), objc2-core-foundation, libc (macOS only) (dev: tauri-specta, specta, toml, semver) | | exists |
-| `protocol` | Event envelope, domain events, commands, queries, view patches, account limits, ids, error codes | serde, serde_json, uuid, compact_str, thiserror, specta, specta-serde | tauri, tokio, fs, process | exists |
+| `protocol` | Event envelope, domain events, commands, queries, view patches, account limits, ids, error codes | serde, serde_json, uuid, compact_str, thiserror, zeroize, specta, specta-serde | tauri, tokio, fs, process | exists |
 | `reducer` | Pure fold from events to thread and matter state and view patches; the snapshot format (`MessagePack`, `REDUCER_SCHEMA_VERSION`) | protocol, serde, rmp-serde | any I/O, clock, tauri | exists |
 | `reducer_bench` | The gungraun instruction-count bench of `reducer`'s fold (Linux, CI) | none (dev: protocol, reducer, gungraun) | tauri | exists |
 | `store` | SQLite log, snapshots, blobs, receipts, writer thread | protocol, rusqlite, serde, serde_json, rmp-serde, blake3, zstd, async-channel, futures | tauri | exists |

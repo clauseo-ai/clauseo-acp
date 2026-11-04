@@ -4,6 +4,8 @@
 //! use them stay in its `golden!` lists, whose match must name every variant, and their snapshot
 //! files keep their names.
 
+use std::collections::BTreeMap;
+
 use clauseo_protocol::{
     Language, Lite, Motion, PrivacyPatch, PrivacySettings, SettingsView, Theme, ToolsSettingsView,
     UiSettings,
@@ -29,6 +31,7 @@ pub(crate) fn settings_view() -> SettingsView {
             counts_started: false,
         },
         locked: vec!["ui.font_size".to_owned(), "ui.theme".to_owned()],
+        plans: BTreeMap::new(),
     }
 }
 

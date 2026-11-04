@@ -1189,6 +1189,7 @@ dependencies = [
  "specta-typescript",
  "thiserror 2.0.21",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]

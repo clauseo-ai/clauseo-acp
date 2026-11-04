@@ -17,6 +17,7 @@ serde_json = { workspace = true }
 uuid = { workspace = true, features = ["serde"] }
 compact_str = { workspace = true, features = ["serde"] }
 thiserror = { workspace = true }
+zeroize = { workspace = true }
 specta = { workspace = true, optional = true, features = ["derive"] }
 specta-serde = { workspace = true, optional = true }
 

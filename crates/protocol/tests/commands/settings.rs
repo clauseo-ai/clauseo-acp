@@ -2,9 +2,12 @@
 //! values each setting takes. That the values match `clauseo-settings` is checked in
 //! `crates/host`, where both crates are visible.
 
+use std::collections::BTreeMap;
+
 use clauseo_protocol::{
-    CommandEnvelope, HostCommand, HostQuery, Language, Lite, Motion, PrivacyPatch, PrivacySettings,
-    QueryResult, SettingsView, Theme, ToolsPatch, ToolsSettingsView, UiPatch, UiSettings,
+    AgentId, CommandEnvelope, HostCommand, HostQuery, Language, Lite, Motion, PlanProvider,
+    PlanView, PrivacyPatch, PrivacySettings, QueryResult, SettingsView, Theme, ToolsPatch,
+    ToolsSettingsView, UiPatch, UiSettings,
 };
 
 use super::Validate;
@@ -35,6 +38,7 @@ fn get_settings_is_a_plain_string_and_answers_settings() {
             counts_started: false,
         },
         locked: vec!["ui.theme".to_owned()],
+        plans: BTreeMap::new(),
     });
     assert_eq!(
         serde_json::to_string(&answer).unwrap(),
@@ -227,4 +231,60 @@ fn every_value_has_its_snake_case_name() {
     assert_eq!(Language::default(), Language::En);
     assert_eq!(Lite::default(), Lite::Automatic);
     assert_eq!(Motion::default(), Motion::System);
+}
+
+/// A view with the firm plans: each agent's endpoint, provider and variable names, and no
+/// variable's value, which the type has nowhere to hold.
+#[test]
+fn plans_carry_names_and_never_values() {
+    let mut view = SettingsView {
+        ui: UiSettings {
+            theme: Theme::System,
+            font_size: 16,
+            language: Language::En,
+            lite: Lite::Automatic,
+            motion: Motion::System,
+        },
+        tools: ToolsSettingsView {
+            web_search: true,
+            browser: false,
+        },
+        privacy: PrivacySettings {
+            counts: true,
+            crash_reports: false,
+            counts_started: false,
+        },
+        locked: Vec::new(),
+        plans: BTreeMap::new(),
+    };
+    let without = serde_json::to_string(&view).unwrap();
+    assert!(
+        !without.contains("plans"),
+        "no plans are left out: {without}"
+    );
+    round_trips(&view);
+
+    let plan = PlanView {
+        endpoint: Some("https://gw.firm.example".to_owned()),
+        provider: Some(PlanProvider::Anthropic),
+        env_names: vec!["ANTHROPIC_CUSTOM_HEADERS_FILE".to_owned()],
+    };
+    view.plans.insert(AgentId::new("claude-acp").unwrap(), plan);
+    view.plans
+        .insert(AgentId::new("codex-acp").unwrap(), PlanView::default());
+    let json = serde_json::to_string(&view.plans).unwrap();
+    assert_eq!(
+        json,
+        r#"{"claude-acp":{"endpoint":"https://gw.firm.example","provider":"anthropic","env_names":["ANTHROPIC_CUSTOM_HEADERS_FILE"]},"codex-acp":{}}"#
+    );
+    round_trips(&view);
+    // A value, or any field the view does not have, is not part of the form: the keys of a plan
+    // are exactly these three.
+    let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let mut keys: Vec<&String> = value["claude-acp"].as_object().unwrap().keys().collect();
+    keys.sort();
+    assert_eq!(keys, ["endpoint", "env_names", "provider"]);
+    for provider in PlanProvider::ALL {
+        round_trips(&provider);
+    }
 }

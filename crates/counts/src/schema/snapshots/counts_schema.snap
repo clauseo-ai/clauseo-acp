@@ -1479,7 +1479,18 @@ expression: counts_schema()
         "matter.folder_in_matters_root",
         "transport.unauthorized",
         "transport.too_large",
-        "settings.locked"
+        "settings.locked",
+        "agent.install_offline",
+        "agent.install_blocked",
+        "agent.install_disk_full",
+        "agent.install_failed",
+        "signin.cancelled",
+        "signin.link_expired",
+        "signin.no_plan",
+        "signin.device_code_off",
+        "signin.port_busy",
+        "signin.failed",
+        "signin.policy_unreadable"
       ],
       "type": "string"
     },
