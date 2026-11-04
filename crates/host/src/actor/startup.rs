@@ -142,6 +142,10 @@ pub(super) async fn open(
         made: BTreeMap::new(),
         #[cfg(test)]
         fault: None,
+        #[cfg(test)]
+        lost_replies: 0,
+        #[cfg(test)]
+        failed_sends: 0,
     };
     // The limits model and its first reads; nothing waits on them.
     super::limits::start(&mut actor, cached_limits);

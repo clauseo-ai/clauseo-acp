@@ -145,6 +145,11 @@ pub(crate) enum Input {
         id: SubId,
         result: Result<Vec<Envelope>, clauseo_store::Error>,
     },
+    /// Whether the store holds the row of a made matter whose commit failed (`matters/made.rs`).
+    MadeRow {
+        matter: MatterId,
+        result: Result<bool, clauseo_store::Error>,
+    },
     /// A matter worker's reply.
     Matter {
         matter: MatterId,
@@ -188,6 +193,7 @@ impl std::fmt::Debug for Input {
             Self::Reopened { .. } => "Reopened",
             Self::Receipt { .. } => "Receipt",
             Self::EventPage { .. } => "EventPage",
+            Self::MadeRow { .. } => "MadeRow",
             Self::Matter { .. } => "Matter",
             Self::Snapshot(_) => "Snapshot",
             Self::Agent { .. } => "Agent",

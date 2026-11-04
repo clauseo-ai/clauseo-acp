@@ -187,9 +187,12 @@ pub(crate) fn is_unc_text(text: &str) -> bool {
 }
 
 /// Whether `text` is a Windows drive root: a drive letter, `:` and an optional separator, with
-/// nothing after it, also in the `\\?\X:\` form.
+/// nothing after it, also in the `\\?\X:\` and `\\.\X:\` (device path) forms.
 pub(crate) fn is_windows_drive_root_text(text: &str) -> bool {
-    let rest = text.strip_prefix(r"\\?\").unwrap_or(text);
+    let rest = text
+        .strip_prefix(r"\\?\")
+        .or_else(|| text.strip_prefix(r"\\.\"))
+        .unwrap_or(text);
     match rest.as_bytes() {
         [letter, b':'] | [letter, b':', b'\\' | b'/'] => letter.is_ascii_alphabetic(),
         _ => false,
@@ -219,16 +222,22 @@ fn is_drive_root(folder: &Path) -> bool {
 }
 
 /// Windows: whether `folder` is a network share's root, a UNC prefix (`\\server\share` or
-/// `\\?\UNC\server\share`) with at most its root separator after it. Parsed by
-/// [`Prefix`], so a folder inside the share (`\\server\share\Clients`) is not one.
+/// `\\?\UNC\server\share`) with at most its root separator after it, or the device path
+/// `\\.\UNC\server\share`, which [`Prefix`] reads as the device `UNC` with the server and
+/// share as its first two names. Parsed by [`Prefix`], so a folder inside the share
+/// (`\\server\share\Clients`) is not one.
 #[cfg(windows)]
 fn is_share_root(folder: &Path) -> bool {
     let mut parts = folder.components();
     let Some(Component::Prefix(prefix)) = parts.next() else {
         return false;
     };
-    matches!(prefix.kind(), Prefix::UNC(..) | Prefix::VerbatimUNC(..))
-        && parts.all(|part| part == Component::RootDir)
+    let names = parts.filter(|part| *part != Component::RootDir).count();
+    match prefix.kind() {
+        Prefix::UNC(..) | Prefix::VerbatimUNC(..) => names == 0,
+        Prefix::DeviceNS(device) => device.eq_ignore_ascii_case("UNC") && names <= 2,
+        Prefix::Verbatim(_) | Prefix::VerbatimDisk(_) | Prefix::Disk(_) => false,
+    }
 }
 
 /// Linux: whether `folder` is a mount point, its device differing from its parent's.

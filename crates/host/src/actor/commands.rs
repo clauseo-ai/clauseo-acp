@@ -16,7 +16,7 @@ use clauseo_protocol::{
 use clauseo_store::{Receipt, ThreadRow, command_hash};
 
 use super::input::Reply;
-use super::matters::PendingMatter;
+use super::matters::{PendingMatter, Stage};
 use super::settings::{first_act, set_privacy_settings, set_tool_settings, set_ui_settings};
 use super::{Actor, MatterEntry, Tag, ThreadEntry, title_source, triage, turn};
 use crate::error::Error;
@@ -293,8 +293,9 @@ pub(super) fn command_committed(
         (AfterCommand::Matter(entry), Ok(())) => super::matters::recorded(actor, *entry),
         (AfterCommand::Matter(entry), Err(failure)) => {
             let error = Error::Store(failure.error.clone());
-            // Answered once the made matter is discarded.
-            return super::matters::discard(actor, Some(id), entry.row.id, error, "store");
+            // Answered once the store is asked for the row (`matters/made.rs`).
+            let matter = entry.row.id;
+            return super::matters::discard(actor, Some(id), matter, error, Stage::Store);
         }
         (AfterCommand::Thread(entry), Ok(())) => {
             actor.threads.insert(entry.row.id, *entry);

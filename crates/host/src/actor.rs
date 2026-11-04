@@ -180,6 +180,13 @@ pub(crate) struct Actor {
     /// store already holds. The commit then carries a receipt with it: `DuplicateCommand`.
     #[cfg(test)]
     pub(crate) fault: Option<Fault>,
+    /// How many of the next stored commits are reported as failed (`Closed`) though stored
+    /// (tests): a reply lost on its way back.
+    #[cfg(test)]
+    pub(crate) lost_replies: usize,
+    /// How many of the next commits fail to send (tests), as with the store's feeder gone.
+    #[cfg(test)]
+    pub(crate) failed_sends: usize,
 }
 
 /// See [`Actor::fault`].
@@ -386,6 +393,11 @@ impl Actor {
     /// Sends `draft` with `tag` and folds its events into the sent views of loaded streams.
     pub(crate) fn send_commit(&mut self, draft: Draft, tag: Tag) -> Result<Ticket, Error> {
         #[cfg(test)]
+        if self.failed_sends > 0 {
+            self.failed_sends -= 1;
+            return Err(Error::Closed);
+        }
+        #[cfg(test)]
         let draft = self.with_fault(draft);
         let ticket = self.pipeline.send(draft, tag, &self.feeder)?;
         self.work.commits += 1;
@@ -534,6 +546,7 @@ impl Actor {
             Input::EventPage { stream, id, result } => {
                 subs::on_event_page(self, stream, id, result);
             }
+            Input::MadeRow { matter, result } => matters::row_checked(self, matter, result),
             Input::Matter { matter, tag, reply } => {
                 matters::on_matter_reply(self, matter, tag, reply);
             }

@@ -12,12 +12,16 @@ use crate::{Error, MissingReason, Refusal, write};
 
 #[test]
 fn windows_drive_roots_by_text() {
-    for root in [r"C:\", r"c:\", r"\\?\C:\", "D:", "z:/"] {
+    for root in [
+        r"C:\", r"c:\", r"\\?\C:\", r"\\.\C:\", r"\\.\c:", "D:", "z:/",
+    ] {
         assert!(is_windows_drive_root_text(root), "{root} is a drive root");
     }
     for other in [
         r"C:\Users",
         r"\\?\C:\x",
+        r"\\.\C:\x",
+        r"\\.\pipe\x",
         r"\\server\share",
         r"\\?\UNC\server\share\x",
         "/",
@@ -259,8 +263,11 @@ fn share_roots_are_drive_roots_on_windows() {
         r"\\?\UNC\server\share",
         r"\\localhost\C$\",
         r"\\?\UNC\localhost\C$\",
+        r"\\.\UNC\server\share\",
+        r"\\.\UNC\server\share",
         r"C:\",
         r"\\?\C:\",
+        r"\\.\C:\",
     ] {
         assert!(is_drive_root(Path::new(root)), "{root} is a drive root");
     }
@@ -268,6 +275,8 @@ fn share_roots_are_drive_roots_on_windows() {
         r"\\server\share\Clients\X",
         r"\\?\UNC\server\share\Clients",
         r"\\localhost\C$\Users",
+        r"\\.\UNC\server\share\Clients",
+        r"\\.\pipe\x\y\z",
         r"C:\Users",
     ] {
         assert!(

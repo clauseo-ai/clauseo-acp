@@ -7,6 +7,13 @@
 //! made them) and only then is the command answered, with the commit's own error, so a retry
 //! finds the folder as it was.
 //!
+//! Only a matter whose row is surely not stored is discarded: one whose commit could not be built
+//! or sent (the store never had it). A commit the store answered with an error may still have
+//! been stored (`COMMIT` failing after its frames were written, a reply lost on the way), so
+//! the store is asked first: with no row for the matter, it is discarded; with one, or when
+//! the store cannot say, everything is kept and the command gets the commit's error (the matter
+//! is listed from its row at the next start). Losing nothing comes before a clean retry.
+//!
 //! The logs here name the matter, the error's code and the stage, never a folder: a path names a
 //! client.
 
@@ -17,7 +24,9 @@ use clauseo_protocol::{
 };
 use clauseo_store::MatterRow;
 
-use super::super::input::MatterTag;
+use futures::task::LocalSpawnExt;
+
+use super::super::input::{Input, MatterTag};
 use super::super::{Actor, MatterEntry, turn};
 use super::{PendingMatter, command_ctx};
 use crate::error::Error;
@@ -47,30 +56,97 @@ pub(crate) fn recorded(actor: &mut Actor, mut entry: MatterEntry) {
     actor.matters.insert(entry.row.id, entry);
 }
 
-/// The made matter `matter` was not recorded (`stage`: `commit` when its commit could not be
-/// built or sent, `store` when the store refused it): its worker discards it, and command
-/// `command` is answered with `error` when that returns ([`discarded`]).
+/// Where a made matter's record failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Stage {
+    /// Its commit could not be built or sent: the store never had it.
+    Commit,
+    /// The store answered its commit with an error: the row may be stored all the same.
+    Store,
+}
+
+/// The made matter `matter` was not recorded at `stage`. For [`Stage::Commit`] its worker
+/// discards it; for [`Stage::Store`] the store is asked for its row first ([`row_checked`]).
+/// Command `command` is answered with `error` once that is done.
 pub(crate) fn discard(
     actor: &mut Actor,
     command: Option<CommandId>,
     matter: MatterId,
     error: Error,
-    stage: &'static str,
+    stage: Stage,
 ) {
-    tracing::warn!(%matter, code = %error.code(), stage, "a matter made on disk was not recorded");
+    tracing::warn!(%matter, code = %error.code(), ?stage, "a matter made on disk was not recorded");
     let Some(made) = actor.made.get_mut(&matter) else {
         answer(actor, command, error);
         return;
     };
-    match made.worker.send(MatterJob::Discard, MatterTag::Discard) {
-        Ok(()) => {
-            made.failed = Some((command, error));
-            actor.work.matter_jobs += 1;
+    made.failed = Some((command, error));
+    match stage {
+        Stage::Commit => send_discard(actor, matter),
+        Stage::Store => check_row(actor, matter),
+    }
+}
+
+/// Asks the store whether it holds `matter`'s row; answered as [`Input::MadeRow`].
+fn check_row(actor: &mut Actor, matter: MatterId) {
+    let (store, post) = (actor.store.clone(), actor.post.clone());
+    let asked = actor.spawner.spawn_local(async move {
+        let result = store
+            .matters()
+            .await
+            .map(|rows| rows.iter().any(|row| row.id == matter));
+        let _gone = post.try_send(Input::MadeRow { matter, result });
+    });
+    match asked {
+        // Counted as a matter job, so shutdown waits for it.
+        Ok(()) => actor.work.matter_jobs += 1,
+        Err(_shutdown) => keep(actor, matter, "the store could not be asked"),
+    }
+}
+
+/// The store answered whether it holds `matter`'s row: discarded only when it surely does not.
+pub(crate) fn row_checked(
+    actor: &mut Actor,
+    matter: MatterId,
+    result: Result<bool, clauseo_store::Error>,
+) {
+    actor.work.matter_jobs = actor.work.matter_jobs.saturating_sub(1);
+    match result {
+        Ok(false) => send_discard(actor, matter),
+        Ok(true) => keep(actor, matter, "its row was stored"),
+        Err(error) => {
+            tracing::warn!(%matter, code = %error.code(), stage = "lookup", "row not read");
+            keep(actor, matter, "the store could not say");
         }
+    }
+}
+
+/// Keeps what the create or import made and answers its command with the commit's error.
+fn keep(actor: &mut Actor, matter: MatterId, why: &'static str) {
+    tracing::warn!(%matter, why, "the matter made on disk is kept");
+    if let Some(made) = actor.made.remove(&matter)
+        && let Some((command, error)) = made.failed
+    {
+        answer(actor, command, error);
+    }
+}
+
+/// Sends `matter`'s worker its discard; the answer comes in [`discarded`].
+fn send_discard(actor: &mut Actor, matter: MatterId) {
+    let Some(made) = actor.made.get(&matter) else {
+        return;
+    };
+    match made.worker.send(MatterJob::Discard, MatterTag::Discard) {
+        Ok(()) => actor.work.matter_jobs += 1,
         Err(closed) => {
             tracing::warn!(%matter, code = %closed.code(), stage = "discard", "not discarded");
-            actor.made.remove(&matter);
-            answer(actor, command, error);
+            if let Some(Made {
+                failed: Some((command, error)),
+                ..
+            }) = actor.made.remove(&matter)
+            {
+                answer(actor, command, error);
+            }
         }
     }
 }
@@ -81,7 +157,7 @@ pub(crate) fn discarded(actor: &mut Actor, matter: MatterId, reply: &MatterReply
     if let MatterReply::Discarded(Err(error)) = reply {
         tracing::warn!(%matter, code = %error.code(), stage = "discard", "not discarded");
     } else if !matches!(reply, MatterReply::Discarded(Ok(()))) {
-        tracing::error!(?reply, "a discard answered with another job's reply");
+        tracing::error!(%matter, "a discard answered with another job's reply");
     }
     let Some(made) = actor.made.remove(&matter) else {
         return;

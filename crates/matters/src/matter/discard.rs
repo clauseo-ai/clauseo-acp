@@ -69,7 +69,7 @@ pub(super) fn discard(matter: Matter) -> Result<(), Error> {
         && let Err(err) = write::remove_dir(&folder)
         && err.kind() != io::ErrorKind::NotFound
     {
-        tracing::debug!(path = %folder.display(), error = %err, "the new folder was kept");
+        tracing::debug!(kind = ?err.kind(), stage = "folder", "the new folder was kept");
     }
     history.and(marker)
 }
@@ -81,9 +81,9 @@ pub(super) fn undo_make(home: &Path, folder: &Path, fresh: Fresh) {
     if let Err(err) = write::remove_dir_all(home)
         && err.kind() != io::ErrorKind::NotFound
     {
-        tracing::warn!(path = %home.display(), error = %err, "history folder left behind");
+        tracing::warn!(kind = ?err.kind(), stage = "history", "history folder left behind");
     }
     if let Err(err) = json::remove(folder, fresh.marker_dir) {
-        tracing::warn!(error = %err, "matter.json left behind");
+        tracing::warn!(code = %err.code(), stage = "marker", "matter.json left behind");
     }
 }

@@ -118,3 +118,65 @@ fn a_new_folder_whose_record_fails_is_removed_and_made_again() {
     );
     rig.finish();
 }
+
+/// A commit that could not be sent (the store never had it): the matter is discarded and the
+/// folder imports again.
+#[test]
+fn an_import_whose_commit_cannot_be_sent_leaves_nothing_and_imports_again() {
+    let mut rig = Rig::start("made-send", "");
+    let papers = TempDir::new("made-send-papers");
+    let folder = papers.path().join("Smith v Jones");
+    crate::write::create_dir_all(&folder).unwrap();
+    crate::write::write_file(&folder.join("brief.txt"), b"Clause 4\n").unwrap();
+    let made = histories(&rig);
+    let source = MatterSource::ExistingFolder {
+        folder: folder_ref(&mut rig, &folder),
+    };
+
+    rig.actor.failed_sends = 1;
+    let error = rig.dispatch(10, create(source)).unwrap_err();
+    assert!(matches!(error, Error::Closed), "{error:?}");
+    assert!(!folder.join(".clauseo").exists(), "no marker left");
+    assert_eq!(histories(&rig), made, "no history left");
+    assert!(rig.actor.made.is_empty() && rig.actor.claims.is_empty());
+
+    let answer = rig.dispatch(11, create(source)).unwrap();
+    assert!(
+        matches!(answer, CommandOutcome::MatterCreated { .. }),
+        "{answer:?}"
+    );
+    rig.finish();
+}
+
+/// A commit the store made whose reply was lost: the outcome is unknown, so the store is asked;
+/// it holds the row, so the marker and the history are kept and the command gets the error.
+#[test]
+fn a_stored_matter_whose_reply_was_lost_is_kept() {
+    let mut rig = Rig::start("made-lost", "");
+    let papers = TempDir::new("made-lost-papers");
+    let folder = papers.path().join("Smith v Jones");
+    crate::write::create_dir_all(&folder).unwrap();
+    crate::write::write_file(&folder.join("brief.txt"), b"Clause 4\n").unwrap();
+    let made = histories(&rig);
+    let source = MatterSource::ExistingFolder {
+        folder: folder_ref(&mut rig, &folder),
+    };
+
+    rig.actor.lost_replies = 1;
+    let error = rig.dispatch(10, create(source)).unwrap_err();
+    assert!(matches!(error, Error::Store(_)), "{error:?}");
+    assert!(
+        folder.join(".clauseo/matter.json").exists(),
+        "the marker is kept"
+    );
+    assert_eq!(histories(&rig), made + 1, "the history is kept");
+    assert!(rig.actor.made.is_empty() && rig.actor.claims.is_empty());
+    let store = rig.actor.store.clone();
+    let rows = rig.run(async move { store.matters().await }).unwrap();
+    let path = folder.to_string_lossy();
+    assert!(
+        rows.iter().any(|row| row.folder_path == path),
+        "the row is stored"
+    );
+    rig.finish();
+}
