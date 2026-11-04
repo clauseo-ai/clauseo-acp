@@ -33,8 +33,13 @@ pub struct AgentsConfig {
     /// What sign-in, status and detection runs are built from: each agent's home and the base
     /// environment.
     pub signin: SigninConfig,
-    /// The receipt's install time and the progress throttle's clock.
+    /// The receipt's install time and the progress throttle's clock; sign-in's `since` and `at`.
     pub clock: Arc<dyn Clock>,
+    /// Tests only: agents taken as `Ready` at start with this install, with no receipt or Node
+    /// check, so the sign-in tests can run a fake CLI as the adapter. Outside `test-support`
+    /// the field does not exist.
+    #[cfg(feature = "test-support")]
+    pub ready_for_tests: BTreeMap<AgentId, crate::state::Installed>,
 }
 
 impl AgentsConfig {
@@ -51,6 +56,8 @@ impl AgentsConfig {
             node_search: NodeSearch::from_env(),
             signin: SigninConfig::from_env(),
             clock: Arc::new(SystemClock),
+            #[cfg(feature = "test-support")]
+            ready_for_tests: BTreeMap::new(),
         }
     }
 }

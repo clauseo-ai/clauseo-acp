@@ -2,9 +2,12 @@
 //! the two pieces every sign-in, status and detection run is built from: the child's whole
 //! environment (`env`) and the runner (`run`).
 //!
-//! The flows themselves (Claude's `auth login` with the `BROWSER` shim, Codex's `login` and
-//! `--device-auth`, detection and reuse) are built on these, in `signin/claude.rs`,
-//! `signin/codex.rs`, `signin/shim.rs` and `signin/reuse.rs`. Each flow:
+//! One job model runs every sign-in, sign-out and status check (`signin/job.rs`): one job per
+//! agent at a time, on its own thread, which reports through `SigninHub::emit_job` and is
+//! silenced once superseded. The job hands its task to the agent's flow: Claude's `auth login`
+//! with the `BROWSER` shim (`signin/claude.rs`, `signin/shim.rs`); Codex's `login` and
+//! `--device-auth` (`signin/codex.rs`, S18 piece 4); detection and reuse (`signin/reuse.rs`,
+//! piece 5). Each flow:
 //! - builds its environment with `env::run_env`, from [`crate::SigninConfig::base_env`], and
 //!   for Codex adds `env::codex_store_args` to its arguments;
 //! - starts `<node> <script> args…` with `run::run`, through the `Launcher` the caller gave
@@ -18,24 +21,75 @@
 
 use std::time::SystemTime;
 
+use clauseo_protocol::AgentId;
 use zeroize::Zeroizing;
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "S18's foundation: the Claude and Codex sign-in flows that call it come next"
-    )
-)]
+use self::env::Vendor;
+
+pub(crate) mod claude;
 pub(crate) mod env;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "S18's foundation: the Claude and Codex sign-in flows that call it come next"
-    )
-)]
+pub(crate) mod job;
 pub(crate) mod run;
+pub(crate) mod shim;
+
+/// How to sign in. Each agent takes its own two: Claude `ClaudeAi` and `Console`, Codex
+/// `Browser` and `DeviceCode`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Method {
+    /// Claude with a Claude.ai plan: `auth login --claudeai`.
+    ClaudeAi,
+    /// Claude with an Anthropic Console account, behind "Use an API key or my firm's account":
+    /// `auth login --console`.
+    Console,
+    /// Codex's browser sign-in: `codex login`.
+    Browser,
+    /// Codex's device-code sign-in, offered and never started first: `codex login --device-auth`.
+    DeviceCode,
+}
+
+/// Why a sign-in call was refused. Nothing ran; the agent's state is unchanged. No variant
+/// carries a pasted code, an email or a path.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum SigninError {
+    /// The snapshot has no such agent, or no sign-in for it.
+    #[error("{0} is not an agent Clauseo signs in to")]
+    UnknownAgent(AgentId),
+    /// The method is another agent's.
+    #[error("{agent} does not sign in with {method:?}")]
+    WrongMethod {
+        /// The agent.
+        agent: AgentId,
+        /// The method asked for.
+        method: Method,
+    },
+    /// This agent's flow is not built yet (Codex, until S18 piece 4).
+    #[error("signing in to {0} is not built yet")]
+    NotBuilt(AgentId),
+    /// The agent's install is not ready.
+    #[error("{0} is not installed yet")]
+    NotReady(AgentId),
+    /// The caller set no home folder for the agent (`SigninConfig::homes`).
+    #[error("{0} has no home folder set")]
+    NoHome(AgentId),
+    /// No sign-in run is going for the agent (cancel, paste).
+    #[error("{0} has no sign-in running")]
+    NotRunning(AgentId),
+    /// The login is the lawyer's own, reused: Clauseo never signs it out; "Stop using it here"
+    /// is `stop_using_login`.
+    #[error("{0}'s login is the lawyer's own, and Clauseo never signs it out")]
+    Reused(AgentId),
+}
+
+/// Whose CLI signs `agent` in: by its snapshot id, `claude-acp` or `codex-acp`.
+pub(crate) fn vendor_of(agent: &AgentId) -> Option<Vendor> {
+    match agent.as_str() {
+        "claude-acp" => Some(Vendor::Claude),
+        "codex-acp" => Some(Vendor::Codex),
+        _ => None,
+    }
+}
 
 /// Where an agent's sign-in is. R20 maps each state to the wire.
 #[derive(Debug, Clone, PartialEq, Eq)]

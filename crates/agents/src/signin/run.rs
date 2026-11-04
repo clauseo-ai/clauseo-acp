@@ -87,6 +87,7 @@ impl Ring {
     }
 
     /// Its length in bytes.
+    #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
         self.bytes.len()
     }

@@ -6,6 +6,9 @@
 //! once a paused one's thread has stopped. Every event a job sends goes through
 //! [`Shared::emit_job`], under the same lock `pause` takes, and is dropped once the job is
 //! paused or superseded: a paused job never speaks after its `Paused`.
+//!
+//! Sign-in jobs (`signin`) run beside the installs, one per agent, on the model in
+//! [`crate::signin::job`]: the calls reserve the agent's job slot, the worker starts the job.
 
 use std::collections::BTreeMap;
 use std::sync::mpsc;
@@ -18,8 +21,14 @@ use crate::cancel::Cancel;
 use crate::config::AgentsConfig;
 use crate::install::{self, Job};
 use crate::log::{InstallLog, redact};
+use crate::signin::{Method, PasteCode, SigninError, SigninState};
 use crate::state::{AgentsEvent, Failure, FailureKind, InstallState, Installed};
 use crate::{node, receipt, sysproxy};
+
+mod signin;
+
+pub(crate) use self::signin::SigninHub;
+use self::signin::SigninStart;
 
 /// The agents' installs. Cheap calls: each hands its work to the worker thread.
 #[derive(Debug)]
@@ -34,6 +43,8 @@ enum Command {
     Install(AgentId),
     Pause(AgentId),
     Retry(AgentId, bool),
+    /// Start a reserved sign-in, sign-out or status job.
+    Signin(Box<SigninStart>),
 }
 
 /// What the handle, the worker and the jobs share.
@@ -41,6 +52,8 @@ enum Command {
 pub(crate) struct Shared {
     inner: Mutex<Inner>,
     events: async_channel::Sender<AgentsEvent>,
+    /// Every agent's sign-in state and running sign-in job.
+    pub(crate) signin: SigninHub,
 }
 
 #[derive(Debug, Default)]
@@ -57,7 +70,7 @@ struct Inner {
 pub(crate) struct Ticket {
     /// Unique per `Agents`.
     pub(crate) job: u64,
-    /// The agent it installs.
+    /// The agent it installs or signs in.
     pub(crate) agent: AgentId,
     /// Set by a pause or a newer job; the job's emits stop then.
     pub(crate) cancel: Arc<Cancel>,
@@ -76,6 +89,7 @@ impl Agents {
         let (events, receiver) = async_channel::unbounded();
         let shared = Arc::new(Shared {
             inner: Mutex::new(Inner::default()),
+            signin: SigninHub::new(&config, events.clone()),
             events,
         });
         let (commands, inbox) = mpsc::channel();
@@ -124,6 +138,68 @@ impl Agents {
         self.shared.lock().installed.get(agent).cloned()
     }
 
+    /// Signs `agent` in with `method` (Claude `ClaudeAi` or `Console`): a hidden login run in
+    /// Clauseo's own folder, reported as `Waiting` and then `SignedIn` or `Failed`, with
+    /// `OpenUrl` for the page the vendor would open. A sign-in or sign-out already going for
+    /// `agent` is stopped first, silently: "Didn't open?" is a new sign-in. Refused when the
+    /// agent is unknown, the method is another agent's, its flow is not built yet (Codex, S18
+    /// piece 4), the caller gave it no home, or its install is not `Ready`.
+    pub fn sign_in(&self, agent: &AgentId, method: Method) -> Result<(), SigninError> {
+        let start = self
+            .shared
+            .signin
+            .sign_in(agent, method, self.installed(agent));
+        self.start_signin(start)
+    }
+
+    /// Cancels `agent`'s sign-in run: its child's tree is killed and the state becomes
+    /// `Failed { code: Cancelled }`. Refused when no sign-in run is going.
+    pub fn cancel_sign_in(&self, agent: &AgentId) -> Result<(), SigninError> {
+        self.shared.signin.cancel(agent)
+    }
+
+    /// Writes `code` and a newline to `agent`'s login run's stdin (Claude's paste route), then
+    /// drops it, zeroed. It is never stored, logged or shown. Refused when no sign-in run is
+    /// going.
+    pub fn paste_code(&self, agent: &AgentId, code: PasteCode) -> Result<(), SigninError> {
+        self.shared.signin.paste(agent, code)
+    }
+
+    /// Signs `agent` out of Clauseo's own login (the vendor's logout), then checks status.
+    /// Refused for a reused login, the lawyer's own: `SignedIn { source: Reused }` is left with
+    /// `stop_using_login` (S18 piece 5). A sign-in going is stopped first, silently.
+    pub fn sign_out(&self, agent: &AgentId) -> Result<(), SigninError> {
+        let start = self.shared.signin.sign_out(agent, self.installed(agent));
+        self.start_signin(start)
+    }
+
+    /// One status check for `agent` (R20's "a window shows Plans"): `SignedIn` or `SignedOut`,
+    /// unchanged when status cannot tell. Nothing new runs while a sign-in or sign-out is going,
+    /// since that reports by itself.
+    pub fn check_status(&self, agent: &AgentId) -> Result<(), SigninError> {
+        let start = self
+            .shared
+            .signin
+            .check_status(agent, self.installed(agent));
+        self.start_signin(start)
+    }
+
+    /// `agent`'s last sign-in state, or `None` before any.
+    pub fn signin_state(&self, agent: &AgentId) -> Option<SigninState> {
+        self.shared.signin.state(agent)
+    }
+
+    /// Hands a reserved sign-in job to the worker.
+    fn start_signin(
+        &self,
+        start: Result<Option<SigninStart>, SigninError>,
+    ) -> Result<(), SigninError> {
+        if let Some(start) = start? {
+            self.send(Command::Signin(Box::new(start)));
+        }
+        Ok(())
+    }
+
     fn send(&self, command: Command) {
         // A send fails only once the worker is gone, and then nothing can be done.
         drop(self.commands.send(command));
@@ -131,11 +207,13 @@ impl Agents {
 }
 
 impl Drop for Agents {
-    /// Stops the running job, if any; the worker ends once its commands' sender is gone.
+    /// Stops the running jobs, install and sign-ins; the worker ends once its commands' sender
+    /// is gone.
     fn drop(&mut self) {
         if let Some(running) = self.shared.lock().current.take() {
             running.cancel.cancel();
         }
+        self.shared.signin.stop_all();
     }
 }
 
@@ -238,6 +316,7 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
                 Command::Install(agent) => self.install(&agent),
                 Command::Pause(agent) => self.pause(&agent),
                 Command::Retry(agent, use_system_proxy) => self.retry(&agent, use_system_proxy),
+                Command::Signin(start) => signin::start_job(&self, *start),
             }
         }
     }
@@ -261,6 +340,16 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
         for agent in agents {
             if config.managed.contains(&agent) {
                 self.shared.emit(&agent, InstallState::Managed, None);
+                continue;
+            }
+            #[cfg(feature = "test-support")]
+            if let Some(installed) = config.ready_for_tests.get(&agent) {
+                let version = installed.version.clone();
+                self.shared.emit(
+                    &agent,
+                    InstallState::Ready { version },
+                    Some(installed.clone()),
+                );
                 continue;
             }
             if lock.is_some()

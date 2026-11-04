@@ -512,6 +512,22 @@ impl Drop for TempDir {
     }
 }
 
+/// An install for tests: `node` runs `script` (the sign-in tests' fake CLI), with
+/// [`crate::AgentsConfig::ready_for_tests`].
+pub fn installed(
+    node: PathBuf,
+    script: PathBuf,
+    folder: PathBuf,
+    version: &str,
+) -> crate::Installed {
+    crate::Installed {
+        node,
+        script,
+        folder,
+        version: version.to_owned(),
+    }
+}
+
 /// Writes `bytes` to `path`, making its folder, replacing any file there.
 pub fn write_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
     if let Some(parent) = path.parent() {
