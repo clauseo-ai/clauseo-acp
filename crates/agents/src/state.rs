@@ -27,9 +27,10 @@ pub enum AgentsEvent {
         /// Its new state.
         state: SigninState,
     },
-    /// Open `url` in the lawyer's browser: an address the `BROWSER` shim captured, or a device
-    /// code's page, whose host is one of the snapshot's sign-in hosts. Sent once per address;
-    /// an address read only from a run's output is never sent.
+    /// Open `url` in the lawyer's browser: an address Claude's `BROWSER` shim captured whose host
+    /// is one of the snapshot's sign-in hosts (Unix only). Sent once per address; an address read
+    /// only from a run's output is never sent, and Codex never sends one: its device page is in
+    /// [`SigninState::DeviceCode`], and its browser login opens the tab itself.
     OpenUrl {
         /// The agent signing in.
         agent: AgentId,
