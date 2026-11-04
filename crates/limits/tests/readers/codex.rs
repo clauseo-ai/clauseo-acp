@@ -146,6 +146,8 @@ fn the_spec_runs_codex_js_app_server_with_codex_home_forced() {
         "cloud.skills.enabled=false",
         "skills.bundled.enabled=false",
         "skills.include_instructions=false",
+        "cli_auth_credentials_store=\"file\"",
+        "shell_environment_policy.ignore_default_excludes=false",
     ] {
         args.extend([OsString::from("-c"), OsString::from(set)]);
     }

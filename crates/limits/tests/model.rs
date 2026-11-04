@@ -44,3 +44,7 @@ mod read_contract;
 #[cfg(test)]
 #[path = "model/unread_email.rs"]
 mod unread_email;
+
+#[cfg(test)]
+#[path = "model/login_changed.rs"]
+mod login_changed;

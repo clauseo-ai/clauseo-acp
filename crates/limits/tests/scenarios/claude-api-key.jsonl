@@ -1,0 +1,3 @@
+{"scenario":"claude-api-key","description":"The Claude usage helper's ok line for an API key sign-in (the line of fixtures/claude/api-key.json), then exit 0."}
+{"send_line":"{\"ok\":true,\"account\":{\"apiProvider\":\"firstParty\"},\"usage\":{\"subscription_type\":null,\"rate_limits_available\":false,\"rate_limits\":null}}"}
+{"exit":{"code":0}}

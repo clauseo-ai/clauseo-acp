@@ -26,6 +26,8 @@ fn switches() -> Value {
         "features": {"apps": false, "plugins": false, "skill_mcp_dependency_install": false},
         "cloud": {"skills": {"enabled": false}},
         "skills": {"bundled": {"enabled": false}, "include_instructions": false},
+        "cli_auth_credentials_store": "file",
+        "shell_environment_policy": {"ignore_default_excludes": false},
     })
 }
 
@@ -105,7 +107,7 @@ fn merge_add_only_extends_arrays_and_keeps_what_is_there() {
 fn config_nests_every_limits_override() {
     let built = Value::Object(config(&BTreeMap::new(), Map::new(), None));
     assert_eq!(built, pinned());
-    assert_eq!(clauseo_limits::CODEX_OVERRIDES.len(), 6);
+    assert_eq!(clauseo_limits::CODEX_OVERRIDES.len(), 8);
 }
 
 /// On Windows Codex gets the unelevated sandbox, without which codex 0.162.1 makes
@@ -439,6 +441,8 @@ fn home_config_holds_only_the_switches() {
             "cloud.skills.enabled = false",
             "skills.bundled.enabled = false",
             "skills.include_instructions = false",
+            "cli_auth_credentials_store = \"file\"",
+            "shell_environment_policy.ignore_default_excludes = false",
         ]
     );
     assert!(!text.contains("hooks"), "{text}");

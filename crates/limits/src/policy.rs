@@ -86,6 +86,15 @@ pub enum Input {
         /// The agent, or `None` for every agent.
         agent: Option<AgentKind>,
     },
+    /// The agent's login changed: a sign-in, a sign-out, an account change, or an API key or
+    /// firm endpoint set or cleared (decision record 0048). Reads at once, past any age or
+    /// back-off; a read already in flight read the old login, so another starts when it ends.
+    /// A question pending still holds the read until it is answered. Rust only: the host takes
+    /// it from desktop, never from a window, so a window cannot use it to skip the back-off.
+    LoginChanged {
+        /// The agent.
+        agent: AgentKind,
+    },
     /// A turn of `agent` ended. With no turn-start input, "this turn" is the time since the
     /// agent's last turn end: a live signal since then makes this end wait the longer age.
     TurnEnded {
@@ -196,6 +205,11 @@ impl Limits {
                     actions.push(Action::ViewChanged);
                 }
             }
+            Input::LoginChanged { agent } => {
+                if let Some(state) = self.state_mut(agent) {
+                    triggers::login_changed(state, now, &mut actions);
+                }
+            }
             Input::TurnEnded { agent, read_now } => {
                 if let Some(state) = self.state_mut(agent) {
                     triggers::turn_ended(state, read_now, now, &mut actions);
@@ -214,10 +228,14 @@ impl Limits {
             }
             Input::ReadDone { agent, outcome } => {
                 if let Some(state) = self.state_mut(agent)
-                    && state.reads.in_flight
+                    && state.reads.in_flight()
                 {
-                    state.reads.in_flight = false;
+                    let stale = state.reads.flight == triggers::Flight::ReadingStale;
+                    state.reads.flight = triggers::Flight::Idle;
                     actions.extend(apply_read(state, outcome, now));
+                    if stale {
+                        request_read(state, now, &mut actions);
+                    }
                 }
             }
             Input::Deadline => {

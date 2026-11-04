@@ -230,7 +230,7 @@ pub(crate) fn apply_live(
 /// signed out (`Unavailable { MissingScope }`).
 fn drops_live_without_account(state: &AgentState) -> bool {
     match state.source {
-        LimitSource::Loading => state.reads.in_flight,
+        LimitSource::Loading => state.reads.in_flight(),
         LimitSource::Unavailable {
             reason: UnavailableReason::MissingScope,
         } => true,
