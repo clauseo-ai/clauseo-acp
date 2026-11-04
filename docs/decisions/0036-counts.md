@@ -203,7 +203,9 @@ cells, the weekly tally, the queue and the sender. Its row bans `matters`, `acp`
   `tauri-plugin-updater` installs; no second one), the OS's certificate check, HTTPS only, no
   redirect, no cookie store, no `Referer`, a 60 s timeout. A POST names `User-Agent: Clauseo`,
   `Content-Type: application/json` and `Content-Encoding: gzip`; reqwest adds `Accept: */*` and
-  hyper `Host` and `Content-Length`. Only the status of the answer is read.
+  hyper `Host` and `Content-Length`, and nothing else goes: a test reads the bytes sent, at a
+  server on 127.0.0.1 with HTTPS only relaxed for the test alone, and fails on any other header.
+  Only the status of the answer is read.
 - **The proxy** is the system's, through reqwest's `system-proxy` (hyper-util's
   `client-proxy-system`, read in hyper-util 0.1.21's `client/proxy/matcher.rs`): the
   `HTTPS_PROXY`/`HTTP_PROXY`/`ALL_PROXY`/`NO_PROXY` variables first, then on macOS the network
@@ -218,7 +220,8 @@ cells, the weekly tally, the queue and the sender. Its row bans `matters`, `acp`
   release builds never read it. An endpoint is an `https` origin with no user, query, fragment or
   path. With none, every POST fails without touching the network, and the days age out of the queue.
 - **`count_ui(event: UiCount)`**, granted to `main` alone by its own capability
-  (`capabilities/counts.json`): `error_shown` (a code `StrictErrorCode` refuses counts nothing),
+  (`capabilities/counts.json`): `error_shown` (its code read as `StrictErrorCode`, so `unknown` or
+  a code this build does not know is refused with the argument),
   `break_shown`, the webview's `feature_used` values (`versions`, `compare`, `open_in_word`,
   `continue_other_agent`, `prepared_answer_used`, `sample_matter`; never the host's `undo` and
   `restore` or stage E's tools'), and `onboarding_step`. Each enum refuses an unknown field or
@@ -229,6 +232,9 @@ cells, the weekly tally, the queue and the sender. Its row bans `matters`, `acp`
   them, and a second, disk lock orders them. `bump` takes the state's lock alone and never waits
   on the disk, and an off waits for a write under way before it deletes the folder.
 - **No document text in a payload** is shown end to end by `crates/desktop/tests/canary.rs`.
+- **Follow-up:** the envelope is read once at start. A change of `ui.language` or of policy
+  reaches the next day report or tally after a restart; calling `Counts::set_about` when either
+  changes is a later pull request.
 
 ## Status
 

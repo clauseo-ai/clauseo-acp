@@ -11,7 +11,6 @@ use clauseo_counts::schema::{
     BreakKind, BreakShown, ErrorShown, Event, Feature, FeatureUsed, Onboarding, OnboardingStep,
     StrictErrorCode,
 };
-use clauseo_protocol::ErrorCode;
 use serde::Deserialize;
 
 /// One count from the webview.
@@ -19,11 +18,12 @@ use serde::Deserialize;
 #[cfg_attr(test, derive(serde::Serialize, specta::Type))]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum UiCount {
-    /// The UI showed an error's copy. `unknown`, or a code this build does not know, counts
-    /// nothing.
+    /// The UI showed an error's copy. `unknown`, or a code this build does not know, is refused
+    /// as the argument is read (`StrictErrorCode`).
     ErrorShown {
-        /// The error's code.
-        code: ErrorCode,
+        /// The error's code. The bindings name it `ErrorCode`, whose strings it reads.
+        #[cfg_attr(test, specta(type = clauseo_protocol::ErrorCode))]
+        code: StrictErrorCode,
     },
     /// A break screen showed, and what the lawyer did next.
     BreakShown {
@@ -122,12 +122,10 @@ pub(crate) enum UiOnboardingStep {
 }
 
 impl UiCount {
-    /// The counts' event; none for an error code the schema refuses (`unknown`).
-    pub(crate) fn event(self) -> Option<Event> {
-        Some(match self {
-            UiCount::ErrorShown { code } => Event::ErrorShown(ErrorShown {
-                code: StrictErrorCode::new(code)?,
-            }),
+    /// The counts' event.
+    pub(crate) fn event(self) -> Event {
+        match self {
+            UiCount::ErrorShown { code } => Event::ErrorShown(ErrorShown { code }),
             UiCount::BreakShown { kind, then } => Event::BreakShown(BreakShown {
                 kind: kind.into(),
                 then: then.into(),
@@ -136,7 +134,7 @@ impl UiCount {
                 feature: feature.into(),
             }),
             UiCount::OnboardingStep { step } => Event::Onboarding(Onboarding { step: step.into() }),
-        })
+        }
     }
 }
 

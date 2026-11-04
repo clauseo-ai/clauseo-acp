@@ -4029,11 +4029,11 @@ export type UiBreakThen =
 /**  One count from the webview. */
 export type UiCount = 
 /**
- *  The UI showed an error's copy. `unknown`, or a code this build does not know, counts
- *  nothing.
+ *  The UI showed an error's copy. `unknown`, or a code this build does not know, is refused
+ *  as the argument is read (`StrictErrorCode`).
  */
 ({ error_shown: {
-	/**  The error's code. */
+	/**  The error's code. The bindings name it `ErrorCode`, whose strings it reads. */
 	code: ErrorCode,
 } }) & { break_shown?: never; feature_used?: never; onboarding_step?: never } | 
 /**  A break screen showed, and what the lawyer did next. */

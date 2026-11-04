@@ -267,7 +267,9 @@ included, and stores no proxy password ([decision 0039](decisions/0039-egress-pr
 Coming:
 
 - `t.clauseo.chat`: usage counts and crash reports (tasks S21 to S23), only when they are on, and
-  firms can force them off (`privacy.*`).
+  firms can force them off (`privacy.*`). HTTPS POSTs with `User-Agent: Clauseo`; they follow
+  `HTTPS_PROXY`, then the OS's proxy settings, but not a PAC file yet, and never Clauseo's egress
+  proxy ([decision 0036](decisions/0036-counts.md), "The desktop").
 - `nodejs.org` and `registry.npmjs.org`: Node and the agents' own downloads (task S17), unless
   `install.bundle` or `install.registry` points at your copy.
 - `data.clauseo.chat`: Clauseo's optional paid data connectors, only for a firm that adds one.

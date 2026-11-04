@@ -84,11 +84,11 @@ impl CountsState {
     /// Counts one of the webview's events. Before the counts open (they open before the host
     /// starts, and `count_ui` waits for the host's start) or without counts, nothing.
     pub(crate) fn count(&self, event: UiCount) {
-        let (Some(counts), Some(event)) = (self.counts.get(), event.event()) else {
+        let Some(counts) = self.counts.get() else {
             tracing::debug!("a webview count with no usage counts to go to");
             return;
         };
-        counts.bump(event);
+        counts.bump(event.event());
     }
 
     /// Saves the counts at exit.
@@ -106,7 +106,7 @@ impl CountsState {
 pub fn open(locations: &Locations, effective: &Effective, exe: Option<&Path>) -> Option<Counts> {
     let about = about(effective, exe)?;
     let data_dir = locations.data_dir();
-    let consented = data_dir.join("first_act_done").exists();
+    let consented = data_dir.join(clauseo_counts::FIRST_ACT).exists();
     Some(Counts::open(
         data_dir,
         about,

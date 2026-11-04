@@ -26,8 +26,9 @@ use crate::write;
 
 /// The folder under the data folder that holds every counts file.
 pub(crate) const FOLDER: &str = "counts";
-/// The first-act marker, in the data folder itself (coordinator decision 8). Never deleted.
-pub(crate) const FIRST_ACT: &str = "first_act_done";
+/// The first-act marker's name, in the data folder itself (coordinator decision 8). Never
+/// deleted. Desktop checks it exists before `Counts::open`.
+pub const FIRST_ACT: &str = "first_act_done";
 
 /// `today.json`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
