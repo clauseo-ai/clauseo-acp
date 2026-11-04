@@ -27,6 +27,55 @@
   .room-matter-match {
     @apply text-small text-muted;
   }
+  /* ---------- Find searching inside (U16a) ---------- */
+  /* its key, at the empty field's end */
+  .room-find-key {
+    flex: none;
+  }
+  /* a found word inside a snippet or a file name */
+  .room-find-hit {
+    @apply text-primary font-chip;
+  }
+  /* a paper found by its name: the file's glyph, then the name */
+  .room-find-paper {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--s1);
+  }
+  .room-find-paper > svg {
+    flex: none;
+    margin-top: var(--icon-line-drop);
+  }
+  /* an archived conversation: its 14 px mark at the end of the title, quiet */
+  .room-find-archived {
+    display: inline-flex;
+    vertical-align: middle;
+    margin-left: var(--s1-5);
+    color: var(--quiet);
+  }
+  /* the index still being built: the clock, then the line */
+  .room-find-indexing {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--s1-5);
+    padding: 0 var(--s3);
+    margin-bottom: var(--s2);
+    @apply text-small text-muted;
+  }
+  /* what Find covers, behind the info icon at the results' foot */
+  .room-find-foot {
+    padding: 0 var(--s3);
+    margin-top: var(--s2);
+  }
+  .room-find-scope {
+    display: inline-grid;
+    place-items: center;
+    width: var(--size-icon-line);
+    height: var(--size-icon-line);
+    color: var(--quiet);
+    border-radius: var(--r-round);
+    @apply is-hover:text-primary;
+  }
   /* a status's mark (rail-mark.tsx): a 14 px icon in the status line's tone, or on a court-yellow disc where the matter
      waits on the lawyer's hand */
   .room-mark {

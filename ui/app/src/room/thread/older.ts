@@ -80,6 +80,9 @@ export function useOlder(
   stream: StreamId | null,
   hasOlder: boolean,
   scroller: () => HTMLElement | null,
+  /** An entry's order to page back to (jump-entry.ts, a Find result): pages are asked for, one after another, until
+   * the oldest entry held is at or before it. Null asks for none. */
+  reach: number | null = null,
 ): Older {
   const [pages, setPages] = useState<Pages | null>(null);
   const [loading, setLoading] = useState(false);
@@ -149,8 +152,13 @@ export function useOlder(
     // one listener, on whichever scrolls: the thread itself, or the page below 1000 px; asked again on a resize
     let self = scrolls(el);
     let target: HTMLElement | Window = self ? el : window;
+    // a jump to an entry above what is held (reach) asks for the next page wherever the view is, as each lands
+    const view = store.view(stream);
+    const oldest = own?.entries[0] ?? (view === undefined ? undefined : firstOf(view));
+    const jumping = reach !== null && oldest !== undefined && orderOf(oldest) > reach;
     const look = () => {
-      if ((self ? el.scrollTop : window.scrollY) > TOP) refusedAt.current = null;
+      if (jumping) more();
+      else if ((self ? el.scrollTop : window.scrollY) > TOP) refusedAt.current = null;
       else more();
     };
     // at most one look a frame, however many scroll events the frame brings
@@ -179,7 +187,7 @@ export function useOlder(
       target.removeEventListener("scroll", onScroll);
       window.removeEventListener("resize", onResize);
     };
-  }, [scroller, stream, hasOlder, own, more]);
+  }, [scroller, stream, hasOlder, own, more, reach, store, epoch]);
 
   return { entries: own?.entries ?? NONE, loading };
 }

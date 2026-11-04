@@ -12,6 +12,8 @@ import { wordsOf, type Slots, type Hindi } from "./words-core.ts";
 const HI = {
   /* ---------- the rail: finding a matter, a folder that moved ---------- */
   "Find a matter": "मामला खोजें",
+  // RO-20: Find's placeholder and name once it searches inside (U16a); hi: later
+  Find: null,
   "Find a matter by its name, client or case number": "नाम, मुवक्किल या केस नंबर से मामला खोजें",
   Recent: "हाल के",
   "Matching matters": "मेल खाते मामले",

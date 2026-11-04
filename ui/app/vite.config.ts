@@ -155,7 +155,8 @@ function probeEntry(): Plugin {
  * nothing to preload. The perf module and the entity table import nothing the first load lacks; the room's lazy parts
  * (the thread's list, the plan trigger, the working line's details, the composer's `/` menu) import only chunks
  * index.html preloads, and the list's change-note question only those and the list; U6's retried line only those, and
- * the title rules nothing; U7's queue strip only the first load. The dialogs that share the dialog primitives are
+ * the title rules nothing; U7's queue strip only the first load; U16a's Find results only the first load and the small
+ * jump-entry chunk they share with the list (isLazyShared). The dialogs that share the dialog primitives are
  * PRELOADED_CHUNKS, not here. vite-config.test.ts checks that, and that no chunk carries a preload list except the
  * importers of PRELOADED_CHUNKS. */
 export const BARE_CHUNKS = [
@@ -168,6 +169,7 @@ export const BARE_CHUNKS = [
   "conversation-title",
   "composer-menu",
   "queue-strip",
+  "find-results",
 ];
 
 /** The lazy chunks that keep Vite's preload list, though not bare: a lazy part behind a click whose chunk imports

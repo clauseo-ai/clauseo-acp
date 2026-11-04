@@ -359,9 +359,9 @@ test("H8 before H5: with only the papers part the wall has its tiles and the rai
   expect(transport.only("next_query").map((q) => q.query)).toEqual([
     { list_papers: { matter: NEWER.matter } },
   ]);
-  // find names only: no client to search without H5
+  // Find searches inside: its name says only "Find"
   expect(host?.querySelector("[data-testid=find]")?.closest("label")?.textContent).toContain(
-    mt("en", "Find a matter by its name"),
+    mt("en", "Find"),
   );
 });
 

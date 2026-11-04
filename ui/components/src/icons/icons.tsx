@@ -7,7 +7,7 @@
 // is listed in names.ts, and icons.test.ts fails when the two disagree.
 // The icon pass's 21 (IconBreak to IconPlanLimit, at the end of this file) were cut from Lucide 1.66.0 (commit
 // a630cec77eac6568b989e87e4947a8bfe45caacd) on 3 Nov 2026, each drawn over its source at that release and checked
-// against it. The tool kinds' glyphs are in tool-kinds.tsx, cut the same way, and re-exported here; the three that
+// against it. IconArchived was cut from Lucide 1.66.0's archive (same commit) on 4 Nov 2026, the same way. The tool kinds' glyphs are in tool-kinds.tsx, cut the same way, and re-exported here; the three that
 // reuse a shape already here (IconToolEdit, IconToolSearch, IconToolFetch) stay in this file.
 // IconFailed was cut from Lucide 1.66.0 (triangle-alert, the same commit) on 4 Nov 2026 for U16a, the same way: its
 // rounded corners drawn square, its triangle drawn in from the edge so the miter joins stay inside the 20 px box.
@@ -520,6 +520,18 @@ export function IconPlanLimit(props: IconProps) {
     <Icon {...props}>
       <path d="M10 11.45l2.9-2.9" vectorEffect="non-scaling-stroke" />
       <path d="M3.72 15.07a7.25 7.25 0 1 1 12.56 0" vectorEffect="non-scaling-stroke" />
+    </Icon>
+  );
+}
+
+/** Archived: a conversation set aside, on a Find result (source: archive, Lucide archive at 1.66.0; the lid and the
+ * box's corners drawn square) */
+export function IconArchived(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M2.8 3.5h14.4v3.6H2.8z" vectorEffect="non-scaling-stroke" />
+      <path d="M4.2 7.1v10.1h11.6V7.1" vectorEffect="non-scaling-stroke" />
+      <path d="M8.55 10.6h2.9" vectorEffect="non-scaling-stroke" />
     </Icon>
   );
 }

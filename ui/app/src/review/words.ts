@@ -2,6 +2,7 @@
 // up from that file, so the page and the gate always compare against what the app shows.
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { errorHindi, errorSentence, type ErrorKey } from "@clauseo/components/lib/words-errors.ts";
+import { fw, type FindKey } from "@clauseo/components/lib/words-find.ts";
 import { frame, type FrameKey } from "@clauseo/components/lib/words-frame.ts";
 import { lim, type LimitKey } from "@clauseo/components/lib/words-limits.ts";
 import { limThread, type LimitThreadKey } from "@clauseo/components/lib/words-limits-thread.ts";
@@ -44,6 +45,13 @@ export const frameWords = (key: FrameKey): WordsRef => ({
   key,
   text: (lang) => frame(lang, key),
   later: frame.hi[key] === null,
+});
+
+export const findWords = (key: FindKey): WordsRef => ({
+  file: "lib/words-find.ts",
+  key,
+  text: (lang) => fw(lang, key),
+  later: fw.hi[key] === null,
 });
 
 export const roomWords = (key: RoomKey): WordsRef => ({
