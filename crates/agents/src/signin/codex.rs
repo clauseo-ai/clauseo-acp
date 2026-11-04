@@ -295,8 +295,9 @@ pub(crate) async fn status_run<T: Timer + Send + Sync>(
 
 /// `logout` in Clauseo's home, then a status check. Never for a reused login (the call refuses
 /// it by the state and the job checks again here by `login-source` and the home's login file),
-/// and never while the home shares the lawyer's login file (the guard, [`home_shares_lawyers_login`]): Codex's logout revokes the tokens and deletes the
-/// login. The job then runs the status check instead.
+/// and never while the home shares the lawyer's login file (the guard,
+/// [`home_shares_lawyers_login`]): Codex's logout revokes the tokens and deletes the login. The
+/// job then runs the status check instead.
 pub(crate) async fn sign_out<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Option<SigninState> {
     if job.shared.signin.source(&job.ticket.agent) == Some(Source::Reused)
         || super::found::is_reused(job)
