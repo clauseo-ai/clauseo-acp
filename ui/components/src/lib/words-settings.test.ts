@@ -17,7 +17,8 @@ test("the sections and their lines say the design's words in both languages", ()
     "तुरंत बदलती है, और सब कुछ वहीं रहता है जहाँ था।",
   );
   expect(st("hi", "How Clauseo looks on this computer.")).toBe("इस कंप्यूटर पर Clauseo कैसा दिखे।");
-  expect(st("hi", "Managed by your organisation")).toBe("आपके संगठन द्वारा प्रबंधित");
+  // hi: later, so the Hindi window shows the English
+  expect(st("hi", "Managed by firm")).toBe("Managed by firm");
   expect(LANGUAGE_NAMES).toEqual({ en: "English", hi: "हिन्दी" });
 });
 

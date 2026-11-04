@@ -23,8 +23,8 @@ const HI = {
   "Released {date}": "{date} को जारी",
   "{n}% of the 5-hour limit left": "5 घंटे की सीमा का {n}% बाकी",
   "Pay as you go": "उपयोग के अनुसार भुगतान",
-  // a row the firm's policy locks
-  "Managed by your organisation": "आपके संगठन द्वारा प्रबंधित",
+  // a row the firm's policy locks (hi: later: the old Hindi said "your organisation")
+  "Managed by firm": null,
   // each section's one line
   "The language of every word on screen. Papers, quotes and case names stay as filed.":
     "स्क्रीन के हर शब्द की भाषा। दस्तावेज़, उद्धरण और मामलों के नाम वैसे ही रहते हैं जैसे दर्ज हैं।",
