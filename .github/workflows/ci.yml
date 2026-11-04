@@ -301,11 +301,12 @@ jobs:
       # keychain smoke, app build or other test, which wait for the merge queue. Every step past
       # clippy checks it, directly or through RELEASE, UI or the OS.
       PR_LINT_ONLY: ${{ github.event_name == 'pull_request' }}
-      # The full-LTO release app: nightly, on demand and the push exception's macOS job. A merge
-      # group runs the dev-profile steps only, here and in runs-on above.
-      RELEASE: ${{ github.event_name != 'pull_request' && github.event_name != 'merge_group' }}
+      # The full-LTO release app: nightly and on demand only. A merge group and the push exception's
+      # macOS job run the dev-profile steps (clippy and the tests), so the scarce macOS runner does
+      # the least it can while it is the only place macOS ARM64 is checked.
+      RELEASE: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
       # The ui is built for the release app, and on Linux for the debug app launched under xvfb.
-      UI: ${{ (github.event_name != 'pull_request' && github.event_name != 'merge_group') || contains(matrix.target, '-linux-') }}
+      UI: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || contains(matrix.target, '-linux-') }}
     defaults:
       run:
         shell: bash
