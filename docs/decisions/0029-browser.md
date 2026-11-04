@@ -395,7 +395,8 @@ agent-browser's own `install` writes under the home folder, which Clauseo cannot
 Windows, so the host downloads Chrome for Testing itself, once the lawyer agreed.
 
 **Wire.** `HostCommand::InstallBrowser {}` starts it and answers `Done` at once; while one runs
-it answers `Done` and does nothing (no second download). `HostCommand::CancelBrowserInstall
+it answers `Done` and does nothing (no second download), except while a cancelled one is still
+ending: then a new download starts once its `Failed { cancelled }` is out. `HostCommand::CancelBrowserInstall
 {}` stops it, and does nothing when none runs. Neither stores a receipt. Every app subscriber gets
 `HostEvent::BrowserInstall { state }` as it goes: some `Downloading { bytes, total }` (at most
 four a second, only once `Content-Length` is known), `Unpacking`, then one `Done` or one
