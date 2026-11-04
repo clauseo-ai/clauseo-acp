@@ -45,7 +45,7 @@ use clauseo_settings::{
 };
 use futures::StreamExt as _;
 
-use support::{NoReader, RecordingUpload, Scratch, Seen, leaks, wait};
+use support::{NoReader, RecordingUpload, Scratch, Seen, leaks, os_home_never_leaks, wait};
 
 /// The matter's name, in Devanagari: a divorce matter, "Mehra divorce".
 const MATTER: &str = "मेहरा तलाक़";
@@ -337,6 +337,7 @@ fn session_in_a_planted_environment() {
     } else {
         SystemDirs.home().unwrap()
     };
+    let planted_home = home.clone();
     assert!(
         home.display().to_string().contains(&token),
         "{}",
@@ -513,6 +514,9 @@ fn session_in_a_planted_environment() {
         "the canary reached a body:\n{}",
         hits.join("\n")
     );
+    if let Some(os_home) = SystemDirs.home() {
+        os_home_never_leaks(&seen, &os_home, &planted_home);
+    }
 
     // The bodies are real: the day batch holds what the session counted.
     let batches: Vec<Batch> = seen
