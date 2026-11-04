@@ -48,10 +48,15 @@ fn a_folder_whose_owner_rights_exclude_write_dac_cant_change_permissions() {
 
 #[test]
 fn a_unc_path_is_network() {
-    // The admin share `C$`: GitHub's Windows runners have it. Where this machine has none, the
-    // test says so and passes, as the connectors' loopback test does.
+    // The admin share `C$`: GitHub's Windows runners have it, so on CI a missing share fails the
+    // test. Elsewhere (a developer's machine without it) the test says so and passes, as the
+    // connectors' loopback test does. A subfolder, not the share root, which matters refuses.
     let share = Path::new(r"\\localhost\C$\Windows");
     if !share.is_dir() {
+        assert!(
+            std::env::var_os("CI").is_none(),
+            "CI's Windows runners have the C$ admin share, and this run has none"
+        );
         eprintln!("skipped: this machine has no \\\\localhost\\C$ share");
         return;
     }
