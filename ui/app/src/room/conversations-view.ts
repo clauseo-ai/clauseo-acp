@@ -26,6 +26,9 @@ export type ConversationRow = {
   /** H6: false while its last answer waits to be seen; absent without H6. */
   seen?: boolean;
   last_stop?: Known["last_stop"];
+  /** H-triage: when its snooze ends, and whether it's done (U16b); absent: neither. */
+  snoozed_until?: Timestamp;
+  done?: boolean;
 };
 
 export type ConversationsView = {

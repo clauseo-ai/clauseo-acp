@@ -540,6 +540,8 @@ export class Conversations {
       status: t.status,
       ...(t.seen === undefined ? {} : { seen: t.seen }),
       ...(t.last_stop === undefined ? {} : { last_stop: t.last_stop }),
+      ...(t.snoozed_until === undefined ? {} : { snoozed_until: t.snoozed_until }),
+      ...(t.done === true ? { done: true } : {}),
     }));
     const d = m.draft;
     if (d !== null && d.shown)

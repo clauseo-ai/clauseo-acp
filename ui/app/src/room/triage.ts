@@ -13,6 +13,9 @@
 // Where a matter's thread list hasn't come (no app feed), the matter's status alone places it: a question, a permission
 // or an answer ready need you, with no thread named. `held` keeps rows where they stand: the open matter until another
 // opens, and every row while the pointer is over the rail (rail-triage.ts keeps both); a row's words still change.
+// U16b: a conversation snoozed (its snoozed_until still ahead of now) or done counts for nothing here: a wake (the
+// reducer clearing it) brings its need back. A matter whose every conversation not done is snoozed to one time is
+// snoozed whole: it leaves the groups for the Snoozed shelf (`shelf`), unless pinned or held. Matters are never done.
 import type { MatterId, ThreadStatus, ThreadSummary, Timestamp } from "../transport/protocol.ts";
 import type { MatterInfo } from "./host-next.ts";
 import type { RowState, RowStatus } from "./matters.ts";
@@ -20,7 +23,7 @@ import type { RowState, RowStatus } from "./matters.ts";
 /** Why a matter needs the lawyer, in Needs you's order. */
 export type Need = "hand" | "ready" | "failed";
 /** Where a matter's row stands. "date": its date group, by its next date. */
-export type Group = "pinned" | "needs" | "date";
+export type Group = "pinned" | "needs" | "date" | "snoozed";
 
 /** A row's state: the matters' row states and Failed. */
 export type TriageState = RowState | "failed";
@@ -57,7 +60,51 @@ export type TriageInput = {
   held: ReadonlyMap<MatterId, Group> | null;
   /** The previous triage's arrivals. */
   arrived: ReadonlyMap<MatterId, Arrival>;
+  /** The time snoozes are compared with: a snooze whose time has come counts as none. */
+  now: Timestamp;
 };
+
+/** Snoozed: its time to come back still ahead. The host clears it at that time; comparing covers a render before. */
+export const snoozed = (t: Pick<ThreadSummary, "snoozed_until">, now: Timestamp): boolean =>
+  t.snoozed_until !== undefined && t.snoozed_until > now;
+
+/** The time a matter is snoozed to whole (every thread of it neither done nor archived snoozed to that one time),
+ * else null; a matter with no such thread isn't snoozed. */
+export function wholly(
+  list: readonly ThreadSummary[] | undefined,
+  now: Timestamp,
+): Timestamp | null {
+  let until: Timestamp | null = null;
+  for (const t of list ?? []) {
+    if (t.status === "archived" || t.done === true) continue;
+    if (!snoozed(t, now) || (until !== null && t.snoozed_until !== until)) return null;
+    until = t.snoozed_until ?? null;
+  }
+  return until;
+}
+
+/** One row of the Snoozed shelf: a matter snoozed whole (thread null) or a conversation. */
+export type Shelved = { matter: MatterInfo; thread: ThreadSummary | null; until: Timestamp };
+
+/** The Snoozed shelf, the next back first: each matter snoozed whole as one row, else each snoozed conversation (the
+ * scratch matter's one by one). */
+export function shelf(
+  matters: readonly MatterInfo[],
+  lists: ReadonlyMap<MatterId, readonly ThreadSummary[]>,
+  now: Timestamp,
+): Shelved[] {
+  const rows: Shelved[] = [];
+  for (const matter of matters) {
+    const list = lists.get(matter.matter) ?? [];
+    const whole = matter.kind === "scratch" ? null : wholly(list, now);
+    if (whole !== null) rows.push({ matter, thread: null, until: whole });
+    else
+      for (const t of list)
+        if (t.status !== "archived" && t.snoozed_until !== undefined && snoozed(t, now))
+          rows.push({ matter, thread: t, until: t.snoozed_until });
+  }
+  return rows.sort((a, b) => a.until - b.until);
+}
 
 const RANK: Record<Need, number> = { hand: 0, ready: 1, failed: 2 };
 
@@ -82,6 +129,7 @@ function rowOf(
   m: MatterInfo,
   own: RowStatus | undefined,
   list: readonly ThreadSummary[] | undefined,
+  now: Timestamp,
 ): TriageRow {
   if (list === undefined) {
     const s = own?.state;
@@ -91,7 +139,7 @@ function rowOf(
   }
   let best: { t: ThreadSummary; need: Need } | null = null;
   for (const t of list) {
-    const need = needOf(t);
+    const need = t.done === true || snoozed(t, now) ? null : needOf(t);
     if (need === null) continue;
     if (
       best === null ||
@@ -124,16 +172,22 @@ function rowOf(
 }
 
 /** The groups and every row's words. */
-export function triage({ matters, status, lists, held, arrived }: TriageInput): Triage {
+export function triage({ matters, status, lists, held, arrived, now }: TriageInput): Triage {
   const rows = new Map<MatterId, TriageRow>();
   const group = new Map<MatterId, Group>();
   const needing: { m: MatterInfo; row: TriageRow }[] = [];
   for (const m of matters) {
-    const row = rowOf(m, status.get(m.matter), lists.get(m.matter));
+    const list = lists.get(m.matter);
+    const row = rowOf(m, status.get(m.matter), list, now);
     rows.set(m.matter, row);
     const g: Group = m.pinned
       ? "pinned"
-      : (held?.get(m.matter) ?? (row.need === null ? "date" : "needs"));
+      : (held?.get(m.matter) ??
+        (m.kind !== "scratch" && wholly(list, now) !== null
+          ? "snoozed"
+          : row.need === null
+            ? "date"
+            : "needs"));
     group.set(m.matter, g);
     if (g === "needs") needing.push({ m, row });
   }

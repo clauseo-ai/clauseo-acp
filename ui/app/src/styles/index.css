@@ -13,6 +13,7 @@
 @import "@clauseo/components/clauseo/live.css";
 @import "@clauseo/components/clauseo/matter-form.css";
 @import "@clauseo/components/clauseo/matters.css";
+@import "@clauseo/components/clauseo/triage.css";
 @source "..";
 @source not "../gallery";
 @source not "../review";

@@ -42,6 +42,7 @@ const run = (
     lists: new Map(lists.map(([m, ts]) => [m.matter, ts])),
     held,
     arrived,
+    now: NOW,
   });
 
 test("each thread status and last stop lands in its group, as the page's table has it", () => {

@@ -211,7 +211,10 @@ test("with a NextHost: the default location's folder line, create_matter with de
       next_date: "2026-11-30",
     },
   });
-  expect(transport.only("dispatch")).toEqual([]);
+  // nothing but the rail's morning sweep (U16b), sent at launch whenever the clock reads 05:00 or later
+  expect(transport.only("dispatch").filter((c) => !("sweep_done" in c.command.command))).toEqual(
+    [],
+  );
   expect(title()).toBe(NAME);
 });
 

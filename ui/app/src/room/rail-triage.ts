@@ -15,6 +15,8 @@ type Inputs = {
   open: MatterId | null;
   /** Whether the pointer is over the rail. */
   over: boolean;
+  /** The time snoozes are compared with (triage.ts). */
+  now: number;
 };
 
 const NONE: ReadonlyMap<MatterId, Arrival> = new Map();
@@ -36,7 +38,8 @@ export class RailTriage {
       last.status === inputs.status &&
       last.lists === inputs.lists &&
       last.open === inputs.open &&
-      last.over === inputs.over
+      last.over === inputs.over &&
+      last.now === inputs.now
     )
       return last.result;
     // the pointer came over the rail: every row keeps the group it stands in until it leaves
@@ -68,6 +71,7 @@ export class RailTriage {
       lists: inputs.lists,
       held,
       arrived: this.#arrived,
+      now: inputs.now,
     });
   }
 }
