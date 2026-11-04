@@ -90,15 +90,19 @@ fn a_local_link_to_a_share_is_network() {
     // has; elsewhere the test says so and passes, but on CI it must run.
     let share = Path::new(r"\\localhost\C$\Windows");
     let temp = TempDir::new("folder-link-to-share");
-    let link = temp.path().join("link");
-    if !share.is_dir() || std::os::windows::fs::symlink_dir(share, &link).is_err() {
+    let link = if share.is_dir() {
+        temp.symlink_dir("link", share).ok()
+    } else {
+        None
+    };
+    let Some(link) = link else {
         assert!(
             std::env::var_os("CI").is_none(),
             "CI's Windows runners have the C$ share and may make symlinks, and this run can't"
         );
         eprintln!("skipped: no C$ share here, or no right to make a symlink");
         return;
-    }
+    };
     assert_eq!(folder_support(&link).unwrap(), FolderSupport::Network);
 }
 
