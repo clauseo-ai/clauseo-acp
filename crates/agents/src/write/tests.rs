@@ -55,7 +55,7 @@ fn follows_a_linked_data_folder() {
     assert!(real.0.join("agents").join("signin").is_dir());
 }
 
-/// Each folder it makes is 0700 on Unix, whatever the umask; one already there keeps its mode.
+/// Each folder it makes is 0700 on Unix, whatever the umask.
 #[cfg(unix)]
 #[test]
 fn new_folders_are_private() {
@@ -72,4 +72,32 @@ fn new_folders_are_private() {
         let mode = std::fs::metadata(&folder).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o700, "{}", folder.display());
     }
+}
+
+/// S18 re-review, Low: a real folder already there is set to 0700 too, as host's `make_home`
+/// does; a link is refused, never chmodded through.
+#[cfg(unix)]
+#[test]
+fn an_existing_folder_is_made_private() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let data = TestDir::new("dirs-premade");
+    let home = data.0.join("agents").join("codex-acp").join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    for folder in [
+        data.0.join("agents"),
+        home.parent().unwrap().to_owned(),
+        home.clone(),
+    ] {
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    create_private_dirs_under(&data.0, &home).unwrap();
+    let mode = std::fs::metadata(&home).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o700);
+    let mode = std::fs::metadata(data.0.join("agents"))
+        .unwrap()
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(mode, 0o700);
 }

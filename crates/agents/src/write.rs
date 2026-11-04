@@ -31,7 +31,8 @@ pub(crate) fn create_dir_all(path: &Path) -> io::Result<()> {
 /// Unix whatever the umask. Another thread or process making one first is fine; the check after
 /// still refuses a link or a file there. A link or a file below `data_dir`, or a `target` not
 /// under it, fails with `InvalidInput`, and nothing is made where a link points. `data_dir`
-/// itself may be a link: `CLAUSEO_DATA_DIR` may name one. A folder already there keeps its
+/// itself may be a link: `CLAUSEO_DATA_DIR` may name one. A real folder already there below
+/// `data_dir` is set to 0700 too (on Unix), as host's `make_home` does; `data_dir` keeps its
 /// mode. Every sign-in folder is made with this: the agent's home, `agents/<id>` for the
 /// markers, `agents/signin` and its `detect` folder.
 pub(crate) fn create_private_dirs_under(data_dir: &Path, target: &Path) -> io::Result<()> {
@@ -65,7 +66,23 @@ pub(crate) fn create_private_dirs_under(data_dir: &Path, target: &Path) -> io::R
                 "a link or a file stands where a folder goes",
             ));
         }
+        make_private(&at, &meta)?;
     }
+    Ok(())
+}
+
+/// Sets the real folder `path` (`meta` its `symlink_metadata`, checked not a link) to 0700 when
+/// it is not already, as host's `make_private_dir` does. Nothing on Windows.
+fn make_private(path: &Path, meta: &std::fs::Metadata) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        if meta.permissions().mode() & 0o777 != 0o700 {
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = (path, meta);
     Ok(())
 }
 
