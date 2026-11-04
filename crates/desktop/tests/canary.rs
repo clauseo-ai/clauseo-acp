@@ -2,8 +2,11 @@
 //! `fake_agent` playing Claude Code plants a canary, a random token and the Devanagari matter
 //! name "मेहरा तलाक़", everywhere a lawyer's words or a machine's names could come from: the
 //! folder name, the papers' names and contents, the prompt, the agent's answer and a tool call
-//! of it, the agent's stderr, an agent error and a refused command's error text, an environment
-//! variable of the agent, the app's install path, `HOME`, `USER` and `CLAUSEO_DATA_DIR`. With
+//! of it, the agent's stderr, an agent error and a refused command's error text, the app's
+//! install path, and the process environment: `HOME`, `USER`, `CLAUSEO_DATA_DIR` and a variable
+//! of its own. The environment is real: the outer test runs the session (an `#[ignore]`d inner
+//! test) in a child process of this binary with those variables set, so `Locations::resolve`
+//! and the agent, which inherits them, read them as the app would. With
 //! counts on (`FirstAct { counts: true }`) it runs a session through desktop's own counts code
 //! (`counts_for_tests`), moves the counts' time past midnight and on into the week after, so
 //! the day batch and the weekly tally are posted, and captures every body at a mock `Upload`.
@@ -22,7 +25,7 @@
 #[path = "canary/support.rs"]
 mod support;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use clauseo_counts::schema::{
@@ -37,10 +40,12 @@ use clauseo_protocol::{
     HostError, HostEvent, MatterSource, Principal, PromptBlock, StopReason, StreamId, ThreadId,
     Title, TurnId,
 };
-use clauseo_settings::{Effective, Locations, SystemFiles};
+use clauseo_settings::{
+    Effective, Locations, PlatformDirs as _, SystemDirs, SystemEnv, SystemFiles,
+};
 use futures::StreamExt as _;
 
-use support::{FakeDirs, FakeEnv, NoReader, RecordingUpload, Scratch, Seen, leaks, wait};
+use support::{NoReader, RecordingUpload, Scratch, Seen, leaks, wait};
 
 /// The matter's name, in Devanagari: a divorce matter, "Mehra divorce".
 const MATTER: &str = "मेहरा तलाक़";
@@ -214,11 +219,35 @@ fn tick_through(
     }
 }
 
-#[test]
+/// The child's environment variable naming the canary token.
+const TOKEN_VAR: &str = "CLAUSEO_CANARY_TOKEN";
+
+/// The child's environment variable naming the scratch root the outer test made.
+const ROOT_VAR: &str = "CLAUSEO_CANARY_ROOT";
+
+/// The inner test, which the outer one runs in a child process.
+const INNER: &str = "session_in_a_planted_environment";
+
+/// Runs this test binary's [`INNER`] test alone, with `env` added to its environment; how it
+/// ended.
 #[expect(
-    clippy::too_many_lines,
-    reason = "one session told in order: plant, run, close the day and the week, search"
+    clippy::disallowed_methods,
+    reason = "the test runs its own binary again, to give the session a process environment that \
+              holds the canary; the process crate is for agents and tools"
 )]
+fn run_child(env: &[(&str, &str)]) -> std::process::Output {
+    std::process::Command::new(std::env::current_exe().unwrap())
+        .args([INNER, "--exact", "--ignored", "--nocapture"])
+        .envs(env.iter().copied())
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap()
+}
+
+/// Plants the canary in the process environment the app reads (`HOME`, `USER`, `CLAUSEO_DATA_DIR`,
+/// and a variable of its own; USERPROFILE too, the home folder on Windows) and runs the session
+/// ([`INNER`]) in a child process with it.
+#[test]
 fn no_canary_reaches_a_usage_counts_body() {
     let token = token();
     let user = format!("{token}-मेहरा");
@@ -227,20 +256,80 @@ fn no_canary_reaches_a_usage_counts_body() {
         "clauseo-canary-{}-{token} {MATTER}",
         std::process::id()
     ));
-
-    // HOME, USER, CLAUSEO_DATA_DIR and the install path, each holding the canary.
     let home = scratch.dir(&format!("home {canary}"));
-    let data_dir = scratch.path().join(format!("data {canary}"));
-    let locations =
-        Locations::resolve(&FakeDirs { home: home.clone() }, &FakeEnv { data_dir }).unwrap();
-    assert!(locations.data_dir().display().to_string().contains(&token));
     let data_dir = scratch.dir(&format!("data {canary}"));
+    let (home, data_dir, root) = (
+        home.display().to_string(),
+        data_dir.display().to_string(),
+        scratch.path().display().to_string(),
+    );
+    let output = run_child(&[
+        ("HOME", &home),
+        ("USERPROFILE", &home),
+        ("USER", &user),
+        ("CLAUSEO_DATA_DIR", &data_dir),
+        (CANARY_VAR, &canary),
+        (TOKEN_VAR, &token),
+        (ROOT_VAR, &root),
+    ]);
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        output.status.success(),
+        "the session failed ({}):\n{text}",
+        output.status
+    );
+    // A filter that matched nothing also exits 0: the inner test must have run and passed.
+    assert!(
+        text.contains("test result: ok. 1 passed"),
+        "the session did not run:\n{text}"
+    );
+}
+
+/// The session, run by [`no_canary_reaches_a_usage_counts_body`] in a child whose environment
+/// holds the canary: the folders come from the real `Locations::resolve` over that
+/// environment, and the agent inherits it.
+#[test]
+#[ignore = "run by no_canary_reaches_a_usage_counts_body in a planted environment"]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one session told in order: plant, run, close the day and the week, search"
+)]
+fn session_in_a_planted_environment() {
+    let var = |name: &str| {
+        std::env::var(name).unwrap_or_else(|_| panic!("{name} is not set: run the outer test"))
+    };
+    let token = var(TOKEN_VAR);
+    let user = var("USER");
+    let canary = var(CANARY_VAR);
+    assert_eq!(canary, format!("{MATTER} {token}"));
+    let scratch = Scratch::adopt(PathBuf::from(var(ROOT_VAR)));
+
+    // HOME and CLAUSEO_DATA_DIR from the process environment, as the app reads them.
+    let home = SystemDirs.home().unwrap();
+    assert!(
+        home.display().to_string().contains(&token),
+        "{}",
+        home.display()
+    );
+    let locations = Locations::resolve(&SystemDirs, &SystemEnv).unwrap();
+    let data_dir = locations.data_dir().to_owned();
+    assert!(
+        data_dir.display().to_string().contains(&token),
+        "{}",
+        data_dir.display()
+    );
+    assert!(data_dir.is_dir(), "{}", data_dir.display());
+    // The install path holds the canary too.
     let exe = scratch
         .dir(&format!("Clauseo {canary}"))
         .join("clauseo-desktop");
 
-    // The agent: fake_agent as Claude Code, playing a scenario that holds the canary, with the
-    // canary in an environment variable, HOME and USER.
+    // The agent: fake_agent as Claude Code, playing a scenario that holds the canary. It
+    // inherits the planted environment (the canary variable, HOME, USER).
     let bin = clauseo_fake_agent::bin_path()
         .unwrap_or_else(|e| panic!("{e} (run cargo build -p clauseo-fake_agent)"));
     let stem = format!("canary-{token}");
@@ -252,16 +341,10 @@ fn no_canary_reaches_a_usage_counts_body() {
         "agents": { CLAUDE: {
             "command": bin.display().to_string(),
             "args": ["--scenario", scenario_path.display().to_string()],
-            "env": {
-                CANARY_VAR: canary,
-                "HOME": home.display().to_string(),
-                "USER": user,
-            },
         }},
         "matters": { "default_location": scratch.dir(&format!("matters {canary}")).display().to_string() },
     });
     Scratch::write(locations.settings_file(), settings.to_string().as_bytes());
-    assert_eq!(locations.data_dir(), data_dir);
 
     // The matter's folder and papers: names and contents hold the canary.
     let folder = scratch.dir(&format!("work/{canary}"));

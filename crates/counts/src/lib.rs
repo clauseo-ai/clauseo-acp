@@ -16,7 +16,8 @@
 //!   types, each [`schema::Closed`].
 //! - [`Counts`] (client): `open`, `bump`, `set_foreground`, `tick`, `due`, `sent`,
 //!   `set_enabled`, `first_act`, `set_about`, and `consented`, `mode`, `today`,
-//!   `queued_days`, `install_id`; with [`About`], [`Mode`], [`Post`], [`PostId`], [`Outcome`].
+//!   `queued_days`, `install_id`; with [`About`], [`Mode`], [`Post`], [`PostId`], [`Outcome`],
+//!   and [`FIRST_ACT`], the marker's name.
 //! - [`Upload`], [`UploadPath`], [`UploadError`] and [`send_due`] (client): the network seam,
 //!   which desktop implements with `reqwest` and S22 reuses; [`os_seed`] seeds the send delays.
 //!
@@ -74,5 +75,7 @@ pub use counts::{Counts, Mode};
 pub use random::os_seed;
 #[cfg(feature = "client")]
 pub use sender::{Cancelled, Outcome, Post, PostId};
+#[cfg(feature = "client")]
+pub use store::FIRST_ACT;
 #[cfg(feature = "client")]
 pub use upload::{Upload, UploadError, UploadPath, send_due};

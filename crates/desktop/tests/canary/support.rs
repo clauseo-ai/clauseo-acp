@@ -1,8 +1,7 @@
-//! What the canary test uses: a scratch folder whose path holds the canary, the fake OS folders
-//! and environment `Locations::resolve` reads, a limits reader that launches nothing, an
-//! `Upload` that records every body and answers 200, and the search for the canary in a body.
+//! What the canary test uses: a scratch folder whose path holds the canary, a limits reader
+//! that launches nothing, an `Upload` that records every body and answers 200, and the search
+//! for the canary in a body.
 
-use std::ffi::OsString;
 use std::fmt::Write as _;
 use std::future::Future;
 use std::io::Read as _;
@@ -14,7 +13,6 @@ use std::time::Duration;
 use clauseo_counts::{Upload, UploadError, UploadPath};
 use clauseo_limits::{ReadFailure, ReadLimits, ReadOutcome};
 use clauseo_protocol::AgentKind;
-use clauseo_settings::{Env, KnownFolder, PlatformDirs};
 use futures::future::{BoxFuture, Either};
 
 /// How long one wait on the host may take in real time before the test fails naming it.
@@ -31,9 +29,12 @@ pub(crate) fn wait<T>(what: &str, fut: impl Future<Output = T>) -> T {
     })
 }
 
-/// A folder of the test's own under the temp folder, removed when dropped.
+/// A folder of the test's own under the temp folder, removed when dropped by the one that made
+/// it.
 pub(crate) struct Scratch {
     root: PathBuf,
+    /// Whether this one made it, and so removes it.
+    owned: bool,
 }
 
 impl Scratch {
@@ -48,7 +49,12 @@ impl Scratch {
             std::fs::remove_dir_all(&root).unwrap();
         }
         std::fs::create_dir_all(&root).unwrap();
-        Self { root }
+        Self { root, owned: true }
+    }
+
+    /// The folder `root`, made by another (the outer test's process); left in place when dropped.
+    pub(crate) fn adopt(root: PathBuf) -> Self {
+        Self { root, owned: false }
     }
 
     /// The folder.
@@ -83,33 +89,9 @@ impl Drop for Scratch {
         reason = "test clean-up removes its scratch folder; the desktop crate has no write module"
     )]
     fn drop(&mut self) {
-        let _gone = std::fs::remove_dir_all(&self.root);
-    }
-}
-
-/// The OS folders: `home` is the home folder, and every Windows known folder lies under it.
-pub(crate) struct FakeDirs {
-    pub(crate) home: PathBuf,
-}
-
-impl PlatformDirs for FakeDirs {
-    fn home(&self) -> Option<PathBuf> {
-        Some(self.home.clone())
-    }
-
-    fn known_folder(&self, folder: KnownFolder) -> Option<PathBuf> {
-        Some(self.home.join(format!("{folder:?}")))
-    }
-}
-
-/// The environment: `CLAUSEO_DATA_DIR` and nothing else.
-pub(crate) struct FakeEnv {
-    pub(crate) data_dir: PathBuf,
-}
-
-impl Env for FakeEnv {
-    fn var(&self, name: &str) -> Option<OsString> {
-        (name == "CLAUSEO_DATA_DIR").then(|| self.data_dir.clone().into_os_string())
+        if self.owned {
+            let _gone = std::fs::remove_dir_all(&self.root);
+        }
     }
 }
 

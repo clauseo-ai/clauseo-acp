@@ -42,8 +42,10 @@ crates/desktop/src/machine_memory.rs win unsafe_code
 # clauseo-counts takes time as an input.
 crates/desktop/src/counts.rs now clippy::disallowed_methods
 # The usage counts' canary test (tests/canary.rs, S21): its scratch folder and the papers planted in
-# it, and the one end-to-end session, kept in one function so each step's canary reads in order.
-crates/desktop/tests/canary.rs no_canary_reaches_a_usage_counts_body clippy::too_many_lines
+# it, the one end-to-end session, kept in one function so each step's canary reads in order, and
+# the child process of its own binary that runs that session in an environment holding the canary.
+crates/desktop/tests/canary.rs session_in_a_planted_environment clippy::too_many_lines
+crates/desktop/tests/canary.rs run_child clippy::disallowed_methods
 crates/desktop/tests/canary/support.rs Scratch::new clippy::disallowed_methods
 crates/desktop/tests/canary/support.rs Scratch::dir clippy::disallowed_methods
 crates/desktop/tests/canary/support.rs Scratch::write clippy::disallowed_methods

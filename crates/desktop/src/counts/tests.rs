@@ -1,6 +1,6 @@
 //! `count_ui`'s closed argument, and the focus that makes `time_open`.
 
-use clauseo_counts::schema::{BreakKind, BreakThen, Feature, OnboardingStep};
+use clauseo_counts::schema::{BreakKind, BreakThen, Feature, OnboardingStep, StrictErrorCode};
 use clauseo_protocol::ErrorCode;
 use serde_json::{Value, json};
 
@@ -22,7 +22,7 @@ fn ui_counts_read_each_event_and_refuse_anything_else() {
     assert_eq!(
         parse(json!({ "error_shown": { "code": "agent.exited" } })).unwrap(),
         UiCount::ErrorShown {
-            code: ErrorCode::AgentExited
+            code: StrictErrorCode::new(ErrorCode::AgentExited).unwrap()
         }
     );
     for refused in [
@@ -47,12 +47,14 @@ fn ui_counts_read_each_event_and_refuse_anything_else() {
     }
 }
 
+/// `error_shown.code` reads as `StrictErrorCode`: a code this build does not know, and
+/// `unknown` itself, are refused with the argument, never turned into `Unknown`.
 #[test]
-fn an_unknown_error_code_counts_nothing() {
-    let unknown = parse(json!({ "error_shown": { "code": "not.a.code" } })).unwrap();
-    assert_eq!(unknown.event(), None);
-    let named = parse(json!({ "error_shown": { "code": "unknown" } })).unwrap();
-    assert_eq!(named.event(), None);
+fn an_unknown_error_code_is_refused_as_it_is_read() {
+    for code in ["not.a.code", "unknown", "Agent.Exited", "", "agent.exited "] {
+        let refused = parse(json!({ "error_shown": { "code": code } }));
+        assert!(refused.is_err(), "{code:?}: {refused:?}");
+    }
 }
 
 /// Each mirrored value is spelled as the counts' own: what the webview names is what is counted.
@@ -134,12 +136,12 @@ fn a_ui_count_goes_into_the_counts_once_they_are_open() {
         feature: UiFeature::Versions,
     });
     state.count(UiCount::ErrorShown {
-        code: ErrorCode::Unknown,
+        code: StrictErrorCode::new(ErrorCode::AgentExited).unwrap(),
     });
     let today = counts.today();
     assert_eq!(today.feature_used.len(), 1);
     assert_eq!(today.feature_used[0].n.get(), 1);
-    assert_eq!(today.error_shown.len(), 0);
+    assert_eq!(today.error_shown.len(), 1);
 }
 
 #[test]

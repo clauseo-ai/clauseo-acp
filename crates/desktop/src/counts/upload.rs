@@ -5,16 +5,17 @@
 //! - HTTPS only (`https_only`, and an endpoint that is not `https://` is none), no redirect
 //!   followed, no cookie store, no `Referer`.
 //! - Each POST names `User-Agent: Clauseo`, `Content-Type: application/json` and
-//!   `Content-Encoding: gzip`, and nothing else. reqwest adds `Accept: */*` to every request,
-//!   and hyper `Host` and `Content-Length`; none carries anything of the lawyer's.
+//!   `Content-Encoding: gzip`. reqwest adds `Accept: */*` to every request, and hyper `Host`
+//!   and `Content-Length`; none carries anything of the lawyer's, and a test reads the bytes sent
+//!   and fails on any other header.
 //! - The proxy is the system's: reqwest's `system-proxy` (on by default; `no_proxy` is never
 //!   called) reads the `HTTPS_PROXY` family of variables, then macOS's network settings
 //!   (`SCDynamicStoreCopyProxies`) or Windows' per-user Internet Settings (`ProxyEnable`,
 //!   `ProxyServer`, `ProxyOverride`), through hyper-util's `client-proxy-system`. No PAC file
 //!   (Later, G10). Never the agents' egress proxy: that goes to agents in their own environment,
 //!   never into this process's.
-//! - The endpoint: release builds post to [`RELEASE_ENDPOINT`], which is empty until S23's live
-//!   checks pass, so they send nothing. Debug and `e2e` builds read [`ENDPOINT_VAR`] instead,
+//! - The endpoint: release builds post to `RELEASE_ENDPOINT`, which is empty until S23's live
+//!   checks pass, so they send nothing. Debug and `e2e` builds read `ENDPOINT_VAR` instead,
 //!   and have none without it; release builds never read it. With no endpoint every POST fails
 //!   without touching the network, and the days wait in the queue until they age out.
 
@@ -26,9 +27,11 @@ use reqwest::header::{CONTENT_ENCODING, CONTENT_TYPE, USER_AGENT};
 
 /// The release builds' endpoint. Empty until a follow-up pull request, made after S23's live
 /// checks pass, sets it to `https://t.clauseo.chat`.
+#[cfg(any(test, not(any(debug_assertions, feature = "e2e"))))]
 pub(crate) const RELEASE_ENDPOINT: &str = "";
 
 /// The variable debug and `e2e` builds read their endpoint from.
+#[cfg(any(debug_assertions, feature = "e2e"))]
 pub(crate) const ENDPOINT_VAR: &str = "CLAUSEO_COUNTS_URL";
 
 /// How long a POST may take, connecting included. The sender counts one with no answer after
@@ -53,17 +56,7 @@ impl HttpsUpload {
 
     /// The upload to `endpoint`, when it is one ([`endpoint`]).
     pub(crate) fn to(endpoint: Option<&str>) -> HttpsUpload {
-        // reqwest's rustls takes the process's provider: ring, as tauri-plugin-updater installs
-        // it. Either may be first; the other finds it in place.
-        if rustls::crypto::CryptoProvider::get_default().is_none() {
-            drop(rustls::crypto::ring::default_provider().install_default());
-        }
-        let client = reqwest::Client::builder()
-            .https_only(true)
-            .redirect(reqwest::redirect::Policy::none())
-            .referer(false)
-            .timeout(TIMEOUT)
-            .connect_timeout(CONNECT_TIMEOUT)
+        let client = builder()
             .build()
             .map_err(|err| tracing::warn!(%err, "no usage counts upload: the counts are kept and not sent"))
             .ok();
@@ -109,14 +102,33 @@ impl Upload for HttpsUpload {
     }
 }
 
-/// This build's endpoint: [`ENDPOINT_VAR`] in debug and `e2e` builds, [`RELEASE_ENDPOINT`] in
-/// release builds.
-fn build_endpoint() -> Option<String> {
-    if cfg!(any(debug_assertions, feature = "e2e")) {
-        std::env::var(ENDPOINT_VAR).ok()
-    } else {
-        Some(RELEASE_ENDPOINT.to_owned())
+/// The client's settings, with ring as rustls' provider: HTTPS only, no redirect, no `Referer`,
+/// the timeouts. No cookie store and no proxy override, so the system proxy applies.
+fn builder() -> reqwest::ClientBuilder {
+    // reqwest's rustls takes the process's provider: ring, as tauri-plugin-updater installs it.
+    // Either may be first; the other finds it in place.
+    if rustls::crypto::CryptoProvider::get_default().is_none() {
+        drop(rustls::crypto::ring::default_provider().install_default());
     }
+    reqwest::Client::builder()
+        .https_only(true)
+        .redirect(reqwest::redirect::Policy::none())
+        .referer(false)
+        .timeout(TIMEOUT)
+        .connect_timeout(CONNECT_TIMEOUT)
+}
+
+/// This build's endpoint: `ENDPOINT_VAR` in debug and `e2e` builds.
+#[cfg(any(debug_assertions, feature = "e2e"))]
+fn build_endpoint() -> Option<String> {
+    std::env::var(ENDPOINT_VAR).ok()
+}
+
+/// This build's endpoint: `RELEASE_ENDPOINT` in release builds, which never read
+/// `ENDPOINT_VAR` (nor hold its name).
+#[cfg(not(any(debug_assertions, feature = "e2e")))]
+fn build_endpoint() -> Option<String> {
+    Some(RELEASE_ENDPOINT.to_owned())
 }
 
 /// `text` as an endpoint: an `https` URL with a host, no user, password, query or fragment, and
