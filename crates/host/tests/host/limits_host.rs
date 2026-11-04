@@ -349,9 +349,10 @@ fn codex_turn_end_reads_at_most_once_a_minute() {
 }
 
 #[test]
-fn claude_turn_end_reads_once_the_last_read_is_ten_minutes_old() {
+fn claude_turn_end_with_no_live_signal_reads_once_the_last_read_is_two_minutes_old() {
+    // `claude-prompt-stream` sends no `_claude/rateLimit`, so the 2-minute rule applies.
     let dir = Dir::new(
-        "claude_turn_end_reads_once_the_last_read_is_ten_minutes_old",
+        "claude_turn_end_with_no_live_signal_reads_once_the_last_read_is_two_minutes_old",
         &[(CLAUDE, Scenario::Bundled("claude-prompt-stream"))],
     );
     let reads = Reads::new();
@@ -365,13 +366,13 @@ fn claude_turn_end_reads_once_the_last_read_is_ten_minutes_old() {
     turn(&host, first);
     assert_eq!(reads.count(AgentKind::Claude), 1, "the last read is new");
 
-    host.clock.advance(10 * MINUTE);
+    host.clock.advance(2 * MINUTE);
     let second = host.create_thread(matter, CLAUDE);
     turn(&host, second);
     assert_eq!(
         reads.count(AgentKind::Claude),
         2,
-        "the last read is ten minutes old"
+        "the last read is two minutes old"
     );
     host.shutdown();
 }

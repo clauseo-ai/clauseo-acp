@@ -24,6 +24,26 @@ pub(crate) struct Reads {
     pub(crate) asking: bool,
     /// A read was asked for while the agent asked a question.
     pub(crate) pending_read: bool,
+    /// Whether a live signal came since the agent's last turn end. There is no turn-start input,
+    /// so the last turn end stands in for this turn's start.
+    turn_signal: TurnSignal,
+}
+
+impl Reads {
+    /// A live signal came: the agent's next turn end waits the longer age.
+    pub(crate) fn live_seen(&mut self) {
+        self.turn_signal = TurnSignal::Live;
+    }
+}
+
+/// Whether a live signal came during the agent's turn.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum TurnSignal {
+    /// None came.
+    #[default]
+    None,
+    /// At least one came.
+    Live,
 }
 
 /// Asks for a read of `state`'s agent. The read in flight counts; while the agent asks a
@@ -55,18 +75,25 @@ pub(crate) fn try_again(state: &mut AgentState, now: Timestamp, actions: &mut Ve
     !read_if_older(state, TRY_AGAIN_AFTER_MS, now, actions)
 }
 
-/// A turn ended; `read_now` reads whatever the age, else the agent kind's age applies.
+/// A turn ended; `read_now` reads whatever the age, else the agent kind's age applies: the
+/// longer one when a live signal came during the turn, the shorter one when none did. Either
+/// way the next turn starts with no live signal seen.
 pub(crate) fn turn_ended(
     state: &mut AgentState,
     read_now: bool,
     now: Timestamp,
     actions: &mut Vec<Action>,
 ) {
+    let signal = std::mem::take(&mut state.reads.turn_signal);
     if read_now {
         request_read(state, now, actions);
         return;
     }
-    let min_age = kind_rules(state.agent).turn_read_after_ms;
+    let rules = kind_rules(state.agent);
+    let min_age = match signal {
+        TurnSignal::Live => rules.turn_read_after_ms,
+        TurnSignal::None => rules.turn_read_after_ms_no_live,
+    };
     let _ = read_if_older(state, min_age, now, actions);
 }
 
