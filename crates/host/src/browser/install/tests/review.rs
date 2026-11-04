@@ -10,9 +10,11 @@ use clauseo_protocol::BrowserInstallFailure;
 #[cfg(unix)]
 use super::browsers;
 #[cfg(unix)]
+use super::job;
+#[cfg(unix)]
 use super::support::MAC_BINARY;
 use super::support::{Fake, Made, VERSION, ZipEntry, file, zip};
-use super::{fails_with, job, run_with};
+use super::{fails_with, run_with};
 use crate::browser::chrome::Platform;
 use crate::browser::install::system::{CURL_FLAGS, download_args};
 use crate::browser::install::{Cancel, Failure, archive};
