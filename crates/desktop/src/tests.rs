@@ -4,13 +4,31 @@
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::PathBuf;
+use std::sync::Arc;
 
-use clauseo_process::{LaunchSpec, Launched, Launcher as _};
+use clauseo_process::{LaunchSpec, Launched, Launcher};
 use futures::{AsyncReadExt as _, join};
 
-/// The lines the child `program args` prints, started by the host's launcher with `env` and
-/// stdin closed, sorted. The child must exit 0.
-fn child_lines(program: PathBuf, args: &[&str], env: BTreeMap<OsString, OsString>) -> Vec<String> {
+use crate::test_support::Scratch;
+
+/// The launchers to check: `host_launcher` itself, and the one the app's start-up path
+/// (`host_config`, #351) puts in the host's config, so a second launcher that inherits this
+/// process's environment cannot come back unseen.
+fn launchers(scratch: &Scratch) -> [(&'static str, Arc<dyn Launcher>); 2] {
+    [
+        ("host_launcher", Arc::new(crate::host_launcher(None))),
+        ("host_config", scratch.app_launcher()),
+    ]
+}
+
+/// The lines the child `program args` prints, started by `launcher` with `env` and stdin
+/// closed, sorted. The child must exit 0.
+fn child_lines(
+    launcher: &dyn Launcher,
+    program: PathBuf,
+    args: &[&str],
+    env: BTreeMap<OsString, OsString>,
+) -> Vec<String> {
     let args = args.iter().map(OsString::from).collect();
     let spec = LaunchSpec::new(program, args, env, env!("CARGO_MANIFEST_DIR").into()).unwrap();
     let Launched {
@@ -19,7 +37,7 @@ fn child_lines(program: PathBuf, args: &[&str], env: BTreeMap<OsString, OsString
         stderr,
         mut handle,
         ..
-    } = crate::host_launcher(None).launch(&spec).unwrap();
+    } = launcher.launch(&spec).unwrap();
     drop(stdin);
     let (out, report) = async_io::block_on(async {
         let mut out = Vec::new();
@@ -56,11 +74,15 @@ fn the_host_launcher_gives_the_child_only_its_specs_variables() {
         (OsString::from("HOME"), OsString::from("/home/probe")),
         (OsString::from("PATH"), OsString::from("/probe/bin")),
     ]);
-    let lines = child_lines("/usr/bin/env".into(), &[], env);
-    assert_eq!(
-        lines,
-        ["CLAUSEO_PROBE=1", "HOME=/home/probe", "PATH=/probe/bin"]
-    );
+    let scratch = Scratch::new("host-launcher-env", &[]);
+    for (name, launcher) in launchers(&scratch) {
+        let lines = child_lines(&*launcher, "/usr/bin/env".into(), &[], env.clone());
+        assert_eq!(
+            lines,
+            ["CLAUSEO_PROBE=1", "HOME=/home/probe", "PATH=/probe/bin"],
+            "{name}"
+        );
+    }
 }
 
 /// On Windows the child gets the spec's `SystemRoot` (Winsock and Node need it) and not this
@@ -78,12 +100,18 @@ fn the_host_launcher_gives_the_child_only_its_specs_variables() {
         (OsString::from("CLAUSEO_PROBE"), OsString::from("1")),
         (OsString::from("SystemRoot"), system_root.clone()),
     ]);
-    let lines = child_lines(cmd, &["/d", "/c", "set"], env);
     let root = format!("SystemRoot={}", system_root.to_string_lossy());
-    assert!(lines.contains(&root), "{lines:?}");
-    assert!(lines.contains(&"CLAUSEO_PROBE=1".to_owned()), "{lines:?}");
-    let profile = lines
-        .iter()
-        .find(|line| line.to_ascii_uppercase().starts_with("USERPROFILE="));
-    assert_eq!(profile, None);
+    let scratch = Scratch::new("host-launcher-env", &[]);
+    for (name, launcher) in launchers(&scratch) {
+        let lines = child_lines(&*launcher, cmd.clone(), &["/d", "/c", "set"], env.clone());
+        assert!(lines.contains(&root), "{name}: {lines:?}");
+        assert!(
+            lines.contains(&"CLAUSEO_PROBE=1".to_owned()),
+            "{name}: {lines:?}"
+        );
+        let profile = lines
+            .iter()
+            .find(|line| line.to_ascii_uppercase().starts_with("USERPROFILE="));
+        assert_eq!(profile, None, "{name}");
+    }
 }
