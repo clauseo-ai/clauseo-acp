@@ -24,6 +24,10 @@ pub mod entries;
 #[path = "support/limits.rs"]
 pub mod limits;
 
+#[cfg(test)]
+#[path = "snapshots/privacy.rs"]
+mod privacy;
+
 use clauseo_protocol::{
     AgentKind,
     AppendTarget,
@@ -50,7 +54,6 @@ use clauseo_protocol::{
     HostError,
     HostEvent,
     // The display settings.
-    Language,
     LastStop,
     Lite,
     MatterKind,
@@ -58,14 +61,10 @@ use clauseo_protocol::{
     MatterStatus,
     MatterSummary,
     MattersChanged,
-    Motion,
     PatchBatch,
-    PrivacyPatch,
-    PrivacySettings,
     PromptBlock,
     RefreshWhy,
     RestoreRequest,
-    SettingsView,
     StopReason,
     StreamHeader,
     StreamId,
@@ -78,9 +77,7 @@ use clauseo_protocol::{
     ToolCallContent,
     ToolLocation,
     ToolsPatch,
-    ToolsSettingsView,
     UiPatch,
-    UiSettings,
     ViewEntry,
     ViewEpoch,
     ViewPatch,
@@ -331,10 +328,7 @@ mod host_command {
             },
         };
         SetPrivacySettings => set_privacy_settings: HostCommand::SetPrivacySettings {
-            patch: PrivacyPatch {
-                counts: Some(false),
-                crash_reports: None,
-            },
+            patch: privacy::privacy_patch(),
         };
         FirstAct => first_act: HostCommand::FirstAct { counts: true };
         RefreshLimits => refresh_limits: HostCommand::RefreshLimits {
@@ -461,25 +455,7 @@ mod host_event {
             account_limits(),
         );
         LimitsViewChanged => limits_view_changed: HostEvent::LimitsViewChanged(limits_view());
-        SettingsChanged => settings_changed: HostEvent::SettingsChanged(SettingsView {
-            ui: UiSettings {
-                theme: Theme::Dark,
-                font_size: 18,
-                language: Language::Hi,
-                lite: Lite::Automatic,
-                motion: Motion::Reduce,
-            },
-            tools: ToolsSettingsView {
-                web_search: false,
-                browser: true,
-            },
-            privacy: PrivacySettings {
-                counts: true,
-                crash_reports: false,
-                counts_started: false,
-            },
-            locked: vec!["ui.font_size".to_owned(), "ui.theme".to_owned()],
-        });
+        SettingsChanged => settings_changed: HostEvent::SettingsChanged(privacy::settings_view());
         MattersChanged => matters_changed: HostEvent::MattersChanged(MattersChanged {
             matters: vec![MatterSummary {
                 matter: matter_id(1),
