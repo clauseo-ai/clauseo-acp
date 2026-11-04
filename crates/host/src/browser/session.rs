@@ -79,7 +79,8 @@ pub(crate) enum ClaimError {
     /// A loopback port could not be claimed.
     #[error("no loopback port could be claimed for the browser: {0}")]
     Port(io::Error),
-    /// The socket folder could not be made.
+    /// The socket folder could not be made (Unix only: Windows uses `<cwd>\run`).
+    #[cfg(unix)]
     #[error("the browser's socket folder could not be made: {0}")]
     SocketDir(io::Error),
     /// A random session name could not be drawn.
