@@ -25,6 +25,8 @@ impl TestDir {
     /// `<temp>/clauseo-matters-it-<name>-<pid>`, emptied first if a crashed run left it, and
     /// canonical (macOS: `/private/var/...`).
     pub(crate) fn new(name: &str) -> Self {
+        // Owner files planted here stay held through the stale rule: no Word runs in a test.
+        clauseo_matters::test_support::pretend_word_running_since_epoch();
         let path =
             std::env::temp_dir().join(format!("clauseo-matters-it-{name}-{}", std::process::id()));
         if let Err(err) = std::fs::remove_dir_all(&path) {

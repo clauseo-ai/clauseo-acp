@@ -17,6 +17,9 @@
 //!   and from the job's process list on Windows (parents from Toolhelp), each with its start
 //!   time so a reused pid is never signalled; and the sweep that ends those new since an earlier
 //!   listing and started before a cutoff, with what they start meanwhile.
+//! - The processes running under a name, with their starts (macOS and Windows), for `matters`'
+//!   stale owner-file rule: every process from libproc's `proc_listallpids` on macOS, from a
+//!   Toolhelp snapshot on Windows.
 //! - The stderr ring (256 KiB per agent, never uploaded) and its redacted tail of at most 4 KiB.
 //!
 //! # Interface
@@ -41,6 +44,8 @@
 //!   With `test-support`, [`running`] says whether a pid still runs, [`started_before_now`]
 //!   whether a cutoff taken now would cover it, and [`kill`] kills one, for tests that watch a
 //!   process they did not start.
+//! - [`processes_named`] (macOS and Windows): the starts of the running processes with a name,
+//!   or `None` when that is unknown. It blocks, and signals nothing.
 //! - [`ExitReport`]: the code or signal, [`ExitReport::stderr_tail`], and
 //!   [`ExitReport::detach_reason`] for `AgentSessionDetached`. [`ShutdownOutcome`] names the
 //!   ladder step that ended the agent, or says it never exited (`Unresponsive`).
@@ -98,6 +103,17 @@ pub use stdin::AgentStdin;
 #[cfg(feature = "test-support")]
 pub use timer::ManualTimer;
 pub use timer::{AsyncIoTimer, Timer};
+
+/// The start times, as wall time, of the running processes named `name`: the executable's
+/// process name on macOS (`Microsoft Word`, libproc's `pbi_name` or `pbi_comm`, byte for byte),
+/// the image name on Windows (`WINWORD.EXE`, ignoring ASCII case). An empty list when none runs.
+/// `None` when the answer is unknown: the listing failed, or a process that may be one could not
+/// be read. One listing of every process, and one read per process (macOS) or per match
+/// (Windows). macOS and Windows only; `matters` asks it for Word (its stale owner-file rule).
+#[cfg(any(target_os = "macos", windows))]
+pub fn processes_named(name: &str) -> Option<Vec<std::time::SystemTime>> {
+    os::named(name)
+}
 
 /// Whether process `pid` still runs (a Unix zombie does not), for tests that watch a process
 /// they did not start.

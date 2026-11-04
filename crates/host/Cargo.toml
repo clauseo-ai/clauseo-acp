@@ -53,6 +53,8 @@ unicode-normalization = { workspace = true }
 # Itself with test-support, so its tests reach ManualClock and SequentialIds with no flag.
 clauseo-host = { path = ".", features = ["test-support"] }
 clauseo-fake_agent = { path = "../fake_agent" }
+# `pretend_word_running_since_epoch`: the tests' owner files stay held through the stale rule.
+clauseo-matters = { path = "../matters", features = ["test-support"] }
 # `running` and `kill`: the cancel tests watch the processes the agent started.
 clauseo-process = { path = "../process", features = ["test-support"] }
 clauseo-profile = { path = "../profile", features = ["test-support"] }

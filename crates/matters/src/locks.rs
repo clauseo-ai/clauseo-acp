@@ -9,6 +9,7 @@ use unicode_normalization::{UnicodeNormalization, is_nfc};
 use crate::refuse::{Fold, keys_by};
 
 mod beside;
+pub(crate) mod stale;
 
 pub use beside::OwnersBeside;
 
@@ -26,9 +27,14 @@ pub enum HeldOpen {
 /// exact name and then, for a name that is not all ASCII, in any Unicode form
 /// ([`owner_in_another_form`]); on Windows also a sharing or lock violation when it exists and
 /// is opened with no sharing. A missing file with no owner file, and any other error, is `None`.
+/// An owner file the stale rule passes over ([`stale::is_stale`]: on macOS no lock on the
+/// document, the owner file older than every running Word and a local APFS or HFS+ volume; on
+/// Windows a no-share open that succeeds and no Word running; never on Linux) does not count, so
+/// one a crashed Word left blocks nothing; the next owner file found is checked the same way.
 /// One `symlink_metadata` per owner name (at most three), a `read_dir` of the parent for a
-/// non-ASCII name none of them finds (at most [`MAX_LISTED`] entries; an owner file past them,
-/// or a listing that fails, is not found: it fails open, as any other error does), and on
+/// non-ASCII name none of them finds or all of them are stale (at most [`MAX_LISTED`] entries;
+/// an owner file past them, or a listing that fails, is not found: it fails open, as any other
+/// error does), the stale rule's queries for each owner file found on macOS and Windows, and on
 /// Windows one open. The rule undo and restore refuse by.
 pub fn held_open(folder: &Path, path: &MatterPath) -> Option<HeldOpen> {
     held_open_by(folder, path, None)
@@ -68,13 +74,17 @@ fn held_open_by(folder: &Path, path: &MatterPath, given: Option<&[String]>) -> O
     let (Some(parent), Some(name)) = (absolute.parent(), path.as_str().rsplit('/').next()) else {
         return None;
     };
-    if let Some(owner) = owner_names(name)
+    let exact = owner_names(name)
         .into_iter()
-        .find(|owner| parent.join(owner).symlink_metadata().is_ok())
-    {
-        return Some(HeldOpen::OwnerFile(owner));
+        .filter(|owner| parent.join(owner).symlink_metadata().is_ok());
+    for owner in exact {
+        if !stale::is_stale(parent, &owner, &absolute) {
+            return Some(HeldOpen::OwnerFile(owner));
+        }
     }
-    if let Some(owner) = owner_in_another_form(parent, name, given) {
+    if let Some(owner) = owner_in_another_form(parent, name, given)
+        && !stale::is_stale(parent, &owner, &absolute)
+    {
         return Some(HeldOpen::OwnerFile(owner));
     }
     #[cfg(windows)]

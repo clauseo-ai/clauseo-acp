@@ -108,6 +108,8 @@ pub(crate) struct Dir {
 impl Dir {
     /// A fresh folder for `test`, with `agents` written into `settings.json`.
     pub(crate) fn new(test: &str, agents: &[(&str, Scenario)]) -> Self {
+        // Owner files planted here stay held through the stale rule: no Word runs in a test.
+        clauseo_matters::test_support::pretend_word_running_since_epoch();
         let stem = format!("clauseo-host-{test}-{}", std::process::id());
         let root = std::env::temp_dir().join(&stem);
         let work = std::env::temp_dir().join(format!("{stem}-work"));

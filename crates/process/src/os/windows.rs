@@ -22,6 +22,7 @@ use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Arc, Weak};
+use std::time::{Duration, SystemTime};
 
 use async_process::Child;
 use windows::Win32::Foundation::{CloseHandle, ERROR_MORE_DATA, FILETIME, HANDLE, WAIT_TIMEOUT};
@@ -254,8 +255,50 @@ pub(crate) fn started_before_now(pid: u32) -> bool {
 /// Every process's (pid, parent pid) from a Toolhelp process snapshot; empty when the snapshot
 /// fails. A parent pid can name a process that has exited, or a pid reused since.
 fn parents() -> Vec<(u32, u32)> {
+    let mut found = Vec::new();
+    if !each_process(|entry| found.push((entry.th32ProcessID, entry.th32ParentProcessID))) {
+        found.clear();
+    }
+    found
+}
+
+/// `FILETIME`'s count (100 ns units since 1601) at the Unix epoch.
+const UNIX_EPOCH_FILETIME: u64 = 116_444_736_000_000_000;
+
+/// The creation times of the running processes whose image name (`szExeFile`, `WINWORD.EXE`)
+/// is `name`, compared ignoring ASCII case; an empty list when none runs. `None` when the
+/// snapshot fails or a matching process cannot be opened for its creation time (it runs, but
+/// when it started is unknown).
+pub(crate) fn named(name: &str) -> Option<Vec<SystemTime>> {
+    let mut pids = Vec::new();
+    let listed = each_process(|entry| {
+        let length = entry
+            .szExeFile
+            .iter()
+            .position(|&unit| unit == 0)
+            .unwrap_or(entry.szExeFile.len());
+        let image = String::from_utf16_lossy(entry.szExeFile.get(..length).unwrap_or_default());
+        if image.eq_ignore_ascii_case(name) {
+            pids.push(entry.th32ProcessID);
+        }
+    });
+    if !listed {
+        return None;
+    }
+    pids.into_iter()
+        .map(|pid| {
+            let created = open(pid, PROCESS_QUERY_LIMITED_INFORMATION).and_then(|p| created(&p))?;
+            let since = created.checked_sub(UNIX_EPOCH_FILETIME)?.checked_mul(100)?;
+            SystemTime::UNIX_EPOCH.checked_add(Duration::from_nanos(since))
+        })
+        .collect()
+}
+
+/// Calls `visit` with each entry of a Toolhelp process snapshot of the whole system; `false`
+/// when the snapshot cannot be taken.
+fn each_process(mut visit: impl FnMut(&PROCESSENTRY32W)) -> bool {
     let Ok(size) = u32::try_from(size_of::<PROCESSENTRY32W>()) else {
-        return Vec::new();
+        return false;
     };
     let mut entry = PROCESSENTRY32W {
         dwSize: size,
@@ -264,20 +307,19 @@ fn parents() -> Vec<(u32, u32)> {
     // SAFETY: a process snapshot of the whole system takes no pointer; the handle is owned
     // below and closed once.
     let Ok(snapshot) = (unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) }) else {
-        return Vec::new();
+        return false;
     };
     // SAFETY: `snapshot` is the open handle the call just returned, which nothing else owns.
     let snapshot = unsafe { OwnedHandle::from_raw_handle(snapshot.0) };
-    let mut found = Vec::new();
     // SAFETY: `snapshot` is a live process snapshot and `entry` a PROCESSENTRY32W whose
     // `dwSize` is set, as Process32FirstW and Process32NextW require.
     let mut next = unsafe { Process32FirstW(raw(&snapshot), &raw mut entry) };
     while next.is_ok() {
-        found.push((entry.th32ProcessID, entry.th32ParentProcessID));
+        visit(&entry);
         // SAFETY: as for Process32FirstW above.
         next = unsafe { Process32NextW(raw(&snapshot), &raw mut entry) };
     }
-    found
+    true
 }
 
 /// Ends `process` with `TerminateProcess` if it still runs with the creation time it was listed

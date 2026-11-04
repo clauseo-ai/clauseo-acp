@@ -344,4 +344,32 @@ mod windows {
         let edited = matter.edited_since(cid(1), cid(3)).unwrap();
         assert!(edited.is_empty(), "{edited:?}");
     }
+    /// The stale owner-file rule on Windows (this binary never calls `test_support`'s pretend
+    /// Word, so it reads the real process list; no Word runs on CI): an owner file whose document
+    /// opens with no sharing is stale and shows nothing held; while the test holds the document
+    /// with no sharing, as Word does, the same owner file is held.
+    #[test]
+    fn an_owner_file_is_stale_with_no_word_and_the_document_free_and_held_while_it_is_held() {
+        let dir = TestDir::new("stale-owner");
+        let root = dir.path();
+        write(&root.join("Invoice.docx"), b"one");
+        write(
+            &root.join("~$nvoice.docx"),
+            b"owner file left by a crashed Word",
+        );
+        assert_eq!(
+            clauseo_matters::held_open(root, &path("Invoice.docx")),
+            None,
+            "stale: no Word runs and the document opens with no sharing"
+        );
+        let held = hold(&root.join("Invoice.docx"));
+        assert_eq!(
+            clauseo_matters::held_open(root, &path("Invoice.docx")),
+            Some(clauseo_matters::HeldOpen::OwnerFile(
+                "~$nvoice.docx".to_owned()
+            )),
+            "held: the no-share open fails"
+        );
+        drop(held);
+    }
 }
