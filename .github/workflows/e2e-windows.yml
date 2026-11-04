@@ -110,7 +110,10 @@ jobs:
   smoke:
     name: smoke (${{ matrix.runner }})
     needs: e2e-changes
-    if: ${{ !cancelled() }}
+    # Not in a merge group (2026-11-04): smoke left the merge-group requirement for main's push and
+    # nightly, to cut the time from approval to merge; it still runs on pull requests that change
+    # the app, on push and nightly, and a red one on main goes to its owner.
+    if: ${{ !cancelled() && github.event_name != 'merge_group' }}
     # A pull request that leaves the app alone only skips, on an ubuntu runner, which starts faster
     # than a Windows one. A failed e2e-changes runs everything on Windows.
     runs-on: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.e2e-changes.result == 'success' && needs.e2e-changes.outputs.app != 'true' && 'ubuntu-24.04' || matrix.runner }}

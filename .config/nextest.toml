@@ -66,3 +66,24 @@ threads-required = "num-cpus"
 retries = 1
 failure-output = "immediate-final"
 junit = { path = "junit.xml" }
+
+# Quarantine: tests that failed and then passed on their retry, or ejected a merge group they had
+# nothing to do with, are left out of the ci profile (pull requests, merge groups, main's push and
+# the pre-push hook's CI mode) until their owner fixes them; the nightly `quarantine` job in ci.yml
+# still runs them (profile quarantine below), so it shows when one is fixed. Each entry names its
+# tracking issue; an entry comes out in the fix's pull request. The same expression is in both
+# profiles: keep them equal.
+#   - agents install tests: stall all at once on loaded runners, 11 timed out on Windows x64 in
+#     run 41840642164 (stage D's #366 gives them 160 s)
+#   - host search supersede race: search.rs:323 before the index settles (host's fix in progress)
+#   - host window-specs scenarios: past 30 s on Windows ARM64 (#357 gives them 90 s)
+#   - sandbox proxy limits: a freed port reused before the refused-connect check (stage C's #358)
+#   - desktop bridge cap: flaky on 11-04
+default-filter = 'not (package(clauseo-agents) & binary(install) | package(clauseo-host) & binary(host) & test(=search::a_newer_search_cancels_older_ones_and_a_late_answer_is_dropped) | package(clauseo-host) & binary(host) & test(/^e2e_scenarios::/) | package(clauseo-sandbox) & test(=proxy::tests::limits::dropping_the_handle_closes_both_ports_and_every_tunnel) | package(clauseo-desktop) & test(=bridge::tests::past_the_cap_the_driver_pauses_and_resubscribes_once_acks_catch_up))'
+
+# The quarantined tests alone (see profile ci), run nightly by ci.yml's `quarantine` job, with the
+# ci profile's timeouts and retry, so a fixed one shows as passing.
+[profile.quarantine]
+retries = 1
+failure-output = "immediate-final"
+default-filter = 'package(clauseo-agents) & binary(install) | package(clauseo-host) & binary(host) & test(=search::a_newer_search_cancels_older_ones_and_a_late_answer_is_dropped) | package(clauseo-host) & binary(host) & test(/^e2e_scenarios::/) | package(clauseo-sandbox) & test(=proxy::tests::limits::dropping_the_handle_closes_both_ports_and_every_tunnel) | package(clauseo-desktop) & test(=bridge::tests::past_the_cap_the_driver_pauses_and_resubscribes_once_acks_catch_up)'

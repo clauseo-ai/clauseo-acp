@@ -194,8 +194,9 @@ jobs:
   vitest-newest-node:
     name: vitest (newest Node)
     needs: changes
-    # A failed `changes` runs it, as it runs everything.
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.ui == 'true') }}
+    # A failed `changes` runs it, as it runs everything. Not in a merge group (2026-11-04): it is not
+    # required there, and the pull request already ran it on the same ui.
+    if: ${{ !cancelled() && github.event_name != 'merge_group' && (needs.changes.result != 'success' || needs.changes.outputs.ui == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -238,9 +239,9 @@ jobs:
       fail-fast: false
       # Tier 1 and Linux on every event; tier 2 (Intel macOS, Windows ARM64) on push, nightly and on
       # demand. On a pull request the job tier2-x86_64-apple-darwin below and tier2-pr.yml report
-      # their checks. In a merge group Windows ARM64 runs too, `test_only`: the Test step, which is
-      # all that its check needs there (about 9 minutes, cold: no Rust cache for it), while Intel
-      # macOS keeps the job below. `native`: built on its own OS, so linted and tested; Intel macOS
+      # their checks. A merge group runs what a pull request runs (2026-11-04: Windows ARM64 left
+      # the merge-group requirement for main's push and nightly, to cut the time from approval to
+      # merge; a break there shows on main and goes to its owner). `native`: built on its own OS, so linted and tested; Intel macOS
       # is cross-compiled on the arm64 runner, so it is built but not linted or tested. Linux is the
       # oldest glibc we support; release packages are built there later. One JSON list per case,
       # as in e2e-windows.yml's smoke.
@@ -253,8 +254,7 @@ jobs:
             || github.event_name == 'merge_group'
             && '[{"target": "aarch64-apple-darwin", "runner": "macos-15", "native": true},
                  {"target": "x86_64-unknown-linux-gnu", "runner": "ubuntu-22.04", "native": true},
-                 {"target": "x86_64-pc-windows-msvc", "runner": "windows-2025", "native": true},
-                 {"target": "aarch64-pc-windows-msvc", "runner": "windows-11-arm", "native": true, "test_only": true}]'
+                 {"target": "x86_64-pc-windows-msvc", "runner": "windows-2025", "native": true}]'
             || '[{"target": "aarch64-apple-darwin", "runner": "macos-15", "native": true},
                  {"target": "x86_64-apple-darwin", "runner": "macos-15", "native": false},
                  {"target": "x86_64-unknown-linux-gnu", "runner": "ubuntu-22.04", "native": true},
@@ -728,3 +728,54 @@ jobs:
           name: reducer-bench-summary
           path: ${{ runner.temp }}/reducer-bench-summary.json
           if-no-files-found: warn
+
+  # The quarantined tests (.config/nextest.toml, profile quarantine): left out of every other run
+  # until fixed, run here nightly and on demand on Linux and Windows x64, so a fixed one shows as
+  # passing and its entry can come out. Reported in the nightly CI run; required nowhere.
+  quarantine:
+    name: quarantine (${{ matrix.runner }})
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-22.04, windows-2025]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Put the temp folder on drive D (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $t = Join-Path $env:RUNNER_TEMP 't'
+          New-Item -ItemType Directory -Force $t | Out-Null
+          "TMP=$t" >> $env:GITHUB_ENV
+          "TEMP=$t" >> $env:GITHUB_ENV
+
+      - name: Install the Rust toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+
+      - name: Install the Linux system packages Tauri needs
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/install-tauri-linux-deps
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: v1-rust
+          key: ${{ runner.os == 'Windows' && 'x86_64-pc-windows-msvc' || 'x86_64-unknown-linux-gnu' }}
+          cache-bin: "false"
+          save-if: "false"
+
+      - name: Install nextest at its pin
+        uses: ./.github/actions/install-pinned-tools
+        with:
+          tools: cargo-nextest
+
+      - name: The quarantined tests
+        run: cargo nextest run --workspace --profile quarantine --no-tests=pass
