@@ -40,6 +40,7 @@ fn rename(host: &Running, thread: clauseo_protocol::ThreadId, title: &str) {
     host.ok(HostCommand::RenameThread {
         thread,
         title: Title::new(title).unwrap(),
+        placeholder: false,
     });
 }
 

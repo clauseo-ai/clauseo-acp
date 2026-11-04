@@ -88,6 +88,7 @@ fn one_turn(dir: &Dir, host: &Running) -> (MatterId, ThreadId, clauseo_protocol:
     host.ok(HostCommand::RenameThread {
         thread,
         title: Title::new("Rent dispute").unwrap(),
+        placeholder: false,
     });
     let mut events = host.events(StreamId::Thread(thread));
     let (turn, _) = host.prompt(thread, "Draft the indemnity note");
