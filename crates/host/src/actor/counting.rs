@@ -142,15 +142,25 @@ struct PlaceJob {
 
 /// The one `clauseo-place` thread, started at its first job and kept for the process: a stat a
 /// network share holds up holds up only the counts queued behind it, never the actor, and
-/// strands one thread at most.
-static PLACES: OnceLock<Option<mpsc::Sender<PlaceJob>>> = OnceLock::new();
+/// strands one thread at most. Its queue holds [`PLACE_QUEUE`] jobs; one more is dropped.
+static PLACES: OnceLock<Option<mpsc::SyncSender<PlaceJob>>> = OnceLock::new();
+
+/// How many `matter_opened` counts may wait for their place. Counts are best-effort: behind a
+/// lookup that hangs, the next ones are dropped rather than queued without limit.
+const PLACE_QUEUE: usize = 8;
+
+/// Puts `job` on a bounded queue without waiting: `false` when the queue is full or its
+/// thread is gone, and the job is dropped.
+fn offer<T>(queue: &mpsc::SyncSender<T>, job: T) -> bool {
+    queue.try_send(job).is_ok()
+}
 
 /// Counts `matter_opened` from the `clauseo-place` thread, once `clauseo_matters::place` has
 /// said where `folder` lives: it stats the folder, so never on the actor. Only the place's kind
 /// is counted, never the sync service's name.
 fn bump_matter(counts: Counts, kind: MatterKind, papers: Papers, folder: PathBuf) {
     let places = PLACES.get_or_init(|| {
-        let (send, jobs) = mpsc::channel::<PlaceJob>();
+        let (send, jobs) = mpsc::sync_channel::<PlaceJob>(PLACE_QUEUE);
         let started = std::thread::Builder::new()
             .name("clauseo-place".to_owned())
             .spawn(move || {
@@ -182,9 +192,8 @@ fn bump_matter(counts: Counts, kind: MatterKind, papers: Papers, folder: PathBuf
         papers,
         folder,
     };
-    let sent = places.as_ref().map(|send| send.send(job));
-    if !matches!(sent, Some(Ok(()))) {
-        tracing::debug!("a matter's place could not be read for its count");
+    if !places.as_ref().is_some_and(|queue| offer(queue, job)) {
+        tracing::debug!("the matter's open is not counted: its place cannot be read now");
     }
 }
 
@@ -367,5 +376,28 @@ fn motion(motion: settings::Motion) -> ReducedMotion {
         settings::Motion::System => ReducedMotion::System,
         settings::Motion::Reduce => ReducedMotion::Reduce,
         settings::Motion::Full => ReducedMotion::Full,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::mpsc;
+
+    use super::{PLACE_QUEUE, offer};
+
+    // A lookup that hangs fills the queue; the next count is dropped, never waited for.
+    #[test]
+    fn a_full_place_queue_drops_the_next_count() {
+        let (queue, jobs) = mpsc::sync_channel(PLACE_QUEUE);
+        for job in 0..PLACE_QUEUE {
+            assert!(offer(&queue, job), "job {job}");
+        }
+        assert!(!offer(&queue, PLACE_QUEUE));
+        // Once the thread takes one, there is room again.
+        assert_eq!(jobs.recv().ok(), Some(0));
+        assert!(offer(&queue, PLACE_QUEUE));
+        // A queue whose thread is gone drops everything.
+        drop(jobs);
+        assert!(!offer(&queue, 0));
     }
 }
