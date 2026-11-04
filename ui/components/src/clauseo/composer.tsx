@@ -20,7 +20,7 @@ import { useThreadWords } from "../lib/words-thread.ts";
 import { rt } from "../lib/words-room.ts";
 import type { Paper } from "./matter.ts";
 import { dur, ease } from "./motion.ts";
-import { mayTakeFocus, pressOwn, replaceAll } from "./composer-edit.ts";
+import { insertedOnly, mayTakeFocus, pressOwn, replaceAll } from "./composer-edit.ts";
 import { sendsOnEnter } from "./composer-keys.ts";
 import type { MenuShown } from "./composer-menu.tsx";
 import { useRoom } from "./room-scope.ts";
@@ -222,7 +222,10 @@ export function Composer<V extends string = string>({
   const clearAfter = useRef<string | null>(null);
   // a fill asked for while an input method composed: put in at the composition's end, if the field is empty then
   const fillAfter = useRef<string | null>(null);
-  const fitRef = useRef<() => void>(() => {});
+  // fits the field to its words; `grow` after an input event, when words only put in can only keep or grow it
+  const fitRef = useRef<(grow?: boolean) => void>(() => {});
+  // the words as the field was last fitted to them
+  const fitted = useRef(initial);
   // the menu's chunk is asked for as the field is first focused with commands to list, with what the field held
   // then, so a `/` typed before it lands is read as it lands; the chunk reads it once
   const [armed, setArmed] = useState<HTMLTextAreaElement | null>(null);
@@ -262,16 +265,35 @@ export function Composer<V extends string = string>({
   useLayoutEffect(() => {
     const a = area.current;
     if (a === null) return;
-    const fit = () => {
+    // the one line's height, as the last whole fit measured it
+    let one = 0;
+    // each style written only when it changes: a write of the same value still restyles the field in some engines
+    const set = (height: string, scrolls: boolean) => {
+      if (a.style.height !== height) a.style.height = height;
+      const overflow = scrolls ? "" : "hidden";
+      if (a.style.overflowY !== overflow) a.style.overflowY = overflow;
+      if (!scrolls && a.scrollTop !== 0) a.scrollTop = 0;
+    };
+    const fit = (grow = false) => {
+      const was = fitted.current;
+      fitted.current = a.value;
+      // words only put in, as plain typing does: the field can only keep its height or grow, which its own scroll
+      // height shows with no collapse. Collapsing it to measure, as the whole fit does, laid out the room's column
+      // twice and repainted the thread above on every keystroke (Chromium trace, #117 L). A mark that joins a
+      // conjunct could in principle narrow a line enough to lose one; the next deletion or width change fits it whole
+      if (grow && one > 0 && insertedOnly(was, a.value)) {
+        const h = a.scrollHeight;
+        if (h <= a.clientHeight + (a.style.height === "" ? 4 : 0)) return;
+        set(`${Math.min(h, one * 6)}px`, h > one * 6);
+        return;
+      }
       a.style.height = "";
-      const one = a.clientHeight;
+      one = a.clientHeight;
       const cap = one * 6;
-      if (a.scrollHeight > one + 4) a.style.height = `${Math.min(a.scrollHeight, cap)}px`;
+      const h = a.scrollHeight;
       // only words past the six lines scroll; short of them the field draws no scroll arrows. A Devanagari line can
       // measure a few px over the one line, inside the slack above, and WebView2 drew arrows on an empty field
-      const scrolls = a.scrollHeight > cap;
-      a.style.overflowY = scrolls ? "" : "hidden";
-      if (!scrolls) a.scrollTop = 0;
+      set(h > one + 4 ? `${Math.min(h, cap)}px` : "", h > cap);
     };
     fitRef.current = fit;
     fit();
@@ -292,10 +314,10 @@ export function Composer<V extends string = string>({
   }, [lang, textSize]);
   // after every change to the words, typed, composed, undone or set through the handle: fit the field to them, say
   // whether it holds any, and tell the room
-  const changed = () => {
+  const changed = (typed = false) => {
     const a = area.current;
     if (a === null) return;
-    fitRef.current();
+    fitRef.current(typed);
     tokenSync.current?.();
     setEmpty(a.value.trim() === "");
     onInput?.(a.value);
@@ -443,7 +465,7 @@ export function Composer<V extends string = string>({
               held.current = e.currentTarget.value;
               setArmed(e.currentTarget);
             }}
-            onInput={changed}
+            onInput={() => changed(true)}
             onCompositionStart={() => {
               composing.current = true;
             }}
