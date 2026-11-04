@@ -106,6 +106,8 @@ const HI = {
   "You undid Clauseo's changes to {n} papers.": "आपने {n} दस्तावेज़ों में Clauseo के बदलाव पूर्ववत किए।",
   "You undid Clauseo's changes to 1 paper.": "आपने 1 दस्तावेज़ में Clauseo के बदलाव पूर्ववत किए।",
   // the composer
+  // in the composer's place while the open conversation is archived (U16a's Find opens one): it takes no question
+  "Archived. Read only.": null,
   "Papers for this question": "इस प्रश्न के दस्तावेज़",
   "Remove {title}": "{title} हटाएँ",
   // the composer's `/` menu, the agent's commands, named for assistive technology

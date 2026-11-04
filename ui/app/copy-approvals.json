@@ -1367,6 +1367,15 @@
     "by": "Rohan",
     "note": "Rohan, via the orchestrator (U6-followup page)"
   },
+  "AR-01": {
+    "en": "Archived. Read only.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (archived-read-only)"
+  },
   "C117-01": {
     "en": "Commands",
     "hi": "कमांड",

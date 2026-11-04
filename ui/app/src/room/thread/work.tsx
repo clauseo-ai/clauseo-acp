@@ -30,6 +30,7 @@ import {
 } from "./session.ts";
 import { paperMentions } from "./paper-mentions.ts";
 import { WorkComposer } from "./work-composer.tsx";
+import { ArchivedLine } from "../archived.tsx";
 
 const NO_COMMANDS: readonly AvailableCommand[] = [];
 
@@ -62,6 +63,7 @@ export function Work({
   focus = null,
   onThread,
   conversations,
+  archived = false,
 }: {
   transport: HostTransport;
   matter: MatterSummary | null;
@@ -81,6 +83,8 @@ export function Work({
   onThread?: (thread: ThreadId | null) => void;
   /** The matter's conversations, for the wait while another of them holds the matter (U7); none, no wait. */
   conversations?: Conversations | undefined;
+  /** The open conversation is archived: read only, its line in the composer's place (archived.tsx). */
+  archived?: boolean;
 }) {
   const store = useViewStore();
   const field = useRef<ComposerHandle>(null);
@@ -121,7 +125,8 @@ export function Work({
     live,
     busy,
     thread: session.thread,
-    restart,
+    // the host refuses Restart in an archived conversation
+    restart: archived ? null : restart,
     lines,
     plan: agentPlan,
   });
@@ -156,47 +161,53 @@ export function Work({
           </Suspense>
         </div>
       </ThreadActionsContext>
-      <WorkComposer
-        ref={field}
-        drafts={drafts}
-        draftKey={draftKey}
-        choice={choice}
-        plan={plan}
-        commands={commands}
-        mentions={mentions}
-        disabled={matter === null}
-        busy={busy}
-        doing={doing}
-        asks={asks}
-        refused={session.refused ?? otherRefused}
-        failed={
-          failed === null
-            ? null
-            : lines !== null
-              ? lines.streamFailedLine(lang, failed, retry, agentPlan)
-              : // the thread's chunk never came in (chunk.ts's NoThread): the code's words, never no line
-                {
-                  state: {
-                    kind: "wait",
-                    words: errorWords(lang, failed.code, agentPlan),
-                    pill: null,
-                    code: failed.code,
-                  },
-                  testId: "stream-failed",
-                }
-        }
-        stopped={stopped}
-        refill={refillOf(brk, live, restart)}
-        onAsk={ask}
-        onStop={session.stop}
-        paused={paused}
-        others={
-          conversations === undefined ? null : { transport, conversations, onRefused: refuseOther }
-        }
-        transport={transport}
-        stream={stream}
-        thread={session.thread}
-      />
+      {archived ? (
+        <ArchivedLine />
+      ) : (
+        <WorkComposer
+          ref={field}
+          drafts={drafts}
+          draftKey={draftKey}
+          choice={choice}
+          plan={plan}
+          commands={commands}
+          mentions={mentions}
+          disabled={matter === null}
+          busy={busy}
+          doing={doing}
+          asks={asks}
+          refused={session.refused ?? otherRefused}
+          failed={
+            failed === null
+              ? null
+              : lines !== null
+                ? lines.streamFailedLine(lang, failed, retry, agentPlan)
+                : // the thread's chunk never came in (chunk.ts's NoThread): the code's words, never no line
+                  {
+                    state: {
+                      kind: "wait",
+                      words: errorWords(lang, failed.code, agentPlan),
+                      pill: null,
+                      code: failed.code,
+                    },
+                    testId: "stream-failed",
+                  }
+          }
+          stopped={stopped}
+          refill={refillOf(brk, live, restart)}
+          onAsk={ask}
+          onStop={session.stop}
+          paused={paused}
+          others={
+            conversations === undefined
+              ? null
+              : { transport, conversations, onRefused: refuseOther }
+          }
+          transport={transport}
+          stream={stream}
+          thread={session.thread}
+        />
+      )}
     </>
   );
 }

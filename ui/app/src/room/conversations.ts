@@ -547,6 +547,8 @@ export class Conversations {
     const thread = m.open === null ? null : this.#threadOf(m, m.open);
     const origin = thread === null ? undefined : m.retried.get(thread);
     const source = origin === undefined ? undefined : m.threads.get(origin.from);
+    // the host refuses Retry from here in an archived conversation, as it refuses a question
+    const archived = thread !== null && m.threads.get(thread)?.status === "archived";
     return {
       matter: m.matter,
       phase: m.phase,
@@ -555,12 +557,13 @@ export class Conversations {
       open: m.open,
       thread,
       drafting: m.phase !== "loading" && thread === null,
+      archived,
       plan: matterPlan(listed, agents),
       agents,
       options,
       agent: this.#agentOf(m),
       focus: this.#focus !== null && this.#focus.key === m.open ? this.#focus : null,
-      canRetry: this.#next.retry !== null,
+      canRetry: this.#next.retry !== null && !archived,
       retried:
         origin === undefined
           ? null
