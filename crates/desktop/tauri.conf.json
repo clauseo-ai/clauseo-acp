@@ -39,6 +39,8 @@
         "installMode": "currentUser",
         "installerIcon": "icons/icon.ico",
         "uninstallerIcon": "icons/icon.ico",
+        "sidebarImage": "icons/installer-sidebar.bmp",
+        "headerImage": "icons/installer-header.bmp",
         "languages": ["English"],
         "customLanguageFiles": { "English": "windows/nsis/English.nsh" }
       }
