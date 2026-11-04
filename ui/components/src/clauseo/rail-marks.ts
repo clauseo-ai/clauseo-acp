@@ -1,10 +1,11 @@
 // Each rail status's icon (rail-mark.tsx draws it): yellow, as a disc, only where the matter or the conversation waits
-// on the lawyer's hand.
+// on the lawyer's hand. Failed takes the warning triangle in concrete: no red, and no yellow, for a failure.
 import type { ComponentType } from "react";
 import type { IconProps } from "../icons/icon.tsx";
 import {
   IconAnswerReady,
   IconChecking,
+  IconFailed,
   IconLocateFolder,
   IconNeedsPermission,
   IconPlanLimit,
@@ -28,6 +29,7 @@ export const MATTER_MARK: Record<Exclude<MatterState, "idle">, Mark> = {
   pausedSet: { icon: IconPlanLimit, waits: false },
   limit: { icon: IconPlanLimit, waits: false },
   moved: { icon: IconLocateFolder, waits: false },
+  failed: { icon: IconFailed, waits: false },
 };
 
 /** Each conversation status's mark, the same shapes as the matters'. */
@@ -37,4 +39,5 @@ export const CONVERSATION_MARK: Record<Exclude<ConversationState, "idle">, Mark>
   working: { icon: IconChecking, waits: false },
   stopped: { icon: IconStop, waits: false },
   waiting: { icon: IconChecking, waits: false },
+  failed: { icon: IconFailed, waits: false },
 };

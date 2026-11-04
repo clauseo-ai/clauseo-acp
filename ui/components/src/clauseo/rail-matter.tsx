@@ -57,6 +57,8 @@ export type MatterRowProps = {
   moved?: boolean | undefined;
   /** Pinned above every date group. Its menu's Pin to the top shows it ticked. */
   pinned?: boolean | undefined;
+  /** Optional: in Needs you, the title of the conversation behind its status, quiet, beneath the status's words. */
+  where?: string | undefined;
   /** A line under the note saying why a search found it, where the name alone doesn't show: "Client, Asha Rao". */
   match?: string | undefined;
   /** Optional: protection is off for this matter, or couldn't be set up. The row's name line ends in the open
@@ -180,11 +182,13 @@ function RowWords({
   match,
   state,
   status,
+  where,
   unprotected,
 }: {
   name: string;
   note: string;
   match?: string | undefined;
+  where?: string | undefined;
   state: MatterState;
   status: string | null;
   unprotected?: boolean | undefined;
@@ -192,7 +196,11 @@ function RowWords({
   const w = useWords();
   // waiting on the lawyer, or an answer waiting to be opened: the status line speaks up
   const news =
-    state === "question" || state === "permission" || state === "ready" || state === "paused";
+    state === "question" ||
+    state === "permission" ||
+    state === "ready" ||
+    state === "paused" ||
+    state === "failed";
   // limit stays muted: nothing for the lawyer to choose, only a time to wait for
   return (
     <>
@@ -230,6 +238,11 @@ function RowWords({
           <RailMark mark={MATTER_MARK[state]} className="room-matter-mark" />
           <span className="min-w-0 deva-nudge">
             <Say>{status}</Say>
+            {where !== undefined && (
+              <span className="room-matter-where" lang={langOfText(where)}>
+                <Say>{where}</Say>
+              </span>
+            )}
           </span>
         </span>
       )}
@@ -251,6 +264,7 @@ export function MatterRow({
   moved,
   pinned,
   match,
+  where,
   unprotected,
   onOpen,
   onPin,
@@ -281,6 +295,7 @@ export function MatterRow({
         name={name}
         note={note}
         match={match}
+        where={where}
         state={state}
         status={status}
         unprotected={unprotected}
