@@ -6,6 +6,8 @@
 // and axe are in find-open.test.tsx, find-lazy.test.tsx and find-axe.test.tsx.
 import { act, StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { iconIn } from "@clauseo/components/icons/icon-in.tsx";
+import { IconChecking } from "@clauseo/components/icons/icons.tsx";
 import { settled } from "@clauseo/components/lib/late.ts";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { Search } from "../store/search.ts";
@@ -212,8 +214,19 @@ test("the found words are spans in primary at chip weight; markup inside a snipp
 test("RO-27 shows while the index builds, and clears on a page without it", async () => {
   await room((s) => page([said()], s.query === "ask" ? { indexing: { done: 3, total: 10 } } : {}));
   await find("ask");
-  expect(results()?.querySelector(".room-find-indexing")?.textContent).toBe(
-    "Still adding older conversations.",
+  const line = results()?.querySelector<HTMLElement>(".room-find-indexing");
+  expect(line?.textContent).toBe("Still adding older conversations.");
+  // no clock, which means Answering on the rail; what the line means, RO-32, behind the info icon's app tooltip
+  expect(iconIn(line, IconChecking, 14, "room-matter-mark")).toBeNull();
+  expect(line?.querySelectorAll("svg").length).toBe(1);
+  const info = line?.querySelector<HTMLButtonElement>("button");
+  expect(info?.getAttribute("aria-label")).toBe("Some may not show yet.");
+  await act(async () => {
+    info?.focus();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(document.querySelector("[data-base-ui-portal] > [data-side]")?.textContent).toBe(
+    "Some may not show yet.",
   );
   await find("asks");
   expect(results()?.querySelector(".room-find-indexing")).toBeNull();

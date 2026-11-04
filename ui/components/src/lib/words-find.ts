@@ -19,6 +19,8 @@ const HI = {
   'Nothing found for "{words}".': null,
   // RO-27: while the index is still being built
   "Still adding older conversations.": null,
+  // RO-32: what that means, behind the info icon at its end
+  "Some may not show yet.": null,
   // RO-28: an archived conversation's icon, named
   Archived: null,
 } as const;

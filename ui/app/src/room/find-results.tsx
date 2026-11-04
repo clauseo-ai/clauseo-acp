@@ -11,12 +11,7 @@ import {
   type MatterRowProps,
 } from "@clauseo/components/clauseo/rail.tsx";
 import { Say } from "@clauseo/components/clauseo/say.tsx";
-import {
-  IconAbout,
-  IconArchived,
-  IconChecking,
-  IconFileGeneric,
-} from "@clauseo/components/icons/icons.tsx";
+import { IconAbout, IconArchived, IconFileGeneric } from "@clauseo/components/icons/icons.tsx";
 import { isolate } from "@clauseo/components/lib/bidi.ts";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { langOfText } from "@clauseo/components/lib/script.ts";
@@ -220,11 +215,20 @@ export function FindResults({
   return (
     <>
       {shown.indexing && (
+        // no lead icon: the clock means Answering on the rail; what the line means sits behind the info icon
         <p className="room-find-indexing" role="status">
-          <IconChecking size={14} className="room-matter-mark" />
           <span className="deva-nudge">
             <Say>{fw(lang, "Still adding older conversations.")}</Say>
           </span>
+          <Tooltip content={fw(lang, "Some may not show yet.")}>
+            <button
+              type="button"
+              className="room-find-scope"
+              aria-label={fw(lang, "Some may not show yet.")}
+            >
+              <IconAbout size={14} />
+            </button>
+          </Tooltip>
         </p>
       )}
       {shown.matters.length + shown.papers.length > 0 && (
