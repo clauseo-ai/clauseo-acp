@@ -166,12 +166,22 @@ pub(crate) async fn sign_in<T: Timer + Send + Sync>(
     last
 }
 
-/// The run's URL file on macOS and Linux, when the worker wrote the shim; none on Windows.
+/// The run's URL file on macOS and Linux, when the worker wrote the shim.
+#[cfg(unix)]
 fn url_file<T>(job: &SigninJob<T>) -> std::io::Result<Option<UrlFile>> {
-    #[cfg(unix)]
     if job.browser.is_some() {
         return UrlFile::create(&job.config.data_dir, &job.ticket.agent, job.ticket.job).map(Some);
     }
+    Ok(None)
+}
+
+/// None on Windows, which has no shim.
+#[cfg(not(unix))]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "the Unix version's signature, which can fail; one call site serves both"
+)]
+fn url_file<T>(job: &SigninJob<T>) -> std::io::Result<Option<UrlFile>> {
     let _ = job;
     Ok(None)
 }

@@ -13,6 +13,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+#[cfg(unix)]
 use clauseo_protocol::AgentId;
 
 /// The shim's text. It refuses to run without its file, and writes one line per address.
@@ -26,11 +27,13 @@ printf '%s\\n' \"$1\" >> \"$CLAUSEO_SIGNIN_URL_FILE\"\n";
 const URL_FILE_MAX: u64 = 64 * 1024;
 
 /// `<data_dir>/agents/signin`: the shim and the runs' URL files.
+#[cfg(unix)]
 pub(crate) fn folder(data_dir: &Path) -> PathBuf {
     data_dir.join("agents").join("signin")
 }
 
 /// `<data_dir>/agents/signin/browser`.
+#[cfg(unix)]
 pub(crate) fn script_path(data_dir: &Path) -> PathBuf {
     folder(data_dir).join("browser")
 }

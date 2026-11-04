@@ -72,26 +72,39 @@ pub(crate) fn create_private_dirs_under(data_dir: &Path, target: &Path) -> io::R
 }
 
 /// Sets the real folder `path` (`meta` its `symlink_metadata`, checked not a link) to 0700 when
-/// it is not already, as host's `make_private_dir` does. Nothing on Windows.
+/// it is not already, as host's `make_private_dir` does.
+#[cfg(unix)]
 fn make_private(path: &Path, meta: &std::fs::Metadata) -> io::Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        if meta.permissions().mode() & 0o777 != 0o700 {
-            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
-        }
+    use std::os::unix::fs::PermissionsExt as _;
+    if meta.permissions().mode() & 0o777 != 0o700 {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
     }
-    #[cfg(not(unix))]
+    Ok(())
+}
+
+/// Nothing on Windows: a folder's access comes from its parent's ACL.
+#[cfg(not(unix))]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "the Unix version's signature, which can fail; one call site serves both"
+)]
+fn make_private(path: &Path, meta: &std::fs::Metadata) -> io::Result<()> {
     let _ = (path, meta);
     Ok(())
 }
 
 /// Makes the one folder `path` (its parent must exist), 0700 on Unix (a umask only narrows it).
 fn create_private_dir(path: &Path) -> io::Result<()> {
-    let mut builder = std::fs::DirBuilder::new();
     #[cfg(unix)]
-    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
-    builder.create(path)
+    {
+        let mut builder = std::fs::DirBuilder::new();
+        std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+        builder.create(path)
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::DirBuilder::new().create(path)
+    }
 }
 
 /// Whether `meta` (from `symlink_metadata`) is a symbolic link or, on Windows, any reparse point
