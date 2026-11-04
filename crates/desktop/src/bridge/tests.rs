@@ -170,6 +170,12 @@ fn a_resubscribe_from_an_older_cursor_gets_the_tail_in_the_same_epoch() {
 /// [`window::WATCHDOG`] without an ack while it fills the window: every stream and feed restarts,
 /// and the limits feed sends its view again.
 ///
+/// The window's own watchdog is stopped first, so only `fire_at` fires it. Left running, it fires
+/// on the wall clock on any run that takes [`window::WATCHDOG`] from `open`, and a fire between
+/// the pause and the caller's ack restarts every subscription, sends one message more and pauses
+/// again: the caller's ack then misses that message, and what it reads next depends on which
+/// restart the host answered first.
+///
 /// The window counts every message toward its cap, the limits messages too: the limits view
 /// `open` waited for, and the one each watchdog fire resends. So the bytes the page received are
 /// the stream's messages' and the limits messages' together, and they must be the window's
@@ -181,11 +187,12 @@ fn fill_until_paused(
     thread: ThreadId,
     fire_at: Option<u32>,
 ) -> Vec<String> {
+    let window = bridge.window(MAIN).unwrap();
+    block_on(pump::stop_watchdog(&window));
     block_on(bridge.subscribe(MAIN, stream(thread), None)).unwrap();
     let mut sent = vec![messages.next_text()];
 
     // Long titles, so each rename's patch is large: renames until the window pauses.
-    let window = bridge.window(MAIN).unwrap();
     let long = "x".repeat(150);
     let mut renames = 0;
     while !lock(&window).state().is_paused() {
@@ -197,8 +204,9 @@ fn fill_until_paused(
             // Far past the watchdog's wait, whatever the window's clock reads. The restart's
             // `Reset` comes in among the renames' messages, and the loop takes it as one.
             pump::tick_at(&window, Duration::from_secs(3600));
-            // The limits view it resends. On a run slow enough that the window's own watchdog
-            // fired first, this one does not fire (no ack rearmed it), and that one resent it.
+            // The limits view it resends, unless the loop took it already. (On a run that took
+            // a full watchdog wait from `open` to stopping the watchdog, that fire resent the
+            // view, and this one does not fire: no ack rearmed it.)
             if messages.limits_received() < 2 {
                 let _view = messages.next_limits();
             }
@@ -290,8 +298,7 @@ fn a_watchdog_fire_while_the_window_fills_counts_the_limits_view_it_resends() {
     let bridge = host.bridge();
     let messages = open(&bridge, MAIN);
     let _sent = fill_until_paused(&host, &bridge, &messages, thread, Some(50));
-    // The view at open and the one the fire resent; a fire of the window's own watchdog on a
-    // slow run may add one more.
+    // The view at open and the one the fire resent.
     assert!(
         messages.limits_received() >= 2,
         "{}",

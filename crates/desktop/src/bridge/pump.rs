@@ -320,6 +320,18 @@ async fn watch(window: Weak<Mutex<Window>>) {
     }
 }
 
+/// For tests that drive the clock with [`tick_at`] alone: stops the window's watchdog task and
+/// returns once it has ended, so no tick of the wall clock runs from then on.
+#[cfg(test)]
+pub(crate) async fn stop_watchdog(window: &Mutex<Window>) {
+    let watchdog = lock(window).watchdog.take();
+    if let Some(watchdog) = watchdog {
+        watchdog.abort();
+        // Cancelled, or a tick that was running finished first: either way the task is over.
+        let _ended = watchdog.await;
+    }
+}
+
 /// One watchdog tick at `elapsed` since the window opened: starts the restarts the state asks
 /// for, the feeds' included.
 pub(crate) fn tick_at(window: &Arc<Mutex<Window>>, elapsed: Duration) {

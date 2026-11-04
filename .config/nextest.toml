@@ -100,20 +100,19 @@ junit = { path = "junit.xml" }
 #   - agents install tests, on Windows only: stall all at once on the loaded runner, 11 timed out
 #     on Windows x64 in run 41840642164 (stage D's #366 gives them 160 s)
 #   - host search supersede race: search.rs:323 before the index settles (host's fix in progress)
-#   - desktop bridge cap: flaky on 11-04
-default-filter = 'not (package(clauseo-host) & binary(host) & test(=search::a_newer_search_cancels_older_ones_and_a_late_answer_is_dropped) | package(clauseo-desktop) & test(=bridge::tests::past_the_cap_the_driver_pauses_and_resubscribes_once_acks_catch_up))'
+default-filter = 'not (package(clauseo-host) & binary(host) & test(=search::a_newer_search_cancels_older_ones_and_a_late_answer_is_dropped))'
 # On Windows the agents install tests too (their stalls are the Windows runner's; Linux and macOS
 # keep gating them while their crate changes).
 [[profile.ci.overrides]]
 platform = 'cfg(windows)'
-default-filter = 'not (package(clauseo-host) & binary(host) & test(=search::a_newer_search_cancels_older_ones_and_a_late_answer_is_dropped) | package(clauseo-desktop) & test(=bridge::tests::past_the_cap_the_driver_pauses_and_resubscribes_once_acks_catch_up) | package(clauseo-agents) & binary(install))'
+default-filter = 'not (package(clauseo-host) & binary(host) & test(=search::a_newer_search_cancels_older_ones_and_a_late_answer_is_dropped) | package(clauseo-agents) & binary(install))'
 
 # The quarantined tests alone (see profile ci), run nightly by ci.yml's `quarantine` job, with the
 # ci profile's timeouts and retry, so a fixed one shows as passing.
 [profile.quarantine]
 retries = 1
 failure-output = "immediate-final"
-default-filter = 'package(clauseo-host) & binary(host) & test(=search::a_newer_search_cancels_older_ones_and_a_late_answer_is_dropped) | package(clauseo-desktop) & test(=bridge::tests::past_the_cap_the_driver_pauses_and_resubscribes_once_acks_catch_up)'
+default-filter = 'package(clauseo-host) & binary(host) & test(=search::a_newer_search_cancels_older_ones_and_a_late_answer_is_dropped)'
 [[profile.quarantine.overrides]]
 platform = 'cfg(windows)'
-default-filter = 'package(clauseo-host) & binary(host) & test(=search::a_newer_search_cancels_older_ones_and_a_late_answer_is_dropped) | package(clauseo-desktop) & test(=bridge::tests::past_the_cap_the_driver_pauses_and_resubscribes_once_acks_catch_up) | package(clauseo-agents) & binary(install)'
+default-filter = 'package(clauseo-host) & binary(host) & test(=search::a_newer_search_cancels_older_ones_and_a_late_answer_is_dropped) | package(clauseo-agents) & binary(install)'
