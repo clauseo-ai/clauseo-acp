@@ -10,18 +10,32 @@ use std::path::Path;
 use std::process::ExitCode;
 use std::time::Duration;
 
-/// Runs the whole check on `ctx`: `quick` limits clippy and nextest to changed packages, `ci` is
-/// the CI mode, `skip_ui` skips the ui steps (`--skip-ui`), every tool command goes through
-/// `exec` and the pnpm probe through `quiet`. With `skip_ui` pnpm is not probed.
+/// The flags of `cargo xtask check`, as `main.rs` parses them.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Flags {
+    /// `--quick`: clippy and nextest only on changed packages.
+    pub(crate) quick: bool,
+    /// `--skip-ui`: the ui steps are skipped, and pnpm is not probed.
+    pub(crate) skip_ui: bool,
+    /// `--no-tests`: the test steps are skipped (`steps::without_tests`).
+    pub(crate) no_tests: bool,
+}
+
+/// Runs the whole check on `ctx` with `flags`: `ci` is the CI mode, every tool command goes
+/// through `exec` and the pnpm probe through `quiet`.
 /// `main.rs` passes the real runners, `process::capture` and `process::run_quiet`.
 pub(crate) fn run(
     ctx: &Context,
-    quick: bool,
+    flags: Flags,
     ci: bool,
-    skip_ui: bool,
     exec: &mut Exec<'_>,
     quiet: &mut QuietRunner<'_>,
 ) -> ExitCode {
+    let Flags {
+        quick,
+        skip_ui,
+        no_tests,
+    } = flags;
     let mut out = Printer::stdout();
     // Printed once here in full. Each check that stops on it quotes one line and points up.
     if let Err(error) = &ctx.members {
@@ -34,13 +48,16 @@ pub(crate) fn run(
         Scope::Workspace
     };
     let range = gitleaks_range(&mut out, &changes::scan_range(&ctx.root, ci));
-    let steps = steps::plan(
+    let mut steps = steps::plan(
         &scope,
         ci,
         range.as_deref(),
         !skip_ui && (ci || pnpm_found(&ctx.root, quiet)),
         skip_ui,
     );
+    if no_tests {
+        steps = steps::without_tests(steps);
+    }
     let results = steps::run_all(steps, ctx, &mut out, exec);
     out.summary(&results);
 
@@ -199,7 +216,7 @@ mod tests {
             Ok(Ran::exited(true, "9.15.0\n", String::new()))
         };
         assert_eq!(
-            run(&ctx, false, false, false, &mut exec, &mut quiet),
+            run(&ctx, Flags::default(), false, &mut exec, &mut quiet),
             ExitCode::FAILURE
         );
         assert!(ran.borrow().iter().any(|cmd| cmd.starts_with("cargo fmt")));
@@ -213,7 +230,7 @@ mod tests {
         let mut quiet = |_: &Cmd, _: &Path| -> io::Result<Ran> {
             Ok(Ran::exited(true, "9.15.0\n", String::new()))
         };
-        run(&ctx, false, false, false, &mut exec, &mut quiet);
+        run(&ctx, Flags::default(), false, &mut exec, &mut quiet);
         assert!(ran.borrow().iter().any(|cmd| cmd.starts_with("pnpm")));
     }
 
@@ -225,7 +242,7 @@ mod tests {
         let mut quiet = |_: &Cmd, _: &Path| -> io::Result<Ran> {
             Err(io::Error::from(io::ErrorKind::NotFound))
         };
-        run(&ctx, false, false, false, &mut exec, &mut quiet);
+        run(&ctx, Flags::default(), false, &mut exec, &mut quiet);
         assert!(!ran.borrow().iter().any(|cmd| cmd.starts_with("pnpm")));
     }
 
@@ -239,7 +256,7 @@ mod tests {
             *probes.borrow_mut() += 1;
             Err(io::Error::from(io::ErrorKind::NotFound))
         };
-        run(&ctx, false, true, false, &mut exec, &mut quiet);
+        run(&ctx, Flags::default(), true, &mut exec, &mut quiet);
         assert_eq!(*probes.borrow(), 0);
         assert!(ran.borrow().iter().any(|cmd| cmd.starts_with("pnpm")));
     }
@@ -255,11 +272,53 @@ mod tests {
                 *probes.borrow_mut() += 1;
                 Ok(Ran::exited(true, "9.15.0\n", String::new()))
             };
-            run(&ctx, false, ci, true, &mut exec, &mut quiet);
+            run(
+                &ctx,
+                Flags {
+                    skip_ui: true,
+                    ..Flags::default()
+                },
+                ci,
+                &mut exec,
+                &mut quiet,
+            );
             assert_eq!(*probes.borrow(), 0, "ci={ci}");
             assert!(!ran.borrow().iter().any(|cmd| cmd.starts_with("pnpm")));
             assert!(ran.borrow().iter().any(|cmd| cmd.starts_with("cargo fmt")));
         }
+    }
+
+    #[test]
+    fn no_tests_runs_no_test_command_but_still_lints_and_builds() {
+        let (_root, ctx) = scratch_context("check-run-no-tests");
+        let ran = RefCell::new(Vec::new());
+        let mut exec = |cmd: &Cmd, _: &mut dyn FnMut(&[u8])| Ok(record_and_fail(&ran, cmd));
+        let mut quiet =
+            |_: &Cmd, _: &Path| -> io::Result<Ran> { unreachable!("CI does not probe") };
+        run(
+            &ctx,
+            Flags {
+                no_tests: true,
+                ..Flags::default()
+            },
+            true,
+            &mut exec,
+            &mut quiet,
+        );
+        let ran = ran.borrow();
+        let tests = [
+            "cargo nextest run",
+            "cargo test",
+            "pnpm -C ui/app run test",
+            "pnpm -C ui/e2e run test:unit",
+        ];
+        assert!(
+            !ran.iter()
+                .any(|cmd| tests.iter().any(|test| cmd.starts_with(test))),
+            "{ran:?}"
+        );
+        assert!(ran.iter().any(|cmd| cmd.starts_with("cargo clippy")));
+        assert!(ran.iter().any(|cmd| cmd == "pnpm -C ui/app run build"));
     }
 
     /// A member at `dir` that depends on the members whose directories are `path_deps`.

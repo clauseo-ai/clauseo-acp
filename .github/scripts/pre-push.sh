@@ -3,16 +3,22 @@
 # writes one line per ref it is about to push, `<local ref> <local sha> <remote ref> <remote sha>`,
 # and a delete (`git push origin --delete <branch>`, `git push origin :<branch>`) has a local sha
 # of all zeros. A push of deletes only sends no commits, so there is nothing to check: it passes at
-# once. Every other push runs `cargo xtask check --quick` in CI mode, as fast-lane runs it (#210);
-# `CI=0 git push` runs it in local mode. With no ref on stdin (`lefthook run pre-push` by hand) the
-# check runs too.
+# once. Every other push runs `cargo xtask check --quick --no-tests` in CI mode, so clippy denies
+# warnings as fast-lane's does (#210); `CI=0 git push` runs it in local mode. With no ref on stdin
+# (`lefthook run pre-push` by hand) the check runs too.
+#
+# `--no-tests` leaves out the five test steps (nextest, nextest-specta, doctest, vitest,
+# playwright-unit): a push runs the format, lint, typecheck and build steps only (fmt, both clippy
+# steps, deny, shear, typos, taplo, gitleaks, the static checks, tsc, oxlint, oxfmt, vite-build).
+# Under load on the dev machines the tests timed out and failed pushes; CI and the merge queue run
+# them.
 #
 # The ui steps are about half of the check, so a push that changes no ui path skips them with
-# `--skip-ui`; CI runs them whatever the branch. For each pushed ref that is not a delete, the
+# `--skip-ui` as well; CI runs them whatever the branch. For each pushed ref that is not a delete, the
 # paths it changes since its merge-base with origin/main go to changes.sh (the classifier CI's
 # `changes` job uses). Only when every git command and changes.sh succeed and changes.sh prints
 # `ui=false` does the check get `--skip-ui`. Anything else (no ref on stdin, no origin/main, a git
-# or changes.sh failure, `ui=true`) runs the full check. changes.sh turns everything on for an
+# or changes.sh failure, `ui=true`) runs the ui steps too. changes.sh turns everything on for an
 # empty diff or a path it has no rule for.
 #
 # pre-push-test.sh tests it, alone and through lefthook with a local remote.
@@ -62,6 +68,6 @@ fi
 export CI="${CI:-1}"
 if [ "$skip_ui" = true ]; then
   echo "pre-push: no ui change on the pushed branch; skipping the ui steps (CI runs them)"
-  exec cargo xtask check --quick --skip-ui
+  exec cargo xtask check --quick --no-tests --skip-ui
 fi
-exec cargo xtask check --quick
+exec cargo xtask check --quick --no-tests
