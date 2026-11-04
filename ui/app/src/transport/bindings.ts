@@ -1188,6 +1188,28 @@ export type ErrorCode =
 "transport.too_large" | 
 /** The change names a setting that the firm's policy sets, so the lawyer cannot change it; nothing was changed. */
 "settings.locked" | 
+/** The agent's install cannot reach its hosts: name resolution or connect failed with no route. The install waits and tries again by itself. */
+"agent.install_offline" | 
+/** A proxy or firewall blocked the agent's download: a 403 or 407 from a proxy, a TLS failure, or a web page where a file should be. */
+"agent.install_blocked" | 
+/** Too little free space for the agent's install; a retry succeeds once space is freed. */
+"agent.install_disk_full" | 
+/** The agent's install failed for another reason, after three tries. */
+"agent.install_failed" | 
+/** The lawyer cancelled the sign-in, in Clauseo or on the vendor's page. */
+"signin.cancelled" | 
+/** The sign-in link or device code expired before the sign-in finished; a new sign-in gets a new one. */
+"signin.link_expired" | 
+/** The account has no plan the agent accepts. */
+"signin.no_plan" | 
+/** Device-code sign-in is turned off for the account. */
+"signin.device_code_off" | 
+/** Another program holds the port the agent's sign-in listens on (Codex's 1455). */
+"signin.port_busy" | 
+/** The sign-in ended before signing in, for any other reason. */
+"signin.failed" | 
+/** The firm's policy cannot be read and once set this agent's firm plan, so sign-in and launch are refused rather than sent to a plan login. */
+"signin.policy_unreadable" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 
@@ -1346,6 +1368,23 @@ export type FolderState =
 "missing" | 
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
+
+/**  A login seen but not reusable, or why reuse stopped: [`SignIn::SignedOut`]'s `found`. */
+export type FoundLogin = 
+/**  A Claude login set in the lawyer's own Claude settings (not a `claude.ai` one). */
+"claude_settings" | 
+/**  Windows with the sandbox set up, where Claude's login is not reused. */
+"claude_windows_sandbox" | 
+/**  A Codex login held in the OS keyring, not in a file. */
+"codex_keyring" | 
+/**  Reuse stopped: a refresh failed twice. */
+"reused_failed" | 
+/**  Reuse stopped: the agent's own CLI is signed out. */
+"reused_signed_out" | 
+/**  Reuse stopped: the agent's own CLI is signed in to another account. */
+"reused_changed" | 
+/**  Reuse stopped: Codex's shared login file was replaced, so it is no longer shared. */
+"codex_link_split";
 
 /**  One piece of an event's JSON text. */
 export type Fragment = {
@@ -1951,6 +1990,65 @@ export type ImportSummary = {
 };
 
 /**
+ *  An install's log as "Details" shows it: English lines, already free of user names,
+ *  passwords and paths outside the data folder (`agents` redacts them). At most
+ *  [`MAX_INSTALL_LOG_LINES`] lines of at most [`MAX_INSTALL_LOG_LINE_BYTES`] bytes each; decoding
+ *  refuses more. JSON: `["Clauseo download log", "agent: claude-acp", ...]`.
+ */
+export type InstallLog = string[];
+
+/**  Where an agent's install is: `agents`' `InstallState`. There is no end estimate. */
+export type InstallProgress = 
+/**  Not installed, and no install running. */
+({ missing: {
+	/**
+	 *  Bytes an install would download here, Node's archive included when Node would be
+	 *  downloaded ("About {size} MB").
+	 */
+	download_bytes: Count,
+} }) & { downloading?: never; failed?: never; ready?: never; waiting?: never } | 
+/**  Offline: the install waits and tries again by itself. */
+({ waiting: {
+	/**  Why it waits: `agent.install_offline`. */
+	code: ErrorCode,
+	/**  The hosts the install contacts, for "Ask your IT team". */
+	hosts: string[],
+	/**  The log so far, for "Details". */
+	log: InstallLog,
+} }) & { downloading?: never; failed?: never; missing?: never; ready?: never } | 
+/**  Downloading. */
+({ downloading: {
+	/**  Bytes received so far. */
+	received: Count,
+	/**  Bytes in all, Node's archive included. */
+	total: Count,
+} }) & { failed?: never; missing?: never; ready?: never; waiting?: never } | 
+/**  Every file is here and checked; npm is installing from them. */
+"installing" | 
+/**  Installed. */
+({ ready: {
+	/**  The adapter's version. */
+	version: string,
+} }) & { downloading?: never; failed?: never; missing?: never; waiting?: never } | 
+/**  Stopped with a failure; [`crate::SetupCommand::RetryAgentInstall`] starts again. */
+({ failed: {
+	/**  Why: `agent.install_blocked`, `agent.install_disk_full` or `agent.install_failed`. */
+	code: ErrorCode,
+	/**  For `agent.install_disk_full`: the space needed, in MB (10^6 bytes). */
+	need_mb?: Count,
+	/**  For `agent.install_disk_full`: the space free, in MB. */
+	free_mb?: Count,
+	/**  The hosts the install contacts, for "Ask your IT team". */
+	hosts: string[],
+	/**  The log, for "Details". */
+	log: InstallLog,
+} }) & { downloading?: never; missing?: never; ready?: never; waiting?: never } | 
+/**  Paused because another agent's install started; `InstallAgent` resumes it. */
+"paused" | 
+/**  The firm's policy runs this agent, so Clauseo installs nothing for it. */
+"managed";
+
+/**
  *  The TypeScript shape of a [`RawPayload`]: any JSON value. specta has no `unknown` outside
  *  specta-typescript, which this crate may not depend on, so the union says the same thing.
  */
@@ -2207,6 +2305,13 @@ export type Lite =
 "on" | 
 /**  Never light. */
 "off";
+
+/**  Whose login [`SignIn::LoginFound`] found. */
+export type LoginFrom = 
+/**  The lawyer's Claude Code. */
+"claude_code" | 
+/**  The lawyer's Codex CLI. */
+"codex";
 
 /**  An undo, a restore, a located folder or a compaction. Entry id `marker:<event>`. */
 export type MarkerEntry = {
@@ -2742,6 +2847,15 @@ export type PlanPriority =
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
 
+/**  Whose service a firm plan uses (`plans.<id>.provider`). */
+export type PlanProvider = 
+/**  Anthropic's API, or a gateway that speaks it. */
+"anthropic" | 
+/**  Amazon Bedrock. */
+"bedrock" | 
+/**  Google Vertex AI. */
+"vertex";
+
 /**  The agent's plan, replaced whole (ACP v1 sends the full plan each time). */
 export type PlanReplaced = {
 	/**  The entries. */
@@ -2758,6 +2872,20 @@ export type PlanStatus =
 "completed" | 
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
+
+/**
+ *  An agent's firm plan as a window sees it (`plans.<id>`): the endpoint, the provider and the
+ *  names of the extra variables. It never holds a variable's value or a key; the settings crate
+ *  refuses a secret-shaped variable name.
+ */
+export type PlanView = {
+	/**  The firm's gateway, an `https` URL (`plans.<id>.endpoint`); missing when unset. */
+	endpoint?: string,
+	/**  Whose service the plan uses (`plans.<id>.provider`); missing when unset. */
+	provider?: PlanProvider,
+	/**  The names of the extra variables (`plans.<id>.env`), sorted; never their values. */
+	env_names?: string[],
+};
 
 /**  The OS the host runs on. */
 export type Platform = 
@@ -3161,6 +3289,16 @@ export type SearchScope =
 /**  One matter. JSON: `{"matter": "<id>"}`. */
 { matter: MatterId };
 
+/**
+ *  A pasted sign-in code or an API key, as a window sends it: 1 to [`MAX_SECRET_BYTES`] bytes.
+ * 
+ *  It decodes but never encodes: there is no `Serialize`, so nothing that holds one can be
+ *  written to a log, an event or a file through serde. `Debug` and `Display` print `<secret>`,
+ *  there is no `Clone`, and the text is zeroed when dropped. A decode error never quotes it.
+ *  TypeScript sees a plain `string`.
+ */
+export type Secret = string;
+
 /**  An event's position in its stream: gapless, starting at 1, assigned by the host at commit. */
 export type Seq = number;
 
@@ -3192,7 +3330,221 @@ export type SettingsView = {
 	 *  (`matters.default_location`, `agents.<id>`).
 	 */
 	locked: string[],
+	/**  Each agent's firm plan (`plans.<id>`), by agent id; left out when no agent has one. */
+	plans?: { [key in AgentId]: PlanView },
 };
+
+/**
+ *  What a window asks of an agent's install or sign-in. JSON: `{"start_sign_in": {"agent":
+ *  "claude-acp", "console": false}}`; unknown fields and unknown commands are refused. Decode
+ *  only: it may hold a [`Secret`], so it has no `Serialize`, and no `Clone`.
+ * 
+ *  Which window may send which command is desktop's allow-list (0048, "Allow-lists").
+ */
+export type SetupCommand = 
+/**
+ *  Install the agent, after a native confirm naming it and its size; another agent's
+ *  download pauses.
+ */
+({ install_agent: {
+	/**  The agent. */
+	agent: AgentId,
+} }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
+/**  Start a failed or paused install again. */
+({ retry_agent_install: {
+	/**  The agent. */
+	agent: AgentId,
+	/**  Whether to go through the OS's proxy this time; missing means `false`. */
+	use_system_proxy?: boolean,
+} }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
+/**
+ *  Sign in with the agent's plan login. A sign-in already running for the agent is joined,
+ *  not restarted.
+ */
+({ start_sign_in: {
+	/**  The agent. */
+	agent: AgentId,
+	/**
+	 *  Claude only: sign in with an Anthropic Console account instead of a Claude.ai plan;
+	 *  missing means `false`.
+	 */
+	console?: boolean,
+} }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
+/**  Stop the sign-in that is running. */
+({ cancel_sign_in: {
+	/**  The agent. */
+	agent: AgentId,
+} }) & { clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
+/**  Give the running sign-in the code the lawyer pasted (Claude's paste route). */
+({ paste_sign_in_code: {
+	/**  The agent. */
+	agent: AgentId,
+	/**  The pasted code: never stored, logged or shown. */
+	code: Secret,
+} }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
+/**  Switch Codex's sign-in to its device code. */
+({ use_device_code: {
+	/**  The agent. */
+	agent: AgentId,
+} }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_different_account?: never; use_found_login?: never } | 
+/**  Open the sign-in page again ("Didn't open?"); nothing happens when no page is known. */
+({ open_sign_in_page: {
+	/**  The agent. */
+	agent: AgentId,
+} }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
+/**  Sign Clauseo's own login out. Refused with `command.invalid` for a reused login. */
+({ sign_out: {
+	/**  The agent. */
+	agent: AgentId,
+} }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
+/**  "Use it": reuse the login [`SignIn::LoginFound`] showed. */
+({ use_found_login: {
+	/**  The agent. */
+	agent: AgentId,
+} }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never } | 
+/**  "Sign in with a different account": leave the found or reused login and sign in. */
+({ use_different_account: {
+	/**  The agent. */
+	agent: AgentId,
+} }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_found_login?: never } | 
+/**  "Stop using it here": stop reusing the lawyer's own login; it stays signed in. */
+({ stop_using_login: {
+	/**  The agent. */
+	agent: AgentId,
+} }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
+/**  Look again for a login the lawyer already has. */
+({ find_login: {
+	/**  The agent. */
+	agent: AgentId,
+} }) & { cancel_sign_in?: never; clear_agent_key?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
+/**  Store an API key for the agent in the OS keychain. */
+({ set_agent_key: {
+	/**  The agent. */
+	agent: AgentId,
+	/**  The key: kept only in the keychain. */
+	key: Secret,
+} }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
+/**  Remove the agent's API key from the keychain. */
+({ clear_agent_key: {
+	/**  The agent. */
+	agent: AgentId,
+} }) & { cancel_sign_in?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
+/**
+ *  Set or clear the agent's firm endpoint (`plans.<id>.endpoint`), after a native confirm.
+ *  The settings crate checks the URL.
+ */
+({ set_firm_endpoint: {
+	/**  The agent. */
+	agent: AgentId,
+	/**  The endpoint, an `https` URL; missing or `null` clears it. */
+	url?: string,
+} }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never };
+
+/**
+ *  What desktop's `setup` stream arm carries. A new subscription first gets `SetupInfo`, then
+ *  each agent's install and sign-in state, before any newer event.
+ */
+export type SetupEvent = 
+/**  What this computer offers. */
+({ setup_info: {
+	/**
+	 *  Whether the OS keychain can hold an API key: false where Linux has no Secret
+	 *  Service, and the key screens are hidden.
+	 */
+	keys_available: boolean,
+} }) & { agent_install_progress?: never; sign_in_changed?: never } | 
+/**  An agent's install state changed, or its download made progress. */
+({ agent_install_progress: {
+	/**  The agent. */
+	agent: AgentId,
+	/**  Its new state. */
+	state: InstallProgress,
+} }) & { setup_info?: never; sign_in_changed?: never } | 
+/**  An agent's sign-in state changed. */
+({ sign_in_changed: {
+	/**  The agent. */
+	agent: AgentId,
+	/**  Its new state. */
+	state: SignIn,
+} }) & { agent_install_progress?: never; setup_info?: never };
+
+/**  Where an agent's sign-in is: `agents`' `SigninState`, with how the agent is signed in. */
+export type SignIn = 
+/**  Not signed in. */
+({ signed_out: {
+	/**  A login seen but not reusable, or why reuse stopped; missing when neither. */
+	found?: FoundLogin,
+} }) & { device_code?: never; failed?: never; login_found?: never; signed_in?: never; waiting?: never } | 
+/**
+ *  Waiting for the install to finish or the network to return; the sign-in then starts by
+ *  itself.
+ */
+"queued" | 
+/**  The login run is going and the vendor's page should be open. */
+({ waiting: {
+	/**  When the run started. */
+	since: Timestamp,
+	/**  Whether to offer "Didn't open?" (true after 30 seconds). */
+	nudge: boolean,
+} }) & { device_code?: never; failed?: never; login_found?: never; signed_in?: never; signed_out?: never } | 
+/**  Codex's device code: the lawyer opens `url` and types `code` before `expires_at`. */
+({ device_code: {
+	/**  The device page, on one of the agent's sign-in hosts. */
+	url: string,
+	/**  The one-time code to type, such as `ABCD-1234`; shown, so not a [`Secret`]. */
+	code: string,
+	/**  When the code stops working. */
+	expires_at: Timestamp,
+} }) & { failed?: never; login_found?: never; signed_in?: never; signed_out?: never; waiting?: never } | 
+/**  A login the lawyer already has, not used until they choose "Use it". */
+({ login_found: {
+	/**  Whose login it is. */
+	from: LoginFrom,
+	/**  The account, from the agent's own status output, when it names one. */
+	email?: string,
+} }) & { device_code?: never; failed?: never; signed_in?: never; signed_out?: never; waiting?: never } | 
+/**  Signed in. */
+({ signed_in: {
+	/**  The account's email, when known. */
+	email?: string,
+	/**  The plan in words, such as "Claude Max", when known. */
+	plan?: PlanLabel,
+	/**  How: a plan login, an API key or the firm's endpoint. */
+	method: SignInMethod,
+	/**  Whose login: the lawyer's own, reused, or Clauseo's. */
+	source: SignInSource,
+	/**  When the sign-in was confirmed. */
+	at: Timestamp,
+} }) & { device_code?: never; failed?: never; login_found?: never; signed_out?: never; waiting?: never } | 
+/**
+ *  The sign-in stopped: a `signin.*` code, `agent.auth_required`, or
+ *  `signin.policy_unreadable`.
+ */
+({ failed: {
+	/**  Why. */
+	code: ErrorCode,
+	/**  When. */
+	at: Timestamp,
+} }) & { device_code?: never; login_found?: never; signed_in?: never; signed_out?: never; waiting?: never };
+
+/**  How a signed-in agent is signed in. */
+export type SignInMethod = 
+/**  The vendor's plan login (a Claude.ai plan, a Console account, a `ChatGPT` plan). */
+"plan" | 
+/**  An API key from the keychain. */
+"api_key" | 
+/**  The firm's endpoint or provider (`plans.<id>`). */
+"firm";
+
+/**  Where a signed-in login came from. */
+export type SignInSource = 
+/**
+ *  The lawyer's own CLI login on this computer, reused after "Use it". Clauseo never signs
+ *  it out.
+ */
+"reused" | 
+/**  Clauseo's own sign-in, a key or an endpoint. */
+"own";
 
 /**
  *  A file a checkpoint did not version. Office lock and temp files (`~$*`, `*.tmp`) are never
