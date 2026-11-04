@@ -19,6 +19,8 @@ Three facts shape the foundations:
 - Codex's reused login is one file under two names (a hard link). Telling whether two names are
   one file needs the file system's id. On Unix, `lstat` gives it and opens nothing. On Windows,
   `std` has no stable call that gives the volume serial number and file index without a handle.
+  There, `std::fs::symlink_metadata` itself opens a handle with desired access 0, and so does
+  `same_file`: such a handle can query attributes and ids but cannot read a byte of contents.
 
 The brief is `tasks/stage-d/S18-agents-signin-and-status.md` (private repository). This record
 covers the whole of S18: the shared pieces every run is built from, the calls and their job
@@ -61,6 +63,9 @@ No `protocol` change: R20 maps the states and codes to the wire.
 environment (`signin/env.rs`):
 - It starts from a base, `SigninConfig::base_env`, which is this process's
   `std::env::vars_os()` outside tests. A test passes its own map.
+- The builder's inputs (`EnvInputs`) and a run's spec (`RunSpec`) have hand-written `Debug`
+  that prints the variables' names only, never a value, and not the proxy setting, which may
+  hold a password.
 - It removes every `SSH_*` name, `NO_BROWSER`, `CLAUDE_CODE_REMOTE`, `CLAUDE_CONFIG_DIR`,
   `CLAUDE_SECURESTORAGE_CONFIG_DIR`, `CODEX_HOME` and `CLAUSEO_SIGNIN_URL_FILE`. Names match
   without regard to ASCII case. The home variables are always removed, so an inherited one never
@@ -134,8 +139,20 @@ its own stderr ring for `ExitReport::stderr_tail`, and S18 never reads it.
 **The credential-name scan** (`tests/credential_names.rs`, done-when 2) reads every `.rs` file
 under `crates/agents/src`, with comments blanked and string literals kept. It fails if any file
 names Claude's credential file, or names Codex's login file outside `signin/reuse.rs`. It also
-fails if `reuse.rs` calls `File::open`, any `fs::read*`, `OpenOptions` or the crate's own
-`open_read`. The test builds the file names with `concat!`, so it never names them itself.
+fails if `reuse.rs` calls `File::open`, any `fs::read*`, `OpenOptions`, the crate's own
+`open_read` or `read_small`, any `write::read`, any `read_…(` call, `options(` or `open(`, or
+names `File` at all (as a type or a path, so `use std::fs::File as F` is caught). Across
+`src` it fails on a string literal holding an escaped dot (`\x2e`, `\u{2e}`, any case or
+leading zeros) and on an `"auth"` literal with `json` or `with_extension` on the same or the
+next line (`concat!("auth", ".json")`, `join("auth").with_extension("json")`); Claude's
+`--json` flag beside its `auth` subcommand is left out of that rule. Each rule has a test that
+plants a probe in a copy of `src`. The test builds the file names with `concat!`, so it never
+names them itself.
+
+The scan is defence in depth, not proof: it reads text line by line, and code written to get
+around it (a name built at run time, a macro, a call through a renamed import of something not
+listed) can still pass. The review of `reuse.rs` and the `write` module's single door for
+file changes are what hold the property; the scan catches the plain mistakes.
 
 **The calls on `Agents`.** Each checks what it can at once, on the caller's thread, and
 returns `Result<(), SigninError>`; the work runs on threads, as installs do:
@@ -196,8 +213,9 @@ the network. The call never refuses for either. It takes the slot as above, and 
   first time either fails until the run starts and reports `Waiting`. With both holding at
   once, no `Queued` is sent: the lookup still runs before every login run.
 - `cancel_sign_in` on a queued sign-in ends the wait with `Failed { code: Cancelled }`. A new
-  sign-in replaces it silently, as it replaces a running one. `paste_code` is refused while
-  queued, since no run reads stdin yet.
+  sign-in replaces it silently, as it replaces a running one. A cancel or a new sign-in that
+  lands while the lookup runs is checked again once it returns, so no `Waiting` is sent and no
+  run starts. `paste_code` is refused while queued, since no run reads stdin yet.
 - The status check, detection, `find_login`, `use_found_login`, `stop_using_login` and
   `sign_out` are unaffected. They run the local CLI, so they need the install but not the
   network: refused with `NotReady` while there is no install, and never queued or looked up.
@@ -234,6 +252,8 @@ the network. The call never refuses for either. It takes the slot as above, and 
 **The paste route.** `paste_code` puts the code on the run's channel. The runner writes it, with
 a newline, to the login's stdin and drops it, zeroed. It appears in no event, state, `Debug` or
 error text. The prompt "Paste code here if prompted >" has no newline, so nothing waits on it.
+The route is Claude's alone: `paste_code` for Codex is refused with `WrongMethod` (method
+`ClaudeAi`), never taken and dropped.
 
 **Sign-out.** `--cli auth logout` with the Own environment, 30 s limit, then a status run: the
 result is `SignedOut`, or `SignedIn` if the account is still there. If status cannot tell, a
@@ -351,6 +371,7 @@ to the other.
 
 `use_found_login` and `use_different_account` are cancellable and take pasted codes like
 `sign_in`, since they may run a login; `use_different_account` queues as `sign_in` does.
+Cancelling "Use it" during its detection ends it with `signin.cancelled`.
 `AgentsEvent::SigninNote` carries `claude_reuse_fallback` and `codex_link_failed`.
 
 **The markers** (`signin/marker.rs`) are Clauseo's own files in `<data_dir>/agents/<id>/`,
@@ -381,27 +402,56 @@ A run that cannot tell leaves the state unchanged. The job creates the agent's h
 any run. Without it, a status check before the first sign-in could not start, since every run
 but detection has the home as its working folder.
 
+**Folders.** Every folder sign-in makes goes through one helper,
+`write::create_private_dirs_under(data_dir, folder)`, which follows host's `make_home`
+(0025): each part below the data folder that exists must be a real folder, never a symbolic
+link, junction or other reparse point (`symlink_metadata`, which follows none); each missing
+one is made, 0700 on Unix; another thread making one first is fine; a link or a file in the way,
+or a folder outside the data folder, is refused, and nothing is made where a link points. The
+data folder itself may be a link. It makes the agent's home (the job, Claude's and Codex's
+login, Codex's link), `agents/<id>` for the markers, `agents/signin` for the shim and URL
+files, and detection's `agents/signin/detect`. `agents` itself does not depend on host.
+
 **Detection** (`signin/detect.rs`) runs with `RunKind::Detect`: no `CLAUDE_CONFIG_DIR`,
 `CLAUDE_SECURESTORAGE_CONFIG_DIR` or `CODEX_HOME`, the lawyer's `HOME`, no
 `cli_auth_credentials_store`. Its working folder is the empty `<data_dir>/agents/signin/detect`.
 - Claude: `--cli auth status --json`, read by `status::claude_detection`.
 - Codex: `login status`, exit code only. Exit 0 is followed by a `symlink_metadata` of the
   lawyer's `~/.codex` login file: present is `LoginFound` (with `account/read`, same
-  environment, same folder), absent is `CodexKeyring`.
+  environment, same folder), absent is `CodexKeyring`. An `account/read` that gets no answer
+  (cut short by Cancel or its 10 s limit, or an error reply) is "could not tell", never "no
+  email": the status check leaves the state unchanged, and "Use it" ends. `LoginFound { email:
+  None }` comes only from an answer that names no `ChatGPT` account (an API key, say).
 
 The lawyer's home folder is `SigninConfig::lawyer_home()` (new, public): the base environment's
 `HOME`, or `USERPROFILE` on Windows.
 
-**"Use it"** runs detection again first. If the email differs from the one `LoginFound` showed,
-the new `LoginFound` is reported and nothing is reused.
-- Claude: status under the session's environment must say signed in. Then `login-source` is
-  written, and the state is `SignedIn { Reused }`.
+**"Use it"** runs detection again first. It goes on only when detection names an email and that
+email is the one `LoginFound` showed. Otherwise nothing is linked or recorded, and the new
+detection is the state: `LoginFound` with the new email (or none), or what was seen. So a login
+with no email (an API-key Codex login) is shown but never reused. Detection that cannot tell
+ends the job: `signin.cancelled` when it was cancelled or replaced, else `signin.failed`.
+- Claude: status under the session's environment must say signed in. Then, if the job is still
+  the agent's and not cancelled, `login-source` is written, and the state is
+  `SignedIn { Reused }`.
 - Codex: `link_reused_login` makes the hard link, then `login-source` is written, then
   `SignedIn { Reused }`, with the plan from detection's `account/read`. The link is refused
   when the lawyer's name is not a plain file, and checked with `same_file` afterwards. If it
   fails (another volume, a name already taken, any error), the `codex_link_failed` note goes
   out, then Clauseo's own browser sign-in runs. If `login-source` cannot be written, the link
   is removed again.
+- **Races (S18 security review).** The link step runs under a per-`Agents` lock on Codex's
+  login files, `SigninHub::codex_files`. Right before the link, and again right before
+  `login-source` is written, the job must still be the agent's and not cancelled. Stopped
+  before the link: nothing was done, and the job ends as cancelled (or silently, if replaced).
+  Stopped after it: Clauseo's own name is removed again (`remove_file` of the home's name,
+  never the lawyer's), and no `reused` is written. Every Codex `login` and `logout` holds
+  the same lock from its guard to the run's end, so a "Use it" never links while a replaced
+  login still runs, and a login's guard never looks while a replaced "Use it" could still link.
+- `use_different_account` for Codex orders this explicitly: taking the slot sets the cancel of
+  a running "Use it" and replaces it; the job then waits for the lock, removes any reused name
+  and record such a "Use it" left (it recorded just before it was replaced), and only then
+  starts the login, whose guard runs as for any login.
 
 **Reuse stops** (`found::stop`) with no logout:
 - no reason: `no-reuse` is written;
@@ -419,8 +469,12 @@ Code that ignores the variable would loop through "Use it" otherwise. "Look for 
 login" offers it again.
 
 **The guard and the split rule** (`signin/reuse.rs`, public):
-- `codex_login_shared(codex_home, lawyer_home)` is true while the two login files share a file
-  id. S18 refuses its own Codex `login` and `logout` then, whatever `login-source` says. R20
+- `codex_login_shared(codex_home, lawyer_home)` is true, refuse, unless the home has no login
+  file, the lawyer has none, or both are plain files (never a symbolic link or other reparse
+  point) with different file ids. A shared file id, a link or non-file in either place, and any
+  stat error other than "not found" all refuse: a symbolic link to the lawyer's file would let
+  Codex read their tokens to revoke them. S18 refuses its own Codex `login` and `logout` then,
+  whatever `login-source` says. R20
   asks it before codex-acp's `authenticate`.
 - `codex_link_holds(codex_home, lawyer_home) -> CodexLink { Holds, Split, Gone }`, with
   `CodexLink::found()`, is the check R20 and R17 run at every Codex session start.
@@ -507,9 +561,7 @@ The crate cannot enforce these through its API; R20's desktop wiring must:
   - With a proxy set, the queued start looks up the proxy's host, not the sign-in host. A firm
     whose DNS resolves only the proxy is then never taken for offline.
   - The lookup blocks the job's thread for as long as the OS takes to fail it; a cancel during
-    one lands when it returns.
-  - The agent's home is created with `create_dir_all`, which follows a link already standing
-    there. The folder is under the trusted data folder, as the adapters are (0033).
+    one lands when it returns, and the job then ends with no `Waiting` and no run.
   - A crash after Codex's own sign-in but before `login-source` `own` is written leaves a home
     login file with no marker. That reads as reused: no logout runs, and the next status check
     takes it for a split link and removes the name, so the lawyer signs in again. That is the
