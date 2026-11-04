@@ -273,3 +273,74 @@ pub(crate) fn leaks(seen: &Seen, secrets: &[&str]) -> Vec<String> {
     }
     hits
 }
+
+/// Where in `seen` `secret` occurs regardless of case: in the raw gzip bytes, the unzipped
+/// bytes, or a decoded JSON string, each lower-cased. One line per hit; empty when none.
+pub(crate) fn leaks_ignoring_case(seen: &Seen, secret: &str) -> Vec<String> {
+    let needle = secret.to_lowercase();
+    let json = gunzip(&seen.body);
+    let mut decoded = Vec::new();
+    if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&json) {
+        strings(&value, &mut decoded);
+    }
+    let places = [
+        (
+            "raw gzip bytes",
+            contains(&seen.body.to_ascii_lowercase(), needle.as_bytes()),
+        ),
+        (
+            "gunzipped bytes",
+            String::from_utf8_lossy(&json)
+                .to_lowercase()
+                .contains(&needle),
+        ),
+        (
+            "a decoded JSON string",
+            decoded
+                .iter()
+                .any(|text| text.to_lowercase().contains(&needle)),
+        ),
+    ];
+    places
+        .into_iter()
+        .filter(|(_, hit)| *hit)
+        .map(|(place, _)| format!("{:?} body: {secret:?} in any case, in {place}", seen.path))
+        .collect()
+}
+
+/// The home the app reads in production, `SystemDirs.home()` (`os_home`), reaches no body
+/// either: neither its path, with backslashes or forward slashes (each also JSON-escaped, `\\`
+/// for `\`, by `leaks`), nor its last part, the real account name. On Windows that is the
+/// OS's profile folder (`FOLDERID_Profile`, `C:\Users\runneradmin` on CI), which planting the
+/// environment cannot move, so the session's home is the planted `USERPROFILE` and this checks
+/// the real one. Elsewhere `SystemDirs.home()` follows the planted `HOME`, so it equals
+/// `planted_home` and there is nothing more to check.
+pub(crate) fn os_home_never_leaks(seen: &[Seen], os_home: &Path, planted_home: &Path) {
+    if os_home == planted_home {
+        // Not on Windows CI: the profile folder is never the scratch folder.
+        return;
+    }
+    let path = os_home.display().to_string();
+    let forward = path.replace('\\', "/");
+    let mut hits: Vec<String> = seen
+        .iter()
+        .flat_map(|seen| leaks(seen, &[path.as_str(), forward.as_str()]))
+        .collect();
+    // The account name, in any case, only from 4 characters: a shorter one (a dev box's "a" or
+    // "dev") could match unrelated text in a body by chance.
+    if let Some(name) = os_home
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        && name.chars().count() >= 4
+    {
+        hits.extend(
+            seen.iter()
+                .flat_map(|seen| leaks_ignoring_case(seen, &name)),
+        );
+    }
+    assert!(
+        hits.is_empty(),
+        "the OS's home folder or account name reached a body:\n{}",
+        hits.join("\n")
+    );
+}
