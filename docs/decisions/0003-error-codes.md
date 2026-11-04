@@ -94,6 +94,7 @@ as `yes` or `no`. The meaning is also each variant's doc comment in `error_code.
 | `signin.port_busy` | Another program holds the port the agent's sign-in listens on (Codex's 1455). | yes | agents (S18 `SigninCode`), desktop (0048); new area for R20 |
 | `signin.failed` | The sign-in ended before signing in, for any other reason. | yes | agents (S18 `SigninCode`), desktop (0048); new area for R20 |
 | `signin.policy_unreadable` | The firm's policy cannot be read and once set this agent's firm plan, so sign-in and launch are refused rather than sent to a plan login. | no | desktop (0048); new area for R20 |
+| `agent.guard_missing` | A Claude launch that must ask before every change could not set up the guard that makes it ask, so it was not started. | no | host (a forced-ask Claude launch with no guard hook, `actor/turn/profile_loads.rs`) |
 | `unknown` | A code from a newer Clauseo that this version does not know. Never produced here. | no | decoding only |
 
 Judgement calls on retryable: `agent.launch_failed` and `agent.exited` are retryable because a new

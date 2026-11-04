@@ -1492,7 +1492,8 @@ expression: counts_schema()
         "signin.device_code_off",
         "signin.port_busy",
         "signin.failed",
-        "signin.policy_unreadable"
+        "signin.policy_unreadable",
+        "agent.guard_missing"
       ],
       "type": "string"
     },

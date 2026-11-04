@@ -116,8 +116,12 @@ test("every error code has a sentence with Hindi or Hindi later, and none says a
   // our own words around the slot are checked (a settings id itself is the lawyer's label, shown as written), and the
   // nameless one
   for (const c of PLANNED_CODES)
-    for (const agent of [CODEX, named("Gemini"), named(null)])
-      sound(errorWords("en", c, agent), errorWords("hi", c, agent));
+    for (const agent of [CODEX, named("Gemini"), named(null)]) {
+      const en = errorWords("en", c, agent);
+      // hi: later (Rohan, 2026-11-03): a sentence whose Hindi is null ships in English, as above
+      if (hindi[plannedKey(c, agent).key] === null) expect(en, en).not.toMatch(BANNED_EN);
+      else sound(en, errorWords("hi", c, agent));
+    }
 });
 
 test("a stopped Claude and an interrupted thread read as the thread's own stop, with its one Hindi", () => {
@@ -170,6 +174,16 @@ const PLANNED_LINES = [
     "gemini का यह संस्करण Clauseo के साथ काम नहीं करता।",
     "This version of the AI doesn't work with Clauseo.",
     "AI का यह संस्करण Clauseo के साथ काम नहीं करता।",
+  ],
+  // hi: later, so its Hindi columns hold the English that errorWords falls back to
+  [
+    "agent.guard_missing",
+    "Clauseo can't start ChatGPT safely here. Reinstall Clauseo.",
+    "Clauseo can't start ChatGPT safely here. Reinstall Clauseo.",
+    "Clauseo can't start gemini safely here. Reinstall Clauseo.",
+    "Clauseo can't start gemini safely here. Reinstall Clauseo.",
+    "Clauseo can't start the AI safely here. Reinstall Clauseo.",
+    "Clauseo can't start the AI safely here. Reinstall Clauseo.",
   ],
 ] as const;
 

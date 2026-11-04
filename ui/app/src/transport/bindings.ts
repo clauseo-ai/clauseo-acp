@@ -1214,6 +1214,8 @@ export type ErrorCode =
 "signin.failed" | 
 /** The firm's policy cannot be read and once set this agent's firm plan, so sign-in and launch are refused rather than sent to a plan login. */
 "signin.policy_unreadable" | 
+/** A Claude launch that must ask before every change could not set up the guard that makes it ask, so it was not started. */
+"agent.guard_missing" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 

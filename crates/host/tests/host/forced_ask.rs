@@ -198,7 +198,7 @@ fn claude_elsewhere_runs_as_before() {
 }
 
 /// Forced ask with no guard hook to give (no guard program, as when `current_exe` failed): the
-/// launch is refused with `agent.launch_failed` rather than left to the ask rules alone, and no
+/// launch is refused with `agent.guard_missing` rather than left to the ask rules alone, and no
 /// session call reaches the agent. The review's `rev_forced_ask_without_a_guard_still_fences`.
 #[test]
 fn a_forced_ask_launch_without_a_guard_is_refused() {
@@ -216,7 +216,7 @@ fn a_forced_ask_launch_without_a_guard_is_refused() {
     let failed = turn_failed(&events, turn).unwrap();
     assert_eq!(
         failed.code,
-        ErrorCode::AgentLaunchFailed,
+        ErrorCode::AgentGuardMissing,
         "{}",
         events.dump()
     );

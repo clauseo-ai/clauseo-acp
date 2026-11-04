@@ -644,6 +644,14 @@
     "by": "Rohan",
     "note": "Rohan, on the review page (built from R15-codex c921f277), 2026-11-02 15:35"
   },
+  "U3-err-agent.guard_missing": {
+    "en": "Clauseo can't start Claude safely here. Reinstall Clauseo.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-05",
+    "by": "stage C (provisional; Rohan batch review)"
+  },
   "U3-err-matter.file_locked": {
     "en": "A paper is open in another program. Close it, then try again.",
     "hi": "कोई दस्तावेज़ किसी दूसरे प्रोग्राम में खुला है। उसे बंद करें, फिर दोबारा प्रयास करें।",
@@ -2052,6 +2060,30 @@
     "at": "2026-11-02",
     "by": "Rohan",
     "note": "Rohan, via the orchestrator (U6-followup page)"
+  },
+  "U6F-13": {
+    "en": "Clauseo can't start ChatGPT safely here. Reinstall Clauseo.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-05",
+    "by": "stage C (provisional; Rohan batch review)"
+  },
+  "U6F-14": {
+    "en": "Clauseo can't start {name} safely here. Reinstall Clauseo.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-05",
+    "by": "stage C (provisional; Rohan batch review)"
+  },
+  "U6F-15": {
+    "en": "Clauseo can't start the AI safely here. Reinstall Clauseo.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-05",
+    "by": "stage C (provisional; Rohan batch review)"
   },
   "AR-01": {
     "en": "Archived. Read only.",

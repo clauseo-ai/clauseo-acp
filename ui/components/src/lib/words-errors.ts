@@ -61,6 +61,7 @@ export type ErrorCode =
   | "signin.port_busy"
   | "signin.failed"
   | "signin.policy_unreadable"
+  | "agent.guard_missing"
   | "unknown";
 
 const HI = {
@@ -86,6 +87,7 @@ const HI = {
     "पहले Claude में साइन इन करें। आपका प्रश्न रखा गया है।",
   "This version of Claude Code doesn't work with Clauseo.":
     "Claude Code का यह संस्करण Clauseo के साथ काम नहीं करता।",
+  "Clauseo can't start Claude safely here. Reinstall Clauseo.": null,
   // the agent.* sentences above for a thread on the ChatGPT plan (Codex), for an agent of no kind by its name, and
   // with no name at all (PLANNED). The lawyer signs in to Codex outside Clauseo until stage D's sign-in, so
   // auth_required says where, with no button.
@@ -105,6 +107,9 @@ const HI = {
   "This version of {name} doesn't work with Clauseo.":
     "{name} का यह संस्करण Clauseo के साथ काम नहीं करता।",
   "This version of the AI doesn't work with Clauseo.": "AI का यह संस्करण Clauseo के साथ काम नहीं करता।",
+  "Clauseo can't start ChatGPT safely here. Reinstall Clauseo.": null,
+  "Clauseo can't start {name} safely here. Reinstall Clauseo.": null,
+  "Clauseo can't start the AI safely here. Reinstall Clauseo.": null,
   "The computer's disk is full. Free some space, then try again.":
     "कंप्यूटर की डिस्क भर गई है। कुछ जगह खाली करें, फिर दोबारा प्रयास करें।",
   "Clauseo couldn't read back its saved data.": "Clauseo अपना सहेजा गया डेटा वापस नहीं पढ़ सका।",
@@ -215,6 +220,7 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   "signin.failed": "Sign-in didn't finish. Try again.",
   "signin.policy_unreadable":
     "Clauseo can't read your firm's sign-in settings, so it won't sign in until they can be read.",
+  "agent.guard_missing": "Clauseo can't start Claude safely here. Reinstall Clauseo.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };
@@ -253,6 +259,11 @@ const PLANNED: Partial<
     chatgpt: "This version of Codex doesn't work with Clauseo.",
     named: "This version of {name} doesn't work with Clauseo.",
     nameless: "This version of the AI doesn't work with Clauseo.",
+  },
+  "agent.guard_missing": {
+    chatgpt: "Clauseo can't start ChatGPT safely here. Reinstall Clauseo.",
+    named: "Clauseo can't start {name} safely here. Reinstall Clauseo.",
+    nameless: "Clauseo can't start the AI safely here. Reinstall Clauseo.",
   },
 };
 

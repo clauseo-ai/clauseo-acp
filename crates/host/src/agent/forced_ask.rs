@@ -13,7 +13,7 @@
 //!   `permissions.ask` rules in its flag settings, the fence that holds when the hook fails;
 //! - the guard hook runs before every tool with [`ASK_ALL_FLAG`] and answers `ask` for all but a
 //!   fixed set of local reads (`pre_write_guard/ask.rs`), the fence a mode switch cannot race.
-//!   A forced-ask Claude launch with no guard hook to give is refused (`agent.launch_failed`).
+//!   A forced-ask Claude launch with no guard hook to give is refused (`agent.guard_missing`).
 //!
 //! A `PermissionRequest` hook already in the lawyer's own settings or plugins can still approve
 //! here (decision record 0030 has why that is accepted).
