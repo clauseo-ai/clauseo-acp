@@ -4,7 +4,7 @@ use std::ffi::OsString;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
-use crate::{EXIT_LOAD, EXIT_OK, EXIT_WRITE, Error, Scenario, bundled, diagnostic};
+use crate::{EXIT_LOAD, EXIT_OK, EXIT_WRITE, Error, Scenario, bundled, diagnostic, signin};
 
 const USAGE: &str = "usage: fake_agent --scenario <name or path> [--pace-ms <n>] \
     | --check <path>... | --list | --hold";
@@ -16,6 +16,13 @@ const MAX_PACE_MS: u32 = 60_000;
 /// [`EXIT_OK`], [`EXIT_WRITE`], [`EXIT_LOAD`] and [`crate::EXIT_MISMATCH`], or an `exit` step's
 /// code. Never returns for `--hold`, or when stdin closes under `on_stdin_close: "hang"`.
 pub fn cli(args: Vec<OsString>) -> i32 {
+    // A script named `claude-cli` or `codex.js` as argv[1] starts a sign-in mode; any other
+    // argv[1] is the usual command line, which is unchanged.
+    if let Some((script, rest)) = args.split_first()
+        && let Some(mode) = signin::mode(script)
+    {
+        return signin::run(mode, rest);
+    }
     let args: Option<Vec<String>> = args.into_iter().map(|a| a.into_string().ok()).collect();
     let Some(args) = args else {
         return fail(&diagnostic(USAGE));

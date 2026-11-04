@@ -1,7 +1,7 @@
 //! Plays a scenario over stdin and stdout, one step at a time, waiting only for client lines.
 
 mod client;
-mod effects;
+pub(crate) mod effects;
 
 use std::collections::HashMap;
 use std::io::{BufRead, Write};

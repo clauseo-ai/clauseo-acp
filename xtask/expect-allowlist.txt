@@ -112,6 +112,9 @@ crates/fake_agent/src/run/effects.rs pause clippy::disallowed_methods
 crates/fake_agent/tests/stdio/harness.rs Agent::start_args clippy::disallowed_methods
 crates/fake_agent/tests/stdio/harness.rs kill_pid clippy::disallowed_methods
 
+# Added by S18: the sign-in fake's Claude login, which runs the BROWSER command it is given.
+crates/fake_agent/src/signin.rs open_browser clippy::disallowed_methods
+
 # Added by R7: store's write module (the lock file and the private database file), the one
 # BlobRef::new that cannot fail, the test-support fixture's fixed values, the tests' write
 # module, the benches' scratch folder, and the two benches' unwraps.

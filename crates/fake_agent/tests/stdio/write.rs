@@ -36,6 +36,14 @@ pub(crate) fn remove_file(path: impl AsRef<Path>) -> io::Result<()> {
     std::fs::remove_file(path)
 }
 
+/// `fs::set_permissions`.
+pub(crate) fn set_permissions(
+    path: impl AsRef<Path>,
+    perm: std::fs::Permissions,
+) -> io::Result<()> {
+    std::fs::set_permissions(path, perm)
+}
+
 /// `fs::remove_dir_all`.
 pub(crate) fn remove_dir_all(path: impl AsRef<Path>) -> io::Result<()> {
     std::fs::remove_dir_all(path)

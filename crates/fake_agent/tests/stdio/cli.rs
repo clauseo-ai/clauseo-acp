@@ -27,7 +27,11 @@ fn every_bundled_scenario_validates() {
         assert_eq!(Scenario::parse(name, &text).unwrap().name(), *name);
     }
     let dir = Scratch::new("every_bundled_scenario_validates");
-    let agent = Agent::start_args(&["--check", scenarios_dir().to_str().unwrap()], dir.path());
+    let agent = Agent::start_args(
+        &["--check", scenarios_dir().to_str().unwrap()],
+        dir.path(),
+        &[],
+    );
     let finished = agent.finish();
     assert_eq!(finished.status.code(), Some(EXIT_OK), "{}", finished.stderr);
     assert_eq!(finished.stdout, format!("ok {}\n", SCENARIOS.len()));
@@ -92,7 +96,7 @@ fn every_agent_info_names_the_crate_version() {
 #[test]
 fn list_prints_the_bundled_names() {
     let dir = Scratch::new("list_prints_the_bundled_names");
-    let finished = Agent::start_args(&["--list"], dir.path()).finish();
+    let finished = Agent::start_args(&["--list"], dir.path(), &[]).finish();
     assert_eq!(finished.status.code(), Some(EXIT_OK), "{}", finished.stderr);
     let lines: Vec<&str> = finished.stdout.lines().collect();
     assert_eq!(lines, SCENARIOS);
@@ -117,7 +121,7 @@ fn edit_file_kind_fails_validation_naming_session_update() {
     )
     .unwrap();
     write::write(dir.path().join("files-multi-turn.jsonl"), planted).unwrap();
-    let finished = Agent::start_args(&["--check", "."], dir.path()).finish();
+    let finished = Agent::start_args(&["--check", "."], dir.path(), &[]).finish();
     assert_eq!(finished.status.code(), Some(EXIT_LOAD));
     assert_eq!(finished.stdout, "");
     assert_eq!(
@@ -132,7 +136,7 @@ fn edit_file_kind_fails_validation_naming_session_update() {
 #[test]
 fn check_of_an_empty_folder_fails() {
     let dir = Scratch::new("check_of_an_empty_folder_fails");
-    let finished = Agent::start_args(&["--check", "."], dir.path()).finish();
+    let finished = Agent::start_args(&["--check", "."], dir.path(), &[]).finish();
     assert_eq!(finished.status.code(), Some(EXIT_LOAD));
     assert_eq!(
         finished.stderr,
@@ -150,11 +154,11 @@ fn bad_arguments_exit_2_with_usage() {
         &["--list", "x"],
         &["--frob"],
     ] {
-        let finished = Agent::start_args(args, dir.path()).finish();
+        let finished = Agent::start_args(args, dir.path(), &[]).finish();
         assert_eq!(finished.status.code(), Some(EXIT_LOAD), "{args:?}");
         assert_eq!(finished.stderr, USAGE, "{args:?}");
     }
-    let finished = Agent::start_args(&["--scenario", "no-such"], dir.path()).finish();
+    let finished = Agent::start_args(&["--scenario", "no-such"], dir.path(), &[]).finish();
     assert_eq!(finished.status.code(), Some(EXIT_LOAD));
     assert_eq!(
         finished.stderr,
@@ -175,12 +179,13 @@ fn scenario_takes_a_path_only_with_a_separator_or_jsonl() {
     let dir = Scratch::new("scenario_takes_a_path");
     write::copy(scenario_path("idle"), dir.path().join("idle.jsonl")).unwrap();
     // A `.jsonl` name in the working folder runs as a file.
-    Agent::start_args(&["--scenario", "idle.jsonl"], dir.path()).expect_exit(EXIT_OK);
+    Agent::start_args(&["--scenario", "idle.jsonl"], dir.path(), &[]).expect_exit(EXIT_OK);
     // A path with a separator runs as a file, whatever its extension.
     let by_path = scenario_path("idle");
-    Agent::start_args(&["--scenario", by_path.to_str().unwrap()], dir.path()).expect_exit(EXIT_OK);
+    Agent::start_args(&["--scenario", by_path.to_str().unwrap()], dir.path(), &[])
+        .expect_exit(EXIT_OK);
     for target in ["sub/missing", "missing.jsonl"] {
-        let finished = Agent::start_args(&["--scenario", target], dir.path()).finish();
+        let finished = Agent::start_args(&["--scenario", target], dir.path(), &[]).finish();
         assert_eq!(finished.status.code(), Some(EXIT_LOAD), "{target}");
         assert!(
             finished
@@ -198,7 +203,7 @@ fn check_of_a_folder_takes_only_the_jsonl_files() {
     let dir = Scratch::new("check_takes_only_jsonl");
     write::copy(scenario_path("idle"), dir.path().join("idle.jsonl")).unwrap();
     write::write(dir.path().join("notes.txt"), "not a scenario\n").unwrap();
-    let finished = Agent::start_args(&["--check", "."], dir.path()).finish();
+    let finished = Agent::start_args(&["--check", "."], dir.path(), &[]).finish();
     assert_eq!(finished.status.code(), Some(EXIT_OK), "{}", finished.stderr);
     assert_eq!(finished.stdout, "ok 1\n");
 }
@@ -215,7 +220,7 @@ fn answer_chunk(text: &str) -> serde_json::Value {
 /// checks.
 fn prompt_stream_plays(args: &[&str], test: &str) {
     let dir = Scratch::new(test);
-    let mut agent = Agent::start_args(args, dir.path());
+    let mut agent = Agent::start_args(args, dir.path(), &[]);
     agent.handshake(&dir.cwd());
     agent.send(&prompt(2, "Summarise the indemnity clause"));
     for text in ["Reading the ", "indemnity clause ", "first."] {
@@ -309,7 +314,7 @@ fn pace_ms_bad_forms_exit_2_with_a_diagnostic() {
         ),
     ];
     for (args, diagnostic) in cases {
-        let finished = Agent::start_args(args, dir.path()).finish();
+        let finished = Agent::start_args(args, dir.path(), &[]).finish();
         assert_eq!(finished.status.code(), Some(EXIT_LOAD), "{args:?}");
         assert_eq!(finished.stdout, "", "{args:?}");
         assert_eq!(finished.stderr, diagnostic, "{args:?}");

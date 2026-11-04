@@ -16,12 +16,13 @@ pub(super) fn write_stderr(text: &str) -> std::io::Result<()> {
 }
 
 /// Sleeps for `duration`: the `--pace-ms` pause between updates, for the speed scoreboard's
-/// session only. Scenarios themselves stay timer-free.
+/// session only, and the `FAKE_SIGNIN=ok-after:<ms>` wait of a sign-in mode (`signin.rs`).
+/// Scenarios themselves stay timer-free.
 #[expect(
     clippy::disallowed_methods,
-    reason = "--pace-ms paces the speed scoreboard's session; scenarios stay timer-free"
+    reason = "a fake pauses for --pace-ms or ok-after; scenarios stay timer-free"
 )]
-pub(super) fn pause(duration: Duration) {
+pub(crate) fn pause(duration: Duration) {
     std::thread::sleep(duration);
 }
 
