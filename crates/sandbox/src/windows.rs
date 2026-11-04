@@ -23,9 +23,10 @@ use windows::Win32::Security::{
 use windows::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, CreateFileW, FILE_ALL_ACCESS, FILE_ATTRIBUTE_DIRECTORY,
     FILE_FLAG_BACKUP_SEMANTICS, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, FILE_GENERIC_WRITE,
-    FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, GetDriveTypeW,
-    GetFileInformationByHandle, GetFinalPathNameByHandleW, GetVolumeInformationByHandleW,
-    GetVolumePathNameW, OPEN_EXISTING, VOLUME_NAME_DOS, WRITE_DAC,
+    FILE_NAME_OPENED, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+    GETFINALPATHNAMEBYHANDLE_FLAGS, GetDriveTypeW, GetFileInformationByHandle,
+    GetFinalPathNameByHandleW, GetVolumeInformationByHandleW, OPEN_EXISTING, VOLUME_NAME_DOS,
+    WRITE_DAC,
 };
 use windows::Win32::System::SystemServices::FILE_PERSISTENT_ACLS;
 use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
@@ -47,24 +48,30 @@ pub enum FolderSupport {
     NoPermissions,
 }
 
-/// Asks whether the folder at `path` can take the agent's permission entries, in four steps (the
+/// Asks whether the folder at `path` can take the agent's permission entries, in five steps (the
 /// first that answers wins):
 ///
-/// 1. Open the folder. A missing path is `NotFound`; a file is `InvalidInput`.
-/// 2. `Network` when the folder's final path is a UNC path, or its volume's drive type is
-///    `DRIVE_REMOTE`. Network folders go no further: the server decides there.
-/// 3. `NoPermissions` when the volume lacks `FILE_PERSISTENT_ACLS`.
-/// 4. `CantChangePermissions` when the folder's DACL, checked with `AccessCheck` for this
+/// 1. `Network` when the path is a UNC path (`\\?\UNC\...`), or its drive letter is
+///    `DRIVE_REMOTE`. Asked before the folder is opened, so an unreachable server can't fail it.
+/// 2. Open the folder. A missing path is `NotFound`; a file is `InvalidInput`.
+/// 3. `Network` when the folder's final path, from `FILE_NAME_OPENED | VOLUME_NAME_DOS`, is a UNC
+///    path: a link to a share. If that call fails, this step is skipped, not an error.
+/// 4. `NoPermissions` when the volume lacks `FILE_PERSISTENT_ACLS`.
+/// 5. `CantChangePermissions` when the folder's DACL, checked with `AccessCheck` for this
 ///    process's token, doesn't grant `WRITE_DAC`, or its permissions can't be read. Otherwise
 ///    `Ok`.
 ///
-/// Every handle is closed on every path. A path over `MAX_PATH` goes to the Win32 calls in the
-/// `\\?\` form; no test makes one yet. The answer is for this process's token, which the agent
-/// inherits. `AccessCheck` evaluates the DACL, the owner rights and the integrity label as
+/// Network folders go no further than their step: the server decides there. Every handle is
+/// closed on every path. A path over `MAX_PATH` goes to the Win32 calls in the `\\?\` form; no
+/// test makes one yet. The answer is for this process's token, which the agent inherits.
+/// `AccessCheck` evaluates the DACL, the owner rights and the integrity label as
 /// `SetNamedSecurityInfoW` will meet them. Backup and restore privileges don't affect it, so a
 /// token that holds them gets the same answer as one that doesn't.
 pub fn folder_support(path: &Path) -> io::Result<FolderSupport> {
     let wide = verbatim_wide(path)?;
+    if is_share_path(&wide) || on_remote_drive(&wide) {
+        return Ok(FolderSupport::Network);
+    }
     let folder = open(&wide, FILE_READ_ATTRIBUTES.0).map_err(|error| os_error(&error))?;
     if !is_directory(&folder)? {
         return Err(io::Error::new(
@@ -72,8 +79,7 @@ pub fn folder_support(path: &Path) -> io::Result<FolderSupport> {
             format!("{} is not a folder", path.display()),
         ));
     }
-    let final_path = final_path(&folder)?;
-    if final_path.starts_with(&wide_text(r"\\?\UNC\")) || drive_type(&wide)? == DRIVE_REMOTE {
+    if final_path(&folder).is_some_and(|final_path| is_share_path(&final_path)) {
         return Ok(FolderSupport::Network);
     }
     if volume_flags(&folder)? & FILE_PERSISTENT_ACLS == 0 {
@@ -133,46 +139,47 @@ fn is_directory(folder: &Handle) -> io::Result<bool> {
     Ok(info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY.0 != 0)
 }
 
-/// The folder's final path in the `\\?\` form (`\\?\UNC\server\share\...` for a network path).
-fn final_path(folder: &Handle) -> io::Result<Vec<u16>> {
+/// The folder's final path in the `\\?\` form (`\\?\UNC\server\share\...` for a network path),
+/// from `FILE_NAME_OPENED`: the name the handle was opened by, which needs none of the per-folder
+/// lookups that a share can refuse. `None` when the call fails, which is not an answer.
+fn final_path(folder: &Handle) -> Option<Vec<u16>> {
+    let flags = GETFINALPATHNAMEBYHANDLE_FLAGS(FILE_NAME_OPENED.0 | VOLUME_NAME_DOS.0);
     let mut buffer = vec![0u16; 512];
     loop {
         // SAFETY: the handle is open and `buffer` is a writable slice of the length given.
-        let length = unsafe { GetFinalPathNameByHandleW(folder.0, &mut buffer, VOLUME_NAME_DOS) };
-        let length = usize::try_from(length).map_err(io::Error::other)?;
-        match length {
-            0 => return Err(os_error(&windows::core::Error::from_thread())),
+        let length = unsafe { GetFinalPathNameByHandleW(folder.0, &mut buffer, flags) };
+        match usize::try_from(length).ok()? {
+            0 => return None,
             // A length within the buffer is the path without its NUL; a longer one is the size
             // the path needs, NUL included, so the next call fits.
             n if n < buffer.len() => {
                 buffer.truncate(n);
-                return Ok(buffer);
+                return Some(buffer);
             }
             n => buffer.resize(n + 1, 0),
         }
     }
 }
 
-/// The drive type of the folder's volume root, from `GetVolumePathNameW` on `wide`.
-fn drive_type(wide: &[u16]) -> io::Result<u32> {
-    // The plain form (`C:\...`, `\\server\share\...`) while the path fits in `MAX_PATH`, which
-    // every volume call takes; the `\\?\` form only beyond that. `wide` ends in its NUL.
-    let input = if wide.len() <= MAX_PATH {
-        plain_text(wide)
-    } else {
-        wide.to_vec()
+/// Whether `wide` (a verbatim path) is a UNC path, which names a network folder.
+fn is_share_path(wide: &[u16]) -> bool {
+    wide.starts_with(&wide_text(r"\\?\UNC\"))
+}
+
+/// Whether the drive letter of `wide` (a verbatim path, so the letter is at index 4) is a
+/// `DRIVE_REMOTE` drive. The drive is asked by its root, `X:\`, so no folder is opened. A path
+/// without a drive letter is not answered here.
+fn on_remote_drive(wide: &[u16]) -> bool {
+    let Some(&[letter, colon]) = wide.get(4..6) else {
+        return false;
     };
-    // The root is a prefix of the path, so a buffer of the input's length fits it with its NUL.
-    let mut root = vec![0u16; input.len()];
-    // SAFETY: `input` is NUL-terminated UTF-16 that outlives the call, and `root` is a writable
-    // buffer of the length given.
-    unsafe { GetVolumePathNameW(PCWSTR(input.as_ptr()), &mut root) }
-        .map_err(|error| os_error(&error))?;
-    let text = root.split(|&unit| unit == 0).next().unwrap_or_default();
-    let mut plain = plain_text(text);
-    plain.push(0);
-    // SAFETY: `plain` is NUL-terminated UTF-16 that outlives the call.
-    Ok(unsafe { GetDriveTypeW(PCWSTR(plain.as_ptr())) })
+    let is_letter = u8::try_from(letter).is_ok_and(|byte| byte.is_ascii_alphabetic());
+    if !is_letter || colon != u16::from(b':') {
+        return false;
+    }
+    let root = [letter, colon, u16::from(b'\\'), 0];
+    // SAFETY: `root` is NUL-terminated UTF-16 that outlives the call.
+    unsafe { GetDriveTypeW(PCWSTR(root.as_ptr())) == DRIVE_REMOTE }
 }
 
 /// The volume's file-system flags.
@@ -215,27 +222,37 @@ fn security_descriptor(wide: &[u16]) -> io::Result<Option<Vec<u64>>> {
         return Err(os_error(&error));
     }
     let mut descriptor = words_for(needed)?;
-    let mut returned = 0_u32;
-    // SAFETY: `wide` is NUL-terminated and outlives the call; `descriptor` is a writable buffer
-    // of `needed` bytes or more, and `returned` a live out-pointer.
-    let read = unsafe {
-        GetFileSecurityW(
-            PCWSTR(wide.as_ptr()),
-            INFORMATION,
-            Some(PSECURITY_DESCRIPTOR(descriptor.as_mut_ptr().cast())),
-            needed,
-            &raw mut returned,
-        )
-    };
-    if read.as_bool() {
-        return Ok(Some(descriptor));
+    let mut size = needed;
+    for _ in 0..DESCRIPTOR_READS {
+        let mut returned = 0_u32;
+        // SAFETY: `wide` is NUL-terminated and outlives the call; `descriptor` is a writable buffer
+        // of `size` bytes or more, and `returned` a live out-pointer.
+        let read = unsafe {
+            GetFileSecurityW(
+                PCWSTR(wide.as_ptr()),
+                INFORMATION,
+                Some(PSECURITY_DESCRIPTOR(descriptor.as_mut_ptr().cast())),
+                size,
+                &raw mut returned,
+            )
+        };
+        if read.as_bool() {
+            return Ok(Some(descriptor));
+        }
+        let error = windows::core::Error::from_thread();
+        if error.code() == ERROR_ACCESS_DENIED.to_hresult() {
+            return Ok(None);
+        }
+        if error.code() != ERROR_INSUFFICIENT_BUFFER.to_hresult() {
+            return Err(os_error(&error));
+        }
+        // An entry was added since the size call: read again at the length this call reported.
+        size = returned;
+        descriptor = words_for(size)?;
     }
-    let error = windows::core::Error::from_thread();
-    if error.code() == ERROR_ACCESS_DENIED.to_hresult() {
-        Ok(None)
-    } else {
-        Err(os_error(&error))
-    }
+    Err(io::Error::other(
+        "the folder's permissions kept growing while they were read",
+    ))
 }
 
 /// A duplicate of this process's token as an impersonation token, which `AccessCheck` takes. The
@@ -320,6 +337,11 @@ fn verbatim_wide(path: &Path) -> io::Result<Vec<u16>> {
     let verbatim = wide_text(r"\\?\");
     let mut wide = if text.starts_with(&verbatim) {
         text
+    } else if let Some(rest) = text.strip_prefix(wide_text(r"\\.\").as_slice()) {
+        // A device path (`\\.\C:\x`, `\\.\UNC\srv\share`) keeps its rest, under `\\?\`.
+        let mut wide = verbatim;
+        wide.extend_from_slice(rest);
+        wide
     } else if let Some(rest) = text.strip_prefix(wide_text(r"\\").as_slice()) {
         let mut wide = wide_text(r"\\?\UNC\");
         wide.extend_from_slice(rest);
@@ -338,26 +360,13 @@ fn wide_text(text: &str) -> Vec<u16> {
     text.encode_utf16().collect()
 }
 
-/// `text` as a drive or UNC path, the form `GetDriveTypeW` takes: the `\\?\` prefix goes, and
-/// `\\?\UNC\` becomes `\\`.
-fn plain_text(text: &[u16]) -> Vec<u16> {
-    if let Some(rest) = text.strip_prefix(wide_text(r"\\?\UNC\").as_slice()) {
-        let mut plain = wide_text(r"\\");
-        plain.extend_from_slice(rest);
-        plain
-    } else if let Some(rest) = text.strip_prefix(wide_text(r"\\?\").as_slice()) {
-        rest.to_vec()
-    } else {
-        text.to_vec()
-    }
-}
-
-/// `MAX_PATH`, counted with the NUL.
-const MAX_PATH: usize = 260;
-
 /// The privilege-set buffer's first size, in bytes: enough for a token with no privileges to
 /// check, and `AccessCheck` names the size it needs when this is too small.
 const PRIVILEGE_BYTES: u32 = 256;
+
+/// How many times the descriptor is read when its size grows between the two `GetFileSecurityW`
+/// calls.
+const DESCRIPTOR_READS: usize = 4;
 
 /// The Win32 error that `error` carries, as an `io::Error`. The calls here report
 /// `HRESULT_FROM_WIN32(code)`, which keeps the code in its low 16 bits.
