@@ -309,6 +309,7 @@ pub(super) fn prepare(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>
             return;
         }
     };
+    let job = codex::prepare::Job::launch(run.key.matter);
     let Some(state) = state(actor, thread) else {
         return;
     };
@@ -317,6 +318,7 @@ pub(super) fn prepare(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>
     actor.spawn_post(async move {
         let result = codex::prepare::off_actor_or_undo(
             clock,
+            job,
             move || {
                 data_folder::refuse_data_folder(&stored, &data)?;
                 let codex = match home {
@@ -473,8 +475,9 @@ pub(super) fn on_prepared(
 fn discard(actor: &mut Actor, thread: ThreadId, run: RunFolders) {
     actor.wiring.browser_slots.release(run.key);
     let clock = std::sync::Arc::clone(&actor.clock);
+    let job = codex::prepare::Job::short("run folder removal", Some(run.key.matter));
     let spawned = actor.spawner.spawn_local(async move {
-        let removed = codex::prepare::off_actor(clock, move || {
+        let removed = codex::prepare::off_actor(clock, job, move || {
             run.remove();
             Ok(())
         })

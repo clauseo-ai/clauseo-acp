@@ -307,7 +307,9 @@ fn home_failed(path: &Path, error: &str) -> Error {
 /// appear later: codex-acp restarts a crashed app-server and resumes the session itself,
 /// `dist/index.js:37755-37772`). `folder` is the matter folder as resolved through links. A
 /// stat that fails for any reason but not-found fails closed too, as `matter.folder_missing`
-/// (the folder may be a share that does not answer), not as a `.codex` to rename.
+/// (the folder may be a share that does not answer), not as a `.codex` to rename. A `.codex`
+/// that is not found passes only when `folder` itself is a folder: a matter folder that is gone
+/// is `matter.folder_missing` too, not a pass.
 ///
 /// Lift this once codex-acp has an option to not trust the session root
 /// (agentclientprotocol/codex-acp#690), or once the direct Codex driver exists. The guard
@@ -316,18 +318,20 @@ pub(crate) fn refuse_codex_folder(folder: &Path) -> Result<(), Error> {
     let entry = folder.join(".codex");
     // `symlink_metadata`: a link named `.codex` counts too, wherever it points.
     match std::fs::symlink_metadata(&entry) {
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => {
-            tracing::warn!(
-                folder = %folder.display(),
-                %error,
-                "a Codex session was refused: the matter folder's .codex stat failed"
-            );
-            Err(Error::refused(
-                ErrorCode::MatterFolderMissing,
-                "Clauseo couldn't check the matter's folder for Codex.",
-            ))
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            match std::fs::metadata(folder) {
+                Ok(meta) if meta.is_dir() => Ok(()),
+                Ok(_) => Err(folder_failed(None, "the matter folder is not a folder")),
+                Err(error) => Err(folder_failed(
+                    Some(error.kind()),
+                    "the matter folder's stat failed",
+                )),
+            }
         }
+        Err(error) => Err(folder_failed(
+            Some(error.kind()),
+            "the matter folder's .codex stat failed",
+        )),
         Ok(_) => {
             tracing::warn!(
                 folder = %folder.display(),
@@ -341,6 +345,17 @@ pub(crate) fn refuse_codex_folder(folder: &Path) -> Result<(), Error> {
             ))
         }
     }
+}
+
+/// The fail-closed refusal of a Codex session whose matter folder could not be checked: `why`
+/// and the io error's kind go to the log, never the path or the error's text (either may hold
+/// the user's name).
+fn folder_failed(kind: Option<std::io::ErrorKind>, why: &str) -> Error {
+    tracing::warn!(error_kind = ?kind, "a Codex session was refused: {why}");
+    Error::refused(
+        ErrorCode::MatterFolderMissing,
+        "Clauseo couldn't check the matter's folder for Codex.",
+    )
 }
 
 /// Whether `_codex/hooks/list`'s answer shows the guard trusted: at least one session-flags hook

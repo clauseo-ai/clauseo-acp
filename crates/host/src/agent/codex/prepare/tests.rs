@@ -2,8 +2,12 @@ use std::sync::{Arc, Mutex, mpsc};
 
 use clauseo_protocol::{ErrorCode, Timestamp};
 
-use super::{PREPARE_WAIT, off_actor};
+use super::{Job, PREPARE_WAIT, off_actor};
 use crate::ManualClock;
+
+fn job() -> Job {
+    Job::short("a test", None)
+}
 
 fn clock() -> ManualClock {
     ManualClock::new(Timestamp::new(1_790_000_000_000).unwrap())
@@ -11,7 +15,7 @@ fn clock() -> ManualClock {
 
 #[test]
 fn the_answer_comes_back_from_its_thread() {
-    let name = off_actor(Arc::new(clock()), || {
+    let name = off_actor(Arc::new(clock()), job(), || {
         Ok(std::thread::current().name().map(str::to_owned))
     });
     let name = futures::executor::block_on(name).unwrap();
@@ -20,7 +24,7 @@ fn the_answer_comes_back_from_its_thread() {
 
 #[test]
 fn an_error_comes_back_as_it_is() {
-    let failed = off_actor::<()>(Arc::new(clock()), || {
+    let failed = off_actor::<()>(Arc::new(clock()), job(), || {
         Err(crate::error::Error::refused(
             ErrorCode::MatterCodexFolder,
             "x",
@@ -30,13 +34,15 @@ fn an_error_comes_back_as_it_is() {
     assert_eq!(error.code(), ErrorCode::MatterCodexFolder);
 }
 
+/// A check that hangs fails closed at the deadline, as `agent.launch_failed`, which may be
+/// retried: waiting is not a missing folder (#365).
 #[test]
 fn a_hung_check_fails_closed_at_the_deadline() {
     let clock = clock();
     let (entered, started) = async_channel::unbounded::<()>();
     let (release, blocked) = mpsc::channel::<()>();
     let blocked = Mutex::new(blocked);
-    let hung = off_actor(Arc::new(clock.clone()), move || {
+    let hung = off_actor(Arc::new(clock.clone()), job(), move || {
         let _told = entered.send_blocking(());
         let _released = blocked.lock().map(|blocked| blocked.recv());
         Ok(())
@@ -47,7 +53,9 @@ fn a_hung_check_fails_closed_at_the_deadline() {
         clock.advance(PREPARE_WAIT);
     };
     let (result, ()) = futures::executor::block_on(futures::future::join(hung, move_on));
-    assert_eq!(result.unwrap_err().code(), ErrorCode::MatterFolderMissing);
+    let error = result.unwrap_err();
+    assert_eq!(error.code(), ErrorCode::AgentLaunchFailed);
+    assert!(error.code().is_retryable());
     drop(release);
 }
 
@@ -63,7 +71,7 @@ fn the_recheck_resolves_a_linked_matter_again() {
     let link = root.join("link");
     crate::write::symlink(&root.join("clean"), &link).unwrap();
     let check =
-        || futures::executor::block_on(super::recheck(Arc::new(clock()), Some(link.clone())));
+        || futures::executor::block_on(super::recheck(Arc::new(clock()), None, Some(link.clone())));
     assert!(check().is_ok());
     crate::write::remove_file(&link).unwrap();
     crate::write::symlink(&root.join("other"), &link).unwrap();
