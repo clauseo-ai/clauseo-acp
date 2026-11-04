@@ -96,7 +96,7 @@ pub(crate) async fn sign_in<T: Timer + Send + Sync>(
     } else {
         LOGIN_CLAUDE_AI
     };
-    let spec = job.spec(&args, env, LOGIN_LIMIT);
+    let spec = job.spec(args, env, LOGIN_LIMIT);
     let since = job.now();
     job.report(SigninState::Waiting {
         since,
@@ -196,7 +196,7 @@ pub(crate) async fn status<T: Timer + Send + Sync>(
     cancel: &Cancel,
 ) -> Option<Option<Identity>> {
     let env = job.env(RunKind::Own { home: &job.home }, None);
-    let spec = job.spec(&STATUS, env, STATUS_LIMIT);
+    let spec = job.spec(STATUS, env, STATUS_LIMIT);
     let ran = run(
         &*job.launcher,
         &*job.timer,
@@ -232,7 +232,7 @@ pub(crate) async fn sign_out<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Opti
         return None;
     }
     let env = job.env(RunKind::Own { home: &job.home }, None);
-    let spec = job.spec(&LOGOUT, env, LOGOUT_LIMIT);
+    let spec = job.spec(LOGOUT, env, LOGOUT_LIMIT);
     let cancel = &job.ticket.cancel;
     let ran = run(
         &*job.launcher,

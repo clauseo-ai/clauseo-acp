@@ -5,7 +5,7 @@
 //!   install) and reserves the agent's job slot under the shared lock: a new [`Ticket`], and
 //!   for a sign-in the channel pasted codes go down. A sign-in or sign-out supersedes the
 //!   agent's running job; a status check never does. The worker thread then starts the job.
-//! - The job hands its [`Task`] to the agent's flow ([`super::claude`]; Codex's in piece 4).
+//! - The job hands its [`Task`] to the agent's flow ([`super::claude`] or [`super::codex`]).
 //!   Every event goes through `SigninHub::emit_job`, which drops it once the job is no
 //!   longer the agent's: a superseded job is silent, and its child is killed by its
 //!   [`Ticket::cancel`].
@@ -27,7 +27,7 @@ use clauseo_process::{Launcher, Timer};
 use crate::config::AgentsConfig;
 use crate::signin::env::{EnvInputs, RunKind, Shim, Vendor, run_env};
 use crate::signin::run::RunSpec;
-use crate::signin::{Method, PasteCode, SigninCode, SigninState, claude};
+use crate::signin::{Method, PasteCode, SigninCode, SigninState, claude, codex};
 use crate::state::Installed;
 use crate::worker::{Shared, Ticket};
 
@@ -41,6 +41,9 @@ pub(crate) enum Task {
     SignOut,
     /// One status check (R20's "a window shows Plans").
     Status,
+    /// Codex's "Try again" after `signin.port_busy`: port 1455 is probed every 2 s, and the
+    /// browser sign-in starts once it is free.
+    TryAgain,
 }
 
 impl Task {
@@ -92,8 +95,12 @@ impl<T: Timer + Send + Sync> SigninJob<T> {
             }
             (Vendor::Claude, Task::SignOut) => claude::sign_out(self).await,
             (Vendor::Claude, Task::Status) => claude::check_status(self).await,
-            // S18 piece 4: the calls refuse Codex before a job starts.
-            (Vendor::Codex, _) => None,
+            // The call refuses it for Claude, which has no callback port.
+            (Vendor::Claude, Task::TryAgain) => None,
+            (Vendor::Codex, Task::SignIn(method)) => Some(codex::sign_in(self, method).await),
+            (Vendor::Codex, Task::TryAgain) => Some(codex::try_again(self).await),
+            (Vendor::Codex, Task::SignOut) => codex::sign_out(self).await,
+            (Vendor::Codex, Task::Status) => codex::check_status(self).await,
         }
     }
 
@@ -152,16 +159,16 @@ impl<T: Timer + Send + Sync> SigninJob<T> {
     }
 
     /// `<node> <script> args…` in the agent's home, with `env`, killed past `limit`.
-    pub(crate) fn spec(
+    pub(crate) fn spec<A: Into<OsString>>(
         &self,
-        args: &[&str],
+        args: impl IntoIterator<Item = A>,
         env: BTreeMap<OsString, OsString>,
         limit: Duration,
     ) -> RunSpec {
         RunSpec {
             node: self.installed.node.clone(),
             script: self.installed.script.clone(),
-            args: args.iter().map(OsString::from).collect(),
+            args: args.into_iter().map(Into::into).collect(),
             env,
             cwd: self.home.clone(),
             limit,

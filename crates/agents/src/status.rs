@@ -128,13 +128,6 @@ pub(crate) fn claude_signed_in(
 
 /// Whether `codex login status` says signed in: exit 0. Its output is never read (stderr
 /// prints a masked key prefix).
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "S18 pieces 4 and 5 (Codex's sign-in, detection and reuse) call it"
-    )
-)]
 pub(crate) fn codex_logged_in(exit: Option<i32>) -> bool {
     exit == Some(0)
 }
@@ -188,13 +181,6 @@ impl CodexDetect {
 
 /// The account behind `account/read`: a `ChatGPT` sign-in's `email` and `plan_type`. `None` for
 /// no account or another kind (an API key, Bedrock), which is not a plan login.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "S18 pieces 4 and 5 (Codex's sign-in, detection and reuse) call it"
-    )
-)]
 pub(crate) fn codex_identity(response: &GetAccountResponse) -> Option<Identity> {
     match response.account.as_ref()? {
         Account::Chatgpt(account) => Some(Identity {

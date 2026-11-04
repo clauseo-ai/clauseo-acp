@@ -31,14 +31,18 @@
 //!   sign-in, sign-out and status check (`signin/job.rs`, one job per agent on its own thread);
 //!   Claude's flow (`signin/claude.rs`: hidden `auth login`, status polled every 1.5 s, the
 //!   nudge at 30 s, expiry at 10 minutes, the paste route, sign-out) and its `BROWSER` shim on
-//!   macOS and Linux (`signin/shim.rs`). Codex's flow, detection and reuse build on these.
+//!   macOS and Linux (`signin/shim.rs`); Codex's flow (`signin/codex.rs`: the port 1455 probe
+//!   and "Try again", hidden `login` or `login --device-auth` with the device code read
+//!   strictly from its output, `login status` polled, the account from `app-server`'s
+//!   `account/read`, sign-out). Detection and reuse build on these.
 //!
 //! # Interface
 //!
 //! - [`Agents::start`]`(config, launcher, timer)` gives an [`Agents`] and the `Receiver` of
 //!   [`AgentsEvent`]s; `install`, `pause`, `retry(agent, use_system_proxy)`, `state` and
-//!   `installed`; `sign_in(agent, Method)`, `cancel_sign_in`, `paste_code(agent, PasteCode)`,
-//!   `sign_out`, `check_status` (each `Result<(), SigninError>`) and `signin_state`.
+//!   `installed`; `sign_in(agent, Method)`, `try_again` (Codex's busy port), `cancel_sign_in`,
+//!   `paste_code(agent, PasteCode)`, `sign_out`, `check_status` (each
+//!   `Result<(), SigninError>`) and `signin_state`.
 //! - [`AgentsConfig`], [`InstallConfig`], [`NodeSearch`], [`Clock`] and [`SystemClock`].
 //! - [`InstallState`], [`Failure`], [`FailureKind`] (with its error code), [`InstallLog`] and
 //!   [`Installed`].

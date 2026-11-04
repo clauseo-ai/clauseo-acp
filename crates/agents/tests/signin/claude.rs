@@ -290,8 +290,11 @@ fn calls_that_cannot_run_are_refused() {
     {
         let (agents, _events) = fx.start();
         assert_eq!(
-            agents.sign_in(&codex(), Method::Browser),
-            Err(SigninError::NotBuilt(codex()))
+            agents.try_again(&claude()),
+            Err(SigninError::WrongMethod {
+                agent: claude(),
+                method: Method::Browser
+            })
         );
         assert_eq!(
             agents.sign_in(&claude(), Method::DeviceCode),

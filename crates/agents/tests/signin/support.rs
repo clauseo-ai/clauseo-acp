@@ -1,8 +1,10 @@
 //! The fixture every sign-in test starts from: `Agents` on the embedded snapshot, with Claude's
-//! install taken as ready (`ready_for_tests`) and its adapter played by `fake_agent` (a script
-//! named `claude-cli` picks its Claude CLI mode); a clearing launcher that records each run's
-//! arguments and pid; a timer whose waits the test ends one by one, by duration; and a fixed
-//! clock. The base environment holds the four remote hints, which must never reach the child.
+//! and Codex's installs taken as ready (`ready_for_tests`) and their CLIs played by `fake_agent`
+//! (a script named `claude-cli` picks its Claude CLI mode, one named `codex.js` its Codex mode),
+//! Codex's callback port moved to one that is always free (port 0); a clearing launcher that
+//! records each run's arguments and pid; a timer whose waits the test ends one by one, by
+//! duration; and a fixed clock. The base environment holds the four remote hints, which must
+//! never reach the child.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -161,6 +163,15 @@ pub(crate) struct Launch {
 }
 
 impl Launch {
+    /// The Codex command after the script and its leading `-c <value>` overrides.
+    pub(crate) fn command(&self) -> Vec<&str> {
+        let mut args: Vec<&str> = self.args.iter().skip(1).map(String::as_str).collect();
+        while args.first() == Some(&"-c") && args.len() >= 2 {
+            args.drain(..2);
+        }
+        args
+    }
+
     /// Whether this was a run of `auth <word>`.
     pub(crate) fn is(&self, word: &str) -> bool {
         self.args
@@ -208,17 +219,28 @@ impl Fixture {
             .expect("build fake_agent first: cargo build -p clauseo-fake_agent");
         let cli = root.join("adapter").join("claude-cli");
         write_file(&cli, b"").unwrap();
+        let codex_js = root.join("codex").join("codex.js");
+        write_file(&codex_js, b"").unwrap();
         let mut config = AgentsConfig::new(root.to_path_buf(), Platform::current().unwrap());
         config.node_search = NodeSearch::none();
         config.clock = Arc::new(FixedClock);
         config.ready_for_tests.insert(
             claude(),
-            installed(bin, cli, root.join("adapter"), "0.0.0-test"),
+            installed(bin.clone(), cli, root.join("adapter"), "0.0.0-test"),
+        );
+        config.ready_for_tests.insert(
+            codex(),
+            installed(bin, codex_js, root.join("codex"), "0.0.0-test"),
         );
         config
             .signin
             .homes
             .insert(claude(), root.join("agents/claude-acp/home"));
+        config
+            .signin
+            .homes
+            .insert(codex(), root.join("agents/codex-acp/home"));
+        config.signin.callback_port = Some(0);
         let mut base: BTreeMap<OsString, OsString> = BTreeMap::new();
         let mut put = |name: &str, value: &Path| {
             base.insert(name.into(), value.as_os_str().to_owned());
@@ -244,12 +266,18 @@ impl Fixture {
 
     /// Starts `Agents` and waits for Claude's install to report `Ready`.
     pub(crate) fn start(&self) -> (Agents, Events) {
+        self.start_for(claude())
+    }
+
+    /// Starts `Agents` and waits for `agent`'s install to report `Ready`; the events are
+    /// `agent`'s.
+    pub(crate) fn start_for(&self, agent: AgentId) -> (Agents, Events) {
         let launcher: Arc<dyn Launcher> = Arc::new(Recording {
             inner: PassthroughLauncher::new(SpawnOptions::new().clear_env()),
             launches: Arc::clone(&self.launches),
         });
         let (agents, events) = Agents::start(self.config.clone(), launcher, self.timer.clone());
-        let events = Events(events);
+        let events = Events { rx: events, agent };
         events.until_install_ready();
         (agents, events)
     }
@@ -257,6 +285,14 @@ impl Fixture {
     /// Every run started so far.
     pub(crate) fn launches(&self) -> Vec<Launch> {
         lock(&self.launches).clone()
+    }
+
+    /// The Codex runs of `command` (after the overrides) started so far.
+    pub(crate) fn codex_runs(&self, command: &[&str]) -> Vec<Launch> {
+        self.launches()
+            .into_iter()
+            .filter(|run| run.command() == command)
+            .collect()
     }
 
     /// The runs of `auth <word>` started so far.
@@ -297,15 +333,18 @@ pub(crate) enum Seen {
     Open(String),
 }
 
-/// The events' receiver, read by blocking. Install events are skipped.
-pub(crate) struct Events(pub(crate) async_channel::Receiver<AgentsEvent>);
+/// One agent's events, read by blocking. Install events and other agents' are skipped.
+pub(crate) struct Events {
+    rx: async_channel::Receiver<AgentsEvent>,
+    agent: AgentId,
+}
 
 impl Events {
     fn until_install_ready(&self) {
         loop {
-            let event = futures::executor::block_on(self.0.recv()).expect("the events closed");
+            let event = futures::executor::block_on(self.rx.recv()).expect("the events closed");
             if let AgentsEvent::Install { agent, state } = event
-                && agent == claude()
+                && agent == self.agent
             {
                 assert!(matches!(state, InstallState::Ready { .. }), "{state:?}");
                 return;
@@ -313,15 +352,17 @@ impl Events {
         }
     }
 
-    /// The next sign-in event for Claude.
+    /// The next sign-in event for the agent.
     pub(crate) fn next(&self) -> Seen {
         loop {
-            let event = futures::executor::block_on(self.0.recv()).expect("the events closed");
+            let event = futures::executor::block_on(self.rx.recv()).expect("the events closed");
             match event {
-                AgentsEvent::Signin { agent, state } if agent == claude() => {
+                AgentsEvent::Signin { agent, state } if agent == self.agent => {
                     return Seen::State(state);
                 }
-                AgentsEvent::OpenUrl { agent, url } if agent == claude() => return Seen::Open(url),
+                AgentsEvent::OpenUrl { agent, url } if agent == self.agent => {
+                    return Seen::Open(url);
+                }
                 _ => {}
             }
         }
@@ -358,7 +399,7 @@ impl Events {
 
     /// Every event already sent, without waiting, Install events included.
     pub(crate) fn drain(&self) -> Vec<AgentsEvent> {
-        std::iter::from_fn(|| self.0.try_recv().ok()).collect()
+        std::iter::from_fn(|| self.rx.try_recv().ok()).collect()
     }
 }
 

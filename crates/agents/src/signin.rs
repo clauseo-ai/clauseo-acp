@@ -6,8 +6,8 @@
 //! agent at a time, on its own thread, which reports through `SigninHub::emit_job` and is
 //! silenced once superseded. The job hands its task to the agent's flow: Claude's `auth login`
 //! with the `BROWSER` shim (`signin/claude.rs`, `signin/shim.rs`); Codex's `login` and
-//! `--device-auth` (`signin/codex.rs`, S18 piece 4); detection and reuse (`signin/reuse.rs`,
-//! piece 5). Each flow:
+//! `--device-auth`, after the port 1455 probe (`signin/codex.rs`); detection and reuse
+//! (`signin/reuse.rs`, piece 5). Each flow:
 //! - builds its environment with `env::run_env`, from [`crate::SigninConfig::base_env`], and
 //!   for Codex adds `env::codex_store_args` to its arguments;
 //! - starts `<node> <script> args…` with `run::run`, through the `Launcher` the caller gave
@@ -27,6 +27,7 @@ use zeroize::Zeroizing;
 use self::env::Vendor;
 
 pub(crate) mod claude;
+pub(crate) mod codex;
 pub(crate) mod env;
 pub(crate) mod job;
 pub(crate) mod run;
@@ -64,9 +65,6 @@ pub enum SigninError {
         /// The method asked for.
         method: Method,
     },
-    /// This agent's flow is not built yet (Codex, until S18 piece 4).
-    #[error("signing in to {0} is not built yet")]
-    NotBuilt(AgentId),
     /// The agent's install is not ready.
     #[error("{0} is not installed yet")]
     NotReady(AgentId),

@@ -138,17 +138,28 @@ impl Agents {
         self.shared.lock().installed.get(agent).cloned()
     }
 
-    /// Signs `agent` in with `method` (Claude `ClaudeAi` or `Console`): a hidden login run in
-    /// Clauseo's own folder, reported as `Waiting` and then `SignedIn` or `Failed`, with
-    /// `OpenUrl` for the page the vendor would open. A sign-in or sign-out already going for
-    /// `agent` is stopped first, silently: "Didn't open?" is a new sign-in. Refused when the
-    /// agent is unknown, the method is another agent's, its flow is not built yet (Codex, S18
-    /// piece 4), the caller gave it no home, or its install is not `Ready`.
+    /// Signs `agent` in with `method` (Claude `ClaudeAi` or `Console`, Codex `Browser` or
+    /// `DeviceCode`): a hidden login run in Clauseo's own folder, reported as `Waiting` (or
+    /// Codex's `DeviceCode`) and then `SignedIn` or `Failed`, with `OpenUrl` for the page
+    /// Claude would open (Codex opens its own). Codex's `Browser` first checks that port 1455 is
+    /// free, else `Failed { code: PortBusy }` and no run. A sign-in or sign-out already going
+    /// for `agent` is stopped first, silently: "Didn't open?" is a new sign-in. Refused when
+    /// the agent is unknown, the method is another agent's, the caller gave it no home, or its
+    /// install is not `Ready`.
     pub fn sign_in(&self, agent: &AgentId, method: Method) -> Result<(), SigninError> {
         let start = self
             .shared
             .signin
             .sign_in(agent, method, self.installed(agent));
+        self.start_signin(start)
+    }
+
+    /// Codex's "Try again" after `signin.port_busy`: probes port 1455 every 2 s and starts the
+    /// browser sign-in once it is free, as `sign_in(agent, Browser)` then does. The state is
+    /// unchanged while it waits; `cancel_sign_in` stops the wait. Refused for Claude (it has
+    /// no callback port) and as `sign_in` is.
+    pub fn try_again(&self, agent: &AgentId) -> Result<(), SigninError> {
+        let start = self.shared.signin.try_again(agent, self.installed(agent));
         self.start_signin(start)
     }
 

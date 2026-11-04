@@ -80,6 +80,36 @@ fn codex_login_status_flips_after_login_and_back_after_logout() {
 }
 
 #[test]
+fn leading_config_overrides_are_skipped_before_the_command() {
+    let scratch = Scratch::new("codex_overrides");
+    let home = home(&scratch);
+    let codex_home = scratch.path().join("codex-home");
+    let env = [("CODEX_HOME", text(&codex_home))];
+    let store = "cli_auth_credentials_store=\"file\"";
+    let login = codex(&scratch, &home, &["-c", store, "login"], &env).finish();
+    assert_eq!(login.status.code(), Some(EXIT_OK), "{}", login.stderr);
+    assert!(marker(&codex_home).is_file());
+    let status = codex(
+        &scratch,
+        &home,
+        &[
+            "-c",
+            store,
+            "-c",
+            "features.plugins=false",
+            "login",
+            "status",
+        ],
+        &env,
+    )
+    .finish();
+    assert_eq!(status.status.code(), Some(EXIT_OK), "{}", status.stderr);
+    // An override after the command is still a usage error.
+    let late = codex(&scratch, &home, &["login", "-c", store], &env).finish();
+    assert_eq!(late.status.code(), Some(2), "{}", late.stderr);
+}
+
+#[test]
 fn codex_device_auth_prints_the_url_and_the_code_then_logs_in() {
     let scratch = Scratch::new("codex_device");
     let home = home(&scratch);

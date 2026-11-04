@@ -122,7 +122,15 @@ pub struct SigninConfig {
     /// map here instead of changing its process's environment. `Debug` prints only how many
     /// names it holds: values can be secrets.
     pub base_env: BTreeMap<OsString, OsString>,
+    /// Tests only: the port Codex's browser sign-in probes in place of 1455, so tests that hold
+    /// "the" callback port run side by side. `Some(0)` is a port that is always free. Outside
+    /// `test-support` the field does not exist, so the probe is always `127.0.0.1:1455`.
+    #[cfg(feature = "test-support")]
+    pub callback_port: Option<u16>,
 }
+
+/// The port Codex's browser sign-in listens on for its callback: `http://127.0.0.1:1455`.
+pub(crate) const CODEX_CALLBACK_PORT: u16 = 1455;
 
 impl SigninConfig {
     /// This process's environment as the base, and no agent homes.
@@ -130,7 +138,18 @@ impl SigninConfig {
         SigninConfig {
             homes: BTreeMap::new(),
             base_env: std::env::vars_os().collect(),
+            #[cfg(feature = "test-support")]
+            callback_port: None,
         }
+    }
+
+    /// The port Codex's browser sign-in needs free: 1455, or a test's own.
+    pub(crate) fn callback_port(&self) -> u16 {
+        #[cfg(feature = "test-support")]
+        if let Some(port) = self.callback_port {
+            return port;
+        }
+        CODEX_CALLBACK_PORT
     }
 }
 
@@ -139,7 +158,7 @@ impl std::fmt::Debug for SigninConfig {
         f.debug_struct("SigninConfig")
             .field("homes", &self.homes)
             .field("base_env", &format_args!("{} names", self.base_env.len()))
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
