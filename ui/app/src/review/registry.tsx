@@ -1,7 +1,7 @@
 // Every string the copy review shows, one entry each. A brief that adds or changes a string adds its entry here: the
 // next free id for the brief ("U1-04"), the words file and English key (words.ts's helpers), the screen, the state
 // that shows it (the real screen over a scripted host, built in the render function), and, where the default desktop
-// window (entry.ts) doesn't suit, the width and height to render at. Approvals live in ui/app/copy-approvals.json.
+// window (entry.ts) doesn't suit, the width and height to render at. Approvals live in ui/app/copy-approvals/, one file per brief.
 import { LocateGate, MovedFolder } from "../room/moved.tsx";
 import { ScratchLine } from "../room/scratch-line.tsx";
 import type { Entry } from "./entry.ts";
