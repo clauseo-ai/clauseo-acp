@@ -32,8 +32,8 @@ must therefore stay stable across versions.
   open it without reading `message`. Added by decision record 0022.
 - `HostError.files` (optional, left out when empty) lists the matter's files a failure is about, as
   matter paths: for `matter.file_locked`, the files held open, so the UI can name the document to
-  close without reading `message` (an undo has no preview that lists them). A path never goes in
-  `message`. A peer that predates it reads such an error as before, without the files.
+  close without reading `message` (an undo has no preview that lists them). For
+  `matter.file_locked` the files are in `files`, not in `message`. A peer that predates it reads such an error as before, without the files.
 - `matter.folder_refused` stays, with its meaning: since 0022 the host answers `CreateMatter` with
   one of the six `matter.folder_*` codes after it instead, one per reason.
 

@@ -197,11 +197,12 @@ fn an_owner_file_cut_from_the_decomposed_name_is_found_for_the_decomposed_name()
     );
 }
 
-/// A Windows rename or delete that failed with a sharing or lock violation (32, 33) is a file
-/// held open, without asking whether it is held; an access denied (5) only when the file is held
-/// at that moment, since 5 is also a plain permission denial; any other code, or none, never is.
+/// A Windows rename or delete that failed with an access denied (5), a sharing violation (32)
+/// or a lock violation (33) is a file held open only when the target is held at that moment:
+/// 5 is also a plain permission denial, and 32 or 33 can come from our own temp file. Any other
+/// code, or none, never is, and does not ask.
 #[test]
-fn a_write_failure_is_held_by_its_code_and_access_denied_only_when_held() {
+fn a_write_failure_is_held_by_its_code_only_when_the_target_is_held() {
     let asked = Cell::new(0);
     let held = |answer: bool| {
         let asked = &asked;
@@ -210,15 +211,11 @@ fn a_write_failure_is_held_by_its_code_and_access_denied_only_when_held() {
             answer
         }
     };
-    assert!(held_by_code(Some(32), held(false)), "sharing violation");
-    assert!(held_by_code(Some(33), held(false)), "lock violation");
-    assert_eq!(asked.get(), 0, "32 and 33 need no check");
-    assert!(held_by_code(Some(5), held(true)), "access denied, held");
-    assert!(
-        !held_by_code(Some(5), held(false)),
-        "access denied, not held"
-    );
-    assert_eq!(asked.get(), 2, "5 asks once each time");
+    for code in [5, 32, 33] {
+        assert!(held_by_code(Some(code), held(true)), "{code}, held");
+        assert!(!held_by_code(Some(code), held(false)), "{code}, not held");
+    }
+    assert_eq!(asked.get(), 6, "5, 32 and 33 ask once each time");
     for other in [
         None,
         Some(0),
@@ -230,7 +227,7 @@ fn a_write_failure_is_held_by_its_code_and_access_denied_only_when_held() {
     ] {
         assert!(!held_by_code(other, held(true)), "{other:?}");
     }
-    assert_eq!(asked.get(), 2, "no other code asks");
+    assert_eq!(asked.get(), 6, "no other code asks");
 }
 
 /// Off Windows an open file never stops a rename or delete, so no write failure is a held file,

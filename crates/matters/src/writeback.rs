@@ -285,7 +285,7 @@ pub(crate) fn apply(core: &Core, folder: &Path, ops: &[&Op]) -> Result<(), Error
                 // after it, and its own, are removed as each `Staged` drops.
                 for dir in dirs {
                     if let Err(err) = fsync::sync_dir(&dir) {
-                        tracing::warn!(path = %dir.display(), error = %err, "folder not synced");
+                        tracing::warn!(error = %err, "a renamed file's folder not synced");
                     }
                 }
                 return Err(held_or(folder, path, err));
@@ -351,7 +351,7 @@ fn moved_since(core: &Core, folder: &Path, ops: &[&Op]) -> Result<Vec<MatterPath
 
 /// `err`, from deleting or renaming over the target `path` in step 3 or 4 of [`apply`], as
 /// [`Error::FileLocked`] naming `path` when another program holds that file
-/// ([`locks::held_at_write`], asking [`locks::held_open`] for an access denied); otherwise
+/// ([`locks::held_at_write`], confirmed by [`locks::held_open`] for the target); otherwise
 /// `err` as it was. A program that opened the file after the caller's check (Word, between the
 /// check and the rename) gets the lawyer the "close it" answer instead of a failed checkpoint.
 fn held_or(folder: &Path, path: &MatterPath, err: Error) -> Error {
