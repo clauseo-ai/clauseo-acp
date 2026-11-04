@@ -197,21 +197,40 @@ test("Undo sends snooze_thread with no time, and the row is back", async () => {
   expect(titles()).toContain("Bail conditions");
 });
 
-for (const why of ["a time past", "more than 366 days ahead"])
+// the host's own rule (MAX_SNOOZE_AHEAD_MS) on a clock of its own: two days ahead of the app's, Tomorrow 9:00 am is past
+// for it; a year and a day behind, Monday 9:00 am is more than 366 days ahead
+const CASES = [
+  { why: "a time past", skew: 2 * 24 * HOUR, pick: "Tomorrow 9:00 am", refused: "not after now" },
+  {
+    why: "more than 366 days ahead",
+    skew: -367 * 24 * HOUR,
+    pick: "Monday 9:00 am",
+    refused: "too far ahead",
+  },
+];
+for (const { why, skew, pick, refused } of CASES)
   test(`snooze_thread refused (${why}): the conversation stays as it was, and no line`, async () => {
     const { lists } = withA([T_LIST]);
+    const said: string[] = [];
     const transport = await mount({
       lists,
       dispatch: (command) => {
-        if ("snooze_thread" in command.command)
-          throw { code: "command.invalid", message: why, retryable: false };
-        return "done";
+        const until = (command.command as { snooze_thread?: { until?: number } }).snooze_thread
+          ?.until;
+        if (until === undefined) return "done";
+        const now = Date.now() + skew;
+        const message =
+          until <= now ? "not after now" : until - now > 366 * 24 * HOUR ? "too far ahead" : null;
+        if (message === null) return "done";
+        said.push(message);
+        throw { code: "command.invalid", message, retryable: false };
       },
     });
     await menuOf();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    await press(item("Monday 9:00 am"));
+    await press(item(pick));
     warn.mockRestore();
+    expect(said).toEqual([refused]);
     expect(sent(transport, "snooze_thread")).toHaveLength(1);
     expect(line()).toBeNull();
     expect(titles()).toContain("Bail conditions");
