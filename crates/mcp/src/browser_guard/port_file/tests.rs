@@ -1,6 +1,14 @@
 use std::path::PathBuf;
 
-use super::{Found, Status, file, judge, read};
+use std::path::Path;
+
+use super::{Expected, Found, Status, judge, read};
+
+const DAEMON: &str = "daemon port";
+
+fn file(dir: &Path, session: &str) -> PathBuf {
+    Expected::daemon(dir, session, 61_100).file
+}
 
 /// A folder of its own under the system temp folder, removed on drop.
 struct Scratch(PathBuf);
@@ -28,19 +36,19 @@ fn a_missing_or_empty_file_is_checked_again() {
     let scratch = Scratch::new("missing");
     let port_file = file(&scratch.0, "s-1");
     assert_eq!(port_file, scratch.0.join("s-1.port"));
-    assert_eq!(judge(read(&port_file), 61_100), Status::Pending);
+    assert_eq!(judge(read(&port_file), 61_100, DAEMON), Status::Pending);
     crate::write::write(&port_file, b"").unwrap();
-    assert_eq!(judge(read(&port_file), 61_100), Status::Pending);
+    assert_eq!(judge(read(&port_file), 61_100, DAEMON), Status::Pending);
 }
 
 #[test]
-fn the_claimed_port_is_verified() {
+fn the_claimed_port_matches() {
     let scratch = Scratch::new("match");
     let port_file = file(&scratch.0, "s-1");
     crate::write::write(&port_file, b"61100").unwrap();
-    assert_eq!(judge(read(&port_file), 61_100), Status::Verified);
+    assert_eq!(judge(read(&port_file), 61_100, DAEMON), Status::Matches);
     crate::write::write(&port_file, b"61100\n").unwrap();
-    assert_eq!(judge(read(&port_file), 61_100), Status::Verified);
+    assert_eq!(judge(read(&port_file), 61_100, DAEMON), Status::Matches);
 }
 
 #[test]
@@ -50,7 +58,7 @@ fn another_port_is_refused() {
     // agent-browser's fallback: an ephemeral port the OS gave.
     crate::write::write(&port_file, b"52731").unwrap();
     assert_eq!(
-        judge(read(&port_file), 61_100),
+        judge(read(&port_file), 61_100, DAEMON),
         Status::Refused(
             "agent-browser's daemon port file says 52731, not the claimed port 61100".to_owned()
         )
@@ -71,7 +79,7 @@ fn garbage_is_refused() {
     ] {
         crate::write::write(&port_file, garbage).unwrap();
         assert_eq!(
-            judge(read(&port_file), 61_100),
+            judge(read(&port_file), 61_100, DAEMON),
             Status::Refused(
                 "agent-browser's daemon port file holds no port, not the claimed port 61100"
                     .to_owned()
@@ -82,7 +90,7 @@ fn garbage_is_refused() {
     // A long file is read only to its first bytes, which hold no port here.
     crate::write::write(&port_file, "6".repeat(4096)).unwrap();
     assert!(matches!(
-        judge(read(&port_file), 61_100),
+        judge(read(&port_file), 61_100, DAEMON),
         Status::Refused(_)
     ));
 }
@@ -94,7 +102,7 @@ fn a_folder_at_the_name_is_refused() {
     crate::write::create_dir(&port_file).unwrap();
     assert!(matches!(read(&port_file), Found::NotFile));
     assert!(matches!(
-        judge(read(&port_file), 61_100),
+        judge(read(&port_file), 61_100, DAEMON),
         Status::Refused(_)
     ));
 }
@@ -110,7 +118,7 @@ fn a_link_at_the_name_is_refused() {
     crate::write::symlink(&target, &port_file).unwrap();
     assert!(matches!(read(&port_file), Found::Link));
     assert_eq!(
-        judge(read(&port_file), 61_100),
+        judge(read(&port_file), 61_100, DAEMON),
         Status::Refused(
             "agent-browser's daemon port file is a link, not the claimed port 61100".to_owned()
         )
@@ -119,10 +127,33 @@ fn a_link_at_the_name_is_refused() {
 
 #[test]
 fn the_verdict_alone_refuses_a_link_and_an_unreadable_file() {
-    assert!(matches!(judge(Found::Link, 61_100), Status::Refused(_)));
-    let error = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
     assert!(matches!(
-        judge(Found::Unreadable(error), 61_100),
+        judge(Found::Link, 61_100, DAEMON),
         Status::Refused(_)
     ));
+    let error = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+    assert!(matches!(
+        judge(Found::Unreadable(error), 61_100, DAEMON),
+        Status::Refused(_)
+    ));
+}
+
+/// The stream server's file sits beside the daemon's, as `<session>.stream`, and its refusal
+/// names it.
+#[test]
+fn the_stream_file_is_read_the_same_way() {
+    let scratch = Scratch::new("stream");
+    let expected = Expected::stream(&scratch.0, "s-1", 61_100);
+    assert_eq!(expected.file, scratch.0.join("s-1.stream"));
+    assert_eq!(expected.check(), Status::Pending);
+    crate::write::write(&expected.file, b"61100").unwrap();
+    assert_eq!(expected.check(), Status::Matches);
+    // agent-browser's fallback: the port the OS gave the stream server instead.
+    crate::write::write(&expected.file, b"40117").unwrap();
+    assert_eq!(
+        expected.check(),
+        Status::Refused(
+            "agent-browser's stream port file says 40117, not the claimed port 61100".to_owned()
+        )
+    );
 }

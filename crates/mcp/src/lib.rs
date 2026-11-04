@@ -15,11 +15,13 @@
 //!
 //! - [`browser_guard::run`]: the mode, given the arguments after `browser-guard`. It returns the
 //!   exit code, or a [`Failure`] for `main` to print. `main.rs` holds the table of modes.
-//! - The command line: `clauseo-mcp browser-guard --agent-browser <file> --cwd <folder> --
-//!   <agent-browser args...>`. Exit 2 for a bad command line or a missing or invalid variable;
-//!   1 when a folder cannot be made or agent-browser cannot start, when agent-browser was
-//!   killed (by a signal, by the guard after its exit wait, or for a line over 64 MiB);
-//!   otherwise agent-browser's own exit code. Exit 2 also for an unsafe Unix socket folder.
+//! - The command line: `clauseo-mcp browser-guard --agent-browser <file> --cwd <folder>
+//!   --cdp-port <port> -- <agent-browser args...>`, with `--daemon-port <port>` on Windows.
+//!   Exit 2 for a bad command line or a missing or invalid variable; 1 when a folder cannot be
+//!   made or agent-browser cannot start, when agent-browser was killed (by a signal, by the
+//!   guard after its exit wait, for a line over 64 MiB, or for a listener on a port the host did
+//!   not claim); otherwise agent-browser's own exit code. Exit 2 also for an unsafe Unix socket
+//!   folder.
 //!
 //! # Invariants
 //!
