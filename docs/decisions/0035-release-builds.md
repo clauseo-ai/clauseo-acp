@@ -59,17 +59,13 @@ for a pull request.
 - **Release overlays,** in `crates/desktop/release/`, passed with `--config`:
   `release.conf.json` (`mainBinaryName: "Clauseo"`, and no `beforeBuildCommand`, since the legs embed
   the `ui` job's build); `windows.conf.json` (`bundle.windows.nsis.installerHooks`, the uninstall hook
-  in `crates/desktop/windows/hooks.nsh`, and later S15's sandbox tools in `bundle.externalBin`);
-  `machine.conf.json` (`installMode: "perMachine"`). `check` fails on any other key in them. The guard
-  covers the overlays only: sidecars every platform ships (S27's `clauseo-mcp` and `agent-browser`)
-  live in `tauri.conf.json`, where the `tauri-config` check and review cover them.
-- **The sidecar seam.** Each `build` leg has one step, "Sidecars for this target", before the app is
-  built (tauri-build checks that every `externalBin` file exists): it builds or fetches that leg's
-  sidecars for its target triple as `crates/desktop/binaries/<name>-<target>`. The Windows legs carry
-  them to `sign-windows` in the `windows-exe-<target>` artifact, and the size summary lists each
-  beside the app. A sidecar task adds its build or fetch there and nothing else moves. A
-  `beforeBundleCommand` would run inside the Mac bundling step, which holds the updater key, so
-  sidecar work belongs in the seam instead.
+  in `crates/desktop/windows/hooks.nsh`); `machine.conf.json` (`installMode: "perMachine"`). `check`
+  fails on any other key in them. Sidecars are in none of them: see "Sidecars" below.
+- **The sidecar seam.** Each `build` leg has one step, "Sidecars for this target", after the installs
+  and before the app is built (tauri-build checks that every `externalBin` file exists). It runs
+  `.github/scripts/sidecars.mjs` for the leg's target ("Sidecars" below). A sidecar task adds a row to
+  that script's table and nothing else moves. A `beforeBundleCommand` would run inside the Mac
+  bundling step, which holds the updater key, so sidecar work belongs in the seam instead.
 - **The version** is `X.Y.Z` only, in `crates/desktop/Cargo.toml` and `tauri.conf.json`;
   `crates/desktop/tests/version.rs` fails when they differ, and `check` fails when a tag names another
   version. The first release is `0.1.0`.
@@ -154,6 +150,58 @@ for a pull request.
 - The Linux budgets are the first Linux dry run's sizes plus 5% (`budgets.toml`, release run
   41660337744): `release_binary_size` 23.84 MB measured, limit 25.1 MB; `deb_size` 10.90 MB measured,
   limit 11.5 MB. Windows and macOS have no size rows.
+
+## Sidecars (S20 follow-up, 2026-11-04)
+
+The plan is the private repo's `tasks/stage-f/S20-sidecars.md`. This changes PR 1's plan, in which
+S15's tools sat in `windows.conf.json` and S27's in `tauri.conf.json`.
+
+- **No `externalBin` in the base config.** tauri-build checks at `cargo build` time that every
+  listed file exists, so a sidecar in `tauri.conf.json` would break every dev, CI, e2e and
+  scoreboard build. Release builds get the list from a generated overlay instead.
+- **One script, `.github/scripts/sidecars.mjs <target-triple>`** (Node built-ins only), holds the
+  table of sidecars and their targets. For one target it builds or fetches each, copies it to
+  `crates/desktop/binaries/<name>-<triple>` (`.exe` on Windows; Tauri's naming), and writes
+  `sidecars.generated.json` in `crates/desktop/release/`, holding only `bundle.externalBin` for the
+  sidecars it placed. Both are gitignored. Today's rows, every release target:
+  - `clauseo-mcp`: `cargo build --release --locked -p clauseo-mcp --target <triple>` with the job's
+    own `RUSTFLAGS` and profile variables, so it gets the app's release flags; its `.pdb`, `.dSYM`
+    or `.dwp` goes into `debug-files-<target>` with the app's.
+  - `agent-browser`: `fetchAgentBrowser` from `crates/desktop/sidecars/agent-browser.mjs`, checked
+    against `crates/desktop/agent-browser.toml`. A triple the pin marks `none = true` leaves it out
+    of that target's list; a triple missing from the pin fails the job.
+  - `clauseo-guard` is a commented-out row: parked (host thread, 2026-11-03). S15 adds
+    `clauseo-sandbox-setup` and `clauseo-sandbox-run` (Windows targets) as rows of their own.
+- **The overlay goes last.** Every `tauri build` and `tauri bundle` of a shipped leg passes
+  `--config release/sidecars.generated.json` after every other `--config`. A JSON merge patch
+  replaces arrays, so one generated list per target is the only safe shape. The seam fails if the
+  file holds anything but `bundle.externalBin`; `check` now allows only
+  `bundle.windows.nsis.installerHooks` in `windows.conf.json`. `latest-json.test.mjs` fails when a
+  step running the script, or any step before it in the job, holds a secret, and when a shipped
+  build passes the overlay other than last. The measuring builds (S24) ship nothing and take no
+  sidecar.
+- **Windows.** The `build` leg uploads the sidecars and the overlay with `Clauseo.exe` in
+  `windows-exe-<target>`, and `sign-windows` downloads them back to the same two folders in
+  `crates/desktop/` before `tauri bundle --no-binary-patching`, so both installers take
+  exactly the files that were built. SignPath (S20a) signs every PE there and `Clauseo.exe`, before
+  NSIS and before the updater signature.
+- **Where they land:** beside the app's exe in every bundle: `Clauseo.app/Contents/MacOS/`,
+  `/usr/bin/` in the `.deb` and `.rpm` (hence the `clauseo-` prefix), and the install folder of
+  both NSIS installers, which install and remove each `externalBin` with `Clauseo.exe`.
+- **Sizes.** The size table lists each sidecar on its own row beside the app's exe; none counts
+  towards `release_binary_size`.
+- **Per-machine sandbox grants, with S15 (not before).** Under `%ProgramFiles%` S15's launcher cannot
+  write ACEs without admin, so the elevated per-machine installer writes them in `hooks.nsh`'s
+  `NSIS_HOOK_POSTINSTALL`, per-machine only, on every install and upgrade (a recreated file loses
+  its ACE; per-machine installs never update themselves). Per-user installs skip it. Each grant is
+  per file, without inheritance, read and execute only, to the well-known `RESTRICTED` SID:
+  `icacls "$INSTDIR\<file>.exe" /grant:r *S-1-5-12:(RX)` (`Everyone` if S15's spike drops
+  `RESTRICTED` from the restricting list). The files are what a jailed process starts:
+  `Clauseo.exe` (and any non-system DLL beside it that it imports), `agent-browser.exe`,
+  `clauseo-mcp.exe` (if the agent starts it from its MCP config), and `clauseo-guard.exe` only if
+  the guard returns. Never `clauseo-sandbox-setup.exe` (a jailed agent could raise a real UAC
+  prompt), and not `clauseo-sandbox-run.exe` (it runs with the plain logon token). Uninstall has
+  nothing to do: the ACEs go with the folder.
 
 ## Status
 

@@ -12,8 +12,11 @@
 // release.yml is read as text, line by line with its indentation, not with a YAML parser (none
 // ships with Node). It fails on a pull_request or pull_request_target trigger, a `uses:` not
 // pinned by a 40-character commit SHA (a local `./` action passes), a job with no `permissions:`,
-// a mention of `secrets` anywhere but inside a step, and a job that downloads an artifact name it
-// also uploads (a re-run of that job would download its own earlier upload).
+// a mention of `secrets` anywhere but inside a step, a job that downloads an artifact name it
+// also uploads (a re-run of that job would download its own earlier upload), and a step that runs
+// sidecars.mjs (third-party build scripts) with a secret in it or in any step before it.
+// release.yml's own test also holds every `tauri build` and `tauri bundle` of the shipped legs
+// to passing the generated sidecar overlay last.
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -178,8 +181,17 @@ function lintWorkflow(text) {
   const inStep = (path) => path[0] === "jobs" && path[2] === "steps" && path.length > 3;
   const checkSecrets = (n, path, line) => {
     // Any mention: `secrets.X`, `secrets[...]`, `secrets: inherit`, `toJSON(secrets)`.
-    if (/\bsecrets\b/.test(line) && !inStep(path)) {
+    const secret = /\bsecrets\b/.test(line);
+    if (secret && !inStep(path)) {
       problems.push(`line ${n}: a secret outside a step (${path.join(".") || "top level"})`);
+    }
+    // What the step holds, for the sidecar rule below.
+    const step = inStep(path) ? jobs.get(path[1])?.steps.at(-1) : undefined;
+    if (step !== undefined) {
+      step.secret ||= secret;
+      if (/\bsidecars\.mjs\b/.test(line)) {
+        step.sidecars ??= n;
+      }
     }
   };
   text.split(/\r?\n/).forEach((raw, index) => {
@@ -229,7 +241,7 @@ function lintWorkflow(text) {
     if (path[0] === "jobs" && path[2] === "steps" && jobs.has(path[1])) {
       const job = jobs.get(path[1]);
       if (startsStep) {
-        job.steps.push({ uses: "", name: null, pattern: null });
+        job.steps.push({ uses: "", name: null, pattern: null, secret: false, sidecars: null });
       }
       const step = job.steps.at(-1);
       if (step !== undefined && path.length === 5 && key === "uses") {
@@ -254,6 +266,12 @@ function lintWorkflow(text) {
     if (!job.permissions) {
       problems.push(`line ${job.line}: job ${name} has no permissions block`);
     }
+    // The sidecar script runs cargo build scripts and fetches: no secret may be present yet.
+    job.steps.forEach((step, i) => {
+      if (step.sidecars !== null && job.steps.slice(0, i + 1).some((one) => one.secret)) {
+        problems.push(`line ${step.sidecars}: job ${name} runs sidecars.mjs with a secret in that step or before it`);
+      }
+    });
     // A job's download must not pick up what the same job uploads: a re-run of the job would
     // download its own earlier upload. An expression in a name or pattern stands for anything.
     const action = (step, what) => step.uses.startsWith(`actions/${what}-artifact@`);
@@ -287,6 +305,45 @@ test("release.yml keeps the workflow rules", () => {
   for (const job of ["check", "build", "sign-windows", "assemble", "publish", "measure-builds"]) {
     assert.match(text, new RegExp(`^  ${job}:`, "m"), job);
   }
+});
+
+/** A job's lines without comments, each `\`-continued command joined into one line. */
+function jobCommands(text, job) {
+  const body = text.split(/^  ([a-z-]+):\s*$/m);
+  const at = body.indexOf(job);
+  assert.notEqual(at, -1, job);
+  return body[at + 1]
+    .replace(/\\\n\s*/g, " ")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => !line.startsWith("#"));
+}
+
+/** Every `tauri build` or `tauri bundle` in <job> that does not pass the sidecar overlay last. */
+function overlayNotLast(text, job) {
+  return jobCommands(text, job)
+    .filter((line) => /\btauri (build|bundle)\b/.test(line))
+    .filter((line) => !/--config release\/sidecars\.generated\.json( -- --locked)?$/.test(line));
+}
+
+test("release.yml's shipped builds run sidecars.mjs first and pass its overlay last", () => {
+  const text = readFileSync(RELEASE_YML, "utf8");
+  for (const job of ["build", "sign-windows"]) {
+    const commands = jobCommands(text, job).filter((line) => /\btauri (build|bundle)\b/.test(line));
+    assert.ok(commands.length > 0, job);
+    assert.deepEqual(overlayNotLast(text, job), [], job);
+  }
+  const build = jobCommands(text, "build");
+  const seam = build.findIndex((line) => line.startsWith("node .github/scripts/sidecars.mjs"));
+  assert.ok(seam !== -1 && seam < build.findIndex((line) => /\btauri build\b/.test(line)), "the seam runs before tauri build");
+  const broken = text.replace(/ --config release\/sidecars\.generated\.json -- --locked/, " -- --locked");
+  assert.equal(overlayNotLast(broken, "build").length, 1);
+  const early = text.replace(
+    '--config "$RUNNER_TEMP/updater-key.conf.json" --config release/sidecars.generated.json',
+    '--config release/sidecars.generated.json --config "$RUNNER_TEMP/updater-key.conf.json"',
+  );
+  assert.notEqual(early, text);
+  assert.equal(overlayNotLast(early, "build").length, 1);
 });
 
 test("the workflow lint fails each broken rule", () => {
@@ -355,6 +412,16 @@ test("the workflow lint fails each broken rule", () => {
   assert.deepEqual(broken("      - name: Sign", artifacts.replace("dist-assets", "release-${{ matrix.target }}")), [
     "line 15: job one downloads release-*, which matches its own upload release-${{ matrix.target }} (line 18)",
   ]);
+  // sidecars.mjs runs before any secret: after the signing step, or with a secret of its own, fails.
+  const seam = "      - name: Sidecars\n        run: node .github/scripts/sidecars.mjs \"$TARGET\"\n";
+  assert.deepEqual(broken("      - name: Sign", `${seam}      - name: Sign`), []);
+  assert.deepEqual(lintWorkflow(`${good}${seam}`), [
+    "line 19: job one runs sidecars.mjs with a secret in that step or before it",
+  ]);
+  assert.deepEqual(
+    broken("      - name: Sign", `${seam}        env:\n          GH_TOKEN: \${{ secrets.GH }}\n      - name: Sign`),
+    ["line 14: job one runs sidecars.mjs with a secret in that step or before it"],
+  );
 });
 
 // ---- a published release (network; only with LATEST_JSON_RELEASE) ----
