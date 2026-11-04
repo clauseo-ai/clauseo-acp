@@ -33,7 +33,8 @@
 //! - Time and randomness are inputs: the crate reads no clock, and its send delays come from the
 //!   seed given to `open`. Ids come from the OS's random source.
 //! - Files change only through `write.rs`, and only `<data_dir>/first_act_done` and
-//!   `<data_dir>/counts/`.
+//!   `<data_dir>/counts/`; never while the state's lock is held, so `bump` never waits on the
+//!   disk, and an off deletes the folder after any write under way (`counts.rs`).
 //!
 //! # Depends on
 //!

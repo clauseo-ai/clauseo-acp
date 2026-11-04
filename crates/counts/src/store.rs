@@ -86,6 +86,27 @@ impl TallyFile {
     }
 }
 
+/// One file change, which the state queues under its lock and `Counts` makes with it released.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Op {
+    /// Write the first-act marker.
+    Marker,
+    /// Write `install_id`.
+    Install(InstallId),
+    /// Write `today.json`.
+    Today(TodayFile),
+    /// Write a tally file.
+    Tally(TallyFile),
+    /// Write a queued day.
+    Queued(DayReport),
+    /// Remove a queued day.
+    RemoveQueued(Day),
+    /// Remove a tally file.
+    RemoveTally(Week),
+    /// Delete the counts folder ([`Store::delete_all`]).
+    DeleteAll,
+}
+
 /// The counts folder of one data folder.
 #[derive(Debug, Clone)]
 pub(crate) struct Store {
@@ -101,8 +122,22 @@ impl Store {
         }
     }
 
+    /// Makes the change `op` names.
+    pub(crate) fn apply(&self, op: &Op) -> io::Result<()> {
+        match op {
+            Op::Marker => self.write_marker(),
+            Op::Install(id) => self.write_install(*id),
+            Op::Today(today) => write_json(&self.today_path(), today),
+            Op::Tally(tally) => write_json(&self.tally_path(tally.week()), tally),
+            Op::Queued(report) => write_json(&self.queue_path(report.day), report),
+            Op::RemoveQueued(day) => write::remove_file(&self.queue_path(*day)),
+            Op::RemoveTally(week) => write::remove_file(&self.tally_path(*week)),
+            Op::DeleteAll => self.delete_all(),
+        }
+    }
+
     /// Writes the first-act marker.
-    pub(crate) fn write_marker(&self) -> io::Result<()> {
+    fn write_marker(&self) -> io::Result<()> {
         write::replace(&self.marker, b"")
     }
 
@@ -153,10 +188,6 @@ impl Store {
         }
     }
 
-    pub(crate) fn write_today(&self, today: &TodayFile) -> io::Result<()> {
-        write_json(&self.today_path(), today)
-    }
-
     /// Every queued day whose file holds that day's report, made under `install`.
     pub(crate) fn read_queue(&self, install: InstallId) -> io::Result<BTreeMap<Day, DayReport>> {
         let mut queue = BTreeMap::new();
@@ -174,14 +205,6 @@ impl Store {
         Ok(queue)
     }
 
-    pub(crate) fn write_queued(&self, report: &DayReport) -> io::Result<()> {
-        write_json(&self.queue_path(report.day), report)
-    }
-
-    pub(crate) fn remove_queued(&self, day: Day) -> io::Result<()> {
-        write::remove_file(&self.queue_path(day))
-    }
-
     /// Every tally whose file holds that week's tally, counted under `install`.
     pub(crate) fn read_tallies(&self, install: InstallId) -> io::Result<BTreeMap<Week, TallyFile>> {
         let mut tallies = BTreeMap::new();
@@ -197,14 +220,6 @@ impl Store {
             }
         }
         Ok(tallies)
-    }
-
-    pub(crate) fn write_tally(&self, tally: &TallyFile) -> io::Result<()> {
-        write_json(&self.tally_path(tally.week()), tally)
-    }
-
-    pub(crate) fn remove_tally(&self, week: Week) -> io::Result<()> {
-        write::remove_file(&self.tally_path(week))
     }
 
     /// The files in `<counts>/<folder>`, sorted; a missing folder has none. A leftover temp file

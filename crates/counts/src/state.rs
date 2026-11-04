@@ -1,5 +1,9 @@
 //! What one install holds in memory: the open day, the queue, the tallies and the sender, and
 //! the mode that says whether any of it is saved. [`crate::Counts`] wraps it in a mutex.
+//!
+//! After `open`, the state changes no file itself: what it would write or delete goes on
+//! `pending`, which `Counts` takes and applies with this mutex released, so a `bump` never
+//! waits on the disk.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
@@ -14,7 +18,7 @@ use crate::schema::{
     Week,
 };
 use crate::sender::Sender;
-use crate::store::{Store, TallyFile, TodayFile};
+use crate::store::{Op, Store, TallyFile, TodayFile};
 
 /// Foreground time between two calls further apart than this is not counted: the machine slept
 /// or the app hung, and the time is not use.
@@ -60,6 +64,8 @@ pub(crate) struct State {
     pub(crate) dirty: bool,
     /// The file error `open` met, for the first tick to return.
     pub(crate) open_error: Option<io::Error>,
+    /// The file changes made since `Counts` last applied them, in order.
+    pub(crate) pending: Vec<Op>,
 }
 
 impl State {
@@ -88,6 +94,7 @@ impl State {
             sender: Sender::default(),
             dirty: false,
             open_error: None,
+            pending: Vec::new(),
         };
         let result = match (on, consented) {
             (false, _) => state.delete_folder(),
@@ -133,43 +140,42 @@ impl State {
         Ok(())
     }
 
-    /// Writes everything held in memory: at the first act, and on again after the first act.
-    fn save_all(&mut self) -> io::Result<()> {
+    /// Saves everything held in memory: at the first act, and on again after the first act.
+    fn save_all(&mut self) {
         if let Some(id) = self.install {
-            self.store.write_install(id)?;
+            self.pending.push(Op::Install(id));
         }
         for report in self.queue.values() {
-            self.store.write_queued(report)?;
+            self.pending.push(Op::Queued(report.clone()));
         }
         self.dirty = true;
-        self.save()
+        self.save();
     }
 
-    /// Writes `today.json` and every tally file when something changed and the mode saves.
-    pub(crate) fn save(&mut self) -> io::Result<()> {
+    /// Saves `today.json` and every tally file when something changed and the mode saves.
+    pub(crate) fn save(&mut self) {
         let Some(install) = self.install else {
-            return Ok(());
+            return;
         };
         if self.mode != Mode::Saving || !self.dirty {
-            return Ok(());
+            return;
         }
-        self.store.write_today(&TodayFile {
+        self.pending.push(Op::Today(TodayFile {
             install,
             day: self.today.day,
             cells: self.today.counter.to_cells(),
             foreground_secs: self.today.foreground_secs,
             steps: self.today.steps.clone(),
             posted: self.today.posted,
-        })?;
+        }));
         for (&week, tally) in &self.tallies {
-            self.store.write_tally(&tally.to_file(week, install))?;
+            self.pending.push(Op::Tally(tally.to_file(week, install)));
         }
         self.dirty = false;
-        Ok(())
     }
 
-    /// Deletes the counts folder, or marks it to be tried again on the next tick.
-    pub(crate) fn delete_folder(&mut self) -> io::Result<()> {
+    /// Deletes the counts folder at `open`, or marks it to be tried again on the next tick.
+    fn delete_folder(&mut self) -> io::Result<()> {
         let result = self.store.delete_all();
         self.delete_pending = result.is_err();
         result
@@ -277,7 +283,7 @@ impl State {
         };
         if self.mode == Mode::Saving {
             // A failed write keeps the report in memory, and the sender sends it from there.
-            drop(self.store.write_queued(&report));
+            self.pending.push(Op::Queued(report.clone()));
         }
         self.queue.insert(day, report);
         while self.queue.len() > usize::try_from(MAX_DAY_AGE).unwrap_or(usize::MAX) {
@@ -349,7 +355,7 @@ impl State {
     /// and the age rule drops it again.
     pub(crate) fn forget_day(&mut self, day: Day) {
         if self.mode == Mode::Saving {
-            drop(self.store.remove_queued(day));
+            self.pending.push(Op::RemoveQueued(day));
         }
     }
 
@@ -357,13 +363,13 @@ impl State {
     pub(crate) fn forget_tally(&mut self, week: Week) {
         self.tallies.remove(&week);
         if self.mode == Mode::Saving {
-            drop(self.store.remove_tally(week));
+            self.pending.push(Op::RemoveTally(week));
         }
     }
 
     /// Turns counts off: cancels a POST in flight (it is never retried), forgets everything in
-    /// memory, and deletes the counts folder.
-    pub(crate) fn turn_off(&mut self) -> io::Result<()> {
+    /// memory, drops every file change not yet made, and deletes the counts folder.
+    pub(crate) fn turn_off(&mut self) {
         self.mode = Mode::Off;
         self.sender.reset();
         self.install = None;
@@ -373,44 +379,36 @@ impl State {
         self.queue.clear();
         self.tallies.clear();
         self.dirty = false;
-        self.delete_folder()
+        self.pending.clear();
+        self.pending.push(Op::DeleteAll);
     }
 
-    /// Turns counts on with a new id: saved after the first act, in memory before it. A counts
-    /// folder whose delete failed is deleted first; while that fails, counts stay off and the
-    /// error comes back, so nothing from before off can sit beside the new id.
-    pub(crate) fn turn_on(&mut self) -> io::Result<()> {
+    /// Turns counts on with a new id, once `Counts` has deleted a counts folder whose delete
+    /// failed (so nothing from before off can sit beside the new id): saved after the first act,
+    /// in memory before it.
+    pub(crate) fn turn_on(&mut self) {
         if self.mode != Mode::Off {
-            return Ok(());
-        }
-        if self.delete_pending {
-            self.delete_folder()?;
+            return;
         }
         self.install = Some(InstallId::random());
         if self.consented {
             self.mode = Mode::Saving;
-            self.save_all()
+            self.save_all();
         } else {
             self.mode = Mode::Memory;
-            Ok(())
         }
     }
 
-    /// The first act: writes the marker; with counts on, starts saving what memory holds.
-    pub(crate) fn first_act(&mut self, counts: bool) -> io::Result<()> {
-        if self.consented {
-            return Ok(());
-        }
-        self.store.write_marker()?;
+    /// The first act, once `Counts` has written the marker: with counts on, starts saving what
+    /// memory holds; with counts off, turns off.
+    pub(crate) fn first_act(&mut self, counts: bool) {
         self.consented = true;
         if !counts {
-            return self.turn_off();
-        }
-        if self.mode == Mode::Memory {
+            self.turn_off();
+        } else if self.mode == Mode::Memory {
             self.mode = Mode::Saving;
-            return self.save_all();
+            self.save_all();
         }
-        Ok(())
     }
 }
 
