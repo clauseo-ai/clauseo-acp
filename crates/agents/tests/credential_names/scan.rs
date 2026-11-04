@@ -73,6 +73,16 @@ fn escaped_dot(line: &str) -> bool {
     })
 }
 
+/// Whether `line` has a `format!` and a literal holding `auth` (`format!("auth.{}", "json")`).
+fn formats_auth(line: &str) -> bool {
+    line.contains("format!")
+        && line
+            .split('"')
+            .skip(1)
+            .step_by(2)
+            .any(|lit| lit.contains("auth"))
+}
+
 /// Whether `line` (Claude's `--json` flag left out) says `json` or `with_extension`.
 fn builds_extension(line: &str) -> bool {
     let line = line.replace(JSON_FLAG, "");
@@ -227,7 +237,9 @@ fn violations(rel: &str, code: &str) -> Vec<String> {
             found.push(format!("{at} spells a dot with an escape"));
         }
         let next = lines.get(n + 1).copied().unwrap_or_default();
-        if line.contains(AUTH_LITERAL) && (builds_extension(line) || builds_extension(next)) {
+        if (line.contains(AUTH_LITERAL) || formats_auth(line))
+            && (builds_extension(line) || builds_extension(next))
+        {
             found.push(format!("{at} builds a file name from \"auth\" in pieces"));
         }
         if line.contains(CLAUDE_FILE) {
@@ -246,8 +258,10 @@ fn violations(rel: &str, code: &str) -> Vec<String> {
             if calls(line, "read_", false) {
                 found.push(format!("{at} calls a read_ function"));
             }
-            if calls(line, "open", true) {
-                found.push(format!("{at} calls open("));
+            for name in ["open", "copy", "rename"] {
+                if calls(line, name, true) {
+                    found.push(format!("{at} calls {name}("));
+                }
             }
         }
     }
@@ -323,6 +337,28 @@ fn the_scan_catches_the_review_s_ways_around_it() {
     ];
     for rel in ["signin/claude.rs", REUSE, "probe.rs"] {
         for code in anywhere {
+            assert!(!probe(rel, code).is_empty(), "{code} in {rel}");
+        }
+    }
+}
+
+/// S18 re-review, Low: `reuse.rs` may not copy or rename a file (`fs::copy` reads the
+/// source), and a `format!` whose literal holds `auth` beside `json` builds the name in
+/// pieces anywhere.
+#[test]
+fn the_scan_catches_copy_rename_and_format() {
+    for code in [
+        "fn f(a: &Path, b: &Path) { let _ = std::fs::copy(a, b); }",
+        "fn f(a: &Path, b: &Path) { let _ = crate::write::rename(a, b); }",
+    ] {
+        assert!(!probe(REUSE, code).is_empty(), "{code} in {REUSE}");
+    }
+    for code in [
+        "fn f() -> String { format!(\"auth.{}\", \"json\") }",
+        "fn f() -> String { format!(\"auth{}json\", '.') }",
+        "fn f(e: &str) -> String {\n    format!(\"auth.{e}\")\n} const E: &str = \"json\";",
+    ] {
+        for rel in ["signin/claude.rs", REUSE, "probe.rs"] {
             assert!(!probe(rel, code).is_empty(), "{code} in {rel}");
         }
     }
