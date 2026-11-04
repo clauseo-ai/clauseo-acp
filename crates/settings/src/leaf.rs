@@ -18,8 +18,11 @@
 //!   and `the_keys_a_patch_sets_are_the_ui_policy_keys_in_field_order`;
 //! - a sample value in `leaf/tests.rs`' `every_fixed_key_types_and_the_kinds_agree`, and a
 //!   value that is not the default in `a_refused_key_goes_back_to_its_default`;
-//! - for a key that decides what an agent can reach, its name in [`SECURITY_KEYS`] and its
-//!   arm in [`refuse`], which sets the value it is locked at when its policy is unknown.
+//! - for a key that decides what an agent can reach, or what Clauseo sends off the machine, its
+//!   name in [`SECURITY_KEYS`] and its arm in [`refuse`], which sets the value it is locked at
+//!   when its policy is unknown;
+//! - for a key a policy may only turn off, its name in [`OFF_ONLY_KEYS`] (`Effective::load`
+//!   ignores a policy `true` for it, with a warning).
 //!
 //! `schema::tests::the_keys_and_their_kinds_are_the_schemas` fails when the schema and [`KEYS`]
 //! disagree, and the two samples tests fail when [`KEYS`] has a row without a sample.
@@ -29,8 +32,8 @@ mod tests;
 
 use crate::policy::{Kind, kind_of};
 use crate::schema::{
-    AgentLaunch, Density, FontSize, Language, Lite, McpServerLaunch, Motion, Settings, Theme,
-    ToolsSettings,
+    AgentLaunch, Density, FontSize, Language, Lite, McpServerLaunch, Motion, PrivacySettings,
+    Settings, Theme, ToolsSettings,
 };
 use crate::warning::{Origin, Warning, WarningKind};
 use serde::de::DeserializeOwned;
@@ -40,7 +43,7 @@ use std::path::{Path, PathBuf};
 
 /// Every key with a fixed name, and its kind. An agent's key is `agents.<id>`, an object.
 /// `schema::tests::the_keys_and_their_kinds_are_the_schemas` holds this to the schema.
-pub(crate) const KEYS: [(&str, Kind); 10] = [
+pub(crate) const KEYS: [(&str, Kind); 12] = [
     ("matters.default_location", Kind::String),
     ("mcp.servers", Kind::Object),
     ("ui.theme", Kind::String),
@@ -51,13 +54,27 @@ pub(crate) const KEYS: [(&str, Kind); 10] = [
     ("ui.motion", Kind::String),
     ("tools.web_search", Kind::Boolean),
     ("tools.browser", Kind::Boolean),
+    ("privacy.counts", Kind::Boolean),
+    ("privacy.crash_reports", Kind::Boolean),
 ];
 
-/// The keys that decide what an agent can reach. A policy source that cannot be read locks each
-/// off with [`refuse`] (ADR 0009, R21): its value there is unknown, and the user's must not stand
-/// in. Off is not always the default: both `tools` keys default to on, and locking them at their
-/// default would fail open.
-pub(crate) const SECURITY_KEYS: [&str; 3] = ["mcp.servers", "tools.web_search", "tools.browser"];
+/// The keys that decide what an agent can reach, or what Clauseo sends off the machine. A policy
+/// source that cannot be read locks each off with [`refuse`] (ADR 0009, R21; the `privacy` keys,
+/// decision record 0036): its value there is unknown, and the user's must not stand in. Off is
+/// not always the default: both `tools` keys and `privacy.counts` default to on, and locking
+/// them at their default would fail open.
+pub(crate) const SECURITY_KEYS: [&str; 5] = [
+    "mcp.servers",
+    "tools.web_search",
+    "tools.browser",
+    "privacy.counts",
+    "privacy.crash_reports",
+];
+
+/// The keys a policy may only turn off (decision record 0036): a policy `true` for one is
+/// ignored with a warning and does not lock it, so the lawyer's own switch stands. A policy
+/// `false` locks it, as any policy value does.
+pub(crate) const OFF_ONLY_KEYS: [&str; 2] = ["privacy.counts", "privacy.crash_reports"];
 
 /// The MCP server name Clauseo keeps for its own browser tool. An `mcp.servers` entry of this
 /// name, in any case, in `settings.json` or a policy, is left out with a warning; the host adds its
@@ -96,6 +113,8 @@ pub(crate) enum Leaf {
     Motion(Motion),
     WebSearch(bool),
     Browser(bool),
+    Counts(bool),
+    CrashReports(bool),
     /// A known key whose value does not type, or that a policy source refused. Applied, it puts
     /// the key back at its default; for `agents.<id>`, the entry for that id is dropped. A
     /// policy also locks the key (fail closed, Rohan, 2026-10-31), and applies it with
@@ -315,6 +334,8 @@ impl Leaf {
             "ui.motion" => typed_value(key, value).map(Leaf::Motion),
             "tools.web_search" => typed_value(key, value).map(Leaf::WebSearch),
             "tools.browser" => typed_value(key, value).map(Leaf::Browser),
+            "privacy.counts" => typed_value(key, value).map(Leaf::Counts),
+            "privacy.crash_reports" => typed_value(key, value).map(Leaf::CrashReports),
             _ => match agent_id(key) {
                 Some(id) => agent(key, id, value, unknown),
                 None => Err(WarningKind::UnknownKey {
@@ -338,6 +359,8 @@ impl Leaf {
             Leaf::Motion(_) => "ui.motion".to_owned(),
             Leaf::WebSearch(_) => "tools.web_search".to_owned(),
             Leaf::Browser(_) => "tools.browser".to_owned(),
+            Leaf::Counts(_) => "privacy.counts".to_owned(),
+            Leaf::CrashReports(_) => "privacy.crash_reports".to_owned(),
             Leaf::Refused(key) => key.clone(),
         }
     }
@@ -345,6 +368,14 @@ impl Leaf {
     /// Whether this is a value, not a [`Leaf::Refused`] key.
     pub(crate) fn is_value(&self) -> bool {
         !matches!(self, Leaf::Refused(_))
+    }
+
+    /// Whether this turns on a key a policy may only turn off ([`OFF_ONLY_KEYS`]): a policy
+    /// value that `Effective::load` ignores, with a warning, and does not lock.
+    pub(crate) fn turns_on_an_off_only_key(&self) -> bool {
+        let on = matches!(self, Leaf::Counts(true) | Leaf::CrashReports(true));
+        debug_assert!(!on || OFF_ONLY_KEYS.contains(&self.key().as_str()));
+        on
     }
 
     /// Writes the value into `settings`, replacing what was there. An agent replaces the whole
@@ -364,6 +395,8 @@ impl Leaf {
             Leaf::Motion(motion) => settings.ui.motion = motion,
             Leaf::WebSearch(on) => settings.tools.web_search = on,
             Leaf::Browser(on) => settings.tools.browser = on,
+            Leaf::Counts(on) => settings.privacy.counts = on,
+            Leaf::CrashReports(on) => settings.privacy.crash_reports = on,
             Leaf::Refused(key) => reset(&key, settings),
         }
     }
@@ -379,9 +412,10 @@ impl Leaf {
 }
 
 /// Locks each security key `key` names at its refused value: `mcp.servers` empty, each
-/// `tools` key `false`. Kept apart from [`reset`], which restores the default, since a security
-/// key's default can be on. `key` is one of [`SECURITY_KEYS`], or a prefix ending in `.`
-/// (`tools.`) that names every security key under it; stage C adds keys under `plans.`.
+/// `tools` and `privacy` key `false`. Kept apart from [`reset`], which restores the default,
+/// since a security key's default can be on. `key` is one of [`SECURITY_KEYS`], or a prefix
+/// ending in `.` (`tools.`) that names every security key under it; stage C adds keys under
+/// `plans.`.
 /// Returns whether `key` named any security key; when it did not, nothing changes.
 pub(crate) fn refuse(key: &str, settings: &mut Settings) -> bool {
     let named = |security: &str| match key.strip_suffix('.') {
@@ -395,6 +429,8 @@ pub(crate) fn refuse(key: &str, settings: &mut Settings) -> bool {
             "mcp.servers" => settings.mcp.servers.clear(),
             "tools.web_search" => settings.tools.web_search = false,
             "tools.browser" => settings.tools.browser = false,
+            "privacy.counts" => settings.privacy.counts = false,
+            "privacy.crash_reports" => settings.privacy.crash_reports = false,
             other => unreachable!("security key {other} has no refused value"),
         }
     }
@@ -414,6 +450,10 @@ fn reset(key: &str, settings: &mut Settings) {
         "ui.motion" => settings.ui.motion = Motion::default(),
         "tools.web_search" => settings.tools.web_search = ToolsSettings::default().web_search,
         "tools.browser" => settings.tools.browser = ToolsSettings::default().browser,
+        "privacy.counts" => settings.privacy.counts = PrivacySettings::default().counts,
+        "privacy.crash_reports" => {
+            settings.privacy.crash_reports = PrivacySettings::default().crash_reports;
+        }
         _ => {
             if let Some(id) = agent_id(key) {
                 settings.agents.remove(id);

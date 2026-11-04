@@ -61,6 +61,10 @@
       <true/>
       <key>tools.browser</key>
       <false/>
+      <key>privacy.counts</key>
+      <false/>
+      <key>privacy.crash_reports</key>
+      <false/>
     </dict>
   </array>
   <key>PayloadType</key>

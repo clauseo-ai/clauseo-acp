@@ -5,8 +5,9 @@
 //! The settings schema ([`Settings`] and its sections) and its JSON Schema; where the data
 //! folder, `settings.json` and new matters go on each OS ([`Locations`]); the folders a lawyer
 //! may not pick as a matter ([`refused_folders`]); reading `settings.json` (JSON with comments)
-//! and its runtime writes, [`Effective::apply_ui_patch`] of a [`UiPatch`] and
-//! [`Effective::apply_tools_patch`] of a [`ToolsPatch`]; and the policy
+//! and its runtime writes, [`Effective::apply_ui_patch`] of a [`UiPatch`],
+//! [`Effective::apply_tools_patch`] of a [`ToolsPatch`] and [`Effective::apply_privacy_patch`]
+//! of a [`PrivacyPatch`]; and the policy
 //! layer a firm's IT pushes: the Windows registry, macOS managed preferences and a
 //! `policy.json`. Decision record `docs/decisions/0009-policy-layer.md` fixes the policy
 //! sources, paths, formats and the merge rule.
@@ -20,23 +21,29 @@
 //! readers go through that owner. It answers [`Effective::settings`], [`Effective::agent`],
 //! [`Effective::mcp_servers`], [`Effective::enabled_mcp_servers`],
 //! [`Effective::default_matters_dir`], [`Effective::data_dir`], [`Effective::locations`],
-//! [`Effective::policy`], [`Effective::is_locked`], [`Effective::warnings`],
-//! [`Effective::apply_ui_patch`] and [`Effective::apply_tools_patch`]. Every input is a trait:
+//! [`Effective::policy`], [`Effective::policy_present`], [`Effective::is_locked`],
+//! [`Effective::warnings`], [`Effective::apply_ui_patch`], [`Effective::apply_tools_patch`],
+//! [`Effective::check_privacy_patch`] and [`Effective::apply_privacy_patch`]. Every input is a
+//! trait:
 //! [`PlatformDirs`], [`Env`], [`Files`] and [`PolicySource`], with [`SystemDirs`], [`SystemEnv`]
 //! and [`SystemFiles`] over the OS. The
 //! parsers of each policy store are in [`policy`]. The webview's `ui` changes are a [`UiPatch`],
 //! applied with [`Effective::apply_ui_patch`]: the only write to `settings.json` and the only
 //! change to settings after `load`. The `tools` switches are a [`ToolsPatch`], applied with
 //! [`Effective::apply_tools_patch`] the same way; a session reads them at its start, so they
-//! take effect at the next session start. Everything else takes effect on the next start.
+//! take effect at the next session start. The `privacy` switches are a [`PrivacyPatch`], applied
+//! with [`Effective::apply_privacy_patch`] the same way. Everything else takes effect on the next
+//! start.
 //!
 //! # Invariants
 //!
 //! - [`Effective::load`] never fails. A missing file is normal; a file or value that cannot be
 //!   read is a [`Warning`] (with path, line and column where there is one) and defaults stand in.
 //!   A policy source that cannot be read is dropped whole and listed in [`PolicyStatus`], and
-//!   locks each security key (`mcp.servers`, `tools.web_search`, `tools.browser`) off: the
-//!   list empty, each tool `false`.
+//!   locks each security key (`mcp.servers`, `tools.web_search`, `tools.browser`,
+//!   `privacy.counts`, `privacy.crash_reports`) off: the list empty, each switch `false`.
+//! - A policy can only turn a `privacy` key off: a policy `true` is ignored with a warning and
+//!   locks nothing; a policy `false` locks it (decision record 0036).
 //! - Policy wins: a policy value replaces the user's for its key, and locks it. An agent's
 //!   policy entry replaces the user's whole entry for that id. Earlier sources win over later.
 //! - Policy fails closed per key: a policy value for a known key that does not type is a
@@ -56,7 +63,8 @@
 //! - A [`UiPatch`] that names a locked key is refused with [`Error::Locked`], and nothing is
 //!   written or changed in memory.
 //! - [`ToolsPatch`] holds only the `tools` fields and refuses any other key; one that names a
-//!   locked tool key is refused whole, as a [`UiPatch`] is.
+//!   locked tool key is refused whole, as a [`UiPatch`] is. [`PrivacyPatch`] is the same for
+//!   the `privacy` fields.
 //! - An agent's `command` is an absolute path, or the agent is left out with a warning.
 //! - `mcp.servers` is one key: a policy value replaces the user's whole list, with each
 //!   server's `enabled`, and an invalid one locks the list empty. An entry with a bad name, a
@@ -82,6 +90,7 @@ mod json;
 mod leaf;
 mod locations;
 pub mod policy;
+mod privacy;
 mod schema;
 mod system;
 #[cfg(test)]
@@ -103,9 +112,10 @@ pub use policy::{
     FilePolicy, PolicyRead, PolicySource, PolicyStatus, PolicyValues, SourceError,
     system_policy_sources,
 };
+pub use privacy::PrivacyPatch;
 pub use schema::{
     AgentLaunch, Density, FontSize, Language, Lite, MattersSettings, McpServerLaunch, McpSettings,
-    Motion, Settings, Theme, ToolsSettings, UiSettings, json_schema,
+    Motion, PrivacySettings, Settings, Theme, ToolsSettings, UiSettings, json_schema,
 };
 pub use system::{SystemDirs, SystemEnv};
 pub use tools::ToolsPatch;

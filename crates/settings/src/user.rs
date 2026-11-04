@@ -1,5 +1,6 @@
-//! The user's `settings.json`: reading it, and the write of a [`UiPatch`] or a [`ToolsPatch`].
-//! Only [`crate::Effective::apply_ui_patch`] and [`crate::Effective::apply_tools_patch`] call
+//! The user's `settings.json`: reading it, and the write of a [`UiPatch`], a [`ToolsPatch`] or a
+//! [`PrivacyPatch`]. Only [`crate::Effective::apply_ui_patch`],
+//! [`crate::Effective::apply_tools_patch`] and [`crate::Effective::apply_privacy_patch`] call
 //! those writes, after they have checked policy locks.
 
 #[cfg(test)]
@@ -10,6 +11,7 @@ use crate::files::Files;
 use crate::json;
 use crate::leaf::{self, Leaf};
 use crate::locations::Locations;
+use crate::privacy::PrivacyPatch;
 use crate::tools::ToolsPatch;
 use crate::ui::UiPatch;
 use crate::warning::{Origin, Warning, WarningKind};
@@ -81,6 +83,17 @@ pub(crate) fn write_tools_settings(
     patch: &ToolsPatch,
 ) -> Result<(), Error> {
     write_section(locations, files, "tools", patch)
+}
+
+/// Saves a [`PrivacyPatch`] to the user's `settings.json`, into its `privacy` section, as
+/// [`write_user_settings`] does for `ui`. It does not check policy locks:
+/// [`crate::Effective::apply_privacy_patch`] does, before it calls this.
+pub(crate) fn write_privacy_settings(
+    locations: &Locations,
+    files: &dyn Files,
+    patch: &PrivacyPatch,
+) -> Result<(), Error> {
+    write_section(locations, files, "privacy", patch)
 }
 
 /// Saves the fields of `patch` that are set into the section `name` of the user's

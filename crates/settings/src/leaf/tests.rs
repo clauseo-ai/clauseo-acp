@@ -1,8 +1,8 @@
 use super::{KEYS, Leaf, RESERVED_MCP_SERVER, Raw, SECURITY_KEYS, agent_id, refuse, typed};
 use crate::policy::kind_of;
 use crate::schema::{
-    AgentLaunch, Density, FontSize, Language, Lite, McpServerLaunch, Motion, Settings, Theme,
-    ToolsSettings,
+    AgentLaunch, Density, FontSize, Language, Lite, McpServerLaunch, Motion, PrivacySettings,
+    Settings, Theme, ToolsSettings,
 };
 use crate::testing::{abs, abs_str};
 use crate::warning::{Origin, Warning, WarningKind};
@@ -310,6 +310,8 @@ fn every_fixed_key_types_and_the_kinds_agree() {
         json!("system"),
         json!(true),
         json!(false),
+        json!(false),
+        json!(true),
     ];
     // One sample per row, so a new row cannot go unchecked.
     assert_eq!(samples.len(), KEYS.len());
@@ -337,6 +339,8 @@ fn a_refused_key_goes_back_to_its_default() {
         json!("full"),
         json!(!ToolsSettings::default().web_search),
         json!(!ToolsSettings::default().browser),
+        json!(!PrivacySettings::default().counts),
+        json!(!PrivacySettings::default().crash_reports),
     ];
     assert_eq!(samples.len(), KEYS.len());
     for ((key, _), sample) in KEYS.iter().zip(samples) {
@@ -486,6 +490,8 @@ fn refuse_locks_each_security_key_off() {
         let mut settings = Settings::default();
         settings.tools.web_search = true;
         settings.tools.browser = true;
+        settings.privacy.counts = true;
+        settings.privacy.crash_reports = true;
         settings.mcp.servers.insert(
             "s".to_owned(),
             serde_json::from_value(json!({"command": abs_str("s"), "enabled": true})).unwrap(),
@@ -502,6 +508,15 @@ fn refuse_locks_each_security_key_off() {
     assert!(refuse("tools.browser", &mut settings));
     assert!(settings.tools.web_search);
     assert!(!settings.tools.browser);
+
+    // The privacy keys lock off too (0036): counts defaults to on.
+    let mut settings = on();
+    assert!(refuse("privacy.counts", &mut settings));
+    assert!(!settings.privacy.counts && settings.privacy.crash_reports);
+    let mut settings = on();
+    assert!(refuse("privacy.", &mut settings));
+    assert!(!settings.privacy.counts && !settings.privacy.crash_reports);
+    assert!(settings.tools.web_search && settings.tools.browser);
 
     let mut settings = on();
     assert!(refuse("mcp.servers", &mut settings));
