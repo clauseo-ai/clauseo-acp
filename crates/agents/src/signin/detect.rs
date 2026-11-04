@@ -45,7 +45,7 @@ fn folder<T>(job: &SigninJob<T>) -> Option<PathBuf> {
         .join("agents")
         .join("signin")
         .join("detect");
-    crate::write::create_dir_all(&folder).ok()?;
+    crate::write::create_private_dirs_under(&job.config.data_dir, &folder).ok()?;
     Some(folder)
 }
 
@@ -67,7 +67,10 @@ pub(crate) async fn claude<T: Timer + Send + Sync>(
     Some(Detected { state, identity })
 }
 
-/// Codex's detection; `None` when it could not tell.
+/// Codex's detection; `None` when it could not tell: a status run that could not, or, for a
+/// reusable login, an `account/read` that got no answer (cut short by Cancel or its limit, or
+/// an error). Such a read is never "no email": `LoginFound { email: None }` comes only from an
+/// answer that names no `ChatGPT` account.
 pub(crate) async fn codex<T: Timer + Send + Sync>(
     job: &SigninJob<T>,
     cancel: &Cancel,
@@ -81,9 +84,7 @@ pub(crate) async fn codex<T: Timer + Send + Sync>(
         .is_some_and(|lawyer| reuse::lawyer_login_present(&lawyer));
     let verdict = CodexDetect::classify(code, present);
     let identity = if verdict == CodexDetect::Reusable {
-        identity::read_as(job, cancel, RunKind::Detect, &folder)
-            .await
-            .unwrap_or_default()
+        identity::read_as(job, cancel, RunKind::Detect, &folder).await?
     } else {
         Identity::default()
     };

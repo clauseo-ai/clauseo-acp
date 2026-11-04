@@ -3,6 +3,8 @@
 //!
 //! Everything written is under `<data_dir>/agents`: downloads, the npm cache's folder, the
 //! runtime, install folders and receipts. Callers pass paths they built from the data folder.
+//! Sign-in's folders are made with [`create_private_dirs_under`], which follows no link below
+//! the data folder.
 
 #![expect(
     clippy::disallowed_methods,
@@ -20,6 +22,74 @@ pub(crate) use extract::{ArchiveKind, ExtractError, extract};
 /// `fs::create_dir_all`.
 pub(crate) fn create_dir_all(path: &Path) -> io::Result<()> {
     std::fs::create_dir_all(path)
+}
+
+/// Creates the folder `target` and every missing folder between `data_dir` and it, through no
+/// link, following host's `make_home` (decision 0025): each part below `data_dir` that exists
+/// must be a real folder, never a symbolic link, junction or other reparse point (read with
+/// `symlink_metadata`, which never follows one), and each missing one is made, mode 0700 on
+/// Unix whatever the umask. Another thread or process making one first is fine; the check after
+/// still refuses a link or a file there. A link or a file below `data_dir`, or a `target` not
+/// under it, fails with `InvalidInput`, and nothing is made where a link points. `data_dir`
+/// itself may be a link: `CLAUSEO_DATA_DIR` may name one. A folder already there keeps its
+/// mode. Every sign-in folder is made with this: the agent's home, `agents/<id>` for the
+/// markers, `agents/signin` and its `detect` folder.
+pub(crate) fn create_private_dirs_under(data_dir: &Path, target: &Path) -> io::Result<()> {
+    let below = target.strip_prefix(data_dir).map_err(|_outside| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "the folder is not under the data folder",
+        )
+    })?;
+    let mut at = data_dir.to_owned();
+    for part in below.components() {
+        if !matches!(part, std::path::Component::Normal(_)) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "the folder's path leaves the data folder",
+            ));
+        }
+        at.push(part);
+        match std::fs::symlink_metadata(&at) {
+            Err(err) if err.kind() == io::ErrorKind::NotFound => match create_private_dir(&at) {
+                Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {}
+                made => made?,
+            },
+            Err(err) => return Err(err),
+            Ok(_) => {}
+        }
+        let meta = std::fs::symlink_metadata(&at)?;
+        if !meta.is_dir() || is_reparse_point(&meta) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "a link or a file stands where a folder goes",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Makes the one folder `path` (its parent must exist), 0700 on Unix (a umask only narrows it).
+fn create_private_dir(path: &Path) -> io::Result<()> {
+    let mut builder = std::fs::DirBuilder::new();
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    builder.create(path)
+}
+
+/// Whether `meta` (from `symlink_metadata`) is a symbolic link or, on Windows, any reparse point
+/// (a junction, a symbolic link, or another kind).
+pub(crate) fn is_reparse_point(meta: &std::fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt as _;
+        /// `FILE_ATTRIBUTE_REPARSE_POINT`.
+        const REPARSE_POINT: u32 = 0x400;
+        if meta.file_attributes() & REPARSE_POINT != 0 {
+            return true;
+        }
+    }
+    meta.file_type().is_symlink()
 }
 
 /// Opens `path` to append, making it if missing: a partial download resumed. A link at `path`
@@ -210,7 +280,7 @@ pub(crate) fn set_mode(path: &Path, mode: u32) -> io::Result<()> {
 }
 
 /// Tests only: makes a symbolic link at `link` to `target`.
-#[cfg(all(test, unix))]
+#[cfg(all(unix, any(test, feature = "test-support")))]
 pub(crate) fn symlink(target: &Path, link: &Path) -> io::Result<()> {
     std::os::unix::fs::symlink(target, link)
 }
@@ -228,6 +298,9 @@ pub(crate) fn hard_link(original: &Path, link: &Path) -> io::Result<()> {
 pub(crate) fn symlink_file(target: &Path, link: &Path) -> io::Result<()> {
     std::os::windows::fs::symlink_file(target, link)
 }
+
+#[cfg(test)]
+mod tests;
 
 /// Tests only: a fresh folder under the temp folder, removed on drop.
 #[cfg(test)]

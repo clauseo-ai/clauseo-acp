@@ -547,3 +547,9 @@ pub fn remove_file(path: &Path) -> io::Result<()> {
 pub fn hard_link(original: &Path, link: &Path) -> io::Result<()> {
     crate::write::hard_link(original, link)
 }
+
+/// Makes a symbolic link at `link` to `target` (Unix).
+#[cfg(unix)]
+pub fn symlink(target: &Path, link: &Path) -> io::Result<()> {
+    crate::write::symlink(target, link)
+}

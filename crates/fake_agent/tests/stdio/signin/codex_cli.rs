@@ -244,3 +244,31 @@ fn app_server_account_read_is_signed_out_without_a_marker() {
     agent.expect_exit(EXIT_OK);
     assert!(!marker(&codex_home).exists());
 }
+
+/// S18's race tests need a reusable login with no email: a dummy login file whose
+/// `authMethod` is `apikey` makes `account/read` name an API-key account.
+#[test]
+fn app_server_account_read_gives_an_api_key_account_for_an_apikey_marker() {
+    let scratch = Scratch::new("codex_app_server_apikey");
+    let home = home(&scratch);
+    let codex_home = scratch.path().join("codex-home");
+    crate::write::create_dir_all(&codex_home).unwrap();
+    crate::write::write(
+        codex_home.join(concat!("auth", ".json")),
+        r#"{"authMethod": "apikey"}"#,
+    )
+    .unwrap();
+    let mut agent = codex(
+        &scratch,
+        &home,
+        &["app-server"],
+        &[("CODEX_HOME", text(&codex_home))],
+    );
+    agent.send(&json!({"jsonrpc": "2.0", "id": 1, "method": "account/read", "params": {}}));
+    assert_eq!(
+        agent.read_line(),
+        json!({"jsonrpc": "2.0", "id": 1, "result": {
+            "account": {"type": "apiKey"}, "requiresOpenaiAuth": true}})
+    );
+    agent.expect_exit(EXIT_OK);
+}

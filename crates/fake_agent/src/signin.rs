@@ -47,6 +47,9 @@ use crate::{EXIT_LOAD, EXIT_OK, diagnostic, park_forever};
 pub(crate) const MARKER: &str = "fake-signin-marker";
 /// The name of Codex's own login file, which the fake also takes as its marker (see [`marker`]).
 const CODEX_LOGIN_FILE: &str = "auth.json";
+/// The marker `authMethod` for which Codex's `account/read` gives an API-key account, with no
+/// email (a test's dummy marker; no key is ever written).
+const API_KEY_METHOD: &str = "apikey";
 /// The email every marker and every status reply carries.
 const EMAIL: &str = "test@example.com";
 /// The one code `FAKE_SIGNIN=paste` accepts.
@@ -416,10 +419,14 @@ fn reply(line: &str, folder: &Path) -> Option<String> {
 }
 
 /// `account/read`'s result. With the marker in `folder`, the `ChatGPT` account
-/// `test@example.com` on `plus`. Without it, the signed-out reply: `account` null and
+/// `test@example.com` on `plus`, or, when the marker's `authMethod` is `apikey`, an API-key
+/// account, which names no email. Without it, the signed-out reply: `account` null and
 /// `requiresOpenaiAuth` true.
 fn account_read(folder: &Path) -> Value {
-    if marker_method(folder).is_some() {
+    let method = marker_method(folder);
+    if method.as_deref() == Some(API_KEY_METHOD) {
+        json!({"account": {"type": "apiKey"}, "requiresOpenaiAuth": true})
+    } else if method.is_some() {
         json!({
             "account": {"type": "chatgpt", "email": EMAIL, "planType": "plus"},
             "requiresOpenaiAuth": false,

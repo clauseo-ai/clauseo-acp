@@ -184,14 +184,30 @@ impl Launch {
 }
 
 /// The passthrough launcher with a cleared environment, as R20 must give, recording each run.
+/// While a word is set to stall ([`Fixture::stall`]), a run whose arguments hold it runs
+/// `/bin/sleep` instead (Unix), so it never answers and ends only when it is killed.
 struct Recording {
     inner: PassthroughLauncher,
     launches: Arc<Mutex<Vec<Launch>>>,
+    stall: Arc<Mutex<Option<String>>>,
 }
 
 impl Launcher for Recording {
     fn launch(&self, spec: &LaunchSpec) -> Result<Launched, clauseo_process::Error> {
-        let launched = self.inner.launch(spec)?;
+        let stalled = lock(&self.stall)
+            .as_ref()
+            .is_some_and(|word| spec.args().iter().any(|arg| arg == word.as_str()));
+        let launched = if stalled {
+            let sleep = LaunchSpec::new(
+                PathBuf::from("/bin/sleep"),
+                vec![OsString::from("600")],
+                spec.env().clone(),
+                spec.cwd().to_path_buf(),
+            )?;
+            self.inner.launch(&sleep)?
+        } else {
+            self.inner.launch(spec)?
+        };
         lock(&self.launches).push(Launch {
             args: spec
                 .args()
@@ -211,6 +227,7 @@ pub(crate) struct Fixture {
     pub(crate) config: AgentsConfig,
     pub(crate) timer: KeyedTimer,
     launches: Arc<Mutex<Vec<Launch>>>,
+    stall: Arc<Mutex<Option<String>>>,
     online: Arc<AtomicBool>,
     lookups: Arc<Mutex<Vec<String>>>,
 }
@@ -277,6 +294,7 @@ impl Fixture {
             config,
             timer: KeyedTimer::default(),
             launches: Arc::default(),
+            stall: Arc::default(),
             online,
             lookups,
         }
@@ -323,6 +341,7 @@ impl Fixture {
         let launcher: Arc<dyn Launcher> = Arc::new(Recording {
             inner: PassthroughLauncher::new(SpawnOptions::new().clear_env()),
             launches: Arc::clone(&self.launches),
+            stall: Arc::clone(&self.stall),
         });
         let (agents, events) = Agents::start(self.config.clone(), launcher, self.timer.clone());
         let events = Events {
@@ -331,6 +350,12 @@ impl Fixture {
             notes: Mutex::default(),
         };
         (agents, events)
+    }
+
+    /// From now on, runs whose arguments hold `word` (`app-server`, `status`) never answer
+    /// (Unix: they run `/bin/sleep`); `None` lets them run again.
+    pub(crate) fn stall(&self, word: Option<&str>) {
+        *lock(&self.stall) = word.map(str::to_owned);
     }
 
     /// Every run started so far.

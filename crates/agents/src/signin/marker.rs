@@ -96,7 +96,7 @@ pub(crate) fn write_source(
     agent: &AgentId,
     source: &LoginSource,
 ) -> io::Result<()> {
-    crate::write::create_dir_all(&agent_folder(data_dir, agent))?;
+    crate::write::create_private_dirs_under(data_dir, &agent_folder(data_dir, agent))?;
     crate::write::write_atomic(&source_path(data_dir, agent), source.text().as_bytes())
 }
 
@@ -112,7 +112,7 @@ pub(crate) fn no_reuse(data_dir: &Path, agent: &AgentId) -> bool {
 
 /// Writes `no-reuse`.
 pub(crate) fn write_no_reuse(data_dir: &Path, agent: &AgentId) -> io::Result<()> {
-    crate::write::create_dir_all(&agent_folder(data_dir, agent))?;
+    crate::write::create_private_dirs_under(data_dir, &agent_folder(data_dir, agent))?;
     crate::write::write_atomic(&no_reuse_path(data_dir, agent), NO_REUSE_TEXT.as_bytes())
 }
 

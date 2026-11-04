@@ -40,7 +40,7 @@ pub(crate) fn script_path(data_dir: &Path) -> PathBuf {
 #[cfg(unix)]
 pub(crate) fn install(data_dir: &Path) -> std::io::Result<PathBuf> {
     let path = script_path(data_dir);
-    crate::write::create_dir_all(&folder(data_dir))?;
+    crate::write::create_private_dirs_under(data_dir, &folder(data_dir))?;
     crate::write::write_script(&path, SCRIPT.as_bytes())?;
     Ok(path)
 }
@@ -60,7 +60,7 @@ impl UrlFile {
     #[cfg(unix)]
     pub(crate) fn create(data_dir: &Path, agent: &AgentId, job: u64) -> std::io::Result<UrlFile> {
         let path = folder(data_dir).join(format!("url-{agent}-{job}"));
-        crate::write::create_dir_all(&folder(data_dir))?;
+        crate::write::create_private_dirs_under(data_dir, &folder(data_dir))?;
         crate::write::remove_file(&path)?;
         crate::write::create_private(&path)?;
         Ok(UrlFile {

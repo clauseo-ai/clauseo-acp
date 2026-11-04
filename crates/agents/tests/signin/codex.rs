@@ -347,3 +347,43 @@ fn codex_s_refresh_token_reused_classifies_as_sign_in_again() {
     assert!(is_sign_in_again("Refresh_Token_Reused"));
     assert!(!is_sign_in_again("refresh_token"));
 }
+
+/// Codex's login reads no pasted code: `paste_code` is refused with `WrongMethod` (the paste
+/// route is Claude's), not taken and thrown away.
+#[test]
+fn paste_code_to_codex_is_refused() {
+    let fx = Fixture::new("codex-paste", "never");
+    let (agents, events) = start(&fx);
+    agents.sign_in(&codex(), Method::Browser).unwrap();
+    assert_eq!(
+        states(&events.until(|state| *state == waiting())),
+        [waiting()]
+    );
+    assert_eq!(
+        agents.paste_code(&codex(), clauseo_agents::PasteCode::from("x".to_owned())),
+        Err(clauseo_agents::SigninError::WrongMethod {
+            agent: codex(),
+            method: Method::ClaudeAi,
+        })
+    );
+    agents.cancel_sign_in(&codex()).unwrap();
+    assert_eq!(events.until_end().1, failed(SigninCode::Cancelled));
+}
+
+/// S18 security review, drift: the agent's folders are made without following links. With
+/// `<data>/agents/codex-acp` a link to another folder, the sign-in fails before any run and
+/// nothing is made where the link points.
+#[cfg(unix)]
+#[test]
+fn a_linked_agent_folder_is_refused_and_never_followed() {
+    let fx = Fixture::new("codex-linked-home", "ok-after:0");
+    let elsewhere = fx.data.path().join("elsewhere");
+    write_file(&elsewhere.join("keep"), b"").unwrap();
+    write_file(&fx.data.path().join("agents/keep"), b"").unwrap();
+    clauseo_agents::testing::symlink(&elsewhere, &fx.data.path().join("agents/codex-acp")).unwrap();
+    let (agents, events) = start(&fx);
+    agents.sign_in(&codex(), Method::Browser).unwrap();
+    assert_eq!(events.until_end().1, failed(SigninCode::Failed));
+    assert_eq!(fx.codex_runs(&["login"]), []);
+    assert!(!elsewhere.join("home").exists());
+}
