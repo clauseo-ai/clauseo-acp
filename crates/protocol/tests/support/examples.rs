@@ -101,6 +101,11 @@ pub fn file_changes() -> Vec<FileChange> {
 /// vias no example opens a page with.
 pub fn later_variants() -> Vec<DomainEvent> {
     vec![
+        ThreadRenamed {
+            title: short("Read the lease"),
+            by: RenameSource::Placeholder,
+        }
+        .into(),
         TurnFailed {
             turn: turn_id(3),
             code: ErrorCode::SettingsLocked,

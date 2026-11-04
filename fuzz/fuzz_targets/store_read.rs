@@ -39,7 +39,7 @@ use std::sync::{Mutex, OnceLock};
 
 use clauseo_protocol::{
     AccountLimits, AgentId, BlobHash, CommandId, CommandOutcome, Envelope, MAX_BLOB_READ_BYTES,
-    MatterId, MatterKind, Seq, StreamId, Timestamp,
+    MatterId, MatterKind, RenameSource, Seq, StreamId, Timestamp,
 };
 use clauseo_reducer::{REDUCER_SCHEMA_VERSION, Snapshot as ReducerSnapshot, StreamState, apply};
 use clauseo_store::{
@@ -143,6 +143,7 @@ fn fixture() -> &'static Fixture {
             matter,
             agent: AgentId::new("claude-acp").expect("a valid agent id"),
             title: Some("Fixture thread".to_owned()),
+            title_source: Some(RenameSource::Lawyer),
             acp_session_id: None,
             archived: false,
             created: fixture_time(0),

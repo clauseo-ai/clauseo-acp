@@ -295,17 +295,20 @@ pub(crate) fn tail_times(conn: &Connection) -> Result<Vec<(StreamId, Timestamp)>
 pub(crate) fn threads(conn: &Connection, matter: MatterId) -> Result<Vec<ThreadRow>, Error> {
     let mut statement = conn.prepare_cached(
         "SELECT id, matter_id, agent_id, title, acp_session_id, archived, created_ms, \
-         updated_ms, seen_seq FROM threads WHERE matter_id = ?1 ORDER BY updated_ms DESC, id",
+         updated_ms, seen_seq, title_source FROM threads WHERE matter_id = ?1 \
+         ORDER BY updated_ms DESC, id",
     )?;
     let mut rows = statement.query([matter.to_string()])?;
     let mut out = Vec::new();
     while let Some(row) = rows.next()? {
         let session: Option<String> = row.get(4)?;
+        let source: Option<String> = row.get(9)?;
         out.push(ThreadRow {
             id: codec::parse(row.get_ref(0)?.as_str()?, "a thread id")?,
             matter: codec::parse(row.get_ref(1)?.as_str()?, "a matter id")?,
             agent: codec::parse(row.get_ref(2)?.as_str()?, "an agent id")?,
             title: row.get(3)?,
+            title_source: source.as_deref().map(codec::title_source),
             acp_session_id: session
                 .map(|text| codec::parse(&text, "an agent session id"))
                 .transpose()?,

@@ -176,6 +176,7 @@ fn start_command_subscribe_shutdown_restart() {
     let rename = HostCommand::RenameThread {
         thread,
         title: Title::new("Lease review").unwrap(),
+        placeholder: false,
     };
     assert_eq!(
         block_on(host.dispatch(envelope(2, rename))).unwrap(),

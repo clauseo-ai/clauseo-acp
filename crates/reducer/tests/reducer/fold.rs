@@ -4,9 +4,9 @@
 use clauseo_protocol::{
     AgentId, AgentNamed, AgentSessionDetached, BlobHash, BlobRef, ContentAppended, ContentBlock,
     Count, DetachReason, DomainEvent, EntryId, Envelope, LimitStopReason, ModeChanged, PageVia,
-    PageVisited, QueuedPromptEdited, StepUndone, TextKind, TextOrBlob, ThreadStatus, Timestamp,
-    ToolCallContent, ToolCallPatch, ToolCallStarted, ToolCallStatus, ToolCallUpdated, ToolKind,
-    TurnStoppedAtLimit, ViewEntry, WebResult, WebSearchRecorded,
+    PageVisited, QueuedPromptEdited, RenameSource, StepUndone, TextKind, TextOrBlob, ThreadRenamed,
+    ThreadStatus, Timestamp, ToolCallContent, ToolCallPatch, ToolCallStarted, ToolCallStatus,
+    ToolCallUpdated, ToolKind, TurnStoppedAtLimit, ViewEntry, WebResult, WebSearchRecorded,
 };
 use clauseo_reducer::{Anomaly, Error, StreamState, ViewChange, apply, view_snapshot};
 
@@ -444,6 +444,25 @@ fn no_patch_for_unchanged_entry() {
     );
     let again = push(&mut log, &mut state, tool_diff(tool_call, 1).unwrap());
     assert!(again.changes.is_empty() && again.anomalies.is_empty());
+}
+
+/// A placeholder rename folds like the lawyer's or the agent's: the header takes the title.
+/// The reducer reads no precedence; the host decides which title is sent.
+#[test]
+fn a_placeholder_rename_sets_the_header_title() {
+    let (mut log, mut state) = created(5);
+    let placeholder = ThreadRenamed {
+        title: short("Draft the SPA"),
+        by: RenameSource::Placeholder,
+    };
+    let out = push(&mut log, &mut state, placeholder);
+    assert!(out.anomalies.is_empty(), "{:?}", out.anomalies);
+    assert!(matches!(
+        first_upsert(&out.changes),
+        ViewEntry::Header(header) if header.title.as_deref() == Some("Draft the SPA")
+    ));
+    let header = state.as_thread().unwrap().header().unwrap();
+    assert_eq!(header.title.as_deref(), Some("Draft the SPA"));
 }
 
 /// The agent's own name the header holds.

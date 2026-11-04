@@ -92,7 +92,7 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
 | Kind | Payload | Emitted by | Logged | Stream |
 |---|---|---|---|---|
 | `thread_created` | matter, agent, title? | host | yes | T |
-| `thread_renamed` | title, by (lawyer or agent) | host, acp | yes | T |
+| `thread_renamed` | title, by (lawyer, agent or placeholder) | host, acp | yes | T |
 | `thread_archived` | nothing (`{}`) | host | yes | T |
 | `agent_session_attached` | session, agent_version?, capabilities | acp | yes | T |
 | `agent_named` | agent_name (the agent's own display name, `initialize`'s title, cleaned) | host, from acp | yes | T |

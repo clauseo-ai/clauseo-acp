@@ -11,7 +11,7 @@ use clauseo_protocol::{
 };
 use clauseo_store::BlobIn;
 
-use super::super::Actor;
+use super::super::{Actor, title_source};
 use super::agents::{Agent, Stage};
 use super::out::Out;
 use super::{Then, TimerKind, TurnTimer, asks, current, lost, state, text};
@@ -437,7 +437,9 @@ fn plain(actor: &mut Actor, thread: ThreadId, update: AgentUpdate) -> Result<(),
     commit(actor, thread, [event], Vec::new())
 }
 
-/// A session title: `ThreadRenamed { by: Agent }` and the row, when it is a valid title.
+/// A session title: `ThreadRenamed { by: Agent }` and the row, when it is a valid title the
+/// thread takes (see `title_source`). A title the thread already has from the agent makes no
+/// event, so the replay Codex sends on load adds nothing.
 fn title_changed(actor: &mut Actor, thread: ThreadId, title: Option<String>) -> Result<(), Error> {
     let Some(title) = title else {
         tracing::debug!(%thread, "the agent cleared its session title");
@@ -450,6 +452,16 @@ fn title_changed(actor: &mut Actor, thread: ThreadId, title: Option<String>) -> 
             return Ok(());
         }
     };
+    let entry = actor.threads.get(&thread).ok_or_else(|| lost("a thread"))?;
+    let (source, has_title) = (entry.row.title_source, entry.row.title.is_some());
+    if !title_source::title_may_change(source, has_title, RenameSource::Agent) {
+        // No event came between the chunks, so the message run goes on.
+        tracing::debug!(%thread, "the agent's title does not replace the thread's title");
+        return Ok(());
+    }
+    if source == Some(RenameSource::Agent) && entry.row.title.as_deref() == Some(title.as_str()) {
+        return Ok(());
+    }
     let mut out = Out::new(actor, thread, None)?;
     out.push(
         actor,
@@ -464,6 +476,7 @@ fn title_changed(actor: &mut Actor, thread: ThreadId, title: Option<String>) -> 
         .get_mut(&thread)
         .ok_or_else(|| lost("a thread"))?;
     entry.row.title = Some(title.as_str().to_owned());
+    entry.row.title_source = Some(RenameSource::Agent);
     entry.row.updated = now;
     out.draft.thread_row(entry.row.clone());
     out.send(actor, Then::Nothing)?;

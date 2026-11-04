@@ -173,6 +173,7 @@ fn rename_source() {
     let cases = [
         (RenameSource::Lawyer, "lawyer"),
         (RenameSource::Agent, "agent"),
+        (RenameSource::Placeholder, "placeholder"),
     ];
     unit_enum(&RenameSource::ALL, &cases, RenameSource::Unknown);
 }

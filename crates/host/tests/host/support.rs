@@ -238,9 +238,31 @@ impl Dir {
         self.start(run)
     }
 
-    /// Starts run `run` with every default.
+    /// Starts run `run` with every default. A start that finds the data folder's lock still held
+    /// is tried again, as [`open_store`] does: the config is rebuilt for each try.
     pub(crate) fn start(&self, run: u16) -> Running {
-        self.start_with(run, |config| config)
+        const TRIES: u32 = 2_000;
+        for _ in 0..TRIES {
+            let clock = Self::clock(run);
+            let config = self.config_launching(run, &clock, Arc::new(self.launcher()));
+            match Host::start(config) {
+                Ok((handle, join)) => {
+                    return Running {
+                        handle,
+                        join: Some(join),
+                        clock,
+                    };
+                }
+                Err(error) if error.code() == ErrorCode::StoreLocked => {
+                    wait(
+                        "a store lock",
+                        async_io::Timer::after(Duration::from_millis(5)),
+                    );
+                }
+                Err(error) => panic!("Host::start (run {run}): {error}"),
+            }
+        }
+        panic!("Host::start (run {run}): the store stayed locked");
     }
 
     /// Starts run `run`, letting `adjust` change the config first.

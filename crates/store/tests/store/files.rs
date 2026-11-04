@@ -38,6 +38,7 @@ fn decision_record_quotes_the_migration() {
         include_str!("../../src/migrations/0001_init.sql"),
         include_str!("../../src/migrations/0002_matter_details.sql"),
         include_str!("../../src/migrations/0003_thread_seen.sql"),
+        include_str!("../../src/migrations/0004_thread_title_source.sql"),
     ];
     let mut rest = record;
     for migration in migrations {

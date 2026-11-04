@@ -371,6 +371,7 @@ impl Running {
         self.run(HostCommand::RenameThread {
             thread,
             title: Title::new(title).unwrap(),
+            placeholder: false,
         });
     }
 }
