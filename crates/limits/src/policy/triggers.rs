@@ -1,5 +1,6 @@
-//! The read triggers: when a focus, a turn's end, a "try again" or an answered question starts
-//! a read. At most one read runs per agent, and none while the agent asks a question.
+//! The read triggers: when a focus, a turn's end, a "try again", a login change or an answered
+//! question starts a read. At most one read runs per agent, and none while the agent asks a
+//! question.
 
 use clauseo_protocol::Timestamp;
 
@@ -13,11 +14,23 @@ const SHOWN_AFTER_MS: i64 = 5 * 60 * 1000;
 /// sent it (the Settings window's loop must not launch one reader after another).
 const TRY_AGAIN_AFTER_MS: i64 = 10_000;
 
+/// Whether a read of one agent runs.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum Flight {
+    /// None runs.
+    #[default]
+    Idle,
+    /// One runs.
+    Reading,
+    /// One runs, but the login changed since it started: read again once it ends.
+    ReadingStale,
+}
+
 /// One agent's read policy state.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Reads {
-    /// A read is running.
-    pub(crate) in_flight: bool,
+    /// Whether a read runs.
+    pub(crate) flight: Flight,
     /// When the last read started, whatever its outcome.
     pub(crate) last_read_started: Option<Timestamp>,
     /// The agent asks a question (a permission or an elicitation).
@@ -33,6 +46,11 @@ impl Reads {
     /// A live signal came: the agent's next turn end waits the longer age.
     pub(crate) fn live_seen(&mut self) {
         self.turn_signal = TurnSignal::Live;
+    }
+
+    /// Whether a read is running.
+    pub(crate) fn in_flight(&self) -> bool {
+        self.flight != Flight::Idle
     }
 }
 
@@ -50,14 +68,14 @@ enum TurnSignal {
 /// question, the read waits for the answer.
 pub(crate) fn request_read(state: &mut AgentState, now: Timestamp, actions: &mut Vec<Action>) {
     let reads = &mut state.reads;
-    if reads.in_flight {
+    if reads.in_flight() {
         return;
     }
     if reads.asking {
         reads.pending_read = true;
         return;
     }
-    reads.in_flight = true;
+    reads.flight = Flight::Reading;
     reads.last_read_started = Some(now);
     actions.push(Action::Read(state.agent));
 }
@@ -73,6 +91,16 @@ pub(crate) fn shown(state: &mut AgentState, now: Timestamp, actions: &mut Vec<Ac
 /// while a question is pending.
 pub(crate) fn try_again(state: &mut AgentState, now: Timestamp, actions: &mut Vec<Action>) -> bool {
     !read_if_older(state, TRY_AGAIN_AFTER_MS, now, actions)
+}
+
+/// The login changed: read at once whatever the age; a read in flight read the old login, so
+/// another follows it ([`Flight::ReadingStale`]).
+pub(crate) fn login_changed(state: &mut AgentState, now: Timestamp, actions: &mut Vec<Action>) {
+    if state.reads.in_flight() {
+        state.reads.flight = Flight::ReadingStale;
+        return;
+    }
+    request_read(state, now, actions);
 }
 
 /// A turn ended; `read_now` reads whatever the age, else the agent kind's age applies: the

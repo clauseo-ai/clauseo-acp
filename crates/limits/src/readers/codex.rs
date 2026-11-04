@@ -59,18 +59,27 @@ const CODEX_HOME: &str = "CODEX_HOME";
 /// returns no thread context and `:417` adds no turn fragment without it, and
 /// `ext/skills/src/world_state_catalogs.rs:400-402` renders no catalog.
 ///
+/// R20 adds two (decision record 0048): `cli_auth_credentials_store="file"`, so a Codex sign-in
+/// keeps its login in `CODEX_HOME/auth.json`, where S18's link rules apply, never in the OS
+/// keyring; and `shell_environment_policy.ignore_default_excludes=false`, which keeps Codex's
+/// default exclusion of variables whose names hold `KEY`, `SECRET` or `TOKEN` from its shell
+/// tools, so a stored `CODEX_API_KEY` does not reach a command the model runs (believed; G7 row
+/// 15 checks it at 0.162.1).
+///
 /// G16's probe of 0.162.1 (#203) found that app-server, with no login, no thread and even an empty
 /// home, starts a git sync of `github.com/openai/plugins` into the home at start-up, because
 /// plugins are on by default. `features.plugins=false` stops it; nothing the home's config names
 /// (MCP servers, plugin and skill MCP servers, hooks) ran before a thread. The others cost
 /// nothing.
-pub const CODEX_OVERRIDES: [&str; 6] = [
+pub const CODEX_OVERRIDES: [&str; 8] = [
     "features.apps=false",
     "features.plugins=false",
     "features.skill_mcp_dependency_install=false",
     "cloud.skills.enabled=false",
     "skills.bundled.enabled=false",
     "skills.include_instructions=false",
+    "cli_auth_credentials_store=\"file\"",
+    "shell_environment_policy.ignore_default_excludes=false",
 ];
 
 /// What the app-server answered.

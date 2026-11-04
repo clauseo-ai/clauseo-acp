@@ -75,6 +75,17 @@ fn is_dropped_inherited(name: &OsStr) -> bool {
         .any(|drop| same(OsStr::new(drop), name))
 }
 
+/// Puts the stored key in the agent's settings variables as `var` (decision record 0048): every
+/// settings variable of that name in any case is dropped first, so an empty placeholder (the
+/// installed entry's `ANTHROPIC_API_KEY: ""`) gives way. Never logged; the redactor takes it
+/// from the spec's env, so a tail that echoes it shows `[redacted]`. Neither key variable is in
+/// a drop list, so [`spec_env`]'s drops leave it in place
+/// (`tests::a_stored_key_survives_every_drop`).
+pub(crate) fn with_key(own: &mut BTreeMap<String, String>, var: &str, key: String) {
+    own.retain(|name, _| !name.eq_ignore_ascii_case(var));
+    own.insert(var.to_owned(), key);
+}
+
 /// One variable name on every OS: Windows ignores the case of env names.
 fn same(a: &OsStr, b: &OsStr) -> bool {
     a.eq_ignore_ascii_case(b)
@@ -229,5 +240,29 @@ mod tests {
             env.get(OsStr::new("HOME")),
             Some(&OsString::from("/home/lawyer"))
         );
+    }
+
+    /// The stored key's variables are in no drop list: `spec_env` keeps each one, from the
+    /// settings side, under the Codex reader's drops too.
+    #[test]
+    fn a_stored_key_survives_every_drop() {
+        use clauseo_protocol::AgentKind;
+        for agent in [AgentKind::Claude, AgentKind::Codex] {
+            let var = crate::readers::key_var(agent);
+            assert!(!is_dropped_inherited(OsStr::new(var)), "{var}");
+            assert!(
+                !CODEX_DROPPED
+                    .iter()
+                    .any(|drop| drop.eq_ignore_ascii_case(var)),
+                "{var}"
+            );
+            let mut settings = own(&[(var, "")]);
+            with_key(&mut settings, var, "stored".to_owned());
+            let env = spec_env(&settings, std::iter::empty(), None, &CODEX_DROPPED);
+            assert!(
+                env.get(OsStr::new(var)) == Some(&OsString::from("stored")),
+                "{var}"
+            );
+        }
     }
 }

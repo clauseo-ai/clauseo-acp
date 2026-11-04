@@ -210,6 +210,8 @@ fn codex_launch_variables_beat_the_settings_env() {
         "features": {"apps": false, "plugins": false, "skill_mcp_dependency_install": false},
         "cloud": {"skills": {"enabled": false}},
         "skills": {"bundled": {"enabled": false}, "include_instructions": false},
+        "cli_auth_credentials_store": "file",
+        "shell_environment_policy": {"ignore_default_excludes": false},
         "web_search": "live",
         "sandbox_workspace_write": {"writable_roots": [work, notes]},
     });
