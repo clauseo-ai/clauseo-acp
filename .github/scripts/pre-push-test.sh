@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Tests pre-push.sh, lefthook's pre-push command: a push of deletes only passes without the check,
-# and every other push runs `cargo xtask check --quick`, in CI mode unless CI says otherwise, with
+# and every other push runs `cargo xtask check --quick --no-tests`, in CI mode unless CI says otherwise, with
 # `--skip-ui` only when changes.sh says every pushed branch changes no ui path. First
 # the script alone, fed git's ref lines; then through lefthook, with this repo's lefthook.yml, in a
 # scratch repo that pushes to a local bare remote, so the test also fails when lefthook stops
@@ -45,8 +45,8 @@ z64=$z40$z40
 z64=${z64:0:64}
 a=1111111111111111111111111111111111111111
 b=2222222222222222222222222222222222222222
-check="CI=1 xtask check --quick"
-skip="CI=1 xtask check --quick --skip-ui"
+check="CI=1 xtask check --quick --no-tests"
+skip="CI=1 xtask check --quick --no-tests --skip-ui"
 skip_note="pre-push: no ui change on the pushed branch; skipping the ui steps (CI runs them)"
 
 # ---- the script alone: $1 name, $2 stdin, $3 calls expected, $4 exit expected; env from the caller.
@@ -66,7 +66,7 @@ alone "a new branch" "refs/heads/x $a refs/heads/x $z40"$'\n' "$check" 0
 alone "a delete and an update" "(delete) $z40 refs/heads/x $a"$'\n'"refs/heads/y $b refs/heads/y $a"$'\n' "$check" 0
 alone "no refs" "" "$check" 0
 alone "a line without a sha" "refs/heads/x"$'\n' "$check" 0
-CI=0 alone "CI=0 runs the check in local mode" "refs/heads/x $a refs/heads/x $b"$'\n' "CI=0 xtask check --quick" 0
+CI=0 alone "CI=0 runs the check in local mode" "refs/heads/x $a refs/heads/x $b"$'\n' "CI=0 xtask check --quick --no-tests" 0
 FAKE_CARGO_EXIT=3 alone "a failed check fails the push" "refs/heads/x $a refs/heads/x $b"$'\n' "$check" 3
 FAKE_CARGO_EXIT=3 alone "a delete passes whatever the check would say" "(delete) $z40 refs/heads/x $a"$'\n' "" 0
 
@@ -119,7 +119,7 @@ in_repo "a Rust-only branch skips the ui steps" "$(line rust)"$'\n' "$skip" 0
 grep -qxF "$skip_note" "$tmp/out" || fail "in a repo: a Rust-only branch: no note (output: $(cat "$tmp/out"))"
 in_repo "two Rust-only branches skip the ui steps" "$(line rust)"$'\n'"$(line rust2)"$'\n' "$skip" 0
 in_repo "a delete and a Rust-only branch skip the ui steps" "(delete) $z40 refs/heads/x $a"$'\n'"$(line rust)"$'\n' "$skip" 0
-CI=0 in_repo "CI=0 skips the ui steps in local mode" "$(line rust)"$'\n' "CI=0 xtask check --quick --skip-ui" 0
+CI=0 in_repo "CI=0 skips the ui steps in local mode" "$(line rust)"$'\n' "CI=0 xtask check --quick --no-tests --skip-ui" 0
 FAKE_CARGO_EXIT=3 in_repo "a failed check without the ui steps fails the push" "$(line rust)"$'\n' "$skip" 3
 in_repo "a ui-only branch runs the ui steps" "$(line ui)"$'\n' "$check" 0
 grep -qF "skipping the ui steps" "$tmp/out" && fail "in a repo: a ui-only branch: the skip note printed"
