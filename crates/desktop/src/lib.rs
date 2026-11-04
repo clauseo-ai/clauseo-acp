@@ -93,6 +93,8 @@ mod rust_only;
 mod settings_window;
 #[cfg(test)]
 mod test_support;
+#[cfg(test)]
+mod tests;
 mod webview2;
 mod window_frame;
 mod window_size;
@@ -350,14 +352,10 @@ fn load_effective(locations: &Locations) -> Effective {
     Effective::load(locations, &SystemFiles, &sources)
 }
 
-/// The host's config: the effective settings, the `PassthroughLauncher`, and the refused
-/// folders.
+/// The host's config: the effective settings, the launcher that clears the environment
+/// (`host_launcher`), and the refused folders.
 fn host_config(effective: Effective) -> HostConfig {
-    let mut spawn = SpawnOptions::new();
-    if let Some(home) = SystemDirs.home() {
-        spawn = spawn.home(home);
-    }
-    let launcher = PassthroughLauncher::new(spawn);
+    let launcher = host_launcher(SystemDirs.home());
     let config = HostConfig::new(effective, Arc::new(launcher))
         .with_refused_folders(clauseo_settings::refused_folders(&SystemDirs));
     // With no path to this executable no guard hook goes; the permission check remains.
@@ -365,6 +363,18 @@ fn host_config(effective: Effective) -> HostConfig {
         Ok(exe) => config.with_pre_write_guard(exe),
         Err(_) => config,
     }
+}
+
+/// The launcher the host starts every agent and plan reader with: it clears the environment
+/// (`SpawnOptions::clear_env`, as `HostConfig::new` requires), so a child gets its spec's
+/// variables and nothing else, and the variables the host drops (`GIT_*`, `SSH_*`, Codex's
+/// dropped names) stay dropped. `home` shows as `~` in stderr tails.
+pub(crate) fn host_launcher(home: Option<std::path::PathBuf>) -> PassthroughLauncher {
+    let mut spawn = SpawnOptions::new().clear_env();
+    if let Some(home) = home {
+        spawn = spawn.home(home);
+    }
+    PassthroughLauncher::new(spawn)
 }
 
 /// Stops the usage counts' task, then the host off the UI thread (waits for its start, shuts it

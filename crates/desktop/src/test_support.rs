@@ -16,7 +16,6 @@ use std::time::Duration;
 
 use clauseo_host::{Host, HostConfig, HostHandle, HostJoin, ManualClock};
 use clauseo_limits::ReadLimits;
-use clauseo_process::{PassthroughLauncher, SpawnOptions};
 use clauseo_protocol::{
     AgentId, CommandEnvelope, CommandId, CommandOutcome, HostCommand, HostEvent, HostQuery,
     MatterId, Principal, QueryResult, StreamId, ThreadId, Title,
@@ -256,7 +255,7 @@ impl Scratch {
     /// The config of a host on the folder, refusing `refused` as a matter.
     pub(crate) fn config(&self, refused: Vec<PathBuf>) -> HostConfig {
         let effective = Effective::load(&Locations::under_root(&self.root), &SystemFiles, &[]);
-        let launcher = PassthroughLauncher::new(SpawnOptions::new());
+        let launcher = crate::host_launcher(None);
         HostConfig::new(effective, Arc::new(launcher)).with_refused_folders(refused)
     }
 

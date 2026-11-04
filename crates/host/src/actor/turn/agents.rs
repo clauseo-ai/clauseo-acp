@@ -242,13 +242,16 @@ fn launch(actor: &Actor, thread: ThreadId, prepared: Prepared) -> Result<Launche
     } else {
         &[]
     };
-    let inherited = std::env::vars_os();
+    let inherited: Vec<_> = match &actor.wiring.inherited_env {
+        Some(env) => env.clone(),
+        None => std::env::vars_os().collect(),
+    };
     let spec = agent::launch_spec(
         settings,
         hook,
         forced,
         dropped,
-        inherited,
+        inherited.into_iter(),
         agent::session_folder(&folder),
         actor.wiring.path_prepend.as_deref(),
     )?;

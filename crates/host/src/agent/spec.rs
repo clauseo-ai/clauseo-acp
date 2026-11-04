@@ -12,7 +12,8 @@ use crate::error::Error;
 /// The spec for `agent`, run in `cwd` (the matter folder).
 ///
 /// The env map holds the `inherited` environment (the host's own, read at launch) minus every
-/// `GIT_*` variable and every name an agent, hook or forced variable also names, then the
+/// `GIT_*` and `SSH_*` variable, the names in [`DROPPED_INHERITED`], and every name an agent,
+/// hook or forced variable also names, then the
 /// agent's variables minus those the hook or `forced` names, then the hook's minus those
 /// `forced` names, then `forced`: what the host sets for the agent's kind (a Codex agent's
 /// mode, home and config, `agent/codex.rs`), which nothing in the settings can override. Every
@@ -20,13 +21,20 @@ use crate::error::Error;
 /// from (inherited, the agent's variables or the hook's), ignoring ASCII case. No
 /// inherited `GIT_*` reaches any agent: a `GIT_DIR` or `GIT_WORK_TREE` the host was started
 /// with would point the agent's git at another repository (agents never see a git repository
-/// through the environment). Names are compared ignoring ASCII case: on Windows `PATH` and `Path`
-/// are one variable and `Command::envs` keeps whichever comes last in the map's order, so an
-/// inherited `Path` left beside the agent's `PATH` would win. The child's environment is the
-/// same as with the agent's and hook's variables alone, since the inherited ones are what the
-/// child inherits anyway; they are in the map because the process crate's redactor takes its
-/// secrets only from the spec's env, by its own name rule, so every inherited key or token stays
-/// out of the stderr tail. Never `Debug`-print the spec: it holds those secrets.
+/// through the environment). No inherited `SSH_*`, `NO_BROWSER` or `CLAUDE_CODE_REMOTE`
+/// reaches one either: each tells an agent it runs on a remote or headless machine, so it would
+/// skip the browser sign-in on the lawyer's own desktop. Names are compared ignoring ASCII case:
+/// on Windows `PATH` and `Path` are one variable and `Command::envs` keeps whichever comes last
+/// in the map's order, so an inherited `Path` left beside the agent's `PATH` would win.
+///
+/// The map is the child's whole environment: the caller's launcher must clear the environment
+/// (`SpawnOptions::clear_env`, as `HostConfig::new` requires), or the child inherits the host's
+/// own and every drop above is undone. Clearing loses nothing else, since the map already holds
+/// the rest of the inherited environment (`PATH`, `HOME`, and on Windows `SystemRoot`,
+/// `PATHEXT`, `APPDATA` and the others Node and the agents need). The map also feeds the process
+/// crate's redactor, which takes its secrets only from the spec's env, by its own name rule, so
+/// every inherited key or token stays out of the stderr tail. Never `Debug`-print the spec: it
+/// holds those secrets.
 ///
 /// `path_prepend` (`HostConfig::with_agent_path_prepend`, stetdoc's folder) goes first on the
 /// merged `PATH` ([`prepend_path`]).
@@ -49,7 +57,7 @@ pub(crate) fn launch_spec(
         .collect();
     let mut env: BTreeMap<OsString, OsString> = inherited
         .filter(|(name, _)| {
-            !is_git(name)
+            !is_dropped_inherited(name)
                 && !drops(name)
                 && !names(&hook_env, name)
                 && !names(&forced, name)
@@ -100,11 +108,26 @@ pub(crate) fn prepend_path(env: &mut BTreeMap<OsString, OsString>, folder: &Path
     }
 }
 
-/// Whether `name` is a `GIT_*` variable, ignoring ASCII case (Windows does).
-fn is_git(name: &OsStr) -> bool {
-    name.as_encoded_bytes()
-        .get(..4)
-        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(b"GIT_"))
+/// The prefixes of the inherited variables no agent gets: `GIT_*` would point its git at another
+/// repository, `SSH_*` would tell it it runs over SSH.
+const DROPPED_INHERITED_PREFIXES: [&str; 2] = ["GIT_", "SSH_"];
+
+/// The inherited variables no agent gets: each tells it it runs headless or remote, so it would
+/// skip the browser sign-in.
+pub(crate) const DROPPED_INHERITED: [&str; 2] = ["NO_BROWSER", "CLAUDE_CODE_REMOTE"];
+
+/// Whether an inherited `name` stays out of every agent's environment: it has a prefix in
+/// [`DROPPED_INHERITED_PREFIXES`] or is in [`DROPPED_INHERITED`], ignoring ASCII case (Windows
+/// does).
+fn is_dropped_inherited(name: &OsStr) -> bool {
+    let bytes = name.as_encoded_bytes();
+    DROPPED_INHERITED_PREFIXES.iter().any(|prefix| {
+        bytes
+            .get(..prefix.len())
+            .is_some_and(|start| start.eq_ignore_ascii_case(prefix.as_bytes()))
+    }) || DROPPED_INHERITED
+        .iter()
+        .any(|drop| same(OsStr::new(drop), name))
 }
 
 /// Whether `map` holds `name`, ignoring ASCII case.
