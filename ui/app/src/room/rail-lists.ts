@@ -46,7 +46,7 @@ export function recentDays({
   return recent(lists, matters, now, zone, lang).map((g) => ({
     day: g.day,
     rows: g.items.map(({ thread, matter }) => {
-      const words = rowWords(thread);
+      const words = rowWords(thread, matter.status);
       const moment =
         words.state === "stopped" || words.state === "failed"
           ? clockOf(words.at, now, zone, lang)

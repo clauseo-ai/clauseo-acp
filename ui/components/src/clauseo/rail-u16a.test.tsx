@@ -37,7 +37,9 @@ test("yellow stands only on a question, a permission and the limit's open choice
   for (const [state, mark] of Object.entries(MATTER_MARK))
     expect(mark.waits, `matter ${state}`).toBe(yellow.has(state));
   for (const [state, mark] of Object.entries(CONVERSATION_MARK))
-    expect(mark.waits, `conversation ${state}`).toBe(state === "question");
+    expect(mark.waits, `conversation ${state}`).toBe(
+      state === "question" || state === "permission",
+    );
   // the drawn mark: the disc only where it waits
   await mount(
     <>

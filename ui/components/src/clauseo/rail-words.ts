@@ -30,11 +30,13 @@ export type MatterState =
   | "moved"
   | "failed";
 
-/** What a conversation is doing while the lawyer reads another. waiting: behind another conversation's answer. */
+/** What a conversation is doing while the lawyer reads another. waiting: behind another conversation's answer;
+ * question and permission, as a matter's: it waits on the lawyer's hand. */
 export type ConversationState =
   | "idle"
   | "working"
   | "question"
+  | "permission"
   | "ready"
   | "stopped"
   | "waiting"
@@ -114,6 +116,8 @@ export function conversationStatus(
         : frame(lang, "Answering. Expected by {time}", { time });
     case "question":
       return frame(lang, "A question for you");
+    case "permission":
+      return frame(lang, "Needs your permission");
     case "ready":
       return frame(lang, "Answer ready");
     case "stopped":

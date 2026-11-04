@@ -71,6 +71,23 @@ test("a press on a Needs-you row opens that conversation in its matter", async (
   );
 });
 
+test("in the open matter's list, a conversation waiting on a permission says so, as Needs you does", async () => {
+  await mount();
+  await act(async () => rowOf(B.name)?.click());
+  await settle();
+  // a draft open, so the conversation's row says what it's doing
+  await act(async () =>
+    rail()?.querySelector<HTMLButtonElement>('[data-testid="new-conversation"]')?.click(),
+  );
+  await settle();
+  const row = [
+    ...(rail()?.querySelectorAll<HTMLElement>('[data-testid="conversation"]') ?? []),
+  ].find((r) => r.querySelector(".room-conv-title")?.textContent === "Reply to the notice");
+  expect(row?.dataset["state"]).toBe("permission");
+  expect(row?.title).toContain("Needs your permission");
+  expect(row?.textContent).not.toContain("A question for you");
+});
+
 test("no row changes group under the pointer; at pointer leave it does", async () => {
   const transport = await mount();
   const nav = rail();
@@ -133,8 +150,13 @@ test("Recent lists every conversation, scratch included, under its day; a press 
   ]);
   expect(rows[4]?.querySelector(".room-matter-note")?.textContent).toBe("Scratch matter");
   expect(headings()).toEqual(["Today"]);
-  // only the question says its words
-  expect(rows[0]?.querySelector(".room-conv-ask")?.textContent).toBe("A question for you");
+  // a conversation waiting on the lawyer takes its matter's kind: Sharma's a permission, as Needs you says it, with
+  // its shield on the yellow disc and its words only in the tooltip; Desai's a question, whose words show
+  expect(rows[0]?.dataset["state"]).toBe("permission");
+  expect(rows[0]?.querySelector(".room-conv-ask")).toBeNull();
+  expect(rows[0]?.title).toContain("Needs your permission");
+  expect(rows[0]?.querySelector("[data-waits]")).not.toBeNull();
+  expect(rows[2]?.querySelector(".room-conv-ask")?.textContent).toBe("A question for you");
   expect(rows[1]?.querySelector(".room-conv-ask")).toBeNull();
   expect(rows[1]?.textContent).toContain("Answer ready");
   await act(async () => rows[1]?.click());
