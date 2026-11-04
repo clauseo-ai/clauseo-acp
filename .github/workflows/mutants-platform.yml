@@ -109,8 +109,8 @@ jobs:
               crates/process/src/handle.rs
               crates/process/src/launch.rs
             skip_re:
-              # `#[cfg(unix)]` `signal`, not compiled here; Linux catches it. Line 203 is Windows' own.
-              - 'crates/process/src/handle\.rs:197:5: replace signal -> Option<i32> with '
+              # `#[cfg(unix)]` `signal`, not compiled here; Linux catches it. Line 242 is Windows' own.
+              - 'crates/process/src/handle\.rs:236:5: replace signal -> Option<i32> with '
               # Always None on Windows, whose `signal` has no signal to give; Linux catches it.
               - 'crates/process/src/handle\.rs:\d+:\d+: replace ExitReport::signal -> Option<i32> with None$'
           # Cloud placeholders, drive roots, hidden folders, and the case-insensitive file
@@ -190,8 +190,8 @@ jobs:
               - 'crates/matters/src/probe\.rs:\d+:\d+: replace <impl PlaceholderProbe for OsProbe>::is_cloud_only -> bool with false$'
               # The Windows block of `is_cloud_only`, not compiled here; line 41 is macOS's own.
               - 'crates/matters/src/probe\.rs:4[78]:\d+: replace (& with \||& with \^|\| with &|!= with ==) in <impl PlaceholderProbe for OsProbe>::is_cloud_only$'
-              # The not-macOS branch of `is_drive_root`, not compiled here.
-              - 'crates/matters/src/refuse\.rs:\d+:\d+: replace && with \|\| in is_drive_root$'
+              # `is_share_root` is Windows only, not compiled here.
+              - 'crates/matters/src/refuse\.rs:\d+:\d+: (replace is_share_root -> .*|.* in is_share_root)$'
               # `is_mount_point` is Linux only, not compiled here.
               - 'crates/matters/src/refuse\.rs:\d+:\d+: (replace is_mount_point -> .*|.* in is_mount_point)$'
               # `fold`: `cfg!(target_os = "macos")` makes the parenthesis true here, and NFC keeps ASCII as it is; Windows catches both.
