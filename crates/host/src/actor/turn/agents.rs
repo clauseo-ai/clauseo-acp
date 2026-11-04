@@ -1,5 +1,6 @@
 //! A thread's agent: its launch (step 2: launch, `initialize`, `session/load` or `session/new`,
-//! the attach commit), the work that waits for its session, and its end.
+//! the attach commit) and the work that waits for its session. Its stop and its end are in
+//! `agents/ended.rs`.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -8,23 +9,26 @@ use std::sync::Arc;
 
 use clauseo_acp::{AcpEvent, AgentInfo, MessageRole, PendingKey};
 use clauseo_protocol::{
-    AgentChoiceId, AgentSessionDetached, AgentSessionId, CompactString, ConfigValue, DetachReason,
-    ElicitationId, ErrorCode, MessageId, PermissionRequestId, StreamId, ThreadId, TurnId,
+    AgentChoiceId, AgentSessionId, CompactString, ConfigValue, ElicitationId, ErrorCode, MessageId,
+    PermissionRequestId, ThreadId, TurnId,
 };
 
 use super::super::Actor;
 use super::super::commands::CommandCtx;
 use super::super::input::Input;
 use super::launch_checks::{self, Prepared};
-use super::out::Out;
 use super::{
-    AgentReply, End, Then, TurnInput, TurnPhase, current, end, host_stopping, lost, session, state,
-    steps, updates,
+    AgentReply, TurnInput, TurnPhase, current, end, host_stopping, lost, session, state, steps,
 };
-use crate::agent::{self, AgentLink, Ended, StopStep};
+use crate::agent::{self, AgentLink};
 use crate::error::Error;
 use crate::rate::{RateCap, RatedUpdate};
 use crate::sent::SentView;
+
+mod ended;
+
+use ended::{StopCause, stop_closed};
+pub(super) use ended::{log_detach, on_ended, stop};
 
 /// Work that waits for the agent's session.
 #[derive(Debug)]
@@ -51,18 +55,6 @@ pub(super) enum Stage {
     Closed,
     /// The shutdown ladder runs; `Ended` follows.
     Stopping,
-}
-
-/// Why an agent is stopped, for the detach its `Ended::Stopped` logs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum StopCause {
-    /// The host closed it (a stop, a failed launch): `Closed`.
-    Asked,
-    /// It starts again in its matter's new folder: `Restarting`.
-    Restarting,
-    /// Its connection was already gone when the stop came, which only ends a process that
-    /// outlived its pipes: the exit report's reason, as if it had exited first.
-    Closed,
 }
 
 /// A thread's agent as the actor holds it.
@@ -141,16 +133,6 @@ pub(super) fn ensure(actor: &mut Actor, thread: ThreadId, waiting: Waiting) {
             Stage::Stopping => agent.after_stop.push(waiting),
         },
     }
-}
-
-/// Stops an agent whose connection is gone; `waiting` goes to the agent started after its
-/// `Ended`. The stop ends a process that outlived its pipes, and it can beat the owner's
-/// exit report (Windows reports an exit late): `on_ended` then logs the report's exit.
-fn stop_closed(agent: &mut Agent, waiting: Waiting) {
-    agent.link.stop();
-    agent.stage = Stage::Stopping;
-    agent.stop_cause = StopCause::Closed;
-    agent.after_stop.push(waiting);
 }
 
 /// Launches `thread`'s agent and sends `initialize`, its folder checks (and a Codex agent's
@@ -484,118 +466,5 @@ pub(super) fn launch_failed(actor: &mut Actor, thread: ThreadId, error: &Error) 
     let waiting = std::mem::take(&mut agent.waiting);
     for item in waiting {
         fail_waiting(actor, thread, &item, error);
-    }
-}
-
-/// Stops `thread`'s agent with the shutdown ladder; `Ended` follows.
-pub(super) fn stop(actor: &mut Actor, thread: ThreadId) {
-    let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
-        return;
-    };
-    if agent.stage == Stage::Stopping {
-        return;
-    }
-    agent.link.stop();
-    if agent.stage == Stage::Closed || agent.link.closed() {
-        agent.stop_cause = StopCause::Closed;
-    }
-    agent.stage = Stage::Stopping;
-    let waiting = std::mem::take(&mut agent.waiting);
-    for item in waiting {
-        fail_waiting(actor, thread, &item, &Error::Closed);
-    }
-}
-
-/// The agent's tasks are done: log the detach, end a turn the exit cut short, and start a new
-/// agent for work that came while it stopped.
-pub(super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: Ended) {
-    // Updates the rate cap holds came before the exit, while the turn is still live.
-    updates::flush_rate(actor, thread);
-    let Some(agent) = state(actor, thread).and_then(|state| state.agent.take()) else {
-        return;
-    };
-    // Its pending questions went with it.
-    super::super::limits::asking_changed(actor);
-    launch_checks::remove_run(actor, thread);
-    let Agent {
-        session,
-        waiting,
-        after_stop,
-        stop_cause,
-        ..
-    } = *agent;
-    let reason = match ended {
-        Ended::Exited(reason) => reason,
-        Ended::Stopped { step, report } => {
-            if step == StopStep::Unresponsive {
-                tracing::warn!(%thread, ?report, "the agent did not exit after its kill");
-            }
-            match stop_cause {
-                StopCause::Asked => DetachReason::Closed,
-                StopCause::Restarting => DetachReason::Restarting,
-                // It was gone before the stop: the exit is its own, not a close.
-                StopCause::Closed => report,
-            }
-        }
-    };
-    let exited = Error::refused(ErrorCode::AgentExited, "the agent exited");
-    for item in waiting {
-        fail_waiting(actor, thread, &item, &exited);
-    }
-    let detach = session.is_some().then_some(reason);
-    let phase = current(actor, thread).map(|current| (current.phase, current.cancelled));
-    match (phase, detach) {
-        (Some((TurnPhase::Prompting, cancelled)), detach) => {
-            let end = if cancelled {
-                End::cancelled(detach)
-            } else {
-                End::failed(ErrorCode::AgentExited, None, detach)
-            };
-            end::end_turn(actor, thread, end);
-        }
-        (Some((TurnPhase::FallbackStop, _)), detach) => {
-            if let Some(reason) = detach {
-                log_detach(actor, thread, reason);
-            }
-            end::end_turn(actor, thread, End::cancelled(None));
-        }
-        (Some((TurnPhase::Ending, _)), Some(reason)) => {
-            // Logged after the turn's `TurnEnded`, which is still to come.
-            if let Some(current) = current(actor, thread) {
-                match &mut current.end {
-                    Some(end) => end.detach = Some(reason),
-                    None => {
-                        current.end = Some(End::failed(ErrorCode::AgentExited, None, Some(reason)));
-                    }
-                }
-            }
-        }
-        (
-            Some((TurnPhase::Queued | TurnPhase::Checkpointing | TurnPhase::Starting, _)),
-            Some(reason),
-        ) => {
-            // The turn ends when it reaches its prompt and finds no agent; the detach goes
-            // after its `TurnEnded`.
-            if let Some(current) = current(actor, thread) {
-                current.detach = Some(reason);
-            }
-        }
-        (_, Some(reason)) => log_detach(actor, thread, reason),
-        (_, None) => {}
-    }
-    if !after_stop.is_empty() {
-        start(actor, thread, after_stop);
-    }
-    actor.release(StreamId::Thread(thread));
-}
-
-/// Logs `AgentSessionDetached { reason }`.
-pub(super) fn log_detach(actor: &mut Actor, thread: ThreadId, reason: DetachReason) {
-    let sent = Out::new(actor, thread, None).and_then(|mut out| {
-        out.push(actor, AgentSessionDetached { reason })?;
-        out.send(actor, Then::Nothing)
-    });
-    if let Err(error) = sent {
-        tracing::warn!(%thread, %error, "the detach was not logged");
     }
 }
