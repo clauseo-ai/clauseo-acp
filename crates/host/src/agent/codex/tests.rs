@@ -404,7 +404,7 @@ fn prepare_launch_checks_then_makes_the_home() {
     ))
     .unwrap();
     let check = crate::agent::folder_support::FolderCheck {
-        matter: id,
+        matter: Some(id),
         source: crate::agent::folder_support::CheckSource::Windows,
     };
     let error = prepare_launch(&check, &matter, &data, &home_in(&data)).unwrap_err();

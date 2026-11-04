@@ -10,11 +10,16 @@
 //! `no_permissions` refuse Codex (`matter.folder_network`, `matter.folder_no_permissions`);
 //! `cant_change_permissions` starts Codex and only shows on the row. A check that fails is a
 //! warning and an unknown answer ([`Answer::Failed`]), never a Codex refusal (Codex's sandbox
-//! stays the boundary) and nothing on the row; a Claude launch fails closed into forced ask. A
-//! folder that is not found is left to the other folder checks. Off Windows nothing is checked
+//! stays the boundary); the row shows `check_failed` ([`Answer::row_kind`]), and a Claude launch
+//! fails closed into forced ask. A folder that is not found is a failed check too (the app shows
+//! the missing folder first); the other folder checks report it. Off Windows nothing is checked
 //! and there is never an answer.
 //!
-//! Each check logs one line with the matter and the answer, never the folder (ADR 0047).
+//! The New matter dialog asks the same check of a picked folder before the matter exists
+//! (`HostQuery::FolderSupport`, `actor/query/folder_support.rs`), with no matter to log.
+//!
+//! Each check logs one line with the matter (none for a picked folder) and the answer, never the
+//! folder (ADR 0047).
 
 use std::path::Path;
 
@@ -28,24 +33,28 @@ pub(crate) enum Answer {
     /// The check answered: `None` for a fine folder, and always off Windows.
     Known(Option<FolderSupportKind>),
     /// The check failed (an io error, `NotFound` included): unknown. Never a refusal, and the
-    /// row shows nothing; a Claude launch fails closed into forced ask (`agent/forced_ask.rs`).
+    /// row shows `check_failed`; a Claude launch fails closed into forced ask
+    /// (`agent/forced_ask.rs`).
     Failed,
 }
 
 impl Answer {
-    /// The kind the matter's row shows: none for a failed check.
-    pub(crate) fn kind(self) -> Option<FolderSupportKind> {
+    /// The kind the matter's row, and the `FolderSupport` query, show: `check_failed` for a
+    /// failed check. Only for showing: Codex's refusal ([`decide`]) and forced ask
+    /// (`forced_ask::applies`) decide from the answer itself.
+    pub(crate) fn row_kind(self) -> Option<FolderSupportKind> {
         match self {
             Self::Known(kind) => kind,
-            Self::Failed => None,
+            Self::Failed => Some(FolderSupportKind::CheckFailed),
         }
     }
 }
 
-/// The folder check of `matter`'s folder `folder`. A failure is a warning with the io error's
-/// kind (a missing folder an info line: the other folder checks report it).
+/// The folder check of `folder`, `matter`'s folder or (`None`) a folder the lawyer picked for a
+/// new matter. A failure is a warning with the io error's kind (a missing folder an info line:
+/// the other folder checks report it).
 #[cfg(windows)]
-pub(crate) fn check(matter: MatterId, folder: &Path) -> Answer {
+pub(crate) fn check(matter: Option<MatterId>, folder: &Path) -> Answer {
     use clauseo_sandbox::windows::{FolderSupport, folder_support};
     match folder_support(folder) {
         Ok(support) => {
@@ -57,17 +66,20 @@ pub(crate) fn check(matter: MatterId, folder: &Path) -> Answer {
                 FolderSupport::Network => Some(FolderSupportKind::Network),
                 FolderSupport::NoPermissions => Some(FolderSupportKind::NoPermissions),
             };
-            tracing::info!(%matter, support = ?kind, "the matter folder was checked");
+            tracing::info!(?matter, support = ?kind, "the matter folder was checked");
             Answer::Known(kind)
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            tracing::info!(%matter, "the matter folder check found no folder; the others report it");
+            tracing::info!(
+                ?matter,
+                "the matter folder check found no folder; the others report it"
+            );
             Answer::Failed
         }
         Err(error) => {
             // The kind only: the error's text may hold the path.
             tracing::warn!(
-                %matter,
+                ?matter,
                 error_kind = ?error.kind(),
                 "the matter folder could not be checked: Codex is not refused, Claude asks first"
             );
@@ -78,7 +90,7 @@ pub(crate) fn check(matter: MatterId, folder: &Path) -> Answer {
 
 /// Off Windows there is no check: the sandbox needs no permission entries there.
 #[cfg(not(windows))]
-pub(crate) fn check(_matter: MatterId, _folder: &Path) -> Answer {
+pub(crate) fn check(_matter: Option<MatterId>, _folder: &Path) -> Answer {
     Answer::Known(None)
 }
 
@@ -95,10 +107,12 @@ pub(crate) enum CheckSource {
     Fixed(Answer),
 }
 
-/// One launch's folder check of `matter`'s folder, from `source`.
+/// One folder check from `source`: a launch's of `matter`'s folder, or (`matter: None`) the
+/// `FolderSupport` query's of a picked folder.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct FolderCheck {
-    pub(crate) matter: MatterId,
+    /// The matter, for the log; `None` before the matter exists.
+    pub(crate) matter: Option<MatterId>,
     pub(crate) source: CheckSource,
 }
 
@@ -110,7 +124,7 @@ impl FolderCheck {
             #[cfg(feature = "test-support")]
             CheckSource::Fixed(answer) => {
                 let matter = self.matter;
-                tracing::info!(%matter, ?answer, "the matter folder was checked (fixed)");
+                tracing::info!(?matter, ?answer, "the matter folder was checked (fixed)");
                 answer
             }
         }
@@ -127,7 +141,8 @@ impl FolderCheck {
 }
 
 /// What a Codex launch does with the answer `kind`: a refusal for `network` and
-/// `no_permissions`, which name no path; otherwise the answer, for the matter's row.
+/// `no_permissions`, which name no path; otherwise the answer, for the matter's row
+/// (`check_failed` included: a failed check never refuses Codex).
 pub(crate) fn decide(kind: Option<FolderSupportKind>) -> Result<Option<FolderSupportKind>, Error> {
     match kind {
         Some(FolderSupportKind::Network) => Err(Error::refused(

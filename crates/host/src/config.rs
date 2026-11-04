@@ -450,7 +450,7 @@ impl HostConfig {
 
     /// A failed folder check for every launch (an io error on Windows), as
     /// [`Self::with_folder_support`] fixes an answer: Claude fails closed into forced ask, Codex
-    /// is not refused, the row shows nothing.
+    /// is not refused, the row shows `check_failed`.
     #[cfg(feature = "test-support")]
     pub fn with_folder_check_failed(mut self) -> Self {
         self.folder_check = crate::agent::folder_support::CheckSource::Fixed(
