@@ -22,7 +22,7 @@ Source lines below are agent-browser's, at tag v0.41.1, under `cli/src/`.
 **The binary.** `clauseo-mcp`, package `clauseo-mcp`. `main.rs` dispatches on argv[1] through one
 table of modes, which also builds the usage line; R24 adds `connector` to it. No mode, or any
 name not in the table (case-sensitive), prints `usage: clauseo-mcp <mode> ... (modes:
-browser-guard)` on stderr and exits 2. Dependencies: `serde_json` only. Plain threads, no async
+browser-guard)` on stderr and exits 2. Dependencies: `serde_json`, and `windows` on Windows (the Job Object). Plain threads, no async
 runtime, no HTTP client; `crates/mcp/tests/guard/deps.rs` walks `Cargo.lock` and fails if
 reqwest, hyper, hyper-util, h2, ureq, curl, isahc, attohttpc, rustls, native-tls, openssl,
 socket2, mio, tokio, async-std, smol or tauri becomes reachable.
@@ -79,19 +79,35 @@ with mode exactly 0700 and the same owner uid as `--cwd`, and `<socket folder>/<
 is at most 103 bytes (with the host's 32-byte folder it is at most 102 for a 64-character
 session). It passes the same value to agent-browser. On Windows the socket folder stays
 `<cwd>\run`: agent-browser uses loopback TCP there, and the folder holds only `.port` and
-`.pid` files. The host removes the folder once the launch's process tree has exited.
+`.pid` files. The host removes the folder once the agent's process tree was killed (host part,
+"Ports and socket folder", for what can outlive that).
 
-**The Windows daemon port.** On Windows agent-browser's daemon listens on loopback TCP at a port
-it derives from the session name, and when that port will not bind it silently takes an
-ephemeral one (`native/daemon.rs`, the `TcpListener::bind` fallback) and writes the port it got
-to `<cwd>\run\<session>.port`. The host draws the name so the port is one it claimed (host
-part), and passes that port as `--daemon-port`. After each line it relays from the child, the
-guard reads the `.port` file without following a link (`browser_guard/daemon_port.rs`): no file
-yet, or an empty one, means the daemon has not started (it starts on the agent's first browser
-call), so it checks again after the next line; the claimed port marks it verified and the
-guard reads no more; another port, text that is no port, a link, or anything but a regular
-file kills agent-browser, and the guard exits 1 with a stderr line. A daemon on another port
-would sit outside the ports the jail pins to the session.
+**The ports agent-browser reports.** agent-browser writes the port each listener got to a file
+in the socket folder, and when the port it was asked for will not bind it silently takes another
+and writes that one: the stream server's `<socket folder>/<session>.stream` on every OS (started
+with port fallback allowed, `native/daemon.rs` `StreamServer::start_without_client`,
+`stream/mod.rs`), and on Windows the daemon's `<cwd>\run\<session>.port` (from a port it derives
+from the session name, with an ephemeral fallback, the `TcpListener::bind` fallback). The host
+claims the stream port (`AGENT_BROWSER_STREAM_PORT`) and draws the Windows session name so the
+daemon's port is one it claimed (host part), passed as `--daemon-port`. After every line it
+relays from the child, for the session's whole life, the guard reads each file without following
+a link (`browser_guard/port_file.rs`): no file yet, or an empty one, means not started or being
+written; the claimed port is fine for now, and the file is read again after the next line, since
+the daemon can end (idle timeout, `agent_browser_close`) and start again on another port;
+another port, text that is no port, a link, or anything but a regular file ends agent-browser,
+and the guard exits 1 with a stderr line. A listener on another port would sit outside the ports
+the jail pins to the session.
+
+The socket folder is agent-writable (`<cwd>` is, and the jail allows the Unix socket folder to
+the whole session), so the agent can write the claimed port into a file itself. The check
+catches agent-browser's silent fallback to another port; it is not a boundary against the agent.
+
+How far "ends agent-browser" reaches differs by OS. On Windows the guard starts agent-browser
+suspended, puts it in a Job Object the guard owns (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, no
+breakaway allowed), then resumes it (`browser_guard/job.rs`); `DETACHED_PROCESS` and a new
+process group do not leave a job, so ending the job ends the daemon and Chrome too. On Unix the
+guard kills the direct child only: the daemon has left the process group (`setsid`) and lives,
+on the wrong port, until its idle timeout (G17 item 6).
 
 Why each value:
 - The proxy variables: `agent_browser_read` with a `url` fetches through the CLI's own reqwest
@@ -139,8 +155,10 @@ by such a PID. The guard's close request on stdin EOF (above) is the normal end,
 timeout the backstop; how often a daemon outlives its session is a follow-up, measured in G17
 item 6 (host part, "No daemon kill by PID"). On
 Windows it is started with `CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS`
-(`connection.rs:963-983`), which does not leave a Job Object, so the job kill should still end
-it (not verified). A daemon nobody kills ends after the idle timeout, 10 minutes.
+(`connection.rs:963-983`), which does not leave a Job Object; agent-browser runs in a job the
+guard owns (`browser_guard/job.rs`), whose last handle closes when the guard exits, however it
+exits, so the daemon and Chrome end with the guard on Windows. That closes G17 item 6 there; it
+stays open on Unix. A daemon nobody kills ends after the idle timeout, 10 minutes.
 
 **The filter** (`filter.rs`) applies to agent-to-child lines only, in this order:
 
@@ -235,7 +253,8 @@ The guard cannot enforce these; stage C's egress proxy and sandbox must.
 - **The jail allows one socket folder, made by the host.** On Unix agent-browser keeps its
   socket in a folder outside `--cwd` (the state path is over the 103-byte socket limit). Since
   #257 the host makes it (`BrowserSocketDir`: `/tmp/clauseo-ab-<16 random>`, mode 0700,
-  lstat-checked, removed after the launch's process tree exits) and the jail may use only that
+  lstat-checked, removed once the agent's process tree was killed; an agent that ignores its
+  kill and the Unix daemon, which leaves the tree, can outlive that) and the jail may use only that
   folder, not create it. The guard makes nothing there: it checks the folder it is given and
   refuses to start on a failed check.
 - **`<state>/browser` and the browser's loopback ports, in the jail: the jail adds nothing
@@ -327,7 +346,13 @@ claims a `BrowserSession`:
 The `BrowserSession` rides on the launch's `RunFolders` (in an `Arc`; the thread's turn state
 is its one lasting holder) and drops with the run folder in `launch_checks::discard`, off the
 actor: after the agent's process tree was killed (`clauseo-process` kills what is left of the
-tree however the agent ends), or when the agent never started. Dropping it releases the ports
+tree however the agent ends), or when the agent never started. Two processes can outlive that
+kill, and the claims drop anyway: an agent that ignores its kill
+(`StopStep::Unresponsive`, logged), and agent-browser's Unix daemon, which leaves the tree
+(`setsid`) and lives until its idle timeout (G17 item 6). A claim holds within this host process
+only (stage C's `ports`): two hosts on one machine, such as two Windows users sharing 61080 to
+61179, could be handed the same port before Chrome binds it; the launch then fails, with no
+fallback. Dropping it releases the ports
 and removes the folder and its lock file. A claim that fails, or a token the claims cannot fill
 (`{socket_dir}` on Windows, `{daemon_port}` elsewhere), leaves the browser out with
 `BrowserNotInstalled` and a log line.
@@ -346,7 +371,7 @@ charset (`A-Z a-z 0-9 _ -`, from the OS's random source) until a name's port is 
 `ports::claim_port_at(port)` claims it (`AddrInUse` draws again), at most 200,000 draws (a
 name lands in range about once in 164), then fails typed (`ClaimError::NameSearchExhausted`).
 That name is agent-browser's session name, and the port goes to the guard as `--daemon-port`,
-which checks the daemon's `.port` file (guard part, "The Windows daemon port"). Upstream issue
+which checks the daemon's `.port` file (guard part, "The ports agent-browser reports"). Upstream issue
 vercel-labs/agent-browser#2313, a daemon port set by the caller, would remove the search.
 
 **Missing sidecars.** The same prep checks that the browser entry's `clauseo-mcp` (its command)
@@ -633,6 +658,13 @@ The guard:
   agent's first browser call, inside the agent's MCP child), so the check sits in the guard.
   The guard also takes an empty `.port` file as not written yet, so a reply relayed while the
   daemon writes it cannot kill a good session.
+- After the security review: the guard reads the port files after every relayed line for the
+  session's whole life (a match no longer ends the checks); it checks the stream server's
+  `<session>.stream` too, on every OS; and on Windows agent-browser runs in a Job Object the
+  guard owns, so a refusal ends the daemon and Chrome, not just the direct child. `crates/mcp`
+  gains `windows` (Windows only) for it, with one `unsafe_code` expect in `job.rs`;
+  `clauseo-process` has the same steps but for an async child, with dependencies this crate may
+  not take.
 - The host depends on `clauseo-sandbox` (`BrowserSocketDir`, `ports`) and `getrandom` (the
   Windows names); `ARCHITECTURE.md`'s row lists both.
 - `AGENT_BROWSER_CONFIG` and `AGENT_BROWSER_EXECUTABLE_PATH` must name existing files, and on
@@ -671,9 +703,11 @@ The guard:
 - The URL host reader follows the WHATWG URL standard as written; it was not compared with
   Chrome's or the `url` crate's parser on the same inputs.
 - The socket folder's owner and mode check ran on Linux only, not macOS.
-- The Windows name search and the `.port` check: their logic runs as pure-function tests on
-  Linux; the Windows wiring (`claim_port_at` in the jail's range, the `.port` read with
-  `FILE_FLAG_OPEN_REPARSE_POINT`) was not built or run. That Chrome honours the later
+- The Windows name search and the port-file checks: their logic runs as tests on Linux; the
+  Windows wiring (`claim_port_at` in the jail's range, the read with
+  `FILE_FLAG_OPEN_REPARSE_POINT`, the guard's Job Object) passes `cargo clippy --target
+  x86_64-pc-windows-gnu` and was never run here; `tests/guard/tree.rs` runs it on CI's Windows
+  job. That Chrome honours the later
   `--remote-debugging-port` over agent-browser's own `=0` is from Chrome's switch rule, not a run.
 
 ## Status
