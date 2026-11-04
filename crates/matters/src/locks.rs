@@ -91,8 +91,8 @@ fn held_open_by(folder: &Path, path: &MatterPath, given: Option<&[String]>) -> O
 /// Whether a rename or delete of a matter file that failed with `err` failed because another
 /// program holds the file, so the failure is `matter.file_locked` and not an I/O failure. Only on
 /// Windows, by [`held_by_code`]; `held` asks [`held_open`] for the target at that moment, and
-/// is called only for an access denied, a sharing violation or a lock violation. Elsewhere `false`: an open file never stops a rename or
-/// delete on macOS or Linux.
+/// is called only for an access denied, a sharing violation or a lock violation. Elsewhere
+/// `false`: an open file never stops a rename or delete on macOS or Linux.
 pub(crate) fn held_at_write(err: &std::io::Error, held: impl FnOnce() -> bool) -> bool {
     #[cfg(windows)]
     {
