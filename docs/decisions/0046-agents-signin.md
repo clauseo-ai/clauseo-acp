@@ -310,10 +310,134 @@ error text is now tested through the public API.
 
 Detection runs, without the store argument, come with piece 5.
 
-### Detection and reuse (to come: S18 piece 5)
+### Detection and reuse (S18 piece 5)
 
-`signin/reuse.rs`: the markers, the four reuse calls, the hard link, the guard and the split
-rule.
+**The calls.** Four are new on `Agents`, each a job on the model above, each
+`Result<(), SigninError>`:
+- `find_login(agent)`: UD2's "Look for my … login". It deletes `no-reuse`, then runs the status
+  check.
+- `use_found_login(agent)`: the lawyer's "Use it". It is refused with `NothingFound` unless the
+  state is `LoginFound`.
+- `use_different_account(agent)`: "Sign in with a different account". It writes `no-reuse`,
+  then starts Clauseo's own sign-in (Claude `--claudeai`, Codex browser). It is refused with
+  `Reused` while the login is reused.
+- `stop_using_login(agent, why: Option<Found>)`: it never runs a logout. It is refused with
+  `NotReused` for Clauseo's own login.
+
+They are cancellable and take pasted codes like `sign_in`, since two of them may run a login.
+`AgentsEvent::SigninNote { agent, note }` is new: `claude_reuse_fallback` and
+`codex_link_failed`, for R20's log. The crate has no logger, so R20 writes them.
+
+**The markers** (`signin/marker.rs`) are Clauseo's own files in `<data_dir>/agents/<id>/`,
+never in a CLI's home. They are read and written through `write`, which refuses a link, and
+written atomically:
+- `login-source`: the line `own`, or the line `reused` followed by the accepted email on a
+  second line (left out when the status gave none). No secret. Anything unreadable or garbled
+  (a link, over 4 KB, another first line) reads as reused, the side on which no logout runs.
+  `own` is written when a sign-in of Clauseo's ends `SignedIn { Own }`, and `reused` on "Use
+  it". Clearing the reuse record deletes the file.
+- `no-reuse`: the line `no-reuse`. Only whether it exists counts (`symlink_metadata`).
+
+**The status check** (`check_status`) is now the start check (`signin/found.rs`). R20 calls it
+at start and when a window shows Plans. It runs:
+1. A recorded reuse first. For Codex, a missing `login-source` with a login file in the home
+   also counts, per the brief.
+   - Claude: detection must still find a `claude.ai` login with the accepted email. Another
+     email gives `ReusedChanged`, signed out gives `ReusedSignedOut`. Then status under the
+     session's environment (`CLAUDE_CONFIG_DIR` the home, `CLAUDE_SECURESTORAGE_CONFIG_DIR=""`)
+     must say signed in, giving `SignedIn { Reused }`. Otherwise the run-time fallback below.
+   - Codex: `codex_link_holds` must say `Holds`, giving `SignedIn { Reused }` with
+     `account/read` under the home. `Split` gives `CodexLinkSplit`, `Gone` gives
+     `ReusedSignedOut`.
+2. Clauseo's own login: "A Clauseo-owned login, once made, wins over reuse."
+3. With `no-reuse` there, `SignedOut`. Otherwise detection.
+
+A run that cannot tell leaves the state unchanged. The job now creates the agent's home before
+any run. Without it, a status check before the first sign-in could not start, since every run
+but detection has the home as its working folder.
+
+**Detection** (`signin/detect.rs`) runs with `RunKind::Detect`: no `CLAUDE_CONFIG_DIR`,
+`CLAUDE_SECURESTORAGE_CONFIG_DIR` or `CODEX_HOME`, the lawyer's `HOME`, no
+`cli_auth_credentials_store`. Its working folder is the empty `<data_dir>/agents/signin/detect`.
+- Claude: `--cli auth status --json`, read by `status::claude_detection`.
+- Codex: `login status`, exit code only. Exit 0 is followed by a `symlink_metadata` of the
+  lawyer's `~/.codex` login file: present is `LoginFound` (with `account/read`, same
+  environment, same folder), absent is `CodexKeyring`.
+
+The lawyer's home folder is `SigninConfig::lawyer_home()` (new, public): the base environment's
+`HOME`, or `USERPROFILE` on Windows.
+
+**"Use it"** runs detection again first. If the email differs from the one `LoginFound` showed,
+the new `LoginFound` is reported and nothing is reused.
+- Claude: status under the session's environment must say signed in. Then `login-source` is
+  written, and the state is `SignedIn { Reused }`.
+- Codex: `link_reused_login` makes the hard link, then `login-source` is written, then
+  `SignedIn { Reused }`, with the plan from detection's `account/read`. The link is refused
+  when the lawyer's name is not a plain file, and checked with `same_file` afterwards. If it
+  fails (another volume, a name already taken, any error), the `codex_link_failed` note goes
+  out, then Clauseo's own browser sign-in runs. If `login-source` cannot be written, the link
+  is removed again.
+
+**Reuse stops** (`found::stop`) with no logout:
+- no reason: `no-reuse` is written;
+- for Codex, a reused home's login file name is removed (`unlink_reused_login`);
+- then `login-source` is deleted, and the state is `SignedOut { found: why }`.
+
+A marker write that fails gives `signin.failed`, since the next start could otherwise reuse
+again without asking. The status check uses the same steps when it finds reuse has ended. So the
+next start shows `LoginFound` again, and nothing re-links on its own.
+
+**The run-time fallback.** Claude's status can say signed out under the session's environment
+while detection says signed in. Then the `claude_reuse_fallback` note goes out, and reuse stops
+with no reason: `no-reuse`, `SignedOut`. This happens on "Use it" or at a later start. A Claude
+Code that ignores the variable would loop through "Use it" otherwise. "Look for my Claude Code
+login" offers it again.
+
+**The guard and the split rule** (`signin/reuse.rs`, public):
+- `codex_login_shared(codex_home, lawyer_home)` is true while the two login files share a file
+  id. S18 refuses its own Codex `login` and `logout` then, whatever `login-source` says. R20
+  asks it before codex-acp's `authenticate`.
+- `codex_link_holds(codex_home, lawyer_home) -> CodexLink { Holds, Split, Gone }`, with
+  `CodexLink::found()`, is the check R20 and R17 run at every Codex session start.
+- `unlink_reused_login(codex_home)` is the leave order's unlink step.
+
+`same_file` does not follow links, so a symbolic link is never "one file".
+
+**Sign-out.** A Codex `logout` is refused by the state, then by the job if any of these holds:
+`login-source`, the missing-marker rule, or the guard. Claude's `auth logout` is refused the same
+way by `login-source`. The job then runs the status check instead, which reports the reused
+login. No `auth logout` or `codex logout` runs while the source is `Reused`.
+
+**The leave order** (R20's: no-reuse, stop, unlink, new login, relaunch). `stop_using_login`
+covers no-reuse and unlink in one job, for the agent's own home. R20 calls it once every Codex
+process using the home has stopped, then `sign_in`, then relaunches. R17 calls
+`unlink_reused_login` for each matter's folder.
+
+**The fakes.**
+- Codex's mode takes a file with the name of Codex's login file as its marker too. A test's
+  empty dummy in `~/.codex`, hard-linked into the home, then signs the home in as Codex's file
+  would.
+- Claude's status prints the marker's email.
+- `FAKE_SIGNIN=secure-ignored` makes Claude's mode drop `CLAUDE_SECURESTORAGE_CONFIG_DIR`, for
+  the run-time fallback.
+
+**Every file operation reuse makes on a login file's path** (for the security review). None
+opens or reads the file:
+- `std::fs::symlink_metadata` (an `lstat`): `reuse.rs` `codex_link_holds` (the lawyer's file),
+  `lawyer_login_present` (detection's stat), `codex_reused` (the home's file),
+  `link_reused_login` (the lawyer's file is a plain file).
+- `same_file`, i.e. `lstat`, or on Windows a `CreateFileW` handle with access 0:
+  `codex_link_holds`, `codex_login_shared`, and `link_reused_login` before and after the link.
+- `std::fs::hard_link`, through `write::hard_link`: `link_reused_login`, on "Use it" only.
+- `std::fs::remove_file`, through `write::remove_file`, of the home's name only (never the
+  lawyer's): `unlink_reused_login`, and `link_reused_login` when the new name does not compare
+  as one file.
+
+The Codex CLI itself reads and refreshes the linked file in the home, as it would its own.
+Claude's reuse touches no file: it is an environment.
+
+**Not done here:** `ClaudeWindowsSandbox` (detection again when S15's tier B set-up finishes).
+The crate has no signal for it yet, and it comes with S15's wiring.
 
 ### Worker wiring (to come: S18 piece 6)
 
@@ -326,11 +450,10 @@ refused) and status checks at start. The calls on `Agents` came with piece 3.
   `Locations::agent_home`. The base environment defaults to the app's own.
 - Every later sign-in piece builds its environment with `signin/env.rs` and starts its runs with
   `signin/run.rs`. Neither the ring nor `ExitReport::stderr_tail` is ever logged.
-- The marker file `login-source` cannot be read in `reuse.rs`, which may not call a read. It is
-  read from another module.
-- The foundation items that only Codex's flow and reuse call carry an item-level
-  `#[expect(dead_code)]` until those pieces land. Each expect then fails and is removed with its
-  allowlist line.
+- The markers `login-source` and `no-reuse` are read and written in `signin/marker.rs`, since
+  `reuse.rs` may not call a read.
+- The foundation items that only Codex's flow and reuse call carried an item-level
+  `#[expect(dead_code)]` until those pieces landed. All are gone now, with their allowlist lines.
 - The agent's home is created with `create_dir_all`, which follows a link already standing
   there. The folder is under the trusted data folder, as the adapters are (0033).
 - For the security review (S18):
@@ -339,7 +462,13 @@ refused) and status checks at start. The calls on `Agents` came with piece 3.
   - `PasteCode`'s zeroing and `Debug`;
   - the ring never logged;
   - the shim and the URL file (mode 0600, removed whatever the outcome), and the host check
-    before `OpenUrl`.
+    before `OpenUrl`;
+  - reuse's file operations on login file paths (listed under "Detection and reuse"), the
+    guard, the split check, and the markers' "unreadable reads as reused" rule.
+- A crash after Codex's own sign-in but before `login-source` `own` is written leaves a home
+  login file with no marker. That reads as reused: no logout runs, and the next status check
+  takes it for a split link and removes the name, so the lawyer signs in again. That is the safe
+  side.
 - Not checked yet: `fileid.rs`'s Windows branch is written against `windows` 0.62.2 but was not
   built or run here. It needs `cargo nextest` on `clauseo-win-01`. On ReFS, a 64-bit file index
   may not be unique (`FILE_ID_INFO` holds 128 bits). The login files live on the system volume,
