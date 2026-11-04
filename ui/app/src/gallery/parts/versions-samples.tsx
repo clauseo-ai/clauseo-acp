@@ -226,7 +226,7 @@ type Mode = "restore" | "undo" | "word";
 /** The dialog's ask for a mode: a restore to the draft's first version, a word file held open, or an undo of the
  * draft's latest change, with each change made since kept or undone by the lawyer. */
 function askFor(mode: Mode, lang: Lang, kept: readonly string[]): RestoreAsk | null {
-  if (mode === "word") return { kind: "word", act: "restore", file: "Written statement.docx" };
+  if (mode === "word") return { kind: "word", act: "restore", files: ["Written statement.docx"] };
   if (mode === "restore") {
     const r = restoreWords(lang, CAL, HISTORY, "v4", nameOf);
     return r === null

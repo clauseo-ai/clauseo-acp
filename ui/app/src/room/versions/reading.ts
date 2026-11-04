@@ -13,7 +13,7 @@ import type {
   ViewEntry,
 } from "../../transport/protocol.ts";
 import { orderOf, pageBefore } from "../matter-stream.ts";
-import { wordLock } from "../word/lock.ts";
+import { lockedFiles, wordLocks } from "../word/lock.ts";
 import { inRowOrder, type Ask, type Done, type Unsaved } from "./state.ts";
 import type { Timeline } from "./timeline.ts";
 
@@ -165,17 +165,13 @@ export class DoneWatch {
   }
 }
 
-/** The files a preview says a refused restore was held on: the ones it names as locked, or else every file it writes. */
-const heldOn = (preview: RestorePreview): readonly string[] =>
-  preview.locked.length > 0 ? preview.locked : preview.changes.map((c) => c.path);
-
-/** The restore dialog after a program refused the restore a file: Word's lines when the files the preview names as
- * locked, or else the files the restore writes, are one Word document (word/lock.ts). A preview naming none locked and
- * writing more than one is asked again first, in case it now names one. Otherwise the dialog stays with what restoring
- * writes, says why, and offers Try again. */
+/** The restore dialog after a program refused the restore a file: Word's lines when the files the host names as held,
+ * or else the files the preview names as locked, or else the files the restore writes, are all Word documents
+ * (word/lock.ts). A preview naming none locked and writing more than one is asked again first, in case it now names
+ * one. Otherwise the dialog stays with what restoring writes, says why, and offers Try again. */
 export async function lockedRestore(
   ask: Extract<Ask, { act: "restore" }>,
-  code: string,
+  refusal: { code: string; files?: readonly string[] | undefined },
   previewOf: (id: string) => Promise<RestorePreview | null>,
 ): Promise<Ask> {
   const { id, undoes } = ask;
@@ -187,8 +183,15 @@ export async function lockedRestore(
       console.warn(`preview_restore failed: ${JSON.stringify(error)}`);
     }
   }
-  const file = wordLock(code, heldOn(preview));
-  return file === null
-    ? { act: "restore", id, preview, undoes, stage: "confirm", failed: code }
-    : { act: "restore", id, preview, undoes, stage: "word", file };
+  const files = wordLocks(
+    refusal.code,
+    lockedFiles(
+      refusal,
+      preview.changes.map((c) => c.path),
+      preview.locked,
+    ),
+  );
+  return files === null
+    ? { act: "restore", id, preview, undoes, stage: "confirm", failed: refusal.code }
+    : { act: "restore", id, preview, undoes, stage: "word", files };
 }

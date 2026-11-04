@@ -11,13 +11,14 @@ import { toHostError } from "../../transport/host-transport.ts";
 import type {
   FileChoice,
   HostCommand,
+  HostError,
   MatterId,
   RestorePreview,
   ViewEntry,
 } from "../../transport/protocol.ts";
 import { matterStreamOf, readMatter } from "../matter-stream.ts";
 import { localZone } from "../when.ts";
-import { wordLock } from "../word/lock.ts";
+import { lockedFiles, wordLocks } from "../word/lock.ts";
 import { Conversations } from "./conversations.ts";
 import {
   DoneWatch,
@@ -50,6 +51,8 @@ import { newestUndo, timelineOf, undoable, undoesAsRestore, type VersionMeta } f
 export type { Ask, Done, Look, Snapshot, Unsaved };
 
 type UndoAsk = Extract<Ask, { act: "undo" }>;
+/** A refusal: its code, the files the host names as held (matter.file_locked), and whether the dialog is still open. */
+type Refusal = Pick<HostError, "code" | "files"> & { kind: "refused"; current: boolean };
 type RestoreAsk = Extract<Ask, { act: "restore" }>;
 
 export class VersionsController {
@@ -466,16 +469,16 @@ export class VersionsController {
     const papers = files.filter((f) => f.choice === "undo").map((f) => f.path);
     const outcome = await this.#act({ undo_step: { thread: m.thread, turn: step.turn, files } });
     if (outcome.kind === "refused") {
-      // undo_step's refusal doesn't name the file a program holds: an undo of one Word document can only mean Word holds
-      // that one (word/lock.ts); otherwise the dialog keeps the lawyer's choices, says why, and offers Try again
-      const word = wordLock(outcome.code, papers);
+      // the files the host names as held (word/lock.ts guesses for an older host): Word's lines when all are Word
+      // documents; otherwise the dialog keeps the lawyer's choices, says why, and offers Try again
+      const word = wordLocks(outcome.code, lockedFiles(outcome, papers));
       await this.#refused(
         outcome.code,
         outcome.current
           ? () =>
               word === null
                 ? { act: "undo", id, choices, stage: "confirm", failed: outcome.code }
-                : { act: "undo", id, choices, stage: "word", file: word }
+                : { act: "undo", id, choices, stage: "word", files: word }
           : undefined,
       );
       return;
@@ -497,9 +500,7 @@ export class VersionsController {
     if (outcome.kind === "refused") {
       await this.#refused(
         outcome.code,
-        outcome.current
-          ? () => lockedRestore(ask, outcome.code, (id) => this.#preview(id))
-          : undefined,
+        outcome.current ? () => lockedRestore(ask, outcome, (id) => this.#preview(id)) : undefined,
       );
       return;
     }
@@ -523,11 +524,9 @@ export class VersionsController {
     });
   }
 
-  /** Sends one act; resolves with what it wrote, or the code the host refused it with (current: its dialog wasn't
-   * closed meanwhile, so a dialog may open again to say why). */
-  async #act(
-    command: HostCommand,
-  ): Promise<Outcome | { kind: "refused"; code: string; current: boolean }> {
+  /** Sends one act; resolves with what it wrote, or the code the host refused it with and the files it names as held
+   * (current: its dialog wasn't closed meanwhile, so a dialog may open again to say why). */
+  async #act(command: HostCommand): Promise<Outcome | Refusal> {
     this.#acting = true;
     this.#done.sent(this.#store.view(this.#stream));
     this.#asked += 1;
@@ -539,7 +538,8 @@ export class VersionsController {
       this.#set({ failed: null });
       return outcome;
     } catch (e) {
-      return { kind: "refused", code: toHostError(e).code, current: asked === this.#asked };
+      const { code, files } = toHostError(e);
+      return { kind: "refused", code, ...(files && { files }), current: asked === this.#asked };
     } finally {
       this.#acting = false;
       this.#set({}); // busy changed, though nothing else may have: the room's New conversation hears it
