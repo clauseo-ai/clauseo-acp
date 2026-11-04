@@ -22,7 +22,7 @@ import {
   type NextHostError,
   type PaperSummary,
 } from "../room/host-next.ts";
-import { detailed, fakeNext, railStates } from "../room/fake-next.ts";
+import { detailed, fakeNext, railStates, railThreads } from "../room/fake-next.ts";
 
 /** A matter as filed, for states that show one. */
 export const MATTER: MatterSummary = {
@@ -186,7 +186,14 @@ export const scratchHost = (): FakeTransport =>
 
 /** A NextHost whose matters show every rail state, in every date group, one pinned (room/fake-next.ts). */
 export const railHost = (): FakeTransport =>
-  new FakeTransport({ next: fakeNext({ matters: () => railStates(MATTER, SCRATCH, Date.now()) }) });
+  new FakeTransport({
+    next: fakeNext({
+      matters: () => railStates(MATTER, SCRATCH, Date.now()),
+      // Needs you and Recent (U16a): every matter's threads, as the host's first frames give them
+      frames: true,
+      threads: railThreads(MATTER, SCRATCH, Date.now()),
+    }),
+  });
 
 /** A host that refuses create_matter with `code`, its picker giving `display`. With `next`, a NextHost with the
  * default location "Documents/Clauseo", so Create sends default_location and the line names no folder. */
