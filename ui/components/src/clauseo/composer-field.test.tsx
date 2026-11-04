@@ -493,3 +493,24 @@ test("plain typing writes the field's style only as its line count changes, neve
   await type("");
   expect(a.style.height).toBe("");
 });
+
+test("a field left a line too tall by words only put in is fitted whole once typing pauses", async () => {
+  await mount(composer({}));
+  const a = field();
+  wraps(a);
+  // 70 characters at 40 a line: two lines, and still two with one more
+  const words = "न्यायालय ने आज अपना फैसला सुना दिया है। ".repeat(2).slice(0, 70);
+  await type(words.slice(0, 1));
+  await type(words);
+  expect(a.style.height).toBe("52px");
+  // as a mark joining a conjunct narrows a line and the words need one line fewer: a scroll height never shows it
+  vi.useFakeTimers({ toFake: ["setTimeout"] });
+  a.style.height = "78px";
+  await type(`${words}न`);
+  expect(a.style.height).toBe("78px");
+  await act(async () => vi.advanceTimersByTime(399));
+  expect(a.style.height).toBe("78px");
+  await act(async () => vi.advanceTimersByTime(1));
+  expect(a.style.height).toBe("52px");
+  vi.useRealTimers();
+});
