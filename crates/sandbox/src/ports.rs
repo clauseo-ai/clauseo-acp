@@ -11,7 +11,8 @@
 //! while it is held, so the registry keeps this process's own listeners and claims apart:
 //! [`bind_loopback`], [`claim_port`] and [`claim_port_at`] never hand out a claimed port.
 //!
-//! On macOS and Linux a dropped claim retires its port instead of freeing it. Retired ports
+//! On macOS and Linux a dropped claim retires its port instead of freeing it, and so does every
+//! port [`bind_loopback`] hands out, as it binds. Retired ports
 //! join a second registry that is never cleared, and those three functions never hand them out
 //! again for the life of the process. The host's tree kill is `killpg`, which misses a jailed
 //! child that called `setsid`; that child keeps its Seatbelt rules, and they still allow the
@@ -79,9 +80,13 @@ impl Held {
 /// [`claim_port_at`] of this process hands it out while the claim lives. Nothing is bound;
 /// whoever the port is for binds it.
 ///
-/// A claim holds only inside this process. Another local process can still bind the port
-/// before Chrome or agent-browser does; the launch then fails, with no fallback to another
-/// port. On macOS and Linux [`bind_loopback`] and [`claim_port`] bind port 0, so the kernel
+/// A claim holds only inside this process, and nothing is bound while it is held: Chrome,
+/// agent-browser's stream server and its Windows daemon bind at the browser's first tool call,
+/// if ever. Another local process (another user's host) can bind the port first. The session's
+/// own listener then fails or falls back to another port, which the browser guard's port files
+/// catch, but the session's jail still allows the port, so its agent can reach whatever bound
+/// it. A residual risk (stage C's review of #329): S15's listener rule closes it on Windows.
+/// On macOS and Linux [`bind_loopback`] and [`claim_port`] bind port 0, so the kernel
 /// picks the port and it is known only after the bind: if the kernel hands back a claimed or
 /// retired port (it hands out only ports nobody holds), it is held for an instant, under the
 /// registry lock, and the bind asked again. A launch binding that exact port in that instant
@@ -115,9 +120,22 @@ impl Drop for PortClaim {
     }
 }
 
-/// Binds a listener on `127.0.0.1` for one launch, never on a claimed or retired port. On
-/// Windows, when no port in [`WINDOWS_PORTS`] binds, the error names the range and says what
-/// may hold it.
+/// Binds a listener on `127.0.0.1` for one launch, never on a claimed or retired port. Its port
+/// is retired as it binds: the listener holds it while it lives, and once it closes no later
+/// launch of this process gets it. A jailed child of this launch that outlived it keeps the rule
+/// for this port, and the proxy's browser listener takes no token.
+#[cfg(not(windows))]
+pub fn bind_loopback() -> io::Result<TcpListener> {
+    let mut held = Held::lock();
+    let listener = imp::bind(&held)?;
+    held.retired.insert(listener.local_addr()?.port());
+    Ok(listener)
+}
+
+/// Binds a listener on `127.0.0.1` for one launch, on a free port in [`WINDOWS_PORTS`] that is
+/// not claimed. When none binds, the error names the range and says what may hold it. Windows
+/// retires nothing (see the module header).
+#[cfg(windows)]
 pub fn bind_loopback() -> io::Result<TcpListener> {
     imp::bind(&Held::lock())
 }
@@ -383,6 +401,19 @@ mod tests {
         assert_ne!(got.local_addr().unwrap().port(), claim.port());
         let all_claimed = imp::first_unheld(&Held::lock(), || imp::bind_port(claim.port()));
         assert!(all_claimed.is_err(), "the port was bound twice");
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn a_closed_listener_port_is_not_handed_out_again() {
+        let listener = bind_loopback().unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let error = claim_port_at(port).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::AddrInUse, "{error}");
+        for _ in 0..200 {
+            assert_ne!(claim_port().unwrap().port(), port);
+        }
     }
 
     #[cfg(not(windows))]
