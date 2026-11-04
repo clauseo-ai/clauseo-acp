@@ -30,6 +30,7 @@ use super::out::Out;
 use super::{Current, Holder, Then, TurnTag, cancel, host_stopping, lost, matter_of, state, steps};
 use crate::build;
 use crate::error::Error;
+use crate::log_file::Cause;
 
 use commands::put_content;
 pub(super) use commands::{edit, remove, resume, send_now};
@@ -466,7 +467,11 @@ fn start_head(actor: &mut Actor, thread: ThreadId) {
                 Ok(()) => steps::on_accepted(actor, thread, turn),
                 Err(error) => {
                     // Nothing could be logged for it: it waits again, held.
-                    tracing::warn!(%thread, %error, "a queued turn could not start");
+                    tracing::warn!(
+                        %thread,
+                        error = %Cause(&error),
+                        "a queued turn could not start"
+                    );
                     put_back(actor, thread, turn);
                 }
             }

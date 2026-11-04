@@ -27,6 +27,7 @@ use super::{
 use crate::build;
 use crate::error::Error;
 use crate::file_link;
+use crate::log_file::Cause;
 use crate::matter_worker::{MatterJob, TurnCheckpoint};
 use crate::pipeline::MatterEvent;
 
@@ -232,7 +233,7 @@ pub(super) fn on_launched(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
         out.send(actor, Then::Nothing)
     })();
     if let Err(error) = taken {
-        tracing::warn!(%thread, %error, "a turn could not wait for its writer");
+        tracing::warn!(%thread, error = %Cause(&error), "a turn could not wait for its writer");
     }
 }
 
@@ -329,7 +330,7 @@ pub(super) fn on_before_turn(
     let matter = match matter_of(actor, thread) {
         Ok(matter) => matter,
         Err(error) => {
-            tracing::error!(%thread, %error, "a turn lost its matter");
+            tracing::error!(%thread, error = %Cause(&error), "a turn lost its matter");
             end::finish(actor, thread);
             return;
         }
@@ -388,7 +389,7 @@ pub(super) fn on_before_turn(
         out.send(actor, Then::Started(turn))
     })();
     if let Err(error) = started {
-        tracing::warn!(%thread, %error, "a turn's start was not logged");
+        tracing::warn!(%thread, error = %Cause(&error), "a turn's start was not logged");
         if failure::blocked(actor, thread) {
             // The unblock ends it.
             if let Some(current) = current(actor, thread) {

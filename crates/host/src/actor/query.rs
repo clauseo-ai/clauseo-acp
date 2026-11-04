@@ -24,6 +24,7 @@ use futures::task::LocalSpawnExt;
 
 use crate::blob_read;
 use crate::error::Error;
+use crate::log_file::Cause;
 use crate::matter_worker::{MatterJob, MatterReply};
 use crate::principal::{Access, authorize};
 
@@ -196,7 +197,9 @@ fn matter_query(
                 // closed.
                 Ok(worker) => match worker.send(job, MatterTag::Query(reply)) {
                     Ok(()) => actor.work.matter_jobs += 1,
-                    Err(error) => tracing::warn!(%matter, %error, "a query was not sent"),
+                    Err(error) => {
+                        tracing::warn!(%matter, error = %Cause(&error), "a query was not sent");
+                    }
                 },
                 Err(error) => {
                     let _gone = reply.send(Err(error));

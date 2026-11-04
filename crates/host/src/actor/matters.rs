@@ -23,6 +23,7 @@ use super::commands::{AfterCommand, CommandCtx};
 use super::input::{Input, MatterTag};
 use super::{Actor, MatterEntry, Tag, turn};
 use crate::error::Error;
+use crate::log_file::Cause;
 use crate::matter_worker::{
     Claim, Claimed, MatterJob, MatterReply, MatterWorker, Registry, Relink, check_registry, made,
     matter_settings,
@@ -384,7 +385,7 @@ pub(super) fn create_scratch(actor: &mut Actor) {
     );
     match begun {
         Ok(pending) => actor.scratch = Some(pending),
-        Err(error) => tracing::warn!(%error, "could not start the Scratch matter"),
+        Err(error) => tracing::warn!(error = %Cause(&error), "could not start the Scratch matter"),
     }
 }
 
@@ -462,15 +463,11 @@ pub(super) fn on_matter_reply(
                     }
                 }
                 Err(error) => {
-                    tracing::warn!(code = %error.code(), "could not create the Scratch matter");
+                    tracing::warn!(error = %Cause(&error), "could not create the Scratch matter");
                 }
             }
         }
-        MatterTag::Open => {
-            if let MatterReply::Opened(Err(error)) = reply {
-                tracing::warn!(%matter, %error, "could not open a matter; it is tried again");
-            }
-        }
+        MatterTag::Open => super::matter_details::opened(matter, reply),
         MatterTag::Relocate { command, folder } => {
             super::relocate::located(actor, matter, command, &folder, reply);
         }
@@ -479,7 +476,10 @@ pub(super) fn on_matter_reply(
             if let MatterReply::Restored(result) = reply {
                 turn::on_restored(actor, &ask, result.map(|done| *done));
             } else {
-                tracing::error!(?reply, "a restore answered with another job's reply");
+                tracing::error!(
+                    reply = reply.name(),
+                    "a restore answered with another job's reply"
+                );
             }
         }
         MatterTag::Query(answer) => {

@@ -309,6 +309,19 @@ enum JobKind {
     Permission(Box<asks::HeldOpenCheck>),
 }
 
+impl JobKind {
+    /// The variant's name, for the log: its fields can hold paths.
+    const fn name(&self) -> &'static str {
+        match self {
+            Self::Before(_) => "Before",
+            Self::After(_) => "After",
+            Self::Reconcile(_) => "Reconcile",
+            Self::Undo(_) => "Undo",
+            Self::Permission(_) => "Permission",
+        }
+    }
+}
+
 /// An agent's event or its end, in the order its tasks posted them, for `thread`.
 pub(crate) fn agent_input(actor: &mut Actor, thread: ThreadId, input: AgentInput) {
     match input {
@@ -383,8 +396,8 @@ pub(crate) fn matter_reply(actor: &mut Actor, _matter: MatterId, job: TurnJob, r
         }
         (kind, reply) => {
             tracing::error!(
-                ?kind,
-                ?reply,
+                kind = kind.name(),
+                reply = reply.name(),
                 "a matter job answered with another job's reply"
             );
         }

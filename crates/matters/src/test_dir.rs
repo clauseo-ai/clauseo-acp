@@ -38,7 +38,7 @@ impl TestDir {
 impl Drop for TestDir {
     fn drop(&mut self) {
         if let Err(err) = write::remove_dir_all(&self.path) {
-            tracing::warn!(path = %self.path.display(), error = %err, "test folder left behind");
+            tracing::warn!(error = %err, "test folder left behind");
         }
     }
 }

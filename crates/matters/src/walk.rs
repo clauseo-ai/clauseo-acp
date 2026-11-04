@@ -126,7 +126,7 @@ pub(crate) fn walk(
                         Stated::Vanished(path) => vanished.push(path),
                         Stated::Gone => {}
                         Stated::Denied(err) => {
-                            walker.unenterable(&dir, &relative, entry.path(), err)?;
+                            walker.unenterable(&relative, entry.path(), err)?;
                             found.truncate(found_mark);
                             pending.truncate(pending_mark);
                             vanished.truncate(vanished_mark);
@@ -191,12 +191,7 @@ pub(crate) fn walk_first(
                 // Denied after its folder's first stat passed: drop all of that folder.
                 Stated::Denied(err) => {
                     let (folder, _) = path.as_str().rsplit_once('/').unwrap_or(("", ""));
-                    let dir = entry
-                        .path()
-                        .parent()
-                        .map(Path::to_path_buf)
-                        .unwrap_or_default();
-                    walker.unenterable(&dir, folder, entry.path(), err)?;
+                    walker.unenterable(folder, entry.path(), err)?;
                     let prefix = format!("{folder}/");
                     let under = |path: &str| path.starts_with(&prefix);
                     while found
@@ -217,7 +212,7 @@ pub(crate) fn walk_first(
                 // No cancel flag, so the read always finishes.
                 walker.read_folder(&dir, &relative, &mut items)?;
                 items.sort_unstable_by(|a, b| a.sort_key().cmp(b.sort_key()));
-                if !walker.first_stat(&dir, &relative, &mut items)? {
+                if !walker.first_stat(&relative, &mut items)? {
                     items.clear();
                 }
                 pending.extend(items.drain(..).rev());
@@ -320,12 +315,12 @@ impl Walker<'_> {
             Err(err) if relative.is_empty() => return Err(Error::io("read folder", dir, err)),
             Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(true),
             Err(err) if not_downloaded(&err) => {
-                tracing::info!(path = %dir.display(), "kept a folder that is not downloaded as it was");
+                tracing::info!("kept a folder that is not downloaded as it was");
                 self.unread.push(relative.to_owned());
                 return Ok(true);
             }
             Err(err) => {
-                tracing::warn!(path = %dir.display(), error = %err, "skipped a folder that does not read");
+                tracing::warn!(error = %err, "skipped a folder that does not read");
                 self.unread.push(relative.to_owned());
                 return Ok(true);
             }
@@ -340,12 +335,12 @@ impl Walker<'_> {
                     return Err(Error::io("read folder", dir, err));
                 }
                 Err(err) if not_downloaded(&err) => {
-                    tracing::info!(path = %dir.display(), "kept a folder that is not downloaded as it was");
+                    tracing::info!("kept a folder that is not downloaded as it was");
                     self.unread.push(relative.to_owned());
                     break;
                 }
                 Err(err) => {
-                    tracing::warn!(path = %dir.display(), error = %err, "stopped reading a folder");
+                    tracing::warn!(error = %err, "stopped reading a folder");
                     self.unread.push(relative.to_owned());
                     break;
                 }
@@ -354,7 +349,7 @@ impl Walker<'_> {
                 Entry::Skip => {}
                 Entry::Item(item) => items.push(item),
                 Entry::Denied(path, err) => {
-                    self.unenterable(dir, relative, path, err)?;
+                    self.unenterable(relative, path, err)?;
                     items.truncate(mark);
                     break;
                 }
@@ -363,12 +358,11 @@ impl Walker<'_> {
         Ok(true)
     }
 
-    /// The folder `dir` (`relative` to the root) lists but cannot be entered: the stat of
+    /// The folder at `relative` (to the root) lists but cannot be entered: the stat of
     /// `path` in it failed with `err`. Kept as unread, as a folder that does not list, so one
     /// such folder does not stop a checkpoint; the root is an error.
     fn unenterable(
         &mut self,
-        dir: &Path,
         relative: &str,
         path: std::path::PathBuf,
         err: io::Error,
@@ -376,7 +370,7 @@ impl Walker<'_> {
         if relative.is_empty() {
             return Err(Error::io("stat", path, err));
         }
-        tracing::warn!(path = %dir.display(), error = %err, "skipped a folder that does not read");
+        tracing::warn!(error = %err, "skipped a folder that does not read");
         // A folder that stopped reading part way, or whose subfolder was dropped with it, may
         // be listed already.
         if !self.unread.iter().any(|dir| dir == relative) {
@@ -386,14 +380,9 @@ impl Walker<'_> {
     }
 
     /// Takes the stat of the first file of `items` (one folder's, sorted), which says whether
-    /// the folder `dir` can be entered: `Ok(false)` when it cannot (now in `unread`). A file
-    /// gone is dropped and the next one tried.
-    fn first_stat(
-        &mut self,
-        dir: &Path,
-        relative: &str,
-        items: &mut Vec<Item>,
-    ) -> Result<bool, Error> {
+    /// the folder at `relative` can be entered: `Ok(false)` when it cannot (now in `unread`).
+    /// A file gone is dropped and the next one tried.
+    fn first_stat(&mut self, relative: &str, items: &mut Vec<Item>) -> Result<bool, Error> {
         let mut at = 0;
         while let Some(item) = items.get(at) {
             let Item::File(entry, path) = item else {
@@ -412,7 +401,7 @@ impl Walker<'_> {
                 }
                 Stated::Denied(err) => {
                     let path = entry.path();
-                    self.unenterable(dir, relative, path, err)?;
+                    self.unenterable(relative, path, err)?;
                     return Ok(false);
                 }
                 Stated::Failed(err) => return Err(err),
@@ -460,7 +449,7 @@ enum Entry {
 fn entry_item(entry: DirEntry, parent: &str) -> Result<Entry, Error> {
     let os_name = entry.file_name();
     let Some(name) = os_name.to_str() else {
-        tracing::warn!(path = %entry.path().display(), "skipped a name that is not UTF-8");
+        tracing::warn!("skipped a name that is not UTF-8");
         return Ok(Entry::Skip);
     };
     let file_type = match entry.file_type() {
@@ -483,7 +472,7 @@ fn entry_item(entry: DirEntry, parent: &str) -> Result<Entry, Error> {
     let matter_path = match MatterPath::new(&relative) {
         Ok(matter_path) => matter_path,
         Err(err) => {
-            tracing::warn!(path = %entry.path().display(), error = %err, "skipped a path");
+            tracing::warn!(error = %err, "skipped a path");
             return Ok(Entry::Skip);
         }
     };

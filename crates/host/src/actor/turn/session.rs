@@ -23,6 +23,7 @@ use super::out::Out;
 use super::{AgentReply, LogFor, Then, TurnInput, lost, state, updates};
 use crate::agent::{self, codex};
 use crate::error::Error;
+use crate::log_file::Cause;
 use crate::sent::SentView;
 
 /// The notice a thread gets when its agent starts a new session after earlier turns.
@@ -101,7 +102,7 @@ pub(super) fn on_replay_log(
     };
     match result {
         Ok(log) => agent.replay = Some(SentView::rebuild(StreamId::Thread(thread), &log)),
-        Err(error) => tracing::warn!(%thread, %error, "no log for replay dedupe"),
+        Err(error) => tracing::warn!(%thread, error = %Cause(&error), "no log for replay dedupe"),
     }
     agent.mcp_commands = commands(&mcp_servers);
     let (id, client, fence) = (agent.id, agent.link.client.clone(), agent.link.fence());
@@ -286,7 +287,11 @@ pub(super) fn on_started(actor: &mut Actor, thread: ThreadId, start: SessionStar
     let (ask, switch) = match checks {
         Ok(checks) => checks,
         Err(error) => {
-            tracing::warn!(%thread, %error, "the Codex session cannot run in its ask mode");
+            tracing::warn!(
+                %thread,
+                error = %Cause(&error),
+                "the Codex session cannot run in its ask mode"
+            );
             launch_failed(actor, thread, &error);
             return;
         }
@@ -386,7 +391,11 @@ fn claude_no_mode(actor: &mut Actor, thread: ThreadId, why: &str) {
             agent::loads::CLAUDE_MODE
         ),
     );
-    tracing::warn!(%thread, %error, "the Claude session cannot run in Clauseo's mode");
+    tracing::warn!(
+        %thread,
+        error = %Cause(&error),
+        "the Claude session cannot run in Clauseo's mode"
+    );
     launch_failed(actor, thread, &error);
 }
 
@@ -521,7 +530,9 @@ fn log_agent_name(actor: &mut Actor, thread: ThreadId, name: Option<CompactStrin
                 header.agent_name = Some(name);
             }
         }
-        Err(error) => tracing::warn!(%thread, %error, "the agent's name was not logged"),
+        Err(error) => {
+            tracing::warn!(%thread, error = %Cause(&error), "the agent's name was not logged");
+        }
     }
 }
 

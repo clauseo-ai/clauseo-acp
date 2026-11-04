@@ -28,6 +28,7 @@ use super::input::MatterTag;
 use super::matters::{registry, start_worker};
 use super::{Actor, Tag, turn};
 use crate::error::Error;
+use crate::log_file::Cause;
 use crate::matter_worker::{MatterJob, MatterReply};
 use crate::pipeline::Draft;
 
@@ -242,6 +243,8 @@ fn reopen_recorded(actor: &mut Actor, matter: MatterId) {
     };
     match worker.send(open, MatterTag::Open) {
         Ok(()) => actor.work.matter_jobs += 1,
-        Err(error) => tracing::warn!(%matter, %error, "could not reopen a matter's folder"),
+        Err(error) => {
+            tracing::warn!(%matter, error = %Cause(&error), "could not reopen a matter's folder");
+        }
     }
 }

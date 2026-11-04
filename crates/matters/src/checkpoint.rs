@@ -319,7 +319,7 @@ impl Core {
         if let Err(err) = self.history.publish(commit, parent, &mut cache) {
             // The ref may or may not have moved: read it again before the next checkpoint.
             if let Err(reload) = self.reload() {
-                tracing::warn!(error = %reload, "the timeline did not read after a failed publish");
+                tracing::warn!(code = %reload.code(), "the timeline did not read after a failed publish");
             }
             return Err(err);
         }

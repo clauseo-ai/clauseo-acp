@@ -14,6 +14,7 @@ use super::input::Input;
 use super::subs::ViewSub;
 use super::{Actor, Tag, turn};
 use crate::error::Error;
+use crate::log_file::Cause;
 use crate::pipeline::{Draft, Failure, Ticket};
 use crate::sent::SentView;
 use crate::view::StreamView;
@@ -125,7 +126,11 @@ pub(super) fn on_reopened(
         Ok(Folded::State { state, tail }) => finish_load(actor, stream, *state, &tail),
         Err(failure) => {
             if let Some(StreamSlot::Loading(loading)) = actor.streams.remove(&stream) {
-                tracing::warn!(%stream, ?failure, "could not load a stream");
+                tracing::warn!(
+                    %stream,
+                    error = %Cause(&failure.to_error()),
+                    "could not load a stream"
+                );
                 for waiter in loading.waiters {
                     waiter(actor, Err(failure.to_error()));
                 }
@@ -265,7 +270,7 @@ pub(super) fn on_committed(
             }
             Err(failure) => {
                 if failure.first {
-                    tracing::warn!(error = %failure.error, "a commit failed");
+                    tracing::warn!(error = %Cause(&failure.error), "a commit failed");
                 }
                 continuations.push((done.tag, Err(failure)));
             }
@@ -300,7 +305,7 @@ fn continue_commit(actor: &mut Actor, tag: Tag, outcome: Result<(), &Failure>) {
         Tag::Scratch(entry) => super::matters::scratch_committed(actor, *entry, outcome),
         Tag::Snapshot => {
             if let Err(failure) = outcome {
-                tracing::warn!(error = %failure.error, "a snapshot was not stored");
+                tracing::warn!(error = %Cause(&failure.error), "a snapshot was not stored");
             }
         }
         Tag::Turn(tag) => turn::committed(actor, tag, outcome),
@@ -328,7 +333,11 @@ fn apply_commit(actor: &mut Actor, envelopes: Vec<Envelope>, touched: &mut Vec<S
                 let encoded = match changes_of(loaded, stream, envelopes, &mut actor.encoder) {
                     Ok(encoded) => encoded,
                     Err(error) => {
-                        tracing::error!(%stream, %error, "view changes did not encode");
+                        tracing::error!(
+                            %stream,
+                            error = %Cause(&error),
+                            "view changes did not encode"
+                        );
                         Vec::new()
                     }
                 };
@@ -373,7 +382,7 @@ pub(super) fn on_snapshot(actor: &mut Actor, snapshot: SnapshotIn) {
     let mut draft = Draft::new();
     draft.snapshot(snapshot);
     if let Err(error) = actor.send_commit(draft, Tag::Snapshot) {
-        tracing::warn!(%error, "a snapshot was not sent");
+        tracing::warn!(error = %Cause(&error), "a snapshot was not sent");
     }
 }
 
@@ -436,7 +445,9 @@ fn take_snapshot(
     match Snapshot::of(&loaded.state).to_bytes() {
         Ok(bytes) => match snapshots.submit(stream, seq, bytes) {
             Ok(()) => work.snapshots += 1,
-            Err(error) => tracing::warn!(%stream, %error, "the snapshot thread is gone"),
+            Err(error) => {
+                tracing::warn!(%stream, error = %Cause(&error), "the snapshot thread is gone");
+            }
         },
         Err(error) => tracing::warn!(%stream, %error, "a snapshot did not encode"),
     }

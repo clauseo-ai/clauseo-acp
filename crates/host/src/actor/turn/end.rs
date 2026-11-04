@@ -33,6 +33,7 @@ use super::{
     current, failure, host_stopping, known, matter_of, state, steps, updates,
 };
 use crate::error::Error;
+use crate::log_file::Cause;
 use crate::matter_worker::{MatterJob, TurnCheckpoint};
 use crate::pipeline::MatterEvent;
 
@@ -117,7 +118,11 @@ pub(super) fn on_prompt_refused(actor: &mut Actor, thread: ThreadId, turn: TurnI
     if !prompting {
         return;
     }
-    tracing::warn!(%thread, %error, "a Codex prompt was refused before it was sent");
+    tracing::warn!(
+        %thread,
+        error = %Cause(error),
+        "a Codex prompt was refused before it was sent"
+    );
     if let Some(current) = current(actor, thread) {
         current.prompt_call = None;
     }
@@ -168,7 +173,7 @@ pub(super) fn end_turn(actor: &mut Actor, thread: ThreadId, mut end: End) {
         out.send(actor, Then::Nothing)
     })();
     if let Err(error) = expired {
-        tracing::warn!(%thread, %error, "a turn's expiries were not logged");
+        tracing::warn!(%thread, error = %Cause(&error), "a turn's expiries were not logged");
     }
     if let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) {
         agent.permissions.clear();

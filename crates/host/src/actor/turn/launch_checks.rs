@@ -49,6 +49,7 @@ use crate::agent::{codex, data_folder};
 use crate::browser::session::BrowserSession;
 use crate::config::SessionKey;
 use crate::error::Error;
+use crate::log_file::Cause;
 
 /// A launch whose checks are running.
 #[derive(Debug)]
@@ -158,7 +159,7 @@ impl RunFolders {
         let ours = self.root.file_name() == Some(std::ffi::OsStr::new(&self.key.id()))
             && self.root.parent().and_then(Path::file_name) == Some(std::ffi::OsStr::new("run"));
         if !ours {
-            tracing::warn!(folder = %self.root.display(), "not a run folder the host made; it stays");
+            tracing::warn!("not a run folder the host made; it stays");
             return;
         }
         if crate::write::is_real_dir(&self.root) {
@@ -235,7 +236,7 @@ fn set_aside(data: &Path) {
     match std::fs::symlink_metadata(&run) {
         Err(_) => return,
         Ok(meta) if !meta.is_dir() => {
-            tracing::warn!(folder = %run.display(), "the run folder is a link or no folder; left as is");
+            tracing::warn!("the run folder is a link or no folder; left as is");
             return;
         }
         Ok(_) => {}
@@ -248,7 +249,7 @@ fn set_aside(data: &Path) {
         None => Err(std::io::Error::other("no free run.old-<n> name")),
     };
     if let Err(error) = renamed {
-        tracing::warn!(folder = %run.display(), %error, "the earlier run's folders stay");
+        tracing::warn!(%error, "the earlier run's folders stay");
     }
 }
 
@@ -284,7 +285,7 @@ pub(crate) fn notes_dir(data: &Path, matter: MatterId) -> PathBuf {
 /// Removes `folder` and all it holds, through no link; a failure is a warning.
 fn remove_tree(folder: &Path) {
     if let Err(error) = crate::write::remove_tree(folder) {
-        tracing::warn!(folder = %folder.display(), %error, "a session's run folder stays");
+        tracing::warn!(%error, "a session's run folder stays");
     }
 }
 
@@ -425,7 +426,7 @@ fn write_skills(writes: &[SkillWrite]) -> Option<SkillsWritten> {
             Ok(written) if at == 0 => first = Some(written),
             Ok(_) => {}
             Err(error) => tracing::warn!(
-                %error,
+                error = %Cause(&error),
                 "the profile's skills were not written; the agent starts with what the folder holds"
             ),
         }
@@ -501,7 +502,11 @@ fn discard(actor: &mut Actor, thread: ThreadId, run: RunFolders) {
         })
         .await;
         if let Err(error) = removed {
-            tracing::warn!(%thread, %error, "a session's run folder was not removed");
+            tracing::warn!(
+                %thread,
+                error = %Cause(&error),
+                "a session's run folder was not removed"
+            );
         }
     });
     if let Err(error) = spawned {

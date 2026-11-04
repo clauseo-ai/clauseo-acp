@@ -23,6 +23,7 @@ use clauseo_protocol::{
 
 use crate::agent::folder_support::CheckSource;
 use crate::error::Error;
+use crate::log_file::Cause;
 use crate::sent::TurnPaths;
 
 /// The matter paths a turn's tool calls named, in `folder`: those `acp` placed inside the
@@ -247,6 +248,26 @@ pub(crate) enum MatterReply {
     Discarded(Result<(), Error>),
 }
 
+impl MatterReply {
+    /// The variant's name, for the log: its fields hold paths and file names.
+    pub(crate) const fn name(&self) -> &'static str {
+        match self {
+            Self::Created(_) => "Created",
+            Self::Imported(_) => "Imported",
+            Self::Opened(_) => "Opened",
+            Self::Located(_) => "Located",
+            Self::BeforeTurn(_) => "BeforeTurn",
+            Self::AfterTurn(_) => "AfterTurn",
+            Self::Undone(_) => "Undone",
+            Self::Restored(_) => "Restored",
+            Self::Compared(_) => "Compared",
+            Self::Previewed(_) => "Previewed",
+            Self::HeldOpen(_) => "HeldOpen",
+            Self::Papers(_) => "Papers",
+        }
+    }
+}
+
 /// A turn's checkpoint, and for an id R8 reused what the host needs to record it when its log
 /// lost that checkpoint (a crash, or a commit that failed, between R8 and the log).
 #[derive(Debug)]
@@ -341,7 +362,7 @@ impl<T: Send + 'static> MatterWorker<T> {
 impl<T: Send + 'static> Drop for MatterWorker<T> {
     fn drop(&mut self) {
         if let Err(err) = self.join() {
-            tracing::warn!(error = %err, "the matter thread panicked");
+            tracing::warn!(error = %Cause(&err), "the matter thread panicked");
         }
     }
 }

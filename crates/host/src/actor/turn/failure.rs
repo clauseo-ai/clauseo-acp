@@ -19,6 +19,7 @@ use super::close::TurnClose;
 use super::state::STORE_DETAIL;
 use super::{Closing, Then, TurnPhase, cancel, current, queue, state, steps, undo};
 use crate::error::Error;
+use crate::log_file::Cause;
 use crate::pipeline::Failure;
 
 /// Whether `thread`'s stream is blocked by a failed commit; its unblock comes once every
@@ -31,13 +32,17 @@ pub(crate) fn blocked(actor: &Actor, thread: ThreadId) -> bool {
 /// stream's commits have all returned, [`on_unblocked`] moves the turn on.
 pub(super) fn on_store_failure(actor: &mut Actor, thread: ThreadId, failure: &Failure) {
     let Some(current) = current(actor, thread) else {
-        tracing::warn!(%thread, error = %failure.error, "an agent-driven commit failed");
+        tracing::warn!(%thread, error = %Cause(&failure.error), "an agent-driven commit failed");
         return;
     };
     if current.store_failed.is_some() {
         return;
     }
-    tracing::warn!(%thread, error = %failure.error, "a turn's commit failed; cancelling it");
+    tracing::warn!(
+        %thread,
+        error = %Cause(&failure.error),
+        "a turn's commit failed; cancelling it"
+    );
     current.store_failed = Some(failure.error.code());
     if current.live() {
         cancel::cancel_running(actor, thread, None);
@@ -66,7 +71,7 @@ pub(super) fn on_unblocked(actor: &mut Actor, thread: ThreadId) {
             // Logs nothing when the cancel commit was durable: the view no longer holds
             // anything for it to close.
             if let Err(error) = cancel::log_cancel(actor, thread, turn, None) {
-                tracing::warn!(%thread, %error, "a cancel was not logged");
+                tracing::warn!(%thread, error = %Cause(&error), "a cancel was not logged");
             }
         }
         TurnPhase::Prompting | TurnPhase::FallbackStop => {
@@ -94,7 +99,7 @@ pub(super) fn closing_sent(
     sent: Result<(), Error>,
 ) {
     let failed = sent.err().map(|error| {
-        tracing::warn!(%thread, %error, "the end of a turn was not logged");
+        tracing::warn!(%thread, error = %Cause(&error), "the end of a turn was not logged");
         error.code()
     });
     let Some(state) = state(actor, thread) else {
@@ -161,6 +166,10 @@ fn retry_closing(actor: &mut Actor, thread: ThreadId) {
     close.store_failed(code);
     let sent = close.send(actor, thread, Then::Closing(close.turn));
     if let Err(error) = sent {
-        tracing::warn!(%thread, %error, "a turn's end failed twice; the next start ends it");
+        tracing::warn!(
+            %thread,
+            error = %Cause(&error),
+            "a turn's end failed twice; the next start ends it"
+        );
     }
 }

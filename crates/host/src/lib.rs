@@ -66,6 +66,12 @@
 //!   matter's `.codex` folder, and a Codex shell command naming a `.codex` folder. When
 //!   [`HostConfig::with_pre_write_guard`] names the program to run, Claude Code's entry goes in
 //!   the session's `_meta`, with the matter folder, and Codex's in its `CODEX_CONFIG`.
+//! - The log file ([`log_file`], decision record 0047): `host.log` in the data folder's
+//!   `logs`, warn and error from every target and the host's lifecycle lines, through a
+//!   bounded channel to one `clauseo-log` thread that rotates at 5 MB into three files and
+//!   drops and counts what it cannot write; and the panic hook. Its lines hold ids, codes and
+//!   kinds, never a path, a file name, a prompt, agent text, a title or a settings value: a
+//!   log site passes an error through `log_file::Cause`.
 //!
 //! # Interface
 //!
@@ -134,6 +140,8 @@
 //!   [`pre_write_guard::FLAG`] (then
 //!   `--matter <folder>`) is what the hook passes. It runs in the hook's own process, with no
 //!   host thread.
+//! - [`log_file::install`] starts the log file as the process's global subscriber and returns
+//!   its [`log_file::LogGuard`]; the app calls it once, first thing.
 //! - The limits (`actor/limits.rs`): the host owns the `clauseo_limits::Limits` model, starts
 //!   its reads on the actor's pool (the reader is [`HostConfig::with_limits_reader`]'s, by
 //!   default `clauseo_limits::ProcessReaders`), feeds it live rate-limit signals, turn ends,
@@ -170,8 +178,9 @@
 //! model, its readers and `CODEX_OVERRIDES`), `profile` (the placeholders and the skill writes,
 //! 0030), `counts` (the usage counts, 0036), `sandbox` (the browser's socket folder and port
 //! claims, 0029), `getrandom` (Windows browser session names), `async-channel`, `async-io`,
-//! `futures`, `uuid`, `serde_json`, `tracing`, `thiserror`, `dunce` and `sha2` (the Codex
-//! hook's trust hash, 0024). Never `tauri`, `tokio` or `agents`.
+//! `futures`, `uuid`, `serde_json`, `tracing`, `tracing-subscriber` (the log file, 0047),
+//! `thiserror`, `dunce` and `sha2` (the Codex hook's trust hash, 0024). Never `tauri`, `tokio`
+//! or `agents`.
 //!
 //! # Start reading
 //!
@@ -203,6 +212,7 @@ mod error;
 mod file_link;
 mod handle;
 mod ids;
+pub mod log_file;
 mod matter_worker;
 mod pipeline;
 pub mod pre_write_guard;

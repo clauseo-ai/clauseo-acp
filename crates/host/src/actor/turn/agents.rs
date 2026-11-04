@@ -22,6 +22,7 @@ use super::{
 };
 use crate::agent::{self, AgentLink};
 use crate::error::Error;
+use crate::log_file::{Cause, LIFECYCLE};
 use crate::rate::{RateCap, RatedUpdate};
 use crate::sent::SentView;
 
@@ -182,7 +183,17 @@ pub(super) fn launch_now(
     call(actor, thread, id, async move {
         AgentReply::Initialized(client.initialize().await)
     });
-    tracing::debug!(%thread, pid = link.pid(), "agent launched");
+    let agent_id = actor
+        .check_thread(thread)
+        .map(|entry| entry.row.agent.clone())
+        .ok();
+    tracing::info!(
+        target: LIFECYCLE,
+        %thread,
+        agent = agent_id.as_ref().map(clauseo_protocol::AgentId::as_str),
+        pid = link.pid(),
+        "agent launched"
+    );
     let agent = Agent {
         id,
         link,
@@ -423,7 +434,7 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
         } => {
             tracing::warn!(
                 %thread,
-                %error,
+                error = %Cause(&error),
                 "session/load or session/resume failed; starting a new session"
             );
             // The old session's replay belongs to no session the new one knows.
@@ -511,7 +522,7 @@ pub(super) fn launch_failed(actor: &mut Actor, thread: ThreadId, error: &Error) 
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };
-    tracing::warn!(%thread, %error, "the agent did not start");
+    tracing::warn!(%thread, error = %Cause(error), "the agent did not start");
     agent.link.stop();
     agent.stage = Stage::Stopping;
     let waiting = std::mem::take(&mut agent.waiting);

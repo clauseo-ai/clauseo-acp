@@ -11,6 +11,7 @@ use clauseo_protocol::{
 use super::super::Actor;
 use super::matter_of;
 use crate::error::Error;
+use crate::log_file::Cause;
 use crate::matter_worker::{Reused, TurnCheckpoint};
 use crate::pipeline::MatterEvent;
 
@@ -35,7 +36,11 @@ pub(super) fn when_loaded(
         stream,
         Box::new(move |actor: &mut Actor, loaded: Result<(), Error>| {
             if let Err(error) = loaded {
-                tracing::warn!(%stream, %error, "a matter's log was not read; recording anyway");
+                tracing::warn!(
+                    %stream,
+                    error = %Cause(&error),
+                    "a matter's log was not read; recording anyway"
+                );
             }
             then(actor, result);
             actor.release(stream);

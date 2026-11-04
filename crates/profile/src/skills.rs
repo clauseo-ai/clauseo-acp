@@ -205,7 +205,7 @@ pub fn render_each(skills: &[SkillSource]) -> (Rendered, Vec<ProfileError>) {
             check(skill)
         };
         if let Err(error) = checked {
-            tracing::warn!(%error, "a skill is left out");
+            tracing::warn!(error = %error.log_text(), "a skill is left out");
             refused.push(error);
             continue;
         }
@@ -273,10 +273,7 @@ pub(crate) fn write_unlocked(
             .filter(|path| !skill.entry.files.contains_key(*path))
         {
             if !is_safe_path(path) {
-                tracing::warn!(
-                    path,
-                    "a manifest entry names an unsafe path; it is left alone"
-                );
+                tracing::warn!("a manifest entry names an unsafe path; it is left alone");
                 continue;
             }
             let parts = path_parts(&skill.name, path);
@@ -293,7 +290,6 @@ pub(crate) fn write_unlocked(
             });
             if drifted {
                 tracing::warn!(
-                    path = %target.display(),
                     "a skill file changed or went since Clauseo wrote it; it is written again"
                 );
                 report.drifted.push(target.clone());
@@ -326,10 +322,7 @@ pub(crate) fn retire_unlocked(root: &Path, names: &[&str]) -> Result<Vec<PathBuf
     let mut changed = false;
     for name in names {
         if !is_skill_name(name) {
-            tracing::warn!(
-                name,
-                "a retired skill name is not a skill name; it is left alone"
-            );
+            tracing::warn!("a retired skill name is not a skill name; it is left alone");
             continue;
         }
         let Some(entry) = manifest.entry(name) else {
@@ -340,10 +333,7 @@ pub(crate) fn retire_unlocked(root: &Path, names: &[&str]) -> Result<Vec<PathBuf
         let mut dirs = BTreeSet::new();
         for path in entry.files.keys() {
             if !is_safe_path(path) {
-                tracing::warn!(
-                    path,
-                    "a manifest entry names an unsafe path; it is left alone"
-                );
+                tracing::warn!("a manifest entry names an unsafe path; it is left alone");
                 continue;
             }
             no_links(root, &path_parts(name, path))?;

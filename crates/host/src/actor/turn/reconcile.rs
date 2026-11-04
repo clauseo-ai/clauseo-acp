@@ -46,6 +46,7 @@ use super::close::{Expiries, TurnClose, log_limit_stop};
 use super::out::Out;
 use super::{JobKind, LogFor, Then, TurnInput, TurnJob, end, matter_of, queue, state};
 use crate::error::Error;
+use crate::log_file::Cause;
 use crate::matter_worker::{MatterJob, TurnCheckpoint};
 use crate::sent::{SentView, TurnPaths};
 
@@ -111,7 +112,12 @@ pub(super) fn reconcile(actor: &mut Actor, thread: ThreadId) {
             reason: LimitStopReason::PlanWindow,
         };
         if let Err(error) = log_limit_stop(actor, thread, stopped) {
-            tracing::warn!(%thread, %turn, %error, "start-up repair did not log a stop at the limit");
+            tracing::warn!(
+                %thread,
+                %turn,
+                error = %Cause(&error),
+                "start-up repair did not log a stop at the limit"
+            );
         }
     }
     let needs = actor
@@ -219,7 +225,7 @@ pub(super) fn on_log(
     let log = match result {
         Ok(log) => log,
         Err(error) => {
-            tracing::warn!(%thread, %error, "a thread could not be reconciled");
+            tracing::warn!(%thread, error = %Cause(&error), "a thread could not be reconciled");
             done(actor, thread);
             skipped(actor, thread);
             return;
@@ -245,7 +251,7 @@ pub(super) fn on_log(
                 out.send(actor, Then::Nothing)
             })();
             if let Err(error) = logged {
-                tracing::warn!(%thread, %error, "the queued turns were not held");
+                tracing::warn!(%thread, error = %Cause(&error), "the queued turns were not held");
             }
             hold(actor, thread, turn, &log, pending);
         }
@@ -258,7 +264,7 @@ pub(super) fn on_log(
                 out.send(actor, Then::Nothing)
             })();
             if let Err(error) = logged {
-                tracing::warn!(%thread, %error, "a queued turn was not held");
+                tracing::warn!(%thread, error = %Cause(&error), "a queued turn was not held");
             }
             done(actor, thread);
         }
@@ -272,7 +278,11 @@ pub(super) fn on_log(
                 out.send(actor, Then::Nothing)
             })();
             if let Err(error) = logged {
-                tracing::warn!(%thread, %error, "pending requests were not expired");
+                tracing::warn!(
+                    %thread,
+                    error = %Cause(&error),
+                    "pending requests were not expired"
+                );
             }
             done(actor, thread);
         }
@@ -480,13 +490,17 @@ pub(super) fn on_after_turn(
         match result {
             Ok(done) => end::after_events(actor, &mut close, matter, thread, done)?,
             Err(error) => {
-                tracing::warn!(%thread, %error, "an interrupted turn's checkpoint failed");
+                tracing::warn!(
+                    %thread,
+                    error = %Cause(&error),
+                    "an interrupted turn's checkpoint failed"
+                );
             }
         }
         close.send(actor, thread, Then::Nothing)
     });
     if let Err(error) = logged {
-        tracing::warn!(%thread, %error, "an interrupted turn was not ended");
+        tracing::warn!(%thread, error = %Cause(&error), "an interrupted turn was not ended");
     }
     done(actor, thread);
 }

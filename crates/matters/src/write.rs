@@ -156,7 +156,7 @@ pub(crate) fn hide_dir(dir: &Path) {
             if HIDE_WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
                 tracing::debug!(path = %dir.display(), error = %err, "folder not hidden");
             } else {
-                tracing::warn!(path = %dir.display(), error = %err, "folder not hidden");
+                tracing::warn!(error = %err, "folder not hidden");
             }
         }
     }
@@ -267,7 +267,7 @@ impl Drop for Staged {
         if let Some(temp) = self.temp.take()
             && let Err(err) = remove_file(&temp)
         {
-            tracing::warn!(path = %temp.display(), error = %err, "temp file left behind");
+            tracing::warn!(error = %err, "temp file left behind");
         }
     }
 }

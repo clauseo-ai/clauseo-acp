@@ -120,7 +120,7 @@ pub(super) fn load(path: &Path) -> Result<Option<StatCache>, Error> {
     let index = match gix::index::File::at(path, HashKind::Sha1, false, options) {
         Ok(index) => index,
         Err(err) => {
-            tracing::warn!(path = %path.display(), error = %err, "the stat cache does not read");
+            tracing::warn!(error = %err, "the stat cache does not read");
             return Ok(None);
         }
     };
@@ -130,7 +130,7 @@ pub(super) fn load(path: &Path) -> Result<Option<StatCache>, Error> {
             written_at: Some(written_at),
         })),
         Err(reason) => {
-            tracing::warn!(path = %path.display(), %reason, "the stat cache does not read");
+            tracing::warn!(%reason, "the stat cache does not read");
             Ok(None)
         }
     }

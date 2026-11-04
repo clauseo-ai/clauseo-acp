@@ -3,8 +3,8 @@
 #![expect(
     clippy::disallowed_methods,
     reason = "the host's one place that creates folders (the data folder, the matters root and \
-              agents' homes), writes an agent home's config.toml, and writes unit tests' temp \
-              folders"
+              agents' homes), writes an agent home's config.toml, appends to and rotates the log \
+              file, and writes unit tests' temp folders"
 )]
 
 use std::io;
@@ -71,6 +71,21 @@ pub(crate) fn is_real_dir(path: &Path) -> bool {
 /// Renames the folder `from` to `to` in one call: the start-up sweep's `run` set aside
 /// (`actor/turn/launch_checks.rs`).
 pub(crate) fn rename_folder(from: &Path, to: &Path) -> io::Result<()> {
+    std::fs::rename(from, to)
+}
+
+/// Opens the file `path` for appending, creating it (0600 on Unix): the host's log file
+/// (`log_file.rs`, decision record 0047).
+pub(crate) fn open_append(path: &Path) -> io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.append(true).create(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    options.open(path)
+}
+
+/// Renames the file `from` to `to`, replacing a file at `to`: the log file's rotation.
+pub(crate) fn rename_file(from: &Path, to: &Path) -> io::Result<()> {
     std::fs::rename(from, to)
 }
 

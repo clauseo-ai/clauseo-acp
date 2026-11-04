@@ -22,6 +22,7 @@ use super::{
 };
 use crate::agent::leftovers;
 use crate::error::Error;
+use crate::log_file::Cause;
 
 /// `Cancel { thread }`: stops the thread's current turn only.
 pub(super) fn cancel_command(
@@ -78,7 +79,11 @@ pub(super) fn cancel_current(actor: &mut Actor, thread: ThreadId) {
     match found {
         Some((TurnPhase::Accepting | TurnPhase::Launching | TurnPhase::Queued, false, turn)) => {
             if let Err(error) = dequeue(actor, None, thread, turn) {
-                tracing::warn!(%thread, %error, "a turn was not dequeued for a send now");
+                tracing::warn!(
+                    %thread,
+                    error = %Cause(&error),
+                    "a turn was not dequeued for a send now"
+                );
             }
         }
         Some((TurnPhase::Prompting, false, _)) => cancel_running(actor, thread, None),
@@ -141,7 +146,7 @@ pub(super) fn cancel_running(actor: &mut Actor, thread: ThreadId, ctx: Option<Co
     let turn = running.turn;
     let logged = log_cancel(actor, thread, turn, ctx);
     if let Err(error) = logged {
-        tracing::warn!(%thread, %error, "a cancel was not logged");
+        tracing::warn!(%thread, error = %Cause(&error), "a cancel was not logged");
         if let Some(ctx) = ctx {
             actor.finish_command(ctx.id, Err(error));
         }

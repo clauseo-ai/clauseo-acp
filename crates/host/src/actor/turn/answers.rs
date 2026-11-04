@@ -15,6 +15,7 @@ use super::super::{Actor, Tag, limits};
 use super::out::Out;
 use super::{Then, TurnTag, current, spawn, state};
 use crate::error::Error;
+use crate::log_file::Cause;
 
 /// `AnswerPermission`: the request must be pending and the option one the agent offered.
 pub(super) fn answer_permission(
@@ -124,7 +125,11 @@ pub(super) fn tell_permission(
     };
     spawn(actor, async move {
         if let Err(error) = client.answer_permission(key, option).await {
-            tracing::warn!(%thread, %error, "a permission answer did not reach the agent");
+            tracing::warn!(
+                %thread,
+                error = %Cause(&error),
+                "a permission answer did not reach the agent"
+            );
         }
     });
 }
@@ -136,7 +141,11 @@ pub(super) fn tell_cancel_permission(actor: &Actor, thread: ThreadId, agent: u64
     };
     spawn(actor, async move {
         if let Err(error) = client.cancel_permission(key).await {
-            tracing::warn!(%thread, %error, "a permission cancel did not reach the agent");
+            tracing::warn!(
+                %thread,
+                error = %Cause(&error),
+                "a permission cancel did not reach the agent"
+            );
         }
     });
 }
@@ -216,7 +225,11 @@ pub(super) fn tell_elicitation(
     };
     spawn(actor, async move {
         if let Err(error) = client.answer_elicitation(key, response).await {
-            tracing::warn!(%thread, %error, "an elicitation answer did not reach the agent");
+            tracing::warn!(
+                %thread,
+                error = %Cause(&error),
+                "an elicitation answer did not reach the agent"
+            );
         }
     });
 }

@@ -63,7 +63,7 @@ pub(crate) fn sweep_temps(dir: &Path, deep: bool) {
             && entry.file_name().to_str().is_some_and(is_temp_name)
             && let Err(err) = std::fs::remove_file(&path)
         {
-            tracing::warn!(path = %path.display(), %err, "a leftover temp file stays");
+            tracing::warn!(%err, "a leftover temp file stays");
         }
     }
 }
@@ -88,7 +88,7 @@ pub(crate) fn remove_file(path: &Path) -> Result<(), ProfileError> {
 pub(crate) fn remove_empty_dir(path: &Path) {
     let empty = std::fs::read_dir(path).is_ok_and(|mut entries| entries.next().is_none());
     if empty && let Err(err) = std::fs::remove_dir(path) {
-        tracing::warn!(path = %path.display(), %err, "an emptied skill folder stays");
+        tracing::warn!(%err, "an emptied skill folder stays");
     }
 }
 

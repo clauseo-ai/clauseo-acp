@@ -165,8 +165,6 @@ fn browser_entry(
         dunce::simplified(inputs.browser_dir).to_str(),
     ) else {
         tracing::warn!(
-            chrome = %executable.display(),
-            folder = %inputs.browser_dir.display(),
             "the Chrome or the session's browser folder is not UTF-8: the browser is left out"
         );
         return Err(ToolsUnavailableReason::BrowserNotInstalled);

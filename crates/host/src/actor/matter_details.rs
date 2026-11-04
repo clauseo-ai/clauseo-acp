@@ -268,3 +268,18 @@ fn apply<T>(detail: &mut Option<T>, change: FieldChange<T>) {
         FieldChange::Set(value) => *detail = Some(value),
     }
 }
+
+/// A matter worker's open answered: logged, by id only (decision record 0047); a failed open
+/// is tried again on the next use.
+pub(super) fn opened(matter: MatterId, reply: crate::matter_worker::MatterReply) {
+    if let crate::matter_worker::MatterReply::Opened(opened) = reply {
+        match opened {
+            Ok(_) => tracing::info!(target: crate::log_file::LIFECYCLE, %matter, "matter opened"),
+            Err(error) => tracing::warn!(
+                %matter,
+                error = %crate::log_file::Cause(&error),
+                "could not open a matter; it is tried again"
+            ),
+        }
+    }
+}

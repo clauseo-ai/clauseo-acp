@@ -18,6 +18,7 @@ use super::{Then, TimerKind, TurnTimer, asks, current, lost, state, text};
 use crate::build;
 use crate::coalesce::TextIn;
 use crate::error::Error;
+use crate::log_file::Cause;
 use crate::rate::{Admitted, RatedUpdate};
 
 /// Where an update belongs.
@@ -131,8 +132,21 @@ fn handle(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
             signal,
         } => asks::on_limit(actor, thread, &session, origin, &signal),
         AcpEvent::Warning { session, warning } => {
-            tracing::warn!(%thread, ?session, ?warning, "the agent sent something unreadable");
+            let warning = warning_kind(&warning);
+            tracing::warn!(%thread, ?session, warning, "the agent sent something unreadable");
         }
+    }
+}
+
+/// A warning's kind, for the log: its fields hold what the agent sent.
+const fn warning_kind(warning: &clauseo_acp::ProtocolWarning) -> &'static str {
+    use clauseo_acp::ProtocolWarning as W;
+    match warning {
+        W::MalformedLine { .. } => "malformed_line",
+        W::UnknownUpdate { .. } => "unknown_update",
+        W::InvalidUpdate { .. } => "invalid_update",
+        W::UnknownLimitStatus { .. } => "unknown_limit_status",
+        W::SessionFailure { .. } => "session_failure",
     }
 }
 
@@ -188,7 +202,7 @@ fn on_update(
         | AgentUpdate::CompactionSummaryChunk { .. }) => plain(actor, thread, update),
     };
     if let Err(error) = done {
-        tracing::warn!(%thread, %error, "an agent update was not logged");
+        tracing::warn!(%thread, error = %Cause(&error), "an agent update was not logged");
     }
 }
 
@@ -427,7 +441,7 @@ fn plain(actor: &mut Actor, thread: ThreadId, update: AgentUpdate) -> Result<(),
         AgentUpdate::CompactionEnded { acp_id, completed } => {
             let summary = agent(actor, thread).and_then(|agent| agent.compaction.remove(&acp_id));
             if !completed {
-                tracing::warn!(%thread, %acp_id, "a compaction failed or was cancelled");
+                tracing::warn!(%thread, "a compaction failed or was cancelled");
                 return Ok(());
             }
             let built = build::compaction_changed(CompactionStatus::Completed, summary);

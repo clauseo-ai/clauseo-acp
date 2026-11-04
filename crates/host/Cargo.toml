@@ -41,6 +41,8 @@ futures = { workspace = true, features = ["executor"] }
 serde_json = { workspace = true }
 uuid = { workspace = true, features = ["v7"] }
 tracing = { workspace = true }
+# The log file (log_file.rs, decision record 0047): the formatter, the registry and the filter.
+tracing-subscriber = { workspace = true, features = ["fmt"] }
 thiserror = { workspace = true }
 # The matter folder check on a prompt's file (std's canonicalize is banned in clippy.toml).
 dunce = { workspace = true }
