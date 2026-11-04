@@ -72,6 +72,8 @@ export type Older = {
   readonly entries: readonly ViewEntry[];
   /** A page is on its way. */
   readonly loading: boolean;
+  /** The thread's first entry is held: no older page is left to ask for. */
+  readonly start: boolean;
 };
 
 export function useOlder(
@@ -189,7 +191,7 @@ export function useOlder(
     };
   }, [scroller, stream, hasOlder, own, more, reach, store, epoch]);
 
-  return { entries: own?.entries ?? NONE, loading };
+  return { entries: own?.entries ?? NONE, loading, start: !hasOlder || own?.done === true };
 }
 
 const NONE: readonly ViewEntry[] = [];
