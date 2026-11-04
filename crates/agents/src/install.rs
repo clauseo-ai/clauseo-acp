@@ -1,6 +1,6 @@
 //! One agent's install job, on its own thread: up to three tries, each one checking the free
-//! space, choosing Node, fetching every file (`files`), then npm's `cache add` and `ci` and the
-//! rename and receipt (`npm`).
+//! space, choosing Node, fetching every file (`files`), then `npm ci` reading the checked
+//! tarballs through `file:` URLs, and the rename and receipt (`npm`).
 //!
 //! - `Offline`: `Waiting`, then 30 s on the timer and again, with no try counted, until it
 //!   works or is paused.

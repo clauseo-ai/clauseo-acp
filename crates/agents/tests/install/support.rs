@@ -16,7 +16,9 @@ use clauseo_agents::{
     AgentEntry, AgentSizes, Agents, AgentsConfig, AgentsEvent, Clock, InstallState, NodeArchive,
     NodeEntry, NodeSearch, Platform, Snapshot,
 };
-use clauseo_process::{Launcher, ManualTimer, PassthroughLauncher, SpawnOptions, Timer};
+use clauseo_process::{
+    LaunchSpec, Launched, Launcher, ManualTimer, PassthroughLauncher, SpawnOptions, Timer,
+};
 use clauseo_protocol::AgentId;
 
 use crate::write;
@@ -309,6 +311,20 @@ impl Fixture {
         (agents, Events(events))
     }
 
+    /// Starts `Agents` on the fixture with a launcher that calls `before` with each spec just
+    /// before it starts it, and reads each agent's first state.
+    pub(crate) fn start_hooked(
+        &self,
+        before: impl Fn(&LaunchSpec) + Send + Sync + 'static,
+    ) -> (Agents, Events) {
+        let launcher: Arc<dyn Launcher> = Arc::new(Hooked {
+            inner: PassthroughLauncher::new(SpawnOptions::new()),
+            before,
+        });
+        let (agents, events) = Agents::start(self.config.clone(), launcher, self.timer.clone());
+        (agents, Events(events))
+    }
+
     /// The requests made for package `name`'s tarball.
     pub(crate) fn requests_for(&self, name: &str) -> Vec<clauseo_agents::testing::Request> {
         let path = tarball_path(name);
@@ -322,6 +338,19 @@ impl Fixture {
     /// `<data>/agents/<id>/install`.
     pub(crate) fn install_root(&self, agent: &AgentId) -> PathBuf {
         clauseo_agents::install_root(self.data.path(), agent)
+    }
+}
+
+/// The passthrough launcher, calling `before` with each spec first.
+struct Hooked<F> {
+    inner: PassthroughLauncher,
+    before: F,
+}
+
+impl<F: Fn(&LaunchSpec) + Send + Sync> Launcher for Hooked<F> {
+    fn launch(&self, spec: &LaunchSpec) -> Result<Launched, clauseo_process::Error> {
+        (self.before)(spec);
+        self.inner.launch(spec)
     }
 }
 

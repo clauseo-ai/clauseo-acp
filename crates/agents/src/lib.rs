@@ -18,8 +18,10 @@
 //! - Node: the user's when it is a regular file, reports v22 or later and has `npm-cli.js`
 //!   beside it; otherwise the pinned download, checked by SHA-256.
 //! - Downloads (Rust's): each tarball the derived lock lists for this platform, with `Range`
-//!   resume and the lock's SHA-512, then `npm cache add` and `npm ci --offline --ignore-scripts
-//!   --no-bin-links` (npm's) in a temp folder, renamed into place, the receipt written last.
+//!   resume and the lock's SHA-512, then `npm ci --offline --ignore-scripts --no-bin-links`
+//!   (npm's) in a temp folder, reading each checked tarball in place through a `file:`
+//!   `resolved` URL and checking it against the lock's `integrity` again (no `npm cache add`),
+//!   renamed into place, the receipt written last.
 //! - Progress, the four failure kinds and their logs, one download at a time, firm IT mode (IT's
 //!   runtime, an offline bundle, a mirror, a proxy and a CA file).
 //!
