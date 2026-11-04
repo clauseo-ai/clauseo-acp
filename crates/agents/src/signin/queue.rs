@@ -13,7 +13,8 @@
 //!
 //! The order does not matter: the install is checked first, then the lookup, and every wake
 //! checks both again. `Queued` is sent once, the first time either fails; a cancel while queued
-//! ends the job with `Failed { code: Cancelled }`.
+//! ends the job with `Failed { code: Cancelled }`, and so does one that lands during the lookup,
+//! which is checked again once the lookup returns.
 
 use std::net::ToSocketAddrs;
 use std::pin::pin;
@@ -76,7 +77,13 @@ pub(crate) async fn until_startable<T: Timer>(queue: &Queue<'_, T>) -> Gate {
                 Either::Left((Err(_), _)) | Either::Right(_) => return Gate::Stop,
             }
         };
-        if online(queue.config, &ticket.agent) {
+        let online = online(queue.config, &ticket.agent);
+        // The lookup may block for as long as the OS takes: a cancel or a newer job that
+        // landed meanwhile ends the wait here, before any `Waiting` or run.
+        if ticket.cancel.is_cancelled() || !queue.shared.signin.is_job(ticket) {
+            return Gate::Stop;
+        }
+        if online {
             return Gate::Start(installed);
         }
         say_queued();

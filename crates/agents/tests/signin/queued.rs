@@ -222,3 +222,51 @@ fn a_new_sign_in_replaces_the_queued_one() {
     assert_eq!(logins.len(), 1);
     assert!(logins[0].args.ends_with(&["--console".to_owned()]));
 }
+
+/// S18 security review, drift: a cancel that lands while the queued start's lookup runs ends the
+/// job when the lookup returns: no `Waiting` and no run.
+#[test]
+fn a_cancel_during_the_lookup_starts_no_run() {
+    use std::sync::{Arc, Condvar, Mutex};
+
+    let mut fx = Fixture::new("queued-cancel-lookup", "never");
+    // (entered, released), guarded together.
+    let gate = Arc::new((Mutex::new((false, false)), Condvar::new()));
+    let held = Arc::clone(&gate);
+    fx.config.install.resolver = Some(clauseo_agents::TestResolver(Arc::new(move |_: &str| {
+        let (lock, changed) = &*held;
+        let mut state = lock.lock().unwrap();
+        state.0 = true;
+        changed.notify_all();
+        while !state.1 {
+            state = changed.wait(state).unwrap();
+        }
+        Ok(vec![([127, 0, 0, 1], 0).into()])
+    })));
+    let (agents, events) = fx.start();
+    agents.sign_in(&claude(), Method::ClaudeAi).unwrap();
+    {
+        let (lock, changed) = &*gate;
+        let mut state = lock.lock().unwrap();
+        while !state.0 {
+            state = changed.wait(state).unwrap();
+        }
+    }
+    agents.cancel_sign_in(&claude()).unwrap();
+    {
+        let (lock, changed) = &*gate;
+        lock.lock().unwrap().1 = true;
+        changed.notify_all();
+    }
+    let (seen, last) = events.until_end();
+    assert_eq!(
+        last,
+        SigninState::Failed {
+            code: SigninCode::Cancelled,
+            at: now()
+        }
+    );
+    assert!(!states(&seen).contains(&waiting()), "{seen:?}");
+    settle();
+    assert_eq!(fx.launches(), []);
+}
