@@ -103,6 +103,21 @@ pub(super) fn session_loads(
             matter,
             ask_all: forced_ask,
         });
+    // Without the guard's hook, a forced-ask session would rest on the ask rules alone, and a
+    // hook that is missing fails open: refuse it.
+    if let (true, Some(_), Some(reason)) = (forced_ask, &claude, loads::guard_missing(guard)) {
+        let matter_id = actor.check_thread(thread)?.row.matter;
+        tracing::warn!(
+            matter = %matter_id,
+            reason,
+            "a forced-ask Claude launch has no guard hook to give: the launch is refused"
+        );
+        return Err(Error::refused(
+            ErrorCode::AgentLaunchFailed,
+            "this matter's folder is unprotected, and the guard that makes Claude ask before \
+             each change could not be set up",
+        ));
+    }
     let mut meta = loads::session_meta(
         actor.profile.session_meta(&agent_id),
         control,

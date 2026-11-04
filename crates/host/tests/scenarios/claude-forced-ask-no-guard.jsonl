@@ -1,0 +1,3 @@
+{"scenario":"claude-forced-ask-no-guard","description":"A claude-acp agent in a matter whose folder is unprotected (forced ask), with no pre-write guard configured: the host refuses the launch after initialize, and no session call reaches the agent","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}

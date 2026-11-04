@@ -298,6 +298,18 @@ pub(crate) fn guard_entry(guard: GuardHook<'_>) -> Option<Value> {
     }))
 }
 
+/// Why `guard` gives no [`guard_entry`], as a kind fit for a log line (no path): `no_program`
+/// when the host has no guard program (`HostConfig::with_pre_write_guard` unset, as when
+/// `current_exe` failed), `program_not_utf8` or `matter_not_utf8`. `None` when it gives one.
+pub(crate) fn guard_missing(guard: Option<GuardHook<'_>>) -> Option<&'static str> {
+    match guard {
+        None => Some("no_program"),
+        Some(guard) if guard.program.to_str().is_none() => Some("program_not_utf8"),
+        Some(guard) if guard.matter.to_str().is_none() => Some("matter_not_utf8"),
+        Some(_) => None,
+    }
+}
+
 /// The object at `key`, taken out of `map`; empty when it is missing or not an object.
 pub(crate) fn take_object(map: &mut Map<String, Value>, key: &str) -> Map<String, Value> {
     match map.remove(key) {

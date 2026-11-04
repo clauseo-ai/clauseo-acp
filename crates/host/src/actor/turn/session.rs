@@ -78,6 +78,17 @@ pub(super) fn on_replay_log(
         .and_then(|entry| entry.row.acp_session_id.clone());
     let cwd = folder(actor, thread);
     let loads = session_loads(actor, thread);
+    if let Err(error) = &loads {
+        // A launch refused here (forced ask without its guard) ends as a failed launch, not a
+        // load that never goes out.
+        let loading = state(actor, thread)
+            .and_then(|state| state.agent.as_deref())
+            .is_some_and(|agent| agent.stage == Stage::Loading);
+        if loading {
+            launch_failed(actor, thread, error);
+            return;
+        }
+    }
     let clock = Arc::clone(&actor.clock);
     let matter = matter_of(actor, thread);
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {

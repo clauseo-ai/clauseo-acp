@@ -1,12 +1,12 @@
-{"scenario":"claude-forced-ask","description":"A claude-acp session in a matter whose folder is unprotected (forced ask): a plan exit whose auto-accept option the client must not offer, answered with the manual option; the agent then moves itself to acceptEdits and the client must switch it back to default; after the turn, the client's SetMode plan (the refused modes never reach the agent)","on_stdin_close":"exit"}
+{"scenario":"claude-forced-ask","description":"A claude-acp session in a matter whose folder is unprotected (forced ask): a plan exit whose auto-accept option the client must not offer, answered with the manual option; the agent then moves itself to acceptEdits and the client must switch it back to default; after the turn, the client's SetMode plan and SetConfigOption mode plan (the refused modes never reach the agent)","on_stdin_close":"exit"}
 {"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
 {"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
 {"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}","_meta":{"claudeCode":{"options":{"allowDangerouslySkipPermissions":false}}}}}}
 {"respond":{"to":"new","result":{"sessionId":"sess-1","modes":{"currentModeId":"default","availableModes":[{"id":"default","name":"Manual"},{"id":"acceptEdits","name":"Accept edits"},{"id":"plan","name":"Plan"}]}}}}
 {"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
 {"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t-plan-1","title":"Ready to code?","kind":"switch_mode","status":"pending"}}}
-{"note":"claude-agent-acp's plan exit (ExitPlanMode): its three options, written from the adapter's source; the auto-accept one is allow_always with the mode as its id","request":{"id":"perm-1","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"t-plan-1","title":"Ready to code?","kind":"switch_mode","status":"pending"},"options":[{"optionId":"acceptEdits","name":"Yes, and auto-accept edits","kind":"allow_always"},{"optionId":"default","name":"Yes, and manually approve edits","kind":"allow_once"},{"optionId":"plan","name":"No, keep planning","kind":"reject_once"}]}}}
-{"expect_response":{"id":"perm-1","result":{"outcome":{"outcome":"selected","optionId":"default"}}}}
+{"note":"claude-agent-acp 0.89.1's plan exit (ExitPlanMode) with no plan text and neither auto nor bypass available: its three options as permissions/options/tools.js builds them (ids from shared.js PERMISSION_OPTION_ID)","request":{"id":"perm-1","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"t-plan-1","title":"Ready to code?","kind":"switch_mode","status":"pending"},"options":[{"optionId":"exit-plan-accept-edits","name":"Yes, auto-accept edits","kind":"allow_always"},{"optionId":"exit-plan-default","name":"Yes, manually approve edits","kind":"allow_once"},{"optionId":"reject","name":"No, keep planning","kind":"reject_once"}]}}}
+{"expect_response":{"id":"perm-1","result":{"outcome":{"outcome":"selected","optionId":"exit-plan-default"}}}}
 {"update":{"update":{"sessionUpdate":"current_mode_update","currentModeId":"acceptEdits"}}}
 {"expect":{"method":"session/set_mode","as":"back","params":{"sessionId":"sess-1","modeId":"default"}}}
 {"respond":{"to":"back","result":{}}}
@@ -14,3 +14,5 @@
 {"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
 {"expect":{"method":"session/set_mode","as":"to-plan","params":{"sessionId":"sess-1","modeId":"plan"}}}
 {"respond":{"to":"to-plan","result":{}}}
+{"note":"the client's SetConfigOption mode plan; mode acceptEdits was refused before it and never reaches the agent","expect":{"method":"session/set_config_option","as":"config-plan","params":{"sessionId":"sess-1","configId":"mode","value":"plan"}}}
+{"respond":{"to":"config-plan","result":{"configOptions":[{"id":"mode","name":"Mode","category":"mode","type":"select","currentValue":"plan","options":[{"value":"default","name":"Manual"},{"value":"acceptEdits","name":"Accept edits"},{"value":"plan","name":"Plan"}]}]}}}

@@ -424,14 +424,37 @@ change from the settings window as `ui` does.
   is refused there. A check that fails (an io error) is unknown and fails closed for Claude:
   forced ask, nothing on the matter's row, and Codex not refused (its own sandbox applies). The host enforces four layers (`agent/forced_ask.rs`):
   - **Modes:** `SetMode` takes only `default` and `plan` (any other id is `command.invalid`),
-    and a mode the agent moves to itself is switched back to `default`.
-  - **Options:** a permission request loses its `allow_always` options and any option whose id
-    names another mode (the plan exit's `acceptEdits`); an answer naming one is refused.
-  - **No `allowedTools`:** not the host's web rules, not the profile hook's.
+    and so does `SetConfigOption` for claude-agent-acp's `mode` option, which sets the mode
+    too; a mode the agent moves to itself is switched back to `default`.
+  - **Options:** a permission request loses its `allow_always` options and the plan exit's
+    options that switch to a skipping mode (`exit-plan-auto`, `exit-plan-accept-edits` and the
+    rest, claude-agent-acp 0.89.1 `permissions/options/shared.js`); an answer naming one is
+    refused.
+  - **No `allowedTools`, and ask rules:** not the host's web rules, not the profile hook's. The
+    flag settings carry `permissions.ask` rules for `Bash`, `PowerShell`, `Edit`, `Write`,
+    `MultiEdit`, `NotebookEdit`, `WebFetch`, `WebSearch` and `mcp__*`, and
+    `sandbox.autoAllowBashIfSandboxed: false`: if the hook fails, times out or is blocked, Claude
+    Code 2.1.293 checks deny rules, then ask rules, then allow rules over every source, so the
+    lawyer's own `allow` rules no longer approve unasked (read from the CLI binary; the
+    detail is in `agent/forced_ask.rs` `ASK_RULES`).
   - **The hook:** the guard's entry matches every tool (`*`, MCP tools included) and passes
     `--ask-all`, so the guard answers `ask` for every tool but `Read`, `Glob`, `Grep`, `LS`,
     `NotebookRead`, `TodoWrite` and `Task`; `WebSearch` and `WebFetch` ask too. The flag is an
     argument, not a variable, so it never reaches the agent's shell.
+  A forced-ask Claude launch with no guard hook to give (no guard program, as when
+  `current_exe` failed, or a path that is not UTF-8) is refused with `agent.launch_failed`.
+- **2026-11-05 (orchestrator; accepted risk).** A `PermissionRequest` hook already in the
+  lawyer's own settings or plugins can still approve in forced ask: Claude Code runs such hooks
+  alongside the SDK's permission callback, and whichever decides first applies. The risk is
+  accepted because only something the lawyer or their IT already installed can do it; the agent
+  cannot install one without a yes. Keeping user hooks out was not possible in Claude Code
+  2.1.293 with claude-agent-acp 0.89.1:
+  - `settingSources: []` breaks the login (a live run on the Mac mini, 2026-11-02; commit
+    `45b2a5a4`, `agent/loads.rs` `CLAUDE_SETTING_SOURCES`);
+  - `disableAllHooks` drops Clauseo's guard hook too: when the merged settings set it, the CLI
+    keeps only managed (policy) hooks, and the guard is in the flag settings;
+  - the adapter refuses `hooks` in `_meta` (`acp-agent.js`, its option table marks `hooks:
+    false`), so the guard cannot become a programmatic hook.
 
 ### Deviations from the brief (PR-A)
 

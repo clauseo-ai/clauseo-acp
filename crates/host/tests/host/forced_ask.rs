@@ -2,14 +2,15 @@
 //! `HostConfig::with_folder_support` (test-support only), so it runs on every OS. A Claude agent
 //! in a matter on a network drive: `SetMode` takes only `default` and `plan`; a plan exit loses
 //! its auto-accept option and an answer naming it is refused; a mode the agent moves to itself is
-//! switched back; the row says why. A matter with no such answer runs as before. Codex in such a
-//! matter is refused. The `_meta` layers (no `allowedTools`, the hook before every tool with
-//! `--ask-all`) are pinned in `agent/loads/tests.rs`, the hook's answers in
-//! `pre_write_guard/tests/ask.rs`.
+//! switched back; `SetConfigOption` for the mode takes only the same two; the row says why. With
+//! no guard program the launch is refused. A matter with no such answer runs as before. Codex in
+//! such a matter is refused. The `_meta` layers (no `allowedTools`, the `permissions.ask` rules,
+//! the hook before every tool with `--ask-all`) are pinned in `agent/loads/layering_tests.rs`
+//! and `claude-ask-unknown.jsonl`, the hook's answers in `pre_write_guard/tests/ask.rs`.
 
 use clauseo_protocol::{
-    AgentChoiceId, CommandOutcome, DomainEvent, ErrorCode, FolderSupportKind, HostCommand,
-    MatterId, StopReason, StreamId, ThreadId,
+    AgentChoiceId, CommandOutcome, ConfigValue, DomainEvent, ErrorCode, FolderSupportKind,
+    HostCommand, MatterId, StopReason, StreamId, ThreadId,
 };
 
 use crate::codex::{CODEX, run_turn, turn_failed};
@@ -20,14 +21,22 @@ use crate::support::{Dir, Running, Scenario, matter_with_thread};
 /// The agent id that makes a fake agent a Claude agent.
 const CLAUDE: &str = "claude-acp";
 
-/// A host whose launches' folder check answers `kind`, with a Claude thread playing `scenario`.
+/// The guard program the tests' hosts name; the fake agent never runs it.
+const GUARD: &str = "/opt/clauseo/clauseo-desktop";
+
+/// A host whose launches' folder check answers `kind`, with the pre-write guard configured and
+/// a Claude thread playing `scenario`.
 fn claude_in(
     test: &str,
     scenario: &'static str,
     kind: Option<FolderSupportKind>,
 ) -> (Dir, Running, MatterId, ThreadId) {
     let dir = Dir::new(test, &[(CLAUDE, Scenario::Local(scenario))]);
-    let host = dir.start_with(0, |config| config.with_folder_support(kind));
+    let host = dir.start_with(0, |config| {
+        config
+            .with_folder_support(kind)
+            .with_pre_write_guard(std::path::PathBuf::from(GUARD))
+    });
     let (matter, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], CLAUDE);
     (dir, host, matter, thread)
 }
@@ -67,6 +76,14 @@ fn set_mode(thread: ThreadId, mode: &str) -> HostCommand {
     }
 }
 
+fn set_config_mode(thread: ThreadId, mode: &str) -> HostCommand {
+    HostCommand::SetConfigOption {
+        thread,
+        option_id: AgentChoiceId::new("mode").unwrap(),
+        value: ConfigValue::Select(AgentChoiceId::new(mode).unwrap()),
+    }
+}
+
 fn answer(thread: ThreadId, events: &Events, option: &str) -> HostCommand {
     HostCommand::AnswerPermission {
         thread,
@@ -88,13 +105,18 @@ fn claude_on_a_network_drive_runs_in_forced_ask() {
         !e.permission_requests().is_empty()
     });
     // The plan exit's auto-accept option is not offered, and naming it is refused.
-    assert_eq!(offered(&events), ["default", "plan"], "{}", events.dump());
+    assert_eq!(
+        offered(&events),
+        ["exit-plan-default", "reject"],
+        "{}",
+        events.dump()
+    );
     host.refused(
-        answer(thread, &events, "acceptEdits"),
+        answer(thread, &events, "exit-plan-accept-edits"),
         ErrorCode::PermissionUnknownOption,
     );
     assert_eq!(
-        host.ok(answer(thread, &events, "default")),
+        host.ok(answer(thread, &events, "exit-plan-default")),
         CommandOutcome::Done
     );
     let ended = events.until_turn_ended(turn);
@@ -114,6 +136,15 @@ fn claude_on_a_network_drive_runs_in_forced_ask() {
     }
     assert_eq!(host.ok(set_mode(thread, "plan")), CommandOutcome::Done);
     events.until("ModeChanged plan", |e| modes(e).len() == 4);
+    // The mode's config option is gated the same way (the review's
+    // `rev_config_option_mode_is_refused_in_forced_ask`): only plan reaches the agent.
+    for mode in ["acceptEdits", "bypassPermissions", "auto"] {
+        host.refused(set_config_mode(thread, mode), ErrorCode::CommandInvalid);
+    }
+    assert_eq!(
+        host.ok(set_config_mode(thread, "plan")),
+        CommandOutcome::Done
+    );
     events.assert_no_mismatch();
     assert_eq!(
         summary(&host, matter).folder_support,
@@ -142,11 +173,11 @@ fn claude_elsewhere_runs_as_before() {
         });
         assert_eq!(
             offered(&events),
-            ["acceptEdits", "default", "plan"],
+            ["exit-plan-accept-edits", "exit-plan-default", "reject"],
             "{test}"
         );
         assert_eq!(
-            host.ok(answer(thread, &events, "acceptEdits")),
+            host.ok(answer(thread, &events, "exit-plan-accept-edits")),
             CommandOutcome::Done
         );
         let ended = events.until_turn_ended(turn);
@@ -164,6 +195,33 @@ fn claude_elsewhere_runs_as_before() {
         );
         host.shutdown();
     }
+}
+
+/// Forced ask with no guard hook to give (no guard program, as when `current_exe` failed): the
+/// launch is refused with `agent.launch_failed` rather than left to the ask rules alone, and no
+/// session call reaches the agent. The review's `rev_forced_ask_without_a_guard_still_fences`.
+#[test]
+fn a_forced_ask_launch_without_a_guard_is_refused() {
+    let dir = Dir::new(
+        "forced_ask_no_guard",
+        &[(CLAUDE, Scenario::Local("claude-forced-ask-no-guard"))],
+    );
+    let host = dir.start_with(0, |config| {
+        config.with_folder_support(Some(FolderSupportKind::Network))
+    });
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], CLAUDE);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (turn, _) = host.prompt(thread, "Change clause 4.");
+    events.until("TurnFailed", |e| turn_failed(e, turn).is_some());
+    let failed = turn_failed(&events, turn).unwrap();
+    assert_eq!(
+        failed.code,
+        ErrorCode::AgentLaunchFailed,
+        "{}",
+        events.dump()
+    );
+    events.assert_no_mismatch();
+    host.shutdown();
 }
 
 /// The fixed answer refuses Codex as the Windows check would, on every OS.
@@ -202,7 +260,7 @@ fn claude_whose_folder_check_failed_runs_in_forced_ask() {
     let host = dir.start_with(0, |config| {
         config
             .with_folder_check_failed()
-            .with_pre_write_guard(std::path::PathBuf::from("/opt/clauseo/clauseo-desktop"))
+            .with_pre_write_guard(std::path::PathBuf::from(GUARD))
     });
     let (matter, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], CLAUDE);
     let mut events = host.events(StreamId::Thread(thread));

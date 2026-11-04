@@ -7,7 +7,8 @@
 //!   site; in forced ask (`agent/forced_ask.rs`) there is no `allowedTools` at all, the hook's
 //!   included. `additionalDirectories` gains the work folder and the matter notes folder, after any
 //!   hook entries. `settings` gains `disableSkillShellExecution: true` always, and
-//!   `skipWebFetchPreflight: true` on a Bedrock, Vertex or Foundry login.
+//!   `skipWebFetchPreflight: true` on a Bedrock, Vertex or Foundry login; in forced ask it also
+//!   gains the `permissions.ask` rules and `sandbox.autoAllowBashIfSandboxed: false`.
 //! - Codex ([`codex_keys`]): of the hook's keys only `developer_instructions`
 //!   (`agent::codex::PROFILE_KEYS`), its tokens filled; then the host's `web_search` (`live` or
 //!   `disabled`) and both folders in `sandbox_workspace_write.writable_roots`.
@@ -134,7 +135,7 @@ pub(crate) struct ClaudeKeys<'a> {
     /// The hosts seeded as `WebFetch(domain:…)` rules.
     pub(crate) seed_sites: &'a [&'a str],
     /// The session runs in forced ask (`agent/forced_ask.rs`): no `allowedTools` at all, the
-    /// hook's included.
+    /// hook's included, and the forced-ask `permissions.ask` rules in the flag settings.
     pub(crate) forced_ask: bool,
 }
 
@@ -173,7 +174,32 @@ pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys
     if keys.login != Login::FirstParty {
         settings.insert("skipWebFetchPreflight".to_owned(), Value::Bool(true));
     }
+    if keys.forced_ask {
+        forced_ask_settings(&mut settings);
+    }
     options.insert("settings".to_owned(), Value::Object(settings));
+}
+
+/// Forced ask's second fence in the flag settings (`agent/forced_ask.rs` [`ASK_RULES`]):
+/// `permissions.ask` gains every rule, after any the hook put there, and
+/// `sandbox.autoAllowBashIfSandboxed` is `false`. A hook value at `permissions`, `ask` or
+/// `sandbox` of another type is replaced.
+///
+/// [`ASK_RULES`]: crate::agent::forced_ask::ASK_RULES
+fn forced_ask_settings(settings: &mut Map<String, Value>) {
+    let mut permissions = take_object(settings, "permissions");
+    let mut ask = take_array(&mut permissions, "ask");
+    for rule in crate::agent::forced_ask::ASK_RULES {
+        push_new(&mut ask, rule);
+    }
+    permissions.insert("ask".to_owned(), Value::Array(ask));
+    settings.insert("permissions".to_owned(), Value::Object(permissions));
+    let mut sandbox = take_object(settings, "sandbox");
+    sandbox.insert(
+        crate::agent::forced_ask::NO_SANDBOX_AUTO_ALLOW.to_owned(),
+        Value::Bool(false),
+    );
+    settings.insert("sandbox".to_owned(), Value::Object(sandbox));
 }
 
 /// Whether an `allowedTools` rule is for a built-in web tool: `WebSearch`, `WebFetch`, or a
