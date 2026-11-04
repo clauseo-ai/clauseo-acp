@@ -21,7 +21,7 @@ use crate::cancel::Cancel;
 use crate::config::AgentsConfig;
 use crate::install::{self, Job};
 use crate::log::{InstallLog, redact};
-use crate::signin::{Method, PasteCode, SigninError, SigninState};
+use crate::signin::{Found, Method, PasteCode, SigninError, SigninState};
 use crate::state::{AgentsEvent, Failure, FailureKind, InstallState, Installed};
 use crate::{node, receipt, sysproxy};
 
@@ -178,20 +178,75 @@ impl Agents {
 
     /// Signs `agent` out of Clauseo's own login (the vendor's logout), then checks status.
     /// Refused for a reused login, the lawyer's own: `SignedIn { source: Reused }` is left with
-    /// `stop_using_login` (S18 piece 5). A sign-in going is stopped first, silently.
+    /// `stop_using_login`. The job checks `login-source` again, and for Codex refuses while the
+    /// home's login file is the lawyer's (same file id). A sign-in going is stopped first,
+    /// silently.
     pub fn sign_out(&self, agent: &AgentId) -> Result<(), SigninError> {
         let start = self.shared.signin.sign_out(agent, self.installed(agent));
         self.start_signin(start)
     }
 
-    /// One status check for `agent` (R20's "a window shows Plans"): `SignedIn` or `SignedOut`,
-    /// unchanged when status cannot tell. Nothing new runs while a sign-in or sign-out is going,
-    /// since that reports by itself.
+    /// The status check for `agent`, at start and when R20 asks ("a window shows Plans"): a
+    /// recorded reuse whose login still holds is `SignedIn { source: Reused }` with no question
+    /// (or `SignedOut` with why reuse stopped); else Clauseo's own login, `SignedIn { source: Own
+    /// }`; else, unless `no-reuse` is there, detection: `LoginFound` or `SignedOut` with what
+    /// was seen. Unchanged when status cannot tell. Nothing new runs while a sign-in or sign-out
+    /// is going, since that reports by itself.
     pub fn check_status(&self, agent: &AgentId) -> Result<(), SigninError> {
         let start = self
             .shared
             .signin
             .check_status(agent, self.installed(agent));
+        self.start_signin(start)
+    }
+
+    /// UD2's "Look for my Claude Code login" or "Look for my Codex login": deletes `no-reuse` and
+    /// runs the status check again, which detects the lawyer's login (`LoginFound`, or
+    /// `SignedOut` with what was seen) unless Clauseo's own login is signed in. Refused as
+    /// `check_status` is.
+    pub fn find_login(&self, agent: &AgentId) -> Result<(), SigninError> {
+        let start = self.shared.signin.find_login(agent, self.installed(agent));
+        self.start_signin(start)
+    }
+
+    /// The lawyer's "Use it" on a `LoginFound`: detection runs again (another account than the
+    /// one shown comes back as `LoginFound`, unused); then Claude's status under the reused
+    /// session's environment must say signed in (else the run-time fallback: the
+    /// `claude_reuse_fallback` note and `SignedOut`), or Codex's login file is hard-linked into
+    /// Clauseo's home (a failed link: the `codex_link_failed` note and Clauseo's own browser
+    /// sign-in); then `login-source` records `reused` with the accepted email, and the state is
+    /// `SignedIn { source: Reused }`. Refused with `NothingFound` unless the state is
+    /// `LoginFound`.
+    pub fn use_found_login(&self, agent: &AgentId) -> Result<(), SigninError> {
+        let start = self.shared.signin.use_found(agent, self.installed(agent));
+        self.start_signin(start)
+    }
+
+    /// "Sign in with a different account": writes `no-reuse` and starts Clauseo's own sign-in
+    /// (Claude's `--claudeai`, Codex's browser), reported as `sign_in` reports; the lawyer's CLI
+    /// login is untouched. Refused for a reused login (`stop_using_login` first) and as
+    /// `sign_in` is.
+    pub fn use_different_account(&self, agent: &AgentId) -> Result<(), SigninError> {
+        let start = self
+            .shared
+            .signin
+            .use_different(agent, self.installed(agent));
+        self.start_signin(start)
+    }
+
+    /// Stops reusing the lawyer's login, and never signs it out: no `auth logout` or `codex
+    /// logout` runs. With no reason (UD2's "Stop using it here") `no-reuse` is written, so the
+    /// next start does not reuse again without asking; with a reason (`ReusedFailed`,
+    /// `CodexLinkSplit`, …) only the reuse record is cleared, so the next start shows
+    /// `LoginFound` again. The state becomes `SignedOut { found: why }`. For Codex the home's
+    /// link is removed too ([`crate::unlink_reused_login`]): R20 calls this in its leave order
+    /// once every Codex process using the home has stopped, then `sign_in` and relaunch.
+    /// Refused with `NotReused` for Clauseo's own login, and as `check_status` is.
+    pub fn stop_using_login(&self, agent: &AgentId, why: Option<Found>) -> Result<(), SigninError> {
+        let start = self
+            .shared
+            .signin
+            .stop_using(agent, why, self.installed(agent));
         self.start_signin(start)
     }
 

@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use clauseo_protocol::AgentId;
 
 use crate::log::InstallLog;
-use crate::signin::SigninState;
+use crate::signin::{SigninNote, SigninState};
 
 /// An event on the channel `Agents::start` returns.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,6 +35,13 @@ pub enum AgentsEvent {
         agent: AgentId,
         /// The address to open.
         url: String,
+    },
+    /// A sign-in note for R20's log (`claude_reuse_fallback`, `codex_link_failed`).
+    SigninNote {
+        /// The agent.
+        agent: AgentId,
+        /// What happened.
+        note: SigninNote,
     },
 }
 

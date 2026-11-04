@@ -3,13 +3,15 @@
 //! identity"). Its `email` and `plan_type` go into `SignedIn`; nothing else is read.
 //!
 //! The app-server starts no thread. It runs with the Own environment and the store argument,
-//! like every Codex run but detection, plus the same `-c` overrides `limits`' reader uses
+//! like every Codex run but detection (detection's runs with `RunKind::Detect` and neither, in
+//! an empty Clauseo folder: [`read_as`]), plus the same `-c` overrides `limits`' reader uses
 //! (`crates/limits/src/readers/codex.rs`, `CODEX_OVERRIDES`): with plugins on, an app-server
 //! starts a git sync into its home at start-up (#203). The talk is `initialize`, then
 //! `account/read`; then the client is dropped, so stdin closes, and the run's tree is killed when
 //! it ends, at its 10 s limit, or on Cancel.
 
 use std::ffi::OsString;
+use std::path::Path;
 use std::pin::pin;
 use std::time::Duration;
 
@@ -40,11 +42,24 @@ const APP_SERVER_OVERRIDES: [&str; 6] = [
 /// answer, answers with an error, or names no `ChatGPT` account. Login status already said
 /// signed in; the identity only fills in who.
 pub(crate) async fn read<T: Timer + Send + Sync>(job: &SigninJob<T>, cancel: &Cancel) -> Identity {
-    account(job, cancel)
+    read_as(job, cancel, RunKind::Own { home: &job.home }, &job.home)
+        .await
+        .unwrap_or_default()
+}
+
+/// `account/read` with `kind`'s environment and store argument, in `cwd`: detection's (no
+/// store argument, the lawyer's own `~/.codex`, an empty Clauseo folder) or a reused session's.
+/// `None` when there is no `ChatGPT` account to read, or no answer.
+pub(crate) async fn read_as<T: Timer + Send + Sync>(
+    job: &SigninJob<T>,
+    cancel: &Cancel,
+    kind: RunKind<'_>,
+    cwd: &Path,
+) -> Option<Identity> {
+    account(job, cancel, kind, cwd)
         .await
         .as_ref()
         .and_then(codex_identity)
-        .unwrap_or_default()
 }
 
 /// The arguments after `codex.js`: the store argument, the overrides, then `app-server`.
@@ -60,9 +75,11 @@ pub(crate) fn app_server_args(kind: RunKind<'_>) -> Vec<OsString> {
 async fn account<T: Timer + Send + Sync>(
     job: &SigninJob<T>,
     cancel: &Cancel,
+    kind: RunKind<'_>,
+    cwd: &Path,
 ) -> Option<GetAccountResponse> {
-    let kind = RunKind::Own { home: &job.home };
-    let spec = job.spec(app_server_args(kind), job.env(kind, None), APP_SERVER_LIMIT);
+    let mut spec = job.spec(app_server_args(kind), job.env(kind, None), APP_SERVER_LIMIT);
+    spec.cwd = cwd.to_path_buf();
     let mut argv = Vec::with_capacity(spec.args.len().saturating_add(1));
     argv.push(spec.script.into_os_string());
     argv.extend(spec.args);

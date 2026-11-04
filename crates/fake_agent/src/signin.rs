@@ -14,6 +14,8 @@
 //!
 //! - The marker is `fake-signin-marker` in the CLI's home folder. It holds
 //!   `{"authMethod": ..., "email": "test@example.com"}` and nothing else, never a credential.
+//!   Claude's status prints the marker's email. For Codex a test's dummy file with the name of
+//!   Codex's login file counts as the marker too (reuse's hard link, S18).
 //! - The Claude home is `CLAUDE_SECURESTORAGE_CONFIG_DIR` when set (`""` is `$HOME/.claude`), else
 //!   `CLAUDE_CONFIG_DIR` when set and not empty, else `$HOME/.claude`. Codex's home is `CODEX_HOME`
 //!   when set and not empty, else `$HOME/.codex`.
@@ -43,6 +45,8 @@ use crate::{EXIT_LOAD, EXIT_OK, diagnostic, park_forever};
 
 /// The file name of the marker in the CLI's home folder.
 pub(crate) const MARKER: &str = "fake-signin-marker";
+/// The name of Codex's own login file, which the fake also takes as its marker (see [`marker`]).
+const CODEX_LOGIN_FILE: &str = "auth.json";
 /// The email every marker and every status reply carries.
 const EMAIL: &str = "test@example.com";
 /// The one code `FAKE_SIGNIN=paste` accepts.
@@ -131,6 +135,10 @@ pub(crate) enum Script {
     /// Plants the marker with this `authMethod` at startup, for any subcommand. The login then
     /// behaves as [`Script::OkAfter`] with 0.
     Reuse(String),
+    /// Claude ignores `CLAUDE_SECURESTORAGE_CONFIG_DIR`, as a later Claude Code that dropped the
+    /// variable would: a reused session's status then looks in `CLAUDE_CONFIG_DIR` (the
+    /// run-time fallback's case). Otherwise as [`Script::OkAfter`] with 0.
+    SecureIgnored,
 }
 
 impl Script {
@@ -143,6 +151,7 @@ impl Script {
             "device" => Self::Device,
             "device-off" => Self::DeviceOff,
             "port-busy" => Self::PortBusy,
+            "secure-ignored" => Self::SecureIgnored,
             _ => value
                 .strip_prefix("reuse:")
                 .filter(|method| !method.is_empty())
@@ -179,7 +188,8 @@ fn session(mode: Mode, args: &[OsString]) -> io::Result<i32> {
     let home = PathBuf::from(home);
     let folder = match mode {
         Mode::Claude => claude_home(
-            std::env::var_os("CLAUDE_SECURESTORAGE_CONFIG_DIR"),
+            std::env::var_os("CLAUDE_SECURESTORAGE_CONFIG_DIR")
+                .filter(|_| script != Script::SecureIgnored),
             std::env::var_os("CLAUDE_CONFIG_DIR"),
             &home,
         ),
@@ -297,12 +307,14 @@ fn open_browser(browser: &OsStr, url: &str) {
 }
 
 /// `auth status --json`: the signed-in line when the marker is there, else the signed-out line.
-/// Both are printed exactly as the brief has them, with the keys in that order.
+/// Both are printed exactly as the brief has them, with the keys in that order. The email is the
+/// marker's, `test@example.com` unless a test planted another.
 fn claude_status(folder: &Path) -> io::Result<i32> {
-    let line = match marker_method(folder) {
-        Some(method) => format!(
-            r#"{{"loggedIn":true,"authMethod":{},"apiProvider":"firstParty","email":"{EMAIL}","subscriptionType":"max"}}"#,
-            json!(method)
+    let line = match marker(folder) {
+        Some((method, email)) => format!(
+            r#"{{"loggedIn":true,"authMethod":{},"apiProvider":"firstParty","email":{},"subscriptionType":"max"}}"#,
+            json!(method),
+            json!(email)
         ),
         None => r#"{"loggedIn":false,"authMethod":"none","apiProvider":"firstParty"}"#.to_owned(),
     };
@@ -475,15 +487,26 @@ fn read_line() -> io::Result<String> {
 
 /// The `authMethod` the marker in `folder` holds, or `None` when there is no marker.
 fn marker_method(folder: &Path) -> Option<String> {
-    let path = folder.join(MARKER);
-    if !path.is_file() {
-        return None;
-    }
+    marker(folder).map(|(method, _)| method)
+}
+
+/// The marker in `folder`: its `authMethod` and its `email` (`test@example.com` when it
+/// names none), or `None` when there is none. For Codex a file named [`CODEX_LOGIN_FILE`]
+/// counts as the marker too, so a test can stand an empty file of that name in `~/.codex` and
+/// the engine's hard link of it into `CODEX_HOME` signs the home in, as Codex's own file would.
+/// The file is the test's dummy, never a real credential.
+fn marker(folder: &Path) -> Option<(String, String)> {
+    let path = [MARKER, CODEX_LOGIN_FILE]
+        .into_iter()
+        .map(|name| folder.join(name))
+        .find(|path| path.is_file())?;
     let text = std::fs::read_to_string(path).unwrap_or_default();
-    let method = serde_json::from_str::<Value>(&text)
-        .ok()
-        .and_then(|marker| marker["authMethod"].as_str().map(str::to_owned));
-    Some(method.unwrap_or_default())
+    let marker = serde_json::from_str::<Value>(&text).unwrap_or_default();
+    let field = |name: &str| marker[name].as_str().map(str::to_owned);
+    Some((
+        field("authMethod").unwrap_or_default(),
+        field("email").unwrap_or_else(|| EMAIL.to_owned()),
+    ))
 }
 
 /// Writes the marker in `folder` for `auth_method`, creating the folder first.

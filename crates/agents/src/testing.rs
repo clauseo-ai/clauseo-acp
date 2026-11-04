@@ -537,3 +537,13 @@ pub fn write_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
     file.write_all(bytes)?;
     file.flush()
 }
+
+/// Removes the file at `path`; a missing file is fine.
+pub fn remove_file(path: &Path) -> io::Result<()> {
+    crate::write::remove_file(path)
+}
+
+/// Makes a hard link at `link` to `original`: one file under two names.
+pub fn hard_link(original: &Path, link: &Path) -> io::Result<()> {
+    crate::write::hard_link(original, link)
+}

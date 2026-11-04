@@ -28,10 +28,11 @@
 //! The login, its pollers and the app-server are all gone before the last state is sent.
 
 mod device;
-mod identity;
+pub(crate) mod identity;
 
 use std::ffi::OsString;
 use std::net::{Ipv4Addr, TcpListener};
+use std::path::Path;
 use std::pin::pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, PoisonError};
@@ -62,12 +63,15 @@ pub(crate) fn port_free(port: u16) -> bool {
     TcpListener::bind((Ipv4Addr::LOCALHOST, port)).is_ok()
 }
 
-/// The hook point of the brief's guard (S18 piece 5, reuse): before any Codex `login` or
-/// `logout`, the home's login file and the lawyer's `~/.codex` one are compared by file id, and
-/// the run is refused while they are one file, whatever the recorded source says. Until reuse
-/// lands, Clauseo makes no link, so no home shares the lawyer's login.
-fn home_shares_lawyers_login<T>(_job: &SigninJob<T>) -> bool {
-    false
+/// The brief's guard: before any Codex `login` or `logout`, the home's login file and the
+/// lawyer's `~/.codex` one are compared by file id ([`super::reuse::codex_login_shared`]), and
+/// the run is refused while they are one file, whatever `login-source` says. With no lawyer's
+/// home folder known there is no lawyer's file to share.
+fn home_shares_lawyers_login<T>(job: &SigninJob<T>) -> bool {
+    job.config
+        .signin
+        .lawyer_home()
+        .is_some_and(|lawyer| super::reuse::codex_login_shared(&job.home, &lawyer))
 }
 
 /// A sign-in with `method`, start to end; gives the last state.
@@ -241,7 +245,7 @@ fn refusal(said: &Said) -> SigninCode {
 }
 
 /// `SignedIn` for `identity`, Clauseo's own login, now.
-fn signed_in<T>(job: &SigninJob<T>, identity: Identity) -> SigninState {
+pub(crate) fn signed_in<T>(job: &SigninJob<T>, identity: Identity) -> SigninState {
     SigninState::SignedIn {
         email: identity.email,
         plan: identity.plan,
@@ -252,11 +256,27 @@ fn signed_in<T>(job: &SigninJob<T>, identity: Identity) -> SigninState {
 
 /// One `login status` in Clauseo's home: `Some(true)` signed in (exit 0), `Some(false)` not,
 /// `None` when it could not tell (no start, killed past 5 s, cancelled). Its output is never read.
-async fn status<T: Timer + Send + Sync>(job: &SigninJob<T>, cancel: &Cancel) -> Option<bool> {
-    let kind = RunKind::Own { home: &job.home };
+pub(crate) async fn status<T: Timer + Send + Sync>(
+    job: &SigninJob<T>,
+    cancel: &Cancel,
+) -> Option<bool> {
+    let code = status_run(job, cancel, RunKind::Own { home: &job.home }, &job.home).await?;
+    Some(codex_logged_in(code))
+}
+
+/// One `login status` with `kind`'s environment and store argument, in `cwd`: its exit code,
+/// or `None` when it could not tell. Its output (stderr prints a masked key prefix) is never
+/// read.
+pub(crate) async fn status_run<T: Timer + Send + Sync>(
+    job: &SigninJob<T>,
+    cancel: &Cancel,
+    kind: RunKind<'_>,
+    cwd: &Path,
+) -> Option<Option<i32>> {
     let mut args = codex_store_args(kind);
     args.extend([OsString::from("login"), OsString::from("status")]);
-    let spec = job.spec(args, job.env(kind, None), STATUS_LIMIT);
+    let mut spec = job.spec(args, job.env(kind, None), STATUS_LIMIT);
+    spec.cwd = cwd.to_path_buf();
     let ran = run(
         &*job.launcher,
         &*job.timer,
@@ -268,33 +288,21 @@ async fn status<T: Timer + Send + Sync>(job: &SigninJob<T>, cancel: &Cancel) -> 
     .await
     .ok()?;
     match ran.ended {
-        Ended::Exited(code) => Some(codex_logged_in(code)),
+        Ended::Exited(code) => Some(code),
         Ended::TimedOut | Ended::Cancelled => None,
     }
 }
 
-/// One status check: `SignedIn` (with `account/read`'s account) or `SignedOut`, or no change
-/// when it could not tell.
-pub(crate) async fn check_status<T: Timer + Send + Sync>(
-    job: &SigninJob<T>,
-) -> Option<SigninState> {
-    let cancel = &job.ticket.cancel;
-    Some(if status(job, cancel).await? {
-        signed_in(job, identity::read(job, cancel).await)
-    } else {
-        SigninState::SignedOut { found: None }
-    })
-}
-
 /// `logout` in Clauseo's home, then a status check. Never for a reused login (the call refuses
-/// it and the job checks again here), and never while the home shares the lawyer's login file
-/// (the guard's hook, [`home_shares_lawyers_login`]): Codex's logout revokes the tokens and
-/// deletes the login.
+/// it by the state and the job checks again here by `login-source` and the home's login file),
+/// and never while the home shares the lawyer's login file (the guard, [`home_shares_lawyers_login`]): Codex's logout revokes the tokens and deletes the
+/// login. The job then runs the status check instead.
 pub(crate) async fn sign_out<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Option<SigninState> {
     if job.shared.signin.source(&job.ticket.agent) == Some(Source::Reused)
+        || super::found::is_reused(job)
         || home_shares_lawyers_login(job)
     {
-        return None;
+        return super::found::check(job).await;
     }
     let kind = RunKind::Own { home: &job.home };
     let mut args = codex_store_args(kind);

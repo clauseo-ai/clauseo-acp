@@ -29,6 +29,23 @@ fn reuse_plants_the_codex_marker_in_codex_home() {
     assert!(!PathBuf::from(&home).join(".codex").exists());
 }
 
+/// S18's reuse tests stand a dummy file with Codex's login file name in `~/.codex` and the
+/// engine hard-links it into `CODEX_HOME`: the fake takes that file as its marker.
+#[test]
+fn a_dummy_codex_login_file_counts_as_the_marker() {
+    let scratch = Scratch::new("codex_login_file");
+    let home = home(&scratch);
+    let codex_home = scratch.path().join("codex-home");
+    let env = [("CODEX_HOME", text(&codex_home))];
+    assert_eq!(codex_status(&scratch, &home, &env, 1), "Not logged in\n");
+    crate::write::create_dir_all(&codex_home).unwrap();
+    crate::write::write(codex_home.join(concat!("auth", ".json")), "").unwrap();
+    assert_eq!(
+        codex_status(&scratch, &home, &env, 0),
+        "Logged in using ChatGPT\n"
+    );
+}
+
 #[test]
 fn codex_login_prints_the_callback_line_and_writes_the_marker_in_codex_home() {
     let scratch = Scratch::new("codex_login");

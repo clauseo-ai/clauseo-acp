@@ -78,6 +78,28 @@ pub(crate) fn try_lock_agents(data_dir: &Path) -> io::Result<Option<File>> {
     }
 }
 
+/// Reads the small text file at `path`, refusing a link and anything past `limit` bytes:
+/// Clauseo's own sign-in markers (`signin/marker.rs`), never a credential. `Ok(None)` when
+/// there is no file.
+pub(crate) fn read_small(path: &Path, limit: u64) -> io::Result<Option<String>> {
+    use std::io::Read as _;
+    let file = match open_read(path) {
+        Ok(file) => file,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(err),
+    };
+    let mut text = String::new();
+    file.take(limit.saturating_add(1))
+        .read_to_string(&mut text)?;
+    if u64::try_from(text.len()).unwrap_or(u64::MAX) > limit {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "the file is too long",
+        ));
+    }
+    Ok(Some(text))
+}
+
 /// Flushes `path`'s bytes to the disk (`fsync`): a file about to be vouched for by a receipt.
 pub(crate) fn sync_file(path: &Path) -> io::Result<()> {
     open_no_follow(OpenOptions::new().write(true), path)?.sync_all()
@@ -193,8 +215,9 @@ pub(crate) fn symlink(target: &Path, link: &Path) -> io::Result<()> {
     std::os::unix::fs::symlink(target, link)
 }
 
-/// Tests only: makes a hard link at `link` to `original`: one file under two names.
-#[cfg(test)]
+/// Makes a hard link at `link` to `original`: one file under two names, `std::fs::hard_link`,
+/// which opens neither (`link(2)` on Unix, `CreateHardLinkW` on Windows). An existing `link`
+/// is an error, never replaced. Codex's reused login (`signin/reuse.rs`), and tests.
 pub(crate) fn hard_link(original: &Path, link: &Path) -> io::Result<()> {
     std::fs::hard_link(original, link)
 }

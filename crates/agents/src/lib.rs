@@ -34,22 +34,28 @@
 //!   macOS and Linux (`signin/shim.rs`); Codex's flow (`signin/codex.rs`: the port 1455 probe
 //!   and "Try again", hidden `login` or `login --device-auth` with the device code read
 //!   strictly from its output, `login status` polled, the account from `app-server`'s
-//!   `account/read`, sign-out). Detection and reuse build on these.
+//!   `account/read`, sign-out); detection of the lawyer's own login (`signin/detect.rs`), the
+//!   status check and the lawyer's choices about it (`signin/found.rs`), Clauseo's `login-source`
+//!   and `no-reuse` markers (`signin/marker.rs`), and Codex's hard link, guard and split check
+//!   (`signin/reuse.rs`, the one file that may name Codex's login file, and never opens it).
 //!
 //! # Interface
 //!
 //! - [`Agents::start`]`(config, launcher, timer)` gives an [`Agents`] and the `Receiver` of
 //!   [`AgentsEvent`]s; `install`, `pause`, `retry(agent, use_system_proxy)`, `state` and
 //!   `installed`; `sign_in(agent, Method)`, `try_again` (Codex's busy port), `cancel_sign_in`,
-//!   `paste_code(agent, PasteCode)`, `sign_out`, `check_status` (each
+//!   `paste_code(agent, PasteCode)`, `sign_out`, `check_status`, `find_login`,
+//!   `use_found_login`, `use_different_account`, `stop_using_login(agent, Option<Found>)` (each
 //!   `Result<(), SigninError>`) and `signin_state`.
 //! - [`AgentsConfig`], [`InstallConfig`], [`NodeSearch`], [`Clock`] and [`SystemClock`].
 //! - [`InstallState`], [`Failure`], [`FailureKind`] (with its error code), [`InstallLog`] and
 //!   [`Installed`].
 //! - [`SigninState`], [`Found`], [`LoginFrom`], [`Source`], [`SigninCode`] (with its error
 //!   code), [`Method`], [`SigninError`], [`PasteCode`] and [`SigninConfig`];
-//!   [`AgentsEvent::Signin`] and [`AgentsEvent::OpenUrl`]; [`same_file`] and
-//!   [`is_sign_in_again`].
+//!   [`SigninNote`]; [`AgentsEvent::Signin`], [`AgentsEvent::OpenUrl`] and
+//!   [`AgentsEvent::SigninNote`]; [`same_file`] and [`is_sign_in_again`]; Codex's split check and
+//!   guard, [`codex_link_holds`] ([`CodexLink`]) and [`codex_login_shared`], and the leave order's
+//!   unlink step, [`unlink_reused_login`].
 //! - [`Snapshot`] and [`Platform`].
 //! - [`keys`]: each agent's API key in the OS keychain (`store`, `load`, `clear`, `available`).
 //!
@@ -72,6 +78,9 @@
 //! - Clauseo never opens or reads an agent's credential, and no file under `src` names one
 //!   outside a comment (`tests/credential_names.rs`). Emails and plans come only from the
 //!   vendors' own status output. A pasted code is zeroed once written and never logged.
+//! - No `auth logout` or `codex logout` runs while the source is `Reused`, and no Codex `login`
+//!   or `logout` while the home's login file is the lawyer's (same file id). Reuse starts only
+//!   on `use_found_login`; detection never starts it.
 //! - Only an address the `BROWSER` shim captured, on one of the snapshot's sign-in hosts over
 //!   https, becomes `OpenUrl`, once; an address in a run's output never does. No status
 //!   process runs once a sign-in is confirmed, cancelled, expired or failed.
@@ -128,8 +137,9 @@ pub use log::InstallLog;
 pub use pins::{AgentPins, PinsError};
 pub use platform::{Arch, Libc, Os, Platform};
 pub use receipt::{install_folder, install_root, script_path};
+pub use signin::reuse::{CodexLink, codex_link_holds, codex_login_shared, unlink_reused_login};
 pub use signin::{
-    Found, LoginFrom, Method, PasteCode, SigninCode, SigninError, SigninState, Source,
+    Found, LoginFrom, Method, PasteCode, SigninCode, SigninError, SigninNote, SigninState, Source,
 };
 pub use snapshot::{
     AgentEntry, AgentSizes, NPM_REGISTRY, NodeArchive, NodeEntry, Snapshot, SnapshotError,

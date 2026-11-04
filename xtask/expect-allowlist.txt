@@ -299,14 +299,5 @@ crates/agents/src/testing/trace.rs instant clippy::disallowed_methods
 crates/agents/examples/install.rs mb clippy::cast_precision_loss
 # R20: an agent's API key cleared where Linux has no keychain, so it always succeeds there.
 crates/agents/src/keys.rs Keychain::clear clippy::unnecessary_wraps
-# S18: the Windows file id (CreateFileW with access 0, then GetFileInformationByHandle), and the
-# sign-in foundation's items that only detection and reuse (piece 5) call; Claude's flow
-# (piece 3) and Codex's (piece 4) use the rest.
+# S18: the Windows file id (CreateFileW with access 0, then GetFileInformationByHandle).
 crates/agents/src/fileid.rs file_id unsafe_code
-crates/agents/src/signin/env.rs RunKind dead_code
-crates/agents/src/status.rs CLAUDE_AI dead_code
-crates/agents/src/status.rs FIRST_PARTY dead_code
-crates/agents/src/status.rs claude_detection dead_code
-crates/agents/src/status.rs first_party dead_code
-crates/agents/src/status.rs CodexDetect dead_code
-crates/agents/src/status.rs CodexDetect dead_code
