@@ -262,6 +262,26 @@ test("missing titles show the room's own words; an unknown matter's line keeps i
   expect(tip?.classList.contains("z-30")).toBe(true);
 });
 
+test("a conversation's day reads as Recent's: today, else its weekday and date, never one alone", async () => {
+  const DAY = 86_400_000;
+  await room(() =>
+    page([
+      said({ kind: "thread_title", thread: T2, at: NOW - DAY }),
+      said({ kind: "thread_title", thread: T3, at: NOW - 8 * DAY }),
+      said({ at: NOW }),
+    ]),
+  );
+  await find("bail");
+  const notes = [...(results()?.querySelectorAll('[data-testid="find-conversation"]') ?? [])].map(
+    (r) => r.querySelector(".room-matter-note")?.textContent,
+  );
+  expect(notes).toEqual([
+    "Sharma v. State of Delhi, Monday 2 November",
+    "Sharma v. State of Delhi, Monday 26 October",
+    "Sharma v. State of Delhi, today",
+  ]);
+});
+
 test("nothing found says so, with the scope behind the info icon", async () => {
   await room(() => page([]));
   await find("zzz");
