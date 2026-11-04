@@ -258,6 +258,106 @@ fn a_second_install_while_one_runs_is_done_and_starts_nothing() {
     host.shutdown();
 }
 
+/// The first download runs until cancelled, then ends only once the test lets it (the kill
+/// steps still running); every later download finishes at once, as `Fake` does.
+struct SlowCancel {
+    inner: Arc<Fake>,
+    started: Mutex<mpsc::Sender<()>>,
+    ended: Mutex<mpsc::Receiver<()>>,
+}
+
+impl InstallTools for SlowCancel {
+    fn free_bytes(&self, folder: &Path) -> std::io::Result<u64> {
+        self.inner.free_bytes(folder)
+    }
+
+    fn fetch_versions(&self, url: &str, work: &Path, cancel: &Cancel) -> Result<Vec<u8>, Failure> {
+        self.inner.fetch_versions(url, work, cancel)
+    }
+
+    fn download(
+        &self,
+        url: &str,
+        zip: &Path,
+        cancel: &Cancel,
+        progress: &mut dyn FnMut(u64, u64),
+    ) -> Result<Option<u64>, Failure> {
+        if self.inner.downloads.load(Ordering::SeqCst) > 0 {
+            return self.inner.download(url, zip, cancel, progress);
+        }
+        self.inner.downloads.fetch_add(1, Ordering::SeqCst);
+        write::write(zip, &EMPTY_ZIP);
+        progress(22, 22);
+        self.started.lock().unwrap().send(()).unwrap();
+        // Polls the cancel; nothing ever arrives on `idle`.
+        let (_keep, idle) = mpsc::channel::<()>();
+        while !cancel.is_cancelled() {
+            let _waited = idle.recv_timeout(Duration::from_millis(5));
+        }
+        self.ended.lock().unwrap().recv().unwrap();
+        Err(Failure::cancelled())
+    }
+
+    fn unpack(&self, zip: &Path, into: &Path, cancel: &Cancel) -> Result<(), Failure> {
+        self.inner.unpack(zip, into, cancel)
+    }
+
+    fn verify_signature(
+        &self,
+        platform: Platform,
+        folder: &Path,
+        cancel: &Cancel,
+    ) -> Result<(), String> {
+        self.inner.verify_signature(platform, folder, cancel)
+    }
+}
+
+/// Install, Cancel, Install while the cancelled download is still ending: the second Install
+/// is kept, and starts once the first's `Failed { cancelled }` is out; it ends `Done`, two
+/// downloads begun (the host review of #337).
+#[test]
+fn an_install_right_after_a_cancel_starts_once_the_cancelled_one_ends() {
+    let dir = Dir::new("browser_install_cancel_again", &[]);
+    let (inner, _handles) = Fake::new(false);
+    let (started, starts) = mpsc::channel();
+    let (end, ended) = mpsc::channel();
+    let tools = Arc::new(SlowCancel {
+        inner: Arc::clone(&inner),
+        started: Mutex::new(started),
+        ended: Mutex::new(ended),
+    });
+    let found = roots(&dir);
+    let host = dir.start_with(0, move |config: HostConfig| {
+        config
+            .with_browser_install_tools(tools)
+            .with_chrome_roots(found)
+    });
+    let mut sub = subscribe(&host);
+    host.ok(HostCommand::InstallBrowser {});
+    starts.recv_timeout(Duration::from_secs(30)).unwrap();
+    host.ok(HostCommand::CancelBrowserInstall {});
+    assert_eq!(
+        host.ok(HostCommand::InstallBrowser {}),
+        CommandOutcome::Done
+    );
+    end.send(()).unwrap();
+    let first = states(&mut sub).pop().unwrap();
+    assert!(
+        matches!(
+            first,
+            BrowserInstallState::Failed {
+                code: BrowserInstallFailure::Cancelled,
+                ..
+            }
+        ),
+        "{first:?}"
+    );
+    assert_eq!(states(&mut sub).pop(), Some(BrowserInstallState::Done));
+    assert_eq!(inner.downloads.load(Ordering::SeqCst), 2);
+    assert_eq!(browsers(&dir), ["chrome-131.0.6778.85"]);
+    host.shutdown();
+}
+
 /// The cancel ends a running download as `cancelled` with nothing left, and a new one may
 /// start after.
 #[test]

@@ -4,8 +4,9 @@
 //! `HostEvent::BrowserInstall`. The actor never waits on it.
 //!
 //! - `InstallBrowser` starts the thread and answers `Done`; while one runs it answers `Done` and
-//!   does nothing, since the running one's events already tell the app. Neither command stores
-//!   a receipt.
+//!   does nothing, since the running one's events already tell the app. While a cancelled one is
+//!   still ending, it answers `Done` and a new download starts once that one's `Failed` is out.
+//!   Neither command stores a receipt.
 //! - `CancelBrowserInstall` sets the running download's [`Cancel`]; with none running it does
 //!   nothing.
 //! - The latest state goes into every app catch-up (`current`), so a window that lagged,
@@ -45,6 +46,9 @@ pub(crate) struct BrowserInstall {
     /// then its `Done` or `Failed` until the next download starts. In every app catch-up, so a
     /// window that lagged, resubscribed or reloaded hears where the download stands.
     latest: Option<BrowserInstallState>,
+    /// An `InstallBrowser` came while the running download was cancelled but not yet ended: a
+    /// new download starts once the cancelled one's last state is in.
+    restart: bool,
 }
 
 /// A running download.
@@ -61,6 +65,7 @@ impl BrowserInstall {
             sweep: None,
             running: None,
             latest: None,
+            restart: false,
         }
     }
 
@@ -105,8 +110,14 @@ pub(super) fn install(actor: &mut Actor, ctx: &CommandCtx) {
 }
 
 fn begin(actor: &mut Actor) -> Result<(), Error> {
-    if actor.browser_install.running.is_some() {
-        tracing::info!("a Chrome for Testing download is already running; nothing started");
+    if let Some(running) = &actor.browser_install.running {
+        if running.cancel.is_cancelled() {
+            // The lawyer asked again after a cancel: start afresh once that one has ended.
+            tracing::info!("a cancelled download is still ending; a new one starts after it");
+            actor.browser_install.restart = true;
+        } else {
+            tracing::info!("a Chrome for Testing download is already running; nothing started");
+        }
         return Ok(());
     }
     let (platform, app_data) = place(actor);
@@ -184,8 +195,10 @@ impl Drop for LastState {
     }
 }
 
-/// `CancelBrowserInstall`: sets the running download's cancel; nothing else. Answers `Done`.
+/// `CancelBrowserInstall`: sets the running download's cancel, and drops a restart asked for
+/// after an earlier cancel. Answers `Done`.
 pub(super) fn cancel(actor: &mut Actor, ctx: &CommandCtx) {
+    actor.browser_install.restart = false;
     if let Some(running) = &actor.browser_install.running {
         running.cancel.cancel();
     }
@@ -205,6 +218,16 @@ pub(super) fn on_state(actor: &mut Actor, state: BrowserInstallState) {
         if running.thread.join().is_err() {
             tracing::warn!("the download thread panicked");
         }
+        // An Install that came while this one was ending after a cancel: its turn now, after
+        // the cancelled one's `Failed` went out.
+        // Never once the host is stopping.
+        let serving = matches!(actor.phase, super::state::HostPhase::Serving);
+        if std::mem::take(&mut actor.browser_install.restart)
+            && serving
+            && let Err(error) = begin(actor)
+        {
+            tracing::warn!(%error, "the download asked for after a cancel did not start");
+        }
     }
 }
 
@@ -214,8 +237,9 @@ pub(super) fn current(actor: &Actor) -> Option<HostEvent> {
     Some(HostEvent::BrowserInstall { state })
 }
 
-/// Shutdown: the running download is cancelled.
+/// Shutdown: the running download is cancelled, and no restart follows it.
 pub(super) fn shutdown(actor: &mut Actor) {
+    actor.browser_install.restart = false;
     if let Some(running) = &actor.browser_install.running {
         running.cancel.cancel();
     }
