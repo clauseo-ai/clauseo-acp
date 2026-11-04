@@ -47,7 +47,27 @@ fn a_symlink_is_never_the_same_file() {
     );
 }
 
-/// Skips (passes with a note) when this account may not make symbolic links.
+/// Whether a test that needs a privilege it lacks may skip: only off CI. `ci` is the `CI`
+/// variable, which GitHub's runners set to `true`; set and not empty, `false` or `0`, it is CI,
+/// where Windows runners can make symbolic links, so the test must run there.
+fn may_skip_unprivileged(ci: Option<&std::ffi::OsStr>) -> bool {
+    ci.is_none_or(|ci| ci.is_empty() || ci == "false" || ci == "0")
+}
+
+#[test]
+fn only_a_local_run_may_skip_for_want_of_a_privilege() {
+    use std::ffi::OsStr;
+    assert!(may_skip_unprivileged(None));
+    for local in ["", "false", "0"] {
+        assert!(may_skip_unprivileged(Some(OsStr::new(local))), "{local:?}");
+    }
+    for ci in ["true", "1", "yes"] {
+        assert!(!may_skip_unprivileged(Some(OsStr::new(ci))), "{ci:?}");
+    }
+}
+
+/// Skips (passes with a note) when this account may not make symbolic links, on a local run
+/// alone: with `CI` set it fails with the error, so Windows CI always proves this.
 #[cfg(windows)]
 #[test]
 fn a_symlink_is_never_the_same_file() {
@@ -55,6 +75,11 @@ fn a_symlink_is_never_the_same_file() {
     let original = dir.file("login", b"marker");
     let link = dir.0.join("link");
     if let Err(err) = write::symlink_file(&original, &link) {
+        let ci = std::env::var_os("CI");
+        assert!(
+            may_skip_unprivileged(ci.as_deref()),
+            "CI must make symbolic links to prove same_file: {err}"
+        );
         eprintln!("skipped: this account cannot make symbolic links ({err})");
         return;
     }
