@@ -3,9 +3,10 @@
 //!
 //! A value counts as policy only when it is forced (`CFPreferencesAppValueIsForced`): the same
 //! call also returns what a user wrote with `defaults write`, which is not policy. Keys are the
-//! dotted keys, except agents: the key `agents` holds a dictionary from agent id to launch spec,
-//! since managed preferences are read key by key and cannot list the ids. An `agents.<id>` key
-//! is never read there (the shim never asks for one), and [`parse`] calls it unknown.
+//! dotted keys, except agents and plans: the key `agents` holds a dictionary from agent id to
+//! launch spec, and `plans` one from agent id to plan, since managed preferences are read key by
+//! key and cannot list the ids. An `agents.<id>` or `plans.<id>` key is never read there (the
+//! shim never asks for one), and [`parse`] calls it unknown.
 
 #[cfg(test)]
 mod tests;
@@ -20,6 +21,9 @@ pub const SOURCE: &str = "managed preferences";
 
 /// The key whose dictionary holds every agent.
 pub const AGENTS_KEY: &str = "agents";
+
+/// The key whose dictionary holds every agent's plan.
+pub const PLANS_KEY: &str = "plans";
 
 /// A property list value, as Core Foundation returns it.
 #[derive(Debug, Clone, PartialEq)]
@@ -52,10 +56,10 @@ pub fn parse(values: Vec<(String, PlistValue, bool)>) -> PolicyRead {
     let mut entries = Vec::new();
     for (key, value) in forced {
         match value {
-            PlistValue::Dict(agents) if key == AGENTS_KEY => entries.extend(
-                agents
+            PlistValue::Dict(by_id) if key == AGENTS_KEY || key == PLANS_KEY => entries.extend(
+                by_id
                     .into_iter()
-                    .map(|(id, launch)| (format!("{AGENTS_KEY}.{id}"), Some(launch))),
+                    .map(|(id, entry)| (format!("{key}.{id}"), Some(entry))),
             ),
             value if leaf::KEYS.iter().any(|&(known, _)| known == key) => {
                 entries.push((key, Some(value)));
@@ -87,6 +91,14 @@ pub fn parse(values: Vec<(String, PlistValue, bool)>) -> PolicyRead {
                 key,
                 message: "it must be a dictionary from agent id to launch spec".to_owned(),
             },
+            None if key == PLANS_KEY => {
+                // What the firm meant is unknown, so no plan stands (decision record 0048).
+                refused.push("plans.".to_owned());
+                WarningKind::InvalidValue {
+                    key,
+                    message: "it must be a dictionary from agent id to plan".to_owned(),
+                }
+            }
             None => WarningKind::UnknownKey { key },
         };
         warnings.push(Warning {

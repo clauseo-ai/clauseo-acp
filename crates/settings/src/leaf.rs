@@ -20,8 +20,9 @@
 //! - a sample value in `leaf/tests.rs`' `every_fixed_key_types_and_the_kinds_agree`, and a
 //!   value that is not the default in `a_refused_key_goes_back_to_its_default`;
 //! - for a key that decides what an agent can reach, or what Clauseo sends off the machine, its
-//!   name in [`SECURITY_KEYS`] and its arm in [`refuse`] (`leaf/reset.rs`), which sets the value
-//!   it is locked at when its policy is unknown;
+//!   name in [`SECURITY_KEYS`] (a section of entries by id, as `plans.`, ends in `.`) and its
+//!   arm in [`refuse`] (`leaf/reset.rs`), which sets the value it is locked at when its policy
+//!   is unknown;
 //! - for a key a policy may only turn off, its name in [`OFF_ONLY_KEYS`] (`Effective::load`
 //!   ignores a policy `true` for it, with a warning).
 //!
@@ -36,9 +37,10 @@ mod security_tests;
 #[cfg(test)]
 mod tests;
 
+use crate::plans::{self, plan_id};
 use crate::policy::{Kind, kind_of};
 use crate::schema::{
-    AgentLaunch, Density, FontSize, Language, Lite, McpServerLaunch, Motion, Settings, Theme,
+    AgentLaunch, Density, FontSize, Language, Lite, McpServerLaunch, Motion, Plan, Settings, Theme,
     UpdateMode,
 };
 use crate::warning::{Origin, Warning, WarningKind};
@@ -50,9 +52,10 @@ use std::path::{Path, PathBuf};
 pub(crate) use reset::refuse;
 use reset::reset;
 
-/// Every key with a fixed name, and its kind. An agent's key is `agents.<id>`, an object.
-/// `schema::tests::the_keys_and_their_kinds_are_the_schemas` holds this to the schema.
-pub(crate) const KEYS: [(&str, Kind); 13] = [
+/// Every key with a fixed name, and its kind. An agent's key is `agents.<id>`, and a plan's
+/// `plans.<id>`, each an object. `schema::tests::the_keys_and_their_kinds_are_the_schemas`
+/// holds this to the schema.
+pub(crate) const KEYS: [(&str, Kind); 15] = [
     ("matters.default_location", Kind::String),
     ("mcp.servers", Kind::Object),
     ("ui.theme", Kind::String),
@@ -66,6 +69,8 @@ pub(crate) const KEYS: [(&str, Kind); 13] = [
     ("privacy.counts", Kind::Boolean),
     ("privacy.crash_reports", Kind::Boolean),
     ("update.mode", Kind::String),
+    ("install.bundle", Kind::String),
+    ("install.registry", Kind::String),
 ];
 
 /// The keys that decide what an agent can reach, what Clauseo sends off the machine, or what it
@@ -73,14 +78,18 @@ pub(crate) const KEYS: [(&str, Kind); 13] = [
 /// 0009, R21; the `privacy` keys, decision record 0036; `update.mode` at `none`, R23): its value
 /// there is unknown, and the user's must not stand in. Off is not always the default: both
 /// `tools` keys, `privacy.counts` and `update.mode` default to on, and locking them at their
-/// default would fail open.
-pub(crate) const SECURITY_KEYS: [&str; 6] = [
+/// default would fail open. `plans.` stands for every `plans.<id>` (decision record 0048):
+/// locked, no plan stands, so no endpoint the lawyer chose does.
+pub(crate) const SECURITY_KEYS: [&str; 9] = [
     "mcp.servers",
     "tools.web_search",
     "tools.browser",
     "privacy.counts",
     "privacy.crash_reports",
     "update.mode",
+    "install.bundle",
+    "install.registry",
+    "plans.",
 ];
 
 /// The keys a policy may only turn off (decision record 0036): a policy `true` for one is
@@ -128,8 +137,11 @@ pub(crate) enum Leaf {
     Counts(bool),
     CrashReports(bool),
     UpdateMode(UpdateMode),
+    Plan(String, Plan),
+    Bundle(Option<PathBuf>),
+    Registry(Option<String>),
     /// A known key whose value does not type, or that a policy source refused. Applied, it puts
-    /// the key back at its default; for `agents.<id>`, the entry for that id is dropped. A
+    /// the key back at its default; for `agents.<id>` or `plans.<id>`, that entry is dropped. A
     /// policy also locks the key (fail closed, Rohan, 2026-10-31), and applies it with
     /// [`Leaf::apply_policy`], which locks a security key off rather than at its default.
     Refused(String),
@@ -350,9 +362,12 @@ impl Leaf {
             "privacy.counts" => typed_value(key, value).map(Leaf::Counts),
             "privacy.crash_reports" => typed_value(key, value).map(Leaf::CrashReports),
             "update.mode" => typed_value(key, value).map(Leaf::UpdateMode),
-            _ => match agent_id(key) {
-                Some(id) => agent(key, id, value, unknown),
-                None => Err(WarningKind::UnknownKey {
+            "install.bundle" => plans::bundle(key, value).map(Leaf::Bundle),
+            "install.registry" => plans::registry(key, value).map(Leaf::Registry),
+            _ => match (agent_id(key), plan_id(key)) {
+                (Some(id), _) => agent(key, id, value, unknown),
+                (_, Some(id)) => plans::plan(key, value, unknown).map(|p| Leaf::Plan(id.into(), p)),
+                (None, None) => Err(WarningKind::UnknownKey {
                     key: key.to_owned(),
                 }),
             },
@@ -376,6 +391,9 @@ impl Leaf {
             Leaf::Counts(_) => "privacy.counts".to_owned(),
             Leaf::CrashReports(_) => "privacy.crash_reports".to_owned(),
             Leaf::UpdateMode(_) => "update.mode".to_owned(),
+            Leaf::Plan(id, _) => format!("plans.{id}"),
+            Leaf::Bundle(_) => "install.bundle".to_owned(),
+            Leaf::Registry(_) => "install.registry".to_owned(),
             Leaf::Refused(key) => key.clone(),
         }
     }
@@ -393,8 +411,8 @@ impl Leaf {
         on
     }
 
-    /// Writes the value into `settings`, replacing what was there. An agent replaces the whole
-    /// entry for its id.
+    /// Writes the value into `settings`, replacing what was there. An agent or a plan replaces
+    /// the whole entry for its id.
     pub(crate) fn apply(self, settings: &mut Settings) {
         match self {
             Leaf::DefaultLocation(path) => settings.matters.default_location = path,
@@ -413,6 +431,11 @@ impl Leaf {
             Leaf::Counts(on) => settings.privacy.counts = on,
             Leaf::CrashReports(on) => settings.privacy.crash_reports = on,
             Leaf::UpdateMode(mode) => settings.update.mode = mode,
+            Leaf::Plan(id, plan) => {
+                settings.plans.insert(id, plan);
+            }
+            Leaf::Bundle(path) => settings.install.bundle = path,
+            Leaf::Registry(url) => settings.install.registry = url,
             Leaf::Refused(key) => reset(&key, settings),
         }
     }

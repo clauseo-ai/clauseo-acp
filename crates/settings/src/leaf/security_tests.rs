@@ -3,8 +3,8 @@
 
 use super::tests::one;
 use super::{Leaf, refuse};
-use crate::schema::{Settings, Theme, UpdateMode};
-use crate::testing::abs_str;
+use crate::schema::{Plan, Settings, Theme, UpdateMode};
+use crate::testing::{abs, abs_str};
 use crate::warning::WarningKind;
 use serde_json::json;
 
@@ -82,11 +82,14 @@ fn refuse_locks_each_security_key_off() {
     assert!(!settings.tools.web_search && !settings.tools.browser);
     assert_eq!(settings.mcp.servers.len(), 1);
 
-    // Any other key, a prefix of no security key, or a prefix without its dot names nothing.
+    // Any other key, a prefix of no security key, or a prefix without its dot names nothing. A
+    // single plan names none either: `reset` drops it alone.
     for key in [
         "ui.theme",
         "agents.x",
-        "plans.",
+        "plans.x",
+        "plans",
+        "install",
         "tools",
         "tool.",
         "tools.web",
@@ -112,4 +115,38 @@ fn a_policy_refusal_locks_a_security_key_off_and_any_other_at_its_default() {
     // A value from policy applies as any value does.
     Leaf::WebSearch(true).apply_policy(&mut settings);
     assert!(settings.tools.web_search);
+}
+
+// The `install` keys lock unset and `plans.` locks no plan at all (decision record 0048); a
+// single refused plan drops that plan alone.
+#[test]
+fn refuse_unsets_the_install_keys_and_leaves_no_plan() {
+    let set = || {
+        let mut settings = Settings::default();
+        settings.install.bundle = Some(abs("bundle"));
+        settings.install.registry = Some("https://npm.firm.example".to_owned());
+        for id in ["claude-acp", "codex-acp"] {
+            settings.plans.insert(id.to_owned(), Plan::default());
+        }
+        settings
+    };
+    let mut settings = set();
+    assert!(refuse("install.bundle", &mut settings));
+    assert_eq!(settings.install.bundle, None);
+    assert!(settings.install.registry.is_some());
+    let mut settings = set();
+    assert!(refuse("install.", &mut settings));
+    assert_eq!(settings.install, crate::schema::InstallSettings::default());
+    assert_eq!(settings.plans.len(), 2);
+    let mut settings = set();
+    assert!(refuse("plans.", &mut settings));
+    assert!(settings.plans.is_empty());
+    assert!(settings.install.bundle.is_some());
+    let mut settings = set();
+    Leaf::Refused("plans.claude-acp".to_owned()).apply_policy(&mut settings);
+    assert_eq!(settings.plans.keys().collect::<Vec<_>>(), ["codex-acp"]);
+    let mut settings = set();
+    Leaf::Refused("install.registry".to_owned()).apply_policy(&mut settings);
+    assert_eq!(settings.install.registry, None);
+    assert_eq!(abs_str("bundle"), abs("bundle").display().to_string());
 }

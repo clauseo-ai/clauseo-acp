@@ -1,12 +1,18 @@
 //! [`Effective`]: the settings `host` and `cli` run with. Read at start-up; the `ui` section
 //! changes at runtime through [`Effective::apply_ui_patch`], the `tools` section through
 //! [`Effective::apply_tools_patch`], the `privacy` section through
-//! [`Effective::apply_privacy_patch`], `update.mode` through [`Effective::apply_update_mode`].
+//! [`Effective::apply_privacy_patch`], `update.mode` through [`Effective::apply_update_mode`];
+//! one agent's launch entry through [`Effective::set_agent_launch`], and one agent's plan
+//! through [`Effective::set_plan`].
 
 #[cfg(test)]
 mod mcp_tests;
 #[cfg(test)]
+mod plans_tests;
+#[cfg(test)]
 mod privacy_tests;
+#[cfg(test)]
+mod set_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
@@ -20,11 +26,12 @@ mod update_tests;
 
 use crate::error::Error;
 use crate::files::Files;
-use crate::leaf;
+use crate::leaf::{self, Leaf};
 use crate::locations::Locations;
+use crate::plans;
 use crate::policy::{PolicyRead, PolicySource, PolicyStatus};
 use crate::privacy::PrivacyPatch;
-use crate::schema::{AgentLaunch, McpServerLaunch, Settings};
+use crate::schema::{AgentLaunch, McpServerLaunch, Plan, Settings};
 use crate::tools::ToolsPatch;
 use crate::ui::UiPatch;
 use crate::update::UpdateChoice;
@@ -32,6 +39,21 @@ use crate::user;
 use crate::warning::{Origin, Warning, WarningKind};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
+
+/// What [`Effective::set_agent_launch`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[must_use]
+pub enum EntryWrite {
+    /// The entry was written to `settings.json` and is in force.
+    Written,
+    /// The entry there is the lawyer's or the firm's own (its program is outside
+    /// `<data_dir>/agents/`), so it was left as it is and nothing was written.
+    LeftAlone,
+}
+
+/// Why [`Effective::set_agent_launch`] refuses a launch that is not Clauseo's own install.
+const NOT_OURS: &str =
+    "Clauseo writes only its own installs: a command or script under <data_dir>/agents/";
 
 /// The settings after the defaults, the user's `settings.json` and the policy layer, in that
 /// order: policy wins. The `ui` and `tools` sections change at runtime only through
@@ -59,10 +81,11 @@ impl Effective {
     /// known key that does not type locks the key at its default (an agent: no entry), or off for
     /// a security key (`leaf::SECURITY_KEYS`), with a warning: fail closed (Rohan, 2026-10-31). A
     /// source that cannot be read also locks each security key off (`mcp.servers` empty, each
-    /// `tools` and `privacy` key `false`, `update.mode` `none`), with a warning, since its value
-    /// is unknown (2026-11-02, R21; 0036; R23). A policy `true` for a `privacy` key is ignored
-    /// with a warning and locks nothing: a policy can only turn those off (0036). A policy may
-    /// set `update.mode` to any value, and it locks.
+    /// `tools` and `privacy` key `false`, `update.mode` `none`, each `install` key unset, no
+    /// plan at all), with a warning, since its value is unknown (2026-11-02, R21; 0036; R23;
+    /// 0048). A plan a stronger source set stands. A policy `true` for a `privacy` key is
+    /// ignored with a warning and locks nothing: a policy can only turn those off (0036). A
+    /// policy may set `update.mode` to any value, and it locks.
     pub fn load(
         locations: &Locations,
         files: &dyn Files,
@@ -96,9 +119,7 @@ impl Effective {
                             warnings.push(policy_on_ignored(source.name(), leaf.key()));
                             continue;
                         }
-                        if locked.insert(leaf.key()) {
-                            leaf.apply_policy(&mut settings);
-                        }
+                        lock_and_apply(leaf, &mut settings, &mut locked);
                     }
                 }
             }
@@ -226,9 +247,110 @@ impl Effective {
         Ok(())
     }
 
+    /// Writes the launch entry `agents.<id>`: saves it to `settings.json` through `files`,
+    /// then sets it in memory. Only Clauseo's own installs are written: `launch` must have an
+    /// absolute `command`, and that command or its first argument (the adapter's script) must
+    /// lie under `<data_dir>/agents/`, or it is refused with [`Error::Refused`].
+    ///
+    /// A policy-locked id is refused with [`Error::Locked`]. An entry already there whose
+    /// command and first argument are both outside `<data_dir>/agents/` (or that does not type)
+    /// is the lawyer's or the firm's own: it is never replaced, and the answer is
+    /// [`EntryWrite::LeftAlone`] with nothing written. A failed write returns the error with
+    /// nothing changed in memory.
+    pub fn set_agent_launch(
+        &mut self,
+        files: &dyn Files,
+        id: &str,
+        launch: &AgentLaunch,
+    ) -> Result<EntryWrite, Error> {
+        let key = format!("agents.{id}");
+        if self.is_locked(&key) {
+            return Err(Error::Locked { key });
+        }
+        let data_dir = self.locations.data_dir();
+        if id.is_empty()
+            || !Path::new(&launch.command).is_absolute()
+            || !plans::launch_is_clauseos(launch, data_dir)
+        {
+            return Err(Error::Refused {
+                key,
+                reason: NOT_OURS,
+            });
+        }
+        if self
+            .settings
+            .agents
+            .get(id)
+            .is_some_and(|held| !plans::launch_is_clauseos(held, data_dir))
+        {
+            return Ok(EntryWrite::LeftAlone);
+        }
+        let entry = serde_json_lenient::to_value(launch).map_err(|error| Error::Io {
+            path: self.locations.settings_file().to_owned(),
+            source: error.into(),
+        })?;
+        let keep = |held: &serde_json::Value| !plans::entry_is_clauseos(held, data_dir);
+        if !user::write_entry(&self.locations, files, ("agents", id), Some(entry), keep)? {
+            return Ok(EntryWrite::LeftAlone);
+        }
+        self.settings.agents.insert(id.to_owned(), launch.clone());
+        Ok(EntryWrite::Written)
+    }
+
+    /// Writes the plan `plans.<id>`, or with `None` (or an empty plan) removes it: saves it to
+    /// `settings.json` through `files`, then sets it in memory. A policy-locked id is refused
+    /// with [`Error::Locked`]; while a policy source cannot be read every plan is locked. An
+    /// endpoint that is not an `https` URL with a host (no user name, password, query or
+    /// fragment), or a variable whose name holds `KEY`, `TOKEN`, `SECRET` or `PASSWORD` in any
+    /// case, is refused with [`Error::Refused`], naming the key and never the value. Nothing is
+    /// written then; a failed write returns the error with nothing changed in memory.
+    pub fn set_plan(
+        &mut self,
+        files: &dyn Files,
+        id: &str,
+        plan: Option<&Plan>,
+    ) -> Result<(), Error> {
+        let key = format!("plans.{id}");
+        if self.is_locked(&key) {
+            return Err(Error::Locked { key });
+        }
+        if id.is_empty() {
+            return Err(Error::Refused {
+                key,
+                reason: "a plan needs an agent id",
+            });
+        }
+        let plan = plan.filter(|plan| **plan != Plan::default());
+        if let Some(plan) = plan {
+            plans::check_plan(id, plan)?;
+        }
+        let entry = plan
+            .map(serde_json_lenient::to_value)
+            .transpose()
+            .map_err(|error| Error::Io {
+                path: self.locations.settings_file().to_owned(),
+                source: error.into(),
+            })?;
+        let _ = user::write_entry(&self.locations, files, ("plans", id), entry, |_| false)?;
+        match plan {
+            Some(plan) => {
+                self.settings.plans.insert(id.to_owned(), plan.clone());
+            }
+            None => {
+                self.settings.plans.remove(id);
+            }
+        }
+        Ok(())
+    }
+
     /// How to launch the agent `id`, if one is set.
     pub fn agent(&self, id: &str) -> Option<&AgentLaunch> {
         self.settings.agents.get(id)
+    }
+
+    /// The agent `id`'s firm plan, if one is set (`plans.<id>`).
+    pub fn plan(&self, id: &str) -> Option<&Plan> {
+        self.settings.plans.get(id)
     }
 
     /// Every MCP server in the settings, on or off, by name. When policy sets `mcp.servers`
@@ -282,13 +404,14 @@ impl Effective {
         self.policy_present
     }
 
-    /// Whether policy set the dotted `key` (such as `matters.default_location`, `mcp.servers`
-    /// or `agents.<id>`), so the user cannot change it.
+    /// Whether policy set the dotted `key` (such as `matters.default_location`, `mcp.servers`,
+    /// `agents.<id>` or `plans.<id>`), so the user cannot change it. A locked key ending in `.`
+    /// locks every key under it: `plans.`, while a policy source cannot be read.
     pub fn is_locked(&self, key: &str) -> bool {
-        self.locked.contains(key)
+        self.locked.contains(key) || under_section_lock(&self.locked, key)
     }
 
-    /// Every locked key, sorted.
+    /// Every locked key, sorted. One ending in `.` (`plans.`) stands for every key under it.
     pub fn locked(&self) -> impl Iterator<Item = &str> {
         self.locked.iter().map(String::as_str)
     }
@@ -325,8 +448,7 @@ fn lock_security_keys(
     warnings: &mut Vec<Warning>,
 ) {
     for key in leaf::SECURITY_KEYS {
-        if locked.insert(key.to_owned()) {
-            leaf::refuse(key, settings);
+        if lock_and_apply(Leaf::Refused(key.to_owned()), settings, locked) {
             warnings.push(Warning {
                 origin: Origin::Store {
                     name: name.to_owned(),
@@ -339,4 +461,31 @@ fn lock_security_keys(
             });
         }
     }
+}
+
+/// Locks `leaf`'s key and applies it as policy, unless a stronger source locked that key, or a
+/// section over it (`plans.`), already. Each plan a stronger source locked stands through a
+/// refusal of the whole section. Returns whether it applied.
+fn lock_and_apply(leaf: Leaf, settings: &mut Settings, locked: &mut BTreeSet<String>) -> bool {
+    let key = leaf.key();
+    if locked.contains(&key) || under_section_lock(locked, &key) {
+        return false;
+    }
+    let kept: Vec<(String, Plan)> = settings
+        .plans
+        .iter()
+        .filter(|(id, _)| locked.contains(&format!("plans.{id}")))
+        .map(|(id, plan)| (id.clone(), plan.clone()))
+        .collect();
+    locked.insert(key);
+    leaf.apply_policy(settings);
+    settings.plans.extend(kept);
+    true
+}
+
+/// Whether a locked section (a key ending in `.`) holds `key`, which is not that section.
+fn under_section_lock(locked: &BTreeSet<String>, key: &str) -> bool {
+    locked
+        .iter()
+        .any(|lock| lock.ends_with('.') && key.len() > lock.len() && key.starts_with(lock.as_str()))
 }

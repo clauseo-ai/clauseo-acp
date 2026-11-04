@@ -289,7 +289,10 @@ fn an_unreadable_policy_source_locks_the_list_empty() {
     assert_eq!(
         effective.locked().collect::<Vec<_>>(),
         [
+            "install.bundle",
+            "install.registry",
             "mcp.servers",
+            "plans.",
             "privacy.counts",
             "privacy.crash_reports",
             "tools.browser",
