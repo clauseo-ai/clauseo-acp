@@ -23,7 +23,7 @@ use super::tap::{StdoutTap, tapped};
 use super::time::parse_rfc3339;
 use crate::model::kind_rank;
 use crate::words::{self, CLAUDE_WINDOWS};
-use crate::{ReadFailure, ReadOutcome, write};
+use crate::{AccountRead, ReadFailure, ReadOutcome, write};
 
 /// The helper's bytes, written into the install folder when the file there differs.
 pub(crate) const HELPER: &str = include_str!("../../helper/claude-usage.mjs");
@@ -241,6 +241,7 @@ fn usage(line: &Map<String, Value>) -> ReadOutcome {
     ReadOutcome::Usage {
         limits,
         reached: None,
+        account_read: AccountRead::Read,
     }
 }
 

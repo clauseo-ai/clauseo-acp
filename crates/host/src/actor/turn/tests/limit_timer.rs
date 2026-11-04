@@ -6,7 +6,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use clauseo_limits::{ReadFailure, ReadLimits, ReadOutcome};
+use clauseo_limits::{AccountRead, ReadFailure, ReadLimits, ReadOutcome};
 use clauseo_protocol::{
     AccountLimits, AccountRef, AgentKind, AtLimitBehaviour, Billing, Finite, HostEvent,
     LimitSource, LimitWindow, LimitsView, PlanLabel, Principal, RefreshWhy, Timestamp,
@@ -171,6 +171,7 @@ fn a_fire_after_the_last_subscriber_left_is_stale() {
     let usage = ReadOutcome::Usage {
         limits: plan(rig.actor.now().wall, later(&rig, RESET)),
         reached: None,
+        account_read: AccountRead::Read,
     };
     reads.answer(0, usage);
     let mut events = Vec::new();

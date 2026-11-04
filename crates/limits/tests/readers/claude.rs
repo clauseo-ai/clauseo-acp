@@ -34,7 +34,10 @@ fn one_line_is_read_and_mapped_after_the_helper_exits() {
     let setup = ready_setup();
     let (outcome, launcher) = read_once(&setup, "claude-ok");
     launcher.wait_stdout_closed();
-    let ReadOutcome::Usage { limits, reached } = outcome else {
+    let ReadOutcome::Usage {
+        limits, reached, ..
+    } = outcome
+    else {
         panic!("not usage: {outcome:?}");
     };
     assert_eq!(reached, None);

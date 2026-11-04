@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use clauseo_host::Subscription;
-use clauseo_limits::{ReadFailure, ReadLimits, ReadOutcome};
+use clauseo_limits::{AccountRead, ReadFailure, ReadLimits, ReadOutcome};
 use clauseo_protocol::{
     AccountLimits, AccountRef, AgentKind, AgentLimitsView, AtLimitBehaviour, Billing,
     CommandOutcome, Finite, Freshness, HostCommand, HostEvent, LimitSource, LimitWindow,
@@ -188,6 +188,7 @@ pub(crate) fn usage(agent: AgentKind, used: f64, resets_at: Option<Timestamp>) -
     ReadOutcome::Usage {
         limits: plan(agent, used, resets_at),
         reached: None,
+        account_read: AccountRead::Read,
     }
 }
 

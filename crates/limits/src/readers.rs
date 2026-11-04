@@ -21,6 +21,7 @@ use clauseo_process::{Launcher, Timer};
 use clauseo_protocol::{AccountLimits, AgentKind, LimitStopReason};
 use clauseo_settings::{AgentLaunch, Effective};
 
+pub(crate) use claude::looks_like_email;
 pub use codex::CODEX_OVERRIDES;
 use paths::{CLAUDE_ID, CODEX_ID};
 #[cfg(feature = "live-tap")]
@@ -39,6 +40,9 @@ pub enum ReadOutcome {
         /// The limit the vendor says the account has reached (Codex's `rateLimitReachedType`
         /// and `spendControlReached`); always `None` for Claude.
         reached: Option<LimitStopReason>,
+        /// Whether the vendor's account answer named `limits.account`, or the reader went
+        /// without it this time.
+        account_read: AccountRead,
     },
     /// The usage method is missing or reshaped (Claude only): the source is unavailable, which
     /// is not an error.
@@ -48,6 +52,18 @@ pub enum ReadOutcome {
     SignedOut,
     /// The read failed.
     Failed(ReadFailure),
+}
+
+/// Whether a good read's account ref came from the vendor's account answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccountRead {
+    /// The account answer came, and the ref is what it said (an email, or the fixed ref when it
+    /// had none).
+    Read,
+    /// The account answer did not come in time or failed, so the ref is the plan ref: the email
+    /// was not read this time, which is not the same as an account with no email. The model
+    /// keeps the last email it held for the same plan (`model/merge.rs`). Codex only.
+    NotRead,
 }
 
 /// Why a read failed.

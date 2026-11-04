@@ -26,7 +26,9 @@ an id becomes a kind.
 `input(Input, now) -> Vec<Action>`, `view(now)`, `next_deadline()`, `next_read_at(agent)` and
 `at_limit(agent, now)`. Four shapes differ from the task brief's sketch. `host` (R16) passes the
 first three through and calls the fourth:
-- `ReadOutcome::Usage { limits, reached: Option<LimitStopReason> }`. `reached` carries Codex's
+- `ReadOutcome::Usage { limits, reached: Option<LimitStopReason>, account_read }`. `account_read`
+  (`AccountRead::Read` or `NotRead`) says whether the vendor's account answer named the ref
+  (amended 2026-11-04, below). `reached` carries Codex's
   `rateLimitReachedType` and `spendControlReached`, which `AccountLimits` has no field for. It is
   model state until the next good read, so a restart forgets it, as it forgets the rejected flag.
   Claude always gives `None`.
@@ -149,8 +151,9 @@ looks like one. Otherwise it is a fixed ref: `api-key`, `bedrock`, `vertex`, or 
 never a key or a token.
 
 **Codex.** The reader runs `node <codex.js> app-server` and talks through `codex_appserver`'s
-client: `initialize` (then `initialized`), `account/read`, and, for a ChatGPT account only,
-`account/rateLimits/read { excludeResetCreditDetails: true }`. Then it drops the client, which
+client: `initialize` (then `initialized`), then `account/read` and
+`account/rateLimits/read { excludeResetCreditDetails: true }` sent together (amended
+2026-11-04, below); the limits count only for a ChatGPT account. Then it drops the client, which
 closes stdin. It runs `codex.js` with `-c` overrides before `app-server`, one per category #160
 turns off: `features.apps=false`, `features.plugins=false`,
 `features.skill_mcp_dependency_install=false` and `cloud.skills.enabled=false` (#203,
@@ -221,6 +224,21 @@ numbers up to 10 minutes old shown as fresh. The model has no turn-start input, 
 turn" means since the agent's last turn end. Codex stays at 60 seconds; `read_now`, the focus,
 "try again" and reset rules, one read in flight per agent, and no read while a question is
 pending are unchanged.
+
+Amended 2026-11-04 (G16, windows-x64): codex 0.162.1's `account/read` runs workspace routing
+discovery for a ChatGPT login, `GET {chatgpt_base_url}/wham/accounts/check` under a hard-coded
+15 s timeout, with no config key, env var or param to turn it off or shorten it, cached only in the
+app-server's memory, so every read pays it. That is upstream behaviour; on G16's Windows VM 2 reads
+in 20 stalled on it. Clauseo works around it: the Codex reader sends `account/read` and
+`account/rateLimits/read` together after `initialize` (the limits never use the routing), and
+once good limits are in, `account/read` gets a 500 ms grace (`ACCOUNT_GRACE`). Late or failed,
+the read is the ChatGPT outcome from the limits alone: the snapshot's plan, the `plan` ref, and
+`AccountRead::NotRead`. When the limits fail (signed out, API key, Bedrock, which skip discovery)
+the reader waits for `account/read` and classifies by it, never by an error's text. The merge
+keeps the last email it held for a `NotRead` read when the identity matches: a plan account then
+and now with the same named plan; otherwise the ref is `plan`. An `account/read` that says
+`email: null` is `Read` and is never filled from before. One app-server per read, and the 10 s
+limit, are unchanged.
 
 ## Date
 

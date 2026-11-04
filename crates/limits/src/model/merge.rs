@@ -8,7 +8,7 @@ use clauseo_protocol::{
 
 use crate::model::{AgentState, LiveSignal, LiveStatus, Row, kind_rank};
 use crate::policy::{Action, kind_rules};
-use crate::readers::{ReadFailure, ReadOutcome};
+use crate::readers::{AccountRead, ReadFailure, ReadOutcome, looks_like_email};
 use crate::words::claude_live_window;
 
 /// Merges the outcome of a read of `state`'s agent, at `now`.
@@ -18,8 +18,16 @@ pub(crate) fn apply_read(
     now: Timestamp,
 ) -> Option<Action> {
     match outcome {
-        ReadOutcome::Usage { limits, reached } => {
+        ReadOutcome::Usage {
+            limits,
+            reached,
+            account_read,
+        } => {
             if limits.agent == state.agent {
+                let limits = match account_read {
+                    AccountRead::Read => limits,
+                    AccountRead::NotRead => keep_email(state, limits),
+                };
                 Some(good_read(state, limits, reached, now))
             } else {
                 tracing::warn!(
@@ -65,6 +73,25 @@ fn signed_out(state: &mut AgentState) -> bool {
         ..AgentState::loading(state.agent)
     };
     !unchanged
+}
+
+/// `limits` from a read that did not read the account (`AccountRead::NotRead`, so the plan ref),
+/// with the account ref `state` holds when that is an email for the same identity: a plan
+/// account then and now, with the same named plan. Otherwise `limits` as they are: nothing was
+/// known, or the kind or the plan changed. An account that really has no email comes with
+/// `AccountRead::Read` and never reaches here.
+pub(crate) fn keep_email(state: &AgentState, limits: AccountLimits) -> AccountLimits {
+    let same = state.billing == Billing::Plan
+        && limits.billing == Billing::Plan
+        && state.plan.is_some()
+        && state.plan == limits.plan;
+    match &state.account {
+        Some(account) if same && looks_like_email(&account.0) => AccountLimits {
+            account: account.clone(),
+            ..limits
+        },
+        _ => limits,
+    }
 }
 
 /// Replaces the account's data with `limits`. Live updates that arrived while the read ran are
