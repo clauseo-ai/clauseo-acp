@@ -107,7 +107,7 @@ UPDATE threads SET seen_seq = (SELECT last_seq FROM streams WHERE stream = 'thre
 ### Schema version 4
 
 `crates/store/src/migrations/0004_thread_title_source.sql`, verbatim (the same test checks this
-copy too); the rule for which title a thread keeps is in the threads paragraph above:
+copy too); the rule for which title a thread keeps is in the threads paragraph below:
 
 ```sql
 -- Schema version 4: who set each thread's title, so the agent's title never replaces the lawyer's.
@@ -229,8 +229,9 @@ since the Unix epoch. Inside `events.envelope`, the envelope's own encoding appl
   with its stream's `last_seq`, so threads from before schema 3 start seen; a value that is no
   `seq` read back is `store.corrupt`.
   Since schema 4 it also holds `title_source`: who set `title`, as the `RenameSource`'s JSON name
-  (`lawyer`, `agent`, `placeholder`), `NULL` with no title and on rows from before schema 4. A
-  name this build does not know reads as `Unknown`. The host decides which title stays, and the
+  (`lawyer`, `agent`, `placeholder`, and `unknown` for a name an older build read), `NULL` with no
+  title and on rows from before schema 4. A name this build does not know reads as `Unknown` and is
+  written back as `unknown`, so a downgrade keeps the title but not its newer source name. The host decides which title stays, and the
   rule is this one: a title the lawyer typed always wins; the agent's own title
   (`session_info_update`) replaces only the first-words placeholder (`placeholder`) or an earlier
   agent title; a placeholder fills in only a thread with no title. The host checks it in one
