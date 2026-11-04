@@ -228,7 +228,7 @@ wire_types! {
     },
     query::{
         AgentSummary, BlobRange, DefaultLocation, FolderState, HostQuery, MatterSummary, PageLimit, PaperSummary,
-        QueryResult, ReadLen, RestorePreview, ThreadSummary,
+        QueryResult, ReadLen, RestorePreview, ThreadSummary, UndoPreview,
     },
     raw::{RawPayload},
     search::{

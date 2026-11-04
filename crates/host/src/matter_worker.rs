@@ -154,6 +154,12 @@ pub(crate) enum MatterJob {
     },
     /// `Matter::papers`: the folder as it is now, its first `limit` files.
     ListPapers { limit: usize },
+    /// `Matter::edited_since`: the files of the step from `before` to `after` whose content
+    /// now differs from `after`; writes nothing.
+    EditedSince {
+        before: CheckpointId,
+        after: CheckpointId,
+    },
 }
 
 /// How an import ended.
@@ -189,6 +195,7 @@ pub(crate) enum MatterReply {
     /// The first path held open, with what shows it.
     HeldOpen(Option<(MatterPath, HeldOpen)>),
     Papers(Result<PaperList, Error>),
+    EditedSince(Result<Vec<MatterPath>, Error>),
 }
 
 /// A turn's checkpoint, and for an id R8 reused what the host needs to record it when its log
@@ -407,6 +414,9 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
         MatterJob::ListPapers { limit } => {
             MatterReply::Papers(open(settings, slot).and_then(|matter| Ok(matter.papers(limit)?)))
         }
+        MatterJob::EditedSince { before, after } => MatterReply::EditedSince(
+            open(settings, slot).and_then(|matter| Ok(matter.edited_since(before, after)?)),
+        ),
     }
 }
 

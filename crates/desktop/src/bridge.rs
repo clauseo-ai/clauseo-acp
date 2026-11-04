@@ -210,6 +210,8 @@ impl Bridge {
             | HostQuery::PageEntries { .. }
             | HostQuery::CompareVersions { .. }
             | HostQuery::PreviewRestore { .. }
+            // Undo's "changed after Clauseo's edit" ask (#360): reads the folder, writes nothing.
+            | HostQuery::PreviewUndo { .. }
             | HostQuery::ReadBlob { .. }
             | HostQuery::GetSettings
             | HostQuery::ListAgents

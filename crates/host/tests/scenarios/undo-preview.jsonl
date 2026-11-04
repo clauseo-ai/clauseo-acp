@@ -1,0 +1,12 @@
+{"scenario":"undo-preview","description":"One turn writes notes.txt through a shell command (an execute tool call that names no path, as Codex's exec does) and memo.txt through an edit tool call with a diff; PreviewUndo then compares both with the after-turn checkpoint","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1"}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"write_file":{"path":"notes.txt","content":"hello\n"}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t1-exec","title":"Run printf 'hello\\n' > notes.txt","kind":"execute","status":"completed","rawInput":{"command":["bash","-lc","printf 'hello\\n' > notes.txt"]}}}}
+{"write_file":{"path":"memo.txt","content":"Memo\n"}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t1-write-memo","title":"Write memo.txt","name":"Write","kind":"edit","status":"completed","content":[{"type":"diff","path":"{{cwd}}/memo.txt","newText":"Memo\n"}],"locations":[{"path":"{{cwd}}/memo.txt"}]}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Wrote notes.txt and memo.txt."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

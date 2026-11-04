@@ -177,6 +177,9 @@ mod triage_wake;
 #[path = "host/turn.rs"]
 mod turn;
 #[cfg(test)]
+#[path = "host/undo_preview.rs"]
+mod undo_preview;
+#[cfg(test)]
 #[path = "host/versions.rs"]
 mod versions;
 #[cfg(test)]

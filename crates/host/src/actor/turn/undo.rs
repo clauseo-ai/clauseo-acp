@@ -90,14 +90,15 @@ pub(super) fn undo_step(
 }
 
 /// The step as the log has it.
-struct Step {
-    before: CheckpointId,
-    after: CheckpointId,
+pub(super) struct Step {
+    pub(super) before: CheckpointId,
+    pub(super) after: CheckpointId,
     paths: Vec<MatterPath>,
 }
 
 /// The step of `turn`: started, ended with a checkpoint, not undone; else `command.invalid`.
-fn step_of(log: &[Envelope], turn: TurnId) -> Result<Step, Error> {
+/// `PreviewUndo` reads it too (`undo_preview.rs`).
+pub(super) fn step_of(log: &[Envelope], turn: TurnId) -> Result<Step, Error> {
     let (mut before, mut after, mut undone) = (None, None, false);
     let mut paths = Vec::new();
     for envelope in log {

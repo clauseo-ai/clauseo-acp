@@ -57,6 +57,7 @@ fn matters(host: &HostHandle) -> Vec<(MatterId, MatterKind)> {
         | QueryResult::Entries(_)
         | QueryResult::FileChanges(_)
         | QueryResult::RestorePreview(_)
+        | QueryResult::UndoPreview(_)
         | QueryResult::Blob(_)
         | QueryResult::Settings(_)
         | QueryResult::Papers { .. }

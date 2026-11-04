@@ -2,7 +2,7 @@
 //! public limits. How a prompt's delivery is read is in `commands/delivery.rs`, typed fields and
 //! name rules in `commands/names.rs`, file lists in `commands/files.rs`, the display settings'
 //! wire form in `commands/settings.rs`, `list_agents` in `commands/agents.rs`, `refresh_limits` in
-//! `commands/limits.rs`.
+//! `commands/limits.rs`, `preview_undo` in `commands/undo_preview.rs`.
 
 #![forbid(clippy::disallowed_methods, clippy::disallowed_types)]
 
@@ -41,6 +41,10 @@ mod limits;
 #[cfg(test)]
 #[path = "commands/matters.rs"]
 mod matters;
+
+#[cfg(test)]
+#[path = "commands/undo_preview.rs"]
+mod undo_preview;
 
 use std::str::FromStr;
 

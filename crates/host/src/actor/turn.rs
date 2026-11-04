@@ -31,6 +31,7 @@ mod state;
 mod steps;
 mod text;
 mod undo;
+mod undo_preview;
 mod updates;
 mod writer;
 
@@ -61,6 +62,7 @@ pub(crate) use restore::{
     RestoreAsk, committed as restore_committed, on_restored, restore_version,
 };
 pub(crate) use route::{TurnCommand, command};
+pub(crate) use undo_preview::preview_undo;
 pub(crate) use writer::{
     hold_for_relocate, matter_busy, release_relocate, stop_agents, writer_busy,
 };
@@ -322,6 +324,9 @@ pub(crate) fn turn_input(actor: &mut Actor, input: TurnInput) {
             LogFor::Replay => session::on_replay_log(actor, thread, result),
             LogFor::Reconcile => reconcile::on_log(actor, thread, result),
             LogFor::Undo(ask) => undo::on_log(actor, thread, *ask, result),
+            LogFor::PreviewUndo { turn, reply } => {
+                undo_preview::on_log(actor, thread, turn, reply, result);
+            }
         },
     }
 }

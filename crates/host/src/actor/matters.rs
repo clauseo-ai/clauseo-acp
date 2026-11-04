@@ -16,8 +16,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use clauseo_matters::{CommitId, DEFAULT_MARKER, NewMatter, Refusal};
 use clauseo_protocol::{
     CheckpointKind, CheckpointRecorded, ClientName, CommandOutcome, Date, DomainEvent, ErrorCode,
-    HostError, ImportSummary, MatterCreated, MatterId, MatterKind, MatterSource, QueryResult,
-    RestorePreview, StreamId, Title,
+    HostError, ImportSummary, MatterCreated, MatterId, MatterKind, MatterSource, StreamId, Title,
 };
 use clauseo_store::MatterRow;
 
@@ -430,31 +429,7 @@ pub(super) fn on_matter_reply(
             }
         }
         MatterTag::Query(answer) => {
-            let result = match reply {
-                MatterReply::Compared(result) => result.map(QueryResult::FileChanges),
-                MatterReply::Previewed(result) => result.map(|plan| {
-                    let plan = *plan;
-                    QueryResult::RestorePreview(RestorePreview {
-                        changes: plan.writes,
-                        added_since: plan.added_since,
-                        kept: plan.kept,
-                        locked: plan.locked,
-                    })
-                }),
-                other @ (MatterReply::Created(_)
-                | MatterReply::Imported(_)
-                | MatterReply::Opened(_)
-                | MatterReply::BeforeTurn(_)
-                | MatterReply::AfterTurn(_)
-                | MatterReply::Undone(_)
-                | MatterReply::Restored(_)
-                | MatterReply::Located(_)
-                | MatterReply::HeldOpen(_)
-                | MatterReply::Papers(_)) => Err(Error::Internal(format!(
-                    "a query answered with another job's reply: {other:?}"
-                ))),
-            };
-            let _gone = answer.send(result);
+            let _gone = answer.send(super::query::matter_answer(reply));
         }
         MatterTag::Papers(answer) => super::papers::answer(actor, matter, reply, answer),
     }
@@ -591,6 +566,7 @@ fn made(reply: MatterReply) -> Result<(CommitId, Option<ImportSummary>), Error> 
         | MatterReply::Restored(_)
         | MatterReply::Compared(_)
         | MatterReply::Previewed(_)
+        | MatterReply::EditedSince(_)
         | MatterReply::HeldOpen(_)
         | MatterReply::Papers(_) => Err(Error::Internal(
             "a matter's create got another job's reply".to_owned(),

@@ -2,9 +2,10 @@
 //! reads.
 
 use clauseo_acp::{AgentInfo, PromptEnd, SessionStart};
-use clauseo_protocol::{AgentChoiceId, ConfigOption, Envelope, ThreadId, TurnId};
+use clauseo_protocol::{AgentChoiceId, ConfigOption, Envelope, QueryResult, ThreadId, TurnId};
 
 use super::super::commands::CommandCtx;
+use super::super::input::Reply;
 use super::undo;
 
 /// A result the turn path's own tasks post back: agent calls and store reads.
@@ -76,4 +77,9 @@ pub(crate) enum LogFor {
     Replay,
     Reconcile,
     Undo(Box<undo::UndoAsk>),
+    /// A `PreviewUndo` query of `turn`'s step, answered on `reply`.
+    PreviewUndo {
+        turn: TurnId,
+        reply: Reply<QueryResult>,
+    },
 }
