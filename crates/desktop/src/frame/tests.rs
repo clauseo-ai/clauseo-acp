@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use clauseo_protocol::{
     AccountLimits, AccountRef, AgentKind, AgentTextEntry, AppendTarget, AtLimitBehaviour, Billing,
     Cursor, ErrorCode, HostError, HostEvent, LimitSource, MessageId, PatchBatch, Seq, StreamId,
@@ -203,6 +205,7 @@ fn no_host_event_kind_takes_a_reserved_key() {
                 counts_started: false,
             },
             locked: Vec::new(),
+            plans: BTreeMap::new(),
         }),
         HostEvent::MattersChanged(clauseo_protocol::MattersChanged {
             matters: Vec::new(),

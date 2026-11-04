@@ -83,6 +83,18 @@ fn assert_exported(types: &Types, ts: &str) {
         "Finite",
         "LimitsView",
         "ViewEntry",
+        "SetupCommand",
+        "SetupEvent",
+        "Secret",
+        "InstallProgress",
+        "InstallLog",
+        "SignIn",
+        "FoundLogin",
+        "LoginFrom",
+        "SignInMethod",
+        "SignInSource",
+        "PlanView",
+        "PlanProvider",
     ] {
         assert!(ours.contains(name), "wire_types() lacks {name}");
     }
@@ -256,6 +268,11 @@ fn exports_every_wire_type() {
     assert_snake_case(&ts);
     assert_optional(&ts);
     assert_scalars(&ts);
+    // A secret is a plain string to the webview, and the setup command carries it as one.
+    assert_block(&ts, "Secret", |b| {
+        b.starts_with("export type Secret = string;")
+    });
+    assert_block(&ts, "SetupCommand", |b| b.contains("key: Secret"));
 }
 
 /// `known_kinds_typescript()` lists `DomainEvent::KINDS` in order, and its names are the keys of

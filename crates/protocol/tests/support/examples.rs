@@ -181,6 +181,34 @@ pub fn later_variants() -> Vec<DomainEvent> {
         }
         .into(),
     ]
+    .into_iter()
+    .chain(setup_codes().map(|code| {
+        TurnFailed {
+            turn: turn_id(3),
+            code,
+            detail: Some("an install or sign-in stopped".to_owned()),
+        }
+        .into()
+    }))
+    .collect()
+}
+
+/// The install and sign-in codes of decision record 0048, each in a `TurnFailed` of
+/// [`later_variants`].
+fn setup_codes() -> [ErrorCode; 11] {
+    [
+        ErrorCode::AgentInstallOffline,
+        ErrorCode::AgentInstallBlocked,
+        ErrorCode::AgentInstallDiskFull,
+        ErrorCode::AgentInstallFailed,
+        ErrorCode::SigninCancelled,
+        ErrorCode::SigninLinkExpired,
+        ErrorCode::SigninNoPlan,
+        ErrorCode::SigninDeviceCodeOff,
+        ErrorCode::SigninPortBusy,
+        ErrorCode::SigninFailed,
+        ErrorCode::SigninPolicyUnreadable,
+    ]
 }
 
 /// One example of every known event kind, in `DomainEvent::KINDS` order.

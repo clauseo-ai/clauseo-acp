@@ -3,7 +3,7 @@
 //! to no stream, starting with the settings as they are.
 //! The mirror test holds the wire types to `clauseo-settings`, key for key and value for value.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use clauseo_host::{AppSubscription, EncodedEvent};
 use clauseo_protocol::{
@@ -102,6 +102,7 @@ fn get_settings_gives_the_defaults_and_no_locked_key() {
             tools: tool_defaults(),
             privacy: privacy_defaults(),
             locked: Vec::new(),
+            plans: BTreeMap::new(),
         }
     );
     host.shutdown();
@@ -168,6 +169,7 @@ fn a_patch_reaches_every_app_subscriber_and_no_stream() {
         tools: tool_defaults(),
         privacy: privacy_defaults(),
         locked: Vec::new(),
+        plans: BTreeMap::new(),
     };
     assert_eq!(settings(&host), expected);
     host.settle();
@@ -280,6 +282,7 @@ fn a_tool_patch_reaches_every_app_subscriber_the_file_and_a_restart() {
         },
         privacy: privacy_defaults(),
         locked: Vec::new(),
+        plans: BTreeMap::new(),
     };
     assert_eq!(settings(&host), expected);
     host.settle();

@@ -15,6 +15,8 @@ mod tools;
 pub(in crate::actor) use privacy::{first_act, set_privacy_settings};
 pub(super) use tools::set_tool_settings;
 
+use std::collections::BTreeMap;
+
 use clauseo_protocol::{
     CommandOutcome, ErrorCode, HostEvent, Language, Lite, Motion, SettingsView, Theme, UiPatch,
     UiSettings,
@@ -43,6 +45,8 @@ pub(crate) fn view(actor: &Actor) -> SettingsView {
         tools: tools::view(effective),
         privacy: privacy::view(actor),
         locked: effective.locked().map(str::to_owned).collect(),
+        // The firm plans come with R20's `plans` settings section (decision record 0048).
+        plans: BTreeMap::new(),
     }
 }
 

@@ -156,6 +156,31 @@ error_codes! {
         than the transport accepts.";
     SettingsLocked = "settings.locked", retryable: false, meaning: "The change names a setting \
         that the firm's policy sets, so the lawyer cannot change it; nothing was changed.";
+    AgentInstallOffline = "agent.install_offline", retryable: true, meaning: "The agent's install \
+        cannot reach its hosts: name resolution or connect failed with no route. The install \
+        waits and tries again by itself.";
+    AgentInstallBlocked = "agent.install_blocked", retryable: false, meaning: "A proxy or \
+        firewall blocked the agent's download: a 403 or 407 from a proxy, a TLS failure, or a web \
+        page where a file should be.";
+    AgentInstallDiskFull = "agent.install_disk_full", retryable: false, meaning: "Too little free \
+        space for the agent's install; space must be freed first.";
+    AgentInstallFailed = "agent.install_failed", retryable: true, meaning: "The agent's install \
+        failed for another reason, after three tries.";
+    SigninCancelled = "signin.cancelled", retryable: false, meaning: "The lawyer cancelled the \
+        sign-in, in Clauseo or on the vendor's page.";
+    SigninLinkExpired = "signin.link_expired", retryable: true, meaning: "The sign-in link or \
+        device code expired before the sign-in finished; a new sign-in gets a new one.";
+    SigninNoPlan = "signin.no_plan", retryable: false, meaning: "The account has no plan the \
+        agent accepts.";
+    SigninDeviceCodeOff = "signin.device_code_off", retryable: false, meaning: "Device-code \
+        sign-in is turned off for the account.";
+    SigninPortBusy = "signin.port_busy", retryable: true, meaning: "Another program holds the \
+        port the agent's sign-in listens on (Codex's 1455).";
+    SigninFailed = "signin.failed", retryable: true, meaning: "The sign-in ended before signing \
+        in, for any other reason.";
+    SigninPolicyUnreadable = "signin.policy_unreadable", retryable: false, meaning: "The firm's \
+        policy cannot be read and once set this agent's firm plan, so sign-in and launch are \
+        refused rather than sent to a plan login.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }
