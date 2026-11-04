@@ -1359,6 +1359,22 @@
     "at": "2026-11-02",
     "by": "design"
   },
+  "U9-06": {
+    "en": "Close {files} in Word to undo the change.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U9-07": {
+    "en": "Close {files} in Word to restore it.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
   "ME-01": {
     "en": "This folder is already a matter: {name}.",
     "hi": null,

@@ -20,7 +20,13 @@ import { useNow } from "../../store/limits.ts";
 import { toHostError } from "../../transport/host-transport.ts";
 import { StoppedMark } from "../stopped-mark.tsx";
 import { takesMark } from "../thread-break.ts";
-import type { EntryId, LimitStopEntry, StepEntry, Timestamp } from "../../transport/protocol.ts";
+import type {
+  EntryId,
+  HostError,
+  LimitStopEntry,
+  StepEntry,
+  Timestamp,
+} from "../../transport/protocol.ts";
 import { useAgentPlan } from "./agent-plan.ts";
 import { isoOf, whenOf } from "./clock.ts";
 import { planNameOf, stopTimeOf } from "./limit-words.ts";
@@ -29,7 +35,7 @@ import { useBusy } from "./live.ts";
 import { SentNowLine } from "./steer-rows.tsx";
 import { useThreadActions } from "./session.ts";
 import { resetPassed, stopLine } from "./stops.ts";
-import { wordLock } from "../word/lock.ts";
+import { lockedFiles, wordLocks } from "../word/lock.ts";
 import { useWordOpen, type WordOpener } from "../word/open-in-word.ts";
 
 /** The lock's lines, from Versions' chunk, which holds their words: loaded on the first lock. */
@@ -52,7 +58,8 @@ function Changed({ entry }: { entry: StepEntry }) {
   const { undo, previewUndo, sentTurn, stream } = useThreadActions();
   const busy = useBusy(stream, sentTurn);
   const plan = useAgentPlan();
-  const [refused, setRefused] = useState<string | null>(null);
+  // the refusal as the host sent it: its code, and the files it names as held
+  const [refused, setRefused] = useState<HostError | null>(null);
   // one undo at a time: Undo waits while the host answers the first
   const [pending, setPending] = useState(false);
   const { openerFor } = useWordOpen();
@@ -62,7 +69,7 @@ function Changed({ entry }: { entry: StepEntry }) {
   const papers = entry.files.map((f) => f.path);
   const undoable = entry.checkpoint_after !== undefined;
   // a program holds a file: the lock's lines stand under the note, and Try again takes Undo's place
-  const locked = refused === LOCKED && !entry.undone;
+  const locked = refused?.code === LOCKED && !entry.undone;
   // the one Word document the note names that the wall lists, while the changes stand
   const openers = entry.undone
     ? []
@@ -85,7 +92,7 @@ function Changed({ entry }: { entry: StepEntry }) {
     undo(entry)
       .then(
         () => setRefused(null),
-        (e: unknown) => setRefused(toHostError(e).code),
+        (e: unknown) => setRefused(toHostError(e)),
       )
       .finally(() => setPending(false));
   };
@@ -121,7 +128,7 @@ function Changed({ entry }: { entry: StepEntry }) {
       note.querySelector<HTMLElement>(".change-note");
     back?.focus();
   }, [locked]);
-  const undoRefusal = refused === null || locked ? null : refused;
+  const undoRefusal = refused === null || locked ? null : refused.code;
   const shown = undoRefusal ?? openFailed;
   return (
     <div data-testid="files-changed" ref={box}>
@@ -138,7 +145,7 @@ function Changed({ entry }: { entry: StepEntry }) {
       {locked && (
         <Suspense fallback={null}>
           <WordLock
-            file={wordLock(LOCKED, papers)}
+            files={wordLocks(LOCKED, lockedFiles(refused ?? { code: LOCKED }, papers))}
             code={LOCKED}
             pending={busy || pending}
             onRetry={send}

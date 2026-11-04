@@ -62,7 +62,7 @@ const versionOf = (s: Snapshot, id: string): Version | undefined =>
 /** The dialog's words for what the controller asks. */
 export function askOf(lang: Lang, cal: Calendar, s: Snapshot, ask: Ask | null): RestoreAsk | null {
   if (ask === null) return null;
-  if (ask.stage === "word") return { kind: "word", act: ask.act, file: fileName(ask.file) };
+  if (ask.stage === "word") return { kind: "word", act: ask.act, files: ask.files.map(fileName) };
   const v = versionOf(s, ask.id);
   if (v === undefined) return null;
   // a refusal that named no file: the dialog stays as it was, says why, and offers Try again

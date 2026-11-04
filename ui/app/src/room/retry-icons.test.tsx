@@ -35,7 +35,7 @@ test.each([
     "Try again",
     <WordLock
       key="word"
-      file="papers/Reply.docx"
+      files={["papers/Reply.docx"]}
       code="matter.file_locked"
       pending={false}
       onRetry={() => {}}

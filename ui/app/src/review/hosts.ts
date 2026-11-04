@@ -74,6 +74,8 @@ export type ThreadState = {
   commands?: AvailableCommand[];
   /** undo_step is refused with this code: a Word document held open is matter.file_locked (U9). */
   undoRefused?: ErrorCode;
+  /** With undoRefused matter.file_locked, the files the host names as held (its `files`, U9). */
+  undoLocked?: string[];
   /** H8's papers, as list_papers lists them: the wall's tiles, and a change note's Open in Word (U9). */
   papers?: PaperSummary[];
   /** How list_papers answers, for the `@` menu's states (with `papers`, or alone, the papers it lists): never (pending),
@@ -134,7 +136,9 @@ export function threadHost(state: ThreadState): FakeTransport {
         return { prompt_accepted: { turn: TURN, message: THREAD } };
       }
       if (command.undo_step !== undefined && state.undoRefused !== undefined)
-        throw refusal(state.undoRefused);
+        throw state.undoLocked === undefined
+          ? refusal(state.undoRefused)
+          : { ...refusal(state.undoRefused), files: state.undoLocked };
       return "done";
     },
     subscribe: (stream) =>

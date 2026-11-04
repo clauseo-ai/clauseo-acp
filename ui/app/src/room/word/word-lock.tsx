@@ -6,21 +6,21 @@ import { IconTryAgain } from "@clauseo/components/icons/icons.tsx";
 import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
-import { vt } from "@clauseo/components/lib/words-versions.ts";
+import { vt, wordFiles } from "@clauseo/components/lib/words-versions.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
 import { useEffect, useRef } from "react";
 import { fileName } from "../versions/timeline.ts";
 
 export function WordLock({
-  file,
+  files,
   code,
   pending,
   onRetry,
   focusOnMount = false,
   testIds,
 }: {
-  /** The matter-relative path of the Word document held, or null when the room can't say which file it is. */
-  file: string | null;
+  /** The matter-relative paths of the Word documents held, or null when the room can't say which files they are. */
+  files: readonly string[] | null;
   /** The refusal's code, for the error map's line when no file is named. */
   code: string;
   /** Try again waits, faint but focusable, while its undo is on its way. */
@@ -48,7 +48,7 @@ export function WordLock({
       data-testid={testIds?.block}
       className="mt-(--s2) flex max-w-measure min-w-0 flex-col items-start gap-(--s1) wrap-break-word"
     >
-      {file === null ? (
+      {files === null ? (
         <p className="text-small text-primary">
           <Say>{errorWords(lang, code)}</Say>
         </p>
@@ -56,7 +56,13 @@ export function WordLock({
         <>
           <p className="text-small text-primary">
             <Say>
-              {vt(lang, "Close '{file}' in Word to undo the change.", { file: fileName(file) })}
+              {files.length === 1
+                ? vt(lang, "Close '{file}' in Word to undo the change.", {
+                    file: fileName(files[0] ?? ""),
+                  })
+                : vt(lang, "Close {files} in Word to undo the change.", {
+                    files: wordFiles(lang, files.map(fileName)),
+                  })}
             </Say>
           </p>
           <p className="text-small text-quiet">

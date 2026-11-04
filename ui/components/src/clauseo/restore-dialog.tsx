@@ -40,7 +40,7 @@ export type RestoreAsk =
       /** Optional: why the act just failed, when no file can be named: said in the dialog, which offers Try again. */
       failed?: string | null;
     }
-  | { kind: "word"; act?: RestoreAct; file: string };
+  | { kind: "word"; act?: RestoreAct; files: readonly string[] };
 
 export function RestoreDialog({
   ask,
@@ -84,12 +84,19 @@ export function RestoreDialog({
             <>
               <Base.Title className={dialogTitle}>
                 <Say>
-                  {w.v(
-                    ask.act === "undo"
-                      ? "Close '{file}' in Word to undo the change."
-                      : "Close '{file}' in Word to restore it.",
-                    { file: ask.file },
-                  )}
+                  {ask.files.length === 1
+                    ? w.v(
+                        ask.act === "undo"
+                          ? "Close '{file}' in Word to undo the change."
+                          : "Close '{file}' in Word to restore it.",
+                        { file: ask.files[0] ?? "" },
+                      )
+                    : w.v(
+                        ask.act === "undo"
+                          ? "Close {files} in Word to undo the change."
+                          : "Close {files} in Word to restore it.",
+                        { files: w.files(ask.files) },
+                      )}
                 </Say>
               </Base.Title>
               <Base.Description className={dialogBody}>

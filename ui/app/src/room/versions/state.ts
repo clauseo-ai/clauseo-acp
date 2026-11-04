@@ -24,7 +24,7 @@ type RestoreAsk = { act: "restore"; id: string; preview: RestorePreview; undoes:
 /** What the restore dialog asks: to go ahead (failed: the code of a refusal that named no file, with Try again), or,
  * where a program holds a file, to close it and try again. */
 export type Ask = (UndoAsk | RestoreAsk) &
-  ({ stage: "confirm"; failed: string | null } | { stage: "word"; file: string });
+  ({ stage: "confirm"; failed: string | null } | { stage: "word"; files: readonly string[] });
 
 /** What an act wrote: the version it made, or nothing (a bare done). */
 export type Outcome = { kind: "wrote"; checkpoint: string } | { kind: "nothing" };

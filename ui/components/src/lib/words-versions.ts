@@ -98,6 +98,9 @@ const HI = {
     "{papers} पुनर्स्थापित नहीं हो सकते और जैसे हैं वैसे ही रहेंगे।",
   "Close '{file}' in Word to restore it.": "पुनर्स्थापित करने के लिए Word में '{file}' बंद करें।",
   "Close '{file}' in Word to undo the change.": "बदलाव पूर्ववत करने के लिए Word में '{file}' बंद करें।",
+  // two or more Word documents, named in one line (hi: later)
+  "Close {files} in Word to undo the change.": null,
+  "Close {files} in Word to restore it.": null,
   "Word holds the file while it is open. Nothing has changed yet.":
     "खुली रहने तक फ़ाइल Word के पास रहती है। अभी कुछ नहीं बदला है।",
   "Try again": "फिर से प्रयास करें",
@@ -294,6 +297,11 @@ export function listOf(lang: Lang, items: readonly string[]): string {
   return vt(lang, "{a} and {b}", { a: head, b: items[items.length - 1] ?? "" });
 }
 
+/** Word's file names, each in single quotes, joined as the language joins a list: 'Lease.docx' and 'Notice.docx'. */
+export function wordFiles(lang: Lang, names: readonly string[]): string {
+  return new Intl.ListFormat(lang, { type: "conjunction" }).format(names.map((n) => `'${n}'`));
+}
+
 /** Versions' words of the page's language, bound, with the room's and the shared interface words beside them. */
 export function useVersionWords() {
   const { lang } = useDisplay();
@@ -304,6 +312,7 @@ export function useVersionWords() {
     ui: (key: UiKey, slots?: Slots) => ui(lang, key, slots),
     clock: (time: string) => clock(lang, time),
     list: (items: readonly string[]) => listOf(lang, items),
+    files: (names: readonly string[]) => wordFiles(lang, names),
   };
 }
 
