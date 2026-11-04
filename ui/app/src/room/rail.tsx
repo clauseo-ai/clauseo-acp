@@ -24,7 +24,7 @@ import { isolate } from "@clauseo/components/lib/bidi.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import type { MatterId } from "../transport/protocol.ts";
 import type { AllThreads } from "./all-threads.ts";
-import type { MatterInfo } from "./host-next.ts";
+import type { MatterInfo, MatterStatus } from "./host-next.ts";
 import { openConversation } from "./open-conversation.ts";
 import { railView, recentDays } from "./rail-lists.ts";
 import { RailTriage } from "./rail-triage.ts";
@@ -60,11 +60,13 @@ function conversationRows(
   now: number,
   zone: string,
   lang: Lang,
+  /** The matter's own status (H5): whether a conversation waiting on the lawyer asks a permission or a question. */
+  matter?: MatterStatus,
 ): ConversationRowProps[] {
   const untitled = mt(lang, "New conversation");
   const titleOf = (row: ConversationRow | undefined) => row?.title ?? untitled;
   return talks.rows.map((row) => {
-    const words = rowWords(row);
+    const words = rowWords(row, matter);
     const stopped = words.state === "stopped" ? clockOf(words.at, now, zone, lang) : null;
     const state = stopped !== null && stopped.day !== "" ? "idle" : words.state;
     // a failure keeps its mark on another day: its words, under the pointer, say the day
@@ -193,6 +195,7 @@ export function RoomRail({
               now,
               zone,
               w.lang,
+              m.status,
             ),
             onNewConversation: () => {
               // the button stays as it is rather than greying: Versions' dialog is modal and stands while its act

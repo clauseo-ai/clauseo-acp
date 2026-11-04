@@ -35,6 +35,7 @@ export const MATTER_MARK: Record<Exclude<MatterState, "idle">, Mark> = {
 /** Each conversation status's mark, the same shapes as the matters'. */
 export const CONVERSATION_MARK: Record<Exclude<ConversationState, "idle">, Mark> = {
   question: { icon: IconQuestion, waits: true },
+  permission: { icon: IconNeedsPermission, waits: true },
   ready: { icon: IconAnswerReady, waits: false },
   working: { icon: IconChecking, waits: false },
   stopped: { icon: IconStop, waits: false },

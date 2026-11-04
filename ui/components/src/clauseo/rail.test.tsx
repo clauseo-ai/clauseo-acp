@@ -557,7 +557,7 @@ describe("Settings at the rail's foot", () => {
   });
 });
 
-test("a conversation's status ends its line as the matters' icon, on a yellow disc only for a question", async () => {
+test("a conversation's status ends its line as the matters' icon, on a yellow disc only for a question or a permission", async () => {
   await mount(
     <Rail
       open
@@ -574,6 +574,7 @@ test("a conversation's status ends its line as the matters' icon, on a yellow di
                 { id: "c", title: "Limitation", agent: "Claude", state: "ready" },
                 { id: "d", title: "Annexures", agent: "Claude", state: "stopped", at: "4:31 pm" },
                 { id: "e", title: "Dates", agent: "Claude", state: "waiting", behind: "Plaint" },
+                { id: "f", title: "Inspection", agent: "Claude", state: "permission" },
               ],
             },
           ],
@@ -588,6 +589,7 @@ test("a conversation's status ends its line as the matters' icon, on a yellow di
     ["c", IconAnswerReady, false],
     ["d", IconStop, false],
     ["e", IconChecking, false],
+    ["f", IconNeedsPermission, true],
   ] as const;
   for (const [id, Icon, waits] of cases) {
     const mark = conv(id)?.querySelector(".room-mark");
@@ -597,4 +599,7 @@ test("a conversation's status ends its line as the matters' icon, on a yellow di
   }
   // the words still reach assistive technology
   expect(txt(conv("d"))).toContain("Stopped at 4:31 pm");
+  // a permission's words, as every state's but a question's, only in the tooltip and the accessible name
+  expect(conv("f")?.querySelector(".room-conv-ask")).toBeNull();
+  expect(txt(conv("f"))).toContain("Needs your permission");
 });
