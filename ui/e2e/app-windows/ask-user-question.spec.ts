@@ -13,7 +13,7 @@ import { window } from "./selectors.ts";
 
 test.describe("ask-user-question", () => {
   test.describe("answered", () => {
-    test.use({ scenario: "ask-user-question" });
+    test.use({ scenario: "claude-ask-user-question" });
 
     test("the form takes an option, a box and an Other, and Send ends the turn", async ({
       app,
@@ -46,7 +46,7 @@ test.describe("ask-user-question", () => {
   });
 
   test.describe("stopped", () => {
-    test.use({ scenario: "ask-user-question-stop" });
+    test.use({ scenario: "claude-ask-user-question-stop" });
 
     test("Stop the answer ends a turn waiting on the form as cancelled", async ({ app }) => {
       const w = window(app.page);

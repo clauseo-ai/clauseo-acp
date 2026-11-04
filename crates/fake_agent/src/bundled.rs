@@ -32,6 +32,8 @@ bundled! {
         "auth-required-titled",
         "cancel-late-updates",
         "cancel-unanswered",
+        "claude-ask-user-question",
+        "claude-ask-user-question-stop",
         "claude-cancel-unanswered",
         "claude-elicitation-form",
         "claude-exit-mid-turn",
