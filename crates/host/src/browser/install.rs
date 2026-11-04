@@ -43,7 +43,7 @@ pub use system::SystemTools;
 /// The version list the download starts from, the source agent-browser's own `install` uses.
 pub const VERSIONS_URL: &str = "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json";
 
-/// The free space the download needs in the app data folder: the zip (about 150 MB) and what it
+/// The free space the download needs in the app data folder: the zip (about 200 MB) and what it
 /// unpacks to (about 400 MB), side by side, with room to spare.
 pub const MIN_FREE_BYTES: u64 = 1_000_000_000;
 
