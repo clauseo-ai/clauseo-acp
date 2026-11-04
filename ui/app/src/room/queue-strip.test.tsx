@@ -245,11 +245,12 @@ test("a refused Remove forgets the press: the row going later moves no focus", a
 });
 
 test("held after a Stop on another day: the head puts the day before the time", async () => {
+  fixNow();
   await mount();
-  const ts = Date.now() - 3 * 86_400_000;
+  const ts = NOW.getTime() - 3 * 86_400_000;
   h!.deliver([reset([step(2, { stop: "cancelled", ts }), queued(5, 2, "A.")], held())]);
   await h!.settle();
-  const when = stamp("en", ts, Date.now());
+  const when = stamp("en", ts, NOW.getTime());
   expect(when).toMatch(/^[A-Z][a-z]+day \d/);
   expect(say()).toBe(
     `The queue is held. You stopped the answer at ${when}, so nothing more is sent until you send.`,

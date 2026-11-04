@@ -6,7 +6,7 @@
 // @vitest-environment happy-dom
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { MatterSummary } from "../transport/protocol.ts";
 import { FakeTransport, type FakeHost } from "../transport/fake-transport.ts";
 import { header, reset, upsert, uuid } from "../testing/stream-script.ts";
@@ -23,6 +23,13 @@ import { clockOf, localZone } from "./when.ts";
 
 let host: HTMLDivElement | null = null;
 let root: Root | null = null;
+
+// a fixed instant (Tuesday 3 November 2026); a test that needs another day sets its own
+const NOW = Date.UTC(2026, 10, 3, 17, 0);
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
+});
 
 afterEach(async () => {
   await act(async () => root?.unmount());
@@ -100,8 +107,7 @@ test("the scratch matter is never a row of the list: only the foot's row opens i
 });
 
 test("with a NextHost, a scratch matter with a date and a pin still stands only at the foot", async () => {
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrow = new Date(NOW + 86_400_000);
   const pad = (n: number) => String(n).padStart(2, "0");
   // tomorrow on the computer's own calendar: the app's day is local, not UTC
   const next = `${tomorrow.getFullYear()}-${pad(tomorrow.getMonth() + 1)}-${pad(tomorrow.getDate())}`;
