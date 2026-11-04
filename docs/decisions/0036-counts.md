@@ -133,12 +133,14 @@ cells, the weekly tally, the queue and the sender. Its row bans `matters`, `acp`
   counts (`HostConfig::with_counts` not called: tests, `cli`) saves the switches, and its
   `FirstAct` changes nothing.
 - **The rule for the host above, as built** (`crates/host/src/actor/settings/privacy.rs`). Off
-  writes `privacy.counts: false` first, then the marker if it is the first act, then
-  `Counts::set_enabled(false)`; a failed delete is logged and retried by each tick and the next
-  start, and the command answers `Done`. When the settings write itself fails, counts still stop,
-  but the command is refused (`internal`) and `privacy.counts` has not changed: the switch keeps
-  showing on, and the stop lasts only this session, since the next start reads `true` and counts
-  under a new id. On calls `Counts::set_enabled(true)` first; while it fails (the old folder
+  writes `privacy.counts: false` first, then, if it is the first act and only once that write
+  succeeded, the marker, then `Counts::set_enabled(false)`; a failed delete is logged and retried
+  by each tick and the next start, and the command answers `Done`. When the settings write itself
+  fails, counts still stop, but the command is refused (`internal`), no marker is written and
+  `privacy.counts` has not changed: the switch keeps showing on, and the stop lasts only this
+  session, since the next start reads `true` (and, before a first act, counts in memory only,
+  so a refused opt-out never becomes consent). The `clauseo-place` thread's queue holds 8 counts;
+  behind a lookup that hangs, the next are dropped. On calls `Counts::set_enabled(true)` first; while it fails (the old folder
   cannot be deleted) the command is refused with `store.io`, counts stay off and
   `privacy.counts` stays `false`. A settings write that fails after on turns counts back off.
   Off is otherwise refused only by a policy lock. Every app subscriber gets `SettingsChanged`

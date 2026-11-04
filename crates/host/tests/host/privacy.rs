@@ -300,3 +300,29 @@ fn a_refused_first_act_that_started_counts_still_tells_the_window() {
     );
     host.shutdown();
 }
+
+// The code owner's review of #344: before the first act, an off whose settings write fails
+// writes no marker, so the next start is not consent (it counts in memory, never saving).
+#[test]
+fn a_refused_first_act_off_is_not_consent_at_the_next_start() {
+    for (test, off) in [
+        (
+            "privacy_first_off_unwritable",
+            HostCommand::FirstAct { counts: false },
+        ),
+        ("privacy_patch_off_unwritable", set_counts(false)),
+    ] {
+        let dir = Dir::new(test, &[]);
+        let counts = open_counts(&dir, true);
+        let host = start_counting(&dir, 0, &counts);
+        break_settings_json(&dir);
+        host.refused(off, ErrorCode::Internal);
+        assert!(!marker(&dir), "{test}");
+        assert_eq!(counts.mode(), Mode::Off, "{test}");
+        assert_eq!(privacy(&host), privacy_defaults(), "{test}");
+        host.shutdown();
+        let next = open_counts(&dir, true);
+        assert!(!next.consented(), "{test}");
+        assert_eq!(next.mode(), Mode::Memory, "{test}");
+    }
+}

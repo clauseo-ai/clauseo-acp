@@ -5,11 +5,12 @@
 //!
 //! The rule 0036 sets for the host, in two halves:
 //! 1. Off is saved first. Turning counts off writes `privacy.counts: false` to `settings.json`
-//!    before it deletes `<data_dir>/counts/`, and stands when the delete fails: the next start
-//!    opens counts off and tries the delete again. When the write itself fails, the command is
-//!    refused (`internal`) and the setting has not changed, so the switch still shows on; counts
-//!    stop anyway, but only for this session: the next start reads `true` and counts under a
-//!    new id. Off is otherwise never refused, but by a policy lock, which is off already.
+//!    and, at the first act, the first-act marker before it deletes `<data_dir>/counts/`, and
+//!    stands when the delete fails: the next start opens counts off and tries the delete again.
+//!    When the write itself fails, the command is refused (`internal`), no marker is written and
+//!    the setting has not changed, so the switch still shows on; counts stop anyway, but only for
+//!    this session: the next start reads `true` (in memory only, before a first act). Off is
+//!    otherwise never refused, but by a policy lock, which is off already.
 //! 2. On is refused while the old counts cannot go. `Counts::set_enabled(true)` deletes a folder
 //!    whose delete failed before it makes a new id; while that fails, the command is refused with
 //!    `store.io` and `privacy.counts` stays `false`, so the old id is never resumed.
@@ -46,9 +47,9 @@ pub(super) fn view(actor: &Actor) -> PrivacySettings {
 
 /// `SetPrivacySettings`: the lock check, the counts and the write in the order the module doc
 /// gives, `setting_changed` for crash reports, then `SettingsChanged` to every app subscriber,
-/// then the receipt. A refusal changes nothing and sends nothing: a locked key is
-/// `settings.locked`, counts that cannot turn on `store.io`, any other settings failure
-/// `internal`.
+/// then the receipt. A refusal is `settings.locked` for a locked key, `store.io` for counts
+/// that cannot turn on, `internal` for any other settings failure; it sends `SettingsChanged`
+/// only when the view changed anyway.
 pub(in crate::actor) fn set_privacy_settings(
     actor: &mut Actor,
     ctx: &CommandCtx,
@@ -145,16 +146,21 @@ fn switch(actor: &mut Actor, on: bool, patch: &settings::PrivacyPatch) -> Result
     }
 }
 
-/// The rule's first half: the setting is saved before anything is deleted, and counts turn off
-/// even when the write, the first-act marker or the delete fails. A failed write refuses the
-/// command: the setting is unchanged, so this off lasts only until the next start.
+/// The rule's first half: the setting is saved first, then the first-act marker (only once the
+/// setting is saved), then the counts are deleted; counts turn off even when the write, the
+/// marker or the delete fails. A failed write refuses the command and writes no marker: the
+/// setting is unchanged and the first act has not happened, so this off lasts only until the
+/// next start, which counts in memory again until the lawyer's first act.
 fn turn_off(
     actor: &mut Actor,
     counts: &Counts,
     patch: &settings::PrivacyPatch,
 ) -> Result<(), Error> {
     let written = actor.effective.apply_privacy_patch(&SystemFiles, patch);
-    if !counts.consented()
+    // The marker only once off is saved: with `privacy.counts` still true in the file, a marker
+    // would turn this refused off into consent at the next start (code owner's review of #344).
+    if written.is_ok()
+        && !counts.consented()
         && let Err(error) = counts.first_act(false)
     {
         // Only means the next change of the switch is the first act again.
