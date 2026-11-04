@@ -3164,5 +3164,152 @@
     "at": "2026-11-04",
     "by": "Rohan",
     "note": "Rohan, on the review page (U16a-rail)"
+  },
+  "RO-02": {
+    "en": "Snoozed",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "RO-03": {
+    "en": "Next back {when}",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "cut from \"The next is back at {time}\"; {when} is \"6:00 pm\", \"tomorrow 9:00 am\" or \"Monday 9:00 am\""
+  },
+  "RO-04": {
+    "en": "Back sooner if Clauseo needs you or an answer finishes.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "behind the open shelf's info icon"
+  },
+  "RO-05": {
+    "en": "Until {when}",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "one line for the brief's three: {when} carries tomorrow (RO-33) or the day"
+  },
+  "RO-06": {
+    "en": "Whole matter",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "cut from \"The whole matter\""
+  },
+  "RO-07": {
+    "en": "Snooze until",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "RO-08": {
+    "en": "Tomorrow {time} / Monday {time} / Choose a day and time",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "RO-09": {
+    "en": "Before the next date",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "RO-10": {
+    "en": "Snoozed until {when} / Undo",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "the line's full stop dropped; Undo is words.ts's own, its Hindi approved"
+  },
+  "RO-11": {
+    "en": "Snoozed until {when}",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "the alarm clock's words, under the pointer and to assistive technology"
+  },
+  "RO-12": {
+    "en": "Wake now",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "the undo arrow's name, under the pointer and to assistive technology"
+  },
+  "RO-13": {
+    "en": "Snooze / Mark as done / Mark as not done",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "the alarm clock's, the tick's and the undo arrow's names; Snooze also the conversation's context menu's item"
+  },
+  "RO-14": {
+    "en": "Marked as done / Undo",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "the line's full stop dropped; Undo is words.ts's own, its Hindi approved"
+  },
+  "RO-15": {
+    "en": "Snooze until… / Mark all done",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "RO-16": {
+    "en": "Done",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "RO-17": {
+    "en": "Read conversations with nothing waiting move here each morning.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "cut from \"Conversations you've read, with nothing waiting, move here each morning.\"; behind the open fold's info icon"
+  },
+  "RO-33": {
+    "en": "tomorrow {time}",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "split from RO-05 and RO-10: a time tomorrow inside them"
   }
 }
