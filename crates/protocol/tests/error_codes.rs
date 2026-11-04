@@ -10,7 +10,8 @@ pub mod markdown;
 
 use std::collections::BTreeSet;
 
-use clauseo_protocol::ErrorCode;
+use clauseo_protocol::{ErrorCode, HostError, MatterPath};
+use serde_json::json;
 
 /// The record, read at build time.
 const RECORD: &str = include_str!("../../../docs/decisions/0003-error-codes.md");
@@ -113,4 +114,44 @@ fn display_writes_the_code_text() {
         "store.newer_version"
     );
     assert_eq!(ErrorCode::Unknown.to_string(), "unknown");
+}
+
+/// `HostError.files` (decision record 0003): left out when it names no file, and a list of
+/// matter paths that round-trips when set, a code this version does not know included. A path no
+/// matter could hold is refused, as everywhere a `MatterPath` is read.
+#[test]
+fn a_host_error_names_files_only_when_given_some() {
+    let plain = HostError::new(
+        ErrorCode::MatterFileLocked,
+        "1 file open in another program",
+    );
+    assert_eq!(plain.files(), []);
+    let json = serde_json::to_value(&plain).unwrap();
+    assert_eq!(json.get("files"), None, "{json}");
+    assert_eq!(serde_json::from_value::<HostError>(json).unwrap(), plain);
+
+    let files = vec![
+        MatterPath::new("Brief.docx").unwrap(),
+        MatterPath::new("sub/Memo.docx").unwrap(),
+    ];
+    let named = plain.with_files(files.clone());
+    let json = serde_json::to_value(&named).unwrap();
+    assert_eq!(
+        json["files"],
+        json!(["Brief.docx", "sub/Memo.docx"]),
+        "{json}"
+    );
+    let back: HostError = serde_json::from_value(json.clone()).unwrap();
+    assert_eq!(back, named);
+    assert_eq!(back.files(), files.as_slice());
+
+    let mut unknown = json.clone();
+    unknown["code"] = json!("matter.from_the_future");
+    let back: HostError = serde_json::from_value(unknown).unwrap();
+    assert_eq!(back.code(), ErrorCode::Unknown);
+    assert_eq!(back.files(), files.as_slice());
+
+    let mut bad = json;
+    bad["files"] = json!(["../outside.docx"]);
+    assert!(serde_json::from_value::<HostError>(bad).is_err());
 }

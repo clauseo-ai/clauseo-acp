@@ -1807,6 +1807,11 @@ export type HostError = {
 	 *  otherwise, and when that matter is not on the list (forgotten, or from another install).
 	 */
 	matter?: MatterId,
+	/**
+	 *  The matter's files the failure is about: for `matter.file_locked`, the files held open,
+	 *  sorted. Missing when it names none. Paths go here, never in `message`.
+	 */
+	files?: MatterPath[],
 };
 
 /**  What a subscriber receives. Never logged (the log holds only `DomainEvent`s). */

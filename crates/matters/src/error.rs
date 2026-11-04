@@ -27,7 +27,10 @@ pub enum Error {
         reason: Refusal,
     },
     /// Files the operation would write are open in another program (`matter.file_locked`).
-    /// Nothing was written.
+    /// Nothing was written when the check before writing found them. On Windows, a file a
+    /// program opened after that check fails the delete or rename of it with this error, naming
+    /// it alone; the files deleted or renamed before it stay written (a partial undo or restore,
+    /// which a retry finishes).
     #[error("files are open in another program: {}", join(paths))]
     FileLocked {
         /// The locked files, sorted.

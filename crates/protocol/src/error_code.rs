@@ -10,7 +10,7 @@ use std::str::FromStr;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::serde_util::BorrowedStr;
-use crate::{Error, MatterId};
+use crate::{Error, MatterId, MatterPath};
 
 /// Writes `ErrorCode` and its methods from one table: variant, dotted string, retryable, and the
 /// meaning, which is both the variant's doc comment and what `meaning()` returns. The record in
@@ -217,6 +217,10 @@ pub struct HostError {
     /// otherwise, and when that matter is not on the list (forgotten, or from another install).
     #[serde(skip_serializing_if = "Option::is_none", default)]
     matter: Option<MatterId>,
+    /// The matter's files the failure is about: for `matter.file_locked`, the files held open,
+    /// sorted. Missing when it names none. Paths go here, never in `message`.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    files: Vec<MatterPath>,
 }
 
 impl HostError {
@@ -227,6 +231,7 @@ impl HostError {
             retryable: code.is_retryable(),
             message: message.into(),
             matter: None,
+            files: Vec::new(),
         }
     }
 
@@ -241,6 +246,19 @@ impl HostError {
     /// (`matter.folder_is_matter`).
     pub const fn matter(&self) -> Option<MatterId> {
         self.matter
+    }
+
+    /// The same failure, naming the matter's `files` it is about (see [`HostError::files`]).
+    #[must_use]
+    pub fn with_files(mut self, files: Vec<MatterPath>) -> Self {
+        self.files = files;
+        self
+    }
+
+    /// The matter's files the failure is about: for `matter.file_locked`, the files held open.
+    /// Empty when it names none.
+    pub fn files(&self) -> &[MatterPath] {
+        &self.files
     }
 
     /// Why the call failed.
@@ -280,6 +298,8 @@ struct HostErrorWire<'a> {
     retryable: bool,
     #[serde(default)]
     matter: Option<MatterId>,
+    #[serde(default)]
+    files: Vec<MatterPath>,
 }
 
 impl<'de> Deserialize<'de> for HostError {
@@ -298,12 +318,14 @@ impl<'de> Deserialize<'de> for HostError {
                     code.is_retryable()
                 },
                 matter: wire.matter,
+                files: wire.files,
             },
             None => Self {
                 code: ErrorCode::Unknown,
                 message: format!("{raw}: {}", wire.message),
                 retryable: wire.retryable,
                 matter: wire.matter,
+                files: wire.files,
             },
         })
     }

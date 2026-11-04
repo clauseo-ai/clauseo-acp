@@ -56,6 +56,29 @@ impl Error {
         }
     }
 
+    /// The wire form ([`HostError`]'s `From`), without taking the error: a refusal as it was
+    /// made; a matter's `FileLocked` with its files in `HostError::files` and their count, not
+    /// their paths, in the message; anything else with its `Display` text as the message.
+    pub(crate) fn to_wire(&self) -> HostError {
+        match self {
+            Self::Refused(refusal) => refusal.clone(),
+            Self::Matters(clauseo_matters::Error::FileLocked { paths }) => HostError::new(
+                ErrorCode::MatterFileLocked,
+                format!("matter: {} files open in another program", paths.len()),
+            )
+            .with_files(paths.clone()),
+            Self::Invalid(_)
+            | Self::Reducer(_)
+            | Self::Store(_)
+            | Self::Matters(_)
+            | Self::Process(_)
+            | Self::Acp(_)
+            | Self::Settings(_)
+            | Self::Closed
+            | Self::Internal(_) => HostError::new(self.code(), self.to_string()),
+        }
+    }
+
     /// A state check's refusal with `code` and a detail for logs.
     pub(crate) fn refused(code: ErrorCode, message: impl Into<String>) -> Self {
         Self::Refused(HostError::new(code, message))
@@ -70,7 +93,8 @@ impl From<futures::channel::oneshot::Canceled> for Error {
 }
 
 /// The wire form: the code, the `Display` text as the message, `retryable` from the code. A
-/// refusal is passed on as it was made.
+/// refusal is passed on as it was made. A matter's `FileLocked` names its files in
+/// `HostError.files` and not in the message, which never holds a path.
 impl From<Error> for HostError {
     fn from(error: Error) -> Self {
         match error {
@@ -83,7 +107,7 @@ impl From<Error> for HostError {
             | Error::Acp(_)
             | Error::Settings(_)
             | Error::Closed
-            | Error::Internal(_) => HostError::new(error.code(), error.to_string()),
+            | Error::Internal(_) => error.to_wire(),
         }
     }
 }

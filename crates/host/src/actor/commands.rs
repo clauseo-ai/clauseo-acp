@@ -9,9 +9,9 @@
 mod to_turn;
 
 use clauseo_protocol::{
-    CommandEnvelope, CommandId, CommandOutcome, DomainEvent, ErrorCode, HostCommand, HostError,
-    MatterId, Principal, StreamId, ThreadArchived, ThreadCreated, ThreadId, ThreadRenamed,
-    Timestamp, Title, ValidatedCommand,
+    CommandEnvelope, CommandId, CommandOutcome, DomainEvent, ErrorCode, HostCommand, MatterId,
+    Principal, StreamId, ThreadArchived, ThreadCreated, ThreadId, ThreadRenamed, Timestamp, Title,
+    ValidatedCommand,
 };
 use clauseo_store::{Receipt, ThreadRow, command_hash};
 
@@ -183,14 +183,12 @@ pub(crate) fn finish_command(
     let Some(first) = waiters.next() else {
         return;
     };
-    // A refusal keeps all it carries, `HostError::matter` included.
-    let shared = result.as_ref().map(|outcome| *outcome).map_err(|error| {
-        if let Error::Refused(refusal) = error {
-            refusal.clone()
-        } else {
-            HostError::new(error.code(), error.to_string())
-        }
-    });
+    // A refusal keeps all it carries, `HostError::matter` included, and a matter's
+    // `file_locked` its files.
+    let shared = result
+        .as_ref()
+        .map(|outcome| *outcome)
+        .map_err(Error::to_wire);
     let _gone = first.send(result);
     for waiter in waiters {
         let _gone = waiter.send(shared.clone().map_err(Error::Refused));

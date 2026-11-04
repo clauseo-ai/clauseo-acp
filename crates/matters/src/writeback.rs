@@ -15,7 +15,7 @@ use crate::history::{HistoryStore, Oid};
 use crate::stat::Stat;
 use crate::types::Settings;
 use crate::walk::{self, FoundKind};
-use crate::{Error, fsync, write};
+use crate::{Error, fsync, locks, write};
 
 #[cfg(test)]
 #[cfg(windows)]
@@ -236,6 +236,13 @@ pub(crate) fn writable(
 /// recorded by nothing until the next checkpoint. `apply` returns only after every folder is
 /// synced, so the checkpoint the caller takes next never records a rename that could be lost.
 ///
+/// A delete or rename in step 3 or 4 that Windows refuses because another program holds the
+/// target (it opened the file after the caller's check) fails with `matter.file_locked` naming
+/// that file ([`held_or`]); one that fails otherwise is the I/O error. Either way the deletes
+/// and renames before it stay, so the folder is partly written (an undo or restore that a retry
+/// finishes, as [`crate::UndoRequest`] and [`crate::Restore`] say); the folders of the renames
+/// made are synced, and every temp file not renamed yet is removed.
+///
 /// Deleting before renaming matters on a case- or normalisation-insensitive file system: undoing
 /// a rename of `Brief.txt` to `brief.txt` deletes `brief.txt`, which is the same file as
 /// `Brief.txt` there; deleting after the rename would remove what was just put back.
@@ -259,7 +266,7 @@ pub(crate) fn apply(core: &Core, folder: &Path, ops: &[&Op]) -> Result<(), Error
             match write::remove_file(&abs) {
                 Ok(()) => {}
                 Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
-                Err(err) => return Err(Error::io("delete", abs, err)),
+                Err(err) => return Err(held_or(folder, path, Error::io("delete", abs, err))),
             }
             let dir = abs.parent().unwrap_or(folder);
             fsync::sync_dir(dir).map_err(|err| Error::io("sync", dir, err))?;
@@ -268,8 +275,22 @@ pub(crate) fn apply(core: &Core, folder: &Path, ops: &[&Op]) -> Result<(), Error
     // Every rename, then each folder synced once: the renames are durable before the
     // checkpoint that follows records them.
     let mut dirs = std::collections::BTreeSet::new();
-    for file in staged {
-        dirs.insert(file.rename()?);
+    for (path, file) in staged {
+        match file.rename() {
+            Ok(dir) => {
+                dirs.insert(dir);
+            }
+            Err(err) => {
+                // The renames before it stay, made durable as far as the OS lets; the temp files
+                // after it, and its own, are removed as each `Staged` drops.
+                for dir in dirs {
+                    if let Err(err) = fsync::sync_dir(&dir) {
+                        tracing::warn!(path = %dir.display(), error = %err, "folder not synced");
+                    }
+                }
+                return Err(held_or(folder, path, err));
+            }
+        }
     }
     for dir in dirs {
         fsync::sync_dir(&dir).map_err(|err| Error::io("sync", &dir, err))?;
@@ -282,20 +303,20 @@ pub(crate) fn apply(core: &Core, folder: &Path, ops: &[&Op]) -> Result<(), Error
 
 /// Steps 1 and 2 of [`apply`]: the staged writes, or an error with every temp file removed;
 /// `made` gets each folder made on the way, outermost first.
-fn stage_all(
+fn stage_all<'a>(
     core: &Core,
     folder: &Path,
-    ops: &[&Op],
+    ops: &[&'a Op],
     made: &mut Vec<PathBuf>,
-) -> Result<Vec<write::Staged>, Error> {
+) -> Result<Vec<(&'a MatterPath, write::Staged)>, Error> {
     let mut staged = Vec::new();
-    for op in ops {
+    for &op in ops {
         if let Op::Write(path, blob) = op {
             let abs = make_parents(folder, path, made)?;
             let file = write::stage(&abs, &mut |file| {
                 core.history.read_blob(*blob, path.as_str(), file).map(drop)
             })?;
-            staged.push(file);
+            staged.push((path, file));
         }
     }
     let moved = moved_since(core, folder, ops)?;
@@ -326,6 +347,22 @@ fn moved_since(core: &Core, folder: &Path, ops: &[&Op]) -> Result<Vec<MatterPath
     moved.sort();
     moved.dedup();
     Ok(moved)
+}
+
+/// `err`, from deleting or renaming over the target `path` in step 3 or 4 of [`apply`], as
+/// [`Error::FileLocked`] naming `path` when another program holds that file
+/// ([`locks::held_at_write`], asking [`locks::held_open`] for an access denied); otherwise
+/// `err` as it was. A program that opened the file after the caller's check (Word, between the
+/// check and the rename) gets the lawyer the "close it" answer instead of a failed checkpoint.
+fn held_or(folder: &Path, path: &MatterPath, err: Error) -> Error {
+    if let Error::Io { source, .. } = &err
+        && locks::held_at_write(source, || locks::held_open(folder, path).is_some())
+    {
+        return Error::FileLocked {
+            paths: vec![path.clone()],
+        };
+    }
+    err
 }
 
 /// `folder`/`path`, after making each missing folder on the way (and syncing the folder

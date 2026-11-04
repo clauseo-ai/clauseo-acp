@@ -46,6 +46,16 @@ pub fn held_open_beside(
     held_open_by(folder, path, Some(owner_files))
 }
 
+/// Windows' `ERROR_ACCESS_DENIED`.
+#[cfg(any(windows, test))]
+const ACCESS_DENIED: i32 = 5;
+/// Windows' `ERROR_SHARING_VIOLATION`.
+#[cfg(any(windows, test))]
+const SHARING_VIOLATION: i32 = 32;
+/// Windows' `ERROR_LOCK_VIOLATION`.
+#[cfg(any(windows, test))]
+const LOCK_VIOLATION: i32 = 33;
+
 /// The most entries the lookup by another Unicode form reads from one folder.
 const MAX_LISTED: usize = 20_000;
 
@@ -69,9 +79,6 @@ fn held_open_by(folder: &Path, path: &MatterPath, given: Option<&[String]>) -> O
     }
     #[cfg(windows)]
     {
-        /// `ERROR_SHARING_VIOLATION` and `ERROR_LOCK_VIOLATION`.
-        const SHARING_VIOLATION: i32 = 32;
-        const LOCK_VIOLATION: i32 = 33;
         if let Err(err) = crate::write::open_exclusive(&absolute)
             && matches!(err.raw_os_error(), Some(SHARING_VIOLATION | LOCK_VIOLATION))
         {
@@ -79,6 +86,37 @@ fn held_open_by(folder: &Path, path: &MatterPath, given: Option<&[String]>) -> O
         }
     }
     None
+}
+
+/// Whether a rename or delete of a matter file that failed with `err` failed because another
+/// program holds the file, so the failure is `matter.file_locked` and not an I/O failure. Only on
+/// Windows, by [`held_by_code`]; `held` asks [`held_open`] for the file at that moment, and is
+/// called only for an access denied. Elsewhere `false`: an open file never stops a rename or
+/// delete on macOS or Linux.
+pub(crate) fn held_at_write(err: &std::io::Error, held: impl FnOnce() -> bool) -> bool {
+    #[cfg(windows)]
+    {
+        held_by_code(err.raw_os_error(), held)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (err, held);
+        false
+    }
+}
+
+/// [`held_at_write`] by the Windows error code: `ERROR_SHARING_VIOLATION` (32) and
+/// `ERROR_LOCK_VIOLATION` (33) always; `ERROR_ACCESS_DENIED` (5) only when `held` says the
+/// file is held open now (an owner file beside it, or a no-share open that fails), since 5 is
+/// also a real permission denial (a folder without write access), where "close it in Word"
+/// would be wrong. Any other code, or none, is not. Plain arithmetic, so tested on every OS.
+#[cfg(any(windows, test))]
+pub(crate) fn held_by_code(code: Option<i32>, held: impl FnOnce() -> bool) -> bool {
+    match code {
+        Some(SHARING_VIOLATION | LOCK_VIOLATION) => true,
+        Some(ACCESS_DENIED) => held(),
+        _ => false,
+    }
 }
 
 /// [`held_open`] for a path as an agent names it: absolute, or relative to `folder` (the

@@ -1,7 +1,11 @@
 use clauseo_protocol::MatterPath;
 use unicode_normalization::UnicodeNormalization;
 
-use super::{HeldOpen, fold_name, held_open, locked, owner_in_another_form, owner_names};
+use std::cell::Cell;
+
+use super::{
+    HeldOpen, fold_name, held_by_code, held_open, locked, owner_in_another_form, owner_names,
+};
 use crate::test_dir::TestDir;
 use crate::write;
 
@@ -191,4 +195,51 @@ fn an_owner_file_cut_from_the_decomposed_name_is_found_for_the_decomposed_name()
         owner_in_another_form(dir.path(), &decomposed, Some(std::slice::from_ref(&owner))),
         Some(owner)
     );
+}
+
+/// A Windows rename or delete that failed with a sharing or lock violation (32, 33) is a file
+/// held open, without asking whether it is held; an access denied (5) only when the file is held
+/// at that moment, since 5 is also a plain permission denial; any other code, or none, never is.
+#[test]
+fn a_write_failure_is_held_by_its_code_and_access_denied_only_when_held() {
+    let asked = Cell::new(0);
+    let held = |answer: bool| {
+        let asked = &asked;
+        move || {
+            asked.set(asked.get() + 1);
+            answer
+        }
+    };
+    assert!(held_by_code(Some(32), held(false)), "sharing violation");
+    assert!(held_by_code(Some(33), held(false)), "lock violation");
+    assert_eq!(asked.get(), 0, "32 and 33 need no check");
+    assert!(held_by_code(Some(5), held(true)), "access denied, held");
+    assert!(
+        !held_by_code(Some(5), held(false)),
+        "access denied, not held"
+    );
+    assert_eq!(asked.get(), 2, "5 asks once each time");
+    for other in [
+        None,
+        Some(0),
+        Some(2),
+        Some(3),
+        Some(13),
+        Some(112),
+        Some(1224),
+    ] {
+        assert!(!held_by_code(other, held(true)), "{other:?}");
+    }
+    assert_eq!(asked.get(), 2, "no other code asks");
+}
+
+/// Off Windows an open file never stops a rename or delete, so no write failure is a held file,
+/// whatever its code (5 is `EIO` on Linux and macOS, 32 `EPIPE`).
+#[cfg(not(windows))]
+#[test]
+fn off_windows_no_write_failure_is_held() {
+    for code in [5, 32, 33] {
+        let err = std::io::Error::from_raw_os_error(code);
+        assert!(!super::held_at_write(&err, || true), "{code}");
+    }
 }

@@ -159,7 +159,7 @@ until `StepUndone` is durable; a failed undo commit is retried once, as a turn's
 - `HostQuery::PreviewRestore { matter, checkpoint, scope }` is new and additive (0002): it
   answers `QueryResult::RestorePreview { changes, added_since, kept, locked }` from
   `Matter::preview_restore` and writes nothing. `locked` lists the files a program holds, which a
-  `RestoreVersion` would refuse with `matter.file_locked`, its message naming them.
+  `RestoreVersion` would refuse with `matter.file_locked`, its `files` naming them (0003).
 - `HostQuery::PreviewUndo { thread, turn }` is new and additive (0002): it reads the thread's
   log for the step as `UndoStep` does (refused as `command.invalid` when the turn has no step to
   undo), then answers `QueryResult::UndoPreview { edited_since }` from `Matter::edited_since` on
