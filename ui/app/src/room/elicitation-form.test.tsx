@@ -437,3 +437,69 @@ test("minItems and maxItems: too few or too many ticks hold Send and say so", as
     { accept: { values: { papers: ["Notice", "Minutes"] } } },
   ]);
 });
+
+/** The request fake_agent's ask-user-question scenario sends (crates/fake_agent/scenarios/ask-user-question.jsonl),
+ * as claude-agent-acp 0.89.1 builds it, an option's preview under _meta included. */
+const FAKE_AGENT_ASK = {
+  message: "Please answer the following questions.",
+  schema: {
+    type: "object",
+    properties: {
+      question_0: {
+        type: "string",
+        title: "Law",
+        description: "Which governing law should the draft use?",
+        oneOf: [
+          {
+            const: "England and Wales",
+            title: "England and Wales",
+            description: "The client's usual choice",
+          },
+          {
+            const: "New York",
+            title: "New York",
+            description: "Matches the counterparty",
+            _meta: { "_claude/askUserQuestionOption": { preview: "Clause 12: New York law" } },
+          },
+        ],
+      },
+      question_0_custom: {
+        type: "string",
+        title: "Other",
+        description:
+          "Type your own answer, or add a note to the option you chose above (optional).",
+      },
+      question_1: {
+        type: "array",
+        title: "Schedules",
+        description: "Which schedules should I draft?",
+        items: {
+          anyOf: [
+            { const: "Fees", title: "Fees", description: "Rates and caps" },
+            { const: "Services", title: "Services", description: "Scope" },
+          ],
+        },
+      },
+      question_1_custom: {
+        type: "string",
+        title: "Other",
+        description: "Type your own answer to add to your selection above (optional).",
+      },
+    },
+  },
+};
+
+test("fake_agent's ask-user-question: the e2e's picks send exactly the values the scenario expects", async () => {
+  h = await ask(FAKE_AGENT_ASK);
+  await h.click(el(T.choice("question_0", 1)));
+  await h.click(el(T.choice("question_1", 0)));
+  await fill(T.input("question_1_custom"), "Exhibits");
+  await h.click(el(T.send));
+  expect(answered().map((a) => a.response)).toEqual([
+    {
+      accept: {
+        values: { question_0: "New York", question_1: ["Fees"], question_1_custom: "Exhibits" },
+      },
+    },
+  ]);
+});
