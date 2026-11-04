@@ -346,13 +346,23 @@ claims a `BrowserSession`:
 The `BrowserSession` rides on the launch's `RunFolders` (in an `Arc`; the thread's turn state
 is its one lasting holder) and drops with the run folder in `launch_checks::discard`, off the
 actor: after the agent's process tree was killed (`clauseo-process` kills what is left of the
-tree however the agent ends), or when the agent never started. Two processes can outlive that
-kill, and the claims drop anyway: an agent that ignores its kill
-(`StopStep::Unresponsive`, logged), and agent-browser's Unix daemon, which leaves the tree
-(`setsid`) and lives until its idle timeout (G17 item 6). A claim holds within this host process
-only (stage C's `ports`): two hosts on one machine, such as two Windows users sharing 61080 to
-61179, could be handed the same port before Chrome binds it; the launch then fails, with no
-fallback. Dropping it releases the ports
+tree however the agent ends), or when the agent never started. Processes can outlive that
+kill, and the claims drop anyway: an agent that ignores its kill (`StopStep::Unresponsive`,
+logged), and any jailed process that calls `setsid`, which `killpg` does not reach, such as
+agent-browser's Unix daemon, which then lives until its idle timeout (G17 item 6).
+
+**Residual risk: a claimed port taken by another host.** A claim holds within this host process
+only (stage C's `ports`). Chrome, the stream server and agent-browser's daemon bind only at the
+agent's first browser tool call, and the stream server and the daemon fall back to another port
+when theirs is taken. So a second host on the same machine (two OS users, or two Windows users
+sharing 61080 to 61179) can be handed a port this host claimed but has not bound yet. This
+host's jailed agent could then reach that host's Chrome on its CDP port, and this host's
+`.port` and `.stream` files never appear, so the guard's checks never fire. The odds are low on
+macOS (two hosts drawing the same ephemeral port in the window before the first tool call); on
+Windows, S15's per-launch rules (exact ports per launch, never the whole range, and a
+listener-side rule) close it; the upstream mitigation is a pipe or socket mode for CDP and the
+stream (vercel-labs/agent-browser#2313). Stage C's next sandbox PR also retires released ports
+for the host's life on Unix. Dropping the session releases the ports
 and removes the folder and its lock file. A claim that fails, or a token the claims cannot fill
 (`{socket_dir}` on Windows, `{daemon_port}` elsewhere), leaves the browser out with
 `BrowserNotInstalled` and a log line.
