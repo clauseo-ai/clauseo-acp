@@ -160,6 +160,13 @@ until `StepUndone` is durable; a failed undo commit is retried once, as a turn's
   answers `QueryResult::RestorePreview { changes, added_since, kept, locked }` from
   `Matter::preview_restore` and writes nothing. `locked` lists the files a program holds, which a
   `RestoreVersion` would refuse with `matter.file_locked`, its message naming them.
+- `HostQuery::PreviewUndo { thread, turn }` is new and additive (0002): it reads the thread's
+  log for the step as `UndoStep` does (refused as `command.invalid` when the turn has no step to
+  undo), then answers `QueryResult::UndoPreview { edited_since }` from `Matter::edited_since` on
+  the matter's thread: the step's files whose content differs from the after-turn checkpoint,
+  by the stat cache and else a blob hash. It writes nothing, logs nothing and takes no writer.
+  It is what Undo's "changed after Clauseo's edit" ask reads; a `FileChange`'s
+  `may_include_lawyer_edits` (no agent tool call named the path during the turn) is not.
 
 ### Cancel, reconciliation, shutdown
 

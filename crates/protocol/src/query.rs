@@ -11,7 +11,7 @@ use crate::{
     AgentId, AgentKind, BlobHash, CheckpointId, ClientName, CompactString, Count, Date, Error,
     FileChange, FileRefId, LastStop, MatterId, MatterKind, MatterPath, MatterStatus,
     RestoreRequest, SearchAnswer, SearchRequest, Seq, SettingsView, SkippedFile, StreamId,
-    ThreadId, ThreadStatus, Timestamp, ViewEntry,
+    ThreadId, ThreadStatus, Timestamp, TurnId, ViewEntry,
 };
 
 /// Most entries one `PageEntries` returns: the size of a `Reset`'s view window (about 200 recent
@@ -128,6 +128,16 @@ pub enum HostQuery {
         /// The whole matter or chosen files, as `RestoreVersion` takes it.
         scope: RestoreRequest,
     },
+    /// What undoing a turn's step would meet now: the step's files whose content in the folder
+    /// differs from the step's after-turn checkpoint (edited since). Writes nothing and logs
+    /// nothing. Refused as `command.invalid` when the turn has no step to undo (not started or
+    /// ended in this thread, no after-turn checkpoint, or undone already).
+    PreviewUndo {
+        /// The thread.
+        thread: ThreadId,
+        /// The step's turn.
+        turn: TurnId,
+    },
     /// Part of a blob's text.
     ReadBlob {
         /// The blob.
@@ -169,6 +179,8 @@ pub enum QueryResult {
     FileChanges(Vec<FileChange>),
     /// For `PreviewRestore`.
     RestorePreview(RestorePreview),
+    /// For `PreviewUndo`.
+    UndoPreview(UndoPreview),
     /// For `ReadBlob`.
     Blob(BlobRange),
     /// For `GetSettings`.
@@ -254,6 +266,19 @@ pub struct RestorePreview {
     /// Files of `changes` open in another program now: `RestoreVersion` would fail with
     /// `matter.file_locked`, naming them, and write nothing.
     pub locked: Vec<MatterPath>,
+}
+
+/// What undoing a step would meet now, for `PreviewUndo`. A struct, so later fields (such as
+/// the files open in another program) are additive; it accepts fields it does not know.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct UndoPreview {
+    /// The step's files whose content now differs from the step's after-turn checkpoint
+    /// (changed, deleted, or added at a path the step deleted), sorted by path. Compared by
+    /// content: a file the cache vouches for by its stat is not read, any other is hashed. A
+    /// file not read (cloud-only, over the size cap) is not listed. Empty when nothing changed
+    /// since: Undo then needs no "changed after Clauseo's edit" ask.
+    pub edited_since: Vec<MatterPath>,
 }
 
 /// One matter in a list.

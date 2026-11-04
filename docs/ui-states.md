@@ -129,6 +129,7 @@ reported it.
 | Undo disabled while a turn runs in this thread | `HeaderEntry.status` is `ThreadStatus::Starting`, `ThreadStatus::Running`, `ThreadStatus::NeedsYou` or `ThreadStatus::Queued` (the derived undo stays as it is) | the step |
 | Undo refused: a turn runs in another thread of the matter | the host checks when the command arrives: `ErrorCode::MatterTurnRunning` | the code only (retryable) |
 | Undo with a choice per file | `HostCommand::UndoStep` with `FileChoice::Undo`, `FileChoice::Keep` | the step's files |
+| Undo asks first: a file changed after Clauseo's edit | `HostQuery::PreviewUndo` returns `QueryResult::UndoPreview` | `edited_since`: the step's files whose content now differs from its after-turn checkpoint; empty means Undo needs no ask |
 
 ## 4. Approvals
 

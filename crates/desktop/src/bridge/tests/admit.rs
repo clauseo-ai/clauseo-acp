@@ -185,6 +185,30 @@ fn the_settings_window_sets_and_reads_the_settings_and_refreshes_the_limits_only
     assert_eq!(other.code(), ErrorCode::CommandInvalid);
 }
 
+/// `PreviewUndo` (Undo's ask, #360) reaches the host from the main window, which answers for
+/// a turn with no step with its own refusal, and the settings window is refused it by the
+/// bridge.
+#[test]
+fn preview_undo_is_read_from_main_and_refused_from_settings() {
+    let scratch = Scratch::new("admit-preview-undo", &[]);
+    let host = scratch.start(Vec::new());
+    let thread = host.thread();
+    let bridge = host.bridge();
+    let body = json!({"preview_undo": {"thread": thread, "turn": Uuid::now_v7()}});
+    let refusal = block_on(bridge.query(MAIN, read(body.clone()))).unwrap_err();
+    assert_eq!(refusal.code(), ErrorCode::CommandInvalid, "{refusal:?}");
+    assert!(
+        refusal.to_string().contains("has no step to undo"),
+        "the host's answer, not the bridge's: {refusal}"
+    );
+    let refusal = block_on(bridge.query(SETTINGS, read(body))).unwrap_err();
+    assert_eq!(refusal.code(), ErrorCode::CommandInvalid, "{refusal:?}");
+    assert!(
+        refusal.to_string().contains("reads only the settings"),
+        "{refusal}"
+    );
+}
+
 /// `ScanFolder` passes `admit` only with a folder this run's picker issued; `CancelScan`
 /// passes with any ref, even one never issued, and starts nothing: no scan event comes and the
 /// host answers `Done`.

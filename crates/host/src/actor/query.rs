@@ -3,12 +3,13 @@
 //! loaded stream (`PageEntries`), a loaded stream and then the matter's thread
 //! (`CompareVersions`, with a version or the folder now, and `PreviewRestore`) or a store
 //! read on a task of its own (`ReadBlob`); `ListPapers` runs on the matter's worker
-//! (`papers.rs`).
+//! (`papers.rs`), and `PreviewUndo` reads the thread's log and then asks the matter's worker
+//! (`turn/undo_preview.rs`).
 
 use clauseo_matters::CompareSide;
 use clauseo_protocol::{
     AgentId, AgentKind, AgentSummary, CheckpointId, ErrorCode, FolderState, HostQuery, MatterId,
-    Principal, QueryResult, StreamId, ViewEntry,
+    Principal, QueryResult, RestorePreview, StreamId, UndoPreview, ViewEntry,
 };
 
 use std::path::PathBuf;
@@ -22,7 +23,7 @@ use futures::task::LocalSpawnExt;
 
 use crate::blob_read;
 use crate::error::Error;
-use crate::matter_worker::MatterJob;
+use crate::matter_worker::{MatterJob, MatterReply};
 use crate::principal::{Access, authorize};
 
 /// Answers one query.
@@ -97,6 +98,9 @@ pub(super) fn query(
                 scope: scope.clone(),
             };
             matter_query(actor, matter, vec![checkpoint], job, reply);
+        }
+        HostQuery::PreviewUndo { thread, turn } => {
+            super::turn::preview_undo(actor, thread, turn, reply);
         }
         HostQuery::Search(ref request) => actor.search.query(
             crate::search::QUERY_WINDOW,
@@ -195,6 +199,38 @@ fn matter_query(
             actor.release(stream);
         }),
     );
+}
+
+/// The answer to a query R8 answered (`MatterTag::Query`): `CompareVersions`,
+/// `PreviewRestore`, `PreviewUndo`.
+pub(super) fn matter_answer(reply: MatterReply) -> Result<QueryResult, Error> {
+    match reply {
+        MatterReply::Compared(result) => result.map(QueryResult::FileChanges),
+        MatterReply::Previewed(result) => result.map(|plan| {
+            let plan = *plan;
+            QueryResult::RestorePreview(RestorePreview {
+                changes: plan.writes,
+                added_since: plan.added_since,
+                kept: plan.kept,
+                locked: plan.locked,
+            })
+        }),
+        MatterReply::EditedSince(result) => {
+            result.map(|edited_since| QueryResult::UndoPreview(UndoPreview { edited_since }))
+        }
+        other @ (MatterReply::Created(_)
+        | MatterReply::Imported(_)
+        | MatterReply::Opened(_)
+        | MatterReply::BeforeTurn(_)
+        | MatterReply::AfterTurn(_)
+        | MatterReply::Undone(_)
+        | MatterReply::Restored(_)
+        | MatterReply::Located(_)
+        | MatterReply::HeldOpen(_)
+        | MatterReply::Papers(_)) => Err(Error::Internal(format!(
+            "a query answered with another job's reply: {other:?}"
+        ))),
+    }
 }
 
 /// `ListMatters`: the summaries from memory (`rail.rs`), each folder's state read off the actor
