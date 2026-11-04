@@ -177,7 +177,7 @@ fn go_with_no_email_is_the_plan_ref() {
         "Monthly limit",
         15.0,
         Some(MONTH_RESET),
-        Some(40_320),
+        Some(43_200),
     );
     assert_eq!(
         read(include_str!("../../../fixtures/codex/go.json")),

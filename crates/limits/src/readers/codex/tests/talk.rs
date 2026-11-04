@@ -6,7 +6,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use clauseo_codex_appserver::Error as AppServerError;
-use clauseo_protocol::BillingProvider;
+use clauseo_protocol::{AccountRef, Billing, BillingProvider, PlanLabel, WindowKind};
 use futures::channel::mpsc;
 use futures::executor::block_on;
 use futures::future::join;
@@ -216,5 +216,55 @@ fn stdout_ending_before_an_answer_is_closed() {
     assert!(
         matches!(talked, Talked::Failed(AppServerError::Closed)),
         "{talked:?}"
+    );
+}
+
+/// Plays a recorded app-server stdout line by line: a response goes out only once the reader has
+/// sent the request with its id, as the app-server answers, and the other lines go out at once.
+async fn replay(server: &mut Server, recorded: &str) {
+    for line in recorded.lines() {
+        let message: Value = serde_json::from_str(line).unwrap();
+        if message.get("result").is_some() {
+            loop {
+                let sent = server.read().await;
+                if sent["id"] == message["id"] {
+                    break;
+                }
+            }
+        }
+        server
+            .stdout
+            .unbounded_send(format!("{line}\n").into_bytes())
+            .unwrap();
+    }
+    server.read_end().await;
+}
+
+#[test]
+fn a_recorded_plus_session_decodes_to_plus_limits() {
+    let recorded = include_str!("../../../../fixtures/recorded/codex/plus.jsonl");
+    let (stdin, stdout, mut server) = pipes();
+    let (talked, ()) = block_on(join(talk(stdin, stdout), replay(&mut server, recorded)));
+    let ReadOutcome::Usage {
+        limits,
+        reached: None,
+    } = answered(talked)
+    else {
+        panic!("not usage with no reached type");
+    };
+    assert_eq!(limits.account, AccountRef("test@example.com".to_owned()));
+    assert_eq!(limits.plan, Some(PlanLabel("ChatGPT Plus".to_owned())));
+    assert_eq!(limits.billing, Billing::Plan);
+    let shape: Vec<(WindowKind, Option<u32>)> = limits
+        .windows
+        .iter()
+        .map(|window| (window.kind, window.duration_mins))
+        .collect();
+    assert_eq!(
+        shape,
+        [
+            (WindowKind::Session, Some(300)),
+            (WindowKind::Weekly, Some(10080))
+        ]
     );
 }
