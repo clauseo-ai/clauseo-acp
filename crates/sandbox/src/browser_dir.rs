@@ -39,7 +39,11 @@ const MODE: u32 = 0o700;
 /// `/tmp/clauseo-ab-<id>.lock` held (`flock`) for as long as the value lives. Dropping it
 /// removes the folder (with what is in it), then the lock file, then releases the lock.
 ///
-/// Drop it only after the launch's whole process tree has exited. The jail's rules match
+/// Drop it only after the launch's whole process tree has exited, as far as the host can tell:
+/// the host drops it once the agent's tree was killed, and two processes can still outlive that
+/// (an agent that ignores its kill, the process crate's `Unresponsive` step, and agent-browser's
+/// Unix daemon, which leaves the tree with `setsid` and lives until its idle timeout, G17 item
+/// 6; decision record 0029). The jail's rules match
 /// paths, not owners: a jailed process that outlived its session could meet a folder another
 /// local user made again at the same path once this one is gone. The random 16-letter name,
 /// the drop order and agent-browser's daemon living inside the launch make that unlikely, not

@@ -36,8 +36,8 @@ pub const SESSION_ID: &str = "{session_id}";
 pub const BROWSER_EXECUTABLE: &str = "{browser_executable}";
 
 /// macOS and Linux only: the session's browser socket folder, `/tmp/clauseo-ab-<16 random>`,
-/// which the host makes for the session (mode 0700) and removes once the launch's process tree
-/// has exited, as `AGENT_BROWSER_SOCKET_DIR`. Unfillable (the folder could not be made): the
+/// which the host makes for the session (mode 0700) and removes once the agent's process tree
+/// was killed, as `AGENT_BROWSER_SOCKET_DIR`. Unfillable (the folder could not be made): the
 /// host drops `browser` and shows `BrowserNotInstalled`.
 pub const SOCKET_DIR: &str = "{socket_dir}";
 /// The loopback port the host claimed for the session's stream server, as

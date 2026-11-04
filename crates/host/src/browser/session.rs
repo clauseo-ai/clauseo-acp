@@ -1,5 +1,10 @@
 //! One browser session's loopback ports and socket folder (S27, decision record 0029), claimed on
-//! the launch-prep thread and held until the launch's whole process tree has exited.
+//! the launch-prep thread and held until the agent's process tree was killed. Two processes can
+//! outlive that kill and with it the claims: an agent that ignores it (the process crate's
+//! `StopStep::Unresponsive`), and agent-browser's Unix daemon, which leaves the tree (`setsid`)
+//! and lives until its idle timeout (G17 item 6). On Windows the guard's own Job Object ends
+//! the daemon and Chrome when the guard exits. Claims hold within this host process only: two
+//! hosts on one machine can be handed the same port (stage C's `ports`).
 //!
 //! - [`BrowserPorts`]: Chrome's debugging port (`--cdp-port`), the stream server's port
 //!   (`AGENT_BROWSER_STREAM_PORT`) and, on Windows, agent-browser's daemon port
@@ -55,7 +60,7 @@ impl BrowserPorts {
 
 /// One browser session's claims: its name, its ports and, on macOS and Linux, its socket
 /// folder. Dropping it releases the ports and removes the folder; drop it only after the
-/// launch's process tree has exited.
+/// agent's process tree was killed (see the module's documentation for what can outlive that).
 #[derive(Debug)]
 pub(crate) struct BrowserSession {
     /// agent-browser's session name, `{session_id}`.
