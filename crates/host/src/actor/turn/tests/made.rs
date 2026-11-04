@@ -6,10 +6,12 @@
 use std::path::Path;
 
 use clauseo_protocol::{
-    CommandOutcome, DomainEvent, ErrorCode, FolderRefId, HostCommand, MatterSource, Title,
+    CommandOutcome, DomainEvent, ErrorCode, FolderRefId, FolderSupportKind, HostCommand,
+    MatterSource, Title,
 };
 
 use super::rig::Rig;
+use crate::agent::folder_support::{Answer, CheckSource};
 use crate::error::Error;
 use crate::pipeline::tests::support::TempDir;
 
@@ -28,6 +30,11 @@ fn create(source: MatterSource) -> HostCommand {
         client: None,
         next_date: None,
     }
+}
+
+/// Makes the folder check answer `network` for the next create, whatever its folder.
+fn folder_check_says_network(rig: &mut Rig) {
+    rig.actor.folder_check = CheckSource::Fixed(Answer::Known(Some(FolderSupportKind::Network)));
 }
 
 /// The matters' histories under the data folder.
@@ -178,5 +185,85 @@ fn a_stored_matter_whose_reply_was_lost_is_kept() {
         rows.iter().any(|row| row.folder_path == path),
         "the row is stored"
     );
+    rig.finish();
+}
+
+/// A new folder's create that succeeds keeps the folder check's answer for its row.
+#[test]
+fn a_created_matter_keeps_its_folder_answer() {
+    let mut rig = Rig::start("made-answer", "");
+    let papers = TempDir::new("made-answer-papers");
+    let source = MatterSource::NewFolder {
+        folder: folder_ref(&mut rig, papers.path()),
+    };
+    folder_check_says_network(&mut rig);
+
+    let answer = rig.dispatch(10, create(source)).unwrap();
+    let CommandOutcome::MatterCreated { matter } = answer else {
+        panic!("{answer:?}");
+    };
+    assert_eq!(
+        rig.actor.folder_supports.get(&matter),
+        Some(&FolderSupportKind::Network)
+    );
+    rig.finish();
+}
+
+/// A create whose store refuses its commit leaves no folder answer in memory.
+#[test]
+fn a_create_the_store_refuses_leaves_no_folder_answer() {
+    let mut rig = Rig::start("made-refused-answer", "");
+    let papers = TempDir::new("made-refused-answer-papers");
+    let source = MatterSource::NewFolder {
+        folder: folder_ref(&mut rig, papers.path()),
+    };
+    folder_check_says_network(&mut rig);
+
+    store_refuses_the_next_matter(&mut rig);
+    assert!(rig.dispatch(10, create(source)).is_err());
+    assert!(rig.actor.folder_supports.is_empty());
+    rig.finish();
+}
+
+/// A create whose commit cannot be sent leaves no folder answer in memory.
+#[test]
+fn a_create_whose_commit_cannot_be_sent_leaves_no_folder_answer() {
+    let mut rig = Rig::start("made-unsent-answer", "");
+    let papers = TempDir::new("made-unsent-answer-papers");
+    let source = MatterSource::NewFolder {
+        folder: folder_ref(&mut rig, papers.path()),
+    };
+    folder_check_says_network(&mut rig);
+
+    rig.actor.failed_sends = 1;
+    let error = rig.dispatch(10, create(source)).unwrap_err();
+    assert!(matches!(error, Error::Closed), "{error:?}");
+    assert!(rig.actor.folder_supports.is_empty());
+    rig.finish();
+}
+
+/// A create whose store reply is lost, but whose row is stored, keeps the matter and its
+/// folder answer.
+#[test]
+fn a_stored_matter_whose_reply_was_lost_keeps_its_folder_answer() {
+    let mut rig = Rig::start("made-lost-answer", "");
+    let papers = TempDir::new("made-lost-answer-papers");
+    let source = MatterSource::NewFolder {
+        folder: folder_ref(&mut rig, papers.path()),
+    };
+    folder_check_says_network(&mut rig);
+
+    rig.actor.lost_replies = 1;
+    let error = rig.dispatch(10, create(source)).unwrap_err();
+    assert!(matches!(error, Error::Store(_)), "{error:?}");
+    assert!(
+        papers
+            .path()
+            .join("Smith v Jones/.clauseo/matter.json")
+            .exists(),
+        "the marker is kept"
+    );
+    let supports: Vec<_> = rig.actor.folder_supports.values().copied().collect();
+    assert_eq!(supports, [FolderSupportKind::Network]);
     rig.finish();
 }

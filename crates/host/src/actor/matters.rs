@@ -145,15 +145,20 @@ fn begin_matter(
     };
     let worker = start_worker(actor, new.id)?;
     let cancel = Arc::new(AtomicBool::new(false));
+    let check = actor.folder_check;
     let job = if let Some(registry) = import {
         MatterJob::Import {
             new: new.clone(),
             refused: refused_folders(actor),
             registry,
             cancel: Arc::clone(&cancel),
+            check,
         }
     } else {
-        MatterJob::Create(new.clone())
+        MatterJob::Create {
+            new: new.clone(),
+            check,
+        }
     };
     worker.send(job, tag)?;
     actor.work.matter_jobs += 1;
