@@ -371,3 +371,20 @@ describe("TauriTransport", () => {
     await expect(t.query("list_matters")).rejects.toMatchObject({ code: "internal" });
   });
 });
+
+// UD1: R20's setup wire is a stub until stage D's P5 brings desktop's `setup` command and stream arm: no event ever
+// arrives, so the first run holds nothing back, and a setup command does nothing. count_ui (S21) is on the wire already.
+test("the setup wire is a stub: onSetup hears nothing, setup does nothing, and countUi invokes count_ui", async () => {
+  const t = new TauriTransport({ warn: () => {}, nextFrame: () => {} });
+  // it takes no listener at all: there is nothing to hear
+  expect(t.onSetup.length).toBe(0);
+  t.onSetup()();
+  await settle();
+  await expect(t.setup()).resolves.toBeUndefined();
+  expect(invoked.map((c) => c.command)).not.toContain("setup");
+  await t.countUi({ onboarding_step: { step: "welcome_shown" } });
+  expect(invoked.at(-1)).toEqual({
+    command: "count_ui",
+    args: { event: { onboarding_step: { step: "welcome_shown" } } },
+  });
+});

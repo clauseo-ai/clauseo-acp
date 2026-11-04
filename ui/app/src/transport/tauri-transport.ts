@@ -34,6 +34,7 @@ import type {
   RevealTarget,
   StreamId,
   ThreadId,
+  UiCount,
   ViewPosition,
 } from "./protocol.ts";
 import { LimitsFeed, limitsOf, type LimitsSource } from "./limits-feed.ts";
@@ -285,6 +286,17 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
   }
   resubscribe(stream: StreamId, after: ViewPosition | null): void {
     this.#subs.resubscribe(stream, after);
+  }
+  // A stub of R20's setup wire (store/setup.ts's SetupSource): desktop's `setup` command and stream arm come with
+  // stage D's P5. Until then no SetupEvent arrives, so the first run shows its first screen but no install line and no
+  // sign-in gate; with no state to act on no setup command can be pressed, and one sent anyway does nothing.
+  onSetup(): () => void {
+    return () => {};
+  }
+  async setup(): Promise<void> {}
+  /** Counts one event only the webview sees (S21's `count_ui`). */
+  async countUi(event: UiCount): Promise<void> {
+    await call(commands.countUi(event));
   }
 }
 
