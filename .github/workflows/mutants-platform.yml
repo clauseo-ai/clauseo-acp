@@ -3,7 +3,8 @@
 # `cfg(windows)` or `cfg(target_os = "macos")` mutant builds the same binary as the code and comes
 # back missed. Here those files are mutated where they compile.
 #
-# - Weekly, Sundays at 02:07 UTC, and by hand (workflow_dispatch, which needs write access). A
+# - By hand only until after the release (workflow_dispatch, which needs write access; the weekly
+#   Sunday 02:07 UTC run is off, Rohan's decision 2026-11-04). A
 #   dispatch can run one job (`only`), to check a pull request's tests against that job's
 #   mutants; the other jobs then run on ubuntu and skip every step, so they hold no Windows or
 #   macOS runner. No pull request or push event, so it never takes a runner from a pull request:
@@ -45,8 +46,9 @@
 name: mutants-platform
 
 on:
-  schedule:
-    - cron: "7 2 * * 0"
+  # No schedule until after the release (Rohan's decision, 2026-11-04: mutation testing stops, and
+  # no "kill the mutant" pull requests meanwhile); on demand only. To restore the weekly run, put
+  # back `schedule:` with `- cron: "7 2 * * 0"`.
   workflow_dispatch:
     inputs:
       only:

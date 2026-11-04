@@ -490,7 +490,10 @@ jobs:
   #   also does not build on Windows ARM64 (#41).
   mutants:
     name: mutants
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    # On demand only (Rohan's decision, 2026-11-04): mutation testing stops until after the release,
+    # and no "kill the mutant" pull requests meanwhile. To bring the nightly run back, put
+    # `github.event_name == 'schedule' ||` in front again.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     continue-on-error: true
     # Must exceed the setup (apt, xtask's build) plus `MUTANTS_TIMEOUT` and `MUTANTS_KILL_GRACE`
