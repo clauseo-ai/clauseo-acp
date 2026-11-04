@@ -113,7 +113,7 @@ pub(super) fn session_loads(
             "a forced-ask Claude launch has no guard hook to give: the launch is refused"
         );
         return Err(Error::refused(
-            ErrorCode::AgentLaunchFailed,
+            ErrorCode::AgentGuardMissing,
             "this matter's folder is unprotected, and the guard that makes Claude ask before \
              each change could not be set up",
         ));

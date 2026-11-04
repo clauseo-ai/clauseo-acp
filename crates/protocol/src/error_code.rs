@@ -187,6 +187,9 @@ error_codes! {
     SigninPolicyUnreadable = "signin.policy_unreadable", retryable: false, meaning: "The firm's \
         policy cannot be read and once set this agent's firm plan, so sign-in and launch are \
         refused rather than sent to a plan login.";
+    AgentGuardMissing = "agent.guard_missing", retryable: false, meaning: "A Claude launch that \
+        must ask before every change could not set up the guard that makes it ask, so it was \
+        not started.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

@@ -87,6 +87,13 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (247, 0x6183_35df_db2e_e546),
     ),
     (
+        "added/turn_failed-AgentGuardMissing",
+        include_bytes!("added/turn_failed-AgentGuardMissing.jsonl"),
+        include_bytes!("added/turn_failed-AgentGuardMissing.msgpack"),
+        (347, 0xa941_6002_a1cf_91e7),
+        (248, 0x0a24_9e02_11c7_988d),
+    ),
+    (
         "added/agent_named",
         include_bytes!("added/agent_named.jsonl"),
         include_bytes!("added/agent_named.msgpack"),

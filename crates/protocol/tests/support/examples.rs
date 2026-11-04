@@ -33,6 +33,9 @@ use crate::fixtures::{
     permission_request_id, raw, short, thread_id, tool_call_id, turn_id,
 };
 
+#[path = "examples/setup.rs"]
+mod setup;
+
 /// A tool call with every field filled.
 pub fn tool_call_started() -> ToolCallStarted {
     ToolCallStarted {
@@ -192,35 +195,16 @@ pub fn later_variants() -> Vec<DomainEvent> {
             detail: Some("no file permissions".to_owned()),
         }
         .into(),
-    ]
-    .into_iter()
-    .chain(setup_codes().map(|code| {
         TurnFailed {
             turn: turn_id(3),
-            code,
-            detail: Some("an install or sign-in stopped".to_owned()),
+            code: ErrorCode::AgentGuardMissing,
+            detail: Some("the guard hook has no program".to_owned()),
         }
-        .into()
-    }))
-    .collect()
-}
-
-/// The install and sign-in codes of decision record 0048, each in a `TurnFailed` of
-/// [`later_variants`].
-fn setup_codes() -> [ErrorCode; 11] {
-    [
-        ErrorCode::AgentInstallOffline,
-        ErrorCode::AgentInstallBlocked,
-        ErrorCode::AgentInstallDiskFull,
-        ErrorCode::AgentInstallFailed,
-        ErrorCode::SigninCancelled,
-        ErrorCode::SigninLinkExpired,
-        ErrorCode::SigninNoPlan,
-        ErrorCode::SigninDeviceCodeOff,
-        ErrorCode::SigninPortBusy,
-        ErrorCode::SigninFailed,
-        ErrorCode::SigninPolicyUnreadable,
+        .into(),
     ]
+    .into_iter()
+    .chain(setup::turns())
+    .collect()
 }
 
 /// One example of every known event kind, in `DomainEvent::KINDS` order.
