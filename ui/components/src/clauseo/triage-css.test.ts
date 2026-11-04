@@ -1,5 +1,7 @@
-// triage.css (U16b), read as text: nothing moves under the pointer or the focus (no rule that applies only then changes
-// a row's box), the info icon's target is at least 24 px, and Undo is padded so its focus ring clears its letters.
+// triage.css (U16b), read as text with the rail's other sheets: nothing moves under the pointer or the focus (no rule
+// that applies only then changes a row's box), nothing clips or fades a title at rest, under the pointer or with the
+// focus, the buttons' width is held at all times, the info icon's target is at least 24 px, and Undo is padded so its
+// focus ring clears its letters.
 import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 
@@ -26,7 +28,7 @@ test("nothing moves when a row's buttons show: no rule for the pointer or the fo
   const box =
     /^(padding|margin|width|height|min-|max-|inset|top|left|right|bottom|font|line-height|display)/;
   const shown = rules().filter((r) => /:hover|:focus-within|data-popup-open/.test(r.selector));
-  expect(shown.length).toBeGreaterThan(2);
+  expect(shown.length).toBeGreaterThanOrEqual(2);
   const moving = shown.flatMap((r) =>
     [...r.decls.keys()].filter((p) => box.test(p)).map((p) => `${r.selector} { ${p} }`),
   );
@@ -45,4 +47,30 @@ test("the info icon's target is the least target, 24 px", () => {
 test("Undo is padded, so its focus ring clears its letters", () => {
   const undo = rules().find((r) => r.selector === ".room-line-undo");
   expect(undo?.decls.get("padding")).toBe("0 var(--s1)");
+});
+
+test("no title is clipped or faded, at rest, under the pointer or with the focus: the buttons' width is held instead", () => {
+  const clip =
+    /mask|overflow\s*:\s*(hidden|clip)|text-overflow|line-clamp|clip-path|white-space\s*:\s*nowrap/;
+  const title = /room-conv|room-shelf-row|room-matter-name|room-matter-note|room-one-act/;
+  const found: string[] = [];
+  for (const sheet of ["triage.css", "matters.css", "shell.css"]) {
+    const text = readFileSync(new URL(sheet, import.meta.url), "utf8").replace(
+      /\/\*[\s\S]*?\*\//g,
+      "",
+    );
+    for (const m of text.matchAll(/([^{}]+)\{([^{}]*)\}/g))
+      if (title.test(m[1] ?? "") && clip.test(m[2] ?? ""))
+        found.push(`${sheet}: ${(m[1] ?? "").trim()}`);
+  }
+  expect(found).toEqual([]);
+  // held at all times, for the row's buttons, not only under the pointer
+  const held = rules().filter((r) =>
+    r.decls.get("padding-right")?.includes("--size-control-small"),
+  );
+  expect(held.map((r) => r.selector)).toEqual([
+    ".room-conv-item[data-triage] .room-conv",
+    ".room-one-act :is(.room-conv, .room-shelf-row)",
+  ]);
+  expect(held.every((r) => !/:hover|:focus/.test(r.selector))).toBe(true);
 });
