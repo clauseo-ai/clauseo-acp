@@ -1,6 +1,7 @@
 //! The host's log file (decision record 0047): `host.log` in [`Locations::log_dir`], warn and
-//! error from every target plus the host's lifecycle lines ([`LIFECYCLE`]), each line its UTC
-//! RFC 3339 time, level, target, message and fields.
+//! error from Clauseo's own crates (`clauseo_*` targets; other crates' events never) plus the
+//! host's lifecycle lines ([`LIFECYCLE`]), each line its UTC RFC 3339 time, level, target,
+//! message and fields. A deleted log folder is made again at the next write.
 //!
 //! - A caller formats its line and hands it to a bounded channel ([`CHANNEL_LINES`]) with
 //!   `try_send`; a full channel drops the line and counts it, so no thread ever waits on the
@@ -13,8 +14,8 @@
 //! - Ids, codes and kinds only, never matter content: a site logs a matter, thread or turn id,
 //!   an error through [`Cause`], an exit code, an agent id; never a path, a file name, a prompt,
 //!   agent text, a title or a settings value.
-//! - The panic hook ([`panic`]) writes each panic's message and location, then runs the hook
-//!   that was set before.
+//! - The panic hook ([`panic`]) writes each panic's location and thread, and its message only
+//!   when that is a `&'static str` (code text), then runs the hook that was set before.
 //! - [`LogGuard`]'s drop waits at most [`FLUSH_WAIT`] for the queued lines.
 
 use std::io;
@@ -111,7 +112,7 @@ impl LogGuard {
         self.shared.is_some()
     }
 
-    /// The lines dropped since the last `dropped N lines` line.
+    /// The lines dropped and not yet named by a written `dropped N lines` line.
     pub fn dropped(&self) -> u64 {
         self.shared
             .as_ref()
@@ -191,14 +192,18 @@ pub(crate) fn build<S: Sink>(
     Some((Dispatch::new(subscriber), guard))
 }
 
-/// What the file keeps: warn and error from every target, info from lifecycle targets.
+/// What the file keeps: warn and error from `clauseo_*` targets, and info from their
+/// lifecycle targets. Other crates' events never go in: a dependency's error can hold a
+/// request's whole params (agent-client-protocol logs its errors' data at warn), so prompt or
+/// file text.
 fn kept(meta: &Metadata<'_>) -> bool {
     kept_target(*meta.level(), meta.target())
 }
 
 /// [`kept`] for one level and target.
 fn kept_target(level: Level, target: &str) -> bool {
-    level <= Level::WARN || (level == Level::INFO && is_lifecycle(target))
+    target.starts_with("clauseo_")
+        && (level <= Level::WARN || (level == Level::INFO && is_lifecycle(target)))
 }
 
 /// A `clauseo_*` crate's lifecycle target, such as [`LIFECYCLE`].
@@ -211,6 +216,23 @@ pub(crate) fn stamp() -> String {
     let mut text = String::new();
     let _never_fails = SystemTime.format_time(&mut TimeWriter::new(&mut text));
     text
+}
+
+/// Where `line` is cut: its end, or the last char boundary at or before [`LINE_MAX`] (a
+/// UTF-8 continuation byte is never the first byte cut away).
+fn line_end(line: &[u8]) -> usize {
+    if line.len() <= LINE_MAX {
+        return line.len();
+    }
+    let mut end = LINE_MAX;
+    while end > 0
+        && line
+            .get(end)
+            .is_some_and(|byte| byte & 0b1100_0000 == 0b1000_0000)
+    {
+        end -= 1;
+    }
+    end
 }
 
 /// The formatter's writer: each formatted line goes on the channel or is counted as dropped.
@@ -233,7 +255,7 @@ struct Line<'a>(&'a Lines);
 
 impl io::Write for Line<'_> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let mut line = buf.get(..LINE_MAX).unwrap_or(buf).to_vec();
+        let mut line = buf.get(..line_end(buf)).unwrap_or(buf).to_vec();
         if line.len() < buf.len() {
             line.push(b'\n');
         }

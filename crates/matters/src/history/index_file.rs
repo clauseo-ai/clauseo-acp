@@ -58,31 +58,28 @@ fn state_of(cache: &StatCache) -> State {
     state
 }
 
-/// The cache entries of `state`, or why it is not a cache this module wrote.
-fn entries_of(state: &State) -> Result<Vec<CacheEntry>, String> {
+/// The cache entries of `state`, or why it is not a cache this module wrote: a fixed kind,
+/// never an entry's path, so the log holds no file name (decision record 0047).
+fn entries_of(state: &State) -> Result<Vec<CacheEntry>, &'static str> {
     let mut entries = Vec::with_capacity(state.entries().len());
     let mut previous: Option<&[u8]> = None;
     for entry in state.entries() {
         let path: &[u8] = entry.path(state);
         if previous.is_some_and(|before| before >= path) {
-            return Err(format!("{path:?} is out of order"));
+            return Err("out_of_order");
         }
         previous = Some(path);
         let path = std::str::from_utf8(path)
             .ok()
             .and_then(|text| MatterPath::new(text).ok())
-            .ok_or_else(|| format!("{path:?} is not a matter path"))?;
+            .ok_or("not_matter_path")?;
         if entry.mode != Mode::FILE {
-            return Err(format!(
-                "{} has mode {:o}",
-                path.as_str(),
-                entry.mode.bits()
-            ));
+            return Err("mode");
         }
         let unread = entry.flags.contains(Flags::SKIP_WORKTREE);
         let skipped = entry.flags.contains(Flags::INTENT_TO_ADD);
         let empty = entry.id == ObjectId::empty_blob(HashKind::Sha1);
-        let oid = to_oid(&entry.id).map_err(|err| err.to_string())?;
+        let oid = to_oid(&entry.id).map_err(|_not_sha1| "object_id")?;
         let state = match (unread, skipped) {
             _ if entry.flags.stage_raw() != 0 => None,
             (false, false) => Some(EntryState::Read(oid)),
@@ -90,8 +87,7 @@ fn entries_of(state: &State) -> Result<Vec<CacheEntry>, String> {
             (false, true) => empty.then_some(EntryState::Skipped),
             (true, true) => None,
         };
-        let state =
-            state.ok_or_else(|| format!("{} has flags {:?}", path.as_str(), entry.flags))?;
+        let state = state.ok_or("flags")?;
         let stat = Stat {
             mtime: file_time(entry.stat.mtime),
             ctime: file_time(entry.stat.ctime),
@@ -117,12 +113,10 @@ pub(super) fn load(path: &Path) -> Result<Option<StatCache>, Error> {
         thread_limit: Some(1),
         ..decode::Options::default()
     };
-    let index = match gix::index::File::at(path, HashKind::Sha1, false, options) {
-        Ok(index) => index,
-        Err(err) => {
-            tracing::warn!(error = %err, "the stat cache does not read");
-            return Ok(None);
-        }
+    let Ok(index) = gix::index::File::at(path, HashKind::Sha1, false, options) else {
+        // gix's error names the file: the kind is all the log may hold.
+        tracing::warn!(reason = "decode", "the stat cache does not read");
+        return Ok(None);
     };
     match entries_of(&index) {
         Ok(entries) => Ok(Some(StatCache {
@@ -130,7 +124,7 @@ pub(super) fn load(path: &Path) -> Result<Option<StatCache>, Error> {
             written_at: Some(written_at),
         })),
         Err(reason) => {
-            tracing::warn!(%reason, "the stat cache does not read");
+            tracing::warn!(reason, "the stat cache does not read");
             Ok(None)
         }
     }

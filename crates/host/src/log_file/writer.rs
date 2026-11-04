@@ -22,9 +22,11 @@ const BATCH_BYTES: usize = 64 * 1024;
 
 /// Where lines go: `host.log` and its rotations, or a test's stand-in.
 pub(crate) trait Sink: Send + 'static {
-    /// The bytes already in the current file, so a restart keeps counting toward the cap.
+    /// The bytes in the current file: read at the start, so a restart keeps counting toward
+    /// the cap, and after each write, so a partial write or a file made again counts what is
+    /// really there.
     fn len(&mut self) -> u64;
-    /// Appends `bytes` to the current file.
+    /// Appends `bytes` to the current file; an error may leave some of them written.
     fn write(&mut self, bytes: &[u8]) -> io::Result<()>;
     /// `host.1.log` becomes `host.2.log` (the old one goes), `host.log` becomes `host.1.log`,
     /// and the next write starts a new `host.log`. An error leaves the current file in place.
@@ -50,9 +52,18 @@ impl FileSink {
         }
     }
 
+    /// The open `host.log`, opened (and its folder made again, if someone deleted it) when
+    /// none is open.
     fn file(&mut self) -> io::Result<&mut File> {
         if self.file.is_none() {
-            self.file = Some(write::open_append(&self.name(0))?);
+            let path = self.name(0);
+            let opened = match write::open_append(&path) {
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                    write::create_dir_all(&self.dir).and_then(|()| write::open_append(&path))
+                }
+                opened => opened,
+            };
+            self.file = Some(opened?);
         }
         self.file
             .as_mut()
@@ -66,6 +77,11 @@ impl Sink for FileSink {
     }
 
     fn write(&mut self, bytes: &[u8]) -> io::Result<()> {
+        // A `host.log` deleted while open (with its folder, or alone) is opened again; on Unix
+        // the old handle would go on writing to a file no one can see.
+        if self.file.is_some() && !self.name(0).exists() {
+            self.file = None;
+        }
         let written = self.file()?.write_all(bytes);
         if written.is_err() {
             // The next try opens the file again: it may have gone, or its drive come back.
@@ -95,6 +111,8 @@ pub(crate) struct Writer<S> {
     /// The lines and bytes taken but not yet written.
     batch: Vec<u8>,
     batch_lines: u64,
+    /// The drops the batch's `dropped N lines` names: taken off the count once it is written.
+    batch_noted: u64,
     /// Until when the disk is left alone after a failure (on [`Writer::now`]'s clock).
     paused_until: Option<Duration>,
     shared: Arc<Shared>,
@@ -116,6 +134,7 @@ impl<S: Sink> Writer<S> {
             size,
             batch: Vec::new(),
             batch_lines: 0,
+            batch_noted: 0,
             paused_until: None,
             shared,
             now,
@@ -172,8 +191,10 @@ impl<S: Sink> Writer<S> {
     }
 
     /// Puts `dropped N lines` first in a new batch when lines were dropped since the last.
+    /// The count keeps them until the note is written, so it never reads low while a write
+    /// hangs or fails.
     fn note_drops(&mut self) {
-        let dropped = self.shared.dropped.swap(0, Ordering::Relaxed);
+        let dropped = self.shared.dropped.load(Ordering::Relaxed);
         if dropped == 0 {
             return;
         }
@@ -183,10 +204,7 @@ impl<S: Sink> Writer<S> {
         );
         if self.room_for(note.len()) {
             self.batch.extend_from_slice(note.as_bytes());
-            // A failed write of the batch counts the lines the note names back in.
-            self.batch_lines += dropped;
-        } else {
-            self.drop_lines(dropped);
+            self.batch_noted = dropped;
         }
     }
 
@@ -197,6 +215,10 @@ impl<S: Sink> Writer<S> {
             return true;
         }
         self.flush();
+        // The flush read the file's real length: a file made again may have room after all.
+        if self.size + bytes as u64 <= self.cap {
+            return true;
+        }
         if self.paused() {
             return false;
         }
@@ -218,13 +240,20 @@ impl<S: Sink> Writer<S> {
             return;
         }
         let lines = std::mem::take(&mut self.batch_lines);
+        let noted = std::mem::take(&mut self.batch_noted);
         if self.paused() {
             self.drop_lines(lines);
-        } else if self.sink.write(&self.batch).is_ok() {
-            self.size += self.batch.len() as u64;
         } else {
-            self.drop_lines(lines);
-            self.pause();
+            let written = self.sink.write(&self.batch);
+            // What is really in the file now: all of the batch, part of it, or a file made
+            // again after it was deleted.
+            self.size = self.sink.len();
+            if written.is_ok() {
+                self.shared.dropped.fetch_sub(noted, Ordering::Relaxed);
+            } else {
+                self.drop_lines(lines);
+                self.pause();
+            }
         }
         self.batch.clear();
     }

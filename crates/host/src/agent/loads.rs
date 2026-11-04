@@ -103,7 +103,6 @@ pub(crate) fn managed_mcp_path() -> PathBuf {
 pub(crate) fn mcp_control(managed: &Path) -> McpControl {
     if std::fs::metadata(managed).is_ok() {
         tracing::warn!(
-            path = %managed.display(),
             "an enterprise managed-mcp.json is present: the firm controls MCP on this machine, \
              so the session gets no MCP servers and no strict MCP config"
         );
@@ -269,8 +268,6 @@ pub(crate) fn guard_entry(guard: GuardHook<'_>) -> Option<Value> {
     } = guard;
     let (Some(command), Some(matter)) = (program.to_str(), matter.to_str()) else {
         tracing::warn!(
-            program = %program.display(),
-            matter = %matter.display(),
             "the pre-write guard's program or matter path is not UTF-8: no guard hook goes to \
              the agent"
         );

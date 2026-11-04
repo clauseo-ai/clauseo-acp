@@ -63,6 +63,8 @@ fn rotation_keeps_three_files_each_within_the_cap_and_drops_the_oldest() {
     let (dispatch, guard) = build(FileSink::new(dir.path().to_owned()), cap, real_time()).unwrap();
     // About 100 bytes a line: 400 lines are 20 caps' worth, so the first lines are long gone.
     emit(&dispatch, 400);
+    // The writer's own pace, not the guard's 500 ms, decides when the files are read.
+    drained(&guard);
     assert_eq!(guard.dropped(), 0);
     drop(guard);
     let mut names: Vec<String> = std::fs::read_dir(dir.path())
@@ -167,12 +169,14 @@ fn a_sink_that_never_returns_never_stalls_the_caller_or_the_exit() {
     drop(release);
 }
 
-/// A file in memory whose rotation fails until `rotates` is set.
+/// A file in memory whose rotation fails until `rotates` is set, and whose next write, when
+/// `partial` is set, stops half way with an error.
 #[derive(Default)]
 struct Held {
     current: Mutex<Vec<u8>>,
     rotated: Mutex<Vec<Vec<u8>>>,
     rotates: AtomicBool,
+    partial: AtomicBool,
 }
 
 #[derive(Clone)]
@@ -180,11 +184,16 @@ struct HeldSink(Arc<Held>);
 
 impl Sink for HeldSink {
     fn len(&mut self) -> u64 {
-        0
+        self.0.current.lock().unwrap().len() as u64
     }
 
     fn write(&mut self, bytes: &[u8]) -> io::Result<()> {
-        self.0.current.lock().unwrap().extend_from_slice(bytes);
+        let mut current = self.0.current.lock().unwrap();
+        if self.0.partial.swap(false, Ordering::SeqCst) {
+            current.extend_from_slice(&bytes[..bytes.len() / 2]);
+            return Err(io::Error::from(io::ErrorKind::StorageFull));
+        }
+        current.extend_from_slice(bytes);
         Ok(())
     }
 
@@ -250,11 +259,13 @@ fn a_failed_rotation_stops_at_the_cap_counts_drops_and_retries_after_the_backoff
 }
 
 #[test]
-fn the_file_keeps_warn_error_and_lifecycle_info_only() {
+fn the_file_keeps_clauseo_warn_error_and_lifecycle_info_only() {
     use tracing::Level;
     for (level, target, kept) in [
         (Level::ERROR, "clauseo_matters::walk", true),
-        (Level::WARN, "rustls", true),
+        (Level::WARN, "rustls", false),
+        (Level::ERROR, "agent_client_protocol::rpc", false),
+        (Level::INFO, "agent_client_protocol::lifecycle", false),
         (Level::INFO, "clauseo_host::lifecycle", true),
         (Level::INFO, "clauseo_sandbox::lifecycle", true),
         (Level::INFO, "clauseo_host::actor::turn", false),
@@ -266,8 +277,103 @@ fn the_file_keeps_warn_error_and_lifecycle_info_only() {
     }
 }
 
+/// A clock the test moves, in milliseconds.
+fn manual_time() -> (Arc<AtomicU64>, Box<dyn Fn() -> Duration + Send>) {
+    let clock = Arc::new(AtomicU64::new(0));
+    let read = Arc::clone(&clock);
+    (
+        clock,
+        Box::new(move || Duration::from_millis(read.load(Ordering::SeqCst))),
+    )
+}
+
 #[test]
-fn a_panic_writes_its_message_and_location() {
+fn a_partial_write_counts_what_reached_the_file_so_the_cap_holds() {
+    let held = Arc::new(Held::default());
+    held.rotates.store(false, Ordering::SeqCst);
+    held.partial.store(true, Ordering::SeqCst);
+    let (clock, time) = manual_time();
+    let cap = 1_000;
+    let (dispatch, guard) = build(HeldSink(Arc::clone(&held)), cap, time).unwrap();
+    emit(&dispatch, 5);
+    drained(&guard);
+    let half = held.current.lock().unwrap().len();
+    assert!(half > 0, "the partial write wrote nothing");
+    // After the backoff, writing goes on until the cap, which counts the half batch.
+    clock.store(
+        u64::try_from(BACKOFF.as_millis()).unwrap() + 1,
+        Ordering::SeqCst,
+    );
+    emit(&dispatch, 100);
+    drained(&guard);
+    let written = held.current.lock().unwrap().len() as u64;
+    assert!(written <= cap, "{written} bytes past the cap {cap}");
+    drop(guard);
+}
+
+#[test]
+fn another_crates_warning_never_reaches_the_file() {
+    let dir = TempDir::new("log-other-crates");
+    let (dispatch, guard) =
+        build(FileSink::new(dir.path().to_owned()), 10_000, real_time()).unwrap();
+    tracing::dispatcher::with_default(&dispatch, || {
+        tracing::warn!(target: "agent_client_protocol::rpc", params = "Draft the clause", "x");
+        tracing::error!(target: "rustls", "y");
+        tracing::warn!("a clauseo line");
+    });
+    drained(&guard);
+    drop(guard);
+    let log = read(&dir.path().join("host.log"));
+    assert!(
+        log.contains("WARN clauseo_host::log_file::tests: a clauseo line"),
+        "{log}"
+    );
+    assert!(!log.contains("agent_client_protocol"), "{log}");
+    assert!(!log.contains("Draft the clause"), "{log}");
+    assert!(!log.contains("rustls"), "{log}");
+}
+
+#[test]
+fn a_deleted_log_folder_is_made_again_and_counted_from_empty() {
+    let dir = TempDir::new("log-deleted");
+    let logs = dir.path().join("logs");
+    crate::write::create_dir_all(&logs).unwrap();
+    let cap = 2_000;
+    let (dispatch, guard) = build(FileSink::new(logs.clone()), cap, real_time()).unwrap();
+    // About 1 300 bytes: past half the cap, so 1 300 more would rotate a file not made again.
+    emit(&dispatch, 15);
+    drained(&guard);
+    assert!(read(&logs.join("host.log")).contains(" n=14\n"));
+    crate::write::remove_dir_all(&logs).unwrap();
+    tracing::dispatcher::with_default(&dispatch, || {
+        for n in 0..15 {
+            tracing::warn!(n, "after the delete");
+        }
+    });
+    drained(&guard);
+    drop(guard);
+    let log = read(&logs.join("host.log"));
+    assert!(log.contains("after the delete n=14\n"), "{log}");
+    assert!(!log.contains("a test line"), "{log}");
+    assert!(
+        !logs.join("host.1.log").exists(),
+        "the made-again file rotated at once"
+    );
+}
+
+#[test]
+fn a_cut_line_ends_on_a_char_boundary() {
+    use super::{LINE_MAX, line_end};
+    let mut line = vec![b'a'; LINE_MAX - 1];
+    line.extend_from_slice("é and more".as_bytes());
+    let end = line_end(&line);
+    assert_eq!(end, LINE_MAX - 1);
+    assert!(std::str::from_utf8(&line[..end]).is_ok());
+    assert_eq!(line_end(b"short"), 5);
+}
+
+#[test]
+fn a_panic_writes_its_location_and_only_a_literal_message() {
     let dir = TempDir::new("log-panic");
     panic::install(dir.path().to_owned());
     let line = line!() + 3;
@@ -291,6 +397,21 @@ fn a_panic_writes_its_message_and_location() {
         "{log}"
     );
     assert!(log.contains("thread=\"log-panic-test\""), "{log}");
+    // A formatted message can hold content: only its location and thread go in.
+    let secret = "Ptolemy settlement";
+    let formatted = std::thread::Builder::new()
+        .name("log-panic-formatted".to_owned())
+        .spawn(move || panic!("slicing {secret}"))
+        .unwrap()
+        .join();
+    assert!(formatted.is_err());
+    let log = read(&dir.path().join("host.log"));
+    assert!(!log.contains(secret), "{log}");
+    assert!(log.contains("thread=\"log-panic-formatted\""), "{log}");
+    assert!(
+        log.contains("message=\"message omitted (formatted)\""),
+        "{log}"
+    );
 }
 
 #[test]

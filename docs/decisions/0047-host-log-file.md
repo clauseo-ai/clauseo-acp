@@ -21,12 +21,17 @@ copy of the matter: a log holding paths, file names or prompts would itself be m
 - **The cap.** At 5 MB `host.log` becomes `host.1.log` and `host.1.log` becomes `host.2.log`,
   so three files and 15 MB at most. The rotation is written by hand (`tracing-appender` rotates
   by time only); the host gets `tracing-subscriber` with its `fmt` feature, already in the lock.
-- **What.** Warn and error from every target. Info only from a `clauseo_*` crate's
+- **What.** Warn and error from Clauseo's own crates (`clauseo_*` targets) only. Every other
+  crate's events are dropped: a dependency's error can hold a request's whole params
+  (agent-client-protocol 3.3.0 logs `?error` at warn, and its error data can hold a prompt's or
+  a file's text), and no rule here reaches its sites. Info only from a `clauseo_*` crate's
   `::lifecycle` target (`clauseo_host::lifecycle`): the log's start, the host's start and stop,
   an agent's launch (thread id, agent id, pid) and end (exit code or close reason), a matter's
   open and close by id. Debug and trace never. Each line: UTC RFC 3339 time, level, target,
-  message and fields. A panic hook writes each panic's message, `file:line` of the code and
-  thread name, then runs the hook set before it.
+  message and fields. A panic hook writes each panic's `file:line` of the code and thread
+  name, and its message only when it is a `&'static str` (`panic!("literal")`, code text); a
+  formatted message is written as `message omitted (formatted)`. Then the hook set before it
+  runs.
 - **The content rule: ids, codes and kinds only.** Allowed: matter, thread, turn, stream and
   session ids; error codes and kinds; durations, counts, exit codes and pids; agent ids, names
   and versions; non-identifying categories (the path kind such as local, UNC, mapped or
@@ -36,9 +41,9 @@ copy of the matter: a log holding paths, file names or prompts would itself be m
   site logs `error = %Cause(&error)`, which prints the `ErrorCode`s along the source chain and
   each `io::Error`'s kind, never the text; `ProfileError::log_text` does the same for the
   profile's errors. A test runs host scenarios with the file on and fails if the log holds the
-  matter's folder, its file names, the prompt, the agent's text or the thread's title. A panic
-  message is code text (the crates ban `panic!`, `unwrap` and `expect` outside tests), so it is
-  written as it is.
+  matter's folder, its file names, the prompt, the agent's text or the thread's title. A formatted
+  panic message can hold content (a slicing panic prints the string, an `expect` text can name
+  a path), so only a literal one is written.
 - **Backpressure.** A caller formats its line and hands it to a bounded channel (1024 lines)
   with `try_send`. A full channel drops the line and counts it; no thread ever waits for the
   disk. One `clauseo-log` thread writes, in batches, and puts `dropped N lines` before the next
@@ -51,11 +56,17 @@ copy of the matter: a log holding paths, file names or prompts would itself be m
   - A rotation fails (on Windows, another program holding `host.log` open): writing stops at
     the cap rather than growing past it, lines are dropped and counted, and the rotation is
     tried again after 5 s.
+  - The log folder or `host.log` is deleted while the app runs: the next write makes the folder
+    again, opens a new `host.log` and counts the cap from its real length. The panic hook makes
+    the folder again too.
+  - A write stops part way: the cap counts the bytes that reached the file.
   - The panic hook writes on a helper thread and waits for it 250 ms at most.
   - The guard's drop, at exit, waits 500 ms at most for the queued lines.
 - **Who installs it.** The app calls `clauseo_host::log_file::install(&locations)` once, first
-  thing in `run()`, keeps the guard until exit, and calls `LogGuard::flush` before an exit
-  that skips drops (`std::process::exit`).
+  thing in `run()`, and keeps the guard in its managed state. The app never drops it: the
+  default build exits through `app.exit` and tao's `process::exit`, and the e2e build through
+  `std::process::exit`. So its stopper thread (`stop_host_then_exit`) calls `LogGuard::flush`
+  (500 ms at most) right after `host_start::stop`, before both exits.
 - **Uninstall.** On Windows the NSIS uninstaller's ticked "Also delete conversations, saved
   versions and settings" box already removes `logs\` with the rest of the data folder (Tauri's
   template runs `RmDir /r $LOCALAPPDATA\${BUNDLEID}`), for the current user only and never a

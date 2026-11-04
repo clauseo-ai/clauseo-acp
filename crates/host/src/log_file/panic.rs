@@ -1,6 +1,6 @@
-//! The panic hook: a panic's message, location and thread go straight to `host.log`, written
-//! on a helper thread that the hook waits for at most [`PANIC_WAIT`], then the previous hook
-//! runs. The location is `file:line` of the code, never matter content.
+//! The panic hook: a panic's location, thread and (when it is code text) message go straight to
+//! `host.log`, written on a helper thread that the hook waits for at most [`PANIC_WAIT`], then
+//! the previous hook runs. The location is `file:line` of the code, never matter content.
 
 use std::io::Write;
 use std::panic::PanicHookInfo;
@@ -23,9 +23,17 @@ pub(super) fn install(dir: PathBuf) {
     }));
 }
 
-/// The panic's line: its message (escaped onto one line), its location and its thread.
+/// The panic's line: its location, its thread, and its message when that is code text (a
+/// `&'static str` payload, such as `panic!("literal")`), escaped onto one line. A formatted
+/// message (a `String` payload) can hold content (a slicing panic prints the string, an
+/// `expect` text a path), so it is left out.
 pub(super) fn line(info: &PanicHookInfo<'_>) -> String {
-    let message = info.payload_as_str().unwrap_or("(no message)");
+    let payload = info.payload();
+    let message = match payload.downcast_ref::<&'static str>() {
+        Some(text) => text,
+        None if payload.is::<String>() => "message omitted (formatted)",
+        None => "(no message)",
+    };
     let location = info.location().map_or_else(
         || "unknown".to_owned(),
         |at| format!("{}:{}", at.file(), at.line()),
@@ -62,8 +70,16 @@ fn write_line(dir: &Path, line: &str) {
     }
 }
 
+/// Appends `line` to `path`, making its folder again when someone deleted it.
 fn append(path: &Path, line: &str) {
-    if let Ok(mut file) = write::open_append(path) {
+    let opened = match write::open_append(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => path
+            .parent()
+            .map_or(Err(error), write::create_dir_all)
+            .and_then(|()| write::open_append(path)),
+        opened => opened,
+    };
+    if let Ok(mut file) = opened {
         let _best_effort = file.write_all(line.as_bytes());
     }
 }
