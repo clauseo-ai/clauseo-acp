@@ -3,7 +3,7 @@
 // under the open matter, moving between conversations, what a row not open says to assistive technology, and Hindi.
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { reset, userMessage, uuid } from "../testing/stream-script.ts";
 import type {
   AgentId,
@@ -22,11 +22,17 @@ import { ThreadActionsContext, type ThreadActions } from "./thread/session.ts";
 import { clockOf } from "./when.ts";
 import { defaultOutcome, mountRoom, THE_MATTER, type Harness } from "./thread/harness.ts";
 
+const NOW = Date.UTC(2026, 10, 3, 17, 0); // a fixed instant; fixture times derive from NOW
 let h: Harness | null = null;
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
+});
 afterEach(async () => {
   await h?.unmount();
   h = null;
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 const T1 = uuid(1, 1);
@@ -228,7 +234,7 @@ test("after a retry the new conversation opens with its line: the question's tim
   const open = h.one("retried-open");
   expect(open).not.toBeNull();
   const line = open?.closest("p")?.textContent ?? "";
-  const time = clockOf(at, Date.now(), Intl.DateTimeFormat().resolvedOptions().timeZone, "en").time;
+  const time = clockOf(at, NOW, Intl.DateTimeFormat().resolvedOptions().timeZone, "en").time;
   expect(line).toContain(time);
   expect(line).toContain("Retried from your question at");
   expect(line).toContain("Indemnity");
@@ -564,8 +570,8 @@ test("a stop on another day says nothing on its row; one today says when", async
     next: fakeNext({
       matters: () => [detailed(THE_MATTER)],
       threads: () => [
-        info(T1, "Lease notice", Date.now() - 2 * day),
-        info(T2, "Indemnity", Date.now()),
+        info(T1, "Lease notice", NOW - 2 * day),
+        info(T2, "Indemnity", NOW - 30 * 60_000),
         { ...thread(T3, { title: "Reply" }), seen: true },
       ],
     }),

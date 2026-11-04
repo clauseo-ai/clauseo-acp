@@ -20,8 +20,11 @@ import {
 import { loadVersions } from "./use-versions.ts";
 
 let h: VersionsHarness | null = null;
+// a fixed instant half an hour after the fixtures' NOON: the rows' "today" depends on it
+const NOW = NOON + 30 * 60_000;
 beforeEach(() => {
-  vi.setSystemTime(NOON + 30 * 60_000);
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
 });
 afterEach(async () => {
   await h?.unmount();

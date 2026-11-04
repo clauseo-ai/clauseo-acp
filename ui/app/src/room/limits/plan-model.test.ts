@@ -2,7 +2,7 @@
 // look, and when the composer warns: a session window at 95% used, or the agent's own warning under 75%.
 import { lim } from "@clauseo/components/lib/words-limits.ts";
 import { clock } from "@clauseo/components/lib/words.ts";
-import { describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type {
   AgentLimitsView,
   Freshness,
@@ -14,13 +14,18 @@ import { bandOf, lookOf, meterLine, planLine, shareLeft, warningKey } from "./pl
 import { limThread } from "@clauseo/components/lib/words-limits-thread.ts";
 import { warningWords } from "../thread/warning-words.ts";
 
-const today = (h: number, m: number) => {
-  const d = new Date();
-  d.setHours(h, m, 0, 0);
-  return d.getTime();
-};
+const NOW = Date.UTC(2026, 10, 3, 17, 0); // a fixed instant; fixture times derive from NOW
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
+});
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+const MIDNIGHT = NOW - 17 * 3_600_000; // the start of NOW's day
+const today = (h: number, m: number) => MIDNIGHT + h * 3_600_000 + m * 60_000;
 const RESET = today(18, 10);
-const NOW = today(12, 0);
 
 /** The host's tone for a share, as `limits` gives it without an agent's warning. */
 const toneOf = (used: number): MeterTone =>

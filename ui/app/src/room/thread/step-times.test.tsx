@@ -3,24 +3,28 @@
 // clock words (clock.ts stamp: the weekday before it on another day), leading the row in the work list's clock
 // column; none while a step runs; never on the folded
 // line. The suite pins TZ=UTC, so every time here is built from a local midnight, never a literal UTC date.
-import { afterEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { agentText, reset, toolCall, userMessage } from "../../testing/stream-script.ts";
 import type { ToolCallEntry, ToolCallStatus, ViewEntry } from "../../transport/protocol.ts";
 import { stamp } from "./clock.ts";
 import { mountRoom, type Harness } from "./harness.ts";
 
 let h: Harness | null = null;
+const NOW = Date.UTC(2026, 10, 3, 17, 0); // a fixed instant; fixture times derive from NOW
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
+});
 afterEach(async () => {
   await h?.unmount();
   h = null;
   document.body.replaceChildren();
+  vi.useRealTimers();
 });
 
-/** Today's local midnight, `days` away, then `h`:`m` on that day's clock. */
-const local = (days: number, hh: number, mm: number) => {
-  const d = new Date();
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + days, hh, mm).getTime();
-};
+/** NOW's day, `days` away, then `h`:`m` on that day's clock. */
+const local = (days: number, hh: number, mm: number) =>
+  NOW - 17 * 3_600_000 + days * 86_400_000 + hh * 3_600_000 + mm * 60_000;
 
 const read = (
   order: number,
