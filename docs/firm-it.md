@@ -171,8 +171,10 @@ shows the policy's value with its choices greyed out and the line "Managed by yo
 (measured on Windows Server 2025, 2026-11-03, with `ui.theme` = `dark`). A value
 of the wrong type for a known key is a warning and **still locks the key, at its default**. A
 source that cannot be read at all (a `policy.json` that does not parse, a registry read that
-fails) is skipped and **locks each security key off**: `mcp.servers` empty, `tools.web_search`
-and `tools.browser` false. A key this version does not know is only a warning, so one profile can
+fails) is skipped and **locks each security key off**: `mcp.servers` empty, `tools.web_search`,
+`tools.browser`, `privacy.counts` and `privacy.crash_reports` false. The two `privacy` keys can
+only be turned off by policy: a policy `true` for one is ignored with a warning, and the lawyer
+keeps their own switch. A key this version does not know is only a warning, so one profile can
 serve mixed versions. (`Leaf::parse`, `refuse` and `SECURITY_KEYS` in
 [`crates/settings/src/leaf.rs`](../crates/settings/src/leaf.rs); `lock_security_keys` in
 [`crates/settings/src/effective.rs`](../crates/settings/src/effective.rs).)
@@ -184,7 +186,7 @@ serve mixed versions. (`Leaf::parse`, `refuse` and `SECURITY_KEYS` in
   the table below takes a list yet). Value names ignore case; an agent id keeps
   its case ([`crates/settings/src/policy/registry.rs`](../crates/settings/src/policy/registry.rs)).
 - **`policy.json`:** the shape of the user's `settings.json`: sections `matters`, `agents`, `mcp`,
-  `ui` and `tools`, each an object; comments and trailing commas are allowed. Sample:
+  `ui`, `tools` and `privacy`, each an object; comments and trailing commas are allowed. Sample:
   [`docs/firm-it/policy.sample.json`](firm-it/policy.sample.json) (Windows paths).
 - **macOS profile:** a payload whose `PayloadType` is `ai.clauseo.desktop`, with the dotted keys as
   its keys, except agents: one key `agents`, a dictionary from agent id to launch spec. Sample:
@@ -208,6 +210,8 @@ Clauseo's readers with no warning, and fails when this table misses a key.
 | `ui.motion` | `system`, `reduce`, `full` | `system` | `REG_SZ` | `reduce` |
 | `tools.web_search` | boolean | true | `REG_DWORD` 0 or 1 | 0: agents may not search the web or read web pages. **Security key** |
 | `tools.browser` | boolean | true on macOS; false on Windows and Linux | `REG_DWORD` 0 or 1 | 0: agents do not get Clauseo's browser. **Security key** |
+| `privacy.counts` | boolean | true | `REG_DWORD` 0 or 1 | 0: Clauseo keeps and sends no anonymous usage counts, and deletes what it kept. Policy can only turn it off (1 is ignored with a warning). **Security key** |
+| `privacy.crash_reports` | boolean | false | `REG_DWORD` 0 or 1 | 0: Clauseo sends no crash reports. Policy can only turn it off (1 is ignored with a warning). **Security key** |
 
 Sources: the key list and kinds are `KEYS` in `crates/settings/src/leaf.rs`; the values and
 defaults are in [`crates/settings/src/schema.rs`](../crates/settings/src/schema.rs).
@@ -231,7 +235,6 @@ it.
 | Key | Task | Note |
 |---|---|---|
 | `update.mode` (`auto`, `notify`, `none`) | R23 | `none` for managed fleets; locks at `none` if a policy source is unreadable. Per-machine installs never update themselves anyway |
-| `privacy.counts` (default true), `privacy.crash_reports` (default false) | S21 | Policy can only force them off; both lock false if a policy source is unreadable |
 | `sandbox.required`, `sandbox.allow_unprotected_auto`, `network.upstream_proxy`, `network.ca_certs`, `network.allowed_domains` | R17 | Security keys |
 | `plans.<id>.endpoint`, `plans.<id>.provider` (`anthropic`, `bedrock`, `vertex`), `plans.<id>.env` | R20 | Security keys: your firm's own model endpoint; `env` refuses secret-shaped names |
 | `install.bundle`, `install.registry` | R20 | Security keys: an offline bundle folder, a firm npm mirror. Downloads use the `network.*` keys for proxy and CA |

@@ -1,6 +1,5 @@
 ---
 source: crates/settings/src/schema/tests.rs
-assertion_line: 16
 ---
 {
   "$defs": {
@@ -172,6 +171,22 @@ assertion_line: 16
         }
       ]
     },
+    "PrivacySettings": {
+      "description": "The `privacy` section: the anonymous usage counts and crash reports (decision record 0036).\nBoth keys are privacy keys: a policy can only turn them off. A policy `true` is ignored with a\nwarning and locks nothing; a policy `false`, a policy value that does not type, and a policy\nsource that cannot be read each lock the key `false`.",
+      "properties": {
+        "counts": {
+          "default": true,
+          "description": "Whether Clauseo keeps and sends its anonymous usage counts. On by default; nothing is\nkept or sent before the lawyer's first act.",
+          "type": "boolean"
+        },
+        "crash_reports": {
+          "default": false,
+          "description": "Whether Clauseo sends crash reports. Off by default.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "Theme": {
       "description": "The colour theme.",
       "oneOf": [
@@ -269,6 +284,14 @@ assertion_line: 16
         "servers": {}
       },
       "description": "The MCP servers a lawyer can turn on for their agents' sessions."
+    },
+    "privacy": {
+      "$ref": "#/$defs/PrivacySettings",
+      "default": {
+        "counts": true,
+        "crash_reports": false
+      },
+      "description": "What Clauseo may count and send about its own use (decision record 0036)."
     },
     "tools": {
       "$ref": "#/$defs/ToolsSettings",

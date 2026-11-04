@@ -1,9 +1,12 @@
 //! [`Effective`]: the settings `host` and `cli` run with. Read at start-up; the `ui` section
 //! changes at runtime through [`Effective::apply_ui_patch`], the `tools` section through
-//! [`Effective::apply_tools_patch`].
+//! [`Effective::apply_tools_patch`], the `privacy` section through
+//! [`Effective::apply_privacy_patch`].
 
 #[cfg(test)]
 mod mcp_tests;
+#[cfg(test)]
+mod privacy_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
@@ -18,6 +21,7 @@ use crate::files::Files;
 use crate::leaf;
 use crate::locations::Locations;
 use crate::policy::{PolicyRead, PolicySource, PolicyStatus};
+use crate::privacy::PrivacyPatch;
 use crate::schema::{AgentLaunch, McpServerLaunch, Settings};
 use crate::tools::ToolsPatch;
 use crate::ui::UiPatch;
@@ -36,6 +40,7 @@ pub struct Effective {
     locations: Locations,
     settings: Settings,
     policy: PolicyStatus,
+    policy_present: bool,
     locked: BTreeSet<String>,
     warnings: Vec<Warning>,
 }
@@ -51,7 +56,9 @@ impl Effective {
     /// known key that does not type locks the key at its default (an agent: no entry), or off for
     /// a security key (`leaf::SECURITY_KEYS`), with a warning: fail closed (Rohan, 2026-10-31). A
     /// source that cannot be read also locks each security key off (`mcp.servers` empty, each
-    /// `tools` key `false`), with a warning, since its value is unknown (2026-11-02, R21).
+    /// `tools` and `privacy` key `false`), with a warning, since its value is unknown
+    /// (2026-11-02, R21; 0036). A policy `true` for a `privacy` key is ignored with a warning
+    /// and locks nothing: a policy can only turn those off (0036).
     pub fn load(
         locations: &Locations,
         files: &dyn Files,
@@ -64,20 +71,27 @@ impl Effective {
         }
         let mut status = PolicyStatus::default();
         let mut locked = BTreeSet::new();
+        let mut policy_present = false;
         for source in policy {
             match source.read() {
                 PolicyRead::Absent => {}
                 PolicyRead::Unreadable(error) => {
+                    policy_present = true;
                     status.push_error(source.name(), error);
                     lock_security_keys(source.name(), &mut settings, &mut locked, &mut warnings);
                 }
                 PolicyRead::Read(values) => {
+                    policy_present = true;
                     if values.sets_a_value() {
                         status.push_applied(source.name());
                     }
                     let (leaves, source_warnings) = values.into_parts();
                     warnings.extend(source_warnings);
                     for leaf in leaves {
+                        if leaf.turns_on_an_off_only_key() {
+                            warnings.push(policy_on_ignored(source.name(), leaf.key()));
+                            continue;
+                        }
                         if locked.insert(leaf.key()) {
                             leaf.apply_policy(&mut settings);
                         }
@@ -89,6 +103,7 @@ impl Effective {
             locations: locations.clone(),
             settings,
             policy: status,
+            policy_present,
             locked,
             warnings,
         }
@@ -150,6 +165,40 @@ impl Effective {
         Ok(())
     }
 
+    /// Whether the `privacy` patch could be applied as far as policy goes: [`Error::Locked`],
+    /// the first locked key in field order, when it names a key policy locks. The host calls it
+    /// before it turns counts on, so a refused patch changes nothing anywhere;
+    /// [`Effective::apply_privacy_patch`] checks again.
+    pub fn check_privacy_patch(&self, patch: &PrivacyPatch) -> Result<(), Error> {
+        match patch.keys().into_iter().find(|key| self.is_locked(key)) {
+            Some(key) => Err(Error::Locked {
+                key: key.to_owned(),
+            }),
+            None => Ok(()),
+        }
+    }
+
+    /// Changes the `privacy` section: saves the patch to `settings.json` through `files`, then
+    /// sets it in memory, as [`Effective::apply_ui_patch`] does for `ui`. A patch that names
+    /// `privacy.counts` or `privacy.crash_reports` while policy locks it is refused as a whole
+    /// with [`Error::Locked`] ([`Effective::check_privacy_patch`]); nothing is written or
+    /// changed. An empty patch returns `Ok` without touching the file. A failed write returns
+    /// the error with nothing changed in memory. The counts themselves are not here: the host
+    /// turns `clauseo-counts` on or off around this call (decision record 0036).
+    pub fn apply_privacy_patch(
+        &mut self,
+        files: &dyn Files,
+        patch: &PrivacyPatch,
+    ) -> Result<(), Error> {
+        self.check_privacy_patch(patch)?;
+        if patch.keys().is_empty() {
+            return Ok(());
+        }
+        user::write_privacy_settings(&self.locations, files, patch)?;
+        self.settings.privacy.apply_patch(patch);
+        Ok(())
+    }
+
     /// How to launch the agent `id`, if one is set.
     pub fn agent(&self, id: &str) -> Option<&AgentLaunch> {
         self.settings.agents.get(id)
@@ -197,6 +246,15 @@ impl Effective {
         &self.policy
     }
 
+    /// Whether any policy source was there at start-up: one that was read, even one silent on
+    /// every key this version knows, or one that could not be read. `false` only when every
+    /// source was absent. It is the usage tally's `managed` (decision record 0036); unlike
+    /// [`PolicyStatus::is_absent`] it counts a source that set no valid value. Beside
+    /// [`Effective::is_locked`]: a present policy need not lock anything.
+    pub fn policy_present(&self) -> bool {
+        self.policy_present
+    }
+
     /// Whether policy set the dotted `key` (such as `matters.default_location`, `mcp.servers`
     /// or `agents.<id>`), so the user cannot change it.
     pub fn is_locked(&self, key: &str) -> bool {
@@ -211,6 +269,22 @@ impl Effective {
     /// What loading worked round, in the order it was found.
     pub fn warnings(&self) -> &[Warning] {
         &self.warnings
+    }
+}
+
+/// The warning for a policy `true` on a key a policy may only turn off
+/// (`leaf::OFF_ONLY_KEYS`): it is ignored and locks nothing.
+fn policy_on_ignored(name: &str, key: String) -> Warning {
+    Warning {
+        origin: Origin::Store {
+            name: name.to_owned(),
+        },
+        kind: WarningKind::InvalidValue {
+            message: format!(
+                "a policy can only turn {key} off, so true is ignored and the lawyer's switch stands"
+            ),
+            key,
+        },
     }
 }
 

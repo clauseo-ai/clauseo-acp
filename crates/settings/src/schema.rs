@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 /// The top-level keys of `settings.json`, each an object.
-pub(crate) const SECTIONS: [&str; 5] = ["matters", "agents", "mcp", "ui", "tools"];
+pub(crate) const SECTIONS: [&str; 6] = ["matters", "agents", "mcp", "ui", "tools", "privacy"];
 
 /// Every setting, as `Effective::settings` gives it: the defaults, then `settings.json`, then
 /// the policy layer.
@@ -34,6 +34,8 @@ pub struct Settings {
     pub ui: UiSettings,
     /// Clauseo's own tools an agent may use. Read at start-up; a change applies after a restart.
     pub tools: ToolsSettings,
+    /// What Clauseo may count and send about its own use (decision record 0036).
+    pub privacy: PrivacySettings,
 }
 
 /// The `matters` section.
@@ -103,6 +105,29 @@ impl Default for ToolsSettings {
         ToolsSettings {
             web_search: true,
             browser: cfg!(target_os = "macos"),
+        }
+    }
+}
+
+/// The `privacy` section: the anonymous usage counts and crash reports (decision record 0036).
+/// Both keys are privacy keys: a policy can only turn them off. A policy `true` is ignored with a
+/// warning and locks nothing; a policy `false`, a policy value that does not type, and a policy
+/// source that cannot be read each lock the key `false`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(default)]
+pub struct PrivacySettings {
+    /// Whether Clauseo keeps and sends its anonymous usage counts. On by default; nothing is
+    /// kept or sent before the lawyer's first act.
+    pub counts: bool,
+    /// Whether Clauseo sends crash reports. Off by default.
+    pub crash_reports: bool,
+}
+
+impl Default for PrivacySettings {
+    fn default() -> Self {
+        PrivacySettings {
+            counts: true,
+            crash_reports: false,
         }
     }
 }
