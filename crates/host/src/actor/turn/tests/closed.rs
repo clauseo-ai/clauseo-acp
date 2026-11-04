@@ -3,6 +3,8 @@
 //! learnt of it (a call's `Closed` answer, or the connection's end while the agent was idle),
 //! and the stop that ends it keeps the agent's own exit as the detach.
 
+use std::time::Duration;
+
 #[cfg(unix)]
 use clauseo_protocol::DetachReason;
 use clauseo_protocol::{DomainEvent, TurnId};
@@ -84,12 +86,45 @@ fn second_agent_took(rig: &mut Rig, thread: clauseo_protocol::ThreadId, second: 
 /// wait for a new agent, not go to the closed connection and fail with `agent.exited` at once.
 #[test]
 fn a_prompt_between_a_closed_answer_and_the_end_starts_a_new_agent() {
-    let mut rig = Rig::start("turn-closed-then-prompt", EXIT_ON_PROMPT);
+    closed_answer_then_prompt(
+        Rig::start("turn-closed-then-prompt", EXIT_ON_PROMPT),
+        Duration::ZERO,
+    );
+}
+
+/// [`a_prompt_between_a_closed_answer_and_the_end_starts_a_new_agent`] with the agent's exit
+/// reported a second after its connection closed, as Windows reports it late, and the second
+/// prompt sent once that `Ended` is queued: the first turn has ended before the `Ended` exists,
+/// and it must still be held, not handled while the prompt is dispatched (CI run 41755349658).
+#[cfg(unix)]
+#[test]
+fn a_prompt_between_a_closed_answer_and_a_late_end_starts_a_new_agent() {
+    closed_answer_then_prompt(
+        Rig::start_wrapped(
+            "turn-closed-then-prompt-late-end",
+            EXIT_ON_PROMPT,
+            OUTLIVES_PIPES,
+        ),
+        Duration::from_millis(1500),
+    );
+}
+
+/// The first prompt's agent exits on it; its `Ended` is held (waited for when it comes after the
+/// turn's end) before a second prompt, sent `pause` later, which must wait for a new agent.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the pause waits for a real child's late exit report, which no injected clock drives"
+)]
+fn closed_answer_then_prompt(mut rig: Rig, pause: Duration) {
     let thread = rig.thread();
     let first = send_prompt(&mut rig, 10, thread);
     rig.run_holding("the first turn's end", ended, |actor| {
         actor.threads[&thread].turn.current.is_none() && actor.work.commits == 0
     });
+    if rig.held.is_empty() {
+        rig.hold_next("the agent's end", ended);
+    }
+    std::thread::sleep(pause);
     assert!(
         rig.actor.threads[&thread].turn.agent.is_some(),
         "the agent's end is held"
