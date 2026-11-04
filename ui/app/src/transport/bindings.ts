@@ -1596,6 +1596,11 @@ export type HostCommand =
 	thread: ThreadId,
 	/**  The new title. */
 	title: Title,
+	/**
+	 *  `true` for a title Clauseo made up (the first words), which the agent's own title
+	 *  replaces; `false` for one the lawyer typed. Missing means `false`.
+	 */
+	placeholder?: boolean,
 } }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_scan?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; forget_matter?: never; mark_seen?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_tool_settings?: never; set_ui_settings?: never; undo_step?: never; update_matter?: never } | 
 /**  Archive a thread; refused while a turn runs. */
 ({ archive_thread: {
@@ -2827,6 +2832,8 @@ export type RenameSource =
 "lawyer" | 
 /**  The agent (`session_info_update`). */
 "agent" | 
+/**  Clauseo's stand-in title (the first words), until the agent's arrives. */
+"placeholder" | 
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
 

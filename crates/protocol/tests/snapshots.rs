@@ -301,6 +301,7 @@ mod host_command {
         RenameThread => rename_thread: HostCommand::RenameThread {
             thread: thread_id(2),
             title: title("Draft SPA v2"),
+            placeholder: false,
         };
         ArchiveThread => archive_thread: HostCommand::ArchiveThread { thread: thread_id(2) };
         UndoStep => undo_step: HostCommand::UndoStep {

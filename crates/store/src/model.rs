@@ -4,8 +4,8 @@ use std::path::PathBuf;
 
 use clauseo_protocol::{
     AgentId, AgentSessionId, BlobHash, BlobRef, CheckpointId, ClientName, CommandId,
-    CommandOutcome, Count, Date, Envelope, MatterId, MatterKind, Seq, StreamId, ThreadId,
-    Timestamp,
+    CommandOutcome, Count, Date, Envelope, MatterId, MatterKind, RenameSource, Seq, StreamId,
+    ThreadId, Timestamp,
 };
 
 use crate::blob::preview;
@@ -188,6 +188,8 @@ pub struct ThreadRow {
     pub agent: AgentId,
     /// Its title, once it has one.
     pub title: Option<String>,
+    /// Who set `title`; `None` when there is no title, or the row is from before schema 4.
+    pub title_source: Option<RenameSource>,
     /// The agent's session id, once attached.
     pub acp_session_id: Option<AgentSessionId>,
     /// Whether it is archived.

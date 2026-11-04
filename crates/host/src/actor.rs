@@ -58,6 +58,7 @@ mod startup;
 mod state;
 mod streams;
 mod subs;
+mod title_source;
 pub(crate) mod turn;
 
 use commands::PendingCommand;

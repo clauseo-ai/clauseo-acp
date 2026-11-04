@@ -332,6 +332,10 @@ pub enum HostCommand {
         thread: ThreadId,
         /// The new title.
         title: Title,
+        /// `true` for a title Clauseo made up (the first words), which the agent's own title
+        /// replaces; `false` for one the lawyer typed. Missing means `false`.
+        #[serde(default)]
+        placeholder: bool,
     },
     /// Archive a thread; refused while a turn runs.
     ArchiveThread {

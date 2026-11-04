@@ -142,6 +142,10 @@ mod tool_switches;
 #[cfg(test)]
 #[path = "host/tools.rs"]
 mod tools;
+
+#[cfg(test)]
+#[path = "host/titles.rs"]
+mod titles;
 #[cfg(test)]
 #[path = "host/turn.rs"]
 mod turn;

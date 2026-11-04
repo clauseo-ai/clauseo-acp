@@ -8,8 +8,8 @@
 
 use clauseo_protocol::{
     CommandEnvelope, CommandId, CommandOutcome, DomainEvent, ErrorCode, HostCommand, HostError,
-    MatterId, Principal, RenameSource, StreamId, ThreadArchived, ThreadCreated, ThreadId,
-    ThreadRenamed, Timestamp, ValidatedCommand,
+    MatterId, Principal, StreamId, ThreadArchived, ThreadCreated, ThreadId, ThreadRenamed,
+    Timestamp, Title, ValidatedCommand,
 };
 use clauseo_store::{Receipt, ThreadRow, command_hash};
 
@@ -17,7 +17,7 @@ use super::input::Reply;
 use super::matters::PendingMatter;
 use super::settings::set_tool_settings;
 use super::turn::TurnCommand;
-use super::{Actor, MatterEntry, Tag, ThreadEntry, turn};
+use super::{Actor, MatterEntry, Tag, ThreadEntry, title_source, turn};
 use crate::error::Error;
 use crate::pipeline::{Draft, Failure};
 use crate::principal::{Access, authorize};
@@ -235,10 +235,7 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
                 actor.finish_command(ctx.id, Err(error));
             }
         }
-        HostCommand::RenameThread { thread, title } => {
-            let title = clauseo_protocol::CompactString::from(title.as_str());
-            thread_command(actor, ctx, thread, ThreadChange::Rename(title));
-        }
+        HostCommand::RenameThread { .. } => rename_thread(actor, ctx, command),
         HostCommand::ArchiveThread { thread } => {
             thread_command(actor, ctx, thread, ThreadChange::Archive);
         }
@@ -442,7 +439,9 @@ fn create_thread(
         id: thread,
         matter,
         agent: agent.clone(),
+        // `CreateThread` takes no title, so the new row has neither a title nor a source.
         title: None,
+        title_source: None,
         acp_session_id: None,
         archived: false,
         created: now.wall,
@@ -478,6 +477,19 @@ fn create_thread(
         after: AfterCommand::Thread(Box::new(entry)),
     };
     actor.send_commit(draft, tag).map(|_| ())
+}
+
+/// `RenameThread`: the app's placeholder when its flag is set, else a title the lawyer typed.
+fn rename_thread(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
+    let HostCommand::RenameThread {
+        thread,
+        title,
+        placeholder,
+    } = command
+    else {
+        return;
+    };
+    thread_command(actor, ctx, thread, ThreadChange::Rename(title, placeholder));
 }
 
 /// `RenameThread` and `ArchiveThread`: the thread's stream is loaded first, so its header
@@ -519,12 +531,17 @@ fn change_thread(
     let mut row = before.clone();
     row.updated = now.wall;
     let event = match change {
-        ThreadChange::Rename(title) => {
-            row.title = Some(title.to_string());
-            Some(DomainEvent::ThreadRenamed(ThreadRenamed {
-                title,
-                by: RenameSource::Lawyer,
-            }))
+        ThreadChange::Rename(title, placeholder) => {
+            let by = title_source::rename_source(placeholder);
+            if title_source::title_may_change(before.title_source, before.title.is_some(), by) {
+                row.title = Some(title.to_string());
+                row.title_source = Some(by);
+                let title = clauseo_protocol::CompactString::from(title.as_str());
+                Some(DomainEvent::ThreadRenamed(ThreadRenamed { title, by }))
+            } else {
+                tracing::debug!(%thread, ?by, "a rename does not replace the thread's title");
+                None
+            }
         }
         ThreadChange::Archive if before.archived => None,
         ThreadChange::Archive => {
@@ -570,7 +587,8 @@ fn change_thread(
 /// What `RenameThread` or `ArchiveThread` changes.
 #[derive(Debug)]
 enum ThreadChange {
-    Rename(clauseo_protocol::CompactString),
+    /// The title, and whether it is the app's first-words placeholder (else the lawyer typed it).
+    Rename(Title, bool),
     Archive,
 }
 

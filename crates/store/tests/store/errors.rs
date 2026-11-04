@@ -62,6 +62,7 @@ fn error_codes_map() {
         matter: matter(9),
         agent: clauseo_protocol::AgentId::new("claude-code").unwrap(),
         title: None,
+        title_source: None,
         acp_session_id: None,
         archived: false,
         created: ts(0),

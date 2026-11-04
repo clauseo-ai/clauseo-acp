@@ -298,6 +298,8 @@ open_unit_enum! {
         Lawyer,
         /// The agent (`session_info_update`).
         Agent,
+        /// Clauseo's stand-in title (the first words), until the agent's arrives.
+        Placeholder,
     }
     test mod rename_source;
 }

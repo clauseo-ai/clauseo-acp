@@ -1,7 +1,8 @@
 //! The stored forms: the `events` key, the `MessagePack` envelope, and the text of ids and rows.
 
 use clauseo_protocol::{
-    Envelope, EnvelopeRead, MAX_MSGPACK_DEPTH, MatterKind, SCHEMA_VERSION, Seq, StreamId, Timestamp,
+    Envelope, EnvelopeRead, MAX_MSGPACK_DEPTH, MatterKind, RenameSource, SCHEMA_VERSION, Seq,
+    StreamId, Timestamp,
 };
 use serde::Deserialize;
 
@@ -95,6 +96,26 @@ where
 {
     text.parse()
         .map_err(|error| Error::corrupt(format!("{what} {text:?} does not parse: {error}")))
+}
+
+/// The `threads.title_source` text: the `RenameSource`'s JSON name.
+pub(crate) fn title_source_text(source: RenameSource) -> &'static str {
+    match source {
+        RenameSource::Lawyer => "lawyer",
+        RenameSource::Agent => "agent",
+        RenameSource::Placeholder => "placeholder",
+        RenameSource::Unknown => "unknown",
+    }
+}
+
+/// A `threads.title_source` read back: a name this build does not know reads as `Unknown`.
+pub(crate) fn title_source(text: &str) -> RenameSource {
+    match text {
+        "lawyer" => RenameSource::Lawyer,
+        "agent" => RenameSource::Agent,
+        "placeholder" => RenameSource::Placeholder,
+        _ => RenameSource::Unknown,
+    }
 }
 
 /// The `matters.kind` text.
