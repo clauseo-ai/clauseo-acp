@@ -1477,6 +1477,8 @@ expression: counts_schema()
         "matter.folder_unreadable",
         "matter.folder_is_matter",
         "matter.folder_in_matters_root",
+        "matter.folder_network",
+        "matter.folder_no_permissions",
         "transport.unauthorized",
         "transport.too_large",
         "settings.locked",

@@ -161,6 +161,8 @@ pub(crate) struct Actor {
     /// subscribers (`app_lists.rs`): in memory only, never logged. A matter with none reads
     /// `found`; a relocate and a forget drop its entry.
     pub(crate) folder_states: BTreeMap<MatterId, clauseo_protocol::FolderState>,
+    /// Each matter's last folder check, for its row; in memory only. None: fine or unchecked.
+    pub(crate) folder_supports: BTreeMap<MatterId, clauseo_protocol::FolderSupportKind>,
     /// The folder scans whose thread has not ended (`scan.rs`).
     pub(crate) scans: scan::Scans,
     /// The walk each scan runs: `clauseo_matters::scan_folder`, or a test's stand-in.

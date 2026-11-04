@@ -129,6 +129,7 @@ pub(super) fn forget_committed(actor: &mut Actor, matter: MatterId, durable: boo
     if durable {
         actor.search.forget(matter);
         actor.folder_states.remove(&matter);
+        actor.folder_supports.remove(&matter);
         turn::stop_agents(actor, matter);
         return;
     }

@@ -286,6 +286,23 @@ pub(super) fn on_folder_states(actor: &mut Actor, states: Vec<(MatterId, String,
     }
 }
 
+/// The folder check (`agent/folder_support.rs`) of `matter` answered `support` off the actor,
+/// at its create or at an agent launch: keep it for the matter's row (`None`, a fine folder, as
+/// no entry), and compare every row at the next flush when it changed.
+pub(crate) fn on_folder_support(
+    actor: &mut Actor,
+    matter: MatterId,
+    support: Option<clauseo_protocol::FolderSupportKind>,
+) {
+    let before = match support {
+        Some(kind) => actor.folder_supports.insert(matter, kind),
+        None => actor.folder_supports.remove(&matter),
+    };
+    if before != support {
+        actor.lists.touch_all();
+    }
+}
+
 /// `command.invalid` unless every checkpoint is a version in `matter`'s loaded timeline.
 pub(super) fn own_versions(
     actor: &Actor,

@@ -336,7 +336,13 @@ fn a_codex_launch_in_a_missing_folder_is_folder_missing() {
         off_actor_or_undo(
             Arc::new(clock),
             Job::launch(id::<MatterId>(7)),
-            move || crate::agent::codex::prepare_launch(&gone, &data, &home),
+            move || {
+                let check = crate::agent::folder_support::FolderCheck {
+                    matter: id::<MatterId>(7),
+                    source: crate::agent::folder_support::CheckSource::Windows,
+                };
+                crate::agent::codex::prepare_launch(&check, &gone, &data, &home)
+            },
             drop,
         )
     };

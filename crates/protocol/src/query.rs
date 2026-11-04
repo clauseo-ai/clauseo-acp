@@ -323,6 +323,12 @@ pub struct MatterSummary {
     /// `found`.
     #[serde(default)]
     pub folder_state: FolderState,
+    /// What keeps Codex's sandbox from working fully in its folder, on Windows, as the host last
+    /// checked it: when the matter was made and at each agent launch (an in-memory reading, not
+    /// state in the log). Missing when the folder is fine, before any check since the host
+    /// started, and off Windows.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub folder_support: Option<FolderSupportKind>,
 }
 
 open_unit_enum! {
@@ -336,6 +342,24 @@ open_unit_enum! {
         Missing,
     }
     test mod folder_state;
+}
+
+open_unit_enum! {
+    /// Why Codex's sandbox can't work fully in a matter's folder on Windows: the sandbox adds
+    /// permission entries to the folder before Codex may write there. A folder with none of
+    /// these has no value.
+    pub enum FolderSupportKind {
+        /// The lawyer can't change the folder's permissions: Codex starts, but asks before every
+        /// file edit, and its shell's writes there fail.
+        CantChangePermissions,
+        /// The folder is on a network drive: Codex can neither read nor write it, so it is not
+        /// started there (`matter.folder_network`).
+        Network,
+        /// The folder's drive keeps no permissions (FAT, exFAT): Codex is not started there
+        /// (`matter.folder_no_permissions`).
+        NoPermissions,
+    }
+    test mod folder_support_kind;
 }
 
 /// What an older host, which sent no state, means: the folder is taken as found.

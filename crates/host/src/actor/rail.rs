@@ -281,6 +281,9 @@ fn matter_row(
             .get(&row.id)
             .copied()
             .unwrap_or(FolderState::Found),
+        // As the folder check last answered at the create or an agent launch
+        // (`agent/folder_support.rs`): read from memory, never checked here.
+        folder_support: actor.folder_supports.get(&row.id).copied(),
     }
 }
 

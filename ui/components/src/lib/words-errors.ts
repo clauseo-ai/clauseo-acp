@@ -45,6 +45,8 @@ export type ErrorCode =
   | "matter.folder_unreadable"
   | "matter.folder_is_matter"
   | "matter.folder_in_matters_root"
+  | "matter.folder_network"
+  | "matter.folder_no_permissions"
   | "transport.unauthorized"
   | "transport.too_large"
   | "settings.locked"
@@ -144,6 +146,9 @@ const HI = {
   "Sign-in didn't finish. Try again.": null,
   "Clauseo can't read your firm's sign-in settings, so it won't sign in until they can be read.":
     null,
+  // hi: later
+  "Codex can't work on a network drive. Move the matter to this computer.": null,
+  "Codex can't work on a drive without file permissions. Move the matter to this computer.": null,
 } as const;
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
@@ -192,6 +197,9 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   "matter.folder_unreadable": "Clauseo can't read that folder.",
   "matter.folder_is_matter": "That folder is already a matter's, or inside one.",
   "matter.folder_in_matters_root": "That folder holds Clauseo's own data.",
+  "matter.folder_network": "Codex can't work on a network drive. Move the matter to this computer.",
+  "matter.folder_no_permissions":
+    "Codex can't work on a drive without file permissions. Move the matter to this computer.",
   "transport.unauthorized": "That wasn't allowed, so nothing changed.",
   "transport.too_large": "That is too large to send.",
   "settings.locked": "Your organisation manages that setting, so it can't be changed.",

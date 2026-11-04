@@ -1,28 +1,10 @@
 //! The folder check's answers on folders this test makes, and the admin shares on a Windows
 //! runner.
 
-#![expect(
-    unsafe_code,
-    reason = "FFI to the security calls that give the test folder its protected DACL"
-)]
-
 use std::io;
-use std::iter::once;
-use std::os::windows::ffi::OsStrExt as _;
 use std::path::{Path, PathBuf};
-use std::ptr::null_mut;
 
-use windows::Win32::Foundation::{ERROR_SUCCESS, HLOCAL, LocalFree};
-use windows::Win32::Security::Authorization::{
-    ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1, SE_FILE_OBJECT,
-    SetNamedSecurityInfoW,
-};
-use windows::Win32::Security::{
-    ACL, DACL_SECURITY_INFORMATION, GetSecurityDescriptorDacl, PROTECTED_DACL_SECURITY_INFORMATION,
-    PSECURITY_DESCRIPTOR,
-};
-use windows::core::{BOOL, PCWSTR};
-
+use super::test_dacl;
 use super::{FolderSupport, folder_support};
 use crate::test_support::TempDir;
 
@@ -190,57 +172,5 @@ fn drive_and_rest(path: &Path) -> (&str, &str) {
 
 /// Gives `path` the protected DACL that `sddl` describes.
 fn protect_with(path: &Path, sddl: &str) {
-    let text: Vec<u16> = sddl.encode_utf16().chain(once(0)).collect();
-    let mut descriptor = PSECURITY_DESCRIPTOR(null_mut());
-    // SAFETY: `text` is NUL-terminated and outlives the call; `descriptor` is a live out-pointer,
-    // and the descriptor it receives is freed by `Local` below.
-    unsafe {
-        ConvertStringSecurityDescriptorToSecurityDescriptorW(
-            PCWSTR(text.as_ptr()),
-            SDDL_REVISION_1,
-            &raw mut descriptor,
-            None,
-        )
-    }
-    .unwrap();
-    let _descriptor = Local(descriptor);
-    let mut present = BOOL(0);
-    let mut dacl: *mut ACL = null_mut();
-    let mut defaulted = BOOL(0);
-    // SAFETY: the descriptor is valid until `_descriptor` drops; the out-pointers are live.
-    unsafe {
-        GetSecurityDescriptorDacl(
-            descriptor,
-            &raw mut present,
-            &raw mut dacl,
-            &raw mut defaulted,
-        )
-    }
-    .unwrap();
-    assert!(present.as_bool(), "{sddl} has no DACL");
-    let target: Vec<u16> = path.as_os_str().encode_wide().chain(once(0)).collect();
-    // SAFETY: `target` is NUL-terminated and outlives the call; the DACL points into the
-    // descriptor, which lives until this function returns.
-    let status = unsafe {
-        SetNamedSecurityInfoW(
-            PCWSTR(target.as_ptr()),
-            SE_FILE_OBJECT,
-            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
-            None,
-            None,
-            Some(dacl.cast_const()),
-            None,
-        )
-    };
-    assert_eq!(status, ERROR_SUCCESS, "SetNamedSecurityInfoW on {path:?}");
-}
-
-/// A descriptor from `ConvertStringSecurityDescriptorToSecurityDescriptorW`, freed on drop.
-struct Local(PSECURITY_DESCRIPTOR);
-
-impl Drop for Local {
-    fn drop(&mut self) {
-        // SAFETY: the descriptor was allocated with LocalAlloc and is freed here, once.
-        unsafe { LocalFree(Some(HLOCAL(self.0.0))) };
-    }
+    test_dacl::protect_with(path, sddl).unwrap();
 }

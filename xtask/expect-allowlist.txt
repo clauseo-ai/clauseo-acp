@@ -131,7 +131,7 @@ crates/sandbox/src/proxy/upstream/macos.rs - unsafe_code
 crates/sandbox/src/proxy/upstream/windows.rs - unsafe_code
 # The folder check (src/windows.rs): its Win32 calls, and its test's DACL setup.
 crates/sandbox/src/windows.rs - unsafe_code
-crates/sandbox/src/windows/tests.rs - unsafe_code
+crates/sandbox/src/windows/test_dacl.rs - unsafe_code
 
 # clauseo-search: its write module (the private index file, and removing one to rebuild), its
 # tests' write module (each test's folder, damaged files), and the measurement's clock.

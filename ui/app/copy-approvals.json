@@ -618,6 +618,24 @@
     "by": "Rohan",
     "note": "Rohan, on the review page (H5-matters-rail, #148 5c3ad943)"
   },
+  "U3-err-matter.folder_network": {
+    "en": "Codex can't work on a network drive. Move the matter to this computer.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (folder-rights FR18)"
+  },
+  "U3-err-matter.folder_no_permissions": {
+    "en": "Codex can't work on a drive without file permissions. Move the matter to this computer.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (folder-rights FR19)"
+  },
   "U3-err-matter.codex_folder": {
     "en": "This matter's folder holds a .codex folder. Rename or remove it to use Codex here.",
     "hi": "इस मामले के फ़ोल्डर में एक .codex फ़ोल्डर है। यहाँ Codex का उपयोग करने के लिए उसका नाम बदलें या उसे हटाएँ।",

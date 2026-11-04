@@ -1,6 +1,6 @@
 ---
 source: crates/protocol/tests/snapshots.rs
-expression: "HostEvent::MattersChanged(MattersChanged\n{\n    matters:\n    vec![MatterSummary\n    {\n        matter: matter_id(1), name: \"Smith v Jones\".to_owned(), kind:\n        MatterKind::Folder, last_activity:\n        Some(Timestamp::new(1_760_000_009_000).unwrap()), client:\n        Some(ClientName::new(\"Rathi Steels\").unwrap()), next_date: None,\n        pinned: true, last_opened: None, status: MatterStatus::Stopped\n        { at: Timestamp::new(1_760_000_008_000).unwrap() }, folder_display:\n        \"Documents/Clauseo/Smith v Jones\".to_owned(), folder_state:\n        FolderState::Missing,\n    }], removed: vec![matter_id(3)], all: false,\n})"
+expression: "HostEvent::MattersChanged(MattersChanged\n{\n    matters:\n    vec![MatterSummary\n    {\n        matter: matter_id(1), name: \"Smith v Jones\".to_owned(), kind:\n        MatterKind::Folder, last_activity:\n        Some(Timestamp::new(1_760_000_009_000).unwrap()), client:\n        Some(ClientName::new(\"Rathi Steels\").unwrap()), next_date: None,\n        pinned: true, last_opened: None, status: MatterStatus::Stopped\n        { at: Timestamp::new(1_760_000_008_000).unwrap() }, folder_display:\n        \"Documents/Clauseo/Smith v Jones\".to_owned(), folder_state:\n        FolderState::Missing, folder_support:\n        Some(FolderSupportKind::CantChangePermissions),\n    }], removed: vec![matter_id(3)], all: false,\n})"
 ---
 {
   "matters_changed": {
@@ -18,7 +18,8 @@ expression: "HostEvent::MattersChanged(MattersChanged\n{\n    matters:\n    vec!
           }
         },
         "folder_display": "Documents/Clauseo/Smith v Jones",
-        "folder_state": "missing"
+        "folder_state": "missing",
+        "folder_support": "cant_change_permissions"
       }
     ],
     "removed": [
