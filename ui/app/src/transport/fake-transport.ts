@@ -1,7 +1,7 @@
 // A transport for tests and the room's probe build (room/probe-main.tsx): the same channel reader and subscriptions as
 // the Tauri one, with the host replaced by a recorder. `deliver` plays a channel message as the bridge would send it;
 // `host` scripts the answers. It counts no messages: that bookkeeping is the desktop transport's own. With `host.next` it also answers the calls the host
-// doesn't have yet (room/host-next.ts), which the desktop transport never sends, and `appEvent` plays H4's events.
+// beyond the generated ones (room/host-next.ts), scripted, and `appEvent` plays H4's events as the room reads them.
 import type {
   AppEvent,
   NextCommand,

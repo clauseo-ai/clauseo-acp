@@ -4,7 +4,7 @@
 // With the NextHost's matters part (host-next.ts: H3, H5, H6 and H20's rows) the list is `list_matters`'s MatterInfo,
 // each row's status is the host's (H5), and opening a matter sends open_matter. H4's app events (the app part) keep the
 // list current, applied once a frame. H6's seen marks are the conversations' (conversations.ts). Without the matters
-// part (today's desktop host) the list is today's `list_matters`, with no dates, pins or statuses, and a row says what
+// part (a host without H5) the list is `list_matters`, with no dates, pins or statuses, and a row says what
 // it's doing only from the thread headers the room holds: the open conversation's thread, and the threads of
 // conversations the lawyer left while they were working, kept subscribed until they rest. A list answer older than the list shown is dropped.
 import { frameBatch, type Batch } from "../store/batch.ts";
@@ -82,6 +82,22 @@ const undetailed = (m: MatterSummary): MatterInfo => ({
   status: "idle",
 });
 
+/** A list with H4's changed rows in place of their matter's (a new matter's added last, as the newest) and the matters
+ * that left it taken off. */
+export function merged(
+  list: readonly MatterInfo[],
+  rows: readonly MatterInfo[],
+  removed: readonly MatterId[],
+): readonly MatterInfo[] {
+  if (rows.length === 0 && removed.length === 0) return list;
+  const gone = new Set(removed);
+  const byId = new Map(rows.map((m) => [m.matter, m]));
+  const out = list.filter((m) => !gone.has(m.matter)).map((m) => byId.get(m.matter) ?? m);
+  const had = new Set(list.map((m) => m.matter));
+  for (const m of rows) if (!had.has(m.matter) && !gone.has(m.matter)) out.push(m);
+  return out;
+}
+
 /** H5's status as the row's state; a folder that moved says so over any status. */
 export function rowOf(info: MatterInfo): RowStatus | null {
   if (info.folder_state === "missing") return { state: "moved" };
@@ -145,8 +161,10 @@ export class Matters {
   #heard: AppEvent[] = [];
   #heardAt = 0;
   #cancelHeard: (() => void) | null = null;
-  /** Matters removed before any list arrived: taken out of the first list applied, which may not know yet. */
+  /** Matters removed, and rows changed, before any list arrived: applied to the first list, which may not know yet. A
+   * whole list heard (`all`) is newer than both, so it drops them. */
   readonly #removedEarly = new Set<MatterId>();
+  readonly #changedEarly = new Map<MatterId, MatterInfo>();
   readonly #listeners = new Set<() => void>();
   #view: MattersView;
   /** Thread views the room watches without the matters part, for their headers: the open thread, and threads of left
@@ -341,11 +359,22 @@ export class Matters {
   /** An app event (H4): held until the frame, so a burst is one apply and one render. */
   #hear(event: AppEvent): void {
     if (!this.#live) return;
-    // before the first list there is no list to take a matter off: keep the ids for the list to come, and take no
-    // ticket, so the read on its way still applies
-    if (this.#view.phase !== "ready" && "matters_removed" in event) {
-      for (const id of event.matters_removed.matters) this.#removedEarly.add(id);
+    // before the first list there is no list to change a row of or take a matter off: keep the rows and the ids for
+    // the list to come, and take no ticket, so the read on its way still applies
+    if (this.#view.phase !== "ready" && "matters_changed" in event && !event.matters_changed.all) {
+      for (const m of event.matters_changed.matters) {
+        this.#changedEarly.set(m.matter, m);
+        this.#removedEarly.delete(m.matter);
+      }
+      for (const id of event.matters_changed.removed) {
+        this.#removedEarly.add(id);
+        this.#changedEarly.delete(id);
+      }
       return;
+    }
+    if ("matters_changed" in event && event.matters_changed.all) {
+      this.#removedEarly.clear();
+      this.#changedEarly.clear();
     }
     this.#heard.push(event);
     this.#heardAt = this.#ticket += 1;
@@ -363,11 +392,8 @@ export class Matters {
     let changed = false;
     for (const event of events) {
       if ("matters_changed" in event) {
-        matters = event.matters_changed.matters;
-        changed = true;
-      } else if ("matters_removed" in event) {
-        const gone = new Set(event.matters_removed.matters);
-        matters = matters.filter((m) => !gone.has(m.matter));
+        const change = event.matters_changed;
+        matters = change.all ? change.matters : merged(matters, change.matters, change.removed);
         changed = true;
       }
       // threads_changed is the conversations' (conversations.ts); a matter row's status is H5's
@@ -385,9 +411,12 @@ export class Matters {
 
   /** A new list: the open matter follows it, or, gone or not yet chosen, the matter to reopen takes its place. */
   #list(listed: readonly MatterInfo[]): void {
-    const early = this.#removedEarly;
-    const matters = early.size === 0 ? listed : listed.filter((m) => !early.has(m.matter));
-    early.clear();
+    const matters =
+      this.#removedEarly.size === 0 && this.#changedEarly.size === 0
+        ? listed
+        : merged(listed, [...this.#changedEarly.values()], [...this.#removedEarly]);
+    this.#removedEarly.clear();
+    this.#changedEarly.clear();
     const was = this.#view.open;
     const open =
       (was === null ? undefined : matters.find((m) => m.matter === was.matter)) ??

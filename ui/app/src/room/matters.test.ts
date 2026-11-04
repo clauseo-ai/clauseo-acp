@@ -212,29 +212,47 @@ test("with a NextHost: the last opened reopens, opening sends open_matter, and n
   expect(transport.only("query")).toEqual([]);
 });
 
-test("matters_changed updates a row, and matters_removed takes it off", async () => {
+test("matters_changed updates a row in place, adds a new one last, and its removed takes one off", async () => {
   const { matters, transport, settle } = await rig(nextHost(() => [info(A), info(B)]));
   expect(matters.view().status.has(A.matter)).toBe(false);
   transport.appEvent({
     matters_changed: {
-      matters: [info(A, { status: "needs_answer", client: "Asha Rao" }), info(B)],
+      matters: [info(A, { status: "needs_answer", client: "Asha Rao" })],
+      removed: [],
+      all: false,
     },
   });
   await settle();
   expect(matters.view().status.get(A.matter)).toEqual({ state: "question" });
   expect(matters.view().matters.find((m) => m.matter === A.matter)?.client).toBe("Asha Rao");
-  transport.appEvent({ matters_removed: { matters: [A.matter] } });
+  expect(matters.view().matters.map((m) => m.matter)).toEqual([A.matter, B.matter]);
+  transport.appEvent({
+    matters_changed: { matters: [info(SCRATCH)], removed: [A.matter], all: false },
+  });
   await settle();
-  expect(matters.view().matters.map((m) => m.matter)).toEqual([B.matter]);
+  expect(matters.view().matters.map((m) => m.matter)).toEqual([B.matter, SCRATCH.matter]);
+});
+
+test("a whole list (all) replaces the rows: a row not in it goes", async () => {
+  const { matters, transport, settle } = await rig(nextHost(() => [info(A), info(B)]));
+  transport.appEvent({
+    matters_changed: { matters: [info(B, { pinned: true })], removed: [], all: true },
+  });
+  await settle();
+  expect(matters.view().matters).toEqual([info(B, { pinned: true })]);
 });
 
 test("app events are applied once a frame: a burst of them is one view change", async () => {
   const { matters, transport, settle } = await rig(nextHost(() => [info(A), info(B)]));
   let changes = 0;
   const stop = matters.subscribe(() => (changes += 1));
-  transport.appEvent({ matters_changed: { matters: [info(A, { status: "working" }), info(B)] } });
-  transport.appEvent({ matters_changed: { matters: [info(A), info(B, { status: "ready" })] } });
-  transport.appEvent({ matters_removed: { matters: [A.matter] } });
+  transport.appEvent({
+    matters_changed: { matters: [info(A, { status: "working" }), info(B)], removed: [], all: true },
+  });
+  transport.appEvent({
+    matters_changed: { matters: [info(B, { status: "ready" })], removed: [], all: false },
+  });
+  transport.appEvent({ matters_changed: { matters: [], removed: [A.matter], all: false } });
   // nothing applies before the frame
   expect(changes).toBe(0);
   await settle();
@@ -262,7 +280,7 @@ test("an older list_matters answer never overwrites a newer one, nor an app even
   const { host, asked } = heldLists();
   const { matters, transport, settle } = await rig(host);
   // the first read is on its way; an app event arrives first
-  transport.appEvent({ matters_changed: { matters: [info(A), info(B)] } });
+  transport.appEvent({ matters_changed: { matters: [info(A), info(B)], removed: [], all: true } });
   await settle();
   expect(matters.view().matters.map((m) => m.matter)).toEqual([A.matter, B.matter]);
   asked[0]?.([info(A)]);
@@ -283,7 +301,7 @@ test("a matter removed before the first list arrives: the list applies without i
   const { host, asked } = heldLists();
   const { matters, transport, settle } = await rig(host);
   expect(matters.view().phase).toBe("loading");
-  transport.appEvent({ matters_removed: { matters: [A.matter] } });
+  transport.appEvent({ matters_changed: { matters: [], removed: [A.matter], all: false } });
   await settle();
   expect(matters.view().phase).toBe("loading");
   // the read asked before the removal still applies, minus the removed matter
@@ -293,9 +311,35 @@ test("a matter removed before the first list arrives: the list applies without i
   expect(matters.view().matters.map((m) => m.matter)).toEqual([B.matter]);
   expect(matters.view().open?.matter).toBe(B.matter);
   // only the first list: a later one with A keeps it
-  transport.appEvent({ matters_changed: { matters: [info(A), info(B)] } });
+  transport.appEvent({ matters_changed: { matters: [info(A), info(B)], removed: [], all: true } });
   await settle();
   expect(matters.view().matters.map((m) => m.matter)).toEqual([A.matter, B.matter]);
+});
+
+test("a row changed before the first list arrives applies to it; a whole list heard after drops it", async () => {
+  const { host, asked } = heldLists();
+  const { matters, transport, settle } = await rig(host);
+  transport.appEvent({
+    matters_changed: { matters: [info(B, { status: "ready" })], removed: [], all: false },
+  });
+  await settle();
+  expect(matters.view().phase).toBe("loading");
+  asked[0]?.([info(A), info(B)]);
+  await settle();
+  expect(matters.view().status.get(B.matter)).toEqual({ state: "ready" });
+
+  // again from the start: the whole list comes after the early row, and stands as it came
+  const again = heldLists();
+  const later = await rig(again.host);
+  later.transport.appEvent({
+    matters_changed: { matters: [info(B, { status: "ready" })], removed: [A.matter], all: false },
+  });
+  later.transport.appEvent({
+    matters_changed: { matters: [info(A), info(B)], removed: [], all: true },
+  });
+  await later.settle();
+  expect(later.matters.view().matters).toEqual([info(A), info(B)]);
+  expect(later.matters.view().status.size).toBe(0);
 });
 
 test("create ends with the new matter shown even when the list read after fails, and with H5 tells the host it is open", async () => {
