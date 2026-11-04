@@ -24,19 +24,21 @@
 //! - Every other start first asks whether it runs inside the agent sandbox ([`launch`],
 //!   `jailed.rs`): inside, it prints one line and exits with [`SANDBOXED_EXIT`] before `run`,
 //!   so no window, no single-instance hand-off and no settings read.
-//! - Fourteen async commands (`commands.rs`), each granted by its own permission in
-//!   `capabilities/main.json` and listed in `build.rs`'s `AppManifest`. Beside them that file
+//! - Fifteen async commands (`commands.rs`), each granted by its own permission in
+//!   `capabilities/main.json` (`count_ui` in `capabilities/counts.json`, `main` only) and
+//!   listed in `build.rs`'s `AppManifest`. Beside them that file
 //!   grants only the two window commands of Tauri's drag script, and `window_frame.rs` adds
 //!   the caption buttons' four on Windows and Linux (0015). `capabilities/settings.json`
 //!   grants the settings window six of the commands (`dispatch`, `query`, `open_stream`,
 //!   `subscribe_app`, `ack`, `display_info`) and the same drag pair, and the bridge admits
-//!   from it only `SetUiSettings`, `SetToolSettings` and `GetSettings`, and of the app feed
+//!   from it only `SetUiSettings`, `SetToolSettings`, `SetPrivacySettings` and `GetSettings`
+//!   (and `RefreshLimits`), and of the app feed
 //!   only `settings_changed`: never the matter and thread lists (0028).
 //!   Every argument is checked in Rust first, and every host call runs as `LocalDesktop`.
 //!   The `e2e` build adds `perf_channel_bytes` (`e2e.rs`, granted by `capabilities/e2e.json`),
 //!   and the `marks` build `marks_memory` and `marks_finish` (`marks.rs`,
-//!   `capabilities/marks.json`), granted to `main` alone. `tauri.conf.json` names `main`
-//!   and `settings`: those builds add the two at setup (`e2e::grant_scoreboard`), and the
+//!   `capabilities/marks.json`), granted to `main` alone. `tauri.conf.json` names `main`,
+//!   `settings` and `counts`: those builds add the two at setup (`e2e::grant_scoreboard`), and the
 //!   default build has neither.
 //! - One `ipc::Channel` per window carries its stream (`bridge/`): each message an event's JSON
 //!   as the host encoded it, a fragment of one, or a stream failure, always below 8 KB (and in
@@ -48,6 +50,9 @@
 //!   limits on it (`HostHandle::subscribe_limits`, `follows_limits`), counted and restarted like
 //!   the window's other messages; a restart sends the current view only, never the account
 //!   changes it missed. No other window follows the limits.
+//! - The anonymous usage counts (`counts.rs`, 0036): opened on the host's start thread and
+//!   handed to the host (`HostConfig::with_counts`), saved and sent by one task on Tauri's
+//!   runtime every 60 s and at exit, with `time_open` from the two windows' focus.
 //! - The native focus of `main` or the `settings` window dispatches
 //!   `RefreshLimits { agent: None, why: Shown }` from Rust; the host throttles it.
 //! - Both windows' scripts carry `app.security.csp` like its page, the colouring worker's
@@ -69,6 +74,7 @@
 mod agent_browser_pin;
 mod bridge;
 mod commands;
+mod counts;
 mod csp;
 mod dialogs;
 #[cfg(feature = "e2e")]
@@ -113,6 +119,13 @@ use tauri::{
 
 /// Bumped by `cargo xtask buildtime` to time an edit to this crate. Nothing reads it.
 pub const BUILDTIME_MARKER: u64 = 0;
+
+/// What `tests/canary.rs` drives: the counts opened and ticked as the app opens and ticks them.
+/// Not an interface.
+#[doc(hidden)]
+pub mod counts_for_tests {
+    pub use crate::counts::{about, open, tick_once};
+}
 
 /// The label of the main window. `capabilities/main.json` grants by this label
 /// (`"windows": ["main"]`), so rename both together: a window whose label no capability names
@@ -199,6 +212,7 @@ pub fn run() -> tauri::Result<()> {
             commands::open_file,
             commands::reveal,
             commands::open_settings,
+            commands::count_ui,
             #[cfg(feature = "e2e")]
             e2e::perf_channel_bytes,
             #[cfg(feature = "marks")]
@@ -207,7 +221,10 @@ pub fn run() -> tauri::Result<()> {
             marks::marks_finish,
         ])
         // The task is short and bounded (one host command), like the bridge's others.
-        .on_window_event(|window, event| drop(on_window_event(window, event)))
+        .on_window_event(|window, event| {
+            counts::on_window_event(window, event);
+            drop(on_window_event(window, event));
+        })
         .setup(|app| {
             // The scoreboard commands' capabilities, in the e2e and marks builds only.
             #[cfg(feature = "e2e")]
@@ -220,8 +237,9 @@ pub fn run() -> tauri::Result<()> {
             app.manage(open::OpenGates::default());
             let (cell, start) = HostCell::new();
             app.manage(Bridge::new(cell));
+            app.manage(counts::CountsState::default());
             open_main_window(app)?;
-            start_host(start, locations)?;
+            start_host(app.handle().clone(), start, locations)?;
             Ok(())
         })
         .build(context)?;
@@ -248,14 +266,30 @@ pub fn run() -> tauri::Result<()> {
 /// Starts the session host on its own thread (`Host::start` blocks until the store opens),
 /// its outcome going into the bridge's cell through `start`. The launch profile is built on
 /// that thread too (it runs stetdoc and reads files), and so is the machine's memory, which the
-/// host's browser limit takes (`machine_memory`), before the host starts.
-fn start_host(start: HostStart, locations: Locations) -> std::io::Result<()> {
+/// host's browser limit takes (`machine_memory`), before the host starts. So are the usage
+/// counts, which go to the host and to `app`'s `CountsState`, and whose task starts here.
+fn start_host<R: Runtime>(
+    app: AppHandle<R>,
+    start: HostStart,
+    locations: Locations,
+) -> std::io::Result<()> {
     host_start::start_on_thread(start, move || {
         let profile = DesktopProfile::build(&locations)
             .map_err(|err| tracing::warn!(%err, "no launch profile: agents start without it"))
             .ok();
+        let effective = load_effective(&locations);
+        let exe = std::env::current_exe().ok();
+        let counts = counts::open(&locations, &effective, exe.as_deref());
+        let config = host_config(effective);
+        let config = match counts {
+            Some(counts) => {
+                start_counts(&app, counts.clone(), locations.clone());
+                config.with_counts(counts)
+            }
+            None => config,
+        };
         let config = machine_memory::pass_to(
-            host_config(&locations),
+            config,
             machine_memory::total_bytes,
             HostConfig::with_machine_memory,
         );
@@ -294,13 +328,29 @@ fn absolute_folder(folder: std::path::PathBuf) -> Option<std::path::PathBuf> {
     }
 }
 
-/// The host's config: the effective settings under `locations` with the system policy
-/// sources, the `PassthroughLauncher`, and the refused folders.
-fn host_config(locations: &Locations) -> HostConfig {
+/// Puts `counts` in `app`'s `CountsState` and starts their task.
+fn start_counts<R: Runtime>(
+    app: &AppHandle<R>,
+    counts: clauseo_counts::Counts,
+    locations: Locations,
+) {
+    if let Some(state) = app.try_state::<counts::CountsState>() {
+        state.start(counts.clone());
+    }
+    counts::spawn_ticker(counts, counts::HttpsUpload::new(), locations);
+}
+
+/// The effective settings under `locations`, with the system policy sources.
+pub(crate) fn load_effective(locations: &Locations) -> Effective {
     let sources = clauseo_settings::system_policy_sources();
     let sources: Vec<&dyn clauseo_settings::PolicySource> =
         sources.iter().map(AsRef::as_ref).collect();
-    let effective = Effective::load(locations, &SystemFiles, &sources);
+    Effective::load(locations, &SystemFiles, &sources)
+}
+
+/// The host's config: the effective settings, the `PassthroughLauncher`, and the refused
+/// folders.
+fn host_config(effective: Effective) -> HostConfig {
     let mut spawn = SpawnOptions::new();
     if let Some(home) = SystemDirs.home() {
         spawn = spawn.home(home);
@@ -327,6 +377,10 @@ fn stop_host_then_exit<R: Runtime>(app: &AppHandle<R>, exit: Arc<Exit>, code: i3
         .spawn(move || {
             if let Some(cell) = cell {
                 host_start::stop(&cell);
+            }
+            // After the host, whose last counts go in too.
+            if let Some(counts) = app.try_state::<counts::CountsState>() {
+                counts.save();
             }
             exit.stopped.store(true, Ordering::Release);
             // The e2e build ends the process itself once the host has joined. On a Windows

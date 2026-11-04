@@ -1007,6 +1007,7 @@ name = "clauseo-desktop"
 version = "0.0.0"
 dependencies = [
  "async-io",
+ "clauseo-counts",
  "clauseo-fake_agent",
  "clauseo-host",
  "clauseo-limits",
@@ -1015,11 +1016,14 @@ dependencies = [
  "clauseo-protocol",
  "clauseo-settings",
  "dunce",
+ "flate2",
  "futures",
  "libc",
  "memchr",
  "objc2-core-foundation",
+ "reqwest",
  "rfd",
+ "rustls",
  "semver",
  "serde",
  "serde_json",

@@ -60,6 +60,16 @@ url = { workspace = true }
 dunce = { workspace = true }
 # The command ids the bridge mints for `answer_permission` and the focus refresh.
 uuid = { workspace = true, features = ["v7"] }
+# The anonymous usage counts (src/counts.rs, 0036): opened here, handed to the host, ticked and sent.
+clauseo-counts = { path = "../counts" }
+# The counts' upload (src/counts/upload.rs): HTTPS over rustls with ring (the updater's provider,
+# so no second one), the OS's certificate check, and the system proxy. TLS 1.2 too, for the
+# inspecting proxies some firms run.
+reqwest = { workspace = true, features = [
+  "rustls-no-provider",
+  "system-proxy",
+] }
+rustls = { workspace = true, features = ["ring", "std", "tls12"] }
 
 # The native window over the room's maximise button, for Snap Layouts
 # (src/window_frame/windows.rs): the window and its class, the top-level window's subclass, mouse
@@ -121,3 +131,5 @@ tauri = { workspace = true, features = ["test", "specta"] }
 # with the toml crate (xtask's version) and checks its version with semver (already in the tree).
 toml = "1"
 semver = "1"
+# The canary test (tests/canary.rs) unzips each counts body it captured to search it.
+flate2 = { workspace = true }
