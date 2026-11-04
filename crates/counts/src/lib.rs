@@ -15,8 +15,8 @@
 //! - [`schema::Event`], one variant per event with its fields as closed types, and the payload
 //!   types, each [`schema::Closed`].
 //! - [`Counts`] (client): `open`, `bump`, `set_foreground`, `tick`, `due`, `sent`,
-//!   `set_enabled`, `first_act`, `set_about`, and `mode`, `today`, `queued_days`,
-//!   `install_id`; with [`About`], [`Mode`], [`Post`], [`PostId`], [`Outcome`].
+//!   `set_enabled`, `first_act`, `set_about`, and `consented`, `mode`, `today`,
+//!   `queued_days`, `install_id`; with [`About`], [`Mode`], [`Post`], [`PostId`], [`Outcome`].
 //! - [`Upload`], [`UploadPath`], [`UploadError`] and [`send_due`] (client): the network seam,
 //!   which desktop implements with `reqwest` and S22 reuses; [`os_seed`] seeds the send delays.
 //!

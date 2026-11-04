@@ -18,8 +18,8 @@ use crate::MatterPath;
 use crate::{
     AgentChoiceId, AgentId, AgentKind, CheckpointId, ClientName, CommandId, Date, Delivery,
     ElicitationId, ElicitationResponse, FieldChange, FileDecision, FolderRefId, MatterId,
-    MessageId, PermissionRequestId, PromptBlock, RestoreScope, ThreadId, Title, ToolsPatch, TurnId,
-    UiPatch,
+    MessageId, PermissionRequestId, PrivacyPatch, PromptBlock, RestoreScope, ThreadId, Title,
+    ToolsPatch, TurnId, UiPatch,
 };
 #[cfg(doc)]
 use crate::{FileChoice, RawPayload};
@@ -381,6 +381,25 @@ pub enum HostCommand {
         /// The switches to change.
         patch: ToolsPatch,
     },
+    /// Change the privacy switches (`privacy.counts`, `privacy.crash_reports`); answers `Done`,
+    /// and every app subscriber gets `HostEvent::SettingsChanged`. A patch naming a key the
+    /// firm's policy sets is refused whole with `settings.locked`; nothing changes. Before the
+    /// lawyer's first act, a patch naming `counts` is that first act (decision record 0036).
+    /// Turning counts off always saves; turning them on while the old counts folder cannot be
+    /// deleted is refused with `store.io` and changes nothing. Logs only the receipt.
+    SetPrivacySettings {
+        /// The switches to change.
+        patch: PrivacyPatch,
+    },
+    /// The lawyer's first act (the welcome's button): from now on the usage counts are saved and
+    /// sent, unless `counts` is `false`, which turns them off. Answers `Done`, and every app
+    /// subscriber gets `HostEvent::SettingsChanged` with `counts_started`. Once the first act
+    /// has happened, another changes nothing and answers `Done`. A policy lock on
+    /// `privacy.counts` stands over `counts`. Logs only the receipt (decision record 0036).
+    FirstAct {
+        /// The switch as the lawyer left it.
+        counts: bool,
+    },
     /// Refresh account limits. Answers `Done` and logs nothing. `Shown` reads only data older
     /// than 5 minutes; `TryAgain` reads now unless a read is in flight or the last read started
     /// less than 10 s ago (it then re-emits the view). No read starts while the agent has a
@@ -414,8 +433,8 @@ pub enum HostCommand {
 
 /// What a command did. The host's receipt stores it, so a repeated `command_id` returns the same
 /// outcome. The queue commands, `RestartAgent`, `SetUiSettings`, `SetToolSettings`,
-/// `UpdateMatter`, `OpenMatter`, `ForgetMatter`, `RefreshLimits`, `MarkSeen`, `ScanFolder` and
-/// `CancelScan` answer `Done`.
+/// `SetPrivacySettings`, `FirstAct`, `UpdateMatter`, `OpenMatter`, `ForgetMatter`, `RefreshLimits`,
+/// `MarkSeen`, `ScanFolder` and `CancelScan` answer `Done`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "specta", derive(specta::Type))]

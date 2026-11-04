@@ -87,7 +87,14 @@
 //!   locks is `settings.locked`. `docs/decisions/0017-settings-over-the-wire.md` records it.
 //!   The tool switches are `SetToolSettings` through `Effective::apply_tools_patch`, the same
 //!   way; a session reads them at its start, so a change reaches the next session
-//!   (`docs/decisions/0030-launch-profile.md`, "Tool switches over the wire").
+//!   (`docs/decisions/0030-launch-profile.md`, "Tool switches over the wire"). The privacy
+//!   switches are `SetPrivacySettings` and `FirstAct` (`actor/settings/privacy.rs`): off is
+//!   saved before the usage counts folder is deleted, and on is refused with `store.io` while it
+//!   cannot be (`docs/decisions/0036-counts.md`).
+//! - The usage counts: `HostConfig::with_counts` hands the host a `clauseo_counts::Counts`, and
+//!   `actor/counting.rs` bumps closed events into it at each call site, once per operation that
+//!   succeeded; with none, or counts off, it counts nothing. Counting never blocks or fails a
+//!   command.
 //! - [`session_folder`]: the canonical spelling of a matter folder that an agent session
 //!   works in (its process's folder and its `cwd`), for whatever else must compare with it.
 //! - [`Error`] wraps the errors of `protocol`, `store`, `matters`, `process`, `acp`, `reducer`
@@ -143,8 +150,9 @@
 //!
 //! `protocol`, `reducer`, `store`, `matters`, `process`, `acp`, `settings`, `limits` (its
 //! model, its readers and `CODEX_OVERRIDES`), `profile` (the placeholders and the skill writes,
-//! 0030), `async-channel`, `async-io`, `futures`, `uuid`, `serde_json`, `tracing`, `thiserror`,
-//! `dunce` and `sha2` (the Codex hook's trust hash, 0024). Never `tauri`, `tokio` or `agents`.
+//! 0030), `counts` (the usage counts, 0036), `async-channel`, `async-io`, `futures`, `uuid`,
+//! `serde_json`, `tracing`, `thiserror`, `dunce` and `sha2` (the Codex hook's trust hash,
+//! 0024). Never `tauri`, `tokio` or `agents`.
 //!
 //! # Start reading
 //!

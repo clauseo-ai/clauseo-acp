@@ -95,6 +95,8 @@ pub(super) async fn open(
         codex_hooks: parts.codex_hooks,
         pre_write_guard: parts.pre_write_guard,
         wiring: parts.wiring,
+        counts: parts.counts,
+        count_on_commit: BTreeMap::new(),
         header_tools: super::header_tools::HeaderTools::default(),
         run_sweep: super::turn::RunSweep::default(),
         refused_folders: parts.refused_folders,

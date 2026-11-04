@@ -50,6 +50,9 @@ mod codex_plans;
 #[path = "host/commands.rs"]
 mod commands;
 #[cfg(test)]
+#[path = "host/counts.rs"]
+mod counts;
+#[cfg(test)]
 #[path = "host/e2e_scenarios.rs"]
 mod e2e_scenarios;
 #[cfg(test)]
@@ -103,6 +106,9 @@ mod papers;
 #[cfg(test)]
 #[path = "host/permissions.rs"]
 mod permissions;
+#[cfg(test)]
+#[path = "host/privacy.rs"]
+mod privacy;
 #[cfg(test)]
 #[path = "host/profile.rs"]
 mod profile;

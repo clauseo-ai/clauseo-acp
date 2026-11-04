@@ -60,6 +60,8 @@ use clauseo_protocol::{
     MattersChanged,
     Motion,
     PatchBatch,
+    PrivacyPatch,
+    PrivacySettings,
     PromptBlock,
     RefreshWhy,
     RestoreRequest,
@@ -328,6 +330,13 @@ mod host_command {
                 browser: Some(true),
             },
         };
+        SetPrivacySettings => set_privacy_settings: HostCommand::SetPrivacySettings {
+            patch: PrivacyPatch {
+                counts: Some(false),
+                crash_reports: None,
+            },
+        };
+        FirstAct => first_act: HostCommand::FirstAct { counts: true };
         RefreshLimits => refresh_limits: HostCommand::RefreshLimits {
             agent: Some(AgentKind::Claude),
             why: RefreshWhy::Shown,
@@ -463,6 +472,11 @@ mod host_event {
             tools: ToolsSettingsView {
                 web_search: false,
                 browser: true,
+            },
+            privacy: PrivacySettings {
+                counts: true,
+                crash_reports: false,
+                counts_started: false,
             },
             locked: vec!["ui.font_size".to_owned(), "ui.theme".to_owned()],
         });

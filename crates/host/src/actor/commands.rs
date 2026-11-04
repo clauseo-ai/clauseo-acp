@@ -15,7 +15,7 @@ use clauseo_store::{Receipt, ThreadRow, command_hash};
 
 use super::input::Reply;
 use super::matters::PendingMatter;
-use super::settings::set_tool_settings;
+use super::settings::{first_act, set_privacy_settings, set_tool_settings, set_ui_settings};
 use super::turn::TurnCommand;
 use super::{Actor, MatterEntry, Tag, ThreadEntry, title_source, turn};
 use crate::error::Error;
@@ -290,12 +290,12 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
             checkpoint,
             scope,
         } => turn::restore_version(actor, *ctx, matter, checkpoint, scope),
-        HostCommand::SetUiSettings { patch } => {
-            super::settings::set_ui_settings(actor, ctx, &patch);
-        }
+        HostCommand::SetUiSettings { patch } => set_ui_settings(actor, ctx, &patch),
         HostCommand::SetToolSettings { patch } => set_tool_settings(actor, ctx, &patch),
         HostCommand::ScanFolder { folder } => super::scan::scan_folder(actor, ctx, folder),
         HostCommand::CancelScan { folder } => super::scan::cancel_scan(actor, ctx, folder),
+        HostCommand::SetPrivacySettings { patch } => set_privacy_settings(actor, ctx, &patch),
+        HostCommand::FirstAct { counts } => first_act(actor, ctx, counts),
         // No receipt and no event: a repeated id asks the model again, under its read rules.
         HostCommand::RefreshLimits { agent, why } => {
             super::limits::refresh(actor, agent, why);
@@ -340,6 +340,7 @@ pub(super) fn command_committed(
     after: AfterCommand,
     outcome: Result<(), &Failure>,
 ) {
+    super::counting::committed(actor, id, outcome.is_ok());
     match (after, outcome) {
         (AfterCommand::Matter(entry), Ok(())) => {
             actor.matters.insert(entry.row.id, *entry);

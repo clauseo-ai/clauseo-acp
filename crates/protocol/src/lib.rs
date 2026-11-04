@@ -18,7 +18,8 @@
 //! [`ValidatedCommand`] that [`CommandEnvelope::validate`] makes, and answers with a
 //! [`CommandOutcome`]) and read with a [`HostQuery`] ([`QueryResult`]). The display
 //! settings cross as [`SettingsView`] and [`UiPatch`], mirrors of `clauseo-settings`' `ui`
-//! section; the tool switches are a [`ToolsSettingsView`] and a [`ToolsPatch`]. A matter's rail
+//! section; the tool switches are a [`ToolsSettingsView`] and a [`ToolsPatch`], the privacy
+//! switches a [`PrivacySettings`] and a [`PrivacyPatch`]. A matter's rail
 //! details are [`ClientName`], [`Date`] and [`MatterStatus`] on
 //! [`MatterSummary`], changed with [`FieldChange`]s; a thread's seen mark and [`LastStop`] are on
 //! [`ThreadSummary`], and app subscribers get both lists as [`MattersChanged`] and
@@ -235,8 +236,8 @@ wire_types! {
         TextKind, TurnUsage,
     },
     settings::{
-        Language, Lite, Motion, SettingsView, Theme, ToolsPatch, ToolsSettingsView, UiPatch,
-        UiSettings,
+        Language, Lite, Motion, PrivacyPatch, PrivacySettings, SettingsView, Theme, ToolsPatch,
+        ToolsSettingsView, UiPatch, UiSettings,
     },
     stream::{StreamId},
     text::{BlobRef, TextOrBlob},

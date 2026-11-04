@@ -130,8 +130,9 @@ pub(super) fn accept(
         out.push(actor, resolved)?;
     }
     out.draft.receipt(ctx.receipt(Some(stream), outcome, now));
+    let started = actor.now().mono;
     let held = state(actor, thread).ok_or_else(|| lost("a thread"))?;
-    held.current = Some(Box::new(Current::new(turn, message, blocks)));
+    held.current = Some(Box::new(Current::new(turn, message, blocks, started)));
     let tag = Tag::Command {
         id: ctx.id,
         outcome,

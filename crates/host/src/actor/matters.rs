@@ -381,6 +381,7 @@ pub(super) fn on_matter_reply(
                     })
                 }
                 made => made.and_then(|import| {
+                    let opened = super::counting::matter_created(import.1.as_ref(), folder.clone());
                     let (draft, entry) =
                         matter_commit(actor, *pending, import, Some((id, outcome)))?;
                     let tag = Tag::Command {
@@ -388,7 +389,9 @@ pub(super) fn on_matter_reply(
                         outcome,
                         after: AfterCommand::Matter(Box::new(entry)),
                     };
-                    actor.send_commit(draft, tag).map(|_| ())
+                    actor.send_commit(draft, tag)?;
+                    super::counting::on_commit(actor, id, opened);
+                    Ok(())
                 }),
             };
             if let Err(error) = committed {

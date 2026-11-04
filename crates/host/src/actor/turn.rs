@@ -173,6 +173,11 @@ struct Current {
     detach: Option<DetachReason>,
     /// A Codex prompt failed with a JSON-RPC error: the turn's end waits for a limits read.
     limit_read: Option<end::LimitRead>,
+    /// When it became the current turn, on the host's monotonic clock: the usage counts'
+    /// `answer_ended.took` runs from here to `end::finish`.
+    started: std::time::Duration,
+    /// When its first answer text came, on the same clock: `answer_ended.first_words`.
+    first_words: Option<std::time::Duration>,
 }
 
 /// Where a current turn is.
@@ -375,7 +380,10 @@ pub(crate) fn matter_reply(actor: &mut Actor, _matter: MatterId, job: TurnJob, r
 pub(crate) fn committed(actor: &mut Actor, tag: TurnTag, outcome: Result<(), &Failure>) {
     let TurnTag { thread, then } = tag;
     match (then, outcome) {
-        (Then::Launch(turn), Ok(())) => steps::on_accepted(actor, thread, turn),
+        (Then::Launch(turn), Ok(())) => {
+            super::counting::question_sent(actor, thread, clauseo_counts::schema::Delivery::Now);
+            steps::on_accepted(actor, thread, turn);
+        }
         (Then::Launch(turn), Err(_)) => steps::on_refused(actor, thread, turn),
         (Then::Started(turn), Ok(())) => steps::on_started(actor, thread, turn),
         (Then::Closing(turn), Ok(())) => failure::on_closed(actor, thread, turn),

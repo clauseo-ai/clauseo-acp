@@ -5,6 +5,7 @@
 //! until that commit is durable; a failed one is sent once more when the matter's stream
 //! drains, as an undo's is.
 
+use clauseo_counts::schema::Feature;
 use clauseo_matters::{CheckpointOutcome, Restored};
 use clauseo_protocol::{
     CheckpointId, CheckpointKind, CheckpointRecorded, CommandOutcome, ErrorCode, MatterId,
@@ -14,7 +15,7 @@ use clauseo_protocol::{
 use super::super::commands::{AfterCommand, CommandCtx};
 use super::super::input::MatterTag;
 use super::super::query::own_versions;
-use super::super::{Actor, Tag};
+use super::super::{Actor, Tag, counting};
 use super::{Holder, end, known, lost, undo};
 use crate::error::Error;
 use crate::matter_worker::{MatterJob, RestoreDone, RestoreJob};
@@ -246,6 +247,7 @@ pub(crate) fn committed(actor: &mut Actor, matter: MatterId, durable: bool) {
     else {
         return;
     };
+    counting::feature_used(actor, Feature::Restore);
     note_restored(actor, matter, &log.written);
     end::pass_writer(actor, matter);
 }

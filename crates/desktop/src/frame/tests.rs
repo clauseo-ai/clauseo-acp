@@ -197,6 +197,11 @@ fn no_host_event_kind_takes_a_reserved_key() {
                 web_search: true,
                 browser: false,
             },
+            privacy: clauseo_protocol::PrivacySettings {
+                counts: true,
+                crash_reports: false,
+                counts_started: false,
+            },
             locked: Vec::new(),
         }),
         HostEvent::MattersChanged(clauseo_protocol::MattersChanged {

@@ -1,0 +1,11 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "HostCommand::SetPrivacySettings\n{ patch: PrivacyPatch { counts: Some(false), crash_reports: None, }, }"
+---
+{
+  "set_privacy_settings": {
+    "patch": {
+      "counts": false
+    }
+  }
+}

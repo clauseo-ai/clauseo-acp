@@ -6,10 +6,13 @@
 //! The wire types mirror `clauseo-settings`' `ui` section. Every conversion here is an
 //! exhaustive match, so a value added to one side and not the other does not compile; the
 //! mirror test in `tests/host/settings.rs` also holds the keys and the JSON names together.
-//! The tool switches (`tools`, `SetToolSettings`) are in `tools.rs`, beside this file's UI code.
+//! The tool switches (`tools`, `SetToolSettings`) are in `tools.rs`, beside this file's UI code;
+//! the privacy switches (`privacy`, `SetPrivacySettings`, `FirstAct`) in `privacy.rs`.
 
+mod privacy;
 mod tools;
 
+pub(in crate::actor) use privacy::{first_act, set_privacy_settings};
 pub(super) use tools::set_tool_settings;
 
 use clauseo_protocol::{
@@ -17,15 +20,17 @@ use clauseo_protocol::{
     UiSettings,
 };
 use clauseo_settings as settings;
-use clauseo_settings::{Effective, FontSize, SystemFiles};
+use clauseo_settings::{FontSize, SystemFiles};
 
 use super::commands::{AfterCommand, CommandCtx};
 use super::{Actor, Tag};
 use crate::error::Error;
 use crate::pipeline::Draft;
 
-/// The display settings in force, the tool switches in force, and every key policy locks, sorted.
-pub(crate) fn view(effective: &Effective) -> SettingsView {
+/// The display settings in force, the tool and privacy switches in force, and every key policy
+/// locks, sorted.
+pub(crate) fn view(actor: &Actor) -> SettingsView {
+    let effective = &actor.effective;
     let ui = &effective.settings().ui;
     SettingsView {
         ui: UiSettings {
@@ -36,6 +41,7 @@ pub(crate) fn view(effective: &Effective) -> SettingsView {
             motion: motion_out(ui.motion),
         },
         tools: tools::view(effective),
+        privacy: privacy::view(actor),
         locked: effective.locked().map(str::to_owned).collect(),
     }
 }
@@ -44,7 +50,7 @@ pub(crate) fn view(effective: &Effective) -> SettingsView {
 /// `SettingsChanged` to every app subscriber, then the receipt. A refusal changes nothing and
 /// sends nothing: a font size out of range is `command.invalid`, a locked key
 /// `settings.locked`, any other settings failure `internal`.
-pub(super) fn set_ui_settings(actor: &mut Actor, ctx: &CommandCtx, patch: &UiPatch) {
+pub(in crate::actor) fn set_ui_settings(actor: &mut Actor, ctx: &CommandCtx, patch: &UiPatch) {
     if let Err(error) = apply(actor, ctx, patch) {
         actor.finish_command(ctx.id, Err(error));
     }
@@ -52,10 +58,12 @@ pub(super) fn set_ui_settings(actor: &mut Actor, ctx: &CommandCtx, patch: &UiPat
 
 fn apply(actor: &mut Actor, ctx: &CommandCtx, patch: &UiPatch) -> Result<(), Error> {
     let patch = patch_in(patch)?;
+    let before = actor.effective.settings().ui.clone();
     actor.effective.apply_ui_patch(&SystemFiles, &patch)?;
     // An empty patch writes nothing, so nothing changed to tell anyone about.
     if patch != settings::UiPatch::default() {
-        let changed = HostEvent::SettingsChanged(view(&actor.effective));
+        super::counting::ui_changed(actor, &before);
+        let changed = HostEvent::SettingsChanged(view(actor));
         super::app::publish(actor, &changed);
     }
     receipt(actor, ctx)
