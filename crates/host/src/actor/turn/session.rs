@@ -92,6 +92,7 @@ pub(super) fn on_replay_log(
         Ok(log) => agent.replay = Some(SentView::rebuild(StreamId::Thread(thread), &log)),
         Err(error) => tracing::warn!(%thread, %error, "no log for replay dedupe"),
     }
+    agent.mcp_commands = commands(&mcp_servers);
     let (id, client, fence) = (agent.id, agent.link.client.clone(), agent.link.fence());
     let check = codex::prepare::recheck(
         clock,
@@ -130,9 +131,10 @@ fn resume_session(actor: &mut Actor, thread: ThreadId) {
     };
     let clock = Arc::clone(&actor.clock);
     let matter = matter_of(actor, thread);
-    let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref()) else {
+    let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };
+    agent.mcp_commands = commands(&mcp_servers);
     let (id, client, fence) = (agent.id, agent.link.client.clone(), agent.link.fence());
     let check = codex::prepare::recheck(
         clock,
@@ -169,9 +171,10 @@ pub(super) fn new_session(actor: &mut Actor, thread: ThreadId) {
     };
     let clock = Arc::clone(&actor.clock);
     let matter = matter_of(actor, thread);
-    let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref()) else {
+    let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };
+    agent.mcp_commands = commands(&mcp_servers);
     let (id, client, fence) = (agent.id, agent.link.client.clone(), agent.link.fence());
     let check = codex::prepare::recheck(
         clock,
@@ -211,6 +214,16 @@ fn session_loads(
 ) -> Result<(serde_json::Map<String, serde_json::Value>, Vec<McpServer>), Error> {
     let matter = folder(actor, thread)?;
     super::profile_loads::session_loads(actor, thread, &matter)
+}
+
+/// The program of each MCP server, which a cancelled turn's sweep leaves running.
+fn commands(servers: &[McpServer]) -> Vec<PathBuf> {
+    servers
+        .iter()
+        .map(|server| match server {
+            McpServer::Stdio { command, .. } => command.clone(),
+        })
+        .collect()
 }
 
 fn folder(actor: &Actor, thread: ThreadId) -> Result<PathBuf, Error> {

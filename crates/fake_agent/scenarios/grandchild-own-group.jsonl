@@ -1,0 +1,2 @@
+{"scenario":"grandchild-own-group","description":"No handshake: starts a grandchild that ignores stdin and leads a process group of its own (Unix), writes its PID to grandchild.pid, and holds","on_stdin_close":"hang"}
+{"spawn_child":{"pid_file":"grandchild.pid","own_group":true}}

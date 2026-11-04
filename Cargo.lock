@@ -1149,6 +1149,7 @@ dependencies = [
  "clauseo-process",
  "clauseo-protocol",
  "futures",
+ "libc",
  "memchr",
  "nix",
  "serde_json",

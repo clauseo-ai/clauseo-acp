@@ -97,6 +97,9 @@ pub(super) struct Agent {
     pub(super) preparing: bool,
     /// What a Codex agent's launch recorded; `None` for any other agent.
     pub(super) codex: Option<CodexAgent>,
+    /// The programs of the MCP servers its session was given: a cancelled turn's sweep leaves
+    /// a process running one of them (`agent/leftovers.rs`).
+    pub(super) mcp_commands: Vec<PathBuf>,
 }
 
 /// What a Codex agent's launch recorded.
@@ -192,6 +195,7 @@ pub(super) fn launch_now(
         replayed: Vec::new(),
         preparing: false,
         codex,
+        mcp_commands: Vec::new(),
     };
     if let Some(state) = state(actor, thread) {
         state.agent = Some(Box::new(agent));

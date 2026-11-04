@@ -104,7 +104,7 @@ windows = { workspace = true, features = [
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-core-foundation = { workspace = true, features = ["CFString", "CFURL"] }
 # The machine's total memory on macOS (src/machine_memory.rs): sysctlbyname("hw.memsize").
-libc = "0.2.191"
+libc = { workspace = true }
 
 # The updater is left out of Linux: Linux always updates through its package manager (R23), so the
 # plugin is never registered there (lib.rs).

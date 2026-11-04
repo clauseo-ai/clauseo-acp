@@ -16,7 +16,7 @@ const JOB_KILLED: u32 = 0xC1A0;
 /// Waits for the grandchild, inside the test's script so a pipe the grandchild may hold (it
 /// inherits the agent's handles on Windows) cannot keep the test waiting first. On Windows the
 /// wait has a deadline and the grandchild must carry the tree kill's exit code.
-fn wait_for_the_tree_kill(grandchild: Watch) {
+pub(crate) fn wait_for_the_tree_kill(grandchild: Watch) {
     #[cfg(windows)]
     assert_eq!(
         grandchild.wait(),

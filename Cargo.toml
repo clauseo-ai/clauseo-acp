@@ -61,6 +61,9 @@ reqwest = { version = "0.13.5", default-features = false }
 # also brings nix's safe spawn and exec calls (`spawn::posix_spawn*`, `unistd::exec*`); the root
 # clippy.toml bans each, so children still start only through the process door.
 nix = { version = "0.31.3", default-features = false, features = ["signal"] }
+# desktop: the machine's total memory on macOS (sysctlbyname); process: libproc's descendant
+# listing on macOS. Each crate gates it to macOS on its own line.
+libc = "0.2.191"
 # Shared with S7 likewise. Each feature turns on the Win32 calls of xtask/src/process/windows.rs:
 # `Win32_Foundation` for `HANDLE` and `CloseHandle`, `Win32_Security` for `CreateJobObjectW`
 # (which takes `SECURITY_ATTRIBUTES`), `Win32_System_JobObjects` for the job calls,

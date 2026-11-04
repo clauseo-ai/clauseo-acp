@@ -1,0 +1,14 @@
+{"scenario":"cancel-then-next-command","description":"The first prompt starts a child in a process group of its own (cmd.pid) and streams a chunk; after session/cancel answers cancelled; the second prompt at once starts another (next.pid), streams a chunk and ends end_turn","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1"}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"spawn_child":{"pid_file":"cmd.pid","own_group":true}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Running the command."}}}}
+{"expect":{"method":"session/cancel","params":{"sessionId":"sess-1"}}}
+{"respond":{"to":"p1","result":{"stopReason":"cancelled"}}}
+{"expect":{"method":"session/prompt","as":"p2","params":{"sessionId":"sess-1"}}}
+{"spawn_child":{"pid_file":"next.pid","own_group":true}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-2","content":{"type":"text","text":"Running the next command."}}}}
+{"respond":{"to":"p2","result":{"stopReason":"end_turn"}}}

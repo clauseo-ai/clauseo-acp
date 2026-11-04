@@ -169,6 +169,8 @@ fn one() -> u32 {
 #[serde(deny_unknown_fields)]
 struct SpawnChildBody {
     pid_file: String,
+    #[serde(default)]
+    own_group: bool,
 }
 
 #[derive(Deserialize)]
@@ -227,6 +229,7 @@ pub(super) fn step(value: Value) -> Result<Body, String> {
         StepBody::SpawnChild(b) => (
             StepKind::SpawnChild {
                 pid_file: b.pid_file,
+                own_group: b.own_group,
             },
             false,
         ),
