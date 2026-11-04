@@ -14,6 +14,10 @@
 //!   short-lived `clauseo-stat` thread per `ListMatters` that reads each matter's folder state,
 //!   and a short-lived `clauseo-scan` thread per `ScanFolder` (one at a time) that walks the
 //!   folder before it becomes a matter and posts its counts back.
+//! - What a cancelled turn left running (`agent/leftovers.rs`, decision 0011): a short-lived
+//!   `clauseo-sweep` thread lists the agent's descendants as each prompt goes out, and another
+//!   ends those new since that started before the turn's end when it ends cancelled, but the
+//!   session's MCP servers. An agent's stop lists them on one first, for its tree kill.
 //! - The `clauseo-search` thread (`search.rs`, decision 0043): it owns `search.sqlite` in the
 //!   data folder, opens it (or rebuilds it from the log through the store) without holding up
 //!   start-up, and indexes each returned commit's envelopes, which the actor hands over a bounded

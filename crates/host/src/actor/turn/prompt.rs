@@ -1,13 +1,13 @@
 //! Step 5: the prompt, with the undo note (the files put back since the last turn) first.
 
 use clauseo_protocol::{ContentBlock, ErrorCode, StreamId, ThreadId, TurnId, ViewEntry};
-use futures::future::{AbortHandle, Abortable};
+use futures::future::{AbortHandle, Abortable, join};
 
 use super::super::Actor;
 use super::super::input::Input;
 use super::agents::Stage;
-use super::{AgentReply, End, TurnInput, TurnPhase, current, end, spawn, state};
-use crate::agent::codex;
+use super::{AgentReply, BeforePrompt, End, TurnInput, TurnPhase, current, end, spawn, state};
+use crate::agent::{codex, leftovers};
 use crate::undo_note::{self, NoteInput};
 
 /// Step 5: the prompt, with the undo note first.
@@ -23,12 +23,12 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
                     agent.id,
                     agent.codex.is_some().then(|| agent.folder.clone()),
                 ),
-                agent.link.client.clone(),
+                (agent.link.client.clone(), agent.link.descendants().clone()),
                 agent.link.fence(),
                 session,
             ))
         });
-    let Some(((id, check), client, fence, session)) = agent else {
+    let Some(((id, check), (client, descendants), fence, session)) = agent else {
         if let Some(current) = current(actor, thread) {
             current.phase = TurnPhase::Prompting;
         }
@@ -52,12 +52,23 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     content.extend(blocks);
     let (abort, registration) = AbortHandle::new_pair();
     current.prompt_call = Some(abort);
+    let before = BeforePrompt::default();
+    current.before_prompt = Some(std::rc::Rc::clone(&before));
     let clock = std::sync::Arc::clone(&actor.clock);
     let matter = actor.threads.get(&thread).map(|entry| entry.row.matter);
+    let list_clock = std::sync::Arc::clone(&actor.clock);
     let call = Abortable::new(
         async move {
-            // A Codex agent's matter folder is checked for `.codex` again first, off the actor.
-            if let Err(error) = codex::prepare::recheck(clock, matter, check).await {
+            // A Codex agent's matter folder is checked for `.codex` again first, and the agent's
+            // descendants are listed, both off the actor, before the prompt goes out: a
+            // cancelled turn ends what is new since this listing.
+            let (checked, listed) = join(
+                codex::prepare::recheck(clock, matter, check),
+                leftovers::snapshot(descendants, list_clock),
+            )
+            .await;
+            *before.borrow_mut() = listed;
+            if let Err(error) = checked {
                 return AgentReply::PromptRefused { turn, error };
             }
             let result = client.prompt(&session, turn, content).await;

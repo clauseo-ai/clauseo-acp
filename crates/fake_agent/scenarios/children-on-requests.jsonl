@@ -1,0 +1,6 @@
+{"scenario":"children-on-requests","description":"No handshake: starts a child in a process group of its own (Unix), waits for initialize and never answers it, starts a second, waits for session/new and never answers it, starts a third, and holds","on_stdin_close":"hang"}
+{"spawn_child":{"pid_file":"first.pid","own_group":true}}
+{"expect":{"method":"initialize","as":"init"}}
+{"spawn_child":{"pid_file":"second.pid","own_group":true}}
+{"expect":{"method":"session/new","as":"new"}}
+{"spawn_child":{"pid_file":"third.pid","own_group":true}}

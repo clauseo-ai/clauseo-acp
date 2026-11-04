@@ -1,13 +1,14 @@
 //! One agent process and its ACP connection, driven by four tasks on the actor's `LocalPool`:
 //! R10's `Driver`, the event forwarder, S7's stderr pump, and the owner task that holds S7's
 //! `Handle`. The owner waits for the agent to exit or for a stop; on a stop it drops the `exited`
-//! future and runs the shutdown ladder, because `exited` borrows the handle and `shutdown`
-//! consumes it. Either way it then waits for the stderr pump and the event forwarder to end and
-//! then for every call that took a [`AgentLink::fence`] to post its answer, reads the exit
-//! report, and posts [`Ended`] after the agent's last event and after those answers. So a prompt
-//! the agent answered just before it exited (a Codex limit error, then the exit) reaches the actor
-//! as the prompt's answer, never as the exit, and the last chunk it wrote before it exited is
-//! posted before its `Ended`.
+//! future, lists the agent's descendants on a `clauseo-sweep` thread (on Unix the tree kill ends
+//! those that left the agent's group) and runs the shutdown ladder, because `exited` borrows the
+//! handle and `shutdown` consumes it. Either way it then waits for the stderr pump and the event
+//! forwarder to end and then for every call that took a [`AgentLink::fence`] to post its answer,
+//! reads the exit report, and posts [`Ended`] after the agent's last event and after those
+//! answers. So a prompt the agent answered just before it exited (a Codex limit error, then the
+//! exit) reaches the actor as the prompt's answer, never as the exit, and the last chunk it wrote
+//! before it exited is posted before its `Ended`.
 //!
 //! A helper the agent left holding a pipe would hold that wait open, so it gives up once
 //! [`PUMP_END_BOUND`] has passed with all the agent wrote to stdout before the exit posted
@@ -18,6 +19,7 @@
 
 pub(crate) mod codex;
 pub(crate) mod data_folder;
+pub(crate) mod leftovers;
 pub(crate) mod loads;
 mod spec;
 pub(crate) mod title;
@@ -32,7 +34,7 @@ use std::task::{Poll, Waker};
 use std::time::Duration;
 
 use clauseo_acp::{AcpClient, AcpEvent, ReadProgress};
-use clauseo_process::{Handle, LaunchSpec, Launched, Launcher, ShutdownOutcome};
+use clauseo_process::{Descendants, Handle, LaunchSpec, Launched, Launcher, ShutdownOutcome};
 use clauseo_protocol::DetachReason;
 use futures::channel::oneshot;
 use futures::executor::LocalSpawner;
@@ -143,6 +145,9 @@ pub(crate) struct AgentLink {
     /// The ACP connection; its calls run as spawned tasks that post their results.
     pub(crate) client: AcpClient,
     pid: u32,
+    /// The agent's descendants, which a cancelled turn's sweep lists and ends
+    /// ([`leftovers`]); it keeps nothing alive.
+    descendants: Descendants,
     stop: Option<oneshot::Sender<()>>,
     /// The connection's event channel, read only to see whether it is empty ([`Self::fence`]).
     events: async_channel::Receiver<AcpEvent>,
@@ -154,6 +159,11 @@ impl AgentLink {
     /// The agent's process id, for logs.
     pub(crate) fn pid(&self) -> u32 {
         self.pid
+    }
+
+    /// The agent's descendants, for a cancelled turn's sweep.
+    pub(crate) fn descendants(&self) -> &Descendants {
+        &self.descendants
     }
 
     /// A future that ends once every event the connection has emitted so far was posted. A
@@ -215,6 +225,7 @@ pub(crate) fn start(
         ..
     } = launcher.launch(spec)?;
     let pid = handle.pid();
+    let descendants = handle.descendants();
     #[cfg(not(test))]
     let (client, events, driver) =
         clauseo_acp::connect(stdin, stdout, clauseo_acp::ConnectOptions::default());
@@ -262,6 +273,7 @@ pub(crate) fn start(
     Ok(AgentLink {
         client,
         pid,
+        descendants,
         stop: Some(stop),
         events: fence_events,
         calls,
@@ -382,7 +394,16 @@ async fn own(
         settle(ends, || output.posted_since(mark), &*clock).await;
         Ended::Exited(report.detach_reason())
     } else {
-        let outcome = handle.shutdown(&ProcessTimer(Arc::clone(&clock))).await;
+        // Listed off the actor first (Unix only: Windows ends the whole job): the tree kill
+        // ends a descendant that left the agent's group, as a Codex command does.
+        let listed = if cfg!(unix) {
+            leftovers::snapshot(handle.descendants(), Arc::clone(&clock)).await
+        } else {
+            None
+        };
+        let outcome = handle
+            .shutdown(&ProcessTimer(Arc::clone(&clock)), listed)
+            .await;
         let step = StopStep::of(&outcome);
         if step == StopStep::Unresponsive {
             tracing::warn!(

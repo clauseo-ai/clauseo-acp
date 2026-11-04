@@ -1,8 +1,10 @@
 //! Cancel: a turn that has not started is dequeued with `TurnEnded { Cancelled, None }`; a
 //! running one gets one commit closing its pending requests and unfinished tool calls, then
-//! `session/cancel` and the 5 s fallback, after which the agent is stopped. Shutdown cancels
-//! every running turn the same way and stops every agent.
+//! `session/cancel` and the 5 s fallback, after which the agent is stopped. A turn that ends
+//! cancelled with its agent still attached has what it left running ended (`sweep_leftovers`).
+//! Shutdown cancels every running turn the same way and stops every agent.
 
+use clauseo_process::Cutoff;
 use clauseo_protocol::{
     CommandOutcome, ElicitationOutcome, ElicitationResolved, ElicitationResponse, PermissionChoice,
     PermissionResolved, Principal, StopReason, StreamId, ThreadId, ToolCallPatch, ToolCallStatus,
@@ -16,8 +18,9 @@ use super::close::TurnClose;
 use super::out::Out;
 use super::{
     CANCEL_WAIT, End, Then, TimerKind, TurnPhase, TurnTag, TurnTimer, current, end, failure,
-    matter_of, spawn, state, updates,
+    host_stopping, matter_of, spawn, state, updates,
 };
+use crate::agent::leftovers;
 use crate::error::Error;
 
 /// `Cancel { thread }`: stops the thread's current turn only.
@@ -271,6 +274,46 @@ pub(super) fn on_cancel_timer(actor: &mut Actor, thread: ThreadId, turn: TurnId)
     } else {
         end::end_turn(actor, thread, End::cancelled(None));
     }
+}
+
+/// A turn ending with `stop`: when it was cancelled, what it left running (every descendant of
+/// the agent new since its prompt's listing that started before now, but the session's MCP
+/// servers) is ended off the actor (`agent/leftovers.rs`), if the agent is still attached and
+/// the listing was taken. The cutoff is read here, on the actor, as the turn ends and before it
+/// lets go of the writer, so nothing a later turn starts (a sent-now or requeued prompt starts
+/// right after) is ever ended. The listing is taken once, so a second end of the same turn
+/// sweeps nothing. No sweep while the host stops, nor for an agent being stopped: the stop
+/// kills the agent's group and every descendant listed before it.
+pub(super) fn sweep_leftovers(actor: &mut Actor, thread: ThreadId, stop: StopReason) {
+    if host_stopping(actor) {
+        return;
+    }
+    let listed = current(actor, thread)
+        .filter(|current| stop == StopReason::Cancelled || current.cancelled)
+        .and_then(|current| current.before_prompt.take())
+        .and_then(|listed| listed.borrow_mut().take());
+    let Some(before) = listed else {
+        return;
+    };
+    let Some(cutoff) = Cutoff::now() else {
+        tracing::warn!(%thread, "the process clock was not read; a cancel ends nothing");
+        return;
+    };
+    let clock = std::sync::Arc::clone(&actor.clock);
+    let Some(agent) = state(actor, thread)
+        .and_then(|state| state.agent.as_deref())
+        .filter(|agent| agent.stage == Stage::Attached)
+    else {
+        return;
+    };
+    let descendants = agent.link.descendants().clone();
+    leftovers::sweep(
+        descendants,
+        before,
+        cutoff,
+        agent.mcp_commands.clone(),
+        clock,
+    );
 }
 
 /// Shutdown's part: running turns are cancelled (their agents stop when they end), turns that

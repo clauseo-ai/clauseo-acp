@@ -163,6 +163,9 @@ struct Current {
     prompt_call: Option<AbortHandle>,
     /// The cancel fallback timer.
     cancel_timer: Option<AbortHandle>,
+    /// The agent's descendants listed as the prompt went out, filled in by the prompt's task:
+    /// a cancelled turn ends what is new since (`agent/leftovers.rs`).
+    before_prompt: Option<BeforePrompt>,
     /// How the turn ends, once known.
     end: Option<End>,
     /// The turn failed on the host's side; it ends `Failed` with this `TurnFailed`.
@@ -181,6 +184,10 @@ struct Current {
     /// When its first answer text came, on the same clock: `answer_ended.first_words`.
     first_words: Option<std::time::Duration>,
 }
+
+/// Where the prompt's task leaves the listing of the agent's descendants; `None` until it is
+/// taken, and when it failed.
+type BeforePrompt = std::rc::Rc<std::cell::RefCell<Option<clauseo_process::Snapshot>>>;
 
 /// Where a current turn is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -15,4 +15,5 @@ mod relocate;
 mod repair;
 mod restore;
 mod rig;
+mod sweep;
 mod undo;

@@ -101,7 +101,7 @@ fn ladder_kills_an_agent_that_left_its_group() {
     };
     let outcome = block_on(async {
         // The pump ends only once the agent is dead, so it is not waited for.
-        let ladder = pin!(async { join!(handle.shutdown(&timer), script).0 });
+        let ladder = pin!(async { join!(handle.shutdown(&timer, None), script).0 });
         match select(ladder, pin!(pumped)).await {
             Either::Left((outcome, _)) => outcome,
             Either::Right((_, ladder)) => ladder.await,

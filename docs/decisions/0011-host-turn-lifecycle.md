@@ -178,6 +178,28 @@ until `StepUndone` is durable; a failed undo commit is retried once, as a turn's
   arrives with no running turn, or while it is cancelling, is answered cancelled and not logged.
   Everything else the agent sends after `session/cancel` (text, tool calls) is dropped too: R10
   tags it `Late` and the host drops `Late` updates, keeping only what the cancel commit needs.
+- Stop ends what the turn started (clauseo-acp-private#359). An agent can keep a command running
+  past `session/cancel`: codex app-server keeps each background terminal on `turn/interrupt` by
+  design, and starts each command in a session of its own, outside the agent's process group. So
+  as the prompt goes out the host lists the agent's descendants (`process`'s `Descendants`,
+  each with its start time; off the actor, on a `clauseo-sweep` thread), and when the turn ends
+  `Cancelled` with the agent still attached it reads a cutoff on the actor (the clock process
+  starts are stamped with) before the turn lets go of the writer, then ends every descendant new
+  since the listing that started before the cutoff: on Unix SIGTERM (to the process's group when
+  it leads one), 2 s, then SIGKILL to those and to what they started meanwhile; on Windows
+  `TerminateProcess` within the agent's job, and again after 2 s. A queued prompt sent now
+  (`SendQueuedNow`), a Codex steer (a cancel and a new prompt) and any prompt sent right after a
+  Stop all start their turn after that cutoff, so nothing they start is ended; a process started
+  in the cutoff's own clock unit (10 ms on Linux, a timer tick on Windows) is spared too. The
+  agent and everything that ran before the prompt stay, and so does a new process running one of
+  the session's MCP server programs. No sweep runs while the host stops. The agent's stop
+  (restart, fallback, quit) lists the descendants off the actor first, and after the group or job
+  kill also kills those still running. Known gaps: a process that double-forks away from its
+  parent (Unix); an MCP server started or restarted mid-turn whose program is not an absolute path
+  the OS reports as such (`npx` runs as `node`), or any server under a firm's managed MCP
+  (`McpControl::Managed`, where the session gives the agent no servers and so nothing is kept);
+  a helper an agent starts only at its first prompt, which a first-turn cancel ends; and a wall
+  clock set back between the cutoff and a start (macOS, Windows).
 - Start-up reconciliation, before serving, once per thread with an open turn or pending request:
   expire with `HostRestarted`; a started turn gets an after-turn checkpoint and step 7 with
   `TurnFailed { thread.interrupted }`; `AgentSessionDetached { Closed }` when a session was

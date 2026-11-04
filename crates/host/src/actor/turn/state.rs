@@ -69,6 +69,7 @@ impl Current {
             checkpoint_before: None,
             prompt_call: None,
             cancel_timer: None,
+            before_prompt: None,
             end: None,
             failure: None,
             abort: false,
