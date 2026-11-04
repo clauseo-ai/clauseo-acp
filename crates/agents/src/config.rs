@@ -143,6 +143,24 @@ impl SigninConfig {
         }
     }
 
+    /// The lawyer's own home folder, where Codex finds `~/.codex` and Claude Code `~/.claude`:
+    /// `base_env`'s `HOME` (`USERPROFILE` on Windows), when set and not empty. R20 and R17 pass
+    /// it to [`crate::codex_link_holds`] and [`crate::codex_login_shared`].
+    pub fn lawyer_home(&self) -> Option<PathBuf> {
+        let name = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+        self.base_env
+            .iter()
+            .find(|(key, _)| {
+                if cfg!(windows) {
+                    key.to_string_lossy().eq_ignore_ascii_case(name)
+                } else {
+                    key.as_os_str() == name
+                }
+            })
+            .map(|(_, value)| PathBuf::from(value))
+            .filter(|path| !path.as_os_str().is_empty())
+    }
+
     /// The port Codex's browser sign-in needs free: 1455, or a test's own.
     pub(crate) fn callback_port(&self) -> u16 {
         #[cfg(feature = "test-support")]

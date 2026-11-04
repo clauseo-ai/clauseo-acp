@@ -311,3 +311,44 @@ fn reuse_plants_the_claude_marker_for_any_subcommand() {
         json!({"authMethod": "console", "email": "test@example.com"})
     );
 }
+
+/// Status prints the marker's email, so a test can stand another account in the lawyer's home.
+#[test]
+fn claude_status_prints_the_marker_s_email() {
+    let scratch = Scratch::new("claude_status_email");
+    let home = home(&scratch);
+    let dir = claude_dir(&home);
+    write::create_dir_all(&dir).unwrap();
+    write::write(
+        marker(&dir),
+        r#"{"authMethod":"claude.ai","email":"other@example.com"}"#,
+    )
+    .unwrap();
+    let status: serde_json::Value =
+        serde_json::from_str(claude_status(&scratch, &home, &[]).trim()).unwrap();
+    assert_eq!(status["email"], "other@example.com");
+}
+
+/// `FAKE_SIGNIN=secure-ignored` stands for a Claude Code that dropped
+/// `CLAUDE_SECURESTORAGE_CONFIG_DIR`: a reused session's status looks in `CLAUDE_CONFIG_DIR`.
+#[test]
+fn secure_ignored_drops_the_secure_storage_variable() {
+    let scratch = Scratch::new("claude_secure_ignored");
+    let home = home(&scratch);
+    let dir = claude_dir(&home);
+    write::create_dir_all(&dir).unwrap();
+    write::write(marker(&dir), r#"{"authMethod":"claude.ai"}"#).unwrap();
+    let config = scratch.path().join("clauseo-home");
+    let reused = [
+        ("CLAUDE_CONFIG_DIR", text(&config)),
+        ("CLAUDE_SECURESTORAGE_CONFIG_DIR", ""),
+    ];
+    let honoured = claude_status(&scratch, &home, &reused);
+    assert!(honoured.contains(r#""loggedIn":true"#), "{honoured}");
+    let mut ignored = reused.to_vec();
+    ignored.push(("FAKE_SIGNIN", "secure-ignored"));
+    assert_eq!(
+        claude_status(&scratch, &home, &ignored),
+        format!("{CLAUDE_STATUS_OUT}\n")
+    );
+}

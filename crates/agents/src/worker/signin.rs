@@ -14,7 +14,9 @@ use crate::cancel::Cancel;
 use crate::config::AgentsConfig;
 use crate::signin::env::Vendor;
 use crate::signin::job::{self, SigninJob, Task};
-use crate::signin::{Method, PasteCode, SigninCode, SigninError, SigninState, Source, vendor_of};
+use crate::signin::{
+    Found, Method, PasteCode, SigninCode, SigninError, SigninNote, SigninState, Source, vendor_of,
+};
 use crate::state::{AgentsEvent, Installed};
 
 /// Every agent's sign-in: what the handle, the worker and the sign-in jobs share.
@@ -150,11 +152,62 @@ impl SigninHub {
         self.reserve(agent, vendor, Task::Status, installed)
     }
 
+    /// `Agents::find_login`'s checks, then the slot.
+    pub(super) fn find_login(
+        &self,
+        agent: &AgentId,
+        installed: Option<Installed>,
+    ) -> Result<Option<SigninStart>, SigninError> {
+        let vendor = self.vendor(agent)?;
+        self.reserve(agent, vendor, Task::FindLogin, installed)
+    }
+
+    /// `Agents::use_found_login`'s checks (a `LoginFound` was shown), then the slot.
+    pub(super) fn use_found(
+        &self,
+        agent: &AgentId,
+        installed: Option<Installed>,
+    ) -> Result<Option<SigninStart>, SigninError> {
+        let vendor = self.vendor(agent)?;
+        if !matches!(self.state(agent), Some(SigninState::LoginFound { .. })) {
+            return Err(SigninError::NothingFound(agent.clone()));
+        }
+        self.reserve(agent, vendor, Task::UseFound, installed)
+    }
+
+    /// `Agents::use_different_account`'s checks (never from a reused login, which is left with
+    /// `stop_using_login` first), then the slot.
+    pub(super) fn use_different(
+        &self,
+        agent: &AgentId,
+        installed: Option<Installed>,
+    ) -> Result<Option<SigninStart>, SigninError> {
+        let vendor = self.vendor(agent)?;
+        if self.source(agent) == Some(Source::Reused) {
+            return Err(SigninError::Reused(agent.clone()));
+        }
+        self.reserve(agent, vendor, Task::UseDifferent, installed)
+    }
+
+    /// `Agents::stop_using_login`'s checks (never Clauseo's own login), then the slot.
+    pub(super) fn stop_using(
+        &self,
+        agent: &AgentId,
+        why: Option<Found>,
+        installed: Option<Installed>,
+    ) -> Result<Option<SigninStart>, SigninError> {
+        let vendor = self.vendor(agent)?;
+        if self.source(agent) == Some(Source::Own) {
+            return Err(SigninError::NotReused(agent.clone()));
+        }
+        self.reserve(agent, vendor, Task::StopUsing(why), installed)
+    }
+
     /// Cancels `agent`'s sign-in run; its job reports `Failed { code: Cancelled }`.
     pub(super) fn cancel(&self, agent: &AgentId) -> Result<(), SigninError> {
         let inner = self.lock();
         match inner.jobs.get(agent) {
-            Some(slot) if matches!(slot.task, Task::SignIn(_) | Task::TryAgain) => {
+            Some(slot) if slot.task.signs_in() => {
                 slot.ticket.cancel.cancel();
                 Ok(())
             }
@@ -178,7 +231,7 @@ impl SigninHub {
     }
 
     /// `agent`'s last state.
-    pub(super) fn state(&self, agent: &AgentId) -> Option<SigninState> {
+    pub(crate) fn state(&self, agent: &AgentId) -> Option<SigninState> {
         self.lock().states.get(agent).cloned()
     }
 
@@ -218,12 +271,11 @@ impl SigninHub {
             agent: agent.clone(),
             cancel: Arc::new(Cancel::new()),
         };
-        let (sender, receiver) = match task {
-            Task::SignIn(_) => {
-                let (sender, receiver) = async_channel::unbounded();
-                (Some(sender), Some(receiver))
-            }
-            Task::SignOut | Task::Status | Task::TryAgain => (None, None),
+        let (sender, receiver) = if task.signs_in() {
+            let (sender, receiver) = async_channel::unbounded();
+            (Some(sender), Some(receiver))
+        } else {
+            (None, None)
         };
         inner.jobs.insert(
             agent.clone(),
@@ -272,6 +324,17 @@ impl SigninHub {
         let mut inner = self.lock();
         if is_current(&inner, ticket) {
             inner.jobs.remove(&ticket.agent);
+        }
+    }
+
+    /// Sends `note` for `ticket`'s job, unless it was superseded.
+    pub(crate) fn emit_note(&self, ticket: &Ticket, note: SigninNote) {
+        let inner = self.lock();
+        if is_current(&inner, ticket) {
+            drop(self.events.try_send(AgentsEvent::SigninNote {
+                agent: ticket.agent.clone(),
+                note,
+            }));
         }
     }
 
@@ -338,7 +401,8 @@ pub(super) fn start_job<T: Timer + Send + Sync + 'static>(worker: &Worker<T>, st
         fail(&ticket);
         return;
     }
-    let needs_shim = matches!(task, Task::SignIn(_)) && vendor == Vendor::Claude;
+    let needs_shim =
+        matches!(task, Task::SignIn(_) | Task::UseDifferent) && vendor == Vendor::Claude;
     let browser = if needs_shim {
         let Ok(browser) = shim_script(&worker.config) else {
             fail(&ticket);

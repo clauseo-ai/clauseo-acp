@@ -21,6 +21,7 @@
 //! In every case the login's child, its pollers and its URL file are gone before the last state
 //! is sent, so no status process runs after it.
 
+use std::path::Path;
 use std::pin::pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, PoisonError};
@@ -35,7 +36,7 @@ use crate::signin::job::SigninJob;
 use crate::signin::run::{Ended, Ran, run};
 use crate::signin::shim::UrlFile;
 use crate::signin::{PasteCode, SigninCode, SigninState, Source};
-use crate::status::{Identity, claude_signed_in, parse_claude_status};
+use crate::status::{ClaudeStatus, Identity, claude_signed_in, parse_claude_status};
 
 /// The time between status polls during a login.
 pub(crate) const POLL: Duration = Duration::from_millis(1500);
@@ -180,7 +181,7 @@ fn lock(file: &Mutex<UrlFile>) -> std::sync::MutexGuard<'_, UrlFile> {
 }
 
 /// `SignedIn` for `identity`, Clauseo's own login, now.
-fn signed_in<T>(job: &SigninJob<T>, identity: Identity) -> SigninState {
+pub(crate) fn signed_in<T>(job: &SigninJob<T>, identity: Identity) -> SigninState {
     SigninState::SignedIn {
         email: identity.email,
         plan: identity.plan,
@@ -195,8 +196,30 @@ pub(crate) async fn status<T: Timer + Send + Sync>(
     job: &SigninJob<T>,
     cancel: &Cancel,
 ) -> Option<Option<Identity>> {
-    let env = job.env(RunKind::Own { home: &job.home }, None);
-    let spec = job.spec(STATUS, env, STATUS_LIMIT);
+    status_as(job, cancel, RunKind::Own { home: &job.home }).await
+}
+
+/// One `auth status --json` with `kind`'s environment, in the home: as [`status`] says. With
+/// `RunKind::Reused` it is the status a reused session sees.
+pub(crate) async fn status_as<T: Timer + Send + Sync>(
+    job: &SigninJob<T>,
+    cancel: &Cancel,
+    kind: RunKind<'_>,
+) -> Option<Option<Identity>> {
+    let (code, parsed) = status_run(job, cancel, kind, &job.home).await?;
+    Some(claude_signed_in(code, parsed.as_ref()))
+}
+
+/// One `auth status --json` with `kind`'s environment in `cwd`: its exit code and parsed
+/// output, or `None` when it could not tell (no start, killed past 5 s, cancelled).
+pub(crate) async fn status_run<T: Timer + Send + Sync>(
+    job: &SigninJob<T>,
+    cancel: &Cancel,
+    kind: RunKind<'_>,
+    cwd: &Path,
+) -> Option<(Option<i32>, Option<ClaudeStatus>)> {
+    let mut spec = job.spec(STATUS, job.env(kind, None), STATUS_LIMIT);
+    spec.cwd = cwd.to_path_buf();
     let ran = run(
         &*job.launcher,
         &*job.timer,
@@ -210,26 +233,18 @@ pub(crate) async fn status<T: Timer + Send + Sync>(
     let Ended::Exited(code) = ran.ended else {
         return None;
     };
-    let parsed = parse_claude_status(&ran.output.text());
-    Some(claude_signed_in(code, parsed.as_ref()))
-}
-
-/// One status check: `SignedIn` or `SignedOut`, or no change when it could not tell.
-pub(crate) async fn check_status<T: Timer + Send + Sync>(
-    job: &SigninJob<T>,
-) -> Option<SigninState> {
-    let found = status(job, &job.ticket.cancel).await?;
-    Some(match found {
-        Some(identity) => signed_in(job, identity),
-        None => SigninState::SignedOut { found: None },
-    })
+    Some((code, parse_claude_status(&ran.output.text())))
 }
 
 /// `auth logout` in Clauseo's folder, then a status check. Never for a reused login: the call
-/// refuses it, and the job checks again here, at the point reuse (S18 piece 5) relies on.
+/// refuses it by the state, and the job checks again here by `login-source`
+/// ([`super::found::is_reused`]), so no `auth logout` runs while the source is `Reused`; the
+/// job then runs the status check instead, which reports the reused login.
 pub(crate) async fn sign_out<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Option<SigninState> {
-    if job.shared.signin.source(&job.ticket.agent) == Some(Source::Reused) {
-        return None;
+    if job.shared.signin.source(&job.ticket.agent) == Some(Source::Reused)
+        || super::found::is_reused(job)
+    {
+        return super::found::check(job).await;
     }
     let env = job.env(RunKind::Own { home: &job.home }, None);
     let spec = job.spec(LOGOUT, env, LOGOUT_LIMIT);

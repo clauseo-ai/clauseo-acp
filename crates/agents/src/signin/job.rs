@@ -13,8 +13,11 @@
 //!   reports `Failed { code: Cancelled }`, after its child is killed and its URL file removed.
 //! - The flow's last state ends the job; `None` ends it with the state unchanged.
 //!
-//! Detection and reuse (piece 5) add tasks here; the queued start (piece 6) reserves the slot
-//! early and starts the same job once the install is ready and the network is up.
+//! Reuse (piece 5) adds the lawyer's choices about a login they already have as tasks
+//! ([`super::found`]), and the status check becomes the start check: reuse first, then
+//! Clauseo's own login, then detection. A sign-in of Clauseo's own that ends signed in records
+//! `login-source` `own`. The queued start (piece 6) reserves the slot early and starts the same
+//! job once the install is ready and the network is up.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -26,8 +29,11 @@ use clauseo_process::{Launcher, Timer};
 
 use crate::config::AgentsConfig;
 use crate::signin::env::{EnvInputs, RunKind, Shim, Vendor, run_env};
+use crate::signin::marker::{self, LoginSource};
 use crate::signin::run::RunSpec;
-use crate::signin::{Method, PasteCode, SigninCode, SigninState, claude, codex};
+use crate::signin::{
+    Found, Method, PasteCode, SigninCode, SigninNote, SigninState, Source, claude, codex, found,
+};
 use crate::state::Installed;
 use crate::worker::{Shared, Ticket};
 
@@ -44,12 +50,28 @@ pub(crate) enum Task {
     /// Codex's "Try again" after `signin.port_busy`: port 1455 is probed every 2 s, and the
     /// browser sign-in starts once it is free.
     TryAgain,
+    /// "Look for my … login": `no-reuse` goes, then the status check.
+    FindLogin,
+    /// "Use it": reuse the login `LoginFound` showed.
+    UseFound,
+    /// "Sign in with a different account": `no-reuse`, then Clauseo's own sign-in.
+    UseDifferent,
+    /// "Stop using it here" (no reason) or reuse stopping for a reason: no logout.
+    StopUsing(Option<Found>),
 }
 
 impl Task {
     /// Whether this task replaces the agent's running job (a status check never does).
     pub(crate) fn supersedes(self) -> bool {
         !matches!(self, Task::Status)
+    }
+
+    /// Whether the task may run a login, so it can be cancelled and takes pasted codes.
+    pub(crate) fn signs_in(self) -> bool {
+        matches!(
+            self,
+            Task::SignIn(_) | Task::TryAgain | Task::UseFound | Task::UseDifferent
+        )
     }
 }
 
@@ -76,6 +98,24 @@ pub(crate) struct SigninJob<T> {
 pub(crate) fn run<T: Timer + Send + Sync>(mut job: SigninJob<T>) {
     let paste = job.paste.take();
     let last = futures::executor::block_on(job.work(paste));
+    if job.task.signs_in()
+        && matches!(
+            last,
+            Some(SigninState::SignedIn {
+                source: Source::Own,
+                ..
+            })
+        )
+        && job.shared.signin.is_job(&job.ticket)
+    {
+        // "written … when Clauseo's sign-in ends". A failed write leaves no marker, which for
+        // Codex reads as reused while the home holds a login file: the safe side.
+        drop(marker::write_source(
+            &job.config.data_dir,
+            &job.ticket.agent,
+            &LoginSource::Own,
+        ));
+    }
     match last {
         Some(state) => {
             job.shared.signin.emit_job(&job.ticket, state, true);
@@ -89,18 +129,24 @@ impl<T: Timer + Send + Sync> SigninJob<T> {
         if !self.shared.signin.is_job(&self.ticket) {
             return None;
         }
+        // Every run but detection starts in the home, so it must be there; a failure shows as
+        // the run not starting.
+        drop(crate::write::create_dir_all(&self.home));
         match (self.vendor, self.task) {
             (Vendor::Claude, Task::SignIn(method)) => {
                 Some(claude::sign_in(self, method == Method::Console, paste).await)
             }
             (Vendor::Claude, Task::SignOut) => claude::sign_out(self).await,
-            (Vendor::Claude, Task::Status) => claude::check_status(self).await,
             // The call refuses it for Claude, which has no callback port.
             (Vendor::Claude, Task::TryAgain) => None,
             (Vendor::Codex, Task::SignIn(method)) => Some(codex::sign_in(self, method).await),
             (Vendor::Codex, Task::TryAgain) => Some(codex::try_again(self).await),
             (Vendor::Codex, Task::SignOut) => codex::sign_out(self).await,
-            (Vendor::Codex, Task::Status) => codex::check_status(self).await,
+            (_, Task::Status) => found::check(self).await,
+            (_, Task::FindLogin) => found::find_login(self).await,
+            (_, Task::UseFound) => Some(found::use_found(self).await),
+            (_, Task::UseDifferent) => Some(found::use_different(self, paste).await),
+            (_, Task::StopUsing(why)) => found::stop_using(self, why),
         }
     }
 
@@ -120,6 +166,11 @@ impl<T: Timer + Send + Sync> SigninJob<T> {
     /// Reports `state` while the job goes on; nothing once it is superseded.
     pub(crate) fn report(&self, state: SigninState) {
         self.shared.signin.emit_job(&self.ticket, state, false);
+    }
+
+    /// Sends `note` for R20's log; nothing once the job is superseded.
+    pub(crate) fn note(&self, note: SigninNote) {
+        self.shared.signin.emit_note(&self.ticket, note);
     }
 
     /// Sends `OpenUrl` for `url`, already checked against [`SigninJob::hosts`].

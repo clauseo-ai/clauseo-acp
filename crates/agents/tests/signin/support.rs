@@ -15,7 +15,8 @@ use std::time::{Duration, SystemTime};
 
 use clauseo_agents::testing::{TempDir, installed, write_file};
 use clauseo_agents::{
-    Agents, AgentsConfig, AgentsEvent, Clock, InstallState, NodeSearch, Platform, SigninState,
+    Agents, AgentsConfig, AgentsEvent, Clock, InstallState, NodeSearch, Platform, SigninNote,
+    SigninState,
 };
 use clauseo_process::{LaunchSpec, Launched, Launcher, PassthroughLauncher, SpawnOptions, Timer};
 use clauseo_protocol::AgentId;
@@ -277,7 +278,11 @@ impl Fixture {
             launches: Arc::clone(&self.launches),
         });
         let (agents, events) = Agents::start(self.config.clone(), launcher, self.timer.clone());
-        let events = Events { rx: events, agent };
+        let events = Events {
+            rx: events,
+            agent,
+            notes: Mutex::default(),
+        };
         events.until_install_ready();
         (agents, events)
     }
@@ -309,6 +314,20 @@ impl Fixture {
         text.lines().map(str::to_owned).collect()
     }
 
+    /// The lawyer's home folder: the base environment's `HOME`.
+    pub(crate) fn user_home(&self) -> PathBuf {
+        self.data.path().join("user-home")
+    }
+
+    /// `<data_dir>/agents/<id>/<name>`: Clauseo's own markers for `agent`.
+    pub(crate) fn marker(&self, agent: &AgentId, name: &str) -> PathBuf {
+        self.data
+            .path()
+            .join("agents")
+            .join(agent.as_str())
+            .join(name)
+    }
+
     /// `<data_dir>/agents/signin`.
     pub(crate) fn signin_folder(&self) -> PathBuf {
         self.data.path().join("agents/signin")
@@ -333,10 +352,12 @@ pub(crate) enum Seen {
     Open(String),
 }
 
-/// One agent's events, read by blocking. Install events and other agents' are skipped.
+/// One agent's events, read by blocking. Install events and other agents' are skipped; the
+/// agent's sign-in notes are kept aside ([`Events::notes`]).
 pub(crate) struct Events {
     rx: async_channel::Receiver<AgentsEvent>,
     agent: AgentId,
+    notes: Mutex<Vec<SigninNote>>,
 }
 
 impl Events {
@@ -362,6 +383,9 @@ impl Events {
                 }
                 AgentsEvent::OpenUrl { agent, url } if agent == self.agent => {
                     return Seen::Open(url);
+                }
+                AgentsEvent::SigninNote { agent, note } if agent == self.agent => {
+                    lock(&self.notes).push(note);
                 }
                 _ => {}
             }
@@ -395,6 +419,20 @@ impl Events {
             unreachable!()
         };
         (seen, last)
+    }
+
+    /// The next sign-in state for the agent, `OpenUrl` skipped.
+    pub(crate) fn state(&self) -> SigninState {
+        loop {
+            if let Seen::State(state) = self.next() {
+                return state;
+            }
+        }
+    }
+
+    /// The agent's sign-in notes read so far.
+    pub(crate) fn notes(&self) -> Vec<SigninNote> {
+        lock(&self.notes).clone()
     }
 
     /// Every event already sent, without waiting, Install events included.

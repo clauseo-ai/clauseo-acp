@@ -35,10 +35,6 @@ pub(crate) enum Vendor {
 }
 
 /// What a run is for, and so which home variables it gets.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "S18 piece 5 builds the detection and reused runs")
-)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RunKind<'a> {
     /// Detection: the lawyer's own login, looked at where the CLI keeps it by default.

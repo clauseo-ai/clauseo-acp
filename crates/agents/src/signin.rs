@@ -6,8 +6,10 @@
 //! agent at a time, on its own thread, which reports through `SigninHub::emit_job` and is
 //! silenced once superseded. The job hands its task to the agent's flow: Claude's `auth login`
 //! with the `BROWSER` shim (`signin/claude.rs`, `signin/shim.rs`); Codex's `login` and
-//! `--device-auth`, after the port 1455 probe (`signin/codex.rs`); detection and reuse
-//! (`signin/reuse.rs`, piece 5). Each flow:
+//! `--device-auth`, after the port 1455 probe (`signin/codex.rs`); detection
+//! (`signin/detect.rs`), the status check and the lawyer's choices about a login they already
+//! have (`signin/found.rs`), Clauseo's two markers (`signin/marker.rs`), and Codex's hard link,
+//! guard and split check (`signin/reuse.rs`). Each flow:
 //! - builds its environment with `env::run_env`, from [`crate::SigninConfig::base_env`], and
 //!   for Codex adds `env::codex_store_args` to its arguments;
 //! - starts `<node> <script> args…` with `run::run`, through the `Launcher` the caller gave
@@ -28,8 +30,12 @@ use self::env::Vendor;
 
 pub(crate) mod claude;
 pub(crate) mod codex;
+pub(crate) mod detect;
 pub(crate) mod env;
+pub(crate) mod found;
 pub(crate) mod job;
+pub(crate) mod marker;
+pub(crate) mod reuse;
 pub(crate) mod run;
 pub(crate) mod shim;
 
@@ -78,6 +84,36 @@ pub enum SigninError {
     /// is `stop_using_login`.
     #[error("{0}'s login is the lawyer's own, and Clauseo never signs it out")]
     Reused(AgentId),
+    /// `use_found_login` with no `LoginFound` to use: the lawyer has not been shown a login.
+    #[error("{0} has no login found to use")]
+    NothingFound(AgentId),
+    /// `stop_using_login` on Clauseo's own login, which `sign_out` signs out.
+    #[error("{0}'s login is Clauseo's own, not a reused one")]
+    NotReused(AgentId),
+}
+
+/// Something the sign-in did that R20 writes to its log: `AgentsEvent::SigninNote`. No email,
+/// path or secret.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum SigninNote {
+    /// The run-time fallback: Claude's status under the reused session's environment said signed
+    /// out while detection's said signed in (the variable changed upstream), so Clauseo's own
+    /// sign-in is offered.
+    ClaudeReuseFallback,
+    /// Codex's hard link could not be made (another volume, or any link error), so Clauseo's own
+    /// sign-in runs instead.
+    CodexLinkFailed,
+}
+
+impl SigninNote {
+    /// The log's name for it: `claude_reuse_fallback` or `codex_link_failed`.
+    pub fn code(self) -> &'static str {
+        match self {
+            SigninNote::ClaudeReuseFallback => "claude_reuse_fallback",
+            SigninNote::CodexLinkFailed => "codex_link_failed",
+        }
+    }
 }
 
 /// Whose CLI signs `agent` in: by its snapshot id, `claude-acp` or `codex-acp`.

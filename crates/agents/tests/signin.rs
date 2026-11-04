@@ -16,6 +16,14 @@ mod claude;
 mod codex;
 
 #[cfg(test)]
+#[path = "signin/reuse_claude.rs"]
+mod reuse_claude;
+
+#[cfg(test)]
+#[path = "signin/reuse_codex.rs"]
+mod reuse_codex;
+
+#[cfg(test)]
 #[path = "signin/shim.rs"]
 mod shim;
 
