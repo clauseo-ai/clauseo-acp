@@ -41,15 +41,18 @@ export function SnoozeItems({
 }
 
 /** The picker in a row's place: a day and a time between `min` and `max` ("2026-11-05T17:30", the field's own form),
- * Snooze to send it, Cancel or Escape to leave it. */
+ * Snooze to send it, Cancel or Escape to leave it. Snooze stands greyed while the value isn't one the host takes
+ * (`valid`): empty, already past, or too far ahead. */
 export function SnoozePicker({
   min,
   max,
+  valid,
   onPick,
   onCancel,
 }: {
   min: string;
   max: string;
+  valid: (value: string) => boolean;
   onPick: (value: string) => void;
   onCancel: () => void;
 }) {
@@ -64,7 +67,7 @@ export function SnoozePicker({
       aria-label={label}
       onSubmit={(e) => {
         e.preventDefault();
-        if (value !== "") onPick(value);
+        if (valid(value)) onPick(value);
       }}
       onKeyDown={(e) => {
         if (e.key !== "Escape") return;
@@ -86,7 +89,7 @@ export function SnoozePicker({
         onChange={(e) => setValue(e.target.value)}
       />
       <span className="room-picker-acts">
-        <Button kind="tone" size="small" type="submit">
+        <Button kind="tone" size="small" type="submit" disabled={!valid(value)}>
           {tw(lang, "Snooze")}
         </Button>
         <Button

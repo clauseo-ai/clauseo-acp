@@ -1,8 +1,9 @@
 // The Snoozed shelf, open (U16b), loaded later: each snoozed conversation (its title, its matter beneath) or matter
-// snoozed whole (its name, "Whole matter"), the alarm clock and "Until {when}", and Wake now at its end; then why a
+// snoozed whole (its name, "Whole matter"), the alarm clock and "Until {when}", and Wake now (the up arrow: back up
+// into the list, apart from Mark as not done's undo arrow) at its end; then why a
 // row may come back sooner, behind the info icon.
 import { Button } from "../ui/button.tsx";
-import { IconSnooze, IconUndo } from "../icons/icons.tsx";
+import { IconArrowUp, IconSnooze } from "../icons/icons.tsx";
 import { useDisplay } from "../lib/display.ts";
 import { langOfText } from "../lib/script.ts";
 import { twl } from "../lib/words-triage-late.ts";
@@ -28,7 +29,7 @@ export function ShelfRows({ rows }: { rows: readonly ShelfRow[] }) {
     <>
       <ul className="room-shelf-rows">
         {rows.map((r) => (
-          <li key={r.key} className="room-conv-item" data-testid="shelf-row">
+          <li key={r.key} className="room-conv-item room-one-act" data-testid="shelf-row">
             <button type="button" className="room-shelf-row" onClick={r.onOpen}>
               <span className="room-matter-name" lang={langOfText(r.title)}>
                 {r.title}
@@ -55,7 +56,7 @@ export function ShelfRows({ rows }: { rows: readonly ShelfRow[] }) {
                 data-testid="wake-now"
                 onClick={r.onWake}
               >
-                <IconUndo size={16} />
+                <IconArrowUp size={16} />
               </Button>
             </span>
           </li>

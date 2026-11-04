@@ -8,8 +8,7 @@ const HI = {
   // RO-13: a conversation's two buttons, and its menu
   Snooze: null,
   "Mark as done": null,
-  // RO-15: a matter's menu
-  "Snooze until…": null,
+  // RO-15: a matter's menu, with RO-07's "Snooze until" on its submenu's row
   "Mark all done": null,
   // RO-02: the shelf's heading, with its count
   Snoozed: null,

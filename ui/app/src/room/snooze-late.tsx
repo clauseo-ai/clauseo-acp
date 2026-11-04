@@ -7,6 +7,8 @@ import { ShelfRows, type ShelfRow } from "@clauseo/components/clauseo/rail-shelf
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { t } from "@clauseo/components/lib/words.ts";
 import { TriageItems } from "@clauseo/components/clauseo/rail-triage-items.tsx";
+import { RowTriage } from "@clauseo/components/clauseo/rail-triage.tsx";
+import { PointMenu } from "@clauseo/components/clauseo/rail-point-menu.tsx";
 import { RailLine } from "@clauseo/components/clauseo/rail-line.tsx";
 import { SnoozeItems, SnoozePicker } from "@clauseo/components/clauseo/snooze-menu.tsx";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
@@ -24,12 +26,16 @@ export type SnoozeMenuProps = {
   onChoose: () => void;
 };
 
-/** The menu's times as the lawyer's clock reads them when it opens. */
+/** The menu's times as the lawyer's clock reads them when it opens (its popup mounts afresh each time). One whose time
+ * has gone by while the menu stood open (9:00 pm, chosen at 9:01) sends nothing. */
 export function SnoozeMenu({ zone, nextDate, onPick, onChoose }: SnoozeMenuProps) {
   const { lang } = useDisplay();
   const [now] = useState(Date.now);
+  const pick = (until: Timestamp) => {
+    if (takes(until)) onPick(until);
+  };
   return (
-    <SnoozeItems choices={snoozeChoices(now, zone, nextDate, lang, onPick)} onChoose={onChoose} />
+    <SnoozeItems choices={snoozeChoices(now, zone, nextDate, lang, pick)} onChoose={onChoose} />
   );
 }
 
@@ -39,16 +45,21 @@ export type PickerProps = {
   onCancel: () => void;
 };
 
-/** The picker, from a minute ahead to the host's furthest; a value outside them sends nothing. */
+/** A moment the host takes: after now, and no more than 366 days ahead. */
+const takes = (until: Timestamp | null): until is Timestamp =>
+  until !== null && until > Date.now() && until - Date.now() <= MOST_AHEAD;
+
+/** The picker, from a minute ahead to the host's furthest; Snooze greyed for a value outside them. */
 export function Picker({ zone, onPick, onCancel }: PickerProps) {
   const [now] = useState(Date.now);
   return (
     <SnoozePicker
       min={pickerValue(now + 60_000, zone)}
       max={pickerValue(now + MOST_AHEAD - 60_000, zone)}
+      valid={(value) => takes(pickedAt(value, zone))}
       onPick={(value) => {
         const until = pickedAt(value, zone);
-        if (until !== null && until > Date.now() && until - Date.now() < MOST_AHEAD) onPick(until);
+        if (takes(until)) onPick(until);
       }}
       onCancel={onCancel}
     />
@@ -92,5 +103,5 @@ export function ShelfOpen({ c, shelved, lists, open }: ShelfOpenProps) {
   return <ShelfRows rows={rows} />;
 }
 
-export { DoneRows, RailLine, TriageItems };
-export type ItemsProps = { times: ReactNode; onDone: () => void; matter: boolean };
+export { DoneRows, PointMenu, RailLine, RowTriage, TriageItems };
+export type ItemsProps = { times: ReactNode; onDone: () => void; matter: boolean; done: boolean };

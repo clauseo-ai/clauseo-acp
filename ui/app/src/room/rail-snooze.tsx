@@ -19,15 +19,17 @@ import type { ConversationRow } from "./conversations.ts";
 import type { MatterInfo } from "./host-next.ts";
 import {
   LazyDoneRows,
+  LazyButtons,
   LazyItems,
   LazyLine,
   LazyPicker,
+  LazyPoint,
   LazyShelfOpen,
   LazySnoozeMenu,
   preloadSnooze,
 } from "./snooze-load.ts";
-import type { Acts, Line } from "./snooze-acts.ts";
-import { shelf, snoozed } from "./triage.ts";
+import type { Acts, Held, Line } from "./snooze-acts.ts";
+import { shelf, snoozed, wholly, type Group } from "./triage.ts";
 import { clockOf, dayOf } from "./when.ts";
 
 const NO_LINES: ReadonlyMap<string, Line> = new Map();
@@ -35,7 +37,8 @@ const NO_LINES: ReadonlyMap<string, Line> = new Map();
 /** A time to come back, as the rail says it: "6:00 pm", "tomorrow 9:00 am", "Monday 9:00 am", "18 November 9:00 am". */
 export function whenWords(at: Timestamp, now: Timestamp, zone: string, lang: Lang): string {
   const { time, day } = clockOf(at, now, zone, lang);
-  const held = clock(lang, time);
+  // the time holds together on its line: "9:00 am" never breaks before "am"
+  const held = clock(lang, time).replace(/ (am|pm)$/, "\u00a0$1");
   if (day === "") return held;
   return dayOf(at, zone) - dayOf(now, zone) === 1
     ? tw(lang, "tomorrow {time}", { time: held })
@@ -46,9 +49,7 @@ export function whenWords(at: Timestamp, now: Timestamp, zone: string, lang: Lan
  * open, and the acts. */
 export function useSnooze(transport: HostTransport) {
   const [lines, setLines] = useState(NO_LINES);
-  const [picking, setPicking] = useState<{ key: string; threads: readonly ThreadId[] } | null>(
-    null,
-  );
+  const [picking, setPicking] = useState<{ key: string; threads: readonly Held[] } | null>(null);
   const show = (key: string, line: Line) => setLines((was) => new Map(was).set(key, line));
   // the commands come with the later chunk, in or on its way since the pointer came over the rail
   const acts = (run: (acts: Acts) => void) =>
@@ -56,11 +57,11 @@ export function useSnooze(transport: HostTransport) {
   return {
     lines,
     picking,
-    snooze: (key: string, threads: readonly ThreadId[], until: Timestamp) => {
+    snooze: (key: string, threads: readonly Held[], until: Timestamp) => {
       setPicking(null);
       acts((a) => a.snooze(key, threads, until));
     },
-    done: (key: string, threads: readonly ThreadId[]) => acts((a) => a.done(key, threads)),
+    done: (key: string, threads: readonly Held[]) => acts((a) => a.done(key, threads)),
     undo: (key: string) => {
       const line = lines.get(key);
       if (line === undefined) return;
@@ -71,7 +72,7 @@ export function useSnooze(transport: HostTransport) {
     },
     wake: (threads: readonly ThreadId[]) => acts((a) => a.wake(threads)),
     notDone: (thread: ThreadId) => acts((a) => a.notDone(thread)),
-    choose: (key: string, threads: readonly ThreadId[]) => setPicking({ key, threads }),
+    choose: (key: string, threads: readonly Held[]) => setPicking({ key, threads }),
     cancel: () => setPicking(null),
     /** The pointer or the focus left the rail: the lines go, their rows taking their new places. */
     leave: () => {
@@ -88,10 +89,15 @@ export type SnoozeCtx = { snooze: Snooze; now: Timestamp; zone: string; lang: La
 function triageOf(
   c: SnoozeCtx,
   key: string,
-  threads: readonly ThreadId[],
+  threads: readonly Held[],
   nextDate: string | undefined,
+  done = false,
 ): Triage {
-  const onDone = () => c.snooze.done(key, threads);
+  const first = threads[0];
+  const onDone =
+    done && first !== undefined
+      ? () => c.snooze.notDone(first.thread)
+      : () => c.snooze.done(key, threads);
   const menu = () => (
     <Suspense fallback={null}>
       <LazySnoozeMenu
@@ -102,15 +108,28 @@ function triageOf(
       />
     </Suspense>
   );
-  return {
+  const triage: Triage = {
     menu,
-    items: (matter) => (
+    onDone,
+    buttons: (title) => (
       <Suspense fallback={null}>
-        <LazyItems times={menu()} onDone={onDone} matter={matter} />
+        <LazyButtons triage={triage} title={title} />
       </Suspense>
     ),
-    onDone,
+    items: (matter) => (
+      <Suspense fallback={null}>
+        <LazyItems times={menu()} onDone={onDone} matter={matter} done={done} />
+      </Suspense>
+    ),
+    context: (at, onClose) => (
+      <Suspense fallback={null}>
+        <LazyPoint at={at} onClose={onClose}>
+          {triage.items(false)}
+        </LazyPoint>
+      </Suspense>
+    ),
   };
+  return triage;
 }
 
 /** What stands in a row's place, if anything: its picker, or its line with Undo. */
@@ -173,6 +192,10 @@ export function splitConversations(
       return;
     }
     const until = snoozed(row, c.now) ? row.snoozed_until : undefined;
+    const held: Held =
+      row.snoozed_until === undefined ? { thread } : { thread, snoozed_until: row.snoozed_until };
+    // the open one, done, says so, and its menu offers Mark as not done
+    const isDone = row.done === true;
     shown.push({
       ...p,
       ...(until === undefined
@@ -183,7 +206,8 @@ export function splitConversations(
               when: whenWords(until, c.now, c.zone, c.lang),
             }),
           }),
-      triage: triageOf(c, thread, [thread], nextDate),
+      triage: triageOf(c, thread, [held], nextDate, isDone),
+      ...(isDone ? { done: true } : {}),
       ...(replace === undefined ? {} : { replace }),
     });
   });
@@ -201,12 +225,20 @@ export function matterSnooze(
   c: SnoozeCtx,
   m: MatterInfo,
   list: readonly ThreadSummary[] | undefined,
-): Pick<MatterRowProps, "triage" | "replace"> {
-  const awake = (list ?? [])
-    .filter((th) => th.status !== "archived" && th.done !== true)
-    .map((th) => th.thread);
+  group: Group | undefined,
+): Pick<MatterRowProps, "triage" | "replace" | "snoozed"> {
+  const awake = (list ?? []).filter((th) => th.status !== "archived" && th.done !== true);
   const replace = replaceOf(c, m.matter);
+  // snoozed whole, yet in view (Pinned, or held where it stood): its row says so
+  const whole = group === "snoozed" || m.kind === "scratch" ? null : wholly(list, c.now);
   return {
+    ...(whole === null
+      ? {}
+      : {
+          snoozed: tw(c.lang, "Snoozed until {when}", {
+            when: whenWords(whole, c.now, c.zone, c.lang),
+          }),
+        }),
     ...(awake.length === 0 || m.kind === "scratch"
       ? {}
       : {
@@ -228,8 +260,9 @@ export function snoozedShelf(
   matters: readonly MatterInfo[],
   lists: ReadonlyMap<MatterId, readonly ThreadSummary[]>,
   open: ShelfOpens,
+  group: ReadonlyMap<MatterId, Group>,
 ): ReactNode {
-  const shelved = shelf(matters, lists, c.now);
+  const shelved = shelf(matters, lists, c.now, group);
   const first = shelved[0];
   if (first === undefined) return undefined;
   return (

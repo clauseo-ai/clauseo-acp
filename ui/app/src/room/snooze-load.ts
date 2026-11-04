@@ -2,12 +2,15 @@
 // or the focus reaching it starts it, so a menu, the open shelf or the open fold finds it in or on its way. Read with
 // React's use() on one cached promise, tagged once settled, as Find's chunk is (find-load.ts). A load that failed draws
 // nothing and is tried again on the next ask.
-import { createElement, use, type ComponentType } from "react";
+import { createElement, use, type ComponentType, type ReactNode } from "react";
+
+type PointProps = { at: { x: number; y: number }; onClose: () => void; children: ReactNode };
 import { late } from "@clauseo/components/lib/late.ts";
 // types alone: erased, so this file has no static dependency on the chunk
 import type { ItemsProps, PickerProps, ShelfOpenProps, SnoozeMenuProps } from "./snooze-late.tsx";
 import type { Acts, Line } from "./snooze-acts.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
+import type { Triage } from "@clauseo/components/clauseo/rail-triage.tsx";
 import type { DoneRow } from "@clauseo/components/clauseo/rail-done-rows.tsx";
 
 type Parts = {
@@ -17,6 +20,8 @@ type Parts = {
   DoneRows: ComponentType<{ rows: readonly DoneRow[] }>;
   Items: ComponentType<ItemsProps>;
   Line: ComponentType<{ text: string; onUndo: () => void }>;
+  Buttons: ComponentType<{ triage: Triage; title: string }>;
+  Point: ComponentType<PointProps>;
   acts: (transport: HostTransport, show: (key: string, line: Line) => void) => Acts;
 };
 
@@ -31,6 +36,8 @@ const NONE: Parts = {
   DoneRows: NOTHING,
   Items: NOTHING,
   Line: NOTHING,
+  Buttons: NOTHING,
+  Point: NOTHING,
   acts: () => ({ snooze: NOOP, done: NOOP, undo: NOOP, wake: NOOP, notDone: NOOP }),
 };
 
@@ -49,6 +56,8 @@ export function preloadSnooze(): Promise<Parts> {
       DoneRows: m.DoneRows,
       Items: m.TriageItems,
       Line: m.RailLine,
+      Buttons: m.RowTriage,
+      Point: m.PointMenu,
       acts: a.snoozeActs,
     }),
     (error: unknown): Parts => {
@@ -77,3 +86,6 @@ export const LazyDoneRows = (p: { rows: readonly DoneRow[] }) =>
 export const LazyItems = (p: ItemsProps) => createElement(use(preloadSnooze()).Items, p);
 export const LazyLine = (p: { text: string; onUndo: () => void }) =>
   createElement(use(preloadSnooze()).Line, p);
+export const LazyButtons = (p: { triage: Triage; title: string }) =>
+  createElement(use(preloadSnooze()).Buttons, p);
+export const LazyPoint = (p: PointProps) => createElement(use(preloadSnooze()).Point, p);

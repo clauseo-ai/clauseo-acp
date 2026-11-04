@@ -4,7 +4,7 @@
 // clock reads 05:00 or later; before 05:00 it sends nothing. No timer: a window left open overnight sweeps when the
 // lawyer comes back to it. The command is the host's to make idempotent, so every such moment sends it. The rail
 // (rail.tsx) is the main window's alone, so the Settings window never sends it.
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { toHostError, type HostTransport } from "../transport/host-transport.ts";
 import type { Timestamp } from "../transport/protocol.ts";
 import { atLocal, wallOf } from "./local-time.ts";
@@ -58,4 +58,16 @@ export function useSweep(
       document.removeEventListener("visibilitychange", shown);
     };
   }, [transport, zone, onBack]);
+}
+
+/** The rail's clock: the moment it mounted, then each moment the window comes back (useSweep, which it runs) or
+ * `stamp` is called (the pointer coming or going). A rail mounted again (after Versions) starts at its own mount, so
+ * a snooze that ran out meanwhile has ended at its first render. */
+export function useRailClock(
+  transport: HostTransport,
+  zone: string,
+): [Timestamp, (now: Timestamp) => void] {
+  const [stamp, setStamp] = useState(Date.now);
+  useSweep(transport, zone, setStamp);
+  return [stamp, setStamp];
 }

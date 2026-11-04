@@ -4,7 +4,7 @@
 import { wordsOf } from "./words-core.ts";
 
 const HI = {
-  // RO-07: the menu's heading
+  // RO-07: the menu's heading, and the row of a matter's menu that opens it (RO-15)
   "Snooze until": null,
   // RO-08: the menu's times, and the picker
   "Tomorrow {time}": null,
@@ -23,7 +23,7 @@ const HI = {
   // RO-13: a done conversation's button
   "Mark as not done": null,
   // RO-17: behind the open fold's info icon
-  "Read conversations with nothing waiting move here each morning.": null,
+  "Conversations you've read, with nothing waiting, move here each morning.": null,
 } as const;
 
 export type TriageLateKey = keyof typeof HI;

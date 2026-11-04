@@ -34,7 +34,7 @@ import { Say } from "./say.tsx";
 import { ConversationList, type ConversationRowProps } from "./rail-conversations.tsx";
 import { RailMark } from "./rail-mark.tsx";
 import type { Triage } from "./rail-triage.tsx";
-import { MATTER_MARK } from "./rail-marks.ts";
+import { MATTER_MARK, SNOOZED } from "./rail-marks.ts";
 import { matterStatus, type MatterState } from "./rail-words.ts";
 
 export type { MatterState };
@@ -86,6 +86,9 @@ export type MatterRowProps = {
   conversationPlan?: string | undefined;
   /** Optional: a test id on New conversation. */
   newConversationTestId?: string | undefined;
+  /** Optional (U16b): snoozed whole where it stays in view (Pinned, or open), its words ("Snoozed until …"): its status
+   * line, muted, led by the alarm clock. */
+  snoozed?: string | undefined;
   /** Optional (U16b): the current matter's done conversations, folded under its list (ConversationList's `done`). */
   conversationsDone?: { count: number; rows: () => ReactNode } | undefined;
   /** Optional (U16b): Snooze until… and Mark all done in its menu, for its conversations not done. */
@@ -196,6 +199,7 @@ function RowWords({
   status,
   where,
   unprotected,
+  snoozed,
 }: {
   name: string;
   note: string;
@@ -204,6 +208,7 @@ function RowWords({
   state: MatterState;
   status: string | null;
   unprotected?: boolean | undefined;
+  snoozed?: string | undefined;
 }) {
   const w = useWords();
   // waiting on the lawyer, or an answer waiting to be opened: the status line speaks up
@@ -240,7 +245,15 @@ function RowWords({
           <Say>{match}</Say>
         </span>
       )}
-      {status !== null && state !== "idle" && (
+      {snoozed !== undefined && (
+        <span className="flex items-start gap-s1-5 text-small text-muted">
+          <RailMark mark={SNOOZED} className="room-matter-mark" />
+          <span className="min-w-0 deva-nudge">
+            <Say>{snoozed}</Say>
+          </span>
+        </span>
+      )}
+      {snoozed === undefined && status !== null && state !== "idle" && (
         <span
           className={cn(
             "flex items-start gap-s1-5 text-small",
@@ -291,6 +304,7 @@ export function MatterRow({
   triage,
   replace,
   conversationsDone,
+  snoozed,
 }: MatterRowProps) {
   const w = useWords();
   if (replace !== undefined && !(current && conversations !== undefined)) return <li>{replace}</li>;
@@ -325,6 +339,7 @@ export function MatterRow({
         state={state}
         status={status}
         unprotected={unprotected}
+        snoozed={snoozed}
       />
     </button>
   );

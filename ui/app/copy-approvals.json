@@ -3258,7 +3258,7 @@
     "status": "approved",
     "at": "2026-11-05",
     "by": "app track (provisional; Rohan batch review)",
-    "note": "the undo arrow's name, under the pointer and to assistive technology"
+    "note": "the up arrow's name, under the pointer and to assistive technology"
   },
   "RO-13": {
     "en": "Snooze / Mark as done / Mark as not done",
@@ -3279,12 +3279,13 @@
     "note": "the line's full stop dropped; Undo is words.ts's own, its Hindi approved"
   },
   "RO-15": {
-    "en": "Snooze until… / Mark all done",
+    "en": "Snooze until / Mark all done",
     "hi": null,
     "hi_status": "later",
     "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "RO-07's \"Snooze until\" on the submenu's row, its \"…\" dropped (the row's chevron says it opens)"
   },
   "RO-16": {
     "en": "Done",
@@ -3295,13 +3296,13 @@
     "by": "app track (provisional; Rohan batch review)"
   },
   "RO-17": {
-    "en": "Read conversations with nothing waiting move here each morning.",
+    "en": "Conversations you've read, with nothing waiting, move here each morning.",
     "hi": null,
     "hi_status": "later",
     "status": "approved",
     "at": "2026-11-05",
     "by": "app track (provisional; Rohan batch review)",
-    "note": "cut from \"Conversations you've read, with nothing waiting, move here each morning.\"; behind the open fold's info icon"
+    "note": "behind the open fold's info icon; the brief's line, kept whole (the cut read as an instruction)"
   },
   "RO-33": {
     "en": "tomorrow {time}",

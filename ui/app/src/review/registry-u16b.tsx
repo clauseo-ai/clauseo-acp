@@ -66,7 +66,7 @@ export const U16B: Entry[] = [
   entry("RO-03", w("Next back {when}"), () => <RoomTriage />),
   // the shelf open: each row's time, Joshi v. Joshi snoozed whole, Wake now, and behind the info icon why sooner
   entry("RO-04", wl("Back sooner if Clauseo needs you or an answer finishes."), () => (
-    <RoomTriage acts={[...SHELF, { focus: '[data-testid="rail-shelf"] .room-fold-info button' }]} />
+    <RoomTriage acts={[...SHELF, { hover: '[data-testid="rail-shelf"] .room-fold-info button' }]} />
   )),
   entry("RO-05", wl("Until {when}"), () => <RoomTriage acts={SHELF} />),
   entry("RO-06", wl("Whole matter"), () => <RoomTriage acts={SHELF} />),
@@ -92,14 +92,18 @@ export const U16B: Entry[] = [
   )),
   entry("RO-14", joined([w("Marked as done"), undo]), () => <RoomTriage acts={MARKED} />),
   // a matter's menu
-  entry("RO-15", joined([w("Snooze until…"), w("Mark all done")]), () => (
+  entry("RO-15", joined([wl("Snooze until"), w("Mark all done")]), () => (
     <RoomTriage acts={MATTER_MENU} />
   )),
   // the Done fold, folded, then open with its explanation behind the info icon
   entry("RO-16", w("Done"), () => <RoomTriage />),
-  entry("RO-17", wl("Read conversations with nothing waiting move here each morning."), () => (
-    <RoomTriage acts={[...FOLD, { focus: '[data-testid="done-fold"] .room-fold-info button' }]} />
-  )),
+  entry(
+    "RO-17",
+    wl("Conversations you've read, with nothing waiting, move here each morning."),
+    () => (
+      <RoomTriage acts={[...FOLD, { hover: '[data-testid="done-fold"] .room-fold-info button' }]} />
+    ),
+  ),
   // a time tomorrow, in the line and on the shelf
   entry("RO-33", w("tomorrow {time}"), () => <RoomTriage acts={SNOOZED} />),
 ];

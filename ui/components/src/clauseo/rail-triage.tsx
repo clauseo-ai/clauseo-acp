@@ -16,6 +16,10 @@ export type Triage = {
   menu: () => ReactNode;
   items: (matter: boolean) => ReactNode;
   onDone: () => void;
+  /** The row's two buttons (RowTriage, loaded later), for the row titled `title`. */
+  buttons: (title: string) => ReactNode;
+  /** The row's context menu (PointMenu, loaded later, holding `items`), opened at `at`; `onClose` when it shuts. */
+  context: (at: { x: number; y: number }, onClose: () => void) => ReactNode;
 };
 
 /** A conversation's two buttons at its line's end, shown under the pointer or with focus; named with its title. */

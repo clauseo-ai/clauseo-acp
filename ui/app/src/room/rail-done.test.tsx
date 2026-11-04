@@ -58,6 +58,8 @@ test("the Done fold: its count, its rows once open, and Mark as not done", async
   expect(titles()).toEqual(["Bail conditions", "List of dates"]);
   expect(fold()?.querySelector(".room-fold")?.textContent).toBe("Done2");
   expect(fold()?.querySelector(".room-fold")?.getAttribute("aria-expanded")).toBe("false");
+  // a fold's chevron, 13 px (DESIGN.md)
+  expect(fold()?.querySelector(".room-fold-icon")?.getAttribute("width")).toBe("13");
   await press(fold()?.querySelector(".room-fold"));
   const rows = [...(fold()?.querySelectorAll('[data-testid="done-row"]') ?? [])];
   expect(rows.map((r) => r.querySelector(".room-conv-title")?.textContent)).toEqual([
@@ -65,7 +67,7 @@ test("the Done fold: its count, its rows once open, and Mark as not done", async
     "Earlier bail order, 2024",
   ]);
   expect(fold()?.querySelector(".room-fold-info button")?.getAttribute("aria-label")).toBe(
-    "Read conversations with nothing waiting move here each morning.",
+    "Conversations you've read, with nothing waiting, move here each morning.",
   );
   await press(rows[0]?.querySelector('[data-testid="mark-not-done"]'));
   expect(sent(transport, "mark_thread_done")).toEqual([{ thread: T_OLD.thread, done: false }]);
@@ -107,17 +109,17 @@ test("a done row moves into the fold once the pointer leaves", async () => {
   expect(fold()?.querySelector(".room-fold-count")?.textContent).toBe("3");
 });
 
-test("a matter's Snooze until… sends one snooze_thread per conversation not done; Mark all done one mark_thread_done each", async () => {
+test("a matter's Snooze until sends one snooze_thread per conversation not done; Mark all done one mark_thread_done each", async () => {
   const transport = await mount({ lists: lists() });
   await press(rail()?.querySelector(`[aria-label="Actions for ${A.name}"]`));
-  await press(item("Snooze until…"));
+  await press(item("Snooze until"));
   await press(item("Tomorrow 9:00 am"));
   const until = Date.UTC(2026, 10, 4, 9, 0);
   expect(sent(transport, "snooze_thread")).toEqual([
     { thread: T_A.thread, until },
     { thread: T_LIST.thread, until },
   ]);
-  expect(line()?.textContent).toBe("Snoozed until tomorrow 9:00 am Undo");
+  expect(line()?.textContent).toBe("Snoozed until tomorrow 9:00\u00a0am Undo");
   await press(line()?.querySelector("button"));
   expect(sent(transport, "snooze_thread").slice(2)).toEqual([
     { thread: T_A.thread },
@@ -144,7 +146,7 @@ test("one thread of a matter refused: those taken are put back, and no line", as
   });
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
   await press(rail()?.querySelector(`[aria-label="Actions for ${A.name}"]`));
-  await press(item("Snooze until…"));
+  await press(item("Snooze until"));
   await press(item("Monday 9:00 am"));
   warn.mockRestore();
   expect(sent(transport, "snooze_thread").slice(2)).toEqual([{ thread: T_A.thread }]);
@@ -178,7 +180,7 @@ test("the open shelf: a row with its matter and time, Wake now sending snooze_th
   const shelf = rail()?.querySelector<HTMLElement>('[data-testid="rail-shelf"]');
   await press(shelf?.querySelector(".room-fold"));
   const row = shelf?.querySelector('[data-testid="shelf-row"]');
-  expect(row?.textContent).toBe(`${T_ASK.title}${B.name}Until 6:00 pm`);
+  expect(row?.textContent).toBe(`${T_ASK.title}${B.name}Until 6:00\u00a0pm`);
   await press(row?.querySelector('[data-testid="wake-now"]'));
   expect(sent(transport, "snooze_thread")).toEqual([{ thread: T_ASK.thread }]);
 });
@@ -201,6 +203,10 @@ for (const theme of ["light", "dark"] as const)
     await press(rail()?.querySelector('[data-testid="rail-shelf"] .room-fold'));
     expect(rail()?.querySelector('[data-testid="snooze"]')).not.toBeNull();
     expect(rail()?.textContent).toContain("Whole matter");
+    // Wake now and Mark as not done don't share an icon
+    const glyph = (id: string) => rail()?.querySelector(`[data-testid="${id}"] svg`)?.innerHTML;
+    expect(glyph("wake-now")).toBeDefined();
+    expect(glyph("wake-now")).not.toBe(glyph("mark-not-done"));
     expect(await violations()).toEqual([]);
     // the line in a row's place
     await press(rail()?.querySelector('[data-testid="mark-done"]'));
