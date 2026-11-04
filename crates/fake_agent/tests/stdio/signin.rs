@@ -49,7 +49,8 @@ fn script(scratch: &Scratch, relative: &str) -> String {
     text(&path).to_owned()
 }
 
-/// Starts `<script> <args>` with `HOME` set to `home` and `env` set on top.
+/// Starts `<script> <args>` with `HOME` and `USERPROFILE` (the home the fake reads on Windows)
+/// set to `home`, and `env` set on top.
 fn start(
     scratch: &Scratch,
     relative: &str,
@@ -60,7 +61,7 @@ fn start(
     let script = script(scratch, relative);
     let mut argv = vec![script.as_str()];
     argv.extend_from_slice(args);
-    let mut vars = vec![("HOME", home)];
+    let mut vars = vec![("HOME", home), ("USERPROFILE", home)];
     vars.extend_from_slice(env);
     Agent::start_args(&argv, scratch.path(), &vars)
 }

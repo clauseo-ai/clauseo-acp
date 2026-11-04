@@ -10,7 +10,7 @@ use std::time::{Duration, SystemTime};
 
 use clauseo_protocol::AgentId;
 
-use crate::platform::Platform;
+use crate::platform::{Os, Platform};
 use crate::snapshot::Snapshot;
 
 /// Everything an `Agents` needs, read once at start.
@@ -147,18 +147,8 @@ impl SigninConfig {
     /// `base_env`'s `HOME` (`USERPROFILE` on Windows), when set and not empty. R20 and R17 pass
     /// it to [`crate::codex_link_holds`] and [`crate::codex_login_shared`].
     pub fn lawyer_home(&self) -> Option<PathBuf> {
-        let name = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
-        self.base_env
-            .iter()
-            .find(|(key, _)| {
-                if cfg!(windows) {
-                    key.to_string_lossy().eq_ignore_ascii_case(name)
-                } else {
-                    key.as_os_str() == name
-                }
-            })
-            .map(|(_, value)| PathBuf::from(value))
-            .filter(|path| !path.as_os_str().is_empty())
+        let os = if cfg!(windows) { Os::Win32 } else { Os::Linux };
+        lawyer_home_in(&self.base_env, os)
     }
 
     /// The port Codex's browser sign-in needs free: 1455, or a test's own.
@@ -240,3 +230,24 @@ impl Clock for SystemClock {
         Instant::now().saturating_duration_since(start)
     }
 }
+
+/// The lawyer's home folder in `env` on `os`, as Codex and Claude Code find it: `USERPROFILE`
+/// on Windows, where names match in any case as Windows matches them, and `HOME` elsewhere; when
+/// set and not empty.
+pub(crate) fn lawyer_home_in(env: &BTreeMap<OsString, OsString>, os: Os) -> Option<PathBuf> {
+    let windows = os == Os::Win32;
+    let name = if windows { "USERPROFILE" } else { "HOME" };
+    env.iter()
+        .find(|(key, _)| {
+            if windows {
+                key.to_string_lossy().eq_ignore_ascii_case(name)
+            } else {
+                key.as_os_str() == name
+            }
+        })
+        .map(|(_, value)| PathBuf::from(value))
+        .filter(|path| !path.as_os_str().is_empty())
+}
+
+#[cfg(test)]
+mod tests;

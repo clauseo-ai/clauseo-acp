@@ -269,7 +269,10 @@ impl Fixture {
         let mut put = |name: &str, value: &Path| {
             base.insert(name.into(), value.as_os_str().to_owned());
         };
+        // Codex and Claude Code read `USERPROFILE` on Windows and `HOME` elsewhere: both
+        // name the same folder, so the engine and the fake agree on every OS.
         put("HOME", &root.join("user-home"));
+        put("USERPROFILE", &root.join("user-home"));
         put("FAKE_SIGNIN_ENV_OUT", &root.join("env-names"));
         put("FAKE_SIGNIN", Path::new(script));
         put("SSH_CONNECTION", Path::new("10.0.0.1 50000 10.0.0.2 22"));
@@ -388,7 +391,7 @@ impl Fixture {
         text.lines().map(str::to_owned).collect()
     }
 
-    /// The lawyer's home folder: the base environment's `HOME`.
+    /// The lawyer's home folder: the base environment's `HOME` and `USERPROFILE`.
     pub(crate) fn user_home(&self) -> PathBuf {
         self.data.path().join("user-home")
     }
