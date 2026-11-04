@@ -331,12 +331,15 @@ fn absolute_folder(folder: std::path::PathBuf) -> Option<std::path::PathBuf> {
 /// Puts `counts` in `app`'s `CountsState` and starts their task, which asks the bridge's host
 /// for the switch.
 fn start_counts<R: Runtime>(app: &AppHandle<R>, counts: clauseo_counts::Counts) {
-    if let Some(state) = app.try_state::<counts::CountsState>() {
-        state.start(counts.clone());
-    }
-    if let Some(bridge) = app.try_state::<Bridge>() {
-        counts::spawn_ticker(counts, counts::HttpsUpload::new(), bridge.cell());
-    }
+    let (Some(state), Some(bridge)) = (
+        app.try_state::<counts::CountsState>(),
+        app.try_state::<Bridge>(),
+    ) else {
+        return;
+    };
+    state.start(counts.clone());
+    let cell = bridge.cell();
+    state.run_ticker(|| counts::spawn_ticker(counts, counts::HttpsUpload::new(), cell));
 }
 
 /// The effective settings under `locations`, with the system policy sources.
@@ -364,9 +367,13 @@ fn host_config(effective: Effective) -> HostConfig {
     }
 }
 
-/// Stops the host off the UI thread (waits for its start, shuts it down, joins it), then exits
-/// with `code`.
+/// Stops the usage counts' task, then the host off the UI thread (waits for its start, shuts it
+/// down, joins it), saves the counts, then exits with `code`.
 fn stop_host_then_exit<R: Runtime>(app: &AppHandle<R>, exit: Arc<Exit>, code: i32) {
+    // The counts' task first, so no tick asks a host that is shutting down (`counts.rs`).
+    if let Some(counts) = app.try_state::<counts::CountsState>() {
+        drop(counts.stop_ticker());
+    }
     let fallback = app.clone();
     let fallback_exit = Arc::clone(&exit);
     let app = app.clone();

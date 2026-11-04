@@ -11,10 +11,12 @@
 //! - The tick task ([`spawn_ticker`]): one task on Tauri's runtime that every 60 s saves the
 //!   counts (on a blocking thread) and makes the POST that is due (`send_due`). Just before, it
 //!   asks the host for `privacy.counts` after policy ([`host_counts_on`], the value the host
-//!   switches by), so an off sends nothing and deletes the counts folder; a host that did not
-//!   start or does not answer reads as off. An off read before the switch last moved is stale and
-//!   turns nothing off ([`tick_once`]). The exit saves once more ([`CountsState::save`]). The
-//!   clock is read here and nowhere else.
+//!   switches by), so an off sends nothing and deletes the counts folder. A host that did not
+//!   start, has shut down or does not answer gives no value, and the tick then changes nothing:
+//!   no switch, no POST. An off read before the switch last moved is stale and turns nothing off
+//!   ([`tick_once`]). The exit stops the task before it stops the host
+//!   ([`CountsState::stop_ticker`]), then saves once more ([`CountsState::save`]). The clock is
+//!   read here and nowhere else.
 //! - `time_open`: the foreground time of the `main` and `settings` windows, through
 //!   `Counts::set_foreground` ([`on_window_event`]).
 //! - `count_ui`'s events ([`UiCount`]): only what the webview alone sees.
@@ -36,6 +38,7 @@ use clauseo_counts::schema::Time;
 use clauseo_counts::{About, Counts, Upload, send_due};
 use clauseo_protocol::{HostQuery, Principal, QueryResult};
 use clauseo_settings::{Effective, Locations, Origin, WarningKind};
+use tauri::async_runtime::JoinHandle;
 use tauri::{Manager as _, Runtime, WindowEvent};
 
 use crate::host_start::HostCell;
@@ -55,6 +58,15 @@ pub(crate) struct CountsState {
     /// Whether `main` and `settings` have the focus. Its lock also orders the counts' arrival
     /// against focus changes, so neither misses the other.
     focus: Mutex<[bool; 2]>,
+    /// The tick task, once started, and whether the exit has stopped it.
+    ticker: Mutex<Ticker>,
+}
+
+/// The tick task's place in [`CountsState`].
+#[derive(Debug, Default)]
+struct Ticker {
+    task: Option<JoinHandle<()>>,
+    stopped: bool,
 }
 
 impl CountsState {
@@ -96,6 +108,27 @@ impl CountsState {
             return;
         };
         counts.bump(event.event());
+    }
+
+    /// Starts the tick task with `spawn`, unless the exit has stopped it already.
+    pub(crate) fn run_ticker(&self, spawn: impl FnOnce() -> JoinHandle<()>) {
+        let mut ticker = self.ticker.lock().unwrap_or_else(PoisonError::into_inner);
+        if !ticker.stopped {
+            ticker.task = Some(spawn());
+        }
+    }
+
+    /// Stops the tick task for good (the exit calls it before it stops the host), and returns
+    /// it, aborted, when it had started. A tick under way stops at its next wait; one already
+    /// asking the host gets no answer from a host shutting down, and changes nothing.
+    pub(crate) fn stop_ticker(&self) -> Option<JoinHandle<()>> {
+        let mut ticker = self.ticker.lock().unwrap_or_else(PoisonError::into_inner);
+        ticker.stopped = true;
+        let task = ticker.task.take();
+        if let Some(task) = &task {
+            task.abort();
+        }
+        task
     }
 
     /// Saves the counts at exit.
@@ -146,49 +179,68 @@ pub fn counts_on(effective: &Effective) -> bool {
 }
 
 /// `privacy.counts` after policy as the host holds it now (`GetSettings`): the value its
-/// `SetPrivacySettings` and `FirstAct` switch the counts by, answered between commands. Off
-/// when the host did not start or does not answer.
-pub(crate) async fn host_counts_on(cell: &HostCell) -> bool {
-    let Ok(host) = cell.host().await else {
-        return false;
-    };
-    matches!(
-        host.query(Principal::LocalDesktop, HostQuery::GetSettings).await,
-        Ok(QueryResult::Settings(view)) if view.privacy.counts
-    )
+/// `SetPrivacySettings` and `FirstAct` switch the counts by, answered between commands. None
+/// when the host did not start, has shut down (`Closed`) or answers anything else: no value,
+/// never an off.
+pub(crate) async fn host_counts_on(cell: &HostCell) -> Option<bool> {
+    let host = cell.host().await.ok()?;
+    match host
+        .query(Principal::LocalDesktop, HostQuery::GetSettings)
+        .await
+    {
+        Ok(QueryResult::Settings(view)) => Some(view.privacy.counts),
+        _ => None,
+    }
 }
 
 /// Starts the task that ticks `counts` every 60 s and makes the POSTs that are due through
-/// `upload`, asking the host in `cell` for `privacy.counts` before each.
-pub(crate) fn spawn_ticker(counts: Counts, upload: HttpsUpload, cell: Arc<HostCell>) {
-    drop(tauri::async_runtime::spawn(async move {
+/// `upload`, asking the host in `cell` for `privacy.counts` before each. It never ends by
+/// itself: the exit aborts it ([`CountsState::stop_ticker`]).
+pub(crate) fn spawn_ticker(
+    counts: Counts,
+    upload: HttpsUpload,
+    cell: Arc<HostCell>,
+) -> JoinHandle<()> {
+    tauri::async_runtime::spawn(async move {
         loop {
             tick_once(&counts, &upload, now(), host_counts_on(&cell)).await;
             async_io::Timer::after(TICK).await;
         }
-    }));
+    })
 }
 
 /// One tick at `now`: saves on a blocking thread, then reads `effective_on` and makes the POST
 /// that is due, if any. A save that fails is tried again on the next tick.
 ///
-/// The switch's generation is taken before `effective_on` is read. An off read while the
-/// switch moved (the host turned counts on, and its settings write had not landed when the
-/// read was answered) is older than the switch, so it turns nothing off this tick.
+/// No value from `effective_on` (the host is gone or did not answer) ends the tick there: no
+/// switch and no POST, so a host shutting down never reads as an off. The switch's generation
+/// is taken before `effective_on` is read. An off read while the switch moved (the host turned
+/// counts on, and its settings write had not landed when the read was answered) is older than
+/// the switch, so it turns nothing off this tick.
 pub async fn tick_once(
     counts: &Counts,
     upload: &dyn Upload,
     now: Time,
-    effective_on: impl Future<Output = bool>,
+    effective_on: impl Future<Output = Option<bool>>,
 ) {
     let saving = counts.clone();
-    let saved = tauri::async_runtime::spawn_blocking(move || saving.tick(now)).await;
-    if let Ok(Err(err)) = saved {
+    match tauri::async_runtime::spawn_blocking(move || saving.tick(now)).await {
+        Ok(Ok(())) => {}
         // The kind alone: the error's text could hold a path.
-        tracing::debug!(kind = %err.kind(), "the usage counts were not all saved; the next tick tries again");
+        Ok(Err(err)) => {
+            tracing::debug!(kind = %err.kind(), "the usage counts were not all saved; the next tick tries again");
+        }
+        Err(err) => {
+            tracing::debug!(%err, "the usage counts' save thread did not finish; the next tick tries again");
+        }
     }
     let since = counts.switch_generation();
-    let on = effective_on.await;
+    let Some(on) = effective_on.await else {
+        tracing::debug!(
+            "no answer from the host about the usage counts: this tick sends and switches nothing"
+        );
+        return;
+    };
     send_due(counts, upload, now, &|| {
         on || counts.switch_generation() != since
     })

@@ -228,7 +228,12 @@ fn tick_through(
 ) {
     let mut now = from;
     while now.unix_secs() < to.unix_secs() {
-        futures::executor::block_on(tick_once(counts, upload, now, std::future::ready(on())));
+        futures::executor::block_on(tick_once(
+            counts,
+            upload,
+            now,
+            std::future::ready(Some(on())),
+        ));
         now = now.plus(step);
     }
 }
@@ -386,7 +391,12 @@ fn session_in_a_planted_environment() {
             .counts
     };
     let noon = Day::from_ymd(2026, 11, 4).unwrap().start().plus(12 * HOUR);
-    futures::executor::block_on(tick_once(&counts, &upload, noon, std::future::ready(on())));
+    futures::executor::block_on(tick_once(
+        &counts,
+        &upload,
+        noon,
+        std::future::ready(Some(on())),
+    ));
 
     let launcher = PassthroughLauncher::new(SpawnOptions::new().home(home.clone()));
     let config = HostConfig::new(effective, Arc::new(launcher))

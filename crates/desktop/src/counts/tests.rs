@@ -164,7 +164,12 @@ fn a_damaged_settings_file_opens_the_counts_off() {
         ));
         let upload = HttpsUpload::to(None);
         let noon = Time::from_unix_secs(1_793_793_600);
-        block_on(tick_once(&counts, &upload, noon, std::future::ready(true)));
+        block_on(tick_once(
+            &counts,
+            &upload,
+            noon,
+            std::future::ready(Some(true)),
+        ));
         assert_eq!(counts.mode(), Mode::Off, "{name}");
         assert!(!scratch.path().join("counts").exists(), "{name}");
     }
@@ -191,7 +196,7 @@ fn a_tick_never_turns_off_counts_switched_on_after_its_read() {
     // The read answers off (the settings still say false), then the host's on lands.
     let host = counts.clone();
     let stale_read = async move {
-        let answered = false;
+        let answered = Some(false);
         host.set_enabled(true).unwrap();
         answered
     };
@@ -206,7 +211,7 @@ fn a_tick_never_turns_off_counts_switched_on_after_its_read() {
         &counts,
         &upload,
         noon.plus(60),
-        std::future::ready(false),
+        std::future::ready(Some(false)),
     ));
     assert_eq!(counts.mode(), Mode::Off);
 }
@@ -250,4 +255,89 @@ fn either_window_holding_the_focus_is_the_foreground() {
     // Another window's focus is not ours.
     state.focused("e2e", true);
     assert!(!focus(&state));
+}
+
+/// The files under `dir`, with their contents, sorted by path.
+fn files_under(dir: &std::path::Path) -> Vec<(std::path::PathBuf, Vec<u8>)> {
+    fn walk(dir: &std::path::Path, out: &mut Vec<(std::path::PathBuf, Vec<u8>)>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                walk(&path, out);
+            } else {
+                out.push((path.clone(), std::fs::read(&path).unwrap()));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(dir, &mut out);
+    out.sort();
+    out
+}
+
+/// A tick after the host has shut down (`Closed`) gets no value for the switch and changes
+/// nothing: the counts keep their mode, their install id and every file under `counts/`.
+#[test]
+fn a_tick_after_the_host_shut_down_changes_nothing() {
+    let host_scratch = Scratch::new("tick-closed-host", &[]);
+    let host = host_scratch.start(Vec::new());
+    let bridge = host.bridge();
+    let data = Scratch::folder("tick-closed-counts", &[]);
+    let counts = Counts::open(data.path(), test_about(), true, true, 1);
+    let upload = HttpsUpload::to(None);
+    let noon = Time::from_unix_secs(1_793_793_600);
+    counts.bump(clauseo_counts::schema::Event::FeatureUsed(
+        clauseo_counts::schema::FeatureUsed {
+            feature: Feature::Versions,
+        },
+    ));
+    // A live host answers: counts on (the default).
+    assert_eq!(block_on(host_counts_on(&bridge.cell())), Some(true));
+    block_on(tick_once(
+        &counts,
+        &upload,
+        noon,
+        host_counts_on(&bridge.cell()),
+    ));
+    let install = counts.install_id();
+    let before = files_under(&data.path().join("counts"));
+    assert!(install.is_some());
+    assert!(before.len() >= 2, "install_id and today.json: {before:?}");
+
+    block_on(host.host.shutdown()).unwrap();
+    assert_eq!(block_on(host_counts_on(&bridge.cell())), None);
+    block_on(tick_once(
+        &counts,
+        &upload,
+        noon,
+        host_counts_on(&bridge.cell()),
+    ));
+    assert_eq!(counts.mode(), Mode::Saving);
+    assert_eq!(counts.install_id(), install);
+    assert_eq!(files_under(&data.path().join("counts")), before);
+}
+
+/// The exit's `stop_ticker` aborts the task, which never ends by itself; a task asked to start
+/// after the stop never starts.
+#[test]
+fn the_exit_stops_the_tick_task_for_good() {
+    let host_scratch = Scratch::new("ticker-stop", &[]);
+    let host = host_scratch.start(Vec::new());
+    let bridge = host.bridge();
+    let data = Scratch::folder("ticker-stop-counts", &[]);
+    let counts = Counts::open(data.path(), test_about(), true, true, 1);
+    let state = CountsState::default();
+    state.start(counts.clone());
+    let cell = bridge.cell();
+    state.run_ticker(|| spawn_ticker(counts.clone(), HttpsUpload::to(None), cell));
+    let task = state.stop_ticker().expect("the task had started");
+    let ended = block_on(task);
+    assert!(ended.is_err(), "the task ended by itself: {ended:?}");
+    let mut started = false;
+    state.run_ticker(|| {
+        started = true;
+        tauri::async_runtime::spawn(async {})
+    });
+    assert!(!started, "a task started after the stop");
+    assert!(state.stop_ticker().is_none());
 }

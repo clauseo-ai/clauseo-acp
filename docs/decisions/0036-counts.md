@@ -197,12 +197,15 @@ cells, the weekly tally, the queue and the sender. Its row bans `matters`, `acp`
 - **The tick task.** One task on Tauri's runtime ticks every 60 s: `Counts::tick` on a
   blocking thread, then `send_due`. Just before, it asks the host for `privacy.counts` after
   policy (`GetSettings`): the value `SetPrivacySettings` and `FirstAct` switch the counts by,
-  answered between commands. A host that did not start or does not answer reads as off. The
+  answered between commands. A host that did not start, has shut down or does not answer gives
+  no value, and that tick switches and sends nothing (never an off: an exit would otherwise
+  delete the counts). The
   switch's generation (`Counts::switch_generation`, which `set_enabled` and `first_act` move) is
   taken before the read; an off read while it moved is older than the switch (the host turned
   counts on and its settings write had not landed) and turns nothing off that tick. The host
   reads policy at start, so a policy that appears later takes effect at the next start, as
-  everywhere in the app. The exit ticks once more, after the host has stopped. The clock is read
+  everywhere in the app. The exit stops the task before it stops the host, then ticks once
+  more, after the host has stopped, to save. The clock is read
   in `counts.rs` alone, under `#[expect]`.
 - **`time_open`** is the foreground time of the `main` and `settings` windows (either holding the
   focus), through `Counts::set_foreground`. **`app_opened`** stays the host's (above); desktop
