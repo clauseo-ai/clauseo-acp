@@ -34,6 +34,7 @@ fn app(bridge: Bridge) -> (tauri::App<MockRuntime>, WebviewWindow<MockRuntime>) 
             open_file,
             reveal,
             open_settings,
+            count_ui,
             #[cfg(feature = "e2e")]
             crate::e2e::perf_channel_bytes,
             #[cfg(feature = "marks")]
@@ -46,6 +47,7 @@ fn app(bridge: Bridge) -> (tauri::App<MockRuntime>, WebviewWindow<MockRuntime>) 
     #[cfg(feature = "e2e")]
     crate::e2e::grant_scoreboard(&app).unwrap();
     app.manage(bridge);
+    app.manage(crate::counts::CountsState::default());
     app.manage(crate::open::AppData(std::env::temp_dir()));
     app.manage(crate::open::OpenGates::default());
     let window = WebviewWindowBuilder::new(&app, "main", tauri::WebviewUrl::default())
@@ -335,13 +337,20 @@ fn every_list_of_commands_agrees() {
     assert_eq!(build_list(&build, "E2E"), e2e, "build.rs");
     assert_eq!(build_list(&build, "MARKS"), marks, "build.rs");
 
+    // count_ui has a capability of its own, for main too.
+    let counted = set(&["count_ui"]);
     assert_eq!(
         granted(dir, "main.json", "main")
             .into_iter()
             .filter(|permission| !permission.starts_with("core:window:"))
             .collect::<BTreeSet<_>>(),
-        allowed(&ours),
+        allowed(&ours.difference(&counted).copied().collect()),
         "capabilities/main.json, beside the window permissions window_frame/tests.rs checks"
+    );
+    assert_eq!(
+        granted(dir, "counts.json", "main"),
+        allowed(&counted),
+        "capabilities/counts.json"
     );
     assert_eq!(
         granted(dir, "e2e.json", "main"),
@@ -363,14 +372,14 @@ fn every_list_of_commands_agrees() {
         "capabilities/settings.json, beside the window permissions window_frame/tests.rs checks"
     );
     assert!(set(&SETTINGS_COMMANDS).is_subset(&ours));
-    // The default build names main and settings; e2e::grant_scoreboard adds e2e and marks in
+    // The default build names main, settings and counts; e2e::grant_scoreboard adds e2e and marks in
     // their builds.
     let config: Value =
         serde_json::from_str(&std::fs::read_to_string(dir.join("tauri.conf.json")).unwrap())
             .unwrap();
     assert_eq!(
         config["app"]["security"]["capabilities"],
-        json!(["main", "settings"])
+        json!(["main", "settings", "counts"])
     );
 
     let lib = std::fs::read_to_string(dir.join("src/lib.rs")).unwrap();

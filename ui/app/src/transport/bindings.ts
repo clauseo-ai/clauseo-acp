@@ -85,6 +85,12 @@ export const commands = {
 	 *  Granted to `main` only.
 	 */
 	openSettings: () => typedError<null, HostError>(__TAURI_INVOKE("open_settings")),
+	/**
+	 *  Counts one of the events only the webview sees (`counts/ui.rs`, 0036). Granted to `main`
+	 *  alone, by its own capability (`capabilities/counts.json`). The counts open before the host
+	 *  starts, so it waits for the host's start, whatever its outcome; it never fails.
+	 */
+	countUi: (event: UiCount) => typedError<null, HostError>(__TAURI_INVOKE("count_ui", { event })),
 };
 
 /* Constants */
@@ -3992,6 +3998,97 @@ export type TurnUsage = {
 	/**  Input tokens written to the agent's cache. */
 	cached_write?: Count,
 };
+
+/**  `break_shown.kind`. */
+export type UiBreakKind = 
+/**  The agent stopped. */
+"agent_stopped" | 
+/**  The sign-in expired. */
+"signin_expired" | 
+/**  No network. */
+"offline" | 
+/**  A terms notice. */
+"terms_notice" | 
+/**  The plan shut the lawyer out. */
+"plan_shut_out";
+
+/**  `break_shown.then`. */
+export type UiBreakThen = 
+/**  Restarted. */
+"restarted" | 
+/**  Signed in. */
+"signed_in" | 
+/**  Waited. */
+"waited" | 
+/**  Switched agent. */
+"switched_agent" | 
+/**  Left. */
+"left";
+
+/**  One count from the webview. */
+export type UiCount = 
+/**
+ *  The UI showed an error's copy. `unknown`, or a code this build does not know, counts
+ *  nothing.
+ */
+({ error_shown: {
+	/**  The error's code. */
+	code: ErrorCode,
+} }) & { break_shown?: never; feature_used?: never; onboarding_step?: never } | 
+/**  A break screen showed, and what the lawyer did next. */
+({ break_shown: {
+	/**  Which break. */
+	kind: UiBreakKind,
+	/**  What the lawyer did. */
+	then: UiBreakThen,
+} }) & { error_shown?: never; feature_used?: never; onboarding_step?: never } | 
+/**  A feature the webview alone sees was used. */
+({ feature_used: {
+	/**  The feature. */
+	feature: UiFeature,
+} }) & { break_shown?: never; error_shown?: never; onboarding_step?: never } | 
+/**  An onboarding screen's step; each counts once per install. */
+({ onboarding_step: {
+	/**  The step. */
+	step: UiOnboardingStep,
+} }) & { break_shown?: never; error_shown?: never; feature_used?: never };
+
+/**
+ *  The `feature_used` values the webview alone sees. `versions` and `compare` are the Versions
+ *  panel's (0036: the host would count each refresh, not each use).
+ */
+export type UiFeature = 
+/**  Versions opened. */
+"versions" | 
+/**  Compare. */
+"compare" | 
+/**  Open in Word. */
+"open_in_word" | 
+/**  Continue with the other agent. */
+"continue_other_agent" | 
+/**  A prepared answer was used. */
+"prepared_answer_used" | 
+/**  The sample matter. */
+"sample_matter";
+
+/**  `onboarding_step.step`: the onboarding screens' steps. */
+export type UiOnboardingStep = 
+/**  The welcome showed. */
+"welcome_shown" | 
+/**  A folder was chosen. */
+"folder_chosen" | 
+/**  A new matter was made. */
+"new_matter" | 
+/**  The sample matter opened. */
+"sample_opened" | 
+/**  The agent became ready. */
+"agent_ready" | 
+/**  The lawyer signed in to the agent. */
+"signed_in" | 
+/**  The first read finished. */
+"first_read_done" | 
+/**  The first question went. */
+"first_question";
 
 /**
  *  A change to the display settings: each field set is changed, the rest stay. A patch that

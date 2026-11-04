@@ -102,8 +102,8 @@ cells, the weekly tally, the queue and the sender. Its row bans `matters`, `acp`
   these two halves keep it from being resumed.
 - The host and desktop wiring comes in two more pull requests: the settings keys, the wire and
   the host's call sites (below, "The switches and the host"), then desktop's `reqwest` upload,
-  its tick task, `count_ui` and the bridge arms. Until the second, no window may send the
-  commands that start counts, so nothing is saved or sent.
+  its tick task, `count_ui` and the bridge arms (below, "The desktop"). Until UD1's welcome sends
+  `FirstAct`, nothing starts counts, so nothing is saved or sent.
 
 ## The switches and the host (S21's second pull request)
 
@@ -178,6 +178,57 @@ cells, the weekly tally, the queue and the sender. Its row bans `matters`, `acp`
     Versions makes no host call, and `compare_versions` is the Versions panel's Compare, which it
     asks again whenever the matter moves, so counting it in the host would count attempts, not
     uses. `undo` and `restore` stay host-counted, once per success.
+
+## The desktop (S21's third pull request)
+
+- **Opening.** Desktop opens the counts on the host's start thread, before `Host::start`
+  (`crates/desktop/src/counts.rs`), with `privacy.counts` after policy, whether
+  `<data_dir>/first_act_done` exists, a seed from the OS random source (`os_seed`) and the
+  envelope (`counts/about.rs`): desktop's `CARGO_PKG_VERSION`; `channel` `stable`, a build
+  constant; macOS's major version, or on Windows `11` from build 22000 and `10` before it (from
+  `tauri-plugin-os`); `ui.language`; `per_machine` when the Windows executable sits under the
+  Program Files known folder, else `per_user`; `managed` from `Effective::policy_present`. A
+  machine the schema has no value for (an OS version outside it, another CPU) gets no counts that
+  run: nothing is counted, saved, sent or deleted. The handle goes to the host through
+  `HostConfig::with_counts`.
+- **The tick task.** One task on Tauri's runtime ticks every 60 s: `Counts::tick`, then
+  `send_due`, whose switch reads `privacy.counts` after policy from the settings files and policy
+  sources again before anything is due and before each POST, so an off or a policy that appeared
+  since start sends nothing and deletes the folder. The exit ticks once more, after the host has
+  stopped. The clock is read in `counts.rs` alone, under `#[expect]`.
+- **`time_open`** is the foreground time of the `main` and `settings` windows (either holding the
+  focus), through `Counts::set_foreground`. **`app_opened`** stays the host's (above); desktop
+  adds none.
+- **The upload** (`counts/upload.rs`): reqwest 0.13 with rustls and ring (the provider
+  `tauri-plugin-updater` installs; no second one), the OS's certificate check, HTTPS only, no
+  redirect, no cookie store, no `Referer`, a 60 s timeout. A POST names `User-Agent: Clauseo`,
+  `Content-Type: application/json` and `Content-Encoding: gzip`; reqwest adds `Accept: */*` and
+  hyper `Host` and `Content-Length`. Only the status of the answer is read.
+- **The proxy** is the system's, through reqwest's `system-proxy` (hyper-util's
+  `client-proxy-system`, read in hyper-util 0.1.21's `client/proxy/matcher.rs`): the
+  `HTTPS_PROXY`/`HTTP_PROXY`/`ALL_PROXY`/`NO_PROXY` variables first, then on macOS the network
+  settings from `SCDynamicStoreCopyProxies` (`HTTPSEnable`, `HTTPSProxy`, `HTTPSPort`, and the
+  HTTP ones), and on Windows the per-user Internet Settings (`ProxyEnable`, `ProxyServer`,
+  `ProxyOverride`). Not read: macOS's exception list, a Windows `ProxyServer` split per protocol,
+  and PAC files (Later, G10). The agents' egress proxy goes to agents in their own environment and
+  never into the app's, so the upload cannot take it.
+- **The endpoint.** Release builds post to a constant that is empty until a follow-up pull request,
+  made after S23's live checks pass, sets `https://t.clauseo.chat`; until then they send nothing.
+  Debug and `e2e` builds read `CLAUSEO_COUNTS_URL` instead and have no endpoint without it;
+  release builds never read it. An endpoint is an `https` origin with no user, query, fragment or
+  path. With none, every POST fails without touching the network, and the days age out of the queue.
+- **`count_ui(event: UiCount)`**, granted to `main` alone by its own capability
+  (`capabilities/counts.json`): `error_shown` (a code `StrictErrorCode` refuses counts nothing),
+  `break_shown`, the webview's `feature_used` values (`versions`, `compare`, `open_in_word`,
+  `continue_other_agent`, `prepared_answer_used`, `sample_matter`; never the host's `undo` and
+  `restore` or stage E's tools'), and `onboarding_step`. Each enum refuses an unknown field or
+  value. They mirror the schema's enums name for name, so the TypeScript bindings can name them.
+- **The bridge** admits `FirstAct` from `main` only and `SetPrivacySettings` from the settings
+  window only.
+- **The lock.** `Counts` makes its file changes with its state's lock released: the state queues
+  them, and a second, disk lock orders them. `bump` takes the state's lock alone and never waits
+  on the disk, and an off waits for a write under way before it deletes the folder.
+- **No document text in a payload** is shown end to end by `crates/desktop/tests/canary.rs`.
 
 ## Status
 
