@@ -409,7 +409,8 @@ fn content_length_is_the_final_responses() {
     assert_eq!(content_length(""), None);
 }
 
-/// curl's exit 63 (the 400 MiB cap) is `size_mismatch`; any other failure `network`.
+/// curl's exit 63 (the 400 MiB cap) is `size_mismatch`, 47 (a redirect) `host_refused`; any
+/// other failure `network`.
 #[test]
 fn curl_exits_map_to_codes() {
     curl_exit(Some(0), "").unwrap();
@@ -417,7 +418,11 @@ fn curl_exits_map_to_codes() {
         curl_exit(Some(63), "").unwrap_err().code,
         BrowserInstallFailure::SizeMismatch
     );
-    for code in [Some(6), Some(22), Some(28), Some(47), None] {
+    assert_eq!(
+        curl_exit(Some(47), "").unwrap_err().code,
+        BrowserInstallFailure::HostRefused
+    );
+    for code in [Some(6), Some(22), Some(28), None] {
         assert_eq!(
             curl_exit(code, "x").unwrap_err().code,
             BrowserInstallFailure::Network
@@ -428,7 +433,7 @@ fn curl_exits_map_to_codes() {
 /// A real download from Google with the system tools, on macOS or Windows x64 only. By hand:
 /// `cargo test -p clauseo-host --lib real_download -- --ignored --nocapture`.
 #[test]
-#[ignore = "downloads about 150 MB from Google; run by hand on macOS or Windows"]
+#[ignore = "downloads about 200 MB from Google; run by hand on macOS or Windows"]
 fn real_download() {
     let dir = TempDir::new("cft-real");
     let job = Job {

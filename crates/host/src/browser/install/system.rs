@@ -29,10 +29,10 @@ use super::{Cancel, Failure, InstallTools};
 use crate::browser::chrome::Platform;
 
 /// The flags every curl gets: HTTPS only, redirects included, TLS 1.2 or later, an HTTP error
-/// fails, no redirect followed (one fails as curl's exit 47, `network`: HTTPS to Google's host is
-/// the integrity check, so a redirect elsewhere must not replace it; neither URL redirects
-/// today), at most 400 MiB, 30 s to connect, and a transfer slower than 1 byte a second for 60 s
-/// is ended.
+/// fails, no redirect followed (one fails as curl's exit 47, `host_refused`: HTTPS to Google's
+/// host is the integrity check, so a redirect elsewhere must not replace it; neither URL
+/// redirects today), at most 400 MiB, 30 s to connect, and a transfer slower than 1 byte a
+/// second for 60 s is ended.
 pub const CURL_FLAGS: [&str; 17] = [
     "--proto",
     "=https",
@@ -55,6 +55,9 @@ pub const CURL_FLAGS: [&str; 17] = [
 
 /// curl's exit code when `--max-filesize` stops a transfer.
 pub const CURL_TOO_LARGE: i32 = 63;
+
+/// curl's exit code when a redirect goes past `--max-redirs` (0: any redirect).
+pub const CURL_REDIRECTED: i32 = 47;
 
 /// How often a running tool is looked at: cancel, and the download's progress.
 const TICK: Duration = Duration::from_millis(250);
@@ -228,13 +231,18 @@ fn curl_args<'a, S: Into<OsString> + 'a>(rest: impl IntoIterator<Item = S>) -> V
         .collect()
 }
 
-/// A curl run's exit: 0 is fine, [`CURL_TOO_LARGE`] is `size_mismatch`, any other `network`.
+/// A curl run's exit: 0 is fine, [`CURL_TOO_LARGE`] is `size_mismatch`, [`CURL_REDIRECTED`]
+/// `host_refused` (a retry would meet the same redirect), any other `network`.
 pub fn curl_exit(code: Option<i32>, stderr: &str) -> Result<(), Failure> {
     match code {
         Some(0) => Ok(()),
         Some(CURL_TOO_LARGE) => Err(Failure::new(
             BrowserInstallFailure::SizeMismatch,
             "the download is larger than the 400 MiB cap",
+        )),
+        Some(CURL_REDIRECTED) => Err(Failure::new(
+            BrowserInstallFailure::HostRefused,
+            "the server answered with a redirect, which the host does not follow",
         )),
         code => Err(Failure::new(
             BrowserInstallFailure::Network,
@@ -277,9 +285,15 @@ pub fn content_length(headers: &str) -> Option<u64> {
     length.filter(|_| ok && complete)
 }
 
-/// The system tool `name`, by its fixed absolute path; `unsupported` when it is not there.
+/// The system tool `name`, by its fixed absolute path: `/usr/bin` on macOS, System32 on
+/// Windows; `unsupported` when it is not there, and on every other OS.
 fn tool(name: &str) -> Result<PathBuf, Failure> {
-    let path = tool_path(name);
+    #[cfg(target_os = "macos")]
+    let path = Some(Path::new("/usr/bin").join(name));
+    #[cfg(windows)]
+    let path = super::windows::system_dir().map(|dir| dir.join(format!("{name}.exe")));
+    #[cfg(not(any(target_os = "macos", windows)))]
+    let path: Option<PathBuf> = None;
     match path {
         Some(path) if std::fs::metadata(&path).is_ok_and(|meta| meta.is_file()) => Ok(path),
         _ => Err(Failure::new(
@@ -287,21 +301,6 @@ fn tool(name: &str) -> Result<PathBuf, Failure> {
             format!("the system tool {name} is not there"),
         )),
     }
-}
-
-#[cfg(target_os = "macos")]
-fn tool_path(name: &str) -> Option<PathBuf> {
-    Some(Path::new("/usr/bin").join(name))
-}
-
-#[cfg(windows)]
-fn tool_path(name: &str) -> Option<PathBuf> {
-    super::windows::system_dir().map(|dir| dir.join(format!("{name}.exe")))
-}
-
-#[cfg(not(any(target_os = "macos", windows)))]
-fn tool_path(_name: &str) -> Option<PathBuf> {
-    None
 }
 
 /// The bytes free to this user on the volume that holds `folder`.

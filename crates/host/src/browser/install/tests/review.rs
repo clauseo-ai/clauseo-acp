@@ -7,8 +7,12 @@ use std::path::Path;
 
 use clauseo_protocol::BrowserInstallFailure;
 
-use super::support::{Fake, MAC_BINARY, Made, VERSION, ZipEntry, file, zip};
-use super::{browsers, fails_with, job, run_with};
+#[cfg(unix)]
+use super::browsers;
+#[cfg(unix)]
+use super::support::MAC_BINARY;
+use super::support::{Fake, Made, VERSION, ZipEntry, file, zip};
+use super::{fails_with, job, run_with};
 use crate::browser::chrome::Platform;
 use crate::browser::install::system::{CURL_FLAGS, download_args};
 use crate::browser::install::{Cancel, Failure, archive};
@@ -123,12 +127,12 @@ fn a_link_back_in_by_the_unpack_folders_name_is_refused() {
         ..Fake::working()
     };
     let dir = TempDir::new("cft-review-relink-in");
-    let (result, _) = run_with(&job_in(dir.path()), &inside, &Cancel::new());
+    let (result, _) = run_with(
+        &super::job(dir.path(), Platform::MacArm64),
+        &inside,
+        &Cancel::new(),
+    );
     result.unwrap();
-}
-
-fn job_in(dir: &Path) -> crate::browser::install::Job {
-    job(dir, Platform::MacArm64)
 }
 
 /// Redirects are pinned: `--max-redirs 0` (tightening the agreed 3), so a redirect fails as
@@ -179,7 +183,7 @@ fn a_file_at_the_version_folders_name_is_replaced() {
     write::create_dir_all(&browsers_dir).unwrap();
     write::write_file(&browsers_dir.join(format!("chrome-{VERSION}")), b"").unwrap();
     let (result, _) = run_with(
-        &job(dir.path(), Platform::MacArm64),
+        &super::job(dir.path(), Platform::MacArm64),
         &Fake::working(),
         &Cancel::new(),
     );
