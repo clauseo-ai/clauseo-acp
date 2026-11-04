@@ -31,6 +31,7 @@ use crate::settings_window::SETTINGS_WINDOW;
 mod admit;
 mod permission;
 mod pump;
+mod search;
 mod throttle;
 mod window;
 
@@ -214,16 +215,7 @@ impl Bridge {
             | HostQuery::ListAgents
             // H8's wall (#131): reads the folder's stats, and names files by refs.
             | HostQuery::ListPapers { .. } => {}
-            // Search (0043): superseded per page, so the host hears which page asks: the window's
-            // label and the number of its kept `open_stream`, so a reloaded page counts afresh.
-            HostQuery::Search(request) => {
-                let page = lock(&self.windows)
-                    .get(label)
-                    .map_or_else(|| label.to_owned(), |(number, _)| format!("{label}#{number}"));
-                let host = self.host().await?;
-                let answer = host.search(PRINCIPAL, &page, request.clone()).await?;
-                return Ok(QueryResult::Search(answer));
-            }
+            HostQuery::Search(request) => return search::page(self, label, request.clone()).await,
         }
         self.host().await?.query(PRINCIPAL, query).await
     }
