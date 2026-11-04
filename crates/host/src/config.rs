@@ -338,6 +338,14 @@ impl HostConfig {
         self
     }
 
+    /// The launcher agents and plan readers start with, for a caller's tests that launch
+    /// through it (desktop checks that its app config's launcher clears the environment).
+    #[cfg(feature = "test-support")]
+    #[must_use]
+    pub fn launcher(&self) -> Arc<dyn Launcher> {
+        Arc::clone(&self.launcher)
+    }
+
     /// A Chrome every session's browser entry runs (`{browser_executable}`), in place of the
     /// launch prep's search (`browser::chrome::find`), for tests. `None` keeps the search.
     #[cfg(feature = "test-support")]
