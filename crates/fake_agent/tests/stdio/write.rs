@@ -36,7 +36,8 @@ pub(crate) fn remove_file(path: impl AsRef<Path>) -> io::Result<()> {
     std::fs::remove_file(path)
 }
 
-/// `fs::set_permissions`.
+/// `fs::set_permissions`: Unix modes only (the browser-script test).
+#[cfg(unix)]
 pub(crate) fn set_permissions(
     path: impl AsRef<Path>,
     perm: std::fs::Permissions,

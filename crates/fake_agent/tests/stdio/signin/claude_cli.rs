@@ -9,6 +9,7 @@ use super::{
     claude_status, home, marker, read_marker, text,
 };
 use crate::harness::{Finished, Scratch};
+#[cfg(unix)]
 use crate::write;
 
 #[test]
