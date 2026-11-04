@@ -80,7 +80,7 @@ test("fake_agent comes from E2E_FAKE_AGENT, else beside the app", () => {
   expect(fakeAgentPath({}, app, false)).toBe(join(base, "release", "fake_agent"));
 });
 
-test("the folders: data with settings, a seeded matter beside it, and the launch variables", () => {
+test("the folders: data with settings, a seeded matter beside it, and the launch variables", async () => {
   const scratch = makeScratch(
     {
       scenario: "files-one-turn",
@@ -111,11 +111,11 @@ test("the folders: data with settings, a seeded matter beside it, and the launch
   });
   const first = webviewFolder(scratch, 1);
   expect(webviewFolder(scratch, 2)).not.toBe(first);
-  removeScratch(scratch);
+  await removeScratch(scratch);
   expect(existsSync(scratch.root)).toBe(false);
 });
 
-test("the settings file holds the other agents, each on its scenario", () => {
+test("the settings file holds the other agents, each on its scenario", async () => {
   const scratch = makeScratch(
     { scenario: "prompt-stream", matterFiles: {}, otherAgents: { "codex-acp": "codex-handshake" } },
     () => agent,
@@ -131,7 +131,7 @@ test("the settings file holds the other agents, each on its scenario", () => {
       "codex-acp": { command: agent, args: ["--scenario", "codex-handshake"] },
     },
   });
-  removeScratch(scratch);
+  await removeScratch(scratch);
 });
 
 test("no scenario: settings hold only the matters' location, and fake_agent is never asked for", () => {
@@ -205,8 +205,8 @@ test("a fresh profile is a new folder per launch; a warm one is the worker's fol
   expect(existsSync(folder)).toBe(true);
 
   // It outlives a test's scratch, and goes with the worker.
-  removeScratch(one);
-  removeScratch(two);
+  await removeScratch(one);
+  await removeScratch(two);
   expect(existsSync(folder)).toBe(true);
   const warnings: string[] = [];
   await warm.remove((message) => warnings.push(message), 1000);
@@ -422,4 +422,174 @@ test("a warm-up whose clean-up fails throws without a second try, naming the fir
   await expect(failed).rejects.toThrow(/cleaning up .* \(no port\)/);
   await failed.catch((error: Error) => expect(error.cause).toBe(cleanup));
   expect(tries).toBe(1);
+});
+
+/** An error as fs gives one for a file still held open. */
+function held(code = "EPERM"): NodeJS.ErrnoException {
+  return Object.assign(new Error(`${code}, Permission denied`), { code });
+}
+
+/**
+ * A stand-in for the removal that fails with `error` while `stillHeld()`, then removes the root
+ * for real; counts its calls.
+ */
+function removal(stillHeld: () => boolean, error: () => Error = held) {
+  const calls = { count: 0 };
+  const remove = (root: string): void => {
+    calls.count += 1;
+    if (stillHeld()) throw error();
+    rmSync(root, { recursive: true, force: true });
+  };
+  return { calls, remove };
+}
+
+const quick = { exitTimeoutMs: 200, killTimeoutMs: 200, pollMs: 10 };
+
+test("a root nobody holds goes at once: the holders are never asked", async () => {
+  const scratch = makeScratch({ scenario: null, matterFiles: {} }, () => agent, base);
+  let asked = 0;
+  await removeScratch(scratch, {
+    ...quick,
+    holders: {
+      find: async () => {
+        asked += 1;
+        return [];
+      },
+      kill: async () => {},
+    },
+  });
+  expect(existsSync(scratch.root)).toBe(false);
+  expect(asked).toBe(0);
+});
+
+test("a held root waits for its WebView2 processes to exit, then goes, and says so", async () => {
+  const scratch = makeScratch({ scenario: null, matterFiles: {} }, () => agent, base);
+  let finds = 0;
+  const killed: number[][] = [];
+  const warnings: string[] = [];
+  const { calls, remove } = removal(() => finds < 3);
+  await removeScratch(scratch, {
+    ...quick,
+    remove,
+    warn: (message) => warnings.push(message),
+    holders: {
+      find: async (root) => {
+        expect(root).toBe(scratch.root);
+        finds += 1;
+        return finds < 3 ? [41, 42] : [];
+      },
+      kill: async (pids) => {
+        killed.push([...pids]);
+      },
+    },
+  });
+  expect(existsSync(scratch.root)).toBe(false);
+  expect(finds).toBe(3);
+  expect(killed).toEqual([]);
+  expect(calls.count).toBe(2);
+  expect(warnings).toHaveLength(1);
+  expect(warnings[0]).toContain(`${scratch.root} was still held after the app ended`);
+});
+
+test("holders still running when the wait ends are killed, then the root goes", async () => {
+  const scratch = makeScratch({ scenario: null, matterFiles: {} }, () => agent, base);
+  let alive = true;
+  const killed: number[][] = [];
+  const warnings: string[] = [];
+  const { remove } = removal(
+    () => alive,
+    () => held("EBUSY"),
+  );
+  await removeScratch(scratch, {
+    ...quick,
+    remove,
+    warn: (message) => warnings.push(message),
+    holders: {
+      find: async () => (alive ? [41, 42] : []),
+      kill: async (pids) => {
+        killed.push([...pids]);
+        alive = false;
+      },
+    },
+  });
+  expect(existsSync(scratch.root)).toBe(false);
+  expect(killed).toEqual([[41, 42]]);
+  expect(warnings).toEqual([
+    `WebView2 processes 41, 42 still held ${scratch.root} 200 ms after the app ended; killing them`,
+  ]);
+});
+
+test("a holder the kill leaves: the root is removed anyway, and that removal's error stands", async () => {
+  const scratch = makeScratch({ scenario: null, matterFiles: {} }, () => agent, base);
+  const warnings: string[] = [];
+  const { calls, remove } = removal(() => true);
+  const removed = removeScratch(scratch, {
+    ...quick,
+    remove,
+    warn: (message) => warnings.push(message),
+    holders: {
+      find: async () => [41],
+      kill: async () => {
+        throw new Error("Access is denied");
+      },
+    },
+  });
+  await expect(removed).rejects.toMatchObject({ code: "EPERM" });
+  expect(calls.count).toBe(2);
+  expect(warnings).toEqual([
+    `WebView2 processes 41 still held ${scratch.root} 200 ms after the app ended; killing them`,
+    "killing 41 failed: Access is denied",
+    `processes 41 still held ${scratch.root} after the kill; removing it anyway`,
+  ]);
+  rmSync(scratch.root, { recursive: true, force: true });
+});
+
+test("a failed process list is warned of, and the removal is still tried", async () => {
+  const scratch = makeScratch({ scenario: null, matterFiles: {} }, () => agent, base);
+  let tries = 0;
+  const warnings: string[] = [];
+  const { calls, remove } = removal(() => tries++ === 0);
+  await removeScratch(scratch, {
+    ...quick,
+    remove,
+    warn: (message) => warnings.push(message),
+    holders: {
+      find: async () => {
+        throw new Error("powershell timed out");
+      },
+      kill: async () => {},
+    },
+  });
+  expect(existsSync(scratch.root)).toBe(false);
+  expect(calls.count).toBe(2);
+  expect(warnings).toEqual([
+    `listing the processes that hold ${scratch.root} failed: powershell timed out`,
+  ]);
+});
+
+test("an error that is no held file, or a held root without holders, throws at once", async () => {
+  const scratch = makeScratch({ scenario: null, matterFiles: {} }, () => agent, base);
+  let asked = 0;
+  const holders = {
+    find: async () => {
+      asked += 1;
+      return [];
+    },
+    kill: async () => {},
+  };
+  const other = removal(
+    () => true,
+    () => Object.assign(new Error("EINVAL, invalid argument"), { code: "EINVAL" }),
+  );
+  await expect(
+    removeScratch(scratch, { ...quick, remove: other.remove, holders }),
+  ).rejects.toMatchObject({ code: "EINVAL" });
+  const unheld = removal(() => true);
+  await expect(removeScratch(scratch, { ...quick, remove: unheld.remove })).rejects.toMatchObject({
+    code: "EPERM",
+  });
+  expect(asked).toBe(0);
+  expect(other.calls.count + unheld.calls.count).toBe(2);
+  await removeScratch(scratch);
+  expect(existsSync(scratch.root)).toBe(false);
 });
