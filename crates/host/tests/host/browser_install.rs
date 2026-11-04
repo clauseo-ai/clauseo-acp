@@ -17,6 +17,9 @@ use clauseo_protocol::{
 use futures::StreamExt as _;
 
 use crate::support::{Dir, Running, wait};
+
+#[path = "browser_install_catch_up.rs"]
+mod catch_up;
 use crate::write;
 
 /// The browser inside the unpacked folder on Apple silicon.
@@ -30,7 +33,7 @@ const EMPTY_ZIP: [u8; 22] = [
 
 /// Fake tools: Stable is `131.0.6778.85`; the download either finishes at once or, when
 /// `block` is set, says it started and runs until released (then finishes) or cancelled.
-struct Fake {
+pub(super) struct Fake {
     block: bool,
     started: Mutex<mpsc::Sender<()>>,
     release: Mutex<mpsc::Receiver<()>>,
@@ -39,13 +42,13 @@ struct Fake {
 }
 
 /// A fake's handles: its starts, and the sender that releases a blocked download.
-struct Handles {
-    starts: mpsc::Receiver<()>,
-    release: mpsc::Sender<()>,
+pub(super) struct Handles {
+    pub(super) starts: mpsc::Receiver<()>,
+    pub(super) release: mpsc::Sender<()>,
 }
 
 impl Fake {
-    fn new(block: bool) -> (Arc<Self>, Handles) {
+    pub(super) fn new(block: bool) -> (Arc<Self>, Handles) {
         let (started, starts) = mpsc::channel();
         let (release, released) = mpsc::channel();
         let fake = Self {
@@ -124,7 +127,7 @@ impl InstallTools for Fake {
 }
 
 /// Apple silicon roots with every folder under `dir`'s data folder, `app/` the app data.
-fn roots(dir: &Dir) -> ChromeRoots {
+pub(super) fn roots(dir: &Dir) -> ChromeRoots {
     let data = dir.data();
     ChromeRoots {
         platform: Platform::MacArm64,
@@ -148,7 +151,7 @@ fn start(dir: &Dir, tools: Arc<Fake>) -> Running {
 }
 
 /// An app subscription.
-fn subscribe(host: &Running) -> AppSubscription {
+pub(super) fn subscribe(host: &Running) -> AppSubscription {
     wait(
         "subscribe_app",
         host.handle.subscribe_app(Principal::LocalDesktop),
@@ -177,7 +180,7 @@ fn states(sub: &mut AppSubscription) -> Vec<BrowserInstallState> {
 }
 
 /// What `<app>/browsers` holds, by name, sorted.
-fn browsers(dir: &Dir) -> Vec<String> {
+pub(super) fn browsers(dir: &Dir) -> Vec<String> {
     let mut names: Vec<String> = std::fs::read_dir(dir.data().join("app").join("browsers"))
         .unwrap()
         .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
@@ -297,10 +300,15 @@ fn a_cancel_with_nothing_running_does_nothing() {
     let dir = Dir::new("browser_install_idle_cancel", &[]);
     let (tools, _handles) = Fake::new(false);
     let host = start(&dir, tools);
+    let mut sub = subscribe(&host);
     assert_eq!(
         host.ok(HostCommand::CancelBrowserInstall {}),
         CommandOutcome::Done
     );
+    host.settle();
+    let heard = catch_up::available(&mut sub);
+    assert!(!heard.is_empty(), "the first frames");
+    assert_eq!(catch_up::install_states(&heard), []);
     host.shutdown();
 }
 

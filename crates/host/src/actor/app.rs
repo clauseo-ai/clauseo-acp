@@ -22,14 +22,16 @@
 //! Each event is serialised once ([`publish`]) and the same `EncodedEvent` goes to every
 //! subscriber. What publishes here: `SettingsChanged` after each successful settings write
 //! (`settings.rs`), `MattersChanged` and `ThreadsChanged` when a row of the rail changes
-//! (`app_lists.rs`), and `FolderScanned` as a folder scan goes (`scan.rs`, throttled; its last
-//! event is part of the catch-up). Still to come, each through [`publish`] and each adding its
+//! (`app_lists.rs`), `FolderScanned` as a folder scan goes (`scan.rs`, throttled; its last
+//! event is part of the catch-up), and `BrowserInstall` at each step of the Chrome for Testing
+//! download (`browser_install.rs`). Still to come, each through [`publish`] and each adding its
 //! part of the current state to [`catch_up`]: notices. The limits have their own subscribers
 //! (`limits.rs`). `subscribe_app` carries no window identity, so the host sends every changed
 //! thread summary to every app subscriber and each window drops those of threads it has open.
 //!
 //! The current state ([`catch_up`]) is whole: one `SettingsChanged`, one `MattersChanged` with
-//! `all` and one `ThreadsChanged` with `all` per matter, each replacing what a window holds. The
+//! `all`, one `ThreadsChanged` with `all` per matter, and the download's latest `BrowserInstall`
+//! once there is one, each replacing what a window holds. The
 //! partial rows that follow build on it, so a subscriber that missed some (it lagged) gets it
 //! again before any partial row. An event added here must keep that: whole in the catch-up.
 
@@ -200,13 +202,14 @@ pub(super) fn on_unsubscribed(actor: &mut Actor, id: SubId) {
 }
 
 /// The current state, as the events that start a subscription and bring a lagged subscriber up
-/// to date: the settings, the matter list, each matter's thread list and the last folder scan
-/// event. Each event here must replace what a window holds whole; see the module doc before
-/// adding a partial one.
+/// to date: the settings, the matter list, each matter's thread list, the last folder scan
+/// event and the download's latest `BrowserInstall`. Each event here must replace what a window
+/// holds whole; see the module doc before adding a partial one.
 fn catch_up(actor: &mut Actor) -> Vec<EncodedEvent> {
     let mut events = vec![HostEvent::SettingsChanged(super::settings::view(actor))];
     events.extend(super::app_lists::current(actor));
     events.extend(super::scan::catch_up(actor));
+    events.extend(super::browser_install::current(actor));
     events
         .iter()
         .filter_map(|event| {

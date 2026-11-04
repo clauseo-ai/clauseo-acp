@@ -145,7 +145,8 @@ pub enum HostEvent {
     SettingsChanged(SettingsView),
     /// Where the Chrome for Testing download that `HostCommand::InstallBrowser` started stands.
     /// App-wide, never logged and in no stream: it reaches app subscribers only, as each state
-    /// happens. A subscriber that joins later gets no catch-up for it.
+    /// happens. Every app catch-up (a new, lagged or resubscribed subscriber) carries the latest
+    /// one: the running download's last step, or the last download's end until the next starts.
     BrowserInstall {
         /// Where it stands.
         state: BrowserInstallState,
