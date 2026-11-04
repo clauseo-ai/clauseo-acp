@@ -163,10 +163,10 @@ jobs:
           echo "node $(node -v), ui/package.json wants $(node -p 'require("./ui/package.json").engines.node')"
 
       # release.yml runs only on tags and on demand, so its rules (pull request triggers, pinned
-      # actions, permissions, secrets on steps) and latest.json's writer are tested here, in
-      # plain Node, without the network.
+      # actions, permissions, secrets on steps, the sidecar seam), latest.json's writer and the
+      # sidecar script are tested here, in plain Node, without the network or cargo.
       - name: Test the release scripts and release.yml's rules
-        run: node --test .github/scripts/latest-json.test.mjs
+        run: node --test .github/scripts/latest-json.test.mjs .github/scripts/sidecars.test.mjs
 
       # Saved on main only, as every Rust cache here.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2

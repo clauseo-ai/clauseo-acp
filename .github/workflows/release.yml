@@ -31,8 +31,10 @@
 #   ui-sourcemaps-<version>, never in a bundle or on the Release.
 # - crates/desktop/release/ holds the overlays passed with --config: release.conf.json (the
 #   binary's name, Clauseo, and the ui built once by the `ui` job instead of beforeBuildCommand),
-#   windows.conf.json (S15's sidecars and the uninstall hook) and machine.conf.json (the
-#   perMachine installer). `check` fails on any other key in them.
+#   windows.conf.json (the uninstall hook) and machine.conf.json (the perMachine installer).
+#   `check` fails on any other key in them. The sidecar seam writes a fourth,
+#   sidecars.generated.json (bundle.externalBin only, gitignored), which every `tauri build` and
+#   `tauri bundle` of a shipped build passes last.
 # - Tier 1 is macOS Apple silicon and Windows x64; tier 2 (Intel macOS, Windows ARM64, Linux) is
 #   continue-on-error, and the release notes name a tier 2 asset that is missing.
 
@@ -174,8 +176,8 @@ jobs:
             echo "release_date=$release_date"
           } | tee -a "$GITHUB_OUTPUT"
 
-      # The overlays may hold only what they are for. S27's sidecars live in tauri.conf.json, which
-      # this does not read.
+      # The overlays may hold only what they are for. Every sidecar, S15's included, goes through
+      # .github/scripts/sidecars.mjs and its generated overlay, which the seam checks.
       - name: The release overlays hold only their own keys
         working-directory: crates/desktop/release
         run: |
@@ -194,11 +196,7 @@ jobs:
           }
           want release.conf.json "build.beforeBuildCommand mainBinaryName"
           want machine.conf.json "bundle.windows.nsis.installMode"
-          # S15 adds bundle.externalBin; the hook is there from the start.
-          case "$(leaves windows.conf.json)" in
-            "bundle.windows.nsis.installerHooks" | "bundle.externalBin bundle.windows.nsis.installerHooks") ;;
-            *) want windows.conf.json "bundle.windows.nsis.installerHooks (and bundle.externalBin)" ;;
-          esac
+          want windows.conf.json "bundle.windows.nsis.installerHooks"
           [ "$(jq -r .mainBinaryName release.conf.json)" = Clauseo ] || { echo "::error::mainBinaryName is not Clauseo"; status=1; }
           [ "$(jq -r .bundle.windows.nsis.installMode machine.conf.json)" = perMachine ] ||
             { echo "::error::machine.conf.json's installMode is not perMachine"; status=1; }
@@ -328,14 +326,25 @@ jobs:
           path: ui/app/dist
 
       # ---- The sidecar seam ----
-      # Each sidecar this leg ships is built or fetched here, for $TARGET, before the app is
-      # built (tauri-build checks that every bundle.externalBin file exists), as
-      # crates/desktop/binaries/<name>-$TARGET (.exe on Windows), Tauri's externalBin naming.
-      # S15 adds the Windows sandbox tools (bundle.externalBin in release/windows.conf.json);
-      # S27 adds clauseo-mcp and agent-browser (bundle.externalBin in tauri.conf.json). The size
-      # summary lists each beside the app, and the Windows legs carry them to sign-windows.
-      - name: Sidecars for this target (none yet)
-        run: echo "No sidecar yet for $TARGET."
+      # After the installs, before any secret and before the app is built (latest-json.test.mjs
+      # checks both). sidecars.mjs builds or fetches each sidecar for $TARGET (clauseo-mcp with
+      # this job's RUSTFLAGS and profile, agent-browser from its pin) as
+      # crates/desktop/binaries/<name>-$TARGET (.exe on Windows), and writes
+      # release/sidecars.generated.json: bundle.externalBin for exactly those. Every tauri build
+      # and tauri bundle below passes it last (a merge patch replaces arrays, so it is the
+      # target's whole list). S15 adds its rows to the script's table.
+      - name: Sidecars for this target
+        run: |
+          set -euo pipefail
+          node .github/scripts/sidecars.mjs "$TARGET"
+          node -e '
+            const o = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+            const keys = (v) => Object.keys(v ?? {}).join(" ");
+            if (keys(o) !== "bundle" || keys(o.bundle) !== "externalBin" || !Array.isArray(o.bundle.externalBin)) {
+              console.log("::error::sidecars.generated.json may hold only bundle.externalBin, a list");
+              process.exit(1);
+            }
+          ' crates/desktop/release/sidecars.generated.json
 
       # CLAUSEO_RELEASE_DATE is set only for a tag (release and test); unset, the app has none.
       - name: Build the app
@@ -345,11 +354,11 @@ jobs:
           config=(--config release/release.conf.json)
           if [ "$RUNNER_OS" = Windows ]; then config+=(--config release/windows.conf.json); fi
           if [ "$RUNNER_OS" = Linux ]; then
-            pnpm -C ui tauri build --ci --target "$TARGET" ${FEATURES:+--features "$FEATURES"} "${config[@]}" \
-              --bundles deb,rpm --config '{"bundle":{"createUpdaterArtifacts":false}}' -- --locked
+            pnpm -C ui tauri build --ci --target "$TARGET" ${FEATURES:+--features "$FEATURES"} --bundles deb,rpm \
+              "${config[@]}" --config '{"bundle":{"createUpdaterArtifacts":false}}' --config release/sidecars.generated.json -- --locked
           else
-            pnpm -C ui tauri build --ci --target "$TARGET" ${FEATURES:+--features "$FEATURES"} "${config[@]}" \
-              --no-bundle -- --locked
+            pnpm -C ui tauri build --ci --target "$TARGET" ${FEATURES:+--features "$FEATURES"} --no-bundle \
+              "${config[@]}" --config release/sidecars.generated.json -- --locked
           fi
 
       # A dry run's updater key: made here, with a random password, and gone with the runner.
@@ -391,7 +400,7 @@ jobs:
           fi
           [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] || { echo "::error::no updater key for a $MODE run"; exit 1; }
           pnpm -C ui tauri bundle --ci --target "$TARGET" ${FEATURES:+--features "$FEATURES"} --bundles app,dmg \
-            --config release/release.conf.json --config "$RUNNER_TEMP/updater-key.conf.json"
+            --config release/release.conf.json --config "$RUNNER_TEMP/updater-key.conf.json" --config release/sidecars.generated.json
 
       # Each leg's assets, under the names latest-json.mjs lists (assemble renames the macOS
       # archive, which both macOS legs call Clauseo.app.tar.gz).
@@ -416,7 +425,9 @@ jobs:
           path: ${{ env.OUT }}
           if-no-files-found: error
 
-      # The exe exactly as linked, and the sidecars, for sign-windows to sign and bundle.
+      # The exe exactly as linked, the sidecars as placed and the overlay that lists them, for
+      # sign-windows to sign and bundle. Paths are kept from the repo root, so the download puts
+      # each back where it was.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: runner.os == 'Windows'
         with:
@@ -424,9 +435,12 @@ jobs:
           path: |
             ${{ env.RELEASE_DIR }}/Clauseo.exe
             crates/desktop/binaries/*-${{ matrix.target }}.exe
+            crates/desktop/release/sidecars.generated.json
           if-no-files-found: error
 
-      # From the same link as the shipped binary, for S22's symbols job. Never on the Release.
+      # From the same link as the shipped binaries, for S22's symbols job. Never on the Release.
+      # The globs take clauseo-mcp's .pdb, .dSYM or .dwp beside the app's (agent-browser is
+      # fetched, so it has none).
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: debug-files-${{ matrix.target }}
@@ -436,8 +450,8 @@ jobs:
             ${{ env.RELEASE_DIR }}/*.dwp
           if-no-files-found: error
 
-      # budgets.toml's release_binary_size is the app binary alone; each sidecar is listed beside
-      # it. deb_size is the .deb.
+      # budgets.toml's release_binary_size is the app binary alone; each sidecar gets its own row
+      # beside it, never counted in that limit. deb_size is the .deb.
       # minimumWebview2Version in tauri.conf.json is this runner's WebView2 major version as of
       # when S20 landed, raised only on purpose. This line shows what the runner has now. It never
       # fails the job.
@@ -535,10 +549,14 @@ jobs:
           pnpm -C ui install --frozen-lockfile
           cargo fetch --locked
 
+      # Clauseo.exe back in $RELEASE_DIR, the sidecars in crates/desktop/binaries/ and the
+      # overlay in crates/desktop/release/, exactly as the build leg left them.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: windows-exe-${{ matrix.target }}
 
+      # S20a signs every PE the installers take: Clauseo.exe and each file in
+      # crates/desktop/binaries/ (clauseo-mcp, agent-browser, later S15's tools), before NSIS.
       - name: SignPath, the exe and the sidecars (S20a)
         if: needs.check.outputs.mode == 'release' && vars.SIGNPATH_ENABLED == 'true'
         run: |
@@ -547,7 +565,7 @@ jobs:
 
       # --no-binary-patching keeps the signed exe as signed (the updater then reads the plain
       # windows-<arch> key of latest.json); --no-sign leaves the updater signature to the last
-      # step. Both installers ship the same exe.
+      # step. Both installers ship the same exe, and the sidecars the overlay lists, beside it.
       - name: Bundle the currentUser and perMachine installers
         run: |
           set -euo pipefail
@@ -556,7 +574,8 @@ jobs:
           bundle() {
             rm -rf "$nsis"
             pnpm -C ui tauri bundle --ci --target "$TARGET" ${FEATURES:+--features "$FEATURES"} --bundles nsis \
-              --no-binary-patching --no-sign --config release/release.conf.json --config release/windows.conf.json "$@"
+              --no-binary-patching --no-sign --config release/release.conf.json --config release/windows.conf.json "$@" \
+              --config release/sidecars.generated.json
           }
           bundle
           mv "$nsis/Clauseo_${VERSION}_${{ matrix.arch }}-setup.exe" "$OUT/"
