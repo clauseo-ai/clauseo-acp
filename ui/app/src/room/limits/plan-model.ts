@@ -76,6 +76,26 @@ export function meterLine(lang: Lang, meter: LimitMeter, now: number): string {
     : lim(lang, timed, { time: stamp(lang, meter.resets_at, now) });
 }
 
+/** How far `resets_at` may move from the reset the line showed last and still show that one: the host's reads land a
+ * little apart, so a reset jitters by a few hundred ms, and at a minute's edge that flips the minute shown. */
+const RESET_SLACK_MS = 30_000;
+/** The reset instant each window's line last showed, by agent kind and window label. */
+const shownResets = new Map<string, number>();
+
+/** The reset to show for a window: the one it showed last, unless `resets_at` is 30 s or more away from it, which is
+ * then the one shown from here on. */
+function shownReset(key: string, resets_at: number): number {
+  const held = shownResets.get(key);
+  if (held !== undefined && Math.abs(resets_at - held) < RESET_SLACK_MS) return held;
+  shownResets.set(key, resets_at);
+  return resets_at;
+}
+
+/** Forgets every reset the lines showed (the tests start each from none). */
+export function forgetShownResets(): void {
+  shownResets.clear();
+}
+
 /** The toolbar's plan for an entry, as RoomToolbar takes it, without the card: null where no line stands. */
 export type PlanLine = {
   name: string;
@@ -117,11 +137,15 @@ export function planLine(
   // figures with no window to show: the name alone, as while loading, with the card still to open
   if (meter === undefined) return { ...base, status: "", look: "none" };
   const left = shareLeft(meter.used_percent);
+  const resets =
+    meter.resets_at === undefined
+      ? meter
+      : { ...meter, resets_at: shownReset(`${kind}:${meter.window_label}`, meter.resets_at) };
   return {
     name,
     left: bandOf(meter) === "reached" ? 0 : left / 100,
     valueText: lim(lang, "{n} percent of the plan left", { n: left }),
-    status: meterLine(lang, meter, now),
+    status: meterLine(lang, resets, now),
     state: STATE[bandOf(meter)],
     ...(look === "stale" ? { look: "stale" as const } : {}),
     tone: meter.tone,
