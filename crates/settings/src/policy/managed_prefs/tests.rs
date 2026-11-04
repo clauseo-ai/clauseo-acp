@@ -1,7 +1,7 @@
 use super::{AGENTS_KEY, PlistValue, SOURCE, parse};
 use crate::leaf::Leaf;
 use crate::policy::{PolicyRead, PolicyValues};
-use crate::schema::{Density, FontSize, Theme};
+use crate::schema::{Density, FontSize, Theme, UpdateMode};
 use crate::testing::abs_str;
 use crate::warning::{Origin, WarningKind};
 
@@ -227,4 +227,43 @@ fn the_mcp_servers_key_sets_or_locks_the_list() {
     let (leaves, kinds) = values(vec![("mcp.servers", string("all"), true)]);
     assert_eq!(leaves, vec![Leaf::Refused("mcp.servers".to_owned())]);
     assert_eq!(kinds.len(), 1);
+}
+
+// `update.mode` (R23) is a forced string, `auto`, `notify` or `none`. Another string, or
+// another type, locks it at `none` with a warning: a security key.
+#[test]
+fn the_update_mode_is_a_string() {
+    for (text, mode) in [
+        ("auto", UpdateMode::Auto),
+        ("notify", UpdateMode::Notify),
+        ("none", UpdateMode::None),
+    ] {
+        let (leaves, warnings) = values(vec![("update.mode", string(text), true)]);
+        assert_eq!(leaves, [Leaf::UpdateMode(mode)], "{text}");
+        assert_eq!(warnings, [], "{text}");
+    }
+    for value in [
+        string("Notify"),
+        PlistValue::Bool(false),
+        PlistValue::Integer(0),
+    ] {
+        let (leaves, warnings) = values(vec![("update.mode", value.clone(), true)]);
+        assert_eq!(
+            leaves,
+            [Leaf::Refused("update.mode".to_owned())],
+            "{value:?}"
+        );
+        assert!(
+            matches!(
+                &warnings[..],
+                [WarningKind::InvalidValue { key, .. }] if key == "update.mode"
+            ),
+            "{value:?}: {warnings:?}"
+        );
+    }
+    // Not forced, it is the user's own `defaults write`, not policy.
+    assert!(matches!(
+        read(vec![("update.mode", string("none"), false)]),
+        PolicyRead::Absent
+    ));
 }

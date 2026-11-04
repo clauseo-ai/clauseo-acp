@@ -258,6 +258,37 @@ source: crates/settings/src/schema/tests.rs
         }
       },
       "type": "object"
+    },
+    "UpdateMode": {
+      "description": "When Clauseo installs an update. The app writes only `auto` and `notify`; `none` comes from\npolicy, or a hand-edited `settings.json`.",
+      "oneOf": [
+        {
+          "const": "auto",
+          "description": "Download in the background, and install at the next start or when the lawyer says.",
+          "type": "string"
+        },
+        {
+          "const": "notify",
+          "description": "Download, and install only when the lawyer says.",
+          "type": "string"
+        },
+        {
+          "const": "none",
+          "description": "Never check: the firm updates Clauseo itself.",
+          "type": "string"
+        }
+      ]
+    },
+    "UpdateSettings": {
+      "description": "The `update` section. `update.mode` is a security key: a policy may set any of its values,\nwhich locks it, and a policy source that cannot be read, or a policy value that does not\ntype, locks it `none`.",
+      "properties": {
+        "mode": {
+          "$ref": "#/$defs/UpdateMode",
+          "default": "auto",
+          "description": "When Clauseo installs an update. `auto` by default."
+        }
+      },
+      "type": "object"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -312,6 +343,13 @@ source: crates/settings/src/schema/tests.rs
         "theme": "system"
       },
       "description": "How the app looks. The webview changes these only through a `UiPatch`."
+    },
+    "update": {
+      "$ref": "#/$defs/UpdateSettings",
+      "default": {
+        "mode": "auto"
+      },
+      "description": "How Clauseo updates itself (task R23)."
     }
   },
   "title": "Settings",

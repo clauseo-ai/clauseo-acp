@@ -7,5 +7,6 @@ expression: SECURITY_KEYS
   "tools.web_search",
   "tools.browser",
   "privacy.counts",
-  "privacy.crash_reports"
+  "privacy.crash_reports",
+  "update.mode"
 ]

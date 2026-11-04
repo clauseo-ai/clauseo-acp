@@ -238,6 +238,42 @@ fn agent_home_is_under_the_data_folder_never_the_temp_folder() {
     );
 }
 
+// The updater's files (R23) sit in the data folder, follow `CLAUSEO_DATA_DIR`, and are never
+// under the default matters folder or the matters' own `<data dir>/matters`.
+#[test]
+fn the_update_marker_and_downloads_are_in_the_data_folder_never_a_matters_folder() {
+    let over = FakeEnv(vec![(DATA_DIR_VAR, abs_str("tmp/run-9/data"))]);
+    for (os, dirs) in [
+        (Os::Windows, windows_dirs()),
+        (Os::Mac, home_dirs()),
+        (Os::Linux, home_dirs()),
+    ] {
+        for env in [&FakeEnv::default(), &over] {
+            let at = Locations::resolve_for(os, &dirs, env).unwrap();
+            let (marker, updates) = (at.update_marker(), at.updates_dir());
+            assert_eq!(marker, at.data_dir().join("update.json"), "{os:?}");
+            assert_eq!(updates, at.data_dir().join("updates"), "{os:?}");
+            for path in [&marker, &updates] {
+                assert!(
+                    !path.starts_with(at.default_matters_dir()),
+                    "{os:?}: {path:?}"
+                );
+                assert!(!path.starts_with(at.data_dir().join("matters")), "{path:?}");
+            }
+        }
+        let at = Locations::resolve_for(os, &dirs, &over).unwrap();
+        assert_eq!(
+            at.update_marker(),
+            abs("tmp/run-9/data/update.json"),
+            "{os:?}"
+        );
+        assert_eq!(at.updates_dir(), abs("tmp/run-9/data/updates"), "{os:?}");
+    }
+    let at = Locations::under_root(Path::new("/scratch/run-2"));
+    assert_eq!(at.update_marker(), Path::new("/scratch/run-2/update.json"));
+    assert_eq!(at.updates_dir(), Path::new("/scratch/run-2/updates"));
+}
+
 #[test]
 #[cfg(debug_assertions)]
 #[should_panic(expected = "an agent id is [a-z0-9-]+")]

@@ -1,7 +1,7 @@
 //! [`Effective`]: the settings `host` and `cli` run with. Read at start-up; the `ui` section
 //! changes at runtime through [`Effective::apply_ui_patch`], the `tools` section through
 //! [`Effective::apply_tools_patch`], the `privacy` section through
-//! [`Effective::apply_privacy_patch`].
+//! [`Effective::apply_privacy_patch`], `update.mode` through [`Effective::apply_update_mode`].
 
 #[cfg(test)]
 mod mcp_tests;
@@ -15,6 +15,8 @@ mod tools_patch_tests;
 mod tools_tests;
 #[cfg(test)]
 mod ui_patch_tests;
+#[cfg(test)]
+mod update_tests;
 
 use crate::error::Error;
 use crate::files::Files;
@@ -25,6 +27,7 @@ use crate::privacy::PrivacyPatch;
 use crate::schema::{AgentLaunch, McpServerLaunch, Settings};
 use crate::tools::ToolsPatch;
 use crate::ui::UiPatch;
+use crate::update::UpdateChoice;
 use crate::user;
 use crate::warning::{Origin, Warning, WarningKind};
 use std::collections::{BTreeMap, BTreeSet};
@@ -56,9 +59,10 @@ impl Effective {
     /// known key that does not type locks the key at its default (an agent: no entry), or off for
     /// a security key (`leaf::SECURITY_KEYS`), with a warning: fail closed (Rohan, 2026-10-31). A
     /// source that cannot be read also locks each security key off (`mcp.servers` empty, each
-    /// `tools` and `privacy` key `false`), with a warning, since its value is unknown
-    /// (2026-11-02, R21; 0036). A policy `true` for a `privacy` key is ignored with a warning
-    /// and locks nothing: a policy can only turn those off (0036).
+    /// `tools` and `privacy` key `false`, `update.mode` `none`), with a warning, since its value
+    /// is unknown (2026-11-02, R21; 0036; R23). A policy `true` for a `privacy` key is ignored
+    /// with a warning and locks nothing: a policy can only turn those off (0036). A policy may
+    /// set `update.mode` to any value, and it locks.
     pub fn load(
         locations: &Locations,
         files: &dyn Files,
@@ -196,6 +200,29 @@ impl Effective {
         }
         user::write_privacy_settings(&self.locations, files, patch)?;
         self.settings.privacy.apply_patch(patch);
+        Ok(())
+    }
+
+    /// Changes `update.mode` to the lawyer's choice: saves it to `settings.json` through `files`,
+    /// then sets it in memory, as [`Effective::apply_privacy_patch`] does for `privacy`. While
+    /// policy locks the key (a policy value, or a policy source that cannot be read) it is
+    /// refused with [`Error::Locked`]; nothing is written or changed. A failed write returns the
+    /// error with nothing changed in memory. `none` cannot be written: [`UpdateChoice`] has no
+    /// such value, since only the firm's policy (or a hand edit) turns updates off. The host
+    /// calls it for `SetUpdateMode`.
+    pub fn apply_update_mode(
+        &mut self,
+        files: &dyn Files,
+        mode: UpdateChoice,
+    ) -> Result<(), Error> {
+        const KEY: &str = "update.mode";
+        if self.is_locked(KEY) {
+            return Err(Error::Locked {
+                key: KEY.to_owned(),
+            });
+        }
+        user::write_update_mode(&self.locations, files, mode)?;
+        self.settings.update.mode = mode.into();
         Ok(())
     }
 

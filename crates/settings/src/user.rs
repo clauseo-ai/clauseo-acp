@@ -1,7 +1,8 @@
-//! The user's `settings.json`: reading it, and the write of a [`UiPatch`], a [`ToolsPatch`] or a
-//! [`PrivacyPatch`]. Only [`crate::Effective::apply_ui_patch`],
-//! [`crate::Effective::apply_tools_patch`] and [`crate::Effective::apply_privacy_patch`] call
-//! those writes, after they have checked policy locks.
+//! The user's `settings.json`: reading it, and the write of a [`UiPatch`], a [`ToolsPatch`], a
+//! [`PrivacyPatch`] or an [`UpdateChoice`]. Only [`crate::Effective::apply_ui_patch`],
+//! [`crate::Effective::apply_tools_patch`], [`crate::Effective::apply_privacy_patch`] and
+//! [`crate::Effective::apply_update_mode`] call those writes, after they have checked policy
+//! locks.
 
 #[cfg(test)]
 mod tests;
@@ -14,6 +15,7 @@ use crate::locations::Locations;
 use crate::privacy::PrivacyPatch;
 use crate::tools::ToolsPatch;
 use crate::ui::UiPatch;
+use crate::update::{UpdateChoice, UpdateFields};
 use crate::warning::{Origin, Warning, WarningKind};
 use serde::Serialize;
 use serde_json_lenient::{Map, Value};
@@ -94,6 +96,17 @@ pub(crate) fn write_privacy_settings(
     patch: &PrivacyPatch,
 ) -> Result<(), Error> {
     write_section(locations, files, "privacy", patch)
+}
+
+/// Saves the lawyer's `update.mode` to the user's `settings.json`, into its `update` section, as
+/// [`write_user_settings`] does for `ui`. It does not check policy locks:
+/// [`crate::Effective::apply_update_mode`] does, before it calls this.
+pub(crate) fn write_update_mode(
+    locations: &Locations,
+    files: &dyn Files,
+    mode: UpdateChoice,
+) -> Result<(), Error> {
+    write_section(locations, files, "update", &UpdateFields { mode })
 }
 
 /// Saves the fields of `patch` that are set into the section `name` of the user's

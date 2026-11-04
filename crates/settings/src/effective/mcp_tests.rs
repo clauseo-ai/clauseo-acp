@@ -293,7 +293,8 @@ fn an_unreadable_policy_source_locks_the_list_empty() {
             "privacy.counts",
             "privacy.crash_reports",
             "tools.browser",
-            "tools.web_search"
+            "tools.web_search",
+            "update.mode"
         ]
     );
 }

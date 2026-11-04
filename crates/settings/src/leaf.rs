@@ -39,6 +39,7 @@ mod tests;
 use crate::policy::{Kind, kind_of};
 use crate::schema::{
     AgentLaunch, Density, FontSize, Language, Lite, McpServerLaunch, Motion, Settings, Theme,
+    UpdateMode,
 };
 use crate::warning::{Origin, Warning, WarningKind};
 use serde::de::DeserializeOwned;
@@ -51,7 +52,7 @@ use reset::reset;
 
 /// Every key with a fixed name, and its kind. An agent's key is `agents.<id>`, an object.
 /// `schema::tests::the_keys_and_their_kinds_are_the_schemas` holds this to the schema.
-pub(crate) const KEYS: [(&str, Kind); 12] = [
+pub(crate) const KEYS: [(&str, Kind); 13] = [
     ("matters.default_location", Kind::String),
     ("mcp.servers", Kind::Object),
     ("ui.theme", Kind::String),
@@ -64,19 +65,22 @@ pub(crate) const KEYS: [(&str, Kind); 12] = [
     ("tools.browser", Kind::Boolean),
     ("privacy.counts", Kind::Boolean),
     ("privacy.crash_reports", Kind::Boolean),
+    ("update.mode", Kind::String),
 ];
 
-/// The keys that decide what an agent can reach, or what Clauseo sends off the machine. A policy
-/// source that cannot be read locks each off with [`refuse`] (ADR 0009, R21; the `privacy` keys,
-/// decision record 0036): its value there is unknown, and the user's must not stand in. Off is
-/// not always the default: both `tools` keys and `privacy.counts` default to on, and locking
-/// them at their default would fail open.
-pub(crate) const SECURITY_KEYS: [&str; 5] = [
+/// The keys that decide what an agent can reach, what Clauseo sends off the machine, or what it
+/// fetches and runs. A policy source that cannot be read locks each off with [`refuse`] (ADR
+/// 0009, R21; the `privacy` keys, decision record 0036; `update.mode` at `none`, R23): its value
+/// there is unknown, and the user's must not stand in. Off is not always the default: both
+/// `tools` keys, `privacy.counts` and `update.mode` default to on, and locking them at their
+/// default would fail open.
+pub(crate) const SECURITY_KEYS: [&str; 6] = [
     "mcp.servers",
     "tools.web_search",
     "tools.browser",
     "privacy.counts",
     "privacy.crash_reports",
+    "update.mode",
 ];
 
 /// The keys a policy may only turn off (decision record 0036): a policy `true` for one is
@@ -123,6 +127,7 @@ pub(crate) enum Leaf {
     Browser(bool),
     Counts(bool),
     CrashReports(bool),
+    UpdateMode(UpdateMode),
     /// A known key whose value does not type, or that a policy source refused. Applied, it puts
     /// the key back at its default; for `agents.<id>`, the entry for that id is dropped. A
     /// policy also locks the key (fail closed, Rohan, 2026-10-31), and applies it with
@@ -344,6 +349,7 @@ impl Leaf {
             "tools.browser" => typed_value(key, value).map(Leaf::Browser),
             "privacy.counts" => typed_value(key, value).map(Leaf::Counts),
             "privacy.crash_reports" => typed_value(key, value).map(Leaf::CrashReports),
+            "update.mode" => typed_value(key, value).map(Leaf::UpdateMode),
             _ => match agent_id(key) {
                 Some(id) => agent(key, id, value, unknown),
                 None => Err(WarningKind::UnknownKey {
@@ -369,6 +375,7 @@ impl Leaf {
             Leaf::Browser(_) => "tools.browser".to_owned(),
             Leaf::Counts(_) => "privacy.counts".to_owned(),
             Leaf::CrashReports(_) => "privacy.crash_reports".to_owned(),
+            Leaf::UpdateMode(_) => "update.mode".to_owned(),
             Leaf::Refused(key) => key.clone(),
         }
     }
@@ -405,6 +412,7 @@ impl Leaf {
             Leaf::Browser(on) => settings.tools.browser = on,
             Leaf::Counts(on) => settings.privacy.counts = on,
             Leaf::CrashReports(on) => settings.privacy.crash_reports = on,
+            Leaf::UpdateMode(mode) => settings.update.mode = mode,
             Leaf::Refused(key) => reset(&key, settings),
         }
     }

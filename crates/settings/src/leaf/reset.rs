@@ -4,13 +4,14 @@
 use super::{SECURITY_KEYS, agent_id};
 use crate::schema::{
     Density, FontSize, Language, Lite, Motion, PrivacySettings, Settings, Theme, ToolsSettings,
+    UpdateMode,
 };
 
 /// Locks each security key `key` names at its refused value: `mcp.servers` empty, each
-/// `tools` and `privacy` key `false`. Kept apart from [`reset`], which restores the default,
-/// since a security key's default can be on. `key` is one of [`SECURITY_KEYS`], or a prefix
-/// ending in `.` (`tools.`) that names every security key under it; stage C adds keys under
-/// `plans.`.
+/// `tools` and `privacy` key `false`, `update.mode` `none`. Kept apart from [`reset`], which
+/// restores the default, since a security key's default can be on. `key` is one of
+/// [`SECURITY_KEYS`], or a prefix ending in `.` (`tools.`) that names every security key under
+/// it; stage C adds keys under `plans.`.
 /// Returns whether `key` named any security key; when it did not, nothing changes.
 pub(crate) fn refuse(key: &str, settings: &mut Settings) -> bool {
     let named = |security: &str| match key.strip_suffix('.') {
@@ -26,6 +27,7 @@ pub(crate) fn refuse(key: &str, settings: &mut Settings) -> bool {
             "tools.browser" => settings.tools.browser = false,
             "privacy.counts" => settings.privacy.counts = false,
             "privacy.crash_reports" => settings.privacy.crash_reports = false,
+            "update.mode" => settings.update.mode = UpdateMode::None,
             other => unreachable!("security key {other} has no refused value"),
         }
     }
@@ -49,6 +51,7 @@ pub(super) fn reset(key: &str, settings: &mut Settings) {
         "privacy.crash_reports" => {
             settings.privacy.crash_reports = PrivacySettings::default().crash_reports;
         }
+        "update.mode" => settings.update.mode = UpdateMode::default(),
         _ => {
             if let Some(id) = agent_id(key) {
                 settings.agents.remove(id);

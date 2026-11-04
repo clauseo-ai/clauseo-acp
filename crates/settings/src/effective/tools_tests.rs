@@ -98,7 +98,8 @@ fn an_unreadable_policy_source_locks_every_security_key_off_with_a_warning_each(
             "privacy.counts",
             "privacy.crash_reports",
             "tools.browser",
-            "tools.web_search"
+            "tools.web_search",
+            "update.mode"
         ]
     );
     let keys: Vec<&str> = effective
@@ -127,7 +128,8 @@ fn an_unreadable_policy_source_locks_every_security_key_off_with_a_warning_each(
             "tools.web_search",
             "tools.browser",
             "privacy.counts",
-            "privacy.crash_reports"
+            "privacy.crash_reports",
+            "update.mode"
         ]
     );
 }

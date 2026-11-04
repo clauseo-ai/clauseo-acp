@@ -7,7 +7,7 @@ use super::{KEYS, Leaf, Raw, SECURITY_KEYS, agent_id, typed};
 use crate::policy::kind_of;
 use crate::schema::{
     AgentLaunch, Density, FontSize, Language, Lite, McpServerLaunch, Motion, PrivacySettings,
-    Settings, Theme, ToolsSettings,
+    Settings, Theme, ToolsSettings, UpdateMode,
 };
 use crate::testing::{abs, abs_str};
 use crate::warning::{Origin, Warning, WarningKind};
@@ -184,7 +184,13 @@ fn an_agent_needs_an_absolute_command_and_warns_on_fields_it_does_not_know() {
 
 #[test]
 fn unknown_keys_are_warnings() {
-    for key in ["ui.colour", "agents.", "agents", "matters", "update.mode"] {
+    for key in [
+        "ui.colour",
+        "agents.",
+        "agents",
+        "matters",
+        "update.channel",
+    ] {
         assert_eq!(
             one(key, json!(1)),
             Err(vec![WarningKind::UnknownKey {
@@ -193,6 +199,24 @@ fn unknown_keys_are_warnings() {
             "{key}"
         );
     }
+}
+
+#[test]
+fn the_update_mode_is_auto_notify_or_none() {
+    for (text, mode) in [
+        ("auto", UpdateMode::Auto),
+        ("notify", UpdateMode::Notify),
+        ("none", UpdateMode::None),
+    ] {
+        assert_eq!(one("update.mode", json!(text)), Ok(Leaf::UpdateMode(mode)));
+    }
+    assert_eq!(
+        one("update.mode", json!("off")),
+        Err(invalid(
+            "update.mode",
+            "unknown variant `off`, expected one of `auto`, `notify`, `none`"
+        ))
+    );
 }
 
 fn theme_raws(themes: &[&str]) -> Vec<Raw> {
@@ -283,6 +307,7 @@ fn key_names_each_leaf_and_apply_sets_it() {
         (Leaf::Motion(Motion::Reduce), "ui.motion"),
         (Leaf::WebSearch(false), "tools.web_search"),
         (Leaf::Browser(true), "tools.browser"),
+        (Leaf::UpdateMode(UpdateMode::Notify), "update.mode"),
     ];
     let mut settings = Settings::default();
     for (leaf, key) in leaves {
@@ -300,6 +325,7 @@ fn key_names_each_leaf_and_apply_sets_it() {
     assert_eq!(settings.ui.motion, Motion::Reduce);
     assert!(!settings.tools.web_search);
     assert!(settings.tools.browser);
+    assert_eq!(settings.update.mode, UpdateMode::Notify);
 }
 
 #[test]
@@ -317,6 +343,7 @@ fn every_fixed_key_types_and_the_kinds_agree() {
         json!(false),
         json!(false),
         json!(true),
+        json!("notify"),
     ];
     // One sample per row, so a new row cannot go unchecked.
     assert_eq!(samples.len(), KEYS.len());
@@ -346,6 +373,7 @@ fn a_refused_key_goes_back_to_its_default() {
         json!(!ToolsSettings::default().browser),
         json!(!PrivacySettings::default().counts),
         json!(!PrivacySettings::default().crash_reports),
+        json!("none"),
     ];
     assert_eq!(samples.len(), KEYS.len());
     for ((key, _), sample) in KEYS.iter().zip(samples) {

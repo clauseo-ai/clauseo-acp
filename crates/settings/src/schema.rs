@@ -15,7 +15,9 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 /// The top-level keys of `settings.json`, each an object.
-pub(crate) const SECTIONS: [&str; 6] = ["matters", "agents", "mcp", "ui", "tools", "privacy"];
+pub(crate) const SECTIONS: [&str; 7] = [
+    "matters", "agents", "mcp", "ui", "tools", "privacy", "update",
+];
 
 /// Every setting, as `Effective::settings` gives it: the defaults, then `settings.json`, then
 /// the policy layer.
@@ -36,6 +38,8 @@ pub struct Settings {
     pub tools: ToolsSettings,
     /// What Clauseo may count and send about its own use (decision record 0036).
     pub privacy: PrivacySettings,
+    /// How Clauseo updates itself (task R23).
+    pub update: UpdateSettings,
 }
 
 /// The `matters` section.
@@ -130,6 +134,30 @@ impl Default for PrivacySettings {
             crash_reports: false,
         }
     }
+}
+
+/// The `update` section. `update.mode` is a security key: a policy may set any of its values,
+/// which locks it, and a policy source that cannot be read, or a policy value that does not
+/// type, locks it `none`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(default)]
+pub struct UpdateSettings {
+    /// When Clauseo installs an update. `auto` by default.
+    pub mode: UpdateMode,
+}
+
+/// When Clauseo installs an update. The app writes only `auto` and `notify`; `none` comes from
+/// policy, or a hand-edited `settings.json`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateMode {
+    /// Download in the background, and install at the next start or when the lawyer says.
+    #[default]
+    Auto,
+    /// Download, and install only when the lawyer says.
+    Notify,
+    /// Never check: the firm updates Clauseo itself.
+    None,
 }
 
 /// The `ui` section. Design may change these values before M4 without a decision record.
