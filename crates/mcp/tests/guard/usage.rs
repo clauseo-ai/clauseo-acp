@@ -2,6 +2,7 @@
 //! anything.
 
 use std::ffi::OsStr;
+#[cfg(unix)]
 use std::path::Path;
 use std::process::Command;
 

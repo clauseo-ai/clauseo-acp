@@ -22,6 +22,9 @@ mod env;
 #[cfg(test)]
 #[path = "guard/filter.rs"]
 mod filter;
+#[cfg(all(test, windows))]
+#[path = "guard/tree.rs"]
+mod tree;
 #[cfg(test)]
 #[path = "guard/usage.rs"]
 mod usage;

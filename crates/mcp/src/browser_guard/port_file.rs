@@ -1,22 +1,31 @@
-//! Windows only in use, built and tested everywhere: the check that agent-browser's daemon
-//! listens on the port the host claimed.
+//! The check that agent-browser's listeners sit on the ports the host claimed, built and
+//! tested on every OS.
 //!
-//! On Windows agent-browser's daemon listens on loopback TCP at a port it derives from the
-//! session name (`connection.rs` `get_port_for_session`), and when that port will not bind it
-//! silently takes an ephemeral one instead (`native/daemon.rs`, the `TcpListener::bind` fallback)
-//! and writes the port it got to `<socket folder>\<session>.port`. The host draws the session
-//! name so the derived port is one it claimed in the jail's range, and passes that port as
-//! `--daemon-port`. A daemon on any other port would sit outside the ports the jail pins to the
-//! session, so the guard reads the `.port` file after each reply it relays:
+//! agent-browser writes the port each listener got to a file in the socket folder, and when the
+//! port it was asked for will not bind it silently takes another and writes that one:
 //!
-//! - no file yet, or an empty one: the daemon has not started (it starts on the agent's first
-//!   browser call) or is writing it, so the guard checks again after the next reply;
-//! - the claimed port: verified, and the guard reads no more;
-//! - anything else (another port, text that is no port, a link, not a regular file, unreadable):
-//!   the guard kills agent-browser and exits 1.
+//! - the stream server (every OS): `<socket folder>/<session>.stream`, decimal, written after the
+//!   server starts with port fallback allowed (`native/daemon.rs`
+//!   `StreamServer::start_without_client`, `stream/mod.rs`); the guard expects
+//!   `AGENT_BROWSER_STREAM_PORT`;
+//! - the daemon (Windows): `<cwd>\run\<session>.port`, decimal, from a port it derives from the
+//!   session name, with an ephemeral fallback (`native/daemon.rs`, the `TcpListener::bind`
+//!   fallback); the guard expects `--daemon-port`.
+//!
+//! A listener on any other port sits outside the ports the jail pins to the session. The guard
+//! reads every file after each line it relays, for the session's whole life: the daemon can end
+//! (idle timeout, `agent_browser_close`) and start again on another port. For each file:
+//!
+//! - no file yet, or an empty one: not started, or being written; checked again next time;
+//! - the claimed port: fine for now; checked again next time;
+//! - anything else (another port, text that is no port, a link, not a regular file,
+//!   unreadable): the guard ends agent-browser's tree and exits 1.
 //!
 //! The file is read without following a link: a link at its name is refused, and the file read
-//! must be the one `symlink_metadata` saw.
+//! must be the one `symlink_metadata` saw. The socket folder is writable by the agent (`<cwd>`
+//! is, and on Unix the jail allows the socket folder to the whole session), so this check
+//! catches agent-browser's silent fallback; it is not a boundary against the agent, which can
+//! write the claimed port into the file itself.
 
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
@@ -24,18 +33,41 @@ use std::path::{Path, PathBuf};
 /// The most of the file read: a port is at most 5 digits, with room for a line end.
 const MAX_BYTES: u64 = 16;
 
-/// The daemon port the host claimed, and the file agent-browser reports its port in.
+/// One listener's claimed port, and the file agent-browser reports the port it got in.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Expected {
-    /// `<cwd>\run\<session>.port`.
+    /// The listener, for the refusal: `"daemon port"` or `"stream port"`.
+    pub(crate) what: &'static str,
+    /// `<socket folder>/<session>.<extension>`.
     pub(crate) file: PathBuf,
-    /// `--daemon-port`.
+    /// The claimed port.
     pub(crate) port: u16,
 }
 
-/// `<socket folder>/<session>.port`.
-pub(crate) fn file(socket_dir: &Path, session: &str) -> PathBuf {
-    socket_dir.join(format!("{session}.port"))
+impl Expected {
+    /// The daemon's: `<socket folder>/<session>.port`, against `--daemon-port`.
+    pub(crate) fn daemon(socket_dir: &Path, session: &str, port: u16) -> Self {
+        Self {
+            what: "daemon port",
+            file: socket_dir.join(format!("{session}.port")),
+            port,
+        }
+    }
+
+    /// The stream server's: `<socket folder>/<session>.stream`, against
+    /// `AGENT_BROWSER_STREAM_PORT`.
+    pub(crate) fn stream(socket_dir: &Path, session: &str, port: u16) -> Self {
+        Self {
+            what: "stream port",
+            file: socket_dir.join(format!("{session}.stream")),
+            port,
+        }
+    }
+
+    /// Reads the file and judges it.
+    pub(crate) fn check(&self) -> Status {
+        judge(read(&self.file), self.port, self.what)
+    }
 }
 
 /// What reading the `.port` file found.
@@ -56,19 +88,20 @@ pub(crate) enum Found {
 /// What the guard does after a check.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Status {
-    /// The daemon has not written its port yet: check again after the next reply.
+    /// No port written yet: check again after the next line.
     Pending,
-    /// The daemon is on the claimed port: stop checking.
-    Verified,
-    /// The daemon is elsewhere, or the file cannot be trusted: kill agent-browser. The reason.
+    /// The claimed port, for now: check again after the next line.
+    Matches,
+    /// Another port, or a file that cannot be trusted: end agent-browser. The reason.
     Refused(String),
 }
 
-/// The verdict on what [`read`] found, against the claimed `port`. Pure.
-pub(crate) fn judge(found: Found, port: u16) -> Status {
-    let refused = |what: String| {
+/// The verdict on what [`read`] found, against the claimed `port` of the listener `what`.
+/// Pure.
+pub(crate) fn judge(found: Found, port: u16, what: &str) -> Status {
+    let refused = |problem: String| {
         Status::Refused(format!(
-            "agent-browser's daemon port file {what}, not the claimed port {port}"
+            "agent-browser's {what} file {problem}, not the claimed port {port}"
         ))
     };
     match found {
@@ -82,7 +115,7 @@ pub(crate) fn judge(found: Found, port: u16) -> Status {
             let text = std::str::from_utf8(&bytes).unwrap_or_default().trim();
             let plain = !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit());
             match text.parse::<u16>() {
-                Ok(found) if plain && found == port => Status::Verified,
+                Ok(found) if plain && found == port => Status::Matches,
                 Ok(found) if plain => refused(format!("says {found}")),
                 _ => refused("holds no port".to_owned()),
             }

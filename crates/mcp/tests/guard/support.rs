@@ -47,7 +47,8 @@ impl Scratch {
         });
         let session = format!("{hash:08x}{:08x}-t", std::process::id());
         let scratch = Self { path, session };
-        if cfg!(unix) {
+        #[cfg(unix)]
+        {
             let socket_dir = scratch.socket_dir();
             if std::fs::symlink_metadata(&socket_dir).is_ok() {
                 write::remove_dir_all(&socket_dir).unwrap();

@@ -18,7 +18,7 @@ pub(crate) fn create_dir(path: &Path) -> io::Result<()> {
 
 /// Opens `file` read-only (`OpenOptions` is banned because it can also write); on Windows a
 /// reparse point at the name is opened itself, never followed (`FILE_FLAG_OPEN_REPARSE_POINT`).
-/// The daemon port check (`browser_guard/daemon_port.rs`) reads the `.port` file with it.
+/// The port-file check (`browser_guard/port_file.rs`) reads agent-browser's port files with it.
 pub(crate) fn open_read_no_follow(file: &Path) -> io::Result<std::fs::File> {
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
@@ -48,4 +48,11 @@ pub(crate) fn remove_dir_all(path: &Path) -> io::Result<()> {
 #[cfg(all(test, unix))]
 pub(crate) fn symlink(target: &Path, link: &Path) -> io::Result<()> {
     std::os::unix::fs::symlink(target, link)
+}
+
+/// `fs::set_permissions` with a Unix mode, for the unit tests' fixtures.
+#[cfg(all(test, unix))]
+pub(crate) fn set_mode(path: &Path, mode: u32) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
 }

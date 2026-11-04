@@ -6,13 +6,16 @@
 //! the host's variables (`env.rs`; exit 2 naming a missing or invalid one), on Unix check the
 //! socket folder the host made under `/tmp` (`socket.rs`; exit 2 if it is unsafe or too long),
 //! make the folders under `--cwd` the variables point at, then start agent-browser and relay
-//! (`relay.rs`), checking each agent line (`filter.rs`) and, on Windows, the daemon's port
-//! after each reply (`daemon_port.rs`). `docs/decisions/0029-browser.md` gives every rule its
+//! (`relay.rs`), checking each agent line (`filter.rs`) and, after each child line, that the
+//! stream server and on Windows the daemon are on their claimed ports (`port_file.rs`); on
+//! Windows inside a Job Object (`job.rs`). `docs/decisions/0029-browser.md` gives every rule its
 //! reason.
 
-mod daemon_port;
 mod env;
 mod filter;
+#[cfg(windows)]
+mod job;
+mod port_file;
 mod relay;
 #[cfg(any(unix, test))]
 mod socket;
@@ -32,7 +35,7 @@ pub const USAGE: &str = if cfg!(windows) {
 /// The command line on macOS and Linux.
 const USAGE_UNIX: &str = "usage: clauseo-mcp browser-guard --agent-browser <file> --cwd <folder> --cdp-port <port> -- <agent-browser args...>";
 /// The command line on Windows: the daemon's port too, which agent-browser derives from the
-/// session name and the host claimed (`daemon_port.rs`).
+/// session name and the host claimed (`port_file.rs`).
 const USAGE_WINDOWS: &str = "usage: clauseo-mcp browser-guard --agent-browser <file> --cwd <folder> --cdp-port <port> --daemon-port <port> -- <agent-browser args...>";
 
 /// The exit code for a bad command line or environment.
@@ -91,16 +94,13 @@ pub fn run(args: &[OsString]) -> Result<i32, Failure> {
             ),
         })?;
     }
-    let port_check = command.daemon_port.map(|port| daemon_port::Expected {
-        file: daemon_port::file(&env::windows_socket_dir(&command.cwd), &session),
-        port,
-    });
+    let port_checks = port_checks(&env, &command, &session);
     let outcome = relay::run(
         &command.agent_browser,
         &command.child_args,
         &command.cwd,
         &env,
-        port_check,
+        port_checks,
     )
     .map_err(|error| Failure {
         code: EXIT_FAILED,
@@ -119,11 +119,35 @@ pub fn run(args: &[OsString]) -> Result<i32, Failure> {
                 relay::CHILD_MAX_LINE_BYTES
             ),
         }),
-        relay::Outcome::DaemonPortRefused(reason) => Err(Failure {
+        relay::Outcome::PortRefused(reason) => Err(Failure {
             code: EXIT_FAILED,
-            message: format!("clauseo-mcp browser-guard: {reason}; the guard killed agent-browser"),
+            message: format!("clauseo-mcp browser-guard: {reason}; the guard ended agent-browser"),
         }),
     }
+}
+
+/// The port files the relay checks after each child line: the stream server's in the socket
+/// folder (the host's on Unix, `<cwd>\run` on Windows), and the daemon's on Windows.
+fn port_checks(
+    env: &std::collections::BTreeMap<String, OsString>,
+    command: &Command,
+    session: &str,
+) -> Vec<port_file::Expected> {
+    let socket_dir = env
+        .get(env::SOCKET_DIR)
+        .map_or_else(|| env::windows_socket_dir(&command.cwd), PathBuf::from);
+    let mut checks = Vec::new();
+    // `env::build` checked the stream port already.
+    if let Some(port) = env
+        .get(env::STREAM_PORT)
+        .and_then(|value| env::port_of(value))
+    {
+        checks.push(port_file::Expected::stream(&socket_dir, session, port));
+    }
+    if let Some(port) = command.daemon_port {
+        checks.push(port_file::Expected::daemon(&socket_dir, session, port));
+    }
+    checks
 }
 
 /// What the command line must look like, for its refusals.
