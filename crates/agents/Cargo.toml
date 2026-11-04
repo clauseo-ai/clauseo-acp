@@ -30,6 +30,7 @@ ureq = { version = "3.5.0", default-features = false, features = [
   "rustls",
   "platform-verifier",
 ] }
+zeroize = { workspace = true }
 zip = { version = "9.2.2", default-features = false, features = [
   "deflate-flate2",
 ] }
@@ -46,6 +47,12 @@ rcgen = { version = "0.14.10", optional = true, default-features = false, featur
   "pem",
   "ring",
 ] }
+
+# `keys`: keyring 4's `v1` feature picks the store per OS: Keychain Services on macOS, Credential
+# Manager on Windows (and the Secret Service on Linux, which is why keyring is not a Linux
+# dependency at all: Linux is not a product target, and `keys` there has no keychain).
+[target.'cfg(any(target_os = "macos", windows))'.dependencies]
+keyring = { workspace = true, features = ["v1"] }
 
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true, features = ["fs"] }

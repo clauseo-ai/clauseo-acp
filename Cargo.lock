@@ -937,6 +937,7 @@ dependencies = [
  "dunce",
  "flate2",
  "futures",
+ "keyring",
  "nix",
  "rcgen",
  "rustls",
@@ -947,6 +948,7 @@ dependencies = [
  "thiserror 2.0.21",
  "ureq",
  "windows",
+ "zeroize",
  "zip",
 ]
 

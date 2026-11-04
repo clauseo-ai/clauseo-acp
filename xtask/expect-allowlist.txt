@@ -297,3 +297,5 @@ crates/agents/src/testing/trace.rs trace clippy::disallowed_methods
 crates/agents/src/testing/trace.rs trace clippy::print_stderr
 crates/agents/src/testing/trace.rs instant clippy::disallowed_methods
 crates/agents/examples/install.rs mb clippy::cast_precision_loss
+# R20: an agent's API key cleared where Linux has no keychain, so it always succeeds there.
+crates/agents/src/keys.rs Keychain::clear clippy::unnecessary_wraps
