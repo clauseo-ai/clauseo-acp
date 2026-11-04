@@ -94,6 +94,8 @@ function ConversationRow({
     <li
       className="room-conv-item"
       data-current={current ? "" : undefined}
+      // the buttons' width is held from the first render (triage.css), before they mount
+      data-triage={triage !== undefined && !current ? "" : undefined}
       onPointerEnter={arm}
       onFocus={arm}
     >

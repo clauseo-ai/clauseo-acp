@@ -288,6 +288,13 @@ test("the open conversation's chevron is drawn from the first render, its menu l
   // no pointer, no focus: the chevron already stands, so the title's room never changes under the pointer
   const chevron = actions("List of dates");
   expect(chevron).not.toBeNull();
+  // a row with Snooze holds its buttons' width from the first render, before they mount; the open one, its chevron's
+  const bail = [...(rail()?.querySelectorAll(".room-conv-item") ?? [])].find((li) =>
+    li.textContent?.includes("Bail conditions"),
+  );
+  expect(bail?.hasAttribute("data-triage")).toBe(true);
+  expect(bail?.querySelector(".room-conv-acts")).toBeNull();
+  expect(chevron?.closest(".room-conv-item")?.hasAttribute("data-triage")).toBe(false);
   expect(chevron?.closest(".room-conv-item")?.querySelector(".room-conv-more")).toBe(chevron);
   await press(chevron);
   expect(menuItems().map((i) => i.textContent)).toEqual(["Snooze", "Mark as done"]);

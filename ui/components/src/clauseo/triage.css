@@ -2,8 +2,8 @@
    the snooze picker, the folds (the Snoozed shelf and the Done fold) and their open rows. After matters.css, whose
    rows these sit on. */
 @layer components {
-  /* the two buttons stand over the line's end, hidden until the pointer or the focus is on the row, or its menu is open.
-     Nothing moves when they show: no padding or width changes; the words under them fade out instead */
+  /* the two buttons stand at the row's end in the width held for them, hidden until the pointer or the focus is on the
+     row, or its menu is open. Nothing moves when they show: no padding or width changes */
   .room-conv-acts {
     position: absolute;
     top: 0;
@@ -23,20 +23,15 @@
   .room-conv-item:has(.room-conv-acts):is(:hover, :focus-within) .room-conv-mark {
     visibility: hidden;
   }
-  .room-conv-item:has(.room-conv-acts):is(:hover, :focus-within) .room-conv-line {
-    mask-image: linear-gradient(
-      to left,
-      transparent calc(2 * var(--size-control-small) + var(--s0-5)),
-      currentColor calc(2 * var(--size-control-small) + var(--s4))
-    );
+  /* no fade, no clipping (DESIGN.md: never truncate): the buttons' width is held for them at all times, so the words
+     never run under them and nothing moves when they show. A conversation's status mark is too narrow a slot for its
+     two buttons, so the width is held beside it; a shelf row and a done row have no trailing slot to give, so theirs
+     is held for their one button */
+  .room-conv-item[data-triage] .room-conv {
+    padding-right: calc(2 * var(--size-control-small) + var(--s1));
   }
-  /* a shelf row's or a done row's one button */
-  .room-one-act:is(:hover, :focus-within) :is(.room-shelf-row > span, .room-conv-line) {
-    mask-image: linear-gradient(
-      to left,
-      transparent calc(var(--size-control-small) + var(--s0-5)),
-      currentColor calc(var(--size-control-small) + var(--s4))
-    );
+  .room-one-act :is(.room-conv, .room-shelf-row) {
+    padding-right: calc(var(--size-control-small) + var(--s1));
   }
 
   /* in a row's place: what happened, and Undo */
