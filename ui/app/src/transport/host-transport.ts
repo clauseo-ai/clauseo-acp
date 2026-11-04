@@ -85,8 +85,8 @@ export interface HostTransport {
  * with the HostError when it refused; a later listener tries again), `stop` ends the hold. */
 export type AppFeed = { ready: Promise<void>; stop: () => void };
 
-/** A transport that carries the host's app-wide events, those of no stream (today `settings_changed`). Only the
- * desktop transport is one; the room asks for it by duck type (host-next.ts), so it is not part of HostTransport. */
+/** A transport that carries the host's app-wide events, those of no stream (`settings_changed`, `matters_changed`,
+ * `threads_changed`). Only the desktop transport is one; the room asks for it by duck type (host-next.ts), so it is not part of HostTransport. */
 export interface AppFeedSource {
   onAppEvent(listener: (event: HostEvent) => void): AppFeed;
 }

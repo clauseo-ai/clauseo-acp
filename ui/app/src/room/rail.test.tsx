@@ -389,7 +389,9 @@ test("U12's paused rail: the at-limit words muted, never yellow or red; a new vi
   // past midnight, the next view reads today again: the same reset is now today's, with no day
   vi.setSystemTime(new Date(2026, 10, 3, 0, 30));
   await act(async () =>
-    transport.appEvent({ matters_changed: { matters: paused({ pinned: true }) } }),
+    transport.appEvent({
+      matters_changed: { matters: paused({ pinned: true }), removed: [], all: true },
+    }),
   );
   expect(said(A.name)).toContain("Limit reached until 9:00 am");
   expect(said(A.name)).not.toContain("Tuesday");
@@ -400,7 +402,11 @@ test("matters_changed updates a row in place", async () => {
   expect(rowOf(A.name)?.dataset["state"]).toBe("idle");
   await act(async () =>
     transport.appEvent({
-      matters_changed: { matters: [detailed(A, { status: "needs_answer" }), detailed(B)] },
+      matters_changed: {
+        matters: [detailed(A, { status: "needs_answer" })],
+        removed: [],
+        all: false,
+      },
     }),
   );
   expect(rowOf(A.name)?.dataset["state"]).toBe("question");

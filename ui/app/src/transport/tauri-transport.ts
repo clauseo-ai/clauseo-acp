@@ -118,7 +118,11 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
           const view = limitsOf(event);
           if (view === null) warn("limits_view_changed carried no view");
           else this.#limits.deliver(view);
-        } else if ("settings_changed" in event && event.settings_changed !== undefined) {
+        } else if (
+          ("settings_changed" in event && event.settings_changed !== undefined) ||
+          ("matters_changed" in event && event.matters_changed !== undefined) ||
+          ("threads_changed" in event && event.threads_changed !== undefined)
+        ) {
           // app-wide: no stream and no position, so the message counts as processed at once (#onMessage)
           for (const listener of this.#appListeners) {
             try {
@@ -171,7 +175,7 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
     return this.#appReady;
   }
 
-  /** Hears each app-wide event (`settings_changed`). The first listener subscribes the window's channel to them;
+  /** Hears each app-wide event (`settings_changed`, `matters_changed`, `threads_changed`). The first listener subscribes the window's channel to them;
    * read the current state with `query` after `ready`, so no change falls between. */
   onAppEvent(listener: (event: HostEvent) => void): AppFeed {
     this.#appListeners.add(listener);

@@ -314,6 +314,20 @@ describe("TauriTransport", () => {
     expect(acks()).toEqual([{ positions: [], messages: 1 }]);
   });
 
+  test("matters_changed and threads_changed reach the app listeners, no stream subscriber, and are acked on the next frame", async () => {
+    const { t, got, send, frame, acks } = await rig("a");
+    const heard: unknown[] = [];
+    await t.onAppEvent((e) => heard.push(e)).ready;
+    const matters = { matters: [], removed: ["m-1"], all: false };
+    const threads = { matter: "m-2", threads: [], removed: [], all: true };
+    send({ matters_changed: matters });
+    send({ threads_changed: threads });
+    expect(heard).toEqual([{ matters_changed: matters }, { threads_changed: threads }]);
+    expect(got).toEqual([]);
+    await frame();
+    expect(acks()).toEqual([{ positions: [], messages: 2 }]);
+  });
+
   test("stop removes only that app listener", async () => {
     const { t, send } = await rig();
     const heard: string[] = [];
