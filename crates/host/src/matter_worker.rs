@@ -21,6 +21,7 @@ use clauseo_protocol::{
     RestoreRequest, ThreadId, Timestamp, TurnId,
 };
 
+use crate::agent::folder_support::CheckSource;
 use crate::error::Error;
 use crate::sent::TurnPaths;
 
@@ -83,17 +84,19 @@ pub(crate) struct RestoreJob {
 /// One job for a matter thread.
 #[derive(Debug)]
 pub(crate) enum MatterJob {
-    /// `Matter::create`; the worker keeps the matter.
-    Create(NewMatter),
+    /// `Matter::create`; the worker keeps the matter. Its folder check uses `check`, the
+    /// actor's source.
+    Create { new: NewMatter, check: CheckSource },
     /// `Matter::import` with a no-op progress callback; `cancel` is set by shutdown.
     /// Before it, the place check (`check_place`) and then the registry: a folder that is,
     /// holds or sits inside one of `registry`'s folders is `matter.folder_is_matter`
-    /// (`check_registry`).
+    /// (`check_registry`). Its folder check uses `check`, the actor's source.
     Import {
         new: NewMatter,
         refused: Vec<PathBuf>,
         registry: Vec<Claimed>,
         cancel: Arc<AtomicBool>,
+        check: CheckSource,
     },
     /// `Matter::open`. When it fails, the worker keeps the id and folder and tries the open
     /// again before the next job that needs the matter. With `relink`, the first open, if it
@@ -359,14 +362,18 @@ fn run<T>(
 /// Runs one job against the slot.
 fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
     match job {
-        MatterJob::Create(new) => {
+        MatterJob::Create { new, check } => {
             let (root, id, folder) = (new.checkpoint, new.id, new.folder.clone());
             MatterReply::Created(
                 Matter::create(settings.clone(), new)
                     .map_err(Error::from)
                     .and_then(|matter| {
                         let commit = root_commit(&matter, root)?;
-                        let support = crate::agent::folder_support::check(id, &folder).kind();
+                        let folder_check = crate::agent::folder_support::FolderCheck {
+                            matter: id,
+                            source: check,
+                        };
+                        let support = folder_check.run(&folder).kind();
                         *slot = Slot::Open(Box::new(matter));
                         Ok((commit, support))
                     }),
@@ -377,11 +384,12 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
             refused,
             registry,
             cancel,
+            check,
         } => MatterReply::Imported(
             clauseo_matters::check_place(&new.folder, &refused)
                 .map_err(Error::Matters)
                 .and_then(|()| check_registry(&new.folder, &registry, true))
-                .and_then(|()| import(settings, slot, new, &refused, &cancel)),
+                .and_then(|()| import(settings, slot, new, &refused, &cancel, check)),
         ),
         MatterJob::Open { id, folder, relink } => {
             *slot = Slot::Unopened { id, folder, relink };
@@ -484,6 +492,7 @@ fn import(
     new: NewMatter,
     refused: &[PathBuf],
     cancel: &AtomicBool,
+    check: CheckSource,
 ) -> Result<ImportEnd, Error> {
     let (root, id, folder) = (new.checkpoint, new.id, new.folder.clone());
     match Matter::import(settings.clone(), new, refused, &mut |_progress| {}, cancel)? {
@@ -493,7 +502,11 @@ fn import(
             warnings,
         } => {
             let commit = root_commit(&matter, root)?;
-            let folder_support = crate::agent::folder_support::check(id, &folder).kind();
+            let folder_check = crate::agent::folder_support::FolderCheck {
+                matter: id,
+                source: check,
+            };
+            let folder_support = folder_check.run(&folder).kind();
             *slot = Slot::Open(matter);
             Ok(ImportEnd::Done {
                 commit,
