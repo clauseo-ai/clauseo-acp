@@ -264,8 +264,9 @@ fn run_child(env: &[(&str, &str)]) -> std::process::Output {
 }
 
 /// Plants the canary in the process environment the app reads (`HOME`, `USER`, `CLAUSEO_DATA_DIR`,
-/// and a variable of its own; USERPROFILE too, the home folder on Windows) and runs the session
-/// ([`INNER`]) in a child process with it.
+/// and a variable of its own; `USERPROFILE` and `USERNAME`, their Windows names, too) and runs
+/// the session ([`INNER`]) in a child process with it. Windows reads the profile folder from the
+/// OS, not the environment, so there the session's home is the planted `USERPROFILE`.
 #[test]
 fn no_canary_reaches_a_usage_counts_body() {
     let token = token();
@@ -286,6 +287,7 @@ fn no_canary_reaches_a_usage_counts_body() {
         ("HOME", &home),
         ("USERPROFILE", &home),
         ("USER", &user),
+        ("USERNAME", &user),
         ("CLAUSEO_DATA_DIR", &data_dir),
         (CANARY_VAR, &canary),
         (TOKEN_VAR, &token),
@@ -327,8 +329,14 @@ fn session_in_a_planted_environment() {
     assert_eq!(canary, format!("{MATTER} {token}"));
     let scratch = Scratch::adopt(PathBuf::from(var(ROOT_VAR)));
 
-    // HOME and CLAUSEO_DATA_DIR from the process environment, as the app reads them.
-    let home = SystemDirs.home().unwrap();
+    // HOME and CLAUSEO_DATA_DIR from the process environment, as the app reads them. Windows
+    // reads the home folder from the known folder (FOLDERID_Profile), never from a variable, so
+    // there the planted USERPROFILE goes to the host and the agent as their home instead.
+    let home = if cfg!(windows) {
+        PathBuf::from(var("USERPROFILE"))
+    } else {
+        SystemDirs.home().unwrap()
+    };
     assert!(
         home.display().to_string().contains(&token),
         "{}",

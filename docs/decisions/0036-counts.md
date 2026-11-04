@@ -245,7 +245,9 @@ cells, the weekly tally, the queue and the sender. Its row bans `matters`, `acp`
 - **No document text in a payload** is shown end to end by `crates/desktop/tests/canary.rs`. Its
   session runs in a child process whose own environment holds the canary (`HOME`, `USER`,
   `CLAUSEO_DATA_DIR`, a variable), and on a machine the schema has no value for it uses a fixed
-  envelope, so it never depends on the runner's OS version.
+  envelope, so it never depends on the runner's OS version. Windows reads the profile folder
+  from the OS (the known folder), not the environment, so there the host's and the agent's home
+  is the planted `USERPROFILE`.
 - **`os_major` takes macOS 13 to 40** (was 26; decided 2026-11-04 in review). macOS 27 shipped in
   2026, and macOS is numbered by year since 26, so 40 is the 2039 release: headroom for any build
   sent today, with a schema change well before then. Windows stays 10 or 11. The cap is in the
