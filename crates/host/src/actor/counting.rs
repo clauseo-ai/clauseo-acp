@@ -11,7 +11,7 @@
 //! - `app_opened` (`cold`): the host has started (`Actor::settle`).
 //! - `matter_opened`: `CreateMatter`'s commit; `OpenMatter`'s commit, with the folder's papers
 //!   listed on the matter's worker. `place` (`clauseo_matters::place`, which stats the folder)
-//!   runs on a `clauseo-place` thread, never on the actor, and the event counts from there.
+//!   runs on the one `clauseo-place` thread, never on the actor, and the event counts there.
 //! - `question_sent`: the prompt's commit, started now, queued, sent now over a running answer,
 //!   or a steer.
 //! - `answer_ended`: `turn::end::finish`, the one place every turn ends.
@@ -20,6 +20,7 @@
 //!   changed.
 
 use std::path::PathBuf;
+use std::sync::{OnceLock, mpsc};
 use std::time::Duration;
 
 use clauseo_counts::schema::{
@@ -72,9 +73,12 @@ pub(super) fn app_opened(actor: &Actor) {
     );
 }
 
-/// Counts `what` when command `id`'s commit, just sent, is durable ([`committed`]).
+/// Counts `what` when command `id`'s commit, just sent, is durable ([`committed`]). Nothing is
+/// kept while counts are off or absent.
 pub(super) fn on_commit(actor: &mut Actor, id: CommandId, what: OnCommit) {
-    actor.count_on_commit.insert(id, what);
+    if counting(actor).is_some() {
+        actor.count_on_commit.insert(id, what);
+    }
 }
 
 /// Command `id`'s commit returned: what [`on_commit`] put by for it counts now when it is
@@ -128,27 +132,59 @@ pub(super) fn matter_created(import: Option<&ImportSummary>, folder: PathBuf) ->
     }
 }
 
-/// Counts `matter_opened` from a `clauseo-place` thread, once `clauseo_matters::place` has
-/// said where `folder` lives: it stats the folder, which a network share can hold up, so never
-/// on the actor. Only the place's kind is counted, never the sync service's name.
+/// One `matter_opened` waiting for its folder's place.
+struct PlaceJob {
+    counts: Counts,
+    kind: MatterKind,
+    papers: Papers,
+    folder: PathBuf,
+}
+
+/// The one `clauseo-place` thread, started at its first job and kept for the process: a stat a
+/// network share holds up holds up only the counts queued behind it, never the actor, and
+/// strands one thread at most.
+static PLACES: OnceLock<Option<mpsc::Sender<PlaceJob>>> = OnceLock::new();
+
+/// Counts `matter_opened` from the `clauseo-place` thread, once `clauseo_matters::place` has
+/// said where `folder` lives: it stats the folder, so never on the actor. Only the place's kind
+/// is counted, never the sync service's name.
 fn bump_matter(counts: Counts, kind: MatterKind, papers: Papers, folder: PathBuf) {
-    let started = std::thread::Builder::new()
-        .name("clauseo-place".to_owned())
-        .spawn(move || {
-            let place = match clauseo_matters::place(&folder) {
-                clauseo_matters::Place::Local => Place::Local,
-                clauseo_matters::Place::Network => Place::Network,
-                clauseo_matters::Place::Synced { .. } => Place::CloudSync,
-            };
-            counts.bump(Event::MatterOpened(MatterOpened {
-                kind,
-                papers,
-                place: Some(place),
-                protection: Protection::NotProtected,
-            }));
-        });
-    if let Err(error) = started {
-        tracing::debug!(%error, "a matter's place could not be read for its count");
+    let places = PLACES.get_or_init(|| {
+        let (send, jobs) = mpsc::channel::<PlaceJob>();
+        let started = std::thread::Builder::new()
+            .name("clauseo-place".to_owned())
+            .spawn(move || {
+                for job in jobs {
+                    let place = match clauseo_matters::place(&job.folder) {
+                        clauseo_matters::Place::Local => Place::Local,
+                        clauseo_matters::Place::Network => Place::Network,
+                        clauseo_matters::Place::Synced { .. } => Place::CloudSync,
+                    };
+                    job.counts.bump(Event::MatterOpened(MatterOpened {
+                        kind: job.kind,
+                        papers: job.papers,
+                        place: Some(place),
+                        protection: Protection::NotProtected,
+                    }));
+                }
+            });
+        match started {
+            Ok(_) => Some(send),
+            Err(error) => {
+                tracing::debug!(%error, "no thread to read matters' places for their counts");
+                None
+            }
+        }
+    });
+    let job = PlaceJob {
+        counts,
+        kind,
+        papers,
+        folder,
+    };
+    let sent = places.as_ref().map(|send| send.send(job));
+    if !matches!(sent, Some(Ok(()))) {
+        tracing::debug!("a matter's place could not be read for its count");
     }
 }
 
