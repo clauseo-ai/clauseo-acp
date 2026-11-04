@@ -140,11 +140,12 @@ its own stderr ring for `ExitReport::stderr_tail`, and S18 never reads it.
 under `crates/agents/src`, with comments blanked and string literals kept. It fails if any file
 names Claude's credential file, or names Codex's login file outside `signin/reuse.rs`. It also
 fails if `reuse.rs` calls `File::open`, any `fs::read*`, `OpenOptions`, the crate's own
-`open_read` or `read_small`, any `write::read`, any `read_…(` call, `options(` or `open(`, or
+`open_read` or `read_small`, any `write::read`, any `read_…(` call, `options(`, `open(`,
+`copy(` or `rename(`, or
 names `File` at all (as a type or a path, so `use std::fs::File as F` is caught). Across
 `src` it fails on a string literal holding an escaped dot (`\x2e`, `\u{2e}`, any case or
-leading zeros) and on an `"auth"` literal with `json` or `with_extension` on the same or the
-next line (`concat!("auth", ".json")`, `join("auth").with_extension("json")`); Claude's
+leading zeros) and on an `"auth"` literal, or a `format!` whose literal holds `auth`, with
+`json` or `with_extension` on the same or the next line (`concat!("auth", ".json")`, `join("auth").with_extension("json")`); Claude's
 `--json` flag beside its `auth` subcommand is left out of that rule. Each rule has a test that
 plants a probe in a copy of `src`. The test builds the file names with `concat!`, so it never
 names them itself.
@@ -410,7 +411,8 @@ one is made, 0700 on Unix; another thread making one first is fine; a link or a 
 or a folder outside the data folder, is refused, and nothing is made where a link points. The
 data folder itself may be a link. It makes the agent's home (the job, Claude's and Codex's
 login, Codex's link), `agents/<id>` for the markers, `agents/signin` for the shim and URL
-files, and detection's `agents/signin/detect`. `agents` itself does not depend on host.
+files, and detection's `agents/signin/detect`. A real folder already there below the data folder
+is set to 0700 as well, as `make_home` does. `agents` itself does not depend on host.
 
 **Detection** (`signin/detect.rs`) runs with `RunKind::Detect`: no `CLAUDE_CONFIG_DIR`,
 `CLAUDE_SECURESTORAGE_CONFIG_DIR` or `CODEX_HOME`, the lawyer's `HOME`, no
@@ -426,10 +428,12 @@ files, and detection's `agents/signin/detect`. `agents` itself does not depend o
 The lawyer's home folder is `SigninConfig::lawyer_home()` (new, public): the base environment's
 `HOME`, or `USERPROFILE` on Windows.
 
-**"Use it"** runs detection again first. It goes on only when detection names an email and that
-email is the one `LoginFound` showed. Otherwise nothing is linked or recorded, and the new
-detection is the state: `LoginFound` with the new email (or none), or what was seen. So a login
-with no email (an API-key Codex login) is shown but never reused. Detection that cannot tell
+**"Use it"** runs detection again first. It goes on only when detection's email is the one
+`LoginFound` showed, `None` equal to `None`: a login with no email (an API-key Codex login)
+is shown and can be used, since a read that got no answer is "could not tell", never `None`.
+Otherwise (`Some` shown and `None` found, `None` and `Some`, or two emails) nothing is linked
+or recorded, and the new detection is the state: `LoginFound` with the new email, or what was
+seen. Detection that cannot tell
 ends the job: `signin.cancelled` when it was cancelled or replaced, else `signin.failed`.
 - Claude: status under the session's environment must say signed in. Then, if the job is still
   the agent's and not cancelled, `login-source` is written, and the state is
@@ -445,7 +449,9 @@ ends the job: `signin.cancelled` when it was cancelled or replaced, else `signin
   `login-source` is written, the job must still be the agent's and not cancelled. Stopped
   before the link: nothing was done, and the job ends as cancelled (or silently, if replaced).
   Stopped after it: Clauseo's own name is removed again (`remove_file` of the home's name,
-  never the lawyer's), and no `reused` is written. Every Codex `login` and `logout` holds
+  never the lawyer's), and no `reused` is written. Reuse stopping (`found::stop`, for Codex)
+  takes the same lock before it removes the link and `login-source`. Every Codex `login` and
+  `logout` holds
   the same lock from its guard to the run's end, so a "Use it" never links while a replaced
   login still runs, and a login's guard never looks while a replaced "Use it" could still link.
 - `use_different_account` for Codex orders this explicitly: taking the slot sets the cancel of
