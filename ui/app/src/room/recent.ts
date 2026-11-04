@@ -19,9 +19,18 @@ export function madeAt(id: string): Timestamp {
 
 /** A day's heading, in the language: today, yesterday, or its weekday and date. */
 export function dayHeading(at: Timestamp, now: Timestamp, zone: string, lang: Lang): string {
-  const apart = dayOf(now, zone) - dayOf(at, zone);
+  const apart = daysApart(at, now, zone);
   if (apart === 0) return frame(lang, "Today");
   if (apart === 1) return frame(lang, "Yesterday");
+  return longDay(at, zone, lang);
+}
+
+/** How many of the lawyer's days `at` lies before `now`, in `zone`: 0 for today. */
+export const daysApart = (at: Timestamp, now: Timestamp, zone: string): number =>
+  dayOf(now, zone) - dayOf(at, zone);
+
+/** A day in RO-19's form, its weekday and its date: "Tuesday 27 October", never one without the other. */
+export function longDay(at: Timestamp, zone: string, lang: Lang): string {
   const locale = lang === "hi" ? "hi-IN" : "en-GB";
   return format(locale, zone, { weekday: "long", day: "numeric", month: "long" })
     .format(at)

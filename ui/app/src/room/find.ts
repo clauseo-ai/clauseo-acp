@@ -22,7 +22,7 @@ import type { SearchState } from "../store/search.ts";
 import type { AllThreadsView } from "./all-threads.ts";
 import type { ConversationsView } from "./conversations-view.ts";
 import type { MatterInfo } from "./host-next.ts";
-import { clockOf } from "./when.ts";
+import { daysApart, longDay } from "./recent.ts";
 
 /** A paper found by its file name: its matter, its path in the matter's folder, and the name, cut at the found words. */
 export type FoundPaper = {
@@ -95,7 +95,9 @@ export function findView(input: FindInput): FindView {
     if (held?.kind === "scratch") return t(lang, "Scratch matter");
     return held?.name ?? (title === undefined || title === "" ? undefined : title);
   };
-  const dayOf = (at: number) => clockOf(at, now, zone, lang).day || fw(lang, "today");
+  // RO-19's day, as Recent says it: "today", in the line's lower case (RO-30), else its weekday and date
+  const dayOf = (at: number) =>
+    daysApart(at, now, zone) === 0 ? fw(lang, "today") : longDay(at, zone, lang);
   const whereOf = (matter: MatterId, title: string | undefined, at: number) => {
     const name = nameOf(matter, title);
     const day = dayOf(at);
