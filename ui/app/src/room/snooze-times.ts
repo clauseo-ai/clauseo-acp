@@ -1,6 +1,7 @@
 // The snooze menu's times, pure (U16b), on the lawyer's wall clock in her zone: 6:00 pm today until 5:00 pm, then
 // 9:00 pm in its place (none from 9:00 pm); 9:00 am tomorrow; 9:00 am on Monday, unless tomorrow is Monday; and 9:00
-// am on the day before the matter's next date, where that date is more than a day away. None past the host's 366 days.
+// am on the day before the matter's next date, where that date is more than a day away and that day isn't tomorrow
+// (Tomorrow 9:00 am says it already). None past the host's 366 days, and none already past.
 import type { Timestamp } from "../transport/protocol.ts";
 import { atLocal, wallOf } from "./local-time.ts";
 import { isoDay } from "./when.ts";
@@ -25,7 +26,7 @@ export function snoozeTimes(now: Timestamp, zone: string, nextDate?: string): Sn
   const toMonday = (8 - ((day + 4) % 7)) % 7 || 7;
   if (toMonday > 1) times.push({ key: "monday", until: atLocal(day + toMonday, 9 * H, zone) });
   const next = nextDate === undefined ? null : isoDay(nextDate);
-  if (next !== null && next - day > 1) {
+  if (next !== null && next - day > 2) {
     const until = atLocal(next - 1, 9 * H, zone);
     if (until - now <= MOST_AHEAD) times.push({ key: "before", until });
   }

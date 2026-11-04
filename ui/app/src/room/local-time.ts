@@ -27,10 +27,13 @@ const offsetAt = (at: Timestamp, zone: string) => {
   return w.day * DAY_MS + w.minute * 60_000 - Math.floor(at / 60_000) * 60_000;
 };
 
-/** The moment the zone's wall clock reads `minute` on `day`. Twice over, so a change of offset between the guess and
- * the answer (summer time) is taken into account. */
+/** The moment the zone's wall clock reads `minute` on `day`: twice over, so a change of offset between the guess and
+ * the answer (summer time) is taken into account. A time the clock skips (summer time starting at that hour, as at
+ * midnight in Santiago on 6 September 2026) gives the first moment after the skip on that day, never the day before. */
 export function atLocal(day: Day, minute: number, zone: string): Timestamp {
   const wall = day * DAY_MS + minute * 60_000;
   const first = wall - offsetAt(wall, zone);
-  return wall - offsetAt(first, zone);
+  const second = wall - offsetAt(first, zone);
+  const reads = wallOf(second, zone);
+  return reads.day === day && reads.minute >= minute ? second : Math.max(first, second);
 }
