@@ -123,6 +123,23 @@ impl SigninHub {
         self.reserve(agent, vendor, Task::SignOut, installed)
     }
 
+    /// `Agents::try_again`'s checks (Codex alone has a callback port to wait for), then the
+    /// slot.
+    pub(super) fn try_again(
+        &self,
+        agent: &AgentId,
+        installed: Option<Installed>,
+    ) -> Result<Option<SigninStart>, SigninError> {
+        let vendor = self.vendor(agent)?;
+        if vendor != Vendor::Codex {
+            return Err(SigninError::WrongMethod {
+                agent: agent.clone(),
+                method: Method::Browser,
+            });
+        }
+        self.reserve(agent, vendor, Task::TryAgain, installed)
+    }
+
     /// `Agents::check_status`'s checks, then the slot unless a job is running.
     pub(super) fn check_status(
         &self,
@@ -137,7 +154,7 @@ impl SigninHub {
     pub(super) fn cancel(&self, agent: &AgentId) -> Result<(), SigninError> {
         let inner = self.lock();
         match inner.jobs.get(agent) {
-            Some(slot) if matches!(slot.task, Task::SignIn(_)) => {
+            Some(slot) if matches!(slot.task, Task::SignIn(_) | Task::TryAgain) => {
                 slot.ticket.cancel.cancel();
                 Ok(())
             }
@@ -182,9 +199,6 @@ impl SigninHub {
         task: Task,
         installed: Option<Installed>,
     ) -> Result<Option<SigninStart>, SigninError> {
-        if vendor == Vendor::Codex {
-            return Err(SigninError::NotBuilt(agent.clone()));
-        }
         let home = self
             .agents
             .get(agent)
@@ -209,7 +223,7 @@ impl SigninHub {
                 let (sender, receiver) = async_channel::unbounded();
                 (Some(sender), Some(receiver))
             }
-            Task::SignOut | Task::Status => (None, None),
+            Task::SignOut | Task::Status | Task::TryAgain => (None, None),
         };
         inner.jobs.insert(
             agent.clone(),

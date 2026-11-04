@@ -310,8 +310,14 @@ fn claude_status(folder: &Path) -> io::Result<i32> {
     Ok(EXIT_OK)
 }
 
-/// The Codex commands: `login`, `login --device-auth`, `login status`, `logout` and `app-server`.
+/// The Codex commands: `login`, `login --device-auth`, `login status`, `logout` and `app-server`,
+/// each after any number of leading `-c <key=value>` config overrides, which are skipped as
+/// Codex takes them before its subcommand (`-c cli_auth_credentials_store="file"`).
 fn codex(args: &[&str], script: &Script, folder: &Path) -> io::Result<i32> {
+    let mut args = args;
+    while let ["-c", _, rest @ ..] = args {
+        args = rest;
+    }
     match args {
         ["login", "status"] => codex_status(folder),
         ["login"] => codex_browser_login(script, folder),

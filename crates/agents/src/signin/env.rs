@@ -118,10 +118,6 @@ const STRIPPED: [&str; 6] = [
 /// Codex's argument that keeps its login a file in `CODEX_HOME`: "with
 /// `-c cli_auth_credentials_store="file"` on every Codex run but detection". The value is TOML,
 /// so the quotes are part of the argument.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "S18 piece 4 (Codex's sign-in) calls it")
-)]
 const CODEX_STORE: [&str; 2] = ["-c", "cli_auth_credentials_store=\"file\""];
 
 /// The child's whole environment for `inputs`: the base minus the stripped names, plus the
@@ -177,10 +173,6 @@ pub(crate) fn run_env(inputs: &EnvInputs<'_>) -> BTreeMap<OsString, OsString> {
 
 /// The arguments every Codex run but detection adds after its command:
 /// `-c cli_auth_credentials_store="file"`. Detection gets none ("without the store override").
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "S18 piece 4 (Codex's sign-in) calls it")
-)]
 pub(crate) fn codex_store_args(kind: RunKind<'_>) -> Vec<OsString> {
     match kind {
         RunKind::Detect => Vec::new(),

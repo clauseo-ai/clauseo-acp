@@ -12,6 +12,10 @@ mod support;
 mod claude;
 
 #[cfg(test)]
+#[path = "signin/codex.rs"]
+mod codex;
+
+#[cfg(test)]
 #[path = "signin/shim.rs"]
 mod shim;
 
