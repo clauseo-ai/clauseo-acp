@@ -109,6 +109,36 @@ fn undo_lists_files_edited_since() {
     assert_eq!(fx.read("b.txt"), b"bee");
 }
 
+/// #360: a file the agent wrote with no tool call naming it (flagged as maybe holding the
+/// lawyer's edits) and left alone is not edited since; rewritten after the checkpoint, the same
+/// size, it is. A rename is edited since when its old name comes back.
+#[test]
+fn edited_since_compares_content_not_the_lawyer_edits_flag() {
+    let fx = Fixture::new("edited-since-by-content");
+    fx.write("old.txt", "the old name");
+    let mut matter = fx.import();
+    matter.before_turn(&meta(2)).unwrap();
+    fx.write("notes.txt", "hello\n");
+    crate::support::rename(fx.file("old.txt"), fx.file("new.txt"));
+    let changes = created(
+        matter.after_turn(&meta(3), &tools(&["new.txt"])).unwrap(),
+        3,
+    );
+    let flagged: Vec<(&str, bool)> = changes
+        .iter()
+        .map(|change| (change.path().as_str(), change.may_include_lawyer_edits()))
+        .collect();
+    assert_eq!(flagged, [("new.txt", false), ("notes.txt", true)]);
+    assert_none(&matter.edited_since(cid(1), cid(3)).unwrap());
+
+    fx.write("notes.txt", "HELLO\n");
+    fx.write("old.txt", "back again");
+    assert_eq!(
+        matter.edited_since(cid(1), cid(3)).unwrap(),
+        [path("new.txt"), path("notes.txt")]
+    );
+}
+
 #[test]
 fn undo_anyway_keeps_overwritten_edits_in_versions() {
     let (fx, mut matter) = stepped("undo-anyway");
