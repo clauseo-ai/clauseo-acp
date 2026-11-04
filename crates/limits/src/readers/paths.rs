@@ -77,11 +77,13 @@ pub(crate) fn claude(launch: &AgentLaunch) -> Result<(Located, PathBuf), Error> 
             });
         }
     }
+    // The SDK's folder and every folder above it passed the walk just above.
+    let sdk_dir = sdk.parent().unwrap_or(modules.as_path());
     for file in entry::entry_files(&sdk).map_err(|rule| Error::Refused {
         agent: CLAUDE_ID,
         rule,
     })? {
-        match walk(&located.install, &file) {
+        match walk_from(&located.install, sdk_dir, &file) {
             Ok(()) => {}
             Err(Walk::Missing) => {
                 return Err(refused(
@@ -284,14 +286,20 @@ enum Walk {
 /// Checks each part of `file` below `install` with `symlink_metadata`: none may be a link, each
 /// folder must be a folder and `file` a regular file. `install` itself is not checked.
 fn walk(install: &Path, file: &Path) -> Result<(), Walk> {
-    let rest = file.strip_prefix(install).map_err(|err| {
+    walk_from(install, install, file)
+}
+
+/// As [`walk`], but checks only the parts of `file` below `from`: a folder in `install` that
+/// passed the walk already. Messages still name `install`.
+fn walk_from(install: &Path, from: &Path, file: &Path) -> Result<(), Walk> {
+    let rest = file.strip_prefix(from).map_err(|err| {
         Walk::Refused(format!(
             "{} is not inside {}: {err}",
             file.display(),
-            install.display()
+            from.display()
         ))
     })?;
-    let mut path = install.to_owned();
+    let mut path = from.to_owned();
     let mut parts = rest.components().peekable();
     while let Some(part) = parts.next() {
         let Component::Normal(part) = part else {
