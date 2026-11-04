@@ -194,6 +194,8 @@ jobs:
               - 'crates/matters/src/refuse\.rs:\d+:\d+: replace && with \|\| in is_drive_root$'
               # `is_mount_point` is Linux only, not compiled here.
               - 'crates/matters/src/refuse\.rs:\d+:\d+: (replace is_mount_point -> .*|.* in is_mount_point)$'
+              # `fold`: `cfg!(target_os = "macos")` makes the parenthesis true here, and NFC keeps ASCII as it is; Windows catches both.
+              - 'crates/matters/src/refuse\.rs:\d+:\d+: replace (== with !=|&& with \|\|) in fold$'
               # `open_exclusive` is Windows only, not compiled here.
               - 'crates/matters/src/write\.rs:\d+:\d+: replace open_exclusive -> io::Result<File> with Ok\(Default::default\(\)\)$'
               # `hide_dir`'s body is Windows only, so here it is already empty; Windows catches it.
