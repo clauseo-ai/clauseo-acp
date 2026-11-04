@@ -189,8 +189,14 @@ its session name: it refuses a port outside 61080 to 61179 on Windows (`InvalidI
 `AddrInUse` when the port is registered or a test bind fails, so the caller draws a new session
 name; it checks the registry before its test bind, so it never binds a claimed port. Interim,
 until agent-browser takes a port option upstream. The registry keeps this process's claims apart
-only; another process can still take a claimed port before its owner binds it, and the launch
-then fails with no fallback. On macOS and Linux a bind of port 0 learns its port only after the
+only. Nothing is bound while a claim is held, since Chrome, the stream server and the Windows
+daemon bind at the browser's first tool call, if ever, so another process (another user's host)
+can take a claimed port first. The session's own listener then fails or falls back, but its jail
+still allows the port, so its agent can reach whatever took it. Amended 2026-11-04 (stage C's
+review of #329): this is a residual risk, not a failure, and S15's listener rule closes it on
+Windows. On macOS and Linux a dropped claim's port, and every port `bind_loopback` hands out, is
+retired for the life of the process. The tree kill (`killpg`) misses a jailed child that called
+`setsid`, and that child keeps its jail's rule for the port. On macOS and Linux a bind of port 0 learns its port only after the
 kernel picked it: if the kernel hands back a claimed port (it hands out only ports nobody holds),
 it is held for an instant under the registry lock and the bind asked again, and a launch binding
 that exact port in that instant fails, but cannot take it over. On Windows the candidate loop skips
