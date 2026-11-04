@@ -1,7 +1,7 @@
 //! Builders for the model's tests: limits values, read outcomes, live signals and a manual
 //! time, a plain `Timestamp` the test moves forward. No clock.
 
-use clauseo_limits::{Action, Input, Limits, LiveSignal, LiveStatus, ReadOutcome};
+use clauseo_limits::{AccountRead, Action, Input, Limits, LiveSignal, LiveStatus, ReadOutcome};
 use clauseo_protocol::{
     AccountLimits, AccountRef, AgentKind, AgentLimitsView, AtLimitBehaviour, Billing, Finite,
     LimitSource, LimitStopReason, LimitWindow, LimitWindowView, PlanLabel, Timestamp, WindowKind,
@@ -84,6 +84,7 @@ pub(crate) fn usage(limits: AccountLimits) -> ReadOutcome {
     ReadOutcome::Usage {
         limits,
         reached: None,
+        account_read: AccountRead::Read,
     }
 }
 
@@ -92,6 +93,7 @@ pub(crate) fn usage_reached(limits: AccountLimits, reached: LimitStopReason) -> 
     ReadOutcome::Usage {
         limits,
         reached: Some(reached),
+        account_read: AccountRead::Read,
     }
 }
 

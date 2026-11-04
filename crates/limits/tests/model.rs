@@ -40,3 +40,7 @@ mod rejected;
 #[cfg(test)]
 #[path = "model/read_contract.rs"]
 mod read_contract;
+
+#[cfg(test)]
+#[path = "model/unread_email.rs"]
+mod unread_email;

@@ -69,4 +69,6 @@ pub use policy::{Action, Input, Limits};
 #[cfg(feature = "live-tap")]
 #[doc(hidden)]
 pub use readers::StdoutTap;
-pub use readers::{CODEX_OVERRIDES, ProcessReaders, ReadFailure, ReadLimits, ReadOutcome};
+pub use readers::{
+    AccountRead, CODEX_OVERRIDES, ProcessReaders, ReadFailure, ReadLimits, ReadOutcome,
+};

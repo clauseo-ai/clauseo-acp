@@ -8,7 +8,7 @@ use clauseo_protocol::{
 };
 
 use super::{Answer, answer, clean, looks_like_email};
-use crate::{ReadFailure, ReadOutcome};
+use crate::{AccountRead, ReadFailure, ReadOutcome};
 
 /// 2026-11-02T18:00:00Z.
 const NOV_2_1800: i64 = 1_793_642_400_000;
@@ -28,6 +28,7 @@ fn limits(line: &str) -> AccountLimits {
         Answer::Outcome(ReadOutcome::Usage {
             limits,
             reached: None,
+            account_read: AccountRead::Read,
         }) => limits,
         other => panic!("not usage: {other:?}"),
     }
