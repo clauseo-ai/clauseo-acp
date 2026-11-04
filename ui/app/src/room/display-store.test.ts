@@ -286,6 +286,7 @@ test("without a host no key is locked", () => {
 const WIRE_VIEW: SettingsView = {
   ui: { theme: "dark", font_size: 17, language: "en", lite: "off", motion: "system" },
   tools: { web_search: true, browser: false },
+  privacy: { counts: true, crash_reports: false, counts_started: false },
   locked: ["ui.theme"],
 };
 

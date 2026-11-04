@@ -22,6 +22,7 @@ use clauseo_protocol::{
 use clauseo_store::MatterRow;
 
 use super::commands::{AfterCommand, CommandCtx};
+use super::counting::OnCommit;
 use super::{Actor, Tag, turn};
 use crate::error::Error;
 use crate::pipeline::Draft;
@@ -63,7 +64,9 @@ pub(super) fn open_matter(actor: &mut Actor, ctx: &CommandCtx, matter: MatterId)
                 last_opened: Some(now),
                 ..before.clone()
             };
-            commit_row(actor, ctx, before, row)
+            commit_row(actor, ctx, before, row)?;
+            super::counting::on_commit(actor, ctx.id, OnCommit::MatterOpened(matter));
+            Ok(())
         });
     if let Err(error) = done {
         actor.finish_command(ctx.id, Err(error));

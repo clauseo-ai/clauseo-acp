@@ -1061,6 +1061,7 @@ dependencies = [
  "async-channel",
  "async-io",
  "clauseo-acp",
+ "clauseo-counts",
  "clauseo-fake_agent",
  "clauseo-host",
  "clauseo-limits",

@@ -52,7 +52,12 @@ impl End {
 }
 
 impl Current {
-    pub(super) fn new(turn: TurnId, message: MessageId, prompt: Vec<ContentBlock>) -> Self {
+    pub(super) fn new(
+        turn: TurnId,
+        message: MessageId,
+        prompt: Vec<ContentBlock>,
+        started: std::time::Duration,
+    ) -> Self {
         Self {
             turn,
             message,
@@ -70,6 +75,8 @@ impl Current {
             store_failed: None,
             detach: None,
             limit_read: None,
+            started,
+            first_words: None,
         }
     }
 

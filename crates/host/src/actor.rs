@@ -39,6 +39,7 @@ use crate::snapshot::SnapshotWorker;
 mod app;
 mod app_lists;
 mod commands;
+pub(crate) mod counting;
 mod folder_state;
 pub(crate) mod header_tools;
 pub(crate) mod input;
@@ -90,9 +91,15 @@ pub(crate) struct Actor {
     pub(crate) feeder: FeederTx,
     pub(crate) snapshots: SnapshotWorker,
     /// The settings. Only the actor touches them, so it is the one lock their writes need:
-    /// `SetUiSettings` runs `Effective::apply_ui_patch` here, and `SetToolSettings`
-    /// `Effective::apply_tools_patch`, one command at a time.
+    /// `SetUiSettings` runs `Effective::apply_ui_patch` here, `SetToolSettings`
+    /// `Effective::apply_tools_patch` and `SetPrivacySettings` `Effective::apply_privacy_patch`,
+    /// one command at a time.
     pub(crate) effective: Effective,
+    /// The usage counts (`HostConfig::with_counts`), or none: every call site is then a no-op
+    /// (`counting.rs`).
+    pub(crate) counts: Option<clauseo_counts::Counts>,
+    /// What to count once a command's commit is durable, by command (`counting.rs`).
+    pub(crate) count_on_commit: BTreeMap<clauseo_protocol::CommandId, counting::OnCommit>,
     pub(crate) launcher: Arc<dyn Launcher>,
     /// Called at each session start, for the `_meta` of `session/new` and `session/load`, and
     /// at each launch, for the agent's variables (`agent/loads.rs`).
@@ -535,6 +542,7 @@ impl Actor {
                 }
                 // `start` may have given up waiting; then nobody is listening.
                 let _gone = ready.send(Ok(()));
+                counting::app_opened(self);
                 None
             }
             HostPhase::Serving => None,

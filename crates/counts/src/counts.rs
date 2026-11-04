@@ -119,6 +119,13 @@ impl Counts {
         self.state().about = about;
     }
 
+    /// Whether the lawyer's first act has happened: `<data_dir>/first_act_done` existed at
+    /// [`Counts::open`] or [`Counts::first_act`] wrote it. The host shows it as the settings'
+    /// `counts_started`.
+    pub fn consented(&self) -> bool {
+        self.state().consented
+    }
+
     /// Whether counts are off, in memory or saving.
     pub fn mode(&self) -> Mode {
         self.state().mode

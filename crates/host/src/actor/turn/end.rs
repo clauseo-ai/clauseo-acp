@@ -24,7 +24,7 @@ use clauseo_protocol::{
 use futures::future::AbortHandle;
 
 use super::super::input::MatterTag;
-use super::super::{Actor, limits};
+use super::super::{Actor, counting, limits};
 use super::agents;
 use super::close::{Expiries, TurnClose};
 use super::out::Out;
@@ -401,10 +401,24 @@ pub(super) fn after_events(
 }
 
 /// The turn is over: it lets go of the writer, which passes to the next queued turn; during
-/// shutdown the agent stops now.
+/// shutdown the agent stops now. Every turn ends here, whatever its stop, so the usage counts'
+/// `answer_ended` is counted here once, from the close `failure::closing_sent` just kept.
 pub(super) fn finish(actor: &mut Actor, thread: ThreadId) {
-    if let Some(state) = state(actor, thread) {
-        state.current = None;
+    let now = actor.now().mono;
+    let ended = state(actor, thread).and_then(|state| {
+        let current = state.current.take()?;
+        let close = &state.closing.as_ref()?.close;
+        // A turn ended with no close of its own (a host bug lost its matter) is not counted.
+        (close.turn == current.turn).then(|| counting::Ended {
+            started: current.started,
+            first_words: current.first_words,
+            now,
+            stop: close.stop,
+            failure: close.failure.as_ref().map(|(code, _)| *code),
+        })
+    });
+    if let Some(ended) = ended {
+        counting::answer_ended(actor, thread, &ended);
     }
     if let Ok(matter) = matter_of(actor, thread) {
         release_writer(actor, matter, thread);

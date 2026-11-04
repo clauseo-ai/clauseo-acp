@@ -22,6 +22,7 @@ import type { HostTransport } from "../transport/host-transport.ts";
 const VIEW: SettingsView = {
   ui: { theme: "dark", font_size: 18, language: "hi", lite: "on", motion: "reduce" },
   tools: { web_search: true, browser: false },
+  privacy: { counts: true, crash_reports: false, counts_started: false },
   locked: ["ui.theme", "matters.default_location"],
 };
 

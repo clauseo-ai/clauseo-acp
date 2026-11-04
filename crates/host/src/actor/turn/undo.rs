@@ -5,6 +5,7 @@
 
 use std::collections::BTreeSet;
 
+use clauseo_counts::schema::Feature;
 use clauseo_matters::{Checkpoint, CheckpointOutcome, Undone};
 use clauseo_protocol::{
     CheckpointId, CheckpointKind, CheckpointRecorded, CommandOutcome, DomainEvent, Envelope,
@@ -14,7 +15,7 @@ use clauseo_protocol::{
 
 use super::super::commands::{AfterCommand, CommandCtx};
 use super::super::input::{Input, MatterTag};
-use super::super::{Actor, Tag};
+use super::super::{Actor, Tag, counting};
 use super::out::Out;
 use super::{
     Holder, JobKind, LogFor, Then, TurnInput, TurnJob, TurnTag, end, failure, lost, matter_of,
@@ -369,6 +370,7 @@ pub(super) fn on_logged(actor: &mut Actor, thread: ThreadId) {
     let Some(log) = state(actor, thread).and_then(|state| state.undo.take()) else {
         return;
     };
+    counting::feature_used(actor, Feature::Undo);
     prompt::ensure_note(actor, thread);
     if let Some(note) = state(actor, thread).and_then(|state| state.note.as_mut()) {
         for path in log.step.restored {

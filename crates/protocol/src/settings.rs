@@ -1,7 +1,9 @@
 //! The display settings as the window reads and changes them: [`SettingsView`] answers
 //! `HostQuery::GetSettings` and rides `HostEvent::SettingsChanged`; a [`UiPatch`] is what
 //! `HostCommand::SetUiSettings` carries. The tool switches are a [`ToolsSettingsView`] inside
-//! it, changed by a [`ToolsPatch`] in `HostCommand::SetToolSettings`.
+//! it, changed by a [`ToolsPatch`] in `HostCommand::SetToolSettings`. The privacy switches are a
+//! [`PrivacySettings`] inside it, changed by a [`PrivacyPatch`] in
+//! `HostCommand::SetPrivacySettings` and started by `HostCommand::FirstAct` (decision record 0036).
 //!
 //! These mirror the `ui` section of `clauseo-settings`, which this crate cannot depend on. That
 //! crate holds the rules (the font size range, which keys policy locks); the host turns these
@@ -109,9 +111,11 @@ pub struct SettingsView {
     /// The tool switches in force. A session reads them at its start: a change reaches the
     /// next session started, and a session already running keeps its tools.
     pub tools: ToolsSettingsView,
+    /// The privacy switches in force, and whether the usage counts have started.
+    pub privacy: PrivacySettings,
     /// Every dotted key the firm's policy sets, such as `ui.theme`, sorted. The lawyer cannot
-    /// change these: a `SetUiSettings` or `SetToolSettings` naming one is refused with
-    /// `settings.locked`. It can also name keys outside `ui` and `tools`
+    /// change these: a `SetUiSettings`, `SetToolSettings` or `SetPrivacySettings` naming one is
+    /// refused with `settings.locked`. It can also name keys outside `ui`, `tools` and `privacy`
     /// (`matters.default_location`, `agents.<id>`).
     pub locked: Vec<String>,
 }
@@ -124,6 +128,35 @@ pub struct ToolsSettingsView {
     pub web_search: bool,
     /// Whether the agent gets Clauseo's browser (`tools.browser`).
     pub browser: bool,
+}
+
+/// The privacy switches in force: the lawyer's, with policy's `false` over them (a policy can
+/// only turn them off; decision record 0036).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct PrivacySettings {
+    /// Whether Clauseo keeps and sends its anonymous usage counts (`privacy.counts`).
+    pub counts: bool,
+    /// Whether Clauseo sends crash reports (`privacy.crash_reports`).
+    pub crash_reports: bool,
+    /// Whether the lawyer's first act has happened (`HostCommand::FirstAct`, or the first change
+    /// of `counts`). Before it nothing is saved or sent, so the switch shows on but not started.
+    pub counts_started: bool,
+}
+
+/// A change to the privacy switches: each field set is changed, the rest stay. A patch that
+/// names a locked key is refused whole with `settings.locked`, and changes nothing. Unknown
+/// fields are refused, as in every command.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct PrivacyPatch {
+    /// The new usage counts switch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub counts: Option<bool>,
+    /// The new crash reports switch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crash_reports: Option<bool>,
 }
 
 /// A change to the tool switches: each field set is changed, the rest stay. A patch that names

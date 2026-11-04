@@ -100,8 +100,74 @@ cells, the weekly tally, the queue and the sender. Its row bans `matters`, `acp`
   `today.json`, queued days and tallies made under another id, which covers an off that failed
   part way; but when `counts/` itself cannot be changed, the old id cannot be removed, and only
   these two halves keep it from being resumed.
-- The host and desktop wiring (the settings keys, `FirstAct`, the call sites, the `reqwest`
-  upload) comes in S21's next pull request; until then nothing calls this crate.
+- The host and desktop wiring comes in two more pull requests: the settings keys, the wire and
+  the host's call sites (below, "The switches and the host"), then desktop's `reqwest` upload,
+  its tick task, `count_ui` and the bridge arms. Until the second, no window may send the
+  commands that start counts, so nothing is saved or sent.
+
+## The switches and the host (S21's second pull request)
+
+- **Settings.** A new section `privacy`: `privacy.counts` (default `true`) and
+  `privacy.crash_reports` (default `false`, for S22). Both are in `SECURITY_KEYS`, so the
+  shared `refuse(key, settings)` (`crates/settings/src/leaf.rs`, from R21) locks each `false`
+  when a policy source cannot be read, when a policy value does not type, and when a policy names
+  the section in a shape this version cannot read: no second mechanism. A policy can only turn
+  them off (`OFF_ONLY_KEYS`): a policy `true` is ignored with a warning in `Effective::warnings`
+  and does not lock, so the lawyer's switch stands; a policy `false` locks the key.
+- **`Effective::policy_present`** is whether any policy source was there: read (even one silent
+  on every key, or `{}`) or unreadable. It is `false` only when every source was absent. It is the
+  tally's `managed`; desktop fills `About` with it.
+- **The wire** (protocol; no new `ErrorCode`, additive under 0002's freeze rules).
+  `SettingsView.privacy: PrivacySettings { counts, crash_reports, counts_started }`, where
+  `counts_started` is `Counts::consented` (the marker exists). `HostCommand::SetPrivacySettings {
+  patch: PrivacyPatch { counts, crash_reports } }` follows `SetUiSettings`' rules (0017): a patch
+  naming a locked key is refused whole with `settings.locked`, and a write sends
+  `SettingsChanged`. `HostCommand::FirstAct { counts }` is the welcome's button. Both log only
+  their receipt, as every settings command does: the switches live in `settings.json`, not the
+  log, and no reducer state changes (`REDUCER_SCHEMA_VERSION` stays).
+- **The first act.** Before `<data_dir>/first_act_done` exists, a `SetPrivacySettings` naming
+  `counts` is the first act, since the lawyer changed the switch in view: it writes the marker,
+  and with `true` starts saving. `FirstAct { counts }` does the same with the switch as the
+  lawyer left it; a policy lock on `privacy.counts` stands over it, and only the marker is
+  written. Once the marker exists, `FirstAct` changes nothing and answers `Done`. A host given no
+  counts (`HostConfig::with_counts` not called: tests, `cli`) saves the switches, and its
+  `FirstAct` changes nothing.
+- **The rule for the host above, as built** (`crates/host/src/actor/settings/privacy.rs`). Off
+  writes `privacy.counts: false` first, then the marker if it is the first act, then
+  `Counts::set_enabled(false)`; a failed delete is logged and retried by each tick and the next
+  start, and the command answers `Done`. On calls `Counts::set_enabled(true)` first; while it
+  fails (the old folder cannot be deleted) the command is refused with `store.io`, counts stay
+  off and `privacy.counts` stays `false`. A settings write that fails after on turns counts back
+  off. Off is never refused but by a policy lock.
+- **The host's call sites** (`crates/host/src/actor/counting.rs`). Each bump is one lock and one
+  increment on the actor; with no counts it is a no-op with a debug log, and it never fails a
+  command. Each event counts once per operation that succeeded, when it is durable:
+  - `app_opened` (`cold`), when the host has started; `after_update` waits for R23's marker.
+  - `matter_opened`, at `CreateMatter`'s commit (`folder` with the import's papers, or
+    `new_folder` with none) and at `OpenMatter`'s (`folder`, its papers listed on the matter's
+    worker as `ListPapers` lists them, and only while counts are on). `place` is
+    `clauseo_matters::place` (0032), read on a `clauseo-place` thread since it stats the folder,
+    and counted by its kind alone (`local`, `network`, `cloud_sync`; never the service's name).
+    `protection` is `not_protected` until R17. The Scratch matter is not counted.
+  - `question_sent`, at the prompt's commit: `now` (started at once, or sent now over a running
+    answer), `queued`, or `steer`. An agent with no value in the schema (`fake-agent`, a firm's
+    own) is not counted.
+  - `answer_ended`, in `turn::end::finish`, the one place every turn ends, never per stop:
+    `EndTurn` is `done`, `Cancelled` `stopped_by_lawyer`, `AtLimit` `limit`, `MaxTokens`,
+    `MaxTurnRequests` and `Refusal` `agent_stopped`, a failure with `agent.auth_required`
+    `signin_expired`, any other failure `error`. `took` runs from the turn becoming current to its
+    end, `first_words` to its first answer text, on the host's monotonic clock. `offline` has no
+    signal in the host yet.
+  - `feature_used`: `undo` and `restore` once their log is durable.
+  - `setting_changed`, after a write, for each `ui` value that changed (`language`, `theme`,
+    `text_size`, `lite_mode`, `reduced_motion`) and for `crash_reports`; never for counts' own
+    switch.
+  - Left to their owners: `limit` (R16's view), `agent_install` and `sign_in` (R20),
+    `permission_asked` (R18), `update` (R23), `onboarding_step`, `error_shown`,
+    `break_shown` and the webview's `feature_used` values through `count_ui` (desktop).
+  - `feature_used.versions` is not counted in the host: opening Versions makes no host call, and
+    `compare_versions` is the Versions panel's Compare, which it asks again whenever the matter
+    moves, so counting it would count attempts. Both come from the webview through `count_ui`.
 
 ## Status
 

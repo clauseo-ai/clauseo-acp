@@ -220,3 +220,25 @@ fn scan_folder_needs_a_picked_folder_and_cancel_scan_starts_nothing() {
         );
     }
 }
+
+/// The privacy switches and the first act (decision record 0036) are refused from every window
+/// until S21's next pull request rules on them, so no window can start the usage counts yet.
+#[test]
+fn no_window_sends_the_privacy_switches_or_the_first_act_yet() {
+    let scratch = Scratch::new("admit-privacy", &[]);
+    let host = scratch.start(Vec::new());
+    let bridge = host.bridge();
+    for body in [
+        json!({"set_privacy_settings": {"patch": {"counts": true}}}),
+        json!({"first_act": {"counts": true}}),
+    ] {
+        let refused = command(body);
+        for window in [MAIN, SETTINGS, "other"] {
+            assert_eq!(
+                bridge.admit(window, &refused).unwrap_err().code(),
+                ErrorCode::CommandInvalid,
+                "{window}: {refused:?}"
+            );
+        }
+    }
+}

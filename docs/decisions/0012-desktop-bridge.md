@@ -20,7 +20,7 @@ which check ids and bounded values as they decode; the bridge then checks what d
 
 | Command | Arguments | Answer | Rust checks |
 |---|---|---|---|
-| `dispatch` | `command: CommandEnvelope` | `CommandOutcome` | `CommandEnvelope::validate`; refuses `AnswerPermission`, `SetMode`, `SetConfigOption`, and a `CreateMatter` whose folder ref this run's `pick_folder` did not issue (`command.invalid`); from the `settings` window, everything but `SetUiSettings` and `SetToolSettings` ([0028](0028-settings-window.md)) |
+| `dispatch` | `command: CommandEnvelope` | `CommandOutcome` | `CommandEnvelope::validate`; refuses `AnswerPermission`, `SetMode`, `SetConfigOption`, and a `CreateMatter` whose folder ref this run's `pick_folder` did not issue (`command.invalid`); from the `settings` window, everything but `SetUiSettings` and `SetToolSettings` ([0028](0028-settings-window.md)); from every window, `SetPrivacySettings` and `FirstAct` until S21's desktop pull request rules on them ([0036](0036-counts.md)) |
 | `query` | `query: HostQuery` | `QueryResult` | decoding (`PageLimit`, `ReadLen` bounds); from the `settings` window, only `GetSettings` ([0028](0028-settings-window.md)) |
 | `open_stream` | `channel: Channel<StreamMessage>` | `()` | one channel per window; a second call replaces it and drops its subscriptions; waits for the host's start and, after a failed start, returns that start's error; of calls that waited together (a reload while the host starts) the last to arrive is kept; destroying the window drops its channel, its subscriptions, its app feed and its watchdog ([0028](0028-settings-window.md)) |
 | `subscribe` | `stream: StreamId, after: ViewPosition \| null` | `()` | needs `open_stream` first |

@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use clauseo_acp::McpServer;
+use clauseo_counts::Counts;
 use clauseo_limits::ReadLimits;
 use clauseo_process::Launcher;
 use clauseo_profile::{SkillWrite, SkillsWritten};
@@ -185,6 +186,7 @@ pub struct HostConfig {
     limits_reader: Option<Arc<dyn ReadLimits>>,
     wiring: LaunchWiring,
     scan_walk: crate::actor::scan::Walk,
+    counts: Option<Counts>,
 }
 
 /// A `HostConfig` taken apart by the host thread.
@@ -205,6 +207,8 @@ pub(crate) struct ConfigParts {
     pub(crate) limits_reader: Option<Arc<dyn ReadLimits>>,
     pub(crate) wiring: LaunchWiring,
     pub(crate) scan_walk: crate::actor::scan::Walk,
+    /// The usage counts a caller set; `None` counts nothing.
+    pub(crate) counts: Option<Counts>,
 }
 
 impl HostConfig {
@@ -227,7 +231,18 @@ impl HostConfig {
             limits_reader: None,
             wiring: LaunchWiring::default(),
             scan_walk: crate::actor::scan::os_walk(),
+            counts: None,
         }
+    }
+
+    /// The anonymous usage counts (default: none, and nothing is counted). The desktop opens
+    /// them (`Counts::open`, with `privacy.counts` after policy and whether the first act has
+    /// happened) and passes a clone here; the host bumps its call sites' events into it and turns
+    /// it on, off or started for `SetPrivacySettings` and `FirstAct` (decision record 0036).
+    /// Without it those commands still change the settings, and `counts_started` reads false.
+    pub fn with_counts(mut self, counts: Counts) -> Self {
+        self.counts = Some(counts);
+        self
     }
 
     /// The profile hook (default: [`NoProfile`]).
@@ -406,6 +421,7 @@ impl HostConfig {
             limits_reader: self.limits_reader,
             wiring: self.wiring,
             scan_walk: self.scan_walk,
+            counts: self.counts,
         }
     }
 }

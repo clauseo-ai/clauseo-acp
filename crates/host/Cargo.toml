@@ -25,6 +25,8 @@ clauseo-settings = { path = "../settings" }
 clauseo-limits = { path = "../limits" }
 # The launch profile's placeholders and skill writes (decision record 0030).
 clauseo-profile = { path = "../profile" }
+# The anonymous usage counts' call sites and the privacy switches (decision record 0036).
+clauseo-counts = { path = "../counts" }
 async-channel = { workspace = true, features = ["std"] }
 async-io = { workspace = true }
 # `executor` for `LocalPool` (QR11.2); the root line's default features include it already.

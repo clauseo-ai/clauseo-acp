@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use clauseo_protocol::{StreamId, TextAppended, ThreadId};
+use clauseo_protocol::{StreamId, TextAppended, TextKind, ThreadId};
 use clauseo_reducer::{TextDelta, ViewChange, apply_text_delta};
 
 use super::super::Actor;
@@ -26,6 +26,15 @@ pub(super) fn on_delta(actor: &mut Actor, thread: ThreadId, delta: TextIn) -> Re
     }
     let now = actor.now().mono;
     let state = state(actor, thread).ok_or_else(|| lost("a thread"))?;
+    // The usage counts' `answer_ended.first_words`: the first answer text of the turn.
+    if delta.kind == TextKind::Answer
+        && let Some(current) = state
+            .current
+            .as_mut()
+            .filter(|current| current.turn == delta.turn)
+    {
+        current.first_words.get_or_insert(now);
+    }
     let pushed = state.text.push(now, delta);
     if let Some(at) = pushed.display_at {
         arm(actor, thread, at.saturating_sub(now), TimerKind::Display);

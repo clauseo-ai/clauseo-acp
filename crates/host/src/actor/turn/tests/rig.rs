@@ -309,7 +309,8 @@ impl Rig {
         let now = self.actor.now().wall;
         let turn: TurnId = self.actor.ids.mint(now).unwrap();
         let message = self.actor.ids.mint(now).unwrap();
-        let mut current = Current::new(turn, message, Vec::new());
+        let started = self.actor.now().mono;
+        let mut current = Current::new(turn, message, Vec::new(), started);
         current.phase = phase;
         self.actor.threads.get_mut(&thread).unwrap().turn.current = Some(Box::new(current));
         let stream = StreamId::Thread(thread);

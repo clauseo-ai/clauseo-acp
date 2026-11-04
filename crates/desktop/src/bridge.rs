@@ -269,6 +269,12 @@ impl Bridge {
             HostCommand::SetToolSettings { .. } => Err(invalid(
                 "the tool switches are set from the settings window only",
             )),
+            // The privacy switches and the first act (decision record 0036): which window may
+            // send them is S21's next pull request, with the welcome and the settings page.
+            // Until then no window does, so nothing is saved or sent.
+            HostCommand::SetPrivacySettings { .. } | HostCommand::FirstAct { .. } => Err(invalid(
+                "the privacy switches are not settable from the window yet",
+            )),
         }
     }
 

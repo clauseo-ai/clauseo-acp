@@ -204,9 +204,7 @@ pub(super) fn on_unsubscribed(actor: &mut Actor, id: SubId) {
 /// event. Each event here must replace what a window holds whole; see the module doc before
 /// adding a partial one.
 fn catch_up(actor: &mut Actor) -> Vec<EncodedEvent> {
-    let mut events = vec![HostEvent::SettingsChanged(super::settings::view(
-        &actor.effective,
-    ))];
+    let mut events = vec![HostEvent::SettingsChanged(super::settings::view(actor))];
     events.extend(super::app_lists::current(actor));
     events.extend(super::scan::catch_up(actor));
     events

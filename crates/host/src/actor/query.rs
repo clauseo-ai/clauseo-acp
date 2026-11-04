@@ -108,7 +108,7 @@ pub(super) fn query(
             let _gone = reply.send(Ok(answer));
         }
         HostQuery::GetSettings => {
-            let view = super::settings::view(&actor.effective);
+            let view = super::settings::view(actor);
             let _gone = reply.send(Ok(QueryResult::Settings(view)));
         }
         HostQuery::ListPapers { matter } => {
