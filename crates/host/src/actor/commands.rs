@@ -235,7 +235,7 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
                 actor.finish_command(ctx.id, Err(error));
             }
         }
-        HostCommand::RenameThread { .. } => rename_thread(actor, ctx, command),
+        HostCommand::RenameThread { .. } => title_source::rename_thread(actor, ctx, command),
         HostCommand::ArchiveThread { thread } => {
             thread_command(actor, ctx, thread, ThreadChange::Archive);
         }
@@ -479,22 +479,14 @@ fn create_thread(
     actor.send_commit(draft, tag).map(|_| ())
 }
 
-/// `RenameThread`: the app's placeholder when its flag is set, else a title the lawyer typed.
-fn rename_thread(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
-    let HostCommand::RenameThread {
-        thread,
-        title,
-        placeholder,
-    } = command
-    else {
-        return;
-    };
-    thread_command(actor, ctx, thread, ThreadChange::Rename(title, placeholder));
-}
-
 /// `RenameThread` and `ArchiveThread`: the thread's stream is loaded first, so its header
 /// stays current for `ListThreads`.
-fn thread_command(actor: &mut Actor, ctx: &CommandCtx, thread: ThreadId, change: ThreadChange) {
+pub(super) fn thread_command(
+    actor: &mut Actor,
+    ctx: &CommandCtx,
+    thread: ThreadId,
+    change: ThreadChange,
+) {
     if let Err(error) = listed_thread(actor, thread) {
         actor.finish_command(ctx.id, Err(error));
         return;
@@ -586,7 +578,7 @@ fn change_thread(
 
 /// What `RenameThread` or `ArchiveThread` changes.
 #[derive(Debug)]
-enum ThreadChange {
+pub(super) enum ThreadChange {
     /// The title, and whether it is the app's first-words placeholder (else the lawyer typed it).
     Rename(Title, bool),
     Archive,
