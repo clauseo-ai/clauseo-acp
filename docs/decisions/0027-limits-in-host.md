@@ -125,6 +125,10 @@ Amended 2026-11-03: U12 opened the limits for the Settings window: its Channel f
 `main`'s does, it may send `refresh_limits`, and its focus dispatches `Shown` from Rust
 ([0028](0028-settings-window.md)).
 
+2026-11-04: a Claude turn end reads after 2 minutes when no live signal came since the agent's
+last turn end, and after 10 minutes when one did ([0014](0014-limits.md)). The host feeds the
+same `TurnEnded` and `Live` inputs as before; only the model's threshold changed.
+
 ## Date
 
 2026-11-02

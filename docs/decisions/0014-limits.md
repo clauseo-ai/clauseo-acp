@@ -84,7 +84,8 @@ gives.
 **Refresh.** One read per agent at start, and cached values become `Stale { Aged }`
 (`NotApplicable` stays). A focus, or a meter or the settings page opening, reads when the last read
 started 5 minutes ago or more. A turn end reads after 10 minutes for Claude and 60 seconds for
-Codex. `TurnEnded { read_now: true }` and `TryAgain` read at once. Every age counts from the start
+Codex (Claude's 10 minutes became 2 for a turn with no live signal; see the note of
+2026-11-04 under Status). `TurnEnded { read_now: true }` and `TryAgain` read at once. Every age counts from the start
 of the agent's last read, whatever its outcome, so a failed read is not retried on every focus.
 At most one read is in flight per account. None starts while that agent has a permission or
 elicitation pending; one asked for then starts when the question is answered. While anyone
@@ -212,6 +213,14 @@ and this record together.
 ## Status
 
 proposed
+
+2026-11-04: a Claude turn end that no live `_claude/rateLimit` signal came before reads when
+the last read started 2 minutes ago or more; one that a live signal came before keeps 10 minutes.
+On real Claude Pro accounts claude-agent-acp sent the signal in 1 turn of 8, so most turns left
+numbers up to 10 minutes old shown as fresh. The model has no turn-start input, so "during the
+turn" means since the agent's last turn end. Codex stays at 60 seconds; `read_now`, the focus,
+"try again" and reset rules, one read in flight per agent, and no read while a question is
+pending are unchanged.
 
 ## Date
 
