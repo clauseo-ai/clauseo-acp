@@ -70,8 +70,12 @@ const rows = () => h!.all("conversation");
 /** A row by its title: the thread that opens first keeps the key the room gave it before the list was in. */
 const rowOf = (title: string) =>
   rows().find((r) => r.querySelector(".room-conv-title")?.textContent === title);
+// the rail's morning sweep (U16b) goes at launch whenever the clock reads 05:00 or later: not these tests' business
 const kinds = () =>
-  h!.transport.only("dispatch").map((c) => Object.keys(c.command.command)[0] as keyof HostCommand);
+  h!.transport
+    .only("dispatch")
+    .map((c) => Object.keys(c.command.command)[0] as keyof HostCommand)
+    .filter((k) => k !== "sweep_done");
 const streams = (call: "subscribe" | "unsubscribe") => h!.transport.only(call).map((c) => c.stream);
 
 // The file's first test mounts the room cold: 9.6 s on a loaded runner, and the rest of the file failed after it, so 30 s of its own.

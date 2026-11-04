@@ -5,7 +5,10 @@
 // its moments put in the lawyer's clock as the rail renders, so nothing ticks at rest; the open matter's row says
 // nothing, since the lawyer is looking at it. Until the list arrives, and if it can't be read, the rail draws no list
 // and no scratch row. Under the open matter's row stand its conversations (conversations.ts), with New conversation:
-// a draft, or a thread with no title yet, says "New conversation"; a row not open says what it's doing.
+// a draft, or a thread with no title yet, says "New conversation"; a row not open says what it's doing. Snooze and Done
+// (U16b) are rail-snooze.tsx's: a row's buttons and menus, its line, the done fold and the Snoozed shelf; the morning
+// sweep is sweep.ts's. Snoozes are compared with the newest of the views' times and the moment the pointer came or went,
+// or the window came back, so a snooze whose time has come ends at the next render with no timer.
 import { Suspense, useState, useSyncExternalStore, type Ref } from "react";
 import {
   Rail,
@@ -35,6 +38,9 @@ import type { ConversationRow, Conversations, ConversationsView } from "./conver
 import type { Matters, MattersView } from "./matters.ts";
 import { LazyFindResults, preloadFind } from "./find-load.ts";
 import { clockOf, dayOf, groupMatters } from "./when.ts";
+import { matterSnooze, snoozedShelf, splitConversations, useSnooze } from "./rail-snooze.tsx";
+import { preloadSnooze } from "./snooze-load.ts";
+import { useSweep } from "./sweep.ts";
 
 /** A row's status as MatterRow takes it: the state, and its moment as words. Working never names a time (no end
  * estimates), so it says "Answering."; a stop or a reset on another day gives its day. */
@@ -151,7 +157,12 @@ export function RoomRail({
   const w = useWords();
   const every = useSyncExternalStore(threads.subscribe, threads.view, threads.view);
   const zone = view.zone;
-  const now = Math.max(view.now, every.now);
+  // the last moment the pointer came or went, or the window came back
+  const [stamp, setStamp] = useState(0);
+  const now = Math.max(view.now, every.now, stamp);
+  useSweep(transport, zone, setStamp);
+  const snooze = useSnooze(transport);
+  const sc = { snooze, now, zone, lang: w.lang };
   const detailed = view.detailed;
   const [triager] = useState(() => new RailTriage());
   // whether the pointer is over the rail: rows hold their groups while it is
@@ -163,6 +174,7 @@ export function RoomRail({
     lists: every.lists,
     open: view.open?.matter ?? null,
     over,
+    now,
   });
   const room = { matters, conversations };
   const untitled = mt(w.lang, "New conversation");
@@ -172,6 +184,15 @@ export function RoomRail({
     // a row that needs the lawyer names the conversation behind it, and a press opens that conversation
     const behind =
       current || triaged === undefined || triaged.need === null ? null : triaged.thread;
+    const split =
+      current && talks.matter === m.matter && talks.phase !== "loading"
+        ? splitConversations(
+            sc,
+            talks.rows,
+            conversationRows(talks, conversations, onConversation, now, zone, w.lang, m.status),
+            m.next_date,
+          )
+        : null;
     return {
       id: m.matter,
       name: m.name,
@@ -186,17 +207,11 @@ export function RoomRail({
       ...(behind === null ? {} : { where: behind.title ?? untitled }),
       testIds: { row: "matter-row" },
       // the open matter's conversations, once its list is in
-      ...(current && talks.matter === m.matter && talks.phase !== "loading"
+      ...matterSnooze(sc, m, every.lists.get(m.matter)),
+      ...(split !== null
         ? {
-            conversations: conversationRows(
-              talks,
-              conversations,
-              onConversation,
-              now,
-              zone,
-              w.lang,
-              m.status,
-            ),
+            conversations: split.rows,
+            conversationsDone: split.done,
             onNewConversation: () => {
               // the button stays as it is rather than greying: Versions' dialog is modal and stands while its act
               // runs, so the rail can't be pressed then anyway; this only guards it, and nothing happens
@@ -344,7 +359,20 @@ export function RoomRail({
             ),
           }
         : {})}
-      onHover={setOver}
+      shelf={snoozedShelf(sc, view.matters, every.lists, {
+        conversation: (matter, thread) => {
+          openConversation(room, matter, thread);
+          onConversation();
+        },
+        matter: (id) => openScratch(id)(),
+      })}
+      onHover={(on) => {
+        setOver(on);
+        setStamp(Date.now());
+        if (on) void preloadSnooze();
+        else snooze.leave();
+      }}
+      onFocusLeave={snooze.leave}
       onEscape={onEscape}
       {...(onSettings === undefined ? {} : { onSettings })}
       testIds={{ newMatter: "new-matter", find: "find", settings: "open-settings" }}

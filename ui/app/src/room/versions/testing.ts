@@ -219,7 +219,9 @@ export async function mountVersions(
         return { threads: script.threads ?? [thread()] };
       throw new Error(`not scripted: ${JSON.stringify(query)}`);
     },
-    dispatch: (envelope) => script.dispatch?.(envelope.command) ?? "done",
+    // the rail's morning sweep (U16b), sent at launch whenever the clock reads 05:00 or later, is no script's business
+    dispatch: (envelope) =>
+      "sweep_done" in envelope.command ? "done" : (script.dispatch?.(envelope.command) ?? "done"),
     ...(script.next === undefined ? {} : { next: script.next }),
   });
   // a wide window, past the room's 1200 px breakpoint, where Versions' panel stands beside the work
