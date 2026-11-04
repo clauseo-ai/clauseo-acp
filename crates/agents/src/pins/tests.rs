@@ -171,3 +171,78 @@ fn override_names_drop_their_range() {
     assert_eq!(override_name("@openai/codex"), "@openai/codex");
     assert_eq!(override_name("@openai/codex@0.1"), "@openai/codex");
 }
+
+#[test]
+fn file_urls_have_three_slashes_forward_slashes_and_no_percent_encoding() {
+    assert_eq!(
+        file_url("/home/u/data dir/a#b%c.tgz", Os::Linux),
+        "file:///home/u/data dir/a#b%c.tgz"
+    );
+    assert_eq!(
+        file_url("/Users/u/a.tgz", Os::Darwin),
+        "file:///Users/u/a.tgz"
+    );
+    // A backslash is a file name's character on Unix.
+    assert_eq!(file_url(r"/tmp/a\b.tgz", Os::Linux), r"file:///tmp/a\b.tgz");
+    assert_eq!(
+        file_url(r"C:\Users\J S\AppData\Local\a.tgz", Os::Win32),
+        "file:///C:/Users/J S/AppData/Local/a.tgz"
+    );
+    assert_eq!(
+        file_url(r"\\?\D:\data\a.tgz", Os::Win32),
+        "file:///D:/data/a.tgz"
+    );
+    assert_eq!(
+        file_url(r"\\server\share\a.tgz", Os::Win32),
+        "file:////server/share/a.tgz"
+    );
+    assert_eq!(
+        file_url(r"\\?\UNC\server\share\a.tgz", Os::Win32),
+        "file:////server/share/a.tgz"
+    );
+}
+
+#[test]
+fn the_install_lock_changes_only_the_mapped_resolved_urls() {
+    let pins = derive(&manifest(), &lock(false), "a", REGISTRY).unwrap();
+    let tarballs = BTreeMap::from([
+        (
+            "node_modules/a".to_owned(),
+            PathBuf::from("/d/downloads/aa.tgz"),
+        ),
+        (
+            "node_modules/a/node_modules/c".to_owned(),
+            PathBuf::from("/bundle/npm/cc.tgz"),
+        ),
+    ]);
+    let written = pins.lock_with_tarballs(&tarballs, Os::Linux).unwrap();
+    let expected = pins
+        .lock()
+        .replace(
+            &format!("\"{REGISTRY}node_modules/a.tgz\""),
+            "\"file:///d/downloads/aa.tgz\"",
+        )
+        .replace(
+            &format!("\"{REGISTRY}node_modules/a/node_modules/c.tgz\""),
+            "\"file:///bundle/npm/cc.tgz\"",
+        );
+    assert_ne!(expected, pins.lock());
+    assert_eq!(written, expected);
+    assert_eq!(
+        pins.lock_with_tarballs(&BTreeMap::new(), Os::Linux)
+            .unwrap(),
+        pins.lock()
+    );
+}
+
+#[test]
+fn the_install_lock_refuses_a_path_it_does_not_hold() {
+    let pins = derive(&manifest(), &lock(false), "a", REGISTRY).unwrap();
+    for path in ["node_modules/b", ""] {
+        let tarballs = BTreeMap::from([(path.to_owned(), PathBuf::from("/d/b.tgz"))]);
+        assert!(matches!(
+            pins.lock_with_tarballs(&tarballs, Os::Linux),
+            Err(PinsError::Malformed(_))
+        ));
+    }
+}

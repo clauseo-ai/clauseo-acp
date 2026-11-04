@@ -20,7 +20,12 @@ Measured on Linux x64 on 2026-11-02 with Node 24.22.0 and npm 11.19.1:
 - `npm cache add <absolute path to a .tgz>` puts the tarball in the cache by its integrity, and
   `npm ci --offline --ignore-scripts --no-bin-links` then installs from the cache alone. It
   leaves the lock unchanged and makes no link. A relative path is read as a GitHub shorthand
-  (`user/repo`), so the path is always absolute.
+  (`user/repo`), so the path is always absolute. (Superseded on 2026-11-04: see below.)
+- Measured on 2026-11-04 with npm 11.19.1 and npm 10.9.9: a lock entry whose `resolved` is a
+  `file:` URL of an absolute `.tgz` path, with its `integrity` kept, installs under
+  `npm ci --offline` with an empty cache, and a file whose bytes changed fails with
+  `EINTEGRITY` ("integrity checksum failed when using sha512"). npm encodes the raw text itself
+  before parsing it as a URL, so the path is written unencoded; spaces, `#` and `%` work.
 - One-platform downloads: Claude 112.3 to 124.9 MB (unpacked 284 to 304 MB), Codex 138.9 to
   167.7 MB (unpacked 353 to 472 MB). Node 24.22.0's archives are 33.8 to 58.3 MB (unpacked 96 to
   202 MB). The table is in `snapshot.rs`.
@@ -115,12 +120,22 @@ present), the crate fetches `resolved` itself:
   before any request, with a detail naming the mirror setting. Only the `test-support` feature's
   `InstallConfig::allow_http_for_tests` lets the tests' plain-HTTP loopback registry through.
 
-The crate then runs `node <npm-cli.js> cache add <absolute paths…>` in batches of 40. Next comes
-`node <npm-cli.js> ci` in `install/.tmp-<hash>-<n>`. Both get `--cache <npm-cache> --userconfig
-<agents/npmrc> --globalconfig <agents/npmrc-global> --update-notifier=false --logs-max=0`, both
-files empty (npm refuses one file for both), so no npmrc of the user's or the machine's applies.
-`ci` adds `--offline --ignore-scripts --no-bin-links --no-audit --no-fund`, so it makes no network
-call. No proxy and no CA file reach npm (no `--proxy`, `--https-proxy`, `--cafile` or
+The crate then writes the derived `package.json` and lock into `install/.tmp-<hash>-<n>`, with
+each entry's `resolved` replaced by a `file:` URL of its checked tarball (in `agents/downloads/`,
+or in the offline bundle), and runs `node <npm-cli.js> ci` there. Every other byte of the lock,
+`integrity` included, is the snapshot's, so `<hash>` and the receipts do not change. The URL is
+`file://` and the absolute path with a leading `/`: `file:///home/u/…`, and on Windows
+`file:///C:/Users/u/…` (backslashes turned to `/`, a `\\?\` prefix dropped), the form
+npm-package-arg reads back as the same absolute path on every OS. npm checks each tarball it
+reads against the entry's `integrity`, on top of the download's own check. The run gets `--cache
+<npm-cache> --userconfig <agents/npmrc> --globalconfig <agents/npmrc-global>
+--update-notifier=false --logs-max=0`, both files empty (npm refuses one file for both), so no
+npmrc of the user's or the machine's applies. `ci` adds `--offline --ignore-scripts
+--no-bin-links --no-audit --no-fund --allow-file=all`, so it makes no network call;
+`--allow-file=all` overrides an `npm_config_allow_file` in the environment the run inherits,
+which npm 11 would otherwise apply to the `file:` tarballs (npm 10 accepts the flag). npm still
+copies each tarball it reads into the private cache, so the cache folder stays. No proxy and no
+CA file reach npm (no `--proxy`, `--https-proxy`, `--cafile` or
 `NODE_EXTRA_CA_CERTS`): npm never uses the network here, and a proxy's password on a command line is
 visible to other local users. Each npm run gets `NODE_OPTIONS` set empty. Each run is raced against
 a pause and a 10-minute timeout. Only npm's `npm error code X` line reaches the log, redacted. An
@@ -200,8 +215,14 @@ setting, and start-up neither cleans nor reads anything under a relative data fo
    missing file fails the install. Node's archive is copied into `agents/downloads/` as it is
    hashed (the download's own write path, with its size cap), and only the copy is unpacked, so a
    share that serves other bytes to a second read cannot pick the Node that runs. An npm tarball
-   is checked where it sits; npm reads it again, but stores it by its computed SHA-512 and installs
-   by the lock's integrity, so a swapped file is `ENOTCACHED`. Making a bundle is S25's.
+   is checked where it sits; npm reads it again through its `file:` URL and checks it against the
+   lock's `integrity`, so a swapped file is `EINTEGRITY`. On Windows a bundle on a share (a
+   `\\server\share\…` or `\\?\UNC\…` path) is the exception: npm 11 turns
+   `file:////server/share/a.tgz` into `file:\\server\share\a.tgz` when it loads the lock, and
+   its fetcher then reads that as `C:\server\share\a.tgz` (checked by running npm's own
+   npm-package-arg and arborist code as win32). So each such tarball is copied into
+   `agents/downloads/` as it is hashed, as Node's archive is, and npm reads the copy. Making a
+   bundle is S25's.
 3. A firm npm mirror (`install.registry`, R20's setting): `mirror_url` replaces each `resolved`
    URL's snapshot registry base (`https://registry.npmjs.org/` in the build) with the mirror's
    base. A URL off that base is refused. The integrity check is unchanged.
@@ -232,6 +253,12 @@ setting, and start-up neither cleans nor reads anything under a relative data fo
     when unpacking: the archive is pinned by SHA-256, checked on the bytes unpacked.
   - A glibc Linux with musl also installed reads as musl, so the install fails and asks for the
     user's own Node.
+
+- 2026-11-04: `npm cache add` was dropped. It was the slowest step of a first install on
+  Windows (44.1 s of 79.8 s for Claude with Defender on), and a `file:` `resolved` with the
+  lock's `integrity` lets `npm ci --offline` read the checked tarballs in place with the same
+  integrity check, proved by an install test that swaps a tarball after the download's check and
+  sees `EINTEGRITY`.
 
 ## Status
 

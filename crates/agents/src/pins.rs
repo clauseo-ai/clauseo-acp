@@ -14,11 +14,12 @@
 //! `preserve_order`. Nothing here relies on a `Map`'s order.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
 
 use serde_json::{Map, Value};
 
 use crate::integrity::Expected;
-use crate::platform::Platform;
+use crate::platform::{Os, Platform};
 
 /// Why the pins did not derive.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -115,6 +116,36 @@ impl AgentPins {
     /// How many `packages` entries the lock holds, the root entry not counted.
     pub fn package_count(&self) -> usize {
         self.packages.len()
+    }
+
+    /// The derived lock as one install writes it: each entry named in `tarballs` (lock entry path
+    /// to that entry's checked tarball) gets a `resolved` of [`file_url`]`(tarball, os)`, so
+    /// `npm ci` reads the file in place and checks it against the entry's `integrity`. Every
+    /// other byte is [`Self::lock`]'s: the root entry, versions, `integrity` and key order. A
+    /// path the lock does not hold, or a tarball path that is not UTF-8, is
+    /// [`PinsError::Malformed`].
+    pub(crate) fn lock_with_tarballs(
+        &self,
+        tarballs: &BTreeMap<String, PathBuf>,
+        os: Os,
+    ) -> Result<String, PinsError> {
+        let mut lock: Value = parse(&self.lock, "the derived lock")?;
+        let entries = lock
+            .get_mut("packages")
+            .and_then(Value::as_object_mut)
+            .ok_or_else(|| malformed("the derived lock has no packages"))?;
+        for (path, tarball) in tarballs {
+            let entry = entries
+                .get_mut(path)
+                .filter(|_| !path.is_empty())
+                .and_then(Value::as_object_mut)
+                .ok_or_else(|| malformed(&format!("the derived lock has no entry {path}")))?;
+            let tarball = tarball
+                .to_str()
+                .ok_or_else(|| malformed(&format!("{path}'s tarball path is not UTF-8")))?;
+            entry.insert("resolved".into(), Value::String(file_url(tarball, os)));
+        }
+        Ok(canonical(&lock))
     }
 
     /// Every entry but the root, by path.
@@ -334,6 +365,30 @@ fn locked(path: &str, entry: &Value, registry: &str) -> Result<LockedPackage, Pi
             .and_then(Value::as_bool)
             .unwrap_or(false),
     })
+}
+
+/// The `file:` URL npm's `npm-package-arg` reads back as the absolute path `path` on `os`:
+/// `file://` then the path with a leading `/`, so `file:///home/u/a.tgz` and, on Windows (where
+/// `\` becomes `/` and a `\\?\` prefix goes), `file:///C:/Users/u/a.tgz`. Nothing is
+/// percent-encoded: npm encodes the raw text itself before it parses it as a URL, so a space, `#`
+/// or `%` must stay as it is. A UNC path gives `file:////server/share/…`, which npm 11 parses
+/// but then misreads on Windows; a tarball on a share is copied to a drive before it gets here.
+pub(crate) fn file_url(path: &str, os: Os) -> String {
+    let path = if os == Os::Win32 {
+        let path = if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
+            format!(r"\\{rest}")
+        } else {
+            path.strip_prefix(r"\\?\").unwrap_or(path).to_owned()
+        };
+        path.replace('\\', "/")
+    } else {
+        path.to_owned()
+    };
+    if path.starts_with('/') {
+        format!("file://{path}")
+    } else {
+        format!("file:///{path}")
+    }
 }
 
 /// The package an `overrides` key names: `name` from `name` or `name@range`.

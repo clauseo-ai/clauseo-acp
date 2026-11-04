@@ -1,12 +1,21 @@
-//! A try's install step: Node's runtime unpacked when it was downloaded, then
-//! `node npm-cli.js cache add` in batches and `npm ci --offline` in `install/.tmp-<hash>-<n>`,
-//! a walk that refuses any link, the rename to `<hash>` and the receipt, written last.
+//! A try's install step: Node's runtime unpacked when it was downloaded, then the derived
+//! `package.json` and a lock whose `resolved` URLs are `file:` URLs of the checked tarballs
+//! written to `install/.tmp-<hash>-<n>`, `npm ci --offline` there, a walk that refuses any link,
+//! the rename to `<hash>` and the receipt, written last.
+//!
+//! `npm ci` reads each tarball in place (in `downloads/`, or in the offline bundle) and checks
+//! it against the entry's `integrity`, on top of the download's own check: a file swapped in
+//! between is `EINTEGRITY`. Every other byte of the lock is the snapshot's, so the receipt's
+//! `<hash>` is unchanged. There is no `npm cache add` step (decision 0033, 2026-11-04).
 //!
 //! Every npm run starts through the launcher as `node <npm-cli.js> …`, with `NODE_OPTIONS`
 //! empty, the private cache, and empty `agents/npmrc` and `agents/npmrc-global` files as its user
 //! and global config (npm refuses one file for both).
-//! No proxy or CA file is passed: npm never uses the network here (`cache add` reads local
-//! files and `ci` runs `--offline`), and a proxy's password on a command line is visible to
+//! `npm ci` runs with `--offline --ignore-scripts --no-bin-links --no-audit --no-fund` and
+//! `--allow-file=all` (npm 11 reads `npm_config_allow_file` from the environment the launch
+//! inherits, and `none` there would refuse the `file:` tarballs; npm 10 accepts the flag).
+//! No proxy or CA file is passed: npm never uses the network here (every tarball is a local
+//! file and `ci` runs `--offline`), and a proxy's password on a command line is visible to
 //! other local users. Its stderr pump and its stdout are driven to their end while its exit is
 //! raced against a pause (the handle is dropped, which kills its tree) and 10 minutes. Nothing
 //! of its output reaches the log but npm's own `npm error code X` line, redacted.
@@ -29,17 +38,16 @@ use crate::receipt::{Receipt, install_folder, install_root, script_path, write_r
 use crate::state::{InstallState, Installed};
 use crate::write;
 
-/// The most tarballs one `npm cache add` gets.
-const BATCH: usize = 40;
 /// The longest one npm run may take.
 const NPM_LIMIT: Duration = Duration::from_mins(10);
 /// The flags `npm ci` runs with, besides the common ones.
-const CI_FLAGS: [&str; 5] = [
+const CI_FLAGS: [&str; 6] = [
     "--offline",
     "--ignore-scripts",
     "--no-bin-links",
     "--no-audit",
     "--no-fund",
+    "--allow-file=all",
 ];
 
 /// Unpacks Node if needed, runs npm, checks for links, renames into place and writes the
@@ -106,15 +114,13 @@ pub(super) async fn install<T: Timer + Send + Sync>(
         env: BTreeMap::from([(OsString::from("NODE_OPTIONS"), OsString::new())]),
     };
     let done = async {
+        let lock = pins
+            .lock_with_tarballs(&fetched.tarballs, platform.os)
+            .map_err(|err| TryError::retry(&err.to_string(), config))?;
         write::write_atomic(&tmp.join("package.json"), pins.package_json().as_bytes())
             .map_err(io("writing package.json"))?;
-        write::write_atomic(&tmp.join("package-lock.json"), pins.lock().as_bytes())
+        write::write_atomic(&tmp.join("package-lock.json"), lock.as_bytes())
             .map_err(io("writing package-lock.json"))?;
-        for batch in fetched.tarballs.chunks(BATCH) {
-            let mut args: Vec<OsString> = vec!["cache".into(), "add".into()];
-            args.extend(batch.iter().map(|path| path.as_os_str().to_owned()));
-            npm.run("cache add", args, &tmp).await?;
-        }
         let mut args: Vec<OsString> = vec!["ci".into()];
         args.extend(CI_FLAGS.iter().map(OsString::from));
         npm.run("ci", args, &tmp).await?;

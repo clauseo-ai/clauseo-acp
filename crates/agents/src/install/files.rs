@@ -3,6 +3,7 @@
 //! set) into `agents/downloads/`, or from the offline bundle with no network call, and is
 //! checked against its digest. Progress covers them all.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -12,6 +13,7 @@ use super::{Job, NodeChoice, Run, TryError};
 use crate::config::AgentsConfig;
 use crate::download::firm::{BundleEntry, bundle_file, bundle_path, copy_from_bundle, mirror_url};
 use crate::download::{FetchJob, Fetcher, Magic, part_path};
+use crate::platform::Os;
 use crate::state::InstallState;
 use crate::write;
 
@@ -25,8 +27,9 @@ const PROGRESS_EVERY: Duration = Duration::from_millis(250);
 /// A try's checked files.
 #[derive(Debug)]
 pub(crate) struct Fetched {
-    /// The tarballs' absolute paths, for `npm cache add`.
-    pub(crate) tarballs: Vec<PathBuf>,
+    /// Each checked tarball's absolute path, by its lock entry's path: the `file:` URLs of the
+    /// lock `npm ci` reads.
+    pub(crate) tarballs: BTreeMap<String, PathBuf>,
     /// Node's checked archive, when the runtime is to be unpacked.
     pub(crate) node_archive: Option<PathBuf>,
     /// The files this install put in `downloads/`, removed once it is `Ready`.
@@ -38,7 +41,8 @@ enum Source {
     Fetch(FetchJob),
     /// An npm tarball already checked, in the offline bundle.
     Bundle(PathBuf),
-    /// Node's archive in the offline bundle, copied into `downloads/` as it is hashed.
+    /// Node's archive, or an npm tarball on a Windows share, in the offline bundle: copied into
+    /// `downloads/` as it is hashed.
     Copy {
         from: PathBuf,
         job: FetchJob,
@@ -49,7 +53,8 @@ struct Item {
     source: Source,
     /// Its size when known before its request.
     known: Option<u64>,
-    is_package: bool,
+    /// The lock entry's path when it is an npm tarball; `None` for Node's archive.
+    package: Option<String>,
 }
 
 /// `<data_dir>/agents/downloads`.
@@ -73,14 +78,14 @@ pub(super) fn fetch_all<T: Timer + Send + Sync>(
     let mut progress = Progress {
         received: vec![0; items.len()],
         totals: items.iter().map(|item| item.known).collect(),
-        is_package: items.iter().map(|item| item.is_package).collect(),
+        is_package: items.iter().map(|item| item.package.is_some()).collect(),
         estimate,
         last: None,
     };
     progress.tick(job, run, true);
     let mut fetcher = None;
     let mut fetched = Fetched {
-        tarballs: Vec::new(),
+        tarballs: BTreeMap::new(),
         node_archive: None,
         downloaded: Vec::new(),
     };
@@ -129,10 +134,11 @@ pub(super) fn fetch_all<T: Timer + Send + Sync>(
                 fetch_job.dest
             }
         };
-        if item.is_package {
-            fetched.tarballs.push(path);
-        } else {
-            fetched.node_archive = Some(path);
+        match item.package {
+            Some(entry) => {
+                fetched.tarballs.insert(entry, path);
+            }
+            None => fetched.node_archive = Some(path),
         }
     }
     progress.tick(job, run, true);
@@ -181,7 +187,7 @@ fn items<T: Timer + Send + Sync>(job: &Job<T>, node: &NodeChoice) -> Result<Vec<
         items.push(Item {
             source,
             known: Some(archive.size()),
-            is_package: false,
+            package: None,
         });
     }
     // A package's cap is the agent's whole download for the platform (every package together),
@@ -195,12 +201,33 @@ fn items<T: Timer + Send + Sync>(job: &Job<T>, node: &NodeChoice) -> Result<Vec<
     for package in config.snapshot.packages(&job.ticket.agent, config.platform) {
         let short = package.name.rsplit('/').next().unwrap_or(&package.name);
         let label = format!("{short}-{}.tgz", package.version);
+        let dest = downloads.join(format!("{}.tgz", package.integrity.hex()));
         let item = if let Some(bundle) = &config.install.bundle {
-            let path = bundle_file(bundle, &package.integrity, &label, data)?;
-            Item {
-                known: size_of(&path),
-                source: Source::Bundle(path),
-                is_package: true,
+            let in_bundle = bundle.join("npm");
+            // npm cannot read a `file:` tarball on a Windows share (see `is_unc`): copied first.
+            if config.platform.os == Os::Win32 && is_unc(&in_bundle.to_string_lossy()) {
+                let from = bundle_path(bundle, BundleEntry::Npm, &package.integrity, &label, data)?;
+                Item {
+                    known: size_of(&from),
+                    source: Source::Copy {
+                        from,
+                        job: FetchJob {
+                            url: package.resolved.clone(),
+                            expected: package.integrity.clone(),
+                            dest,
+                            magic: Magic::Gzip,
+                            max_bytes: package_cap,
+                        },
+                    },
+                    package: Some(package.path.clone()),
+                }
+            } else {
+                let path = bundle_file(bundle, &package.integrity, &label, data)?;
+                Item {
+                    known: size_of(&path),
+                    source: Source::Bundle(path),
+                    package: Some(package.path.clone()),
+                }
             }
         } else {
             let url = match &config.install.registry {
@@ -209,7 +236,6 @@ fn items<T: Timer + Send + Sync>(job: &Job<T>, node: &NodeChoice) -> Result<Vec<
                 }
                 None => package.resolved.clone(),
             };
-            let dest = downloads.join(format!("{}.tgz", package.integrity.hex()));
             Item {
                 known: size_of(&dest),
                 source: Source::Fetch(FetchJob {
@@ -219,7 +245,7 @@ fn items<T: Timer + Send + Sync>(job: &Job<T>, node: &NodeChoice) -> Result<Vec<
                     magic: Magic::Gzip,
                     max_bytes: package_cap,
                 }),
-                is_package: true,
+                package: Some(package.path.clone()),
             }
         };
         items.push(item);
@@ -305,7 +331,28 @@ pub(super) fn clean_up(config: &AgentsConfig, fetched: &Fetched) {
     drop(write::remove_dir_all(&npm_cache(&config.data_dir)));
 }
 
+/// Whether the Windows path `path` is on a share: `\\server\share\…`, `\\?\UNC\…` or
+/// `\\.\UNC\…`, with `\` or `/`. npm 11 on Windows reads a `file:` tarball on a share from the
+/// wrong path (its lock loader turns `file:////server/share/a.tgz` into
+/// `file:\\server\share\a.tgz`, which its fetcher then reads as `C:\server\share\a.tgz`), so such
+/// a bundle tarball is copied to `downloads/` first. A drive path, `\\?\C:\…` included, is not a
+/// share. A plain string function, so its rule is tested on every OS.
+pub(crate) fn is_unc(path: &str) -> bool {
+    let path = path.replace('/', "\\");
+    let upper = path.to_ascii_uppercase();
+    if let Some(rest) = upper
+        .strip_prefix(r"\\?\")
+        .or_else(|| upper.strip_prefix(r"\\.\"))
+    {
+        return rest.starts_with(r"UNC\");
+    }
+    path.starts_with(r"\\")
+}
+
 /// `<data_dir>/agents/npm-cache`.
 pub(crate) fn npm_cache(data_dir: &Path) -> PathBuf {
     data_dir.join("agents").join("npm-cache")
 }
+
+#[cfg(test)]
+mod tests;

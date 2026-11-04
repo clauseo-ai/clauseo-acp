@@ -83,9 +83,9 @@ pub(crate) fn bundle_path(
 }
 
 /// The path of an npm tarball in the offline bundle, once its digest is checked where it sits.
-/// npm reads it again by path, which is safe: `npm cache add` stores it under its own computed
-/// SHA-512 and `npm ci --offline` looks it up by the lock's integrity, so a file swapped after
-/// this check is `ENOTCACHED`, not an install. A mismatch is [`FetchKind::Failed`].
+/// npm reads it again by path (a `file:` `resolved` in the install's lock), which is safe:
+/// `npm ci` checks what it reads against the entry's `integrity`, so a file swapped after this
+/// check is `EINTEGRITY`, not an install. A mismatch is [`FetchKind::Failed`].
 pub(crate) fn bundle_file(
     bundle: &Path,
     expected: &Expected,
@@ -111,11 +111,11 @@ pub(crate) fn bundle_file(
     Ok(path)
 }
 
-/// Copies `from` (Node's archive in the offline bundle) to `job.dest` in `agents/downloads/`,
-/// hashing the bytes as they are written, through the same path as a download: the magic, the
-/// size cap, the digest, then the rename. Only the copy is unpacked, so a share that hands
-/// different bytes to a second read cannot change what runs. A copy already there with the
-/// right digest is kept.
+/// Copies `from` (Node's archive, or an npm tarball on a Windows share, in the offline bundle)
+/// to `job.dest` in `agents/downloads/`, hashing the bytes as they are written, through the same
+/// path as a download: the magic, the size cap, the digest, then the rename. Only the copy is
+/// unpacked or handed to npm, so a share that hands different bytes to a second read cannot
+/// change what runs. A copy already there with the right digest is kept.
 pub(crate) fn copy_from_bundle(
     from: &Path,
     job: &FetchJob,
@@ -134,11 +134,12 @@ pub(crate) fn copy_from_bundle(
     if let Some(parent) = job.dest.parent() {
         write::create_dir_all(parent).map_err(|err| at.io(&err))?;
     }
+    let name = from.file_name().unwrap_or_default().to_string_lossy();
     let read_error = |err: io::Error| {
         at.fail(
             FetchKind::Failed,
             None,
-            &format!("the offline bundle's Node archive could not be read: {err}"),
+            &format!("the offline bundle's {name} could not be read: {err}"),
         )
     };
     let file = std::fs::File::open(from).map_err(read_error)?;

@@ -29,3 +29,7 @@ mod jobs;
 #[cfg(test)]
 #[path = "install/firm.rs"]
 mod firm;
+
+#[cfg(test)]
+#[path = "install/npm_file.rs"]
+mod npm_file;
