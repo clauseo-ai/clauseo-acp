@@ -168,6 +168,18 @@ documents with 3 changed).
   per MiB of text (about 57 ms for 40 MiB), on top of reading the file.
 - Retention: every version is kept. No pruning, squashing, gc or repack. `Retention::KeepAll` is
   passed at open, so a later policy is a new variant.
+- No automatic repack either (orchestrator, 2026-11-04, after the R9 spike,
+  clauseo-ai/clauseo-acp-private#224). Loose growth was about 131 MB per 100 turns (20 Word
+  documents of 30 KB to 2 MB, 3 changed per turn). `git repack -a -d` saves 25 to 38 % on whole
+  `.docx` blobs, but gix 0.89 writes no delta pack (0 % on whole blobs). A loose-to-packed repack
+  of 300 such turns took 17.5 s wall on Windows (2 vCPUs, Defender on) and 5.0 s on the Mac mini;
+  one every 50 turns took 4.9 s and 1.7 s, and 60 checkpoints taken during repacks hit no lock or
+  missing-object error. A clean Windows has no `git`, and a Mac without the Command Line Tools
+  shows Apple's install dialog when `/usr/bin/git` runs, so a repack means bundling git (installer
+  size, GPL-2 source offer) or trusting a `git` on `PATH` that few lawyers have. Performance comes
+  before size, and the growth is acceptable for release. Revisit when gix writes delta packs or
+  users run short of disk. Numbers: `measurements/g9-versions.md` and
+  `measurements/g9-versions/repack-timing.md` in the private repository.
 
 ### The sync order
 
@@ -241,8 +253,8 @@ matches.
   trailers and level-0 and level-1 loose objects. It may change the summary line, the compression
   rule and the stat cache freely; it may add trailers and kinds (older readers ignore them).
 - Rebuilding the timeline reads every commit on open, which grows with the number of checkpoints.
-- Loose objects only, kept for ever, so `history.git` grows with every changed document until a
-  retention policy exists.
+- Loose objects only, kept for ever, so `history.git` grows with every changed document (about
+  1.3 MB per turn in R9's corpus) until a retention policy or a delta-pack writer exists.
 - A checkpoint costs at most one full drive flush, plus a barrier, plus plain syncs of new files.
 - Not tested by pulling the power: durability rests on Apple's documented `F_FULLFSYNC` behaviour.
   The placeholder attributes are unverified per OS until a measurement checks them.
