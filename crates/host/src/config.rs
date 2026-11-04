@@ -236,7 +236,7 @@ impl HostConfig {
     /// own minus the variables no agent may get (`GIT_*`, `SSH_*`, `NO_BROWSER`,
     /// `CLAUDE_CODE_REMOTE`, and Codex's dropped names), and a launcher that lets the child
     /// inherit the host's environment gives every dropped variable back. The plan readers'
-    /// specs (`clauseo_limits`) also carry the inherited environment whole.
+    /// specs (`clauseo_limits`) also carry the inherited environment, minus the same drops.
     pub fn new(effective: Effective, launcher: Arc<dyn Launcher>) -> Self {
         Self {
             effective,

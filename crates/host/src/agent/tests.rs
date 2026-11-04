@@ -269,6 +269,18 @@ fn launch_spec_drops_remote_markers_and_keeps_what_agents_need() {
     assert_eq!(env, kept);
 }
 
+/// The drop lists, as `crates/limits/src/readers/env.rs` copies them for the plan readers: a change
+/// to one goes in both.
+#[test]
+fn the_drop_lists_are_the_plan_readers() {
+    assert_eq!(super::spec::DROPPED_INHERITED_PREFIXES, ["GIT_", "SSH_"]);
+    let markers = super::spec::DROPPED_INHERITED.join(" ");
+    assert_eq!(markers, "NO_BROWSER CLAUDE_CODE_REMOTE");
+    let codex = super::codex::DROPPED_VARS.join(" ");
+    let expected = "CODEX_PATH APP_SERVER_LOGS DEFAULT_AUTH_REQUEST MODEL_PROVIDER";
+    assert_eq!(codex, expected);
+}
+
 /// Each dropped name is left out whatever its case and wherever it comes from: inherited, the
 /// agent's variables or the hook's.
 #[test]

@@ -3,11 +3,13 @@
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 
-/// The spec's env map: the `inherited` environment (read at each read) minus every name the
-/// agent's settings variables (`own`) also name, ignoring ASCII case, then `own`.
+/// The spec's env map: the `inherited` environment (read at each read) minus every `GIT_*` and
+/// `SSH_*` variable, the names in [`DROPPED_INHERITED`] and every name the agent's settings
+/// variables (`own`) also name, then `own`, all ignoring ASCII case. Every name in `dropped`
+/// (the Codex reader's [`CODEX_DROPPED`]) is left out of both.
 ///
-/// The child gets the same environment as with `own` alone, since it inherits the rest anyway.
-/// The inherited variables are in the map because `process`'s redactor takes its secrets only from
+/// The map is the child's whole environment: the host's launcher clears the environment. The
+/// inherited variables are also in the map because `process`'s redactor takes its secrets only from
 /// the spec's env, so every inherited key or token stays out of the stderr tail. On Windows `PATH`
 /// and `Path` are one variable, and an inherited `Path` left beside the agent's `PATH` would win.
 /// Never `Debug`-print the map: it holds those secrets. The rule is
@@ -20,19 +22,57 @@ pub(crate) fn spec_env(
     own: &BTreeMap<String, String>,
     inherited: impl Iterator<Item = (OsString, OsString)>,
     forced: Option<(&OsStr, &OsStr)>,
+    dropped: &[&str],
 ) -> BTreeMap<OsString, OsString> {
+    let drops = |name: &OsStr| dropped.iter().any(|drop| same(OsStr::new(drop), name));
     let mut env: BTreeMap<OsString, OsString> = inherited
-        .filter(|(name, _)| !own.keys().any(|own| same(OsStr::new(own), name)))
+        .filter(|(name, _)| {
+            !is_dropped_inherited(name)
+                && !drops(name)
+                && !own.keys().any(|own| same(OsStr::new(own), name))
+        })
         .collect();
     env.extend(
         own.iter()
-            .map(|(name, value)| (OsString::from(name), OsString::from(value))),
+            .map(|(name, value)| (OsString::from(name), OsString::from(value)))
+            .filter(|(name, _)| !drops(name)),
     );
     if let Some((name, value)) = forced {
         env.retain(|key, _| !same(key, name));
         env.insert(name.to_owned(), value.to_owned());
     }
     env
+}
+
+/// The prefixes of the inherited variables no reader gets: `GIT_*` would point git at another
+/// repository; `SSH_*` would mark a remote session or lend the lawyer's ssh keys. The same list as
+/// `crates/host/src/agent/spec.rs`'s (`limits` cannot depend on `host`).
+const DROPPED_INHERITED_PREFIXES: [&str; 2] = ["GIT_", "SSH_"];
+
+/// The inherited variables no reader gets, each a headless or remote marker: the same list as
+/// `crates/host/src/agent/spec.rs`'s `DROPPED_INHERITED`.
+pub(crate) const DROPPED_INHERITED: [&str; 2] = ["NO_BROWSER", "CLAUDE_CODE_REMOTE"];
+
+/// The names left out of the Codex reader's environment wherever they come from: the same list
+/// as `crates/host/src/agent/codex.rs`'s `DROPPED_VARS`.
+pub(crate) const CODEX_DROPPED: [&str; 4] = [
+    "CODEX_PATH",
+    "APP_SERVER_LOGS",
+    "DEFAULT_AUTH_REQUEST",
+    "MODEL_PROVIDER",
+];
+
+/// Whether an inherited `name` stays out: a prefix in [`DROPPED_INHERITED_PREFIXES`] or a name
+/// in [`DROPPED_INHERITED`], ignoring ASCII case.
+fn is_dropped_inherited(name: &OsStr) -> bool {
+    let bytes = name.as_encoded_bytes();
+    DROPPED_INHERITED_PREFIXES.iter().any(|prefix| {
+        bytes
+            .get(..prefix.len())
+            .is_some_and(|start| start.eq_ignore_ascii_case(prefix.as_bytes()))
+    }) || DROPPED_INHERITED
+        .iter()
+        .any(|drop| same(OsStr::new(drop), name))
 }
 
 /// One variable name on every OS: Windows ignores the case of env names.
@@ -43,6 +83,45 @@ fn same(a: &OsStr, b: &OsStr) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The lists match the host's (`crates/host/src/agent/spec.rs`, `agent/codex.rs`): a change
+    /// to one goes in both.
+    #[test]
+    fn the_drop_lists_are_the_hosts() {
+        assert_eq!(DROPPED_INHERITED_PREFIXES, ["GIT_", "SSH_"]);
+        assert_eq!(DROPPED_INHERITED, ["NO_BROWSER", "CLAUDE_CODE_REMOTE"]);
+        assert_eq!(
+            CODEX_DROPPED,
+            [
+                "CODEX_PATH",
+                "APP_SERVER_LOGS",
+                "DEFAULT_AUTH_REQUEST",
+                "MODEL_PROVIDER"
+            ]
+        );
+    }
+
+    #[test]
+    fn inherited_markers_and_dropped_names_stay_out_in_any_case() {
+        let env = spec_env(
+            &own(&[("model_provider", "other"), ("KEEP", "1")]),
+            os(&[
+                ("GIT_DIR", "/elsewhere/.git"),
+                ("ssh_auth_sock", "/tmp/agent.sock"),
+                ("SSH_CONNECTION", "10.0.0.1 22 10.0.0.2 22"),
+                ("No_Browser", "1"),
+                ("CLAUDE_CODE_REMOTE", "true"),
+                ("App_Server_Logs", "/tmp/logs"),
+                ("SSHFS_OPTS", "kept"),
+                ("PATH", "/usr/bin"),
+            ])
+            .into_iter(),
+            None,
+            &CODEX_DROPPED,
+        );
+        let names: Vec<&OsStr> = env.keys().map(OsString::as_os_str).collect();
+        assert_eq!(names, ["KEEP", "PATH", "SSHFS_OPTS"].map(OsStr::new));
+    }
 
     fn os(pairs: &[(&str, &str)]) -> Vec<(OsString, OsString)> {
         pairs
@@ -64,6 +143,7 @@ mod tests {
             &own(&[("PATH", "/agent/bin")]),
             os(&[("Path", "/inherited/bin"), ("HOME", "/home/lawyer")]).into_iter(),
             None,
+            &[],
         );
         let names: Vec<&OsString> = env.keys().collect();
         assert_eq!(names, [OsStr::new("HOME"), OsStr::new("PATH")]);
@@ -80,6 +160,7 @@ mod tests {
             &own(&[]),
             os(&[("LANG", "en_GB.UTF-8"), ("EMPTY", ""), ("SPACED", " a b ")]).into_iter(),
             None,
+            &[],
         );
         assert_eq!(
             env.get(OsStr::new("LANG")),
@@ -101,6 +182,7 @@ mod tests {
             &own(&[("CLAUDE_CONFIG_DIR", "/agent/config")]),
             os(&[("OPENAI_API_KEY", &openai), ("GH_TOKEN", &github)]).into_iter(),
             None,
+            &[],
         );
         assert!(
             env.get(OsStr::new("OPENAI_API_KEY")) == Some(&OsString::from(&openai)),
@@ -130,6 +212,7 @@ mod tests {
             ])
             .into_iter(),
             Some((OsStr::new("CODEX_HOME"), OsStr::new("/data/codex-home"))),
+            &[],
         );
         let homes: Vec<_> = env
             .iter()

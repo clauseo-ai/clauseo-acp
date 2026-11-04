@@ -21,11 +21,15 @@ use crate::error::Error;
 /// from (inherited, the agent's variables or the hook's), ignoring ASCII case. No
 /// inherited `GIT_*` reaches any agent: a `GIT_DIR` or `GIT_WORK_TREE` the host was started
 /// with would point the agent's git at another repository (agents never see a git repository
-/// through the environment). No inherited `SSH_*`, `NO_BROWSER` or `CLAUDE_CODE_REMOTE`
-/// reaches one either: each tells an agent it runs on a remote or headless machine, so it would
-/// skip the browser sign-in on the lawyer's own desktop. Names are compared ignoring ASCII case:
-/// on Windows `PATH` and `Path` are one variable and `Command::envs` keeps whichever comes last
-/// in the map's order, so an inherited `Path` left beside the agent's `PATH` would win.
+/// through the environment). No inherited `NO_BROWSER` or `CLAUDE_CODE_REMOTE` reaches one
+/// either: each tells an agent it runs on a remote or headless machine, so it would skip the
+/// browser sign-in on the lawyer's own desktop. Every inherited `SSH_*` is dropped on purpose,
+/// the SSH agent's own (`SSH_AUTH_SOCK`, `SSH_AGENT_PID`, `SSH_ASKPASS`) included: the session
+/// markers (`SSH_CONNECTION`, `SSH_CLIENT`, `SSH_TTY`) would skip the sign-in too, and the
+/// agent's would hand an AI agent the lawyer's ssh keys, a way to send data out. No agent needs
+/// remote git: Clauseo's checkpoints use git in-process (gix). Names are compared ignoring ASCII
+/// case: on Windows `PATH` and `Path` are one variable and `Command::envs` keeps whichever comes
+/// last in the map's order, so an inherited `Path` left beside the agent's `PATH` would win.
 ///
 /// The map is the child's whole environment: the caller's launcher must clear the environment
 /// (`SpawnOptions::clear_env`, as `HostConfig::new` requires), or the child inherits the host's
@@ -109,8 +113,9 @@ pub(crate) fn prepend_path(env: &mut BTreeMap<OsString, OsString>, folder: &Path
 }
 
 /// The prefixes of the inherited variables no agent gets: `GIT_*` would point its git at another
-/// repository, `SSH_*` would tell it it runs over SSH.
-const DROPPED_INHERITED_PREFIXES: [&str; 2] = ["GIT_", "SSH_"];
+/// repository, `SSH_*` would tell it it runs over SSH or lend it the lawyer's ssh keys.
+/// `crates/limits/src/readers/env.rs` keeps the same lists for the plan readers.
+pub(crate) const DROPPED_INHERITED_PREFIXES: [&str; 2] = ["GIT_", "SSH_"];
 
 /// The inherited variables no agent gets: each tells it it runs headless or remote, so it would
 /// skip the browser sign-in.
