@@ -4,7 +4,8 @@
 // markup staying text; RO-27 while the index builds; the room's own words for a missing title; archived results
 // marked; nothing found; and zero timers at rest once a search settles. Opening a result, Find's key, the lazy chunk
 // and axe are in find-open.test.tsx, find-lazy.test.tsx and find-axe.test.tsx.
-import { act } from "react";
+import { act, StrictMode } from "react";
+import { createRoot } from "react-dom/client";
 import { settled } from "@clauseo/components/lib/late.ts";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { Search } from "../store/search.ts";
@@ -17,7 +18,10 @@ import type {
   SearchPage,
   SearchRequest,
 } from "../transport/protocol.ts";
-import { mountRoom, summary, type Harness } from "./thread/harness.ts";
+import { detailed, fakeNext } from "./fake-next.ts";
+import { Room } from "./room.tsx";
+import { connectRoom } from "./start.ts";
+import { mountRoom, summary, THE_MATTER, type Harness } from "./thread/harness.ts";
 
 const NOW = Date.UTC(2026, 10, 3, 17, 0);
 const T2 = uuid(2, 1);
@@ -276,4 +280,33 @@ test("zero timers at rest once a search settles", async () => {
   expect(vi.getTimerCount()).toBe(0);
   await act(() => vi.advanceTimersByTimeAsync(5000));
   expect(vi.getTimerCount()).toBe(0);
+});
+
+test("under StrictMode (main.tsx's), the results mounting with the first word typed still show its answer", async () => {
+  const transport = new FakeTransport({
+    next: fakeNext({ matters: () => [detailed(THE_MATTER)], threads: () => [summary()] }),
+    query: (q) => {
+      if (searchOf(q) !== undefined) return page([said()]);
+      throw new Error("not scripted");
+    },
+  });
+  connectRoom(transport, { language: "en" });
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  try {
+    await act(async () =>
+      root.render(
+        <StrictMode>
+          <Room transport={transport} />
+        </StrictMode>,
+      ),
+    );
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    await find("surety");
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(results()?.textContent).toContain("Bail conditions");
+  } finally {
+    await act(async () => root.unmount());
+  }
 });
