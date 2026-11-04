@@ -40,7 +40,9 @@ pub(crate) const REMOTE_HINTS: [&str; 4] = [
 
 /// The address the fake's login calls `$BROWSER` with, and the one it prints for the paste
 /// route.
+#[cfg(unix)]
 pub(crate) const BROWSER_URL: &str = "https://claude.com/cai/oauth/authorize?fake=1";
+#[cfg(unix)]
 pub(crate) const PRINTED_URL: &str = "https://claude.com/cai/oauth/authorize?redirect_uri=https://platform.claude.com/oauth/code/callback";
 
 pub(crate) fn claude() -> AgentId {
@@ -354,6 +356,7 @@ impl Fixture {
 
     /// From now on, runs whose arguments hold `word` (`app-server`, `status`) never answer
     /// (Unix: they run `/bin/sleep`); `None` lets them run again.
+    #[cfg(unix)]
     pub(crate) fn stall(&self, word: Option<&str>) {
         *lock(&self.stall) = word.map(str::to_owned);
     }
@@ -400,11 +403,13 @@ impl Fixture {
     }
 
     /// `<data_dir>/agents/signin`.
+    #[cfg(unix)]
     pub(crate) fn signin_folder(&self) -> PathBuf {
         self.data.path().join("agents/signin")
     }
 
     /// The URL files in the sign-in folder now (every file but the shim).
+    #[cfg(unix)]
     pub(crate) fn url_files(&self) -> Vec<PathBuf> {
         let Ok(entries) = std::fs::read_dir(self.signin_folder()) else {
             return Vec::new();

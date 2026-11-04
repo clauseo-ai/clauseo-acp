@@ -100,8 +100,8 @@ impl Ring {
         self.bytes.extend(tail);
     }
 
-    /// Its length in bytes.
-    #[cfg(test)]
+    /// Its length in bytes (the ring tests run on Unix).
+    #[cfg(all(test, unix))]
     pub(crate) fn len(&self) -> usize {
         self.bytes.len()
     }

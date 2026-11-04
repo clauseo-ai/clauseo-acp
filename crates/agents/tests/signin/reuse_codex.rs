@@ -12,7 +12,9 @@ use clauseo_agents::{
     codex_link_holds, codex_login_shared, same_file, unlink_reused_login,
 };
 
-use crate::support::{Events, Fixture, Launch, claude, codex, eventually, now};
+#[cfg(unix)]
+use crate::support::claude;
+use crate::support::{Events, Fixture, Launch, codex, eventually, now};
 
 /// Codex's login file's name. Tests may name it; `src` names it only in `signin/reuse.rs`.
 const LOGIN_FILE: &str = "auth.json";
@@ -374,6 +376,7 @@ fn nothing_reused(fx: &Fixture) -> bool {
 }
 
 /// Waits until `count` app-servers have started.
+#[cfg(unix)]
 fn until_app_servers(fx: &Fixture, count: usize) {
     eventually("an app-server started", || {
         fx.codex_runs(&["app-server"]).len() >= count
