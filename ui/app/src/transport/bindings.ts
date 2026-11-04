@@ -9,7 +9,8 @@ export const commands = {
 	/**
 	 *  Runs a command. Refuses `AnswerPermission` (that goes through `answer_permission`) and a
 	 *  `CreateMatter` whose folder ref this run's `pick_folder` did not issue; from the settings
-	 *  window, everything but `SetUiSettings` and `SetToolSettings`.
+	 *  window, everything but `SetUiSettings`, `SetToolSettings`, `SetPrivacySettings` and
+	 *  `RefreshLimits`; from `main`, `SetToolSettings` and `SetPrivacySettings`.
 	 */
 	dispatch: (command: CommandEnvelope) => typedError<CommandOutcome, HostError>(__TAURI_INVOKE("dispatch", { command })),
 	/**  Answers a query; from the settings window, `GetSettings` only. */
