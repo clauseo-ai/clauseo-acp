@@ -493,15 +493,19 @@ pub(super) fn start_job<T: Timer + Send + Sync + 'static>(worker: &Worker<T>, st
     }
 }
 
-/// The shim on macOS and Linux; none on Windows, where Claude opens its own tab.
+/// The shim on macOS and Linux.
+#[cfg(unix)]
 fn shim_script(config: &AgentsConfig) -> std::io::Result<Option<PathBuf>> {
-    #[cfg(unix)]
-    {
-        crate::signin::shim::install(&config.data_dir).map(Some)
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = config;
-        Ok(None)
-    }
+    crate::signin::shim::install(&config.data_dir).map(Some)
+}
+
+/// None on Windows, where Claude opens its own tab.
+#[cfg(not(unix))]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "the Unix version's signature, which can fail; one call site serves both"
+)]
+fn shim_script(config: &AgentsConfig) -> std::io::Result<Option<PathBuf>> {
+    let _ = config;
+    Ok(None)
 }
