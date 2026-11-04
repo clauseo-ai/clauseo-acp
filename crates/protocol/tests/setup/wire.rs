@@ -162,24 +162,29 @@ fn a_command_refuses_unknown_fields_commands_and_bad_agents() {
 
 #[test]
 fn a_secret_refuses_empty_and_overlong_text_without_quoting_it() {
-    let long = "k".repeat(MAX_SECRET_BYTES + 1);
-    for text in [String::new(), long.clone()] {
+    // A recognisable start, so an error quoting any part of the text shows.
+    let long = format!("sk-{}", "k".repeat(MAX_SECRET_BYTES - 2));
+    assert_eq!(long.len(), MAX_SECRET_BYTES + 1);
+    for (text, quoted) in [("", "\"\""), (long.as_str(), "sk-k")] {
         let json = format!(r#"{{"set_agent_key":{{"agent":"claude-acp","key":"{text}"}}}}"#);
-        let (from_json, from_packed) = decode_both::<SetupCommand>(&json);
-        for error in [from_json.unwrap_err(), from_packed.unwrap_err()] {
+        let from_json = serde_json::from_str::<SetupCommand>(&json).unwrap_err();
+        let shown = [from_json.to_string(), format!("{from_json:?}")];
+        let packed = serde_json::from_str::<serde_json::Value>(&json).unwrap();
+        let packed = rmp_serde::to_vec_named(&packed).unwrap();
+        let from_packed = rmp_serde::from_slice::<SetupCommand>(&packed).unwrap_err();
+        let shown_packed = [from_packed.to_string(), format!("{from_packed:?}")];
+        for error in shown.iter().chain(&shown_packed) {
             assert!(
                 error.contains("a secret must be 1 to 4096 bytes"),
                 "{error}"
             );
-            assert!(
-                text.is_empty() || !error.contains(&long),
-                "the error quotes the key"
-            );
+            assert!(!error.contains(quoted), "the error quotes the key: {error}");
         }
     }
     let full = "k".repeat(MAX_SECRET_BYTES);
     assert_eq!(secret(&full).expose(), full);
     assert!(Secret::new(Zeroizing::new(String::new())).is_none());
+    assert!(Secret::new(Zeroizing::new(long)).is_none());
 }
 
 #[test]

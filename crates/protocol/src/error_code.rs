@@ -162,8 +162,8 @@ error_codes! {
     AgentInstallBlocked = "agent.install_blocked", retryable: false, meaning: "A proxy or \
         firewall blocked the agent's download: a 403 or 407 from a proxy, a TLS failure, or a web \
         page where a file should be.";
-    AgentInstallDiskFull = "agent.install_disk_full", retryable: false, meaning: "Too little free \
-        space for the agent's install; space must be freed first.";
+    AgentInstallDiskFull = "agent.install_disk_full", retryable: true, meaning: "Too little free \
+        space for the agent's install; a retry succeeds once space is freed.";
     AgentInstallFailed = "agent.install_failed", retryable: true, meaning: "The agent's install \
         failed for another reason, after three tries.";
     SigninCancelled = "signin.cancelled", retryable: false, meaning: "The lawyer cancelled the \

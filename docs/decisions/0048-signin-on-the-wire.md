@@ -105,7 +105,7 @@ closed: setup events are never logged, and window and desktop ship together.
 |---|---|---|
 | `agent.install_offline` | yes | S17 `FailureKind::Offline` (the `Waiting` state) |
 | `agent.install_blocked` | no | S17 `FailureKind::Blocked` |
-| `agent.install_disk_full` | no | S17 `FailureKind::DiskFull` |
+| `agent.install_disk_full` | yes (once space is freed) | S17 `FailureKind::DiskFull` |
 | `agent.install_failed` | yes | S17 `FailureKind::Failed` |
 | `signin.cancelled` | no | S18 `SigninCode::Cancelled` |
 | `signin.link_expired` | yes | S18 `SigninCode::LinkExpired` |
@@ -196,6 +196,8 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
 - `bindings.ts` changes when desktop regenerates it (P5a), and the UI's copy table needs words
   for the eleven new codes (the app thread).
 - `SettingsView` literals gain `plans`; the host fills it in P3 from the `plans` section.
+- **Not covered:** zeroing a `Secret` on drop does not reach the IPC buffer serde read it from
+  (Tauri's, and serde_json's input); only Clauseo's own copy is zeroed.
 - `setup` is outside `HostCommand`, so `cli` and `transport_ws` cannot install or sign in. A
   phone client that needs to would get its own record.
 
