@@ -60,10 +60,12 @@ threads-required = "num-cpus"
 
 # xtask's buildtime tests that run real cargo builds in a fresh worktree or target folder: a few
 # seconds on Linux, but on the loaded Windows runner four of them passed 30 s on both tries and
-# ejected #350's merge group (run 41871459180), as they had flaked on 11-03. Slow by design, not
-# flaky, so a longer bound instead of quarantine; 120 s still ends a hung one.
+# ejected #350's merge group (run 41871459180), as they had flaked on 11-03; core_io's clippy test,
+# which runs clippy on a planted crate, passed 30 s on both tries on Windows x64 in #379's run
+# (job 126782296836). Slow by design, not flaky, so a longer bound instead of quarantine; 120 s
+# still ends a hung one.
 [[profile.default.overrides]]
-filter = 'package(xtask) & test(/^buildtime::(worktree|profile)::tests::/)'
+filter = 'package(xtask) & (test(/^buildtime::(worktree|profile)::tests::/) | test(/^checks::core_io::tests::clippy::/))'
 slow-timeout = { period = "30s", terminate-after = 4 }
 
 [profile.ci]
