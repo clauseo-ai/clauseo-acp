@@ -39,7 +39,8 @@ export function Tooltip({
       setBoundary(within === undefined ? null : (el?.closest(within) ?? null)),
     [within],
   );
-  // it mounts in the page's layer, inside the main landmark, as menus do
+  // it mounts in the page's layer, inside the main landmark, as menus do, and stands in the floating layer, as the
+  // floating cards do: over the work surface and the folded rail's panel, which would cut it off
   const layer = useLayer();
   return (
     <BaseTooltip.Root>
@@ -50,6 +51,7 @@ export function Tooltip({
           sideOffset={8}
           collisionPadding={8}
           positionMethod={fixed ? "fixed" : "absolute"}
+          className="z-30"
           {...(boundary === null ? {} : { collisionBoundary: boundary })}
         >
           <BaseTooltip.Popup className={tip}>{content}</BaseTooltip.Popup>

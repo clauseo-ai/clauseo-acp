@@ -245,12 +245,21 @@ test("missing titles show the room's own words; an unknown matter's line keeps i
     "today",
   ]);
   expect(rows[2]?.textContent).toContain("Clauseo:");
-  // archived: the icon, named in words and in the tooltip, the word itself not shown
+  // archived: the icon, named in words and in the app's tooltip, the word itself not shown
   const mark = rows[1]?.querySelector(".room-find-archived");
-  expect(mark?.getAttribute("title")).toBe("Archived");
+  expect(mark?.hasAttribute("title")).toBe(false);
   expect(mark?.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
   expect(mark?.querySelector(".sr-only")?.textContent).toBe("Archived");
   expect(rows[0]?.querySelector(".room-find-archived")).toBeNull();
+  // the tooltip opens for the keyboard: the row's focus shows it, in the floating layer, outside the rail
+  await act(async () => {
+    (rows[1] as HTMLElement | undefined)?.focus();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  const tip = document.querySelector<HTMLElement>("[data-base-ui-portal] > [data-side]");
+  expect(tip?.textContent).toBe("Archived");
+  expect(tip?.closest(".room-rail")).toBeNull();
+  expect(tip?.classList.contains("z-30")).toBe(true);
 });
 
 test("nothing found says so, with the scope behind the info icon", async () => {
