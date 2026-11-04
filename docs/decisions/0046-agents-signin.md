@@ -136,10 +136,108 @@ fails if `reuse.rs` calls `File::open`, any `fs::read*`, `OpenOptions` or the cr
 `open_read`. The test builds the file names with `concat!`, so it never names them itself.
 `reuse.rs` does not exist yet; the test guards it from the start.
 
-### Claude's sign-in (to come: S18 piece 3)
+### The calls and the job model (S18 piece 3)
 
-Hidden `auth login --claudeai|--console`, the `BROWSER` shim, status polled every 1.5 s, the
-nudge at 30 s, expiry at 10 minutes, and the paste route.
+**The calls on `Agents`.** Each checks what it can at once and returns
+`Result<(), SigninError>`; the work runs on threads, as installs do:
+- `sign_in(agent, Method)`. `Method` is `ClaudeAi`, `Console`, `Browser` or `DeviceCode`.
+  Claude takes the first two, Codex the last two.
+- `cancel_sign_in(agent)`, `paste_code(agent, PasteCode)`, `sign_out(agent)`,
+  `check_status(agent)` (R20's "a window shows Plans") and `signin_state(agent)`.
+- `SigninError` covers an unknown agent, another agent's method, a flow not built yet (Codex
+  until piece 4), no home in `SigninConfig::homes`, an install not `Ready`, no run to cancel
+  or paste into, and a reused login asked to sign out. No variant carries a code, an email or a
+  path.
+- Which CLI signs an agent in comes from its id: `claude-acp` is Claude, `codex-acp` is Codex.
+
+**One job model** (`signin/job.rs`, `worker/signin.rs`), for every sign-in, sign-out and status
+check, and for the tasks pieces 4 to 6 add:
+- An agent has at most one job. The call reserves the agent's slot under a lock: a new ticket
+  (job number, agent, `Cancel`) and, for a sign-in, the channel pasted codes go down. Then the
+  worker thread starts the job on its own thread.
+- A sign-in or sign-out supersedes the running job: its cancel is set, which kills its child's
+  tree, and its events are dropped from then on. "Didn't open?" is a new `sign_in`, so
+  reopening is a new login run. A status check with a job running starts nothing, since that
+  job reports by itself.
+- `cancel_sign_in` sets the cancel but keeps the job the agent's. The job then reports
+  `Failed { code: Cancelled }` itself, once its child is killed and its URL file removed.
+- Every event goes through `SigninHub::emit_job`, which checks that the job is still the agent's.
+  The flow's last state ends the job. A flow that cannot tell (a status that timed out) ends it
+  with the state unchanged.
+- The job hands its task to the agent's flow. Codex's flow (piece 4) is one more arm of that
+  dispatch, with no change to the calls. Reuse (piece 5) adds its tasks and reads the recorded
+  source at the check point `sign_out` already has. The queued start (piece 6) reserves the
+  slot early and starts the same job once the install is ready and the network is up.
+- Sign-in jobs run beside installs and do not take the install job lock.
+
+### Claude's sign-in (S18 piece 3)
+
+**The run.** `node <adapter> --cli auth login --claudeai`, or `--console`, in the agent's home
+(created if missing; it is also the run's working folder), with the Own environment:
+`CLAUDE_CONFIG_DIR` set to the home, everything stripped as above, and `BROWSER` plus
+`CLAUSEO_SIGNIN_URL_FILE` on macOS and Linux. stdin stays open for pasted codes.
+
+**While it runs**, the state is `Waiting { since, nudge: false }`, and three things race:
+- **Polling.** Every 1.5 s, `--cli auth status --json` runs with a 5 s limit. The first that says
+  signed in ends everything: the login is killed and the state is
+  `SignedIn { email, plan: subscriptionType, source: Own, at }`.
+- **The nudge.** At 30 s, and not before, the state becomes `Waiting { since, nudge: true }`.
+- **The login run itself**, with a 10 minute limit.
+
+**How it ends:**
+- At 10 minutes the login is killed: `Failed { code: LinkExpired, at }`.
+- On Cancel the login is killed: `Failed { code: Cancelled, at }`.
+- If it exits 0, one more status run decides between `SignedIn` and `signin.failed`. The real CLI
+  exits 0 right after a good login, often before a poll has seen it.
+- If it exits otherwise, the result is `signin.cancelled` when an output line matched the cancel
+  pattern, and `signin.failed` if not. The pattern is a line holding both `OAuth error` and
+  `access_denied`, in any case.
+- In every case the child, the pollers with their limits, and the URL file are gone before the
+  last state is sent. So no status process runs after it, which the tests check by seeing that no
+  timer wait is left armed.
+- A status check (`check_status`) is one such status run: `SignedIn` or `SignedOut`, unchanged
+  when it cannot tell.
+
+**The paste route.** `paste_code` puts the code on the run's channel. The runner writes it, with
+a newline, to the login's stdin and drops it, zeroed. It appears in no event, state, `Debug` or
+error text. The prompt "Paste code here if prompted >" has no newline, so nothing waits on it.
+
+**Sign-out.** `--cli auth logout` with the Own environment, 30 s limit, then a status run: the
+result is `SignedOut`, or `SignedIn` if the account is still there. If status cannot tell, a
+logout that exited 0 is taken at its word. A login whose recorded source is `Reused` is never
+logged out. The call refuses it, and the job checks again before any run. Piece 5 makes that
+state reachable.
+
+**The shim** (`signin/shim.rs`, macOS and Linux). Before each Claude login, the worker thread
+writes `<data_dir>/agents/signin/browser` atomically, with mode 0700. It is an `sh` script that
+refuses to run without `CLAUSEO_SIGNIN_URL_FILE` and appends its first argument there as a line.
+Writing it on the one worker thread means two jobs never write it at once.
+
+Each run gets `<data_dir>/agents/signin/url-<agent>-<job>`:
+- It is made new with mode 0600 and `O_NOFOLLOW` through `write::create_private`, after a stale
+  one is removed.
+- It is removed when the run ends, whatever the outcome (`UrlFile`'s `Drop`).
+- The job reads it on every output line of the login and on every poll.
+- Each new line is sent once as `OpenUrl`, but only if it is `https://` with a host exactly in
+  the snapshot's sign-in hosts. A user name, a backslash, a space or control character, an IP
+  literal or a port that is not digits each refuse it.
+- An address read only from the login's output (Claude's paste route,
+  `redirect_uri=https://platform.claude.com/...`) is never sent.
+
+`claude.com` joins Claude's sign-in hosts: Claude Code's authorize page is
+`https://claude.com/cai/oauth/authorize`, the address the brief's fake opens. G7 row 1 confirms
+the list against a real sign-in.
+
+**Windows** has no shim until G7 row 1 says Claude honours `BROWSER` there. So no
+`CLAUSEO_SIGNIN_URL_FILE` and no URL file, an inherited `BROWSER` is left as the lawyer's own,
+Claude opens its own tab, and Clauseo sends no `OpenUrl` for Claude. Everything else (polling,
+nudge, expiry, Cancel, paste, sign-out) is the same.
+
+**Test seams.** `AgentsConfig::ready_for_tests` (test-support only) takes an agent as `Ready`
+with a given `Installed`, so the tests run `fake_agent` as the adapter. Their timer ends each
+wait by its duration, so the 30 s nudge and the 10 minute expiry are tested with no real time.
+The base environment seam stands in for "set in the test's own environment". The launcher is
+`PassthroughLauncher` with `clear_env`, as R20 must give. `fake_agent` must be built first.
 
 ### Codex's sign-in (to come: S18 piece 4)
 
@@ -153,7 +251,8 @@ rule.
 
 ### Worker wiring (to come: S18 piece 6)
 
-The calls on `Agents`, `Queued`, and status checks at start.
+`Queued` (a sign-in before the install is ready, or while offline; until then `NotReady` is
+refused) and status checks at start. The calls on `Agents` came with piece 3.
 
 ## Consequences
 
@@ -163,13 +262,18 @@ The calls on `Agents`, `Queued`, and status checks at start.
   `signin/run.rs`. Neither the ring nor `ExitReport::stderr_tail` is ever logged.
 - The marker file `login-source` cannot be read in `reuse.rs`, which may not call a read. It is
   read from another module.
-- The foundation modules carry an `#[expect(dead_code)]` until the flows call them. The expect
-  then fails and is removed with its allowlist lines.
+- The foundation items that only Codex's flow and reuse call carry an item-level
+  `#[expect(dead_code)]` until those pieces land. Each expect then fails and is removed with its
+  allowlist line.
+- The agent's home is created with `create_dir_all`, which follows a link already standing
+  there. The folder is under the trusted data folder, as the adapters are (0033).
 - For the security review (S18):
   - the env builder and its dependence on the caller's `clear_env` launcher;
   - the Windows `CreateFileW` handle with access 0, opened to read a file id;
   - `PasteCode`'s zeroing and `Debug`;
-  - the ring never logged.
+  - the ring never logged;
+  - the shim and the URL file (mode 0600, removed whatever the outcome), and the host check
+    before `OpenUrl`.
 - Not checked yet: `fileid.rs`'s Windows branch is written against `windows` 0.62.2 but was not
   built or run here. It needs `cargo nextest` on `clauseo-win-01`. On ReFS, a 64-bit file index
   may not be unique (`FILE_ID_INFO` holds 128 bits). The login files live on the system volume,
