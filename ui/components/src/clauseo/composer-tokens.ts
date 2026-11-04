@@ -28,8 +28,13 @@ import {
   type Token,
 } from "./composer-tokens-logic.ts";
 
-/** The curly quotes macOS's smart quotes put in place of a straight one. */
-const SMART_QUOTES = new Set(["\u2018", "\u2019", "\u201c", "\u201d"]);
+/** The straight quote each curly one macOS's smart quotes put in replaces. */
+const STRAIGHT: Readonly<Record<string, string>> = {
+  "\u201c": '"',
+  "\u201d": '"',
+  "\u2018": "'",
+  "\u2019": "'",
+};
 
 export type Tokens = {
   /** The tokens that count now, in order: those standing alone (one typed against is plain text while it is). */
@@ -138,13 +143,16 @@ export function holdTokens(
   };
 
   /** A replacement the system makes in a token is refused: macOS's smart quotes turn a quoted paper's closing `"`
-   * into `”` as the pick puts it in, inside the pick's own insertText, and the token is lost (WKWebView, #117 M5).
+   * into `”` as the pick puts it in, inside the pick's own insertText, or when a word is typed against it, and the
+   * token is lost (WKWebView, #117 M5).
    * The range isn't read from target ranges (a textarea's are no offsets in its value, and the run logged none): while
    * the pick's words stand in the field unread, a replacement can only be in them; otherwise it is the selection, as
    * WebKit selects what it replaces (Tamil99's vowel signs, a spelling fix). One that starts at or after a token's end is let be. */
   const onBeforeInput = (e: Event) => {
     const ev = e as InputEvent;
-    if (ev.inputType !== "insertReplacementText" || composing.current || ev.isComposing) return;
+    // Not composing.current: WebKit's smart quotes come after the composition's words are in and before its
+    // compositionend, flagged as no composition (the M5-hi log, step 10). An input method's own is flagged.
+    if (ev.inputType !== "insertReplacementText" || ev.isComposing) return;
     const p = pending;
     if (p !== null && field.value.slice(p.start, p.end) === p.text) {
       e.preventDefault();
@@ -154,19 +162,14 @@ export function holdTokens(
     const end = field.selectionEnd;
     if (field.value !== value) read(false);
     if (start === end) {
-      // A collapsed caret: WebKit's smart quotes asked with the caret after the space that follows the token, not on
-      // the quote it replaces (the M5-hi log: the quote at 37, the caret at [39, 39]). A curly quote replacing, with
-      // only spaces between a quoted token's closing `"` and the caret, can only be that quote: refused. Any other
-      // replacement at a collapsed caret is let be (Tamil99's vowel signs, a spelling fix after the words typed).
-      const text = field.value;
-      if (
-        SMART_QUOTES.has(ev.data ?? "") &&
-        tokens.some(
-          (t) =>
-            t.end <= start && text[t.end - 1] === '"' && text.slice(t.end, start).trim() === "",
-        )
-      )
-        e.preventDefault();
+      // A collapsed caret: WebKit's smart quotes ask with the caret after the words, not on the quote they replace
+      // (the M5-hi log: the quote at 37, the caret at [39, 39] after a space, or at [47, 47] after a word typed against
+      // it). A curly quote replaces the last straight one before the caret: refused when that one is a token's. Any
+      // other replacement at a collapsed caret is let be (Tamil99's vowel signs, a spelling fix, the lawyer's own quotes).
+      const straight = STRAIGHT[ev.data ?? ""];
+      const at =
+        straight === undefined || start === 0 ? -1 : field.value.lastIndexOf(straight, start - 1);
+      if (at >= 0 && tokens.some((t) => t.start <= at && at < t.end)) e.preventDefault();
       return;
     }
     if (tokens.some((t) => start < t.end && end > t.start)) e.preventDefault();
