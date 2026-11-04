@@ -1,28 +1,33 @@
-// A conversation's context menu's and a matter's menu's two items (U16b), loaded later: Snooze (until…), opening the
-// snooze menu's times beside it, and Mark as done (Mark all done).
+// A conversation's context menu's and a matter's menu's two items (U16b), loaded later: Snooze (Snooze until, for a
+// matter), opening the snooze menu's times beside it (its chevron says so, with no "…"), and Mark as done (Mark all
+// done; Mark as not done for the open conversation once done).
 import { Menu as BaseMenu } from "@base-ui/react/menu";
 import type { ReactNode } from "react";
 import { useLayer } from "../ui/layer-context.ts";
 import { MenuItem } from "../ui/menu.tsx";
 import { raised, row } from "../ui/recipes-overlays.ts";
-import { IconFold, IconSnooze, IconTick } from "../icons/icons.tsx";
+import { IconFold, IconSnooze, IconTick, IconUndo } from "../icons/icons.tsx";
 import { useDisplay } from "../lib/display.ts";
 import { tw } from "../lib/words-triage.ts";
+import { twl } from "../lib/words-triage-late.ts";
 
-/** A context menu's or a matter menu's two items: Snooze (until…), opening the times beside it, and Mark (all) done. */
 export function TriageItems({
   times,
   onDone,
   matter,
+  done = false,
 }: {
   /** The snooze menu's times. */
   times: ReactNode;
+  /** Mark (all) done pressed; with `done`, Mark as not done. */
   onDone: () => void;
   matter: boolean;
+  /** The conversation is done already: its second item is Mark as not done. */
+  done?: boolean;
 }) {
   const { lang } = useDisplay();
   const layer = useLayer();
-  const snooze = tw(lang, matter ? "Snooze until…" : "Snooze");
+  const snooze = matter ? twl(lang, "Snooze until") : tw(lang, "Snooze");
   return (
     <>
       <BaseMenu.SubmenuRoot>
@@ -38,8 +43,10 @@ export function TriageItems({
         </BaseMenu.Portal>
       </BaseMenu.SubmenuRoot>
       <MenuItem
-        label={tw(lang, matter ? "Mark all done" : "Mark as done")}
-        icon={<IconTick size={16} />}
+        label={
+          done ? twl(lang, "Mark as not done") : tw(lang, matter ? "Mark all done" : "Mark as done")
+        }
+        icon={done ? <IconUndo size={16} /> : <IconTick size={16} />}
         onClick={onDone}
       />
     </>

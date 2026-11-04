@@ -95,7 +95,7 @@ test("a snoozed row comes back at the first render after its time, and not befor
   expect(names(needs())).toEqual([C.name]);
   const shelf = rail()?.querySelector('[data-testid="rail-shelf"]');
   expect(shelf?.querySelector(".room-fold-count")?.textContent).toBe("1");
-  expect(shelf?.textContent).toContain("Next back 6:00 pm");
+  expect(shelf?.textContent).toContain("Next back 6:00\u00a0pm");
   vi.setSystemTime(NOW + HOUR - 1);
   await focusWindow();
   expect(names(needs())).toEqual([C.name]);
@@ -161,7 +161,7 @@ test("a snooze: one snooze_thread with its time, the line in the row's place unt
   await press(item("Tomorrow 9:00 am"));
   const until = Date.UTC(2026, 10, 4, 9, 0);
   expect(sent(transport, "snooze_thread")).toEqual([{ thread: T_A.thread, until }]);
-  expect(line()?.textContent).toBe("Snoozed until tomorrow 9:00 am Undo");
+  expect(line()?.textContent).toBe("Snoozed until tomorrow 9:00\u00a0am Undo");
   expect(titles()).not.toContain("Bail conditions");
   await act(async () => {
     transport.appEvent({
@@ -178,7 +178,7 @@ test("a snooze: one snooze_thread with its time, the line in the row's place unt
   expect(line()).toBeNull();
   const row = conversations().find((c) => c.textContent?.includes("Bail conditions"));
   expect(row?.querySelector(".room-conv-mark")).not.toBeNull();
-  expect(row?.getAttribute("title")).toContain("Snoozed until tomorrow 9:00 am");
+  expect(row?.getAttribute("title")).toContain("Snoozed until tomorrow 9:00\u00a0am");
 });
 
 test("Undo sends snooze_thread with no time, and the row is back", async () => {

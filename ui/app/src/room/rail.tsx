@@ -40,7 +40,7 @@ import { LazyFindResults, preloadFind } from "./find-load.ts";
 import { clockOf, dayOf, groupMatters } from "./when.ts";
 import { matterSnooze, snoozedShelf, splitConversations, useSnooze } from "./rail-snooze.tsx";
 import { preloadSnooze } from "./snooze-load.ts";
-import { useSweep } from "./sweep.ts";
+import { useRailClock } from "./sweep.ts";
 
 /** A row's status as MatterRow takes it: the state, and its moment as words. Working never names a time (no end
  * estimates), so it says "Answering."; a stop or a reset on another day gives its day. */
@@ -158,9 +158,10 @@ export function RoomRail({
   const every = useSyncExternalStore(threads.subscribe, threads.view, threads.view);
   const zone = view.zone;
   // the last moment the pointer came or went, or the window came back
-  const [stamp, setStamp] = useState(0);
+  const [stamp, setStamp] = useRailClock(transport, zone);
+  // whether the focus is inside the rail: rows hold their groups while it is, as under the pointer
+  const [focused, setFocused] = useState(false);
   const now = Math.max(view.now, every.now, stamp);
-  useSweep(transport, zone, setStamp);
   const snooze = useSnooze(transport);
   const sc = { snooze, now, zone, lang: w.lang };
   const detailed = view.detailed;
@@ -173,7 +174,8 @@ export function RoomRail({
     status: view.status,
     lists: every.lists,
     open: view.open?.matter ?? null,
-    over,
+    // rows hold their groups under the pointer, with the focus in the rail, and while a line stands in a row's place
+    over: over || focused || snooze.lines.size > 0,
     now,
   });
   const room = { matters, conversations };
@@ -207,7 +209,7 @@ export function RoomRail({
       ...(behind === null ? {} : { where: behind.title ?? untitled }),
       testIds: { row: "matter-row" },
       // the open matter's conversations, once its list is in
-      ...matterSnooze(sc, m, every.lists.get(m.matter)),
+      ...matterSnooze(sc, m, every.lists.get(m.matter), placed.group.get(m.matter)),
       ...(split !== null
         ? {
             conversations: split.rows,
@@ -359,20 +361,35 @@ export function RoomRail({
             ),
           }
         : {})}
-      shelf={snoozedShelf(sc, view.matters, every.lists, {
-        conversation: (matter, thread) => {
-          openConversation(room, matter, thread);
-          onConversation();
+      shelf={snoozedShelf(
+        sc,
+        view.matters,
+        every.lists,
+        {
+          conversation: (matter, thread) => {
+            openConversation(room, matter, thread);
+            onConversation();
+          },
+          matter: (id) => openScratch(id)(),
         },
-        matter: (id) => openScratch(id)(),
-      })}
+        placed.group,
+      )}
       onHover={(on) => {
         setOver(on);
         setStamp(Date.now());
         if (on) void preloadSnooze();
-        else snooze.leave();
+        else {
+          // the pointer leaving lets the rows go where they now belong, as before; the focus holds them only from the
+          // keyboard
+          setFocused(false);
+          snooze.leave();
+        }
       }}
-      onFocusLeave={snooze.leave}
+      onFocusMove={(inside, elsewhere) => {
+        setFocused(inside);
+        if (inside) void preloadSnooze();
+        if (elsewhere) snooze.leave();
+      }}
       onEscape={onEscape}
       {...(onSettings === undefined ? {} : { onSettings })}
       testIds={{ newMatter: "new-matter", find: "find", settings: "open-settings" }}

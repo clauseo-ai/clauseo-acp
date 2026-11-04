@@ -103,17 +103,32 @@ const triageHost = (): FakeTransport => {
   });
 };
 
-export type Act = { arm: string } | { press: string } | { item: string } | { focus: string };
+export type Act =
+  | { arm: string }
+  | { press: string }
+  | { item: string }
+  | { focus: string }
+  | { hover: string };
 
 /** The room, then `acts` taken as the lawyer would, each once the last has settled: the pointer coming to the
- * conversation titled `arm`, a press on `press` (a selector), the menu row reading `item`, or the focus on `focus`. */
+ * conversation titled `arm`, a press on `press` (a selector), the menu row reading `item`, the focus on `focus`, or the
+ * pointer resting on `hover` (its tooltip open). */
 export function RoomTriage({ acts = [] }: { acts?: readonly Act[] }) {
   const taken = useRef(false);
   useEffect(() => {
     // once, though Strict Mode runs the effect twice
     if (taken.current) return;
     taken.current = true;
-    const settle = () => new Promise((resolve) => setTimeout(resolve, 120));
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 150));
+    // what an act names may come with the later chunk: waited for, up to 5 s
+    const found = async (selector: string) => {
+      for (let tries = 0; tries < 50; tries += 1) {
+        const el = document.querySelector<HTMLElement>(selector);
+        if (el !== null) return el;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      return null;
+    };
     void (async () => {
       await settle();
       for (const act of acts) {
@@ -121,12 +136,36 @@ export function RoomTriage({ acts = [] }: { acts?: readonly Act[] }) {
           [...document.querySelectorAll(".room-conv-item")]
             .find((li) => li.querySelector(".room-conv-title")?.textContent === act.arm)
             ?.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
-        else if ("press" in act) document.querySelector<HTMLElement>(act.press)?.click();
-        else if ("focus" in act) document.querySelector<HTMLElement>(act.focus)?.focus();
-        else
-          [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
-            .find((i) => i.textContent?.includes(act.item))
-            ?.click();
+        else if ("press" in act) (await found(act.press))?.click();
+        else if ("focus" in act) (await found(act.focus))?.focus();
+        else if ("hover" in act) {
+          // the pointer comes to it and rests there: its tooltip opens after the page's delay
+          const el = await found(act.hover);
+          const box = el?.getBoundingClientRect();
+          const at = { clientX: (box?.x ?? 0) + 4, clientY: (box?.y ?? 0) + 4 };
+          for (const type of ["pointerover", "pointerenter", "pointermove"])
+            el?.dispatchEvent(
+              new PointerEvent(type, {
+                ...at,
+                pointerType: "mouse",
+                bubbles: type !== "pointerenter",
+              }),
+            );
+          for (const type of ["mouseover", "mouseenter", "mousemove"])
+            el?.dispatchEvent(new MouseEvent(type, { ...at, bubbles: type !== "mouseenter" }));
+          await new Promise((resolve) => setTimeout(resolve, 900));
+        } else {
+          for (let tries = 0; tries < 50; tries += 1) {
+            const row = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((i) =>
+              i.textContent?.includes(act.item),
+            );
+            if (row !== undefined) {
+              row.click();
+              break;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 100));
+          }
+        }
         await settle();
       }
     })();

@@ -141,7 +141,7 @@ export function IconArrowRight(props: IconProps) {
   return <IconTurnToIt {...props} />;
 }
 
-/** Send, the arrow up, not used in the room yet (source: arrowUp) */
+/** Wake now, on the Snoozed shelf: back up into the list (cut for Send, not used for it yet) (source: arrowUp) */
 export function IconArrowUp(props: IconProps) {
   return (
     <Icon {...props}>

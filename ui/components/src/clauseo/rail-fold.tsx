@@ -33,7 +33,7 @@ export function Fold({
           aria-expanded={open}
           onClick={() => setOpen(!open)}
         >
-          <IconFold size={14} className="room-fold-icon" />
+          <IconFold size={13} className="room-fold-icon" />
           <span className="room-fold-name deva-nudge">{name}</span>
           <span className="room-fold-count">{count}</span>
         </button>

@@ -10,7 +10,9 @@ import {
   IconNeedsPermission,
   IconPlanLimit,
   IconQuestion,
+  IconSnooze,
   IconStop,
+  IconTick,
 } from "../icons/icons.tsx";
 import type { ConversationState, MatterState } from "./rail-words.ts";
 
@@ -42,3 +44,9 @@ export const CONVERSATION_MARK: Record<Exclude<ConversationState, "idle">, Mark>
   waiting: { icon: IconChecking, waits: false },
   failed: { icon: IconFailed, waits: false },
 };
+
+/** Snoozed (U16b): the alarm clock, in the line's own tone. */
+export const SNOOZED: Mark = { icon: IconSnooze, waits: false };
+
+/** Done (U16b): the tick, on the open conversation once done. */
+export const DONE: Mark = { icon: IconTick, waits: false };

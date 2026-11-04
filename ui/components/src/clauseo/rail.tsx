@@ -193,7 +193,7 @@ export function Rail({
   list,
   onHover,
   shelf,
-  onFocusLeave,
+  onFocusMove,
 }: {
   groups: readonly RailGroup[];
   pinned?: readonly MatterRowProps[];
@@ -233,8 +233,9 @@ export function Rail({
   onHover?: (over: boolean) => void;
   /** Optional (U16b): the Snoozed shelf, at the foot of the groups, above Scratch matter. */
   shelf?: ReactNode;
-  /** Optional (U16b): the focus left the rail for another control on the page (not for one of its menus). */
-  onFocusLeave?: () => void;
+  /** Optional (U16b): the focus came into the rail (true), or left it (false), for another control on the page
+   * (`elsewhere`) or for none; going into one of its menus is not leaving. */
+  onFocusMove?: (inside: boolean, elsewhere: boolean) => void;
 }) {
   const w = useWords();
   const room = useRoom();
@@ -386,15 +387,16 @@ export function Rail({
       onPointerUp={() => {
         pressing.current = false;
       }}
+      onFocus={onFocusMove === undefined ? undefined : () => onFocusMove(true, false)}
       onBlur={(e) => {
         const to = e.relatedTarget;
+        const element = to instanceof Element;
         if (
-          onFocusLeave !== undefined &&
-          to instanceof Element &&
-          nav.current?.contains(to) === false &&
-          to.closest(MENU) === null
+          onFocusMove === undefined ||
+          (element && (nav.current?.contains(to) === true || to.closest(MENU) !== null))
         )
-          onFocusLeave();
+          return;
+        onFocusMove(false, element);
       }}
       onKeyDown={(e) => {
         // a menu's popup sits outside the rail on the page, though inside it in React: its Escape is its own

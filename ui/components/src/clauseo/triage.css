@@ -2,7 +2,8 @@
    the snooze picker, the folds (the Snoozed shelf and the Done fold) and their open rows. After matters.css, whose
    rows these sit on. */
 @layer components {
-  /* the two buttons stand over the line's end, hidden until the pointer or the focus is on the row, or its menu is open */
+  /* the two buttons stand over the line's end, hidden until the pointer or the focus is on the row, or its menu is open.
+     Nothing moves when they show: no padding or width changes; the words under them fade out instead */
   .room-conv-acts {
     position: absolute;
     top: 0;
@@ -22,8 +23,20 @@
   .room-conv-item:has(.room-conv-acts):is(:hover, :focus-within) .room-conv-mark {
     visibility: hidden;
   }
-  .room-conv-item:has(.room-conv-acts):is(:hover, :focus-within) .room-conv {
-    padding-right: calc(2 * var(--size-control-small) + var(--s1-5));
+  .room-conv-item:has(.room-conv-acts):is(:hover, :focus-within) .room-conv-line {
+    mask-image: linear-gradient(
+      to left,
+      transparent calc(2 * var(--size-control-small) + var(--s0-5)),
+      currentColor calc(2 * var(--size-control-small) + var(--s4))
+    );
+  }
+  /* a shelf row's or a done row's one button */
+  .room-one-act:is(:hover, :focus-within) :is(.room-shelf-row > span, .room-conv-line) {
+    mask-image: linear-gradient(
+      to left,
+      transparent calc(var(--size-control-small) + var(--s0-5)),
+      currentColor calc(var(--size-control-small) + var(--s4))
+    );
   }
 
   /* in a row's place: what happened, and Undo */
@@ -38,6 +51,8 @@
   }
   .room-line-undo {
     @apply text-small font-chip text-primary;
+    /* its focus ring clears the letters */
+    padding: 0 var(--s1);
     text-decoration: underline;
     text-underline-offset: var(--ins-offset);
     border-radius: var(--r-small);
@@ -106,6 +121,16 @@
     @apply text-small text-quiet;
     padding: 0 var(--s3) 0 calc(var(--s3) + var(--size-icon-line) + var(--s1-5));
   }
+  /* an explanation's info icon, on the least target */
+  .room-info {
+    display: inline-grid;
+    place-items: center;
+    width: var(--size-target);
+    height: var(--size-target);
+    color: var(--quiet);
+    border-radius: var(--r-round);
+    @apply is-hover:text-primary;
+  }
   .room-fold-info {
     padding: var(--s0-5) var(--s3);
   }
@@ -127,9 +152,6 @@
     padding: var(--s1-5) var(--s3);
     border-radius: var(--r-tile);
     @apply is-hover:bg-hover is-active:bg-press;
-  }
-  .room-conv-item:has(.room-conv-acts):is(:hover, :focus-within) .room-shelf-row {
-    padding-right: calc(var(--size-control-small) + var(--s2));
   }
   .room-shelf-until {
     @apply text-small text-muted;

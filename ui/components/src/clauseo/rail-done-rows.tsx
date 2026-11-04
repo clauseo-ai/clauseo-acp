@@ -17,7 +17,7 @@ export function DoneRows({ rows }: { rows: readonly DoneRow[] }) {
     <>
       <ul className="room-conv-list">
         {rows.map((r) => (
-          <li key={r.id} className="room-conv-item" data-testid="done-row">
+          <li key={r.id} className="room-conv-item room-one-act" data-testid="done-row">
             <button type="button" className="room-conv" title={r.title} onClick={r.onOpen}>
               <span className="room-conv-line">
                 <span className="room-conv-title" lang={langOfText(r.title)}>
@@ -42,7 +42,10 @@ export function DoneRows({ rows }: { rows: readonly DoneRow[] }) {
         ))}
       </ul>
       <RailInfo
-        words={twl(lang, "Read conversations with nothing waiting move here each morning.")}
+        words={twl(
+          lang,
+          "Conversations you've read, with nothing waiting, move here each morning.",
+        )}
       />
     </>
   );

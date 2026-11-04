@@ -55,6 +55,7 @@ import { kindOf, knownPlan } from "./agent.ts";
 import { AgentPlanContext, useThreadAgentName } from "./thread/agent-plan.ts";
 import { Conversations } from "./conversations.ts";
 import { AllThreads } from "./all-threads.ts";
+import { handWaits } from "./triage.ts";
 import { LivePlan } from "./limits/live-plan.tsx";
 import { Matters, type MattersView } from "./matters.ts";
 import { AnswerHost, quietly, type ListedPapers } from "./open.ts";
@@ -126,10 +127,14 @@ function useTransportStandIns(transport: HostTransport): StandIns {
 }
 
 /** Whether a matter the lawyer isn't looking at waits on them, with a question or for permission: Matters' dot. The
- * limit stays muted (QU.6 (ii)): nothing to choose, only a time to wait for. */
-const railWaits = (view: MattersView): boolean =>
-  [...view.status].some(
-    ([id, s]) => id !== view.open?.matter && (s.state === "question" || s.state === "permission"),
+ * limit stays muted (QU.6 (ii)): nothing to choose, only a time to wait for. A snoozed or done conversation's wait
+ * doesn't count (U16b, triage.ts's handWaits). */
+const railWaits = (view: MattersView, threads: AllThreads): boolean =>
+  handWaits(
+    view.status,
+    view.open?.matter ?? null,
+    threads.view().lists,
+    Math.max(view.now, threads.view().now),
   );
 
 /** A file's name, the last part of its path in the matter folder. */
@@ -198,6 +203,8 @@ function RoomFrame({
   const [threads] = useState(() => new AllThreads(matters.next));
   useEffect(() => threads.start(), [threads]);
   const view = useSyncExternalStore(matters.subscribe, matters.view, matters.view);
+  const waiting = () => railWaits(view, threads);
+  const waits = useSyncExternalStore(threads.subscribe, waiting, waiting);
   const talks = useSyncExternalStore(
     conversations.subscribe,
     conversations.view,
@@ -372,7 +379,7 @@ function RoomFrame({
           if (versions.open) versions.close();
           setRailOpen((open) => !open);
         }}
-        railWaits={railWaits(view)}
+        railWaits={waits}
         railRef={railToggle}
         testIds={{ title: "matter", rail: "rail-toggle" }}
       />

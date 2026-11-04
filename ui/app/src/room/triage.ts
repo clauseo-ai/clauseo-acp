@@ -83,20 +83,44 @@ export function wholly(
   return until;
 }
 
+/** Whether a matter other than `open` waits on the lawyer's hand, a question or a permission, by its status (H5),
+ * where no conversation of its list waits, or where every one that does is snoozed or done. */
+export function handWaits(
+  status: ReadonlyMap<MatterId, RowStatus>,
+  open: MatterId | null,
+  lists: ReadonlyMap<MatterId, readonly ThreadSummary[]>,
+  now: Timestamp,
+): boolean {
+  for (const [id, s] of status) {
+    if (id === open || (s.state !== "question" && s.state !== "permission")) continue;
+    const list = lists.get(id);
+    if (
+      list === undefined ||
+      list.some((t) => t.status === "needs_you" && t.done !== true && !snoozed(t, now))
+    )
+      return true;
+  }
+  return false;
+}
+
 /** One row of the Snoozed shelf: a matter snoozed whole (thread null) or a conversation. */
 export type Shelved = { matter: MatterInfo; thread: ThreadSummary | null; until: Timestamp };
 
 /** The Snoozed shelf, the next back first: each matter snoozed whole as one row, else each snoozed conversation (the
- * scratch matter's one by one). */
+ * scratch matter's one by one). A matter snoozed whole that stays in a group (`group`: Pinned, or held there) isn't on
+ * the shelf at all: its row says it's snoozed. */
 export function shelf(
   matters: readonly MatterInfo[],
   lists: ReadonlyMap<MatterId, readonly ThreadSummary[]>,
   now: Timestamp,
+  group: ReadonlyMap<MatterId, Group> = new Map(),
 ): Shelved[] {
   const rows: Shelved[] = [];
   for (const matter of matters) {
     const list = lists.get(matter.matter) ?? [];
     const whole = matter.kind === "scratch" ? null : wholly(list, now);
+    const placed = group.get(matter.matter);
+    if (whole !== null && placed !== undefined && placed !== "snoozed") continue;
     if (whole !== null) rows.push({ matter, thread: null, until: whole });
     else
       for (const t of list)
