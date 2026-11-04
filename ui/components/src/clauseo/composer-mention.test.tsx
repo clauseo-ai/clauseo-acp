@@ -4,11 +4,9 @@
 // picks with Enter into a token (`@path`, quoted when the path holds a space), never opens while an input method
 // composes, and tells the handle which papers the field's tokens mention: each once, in order, none once deleted, again
 // after undo.
-import { act, createRef, StrictMode, type ComponentType, type ReactNode } from "react";
+import { act, createRef, type ComponentType } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, expect, test, vi } from "vitest";
-import { settled } from "../lib/late.ts";
-import { DEFAULT_DISPLAY, showDisplay } from "../lib/display.ts";
+import { expect, test, vi } from "vitest";
 import type { IconProps } from "../icons/icon.tsx";
 import {
   IconFileEmail,
@@ -17,161 +15,29 @@ import {
   IconFilePdf,
   IconFileWord,
 } from "../icons/icons.tsx";
-import { TooltipProvider } from "../ui/tooltip.tsx";
+import type { ComposerHandle, MentionList } from "./composer.tsx";
 import {
-  Composer,
-  type ComposerHandle,
-  type ComposerProps,
-  type MentionItem,
-  type MentionList,
-  type Mentions,
-} from "./composer.tsx";
-import { RoomScopeProvider } from "./room-scope-provider.tsx";
-
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-if (!("fonts" in document)) {
-  Object.defineProperty(document, "fonts", {
-    value: { ready: Promise.resolve(), status: "loaded", load: async () => [] },
-  });
-}
-
-const paper = (id: string, path: string): MentionItem => {
-  const cut = path.lastIndexOf("/");
-  return {
-    id,
-    label: cut === -1 ? path : path.slice(cut + 1),
-    detail: cut === -1 ? undefined : path.slice(0, cut),
-    text: path,
-  };
-};
-const PAPERS: MentionItem[] = [
-  paper("f-1", "Lease deed.pdf"),
-  paper("f-2", "Pleadings/Board minutes.pdf"),
-  paper("f-3", "Notice.pdf"),
-];
-
-/** A room's papers: answers `list` (or what `answer` gives), counting the loads. */
-function source(list: MentionList | (() => Promise<MentionList>) = { items: PAPERS }) {
-  const load = vi.fn(typeof list === "function" ? list : async () => list);
-  const mentions: Mentions = { load };
-  return { mentions, load };
-}
-
-let host: HTMLDivElement | null = null;
-let root: ReturnType<typeof createRoot> | null = null;
-const wrap = (node: ReactNode) => (
-  <StrictMode>
-    <TooltipProvider>
-      <RoomScopeProvider>{node}</RoomScopeProvider>
-    </TooltipProvider>
-  </StrictMode>
-);
-const composer = (p: Partial<ComposerProps>) => (
-  <Composer
-    took={null}
-    plan=""
-    hint={null}
-    testIds={{ field: "composer", menu: "composer-menu", menuItem: "composer-menu-item" }}
-    {...p}
-  />
-);
-async function mount(node: ReactNode) {
-  showDisplay({ ...DEFAULT_DISPLAY, motion: "reduced" });
-  host = document.createElement("div");
-  document.body.append(host);
-  root = createRoot(host);
-  await act(async () => root?.render(wrap(node)));
-}
-
-afterEach(async () => {
-  await act(async () => root?.unmount());
-  host?.remove();
-  root = null;
-  showDisplay(DEFAULT_DISPLAY);
-  Reflect.deleteProperty(document, "execCommand");
-  vi.useRealTimers();
-  vi.restoreAllMocks();
-});
-
-const field = () => document.querySelector<HTMLTextAreaElement>('[data-testid="composer"]')!;
-const menu = () => document.querySelector<HTMLElement>('[data-testid="composer-menu"]');
-const rows = () => [
-  ...document.querySelectorAll<HTMLElement>('[data-testid="composer-menu-item"]'),
-];
-const names = () => rows().map((r) => r.querySelector("bdi")?.textContent);
-/** The plane's lines under the rows: loading, failed, none, the count past 50, a list that stops short. */
-const notes = () => [...document.querySelectorAll(".fixed.z-20 p")].map((p) => p.textContent);
-const said = () => document.querySelector('[aria-live="polite"]')?.textContent;
-
-const focus = async () => {
-  await act(async () => field().focus());
-  await act(settled);
-};
-const edit = (value: string, init: { inputType?: string; isComposing?: boolean } = {}) =>
-  act(async () => {
-    const a = field();
-    Reflect.set(HTMLTextAreaElement.prototype, "value", value, a);
-    a.setSelectionRange(value.length, value.length);
-    a.dispatchEvent(
-      new InputEvent("input", {
-        bubbles: true,
-        inputType: init.inputType ?? "insertText",
-        isComposing: init.isComposing ?? false,
-      }),
-    );
-  });
-const key = (k: string, init: KeyboardEventInit = {}) =>
-  act(async () => {
-    const e = new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true, ...init });
-    field().dispatchEvent(e);
-    return e.defaultPrevented;
-  });
-const put = (at: number) =>
-  act(async () => {
-    field().setSelectionRange(at, at);
-    document.dispatchEvent(new Event("selectionchange"));
-  });
-const compose = (kind: "compositionstart" | "compositionend") =>
-  act(async () => {
-    field().dispatchEvent(new CompositionEvent(kind, { bubbles: true, data: "" }));
-  });
-
-/** A Range's rects as a page would give them (composer-tokens.test.tsx's): one line, 10 px a character. */
-function lay() {
-  vi.spyOn(Range.prototype, "getClientRects").mockImplementation(function (this: Range) {
-    const r = new DOMRect(this.startOffset * 10, 0, (this.endOffset - this.startOffset) * 10, 26);
-    return [r] as unknown as DOMRectList;
-  });
-}
-const boxes = () => [...document.querySelectorAll(".room-field-tokens .room-token")];
-
-/** The engine's own editing with its undo stack (composer-tokens.test.tsx's). */
-function engine() {
-  const back: string[] = [];
-  const set = (a: HTMLTextAreaElement, v: string, at: number, inputType: string) => {
-    Reflect.set(HTMLTextAreaElement.prototype, "value", v, a);
-    a.setSelectionRange(at, at);
-    a.dispatchEvent(new InputEvent("input", { bubbles: true, inputType }));
-  };
-  const exec = (command: string, _ui?: boolean, value?: string) => {
-    const a = document.activeElement;
-    if (!(a instanceof HTMLTextAreaElement)) return false;
-    const insert = command === "delete" ? "" : (value ?? "");
-    const s = a.selectionStart;
-    back.push(a.value);
-    const kind = command === "delete" ? "deleteContentBackward" : "insertText";
-    set(a, a.value.slice(0, s) + insert + a.value.slice(a.selectionEnd), s + insert.length, kind);
-    return true;
-  };
-  Object.defineProperty(document, "execCommand", { value: exec, configurable: true });
-  return {
-    undo: () =>
-      act(async () => {
-        const v = back.pop();
-        if (v !== undefined) set(field(), v, v.length, "historyUndo");
-      }),
-  };
-}
+  unmount,
+  paper,
+  PAPERS,
+  source,
+  composer,
+  mount,
+  field,
+  menu,
+  rows,
+  names,
+  notes,
+  said,
+  focus,
+  edit,
+  key,
+  put,
+  compose,
+  lay,
+  boxes,
+  engine,
+} from "./composer-mention-fixture.tsx";
 
 test("@ asks the room for its papers as it opens, says it is loading, then lists them; Enter there never sends", async () => {
   let answer: (list: MentionList) => void = () => {};
@@ -307,151 +173,6 @@ test("a deleted token mentions nothing; undo brings it back, and its paper with 
   expect(handle.current?.mentioned()).toEqual([]);
 });
 
-/** The engine as WKWebView on macOS edits, smart quotes on (#117 M5-hi's log): insertText's beforeinput, then the words
- * in, then, inside the same command, the closing `"` replaced by `”` with insertReplacementText (its own beforeinput,
- * the caret at the words' end, no target ranges), then insertText's input and the replacement's. `cancelable: false`
- * is an engine that never asks before it substitutes. */
-function smartQuotes({ cancelable = true } = {}) {
-  const exec = (command: string, _ui?: boolean, value?: string) => {
-    const a = document.activeElement;
-    if (!(a instanceof HTMLTextAreaElement) || command !== "insertText" || value === undefined)
-      return false;
-    const before = (inputType: string, data: string) =>
-      a.dispatchEvent(
-        new InputEvent("beforeinput", { bubbles: true, cancelable, inputType, data }),
-      );
-    if (!before("insertText", value)) return false;
-    const s = a.selectionStart;
-    const v = a.value.slice(0, s) + value + a.value.slice(a.selectionEnd);
-    Reflect.set(HTMLTextAreaElement.prototype, "value", v, a);
-    a.setSelectionRange(s + value.length, s + value.length);
-    const q = value.lastIndexOf('"');
-    const replaced = q > 0 && before("insertReplacementText", "\u201d");
-    if (replaced) {
-      const at = s + q;
-      const caret = a.selectionEnd;
-      Reflect.set(
-        HTMLTextAreaElement.prototype,
-        "value",
-        `${v.slice(0, at)}\u201d${v.slice(at + 1)}`,
-        a,
-      );
-      a.setSelectionRange(caret, caret);
-    }
-    a.dispatchEvent(
-      new InputEvent("input", { bubbles: true, inputType: "insertText", data: value }),
-    );
-    if (replaced)
-      a.dispatchEvent(
-        new InputEvent("input", {
-          bubbles: true,
-          inputType: "insertReplacementText",
-          data: "\u201d",
-        }),
-      );
-    return true;
-  };
-  Object.defineProperty(document, "execCommand", { value: exec, configurable: true });
-}
-const ANNEXURE = paper("f-a", "papers/Annexure A अनुलग्नक.pdf");
-/** A replacement asked for at beforeinput over `start` to `end` selected, as WebKit selects what it replaces:
- * whether the composer let it be. */
-const replacing = (start: number, end: number, data: string) =>
-  act(async () => {
-    field().setSelectionRange(start, end);
-    const e = new InputEvent("beforeinput", {
-      bubbles: true,
-      cancelable: true,
-      inputType: "insertReplacementText",
-      data,
-    });
-    return field().dispatchEvent(e);
-  });
-
-test("macOS's smart quotes never rewrite a quoted paper's closing quote as it is picked (#117 M5-hi, WKWebView)", async () => {
-  lay();
-  smartQuotes();
-  const { mentions } = source({ items: [ANNEXURE, ...PAPERS] });
-  const handle = createRef<ComposerHandle>();
-  await mount(composer({ mentions, ref: handle }));
-  await focus();
-  await edit("आदेश @ann");
-  expect(names()).toEqual(["Annexure A अनुलग्नक.pdf"]);
-  await key("Tab");
-  const picked = 'आदेश @"papers/Annexure A अनुलग्नक.pdf" ';
-  expect(field().value).toBe(picked);
-  expect([field().selectionStart, field().selectionEnd]).toEqual([39, 39]);
-  expect(boxes()).toHaveLength(1);
-  expect(handle.current?.mentioned().map((m) => m.id)).toEqual(["f-a"]);
-  // a replacement over the token's characters (a spelling fix in its name) is refused; one at its end or after it,
-  // as Tamil99's vowel sign after a token, is let be
-  expect(await replacing(11, 19, "Annex")).toBe(false);
-  expect(await replacing(37, 38, "\u201d")).toBe(false);
-  // a later smart-quote pass asks as the pick's did, the caret after the space, collapsed (review of #117 M5): refused
-  expect(await replacing(39, 39, "\u201d")).toBe(false);
-  expect(await replacing(38, 39, "x")).toBe(true);
-  await edit(`${picked}க`);
-  // a curly quote at a caret with no straight one since the token can only be the token's: refused
-  expect(await replacing(40, 40, "\u201d")).toBe(false);
-  // the lawyer's own straight quote after the token, and an apostrophe, are theirs to have curled: let be
-  await edit(`${picked}க "`);
-  expect(await replacing(42, 42, "\u201d")).toBe(true);
-  await edit(`${picked}don'`);
-  expect(await replacing(43, 43, "\u2019")).toBe(true);
-  await edit(`${picked}க`);
-  expect(await replacing(39, 40, "கா")).toBe(true);
-  await edit(`${picked}கா`, { inputType: "insertReplacementText" });
-  expect(boxes()).toHaveLength(1);
-  expect(handle.current?.mentioned().map((m) => m.id)).toEqual(["f-a"]);
-});
-
-test("a word typed against a picked paper's closing quote keeps the quote straight and the token (#117 M5-hi step 10, WKWebView)", async () => {
-  lay();
-  smartQuotes();
-  const { mentions } = source({ items: [ANNEXURE, ...PAPERS] });
-  const handle = createRef<ComposerHandle>();
-  await mount(composer({ mentions, ref: handle }));
-  await focus();
-  await edit("आदेश @ann");
-  await key("Tab");
-  const picked = 'आदेश @"papers/Annexure A अनुलग्नक.pdf" ';
-  expect(field().value).toBe(picked);
-  // the caret against the closing quote (Left), then Hindi Transliteration's word, as the log has it: the composition
-  // in, then WebKit's smart quote with the caret after the word, flagged as no composition, before compositionend
-  await act(async () => field().setSelectionRange(38, 38));
-  await compose("compositionstart");
-  const typed = 'आदेश @"papers/Annexure A अनुलग्नक.pdf"न्यायालय  ';
-  await act(async () => {
-    const a = field();
-    Reflect.set(HTMLTextAreaElement.prototype, "value", typed, a);
-    a.setSelectionRange(47, 47);
-    a.dispatchEvent(
-      new InputEvent("input", {
-        bubbles: true,
-        inputType: "insertFromComposition",
-        isComposing: true,
-      }),
-    );
-  });
-  expect(await replacing(47, 47, "\u201d")).toBe(false);
-  await compose("compositionend");
-  expect(field().value).toBe(typed);
-  // typed against, the token is plain text while it is; a space between makes it a token again
-  await edit('आदेश @"papers/Annexure A अनुलग्नक.pdf" न्यायालय  ');
-  expect(boxes()).toHaveLength(1);
-  expect(handle.current?.mentioned().map((m) => m.id)).toEqual(["f-a"]);
-});
-
-test("an engine that substitutes without asking leaves the pick's words once, never part of them twice", async () => {
-  smartQuotes({ cancelable: false });
-  const { mentions } = source({ items: [ANNEXURE] });
-  await mount(composer({ mentions }));
-  await focus();
-  await edit("आदेश @ann");
-  await key("Tab");
-  expect(field().value).toBe('आदेश @"papers/Annexure A अनुलग्नक.pdf\u201d ');
-});
-
 test("no @ menu opens, and no papers are asked for, while an input method composes; an @ in it opens at its end", async () => {
   vi.useFakeTimers({ toFake: ["setTimeout"] });
   const { mentions, load } = source();
@@ -500,8 +221,7 @@ test("a matter with no papers says so; more than 50 matches show 50 with the cou
   await focus();
   await edit("@");
   expect(notes()).toEqual(["No papers yet."]);
-  await act(async () => root?.unmount());
-  host?.remove();
+  await unmount();
   const many = Array.from({ length: 2000 }, (_, i) => paper(`f-${i}`, `Bundle/Exhibit ${i}.pdf`));
   const full = source({ items: many, partial: true });
   await mount(composer({ mentions: full.mentions }));
