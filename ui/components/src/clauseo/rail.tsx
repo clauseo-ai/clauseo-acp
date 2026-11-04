@@ -21,6 +21,9 @@ import { MatterRow, type MatterRowProps } from "./rail-matter.tsx";
 export type { MatterRowProps, MatterState } from "./rail-matter.tsx";
 export { MatterRow };
 
+/** A menu's popup: it stands outside the rail on the page, and focus going into it hasn't left the rail. */
+const MENU = '*[role="menu"]';
+
 /** A group of rows under its heading; testId goes on its section. */
 export type RailGroup = { when: string; matters: readonly MatterRowProps[]; testId?: string };
 
@@ -189,6 +192,8 @@ export function Rail({
   aside,
   list,
   onHover,
+  shelf,
+  onFocusLeave,
 }: {
   groups: readonly RailGroup[];
   pinned?: readonly MatterRowProps[];
@@ -226,6 +231,10 @@ export function Rail({
   list?: ReactNode;
   /** Optional: the pointer came over the rail (true) or left it (false). */
   onHover?: (over: boolean) => void;
+  /** Optional (U16b): the Snoozed shelf, at the foot of the groups, above Scratch matter. */
+  shelf?: ReactNode;
+  /** Optional (U16b): the focus left the rail for another control on the page (not for one of its menus). */
+  onFocusLeave?: () => void;
 }) {
   const w = useWords();
   const room = useRoom();
@@ -377,6 +386,16 @@ export function Rail({
       onPointerUp={() => {
         pressing.current = false;
       }}
+      onBlur={(e) => {
+        const to = e.relatedTarget;
+        if (
+          onFocusLeave !== undefined &&
+          to instanceof Element &&
+          nav.current?.contains(to) === false &&
+          to.closest(MENU) === null
+        )
+          onFocusLeave();
+      }}
       onKeyDown={(e) => {
         // a menu's popup sits outside the rail on the page, though inside it in React: its Escape is its own
         if (e.key !== "Escape" || e.defaultPrevented || onEscape === undefined) return;
@@ -441,7 +460,7 @@ export function Rail({
         </div>
       ) : list !== undefined && !finding ? (
         list
-      ) : shown !== "none" && shown.length === 0 ? (
+      ) : shown !== "none" && shown.length === 0 && (finding || shelf === undefined) ? (
         empty && <NoMatters />
       ) : shown === "none" ? (
         <div className="room-find-none" role="status">
@@ -469,6 +488,7 @@ export function Rail({
               </ul>
             </section>
           ))}
+          {!finding && shelf}
         </div>
       )}
       {/* with Settings, the scratch matter and Settings stand on the rail's foot, always in view as the list scrolls */}

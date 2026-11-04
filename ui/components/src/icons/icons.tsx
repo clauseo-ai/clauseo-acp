@@ -11,6 +11,8 @@
 // reuse a shape already here (IconToolEdit, IconToolSearch, IconToolFetch) stay in this file.
 // IconFailed was cut from Lucide 1.66.0 (triangle-alert, the same commit) on 4 Nov 2026 for U16a, the same way: its
 // rounded corners drawn square, its triangle drawn in from the edge so the miter joins stay inside the 20 px box.
+// IconSnooze was cut from Lucide 1.66.0's alarm-clock (the same commit) on 5 Nov 2026 for U16b: its points scaled about
+// the centre by 0.725, as IconChecking's clock was, so the two clocks read as one family.
 import { Icon, type IconProps } from "./icon.tsx";
 
 export {
@@ -552,4 +554,18 @@ export function IconToolSearch(props: IconProps) {
  * Lucide globe, as toolFetch: the shape IconWebsite draws, so it reuses it) */
 export function IconToolFetch(props: IconProps) {
   return <IconWebsite {...props} />;
+}
+
+/** Snooze: a conversation set aside until a time, on the rail (source: alarmClock, Lucide alarm-clock at 1.66.0) */
+export function IconSnooze(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <circle cx="10" cy="10.75" r="5.8" vectorEffect="non-scaling-stroke" />
+      <path d="M10 7.85v2.9l1.45 1.45" vectorEffect="non-scaling-stroke" />
+      <path d="M4.95 3.5L2.75 5.65" vectorEffect="non-scaling-stroke" />
+      <path d="M17.25 5.65l-2.2-2.15" vectorEffect="non-scaling-stroke" />
+      <path d="M5.9 14.85L4.2 16.55" vectorEffect="non-scaling-stroke" />
+      <path d="M14.1 14.85l1.7 1.7" vectorEffect="non-scaling-stroke" />
+    </Icon>
+  );
 }
