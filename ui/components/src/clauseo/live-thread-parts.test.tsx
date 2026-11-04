@@ -304,6 +304,48 @@ test("with a paper edited since, Keep current sends nothing", async () => {
   expect(onUndo).not.toHaveBeenCalled();
 });
 
+test("askUndo: Undo waits for its answer, and a null answer undoes at once", async () => {
+  let answer: (paper: string | null) => void = () => {};
+  const onUndo = vi.fn();
+  await mount(
+    <ChangeNote
+      papers={PAPERS}
+      testIds={NOTE_IDS}
+      state="changed"
+      askUndo={() => new Promise((resolve) => (answer = resolve))}
+      onUndo={onUndo}
+    />,
+  );
+  await act(async () => byId("undo")?.click());
+  expect(byId("undo")?.getAttribute("aria-disabled")).toBe("true");
+  await act(async () => byId("undo")?.click());
+  await act(async () => answer(null));
+  expect(onUndo).toHaveBeenCalledOnce();
+});
+
+test("askUndo naming a paper asks about that paper, and Undo anyway undoes", async () => {
+  const onUndo = vi.fn();
+  await mount(
+    <ChangeNote
+      papers={PAPERS}
+      testIds={NOTE_IDS}
+      state="changed"
+      askUndo={async () => "Reply, draft 2.docx"}
+      onUndo={onUndo}
+    />,
+  );
+  await act(async () => byId("undo")?.click());
+  await act(async () => {
+    await import("./change-note-ask.tsx");
+  });
+  expect(document.body.textContent).toContain(
+    "\u2068Reply, draft 2.docx\u2069 changed after Clauseo's edit.",
+  );
+  expect(onUndo).not.toHaveBeenCalled();
+  await act(async () => button("Undo anyway")?.click());
+  expect(onUndo).toHaveBeenCalledOnce();
+});
+
 test("Who without a time says the name alone, no comma; with one, the name and the time", async () => {
   await mount(
     <>

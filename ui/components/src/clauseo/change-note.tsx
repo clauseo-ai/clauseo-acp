@@ -1,8 +1,9 @@
 // The change note. After Clauseo changes papers, the thread says so in one line, with the papers named and two ways
 // on: Compare, and Undo, each when the caller gives it, and a way to open a paper where the caller gives one ("Open in
 // Word"). A refused undo, or a failed open, says why in a quiet line beside Undo. The note itself takes focus (not by
-// Tab) when the control under it that held focus goes. When a
-// paper was edited after Clauseo's change, Undo asks first, in the alert dialog, with Keep current as the safe choice.
+// Tab) when the control under it that held focus goes. When a paper was edited after Clauseo's change, Undo asks
+// first, in the alert dialog, with Keep current as the safe choice: at once when the paper is given (editedSince), or,
+// given askUndo, once the caller has answered the press (Undo waits meanwhile).
 import { Fragment, lazy, Suspense, useState } from "react";
 import { late } from "../lib/late.ts";
 import { Button } from "../ui/button.tsx";
@@ -33,6 +34,7 @@ function useCounts(n: number) {
 export function ChangeNote({
   papers,
   editedSince = null,
+  askUndo,
   state: held,
   onUndo,
   onCompare,
@@ -45,6 +47,9 @@ export function ChangeNote({
   papers: readonly string[];
   /** A paper edited after Clauseo's change, if one was: Undo asks first. */
   editedSince?: string | null;
+  /** Asked on each press of Undo, before anything is undone, and Undo waits while it answers: the paper edited since,
+   * which the dialog asks about, or null to undo straight away. Given, it takes the place of editedSince. */
+  askUndo?: () => Promise<string | null>;
   /** Given, the host says when the changes are undone; without it, Undo marks them undone itself. */
   state?: ChangeState;
   /** Undo shows only when given. */
@@ -66,10 +71,31 @@ export function ChangeNote({
   const [asking, setAsking] = useState(false);
   // the dialog's chunk loads when Undo is first in reach, and the dialog mounts the first time it is asked for
   const [asked, setAsked] = useState(false);
-  const reach = editedSince === null ? undefined : () => void loadAsk();
+  // the paper the dialog asks about, as askUndo answers it
+  const [about, setAbout] = useState<string | null>(null);
+  const [previewing, setPreviewing] = useState(false);
+  const askAbout = askUndo === undefined ? editedSince : about;
+  const reach = askAbout === null && askUndo === undefined ? undefined : () => void loadAsk();
   const undo = () => {
     if (held === undefined) setOwn("undone");
     onUndo?.();
+  };
+  const press = () => {
+    if (previewing) return;
+    if (askUndo === undefined) {
+      if (editedSince === null) return undo();
+      setAsked(true);
+      setAsking(true);
+      return;
+    }
+    setPreviewing(true);
+    void askUndo().then((paper) => {
+      setPreviewing(false);
+      if (paper === null) return undo();
+      setAbout(paper);
+      setAsked(true);
+      setAsking(true);
+    });
   };
 
   if (state === "undone") {
@@ -130,25 +156,21 @@ export function ChangeNote({
           <Button
             kind="quiet"
             size="small"
-            disabled={undoDisabled}
+            disabled={undoDisabled || previewing}
             focusableWhenDisabled
             data-testid={testIds?.undo}
             onPointerEnter={reach}
             onFocus={reach}
-            onClick={() => {
-              if (editedSince === null) return undo();
-              setAsked(true);
-              setAsking(true);
-            }}
+            onClick={press}
           >
             <IconUndo size={16} />
             <span className="deva-nudge">{w.t("Undo")}</span>
           </Button>
         )}
       </div>
-      {editedSince !== null && onUndo !== undefined && asked && (
+      {askAbout !== null && onUndo !== undefined && asked && (
         <Suspense fallback={null}>
-          <UndoAsk name={editedSince} open={asking} onOpenChange={setAsking} onUndo={undo} />
+          <UndoAsk name={askAbout} open={asking} onOpenChange={setAsking} onUndo={undo} />
         </Suspense>
       )}
     </div>

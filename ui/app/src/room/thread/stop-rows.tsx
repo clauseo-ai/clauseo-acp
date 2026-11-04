@@ -40,13 +40,16 @@ const WordLock = lazy(() =>
 const LOCKED = "matter.file_locked";
 
 const QUIET = "text-small text-quiet";
+/** A matter path's file name: its last part, as the wall shows the file. */
+const fileNameOf = (path: string): string => path.split(/[\\/]/).pop() || path;
+
 /** The space above a row under another in its section, on the spacing tokens; first in its section, the thread's own
  * gap between sections stands alone. */
 const ROW = "not-first:mt-(--s3)";
 
 function Changed({ entry }: { entry: StepEntry }) {
   const w = useWords();
-  const { undo, sentTurn, stream } = useThreadActions();
+  const { undo, previewUndo, sentTurn, stream } = useThreadActions();
   const busy = useBusy(stream, sentTurn);
   const plan = useAgentPlan();
   const [refused, setRefused] = useState<string | null>(null);
@@ -57,7 +60,6 @@ function Changed({ entry }: { entry: StepEntry }) {
   const [openFailed, setOpenFailed] = useState<string | null>(null);
   const box = useRef<HTMLDivElement>(null);
   const papers = entry.files.map((f) => f.path);
-  const edited = entry.files.find((f) => f.may_include_lawyer_edits)?.path ?? null;
   const undoable = entry.checkpoint_after !== undefined;
   // a program holds a file: the lock's lines stand under the note, and Try again takes Undo's place
   const locked = refused === LOCKED && !entry.undone;
@@ -93,6 +95,17 @@ function Changed({ entry }: { entry: StepEntry }) {
     setOpenFailed(null);
     send();
   };
+  // Undo asks about a paper the lawyer edited since Clauseo's change: PreviewUndo says which, on each press, and Undo
+  // waits for it. Where the query fails (an older host, or any error) the flag a file carries decides, as before: it
+  // may ask when nothing changed, and never loses a warning.
+  const askUndo = (): Promise<string | null> => {
+    const flagged = entry.files.find((f) => f.may_include_lawyer_edits)?.path ?? null;
+    if (previewUndo === undefined) return Promise.resolve(flagged);
+    return previewUndo(entry).then(
+      (edited) => (edited[0] === undefined ? null : fileNameOf(edited[0])),
+      () => flagged,
+    );
+  };
   // the lines going take Try again with them: focus that was on it, or fell to the page, goes back to Undo, or to
   // the note when Undo isn't back (WordLock takes focus to Try again as the lines come)
   const wasLocked = useRef(locked);
@@ -114,7 +127,7 @@ function Changed({ entry }: { entry: StepEntry }) {
     <div data-testid="files-changed" ref={box}>
       <ChangeNote
         papers={papers}
-        editedSince={edited}
+        askUndo={askUndo}
         state={entry.undone ? "undone" : "changed"}
         {...(undoable && !locked ? { onUndo } : {})}
         {...(open === undefined ? {} : { open })}

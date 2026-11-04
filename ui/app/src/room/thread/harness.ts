@@ -66,6 +66,15 @@ export const defaultOutcome = (command: HostCommand): CommandOutcome => {
   return "done";
 };
 
+/** A script whose PreviewUndo answers as `preview` says (or throws its refusal); any other query is not scripted. The
+ * answer is typed by hand where the query is (session.ts): the bindings don't carry PreviewUndo yet. */
+export const previewUndoScript = (preview: () => unknown): Script => ({
+  query: (query) => {
+    if (typeof query === "object" && "preview_undo" in query) return preview() as never;
+    throw new Error(`not scripted: ${JSON.stringify(query)}`);
+  },
+});
+
 export type Harness = {
   transport: FakeTransport;
   store: ViewStore;
