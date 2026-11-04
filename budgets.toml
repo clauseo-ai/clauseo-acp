@@ -623,17 +623,65 @@ source = "doc 17 §3.4"
 
 [[budget]]
 id = "deb_size"
-metric = ".deb package size"
+metric = ".deb package size, the app's own payload (the bundled sidecars left out)"
 limit = 11.5
 unit = "MB"
 gate = "release"
-measured_by = "file size of the .deb"
-# 10,897,866 bytes: Clauseo_0.0.0_amd64.deb from run 41660337744; the limit is that plus 5%. Rohan chose
-# performance over size (2026-11-03): opt-level 3 everywhere; the Linux build drops the unused updater plugin.
+measured_by = "release.yml's Sizes step: the .deb repacked by dpkg-deb (gzip -6) without its /usr/bin/clauseo-* sidecars"
+# 10,897,866 bytes: Clauseo_0.0.0_amd64.deb from run 41660337744, before any sidecar; the limit is that plus
+# 5%. Rohan chose performance over size (2026-11-03): opt-level 3 everywhere; the Linux build drops the
+# unused updater plugin. Since the sidecars (orchestrator's decision, 2026-11-04) this row keeps meaning
+# the app's own payload: 10,921,596 bytes repacked without them in release.yml run 41755666582. dpkg-deb's
+# gzip is a little tighter than Tauri's (the whole .deb repacks to 19.01 MB from 19.45 MB).
 status = "measured"
-measured = 10.90
+measured = 10.92
 measured_on = "linux-x86_64-gha"
 source = "doc 17 §3.4"
+
+# The bundled sidecars and the .deb as shipped (orchestrator's decision, 2026-11-04; Rohan: size is fine if
+# it serves the product). agent-browser is a bundled launch feature (stage E). The rows are split so a
+# regression shows in the part that grew: the app (release_binary_size, deb_size), each sidecar, or the
+# whole package. Each limit is release.yml run 41755666582's Linux size plus 5%, rounded up to 0.1 MB.
+
+[[budget]]
+id = "agent_browser_size"
+metric = "the bundled clauseo-agent-browser sidecar, Linux"
+limit = 19.4
+unit = "MB"
+gate = "release"
+measured_by = "release.yml's Sizes step: file size of the sidecar as bundled"
+# 18,434,808 bytes: crates/desktop/binaries/clauseo-agent-browser-x86_64-unknown-linux-gnu (the pinned
+# upstream v0.41.1 binary), release.yml run 41755666582.
+status = "measured"
+measured = 18.43
+measured_on = "linux-x86_64-gha"
+source = "orchestrator, 2026-11-04"
+
+[[budget]]
+id = "clauseo_mcp_size"
+metric = "the bundled clauseo-mcp sidecar, Linux, stripped"
+limit = 0.6
+unit = "MB"
+gate = "release"
+measured_by = "release.yml's Sizes step: file size of the sidecar as bundled"
+# 535,904 bytes: crates/desktop/binaries/clauseo-mcp-x86_64-unknown-linux-gnu, release.yml run 41755666582.
+status = "measured"
+measured = 0.54
+measured_on = "linux-x86_64-gha"
+source = "orchestrator, 2026-11-04"
+
+[[budget]]
+id = "deb_total_size"
+metric = ".deb package size as shipped, the sidecars included"
+limit = 20.5
+unit = "MB"
+gate = "release"
+measured_by = "release.yml's Sizes step: file size of the .deb"
+# 19,450,944 bytes: Clauseo_0.0.0_amd64.deb, release.yml run 41755666582.
+status = "measured"
+measured = 19.45
+measured_on = "linux-x86_64-gha"
+source = "orchestrator, 2026-11-04"
 
 [[budget]]
 id = "connector_signin_host_p95"

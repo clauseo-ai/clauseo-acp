@@ -196,7 +196,9 @@ S15's tools sat in `windows.conf.json` and S27's in `tauri.conf.json`.
   `/usr/bin/` in the `.deb` and `.rpm` (hence the `clauseo-` prefix), and the install folder of
   both NSIS installers, which install and remove each `externalBin` with `Clauseo.exe`.
 - **Sizes.** The size table lists each sidecar on its own row beside the app's exe; none counts
-  towards `release_binary_size`.
+  towards `release_binary_size`. On Linux each has its own budget row (`agent_browser_size`,
+  `clauseo_mcp_size`), `deb_total_size` is the .deb as shipped, and `deb_size` stays the app's own
+  payload: the .deb repacked without the sidecars (orchestrator, 2026-11-04).
 - **Per-machine sandbox grants, with S15 (not before).** Under `%ProgramFiles%` S15's launcher cannot
   write ACEs without admin, so the elevated per-machine installer writes them in `hooks.nsh`'s
   `NSIS_HOOK_POSTINSTALL`, per-machine only, on every install and upgrade (a recreated file loses

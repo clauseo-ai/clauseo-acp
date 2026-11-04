@@ -463,12 +463,32 @@ jobs:
           "WebView2 Runtime on this runner: $pv; minimumWebview2Version: $min" |
             Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
 
-      # The sizes go to the log as well, where `gh run view --log` reads them.
+      # The sizes go to the log as well, where `gh run view --log` reads them. The budgets.toml
+      # rows are Linux's: release_binary_size (the app binary alone), agent_browser_size and
+      # clauseo_mcp_size (each sidecar), deb_total_size (the .deb as shipped) and deb_size (the
+      # app's own payload: the .deb repacked without the clauseo-* sidecars in /usr/bin, gzip -6 as
+      # Tauri's, so it stays comparable with the rows measured before the sidecars). dpkg-deb's
+      # gzip is a little tighter than Tauri's, so the whole .deb repacked the same way is shown
+      # beside it for comparison.
       - name: Sizes to the job summary
         run: |
           set -euo pipefail
           size() { wc -c < "$1" | tr -d ' '; }
           row() { echo "| $1 | $2 | $(awk -v b="$2" 'BEGIN { printf "%.2f", b / 1000000 }') |"; }
+          # $1 the .deb, $2 the output, $3 "app" to leave the sidecars out.
+          repack() {
+            local dir=$RUNNER_TEMP/deb-repack
+            rm -rf "$dir"
+            dpkg-deb -R "$1" "$dir"
+            if [ "$3" = app ]; then
+              compgen -G "$dir/usr/bin/clauseo-*" > /dev/null ||
+                { echo "::error::no clauseo-* sidecar in the .deb's /usr/bin to leave out"; exit 1; }
+              rm "$dir"/usr/bin/clauseo-*
+              sed -i '/ usr\/bin\/clauseo-/d' "$dir/DEBIAN/md5sums"
+              [ -f "$dir/usr/bin/Clauseo" ] || { echo "::error::the repacked .deb lost usr/bin/Clauseo"; exit 1; }
+            fi
+            dpkg-deb -Zgzip -z6 --root-owner-group -b "$dir" "$2" > /dev/null
+          }
           exe=$RELEASE_DIR/Clauseo; [ "$RUNNER_OS" = Windows ] && exe=$exe.exe
           {
             echo "### Sizes, $TARGET"
@@ -476,12 +496,26 @@ jobs:
             echo "|---|---|---|"
             row "app binary (release_binary_size)" "$(size "$exe")"
             for sidecar in crates/desktop/binaries/*-"$TARGET"*; do
-              [ -e "$sidecar" ] && row "sidecar $(basename "$sidecar")" "$(size "$sidecar")"
+              [ -e "$sidecar" ] || continue
+              id=""
+              if [ "$RUNNER_OS" = Linux ]; then
+                case "$(basename "$sidecar")" in
+                  clauseo-agent-browser-*) id=" (agent_browser_size)" ;;
+                  clauseo-mcp-*) id=" (clauseo_mcp_size)" ;;
+                esac
+              fi
+              row "sidecar $(basename "$sidecar")$id" "$(size "$sidecar")"
             done
             if [ -d "$OUT" ]; then
               for asset in "$OUT"/*; do
                 case "$asset" in
-                  *.deb) row "$(basename "$asset") (deb_size)" "$(size "$asset")" ;;
+                  *.deb)
+                    row "$(basename "$asset") (deb_total_size)" "$(size "$asset")"
+                    repack "$asset" "$RUNNER_TEMP/app-only.deb" app
+                    row "the .deb without its sidecars, repacked (deb_size)" "$(size "$RUNNER_TEMP/app-only.deb")"
+                    repack "$asset" "$RUNNER_TEMP/whole.deb" whole
+                    row "the whole .deb, repacked the same way (for comparison)" "$(size "$RUNNER_TEMP/whole.deb")"
+                    ;;
                   *.sig) ;;
                   *) row "$(basename "$asset")" "$(size "$asset")" ;;
                 esac
