@@ -5,6 +5,8 @@
 // the room.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { iconIn } from "@clauseo/components/icons/icon-in.tsx";
+import { IconFileGeneric, IconFilePdf } from "@clauseo/components/icons/icons.tsx";
 import { settled } from "@clauseo/components/lib/late.ts";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { entryIdOf, orderOf } from "../store/view.ts";
@@ -173,6 +175,9 @@ test("a paper found by its file name opens its matter and the paper, by its File
   const row = h.one("find-paper");
   expect(row?.querySelector(".sr-only")?.textContent).toBe("Paper, \u2068Surety bond.pdf\u2069");
   expect(row?.querySelector(".room-find-hit")?.textContent).toBe("Surety");
+  // led by the bare page at the line's 14 px, not its file type's glyph, drawn at 20 and 24 px only
+  expect(iconIn(row, IconFileGeneric, 14)).not.toBeNull();
+  expect(iconIn(row, IconFilePdf, 14)).toBeNull();
   // the file name, as every path is, bidi-isolated (docs/ui-states.md)
   expect(row?.querySelector(".room-find-hit")?.closest("bdi")?.textContent).toBe("Surety bond.pdf");
   await act(async () => row?.click());
