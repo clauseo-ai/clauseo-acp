@@ -46,6 +46,10 @@ pub(crate) struct Listing {
     /// The subfolders that could not be read (relative to the root, sorted): what is under them
     /// is unknown, so a checkpoint keeps their entries as they were.
     pub(crate) unread: Vec<String>,
+    /// The files listed whose stat found them gone, in the order found: [`walk`] only. A
+    /// checkpoint looks at them again before taking them as deleted (Word saves by swapping
+    /// files with renames, so a document can be missing for a moment).
+    pub(crate) vanished: Vec<MatterPath>,
 }
 
 /// What the crate makes of the entry `path` with `metadata`, taken without following a
@@ -73,8 +77,9 @@ pub(crate) fn classify(
 /// sorted by path bytes, each as [`classify`] makes it with `cap`
 /// ([`crate::Limits::effective_cap`]). `progress` is called once per file found. Symlinks and
 /// other non-regular entries are skipped and never descended; so are names that are not UTF-8
-/// or do not make a [`MatterPath`] (with a warning). An entry gone before its stat is skipped,
-/// and so is a subfolder gone before it is read. A subfolder that does not read (permission
+/// or do not make a [`MatterPath`] (with a warning). A file gone at its stat is left out and
+/// goes in [`Listing::vanished`]; an entry gone before its type is known is skipped, and so is
+/// a subfolder gone before it is read. A subfolder that does not read (permission
 /// denied, say, or not downloaded) is listed in [`Listing::unread`], with a warning unless it
 /// is not downloaded; so is one that lists but cannot be entered (an entry's stat is denied, as
 /// for mode `0o444`), with the same warning and nothing of it kept from the listing. The root
@@ -95,6 +100,7 @@ pub(crate) fn walk(
         unread: Vec::new(),
     };
     let mut found = Vec::new();
+    let mut vanished = Vec::new();
     let mut items = Vec::new();
     // Folders still to read: absolute path and path relative to `root` ("" for the root).
     let mut pending = vec![(root.to_path_buf(), String::new())];
@@ -104,7 +110,8 @@ pub(crate) fn walk(
         }
         // What this folder adds goes after these marks, so a folder that turns out not to
         // enter can drop it again.
-        let (found_mark, pending_mark) = (found.len(), pending.len());
+        let (found_mark, pending_mark, vanished_mark) =
+            (found.len(), pending.len(), vanished.len());
         for item in items.drain(..) {
             match item {
                 Item::File(entry, path) => {
@@ -116,11 +123,13 @@ pub(crate) fn walk(
                             progress(&file);
                             found.push(file);
                         }
+                        Stated::Vanished(path) => vanished.push(path),
                         Stated::Gone => {}
                         Stated::Denied(err) => {
                             walker.unenterable(&dir, &relative, entry.path(), err)?;
                             found.truncate(found_mark);
                             pending.truncate(pending_mark);
+                            vanished.truncate(vanished_mark);
                             break;
                         }
                         Stated::Failed(err) => return Err(err),
@@ -141,6 +150,7 @@ pub(crate) fn walk(
     Ok(Some(Listing {
         files: found,
         unread,
+        vanished,
     }))
 }
 
@@ -177,7 +187,7 @@ pub(crate) fn walk_first(
         match next {
             Item::File(entry, path) => match walker.stat(&entry, path.clone()) {
                 Stated::Found(file) => found.push(file),
-                Stated::Gone => {}
+                Stated::Vanished(_) | Stated::Gone => {}
                 // Denied after its folder's first stat passed: drop all of that folder.
                 Stated::Denied(err) => {
                     let (folder, _) = path.as_str().rsplit_once('/').unwrap_or(("", ""));
@@ -222,6 +232,7 @@ pub(crate) fn walk_first(
     Ok(Listing {
         files: found,
         unread,
+        vanished: Vec::new(),
     })
 }
 
@@ -240,7 +251,9 @@ enum Item {
 enum Stated {
     /// A file the walk lists.
     Found(Found),
-    /// Gone, or no longer a regular file: left out.
+    /// Gone at its stat (not found): left out.
+    Vanished(MatterPath),
+    /// No longer a regular file: left out.
     Gone,
     /// Its stat was denied: the folder it is in lists but cannot be entered.
     Denied(io::Error),
@@ -394,7 +407,7 @@ impl Walker<'_> {
                     }
                     return Ok(true);
                 }
-                Stated::Gone => {
+                Stated::Vanished(_) | Stated::Gone => {
                     items.remove(at);
                 }
                 Stated::Denied(err) => {
@@ -413,7 +426,7 @@ impl Walker<'_> {
         let absolute = entry.path();
         let metadata = match entry.metadata() {
             Ok(metadata) => metadata,
-            Err(err) if err.kind() == io::ErrorKind::NotFound => return Stated::Gone,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => return Stated::Vanished(path),
             Err(err) if err.kind() == io::ErrorKind::PermissionDenied => {
                 return Stated::Denied(err);
             }

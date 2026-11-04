@@ -1,5 +1,7 @@
 //! Files and folders that vanish after the crate saw them and before it reaches them: each is
-//! taken as deleted, never as an error and never as kept.
+//! taken as deleted, never as an error and never as kept. A checkpoint looks at a vanished file
+//! again for about 300 ms first (the unit tests in `checkpoint/tests.rs` cover one that comes
+//! back), so the two file tests here wait that long for real.
 
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
