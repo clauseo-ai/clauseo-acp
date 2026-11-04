@@ -16,7 +16,8 @@
 //!
 //! # Interface
 //!
-//! - [`Matter`]: [`Matter::create`], [`Matter::import`] and [`Matter::open`] make one;
+//! - [`Matter`]: [`Matter::create`], [`Matter::import`] and [`Matter::open`] make one, and
+//!   [`Matter::discard`] undoes a create or import the host could not record;
 //!   [`Matter::locate`] opens one from the folder the lawyer picked after it moved, and
 //!   [`Matter::relink`] writes a deleted or damaged `matter.json` again where the history says
 //!   the folder is; [`same_or_nested`] compares two folders as the refused-folder check does,

@@ -160,6 +160,9 @@ pub(crate) enum MatterJob {
         before: CheckpointId,
         after: CheckpointId,
     },
+    /// `Matter::discard`: undoes the create or import this worker ran, for a matter the host
+    /// could not record; the worker holds no matter afterwards. With none held, nothing to do.
+    Discard,
 }
 
 /// How an import ended.
@@ -196,6 +199,7 @@ pub(crate) enum MatterReply {
     HeldOpen(Option<(MatterPath, HeldOpen)>),
     Papers(Result<PaperList, Error>),
     EditedSince(Result<Vec<MatterPath>, Error>),
+    Discarded(Result<(), Error>),
 }
 
 /// A turn's checkpoint, and for an id R8 reused what the host needs to record it when its log
@@ -417,6 +421,10 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
         MatterJob::EditedSince { before, after } => MatterReply::EditedSince(
             open(settings, slot).and_then(|matter| Ok(matter.edited_since(before, after)?)),
         ),
+        MatterJob::Discard => MatterReply::Discarded(match std::mem::replace(slot, Slot::Empty) {
+            Slot::Open(matter) => matter.discard().map_err(Error::from),
+            Slot::Empty | Slot::Unopened { .. } => Ok(()),
+        }),
     }
 }
 

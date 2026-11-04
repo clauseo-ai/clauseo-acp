@@ -118,6 +118,8 @@ pub(crate) enum MatterTag {
     Query(Reply<QueryResult>),
     /// A `ListPapers` query, answered with the listing.
     Papers(Reply<QueryResult>),
+    /// The discard of a matter made on disk whose commit failed (`matters/made.rs`).
+    Discard,
 }
 
 /// Everything else the actor reads, posted by its own tasks and by other threads.

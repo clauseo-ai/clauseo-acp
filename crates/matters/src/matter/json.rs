@@ -115,19 +115,23 @@ pub(crate) fn check(folder: &Path, id: MatterId) -> Result<(), Error> {
     read(folder)?.require(folder, id)
 }
 
-/// Removes `matter.json`, and `.clauseo` if that leaves it empty; for a cancelled or failed
-/// import. Failures are logged, not returned: the import's own result is what matters.
-pub(crate) fn remove(folder: &Path) {
+/// Removes `matter.json`, and with `dir` (`.clauseo` was made with it) `.clauseo` if that leaves
+/// it empty; for a cancelled, failed or discarded create or import. A missing `matter.json` is
+/// not an error; a `.clauseo` that is not empty is kept, unreported.
+pub(crate) fn remove(folder: &Path, dir: bool) -> Result<(), Error> {
     let file = path(folder);
-    if let Err(err) = write::remove_file(&file)
+    match write::remove_file(&file) {
+        Err(err) if err.kind() != io::ErrorKind::NotFound => {
+            return Err(Error::io("remove", file, err));
+        }
+        _ => {}
+    }
+    let dir_path = folder.join(DIR);
+    if dir
+        && let Err(err) = write::remove_dir(&dir_path)
         && err.kind() != io::ErrorKind::NotFound
     {
-        tracing::warn!(path = %file.display(), error = %err, "matter.json left behind");
+        tracing::debug!(path = %dir_path.display(), error = %err, ".clauseo kept");
     }
-    let dir = folder.join(DIR);
-    if let Err(err) = write::remove_dir(&dir)
-        && err.kind() != io::ErrorKind::NotFound
-    {
-        tracing::debug!(path = %dir.display(), error = %err, ".clauseo kept");
-    }
+    Ok(())
 }

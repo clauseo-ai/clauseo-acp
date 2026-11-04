@@ -139,6 +139,7 @@ pub(super) async fn open(
         work: Work::default(),
         phase: HostPhase::Starting(ready),
         scratch: None,
+        made: BTreeMap::new(),
         #[cfg(test)]
         fault: None,
     };

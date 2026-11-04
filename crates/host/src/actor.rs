@@ -173,6 +173,9 @@ pub(crate) struct Actor {
     pub(crate) phase: HostPhase,
     /// The Scratch matter being created at start-up.
     pub(crate) scratch: Option<Box<matters::PendingMatter>>,
+    /// The workers of matters made on disk whose commit has not returned, and of those being
+    /// discarded because it failed (`matters/made.rs`), by matter.
+    pub(crate) made: BTreeMap<MatterId, matters::Made>,
     /// Picks commits for the store to refuse (tests): given a commit's events, a command id the
     /// store already holds. The commit then carries a receipt with it: `DuplicateCommand`.
     #[cfg(test)]

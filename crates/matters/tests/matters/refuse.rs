@@ -292,3 +292,36 @@ fn refused_tree_matches_in_any_case() {
     );
     assert_eq!(located_refusal(&settings, &spelled), Refusal::Listed(data));
 }
+
+/// A path not made yet under a symlinked folder (macOS `/var` is `/private/var`) compares with
+/// the real folder: its deepest existing ancestor is canonicalised and the rest appended.
+#[cfg(unix)]
+#[test]
+fn a_missing_path_under_a_symlink_compares_with_the_real_folder() {
+    let dir = support::TestDir::new("refuse-nested-link");
+    let real = dir.path().join("real");
+    support::create_dir_all(&real);
+    let link = dir.path().join("link");
+    support::symlink(&real, &link);
+    assert!(clauseo_matters::same_or_nested(
+        &link.join("missing"),
+        &real
+    ));
+    assert!(clauseo_matters::same_or_nested(
+        &real,
+        &link.join("missing").join("deeper")
+    ));
+    assert!(clauseo_matters::same_or_nested(
+        &link.join("missing"),
+        &real.join("missing")
+    ));
+    assert!(!clauseo_matters::same_or_nested(
+        &link.join("missing"),
+        &real.join("other")
+    ));
+    // A path whose missing part has no name is taken as written.
+    assert!(!clauseo_matters::same_or_nested(
+        &link.join("missing").join(".."),
+        &real
+    ));
+}

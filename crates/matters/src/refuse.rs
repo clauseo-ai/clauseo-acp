@@ -110,16 +110,37 @@ pub(crate) fn check_outside_root(folder: &Path, settings: &Settings) -> Result<(
 }
 
 /// Whether `a` and `b` are the same folder or one holds the other, compared as the refused-folder
-/// check compares paths: each canonicalised (taken as written when that fails, so a folder that
-/// has moved away still compares), by components, composed (NFC) everywhere, case-insensitively
-/// on macOS and Windows, and on
-/// macOS with and without `/System/Volumes/Data`. For the host's registry check before
+/// check compares paths: each resolved ([`resolved`]: its deepest existing folder canonicalised,
+/// the rest as written, so a folder that has moved away or is not made yet still compares, and
+/// compares through a symlinked or short-name prefix), by components, composed (NFC) everywhere,
+/// case-insensitively on macOS and Windows, and on macOS with and without
+/// `/System/Volumes/Data`. For the host's registry check before
 /// [`Matter::locate`](crate::Matter::locate) and [`Matter::relink`](crate::Matter::relink): a
 /// folder that is, contains or sits inside another registered matter's folder.
 pub fn same_or_nested(a: &Path, b: &Path) -> bool {
-    let keys =
-        |path: &Path| spellings(&dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()));
-    nested(&keys(a), &keys(b))
+    nested(&spellings(&resolved(a)), &spellings(&resolved(b)))
+}
+
+/// `path` canonicalised; when it does not exist, its deepest existing ancestor canonicalised with
+/// the rest of `path` appended as written, so a path not made yet under a symlink (macOS `/var`,
+/// `/private/var`) or a Windows short name (`RUNNER~1`) compares with the existing folders under
+/// it. `path` as written when no ancestor canonicalises, or when a missing part has no name
+/// (`..`).
+fn resolved(path: &Path) -> PathBuf {
+    let mut rest = Vec::new();
+    let mut base = path;
+    loop {
+        if let Ok(real) = dunce::canonicalize(base) {
+            return rest.iter().rev().fold(real, |real, name| real.join(name));
+        }
+        match (base.parent(), base.file_name()) {
+            (Some(parent), Some(name)) => {
+                rest.push(name);
+                base = parent;
+            }
+            _ => return path.to_path_buf(),
+        }
+    }
 }
 
 /// Whether a key of `a` starts with a key of `b`, or the other way round.
@@ -176,19 +197,38 @@ pub(crate) fn is_windows_drive_root_text(text: &str) -> bool {
 }
 
 /// Whether the canonical `folder` is a drive root by its path: `X:\` on every OS (an absolute
-/// Unix path never matches it), `/`, and on macOS `/Volumes/<name>`.
+/// Unix path never matches it); on Windows also a network share's root (`\\server\share\`,
+/// `\\?\UNC\server\share\`, the admin share `\\localhost\C$\` among them), which is a whole
+/// volume as a drive is; `/`; and on macOS `/Volumes/<name>`.
 fn is_drive_root(folder: &Path) -> bool {
     if is_windows_drive_root_text(&folder.to_string_lossy()) {
         return true;
+    }
+    #[cfg(windows)]
+    {
+        is_share_root(folder)
     }
     #[cfg(target_os = "macos")]
     {
         spellings(folder).iter().any(|key| is_macos_volume_key(key))
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(all(unix, not(target_os = "macos")))]
     {
-        cfg!(unix) && folder.parent().is_none()
+        folder.parent().is_none()
     }
+}
+
+/// Windows: whether `folder` is a network share's root, a UNC prefix (`\\server\share` or
+/// `\\?\UNC\server\share`) with at most its root separator after it. Parsed by
+/// [`Prefix`], so a folder inside the share (`\\server\share\Clients`) is not one.
+#[cfg(windows)]
+fn is_share_root(folder: &Path) -> bool {
+    let mut parts = folder.components();
+    let Some(Component::Prefix(prefix)) = parts.next() else {
+        return false;
+    };
+    matches!(prefix.kind(), Prefix::UNC(..) | Prefix::VerbatimUNC(..))
+        && parts.all(|part| part == Component::RootDir)
 }
 
 /// Linux: whether `folder` is a mount point, its device differing from its parent's.

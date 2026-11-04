@@ -81,7 +81,8 @@ pub(super) fn answer(
         | MatterReply::Previewed(_)
         | MatterReply::EditedSince(_)
         | MatterReply::Located(_)
-        | MatterReply::HeldOpen(_) => Err(Error::Internal(
+        | MatterReply::HeldOpen(_)
+        | MatterReply::Discarded(_) => Err(Error::Internal(
             "a matter's listing got another job's reply".to_owned(),
         )),
     };

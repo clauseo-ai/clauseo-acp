@@ -2,7 +2,10 @@
 //! `checkpoint.rs` and `undo.rs`; this file checks inputs and keeps the folder and history in
 //! step.
 
+mod discard;
 pub(crate) mod json;
+
+use discard::Fresh;
 
 use std::collections::BTreeSet;
 use std::io;
@@ -34,6 +37,8 @@ pub struct Matter {
     folder: PathBuf,
     settings: Settings,
     core: Core,
+    /// What this run's create or import made, for [`Matter::discard`]; `None` once opened.
+    fresh: Option<Fresh>,
 }
 
 impl Matter {
@@ -53,12 +58,13 @@ impl Matter {
         }
         write::create_dir(&new.folder).map_err(|err| Error::io("create", &new.folder, err))?;
         let folder = new.folder.clone();
-        let made = Self::make(settings, new, None, &mut |_| {});
+        let fresh = Fresh::CREATED;
+        let made = Self::make(settings, new, fresh, None, &mut |_| {});
         match made {
             Ok(Made::Done(matter, _)) => Ok(*matter),
             Ok(Made::Cancelled) => Err(Error::history("create", "cancelled without a cancel flag")),
             Err(err) => {
-                undo_make(&home, &folder);
+                discard::undo_make(&home, &folder, fresh);
                 if let Err(cleanup) = write::remove_dir(&folder) {
                     tracing::warn!(error = %cleanup, "the new matter folder was left behind");
                 }
@@ -87,7 +93,8 @@ impl Matter {
             return Err(Error::HistoryExists { git_dir: home });
         }
         let folder = new.folder.clone();
-        match Self::make(settings, new, Some(cancel), progress) {
+        let fresh = Fresh::imported(&folder)?;
+        match Self::make(settings, new, fresh, Some(cancel), progress) {
             Ok(Made::Done(matter, summary)) => {
                 let warnings =
                     scan::warnings(&matter.folder, summary.bytes.get(), &matter.settings.limits);
@@ -98,11 +105,11 @@ impl Matter {
                 })
             }
             Ok(Made::Cancelled) => {
-                undo_make(&home, &folder);
+                discard::undo_make(&home, &folder, fresh);
                 Ok(Imported::Cancelled)
             }
             Err(err) => {
-                undo_make(&home, &folder);
+                discard::undo_make(&home, &folder, fresh);
                 Err(err)
             }
         }
@@ -112,6 +119,7 @@ impl Matter {
     fn make(
         settings: Settings,
         new: NewMatter,
+        fresh: Fresh,
         cancel: Option<&AtomicBool>,
         progress: &mut dyn FnMut(Progress),
     ) -> Result<Made, Error> {
@@ -139,6 +147,7 @@ impl Matter {
             folder: new.folder,
             settings,
             core,
+            fresh: Some(fresh),
         };
         Ok(Made::Done(Box::new(matter), summary))
     }
@@ -255,7 +264,14 @@ impl Matter {
             folder: folder.to_owned(),
             settings,
             core,
+            fresh: None,
         })
+    }
+
+    /// Undoes this run's create or import, for a host that could not record the matter; see
+    /// [`discard::discard`] for what goes and what stays.
+    pub fn discard(self) -> Result<(), Error> {
+        discard::discard(self)
     }
 
     /// The matter's id.
@@ -474,21 +490,10 @@ fn matter_home(settings: &Settings, id: MatterId) -> PathBuf {
     settings.matters_root.join(id.to_string())
 }
 
-fn exists(path: &Path) -> Result<bool, Error> {
+pub(crate) fn exists(path: &Path) -> Result<bool, Error> {
     match std::fs::symlink_metadata(path) {
         Ok(_) => Ok(true),
         Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
         Err(err) => Err(Error::io("stat", path, err)),
     }
-}
-
-/// Removes what [`Matter::make`] wrote: the matter's folder under the matters root and
-/// `matter.json`. Failures are logged; the caller's result stands.
-fn undo_make(home: &Path, folder: &Path) {
-    if let Err(err) = write::remove_dir_all(home)
-        && err.kind() != io::ErrorKind::NotFound
-    {
-        tracing::warn!(path = %home.display(), error = %err, "history folder left behind");
-    }
-    json::remove(folder);
 }

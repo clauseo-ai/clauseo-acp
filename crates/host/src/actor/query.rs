@@ -227,7 +227,8 @@ pub(super) fn matter_answer(reply: MatterReply) -> Result<QueryResult, Error> {
         | MatterReply::Restored(_)
         | MatterReply::Located(_)
         | MatterReply::HeldOpen(_)
-        | MatterReply::Papers(_)) => Err(Error::Internal(format!(
+        | MatterReply::Papers(_)
+        | MatterReply::Discarded(_)) => Err(Error::Internal(format!(
             "a query answered with another job's reply: {other:?}"
         ))),
     }

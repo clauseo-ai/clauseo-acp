@@ -244,3 +244,35 @@ fn a_decomposed_name_folds_to_its_composed_form_as_each_file_system_compares() {
         cfg!(target_os = "macos")
     );
 }
+
+/// A network share's root is a whole volume, as a drive is: refused in both spellings, with or
+/// without the trailing separator, and so is the admin share; a folder inside a share is not
+/// (clauseo-ai/clauseo-acp#244).
+#[cfg(windows)]
+#[test]
+fn share_roots_are_drive_roots_on_windows() {
+    use super::is_drive_root;
+    for root in [
+        r"\\server\share\",
+        r"\\server\share",
+        r"\\?\UNC\server\share\",
+        r"\\?\UNC\server\share",
+        r"\\localhost\C$\",
+        r"\\?\UNC\localhost\C$\",
+        r"C:\",
+        r"\\?\C:\",
+    ] {
+        assert!(is_drive_root(Path::new(root)), "{root} is a drive root");
+    }
+    for inside in [
+        r"\\server\share\Clients\X",
+        r"\\?\UNC\server\share\Clients",
+        r"\\localhost\C$\Users",
+        r"C:\Users",
+    ] {
+        assert!(
+            !is_drive_root(Path::new(inside)),
+            "{inside} is not a drive root"
+        );
+    }
+}

@@ -15,10 +15,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use clauseo_matters::{CommitId, DEFAULT_MARKER, NewMatter, Refusal};
 use clauseo_protocol::{
-    CheckpointKind, CheckpointRecorded, ClientName, CommandOutcome, Date, DomainEvent, ErrorCode,
-    HostError, ImportSummary, MatterCreated, MatterId, MatterKind, MatterSource, StreamId, Title,
+    ClientName, CommandOutcome, Date, ErrorCode, HostError, ImportSummary, MatterId, MatterKind,
+    MatterSource, Title,
 };
-use clauseo_store::MatterRow;
 
 use super::commands::{AfterCommand, CommandCtx};
 use super::input::{Input, MatterTag};
@@ -28,7 +27,13 @@ use crate::matter_worker::{
     Claim, Claimed, ImportEnd, MatterJob, MatterReply, MatterWorker, Registry, Relink,
     check_registry, matter_settings,
 };
-use crate::pipeline::{Draft, Failure, MatterEvent};
+use crate::pipeline::Failure;
+
+mod made;
+
+pub(crate) use made::Made;
+use made::matter_commit;
+pub(super) use made::{discard, recorded};
 
 /// The Scratch matter's name.
 const SCRATCH: &str = "Scratch";
@@ -202,7 +207,10 @@ pub(super) fn create_matter(
                 command.matter = Some(pending);
             }
         }
-        Err(error) => actor.finish_command(ctx.id, Err(error)),
+        Err(error) => {
+            made::not_created(None, &error, "check");
+            actor.finish_command(ctx.id, Err(error));
+        }
     }
 }
 
@@ -368,6 +376,7 @@ pub(super) fn on_matter_reply(
                 return;
             };
             let outcome = CommandOutcome::MatterCreated { matter };
+            let minted = pending.new.id;
             let folder = pending.new.folder.clone();
             let committed = match made(reply) {
                 Err(Error::Matters(clauseo_matters::Error::FolderRefused {
@@ -379,22 +388,25 @@ pub(super) fn on_matter_reply(
                         super::matter_details::unforget(actor, &ctx, known, &folder, details)
                     })
                 }
-                made => made.and_then(|import| {
-                    let opened = super::counting::matter_created(import.1.as_ref(), folder.clone());
-                    let (draft, entry) =
-                        matter_commit(actor, *pending, import, Some((id, outcome)))?;
-                    let tag = Tag::Command {
-                        id,
-                        outcome,
-                        after: AfterCommand::Matter(Box::new(entry)),
-                    };
-                    actor.send_commit(draft, tag)?;
-                    super::counting::on_commit(actor, id, opened);
-                    Ok(())
-                }),
+                Err(error) => Err(error),
+                Ok(import) => {
+                    // Made on disk from here: a failure discards it before the answer.
+                    let opened = super::counting::matter_created(import.1.as_ref(), folder);
+                    let sent = matter_commit(actor, *pending, import, Some((id, outcome)))
+                        .and_then(|(draft, entry)| {
+                            let after = AfterCommand::Matter(Box::new(entry));
+                            actor.send_commit(draft, Tag::Command { id, outcome, after })
+                        });
+                    match sent {
+                        Ok(_) => super::counting::on_commit(actor, id, opened),
+                        Err(error) => made::discard(actor, Some(id), minted, error, "commit"),
+                    }
+                    return;
+                }
             };
             if let Err(error) = committed {
                 let error = refusal(actor, error, &folder);
+                made::not_created(Some(minted), &error, "worker");
                 actor.finish_command(id, Err(error));
             }
         }
@@ -402,14 +414,17 @@ pub(super) fn on_matter_reply(
             let Some(pending) = actor.scratch.take() else {
                 return;
             };
-            let committed = made(reply).and_then(|import| {
-                let (draft, entry) = matter_commit(actor, *pending, import, None)?;
-                actor
-                    .send_commit(draft, Tag::Scratch(Box::new(entry)))
-                    .map(|_| ())
-            });
-            if let Err(error) = committed {
-                tracing::warn!(%error, "could not create the Scratch matter");
+            match made(reply) {
+                Ok(import) => {
+                    let sent =
+                        matter_commit(actor, *pending, import, None).and_then(|(draft, entry)| {
+                            actor.send_commit(draft, Tag::Scratch(Box::new(entry)))
+                        });
+                    if let Err(error) = sent {
+                        made::discard(actor, None, matter, error, "commit");
+                    }
+                }
+                Err(error) => tracing::warn!(%error, "could not create the Scratch matter"),
             }
         }
         MatterTag::Open => {
@@ -432,81 +447,15 @@ pub(super) fn on_matter_reply(
             let _gone = answer.send(super::query::matter_answer(reply));
         }
         MatterTag::Papers(answer) => super::papers::answer(actor, matter, reply, answer),
+        MatterTag::Discard => made::discarded(actor, matter, &reply),
     }
-}
-
-/// The commit of a matter just made: `MatterCreated`, `CheckpointRecorded { Import }`, the
-/// matter's row and the root checkpoint's row (with the receipt for a command), and the entry
-/// it adds once durable.
-fn matter_commit(
-    actor: &mut Actor,
-    pending: PendingMatter,
-    (commit, import): (CommitId, Option<ImportSummary>),
-    command: Option<(clauseo_protocol::CommandId, CommandOutcome)>,
-) -> Result<(Draft, MatterEntry), Error> {
-    let PendingMatter {
-        new,
-        name,
-        kind,
-        details: (client, next_date),
-        worker,
-        cancel: _,
-    } = pending;
-    let now = actor.now();
-    let stream = StreamId::Matter(new.id);
-    let command_id = command.map(|(id, _)| id);
-    let created = MatterCreated::new(name.clone(), kind, import)?;
-    let checkpoint = CheckpointRecorded::new(new.checkpoint, CheckpointKind::Import, None, None)?;
-    let mut draft = Draft::new();
-    let ids = &mut actor.ids;
-    actor.pipeline.push(
-        &mut draft,
-        stream,
-        DomainEvent::MatterCreated(created),
-        command_id,
-        now.wall,
-        ids,
-    )?;
-    actor.pipeline.push_matter(
-        &mut draft,
-        new.id,
-        MatterEvent::checkpoint(checkpoint, commit),
-        command_id,
-        now.wall,
-        ids,
-    )?;
-    let shadow = matter_settings(actor.effective.data_dir())
-        .matters_root
-        .join(new.id.to_string());
-    let row = MatterRow {
-        id: new.id,
-        name,
-        kind,
-        folder_path: new.folder.to_string_lossy().into_owned(),
-        folder_locator: None,
-        shadow_repo_path: shadow.to_string_lossy().into_owned(),
-        created: new.created_at,
-        client,
-        next_date,
-        pinned: false,
-        last_opened: None,
-        forgotten: None,
-    };
-    draft.matter_row(row.clone());
-    if let Some((id, outcome)) = command {
-        let ctx = command_ctx(actor, id)?;
-        draft.receipt(ctx.receipt(Some(stream), outcome, now.wall));
-    }
-    let entry = MatterEntry {
-        row,
-        worker: Some(worker),
-        turns: turn::MatterTurns::default(),
-    };
-    Ok((draft, entry))
 }
 
 /// The receipt context of the pending command `id`.
-fn command_ctx(actor: &Actor, id: clauseo_protocol::CommandId) -> Result<CommandCtx, Error> {
+pub(super) fn command_ctx(
+    actor: &Actor,
+    id: clauseo_protocol::CommandId,
+) -> Result<CommandCtx, Error> {
     let hash = actor
         .commands
         .get(&id)
@@ -522,11 +471,10 @@ pub(super) fn scratch_committed(
     outcome: Result<(), &Failure>,
 ) {
     match outcome {
-        Ok(()) => {
-            actor.matters.insert(entry.row.id, entry);
-        }
+        Ok(()) => made::recorded(actor, entry),
         Err(failure) => {
-            tracing::warn!(error = %failure.error, "the Scratch matter was not stored");
+            let error = Error::Store(failure.error.clone());
+            made::discard(actor, None, entry.row.id, error, "store");
         }
     }
 }
@@ -568,7 +516,8 @@ fn made(reply: MatterReply) -> Result<(CommitId, Option<ImportSummary>), Error> 
         | MatterReply::Previewed(_)
         | MatterReply::EditedSince(_)
         | MatterReply::HeldOpen(_)
-        | MatterReply::Papers(_) => Err(Error::Internal(
+        | MatterReply::Papers(_)
+        | MatterReply::Discarded(_) => Err(Error::Internal(
             "a matter's create got another job's reply".to_owned(),
         )),
     }

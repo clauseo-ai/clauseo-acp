@@ -290,8 +290,11 @@ pub(super) fn command_committed(
 ) {
     super::counting::committed(actor, id, outcome.is_ok());
     match (after, outcome) {
-        (AfterCommand::Matter(entry), Ok(())) => {
-            actor.matters.insert(entry.row.id, *entry);
+        (AfterCommand::Matter(entry), Ok(())) => super::matters::recorded(actor, *entry),
+        (AfterCommand::Matter(entry), Err(failure)) => {
+            let error = Error::Store(failure.error.clone());
+            // Answered once the made matter is discarded.
+            return super::matters::discard(actor, Some(id), entry.row.id, error, "store");
         }
         (AfterCommand::Thread(entry), Ok(())) => {
             actor.threads.insert(entry.row.id, *entry);
@@ -315,7 +318,6 @@ pub(super) fn command_committed(
         }
         (
             AfterCommand::Nothing
-            | AfterCommand::Matter(_)
             | AfterCommand::Thread(_)
             | AfterCommand::Row { .. }
             | AfterCommand::MatterRow { .. },
