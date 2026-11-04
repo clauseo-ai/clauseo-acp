@@ -401,9 +401,10 @@ it answers `Done` and does nothing (no second download). `HostCommand::CancelBro
 four a second, only once `Content-Length` is known), `Unpacking`, then one `Done` or one
 `Failed { code, message }`. The app's copy keys on `code` (`BrowserInstallFailure`, an open
 enum: `network`, `size_mismatch`, `disk_space`, `host_refused`, `signature`, `unpack`,
-`unsupported`, `cancelled`); `message` is for the log. No catch-up: a window that subscribes
-later hears only what comes next, and the next session's header tells whether the browser is
-there. The desktop bridge admits both commands from the main window only, and only main's app
+`unsupported`, `cancelled`); `message` is for the log. The latest state goes into every app catch-up:
+the running download's last step, or the last download's end until the next one starts. So a
+window that lagged, resubscribed after a pause or the watchdog, or reloaded hears where the
+download stands, its end included. The desktop bridge admits both commands from the main window only, and only main's app
 feed carries the event (0012, 0028).
 
 **Flow.** One download at a time, on a thread of its own; the actor never waits on it.
@@ -454,11 +455,10 @@ Windows. A missing tool is `unsupported`. Each runs through `clauseo_process::sp
 gets `-q` first (no `.curlrc`), then `--proto =https --proto-redir =https --tlsv1.2 --fail
 --location --max-redirs 0 --max-filesize 419430400 --connect-timeout 30 -y 60 -Y 1` (`CURL_FLAGS`).
 `--max-redirs 0` tightens the agreed `3` (security review): any redirect fails as curl's exit
-47, `network`. HTTPS to Google's host is the whole integrity check while the signature does not
-enforce, so a redirect to another https host must not replace it; neither URL redirects today
-(checked 2026-11-04). curl's exit 63 (over the 400 MiB cap) is `size_mismatch`, any other
-failure `network`. Progress
-comes from polling the file's size and the `-D` header file every 250 ms. The tools sit behind
+47, `host_refused` (a retry would meet the same redirect). HTTPS to Google's host is the whole
+integrity check while the signature does not enforce, so a redirect to another https host
+must not replace it; neither URL redirects today (checked 2026-11-04). curl's exit 63 (over
+the 400 MiB cap) is `size_mismatch`, any other failure `network`. Progress comes from polling the file's size and the `-D` header file every 250 ms. The tools sit behind
 `InstallTools`; the tests use fakes (`HostConfig::with_browser_install_tools`).
 
 **Signature.** macOS: `codesign --verify --deep --strict` on the app bundle, then `codesign -dv`

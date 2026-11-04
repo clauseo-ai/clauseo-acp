@@ -8,6 +8,8 @@
 //!   a receipt.
 //! - `CancelBrowserInstall` sets the running download's [`Cancel`]; with none running it does
 //!   nothing.
+//! - The latest state goes into every app catch-up (`current`), so a window that lagged,
+//!   resubscribed or reloaded hears where the download stands, its end included.
 //! - Shutdown cancels the download too and waits for its last state ([`busy`]), so the tool it
 //!   ran has ended and its working folder is gone before the host closes.
 //! - At start, a thread removes the working folders (`browsers/.partial-*`) a crash left; the
@@ -39,6 +41,10 @@ pub(crate) struct BrowserInstall {
     sweep: Option<JoinHandle<()>>,
     /// The running download.
     running: Option<Running>,
+    /// The latest state published: the running download's last `Downloading` or `Unpacking`,
+    /// then its `Done` or `Failed` until the next download starts. In every app catch-up, so a
+    /// window that lagged, resubscribed or reloaded hears where the download stands.
+    latest: Option<BrowserInstallState>,
 }
 
 /// A running download.
@@ -54,6 +60,7 @@ impl BrowserInstall {
             tools,
             sweep: None,
             running: None,
+            latest: None,
         }
     }
 
@@ -128,6 +135,8 @@ fn begin(actor: &mut Actor) -> Result<(), Error> {
         })
         .map_err(|error| Error::Internal(format!("starting {THREAD_NAME}: {error}")))?;
     actor.browser_install.running = Some(Running { cancel, thread });
+    // The last download's end is no longer where things stand.
+    actor.browser_install.latest = None;
     Ok(())
 }
 
@@ -189,6 +198,7 @@ pub(super) fn on_state(actor: &mut Actor, state: BrowserInstallState) {
         state,
         BrowserInstallState::Done | BrowserInstallState::Failed { .. }
     );
+    actor.browser_install.latest = Some(state.clone());
     super::app::publish(actor, &HostEvent::BrowserInstall { state });
     if last && let Some(running) = actor.browser_install.running.take() {
         // It posted its last state as its last act, so this join does not wait.
@@ -196,6 +206,12 @@ pub(super) fn on_state(actor: &mut Actor, state: BrowserInstallState) {
             tracing::warn!("the download thread panicked");
         }
     }
+}
+
+/// The app catch-up's part: the latest state, whole, when there is one.
+pub(super) fn current(actor: &Actor) -> Option<HostEvent> {
+    let state = actor.browser_install.latest.clone()?;
+    Some(HostEvent::BrowserInstall { state })
 }
 
 /// Shutdown: the running download is cancelled.
