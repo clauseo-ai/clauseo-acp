@@ -138,10 +138,15 @@ const NODE_ARCHIVES: [(Os, Arch, &str, u64, u64, &str); 6] = [
 
 /// Hosts every install contacts.
 const INSTALL_HOSTS: [&str; 2] = ["nodejs.org", "registry.npmjs.org"];
-// The sign-in hosts below are to be confirmed by S18, which owns the sign-in runs.
-/// Claude's sign-in hosts.
-const CLAUDE_SIGNIN_HOSTS: [&str; 3] =
-    ["claude.ai", "console.anthropic.com", "platform.claude.com"];
+// The sign-in hosts below are S18's: G7 row 1 confirms them against a real sign-in.
+/// Claude's sign-in hosts. `claude.com` is where Claude Code's authorize page now lives
+/// (`https://claude.com/cai/oauth/authorize`, the address the brief's fake opens).
+const CLAUDE_SIGNIN_HOSTS: [&str; 4] = [
+    "claude.ai",
+    "claude.com",
+    "console.anthropic.com",
+    "platform.claude.com",
+];
 /// Codex's sign-in hosts.
 const CODEX_SIGNIN_HOSTS: [&str; 2] = ["auth.openai.com", "chatgpt.com"];
 

@@ -10,9 +10,17 @@ use serde::Deserialize;
 use crate::signin::{Found, LoginFrom, SigninState};
 
 /// The `authMethod` of a Claude.ai plan login, the one kind Clauseo reuses.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "S18 piece 5 (detection and reuse) calls it")
+)]
 const CLAUDE_AI: &str = "claude.ai";
 
 /// The `apiProvider` of Anthropic's own API.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "S18 piece 5 (detection and reuse) calls it")
+)]
 const FIRST_PARTY: &str = "firstParty";
 
 /// The `authMethod` of no login.
@@ -70,6 +78,10 @@ pub(crate) fn parse_claude_status(stdout: &str) -> Option<ClaudeStatus> {
 /// ClaudeSettings`". A `claude.ai` login whose `apiProvider` is set and not `firstParty` reads as
 /// set up in settings too. Anything else, a non-zero exit or output that does not parse
 /// included, is `SignedOut` with nothing found.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "S18 piece 5 (detection and reuse) calls it")
+)]
 pub(crate) fn claude_detection(exit: Option<i32>, status: Option<&ClaudeStatus>) -> SigninState {
     let signed_out = |found| SigninState::SignedOut { found };
     let Some(status) = status.filter(|status| exit == Some(0) && status.logged_in) else {
@@ -86,6 +98,10 @@ pub(crate) fn claude_detection(exit: Option<i32>, status: Option<&ClaudeStatus>)
 }
 
 /// Whether the status names Anthropic's own API, or no provider at all.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "S18 piece 5 (detection and reuse) calls it")
+)]
 fn first_party(status: &ClaudeStatus) -> bool {
     status
         .api_provider
@@ -112,11 +128,22 @@ pub(crate) fn claude_signed_in(
 
 /// Whether `codex login status` says signed in: exit 0. Its output is never read (stderr
 /// prints a masked key prefix).
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "S18 pieces 4 and 5 (Codex's sign-in, detection and reuse) call it"
+    )
+)]
 pub(crate) fn codex_logged_in(exit: Option<i32>) -> bool {
     exit == Some(0)
 }
 
 /// Detection's verdict on Codex, before `account/read`.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "S18 piece 5 (detection and reuse) calls it")
+)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CodexDetect {
     /// `login status` is not 0: nothing found.
@@ -127,6 +154,10 @@ pub(crate) enum CodexDetect {
     Keyring,
 }
 
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "S18 piece 5 (detection and reuse) calls it")
+)]
 impl CodexDetect {
     /// "Exit 0, then a stat (never an open) of `~/.codex/auth.json`: present is a file-mode
     /// login, reusable; absent is a keyring or Windows secrets login, not reusable". `file_present`
@@ -157,6 +188,13 @@ impl CodexDetect {
 
 /// The account behind `account/read`: a `ChatGPT` sign-in's `email` and `plan_type`. `None` for
 /// no account or another kind (an API key, Bedrock), which is not a plan login.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "S18 pieces 4 and 5 (Codex's sign-in, detection and reuse) call it"
+    )
+)]
 pub(crate) fn codex_identity(response: &GetAccountResponse) -> Option<Identity> {
     match response.account.as_ref()? {
         Account::Chatgpt(account) => Some(Identity {

@@ -129,6 +129,46 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     }
 }
 
+/// Writes the `sh` script `bytes` to `path` atomically, as [`write_atomic`] does, with mode 0700
+/// set before the rename: the sign-in's `BROWSER` shim, which only its owner may run or change.
+#[cfg(unix)]
+pub(crate) fn write_script(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt as _;
+    let name = path
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no file name"))?;
+    let mut tmp_name = std::ffi::OsString::from(".");
+    tmp_name.push(name);
+    tmp_name.push(".tmp");
+    let tmp = path.with_file_name(tmp_name);
+    let written = (|| {
+        let mut file = open_truncate(&tmp)?;
+        file.write_all(bytes)?;
+        file.set_permissions(std::fs::Permissions::from_mode(0o700))?;
+        file.sync_all()
+    })();
+    match written.and_then(|()| std::fs::rename(&tmp, path)) {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            drop(remove_file(&tmp));
+            Err(err)
+        }
+    }
+}
+
+/// Creates `path` new and empty, readable and writable by its owner alone (mode 0600, set again
+/// on the open file so no umask widens or narrows it). An existing file or a link at `path` is
+/// refused: a sign-in run's URL file.
+#[cfg(unix)]
+pub(crate) fn create_private(path: &Path) -> io::Result<()> {
+    use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
+    let file = open_no_follow(
+        OpenOptions::new().write(true).create_new(true).mode(0o600),
+        path,
+    )?;
+    file.set_permissions(std::fs::Permissions::from_mode(0o600))
+}
+
 /// Removes `path` whatever it is: a folder with everything in it, or a file or link (never
 /// what a link points to). A missing path is fine.
 pub(crate) fn remove_any(path: &Path) -> io::Result<()> {

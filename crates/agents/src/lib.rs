@@ -27,20 +27,25 @@
 //! - Sign-in (S18, decision 0046): the sign-in states and codes, the pasted code, the whole
 //!   environment of every sign-in, status and detection child (`signin/env.rs`), the runner
 //!   that starts one and keeps its output in a 64 KB ring never logged (`signin/run.rs`), the
-//!   status parsers (`status.rs`) and file identity (`fileid.rs`). The Claude and Codex flows,
-//!   detection and reuse build on these.
+//!   status parsers (`status.rs`) and file identity (`fileid.rs`); one job model for every
+//!   sign-in, sign-out and status check (`signin/job.rs`, one job per agent on its own thread);
+//!   Claude's flow (`signin/claude.rs`: hidden `auth login`, status polled every 1.5 s, the
+//!   nudge at 30 s, expiry at 10 minutes, the paste route, sign-out) and its `BROWSER` shim on
+//!   macOS and Linux (`signin/shim.rs`). Codex's flow, detection and reuse build on these.
 //!
 //! # Interface
 //!
 //! - [`Agents::start`]`(config, launcher, timer)` gives an [`Agents`] and the `Receiver` of
 //!   [`AgentsEvent`]s; `install`, `pause`, `retry(agent, use_system_proxy)`, `state` and
-//!   `installed`.
+//!   `installed`; `sign_in(agent, Method)`, `cancel_sign_in`, `paste_code(agent, PasteCode)`,
+//!   `sign_out`, `check_status` (each `Result<(), SigninError>`) and `signin_state`.
 //! - [`AgentsConfig`], [`InstallConfig`], [`NodeSearch`], [`Clock`] and [`SystemClock`].
 //! - [`InstallState`], [`Failure`], [`FailureKind`] (with its error code), [`InstallLog`] and
 //!   [`Installed`].
 //! - [`SigninState`], [`Found`], [`LoginFrom`], [`Source`], [`SigninCode`] (with its error
-//!   code), [`PasteCode`] and [`SigninConfig`]; [`AgentsEvent::Signin`] and
-//!   [`AgentsEvent::OpenUrl`]; [`same_file`] and [`is_sign_in_again`].
+//!   code), [`Method`], [`SigninError`], [`PasteCode`] and [`SigninConfig`];
+//!   [`AgentsEvent::Signin`] and [`AgentsEvent::OpenUrl`]; [`same_file`] and
+//!   [`is_sign_in_again`].
 //! - [`Snapshot`] and [`Platform`].
 //! - [`keys`]: each agent's API key in the OS keychain (`store`, `load`, `clear`, `available`).
 //!
@@ -55,13 +60,17 @@
 //!   outside any sandbox, as `node <script>`: never `npm.cmd`, a shell or a `PATH` lookup.
 //! - No log holds a URL's user name or password, raw npm output, or a path outside the data
 //!   folder.
-//! - Callers never wait on I/O: the work runs on the worker thread and one thread per install.
+//! - Callers never wait on I/O: the work runs on the worker thread, one thread per install and
+//!   one per sign-in job.
 //!   Installs run one after another, and a paused install sends nothing after its `Paused`.
 //! - Nothing runs while the app is idle once installs are done.
 //! - An API key lives only in the OS keychain: never in a file, a log, a `Debug` or an error.
 //! - Clauseo never opens or reads an agent's credential, and no file under `src` names one
 //!   outside a comment (`tests/credential_names.rs`). Emails and plans come only from the
 //!   vendors' own status output. A pasted code is zeroed once written and never logged.
+//! - Only an address the `BROWSER` shim captured, on one of the snapshot's sign-in hosts over
+//!   https, becomes `OpenUrl`, once; an address in a run's output never does. No status
+//!   process runs once a sign-in is confirmed, cancelled, expired or failed.
 //! - A sign-in, status or detection child gets exactly the environment `signin/env.rs` builds
 //!   (`SSH_*`, `NO_BROWSER` and `CLAUDE_CODE_REMOTE` removed). **The caller's launcher must be
 //!   made with `SpawnOptions::clear_env`** (R20's desktop wiring): a launcher that inherits the
@@ -100,13 +109,6 @@ mod receipt;
 mod signin;
 mod snapshot;
 mod state;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "S18's foundation: the Claude and Codex sign-in flows that call it come next"
-    )
-)]
 mod status;
 mod sysproxy;
 mod worker;
@@ -122,7 +124,9 @@ pub use log::InstallLog;
 pub use pins::{AgentPins, PinsError};
 pub use platform::{Arch, Libc, Os, Platform};
 pub use receipt::{install_folder, install_root, script_path};
-pub use signin::{Found, LoginFrom, PasteCode, SigninCode, SigninState, Source};
+pub use signin::{
+    Found, LoginFrom, Method, PasteCode, SigninCode, SigninError, SigninState, Source,
+};
 pub use snapshot::{
     AgentEntry, AgentSizes, NPM_REGISTRY, NodeArchive, NodeEntry, Snapshot, SnapshotError,
 };
