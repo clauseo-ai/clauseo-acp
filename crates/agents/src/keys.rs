@@ -16,9 +16,14 @@
 //!   item's bytes (`BadEncoding`, `BadDataFormat`), so neither their `Debug` nor their `Display`
 //!   is ever used. A loaded key comes back as `Zeroizing<String>`; an unreadable item's bytes
 //!   are zeroed before the error returns.
-//! - [`store`] refuses an empty key, one over [`MAX_KEY_BYTES`] (Credential Manager caps an item
-//!   at 2,560 bytes) and one with whitespace or a control character (a pasted line break would
-//!   reach the agent's environment); the caller trims what the lawyer pasted.
+//! - The rule for a key is one function, [`refusal`]: it takes only printable ASCII, bytes
+//!   0x21–0x7E (no space, no line break, no control character, no non-ASCII such as U+200B or
+//!   U+FEFF), and at most [`MAX_KEY_BYTES`] (Credential Manager caps an item at 2,560 bytes). Real
+//!   Anthropic and `OpenAI` keys are printable ASCII. [`store`] applies it before writing, and
+//!   [`load`] applies it to the stored item, so a key edited in Keychain Access or planted by
+//!   another app cannot reach the agent's environment. The caller trims what the lawyer pasted.
+//! - A stored item that fails the rule is a [`KeyError::StoredInvalid`], never `Ok(None)`, which
+//!   would read as "no key".
 //! - Every call is a blocking keychain call (macOS may show a prompt), so the caller keeps them
 //!   off the host's actor: desktop loads the keys once at start on the agents thread and keeps
 //!   them in memory.
@@ -93,6 +98,13 @@ pub enum KeyError {
         agent: AgentId,
         /// What is wrong with it, without the key.
         reason: &'static str,
+    },
+    /// The keychain holds an item for `agent` that is not a key [`store`] would take (edited in
+    /// Keychain Access, or planted by another app). It is not returned.
+    #[error("the stored key is not valid: {agent}'s API key in the keychain must be entered again")]
+    StoredInvalid {
+        /// The agent whose key it was.
+        agent: AgentId,
     },
     /// The keychain refused access (locked, or the lawyer denied the prompt).
     #[error("the keychain refused access to {agent}'s API key")]
@@ -177,8 +189,8 @@ impl Keychain {
         }
     }
 
-    /// Stores `key` as `agent`'s key, replacing any; refuses it (writing nothing) when it is
-    /// empty, over [`MAX_KEY_BYTES`], or has whitespace or a control character.
+    /// Stores `key` as `agent`'s key, replacing any; refuses it (writing nothing) unless it is
+    /// printable ASCII of at most [`MAX_KEY_BYTES`] bytes (see [`refusal`]).
     pub fn store(&self, agent: &AgentId, key: &str) -> Result<(), KeyError> {
         if let Some(reason) = refusal(key) {
             return Err(KeyError::Invalid {
@@ -201,7 +213,8 @@ impl Keychain {
         }
     }
 
-    /// `agent`'s key, or `None` when there is none (always `None` with no keychain).
+    /// `agent`'s key, or `None` when there is none (always `None` with no keychain). A stored item
+    /// that is not a valid key is [`KeyError::StoredInvalid`], never `None`.
     pub fn load(&self, agent: &AgentId) -> Result<Option<Zeroizing<String>>, KeyError> {
         let bytes: Option<Vec<u8>> = match &self.backend {
             Backend::None => None,
@@ -249,29 +262,41 @@ fn lock(items: &Mutex<Items>) -> MutexGuard<'_, Items> {
     items.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Why [`Keychain::store`] refuses `key`, or `None` when it takes it.
+/// Why a key is refused, or `None` when it is taken: [`store`] refuses it and [`load`] treats a
+/// stored item that fails it as invalid. A key is 1 to [`MAX_KEY_BYTES`] bytes, each printable
+/// ASCII (0x21–0x7E): no space, no line break, no control character, no non-ASCII character.
 fn refusal(key: &str) -> Option<&'static str> {
     if key.is_empty() {
         Some("it is empty")
     } else if key.len() > MAX_KEY_BYTES {
         Some("it is too long")
-    } else if key.chars().any(|c| c.is_whitespace() || c.is_control()) {
-        Some("it has a space, a line break or a control character")
+    } else if !key.bytes().all(|b| (0x21..=0x7e).contains(&b)) {
+        Some(
+            "it is not printable ASCII (a space, a line break, a control or a non-ASCII character)",
+        )
     } else {
         None
     }
 }
 
-/// The item's bytes as a key; an item that is not UTF-8 is zeroed and reads as unreadable.
+/// The item's bytes as a key. An item that is not UTF-8 is zeroed and reads as unreadable; one
+/// that fails [`refusal`] is zeroed and reads as [`KeyError::StoredInvalid`], which never says
+/// what is wrong with it beyond that.
 fn into_key(agent: &AgentId, bytes: Vec<u8>) -> Result<Zeroizing<String>, KeyError> {
-    match String::from_utf8(bytes) {
-        Ok(key) => Ok(Zeroizing::new(key)),
+    let key = match String::from_utf8(bytes) {
+        Ok(key) => Zeroizing::new(key),
         Err(err) => {
             drop(Zeroizing::new(err.into_bytes()));
-            Err(KeyError::Keychain {
+            return Err(KeyError::Keychain {
                 agent: agent.clone(),
                 kind: "an unreadable item",
-            })
+            });
         }
+    };
+    if refusal(&key).is_some() {
+        return Err(KeyError::StoredInvalid {
+            agent: agent.clone(),
+        });
     }
+    Ok(key)
 }
