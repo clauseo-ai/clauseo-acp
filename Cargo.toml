@@ -172,9 +172,8 @@ rustix = "1.1.5"
 # clauseo-sandbox: the macOS proxy settings and PAC runs of the egress proxy's upstream lookup
 # (crates/sandbox/src/proxy/upstream/macos.rs). Only the modules the crate line names.
 objc2-cf-network = { version = "0.3.2", default-features = false }
-# clauseo-counts: gzip for the bodies it sends (already in the tree through tauri-plugin-updater;
-# the default rust_backend is pure Rust and builds for wasm32), and its compile-fail test (dev only).
-flate2 = "1.1.10"
+# clauseo-counts: its compile-fail test (dev only). Its gzip uses the flate2 entry above, whose
+# default rust_backend is pure Rust and builds for wasm32.
 trybuild = "1.0.122"
 
 [workspace.lints.rust]
