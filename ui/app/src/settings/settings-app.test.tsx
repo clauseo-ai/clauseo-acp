@@ -261,9 +261,7 @@ test("a key the host locks disables its row, which says who manages it and sends
   const night = side(el, "Theme", "Night");
   expect(night?.disabled || night?.hasAttribute("data-disabled")).toBe(true);
   const row = night?.closest(".set-row");
-  expect(row?.querySelector('[data-testid="managed"]')?.textContent).toBe(
-    "Managed by your organisation",
-  );
+  expect(row?.querySelector('[data-testid="managed"]')?.textContent).toBe("Managed by firm");
   await act(async () => night?.click());
   expect(transport.only("next_command")).toEqual([]);
   expect(html().dataset["theme"]).toBe("day");
@@ -289,7 +287,7 @@ test("every locked control names its managed line in aria-describedby: switches,
       .filter((id) => id !== "")
       .map((id) => document.getElementById(id)?.textContent ?? "")
       .join(" ");
-  const managed = "Managed by your organisation";
+  const managed = "Managed by firm";
   expect(el.querySelectorAll('[data-testid="managed"]')).toHaveLength(4);
   expect(described(el.querySelector('[aria-label="Theme"]'))).toBe(managed);
   expect(described(el.querySelector('[aria-label="Reduced motion"]'))).toBe(managed);

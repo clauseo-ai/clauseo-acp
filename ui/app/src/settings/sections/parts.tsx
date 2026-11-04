@@ -66,7 +66,7 @@ export function Managed({ id, className }: { id: string; className?: string }) {
   const w = useSettingsWords();
   return (
     <p id={id} className={cn(settingNote, className)} data-testid="managed">
-      {w.say(w.s("Managed by your organisation"))}
+      {w.say(w.s("Managed by firm"))}
     </p>
   );
 }
