@@ -2,8 +2,6 @@
 //! wait for every commit and snapshot in flight, then stop the snapshot and matter threads and
 //! close the store.
 
-use clauseo_protocol::HostError;
-
 use super::input::Reply;
 use super::{Actor, HostPhase, turn};
 use crate::error::Error;
@@ -51,10 +49,7 @@ pub(super) async fn close(actor: Actor) -> Result<(), Error> {
 
 /// Answers every shutdown call: `Ok`, or the close's error.
 pub(super) fn answer(closed: Result<(), Error>, replies: Vec<Reply<()>>) -> Result<(), Error> {
-    let shared = closed
-        .as_ref()
-        .copied()
-        .map_err(|error| HostError::new(error.code(), error.to_string()));
+    let shared = closed.as_ref().copied().map_err(Error::to_wire);
     for reply in replies {
         let _gone = reply.send(shared.clone().map_err(Error::Refused));
     }

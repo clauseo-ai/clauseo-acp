@@ -90,8 +90,8 @@ fn held_open_by(folder: &Path, path: &MatterPath, given: Option<&[String]>) -> O
 
 /// Whether a rename or delete of a matter file that failed with `err` failed because another
 /// program holds the file, so the failure is `matter.file_locked` and not an I/O failure. Only on
-/// Windows, by [`held_by_code`]; `held` asks [`held_open`] for the file at that moment, and is
-/// called only for an access denied. Elsewhere `false`: an open file never stops a rename or
+/// Windows, by [`held_by_code`]; `held` asks [`held_open`] for the target at that moment, and
+/// is called only for an access denied, a sharing violation or a lock violation. Elsewhere `false`: an open file never stops a rename or
 /// delete on macOS or Linux.
 pub(crate) fn held_at_write(err: &std::io::Error, held: impl FnOnce() -> bool) -> bool {
     #[cfg(windows)]
@@ -105,18 +105,19 @@ pub(crate) fn held_at_write(err: &std::io::Error, held: impl FnOnce() -> bool) -
     }
 }
 
-/// [`held_at_write`] by the Windows error code: `ERROR_SHARING_VIOLATION` (32) and
-/// `ERROR_LOCK_VIOLATION` (33) always; `ERROR_ACCESS_DENIED` (5) only when `held` says the
-/// file is held open now (an owner file beside it, or a no-share open that fails), since 5 is
-/// also a real permission denial (a folder without write access), where "close it in Word"
-/// would be wrong. Any other code, or none, is not. Plain arithmetic, so tested on every OS.
+/// [`held_at_write`] by the Windows error code: `ERROR_ACCESS_DENIED` (5),
+/// `ERROR_SHARING_VIOLATION` (32) and `ERROR_LOCK_VIOLATION` (33) only when `held` says the
+/// target is held open now (an owner file beside it, or a no-share open that fails). Each has
+/// another cause where "close it in Word" would be wrong: 5 is also a real permission denial (a
+/// folder without write access), and 32 or 33 on a rename can come from the source, our own
+/// temp file (an antivirus scanning it). Any other code, or none, is not, and `held` is not
+/// asked. Plain arithmetic, so tested on every OS.
 #[cfg(any(windows, test))]
 pub(crate) fn held_by_code(code: Option<i32>, held: impl FnOnce() -> bool) -> bool {
-    match code {
-        Some(SHARING_VIOLATION | LOCK_VIOLATION) => true,
-        Some(ACCESS_DENIED) => held(),
-        _ => false,
-    }
+    matches!(
+        code,
+        Some(ACCESS_DENIED | SHARING_VIOLATION | LOCK_VIOLATION)
+    ) && held()
 }
 
 /// [`held_open`] for a path as an agent names it: absolute, or relative to `folder` (the

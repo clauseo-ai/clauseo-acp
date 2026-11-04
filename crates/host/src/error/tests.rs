@@ -86,6 +86,13 @@ fn file_locked_names_its_files_and_no_path_in_the_message() {
         assert_eq!(error.files(), paths.as_slice());
         assert_eq!(error.message(), "matter: 2 files open in another program");
     }
+    let one = Error::from(clauseo_matters::Error::FileLocked {
+        paths: vec![MatterPath::new("Brief.docx").unwrap()],
+    });
+    assert_eq!(
+        one.to_wire().message(),
+        "matter: 1 file open in another program"
+    );
     let refusal = HostError::new(ErrorCode::MatterFileLocked, "x").with_files(paths.clone());
     assert_eq!(Error::Refused(refusal.clone()).to_wire(), refusal);
     assert_eq!(wire(Error::Closed).files(), []);

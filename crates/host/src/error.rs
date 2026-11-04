@@ -64,7 +64,10 @@ impl Error {
             Self::Refused(refusal) => refusal.clone(),
             Self::Matters(clauseo_matters::Error::FileLocked { paths }) => HostError::new(
                 ErrorCode::MatterFileLocked,
-                format!("matter: {} files open in another program", paths.len()),
+                match paths.len() {
+                    1 => "matter: 1 file open in another program".to_owned(),
+                    count => format!("matter: {count} files open in another program"),
+                },
             )
             .with_files(paths.clone()),
             Self::Invalid(_)
@@ -94,7 +97,7 @@ impl From<futures::channel::oneshot::Canceled> for Error {
 
 /// The wire form: the code, the `Display` text as the message, `retryable` from the code. A
 /// refusal is passed on as it was made. A matter's `FileLocked` names its files in
-/// `HostError.files` and not in the message, which never holds a path.
+/// `HostError.files` and not in the message.
 impl From<Error> for HostError {
     fn from(error: Error) -> Self {
         match error {

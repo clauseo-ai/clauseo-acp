@@ -1809,7 +1809,8 @@ export type HostError = {
 	matter?: MatterId,
 	/**
 	 *  The matter's files the failure is about: for `matter.file_locked`, the files held open,
-	 *  sorted. Missing when it names none. Paths go here, never in `message`.
+	 *  sorted. Missing when it names none. For `matter.file_locked` the files are here, not in
+	 *  `message`.
 	 */
 	files?: MatterPath[],
 };
