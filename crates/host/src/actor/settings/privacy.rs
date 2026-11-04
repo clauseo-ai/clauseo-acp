@@ -5,9 +5,11 @@
 //!
 //! The rule 0036 sets for the host, in two halves:
 //! 1. Off is saved first. Turning counts off writes `privacy.counts: false` to `settings.json`
-//!    before it deletes `<data_dir>/counts/`, and stands even when the delete fails (or the
-//!    write does): counts turn off in memory, and the next start opens them off and tries the
-//!    delete again. Off is never refused, except by a policy lock, which is off already.
+//!    before it deletes `<data_dir>/counts/`, and stands when the delete fails: the next start
+//!    opens counts off and tries the delete again. When the write itself fails, the command is
+//!    refused (`internal`) and the setting has not changed, so the switch still shows on; counts
+//!    stop anyway, but only for this session: the next start reads `true` and counts under a
+//!    new id. Off is otherwise never refused, but by a policy lock, which is off already.
 //! 2. On is refused while the old counts cannot go. `Counts::set_enabled(true)` deletes a folder
 //!    whose delete failed before it makes a new id; while that fails, the command is refused with
 //!    `store.io` and `privacy.counts` stays `false`, so the old id is never resumed.
@@ -17,6 +19,9 @@
 //! after the marker exists changes nothing and answers `Done`. Without counts
 //! (`HostConfig::with_counts` not called) the switches are still saved, `FirstAct` changes
 //! nothing, and `counts_started` reads `false`.
+//!
+//! Every app subscriber gets `SettingsChanged` whenever the view changed, a refused command's
+//! included (a first act whose settings write failed has still started counts).
 //!
 //! Like `SetUiSettings`, both commands log only their receipt: the switches are not log state.
 
@@ -49,25 +54,39 @@ pub(in crate::actor) fn set_privacy_settings(
     ctx: &CommandCtx,
     patch: &PrivacyPatch,
 ) {
-    if let Err(error) = apply(actor, ctx, &patch_in(patch)) {
-        actor.finish_command(ctx.id, Err(error));
+    let patch = patch_in(patch);
+    let before = view(actor);
+    let settings_before = actor.effective.settings().privacy.clone();
+    let applied = apply(actor, &patch);
+    counting::privacy_changed(actor, &settings_before);
+    // An empty patch writes nothing; a refused one tells only what changed regardless.
+    let sent = applied.is_ok() && patch != settings::PrivacyPatch::default();
+    answer(actor, ctx, before, sent, applied);
+}
+
+fn apply(actor: &mut Actor, patch: &settings::PrivacyPatch) -> Result<(), Error> {
+    actor.effective.check_privacy_patch(patch)?;
+    match patch.counts {
+        Some(on) => switch(actor, on, patch),
+        None => Ok(actor.effective.apply_privacy_patch(&SystemFiles, patch)?),
     }
 }
 
-fn apply(actor: &mut Actor, ctx: &CommandCtx, patch: &settings::PrivacyPatch) -> Result<(), Error> {
-    actor.effective.check_privacy_patch(patch)?;
-    let before = view(actor);
-    let settings_before = actor.effective.settings().privacy.clone();
-    match patch.counts {
-        Some(on) => switch(actor, on, patch)?,
-        None => actor.effective.apply_privacy_patch(&SystemFiles, patch)?,
-    }
-    counting::privacy_changed(actor, &settings_before);
-    // An empty patch writes nothing, so nothing changed to tell anyone about.
-    if *patch != settings::PrivacyPatch::default() || view(actor) != before {
+/// `SettingsChanged` when the view moved from `before` (or `publish_anyway` says so), on
+/// success and failure alike, then the receipt or the refusal.
+fn answer(
+    actor: &mut Actor,
+    ctx: &CommandCtx,
+    before: PrivacySettings,
+    publish_anyway: bool,
+    result: Result<(), Error>,
+) {
+    if publish_anyway || view(actor) != before {
         publish(actor);
     }
-    super::receipt(actor, ctx)
+    if let Err(error) = result.and_then(|()| super::receipt(actor, ctx)) {
+        actor.finish_command(ctx.id, Err(error));
+    }
 }
 
 /// `FirstAct`: the welcome's button, with the switch as the lawyer left it. Once the first act
@@ -75,20 +94,19 @@ fn apply(actor: &mut Actor, ctx: &CommandCtx, patch: &settings::PrivacyPatch) ->
 /// to `on` ([`switch`]); a policy lock on `privacy.counts` stands over `on`, and only the marker
 /// is written.
 pub(in crate::actor) fn first_act(actor: &mut Actor, ctx: &CommandCtx, on: bool) {
-    if let Err(error) = first_act_in(actor, ctx, on) {
-        actor.finish_command(ctx.id, Err(error));
-    }
+    let before = view(actor);
+    let result = first_act_in(actor, on);
+    answer(actor, ctx, before, false, result);
 }
 
-fn first_act_in(actor: &mut Actor, ctx: &CommandCtx, on: bool) -> Result<(), Error> {
+fn first_act_in(actor: &mut Actor, on: bool) -> Result<(), Error> {
     let Some(counts) = actor.counts.clone() else {
         tracing::debug!("no usage counts in this host: the first act changes nothing");
-        return super::receipt(actor, ctx);
+        return Ok(());
     };
     if counts.consented() {
-        return super::receipt(actor, ctx);
+        return Ok(());
     }
-    let before = view(actor);
     if actor.effective.is_locked("privacy.counts") {
         // Policy keeps counts off: the marker alone, so the welcome is not shown again.
         counts
@@ -101,10 +119,7 @@ fn first_act_in(actor: &mut Actor, ctx: &CommandCtx, on: bool) -> Result<(), Err
         };
         switch(actor, on, &patch)?;
     }
-    if view(actor) != before {
-        publish(actor);
-    }
-    super::receipt(actor, ctx)
+    Ok(())
 }
 
 /// Sets `privacy.counts` to `on`, with the rest of `patch`, and counts with it, as the module
@@ -131,7 +146,8 @@ fn switch(actor: &mut Actor, on: bool, patch: &settings::PrivacyPatch) -> Result
 }
 
 /// The rule's first half: the setting is saved before anything is deleted, and counts turn off
-/// even when the write, the first-act marker or the delete fails.
+/// even when the write, the first-act marker or the delete fails. A failed write refuses the
+/// command: the setting is unchanged, so this off lasts only until the next start.
 fn turn_off(
     actor: &mut Actor,
     counts: &Counts,

@@ -247,3 +247,56 @@ fn the_privacy_switches_mirror_the_settings_crate() {
         serde_json::to_value(wire_patch).unwrap()
     );
 }
+
+/// Makes `settings.json` impossible to write: a folder takes its place, on every OS.
+fn break_settings_json(dir: &Dir) {
+    let file = dir.data().join("settings.json");
+    crate::write::remove_file(&file);
+    crate::write::write(&file.join("in-the-way"), b"");
+}
+
+// The review's first defect: off whose settings write fails is refused, counts stop for this
+// session only, and the switch still shows on, which is what the next start will read.
+#[test]
+fn off_whose_settings_write_fails_is_refused_and_lasts_only_this_session() {
+    let dir = Dir::new("privacy_off_unwritable", &[]);
+    let counts = open_counts(&dir, true);
+    let host = start_counting(&dir, 0, &counts);
+    host.ok(HostCommand::FirstAct { counts: true });
+    assert_eq!(counts.mode(), Mode::Saving);
+    break_settings_json(&dir);
+    host.refused(set_counts(false), ErrorCode::Internal);
+    assert_eq!(counts.mode(), Mode::Off);
+    assert!(!dir.data().join("counts").exists());
+    assert!(
+        privacy(&host).counts,
+        "the setting did not change, so the view shows on"
+    );
+    host.shutdown();
+}
+
+// The review's second defect: a first act whose settings write fails has still started counts,
+// so every window hears of it.
+#[test]
+fn a_refused_first_act_that_started_counts_still_tells_the_window() {
+    let dir = Dir::new("privacy_first_act_unwritable", &[]);
+    let counts = open_counts(&dir, true);
+    let host = start_counting(&dir, 0, &counts);
+    let (mut sub, _) = subscribe_app(&host);
+    break_settings_json(&dir);
+    host.refused(HostCommand::FirstAct { counts: true }, ErrorCode::Internal);
+    assert!(marker(&dir));
+    assert_eq!(counts.mode(), Mode::Saving);
+    let started = PrivacySettings {
+        counts_started: true,
+        ..privacy_defaults()
+    };
+    assert_eq!(privacy(&host), started);
+    host.settle();
+    let changed = ready(&mut sub);
+    assert!(
+        matches!(&changed[..], [HostEvent::SettingsChanged(view)] if view.privacy == started),
+        "{changed:?}"
+    );
+    host.shutdown();
+}

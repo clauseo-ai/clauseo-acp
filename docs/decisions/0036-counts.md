@@ -135,10 +135,15 @@ cells, the weekly tally, the queue and the sender. Its row bans `matters`, `acp`
 - **The rule for the host above, as built** (`crates/host/src/actor/settings/privacy.rs`). Off
   writes `privacy.counts: false` first, then the marker if it is the first act, then
   `Counts::set_enabled(false)`; a failed delete is logged and retried by each tick and the next
-  start, and the command answers `Done`. On calls `Counts::set_enabled(true)` first; while it
-  fails (the old folder cannot be deleted) the command is refused with `store.io`, counts stay
-  off and `privacy.counts` stays `false`. A settings write that fails after on turns counts back
-  off. Off is never refused but by a policy lock.
+  start, and the command answers `Done`. When the settings write itself fails, counts still stop,
+  but the command is refused (`internal`) and `privacy.counts` has not changed: the switch keeps
+  showing on, and the stop lasts only this session, since the next start reads `true` and counts
+  under a new id. On calls `Counts::set_enabled(true)` first; while it fails (the old folder
+  cannot be deleted) the command is refused with `store.io`, counts stay off and
+  `privacy.counts` stays `false`. A settings write that fails after on turns counts back off.
+  Off is otherwise refused only by a policy lock. Every app subscriber gets `SettingsChanged`
+  whenever the view changed, a refused command's included: a first act whose settings write
+  failed has still written the marker and started counts.
 - **The host's call sites** (`crates/host/src/actor/counting.rs`). Each bump is one lock and one
   increment on the actor; with no counts it is a no-op with a debug log, and it never fails a
   command. Each event counts once per operation that succeeded, when it is durable:
@@ -148,6 +153,8 @@ cells, the weekly tally, the queue and the sender. Its row bans `matters`, `acp`
     worker as `ListPapers` lists them, and only while counts are on). `place` is
     `clauseo_matters::place` (0032), read on a `clauseo-place` thread since it stats the folder,
     and counted by its kind alone (`local`, `network`, `cloud_sync`; never the service's name).
+    One `clauseo-place` thread serves the process, so a stat a network share holds up strands
+    one thread at most and never the actor.
     `protection` is `not_protected` until R17. The Scratch matter is not counted.
   - `question_sent`, at the prompt's commit: `now` (started at once, or sent now over a running
     answer), `queued`, or `steer`. An agent with no value in the schema (`fake-agent`, a firm's
@@ -165,9 +172,10 @@ cells, the weekly tally, the queue and the sender. Its row bans `matters`, `acp`
   - Left to their owners: `limit` (R16's view), `agent_install` and `sign_in` (R20),
     `permission_asked` (R18), `update` (R23), `onboarding_step`, `error_shown`,
     `break_shown` and the webview's `feature_used` values through `count_ui` (desktop).
-  - `feature_used.versions` is not counted in the host: opening Versions makes no host call, and
-    `compare_versions` is the Versions panel's Compare, which it asks again whenever the matter
-    moves, so counting it would count attempts. Both come from the webview through `count_ui`.
+  - `feature_used.versions` moves to the webview's `count_ui` (decided 2026-11-04): opening
+    Versions makes no host call, and `compare_versions` is the Versions panel's Compare, which it
+    asks again whenever the matter moves, so counting it in the host would count attempts, not
+    uses. `undo` and `restore` stay host-counted, once per success.
 
 ## Status
 
