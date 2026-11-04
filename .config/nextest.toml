@@ -38,6 +38,14 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 filter = 'package(clauseo-sandbox) & binary(jail) & test(/twenty_thousand/)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
+# host's window-specs test launches the host and fake_agent once for every scenario the window's
+# e2e specs play, one after another, so it grows with each new spec: about 2.3 s on Linux and
+# macOS, 15 s on the Windows x64 runner, and past 30 s on both tries on Windows ARM64 (merge
+# group run 41827767038, for #352). 90 s still ends a hung one.
+[[profile.default.overrides]]
+filter = 'package(clauseo-host) & binary(host) & test(/^e2e_scenarios::/)'
+slow-timeout = { period = "30s", terminate-after = 3 }
+
 # counts' compile-fail test runs trybuild, which checks the crate and its dev-dependencies (the
 # windows crate, protocol, settings, proptest) in a target folder of its own before it compiles
 # each case. On the Windows runner that alone took 16 s and the whole test passed 30 s (PR #259,
