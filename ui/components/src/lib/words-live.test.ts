@@ -6,6 +6,7 @@ import { expect, test } from "vitest";
 import { clock } from "./words.ts";
 import {
   ERROR_WORDS,
+  errorHindi,
   errorSentence,
   errorWords,
   plannedKey,
@@ -97,10 +98,20 @@ test("the working line says Answering. in both languages", () => {
   expect(frame("hi", "Answering.")).toBe("उत्तर दिया जा रहा है।");
 });
 
-test("every error code has a sentence with Hindi, and none says agent", () => {
+test("every error code has a sentence with Hindi or Hindi later, and none says agent", () => {
   const codes = Object.keys(ERROR_WORDS) as ErrorCode[];
   expect(codes.length).toBeGreaterThan(30);
-  for (const c of codes) sound(errorWords("en", c), errorWords("hi", c));
+  // the stopped sentence is the thread's, so it is not in errorHindi and reads as undefined here
+  const hindi: Readonly<Record<string, string | null>> = errorHindi;
+  for (const c of codes) {
+    const en = errorWords("en", c);
+    // hi: later (Rohan, 2026-11-03): new strings ship in English; their English is still checked
+    if (hindi[ERROR_WORDS[c]] === null) {
+      expect(en, en).not.toMatch(BANNED_EN);
+      continue;
+    }
+    sound(en, errorWords("hi", c));
+  }
   // and the sentences a thread's agent picks (the agent.* codes'): ChatGPT's, a named agent's with a sample name, so
   // our own words around the slot are checked (a settings id itself is the lawyer's label, shown as written), and the
   // nameless one
