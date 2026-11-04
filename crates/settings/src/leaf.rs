@@ -10,8 +10,9 @@
 //! - its row in [`KEYS`], with its kind: the macOS shim asks managed preferences only for these
 //!   keys, and the registry calls any other value name unknown;
 //! - a [`Leaf`] variant, and its arms in `Leaf::parse`, `Leaf::key` and `Leaf::apply`, and
-//!   in `reset`, which a value that does not type puts the key back at its default
-//!   (`leaf/tests.rs`' `a_refused_key_goes_back_to_its_default` fails for a row with no arm);
+//!   in `reset` (`leaf/reset.rs`), which a value that does not type puts the key back at its
+//!   default (`leaf/tests.rs`' `a_refused_key_goes_back_to_its_default` fails for a row with no
+//!   arm);
 //! - for a `ui` key, its field in `UiPatch` (`ui.rs`, and its name in `UiPatch::keys`) and in
 //!   `Settings::apply_ui_patch`. Two tests in `ui/tests.rs` fail when `keys()` misses a `ui`
 //!   key or differs from the names the writer saves: `the_keys_are_the_names_the_writer_saves`
@@ -19,8 +20,8 @@
 //! - a sample value in `leaf/tests.rs`' `every_fixed_key_types_and_the_kinds_agree`, and a
 //!   value that is not the default in `a_refused_key_goes_back_to_its_default`;
 //! - for a key that decides what an agent can reach, or what Clauseo sends off the machine, its
-//!   name in [`SECURITY_KEYS`] and its arm in [`refuse`], which sets the value it is locked at
-//!   when its policy is unknown;
+//!   name in [`SECURITY_KEYS`] and its arm in [`refuse`] (`leaf/reset.rs`), which sets the value
+//!   it is locked at when its policy is unknown;
 //! - for a key a policy may only turn off, its name in [`OFF_ONLY_KEYS`] (`Effective::load`
 //!   ignores a policy `true` for it, with a warning).
 //!
@@ -28,18 +29,25 @@
 //! disagree, and the two samples tests fail when [`KEYS`] has a row without a sample.
 
 #[cfg(test)]
+mod mcp_tests;
+mod reset;
+#[cfg(test)]
+mod security_tests;
+#[cfg(test)]
 mod tests;
 
 use crate::policy::{Kind, kind_of};
 use crate::schema::{
-    AgentLaunch, Density, FontSize, Language, Lite, McpServerLaunch, Motion, PrivacySettings,
-    Settings, Theme, ToolsSettings,
+    AgentLaunch, Density, FontSize, Language, Lite, McpServerLaunch, Motion, Settings, Theme,
 };
 use crate::warning::{Origin, Warning, WarningKind};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+
+pub(crate) use reset::refuse;
+use reset::reset;
 
 /// Every key with a fixed name, and its kind. An agent's key is `agents.<id>`, an object.
 /// `schema::tests::the_keys_and_their_kinds_are_the_schemas` holds this to the schema.
@@ -407,57 +415,6 @@ impl Leaf {
         match self {
             Leaf::Refused(key) if refuse(&key, settings) => {}
             leaf => leaf.apply(settings),
-        }
-    }
-}
-
-/// Locks each security key `key` names at its refused value: `mcp.servers` empty, each
-/// `tools` and `privacy` key `false`. Kept apart from [`reset`], which restores the default,
-/// since a security key's default can be on. `key` is one of [`SECURITY_KEYS`], or a prefix
-/// ending in `.` (`tools.`) that names every security key under it; stage C adds keys under
-/// `plans.`.
-/// Returns whether `key` named any security key; when it did not, nothing changes.
-pub(crate) fn refuse(key: &str, settings: &mut Settings) -> bool {
-    let named = |security: &str| match key.strip_suffix('.') {
-        Some(_) => security.starts_with(key),
-        None => security == key,
-    };
-    let mut any = false;
-    for security in SECURITY_KEYS.into_iter().filter(|security| named(security)) {
-        any = true;
-        match security {
-            "mcp.servers" => settings.mcp.servers.clear(),
-            "tools.web_search" => settings.tools.web_search = false,
-            "tools.browser" => settings.tools.browser = false,
-            "privacy.counts" => settings.privacy.counts = false,
-            "privacy.crash_reports" => settings.privacy.crash_reports = false,
-            other => unreachable!("security key {other} has no refused value"),
-        }
-    }
-    any
-}
-
-/// Puts the setting `key` back to its default; for `agents.<id>`, drops that agent.
-fn reset(key: &str, settings: &mut Settings) {
-    match key {
-        "matters.default_location" => settings.matters.default_location = None,
-        "mcp.servers" => settings.mcp.servers.clear(),
-        "ui.theme" => settings.ui.theme = Theme::default(),
-        "ui.font_size" => settings.ui.font_size = FontSize::default(),
-        "ui.density" => settings.ui.density = Density::default(),
-        "ui.language" => settings.ui.language = Language::default(),
-        "ui.lite" => settings.ui.lite = Lite::default(),
-        "ui.motion" => settings.ui.motion = Motion::default(),
-        "tools.web_search" => settings.tools.web_search = ToolsSettings::default().web_search,
-        "tools.browser" => settings.tools.browser = ToolsSettings::default().browser,
-        "privacy.counts" => settings.privacy.counts = PrivacySettings::default().counts,
-        "privacy.crash_reports" => {
-            settings.privacy.crash_reports = PrivacySettings::default().crash_reports;
-        }
-        _ => {
-            if let Some(id) = agent_id(key) {
-                settings.agents.remove(id);
-            }
         }
     }
 }
