@@ -1,5 +1,6 @@
 //! What [`crate::Agents`] is started with: the data folder, the snapshot, the platform, the firm's
-//! install settings, the ids policy manages, where to look for the user's Node, and a clock.
+//! install settings, the ids policy manages, where to look for the user's Node, what sign-in
+//! runs are built from, and a clock.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
@@ -29,13 +30,17 @@ pub struct AgentsConfig {
     pub managed: BTreeSet<AgentId>,
     /// Where to look for a Node the user already has.
     pub node_search: NodeSearch,
+    /// What sign-in, status and detection runs are built from: each agent's home and the base
+    /// environment.
+    pub signin: SigninConfig,
     /// The receipt's install time and the progress throttle's clock.
     pub clock: Arc<dyn Clock>,
 }
 
 impl AgentsConfig {
     /// The embedded snapshot for `platform`, with no firm settings, nothing managed, the user's
-    /// Node searched for as [`NodeSearch::from_env`] finds it, and the system clock.
+    /// Node searched for as [`NodeSearch::from_env`] finds it, sign-in as
+    /// [`SigninConfig::from_env`] (no agent homes yet: R20 sets them), and the system clock.
     pub fn new(data_dir: PathBuf, platform: Platform) -> AgentsConfig {
         AgentsConfig {
             data_dir,
@@ -44,6 +49,7 @@ impl AgentsConfig {
             install: InstallConfig::default(),
             managed: BTreeSet::new(),
             node_search: NodeSearch::from_env(),
+            signin: SigninConfig::from_env(),
             clock: Arc::new(SystemClock),
         }
     }
@@ -57,6 +63,7 @@ impl std::fmt::Debug for AgentsConfig {
             .field("install", &self.install)
             .field("managed", &self.managed)
             .field("node_search", &self.node_search)
+            .field("signin", &self.signin)
             .finish_non_exhaustive()
     }
 }
@@ -87,6 +94,46 @@ pub struct InstallConfig {
     /// registry. Outside `test-support` the field does not exist, so every download is https.
     #[cfg(feature = "test-support")]
     pub allow_http_for_tests: bool,
+}
+
+/// What S18's runs are built from. Proxy and CA come from [`InstallConfig::proxy`] and
+/// [`InstallConfig::ca_certs`]: the same `network.*` keys.
+#[derive(Clone, Default)]
+#[non_exhaustive]
+pub struct SigninConfig {
+    /// Each agent's home folder, `<data_dir>/agents/<id>/home`: the text
+    /// `Locations::agent_home(id)` gives (`settings`), passed in by the caller and never
+    /// canonicalised. Claude's login store is keyed by this text (`CLAUDE_CONFIG_DIR`, and later
+    /// `CLAUDE_SECURESTORAGE_CONFIG_DIR` with the same text), so a differently spelt path is a
+    /// different login. This crate does not depend on `settings` and never computes it; an agent
+    /// with no entry has no sign-in of Clauseo's own.
+    pub homes: BTreeMap<AgentId, PathBuf>,
+    /// The environment each run's is built from: this process's (`std::env::vars_os`) outside
+    /// tests. Every run drops `SSH_*`, `NO_BROWSER`, `CLAUDE_CODE_REMOTE` and the agents' home
+    /// variables from it and adds its own; the child gets nothing else, so the caller's launcher
+    /// must clear the inherited environment (`SpawnOptions::clear_env`). A test passes its own
+    /// map here instead of changing its process's environment. `Debug` prints only how many
+    /// names it holds: values can be secrets.
+    pub base_env: BTreeMap<OsString, OsString>,
+}
+
+impl SigninConfig {
+    /// This process's environment as the base, and no agent homes.
+    pub fn from_env() -> SigninConfig {
+        SigninConfig {
+            homes: BTreeMap::new(),
+            base_env: std::env::vars_os().collect(),
+        }
+    }
+}
+
+impl std::fmt::Debug for SigninConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SigninConfig")
+            .field("homes", &self.homes)
+            .field("base_env", &format_args!("{} names", self.base_env.len()))
+            .finish()
+    }
 }
 
 /// Where to look for a Node the user already has: each folder of `path` (the `PATH` value),

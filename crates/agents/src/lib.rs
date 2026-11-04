@@ -1,5 +1,5 @@
 //! `clauseo-agents`: installs the agents' ACP adapters (claude-agent-acp, codex-acp) with no
-//! terminal and no admin rights.
+//! terminal and no admin rights, and signs the lawyer in through each vendor's own login (S18).
 //!
 //! # Owns
 //!
@@ -24,6 +24,11 @@
 //!   renamed into place, the receipt written last.
 //! - Progress, the four failure kinds and their logs, one download at a time, firm IT mode (IT's
 //!   runtime, an offline bundle, a mirror, a proxy and a CA file).
+//! - Sign-in (S18, decision 0046): the sign-in states and codes, the pasted code, the whole
+//!   environment of every sign-in, status and detection child (`signin/env.rs`), the runner
+//!   that starts one and keeps its output in a 64 KB ring never logged (`signin/run.rs`), the
+//!   status parsers (`status.rs`) and file identity (`fileid.rs`). The Claude and Codex flows,
+//!   detection and reuse build on these.
 //!
 //! # Interface
 //!
@@ -33,6 +38,9 @@
 //! - [`AgentsConfig`], [`InstallConfig`], [`NodeSearch`], [`Clock`] and [`SystemClock`].
 //! - [`InstallState`], [`Failure`], [`FailureKind`] (with its error code), [`InstallLog`] and
 //!   [`Installed`].
+//! - [`SigninState`], [`Found`], [`LoginFrom`], [`Source`], [`SigninCode`] (with its error
+//!   code), [`PasteCode`] and [`SigninConfig`]; [`AgentsEvent::Signin`] and
+//!   [`AgentsEvent::OpenUrl`]; [`same_file`] and [`is_sign_in_again`].
 //! - [`Snapshot`] and [`Platform`].
 //! - [`keys`]: each agent's API key in the OS keychain (`store`, `load`, `clear`, `available`).
 //!
@@ -51,25 +59,36 @@
 //!   Installs run one after another, and a paused install sends nothing after its `Paused`.
 //! - Nothing runs while the app is idle once installs are done.
 //! - An API key lives only in the OS keychain: never in a file, a log, a `Debug` or an error.
+//! - Clauseo never opens or reads an agent's credential, and no file under `src` names one
+//!   outside a comment (`tests/credential_names.rs`). Emails and plans come only from the
+//!   vendors' own status output. A pasted code is zeroed once written and never logged.
+//! - A sign-in, status or detection child gets exactly the environment `signin/env.rs` builds
+//!   (`SSH_*`, `NO_BROWSER` and `CLAUDE_CODE_REMOTE` removed). **The caller's launcher must be
+//!   made with `SpawnOptions::clear_env`** (R20's desktop wiring): a launcher that inherits the
+//!   app's environment would pass those names on, since a `LaunchSpec` can add variables but
+//!   never remove one.
 //!
 //! # Depends on
 //!
-//! `protocol` (`AgentId`), `process`, `serde`, `serde_json`, `futures`, `async-channel`,
-//! `ureq` (rustls, blocking, on the install's own thread), `rustls`, `sha2`, `base64`, `flate2`,
-//! `tar`, `zip`, `thiserror`, `dunce`, `zeroize` (the API keys); `keyring` on macOS and Windows
-//! only (the keychain; none on Linux); `nix` on Unix and `windows` on Windows (free disk space,
-//! the Windows proxy setting); `rcgen` with `test-support` only. Never `sandbox`, `tauri` or
-//! `tokio`.
+//! `protocol` (`AgentId`), `process`, `codex_appserver` (Codex's `account/read`), `serde`,
+//! `serde_json`, `futures`, `async-channel`, `ureq` (rustls, blocking, on the install's own
+//! thread), `rustls`, `sha2`, `base64`, `flate2`, `tar`, `zip`, `thiserror`, `dunce`, `zeroize`
+//! (the pasted code and the API keys); `keyring` on macOS and Windows only (the keychain; none
+//! on Linux); `nix` on Unix and `windows` on Windows (free disk space, the Windows proxy setting,
+//! file ids); `rcgen` with `test-support` only. Never `sandbox`, `tauri` or `tokio`; `settings`
+//! only in tests and the example (the caller passes the data folder and the agent homes in).
 //!
 //! # Start reading
 //!
 //! `snapshot.rs` and `pins.rs` (what installs), `worker.rs` (the `Agents` thread),
-//! `install.rs` (one agent's install), `download.rs`, `node.rs`, `receipt.rs`, `write.rs`.
+//! `install.rs` (one agent's install), `download.rs`, `node.rs`, `receipt.rs`, `write.rs`;
+//! for sign-in, `signin.rs` and its modules, then `status.rs` and `fileid.rs`.
 
 mod cancel;
 mod config;
 mod disk;
 mod download;
+mod fileid;
 mod install;
 mod integrity;
 pub mod keys;
@@ -78,8 +97,17 @@ mod node;
 mod pins;
 mod platform;
 mod receipt;
+mod signin;
 mod snapshot;
 mod state;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "S18's foundation: the Claude and Codex sign-in flows that call it come next"
+    )
+)]
+mod status;
 mod sysproxy;
 mod worker;
 mod write;
@@ -88,15 +116,18 @@ mod write;
 #[cfg(any(test, feature = "test-support"))]
 pub mod testing;
 
-pub use config::{AgentsConfig, Clock, InstallConfig, NodeSearch, SystemClock};
+pub use config::{AgentsConfig, Clock, InstallConfig, NodeSearch, SigninConfig, SystemClock};
+pub use fileid::same_file;
 pub use log::InstallLog;
 pub use pins::{AgentPins, PinsError};
 pub use platform::{Arch, Libc, Os, Platform};
 pub use receipt::{install_folder, install_root, script_path};
+pub use signin::{Found, LoginFrom, PasteCode, SigninCode, SigninState, Source};
 pub use snapshot::{
     AgentEntry, AgentSizes, NPM_REGISTRY, NodeArchive, NodeEntry, Snapshot, SnapshotError,
 };
 pub use state::{AgentsEvent, Failure, FailureKind, InstallState, Installed};
+pub use status::is_sign_in_again;
 pub use worker::Agents;
 
 /// Tests only: a host-name resolver standing in for the OS's. `Err` reads as a failed name

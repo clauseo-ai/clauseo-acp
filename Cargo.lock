@@ -931,6 +931,7 @@ dependencies = [
  "async-channel",
  "base64 0.22.1",
  "clauseo-agents",
+ "clauseo-codex_appserver",
  "clauseo-process",
  "clauseo-protocol",
  "clauseo-settings",

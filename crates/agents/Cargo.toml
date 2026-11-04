@@ -1,7 +1,7 @@
 [package]
 name = "clauseo-agents"
 version = "0.1.0"
-description = "Installs the agents' ACP adapters with no terminal: Node, resumable checked downloads, npm ci, receipts."
+description = "Installs the agents' ACP adapters with no terminal (Node, resumable checked downloads, npm ci, receipts) and signs the lawyer in through each vendor's own login."
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -16,6 +16,9 @@ test-support = ["dep:rcgen"]
 [dependencies]
 clauseo-protocol = { path = "../protocol" }
 clauseo-process = { path = "../process" }
+# Codex's `account/read` result (`GetAccountResponse`), read for the signed-in account's email
+# and plan; S18's sign-in starts `codex app-server` through it.
+clauseo-codex_appserver = { path = "../codex_appserver" }
 async-channel = { workspace = true, features = ["std"] }
 base64 = "0.22.1"
 dunce = { workspace = true }
@@ -30,6 +33,7 @@ ureq = { version = "3.5.0", default-features = false, features = [
   "rustls",
   "platform-verifier",
 ] }
+# The pasted sign-in code (S18) and the API keys (R20) are zeroed when dropped.
 zeroize = { workspace = true }
 zip = { version = "9.2.2", default-features = false, features = [
   "deflate-flate2",
