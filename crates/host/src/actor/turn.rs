@@ -16,6 +16,7 @@ mod cancel;
 mod close;
 mod end;
 mod failure;
+mod forced_mode;
 mod inputs;
 mod known;
 mod launch_checks;

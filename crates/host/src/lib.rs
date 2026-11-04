@@ -126,7 +126,8 @@
 //!   [`HostConfig::with_pre_write_guard`] names the program.
 //! - [`pre_write_guard::run`] reads one hook input object and returns 0, or
 //!   [`pre_write_guard::DENY`] with the reason on stderr (0 with a line starting
-//!   [`pre_write_guard::IGNORED`] when it could not read the input);
+//!   [`pre_write_guard::IGNORED`] when it could not read the input); with `--ask-all` (forced
+//!   ask) it writes Claude Code's `ask` decision on stdout for all but the local reads;
 //!   [`pre_write_guard::FLAG`] (then
 //!   `--matter <folder>`) is what the hook passes. It runs in the hook's own process, with no
 //!   host thread.

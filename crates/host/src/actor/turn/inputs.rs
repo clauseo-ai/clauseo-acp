@@ -66,6 +66,9 @@ pub(crate) enum AgentReply {
         mode: AgentChoiceId,
         result: Result<(), clauseo_acp::Error>,
     },
+    /// The switch back to `default` after a forced-ask agent moved itself to another mode
+    /// (`updates.rs`) answered.
+    ModeReset(Result<(), clauseo_acp::Error>),
     /// A steer into the running turn answered (`queue/steer.rs`).
     Steer(Box<super::queue::Steered>),
 }

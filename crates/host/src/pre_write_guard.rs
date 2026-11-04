@@ -131,7 +131,9 @@
 //!
 //! A refusal is exit code 2 with the reason on stderr, which Claude Code and Codex both take as a
 //! block; stdout stays empty, so a login profile's output under Codex's `$SHELL -lc` cannot spoil
-//! it. An unknown tool, or a known one with nothing held, is exit 0 with nothing written.
+//! it. Only Claude Code's entry in forced ask (`--ask-all`, `ask.rs`) writes stdout: its `ask`
+//! decision for every tool it does not refuse but the local reads. An unknown tool, or a known
+//! one with nothing held, is exit 0 with nothing written.
 //!
 //! It fails open, a decision (clauseo-acp-private#162): input it cannot read (empty, cut short,
 //! not JSON), or a shape it does not know (no absolute `cwd` or `--matter`, no `tool_name` or
@@ -145,6 +147,7 @@
 //! default and plan mode the permission check (ADR 0021) still stops a write to a held file; in
 //! acceptEdits and bypassPermissions this guard is the only stop. It never panics.
 
+mod ask;
 mod codex;
 mod names;
 mod shell;
@@ -184,14 +187,22 @@ const MAX_INPUT: u64 = 16 * 1024 * 1024;
 /// on `errors`, when a target is refused; 0 with an [`IGNORED`] line when the input could not be
 /// read; else 0 with nothing written. With `CLAUSEO_GUARD_TIMINGS` set in the environment (not
 /// empty, not `0`), one more line follows, the phase timings (`timings.rs`).
-pub fn run(args: &[OsString], input: impl Read, errors: impl Write) -> i32 {
+/// With `--ask-all` after the folder (forced ask, `agent/forced_ask.rs`), a tool it does not
+/// refuse that is not one of `ask::LOCAL_READS` gets Claude Code's `ask` decision on
+/// `output` (`ask.rs`); otherwise `output` stays empty.
+pub fn run(args: &[OsString], input: impl Read, output: impl Write, errors: impl Write) -> i32 {
     let on = timings::wanted(std::env::var_os(timings::ENV).as_deref());
-    run_timed(args, input, errors, on)
+    run_timed(args, input, (output, errors), on)
 }
 
 /// [`run`], with the phase timings ([`timings`]) on or off; when on, their line follows any
 /// other line on `errors`.
-fn run_timed(args: &[OsString], input: impl Read, mut errors: impl Write, on: bool) -> i32 {
+fn run_timed(
+    args: &[OsString],
+    input: impl Read,
+    (mut output, mut errors): (impl Write, impl Write),
+    on: bool,
+) -> i32 {
     timings::start(on);
     let mut bytes = Vec::new();
     let found = match input.take(MAX_INPUT).read_to_end(&mut bytes) {
@@ -202,11 +213,21 @@ fn run_timed(args: &[OsString], input: impl Read, mut errors: impl Write, on: bo
         Err(_) => Err(Ignored::Unreadable),
     };
     timings::mark("decide");
+    let refused = matches!(found, Ok(Some(_)));
     let (line, code) = match found {
         Ok(None) => (None, 0),
         Ok(Some(refusal)) => (Some(refusal.reason()), DENY),
         Err(ignored) => (Some(ignored.line()), 0),
     };
+    if !refused && ask::wanted(args) && ask::asks(&bytes) {
+        // As for `errors` below: when the agent stopped reading, nothing more can be done.
+        drop(
+            output
+                .write_all(ask::decision().as_bytes())
+                .and_then(|()| output.write_all(b"\n"))
+                .and_then(|()| output.flush()),
+        );
+    }
     // Nothing more can be done when the agent stopped reading; the exit code still decides.
     for line in line.into_iter().chain(timings::finish()) {
         drop(

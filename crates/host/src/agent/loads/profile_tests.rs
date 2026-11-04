@@ -340,6 +340,7 @@ fn keys(web_search: Switch, login: Login) -> ClaudeKeys<'static> {
         login,
         folders: folders(),
         seed_sites: SEED_SITES,
+        forced_ask: false,
     }
 }
 
@@ -450,6 +451,7 @@ fn the_guard_and_the_forced_keys_survive_the_profile_keys() {
     let guard = GuardHook {
         program: Path::new("/app/clauseo"),
         matter: Path::new("/matters/a"),
+        ask_all: false,
     };
     let keys = keys(OFF, Login::Bedrock);
     let meta = Value::Object(session_meta(

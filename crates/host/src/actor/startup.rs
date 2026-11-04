@@ -79,6 +79,7 @@ pub(super) async fn open(
         profile: parts.profile,
         managed_mcp: parts.managed_mcp,
         codex_hooks: parts.codex_hooks,
+        folder_check: parts.folder_check,
         pre_write_guard: parts.pre_write_guard,
         wiring: parts.wiring,
         counts: parts.counts,

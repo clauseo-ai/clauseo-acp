@@ -62,6 +62,9 @@ mod e2e_scenarios;
 #[path = "host/folder_support.rs"]
 mod folder_support;
 #[cfg(test)]
+#[path = "host/forced_ask.rs"]
+mod forced_ask;
+#[cfg(test)]
 #[path = "host/forget.rs"]
 mod forget;
 #[cfg(test)]

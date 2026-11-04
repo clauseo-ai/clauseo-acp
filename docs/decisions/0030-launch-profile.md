@@ -415,6 +415,24 @@ change from the settings window as `ui` does.
   running keeps its tools: its header keeps what it held (`actor/header_tools.rs`), and nothing
   re-reads the switches mid-session.
 
+### Forced ask in an unprotected matter
+
+- **2026-11-04 (Rohan; private `folder-rights.md`, decision 3).** A Claude session in a matter
+  whose folder is on a network drive or a drive without file permissions (the Windows folder
+  check, `agent/folder_support.rs`, answers `network` or `no_permissions` at that launch,
+  `session/load` included) runs in forced ask until the sandbox can fence such a folder. Codex
+  is refused there. A check that fails (an io error) is unknown and fails closed for Claude:
+  forced ask, nothing on the matter's row, and Codex not refused (its own sandbox applies). The host enforces four layers (`agent/forced_ask.rs`):
+  - **Modes:** `SetMode` takes only `default` and `plan` (any other id is `command.invalid`),
+    and a mode the agent moves to itself is switched back to `default`.
+  - **Options:** a permission request loses its `allow_always` options and any option whose id
+    names another mode (the plan exit's `acceptEdits`); an answer naming one is refused.
+  - **No `allowedTools`:** not the host's web rules, not the profile hook's.
+  - **The hook:** the guard's entry matches every tool (`*`, MCP tools included) and passes
+    `--ask-all`, so the guard answers `ask` for every tool but `Read`, `Glob`, `Grep`, `LS`,
+    `NotebookRead`, `TodoWrite` and `Task`; `WebSearch` and `WebFetch` ask too. The flag is an
+    argument, not a variable, so it never reaches the agent's shell.
+
 ### Deviations from the brief (PR-A)
 
 - **The skills API.** The brief's `write_skills(stetdoc, claude_dir, codex_home)` method is

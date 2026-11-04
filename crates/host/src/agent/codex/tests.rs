@@ -403,14 +403,18 @@ fn prepare_launch_checks_then_makes_the_home() {
         0x0190_0000_0000_7000_8000_0000_0000_0001,
     ))
     .unwrap();
-    let error = prepare_launch(id, &matter, &data, &home_in(&data)).unwrap_err();
+    let check = crate::agent::folder_support::FolderCheck {
+        matter: id,
+        source: crate::agent::folder_support::CheckSource::Windows,
+    };
+    let error = prepare_launch(&check, &matter, &data, &home_in(&data)).unwrap_err();
     assert_eq!(error.code(), ErrorCode::MatterCodexFolder);
     assert!(!data.join("agents").exists());
     write::remove_dir_all(&matter.join(".codex")).unwrap();
-    let (folder, support) = prepare_launch(id, &matter, &data, &home_in(&data)).unwrap();
+    let (folder, support) = prepare_launch(&check, &matter, &data, &home_in(&data)).unwrap();
     assert_eq!(folder, dunce::canonicalize(&matter).unwrap());
     // A folder the test made is fine on Windows, and off Windows nothing is checked.
-    assert_eq!(support, None);
+    assert_eq!(support, crate::agent::folder_support::Answer::Known(None));
     assert!(home_in(&data).join("config.toml").is_file());
     write::remove_dir_all(&root).unwrap();
 }

@@ -176,7 +176,7 @@ pub(crate) fn session_meta(
     if let Some(keys) = keys {
         profile::claude_options(&mut options, keys);
     }
-    if let Some(entry) = guard.and_then(|guard| guard_entry(guard.program, guard.matter)) {
+    if let Some(entry) = guard.and_then(guard_entry) {
         let mut settings = take_object(&mut options, "settings");
         let mut hooks = take_object(&mut settings, "hooks");
         let mut pre_tool_use = match hooks.remove("PreToolUse") {
@@ -228,6 +228,9 @@ pub(crate) struct GuardHook<'a> {
     pub(crate) program: &'a Path,
     /// The session's matter folder, passed as `--matter`.
     pub(crate) matter: &'a Path,
+    /// Forced ask (`agent/forced_ask.rs`): the hook runs before every tool, with
+    /// [`ASK_ALL_FLAG`](crate::agent::forced_ask::ASK_ALL_FLAG) after the folder.
+    pub(crate) ask_all: bool,
 }
 
 /// The tools the pre-write guard's hook runs before: Claude Code's file tools (`MultiEdit` is
@@ -240,7 +243,8 @@ pub(crate) const GUARD_MATCHER: &str = "Edit|Write|MultiEdit|NotebookEdit|Bash|P
 pub(crate) const GUARD_TIMEOUT_SECONDS: u64 = 10;
 
 /// The `PreToolUse` entry that runs `program` with [`pre_write_guard::FLAG`]
-/// (`crate::pre_write_guard`) and `--matter <matter>` before each of [`GUARD_MATCHER`]'s tools.
+/// (`crate::pre_write_guard`) and `--matter <matter>` before each of [`GUARD_MATCHER`]'s tools;
+/// with `ask_all`, before every tool (MCP tools included) and with `--ask-all` last.
 /// The matter folder goes as an argument because the hook input's `cwd` follows the agent's
 /// `cd`. `None`, with a warning, when `program` or `matter` is no UTF-8 string: JSON cannot
 /// carry it, and a lossy copy could run another program or guard another folder.
@@ -257,7 +261,12 @@ pub(crate) const GUARD_TIMEOUT_SECONDS: u64 = 10;
 /// adapter, so that needs an adapter downgrade.
 ///
 /// [`pre_write_guard::FLAG`]: crate::pre_write_guard::FLAG
-pub(crate) fn guard_entry(program: &Path, matter: &Path) -> Option<Value> {
+pub(crate) fn guard_entry(guard: GuardHook<'_>) -> Option<Value> {
+    let GuardHook {
+        program,
+        matter,
+        ask_all,
+    } = guard;
     let (Some(command), Some(matter)) = (program.to_str(), matter.to_str()) else {
         tracing::warn!(
             program = %program.display(),
@@ -267,16 +276,23 @@ pub(crate) fn guard_entry(program: &Path, matter: &Path) -> Option<Value> {
         );
         return None;
     };
+    let mut args = vec![
+        crate::pre_write_guard::FLAG,
+        crate::pre_write_guard::MATTER_FLAG,
+        matter,
+    ];
+    let matcher = if ask_all {
+        args.push(crate::agent::forced_ask::ASK_ALL_FLAG);
+        crate::agent::forced_ask::EVERY_TOOL
+    } else {
+        GUARD_MATCHER
+    };
     Some(serde_json::json!({
-        "matcher": GUARD_MATCHER,
+        "matcher": matcher,
         "hooks": [{
             "type": "command",
             "command": command,
-            "args": [
-                crate::pre_write_guard::FLAG,
-                crate::pre_write_guard::MATTER_FLAG,
-                matter,
-            ],
+            "args": args,
             "timeout": GUARD_TIMEOUT_SECONDS,
         }],
     }))

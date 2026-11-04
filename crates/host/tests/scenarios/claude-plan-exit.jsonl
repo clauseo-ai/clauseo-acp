@@ -1,0 +1,14 @@
+{"scenario":"claude-plan-exit","description":"A claude-acp session in a matter with no forced ask: the same plan exit, all three options offered and the auto-accept one chosen; the agent moves to acceptEdits and stays there; after the turn, the client's SetMode acceptEdits reaches the agent","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}","_meta":{"claudeCode":{"options":{"allowDangerouslySkipPermissions":false}}}}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1","modes":{"currentModeId":"default","availableModes":[{"id":"default","name":"Manual"},{"id":"acceptEdits","name":"Accept edits"},{"id":"plan","name":"Plan"}]}}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t-plan-1","title":"Ready to code?","kind":"switch_mode","status":"pending"}}}
+{"note":"claude-agent-acp's plan exit (ExitPlanMode): its three options, written from the adapter's source; the auto-accept one is allow_always with the mode as its id","request":{"id":"perm-1","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"t-plan-1","title":"Ready to code?","kind":"switch_mode","status":"pending"},"options":[{"optionId":"acceptEdits","name":"Yes, and auto-accept edits","kind":"allow_always"},{"optionId":"default","name":"Yes, and manually approve edits","kind":"allow_once"},{"optionId":"plan","name":"No, keep planning","kind":"reject_once"}]}}}
+{"expect_response":{"id":"perm-1","result":{"outcome":{"outcome":"selected","optionId":"acceptEdits"}}}}
+{"update":{"update":{"sessionUpdate":"current_mode_update","currentModeId":"acceptEdits"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Planned."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
+{"expect":{"method":"session/set_mode","as":"to-accept","params":{"sessionId":"sess-1","modeId":"acceptEdits"}}}
+{"respond":{"to":"to-accept","result":{}}}

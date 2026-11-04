@@ -2,7 +2,8 @@
 //! the checks to a `clauseo-codex-fs` thread (`agent/codex/prepare.rs`): for every agent the
 //! data-folder refusal (`agent/data_folder.rs`), and for a Codex agent its preparation
 //! ([`crate::agent::codex::prepare_launch`]: the matter folder resolved through links, the
-//! `.codex` refusal, the home made and the home's `config.toml`). The work that waits for the
+//! `.codex` refusal, the folder check, the home made and the home's `config.toml`; for a Claude
+//! agent the folder check alone, `agent/folder_support.rs`). The work that waits for the
 //! agent is held on the thread's turn state meanwhile. Phase two, when they answer, launches
 //! the agent on the actor with what they found ([`agents::launch_now`]), or fails the waiting
 //! work.
@@ -35,7 +36,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use clauseo_profile::{SkillWrite, SkillsWritten};
-use clauseo_protocol::{AgentKind, FolderSupportKind, MatterId, ThreadId};
+use clauseo_protocol::{AgentKind, MatterId, ThreadId};
 
 use super::super::Actor;
 use super::super::input::Input;
@@ -43,6 +44,7 @@ use super::agents::{self, Waiting};
 use super::{TurnInput, host_stopping, state};
 use futures::task::LocalSpawnExt;
 
+use crate::agent::folder_support::{Answer, FolderCheck};
 use crate::agent::{codex, data_folder};
 use crate::browser::session::BrowserSession;
 use crate::config::SessionKey;
@@ -64,6 +66,9 @@ pub(crate) struct Prepared {
     pub(super) stored: PathBuf,
     /// A Codex agent's preparation; `None` for any other agent.
     pub(super) codex: Option<CodexPrepared>,
+    /// The folder check's answer at this launch (`agent/folder_support.rs`), when it ran: for a
+    /// Codex or a Claude agent. A Claude agent's decides its forced ask (`agent/forced_ask.rs`).
+    pub(super) folder: Option<Answer>,
     /// The session's folders, made.
     pub(super) run: RunFolders,
     /// This launch's own token for its first skills write (Claude's plugin), taken by
@@ -288,8 +293,6 @@ fn remove_tree(folder: &Path) {
 pub(crate) struct CodexPrepared {
     /// The matter folder resolved through links: `_codex/hooks/list` names it.
     pub(super) folder: PathBuf,
-    /// The folder check's answer at this launch (`agent/folder_support.rs`), for the row.
-    pub(super) folder_support: Option<FolderSupportKind>,
     /// The agent's home, made and checked, as `CODEX_HOME`.
     pub(super) home: PathBuf,
     /// The launch profile's `CODEX_CONFIG` keys, filled on the actor
@@ -318,17 +321,18 @@ pub(super) fn prepare(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>
             None => Vec::new(),
         };
         let browser = browser_prep(actor, &row.agent, key);
+        let claude = kind == Some(AgentKind::Claude);
         Ok((
             stored,
             locations.data_dir().to_owned(),
-            home,
+            (home, claude),
             run,
             skills,
             browser,
         ))
     })();
     let sweep = actor.run_sweep.clone();
-    let (stored, data, home, mut run, skills, browser) = match paths {
+    let (stored, data, (home, claude), mut run, skills, browser) = match paths {
         Ok(paths) => paths,
         Err(error) => {
             agents::fail_all(actor, thread, waiting, &error);
@@ -340,7 +344,10 @@ pub(super) fn prepare(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>
         return;
     };
     state.preparing = Some(Box::new(Preparing { id, waiting }));
-    let matter = run.key.matter;
+    let check = FolderCheck {
+        matter: run.key.matter,
+        source: actor.folder_check,
+    };
     let clock = std::sync::Arc::clone(&actor.clock);
     actor.spawn_post(async move {
         let result = codex::prepare::off_actor_or_undo(
@@ -348,25 +355,31 @@ pub(super) fn prepare(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>
             job,
             move || {
                 data_folder::refuse_data_folder(&stored, &data)?;
+                let mut answer = None;
                 let codex = match home {
                     Some(home) => {
-                        let (folder, folder_support) =
-                            codex::prepare_launch(matter, &stored, &data, &home)?;
+                        let (folder, support) =
+                            codex::prepare_launch(&check, &stored, &data, &home)?;
+                        answer = Some(support);
                         Some(CodexPrepared {
                             folder,
-                            folder_support,
                             home,
                             keys: serde_json::Map::new(),
                         })
                     }
                     None => None,
                 };
+                // Claude is never refused for its folder: the answer decides its forced ask.
+                if claude {
+                    answer = Some(check.run(&crate::agent::session_folder(&stored)));
+                }
                 run.make(&data, &sweep)?;
                 (run.chrome, run.browser_session) = browser.prepare(&data, &run.key.id());
                 let skills_written = write_skills(&skills);
                 Ok(Prepared {
                     stored,
                     codex,
+                    folder: answer,
                     run,
                     skills_written,
                 })
@@ -379,17 +392,17 @@ pub(super) fn prepare(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>
     });
 }
 
-/// A Codex launch's folder check answered (`agent/folder_support.rs`): its answer goes to the
-/// matter's row, and so does a refusal it made. Any other agent, and a launch that failed
-/// before or without the check's refusal, leaves the row as it was.
+/// A launch's folder check answered (`agent/folder_support.rs`, a Codex or a Claude agent):
+/// its answer goes to the matter's row, and so does a refusal it made. Any other agent, and a
+/// launch that failed before or without the check's refusal, leaves the row as it was.
 fn remember_folder_support(
     actor: &mut Actor,
     thread: ThreadId,
     result: &Result<Box<Prepared>, Error>,
 ) {
     let support = match result {
-        Ok(prepared) => match &prepared.codex {
-            Some(codex) => codex.folder_support,
+        Ok(prepared) => match prepared.folder {
+            Some(answer) => answer.kind(),
             None => return,
         },
         Err(error) => match crate::agent::folder_support::of_refusal(error.code()) {

@@ -112,6 +112,8 @@ pub(crate) struct Actor {
     /// The Codex hooks object a test set (`HostConfig::with_codex_hooks`); read only through
     /// the codex hooks seam, `turn::agents::codex_hooks`.
     pub(crate) codex_hooks: Option<serde_json::Map<String, serde_json::Value>>,
+    /// Where each launch's folder check answers from (`agent/folder_support.rs`).
+    pub(crate) folder_check: crate::agent::folder_support::CheckSource,
     /// The program the pre-write guard hook runs, if any (`HostConfig::with_pre_write_guard`).
     pub(crate) pre_write_guard: Option<std::path::PathBuf>,
     /// The proxy, stetdoc's folder and the browser inputs (`HostConfig::with_egress_proxy`).
