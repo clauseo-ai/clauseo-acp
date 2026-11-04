@@ -21,6 +21,7 @@ import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { fileTypeIcon } from "@clauseo/components/icons/file-type.ts";
 import type { IconProps } from "@clauseo/components/icons/icon.tsx";
 import { IconAbout, IconArchived, IconChecking } from "@clauseo/components/icons/icons.tsx";
+import { isolate } from "@clauseo/components/lib/bidi.ts";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { langOfText } from "@clauseo/components/lib/script.ts";
 import { fw } from "@clauseo/components/lib/words-find.ts";
@@ -75,10 +76,11 @@ function Own({ text }: { text: string }) {
   );
 }
 
-/** A snippet as text, its found words marked in primary at chip weight: each part a span, never markup. */
+/** A snippet as text, its found words marked in primary at chip weight: each part a span, never markup. Isolated (a
+ * <bdi>), as every path is (docs/ui-states.md): a file name's right-to-left marks can't reorder the line around it. */
 function Parts({ parts }: { parts: readonly SnippetPart[] }) {
   return (
-    <span lang={langOfText(parts.map((p) => p.text).join("")) === "hi" ? "hi" : "en"}>
+    <bdi lang={langOfText(parts.map((p) => p.text).join("")) === "hi" ? "hi" : "en"}>
       {parts.map((p, i) =>
         p.hit ? (
           <span key={i} className="room-find-hit">
@@ -88,7 +90,7 @@ function Parts({ parts }: { parts: readonly SnippetPart[] }) {
           <span key={i}>{p.text}</span>
         ),
       )}
-    </span>
+    </bdi>
   );
 }
 
@@ -111,7 +113,9 @@ function PaperRow({
         </span>
         <span className="room-matter-match room-find-paper">
           <Glyph size={14} />
-          <span className="sr-only">{fw(lang, "Paper, {file}", { file: paper.file })}</span>
+          <span className="sr-only">
+            {fw(lang, "Paper, {file}", { file: isolate(paper.file) })}
+          </span>
           <span aria-hidden="true">
             <Parts parts={paper.parts} />
           </span>

@@ -171,8 +171,10 @@ test("a paper found by its file name opens its matter and the paper, by its File
   });
   await find("surety");
   const row = h.one("find-paper");
-  expect(row?.querySelector(".sr-only")?.textContent).toBe("Paper, Surety bond.pdf");
+  expect(row?.querySelector(".sr-only")?.textContent).toBe("Paper, \u2068Surety bond.pdf\u2069");
   expect(row?.querySelector(".room-find-hit")?.textContent).toBe("Surety");
+  // the file name, as every path is, bidi-isolated (docs/ui-states.md)
+  expect(row?.querySelector(".room-find-hit")?.closest("bdi")?.textContent).toBe("Surety bond.pdf");
   await act(async () => row?.click());
   await h.settle();
   expect(h.transport.only("open_file")).toEqual([{ call: "open_file", file: FILE }]);
