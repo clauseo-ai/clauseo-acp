@@ -8,7 +8,7 @@ use crate::agent::codex::prepare::{Job, LAUNCH_WAIT, off_actor};
 
 fn windows_check() -> FolderCheck {
     FolderCheck {
-        matter: matter(),
+        matter: Some(matter()),
         source: CheckSource::Windows,
     }
 }
@@ -61,9 +61,9 @@ fn off_windows_there_is_no_check_and_no_answer() {
     let missing = std::env::temp_dir()
         .join("clauseo-folder-support-none")
         .join("x");
-    assert_eq!(super::check(matter(), &missing), Answer::Known(None));
+    assert_eq!(super::check(Some(matter()), &missing), Answer::Known(None));
     assert_eq!(
-        super::check(matter(), &std::env::temp_dir()),
+        super::check(Some(matter()), &std::env::temp_dir()),
         Answer::Known(None)
     );
     assert_eq!(
@@ -79,12 +79,12 @@ fn off_windows_there_is_no_check_and_no_answer() {
 #[test]
 fn a_folder_the_user_made_has_no_answer() {
     let folder = std::env::temp_dir();
-    assert_eq!(super::check(matter(), &folder), Answer::Known(None));
-    // A missing folder is a failed check: no refusal, nothing on the row.
+    assert_eq!(super::check(Some(matter()), &folder), Answer::Known(None));
+    // A missing folder is a failed check: no refusal, `check_failed` on the row.
     let missing = folder.join("clauseo-folder-support-missing").join("x");
     let answer = windows_check().refuse_unsupported(&missing).unwrap();
     assert_eq!(answer, Answer::Failed);
-    assert_eq!(answer.kind(), None);
+    assert_eq!(answer.row_kind(), Some(FolderSupportKind::CheckFailed));
 }
 
 /// A folder check that hangs (a share that does not answer) ends as the preparation's deadline
@@ -117,7 +117,7 @@ fn a_hung_check_is_never_a_folder_code() {
 #[test]
 fn a_fixed_answer_stands_in_for_the_check() {
     let fixed = FolderCheck {
-        matter: matter(),
+        matter: Some(matter()),
         source: CheckSource::Fixed(Answer::Known(Some(FolderSupportKind::Network))),
     };
     let folder = std::env::temp_dir();
@@ -129,14 +129,23 @@ fn a_fixed_answer_stands_in_for_the_check() {
     assert_eq!(error.code(), ErrorCode::MatterFolderNetwork);
 }
 
-/// A failed check is no refusal for Codex, and the row shows nothing.
+/// A failed check is no refusal for Codex, and the row shows `check_failed`.
 #[test]
-fn a_failed_check_refuses_nothing_and_shows_nothing() {
+fn a_failed_check_refuses_nothing_and_shows_check_failed() {
     let failed = FolderCheck {
-        matter: matter(),
+        matter: Some(matter()),
         source: CheckSource::Fixed(Answer::Failed),
     };
     let answer = failed.refuse_unsupported(&std::env::temp_dir()).unwrap();
     assert_eq!(answer, Answer::Failed);
-    assert_eq!(answer.kind(), None);
+    assert_eq!(answer.row_kind(), Some(FolderSupportKind::CheckFailed));
+    // The row's name for it refuses nothing either, should it ever reach `decide`.
+    assert_eq!(
+        decide(Some(FolderSupportKind::CheckFailed)).unwrap(),
+        Some(FolderSupportKind::CheckFailed)
+    );
+    // A known answer shows as it is.
+    let network = Answer::Known(Some(FolderSupportKind::Network));
+    assert_eq!(network.row_kind(), Some(FolderSupportKind::Network));
+    assert_eq!(Answer::Known(None).row_kind(), None);
 }

@@ -338,7 +338,7 @@ fn a_codex_launch_in_a_missing_folder_is_folder_missing() {
             Job::launch(id::<MatterId>(7)),
             move || {
                 let check = crate::agent::folder_support::FolderCheck {
-                    matter: id::<MatterId>(7),
+                    matter: Some(id::<MatterId>(7)),
                     source: crate::agent::folder_support::CheckSource::Windows,
                 };
                 crate::agent::codex::prepare_launch(&check, &gone, &data, &home)

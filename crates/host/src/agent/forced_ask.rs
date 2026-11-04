@@ -26,13 +26,17 @@ use clauseo_protocol::{FolderSupportKind, PermissionKind, PermissionOption};
 use crate::agent::folder_support::Answer;
 
 /// Whether a Claude launch whose folder check gave `answer` runs in forced ask: on a network
-/// drive, on a drive without permissions, and when the check failed (unknown fails closed).
+/// drive, on a drive without permissions, and when the check failed (unknown fails closed). A
+/// check gives a failure as [`Answer::Failed`]; `check_failed` is only the row's name for it,
+/// and is taken the same way should an answer ever carry it.
 pub(crate) fn applies(answer: Answer) -> bool {
     matches!(
         answer,
         Answer::Failed
             | Answer::Known(Some(
-                FolderSupportKind::Network | FolderSupportKind::NoPermissions
+                FolderSupportKind::Network
+                    | FolderSupportKind::NoPermissions
+                    | FolderSupportKind::CheckFailed
             ))
     )
 }

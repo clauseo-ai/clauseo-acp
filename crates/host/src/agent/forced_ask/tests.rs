@@ -22,8 +22,13 @@ fn a_network_drive_a_drive_without_permissions_or_a_failed_check_forces_ask() {
     ))));
     assert!(!applies(Answer::Known(Some(FolderSupportKind::Unknown))));
     assert!(!applies(Answer::Known(None)));
-    // A check that failed is unknown, and unknown fails closed.
+    // A check that failed is unknown, and unknown fails closed; the row's name for it too.
     assert!(applies(Answer::Failed));
+    assert_eq!(
+        Answer::Failed.row_kind(),
+        Some(FolderSupportKind::CheckFailed)
+    );
+    assert!(applies(Answer::Known(Some(FolderSupportKind::CheckFailed))));
 }
 
 #[test]

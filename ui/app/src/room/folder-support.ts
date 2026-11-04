@@ -5,7 +5,7 @@ import { createContext, use } from "react";
 import type { FolderSupportKind } from "../transport/protocol.ts";
 
 /** The readings this version shows: the room's notice, and Claude asking before every change. */
-export type FolderNoted = Exclude<FolderSupportKind, "unknown">;
+export type FolderNoted = Exclude<FolderSupportKind, "unknown" | "check_failed">;
 
 /** The reading this version knows, or null: fine, not checked, or a newer Clauseo's. */
 export const notedFolder = (kind: FolderSupportKind | undefined): FolderNoted | null =>

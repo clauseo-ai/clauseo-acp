@@ -250,7 +250,7 @@ fn codex_on_a_network_drive_is_refused_on_every_os() {
 /// A folder check that failed is unknown, and unknown fails closed for Claude: forced ask, all
 /// four layers. Here `SetMode acceptEdits` is refused and the session's `_meta` carries the hook
 /// for every tool with `--ask-all` and no `allowedTools` (the scenario checks the request); the
-/// row shows nothing.
+/// row shows `check_failed` after the launch.
 #[test]
 fn claude_whose_folder_check_failed_runs_in_forced_ask() {
     let dir = Dir::new(
@@ -270,11 +270,14 @@ fn claude_whose_folder_check_failed_runs_in_forced_ask() {
             .any(|event| matches!(event, DomainEvent::AgentSessionAttached(_)))
     });
     events.assert_no_mismatch();
-    assert_eq!(summary(&host, matter).folder_support, None);
+    assert_eq!(
+        summary(&host, matter).folder_support,
+        Some(FolderSupportKind::CheckFailed)
+    );
     host.shutdown();
 }
 
-/// A failed check does not refuse Codex: its own sandbox applies.
+/// A failed check does not refuse Codex: its own sandbox applies; the row shows `check_failed`.
 #[test]
 fn codex_whose_folder_check_failed_runs() {
     let dir = Dir::new(
@@ -292,6 +295,9 @@ fn codex_whose_folder_check_failed_runs() {
         "{}",
         events.dump()
     );
-    assert_eq!(summary(&host, matter).folder_support, None);
+    assert_eq!(
+        summary(&host, matter).folder_support,
+        Some(FolderSupportKind::CheckFailed)
+    );
     host.shutdown();
 }

@@ -1465,6 +1465,11 @@ export type FolderSupportKind =
  *  (`matter.folder_no_permissions`).
  */
 "no_permissions" | 
+/**
+ *  The check couldn't answer (an io error, or no folder there): Claude runs in forced
+ *  ask, and Codex isn't refused (its own sandbox applies).
+ */
+"check_failed" | 
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
 
@@ -2674,8 +2679,8 @@ export type MatterSummary = {
 	/**
 	 *  What keeps Codex's sandbox from working fully in its folder, on Windows, as the host last
 	 *  checked it: when the matter was made and at each agent launch (an in-memory reading, not
-	 *  state in the log). Missing when the folder is fine, before any check since the host
-	 *  started, and off Windows.
+	 *  state in the log); `check_failed` when that check couldn't answer. Missing when the
+	 *  folder is fine, before any check since the host started, and off Windows.
 	 */
 	folder_support?: FolderSupportKind,
 };

@@ -422,7 +422,8 @@ change from the settings window as `ui` does.
   check, `agent/folder_support.rs`, answers `network` or `no_permissions` at that launch,
   `session/load` included) runs in forced ask until the sandbox can fence such a folder. Codex
   is refused there. A check that fails (an io error) is unknown and fails closed for Claude:
-  forced ask, nothing on the matter's row, and Codex not refused (its own sandbox applies). The host enforces four layers (`agent/forced_ask.rs`):
+  forced ask, `check_failed` on the matter's row (2026-11-05, orchestrator; nothing before),
+  and Codex not refused (its own sandbox applies). The host enforces four layers (`agent/forced_ask.rs`):
   - **Modes:** `SetMode` takes only `default` and `plan` (any other id is `command.invalid`),
     and so does `SetConfigOption` for claude-agent-acp's `mode` option, which sets the mode
     too; a mode the agent moves to itself is switched back to `default`.

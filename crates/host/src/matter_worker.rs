@@ -370,10 +370,10 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
                     .and_then(|matter| {
                         let commit = root_commit(&matter, root)?;
                         let folder_check = crate::agent::folder_support::FolderCheck {
-                            matter: id,
+                            matter: Some(id),
                             source: check,
                         };
-                        let support = folder_check.run(&folder).kind();
+                        let support = folder_check.run(&folder).row_kind();
                         *slot = Slot::Open(Box::new(matter));
                         Ok((commit, support))
                     }),
@@ -503,10 +503,10 @@ fn import(
         } => {
             let commit = root_commit(&matter, root)?;
             let folder_check = crate::agent::folder_support::FolderCheck {
-                matter: id,
+                matter: Some(id),
                 source: check,
             };
-            let folder_support = folder_check.run(&folder).kind();
+            let folder_support = folder_check.run(&folder).row_kind();
             *slot = Slot::Open(matter);
             Ok(ImportEnd::Done {
                 commit,

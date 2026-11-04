@@ -345,7 +345,7 @@ pub(super) fn prepare(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>
     };
     state.preparing = Some(Box::new(Preparing { id, waiting }));
     let check = FolderCheck {
-        matter: run.key.matter,
+        matter: Some(run.key.matter),
         source: actor.folder_check,
     };
     let clock = std::sync::Arc::clone(&actor.clock);
@@ -402,7 +402,7 @@ fn remember_folder_support(
 ) {
     let support = match result {
         Ok(prepared) => match prepared.folder {
-            Some(answer) => answer.kind(),
+            Some(answer) => answer.row_kind(),
             None => return,
         },
         Err(error) => match crate::agent::folder_support::of_refusal(error.code()) {
