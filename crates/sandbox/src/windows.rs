@@ -16,8 +16,9 @@ use windows::Win32::Foundation::{
 };
 use windows::Win32::Security::{
     AccessCheck, DACL_SECURITY_INFORMATION, DuplicateToken, GENERIC_MAPPING,
-    GROUP_SECURITY_INFORMATION, GetFileSecurityW, OWNER_SECURITY_INFORMATION, PRIVILEGE_SET,
-    PSECURITY_DESCRIPTOR, SecurityImpersonation, TOKEN_DUPLICATE, TOKEN_QUERY,
+    GROUP_SECURITY_INFORMATION, GetFileSecurityW, LABEL_SECURITY_INFORMATION,
+    OWNER_SECURITY_INFORMATION, PRIVILEGE_SET, PSECURITY_DESCRIPTOR, SecurityImpersonation,
+    TOKEN_DUPLICATE, TOKEN_QUERY,
 };
 use windows::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, CreateFileW, FILE_ALL_ACCESS, FILE_ATTRIBUTE_DIRECTORY,
@@ -185,11 +186,16 @@ fn volume_flags(folder: &Handle) -> io::Result<u32> {
     Ok(flags)
 }
 
-/// The folder's owner, group and DACL, as a self-relative security descriptor in u64 words, so
-/// its structures are aligned. `None` when the caller can't read them (`ERROR_ACCESS_DENIED`).
+/// The folder's owner, group, DACL and integrity label, as a self-relative security descriptor in
+/// u64 words, so its structures are aligned. `None` when the caller can't read them
+/// (`ERROR_ACCESS_DENIED`).
 fn security_descriptor(wide: &[u16]) -> io::Result<Option<Vec<u64>>> {
-    const INFORMATION: u32 =
-        OWNER_SECURITY_INFORMATION.0 | GROUP_SECURITY_INFORMATION.0 | DACL_SECURITY_INFORMATION.0;
+    // The label too, so AccessCheck applies the folder's integrity label (no write-up) as the
+    // real grant meets it; reading it needs only READ_CONTROL, as the rest does.
+    const INFORMATION: u32 = OWNER_SECURITY_INFORMATION.0
+        | GROUP_SECURITY_INFORMATION.0
+        | DACL_SECURITY_INFORMATION.0
+        | LABEL_SECURITY_INFORMATION.0;
     let mut needed = 0_u32;
     // SAFETY: `wide` is NUL-terminated and outlives the call; with no buffer the call only
     // reports the size, into `needed`, a live out-pointer.
