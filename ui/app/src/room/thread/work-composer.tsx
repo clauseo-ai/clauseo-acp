@@ -136,6 +136,10 @@ export function WorkComposer({
   const now = useNow();
   const agentPlan = useAgentPlan();
   const field = useRef<ComposerHandle>(null);
+  // the words an Ask sent while nothing ran, until the host answers; and the stopped question held for that answer,
+  // its turn stopped before the answer cleared the field (the refill below)
+  const asking = useRef<string | null>(null);
+  const held = useRef<string | null>(null);
   useImperativeHandle(
     ref,
     () => ({
@@ -221,7 +225,11 @@ export function WorkComposer({
     if (lost !== null) setLost(null);
     // the papers the field's tokens mention as it goes, read with its words, sent with them however they go
     const files = (field.current?.mentioned() ?? []).map((m) => m.id);
+    if (how === undefined) asking.current = asked;
     void onAsk(asked, files.length === 0 ? how : { ...how, files }).then((ok) => {
+      if (how === undefined) asking.current = null;
+      const back = held.current;
+      held.current = null;
       if (!ok) return;
       // pressed on the hint's Send now or Queue, which sit outside the field's row: the focus goes back to the field
       // first, so the clear is one step Cmd/Ctrl+Z takes back, and not lost with the hint as it goes
@@ -233,6 +241,8 @@ export function WorkComposer({
       // and an accepted question is no draft: the drafts outlive this composer, so this holds when the lawyer has
       // gone to another conversation while the question went
       if (draftKey !== null && drafts.get(draftKey) === asked) drafts.delete(draftKey);
+      // its turn already stopped (refill below): the question comes back into the field just emptied
+      if (back !== null) field.current?.fill(back);
     });
   };
   // U7's Queue: the field's words, sent as Ask sends them (send_prompt with no `delivery`, the wire's queue)
@@ -257,13 +267,19 @@ export function WorkComposer({
   );
   const steerField = () => send(field.current?.text() ?? "", { behind: true, delivery: "steer" });
   // the stopped question, once per break, and only into an empty field: words typed since keep their place, and fill
-  // never moves the lawyer's focus or breaks a composition
+  // never moves the lawyer's focus or breaks a composition. The host's answer to send_prompt and the turn over the
+  // stream come back two ways, in either order: an agent that exits at once can stop the turn while the field still
+  // holds the question, before the answer clears it. Then the question waits for that clear and comes back after it
   const refilled = useRef<EntryId | null>(null);
   const refillKey = refill?.key ?? null;
   const refillText = refill?.text ?? "";
   useEffect(() => {
     if (refillKey === null || refilled.current === refillKey) return;
     refilled.current = refillKey;
+    if (asking.current === refillText && field.current?.text() === refillText) {
+      held.current = refillText;
+      return;
+    }
     field.current?.fill(refillText);
   }, [refillKey, refillText]);
   const waitTitle = wait?.title ?? mt(w.lang, "New conversation");
