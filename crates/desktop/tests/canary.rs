@@ -277,6 +277,11 @@ fn no_canary_reaches_a_usage_counts_body() {
         std::process::id()
     ));
     let home = scratch.dir(&format!("home {canary}"));
+    // Windows reads Documents from the known folder, whose stored path is
+    // `%USERPROFILE%\Documents`, expanded with the process's own environment. With the planted
+    // USERPROFILE it lands in this home, and the known-folder call fails when that folder is
+    // missing, so `Locations::resolve` would too. Harmless on the other OSes.
+    scratch.dir(&format!("home {canary}/Documents"));
     let data_dir = scratch.dir(&format!("data {canary}"));
     let (home, data_dir, root) = (
         home.display().to_string(),
