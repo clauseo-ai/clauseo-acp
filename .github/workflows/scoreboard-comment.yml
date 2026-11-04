@@ -21,6 +21,11 @@
 #   of the head commit that has it; one that is missing shows as "not run".
 # - It runs Node without installing anything: comment.ts imports only Node's own modules.
 # - Every action is pinned by commit SHA, with its tag in a comment.
+# - Off since Rohan's CI decision (2026-11-04): the scoreboard runs nightly only (scoreboard.yml),
+#   scoreboard-windows on demand only and reducer-bench nightly only, so no pull request run has
+#   anything to compare, and the comment would show every row as not run. The job's `if:` starts
+#   with a condition that is never true. To restore the comment, delete that first line, once the
+#   scoreboard artifacts come from pull request runs again.
 
 name: scoreboard-comment
 
@@ -48,7 +53,9 @@ jobs:
     # request without the `scoreboard` label (each push, each other label). A cancelled run (a newer
     # push, or a queue cleared by hand) left partial artifacts, and the run that replaces it edits
     # the comment.
+    # Never true (no event is named never): the comment is off, see the header.
     if: >-
+      github.event_name == 'never' &&
       github.event.workflow_run.event == 'pull_request' &&
       contains(fromJSON('["success", "failure"]'), github.event.workflow_run.conclusion)
     runs-on: ubuntu-24.04

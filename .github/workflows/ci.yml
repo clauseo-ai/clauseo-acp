@@ -1,6 +1,21 @@
 # CI: the fast lane (`cargo xtask check` on Linux) and the workspace linted and tested on every
 # target. Nightly and on demand, it also runs the mutation tests of main's last 24 hours.
 #
+# Per event (Rohan's CI decision, 2026-11-04):
+# - pull_request: changes, fast-lane, and what the change touches (changes.sh): vitest (newest
+#   Node) on a ui change, and on a Rust change Windows x64 clippy only (PR_LINT_ONLY below), so
+#   Windows-only lint errors show on the pull request and not as merge-queue ejections. The other
+#   build entries take the quick skip on an ubuntu runner and report their required checks green.
+# - merge_group: the full OS matrix runs once, here (Linux, Windows x64, macOS ARM64), on what
+#   changes.sh says the queued changes need.
+# - push to main: only `build (aarch64-apple-darwin)`. The merge queue already tested the code; the
+#   one exception is macOS ARM64, temporarily not required in the merge queue (a GitHub runner
+#   shortage), so main's push is the only place it runs. Every other job skips on push. When the
+#   macOS ARM64 requirement is restored, delete the `push:` trigger and the matrix's push branch
+#   (both marked "push exception"); the `github.event_name != 'push'` guards can stay or go.
+# - schedule and workflow_dispatch: everything, tier 2, the release builds, the quarantine job,
+#   mutants and reducer-bench. The nightly run (ref main) saves the Rust caches.
+#
 # - No version is written here. Rust comes from rust-toolchain.toml, pnpm from "packageManager" and
 #   Node from "engines.node" in ui/package.json, and the cargo tools and gitleaks from
 #   xtask/src/setup.rs, which .github/actions/install-pinned-tools reads with
@@ -9,51 +24,52 @@
 # - What a pull request runs depends on the paths it changes: .github/scripts/changes.sh decides,
 #   in the `changes` job, after its fixtures (changes-test.sh) pass. Without a Rust change (`rust`:
 #   crates/, xtask/, Cargo.toml, Cargo.lock, the toolchain and cargo config, CI itself) the build
-#   jobs start but skip every step. A path no rule knows runs everything, and so does a failed
-#   `changes` job. A job skipped as a whole would report its check under the unexpanded name
+#   jobs start but skip every step. A path no rule knows runs everything (on a pull request, the
+#   Windows clippy), and so does a failed `changes` job. A job skipped as a whole would report its check under the unexpanded name
 #   "build (${{ matrix.target }})", and a required check that never reports blocks the merge.
-# - On a pull request the build jobs lint and test with the dev profile only: clippy, nextest, and
-#   on Linux a debug app that embeds ui/app/dist, launched under xvfb. No pull request job builds a
-#   release app; e2e-windows.yml's smoke test builds and drives the Windows one. Each push to main,
-#   nightly and on demand run the same steps (so main's Rust cache holds what pull requests build)
-#   and then the release app, full LTO, uploaded as clauseo-desktop-<target>.
-# - Tier 1 (macOS Apple silicon, Windows x64) and Linux build and test on every pull request that
-#   changes Rust. Tier 2 (Intel macOS, Windows ARM64) waits for the merge: on a pull request the
-#   matrix leaves it out and jobs skipped by `if` report its checks without taking a runner (Intel
-#   macOS's below, Windows ARM64's in tier2-pr.yml); it builds in full on each push to main, nightly
-#   and on demand. In the merge queue Windows ARM64 runs its tests only (no clippy, no release
-#   app), so a failure only ARM64 shows cannot reach main. The Apple silicon job checks on
-#   each run that the workspace still compiles for Intel macOS.
-# - Rust caches are saved on main only (`save-if`); pull requests restore main's and save nothing,
+# - In a merge group the build jobs lint and test with the dev profile only: clippy, nextest, and
+#   on Linux a debug app that embeds ui/app/dist, launched under xvfb. No pull request or merge
+#   group job builds a release app; e2e-windows.yml's smoke test builds and drives the Windows one.
+#   The nightly run and a run on demand run the same steps (so main's Rust cache holds what merge
+#   groups build) and then the release app, full LTO, uploaded as clauseo-desktop-<target>; so does
+#   the push exception's macOS ARM64 job.
+# - Tier 1 (macOS Apple silicon, Windows x64) and Linux build and test in the merge queue when the
+#   queued changes touch Rust. Tier 2 (Intel macOS, Windows ARM64) runs nightly and on demand only:
+#   on a pull request and in a merge group the matrix leaves it out, and jobs skipped by `if` report
+#   its checks without taking a runner (Intel macOS's below, Windows ARM64's in tier2-pr.yml). The
+#   Apple silicon job checks on each run that the workspace still compiles for Intel macOS.
+# - Rust caches are saved on main only (`save-if`), which with no push run but the macOS one means
+#   the nightly run; pull requests and merge groups restore main's and save nothing,
 #   so they never evict main's entries from the 10 GB Actions cache. Tier 2 saves none: Intel macOS
 #   restores the Apple silicon entry (same host, so its build scripts and proc macros are reused),
 #   Windows ARM64 builds cold.
-# - The mutants job has no matrix, so it is skipped as a whole on pull requests and pushes, where it
-#   still reports its check as "mutants". It only reports: a missed mutant never fails the run.
+# - The mutants job has no matrix, so it is skipped as a whole on pull requests, merge groups and
+#   pushes, where it still reports its check as "mutants". It only reports: a missed mutant never fails the run.
 # - The Linux job runs the tests with the network cut off, so a test that reaches the network fails.
 # - The fast lane runs on the Node the runner image has cached that "engines.node" allows (the newest
 #   24.x today), but a developer's machine may have a newer major (Homebrew's), where a test can pass
 #   in CI and fail at pre-push. The vitest (newest Node) job runs ui/app's vitest, ui/components'
 #   tests included, on the newest Node release "engines.node" allows (setup-node's check-latest),
-#   on every run that changes ui/.
-# - reducer-bench counts clauseo-reducer's instructions under Valgrind on every run that changes
-#   Rust and, on a pull request, compares them with the merge-base on main. It uploads the counts as
-#   the reducer-bench-summary artifact, which the speed scoreboard's comment reads
-#   (scoreboard-comment.yml).
-# - The macOS speed scoreboard is in scoreboard.yml (main, nightly, on demand, and pull requests
-#   labelled `scoreboard`), so a pull request takes at most one macOS runner.
+#   on every pull request that changes ui/, nightly and on demand.
+# - reducer-bench counts clauseo-reducer's instructions under Valgrind, nightly and on demand only
+#   (Rohan's CI decision, 2026-11-04: benches, scoreboards, mutants and fuzzing stay off the paths
+#   of pull requests and the queue), against the hard limits in apply.rs. It uploads the counts as
+#   the reducer-bench-summary artifact.
+# - The macOS speed scoreboard is in scoreboard.yml, nightly and on demand only.
 # - Every third-party action is pinned by commit SHA, with its tag in a comment.
 
 name: CI
 
 on:
   pull_request:
-  # A pull request in main's merge queue: the same jobs as on a pull request, run on main plus the
-  # pull requests queued ahead of it, so two green pull requests cannot break main together.
+  # A pull request in main's merge queue: the full OS matrix, run on main plus the pull requests
+  # queued ahead of it, so two green pull requests cannot break main together.
   merge_group:
+  # Push exception: only `build (aarch64-apple-darwin)` runs on push (see the header). Remove this
+  # trigger once macOS ARM64 is required in the merge queue again.
   push:
     branches: [main]
-  # Nightly, on main: the tier-2 builds and the mutants of the last 24 hours.
+  # Nightly, on main: everything, the tier-2 builds and the mutants of the last 24 hours included.
   schedule:
     - cron: "17 3 * * *"
   workflow_dispatch:
@@ -61,14 +77,12 @@ on:
 permissions:
   contents: read
 
-# A pull request keeps only its newest run. Pushes to main share one group: one run goes on and one
+# A pull request keeps only its newest run. Pushes to main (only the macOS ARM64 job) share one group: one run goes on and one
 # waits, and a newer push replaces the waiting run (GitHub cancels a pending run when a newer one
 # joins the group, even without cancel-in-progress). A burst of merges is then checked once, at its
 # newest commit. Every commit on main has already passed every required check as the head of its
-# merge group; what only a push runs (the release builds, Intel macOS, the rust-cache save) is
-# checked at least once per burst, and a red run is pinned to the commits since main's last
-# completed run, not to one. Pushes held 44% of the 20 concurrent jobs while all 20 were busy
-# (2026-11-03). A nightly or on-demand run has its own group, so it never cancels or waits on a
+# merge group; macOS ARM64, which only a push runs for now, is checked at least once per burst, and
+# a red run is pinned to the commits since main's last completed run, not to one. A nightly or on-demand run has its own group, so it never cancels or waits on a
 # push, and so has each merge group (its own head commit).
 concurrency:
   group: ci-${{ github.event.pull_request.number || (github.event_name == 'push' && format('push-{0}', github.ref)) || format('{0}-{1}', github.event_name, github.sha) }}
@@ -77,6 +91,9 @@ concurrency:
 jobs:
   changes:
     name: changes
+    # Not on push (Rohan's CI decision, 2026-11-04): the merge queue already ran it. The macOS
+    # build job runs without it (a skipped `changes` builds everything).
+    if: github.event_name != 'push'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
@@ -99,7 +116,7 @@ jobs:
       - name: Test the path rules against their fixtures
         run: bash .github/scripts/changes-test.sh
 
-      # A push, the nightly run and a run on demand run everything; a pull request runs what its
+      # The nightly run and a run on demand run everything; a pull request runs what its
       # changed paths need (.github/scripts/changes.sh), and so does a merge group, from main's
       # commit it starts on to its head (the queued pull requests up to this one).
       - name: Decide which jobs run
@@ -130,6 +147,8 @@ jobs:
 
   fast-lane:
     name: fast-lane
+    # Not on push (Rohan's CI decision, 2026-11-04): the merge queue already ran it on this code.
+    if: github.event_name != 'push'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -195,8 +214,9 @@ jobs:
     name: vitest (newest Node)
     needs: changes
     # A failed `changes` runs it, as it runs everything. Not in a merge group (2026-11-04): it is not
-    # required there, and the pull request already ran it on the same ui.
-    if: ${{ !cancelled() && github.event_name != 'merge_group' && (needs.changes.result != 'success' || needs.changes.outputs.ui == 'true') }}
+    # required there, and the pull request already ran it on the same ui. Not on push either
+    # (Rohan's CI decision, 2026-11-04).
+    if: ${{ !cancelled() && github.event_name != 'merge_group' && github.event_name != 'push' && (needs.changes.result != 'success' || needs.changes.outputs.ui == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -228,29 +248,38 @@ jobs:
   build:
     name: build (${{ matrix.target }})
     needs: changes
-    # A failed `changes` runs everything (BUILD below), so every check still reports.
+    # A failed or skipped `changes` (skipped on push) runs everything (BUILD below), so every check
+    # still reports.
     if: ${{ !cancelled() }}
-    # A job that only skips (a pull request without a Rust change) takes an ubuntu runner, which
-    # starts fastest, never a macOS one: macOS runners are capped at 5 for the whole org. A failed
-    # `changes` runs everything on the target's own runner.
+    # A job that only skips takes an ubuntu runner, which starts fastest, never a macOS one: macOS
+    # runners are capped at 5 for the whole org. On a pull request the Linux and macOS entries name
+    # ubuntu-24.04 as their runner in the matrix, so they always skip there; Windows x64 lints on
+    # its own runner when Rust changed. A merge group without a Rust change skips on ubuntu too. A
+    # failed `changes` runs everything on the target's own runner.
     runs-on: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.changes.result == 'success' && needs.changes.outputs.rust != 'true' && 'ubuntu-24.04' || matrix.runner }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
-      # Tier 1 and Linux on every event; tier 2 (Intel macOS, Windows ARM64) on push, nightly and on
-      # demand. On a pull request the job tier2-x86_64-apple-darwin below and tier2-pr.yml report
-      # their checks. A merge group runs what a pull request runs (2026-11-04: Windows ARM64 left
-      # the merge-group requirement for main's push and nightly, to cut the time from approval to
-      # merge; a break there shows on main and goes to its owner). `native`: built on its own OS, so linted and tested; Intel macOS
-      # is cross-compiled on the arm64 runner, so it is built but not linted or tested. Linux is the
-      # oldest glibc we support; release packages are built there later. One JSON list per case,
-      # as in e2e-windows.yml's smoke.
+      # One JSON list per event, as in e2e-windows.yml's smoke (Rohan's CI decision, 2026-11-04):
+      # - pull_request: the three required checks; Linux and macOS skip on ubuntu, Windows x64
+      #   lints only (PR_LINT_ONLY below).
+      # - merge_group: tier 1 and Linux in full. Windows ARM64 left the merge-group requirement
+      #   (2026-11-04) for the nightly run; a break there goes to its owner.
+      # - push (the push exception): macOS ARM64 alone. Delete this branch, with the push trigger,
+      #   once macOS ARM64 is required in the merge queue again.
+      # - schedule and workflow_dispatch: everything, tier 2 (Intel macOS, Windows ARM64) included.
+      #   The job tier2-x86_64-apple-darwin below and tier2-pr.yml report tier 2's checks elsewhere.
+      # `native`: built on its own OS, so linted and tested; Intel macOS is cross-compiled on the
+      # arm64 runner, so it is built but not linted or tested. Linux is the oldest glibc we
+      # support; release packages are built there later.
       matrix:
         include: >-
           ${{ fromJSON(github.event_name == 'pull_request'
-            && '[{"target": "aarch64-apple-darwin", "runner": "macos-15", "native": true},
-                 {"target": "x86_64-unknown-linux-gnu", "runner": "ubuntu-22.04", "native": true},
+            && '[{"target": "aarch64-apple-darwin", "runner": "ubuntu-24.04", "native": true},
+                 {"target": "x86_64-unknown-linux-gnu", "runner": "ubuntu-24.04", "native": true},
                  {"target": "x86_64-pc-windows-msvc", "runner": "windows-2025", "native": true}]'
+            || github.event_name == 'push'
+            && '[{"target": "aarch64-apple-darwin", "runner": "macos-15", "native": true}]'
             || github.event_name == 'merge_group'
             && '[{"target": "aarch64-apple-darwin", "runner": "macos-15", "native": true},
                  {"target": "x86_64-unknown-linux-gnu", "runner": "ubuntu-22.04", "native": true},
@@ -265,9 +294,15 @@ jobs:
     env:
       TARGET: ${{ matrix.target }}
       EXE: clauseo-desktop${{ contains(matrix.target, '-windows-') && '.exe' || '' }}
-      BUILD: ${{ needs.changes.result != 'success' || needs.changes.outputs.rust == 'true' }}
-      # The full-LTO release app: push to main, nightly and on demand. A merge group runs what a
-      # pull request runs, here and in the matrix and runs-on above.
+      # On a pull request only Windows x64 builds anything, and only its clippy (PR_LINT_ONLY).
+      BUILD: ${{ (github.event_name != 'pull_request' || matrix.target == 'x86_64-pc-windows-msvc') && (needs.changes.result != 'success' || needs.changes.outputs.rust == 'true') }}
+      # A pull request's Windows x64 job (Rohan's CI decision, 2026-11-04): checkout, the temp
+      # folder on D:, the toolchain, the rust-cache restore and the two clippy steps; no nextest,
+      # keychain smoke, app build or other test, which wait for the merge queue. Every step past
+      # clippy checks it, directly or through RELEASE, UI or the OS.
+      PR_LINT_ONLY: ${{ github.event_name == 'pull_request' }}
+      # The full-LTO release app: nightly, on demand and the push exception's macOS job. A merge
+      # group runs the dev-profile steps only, here and in runs-on above.
       RELEASE: ${{ github.event_name != 'pull_request' && github.event_name != 'merge_group' }}
       # The ui is built for the release app, and on Linux for the debug app launched under xvfb.
       UI: ${{ (github.event_name != 'pull_request' && github.event_name != 'merge_group') || contains(matrix.target, '-linux-') }}
@@ -275,9 +310,9 @@ jobs:
       run:
         shell: bash
     steps:
-      - name: Skip, no Rust change
+      - name: Skip, nothing to build
         if: env.BUILD != 'true'
-        run: echo "No change to crates/, xtask/, Cargo.toml, Cargo.lock or the Rust config; nothing to build."
+        run: echo "No Rust change (crates/, xtask/, Cargo.toml, Cargo.lock, the Rust config), or a pull request, where only Windows x64 lints and the merge queue builds and tests; nothing to build here."
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: env.BUILD == 'true'
@@ -344,7 +379,7 @@ jobs:
 
       # The tests need only one pinned tool, nextest, as a prebuilt binary.
       - name: Install nextest at its pin
-        if: env.BUILD == 'true' && matrix.native
+        if: env.BUILD == 'true' && matrix.native && env.PR_LINT_ONLY != 'true'
         uses: ./.github/actions/install-pinned-tools
         with:
           tools: cargo-nextest
@@ -362,7 +397,7 @@ jobs:
         run: cargo clippy -p clauseo-agents --all-targets --target "$TARGET" -- -D warnings
 
       # The marks build's macOS code (src/marks.rs), which the speed scoreboard plays; that job
-      # runs on pull requests only with the `scoreboard` label, so this keeps it compiling.
+      # runs nightly and on demand only, so this keeps it compiling.
       - name: clippy the desktop crate with the marks feature
         if: env.BUILD == 'true' && matrix.target == 'aarch64-apple-darwin'
         run: cargo clippy -p clauseo-desktop --all-targets --features marks --target "$TARGET" -- -D warnings
@@ -376,7 +411,7 @@ jobs:
           cargo check --workspace --all-targets --target x86_64-apple-darwin --locked
 
       - name: Test
-        if: env.BUILD == 'true' && matrix.native && runner.os != 'Linux'
+        if: env.BUILD == 'true' && matrix.native && runner.os != 'Linux' && env.PR_LINT_ONLY != 'true'
         run: cargo nextest run --workspace --profile ci --no-tests=pass
 
       # The OS keychain for real: clauseo-connectors' ignored keychain_smoke test writes, reads and
@@ -384,11 +419,11 @@ jobs:
       # a fresh account name, on every native macOS and Windows entry, Windows ARM64 included.
       # Linux has no keychain store in the crate (not a product target).
       - name: Keychain smoke test (clauseo-connectors)
-        if: env.BUILD == 'true' && matrix.native && runner.os != 'Linux' && !matrix.test_only
+        if: env.BUILD == 'true' && matrix.native && runner.os != 'Linux' && !matrix.test_only && env.PR_LINT_ONLY != 'true'
         run: cargo nextest run -p clauseo-connectors --profile ci --run-ignored only -E 'test(keychain_smoke)'
 
       # The desktop crate's tests with the marks feature (the speed scoreboard's build), here on
-      # main where a failure turns the run red, with their macOS-only cases. On a pull request the
+      # main where a failure turns the run red, with their macOS-only cases. In a merge group the
       # Linux job runs them, off the macOS runner (ci-perfmax's notes: up to about 60 s there).
       - name: Test the desktop crate with the marks feature
         if: env.BUILD == 'true' && matrix.target == 'aarch64-apple-darwin' && env.RELEASE == 'true'
@@ -408,8 +443,8 @@ jobs:
           cargo nextest run -p clauseo-desktop --features marks --profile ci --no-tests=pass --no-run
 
       # The desktop crate's tests run a second time with the marks feature (the speed scoreboard's
-      # build): its portable cases on every run, so a pull request without the `scoreboard` label
-      # still tests them; the macOS job runs the macOS ones on main.
+      # build): its portable cases on every Linux run, so the merge queue tests them; the macOS job
+      # runs the macOS ones on main.
       # A new network namespace with only loopback, entered as root and then dropped back to the
       # runner user, without its supplementary groups (docker's socket would reach the network) and
       # with no_new_privs (sudo could otherwise nsenter back out). sudo may replace PATH, HOME and
@@ -465,7 +500,7 @@ jobs:
           APP: target/${{ env.TARGET }}/release/${{ env.EXE }}
         run: .github/scripts/launch-xvfb.sh "$APP"
 
-  # Tier 2 waits for the merge. On a pull request and in a merge group the build matrix leaves Intel
+  # Tier 2 runs nightly and on demand. On a pull request and in a merge group the build matrix leaves Intel
   # macOS out, and this job reports its required check instead: skipped by `if`, it takes no runner
   # (the org shares 20 concurrent jobs, 5 of them macOS) and reports as skipped, which satisfies a
   # required check. It never runs: on every other event the matrix builds the target under the same
@@ -478,7 +513,7 @@ jobs:
     if: github.event_name == 'never'
     runs-on: ubuntu-24.04
     steps:
-      - run: echo "Intel macOS is tier 2; it builds on push to main, nightly and on demand."
+      - run: echo "Intel macOS is tier 2; it builds nightly and on demand."
 
 
   # cargo-mutants on main's changes of the last 24 hours, nightly and on demand. It only reports:
@@ -577,8 +612,10 @@ jobs:
             target/xtask/wire/mutants.out
           if-no-files-found: warn
 
-  # clauseo-reducer's instruction counts under Valgrind (gungraun), on every run that changes Rust
-  # (`rust` of changes): the hard limits in crates/reducer_bench/benches/apply.rs always apply. On a
+  # clauseo-reducer's instruction counts under Valgrind (gungraun), nightly and on demand only
+  # (Rohan's CI decision, 2026-11-04; the fast lane does not read its output): the hard limits in
+  # crates/reducer_bench/benches/apply.rs always apply. The pull request comparison below no longer
+  # runs, as the job never starts on a pull request; it stays for a later return. On a
   # pull request whose merge-base on main has the bench, it first saves main's counts as the
   # baseline `main`, then fails the head on more than 2% more `ir` in a large case (the soft limit
   # in apply.rs, on scripted_turn, replay_20k and view_snapshot_20k) unless the pull request
@@ -594,15 +631,14 @@ jobs:
   #   (GUNGRAUN_BASELINE) compares with nothing, so it checks the hard limits only.
   # - The head run saves each case's summary (GUNGRAUN_SAVE_SUMMARY=json); the job keeps each
   #   case's module path, id and Callgrind total `Ir` in one small JSON file and uploads it as
-  #   reducer-bench-summary, even when the bench failed, so the scoreboard comment shows this
-  #   run's counts next to main's (scoreboard-comment.yml). Both steps continue on error: the
+  #   reducer-bench-summary, even when the bench failed (scoreboard-comment.yml read it; that
+  #   comment is off while the scoreboard runs nightly only). Both steps continue on error: the
   #   job's result stays the bench's.
   reducer-bench:
     name: reducer-bench
     needs: changes
-    # Not a required check, so it may skip as a whole: on a pull request without a Rust change, and
-    # in the merge queue, where the pull request's own run already compared it with main.
-    if: ${{ !cancelled() && github.event_name != 'merge_group' && (needs.changes.result != 'success' || needs.changes.outputs.rust == 'true') }}
+    # Not a required check, so it skips as a whole on pull requests, merge groups and pushes.
+    if: ${{ !cancelled() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
