@@ -45,7 +45,7 @@ fn grandchild_writes_pid() {
 #[test]
 fn hold_announces_itself_and_dies_when_killed() {
     let dir = Scratch::new("hold_announces_itself");
-    let mut agent = Agent::start_args(&["--hold"], dir.path());
+    let mut agent = Agent::start_args(&["--hold"], dir.path(), &[]);
     assert_eq!(agent.stderr_line(), "fake_agent: holding");
     agent.kill();
     let finished = agent.finish();

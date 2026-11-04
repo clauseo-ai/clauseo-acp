@@ -7,6 +7,8 @@
 //!   labels, includes, `raw`, the exit codes, and how to add a scenario.
 //! - The bundled scenarios in `scenarios/`, compiled in (`bundled.rs` lists them once).
 //! - The runner: a blocking line loop over stdin and stdout, no async runtime, no SDK role.
+//! - The sign-in modes (`signin.rs`): a fake Claude Code CLI and a fake Codex CLI, picked by the
+//!   file name of `argv[1]`, scripted by `FAKE_SIGNIN`. `scenarios/README.md` has the commands.
 //!
 //! # Interface
 //!
@@ -22,14 +24,18 @@
 //!   [`EXIT_WRITE`] when `--list` or `--check` cannot write its result to stdout, or an `exit`
 //!   step's code (never 2 or 3, refused at load). Every failure is one stderr line
 //!   `fake_agent: <file>:<line>: <what>`.
+//! - The sign-in modes: `<script> <args>` where `<script>` is a file named `claude-cli` (Claude
+//!   Code, with an optional leading `--cli` in the args) or `codex.js` (Codex). Their exit codes
+//!   are 0 for success, 1 for a sign-in that did not finish, and 2 for bad arguments.
 //!
 //! # Invariants
 //!
-//! - Stdout carries only JSON-RPC lines (and `send_line` text), each flushed. Diagnostics go to
-//!   stderr.
+//! - In scenario mode, stdout carries only JSON-RPC lines (and `send_line` text), each flushed.
+//!   Diagnostics go to stderr. A sign-in mode writes its own lines (`signin.rs`).
 //! - The agent waits only for the next client line: no timers, sleeps, randomness or clock.
-//!   The one exception is `--pace-ms`, which sleeps between consecutive updates for the speed
-//!   scoreboard (R13) and never touches a scenario.
+//!   The exceptions are `--pace-ms`, which sleeps between consecutive updates for the speed
+//!   scoreboard (R13) and never touches a scenario, and `FAKE_SIGNIN=ok-after:<ms>`, which waits
+//!   before a sign-in writes its marker. A sign-in mode never reads a scenario.
 //! - Every sent message without `"raw": true` survives the SDK's v1 schema for its method at load
 //!   (`validate.rs`): deserialised, serialised again, and every value the scenario wrote is still
 //!   there. A method the SDK does not know must be marked raw.
@@ -53,6 +59,7 @@ mod error;
 mod pattern;
 mod run;
 mod scenario;
+mod signin;
 mod validate;
 mod write;
 

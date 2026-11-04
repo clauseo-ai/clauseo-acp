@@ -32,6 +32,9 @@ mod scoreboard;
 #[path = "stdio/scoreboard_prose.rs"]
 mod scoreboard_prose;
 #[cfg(test)]
+#[path = "stdio/signin.rs"]
+mod signin;
+#[cfg(test)]
 #[path = "stdio/stream.rs"]
 mod stream;
 #[cfg(test)]
