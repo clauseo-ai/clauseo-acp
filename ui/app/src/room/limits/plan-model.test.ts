@@ -10,7 +10,15 @@ import type {
   LimitWindowView,
   MeterTone,
 } from "../../transport/protocol.ts";
-import { bandOf, lookOf, meterLine, planLine, shareLeft, warningKey } from "./plan-model.ts";
+import {
+  bandOf,
+  forgetShownResets,
+  lookOf,
+  meterLine,
+  planLine,
+  shareLeft,
+  warningKey,
+} from "./plan-model.ts";
 import { limThread } from "@clauseo/components/lib/words-limits-thread.ts";
 import { warningWords } from "../thread/warning-words.ts";
 
@@ -18,6 +26,7 @@ const NOW = Date.UTC(2026, 10, 3, 17, 0); // a fixed instant; fixture times deri
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(NOW);
+  forgetShownResets();
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -241,5 +250,21 @@ describe("the warning", () => {
 
   test("never for an account billed by use", () => {
     expect(warningKey(entry(99, { billing: "pay_as_you_go" }))).toBe("");
+  });
+});
+
+describe("the reset the line shows", () => {
+  const status = (resets_at: number) =>
+    planLine("en", "claude", entry(30, { meter: meter(30, { resets_at }) }), NOW)?.status;
+
+  test("two reads 100 ms apart across a minute's edge show the same minute", () => {
+    const edge = today(18, 10) - 50; // 6:09:59.950 pm, then 6:10:00.050 pm
+    expect(status(edge)).toBe("Plenty left until the 6:09 pm reset");
+    expect(status(edge + 100)).toBe("Plenty left until the 6:09 pm reset");
+  });
+
+  test("a reset that moves five minutes shows the new time", () => {
+    expect(status(RESET)).toBe("Plenty left until the 6:10 pm reset");
+    expect(status(RESET + 5 * 60_000)).toBe("Plenty left until the 6:15 pm reset");
   });
 });
