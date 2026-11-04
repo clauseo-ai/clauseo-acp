@@ -67,6 +67,7 @@ import type { StandIns } from "./versions/stand-ins.ts";
 import { useVersions } from "./versions/use-versions.ts";
 import { useWordOpeners, WordOpenContext } from "./word/open-in-word.ts";
 import { clockOf } from "./when.ts";
+import { useJumpFollows } from "./thread/jump-entry.ts";
 import type { Drafts } from "./thread/session.ts";
 import { Work } from "./thread/work.tsx";
 import { tauriWindowControls, type WindowControls } from "../transport/window-controls.ts";
@@ -202,6 +203,8 @@ function RoomFrame({
     conversations.view,
     conversations.view,
   );
+  // a Find result's jump to an entry ends once another conversation opens
+  useJumpFollows(talks.thread, talks.drafting);
   const link = useMemo(
     () => ({
       thread: talks.thread,

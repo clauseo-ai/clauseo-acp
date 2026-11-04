@@ -42,7 +42,7 @@ import type { Matters, MattersView } from "./matters.ts";
 import { openConversation } from "./open-conversation.ts";
 import type { AllThreadsView } from "./all-threads.ts";
 import { quietly } from "./open.ts";
-import { jumpTo } from "./thread/jump-entry.ts";
+import { clearJump, jumpTo } from "./thread/jump-entry.ts";
 
 export type FindResultsProps = {
   transport: HostTransport;
@@ -200,6 +200,7 @@ export function FindResults({
   const openTalk = (found: FoundConversation) => () => {
     // asked before it opens, so the thread's first rows already page back to the entry
     if (found.order !== undefined) jumpTo(streamOf(found.thread), found.order);
+    else clearJump();
     const known = found.archived
       ? archivedSummary(every, found.matter, found.thread, talks.agent)
       : undefined;

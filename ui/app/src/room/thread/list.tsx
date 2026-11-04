@@ -229,7 +229,7 @@ export const ThreadList = memo(function ThreadList({ transport, stream, busy }: 
   // a Find result opens the thread at one of its entries: paged back to it, then scrolled to it
   const reach = useJumpOrder(stream);
   const older = useOlder(transport, store, stream, hasOlder, scroller, reach);
-  useJumpLanding(store, stream, reach, older.entries, scroller);
+  useJumpLanding(store, stream, reach, older.entries, scroller, older.start);
   // one grouping over the older pages and the window, built again as a page goes in
   const pickShape = useMemo(() => exchangesPick(older.entries), [older.entries]);
   const { exchanges, paged } = useStreamPart(store, stream, pickShape);
