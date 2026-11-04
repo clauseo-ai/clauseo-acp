@@ -319,13 +319,14 @@ fn a_newer_search_cancels_older_ones_and_a_late_answer_is_dropped() {
     );
     assert_eq!(running.join().unwrap(), Ok(SearchAnswer::Cancelled));
     assert_eq!(queued, Ok(SearchAnswer::Cancelled));
-    let newest = page(newest.unwrap());
-    assert!(
-        newest
-            .hits
-            .iter()
-            .any(|hit| hit.kind == SearchKind::MatterTitle)
-    );
+    // The newest search runs (a page, not `Cancelled`). Its hits are not checked: the index
+    // follows the Scratch matter's commits on its own thread, so the title row can land after
+    // that search ran (CI saw it miss on both tries). The poll below waits for the settled index
+    // instead, in its own window so its generations do not touch "main"'s.
+    let _newest = page(newest.unwrap());
+    poll(&host, &request("Scratch", 0), |p| {
+        p.indexing.is_none() && p.hits.iter().any(|hit| hit.kind == SearchKind::MatterTitle)
+    });
     assert!(matches!(
         wait(
             "a query search",
