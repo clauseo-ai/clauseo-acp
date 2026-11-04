@@ -6,26 +6,33 @@
 // nothing, since the lawyer is looking at it. Until the list arrives, and if it can't be read, the rail draws no list
 // and no scratch row. Under the open matter's row stand its conversations (conversations.ts), with New conversation:
 // a draft, or a thread with no title yet, says "New conversation"; a row not open says what it's doing.
-import type { Ref } from "react";
+import { Suspense, useState, useSyncExternalStore, type Ref } from "react";
 import { Rail, type MatterRowProps, type RailGroup } from "@clauseo/components/clauseo/rail.tsx";
 import type { ConversationRowProps } from "@clauseo/components/clauseo/rail-conversations.tsx";
+import { RailSwitch } from "@clauseo/components/clauseo/rail-switch.tsx";
+import { RailRecent } from "@clauseo/components/clauseo/rail-recent.tsx";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { frame } from "@clauseo/components/lib/words-frame.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { isolate } from "@clauseo/components/lib/bidi.ts";
 import type { MatterId } from "../transport/protocol.ts";
+import type { AllThreads } from "./all-threads.ts";
 import type { MatterInfo } from "./host-next.ts";
+import { openConversation } from "./open-conversation.ts";
+import { railView, recentDays } from "./rail-lists.ts";
+import { RailTriage } from "./rail-triage.ts";
+import type { TriageStatus } from "./triage.ts";
 import { planName } from "./agent.ts";
 import { rowWords } from "./conversation-status.ts";
 import type { ConversationRow, Conversations, ConversationsView } from "./conversations.ts";
-import type { Matters, MattersView, RowStatus } from "./matters.ts";
+import type { Matters, MattersView } from "./matters.ts";
 import { clockOf, dayOf, groupMatters } from "./when.ts";
 
 /** A row's status as MatterRow takes it: the state, and its moment as words. Working never names a time (no end
  * estimates), so it says "Answering."; a stop or a reset on another day gives its day. */
 function stateWords(
-  status: RowStatus | undefined,
+  status: TriageStatus | undefined,
   now: number,
   zone: string,
   lang: Lang,
@@ -53,12 +60,16 @@ function conversationRows(
     const words = rowWords(row);
     const stopped = words.state === "stopped" ? clockOf(words.at, now, zone, lang) : null;
     const state = stopped !== null && stopped.day !== "" ? "idle" : words.state;
+    // a failure keeps its mark on another day: its words, under the pointer, say the day
+    const failed = words.state === "failed" ? clockOf(words.at, now, zone, lang) : null;
     const extra =
       words.state === "waiting"
         ? { behind: titleOf(talks.rows.find((r) => r.thread === words.behind)) }
         : stopped !== null && state === "stopped"
           ? { at: stopped.time }
-          : {};
+          : failed !== null
+            ? { at: failed.time, day: failed.day }
+            : {};
     return {
       id: row.key,
       title: titleOf(row),
@@ -87,6 +98,7 @@ export function RoomRail({
   view,
   conversations,
   talks,
+  threads,
   open,
   onNewMatter,
   onNewMatterPreload,
@@ -102,6 +114,8 @@ export function RoomRail({
   conversations: Conversations;
   /** The open matter's conversations. */
   talks: ConversationsView;
+  /** Every matter's threads, for Needs you and Recent. */
+  threads: AllThreads;
   /** Matters, pressed below 1200 px: the rail stands open over the work. */
   open: boolean;
   onNewMatter: () => void;
@@ -123,10 +137,29 @@ export function RoomRail({
   onSettings?: (() => void) | undefined;
 }) {
   const w = useWords();
-  const { now, zone } = view;
+  const every = useSyncExternalStore(threads.subscribe, threads.view, threads.view);
+  const zone = view.zone;
+  const now = Math.max(view.now, every.now);
   const detailed = view.detailed;
+  const [triager] = useState(() => new RailTriage());
+  // whether the pointer is over the rail: rows hold their groups while it is
+  const [over, setOver] = useState(false);
+  const [list, setList] = useState(railView.get);
+  const placed = triager.of({
+    matters: view.matters,
+    status: view.status,
+    lists: every.lists,
+    open: view.open?.matter ?? null,
+    over,
+  });
+  const room = { matters, conversations };
+  const untitled = mt(w.lang, "New conversation");
   const row = (m: MatterInfo): MatterRowProps => {
     const current = view.open?.matter === m.matter;
+    const triaged = placed.rows.get(m.matter);
+    // a row that needs the lawyer names the conversation behind it, and a press opens that conversation
+    const behind =
+      current || triaged === undefined || triaged.need === null ? null : triaged.thread;
     return {
       id: m.matter,
       name: m.name,
@@ -137,9 +170,8 @@ export function RoomRail({
       // the menu's Locate folder follows the folder, apart from the status: the open row says nothing, yet offers it
       moved: m.folder_state === "missing",
       // the matter the lawyer is looking at says nothing: its work is in view
-      ...(current
-        ? { state: "idle" as const }
-        : stateWords(view.status.get(m.matter), now, zone, w.lang)),
+      ...(current ? { state: "idle" as const } : stateWords(triaged?.status, now, zone, w.lang)),
+      ...(behind === null ? {} : { where: behind.title ?? untitled }),
       testIds: { row: "matter-row" },
       // the open matter's conversations, once its list is in
       ...(current && talks.matter === m.matter && talks.phase !== "loading"
@@ -163,10 +195,16 @@ export function RoomRail({
             newConversationTestId: "new-conversation",
           }
         : {}),
-      onOpen: () => {
-        matters.open(m.matter);
-        onMoved();
-      },
+      onOpen:
+        behind === null
+          ? () => {
+              matters.open(m.matter);
+              onMoved();
+            }
+          : () => {
+              openConversation(room, m.matter, behind.thread);
+              onConversation();
+            },
       // Show in Finder (File Explorer): the menu greys it while the folder has moved
       onReveal: () => void matters.reveal(m.matter),
       ...(detailed
@@ -183,18 +221,21 @@ export function RoomRail({
   };
   const folders = view.matters.filter((m) => m.kind !== "scratch");
   const scratch = view.matters.find((m) => m.kind === "scratch");
-  const pinned = detailed ? folders.filter((m) => m.pinned) : [];
-  const groups: RailGroup[] = detailed
-    ? groupMatters(
-        folders.filter((m) => !m.pinned),
-        dayOf(now, zone),
-      ).map((g) => ({ when: frame(w.lang, g.when), matters: g.matters.map(row) }))
-    : [
-        {
-          when: frame(w.lang, "No date yet"),
-          matters: [...folders].sort(newestFirst).map(row),
-        },
-      ];
+  const pinned = folders.filter((m) => placed.group.get(m.matter) === "pinned");
+  const dated = folders.filter((m) => placed.group.get(m.matter) === "date");
+  const byId = new Map(folders.map((m) => [m.matter, m]));
+  const needs = placed.needs.flatMap((id) => byId.get(id) ?? []);
+  const groups: RailGroup[] = [
+    ...(needs.length === 0
+      ? []
+      : [{ when: frame(w.lang, "Needs you"), matters: needs.map(row), testId: "rail-needs-you" }]),
+    ...(detailed
+      ? groupMatters(dated, dayOf(now, zone)).map((g) => ({
+          when: frame(w.lang, g.when),
+          matters: g.matters.map(row),
+        }))
+      : [{ when: frame(w.lang, "No date yet"), matters: [...dated].sort(newestFirst).map(row) }]),
+  ];
   const recent = detailed
     ? folders
         .filter((m) => m.last_opened !== undefined)
@@ -234,6 +275,40 @@ export function RoomRail({
             },
           })}
       empty={view.phase === "ready"}
+      aside={
+        <RailSwitch
+          view={list}
+          onView={(v) => {
+            railView.set(v);
+            setList(v);
+          }}
+          testId="rail-switch"
+        />
+      }
+      {...(list === "recent"
+        ? {
+            list: (
+              <Suspense fallback={null}>
+                <RailRecent
+                  days={recentDays({
+                    lists: every.lists,
+                    matters: view.matters,
+                    current: talks.thread,
+                    now,
+                    zone,
+                    lang: w.lang,
+                    onOpen: (matter, thread) => {
+                      openConversation(room, matter, thread);
+                      onConversation();
+                    },
+                  })}
+                  testId="rail-recent"
+                />
+              </Suspense>
+            ),
+          }
+        : {})}
+      onHover={setOver}
       onEscape={onEscape}
       {...(onSettings === undefined ? {} : { onSettings })}
       testIds={{ newMatter: "new-matter", find: "find", settings: "open-settings" }}

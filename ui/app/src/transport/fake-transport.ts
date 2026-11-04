@@ -75,6 +75,9 @@ export type FakeNextHost = {
   command?: (
     command: NextCommand,
   ) => void | NextOutcome | Promise<void> | Promise<NextOutcome | undefined>;
+  /** Optional: the first frames of each app subscription, as the host sends them (each matter's whole thread list,
+   * `all: true`), played to the new listener alone once the subscription is made. */
+  first?: () => readonly AppEvent[];
 };
 
 export type FakeHost = {
@@ -160,6 +163,11 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
     app: {
       subscribeApp: (listener) => {
         this.#appHeard.add(listener);
+        const first = this.host.next?.first?.() ?? [];
+        if (first.length > 0)
+          queueMicrotask(() => {
+            for (const event of first) if (this.#appHeard.has(listener)) listener(event);
+          });
         return () => this.#appHeard.delete(listener);
       },
     },

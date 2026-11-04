@@ -54,6 +54,7 @@ import type { AgentName } from "@clauseo/components/lib/words-errors.ts";
 import { kindOf, knownPlan } from "./agent.ts";
 import { AgentPlanContext, useThreadAgentName } from "./thread/agent-plan.ts";
 import { Conversations } from "./conversations.ts";
+import { AllThreads } from "./all-threads.ts";
 import { LivePlan } from "./limits/live-plan.tsx";
 import { Matters, type MattersView } from "./matters.ts";
 import { AnswerHost, quietly, type ListedPapers } from "./open.ts";
@@ -191,6 +192,9 @@ function RoomFrame({
   const [conversations] = useState(() => new Conversations(transport, store, matters, drafts));
   useEffect(() => matters.start(), [matters]);
   useEffect(() => conversations.start(), [conversations]);
+  // every matter's threads, for the rail's Needs you and Recent
+  const [threads] = useState(() => new AllThreads(matters.next));
+  useEffect(() => threads.start(), [threads]);
   const view = useSyncExternalStore(matters.subscribe, matters.view, matters.view);
   const talks = useSyncExternalStore(
     conversations.subscribe,
@@ -366,6 +370,7 @@ function RoomFrame({
           view={view}
           conversations={conversations}
           talks={talks}
+          threads={threads}
           open={railOpen}
           onNewMatter={() => {
             madeFolded.current = false;
