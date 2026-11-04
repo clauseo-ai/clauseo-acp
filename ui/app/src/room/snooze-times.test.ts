@@ -50,13 +50,26 @@ test("Monday is left out when tomorrow is Monday", () => {
   expect(keys(at(10) + 5 * DAY).map(([k]) => k)).toEqual(["evening", "tomorrow"]);
 });
 
-test("Before the next date: 9:00 am the day before, only with the date more than a day away", () => {
+test("Before the next date: 9:00 am the day before, only with the date more than a day away and not Tomorrow 9:00 am", () => {
   expect(keys(at(10), "2026-11-11").at(-1)).toEqual(["before", at(9) + 7 * DAY]);
-  expect(keys(at(10), "2026-11-05").at(-1)).toEqual(["before", at(9) + DAY]);
+  expect(keys(at(10), "2026-11-06").at(-1)).toEqual(["before", at(9) + 2 * DAY]);
+  // two days away: the day before is tomorrow, and Tomorrow 9:00 am says it already
+  expect(keys(at(10), "2026-11-05").map(([k]) => k)).toEqual(["evening", "tomorrow", "monday"]);
   expect(keys(at(10), "2026-11-04").map(([k]) => k)).not.toContain("before");
   expect(keys(at(10), "2026-11-01").map(([k]) => k)).not.toContain("before");
   // past the host's 366 days
   expect(keys(at(10), "2027-12-01").map(([k]) => k)).not.toContain("before");
+});
+
+test("local midnight where summer time starts at midnight (Santiago, 6 September 2026) is that day's first moment, 01:00", () => {
+  const zone = "America/Santiago";
+  const day = dayOf(Date.UTC(2026, 8, 6, 15), zone);
+  // 00:00 -04 doesn't exist: the clock goes to 01:00 -03, 04:00 UTC; never 23:00 the day before
+  expect(atLocal(day, 0, zone)).toBe(Date.UTC(2026, 8, 6, 4, 0));
+  expect(wallOf(atLocal(day, 0, zone), zone)).toEqual({ day, minute: 60 });
+  expect(sweepStart(Date.UTC(2026, 8, 6, 12, 0), zone)).toBe(Date.UTC(2026, 8, 6, 4, 0));
+  // a day with no change keeps its midnight
+  expect(atLocal(day + 1, 0, zone)).toBe(Date.UTC(2026, 8, 7, 3, 0));
 });
 
 test("the picker's value is the zone's wall clock both ways", () => {
