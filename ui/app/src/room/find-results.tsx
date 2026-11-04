@@ -3,14 +3,7 @@
 // them. A matter opens as from its row; a conversation opens, and one found in something said opens at that entry
 // (thread/jump-entry.ts); a paper opens its matter and the paper in its own app, as a paper named in an answer does
 // (open.ts): there is no reader in the room yet. More hits come a page at a time as the rail is scrolled to its foot.
-import {
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-  type ComponentType,
-} from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Heading } from "@clauseo/components/clauseo/heading.tsx";
 import {
   MatterRow,
@@ -18,9 +11,12 @@ import {
   type MatterRowProps,
 } from "@clauseo/components/clauseo/rail.tsx";
 import { Say } from "@clauseo/components/clauseo/say.tsx";
-import { fileTypeIcon } from "@clauseo/components/icons/file-type.ts";
-import type { IconProps } from "@clauseo/components/icons/icon.tsx";
-import { IconAbout, IconArchived, IconChecking } from "@clauseo/components/icons/icons.tsx";
+import {
+  IconAbout,
+  IconArchived,
+  IconChecking,
+  IconFileGeneric,
+} from "@clauseo/components/icons/icons.tsx";
 import { isolate } from "@clauseo/components/lib/bidi.ts";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { langOfText } from "@clauseo/components/lib/script.ts";
@@ -94,16 +90,9 @@ function Parts({ parts }: { parts: readonly SnippetPart[] }) {
   );
 }
 
-function PaperRow({
-  paper,
-  Glyph,
-  onOpen,
-}: {
-  paper: FoundPaper;
-  /** The paper's file type's glyph (file-type.ts). */
-  Glyph: ComponentType<IconProps>;
-  onOpen: () => void;
-}) {
+/** A paper found by its file name, led by the bare page at the line's 14 px: a file type's glyph is drawn at 20 and
+ * 24 px only, and its letters can't be read smaller (DESIGN, Icons). */
+function PaperRow({ paper, onOpen }: { paper: FoundPaper; onOpen: () => void }) {
   const { lang } = useDisplay();
   return (
     <li>
@@ -112,7 +101,7 @@ function PaperRow({
           <Own text={paper.name} />
         </span>
         <span className="room-matter-match room-find-paper">
-          <Glyph size={14} />
+          <IconFileGeneric size={14} />
           <span className="sr-only">
             {fw(lang, "Paper, {file}", { file: isolate(paper.file) })}
           </span>
@@ -255,7 +244,7 @@ export function FindResults({
               />
             ))}
             {shown.papers.map((p) => (
-              <PaperRow key={p.key} paper={p} Glyph={fileTypeIcon(p.file)} onOpen={openPaper(p)} />
+              <PaperRow key={p.key} paper={p} onOpen={openPaper(p)} />
             ))}
           </ul>
         </section>
