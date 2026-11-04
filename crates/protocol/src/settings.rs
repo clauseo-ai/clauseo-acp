@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::AgentId;
+use crate::{AgentId, EnvName};
 
 /// The colour theme.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -122,7 +122,8 @@ pub struct SettingsView {
     /// Every dotted key the firm's policy sets, such as `ui.theme`, sorted. The lawyer cannot
     /// change these: a `SetUiSettings`, `SetToolSettings` or `SetPrivacySettings` naming one is
     /// refused with `settings.locked`. It can also name keys outside `ui`, `tools` and `privacy`
-    /// (`matters.default_location`, `agents.<id>`).
+    /// (`matters.default_location`, `agents.<id>`, `plans.<id>`). A key ending in `.` stands
+    /// for every key under it: `plans.` while a policy source cannot be read.
     pub locked: Vec<String>,
     /// Each agent's firm plan (`plans.<id>`), by agent id; left out when no agent has one.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -130,8 +131,8 @@ pub struct SettingsView {
 }
 
 /// An agent's firm plan as a window sees it (`plans.<id>`): the endpoint, the provider and the
-/// names of the extra variables. It never holds a variable's value or a key; the settings crate
-/// refuses a secret-shaped variable name.
+/// names of the extra variables. Each name is an [`EnvName`], which cannot hold `=` or a value
+/// after it; the settings crate refuses a secret-shaped variable name.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct PlanView {
@@ -143,7 +144,7 @@ pub struct PlanView {
     pub provider: Option<PlanProvider>,
     /// The names of the extra variables (`plans.<id>.env`), sorted; never their values.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub env_names: Vec<String>,
+    pub env_names: Vec<EnvName>,
 }
 
 /// Whose service a firm plan uses (`plans.<id>.provider`).

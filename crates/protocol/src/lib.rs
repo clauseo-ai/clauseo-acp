@@ -215,7 +215,7 @@ wire_types! {
     },
     ids::{
         AgentChoiceId, AgentId, AgentSessionId, BlobHash, CheckpointId, CommandId, ContentId,
-        ElicitationId, EventId, FileRefId, FolderRefId, MatterId, MatterPath, MessageId,
+        ElicitationId, EnvName, EventId, FileRefId, FolderRefId, MatterId, MatterPath, MessageId,
         PermissionRequestId, ThreadId, ToolCallId, TurnId, ViewEpoch,
     },
     limits::{

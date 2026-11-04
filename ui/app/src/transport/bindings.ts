@@ -1125,6 +1125,12 @@ export type ElicitationState =
 export type EntryId = string;
 
 /**
+ *  An environment variable's name, never its value (decision record 0048): 1 to 255
+ *  characters of `[A-Za-z0-9_]`, so no `NAME=value` text fits in one.
+ */
+export type EnvName = string;
+
+/**
  *  One logged event: which stream it belongs to, its place there, and what caused it.
  * 
  *  Order by `seq`, never by `ts`. The event's JSON is a one-key object:
@@ -3063,8 +3069,8 @@ export type PlanStatus =
 
 /**
  *  An agent's firm plan as a window sees it (`plans.<id>`): the endpoint, the provider and the
- *  names of the extra variables. It never holds a variable's value or a key; the settings crate
- *  refuses a secret-shaped variable name.
+ *  names of the extra variables. Each name is an [`EnvName`], which cannot hold `=` or a value
+ *  after it; the settings crate refuses a secret-shaped variable name.
  */
 export type PlanView = {
 	/**  The firm's gateway, an `https` URL (`plans.<id>.endpoint`); missing when unset. */
@@ -3072,7 +3078,7 @@ export type PlanView = {
 	/**  Whose service the plan uses (`plans.<id>.provider`); missing when unset. */
 	provider?: PlanProvider,
 	/**  The names of the extra variables (`plans.<id>.env`), sorted; never their values. */
-	env_names?: string[],
+	env_names?: EnvName[],
 };
 
 /**  The OS the host runs on. */
@@ -3520,7 +3526,8 @@ export type SettingsView = {
 	 *  Every dotted key the firm's policy sets, such as `ui.theme`, sorted. The lawyer cannot
 	 *  change these: a `SetUiSettings`, `SetToolSettings` or `SetPrivacySettings` naming one is
 	 *  refused with `settings.locked`. It can also name keys outside `ui`, `tools` and `privacy`
-	 *  (`matters.default_location`, `agents.<id>`).
+	 *  (`matters.default_location`, `agents.<id>`, `plans.<id>`). A key ending in `.` stands
+	 *  for every key under it: `plans.` while a policy source cannot be read.
 	 */
 	locked: string[],
 	/**  Each agent's firm plan (`plans.<id>`), by agent id; left out when no agent has one. */

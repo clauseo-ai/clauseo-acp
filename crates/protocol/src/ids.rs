@@ -259,7 +259,7 @@ impl de::Visitor<'_> for DigestBytes {
 
 mod strings;
 pub use strings::{
-    AgentChoiceId, AgentId, AgentSessionId, ContentId, MAX_ID_TEXT_BYTES, MatterPath,
+    AgentChoiceId, AgentId, AgentSessionId, ContentId, EnvName, MAX_ID_TEXT_BYTES, MatterPath,
     is_windows_reserved_name,
 };
 
