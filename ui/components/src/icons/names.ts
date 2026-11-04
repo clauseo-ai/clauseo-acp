@@ -203,6 +203,7 @@ export const ICON_NAMES = [
     meaning:
       "A tool call that fetches from the network, a web fetch or a web search, not used in the room yet",
   },
+  { component: "IconArchived", source: "archive", meaning: "Archived: a conversation set aside" },
   {
     component: "IconFileWord",
     source: "fileWord",

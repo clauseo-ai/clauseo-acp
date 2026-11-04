@@ -8,6 +8,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { MatterSummary } from "../transport/protocol.ts";
+import { settled } from "@clauseo/components/lib/late.ts";
 import { FakeTransport, type FakeHost } from "../transport/fake-transport.ts";
 import { header, reset, upsert, uuid } from "../testing/stream-script.ts";
 import type { ViewEntry } from "../transport/protocol.ts";
@@ -67,6 +68,8 @@ async function mount(h: FakeHost) {
 }
 
 async function settle() {
+  // Find's results come in their own chunk
+  await act(async () => settled());
   for (let i = 0; i < 3; i += 1)
     await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
 }
@@ -192,13 +195,13 @@ test("without a NextHost: one group, No date yet, newest first; no Pinned, and f
   await act(async () => find()?.focus());
   expect(headings()).toEqual(["No date yet"]);
   await act(async () => type(find() as HTMLInputElement, "sharma"));
+  await settle();
   expect(names()).toEqual([B.name]);
+  // this host answers no search: nothing new shows, and the names still match
   await act(async () => type(find() as HTMLInputElement, "Asha"));
+  await settle();
   expect(names()).toEqual([]);
-  expect(rail()?.textContent).toContain("No matter matches 'Asha'.");
-  // it promises only what it searches: names
-  expect(findLabel()).toBe("Find a matter by its name");
-  expect(rail()?.textContent).toContain("Search covers names.");
+  expect(findLabel()).toBe("Find");
   expect(rail()?.textContent).not.toContain("client");
 });
 
@@ -217,13 +220,10 @@ test("with a NextHost: find by client, Pinned above the dates, and Recent by las
   expect(headings()).toEqual(["Recent"]);
   expect(names()).toEqual([A.name, C.name, B.name]);
   await act(async () => type(find() as HTMLInputElement, "asha"));
+  await settle();
   expect(names()).toEqual([A.name]);
   expect(rowOf(A.name)?.textContent).toContain("Client, Asha Rao");
-  // names and clients, never case numbers
-  expect(findLabel()).toBe("Find a matter by its name or client");
-  await act(async () => type(find() as HTMLInputElement, "zzz"));
-  expect(rail()?.textContent).toContain("Search covers names and clients.");
-  expect(rail()?.textContent).not.toContain("case number");
+  expect(findLabel()).toBe("Find");
 });
 
 test("Recent shows the five matters opened last", async () => {

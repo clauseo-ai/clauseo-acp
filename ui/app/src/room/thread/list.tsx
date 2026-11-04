@@ -18,6 +18,7 @@ import { stamp } from "./clock.ts";
 import { exchangesPick, latestAsked } from "./exchanges.ts";
 import { sameIds } from "./ids.ts";
 import { useHasOlder, useQuestionWords } from "./live.ts";
+import { useJumpLanding, useJumpOrder } from "./jump-entry.ts";
 import { useOlder } from "./older.ts";
 import { pickQueued, useTimeOf } from "./time-of.ts";
 import { RowOf } from "./row-of.tsx";
@@ -225,7 +226,10 @@ export const ThreadList = memo(function ThreadList({ transport, stream, busy }: 
   const { nodes } = useRoom();
   const hasOlder = useHasOlder(stream);
   const scroller = useCallback(() => nodes.get("thread"), [nodes]);
-  const older = useOlder(transport, store, stream, hasOlder, scroller);
+  // a Find result opens the thread at one of its entries: paged back to it, then scrolled to it
+  const reach = useJumpOrder(stream);
+  const older = useOlder(transport, store, stream, hasOlder, scroller, reach);
+  useJumpLanding(store, stream, reach, older.entries, scroller);
   // one grouping over the older pages and the window, built again as a page goes in
   const pickShape = useMemo(() => exchangesPick(older.entries), [older.entries]);
   const { exchanges, paged } = useStreamPart(store, stream, pickShape);

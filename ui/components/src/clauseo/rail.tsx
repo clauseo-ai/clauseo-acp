@@ -3,6 +3,7 @@
 // dates come in as props.
 import { useLayoutEffect, useRef, useState, type ReactNode, type Ref } from "react";
 import { Button } from "../ui/button.tsx";
+import { Kbd } from "../ui/kbd.tsx";
 import { searchBoxOpen, searchInput } from "../ui/recipes.ts";
 import { IconNewMatter, IconScratchMatter, IconSearch } from "../icons/icons.tsx";
 import { cn } from "../lib/cn.ts";
@@ -62,6 +63,19 @@ export type RailFind = {
   /** What the search covers, so its label and its no-match line promise only that: names alone, names and clients,
    * or, left out, names, clients and case numbers. */
   covers?: "name" | "nameClient";
+  /** Optional: Find searching inside (U16a). Given it, the field reads "Find", shows its key (⌘K, Ctrl+K), and while
+   * words are in it the list is what this draws: the room's results, which take the matching matters found here. */
+  results?: (search: FindSearch) => ReactNode;
+  /** Optional: the field hovered or focused, before anything is typed: the room loads its results then. */
+  onPreload?: () => void;
+};
+
+/** What Find's results are drawn from: the words in the field, the matters matched here by name, client or case
+ * number (their rows ready to open, each leaving Find), and the leave itself, for a result the room opens. */
+export type FindSearch = {
+  query: string;
+  matching: readonly MatterRowProps[];
+  leave: () => void;
 };
 
 /** Find's label and the line under no match, for what it covers. */
@@ -87,6 +101,9 @@ function findWords(lang: "en" | "hi", covers: RailFind["covers"]) {
 
 function FindField({
   label,
+  placeholder,
+  keys,
+  onPreload,
   testId,
   query,
   onQuery,
@@ -96,6 +113,10 @@ function FindField({
   onFirst,
 }: {
   label: string;
+  placeholder: string;
+  /** Find's key, shown in the empty field and named to assistive technology; none where the room has no key. */
+  keys?: { cap: string; aria: string } | undefined;
+  onPreload?: (() => void) | undefined;
   testId: string | undefined;
   query: string;
   onQuery: (q: string) => void;
@@ -105,10 +126,9 @@ function FindField({
   onDone: () => void;
   onFirst: () => void;
 }) {
-  const w = useWords();
   const room = useRoom();
   return (
-    <label className={cn(searchBoxOpen, "w-full min-w-0 room-find")}>
+    <label className={cn(searchBoxOpen, "w-full min-w-0 room-find")} onPointerEnter={onPreload}>
       <IconSearch size={16} />
       <span className="sr-only">{label}</span>
       <input
@@ -116,11 +136,15 @@ function FindField({
         type="search"
         autoComplete="off"
         className={searchInput}
-        placeholder={mt(w.lang, "Find a matter")}
+        placeholder={placeholder}
+        aria-keyshortcuts={keys?.aria}
         data-testid={testId}
         value={query}
         onChange={(e) => onQuery(e.target.value)}
-        onFocus={onOpen}
+        onFocus={() => {
+          onPreload?.();
+          onOpen();
+        }}
         onBlur={onClose}
         onKeyDown={(e) => {
           // Escape clears the words and keeps focus here; on an empty field the date groups come back and the key goes
@@ -137,6 +161,7 @@ function FindField({
           }
         }}
       />
+      {keys !== undefined && query === "" && <Kbd className="room-find-key">{keys.cap}</Kbd>}
     </label>
   );
 }
@@ -311,6 +336,14 @@ export function Rail({
               },
             ];
   const words = findWords(w.lang, find?.covers);
+  // searching inside: the room's results stand in the matching matters' place while words are in the field
+  const inside = find?.results !== undefined && finding && query.trim() !== "";
+  const findKeys =
+    find?.results === undefined
+      ? undefined
+      : platform === "mac"
+        ? { cap: "⌘K", aria: "Meta+K" }
+        : { cap: "Ctrl+K", aria: "Control+K" };
   const scratchRow = scratch !== undefined && (
     <div className="room-scratch">
       <button
@@ -370,7 +403,10 @@ export function Rail({
         </Button>
         {find !== undefined && (
           <FindField
-            label={words.label}
+            label={find.results === undefined ? words.label : mt(w.lang, "Find")}
+            placeholder={mt(w.lang, find.results === undefined ? "Find a matter" : "Find")}
+            keys={findKeys}
+            onPreload={find.onPreload}
             testId={testIds?.find}
             query={query}
             onQuery={(q) => {
@@ -384,6 +420,10 @@ export function Rail({
             }}
             onDone={() => setFinding(false)}
             onFirst={() => {
+              if (inside) {
+                nav.current?.querySelector<HTMLElement>(".room-find-results button")?.click();
+                return;
+              }
               const first = shown === "none" ? undefined : shown[0]?.matters[0];
               first?.onOpen?.();
             }}
@@ -391,7 +431,15 @@ export function Rail({
         )}
         {!finding && aside}
       </div>
-      {list !== undefined && !finding ? (
+      {inside && find?.results !== undefined ? (
+        <div className="room-groups room-groups-find room-find-results" data-finding="">
+          {find.results({
+            query,
+            matching: shown === "none" ? [] : (shown[0]?.matters ?? []),
+            leave,
+          })}
+        </div>
+      ) : list !== undefined && !finding ? (
         list
       ) : shown !== "none" && shown.length === 0 ? (
         empty && <NoMatters />

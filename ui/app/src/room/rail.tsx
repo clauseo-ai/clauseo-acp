@@ -7,7 +7,12 @@
 // and no scratch row. Under the open matter's row stand its conversations (conversations.ts), with New conversation:
 // a draft, or a thread with no title yet, says "New conversation"; a row not open says what it's doing.
 import { Suspense, useState, useSyncExternalStore, type Ref } from "react";
-import { Rail, type MatterRowProps, type RailGroup } from "@clauseo/components/clauseo/rail.tsx";
+import {
+  Rail,
+  type FindSearch,
+  type MatterRowProps,
+  type RailGroup,
+} from "@clauseo/components/clauseo/rail.tsx";
 import type { ConversationRowProps } from "@clauseo/components/clauseo/rail-conversations.tsx";
 import { RailSwitch } from "@clauseo/components/clauseo/rail-switch.tsx";
 import { RailRecent } from "@clauseo/components/clauseo/rail-recent.tsx";
@@ -16,6 +21,7 @@ import type { Lang } from "@clauseo/components/lib/display.ts";
 import { frame } from "@clauseo/components/lib/words-frame.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { isolate } from "@clauseo/components/lib/bidi.ts";
+import type { HostTransport } from "../transport/host-transport.ts";
 import type { MatterId } from "../transport/protocol.ts";
 import type { AllThreads } from "./all-threads.ts";
 import type { MatterInfo } from "./host-next.ts";
@@ -27,6 +33,7 @@ import { planName } from "./agent.ts";
 import { rowWords } from "./conversation-status.ts";
 import type { ConversationRow, Conversations, ConversationsView } from "./conversations.ts";
 import type { Matters, MattersView } from "./matters.ts";
+import { LazyFindResults, preloadFind } from "./find-load.ts";
 import { clockOf, dayOf, groupMatters } from "./when.ts";
 
 /** A row's status as MatterRow takes it: the state, and its moment as words. Working never names a time (no end
@@ -94,6 +101,7 @@ const newestFirst = (a: MatterInfo, b: MatterInfo) =>
   a.matter < b.matter ? 1 : a.matter > b.matter ? -1 : 0;
 
 export function RoomRail({
+  transport,
   matters,
   view,
   conversations,
@@ -109,6 +117,8 @@ export function RoomRail({
   onEscape,
   onSettings,
 }: {
+  /** For Find's search inside the matters, and opening a paper it finds. */
+  transport: HostTransport;
   matters: Matters;
   view: MattersView;
   conversations: Conversations;
@@ -248,6 +258,23 @@ export function RoomRail({
     client: detailed ? (m.client ?? "") : "",
     caseNo: "",
   }));
+  // Find searches inside the matters (find-results.tsx, loaded as the field is hovered or focused)
+  const results = (search: FindSearch) => (
+    <Suspense fallback={null}>
+      <LazyFindResults
+        transport={transport}
+        search={search}
+        matters={matters}
+        conversations={conversations}
+        view={view}
+        talks={talks}
+        rows={new Map(folders.map((m, i) => [m.matter, all[i] ?? row(m)]))}
+        every={every}
+        onMoved={onMoved}
+        onConversation={onConversation}
+      />
+    </Suspense>
+  );
   const openScratch = (id: MatterId) => () => {
     matters.open(id);
     onMoved();
@@ -264,7 +291,13 @@ export function RoomRail({
       {...(folders.length === 0
         ? {}
         : {
-            find: { all, recent, covers: detailed ? ("nameClient" as const) : ("name" as const) },
+            find: {
+              all,
+              recent,
+              covers: detailed ? ("nameClient" as const) : ("name" as const),
+              results,
+              onPreload: () => void preloadFind(),
+            },
           })}
       {...(scratch === undefined
         ? {}

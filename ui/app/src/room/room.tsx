@@ -61,6 +61,7 @@ import { AnswerHost, quietly, type ListedPapers } from "./open.ts";
 import { LocateGate, MovedFolder } from "./moved.tsx";
 import { RoomRail } from "./rail.tsx";
 import { useSettingsKey } from "./settings-key.ts";
+import { useFindKey } from "./find-key.ts";
 import { ScratchLine } from "./scratch-line.tsx";
 import type { StandIns } from "./versions/stand-ins.ts";
 import { useVersions } from "./versions/use-versions.ts";
@@ -287,6 +288,10 @@ function RoomFrame({
       : () => void quietly("open_settings", open.call(transport));
   });
   useSettingsKey(openSettings, mac);
+  // Find's key focuses the rail's Find from anywhere in the room, a folded rail opened first
+  const [findField] = useState(() => () => document.getElementById(room.id("find")));
+  const [openRail] = useState(() => () => setRailOpen(true));
+  useFindKey(findField, openRail, mac);
   // the plan the open conversation uses, on the status line: its thread's, or the one a draft would run
   // nothing while the matter's list loads (its agent isn't known yet), or for an agent of no kind
   const openRow = talks.rows.find((r) => r.key === talks.open);
@@ -366,6 +371,7 @@ function RoomFrame({
       {/* Matters opens and folds it below 1200 px; opening a matter, making one or Escape folds it again */}
       {versions.rail ?? (
         <RoomRail
+          transport={transport}
           matters={matters}
           view={view}
           conversations={conversations}

@@ -62,12 +62,7 @@ export class AllThreads {
       this.#by.set(change.matter, threads);
       changed.add(change.matter);
     }
-    const removed =
-      "matters_removed" in event
-        ? event.matters_removed.matters
-        : "matters_changed" in event
-          ? ((event.matters_changed as { removed?: readonly MatterId[] }).removed ?? [])
-          : [];
+    const removed = "matters_changed" in event ? event.matters_changed.removed : [];
     for (const matter of removed) if (this.#by.delete(matter)) changed.add(matter);
     if (changed.size === 0) return;
     const lists = new Map(this.#view.lists);
