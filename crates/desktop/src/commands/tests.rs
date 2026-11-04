@@ -372,8 +372,8 @@ fn every_list_of_commands_agrees() {
         "capabilities/settings.json, beside the window permissions window_frame/tests.rs checks"
     );
     assert!(set(&SETTINGS_COMMANDS).is_subset(&ours));
-    // The default build names main, settings and counts; e2e::grant_scoreboard adds e2e and marks in
-    // their builds.
+    // The default build names main, settings and counts; e2e::grant_scoreboard adds e2e and
+    // marks in their builds.
     let config: Value =
         serde_json::from_str(&std::fs::read_to_string(dir.join("tauri.conf.json")).unwrap())
             .unwrap();

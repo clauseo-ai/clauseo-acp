@@ -38,6 +38,16 @@ crates/desktop/src/lib.rs stop_host_then_exit clippy::exit
 # on Windows. Each module's FFI call, under its own #![expect].
 crates/desktop/src/machine_memory.rs mac unsafe_code
 crates/desktop/src/machine_memory.rs win unsafe_code
+# The usage counts' clock (src/counts.rs, 0036, S21): SystemTime::now, read there alone, since
+# clauseo-counts takes time as an input.
+crates/desktop/src/counts.rs now clippy::disallowed_methods
+# The usage counts' canary test (tests/canary.rs, S21): its scratch folder and the papers planted in
+# it, and the one end-to-end session, kept in one function so each step's canary reads in order.
+crates/desktop/tests/canary.rs no_canary_reaches_a_usage_counts_body clippy::too_many_lines
+crates/desktop/tests/canary/support.rs Scratch::new clippy::disallowed_methods
+crates/desktop/tests/canary/support.rs Scratch::dir clippy::disallowed_methods
+crates/desktop/tests/canary/support.rs Scratch::write clippy::disallowed_methods
+crates/desktop/tests/canary/support.rs Scratch::drop clippy::disallowed_methods
 # R13: the speed scoreboard's e2e and marks builds (never in release), and build.rs's cleanup of
 # the permission files tauri-build wrote for them.
 crates/desktop/build.rs remove_permissions clippy::disallowed_methods
