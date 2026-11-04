@@ -79,15 +79,15 @@ as `yes` or `no`. The meaning is also each variant's doc comment in `error_code.
 | `settings.locked` | The change names a setting that the firm's policy sets, so the lawyer cannot change it; nothing was changed. | no | host (`SetUiSettings`, `SetToolSettings`, `SetPrivacySettings`; decision records 0017, 0030 and 0036) |
 | `agent.install_offline` | The agent's install cannot reach its hosts: name resolution or connect failed with no route. The install waits and tries again by itself. | yes | agents (S17 `FailureKind::Offline`), desktop (0048) |
 | `agent.install_blocked` | A proxy or firewall blocked the agent's download: a 403 or 407 from a proxy, a TLS failure, or a web page where a file should be. | no | agents (S17 `FailureKind::Blocked`), desktop (0048) |
-| `agent.install_disk_full` | Too little free space for the agent's install; space must be freed first. | no | agents (S17 `FailureKind::DiskFull`), desktop (0048) |
+| `agent.install_disk_full` | Too little free space for the agent's install; a retry succeeds once space is freed. | yes | agents (S17 `FailureKind::DiskFull`), desktop (0048) |
 | `agent.install_failed` | The agent's install failed for another reason, after three tries. | yes | agents (S17 `FailureKind::Failed`), desktop (0048) |
-| `signin.cancelled` | The lawyer cancelled the sign-in, in Clauseo or on the vendor's page. | no | agents (S18 `SigninCode`), desktop (0048) |
-| `signin.link_expired` | The sign-in link or device code expired before the sign-in finished; a new sign-in gets a new one. | yes | agents (S18 `SigninCode`), desktop (0048) |
-| `signin.no_plan` | The account has no plan the agent accepts. | no | agents (S18 `SigninCode`), desktop (0048) |
-| `signin.device_code_off` | Device-code sign-in is turned off for the account. | no | agents (S18 `SigninCode`), desktop (0048) |
-| `signin.port_busy` | Another program holds the port the agent's sign-in listens on (Codex's 1455). | yes | agents (S18 `SigninCode`), desktop (0048) |
-| `signin.failed` | The sign-in ended before signing in, for any other reason. | yes | agents (S18 `SigninCode`), desktop (0048) |
-| `signin.policy_unreadable` | The firm's policy cannot be read and once set this agent's firm plan, so sign-in and launch are refused rather than sent to a plan login. | no | desktop (0048) |
+| `signin.cancelled` | The lawyer cancelled the sign-in, in Clauseo or on the vendor's page. | no | agents (S18 `SigninCode`), desktop (0048); new area for R20 |
+| `signin.link_expired` | The sign-in link or device code expired before the sign-in finished; a new sign-in gets a new one. | yes | agents (S18 `SigninCode`), desktop (0048); new area for R20 |
+| `signin.no_plan` | The account has no plan the agent accepts. | no | agents (S18 `SigninCode`), desktop (0048); new area for R20 |
+| `signin.device_code_off` | Device-code sign-in is turned off for the account. | no | agents (S18 `SigninCode`), desktop (0048); new area for R20 |
+| `signin.port_busy` | Another program holds the port the agent's sign-in listens on (Codex's 1455). | yes | agents (S18 `SigninCode`), desktop (0048); new area for R20 |
+| `signin.failed` | The sign-in ended before signing in, for any other reason. | yes | agents (S18 `SigninCode`), desktop (0048); new area for R20 |
+| `signin.policy_unreadable` | The firm's policy cannot be read and once set this agent's firm plan, so sign-in and launch are refused rather than sent to a plan login. | no | desktop (0048); new area for R20 |
 | `unknown` | A code from a newer Clauseo that this version does not know. Never produced here. | no | decoding only |
 
 Judgement calls on retryable: `agent.launch_failed` and `agent.exited` are retryable because a new
