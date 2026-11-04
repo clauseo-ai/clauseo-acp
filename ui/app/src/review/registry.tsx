@@ -48,6 +48,7 @@ import type { NextErrorCode } from "../room/host-next.ts";
 import { ERROR_WORDS, type ErrorKey } from "@clauseo/components/lib/words-errors.ts";
 import { agentText, step, toolCall, TURN, userMessage, uuid } from "../testing/stream-script.ts";
 import type { ErrorCode, StepEntry, ViewEntry } from "../transport/protocol.ts";
+import { U16B } from "./registry-u16b.tsx";
 
 /* ---------- U3: the live thread's states ---------- */
 
@@ -545,4 +546,5 @@ export const REGISTRY: readonly Entry[] = [
     screen: "matters/new-matter",
     render: () => <RoomAfter host={() => refusingHost("internal")} steps={NEW_MATTER} />,
   },
+  ...U16B,
 ];

@@ -3,6 +3,8 @@
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { errorHindi, errorSentence, type ErrorKey } from "@clauseo/components/lib/words-errors.ts";
 import { fw, type FindKey } from "@clauseo/components/lib/words-find.ts";
+import { tw, type TriageKey } from "@clauseo/components/lib/words-triage.ts";
+import { twl, type TriageLateKey } from "@clauseo/components/lib/words-triage-late.ts";
 import { frame, type FrameKey } from "@clauseo/components/lib/words-frame.ts";
 import { lim, type LimitKey } from "@clauseo/components/lib/words-limits.ts";
 import { limThread, type LimitThreadKey } from "@clauseo/components/lib/words-limits-thread.ts";
@@ -52,6 +54,22 @@ export const findWords = (key: FindKey): WordsRef => ({
   key,
   text: (lang) => fw(lang, key),
   later: fw.hi[key] === null,
+});
+
+/** A string of snooze and Done drawn with the rail (words-triage.ts, U16b). */
+export const triageWords = (key: TriageKey): WordsRef => ({
+  file: "lib/words-triage.ts",
+  key,
+  text: (lang) => tw(lang, key),
+  later: tw.hi[key] === null,
+});
+
+/** A string of snooze and Done that opens later (words-triage-late.ts, U16b). */
+export const triageLateWords = (key: TriageLateKey): WordsRef => ({
+  file: "lib/words-triage-late.ts",
+  key,
+  text: (lang) => twl(lang, key),
+  later: twl.hi[key] === null,
 });
 
 export const roomWords = (key: RoomKey): WordsRef => ({
