@@ -12,6 +12,7 @@ import type {
   ErrorCode,
   FileRefId,
   HostCommand,
+  HostQuery,
   MatterId,
   MessageId,
   PermissionRequestId,
@@ -61,12 +62,41 @@ export type ConversationLink = {
   retry?: (thread: ThreadId, message: MessageId, at: Timestamp) => Promise<void>;
 };
 
+// swap for bindings.ts once the host's PreviewUndo merges: the query and its answer are declared here by hand, and
+// the query reaches transport.query through one cast until the generated HostQuery carries it.
+
+/** `{"preview_undo": {"thread", "turn"}}`: read-only. Refused as command.unknown_thread, or command.invalid for a turn
+ * with no step or one already undone. */
+export type PreviewUndoQuery = { preview_undo: { thread: ThreadId; turn: TurnId } };
+/** `{"undo_preview": {"edited_since": [...]}}`: the matter's paths edited since the turn's after-turn checkpoint, empty
+ * when nothing changed. */
+export type PreviewUndoAnswer = { undo_preview: { edited_since: string[] } };
+
+/** The paths edited since a turn's after-turn checkpoint; rejects with the HostError when the host refuses. */
+export async function previewUndoOf(
+  transport: Pick<HostTransport, "query">,
+  thread: ThreadId,
+  turn: TurnId,
+): Promise<string[]> {
+  const query: PreviewUndoQuery = { preview_undo: { thread, turn } };
+  const answer = (await transport.query(query as unknown as HostQuery)) as unknown as {
+    undo_preview?: { edited_since?: unknown };
+  };
+  const edited = answer.undo_preview?.edited_since;
+  if (!Array.isArray(edited) || !edited.every((p) => typeof p === "string"))
+    throw internalError("preview_undo answered something else");
+  return edited as string[];
+}
+
 /** What the rows can do and need to know: Undo, and the turn sent last (busy until its end is in the view). */
 export type ThreadActions = {
   readonly stream: StreamId | null;
   readonly sentTurn: TurnId | null;
   /** Undoes every file of a step; rejects with the HostError when the host refuses. */
   undo: (step: StepEntry) => Promise<void>;
+  /** Asks the host which of a step's papers were edited since Clauseo's change (PreviewUndo); absent where the host
+   * has no PreviewUndo. Rejects with the HostError when the host refuses. */
+  previewUndo?: ((step: StepEntry) => Promise<string[]>) | undefined;
   /** Answers a permission request with an option it offered; rejects with the HostError when the host refuses (an
    * allow_always declined at the native confirm: `transport.unauthorized`). */
   answer: (request: PermissionRequestId, option: string) => Promise<void>;
@@ -247,6 +277,19 @@ export function useThreadSession(
     [command],
   );
 
+  const previewUndo = useCallback(
+    async (step: StepEntry): Promise<string[]> => {
+      const id = open.current;
+      if (id === null) throw internalError("no thread is open");
+      try {
+        return await previewUndoOf(transport, id, step.turn);
+      } catch (e) {
+        throw toHostError(e);
+      }
+    },
+    [transport],
+  );
+
   const answer = useCallback(
     async (request: PermissionRequestId, option: string) => {
       const id = open.current;
@@ -291,8 +334,8 @@ export function useThreadSession(
 
   const stream = thread === null ? null : streamOf(thread);
   const actions = useMemo(
-    () => ({ stream, sentTurn, undo, answer, answerElicitation, stop, retry }),
-    [stream, sentTurn, undo, answer, answerElicitation, stop, retry],
+    () => ({ stream, sentTurn, undo, previewUndo, answer, answerElicitation, stop, retry }),
+    [stream, sentTurn, undo, previewUndo, answer, answerElicitation, stop, retry],
   );
   return { thread, sentTurn, refused: refused ?? link.refused, ask, stop, actions };
 }

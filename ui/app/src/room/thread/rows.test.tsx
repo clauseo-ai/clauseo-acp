@@ -24,7 +24,7 @@ import {
 } from "../../testing/stream-script.ts";
 import type { FileChange, HostError, StepEntry, ViewEntry } from "../../transport/protocol.ts";
 import { clockTime, whenOf } from "./clock.ts";
-import { defaultOutcome, mountRoom, type Harness } from "./harness.ts";
+import { defaultOutcome, mountRoom, previewUndoScript, type Harness } from "./harness.ts";
 
 let h: Harness | null = null;
 afterEach(async () => {
@@ -161,7 +161,9 @@ test("one paper reads in the singular", async () => {
 });
 
 test("a paper edited since asks first: Keep current sends nothing, Undo anyway undoes every file", async () => {
-  h = await mountRoom();
+  h = await mountRoom(
+    previewUndoScript(() => ({ undo_preview: { edited_since: ["Reply.docx"] } })),
+  );
   h.deliver([reset([changed({ files: [file("Notice.docx"), file("Reply.docx", true)] })])]);
   const button = (name: string) =>
     [...document.querySelectorAll("button")].find((b) => b.textContent === name);
