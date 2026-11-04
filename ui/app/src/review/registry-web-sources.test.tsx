@@ -128,7 +128,9 @@ test("the cells' tool calls carry the adapters' titles, never \"Web\"", async ()
   await act(async () => {
     for (const line of groups) line.click();
   });
-  const titles = [...host.querySelectorAll('[data-testid="tool-call"]')].map((e) => e.textContent);
+  const titles = [...host.querySelectorAll('[data-testid="tool-call"] .step-row-text')].map(
+    (e) => e.textContent,
+  );
   expect(titles.length).toBe(5);
   expect(titles).not.toContain("Web");
   // UTC's rows end each title with a full stop
