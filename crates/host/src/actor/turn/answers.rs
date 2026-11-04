@@ -6,14 +6,14 @@ use clauseo_acp::PendingKey;
 use clauseo_protocol::{
     AgentChoiceId, CommandOutcome, CompactString, ConfigOption, ConfigOptionsReplaced,
     ElicitationId, ElicitationOutcome, ElicitationRequest, ElicitationResolved,
-    ElicitationResponse, ErrorCode, ModeChanged, PermissionChoice, PermissionRequestId,
-    PermissionResolved, Principal, RawPayload, StreamId, ThreadId,
+    ElicitationResponse, ErrorCode, ModeChanged, PermissionChoice, PermissionKind,
+    PermissionRequestId, PermissionResolved, Principal, RawPayload, StreamId, ThreadId,
 };
 
 use super::super::commands::{AfterCommand, CommandCtx};
 use super::super::{Actor, Tag, limits};
 use super::out::Out;
-use super::{Then, TurnTag, spawn, state};
+use super::{Then, TurnTag, current, spawn, state};
 use crate::error::Error;
 
 /// `AnswerPermission`: the request must be pending and the option one the agent offered.
@@ -51,6 +51,10 @@ pub(super) fn answer_permission(
         .and_then(|state| state.agent.as_deref_mut())
         .ok_or_else(not_pending)?;
     let key = agent.permissions.remove(&request).ok_or_else(not_pending)?;
+    let refused = matches!(
+        option.kind,
+        PermissionKind::RejectOnce | PermissionKind::RejectAlways
+    );
     let then = Then::Permission {
         agent: agent.id,
         key,
@@ -68,7 +72,12 @@ pub(super) fn answer_permission(
         held_open: None,
     };
     out.push(actor, resolved)?;
-    send_answer(actor, ctx, thread, out, then)
+    send_answer(actor, ctx, thread, out, then)?;
+    // The lawyer's last answer decides how an agent's own cancel of the turn reads.
+    if let Some(current) = current(actor, thread) {
+        current.refused = refused;
+    }
+    Ok(())
 }
 
 /// Sends an answer's commit with its receipt; `then` tells the agent once it is durable.

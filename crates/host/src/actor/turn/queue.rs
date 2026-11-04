@@ -4,8 +4,8 @@
 //! A queued turn has its `UserMessage` and a `TurnQueued` behind its own thread logged, and no
 //! `TurnStarted` or `TurnEnded`. The queue moves on when the current turn's `TurnEnded` is
 //! durable: always to a head sent now (send now, a queued prompt sent now, a requeued steer), else
-//! only after `EndTurn`. Any other stop (`Cancelled`, `Failed`, `AtLimit`, `Refusal`,
-//! `MaxTokens`, `MaxTurnRequests`) holds it until the lawyer moves it: `ResumeQueue`,
+//! only after `EndTurn`. Any other stop (`Cancelled`, `NotAllowed`, `Failed`, `AtLimit`,
+//! `Refusal`, `MaxTokens`, `MaxTurnRequests`) holds it until the lawyer moves it: `ResumeQueue`,
 //! `SendQueuedNow` or a new `SendPrompt`. While a steer request is out, it waits for the answer,
 //! so a requeued steer takes the head. The held flag lives here only (nothing is logged for it);
 //! the view shows it through `clauseo_reducer::set_queue_held`. At start-up every queued turn

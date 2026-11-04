@@ -1,16 +1,16 @@
-//! Edges of the thread fold: the end of a turn that never started, and events that carry
-//! nothing to change.
+//! Edges of the thread fold: the end of a turn that never started, a turn ended `NotAllowed`,
+//! and events that carry nothing to change.
 
 use clauseo_protocol::{
-    ErrorCode, MessageId, ThreadStatus, TurnFailed, TurnId, UsageUpdated, UserMessageStatus,
-    ViewEntry,
+    ErrorCode, MessageId, StopReason, ThreadStatus, TurnFailed, TurnId, UsageUpdated,
+    UserMessageStatus, ViewEntry,
 };
 use clauseo_reducer::{StreamState, ViewChange, apply};
 
 use crate::fixtures::{
     Log, files_changed, start_turn, thread_created, turn_ended, usage, user_message,
 };
-use crate::helpers::{cancel, fold, prompt_status};
+use crate::helpers::{cancel, end_with, fold, prompt_status};
 
 /// The state's JSON with `seq` cleared, to compare states that folded different event counts.
 #[cfg(test)]
@@ -126,4 +126,46 @@ fn usage_updated_without_fields_changes_nothing() {
     let out = apply(&mut state, &log.push(empty()).unwrap()).unwrap();
     assert!(out.changes.is_empty(), "{:?}", out.changes);
     assert_eq!(state.as_thread().unwrap().header().unwrap().usage, before);
+}
+
+/// A running turn with a prompt queued behind it, ended with `stop`: the state as JSON and the
+/// changes the end applied as debug text, with `stop` written as `Cancelled` in both.
+#[cfg(test)]
+fn running_turn_ended(stop: StopReason) -> (serde_json::Value, String) {
+    let mut log = Log::thread(11).unwrap();
+    log.push(thread_created().unwrap()).unwrap();
+    let running = start_turn(&mut log, "Write ok outside the matter.").unwrap();
+    let (queued, prompt): (TurnId, MessageId) = (log.fresh().unwrap(), log.fresh().unwrap());
+    log.push(user_message(queued, prompt, "Then check clause 3."))
+        .unwrap();
+    let mut state = fold(log.events());
+    let out = end_with(&mut log, &mut state, running, stop);
+    assert!(out.anomalies.is_empty(), "{:?}", out.anomalies);
+    assert_eq!(state, fold(log.events()));
+    let step = state.entries().values().find_map(|entry| match entry {
+        ViewEntry::Step(step) if step.turn == running => Some(step.stop),
+        _ => None,
+    });
+    assert_eq!(step, Some(stop));
+    let wire = serde_json::to_string(&stop).unwrap();
+    let as_cancelled = |value: serde_json::Value| -> serde_json::Value {
+        let text = serde_json::to_string(&value).unwrap();
+        serde_json::from_str(&text.replace(&wire, "\"cancelled\"")).unwrap()
+    };
+    let changes = format!("{:?}", out.changes).replace(&format!("{stop:?}"), "Cancelled");
+    (as_cancelled(serde_json::to_value(&state).unwrap()), changes)
+}
+
+/// `NotAllowed` (a refusal that ended the turn, private #361) folds as `Cancelled` does: the
+/// same status, prompt and step, and the same changes, but for the step's stop.
+#[test]
+fn not_allowed_folds_like_cancelled() {
+    let (cancelled, cancelled_changes) = running_turn_ended(StopReason::Cancelled);
+    let (not_allowed, not_allowed_changes) = running_turn_ended(StopReason::NotAllowed);
+    assert_eq!(not_allowed, cancelled);
+    assert_eq!(not_allowed_changes, cancelled_changes);
+    assert!(
+        cancelled.to_string().contains("cancelled"),
+        "the step's stop is in the state: {cancelled}"
+    );
 }

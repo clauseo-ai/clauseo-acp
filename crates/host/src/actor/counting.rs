@@ -295,7 +295,7 @@ pub(super) fn outcome(stop: StopReason, failure: Option<ErrorCode>) -> AnswerOut
     }
     match stop {
         StopReason::EndTurn => AnswerOutcome::Done,
-        StopReason::Cancelled => AnswerOutcome::StoppedByLawyer,
+        StopReason::Cancelled | StopReason::NotAllowed => AnswerOutcome::StoppedByLawyer,
         StopReason::AtLimit => AnswerOutcome::Limit,
         StopReason::MaxTokens | StopReason::MaxTurnRequests | StopReason::Refusal => {
             AnswerOutcome::AgentStopped

@@ -64,6 +64,7 @@ impl Current {
             prompt,
             phase: TurnPhase::Accepting,
             cancelled: false,
+            refused: false,
             limit: None,
             tool_paths: crate::sent::TurnPaths::default(),
             checkpoint_before: None,

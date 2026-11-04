@@ -3820,7 +3820,10 @@ export type StepUndone = {
 	kept: MatterPath[],
 };
 
-/**  Why a turn stopped: ACP v1's stop reasons plus Clauseo's `AtLimit` and `Failed`. */
+/**
+ *  Why a turn stopped: ACP v1's stop reasons plus Clauseo's `NotAllowed`, `AtLimit` and
+ *  `Failed`.
+ */
 export type StopReason = 
 /**  The agent finished. Only this ending moves the thread's queue on. */
 "end_turn" | 
@@ -3832,6 +3835,13 @@ export type StopReason =
 "refusal" | 
 /**  The lawyer or the host cancelled it. */
 "cancelled" | 
+/**
+ *  The agent cancelled it right after the lawyer refused a permission (Codex's only
+ *  reject option ends the turn); no Stop came after that refusal. Every rule treats it
+ *  as `Cancelled` (the queue holds); only the words differ. Never on a turn that had not
+ *  started.
+ */
+"not_allowed" | 
 /**  The account's usage limit stopped it; a `TurnStoppedAtLimit` explains it. */
 "at_limit" | 
 /**  It failed; a `TurnFailed` before it says why. */

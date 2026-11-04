@@ -233,4 +233,11 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (352, 0x741e_f296_4d9f_640f),
         (253, 0xc427_8a13_31f8_bf5a),
     ),
+    (
+        "added/turn_ended-NotAllowed",
+        include_bytes!("added/turn_ended-NotAllowed.jsonl"),
+        include_bytes!("added/turn_ended-NotAllowed.msgpack"),
+        (355, 0x1cdf_1262_85a5_c82a),
+        (237, 0xf7de_a844_c52c_55fd),
+    ),
 ];

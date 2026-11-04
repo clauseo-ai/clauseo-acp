@@ -1,0 +1,6 @@
+{"scenario":"permission-deny-then-stop","description":"The lawyer refuses perm-1 (reject-once), then stops the turn: the client must answer reject-once and send session/cancel, in either order; then cancelled","on_stdin_close":"exit"}
+{"include":"handshake.jsonl"}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"request":{"id":"perm-1","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"t-edit-1","title":"Edit brief.txt","kind":"edit","status":"pending"},"options":[{"optionId":"allow-once","name":"Allow once","kind":"allow_once"},{"optionId":"allow-always","name":"Always allow","kind":"allow_always"},{"optionId":"reject-once","name":"Reject","kind":"reject_once"},{"optionId":"reject-always","name":"Always reject","kind":"reject_always"}]}}}
+{"note":"Either order: the refusal and the cancel notification.","all":[{"expect_response":{"id":"perm-1","result":{"outcome":{"outcome":"selected","optionId":"reject-once"}}}},{"expect":{"method":"session/cancel","params":{"sessionId":"sess-1"}}}]}
+{"respond":{"to":"p1","result":{"stopReason":"cancelled"}}}
