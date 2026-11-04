@@ -21,8 +21,8 @@ Three facts shape the foundations:
   `std` has no stable call that gives the volume serial number and file index without a handle.
 
 The brief is `tasks/stage-d/S18-agents-signin-and-status.md` (private repository). This record
-covers the foundations (S18 piece 2). The flows built on them are listed at the end, each with
-its own section to fill when it lands.
+covers the whole of S18: the shared pieces every run is built from, the calls and their job
+model, the queued start, one section per agent's flow, reuse, and what R20 must do with it.
 
 ## Decision
 
@@ -46,8 +46,10 @@ No `protocol` change: R20 maps the states and codes to the wire.
 - `LoginFrom`: `ClaudeCode` and `Codex`. `Source`: `Reused` and `Own`.
 - `SigninCode::code()` gives `signin.cancelled`, `signin.link_expired`, `signin.no_plan`,
   `signin.device_code_off`, `signin.port_busy` or `signin.failed`.
-- `AgentsEvent` gains `Signin { agent, state }` and `OpenUrl { agent, url }`. A URL to open is
-  an event, not a state, so R20 opens each one once.
+- `AgentsEvent` gains `Signin { agent, state }`, `OpenUrl { agent, url }` and
+  `SigninNote { agent, note }`. A URL to open is an event, not a state, so R20 opens each one
+  once. A note (`claude_reuse_fallback`, `codex_link_failed`) is for R20's log: the crate has no
+  logger.
 
 **The pasted code.** `PasteCode` wraps a `Zeroizing<String>`:
 - Its `Debug` prints `<code>`. It has no `Display` and no `Clone`.
@@ -78,11 +80,11 @@ environment (`signin/env.rs`):
 
 **The caller's launcher must clear the environment.** The child gets only the built map
 because the caller gives `Agents::start` a launcher made with
-`PassthroughLauncher::new(SpawnOptions::new().clear_env())`. This is a requirement on R20's
-desktop wiring. A launcher that inherits the app's environment would silently pass `SSH_*`,
-`NO_BROWSER` and the lawyer's own `CLAUDE_CONFIG_DIR` or `CODEX_HOME` on. The crate cannot
-check this through `dyn Launcher`. The end-to-end test with a fake that prints its environment's
-names (the flows' tests) is what proves it.
+`PassthroughLauncher::new(SpawnOptions::new().clear_env())` (see "What R20 must do"). A
+launcher that inherits the app's environment would silently pass `SSH_*`, `NO_BROWSER` and the
+lawyer's own `CLAUDE_CONFIG_DIR` or `CODEX_HOME` on. The crate cannot check this through
+`dyn Launcher`. The end-to-end test with a fake that prints its environment's names
+(`shim::the_remote_hints_in_the_base_environment_never_reach_the_child`) is what proves it.
 
 **The runner** (`signin/run.rs`, crate-private) starts `<node> <script> args…` through the
 caller's `Launcher`, with the built environment. It reuses the pattern of `node_version` and
@@ -134,42 +136,74 @@ under `crates/agents/src`, with comments blanked and string literals kept. It fa
 names Claude's credential file, or names Codex's login file outside `signin/reuse.rs`. It also
 fails if `reuse.rs` calls `File::open`, any `fs::read*`, `OpenOptions` or the crate's own
 `open_read`. The test builds the file names with `concat!`, so it never names them itself.
-`reuse.rs` does not exist yet; the test guards it from the start.
 
-### The calls and the job model (S18 piece 3)
-
-**The calls on `Agents`.** Each checks what it can at once and returns
-`Result<(), SigninError>`; the work runs on threads, as installs do:
+**The calls on `Agents`.** Each checks what it can at once, on the caller's thread, and
+returns `Result<(), SigninError>`; the work runs on threads, as installs do:
 - `sign_in(agent, Method)`. `Method` is `ClaudeAi`, `Console`, `Browser` or `DeviceCode`.
   Claude takes the first two, Codex the last two.
-- `cancel_sign_in(agent)`, `paste_code(agent, PasteCode)`, `sign_out(agent)`,
-  `check_status(agent)` (R20's "a window shows Plans") and `signin_state(agent)`.
-- `SigninError` covers an unknown agent, another agent's method, no home in
-  `SigninConfig::homes`, an install not `Ready`, no run to cancel or paste into, and a reused login asked to sign out. No variant carries a code, an email or a
-  path.
-- Which CLI signs an agent in comes from its id: `claude-acp` is Claude, `codex-acp` is Codex.
+- `try_again(agent)`: Codex's "Try again" after `signin.port_busy`.
+- `cancel_sign_in(agent)`, `paste_code(agent, PasteCode)`, `sign_out(agent)` and
+  `check_status(agent)` (the start check, and R20's "a window shows Plans").
+- Reuse's four: `find_login`, `use_found_login`, `use_different_account` and
+  `stop_using_login(agent, Option<Found>)` (see "Reuse").
+- `signin_state(agent)` reads the last state.
 
-**One job model** (`signin/job.rs`, `worker/signin.rs`), for every sign-in, sign-out and status
-check, and for the tasks pieces 4 to 6 add:
+`SigninError` covers an unknown agent, another agent's method, no home in
+`SigninConfig::homes`, an install not `Ready` (for the calls that do not queue), no run to
+cancel or paste into, a reused login asked to sign out, nothing found to use, and Clauseo's own
+login asked to stop reuse. No variant carries a code, an email or a path. Which CLI signs an
+agent in comes from its id: `claude-acp` is Claude, `codex-acp` is Codex.
+
+**One job model** (`signin/job.rs`, `worker/signin.rs`) runs every task:
 - An agent has at most one job. The call reserves the agent's slot under a lock: a new ticket
-  (job number, agent, `Cancel`) and, for a sign-in, the channel pasted codes go down. Then the
-  worker thread starts the job on its own thread.
-- A sign-in or sign-out supersedes the running job: its cancel is set, which kills its child's
-  tree, and its events are dropped from then on. "Didn't open?" is a new `sign_in`, so
-  reopening is a new login run. A status check with a job running starts nothing, since that
+  (job number, agent, `Cancel`), for a task that may run a login the channel pasted codes go
+  down, and for a task that queues its kick (below). Then the worker thread starts the job on
+  its own thread. Reserving on the caller's thread means a `paste_code` straight after
+  `sign_in` is never lost.
+- A sign-in, sign-out or reuse choice supersedes the running job: its cancel is set, which kills
+  its child's tree, and its events are dropped from then on. "Didn't open?" is a new `sign_in`,
+  so reopening is a new login run. A status check with a job running starts nothing, since that
   job reports by itself.
 - `cancel_sign_in` sets the cancel but keeps the job the agent's. The job then reports
   `Failed { code: Cancelled }` itself, once its child is killed and its URL file removed.
 - Every event goes through `SigninHub::emit_job`, which checks that the job is still the agent's.
   The flow's last state ends the job. A flow that cannot tell (a status that timed out) ends it
   with the state unchanged.
-- The job hands its task to the agent's flow. Codex's flow (piece 4) is one more arm of that
-  dispatch, with no change to the calls. Reuse (piece 5) adds its tasks and reads the recorded
-  source at the check point `sign_out` already has. The queued start (piece 6) reserves the
-  slot early and starts the same job once the install is ready and the network is up.
+- The job hands its task to the agent's flow (`signin/claude.rs`, `signin/codex.rs`) or to
+  reuse (`signin/found.rs`). A sign-in of Clauseo's own that ends `SignedIn { Own }` writes
+  `login-source` `own`.
 - Sign-in jobs run beside installs and do not take the install job lock.
 
-### Claude's sign-in (S18 piece 3)
+**The queued start** (`signin/queue.rs`). A task that starts a login run (`sign_in`,
+`try_again`, `use_different_account`) needs two things first: the agent's install `Ready`, and
+the network. The call never refuses for either. It takes the slot as above, and the job waits:
+- **The install.** The job reads the shared install state. While it is not `Ready`, the job
+  waits on its slot's kick, which every install `Ready` sends (`Shared::emit` and
+  `Shared::emit_job` call `SigninHub::install_ready`). The kick is a one-place channel made
+  with the slot, so a `Ready` that lands between the call and the job's first look is not lost.
+  An install that ends `Failed` or `Waiting` sends nothing, so the sign-in stays `Queued`
+  until a later install succeeds, or until it is cancelled or superseded.
+- **The network.** Offline means the agent's first sign-in host in the snapshot (`claude.ai`,
+  `auth.openai.com`) does not resolve. With a proxy set (`InstallConfig::proxy`), the proxy's
+  host is looked up instead: behind a firm proxy that is the one name the CLI resolves, and the
+  install's downloads do the same. The lookup goes through the install's resolver seam: the OS
+  (`ToSocketAddrs`) in production, `InstallConfig::resolver` under test-support. A failed
+  lookup waits 30 s on the `Timer` and looks again, the install's offline cadence (0033,
+  Failures). The lookup is S18's only network call; the CLIs make the sign-in's connections
+  themselves.
+- **Both.** The install is checked first, then the lookup, and each wake checks both again, so
+  the order in which they come does not matter. The state is `Queued`, sent once, from the
+  first time either fails until the run starts and reports `Waiting`. With both holding at
+  once, no `Queued` is sent: the lookup still runs before every login run.
+- `cancel_sign_in` on a queued sign-in ends the wait with `Failed { code: Cancelled }`. A new
+  sign-in replaces it silently, as it replaces a running one. `paste_code` is refused while
+  queued, since no run reads stdin yet.
+- The status check, detection, `find_login`, `use_found_login`, `stop_using_login` and
+  `sign_out` are unaffected. They run the local CLI, so they need the install but not the
+  network: refused with `NotReady` while there is no install, and never queued or looked up.
+  A status check while a sign-in is queued starts nothing, as with any job running.
+
+### Claude's sign-in
 
 **The run.** `node <adapter> --cli auth login --claudeai`, or `--console`, in the agent's home
 (created if missing; it is also the run's working folder), with the Own environment:
@@ -194,8 +228,8 @@ check, and for the tasks pieces 4 to 6 add:
 - In every case the child, the pollers with their limits, and the URL file are gone before the
   last state is sent. So no status process runs after it, which the tests check by seeing that no
   timer wait is left armed.
-- A status check (`check_status`) is one such status run: `SignedIn` or `SignedOut`, unchanged
-  when it cannot tell.
+- Clauseo's own login in a status check (`check_status`) is one such status run: `SignedIn` or
+  `SignedOut`, unchanged when it cannot tell. The whole start check is under "Reuse".
 
 **The paste route.** `paste_code` puts the code on the run's channel. The runner writes it, with
 a newline, to the login's stdin and drops it, zeroed. It appears in no event, state, `Debug` or
@@ -204,8 +238,7 @@ error text. The prompt "Paste code here if prompted >" has no newline, so nothin
 **Sign-out.** `--cli auth logout` with the Own environment, 30 s limit, then a status run: the
 result is `SignedOut`, or `SignedIn` if the account is still there. If status cannot tell, a
 logout that exited 0 is taken at its word. A login whose recorded source is `Reused` is never
-logged out. The call refuses it, and the job checks again before any run. Piece 5 makes that
-state reachable.
+logged out. The call refuses it, and the job checks again before any run (see "Reuse").
 
 **The shim** (`signin/shim.rs`, macOS and Linux). Before each Claude login, the worker thread
 writes `<data_dir>/agents/signin/browser` atomically, with mode 0700. It is an `sh` script that
@@ -223,7 +256,8 @@ Each run gets `<data_dir>/agents/signin/url-<agent>-<job>`:
 - An address read only from the login's output (Claude's paste route,
   `redirect_uri=https://platform.claude.com/...`) is never sent.
 
-`claude.com` joins Claude's sign-in hosts: Claude Code's authorize page is
+`claude.com` joins Claude's sign-in hosts, beside the brief's `claude.ai`,
+`console.anthropic.com` and `platform.claude.com`: Claude Code's authorize page is
 `https://claude.com/cai/oauth/authorize`, the address the brief's fake opens. G7 row 1 confirms
 the list against a real sign-in.
 
@@ -232,13 +266,7 @@ the list against a real sign-in.
 Claude opens its own tab, and Clauseo sends no `OpenUrl` for Claude. Everything else (polling,
 nudge, expiry, Cancel, paste, sign-out) is the same.
 
-**Test seams.** `AgentsConfig::ready_for_tests` (test-support only) takes an agent as `Ready`
-with a given `Installed`, so the tests run `fake_agent` as the adapter. Their timer ends each
-wait by its duration, so the 30 s nudge and the 10 minute expiry are tested with no real time.
-The base environment seam stands in for "set in the test's own environment". The launcher is
-`PassthroughLauncher` with `clear_env`, as R20 must give. `fake_agent` must be built first.
-
-### Codex's sign-in (S18 piece 4)
+### Codex's sign-in
 
 **The runs.** `node <install>/node_modules/@openai/codex/bin/codex.js` with the Own environment
 (`CODEX_HOME` and, on macOS and Linux, `HOME` set to the agent's home; `CODEX_API_KEY=""`;
@@ -254,17 +282,14 @@ overrides:
   start-up git sync, #203). It is asked `initialize` and `account/read` through
   `codex_appserver`'s `Client`, then its client is dropped and its tree killed.
 
-The calls are the same as Claude's. `SigninError::NotBuilt` is gone. `Agents::try_again(agent)`
-is new: "Try again" after `signin.port_busy`, refused for Claude with `WrongMethod`.
+The calls are the same as Claude's, plus `try_again`, which Claude refuses with `WrongMethod`.
 
 **Port 1455.** Before a browser run the job binds `127.0.0.1:1455` and lets go at once. If
 the bind fails, no run starts, and the state is `Failed { code: PortBusy, at }`. `try_again`
 probes at once and then every 2 s, through the `Timer`. The state stays as it was while it
 waits, and `cancel_sign_in` ends the wait with `signin.cancelled`. Once the port is free, the
 browser run starts as above. A Codex run that loses the race anyway and prints a line naming
-`1455` and `in use` also ends with `signin.port_busy`. Tests move the port with
-`SigninConfig::callback_port` (test-support only, in the style of `InstallConfig::resolver`),
-so they can hold it with a listener and run side by side. Production always probes 1455.
+`1455` and `in use` also ends with `signin.port_busy`. Production always probes 1455.
 
 **No `OpenUrl`.** Codex opens the browser from its own process. The job writes no shim, and
 the addresses Codex prints (the callback, the device page) are never sent as `OpenUrl`.
@@ -299,21 +324,21 @@ ends as Claude's does:
 The login, its polls and the app-server are gone before the last state is sent. `check_status`
 is one status run, and `account/read` when it says signed in.
 
-**Sign-out.** `logout`, then status, as for Claude, never while the source is `Reused`. The
-brief also refuses any Codex `login` or `logout` while the home's login file and the lawyer's
-`~/.codex` one are the same file. That check is reuse's (piece 5). Its hook,
-`codex::home_shares_lawyers_login`, is called before every login and logout, and returns false
-until then, since no link exists before reuse.
+**Sign-out.** `logout`, then status, as for Claude, never while the source is `Reused`. Any
+Codex `login` or `logout` is also refused while the home's login file and the lawyer's
+`~/.codex` one are the same file: `codex::home_shares_lawyers_login`, the guard below, is asked
+before every one.
 
-**Refresh race.** `is_sign_in_again` already classifies `refresh_token_reused`. A Codex-shaped
-error text is now tested through the public API.
+**Refresh race.** `is_sign_in_again` classifies `refresh_token_reused`, tested with a
+Codex-shaped error text through the public API.
 
-Detection runs, without the store argument, come with piece 5.
+**`app-server`'s overrides.** `limits` already runs `app-server` with six `-c` overrides; S18
+copies them by hand, since `agents` cannot depend on `limits`. A change to one list must be made
+to the other.
 
-### Detection and reuse (S18 piece 5)
+### Reuse
 
-**The calls.** Four are new on `Agents`, each a job on the model above, each
-`Result<(), SigninError>`:
+**The calls.** Four, each a job on the model above:
 - `find_login(agent)`: UD2's "Look for my … login". It deletes `no-reuse`, then runs the status
   check.
 - `use_found_login(agent)`: the lawyer's "Use it". It is refused with `NothingFound` unless the
@@ -324,9 +349,9 @@ Detection runs, without the store argument, come with piece 5.
 - `stop_using_login(agent, why: Option<Found>)`: it never runs a logout. It is refused with
   `NotReused` for Clauseo's own login.
 
-They are cancellable and take pasted codes like `sign_in`, since two of them may run a login.
-`AgentsEvent::SigninNote { agent, note }` is new: `claude_reuse_fallback` and
-`codex_link_failed`, for R20's log. The crate has no logger, so R20 writes them.
+`use_found_login` and `use_different_account` are cancellable and take pasted codes like
+`sign_in`, since they may run a login; `use_different_account` queues as `sign_in` does.
+`AgentsEvent::SigninNote` carries `claude_reuse_fallback` and `codex_link_failed`.
 
 **The markers** (`signin/marker.rs`) are Clauseo's own files in `<data_dir>/agents/<id>/`,
 never in a CLI's home. They are read and written through `write`, which refuses a link, and
@@ -338,7 +363,7 @@ written atomically:
   it". Clearing the reuse record deletes the file.
 - `no-reuse`: the line `no-reuse`. Only whether it exists counts (`symlink_metadata`).
 
-**The status check** (`check_status`) is now the start check (`signin/found.rs`). R20 calls it
+**The status check** (`check_status`) is the start check (`signin/found.rs`). R20 calls it
 at start and when a window shows Plans. It runs:
 1. A recorded reuse first. For Codex, a missing `login-source` with a login file in the home
    also counts, per the brief.
@@ -352,7 +377,7 @@ at start and when a window shows Plans. It runs:
 2. Clauseo's own login: "A Clauseo-owned login, once made, wins over reuse."
 3. With `no-reuse` there, `SignedOut`. Otherwise detection.
 
-A run that cannot tell leaves the state unchanged. The job now creates the agent's home before
+A run that cannot tell leaves the state unchanged. The job creates the agent's home before
 any run. Without it, a status check before the first sign-in could not start, since every run
 but detection has the home as its working folder.
 
@@ -421,7 +446,8 @@ process using the home has stopped, then `sign_in`, then relaunches. R17 calls
 - `FAKE_SIGNIN=secure-ignored` makes Claude's mode drop `CLAUDE_SECURESTORAGE_CONFIG_DIR`, for
   the run-time fallback.
 
-**Every file operation reuse makes on a login file's path** (for the security review). None
+**Every file operation on a login file's path** (for the security review). All are in
+`signin/reuse.rs`, the one file that may name Codex's login file; nothing names Claude's. None
 opens or reads the file:
 - `std::fs::symlink_metadata` (an `lstat`): `reuse.rs` `codex_link_holds` (the lawyer's file),
   `lawyer_login_present` (detection's stat), `codex_reused` (the home's file),
@@ -436,26 +462,58 @@ opens or reads the file:
 The Codex CLI itself reads and refreshes the linked file in the home, as it would its own.
 Claude's reuse touches no file: it is an environment.
 
-**Not done here:** `ClaudeWindowsSandbox` (detection again when S15's tier B set-up finishes).
-The crate has no signal for it yet, and it comes with S15's wiring.
+### What R20 must do
 
-### Worker wiring (to come: S18 piece 6)
+The crate cannot enforce these through its API; R20's desktop wiring must:
+- give `Agents::start` a launcher made with
+  `PassthroughLauncher::new(SpawnOptions::new().clear_env())`, so each child gets only the
+  environment `signin/env.rs` builds;
+- fill `SigninConfig::homes` from `Locations::agent_home(id)`, the text as it is, never
+  canonicalised (Claude keys its login store by that text). The base environment defaults to
+  the app's own;
+- write each `AgentsEvent::SigninNote` to its log by its `code()`, and open each `OpenUrl`
+  once;
+- stop every Codex process using the home before `stop_using_login` (the leave order), and ask
+  `codex_login_shared` before codex-acp's `authenticate`; run `codex_link_holds` at each
+  Codex session start (R17 too);
+- call `check_status` at start and when a window shows Plans, and add the six `signin.*` codes
+  to `ErrorCode` when it maps the states to the wire.
 
-`Queued` (a sign-in before the install is ready, or while offline; until then `NotReady` is
-refused) and status checks at start. The calls on `Agents` came with piece 3.
+### Tests and their seams
+
+- `AgentsConfig::ready_for_tests` takes an agent as `Ready` with a given `Installed`, so the
+  tests run `fake_agent` as the adapter (`fake_agent` must be built first).
+  `Agents::finish_install_for_tests` ends an install `Ready` or `Failed` through the same emit
+  an install job uses, for the queued tests.
+- The tests' timer ends each wait by its duration, so the 30 s nudge, the 10 and 15 minute
+  expiries, the 2 s port probe and the 30 s offline wait are tested with no real time.
+- `SigninConfig::base_env` stands in for "set in the test's own environment".
+  `SigninConfig::callback_port` moves port 1455, so a test can hold it with a listener and tests
+  run side by side. `InstallConfig::resolver` plays the network: the fixture's resolver answers
+  until a test turns it offline, and records each name looked up. All three seams exist only
+  with `test-support`.
+- The launcher is `PassthroughLauncher` with `clear_env`, as R20 must give.
 
 ## Consequences
 
-- R20 must give `Agents::start` a `clear_env` launcher and fill `SigninConfig::homes` from
-  `Locations::agent_home`. The base environment defaults to the app's own.
-- Every later sign-in piece builds its environment with `signin/env.rs` and starts its runs with
+- Every sign-in piece builds its environment with `signin/env.rs` and starts its runs with
   `signin/run.rs`. Neither the ring nor `ExitReport::stderr_tail` is ever logged.
 - The markers `login-source` and `no-reuse` are read and written in `signin/marker.rs`, since
   `reuse.rs` may not call a read.
-- The foundation items that only Codex's flow and reuse call carried an item-level
-  `#[expect(dead_code)]` until those pieces landed. All are gone now, with their allowlist lines.
-- The agent's home is created with `create_dir_all`, which follows a link already standing
-  there. The folder is under the trusted data folder, as the adapters are (0033).
+- No `#[expect(dead_code)]` is left from the foundations, nor its allowlist lines.
+- Choices to look at in review:
+  - `claude.com` in Claude's sign-in hosts (see "Claude's sign-in").
+  - `limits`' six `-c` overrides for `app-server`, copied by hand (see "Codex's sign-in").
+  - With a proxy set, the queued start looks up the proxy's host, not the sign-in host. A firm
+    whose DNS resolves only the proxy is then never taken for offline.
+  - The lookup blocks the job's thread for as long as the OS takes to fail it; a cancel during
+    one lands when it returns.
+  - The agent's home is created with `create_dir_all`, which follows a link already standing
+    there. The folder is under the trusted data folder, as the adapters are (0033).
+  - A crash after Codex's own sign-in but before `login-source` `own` is written leaves a home
+    login file with no marker. That reads as reused: no logout runs, and the next status check
+    takes it for a split link and removes the name, so the lawyer signs in again. That is the
+    safe side.
 - For the security review (S18):
   - the env builder and its dependence on the caller's `clear_env` launcher;
   - the Windows `CreateFileW` handle with access 0, opened to read a file id;
@@ -463,16 +521,18 @@ refused) and status checks at start. The calls on `Agents` came with piece 3.
   - the ring never logged;
   - the shim and the URL file (mode 0600, removed whatever the outcome), and the host check
     before `OpenUrl`;
-  - reuse's file operations on login file paths (listed under "Detection and reuse"), the
-    guard, the split check, and the markers' "unreadable reads as reused" rule.
-- A crash after Codex's own sign-in but before `login-source` `own` is written leaves a home
-  login file with no marker. That reads as reused: no logout runs, and the next status check
-  takes it for a split link and removes the name, so the lawyer signs in again. That is the safe
-  side.
-- Not checked yet: `fileid.rs`'s Windows branch is written against `windows` 0.62.2 but was not
-  built or run here. It needs `cargo nextest` on `clauseo-win-01`. On ReFS, a 64-bit file index
-  may not be unique (`FILE_ID_INFO` holds 128 bits). The login files live on the system volume,
-  which is NTFS.
+  - the file operations on login file paths (listed under "Reuse"), the guard, the split check,
+    and the markers' "unreadable reads as reused" rule.
+- Open items:
+  - `Found::ClaudeWindowsSandbox` is never reported yet: detection should run again when S15's
+    tier B set-up finishes, and the crate needs a signal from S15 for it.
+  - Windows has no `BROWSER` shim until G7 row 1 says Claude honours it there.
+  - `fileid.rs`'s Windows branch is written against `windows` 0.62.2 but was not built or run
+    here. It needs `cargo nextest` on `clauseo-win-01`. On ReFS, a 64-bit file index may not be
+    unique (`FILE_ID_INFO` holds 128 bits). The login files live on the system volume, which is
+    NTFS.
+  - G7 confirms the sign-in hosts (row 1) and Claude's status field names (row 14) against the
+    real CLIs.
 
 ## Status
 
