@@ -3,6 +3,7 @@
 // Each rule is read from the stylesheet, so dropping one fails here.
 import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
+import { scrim } from "../ui/recipes-overlays.ts";
 
 const css = readFileSync(new URL("responsive.css", import.meta.url), "utf8");
 const OWN = ':root[data-frame="own"]';
@@ -59,4 +60,15 @@ test("in one column, with no search field, Matters pushes the caption buttons to
   expect(rule(lastMaxMid(), `${OWN} .room-top:not(:has(.room-search)) .room-rail-toggle`)).toMatch(
     /margin-left: auto;/,
   );
+});
+
+test("while a dialog stands, the caption buttons rise over its scrim: the toolbar is no stacking context, and the caption is above the scrim's z", () => {
+  const dialog = ":root:has([data-dialog-plane])";
+  const top = rule(css, `${dialog} .room-top`);
+  expect(top).toMatch(/position: relative;/);
+  expect(top).toMatch(/z-index: auto;/);
+  const scrimZ = Number(/\bz-(\d+)\b/.exec(scrim)?.[1]);
+  expect(scrimZ).toBeGreaterThan(0);
+  const caption = rule(css, `${dialog} .room-caption`);
+  expect(Number(/z-index: (\d+);/.exec(caption ?? "")?.[1])).toBeGreaterThan(scrimZ);
 });
