@@ -244,6 +244,8 @@ for (const theme of THEMES) {
               await act(async () =>
                 host?.querySelector<HTMLButtonElement>('[data-testid="new-matter"]')?.click(),
               );
+              // the dialog's chunk loads on the press (room.tsx's NewMatter), so settled waits for it
+              await act(async () => settled());
               await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
               expect(document.querySelector('[role="dialog"]'), name).not.toBeNull();
             }

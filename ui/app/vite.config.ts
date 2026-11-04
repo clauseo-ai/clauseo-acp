@@ -155,20 +155,27 @@ function probeEntry(): Plugin {
  * nothing to preload. The perf module and the entity table import nothing the first load lacks; the room's lazy parts
  * (the thread's list, the plan trigger, the working line's details, the composer's `/` menu) import only chunks
  * index.html preloads, and the list's change-note question only those and the list; U6's retried line only those, and
- * the title rules nothing; U7's queue strip only the first load. vite-config.test.ts checks that, and that no chunk carries a preload list. */
+ * the title rules nothing; U7's queue strip only the first load. The dialogs that share the dialog primitives are
+ * PRELOADED_CHUNKS, not here. vite-config.test.ts checks that, and that no chunk carries a preload list except the
+ * importers of PRELOADED_CHUNKS. */
 export const BARE_CHUNKS = [
   "perf",
   "character-entities",
   "list",
   "plan-trigger",
   "working-details",
-  "change-note-ask",
-  "versions-chunk",
   "retried-line",
   "conversation-title",
   "composer-menu",
   "queue-strip",
 ];
+
+/** The lazy chunks that keep Vite's preload list, though not bare: a lazy part behind a click whose chunk imports
+ * shared chunks the first load lacks. Since the dialog primitives (dialog-start, DialogRoot, DialogDescription) left
+ * the first load with New matter's dialog (room.tsx, lazy), these three import them: New matter, change-note-ask and
+ * versions-chunk. Their preloads fetch the primitives in parallel, not in a waterfall after the click. vite-config.test.ts
+ * checks that only the chunks importing one of these carry a preload list. */
+export const PRELOADED_CHUNKS = ["new-matter", "change-note-ask", "versions-chunk"];
 
 const HELPER = "__vitePreload(() => ";
 const DEPS = ", __VITE_PRELOAD__)";

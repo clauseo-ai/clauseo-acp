@@ -56,7 +56,6 @@ import { AgentPlanContext, useThreadAgentName } from "./thread/agent-plan.ts";
 import { Conversations } from "./conversations.ts";
 import { LivePlan } from "./limits/live-plan.tsx";
 import { Matters, type MattersView } from "./matters.ts";
-import { NewMatter } from "./new-matter.tsx";
 import { AnswerHost, quietly, type ListedPapers } from "./open.ts";
 import { LocateGate, MovedFolder } from "./moved.tsx";
 import { RoomRail } from "./rail.tsx";
@@ -75,6 +74,11 @@ import { useWindowFrame } from "../window/use-window-frame.ts";
 const RetriedLine = lazy(() =>
   late(import("./retried-line.tsx")).then((m) => ({ default: m.RetriedLine })),
 );
+
+/** New matter's dialog, loaded the first time it opens, or before that when its button is hovered or focused. */
+const loadNewMatter = () => late(import("./new-matter.tsx"));
+const NewMatter = lazy(() => loadNewMatter().then((m) => ({ default: m.NewMatter })));
+const preloadNewMatter = () => void loadNewMatter();
 
 /** The matter's papers from H8, or null: before they arrive, without H8, or when the read fails. */
 function usePapers(next: PapersHost | null, matter: MatterId | null): ListedPapers {
@@ -167,6 +171,8 @@ function RoomFrame({
   const { nodes } = room;
   const [railOpen, setRailOpen] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
+  // the dialog mounts with its first opening and stays mounted, so it keeps its closing and its state as before
+  const [newMounted, setNewMounted] = useState(false);
   const newMatter = useRef<HTMLButtonElement>(null);
   const railToggle = useRef<HTMLButtonElement>(null);
   // a matter made from the folded rail folds it, so focus goes back to Matters, not to New matter's hidden button
@@ -363,8 +369,10 @@ function RoomFrame({
           open={railOpen}
           onNewMatter={() => {
             madeFolded.current = false;
+            setNewMounted(true);
             setNewOpen(true);
           }}
+          onNewMatterPreload={preloadNewMatter}
           onMoved={fold}
           onConversation={() => setRailOpen(false)}
           onStartNew={versions.close}
@@ -373,17 +381,21 @@ function RoomFrame({
           onSettings={openSettings}
         />
       )}
-      <NewMatter
-        matters={matters}
-        detailed={view.detailed}
-        open={newOpen}
-        onOpenChange={setNewOpen}
-        onMade={() => {
-          madeFolded.current = railOpen;
-          setRailOpen(false);
-        }}
-        finalFocus={newFocus}
-      />
+      {newMounted && (
+        <Suspense fallback={null}>
+          <NewMatter
+            matters={matters}
+            detailed={view.detailed}
+            open={newOpen}
+            onOpenChange={setNewOpen}
+            onMade={() => {
+              madeFolded.current = railOpen;
+              setRailOpen(false);
+            }}
+            finalFocus={newFocus}
+          />
+        </Suspense>
+      )}
       <main className="room-centre" ref={nodes.slot("centre")}>
         {open !== null && view.folderMissing ? (
           // the folder moved (H3): its line in the thread's place, and Locate folder as the composer's gate

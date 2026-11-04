@@ -5,6 +5,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { createErrorLine } from "@clauseo/components/clauseo/matter-form-check.ts";
+import { settled } from "@clauseo/components/lib/late.ts";
 import { afterEach, expect, test } from "vitest";
 import type { CommandEnvelope, CommandOutcome, MatterSummary } from "../transport/protocol.ts";
 import { FakeTransport, type FakeHost } from "../transport/fake-transport.ts";
@@ -70,12 +71,11 @@ function type(input: HTMLInputElement, text: string) {
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
-/** New matter, pressed, and the name typed. */
+/** New matter, pressed, and the name typed. The dialog's chunk loads on the press: settled waits for it. */
 async function openForm(name = NAME) {
   await act(async () => byId("new-matter")?.click());
-  await settle();
+  await act(async () => settled());
   const field = byId<HTMLInputElement>("matter-name");
-  expect(field).not.toBeNull();
   await act(async () => type(field as HTMLInputElement, name));
 }
 
@@ -108,6 +108,15 @@ test("an existing folder through Change: its display shows, create_matter takes 
   expect(title()).toBe(NAME);
   expect(dialog()).toBeNull();
   expect(document.activeElement).toBe(byId("new-matter"));
+});
+
+test("the dialog opens the first time New matter is pressed, once its chunk has loaded", async () => {
+  await mount(today());
+  expect(byId("matter-name")).toBeNull();
+  await act(async () => byId("new-matter")?.click());
+  await act(async () => settled());
+  expect(dialog()).not.toBeNull();
+  expect(byId<HTMLInputElement>("matter-name")).not.toBeNull();
 });
 
 test("a matter made from the folded rail folds it, and focus goes back to Matters", async () => {
