@@ -412,8 +412,14 @@ the release fetches the pinned asset, checks its hash and writes it into the des
   the network: `node --test 'crates/desktop/sidecars/*.test.mjs'` (Node 24 does not take a folder
   argument). CI does not run them, because the xtask check is frozen.
 - **Stage F's script**, the release's sidecar script (not in this PR), calls `fetchAgentBrowser` once per release
-  target and writes `crates/desktop/binaries/agent-browser-<triple>[.exe]`. It is not in this PR.
+  target and writes `crates/desktop/binaries/clauseo-agent-browser-<triple>[.exe]`. It is not in this PR.
   The base Tauri config has no `externalBin`, and this PR does not add one.
+- **The installed name** is `clauseo-agent-browser` (`.exe` on Windows), under 0035's `clauseo-`
+  prefix rule, since the `.deb` and `.rpm` put sidecars in `/usr/bin`; the desktop passes that
+  path as `--agent-browser` (`crates/desktop/src/profile.rs`). agent-browser's own image-name check
+  (`connection.rs:198`, `is_agent_browser_process`, which wants the name to start with
+  `agent-browser`) then skips its stale-daemon kill. On Windows the guard's Job Object (#329) covers
+  that; on Unix it is the known G17 item 6 limit: an orphaned daemon lasts until its idle timeout.
 - **Windows ARM64** has no upstream build. `aarch64-pc-windows-msvc` takes the x64 asset, which
   Windows on ARM runs under x64 emulation; the pin says so in a comment.
 - **The license**: `LICENSES/Apache-2.0-agent-browser.txt`, a copy of upstream's `LICENSE` (upstream

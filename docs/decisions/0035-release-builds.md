@@ -163,19 +163,26 @@ S15's tools sat in `windows.conf.json` and S27's in `tauri.conf.json`.
   table of sidecars and their targets. For one target it builds or fetches each, copies it to
   `crates/desktop/binaries/<name>-<triple>` (`.exe` on Windows; Tauri's naming), and writes
   `sidecars.generated.json` in `crates/desktop/release/`, holding only `bundle.externalBin` for the
-  sidecars it placed. Both are gitignored. Today's rows, every release target:
+  sidecars it placed. Both are gitignored. Every name starts with `clauseo-` (the `.deb` and
+  `.rpm` put sidecars in `/usr/bin`, where a bare `agent-browser` from a global npm install
+  could already be); the script refuses a row without it. Today's rows, every release target:
   - `clauseo-mcp`: `cargo build --release --locked -p clauseo-mcp --target <triple>` with the job's
     own `RUSTFLAGS` and profile variables, so it gets the app's release flags; its `.pdb`, `.dSYM`
     or `.dwp` goes into `debug-files-<target>` with the app's.
-  - `agent-browser`: `fetchAgentBrowser` from `crates/desktop/sidecars/agent-browser.mjs`, checked
-    against `crates/desktop/agent-browser.toml`. A triple the pin marks `none = true` leaves it out
-    of that target's list; a triple missing from the pin fails the job.
+  - `clauseo-agent-browser`: `fetchAgentBrowser` from `crates/desktop/sidecars/agent-browser.mjs`,
+    checked against `crates/desktop/agent-browser.toml` (upstream's asset names; only the
+    installed name has the prefix). A triple the pin marks `none = true` leaves it out of that target's list; a
+    triple missing from the pin fails the job. agent-browser's image-name check
+    (`connection.rs:198`, `is_agent_browser_process`, which wants a name starting with
+    `agent-browser`) then skips its stale-daemon kill: on Windows the guard's Job Object (#329)
+    covers that; on Unix it is the known G17 item 6 limit (an orphan lasts until its idle timeout).
   - `clauseo-guard` is a commented-out row: parked (host thread, 2026-11-03). S15 adds
     `clauseo-sandbox-setup` and `clauseo-sandbox-run` (Windows targets) as rows of their own.
 - **The overlay goes last.** Every `tauri build` and `tauri bundle` of a shipped leg passes
   `--config release/sidecars.generated.json` after every other `--config`. A JSON merge patch
-  replaces arrays, so one generated list per target is the only safe shape. The seam fails if the
-  file holds anything but `bundle.externalBin`; `check` now allows only
+  replaces arrays, so one generated list per target is the only safe shape. `sidecars.mjs --check`,
+  after the seam and again in `sign-windows` after the download, fails if the file holds anything
+  but `bundle.externalBin` or an entry not under `binaries/clauseo-`; `check` now allows only
   `bundle.windows.nsis.installerHooks` in `windows.conf.json`. `latest-json.test.mjs` fails when a
   step running the script, or any step before it in the job, holds a secret, and when a shipped
   build passes the overlay other than last. The measuring builds (S24) ship nothing and take no
@@ -197,7 +204,7 @@ S15's tools sat in `windows.conf.json` and S27's in `tauri.conf.json`.
   per file, without inheritance, read and execute only, to the well-known `RESTRICTED` SID:
   `icacls "$INSTDIR\<file>.exe" /grant:r *S-1-5-12:(RX)` (`Everyone` if S15's spike drops
   `RESTRICTED` from the restricting list). The files are what a jailed process starts:
-  `Clauseo.exe` (and any non-system DLL beside it that it imports), `agent-browser.exe`,
+  `Clauseo.exe` (and any non-system DLL beside it that it imports), `clauseo-agent-browser.exe`,
   `clauseo-mcp.exe` (if the agent starts it from its MCP config), and `clauseo-guard.exe` only if
   the guard returns. Never `clauseo-sandbox-setup.exe` (a jailed agent could raise a real UAC
   prompt), and not `clauseo-sandbox-run.exe` (it runs with the plain logon token). Uninstall has

@@ -328,7 +328,7 @@ jobs:
       # ---- The sidecar seam ----
       # After the installs, before any secret and before the app is built (latest-json.test.mjs
       # checks both). sidecars.mjs builds or fetches each sidecar for $TARGET (clauseo-mcp with
-      # this job's RUSTFLAGS and profile, agent-browser from its pin) as
+      # this job's RUSTFLAGS and profile, clauseo-agent-browser from agent-browser's pin) as
       # crates/desktop/binaries/<name>-$TARGET (.exe on Windows), and writes
       # release/sidecars.generated.json: bundle.externalBin for exactly those. Every tauri build
       # and tauri bundle below passes it last (a merge patch replaces arrays, so it is the
@@ -337,14 +337,7 @@ jobs:
         run: |
           set -euo pipefail
           node .github/scripts/sidecars.mjs "$TARGET"
-          node -e '
-            const o = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
-            const keys = (v) => Object.keys(v ?? {}).join(" ");
-            if (keys(o) !== "bundle" || keys(o.bundle) !== "externalBin" || !Array.isArray(o.bundle.externalBin)) {
-              console.log("::error::sidecars.generated.json may hold only bundle.externalBin, a list");
-              process.exit(1);
-            }
-          ' crates/desktop/release/sidecars.generated.json
+          node .github/scripts/sidecars.mjs --check
 
       # CLAUSEO_RELEASE_DATE is set only for a tag (release and test); unset, the app has none.
       - name: Build the app
@@ -555,8 +548,11 @@ jobs:
         with:
           name: windows-exe-${{ matrix.target }}
 
+      - name: The downloaded overlay holds only bundle.externalBin
+        run: node .github/scripts/sidecars.mjs --check
+
       # S20a signs every PE the installers take: Clauseo.exe and each file in
-      # crates/desktop/binaries/ (clauseo-mcp, agent-browser, later S15's tools), before NSIS.
+      # crates/desktop/binaries/ (clauseo-mcp, clauseo-agent-browser, later S15's tools), before NSIS.
       - name: SignPath, the exe and the sidecars (S20a)
         if: needs.check.outputs.mode == 'release' && vars.SIGNPATH_ENABLED == 'true'
         run: |
