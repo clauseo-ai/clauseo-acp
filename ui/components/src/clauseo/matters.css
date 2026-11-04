@@ -26,6 +26,8 @@
   /* why a search found it, where the name alone doesn't show: a client, a case number, when it was opened */
   .room-matter-match {
     @apply text-small text-muted;
+    /* a path or a file name on it can't reorder the row around it (docs/ui-states.md) */
+    unicode-bidi: isolate;
   }
   /* ---------- Find searching inside (U16a) ---------- */
   /* its key, at the empty field's end */
