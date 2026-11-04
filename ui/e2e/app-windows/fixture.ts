@@ -35,6 +35,7 @@ import { setTimeout as wait } from "node:timers/promises";
 import { promisify } from "node:util";
 import { chromium, test as base, type Browser, type Page } from "@playwright/test";
 import { closeWindow } from "./close.ts";
+import { webviewHolders } from "./holders.ts";
 import {
   fakeAgentPath,
   launchProfile,
@@ -524,7 +525,16 @@ export const test = base.extend<
       if (process.env["E2E_KEEP_SCRATCH"] === "1") {
         process.stdout.write(`scratch folders kept in ${scratch.root}\n`);
       } else {
-        removeScratch(scratch);
+        // WebView2's processes can outlive the app under load: removeScratch waits for them, then
+        // kills them, and the run shows each time it had to.
+        await removeScratch(scratch, {
+          holders: webviewHolders,
+          warn: (message) => {
+            process.stdout.write(
+              `::warning title=WebView2 outlived the app::${message.replace(/\r?\n/g, " ")}\n`,
+            );
+          },
+        });
       }
     }
   },
