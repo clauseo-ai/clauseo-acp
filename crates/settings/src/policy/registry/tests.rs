@@ -1,7 +1,7 @@
 use super::{RegValue, SOURCE, parse, parse_with, raw_values};
 use crate::leaf::Leaf;
 use crate::policy::Kind;
-use crate::schema::{AgentLaunch, FontSize, Theme};
+use crate::schema::{AgentLaunch, FontSize, Theme, UpdateMode};
 use crate::testing::abs_json;
 use crate::warning::{Origin, WarningKind};
 use serde_json::{Value, json};
@@ -164,9 +164,9 @@ fn a_value_of_the_wrong_registry_type_names_both_types() {
 #[test]
 fn an_unknown_value_name_is_a_warning() {
     assert_eq!(
-        convert("update.mode", RegValue::Dword(1)),
+        convert("beta.channel", RegValue::Dword(1)),
         Err(WarningKind::UnknownKey {
-            key: "update.mode".to_owned()
+            key: "beta.channel".to_owned()
         })
     );
 }
@@ -258,7 +258,7 @@ fn an_unknown_value_name_about_mcp_locks_the_list() {
         assert_eq!(warnings.len(), 2, "{name}: {warnings:?}");
     }
     let values = parse(vec![(
-        "update.list".to_owned(),
+        "beta.list".to_owned(),
         RegValue::Sz("{}".to_owned()),
     )]);
     let (leaves, warnings) = values.into_parts();
@@ -277,4 +277,59 @@ fn an_unknown_value_name_about_mcp_locks_the_list() {
             Leaf::Refused("tools.browser".to_owned())
         ]
     );
+}
+
+// `update.mode` (R23) is a REG_SZ of `auto`, `notify` or `none`, each read as the policy's
+// value. Another string, or another type, locks it at `none` with a warning: a security key.
+#[test]
+fn the_update_mode_is_a_reg_sz() {
+    for (text, mode) in [
+        ("auto", UpdateMode::Auto),
+        ("notify", UpdateMode::Notify),
+        ("none", UpdateMode::None),
+    ] {
+        let values = parse(vec![(
+            "update.mode".to_owned(),
+            RegValue::Sz(text.to_owned()),
+        )]);
+        let (leaves, warnings) = values.into_parts();
+        assert_eq!(leaves, [Leaf::UpdateMode(mode)], "{text}");
+        assert_eq!(warnings, [], "{text}");
+    }
+    // The value name is compared without case, as Windows does; the value is not.
+    let values = parse(vec![(
+        "Update.Mode".to_owned(),
+        RegValue::Sz("none".to_owned()),
+    )]);
+    assert_eq!(values.into_parts().0, [Leaf::UpdateMode(UpdateMode::None)]);
+    for value in [
+        RegValue::Sz("Auto".to_owned()),
+        RegValue::Sz("off".to_owned()),
+        RegValue::Dword(0),
+        RegValue::MultiSz(vec!["none".to_owned()]),
+    ] {
+        let values = parse(vec![("update.mode".to_owned(), value.clone())]);
+        let (leaves, warnings) = values.into_parts();
+        assert_eq!(
+            leaves,
+            [Leaf::Refused("update.mode".to_owned())],
+            "{value:?}"
+        );
+        assert!(
+            matches!(&warnings[..], [w] if matches!(&w.kind,
+                WarningKind::InvalidValue { key, .. } if key == "update.mode")),
+            "{value:?}: {warnings:?}"
+        );
+    }
+}
+
+// A value name about updates that this version cannot read locks `update.mode` at `none`, as
+// one about MCP locks its list (0009): what the firm meant is unknown.
+#[test]
+fn an_unknown_value_name_about_updates_locks_the_mode() {
+    for name in ["UpdateMode", "update_mode", "update.channel", "Updates"] {
+        let values = parse(vec![(name.to_owned(), RegValue::Sz("none".to_owned()))]);
+        let (leaves, _) = values.into_parts();
+        assert_eq!(leaves, [Leaf::Refused("update.mode".to_owned())], "{name}");
+    }
 }

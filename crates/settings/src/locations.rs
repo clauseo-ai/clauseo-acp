@@ -21,6 +21,12 @@ pub const DATA_DIR_VAR: &str = "CLAUSEO_DATA_DIR";
 /// The name of the user's settings file, in the data folder.
 pub const SETTINGS_FILE: &str = "settings.json";
 
+/// The name of the updater's marker file, in the data folder ([`Locations::update_marker`]).
+const UPDATE_MARKER: &str = "update.json";
+
+/// The name of the updater's download folder, in the data folder ([`Locations::updates_dir`]).
+const UPDATES_DIR: &str = "updates";
+
 /// The folders Clauseo uses.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Locations {
@@ -142,6 +148,21 @@ impl Locations {
             "an agent id is [a-z0-9-]+"
         );
         self.data_dir.join("agents").join(agent).join("home")
+    }
+
+    /// The updater's marker file, `<data folder>/update.json` (task R23): the host writes there
+    /// the update it is about to install, and reads it at the next start to tell an install
+    /// that took from one that failed. In the data folder, so `CLAUSEO_DATA_DIR` moves it, and
+    /// never in a matters folder.
+    pub fn update_marker(&self) -> PathBuf {
+        self.data_dir.join(UPDATE_MARKER)
+    }
+
+    /// Where the updater keeps its downloads, `<data folder>/updates` (task R23), one folder per
+    /// version. In the data folder, never the temp folder or a matters folder, so a download
+    /// kept for the next start survives a temp cleaner and never shows among a lawyer's files.
+    pub fn updates_dir(&self) -> PathBuf {
+        self.data_dir.join(UPDATES_DIR)
     }
 
     pub(crate) fn resolve_for(

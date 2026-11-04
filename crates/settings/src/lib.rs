@@ -23,7 +23,8 @@
 //! [`Effective::default_matters_dir`], [`Effective::data_dir`], [`Effective::locations`],
 //! [`Effective::policy`], [`Effective::policy_present`], [`Effective::is_locked`],
 //! [`Effective::warnings`], [`Effective::apply_ui_patch`], [`Effective::apply_tools_patch`],
-//! [`Effective::check_privacy_patch`] and [`Effective::apply_privacy_patch`]. Every input is a
+//! [`Effective::check_privacy_patch`], [`Effective::apply_privacy_patch`] and
+//! [`Effective::apply_update_mode`]. Every input is a
 //! trait:
 //! [`PlatformDirs`], [`Env`], [`Files`] and [`PolicySource`], with [`SystemDirs`], [`SystemEnv`]
 //! and [`SystemFiles`] over the OS. The
@@ -32,8 +33,10 @@
 //! change to settings after `load`. The `tools` switches are a [`ToolsPatch`], applied with
 //! [`Effective::apply_tools_patch`] the same way; a session reads them at its start, so they
 //! take effect at the next session start. The `privacy` switches are a [`PrivacyPatch`], applied
-//! with [`Effective::apply_privacy_patch`] the same way. Everything else takes effect on the next
-//! start.
+//! with [`Effective::apply_privacy_patch`] the same way, and the lawyer's `update.mode` is an
+//! [`UpdateChoice`], applied with [`Effective::apply_update_mode`]. Everything else takes effect
+//! on the next start. [`Locations::update_marker`] and [`Locations::updates_dir`] name the
+//! updater's files, so the host joins no paths of its own.
 //!
 //! # Invariants
 //!
@@ -41,7 +44,10 @@
 //!   read is a [`Warning`] (with path, line and column where there is one) and defaults stand in.
 //!   A policy source that cannot be read is dropped whole and listed in [`PolicyStatus`], and
 //!   locks each security key (`mcp.servers`, `tools.web_search`, `tools.browser`,
-//!   `privacy.counts`, `privacy.crash_reports`) off: the list empty, each switch `false`.
+//!   `privacy.counts`, `privacy.crash_reports`, `update.mode`) off: the list empty, each switch
+//!   `false`, the update mode `none`.
+//! - A policy may set `update.mode` to any of `auto`, `notify` and `none`, and locks it. The app
+//!   writes only `auto` or `notify` ([`UpdateChoice`], [`Effective::apply_update_mode`]).
 //! - A policy can only turn a `privacy` key off: a policy `true` is ignored with a warning and
 //!   locks nothing; a policy `false` locks it (decision record 0036).
 //! - Policy wins: a policy value replaces the user's for its key, and locks it. An agent's
@@ -97,6 +103,7 @@ mod system;
 mod testing;
 mod tools;
 mod ui;
+mod update;
 mod user;
 mod warning;
 
@@ -115,9 +122,11 @@ pub use policy::{
 pub use privacy::PrivacyPatch;
 pub use schema::{
     AgentLaunch, Density, FontSize, Language, Lite, MattersSettings, McpServerLaunch, McpSettings,
-    Motion, PrivacySettings, Settings, Theme, ToolsSettings, UiSettings, json_schema,
+    Motion, PrivacySettings, Settings, Theme, ToolsSettings, UiSettings, UpdateMode,
+    UpdateSettings, json_schema,
 };
 pub use system::{SystemDirs, SystemEnv};
 pub use tools::ToolsPatch;
 pub use ui::UiPatch;
+pub use update::UpdateChoice;
 pub use warning::{Origin, Position, Warning, WarningKind};

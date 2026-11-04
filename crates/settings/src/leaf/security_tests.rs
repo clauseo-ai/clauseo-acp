@@ -3,7 +3,7 @@
 
 use super::tests::one;
 use super::{Leaf, refuse};
-use crate::schema::{Settings, Theme};
+use crate::schema::{Settings, Theme, UpdateMode};
 use crate::testing::abs_str;
 use crate::warning::WarningKind;
 use serde_json::json;
@@ -35,6 +35,7 @@ fn refuse_locks_each_security_key_off() {
         settings.tools.browser = true;
         settings.privacy.counts = true;
         settings.privacy.crash_reports = true;
+        settings.update.mode = UpdateMode::Notify;
         settings.mcp.servers.insert(
             "s".to_owned(),
             serde_json::from_value(json!({"command": abs_str("s"), "enabled": true})).unwrap(),
@@ -60,6 +61,15 @@ fn refuse_locks_each_security_key_off() {
     assert!(refuse("privacy.", &mut settings));
     assert!(!settings.privacy.counts && !settings.privacy.crash_reports);
     assert!(settings.tools.web_search && settings.tools.browser);
+
+    // The update mode locks at `none` (R23): its default, `auto`, would fail open.
+    let mut settings = on();
+    assert!(refuse("update.mode", &mut settings));
+    assert_eq!(settings.update.mode, UpdateMode::None);
+    assert!(settings.privacy.counts && settings.tools.web_search);
+    let mut settings = on();
+    assert!(refuse("update.", &mut settings));
+    assert_eq!(settings.update.mode, UpdateMode::None);
 
     let mut settings = on();
     assert!(refuse("mcp.servers", &mut settings));
