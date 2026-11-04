@@ -74,6 +74,8 @@ clauseo-agents = { path = ".", features = ["test-support"] }
 clauseo-process = { path = "../process", features = ["test-support"] }
 # The example finds the data folder as the app does.
 clauseo-settings = { path = "../settings" }
+# The sign-in tests run its Claude and Codex CLI modes as the adapters.
+clauseo-fake_agent = { path = "../fake_agent" }
 
 [lints]
 workspace = true
