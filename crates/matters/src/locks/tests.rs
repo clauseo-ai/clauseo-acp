@@ -240,3 +240,59 @@ fn off_windows_no_write_failure_is_held() {
         assert!(!super::held_at_write(&err, || true), "{code}");
     }
 }
+
+/// The pretend Word of `test_support` (which every `TestDir` turns on) feeds the stale rule a
+/// Word started at the epoch, so an owner file a test makes stays held through the real rule;
+/// with no Word running instead (an empty listing), the same owner file, document free on a
+/// local volume, is stale. Both the macOS and Windows rules.
+#[cfg(any(target_os = "macos", windows))]
+#[test]
+fn the_pretend_word_keeps_an_owner_file_held_and_without_it_the_owner_file_is_stale() {
+    use super::stale::{self, Decision};
+    let dir = TestDir::new("locks-pretend-word");
+    let root = dir.path();
+    for name in ["Invoice.docx", "~$nvoice.docx"] {
+        drop(write::create_new(&root.join(name)).unwrap());
+    }
+    let document = root.join("Invoice.docx");
+    assert_eq!(
+        stale::decide(root, "~$nvoice.docx", &document, || Some(Vec::new())),
+        Decision::Stale
+    );
+    assert_eq!(
+        stale::word_starts(),
+        Some(vec![std::time::SystemTime::UNIX_EPOCH])
+    );
+    assert_eq!(
+        stale::decide(root, "~$nvoice.docx", &document, stale::word_starts),
+        Decision::Held
+    );
+    assert_eq!(
+        stale::decide(root, "~$nvoice.docx", &document, || None),
+        Decision::QueryFailed
+    );
+    assert_eq!(
+        held_open(root, &path("Invoice.docx")),
+        Some(HeldOpen::OwnerFile("~$nvoice.docx".to_owned()))
+    );
+}
+
+/// Linux has no Word and no stale rule: an owner file is held, whatever runs, as before it.
+#[cfg(not(any(target_os = "macos", windows)))]
+#[test]
+fn off_macos_and_windows_an_owner_file_is_never_stale() {
+    let dir = TestDir::new("locks-never-stale");
+    let root = dir.path();
+    for name in ["Invoice.docx", "~$nvoice.docx"] {
+        drop(write::create_new(&root.join(name)).unwrap());
+    }
+    assert!(!super::stale::is_stale(
+        root,
+        "~$nvoice.docx",
+        &root.join("Invoice.docx")
+    ));
+    assert_eq!(
+        held_open(root, &path("Invoice.docx")),
+        Some(HeldOpen::OwnerFile("~$nvoice.docx".to_owned()))
+    );
+}

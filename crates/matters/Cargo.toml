@@ -7,6 +7,11 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+# Exports `test_support`: a pretend Word process for the stale owner-file rule, which this
+# crate's and host's tests turn on (dev-dependencies only, never the app).
+test-support = []
+
 [dependencies]
 clauseo-protocol = { path = "../protocol" }
 # index: the stat cache (a git index file); revision: walking the timeline; sha1: gix's own
@@ -24,8 +29,13 @@ dunce = { workspace = true }
 
 # The durability sequence: plain fsync, F_BARRIERFSYNC and one F_FULLFSYNC per checkpoint;
 # mount: `MNT_LOCAL` in `statfs`'s flags, for a folder on a network drive (place.rs).
+# The stale owner-file rule's `F_GETLK` (locks/stale.rs) is `fs` too.
 [target.'cfg(target_os = "macos")'.dependencies]
 nix = { workspace = true, features = ["fs", "mount"] }
+
+# The running Word processes and their starts, for the stale owner-file rule (locks/stale.rs).
+[target.'cfg(any(target_os = "macos", windows))'.dependencies]
+clauseo-process = { path = "../process" }
 
 # `SetFileAttributesW`, to hide `.clauseo` (write/windows.rs), and `GetVolumePathNameW` with
 # `GetDriveTypeW` for a network drive (place/windows.rs); the workspace's one `windows` line.
@@ -33,6 +43,8 @@ nix = { workspace = true, features = ["fs", "mount"] }
 windows = { workspace = true, features = ["Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
+# Itself with test-support, so its tests reach `test_support` with no flag.
+clauseo-matters = { path = ".", features = ["test-support"] }
 criterion = { workspace = true, features = ["cargo_bench_support"] }
 
 [[bench]]

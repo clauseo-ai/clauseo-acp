@@ -1122,6 +1122,8 @@ dependencies = [
 name = "clauseo-matters"
 version = "0.1.0"
 dependencies = [
+ "clauseo-matters",
+ "clauseo-process",
  "clauseo-protocol",
  "criterion",
  "dunce",

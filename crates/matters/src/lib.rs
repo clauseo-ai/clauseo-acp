@@ -36,7 +36,10 @@
 //!   as an agent names it, resolved into the folder by [`matter_path_in`];
 //!   [`held_open_beside`] takes the parent folder's owner files from a caller that listed it,
 //!   and [`OwnersBeside`] tells it, with no file-system call, which names to ask about.
-//!   The host asks them before letting an agent write a file.
+//!   The host asks them before letting an agent write a file. An owner file a crashed Word left
+//!   is passed over by the stale rule (`locks/stale.rs`) on macOS and Windows.
+//! - With the `test-support` feature, [`test_support::pretend_word_running_since_epoch`], for
+//!   tests that plant an owner file and need it held through the stale rule.
 //! - [`scan`]: what importing a folder would take ([`ScanReport`]), before any write.
 //! - [`scan_folder`]: the folder scan before a matter, by the import's walk and rules, with
 //!   running counts and the file reached ([`ScanProgress`]) and its totals ([`FolderScan`],
@@ -95,8 +98,9 @@
 //!
 //! `protocol` (ids, `FileChange`, `SkippedFile`, error codes), `gix` (features `index`,
 //! `revision`, `sha1`), `serde` and `serde_json` (`matter.json`), `tracing`, `dunce`; `nix` on
-//! macOS for the sync calls and `statfs` (features `fs`, `mount`); `windows`
-//! (`Win32_Storage_FileSystem`) on Windows to hide `.clauseo` and to tell a network drive.
+//! macOS for the sync calls, `statfs` and the stale rule's `F_GETLK` (features `fs`, `mount`);
+//! `windows` (`Win32_Storage_FileSystem`) on Windows to hide `.clauseo` and to tell a network
+//! drive; `process` on macOS and Windows for the running Word processes (the stale rule).
 //!
 //! # Start reading
 //!
@@ -132,6 +136,8 @@ mod scan;
 mod stat;
 #[cfg(test)]
 mod test_dir;
+#[cfg(feature = "test-support")]
+pub mod test_support;
 mod trailers;
 mod types;
 mod undo;

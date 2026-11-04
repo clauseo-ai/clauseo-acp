@@ -11,6 +11,8 @@
 mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(target_os = "macos")]
+pub(crate) use macos::named;
 
 #[cfg(unix)]
 mod unix;
@@ -22,6 +24,6 @@ pub(crate) use unix::{kill_pid, running, started_before_now};
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]
-pub(crate) use windows::{Root, Tree, now, prepare, terminate};
+pub(crate) use windows::{Root, Tree, named, now, prepare, terminate};
 #[cfg(all(windows, feature = "test-support"))]
 pub(crate) use windows::{kill_pid, running, started_before_now};
