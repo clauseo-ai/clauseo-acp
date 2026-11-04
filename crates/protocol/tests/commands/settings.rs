@@ -5,9 +5,9 @@
 use std::collections::BTreeMap;
 
 use clauseo_protocol::{
-    AgentId, CommandEnvelope, HostCommand, HostQuery, Language, Lite, Motion, PlanProvider,
-    PlanView, PrivacyPatch, PrivacySettings, QueryResult, SettingsView, Theme, ToolsPatch,
-    ToolsSettingsView, UiPatch, UiSettings,
+    AgentId, CommandEnvelope, EnvName, HostCommand, HostQuery, Language, Lite, Motion,
+    PlanProvider, PlanView, PrivacyPatch, PrivacySettings, QueryResult, SettingsView, Theme,
+    ToolsPatch, ToolsSettingsView, UiPatch, UiSettings,
 };
 
 use super::Validate;
@@ -267,7 +267,7 @@ fn plans_carry_names_and_never_values() {
     let plan = PlanView {
         endpoint: Some("https://gw.firm.example".to_owned()),
         provider: Some(PlanProvider::Anthropic),
-        env_names: vec!["ANTHROPIC_CUSTOM_HEADERS_FILE".to_owned()],
+        env_names: vec![EnvName::new("ANTHROPIC_CUSTOM_HEADERS_FILE").unwrap()],
     };
     view.plans.insert(AgentId::new("claude-acp").unwrap(), plan);
     view.plans
@@ -284,6 +284,9 @@ fn plans_carry_names_and_never_values() {
     let mut keys: Vec<&String> = value["claude-acp"].as_object().unwrap().keys().collect();
     keys.sort();
     assert_eq!(keys, ["endpoint", "env_names", "provider"]);
+    // A name with a value after it does not decode: the view refuses `KEY=val` text.
+    let smuggled = r#"{"env_names":["A=b"]}"#;
+    assert!(serde_json::from_str::<PlanView>(smuggled).is_err());
     for provider in PlanProvider::ALL {
         round_trips(&provider);
     }

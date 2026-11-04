@@ -7,9 +7,9 @@ use uuid::Uuid;
 use crate::test_support::err_contains;
 use crate::{
     AgentId, AgentSessionId, BlobHash, CheckpointId, CommandId, ContentId, Cursor, DomainEvent,
-    ElicitationId, EventId, FileRefId, FolderRefId, MAX_SAFE, MatterId, MatterPath, MessageId,
-    PermissionRequestId, Seq, SteerOutcome, ThreadId, ThreadStatus, Timestamp, ToolCallId, TurnId,
-    TurnStarted, ViewEpoch,
+    ElicitationId, EnvName, EventId, FileRefId, FolderRefId, MAX_SAFE, MatterId, MatterPath,
+    MessageId, PermissionRequestId, Seq, SteerOutcome, ThreadId, ThreadStatus, Timestamp,
+    ToolCallId, TurnId, TurnStarted, ViewEpoch,
 };
 
 const V7: &str = "01900000-0000-7000-8000-000000000001";
@@ -417,4 +417,21 @@ fn a_wrong_type_names_a_blob_hash() {
         error.contains("expected a 64-character lowercase hex hash"),
         "{error}"
     );
+}
+
+#[test]
+fn an_env_name_holds_a_name_and_never_a_value() {
+    for name in ["HTTPS_PROXY", "aws_region", "A", "_X1"] {
+        assert_eq!(EnvName::new(name).unwrap().as_str(), name);
+        let decoded: EnvName = json(&format!("\"{name}\"")).unwrap();
+        assert_eq!(
+            serde_json::to_string(&decoded).unwrap(),
+            format!("\"{name}\"")
+        );
+    }
+    for name in ["A=b", "", "A B", "A-B", "É", "A\nB", &"A".repeat(256)] {
+        assert!(EnvName::new(name).is_err(), "{name:?}");
+        let text = serde_json::to_string(name).unwrap();
+        assert!(json::<EnvName>(&text).is_err(), "{name:?}");
+    }
 }
