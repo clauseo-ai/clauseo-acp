@@ -10,12 +10,17 @@
 //! Only a matter whose row is surely not stored is discarded: one whose commit could not be built
 //! or sent (the store never had it). A commit the store answered with an error may still have
 //! been stored (`COMMIT` failing after its frames were written, a reply lost on the way), so
-//! the store is asked first: with no row for the matter, it is discarded; with one, or when
-//! the store cannot say, everything is kept and the command gets the commit's error (the matter
-//! is listed from its row at the next start). Losing nothing comes before a clean retry.
+//! the store is asked first, up to [`LOOKUPS`] times: with no row for the matter, it is
+//! discarded; with one, or when every lookup fails, everything is kept and the command gets the
+//! commit's error. Losing nothing comes before a clean retry. What is left then: a stored row
+//! is listed at the next start, but when the store could not say and the row was in fact not
+//! stored, the folder keeps a marker and the data folder a history with no row, as before this
+//! rollback, and a new import of the folder is refused as already a matter.
 //!
 //! The logs here name the matter, the error's code and the stage, never a folder: a path names a
 //! client.
+
+use std::time::Duration;
 
 use clauseo_matters::CommitId;
 use clauseo_protocol::{
@@ -23,7 +28,6 @@ use clauseo_protocol::{
     MatterCreated, MatterId, StreamId,
 };
 use clauseo_store::MatterRow;
-
 use futures::task::LocalSpawnExt;
 
 use super::super::input::{Input, MatterTag};
@@ -87,14 +91,32 @@ pub(crate) fn discard(
     }
 }
 
-/// Asks the store whether it holds `matter`'s row; answered as [`Input::MadeRow`].
+/// How many times the store is asked for a made matter's row before it is kept.
+const LOOKUPS: u32 = 3;
+
+/// Asks the store whether it holds `matter`'s row, up to [`LOOKUPS`] times with a short wait
+/// (50 ms, then 200 ms) after each failure; the last answer comes as [`Input::MadeRow`].
 fn check_row(actor: &mut Actor, matter: MatterId) {
-    let (store, post) = (actor.store.clone(), actor.post.clone());
+    let (store, post, clock) = (
+        actor.store.clone(),
+        actor.post.clone(),
+        std::sync::Arc::clone(&actor.clock),
+    );
     let asked = actor.spawner.spawn_local(async move {
-        let result = store
-            .matters()
-            .await
-            .map(|rows| rows.iter().any(|row| row.id == matter));
+        let mut tries = 0;
+        let result = loop {
+            tries += 1;
+            let found = store.matters().await;
+            match found {
+                Err(error) if tries < LOOKUPS => {
+                    tracing::debug!(%matter, code = %error.code(), tries, "row lookup failed");
+                    clock
+                        .after(Duration::from_millis(50 * 4_u64.pow(tries - 1)))
+                        .await;
+                }
+                found => break found.map(|rows| rows.iter().any(|row| row.id == matter)),
+            }
+        };
         let _gone = post.try_send(Input::MadeRow { matter, result });
     });
     match asked {
@@ -115,7 +137,7 @@ pub(crate) fn row_checked(
         Ok(false) => send_discard(actor, matter),
         Ok(true) => keep(actor, matter, "its row was stored"),
         Err(error) => {
-            tracing::warn!(%matter, code = %error.code(), stage = "lookup", "row not read");
+            tracing::warn!(%matter, code = %error.code(), stage = "lookup", "lookup failed");
             keep(actor, matter, "the store could not say");
         }
     }
