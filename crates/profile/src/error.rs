@@ -66,4 +66,39 @@ impl ProfileError {
             reason: reason.into(),
         }
     }
+
+    /// The error as a log line may show it (decision record 0047): its kind, the step and the
+    /// OS error kind, never a path, a skill's name or stetdoc's output.
+    pub fn log_text(&self) -> String {
+        match self {
+            Self::Io { action, source, .. } => format!("io: {action}: {:?}", source.kind()),
+            Self::Stetdoc { .. } => "stetdoc".to_owned(),
+            Self::Path { reason, .. } => format!("path: {reason}"),
+            Self::Skill { .. } => "skill".to_owned(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ProfileError;
+    use std::path::Path;
+
+    #[test]
+    fn log_text_names_the_kind_never_the_path_or_the_skill() {
+        let path = Path::new("/Users/ada/Matters/Acme/skills/acme-memo/SKILL.md");
+        let missing = std::io::Error::from(std::io::ErrorKind::NotFound);
+        let cases = [
+            (
+                ProfileError::io("read", path, missing),
+                "io: read: NotFound",
+            ),
+            (ProfileError::path(path, "a link"), "path: a link"),
+            (ProfileError::skill("acme-memo", "no name line"), "skill"),
+        ];
+        for (error, shown) in cases {
+            assert_eq!(error.log_text(), shown);
+            assert!(!error.log_text().contains("acme"), "{}", error.log_text());
+        }
+    }
 }

@@ -9,6 +9,8 @@ use clauseo_protocol::{CheckpointId, MatterId};
 use clauseo_store::{MatterRow, Store};
 use futures::executor::block_on;
 
+use crate::log_file::Cause;
+
 /// Matters kept open for their listings.
 const OPEN_CAP: usize = 8;
 
@@ -48,7 +50,7 @@ impl Files {
                     self.note(row);
                 }
             }
-            Err(error) => tracing::warn!(%error, "the matter rows were not read"),
+            Err(error) => tracing::warn!(error = %Cause(&error), "the matter rows were not read"),
         }
     }
 
@@ -95,7 +97,11 @@ impl Files {
             }
         }
         if let Some(error) = failed {
-            tracing::warn!(%matter, %error, "a matter's file names were not listed");
+            tracing::warn!(
+                %matter,
+                error = %Cause(&error),
+                "a matter's file names were not listed"
+            );
         } else {
             tracing::warn!(%matter, "a matter with no row has no file names");
         }

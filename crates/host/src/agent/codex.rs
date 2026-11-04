@@ -15,6 +15,7 @@ use serde_json::{Map, Value};
 
 use crate::agent::folder_support::{Answer, FolderCheck};
 use crate::error::Error;
+use crate::log_file::Cause;
 
 /// The variable codex-acp takes its first mode from (`dist/index.js:34362-34367`).
 pub(crate) const MODE_VAR: &str = "INITIAL_AGENT_MODE";
@@ -269,7 +270,7 @@ pub(crate) fn write_home_config(home: &Path) -> Result<(), Error> {
     }
     crate::write::sweep_temp_files(&path);
     crate::write::replace_private_file(&path, text.as_bytes())
-        .map_err(|error| home_failed(&path, &error.to_string()))
+        .map_err(|error| home_failed(&Cause(&error)))
 }
 
 /// Whether the file at `path`, our own `config.toml`, is a plain file (0600 on Unix) holding
@@ -291,10 +292,10 @@ fn holds(path: &Path, bytes: &[u8]) -> bool {
         && std::fs::read(path).is_ok_and(|held| held == bytes)
 }
 
-/// The failure of a Codex launch whose home or `config.toml` could not be made: the path and
-/// the error go to the log only (the path holds the user's name).
-fn home_failed(path: &Path, error: &str) -> Error {
-    tracing::warn!(path = %path.display(), %error, "Codex's folder could not be prepared");
+/// The failure of a Codex launch whose home or `config.toml` could not be made: the error's
+/// codes go to the log only, never the path (it holds the user's name).
+fn home_failed(error: &dyn std::fmt::Display) -> Error {
+    tracing::warn!(%error, "Codex's folder could not be prepared");
     Error::refused(
         ErrorCode::AgentLaunchFailed,
         "Clauseo couldn't prepare Codex's folder.",
@@ -334,10 +335,7 @@ pub(crate) fn refuse_codex_folder(folder: &Path) -> Result<(), Error> {
             "the matter folder's .codex stat failed",
         )),
         Ok(_) => {
-            tracing::warn!(
-                folder = %folder.display(),
-                "a Codex session was refused: the matter folder holds a .codex entry"
-            );
+            tracing::warn!("a Codex session was refused: the matter folder holds a .codex entry");
             Err(Error::refused(
                 ErrorCode::MatterCodexFolder,
                 "Codex can't work in this matter while its folder holds a \".codex\" folder: \
@@ -375,16 +373,19 @@ pub(crate) fn guard_trusted(answer: &Value) -> bool {
 
 /// The failure of a Codex session whose guard is not trusted.
 pub(crate) fn guard_untrusted(answer: &Value) -> Error {
-    // Each hook's trust status and the count only: the answer also holds paths.
+    // Each hook's trust status, as "trusted" or "untrusted" ("other" for any else), and the
+    // count: the answer also holds paths.
     let hooks = answer.get("hooks").and_then(Value::as_array);
     let trust: Vec<&str> = hooks
         .into_iter()
         .flatten()
-        .map(|hook| {
-            hook.get("trustStatus")
-                .and_then(Value::as_str)
-                .unwrap_or("none")
-        })
+        .map(
+            |hook| match hook.get("trustStatus").and_then(Value::as_str) {
+                Some(status @ ("trusted" | "untrusted")) => status,
+                Some(_) => "other",
+                None => "none",
+            },
+        )
         .collect();
     tracing::error!(
         hooks = trust.len(),
@@ -407,7 +408,7 @@ pub(crate) fn guard_untrusted(answer: &Value) -> Error {
 pub(crate) fn make_home(data: &Path, home: &Path) -> Result<(), Error> {
     let below = home
         .strip_prefix(data)
-        .map_err(|_outside| home_failed(home, "not under the data folder"))?;
+        .map_err(|_outside| home_failed(&"not under the data folder"))?;
     let mut at = data.to_owned();
     for part in below.components() {
         at.push(part);
@@ -425,14 +426,14 @@ pub(crate) fn make_home(data: &Path, home: &Path) -> Result<(), Error> {
         // `symlink_metadata` never follows a link, so a link is not a folder here.
         let meta = made
             .and_then(|()| std::fs::symlink_metadata(&at))
-            .map_err(|error| home_failed(&at, &error.to_string()))?;
+            .map_err(|error| home_failed(&Cause(&error)))?;
         if !meta.is_dir() {
-            return Err(home_failed(&at, "a link or not a folder"));
+            return Err(home_failed(&"a link or not a folder"));
         }
     }
     // Off Unix a folder's privacy is its parent's: there is nothing to set.
     #[cfg(unix)]
-    crate::write::make_private_dir(home).map_err(|error| home_failed(home, &error.to_string()))?;
+    crate::write::make_private_dir(home).map_err(|error| home_failed(&Cause(&error)))?;
     Ok(())
 }
 

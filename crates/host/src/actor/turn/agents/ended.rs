@@ -11,6 +11,8 @@ use super::super::{End, Then, TurnPhase, current, end, state, updates};
 use super::{Agent, Stage, Waiting, fail_waiting, start};
 use crate::agent::{Ended, StopStep};
 use crate::error::Error;
+use crate::log_file::Cause;
+use crate::log_file::LIFECYCLE;
 
 /// Why an agent is stopped, for the detach its `Ended::Stopped` logs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,7 +77,8 @@ pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: End
         Ended::Exited(reason) => reason,
         Ended::Stopped { step, report } => {
             if step == StopStep::Unresponsive {
-                tracing::warn!(%thread, ?report, "the agent did not exit after its kill");
+                let (kind, code) = reason_kind(&report);
+                tracing::warn!(%thread, kind, ?code, "the agent did not exit after its kill");
             }
             match stop_cause {
                 StopCause::Asked => DetachReason::Closed,
@@ -85,6 +88,8 @@ pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: End
             }
         }
     };
+    let (kind, code) = reason_kind(&reason);
+    tracing::info!(target: LIFECYCLE, %thread, kind, ?code, "agent ended");
     let exited = Error::refused(ErrorCode::AgentExited, "the agent exited");
     for item in waiting {
         fail_waiting(actor, thread, &item, &exited);
@@ -136,6 +141,18 @@ pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: End
     actor.release(StreamId::Thread(thread));
 }
 
+/// A detach reason as the log file may show it: its kind and exit code, never `stderr_tail`,
+/// which is the agent's output (decision record 0047).
+fn reason_kind(reason: &DetachReason) -> (&'static str, Option<i32>) {
+    match reason {
+        DetachReason::Exited { code, .. } => ("exited", *code),
+        DetachReason::Closed => ("closed", None),
+        DetachReason::Restarting => ("restarting", None),
+        DetachReason::IdleStopped => ("idle_stopped", None),
+        DetachReason::Unknown { .. } => ("unknown", None),
+    }
+}
+
 /// Logs `AgentSessionDetached { reason }`.
 pub(in super::super) fn log_detach(actor: &mut Actor, thread: ThreadId, reason: DetachReason) {
     let sent = Out::new(actor, thread, None).and_then(|mut out| {
@@ -143,6 +160,6 @@ pub(in super::super) fn log_detach(actor: &mut Actor, thread: ThreadId, reason: 
         out.send(actor, Then::Nothing)
     });
     if let Err(error) = sent {
-        tracing::warn!(%thread, %error, "the detach was not logged");
+        tracing::warn!(%thread, error = %Cause(&error), "the detach was not logged");
     }
 }

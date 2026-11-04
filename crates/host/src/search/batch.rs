@@ -6,6 +6,7 @@ use clauseo_protocol::{MatterId, Seq, StreamId, Timestamp};
 use clauseo_search::{Batch, SearchIndex};
 
 use super::fold::Write;
+use crate::log_file::Cause;
 
 /// Why a walk or a write stopped; logged, and the stream is read again later.
 #[derive(Debug)]
@@ -14,10 +15,12 @@ pub(super) enum Failure {
     Index(clauseo_search::Error),
 }
 
+/// For the log: a store error by its codes only (its text can hold a path); the index's errors
+/// hold SQLite's messages and io errors, no matter content.
 impl fmt::Display for Failure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Store(error) => write!(f, "store: {error}"),
+            Self::Store(error) => write!(f, "store: {}", Cause(error)),
             Self::Index(error) => write!(f, "index: {error}"),
         }
     }

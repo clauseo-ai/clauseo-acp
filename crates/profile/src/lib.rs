@@ -188,10 +188,7 @@ impl ClauseoProfile {
             return Map::new();
         }
         if written.root != self.paths.claude_skills() {
-            tracing::warn!(
-                folder = %written.root.display(),
-                "a skills write of another folder: Codex gets no skills index"
-            );
+            tracing::warn!("a skills write of another folder: Codex gets no skills index");
             return self.codex_config().into_keys();
         }
         CodexConfig::with_instructions(self.codex_instructions_with_index()).into_keys()

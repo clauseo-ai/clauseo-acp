@@ -275,6 +275,41 @@ fn the_update_marker_and_downloads_are_in_the_data_folder_never_a_matters_folder
 }
 
 #[test]
+fn log_dir_is_logs_under_the_data_folder_on_every_os() {
+    for (os, dirs, data) in [
+        (
+            Os::Windows,
+            windows_dirs(),
+            "/C/Users/ada/AppData/Local/ai.clauseo.desktop",
+        ),
+        (
+            Os::Mac,
+            home_dirs(),
+            "/home/ada/Library/Application Support/ai.clauseo.desktop",
+        ),
+        (
+            Os::Linux,
+            home_dirs(),
+            "/home/ada/.local/share/ai.clauseo.desktop",
+        ),
+    ] {
+        let at = Locations::resolve_for(os, &dirs, &FakeEnv::default()).unwrap();
+        assert_eq!(at.log_dir(), Path::new(data).join("logs"), "{os:?}");
+    }
+}
+
+#[test]
+fn log_dir_follows_the_data_folder_override() {
+    let env = FakeEnv(vec![(DATA_DIR_VAR, abs_str("scratch/run-2"))]);
+    for os in [Os::Windows, Os::Mac, Os::Linux] {
+        let at = Locations::resolve_for(os, &windows_dirs(), &env).unwrap();
+        assert_eq!(at.log_dir(), abs("scratch/run-2/logs"), "{os:?}");
+    }
+    let rooted = Locations::under_root(Path::new("/scratch/run-3"));
+    assert_eq!(rooted.log_dir(), Path::new("/scratch/run-3/logs"));
+}
+
+#[test]
 #[cfg(debug_assertions)]
 #[should_panic(expected = "an agent id is [a-z0-9-]+")]
 fn agent_home_refuses_a_path_for_an_agent_id() {

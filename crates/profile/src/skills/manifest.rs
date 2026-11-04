@@ -76,11 +76,11 @@ impl Manifest {
             && let Some(Value::Object(skills)) = top.remove("skills")
         {
             if top.remove("format").is_some_and(|format| format != FORMAT) {
-                tracing::warn!(path = %path.display(), "a skills manifest of another format");
+                tracing::warn!("a skills manifest of another format");
             }
             return Ok(Self { skills, other: top });
         }
-        tracing::warn!(path = %path.display(), "a skills manifest does not parse");
+        tracing::warn!("a skills manifest does not parse");
         Ok(Self::default())
     }
 

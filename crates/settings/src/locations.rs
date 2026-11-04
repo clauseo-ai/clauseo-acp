@@ -12,6 +12,9 @@ use std::path::{Path, PathBuf};
 /// and matches the identifier in the desktop crate's `tauri.conf.json`.
 pub const IDENTIFIER: &str = "ai.clauseo.desktop";
 
+/// The log folder's name under the data folder ([`Locations::log_dir`]).
+const LOGS_DIR: &str = "logs";
+
 /// The variable that moves the data folder, for `cli`, CI and by-hand runs. It never moves a
 /// policy path. With it set, the default matters folder moves beside the data folder too (see
 /// [`Locations::default_matters_dir`]), so a run with a scratch data folder creates its matters
@@ -136,6 +139,13 @@ impl Locations {
     /// matter's name.
     pub fn default_matters_dir(&self) -> &Path {
         &self.default_matters_dir
+    }
+
+    /// The folder of the host's log file, `<data folder>/logs` (decision record 0047): it
+    /// follows `CLAUSEO_DATA_DIR`, so a test's log stays in its own data folder. Reads nothing
+    /// and makes nothing; the host makes it when it installs the log.
+    pub fn log_dir(&self) -> PathBuf {
+        self.data_dir.join(LOGS_DIR)
     }
 
     /// The home Clauseo owns for agent `agent`: `<data folder>/agents/<agent>/home`. The host

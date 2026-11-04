@@ -297,7 +297,7 @@ pub fn builtin_allowlist(kind: &LoginKind) -> Allowlist {
         if let Some(name) = Name::parse(host) {
             list.insert_exact(name);
         } else {
-            tracing::warn!(host, "egress: firm host is not a host name; left out");
+            tracing::warn!("egress: firm host is not a host name; left out");
         }
     }
     list

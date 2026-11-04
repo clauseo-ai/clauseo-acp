@@ -115,7 +115,6 @@ impl ProfilePaths {
         .any(|other| same_folder(other, dir));
         if shared {
             tracing::warn!(
-                folder = %dir.display(),
                 "stetdoc's folder holds other programs: it does not go on the agents' PATH"
             );
             return None;

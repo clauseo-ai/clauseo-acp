@@ -44,6 +44,7 @@ use super::input::{Reply, SubId};
 use crate::encode::EncodedEvent;
 use crate::error::Error;
 use crate::handle::{AppSubscription, Front, Sink};
+use crate::log_file::Cause;
 use crate::principal::{Access, authorize};
 
 /// One app subscriber; a limits subscriber (`limits.rs`) is one too, with the same rules.
@@ -176,7 +177,7 @@ pub(crate) fn publish(actor: &mut Actor, event: &HostEvent) {
     }
     match encode(event) {
         Ok(encoded) => actor.app_subs.retain_mut(|sub| sub.offer(&encoded)),
-        Err(error) => tracing::error!(%error, "an app event did not serialise"),
+        Err(error) => tracing::error!(error = %Cause(&error), "an app event did not serialise"),
     }
 }
 
@@ -214,7 +215,9 @@ fn catch_up(actor: &mut Actor) -> Vec<EncodedEvent> {
         .iter()
         .filter_map(|event| {
             encode(event)
-                .inspect_err(|error| tracing::error!(%error, "an app event did not serialise"))
+                .inspect_err(|error| {
+                    tracing::error!(error = %Cause(error), "an app event did not serialise");
+                })
                 .ok()
         })
         .collect()

@@ -15,6 +15,7 @@ use super::out::Out;
 use super::{Then, TimerKind, TurnTimer, end, lost, state};
 use crate::coalesce::{DisplayText, TextIn};
 use crate::error::Error;
+use crate::log_file::Cause;
 
 /// One text delta of the live turn. A message's first delta closes the held batch first, so
 /// its provisional order is the seq its `TextAppended` gets.
@@ -71,7 +72,7 @@ pub(super) fn on_display_timer(actor: &mut Actor, thread: ThreadId) {
 /// text not shown stays held.
 fn show_display(actor: &mut Actor, thread: ThreadId, now: Duration) {
     if let Err(error) = show(actor, thread, false, now) {
-        tracing::error!(%thread, %error, "text could not be shown");
+        tracing::error!(%thread, error = %Cause(&error), "text could not be shown");
     }
 }
 
@@ -83,7 +84,7 @@ pub(super) fn on_durable_timer(actor: &mut Actor, thread: ThreadId) {
     }
     let sent = Out::new(actor, thread, None).and_then(|out| out.send(actor, Then::Nothing));
     if let Err(error) = sent {
-        tracing::warn!(%thread, %error, "held text was not committed");
+        tracing::warn!(%thread, error = %Cause(&error), "held text was not committed");
     }
 }
 

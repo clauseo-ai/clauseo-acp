@@ -21,6 +21,7 @@ use super::out::Out;
 use super::updates::{agent, commit, known_tool};
 use super::{JobKind, LimitMark, Then, TurnJob, current, matter_of, spawn};
 use crate::error::Error;
+use crate::log_file::Cause;
 use crate::matter_worker::MatterJob;
 
 /// A permission request from the agent, kept until it is logged.
@@ -102,7 +103,11 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
         Ok(())
     })();
     if let Err(error) = sent {
-        tracing::warn!(%thread, %error, "a permission request's paths were not checked");
+        tracing::warn!(
+            %thread,
+            error = %Cause(&error),
+            "a permission request's paths were not checked"
+        );
         log_for_lawyer(actor, thread, ask);
     }
 }
@@ -141,7 +146,10 @@ pub(super) fn on_held_open(
             spawn(actor, async move {
                 // Already answered when the turn was cancelled: then nothing is pending.
                 if let Err(error) = client.cancel_permission(ask.key).await {
-                    tracing::debug!(%error, "a checked permission after its turn was not cancelled");
+                    tracing::debug!(
+                        %error,
+                        "a checked permission after its turn was not cancelled"
+                    );
                 }
             });
         }
@@ -150,9 +158,17 @@ pub(super) fn on_held_open(
     match held {
         Some((path, held)) => {
             let why = "refused a permission request: a program holds the file open";
-            tracing::info!(%thread, %path, ?held, "{why}");
+            let held = match held {
+                HeldOpen::OwnerFile(_) => "owner_file",
+                HeldOpen::SharingViolation => "sharing_violation",
+            };
+            tracing::info!(%thread, held, "{why}");
             if let Err(error) = refuse_held_open(actor, thread, ask, path) {
-                tracing::warn!(%thread, %error, "a refused permission request was not logged");
+                tracing::warn!(
+                    %thread,
+                    error = %Cause(&error),
+                    "a refused permission request was not logged"
+                );
             }
         }
         None => log_for_lawyer(actor, thread, ask),
@@ -220,7 +236,7 @@ fn log_for_lawyer(actor: &mut Actor, thread: ThreadId, ask: PermissionAsk) {
     })();
     limits::asking_changed(actor);
     if let Err(error) = logged {
-        tracing::warn!(%thread, %error, "a permission request was not logged");
+        tracing::warn!(%thread, error = %Cause(&error), "a permission request was not logged");
     }
 }
 
@@ -342,7 +358,7 @@ pub(super) fn on_elicitation(
     })();
     limits::asking_changed(actor);
     if let Err(error) = logged {
-        tracing::warn!(%thread, %error, "an elicitation was not logged");
+        tracing::warn!(%thread, error = %Cause(&error), "an elicitation was not logged");
     }
 }
 

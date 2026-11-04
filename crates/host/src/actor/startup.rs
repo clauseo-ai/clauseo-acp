@@ -16,6 +16,7 @@ use crate::config::HostConfig;
 use crate::encode::Encoder;
 use crate::error::Error;
 use crate::ids::Ids;
+use crate::log_file::Cause;
 use crate::matter_worker::matter_settings;
 use crate::pipeline::{Pipeline, Post, spawn_feeder};
 use crate::snapshot::SnapshotWorker;
@@ -60,7 +61,7 @@ pub(super) async fn open(
         let _gone = snapshot_post.try_send(Input::Snapshot(snapshot));
     }))?;
     let cached_limits = store.account_limits().await.unwrap_or_else(|error| {
-        tracing::warn!(%error, "the stored account limits were not read");
+        tracing::warn!(error = %Cause(&error), "the stored account limits were not read");
         Vec::new()
     });
     let limits_reader = parts.limits_reader.unwrap_or_else(|| {
@@ -130,6 +131,12 @@ pub(super) async fn open(
     // The limits model and its first reads; nothing waits on them.
     super::limits::start(&mut actor, cached_limits);
     super::browser_install::start(&mut actor);
+    tracing::info!(
+        target: crate::log_file::LIFECYCLE,
+        matters = actor.matters.len(),
+        threads = actor.threads.len(),
+        "host started"
+    );
     Ok(actor)
 }
 
@@ -162,7 +169,11 @@ pub(super) fn begin_startup(actor: &mut Actor) {
                 match loaded {
                     Ok(()) => turn::reconcile(actor, thread),
                     Err(error) => {
-                        tracing::warn!(%error, %thread, "could not load a thread at start-up");
+                        tracing::warn!(
+                            error = %Cause(&error),
+                            %thread,
+                            "could not load a thread at start-up"
+                        );
                         turn::reconcile_skipped(actor, thread);
                     }
                 }

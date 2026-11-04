@@ -447,11 +447,12 @@ fn target_url(scheme: Scheme, host: &str, port: u16) -> Option<String> {
     url.host_str().is_some().then(|| url.into())
 }
 
-/// An OS answer, or direct when the lookup failed, logged by host and port only.
+/// An OS answer, or direct when the lookup failed, logged by port only: the host is where the
+/// agent goes, which the log never holds (decision record 0047).
 #[cfg(any(target_os = "macos", windows, test))]
-fn settle(host: &str, port: u16, answer: Result<Route, String>) -> Route {
+fn settle(port: u16, answer: Result<Route, String>) -> Route {
     answer.unwrap_or_else(|why| {
-        tracing::warn!(host, port, why, "the OS proxy lookup failed; going direct");
+        tracing::warn!(port, why, "the OS proxy lookup failed; going direct");
         Route::Direct
     })
 }
@@ -462,7 +463,7 @@ fn os_route(scheme: Scheme, host: &str, port: u16) -> Route {
     let answer = target_url(scheme, host, port)
         .ok_or_else(|| "the host is not a URL host".to_owned())
         .and_then(|target| macos::route(&target));
-    settle(host, port, answer)
+    settle(port, answer)
 }
 
 /// The OS lookup: `WinHTTP`'s proxy for the target URL, the whole call bounded to
@@ -482,7 +483,7 @@ fn os_route(scheme: Scheme, host: &str, port: u16) -> Route {
                 move || windows::route(&target, &host, port),
             )
         });
-    settle(host, port, answer)
+    settle(port, answer)
 }
 
 /// The longest a Windows lookup (WPAD discovery and the PAC run included) may take.

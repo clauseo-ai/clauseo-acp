@@ -254,7 +254,7 @@ pub(crate) fn apply(core: &Core, folder: &Path, ops: &[&Op]) -> Result<(), Error
             // The temp files went with `stage_all`; the folders it made are empty again.
             for dir in made.iter().rev() {
                 if let Err(err) = write::remove_dir(dir) {
-                    tracing::warn!(path = %dir.display(), error = %err, "folder left behind");
+                    tracing::warn!(error = %err, "folder left behind");
                 }
             }
             return Err(err);

@@ -113,6 +113,9 @@ mod lists_folder;
 #[path = "host/locate.rs"]
 mod locate;
 #[cfg(test)]
+#[path = "host/log_file.rs"]
+mod log_file;
+#[cfg(test)]
 #[path = "host/matters.rs"]
 mod matters;
 #[cfg(test)]

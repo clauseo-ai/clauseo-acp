@@ -6,6 +6,7 @@ use clauseo_protocol::{StreamId, ThreadId};
 use super::super::super::Actor;
 use super::super::super::streams::StreamSlot;
 use super::queue;
+use crate::log_file::Cause;
 
 /// Whether `thread`'s queue shows held: held with turns waiting.
 pub(crate) fn queue_held(actor: &Actor, thread: ThreadId) -> bool {
@@ -51,7 +52,9 @@ pub(in super::super) fn sync_held(actor: &mut Actor, thread: ThreadId) {
                         loaded.views.retain_mut(|sub| sub.offer(event));
                     }
                 }
-                Err(error) => tracing::error!(%thread, %error, "queue_held was not shown"),
+                Err(error) => {
+                    tracing::error!(%thread, error = %Cause(&error), "queue_held was not shown");
+                }
             }
         }
         Some(StreamSlot::Loading(_)) | None => {

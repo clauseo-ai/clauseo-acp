@@ -114,7 +114,7 @@ pub(super) fn present(
         new_objects.record(path, false);
         return Ok(true);
     }
-    tracing::warn!(path = %path.display(), "rewriting a torn loose object");
+    tracing::warn!("rewriting a torn loose object");
     #[cfg(windows)]
     match write::remove_file(&path) {
         Ok(()) => {}

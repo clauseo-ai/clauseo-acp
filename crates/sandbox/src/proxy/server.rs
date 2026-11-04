@@ -314,8 +314,7 @@ impl Ctx {
             within(self.limits.connect, lookup)
                 .await
                 .unwrap_or_else(|| {
-                    let host = &target.name;
-                    tracing::warn!(%host, "egress: upstream lookup too slow; going direct");
+                    tracing::warn!("egress: upstream lookup too slow; going direct");
                     Route::Direct
                 })
         };

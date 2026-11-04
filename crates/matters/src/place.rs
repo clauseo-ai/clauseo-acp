@@ -75,7 +75,7 @@ fn mac_local_mount(folder: &Path) -> Option<bool> {
     match nix::sys::statfs::statfs(folder) {
         Ok(stat) => Some(stat.flags().contains(MntFlags::MNT_LOCAL)),
         Err(err) => {
-            tracing::warn!(path = %folder.display(), error = %err, "statfs failed");
+            tracing::warn!(error = %err, "statfs failed");
             None
         }
     }

@@ -104,11 +104,7 @@ pub(crate) fn prepend_path(env: &mut BTreeMap<OsString, OsString>, folder: &Path
         Ok(joined) => {
             env.insert(name, joined);
         }
-        Err(error) => tracing::warn!(
-            folder = %folder.display(),
-            %error,
-            "the stetdoc folder cannot go on the agent's PATH"
-        ),
+        Err(error) => tracing::warn!(%error, "the stetdoc folder cannot go on the agent's PATH"),
     }
 }
 

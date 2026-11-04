@@ -22,6 +22,7 @@ use super::{
     prompt, queue, state,
 };
 use crate::error::Error;
+use crate::log_file::Cause;
 use crate::matter_worker::{MatterJob, UndoJob};
 use crate::pipeline::MatterEvent;
 
@@ -356,7 +357,7 @@ fn send_log(actor: &mut Actor, thread: ThreadId, log: UndoLog) {
     };
     state.undo = Some(Box::new(log));
     if let Err(error) = sent {
-        tracing::warn!(%thread, %error, "an undo was not logged");
+        tracing::warn!(%thread, error = %Cause(&error), "an undo was not logged");
         actor.finish_command(ctx.id, Err(error));
         on_failed(actor, thread);
         if !failure::blocked(actor, thread) {
@@ -418,7 +419,7 @@ pub(super) fn retry(actor: &mut Actor, thread: ThreadId) {
         state.undo = Some(log);
     }
     if let Err(error) = sent {
-        tracing::warn!(%thread, %error, "an undo was not logged");
+        tracing::warn!(%thread, error = %Cause(&error), "an undo was not logged");
         on_failed(actor, thread);
     }
 }

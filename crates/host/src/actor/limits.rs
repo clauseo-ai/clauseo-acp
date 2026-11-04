@@ -56,6 +56,7 @@ use super::input::{Input, Reply, SubId};
 use crate::clock::{Clock, ProcessTimer};
 use crate::encode::EncodedEvent;
 use crate::handle::Subscription;
+use crate::log_file::Cause;
 use crate::principal::{Access, authorize};
 
 mod stops;
@@ -410,7 +411,7 @@ fn store(actor: &Actor, limits: AccountLimits) {
     let store = actor.store.clone();
     let spawned = futures::task::LocalSpawnExt::spawn_local(&actor.spawner, async move {
         if let Err(error) = store.put_account_limits(limits).await {
-            tracing::warn!(%error, "account limits were not stored");
+            tracing::warn!(error = %Cause(&error), "account limits were not stored");
         }
     });
     if let Err(error) = spawned {
@@ -425,7 +426,7 @@ fn publish(actor: &mut Actor, event: &HostEvent) {
     }
     match encode(event) {
         Ok(encoded) => actor.limits.subs.retain_mut(|sub| sub.offer(&encoded)),
-        Err(error) => tracing::error!(%error, "a limits event did not serialise"),
+        Err(error) => tracing::error!(error = %Cause(&error), "a limits event did not serialise"),
     }
 }
 
@@ -438,7 +439,9 @@ fn view_event(actor: &Actor, now: Timestamp) -> Option<EncodedEvent> {
         .as_ref()
         .map_or_else(LimitsView::default, |model| model.view(now));
     encode(&HostEvent::LimitsViewChanged(view))
-        .inspect_err(|error| tracing::error!(%error, "a limits event did not serialise"))
+        .inspect_err(|error| {
+            tracing::error!(error = %Cause(error), "a limits event did not serialise");
+        })
         .ok()
 }
 
