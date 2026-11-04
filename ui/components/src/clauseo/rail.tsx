@@ -149,6 +149,7 @@ export function Rail({
   pinned = [],
   open,
   onNewMatter,
+  onNewMatterPreload,
   find,
   scratch,
   settings,
@@ -165,6 +166,8 @@ export function Rail({
   open: boolean;
   /** New matter, pressed. */
   onNewMatter?: () => void;
+  /** Optional: New matter hovered or focused, before it is pressed (the room loads its dialog then). */
+  onNewMatterPreload?: () => void;
   find?: RailFind;
   /** The scratch matter: whether it's the room, and its row pressed. Left out, the foot has no scratch row. */
   scratch?: { current?: boolean; onOpen?: () => void };
@@ -345,6 +348,8 @@ export function Rail({
           kind="tone"
           className="w-full flex-none justify-start px-s3 text-muted is-hover:text-primary"
           onClick={onNewMatter}
+          onPointerEnter={onNewMatterPreload}
+          onFocus={onNewMatterPreload}
           {...(newMatterRef === undefined ? {} : { ref: newMatterRef })}
           {...(testIds?.newMatter === undefined ? {} : { "data-testid": testIds.newMatter })}
         >

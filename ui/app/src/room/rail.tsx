@@ -89,6 +89,7 @@ export function RoomRail({
   talks,
   open,
   onNewMatter,
+  onNewMatterPreload,
   onMoved,
   onConversation,
   onStartNew,
@@ -104,6 +105,8 @@ export function RoomRail({
   /** Matters, pressed below 1200 px: the rail stands open over the work. */
   open: boolean;
   onNewMatter: () => void;
+  /** New matter's button hovered or focused, before it is pressed. */
+  onNewMatterPreload?: () => void;
   /** A matter was opened from the rail. */
   onMoved: () => void;
   /** A conversation was opened, or a new one started, from the rail: the folded rail closes, and the field takes the
@@ -214,6 +217,7 @@ export function RoomRail({
       pinned={pinned.map(row)}
       open={open}
       onNewMatter={onNewMatter}
+      {...(onNewMatterPreload === undefined ? {} : { onNewMatterPreload })}
       newMatterRef={newMatterRef}
       // nothing to find on an empty rail
       {...(folders.length === 0

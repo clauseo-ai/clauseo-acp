@@ -2,7 +2,14 @@ import { brotliCompressSync } from "node:zlib";
 import { createBuilder, createServer, resolveConfig, type Rolldown } from "vite";
 import { afterEach, expect, test, vi } from "vitest";
 import tauriConf from "../../../crates/desktop/tauri.conf.json" with { type: "json" };
-import { BARE_CHUNKS, devCsp, metaCsp, PAGES, unwrapPreloads } from "../vite.config.ts";
+import {
+  BARE_CHUNKS,
+  devCsp,
+  metaCsp,
+  PAGES,
+  PRELOADED_CHUNKS,
+  unwrapPreloads,
+} from "../vite.config.ts";
 
 /** A test that runs a whole Vite build: several seconds on a CI runner, past vitest's 5 s default. */
 const BUILD = { timeout: 60_000 };
@@ -127,9 +134,18 @@ test(
     expect(decoders.length).toBe(1);
     expect(decoders[0]!.code).toMatch(/[^>]import\(`\.\/character-entities-[\w-]+\.js`\)\.then\(/);
     expect(entry!.code).not.toContain("startStream");
-    // no preload list anywhere: every dynamic import in the build is a bare one. (The helper itself stays in the entry,
-    // exported, since the chunks are linked before renderChunk unwraps its calls.)
-    for (const chunk of chunks) expect(chunk.code, chunk.fileName).not.toContain("__vite__mapDeps");
+    // no preload list anywhere but in the importers of a PRELOADED_CHUNKS chunk: every other dynamic import in the build
+    // is a bare one. (The helper itself stays in the entry, exported, since the chunks are linked before renderChunk
+    // unwraps its calls.)
+    const preloaded = PRELOADED_CHUNKS.map((name) =>
+      chunks.find((c) => c.fileName.startsWith(`assets/${name}-`)),
+    );
+    expect(preloaded.map((c) => c?.isDynamicEntry)).toEqual(PRELOADED_CHUNKS.map(() => true));
+    const importsPreloaded = (chunk: (typeof chunks)[number]) =>
+      chunk.dynamicImports.some((file) => preloaded.some((c) => c?.fileName === file));
+    for (const chunk of chunks)
+      if (!importsPreloaded(chunk))
+        expect(chunk.code, chunk.fileName).not.toContain("__vite__mapDeps");
     // and unwrapping lost no preload: each bare chunk imports only what is loaded by the time it loads, the first
     // load and the chunk that imports it with what that one imports
     const byName = new Map(chunks.map((c) => [c.fileName, c]));
