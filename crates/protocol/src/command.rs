@@ -18,8 +18,8 @@ use crate::MatterPath;
 use crate::{
     AgentChoiceId, AgentId, AgentKind, CheckpointId, ClientName, CommandId, Date, Delivery,
     ElicitationId, ElicitationResponse, FieldChange, FileDecision, FolderRefId, MatterId,
-    MessageId, PermissionRequestId, PrivacyPatch, PromptBlock, RestoreScope, ThreadId, Timestamp,
-    Title, ToolsPatch, TurnId, UiPatch,
+    MessageId, PackList, PermissionRequestId, PrivacyPatch, PromptBlock, RestoreScope, ThreadId,
+    Timestamp, Title, ToolsPatch, TurnId, UiPatch,
 };
 #[cfg(doc)]
 use crate::{FileChoice, RawPayload};
@@ -191,7 +191,9 @@ pub enum HostCommand {
         next_date: Option<Date>,
     },
     /// Change a matter's details. Each field: missing leaves it, `null` clears it (`client`,
-    /// `next_date`), a value sets it. A command that changes nothing answers `Done` too.
+    /// `next_date`, `skill_packs`: back to the global `skills.enabled`), a value sets it (`[]`
+    /// for `skill_packs` means no pack for the matter). A command that changes nothing answers
+    /// `Done` too.
     UpdateMatter {
         /// The matter.
         matter: MatterId,
@@ -203,6 +205,10 @@ pub enum HostCommand {
         #[serde(default, skip_serializing_if = "FieldChange::is_keep")]
         #[cfg_attr(feature = "specta", specta(type = Option<Option<Date>>))]
         next_date: FieldChange<Date>,
+        /// The skill packs the matter may load, from those turned on (decision record 0040).
+        #[serde(default, skip_serializing_if = "FieldChange::is_keep")]
+        #[cfg_attr(feature = "specta", specta(type = Option<Option<Vec<String>>>))]
+        skill_packs: FieldChange<PackList>,
         /// Whether it is pinned to the top of the rail.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pinned: Option<bool>,

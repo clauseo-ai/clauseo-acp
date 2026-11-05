@@ -25,7 +25,8 @@
 //! `setup` command and stream arm: a [`SetupCommand`] (a pasted code or a key inside it a
 //! [`Secret`], which never encodes) and a [`SetupEvent`] carrying [`InstallProgress`] and
 //! [`SignIn`] (decision record 0048). A matter's rail
-//! details are [`ClientName`], [`Date`] and [`MatterStatus`] on
+//! details are [`ClientName`], [`Date`], [`PackList`] (of [`PackId`]s, decision record 0040) and
+//! [`MatterStatus`] on
 //! [`MatterSummary`], changed with [`FieldChange`]s; a thread's seen mark and [`LastStop`] are on
 //! [`ThreadSummary`], and app subscribers get both lists as [`MattersChanged`] and
 //! [`ThreadsChanged`]. Subscribers receive
@@ -201,7 +202,7 @@ wire_types! {
         RefreshWhy, RestoreRequest,
     },
     content::{ContentBlock, PromptBlock, RawFrom, ToolCallContent},
-    details::{ClientName, Date, MatterStatus},
+    details::{ClientName, Date, MatterStatus, PackId, PackList},
     envelope::{Envelope},
     error_code::{ErrorCode, HostError},
     event::{
@@ -296,6 +297,8 @@ pub use command::{
 };
 // How `UpdateMatter` changes an optional detail; its fields export as the value's type or null.
 pub use details::FieldChange;
+// The most ids a matter's skill packs hold: a constant, so outside `wire_types!`.
+pub use details::PACK_LIST_MAX;
 // compact_str's type, re-exported for callers; wire fields holding it export as `string`.
 pub use compact_str::CompactString;
 // What a store decodes a stored envelope as; it is never written, so it has no wire form.

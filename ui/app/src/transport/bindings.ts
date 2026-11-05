@@ -1639,7 +1639,9 @@ export type HostCommand =
 } }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**
  *  Change a matter's details. Each field: missing leaves it, `null` clears it (`client`,
- *  `next_date`), a value sets it. A command that changes nothing answers `Done` too.
+ *  `next_date`, `skill_packs`: back to the global `skills.enabled`), a value sets it (`[]`
+ *  for `skill_packs` means no pack for the matter). A command that changes nothing answers
+ *  `Done` too.
  */
 ({ update_matter: {
 	/**  The matter. */
@@ -1648,6 +1650,8 @@ export type HostCommand =
 	client?: ClientName | null,
 	/**  Its next date. */
 	next_date?: Date | null,
+	/**  The skill packs the matter may load, from those turned on (decision record 0040). */
+	skill_packs?: string[] | null,
 	/**  Whether it is pinned to the top of the rail. */
 	pinned?: boolean,
 } }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never } | 
@@ -2759,6 +2763,11 @@ export type MatterSummary = {
 	client?: ClientName,
 	/**  Its next date, once set. */
 	next_date?: Date,
+	/**
+	 *  The skill packs it may load, once set (decision record 0040); missing means the global
+	 *  `skills.enabled` list, and `[]` means no pack for this matter.
+	 */
+	skill_packs?: PackList,
 	/**  Whether it is pinned to the top of the rail; missing reads as `false`. */
 	pinned?: boolean,
 	/**  When the lawyer last opened it (`OpenMatter`), once they have. */
@@ -2882,6 +2891,22 @@ export type OutsideEdits = {
 	/**  The files. */
 	files: FileChange[],
 };
+
+/**
+ *  The id of a skill pack, as the lawyer's skills settings and a matter's list name it: the
+ *  text `^[a-z0-9]+(-[a-z0-9]+)*$`, 2 to 30 bytes, not a Windows device name, and not a reserved
+ *  name. [`PackId::new`], `FromStr` and `Deserialize` check the same rule; serialised as a plain
+ *  string.
+ */
+export type PackId = string;
+
+/**
+ *  A matter's skill packs: the pack ids it may load, in the order the lawyer gave. At most
+ *  [`PACK_LIST_MAX`] ids and no id twice; an empty list is valid and means no extra pack for the
+ *  matter. [`PackList::new`] and `Deserialize` check the same rules; serialised as an array of
+ *  strings.
+ */
+export type PackList = string[];
 
 /**  How many entries one `PageEntries` asks for: 1 to [`MAX_PAGE_ENTRIES`]. */
 export type PageLimit = number;

@@ -522,6 +522,14 @@ fn a_rendered_name_never_equals_a_builtin() {
 }
 
 #[test]
+fn the_protocol_pack_id_refuses_every_builtin_and_stetdoc_name() {
+    // The reserved list lives in `protocol`; this keeps it from drifting from profile's names.
+    for name in BUILTIN.iter().chain([&STETDOC]) {
+        assert!(clauseo_protocol::PackId::new(name).is_err(), "{name}");
+    }
+}
+
+#[test]
 fn nothing_in_packs_starts_a_process() {
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut files = vec![src.join("packs.rs")];

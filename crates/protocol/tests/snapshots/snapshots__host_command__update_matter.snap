@@ -1,12 +1,16 @@
 ---
 source: crates/protocol/tests/snapshots.rs
-expression: "HostCommand::UpdateMatter\n{\n    matter: matter_id(1), client:\n    FieldChange::Set(ClientName::new(\"Rathi Steels\").unwrap()), next_date:\n    FieldChange::Clear, pinned: Some(true),\n}"
+expression: "HostCommand::UpdateMatter\n{\n    matter: matter_id(1), client:\n    FieldChange::Set(ClientName::new(\"Rathi Steels\").unwrap()), next_date:\n    FieldChange::Clear, skill_packs:\n    FieldChange::Set(pack_list(&[\"nda-kit\", \"a1\"])), pinned: Some(true),\n}"
 ---
 {
   "update_matter": {
     "matter": "01900000-0000-7000-8000-000000000001",
     "client": "Rathi Steels",
     "next_date": null,
+    "skill_packs": [
+      "nda-kit",
+      "a1"
+    ],
     "pinned": true
   }
 }

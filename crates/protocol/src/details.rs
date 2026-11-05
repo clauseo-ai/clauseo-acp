@@ -10,6 +10,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use crate::open_enum::enum_with_names;
 use crate::{Error, Timestamp, check_display_title};
 
+mod packs;
+pub use packs::{PACK_LIST_MAX, PackId, PackList};
+
 /// The client a matter is for, as the lawyer typed it: trimmed of surrounding whitespace, then
 /// held to the title rules ([`check_display_title`]): 1 to
 /// [`MAX_TITLE_CHARS`](crate::MAX_TITLE_CHARS) characters, at least one that shows, no control,

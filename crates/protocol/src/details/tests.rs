@@ -1,6 +1,7 @@
-//! The client's name, the date and an update's field change: what each reads and refuses.
+//! The client's name, the date, an update's field change and a matter's skill packs: what each
+//! reads and refuses.
 
-use super::{ClientName, Date, FieldChange, MatterStatus};
+use super::{ClientName, Date, FieldChange, MatterStatus, PACK_LIST_MAX, PackId, PackList};
 use crate::{MAX_TITLE_CHARS, Timestamp};
 
 #[test]
@@ -114,4 +115,72 @@ fn a_status_is_a_string_or_a_one_key_object() {
         assert_eq!(serde_json::to_string(&status).unwrap(), json);
         assert_eq!(serde_json::from_str::<MatterStatus>(json).unwrap(), status);
     }
+}
+
+#[test]
+fn a_pack_id_decodes_only_in_the_charset() {
+    for valid in ["nda-kit", "a1", "x9-y"] {
+        assert_eq!(PackId::new(valid).unwrap().as_str(), valid);
+        let json = serde_json::to_string(valid).unwrap();
+        let decoded: PackId = serde_json::from_str(&json).unwrap();
+        assert_eq!(serde_json::to_string(&decoded).unwrap(), json);
+    }
+    let long = "a".repeat(31);
+    for refused in [
+        "",
+        "a",
+        "-a",
+        "a-",
+        "a--b",
+        "NDA-kit",
+        "a_b",
+        "a.b",
+        "con",
+        "nul",
+        "com1",
+        "clauseo",
+        "clauseo-x",
+        "builtin",
+        "stetdoc",
+        "legal-drafting",
+        "matter-brief",
+        long.as_str(),
+        "a é",
+    ] {
+        assert!(PackId::new(refused).is_err(), "{refused:?}");
+        let json = serde_json::to_string(refused).unwrap();
+        assert!(
+            serde_json::from_str::<PackId>(&json).is_err(),
+            "{refused:?}"
+        );
+    }
+}
+
+#[test]
+fn a_pack_list_refuses_duplicates_and_more_than_32() {
+    let ids = |count: usize| -> Vec<PackId> {
+        (0..count)
+            .map(|at| PackId::new(&format!("p{at}")).unwrap())
+            .collect()
+    };
+    let json = |ids: &[PackId]| serde_json::to_string(ids).unwrap();
+    let full = ids(PACK_LIST_MAX);
+    assert_eq!(PACK_LIST_MAX, 32);
+    assert_eq!(PackList::new(full.clone()).unwrap().as_slice(), &full[..]);
+    let decoded: PackList = serde_json::from_str(&json(&full)).unwrap();
+    assert_eq!(decoded.as_slice(), &full[..]);
+    assert_eq!(serde_json::to_string(&decoded).unwrap(), json(&full));
+    let over = ids(PACK_LIST_MAX + 1);
+    assert!(PackList::new(over.clone()).is_err());
+    assert!(serde_json::from_str::<PackList>(&json(&over)).is_err());
+    let mut twice = ids(3);
+    twice.push(twice[1].clone());
+    assert!(PackList::new(twice.clone()).is_err());
+    assert!(serde_json::from_str::<PackList>(&json(&twice)).is_err());
+    assert_eq!(
+        PackList::new(Vec::new()).unwrap().as_slice(),
+        &[] as &[PackId]
+    );
+    let empty: PackList = serde_json::from_str("[]").unwrap();
+    assert_eq!(empty, PackList::default());
 }

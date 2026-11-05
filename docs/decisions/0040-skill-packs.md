@@ -63,8 +63,9 @@ A pack id matches `^[a-z0-9]+(-[a-z0-9]+)*$`, is 2 to 30 bytes, and is not a Win
 `clauseo`, every `clauseo-*`, `builtin`, `stetdoc` and each name in `skills::builtin::BUILTIN` are
 reserved. Pack skill names follow the same charset with no `--`. Since neither part may hold `--`,
 the rendered name `<pack>--<skill>` splits one way only, never equals a built-in name (none holds
-`--`), and must fit `NAME_MAX` (64 bytes). The rule is `profile::packs::is_pack_id` until PR-C moves
-it to `protocol` as `PackId`.
+`--`), and must fit `NAME_MAX` (64 bytes). The rule is `PackId` in `protocol`
+(`crates/protocol/src/details/packs.rs`); `profile::packs::is_pack_id` calls it, and a profile test
+checks that it refuses each of profile's built-in names, so the two lists cannot drift.
 
 ### Validation (in `profile`)
 
@@ -204,6 +205,12 @@ stored in a new column (store migration `0005`, JSON text) and returned on `Matt
   only narrows the packs turned on in `skills.enabled` whose recorded hash still matches the bytes
   on disk, so a pack turned off, or changed, since the forget stays out.
 - No UI in this work. The app thread reviews the `bindings.ts` change.
+
+Per matter, as built (PR-C): the wire types are `PackId` (a checked id) and `PackList` (at most 32
+ids, no duplicates, checked on decode), both in `protocol`. The store keeps the list in a new
+column (migration `0005_matter_skill_packs.sql`, JSON text, NULL for every matter before it).
+Forget keeps the list and unforget restores it as it was. Narrowing to `skills.enabled` and the
+hash check are left to the launch (PR-D).
 
 ### Loading, rendering and the launch
 
