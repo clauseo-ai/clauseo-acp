@@ -607,5 +607,13 @@
     "at": "2026-11-05",
     "by": "Rohan",
     "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
+  },
+  "U3-err-settings.key_stored": {
+    "en": "A key is already kept on this computer. To change it, open Settings, then Plans.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
   }
 }

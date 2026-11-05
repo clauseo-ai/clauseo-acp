@@ -7,10 +7,16 @@ use crate::fixtures::turn_id;
 
 /// One `TurnFailed` of turn 3 for each later code, in the order the corpus first saw them.
 pub(super) fn failures() -> Vec<DomainEvent> {
-    vec![failed(
-        ErrorCode::SettingsRefused,
-        "plans.claude-acp.endpoint: not an https address",
-    )]
+    vec![
+        failed(
+            ErrorCode::SettingsRefused,
+            "plans.claude-acp.endpoint: not an https address",
+        ),
+        failed(
+            ErrorCode::SettingsKeyStored,
+            "a key is already stored for claude-acp",
+        ),
+    ]
 }
 
 /// A `TurnFailed` of turn 3 with `code` and `detail`.
