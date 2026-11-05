@@ -1,0 +1,14 @@
+{
+  "docs/install/windows.md": {
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "stage F (provisional; Rohan batch review)",
+    "pr": 442
+  },
+  "docs/install/macos.md": {
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "stage F (provisional; Rohan batch review)",
+    "pr": 442
+  }
+}

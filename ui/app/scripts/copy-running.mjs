@@ -2,7 +2,10 @@
 // ../copy-review/ from its root), listing every provisional entry in ui/app/copy-approvals/, grouped by file: its id,
 // English, where it shows (from the review registry, if it has the id), when it was added and by whom, and, where the
 // review gallery can render the id, a shot of its cell by day and by night. A line the gallery has no cell for is
-// listed with "no shot". Rohan reviews these lines in batches, then marks them approved.
+// listed with "no shot". Rohan reviews these lines in batches, then marks them approved. Under the lines, a Docs section
+// lists the provisional docs in ui/app/doc-approvals.json (--docs <file> points it elsewhere; a missing file means
+// none): each doc's title from its first "# " heading, a link to its last commit on GitHub, and who wrote it in which
+// pull request.
 //
 // The whole page is built in running.next/ (beside running/) and swapped in with two renames once every step has
 // succeeded, so a browser never sees a half-built folder, and a failed run leaves the old page as it was.
@@ -10,7 +13,7 @@
 // The gallery is built into review/ in the staging folder (so each line also links to its live cell) and shot from
 // there with agent-browser, headless, in a session of its own, closed after. --approvals <dir>, --out <dir> and
 // --index <file> (the index to add the page's line to, once; default: the index beside --out) point it elsewhere.
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import {
   createReadStream,
   existsSync,
@@ -27,6 +30,7 @@ import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { build, createServer } from "vite";
+import { docsSection, esc } from "./running-docs.mjs";
 
 const app = fileURLToPath(new URL("..", import.meta.url));
 const args = process.argv.slice(2);
@@ -37,17 +41,12 @@ const opt = (name, fallback) => {
 const approvalsDir = opt("--approvals", join(app, "copy-approvals"));
 const reviewRoot = join(app, "..", "..", "..", "copy-review");
 const out = opt("--out", join(reviewRoot, "running"));
+const docsFile = opt("--docs", join(app, "doc-approvals.json"));
+const repoRoot = join(app, "..", "..");
 const next = `${out}.next`;
 const old = `${out}.old`;
 const configFile = join(app, "vite.review.config.ts");
 const DESKTOP = { width: 1100, height: 600 };
-
-const esc = (s) =>
-  String(s)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
 
 // The approvals' checks and the registry, as the gallery and the gate have them, loaded through Vite.
 const vite = await createServer({
@@ -84,10 +83,37 @@ const groups = names
   }))
   .filter((g) => g.lines.length > 0);
 const lines = groups.flatMap((g) => g.lines);
-const count =
-  lines.length === 0
-    ? "No provisional lines: nothing is new or changed since Rohan's last review."
-    : `${lines.length} provisional ${lines.length === 1 ? "line" : "lines"} in ${groups.length} ${groups.length === 1 ? "file" : "files"}: ${lines.map((l) => l.id).join(", ")}.`;
+
+// The docs: each provisional entry of doc-approvals.json, its title from its first "# " heading and its last commit.
+const docEntries = existsSync(docsFile)
+  ? Object.entries(JSON.parse(readFileSync(docsFile, "utf8")))
+  : [];
+const docs = docEntries
+  .filter(([, d]) => d.status === "provisional")
+  .map(([path, d]) => {
+    const heading = readFileSync(join(repoRoot, path), "utf8")
+      .split("\n")
+      .find((l) => l.startsWith("# "));
+    if (heading === undefined) throw new Error(`${path} has no "# " heading for its title`);
+    const commit = execFileSync("git", ["-C", repoRoot, "log", "-1", "--format=%H", "--", path], {
+      encoding: "utf8",
+    }).trim();
+    if (commit === "") throw new Error(`${path} has no commit in git`);
+    return { path, title: heading.slice(2).trim(), commit, by: d.by, pr: d.pr };
+  });
+
+// The count line, once for the page and the log: the lines, then the docs, with the zero-and-zero text as it was.
+function countLine(lineGroups, docCount) {
+  const docText = `${docCount} provisional ${docCount === 1 ? "doc" : "docs"}`;
+  if (lines.length === 0) {
+    return docCount === 0
+      ? "No provisional lines: nothing is new or changed since Rohan's last review."
+      : `No provisional lines; ${docText} below.`;
+  }
+  const base = `${lines.length} provisional ${lines.length === 1 ? "line" : "lines"} in ${lineGroups.length} ${lineGroups.length === 1 ? "file" : "files"}: ${lines.map((l) => l.id).join(", ")}`;
+  return docCount === 0 ? `${base}.` : `${base} and ${docText}.`;
+}
+const count = countLine(groups, docs.length);
 
 // Everything is written into the staging folder; the swap comes last, and only if every step has succeeded.
 const reviewOut = join(next, "review");
@@ -222,10 +248,6 @@ ${shots.length === 0 ? `<p class="running-noshot">no shot</p>` : `<div class="ru
 </article>`;
   };
 
-  const count =
-    lines.length === 0
-      ? "No provisional lines: nothing is new or changed since Rohan's last review."
-      : `${lines.length} provisional ${lines.length === 1 ? "line" : "lines"} in ${groups.length} ${groups.length === 1 ? "file" : "files"}: ${lines.map((l) => l.id).join(", ")}.`;
   const html = `<!doctype html>
 <html lang="en" data-theme="day" data-render="full" data-motion="full" data-text-size="16" data-platform="mac"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Clauseo copy review: new or changed since Rohan's last review</title>
@@ -236,10 +258,11 @@ ${shots.length === 0 ? `<p class="running-noshot">no shot</p>` : `<div class="ru
   <header class="review-head">
     <h1>New or changed since Rohan's last review</h1>
     <p class="review-count">${esc(count)}</p>
-    <p class="review-note">Generated ${esc(stamp)} by <code>pnpm -C ui/app copy:running</code>, from ui/app/copy-approvals/.</p>
+    <p class="review-note">Generated ${esc(stamp)} by <code>pnpm -C ui/app copy:running</code>, from ui/app/copy-approvals/ and ui/app/doc-approvals.json.</p>
     <p class="review-note">Each line here is "status": "provisional": its words follow DESIGN.md and the word list and went in without waiting for a yes. Approve or ask for a change by id. The shots show the line's cell in the review gallery at its window's size, day and night, at 2×, in English; a line the gallery has no cell for says "no shot".</p>
   </header>
 ${groups.map((g) => `<h2 class="running-file">${esc(g.file)}</h2>\n${g.lines.map(item).join("\n")}`).join("\n")}
+${docsSection(docs)}
 </main>
 </body></html>
 `;
