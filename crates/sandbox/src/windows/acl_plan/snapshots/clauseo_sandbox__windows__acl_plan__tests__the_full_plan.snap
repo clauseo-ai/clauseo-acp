@@ -16,8 +16,8 @@ ClaudeStoreFile Modify user 0x001301bf ThisOnly <root>/data/claude-home/.credent
 ClaudeStoreFile Modify matter 0x001301bf ThisOnly <root>/data/claude-home/.credentials.json
 ClaudeStoreFile Modify user 0x001301bf ThisOnly <root>/data/claude-home/.storage-write
 ClaudeStoreFile Modify matter 0x001301bf ThisOnly <root>/data/claude-home/.storage-write
-Runtime ReadAndExecute user 0x001200a9 Tree <root>/data/agents/node
-Runtime ReadAndExecute matter 0x001200a9 Tree <root>/data/agents/node
+Runtime ReadAndExecute user 0x001200a9 Tree <root>/runtime/node
+Runtime ReadAndExecute matter 0x001200a9 Tree <root>/runtime/node
 Read ReadAndExecute user 0x001200a9 Tree <root>/elsewhere
 Read ReadAndExecute matter 0x001200a9 Tree <root>/elsewhere
 AllowedFolder ReadAndExecute user 0x001200a9 Tree <root>/elsewhere/Precedents

@@ -1,32 +1,51 @@
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 
-use super::write::replace_with;
 use super::*;
 use crate::test_support::TempDir;
-use crate::windows::test_world::{MATTER_SID, USER_SID, matter_one, matter_two};
+use crate::windows::test_world::{
+    MATTER_SID, USER_SID, matter_one, matter_two, reserved, user_sid,
+};
+use crate::windows::write::write_atomic_with;
 
-fn grant(path: &str, sid: &str, rights: Rights) -> Grant {
+/// `name` as an absolute path on every OS.
+fn abs(name: &str) -> PathBuf {
+    std::env::temp_dir().join("clauseo-ledger-paths").join(name)
+}
+
+fn grant(path: &Path, sid: &str, rights: Rights) -> Grant {
     Grant {
-        path: PathBuf::from(path),
-        sid: Sid::new(sid).unwrap(),
+        path: path.to_owned(),
+        sid: Sid::parse(sid).unwrap(),
         rights,
         inherit: Inherit::Tree,
         kind: PathKind::Matter,
     }
 }
 
-/// A pair on one folder, and a deny.
-fn grants(folder: &str) -> Vec<Grant> {
-    vec![
-        grant(folder, USER_SID, Rights::Modify),
-        grant(folder, MATTER_SID, Rights::Modify),
-        grant(&format!("{folder}/.git"), MATTER_SID, Rights::DenyWrite),
-    ]
+/// A plan for `matter`: a pair on one folder, and a deny.
+fn plan_for(matter: MatterId, folder: &str) -> AdmittedPlan {
+    let folder = abs(folder);
+    AdmittedPlan::from_grants(
+        matter,
+        vec![
+            grant(&folder, USER_SID, Rights::Modify),
+            grant(&folder, MATTER_SID, Rights::Modify),
+            grant(&folder.join(".git"), MATTER_SID, Rights::DenyWrite),
+        ],
+    )
+}
+
+fn open(path: &Path) -> Ledger {
+    Ledger::open(path, &user_sid(), &reserved()).unwrap()
 }
 
 fn states(ledger: &Ledger) -> Vec<(u64, EntryState)> {
     ledger.entries().map(|e| (e.id.0, e.state)).collect()
+}
+
+fn ids(ledger: &Ledger) -> Vec<EntryId> {
+    ledger.entries().map(|e| e.id).collect()
 }
 
 fn read(path: &Path) -> Vec<u8> {
@@ -46,18 +65,14 @@ fn the_ledger_lives_in_the_data_folders_sandbox_folder() {
 fn a_missing_ledger_is_empty_and_stays_unwritten() {
     let temp = TempDir::new("ledger-missing");
     let path = ledger_path(temp.path());
-    let mut ledger = Ledger::open(&path).unwrap();
+    let mut ledger = open(&path);
     assert_eq!(ledger.entries().count(), 0);
     assert_eq!(
         ledger.reconcile(|_| Ok(true)).unwrap(),
         Reconciled::default()
     );
-    assert_eq!(
-        ledger.forget_matter(matter_one(), |_| Ok(())).unwrap(),
-        Forgotten::default()
-    );
-    ledger.mark_applied(&[EntryId(1)]).unwrap();
-    assert!(!path.exists());
+    let forgotten = ledger.forget_matter(matter_one(), |_| Ok(())).unwrap();
+    assert_eq!(forgotten, Forgotten::default());
     assert!(!temp.path().join("sandbox").exists());
 }
 
@@ -65,68 +80,143 @@ fn a_missing_ledger_is_empty_and_stays_unwritten() {
 fn entries_are_pending_then_applied() {
     let temp = TempDir::new("ledger-pending-applied");
     let path = ledger_path(temp.path());
-    let mut ledger = Ledger::open(&path).unwrap();
-    let ids = ledger.record_pending(matter_one(), &grants("/m1")).unwrap();
-    assert_eq!(ids, [EntryId(1), EntryId(2), EntryId(3)]);
+    let mut ledger = open(&path);
+    let mut plan = plan_for(matter_one(), "m1");
+    ledger.record_pending(&mut plan).unwrap();
+    assert_eq!(plan.entries(), [EntryId(1), EntryId(2), EntryId(3)]);
+    assert_eq!(plan.created(), plan.entries());
     // Written before any permission entry would be: the file already lists them, pending.
-    let reopened = Ledger::open(&path).unwrap();
-    assert_eq!(
-        states(&reopened),
-        [
-            (1, EntryState::Pending),
-            (2, EntryState::Pending),
-            (3, EntryState::Pending)
-        ]
+    let pending = [
+        (1, EntryState::Pending),
+        (2, EntryState::Pending),
+        (3, EntryState::Pending),
+    ];
+    assert_eq!(states(&open(&path)), pending);
+    assert!(
+        String::from_utf8(read(&path))
+            .unwrap()
+            .contains("\"pending\"")
     );
-    let text = String::from_utf8(read(&path)).unwrap();
-    assert!(text.contains("\"pending\""), "{text}");
-    ledger.mark_applied(&ids[..2]).unwrap();
-    let reopened = Ledger::open(&path).unwrap();
-    assert_eq!(
-        states(&reopened),
-        [
-            (1, EntryState::Applied),
-            (2, EntryState::Applied),
-            (3, EntryState::Pending)
-        ]
-    );
+    let first_two = plan.entries()[..2].to_vec();
+    ledger.mark_applied(&plan, &first_two).unwrap();
+    let reopened = open(&path);
+    let applied = [
+        (1, EntryState::Applied),
+        (2, EntryState::Applied),
+        (3, EntryState::Pending),
+    ];
+    assert_eq!(states(&reopened), applied);
     let entry = reopened.entries().next().unwrap();
     assert_eq!(entry.matter, matter_one());
-    assert_eq!(entry.grant(), grants("/m1")[0]);
+    assert_eq!(entry.grant(), plan.grants()[0]);
+    assert!(temp.path().join("sandbox").join(LEDGER_LOCK).exists());
+}
+
+#[test]
+fn a_plan_is_recorded_once() {
+    let temp = TempDir::new("ledger-recorded-once");
+    let mut ledger = open(&ledger_path(temp.path()));
+    let mut plan = plan_for(matter_one(), "m1");
+    ledger.record_pending(&mut plan).unwrap();
+    let error = ledger.record_pending(&mut plan).unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
 }
 
 #[test]
 fn a_grant_listed_already_keeps_its_entry_and_the_file() {
     let temp = TempDir::new("ledger-relisted");
     let path = ledger_path(temp.path());
-    let mut ledger = Ledger::open(&path).unwrap();
-    let first = ledger.record_pending(matter_one(), &grants("/m1")).unwrap();
-    ledger.mark_applied(&first).unwrap();
+    let mut ledger = open(&path);
+    let mut first = plan_for(matter_one(), "m1");
+    ledger.record_pending(&mut first).unwrap();
+    let all = first.entries().to_vec();
+    ledger.mark_applied(&first, &all).unwrap();
     let before = read(&path);
-    let again = ledger.record_pending(matter_one(), &grants("/m1")).unwrap();
-    assert_eq!(again, first);
+    let mut again = plan_for(matter_one(), "m1");
+    ledger.record_pending(&mut again).unwrap();
+    assert_eq!(again.entries(), first.entries());
+    assert_eq!(again.created(), [] as [EntryId; 0]);
     assert_eq!(read(&path), before);
-    // The same grant for another matter is that matter's own entry.
-    let other = ledger
-        .record_pending(matter_two(), &grants("/m1")[..1])
-        .unwrap();
-    assert_eq!(other, [EntryId(4)]);
+    // The same grants for another matter are that matter's own entries.
+    let mut other = plan_for(matter_two(), "m1");
+    ledger.record_pending(&mut other).unwrap();
+    assert_eq!(other.created(), [EntryId(4), EntryId(5), EntryId(6)]);
+}
+
+#[test]
+fn two_ledgers_on_one_file_keep_each_others_entries() {
+    // Two processes (two hosts) open the ledger before either writes; each records under the
+    // lock after reading the file again, so neither loses the other's entries.
+    let temp = TempDir::new("ledger-two-processes");
+    let path = ledger_path(temp.path());
+    let (mut a, mut b) = (open(&path), open(&path));
+    let mut plan_a = plan_for(matter_one(), "a");
+    let mut plan_b = plan_for(matter_two(), "b");
+    a.record_pending(&mut plan_a).unwrap();
+    b.record_pending(&mut plan_b).unwrap();
+    let reloaded = open(&path);
+    assert_eq!(reloaded.entries().count(), 6);
+    let mut all: Vec<EntryId> = plan_a
+        .entries()
+        .iter()
+        .chain(plan_b.entries())
+        .copied()
+        .collect();
+    all.sort();
+    all.dedup();
+    assert_eq!(all.len(), 6, "two launches' entry numbers don't collide");
+    // And a, whose cache is stale, still writes over both.
+    let applied = plan_a.entries().to_vec();
+    a.mark_applied(&plan_a, &applied).unwrap();
+    assert_eq!(open(&path).entries().count(), 6);
+}
+
+#[test]
+fn a_rollback_drops_only_its_own_plans_entries() {
+    let temp = TempDir::new("ledger-rollback");
+    let path = ledger_path(temp.path());
+    let mut ledger = open(&path);
+    let mut earlier = plan_for(matter_one(), "m1");
+    ledger.record_pending(&mut earlier).unwrap();
+    // This launch lists one grant the earlier launch had, and two new ones.
+    let mut grants = earlier.grants()[..1].to_vec();
+    grants.push(grant(&abs("m1/notes"), USER_SID, Rights::Modify));
+    grants.push(grant(&abs("m1/notes"), MATTER_SID, Rights::Modify));
+    let mut this = AdmittedPlan::from_grants(matter_one(), grants);
+    ledger.record_pending(&mut this).unwrap();
+    assert_eq!(this.created(), [EntryId(4), EntryId(5)]);
+    // Rolling back everything this plan touched drops only what it added; ids of the earlier
+    // launch, shared or not, stay.
+    let everything: Vec<EntryId> = (1..=5).map(EntryId).collect();
+    ledger.drop_entries(&mut this, &everything).unwrap();
+    assert_eq!(ids(&open(&path)), [EntryId(1), EntryId(2), EntryId(3)]);
+    assert_eq!(this.created(), [] as [EntryId; 0]);
+    // A plan can't mark another plan's entries either.
+    ledger.mark_applied(&this, &[EntryId(2)]).unwrap();
+    assert_eq!(states(&open(&path))[1], (2, EntryState::Pending));
 }
 
 #[test]
 fn reconcile_keeps_a_pending_entry_whose_ace_is_there_and_drops_one_whose_isnt() {
     let temp = TempDir::new("ledger-reconcile");
     let path = ledger_path(temp.path());
-    let mut ledger = Ledger::open(&path).unwrap();
-    let applied = ledger
-        .record_pending(matter_one(), &grants("/m0")[..1])
-        .unwrap();
-    ledger.mark_applied(&applied).unwrap();
+    let mut ledger = open(&path);
+    let mut done_plan = AdmittedPlan::from_grants(
+        matter_one(),
+        vec![grant(&abs("m0"), USER_SID, Rights::Modify)],
+    );
+    ledger.record_pending(&mut done_plan).unwrap();
+    ledger.mark_applied(&done_plan, &[EntryId(1)]).unwrap();
     // A crash after the pending entries: 2 has its ACE, 3 doesn't, 4 can't be checked.
-    let mut pending = grants("/m1");
-    pending.truncate(2);
-    pending.push(grant("/m1/x", MATTER_SID, Rights::DenyWrite));
-    ledger.record_pending(matter_one(), &pending).unwrap();
+    let mut crashed = AdmittedPlan::from_grants(
+        matter_one(),
+        vec![
+            grant(&abs("m1"), USER_SID, Rights::Modify),
+            grant(&abs("m1"), MATTER_SID, Rights::Modify),
+            grant(&abs("m1/x"), MATTER_SID, Rights::DenyWrite),
+        ],
+    );
+    ledger.record_pending(&mut crashed).unwrap();
     let mut asked = Vec::new();
     let done = ledger
         .reconcile(|entry| {
@@ -147,29 +237,27 @@ fn reconcile_keeps_a_pending_entry_whose_ace_is_there_and_drops_one_whose_isnt()
             unchecked: 1
         }
     );
-    let reopened = Ledger::open(&path).unwrap();
-    assert_eq!(
-        states(&reopened),
-        [
-            (1, EntryState::Applied),
-            (2, EntryState::Applied),
-            (4, EntryState::Pending)
-        ]
-    );
+    let after = [
+        (1, EntryState::Applied),
+        (2, EntryState::Applied),
+        (4, EntryState::Pending),
+    ];
+    assert_eq!(states(&open(&path)), after);
     // Numbers are never reused, so a dropped entry's number can't name a new one.
-    let next = ledger
-        .record_pending(matter_one(), &grants("/m9")[..1])
-        .unwrap();
-    assert_eq!(next, [EntryId(5)]);
+    let mut next = plan_for(matter_two(), "m9");
+    ledger.record_pending(&mut next).unwrap();
+    assert_eq!(next.entries()[0], EntryId(5));
 }
 
 #[test]
 fn reconcile_with_nothing_to_change_leaves_the_file() {
     let temp = TempDir::new("ledger-reconcile-nothing");
     let path = ledger_path(temp.path());
-    let mut ledger = Ledger::open(&path).unwrap();
-    let ids = ledger.record_pending(matter_one(), &grants("/m1")).unwrap();
-    ledger.mark_applied(&ids).unwrap();
+    let mut ledger = open(&path);
+    let mut plan = plan_for(matter_one(), "m1");
+    ledger.record_pending(&mut plan).unwrap();
+    let all = plan.entries().to_vec();
+    ledger.mark_applied(&plan, &all).unwrap();
     let before = read(&path);
     let done = ledger
         .reconcile(|_| panic!("no pending entry to check"))
@@ -182,16 +270,17 @@ fn reconcile_with_nothing_to_change_leaves_the_file() {
 fn forget_matter_drops_exactly_that_matters_entries() {
     let temp = TempDir::new("ledger-forget");
     let path = ledger_path(temp.path());
-    let mut ledger = Ledger::open(&path).unwrap();
-    let one = ledger.record_pending(matter_one(), &grants("/m1")).unwrap();
-    let two = ledger.record_pending(matter_two(), &grants("/m2")).unwrap();
-    ledger.mark_applied(&one).unwrap();
+    let mut ledger = open(&path);
+    let mut one = plan_for(matter_one(), "m1");
+    let mut two = plan_for(matter_two(), "m2");
+    ledger.record_pending(&mut one).unwrap();
+    ledger.record_pending(&mut two).unwrap();
     let listed: Vec<EntryId> = ledger
         .matter_entries(matter_one())
         .iter()
         .map(|e| e.id)
         .collect();
-    assert_eq!(listed, one);
+    assert_eq!(listed, one.entries());
     let mut removed = Vec::new();
     let done = ledger
         .forget_matter(matter_one(), |entry| {
@@ -199,7 +288,7 @@ fn forget_matter_drops_exactly_that_matters_entries() {
             Ok(())
         })
         .unwrap();
-    assert_eq!(removed, one);
+    assert_eq!(removed, one.entries());
     assert_eq!(
         done,
         Forgotten {
@@ -207,9 +296,8 @@ fn forget_matter_drops_exactly_that_matters_entries() {
             kept: 0
         }
     );
-    let reopened = Ledger::open(&path).unwrap();
-    let left: Vec<EntryId> = reopened.entries().map(|e| e.id).collect();
-    assert_eq!(left, two);
+    let reopened = open(&path);
+    assert_eq!(ids(&reopened), two.entries());
     assert!(reopened.entries().all(|e| e.matter == matter_two()));
 }
 
@@ -217,11 +305,13 @@ fn forget_matter_drops_exactly_that_matters_entries() {
 fn forget_matter_keeps_an_entry_whose_removal_failed() {
     let temp = TempDir::new("ledger-forget-retry");
     let path = ledger_path(temp.path());
-    let mut ledger = Ledger::open(&path).unwrap();
-    let ids = ledger.record_pending(matter_one(), &grants("/m1")).unwrap();
+    let mut ledger = open(&path);
+    let mut plan = plan_for(matter_one(), "m1");
+    ledger.record_pending(&mut plan).unwrap();
+    let failing = plan.entries()[1];
     let done = ledger
         .forget_matter(matter_one(), |entry| {
-            if entry.id == ids[1] {
+            if entry.id == failing {
                 Err(io::Error::other("WRITE_DAC was taken away"))
             } else {
                 Ok(())
@@ -235,167 +325,68 @@ fn forget_matter_keeps_an_entry_whose_removal_failed() {
             kept: 1
         }
     );
-    let left: Vec<EntryId> = Ledger::open(&path)
-        .unwrap()
-        .entries()
-        .map(|e| e.id)
-        .collect();
-    assert_eq!(left, [ids[1]]);
-}
-
-#[test]
-fn drop_entries_drops_those_numbers_alone() {
-    let temp = TempDir::new("ledger-drop");
-    let path = ledger_path(temp.path());
-    let mut ledger = Ledger::open(&path).unwrap();
-    let ids = ledger.record_pending(matter_one(), &grants("/m1")).unwrap();
-    ledger.drop_entries(&[ids[0], ids[2], EntryId(99)]).unwrap();
-    let left: Vec<EntryId> = Ledger::open(&path)
-        .unwrap()
-        .entries()
-        .map(|e| e.id)
-        .collect();
-    assert_eq!(left, [ids[1]]);
+    assert_eq!(ids(&open(&path)), [failing]);
 }
 
 #[test]
 fn a_failed_replace_leaves_the_old_file_whole_and_no_temporary_file() {
     let temp = TempDir::new("ledger-atomic");
     let path = ledger_path(temp.path());
-    let mut ledger = Ledger::open(&path).unwrap();
-    ledger.record_pending(matter_one(), &grants("/m1")).unwrap();
+    let mut ledger = open(&path);
+    let mut plan = plan_for(matter_one(), "m1");
+    ledger.record_pending(&mut plan).unwrap();
     let before = read(&path);
-    let error = replace_with(&path, b"{\"version\": 1, \"entries\": [", |file, bytes| {
+    let error = write_atomic_with(&path, b"{\"version\": 1, \"entries\": [", |file, bytes| {
         file.write_all(&bytes[..10])?;
         Err(io::Error::other("the disk is full"))
     })
     .unwrap_err();
     assert_eq!(error.to_string(), "the disk is full");
     assert_eq!(read(&path), before);
-    let names: Vec<String> = std::fs::read_dir(path.parent().unwrap())
+    let mut names: Vec<String> = std::fs::read_dir(path.parent().unwrap())
         .unwrap()
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
         .collect();
-    assert_eq!(names, ["acl-ledger.json"]);
-    // The ledger in memory still matches the file, and writes again.
-    let reopened = Ledger::open(&path).unwrap();
-    assert_eq!(reopened.entries().count(), 3);
-    ledger.mark_applied(&[EntryId(1)]).unwrap();
-}
-
-#[test]
-fn a_temporary_file_left_by_a_crash_is_replaced() {
-    let temp = TempDir::new("ledger-stale-temp");
-    temp.file("sandbox/.acl-ledger.json.tmp", "{\"half");
-    let path = ledger_path(temp.path());
-    let mut ledger = Ledger::open(&path).unwrap();
-    ledger.record_pending(matter_one(), &grants("/m1")).unwrap();
-    assert_eq!(Ledger::open(&path).unwrap().entries().count(), 3);
-    assert!(!temp.path().join("sandbox/.acl-ledger.json.tmp").exists());
+    names.sort();
+    assert_eq!(names, [LEDGER_FILE, LEDGER_LOCK]);
+    let applied = plan.entries().to_vec();
+    ledger.mark_applied(&plan, &applied).unwrap();
+    assert_eq!(open(&path).entries().count(), 3);
 }
 
 #[test]
 fn a_file_where_the_folder_goes_is_refused() {
     let temp = TempDir::new("ledger-folder-is-file");
-    let mut ledger = Ledger::open(ledger_path(temp.path())).unwrap();
+    let mut ledger = open(&ledger_path(temp.path()));
     temp.file("sandbox", "not a folder");
-    let error = ledger
-        .record_pending(matter_one(), &grants("/m1"))
-        .unwrap_err();
-    assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+    let mut plan = plan_for(matter_one(), "m1");
+    assert!(ledger.record_pending(&mut plan).is_err());
     assert_eq!(
         ledger.entries().count(),
         0,
         "memory matches the file after a failed write"
     );
+    assert_eq!(plan.entries(), [] as [EntryId; 0]);
 }
 
+/// On Windows the ledger's folder is made private (PR2's `make_sandbox_dir`): owned by this
+/// user, with the protected DACL.
+#[cfg(windows)]
 #[test]
-fn entries_this_version_cant_read_are_kept_and_left_alone() {
-    let temp = TempDir::new("ledger-unknown");
-    let one = matter_one();
-    let text = format!(
-        r#"{{
-  "version": 1,
-  "next_id": 3,
-  "written_by": "a later Clauseo",
-  "entries": [
-    {{"id": 1, "matter": "{one}", "state": "applied", "path": "/m1", "sid": "{MATTER_SID}",
-      "rights": "modify", "inherit": "tree", "kind": "matter", "note": "kept"}},
-    {{"id": 2, "matter": "{one}", "path": "/m1/old", "sid": "{MATTER_SID}"}},
-    {{"id": 7, "matter": "{one}", "state": "applied", "path": "/m1", "sid": "{MATTER_SID}",
-      "rights": "full_control", "inherit": "tree", "kind": "matter"}},
-    {{"id": 8, "matter": "not a matter id", "state": "pending", "path": "/m1",
-      "sid": "{MATTER_SID}", "rights": "modify", "inherit": "tree", "kind": "matter"}},
-    {{"id": 9, "matter": "{one}", "state": "pending", "path": "/m1", "sid": "Users",
-      "rights": "modify", "inherit": "tree", "kind": "a_newer_kind"}},
-    "not an object",
-    42
-  ]
-}}"#
+fn the_ledgers_folder_is_made_private_and_owned_by_the_user() {
+    let temp = TempDir::new("ledger-private-folder");
+    let path = ledger_path(temp.path());
+    let mut ledger = open(&path);
+    let mut plan = plan_for(matter_one(), "m1");
+    ledger.record_pending(&mut plan).unwrap();
+    let folder = path.parent().unwrap();
+    let owner = crate::windows::private_dir::owner(folder).unwrap();
+    let me = crate::windows::record::current_user_sid().unwrap();
+    assert!(
+        crate::windows::private_dir::owner_allowed(&owner, &me),
+        "{owner}"
     );
-    let path = temp.file("sandbox/acl-ledger.json", &text);
-    let mut ledger = Ledger::open(&path).unwrap();
-    assert_eq!(ledger.entries().count(), 1);
-    assert_eq!(ledger.unknown_entries(), 6);
-    // Nothing acts on an unread entry: reconcile and forget pass over them.
-    assert_eq!(
-        ledger
-            .reconcile(|_| panic!("unread entries aren't checked"))
-            .unwrap(),
-        Reconciled::default()
-    );
-    let done = ledger.forget_matter(one, |entry| {
-        assert_eq!(entry.id, EntryId(1));
-        Err(io::Error::other("keep it"))
-    });
-    assert_eq!(
-        done.unwrap(),
-        Forgotten {
-            removed: 0,
-            kept: 1
-        }
-    );
-    // A new entry takes a number past every one in the file, and the rewrite keeps the rest.
-    let ids = ledger.record_pending(one, &grants("/m5")[..1]).unwrap();
-    assert_eq!(ids, [EntryId(10)]);
-    let written: serde_json::Value = serde_json::from_slice(&read(&path)).unwrap();
-    let before: serde_json::Value = serde_json::from_str(&text).unwrap();
-    let entries = written["entries"].as_array().unwrap();
-    assert_eq!(entries.len(), 8);
-    assert_eq!(entries[..7], before["entries"].as_array().unwrap()[..]);
-    assert_eq!(written["written_by"], "a later Clauseo");
-    assert_eq!(entries[0]["note"], "kept");
 }
 
-#[test]
-fn a_ledger_from_a_newer_version_or_not_json_is_refused_and_left_alone() {
-    let temp = TempDir::new("ledger-refused");
-    for text in [
-        r#"{"version": 2, "entries": []}"#,
-        r#"{"version": "one", "entries": []}"#,
-        r#"{"version": 1, "entries": {}}"#,
-        "[]",
-        "{\"version\": 1, \"entries\": [",
-        "",
-    ] {
-        let path = temp.file("sandbox/acl-ledger.json", text);
-        let error = Ledger::open(&path).unwrap_err();
-        assert_eq!(error.kind(), io::ErrorKind::InvalidData, "{text}");
-        assert_eq!(read(&path), text.as_bytes());
-    }
-}
-
-#[test]
-fn a_ledger_without_a_version_or_entries_reads_as_version_one() {
-    let temp = TempDir::new("ledger-bare");
-    let path = temp.file("sandbox/acl-ledger.json", "{}");
-    let mut ledger = Ledger::open(&path).unwrap();
-    assert_eq!(ledger.entries().count(), 0);
-    assert_eq!(
-        ledger.record_pending(matter_one(), &grants("/m1")).unwrap()[0],
-        EntryId(1)
-    );
-    let written: serde_json::Value = serde_json::from_slice(&read(&path)).unwrap();
-    assert_eq!(written["version"], LEDGER_VERSION);
-}
+/// What is read back from a file: unread, untrusted and refused files.
+mod file;

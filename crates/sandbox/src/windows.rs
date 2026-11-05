@@ -47,7 +47,9 @@ mod write;
 
 #[cfg(windows)]
 pub use admit::admit;
-pub use admit::{Admitted, FolderRefusal, GroupAccess, PathKind, admit_with};
+#[cfg(any(test, feature = "test-support"))]
+pub use admit::admit_with;
+pub use admit::{Admitted, FolderRefusal, GroupAccess, PathKind};
 #[cfg(windows)]
 pub(crate) use detect::os_facts;
 #[cfg(windows)]

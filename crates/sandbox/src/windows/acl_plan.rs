@@ -19,55 +19,24 @@
 //! - Nothing in the lawyer's `<profile>\.claude`, in any letter case: NTFS can't limit a create
 //!   right by name, and the lawyer's own Claude Code loads what is there. A policy that would
 //!   grant there is refused.
+//! - No entry on the profile folder or above it, none on, over or in `<data_dir>\sandbox\`
+//!   (the SID map, the ledger, the marker), and no read, runtime or allowed path over or in
+//!   `<data_dir>` outside this matter's own state and notes folders. Such a plan is refused.
+//!
+//! The plan comes back as an [`AdmittedPlan`]: only [`plan`] makes one, from an [`Admitted`]
+//! only the gate makes, and only an `AdmittedPlan` reaches the ledger.
 
 use std::path::{Component, Path, PathBuf};
 
+use clauseo_protocol::MatterId;
 use serde::{Deserialize, Serialize};
 
-use super::admit::{Admitted, PathKind};
+use super::admit::{Admitted, FolderRefusal, PathKind};
+use super::ledger::EntryId;
+use super::matters::SANDBOX_DIR;
+pub use super::sids::Sid;
 use crate::policy::under;
 use crate::{Error, PathRule};
-
-/// A SID in its string form (`S-1-5-21-…`). Only the shape is checked: `S-1-`, then at least
-/// one more part, every part decimal. S15's PR2 brings the SID types this stands in for.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
-pub struct Sid(String);
-
-impl Sid {
-    /// `text` as a SID, or `None` when it isn't one's string form.
-    pub fn new(text: impl Into<String>) -> Option<Sid> {
-        let text = text.into();
-        let mut parts = text.split('-');
-        let shaped = parts.next() == Some("S") && parts.next() == Some("1") && {
-            let rest: Vec<&str> = parts.collect();
-            !rest.is_empty()
-                && rest.iter().all(|part| {
-                    !part.is_empty() && part.len() <= 10 && part.bytes().all(|b| b.is_ascii_digit())
-                })
-        };
-        shaped.then_some(Sid(text))
-    }
-
-    /// The string form.
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl TryFrom<String> for Sid {
-    type Error = String;
-
-    fn try_from(text: String) -> Result<Sid, String> {
-        Sid::new(text).ok_or_else(|| "not a SID's string form".to_owned())
-    }
-}
-
-impl From<Sid> for String {
-    fn from(sid: Sid) -> String {
-        sid.0
-    }
-}
 
 /// The two SIDs a launch's pairs name.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -135,19 +104,88 @@ pub enum Inherit {
     Tree,
 }
 
-/// One permission entry to write.
+/// One permission entry to write. Made only inside this crate: by [`plan`], or read back from
+/// the ledger.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Grant {
+    pub(crate) path: PathBuf,
+    pub(crate) sid: Sid,
+    pub(crate) rights: Rights,
+    pub(crate) inherit: Inherit,
+    pub(crate) kind: PathKind,
+}
+
+impl Grant {
     /// Where, canonical as the policy's paths are.
-    pub path: PathBuf,
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
     /// Whom.
-    pub sid: Sid,
+    pub fn sid(&self) -> &Sid {
+        &self.sid
+    }
+
     /// What.
-    pub rights: Rights,
+    pub fn rights(&self) -> Rights {
+        self.rights
+    }
+
     /// How far down.
-    pub inherit: Inherit,
+    pub fn inherit(&self) -> Inherit {
+        self.inherit
+    }
+
     /// Why: which of the policy's paths this is.
-    pub kind: PathKind,
+    pub fn kind(&self) -> PathKind {
+        self.kind
+    }
+}
+
+/// A launch's plan, made only by [`plan`] from what the gate admitted: the one thing the ledger
+/// records ([`Ledger::record_pending`](super::ledger::Ledger::record_pending)). Once recorded it
+/// also holds the entry numbers the ledger gave its grants, and which of them this launch made,
+/// so a rollback drops only its own.
+#[derive(Debug)]
+pub struct AdmittedPlan {
+    matter: MatterId,
+    grants: Vec<Grant>,
+    pub(crate) entries: Vec<EntryId>,
+    pub(crate) created: Vec<EntryId>,
+}
+
+impl AdmittedPlan {
+    /// The matter this plan is for.
+    pub fn matter(&self) -> MatterId {
+        self.matter
+    }
+
+    /// The grants, in order.
+    pub fn grants(&self) -> &[Grant] {
+        &self.grants
+    }
+
+    /// Each grant's ledger entry, in the grants' order, once recorded; empty before.
+    pub fn entries(&self) -> &[EntryId] {
+        &self.entries
+    }
+
+    /// The entries this launch added to the ledger (not ones an earlier launch listed), less any
+    /// it has dropped since.
+    pub fn created(&self) -> &[EntryId] {
+        &self.created
+    }
+
+    /// A plan of `grants` without the gate, for the ledger's tests.
+    #[cfg(test)]
+    pub(crate) fn from_grants(matter: MatterId, grants: Vec<Grant>) -> AdmittedPlan {
+        AdmittedPlan {
+            matter,
+            grants,
+            entries: Vec::new(),
+            created: Vec::new(),
+        }
+    }
 }
 
 /// The plan for `admitted`'s policy with `sids`, in a fixed order: the writable folders, the
@@ -155,8 +193,10 @@ pub struct Grant {
 /// Each entry appears once.
 ///
 /// Refuses ([`Error::Policy`], naming the kind of path but not the path) when the two SIDs are
-/// the same, which would collapse every pair, or when any entry would land in `<home>\.claude`.
-pub fn plan(admitted: &Admitted<'_>, sids: &Sids) -> Result<Vec<Grant>, Error> {
+/// the same, which would collapse every pair, or when any entry would land in `<home>\.claude`;
+/// and refuses ([`Error::FolderUnsupported`]) an entry the profile or data rules forbid (see
+/// [`check_target`]).
+pub fn plan(admitted: &Admitted<'_>, sids: &Sids, matter: MatterId) -> Result<AdmittedPlan, Error> {
     if sids.user == sids.matter {
         return Err(Error::Policy(
             "the matter's SID is the sandbox user's SID".to_owned(),
@@ -237,7 +277,50 @@ pub fn plan(admitted: &Admitted<'_>, sids: &Sids) -> Result<Vec<Grant>, Error> {
             )));
         }
     }
-    Ok(plan.grants)
+    for grant in &plan.grants {
+        if let Some(refusal) = check_target(admitted, grant) {
+            return Err(Error::FolderUnsupported {
+                path_kind: grant.kind,
+                support: refusal,
+            });
+        }
+    }
+    Ok(AdmittedPlan {
+        matter,
+        grants: plan.grants,
+        entries: Vec::new(),
+        created: Vec::new(),
+    })
+}
+
+/// Why `grant` may not be written, if it may not:
+///
+/// - it is on the profile folder or a folder above it ([`FolderRefusal::HoldsTheProfile`]);
+/// - it is `<data_dir>\sandbox`, holds it, or is inside it
+///   ([`FolderRefusal::OverlapsSandboxRecords`]);
+/// - it is a runtime, read or allowed path that is `<data_dir>`, holds it or is inside it, and
+///   isn't inside this matter's state or notes folder ([`FolderRefusal::OverlapsDataFolder`]):
+///   it would read other matters' state and notes, and the agents' sign-ins.
+fn check_target(admitted: &Admitted<'_>, grant: &Grant) -> Option<FolderRefusal> {
+    let policy = admitted.policy();
+    let path = &grant.path;
+    let overlaps = |folder: &Path| in_folder(path, folder) || in_folder(folder, path);
+    if policy.home().is_some_and(|home| in_folder(home, path)) {
+        return Some(FolderRefusal::HoldsTheProfile);
+    }
+    let data = admitted.data_dir();
+    if overlaps(&data.join(SANDBOX_DIR)) {
+        return Some(FolderRefusal::OverlapsSandboxRecords);
+    }
+    let reads = matches!(
+        grant.kind,
+        PathKind::Runtime | PathKind::Read | PathKind::AllowedFolder
+    );
+    let own = in_folder(path, policy.state()) || policy.notes().is_some_and(|n| in_folder(path, n));
+    if reads && overlaps(data) && !own {
+        return Some(FolderRefusal::OverlapsDataFolder);
+    }
+    None
 }
 
 /// The entries planned so far.

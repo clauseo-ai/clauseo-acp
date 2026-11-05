@@ -136,8 +136,6 @@ crates/sandbox/src/windows/tests.rs - unsafe_code
 crates/sandbox/src/windows/record.rs - unsafe_code
 crates/sandbox/src/windows/detect.rs - unsafe_code
 crates/sandbox/src/windows/private_dir.rs - unsafe_code
-# S15: the ACL ledger's write module (its folder and its atomic replace).
-crates/sandbox/src/windows/ledger/write.rs - clippy::disallowed_methods
 
 # clauseo-search: its write module (the private index file, and removing one to rebuild), its
 # tests' write module (each test's folder, damaged files), and the measurement's clock.
