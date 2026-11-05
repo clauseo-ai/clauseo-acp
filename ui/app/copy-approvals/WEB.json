@@ -1,0 +1,83 @@
+{
+  "WEB-05": {
+    "en": "'{query}'",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "WEB-06": {
+    "en": "No results",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "WEB-07": {
+    "en": "{name} doesn't list its pages",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "WEB-09": {
+    "en": "Opened on OpenAI's side",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "WEB-10": {
+    "en": "Opened in the browser",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "WEB-11": {
+    "en": "'{query}'",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "WEB-12": {
+    "en": "{n} sources",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "WEB-13": {
+    "en": "1 source",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "WEB-16": {
+    "en": "Searches",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  }
+}
