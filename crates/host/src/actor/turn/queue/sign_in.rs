@@ -2,7 +2,8 @@
 //! failed with `agent.auth_required`, or that `HostHandle::stop_agents` cancelled and that did
 //! not end `EndTurn`, goes back to the head of its thread's queue, held: once its close is
 //! durable, one commit of a new `UserMessage { Queue }` with the same content and its
-//! `TurnQueued` behind the ended turn, the same entries a queued prompt has. The queue is then
+//! `TurnQueued` behind the ended turn, the same entries a queued prompt has, the `TurnQueued`
+//! marked `at_head` so a restart keeps it first. The queue is then
 //! held exactly as after any other stop but `EndTurn` (a refused permission's `NotAllowed`
 //! included), so `queue_held` and the queued prompt look the same whatever held it, and it is
 //! marked as waiting for the sign-in. `HostHandle::restart_agents` resumes it once; a lawyer's
@@ -70,8 +71,10 @@ fn log(actor: &mut Actor, thread: ThreadId, requeue: Requeue) -> Result<(), Erro
     let message: MessageId = actor.ids.mint(now)?;
     let delivery = DeliveryRequest::Queue.into();
     let built = build::user_message(turn, message, None, requeue.content.clone(), delivery);
+    // `at_head`: a restart puts it back ahead of the turns queued before it (`restore.rs`).
     let waits = TurnQueued::new(thread, turn, thread, Some(requeue.turn))
-        .map_err(|error| Error::Internal(error.to_string()))?;
+        .map_err(|error| Error::Internal(error.to_string()))?
+        .at_head();
     let mut out = Out::new(actor, thread, None)?;
     out.push(actor, built.value)?;
     out.draft.blobs(built.blobs);
