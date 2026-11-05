@@ -17,6 +17,8 @@ use futures::StreamExt;
 use futures::executor::block_on;
 use uuid::Uuid;
 
+use super::Actor;
+use crate::pipeline::Draft;
 use crate::pipeline::tests::support::TempDir;
 use crate::{
     EventSubscription, Host, HostConfig, HostHandle, HostJoin, ManualClock, SequentialIds,
@@ -372,4 +374,23 @@ fn a_schema_1_snapshot_is_passed_over_and_the_log_folded_and_snapshotted_again()
         assert_eq!(ts, event_time(order));
         store.close().await.unwrap();
     });
+}
+
+impl Actor {
+    /// Gives `draft` a receipt the store refuses when [`Actor::fault`] picks it.
+    pub(super) fn with_fault(&mut self, mut draft: Draft) -> Draft {
+        let ts = self.clock.now().wall;
+        if let Some(fault) = self.fault.as_mut()
+            && let Some(command_id) = fault(draft.events())
+        {
+            draft.receipt(clauseo_store::Receipt {
+                command_id,
+                stream: None,
+                payload_hash: [0; 32],
+                result: CommandOutcome::Done,
+                ts,
+            });
+        }
+        draft
+    }
 }
