@@ -10,8 +10,11 @@ import { toolsLine, type ToolsLineKey } from "@clauseo/components/lib/words-tool
 import { tw, type ToolsKey } from "@clauseo/components/lib/words-tools.ts";
 import { batch, event, header, reset, THREAD } from "../testing/stream-script.ts";
 import { FakeTransport } from "../transport/fake-transport.ts";
-import type { ToolState } from "../transport/protocol.ts";
-import type { BrowserInstallReport } from "../room/browser-install.ts";
+import type {
+  BrowserInstallFailure,
+  BrowserInstallState,
+  ToolState,
+} from "../transport/protocol.ts";
 import { toolsSegment } from "../room/tool-line-room.ts";
 import { knownTools } from "../room/tools.ts";
 import type { Entry } from "./entry.ts";
@@ -46,7 +49,7 @@ const browser = (reason?: string): ToolState => ({
  * plays `install`'s reports once the view is in. */
 function toolsHost(
   tools: ToolState[],
-  install: readonly BrowserInstallReport[] = [],
+  install: readonly BrowserInstallState[] = [],
 ): FakeTransport {
   const head = header();
   head.header!.tools = tools;
@@ -64,7 +67,7 @@ function toolsHost(
     subscribe: (stream) =>
       queueMicrotask(() => {
         transport.deliver(event(batch(1, [reset([], head)], undefined, stream)));
-        for (const report of install) transport.appEvent({ browser_install: report });
+        for (const state of install) transport.appEvent({ browser_install: { state } });
       }),
   });
   return transport;
@@ -76,7 +79,7 @@ const entry = (
   id: string,
   words: WordsRef,
   tools: ToolState[],
-  install?: readonly BrowserInstallReport[],
+  install?: readonly BrowserInstallState[],
   show: Show = "popover",
 ): Entry => ({
   id,
@@ -112,18 +115,17 @@ const statusFit = (lang: Lang) => (
 );
 
 const NONE = [browser("browser_not_installed")];
-const OFFER: BrowserInstallReport = { offer: "download", bytes: 200_000_000 };
-const DOWNLOADING: BrowserInstallReport = {
+const DOWNLOADING: BrowserInstallState = {
   downloading: { bytes: 64_400_000, total: 200_000_000 },
 };
 /** A failed download by the host's code; its message is the log's, and never shows. */
-const failed = (code: string): BrowserInstallReport[] => [
-  OFFER,
-  { failed: { code, message: `review: ${code}` } },
+const failed = (code: string): BrowserInstallState[] => [
+  { failed: { code: code as BrowserInstallFailure, message: `review: ${code}` } },
 ];
 
 /** UET's tool line entries, each id written as it is: an id never moves when an entry is added or taken out. Retired
- * in round 3 (icons first, DESIGN.md §Icons): UET-02 to UET-08, UET-16, UET-17, UET-32 and UET-36. UET-26's words
+ * in round 3 (icons first, DESIGN.md §Icons): UET-02 to UET-08, UET-16, UET-17, UET-32 and UET-36. UET-37 (Download
+ * stopped) is retired too: a cancelled download goes back to the offer with no line. UET-26's words
  * were Chrome ready, UET-13's Off in Settings and UET-21's longer; each keeps its id for its new words. */
 export const UET: Entry[] = [
   // the line's name and tooltip
@@ -166,29 +168,25 @@ export const UET: Entry[] = [
     },
   ),
   // the download
-  entry("UET-22", popWords("Download Chrome"), NONE, [OFFER]),
-  entry("UET-42", popWords("200\u00a0MB"), NONE, [OFFER]),
-  entry("UET-21", popWords("From Google, once. Needs 1\u00a0GB free."), NONE, [OFFER], {
+  // no state from the host yet: the offer, which is what a machine before any download shows
+  entry("UET-22", popWords("Download Chrome"), NONE),
+  entry("UET-42", popWords("200\u00a0MB"), NONE),
+  entry("UET-21", popWords("From Google, once. Needs 1\u00a0GB free."), NONE, [], {
     tip: "tool-download",
   }),
-  entry("UET-23", popWords("Install Chrome to use it"), NONE, [{ offer: "none" }]),
-  entry("UET-24", popWords("{done} of {total}\u00a0MB"), NONE, [OFFER, DOWNLOADING]),
-  entry("UET-25", popWords("Unpacking"), NONE, [OFFER, "unpacking"]),
+  entry("UET-23", popWords("Install Chrome to use it"), NONE, failed("unsupported")),
+  entry("UET-24", popWords("{done} of {total}\u00a0MB"), NONE, [DOWNLOADING]),
+  entry("UET-25", popWords("Unpacking"), NONE, ["unpacking"]),
   // Chrome is in: the reason it keeps, then its tooltip shown from the keyboard
-  entry("UET-26", popWords("Ready for new conversations"), NONE, [OFFER, "done"]),
-  entry(
-    "UET-43",
-    popWords("The browser comes with your next conversation."),
-    NONE,
-    [OFFER, "done"],
-    { tip: "tool-row-reason" },
-  ),
+  entry("UET-26", popWords("Ready for new conversations"), NONE, ["done"]),
+  entry("UET-43", popWords("The browser comes with your next conversation."), NONE, ["done"], {
+    tip: "tool-row-reason",
+  }),
   entry("UET-34", popWords("Connection dropped"), NONE, failed("network")),
   entry("UET-29", popWords("File didn't match"), NONE, failed("signature")),
   entry("UET-27", popWords("Needs 1\u00a0GB free"), NONE, failed("disk_space")),
   entry("UET-28", popWords("Network blocked it"), NONE, failed("host_refused")),
   entry("UET-35", popWords("Couldn't unpack"), NONE, failed("unpack")),
-  entry("UET-37", popWords("Download stopped"), NONE, failed("cancelled")),
   // a code this version doesn't know reads as unknown
   entry("UET-30", popWords("Download failed"), NONE, failed("a_newer_code")),
   entry("UET-31", popWords("Try again"), NONE, failed("host_refused"), { tip: "tool-retry" }),

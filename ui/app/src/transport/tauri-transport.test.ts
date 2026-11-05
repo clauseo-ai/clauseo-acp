@@ -328,6 +328,18 @@ describe("TauriTransport", () => {
     expect(acks()).toEqual([{ positions: [], messages: 2 }]);
   });
 
+  test("browser_install reaches the app listeners, no stream subscriber, and is acked on the next frame", async () => {
+    const { t, got, send, frame, acks } = await rig("a");
+    const heard: unknown[] = [];
+    await t.onAppEvent((e) => heard.push(e)).ready;
+    const state = { downloading: { bytes: 64_400_000, total: 200_000_000 } };
+    send({ browser_install: { state } });
+    expect(heard).toEqual([{ browser_install: { state } }]);
+    expect(got).toEqual([]);
+    await frame();
+    expect(acks()).toEqual([{ positions: [], messages: 1 }]);
+  });
+
   test("stop removes only that app listener", async () => {
     const { t, send } = await rig();
     const heard: string[] = [];

@@ -1,7 +1,11 @@
 // The tool line's pure reading: which tools a header's list speaks for, each glyph's state and the line's name for every
 // pair of states, and each popover row's words for every ToolState and every Chrome download state.
 import { expect, test } from "vitest";
-import type { ToolState } from "../transport/protocol.ts";
+import type {
+  BrowserInstallFailure,
+  BrowserInstallState,
+  ToolState,
+} from "../transport/protocol.ts";
 import { FakeTransport } from "../transport/fake-transport.ts";
 import {
   BrowserInstallStore,
@@ -167,16 +171,21 @@ test("Open Settings is offered only for Off in Settings, with the settings windo
   expect(words({ tool: "browser", state: "no_proxy" }).settings).toBe(false);
 });
 
-const OFFER = { offer: "download", bytes: 200_000_000 } as const;
+const DL = (bytes: number, total: number): BrowserInstallState => ({
+  downloading: { bytes, total },
+});
+const FAIL = (code: string): BrowserInstallState => ({
+  failed: { code: code as BrowserInstallFailure, message: "curl: (56) Recv failure" },
+});
 const missing = (install: BrowserInstall | null) =>
   words({ tool: "browser", state: "browser_not_installed" }, { install });
+const offer = { progress: null };
 
 const NB = "\u00a0";
 
-test("no Chrome: the download for every install state, and a reason in every one", () => {
+test("no Chrome: the offer until a state says otherwise, and a reason in every one", () => {
   expect(missing(null)).toMatchObject({ reason: "Needs Chrome", download: null });
-  expect(missing({ offer: null, progress: null }).download).toBeNull();
-  expect(missing({ offer: OFFER, progress: null })).toMatchObject({
+  expect(missing(offer)).toMatchObject({
     reason: "Needs Chrome",
     download: {
       kind: "offer",
@@ -185,12 +194,8 @@ test("no Chrome: the download for every install state, and a reason in every one
       tip: `From Google, once. Needs 1${NB}GB free.`,
     },
   });
-  expect(missing({ offer: { offer: "none" }, progress: null })).toMatchObject({
-    reason: "Needs Chrome",
-    download: { kind: "none", line: "Install Chrome to use it" },
-  });
   expect(
-    missing({ offer: OFFER, progress: { downloading: { bytes: 64_400_000, total: 200_000_000 } } }),
+    missing({ progress: { downloading: { bytes: 64_400_000, total: 200_000_000 } } }),
   ).toMatchObject({
     reason: "Needs Chrome",
     download: {
@@ -201,13 +206,20 @@ test("no Chrome: the download for every install state, and a reason in every one
       name: "Download Chrome",
     },
   });
+  // the first Downloading has not brought the total yet: an empty bar, no words
+  expect(missing({ progress: { downloading: { bytes: 0, total: 0 } } }).download).toMatchObject({
+    kind: "progress",
+    value: 0,
+    max: 1,
+    text: "",
+  });
   // no bar while unpacking: DESIGN's bars are determinate only
-  expect(missing({ offer: OFFER, progress: "unpacking" }).download).toEqual({
+  expect(missing({ progress: "unpacking" }).download).toEqual({
     kind: "unpacking",
     text: "Unpacking",
   });
   // done keeps a reason: what Chrome is ready for, its tooltip saying when
-  expect(missing({ offer: OFFER, progress: "done" })).toMatchObject({
+  expect(missing({ progress: "done" })).toMatchObject({
     reason: "Ready for new conversations",
     reasonTip: "The browser comes with your next conversation.",
     beside: false,
@@ -229,18 +241,22 @@ const FAILED: Record<InstallFailCode, string> = {
 };
 
 test("a failed download's cause by its code, Try again for all but unsupported, never the host's message", () => {
-  expect(new Set(Object.keys(FAILED_KEYS))).toEqual(new Set(Object.keys(FAILED)));
+  expect(new Set(Object.keys(FAILED_KEYS))).toEqual(
+    new Set(Object.keys(FAILED).filter((c) => c !== "unsupported" && c !== "cancelled")),
+  );
   for (const code of Object.keys(FAILED) as InstallFailCode[]) {
+    // a cancel is no failure: the store turns it into the offer (see the store tests), so no row gets it
+    if (code === "cancelled") continue;
     const row = missing({
-      offer: OFFER,
       progress: { failed: { code, message: "curl: (56) Recv failure" } },
-    });
+    } as never);
     expect(row.reason).toBe("Needs Chrome");
-    expect(row.download).toEqual({
-      kind: "failed",
-      cause: FAILED[code],
-      retry: code !== "unsupported",
-    });
+    if (code === "unsupported") {
+      // this computer can't download it: a muted line, no Try again
+      expect(row.download).toEqual({ kind: "none", line: "Install Chrome to use it" });
+    } else {
+      expect(row.download).toEqual({ kind: "failed", cause: FAILED[code] });
+    }
     expect(JSON.stringify(row)).not.toContain("curl");
   }
 });
@@ -255,68 +271,127 @@ test("the host's failure code is an open enum: a value this version doesn't know
 
 test("every number before MB or GB in the download's words is held to its unit by a non-breaking space", () => {
   const all = [
-    missing({ offer: OFFER, progress: null }),
-    missing({ offer: OFFER, progress: { downloading: { bytes: 1e6, total: 200_000_000 } } }),
-    missing({ offer: OFFER, progress: { failed: { code: "disk_space", message: "" } } }),
+    missing(offer),
+    missing({ progress: { downloading: { bytes: 1e6, total: 200_000_000 } } }),
+    missing({ progress: { failed: { code: "disk_space", message: "" } } }),
   ].map((r) => JSON.stringify(r.download));
   const joined = all.join(" ");
   expect(joined).toMatch(/\d\u00a0(MB|GB)/);
   expect(joined).not.toMatch(/\d[ \t\n](MB|GB)/);
 });
 
-/** A store over FakeTransport whose installBrowser is refused as a command, as the host refuses a second one. */
-function refusing() {
+/** A store over FakeTransport with the app feed. `first` is the catch-up the host sends a new subscriber; `refuse`
+ * makes every install command fail, as a host refuses one. */
+function storeOver(options: { first?: BrowserInstallState[]; refuse?: boolean } = {}) {
   const transport = new FakeTransport({
     query: () => {
       throw new Error("no query");
     },
-    next: { parts: ["app"], query: () => Promise.reject(new Error("not scripted")) },
+    next: {
+      parts: ["app"],
+      query: () => Promise.reject(new Error("not scripted")),
+      first: () => (options.first ?? []).map((state) => ({ browser_install: { state } })),
+    },
+    dispatch: () => (options.refuse ? Promise.reject(new Error("the host refused it")) : "done"),
   });
-  let refuse: (error: Error) => void = () => {};
-  transport.installBrowser = () =>
-    new Promise<void>((_, reject) => {
-      refuse = reject;
-    });
-  return { transport, store: new BrowserInstallStore(transport), refuse: (e: Error) => refuse(e) };
+  return { transport, store: new BrowserInstallStore(transport) };
 }
+const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+const installs = (transport: FakeTransport) =>
+  transport
+    .only("dispatch")
+    .map((c) => c.command.command)
+    .filter((c) => "install_browser" in c);
 
-test("a refused InstallBrowser is no failure: the row goes back to where it stood before the press", async () => {
-  const { transport, store, refuse } = refusing();
-  transport.appEvent({ browser_install: OFFER });
-  store.install();
-  expect(store.get()?.progress).toEqual({ downloading: { bytes: 0, total: 200_000_000 } });
-  refuse(new Error("already running"));
-  await Promise.resolve();
-  await Promise.resolve();
-  expect(store.get()).toEqual({ offer: OFFER, progress: null });
-  // after a failure, a refused Try again goes back to that failure, not to a new one
-  transport.appEvent({ browser_install: { failed: { code: "network", message: "reset" } } });
-  store.install();
-  refuse(new Error("already running"));
-  await Promise.resolve();
-  await Promise.resolve();
-  expect(store.get()?.progress).toEqual({ failed: { code: "network", message: "reset" } });
+test("a new store hears the catch-up: the latest state, or the offer when the host has none", async () => {
+  const none = storeOver();
+  await settle();
+  expect(none.store.get()).toEqual({ progress: null });
+  const running = storeOver({ first: [DL(50e6, 201e6)] });
+  await settle();
+  expect(running.store.get()).toEqual({ progress: { downloading: { bytes: 50e6, total: 201e6 } } });
+  // the last download's end, until the next one starts: a cancel is the offer again
+  const cancelled = storeOver({ first: [DL(1e6, 201e6), FAIL("cancelled")] });
+  await settle();
+  expect(cancelled.store.get()).toEqual({ progress: null });
 });
 
-test("a refused InstallBrowser leaves alone what the host's events said since the press", async () => {
-  const { transport, store, refuse } = refusing();
-  transport.appEvent({ browser_install: OFFER });
+test("Install sends install_browser once through dispatch, and the bar waits for the host's total", async () => {
+  const { transport, store } = storeOver();
+  await settle();
   store.install();
-  transport.appEvent({ browser_install: { downloading: { bytes: 50e6, total: 201e6 } } });
-  refuse(new Error("already running"));
-  await Promise.resolve();
-  await Promise.resolve();
-  expect(store.get()?.progress).toEqual({ downloading: { bytes: 50e6, total: 201e6 } });
+  expect(installs(transport)).toEqual([{ install_browser: {} }]);
+  expect(store.get().progress).toEqual({ downloading: { bytes: 0, total: 0 } });
+  transport.appEvent({ browser_install: { state: DL(64e6, 200e6) } });
+  expect(store.get().progress).toEqual({ downloading: { bytes: 64e6, total: 200e6 } });
+});
+
+test("a second Install while one runs sends nothing and shows no reset", async () => {
+  const { transport, store } = storeOver({ first: [DL(50e6, 201e6)] });
+  await settle();
+  store.install();
+  store.install();
+  expect(installs(transport)).toEqual([]);
+  expect(store.get().progress).toEqual({ downloading: { bytes: 50e6, total: 201e6 } });
+  transport.appEvent({ browser_install: { state: "unpacking" } });
+  store.install();
+  expect(installs(transport)).toEqual([]);
+  expect(store.get().progress).toBe("unpacking");
+});
+
+test("Try again after a failure sends Install again", async () => {
+  const { transport, store } = storeOver({ first: [FAIL("network")] });
+  await settle();
+  expect(store.get().progress).toEqual({
+    failed: { code: "network", message: "curl: (56) Recv failure" },
+  });
+  store.install();
+  expect(installs(transport)).toHaveLength(1);
+});
+
+test("a refused Install is no failure: the row goes back to where it stood before the press", async () => {
+  const { store } = storeOver({ refuse: true });
+  await settle();
+  store.install();
+  expect(store.get().progress).toEqual({ downloading: { bytes: 0, total: 0 } });
+  await settle();
+  expect(store.get()).toEqual({ progress: null });
+  // after a failure, a refused Try again goes back to that failure, not to a new one
+  const failed = storeOver({ first: [FAIL("network")], refuse: true });
+  await settle();
+  failed.store.install();
+  await settle();
+  expect(failed.store.get().progress).toEqual({
+    failed: { code: "network", message: "curl: (56) Recv failure" },
+  });
+});
+
+test("a refused Install leaves alone what the host's events said since the press", async () => {
+  const { transport, store } = storeOver({ refuse: true });
+  await settle();
+  store.install();
+  transport.appEvent({ browser_install: { state: DL(50e6, 201e6) } });
+  await settle();
+  expect(store.get().progress).toEqual({ downloading: { bytes: 50e6, total: 201e6 } });
+});
+
+test("a cancelled download goes back to the offer with no failure", async () => {
+  const { transport, store } = storeOver({ first: [DL(1e6, 201e6)] });
+  await settle();
+  transport.appEvent({ browser_install: { state: FAIL("cancelled") } });
+  expect(store.get()).toEqual({ progress: null });
 });
 
 test("a failure's code is read and its message kept for the log", () => {
-  const { transport, store } = refusing();
-  transport.appEvent({ browser_install: { failed: { code: "what_is_this", message: "m" } } });
-  expect(store.get()?.progress).toEqual({ failed: { code: "unknown", message: "m" } });
+  const { transport, store } = storeOver();
+  transport.appEvent({ browser_install: { state: FAIL("what_is_this") } });
+  expect(store.get().progress).toEqual({
+    failed: { code: "unknown", message: "curl: (56) Recv failure" },
+  });
 });
 
 test("the download's words leave the other browser states alone", () => {
-  const install: BrowserInstall = { offer: OFFER, progress: "done" };
+  const install: BrowserInstall = { progress: "done" };
   expect(words({ tool: "browser", state: "no_proxy" }, { install })).toMatchObject({
     reason: "Not available yet",
     download: null,
