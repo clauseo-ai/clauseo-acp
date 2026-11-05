@@ -150,6 +150,7 @@ pub fn permission_requested(
             agent_label: "Yes".to_owned(),
         }],
         deliverable: Deliverable::Live,
+        about: None,
     }
     .into()
 }

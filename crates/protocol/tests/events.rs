@@ -44,6 +44,10 @@ mod json_copies;
 mod held_open;
 
 #[cfg(test)]
+#[path = "events/permission_about.rs"]
+mod permission_about;
+
+#[cfg(test)]
 #[path = "events/constructors.rs"]
 mod constructors;
 

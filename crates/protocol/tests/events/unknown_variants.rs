@@ -6,9 +6,9 @@ use std::fmt::Debug;
 
 use clauseo_protocol::{
     CheckpointKind, ContentBlock, Deliverable, Delivery, DetachReason, DomainEvent, ErrorCode,
-    ExpiryReason, HostError, LimitSource, NoticeLevel, PermissionKind, RawFrom, RawPayload,
-    RenameSource, SkippedFileReason, StaleReason, SteerOutcome, StopReason, TextOrBlob, Timestamp,
-    ToolCallStatus, ToolKind, TurnFailed, UnavailableReason,
+    ExpiryReason, HostError, LimitSource, NoticeLevel, PermissionAbout, PermissionKind, RawFrom,
+    RawPayload, RenameSource, SkippedFileReason, StaleReason, SteerOutcome, StopReason, TextOrBlob,
+    Timestamp, ToolCallStatus, ToolKind, TurnFailed, UnavailableReason,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -102,6 +102,12 @@ fn permission_kind() {
         (RejectAlways, "reject_always"),
     ];
     unit_enum(&PermissionKind::ALL, &cases, PermissionKind::Unknown);
+}
+
+#[test]
+fn permission_about() {
+    let cases = [(PermissionAbout::AgentPlan, "agent_plan")];
+    unit_enum(&PermissionAbout::ALL, &cases, PermissionAbout::Unknown);
 }
 
 #[test]

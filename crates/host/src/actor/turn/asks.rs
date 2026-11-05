@@ -10,9 +10,9 @@ use clauseo_acp::{AcpEvent, LimitSignal, LimitStatus, Origin, PendingKey};
 use clauseo_matters::HeldOpen;
 use clauseo_protocol::{
     AgentChoiceId, AgentSessionId, CompactString, Deliverable, ElicitationId, ElicitationRequest,
-    ElicitationRequested, ElicitationResponse, LimitStopReason, MatterPath, PermissionChoice,
-    PermissionKind, PermissionOption, PermissionRequestId, PermissionRequested, PermissionResolved,
-    Principal, StreamId, ThreadId, TurnId,
+    ElicitationRequested, ElicitationResponse, LimitStopReason, MatterPath, PermissionAbout,
+    PermissionChoice, PermissionKind, PermissionOption, PermissionRequestId, PermissionRequested,
+    PermissionResolved, Principal, StreamId, ThreadId, TurnId,
 };
 
 use super::super::input::MatterTag;
@@ -30,6 +30,8 @@ pub(super) struct PermissionAsk {
     pub(super) key: PendingKey,
     pub(super) acp_tool_call_id: CompactString,
     pub(super) options: Vec<PermissionOption>,
+    /// What it is about, when the host can tell (`agent/plan_note.rs`).
+    pub(super) about: Option<PermissionAbout>,
 }
 
 /// A permission request and the turn it came in, while the matter thread checks its paths.
@@ -44,7 +46,8 @@ pub(super) struct HeldOpenCheck {
 /// paths), the matter thread first resolves the paths into the matter folder and checks whether
 /// a program holds one open ([`on_held_open`]); otherwise, or when the check cannot be sent, it
 /// is logged `Live` for the lawyer at once. In forced ask it first loses the options
-/// `agent::forced_ask::keep_option` drops.
+/// `agent::forced_ask::keep_option` drops. A Claude request naming only its own plan note is
+/// marked `about: agent_plan` (`agent/plan_note.rs`), a label that changes nothing else.
 pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
     let AcpEvent::PermissionRequested {
         session,
@@ -61,11 +64,15 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
     if agent(actor, thread).is_some_and(|agent| agent.forced_ask) {
         options.retain(crate::agent::forced_ask::keep_option);
     }
+    // Read from the paths the request itself names, before any fallback to the tool call's.
+    let plans = agent(actor, thread).and_then(|agent| agent.plan_notes.clone());
+    let about = crate::agent::plan_note::about(plans.as_deref(), &paths, cfg!(windows));
     let ask = PermissionAsk {
         session,
         key,
         acp_tool_call_id,
         options,
+        about,
     };
     let Some(turn) = live_turn(actor, thread) else {
         cancel_outside_turn(actor, thread, &ask.session);
@@ -194,6 +201,7 @@ fn log_for_lawyer(actor: &mut Actor, thread: ThreadId, ask: PermissionAsk) {
         key,
         acp_tool_call_id,
         options,
+        about,
     } = ask;
     let tool_call = known_tool(actor, thread, &session, &acp_tool_call_id);
     let logged = (|| -> Result<(), Error> {
@@ -206,6 +214,7 @@ fn log_for_lawyer(actor: &mut Actor, thread: ThreadId, ask: PermissionAsk) {
             tool_call,
             options,
             deliverable: Deliverable::Live,
+            about,
         };
         commit(actor, thread, [event.into()], Vec::new())
     })();
@@ -229,6 +238,7 @@ fn refuse_held_open(
         key,
         acp_tool_call_id,
         options,
+        about,
     } = ask;
     let tool_call = known_tool(actor, thread, &session, &acp_tool_call_id);
     let agent_id = agent(actor, thread)
@@ -265,6 +275,7 @@ fn refuse_held_open(
             tool_call,
             options,
             deliverable: Deliverable::Live,
+            about,
         },
     )?;
     out.push(
