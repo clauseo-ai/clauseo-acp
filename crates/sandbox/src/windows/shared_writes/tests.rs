@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use super::*;
 use crate::test_support::TempDir;
 use crate::windows::acl_plan::Sid;
+use crate::windows::ledger::RecordedFile;
 use crate::windows::test_world::{GROUP_SID, OTHER_POOL_SIDS, USER_SID};
 use crate::windows::writer::{FileId, Label, Strict, Walked};
 
@@ -60,6 +61,20 @@ impl AclWriter for Fake {
             skipped: self.walk_skips,
             ..Walked::default()
         })
+    }
+
+    fn remove_recorded(
+        &mut self,
+        _file: &RecordedFile,
+        grant: &Grant,
+        _prior: Option<Label>,
+    ) -> Result<(), ApplyFailure> {
+        self.removes.push(grant.clone());
+        Ok(())
+    }
+
+    fn present_recorded(&mut self, _file: &RecordedFile, _grant: &Grant) -> io::Result<bool> {
+        Ok(false)
     }
 
     fn same_file(&mut self, _a: &Path, _b: &Path) -> io::Result<bool> {
