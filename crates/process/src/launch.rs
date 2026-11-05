@@ -147,7 +147,11 @@ pub fn spawn_in_tree(spec: &LaunchSpec, opts: &SpawnOptions) -> Result<Launched,
     // Read now, while the agent is this process's unreaped child, so its pid is still its own.
     let root = os::Root::of(&tree, child.id());
     let ring = Arc::new(Mutex::new(Ring::new()));
-    let redactor = Arc::new(Redactor::new(opts.home.as_deref(), spec.env()));
+    let redactor = Arc::new(Redactor::new(
+        opts.home.as_deref(),
+        spec.env(),
+        spec.redacted(),
+    ));
     let stdin = StdinSlot::new(stdin);
     Ok(Launched {
         stdin: AgentStdin::new(stdin.clone()),

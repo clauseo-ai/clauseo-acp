@@ -254,6 +254,8 @@ crates/host/benches/common/dir.rs - clippy::disallowed_methods
 # R24 PR3: the connector relay bench's unwraps and its one report line.
 crates/host/benches/connector_relay.rs - clippy::unwrap_used
 crates/host/benches/connector_relay.rs main clippy::print_stdout
+# R24 PR4: the relay memory test's counting allocator (GlobalAlloc is an unsafe trait).
+crates/host/tests/relay_memory.rs memory::Counting unsafe_code
 
 # clauseo-limits (S13): the write module (the helper file and the run folder) and the readers
 # tests' folders.

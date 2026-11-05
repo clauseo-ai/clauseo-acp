@@ -76,6 +76,9 @@ mod codex_plans;
 mod commands;
 
 #[cfg(test)]
+#[path = "host/case_law.rs"]
+mod case_law;
+#[cfg(test)]
 #[path = "host/connectors.rs"]
 mod connectors;
 #[cfg(test)]

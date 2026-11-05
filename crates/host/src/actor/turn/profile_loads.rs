@@ -10,9 +10,11 @@ use clauseo_protocol::{AgentKind, ErrorCode, ThreadId, ToolAvailability};
 use serde_json::{Map, Value};
 
 use super::super::Actor;
+use super::launch_checks::relay::CaseLaw;
 use super::launch_checks::{Prepared, RunFolders};
 use crate::agent::loads;
 use crate::agent::loads::browser::{self, BrowserInputs, Claims, Switch};
+use crate::agent::loads::case_law::{self, CaseLawInputs, Relay};
 use crate::agent::loads::profile::{self, ClaudeKeys, Folders, Login};
 use crate::browser::seed_sites::SEED_SITES;
 use crate::error::Error;
@@ -44,8 +46,15 @@ pub(super) fn launch_keys(
 ) -> Result<(), Error> {
     let agent_id = actor.check_thread(thread)?.row.agent.clone();
     let written = prepared.skills_written.take();
+    recheck_managed(actor, &mut prepared.run);
     if let Some(codex) = prepared.codex.as_mut() {
-        let folders = Folders::of(&prepared.run.work, &prepared.run.notes)?;
+        // Codex's instructions are fixed here, right before the launch: the paragraph goes in
+        // when the relay is open now. `session_loads` reads `managed-mcp.json` once more after
+        // the agent answers `initialize`; a file that appears in that window drops the entry
+        // (`ManagedByFirm`, the relay ended) while this paragraph stays: wrong words, but no
+        // case law reaches the agent.
+        let part = connectors_part(prepared.run.case_law.relay().is_some());
+        let folders = Folders::of(&prepared.run.work, &prepared.run.notes)?.with_connectors(part);
         let (web_search, _) = switches(actor);
         let packs = prepared.run.packs_written.as_deref();
         let keys = actor
@@ -90,8 +99,11 @@ pub(super) fn session_loads(
         .ok_or_else(|| {
             Error::refused(ErrorCode::AgentLaunchFailed, "the session has no folders")
         })?;
-    let folders = Folders::of(&run.work, &run.notes)?;
     let control = loads::mcp_control(&actor.managed_mcp);
+    let (hook, case_law_entry, case_law_state) =
+        case_law_servers(actor, &run, actor.profile.mcp_servers(&agent_id), control);
+    let part = connectors_part(case_law_entry.is_some());
+    let folders = Folders::of(&run.work, &run.notes)?.with_connectors(part);
     let (web_search, browser_switch) = switches(actor);
     let settings_env = actor
         .effective
@@ -114,6 +126,7 @@ pub(super) fn session_loads(
         seed_sites: SEED_SITES,
         forced_ask,
         data: &run.data_deny,
+        case_law: case_law_entry.is_some(),
     });
     let guard = actor
         .pre_write_guard
@@ -161,9 +174,9 @@ pub(super) fn session_loads(
         claims: run.browser_session.as_deref().map(Claims::of),
     };
     let mut servers = loads::mcp_servers(&actor.effective, control);
-    let (hook_servers, browser_state) =
-        browser::hook_servers(actor.profile.mcp_servers(&agent_id), &inputs);
+    let (hook_servers, browser_state) = browser::hook_servers(hook, &inputs);
     servers.extend(hook_servers);
+    servers.extend(case_law_entry);
     if browser_state
         .as_ref()
         .is_some_and(|state| state.availability == ToolAvailability::Available)
@@ -174,6 +187,7 @@ pub(super) fn session_loads(
     let tools = profile::web_search_state(kind, web_search, login)
         .into_iter()
         .chain(browser_state)
+        .chain(case_law_state)
         .collect();
     super::super::header_tools::hold(actor, thread, tools);
     let directories = if kind == Some(AgentKind::Codex) {
@@ -182,6 +196,66 @@ pub(super) fn session_loads(
         Vec::new()
     };
     Ok((meta, servers, directories))
+}
+
+/// The hook's servers without `case-law`, the `case-law` entry `run`'s session gets (after
+/// the others), and its header state (`agent::loads::case_law`). A relay whose entry does not
+/// go (the firm's `managed-mcp.json` appeared since the launch prep) is ended at once.
+fn case_law_servers(
+    actor: &Actor,
+    run: &RunFolders,
+    hook: Vec<McpServer>,
+    control: loads::McpControl,
+) -> (
+    Vec<McpServer>,
+    Option<McpServer>,
+    Option<clauseo_protocol::ToolState>,
+) {
+    let relay = match &run.case_law {
+        CaseLaw::Absent => Relay::Absent,
+        CaseLaw::Unavailable(reason) | CaseLaw::Ended(_, reason) => Relay::Unavailable(*reason),
+        CaseLaw::Open(relay) => Relay::Open {
+            port: relay.port(),
+            token_file: &run.relay_token,
+        },
+    };
+    let system_root = case_law::system_root(
+        cfg!(windows),
+        match &actor.wiring.inherited_env {
+            Some(env) => env.clone(),
+            None if cfg!(windows) => std::env::vars_os().collect(),
+            None => Vec::new(),
+        },
+    );
+    let inputs = CaseLawInputs {
+        relay,
+        control,
+        system_root: system_root.as_deref(),
+    };
+    let (rest, entry, state) = case_law::hook_servers(hook, &inputs);
+    if entry.is_none()
+        && let Some(relay) = run.case_law.relay()
+    {
+        relay.end();
+    }
+    (rest, entry, state)
+}
+
+/// What `{connectors}` becomes: the paragraph when the session gets the `case-law` entry.
+fn connectors_part(with_case_law: bool) -> &'static str {
+    clauseo_profile::instructions::connectors_part(with_case_law)
+}
+
+/// The firm's `managed-mcp.json`, read again right before the launch: one that appeared since
+/// the launch prep opened the relay ends it, so the session gets no entry and no paragraph
+/// (`ManagedByFirm`). What is left is the spawn and `initialize` (see `launch_keys`).
+fn recheck_managed(actor: &Actor, run: &mut RunFolders) {
+    if run.case_law.relay().is_some()
+        && loads::mcp_control(&actor.managed_mcp) == loads::McpControl::Managed
+    {
+        let reason = clauseo_protocol::ToolsUnavailableReason::ManagedByFirm;
+        run.case_law.end_before_launch(reason);
+    }
 }
 
 /// Codex's ACP `additionalDirectories`: the session's run folder (its work folder and its pack

@@ -31,6 +31,8 @@ pub(crate) struct Seen {
     pub(crate) run: Option<PathBuf>,
     pub(crate) env: BTreeMap<OsString, OsString>,
     pub(crate) packs: Vec<String>,
+    /// The secrets the spec names for the stderr tail to hide (`LaunchSpec::redacted`).
+    pub(crate) redacted: Vec<String>,
 }
 
 impl Seen {
@@ -114,6 +116,7 @@ impl Launcher for Wired {
             run,
             env: spec.env().clone(),
             packs,
+            redacted: spec.redacted().to_vec(),
         });
         self.inner.launch(spec)
     }

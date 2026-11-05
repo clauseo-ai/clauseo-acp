@@ -527,28 +527,6 @@ impl Running {
         }
     }
 
-    /// Shuts the host down while moving the clock past the 5 s cancel fallback when it is
-    /// armed, for a running turn whose agent never answers its cancel.
-    pub(crate) fn shutdown_past_cancel(mut self) {
-        let clock = self.clock.clone();
-        let mover = async move {
-            while clock.next_armed().await != Duration::from_secs(5) {}
-            clock.advance(Duration::from_secs(5));
-        };
-        let result = wait("shutdown", async {
-            let shutdown = std::pin::pin!(self.handle.shutdown());
-            let mover = std::pin::pin!(mover);
-            match futures::future::select(shutdown, mover).await {
-                Either::Left((result, _mover)) => result,
-                Either::Right(((), shutdown)) => shutdown.await,
-            }
-        });
-        result.unwrap_or_else(|e| panic!("shutdown: {e}"));
-        if let Some(join) = self.join.take() {
-            join.join().unwrap_or_else(|e| panic!("join: {e}"));
-        }
-    }
-
     /// Ends the host thread as a crash would, with no flush.
     pub(crate) fn abort(mut self) {
         wait("abort_for_test", self.handle.abort_for_test());
@@ -597,3 +575,8 @@ pub(crate) fn matter_with_thread(
     let thread = host.create_thread(matter, agent);
     (matter, thread, folder)
 }
+
+/// The shutdowns that move the manual clock while they wait.
+#[path = "support_shutdown.rs"]
+mod shutdown;
+pub(crate) use shutdown::{shutdown_past_cancel, shutdown_stopping};

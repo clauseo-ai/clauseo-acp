@@ -20,7 +20,18 @@ const ROLE: &str = "CLAUSEO_PROCESS_TEST_AGENT_ROLE";
 pub(crate) fn launch(
     name: &str,
     opts: &SpawnOptions,
+    env: BTreeMap<OsString, OsString>,
+) -> Result<Launched, Error> {
+    launch_redacting(name, opts, env, Vec::new())
+}
+
+/// As [`launch`], with `redacted` named to the stderr tail as secrets
+/// (`LaunchSpec::with_redacted`).
+pub(crate) fn launch_redacting(
+    name: &str,
+    opts: &SpawnOptions,
     mut env: BTreeMap<OsString, OsString>,
+    redacted: Vec<String>,
 ) -> Result<Launched, Error> {
     let program = std::env::current_exe().expect("the test binary's path");
     let args = ["--exact", name, "--nocapture", "--test-threads=1"]
@@ -32,7 +43,8 @@ pub(crate) fn launch(
         args,
         env,
         PathBuf::from(env!("CARGO_MANIFEST_DIR")),
-    )?;
+    )?
+    .with_redacted(redacted);
     spawn_in_tree(&spec, opts)
 }
 

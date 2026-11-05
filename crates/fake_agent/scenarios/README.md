@@ -45,7 +45,7 @@ The code lives in `crates/fake_agent/src/`.
 |---|---|---|---|
 | `scenario` | yes | The scenario name. | Must equal the file stem (`tool-calls` for `tool-calls.jsonl`). |
 | `description` | yes | One line saying what the scenario does and what the test must do. | Must not be empty or only spaces. |
-| `on_stdin_close` | no, default `"exit"` | What happens when stdin closes: `"exit"` or `"hang"`. See [Running](#running). | Must be one of the two strings. |
+| `on_stdin_close` | no, default `"exit"` | What happens when stdin closes: `"exit"`, `"hang"` or `"hang_briefly"`. See [Running](#running). | Must be one of the three strings. |
 
 No other keys are allowed in the header (`body.rs`, `Header`).
 
@@ -300,6 +300,7 @@ scenarios themselves stay timer-free, and only the tests of the flag itself pass
 |---|---|
 | `"exit"` (default) | Exit 0 at once, even if steps are left. Exit 0 does not prove the scenario ran to the end. |
 | `"hang"` | Write `fake_agent: stdin closed, holding` to stderr and block forever, until killed. Use it to test that the client escalates to a signal. |
+| `"hang_briefly"` | Write `fake_agent: stdin closed, holding briefly` to stderr, block for 15 s (`HANG_BRIEFLY`) unless killed first, then exit 0. Use it where a test holds the stop ladder: a test killed from outside leaves no agent behind for long. |
 
 Stdin closing is only seen while a step reads. Steps that send run before the agent reads
 again.

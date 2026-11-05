@@ -109,7 +109,7 @@ fn both_holds(test: &str, first: First, resume_queue: bool) {
     let at = |turn| events.position(|e| started(e, turn)).unwrap();
     assert!(at(one) < at(two), "{}", events.dump());
     events.assert_no_mismatch();
-    host.shutdown_past_cancel();
+    crate::support::shutdown_past_cancel(host);
 }
 
 #[test]

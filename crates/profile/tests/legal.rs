@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use clauseo_profile::RenderedSkill;
 use clauseo_profile::instructions::{LEGAL, TOOLS, word_count};
-use clauseo_profile::placeholders::{IN_INSTRUCTIONS, MATTER_NOTES, WORK_FOLDER};
+use clauseo_profile::placeholders::{CONNECTORS, IN_INSTRUCTIONS, MATTER_NOTES, WORK_FOLDER};
 use clauseo_profile::skills::builtin::{ASSETS, BUILTIN, RETIRED_BUILTINS, sources};
 use clauseo_profile::skills::frontmatter::{self, MetaValue};
 use clauseo_profile::skills::stetdoc::STETDOC;
@@ -132,7 +132,13 @@ fn legal_word_budget() {
     let legal = word_count(LEGAL);
     assert!(legal <= 1200, "the legal part has {legal} words");
     let whole = ClauseoProfile::new(paths_under(Path::new("/data")), None).instructions();
-    assert_eq!(whole, Instructions::tools().with_part(LEGAL).compose(""));
+    assert_eq!(
+        whole,
+        Instructions::tools()
+            .with_connectors()
+            .with_part(LEGAL)
+            .compose("")
+    );
     assert!(whole.ends_with(&format!("\n\n{}", LEGAL.trim())));
     assert_eq!(
         word_count(&whole),
@@ -168,10 +174,64 @@ fn the_launch_instructions_hold_only_tokens_the_host_fills() {
     let filled = clauseo_profile::placeholders::fill(
         &text,
         &IN_INSTRUCTIONS,
-        &[(WORK_FOLDER, "W"), (MATTER_NOTES, "M")],
+        &[(WORK_FOLDER, "W"), (MATTER_NOTES, "M"), (CONNECTORS, "")],
     )
     .unwrap();
     assert!(!filled.contains("{work_folder}") && !filled.contains("{matter_notes}"));
+    assert!(!filled.contains(CONNECTORS));
+}
+
+/// R24's connectors paragraph (decision D6): at most 80 words, between the tools part and R22's
+/// legal part when the session got the `case-law` entry; otherwise the same place says there is
+/// no case-law database. The two never meet: the legal part and the skills say neither outright.
+#[test]
+fn the_connectors_paragraph_goes_only_where_the_host_puts_it() {
+    use clauseo_profile::instructions::{
+        CONNECTORS as PARAGRAPH, CONNECTORS_MAX_WORDS, CONNECTORS_NONE, TOOLS, connectors_part,
+        word_count,
+    };
+    const DENIAL: &str = "no case-law database";
+    assert!(
+        word_count(PARAGRAPH) <= CONNECTORS_MAX_WORDS,
+        "{} words",
+        word_count(PARAGRAPH)
+    );
+    insta::assert_snapshot!(PARAGRAPH.trim());
+    let text = ClauseoProfile::new(paths_under(Path::new("/data")), None).instructions();
+    assert_eq!(text.matches(CONNECTORS).count(), 1);
+    assert!(
+        !text.contains(DENIAL),
+        "the composed text denies case law outright"
+    );
+    let fill = |with: bool| {
+        let part = connectors_part(with);
+        clauseo_profile::placeholders::fill(
+            &text,
+            &IN_INSTRUCTIONS,
+            &[(WORK_FOLDER, "W"), (MATTER_NOTES, "M"), (CONNECTORS, part)],
+        )
+        .unwrap()
+    };
+    let (with, without) = (fill(true), fill(false));
+    assert!(!with.contains(DENIAL), "{with}");
+    assert!(without.contains(DENIAL), "{without}");
+    assert!(!without.contains("case-law tools"));
+    let tools = TOOLS
+        .trim()
+        .replace("{author}", "Clauseo")
+        .replace("{work_folder}", "W");
+    for (filled, part) in [(&with, PARAGRAPH), (&without, CONNECTORS_NONE)] {
+        let expected = format!("{tools}\n\n{}\n\n## Identity", part.trim());
+        assert!(filled.starts_with(&expected), "{filled}");
+    }
+    // The research skill's line is conditional: no outright denial for the agent to obey.
+    let research = skill_mds()
+        .into_iter()
+        .find(|(name, _)| *name == "legal-research")
+        .unwrap()
+        .1;
+    assert!(research.contains("If case-law tools are available in this session"));
+    assert!(!research.contains("You have no case-law database"));
 }
 
 #[test]
@@ -218,7 +278,13 @@ fn the_rendered_frontmatter_is_name_and_description_alone() {
         assert!(front.clauseo.is_empty());
         assert!(text.starts_with(&frontmatter::render(skill.name(), &front.description)));
         assert!(!text.contains("metadata:"));
-        assert_eq!(skill.entry().version, "1");
+        // R24 gave the research skill's case-law line conditional wording: version 2.
+        let version = if skill.name() == "legal-research" {
+            "2"
+        } else {
+            "1"
+        };
+        assert_eq!(skill.entry().version, version, "{}", skill.name());
     }
 }
 

@@ -1,5 +1,5 @@
 //! Forwarding through the relay to the fake: the headers, `capabilities: {}`, the re-serialised
-//! body, server-to-client requests dropped, batches, parse errors and notifications, event
+//! request body, server-to-client requests dropped, batches, parse errors and notifications, event
 //! streams as lines, and answers in completion order.
 
 use serde_json::{Value, json};
@@ -171,10 +171,11 @@ fn each_event_of_a_stream_comes_back_as_one_line() {
     let reply: Value = serde_json::from_slice(&line).unwrap();
     assert_eq!(reply["id"], 1);
     assert!(reply["result"]["tools"].is_array());
+    // The fake writes its event compact; the relay passes it on as it came.
     assert_eq!(
         line,
         serde_json::to_vec(&reply).unwrap(),
-        "compact, one line"
+        "as sent, one line"
     );
 }
 

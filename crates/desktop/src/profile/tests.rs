@@ -145,6 +145,9 @@ fn every_agent_with_a_kind_gets_the_author_and_the_browser_entry() {
             Some(&OsString::from("Clauseo")),
             "{id}"
         );
+        // The hook offers both of Clauseo's entries, `browser` then `case-law` (R24); the host
+        // fills each per session or leaves it out (no relay, the connector not signed in, the
+        // switch off, the firm's managed MCP), so the hook never decides.
         let servers = hook.mcp_servers(&agent(id));
         let [
             McpServer::Stdio {
@@ -153,10 +156,21 @@ fn every_agent_with_a_kind_gets_the_author_and_the_browser_entry() {
                 args,
                 env,
             },
+            McpServer::Stdio {
+                name: case_law,
+                command: case_law_command,
+                args: case_law_args,
+                env: case_law_env,
+            },
         ] = servers.as_slice()
         else {
-            panic!("one stdio server: {servers:?}");
+            panic!("two stdio servers: {servers:?}");
         };
+        assert_eq!(case_law, "case-law");
+        assert_eq!(case_law_command, command, "the same clauseo-mcp sidecar");
+        assert_eq!(case_law_args, &["connector", "case-law"]);
+        let names: Vec<&str> = case_law_env.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(names, ["CLAUSEO_RELAY", "CLAUSEO_RELAY_TOKEN_FILE"]);
         assert_eq!(name, "browser");
         assert_eq!(
             command,

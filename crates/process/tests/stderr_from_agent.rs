@@ -54,6 +54,38 @@ fn home_folder_shows_as_tilde_in_the_tail() {
     assert_eq!(report.stderr_tail(), "cannot read ~/project/notes.md\n");
 }
 
+/// A secret the spec names outright, as the host names the case-law relay's token (R24, which
+/// the agent reads from a file, never a variable), is redacted in the tail all the same.
+#[test]
+fn a_secret_the_spec_names_is_redacted_in_the_tail() {
+    let token = "5e".repeat(32);
+    let Launched {
+        mut stdin,
+        stdout: _stdout,
+        stderr,
+        mut handle,
+        ..
+    } = self_agent::launch_redacting(
+        "agent_copies_its_stdin_to_stderr",
+        &SpawnOptions::new(),
+        BTreeMap::new(),
+        vec![token.clone()],
+    )
+    .unwrap();
+    let line = format!("relay hello {{\"token\":\"{token}\"}} refused\n");
+    let (report, pumped) = block_on(async {
+        stdin.write_all(line.as_bytes()).await.unwrap();
+        stdin.close().await.unwrap();
+        join!(handle.exited(), stderr.drain())
+    });
+    pumped.unwrap();
+    assert_eq!(report.code(), Some(0));
+    assert_eq!(
+        report.stderr_tail(),
+        "relay hello {\"token\":\"[redacted]\"} refused\n"
+    );
+}
+
 /// The stderr tail of the agent run as `agent_copies_its_stdin_to_stderr`, given `input` on its
 /// stdin, with no secret variables and no home folder.
 #[cfg(test)]

@@ -10,18 +10,20 @@
 //!    method that only reads as `tools/call` (case, whitespace, compatibility forms) is refused.
 //! 4. The body is the parsed value re-serialised, so what the connector reads is what was
 //!    counted; the headers are the checked `protocolVersion` and `Mcp-Session-Id`.
-//! 5. The one reply value that answers the request (a response with its `id`) is the line;
-//!    anything else (a server-to-client request, a notification, an answer to another id) is
-//!    dropped and logged by kind; a line over [`MAX_REPLY_BYTES`] becomes the reply-too-large
-//!    answer. A notification or the agent's own response gets nothing back; a request always
-//!    gets exactly one answer.
+//! 5. The one reply value that answers the request (a response with its `id`) is the line,
+//!    passed on raw (`reply.rs`); anything else (a server-to-client request, a notification, an
+//!    answer to another id) is dropped and logged by kind; an answer over [`MAX_REPLY_BYTES`]
+//!    becomes the reply-too-large answer. A notification or the agent's own response gets
+//!    nothing back; a request always gets exactly one answer.
+//!
+//! [`MAX_REPLY_BYTES`]: super::super::limits::MAX_REPLY_BYTES
 
-use clauseo_connectors::{
-    AuthError, Error, McpBody, McpReply, McpRequestHeaders, ToolOutcome, classify_tool_result_for,
-};
+mod reply;
+
+use clauseo_connectors::{AuthError, Error, McpReply, McpRequestHeaders};
 use serde_json::{Map, Value, json};
 
-use super::super::limits::{Cap, MAX_REPLY_BYTES, Spend, Taken, local_date};
+use super::super::limits::{Cap, Spend, Taken, local_date};
 use super::super::{CredentialEnd, RelayEvent, texts};
 use super::conn::Conn;
 use super::{Phase, Session, lock};
@@ -94,7 +96,7 @@ pub(super) fn message(conn: &Conn, line: &[u8]) {
         refund(&conn.session, &call);
     }
     let lines = match reply {
-        Ok(reply) => reply_lines(conn, &call, reply),
+        Ok(reply) => reply::lines(conn, &call, reply),
         Err(err) => failed(&conn.session, &call, &err).into_iter().collect(),
     };
     for line in &lines {
@@ -238,24 +240,36 @@ fn vet_tools_call(
 }
 
 /// Counts one call of `spend` against the session's turn and, when paid, the install's day. The
-/// day is read under the day's lock, so two calls at midnight count in clock order.
+/// day is read under the day's lock, so two calls at midnight count in clock order. A paid call
+/// returns once `day.json` holds its count (or a newer one), written outside the locks.
 fn take(session: &Session, spend: Spend) -> Result<Taken, Cap> {
     let hub = &session.hub;
-    let mut caps = lock(&session.caps);
-    let mut day = lock(&hub.day);
-    let today = match spend {
-        Spend::Paid => local_date(hub.clock.now().wall.as_millis(), &*hub.local_day),
-        Spend::Free | Spend::Recharge => String::new(),
+    let (taken, seq) = {
+        let mut caps = lock(&session.caps);
+        let mut day = lock(&hub.day);
+        let today = match spend {
+            Spend::Paid => local_date(hub.clock.now().wall.as_millis(), &*hub.local_day),
+            Spend::Free | Spend::Recharge => String::new(),
+        };
+        let taken = caps.take_call(spend, &mut day, &today)?;
+        (taken, day.seq())
     };
-    caps.take_call(spend, &mut day, &today)
+    if spend == Spend::Paid {
+        hub.day_writer.persist(&hub.day, seq);
+    }
+    Ok(taken)
 }
 
-/// Gives back what `call` counted.
+/// Gives back what `call` counted, and writes the day's count if it changed.
 fn refund(session: &Session, call: &Call) {
     if let Some(taken) = &call.taken {
-        let mut caps = lock(&session.caps);
-        let mut day = lock(&session.hub.day);
-        caps.refund(taken, &mut day);
+        let seq = {
+            let mut caps = lock(&session.caps);
+            let mut day = lock(&session.hub.day);
+            caps.refund(taken, &mut day);
+            day.seq()
+        };
+        session.hub.day_writer.persist(&session.hub.day, seq);
     }
 }
 
@@ -338,125 +352,6 @@ fn describe(err: &Error) -> String {
         | Error::Cancelled
         | Error::BadOrigin => "other".to_owned(),
     }
-}
-
-/// Step 5 for a reply that came back.
-fn reply_lines(conn: &Conn, call: &Call, reply: McpReply) -> Vec<Vec<u8>> {
-    let session = &conn.session;
-    if let Some(sid) = reply.session_id.as_deref() {
-        match checked_session_id(sid) {
-            Some(sid) => lock(&conn.upstream).session_id = Some(sid.to_owned()),
-            None => {
-                tracing::warn!(session = %session.key.id(), "case-law relay: an Mcp-Session-Id was not usable");
-            }
-        }
-    }
-    let Some(id) = call.id.as_ref() else {
-        // A notification or the agent's response: nothing goes back.
-        return Vec::new();
-    };
-    if reply.status == 401 && call.tools_call() {
-        return vec![texts::tool_error(id, texts::SIGNED_OUT)];
-    }
-    if reply.status >= 400 {
-        return vec![texts::failure(
-            id,
-            call.tools_call(),
-            &texts::http_status(reply.status),
-        )];
-    }
-    let values = match reply.body {
-        McpBody::Json(value) => vec![value],
-        McpBody::Events(values) => values,
-        McpBody::Empty => Vec::new(),
-    };
-    let Some(value) = answer_to(session, id, values) else {
-        return vec![texts::failure(id, call.tools_call(), texts::NO_ANSWER)];
-    };
-    if value.get("result").is_some() {
-        read_result(conn, call, &value);
-    }
-    let line = texts::line(&value);
-    if line.len() > MAX_REPLY_BYTES {
-        tracing::info!(session = %session.key.id(), method = call.log_method(), "case-law relay: the reply was too large");
-        return vec![texts::failure(
-            id,
-            call.tools_call(),
-            texts::REPLY_TOO_LARGE,
-        )];
-    }
-    vec![line]
-}
-
-/// The first value that answers request `id`: a response (`result` or `error`, no `method`)
-/// with that very `id`. Everything else is dropped and logged by kind: a request from the
-/// connector by its method, a notification, or an answer to another id. The agent gets only what
-/// the relay vetted, and exactly one answer.
-fn answer_to(session: &Session, id: &Value, values: Vec<Value>) -> Option<Value> {
-    let mut answer = None;
-    for value in values {
-        let method = value.get("method");
-        let is_answer = method.is_none()
-            && (value.get("result").is_some() || value.get("error").is_some())
-            && value.get("id") == Some(id);
-        if is_answer && answer.is_none() {
-            answer = Some(value);
-            continue;
-        }
-        let kind = match (method, value.get("id")) {
-            (Some(method), Some(_)) => log_name(method.as_str()),
-            (Some(_), None) => "notification",
-            (None, _) => "foreign_answer",
-        };
-        tracing::warn!(session = %session.key.id(), kind, "case-law relay: dropped a message from the connector");
-    }
-    answer
-}
-
-/// Reads a response: `initialize`'s protocol version, and a `tools/call` result's meaning.
-fn read_result(conn: &Conn, call: &Call, value: &Value) {
-    let session = &conn.session;
-    if call.method.as_deref() == Some("initialize") {
-        let version = value
-            .pointer("/result/protocolVersion")
-            .and_then(Value::as_str);
-        match version.and_then(checked_protocol_version) {
-            Some(version) => lock(&conn.upstream).protocol_version = Some(version.to_owned()),
-            None => {
-                tracing::warn!(session = %session.key.id(), "case-law relay: initialize gave no usable protocolVersion");
-            }
-        }
-    }
-    let Some(spend) = call.spend else {
-        return;
-    };
-    let hub = &session.hub;
-    match classify_tool_result_for(hub.connector.known(), &hub.origin, value) {
-        ToolOutcome::OutOfCredit(payment) => hub.events.event(RelayEvent::OutOfCredit {
-            session: session.key,
-            payment,
-        }),
-        ToolOutcome::Ok if spend == Spend::Paid => hub.events.event(RelayEvent::PaidResult {
-            session: session.key,
-        }),
-        ToolOutcome::Ok | ToolOutcome::OtherError => {}
-    }
-}
-
-/// A `protocolVersion` fit for a header: 1 to 32 ASCII letters, digits, `-`, `.` or `_`.
-fn checked_protocol_version(version: &str) -> Option<&str> {
-    let fits = (1..=32).contains(&version.len())
-        && version
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_'));
-    fits.then_some(version)
-}
-
-/// An `Mcp-Session-Id` fit for a header: 1 to 256 visible ASCII characters (MCP's own rule).
-fn checked_session_id(sid: &str) -> Option<&str> {
-    let fits =
-        (1..=256).contains(&sid.len()) && sid.bytes().all(|byte| (0x21..=0x7e).contains(&byte));
-    fits.then_some(sid)
 }
 
 /// A method name for the log: up to 64 letters, digits, `/`, `_`, `-` or `.`; else `other`.

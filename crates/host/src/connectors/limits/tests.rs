@@ -6,7 +6,12 @@ use super::*;
 fn day_count(name: &str) -> (clauseo_connectors::fake::ScratchDir, DayCount) {
     let scratch = clauseo_connectors::fake::ScratchDir::new(name).unwrap();
     let path = scratch.path().join("connectors").join("day.json");
-    (scratch, DayCount::load(path))
+    (scratch, DayCount::load(&path))
+}
+
+/// A lock, poisoned or not.
+fn hold<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 #[test]
@@ -66,9 +71,13 @@ fn the_day_cap_resets_on_a_new_local_day_and_survives_a_restart() {
     }
     assert_eq!(day.take("2026-11-02"), Err(Cap::Day));
     let path = scratch.path().join("connectors").join("day.json");
-    let mut again = DayCount::load(path.clone());
+    let seq = day.seq();
+    DayWriter::new(path.clone()).persist(&Mutex::new(day), seq);
+    let mut again = DayCount::load(&path);
     assert_eq!(again.take("2026-11-02"), Err(Cap::Day));
     again.take("2026-11-03").unwrap();
+    let seq = again.seq();
+    DayWriter::new(path.clone()).persist(&Mutex::new(again), seq);
     assert_eq!(
         std::fs::read_to_string(&path).unwrap(),
         r#"{"day":"2026-11-03","paid":1}"#
@@ -85,7 +94,7 @@ fn a_day_file_that_does_not_parse_counts_from_0() {
         r#"{"day":"2026-11-02","paid":1,"x":1}"#,
     ] {
         let path = scratch.write("day.json", text.as_bytes()).unwrap();
-        let day = DayCount::load(path);
+        let day = DayCount::load(&path);
         assert_eq!((day.day.as_str(), day.paid), ("", 0), "{text}");
     }
 }
@@ -142,4 +151,94 @@ fn a_day_far_ahead_does_not_hold_the_cap_once_the_clock_is_back() {
     assert_eq!((day.day.as_str(), day.paid), ("2027-01-01", 2));
     day.take("2026-12-30").unwrap();
     assert_eq!((day.day.as_str(), day.paid), ("2026-12-30", 1));
+}
+
+#[test]
+fn a_write_covers_the_counts_before_it_and_an_older_count_is_never_written() {
+    let (scratch, day) = day_count("coalesce");
+    let writer = DayWriter::new(scratch.path().join("connectors").join("day.json"));
+    let day = Mutex::new(day);
+    let seqs: Vec<u64> = (0..3)
+        .map(|_| {
+            let mut day = hold(&day);
+            day.take("2026-11-02").unwrap();
+            day.seq()
+        })
+        .collect();
+    // The first write takes the newest count; the calls behind it have nothing left to write.
+    for seq in seqs {
+        writer.persist(&day, seq);
+    }
+    assert_eq!(writer.writes.load(std::sync::atomic::Ordering::SeqCst), 1);
+    let read = || std::fs::read_to_string(&writer.path).unwrap();
+    assert_eq!(read(), r#"{"day":"2026-11-02","paid":3}"#);
+    // A refund is a newer count, written; asking again for an older one writes nothing.
+    hold(&day).refund("2026-11-02");
+    let seq = hold(&day).seq();
+    writer.persist(&day, seq);
+    writer.persist(&day, 1);
+    assert_eq!(writer.writes.load(std::sync::atomic::Ordering::SeqCst), 2);
+    assert_eq!(read(), r#"{"day":"2026-11-02","paid":2}"#);
+}
+
+#[test]
+fn concurrent_writers_never_leave_the_file_behind_a_call() {
+    const THREADS: u32 = 8;
+    const CALLS: u32 = 60;
+    let (scratch, day) = day_count("concurrent");
+    let writer = DayWriter::new(scratch.path().join("connectors").join("day.json"));
+    let day = Mutex::new(day);
+    std::thread::scope(|scope| {
+        for _ in 0..THREADS {
+            scope.spawn(|| {
+                for _ in 0..CALLS {
+                    let (seq, mine) = {
+                        let mut day = hold(&day);
+                        day.take("2026-11-02").unwrap();
+                        (day.seq(), day.paid)
+                    };
+                    writer.persist(&day, seq);
+                    // Only takes, on one day: a newer count is a larger one.
+                    let bytes = std::fs::read(&writer.path).unwrap();
+                    let file: DayFile = serde_json::from_slice(&bytes).unwrap();
+                    assert!(
+                        file.paid >= mine,
+                        "the file has {}, the call {mine}",
+                        file.paid
+                    );
+                }
+            });
+        }
+    });
+    let file: DayFile = serde_json::from_slice(&std::fs::read(&writer.path).unwrap()).unwrap();
+    assert_eq!(file.paid, THREADS * CALLS);
+    assert_eq!(*hold(&writer.written), hold(&day).seq());
+    let writes = writer.writes.load(std::sync::atomic::Ordering::SeqCst);
+    assert!(writes <= u64::from(THREADS * CALLS), "{writes} writes");
+}
+
+#[test]
+fn a_day_json_write_flushes_its_folder() {
+    let (scratch, mut day) = day_count("folder-sync");
+    let writer = DayWriter::new(scratch.path().join("connectors").join("day.json"));
+    day.take("2026-11-02").unwrap();
+    let seq = day.seq();
+    let before = FOLDER_SYNCS.with(std::cell::Cell::get);
+    let day = Mutex::new(day);
+    writer.persist(&day, seq);
+    // The first write made `connectors`: its parent is flushed once, then the folder.
+    assert_eq!(FOLDER_SYNCS.with(std::cell::Cell::get), before + 2);
+    // A later write, into the folder that is there now, flushes only the folder.
+    hold(&day).take("2026-11-02").unwrap();
+    let seq = hold(&day).seq();
+    writer.persist(&day, seq);
+    assert_eq!(FOLDER_SYNCS.with(std::cell::Cell::get), before + 3);
+    assert_eq!(
+        std::fs::read_to_string(&writer.path).unwrap(),
+        r#"{"day":"2026-11-02","paid":2}"#
+    );
+    sync_folder(scratch.path()).unwrap();
+    // On Unix the folder is opened, so a folder that is not there fails; Windows does nothing.
+    let missing = sync_folder(&scratch.path().join("missing"));
+    assert_eq!(missing.is_err(), cfg!(unix));
 }

@@ -74,3 +74,38 @@ fn the_drop_lists_are_the_plan_readers() {
     let expected = "CODEX_PATH APP_SERVER_LOGS DEFAULT_AUTH_REQUEST MODEL_PROVIDER";
     assert_eq!(codex, expected);
 }
+
+/// R24: the case-law connector's `clauseo-mcp` is started by the agent's MCP client, which
+/// passes on the agent's own `SystemRoot`; without it Winsock cannot start on Windows. So no
+/// agent's spec (a Claude agent's, or a Codex agent's with its drops and forced variables)
+/// loses it, whatever case the host's environment spells it in.
+#[test]
+fn every_agents_spec_keeps_system_root_for_the_connectors_it_starts() {
+    let agent = AgentLaunch {
+        command: absolute_program(),
+        args: Vec::new(),
+        env: BTreeMap::new(),
+    };
+    for (name, dropped) in [
+        ("SystemRoot", &[][..]),
+        ("SYSTEMROOT", &crate::agent::codex::DROPPED_VARS[..]),
+    ] {
+        let inherited = [(OsString::from(name), OsString::from("C:\\Windows"))];
+        let forced = BTreeMap::from([(OsString::from("CODEX_HOME"), OsString::from("/h"))]);
+        let spec = launch_spec(
+            &agent,
+            BTreeMap::new(),
+            forced,
+            dropped,
+            inherited.into_iter(),
+            std::env::temp_dir(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            spec.env().get(&OsString::from(name)),
+            Some(&OsString::from("C:\\Windows")),
+            "{name}"
+        );
+    }
+}

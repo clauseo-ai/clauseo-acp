@@ -8,5 +8,6 @@ mod forwarding;
 mod handshake_refusals;
 mod input_limits;
 mod lifetime;
+mod raw_replies;
 mod spend;
 mod support;

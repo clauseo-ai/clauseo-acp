@@ -17,6 +17,18 @@ fn calls_pass(agent: &mut Agent, first: u64, count: u32, tool: &str) {
     }
 }
 
+/// Sets the paid count of the open turn (or the between-turns bucket), as if that many paid
+/// calls had gone out. Each call through the relay costs a round trip to the fake, so the
+/// tests reach a cap with a few real calls instead of sending all of them.
+fn seed_paid(rig: &Rig, paid: u32) {
+    rig.session
+        .shared()
+        .caps
+        .lock()
+        .unwrap()
+        .set_paid_for_test(paid);
+}
+
 #[test]
 fn the_61st_paid_call_of_a_turn_gets_the_cap_and_the_next_turn_starts_at_0() {
     let rig = rig();
@@ -25,15 +37,17 @@ fn the_61st_paid_call_of_a_turn_gets_the_cap_and_the_next_turn_starts_at_0() {
     let mut agent = rig.agent();
     let turns = rig.session.turns();
     turns.start();
-    calls_pass(&mut agent, 1, MAX_PAID_CALLS_PER_TURN, "search_law");
-    assert_eq!(rig.mcp_requests().len(), 60);
+    // 59 paid calls counted; the 60th is sent for real and reaches the fake.
+    seed_paid(&rig, MAX_PAID_CALLS_PER_TURN - 1);
+    calls_pass(&mut agent, 1, 1, "search_law");
+    assert_eq!(rig.mcp_requests().len(), 1);
     agent.send_value(&call(100, "citator"));
     let reply = agent.recv();
     assert_eq!(reply["id"], 100);
     assert_eq!(error_text(&reply), texts::TURN_CAP);
     assert_eq!(
         rig.mcp_requests().len(),
-        60,
+        1,
         "the 61st did not reach the fake"
     );
     // `account` is not counted.
@@ -51,12 +65,15 @@ fn the_between_turns_bucket_keeps_its_count_until_the_next_turn_starts() {
     rig.add_api_key();
     rig.fake.set_balance(1_000_000);
     let mut agent = rig.agent();
-    // No turn yet: the between-turns bucket.
-    calls_pass(&mut agent, 1, MAX_PAID_CALLS_PER_TURN, "search_law");
+    // No turn yet: the between-turns bucket, with 59 paid calls counted; the 60th is real.
+    seed_paid(&rig, MAX_PAID_CALLS_PER_TURN - 1);
+    calls_pass(&mut agent, 1, 1, "search_law");
+    assert_eq!(rig.mcp_requests().len(), 1);
     agent.send_value(&call(100, "search_law"));
     assert_eq!(error_text(&agent.recv()), texts::TURN_CAP);
     agent.send_value(&call(101, "search_law"));
     assert_eq!(error_text(&agent.recv()), texts::TURN_CAP);
+    assert_eq!(rig.mcp_requests().len(), 1);
     rig.session.turns().start();
     calls_pass(&mut agent, 200, 1, "search_law");
 }

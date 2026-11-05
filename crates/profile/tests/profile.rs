@@ -238,13 +238,13 @@ fn kind_specific_parts_go_only_to_their_kind() {
     assert!(profile.skill_files(None).is_none());
     for kind in [None, Some(AgentKind::Claude), Some(AgentKind::Codex)] {
         let names: Vec<String> = profile.servers(kind).into_iter().map(|s| s.name).collect();
-        assert_eq!(names, ["browser"]);
+        assert_eq!(names, ["browser", "case-law"]);
     }
 }
 
 #[test]
 fn the_browser_entry_runs_the_guard_with_its_ports_and_variables() {
-    let [browser] = profile()
+    let [browser, _case_law] = profile()
         .servers(Some(AgentKind::Claude))
         .try_into()
         .unwrap();
