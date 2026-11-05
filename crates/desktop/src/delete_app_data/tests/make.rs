@@ -125,6 +125,21 @@ pub(super) fn foreign_reparse_point(folder: &Path, tag: u32) -> io::Result<()> {
     .map_err(io::Error::from)
 }
 
+/// Opens the link `link` itself (not its target) to list it, sharing read access only, so while
+/// the handle lives no one can open the link to delete it.
+#[cfg(windows)]
+pub(super) fn hold_link(link: &Path) -> std::fs::File {
+    use std::os::windows::fs::OpenOptionsExt as _;
+    // FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES: a data access, so the share mode counts (one
+    // asking for attributes alone is not checked against, nor checks, anyone's share mode).
+    std::fs::OpenOptions::new()
+        .access_mode(0x1 | 0x80)
+        .share_mode(0x1)
+        .custom_flags(0x0200_0000 | 0x0020_0000)
+        .open(link)
+        .unwrap()
+}
+
 /// Opens `file` with no sharing, so nothing can delete it while the handle lives.
 #[cfg(windows)]
 pub(super) fn lock(file: &Path) -> std::fs::File {

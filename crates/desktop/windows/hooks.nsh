@@ -36,6 +36,21 @@
 !define CLAUSEO_KEPT_SET_ASIDE 3
 !define CLAUSEO_KEPT_AND_FAILED 4
 
+; Sets $R4 to 1 when PATH is a real folder: GetFileAttributesW says a folder (0x10) and no
+; reparse point (0x400), so a junction or a link is never named as kept and the lawyer is never
+; led through it to its target. INVALID_FILE_ATTRIBUTES (0xFFFFFFFF, -1 as the System plugin's
+; i) is no folder. ${FileExists} would follow a link. Uses $R3; 1040 is 0x410, 16 is 0x10.
+!macro CLAUSEO_REAL_FOLDER PATH
+  StrCpy $R4 0
+  System::Call 'kernel32::GetFileAttributesW(w "${PATH}") i .R3'
+  ${If} $R3 <> -1
+    IntOp $R3 $R3 & 1040
+    ${If} $R3 = 16
+      StrCpy $R4 1
+    ${EndIf}
+  ${EndIf}
+!macroend
+
 !macro NSIS_HOOK_PREUNINSTALL
   ${If} $UpdateMode <> 1
     ; 0. The app closed first.
@@ -108,14 +123,22 @@
       ${EndIf}
       ; The kept folder: the set-aside (3, or 4 after --sandbox-removed), else `sandbox` whenever
       ; it is still there (kept, or left by a failure, a refusal or a missing app), so the lawyer
-      ; is never told to delete its records with the rest. None: only the whole folder is named.
+      ; is never told to delete its records with the rest. Each only when it is a real folder
+      ; (CLAUSEO_REAL_FOLDER; $R2 for the set-aside, $R4 for `sandbox`): a `sandbox` link the app
+      ; kept (another kind of reparse point, or one it could not open) is never named, nor a
+      ; linked set-aside. None: only the whole folder is named.
       StrCpy $R8 ""
+      !insertmacro CLAUSEO_REAL_FOLDER "$R9\sandbox\set-aside"
+      StrCpy $R2 $R4
+      !insertmacro CLAUSEO_REAL_FOLDER "$R9\sandbox"
       ${If} $R7 = ${CLAUSEO_KEPT_SET_ASIDE}
+      ${AndIf} $R2 = 1
         StrCpy $R8 "$R9\sandbox\set-aside"
       ${ElseIf} $R7 = ${CLAUSEO_KEPT_AND_FAILED}
       ${AndIf} $R5 = 1
+      ${AndIf} $R2 = 1
         StrCpy $R8 "$R9\sandbox\set-aside"
-      ${ElseIf} ${FileExists} "$R9\sandbox\*.*"
+      ${ElseIf} $R4 = 1
         StrCpy $R8 "$R9\sandbox"
       ${EndIf}
       ; One message: nothing kept, the whole folder (Failed); a folder kept and all else gone

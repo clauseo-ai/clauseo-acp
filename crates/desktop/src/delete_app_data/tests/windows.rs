@@ -45,6 +45,44 @@ fn a_sandbox_directory_symbolic_link_without_sandbox_removed_is_unlinked_by_hand
 }
 
 #[test]
+fn a_sandbox_file_symbolic_link_without_sandbox_removed_is_unlinked_by_handle() {
+    // The same tag as a directory link: the handle deletes the link, the file stays.
+    let world = World::new("dad-sandbox-file-symlink");
+    let target = world.canary().join("secret.txt");
+    if !make::made_or_unprivileged(make::symlink_file(&target, &world.data("sandbox"))) {
+        return;
+    }
+    assert_linked_sandbox_unlinked(&world);
+}
+
+#[test]
+fn a_sandbox_link_that_cannot_be_opened_is_kept_and_reported() {
+    // Held open by another handle that shares no delete access: the unlink's open fails, the
+    // link stays (and the data folder with it, never handed to remove_dir_all), the run fails.
+    let world = World::new("dad-sandbox-held");
+    let sandbox = world.data("sandbox");
+    make::folder_link(&world.canary(), &sandbox);
+    world.data_file("store.sqlite");
+    let held = make::hold_link(&sandbox);
+    let (code, stderr) = world.delete(false);
+    drop(held);
+    assert_eq!(code, FAILED, "{stderr}");
+    assert!(stderr.contains("sandbox: could not delete it"), "{stderr}");
+    assert!(
+        !stderr.contains(world.canary().to_str().unwrap()),
+        "{stderr}"
+    );
+    let meta = std::fs::symlink_metadata(&sandbox).unwrap();
+    assert!(
+        crate::delete_app_data::walk::is_link(&meta),
+        "the link is still there"
+    );
+    assert!(!exists(&world.data("store.sqlite")));
+    assert!(!exists(&world.roaming_root()));
+    world.assert_canary_whole();
+}
+
+#[test]
 fn a_sandbox_reparse_point_that_is_no_link_is_kept_and_reported() {
     // A reparse point with a tag of our own, neither a junction nor a link (as a cloud
     // placeholder is neither): kept, the data folder with it, and the run fails.

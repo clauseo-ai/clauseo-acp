@@ -125,16 +125,13 @@ fn the_hooks_messages_name_the_kept_folder_through_localappdata() {
             SET_ASIDE_PATH.join("\\")
         )],
     );
-    line_with(
-        body,
-        &[&format!("${{FileExists}} \"$R9\\{SANDBOX_DIR}\\*.*\"")],
-    );
     line_with(body, &[&format!("StrCpy $R8 \"$R9\\{SANDBOX_DIR}\"")]);
     // After --sandbox-removed, a keep with a failure is the set-aside's.
     let kept_and_failed = line_with(body, &["${ElseIf} $R7 = ${CLAUSEO_KEPT_AND_FAILED}"]);
     assert_eq!(body[kept_and_failed + 1], "${AndIf} $R5 = 1");
+    assert_eq!(body[kept_and_failed + 2], "${AndIf} $R2 = 1");
     assert!(
-        body[kept_and_failed + 2].ends_with("\\set-aside\""),
+        body[kept_and_failed + 3].ends_with("\\set-aside\""),
         "{body:?}"
     );
     // One box: Failed only when no folder stays; Kept when one stays and all else went (2, 3);
@@ -149,6 +146,67 @@ fn the_hooks_messages_name_the_kept_folder_through_localappdata() {
     assert_eq!(body[both + 1], "${EndIf}");
     let boxes = body.iter().filter(|line| line.starts_with("MessageBox"));
     assert_eq!(boxes.count(), 3, "{body:?}");
+}
+
+#[test]
+fn the_hook_names_a_kept_folder_only_when_it_is_a_real_folder() {
+    let code = hook_code();
+    // The check: the path's own attributes, a folder and no reparse point, never through a link
+    // (${FileExists} follows one); INVALID_FILE_ATTRIBUTES is no folder.
+    let check = line_with(&code, &["!macro CLAUSEO_REAL_FOLDER PATH"]);
+    // FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY masked, the directory bit alone left.
+    let (reparse, directory) = (0x400, 0x10);
+    let expected = [
+        "StrCpy $R4 0".to_owned(),
+        "System::Call 'kernel32::GetFileAttributesW(w \"${PATH}\") i .R3'".to_owned(),
+        "${If} $R3 <> -1".to_owned(),
+        format!("IntOp $R3 $R3 & {}", reparse | directory),
+        format!("${{If}} $R3 = {directory}"),
+        "StrCpy $R4 1".to_owned(),
+    ];
+    assert_eq!(
+        code[check + 1..=check + expected.len()],
+        expected,
+        "{code:?}"
+    );
+    assert!(check < line_with(&code, &["!macro NSIS_HOOK_PREUNINSTALL"]));
+    // Both folders checked before either is named: the set-aside into $R2, `sandbox` into $R4.
+    let body = preuninstall(&code);
+    let set_aside = SET_ASIDE_PATH.join("\\");
+    let checked_set_aside = line_with(
+        body,
+        &[&format!(
+            "!insertmacro CLAUSEO_REAL_FOLDER \"$R9\\{set_aside}\""
+        )],
+    );
+    assert_eq!(body[checked_set_aside + 1], "StrCpy $R2 $R4");
+    assert_eq!(
+        body[checked_set_aside + 2],
+        format!("!insertmacro CLAUSEO_REAL_FOLDER \"$R9\\{SANDBOX_DIR}\"")
+    );
+    // Each name only under its folder's check.
+    let names = body
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| line.starts_with("StrCpy $R8 \"$R9"));
+    let mut seen = 0;
+    for (at, line) in names {
+        assert!(checked_set_aside < at, "{body:?}");
+        let guard = if line.ends_with("\\set-aside\"") {
+            "${AndIf} $R2 = 1"
+        } else {
+            "${ElseIf} $R4 = 1"
+        };
+        assert_eq!(body[at - 1], guard, "{line}");
+        seen += 1;
+    }
+    assert_eq!(seen, 3, "{body:?}");
+    assert!(
+        !code
+            .iter()
+            .any(|line| line.contains("FileExists") && line.contains("$R9")),
+        "{code:?}"
+    );
 }
 
 #[test]
