@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 use clauseo_settings::{IDENTIFIER, KnownFolder, PlatformDirs};
 
+use super::ops::LinkVerdict;
 use super::{DELETED, FAILED, KEPT_AND_FAILED, KEPT_SANDBOX, KEPT_SET_ASIDE, Mode, ops, say};
 
 /// The sandbox's folder under the local data folder: S15's records (its ledger, the matter
@@ -64,12 +65,12 @@ pub(crate) fn delete(dirs: &dyn PlatformDirs, mode: Mode, stderr: &mut dyn Write
         };
         // `sandbox` stays whole; the set-aside stays unless it is empty.
         let whole = !mode.sandbox_removed;
-        if let Ok(stays) = empty_folder(&root, toward, whole, &mut report) {
-            if stays.is_none() {
+        if let Ok(left) = empty_folder(&root, toward, whole, &mut report) {
+            if left.gone() {
                 remove_emptied(&root, &mut report);
             }
             if local {
-                kept = stays;
+                kept = left.kept;
             }
         }
     }
@@ -149,14 +150,15 @@ pub(super) fn plain(path: &Path) -> PathBuf {
 /// entry not on the way down is removed by std, never entered here: a reparse point as a link,
 /// a folder with `remove_dir_all` (which opens nothing through a link), a file with
 /// `remove_file`. Only the folder on the way down is entered, the same way. What is at the end
-/// of the way down stays as [`stays_whole`] says with `whole`. Answers the folder that stays,
-/// if one does; `Err` when `folder` was not entered (reported).
+/// of the way down stays as [`stays_whole`] says with `whole`, but a `sandbox` that is a link
+/// with `whole` is unlinked by handle and reported ([`unlink_sandbox`]). Answers what is left
+/// in it ([`Left`]); `Err` when `folder` was not entered (reported).
 fn empty_folder(
     folder: &Path,
     toward: &[&str],
     whole: bool,
     report: &mut Report<'_>,
-) -> Result<Option<PathBuf>, ()> {
+) -> Result<Left, ()> {
     // Held until the folder's entries are done, then closed.
     let _pinned = match ops::pin_folder(folder) {
         Ok(pinned) => pinned,
@@ -165,22 +167,28 @@ fn empty_folder(
             return Err(());
         }
     };
-    let mut stays = None;
+    let mut left = Left::default();
     for (path, meta) in entries(folder, report) {
         // Windows file names ignore case: `Sandbox` is `sandbox`. What stays is the entry as
         // listed.
         let next = toward.split_first().filter(|(name, _)| named(&path, name));
         if let Some((_, rest)) = next {
+            if rest.is_empty() && whole && is_link(&meta) {
+                // `sandbox` itself a link, with no --sandbox-removed: S15's records are not
+                // behind it, so it is unlinked by handle, reported, and nothing is kept.
+                left.add(unlink_sandbox(path, report));
+                continue;
+            }
             if rest.is_empty() && stays_whole(&path, &meta, whole) {
-                stays = Some(path);
+                left.kept = Some(path);
                 continue;
             }
             if !rest.is_empty() && !is_link(&meta) && meta.is_dir() {
                 if let Ok(below) = empty_folder(&path, rest, whole, report) {
-                    if below.is_none() {
+                    if below.gone() {
                         remove_emptied(&path, report);
                     }
-                    stays = below.or(stays);
+                    left.add(below);
                 }
                 continue;
             }
@@ -188,7 +196,70 @@ fn empty_folder(
         }
         remove_entry(&path, &meta, report);
     }
-    Ok(stays)
+    Ok(left)
+}
+
+/// What [`empty_folder`] left in a folder on purpose.
+#[derive(Default)]
+struct Left {
+    /// The folder that stays, the uninstaller names it as kept: `sandbox`, or the set-aside.
+    kept: Option<PathBuf>,
+    /// Something else that must not go and is no kept folder: a linked `sandbox` that is a
+    /// reparse point of another kind, or one the handle could not open (each reported).
+    held: bool,
+}
+
+impl Left {
+    /// Whether nothing was left, so the folder itself goes ([`remove_emptied`]): never
+    /// through std's `remove_dir_all` over something held, which would enter a reparse point
+    /// that is no link.
+    fn gone(&self) -> bool {
+        self.kept.is_none() && !self.held
+    }
+
+    /// Adds what was left further down.
+    fn add(&mut self, below: Self) {
+        self.kept = below.kept.or(self.kept.take());
+        self.held |= below.held;
+    }
+}
+
+/// Unlinks `sandbox`, listed as a reparse point, by handle (`ops::unlink_name_surrogate`), and
+/// reports it: a failure each way, since S15's records were not where they should be. Answers
+/// what is left: `sandbox` kept only when the handle found a real folder after all (it stays
+/// whole, as `sandbox` does). A link removed leaves nothing; a reparse point of another kind,
+/// or one not opened, is held but never kept, so the uninstaller never calls it the kept folder
+/// and the run fails ([`FAILED`]) unless a real folder was kept.
+fn unlink_sandbox(path: PathBuf, report: &mut Report<'_>) -> Left {
+    let held = Left {
+        kept: None,
+        held: true,
+    };
+    match ops::unlink_name_surrogate(&path) {
+        Ok(LinkVerdict::NotALink) => Left {
+            kept: Some(path),
+            held: false,
+        },
+        Ok(LinkVerdict::Unlinked) => {
+            report.note(
+                &path,
+                "was a link (a junction or a symbolic link), not the sandbox's folder: removed \
+                 as a link, nothing it points at touched or kept",
+            );
+            Left::default()
+        }
+        Ok(LinkVerdict::Kept(tag)) => {
+            report.note(
+                &path,
+                &format!("is a reparse point of another kind (tag {tag:#010x}): kept, not deleted"),
+            );
+            held
+        }
+        Err(error) => {
+            report.fail(&path, &error);
+            held
+        }
+    }
 }
 
 /// Whether `path`'s last name is `name`, ignoring case as Windows does.
@@ -302,6 +373,12 @@ impl<'a> Report<'a> {
             self.stderr,
             &format!("{}: could not delete it ({error})", path.display()),
         );
+    }
+
+    /// Counts a failure at `path` that was no error, and writes what happened.
+    pub(super) fn note(&mut self, path: &Path, what: &str) {
+        self.failures += 1;
+        say(self.stderr, &format!("{}: {what}", path.display()));
     }
 
     /// Reports `result`'s failure at `path`, if any; a path already gone is no failure.

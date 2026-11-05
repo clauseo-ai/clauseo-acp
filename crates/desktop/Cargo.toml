@@ -91,6 +91,9 @@ rustls = { workspace = true, features = ["ring", "std", "tls12"] }
 # Threading for OpenProcessToken; clauseo-sandbox (above) reads the sandbox user record. Its
 # CI test (tests/jailed_windows.rs) also uses Security's CreateRestrictedToken and Threading's
 # CreateProcessAsUserW.
+# The uninstaller's deletion (src/delete_app_data/ops.rs): Storage_FileSystem for a linked
+# `sandbox`'s reparse tag and its delete on one handle (GetFileInformationByHandleEx,
+# SetFileInformationByHandle). Other crates already build the feature.
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [
   "Win32_Foundation",
@@ -99,6 +102,7 @@ windows = { workspace = true, features = [
   "Win32_Graphics_Gdi",
   "Win32_System_Com",
   "Win32_System_LibraryLoader",
+  "Win32_Storage_FileSystem",
   "Win32_System_SystemInformation",
   "Win32_System_Threading",
   "Win32_UI_Controls",
@@ -142,3 +146,8 @@ semver = "1"
 tracing-subscriber = { workspace = true, features = ["fmt"] }
 # The canary test (tests/canary.rs) unzips each counts body it captured to search it.
 flate2 = { workspace = true }
+
+# The deletion's Windows tests (src/delete_app_data/tests/make.rs) set a reparse point that is no
+# link with DeviceIoControl (System_IO), to see it kept.
+[target.'cfg(windows)'.dev-dependencies]
+windows = { workspace = true, features = ["Win32_System_IO"] }

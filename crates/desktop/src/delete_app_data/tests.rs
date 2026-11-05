@@ -4,6 +4,7 @@
 //! stand in, so the walk's logic runs on every CI OS.
 
 mod make;
+mod sandbox_link;
 mod sources;
 #[cfg(windows)]
 mod windows;
