@@ -291,7 +291,18 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
   (#416) need nothing new. Actor state alone marks the queue as waiting for the sign-in:
   `restart_agents` clears the mark and resumes the queue, so a second call does nothing. A
   lawyer's `ResumeQueue`, `SendQueuedNow` or new prompt moves the queue as usual, and the mark
-  goes once the queue no longer shows held. Nothing new is logged for the hold.
+  goes once the queue no longer shows held. Nothing new is logged for the hold beyond one flag.
+- *The held turn keeps its head place across a host restart* (the host code owner's ruling,
+  2026-11-05). It was sent first, and the turns queued behind it may depend on its answer. Its
+  `TurnQueued` carries `at_head: true`, a new optional field (`TurnQueued::at_head`,
+  `is_at_head`). False is written as a missing field and a missing field reads as false, so
+  every older entry, and every other `TurnQueued`, is written byte for byte as before, the
+  corpus is unchanged, and an old log restores in log order as before. `bindings.ts` gains
+  `at_head?: boolean`, which the app does not read. Start-up's queue rebuild
+  (`queue/restore.rs`) puts the turns marked `at_head` first, the latest put back first, then
+  the rest in the order they joined the queue. When the first restored turn is one of them, the
+  queue comes back held for the sign-in as well as held, so `restart_agents` resumes it as it
+  would have before the restart.
 - *The `LoginCheck` hook.* `HostConfig::with_login_check(Arc<dyn LoginCheck + Send + Sync>)` sets
   it. Its one call is `check(&AgentId, agent_home: &Path) -> LoginLink`, and `LoginLink` is
   `Own`, `Shared`, `Split` or `Gone`. Desktop backs it with S18's `codex_link_holds` and
@@ -313,8 +324,27 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
   - *The guard.* While the hook is set and the login is reused, or the last check answered
     `Shared` or gave no answer, a prompt to that Codex agent whose text starts `/login` is
     refused with `signin.login_shared` before anything is queued. `/logout` is refused always,
-    as above. The host never calls `login` or `authenticate`.
+    as above. The host never calls `login`.
+  - *`/login` is hidden too.* The host drops `login`, in any case, from the commands a Codex
+    agent advertises, beside `logout`, before they are logged as `CommandsAvailable`. Signing
+    in goes through Clauseo's own sign-in. A typed `/login` is still refused by the guard as
+    above, and otherwise goes to the agent as before.
   - The hook's logs name the agent and the outcome, never a path.
+- *The API-key `authenticate` retry* (brief, "API keys"). When a Codex agent answers
+  `session/new`, `session/load`, `session/resume` or `session/prompt` with auth-required,
+  the host calls `AcpClient::authenticate("api-key")` once and sends the same call again, only
+  when all of these hold:
+  - the profile hook's launch env set a non-empty `CODEX_API_KEY` for that launch;
+  - the launch's `LoginCheck` answered `Own`. `Shared`, `Split`, `Gone`, no answer and no
+    hook set never retry;
+  - desktop does not say the login is reused (`set_reused_login`), checked again at each call,
+    so the host never retries while a link exists.
+
+  There is one try per agent process (`actor/turn/key_retry.rs`). A second auth-required, or
+  an `authenticate` that fails, ends the call with the first auth-required, so the turn is held
+  for the sign-in with `agent.auth_required` as above. The host sends only the method id, and
+  codex-acp reads the key from its own environment, so the host never reads the key's value.
+  The logs carry the outcome and an error's code only.
 - *New codes.* `settings.refused` (P4a, above) and `signin.login_shared`. The second is not
   retryable and goes just before `unknown`, after `settings.refused`. It refuses a Codex login
   change while Clauseo's Codex home shares the lawyer's ChatGPT login file. The fix is in the
