@@ -156,6 +156,9 @@ pub enum Refusal {
     UnreadableMatterJson,
     /// It is, contains or sits inside the matters root.
     MattersRoot,
+    /// Its path is too long for Windows to start programs in it (over
+    /// [`WINDOWS_FOLDER_LIMIT`](crate::WINDOWS_FOLDER_LIMIT) UTF-16 units). Windows only.
+    TooDeep,
 }
 
 impl fmt::Display for Refusal {
@@ -175,6 +178,9 @@ impl fmt::Display for Refusal {
             }
             Self::MattersRoot => {
                 f.write_str("it is, holds or sits inside Clauseo's matters folder")
+            }
+            Self::TooDeep => {
+                f.write_str("its path is too long for Windows to start programs in it")
             }
         }
     }

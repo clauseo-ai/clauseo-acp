@@ -6,6 +6,8 @@
 
 use std::ffi::OsString;
 use std::io;
+#[cfg(windows)]
+use std::os::windows::ffi::OsStrExt;
 use std::path::{Component, Path, PathBuf, Prefix};
 
 use unicode_normalization::UnicodeNormalization;
@@ -13,11 +15,59 @@ use unicode_normalization::UnicodeNormalization;
 use crate::matter::json;
 use crate::{Error, MissingReason, Refusal, Settings};
 
+/// The longest folder path Windows can start programs in, in UTF-16 units, without a trailing
+/// separator. Windows cannot start programs in a folder this long; measured on Windows 11 with
+/// and without long-path support: a working folder of 335 units fails with error 267, "The
+/// directory name is invalid", through Rust's `current_dir`, plain or `\\?\`, and a short
+/// junction does not help either. The limit is `CreateProcessW`'s `MAX_PATH`: 260 with the NUL, so
+/// 258 for the folder and its trailing backslash, with a margin of 18 that leaves room for a
+/// shell to `cd` into a short subfolder. A path longer than this is refused
+/// (`Refusal::TooDeep`); exactly this long is allowed.
+pub const WINDOWS_FOLDER_LIMIT: usize = 240;
+
+/// Whether a folder path of `units` UTF-16 units is too deep for Windows to start programs in.
+/// OS-neutral, so the rule is tested on every OS; the count is the caller's ([`is_too_deep`]).
+pub(crate) const fn too_deep_for_windows(units: usize) -> bool {
+    units > WINDOWS_FOLDER_LIMIT
+}
+
+/// Whether Windows can't start programs in `folder`: its path is longer than
+/// [`WINDOWS_FOLDER_LIMIT`] UTF-16 units, counted as Windows counts a path ([`path_units`]).
+/// Always false off Windows, where a long path is fine. Its file system calls: none.
+pub fn is_too_deep(folder: &Path) -> bool {
+    cfg!(windows) && too_deep_for_windows(path_units(folder))
+}
+
+/// `folder`'s path in UTF-16 units, as Windows counts a path: `encode_wide` on Windows.
+fn path_units(folder: &Path) -> usize {
+    #[cfg(windows)]
+    {
+        folder.as_os_str().encode_wide().count()
+    }
+    #[cfg(not(windows))]
+    {
+        folder.to_string_lossy().encode_utf16().count()
+    }
+}
+
+/// Refuses `folder` (`Refusal::TooDeep`) when [`is_too_deep`] says Windows can't start programs
+/// in it, the path as given.
+fn check_depth(folder: &Path) -> Result<(), Error> {
+    if is_too_deep(folder) {
+        return Err(Error::FolderRefused {
+            folder: folder.to_path_buf(),
+            reason: Refusal::TooDeep,
+        });
+    }
+    Ok(())
+}
+
 /// Refuses `folder` if, once canonicalised, it is a drive root, or equals or contains an entry of
 /// `refused` (each canonicalised too, or taken as written when that fails). Paths are compared
 /// by components ([`spellings`]): composed (NFC) everywhere, and ASCII- and Unicode-case-
 /// insensitively on macOS and Windows.
-/// On macOS a path under `/System/Volumes/Data` is also compared without that prefix.
+/// On macOS a path under `/System/Volumes/Data` is also compared without that prefix. On Windows
+/// a path too deep to start programs in is refused too ([`is_too_deep`]).
 pub(crate) fn check_folder(folder: &Path, refused: &[PathBuf]) -> Result<(), Error> {
     let canonical = dunce::canonicalize(folder).map_err(|err| {
         if err.kind() == io::ErrorKind::NotFound {
@@ -40,6 +90,7 @@ pub(crate) fn check_folder(folder: &Path, refused: &[PathBuf]) -> Result<(), Err
     if is_mount_point(&canonical)? {
         return Err(refuse(Refusal::DriveRoot));
     }
+    check_depth(&canonical)?;
     let candidate = spellings(&canonical);
     for entry in refused {
         let resolved = dunce::canonicalize(entry).unwrap_or_else(|_| entry.clone());
@@ -69,15 +120,18 @@ pub fn check_place(folder: &Path, refused: &[PathBuf]) -> Result<(), Error> {
 /// Import's protected-tree check alone, as [`Matter::import`](crate::Matter::import) runs it
 /// after its marker read ([`check_outside_root`]): refuses a folder that is, holds or sits
 /// inside the matters root (`Refusal::MattersRoot`) or a `refused_trees` entry
-/// (`Refusal::Listed`). For the host's `FolderSupport` query, which refuses what an import
-/// would before checking the folder. The folder need not exist: a new matter's folder is
-/// checked before it is made, by its path as it would be ([`same_or_nested`] resolves the part
-/// that is not made yet), and nothing is read or written.
+/// (`Refusal::Listed`), and on Windows a path too deep to start programs in
+/// (`Refusal::TooDeep`). For the host's `FolderSupport` query, which refuses what an import
+/// would before checking the folder, and for create, which runs it before the folder is made.
+/// The folder need not exist: a new matter's folder is checked before it is made, by its path
+/// as it would be ([`same_or_nested`] resolves the part that is not made yet), and nothing is
+/// read or written.
 pub fn check_protected(folder: &Path, settings: &Settings) -> Result<(), Error> {
     let refuse = |reason| Error::FolderRefused {
         folder: folder.to_path_buf(),
         reason,
     };
+    check_depth(folder)?;
     if same_or_nested(folder, &settings.matters_root) {
         return Err(refuse(Refusal::MattersRoot));
     }

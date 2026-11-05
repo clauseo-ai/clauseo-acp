@@ -48,6 +48,7 @@ export type ErrorCode =
   | "matter.folder_in_matters_root"
   | "matter.folder_network"
   | "matter.folder_no_permissions"
+  | "matter.folder_too_deep"
   | "transport.unauthorized"
   | "transport.too_large"
   | "settings.locked"
@@ -121,6 +122,8 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   "matter.folder_network": "Codex can't work on a network drive. Move the matter to this computer.",
   "matter.folder_no_permissions":
     "Codex can't work on a drive without file permissions. Move the matter to this computer.",
+  "matter.folder_too_deep":
+    "This matter's folder is too deep for Windows to start programs in it. Move the folder nearer the top of its drive, or choose a higher folder as the matter.",
   "transport.unauthorized": "That wasn't allowed, so nothing changed.",
   "transport.too_large": "That is too large to send.",
   "settings.locked": "Your organisation manages that setting, so it can't be changed.",
