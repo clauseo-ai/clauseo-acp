@@ -81,6 +81,7 @@ pub(crate) fn notice(n: usize) -> DomainEvent {
     DomainEvent::Notice(Notice {
         level: NoticeLevel::Info,
         text: format!("notice {n}"),
+        kind: None,
     })
 }
 

@@ -8,7 +8,7 @@ use crate::{
     AgentId, AvailableCommand, CheckpointId, CheckpointKind, CompactString, CompactionStatus,
     ConfigOption, ContentBlock, Deliverable, Delivery, ElicitationId, ElicitationOutcome,
     ElicitationRequest, ErrorCode, EventId, ExpiryReason, FileChange, ImportSummary,
-    LimitStopReason, MatterId, MatterKind, MatterPath, MessageId, NoticeLevel, PageVia,
+    LimitStopReason, MatterId, MatterKind, MatterPath, MessageId, NoticeKind, NoticeLevel, PageVia,
     PermissionAbout, PermissionChoice, PermissionOption, PermissionRequestId, PlanEntry, Principal,
     RestoreScope, Seq, SkippedFile, SteerOutcome, StopReason, TextKind, TextOrBlob, ThreadId,
     Timestamp, ToolCallContent, ToolCallId, ToolCallStatus, ToolKind, ToolLocation, TurnId,
@@ -435,8 +435,11 @@ pub struct NoticeEntry {
     pub event: EventId,
     /// How loud.
     pub level: NoticeLevel,
-    /// The text.
+    /// The text: shown when `kind` is absent or one this version does not know.
     pub text: String,
+    /// Which host notice it is, for the app's own words; absent for an agent notice.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub kind: Option<NoticeKind>,
     /// When it was logged (display only; the `Notice` envelope's `ts`).
     pub ts: Timestamp,
 }

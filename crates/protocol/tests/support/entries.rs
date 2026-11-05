@@ -12,7 +12,7 @@ use clauseo_protocol::{
     AgentContentEntry, AgentTextEntry, BackgroundMark, CheckpointKind, ContentBlock, ContextUsage,
     Deliverable, Delivery, ElicitationEntry, ElicitationRequest, ElicitationState, ExpiryReason,
     HeaderEntry, ImportSummary, LimitStopEntry, LimitStopReason, MarkerEntry, MarkerKind,
-    MatterHeaderEntry, MatterKind, NoticeEntry, NoticeLevel, PageVia, PermissionAbout,
+    MatterHeaderEntry, MatterKind, NoticeEntry, NoticeKind, NoticeLevel, PageVia, PermissionAbout,
     PermissionChoice, PermissionEntry, PermissionKind, PermissionOption, PermissionState,
     Principal, StepEntry, StopReason, TextKind, TextOrBlob, ThreadStatus, Timestamp, ToolCallEntry,
     ToolCallPage, ToolCallSearch, ToolCallWeb, UserMessageEntry, UserMessageStatus, VersionEntry,
@@ -204,8 +204,9 @@ fn turn_entries() -> Vec<ViewEntry> {
         ViewEntry::Notice(NoticeEntry {
             order: seq(10),
             event: event_id(21),
-            level: NoticeLevel::Warning,
-            text: "Context nearly full".to_owned(),
+            level: NoticeLevel::Info,
+            text: "Clauseo doesn't remember the earlier questions and answers.".to_owned(),
+            kind: Some(NoticeKind::ContextNotRestored),
             ts: Timestamp::new(1_760_000_005_000).unwrap(),
         }),
         ViewEntry::Marker(MarkerEntry {

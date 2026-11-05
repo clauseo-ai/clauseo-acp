@@ -6,8 +6,9 @@ expression: "entry(\"notice\")"
   "notice": {
     "order": 10,
     "event": "01900000-0000-7000-8000-000000000015",
-    "level": "warning",
-    "text": "Context nearly full",
+    "level": "info",
+    "text": "Clauseo doesn't remember the earlier questions and answers.",
+    "kind": "context_not_restored",
     "ts": 1760000005000
   }
 }

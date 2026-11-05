@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     AgentCapabilities, AgentId, AgentSessionId, AvailableCommand, CompactString, CompactionStatus,
-    ConfigOption, Cost, Count, DetachReason, DoneBy, MatterId, NoticeLevel, PlanEntry,
+    ConfigOption, Cost, Count, DetachReason, DoneBy, MatterId, NoticeKind, NoticeLevel, PlanEntry,
     RenameSource, SnoozeBy, TextOrBlob, Timestamp,
 };
 
@@ -146,14 +146,19 @@ pub struct UsageUpdated {
     pub cost: Option<Cost>,
 }
 
-/// A notice for the lawyer, from the agent or the host.
+/// A notice for the lawyer, from the agent or the host. A host notice carries a `kind` the app
+/// shows in its own words; an agent notice never does. `text` is the fallback: what a view that
+/// does not know the kind shows, and an agent notice's only words.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct Notice {
     /// How prominent it is.
     pub level: NoticeLevel,
-    /// What it says.
+    /// What it says: the agent's words, or the host's English fallback for its `kind`.
     pub text: String,
+    /// Which host notice it is; left out for an agent notice and in logs written before kinds.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub kind: Option<NoticeKind>,
 }
 
 /// Context compaction started or finished.

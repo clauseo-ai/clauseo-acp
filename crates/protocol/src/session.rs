@@ -280,6 +280,24 @@ open_unit_enum! {
     test mod notice_level;
 }
 
+open_data_enum! {
+    /// Which notice the host gave, so the app shows it in its own words, in the lawyer's
+    /// language. Host notices get a kind; agent notices never do, and keep their free text.
+    ///
+    /// A plain string for a unit variant; a kind from a newer Clauseo decodes to `Unknown`, and
+    /// the app then shows the notice's `text`. Data, not unit-only, because a later kind carries
+    /// fields.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub enum NoticeKind {
+        /// The agent started a new session after earlier turns, so it does not remember them.
+        ContextNotRestored = "context_not_restored",
+        _ =>
+        /// A kind from a newer Clauseo; written back as the plain string `kind`.
+        Unknown,
+    }
+    test mod notice_kind with [NoticeKind::ContextNotRestored];
+}
+
 open_unit_enum! {
     /// Where context compaction stands.
     pub enum CompactionStatus {

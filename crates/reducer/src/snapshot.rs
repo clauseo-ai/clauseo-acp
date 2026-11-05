@@ -28,7 +28,7 @@ use crate::{Error, StreamState};
 /// events. Bump it with any change to a state field, to how it serialises, or to how events fold
 /// into it (a snapshot folded under the old rule holds the old result): the insta test
 /// `snapshot_shape_is_pinned` fails on a shape change, not on a fold-rule change.
-pub const REDUCER_SCHEMA_VERSION: u32 = 9;
+pub const REDUCER_SCHEMA_VERSION: u32 = 10;
 
 /// A snapshot as read: the schema it was written with and the state.
 #[derive(Debug, Clone, PartialEq)]

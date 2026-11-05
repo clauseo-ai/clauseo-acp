@@ -14,8 +14,8 @@ use std::sync::Arc;
 use clauseo_acp::{AcpClient, AgentInfo, LoadSession, McpServer, NewSession, SessionStart};
 use clauseo_protocol::{
     AgentChoiceId, AgentKind, AgentNamed, AgentSessionAttached, CompactString,
-    ConfigOptionsReplaced, Envelope, ErrorCode, MatterId, ModeChanged, Notice, NoticeLevel,
-    StreamId, ThreadId, ViewEntry,
+    ConfigOptionsReplaced, Envelope, ErrorCode, MatterId, ModeChanged, Notice, NoticeKind,
+    NoticeLevel, StreamId, ThreadId, ViewEntry,
 };
 
 use super::super::Actor;
@@ -29,9 +29,10 @@ use crate::error::Error;
 use crate::log_file::Cause;
 use crate::sent::SentView;
 
-/// The notice a thread gets when its agent starts a new session after earlier turns.
-const CONTEXT_NOT_RESTORED: &str = "The agent started a new session for this thread, so it \
-     does not remember the earlier turns.";
+/// The fallback words of the notice a thread gets when its agent starts a new session after
+/// earlier turns (`NoticeKind::ContextNotRestored`), for a view that does not know the kind.
+const CONTEXT_NOT_RESTORED: &str = "Clauseo doesn't remember the earlier questions and answers \
+     in this conversation. Include what it needs from them in your next question.";
 
 pub(super) fn on_initialized(actor: &mut Actor, thread: ThreadId, info: AgentInfo) {
     let stored = actor
@@ -483,13 +484,16 @@ fn attach_commit(
             Notice {
                 level: NoticeLevel::Info,
                 text: CONTEXT_NOT_RESTORED.to_owned(),
+                kind: Some(NoticeKind::ContextNotRestored),
             },
         )?;
     }
     // The skill packs the launch left out, each pack and reason told once per thread (0040).
     for text in super::launch_checks::pack_notices(actor, thread) {
         let level = NoticeLevel::Warning;
-        out.push(actor, Notice { level, text })?;
+        // Words only until `NoticeKind::SkillPackNotLoaded` (0040, stage E's follow-up).
+        let kind = None;
+        out.push(actor, Notice { level, text, kind })?;
     }
     let now = actor.now().wall;
     let entry = actor
