@@ -52,6 +52,13 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 filter = 'package(clauseo-sandbox) & binary(jail) & test(/twenty_thousand/)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
+# The sandbox's tier B timing row (ignored; run on a Windows VM with --run-ignored) makes 50,000
+# files, then times three walks over them: about 11 s, 10 s and 10 s each on the S15 PR3 VM run at
+# fca0bf0ca, plus the file creation, so 30 s killed it on 3 of 3 tries. 600 s still ends a hung one.
+[[profile.default.overrides]]
+filter = 'package(clauseo-sandbox) & test(=windows::apply::ntfs_tests::timing_first_propagation_and_fix_costs)'
+slow-timeout = { period = "60s", terminate-after = 10 }
+
 # host's window-specs test launches the host and fake_agent once for every scenario the window's
 # e2e specs play, one after another, so it grows with each new spec: about 2.3 s on Linux and
 # macOS, 15 s on the Windows x64 runner, and past 30 s on both tries on Windows ARM64 (merge
