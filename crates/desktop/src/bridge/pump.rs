@@ -24,6 +24,7 @@ use tauri::ipc::Channel;
 use super::window::{AckError, Feed, Forward, Position, Restart, WindowState};
 use super::{PRINCIPAL, lock};
 use crate::frame::{self, Frame};
+use crate::setup::SetupEvents;
 
 mod feeds;
 
@@ -44,6 +45,8 @@ pub(crate) struct Window {
     state: WindowState,
     /// Which app-feed events its channel carries (0028).
     app_events: AppEvents,
+    /// Where the setup events come from (`Feed::Setup`).
+    setup: Arc<SetupEvents>,
     /// The pump of each stream whose host subscription is live.
     pumps: HashMap<StreamId, JoinHandle<()>>,
     /// The pump of each feed whose host subscription is live.
@@ -74,11 +77,12 @@ pub(super) fn now() -> Instant {
 }
 
 impl Window {
-    /// A window sending on `channel` what `host` publishes, its watchdog running.
+    /// A window sending on `channel` what `host` and `setup` publish, its watchdog running.
     pub(crate) fn open(
         host: HostHandle,
         channel: Channel<Frame>,
         app_events: AppEvents,
+        setup: Arc<SetupEvents>,
     ) -> Arc<Mutex<Window>> {
         let window = Arc::new(Mutex::new(Window {
             host,
@@ -86,6 +90,7 @@ impl Window {
             channel,
             state: WindowState::new(),
             app_events,
+            setup,
             pumps: HashMap::new(),
             feed_pumps: BTreeMap::new(),
             #[cfg(test)]

@@ -16,8 +16,12 @@
 //!   the current view, never the `account_limits_changed` it missed: the view must carry
 //!   everything the window shows of the limits.
 //!
-//! The host refuses either only once it has stopped, so a failed restart is not retried: the
-//! window stops following the feed.
+//! - The setup events (`setup.rs`, 0048), desktop's own, which `subscribe_app` follows for
+//!   `main` and the settings window. Every follow, a restart's included, starts with the
+//!   latest `setup_info` and each agent's states, so a restart needs no read.
+//!
+//! The host refuses the first two only once it has stopped, and the setup events never, so a
+//! failed restart is not retried: the window stops following the feed.
 
 use std::sync::{Arc, Mutex, Weak};
 
@@ -29,6 +33,7 @@ use tauri::async_runtime;
 
 use super::{Feed, Forward, Window};
 use crate::bridge::{PRINCIPAL, lock};
+use crate::setup::SetupEvents;
 
 /// Which feed events a window's channel carries: an allow-list keyed on its label (0028).
 /// `main` carries them all. The settings window carries the limits (U12) and, of the app feed,
@@ -59,7 +64,7 @@ impl AppEvents {
     /// event as its one key first (`{"settings_changed":...}`), so the key's prefix names it.
     pub(in crate::bridge) fn carries(self, feed: Feed, json: &str) -> bool {
         match (feed, self) {
-            (_, Self::All) | (Feed::Limits, Self::SettingsAndLimits) => true,
+            (_, Self::All) | (Feed::Limits | Feed::Setup, Self::SettingsAndLimits) => true,
             // `update_changed` (0037) joins here in R23 PR 5, with a feed restart that reads
             // `GetUpdate` as it reads `GetSettings`; until then only main carries it.
             (Feed::App, Self::SettingsAndLimits) => json.starts_with(r#"{"settings_changed":"#),
@@ -130,13 +135,30 @@ async fn current_settings(host: &HostHandle) -> Result<String, HostError> {
         .map_err(|error| HostError::new(ErrorCode::Internal, error.to_string()))
 }
 
-/// A host subscription to `feed`, and the text to send before its events: for the app feed
-/// with `current`, the settings, read after subscribing.
+/// One event of a feed: the host's, as it encoded it, or a setup message's text.
+enum FeedEvent {
+    Host(EncodedEvent),
+    Setup(Arc<str>),
+}
+
+impl FeedEvent {
+    /// The channel message's JSON text.
+    fn json(&self) -> &str {
+        match self {
+            Self::Host(event) => event.json(),
+            Self::Setup(text) => text,
+        }
+    }
+}
+
+/// A subscription to `feed`, and the text to send before its events: for the app feed with
+/// `current`, the settings, read after subscribing.
 async fn subscribe(
     host: &HostHandle,
+    setup: &SetupEvents,
     feed: Feed,
     current: bool,
-) -> Result<(BoxStream<'static, EncodedEvent>, Option<String>), HostError> {
+) -> Result<(BoxStream<'static, FeedEvent>, Option<String>), HostError> {
     match feed {
         Feed::App => {
             let subscription = host.subscribe_app(PRINCIPAL).await?;
@@ -146,10 +168,15 @@ async fn subscribe(
             } else {
                 None
             };
-            Ok((subscription.boxed(), settings))
+            Ok((subscription.map(FeedEvent::Host).boxed(), settings))
         }
         // Its first event is the current view.
-        Feed::Limits => Ok((host.subscribe_limits(PRINCIPAL).await?.boxed(), None)),
+        Feed::Limits => {
+            let subscription = host.subscribe_limits(PRINCIPAL).await?;
+            Ok((subscription.map(FeedEvent::Host).boxed(), None))
+        }
+        // Its first events are the latest states.
+        Feed::Setup => Ok((setup.follow().map(FeedEvent::Setup).boxed(), None)),
     }
 }
 
@@ -164,11 +191,15 @@ pub(crate) async fn start_feed(
     restart_id: u64,
     current: bool,
 ) -> Result<(), HostError> {
-    if lock(window).state.is_paused() {
-        // Started when acks catch up.
-        return Ok(());
-    }
-    let (subscription, first) = match subscribe(host, feed, current).await {
+    let setup = {
+        let guard = lock(window);
+        if guard.state.is_paused() {
+            // Started when acks catch up.
+            return Ok(());
+        }
+        Arc::clone(&guard.setup)
+    };
+    let (subscription, first) = match subscribe(host, &setup, feed, current).await {
         Ok(started) => started,
         Err(error) => {
             let mut guard = lock(window);
@@ -224,7 +255,7 @@ async fn pump_feed(
     window: Weak<Mutex<Window>>,
     feed: Feed,
     restart_id: u64,
-    mut subscription: BoxStream<'static, EncodedEvent>,
+    mut subscription: BoxStream<'static, FeedEvent>,
     // Held by the future and dropped with it: an abort hangs it up.
     _probe: Probe,
 ) {

@@ -11,14 +11,17 @@
 //!   parses once;
 //! - a stream the bridge could not restart: `{"stream_failed":{"stream":<StreamId>,
 //!   "error":<HostError>}}`;
+//! - a setup event of desktop's own (decision record 0048, `setup.rs`): `{"setup":<SetupEvent>}`,
+//!   below [`FRAME_LIMIT`] as it is, else in fragments like an event (a failed install's log
+//!   can be about 26 KB): the joined text is the whole `setup` message;
 //! - in the `e2e` build only, an event with the time the bridge received it from the host:
 //!   `{"timed":{"received_ms":<f64>,"event":<the event's text>}}`, `received_ms` in ms since
 //!   the Unix epoch. The event's text goes in as it is, between a fixed prefix and suffix. An
 //!   event that does not fit one message so wrapped goes as above, with no time. The default
 //!   build never sends it.
 //!
-//! The reader tells them apart by the top-level key: `fragment`, `stream_failed` and `timed`
-//! are reserved, and no `HostEvent` kind may take one (a test in `frame/tests.rs` checks).
+//! The reader tells them apart by the top-level key: `fragment`, `stream_failed`, `setup` and
+//! `timed` are reserved, and no `HostEvent` kind may take one (a test in `frame/tests.rs` checks).
 //! Every message is below [`FRAME_LIMIT`] bytes, so Tauri hands it to the page with one `eval`
 //! instead of a second fetch round trip.
 
@@ -26,7 +29,7 @@ use std::fmt::Write as _;
 
 #[cfg(test)]
 use clauseo_protocol::HostEvent;
-use clauseo_protocol::{HostError, StreamId};
+use clauseo_protocol::{HostError, SetupEvent, StreamId};
 use serde::Serialize;
 use tauri::ipc::{InvokeResponseBody, IpcResponse};
 
@@ -112,6 +115,21 @@ enum StreamMessage {
     Fragment(FragmentMessage),
     /// A stream the bridge could not restart.
     StreamFailed(StreamFailedMessage),
+    /// An install or sign-in change (0048).
+    Setup(SetupMessage),
+}
+
+/// `{"setup": <SetupEvent>}`.
+#[derive(Serialize)]
+#[cfg_attr(test, derive(specta::Type))]
+pub(crate) struct SetupMessage {
+    setup: SetupEvent,
+}
+
+/// The `setup` message's text for `event`, to frame with [`messages`]; `None` when it does not
+/// encode, which a `SetupEvent` always does.
+pub(crate) fn setup_text(event: SetupEvent) -> Option<String> {
+    serde_json::to_string(&SetupMessage { setup: event }).ok()
 }
 
 /// `{"stream_failed": {...}}`.

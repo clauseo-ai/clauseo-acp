@@ -131,5 +131,7 @@ tauri = { workspace = true, features = ["test", "specta"] }
 # with the toml crate (xtask's version) and checks its version with semver (already in the tree).
 toml = "1"
 semver = "1"
+# The setup tests (src/setup/tests.rs) capture the log lines, to see no secret in them.
+tracing-subscriber = { workspace = true, features = ["fmt"] }
 # The canary test (tests/canary.rs) unzips each counts body it captured to search it.
 flate2 = { workspace = true }

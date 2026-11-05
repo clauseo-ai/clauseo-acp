@@ -24,17 +24,18 @@
 //! - Every other start first asks whether it runs inside the agent sandbox ([`launch`],
 //!   `jailed.rs`): inside, it prints one line and exits with [`SANDBOXED_EXIT`] before `run`,
 //!   so no window, no single-instance hand-off and no settings read.
-//! - Fifteen async commands (`commands.rs`), each granted by its own permission in
+//! - Sixteen async commands (`commands.rs`), each granted by its own permission in
 //!   `capabilities/main.json` (`count_ui` in `capabilities/counts.json`, `main` only) and
 //!   listed in `build.rs`'s `AppManifest`. Beside them that file
 //!   grants only the two window commands of Tauri's drag script, and `window_frame.rs` adds
 //!   the caption buttons' four on Windows and Linux (0015). `capabilities/settings.json`
-//!   grants the settings window six of the commands (`dispatch`, `query`, `open_stream`,
-//!   `subscribe_app`, `ack`, `display_info`) and the same drag pair, and the bridge admits
+//!   grants the settings window seven of the commands (`dispatch`, `query`, `open_stream`,
+//!   `subscribe_app`, `ack`, `display_info`, `setup`) and the same drag pair, and the bridge admits
 //!   from it only `SetUiSettings`, `SetToolSettings`, `SetPrivacySettings` and `GetSettings`
 //!   (and `RefreshLimits`, and the updater's `SetUpdateMode`, `CheckForUpdate` and
 //!   `GetUpdate`, 0037), and of the app feed
-//!   only `settings_changed`: never the matter and thread lists (0028).
+//!   only `settings_changed`: never the matter and thread lists (0028). `setup` (0048,
+//!   `setup.rs`) has its own allow-list per window, and its events go to both windows.
 //!   Every argument is checked in Rust first, and every host call runs as `LocalDesktop`.
 //!   The `e2e` build adds `perf_channel_bytes` (`e2e.rs`, granted by `capabilities/e2e.json`),
 //!   and the `marks` build `marks_memory` and `marks_finish` (`marks.rs`,
@@ -42,7 +43,8 @@
 //!   `settings` and `counts`: those builds add the two at setup (`e2e::grant_scoreboard`), and the
 //!   default build has neither.
 //! - One `ipc::Channel` per window carries its stream (`bridge/`): each message an event's JSON
-//!   as the host encoded it, a fragment of one, or a stream failure, always below 8 KB (and in
+//!   as the host encoded it, a setup event (0048), a fragment of either, or a stream failure,
+//!   always below 8 KB (and in
 //!   the `e2e` build an event with its receive time, `timed`). At most
 //!   256 KB unacknowledged per window; a 5 s watchdog that fires once per stall. A window's
 //!   channel lives until the window is destroyed (`Bridge::close_window`).
@@ -95,6 +97,7 @@ mod pre_write_guard;
 mod profile;
 mod rust_only;
 mod settings_window;
+mod setup;
 #[cfg(test)]
 mod test_support;
 #[cfg(test)]
@@ -222,6 +225,7 @@ pub fn run() -> tauri::Result<()> {
             commands::reveal,
             commands::open_settings,
             commands::count_ui,
+            commands::setup,
             #[cfg(feature = "e2e")]
             e2e::perf_channel_bytes,
             #[cfg(feature = "marks")]
@@ -245,7 +249,7 @@ pub fn run() -> tauri::Result<()> {
             app.manage(open::AppData(locations.data_dir().to_path_buf()));
             app.manage(open::OpenGates::default());
             let (cell, start) = HostCell::new();
-            app.manage(Bridge::new(cell));
+            app.manage(Bridge::with_setup(cell, setup::Setup::not_wired()));
             app.manage(counts::CountsState::default());
             open_main_window(app)?;
             start_host(app.handle().clone(), start, locations)?;

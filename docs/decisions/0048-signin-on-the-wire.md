@@ -133,15 +133,26 @@ is a Rust-only `HostHandle` call that desktop makes. A wire arm would let a wind
 back-off.
 
 **Allow-lists.** `setup` is granted to both windows, each with its own list, enforced in
-`crates/desktop/src/bridge/admit.rs` (P5) with a refusal test each way:
+`crates/desktop/src/setup/admit.rs` (P5a, one table keyed on the window labels) with a
+refusal test each way:
 
 | window | actions |
 |---|---|
 | `main` and `settings` | `InstallAgent`, `RetryAgentInstall`, `StartSignIn`, `CancelSignIn`, `PasteSignInCode`, `UseDeviceCode`, `OpenSignInPage`, `UseFoundLogin`, `UseDifferentAccount` |
-| `settings` only (Plans) | `SignOut`, `SetAgentKey`, `ClearAgentKey`, `SetFirmEndpoint`, `FindLogin`, `StopUsingLogin` |
+| `settings`, and `main` for a first key | `SetAgentKey` |
+| `settings` only (Plans) | `SignOut`, `ClearAgentKey`, `SetFirmEndpoint`, `FindLogin`, `StopUsingLogin` |
 | `main` only | none |
 
-A refused action answers `transport.unauthorized`.
+A refused action answers `transport.unauthorized` (`dispatch` and `query` refuse a window with
+`command.invalid`; `setup` keeps this record's code, as a declined confirm answers).
+
+*`main`'s first key* (the orchestrator's ruling for UD1's "Use an API key"): `main` may send
+`SetAgentKey` only while that agent has no key stored. The backend checks and stores in one
+step (`only_if_absent`), so two quick sends, or `main` racing `settings`, store one key; the
+other answers `settings.key_stored`, which the app words as "open Settings, then Plans".
+Replacing or clearing a key stays the settings window's. The flag is `MAIN_SETS_FIRST_KEY` in
+`admit.rs`. Residual risk: script running in a compromised `main` could plant its own key on a
+fresh install, with no key stored yet; it can never replace or clear one.
 
 **The orchestrator's rulings for R20**, as they bear on this design:
 1. *The leave order.* Leaving a reused Codex login (sign-out, an account change,
