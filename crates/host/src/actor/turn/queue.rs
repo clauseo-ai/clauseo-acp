@@ -127,6 +127,7 @@ pub(super) fn send_prompt(
 ) -> Result<(), Error> {
     steps::refuse_unsendable(actor, thread)?;
     let blocks = steps::prompt_blocks(actor, thread, content)?;
+    super::logout::refuse(actor, thread, &blocks)?;
     with_stream(actor, ctx, thread, move |actor| {
         route(actor, ctx, thread, blocks, delivery)
     });

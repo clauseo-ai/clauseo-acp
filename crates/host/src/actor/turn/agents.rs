@@ -261,7 +261,12 @@ fn launch(actor: &Actor, thread: ThreadId, prepared: Prepared) -> Result<Launche
         };
         (forced, Some(codex))
     } else {
-        (BTreeMap::new(), None)
+        // A Claude agent's home goes in before `plans_folder` reads the merged map below.
+        let forced = prepared
+            .claude_home
+            .as_deref()
+            .map(agent::home::claude_launch_env);
+        (forced.unwrap_or_default(), None)
     };
     let hook = agent::loads::launch_env(actor.profile.launch_env(&row.agent));
     let dropped: &[&str] = if codex.is_some() {

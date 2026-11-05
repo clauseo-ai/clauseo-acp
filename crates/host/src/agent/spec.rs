@@ -16,7 +16,8 @@ use crate::error::Error;
 /// hook or forced variable also names, then the
 /// agent's variables minus those the hook or `forced` names, then the hook's minus those
 /// `forced` names, then `forced`: what the host sets for the agent's kind (a Codex agent's
-/// mode, home and config, `agent/codex.rs`), which nothing in the settings can override. Every
+/// mode, home and config, `agent/codex.rs`; a Claude agent's home, `agent/home.rs`), which
+/// nothing in the settings can override, so no inherited `CLAUDE_CONFIG_DIR` reaches it. Every
 /// name in `dropped` (a Codex agent's `codex::DROPPED_VARS`) is left out wherever it comes
 /// from (inherited, the agent's variables or the hook's), ignoring ASCII case. No
 /// inherited `GIT_*` reaches any agent: a `GIT_DIR` or `GIT_WORK_TREE` the host was started

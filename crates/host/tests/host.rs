@@ -20,6 +20,9 @@ mod support;
 mod write;
 
 #[cfg(test)]
+#[path = "host/agent_homes.rs"]
+mod agent_homes;
+#[cfg(test)]
 #[path = "host/agent_name.rs"]
 mod agent_name;
 #[cfg(test)]
@@ -125,6 +128,9 @@ mod mcp;
 #[path = "host/not_allowed.rs"]
 mod not_allowed;
 #[cfg(test)]
+#[path = "host/own_logout.rs"]
+mod own_logout;
+#[cfg(test)]
 #[path = "host/papers.rs"]
 mod papers;
 #[cfg(test)]
@@ -175,6 +181,9 @@ mod search_review;
 #[cfg(test)]
 #[path = "host/settings.rs"]
 mod settings;
+#[cfg(test)]
+#[path = "host/settings_entries.rs"]
+mod settings_entries;
 #[cfg(test)]
 #[path = "host/steer.rs"]
 mod steer;

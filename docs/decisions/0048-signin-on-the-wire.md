@@ -223,6 +223,33 @@ for desktop's sign-in line.
 With the policy unreadable and the agent's `<data_dir>/agents/<id>/firm-policy` marker present,
 sign-in and launch for that agent are refused with `signin.policy_unreadable`.
 
+**The host's settings writes and launch (R20 P4a).**
+
+- `HostHandle::set_agent_launch(agent, AgentLaunch) -> Result<EntryWrite, HostError>` and
+  `HostHandle::set_plan(agent, Option<Plan>) -> Result<(), HostError>` are Rust only. They run on
+  the actor through `Effective::set_agent_launch` and `Effective::set_plan`, the same way
+  `SetUiSettings` writes `settings.json`, and send `SettingsChanged` after a write.
+  - `Error::Locked` maps to `settings.locked`.
+  - `Error::Refused` maps to the new `settings.refused`, which is not retryable and is placed
+    just before `unknown`. Its message is the settings crate's: the key, or a variable's place,
+    and never a value.
+  - `EntryWrite::LeftAlone` is `Ok`, with nothing written or sent.
+- The host fills `SettingsView.plans` from the `plans` section, with names only.
+- Each agent with a kind gets Clauseo's own home, `Locations::agent_home` of
+  `AgentKind::id()`, made at the launch and forced over every other source: `CODEX_HOME` for
+  Codex, `CLAUDE_CONFIG_DIR` for Claude Code. An inherited `CLAUDE_CONFIG_DIR` no longer reaches
+  a Claude agent.
+  - The plans folder for plan notes is read from the launch's merged environment, after this
+    variable is in it.
+  - The profile's Codex skills go in `skills` of the same Codex home
+    (`clauseo_profile::paths::codex_skills`).
+  - Claude's skills stay in Clauseo's plugin, passed by path. The forced-ask rules are
+    flag-tier settings, not a file. Neither depends on the home.
+- Codex's launch config takes both new overrides from the one `clauseo_limits::CODEX_OVERRIDES`.
+- The host drops codex-acp's `logout` from a Codex agent's `CommandsAvailable` and refuses a
+  prompt whose text starts `/logout` with `command.invalid`. It does this whatever the login's
+  source, since signing out goes through `SignOut` alone.
+
 ## Consequences
 
 - Desktop owns the mapping from `agents` to the wire. A state or code added to `agents` needs a

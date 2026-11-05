@@ -295,10 +295,16 @@ fn holds(path: &Path, bytes: &[u8]) -> bool {
 /// The failure of a Codex launch whose home or `config.toml` could not be made: the error's
 /// codes go to the log only, never the path (it holds the user's name).
 fn home_failed(error: &dyn std::fmt::Display) -> Error {
-    tracing::warn!(%error, "Codex's folder could not be prepared");
+    agent_home_failed("Codex", error)
+}
+
+/// The failure of `who`'s launch (`Codex`, `Claude Code`) whose home could not be made: the
+/// error's codes go to the log only, never the path (it holds the user's name).
+fn agent_home_failed(who: &str, error: &dyn std::fmt::Display) -> Error {
+    tracing::warn!(who, %error, "an agent's folder could not be prepared");
     Error::refused(
         ErrorCode::AgentLaunchFailed,
-        "Clauseo couldn't prepare Codex's folder.",
+        format!("Clauseo couldn't prepare {who}'s folder."),
     )
 }
 
@@ -406,9 +412,15 @@ pub(crate) fn guard_untrusted(answer: &Value) -> Error {
 /// points. The data folder itself may be a link: `CLAUSEO_DATA_DIR` may name one, and the
 /// store lives there too.
 pub(crate) fn make_home(data: &Path, home: &Path) -> Result<(), Error> {
+    make_agent_home(data, home, "Codex")
+}
+
+/// [`make_home`] for `who`'s home (`Codex`, `Claude Code`), whose name its failure carries.
+pub(crate) fn make_agent_home(data: &Path, home: &Path, who: &str) -> Result<(), Error> {
+    let failed = |error: &dyn std::fmt::Display| agent_home_failed(who, error);
     let below = home
         .strip_prefix(data)
-        .map_err(|_outside| home_failed(&"not under the data folder"))?;
+        .map_err(|_outside| failed(&"not under the data folder"))?;
     let mut at = data.to_owned();
     for part in below.components() {
         at.push(part);
@@ -426,14 +438,14 @@ pub(crate) fn make_home(data: &Path, home: &Path) -> Result<(), Error> {
         // `symlink_metadata` never follows a link, so a link is not a folder here.
         let meta = made
             .and_then(|()| std::fs::symlink_metadata(&at))
-            .map_err(|error| home_failed(&Cause(&error)))?;
+            .map_err(|error| failed(&Cause(&error)))?;
         if !meta.is_dir() {
-            return Err(home_failed(&"a link or not a folder"));
+            return Err(failed(&"a link or not a folder"));
         }
     }
     // Off Unix a folder's privacy is its parent's: there is nothing to set.
     #[cfg(unix)]
-    crate::write::make_private_dir(home).map_err(|error| home_failed(&Cause(&error)))?;
+    crate::write::make_private_dir(home).map_err(|error| failed(&Cause(&error)))?;
     Ok(())
 }
 

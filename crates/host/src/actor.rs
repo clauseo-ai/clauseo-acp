@@ -516,6 +516,18 @@ impl Actor {
                     .and_then(|()| locate::matter_folder(self, matter));
                 let _gone = reply.send(folder);
             }
+            Request::SetAgentLaunch {
+                agent,
+                launch,
+                reply,
+            } => {
+                let written = settings::set_agent_launch(self, &agent, &launch);
+                let _gone = reply.send(written);
+            }
+            Request::SetPlan { agent, plan, reply } => {
+                let written = settings::set_plan(self, &agent, plan.as_deref());
+                let _gone = reply.send(written);
+            }
             Request::Shutdown { reply } => {
                 match authorize(&Principal::LocalDesktop, Access::Shutdown) {
                     Ok(()) => shutdown::begin_shutdown(self, Some(reply)),

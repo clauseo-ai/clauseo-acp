@@ -411,7 +411,10 @@ pub(super) fn known_tool(
 fn plain(actor: &mut Actor, thread: ThreadId, update: AgentUpdate) -> Result<(), Error> {
     let event: DomainEvent = match update {
         AgentUpdate::Plan(entries) => PlanReplaced { entries }.into(),
-        AgentUpdate::Commands(commands) => CommandsAvailable { commands }.into(),
+        AgentUpdate::Commands(commands) => CommandsAvailable {
+            commands: super::logout::hide(actor, thread, commands),
+        }
+        .into(),
         AgentUpdate::CurrentMode { mode_id } => {
             super::forced_mode::reset_if_forced(actor, thread, &mode_id);
             ModeChanged { mode_id }.into()

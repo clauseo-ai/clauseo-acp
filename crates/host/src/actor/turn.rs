@@ -20,6 +20,7 @@ mod forced_mode;
 mod inputs;
 mod known;
 mod launch_checks;
+mod logout;
 mod out;
 mod profile_loads;
 mod prompt;

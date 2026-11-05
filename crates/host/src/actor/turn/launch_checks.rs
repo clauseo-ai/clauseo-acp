@@ -3,7 +3,8 @@
 //! data-folder refusal (`agent/data_folder.rs`), and for a Codex agent its preparation
 //! ([`crate::agent::codex::prepare_launch`]: the matter folder resolved through links, the
 //! `.codex` refusal, the folder check, the home made and the home's `config.toml`; for a Claude
-//! agent the folder check alone, `agent/folder_support.rs`). The work that waits for the
+//! agent the folder check, `agent/folder_support.rs`, and its home made, the folder it gets as
+//! `CLAUDE_CONFIG_DIR`). The work that waits for the
 //! agent is held on the thread's turn state meanwhile. Phase two, when they answer, launches
 //! the agent on the actor with what they found ([`agents::launch_now`]), or fails the waiting
 //! work.
@@ -67,6 +68,9 @@ pub(crate) struct Prepared {
     pub(super) stored: PathBuf,
     /// A Codex agent's preparation; `None` for any other agent.
     pub(super) codex: Option<CodexPrepared>,
+    /// A Claude agent's home, `Locations::agent_home` of its id, made: its `CLAUDE_CONFIG_DIR`
+    /// (`agent/home.rs`). `None` for any other agent.
+    pub(super) claude_home: Option<PathBuf>,
     /// The folder check's answer at this launch (`agent/folder_support.rs`), when it ran: for a
     /// Codex or a Claude agent. A Claude agent's decides its forced ask (`agent/forced_ask.rs`).
     pub(super) folder: Option<Answer>,
@@ -309,8 +313,8 @@ pub(super) fn prepare(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>
         let stored = PathBuf::from(&actor.check_matter(row.matter)?.row.folder_path);
         let locations = actor.effective.locations();
         let kind = AgentKind::of(&row.agent);
-        let home =
-            (kind == Some(AgentKind::Codex)).then(|| locations.agent_home(row.agent.as_str()));
+        // Clauseo's own home for an agent with a kind (`agent/home.rs`), never the lawyer's.
+        let home = kind.map(|_| locations.agent_home(row.agent.as_str()));
         let key = SessionKey {
             matter: row.matter,
             thread,
@@ -357,7 +361,8 @@ pub(super) fn prepare(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>
             move || {
                 data_folder::refuse_data_folder(&stored, &data)?;
                 let mut answer = None;
-                let codex = match home {
+                let (codex_home, claude_home) = if claude { (None, home) } else { (home, None) };
+                let codex = match codex_home {
                     Some(home) => {
                         let (folder, support) =
                             codex::prepare_launch(&check, &stored, &data, &home)?;
@@ -371,8 +376,9 @@ pub(super) fn prepare(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>
                     None => None,
                 };
                 // Claude is never refused for its folder: the answer decides its forced ask.
-                if claude {
+                if let Some(home) = &claude_home {
                     answer = Some(check.run(&crate::agent::session_folder(&stored)));
+                    codex::make_agent_home(&data, home, "Claude Code")?;
                 }
                 run.make(&data, &sweep)?;
                 (run.chrome, run.browser_session) = browser.prepare(&data, &run.key.id());
@@ -380,6 +386,7 @@ pub(super) fn prepare(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>
                 Ok(Prepared {
                     stored,
                     codex,
+                    claude_home,
                     folder: answer,
                     run,
                     skills_written,

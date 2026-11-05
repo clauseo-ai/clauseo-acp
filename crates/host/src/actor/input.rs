@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 
 use clauseo_protocol::{
-    CommandEnvelope, CommandId, CommandOutcome, Cursor, Envelope, FileRefId, FolderRefId,
+    AgentId, CommandEnvelope, CommandId, CommandOutcome, Cursor, Envelope, FileRefId, FolderRefId,
     HostQuery, MatterId, Principal, QueryResult, SearchAnswer, SearchRequest, Seq, StreamId,
     ThreadId, ViewEpoch,
 };
@@ -90,6 +90,18 @@ pub(crate) enum Request {
         principal: Principal,
         matter: MatterId,
         reply: Reply<PathBuf>,
+    },
+    /// Desktop's write of an installed agent's entry (`actor/settings/entries.rs`).
+    SetAgentLaunch {
+        agent: AgentId,
+        launch: Box<clauseo_settings::AgentLaunch>,
+        reply: Reply<clauseo_settings::EntryWrite>,
+    },
+    /// Desktop's write of an agent's firm plan, `None` to remove it.
+    SetPlan {
+        agent: AgentId,
+        plan: Option<Box<clauseo_settings::Plan>>,
+        reply: Reply<()>,
     },
     Shutdown {
         reply: Reply<()>,

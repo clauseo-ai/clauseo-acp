@@ -1,16 +1,22 @@
 //! Claude's own plan note through the host (`agent/plan_note.rs`): in a matter in forced ask, a
 //! Claude agent's request to write `<CLAUDE_CONFIG_DIR>/plans/<name>.md` is logged with
 //! `about: agent_plan`, and its request for the matter's own `plans/<name>.md` without it. The same
-//! requests from an agent that is not Claude carry no mark. Which other paths are refused (nested,
-//! another extension, `..`, Windows spellings) is pinned in `agent/plan_note/tests.rs`.
+//! requests from an agent that is not Claude carry no mark. The config folder is Clauseo's own
+//! home for Claude (`agent/home.rs`), set in the launch's environment before the plans folder is
+//! read from it: the host itself starts with `CLAUDE_CONFIG_DIR` naming the matter folder, and a
+//! plans folder read from that would mark the matter's own `plans/<name>.md`. Which other paths
+//! are refused (nested, another extension, `..`, Windows spellings) is pinned in
+//! `agent/plan_note/tests.rs`.
 
 use std::ffi::OsString;
+use std::path::PathBuf;
 
 use clauseo_protocol::{
     AgentChoiceId, CommandOutcome, DomainEvent, FolderSupportKind, HostCommand, PermissionAbout,
     StopReason, StreamId,
 };
 
+use crate::profile_rig::{escaped, path_text};
 use crate::support::{Dir, Scenario, matter_with_thread};
 
 /// The agent id that makes a fake agent a Claude agent.
@@ -22,19 +28,40 @@ const OTHER: &str = "fake-agent";
 /// The guard program the tests' hosts name; the fake agent never runs it.
 const GUARD: &str = "/opt/clauseo/clauseo-desktop";
 
+/// `claude-plan-note` written for `dir`: its plan note in Claude's home under `dir`'s data
+/// folder, `<data>/agents/claude-acp/home`, where the scenario file has `{{cwd}}/claude-config`.
+fn scenario(dir: &Dir) -> Scenario {
+    let source = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/scenarios/claude-plan-note.jsonl"
+    );
+    let home = dir.data().join("agents").join(CLAUDE).join("home");
+    let text = std::fs::read_to_string(source)
+        .unwrap()
+        .replace("{{cwd}}/claude-config", &escaped(&path_text(&home)));
+    let path: PathBuf = dir.home().join("claude-plan-note.jsonl");
+    crate::write::write(&path, text.as_bytes());
+    Scenario::Written(path)
+}
+
 /// Runs `claude-plan-note` on an `agent` thread in a matter on a network drive, with
-/// `CLAUDE_CONFIG_DIR` set to `<matter folder>/claude-config` in the agents' environment,
-/// answers both requests allow-once, and returns each logged request's `about`.
+/// `CLAUDE_CONFIG_DIR` set to the matter folder in the host's own environment, answers both
+/// requests allow-once, and returns each logged request's `about`.
 fn abouts(test: &str, agent: &str) -> Vec<Option<PermissionAbout>> {
-    let dir = Dir::new(test, &[(agent, Scenario::Local("claude-plan-note"))]);
+    let dir = Dir::new(test, &[]);
+    dir.set_agents(&[(agent, scenario(&dir))]);
     let files = [("brief.txt", "x\n")];
     let folder = dir.folder("m", &files);
-    // The spelling the agent's `{{cwd}}` has: the folder the session runs in.
-    let config = clauseo_host::session_folder(&folder).join("claude-config");
+    // The spelling the agent's `{{cwd}}` has: the folder the session runs in. Were the plans
+    // folder read from this, the matter's own `plans/the-plan.md` would be marked.
+    let inherited = clauseo_host::session_folder(&folder);
     let mut env: Vec<(OsString, OsString)> = std::env::vars_os()
         .filter(|(name, _)| !name.eq_ignore_ascii_case("CLAUDE_CONFIG_DIR"))
         .collect();
-    env.push((OsString::from("CLAUDE_CONFIG_DIR"), config.into_os_string()));
+    env.push((
+        OsString::from("CLAUDE_CONFIG_DIR"),
+        inherited.into_os_string(),
+    ));
     let host = dir.start_with(0, |config| {
         config
             .with_folder_support(Some(FolderSupportKind::Network))
@@ -67,6 +94,9 @@ fn abouts(test: &str, agent: &str) -> Vec<Option<PermissionAbout>> {
         .collect()
 }
 
+/// The plans folder is read from the launch's environment after Claude's home went in
+/// (`turn/agents.rs` `launch`), so the note in that home is marked and the matter's own
+/// `plans/the-plan.md` is not, though the host's inherited `CLAUDE_CONFIG_DIR` names the matter.
 #[test]
 fn claudes_plan_note_is_marked_and_the_matters_own_plans_file_is_not() {
     assert_eq!(

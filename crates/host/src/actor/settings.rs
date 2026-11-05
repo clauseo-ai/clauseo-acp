@@ -7,15 +7,16 @@
 //! exhaustive match, so a value added to one side and not the other does not compile; the
 //! mirror test in `tests/host/settings.rs` also holds the keys and the JSON names together.
 //! The tool switches (`tools`, `SetToolSettings`) are in `tools.rs`, beside this file's UI code;
-//! the privacy switches (`privacy`, `SetPrivacySettings`, `FirstAct`) in `privacy.rs`.
+//! the privacy switches (`privacy`, `SetPrivacySettings`, `FirstAct`) in `privacy.rs`; desktop's
+//! Rust-only `set_agent_launch` and `set_plan`, and the firm plans' view, in `entries.rs`.
 
+mod entries;
 mod privacy;
 mod tools;
 
+pub(in crate::actor) use entries::{set_agent_launch, set_plan};
 pub(in crate::actor) use privacy::{first_act, set_privacy_settings};
 pub(super) use tools::set_tool_settings;
-
-use std::collections::BTreeMap;
 
 use clauseo_protocol::{
     CommandOutcome, ErrorCode, HostEvent, Language, Lite, Motion, SettingsView, Theme, UiPatch,
@@ -29,8 +30,8 @@ use super::{Actor, Tag};
 use crate::error::Error;
 use crate::pipeline::Draft;
 
-/// The display settings in force, the tool and privacy switches in force, and every key policy
-/// locks, sorted.
+/// The display settings in force, the tool and privacy switches in force, every key policy
+/// locks, sorted, and each agent's firm plan (names, never values).
 pub(crate) fn view(actor: &Actor) -> SettingsView {
     let effective = &actor.effective;
     let ui = &effective.settings().ui;
@@ -45,8 +46,7 @@ pub(crate) fn view(actor: &Actor) -> SettingsView {
         tools: tools::view(effective),
         privacy: privacy::view(actor),
         locked: effective.locked().map(str::to_owned).collect(),
-        // The firm plans come with R20's `plans` settings section (decision record 0048).
-        plans: BTreeMap::new(),
+        plans: entries::plans_view(&effective.settings().plans),
     }
 }
 
