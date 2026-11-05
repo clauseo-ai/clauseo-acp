@@ -59,6 +59,7 @@ pub(crate) use close::{closing, log_limit_stop};
 pub(crate) use end::limits_read;
 pub(crate) use failure::blocked as stream_blocked;
 pub(crate) use inputs::{AgentReply, LogFor, TurnInput};
+pub use launch_checks::PackRequest;
 pub(crate) use launch_checks::RunSweep;
 pub(crate) use out::flush_text;
 pub(crate) use queue::queue_held;
@@ -85,6 +86,8 @@ pub(crate) struct TurnState {
     preparing: Option<Box<launch_checks::Preparing>>,
     /// The folders of the launched agent's session, from its launch until it ends.
     run: Option<launch_checks::RunFolders>,
+    /// The skill packs its launches skipped, each pack and reason told once for the host's run.
+    packs: launch_checks::PackNotices,
     /// The thread's current turn: accepted and not ended.
     current: Option<Box<Current>>,
     /// The thread's sources in progress: the browser's opens and the agents' web calls that have

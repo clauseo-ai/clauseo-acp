@@ -34,7 +34,7 @@ use crate::skills::stetdoc::STETDOC;
 
 pub use hash::PackHash;
 pub use manifest::PackManifest;
-pub use plugin::{PacksWritten, write_packs};
+pub use plugin::{PacksWritten, WrittenSkill, write_packs};
 pub use render::{Pack, PackSkill};
 
 /// The manifest's file name, at the top of a pack.
@@ -239,11 +239,54 @@ pub struct Loaded {
     pub skipped: Vec<(String, Skip)>,
 }
 
+/// A launch's packs to load and write, as data: the packs folder, the packs with the hashes
+/// recorded when each was turned on, and whether scripts may come along. Only
+/// [`ClauseoProfile::pack_write`](crate::ClauseoProfile::pack_write) makes one, with no file
+/// read; the launch-prep thread hands it to [`PackWrite::load`], then the loaded packs to
+/// [`write_packs`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackWrite {
+    packs_root: PathBuf,
+    entries: Vec<PackEntry>,
+    allow_scripts: bool,
+}
+
+impl PackWrite {
+    /// The packs `entries` in `packs_root`.
+    pub(crate) fn new(packs_root: PathBuf, entries: Vec<PackEntry>, allow_scripts: bool) -> Self {
+        Self {
+            packs_root,
+            entries,
+            allow_scripts,
+        }
+    }
+
+    /// The packs folder.
+    pub fn packs_root(&self) -> &Path {
+        &self.packs_root
+    }
+
+    /// The packs to load, in order, each with its recorded hash.
+    pub fn entries(&self) -> &[PackEntry] {
+        &self.entries
+    }
+
+    /// Whether a pack may carry scripts.
+    pub fn allow_scripts(&self) -> bool {
+        self.allow_scripts
+    }
+
+    /// [`load`] of these packs. Reads files: off the host thread.
+    pub fn load(&self) -> Loaded {
+        load(&self.packs_root, &self.entries, self.allow_scripts)
+    }
+}
+
 /// Loads `entries` (the launch's packs, in `skills.enabled` order) from `packs_root`: each is
 /// [`inspect`]ed and its hash compared with the one recorded. Packs past [`PACKS_PER_LAUNCH`]
 /// are skipped as [`Skip::TooMany`]. The packs are read in parallel, one thread each, so a
-/// launch waits for the largest, not the sum. Each skip is logged with the id and its code
-/// alone. Off the host thread.
+/// launch waits for the largest, not the sum. Nothing is logged here: the caller logs the
+/// skips, the host in one line per launch with the ids and codes alone. Off the host thread.
 pub fn load(packs_root: &Path, entries: &[PackEntry], allow_scripts: bool) -> Loaded {
     let (now, later) = entries.split_at(entries.len().min(PACKS_PER_LAUNCH));
     let results: Vec<Result<Pack, Skip>> = std::thread::scope(|scope| {
@@ -267,20 +310,6 @@ pub fn load(packs_root: &Path, entries: &[PackEntry], allow_scripts: bool) -> Lo
     loaded
         .skipped
         .extend(later.iter().map(|entry| (entry.id.clone(), Skip::TooMany)));
-    for (id, skip) in &loaded.skipped {
-        if is_pack_id(id) {
-            tracing::warn!(
-                pack = id.as_str(),
-                reason = skip.code(),
-                "a skill pack is not loaded"
-            );
-        } else {
-            tracing::warn!(
-                reason = skip.code(),
-                "a skill pack with a bad id is not loaded"
-            );
-        }
-    }
     loaded
 }
 

@@ -42,7 +42,7 @@ pub use claude::ClaudeOptions;
 pub use codex::CodexConfig;
 pub use error::ProfileError;
 pub use instructions::Instructions;
-pub use packs::{PacksWritten, write_packs};
+pub use packs::{PackEntry, PackWrite, PacksWritten, write_packs};
 pub use paths::{BrowserSidecars, ProfilePaths};
 pub use servers::ProfileServer;
 pub use skills::{RenderReport, Rendered, RenderedSkill, SkillFile, SkillSource};
@@ -300,6 +300,22 @@ impl ClauseoProfile {
                 .collect(),
             None => Vec::new(),
         }
+    }
+
+    /// The skill packs an agent of `kind` loads and writes into its launch's own plugin, as
+    /// data for the launch-prep thread ([`PackWrite::load`], then [`write_packs`]): `entries`
+    /// (the packs the host admitted, each with the hash recorded when it was turned on) in
+    /// [`ProfilePaths::skill_packs`]. None for an agent with no kind, or with no pack to load.
+    /// Pure and cheap: no file is read here (decision record 0040).
+    pub fn pack_write(
+        &self,
+        kind: Option<AgentKind>,
+        entries: Vec<PackEntry>,
+        allow_scripts: bool,
+    ) -> Option<PackWrite> {
+        kind?;
+        (!entries.is_empty())
+            .then(|| PackWrite::new(self.paths.skill_packs.clone(), entries, allow_scripts))
     }
 
     /// The write of Claude's plugin.

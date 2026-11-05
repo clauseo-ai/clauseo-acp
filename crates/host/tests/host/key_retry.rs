@@ -31,7 +31,11 @@ const KEY: &str = "sk-test-key-retry-0123456789";
 struct WithKey;
 
 impl ProfileHook for WithKey {
-    fn session_meta(&self, _agent: &AgentId) -> Option<Map<String, Value>> {
+    fn session_meta(
+        &self,
+        _agent: &AgentId,
+        _packs: Option<&clauseo_profile::PacksWritten>,
+    ) -> Option<Map<String, Value>> {
         None
     }
 

@@ -36,7 +36,7 @@ fn defaults_and_setters() {
     assert_eq!(parts.refused_folders, Vec::<PathBuf>::new());
     assert_eq!(parts.effective.data_dir(), Path::new("/nowhere"));
     let agent: AgentId = "fake-agent".parse().unwrap();
-    assert!(parts.profile.session_meta(&agent).is_none());
+    assert!(parts.profile.session_meta(&agent, None).is_none());
     assert_eq!(
         NoProfile.launch_env(&agent),
         std::collections::BTreeMap::new()

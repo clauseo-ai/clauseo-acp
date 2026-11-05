@@ -486,6 +486,11 @@ fn attach_commit(
             },
         )?;
     }
+    // The skill packs the launch left out, each pack and reason told once per thread (0040).
+    for text in super::launch_checks::pack_notices(actor, thread) {
+        let level = NoticeLevel::Warning;
+        out.push(actor, Notice { level, text })?;
+    }
     let now = actor.now().wall;
     let entry = actor
         .threads
