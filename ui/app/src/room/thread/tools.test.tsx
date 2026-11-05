@@ -1,14 +1,13 @@
 // @vitest-environment happy-dom
 // The tool line over FakeTransport: the open thread's header's tools as glyphs on the status line, named in words, the
 // popover's row for each tool (glyph, name, On or Off, the reason only when off), Open Settings at the foot, the
-// tools and reasons this version doesn't know left out, and the Chrome download (fake: FakeTransport's
-// `browser_install` app events and its install_browser call), from consent to each end.
+// tools and reasons this version doesn't know left out, and the Chrome download (FakeTransport's `browser_install`
+// app events, and the install_browser commands it is dispatched), from consent to each end.
 import { act } from "react";
 import { settled } from "@clauseo/components/lib/late.ts";
 import { afterEach, expect, test } from "vitest";
 import { header, reset } from "../../testing/stream-script.ts";
-import type { ToolState } from "../../transport/protocol.ts";
-import type { BrowserInstallReport } from "../browser-install.ts";
+import type { BrowserInstallState, ToolState } from "../../transport/protocol.ts";
 import { mountRoom, type Harness } from "./harness.ts";
 
 let h: Harness | null = null;
@@ -54,9 +53,12 @@ const row = (tool: string) =>
 const inRow = (tool: string, id: string) =>
   row(tool)?.querySelector<HTMLElement>(`[data-testid="${id}"]`) ?? null;
 const said = (tool: string, id: string) => inRow(tool, id)?.textContent ?? null;
-const play = async (report: BrowserInstallReport) => {
-  await act(async () => h!.transport.appEvent({ browser_install: report }));
+const play = async (state: BrowserInstallState) => {
+  await act(async () => h!.transport.appEvent({ browser_install: { state } }));
 };
+/** The install_browser commands dispatched so far. */
+const installs = () =>
+  h!.transport.only("dispatch").filter((c) => "install_browser" in c.command.command);
 const openPopover = async () => {
   await h!.click(line());
   await act(() => settled());
@@ -208,11 +210,17 @@ test.each(ROWS)(
       expect(reasonEl.parentElement === inRow(tool.tool, "tool-row-chip")?.parentElement).toBe(
         tool.availability !== "available" && reason === "In Settings",
       );
-    // nothing else in words: the name, the chip and the reason
+    // nothing else in words: the name, the chip and the reason; with no Chrome, the offer's words under it (the
+    // button, its hidden tooltip and the size)
+    const offer =
+      reason === "Needs Chrome"
+        ? "Download Chrome" + "From Google, once. Needs 1\u00a0GB free." + "200\u00a0MB"
+        : "";
     expect(r.textContent).toBe(
       (tool.tool === "web_search" ? "Web search" : "Browser") +
         (reason === null ? "On" : "Off") +
-        (reason ?? ""),
+        (reason ?? "") +
+        offer,
     );
   },
 );
@@ -259,25 +267,16 @@ test("no tool off in Settings, or no settings window: no Open Settings and no fo
   expect(document.body.textContent).not.toContain("Changes apply to new conversations.");
 });
 
-test("no Chrome and no install state from the host: the reason alone", async () => {
+test("no Chrome and no download yet: the reason, and the offer to download it", async () => {
   h = await open([browser(off("browser_not_installed"))]);
   await openPopover();
   expect(said("browser", "tool-row-reason")).toBe("Needs Chrome");
-  expect(row("browser")?.querySelector("button")).toBeNull();
+  expect(inRow("browser", "tool-download")?.textContent).toBe("Download Chrome");
+  expect(installs()).toEqual([]);
 });
 
-test("the host offers no download: the reason stays, and install Chrome yourself", async () => {
+test("Download Chrome is the consent: it sends install_browser once and goes, then the bar, Unpacking, and Ready for new conversations", async () => {
   h = await open([browser(off("browser_not_installed"))]);
-  await play({ offer: "none" });
-  await openPopover();
-  expect(said("browser", "tool-row-reason")).toBe("Needs Chrome");
-  expect(said("browser", "tool-row-note")).toBe("Install Chrome to use it");
-  expect(row("browser")?.querySelector("button")).toBeNull();
-});
-
-test("Download Chrome is the consent: it sends InstallBrowser once and goes, then the bar, Unpacking, and Ready for new conversations", async () => {
-  h = await open([browser(off("browser_not_installed"))]);
-  await play({ offer: "download", bytes: 200_000_000 });
   await openPopover();
   const download = inRow("browser", "tool-download");
   expect(download?.textContent).toBe("Download Chrome");
@@ -288,8 +287,9 @@ test("Download Chrome is the consent: it sends InstallBrowser once and goes, the
   // a second press can't happen: the button is gone
   expect(inRow("browser", "tool-download")).toBeNull();
   download?.click();
-  expect(h.transport.only("install_browser")).toHaveLength(1);
-  expect(said("browser", "tool-progress-text")).toBe("0 of 200\u00a0MB");
+  expect(installs()).toHaveLength(1);
+  // the host's first Downloading brings the total: until then the bar has no words
+  expect(row("browser")?.querySelector('[role="progressbar"]')).not.toBeNull();
   await play({ downloading: { bytes: 64_400_000, total: 200_000_000 } });
   const bar = row("browser")?.querySelector('[role="progressbar"]');
   expect(bar?.getAttribute("aria-valuetext")).toBe("64 of 200\u00a0MB");
@@ -343,7 +343,6 @@ test("opened by a press, the popup itself takes the focus, named by the tool lin
 
 test("opened by a key, the popup takes the focus too, and an Enter right after opening starts no download", async () => {
   h = await open([browser(off("browser_not_installed"))]);
-  await play({ offer: "download", bytes: 200_000_000 });
   line()!.focus();
   await act(async () => {
     line()!.dispatchEvent(
@@ -356,7 +355,7 @@ test("opened by a key, the popup takes the focus too, and an Enter right after o
   expect(document.activeElement).toBe(popup());
   expect(inRow("browser", "tool-download")).not.toBeNull();
   await pressEnter();
-  expect(h.transport.only("install_browser")).toEqual([]);
+  expect(installs()).toEqual([]);
   expect(inRow("browser", "tool-download")).not.toBeNull();
 });
 
@@ -369,14 +368,12 @@ test.each([
   ["disk_space", "Needs 1\u00a0GB free"],
   ["host_refused", "Network blocked it"],
   ["unpack", "Couldn't unpack"],
-  ["cancelled", "Download stopped"],
   ["a_newer_code", "Download failed"],
 ] as const)(
   "a failed download (%s) says its cause by the break glyph, with a Try again icon button, never the host's message",
   async (code, cause) => {
     h = await open([browser(off("browser_not_installed"))]);
-    await play({ offer: "download", bytes: 200_000_000 });
-    await play({ failed: { code, message: MESSAGE } });
+    await play({ failed: { code: code as never, message: MESSAGE } });
     await openPopover();
     expect(said("browser", "tool-row-reason")).toBe("Needs Chrome");
     expect(said("browser", "tool-row-note")).toBe(cause);
@@ -388,25 +385,54 @@ test.each([
     expect(retry?.textContent).toBe("");
     expect(retry?.querySelector("svg")).not.toBeNull();
     await h.click(retry);
-    expect(h.transport.only("install_browser")).toHaveLength(1);
+    expect(installs()).toHaveLength(1);
     expect(inRow("browser", "tool-retry")).toBeNull();
   },
 );
 
 test("a computer that can't download Chrome says to install it, with no Try again", async () => {
   h = await open([browser(off("browser_not_installed"))]);
-  await play({ offer: "download", bytes: 200_000_000 });
   await play({ failed: { code: "unsupported", message: MESSAGE } });
   await openPopover();
+  expect(said("browser", "tool-row-reason")).toBe("Needs Chrome");
   expect(said("browser", "tool-row-note")).toBe("Install Chrome to use it");
   expect(row("browser")?.querySelector("button")).toBeNull();
   expect(document.body.textContent).not.toContain(MESSAGE);
 });
 
-test("a refused InstallBrowser shows no failure: the offer stands again as it stood before the press", async () => {
+test("a cancelled download shows the offer again, with no line and no Try again", async () => {
   h = await open([browser(off("browser_not_installed"))]);
-  await play({ offer: "download", bytes: 200_000_000 });
-  h.transport.installBrowser = () => Promise.reject(new Error("a download is already running"));
+  await play({ downloading: { bytes: 64_400_000, total: 200_000_000 } });
+  await play({ failed: { code: "cancelled", message: MESSAGE } });
+  await openPopover();
+  expect(inRow("browser", "tool-download")?.textContent).toBe("Download Chrome");
+  expect(inRow("browser", "tool-row-note")).toBeNull();
+  expect(inRow("browser", "tool-retry")).toBeNull();
+});
+
+test("while a download runs the row has no Install to press: the bar shows the host's latest bytes", async () => {
+  h = await open([browser(off("browser_not_installed"))]);
+  await play({ downloading: { bytes: 64_400_000, total: 200_000_000 } });
+  await play({ downloading: { bytes: 80_000_000, total: 200_000_000 } });
+  await openPopover();
+  expect(inRow("browser", "tool-download")).toBeNull();
+  expect(installs()).toEqual([]);
+  expect(
+    row("browser")?.querySelector('[role="progressbar"]')?.getAttribute("aria-valuetext"),
+  ).toBe("80 of 200\u00a0MB");
+});
+
+test("a catch-up's latest state shows when the window opens: the bar, not the offer", async () => {
+  h = await open([browser(off("browser_not_installed"))]);
+  await play("unpacking");
+  await openPopover();
+  expect(inRow("browser", "tool-download")).toBeNull();
+  expect(said("browser", "tool-progress-text")).toBe("Unpacking");
+});
+
+test("a refused Install shows no failure: the offer stands again as it stood before the press", async () => {
+  h = await open([browser(off("browser_not_installed"))]);
+  h.transport.host.dispatch = () => Promise.reject(new Error("the host refused it"));
   await openPopover();
   await h.click(inRow("browser", "tool-download"));
   await h.settle();
@@ -419,7 +445,6 @@ test("a refused InstallBrowser shows no failure: the offer stands again as it st
 
 test("the rendered download words hold every number to its unit with a non-breaking space", async () => {
   h = await open([browser(off("browser_not_installed"))]);
-  await play({ offer: "download", bytes: 200_000_000 });
   await openPopover();
   const all = () => row("browser")?.textContent ?? "";
   const texts = [all()];
@@ -435,7 +460,6 @@ test("the rendered download words hold every number to its unit with a non-break
 
 test("the popover keeps one width through every download state", async () => {
   h = await open([browser(off("browser_not_installed"))]);
-  await play({ offer: "download", bytes: 200_000_000 });
   await openPopover();
   const classes = [popup()?.className];
   await play({ downloading: { bytes: 64_400_000, total: 200_000_000 } });

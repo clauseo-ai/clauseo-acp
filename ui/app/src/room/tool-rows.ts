@@ -20,8 +20,8 @@ export type DownloadPart =
   | { kind: "unpacking"; text: string }
   /** Chrome is in: the row's reason says so (ToolRowWords.reason), so nothing more under it. */
   | { kind: "done" }
-  /** [break] the cause in a few words, and Try again unless this computer can't download it. */
-  | { kind: "failed"; cause: string; retry: boolean };
+  /** [break] the cause in a few words, and Try again. */
+  | { kind: "failed"; cause: string };
 
 export type ToolRowWords = {
   tool: KnownTool["tool"];
@@ -44,56 +44,56 @@ export type ToolRowWords = {
 export type ToolRowRoom = {
   /** Whether the host has the settings window, for Open Settings. */
   settings: boolean;
-  /** The app's Chrome download; null when the host reports none. */
+  /** The app's Chrome download; null when the window has no app feed to hear it on. */
   install: BrowserInstall | null;
 };
 
 const mb = (bytes: number) => Math.round(bytes / 1e6);
 
-/** What a failed download says, by the host's code; never the host's own message. */
-export const FAILED: Record<InstallFailCode, ToolsKey> = {
+/** What a failed download says, by the host's code; never the host's own message. `unsupported` is no failure line
+ * (the computer can't download it: a muted line), and `cancelled` is no failure at all (the offer again). */
+export const FAILED: Record<Exclude<InstallFailCode, "unsupported" | "cancelled">, ToolsKey> = {
   network: "Connection dropped",
   size_mismatch: "File didn't match",
   signature: "File didn't match",
   disk_space: "Needs 1\u00a0GB free",
   host_refused: "Network blocked it",
   unpack: "Couldn't unpack",
-  unsupported: "Install Chrome to use it",
-  cancelled: "Download stopped",
   unknown: "Download failed",
 };
 
-/** The download under the browser row with no Chrome, by its state; null without a state from the host. */
+/** The download under the browser row with no Chrome, by its state: the offer until a download starts or after a
+ * cancel; null only without an app feed to hear the state on. */
 export function downloadPart(lang: Lang, install: BrowserInstall | null): DownloadPart | null {
   if (install === null) return null;
   const p = install.progress;
   const name = tw(lang, "Download Chrome");
-  if (p === "unpacking") return { kind: "unpacking", text: tw(lang, "Unpacking") };
-  if (p === "done") return { kind: "done" };
-  if (p !== null && "downloading" in p) {
-    const { bytes, total } = p.downloading;
-    return {
-      kind: "progress",
-      value: Math.min(bytes, total),
-      max: Math.max(total, 1),
-      text: tw(lang, "{done} of {total}\u00a0MB", { done: mb(bytes), total: mb(total) }),
-      name,
-    };
-  }
-  if (p !== null) {
-    const code = p.failed.code;
-    return { kind: "failed", cause: tw(lang, FAILED[code]), retry: code !== "unsupported" };
-  }
-  if (install.offer?.offer === "download")
+  if (p === null)
     return {
       kind: "offer",
       button: name,
       size: tw(lang, "200\u00a0MB"),
       tip: tw(lang, "From Google, once. Needs 1\u00a0GB free."),
     };
-  if (install.offer?.offer === "none")
+  if (p === "unpacking") return { kind: "unpacking", text: tw(lang, "Unpacking") };
+  if (p === "done") return { kind: "done" };
+  if ("downloading" in p) {
+    const { bytes, total } = p.downloading;
+    return {
+      kind: "progress",
+      value: Math.min(bytes, total),
+      // the first Downloading brings the total: until then the bar has no words
+      max: Math.max(total, 1),
+      text:
+        total > 0
+          ? tw(lang, "{done} of {total}\u00a0MB", { done: mb(bytes), total: mb(total) })
+          : "",
+      name,
+    };
+  }
+  if (p.failed.code === "unsupported")
     return { kind: "none", line: tw(lang, "Install Chrome to use it") };
-  return null;
+  return { kind: "failed", cause: tw(lang, FAILED[p.failed.code]) };
 }
 
 /** One row, for a tool the line speaks for. */

@@ -1,12 +1,14 @@
-// The Chrome download the browser row offers, app-wide: what the host says about installing Chrome for Clauseo's own
-// browser, and the one call that starts it. None of it is the host's yet: the types live here, not in bindings.ts,
-// only FakeTransport plays the reports (its `appEvent`, as `browser_install`) and takes the call (`installBrowser`),
-// and the desktop transport does neither, so the real app has no state and shows no download.
+// The Chrome download the browser row offers, app-wide: the one call that starts it (`install_browser`, sent through
+// dispatch) and the host's `browser_install` events, which say where it stands. The host's events carry no offer: a
+// machine with no download (Linux, Windows on ARM64) says so by `failed` with `unsupported`, and a machine before any
+// download hears nothing, so the row offers Download Chrome until a state says otherwise.
 //
-// A failure comes as `Failed { code, message }` (stage E): the app shows words by `code`, an open enum it reads as
-// `unknown` when it doesn't know the value, and `message` is the host's, for the log only, never on screen. A second
-// InstallBrowser while one runs is refused as a command, not reported as a failure.
+// A failure comes as `failed { code, message }`: the app shows words by `code`, an open enum it reads as `unknown` when
+// it doesn't know the value, and `message` is the host's, for the log only, never on screen. `cancelled` is the answer
+// to a cancel, not a failure: the row goes back to the offer, with no line. A second install while one runs is answered
+// `done` by the host and starts nothing; the running download's events already say where it stands.
 import { useSyncExternalStore } from "react";
+import type { BrowserInstallState } from "../transport/protocol.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import { nextHostOf, type AppEvent } from "./host-next.ts";
 
@@ -35,57 +37,57 @@ const FAIL_CODES: ReadonlySet<string> = new Set<InstallFailCode>([
   "cancelled",
 ]);
 
-/** A failure as the app keeps it: the code it has words for, and the host's message, for the log only. */
-export type InstallFailure = { code: InstallFailCode; message: string };
+/** A failure the screen shows: its code has words (never `cancelled`, which is no failure), and the host's message,
+ * for the log only. */
+export type InstallFailure = {
+  code: Exclude<InstallFailCode, "cancelled">;
+  message: string;
+};
 
 /** The host's code, read: one this version doesn't know is `unknown`. */
 export const failCodeOf = (code: unknown): InstallFailCode =>
   typeof code === "string" && FAIL_CODES.has(code) ? (code as InstallFailCode) : "unknown";
 
-/** What the host reports about installing Chrome: whether it can download it (and its size), or not at all (Windows
- * on ARM64, where the lawyer installs Google Chrome); then the download's own events. */
-export type BrowserInstallReport =
-  | { offer: "download"; bytes: number }
-  | { offer: "none" }
-  | { downloading: { bytes: number; total: number } }
-  | "unpacking"
-  | "done"
-  | { failed: { code: string; message: string } };
-
-/** Where a download stands, once one is asked for. */
+/** Where a download stands, as the row shows it: a download under way, unpacking, done, or failed. Null (no value)
+ * is the offer: no download has started, or the last one was cancelled. */
 export type InstallProgress =
   | { downloading: { bytes: number; total: number } }
   | "unpacking"
   | "done"
   | { failed: InstallFailure };
 
-/** The install as the browser row reads it: the offer the host last reported, and the download's progress. Null in
- * the store until the host says anything. */
-export type BrowserInstall = {
-  offer: { offer: "download"; bytes: number } | { offer: "none" } | null;
-  progress: InstallProgress | null;
-};
+/** The install as the browser row reads it. */
+export type BrowserInstall = { progress: InstallProgress | null };
 
-/** A transport whose host takes the install call. Only FakeTransport is one; asked for by duck type. */
-export interface BrowserInstallSource {
-  installBrowser(): Promise<void>;
-  /** The reports played before this store was made, which it reads first: the room makes it only once the tool
-   * line's chunk is in (tool-line-load.ts), after the reports a thread's first view brought. */
-  installReports?(): readonly BrowserInstallReport[];
+/** The host's state as the row reads it: a cancelled download is idle (the offer), not a failure. */
+export function progressOf(state: BrowserInstallState): InstallProgress | null {
+  if (state === "unpacking" || state === "done") return state;
+  if ("downloading" in state && state.downloading !== undefined) {
+    const { bytes, total } = state.downloading;
+    return { downloading: { bytes, total } };
+  }
+  if ("failed" in state && state.failed !== undefined) {
+    const code = failCodeOf(state.failed.code);
+    if (code === "cancelled") return null;
+    return {
+      failed: {
+        code,
+        message: typeof state.failed.message === "string" ? state.failed.message : "",
+      },
+    };
+  }
+  return null;
 }
 
-const installs = (transport: object): transport is BrowserInstallSource =>
-  typeof (transport as Partial<BrowserInstallSource>).installBrowser === "function";
-
 /** Whether the download is under way, so a second can't start. */
-export const installRunning = (state: BrowserInstall | null): boolean => {
-  const p = state?.progress ?? null;
-  return p === "unpacking" || (typeof p === "object" && p !== null && "downloading" in p);
+export const installRunning = (state: BrowserInstall): boolean => {
+  const p = state.progress;
+  return p === "unpacking" || (p !== null && typeof p === "object" && "downloading" in p);
 };
 
-/** The install's state for one transport, heard from its app events. */
+/** The install's state for one transport, heard from its app events: the offer until one says otherwise. */
 export class BrowserInstallStore {
-  #state: BrowserInstall | null = null;
+  #state: BrowserInstall = { progress: null };
   readonly #heard = new Set<() => void>();
   readonly #transport: HostTransport;
 
@@ -93,49 +95,36 @@ export class BrowserInstallStore {
     this.#transport = transport;
     const app = nextHostOf(transport).app;
     if (!app) return;
-    const played = (transport as Partial<BrowserInstallSource>).installReports?.() ?? [];
-    for (const report of played) this.#hear({ browser_install: report });
+    // the app's first frames, the catch-up, carry the latest state when there is one
     app.subscribeApp((event) => this.#hear(event));
   }
 
-  get = (): BrowserInstall | null => this.#state;
+  get = (): BrowserInstall => this.#state;
 
   subscribe = (listener: () => void): (() => void) => {
     this.#heard.add(listener);
     return () => this.#heard.delete(listener);
   };
 
-  /** The lawyer's consent: Download Chrome or Try again. Asks the host once; nothing while a download runs. A
-   * refused command (one already runs, as another window may have started it) is no failure: the row goes back to
-   * where it stood before the press, unless the host's events have said where it stands since. */
+  /** The lawyer's consent: Download Chrome or Try again. Asks the host once; nothing while a download runs. Until the
+   * host's first Downloading the total is not known, so the bar reads empty. A refused command is no failure: the row
+   * goes back to where it stood before the press, unless the host's events have said where it stands since. */
   install(): void {
     const state = this.#state;
-    if (state === null || installRunning(state) || !installs(this.#transport)) return;
-    const total = state.offer?.offer === "download" ? state.offer.bytes : 0;
-    const pressed: InstallProgress = { downloading: { bytes: 0, total } };
-    this.#set({ ...state, progress: pressed });
-    this.#transport.installBrowser().catch(() => {
-      const now = this.#state;
-      if (now !== null && now.progress === pressed) this.#set({ ...now, progress: state.progress });
-    });
+    if (installRunning(state)) return;
+    const pressed: InstallProgress = { downloading: { bytes: 0, total: 0 } };
+    this.#set({ progress: pressed });
+    this.#transport
+      .dispatch({ command_id: crypto.randomUUID(), command: { install_browser: {} } })
+      .catch(() => {
+        const now = this.#state;
+        if (now.progress === pressed) this.#set({ progress: state.progress });
+      });
   }
 
   #hear(event: AppEvent): void {
     if (!("browser_install" in event)) return;
-    const report = event.browser_install;
-    const was = this.#state ?? { offer: null, progress: null };
-    if (typeof report === "object" && "offer" in report) this.#set({ ...was, offer: report });
-    else if (typeof report === "object" && "failed" in report)
-      this.#set({
-        ...was,
-        progress: {
-          failed: {
-            code: failCodeOf(report.failed.code),
-            message: typeof report.failed.message === "string" ? report.failed.message : "",
-          },
-        },
-      });
-    else this.#set({ ...was, progress: report });
+    this.#set({ progress: progressOf(event.browser_install.state) });
   }
 
   #set(state: BrowserInstall): void {
@@ -156,7 +145,7 @@ export function browserInstallOf(transport: HostTransport): BrowserInstallStore 
   return store;
 }
 
-/** The install's state as it changes; null until the host reports one. */
-export function useBrowserInstall(store: BrowserInstallStore): BrowserInstall | null {
+/** The install's state as it changes. */
+export function useBrowserInstall(store: BrowserInstallStore): BrowserInstall {
   return useSyncExternalStore(store.subscribe, store.get, store.get);
 }

@@ -118,20 +118,18 @@ function Download({ part, onInstall }: { part: DownloadPart; onInstall: () => vo
         <div className="tool-row-sub flex items-center gap-s2 text-small text-primary">
           <IconBreak size={14} />
           <span data-testid="tool-row-note">{part.cause}</span>
-          {part.retry && (
-            <LineTip content={w.t("Try again")}>
-              <Button
-                kind="quiet"
-                size="small"
-                shape="icon"
-                aria-label={w.t("Try again")}
-                data-testid="tool-retry"
-                onClick={onInstall}
-              >
-                <IconTryAgain size={16} />
-              </Button>
-            </LineTip>
-          )}
+          <LineTip content={w.t("Try again")}>
+            <Button
+              kind="quiet"
+              size="small"
+              shape="icon"
+              aria-label={w.t("Try again")}
+              data-testid="tool-retry"
+              onClick={onInstall}
+            >
+              <IconTryAgain size={16} />
+            </Button>
+          </LineTip>
         </div>
       );
   }

@@ -214,6 +214,7 @@ function appEventOf(event: HostEvent): AppEvent | null {
     return { matters_changed: { matters: matters.map(roomMatterOf), removed, all } };
   }
   if (event.threads_changed !== undefined) return { threads_changed: event.threads_changed };
+  if (event.browser_install !== undefined) return { browser_install: event.browser_install };
   return null;
 }
 

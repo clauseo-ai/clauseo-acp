@@ -15,7 +15,6 @@ import type {
   Settings,
 } from "../room/host-next.ts";
 import { NO_NEXT, WIRE } from "../room/host-next.ts";
-import type { BrowserInstallReport } from "../room/browser-install.ts";
 import { ChannelReader, envelopesOf, streamFailedOf, type ChannelEvent } from "./channel.ts";
 import {
   internalError,
@@ -70,8 +69,6 @@ export type FakeCall =
   | { call: "open_settings" }
   | { call: "next_query"; query: NextQuery }
   | { call: "next_command"; command: NextCommand }
-  /** Not the host's yet: the Chrome download (room/browser-install.ts). */
-  | { call: "install_browser" }
   | { call: "setup"; command: SetupCommand }
   | { call: "count_ui"; event: UiCount };
 
@@ -136,8 +133,6 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
   readonly #dispatched = new Set<(command: CommandEnvelope) => void>();
   readonly #settingsHeard = new Set<(settings: Settings) => void>();
   readonly #appHeard = new Set<(event: AppEvent) => void>();
-  /** The `browser_install` app events played so far (room/browser-install.ts). */
-  readonly #installs: BrowserInstallReport[] = [];
   readonly #limits = new LimitsFeed((problem) => this.problems.push(problem));
   /** Every `events` arm's envelopes delivered so far, and who hears the next. */
   readonly #envelopes: Envelope[] = [];
@@ -360,18 +355,6 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
     for (const listener of this.#settingsHeard) listener(settings);
   }
 
-  /** Not the host's yet: starts the Chrome download (room/browser-install.ts); its progress comes back as
-   * `browser_install` app events, which a test plays. */
-  async installBrowser(): Promise<void> {
-    this.calls.push({ call: "install_browser" });
-  }
-
-  /** Not the host's yet: the `browser_install` reports played so far, for an install store made after them
-   * (room/browser-install.ts). */
-  installReports(): readonly BrowserInstallReport[] {
-    return this.#installs;
-  }
-
   /** Plays one SetupEvent (R20) as the host's `setup` stream would send it. */
   setupEvent(event: SetupEvent): void {
     for (const listener of this.#setupHeard) listener(event);
@@ -382,9 +365,9 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
     return this.only("setup").map((c) => c.command);
   }
 
-  /** Plays one app event (H4) as the host would send it to every window. */
+  /** Plays one app event (H4) as the host would send it to every window; `{ browser_install: { state } }` is the
+   * Chrome download's state (room/browser-install.ts). A new app listener hears `host.next.first` first, the catch-up. */
   appEvent(event: AppEvent): void {
-    if ("browser_install" in event) this.#installs.push(event.browser_install);
     for (const listener of this.#appHeard) listener(event);
   }
 
