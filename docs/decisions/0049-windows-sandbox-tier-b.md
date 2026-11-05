@@ -1,8 +1,9 @@
 # 0049: The Windows sandbox, tier B
 
-**Draft.** S15 PR2 starts this record and PR1 brings it to design (B). Later S15 pull requests
-complete it: the ACL walk (PR3), set-up and the pool (PR4), the runner and token (PR5), the
-launcher (PR6), the network (PR7), the install-folder grants (PR8), and Codex (PR9).
+**Draft.** S15 PR2 starts this record, PR1 brings it to design (B) and PR3a adds the ACL
+writes. Later S15 pull requests complete it: applying the plan (PR3b), set-up and the pool
+(PR4), the runner and token (PR5), the launcher (PR6), the network (PR7), the install-folder
+grants (PR8), and Codex (PR9).
 
 ## Context
 
@@ -60,6 +61,21 @@ build 26100):
 - **The ledger** `<data_dir>\sandbox\acl-ledger.json` lists every entry and label, write-ahead
   (D4), one entry per matter even when two matters share an entry, so removal waits for the
   last.
+- **Permission writes (PR3a, `windows/acl.rs`, `windows/acl_bytes.rs`).**
+  - Every target is opened by its own name (`FILE_FLAG_OPEN_REPARSE_POINT`, which leaves a cloud
+    placeholder unhydrated) and refused if it is a junction or symbolic link now, if its final
+    path isn't the planned one, if an allow would reach a file's other hard-linked names (the
+    credential link excepted, by design), or for a whole-tree deny, if it is a volume's root.
+  - Entries are added and removed exactly, as bytes, in Windows' order, and written with
+    `SetKernelObjectSecurity`, which doesn't propagate. Clauseo's walk then works out each child's
+    inherited entries from its parent (`CreatePrivateObjectSecurityEx`, as Windows' own
+    propagation does) and the inherited Low label, writing only what changed. It skips junctions,
+    symbolic links and files with more than one link, which stay bare.
+  - A walk can be strict (PR3b makes every tree that carries a deny strict): a child with a
+    protected DACL, or with an explicit allow for a group a pool token holds (`Everyone`,
+    `Users`, `Authenticated Users`, `INTERACTIVE`, `RESTRICTED` and the rest of
+    `acl_bytes::BROAD_SIDS`), the pool group or another pool user, fails the walk: such a child
+    beats the inherited deny. Adding explicit denies there instead was not chosen.
 - **Records.**
   - `HKLM\SOFTWARE\Clauseo\Sandbox`, with an explicit DACL: every pool user's SID, which the
     desktop's start-up check (#317) reads through `clauseo_sandbox::windows::sandbox_user_sid`,
@@ -131,6 +147,9 @@ may drop `Everyone` behind a proxy that runs as the desktop user.
   PR7's VM row (the (B) token against `\\localhost` and a guest share).
 - **Folders on `C:\` outside the matter's parent, and `ProgramData`**, stay readable where
   `Users` reads them. Owner: S15 close-out, Rohan's read-gap decision.
+- **Hard-linked files and junction targets inside a matter or sibling** stay bare (D7): no fence
+  or sibling deny reaches them through the walk, so another pool agent reads a hard-linked file
+  wherever `Users` can. Owner: S15 close-out.
 
 ## Consequences
 
