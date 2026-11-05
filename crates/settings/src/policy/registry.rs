@@ -62,8 +62,10 @@ pub(crate) fn raw_values(
     let mut raws = Vec::with_capacity(values.len());
     let mut refused = Vec::new();
     let mut warnings = Vec::new();
+    let mut plans_seen = 0;
     for (name, value) in values {
         let key = canonical(name);
+        plans_seen += usize::from(key.starts_with("plans."));
         let converted = match kinds(&key) {
             Some(kind) => json_value(kind, value),
             None => Err(None),
@@ -81,7 +83,10 @@ pub(crate) fn raw_values(
                         refused.push(key.clone());
                         WarningKind::InvalidValue { key, message }
                     }
-                    None => WarningKind::UnknownKey { key },
+                    // A `plans.` name that is no plan's can be pasted text: shown by place.
+                    None => WarningKind::UnknownKey {
+                        key: crate::plans::shown_plan_key(&key, plans_seen),
+                    },
                 },
             }),
         }

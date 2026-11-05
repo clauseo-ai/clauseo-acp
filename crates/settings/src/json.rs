@@ -53,11 +53,16 @@ pub(crate) fn read(path: &Path, bytes: &[u8]) -> Result<(Vec<Raw>, Vec<Warning>)
     let mut warnings = Vec::new();
     // A section the file sets twice is its last copy, whole: the save keeps only that copy, so
     // the earlier copy's entries must not load either. Its warnings go with it.
+    let mut plans_seen = 0;
     for (section, value) in leaf::keep_last(sections.0, |(section, _)| section.clone()) {
+        plans_seen += usize::from(section.starts_with("plans."));
         if !SECTIONS.contains(&section.as_str()) {
+            // A top-level `plans.` name can be pasted text: shown by its place.
             warnings.push(Warning {
                 origin: origin(value),
-                kind: WarningKind::UnknownKey { key: section },
+                kind: WarningKind::UnknownKey {
+                    key: crate::plans::shown_plan_key(&section, plans_seen),
+                },
             });
             continue;
         }

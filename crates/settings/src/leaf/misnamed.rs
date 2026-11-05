@@ -3,6 +3,7 @@
 //! there is unknown and the user's value must not stand in.
 
 use super::{Leaf, Raw, SECURITY_KEYS, typed};
+use crate::plans::shown_plan_key;
 use crate::policy::kind_of;
 use crate::warning::{Origin, Warning, WarningKind};
 
@@ -78,8 +79,16 @@ fn security_keys_misnamed(
         };
         let from_raws = raws
             .iter()
-            .find(|raw| about(&raw.key))
-            .map(|raw| (raw.origin.clone(), raw.key.clone()));
+            .enumerate()
+            .find(|(_, raw)| about(&raw.key))
+            .map(|(at, raw)| {
+                let place = raws
+                    .iter()
+                    .take(at + 1)
+                    .filter(|raw| raw.key.starts_with("plans."))
+                    .count();
+                (raw.origin.clone(), shown_plan_key(&raw.key, place))
+            });
         let from_warnings = || {
             warnings.iter().find_map(|warning| match &warning.kind {
                 WarningKind::UnknownKey { key: name } if about(name) || names(name, key) => {

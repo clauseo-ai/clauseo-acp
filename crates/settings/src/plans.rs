@@ -111,6 +111,36 @@ fn name_shaped(name: &str) -> bool {
             .is_some_and(|first| !first.is_ascii_digit())
 }
 
+/// Whether an unknown field `text` may be quoted: `[a-z][a-z0-9_]{0,31}`, which still shows a
+/// typo (`envv`, `endpoit`). Anything else may be pasted text (`NAME=value`, a `ghp_…` or other
+/// token, which mixes case or runs long), so a message gives its place instead.
+fn field_shaped(text: &str) -> bool {
+    text.len() <= 32
+        && text
+            .bytes()
+            .next()
+            .is_some_and(|first| first.is_ascii_lowercase())
+        && text
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+}
+
+/// How a message shows the key `key`, the `place`th `plans.` entry of its source (from 1): as
+/// written when its id passes [`id_ok`] and each dotted part after the id is
+/// [`field_shaped`] (so a misnamed `plans.claude-acp.endpoint` still reads as itself), and as
+/// `plans.<id {place}>` otherwise. Any key outside `plans.` is as written.
+pub(crate) fn shown_plan_key(key: &str, place: usize) -> String {
+    let Some(rest) = key.strip_prefix("plans.") else {
+        return key.to_owned();
+    };
+    let mut parts = rest.split('.');
+    if parts.next().is_some_and(id_ok) && parts.all(field_shaped) {
+        key.to_owned()
+    } else {
+        format!("plans.<id {place}>")
+    }
+}
+
 /// Whether `name` is one of [`PLAN_PROXY_NAMES`], in any case.
 fn proxy_name(name: &str) -> bool {
     PLAN_PROXY_NAMES
@@ -203,7 +233,8 @@ fn authority_ok(authority: &str) -> bool {
 /// address, refuses the entry. Each variable a plan may not set ([`PLAN_ENV_NAMES`],
 /// [`PLAN_PROXY_NAMES`]) is left out with a warning in `dropped`, naming it (or giving its place,
 /// for a name that is no variable name), and the rest of the plan loads; so does each field this
-/// version does not know.
+/// version does not know, quoted only when it is a plain word (`plans.claude-acp.<field 2>`
+/// otherwise).
 pub(crate) fn plan(
     key: &str,
     value: Value,
@@ -214,12 +245,18 @@ pub(crate) fn plan(
         message: message.to_owned(),
     };
     if let Value::Object(fields) = &value {
+        // A field is quoted only when [`field_shaped`]; else by its place, from 1.
         dropped.extend(
             fields
                 .keys()
-                .filter(|field| !PLAN_FIELDS.contains(&field.as_str()))
-                .map(|field| WarningKind::UnknownKey {
-                    key: format!("{key}.{field}"),
+                .enumerate()
+                .filter(|(_, field)| !PLAN_FIELDS.contains(&field.as_str()))
+                .map(|(at, field)| WarningKind::UnknownKey {
+                    key: if field_shaped(field) {
+                        format!("{key}.{field}")
+                    } else {
+                        format!("{key}.<field {}>", at + 1)
+                    },
                 }),
         );
     }
