@@ -60,6 +60,7 @@ import { LivePlan } from "./limits/live-plan.tsx";
 import { Matters, type MattersView } from "./matters.ts";
 import { AnswerHost, quietly, type ListedPapers } from "./open.ts";
 import { LocateGate, MovedFolder } from "./moved.tsx";
+import { unprotectedFolder } from "./folder-support.ts";
 import { RoomRail } from "./rail.tsx";
 import { useSettingsKey } from "./settings-key.ts";
 import { useFindKey } from "./find-key.ts";
@@ -197,6 +198,7 @@ function RoomFrame({
   const [matters] = useState(() => new Matters(transport, store));
   // each conversation's composer draft, kept here, above Work's key, so it outlives a visit to another conversation
   const [drafts] = useState<Drafts>(() => new Map());
+  const [folderShut] = useState(() => new Set<MatterId>());
   const [conversations] = useState(() => new Conversations(transport, store, matters, drafts));
   useEffect(() => matters.start(), [matters]);
   useEffect(() => conversations.start(), [conversations]);
@@ -364,6 +366,7 @@ function RoomFrame({
         caption={caption}
         nativeLights={controls !== null}
         search={false}
+        unprotected={unprotectedFolder(open?.folder_support)}
         versions={open !== null}
         {...versions.toolbar}
         plan={null}
@@ -486,6 +489,7 @@ function RoomFrame({
                       archived={talks.archived}
                       onThread={matters.onThread}
                       conversations={conversations}
+                      folderShut={folderShut}
                     />
                   </ToolLineContext>
                 </AgentPlanContext>

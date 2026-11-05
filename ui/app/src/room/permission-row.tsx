@@ -31,6 +31,8 @@ import {
   toolCallIdOf,
 } from "./permission-model.ts";
 import { ElicitationForm } from "./elicitation-form.tsx";
+import { FolderReason } from "./folder-reason.tsx";
+import { useFolderReason } from "./folder-support.ts";
 import { KeyedRequestContext } from "./permission-keyed.ts";
 import { useAgentPlan } from "./thread/agent-plan.ts";
 import { useThreadActions } from "./thread/session.ts";
@@ -63,6 +65,7 @@ function Permission({
   const pending = m.state === "pending";
   const lang = w.lang;
   const plan = useAgentPlan();
+  const reason = useFolderReason(call?.kind) && pending;
   const onAnswer = useCallback(
     (a: PermissionAnswer) => {
       const offer = m.offers.find((o) => o.answer === a);
@@ -97,6 +100,7 @@ function Permission({
         offered={offered}
         {...(m.asks ? { question: w.th("Clauseo asks before going on.") } : {})}
         title={m.title}
+        {...(reason ? { reason: <FolderReason /> } : {})}
         kept={m.kept}
         done={m.done}
         busy={pending && asked !== null}

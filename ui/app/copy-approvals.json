@@ -1861,6 +1861,85 @@
     "at": "2026-11-02",
     "note": "Rohan, on the review page, 15:35"
   },
+  "FR-01": {
+    "en": "Clauseo asks before each edit / Clauseo asks before each edit in this folder",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the folder-rights copy page"
+  },
+  "FR-02": {
+    "en": "You can change files here, but not this folder's permissions. Clauseo needs them to keep Claude and Codex inside the matter. Some edits won't go through.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "Rohan's approved line with 'the agent' replaced by 'Claude and Codex' (word list: no 'agent')"
+  },
+  "FR-03": {
+    "en": "What to tell IT",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the folder-rights copy page"
+  },
+  "FR-04": {
+    "en": "Close",
+    "hi": "बंद करें",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the folder-rights copy page"
+  },
+  "FR-05": {
+    "en": "Please give my account \"Change permissions\" on this folder: {path}. Clauseo, the app I use for this matter, adds one entry to the folder's permissions so Claude and Codex, which it runs, can write only inside it. / Copy",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "Rohan's approved line with 'the agent' replaced by 'Claude and Codex' (word list: no 'agent')"
+  },
+  "FR-06": {
+    "en": "Can't set folder permissions / Clauseo can't change this folder's permissions, so it asks before each edit.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the folder-rights copy page"
+  },
+  "FR-11": {
+    "en": "Not protected",
+    "hi": "संरक्षित नहीं",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the folder-rights copy page"
+  },
+  "FR-12": {
+    "en": "On a network drive. / Claude asks before every change. Codex can't work here. / This matter's folder is on a network drive / Clauseo can't keep Claude and Codex inside this folder. For full protection, move the matter to a folder on this computer.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "Rohan's approved line with 'the agent' replaced by 'Claude and Codex' (word list: no 'agent')"
+  },
+  "FR-15": {
+    "en": "No file permissions. / Claude asks before every change. Codex can't work here. / This matter's folder is on a drive that doesn't keep file permissions / Clauseo can't keep Claude and Codex inside this folder. USB drives often don't keep permissions. For full protection, move the matter to a folder on this computer.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "Rohan's approved line with 'the agent' replaced by 'Claude and Codex' (word list: no 'agent')"
+  },
   "U9-01": {
     "en": "Close '{file}' in Word to undo the change.",
     "hi": "बदलाव पूर्ववत करने के लिए Word में '{file}' बंद करें।",

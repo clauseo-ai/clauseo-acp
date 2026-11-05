@@ -3,14 +3,19 @@
 // conversation, so each opens fresh, with its own words in the field. The thread's list, its rows and the Markdown renderer are one chunk of
 // their own (chunk.ts, list.tsx), started as Work mounts; the session opens the thread only once it is in, so the
 // rows never wait for it. The composer and the transcript's box are here, for the first paint.
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { ComposerHandle, PlanChoice } from "@clauseo/components/clauseo/composer.tsx";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { useStreamError, useStreamPart, useViewStore, useWatch } from "../../store/hooks.ts";
 import type { StreamView } from "../../store/view.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
-import type { AvailableCommand, MatterSummary, ThreadId } from "../../transport/protocol.ts";
+import type {
+  AvailableCommand,
+  MatterId,
+  MatterSummary,
+  ThreadId,
+} from "../../transport/protocol.ts";
 import type { Conversations } from "../conversations.ts";
 import { nextHostOf } from "../host-next.ts";
 import { KeyedRequestContext, keyedRequest } from "../permission-keyed.ts";
@@ -32,6 +37,12 @@ import { paperMentions } from "./paper-mentions.ts";
 import { WorkComposer } from "./work-composer.tsx";
 import { ArchivedLine } from "../archived.tsx";
 import { useToolsSegment } from "../tool-line-load.ts";
+import { FolderSupportContext, notedFolder } from "../folder-support.ts";
+
+/** Folder rights' notice, loaded only for a matter whose folder Clauseo can't fence. */
+const FolderNotice = lazy(() =>
+  import("../folder-notice.tsx").then((m) => ({ default: m.FolderNotice })),
+);
 
 const NO_COMMANDS: readonly AvailableCommand[] = [];
 
@@ -65,6 +76,7 @@ export function Work({
   onThread,
   conversations,
   archived = false,
+  folderShut,
 }: {
   transport: HostTransport;
   matter: MatterSummary | null;
@@ -86,6 +98,8 @@ export function Work({
   conversations?: Conversations | undefined;
   /** The open conversation is archived: read only, its line in the composer's place (archived.tsx). */
   archived?: boolean;
+  /** The matters whose folder notice the lawyer closed (room.tsx keeps them above Work's key, as the drafts). */
+  folderShut?: Set<MatterId>;
 }) {
   const store = useViewStore();
   const field = useRef<ComposerHandle>(null);
@@ -151,8 +165,29 @@ export function Work({
   const mentions = useMemo(() => paperMentions(transport, matterId), [transport, matterId]);
   // the thread's chunk, in memory before the first view or the first answer, with a matter or without
   useEffect(() => void loadThread(), []);
+  // folder rights: the notice, once per matter until Close
+  const noted = notedFolder(matter?.folder_support);
+  const [closed, setClose] = useState<MatterId | null>(null);
+  const notice =
+    matter !== null &&
+    noted !== null &&
+    closed !== matter.matter &&
+    !folderShut?.has(matter.matter);
   return (
     <>
+      {notice && (
+        <Suspense fallback={null}>
+          <FolderNotice
+            key={matter.matter}
+            kind={noted}
+            folder={matter.folder_display ?? ""}
+            onClose={() => {
+              folderShut?.add(matter.matter);
+              setClose(matter.matter);
+            }}
+          />
+        </Suspense>
+      )}
       <ThreadActionsContext value={session.actions}>
         {/* the list's box, holding Thread, whose .room-thread is the scroller inside it; below 1000 px it takes the
             thread's place in the one column (responsive.css orders the thread first) */}
@@ -160,7 +195,9 @@ export function Work({
           {/* empty until the thread's chunk is in: its arrival is one commit */}
           <Suspense fallback={null}>
             <KeyedRequestContext value={keyed}>
-              <LazyThreadList transport={transport} stream={stream} busy={busy} />
+              <FolderSupportContext value={matter?.folder_support}>
+                <LazyThreadList transport={transport} stream={stream} busy={busy} />
+              </FolderSupportContext>
             </KeyedRequestContext>
           </Suspense>
         </div>

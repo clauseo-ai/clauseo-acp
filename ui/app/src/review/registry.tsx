@@ -52,6 +52,7 @@ import { ERROR_WORDS, type ErrorKey } from "@clauseo/components/lib/words-errors
 import { agentText, step, toolCall, TURN, userMessage, uuid } from "../testing/stream-script.ts";
 import type { ErrorCode, StepEntry, ViewEntry } from "../transport/protocol.ts";
 import { U16B } from "./registry-u16b.tsx";
+import { FOLDER_RIGHTS } from "./registry-folder-rights.tsx";
 
 /* ---------- U3: the live thread's states ---------- */
 
@@ -553,4 +554,5 @@ export const REGISTRY: readonly Entry[] = [
     render: () => <RoomAfter host={() => refusingHost("internal")} steps={NEW_MATTER} />,
   },
   ...U16B,
+  ...FOLDER_RIGHTS,
 ];

@@ -10,6 +10,7 @@ import type {
   AvailableCommand,
   CommandOutcome,
   ErrorCode,
+  FolderSupportKind,
   LimitsView,
   MatterSummary,
   ThreadStatus,
@@ -84,6 +85,8 @@ export type ThreadState = {
   /** The plan's limits the channel carries, as `limits_view_changed` sends them (U12): the toolbar's plan, its card,
    * the composer's warning. */
   limits?: LimitsView;
+  /** What the host found about the matter's folder (folder_support): folder rights' notice and card reason. */
+  folder?: FolderSupportKind;
 };
 
 const refusal = (code: ErrorCode) => ({
@@ -122,7 +125,12 @@ export function threadHost(state: ThreadState): FakeTransport {
   head.header!.agent = agent;
   const transport: FakeTransport = new FakeTransport({
     query: (query) => {
-      if (query === "list_matters") return { matters: [MATTER] };
+      if (query === "list_matters")
+        return {
+          matters: [
+            state.folder === undefined ? MATTER : { ...MATTER, folder_support: state.folder },
+          ],
+        };
       if (typeof query === "object" && query.list_threads !== undefined)
         return {
           threads: [{ thread: THREAD, matter: MATTER.matter, agent, status: "idle" }],
