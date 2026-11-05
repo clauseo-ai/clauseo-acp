@@ -395,3 +395,26 @@ fn a_bare_child_keeps_its_owner_and_has_no_entries() {
     let offset = usize::try_from(read_u32(&bare, 4).unwrap()).unwrap();
     assert_eq!(&bare[offset..offset + owner.len()], owner.as_slice());
 }
+
+/// Round 9: an auto-inherited child's explicit entry is one somebody wrote, so it stays even
+/// when it equals an inheritable entry of the parent; on a child not auto-inherited (where NTFS
+/// writes flagless copies) the same entry goes. Inherited entries go from both.
+#[test]
+fn an_auto_inherited_child_keeps_an_explicit_entry_equal_to_an_inherited_one() {
+    let users = "S-1-5-32-545";
+    let due = render(2, &[&ace(ALLOWED, INHERITED, 0x0012_00a9, users)]);
+    let explicit = ace(ALLOWED, 0, 0x0012_00a9, users);
+    let held = ace(ALLOWED, INHERITED, 0x001f_01ff, OTHER);
+    let dacl = render(2, &[&explicit, &held]);
+
+    let ai = build_descriptor(DACL_AUTO_INHERITED, Some(&dacl), None);
+    let after = without_inherited(&ai, &due).unwrap();
+    let read = Descriptor::parse(&after).unwrap();
+    assert_eq!(read.dacl, Some(render(2, &[&explicit]).as_slice()));
+    assert_eq!(read.control & DACL_AUTO_INHERITED, DACL_AUTO_INHERITED);
+
+    let plain = build_descriptor(0, Some(&dacl), None);
+    let after = without_inherited(&plain, &due).unwrap();
+    let read = Descriptor::parse(&after).unwrap();
+    assert_eq!(read.dacl, Some(empty_acl().as_slice()));
+}
