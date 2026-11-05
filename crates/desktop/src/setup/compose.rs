@@ -223,8 +223,14 @@ impl Compose {
         }
     }
 
-    /// S18's new `state` for `agent`.
+    /// S18's new `state` for `agent`. A resting one (any state but a running one) ends a
+    /// `StartSignIn`'s starting mark (`SetupEvents::end_start`), even when the composed
+    /// state is unchanged and nothing is sent: a reserved job that was cancelled, or replaced
+    /// by a `FindLogin` or a `SignOut`, never reports a running state.
     pub(crate) fn signin(&self, agent: &AgentId, state: SigninState) {
+        if !is_running(&state) {
+            self.events.end_start(agent);
+        }
         self.change(agent, |known, _| {
             let mut state = state;
             if known.ending && !is_running(&state) {
