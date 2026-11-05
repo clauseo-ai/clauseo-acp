@@ -13,6 +13,9 @@ const words = (lang: "en" | "hi"): NoticeWords => ({
 });
 const en = words("en");
 
+/** Papers as Versions names them: isolated, so a right-to-left mark can't reorder the line. */
+const iso = (name: string) => `\u2068${name}\u2069`;
+
 const CONTEXT =
   "Clauseo doesn't remember the earlier questions and answers in this conversation. Include what it needs from them in your next question.";
 
@@ -35,4 +38,48 @@ test("an object kind this version does not know gives null, so the row shows its
 
 test("the Hindi line is the English until its Hindi comes (hi: later)", () => {
   expect(noticeLine("context_not_restored", words("hi"))).toBe(CONTEXT);
+});
+
+test("one paper that came back: its name, and the singular line", () => {
+  const kind: NoticeKind = { files_came_back: { files: ["Pleadings/Reply.docx"], more: 0 } };
+  expect(noticeLine(kind, en)).toBe(
+    `1 paper came back after the undo: ${iso("Reply.docx")}. Clauseo didn't remove it again.`,
+  );
+});
+
+test("several papers that came back, none more: each name, joined as Versions joins them", () => {
+  const kind: NoticeKind = {
+    files_came_back: { files: ["Drafts/Lease.docx", "Notice.docx", "Reply.docx"], more: 0 },
+  };
+  expect(noticeLine(kind, en)).toBe(
+    `3 papers came back after the undo: ${iso("Lease.docx")}, ${iso("Notice.docx")} and ${iso("Reply.docx")}. Clauseo didn't remove them again.`,
+  );
+});
+
+test("papers with more beyond the five: the shared '{n} more' ends the list, and n counts them all", () => {
+  const kind: NoticeKind = {
+    files_came_back: {
+      files: ["A.docx", "B.docx", "C.docx", "D.docx", "E.docx"],
+      more: 3,
+    },
+  };
+  expect(noticeLine(kind, en)).toBe(
+    `8 papers came back after the undo: ${iso("A.docx")}, ${iso("B.docx")}, ${iso("C.docx")}, ${iso("D.docx")}, ${iso("E.docx")} and 3 more. Clauseo didn't remove them again.`,
+  );
+});
+
+test("two papers with one bare name in different folders: each shows its whole path", () => {
+  const kind: NoticeKind = {
+    files_came_back: {
+      files: ["Drafts/Reply.docx", "Pleadings/Reply.docx", "Notice.docx"],
+      more: 0,
+    },
+  };
+  expect(noticeLine(kind, en)).toBe(
+    `3 papers came back after the undo: ${iso("Drafts/Reply.docx")}, ${iso("Pleadings/Reply.docx")} and ${iso("Notice.docx")}. Clauseo didn't remove them again.`,
+  );
+});
+
+test("an object kind with no files and no more gives null, so the row shows its text", () => {
+  expect(noticeLine({ files_came_back: { files: [], more: 0 } }, en)).toBeNull();
 });
