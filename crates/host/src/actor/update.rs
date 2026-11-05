@@ -15,7 +15,7 @@
 //!   the host clock, the marker on the file thread, Stop for every turn, the hold on new sends,
 //!   `UpdateChanged`, the counts and the shutdown that ends in `Exit::Install`.
 //! - **Turns.** After every input the loop calls [`tick`]: the machine hears `TurnsRunning`
-//!   each time \"any turn running\" flips (`turn/install.rs` says what counts), and, after a
+//!   each time "any turn running" flips (`turn/queue/install.rs` says what counts), and, after a
 //!   `CancelTurns`, `TurnsCancelled` once no turn is left without its `TurnEnded`.
 //!
 //! The machine hears nothing once the host stops: a quit never turns into an install.

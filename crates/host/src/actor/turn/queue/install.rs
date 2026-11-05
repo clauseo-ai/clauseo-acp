@@ -1,11 +1,12 @@
 //! What the updater's install asks of the turn path (decision record 0037, `actor/update.rs`):
 //! whether any turn runs, Stop for every running turn, and the queues moved on once the hold
-//! on new sends is lifted. The hold itself is in `queue.rs` (`route` and `move_on`).
+//! on new sends is lifted. The hold itself is in `hold.rs`.
 
 use clauseo_protocol::ThreadId;
 
-use super::super::Actor;
-use super::{TurnState, cancel, queue};
+use super::super::super::Actor;
+use super::super::{TurnState, cancel};
+use super::{move_on, moves_by_itself};
 
 /// Whether any thread has a turn running, for `after_turn`: a current turn (queued for the
 /// writer, starting or prompting), a last turn whose `TurnEnded` is on its way to the store,
@@ -17,7 +18,7 @@ use super::{TurnState, cancel, queue};
 pub(crate) fn any_running(actor: &Actor) -> bool {
     actor.threads.values().any(|entry| {
         let state = &entry.turn;
-        state.current.is_some() || closing(state) || queue::moves_by_itself(&state.queue)
+        state.current.is_some() || closing(state) || moves_by_itself(&state.queue)
     })
 }
 
@@ -60,6 +61,6 @@ pub(crate) fn cancel_all(actor: &mut Actor) {
 pub(crate) fn release(actor: &mut Actor) {
     let threads: Vec<ThreadId> = actor.threads.keys().copied().collect();
     for thread in threads {
-        queue::move_on(actor, thread);
+        move_on(actor, thread);
     }
 }

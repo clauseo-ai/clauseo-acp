@@ -19,7 +19,6 @@ mod end;
 mod failure;
 mod forced_mode;
 mod inputs;
-mod install;
 mod key_retry;
 mod known;
 mod launch_checks;
@@ -65,10 +64,9 @@ pub(crate) use close::{closing, log_limit_stop};
 pub(crate) use end::limits_read;
 pub(crate) use failure::blocked as stream_blocked;
 pub(crate) use inputs::{AgentReply, LogFor, TurnInput};
-pub(crate) use install::{any_active, any_running, cancel_all, release};
 pub use launch_checks::PackRequest;
 pub(crate) use out::flush_text;
-pub(crate) use queue::queue_held;
+pub(crate) use queue::{any_active, any_running, cancel_all, queue_held, release};
 pub(crate) use restore::{
     RestoreAsk, committed as restore_committed, on_restored, restore_version,
 };
