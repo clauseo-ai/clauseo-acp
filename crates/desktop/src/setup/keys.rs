@@ -7,14 +7,16 @@
 //! runs no caller code on it, so the load runs on desktop's own setup thread instead.
 //!
 //! A write goes to the keychain first, on a thread of its own (a keychain call may block on a
-//! prompt), and to memory only once it is stored. `main`'s first key ([`KeyWrite::OnlyIfAbsent`])
+//! prompt), and to memory only once it is stored, under one write order (see [`KeyCache`]). A
+//! read that failed at start leaves the key out; a `main` key refused because one is stored
+//! takes the stored one into memory then. `main`'s first key ([`KeyWrite::OnlyIfAbsent`])
 //! goes through `Keychain::store_if_absent`, whose check and store are one step in this process,
 //! and is refused with `settings.key_stored` when a key is there. No key reaches a log, an error
 //! or a `Debug`: [`KeyCache`]'s `Debug` names the agents that have one.
 
 use std::collections::BTreeMap;
 use std::fmt;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use clauseo_agents::keys::{KeyError, Keychain};
 use clauseo_protocol::{AgentId, ErrorCode, HostError, Secret};
@@ -25,11 +27,20 @@ use super::KeyWrite;
 use super::admit::key_stored;
 use crate::bridge::lock;
 
+/// The keys in memory, by agent.
+type Keys = Arc<Mutex<BTreeMap<AgentId, Zeroizing<String>>>>;
+
 /// The keys in memory, and the keychain they come from.
+///
+/// `order` is held from each write's keychain call through its memory update and its `then`
+/// (the compose trigger), so memory, and what the windows are told, change in the order the
+/// keychain did: a set and a clear at once never leave a cleared key in memory. It is never held
+/// across anything that waits on a window, nor taken by a read ([`KeyCache::has`]).
 pub(crate) struct KeyCache {
     keychain: Keychain,
     available: bool,
-    keys: Mutex<BTreeMap<AgentId, Zeroizing<String>>>,
+    keys: Keys,
+    order: Arc<Mutex<()>>,
 }
 
 impl fmt::Debug for KeyCache {
@@ -67,7 +78,8 @@ impl KeyCache {
         Self {
             keychain,
             available,
-            keys: Mutex::new(keys),
+            keys: Arc::new(Mutex::new(keys)),
+            order: Arc::default(),
         }
     }
 
@@ -90,46 +102,95 @@ impl KeyCache {
         lock(&self.keys).get(agent).cloned()
     }
 
-    /// Stores `key` as `agent`'s: in the keychain (off this thread), then in memory. With
+    /// Stores `key` as `agent`'s: in the keychain, then in memory, then `then(true)`. With
     /// [`KeyWrite::OnlyIfAbsent`] only when no key is stored, else `settings.key_stored` with
-    /// nothing written. A key the keychain refuses is `command.invalid`; a keychain that fails
-    /// is `internal`. Neither error holds the key.
+    /// nothing written; memory then takes the keychain's entry again (a read that failed at start
+    /// left it out), and `then` gets whether it holds one. A key the keychain refuses is
+    /// `command.invalid`; a keychain that fails is `internal`. Neither error holds the key.
+    ///
+    /// All of it runs on a thread of its own (a keychain call may block on a prompt) under the
+    /// one write order ([`KeyCache`]), so memory and `then` follow the keychain's order, and a
+    /// caller that stops waiting leaves them in step all the same.
     pub(crate) async fn set(
         &self,
         agent: &AgentId,
         key: Secret,
         write: KeyWrite,
+        then: impl FnOnce(bool) + Send + 'static,
     ) -> Result<(), HostError> {
         let key = key.into_zeroizing();
-        let keychain = self.keychain.clone();
+        let (keychain, keys, order) = self.parts();
         let for_thread = agent.clone();
-        let stored = off_thread(move || {
-            let key = key;
-            match write {
-                KeyWrite::Replace => keychain.store(&for_thread, &key).map(|()| Some(key)),
-                KeyWrite::OnlyIfAbsent => keychain
-                    .store_if_absent(&for_thread, &key)
-                    .map(|stored| stored.then_some(key)),
+        let stored = off_thread(move || -> Result<bool, KeyError> {
+            let agent = for_thread;
+            let _order = lock(&order);
+            let stored = match write {
+                KeyWrite::Replace => keychain.store(&agent, &key).map(|()| true),
+                KeyWrite::OnlyIfAbsent => keychain.store_if_absent(&agent, &key),
+            }?;
+            if stored {
+                lock(&keys).insert(agent, key);
+                then(true);
+            } else {
+                then(reload(&keychain, &keys, &agent));
             }
+            Ok(stored)
         })
         .await?
         .map_err(|error| key_error(&error))?;
-        let Some(key) = stored else {
-            return Err(key_stored(agent));
-        };
-        lock(&self.keys).insert(agent.clone(), key);
-        Ok(())
+        if stored {
+            Ok(())
+        } else {
+            Err(key_stored(agent))
+        }
     }
 
-    /// Removes `agent`'s key: from the keychain (off this thread), then from memory.
-    pub(crate) async fn clear(&self, agent: &AgentId) -> Result<(), HostError> {
-        let keychain = self.keychain.clone();
-        let for_thread = agent.clone();
-        off_thread(move || keychain.clear(&for_thread))
-            .await?
-            .map_err(|error| key_error(&error))?;
-        lock(&self.keys).remove(agent);
-        Ok(())
+    /// Removes `agent`'s key: from the keychain, then from memory, then `then(false)`; on a
+    /// thread of its own under the write order, as [`KeyCache::set`] runs.
+    pub(crate) async fn clear(
+        &self,
+        agent: &AgentId,
+        then: impl FnOnce(bool) + Send + 'static,
+    ) -> Result<(), HostError> {
+        let (keychain, keys, order) = self.parts();
+        let agent = agent.clone();
+        off_thread(move || -> Result<(), KeyError> {
+            let _order = lock(&order);
+            keychain.clear(&agent)?;
+            lock(&keys).remove(&agent);
+            then(false);
+            Ok(())
+        })
+        .await?
+        .map_err(|error| key_error(&error))
+    }
+
+    /// What a write's thread needs: the keychain, memory and the write order.
+    fn parts(&self) -> (Keychain, Keys, Arc<Mutex<()>>) {
+        (
+            self.keychain.clone(),
+            Arc::clone(&self.keys),
+            Arc::clone(&self.order),
+        )
+    }
+}
+
+/// Takes `agent`'s entry from `keychain` into `keys` again, under the write order, and answers
+/// whether memory holds a key after: a read that fails leaves memory as it was, logged.
+fn reload(keychain: &Keychain, keys: &Keys, agent: &AgentId) -> bool {
+    match keychain.load(agent) {
+        Ok(Some(key)) => {
+            lock(keys).insert(agent.clone(), key);
+            true
+        }
+        Ok(None) => {
+            lock(keys).remove(agent);
+            false
+        }
+        Err(error) => {
+            tracing::warn!(%agent, kind = error_kind(&error), "an API key did not load");
+            lock(keys).contains_key(agent)
+        }
     }
 }
 

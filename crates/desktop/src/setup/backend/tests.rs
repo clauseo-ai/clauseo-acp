@@ -4,6 +4,7 @@
 //! or an endpoint, no key in a log, and the two launchers.
 
 mod fakes;
+mod keys;
 mod retry;
 
 use std::collections::BTreeMap;
