@@ -342,6 +342,7 @@ pub(crate) fn turn_input(actor: &mut Actor, input: TurnInput) {
         TurnInput::Prepared { thread, id, result } => {
             launch_checks::on_prepared(actor, thread, id, result);
         }
+        TurnInput::RunRemoved => launch_checks::on_run_removed(actor),
         TurnInput::Log {
             thread,
             why,

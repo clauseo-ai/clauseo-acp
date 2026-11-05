@@ -1,6 +1,6 @@
 //! Shutdown: stop taking commands, let the turn path cancel running turns and stop agents,
-//! wait for every commit and snapshot in flight, then stop the snapshot and matter threads and
-//! close the store.
+//! wait for every commit, snapshot and run folder removal in flight, then stop the snapshot
+//! and matter threads and close the store.
 
 use super::input::Reply;
 use super::{Actor, HostPhase, turn};

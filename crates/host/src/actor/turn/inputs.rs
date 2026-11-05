@@ -29,6 +29,8 @@ pub(crate) enum TurnInput {
         why: LogFor,
         result: Result<Vec<Envelope>, clauseo_store::Error>,
     },
+    /// A run folder's removal off the actor (`launch_checks::discard`) ended.
+    RunRemoved,
 }
 
 /// An agent call's result.
