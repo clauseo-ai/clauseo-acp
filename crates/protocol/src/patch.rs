@@ -14,9 +14,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AccountLimits, Cursor, EntryId, Envelope, FolderScanned, HeaderEntry, LimitsView,
-    MatterHeaderEntry, MattersChanged, MessageId, Seq, SettingsView, StreamId, ThreadsChanged,
-    ViewEntry, ViewEpoch,
+    AccountLimits, BrowserInstallState, Cursor, EntryId, Envelope, FolderScanned, HeaderEntry,
+    LimitsView, MatterHeaderEntry, MattersChanged, MessageId, Seq, SettingsView, StreamId,
+    ThreadsChanged, ViewEntry, ViewEpoch,
 };
 
 /// One change to a stream's view, at its cursor.
@@ -143,6 +143,13 @@ pub enum HostEvent {
     /// The display settings changed: the whole view after the change. App-wide, never part of
     /// a stream: it reaches app subscribers only.
     SettingsChanged(SettingsView),
+    /// Where the Chrome for Testing download that `HostCommand::InstallBrowser` started stands.
+    /// App-wide, never logged and in no stream: it reaches app subscribers only, as each state
+    /// happens. A subscriber that joins later gets no catch-up for it.
+    BrowserInstall {
+        /// Where it stands.
+        state: BrowserInstallState,
+    },
     /// Rows of the matter list changed, came or went; or, with `all`, the whole list. App-wide:
     /// it reaches app subscribers only.
     MattersChanged(MattersChanged),

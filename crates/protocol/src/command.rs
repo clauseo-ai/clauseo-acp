@@ -472,13 +472,24 @@ pub enum HostCommand {
         /// The folder.
         folder: FolderRefId,
     },
+    /// Download Chrome for Testing into the app data folder, after the lawyer agreed. Answers
+    /// `Done` once the download has started, with no receipt (a repeated id starts it again
+    /// when none runs); every app subscriber then gets `HostEvent::BrowserInstall` as it goes,
+    /// ending with `Done` or `Failed`. While one runs it answers `Done` and does nothing: the
+    /// running download's events already say one is under way. Only the main window sends it,
+    /// from its consent dialog. JSON: `{"install_browser": {}}`.
+    InstallBrowser {},
+    /// Stop the running Chrome for Testing download: it ends `Failed` with `cancelled` and
+    /// leaves no folder. With none running it does nothing. Answers `Done`, with no receipt.
+    /// JSON: `{"cancel_browser_install": {}}`.
+    CancelBrowserInstall {},
 }
 
 /// What a command did. The host's receipt stores it, so a repeated `command_id` returns the same
 /// outcome. The queue commands, `RestartAgent`, `SetUiSettings`, `SetToolSettings`,
 /// `SetPrivacySettings`, `FirstAct`, `UpdateMatter`, `OpenMatter`, `ForgetMatter`, `RefreshLimits`,
-/// `MarkSeen`, `ScanFolder`, `CancelScan`, `SnoozeThread`, `MarkThreadDone` and `SweepDone` answer
-/// `Done`.
+/// `MarkSeen`, `ScanFolder`, `CancelScan`, `SnoozeThread`, `MarkThreadDone`, `SweepDone`,
+/// `InstallBrowser` and `CancelBrowserInstall` answer `Done`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "specta", derive(specta::Type))]

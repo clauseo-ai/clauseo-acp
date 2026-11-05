@@ -181,6 +181,8 @@ pub(crate) enum Input {
     FolderStates(Vec<(MatterId, String, clauseo_protocol::FolderState)>),
     /// A folder scan's thread or throttle timer.
     Scan(super::scan::ScanInput),
+    /// Where the Chrome for Testing download stands, from its thread.
+    BrowserInstall(clauseo_protocol::BrowserInstallState),
     /// End the thread at once (tests); the sender is answered once the store is closed.
     #[cfg(feature = "test-support")]
     Abort(oneshot::Sender<()>),
@@ -207,6 +209,7 @@ impl std::fmt::Debug for Input {
             Self::Limits(_) => "Limits",
             Self::FolderStates(_) => "FolderStates",
             Self::Scan(_) => "Scan",
+            Self::BrowserInstall(_) => "BrowserInstall",
             #[cfg(feature = "test-support")]
             Self::Abort(_) => "Abort",
         };

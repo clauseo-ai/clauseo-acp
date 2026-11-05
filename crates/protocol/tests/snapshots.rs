@@ -31,6 +31,8 @@ mod privacy;
 use clauseo_protocol::{
     AgentKind,
     AppendTarget,
+    BrowserInstallFailure,
+    BrowserInstallState,
     ClientName,
     ConfigValue,
     ContentBlock,
@@ -387,6 +389,12 @@ mod host_event {
             done: false,
             cancelled: false,
         });
+        BrowserInstall => browser_install: HostEvent::BrowserInstall {
+            state: BrowserInstallState::Failed {
+                code: BrowserInstallFailure::SizeMismatch,
+                message: "the zip is 10 bytes, its Content-Length 12".to_owned(),
+            },
+        };
     } }
 }
 

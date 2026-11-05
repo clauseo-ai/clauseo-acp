@@ -49,6 +49,21 @@ sha2 = { workspace = true }
 # The pre-write guard's name check composes names (NFC) on macOS, as APFS compares them.
 unicode-normalization = { workspace = true }
 
+# The Chrome for Testing download's free-space check (browser/install/system.rs): statvfs, safe.
+[target.'cfg(unix)'.dependencies]
+rustix = { workspace = true, features = ["fs"] }
+
+# The Chrome for Testing download's Win32 calls (browser/install/windows.rs): System32's folder
+# (SystemInformation), the free disk space (Storage_FileSystem), and Authenticode on chrome.exe
+# (Security_WinTrust, whose WINTRUST_DATA needs Security_Cryptography).
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = [
+  "Win32_Security_Cryptography",
+  "Win32_Security_WinTrust",
+  "Win32_Storage_FileSystem",
+  "Win32_System_SystemInformation",
+] }
+
 [dev-dependencies]
 # Itself with test-support, so its tests reach ManualClock and SequentialIds with no flag.
 clauseo-host = { path = ".", features = ["test-support"] }

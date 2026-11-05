@@ -304,7 +304,7 @@ session that cannot get the browser makes no file system calls for it. In order:
    Windows ARM64. `<app data>` is the host's data folder.
 4. Otherwise none: `BrowserNotInstalled`.
 
-The Chrome for Testing download is added by a later S27 PR (part 3).
+The download that fills step 3 is the next section.
 
 Linux (development and CI only): `/usr/bin/google-chrome`, then `/usr/bin/chromium`. A path
 counts when it is a regular file, following links (an installed Chrome may be one). In
@@ -388,6 +388,94 @@ vercel-labs/agent-browser#2313, a daemon port set by the caller, would remove th
 and agent-browser (its `--agent-browser` argument) are files. A development build has no
 agent-browser: a missing one leaves the browser out with `BrowserNotInstalled` and a log line
 naming the file, and claims nothing.
+
+#### The Chrome for Testing download (`host/src/browser/install.rs`, part 3)
+
+agent-browser's own `install` writes under the home folder, which Clauseo cannot move on
+Windows, so the host downloads Chrome for Testing itself, once the lawyer agreed.
+
+**Wire.** `HostCommand::InstallBrowser {}` starts it and answers `Done` at once; while one runs
+it answers `Done` and does nothing (no second download). `HostCommand::CancelBrowserInstall
+{}` stops it, and does nothing when none runs. Neither stores a receipt. Every app subscriber gets
+`HostEvent::BrowserInstall { state }` as it goes: some `Downloading { bytes, total }` (at most
+four a second, only once `Content-Length` is known), `Unpacking`, then one `Done` or one
+`Failed { code, message }`. The app's copy keys on `code` (`BrowserInstallFailure`, an open
+enum: `network`, `size_mismatch`, `disk_space`, `host_refused`, `signature`, `unpack`,
+`unsupported`, `cancelled`); `message` is for the log. No catch-up: a window that subscribes
+later hears only what comes next, and the next session's header tells whether the browser is
+there. The desktop bridge admits both commands from the main window only, and only main's app
+feed carries the event (0012, 0028).
+
+**Flow.** One download at a time, on a thread of its own; the actor never waits on it.
+
+1. The machine: `mac-arm64`, `mac-x64` or `win64`. Linux, Windows ARM64 and the rest:
+   `unsupported`. The platform and `<app data>` are the launch prep's `ChromeRoots`, so the
+   search looks where the download writes.
+2. `<app data>/browsers/` is made (0700, through no link). Under 1 GB free there
+   (`statvfs` on macOS, `GetDiskFreeSpaceExW` on Windows): `disk_space`. A failed read only
+   warns.
+3. The version list, at most 1 MiB. Its URL must be `https://googlechromelabs.github.io/...`.
+   Stable's `version` must be dotted digits (32 bytes at most), and the `chrome` URL for the
+   platform must equal, byte for byte,
+   `https://storage.googleapis.com/chrome-for-testing-public/<version>/<platform>/chrome-<platform>.zip`.
+   Else `host_refused`, before anything downloads. The list has no hash (checked 2026-11-02),
+   so integrity is HTTPS to Google's host plus the size check.
+4. The zip goes into `browsers/.partial-<version>-<random>/chrome.zip`. Its size must equal
+   the final response's `Content-Length`; a response without one fails too (`size_mismatch`).
+5. Unpacking (`Unpacking`): first the zip's entry names are read in Rust, from the central
+   directory and each local header (zip64 included). Refused: absolute names, `:` (drives and
+   streams), `\`, `..`, `.` and empty segments (a folder entry's trailing `/` aside), segments
+   ending in a dot or a space (Windows drops those), control characters, names that are not ASCII (macOS and
+   Windows match names ignoring Unicode case and normalisation, so two spellings could slip an
+   entry under a link entry), a name twice
+   (ignoring ASCII case), a Unicode-path extra field naming another file, and any entry under a
+   link entry (made on Unix or OS X), compared segment by segment, so every path has one
+   spelling. Then `ditto -x -k` (macOS) or `tar -xf` (Windows) unpacks into `.partial-…/chrome/`.
+   Then the result is walked without following links: a link must be relative, must never
+   climb above the unpack folder at any step when read as text from its own folder (so it
+   cannot leave and come back by that folder's name, which changes at the rename), and must
+   resolve inside; anything not a file, folder or link is refused. The browser binary must be a file
+   where the search expects it. Else `unpack`.
+6. The signature (next paragraph).
+7. Whatever is at `chrome-<version>` (a folder the search passed over, a file, a link, never
+   followed) is removed, `chrome/` is renamed to `browsers/chrome-<version>/` and walked again
+   there (removed if that fails), and the working folder goes.
+
+Every failure removes the working folder. A cancel, the lawyer's or the host's shutdown, ends
+the running tool's process tree and waits for it to exit before that removal; shutdown waits for
+the download's last state. At start a thread removes every `browsers/.partial-*` a crash left
+(folders with their contents, links and files themselves, never a link's target; a link at
+`browsers` itself is not followed), and the first
+download waits for it.
+
+**Tools.** Each is an absolute path, never a `PATH` lookup: `/usr/bin/curl`, `/usr/bin/ditto` and
+`/usr/bin/codesign` on macOS; `curl.exe` and `tar.exe` in `GetSystemDirectoryW()` (System32) on
+Windows. A missing tool is `unsupported`. Each runs through `clauseo_process::spawn_in_tree`. curl
+gets `-q` first (no `.curlrc`), then `--proto =https --proto-redir =https --tlsv1.2 --fail
+--location --max-redirs 0 --max-filesize 419430400 --connect-timeout 30 -y 60 -Y 1` (`CURL_FLAGS`).
+`--max-redirs 0` tightens the agreed `3` (security review): any redirect fails as curl's exit
+47, `network`. HTTPS to Google's host is the whole integrity check while the signature does not
+enforce, so a redirect to another https host must not replace it; neither URL redirects today
+(checked 2026-11-04). curl's exit 63 (over the 400 MiB cap) is `size_mismatch`, any other
+failure `network`. Progress
+comes from polling the file's size and the `-D` header file every 250 ms. The tools sit behind
+`InstallTools`; the tests use fakes (`HostConfig::with_browser_install_tools`).
+
+**Signature.** macOS: `codesign --verify --deep --strict` on the app bundle, then `codesign -dv`
+must show `TeamIdentifier=EQHXZ8M8AV` (Google). Windows: `WinVerifyTrust` (Authenticode) on
+`chrome.exe`, without fetching revocation. The result is logged; it fails the download
+(`signature`) only while `SIGNATURE_REQUIRED_MAC` or `SIGNATURE_REQUIRED_WINDOWS` is true. Both
+are false: nobody has checked here whether Chrome for Testing is signed. The by-hand check below
+decides, and a later PR flips the constant.
+
+**Quarantine.** curl sets no `com.apple.quarantine` attribute, so Gatekeeper does not check the
+download when Chrome starts. HTTPS to Google's host, the size check, and the logged `codesign`
+result are the checks today.
+
+**By hand.** On a Mac (arm64 and Intel) and on Windows x64:
+`cargo test -p clauseo-host --lib real_download -- --ignored --nocapture` downloads the real zip
+into a temporary folder. Record what it logs, then run `codesign -dv --verbose=4` on the app, or
+`Get-AuthenticodeSignature` on `chrome.exe`, and note whether it passes.
 
 #### Slots and limits (`host/src/browser/limits.rs`)
 
@@ -688,6 +776,18 @@ The guard:
 - `AGENTS.md` lost the Map's comment line to fit the new `crates/mcp` line within its 120 lines
   and 8 KiB; `ARCHITECTURE.md` already says planned crates are in its table.
 
+The download (part 3):
+
+- The brief's `Failed { message }` also carries a `code`, so the app picks its copy without
+  reading English.
+- The tests use fake tools (`InstallTools`), not a local stub server: curl accepts only https,
+  so a stub would need a trusted certificate. The real tools have an ignored by-hand test.
+- A truncated download fails the size check (`size_mismatch`), and a broken zip fails the name
+  check (`unpack`). Neither leaves a folder.
+- A second `InstallBrowser` while one runs is not refused, as the brief said: it answers `Done`
+  and starts nothing. A refusal needs a new error code and a user-facing string, and the
+  running download's `BrowserInstall` events already say one is under way.
+
 ## Consequences
 
 - An agent-browser bump re-reads its `tools/list` schema and `extraArgs` handling: a new typed
@@ -719,6 +819,10 @@ The guard:
   x86_64-pc-windows-gnu` and was never run here; `tests/guard/tree.rs` runs it on CI's Windows
   job. That Chrome honours the later
   `--remote-debugging-port` over agent-browser's own `=0` is from Chrome's switch rule, not a run.
+- The Chrome for Testing download with the real tools: run only through fakes on Linux. Not
+  run: curl, `ditto` or `tar`, `codesign` and `WinVerifyTrust`, the free-space reads, and
+  whether Chrome for Testing is signed (the by-hand steps above). The Windows code
+  (`install/windows.rs`) was checked with clippy for `x86_64-pc-windows-msvc` in a crate of its own.
 
 ## Status
 

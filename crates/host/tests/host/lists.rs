@@ -502,7 +502,8 @@ fn whole(event: &HostEvent) -> bool {
         | HostEvent::Events(_)
         | HostEvent::CaughtUp { .. }
         | HostEvent::AccountLimitsChanged(_)
-        | HostEvent::LimitsViewChanged(_) => false,
+        | HostEvent::LimitsViewChanged(_)
+        | HostEvent::BrowserInstall { .. } => false,
     }
 }
 

@@ -7,6 +7,7 @@
 
 pub mod chrome;
 pub mod deny_hosts;
+pub mod install;
 pub mod limits;
 pub mod seed_sites;
 pub(crate) mod session;

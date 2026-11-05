@@ -38,6 +38,7 @@ use crate::snapshot::SnapshotWorker;
 
 mod app;
 mod app_lists;
+mod browser_install;
 mod commands;
 pub(crate) mod counting;
 mod folder_state;
@@ -118,6 +119,8 @@ pub(crate) struct Actor {
     pub(crate) pre_write_guard: Option<std::path::PathBuf>,
     /// The proxy, stetdoc's folder and the browser inputs (`HostConfig::with_egress_proxy`).
     pub(crate) wiring: crate::config::LaunchWiring,
+    /// The Chrome for Testing download: its tools, its start-up sweep and the one running.
+    pub(crate) browser_install: browser_install::BrowserInstall,
     /// The tools each thread's header shows, laid over the header unlogged.
     pub(crate) header_tools: header_tools::HeaderTools,
     /// The start-up sweep of leftover `run/` folders, done by the first launch's prep.
@@ -566,6 +569,7 @@ impl Actor {
             Input::SnoozeWake { generation } => triage::on_wake(self, generation),
             Input::FolderStates(states) => query::on_folder_states(self, states),
             Input::Scan(input) => scan::on_input(self, input),
+            Input::BrowserInstall(state) => browser_install::on_state(self, state),
             // The loop handles an abort before it gets here.
             #[cfg(feature = "test-support")]
             Input::Abort(reply) => {
@@ -576,7 +580,7 @@ impl Actor {
 
     /// Moves start-up to serving, and shutdown to its end, once their work is done.
     fn settle(&mut self) -> Option<Exit> {
-        if !self.work.idle() || turn::busy(self) {
+        if !self.work.idle() || turn::busy(self) || browser_install::busy(self) {
             return None;
         }
         match std::mem::replace(&mut self.phase, HostPhase::Serving) {

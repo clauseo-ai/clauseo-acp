@@ -269,6 +269,8 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
             actor.finish_command(ctx.id, Ok(CommandOutcome::Done));
         }
         HostCommand::RestartAgent { .. } => not_built(actor, ctx),
+        HostCommand::InstallBrowser {} => super::browser_install::install(actor, ctx),
+        HostCommand::CancelBrowserInstall {} => super::browser_install::cancel(actor, ctx),
     }
 }
 
