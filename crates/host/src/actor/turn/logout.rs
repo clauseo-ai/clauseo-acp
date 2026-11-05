@@ -2,15 +2,18 @@
 //! codex-acp advertises a `logout` command, which revokes the tokens in the login Codex keeps
 //! (research 43). Signing out goes only through Clauseo's own `SignOut`, which knows whether
 //! the login is Clauseo's or the lawyer's reused one and runs the leave order, so the host never
-//! lets the agent's own command run: [`hide`] drops it from the commands a Codex agent
-//! advertises before they are logged as `CommandsAvailable`, and [`refuse`] refuses a prompt
-//! to a Codex agent whose text starts `/logout` with `command.invalid`, before anything is
-//! queued or sent. Any other agent's commands and prompts pass as they are.
+//! lets the agent's own command run: [`hide`] drops it, and `login` with it, from the
+//! commands a Codex agent advertises before they are logged as `CommandsAvailable`, and
+//! [`refuse`] refuses a prompt to a Codex agent whose text starts `/logout` with
+//! `command.invalid`, before anything is queued or sent. Any other agent's commands and
+//! prompts pass as they are.
 //!
 //! S18's guard: while Clauseo's Codex home shares the lawyer's login file (the sign-in hook
 //! says so, or gave no answer, or desktop says the login is reused; `agent/login_link.rs`), a
 //! prompt starting `/login` is refused too, with `signin.login_shared`: the lawyer changes it
-//! with "Stop using it here". The host itself never calls `login` or `authenticate`.
+//! with "Stop using it here". Signing in goes through Clauseo's own sign-in, so `login` is not
+//! advertised either; a typed `/login` reaches the agent only when the guard allows it. The
+//! host never calls `login` itself, and calls `authenticate` only for a key (`key_retry.rs`).
 
 use clauseo_protocol::{AgentKind, AvailableCommand, ContentBlock, ErrorCode, ThreadId};
 
@@ -29,14 +32,14 @@ fn kind(actor: &Actor, thread: ThreadId) -> Option<AgentKind> {
     AgentKind::of(&entry.row.agent)
 }
 
-/// `commands` as the window gets them: without `logout` for a Codex agent.
+/// `commands` as the window gets them: without `logout` and `login` for a Codex agent.
 pub(super) fn hide(
     actor: &Actor,
     thread: ThreadId,
     mut commands: Vec<AvailableCommand>,
 ) -> Vec<AvailableCommand> {
     if kind(actor, thread) == Some(AgentKind::Codex) {
-        commands.retain(|command| !is_logout(&command.name));
+        commands.retain(|command| !is_sign_in_command(&command.name));
     }
     commands
 }
@@ -80,9 +83,9 @@ pub(super) fn refuse(
     Ok(())
 }
 
-/// Whether `name` is `logout`, ignoring ASCII case.
-fn is_logout(name: &str) -> bool {
-    name.eq_ignore_ascii_case(LOGOUT)
+/// Whether `name` is `logout` or `login`, ignoring ASCII case.
+fn is_sign_in_command(name: &str) -> bool {
+    name.eq_ignore_ascii_case(LOGOUT) || name.eq_ignore_ascii_case(LOGIN)
 }
 
 /// Whether `text`, past leading white space, is the command `name`: a slash, `name` in any
