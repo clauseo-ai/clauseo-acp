@@ -369,7 +369,7 @@
     "note": "Rohan, on the review page (folder-rights FR18)"
   },
   "U3-err-matter.folder_too_deep": {
-    "en": "This matter's folder is too deep for Windows to start programs in it. Move the folder nearer the top of its drive, or choose a higher folder as the matter.",
+    "en": "This matter's folder is too deep inside other folders for Clauseo to work in it on Windows. Move it nearer the top of its drive.",
     "hi": null,
     "hi_status": "later",
     "status": "provisional",
