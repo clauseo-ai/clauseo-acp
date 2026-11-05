@@ -12,13 +12,16 @@ use crate::windows::writer::{Label, Reach, Walked};
 const GROUP: &str = "S-1-5-21-1111111111-2222222222-3333333333-1010";
 
 /// Records each call. The `fail_at`-th add (1-based) fails; the `already_at`-th add answers
-/// [`Added::AlreadyThere`].
+/// [`Added::AlreadyThere`]; the `fail_walk_at`-th walk fails. A walk is recorded as its root, its
+/// reach, and whether it had no strict SIDs.
 #[derive(Default)]
 struct Fake {
     adds: Vec<Grant>,
     removes: Vec<Grant>,
+    walks: Vec<(PathBuf, Reach, bool)>,
     fail_at: Option<usize>,
     already_at: Option<usize>,
+    fail_walk_at: Option<usize>,
 }
 
 impl AclWriter for Fake {
@@ -45,10 +48,14 @@ impl AclWriter for Fake {
 
     fn propagate(
         &mut self,
-        _root: &Path,
-        _reach: Reach,
-        _strict: Option<&[Sid]>,
+        root: &Path,
+        reach: Reach,
+        strict: Option<&[Sid]>,
     ) -> Result<Walked, ApplyFailure> {
+        self.walks.push((root.to_owned(), reach, strict.is_none()));
+        if self.fail_walk_at == Some(self.walks.len()) {
+            return Err(ApplyFailure::Io(io::ErrorKind::PermissionDenied));
+        }
         Ok(Walked::default())
     }
 
@@ -124,6 +131,8 @@ fn a_missing_target_is_skipped_and_listed_and_the_rest_are_written() {
     assert_eq!(done.added, [grants[0].clone(), grants[2].clone()]);
     assert_eq!(fake.adds, [grants[0].clone(), grants[2].clone()]);
     assert_eq!(fake.removes, Vec::<Grant>::new());
+    let walked: Vec<_> = fake.walks.iter().map(|(root, ..)| root.clone()).collect();
+    assert_eq!(walked, [paths[0].clone(), paths[1].clone()]);
 }
 
 #[test]
@@ -158,6 +167,69 @@ fn an_entry_already_there_is_not_listed_and_not_rolled_back() {
 }
 
 #[test]
+fn each_add_is_followed_by_a_tree_walk_with_no_strict_sids_even_when_already_there() {
+    let (_dir, paths) = folders("shared-walks", &["a", "b"]);
+    let grants = plan_shared_write_denies(&group(), &paths);
+    let mut fake = Fake {
+        already_at: Some(1),
+        ..Fake::default()
+    };
+    let done = apply_shared_write_denies(&mut fake, &grants).unwrap();
+    assert_eq!(done.added, [grants[1].clone()]);
+    assert_eq!(
+        fake.walks,
+        [
+            (paths[0].clone(), Reach::Tree, true),
+            (paths[1].clone(), Reach::Tree, true),
+        ]
+    );
+}
+
+#[test]
+fn a_failed_walk_rolls_back_the_entry_it_followed_and_the_earlier_ones() {
+    let (_dir, paths) = folders("shared-walk-fail", &["a", "b", "c"]);
+    let grants = plan_shared_write_denies(&group(), &paths);
+    let mut fake = Fake {
+        fail_walk_at: Some(2),
+        ..Fake::default()
+    };
+    let result = apply_shared_write_denies(&mut fake, &grants);
+    assert_eq!(
+        result,
+        Err(ApplyFailure::Io(io::ErrorKind::PermissionDenied))
+    );
+    // The second grant was written before its walk failed, so both come back, last first.
+    assert_eq!(fake.adds, [grants[0].clone(), grants[1].clone()]);
+    assert_eq!(fake.removes, [grants[1].clone(), grants[0].clone()]);
+    // Two walks for the apply, then each rolled-back entry's walk, last first.
+    let roots: Vec<_> = fake.walks.iter().map(|(root, ..)| root.clone()).collect();
+    assert_eq!(
+        roots,
+        [
+            paths[0].clone(),
+            paths[1].clone(),
+            paths[1].clone(),
+            paths[0].clone()
+        ]
+    );
+}
+
+#[test]
+fn remove_walks_each_existing_target_after_removing_its_entry() {
+    let (_dir, paths) = folders("shared-remove-walk", &["a", "b"]);
+    let grants = plan_shared_write_denies(&group(), &paths);
+    let mut fake = Fake::default();
+    remove_shared_write_denies(&mut fake, &grants).unwrap();
+    assert_eq!(
+        fake.walks,
+        [
+            (paths[0].clone(), Reach::Tree, true),
+            (paths[1].clone(), Reach::Tree, true),
+        ]
+    );
+}
+
+#[test]
 fn a_successful_apply_lists_each_written_grant_and_removes_nothing() {
     let (_dir, paths) = folders("shared-ok", &["a", "b"]);
     let grants = plan_shared_write_denies(&group(), &paths);
@@ -186,12 +258,14 @@ fn remove_ignores_a_missing_target() {
     let mut fake = Fake::default();
     remove_shared_write_denies(&mut fake, &grants).unwrap();
     assert_eq!(fake.removes, [grants[1].clone()]);
+    assert_eq!(fake.walks.len(), 1);
 }
 
 #[cfg(windows)]
 mod ntfs {
     use super::*;
     use crate::windows::NtfsAcl;
+    use crate::windows::acl_bytes::INHERITED;
     use crate::windows::test_acl::{Place, entries};
     use crate::windows::test_world::GROUP_SID;
 
@@ -200,35 +274,50 @@ mod ntfs {
     /// `OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE`.
     const TREE: u8 = 0x3;
 
+    /// The entries on `path` for the pool group, as (type, flags, mask).
+    fn group_entries(path: &Path) -> Vec<(u8, u8, u32)> {
+        entries(path)
+            .into_iter()
+            .filter(|(_, _, _, sid)| sid.as_str() == GROUP_SID)
+            .map(|(kind, flags, mask, _)| (kind, flags, mask))
+            .collect()
+    }
+
     #[test]
-    fn a_real_folder_gets_one_deny_ace_with_the_tree_flags_and_remove_clears_it() {
+    fn a_real_tree_gets_the_deny_on_its_folder_and_inherited_on_what_was_already_there() {
         let place = Place::new("shared-ntfs");
-        place.dir.dir("LocalLow");
+        place.dir.file("LocalLow/Microsoft/Sub/doc.txt", "old");
         let target = place.at("LocalLow");
+        let child = place.at("LocalLow/Microsoft/Sub");
+        let file = place.at("LocalLow/Microsoft/Sub/doc.txt");
         let grants = plan_shared_write_denies(
             &Sid::parse(GROUP_SID).unwrap(),
             std::slice::from_ref(&target),
         );
-        assert_eq!(grants.len(), 1);
         let mut acl = NtfsAcl::new().unwrap();
 
         let done = apply_shared_write_denies(&mut acl, &grants).unwrap();
         assert_eq!(done.added.len(), 1);
-        let ours: Vec<_> = entries(&target)
-            .into_iter()
-            .filter(|(_, _, _, sid)| sid.as_str() == GROUP_SID)
-            .collect();
-        assert_eq!(ours.len(), 1, "{ours:?}");
-        let (kind, flags, mask, _) = &ours[0];
-        assert_eq!(*kind, DENIED);
-        assert_eq!(*mask, 0x000d_0156);
+        let on_target = group_entries(&target);
+        assert_eq!(on_target.len(), 1, "{on_target:?}");
+        let (kind, flags, mask) = on_target[0];
+        assert_eq!(kind, DENIED);
+        assert_eq!(mask, 0x000d_0156);
         assert_eq!(flags & TREE, TREE, "flags {flags:#x}");
 
+        // The folder and the file were there before the apply: the walk gives them the deny.
+        for path in [&child, &file] {
+            let inherited = group_entries(path);
+            assert_eq!(inherited.len(), 1, "{}: {inherited:?}", path.display());
+            let (kind, flags, mask) = inherited[0];
+            assert_eq!(kind, DENIED);
+            assert_eq!(mask, 0x000d_0156);
+            assert_ne!(flags & INHERITED, 0, "{}: flags {flags:#x}", path.display());
+        }
+
         remove_shared_write_denies(&mut acl, &grants).unwrap();
-        assert!(
-            entries(&target)
-                .iter()
-                .all(|(_, _, _, sid)| sid.as_str() != GROUP_SID)
-        );
+        for path in [&target, &child, &file] {
+            assert!(group_entries(path).is_empty(), "{}", path.display());
+        }
     }
 }
