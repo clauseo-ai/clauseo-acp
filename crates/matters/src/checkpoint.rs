@@ -15,6 +15,7 @@ use crate::no_download::NoDownload;
 use crate::stat::{CacheEntry, EntryState, Stat, StatCache};
 use crate::types::{Checkpoint, CheckpointOutcome, CommitId, Progress, Settings, TimelineEntry};
 use crate::{Error, trailers};
+pub(crate) use walk_folder::OnHeld;
 use walk_folder::walk_folder;
 
 /// The history of one matter as this process holds it: the repository, the stat cache and the
@@ -109,20 +110,29 @@ pub(crate) struct Spec<'a> {
     pub(crate) tool_paths: Option<&'a BTreeSet<MatterPath>>,
 }
 
-/// A walk's result: the new cache entries, the skipped files worth listing, and whether any file
-/// was read.
+/// A walk's result: the new cache entries, the skipped files worth listing, whether any file
+/// was read, and the files another program held so they could not be read.
 pub(crate) struct Walked {
     entries: Vec<CacheEntry>,
     skipped: Vec<SkippedFile>,
     /// A file was read: if only racily clean files were, the entries may equal the cache's and
     /// the cache must still be written, so its time moves past them.
     read_any: bool,
+    /// The files whose read failed because another program holds them (Windows: a sharing or
+    /// lock violation), sorted by path bytes; only a walk with [`OnHeld::Report`] has any.
+    /// Their entries are the cache's, as it last knew them, so such a walk is never committed.
+    held: Vec<MatterPath>,
 }
 
 impl Walked {
     /// The folder as walked: one entry per file, sorted by path bytes.
     pub(crate) fn entries(&self) -> &[CacheEntry] {
         &self.entries
+    }
+
+    /// The files another program held so the walk could not read them, sorted by path bytes.
+    pub(crate) fn held(&self) -> &[MatterPath] {
+        &self.held
     }
 }
 
@@ -202,7 +212,7 @@ impl Core {
     }
 
     /// Walks `folder` and hashes and stores every file the cache cannot vouch for. `Ok(None)`
-    /// when cancelled. See [`walk_folder`].
+    /// when cancelled. A file another program holds fails the walk. See [`walk_folder`].
     pub(crate) fn scan_folder(
         &mut self,
         folder: &Path,
@@ -210,17 +220,39 @@ impl Core {
         cancel: Option<&AtomicBool>,
         progress: &mut dyn FnMut(Progress),
     ) -> Result<Option<Walked>, Error> {
+        self.scan(folder, settings, cancel, progress, OnHeld::Fail)
+    }
+
+    /// [`Core::scan_folder`], with a file another program holds failing the walk or listed in
+    /// [`Walked::held`], by `on_held`.
+    pub(crate) fn scan(
+        &mut self,
+        folder: &Path,
+        settings: &Settings,
+        cancel: Option<&AtomicBool>,
+        progress: &mut dyn FnMut(Progress),
+        on_held: OnHeld,
+    ) -> Result<Option<Walked>, Error> {
         self.check_cache()?;
         let history = &mut self.history;
         let mut store = |path: &Path, len: u64, cap: u64, guard: &NoDownload<'_>| {
             history.store_file(path, len, cap, guard)
         };
-        walk_folder(&self.cache, folder, settings, cancel, progress, &mut store)
+        walk_folder(
+            &self.cache,
+            folder,
+            settings,
+            cancel,
+            progress,
+            &mut store,
+            on_held,
+        )
     }
 
     /// The folder as a checkpoint would see it now, sorted by path, without storing anything or
     /// writing the cache: every file the cache cannot vouch for is hashed only. Takes `&self`,
-    /// so a preview or a compare never needs the writer.
+    /// so a preview or a compare never needs the writer. A file another program holds fails
+    /// the walk or is listed, by `on_held`.
     ///
     /// When the cache on disk was written for another tree than the tip's (after an open, until
     /// the next checkpoint), each call rebuilds it from the tip's tree, since `&self` cannot
@@ -229,7 +261,8 @@ impl Core {
         &self,
         folder: &Path,
         settings: &Settings,
-    ) -> Result<Vec<CacheEntry>, Error> {
+        on_held: OnHeld,
+    ) -> Result<Walked, Error> {
         let rebuilt = match self.timeline.tip() {
             None => Some(StatCache::default()),
             Some((_, tree)) if self.cache_tree != Some(tree) => self.rebuilt_cache(tree)?,
@@ -240,9 +273,16 @@ impl Core {
         let mut hash = |path: &Path, len: u64, cap: u64, guard: &NoDownload<'_>| {
             hasher.hash(path, len, cap, guard)
         };
-        let walked = walk_folder(cache, folder, settings, None, &mut |_| {}, &mut hash)?
-            .ok_or_else(|| Error::history("walk", "cancelled without a cancel flag"))?;
-        Ok(walked.entries)
+        walk_folder(
+            cache,
+            folder,
+            settings,
+            None,
+            &mut |_| {},
+            &mut hash,
+            on_held,
+        )?
+        .ok_or_else(|| Error::history("walk", "cancelled without a cancel flag"))
     }
 
     /// Commits `walked` as checkpoint `spec`, or reuses the last checkpoint when the folder
@@ -253,7 +293,12 @@ impl Core {
             entries,
             skipped,
             read_any,
+            held,
         } = walked;
+        // A held file's entry is only what the cache last knew: never committed as the folder.
+        if !held.is_empty() {
+            return Err(Error::FileLocked { paths: held });
+        }
         let old_tree = tree_of(&self.cache.entries);
         let new_tree = tree_of(&entries);
         let over_cap: BTreeSet<&str> = entries
@@ -334,7 +379,7 @@ impl Core {
         })
     }
 
-    /// Walks and commits in one go; never cancelled.
+    /// Walks and commits in one go; never cancelled; a held file fails it.
     pub(crate) fn take(
         &mut self,
         folder: &Path,

@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 
 use clauseo_protocol::{MatterPath, RestoreRequest};
 
-use super::{Candidate, Draft, chosen, draft};
+use super::{Candidate, Draft, chosen, draft, with_held};
 use crate::Error;
 use crate::checkpoint::VersionEntry;
 use crate::history::Oid;
@@ -163,4 +163,16 @@ fn a_command_scope_names_the_same_files() {
         paths: chosen.clone(),
     };
     assert_eq!(RestoreFiles::from(&request), RestoreFiles::Only(&chosen));
+}
+
+/// The files a restore refuses for: the locked targets and every file the walk found held,
+/// each once and sorted by path bytes, whether the restore writes it or not.
+#[test]
+fn held_files_join_the_locked_list_once_and_sorted() {
+    assert_eq!(with_held(paths(&["b.txt"]), &[]), paths(&["b.txt"]));
+    assert_eq!(with_held(Vec::new(), &paths(&["a.txt"])), paths(&["a.txt"]));
+    assert_eq!(
+        with_held(paths(&["B.txt", "c.txt"]), &paths(&["a.txt", "c.txt"])),
+        paths(&["B.txt", "a.txt", "c.txt"])
+    );
 }

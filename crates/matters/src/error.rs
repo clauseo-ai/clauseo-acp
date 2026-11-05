@@ -26,7 +26,8 @@ pub enum Error {
         /// Why.
         reason: Refusal,
     },
-    /// Files the operation would write are open in another program (`matter.file_locked`).
+    /// Files the operation would write are open in another program (`matter.file_locked`),
+    /// or, for a restore, a file its walk could not read because another program holds it.
     /// Nothing was written when the check before writing found them. On Windows, a file a
     /// program opened after that check fails the delete or rename of it with this error, naming
     /// it alone; the files deleted or renamed before it stay written (a partial undo or restore,

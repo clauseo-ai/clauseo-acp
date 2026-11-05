@@ -13,6 +13,12 @@
 //! Each wait is for all the files still gone at once, so a walk waits at most the sum
 //! (300 ms) however many vanished, and not at all when none did. A folder gone before it is
 //! listed is not looked at again: Word swaps files, not folders.
+//!
+//! A file another program holds (on Windows, open with no sharing or locked, as Word may hold
+//! a document) fails its open or read with a sharing or lock violation at once; it is never
+//! read again. By [`OnHeld`], that error fails the walk (checkpoints, the import, a compare),
+//! or the file is listed as held with the cache's entry and the walk goes on (a restore and its
+//! preview, which report it locked).
 
 use std::collections::BTreeSet;
 use std::io;
@@ -23,12 +29,12 @@ use std::time::Duration;
 use clauseo_protocol::{MatterPath, SkippedFile, SkippedFileReason};
 
 use super::Walked;
-use crate::Error;
 use crate::history::Oid;
 use crate::no_download::{NoDownload, not_downloaded};
 use crate::stat::{CacheEntry, EntryState, Stat, StatCache};
 use crate::types::{Progress, Settings};
 use crate::walk::{self, Found, FoundKind};
+use crate::{Error, locks};
 
 /// The waits before each new look at the files that vanished during a walk, about 300 ms in
 /// all: Word's swap is two renames back to back (on Windows the document is missing between
@@ -42,6 +48,18 @@ pub(super) const VANISHED_WAITS: [Duration; 3] = [
     Duration::from_millis(150),
 ];
 
+/// What a walk does with a file it cannot read because another program holds it (on Windows,
+/// opened with no sharing or locked: `ERROR_SHARING_VIOLATION` or `ERROR_LOCK_VIOLATION` at its
+/// open or read; never elsewhere).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OnHeld {
+    /// The walk fails with the read's error: every checkpoint, the import and a compare.
+    Fail,
+    /// The walk goes on: the file is listed in [`Walked::held`] and keeps the cache's entry, if
+    /// any. A restore's preview reports it locked, and a restore refuses with it.
+    Report,
+}
+
 /// Reads one file as a blob: `(path, len, cap, guard)` to the blob and the bytes read.
 pub(super) type ReadFile<'a> =
     dyn FnMut(&Path, u64, u64, &NoDownload<'_>) -> Result<(Oid, u64), Error> + 'a;
@@ -53,7 +71,9 @@ pub(super) type ReadFile<'a> =
 /// one the walk found cloud-only; the entries under a subfolder that does not read are kept as
 /// they were. Reads nothing again after either. A file found gone at its stat or read is looked
 /// at again after each of [`VANISHED_WAITS`] (the module's comment), and is deleted only when
-/// still gone after the last.
+/// still gone after the last. A file whose read fails because another program holds it fails
+/// the walk, or with [`OnHeld::Report`] is listed in [`Walked::held`] and keeps the entry
+/// `cache` has for it (none when it has none).
 pub(super) fn walk_folder(
     cache: &StatCache,
     folder: &Path,
@@ -61,6 +81,7 @@ pub(super) fn walk_folder(
     cancel: Option<&AtomicBool>,
     progress: &mut dyn FnMut(Progress),
     read: &mut ReadFile<'_>,
+    on_held: OnHeld,
 ) -> Result<Option<Walked>, Error> {
     let guard = NoDownload::begin(settings.probe.as_ref());
     let cap = settings.limits.effective_cap();
@@ -78,6 +99,8 @@ pub(super) fn walk_folder(
         skipped: Vec::new(),
         done: Progress { files: 0, bytes: 0 },
         read_any: false,
+        on_held,
+        held: Vec::new(),
     };
     let mut vanished = listing.vanished;
     for file in listing.files {
@@ -103,15 +126,24 @@ pub(super) fn walk_folder(
         mut entries,
         skipped,
         read_any,
+        mut held,
         ..
     } = taker;
     if !listing.unread.is_empty() {
         keep_unread(cache, &mut entries, &listing.unread);
     }
+    if !held.is_empty() {
+        held.sort_by(|a, b| a.as_str().as_bytes().cmp(b.as_str().as_bytes()));
+        tracing::debug!(
+            files = held.len(),
+            "files held by another program were not read"
+        );
+    }
     Ok(Some(Walked {
         entries,
         skipped,
         read_any,
+        held,
     }))
 }
 
@@ -131,6 +163,9 @@ struct Taker<'w, 'r> {
     skipped: Vec<SkippedFile>,
     done: Progress,
     read_any: bool,
+    on_held: OnHeld,
+    /// The files whose read failed because another program holds them ([`OnHeld::Report`]).
+    held: Vec<MatterPath>,
 }
 
 impl Taker<'_, '_> {
@@ -169,6 +204,16 @@ impl Taker<'_, '_> {
                         if let Ok(metadata) = std::fs::symlink_metadata(&path) {
                             file.stat = Stat::from_metadata(&metadata);
                         }
+                    }
+                    // Held by another program: listed, with the cache's entry as it was.
+                    Err(Error::Io { source, .. })
+                        if self.on_held == OnHeld::Report && locks::held_at_read(&source) =>
+                    {
+                        if let Some(old) = old {
+                            self.entries.push(old.clone());
+                        }
+                        self.held.push(file.path);
+                        return Ok(None);
                     }
                     Err(err) => return Err(err),
                 }
