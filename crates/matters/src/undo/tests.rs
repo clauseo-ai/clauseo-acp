@@ -242,6 +242,7 @@ fn a_renamed_file_back_cloud_only_under_its_new_name_leaves_only_the_old_name() 
     let undone = setup.undo("memo-final.txt");
     assert_eq!(undone.restored, paths(&["memo-final.txt"]));
     assert_eq!(undone.resurrected, paths(&["memo-final.txt"]));
+    assert_eq!(undone.deleted, paths(&["memo-final.txt"]));
     assert!(setup.exists("memo.txt") && setup.exists("memo-final.txt"));
     assert_eq!(setup.tree(&undone.checkpoint), ["keep.txt", "memo.txt"]);
     assert_eq!(
@@ -282,4 +283,20 @@ fn an_undo_with_nothing_back_resurrects_nothing() {
         [("sub/new.txt".to_owned(), ChangeKind::Deleted)]
     );
     assert_eq!(undone.checkpoint.skipped, []);
+}
+
+#[test]
+fn back_again_counts_a_placeholder_and_a_file_and_never_a_missing_one() {
+    let setup = Setup::new("undo-back-again", added);
+    put(&setup.folder, "cloud.txt", b"a placeholder now");
+    let cloud = setup.folder.join("cloud.txt");
+    setup.marked.lock().unwrap().insert(cloud.clone());
+    // A read of the placeholder would fail: `back_again` never reads.
+    fault::fail(&cloud, 0, std::io::ErrorKind::Deadlock);
+    let asked = paths(&["sub/new.txt", "missing.txt", "cloud.txt", "sub/gone.txt"]);
+    assert_eq!(
+        super::back_again(&setup.folder, &asked),
+        paths(&["cloud.txt", "sub/new.txt"])
+    );
+    assert_eq!(fault::failed(&cloud), 0);
 }

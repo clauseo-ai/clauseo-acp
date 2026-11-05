@@ -207,6 +207,7 @@ async fn registry(store: &Store) -> Result<Registry, Error> {
                     header: None,
                     last_stop: None,
                     turn: turn::TurnState::default(),
+                    came_back: turn::CameBackWatches::default(),
                 },
             );
         }

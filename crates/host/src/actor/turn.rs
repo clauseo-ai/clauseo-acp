@@ -12,6 +12,7 @@
 mod agents;
 mod answers;
 mod asks;
+mod came_back;
 mod cancel;
 mod close;
 mod end;
@@ -56,6 +57,9 @@ use crate::matter_worker::MatterReply;
 use crate::pipeline::Failure;
 
 pub(crate) use asks::asks_pending;
+pub(crate) use came_back::{
+    Check as CameBackCheck, Watches as CameBackWatches, on_reply as came_back_reply,
+};
 pub(crate) use close::{closing, log_limit_stop};
 pub(crate) use end::limits_read;
 pub(crate) use failure::blocked as stream_blocked;
@@ -68,6 +72,7 @@ pub(crate) use restore::{
 };
 pub(crate) use route::{TurnCommand, command};
 pub(crate) use sign_in::on_request as sign_in_request;
+pub(crate) use state::busy;
 pub(crate) use writer::{
     hold_for_relocate, matter_busy, release_relocate, stop_agents, writer_busy,
 };
@@ -356,6 +361,7 @@ pub(crate) fn turn_input(actor: &mut Actor, input: TurnInput) {
             launch_checks::on_prepared(actor, thread, id, result);
         }
         TurnInput::RunRemoved => launch_checks::on_run_removed(actor),
+        TurnInput::CameBack(check) => came_back::on_due(actor, check),
         TurnInput::Log {
             thread,
             why,
@@ -499,34 +505,9 @@ pub(crate) fn reconcile_skipped(actor: &mut Actor, thread: ThreadId) {
 /// limit is logged. The actor closes the store once [`busy`] is false and commits returned.
 pub(crate) fn shutdown(actor: &mut Actor) {
     end::stop_waiting_for_reads(actor);
+    came_back::shutdown(actor);
     cancel::shutdown(actor);
     super::limits::decide_stops_now(actor);
-}
-
-/// Whether start-up (reconciliation) or shutdown (cancels, agent stops, unlogged stops at the
-/// limit) must wait for the turn path. Scanned only while starting or stopping.
-pub(crate) fn busy(actor: &Actor) -> bool {
-    if matches!(actor.phase, HostPhase::Serving) {
-        return false;
-    }
-    let stops = host_stopping(actor) && super::limits::stops_busy(actor);
-    stops
-        || actor.threads.values().any(|entry| {
-            let state = &entry.turn;
-            state.reconciling
-                || state.agent.is_some()
-                || state.preparing.is_some()
-                || state.current.as_ref().is_some_and(|current| {
-                    matches!(
-                        current.phase,
-                        TurnPhase::Checkpointing
-                            | TurnPhase::Starting
-                            | TurnPhase::Prompting
-                            | TurnPhase::FallbackStop
-                            | TurnPhase::Ending
-                    )
-                })
-        })
 }
 
 /// Whether `thread` has a current turn, a last turn whose end is not durable yet, or queued

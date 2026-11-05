@@ -18,8 +18,8 @@ use super::super::input::{Input, MatterTag};
 use super::super::{Actor, Tag, counting};
 use super::out::Out;
 use super::{
-    Holder, JobKind, LogFor, Then, TurnInput, TurnJob, TurnTag, end, failure, lost, matter_of,
-    prompt, queue, state,
+    Holder, JobKind, LogFor, Then, TurnInput, TurnJob, TurnTag, came_back, end, failure, lost,
+    matter_of, prompt, queue, state,
 };
 use crate::error::Error;
 use crate::log_file::Cause;
@@ -251,6 +251,9 @@ pub(crate) struct UndoLog {
     matter_events: Vec<MatterEvent>,
     step: StepUndone,
     outcome: CommandOutcome,
+    /// The files R8 deleted, and those its checkpoint already found back (`came_back.rs`).
+    deleted: Vec<MatterPath>,
+    resurrected: Vec<MatterPath>,
     /// That commit failed; the unblock sends it again.
     failed: bool,
     /// The one retry was sent.
@@ -265,6 +268,8 @@ fn undo_log(thread: ThreadId, ask: &UndoAsk, undone: Undone) -> Result<UndoLog, 
         checkpoint,
         restored,
         kept,
+        deleted,
+        resurrected,
         ..
     } = undone;
     let (matter, turn) = (ask.matter, ask.turn);
@@ -287,6 +292,8 @@ fn undo_log(thread: ThreadId, ask: &UndoAsk, undone: Undone) -> Result<UndoLog, 
             kept,
         },
         outcome: CommandOutcome::StepUndone { checkpoint: undo },
+        deleted,
+        resurrected,
         failed: false,
         retried: false,
     })
@@ -367,7 +374,8 @@ fn send_log(actor: &mut Actor, thread: ThreadId, log: UndoLog) {
 }
 
 /// The commit logging the undo is durable (or its retry returned): the next prompt's note
-/// names the files put back, and the writer passes on.
+/// names the files put back, the host starts looking for deleted files a sync client puts
+/// back (`came_back.rs`), and the writer passes on.
 pub(super) fn on_logged(actor: &mut Actor, thread: ThreadId) {
     let Some(log) = state(actor, thread).and_then(|state| state.undo.take()) else {
         return;
@@ -381,6 +389,7 @@ pub(super) fn on_logged(actor: &mut Actor, thread: ThreadId) {
             }
         }
     }
+    came_back::watch(actor, thread, log.matter, log.deleted, &log.resurrected);
     release(actor, log.matter, thread);
 }
 

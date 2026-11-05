@@ -3,6 +3,7 @@
 //! step.
 
 mod discard;
+pub use discard::remove_marker_of;
 pub(crate) mod json;
 
 use discard::Fresh;
@@ -286,6 +287,14 @@ impl Matter {
     /// The matter's folder.
     pub fn folder(&self) -> &Path {
         &self.folder
+    }
+
+    /// Of `paths` (files an undo deleted, [`Undone::deleted`]), the ones the folder holds
+    /// again, by their exact names, sorted by path bytes: a sync client put them back. Stats
+    /// only, never reads: a cloud-only placeholder counts as back and is never downloaded. A
+    /// stat that fails otherwise counts as still gone. Needs no writer.
+    pub fn still_gone(&self, paths: &[MatterPath]) -> Vec<MatterPath> {
+        undo::back_again(&self.folder, paths)
     }
 
     /// Every checkpoint, oldest first.

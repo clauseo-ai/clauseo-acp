@@ -25,14 +25,21 @@ pub(crate) fn create_dir_all(path: &Path) -> io::Result<()> {
     std::fs::create_dir_all(path)
 }
 
-/// `fs::remove_file`. In unit tests a file can come back after it (`no_download::resurrect`).
+/// `fs::remove_file`. In tests a file can come back after it (`no_download::resurrect` in unit
+/// tests, `test_support::bring_back_after_delete` with the `test-support` feature).
 pub(crate) fn remove_file(path: &Path) -> io::Result<()> {
     #[cfg(test)]
     let back = crate::no_download::resurrect::removing(path);
+    #[cfg(feature = "test-support")]
+    let bytes = crate::test_support::before_delete(path);
     let removed = std::fs::remove_file(path);
     #[cfg(test)]
     if let (Ok(()), Some(back)) = (&removed, back) {
         crate::no_download::resurrect::removed(path, back);
+    }
+    #[cfg(feature = "test-support")]
+    if let (Ok(()), Some(bytes)) = (&removed, bytes) {
+        crate::test_support::after_delete(path, &bytes);
     }
     removed
 }
