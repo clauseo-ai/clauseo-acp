@@ -148,10 +148,10 @@ fn lines_in(text: &[String]) -> Vec<Link> {
         .collect()
 }
 
-/// The results the log keeps from `links`, in order: a link whose URL is over
-/// is no web URL, or is over [`MAX_RESULT_URL_CHARS`](super::MAX_RESULT_URL_CHARS) once logged, is
-/// dropped, as is a repeat of an earlier URL (as logged). A title is cleaned, and an empty one is the URL.
-/// At most [`MAX_SEARCH_RESULTS`] are kept.
+/// The results the log keeps from `links`, in order. A link whose URL is no explicit web URL, or
+/// is over [`MAX_RESULT_URL_CHARS`](super::MAX_RESULT_URL_CHARS) once logged, is dropped, as is a
+/// repeat of an earlier URL (as logged). A title is cleaned, and an empty one is the URL. At most
+/// [`MAX_SEARCH_RESULTS`] are kept.
 fn results(links: Vec<Link>) -> Vec<WebResult> {
     let mut seen = BTreeSet::new();
     let mut results = Vec::new();

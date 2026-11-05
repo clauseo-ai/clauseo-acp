@@ -188,7 +188,8 @@ pub(crate) fn record_url(text: &str) -> Option<String> {
     let rest = ["https://", "http://"].iter().find_map(|scheme| {
         let head = text.get(..scheme.len())?;
         head.eq_ignore_ascii_case(scheme)
-            .then(|| &text[scheme.len()..])
+            .then(|| text.get(scheme.len()..))
+            .flatten()
     })?;
     let logged = clauseo_protocol::logged_url(text);
     (!rest.is_empty()
