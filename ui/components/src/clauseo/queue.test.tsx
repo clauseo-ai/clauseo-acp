@@ -67,6 +67,37 @@ describe("the queue over the composer", () => {
     expect(document.querySelectorAll(".queue-item")).toHaveLength(2);
   });
 
+  test("Edit and Remove stand in the row's tab order before Send now, held together apart from it", async () => {
+    await mount(
+      <QueueStrip
+        items={messages(1)}
+        onEdit={none}
+        onRemove={none}
+        onSendNow={none}
+        onSendNext={none}
+      />,
+    );
+    const row = document.querySelector(".queue-item");
+    const acts = [...(row?.querySelectorAll<HTMLButtonElement>("button") ?? [])];
+    expect(acts.map((b) => txt(b).trim())).toEqual(["Edit", "Remove", "Send now"]);
+    // in the DOM, focusable, never taken out of the tab order: no tabindex, inert, hidden or disabled
+    for (const b of acts) {
+      expect(b.tabIndex).toBe(0);
+      expect(b.disabled).toBe(false);
+      expect(b.closest("[inert], [hidden], [aria-hidden='true']")).toBeNull();
+    }
+    // the two that come in sit together, apart from Send now, so they can stand over the line's end
+    const more = row?.querySelector(".queue-more");
+    expect([...(more?.querySelectorAll("button") ?? [])].map((b) => txt(b).trim())).toEqual([
+      "Edit",
+      "Remove",
+    ]);
+    expect(more?.contains(row?.querySelector(".queue-send") ?? null)).toBe(false);
+    // Edit takes focus as Tab would give it, first in the row
+    acts[0]?.focus();
+    expect(document.activeElement).toBe(acts[0]);
+  });
+
   test("one message says it goes once the answer is done; an empty queue shows nothing", async () => {
     await mount(
       <QueueStrip

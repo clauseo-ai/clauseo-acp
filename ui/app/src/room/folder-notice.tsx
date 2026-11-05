@@ -59,10 +59,11 @@ const IT_TEXT: FolderKey =
   'Please give my account "Change permissions" on this folder: {path}. Clauseo, the app I use for this matter, adds one entry to the folder\'s permissions so Claude and Codex, which it runs, can write only inside it.';
 
 /** An explanation behind an info icon, named with its words, which also show under the pointer and on focus (as the
- * card's, folder-reason.tsx, kept apart so the two chunks share nothing). */
+ * card's, folder-reason.tsx, kept apart so the two chunks share nothing). Below the icon: above, it would cover the
+ * toolbar's matter title. */
 function FolderInfo({ words }: { words: string }) {
   return (
-    <Tooltip content={words}>
+    <Tooltip content={words} side="bottom">
       <button type="button" className="room-info" aria-label={words}>
         <IconAbout size={14} />
       </button>

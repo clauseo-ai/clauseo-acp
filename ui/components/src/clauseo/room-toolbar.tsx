@@ -221,7 +221,8 @@ export function RoomToolbar(p: RoomToolbarProps) {
             <Say>{p.subtitle}</Say>
             {p.unprotected === true && (
               <span className="room-case">
-                <Dot />
+                {/* a dot only between two parts: with no subtitle, Not protected starts the line */}
+                {p.subtitle !== "" && <Dot />}
                 <NotProtectedMark short />
               </span>
             )}

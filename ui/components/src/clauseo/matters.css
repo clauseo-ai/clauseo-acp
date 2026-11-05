@@ -337,7 +337,6 @@
     gap: var(--s1);
     max-height: var(--mat-queue-max);
     overflow-y: auto;
-    scrollbar-gutter: stable;
   }
   /* each message is a slip on the tray, in the lawyer's own words at the lawyer's weight */
   .queue-item {
@@ -357,26 +356,44 @@
     padding: var(--s1-5) 0;
   }
   .queue-acts {
+    position: relative;
     flex: none;
+    align-self: stretch;
     display: flex;
     flex-wrap: wrap;
+    align-items: center;
     gap: var(--s0-5);
     margin-left: auto;
   }
   .queue-send {
     color: var(--primary);
   }
-  /* Edit and Remove come in under the pointer or with focus, as the answer's Accept does, and never move a line */
-  .queue-more-act {
+  /* Edit and Remove come in under the pointer or with focus, as the answer's Accept does, over the line's end before
+     Send now, on the slip's own fill: at rest they hold no width, so the words run to Send now, and nothing moves when
+     they show (the rail's Snooze and Done, triage.css) */
+  .queue-more {
+    position: absolute;
+    top: 0;
+    right: 100%;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--s0-5);
+    padding-left: var(--s2);
+    background: var(--surface);
     opacity: 0;
     transition: opacity var(--dur-quick) var(--ease-arrive);
   }
-  .queue-item:hover .queue-more-act,
-  .queue-item:focus-within .queue-more-act {
+  .queue-item:hover .queue-more,
+  .queue-item:focus-within .queue-more {
     opacity: 1;
   }
+  /* no pointer to bring them in: they stand in the row, in view */
   @media (hover: none) {
-    .queue-more-act {
+    .queue-more {
+      position: static;
+      padding-left: 0;
+      background: none;
       opacity: 1;
     }
   }
