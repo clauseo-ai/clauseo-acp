@@ -15,6 +15,7 @@
 mod commands;
 mod held;
 mod hold;
+mod install;
 mod restore;
 mod sign_in;
 mod steer;
@@ -39,6 +40,7 @@ use commands::put_content;
 pub(super) use commands::{edit, remove, resume, send_now};
 pub(crate) use held::queue_held;
 pub(super) use held::sync_held;
+pub(crate) use install::{any_active, any_running, cancel_all, release};
 pub(super) use restore::restore;
 pub(super) use sign_in::{Requeue, keep as keep_for_sign_in, resume as resume_sign_in};
 pub(super) use steer::{Steered, on_steer_timer, on_steered};
