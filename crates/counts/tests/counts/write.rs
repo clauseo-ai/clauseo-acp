@@ -46,6 +46,14 @@ pub(crate) fn plant(path: &Path, contents: &[u8]) {
     std::fs::write(path, contents).unwrap();
 }
 
+/// Makes `link` (which must not exist; its folder is made) a symbolic link to the folder
+/// `target`.
+#[cfg(unix)]
+pub(crate) fn link_dir(link: &Path, target: &Path) {
+    std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(target, link).unwrap();
+}
+
 /// Makes the folder at `path` read-only (`0555`), or writable again (`0755`), so a delete in
 /// it fails.
 #[cfg(unix)]
