@@ -113,7 +113,7 @@ function actsFor(
         return;
       case "instead": {
         // the other plan's install starts (Claude's download pauses where it is, R20), and the new conversation takes
-        // it once, as soon as the room lists it (FirstRun's pending choice)
+        // it at once (FirstRun's pending choice)
         const other = agent === CODEX ? CLAUDE : CODEX;
         store.set({ chosen: other, pending: other, keyOpen: false, pasting: false });
         store.command({ install_agent: { agent: other } });
@@ -241,16 +241,16 @@ export function FirstRun({
   const { lang, platform } = useDisplay();
   // the plan the send uses: the open conversation's thread's, or the one a draft would run (room.tsx's openAgent)
   const agent = talks.rows.find((r) => r.key === talks.open)?.agent ?? talks.agent;
-  // "Use … instead": the new conversation takes the other plan once, as soon as the room lists it, and never again,
-  // so the lawyer's own pick in the plan switch stands
+  // "Use … instead": the new conversation takes the other plan at once, listed or not (the chosen agent wins,
+  // agent.ts's agentFor: codex-acp is listed only once its install is ready), and only once, so the lawyer's own pick
+  // in the plan switch stands
   const pending = state.pending;
-  const listed =
-    pending !== null && talks.drafting && talks.options.some((o) => o.value === pending);
+  const take = pending !== null && talks.drafting;
   useEffect(() => {
-    if (!listed || pending === null) return;
+    if (!take || pending === null) return;
     store.set({ pending: null });
     conversations.choose(pending);
-  }, [listed, pending, store, conversations]);
+  }, [take, pending, store, conversations]);
   // the composer reads its hold from the setup store's state as it changes (one commit per event, with this one),
   // and again when the room's side changes
   useEffect(() => {

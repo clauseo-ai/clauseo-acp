@@ -56,3 +56,8 @@ test("the foot keeps the welcome's scrollbar gutter, so the working line shares 
   expect(rule(".fl-foot")).toContain("scrollbar-gutter: stable");
   expect(rule(".fl-foot")).toContain("overflow-y: auto");
 });
+
+test("a key or code field in the gate draws no focus ring of its own: the composer's well draws the one ring", () => {
+  expect(sheet).not.toContain(".fl-gate-input:focus-visible");
+  expect(rule(".fl-gate-input")).toContain("outline: none");
+});

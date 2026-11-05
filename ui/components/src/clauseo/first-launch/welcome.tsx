@@ -3,7 +3,7 @@
 // (U2's form, in place). The plan gets ready from the first second, on the working line at the foot where the composer
 // will stand, with the fine print under it; and the anonymous counts Clauseo sends by default, said plainly, with the
 // switch. The sample matter waits (UD1's brief), and so does the Safe workspace's line: no screen names it before UC.
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import { IconNewMatter, IconOpen } from "../../icons/icons.tsx";
 import { useDisplay } from "../../lib/display.ts";
 import { useFirstLaunchWords } from "../../lib/words-first-launch.ts";
@@ -50,14 +50,20 @@ export function Welcome({
   testIds?: { counts?: string; open?: string; newMatter?: string };
 }) {
   const w = useFirstLaunchWords();
+  const heading = useId();
   return (
     <>
       <div className="fl-welcome">
         <div className="fl-col">
+          {/* the page's one level-one heading, for assistive technology: the header shows no title on this screen (the
+              rail says "No matters yet"), and the question names the screen, in the form's place too */}
+          <h1 id={heading} className="sr-only">
+            {w("Open the first matter")}
+          </h1>
           {form !== undefined ? (
             <div className="fl-arrive">{form}</div>
           ) : (
-            <section className="fl-ask" aria-label={w("Open the first matter")}>
+            <section className="fl-ask" aria-labelledby={heading}>
               <Lockup className="fl-lockup" />
               <p className="fl-lede">
                 <Say>

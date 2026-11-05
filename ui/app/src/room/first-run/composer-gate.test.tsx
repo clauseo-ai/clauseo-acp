@@ -9,6 +9,7 @@ import {
   CODEX,
   READY,
   SIGNED_IN,
+  button,
   byId,
   enter,
   install,
@@ -155,3 +156,30 @@ test("Use ChatGPT instead takes the new conversation to ChatGPT once; the lawyer
   expect(byId("signin")?.dataset["agent"]).toBe("claude");
   expect(asked(t)).toEqual([]);
 });
+
+test.each<[string, string[]]>([
+  ["no plan listed yet", []],
+  ["only Claude listed", [CLAUDE]],
+])(
+  "on a first run (%s), Use ChatGPT instead switches the gate and the send to codex-acp at once",
+  async (_, agents) => {
+    const t = await mountFirstRun({
+      agents,
+      first: [
+        install(CLAUDE, { downloading: { received: 1, total: 200e6 } }),
+        signIn(CLAUDE, { signed_out: {} }),
+        signIn(CODEX, { signed_out: {} }),
+      ],
+    });
+    await press("Use ChatGPT instead");
+    expect(t.setups()).toEqual([{ install_agent: { agent: CODEX } }]);
+    expect(byId("signin")?.dataset["agent"]).toBe("chatgpt");
+    expect(button("Use Claude instead")).not.toBeNull();
+    expect(button("Use ChatGPT instead")).toBeNull();
+    await play(t, install(CODEX, READY), signIn(CODEX, SIGNED_IN));
+    expect(byId("signin")).toBeNull();
+    await typeInto(field(), QUESTION);
+    await press(byId("send"));
+    expect(sent(t, "create_thread").map((c) => c.agent)).toEqual([CODEX]);
+  },
+);

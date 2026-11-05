@@ -214,15 +214,12 @@
     box-shadow: var(--set-in-field);
     color: var(--primary);
     font-family: var(--font-en);
+    /* the composer's well draws the one focus ring, as for its own field */
     outline: none;
   }
   .fl-gate-input::placeholder {
     @apply font-ui text-muted;
     font-family: var(--font);
-  }
-  .fl-gate-input:focus-visible {
-    outline: var(--ring-w) solid var(--primary);
-    outline-offset: var(--ring-gap);
   }
   /* ChatGPT's device code: large, in the computer's own letters, then what to do with it */
   .fl-device {
