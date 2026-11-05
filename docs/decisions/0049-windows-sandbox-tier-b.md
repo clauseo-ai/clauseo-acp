@@ -91,17 +91,18 @@ build 26100):
     object allow with no object type applies as a plain one), fails the walk: such a child beats
     the inherited deny. Adding explicit denies there instead was not chosen.
 - **Applying the plan (PR3b, `windows::apply`).**
-  - Order: grants on missing names are left out; the credential link must still be the
-    credentials file the launcher names (one file ID, compared again on the handle the write goes
-    through), and that file may not sit in the state folder or be the link itself, or the launch
-    is refused; every grant is recorded `pending`; a new Low label entry first records the
-    explicit label its path has, unless it is our own Low label or another entry's on the same
-    file (the lawyer's own label, put back when ours goes); the entries are written; the walks
-    run; only then is every entry marked `applied`. An entry still `pending` (a launch, rollback
-    or forget that stopped partway) gets its tree walked at the next launch of its matter.
-    `reconcile` walks each pending entry's tree at start, plainly: an allow or label entry is then
-    marked or dropped, but a deny entry stays `pending`, so its matter's next launch walks it
-    strictly.
+  - Order: grants on missing names are left out; the credential link must still be the credentials
+    file the launcher names (one file ID, compared again on the handle the write goes through), and
+    that file may not sit in the state folder or be the link itself, or the launch is refused, and
+    its ledger entry records that file's path and file ID, so forget and rollback take the entry and
+    label back from that file, checked by its ID, never through a link the agent may have swapped;
+    every grant is recorded `pending`; a new Low label entry first records the explicit label its
+    path has, unless it is our own Low label or another entry's on the same file (the lawyer's own
+    label, put back when ours goes); the entries are written; the walks run; only then is every
+    entry marked `applied`. An entry still `pending` (a launch, rollback or forget that stopped
+    partway) gets its tree walked at the next launch of its matter. `reconcile` walks each pending
+    entry's tree at start, plainly: an allow or label entry is then marked or dropped, but a deny
+    entry stays `pending`, so its matter's next launch walks it strictly.
   - A tree that carries a deny (the matter's own folders, each sibling, each fence) is walked
     strictly. A child an agent made (a pool user owns it, whatever its number of links) that
     would beat the inherited deny, with an explicit allow for a broad group, another pool user
@@ -118,12 +119,21 @@ build 26100):
   - The matter, state and notes trees are walked at every launch, so a file moved in since picks
     up the inherited entries; other trees when their entry was just written or is still pending.
     Every write keeps a DACL's auto-inherited mark (`SE_DACL_AUTO_INHERIT_REQ`), so a walk with
-    nothing changed writes nothing and the lawyer's folders keep their `AI`.
+    nothing changed writes nothing and the lawyer's folders keep their `AI`. As
+    `SetNamedSecurityInfo`'s propagation does, a child that is neither protected nor
+    auto-inherited (a DACL some tool wrote without the mark, as the VM found under a plain
+    `C:\m`) loses its old inherited entries before it is worked out
+    from its parent, and is written auto-inherited; the root's write makes it auto-inherited too
+    and keeps its inherited entries. Otherwise an old inherited `Users` allow would turn explicit
+    and refuse every launch. Paths are compared in one normal form, so a walk's verbatim
+    (`\\?\`) paths match the plan's plain ones.
   - Any failure takes back this launch's new entries: under the ledger's lock they are set
-    `pending` on disk, then each permission entry this launch wrote is removed unless another
-    entry, as read under that lock, names it (a Low label counts as named when another entry's
-    label is on the same file); the trees are walked again, and only entries whose permission
-    entry is gone are dropped. `forget_matter` takes entries back the same way.
+    `removing` on disk (a state of its own, so `reconcile` finishes a rollback or forget that a
+    crash stopped, rather than mistake it for a launch), then each permission entry this launch
+    wrote is removed unless another entry, as read under that lock, names it (a Low label counts as
+    named when another entry's label is on the same file); the trees are walked again, and only
+    entries whose permission entry is gone are dropped. `forget_matter` takes entries back the same
+    way.
   - **A folder that is now a registered matter loses its fix 2 deny once its first launch
     succeeds**, for every matter whose entry names it, and its tree is walked again. A refused
     launch leaves every deny. A deny on a folder that holds the new matter is first replaced, for
@@ -146,38 +156,40 @@ build 26100):
     provide the elevated clean-up for this: take ownership with admin rights, then hand back.
   - The credential link's allow is read and write of the file's data only (`0x12008f`, no
     `DELETE`); it lands on the lawyer's real credentials file.
-  - **Set-aside.** The set-aside scans the matter tree itself, through handles, never following
-    a link; the scan writes nothing and has no cap, so nothing the agent does to the ACL walk or
-    the repair switches it off. In each folder it probes each protected name (at the root
-    `PROTECTED_NAMES` and `.git`; at every depth `.git`, `.claude` and `.mcp.json`) by opening
-    it relative to the folder's handle, case-insensitively as the file system decides, so a
-    name counts exactly when git or Claude would open it; it records what the probe opened by
-    file ID. It also records every junction and symbolic link in the tree by the link's own file
-    ID, whatever its name. Names and paths are compared with `CompareStringOrdinal`, ignoring
-    case. PR6's launcher calls `before_launch` before `apply`, and `after_session` when the
-    agent exits, independently of `repair_after_session`'s result. Every protected name or link
-    that is new or whose file ID changed is set aside, whoever owns it, a link moved as itself and
-    never followed: so a lawyer folder the agent renamed to `.git` or `sub\.git`, a lawyer file
-    it hard-linked as `CLAUDE.md`, or a junction it made to a folder holding a `.git`, is caught.
-    A scan that can't list a folder still sets aside what it found, names the folder in its
-    result, and keeps the session open; names inside a folder it couldn't list at launch aren't
-    recorded, so they count as new later. Matters' agents run in parallel, and so may two
-    sessions of one matter: the record holds the set of open sessions, every `after_session`
-    checks, and `before_launch` checks first whenever a session is open. `before_launch` is told
-    which sessions of the matter are still running; every other open session crashed, and is
-    dropped once that check has run. PR5 and PR6 call `before_launch` only once a crashed
-    session's job object is closed (kill-on-close), so its agent is dead. A protected name a live
-    session makes may be set aside when another session of its matter starts, and one the lawyer
-    changes during a session is set aside too (both accepted). Items go to
+  - **Set-aside.** The set-aside scans the matter tree itself, through handles, never following a
+    link; the scan writes nothing and has no cap, so nothing the agent does to the ACL walk or the
+    repair switches it off. In each folder it probes each protected name (at the root
+    `PROTECTED_NAMES` and `.git`; at every depth `.git`, `.claude` and `.mcp.json`) by opening it
+    relative to the folder's handle, case-insensitively as the file system decides, so a name counts
+    exactly when git or Claude would open it; it records what the probe opened by file ID. It also
+    records every junction and symbolic link in the tree by the link's own file ID, whatever its
+    name. Names are kept as raw UTF-16, so a name that isn't valid text is recorded like any other.
+    Names and paths are compared with `CompareStringOrdinal`, ignoring case, except that what goes
+    with a moved item is decided by its exact path or its file ID, so a second entry differing only
+    in case (a case-sensitive folder) is still checked. PR6's launcher calls `before_launch` before
+    `apply`, and `after_session` when the agent exits, independently of `repair_after_session`'s
+    result. Every protected name or link that is new or whose file ID changed is set aside, whoever
+    owns it, a link moved as itself and never followed: so a lawyer folder the agent renamed to
+    `.git` or `sub\.git`, a lawyer file it hard-linked as `CLAUDE.md`, or a junction it made to a
+    folder holding a `.git`, is caught. A scan that can't list a folder still sets aside what it
+    found, names the folder in its result, and keeps the session open; names inside a folder it
+    couldn't list at launch aren't recorded, so they count as new later. Matters' agents run in
+    parallel, and so may two sessions of one matter: the record holds the set of open sessions,
+    every `after_session` checks, and `before_launch` checks first whenever a session is open.
+    `before_launch` is told which sessions of the matter are still running; every other open session
+    crashed, and is dropped once that check has run. PR5 and PR6 call `before_launch` only once a
+    crashed session's job object is closed (kill-on-close), so its agent is dead. A protected name a
+    live session makes may be set aside when another session of its matter starts, and one the
+    lawyer changes during a session is set aside too (both accepted). Items go to
     `<data_dir>\sandbox\set-aside\<matter>\<timestamp>\`, under the item's path below the matter,
     the protected folder the agent can't write, opened part by part by handle without following a
-    link and renamed with `NtSetInformationFile`, never over an existing name. A manifest entry
-    is written as an intent before each move and finished after it, under the set-aside's lock,
-    and an intent a crash left is settled on the next load, so every item set aside is listed
-    (the original and new paths, the reason, the owner, the time and the matter). The running page
-    shows them (`list_set_aside`), and `restore_set_aside` moves one back only if its name is
-    free. An item on another volume than the data folder can't be moved there by a rename: the
-    pass is refused naming the item (`OtherVolume`), the item stays, and no copy is made.
+    link and renamed with `NtSetInformationFile`, never over an existing name. A manifest entry is
+    written as an intent before each move and finished after it, under the set-aside's lock, and an
+    intent a crash left is settled on the next load, so every item set aside is listed (the original
+    and new paths, the reason, the owner, the time and the matter). The running page shows them
+    (`list_set_aside`), and `restore_set_aside` moves one back only if its name is free. An item on
+    another volume than the data folder can't be moved there by a rename: the pass is refused naming
+    the item (`OtherVolume`), the item stays, and no copy is made.
 - **Records.**
   - `HKLM\SOFTWARE\Clauseo\Sandbox`, with an explicit DACL: every pool user's SID, which the
     desktop's start-up check (#317) reads through `clauseo_sandbox::windows::sandbox_user_sid`,
