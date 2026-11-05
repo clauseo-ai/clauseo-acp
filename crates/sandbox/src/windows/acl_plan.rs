@@ -1,6 +1,6 @@
 //! The grant plan: every permission entry one tier B launch needs, as data. Pure: it reads only
 //! what the gate admitted ([`Admitted`]) and the launch's SIDs ([`Subjects`]), and writes
-//! nothing; S15's PR3 applies it, through the write-ahead ledger.
+//! nothing; [`apply`](super::apply::apply) applies it, through the write-ahead ledger.
 //!
 //! Tier B runs each matter as its own pool user (design B): the token's restricting set is {the
 //! pool user, `RESTRICTED`, `Users`, `Everyone`}, at Low integrity. The rules:
@@ -45,6 +45,8 @@ use clauseo_protocol::MatterId;
 use serde::{Deserialize, Serialize};
 
 use super::admit::{Admitted, PathKind};
+#[cfg(any(windows, test, feature = "test-support"))]
+use super::fence::Fence;
 use super::fence::{MatterFolders, fence_grants, plan_fence};
 use super::ledger::EntryId;
 pub use super::sids::Sid;
@@ -64,6 +66,10 @@ pub struct Subjects {
     /// The `ClauseoSandboxUsers` group, holding every pool user: denied reading the siblings.
     pub pool_group: Sid,
 }
+
+/// `OWNER RIGHTS`, `S-1-3-4`: an allow for it replaces the rights a file's owner gets
+/// implicitly (`READ_CONTROL` and `WRITE_DAC`).
+pub const OWNER_RIGHTS_SID: &str = "S-1-3-4";
 
 /// The Low mandatory level, `S-1-16-4096` (`LW`): the subject of a [`Rights::LowLabel`] item.
 pub const LOW_LABEL_SID: &str = "S-1-16-4096";
@@ -93,6 +99,10 @@ pub enum Rights {
     /// Not an access entry: the Low mandatory label `S:(ML;OICI;NW;;;LW)` (mask `0x1`,
     /// no-write-up), set with `LABEL_SECURITY_INFORMATION`; its subject is [`LOW_LABEL_SID`].
     LowLabel,
+    /// Deny changing permissions and owner (`WRITE_DAC | WRITE_OWNER`, `0xc0000`): a file the
+    /// agent makes under a folder with an inheritable `CREATOR OWNER` allow (such as `C:\`'s
+    /// full control) would otherwise give the agent `WRITE_DAC` on it.
+    DenyChangePermissions,
 }
 
 impl Rights {
@@ -106,6 +116,7 @@ impl Rights {
             Rights::DenyReadWrite => DENY_WRITE | DENY_READ,
             Rights::DenyRead => DENY_READ,
             Rights::LowLabel => 0x1,
+            Rights::DenyChangePermissions => 0x000c_0000,
         }
     }
 
@@ -113,7 +124,10 @@ impl Rights {
     pub fn is_deny(self) -> bool {
         matches!(
             self,
-            Rights::DenyWrite | Rights::DenyReadWrite | Rights::DenyRead
+            Rights::DenyWrite
+                | Rights::DenyReadWrite
+                | Rights::DenyRead
+                | Rights::DenyChangePermissions
         )
     }
 
@@ -152,11 +166,11 @@ pub enum Inherit {
 /// One permission entry to write. Made only inside this crate: by [`plan`], or read back from
 /// the ledger.
 ///
-/// **For PR3, which writes them:** open every target with `FILE_FLAG_OPEN_REPARSE_POINT` and
-/// set the entry through that handle, refusing a reparse point that isn't the target itself, as
-/// defence in depth: the gate checked the names the policy keeps unresolved (the credential link,
-/// the Claude store's files) and the agents' folders, but a name can change between the gate and
-/// the write.
+/// Written by `NtfsAcl` (`acl.rs`): every target opened with `FILE_FLAG_OPEN_REPARSE_POINT` and
+/// the entry set through that handle, a junction or symbolic link or a changed final path
+/// refused, as defence in depth: the gate checked the names the policy keeps unresolved (the
+/// credential link, the Claude store's files) and the agents' folders, but a name can change
+/// between the gate and the write.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Grant {
     pub(crate) path: PathBuf,
@@ -193,8 +207,9 @@ impl Grant {
     }
 }
 
-/// A launch's plan, made only by [`plan`] from what the gate admitted: the one thing the ledger
-/// records ([`Ledger::record_pending`](super::ledger::Ledger::record_pending)). Once recorded it
+/// A launch's plan, made only by [`plan`] from what the gate admitted (or, when the pool grows,
+/// from fences the gate's check resolved, `from_fences`): the one thing the ledger records
+/// ([`Ledger::record_pending`](super::ledger::Ledger::record_pending)). Once recorded it
 /// also holds the entry numbers the ledger gave its grants, and which of them this launch made,
 /// so a rollback drops only its own.
 #[derive(Debug)]
@@ -232,6 +247,48 @@ impl AdmittedPlan {
     /// it has dropped since.
     pub fn created(&self) -> &[EntryId] {
         &self.created
+    }
+
+    /// Leaves out each grant whose path `exists` says isn't there, before the plan is recorded
+    /// (after, it changes nothing): NTFS holds no entry for a missing name.
+    pub(crate) fn retain_existing(&mut self, mut exists: impl FnMut(&Path) -> bool) {
+        if !self.entries.is_empty() {
+            return;
+        }
+        let (grants, owners) = std::mem::take(&mut self.grants)
+            .into_iter()
+            .zip(std::mem::take(&mut self.owners))
+            .filter(|(grant, _)| exists(&grant.path))
+            .unzip();
+        self.grants = grants;
+        self.owners = owners;
+    }
+
+    /// The plan of `fences`, as the gate's check resolved them, against the whole `pool`, each
+    /// grant owned by its matter: what [`fence_registered`](super::apply::fence_registered)
+    /// applies when the pool grows. `None` when there is no fence.
+    #[cfg(any(windows, test, feature = "test-support"))]
+    pub(crate) fn from_fences(fences: &[Fence], pool: &[Sid]) -> Option<AdmittedPlan> {
+        let matter = fences.first()?.id;
+        let (mut grants, mut owners) = (Vec::new(), Vec::new());
+        for fence in fences {
+            let folders: Vec<(&Path, PathKind)> = fence
+                .folders
+                .iter()
+                .map(|(p, k)| (p.as_path(), *k))
+                .collect();
+            for grant in fence_grants(&folders, &fence.pool_user, pool) {
+                grants.push(grant);
+                owners.push(fence.id);
+            }
+        }
+        Some(AdmittedPlan {
+            matter,
+            owners,
+            grants,
+            entries: Vec::new(),
+            created: Vec::new(),
+        })
     }
 
     /// A plan of `grants` without the gate, for the ledger's tests.
@@ -306,6 +363,7 @@ pub fn plan(
             plan.allow(path, Rights::ReadAndExecute, Inherit::Tree, kind);
         }
     }
+    plan.owner_rights(policy, &own)?;
     plan.labels(policy, &own)?;
     plan.read_only(policy);
     let mut pool = vec![pool.clone()];
@@ -404,6 +462,30 @@ impl Plan<'_> {
         if let Some(link) = policy.credential_link() {
             let kind = PathKind::CredentialLink;
             self.push(link, low, Rights::LowLabel, Inherit::ThisOnly, kind);
+        }
+        Ok(())
+    }
+
+    /// What an agent owns, it may not re-permission. On the matter, state and notes folders, an
+    /// inherited allow for `OWNER RIGHTS` with the pool user's own `Modify`, which replaces the
+    /// owner's implicit `READ_CONTROL | WRITE_DAC`; on the Claude store folder, the same for the
+    /// files in it (the rights the pool user has on the store's files). With each, the pool
+    /// user's inherited deny of `WRITE_DAC | WRITE_OWNER`, which a `CREATOR OWNER` allow
+    /// inherited from above can't beat (the deny comes first in the copy a new file gets). The
+    /// lawyer keeps full control of the lawyer's own files: their allows for the lawyer's SID
+    /// (explicit or inherited) still apply; only the implicit owner rights are replaced.
+    fn owner_rights(&mut self, policy: &Policy, own: &[(&Path, PathKind)]) -> Result<(), Error> {
+        let owner = Sid::parse(OWNER_RIGHTS_SID).map_err(|e| Error::Policy(e.to_string()))?;
+        let pool = self.subjects.pool_user.clone();
+        let mut targets: Vec<(&Path, PathKind, Inherit)> =
+            own.iter().map(|&(p, k)| (p, k, Inherit::Tree)).collect();
+        if let Some(store) = policy.claude_store() {
+            targets.push((store.dir(), PathKind::ClaudeStore, Inherit::FilesInFolder));
+        }
+        for (path, kind, inherit) in targets {
+            self.push(path, owner.clone(), Rights::Modify, inherit, kind);
+            let deny = Rights::DenyChangePermissions;
+            self.push(path, pool.clone(), deny, Inherit::Tree, kind);
         }
         Ok(())
     }

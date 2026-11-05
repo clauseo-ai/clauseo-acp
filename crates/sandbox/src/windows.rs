@@ -16,14 +16,17 @@
 //!   on Windows, the machine's sandbox user and owner records (`sandbox_user_sid`,
 //!   `sandbox_owner_sid`) and the set-up state they give (`setup_state`).
 //!
-//! - [`writer`]: the permission writes as a seam, [`AclWriter`]. `NtfsAcl` (Windows, `acl.rs`,
-//!   after Codex's ACL code; `PROVENANCE.md`) writes entries and labels without following a
-//!   link and walks each tree to carry inherited entries down; `acl_bytes.rs` edits the
-//!   descriptors and entries as bytes. S15's `PR3b` applies the plan through it.
+//! - [`apply`](mod@apply): the plan applied through the write-ahead ledger, the walk that carries
+//!   inherited entries down each tree, the rollback, the sibling denies a new matter lifts,
+//!   `forget_matter` and `fence_registered` (S15 PR3). The writes go through [`AclWriter`]:
+//!   `NtfsAcl` on Windows (`acl.rs`, after Codex's ACL code; `PROVENANCE.md`), whose
+//!   descriptors and entries are edited as bytes in `acl_bytes.rs`.
+//! - [`set_aside_with`] (`set_aside.rs`): protected names the matter's pool user made, moved to
+//!   `<state>\set-aside\<timestamp>\` before the next launch.
 //!
-//! The plan, the ledger, the records, the gate's logic and the byte edits hold no Windows call,
-//! so they build and are tested on every OS; the folder check, the registry and token reads, the
-//! permission writes and the walk, and the tests' DACL helper need Windows.
+//! The plan, the ledger, the records, the gate's logic, the apply order and the byte edits hold
+//! no Windows call, so they build and are tested on every OS; the folder check, the registry and
+//! token reads, the permission writes and the walk, and the tests' DACL helper need Windows.
 
 #[cfg(windows)]
 mod acl;
@@ -31,6 +34,7 @@ mod acl;
 mod acl_bytes;
 pub mod acl_plan;
 pub mod admit;
+pub mod apply;
 #[cfg(windows)]
 mod detect;
 pub mod fence;
@@ -43,6 +47,7 @@ pub mod matters;
 mod private_dir;
 #[cfg(windows)]
 mod record;
+mod set_aside;
 pub mod sids;
 #[cfg(test)]
 #[cfg(windows)]
@@ -69,6 +74,9 @@ pub use admit::admit;
 #[cfg(any(test, feature = "test-support"))]
 pub use admit::admit_with;
 pub use admit::{Admitted, FolderList, FolderRefusal, PathKind, ReadDir};
+#[cfg(any(windows, test, feature = "test-support"))]
+pub use apply::fence_registered;
+pub use apply::{Applied, apply, forget_matter, lift_sibling_denies, reconcile};
 #[cfg(windows)]
 pub(crate) use detect::os_facts;
 pub use fence::{MatterFolders, Neighbours, RegisteredMatter, plan_fence};
@@ -78,6 +86,9 @@ pub use folder::folder_support;
 pub use marker::setup_state;
 #[cfg(windows)]
 pub use record::{RecordError, sandbox_owner_sid, sandbox_user_sid};
+#[cfg(windows)]
+pub use set_aside::set_aside_protected;
+pub use set_aside::set_aside_with;
 pub use writer::{AclWriter, Added, ApplyFailure, Reach, Walked};
 
 /// Whether an agent sandbox that grants by ACL can prepare a folder on Windows.

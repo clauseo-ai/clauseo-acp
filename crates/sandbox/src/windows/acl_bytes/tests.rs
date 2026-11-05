@@ -287,6 +287,7 @@ fn a_descriptor_is_built_and_read_back() {
     assert_eq!(read.dacl, Some(dacl.as_slice()));
     assert_eq!(read.sacl, Some(sacl.as_slice()));
     assert!(read.dacl_protected());
+    assert_eq!(owner_sid(&bytes), None);
     let only = build_descriptor(0, Some(&dacl), None);
     let read = Descriptor::parse(&only).unwrap();
     assert_eq!(read.sacl, None);

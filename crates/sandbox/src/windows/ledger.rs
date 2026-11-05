@@ -18,7 +18,8 @@
 //! reaches the ledger, and a missing ledger stays missing until an entry is recorded.
 //!
 //! Only an [`AdmittedPlan`] is recorded, and a rollback ([`Ledger::drop_entries`]) drops only the
-//! entries its own plan added.
+//! entries its own plan added. [`Ledger::lift`] is the one change that drops other matters'
+//! entries: a sibling deny lifted from a folder that became a matter (S15 PR3, `apply`).
 //!
 //! Entries are not trusted on load. One this version can't read (an older shape, a newer kind),
 //! one whose SID is neither a trusted SID given to [`Ledger::open`] (the pool users and their
@@ -406,6 +407,43 @@ impl Ledger {
             }
             state.slots = slots;
             Ok((done.removed + done.shared > 0, done))
+        })
+    }
+
+    /// Lifts entries of any matter, under the lock: for each trusted entry `pick` takes, hands
+    /// it to `remove` once per permission entry (path, SID, rights and inheritance), and on
+    /// success drops every entry, of any matter, naming that permission entry; on failure keeps
+    /// them. Returns how many entries were dropped. A sibling deny lifted when its folder
+    /// becomes a registered matter goes this way.
+    pub fn lift(
+        &mut self,
+        mut pick: impl FnMut(&Entry) -> bool,
+        mut remove: impl FnMut(&Entry) -> io::Result<()>,
+    ) -> io::Result<usize> {
+        self.update(false, |state| {
+            let picked: Vec<Entry> = state.entries().filter(|e| pick(e)).cloned().collect();
+            let mut gone: Vec<EntryId> = Vec::new();
+            for entry in &picked {
+                if gone.contains(&entry.id) {
+                    continue;
+                }
+                match remove(entry) {
+                    Ok(()) => gone.extend(
+                        state
+                            .entries()
+                            .filter(|other| same_ace(other, entry))
+                            .map(|other| other.id),
+                    ),
+                    Err(error) => {
+                        let (kind, error) = (entry.kind, error.kind());
+                        tracing::warn!(%kind, %error, "an ACL entry wasn't lifted");
+                    }
+                }
+            }
+            state.slots.retain(
+                |slot| !matches!(slot, Slot::Known(known) if gone.contains(&known.entry.id)),
+            );
+            Ok((!gone.is_empty(), gone.len()))
         })
     }
 

@@ -445,6 +445,29 @@ pub(super) fn refused(path_kind: PathKind, support: FolderRefusal) -> Error {
     Error::FolderUnsupported { path_kind, support }
 }
 
+/// The fence of each of `registered` against its current pool, every folder resolved and checked
+/// as [`gate`] checks a neighbour's, whether or not the ledger lists it as fenced: for
+/// [`fence_registered`](super::apply::fence_registered), when the pool grows.
+#[cfg(any(windows, test, feature = "test-support"))]
+pub(crate) fn fences_for(
+    registered: &[super::fence::RegisteredMatter],
+    mut check: impl FnMut(&Path) -> io::Result<FolderSupport>,
+) -> Result<Vec<Fence>, Error> {
+    let given = Neighbours {
+        registered: registered
+            .iter()
+            .cloned()
+            .map(|mut matter| {
+                matter.fenced = false;
+                matter
+            })
+            .collect(),
+        reach: Vec::new(),
+    };
+    let resolved = neighbours::resolve(&given);
+    neighbours::fences(&resolved, &given, &mut check)
+}
+
 #[cfg(any(windows, test, feature = "test-support"))]
 mod neighbours;
 #[cfg(any(windows, test, feature = "test-support"))]

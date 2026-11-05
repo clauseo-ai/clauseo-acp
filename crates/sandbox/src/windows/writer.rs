@@ -38,6 +38,15 @@ pub struct Walked {
     pub skipped: u64,
 }
 
+impl Walked {
+    /// Adds `other`'s counts.
+    pub(crate) fn add(&mut self, other: Walked) {
+        self.visited += other.visited;
+        self.written += other.written;
+        self.skipped += other.skipped;
+    }
+}
+
 /// An explicit mandatory label found on a target: its level (`S-1-16-<level>`), flags and
 /// mask. A Low label grant replaces the lawyer's own explicit label, so the one there before is
 /// read first ([`AclWriter::label`]) and put back when ours goes ([`AclWriter::restore_label`]).

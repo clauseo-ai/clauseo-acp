@@ -50,6 +50,16 @@ pub enum Error {
         /// What the check said.
         support: crate::windows::FolderRefusal,
     },
+    /// Windows tier B couldn't apply its permission entries (`windows::apply`): a write, the
+    /// walk or the ledger failed, or the walk found a child that would beat an inherited deny.
+    /// This launch's new entries were rolled back. Names the kind of path, never the path.
+    #[error("the sandbox couldn't set the permissions of {path_kind}: {failure}")]
+    AclApply {
+        /// Which path: the matter, a sibling and so on.
+        path_kind: crate::windows::PathKind,
+        /// What failed.
+        failure: crate::windows::ApplyFailure,
+    },
 }
 
 impl Error {
@@ -63,7 +73,8 @@ impl Error {
             | Error::ProxyConfig(_)
             | Error::ProxyStart(_)
             | Error::FolderUnsupported { .. }
-            | Error::NeighbourUnfenceable { .. } => ErrorCode::AgentLaunchFailed,
+            | Error::NeighbourUnfenceable { .. }
+            | Error::AclApply { .. } => ErrorCode::AgentLaunchFailed,
             Error::Probe(_) => ErrorCode::Internal,
             Error::Launch(error) => error.code(),
         }
