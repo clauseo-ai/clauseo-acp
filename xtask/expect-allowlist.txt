@@ -43,6 +43,12 @@ crates/desktop/src/test_support.rs Scratch::dir clippy::disallowed_methods
 crates/desktop/src/test_support.rs Scratch::file clippy::disallowed_methods
 crates/desktop/src/test_support.rs Scratch::link clippy::disallowed_methods
 crates/desktop/src/lib.rs context clippy::disallowed_methods
+# The updater (R23 PR 5, 0037): its one write, the download saved beside updates/<version>/ and
+# moved in whole (the desktop crate has no write module); access(2) on the .app's folder for the
+# macOS install kind; RegOpenKeyExW for the Windows per-machine uninstall key.
+crates/desktop/src/update/plugin.rs save_download clippy::disallowed_methods
+crates/desktop/src/update/install_kind.rs writable unsafe_code
+crates/desktop/src/update/install_kind/windows.rs - unsafe_code
 crates/desktop/src/profile.rs first_on_path clippy::disallowed_methods
 crates/desktop/src/lib.rs raise_main_window clippy::let_underscore_must_use
 crates/desktop/src/lib.rs stop_host_then_exit clippy::exit

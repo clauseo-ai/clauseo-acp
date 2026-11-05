@@ -34,8 +34,9 @@
 //!   from it only `SetUiSettings`, `SetToolSettings`, `SetPrivacySettings` and `GetSettings`
 //!   (and `RefreshLimits`, and the updater's `SetUpdateMode`, `CheckForUpdate` and
 //!   `GetUpdate`, 0037), and of the app feed
-//!   only `settings_changed`: never the matter and thread lists (0028). `setup` (0048,
-//!   `setup.rs`) has its own allow-list per window, and its events go to both windows.
+//!   only `settings_changed` and `update_changed`: never the matter and thread lists (0028).
+//!   `setup` (0048, `setup.rs`) has its own allow-list per window, and its events go to both
+//!   windows.
 //!   Every argument is checked in Rust first, and every host call runs as `LocalDesktop`.
 //!   The `e2e` build adds `perf_channel_bytes` (`e2e.rs`, granted by `capabilities/e2e.json`),
 //!   and the `marks` build `marks_memory` and `marks_finish` (`marks.rs`,
@@ -105,6 +106,7 @@ mod setup;
 mod test_support;
 #[cfg(test)]
 mod tests;
+mod update;
 mod webview2;
 mod window_frame;
 mod window_size;
@@ -113,7 +115,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use bridge::Bridge;
-use clauseo_host::{Host, HostConfig};
+use clauseo_host::{HostConfig, HostExit};
 use clauseo_process::{PassthroughLauncher, SpawnOptions};
 use clauseo_settings::{
     Effective, Locations, PlatformDirs as _, SystemDirs, SystemEnv, SystemFiles,
@@ -184,19 +186,16 @@ pub fn run() -> tauri::Result<()> {
         ))
         // No URL scheme yet: the scheme is not decided.
         .plugin_rust_only(tauri_plugin_deep_link::init());
-    // No endpoints, and an empty `pubkey` in tauri.conf.json: it never finds or installs an
-    // update. Linux is left out: it updates through its package manager (R23), so the plugin
-    // never runs there.
+    // Reached only through the host's updater (update.rs), which is none while tauri.conf.json
+    // has no endpoint. Linux is left out: it updates through its package manager (R23), so the
+    // plugin never runs there.
     #[cfg(not(target_os = "linux"))]
     let builder = builder.plugin_rust_only(tauri_plugin_updater::Builder::new().build());
     let app = builder
         // Not decorations: the frame is the room's (window_frame.rs), never a saved one.
         .plugin_rust_only(
             tauri_plugin_window_state::Builder::new()
-                .with_state_flags(
-                    tauri_plugin_window_state::StateFlags::all()
-                        - tauri_plugin_window_state::StateFlags::DECORATIONS,
-                )
+                .with_state_flags(window_size::state_flags())
                 .with_denylist(window_size::state_denylist())
                 .build(),
         )
@@ -359,7 +358,9 @@ fn start_host<R: Runtime>(
             HostConfig::with_machine_memory,
         );
         let hook = setup::SetupHook::new(keys, plans);
-        Host::start(with_profile(config, profile, hook))
+        // The updater, and a watch on the host that exits the app to install (update.rs).
+        let config = update::with_updater(&app, config, &locations);
+        update::start_host(&app, with_profile(config, profile, hook))
     })
 }
 
@@ -454,7 +455,8 @@ pub(crate) fn host_spawn_options(home: Option<std::path::PathBuf>) -> SpawnOptio
 
 /// Stops the usage counts' task, then, off the UI thread, the agents' jobs (`Agents::shutdown`,
 /// at most [`AGENTS_STOP_WAIT`]) and the host (waits for its start, shuts it down, joins it),
-/// saves the counts, then exits with `code`.
+/// flushes the log, saves the counts, installs an update when the host stopped for one
+/// (`update::after_host`, which then restarts the app), then exits with `code`.
 fn stop_host_then_exit<R: Runtime>(app: &AppHandle<R>, exit: Arc<Exit>, code: i32) {
     // The counts' task first, so no tick asks a host that is shutting down (`counts.rs`).
     if let Some(counts) = app.try_state::<counts::CountsState>() {
@@ -467,7 +469,9 @@ fn stop_host_then_exit<R: Runtime>(app: &AppHandle<R>, exit: Arc<Exit>, code: i3
     let stopper = std::thread::Builder::new()
         .name("clauseo-host-stop".to_owned())
         .spawn(move || {
-            // The agents' installs and sign-ins first, their children killed (#386), then the host.
+            // The agents' installs and sign-ins first, their children killed (#386), then the host,
+            // which says how it ended.
+            let mut ended = HostExit::Stopped;
             stop_in_order(
                 || {
                     app.try_state::<SetupStop>().is_none_or(|setup| {
@@ -476,16 +480,18 @@ fn stop_host_then_exit<R: Runtime>(app: &AppHandle<R>, exit: Arc<Exit>, code: i3
                 },
                 || {
                     if let Some(cell) = &cell {
-                        host_start::stop(cell);
+                        ended = host_start::stop(cell);
                     }
                 },
             );
+            // The log's queued lines go to the file before either exit below skips the drops.
+            host_log::flush_app(&app);
             // After the host, whose last counts go in too.
             if let Some(counts) = app.try_state::<counts::CountsState>() {
                 counts.save();
             }
-            // The log's queued lines go to the file before either exit below skips the drops.
-            host_log::flush_app(&app);
+            // The window state, then the install (0037); returns when there is none.
+            update::after_host(&app, ended);
             exit.stopped.store(true, Ordering::Release);
             // The e2e build ends the process itself once the host has joined. On a Windows
             // session with no visible window (session 0, as in CI) `app.exit` never yields

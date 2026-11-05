@@ -1,0 +1,11 @@
+{
+  "version": "0.4.1",
+  "notes": "",
+  "pub_date": "2026-11-05T09:00:00Z",
+  "platforms": {
+    "darwin-aarch64-app": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUMHd3UVpmT29KNFBUYWt3b0tmR2p4NEpzZERaQUlRN28reWtUcjN4R3FzMjRJYlZXT1JKVks1elE2bGhLMUtJUm4wRXMzN0hBZ1JidEp3RTFtSnpsdWhoK0dIOXE0RlFnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzODc5Mzk0CWZpbGU6cGF5bG9hZC5iaW4JdmVyc2lvbjowLjQuMQpMa3I1eVd4THM0YWwrRDdFNmI5WFdFVzUvSTBzam9CZ2JrSk9kL1hlVzE4MktGREhSaUtScnRseUY0bjc2d3VWbExEY0o1cEs2b1ZKK2hiTDNoU01EUT09Cg==",
+      "url": "https://github.com/clauseo-ai/clauseo-acp/releases/download/v0.4.1/Clauseo_0.4.1_aarch64.app.tar.gz"
+    }
+  }
+}

@@ -54,7 +54,10 @@
   "plugins": {
     "updater": {
       "pubkey": "",
-      "endpoints": []
+      "endpoints": [],
+      "requireSignedVersion": true,
+      "allowDowngrades": false,
+      "windows": { "installMode": "passive" }
     }
   }
 }

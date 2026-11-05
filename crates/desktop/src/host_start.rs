@@ -7,7 +7,7 @@
 
 use std::sync::{Arc, Mutex, OnceLock};
 
-use clauseo_host::{HostHandle, HostJoin};
+use clauseo_host::{HostExit, HostHandle, HostJoin};
 use clauseo_protocol::{ErrorCode, HostError};
 use futures::channel::oneshot;
 use futures::future::{FutureExt as _, Shared};
@@ -104,10 +104,12 @@ pub(crate) fn start_on_thread(
     Ok(())
 }
 
-/// Stops the host, blocking: waits for its start, shuts it down and joins its thread. After a
-/// failed start there is nothing to stop.
-pub(crate) fn stop(cell: &HostCell) {
-    if let Ok(host) = futures::executor::block_on(cell.host()) {
+/// Stops the host, blocking: waits for its start, shuts it down and joins its thread, and says
+/// how it ended: `HostExit::Install` when it had already stopped to install an update (0037).
+/// After a failed start there is nothing to stop: `HostExit::Stopped`.
+pub(crate) fn stop(cell: &HostCell) -> HostExit {
+    let host = futures::executor::block_on(cell.host()).ok();
+    if let Some(host) = host {
         // Already stopped or failed: join reports it, and the app exits either way.
         let _stopped = futures::executor::block_on(host.shutdown());
     }
@@ -115,6 +117,10 @@ pub(crate) fn stop(cell: &HostCell) {
     if let Some(join) = join {
         let _joined = join.join();
     }
+    // Resolved once the thread has ended, which the join above waited for.
+    host.map_or(HostExit::Stopped, |host| {
+        futures::executor::block_on(host.exit())
+    })
 }
 
 #[cfg(test)]

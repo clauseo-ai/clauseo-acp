@@ -72,6 +72,14 @@ pub(crate) const fn state_denylist() -> &'static [&'static str] {
     }
 }
 
+/// What window-state saves and restores: everything but the decorations, since the frame is the
+/// room's (`window_frame.rs`), never a saved one. The updater saves with it too before an install
+/// (`update/install.rs`), which ends the app without the exit event the plugin saves on.
+pub(crate) fn state_flags() -> tauri_plugin_window_state::StateFlags {
+    tauri_plugin_window_state::StateFlags::all()
+        - tauri_plugin_window_state::StateFlags::DECORATIONS
+}
+
 /// The night ground, `--ground` in `ui/components/src/styles/tokens-colour.css`.
 pub(crate) const NIGHT_GROUND: (u8, u8, u8) = (27, 26, 24);
 

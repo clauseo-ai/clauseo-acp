@@ -1,0 +1,31 @@
+{
+  "version": "0.4.1",
+  "notes": "",
+  "pub_date": "2026-11-05T09:00:00Z",
+  "platforms": {
+    "darwin-aarch64-app": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUMHd3UVpmT29KNE5lVy9hWkFyMy93Y2JWTnhGZW1pcjFHUU5ya1NjNU1vZmNwRHBrQUd5VW9CNkdrVStLOU5kWllvWGh3ajBDYzdhd1BYRW5IUElJOWlBaldySE43QlFNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzODc5Mzk3CWZpbGU6b3RoZXIuYmluCXZlcnNpb246MC40LjEKTzJsWG5SUlBEaEpiQU1FZ05YNVRIdCtzK3BJK2FMaHIzVzJpcEZudFlVeEZ4TC90NnhRaXBCQkl2UG1lNGdmWVNUbTRZTE0wdnprRGF6cG9qQ2pjQ3c9PQo=",
+      "url": "https://github.com/clauseo-ai/clauseo-acp/releases/download/v0.4.1/Clauseo_0.4.1_aarch64.app.tar.gz"
+    },
+    "darwin-x86_64-app": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUMHd3UVpmT29KNE5lVy9hWkFyMy93Y2JWTnhGZW1pcjFHUU5ya1NjNU1vZmNwRHBrQUd5VW9CNkdrVStLOU5kWllvWGh3ajBDYzdhd1BYRW5IUElJOWlBaldySE43QlFNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzODc5Mzk3CWZpbGU6b3RoZXIuYmluCXZlcnNpb246MC40LjEKTzJsWG5SUlBEaEpiQU1FZ05YNVRIdCtzK3BJK2FMaHIzVzJpcEZudFlVeEZ4TC90NnhRaXBCQkl2UG1lNGdmWVNUbTRZTE0wdnprRGF6cG9qQ2pjQ3c9PQo=",
+      "url": "https://github.com/clauseo-ai/clauseo-acp/releases/download/v0.4.1/Clauseo_0.4.1_x64.app.tar.gz"
+    },
+    "windows-x86_64-nsis": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUMHd3UVpmT29KNE5lVy9hWkFyMy93Y2JWTnhGZW1pcjFHUU5ya1NjNU1vZmNwRHBrQUd5VW9CNkdrVStLOU5kWllvWGh3ajBDYzdhd1BYRW5IUElJOWlBaldySE43QlFNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzODc5Mzk3CWZpbGU6b3RoZXIuYmluCXZlcnNpb246MC40LjEKTzJsWG5SUlBEaEpiQU1FZ05YNVRIdCtzK3BJK2FMaHIzVzJpcEZudFlVeEZ4TC90NnhRaXBCQkl2UG1lNGdmWVNUbTRZTE0wdnprRGF6cG9qQ2pjQ3c9PQo=",
+      "url": "https://github.com/clauseo-ai/clauseo-acp/releases/download/v0.4.1/Clauseo_0.4.1_x64-setup.exe"
+    },
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUMHd3UVpmT29KNE5lVy9hWkFyMy93Y2JWTnhGZW1pcjFHUU5ya1NjNU1vZmNwRHBrQUd5VW9CNkdrVStLOU5kWllvWGh3ajBDYzdhd1BYRW5IUElJOWlBaldySE43QlFNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzODc5Mzk3CWZpbGU6b3RoZXIuYmluCXZlcnNpb246MC40LjEKTzJsWG5SUlBEaEpiQU1FZ05YNVRIdCtzK3BJK2FMaHIzVzJpcEZudFlVeEZ4TC90NnhRaXBCQkl2UG1lNGdmWVNUbTRZTE0wdnprRGF6cG9qQ2pjQ3c9PQo=",
+      "url": "https://github.com/clauseo-ai/clauseo-acp/releases/download/v0.4.1/Clauseo_0.4.1_x64-setup.exe"
+    },
+    "windows-aarch64-nsis": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUMHd3UVpmT29KNE5lVy9hWkFyMy93Y2JWTnhGZW1pcjFHUU5ya1NjNU1vZmNwRHBrQUd5VW9CNkdrVStLOU5kWllvWGh3ajBDYzdhd1BYRW5IUElJOWlBaldySE43QlFNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzODc5Mzk3CWZpbGU6b3RoZXIuYmluCXZlcnNpb246MC40LjEKTzJsWG5SUlBEaEpiQU1FZ05YNVRIdCtzK3BJK2FMaHIzVzJpcEZudFlVeEZ4TC90NnhRaXBCQkl2UG1lNGdmWVNUbTRZTE0wdnprRGF6cG9qQ2pjQ3c9PQo=",
+      "url": "https://github.com/clauseo-ai/clauseo-acp/releases/download/v0.4.1/Clauseo_0.4.1_arm64-setup.exe"
+    },
+    "windows-aarch64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUMHd3UVpmT29KNE5lVy9hWkFyMy93Y2JWTnhGZW1pcjFHUU5ya1NjNU1vZmNwRHBrQUd5VW9CNkdrVStLOU5kWllvWGh3ajBDYzdhd1BYRW5IUElJOWlBaldySE43QlFNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzODc5Mzk3CWZpbGU6b3RoZXIuYmluCXZlcnNpb246MC40LjEKTzJsWG5SUlBEaEpiQU1FZ05YNVRIdCtzK3BJK2FMaHIzVzJpcEZudFlVeEZ4TC90NnhRaXBCQkl2UG1lNGdmWVNUbTRZTE0wdnprRGF6cG9qQ2pjQ3c9PQo=",
+      "url": "https://github.com/clauseo-ai/clauseo-acp/releases/download/v0.4.1/Clauseo_0.4.1_arm64-setup.exe"
+    }
+  }
+}
