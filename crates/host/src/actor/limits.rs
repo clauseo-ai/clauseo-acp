@@ -66,11 +66,6 @@ pub(crate) use stops::{
     holds as holds_stop, retry as retry_stops, stop_later,
 };
 
-/// The agent id whose home the host launches Codex with, as `CODEX_HOME`
-/// (`turn/launch_checks.rs` takes `Locations::agent_home` of the thread's agent id, which is
-/// this one for every Codex thread).
-const CODEX_AGENT: &str = "codex-acp";
-
 /// How long the Codex fallback (`turn/end.rs`) and a Codex pending stop wait for a read: the
 /// Codex reader's own deadline (`LIMIT` in `clauseo_limits`' `readers/codex.rs`, 10 s). A read
 /// that hits that deadline answers `Failed(TimedOut)`, which decides from `at_limit` as it
@@ -156,7 +151,7 @@ pub(crate) fn default_reader(
     launcher: &Arc<dyn clauseo_process::Launcher>,
     clock: &Arc<dyn Clock>,
 ) -> Arc<dyn ReadLimits> {
-    let codex_home = effective.locations().agent_home(CODEX_AGENT);
+    let codex_home = effective.locations().agent_home(AgentKind::Codex.id());
     Arc::new(ProcessReaders::new(
         effective,
         codex_home,

@@ -21,6 +21,7 @@ pub(crate) mod codex;
 pub(crate) mod data_folder;
 pub(crate) mod folder_support;
 pub(crate) mod forced_ask;
+pub(crate) mod home;
 pub(crate) mod leftovers;
 pub(crate) mod loads;
 pub(crate) mod plan_note;

@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::thread::JoinHandle;
 
 use clauseo_protocol::{
-    CommandEnvelope, CommandOutcome, Cursor, FileRefId, FolderRefId, HostError, HostQuery,
+    AgentId, CommandEnvelope, CommandOutcome, Cursor, FileRefId, FolderRefId, HostError, HostQuery,
     MatterId, Principal, QueryResult, SearchAnswer, SearchRequest, Seq, StreamId, ViewEpoch,
 };
 use futures::channel::oneshot;
@@ -274,6 +274,46 @@ impl HostHandle {
             reply,
         })
         .await
+    }
+
+    /// Writes `agents.<agent>` as `launch` (decision record 0048): desktop calls it when an
+    /// agent's install is ready, Rust only, since a webview must not choose a program to run.
+    /// The entry is written to `settings.json`, in force for the next launch, and every app
+    /// subscriber gets `SettingsChanged`. Refused, with nothing written, with `settings.locked`
+    /// for an id policy sets, and with `settings.refused` for a launch that is not Clauseo's
+    /// own install (a command under `<data_dir>/agents/`, or `node` with its script there) or
+    /// an `env` that sets a secret-shaped name; the message names the key, never a value. An
+    /// entry already there that is the lawyer's or the firm's own is never replaced: the answer
+    /// is [`EntryWrite::LeftAlone`](clauseo_settings::EntryWrite::LeftAlone), with nothing
+    /// written or sent.
+    pub async fn set_agent_launch(
+        &self,
+        agent: AgentId,
+        launch: clauseo_settings::AgentLaunch,
+    ) -> Result<clauseo_settings::EntryWrite, HostError> {
+        let launch = Box::new(launch);
+        self.call(|reply| Request::SetAgentLaunch {
+            agent,
+            launch,
+            reply,
+        })
+        .await
+    }
+
+    /// Writes `plans.<agent>` as `plan`, or removes it with `None` (decision record 0048):
+    /// desktop calls it, Rust only, after a firm endpoint's confirm. Written to `settings.json`,
+    /// then `SettingsChanged` to every app subscriber. Refused, with nothing written, with
+    /// `settings.locked` for a plan policy sets (every plan while a policy source cannot be read),
+    /// and with `settings.refused` for an endpoint that is not an `https` address or a variable
+    /// a plan may not set; the message names the key or the variable's place, never a value.
+    pub async fn set_plan(
+        &self,
+        agent: AgentId,
+        plan: Option<clauseo_settings::Plan>,
+    ) -> Result<(), HostError> {
+        let plan = plan.map(Box::new);
+        self.call(|reply| Request::SetPlan { agent, plan, reply })
+            .await
     }
 
     /// Stops the host: no more commands, running turns cancelled, agents stopped, text
