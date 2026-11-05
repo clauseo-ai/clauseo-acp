@@ -576,3 +576,17 @@ fn old_downloads_are_removed_at_start() {
     assert!(cached.exists());
     host.shutdown();
 }
+
+#[test]
+fn a_failed_install_leaves_no_download_behind_whatever_its_version() {
+    // As the machine: a marker from the running version drops last run's download.
+    let dir = Dir::new("update_failed_no_download", &[]);
+    let updates = dir.data().join("updates");
+    write::write(&updates.join("0.4.2").join("Clauseo.exe"), b"installer");
+    write::write(&dir.data().join("update.json"), INSTALLING.as_bytes());
+    let fake = FakeUpdater::new(&dir, InstallKind::CurrentUser, None, Download::Instant);
+    let host = start_updating(&dir, 0, &fake);
+    host.settle();
+    assert_eq!(std::fs::read_dir(&updates).unwrap().count(), 0);
+    host.shutdown();
+}
