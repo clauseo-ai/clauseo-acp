@@ -203,6 +203,9 @@ crates/host/tests/host/write.rs - clippy::disallowed_methods
 crates/host/benches/reopen.rs - clippy::unwrap_used
 crates/host/benches/reopen.rs timed_first_item clippy::disallowed_methods
 crates/host/benches/common/dir.rs - clippy::disallowed_methods
+# R23 PR 3: the updater's state machine, run only by its tests until R23 PR 4 wires it into the
+# actor (which removes this line: the expect then fails as unfulfilled).
+crates/host/src/update.rs machine dead_code
 
 # clauseo-limits (S13): the write module (the helper file and the run folder) and the readers
 # tests' folders.

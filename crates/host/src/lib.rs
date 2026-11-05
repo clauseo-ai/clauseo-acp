@@ -117,6 +117,12 @@
 //!   `actor/counting.rs` bumps closed events into it at each call site, once per operation that
 //!   succeeded; with none, or counts off, it counts nothing. Counting never blocks or fails a
 //!   command.
+//! - The updater's seam (decision record 0037): [`Updater`] (`install_kind`, `check` and
+//!   `download`; never `install`, which desktop runs after the host has stopped), the values
+//!   that cross it ([`Offer`], [`Downloaded`], [`Opaque`], [`ProgressSink`], [`UpdaterError`]),
+//!   `update.json`'s [`UpdateMarker`], and [`NoUpdater`], managed by a package so nothing is
+//!   ever checked. The pure state machine that decides each call is `update/machine.rs`; the
+//!   actor runs it from R23 PR 4.
 //! - [`session_folder`]: the canonical spelling of a matter folder that an agent session
 //!   works in (its process's folder and its `cwd`), for whatever else must compare with it.
 //! - [`Error`] wraps the errors of `protocol`, `store`, `matters`, `process`, `acp`, `reducer`
@@ -178,9 +184,9 @@
 //! model, its readers and `CODEX_OVERRIDES`), `profile` (the placeholders and the skill writes,
 //! 0030), `counts` (the usage counts, 0036), `sandbox` (the browser's socket folder and port
 //! claims, 0029), `getrandom` (Windows browser session names), `async-channel`, `async-io`,
-//! `futures`, `uuid`, `serde_json`, `tracing`, `tracing-subscriber` (the log file, 0047),
-//! `thiserror`, `dunce` and `sha2` (the Codex hook's trust hash, 0024). Never `tauri`, `tokio`
-//! or `agents`.
+//! `futures`, `uuid`, `serde` (the updater's marker), `serde_json`, `tracing`,
+//! `tracing-subscriber` (the log file, 0047), `thiserror`, `dunce` and `sha2` (the Codex hook's
+//! trust hash, 0024). Never `tauri`, `tokio` or `agents`.
 //!
 //! # Start reading
 //!
@@ -223,6 +229,7 @@ mod sent;
 mod snapshot;
 mod sources;
 mod undo_note;
+mod update;
 mod view;
 mod window;
 mod write;
@@ -246,3 +253,7 @@ pub use ids::SequentialIds;
 pub use ids::{IdSource, RandomV7};
 #[cfg(feature = "test-support")]
 pub use search::SearchHold;
+pub use update::{
+    CachedDownload, Downloaded, InstallKind, MarkerState, NoUpdater, Offer, Opaque, Progress,
+    ProgressSink, UpdateMarker, Updater, UpdaterError,
+};
