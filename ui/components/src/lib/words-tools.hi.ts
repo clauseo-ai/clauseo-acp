@@ -26,7 +26,6 @@ export const HI = {
   "Needs 1\u00a0GB free": null,
   "Network blocked it": null,
   "Couldn't unpack": null,
-  "Download stopped": null,
   "Download failed": null,
   "Try again": null,
 } as const;
