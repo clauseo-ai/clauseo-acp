@@ -273,10 +273,14 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
     waiting work fails as closed, and stops every live agent of that id.
   - `set_reused_login(agent, bool) -> Result<(), HostError>` records desktop's word on the
     login's source. While it is `true`, the split check runs at each Codex launch.
-  - `login_splits() -> async_channel::Receiver<LoginSplit>` carries `LoginSplit { agent,
-    lawyers_file_gone }`, sent when a split check refuses a launch. Desktop runs
-    `stop_using_login` with `CodexLinkSplit`, or `ReusedSignedOut` when the file is gone, then
-    the leave order. The host has set its own reused flag to `false` by then.
+  - `login_splits() -> LoginSplits` carries `LoginSplit { agent, lawyers_file_gone }`, sent
+    when a split check refuses a launch. Desktop runs `stop_using_login` with
+    `CodexLinkSplit`, or `ReusedSignedOut` when the file is gone, then the leave order. The
+    host has set its own reused flag to `false` by then, so the latest split is all desktop
+    needs: `LoginSplits` keeps the latest unread split per agent, a newer one replacing it in
+    its place, so a slow reader loses none and none back up (the host code owner's review of
+    #440; it was a channel of 16 that dropped extras). Its `recv` and `try_recv` answer as
+    `async_channel`'s do, and every clone takes from the same splits.
   - `remove_login_links(agent) -> Result<(), HostError>` asks the actor only for the folders.
     The removal of each `auth.json` runs on a `clauseo-codex-fs` thread with a 5 s wait, never
     on the actor. Before stage C (R17) no matter has a link, so the list is empty.

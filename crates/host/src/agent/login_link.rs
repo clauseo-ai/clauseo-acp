@@ -28,6 +28,7 @@ use std::time::Duration;
 use clauseo_protocol::{AgentId, ErrorCode, MatterId};
 
 use super::codex::prepare::{Job, off_actor};
+use super::login_splits::{self, LoginSplits, SplitSender};
 use crate::clock::Clock;
 use crate::error::Error;
 
@@ -36,9 +37,6 @@ pub(crate) const CHECK_WAIT: Duration = Duration::from_secs(5);
 
 /// How long `remove_login_links` waits for its removals.
 const REMOVE_WAIT: Duration = Duration::from_secs(5);
-
-/// How many splits wait for desktop to read them before more are dropped with a warning.
-const SPLITS_WAITING: usize = 16;
 
 /// Whether a Codex agent's home holds the lawyer's own login file. Desktop implements it with
 /// S18's file-id checks; the host never opens either file and never compares ids itself.
@@ -104,8 +102,8 @@ pub(crate) struct SignIn {
     pub(crate) check: Option<Arc<dyn LoginCheck + Send + Sync>>,
     /// The sign-in-again test; `None` treats only `agent.auth_required` as a sign-in.
     pub(crate) again: Option<SignInAgain>,
-    splits: async_channel::Sender<LoginSplit>,
-    receiver: async_channel::Receiver<LoginSplit>,
+    splits: SplitSender,
+    receiver: LoginSplits,
     /// The agents whose login desktop said is reused (`HostHandle::set_reused_login`).
     pub(crate) reused: BTreeSet<AgentId>,
     /// What each Codex agent's last launch's check found.
@@ -114,7 +112,7 @@ pub(crate) struct SignIn {
 
 impl Default for SignIn {
     fn default() -> Self {
-        let (splits, receiver) = async_channel::bounded(SPLITS_WAITING);
+        let (splits, receiver) = login_splits::channel();
         Self {
             check: None,
             again: None,
@@ -139,16 +137,14 @@ impl std::fmt::Debug for SignIn {
 
 impl SignIn {
     /// The splits' receiving end, for `HostHandle::login_splits`.
-    pub(crate) fn receiver(&self) -> async_channel::Receiver<LoginSplit> {
+    pub(crate) fn receiver(&self) -> LoginSplits {
         self.receiver.clone()
     }
 
-    /// Sends `split` to desktop without waiting; a full channel drops it with a warning.
+    /// Sends `split` to desktop without waiting, in place of its agent's unread one
+    /// (`login_splits.rs`).
     pub(crate) fn send_split(&self, split: LoginSplit) {
-        let agent = split.agent.clone();
-        if self.splits.try_send(split).is_err() {
-            tracing::warn!(%agent, "a login split was not sent: nobody reads them");
-        }
+        self.splits.send(split);
     }
 
     /// Whether the guard refuses a login change for `agent`: with a hook set, while its login
