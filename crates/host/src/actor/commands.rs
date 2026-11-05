@@ -210,11 +210,13 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
             matter,
             client,
             next_date,
+            skill_packs,
             pinned,
         } => {
             let update = super::matter_details::Update {
                 client,
                 next_date,
+                skill_packs,
                 pinned,
             };
             super::matter_details::update_matter(actor, ctx, matter, update);
