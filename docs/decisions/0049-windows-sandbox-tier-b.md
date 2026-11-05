@@ -94,8 +94,9 @@ build 26100):
   - Order: grants on missing names are left out; the credential link must still be the credentials
     file the launcher names (one file ID, compared again on the handle the write goes through), and
     that file may not sit in the state folder or be the link itself, or the launch is refused, and
-    its ledger entry records that file's path and file ID, so forget and rollback take the entry and
-    label back from that file, checked by its ID, never through a link the agent may have swapped;
+    its ledger entry records that file's volume, path and file ID, so forget and rollback open that
+    file by its ID (`OpenFileById`), wherever its names now are, never through a link the agent may
+    have swapped, and drop the entry when no file has that ID any more;
     every grant is recorded `pending`; a new Low label entry first records the explicit label its
     path has, unless it is our own Low label or another entry's on the same file (the lawyer's own
     label, put back when ours goes); the entries are written; the walks run; only then is every
@@ -112,10 +113,12 @@ build 26100):
     beat it refuses the launch, naming the child for the running page.
   - A child the lawyer can't open, or can open but not re-permission (no `WRITE_DAC`, or no
     `WRITE_OWNER` for an owner or label change), is set aside through its folder's
-    `FILE_DELETE_CHILD` when it sits in this launch's own matter, state or notes tree; every such
-    child is, and the walk runs again after each. Anywhere else (a sibling, another matter's
-    fence), or when the set-aside fails (another volume, or no `FILE_DELETE_CHILD`), the launch is
-    refused, naming the child, and nothing moves.
+    `FILE_DELETE_CHILD` when it sits in this launch's own matter, state or notes tree, or, in a
+    fence walk, in another registered matter's tree, into that matter's own set-aside and list,
+    so one matter's agent can't block another matter's launch or `fence_registered`; every such
+    child is, and the walk runs again after each. Anywhere else (a sibling, parent files), or when
+    the set-aside fails (another volume, or no `FILE_DELETE_CHILD`), the launch is refused, naming
+    the child, and nothing moves.
   - The matter, state and notes trees are walked at every launch, so a file moved in since picks
     up the inherited entries; other trees when their entry was just written or is still pending.
     Every write keeps a DACL's auto-inherited mark (`SE_DACL_AUTO_INHERIT_REQ`), so a walk with
