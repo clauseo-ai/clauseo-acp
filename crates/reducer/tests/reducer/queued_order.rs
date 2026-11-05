@@ -12,6 +12,7 @@ use crate::helpers::{fold, round_trip};
 
 /// A thread whose first turn runs with "Two" and "Three" queued behind it, then ends; returns
 /// the log, the state, the thread and the queued prompts' messages.
+#[cfg(test)]
 fn two_queued() -> (Log, StreamState, ThreadId, TurnId, [MessageId; 2]) {
     let mut log = Log::thread(31).unwrap();
     log.push(thread_created().unwrap()).unwrap();
@@ -35,11 +36,13 @@ fn two_queued() -> (Log, StreamState, ThreadId, TurnId, [MessageId; 2]) {
     (log, state, thread, first, [messages[0], messages[1]])
 }
 
+#[cfg(test)]
 fn push(log: &mut Log, state: &mut StreamState, event: impl Into<DomainEvent>) {
     let applied = apply(state, &log.push(event).unwrap()).unwrap();
     assert!(applied.anomalies.is_empty(), "{:?}", applied.anomalies);
 }
 
+#[cfg(test)]
 fn prompt(log: &mut Log, state: &mut StreamState, text: &str) -> (TurnId, MessageId) {
     let (turn, message) = (log.fresh().unwrap(), log.fresh().unwrap());
     push(log, state, user_message(turn, message, text));
@@ -47,11 +50,13 @@ fn prompt(log: &mut Log, state: &mut StreamState, text: &str) -> (TurnId, Messag
 }
 
 /// `turn` queued behind `behind` of its own thread, put back at the head when `at_head`.
+#[cfg(test)]
 fn queued(thread: ThreadId, turn: TurnId, behind: TurnId, at_head: bool) -> TurnQueued {
     let waits = TurnQueued::new(thread, turn, thread, Some(behind)).unwrap();
     if at_head { waits.at_head() } else { waits }
 }
 
+#[cfg(test)]
 fn order(state: &StreamState) -> Vec<MessageId> {
     state.as_thread().unwrap().queued_order()
 }
