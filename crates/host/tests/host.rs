@@ -100,6 +100,9 @@ mod import;
 #[path = "host/key_retry.rs"]
 mod key_retry;
 #[cfg(test)]
+#[path = "host/launch_refused.rs"]
+mod launch_refused;
+#[cfg(test)]
 #[path = "host/limits.rs"]
 mod limits;
 #[cfg(test)]

@@ -5,9 +5,9 @@
 use std::path::PathBuf;
 
 use clauseo_protocol::{
-    AgentId, AgentKind, CommandEnvelope, CommandId, CommandOutcome, Cursor, Envelope, FileRefId,
-    FolderRefId, HostQuery, MatterId, Principal, QueryResult, SearchAnswer, SearchRequest, Seq,
-    StreamId, ThreadId, ViewEpoch,
+    AgentId, AgentKind, CommandEnvelope, CommandId, CommandOutcome, Cursor, Envelope, ErrorCode,
+    FileRefId, FolderRefId, HostQuery, MatterId, Principal, QueryResult, SearchAnswer,
+    SearchRequest, Seq, StreamId, ThreadId, ViewEpoch,
 };
 use clauseo_store::{Committed, Receipt, Reopen, SnapshotIn};
 use futures::channel::oneshot;
@@ -44,6 +44,12 @@ pub(crate) enum SignInRequest {
     LinkHomes {
         agent: AgentId,
         reply: Reply<Vec<PathBuf>>,
+    },
+    /// `HostHandle::set_launch_refused`.
+    LaunchRefused {
+        agent: AgentId,
+        code: Option<ErrorCode>,
+        reply: Reply<()>,
     },
     /// `HostHandle::limits_login_changed`.
     LimitsLogin { agent: AgentKind, reply: Reply<()> },
