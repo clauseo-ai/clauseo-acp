@@ -149,6 +149,18 @@ pub(crate) fn replace_private_file(path: &Path, bytes: &[u8]) -> io::Result<()> 
     renamed
 }
 
+/// Syncs the folder `path`, so a rename into it survives a power cut (Unix: `fsync` of the
+/// folder). On Windows a folder cannot be opened this way, and NTFS journals the rename itself.
+pub(crate) fn sync_dir(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    return std::fs::File::open(path)?.sync_all();
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Ok(())
+    }
+}
+
 /// Removes the temp files a crashed [`replace_private_file`] of `path` left beside it
 /// (`<name>.clauseo-*.new`), best effort: one that cannot be removed stays, and the write goes
 /// on with its own fresh name.

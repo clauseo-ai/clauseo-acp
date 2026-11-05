@@ -212,7 +212,12 @@ call before `install` stays a no-op seam until S22 merges.
   never stops a host before `Host::start` has answered. Every later touch of `update.json`
   (the clear, the marker) runs on that thread in order; the exit waits for the marker.
 - **Last run's download** is the newest `updates/<version>/` folder, of a dotted-number version
-  newer than the running one, holding exactly one file; PR 5's adapter must save it so.
+  newer than the running one, holding exactly one file; PR 5's adapter must save it so. A file
+  the download left half written passes this test; the plugin's `install` verifies the bytes
+  and signature again and refuses it. Start-up removes everything else in `updates/`, and that
+  download too when the marker says its install failed.
+- **The marker** is written through a temporary file, synced, renamed, then the data folder is
+  synced, so the rename survives a power cut during the install.
 - **Commands.** `CheckForUpdate`, `InstallUpdate` and `CancelScheduledUpdate` answer `Done` with
   no receipt, as `InstallBrowser` does: their state lives in memory. `InstallUpdate`'s answer
   goes out before the host starts to stop. `SetUpdateMode` is checked by the machine, written to

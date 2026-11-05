@@ -40,11 +40,13 @@ pub fn read_update_marker(locations: &Locations) -> Option<UpdateMarker> {
     }
 }
 
-/// Writes `marker` to `update.json` whole: a temporary file beside it, then a rename, so a
-/// reader sees the old file or the new one (`Files::write_atomic`, as `settings.json`).
+/// Writes `marker` to `update.json` whole: a temporary file beside it, synced, then a rename, so
+/// a reader sees the old file or the new one (`Files::write_atomic`, as `settings.json`); then
+/// the data folder is synced, so the rename itself survives a power cut during the install.
 pub(crate) fn write_marker(locations: &Locations, marker: &UpdateMarker) -> io::Result<()> {
     let bytes = serde_json::to_vec(marker).map_err(io::Error::other)?;
-    SystemFiles.write_atomic(&locations.update_marker(), &bytes)
+    SystemFiles.write_atomic(&locations.update_marker(), &bytes)?;
+    crate::write::sync_dir(locations.data_dir())
 }
 
 /// Deletes `update.json`; one already gone is fine.
@@ -77,6 +79,31 @@ pub(crate) fn find_cached(locations: &Locations, current: &str) -> Option<Cached
             Some(CachedDownload { version, path })
         })
         .max_by(|a, b| version_key(&a.version).cmp(&version_key(&b.version)))
+}
+
+/// Removes what `updates/` holds besides `keep`'s folder: older runs' downloads, a version's
+/// folder with no file or several, anything else. Each failure is logged by its kind, and the
+/// rest go on.
+pub(crate) fn remove_old_downloads(locations: &Locations, keep: Option<&CachedDownload>) {
+    let Ok(entries) = std::fs::read_dir(locations.updates_dir()) else {
+        return;
+    };
+    let kept = keep.and_then(|cached| cached.path.parent());
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        if Some(path.as_path()) == kept {
+            continue;
+        }
+        let folder = entry.file_type().is_ok_and(|kind| kind.is_dir());
+        let removed = if folder {
+            crate::write::remove_tree(&path)
+        } else {
+            crate::write::remove_link(&path)
+        };
+        if let Err(error) = removed {
+            tracing::warn!(kind = %error.kind(), "an old update download was not removed");
+        }
+    }
 }
 
 /// The one regular file in `folder`, when there is exactly one.

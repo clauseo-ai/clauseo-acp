@@ -12,7 +12,9 @@ use futures::channel::oneshot;
 
 use super::UpdateInput;
 use crate::actor::input::Input;
-use crate::update::{UpdateMarker, clear_marker, find_cached, read_update_marker, write_marker};
+use crate::update::{
+    UpdateMarker, clear_marker, find_cached, read_update_marker, remove_old_downloads, write_marker,
+};
 
 /// The thread's name.
 pub(super) const THREAD_NAME: &str = "clauseo-update";
@@ -131,10 +133,19 @@ pub(super) fn run(locations: &Locations, job: Job) -> Done {
         "update.json is touched only off the actor"
     );
     match job {
-        Job::Read { current } => Done::Read {
-            marker: read_update_marker(locations),
-            cached: find_cached(locations, &current),
-        },
+        Job::Read { current } => {
+            let marker = read_update_marker(locations);
+            let cached = find_cached(locations, &current);
+            // Only last run's download can be offered again, and not one whose install the
+            // marker says failed (it is fetched again).
+            let failed = |cached: &&crate::update::CachedDownload| {
+                marker
+                    .as_ref()
+                    .is_some_and(|m| m.from == current && m.to == cached.version)
+            };
+            remove_old_downloads(locations, cached.as_ref().filter(|c| !failed(c)));
+            Done::Read { marker, cached }
+        }
         Job::Write(marker) => match write_marker(locations, &marker) {
             Ok(()) => Done::Wrote(true),
             Err(error) => {
