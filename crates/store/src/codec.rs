@@ -1,8 +1,8 @@
 //! The stored forms: the `events` key, the `MessagePack` envelope, and the text of ids and rows.
 
 use clauseo_protocol::{
-    Envelope, EnvelopeRead, MAX_MSGPACK_DEPTH, MatterKind, RenameSource, SCHEMA_VERSION, Seq,
-    StreamId, Timestamp,
+    Envelope, EnvelopeRead, MAX_MSGPACK_DEPTH, MatterKind, PackList, RenameSource, SCHEMA_VERSION,
+    Seq, StreamId, Timestamp,
 };
 use serde::Deserialize;
 
@@ -136,4 +136,21 @@ pub(crate) fn matter_kind(text: &str) -> MatterKind {
         "folder" => MatterKind::Folder,
         _ => MatterKind::Unknown,
     }
+}
+
+/// The `matters.skill_packs` text: the list as a JSON array of pack ids.
+pub(crate) fn skill_packs_text(packs: &PackList) -> Result<String, Error> {
+    serde_json::to_string(packs).map_err(|error| Error::Encode {
+        detail: format!("a matter's skill packs: {error}"),
+    })
+}
+
+/// A `matters.skill_packs` read back: text that is not a JSON array of pack ids, or a list that
+/// breaks the list's rules (more than 32 ids, an id twice), is corrupt.
+pub(crate) fn skill_packs(text: &str) -> Result<PackList, Error> {
+    serde_json::from_str(text).map_err(|error| {
+        Error::corrupt(format!(
+            "a matter's skill packs {text:?} do not parse: {error}"
+        ))
+    })
 }

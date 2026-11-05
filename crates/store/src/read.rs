@@ -242,7 +242,7 @@ pub(crate) fn receipt(conn: &Connection, command: CommandId) -> Result<Option<Re
 pub(crate) fn matters(conn: &Connection) -> Result<Vec<MatterRow>, Error> {
     let mut statement = conn.prepare_cached(
         "SELECT id, name, kind, folder_path, folder_locator, shadow_repo_path, created_ms, \
-         client, next_date, pinned, last_opened_ms, forgotten_ms \
+         client, next_date, pinned, last_opened_ms, forgotten_ms, skill_packs \
          FROM matters ORDER BY created_ms, id",
     )?;
     let mut rows = statement.query([])?;
@@ -269,6 +269,11 @@ pub(crate) fn matters(conn: &Connection) -> Result<Vec<MatterRow>, Error> {
             pinned: row.get(9)?,
             last_opened: optional_timestamp(row, 10)?,
             forgotten: optional_timestamp(row, 11)?,
+            skill_packs: row
+                .get_ref(12)?
+                .as_str_or_null()?
+                .map(codec::skill_packs)
+                .transpose()?,
         });
     }
     Ok(out)

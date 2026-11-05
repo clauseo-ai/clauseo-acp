@@ -47,5 +47,8 @@ mod rows;
 #[path = "store/seen.rs"]
 mod seen;
 #[cfg(test)]
+#[path = "store/skill_packs.rs"]
+mod skill_packs;
+#[cfg(test)]
 #[path = "store/title_source.rs"]
 mod title_source;
