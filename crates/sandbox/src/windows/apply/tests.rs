@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use super::*;
@@ -12,6 +12,7 @@ use crate::windows::test_world::{
     FakeFolders, GROUP_SID, NOTES, OTHER_POOL_SIDS, STATE, USER_SID, World, matter_one, matter_two,
     reserved, sids, trusted,
 };
+use crate::windows::writer::Label;
 
 type Key = (PathBuf, String, Rights, Inherit);
 
@@ -32,6 +33,10 @@ struct FakeAcl {
     fail_add: Option<PathBuf>,
     fail_walk: Option<(PathBuf, ApplyFailure)>,
     walks: Vec<(PathBuf, Reach, bool)>,
+    /// The lawyer's own explicit labels, by path.
+    labels: BTreeMap<PathBuf, Label>,
+    /// The labels put back, in order.
+    restored: Vec<(PathBuf, Label)>,
 }
 
 impl AclWriter for FakeAcl {
@@ -72,6 +77,15 @@ impl AclWriter for FakeAcl {
             visited: 1,
             ..Walked::default()
         })
+    }
+
+    fn label(&mut self, path: &Path) -> io::Result<Option<Label>> {
+        Ok(self.labels.get(path).copied())
+    }
+
+    fn restore_label(&mut self, grant: &Grant, label: Label) -> Result<(), ApplyFailure> {
+        self.restored.push((grant.path().to_owned(), label));
+        Ok(())
     }
 }
 
