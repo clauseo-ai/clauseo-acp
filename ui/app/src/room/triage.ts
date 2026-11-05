@@ -114,7 +114,13 @@ export function needOf(t: Pick<ThreadSummary, "status" | "seen" | "last_stop">):
   if (!resting(t.status) || t.seen !== false || t.last_stop === undefined) return null;
   const reason = t.last_stop.reason;
   if (reason === "failed") return "failed";
-  if (t.status === "idle" && reason !== "at_limit" && reason !== "cancelled") return "ready";
+  if (
+    t.status === "idle" &&
+    reason !== "at_limit" &&
+    reason !== "cancelled" &&
+    reason !== "not_allowed"
+  )
+    return "ready";
   return null;
 }
 

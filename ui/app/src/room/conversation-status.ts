@@ -30,7 +30,8 @@ export function rowWords(
   if (resting && row.seen === false && row.last_stop?.reason === "failed")
     return { state: "failed", at: row.last_stop.at };
   if (s === "idle" && row.seen === false && row.last_stop !== undefined) {
-    if (row.last_stop.reason === "cancelled") return { state: "stopped", at: row.last_stop.at };
+    if (row.last_stop.reason === "cancelled" || row.last_stop.reason === "not_allowed")
+      return { state: "stopped", at: row.last_stop.at };
     if (row.last_stop.reason !== "failed" && row.last_stop.reason !== "at_limit")
       return { state: "ready" };
   }

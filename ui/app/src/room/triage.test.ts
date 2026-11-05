@@ -94,6 +94,14 @@ test("a failure's row says when it failed; needOf reads only the table's waits",
   );
 });
 
+test("a turn ended on the lawyer's refusal is no answer ready, as a Stop is not", () => {
+  for (const reason of ["cancelled", "not_allowed"] as const)
+    expect(needOf({ status: "idle", seen: false, last_stop: { reason, at: 1 } })).toBe(null);
+  expect(needOf({ status: "idle", seen: false, last_stop: { reason: "end_turn", at: 1 } })).toBe(
+    "ready",
+  );
+});
+
 test("a matter's row names the thread behind it: the oldest waiting, over an answer ready", () => {
   const m = matter(1, { status: "needs_answer" });
   const ready = thread(1, m, { seen: false, last_stop: { reason: "end_turn", at: NOW } });
