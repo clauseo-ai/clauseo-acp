@@ -313,6 +313,16 @@ pub enum SignIn {
         /// When.
         at: Timestamp,
     },
+    /// Clauseo is leaving a login it may no longer use (a split Codex link, or a reused login
+    /// the agent's own CLI ended) and the leave did not finish: it tries again by itself, and
+    /// nothing of the agent launches meanwhile. Ends when a try succeeds (the state after it)
+    /// or a new sign-in arrives; it has no failed end.
+    Switching {
+        /// When the first try did not finish; a later try never moves it.
+        since: Timestamp,
+        /// Whether it has gone on for 2 minutes or more.
+        stuck: bool,
+    },
 }
 
 /// A login seen but not reusable, or why reuse stopped: [`SignIn::SignedOut`]'s `found`.
