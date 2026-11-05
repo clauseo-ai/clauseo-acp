@@ -200,3 +200,65 @@ fn a_claude_store_file_that_is_a_link_refuses_on_windows() {
         (PathKind::ClaudeStoreFile, FolderRefusal::ReparsePoint)
     );
 }
+
+#[test]
+fn a_neighbour_under_a_junction_is_fenced_at_its_target_and_one_that_is_a_junction_refuses() {
+    use crate::windows::acl_plan::Sid;
+    use crate::windows::fence::{MatterFolders, RegisteredMatter};
+    use crate::windows::test_junction::junction;
+    use crate::windows::test_world::OTHER_POOL_SIDS;
+
+    let w = World::new("admit-win-fence-junction");
+    w.dir.dir("elsewhere/B");
+    // A directory junction needs no admin rights, unlike a symbolic link.
+    junction(&w.at("Linked"), &w.at("elsewhere")).unwrap();
+    let neighbour = |root: PathBuf| Neighbours {
+        registered: vec![RegisteredMatter {
+            id: matter_two(),
+            folders: MatterFolders {
+                root,
+                state: w.at("other/m3"),
+                notes: None,
+            },
+            pool_user: Sid::parse(OTHER_POOL_SIDS[0]).unwrap(),
+            fenced: false,
+        }],
+        reach: Vec::new(),
+    };
+    let policy = w.builder().build().unwrap();
+    // Under the junction: the neighbour's own policy accepts the root, so the fence lands on the
+    // target and this matter's launch passes.
+    let under = w.at("Linked/B");
+    let own = Policy::builder(&under, w.at("other/m3"))
+        .home(w.at("home"))
+        .build();
+    assert!(own.is_ok(), "{own:?}");
+    let admitted = admit(
+        &policy,
+        &w.at("data"),
+        &neighbour(under),
+        &FakeFolders::default(),
+    )
+    .unwrap();
+    let paths: Vec<&Path> = admitted.fences()[0]
+        .folders
+        .iter()
+        .map(|(p, _)| p.as_path())
+        .collect();
+    assert_eq!(paths, [w.canonical("elsewhere/B"), w.canonical("other/m3")]);
+    // The root itself a junction: its own policy refuses it, and so does the neighbour check.
+    let own = Policy::builder(w.at("Linked"), w.at("other/m3"))
+        .home(w.at("home"))
+        .build();
+    assert!(own.is_err(), "{own:?}");
+    let refused = admit(
+        &policy,
+        &w.at("data"),
+        &neighbour(w.at("Linked")),
+        &FakeFolders::default(),
+    );
+    let Err(Error::NeighbourUnfenceable { support, .. }) = refused else {
+        panic!("not refused: {refused:?}");
+    };
+    assert_eq!(support, FolderRefusal::ReparsePoint);
+}
