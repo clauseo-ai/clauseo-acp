@@ -261,6 +261,65 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
   prompt whose text starts `/logout` with `command.invalid`. It does this whatever the login's
   source, since signing out goes through `SignOut` alone.
 
+**The host's sign-in calls, hold and hook (R20 P4b).**
+
+- *New `HostHandle` calls*, all Rust only:
+  - `restart_agents(agent) -> Result<(), HostError>` stops each live agent of that id that is
+    not in a turn, with the shutdown ladder's stop, so the next question launches with the new
+    login. It then resumes each queue held for that agent's sign-in, once.
+  - `stop_agents(agent) -> Result<(), HostError>` is step 1 of the leave order. It cancels each
+    turn of that id through the Cancel path (the lawyer's Stop, so what the turn left running
+    ends too) and marks the turn to go back held. It drops a launch still being prepared, whose
+    waiting work fails as closed, and stops every live agent of that id.
+  - `set_reused_login(agent, bool) -> Result<(), HostError>` records desktop's word on the
+    login's source. While it is `true`, the split check runs at each Codex launch.
+  - `login_splits() -> async_channel::Receiver<LoginSplit>` carries `LoginSplit { agent,
+    lawyers_file_gone }`, sent when a split check refuses a launch. Desktop runs
+    `stop_using_login` with `CodexLinkSplit`, or `ReusedSignedOut` when the file is gone, then
+    the leave order. The host has set its own reused flag to `false` by then.
+  - `remove_login_links(agent) -> Result<(), HostError>` asks the actor only for the folders.
+    The removal of each `auth.json` runs on a `clauseo-codex-fs` thread with a 5 s wait, never
+    on the actor. Before stage C (R17) no matter has a link, so the list is empty.
+- *The sign-in hold.* A turn is held for its agent's sign-in when it fails with
+  `agent.auth_required`, or with an error the sign-in-again test accepts, which then ends as
+  `agent.auth_required`. A turn `stop_agents` cancelled is held the same way, unless it ended
+  `EndTurn`. Once its close is durable, the turn goes back to the head of its queue as one commit
+  of a new `UserMessage { Queue }`, with the same content, and its `TurnQueued` behind the ended
+  turn. These are the entries any queued prompt has. The queue is held through the same flag
+  as after any stop but `EndTurn`, a refused permission's `NotAllowed` (#408) included. So
+  `queue_held` and the queued prompt look the same whatever held them, and the app's held lines
+  (#416) need nothing new. Actor state alone marks the queue as waiting for the sign-in:
+  `restart_agents` clears the mark and resumes the queue, so a second call does nothing. A
+  lawyer's `ResumeQueue`, `SendQueuedNow` or new prompt moves the queue as usual, and the mark
+  goes once the queue no longer shows held. Nothing new is logged for the hold.
+- *The `LoginCheck` hook.* `HostConfig::with_login_check(Arc<dyn LoginCheck + Send + Sync>)` sets
+  it. Its one call is `check(&AgentId, agent_home: &Path) -> LoginLink`, and `LoginLink` is
+  `Own`, `Shared`, `Split` or `Gone`. Desktop backs it with S18's `codex_link_holds` and
+  `codex_login_shared`. `HostConfig::with_sign_in_again(fn(&str) -> bool)` sets the
+  sign-in-again test (S18's `is_sign_in_again`) apart from the hook, so the hook's inputs stay
+  the agent and its home. If neither is set, nothing is checked: there is no split check, no
+  guard, and only `agent.auth_required` holds a turn.
+  - The host asks the hook at each Codex launch, after the launch's other checks pass. The call
+    runs off the actor on a `clauseo-codex-fs` thread, and the host waits at most 5 s on its
+    clock.
+  - While the login is reused, any answer other than `Shared` refuses the launch with
+    `agent.auth_required`, so its turn is held. The host also sets the reused flag to `false`
+    and sends a `LoginSplit`.
+  - When the check does not answer in time, or its thread fails, that is never a sign-in
+    answer. No split is sent, no flag changes and no turn is held. The brief's rule for an
+    unknown answer is to refuse, as S18's stat failures do. So while the login is reused the
+    launch fails with `agent.launch_failed`, which may be retried, and the guard treats the file
+    as shared.
+  - *The guard.* While the hook is set and the login is reused, or the last check answered
+    `Shared` or gave no answer, a prompt to that Codex agent whose text starts `/login` is
+    refused with `signin.login_shared` before anything is queued. `/logout` is refused always,
+    as above. The host never calls `login` or `authenticate`.
+  - The hook's logs name the agent and the outcome, never a path.
+- *New codes.* `settings.refused` (P4a, above) and `signin.login_shared`. The second is not
+  retryable and goes just before `unknown`, after `settings.refused`. It refuses a Codex login
+  change while Clauseo's Codex home shares the lawyer's ChatGPT login file. The fix is in the
+  app ("Stop using it here"), and the words are in `ERROR_WORDS`.
+
 ## Consequences
 
 - Desktop owns the mapping from `agents` to the wire. A state or code added to `agents` needs a
