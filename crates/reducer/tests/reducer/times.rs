@@ -107,6 +107,7 @@ fn timed_thread() -> (Vec<Envelope>, Settled) {
     log.push(Notice {
         level: NoticeLevel::Warning,
         text,
+        kind: None,
     })
     .unwrap();
     let status = CompactionStatus::Completed;

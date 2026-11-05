@@ -1,7 +1,8 @@
 //! `TurnFailed` examples for codes added after the 0048 install and sign-in set, which
-//! `later_variants` in the parent module chains on before them.
+//! `later_variants` in the parent module chains on before them, and the host notices with a
+//! kind, which it chains on last.
 
-use clauseo_protocol::{DomainEvent, ErrorCode, TurnFailed};
+use clauseo_protocol::{DomainEvent, ErrorCode, Notice, NoticeKind, NoticeLevel, TurnFailed};
 
 use crate::fixtures::turn_id;
 
@@ -43,4 +44,16 @@ fn failed(code: ErrorCode, detail: &str) -> DomainEvent {
         detail: Some(detail.to_owned()),
     }
     .into()
+}
+
+/// One host `Notice` for each `NoticeKind`, with its fallback text.
+pub(super) fn notices() -> Vec<DomainEvent> {
+    vec![
+        Notice {
+            level: NoticeLevel::Info,
+            text: "Clauseo doesn't remember the earlier questions and answers.".to_owned(),
+            kind: Some(NoticeKind::ContextNotRestored),
+        }
+        .into(),
+    ]
 }

@@ -296,4 +296,11 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (384, 0xa23c_e7b7_e1c6_7ee7),
         (286, 0xab84_c352_e8ec_cf83),
     ),
+    (
+        "added/notice-ContextNotRestored",
+        include_bytes!("added/notice-ContextNotRestored.jsonl"),
+        include_bytes!("added/notice-ContextNotRestored.msgpack"),
+        (340, 0x1b39_eb0b_cd14_d75e),
+        (261, 0xe7a7_3665_057b_8b0c),
+    ),
 ];

@@ -248,7 +248,7 @@ wire_types! {
     },
     session::{
         AgentCapabilities, AvailableCommand, CompactionStatus, ConfigCategory, ConfigChoice,
-        ConfigOption, ConfigOptionKind, Cost, DetachReason, DoneBy, NoticeLevel, SnoozeBy, PlanEntry, PlanPriority,
+        ConfigOption, ConfigOptionKind, Cost, DetachReason, DoneBy, NoticeKind, NoticeLevel, SnoozeBy, PlanEntry, PlanPriority,
         PlanStatus, PromptCapabilities, RenameSource, SessionCapabilities, SteeringCapability,
         TextKind, TurnUsage,
     },

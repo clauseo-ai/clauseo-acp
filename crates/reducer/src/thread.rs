@@ -275,6 +275,7 @@ fn notice(
         event: event_id,
         level: event.level,
         text: event.text.clone(),
+        kind: event.kind.clone(),
         ts,
     };
     insert_new(state, seq, ViewEntry::Notice(entry), out);

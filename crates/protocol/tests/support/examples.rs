@@ -221,6 +221,7 @@ pub fn later_variants() -> Vec<DomainEvent> {
     .into_iter()
     .chain(later::failures())
     .chain(setup::turns())
+    .chain(later::notices())
     .collect()
 }
 
@@ -491,6 +492,7 @@ fn turn_end_events() -> Vec<DomainEvent> {
         Notice {
             level: NoticeLevel::Warning,
             text: "Context nearly full".to_owned(),
+            kind: None,
         }
         .into(),
         CompactionChanged {

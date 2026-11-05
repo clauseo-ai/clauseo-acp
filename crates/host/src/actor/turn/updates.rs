@@ -438,7 +438,13 @@ fn plain(actor: &mut Actor, thread: ThreadId, update: AgentUpdate) -> Result<(),
             cost,
         }
         .into(),
-        AgentUpdate::Notice { level, text } => Notice { level, text }.into(),
+        // An agent's notice is its own free text: it never carries a kind.
+        AgentUpdate::Notice { level, text } => Notice {
+            level,
+            text,
+            kind: None,
+        }
+        .into(),
         AgentUpdate::SessionTitle { title } => return title_changed(actor, thread, title),
         AgentUpdate::CompactionStarted { acp_id } => {
             if let Some(agent) = agent(actor, thread) {

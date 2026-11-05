@@ -2858,12 +2858,18 @@ export type Motion =
 /**  Full animation. */
 "full";
 
-/**  A notice for the lawyer, from the agent or the host. */
+/**
+ *  A notice for the lawyer, from the agent or the host. A host notice carries a `kind` the app
+ *  shows in its own words; an agent notice never does. `text` is the fallback: what a view that
+ *  does not know the kind shows, and an agent notice's only words.
+ */
 export type Notice = {
 	/**  How prominent it is. */
 	level: NoticeLevel,
-	/**  What it says. */
+	/**  What it says: the agent's words, or the host's English fallback for its `kind`. */
 	text: string,
+	/**  Which host notice it is; left out for an agent notice and in logs written before kinds. */
+	kind?: NoticeKind,
 };
 
 /**  A notice. Entry id `notice:<event>`. */
@@ -2874,11 +2880,27 @@ export type NoticeEntry = {
 	event: EventId,
 	/**  How loud. */
 	level: NoticeLevel,
-	/**  The text. */
+	/**  The text: shown when `kind` is absent or one this version does not know. */
 	text: string,
+	/**  Which host notice it is, for the app's own words; absent for an agent notice. */
+	kind?: NoticeKind,
 	/**  When it was logged (display only; the `Notice` envelope's `ts`). */
 	ts: Timestamp,
 };
+
+/**
+ *  Which notice the host gave, so the app shows it in its own words, in the lawyer's
+ *  language. Host notices get a kind; agent notices never do, and keep their free text.
+ * 
+ *  A plain string for a unit variant; a kind from a newer Clauseo decodes to `Unknown`, and
+ *  the app then shows the notice's `text`. Data, not unit-only, because a later kind carries
+ *  fields.
+ */
+export type NoticeKind = 
+/**  The agent started a new session after earlier turns, so it does not remember them. */
+"context_not_restored" | 
+/**  A kind from a newer Clauseo; written back as the plain string `kind`. */
+string;
 
 /**  How prominent a notice is. */
 export type NoticeLevel = 

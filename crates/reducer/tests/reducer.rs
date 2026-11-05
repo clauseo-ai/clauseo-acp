@@ -21,6 +21,8 @@ mod field_updates;
 mod fold;
 #[path = "reducer/fold_edges.rs"]
 mod fold_edges;
+#[path = "reducer/notice_kind.rs"]
+mod notice_kind;
 #[path = "reducer/orders.rs"]
 mod orders;
 #[path = "reducer/props.rs"]

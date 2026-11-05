@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use clauseo_process::{LaunchSpec, Launched, Launcher, PassthroughLauncher};
 use clauseo_protocol::{
     DomainEvent, ErrorCode, FileChoice, FileDecision, HostCommand, LimitStopReason, MatterPath,
-    PermissionChoice, Seq, StopReason, StreamId, ThreadId, TurnFailed, TurnId,
+    NoticeKind, PermissionChoice, Seq, StopReason, StreamId, ThreadId, TurnFailed, TurnId,
 };
 use serde_json::{Map, Value, json};
 
@@ -274,6 +274,17 @@ fn notices(events: &Events) -> Vec<String> {
         .collect()
 }
 
+/// The kinds of the `Notice`s logged.
+fn notice_kinds(events: &Events) -> Vec<Option<NoticeKind>> {
+    events
+        .events()
+        .filter_map(|event| match event {
+            DomainEvent::Notice(notice) => Some(notice.kind.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
 /// The sessions of the `AgentSessionAttached`s logged.
 fn attached(events: &Events) -> Vec<String> {
     events
@@ -341,6 +352,13 @@ fn an_agent_with_neither_load_nor_resume_gets_session_new() {
         notices(&events).len(),
         1,
         "context not restored: {}",
+        events.dump()
+    );
+    // The host's notice carries its kind, for the app's own words.
+    assert_eq!(
+        notice_kinds(&events),
+        [Some(NoticeKind::ContextNotRestored)],
+        "{}",
         events.dump()
     );
     host.shutdown();

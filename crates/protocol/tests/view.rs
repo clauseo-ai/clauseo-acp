@@ -466,6 +466,7 @@ fn a_snapshot_header_is_only_a_header_entry() {
         event: event_id(4),
         level: NoticeLevel::Info,
         text: "hello".to_owned(),
+        kind: None,
         ts: Timestamp::ZERO,
     });
     let json = serde_json::to_string(&notice).unwrap();

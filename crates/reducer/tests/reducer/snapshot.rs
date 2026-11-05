@@ -6,8 +6,8 @@ use std::collections::BTreeSet;
 use clauseo_protocol::{
     AgentId, AgentSessionDetached, CompactionChanged, CompactionStatus, ContentAppended,
     ContentBlock, DetachReason, ElicitationOutcome, ElicitationRequest, ElicitationRequested,
-    ElicitationResolved, Envelope, ErrorCode, LimitStopReason, Notice, NoticeLevel, PageVia,
-    PageVisited, Principal, StepUndone, TextKind, TextOrBlob, ToolCallStatus, TurnFailed,
+    ElicitationResolved, Envelope, ErrorCode, LimitStopReason, Notice, NoticeKind, NoticeLevel,
+    PageVia, PageVisited, Principal, StepUndone, TextKind, TextOrBlob, ToolCallStatus, TurnFailed,
     TurnStoppedAtLimit, ViewEntry, WebResult, WebSearchRecorded,
 };
 use clauseo_reducer::{
@@ -80,11 +80,12 @@ fn every_entry_kind() -> Vec<Envelope> {
         by: Principal::LocalDesktop,
     })
     .unwrap();
-    let level = NoticeLevel::Warning;
-    let notice = "Context is nearly full.".to_owned();
+    let level = NoticeLevel::Info;
+    let notice = "Clauseo doesn't remember the earlier questions and answers.".to_owned();
     log.push(Notice {
         level,
         text: notice,
+        kind: Some(NoticeKind::ContextNotRestored),
     })
     .unwrap();
     let summary = Some(TextOrBlob::Inline("Earlier: the lease review.".to_owned()));

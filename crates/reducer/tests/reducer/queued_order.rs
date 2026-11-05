@@ -108,7 +108,7 @@ fn without_at_head_the_queue_keeps_order() {
 /// mark) is refused, so the stream is refolded from its log and the put-back turn goes first.
 #[test]
 fn a_schema_8_snapshot_is_refolded() {
-    assert_eq!(REDUCER_SCHEMA_VERSION, 9);
+    const { assert!(REDUCER_SCHEMA_VERSION > 8) };
     let (mut log, mut state, thread, first, [two, three]) = two_queued();
     let (again, again_message) = prompt(&mut log, &mut state, "One");
     push(&mut log, &mut state, queued(thread, again, first, true));
@@ -122,7 +122,7 @@ fn a_schema_8_snapshot_is_refolded() {
             read,
             Err(Error::SchemaMismatch {
                 found: 8,
-                expected: 9
+                expected: REDUCER_SCHEMA_VERSION
             })
         ),
         "{read:?}"
