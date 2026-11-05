@@ -294,8 +294,10 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
   `queue_held` and the queued prompt look the same whatever held them, and the app's held lines
   (#416) need nothing new. Actor state alone marks the queue as waiting for the sign-in:
   `restart_agents` clears the mark and resumes the queue, so a second call does nothing. A
-  lawyer's `ResumeQueue`, `SendQueuedNow` or new prompt moves the queue as usual, and the mark
-  goes once the queue no longer shows held. If the lawyer removes the turn put back, the mark goes too (the host
+  lawyer's `ResumeQueue` or `SendQueuedNow` moves the queue as usual, and the mark goes once
+  the queue no longer shows held. A new prompt sent while nothing runs queues at the end instead,
+  held, whatever its delivery (send now and a steer with nothing to join included), and a prompt
+  joining the queue keeps it held and marked (the host code owner's review of #461). If the lawyer removes the turn put back, the mark goes too (the host
   code owner's ruling on #440): the queue stays held the usual way (#408), so the next turn
   waits for the lawyer's "Send next", and `restart_agents` sends nothing. Nothing new is logged for the hold beyond one flag.
 - *The held turn keeps its head place across a host restart* (the host code owner's ruling,
@@ -377,8 +379,10 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
   It answers `Exited` once every process of the id has ended, and `TimedOut` once its own 10 s
   wait on the host clock has run out (the shutdown ladder's 7 s and a margin), or when a process
   outlived its kill. It never hangs. From the call on, the id is held: nothing of it launches,
-  and a prompt that would start at once queues instead, held and marked for the sign-in as
-  P4b's turn put back is (#408's hold), so it is not lost. A launch that still comes (work
+  and every prompt sent while nothing runs queues instead, at the end, whatever its delivery
+  (queue, send now, or a steer with nothing to join), held and marked for the sign-in as P4b's
+  turn put back is (#408's hold), so it is not lost and nothing fails. A prompt joining the queue
+  keeps it held and marked (the host code owner's review of #461). A launch that still comes (work
   waiting on a stopped agent) fails with `agent.auth_required`, so its turn goes back held.
   `restart_agents` lifts the hold and resumes once, through P4b's path. Desktop calls it too
   when its leave flow is abandoned, so there is no `release_agents`. **The hold lives in memory
