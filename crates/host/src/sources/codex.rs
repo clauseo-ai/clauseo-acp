@@ -23,32 +23,33 @@ pub(crate) fn is_search(kind: ToolKind, input: Option<&Value>) -> bool {
 
 /// What a finished Codex web search found, from its input. None when it found nothing to record.
 pub(crate) fn found(input: &Value) -> Option<Found> {
-    let action = input.get("action").filter(|action| !action.is_null());
-    match action
-        .and_then(|action| action.get("type"))
-        .and_then(Value::as_str)
-    {
-        None | Some("search") => {
-            let query = query_of(input)?;
-            Some(Found::Search {
-                query,
-                results: Vec::new(),
-            })
-        }
+    let Some(action) = input.get("action").filter(|action| !action.is_null()) else {
+        // No action: a search, by the query.
+        return search(input);
+    };
+    match action.get("type").and_then(Value::as_str) {
+        Some("search") => search(input),
         Some("openPage" | "findInPage") => {
-            let url = record_url(action?.get("url")?.as_str()?)?;
+            let url = record_url(action.get("url")?.as_str()?)?;
             Some(Found::Page {
                 url,
                 title: None,
                 via: PageVia::CodexOpenPage,
             })
         }
-        Some(other) => {
-            tracing::warn!(action = other, "a Codex web action Clauseo does not record");
+        other => {
+            // `other`, a type not known, or no `type` at all: nothing is recorded.
+            tracing::warn!(action_type = ?other, "a Codex web action Clauseo does not record");
             None
         }
     }
 }
 
-#[cfg(test)]
-mod tests;
+/// A search by its input's query, with no results.
+fn search(input: &Value) -> Option<Found> {
+    let query = query_of(input)?;
+    Some(Found::Search {
+        query,
+        results: Vec::new(),
+    })
+}

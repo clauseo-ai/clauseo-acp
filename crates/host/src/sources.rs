@@ -27,8 +27,9 @@ use clauseo_protocol::{
 };
 use serde_json::Value;
 
-/// The longest URL a search result may have, in characters, before the URL rule runs. A longer
-/// one is dropped from the results (S26's own cap; the log's cap is larger).
+/// The longest URL a record keeps, in characters, after the URL rule (`logged_url`) has run; a URL
+/// over it is dropped (S26's own cap; the log's cap is larger). The rule can lengthen a URL (a
+/// redacted value is `REDACTED`), so the cap is on the logged form, not the input.
 pub(crate) const MAX_RESULT_URL_CHARS: usize = 2_000;
 
 /// The thread's state for the sources: the browser's open calls and the agents' own web calls
@@ -114,12 +115,12 @@ impl Found {
 /// `action.queries` joined with ", " (Codex's `action`). The first one that is not empty; none
 /// when all are.
 pub(crate) fn query_of(input: &Value) -> Option<String> {
+    // Cleaned as a title is (`clean_title`), so a bidi or control character never reaches a log.
     let text = |value: Option<&Value>| {
         value
             .and_then(Value::as_str)
-            .map(str::trim)
+            .map(clean_title)
             .filter(|text| !text.is_empty())
-            .map(str::to_owned)
     };
     let action = input.get("action");
     let queries = action
@@ -189,7 +190,12 @@ pub(crate) fn record_url(text: &str) -> Option<String> {
         head.eq_ignore_ascii_case(scheme)
             .then(|| &text[scheme.len()..])
     })?;
-    (!rest.is_empty() && !rest.starts_with('/') && is_safe_url_text(text)).then(|| text.to_owned())
+    let logged = clauseo_protocol::logged_url(text);
+    (!rest.is_empty()
+        && !rest.starts_with('/')
+        && is_safe_url_text(text)
+        && logged.chars().count() <= MAX_RESULT_URL_CHARS)
+        .then(|| text.to_owned())
 }
 
 /// A tool call's `rawInput` or `rawOutput` as JSON: inline text only. A blob is too large to be

@@ -89,3 +89,18 @@ fn an_unsafe_codex_open_page_url_is_no_page() {
         None
     );
 }
+
+/// A Codex action with no `type`, or a type not known, is no record: nothing, with a warning in the
+/// host log (the module doc and 0041).
+#[test]
+fn an_action_with_no_type_or_an_unknown_type_records_nothing() {
+    assert_eq!(
+        found(&json!({"query": "q", "action": {"url": "https://sci.gov.in/a"}})),
+        None
+    );
+    assert_eq!(found(&json!({"query": "q", "action": {}})), None);
+    assert_eq!(
+        found(&json!({"query": "q", "action": {"type": "newKind", "query": "q"}})),
+        None
+    );
+}
