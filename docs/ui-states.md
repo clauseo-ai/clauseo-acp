@@ -96,6 +96,7 @@ entries page in on scroll through `HostQuery::PageEntries`, which returns `Query
 | Host notice: the agent no longer remembers the earlier turns | `NoticeKind::ContextNotRestored` | none; the app's own words (the host's English `text` until it renders the kind) |
 | Host notice: papers an undo removed came back (a sync client put them back) and stay | `NoticeKind::FilesCameBack` | files (at most five, sorted by path), more (how many beyond them); the app's own words (the host's English `text`, a count only, until it renders the kind) |
 | Host notice of a kind from a newer Clauseo | `NoticeKind::Unknown` | text, the host's English fallback |
+| Host notice: a skill pack the launch left out | `NoticeKind::SkillPackNotLoaded`, with `pack` (the pack's id) and `reason` (`PackSkipReason`) | the pack and the reason in the app's own words (the host's English `text` until the app renders the kind) |
 | Compaction started and completed | `ViewEntry::Marker` with `MarkerKind::Compaction`: `CompactionStatus::Started`, `CompactionStatus::Completed` | summary (inline or blob) when completed |
 | Undo marker | `ViewEntry::Marker` with `MarkerKind::StepUndone` | the step's turn, the new checkpoint, restored paths, kept paths |
 | Restore marker | `ViewEntry::Marker` with `MarkerKind::VersionRestored` | the version restored from, the new checkpoint, scope |

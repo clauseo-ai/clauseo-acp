@@ -15,13 +15,15 @@
 //!
 //! [`RunFolders::skill_packs`]: super::RunFolders::skill_packs
 
-use std::collections::BTreeSet;
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
 
 use clauseo_profile::packs::{PACKS_PER_LAUNCH, PackEntry, PackHash, Refusal, Skip, is_pack_id};
 use clauseo_profile::{PackWrite, PacksWritten};
-use clauseo_protocol::{AgentId, AgentKind, PackList, ThreadId};
+use clauseo_protocol::{
+    AgentId, AgentKind, Notice, NoticeKind, NoticeLevel, PackId, PackList, PackSkipReason, ThreadId,
+};
 use clauseo_settings::{SkillsExtra, SkillsSettings};
 
 use super::super::super::Actor;
@@ -53,16 +55,16 @@ impl PackSkip {
         }
     }
 
-    /// The reason as the notice tells it: one of six categories, so two refusal kinds that read
-    /// the same are one reason for the once-per rule.
-    fn category(self) -> &'static str {
+    /// The reason as the app's notice names it: one of six categories, so two refusal kinds
+    /// that read the same are one reason for the once-per rule.
+    pub(crate) fn reason(self) -> PackSkipReason {
         match self {
-            Self::NotTurnedOn => "not_turned_on",
-            Self::NotAdmitted => "not_admitted",
-            Self::Load(Skip::Changed) => "changed",
-            Self::Load(Skip::TooMany) => "too_many",
-            Self::Load(Skip::Refused(Refusal::Missing)) => "missing",
-            Self::Load(_) => "invalid",
+            Self::NotTurnedOn => PackSkipReason::NotTurnedOn,
+            Self::NotAdmitted => PackSkipReason::NotAdmitted,
+            Self::Load(Skip::Changed) => PackSkipReason::Changed,
+            Self::Load(Skip::TooMany) => PackSkipReason::TooMany,
+            Self::Load(Skip::Refused(Refusal::Missing)) => PackSkipReason::Missing,
+            Self::Load(_) => PackSkipReason::Invalid,
         }
     }
 
@@ -94,6 +96,20 @@ impl PackSkip {
             "Clauseo didn't load the skill pack \"{id}\". {}",
             self.words()
         )
+    }
+
+    /// The notice for the pack `pack` this reason left out: a warning of kind
+    /// `SkillPackNotLoaded` naming the pack and the reason. Its `text` is [`Self::notice`]'s
+    /// words, the fallback for a view that does not know the kind.
+    pub(crate) fn host_notice(self, pack: PackId) -> Notice {
+        Notice {
+            level: NoticeLevel::Warning,
+            text: self.notice(pack.as_str()),
+            kind: Some(NoticeKind::SkillPackNotLoaded {
+                pack,
+                reason: self.reason(),
+            }),
+        }
     }
 }
 
@@ -243,7 +259,7 @@ pub(crate) fn skipped_text(skipped: &[(String, PackSkip)]) -> String {
 #[derive(Debug, Default)]
 pub(crate) struct PackNotices {
     pending: Vec<(String, PackSkip)>,
-    shown: BTreeSet<(String, &'static str)>,
+    shown: HashSet<(PackId, PackSkipReason)>,
 }
 
 /// Holds `skipped` (the launch `thread` just started) for its session's notice.
@@ -256,19 +272,21 @@ pub(super) fn hold_notice(actor: &mut Actor, thread: ThreadId, skipped: Vec<(Str
 /// The notices for `thread`'s session that just attached: one per pack its launch skipped
 /// that the thread was not told of yet (each pack and reason once per thread for the host's
 /// run), maybe none. Packs are named by id only, never by the pack's own text.
-pub(crate) fn pack_notices(actor: &mut Actor, thread: ThreadId) -> Vec<String> {
+pub(crate) fn pack_notices(actor: &mut Actor, thread: ThreadId) -> Vec<Notice> {
     state(actor, thread).map_or_else(Vec::new, |state| state.packs.untold())
 }
 
 impl PackNotices {
     /// The notices for what is pending that the thread was not told of yet, keyed by pack and
-    /// the reason's category, so two refusal kinds that read the same are told once.
-    fn untold(&mut self) -> Vec<String> {
+    /// the reason, so two refusal kinds that read the same are told once.
+    fn untold(&mut self) -> Vec<Notice> {
         std::mem::take(&mut self.pending)
             .into_iter()
             .filter(|(id, _)| is_pack_id(id))
-            .filter(|(id, skip)| self.shown.insert((id.clone(), skip.category())))
-            .map(|(id, skip)| skip.notice(&id))
+            // `is_pack_id` implies `PackId::new`, so this drops nothing.
+            .filter_map(|(id, skip)| Some((PackId::new(&id).ok()?, skip)))
+            .filter(|(pack, skip)| self.shown.insert((pack.clone(), skip.reason())))
+            .map(|(pack, skip)| skip.host_notice(pack))
             .collect()
     }
 }

@@ -1,10 +1,10 @@
 //! `TurnFailed` examples for codes added after the 0048 install and sign-in set, which
 //! `later_variants` in the parent module chains on before them, R24's case-law records, and the
-//! host notices with a kind, which it chains on last.
+//! host notices with a kind, which it chains on last, the skill pack notices among them.
 
 use clauseo_protocol::{
-    AgentId, DomainEvent, ErrorCode, MatterPath, Notice, NoticeKind, NoticeLevel, PageVia,
-    PageVisited, SearchSource, TurnFailed, WebResult, WebSearchRecorded,
+    AgentId, DomainEvent, ErrorCode, MatterPath, Notice, NoticeKind, NoticeLevel, PackId,
+    PackSkipReason, PageVia, PageVisited, SearchSource, TurnFailed, WebResult, WebSearchRecorded,
 };
 
 use crate::fixtures::{tool_call_id, turn_id};
@@ -49,15 +49,15 @@ fn failed(code: ErrorCode, detail: &str) -> DomainEvent {
     .into()
 }
 
-/// One host `Notice` for each `NoticeKind`, with its fallback text.
+/// One host `Notice` for each `NoticeKind`, with its fallback text, and a skill pack notice for
+/// each `PackSkipReason`, so the corpus holds every reason.
 pub(super) fn notices() -> Vec<DomainEvent> {
-    vec![
+    let mut notices = vec![
         Notice {
             level: NoticeLevel::Info,
             text: "Clauseo doesn't remember the earlier questions and answers.".to_owned(),
             kind: Some(NoticeKind::ContextNotRestored),
-        }
-        .into(),
+        },
         Notice {
             level: NoticeLevel::Info,
             text: "2 papers came back after the undo. Clauseo didn't remove them again.".to_owned(),
@@ -68,9 +68,51 @@ pub(super) fn notices() -> Vec<DomainEvent> {
                 ],
                 more: 0,
             }),
-        }
-        .into(),
-    ]
+        },
+    ];
+    notices.extend(
+        [
+            (
+                PackSkipReason::NotTurnedOn,
+                "This matter is set to use it, but it isn't turned on.",
+            ),
+            (
+                PackSkipReason::NotAdmitted,
+                "The skill pack settings on this computer don't allow it.",
+            ),
+            (
+                PackSkipReason::Changed,
+                "Its files changed after it was turned on. Turn it on again.",
+            ),
+            (
+                PackSkipReason::Missing,
+                "Clauseo couldn't find it on this computer.",
+            ),
+            (
+                PackSkipReason::Invalid,
+                "Its files aren't a valid skill pack.",
+            ),
+            (
+                PackSkipReason::TooMany,
+                "Clauseo loads at most 8 skill packs at a time.",
+            ),
+        ]
+        .into_iter()
+        .map(|(reason, words)| skill_pack_notice(reason, words)),
+    );
+    notices.into_iter().map(DomainEvent::from).collect()
+}
+
+/// A host notice of kind `SkillPackNotLoaded` for the pack `nda-kit`, left out for `reason`.
+fn skill_pack_notice(reason: PackSkipReason, words: &str) -> Notice {
+    Notice {
+        level: NoticeLevel::Warning,
+        text: format!("Clauseo didn't load the skill pack \"nda-kit\". {words}"),
+        kind: Some(NoticeKind::SkillPackNotLoaded {
+            pack: PackId::new("nda-kit").unwrap(),
+            reason,
+        }),
+    }
 }
 
 /// [`failures`], then [`case_law`], as the corpus first saw them.

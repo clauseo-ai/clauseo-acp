@@ -1,7 +1,9 @@
 //! A notice's kind: the host's notices carry one into the view, for the app's own words; the
 //! agent's carry none, and their entry serialises as before kinds.
 
-use clauseo_protocol::{DomainEvent, Notice, NoticeEntry, NoticeKind, NoticeLevel, ViewEntry};
+use clauseo_protocol::{
+    DomainEvent, Notice, NoticeEntry, NoticeKind, NoticeLevel, PackId, PackSkipReason, ViewEntry,
+};
 use clauseo_reducer::{
     Error, REDUCER_SCHEMA_VERSION, Snapshot, SnapshotRef, StreamState, ViewChange, apply,
 };
@@ -137,5 +139,32 @@ fn a_schema_9_snapshot_is_refolded() {
     assert_eq!(
         notices(&refolded)[0].kind,
         Some(NoticeKind::ContextNotRestored)
+    );
+}
+
+/// A skill pack notice's kind carries its pack and reason into the view and the snapshot.
+#[test]
+fn a_skill_pack_notice_keeps_its_pack_and_reason() {
+    let mut log = Log::thread(46).unwrap();
+    log.push(thread_created().unwrap()).unwrap();
+    let kind = NoticeKind::SkillPackNotLoaded {
+        pack: PackId::new("nda-kit").unwrap(),
+        reason: PackSkipReason::Changed,
+    };
+    log.push(Notice {
+        level: NoticeLevel::Warning,
+        text: "Clauseo didn't load the skill pack \"nda-kit\". Its files changed.".to_owned(),
+        kind: Some(kind.clone()),
+    })
+    .unwrap();
+    let state = fold(log.events());
+    let found = notices(&state);
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].kind, Some(kind));
+    assert_eq!(round_trip(&state), state);
+    let json = serde_json::to_value(found[0]).unwrap();
+    assert_eq!(
+        json["kind"],
+        serde_json::json!({"skill_pack_not_loaded": {"pack": "nda-kit", "reason": "changed"}})
     );
 }

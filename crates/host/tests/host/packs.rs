@@ -16,8 +16,8 @@ use clauseo_profile::{
     SkillsWritten,
 };
 use clauseo_protocol::{
-    AgentId, AgentKind, DomainEvent, FieldChange, HostCommand, MatterId, NoticeLevel, PackId,
-    StreamId, ThreadId,
+    AgentId, AgentKind, DomainEvent, FieldChange, HostCommand, MatterId, NoticeKind, NoticeLevel,
+    PackId, PackSkipReason, StreamId, ThreadId,
 };
 use clauseo_settings::Locations;
 use serde_json::{Map, Value, json};
@@ -355,6 +355,20 @@ fn the_pack_plugin_goes_with_the_run_folder() {
 }
 
 /// The warnings `thread` holds so far.
+/// The kind of each warning notice, in order: a skipped pack's notice carries
+/// `skill_pack_not_loaded` with its pack and reason.
+fn warning_kinds(events: &Events) -> Vec<Option<NoticeKind>> {
+    events
+        .events()
+        .filter_map(|event| match event {
+            DomainEvent::Notice(notice) if notice.level == NoticeLevel::Warning => {
+                Some(notice.kind.clone())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 fn thread_warnings(host: &Running, thread: ThreadId) -> Vec<String> {
     let mut events = host.events(StreamId::Thread(thread));
     events.until_caught_up();
@@ -479,6 +493,19 @@ fn a_matter_list_never_loads_a_pack_that_is_off_or_changed() {
         [
             "Clauseo didn't load the skill pack \"b-kit\". This matter is set to use it, but it isn't turned on.",
             "Clauseo didn't load the skill pack \"c-kit\". Its files changed after it was turned on. Turn it on again to use it.",
+        ]
+    );
+    let told = |pack: &str, reason| {
+        Some(NoticeKind::SkillPackNotLoaded {
+            pack: PackId::new(pack).unwrap(),
+            reason,
+        })
+    };
+    assert_eq!(
+        warning_kinds(&events),
+        [
+            told("b-kit", PackSkipReason::NotTurnedOn),
+            told("c-kit", PackSkipReason::Changed),
         ]
     );
     host.shutdown();

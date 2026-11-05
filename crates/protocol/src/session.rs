@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::open_enum::{open_data_enum, open_unit_enum};
-use crate::{CompactString, Count, Finite, MatterPath};
+use crate::{CompactString, Count, Finite, MatterPath, PackId};
 
 /// The agent's stable ACP v1 capabilities, plus Clauseo's steering capability.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -300,6 +300,14 @@ open_data_enum! {
             /// How many more came back beyond `files`.
             more: u32,
         },
+        /// A skill pack the launch left out: which pack, and why. The app words it by kind; the
+        /// notice's `text` is the fallback.
+        SkillPackNotLoaded = "skill_pack_not_loaded" {
+            /// The pack's id.
+            pack: PackId,
+            /// Why the launch left it out.
+            reason: PackSkipReason,
+        },
         _ =>
         /// A kind from a newer Clauseo; written back as the plain string `kind`.
         Unknown,
@@ -310,7 +318,32 @@ open_data_enum! {
             files: vec![MatterPath::new("Drafts/memo.docx").unwrap()],
             more: 2,
         },
+        NoticeKind::SkillPackNotLoaded {
+            pack: PackId::new("nda-kit").unwrap(),
+            reason: PackSkipReason::Changed,
+        },
     ];
+}
+
+open_unit_enum! {
+    /// Why a launch left a skill pack out: one of six reasons, as the notice names it. Every
+    /// refusal of a pack's files other than a missing folder reads as `invalid`.
+    pub enum PackSkipReason {
+        /// The matter uses the pack, but it is not turned on.
+        NotTurnedOn,
+        /// The skill pack settings on this computer do not admit it.
+        NotAdmitted,
+        /// Its files changed since it was turned on, so it does not load until it is turned on
+        /// again.
+        Changed,
+        /// Clauseo could not find its folder on this computer.
+        Missing,
+        /// Its files are not a valid skill pack.
+        Invalid,
+        /// Past the most packs a launch loads.
+        TooMany,
+    }
+    test mod pack_skip_reason;
 }
 
 open_unit_enum! {
