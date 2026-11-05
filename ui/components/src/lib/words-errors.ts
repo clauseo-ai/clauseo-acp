@@ -52,6 +52,7 @@ export type ErrorCode =
   | "transport.too_large"
   | "settings.locked"
   | "settings.refused"
+  | "settings.key_stored"
   | "agent.install_offline"
   | "agent.install_blocked"
   | "agent.install_disk_full"
@@ -120,6 +121,8 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   "transport.too_large": "That is too large to send.",
   "settings.locked": "Your organisation manages that setting, so it can't be changed.",
   "settings.refused": "Clauseo couldn't save that setting. Your settings are as they were.",
+  "settings.key_stored":
+    "A key is already kept on this computer. To change it, open Settings, then Plans.",
   "agent.install_offline": "You're offline. Setting up waits for the connection.",
   "agent.install_blocked": "Your network is blocking the download.",
   "agent.install_disk_full": "There isn't enough free space on this computer for the download.",

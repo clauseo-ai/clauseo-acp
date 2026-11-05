@@ -197,6 +197,9 @@ error_codes! {
         settings rule, such as an agent entry that is not Clauseo's own install, a secret-shaped \
         variable or an address that is not https; the message names the key, never the value, \
         and nothing was changed.";
+    SettingsKeyStored = "settings.key_stored", retryable: false, meaning: "A key is already \
+        stored for this agent, so this window may not replace it; it is changed or removed in \
+        Settings. No key text is in the message.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

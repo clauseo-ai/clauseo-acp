@@ -261,4 +261,11 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (362, 0x9d40_427f_07a0_a3a4),
         (264, 0xaf29_9eab_7f2d_b9d4),
     ),
+    (
+        "added/turn_failed-SettingsKeyStored",
+        include_bytes!("added/turn_failed-SettingsKeyStored.jsonl"),
+        include_bytes!("added/turn_failed-SettingsKeyStored.msgpack"),
+        (356, 0x8851_c359_aff6_7ca3),
+        (258, 0x1892_6a40_293d_13dd),
+    ),
 ];
