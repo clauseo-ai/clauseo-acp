@@ -23,8 +23,8 @@
 //! - [`ReadLimits`], [`ReadOutcome`], [`ReadFailure`], and [`ProcessReaders`], which reads over a
 //!   `process::Launcher` and a `process::Timer`. A refused settings path or a failed file step
 //!   comes back as `ReadFailure::LaunchFailed` with its text. `ProcessReaders::with_launch_env`
-//!   adds the agent's stored API key to each read; `ProcessReaders::hold` and `resume` keep an
-//!   agent's reads off while its login changes (decision record 0048).
+//!   adds the agent's stored API key to each read; `ProcessReaders::hold` keeps an agent's
+//!   reads off while its login changes, until its [`HoldGuard`] drops (decision record 0048).
 //! - [`claude_plan`] and [`codex_plan`]: the plan names `AccountLimits.plan` uses, for desktop's
 //!   sign-in line.
 //! - [`CODEX_OVERRIDES`]: the `-c` overrides the Codex reader passes `app-server`, which R15's
@@ -75,6 +75,6 @@ pub use policy::{Action, Input, Limits};
 #[doc(hidden)]
 pub use readers::StdoutTap;
 pub use readers::{
-    AccountRead, CODEX_OVERRIDES, ProcessReaders, ReadFailure, ReadLimits, ReadOutcome,
+    AccountRead, CODEX_OVERRIDES, HoldGuard, ProcessReaders, ReadFailure, ReadLimits, ReadOutcome,
 };
 pub use words::{claude_plan, codex_plan};

@@ -14,26 +14,38 @@ fn an_open_gate_lets_reads_in_and_a_hold_waits_for_them_to_end() {
     drop(first);
     assert!((&mut hold).now_or_never().is_none(), "one read runs");
     drop(second);
-    assert_eq!((&mut hold).now_or_never(), Some(()));
+    assert!((&mut hold).now_or_never().is_some());
 }
 
 #[test]
-fn a_held_gate_keeps_new_reads_out_until_resumed() {
+fn dropping_the_guard_resumes_the_reads() {
     let gate = Arc::new(Gate::default());
-    assert_eq!(gate.hold().now_or_never(), Some(()), "no read ran");
+    let guard = gate.hold().now_or_never().expect("no read ran");
     let mut held = Box::pin(Arc::clone(&gate).enter());
     assert!((&mut held).now_or_never().is_none());
-    // A hold taken again, while held, still resolves at once: nothing runs.
-    assert_eq!(gate.hold().now_or_never(), Some(()));
-    gate.resume();
+    drop(guard);
     let running = (&mut held).now_or_never().expect("resumed");
-    // The hold counts that read now.
+    // A new hold counts that read now.
     let mut hold = Box::pin(gate.hold());
     assert!((&mut hold).now_or_never().is_none());
     drop(running);
-    assert_eq!(hold.now_or_never(), Some(()));
-    gate.resume();
+    let guard = hold.now_or_never().expect("the read ended");
+    drop(guard);
     assert!(Arc::clone(&gate).enter().now_or_never().is_some());
+}
+
+#[test]
+fn two_holds_need_two_drops() {
+    let gate = Arc::new(Gate::default());
+    let first = gate.hold().now_or_never().expect("no read ran");
+    // A hold taken while held still resolves at once: nothing runs.
+    let second = gate.hold().now_or_never().expect("no read ran");
+    let mut held = Box::pin(Arc::clone(&gate).enter());
+    assert!((&mut held).now_or_never().is_none());
+    drop(first);
+    assert!((&mut held).now_or_never().is_none(), "one hold is left");
+    drop(second);
+    assert!(held.now_or_never().is_some());
 }
 
 #[test]
@@ -41,7 +53,7 @@ fn the_hold_starts_at_the_call_not_at_the_first_poll() {
     let gate = Arc::new(Gate::default());
     let hold = gate.hold();
     assert!(Arc::clone(&gate).enter().now_or_never().is_none());
+    // Dropping the unresolved hold drops its guard with it.
     drop(hold);
-    gate.resume();
     assert!(Arc::clone(&gate).enter().now_or_never().is_some());
 }

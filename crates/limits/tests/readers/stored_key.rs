@@ -1,6 +1,6 @@
 //! The stored API key and the hold (decision record 0048): a key from `with_launch_env` reaches
 //! the reader's env under the vendor's variable and never its output, and `hold` keeps an
-//! agent's reads off until `resume`.
+//! agent's reads off until its guard drops.
 
 use std::ffi::{OsStr, OsString};
 use std::path::Path;
@@ -193,11 +193,14 @@ fn no_key_or_an_empty_one_leaves_the_settings_variables() {
 }
 
 #[test]
-fn a_held_agent_launches_nothing_until_resumed() {
+fn a_held_agent_launches_nothing_until_its_guard_drops() {
     let setup = installed_setup();
     let launcher = TestLauncher::new(Play::Scenario("claude-api-key"));
     let reader = keyed(&setup, &launcher, &SharedTimer::default());
-    assert_eq!(reader.hold(AgentKind::Claude).now_or_never(), Some(()));
+    let guard = reader
+        .hold(AgentKind::Claude)
+        .now_or_never()
+        .expect("no read ran");
     let mut read = reader.read(AgentKind::Claude);
     assert!((&mut read).now_or_never().is_none());
     assert_eq!(launcher.launches(), 0);
@@ -207,7 +210,7 @@ fn a_held_agent_launches_nothing_until_resumed() {
         ReadOutcome::Failed(_)
     ));
     assert_eq!(launcher.launches(), 1);
-    reader.resume(AgentKind::Claude);
+    drop(guard);
     assert!(matches!(block_on(read), ReadOutcome::Usage { .. }));
     assert_eq!(launcher.launches(), 2);
     launcher.wait_stdout_closed();
@@ -220,16 +223,17 @@ fn a_hold_waits_for_the_read_in_flight_to_end() {
     let launcher = TestLauncher::new(Play::Hold);
     let timer = SharedTimer::default();
     let reader = keyed(&setup, &launcher, &timer);
-    let (outcome, ()) = block_on(join(reader.read(AgentKind::Claude), async {
+    let (outcome, guard) = block_on(join(reader.read(AgentKind::Claude), async {
         assert_eq!(timer.0.next_armed().await, Duration::from_secs(25));
         let mut hold = Box::pin(reader.hold(AgentKind::Claude));
         assert!((&mut hold).now_or_never().is_none(), "a read is in flight");
         assert!(timer.0.fire());
-        hold.await;
+        hold.await
     }));
     assert_eq!(outcome, ReadOutcome::Failed(ReadFailure::TimedOut));
     let mut next = reader.read(AgentKind::Claude);
     assert!((&mut next).now_or_never().is_none(), "held");
     assert_eq!(launcher.launches(), 1);
+    drop(guard);
     launcher.wait_stdout_closed();
 }
