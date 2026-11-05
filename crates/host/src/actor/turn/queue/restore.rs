@@ -94,7 +94,11 @@ pub(in super::super) fn restore(
     let queue = &mut state(actor, thread).ok_or_else(|| lost("a thread"))?.queue;
     queue.turns = turns.into();
     queue.held = !queue.turns.is_empty();
-    queue.sign_in = queue.held && queued.sign_in;
+    queue.sign_in = queue
+        .turns
+        .front()
+        .filter(|_| queue.held && queued.sign_in)
+        .map(|first| first.turn);
     sync_held(actor, thread);
     Ok(())
 }

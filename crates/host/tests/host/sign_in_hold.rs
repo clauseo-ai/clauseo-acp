@@ -4,11 +4,12 @@
 //! permission's `NotAllowed` holds it (#408), and `restart_agents` for that agent sends it once.
 //! `stop_agents` puts a running turn back the same way and stops the agent. Across a host
 //! restart the turn put back keeps its head place, ahead of the turns queued before it, and
-//! every view orders the queue the same way.
+//! every view orders the queue the same way. Removing the turn put back clears the sign-in
+//! hold: the queue stays held the usual way, until the lawyer's "Send next".
 
 use clauseo_protocol::{
-    AgentId, ContentBlock, DeliveryRequest, DomainEvent, ErrorCode, MatterId, StopReason, StreamId,
-    ThreadId, ThreadStatus, TurnId, ViewEntry, ViewPatchBody,
+    AgentId, CommandOutcome, ContentBlock, DeliveryRequest, DomainEvent, ErrorCode, HostCommand,
+    MatterId, StopReason, StreamId, ThreadId, ThreadStatus, TurnId, ViewEntry, ViewPatchBody,
 };
 
 use crate::codex::{CODEX, codex_dir};
@@ -248,6 +249,69 @@ fn a_turn_held_for_the_sign_in_runs_first_after_a_host_restart() {
     assert!(started(again) < started(two), "{}", events.dump());
     assert!(started(two) < started(three), "{}", events.dump());
     assert!(!held(&host, matter, thread));
+    host.shutdown();
+}
+
+#[test]
+fn removing_the_held_turn_clears_the_sign_in_hold_and_the_queue_waits_for_send_next() {
+    let dir = Dir::new(
+        "sign_in_hold_removed",
+        &[(FAKE, Scenario::Local("sign-in-hold-removed"))],
+    );
+    let host = dir.start(0);
+    let (matter, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], FAKE);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (first, _) = host.prompt(thread, ASKED);
+    until_first_request(&mut events);
+    let (two, _) = send(&host, thread, text("Two"), DeliveryRequest::Queue);
+    until_queued(&mut events, two);
+    allow(&host, &mut events, thread);
+    assert_eq!(events.until_turn_ended(first).stop, StopReason::Failed);
+    assert_eq!(failure(&events, first), Some(ErrorCode::AgentAuthRequired));
+    // "Two" waits behind the first turn too: the one put back is the `TurnQueued` at the head.
+    let head = |event: &DomainEvent| matches!(event, DomainEvent::TurnQueued(queued) if queued.is_at_head());
+    events.until("the turn put back", |events| {
+        events.position(head).is_some()
+    });
+    let again = events
+        .events()
+        .find_map(|event| match event {
+            DomainEvent::TurnQueued(queued) if queued.is_at_head() => Some(queued.turn()),
+            _ => None,
+        })
+        .unwrap();
+    settle(&host, &mut events);
+    assert!(held(&host, matter, thread), "{}", events.dump());
+
+    // The lawyer removes the turn held for the sign-in.
+    let remove = HostCommand::RemoveQueuedPrompt {
+        thread,
+        turn: again,
+    };
+    assert_eq!(host.ok(remove), CommandOutcome::Done);
+    settle(&host, &mut events);
+    assert!(
+        held(&host, matter, thread),
+        "the queue stays held: {}",
+        events.dump()
+    );
+
+    // Signed in: nothing moves, as the queue waits for the lawyer, not for the sign-in.
+    wait("restart_agents", host.handle.restart_agents(fake())).unwrap();
+    settle(&host, &mut events);
+    assert_eq!(starts(&events, two), 0, "{}", events.dump());
+    assert!(held(&host, matter, thread), "{}", events.dump());
+
+    // "Send next" sends it.
+    assert_eq!(
+        host.ok(HostCommand::ResumeQueue { thread }),
+        CommandOutcome::Done
+    );
+    assert_eq!(events.until_turn_ended(two).stop, StopReason::EndTurn);
+    settle(&host, &mut events);
+    assert_eq!(starts(&events, again), 0, "{}", events.dump());
+    assert!(!held(&host, matter, thread));
+    events.assert_no_mismatch();
     host.shutdown();
 }
 

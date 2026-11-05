@@ -55,9 +55,11 @@ pub(crate) struct ThreadQueue {
     removed: Option<TurnId>,
     /// The `queue_held` last shown.
     shown: bool,
-    /// The queue is held for its agent's sign-in: `restart_agents` resumes it once
-    /// (`sign_in.rs`). Cleared whenever the queue no longer shows held.
-    sign_in: bool,
+    /// The queue is held for its agent's sign-in, with this turn put back at its head:
+    /// `restart_agents` resumes it once (`sign_in.rs`). Cleared whenever the queue no longer
+    /// shows held, and when the lawyer removes that turn, which leaves the queue held the
+    /// usual way (#408), waiting for "Send next".
+    sign_in: Option<TurnId>,
     /// A turn that ended for the sign-in, put back once its close is durable.
     requeue: Option<Requeue>,
     /// Queued turns whose `RemoveQueuedPrompt` commit is in flight, with their place: gone
