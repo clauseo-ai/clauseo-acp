@@ -33,13 +33,15 @@ use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
 use super::acl_bytes::{
     AceSpec, Acl, DACL_AUTO_INHERITED, DACL_PROTECTED, Descriptor, SACL_AUTO_INHERITED,
-    SACL_PROTECTED, build_descriptor, empty_acl, explicit_label, label_spec, owner_sid,
+    SACL_PROTECTED, build_descriptor, empty_acl, explicit_label, label_spec, owner_sid, sid_bytes,
 };
 use super::acl_plan::{Grant, Inherit, Sid, in_folder};
 use super::admit::PathKind;
 use super::folder::verbatim_wide;
-use super::writer::{AclWriter, Added, ApplyFailure, Label, Reach, Walked};
+use super::record::current_user_sid;
+use super::writer::{AclWriter, Added, ApplyFailure, Label, Reach, Strict, Walked};
 use object::{Handle, Object, os_error};
+use walk::Mode;
 
 mod object;
 mod walk;
@@ -55,6 +57,8 @@ const READ_ALL: u32 = OWNER_SECURITY_INFORMATION.0
 #[derive(Debug)]
 pub struct NtfsAcl {
     token: Handle,
+    /// The child the last failed walk refused, when it was one.
+    refused: Option<PathBuf>,
 }
 
 impl NtfsAcl {
@@ -67,6 +71,16 @@ impl NtfsAcl {
             .map_err(|e| os_error(&e))?;
         Ok(NtfsAcl {
             token: Handle(token),
+            refused: None,
+        })
+    }
+
+    /// Runs the walk in `mode`, keeping the child it refused for [`AclWriter::refused_at`].
+    fn run(&mut self, root: &Path, reach: Reach, mode: Mode<'_>) -> Result<Walked, ApplyFailure> {
+        self.refused = None;
+        walk::walk(self, root, reach, mode).map_err(|(failure, at)| {
+            self.refused = at.map(|wide| PathBuf::from(OsString::from_wide(&wide)));
+            failure
         })
     }
 }
@@ -159,9 +173,44 @@ impl AclWriter for NtfsAcl {
         &mut self,
         root: &Path,
         reach: Reach,
-        strict: Option<&[Sid]>,
+        strict: Option<&Strict>,
     ) -> Result<Walked, ApplyFailure> {
-        walk::walk(self, root, reach, strict)
+        let Some(strict) = strict else {
+            return self.run(root, reach, Mode::Plain);
+        };
+        let watched: Vec<Vec<u8>> = strict.watched.iter().map(sid_bytes).collect();
+        let pool: Vec<Vec<u8>> = strict.pool.iter().map(sid_bytes).collect();
+        let mode = Mode::Strict {
+            watched: &watched,
+            pool: &pool,
+        };
+        self.run(root, reach, mode)
+    }
+
+    fn same_file(&mut self, a: &Path, b: &Path) -> io::Result<bool> {
+        let (a, b) = (Object::open(a)?, Object::open(b)?);
+        if a.name_surrogate() || b.name_surrogate() {
+            return Ok(false);
+        }
+        Ok(a.file_id()? == b.file_id()?)
+    }
+
+    fn refused_at(&mut self) -> Option<PathBuf> {
+        self.refused.take()
+    }
+
+    fn reclaim(&mut self, root: &Path, pool: &[Sid]) -> Result<Walked, ApplyFailure> {
+        let me = current_user_sid().map_err(|e| ApplyFailure::Io(e.kind()))?;
+        let me = sid_bytes(&me);
+        let pool: Vec<Vec<u8>> = pool.iter().map(sid_bytes).collect();
+        self.run(
+            root,
+            Reach::Tree,
+            Mode::Reclaim {
+                pool: &pool,
+                me: &me,
+            },
+        )
     }
 
     fn label(&mut self, path: &Path) -> io::Result<Option<Label>> {

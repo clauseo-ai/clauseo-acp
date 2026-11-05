@@ -148,6 +148,10 @@ crates/sandbox/src/windows/acl/tests.rs the_next_walk_reaches_a_file_moved_in_si
 crates/sandbox/src/windows/acl_bytes.rs SACL_AUTO_INHERITED dead_code
 crates/sandbox/src/windows/acl_bytes.rs empty_acl dead_code
 crates/sandbox/src/windows/acl_bytes.rs label_spec dead_code
+crates/sandbox/src/windows/acl_bytes.rs owner_bytes dead_code
+crates/sandbox/src/windows/acl_bytes.rs without_broad dead_code
+crates/sandbox/src/windows/acl_bytes/repair.rs rebuild dead_code
+crates/sandbox/src/windows/acl_bytes/repair.rs owner_descriptor dead_code
 crates/sandbox/src/windows/acl/tests.rs a_subfolder_swapped_for_a_junction_after_the_listing_is_never_passed_through clippy::disallowed_methods
 crates/sandbox/src/windows/acl/tests.rs a_subfolder_moved_after_its_check_refuses_the_walk clippy::disallowed_methods
 crates/sandbox/src/windows/acl/tests.rs presence_through_a_swapped_name_is_an_error clippy::disallowed_methods

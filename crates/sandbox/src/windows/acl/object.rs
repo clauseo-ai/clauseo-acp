@@ -27,12 +27,12 @@ use windows::Win32::Security::{
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_ACCESS_RIGHTS, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
     FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-    FILE_FLAGS_AND_ATTRIBUTES, FILE_ID_BOTH_DIR_INFO, FILE_LIST_DIRECTORY, FILE_NAME_NORMALIZED,
-    FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_STANDARD_INFO,
-    FileAttributeTagInfo, FileIdBothDirectoryInfo, FileIdBothDirectoryRestartInfo,
-    FileStandardInfo, GETFINALPATHNAMEBYHANDLE_FLAGS, GetFileInformationByHandleEx,
-    GetFinalPathNameByHandleW, OPEN_EXISTING, READ_CONTROL, SYNCHRONIZE, VOLUME_NAME_DOS,
-    VOLUME_NAME_NONE, WRITE_DAC, WRITE_OWNER,
+    FILE_FLAGS_AND_ATTRIBUTES, FILE_ID_BOTH_DIR_INFO, FILE_ID_INFO, FILE_LIST_DIRECTORY,
+    FILE_NAME_NORMALIZED, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ,
+    FILE_SHARE_WRITE, FILE_STANDARD_INFO, FileAttributeTagInfo, FileIdBothDirectoryInfo,
+    FileIdBothDirectoryRestartInfo, FileIdInfo, FileStandardInfo, GETFINALPATHNAMEBYHANDLE_FLAGS,
+    GetFileInformationByHandleEx, GetFinalPathNameByHandleW, OPEN_EXISTING, READ_CONTROL,
+    SYNCHRONIZE, VOLUME_NAME_DOS, VOLUME_NAME_NONE, WRITE_DAC, WRITE_OWNER,
 };
 use windows::Win32::System::IO::IO_STATUS_BLOCK;
 use windows::core::{PCWSTR, PWSTR};
@@ -217,6 +217,23 @@ impl Object {
                 n => buffer.resize(n + 1, 0),
             }
         }
+    }
+
+    /// Its volume's serial number and its 128-bit file ID (`FileIdInfo`): the same file under
+    /// any of its names.
+    pub(in crate::windows) fn file_id(&self) -> io::Result<(u64, [u8; 16])> {
+        let mut info = FILE_ID_INFO::default();
+        // SAFETY: the handle is open and `info` is valid and writable for its size.
+        unsafe {
+            GetFileInformationByHandleEx(
+                self.handle.0,
+                FileIdInfo,
+                (&raw mut info).cast(),
+                u32::try_from(size_of::<FILE_ID_INFO>()).unwrap_or(0),
+            )
+        }
+        .map_err(|e| os_error(&e))?;
+        Ok((info.VolumeSerialNumber, info.FileId.Identifier))
     }
 
     /// Whether it is a volume's root: its path without the volume is `\` (Codex's
