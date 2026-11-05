@@ -336,7 +336,7 @@ fn words_for(bytes: u32) -> io::Result<Vec<u64>> {
 
 /// `path` as an absolute, NUL-terminated UTF-16 string in the `\\?\` form, which lifts the
 /// `MAX_PATH` limit. A UNC path becomes `\\?\UNC\...`.
-fn verbatim_wide(path: &Path) -> io::Result<Vec<u16>> {
+pub(super) fn verbatim_wide(path: &Path) -> io::Result<Vec<u16>> {
     let absolute = std::path::absolute(path)?;
     let text: Vec<u16> = absolute.as_os_str().encode_wide().collect();
     let verbatim = wide_text(r"\\?\");
