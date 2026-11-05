@@ -99,24 +99,27 @@
     "en": "Clauseo can't start ChatGPT safely here. Reinstall Clauseo.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "stage C (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by stage C)"
   },
   "U6F-14": {
     "en": "Clauseo can't start {name} safely here. Reinstall Clauseo.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "stage C (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by stage C)"
   },
   "U6F-15": {
     "en": "Clauseo can't start the AI safely here. Reinstall Clauseo.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "stage C (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by stage C)"
   }
 }

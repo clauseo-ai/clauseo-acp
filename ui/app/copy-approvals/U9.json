@@ -38,40 +38,45 @@
     "en": "Close {files} in Word to undo the change.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "U9-07": {
     "en": "Close {files} in Word to restore it.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "U9-08": {
     "en": "If it isn't open in Word, close Word and try again.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "U9-09": {
     "en": "If they aren't open in Word, close Word and try again.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "U9-10": {
     "en": "If it isn't open in Word, close Word and try again.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   }
 }

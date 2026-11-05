@@ -389,9 +389,10 @@
     "en": "Clauseo can't start Claude safely here. Reinstall Clauseo.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "stage C (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by stage C)"
   },
   "U3-err-matter.file_locked": {
     "en": "A paper is open in another program. Close it, then try again.",
@@ -453,89 +454,100 @@
     "en": "You're offline. Setting up waits for the connection.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
-    "at": "2026-11-04",
-    "by": "app track (provisional; Rohan batch review)"
+    "status": "approved",
+    "at": "2026-11-05",
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "U3-err-agent.install_blocked": {
     "en": "Your network is blocking the download.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
-    "at": "2026-11-04",
-    "by": "app track (provisional; Rohan batch review)"
+    "status": "approved",
+    "at": "2026-11-05",
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "U3-err-agent.install_disk_full": {
     "en": "There isn't enough free space on this computer for the download.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
-    "at": "2026-11-04",
-    "by": "app track (provisional; Rohan batch review)"
+    "status": "approved",
+    "at": "2026-11-05",
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "U3-err-agent.install_failed": {
     "en": "Setting up didn't finish. Try again.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
-    "at": "2026-11-04",
-    "by": "app track (provisional; Rohan batch review)"
+    "status": "approved",
+    "at": "2026-11-05",
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "U3-err-signin.cancelled": {
     "en": "Sign-in was cancelled in the browser.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
-    "at": "2026-11-04",
-    "by": "app track (provisional; Rohan batch review)"
+    "status": "approved",
+    "at": "2026-11-05",
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "U3-err-signin.link_expired": {
     "en": "The sign-in link expired. Try again.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
-    "at": "2026-11-04",
-    "by": "app track (provisional; Rohan batch review)"
+    "status": "approved",
+    "at": "2026-11-05",
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "U3-err-signin.no_plan": {
     "en": "This account has no plan that works with Clauseo.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
-    "at": "2026-11-04",
-    "by": "app track (provisional; Rohan batch review)"
+    "status": "approved",
+    "at": "2026-11-05",
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "U3-err-signin.device_code_off": {
     "en": "Sign-in with a code is turned off for this ChatGPT account.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
-    "at": "2026-11-04",
-    "by": "app track (provisional; Rohan batch review)"
+    "status": "approved",
+    "at": "2026-11-05",
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "U3-err-signin.port_busy": {
     "en": "Another program on this computer is using ChatGPT's sign-in.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
-    "at": "2026-11-04",
-    "by": "app track (provisional; Rohan batch review)"
+    "status": "approved",
+    "at": "2026-11-05",
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "U3-err-signin.failed": {
     "en": "Sign-in didn't finish. Try again.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
-    "at": "2026-11-04",
-    "by": "app track (provisional; Rohan batch review)"
+    "status": "approved",
+    "at": "2026-11-05",
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "U3-err-signin.policy_unreadable": {
     "en": "Clauseo can't read your firm's sign-in settings, so it won't sign in until they can be read.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
-    "at": "2026-11-04",
-    "by": "app track (provisional; Rohan batch review)"
+    "status": "approved",
+    "at": "2026-11-05",
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "U3-48": {
     "en": "Reset not given.",
@@ -573,24 +585,27 @@
     "en": "The update didn't install. Try again.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "U3-51": {
     "en": "You didn't allow a request, so the answer stopped. The answer so far is kept.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "U3-err-settings.refused": {
     "en": "Clauseo couldn't save that setting. Your settings are as they were.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   }
 }
