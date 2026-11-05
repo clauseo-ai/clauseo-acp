@@ -4685,6 +4685,13 @@ export type TurnQueued = {
 	behind: ThreadId,
 	/**  The same thread's turn it waits for. */
 	behind_turn?: TurnId,
+	/**
+	 *  It went back to the head of its thread's queue: a turn put back for its agent's sign-in
+	 *  (decision record 0048, P4b). A restart restores it ahead of the turns queued before it,
+	 *  since it was sent first and they may depend on its answer. False is written as a missing
+	 *  field, and a missing field reads as false, so an older entry restores in log order.
+	 */
+	at_head?: boolean,
 };
 
 /**  A turn started, after its before-turn checkpoint. */
