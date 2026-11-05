@@ -290,3 +290,41 @@ fn pace_counts_updates_across_a_branch() {
     // first update follows its expect.
     assert_eq!(pauses, [pace, pace]);
 }
+
+#[test]
+fn an_app_server_scenario_reads_and_writes_bare_lines() {
+    let text = [
+        r#"{"scenario":"t","description":"test","protocol":"app-server"}"#,
+        r#"{"expect":{"method":"initialize","as":"init"}}"#,
+        r#"{"respond":{"to":"init","result":{"userAgent":"codex/0.162.1"}}}"#,
+        r#"{"expect":{"method":"initialized"}}"#,
+        r#"{"notify":{"method":"account/updated","params":{"authMode":null}}}"#,
+        r#"{"request":{"id":"s1","method":"item/tool/call"}}"#,
+        r#"{"expect_response":{"id":"s1","error":{"code":-32601}}}"#,
+    ]
+    .join("\n");
+    let scenario = Scenario::parse("t", &text).unwrap();
+    let input = [
+        r#"{"id":0,"method":"initialize","params":{"clientInfo":{"name":"clauseo"}}}"#,
+        r#"{"method":"initialized"}"#,
+        r#"{"id":"s1","error":{"code":-32601,"message":"no"}}"#,
+    ];
+    let (stop, lines) = play(&scenario, &format!("{}\n", input.join("\n")));
+    assert_eq!(outcome(stop), None);
+    assert_eq!(
+        lines,
+        [
+            json!({"id": 0, "result": {"userAgent": "codex/0.162.1"}}),
+            json!({"method": "account/updated", "params": {"authMode": null}}),
+            json!({"id": "s1", "method": "item/tool/call"}),
+        ]
+    );
+    // The same handshake under ACP refuses the bare request.
+    let acp = scenario_of(&[r#"{"expect":{"method":"initialize","as":"init"}}"#]);
+    let (stop, _) = play(&acp, &format!("{}\n", input[0]));
+    let failed = outcome(stop).unwrap();
+    assert!(
+        failed.contains("malformed line from the client"),
+        "{failed}"
+    );
+}

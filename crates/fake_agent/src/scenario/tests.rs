@@ -475,3 +475,5 @@ fn one_of_checks_each_branch_on_its_own() {
         assert!(error.starts_with(want), "want {want}\n got {error}");
     }
 }
+
+mod app_server;

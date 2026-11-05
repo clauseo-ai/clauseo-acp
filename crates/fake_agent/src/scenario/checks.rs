@@ -1,11 +1,11 @@
 //! Static checks run at load: labels, request ids, file paths, and SDK validation of every sent
-//! message.
+//! message in an ACP scenario.
 
 use std::collections::{HashMap, HashSet};
 
 use agent_client_protocol::schema::v1 as acp;
 
-use super::{Expect, ExpectResponse, FileOp, Loc, Reply, Step, StepKind, Wait};
+use super::{Expect, ExpectResponse, FileOp, Loc, Protocol, Reply, Step, StepKind, Wait};
 use crate::Error;
 use crate::pattern::{CWD, substitute};
 use crate::validate::{Problem, Sent, validate};
@@ -13,7 +13,7 @@ use crate::validate::{Problem, Sent, validate};
 /// The absolute `cwd` that `{{cwd}}` becomes while validating.
 const VALIDATION_CWD: &str = "/fake_agent/cwd";
 
-/// Whether the client sends `method` as a notification, so its `expect` takes no label.
+/// Whether an ACP client sends `method` as a notification, so its `expect` takes no label.
 pub(crate) fn is_client_notification(method: &str) -> bool {
     method == acp::AGENT_METHOD_NAMES.session_cancel
         || method == acp::PROTOCOL_LEVEL_METHOD_NAMES.cancel_request
@@ -21,6 +21,9 @@ pub(crate) fn is_client_notification(method: &str) -> bool {
 
 #[derive(Default, Clone)]
 struct Seen<'a> {
+    /// The scenario plays an app-server: no SDK validation, and any `expect` may be a
+    /// notification.
+    app_server: bool,
     /// Expect label to its method.
     labels: HashMap<&'a str, &'a str>,
     /// Labels a `respond` step has answered.
@@ -33,9 +36,12 @@ struct Seen<'a> {
     branch_requests: HashSet<&'a str>,
 }
 
-/// Runs every static check over the flattened steps, in order.
-pub(super) fn check(steps: &[Step]) -> Result<(), Error> {
-    let mut seen = Seen::default();
+/// Runs every static check over the flattened steps of a `protocol` scenario, in order.
+pub(super) fn check(steps: &[Step], protocol: Protocol) -> Result<(), Error> {
+    let mut seen = Seen {
+        app_server: protocol == Protocol::AppServer,
+        ..Seen::default()
+    };
     for step in steps {
         check_step(&mut seen, &step.at, &step.kind, step.raw)?;
     }
@@ -49,16 +55,31 @@ fn check_step<'a>(
     kind: &'a StepKind,
     raw: bool,
 ) -> Result<(), Error> {
+    if seen.app_server {
+        if raw {
+            return Err(at.load_error(
+                "\"raw\": true has no use in an app-server scenario, which checks nothing \
+                 against the SDK",
+            ));
+        }
+        if matches!(kind, StepKind::Update { .. }) {
+            return Err(at.load_error(
+                "update sends ACP's session/update; an app-server scenario sends its \
+                 notifications with notify",
+            ));
+        }
+    }
+    let raw = raw || seen.app_server;
     match kind {
         StepKind::Wait(Wait::Expect(expect)) => {
-            check_expect(expect).map_err(|m| at.load_error(m))?;
+            check_expect(expect, seen.app_server).map_err(|m| at.load_error(m))?;
             seen.label(expect, at)?;
         }
         StepKind::All(waits) => {
             for wait in waits {
                 match wait {
                     Wait::Expect(expect) => {
-                        check_expect(expect).map_err(|m| at.load_error(m))?;
+                        check_expect(expect, seen.app_server).map_err(|m| at.load_error(m))?;
                     }
                     Wait::Response(response) => seen.response(response, at)?,
                 }
@@ -76,7 +97,7 @@ fn check_step<'a>(
             let mut after = seen.clone();
             for branch in branches {
                 let mut inner = seen.clone();
-                check_expect(&branch.first).map_err(|m| at.load_error(m))?;
+                check_expect(&branch.first, seen.app_server).map_err(|m| at.load_error(m))?;
                 inner.label(&branch.first, at)?;
                 for step in &branch.rest {
                     check_step(&mut inner, at, &step.kind, step.raw)?;
@@ -226,7 +247,12 @@ impl<'a> Seen<'a> {
     }
 }
 
-fn check_expect(expect: &Expect) -> Result<(), String> {
+/// An ACP `expect` takes a label exactly when its method is a request. In an app-server
+/// scenario (`app_server`) the label alone says which it is.
+fn check_expect(expect: &Expect, app_server: bool) -> Result<(), String> {
+    if app_server {
+        return Ok(());
+    }
     let method = &expect.method;
     match (&expect.label, is_client_notification(method)) {
         (None, false) => Err(format!("expect `{method}`: a request needs an `as` label")),

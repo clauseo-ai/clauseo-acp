@@ -10,7 +10,9 @@ use std::time::Duration;
 use agent_client_protocol::schema::v1 as acp;
 use serde_json::{Map, Value, json};
 
-use crate::scenario::{Branch, Expect, Loc, OnStdinClose, Reply, Scenario, StepKind, Wait};
+use crate::scenario::{
+    Branch, Expect, Loc, OnStdinClose, Protocol, Reply, Scenario, StepKind, Wait,
+};
 use crate::{EXIT_MISMATCH, EXIT_OK, diagnostic};
 use client::{
     Incoming, Miss, NO_CWD, classify, describe_expect, describe_wait, match_expect, match_wait,
@@ -143,16 +145,23 @@ impl<R: BufRead, W: Write> Runner<'_, R, W> {
                 let params = json!({"sessionId": session, "update": update});
                 self.send(
                     at,
-                    &message(None, acp::CLIENT_METHOD_NAMES.session_update, Some(params)),
+                    &message(
+                        self.scenario.protocol,
+                        None,
+                        acp::CLIENT_METHOD_NAMES.session_update,
+                        Some(params),
+                    ),
                 )?;
             }
             StepKind::Notify { method, params } => {
                 let params = params.as_ref().map(|p| self.placed(at, p)).transpose()?;
-                self.send(at, &message(None, method, params))?;
+                let protocol = self.scenario.protocol;
+                self.send(at, &message(protocol, None, method, params))?;
             }
             StepKind::Request { id, method, params } => {
                 let params = params.as_ref().map(|p| self.placed(at, p)).transpose()?;
-                self.send(at, &message(Some(json!(id)), method, params))?;
+                let protocol = self.scenario.protocol;
+                self.send(at, &message(protocol, Some(json!(id)), method, params))?;
             }
             // Written as is: `{{cwd}}` in it is refused at load.
             StepKind::SendLine(text) => self.write_line(at, text)?,
@@ -290,8 +299,7 @@ impl<R: BufRead, W: Write> Runner<'_, R, W> {
                 format!("respond.to `{to}`: no such request received"),
             ));
         };
-        let mut body = Map::new();
-        body.insert("jsonrpc".to_owned(), json!("2.0"));
+        let mut body = envelope(self.scenario.protocol);
         body.insert("id".to_owned(), label.id.clone());
         let new_session = label.method == acp::AGENT_METHOD_NAMES.session_new;
         match reply {
@@ -330,7 +338,7 @@ impl<R: BufRead, W: Write> Runner<'_, R, W> {
                     ));
                 };
                 let line = line.strip_suffix('\r').unwrap_or(line);
-                classify(line).map_err(|m| Stop::Fail(at.clone(), m))
+                classify(line, self.scenario.protocol).map_err(|m| Stop::Fail(at.clone(), m))
             }
             Err(error) => Err(Stop::Fail(
                 at.clone(),
@@ -354,10 +362,19 @@ impl<R: BufRead, W: Write> Runner<'_, R, W> {
     }
 }
 
-/// A JSON-RPC 2.0 request (with `id`) or notification (without).
-fn message(id: Option<Value>, method: &str, params: Option<Value>) -> Value {
+/// The start of every message the agent writes: `"jsonrpc": "2.0"` in an ACP scenario, nothing in
+/// an app-server one, whose schema has no such member.
+fn envelope(protocol: Protocol) -> Map<String, Value> {
     let mut body = Map::new();
-    body.insert("jsonrpc".to_owned(), json!("2.0"));
+    if protocol == Protocol::Acp {
+        body.insert("jsonrpc".to_owned(), json!("2.0"));
+    }
+    body
+}
+
+/// A JSON-RPC request (with `id`) or notification (without), in `protocol`'s envelope.
+fn message(protocol: Protocol, id: Option<Value>, method: &str, params: Option<Value>) -> Value {
+    let mut body = envelope(protocol);
     if let Some(id) = id {
         body.insert("id".to_owned(), id);
     }

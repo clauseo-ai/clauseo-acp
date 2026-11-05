@@ -6,7 +6,8 @@ use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
 
 use super::{
-    Branch, BranchStep, Expect, ExpectResponse, FileOp, OnStdinClose, Reply, StepKind, Wait,
+    Branch, BranchStep, Expect, ExpectResponse, FileOp, OnStdinClose, Protocol, Reply, StepKind,
+    Wait,
 };
 use crate::{EXIT_LOAD, EXIT_MISMATCH};
 
@@ -28,10 +29,12 @@ struct Header {
     description: String,
     #[serde(default)]
     on_stdin_close: OnStdinClose,
+    #[serde(default)]
+    protocol: Protocol,
 }
 
-/// Parses the header line of scenario `name`.
-pub(super) fn header(name: &str, value: Value) -> Result<OnStdinClose, String> {
+/// Parses the header line of scenario `name`: what stdin's end does, and the protocol.
+pub(super) fn header(name: &str, value: Value) -> Result<(OnStdinClose, Protocol), String> {
     let header: Header =
         serde_json::from_value(value).map_err(|error| format!("header: {error}"))?;
     if header.scenario != name {
@@ -43,7 +46,7 @@ pub(super) fn header(name: &str, value: Value) -> Result<OnStdinClose, String> {
     if header.description.trim().is_empty() {
         return Err("header: description is empty".to_owned());
     }
-    Ok(header.on_stdin_close)
+    Ok((header.on_stdin_close, header.protocol))
 }
 
 /// One step line without its `note`: exactly one of these keys.

@@ -3,7 +3,7 @@
 use serde_json::Value;
 
 use crate::pattern::{check_off, cut, matches, short, substitute, uses_cwd};
-use crate::scenario::{Expect, ExpectResponse, Reply, Wait};
+use crate::scenario::{Expect, ExpectResponse, Protocol, Reply, Wait};
 
 /// One parsed client line.
 #[derive(Debug)]
@@ -24,14 +24,18 @@ pub(super) enum Incoming {
 }
 
 /// Parses a client line. Anything that is not a JSON-RPC 2.0 request, notification or response
-/// is malformed, and a malformed line is a mismatch.
-pub(super) fn classify(line: &str) -> Result<Incoming, String> {
+/// is malformed, and a malformed line is a mismatch. An ACP line must carry `"jsonrpc": "2.0"`;
+/// an app-server line may leave it out, as `codex app-server`'s schema does, but any other value
+/// is malformed.
+pub(super) fn classify(line: &str, protocol: Protocol) -> Result<Incoming, String> {
     let malformed = || format!("malformed line from the client: {}", cut(line));
     let Ok(Value::Object(mut map)) = serde_json::from_str::<Value>(line) else {
         return Err(malformed());
     };
-    if map.get("jsonrpc") != Some(&Value::String("2.0".to_owned())) {
-        return Err(malformed());
+    match map.remove("jsonrpc") {
+        Some(Value::String(version)) if version == "2.0" => {}
+        None if protocol == Protocol::AppServer => {}
+        _ => return Err(malformed()),
     }
     let params = map.remove("params");
     let raw_id = map.remove("id");
@@ -211,11 +215,12 @@ mod tests {
 
     #[test]
     fn classify_kinds_and_malformed() {
-        let request = classify(r#"{"jsonrpc":"2.0","id":0,"method":"initialize","params":{}}"#);
+        let acp = |line| classify(line, Protocol::Acp);
+        let request = acp(r#"{"jsonrpc":"2.0","id":0,"method":"initialize","params":{}}"#);
         assert!(matches!(request, Ok(Incoming::Request { .. })));
-        let note = classify(r#"{"jsonrpc":"2.0","method":"session/cancel","params":{}}"#);
+        let note = acp(r#"{"jsonrpc":"2.0","method":"session/cancel","params":{}}"#);
         assert!(matches!(note, Ok(Incoming::Notification { .. })));
-        let response = classify(r#"{"jsonrpc":"2.0","id":"perm-1","result":{}}"#);
+        let response = acp(r#"{"jsonrpc":"2.0","id":"perm-1","result":{}}"#);
         assert!(matches!(response, Ok(Incoming::Response { .. })));
         for bad in [
             "",
@@ -228,7 +233,29 @@ mod tests {
             r#"{"jsonrpc":"2.0","method":"x","result":{}}"#,
             r#"{"jsonrpc":"2.0"}"#,
         ] {
-            assert!(classify(bad).is_err(), "{bad}");
+            assert!(acp(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn an_app_server_line_may_leave_out_jsonrpc_but_not_change_it() {
+        let app = |line| classify(line, Protocol::AppServer);
+        let request = app(r#"{"id":0,"method":"initialize","params":{}}"#);
+        assert!(matches!(request, Ok(Incoming::Request { .. })));
+        let note = app(r#"{"method":"initialized"}"#);
+        assert!(matches!(note, Ok(Incoming::Notification { .. })));
+        let response = app(r#"{"id":"server-1","error":{"code":-32601}}"#);
+        assert!(matches!(response, Ok(Incoming::Response { .. })));
+        let versioned = app(r#"{"jsonrpc":"2.0","method":"initialized"}"#);
+        assert!(matches!(versioned, Ok(Incoming::Notification { .. })));
+        for bad in [
+            r#"{"jsonrpc":"1.0","method":"initialized"}"#,
+            r#"{"jsonrpc":null,"method":"initialized"}"#,
+            r#"{"jsonrpc":2,"method":"initialized"}"#,
+            r#"{"id":null,"method":"initialize"}"#,
+            "{}",
+        ] {
+            assert!(app(bad).is_err(), "{bad}");
         }
     }
 }
