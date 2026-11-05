@@ -547,3 +547,32 @@ fn managed_counts_once_a_day_across_starts() {
     };
     assert_eq!(cells(&counts.today().update), [(managed, 1)]);
 }
+
+#[test]
+fn old_downloads_are_removed_at_start() {
+    let dir = Dir::new("update_old_downloads", &[]);
+    let updates = dir.data().join("updates");
+    let cached = updates.join(NEXT).join("Clauseo.exe");
+    write::write(&cached, b"installer");
+    for old in [
+        "0.3.9/Clauseo.exe",
+        "0.4.0/Clauseo.exe",
+        "0.4.2/a.exe",
+        "0.4.2/b.exe",
+        "junk",
+    ] {
+        write::write(&updates.join(old), b"x");
+    }
+    dir.set_settings(&[], serde_json::json!({ "update": { "mode": "notify" } }));
+    let fake = FakeUpdater::new(&dir, InstallKind::CurrentUser, None, Download::Instant);
+    let host = start_updating(&dir, 0, &fake);
+    host.settle();
+    let mut left: Vec<String> = std::fs::read_dir(&updates)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .collect();
+    left.sort();
+    assert_eq!(left, [NEXT]);
+    assert!(cached.exists());
+    host.shutdown();
+}

@@ -23,7 +23,7 @@ pub(crate) mod machine;
 mod marker;
 
 pub use marker::read_update_marker;
-pub(crate) use marker::{clear_marker, find_cached, write_marker};
+pub(crate) use marker::{clear_marker, find_cached, remove_old_downloads, write_marker};
 
 /// Checks for and downloads the next release. `host` holds an `Arc<dyn Updater>`.
 pub trait Updater: Send + Sync {

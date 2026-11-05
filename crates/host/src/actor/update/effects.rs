@@ -114,9 +114,13 @@ fn start_download(actor: &mut Actor, offer: Offer) {
         async move {
             let mut progress = progress;
             while let Some(mut latest) = progress.next().await {
-                // Only the newest of what has piled up matters.
-                while let Some(Some(newer)) = progress.next().now_or_never() {
-                    latest = newer;
+                // Only the newest of what has piled up matters; the sink holds at most about
+                // this many.
+                for _ in 0..PROGRESS_CAPACITY {
+                    match progress.next().now_or_never() {
+                        Some(Some(newer)) => latest = newer,
+                        Some(None) | None => break,
+                    }
                 }
                 let posted = post.try_send(Input::Update(UpdateInput::Progress {
                     generation,
