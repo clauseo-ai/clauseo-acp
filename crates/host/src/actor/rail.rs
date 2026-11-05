@@ -270,6 +270,7 @@ fn matter_row(
         last_activity: newest(own, activity),
         client: row.client.clone(),
         next_date: row.next_date,
+        skill_packs: row.skill_packs.clone(),
         pinned: row.pinned,
         last_opened: row.last_opened,
         status: matter_status(facts),

@@ -269,6 +269,7 @@ pub(super) fn matter_commit(
         pinned: false,
         last_opened: None,
         forgotten: None,
+        skill_packs: None,
     };
     draft.matter_row(row.clone());
     if let Some((id, outcome)) = command {

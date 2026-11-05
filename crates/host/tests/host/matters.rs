@@ -8,7 +8,8 @@ use std::time::Duration;
 use clauseo_host::Clock as _;
 use clauseo_protocol::{
     ClientName, CommandOutcome, Date, ErrorCode, FieldChange, FolderState, HostCommand, HostQuery,
-    MatterId, MatterKind, MatterSource, MatterStatus, MatterSummary, StopReason, StreamId, Title,
+    MatterId, MatterKind, MatterSource, MatterStatus, MatterSummary, PackId, PackList, StopReason,
+    StreamId, Title,
 };
 
 use crate::support::{Dir, FAKE, Running, Scenario, matter_with_thread, send_prompt, wait};
@@ -19,6 +20,11 @@ pub(crate) fn client(name: &str) -> ClientName {
 
 pub(crate) fn date(text: &str) -> Date {
     text.parse().unwrap()
+}
+
+/// The pack list of `ids`.
+pub(crate) fn packs(ids: &[&str]) -> PackList {
+    PackList::new(ids.iter().map(|id| PackId::new(id).unwrap()).collect()).unwrap()
 }
 
 /// The summary of `matter` in `ListMatters`.
@@ -81,6 +87,7 @@ fn a_create_keeps_its_details_and_list_matters_shows_every_field() {
             last_activity: Some(now),
             client: Some(client("Kunal Desai")),
             next_date: Some(date("2026-11-20")),
+            skill_packs: None,
             pinned: false,
             last_opened: None,
             status: MatterStatus::Idle,
@@ -198,6 +205,7 @@ fn update_matter_keeps_clears_and_sets_each_detail() {
         matter,
         client,
         next_date,
+        skill_packs: FieldChange::Keep,
         pinned,
     };
     // Nothing named: nothing changes, and the answer is still Done.
@@ -246,6 +254,7 @@ fn update_matter_keeps_clears_and_sets_each_detail() {
             matter: unknown,
             client: FieldChange::Keep,
             next_date: FieldChange::Keep,
+            skill_packs: FieldChange::Keep,
             pinned: Some(true),
         },
         ErrorCode::CommandUnknownMatter,
@@ -257,6 +266,59 @@ fn update_matter_keeps_clears_and_sets_each_detail() {
         after,
         "the details survive a restart"
     );
+    host.shutdown();
+}
+
+#[test]
+fn update_matter_keeps_clears_and_sets_skill_packs() {
+    let dir = Dir::new("update_skill_packs", &[]);
+    let host = dir.start(0);
+    let folder = dir.folder("m", &[]);
+    let matter = created(import(&host, "m", &folder, (None, None)));
+    let update = |client, skill_packs| HostCommand::UpdateMatter {
+        matter,
+        client,
+        next_date: FieldChange::Keep,
+        skill_packs,
+        pinned: None,
+    };
+    // A new matter has no list: it takes the global one.
+    assert_eq!(summary(&host, matter).skill_packs, None);
+    // Set a list; it comes back as given.
+    let list = packs(&["india-litigation", "tax-2026"]);
+    assert_eq!(
+        host.ok(update(FieldChange::Keep, FieldChange::Set(list.clone()))),
+        CommandOutcome::Done
+    );
+    assert_eq!(summary(&host, matter).skill_packs, Some(list.clone()));
+    // A missing field keeps it.
+    host.ok(update(FieldChange::Keep, FieldChange::Keep));
+    assert_eq!(summary(&host, matter).skill_packs, Some(list.clone()));
+    // A change of another field leaves it alone.
+    host.ok(update(FieldChange::Set(client("Acme")), FieldChange::Keep));
+    let listed = summary(&host, matter);
+    assert_eq!(
+        (listed.client, listed.skill_packs),
+        (Some(client("Acme")), Some(list))
+    );
+    // An empty list is a list: the matter narrows to no pack.
+    host.ok(update(
+        FieldChange::Keep,
+        FieldChange::Set(PackList::default()),
+    ));
+    assert_eq!(
+        summary(&host, matter).skill_packs,
+        Some(PackList::default())
+    );
+    // Clear goes back to the global list.
+    host.ok(update(FieldChange::Keep, FieldChange::Clear));
+    assert_eq!(summary(&host, matter).skill_packs, None);
+    // A set list survives a restart.
+    let kept = packs(&["contracts"]);
+    host.ok(update(FieldChange::Keep, FieldChange::Set(kept.clone())));
+    host.shutdown();
+    let host = dir.start(1);
+    assert_eq!(summary(&host, matter).skill_packs, Some(kept));
     host.shutdown();
 }
 

@@ -140,6 +140,7 @@ fn each_matter_command_sends_its_row_and_a_forget_its_removal() {
         matter,
         client: FieldChange::Keep,
         next_date: FieldChange::Keep,
+        skill_packs: FieldChange::Keep,
         pinned: Some(true),
     });
     let sent = after(&host, &mut sub);
@@ -150,6 +151,7 @@ fn each_matter_command_sends_its_row_and_a_forget_its_removal() {
         matter,
         client: FieldChange::Keep,
         next_date: FieldChange::Keep,
+        skill_packs: FieldChange::Keep,
         pinned: Some(true),
     });
     assert_eq!(after(&host, &mut sub), [], "no change");
@@ -293,6 +295,7 @@ fn a_lagged_subscriber_gets_the_whole_lists_then_partial_rows() {
             matter,
             client: FieldChange::Keep,
             next_date: FieldChange::Keep,
+            skill_packs: FieldChange::Keep,
             pinned: Some(pinned),
         });
     }
@@ -337,6 +340,7 @@ fn a_lagged_subscriber_gets_the_whole_lists_then_partial_rows() {
         matter,
         client: FieldChange::Keep,
         next_date: FieldChange::Keep,
+        skill_packs: FieldChange::Keep,
         pinned: Some(false),
     });
     assert_eq!(after(&host, &mut sub), [row_of(&host, matter)]);
@@ -386,6 +390,7 @@ fn the_whole_state_arrives_whole_when_it_has_more_frames_than_the_channel_has_pl
         matter,
         client: FieldChange::Keep,
         next_date: FieldChange::Keep,
+        skill_packs: FieldChange::Keep,
         pinned: Some(pinned),
     };
     host.ok(pin(true));
@@ -439,6 +444,7 @@ fn rows_sent_while_the_first_frames_are_unread_come_after_them() {
             matter,
             client: FieldChange::Keep,
             next_date: FieldChange::Keep,
+            skill_packs: FieldChange::Keep,
             pinned: Some(pinned),
         });
     }
@@ -477,6 +483,7 @@ fn pin(matter: MatterId, pinned: bool) -> HostCommand {
         matter,
         client: FieldChange::Keep,
         next_date: FieldChange::Keep,
+        skill_packs: FieldChange::Keep,
         pinned: Some(pinned),
     }
 }
