@@ -1,8 +1,9 @@
 //! Desktop's two Rust-only settings writes through `HostHandle` (decision record 0048):
 //! `set_agent_launch` writes an installed agent's `agents.<id>` entry, `set_plan` a firm's
-//! `plans.<id>` (`set_plan_endpoint` its endpoint alone). Each sends `SettingsChanged` after a write and nothing after a refusal; a locked
-//! id is `settings.locked`, a value that breaks a rule `settings.refused`, whose message names
-//! the key and never the value; the lawyer's own entry is left alone.
+//! `plans.<id>` (`set_plan_endpoint` its endpoint alone). Each sends `SettingsChanged` after a
+//! write and nothing after a refusal; a locked id is `settings.locked`, a value that breaks a
+//! rule `settings.refused`, whose message names the key and never the value; the lawyer's own
+//! entry is left alone.
 
 use std::collections::BTreeMap;
 
