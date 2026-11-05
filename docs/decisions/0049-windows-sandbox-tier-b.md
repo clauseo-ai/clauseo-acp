@@ -1,6 +1,7 @@
 # 0049: The Windows sandbox, tier B
 
-**Draft.** S15 PR2 starts this record, PR1 brings it to design (B), PR3a and PR3b the ACL walk.
+**Draft.** S15 PR2 starts this record, PR1 brings it to design (B), PR3a and PR3b the ACL walk,
+its application and the set-aside.
 Later S15 pull requests complete it: set-up and the pool (PR4), the runner and token (PR5), the
 launcher (PR6), the network (PR7), the install-folder grants (PR8), and Codex (PR9).
 
@@ -90,26 +91,53 @@ build 26100):
     object allow with no object type applies as a plain one), fails the walk: such a child beats
     the inherited deny. Adding explicit denies there instead was not chosen.
 - **Applying the plan (PR3b, `windows::apply`).**
+  - Order: grants on missing names are left out; the credential link must still be the
+    credentials file the launcher names (one file ID), or the launch is refused; every grant is
+    recorded `pending`; a new Low label entry first records the explicit label its path has (the
+    lawyer's own, put back when ours goes); the entries are written; the walks run; only then is
+    every entry marked `applied`. An entry still `pending` (a launch, rollback or forget that
+    stopped partway) gets its tree walked at the next launch, and `reconcile` walks each pending
+    entry's tree at start before it marks or drops it.
   - A tree that carries a deny (the matter's own folders, each sibling, each fence) is walked
-    strictly, so such a child refuses the launch.
+    strictly. A child an agent made (a pool user owns it) that would beat the inherited deny,
+    with an explicit allow for a broad group, another pool user or the pool group, or a
+    protected DACL, is repaired: those allows are stripped, the protection cleared and its
+    inherited entries worked out again. A child the lawyer owns that would beat it refuses the
+    launch, naming the child for the running page. A child the lawyer can't open at all (a
+    DACL an agent made) is set aside through its folder's `FILE_DELETE_CHILD`, or refuses the
+    launch, naming it.
   - The matter, state and notes trees are walked at every launch, so a file moved in since picks
-    up the inherited entries; other trees only when their entry was just written.
-  - Order: a folder that is now a registered matter loses its sibling deny (every matter's entry
-    for it); grants on missing names are left out; every grant is recorded `pending`, written,
-    and marked `applied` path by path; then the walks. Any failure removes this launch's new
-    entries (never one another matter's entry names), walks those trees again and drops the
-    entries; a removal that fails keeps its entry for `forget_matter` or `reconcile`.
-  - **What an agent owns, it can't re-permission.** On the matter, state and notes folders an
-    inherited allow for `OWNER RIGHTS` (`S-1-3-4`) with the pool user's `Modify` (on the Claude
-    store, for the files in it) replaces the owner's implicit `READ_CONTROL | WRITE_DAC`, and an
-    inherited deny of `WRITE_DAC | WRITE_OWNER` for the pool user beats a `CREATOR OWNER` allow
-    inherited from above (`C:\`'s full control). The lawyer keeps full control of the lawyer's
-    own files through the lawyer's own allows; a folder where the lawyer had `WRITE_DAC` only as
-    its owner loses it, and its next launch is refused (tier C).
-  - `forget_matter` removes a matter's entries and labels without admin, walking each tree once.
-    `fence_registered` fences every registered matter against a grown pool (PR4 calls it).
-  - `set_aside_with` / `set_aside_protected` move each protected name at the matter's root (and
-    `.git`) that the pool user owns to `<state>\set-aside\<timestamp>\` before a launch.
+    up the inherited entries; other trees when their entry was just written or is still pending.
+  - Any failure takes back this launch's new entries: under the ledger's lock they are set
+    `pending` on disk, then each permission entry this launch wrote is removed unless another
+    entry, as read under that lock, names it; the trees are walked again, and only entries whose
+    permission entry is gone are dropped. `forget_matter` takes entries back the same way.
+  - **A folder that is now a registered matter loses its fix 2 deny once its first launch
+    succeeds**, for every matter whose entry names it, and its tree is walked again. A refused
+    launch leaves every deny. A deny on a folder that holds the new matter is first replaced, for
+    the matter that wrote it, by the gate's walk-down set below that folder: a deny on each
+    folder beside the path at every level, and a files-only deny at each level.
+  - `forget_matter` removes a matter's entries and labels without admin, puts back the lawyer's
+    own labels, and hands what the matter's pool user made in its matter, state and notes folders
+    back to the desktop user: the owner set to the desktop user (through the lawyer's
+    `WRITE_OWNER`), the agent's explicit labels and broad allows removed, the entries worked out
+    again. `fence_registered` fences every registered matter against a grown pool (PR4 calls
+    it).
+  - The credential link's allow is read and write of the file's data only (`0x12008f`, no
+    `DELETE`); it lands on the lawyer's real credentials file.
+  - **Set-aside.** At launch each protected name at the matter's root (`PROTECTED_NAMES` and
+    `.git`) is recorded with its file ID (`before_launch`). When the agent exits, PR6's launcher
+    calls `after_session`: every protected name that is new or whose file ID changed is set
+    aside, whoever owns it, so a lawyer folder the agent renamed to `.git` or a lawyer file it
+    hard-linked as `CLAUDE.md` is caught. A session that didn't end cleanly is checked the same
+    way at the next launch, before anything else. A protected name the lawyer changes during a
+    session is set aside too (accepted). Items go to `<data_dir>\sandbox\set-aside\<matter>\`,
+    the protected folder the agent can't write, opened part by part by handle without following a
+    link, each with a manifest entry (the original and new paths, the reason, the owner, the time
+    and the matter). The running page shows them (`list_set_aside`), and `restore_set_aside`
+    moves one back only if its name is free. An item on another volume than the data folder can't
+    be moved there by a rename: the set-aside fails (`OtherVolume`), the item stays, and a
+    launch whose pre-launch check meets it is refused; no copy is made.
 - **Records.**
   - `HKLM\SOFTWARE\Clauseo\Sandbox`, with an explicit DACL: every pool user's SID, which the
     desktop's start-up check (#317) reads through `clauseo_sandbox::windows::sandbox_user_sid`,
@@ -185,8 +213,36 @@ may drop `Everyone` behind a proxy that runs as the desktop user.
   or sibling deny reaches them through the walk, so another pool agent reads a hard-linked file
   wherever `Users` can. Owner: S15 close-out.
 - **Between launches**, a file moved into a matter keeps its old entries until the next launch's
-  walk; a file moved into a sibling keeps them until that sibling's deny is written again.
+  walk. A file moved into a sibling keeps them until something walks that sibling again, which
+  launches don't do once its entry is `applied`: a residual until a re-walk. A file moved into
+  a neighbour matter's tree picks up its entries at that matter's own launch.
+- **Lifting a sibling's deny happens only after the new matter's first launch succeeds.** Until
+  then the folder keeps its fix 2 deny, so its new matter's agent reads it only through its own
+  entries, which are nearer and come first.
 - **A nested `CLAUDE.md`** the agent makes below the matter's root is not set aside.
+- **An item set aside keeps its own permissions**, so an agent they grant could still open it by
+  its full path under the data folder.
+
+### Accepted risk: two hijacked agents at once
+
+Rohan ruled on 2026-11-05 that tier B runs matters' agents in parallel, with no
+one-agent-at-a-time policy and no firm switch for one. The threat model:
+
+- One hijacked matter agent can't read or write another matter.
+- Two hijacked agents running at the same time can pass data to each other through channels
+  they name: a file the creator gives its own DACL at creation (no `WRITE_DAC` needed, so the
+  strict walk repairs it only at the next launch or `after_session`), a pipe with an explicit
+  DACL, a FAT or exFAT volume, and `ProgramData\Microsoft\DeviceSync` (a later PR closes
+  DeviceSync).
+- Dropping `Everyone` from the token wouldn't close the pipe channel against a cooperating
+  agent: the creator sets the pipe's DACL itself.
+
+So during a running session an agent's own new files can be opened to another matter's agent,
+but only if that agent is also hijacked and running at the same time. The `OWNER RIGHTS` entry
+PR3b first planned doesn't close this: the creator passes its own DACL, and `C:\`'s inherited
+`CREATOR OWNER` allow gives it full control anyway. Two follow-ups shrink these channels: the
+shared-write-place deny PR and the bypass-traverse spike. A third is to weigh a directory
+watcher that repairs new pool-owned files during a session.
 
 ## Consequences
 
