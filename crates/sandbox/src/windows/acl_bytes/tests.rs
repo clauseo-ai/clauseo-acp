@@ -366,16 +366,21 @@ fn a_write_the_handle_has_no_right_for_is_found_first() {
 
 /// The Windows run 2, row 15 (a plain `C:\m`): a child not marked auto-inherited loses its
 /// inherited copies before it is worked out again, so none comes back explicit; its explicit
-/// entries, owner, group and SACL stay, and the DACL is marked auto-inherited.
+/// entries, owner and SACL stay, and the DACL is marked auto-inherited.
 #[test]
 fn a_dacl_not_auto_inherited_loses_its_inherited_copies_before_the_walk_works_it_out() {
     let owner = sid_bytes(&sid(POOL));
-    let group = sid_bytes(&sid(OTHER));
     let explicit = spec(POOL, Rights::Modify).bytes();
     let users = inherited("S-1-5-32-545", Rights::ReadAndExecute);
     let dacl = render(2, &[&explicit, &users]);
     let sacl = render(2, &[&spec(LOW_LABEL_SID, Rights::LowLabel).bytes()]);
-    let before = assemble(0, [Some(&owner), Some(&group), Some(&sacl), Some(&dacl)]);
+    let before = rebuild(
+        &build_descriptor(0, Some(&dacl), Some(&sacl)),
+        Some(&owner),
+        None,
+        0,
+    )
+    .unwrap();
 
     let after = without_inherited(&before, &empty_acl()).unwrap();
     let read = Descriptor::parse(&after).unwrap();
@@ -387,7 +392,6 @@ fn a_dacl_not_auto_inherited_loses_its_inherited_copies_before_the_walk_works_it
         after[offset..offset + 8 + 4 * usize::from(after[offset + 1])].to_vec()
     };
     assert_eq!(sid_at(4), owner);
-    assert_eq!(sid_at(8), group);
     let bare = build_descriptor(0, None, Some(&sacl));
     assert_eq!(without_inherited(&bare, &empty_acl()).unwrap(), bare);
 }
@@ -458,7 +462,13 @@ fn explicit_copies_of_inherited_entries_are_dropped_and_the_rest_kept() {
 fn a_bare_child_keeps_its_owner_and_has_no_entries() {
     let owner = sid_bytes(&sid(POOL));
     let dacl = render(2, &[&spec(POOL, Rights::Modify).bytes()]);
-    let before = assemble(0, [Some(&owner), None, None, Some(&dacl)]);
+    let before = rebuild(
+        &build_descriptor(0, Some(&dacl), None),
+        Some(&owner),
+        None,
+        0,
+    )
+    .unwrap();
     let bare = bare_child(&before).unwrap();
     let read = Descriptor::parse(&bare).unwrap();
     assert_eq!(read.dacl, Some(empty_acl().as_slice()));

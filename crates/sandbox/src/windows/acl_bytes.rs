@@ -19,9 +19,7 @@ use std::io;
 use super::acl_plan::{Grant, Inherit};
 use super::sids::Sid;
 use super::writer::Label;
-#[cfg(any(windows, test))]
-use copies::is_copy;
-pub(crate) use repair::{owner_descriptor, rebuild};
+pub(crate) use repair::{bare_child, owner_descriptor, rebuild, without_inherited};
 pub(crate) use steps::{Write, lacking, writes};
 
 /// `ACCESS_ALLOWED_ACE_TYPE`.
@@ -474,87 +472,10 @@ impl<'a> Descriptor<'a> {
 /// the mark, every later walk rewrites the child, and the lawyer's folder loses its `AI` for
 /// good (the Windows run at `fca0bf0ca`).
 pub(crate) fn build_descriptor(control: u16, dacl: Option<&[u8]>, sacl: Option<&[u8]>) -> Vec<u8> {
-    let mut control = control;
+    let mut control = control | SELF_RELATIVE;
     if dacl.is_some() && control & DACL_AUTO_INHERITED != 0 {
         control |= DACL_AUTO_INHERIT_REQ;
     }
-    assemble(control, [None, None, sacl, dacl])
-}
-
-/// `descriptor` with its DACL's inherited entries dropped; the DACL marked auto-inherited, the
-/// owner, group, SACL and other control bits kept. When the DACL is not marked auto-inherited,
-/// every explicit entry that copies an inherited one goes too ([`is_copy`]: equal but for the
-/// inherited flag to one of `due`'s inherited entries). `due` is the
-/// ACL the parent alone gives a new child of this kind and owner. The walk hands
-/// `CreatePrivateObjectSecurityEx` this for every child not protected, so its result holds the
-/// parent's entries once, all inherited.
-///
-/// Under a parent that isn't auto-inherited, NTFS writes a child's inherited copies without the
-/// inherited flag (flags `00` in the kernel's DACL; `icacls` and `Get-Acl` still show `(I)`):
-/// kept, they stay explicit, so a `Users` allow refused a strict walk (the Windows run 3, row
-/// 15, a plain `C:\m`) and a plain walk left each entry twice, explicit and inherited. Such a
-/// child's DACL is never marked auto-inherited. On an auto-inherited child an explicit entry is
-/// one somebody wrote, ours or the lawyer's, and stays: folded into an inherited one it would go
-/// with a later change to the parent (round 9). A descriptor with no DACL comes back as it is.
-#[cfg(any(windows, test))]
-pub(crate) fn without_inherited(descriptor: &[u8], due: &[u8]) -> io::Result<Vec<u8>> {
-    let now = Descriptor::parse(descriptor)?;
-    let Some(dacl) = now.dacl else {
-        return Ok(descriptor.to_vec());
-    };
-    let plain = now.control & DACL_AUTO_INHERITED == 0;
-    Acl::parse(dacl)?;
-    let due = Acl::parse(due)?;
-    keeping(descriptor, |ace| {
-        flags(ace) & INHERITED == 0 && !(plain && is_copy(ace, &due))
-    })
-}
-
-/// The descriptor a new child with `descriptor`'s owner and group is worked out from: an empty
-/// DACL marked auto-inherited. What its parent alone gives such a child is what
-/// `CreatePrivateObjectSecurityEx` makes of it, with `CREATOR OWNER` resolved to its owner.
-#[cfg(any(windows, test))]
-pub(crate) fn bare_child(descriptor: &[u8]) -> io::Result<Vec<u8>> {
-    keeping(descriptor, |_| false)
-}
-
-/// `descriptor` with only the DACL entries `keep` takes, marked auto-inherited; the owner, group,
-/// SACL and other control bits kept. A descriptor with no DACL comes back as it is.
-#[cfg(any(windows, test))]
-fn keeping(descriptor: &[u8], keep: impl Fn(&[u8]) -> bool) -> io::Result<Vec<u8>> {
-    let now = Descriptor::parse(descriptor)?;
-    let Some(dacl) = now.dacl else {
-        return Ok(descriptor.to_vec());
-    };
-    let dacl = Acl::parse(dacl)?;
-    let kept: Vec<&[u8]> = dacl
-        .aces()
-        .iter()
-        .copied()
-        .filter(|ace| keep(ace))
-        .collect();
-    let dacl = render(dacl.revision.max(2), &kept);
-    let sid_at = |offset_at: usize| -> io::Result<Option<&[u8]>> {
-        let short = || invalid("a SID past the end");
-        let offset = read_u32(descriptor, offset_at).ok_or_else(short)?;
-        if offset == 0 {
-            return Ok(None);
-        }
-        let rest = descriptor
-            .get(usize::try_from(offset).map_err(invalid)?..)
-            .ok_or_else(short)?;
-        let count = usize::from(*rest.get(1).ok_or_else(short)?);
-        rest.get(..8 + 4 * count).map(Some).ok_or_else(short)
-    };
-    let parts = [sid_at(4)?, sid_at(8)?, now.sacl, Some(dacl.as_slice())];
-    Ok(assemble(now.control | DACL_AUTO_INHERITED, parts))
-}
-
-/// A self-relative descriptor of `control` and `parts` (owner, group, SACL, DACL), each
-/// present one put after the header with its offset, and the SACL's and DACL's present bits set.
-fn assemble(control: u16, parts: [Option<&[u8]>; 4]) -> Vec<u8> {
-    let [owner, group, sacl, dacl] = parts;
-    let mut control = control | SELF_RELATIVE;
     let mut out = vec![1, 0, 0, 0];
     out.extend_from_slice(&[0; 16]);
     let mut put = |acl: Option<&[u8]>, offset_at: usize, present: u16, out: &mut Vec<u8>| {
@@ -567,8 +488,6 @@ fn assemble(control: u16, parts: [Option<&[u8]>; 4]) -> Vec<u8> {
             out.extend_from_slice(acl);
         }
     };
-    put(owner, 4, 0, &mut out);
-    put(group, 8, 0, &mut out);
     put(sacl, 12, SACL_PRESENT, &mut out);
     put(dacl, 16, DACL_PRESENT, &mut out);
     if let Some(slot) = out.get_mut(2..4) {
