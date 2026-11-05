@@ -276,6 +276,7 @@ fn rig_with(accept: bool, keychain: Keychain, plan_locked: bool) -> Rig {
         opener: Arc::clone(&opener) as Arc<dyn Opener>,
         events: Arc::clone(&events),
         known,
+        signin_gate: Mutex::default(),
     });
     Rig {
         backend,

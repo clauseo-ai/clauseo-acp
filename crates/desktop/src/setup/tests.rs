@@ -171,12 +171,11 @@ fn two_keys_from_main_at_once_store_exactly_one() {
     for _ in 0..50 {
         let (setup, stub) = stubbed(true);
         let answers: Vec<Result<CommandOutcome, HostError>> = std::thread::scope(|scope| {
-            let sends: Vec<_> = (0..2)
-                .map(|_| {
-                    scope.spawn(|| block_on(setup.run(MAIN, command(SetupAction::SetAgentKey))))
-                })
-                .collect();
-            sends.into_iter().map(|send| send.join().unwrap()).collect()
+            let send =
+                || scope.spawn(|| block_on(setup.run(MAIN, command(SetupAction::SetAgentKey))));
+            // Both run before either is joined.
+            let (first, second) = (send(), send());
+            vec![first.join().unwrap(), second.join().unwrap()]
         });
         let stored = answers.iter().filter(|answer| answer.is_ok()).count();
         assert_eq!(stored, 1, "{answers:?}");
@@ -235,7 +234,7 @@ fn a_second_start_sign_in_joins_the_running_one() {
 }
 
 #[test]
-fn a_start_with_the_backend_is_joined_and_the_mark_goes_with_its_answer() {
+fn a_start_with_the_backend_is_joined_and_a_dropped_start_leaves_no_mark() {
     let (setup, stub) = stubbed(true);
     let starting = setup.start_sign_in(&claude()).unwrap();
     let start = || command(SetupAction::StartSignIn);

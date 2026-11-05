@@ -9,6 +9,12 @@
 //!   `DeviceCode`), or is being started by another call, answers `Done` and joins it: the
 //!   backend is not called again. S18's engine restarts a running job on a new sign-in, so the
 //!   join is desktop's, here, whatever backend runs.
+//! - **A bar replaces the join.** While a firm policy sets the agent's endpoint, a key is
+//!   stored or the lawyer set an endpoint, a sign-in start is refused from every window
+//!   (`signin.firm_managed`, `signin.key_in_use`, `signin.endpoint_in_use`, in that order of
+//!   precedence; `admit::sign_in_bar`), before any join, and a running sign-in is ended when
+//!   one of them takes over. The `starting` mark holds until the sign-in's first running state
+//!   or a failure is published, so two quick starts never reach the backend twice.
 //! - **A key from `main`** goes to the backend as [`KeyWrite::OnlyIfAbsent`]: the backend
 //!   checks that no key is stored and stores it in one step, and refuses with
 //!   `settings.key_stored` otherwise, so two quick sends cannot both pass.
@@ -39,12 +45,10 @@ mod stub;
 #[cfg(test)]
 mod tests;
 
-use std::collections::BTreeSet;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use clauseo_protocol::{AgentId, CommandOutcome, HostError, SetupAction, SetupCommand};
 
-use crate::bridge::lock;
 use crate::dialogs::BoxFuture;
 
 pub(crate) use admit::may_setup;
@@ -76,14 +80,19 @@ pub(crate) trait SetupBackend: Send + Sync {
         key_write: KeyWrite,
         events: &'a SetupEvents,
     ) -> BoxFuture<'a, Result<CommandOutcome, HostError>>;
+
+    /// Why `agent`'s sign-in may not start now, if anything bars it: a firm policy's endpoint,
+    /// a stored key, an endpoint the lawyer set (`admit::sign_in_bar`). Asked before a start
+    /// joins a running sign-in, since a bar replaces the join. `None` by default.
+    fn sign_in_refused(&self, _agent: &AgentId) -> Option<HostError> {
+        None
+    }
 }
 
 /// The `setup` command's path: the allow-lists, the sign-in join, the backend and its events.
 pub(crate) struct Setup {
     backend: Arc<dyn SetupBackend>,
     events: Arc<SetupEvents>,
-    /// The agents whose `StartSignIn` is with the backend now.
-    starting: Mutex<BTreeSet<AgentId>>,
     /// Whether `main` may send `SetAgentKey` (only while no key is stored).
     main_sets_first_key: bool,
 }
@@ -99,7 +108,6 @@ impl Setup {
         Self {
             backend,
             events: Arc::new(SetupEvents::default()),
-            starting: Mutex::new(BTreeSet::new()),
             main_sets_first_key,
         }
     }
@@ -135,7 +143,13 @@ impl Setup {
                 return Err(error);
             }
         };
-        let _starting = if action == SetupAction::StartSignIn {
+        if starts_sign_in(action)
+            && let Some(error) = self.backend.sign_in_refused(&agent)
+        {
+            log_answer(label, action, &agent, "refused", Some(&error));
+            return Err(error);
+        }
+        let starting = if action == SetupAction::StartSignIn {
             let Some(starting) = self.start_sign_in(&agent) else {
                 log_answer(label, action, &agent, "joined", None);
                 return Ok(CommandOutcome::Done);
@@ -145,6 +159,11 @@ impl Setup {
             None
         };
         let answer = self.backend.run(command, key_write, &self.events).await;
+        if let Some(starting) = starting
+            && answer.is_ok()
+        {
+            starting.keep();
+        }
         match &answer {
             Ok(_) => log_answer(label, action, &agent, "done", None),
             Err(error) => log_answer(label, action, &agent, "failed", Some(error)),
@@ -153,30 +172,51 @@ impl Setup {
     }
 
     /// Marks `agent`'s sign-in as starting, unless one runs or is starting: then `None`, and
-    /// the caller joins it. The mark goes when the guard drops, the backend having answered
-    /// (and published `Queued` or the like) or the call having been dropped.
+    /// the caller joins it. The mark is [`SetupEvents`]', so it holds past the backend's answer
+    /// until the sign-in's first running state, or a failure, is published: S18 reports
+    /// `Queued` or `Waiting` later, through its worker and the pump, and a second start in
+    /// between would restart the run. It goes at once when the backend refuses, or the call is
+    /// dropped, unless [`Starting::keep`] was called.
     fn start_sign_in(&self, agent: &AgentId) -> Option<Starting<'_>> {
-        let mut starting = lock(&self.starting);
-        if starting.contains(agent) || self.events.sign_in_running(agent) {
-            return None;
-        }
-        starting.insert(agent.clone());
-        Some(Starting {
-            setup: self,
+        self.events.begin_start(agent).then(|| Starting {
+            events: &self.events,
             agent: agent.clone(),
+            keep: false,
         })
     }
 }
 
-/// An agent's `StartSignIn` with the backend; dropped, it no longer is.
+/// Whether `action` starts an S18 sign-in run, which a key or an endpoint bars.
+fn starts_sign_in(action: SetupAction) -> bool {
+    matches!(
+        action,
+        SetupAction::StartSignIn
+            | SetupAction::UseDeviceCode
+            | SetupAction::UseFoundLogin
+            | SetupAction::UseDifferentAccount
+    )
+}
+
+/// An agent's `StartSignIn` with the backend; dropped, the mark goes unless kept.
 struct Starting<'a> {
-    setup: &'a Setup,
+    events: &'a SetupEvents,
     agent: AgentId,
+    keep: bool,
+}
+
+impl Starting<'_> {
+    /// The backend took the start: the mark stays until the sign-in's first running state or a
+    /// failure is published.
+    fn keep(mut self) {
+        self.keep = true;
+    }
 }
 
 impl Drop for Starting<'_> {
     fn drop(&mut self) {
-        lock(&self.setup.starting).remove(&self.agent);
+        if !self.keep {
+            self.events.end_start(&self.agent);
+        }
     }
 }
 

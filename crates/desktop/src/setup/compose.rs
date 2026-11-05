@@ -12,13 +12,18 @@
 //! 2. Otherwise, with policy unreadable and the `firm-policy` marker there (`firm_policy.rs`),
 //!    `Failed { code: signin.policy_unreadable }`: the agent is never sent to the plan login.
 //! 3. Otherwise `SignedIn { method: Firm }` while the agent has an endpoint or a provider
-//!    (`plans.<id>`);
+//!    (`plans.<id>`, the lawyer's or the firm's policy's);
 //! 4. else `SignedIn { method: ApiKey }` while a key is stored;
 //! 5. else S18's state, with `method: Plan` and the plan in words (`limits`' `claude_plan` and
 //!    `codex_plan`, so the line matches `AccountLimits.plan`).
 //!
 //! Rule 1 is pending the orchestrator's confirmation (the plan's "Disagreements" 7); it is here
 //! alone, so a ruling changes one function.
+//!
+//! A sign-in the backend ends because a key or an endpoint took over ([`Compose::expect_end`])
+//! ends without an error: S18's `Failed { code: Cancelled }` for it is taken as `SignedOut`, so
+//! the window gets the `ApiKey` or `Firm` line, never "cancelled in the browser". Its running
+//! states pass through until then, as rule 1 says.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -31,6 +36,7 @@ use clauseo_protocol::{
 };
 
 use super::SetupEvents;
+use super::admit::{SignInBar, sign_in_bar};
 use crate::bridge::lock;
 
 /// What desktop knows of one agent's sign-in besides S18's state.
@@ -42,6 +48,8 @@ pub(crate) struct Facts {
     pub(crate) key: Option<SystemTime>,
     /// Since when policy is unreadable with the `firm-policy` marker there, if it is.
     pub(crate) blocked: Option<SystemTime>,
+    /// Since when a firm policy sets the agent's endpoint or provider, if it does.
+    pub(crate) managed: Option<SystemTime>,
 }
 
 /// The rule: what the windows are told of `agent`'s sign-in, from S18's latest state (`None`
@@ -58,7 +66,7 @@ pub(crate) fn compose(agent: &AgentId, s18: Option<&SigninState>, facts: Facts) 
             at: timestamp(since),
         });
     }
-    if let Some(since) = facts.firm {
+    if let Some(since) = facts.managed.or(facts.firm) {
         return Some(signed_in_by(SignInMethod::Firm, since));
     }
     if let Some(since) = facts.key {
@@ -69,12 +77,14 @@ pub(crate) fn compose(agent: &AgentId, s18: Option<&SigninState>, facts: Facts) 
 
 /// Whether S18's `state` passes through whatever else holds (rule 1).
 fn is_running_or_failed(state: &SigninState) -> bool {
+    is_running(state) || matches!(state, SigninState::Failed { .. })
+}
+
+/// Whether S18's `state` is a running one: `Queued`, `Waiting` or `DeviceCode`.
+pub(crate) fn is_running(state: &SigninState) -> bool {
     matches!(
         state,
-        SigninState::Queued
-            | SigninState::Waiting { .. }
-            | SigninState::DeviceCode { .. }
-            | SigninState::Failed { .. }
+        SigninState::Queued | SigninState::Waiting { .. } | SigninState::DeviceCode { .. }
     )
 }
 
@@ -199,6 +209,8 @@ struct Known {
     s18: Option<SigninState>,
     facts: Facts,
     sent: Option<SignIn>,
+    /// Whether the backend is ending the running sign-in for a key or an endpoint.
+    ending: bool,
 }
 
 impl Compose {
@@ -213,7 +225,52 @@ impl Compose {
 
     /// S18's new `state` for `agent`.
     pub(crate) fn signin(&self, agent: &AgentId, state: SigninState) {
-        self.change(agent, |known, _| known.s18 = Some(state));
+        self.change(agent, |known, _| {
+            let mut state = state;
+            if known.ending && !is_running(&state) {
+                known.ending = false;
+                if matches!(state, SigninState::Failed { .. }) {
+                    tracing::info!(%agent, "a sign-in ended: a key or an endpoint took over");
+                    state = SigninState::SignedOut { found: None };
+                }
+            }
+            known.s18 = Some(state);
+        });
+    }
+
+    /// The backend is about to end `agent`'s running sign-in for a key or an endpoint: the
+    /// end S18 reports for it is no failure. Undone with [`Compose::no_end`] when the cancel
+    /// is refused.
+    pub(crate) fn expect_end(&self, agent: &AgentId) {
+        lock(&self.agents).entry(agent.clone()).or_default().ending = true;
+    }
+
+    /// Undoes [`Compose::expect_end`].
+    pub(crate) fn no_end(&self, agent: &AgentId) {
+        if let Some(known) = lock(&self.agents).get_mut(agent) {
+            known.ending = false;
+        }
+    }
+
+    /// Whether a firm policy sets `agent`'s endpoint or provider.
+    pub(crate) fn set_firm_policy(&self, agent: &AgentId, managed: bool) {
+        self.change(agent, |known, now| {
+            known.facts.managed = managed.then(|| known.facts.managed.unwrap_or(now));
+        });
+    }
+
+    /// What bars `agent`'s sign-in now, if anything (`admit::sign_in_bar`).
+    pub(crate) fn sign_in_bar(&self, agent: &AgentId) -> Option<SignInBar> {
+        let agents = lock(&self.agents);
+        let facts = agents
+            .get(agent)
+            .map(|known| known.facts)
+            .unwrap_or_default();
+        sign_in_bar(
+            facts.managed.is_some(),
+            facts.key.is_some(),
+            facts.firm.is_some(),
+        )
     }
 
     /// S18's latest state for `agent`, as the composer last heard it.

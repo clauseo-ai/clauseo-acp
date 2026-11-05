@@ -42,6 +42,9 @@ struct AgentLatest {
     sign_in: Option<Arc<str>>,
     /// Whether that sign-in state is a running one: `Queued`, `Waiting` or `DeviceCode`.
     running: bool,
+    /// Whether a `StartSignIn` went to the backend and no running state or failure has been
+    /// published since (`Setup::start_sign_in`).
+    starting: bool,
 }
 
 impl SetupEvents {
@@ -60,10 +63,11 @@ impl SetupEvents {
             Slot::Install(agent) => {
                 latest.agents.entry(agent).or_default().install = Some(Arc::clone(&text));
             }
-            Slot::SignIn(agent, running) => {
+            Slot::SignIn(agent, running, failed) => {
                 let entry = latest.agents.entry(agent).or_default();
                 entry.sign_in = Some(Arc::clone(&text));
                 entry.running = running;
+                entry.starting &= !(running || failed);
             }
         }
         latest
@@ -104,11 +108,32 @@ impl SetupEvents {
     }
 
     /// Whether `agent`'s latest sign-in state is a running one.
+    #[cfg(test)]
     pub(crate) fn sign_in_running(&self, agent: &AgentId) -> bool {
         lock(&self.state)
             .agents
             .get(agent)
             .is_some_and(|latest| latest.running)
+    }
+
+    /// Marks `agent`'s sign-in as starting and answers `true`, unless one runs or is starting
+    /// (`false`: join it). The mark goes when a running state or a failure is published for
+    /// `agent`, or with [`SetupEvents::end_start`]; checked and set under the one lock.
+    pub(crate) fn begin_start(&self, agent: &AgentId) -> bool {
+        let mut latest = lock(&self.state);
+        let entry = latest.agents.entry(agent.clone()).or_default();
+        if entry.running || entry.starting {
+            return false;
+        }
+        entry.starting = true;
+        true
+    }
+
+    /// Removes `agent`'s starting mark: the backend refused the start, or the call was dropped.
+    pub(crate) fn end_start(&self, agent: &AgentId) {
+        if let Some(entry) = lock(&self.state).agents.get_mut(agent) {
+            entry.starting = false;
+        }
     }
 }
 
@@ -122,7 +147,8 @@ pub(crate) fn note(agent: &AgentId, code: &'static str) {
 enum Slot {
     Info,
     Install(AgentId),
-    SignIn(AgentId, bool),
+    /// The agent, whether the state is a running one, and whether it is `Failed`.
+    SignIn(AgentId, bool, bool),
 }
 
 impl Slot {
@@ -136,6 +162,7 @@ impl Slot {
                     state,
                     SignIn::Queued | SignIn::Waiting { .. } | SignIn::DeviceCode { .. }
                 ),
+                matches!(state, SignIn::Failed { .. }),
             ),
         }
     }
