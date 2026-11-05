@@ -10,6 +10,9 @@
 //! - The launch variables: `STETDOC_AUTHOR`.
 //! - The skills ([`skills`]), rendered into Claude's plugin; Codex gets an index of them in
 //!   its instructions ([`skills::builtin::codex_index`]).
+//! - The skill packs ([`packs`]): a lawyer's or a firm's skill folders, checked and hashed per
+//!   launch, rendered once per hash into a cache, and written into a launch's own second
+//!   plugin (decision record 0040).
 //!
 //! What differs per session goes out as [`placeholders`] the host fills. The host decides
 //! everything the settings decide (web search on or off, the seeded `WebFetch` rules, the
@@ -19,6 +22,7 @@ pub mod claude;
 pub mod codex;
 pub mod error;
 pub mod instructions;
+pub mod packs;
 pub mod paths;
 pub mod placeholders;
 pub mod servers;
@@ -38,6 +42,7 @@ pub use claude::ClaudeOptions;
 pub use codex::CodexConfig;
 pub use error::ProfileError;
 pub use instructions::Instructions;
+pub use packs::{PacksWritten, write_packs};
 pub use paths::{BrowserSidecars, ProfilePaths};
 pub use servers::ProfileServer;
 pub use skills::{RenderReport, Rendered, RenderedSkill, SkillFile, SkillSource};
@@ -169,7 +174,55 @@ impl ClauseoProfile {
 
     /// The `_meta` for an agent of `kind`: Claude's fragment for Claude, none otherwise.
     pub fn session_meta(&self, kind: Option<AgentKind>) -> Option<Map<String, Value>> {
-        (kind == Some(AgentKind::Claude)).then(|| self.claude_options().meta_fragment())
+        self.session_meta_with_packs(kind, None)
+    }
+
+    /// [`Self::session_meta`], with the launch's pack plugin as a second `plugins` entry when
+    /// `packs` is given and wrote a skill: only [`write_packs`] makes the token, so Claude never
+    /// names a plugin the launch did not write.
+    pub fn session_meta_with_packs(
+        &self,
+        kind: Option<AgentKind>,
+        packs: Option<&PacksWritten>,
+    ) -> Option<Map<String, Value>> {
+        (kind == Some(AgentKind::Claude)).then(|| {
+            let options = self.claude_options();
+            match packs.filter(|packs| !packs.skills().is_empty()) {
+                Some(packs) => options.with_pack_plugin(packs.plugin().to_owned()),
+                None => options,
+            }
+            .meta_fragment()
+        })
+    }
+
+    /// The `CODEX_CONFIG` keys for an agent of `kind` with the index of what this launch
+    /// wrote: the built-in lines when `written` is the Claude plugin's [`SkillsWritten`], the
+    /// pack lines when `packs` is given ([`packs::index::codex_index_with_packs`]). With
+    /// neither, [`Self::codex_keys_without_index`].
+    pub fn codex_keys_with_packs(
+        &self,
+        kind: Option<AgentKind>,
+        written: Option<&SkillsWritten>,
+        packs: Option<&PacksWritten>,
+    ) -> Map<String, Value> {
+        if kind != Some(AgentKind::Codex) {
+            return Map::new();
+        }
+        let skills_root = self.paths.claude_skills();
+        let builtin = written.and_then(|written| {
+            if written.root == skills_root {
+                Some((skills_root.as_path(), self.skills.as_ref()))
+            } else {
+                tracing::warn!("a skills write of another folder: Codex gets no built-in index");
+                None
+            }
+        });
+        let index = packs::index::codex_index_with_packs(builtin, packs);
+        let text = self.instructions();
+        if index.is_empty() {
+            return CodexConfig::with_instructions(text).into_keys();
+        }
+        CodexConfig::with_instructions(format!("{text}\n\n{index}")).into_keys()
     }
 
     /// The `CODEX_CONFIG` keys for an agent of `kind`: Codex's for Codex, none otherwise, with
