@@ -96,7 +96,7 @@ pub use set_aside::{Entry as SetAsideEntry, Reason as SetAsideReason, SetAsideFa
 pub use set_aside::{
     after_session, before_launch, list_set_aside, restore_set_aside, set_aside_path,
 };
-pub use writer::{AclWriter, Added, ApplyFailure, Label, Reach, Strict, Walked};
+pub use writer::{AclWriter, Added, ApplyFailure, Found, Label, Reach, Strict, Walked};
 
 /// Whether an agent sandbox that grants by ACL can prepare a folder on Windows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

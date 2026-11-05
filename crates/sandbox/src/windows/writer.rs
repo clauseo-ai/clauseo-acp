@@ -18,6 +18,19 @@ pub enum Reach {
     FilesOnly,
 }
 
+/// A protected name a walk met (`.git`, `.claude` or `.mcp.json`, at any depth, links
+/// included and not followed), with its file ID: what the set-aside records at launch and
+/// compares when the agent exits (S15 `PR3b` round 2, N1).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Found {
+    /// Its path, in the form of the walk's root joined with each name below it.
+    pub path: PathBuf,
+    /// Its volume's serial number.
+    pub volume: u64,
+    /// Its 128-bit file ID (`FileIdInfo`).
+    pub id: [u8; 16],
+}
+
 /// What a write did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Added {
@@ -159,6 +172,13 @@ pub trait AclWriter {
     /// Whether `a` and `b` are the same file (one file ID on one volume), neither followed if
     /// a link: the credential link checked against the credentials file it must be (L5).
     fn same_file(&mut self, a: &Path, b: &Path) -> io::Result<bool>;
+    /// [`AclWriter::add`], refused as [`ApplyFailure::Changed`] unless the object it opened
+    /// to write is the file `expected` names (one file ID, compared on that same handle): the
+    /// credential link's write (L5, N8).
+    fn add_expecting(&mut self, grant: &Grant, expected: &Path) -> Result<Added, ApplyFailure>;
+    /// The protected names ([`Found`]) the walks since the last call met. Taking them clears
+    /// them.
+    fn found(&mut self) -> Vec<Found>;
     /// The child the last failed walk refused, when it was one (for the lawyer to see; never
     /// logged). Taking it clears it.
     fn refused_at(&mut self) -> Option<PathBuf>;

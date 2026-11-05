@@ -14,7 +14,7 @@ use crate::windows::test_world::{
     FakeFolders, GROUP_SID, NOTES, OTHER_POOL_SIDS, STATE, USER_SID, World, matter_one, matter_two,
     reserved, sids, trusted,
 };
-use crate::windows::writer::{Label, Strict};
+use crate::windows::writer::{Found, Label, Strict};
 
 type Key = (PathBuf, String, Rights, Inherit);
 
@@ -46,6 +46,8 @@ struct FakeAcl {
     refused: Option<PathBuf>,
     /// The trees handed back, with the pool users named.
     reclaimed: Vec<(PathBuf, Vec<Sid>)>,
+    /// What `found` hands out next.
+    found: Vec<Found>,
     /// `fail_walk` fails once only.
     fail_once: bool,
     /// A walk of this root panics, as a crash would stop it.
@@ -157,6 +159,17 @@ impl AclWriter for FakeAcl {
 
     fn same_file(&mut self, a: &Path, b: &Path) -> io::Result<bool> {
         Ok(a.file_name() == b.file_name())
+    }
+
+    fn add_expecting(&mut self, grant: &Grant, expected: &Path) -> Result<Added, ApplyFailure> {
+        if grant.path().file_name() != expected.file_name() {
+            return Err(ApplyFailure::Changed);
+        }
+        self.add(grant)
+    }
+
+    fn found(&mut self) -> Vec<Found> {
+        std::mem::take(&mut self.found)
     }
 
     fn label(&mut self, path: &Path) -> io::Result<Option<Label>> {
