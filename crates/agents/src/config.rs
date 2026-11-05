@@ -151,12 +151,19 @@ impl SigninConfig {
         lawyer_home_in(&self.base_env, os)
     }
 
-    /// The port Codex's browser sign-in needs free: 1455, or a test's own.
+    /// The port Codex's browser sign-in needs free: a test's own, or 1455.
+    #[cfg(feature = "test-support")]
     pub(crate) fn callback_port(&self) -> u16 {
-        #[cfg(feature = "test-support")]
-        if let Some(port) = self.callback_port {
-            return port;
-        }
+        self.callback_port.unwrap_or(CODEX_CALLBACK_PORT)
+    }
+
+    /// The port Codex's browser sign-in needs free: always 1455 outside tests.
+    #[cfg(not(feature = "test-support"))]
+    #[expect(
+        clippy::unused_self,
+        reason = "the test-support build reads a test's own port from self; one signature for both"
+    )]
+    pub(crate) fn callback_port(&self) -> u16 {
         CODEX_CALLBACK_PORT
     }
 }

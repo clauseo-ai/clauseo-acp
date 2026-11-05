@@ -310,5 +310,7 @@ crates/agents/examples/install.rs mb clippy::cast_precision_loss
 crates/agents/src/keys.rs Keychain::clear clippy::unnecessary_wraps
 # S18: the Windows file id (CreateFileW with access 0, then GetFileInformationByHandle).
 crates/agents/src/fileid.rs file_id unsafe_code
+# S18: the Codex callback port is a test's own only under test-support; outside it self goes unused.
+crates/agents/src/config.rs SigninConfig::callback_port clippy::unused_self
 # The Chrome for Testing download's Win32 calls: System32's folder, free space, Authenticode.
 crates/host/src/browser/install/windows.rs - unsafe_code
