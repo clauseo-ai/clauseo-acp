@@ -215,7 +215,8 @@ call before `install` stays a no-op seam until S22 merges.
   newer than the running one, holding exactly one file; PR 5's adapter must save it so. A file
   the download left half written passes this test; the plugin's `install` verifies the bytes
   and signature again and refuses it. Start-up removes everything else in `updates/`, and that
-  download too when the marker says its install failed.
+  download too when the marker says an install failed (`from` the running version), whatever
+  its version, as the machine drops it then.
 - **The marker** is written through a temporary file, synced, renamed, then the data folder is
   synced, so the rename survives a power cut during the install. A failed folder sync is logged
   and the install goes ahead: the marker is on disk, and reporting a failed write would count a

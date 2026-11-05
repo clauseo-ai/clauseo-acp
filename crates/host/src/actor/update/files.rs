@@ -136,14 +136,10 @@ pub(super) fn run(locations: &Locations, job: Job) -> Done {
         Job::Read { current } => {
             let marker = read_update_marker(locations);
             let cached = find_cached(locations, &current);
-            // Only last run's download can be offered again, and not one whose install the
-            // marker says failed (it is fetched again).
-            let failed = |cached: &&crate::update::CachedDownload| {
-                marker
-                    .as_ref()
-                    .is_some_and(|m| m.from == current && m.to == cached.version)
-            };
-            remove_old_downloads(locations, cached.as_ref().filter(|c| !failed(c)));
+            // Only last run's download can be offered again, and none when the marker says an
+            // install failed: the machine drops it then whatever its version, and fetches again.
+            let failed = marker.as_ref().is_some_and(|m| m.from == current);
+            remove_old_downloads(locations, cached.as_ref().filter(|_| !failed));
             Done::Read { marker, cached }
         }
         Job::Write(marker) => match write_marker(locations, &marker) {
