@@ -24,7 +24,7 @@
 //! Dropping a [`BrowserSession`] releases the claims and removes the folder. The launch's
 //! `RunFolders` holds it, and it drops off the actor when the run folder goes
 //! (`launch_checks::discard`): after the agent's tree was killed, or when the agent never
-//! started.
+//! started. Shutdown waits for that removal, so the folder is gone once it answers.
 
 use std::io;
 #[cfg(any(windows, test))]

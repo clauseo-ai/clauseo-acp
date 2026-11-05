@@ -20,7 +20,8 @@
 //! ([`codex::prepare::off_actor_or_undo`]), and otherwise from the actor ([`discard`]) when
 //! the answer is for an earlier launch, the host is stopping, the profile keys or the launch
 //! fail, or the agent ends ([`remove_run`]). No launch
-//! removes another's folder: a prep that came late can only take its own.
+//! removes another's folder: a prep that came late can only take its own. Shutdown waits for
+//! the actor's removals in flight, so the host answers it with the run folders gone.
 //!
 //! For a session that can get the browser, the same thread checks that the browser entry's
 //! sidecars (`clauseo-mcp` and agent-browser) exist, finds its Chrome, and claims its ports and,
@@ -43,7 +44,6 @@ use super::super::Actor;
 use super::super::input::Input;
 use super::agents::{self, Waiting};
 use super::{TurnInput, host_stopping, state};
-use futures::task::LocalSpawnExt;
 
 use crate::agent::folder_support::{Answer, FolderCheck};
 use crate::agent::{codex, data_folder};
@@ -494,12 +494,15 @@ pub(super) fn on_prepared(
 
 /// Removes `run` (`thread`'s launch's run folder) off the actor and drops its browser claims
 /// there; the notes folder stays. The session has ended (its agent's tree killed) or never
-/// started, so its browser slot, if it held one, is free.
+/// started, so its browser slot, if it held one, is free. The removal counts as work in flight
+/// ([`super::super::Work::run_removals`]) until its [`TurnInput::RunRemoved`], so shutdown
+/// answers only once the folder and the claims are gone (or the removal's wait has passed).
 fn discard(actor: &mut Actor, thread: ThreadId, run: RunFolders) {
     actor.wiring.browser_slots.release(run.key);
     let clock = std::sync::Arc::clone(&actor.clock);
     let job = codex::prepare::Job::short("run folder removal", Some(run.key.matter));
-    let spawned = actor.spawner.spawn_local(async move {
+    actor.work.run_removals += 1;
+    actor.spawn_post(async move {
         let removed = codex::prepare::off_actor(clock, job, move || {
             run.remove();
             // The browser claims go here, off the actor and after the agent's tree was killed:
@@ -515,10 +518,13 @@ fn discard(actor: &mut Actor, thread: ThreadId, run: RunFolders) {
                 "a session's run folder was not removed"
             );
         }
+        Input::Turn(TurnInput::RunRemoved)
     });
-    if let Err(error) = spawned {
-        tracing::warn!(%thread, %error, "a session's run folder was not removed");
-    }
+}
+
+/// A run folder's removal ended: shutdown no longer waits for it.
+pub(super) fn on_run_removed(actor: &mut Actor) {
+    actor.work.run_removals = actor.work.run_removals.saturating_sub(1);
 }
 
 /// Removes `thread`'s run folder off the actor, once its agent has ended or failed to launch.

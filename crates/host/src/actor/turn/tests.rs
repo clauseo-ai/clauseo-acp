@@ -12,6 +12,7 @@ mod made;
 mod order;
 mod queue;
 mod relocate;
+mod removal;
 mod repair;
 mod restore;
 mod rig;

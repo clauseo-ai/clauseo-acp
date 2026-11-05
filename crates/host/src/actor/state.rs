@@ -60,6 +60,9 @@ pub(crate) struct Work {
     pub(crate) receipts: usize,
     pub(crate) matter_jobs: usize,
     pub(crate) snapshots: usize,
+    /// Run folders being removed off the actor (`launch_checks::discard`), with their browser
+    /// claims: shutdown answers only once they are gone.
+    pub(crate) run_removals: usize,
 }
 
 impl Work {
@@ -69,6 +72,7 @@ impl Work {
             && self.receipts == 0
             && self.matter_jobs == 0
             && self.snapshots == 0
+            && self.run_removals == 0
     }
 }
 
