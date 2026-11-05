@@ -9,7 +9,7 @@ use std::process::Command;
 use crate::support::{CDP_PORT, GUARD, Scratch, example, guard_command, port_args, run};
 use crate::write;
 
-const MODE_USAGE: &str = "usage: clauseo-mcp <mode> ... (modes: browser-guard)\n";
+const MODE_USAGE: &str = "usage: clauseo-mcp <mode> ... (modes: browser-guard, connector)\n";
 const GUARD_USAGE: &str = if cfg!(windows) {
     "usage: clauseo-mcp browser-guard --agent-browser <file> --cwd <folder> --cdp-port <port> \
      --daemon-port <port> -- <agent-browser args...>\n"

@@ -1,5 +1,5 @@
-//! `clauseo-mcp`: the sidecar binary the agents start as an MCP server. One mode today,
-//! `browser-guard`; R24 adds `connector`.
+//! `clauseo-mcp`: the sidecar binary the agents start as an MCP server. Two modes:
+//! `browser-guard` and `connector`.
 //!
 //! # Owns
 //!
@@ -7,6 +7,11 @@
 //!   built-in MCP server (`agent-browser mcp --tools core`, v0.41.1). It starts agent-browser with
 //!   an environment built from scratch, relays stdio both ways, and refuses tool calls whose
 //!   arguments would undo Clauseo's isolation. `docs/decisions/0029-browser.md` is the record.
+//! - The connector relay client ([`connector`]): `clauseo-mcp connector <name>`, the stdio MCP
+//!   server for a connector. It relays each JSON-RPC line, unchanged, over loopback TCP to the
+//!   host's per-launch relay, and answers "not reachable" itself when there is no relay. It reads
+//!   the relay address from `CLAUSEO_RELAY` and the token from the file `CLAUSEO_RELAY_TOKEN_FILE`
+//!   names; it never puts the token on stdout, stderr or argv.
 //! - The one place the crate creates folders (`write.rs`; the Unix socket folder under `/tmp`
 //!   is made with mode 0700 and checked in `browser_guard/socket.rs`) and starts a process
 //!   (`browser_guard/relay.rs`, `spawn_child`).
@@ -42,6 +47,7 @@
 //! `browser_guard.rs`, then `browser_guard/filter.rs` (the rules), `env.rs`, `relay.rs`.
 
 pub mod browser_guard;
+pub mod connector;
 mod write;
 
 /// A mode's failure: the exit code and the message `main` prints on stderr.
