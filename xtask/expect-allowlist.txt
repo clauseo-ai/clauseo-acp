@@ -141,12 +141,16 @@ crates/sandbox/src/windows/test_junction.rs - clippy::disallowed_methods
 crates/sandbox/src/windows/record.rs - unsafe_code
 crates/sandbox/src/windows/detect.rs - unsafe_code
 crates/sandbox/src/windows/private_dir.rs - unsafe_code
-# Tier B's permission writes and walk (src/windows/acl.rs, S15 PR3a), a test that moves a file in,
-# and the label helpers only Windows uses.
+# Tier B's permission writes and walk (src/windows/acl.rs, S15 PR3a), tests that move a file in or
+# play an agent racing the walk, and the label helpers only Windows uses.
 crates/sandbox/src/windows/acl.rs - unsafe_code
 crates/sandbox/src/windows/acl/tests.rs the_next_walk_reaches_a_file_moved_in_since clippy::disallowed_methods
 crates/sandbox/src/windows/acl_bytes.rs SACL_AUTO_INHERITED dead_code
 crates/sandbox/src/windows/acl_bytes.rs empty_acl dead_code
+crates/sandbox/src/windows/acl_bytes.rs label_spec dead_code
+crates/sandbox/src/windows/acl/tests.rs a_subfolder_swapped_for_a_junction_after_the_listing_is_never_passed_through clippy::disallowed_methods
+crates/sandbox/src/windows/acl/tests.rs a_subfolder_moved_after_its_check_refuses_the_walk clippy::disallowed_methods
+crates/sandbox/src/windows/acl/tests.rs presence_through_a_swapped_name_is_an_error clippy::disallowed_methods
 
 # clauseo-search: its write module (the private index file, and removing one to rebuild), its
 # tests' write module (each test's folder, damaged files), and the measurement's clock.

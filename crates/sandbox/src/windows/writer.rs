@@ -38,6 +38,19 @@ pub struct Walked {
     pub skipped: u64,
 }
 
+/// An explicit mandatory label found on a target: its level (`S-1-16-<level>`), flags and
+/// mask. A Low label grant replaces the lawyer's own explicit label, so the one there before is
+/// read first ([`AclWriter::label`]) and put back when ours goes ([`AclWriter::restore_label`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Label {
+    /// The level's relative id: `4096` Low, `8192` Medium, `12288` High.
+    pub level: u32,
+    /// The entry's flags (inheritance).
+    pub flags: u8,
+    /// The entry's mask: no-write-up `0x1`, no-read-up `0x2`, no-execute-up `0x4`.
+    pub mask: u32,
+}
+
 /// Why an apply, a removal or a walk failed. Names no path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ApplyFailure {
@@ -99,7 +112,8 @@ pub trait AclWriter {
     fn add(&mut self, grant: &Grant) -> Result<Added, ApplyFailure>;
     /// Removes `grant`'s explicit entry; one already gone, or a missing path, is `Ok`.
     fn remove(&mut self, grant: &Grant) -> Result<(), ApplyFailure>;
-    /// Whether `grant`'s explicit entry is on its path.
+    /// Whether `grant`'s explicit entry is on its path. A path that is a link now, or whose
+    /// final path isn't the planned one, is an error.
     fn present(&mut self, grant: &Grant) -> io::Result<bool>;
     /// Works out each file and folder below `root` from its parent's inheritable entries and
     /// the Low label, as far as `reach`, writing what changed. Skips junctions, symbolic links
@@ -111,4 +125,10 @@ pub trait AclWriter {
         reach: Reach,
         strict: Option<&[Sid]>,
     ) -> Result<Walked, ApplyFailure>;
+    /// The explicit mandatory label on `path` now, if any (ours included); `None` when the
+    /// path is missing. Read before a label grant is written over it.
+    fn label(&mut self, path: &Path) -> io::Result<Option<Label>>;
+    /// Puts `label` back as the explicit label on `grant`'s path (a Low label grant), in place
+    /// of ours or of none; another explicit label set since is left as it is.
+    fn restore_label(&mut self, grant: &Grant, label: Label) -> Result<(), ApplyFailure>;
 }
