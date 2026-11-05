@@ -30,8 +30,14 @@ fn start(dir: &Path, run: u16) -> (HostHandle, HostJoin) {
     // OS (`/usr/bin/true` is not on Windows). Nothing here launches it.
     let command = dir.join("agent");
     let settings = serde_json::json!({ "agents": { "fake-agent": { "command": command } } });
-    crate::write::write_file(&dir.join("settings.json"), settings.to_string().as_bytes()).unwrap();
-    let effective = Effective::load(&Locations::under_root(dir), &SystemFiles, &[]);
+    // The data folder is `dir/data` (`Locations::under_home`): new matters go outside it.
+    crate::write::create_dir_all(&dir.join("data")).unwrap();
+    crate::write::write_file(
+        &dir.join("data").join("settings.json"),
+        settings.to_string().as_bytes(),
+    )
+    .unwrap();
+    let effective = Effective::load(&Locations::under_home(dir), &SystemFiles, &[]);
     let launcher = PassthroughLauncher::new(SpawnOptions::new().home(dir.join("home")));
     let config = HostConfig::new(effective, Arc::new(launcher))
         .with_clock(Arc::new(ManualClock::new(
@@ -275,8 +281,9 @@ fn a_second_start_is_locked_and_abort_frees_the_folder() {
     let dir = TempDir::new("actor-lock");
     let (host, _join) = start(dir.path(), 0);
     let settings = b"{}";
-    crate::write::write_file(&dir.path().join("settings.json"), settings).unwrap();
-    let effective = Effective::load(&Locations::under_root(dir.path()), &SystemFiles, &[]);
+    crate::write::create_dir_all(&dir.path().join("data")).unwrap();
+    crate::write::write_file(&dir.path().join("data").join("settings.json"), settings).unwrap();
+    let effective = Effective::load(&Locations::under_home(dir.path()), &SystemFiles, &[]);
     let launcher = PassthroughLauncher::new(SpawnOptions::new());
     let second = Host::start(HostConfig::new(effective, Arc::new(launcher))).unwrap_err();
     assert_eq!(second.code(), ErrorCode::StoreLocked);
@@ -305,7 +312,9 @@ fn schema_1_snapshot(events: &[Envelope]) -> Vec<u8> {
 fn a_schema_1_snapshot_is_passed_over_and_the_log_folded_and_snapshotted_again() {
     let dir = TempDir::new("actor-old-snapshot");
     block_on(async {
-        let store = Store::open(StoreOptions::new(dir.path())).await.unwrap();
+        let data = dir.path().join("data");
+        crate::write::create_dir_all(&data).unwrap();
+        let store = Store::open(StoreOptions::new(&data)).await.unwrap();
         for commit in fixtures::reopen_20k(schema_1_snapshot, 1) {
             store.commit(commit).await.unwrap();
         }
@@ -354,7 +363,9 @@ fn a_schema_1_snapshot_is_passed_over_and_the_log_folded_and_snapshotted_again()
     // The whole-log fold was 20,000 events, past SNAPSHOT_EVERY_EVENTS: the load wrote a
     // snapshot of this schema at the head, and it decodes with the same times.
     block_on(async {
-        let store = Store::open(StoreOptions::new(dir.path())).await.unwrap();
+        let store = Store::open(StoreOptions::new(dir.path().join("data")))
+            .await
+            .unwrap();
         let reopen = store
             .reopen(fixtures::stream(), REDUCER_SCHEMA_VERSION)
             .await

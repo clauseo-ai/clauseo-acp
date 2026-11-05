@@ -9,7 +9,6 @@ use clauseo_protocol::{
 };
 
 use crate::support::{Dir, Running, wait};
-#[cfg(unix)]
 use crate::write;
 
 /// Imports `folder` as `name`.
@@ -169,6 +168,50 @@ fn clauseos_data_folder_is_folder_in_matters_root() {
         &dir.data().join("matters"),
         ErrorCode::MatterFolderInMattersRoot,
     );
+    host.shutdown();
+}
+
+/// A new folder inside Clauseo's data folder is refused as an import of the same folder is
+/// (`matter.folder_in_matters_root`), and nothing is made: no folder, no matter.
+#[test]
+fn a_new_folder_inside_clauseos_data_folder_is_folder_in_matters_root() {
+    let dir = Dir::new("refuse_new_in_data", &[]);
+    let host = dir.start(0);
+    let parent = dir.data().join("work");
+    write::create_dir_all(&parent);
+    let parent_ref = host.folder_ref(&parent);
+    let matters = || host.matters().len();
+    let listed = matters();
+    let error = host.refused(
+        HostCommand::CreateMatter {
+            name: Title::new("Appeal").unwrap(),
+            source: MatterSource::NewFolder { folder: parent_ref },
+            client: None,
+            next_date: None,
+        },
+        ErrorCode::MatterFolderInMattersRoot,
+    );
+    assert_eq!(error.matter(), None, "{error}");
+    assert!(!parent.join("Appeal").exists(), "no folder was made");
+    assert_eq!(matters(), listed, "no matter was listed");
+    host.shutdown();
+}
+
+/// A new folder beside the data folder, under the home folder, is made as before.
+#[test]
+fn a_new_folder_outside_the_data_folder_is_made() {
+    let dir = Dir::new("create_new_outside_data", &[]);
+    let parent = dir.folder("Matters", &[]);
+    let host = dir.start(0);
+    let parent_ref = host.folder_ref(&parent);
+    let created = host.ok(HostCommand::CreateMatter {
+        name: Title::new("Appeal").unwrap(),
+        source: MatterSource::NewFolder { folder: parent_ref },
+        client: None,
+        next_date: None,
+    });
+    assert!(matches!(created, CommandOutcome::MatterCreated { .. }));
+    assert!(parent.join("Appeal/.clauseo/matter.json").is_file());
     host.shutdown();
 }
 

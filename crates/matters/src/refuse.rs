@@ -70,9 +70,23 @@ pub fn check_place(folder: &Path, refused: &[PathBuf]) -> Result<(), Error> {
 /// after its marker read ([`check_outside_root`]): refuses a folder that is, holds or sits
 /// inside the matters root (`Refusal::MattersRoot`) or a `refused_trees` entry
 /// (`Refusal::Listed`). For the host's `FolderSupport` query, which refuses what an import
-/// would before checking the folder.
+/// would before checking the folder. The folder need not exist: a new matter's folder is
+/// checked before it is made, by its path as it would be ([`same_or_nested`] resolves the part
+/// that is not made yet), and nothing is read or written.
 pub fn check_protected(folder: &Path, settings: &Settings) -> Result<(), Error> {
-    check_outside_root(folder, settings)
+    let refuse = |reason| Error::FolderRefused {
+        folder: folder.to_path_buf(),
+        reason,
+    };
+    if same_or_nested(folder, &settings.matters_root) {
+        return Err(refuse(Refusal::MattersRoot));
+    }
+    for tree in &settings.refused_trees {
+        if same_or_nested(folder, tree) {
+            return Err(refuse(Refusal::Listed(tree.clone())));
+        }
+    }
+    Ok(())
 }
 
 /// Refuses `folder` if it already holds a `.clauseo/matter.json` (it belongs to a matter;
@@ -102,20 +116,8 @@ pub(crate) fn check_new_matter(folder: &Path, settings: &Settings) -> Result<(),
 /// (`Refusal::Listed(entry)`, the entry as the host passed it). Import checks it after the marker;
 /// locate and relink, which need a marker, check it alone.
 pub(crate) fn check_outside_root(folder: &Path, settings: &Settings) -> Result<(), Error> {
-    let refuse = |reason| Error::FolderRefused {
-        folder: folder.to_path_buf(),
-        reason,
-    };
     dunce::canonicalize(folder).map_err(|err| Error::io("canonicalize", folder, err))?;
-    if same_or_nested(folder, &settings.matters_root) {
-        return Err(refuse(Refusal::MattersRoot));
-    }
-    for tree in &settings.refused_trees {
-        if same_or_nested(folder, tree) {
-            return Err(refuse(Refusal::Listed(tree.clone())));
-        }
-    }
-    Ok(())
+    check_protected(folder, settings)
 }
 
 /// Whether `a` and `b` are the same folder or one holds the other, compared as the refused-folder

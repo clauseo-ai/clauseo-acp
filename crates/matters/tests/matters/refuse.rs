@@ -325,3 +325,107 @@ fn a_missing_path_under_a_symlink_compares_with_the_real_folder() {
         &real
     ));
 }
+
+/// Create makes a new folder only where import would take the folder: a new folder inside a
+/// refused tree (the data folder) or the matters root is refused with the reason import gives
+/// for the same path, and nothing is made (no folder, no marker, no history).
+#[test]
+fn create_refuses_a_new_folder_inside_a_refused_tree() {
+    let fx = Fixture::new("refuse-create-tree");
+    let data = fx.dir.path().join("data");
+    let settings = tree_settings(&fx, &data);
+    let parent = data.join("x");
+    support::create_dir_all(&parent);
+    let root = data.join("matters");
+    for (folder, want) in [
+        (parent.join("Appeal"), Refusal::Listed(data.clone())),
+        (data.join("Appeal"), Refusal::Listed(data.clone())),
+        (root.join("Appeal"), Refusal::MattersRoot),
+    ] {
+        let new = NewMatter {
+            folder: folder.clone(),
+            ..fx.new_matter()
+        };
+        let err = Matter::create(settings.clone(), new).unwrap_err();
+        assert_eq!(err.code(), ErrorCode::MatterFolderRefused, "{err:?}");
+        let reason = match err {
+            Error::FolderRefused { reason, .. } => reason,
+            other => panic!("expected a refusal, got {other:?}"),
+        };
+        assert_eq!(reason, want, "{}", folder.display());
+        // The import of the same path, once it exists, is refused for the same reason.
+        support::create_dir_all(&folder);
+        assert_eq!(
+            refusals(&fx, &settings, &folder),
+            want,
+            "{}",
+            folder.display()
+        );
+        support::remove_dir_all(&folder);
+        assert!(!folder.exists(), "{}", folder.display());
+        assert!(
+            !settings
+                .matters_root
+                .join(matter_id(1).to_string())
+                .exists()
+        );
+        assert!(!root.join(matter_id(1).to_string()).exists());
+    }
+    assert!(!data.join("Appeal").exists());
+    assert!(!parent.join("Appeal").exists());
+}
+
+/// A new folder beside the refused tree, or under a folder that holds it, is made as before.
+#[test]
+fn create_accepts_a_new_folder_outside_the_refused_tree() {
+    let fx = Fixture::new("refuse-create-beside");
+    let data = fx.dir.path().join("data");
+    let settings = tree_settings(&fx, &data);
+    let home = fx.dir.path().join("home");
+    support::create_dir_all(&home);
+    let folders = [
+        home.join("Appeal"),
+        fx.dir.path().join("data-notes").join("Appeal"),
+    ];
+    for (n, folder) in (1..).zip(folders) {
+        let new = NewMatter {
+            id: matter_id(n),
+            folder: folder.clone(),
+            ..fx.new_matter()
+        };
+        let matter = Matter::create(settings.clone(), new).unwrap();
+        assert_eq!(matter.folder(), folder);
+        assert!(
+            folder.join(".clauseo/matter.json").is_file(),
+            "{}",
+            folder.display()
+        );
+    }
+}
+
+/// The protected-folder check takes a path that is not made yet: it refuses what sits inside
+/// the data folder and accepts what does not, and makes nothing.
+#[test]
+fn check_protected_takes_a_folder_not_made_yet() {
+    let fx = Fixture::new("refuse-protected");
+    let data = fx.dir.path().join("data");
+    let settings = tree_settings(&fx, &data);
+    support::create_dir_all(data.join("x"));
+    for folder in [data.join("x").join("_"), data.join("_")] {
+        let err = clauseo_matters::check_protected(&folder, &settings).unwrap_err();
+        assert_eq!(
+            err.code(),
+            ErrorCode::MatterFolderRefused,
+            "{}",
+            folder.display()
+        );
+        assert!(matches!(
+            err,
+            Error::FolderRefused { reason: Refusal::Listed(ref tree), .. } if *tree == data
+        ));
+    }
+    clauseo_matters::check_protected(&fx.dir.path().join("_"), &settings).unwrap();
+    clauseo_matters::check_protected(&fx.dir.path().join("data-notes").join("_"), &settings)
+        .unwrap();
+    assert!(!data.join("x").join("_").exists());
+}

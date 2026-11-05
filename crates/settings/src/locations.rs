@@ -110,6 +110,13 @@ impl Locations {
         Self::with_data_dir(root.to_owned(), root.join("Documents").join("Clauseo"))
     }
 
+    /// The folders of a home at `root`, as a real one lays them out: the data folder is
+    /// `root/data` and new matters go in `root/Documents/Clauseo`, outside the data folder (a
+    /// matter inside it is refused). Reads nothing; for tests and `cli`.
+    pub fn under_home(root: &Path) -> Locations {
+        Self::with_data_dir(root.join("data"), root.join("Documents").join("Clauseo"))
+    }
+
     /// The data folder, which holds `settings.json` and the matters' history.
     pub fn data_dir(&self) -> &Path {
         &self.data_dir

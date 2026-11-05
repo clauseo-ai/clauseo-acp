@@ -323,3 +323,16 @@ fn the_identifier_is_the_desktop_apps() {
     let config: serde_json::Value = serde_json::from_str(&config).unwrap();
     assert_eq!(config["identifier"], IDENTIFIER);
 }
+
+#[test]
+fn under_home_keeps_new_matters_outside_the_data_folder() {
+    let home = Path::new("/srv/home");
+    let at = Locations::under_home(home);
+    assert_eq!(at.data_dir(), home.join("data"));
+    assert_eq!(at.settings_file(), home.join("data").join("settings.json"));
+    assert_eq!(
+        at.default_matters_dir(),
+        home.join("Documents").join("Clauseo")
+    );
+    assert!(!at.default_matters_dir().starts_with(at.data_dir()));
+}

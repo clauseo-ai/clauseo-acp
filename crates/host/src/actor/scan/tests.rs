@@ -133,7 +133,7 @@ impl Running {
         // The data folder beside the scanned folders, never around them.
         let data = dir.path().join("data");
         crate::write::create_dir_all(&data).unwrap();
-        let effective = Effective::load(&Locations::under_root(&data), &SystemFiles, &[]);
+        let effective = Effective::load(&Locations::under_home(dir.path()), &SystemFiles, &[]);
         let launcher = PassthroughLauncher::new(SpawnOptions::new().home(dir.path().join("home")));
         let clock = ManualClock::new(Timestamp::new(1_790_000_000_000).unwrap());
         let mut config = HostConfig::new(effective, Arc::new(launcher))

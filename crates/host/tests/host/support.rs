@@ -95,13 +95,15 @@ impl Scenario {
     }
 }
 
-/// A test's own folder, `<temp>/clauseo-host-<test>-<pid>`, removed when dropped. The data
-/// folder is the root itself (`Locations::under_root`), agents get `home/` as their home, and
-/// matter folders go in `<temp>/clauseo-host-<test>-<pid>-work`, beside the root: a folder inside
-/// the data folder cannot be a matter.
+/// A test's own folder, `<temp>/clauseo-host-<test>-<pid>`, removed when dropped. It is the
+/// lawyer's home: the data folder is `root/data` and the new matters' folder `root/Documents/
+/// Clauseo`, outside it (`Locations::under_home`); agents get `home/` as their home, and matter
+/// folders go in `<temp>/clauseo-host-<test>-<pid>-work`, beside the root: a folder inside the
+/// data folder cannot be a matter.
 #[derive(Debug)]
 pub(crate) struct Dir {
     root: PathBuf,
+    data: PathBuf,
     work: PathBuf,
 }
 
@@ -116,8 +118,10 @@ impl Dir {
         write::remove_dir_all(&root).unwrap();
         write::remove_dir_all(&work).unwrap();
         write::create_dir_all(&root.join("home"));
+        write::create_dir_all(&root.join("data"));
         write::create_dir_all(&work);
-        let dir = Self { root, work };
+        let data = root.join("data");
+        let dir = Self { root, data, work };
         dir.set_agents(agents);
         dir
     }
@@ -150,7 +154,7 @@ impl Dir {
             settings.extend(extra);
         }
         write::write(
-            &self.root.join("settings.json"),
+            &self.data().join("settings.json"),
             serde_json::to_string_pretty(&settings).unwrap().as_bytes(),
         );
     }
@@ -166,8 +170,13 @@ impl Dir {
         write::write(&self.root.join("managed-mcp.json"), b"{\"mcpServers\": {}}");
     }
 
-    /// The data folder (the test's root folder), where the store keeps its database.
+    /// The data folder, `root/data`, where the store keeps its database.
     pub(crate) fn data(&self) -> &Path {
+        &self.data
+    }
+
+    /// The lawyer's home folder: the test's own folder, the data folder inside it.
+    pub(crate) fn home(&self) -> &Path {
         &self.root
     }
 
@@ -181,9 +190,9 @@ impl Dir {
         folder
     }
 
-    /// The data folder (the test's root).
+    /// The data folder, as [`Dir::data`].
     pub(crate) fn data_dir(&self) -> &Path {
-        &self.root
+        &self.data
     }
 
     /// The folder the matter folders go in, `<root>-work`, beside the data folder.
@@ -213,7 +222,7 @@ impl Dir {
         clock: &ManualClock,
         launcher: Arc<dyn Launcher>,
     ) -> HostConfig {
-        let locations = Locations::under_root(&self.root);
+        let locations = Locations::under_home(&self.root);
         let policy = FilePolicy::new(self.root.join("policy.json"), SystemFiles);
         let effective = Effective::load(&locations, &SystemFiles, &[&policy]);
         HostConfig::new(effective, launcher)
@@ -231,7 +240,7 @@ impl Dir {
 
     /// The text of `settings.json`.
     pub(crate) fn settings_json(&self) -> String {
-        std::fs::read_to_string(self.root.join("settings.json")).unwrap()
+        std::fs::read_to_string(self.data().join("settings.json")).unwrap()
     }
 
     /// Starts run `run` with `policy`, a `policy.json`'s text, as its one policy source.
