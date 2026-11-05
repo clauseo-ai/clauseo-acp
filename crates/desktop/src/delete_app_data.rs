@@ -33,7 +33,11 @@
 //!   `sandbox`, whole and unlooked-into, unless [`SANDBOX_REMOVED`] (S15's records, which its
 //!   `--remove` needs to take its access rules back off the lawyer's folders); with it,
 //!   `sandbox\set-aside` (the lawyer's own files that tier B moved aside) unless it is a real,
-//!   empty folder. A `sandbox` that is a link goes as a link and nothing behind it is kept.
+//!   empty folder. A `sandbox` that is a link goes as a link and nothing behind it is kept:
+//!   with [`SANDBOX_REMOVED`] like any other link; without it, by handle
+//!   (`ops::unlink_name_surrogate`): the reparse tag is read on the handle that deletes, only a
+//!   junction or a symbolic link is removed, any other reparse point is kept, and either way it
+//!   is reported, so the run fails and the uninstaller names nothing outside the data folder.
 //! - Exit codes: [`KEPT_SANDBOX`] or [`KEPT_SET_ASIDE`] when that folder stays and all else
 //!   went; [`KEPT_AND_FAILED`] when one stays and something else could not be deleted (the
 //!   uninstaller names both, in one message: never "delete the whole folder" alone, which holds

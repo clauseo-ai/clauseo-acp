@@ -244,6 +244,15 @@ S15's tools sat in `windows.conf.json` and S27's in `tauri.conf.json`.
   shows one box unless silent (`English.nsh`): `deleteAppDataKept` naming the kept folder,
   `deleteAppDataKeptFailed` naming it and the data folder, or `deleteAppDataFailed` naming the
   data folder when nothing was kept. It never falls back to `RMDir /r`. `crates/desktop/src/delete_app_data.rs` holds the contract.
+- **Follow-ups from the VM rows (2026-11-05).** A `sandbox` that is itself a junction or a
+  directory symbolic link, with no `--sandbox-removed`, is no longer kept: the app opens it by
+  handle without following it, reads its reparse tag on that handle, and deletes the link through
+  the same handle only when it is a junction or a symbolic link, so a real folder swapped in is
+  never deleted. Any other reparse point (a cloud placeholder) is kept. Either way the run fails
+  (exit 1) and the box names nothing outside the data folder. The hook's `ShellExecuteExW` adds
+  `SEE_MASK_FLAG_NO_UI`, so a declined or blocked elevation (1223, 1260) shows no error box of
+  Windows' own; the consent prompt still shows, and a denial keeps `sandbox\` as a failed
+  `--remove` does.
 
 ## Status
 

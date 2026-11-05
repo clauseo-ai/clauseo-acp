@@ -8,6 +8,69 @@ use super::{DATA, World, exists, make};
 use crate::delete_app_data::walk::{check, plain};
 use crate::delete_app_data::{DELETED, FAILED, KEPT_AND_FAILED, ops};
 
+/// Runs the deletion without `--sandbox-removed` over a `sandbox` that `make` made a link to
+/// the canary: it is unlinked, reported, nothing kept (exit 1), and the canary is whole. The
+/// line names the link, never its target.
+fn assert_linked_sandbox_unlinked(world: &World) {
+    world.data_file("store.sqlite");
+    let (code, stderr) = world.delete(false);
+    assert_eq!(code, FAILED, "{stderr}");
+    assert!(stderr.contains("removed as a link"), "{stderr}");
+    assert!(
+        stderr.contains(world.data("sandbox").to_str().unwrap()),
+        "{stderr}"
+    );
+    assert!(
+        !stderr.contains(world.canary().to_str().unwrap()),
+        "{stderr}"
+    );
+    world.assert_both_gone();
+    world.assert_canary_whole();
+}
+
+#[test]
+fn a_sandbox_junction_without_sandbox_removed_is_unlinked_by_handle() {
+    let world = World::new("dad-sandbox-junction");
+    make::folder_link(&world.canary(), &world.data("sandbox"));
+    assert_linked_sandbox_unlinked(&world);
+}
+
+#[test]
+fn a_sandbox_directory_symbolic_link_without_sandbox_removed_is_unlinked_by_handle() {
+    let world = World::new("dad-sandbox-symlink");
+    if !make::made_or_unprivileged(make::symlink_dir(&world.canary(), &world.data("sandbox"))) {
+        return;
+    }
+    assert_linked_sandbox_unlinked(&world);
+}
+
+#[test]
+fn a_sandbox_reparse_point_that_is_no_link_is_kept_and_reported() {
+    // A reparse point with a tag of our own, neither a junction nor a link (as a cloud
+    // placeholder is neither): kept, the data folder with it, and the run fails.
+    let world = World::new("dad-sandbox-foreign");
+    let sandbox = world.data_dir("sandbox");
+    world.data_file("store.sqlite");
+    if let Err(error) = make::foreign_reparse_point(&sandbox, 0x0000_7E57) {
+        eprintln!("skipped: no reparse point of our own could be set here ({error})");
+        return;
+    }
+    let (code, stderr) = world.delete(false);
+    assert_eq!(code, FAILED, "{stderr}");
+    assert!(
+        stderr.contains("(tag 0x00007e57): kept, not deleted"),
+        "{stderr}"
+    );
+    let meta = std::fs::symlink_metadata(&sandbox).unwrap();
+    assert!(
+        crate::delete_app_data::walk::is_link(&meta),
+        "the reparse point is still there"
+    );
+    assert!(!exists(&world.data("store.sqlite")));
+    assert!(!exists(&world.roaming_root()));
+    world.assert_canary_whole();
+}
+
 #[test]
 fn a_directory_symbolic_link_goes_as_a_link_and_its_target_survives() {
     let world = World::new("dad-symlink-dir");

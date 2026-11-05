@@ -35,6 +35,10 @@ crates/desktop/src/open.rs check_document clippy::disallowed_methods
 crates/desktop/src/open/gate.rs now clippy::disallowed_methods
 # The uninstaller's --delete-app-data (S20): its only writes, and its tests' links, locks and modes.
 crates/desktop/src/delete_app_data/ops.rs - clippy::disallowed_methods
+# S20 follow-up: a linked `sandbox`'s reparse tag read and its delete done on one handle; the
+# test's own reparse point of no link kind.
+crates/desktop/src/delete_app_data/ops.rs unlink_name_surrogate unsafe_code
+crates/desktop/src/delete_app_data/tests/make.rs foreign_reparse_point unsafe_code
 crates/desktop/src/delete_app_data/tests/make.rs - clippy::disallowed_methods
 crates/desktop/src/open/mac_app.rs - unsafe_code
 crates/desktop/src/test_support.rs Scratch::executable clippy::disallowed_methods

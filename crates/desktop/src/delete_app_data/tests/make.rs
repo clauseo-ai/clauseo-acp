@@ -74,6 +74,57 @@ pub(super) fn symlink_file(target: &Path, link: &Path) -> io::Result<()> {
     std::os::unix::fs::symlink(target, link)
 }
 
+/// Makes the empty folder `folder` a reparse point with `tag`, a tag of no Microsoft kind and
+/// no name surrogate (`FSCTL_SET_REPARSE_POINT` with a `REPARSE_GUID_DATA_BUFFER`), so no
+/// filter acts on it. The caller skips when the file system refuses.
+#[cfg(windows)]
+#[expect(
+    unsafe_code,
+    reason = "FFI: DeviceIoControl sets the test's reparse point"
+)]
+pub(super) fn foreign_reparse_point(folder: &Path, tag: u32) -> io::Result<()> {
+    use std::os::windows::fs::OpenOptionsExt as _;
+    use std::os::windows::io::AsRawHandle as _;
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::System::IO::DeviceIoControl;
+    /// `FSCTL_SET_REPARSE_POINT`.
+    const FSCTL_SET_REPARSE_POINT: u32 = 0x0009_00A4;
+    /// `FILE_WRITE_DATA | FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES`.
+    const ACCESS: u32 = 0x2 | 0x80 | 0x100;
+    /// `FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT`.
+    const FLAGS: u32 = 0x0200_0000 | 0x0020_0000;
+    let file = std::fs::OpenOptions::new()
+        .access_mode(ACCESS)
+        .custom_flags(FLAGS)
+        .open(folder)?;
+    let data = *b"test";
+    // ReparseTag, ReparseDataLength, Reserved, ReparseGuid, then the data.
+    let mut buffer = Vec::new();
+    buffer.extend_from_slice(&tag.to_le_bytes());
+    buffer.extend_from_slice(&u16::try_from(data.len()).unwrap().to_le_bytes());
+    buffer.extend_from_slice(&0u16.to_le_bytes());
+    buffer.extend_from_slice(b"clauseo-test-tag");
+    buffer.extend_from_slice(&data);
+    let len = u32::try_from(buffer.len()).unwrap();
+    let mut returned = 0u32;
+    // SAFETY: the handle is open for the call (`file` lives past it); `buffer` is live and
+    // `len` bytes long; no output buffer; `returned` is a live out-pointer, as a call without
+    // an OVERLAPPED needs.
+    unsafe {
+        DeviceIoControl(
+            HANDLE(file.as_raw_handle()),
+            FSCTL_SET_REPARSE_POINT,
+            Some(buffer.as_ptr().cast()),
+            len,
+            None,
+            0,
+            Some(&raw mut returned),
+            None,
+        )
+    }
+    .map_err(io::Error::from)
+}
+
 /// Opens `file` with no sharing, so nothing can delete it while the handle lives.
 #[cfg(windows)]
 pub(super) fn lock(file: &Path) -> std::fs::File {
