@@ -517,3 +517,25 @@ fn the_unfinished_call_cap_refuses_a_new_call_and_keeps_the_open_ones() {
 fn codex() -> AgentId {
     AgentId::new("codex-acp").unwrap()
 }
+
+#[test]
+fn a_url_with_a_space_a_control_or_a_bidi_control_is_unsafe() {
+    use super::is_safe_url_text;
+    assert!(is_safe_url_text("https://sci.gov.in/a?b=c%20d"));
+    for url in [
+        "https://a b.example/",
+        "https://a.example/\u{7}",
+        "https://a.example/\u{7f}",
+        "https://a.example/\u{85}",
+        "https://a.example/\u{200E}",
+        "https://a.example/\u{200F}",
+        "https://a.example/\u{061C}",
+        "https://a.example/\u{202A}",
+        "https://a.example/\u{202E}",
+        "https://a.example/\u{2066}",
+        "https://a.example/\u{2069}",
+        "https://a.example/\n",
+    ] {
+        assert!(!is_safe_url_text(url), "{url:?}");
+    }
+}
