@@ -332,12 +332,16 @@ impl Progress {
 
 /// After `Ready`: removes this install's downloads (never the bundle's files) and the npm
 /// cache's contents. A file that will not go is left; the next install reuses or replaces it.
+/// The cache goes only when no link stands at `agents` or `npm-cache`.
 pub(super) fn clean_up(config: &AgentsConfig, fetched: &Fetched) {
     for path in &fetched.downloaded {
         drop(write::remove_file(path));
         drop(write::remove_file(&part_path(path)));
     }
-    drop(write::remove_dir_all(&npm_cache(&config.data_dir)));
+    let cache = npm_cache(&config.data_dir);
+    if write::real_dirs_under(&config.data_dir, &cache).unwrap_or(false) {
+        drop(write::remove_dir_all(&cache));
+    }
 }
 
 /// Whether the Windows path `path` is on a share: `\\server\share\…`, `\\?\UNC\…` or
