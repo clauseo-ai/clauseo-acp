@@ -2,29 +2,17 @@
 // built from parts. None of them uses मैं, पेंसिल, स्याही, चरण or
 // कदम, or "pencil", "ink" or "step".
 import type { Lang } from "./display.ts";
-import { wordsOf, type Slots, type Hindi } from "./words-core.ts";
+import { wordsOf, type Slots } from "./words-core.ts";
 import { t, type Key } from "./words.ts";
-
-const HI = {
-  // the "N more" fold at the wall's foot, once it's open: it folds the rest of the citations away again
-  "Show fewer": "कम दिखाएँ",
-  // the toolbar's name for assistive technology: search, Versions and Undo
-  "Tools for this matter": "इस मामले के टूल",
-  // the room's line, one line in every room, saying what the Safe workspace does and promising nothing.
-  // Inside a matter it names this matter's folder; where no matter is open yet, each matter's.
-  "Safe workspace. Clauseo works inside this matter's folder and asks before going beyond it.":
-    "सुरक्षित कार्यक्षेत्र। Clauseo इस मामले के फ़ोल्डर के भीतर काम करता है और उससे बाहर जाने से पहले पूछता है।",
-} as const;
+import type { HI } from "./words-room.hi.ts";
 
 export type RoomKey = keyof typeof HI;
 
-/** The room's own strings, for the tests' banned-words screen. */
-export const roomHindi: Hindi<RoomKey> = HI;
-
-const isRoomKey = (key: string): key is RoomKey => key in HI;
-const room = wordsOf<RoomKey>(HI);
+const room = wordsOf("room");
+/** Whether the room holds a key of its own. Only Hindi asks: in English every key says itself, whichever file holds it. */
+const isRoomKey = (key: string): key is RoomKey => Object.hasOwn(room.hi, key);
 
 /** A string in the language: the room's own first, then the language's. */
 export function rt(lang: Lang, key: RoomKey | Key, slots?: Slots): string {
-  return isRoomKey(key) ? room(lang, key, slots) : t(lang, key, slots);
+  return lang === "hi" && isRoomKey(key) ? room(lang, key, slots) : t(lang, key as Key, slots);
 }

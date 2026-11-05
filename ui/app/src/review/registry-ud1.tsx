@@ -2,6 +2,8 @@
 // in the real room over a FakeTransport that carries the setup wire, the first screen (no matter yet) or matter A open
 // with the sign-in gate in its composer, in the state that shows it, pressed into where a press is needed. The strings
 // from the approved design keep its Hindi and are approved "by": "design"; the new ones are English only (hi: later).
+// the Hindi words in at once, as review/words.ts has them: each ref reads its Hindi when made
+import "@clauseo/components/lib/words-hi.ts";
 import { fl, type FirstLaunchKey } from "@clauseo/components/lib/words-first-launch.ts";
 import { FakeTransport } from "../transport/fake-transport.ts";
 import type {

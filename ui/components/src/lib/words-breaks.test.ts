@@ -1,9 +1,11 @@
 // U10's words: a stream that failed says so before its code's sentence, and each start-up code has its own line, with
 // Hindi that ends in the danda and no banned word.
 import { expect, test } from "vitest";
-import { breakWords, brk, streamFailedWords } from "./words-breaks.ts";
+import { brk, streamFailedWords } from "./words-breaks.ts";
+import { breakWords } from "./words-breaks.hi.ts";
 import { ERROR_WORDS, errorWords, type ErrorCode } from "./words-errors.ts";
-import { STARTUP_WORDS, startupWordList, startupWords, type StartupCode } from "./words-startup.ts";
+import { STARTUP_WORDS, startupWords, type StartupCode } from "./words-startup.ts";
+import { startupWordList } from "./words-startup.hi.ts";
 import { clock } from "./words.ts";
 
 const BANNED_EN = /\bI\b|[\u2013\u2014]|\b(pencil|ink|step|git|token|session|terminal|safe)\b/i;

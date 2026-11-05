@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import { clock } from "./words.ts";
-import { matterWords, mt } from "./words-matters.ts";
+import { mt } from "./words-matters.ts";
+import { matterWords } from "./words-matters.hi.ts";
 
 test("no string of living in matters says I, names a model, or uses a dash or a banned word", () => {
   for (const s of Object.entries(matterWords).flat()) {

@@ -24,6 +24,7 @@
 // for screenshots of Devanagari tables, ₹ and bold in the room. With ?thread=shaping, the thread is a question and a
 // fixed answer (testing/shaping-answer.ts), finished: the cells in every block type, for the Devanagari shaping audit's
 // 1a and 1d. Not shipped.
+import { whenWordsReady } from "@clauseo/components/lib/display.ts";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "../App.tsx";
@@ -285,8 +286,11 @@ installDevHooks(connectRoom(transport, queryPatch(location.search)));
 
 const container = document.getElementById("root");
 if (container === null) throw new Error("index.html has no #root element");
-createRoot(container).render(
-  <StrictMode>
-    <App transport={transport} />
-  </StrictMode>,
+// as the room's main.tsx: a Hindi page renders once its words are in
+whenWordsReady(() =>
+  createRoot(container).render(
+    <StrictMode>
+      <App transport={transport} />
+    </StrictMode>,
+  ),
 );

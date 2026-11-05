@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { wordsOf } from "@clauseo/components/lib/words-core.ts";
+import { wordsOver } from "@clauseo/components/lib/words-core.ts";
 import { ERROR_WORDS } from "@clauseo/components/lib/words-errors.ts";
 import { currentOf, type Entry } from "./entry.ts";
 import { REGISTRY } from "./registry.tsx";
@@ -142,7 +142,7 @@ const HEARING = {
 } as const;
 
 const entriesOf = (hi: Record<keyof typeof HEARING, string | null>): Entry[] => {
-  const say = wordsOf<keyof typeof HEARING>(hi);
+  const say = wordsOver<keyof typeof HEARING>(() => hi);
   return (Object.keys(hi) as (keyof typeof HEARING)[]).map((key, i) => ({
     id: `T9-0${i + 1}`,
     words: {

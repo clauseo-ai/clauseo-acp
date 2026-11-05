@@ -4,7 +4,7 @@
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, test } from "vitest";
-import { matterFormWords } from "../lib/words-matter-form.ts";
+import { matterFormWords } from "../lib/words-matter-form.hi.ts";
 import { NewMatterForm } from "./matter-form.tsx";
 import { NewMatterDialog } from "./new-matter-dialog.tsx";
 

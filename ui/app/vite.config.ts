@@ -158,7 +158,9 @@ function probeEntry(): Plugin {
  * the title rules nothing; U7's queue strip only the first load; U16a's Find results only the first load and the small
  * jump-entry chunk they share with the list (isLazyShared); the tool line (its own chunk) only the first load, and its
  * popover only those and the line; UD1's first run only the first load (U2's form, which it shares with New matter, it
- * loads lazily itself, as Start a new matter is pressed). The dialogs that share the dialog primitives are
+ * loads lazily itself, as Start a new matter is pressed). The Hindi words (ui/components' words-hi.ts, every words
+ * file's .hi.ts) import only the first load's words registry: display.ts loads them before a Hindi display shows.
+ * The dialogs that share the dialog primitives are
  * PRELOADED_CHUNKS, not here. vite-config.test.ts checks that, and that no chunk carries a preload list except the
  * importers of PRELOADED_CHUNKS. */
 export const BARE_CHUNKS = [
@@ -175,6 +177,7 @@ export const BARE_CHUNKS = [
   "tool-line-room",
   "tool-popover",
   "first-run",
+  "words-hi",
 ];
 
 /** The lazy chunks that keep Vite's preload list, though not bare: a lazy part behind a click whose chunk imports

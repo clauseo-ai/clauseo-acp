@@ -6,13 +6,13 @@ import { expect, test } from "vitest";
 import { clock } from "./words.ts";
 import {
   ERROR_WORDS,
-  errorHindi,
   errorSentence,
   errorWords,
   plannedKey,
   PLANNED_CODES,
   type ErrorCode,
 } from "./words-errors.ts";
+import { errorHindi } from "./words-errors.hi.ts";
 import { fr, type FolderKey } from "./words-folder.ts";
 import { frc, type FolderCardKey } from "./words-folder-card.ts";
 import { frame } from "./words-frame.ts";
@@ -250,7 +250,7 @@ test("a code this version doesn't know reads as unknown's sentence, which is int
   expect(errorWords("en", "toString")).toBe("Something went wrong inside Clauseo.");
 });
 
-test.each([["./words-errors.ts"], ["./words-limits.ts"], ["./words-thread.ts"]])(
+test.each([["./words-errors.hi.ts"], ["./words-limits.hi.ts"], ["./words-thread.hi.ts"]])(
   "Hindi in %s ends a sentence with the danda and avoids the banned words",
   (file) => {
     const src = readFileSync(new URL(file, import.meta.url), "utf8");

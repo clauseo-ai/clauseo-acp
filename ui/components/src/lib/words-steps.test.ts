@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
-import { stepWords } from "./words-steps.ts";
-import { stepLiveWords } from "./words-steps-live.ts";
+import { stepWords } from "./words-steps.hi.ts";
+import { stepLiveWords } from "./words-steps-live.hi.ts";
 
 const ALL = { ...stepWords, ...stepLiveWords };
 
