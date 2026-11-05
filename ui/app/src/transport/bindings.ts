@@ -1305,6 +1305,8 @@ export type ErrorCode =
 "settings.refused" | 
 /** A key is already stored for this agent, so this window may not replace it; it is changed or removed in Settings. No key text is in the message. */
 "settings.key_stored" | 
+/** A Codex login, logout or authenticate was refused while Clauseo's Codex home shares the lawyer's ChatGPT login file; the remedy is in the app, "Stop using it here". */
+"signin.login_shared" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 
