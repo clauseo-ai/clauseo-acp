@@ -225,18 +225,24 @@ S15's tools sat in `windows.conf.json` and S27's in `tauri.conf.json`.
   follows junctions: the outside folder was emptied. `rmdir /s /q` and `Remove-Item -Recurse`
   did not follow it. Agent tools, npm or pnpm links and tier B's set-aside can all leave a
   junction there.
-- **The fix.** `hooks.nsh`'s `NSIS_HOOK_PREUNINSTALL`, which the template inserts before its own
-  checks (lines 783-788), keeps S15's `--remove` first (now through `ShellExecuteExW`, so its exit
-  code is read), then, for the ticked box, clears `$DeleteAppDataCheckboxState` so the
-  template's `RmDir /r` never runs, checks the app is closed, and runs
-  `Clauseo.exe --delete-app-data` (`--keep-sandbox` when `--remove` failed). The app takes no
-  path: it deletes `FOLDERID_LocalAppData` and `FOLDERID_RoamingAppData` joined with
-  `ai.clauseo.desktop`, refuses a data folder that is a reparse point or resolves elsewhere,
-  removes every reparse point inside as a link without entering it, then the rest with std's
-  `remove_dir_all`. It keeps `sandbox\set-aside` when it holds anything. Exit 0 deleted, 2 or 3
-  a folder kept, 1 refused or something left; the uninstaller says one line (`English.nsh`'s
-  `deleteAppDataKept` and `deleteAppDataFailed`) unless silent, and never falls back to
-  `RMDir /r`. `crates/desktop/src/delete_app_data.rs` holds the contract.
+- **The fix.** `hooks.nsh`'s `NSIS_HOOK_PREUNINSTALL` runs before the template's own steps
+  (lines 783-788). It first runs the template's `CheckIfAppIsRunning`, so a declined prompt
+  stops the uninstall before anything is removed. Then S15's `--remove`, now through
+  `ShellExecuteExW` so its exit code is read. Then, for the ticked box, it clears
+  `$DeleteAppDataCheckboxState`, so the template's `RmDir /r` never runs, and runs
+  `Clauseo.exe --delete-app-data`, adding `--sandbox-removed` only when `--remove` exited 0.
+- **What the app deletes.** It takes no path: it deletes `FOLDERID_LocalAppData` and
+  `FOLDERID_RoamingAppData` joined with `ai.clauseo.desktop`. It refuses a data folder that is a
+  reparse point or resolves elsewhere. It lists a folder only while holding it open by a handle
+  that refuses a reparse point and shares no delete or write access. Each entry goes by std alone:
+  a link as a link, a folder with `remove_dir_all`, a file with `remove_file`. It walks by hand
+  only toward what it keeps.
+- **What it keeps.** `sandbox` (S15's records), unless `--sandbox-removed`, and
+  `sandbox\set-aside` whenever it holds anything.
+- **Exit codes and messages.** 0 deleted; 2 or 3 a folder kept; 1 refused or something left.
+  The uninstaller says one line unless silent: `English.nsh`'s `deleteAppDataKept`, naming the
+  kept folder whenever one is there, else `deleteAppDataFailed`, naming the whole folder. It never
+  falls back to `RMDir /r`. `crates/desktop/src/delete_app_data.rs` holds the contract.
 
 ## Status
 
