@@ -254,4 +254,11 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (456, 0x81f9_9f30_e434_cbb8),
         (318, 0xdb30_7496_d404_eae9),
     ),
+    (
+        "added/turn_failed-SettingsRefused",
+        include_bytes!("added/turn_failed-SettingsRefused.jsonl"),
+        include_bytes!("added/turn_failed-SettingsRefused.msgpack"),
+        (362, 0x9d40_427f_07a0_a3a4),
+        (264, 0xaf29_9eab_7f2d_b9d4),
+    ),
 ];
