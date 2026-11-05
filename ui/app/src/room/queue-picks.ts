@@ -54,8 +54,8 @@ export function heldPick(): (v: StreamView | undefined) => Held | null {
       if (!id.startsWith(STEP)) continue;
       const step = v.entries.get(id)?.step;
       if (step === undefined) continue;
-      if (step.stop === "cancelled" || step.stop === "not_allowed")
-        next = { kind: "stopped", at: step.ts };
+      if (step.stop === "cancelled") next = { kind: "stopped", at: step.ts };
+      else if (step.stop === "not_allowed") next = { kind: "not_allowed", at: step.ts };
       else if (failedStops.includes(step.stop))
         next = {
           kind: "failed",

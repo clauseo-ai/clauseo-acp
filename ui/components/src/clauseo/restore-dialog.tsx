@@ -99,6 +99,13 @@ export function RestoreDialog({
                       )}
                 </Say>
               </Base.Title>
+              <p className={dialogBody}>
+                <Say>
+                  {ask.files.length === 1
+                    ? w.v("If it isn't open in Word, close Word and try again.")
+                    : w.v("If they aren't open in Word, close Word and try again.")}
+                </Say>
+              </p>
               <Base.Description className={dialogBody}>
                 {w.v("Word holds the file while it is open. Nothing has changed yet.")}
               </Base.Description>

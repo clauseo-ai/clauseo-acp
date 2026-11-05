@@ -49,5 +49,29 @@
     "status": "provisional",
     "at": "2026-11-05",
     "by": "app track (provisional; Rohan batch review)"
+  },
+  "U9-08": {
+    "en": "If it isn't open in Word, close Word and try again.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U9-09": {
+    "en": "If they aren't open in Word, close Word and try again.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U9-10": {
+    "en": "If it isn't open in Word, close Word and try again.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
   }
 }

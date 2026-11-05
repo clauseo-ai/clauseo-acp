@@ -21,10 +21,15 @@ export type Queued = {
   readonly entry: UserMessageEntry;
 };
 
-/** Why the queue is held: the lawyer stopped the answer, or it failed, at the step's time; or held with no stop to
- * name (after a restart, or at a limit, U12's), when the strip offers Send next alone. */
+/** Why the queue is held: the lawyer stopped the answer, or the lawyer didn't allow a request, or it failed, at the
+ * step's time; or held with no stop to name (after a restart, or at a limit, U12's), when the strip offers Send next
+ * alone. */
 export type Held =
-  | { readonly kind: "stopped" | "failed"; readonly at: Timestamp; readonly code?: ErrorCode }
+  | {
+      readonly kind: "stopped" | "not_allowed" | "failed";
+      readonly at: Timestamp;
+      readonly code?: ErrorCode;
+    }
   | { readonly kind: "held" };
 
 const USER = "user_message:";

@@ -568,5 +568,13 @@
     "at": "2026-11-02",
     "by": "Rohan",
     "note": "Rohan, on the review page (built from U3 00b64f56)"
+  },
+  "U3-51": {
+    "en": "You didn't allow a request, so the answer stopped. The answer so far is kept.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
   }
 }

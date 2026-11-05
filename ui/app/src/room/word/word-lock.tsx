@@ -65,6 +65,13 @@ export function WordLock({
                   })}
             </Say>
           </p>
+          <p className="text-small text-primary">
+            <Say>
+              {files.length === 1
+                ? vt(lang, "If it isn't open in Word, close Word and try again.")
+                : vt(lang, "If they aren't open in Word, close Word and try again.")}
+            </Say>
+          </p>
           <p className="text-small text-quiet">
             <Say>{vt(lang, "Word holds the file while it is open. Nothing has changed yet.")}</Say>
           </p>

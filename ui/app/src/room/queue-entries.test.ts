@@ -93,7 +93,7 @@ test("held: after Stop the step's time, after a failure its code, after a restar
   const refused = viewOf(
     reset([queued(5, 2, "Q"), step(4, { stop: "not_allowed", ts: 7500 })], heldHeader),
   );
-  expect(heldPick()(refused.view)).toEqual({ kind: "stopped", at: 7500 });
+  expect(heldPick()(refused.view)).toEqual({ kind: "not_allowed", at: 7500 });
   const failed = viewOf(
     reset(
       [queued(5, 2, "Q"), step(4, { stop: "failed", failure: "agent.exited", ts: 8000 })],

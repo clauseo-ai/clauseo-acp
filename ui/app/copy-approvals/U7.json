@@ -223,5 +223,13 @@
     "at": "2026-11-03",
     "by": "Rohan",
     "note": "Rohan, via the orchestrator"
+  },
+  "U7-32": {
+    "en": "The queue is held. You didn't allow a request at {time}, so nothing more is sent until you send.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
   }
 }

@@ -100,6 +100,8 @@ export const HI = {
   "Edit queued message {n}": "कतार का संदेश {n} बदलें",
   "The queue is held. You stopped the answer at {time}, so nothing more is sent until you send.":
     "कतार रुकी है। आपने {time} बजे उत्तर रोका, इसलिए जब तक आप न भेजें, आगे कुछ नहीं भेजा जाएगा।",
+  "The queue is held. You didn't allow a request at {time}, so nothing more is sent until you send.":
+    null, // hi: later
   "The queue is held. The answer failed at {time}, so nothing more is sent until you send.":
     "कतार रुकी है। {time} बजे उत्तर पूरा नहीं हो सका, इसलिए जब तक आप न भेजें, आगे कुछ नहीं भेजा जाएगा।",
   "Send next": "अगला भेजें",

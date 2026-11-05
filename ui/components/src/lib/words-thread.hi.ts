@@ -28,6 +28,7 @@ export const HI = {
   Stopped: "रोका गया",
   "You stopped the answer. The answer so far is kept.":
     "आपने उत्तर रोक दिया। अब तक का उत्तर रखा गया है।",
+  "You didn't allow a request, so the answer stopped. The answer so far is kept.": null, // hi: later
   "The answer stopped at its limit, before it finished.": "उत्तर पूरा होने से पहले अपनी सीमा पर रुक गया।",
   "This question was declined, so there is no answer.":
     "इस प्रश्न को अस्वीकार किया गया, इसलिए कोई उत्तर नहीं है।",

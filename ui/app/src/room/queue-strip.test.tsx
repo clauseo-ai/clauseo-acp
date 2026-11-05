@@ -417,6 +417,23 @@ test("held after Stop: the step's time and Send next", async () => {
   expect(txt(one("send-next"))).toBe("Send next");
 });
 
+test("held after a step the lawyer didn't allow: its line, with the step's time, and Send next", async () => {
+  fixNow();
+  await mount();
+  const ts = onTheDay(16, 32);
+  h!.deliver([
+    reset(
+      [userMessage(1, 1, "Q1"), step(2, { stop: "not_allowed", ts }), queued(5, 2, "A.")],
+      held(),
+    ),
+  ]);
+  await h!.settle();
+  expect(say()).toBe(
+    "The queue is held. You didn't allow a request at 4:32 pm, so nothing more is sent until you send.",
+  );
+  expect(txt(one("send-next"))).toBe("Send next");
+});
+
 test("held after a failure: the failed line and Send next", async () => {
   fixNow();
   await mount();
