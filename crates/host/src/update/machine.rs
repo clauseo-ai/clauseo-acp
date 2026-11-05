@@ -21,7 +21,8 @@
 //!
 //! `installing` to `failed` happens at the next start: the marker `{ from, to }` with `from`
 //! the running version. Events that arrive in a state they no longer concern (a check's result
-//! after policy made the run managed, a timer that was replaced) change nothing.
+//! after policy made the run managed, a timer a check on command cleared) change nothing. The
+//! timers and the once-a-day counts are in `timers.rs`.
 
 use clauseo_counts::schema::UpdateResult;
 use clauseo_protocol::{
@@ -33,8 +34,10 @@ use super::{
 };
 
 mod jitter;
+mod timers;
 mod vocab;
 pub(crate) use jitter::Jitter;
+use timers::once_a_day;
 pub(crate) use vocab::{Effect, Input, ModeInForce, Refusal, Start};
 
 #[cfg(test)]
@@ -73,8 +76,13 @@ pub(crate) struct Machine {
     /// How far an install has gone.
     install: InstallStep,
     turns_running: bool,
+    /// The running check, and the download it started, are the lawyer's (`CheckRequested`):
+    /// their failure always counts.
+    asked: bool,
     timer: Option<Timestamp>,
     managed_counted: Option<Timestamp>,
+    /// When a background check or download failure last counted.
+    failure_counted: Option<Timestamp>,
     jitter: Jitter,
 }
 
@@ -95,7 +103,9 @@ impl Machine {
             install: InstallStep::None,
             turns_running: false,
             timer: None,
+            asked: false,
             managed_counted: None,
+            failure_counted: None,
             jitter: start.jitter,
         };
         let mut fx = Vec::new();
@@ -125,12 +135,12 @@ impl Machine {
             m.install_at_start = m.mode.mode == UpdateMode::Auto;
             m.cached = Some(cached);
             if m.install_at_start {
-                m.begin_check(&mut fx);
+                m.begin_check(false, &mut fx);
             } else {
-                m.arm_first_check(now, &mut fx);
+                timers::arm_first_check(&mut m, now, &mut fx);
             }
         } else {
-            m.arm_first_check(now, &mut fx);
+            timers::arm_first_check(&mut m, now, &mut fx);
         }
         fx.push(Effect::Publish);
         (m, fx)
@@ -173,12 +183,12 @@ impl Machine {
 
     fn apply(&mut self, input: Input, now: Timestamp, fx: &mut Vec<Effect>) -> Result<(), Refusal> {
         match input {
-            Input::TimerFired => self.timer_fired(now, fx),
+            Input::TimerFired => timers::timer_fired(self, now, fx),
             Input::CheckRequested => {
                 if !self.may_check() {
                     return Err(Refusal::NotNow);
                 }
-                self.begin_check(fx);
+                self.begin_check(true, fx);
             }
             Input::CheckDone(result) => {
                 if self.state == UpdateState::Checking {
@@ -246,20 +256,8 @@ impl Machine {
         self.install == InstallStep::StoppingTurns
     }
 
-    fn timer_fired(&mut self, now: Timestamp, fx: &mut Vec<Effect>) {
-        // A timer replaced since, or cleared by a check that started on command, is stale.
-        if self.timer.is_none_or(|due| now < due) {
-            return;
-        }
-        self.timer = None;
-        if self.may_check() {
-            self.begin_check(fx);
-        } else if matches!(self.state, UpdateState::Managed { .. }) {
-            self.count_managed(now, fx);
-        }
-    }
-
-    fn begin_check(&mut self, fx: &mut Vec<Effect>) {
+    fn begin_check(&mut self, asked: bool, fx: &mut Vec<Effect>) {
+        self.asked = asked;
         self.state = UpdateState::Checking;
         self.timer = None;
         fx.push(Effect::StartCheck);
@@ -283,7 +281,7 @@ impl Machine {
             Ok(None) => {
                 self.checked_at = Some(now);
                 self.state = UpdateState::Idle;
-                return self.arm_interval(now, fx);
+                return timers::arm_interval(self, now, fx);
             }
             Ok(Some(offer)) => offer,
         };
@@ -342,8 +340,12 @@ impl Machine {
             at: now,
             stage,
         };
-        fx.push(Effect::Count(UpdateResult::Failed));
-        self.arm_interval(now, fx);
+        // Always when the lawyer asked; once a day in the background, so an offline laptop
+        // counts one failure a day, not one an hour.
+        if self.asked || once_a_day(&mut self.failure_counted, now) {
+            fx.push(Effect::Count(UpdateResult::Failed));
+        }
+        timers::arm_interval(self, now, fx);
     }
 
     /// From `ready`, or `scheduled` with `now`: at once when no turn runs; else `now` stops the
@@ -408,6 +410,11 @@ impl Machine {
     fn set_mode(&mut self, mode: ModeInForce, now: Timestamp, fx: &mut Vec<Effect>) {
         let was = self.managed_by();
         self.mode = mode;
+        // Only `auto` installs last run's download by itself; in `notify` it only saves the
+        // download.
+        if mode.mode != UpdateMode::Auto {
+            self.install_at_start = false;
+        }
         // The host is already shutting down to install: the new mode applies at the next start.
         if self.install == InstallStep::Begun {
             return;
@@ -415,7 +422,7 @@ impl Machine {
         match (was, self.managed_by()) {
             (Some(_), None) => {
                 self.state = UpdateState::Idle;
-                self.arm_first_check(now, fx);
+                timers::arm_first_check(self, now, fx);
             }
             (was, Some(by)) if was != Some(by) => self.enter_managed(by, now, fx),
             (None | Some(_), None | Some(_)) => {}
@@ -431,36 +438,7 @@ impl Machine {
         self.cached = None;
         self.install_at_start = false;
         self.state = UpdateState::Managed { by };
-        self.count_managed(now, fx);
-    }
-
-    /// Counts `Managed` at most once a day, and arms the timer for the next day.
-    fn count_managed(&mut self, now: Timestamp, fx: &mut Vec<Effect>) {
-        if self
-            .managed_counted
-            .is_none_or(|at| now.as_millis().saturating_sub(at.as_millis()) >= DAY)
-        {
-            self.managed_counted = Some(now);
-            fx.push(Effect::Count(UpdateResult::Managed));
-        }
-        self.arm(later(now, DAY), fx);
-    }
-
-    /// 1 to 10 minutes after start, or after leaving `managed`.
-    fn arm_first_check(&mut self, now: Timestamp, fx: &mut Vec<Effect>) {
-        let delay = MINUTE + self.jitter.below(9 * MINUTE + 1);
-        self.arm(later(now, delay), fx);
-    }
-
-    /// 60 minutes ± 10 after a check ended.
-    fn arm_interval(&mut self, now: Timestamp, fx: &mut Vec<Effect>) {
-        let delay = 50 * MINUTE + self.jitter.below(20 * MINUTE + 1);
-        self.arm(later(now, delay), fx);
-    }
-
-    fn arm(&mut self, at: Timestamp, fx: &mut Vec<Effect>) {
-        self.timer = Some(at);
-        fx.push(Effect::ArmTimer { at });
+        timers::count_managed(self, now, fx);
     }
 }
 
@@ -479,9 +457,4 @@ pub(crate) fn step(
         fx.push(Effect::Publish);
     }
     Ok((next, fx))
-}
-
-/// `now` plus `millis`, or `now` past the protocol's range (some 285,000 years away).
-fn later(now: Timestamp, millis: i64) -> Timestamp {
-    Timestamp::new(now.as_millis().saturating_add(millis)).unwrap_or(now)
 }

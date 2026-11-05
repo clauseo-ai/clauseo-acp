@@ -98,6 +98,11 @@ gone out (lands with PR 3). Further rules:
 - **Managed** is decided policy first (`none` in force gives `managed` by `policy`), then the
   install kind. A managed run never emits `StartCheck`, and counts `managed` at most once a
   day, at start and on a 24-hour timer.
+- **`failed` counts** always for an install failure (the marker) and for a check or download
+  the lawyer asked for (`CheckForUpdate`), and at most once a day for background ones, so an
+  offline laptop counts one failure a day rather than one an hour.
+- **The timer** is one-shot in the actor and its deadline is wall-clock time: a fire before the
+  deadline (the clock stepped back) arms it again at the same deadline rather than dropping it.
 - **`now` and `after_turn`.** `now` with turns running gates new sends and cancels the turns,
   and installs on `TurnsCancelled`. `after_turn` does not gate: new turns start, and the
   install waits until no turn runs (`TurnsRunning(false)`), then counts `after_answer`.
@@ -109,7 +114,7 @@ gone out (lands with PR 3). Further rules:
   installs from the file (`scheduled` while a turn runs). Offline, the check fails as any check
   does and nothing installs; a later offer of that version is `ready` with no second download,
   and installs on the lawyer's command or at the next start. In `notify` the file only saves
-  the download. After a failed install the file is never reused.
+  the download, and so it does once the mode in force leaves `auto` while start-up's check runs. After a failed install the file is never reused.
 
 ### The wire
 
