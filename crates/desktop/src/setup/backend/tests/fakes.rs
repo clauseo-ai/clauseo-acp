@@ -151,6 +151,9 @@ impl SetupAgents for FakeAgents {
     fn signin_state(&self, agent: &AgentId) -> Option<SigninState> {
         lock(&self.signin).get(agent).cloned()
     }
+    fn sign_in_going(&self, agent: &AgentId) -> bool {
+        lock(&self.signing_in).contains(agent)
+    }
     fn stop_using_login(&self, agent: &AgentId, _why: Option<Found>) -> Result<(), SigninError> {
         self.reserve("stop_using_login", agent, false)
     }
@@ -223,6 +226,10 @@ pub(super) struct RecordingHost {
     pub(super) journal: Journal,
     pub(super) stopped: Mutex<AgentsStopped>,
     pub(super) restart_fails: Mutex<usize>,
+    /// The next `stop_agents` panics, once a test sets it.
+    pub(super) stop_panics: Mutex<bool>,
+    /// What `settings_changes` answers, once a test sets it.
+    pub(super) changes: Mutex<Option<BoxStream<'static, ()>>>,
     /// Told at each `restart_agents`, once a test sets it.
     pub(super) restarted: Mutex<Option<std::sync::mpsc::Sender<()>>>,
 }
@@ -234,6 +241,8 @@ impl RecordingHost {
             journal,
             stopped: Mutex::new(AgentsStopped::Exited),
             restart_fails: Mutex::new(0),
+            stop_panics: Mutex::new(false),
+            changes: Mutex::new(None),
             restarted: Mutex::new(None),
         }
     }
@@ -287,6 +296,8 @@ impl SetupHost for RecordingHost {
     }
     fn stop_agents(&self, agent: AgentId) -> BoxFuture<'_, Result<AgentsStopped, HostError>> {
         self.push(HostCall::StopAgents(agent));
+        let panics = std::mem::take(&mut *lock(&self.stop_panics));
+        assert!(!panics, "the test's stop_agents panics");
         Box::pin(std::future::ready(Ok(*lock(&self.stopped))))
     }
     fn set_reused_login(
@@ -316,10 +327,11 @@ impl SetupHost for RecordingHost {
         ))))
     }
     fn settings_changes(&self) -> BoxFuture<'_, Result<BoxStream<'static, ()>, HostError>> {
-        Box::pin(std::future::ready(Err(HostError::new(
-            ErrorCode::Internal,
-            "the tests apply settings directly",
-        ))))
+        lock(&self.journal).push("host.settings_changes".to_owned());
+        let answer = lock(&self.changes).take().ok_or_else(|| {
+            HostError::new(ErrorCode::Internal, "the tests apply settings directly")
+        });
+        Box::pin(std::future::ready(answer))
     }
 }
 

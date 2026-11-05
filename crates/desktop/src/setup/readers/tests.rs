@@ -1,7 +1,7 @@
 //! The swappable readers over a launcher that records each spec and starts nothing: Claude's
 //! read gets Clauseo's own home as `CLAUDE_CONFIG_DIR` over an inherited one and the stored key
 //! from the key slot, an entry set after a hold reads only once the hold drops, and with no
-//! entry there is no launch.
+//! entry there is no launch. A refused entry's warning names no path (review L2).
 
 use std::ffi::{OsStr, OsString};
 use std::path::Path;
@@ -185,4 +185,61 @@ fn a_read_s_variables_are_the_launch_hook_s_for_the_plan_and_the_key() {
             "{name} is not the hook's in the read's env"
         );
     }
+}
+
+/// A log line sink, shared with the subscriber.
+#[derive(Clone, Default)]
+struct Lines(Arc<Mutex<Vec<u8>>>);
+
+impl std::io::Write for Lines {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        lock(&self.0).extend_from_slice(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Decision record 0047 keeps paths out of `host.log`: an entry whose script has no SDK beside it
+/// is refused, and the warning says so by the agent and the kind alone.
+#[test]
+fn a_refused_entry_s_warning_names_no_path() {
+    let scratch = Scratch::folder("setup-readers-refused", &["data"]);
+    let script = fake_file(scratch.path(), SCRIPT, "");
+    let locations = Locations::under_root(&scratch.path().join("data"));
+    let effective = Effective::load(&locations, &SystemFiles, &[]);
+    let readers = SwappableReaders::new(
+        &effective,
+        Arc::new(Recording::default()) as Arc<dyn Launcher>,
+        Arc::new(OnceLock::new()),
+        Arc::default(),
+    );
+    let entry = AgentLaunch {
+        command: if cfg!(windows) {
+            r"C:\node\node.exe".to_owned()
+        } else {
+            "/usr/local/bin/node".to_owned()
+        },
+        args: vec![script],
+        env: std::collections::BTreeMap::new(),
+    };
+    let lines = Lines::default();
+    let writer = lines.clone();
+    let subscriber = tracing_subscriber::fmt()
+        .with_writer(move || writer.clone())
+        .with_ansi(false)
+        .finish();
+    tracing::subscriber::with_default(subscriber, || {
+        readers.set_entry(AgentKind::Claude, Some(entry));
+    });
+    let text = String::from_utf8(lock(&lines.0).clone()).unwrap();
+    assert!(text.contains("a limits reader is refused"), "{text}");
+    assert!(text.contains("kind=") && text.contains("refused"), "{text}");
+    let root = scratch.path().display().to_string();
+    assert!(!text.contains(&root), "a path reached the log: {text}");
+    assert!(
+        !text.contains("node_modules"),
+        "a path reached the log: {text}"
+    );
 }

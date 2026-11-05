@@ -34,6 +34,8 @@ pub(crate) trait SetupAgents: Send + Sync {
     fn use_different_account(&self, agent: &AgentId) -> Result<(), SigninError>;
     /// `Agents::signin_state`.
     fn signin_state(&self, agent: &AgentId) -> Option<SigninState>;
+    /// `Agents::sign_in_going`.
+    fn sign_in_going(&self, agent: &AgentId) -> bool;
     /// `Agents::stop_using_login`: no-reuse (unless `why` is a reason reuse stopped) and the
     /// home's link removed, in one job, which reports `SignedOut`.
     fn stop_using_login(&self, agent: &AgentId, why: Option<Found>) -> Result<(), SigninError>;
@@ -75,6 +77,9 @@ impl SetupAgents for Agents {
     }
     fn use_different_account(&self, agent: &AgentId) -> Result<(), SigninError> {
         Agents::use_different_account(self, agent)
+    }
+    fn sign_in_going(&self, agent: &AgentId) -> bool {
+        Agents::sign_in_going(self, agent)
     }
     fn signin_state(&self, agent: &AgentId) -> Option<SigninState> {
         Agents::signin_state(self, agent)

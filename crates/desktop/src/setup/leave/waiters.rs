@@ -3,6 +3,11 @@
 //! (review H1). A waiter is filled only by a state S18 sent after it was put: when the pump
 //! had not yet taken S18's latest state at the put, that state and everything before it are
 //! stale, and the waiter is filled only by what comes after it.
+//!
+//! A leave's waiter is told how S18's job ended ([`Ended`]). A new `SignedIn` is handled by
+//! the pump first (the host told, the entry rewritten, `restart_agents`), then the leave hears
+//! [`Ended::NewSignIn`], so a sign-in that lands during a leave is never swallowed (review A1).
+//! A lawyer's leave that gives up hands its holds over as [`Waiter::Late`] (review A2).
 
 use std::collections::BTreeMap;
 use std::sync::Mutex;
@@ -13,14 +18,29 @@ use futures::channel::oneshot;
 
 use super::super::compose::is_running;
 use super::super::readers::ReadHold;
+use super::hold::Late;
 use crate::bridge::lock;
 
 /// What waits on an agent's next resting S18 state.
 pub(crate) enum Waiter {
     /// The leave order, for `stop_using_login`'s end.
-    Leave(oneshot::Sender<SigninState>),
+    Leave(oneshot::Sender<Ended>),
     /// `UseFoundLogin`: the hold on the reads, dropped once its end has been handled.
     Found(ReadHold),
+    /// A lawyer's leave that gave up while S18's stop job may still run: the host's and the
+    /// reads' holds, which the pump lifts once the job's end has been handled.
+    Late(Late),
+}
+
+/// How the job a leave waits on ended, as the pump hands it over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Ended {
+    /// `SignedOut`: the reuse stopped.
+    SignedOut,
+    /// A new `SignedIn`, which the pump has handled already, `restart_agents` included.
+    NewSignIn,
+    /// Any other resting state: the reuse did not stop.
+    Other,
 }
 
 /// Names the one put that a [`Waiters::take`] may undo.
@@ -63,8 +83,8 @@ struct Entry {
 
 impl Waiters {
     /// Waits on `agent`'s next resting state; `latest` is S18's latest state, read just
-    /// before. Refused (`None`) while a leave waits for the agent; a `Found` waiter put before
-    /// is replaced, its hold dropped.
+    /// before. Refused (`None`) while a leave, or a leave that gave up, waits for the agent; a
+    /// `Found` waiter put before is replaced, its hold dropped.
     pub(crate) fn put(
         &self,
         agent: &AgentId,
@@ -75,7 +95,7 @@ impl Waiters {
         if matches!(
             inner.waiting.get(agent),
             Some(Entry {
-                waiter: Waiter::Leave(_),
+                waiter: Waiter::Leave(_) | Waiter::Late(_),
                 ..
             })
         ) {
@@ -100,6 +120,27 @@ impl Waiters {
             return None;
         }
         inner.waiting.remove(agent).map(|entry| entry.waiter)
+    }
+
+    /// Puts `waiter` in place of the one `token` names, keeping what it waits for, under a token
+    /// of its own; when that one is gone (the pump took it), `waiter` comes back.
+    pub(crate) fn replace(
+        &self,
+        agent: &AgentId,
+        token: Token,
+        waiter: Waiter,
+    ) -> Result<(), Waiter> {
+        let mut inner = lock(&self.0);
+        inner.next += 1;
+        let next = Token(inner.next);
+        match inner.waiting.get_mut(agent) {
+            Some(entry) if entry.token == token => {
+                entry.token = next;
+                entry.waiter = waiter;
+                Ok(())
+            }
+            _ => Err(waiter),
+        }
     }
 
     /// The pump took `state` for `agent`: the waiter it fills, if any. A running state fills
@@ -131,7 +172,7 @@ mod tests {
         AgentId::new("codex-acp").unwrap()
     }
 
-    fn leave() -> (Waiter, oneshot::Receiver<SigninState>) {
+    fn leave() -> (Waiter, oneshot::Receiver<Ended>) {
         let (tell, told) = oneshot::channel();
         (Waiter::Leave(tell), told)
     }
@@ -169,6 +210,29 @@ mod tests {
             waiters.deliver(&codex(), &OUT),
             Some(Waiter::Leave(_))
         ));
+    }
+
+    #[test]
+    fn a_replaced_waiter_keeps_its_gate_and_the_old_token_takes_nothing() {
+        let waiters = Waiters::default();
+        let (waiter, _told) = leave();
+        let token = waiters.put(&codex(), waiter, Some(OUT)).unwrap();
+        let (other, _other_told) = leave();
+        assert!(waiters.replace(&codex(), token, other).is_ok());
+        assert!(
+            waiters.take(&codex(), token).is_none(),
+            "the old token is spent"
+        );
+        assert!(
+            waiters.deliver(&codex(), &OUT).is_none(),
+            "still S18's latest at the put"
+        );
+        assert!(waiters.deliver(&codex(), &OUT).is_some());
+        let (late, _late_told) = leave();
+        assert!(
+            waiters.replace(&codex(), token, late).is_err(),
+            "nothing left to replace"
+        );
     }
 
     #[test]

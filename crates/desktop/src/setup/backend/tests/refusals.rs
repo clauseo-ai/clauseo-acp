@@ -1,7 +1,8 @@
 //! The launch refusals the host starts with and the keys' lift (decision record 0048, ruling
 //! 4; the security review's M3): every known agent is refused from the host's start, a blocked
 //! one for the policy and the rest until the keys load; the lift after the load clears only
-//! the keys' refusal, never the policy's.
+//! the keys' refusal, never the policy's. The settings are read again once their changes are
+//! followed (review N2).
 
 use std::collections::BTreeSet;
 
@@ -9,8 +10,9 @@ use clauseo_protocol::ErrorCode;
 
 use super::fakes::{HostCall, rig};
 use super::{claude, codex};
-use crate::setup::start::{lift_keys_loading, refusals_at_start};
-use crate::test_support::block_on;
+use crate::bridge::lock;
+use crate::setup::start::{follow_settings, lift_keys_loading, refusals_at_start};
+use crate::test_support::{Scratch, block_on};
 
 #[test]
 fn the_host_starts_refusing_a_blocked_agent_for_the_policy_and_the_rest_for_the_keys() {
@@ -66,4 +68,24 @@ fn the_backend_starts_knowing_the_host_refuses_the_blocked_agents() {
         *crate::bridge::lock(&wiring.refused),
         BTreeSet::from([codex()])
     );
+}
+
+#[test]
+fn the_settings_are_read_again_once_their_changes_are_followed() {
+    let rig = rig(true);
+    let scratch = Scratch::folder("setup-follow-settings", &["data"]);
+    let locations = clauseo_settings::Locations::under_root(&scratch.path().join("data"));
+    *lock(&rig.host.changes) = Some(Box::pin(futures::stream::empty()));
+    let reread = || {
+        lock(&rig.journal).push("reread".to_owned());
+        clauseo_settings::Effective::load(&locations, &clauseo_settings::SystemFiles, &[])
+    };
+    block_on(follow_settings(&rig.backend, &reread));
+    let journal = rig.journal();
+    assert_eq!(
+        journal[..2],
+        ["host.settings_changes", "reread"],
+        "subscribed, then read: a change in between is not missed"
+    );
+    assert_eq!(journal.iter().filter(|seen| *seen == "reread").count(), 1);
 }

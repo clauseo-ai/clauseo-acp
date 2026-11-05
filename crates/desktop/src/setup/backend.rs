@@ -229,7 +229,8 @@ impl AgentsBackend {
     /// refuse (`command.invalid`), and from `main` while a key is there; a reused login is left
     /// first (the leave order), but only once the key is known to be taken: `main`'s first key
     /// on a reused login reads the keychain first, and a read that fails refuses it, so no
-    /// refusal ever follows a leave (the security review's M5). The reads are held while the
+    /// refusal ever follows a leave (the security review's M5), and a computer with no keychain
+    /// refuses any key before it (review N1). The reads are held while the
     /// key is written, then the agents restart with it and the limits read it.
     async fn set_key(
         &self,
@@ -239,6 +240,7 @@ impl AgentsBackend {
     ) -> Result<(), HostError> {
         self.refuse_blocked(agent)?;
         KeyCache::check(agent, &key)?;
+        self.keys.refuse_unavailable(agent)?;
         // `main`'s first key leaves no login for a key that is there already.
         if key_write == KeyWrite::OnlyIfAbsent && self.keys.has(agent) {
             return Err(key_stored(agent));

@@ -339,8 +339,13 @@ pub(crate) async fn lift_keys_loading<'a>(
     }
 }
 
-/// Each `SettingsChanged`: the settings read again and taken in, until the host stops.
-async fn follow_settings(backend: &AgentsBackend, reread: &(dyn Fn() -> Effective + Send)) {
+/// Each `SettingsChanged`: the settings read again and taken in, until the host stops. Once
+/// subscribed they are read again at once, since a change between [`SetupStart::read`] and the
+/// subscription sends no `SettingsChanged` this sees (review N2).
+pub(crate) async fn follow_settings(
+    backend: &AgentsBackend,
+    reread: &(dyn Fn() -> Effective + Send),
+) {
     let mut changes = match backend.host.settings_changes().await {
         Ok(changes) => changes,
         Err(error) => {
@@ -351,9 +356,12 @@ async fn follow_settings(backend: &AgentsBackend, reread: &(dyn Fn() -> Effectiv
             return;
         }
     };
-    while changes.next().await.is_some() {
+    loop {
         let read = SettingsRead::read(&reread(), backend.known.keys());
         super::refresh::apply_settings(backend, read).await;
+        if changes.next().await.is_none() {
+            break;
+        }
     }
 }
 

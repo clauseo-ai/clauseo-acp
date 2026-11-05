@@ -1,6 +1,11 @@
 //! One S18 sign-in state from the pump ([`signin_event`]).
 //!
-//! - A resting state goes to the agent's waiter first, when one was put before S18 sent it.
+//! - A resting state goes to the agent's waiter first, when one was put before S18 sent it. A
+//!   new `SignedIn` is handled as below first, and only then is a leave waiting told
+//!   (`Ended::NewSignIn`): a sign-in that lands during a leave is never swallowed (review A1).
+//! - A lawyer's leave that gave up (`Waiter::Late`): S18's stop job's end is handled as below,
+//!   then the host's hold lifts (`restart_agents`, unless the new sign-in's own did) and the
+//!   reads' with it, so nothing changes under running agents (review A2).
 //! - A reuse that ends with no leave waiting (a `SignedIn { Reused }` followed by any other
 //!   resting state: a leave's late `SignedOut`, or S18 ending the reuse by itself) runs the
 //!   steps after the stop at once (`after_stop`, review H1). When S18 ended it by itself
@@ -19,20 +24,36 @@ use clauseo_protocol::{AgentId, AgentKind, SignInSource};
 
 use super::super::backend::AgentsBackend;
 use super::super::compose::is_running;
-use super::{Waiter, after_stop, login_changed, restart_for_login, set_reused};
+use super::hold::Late;
+use super::{Ended, Waiter, after_stop, login_changed, restart_for_login, set_reused};
 
 /// See the module docs.
 pub(crate) async fn signin_event(backend: &AgentsBackend, agent: &AgentId, state: SigninState) {
     let before = backend.compose.s18(agent);
-    let mut found_hold = None;
+    let new_sign_in = matches!(&state, SigninState::SignedIn { .. })
+        && !matches!(
+            (&before, &state),
+            (
+                Some(SigninState::SignedIn { email: was, source: had, .. }),
+                SigninState::SignedIn { email, source, .. },
+            ) if was == email && had == source
+        );
+    let (mut found_hold, mut leave, mut late) = (None, None, None);
     match backend.wiring.waiters.deliver(agent, &state) {
-        Some(Waiter::Leave(tell)) => {
+        Some(Waiter::Leave(tell)) if !new_sign_in => {
+            let ended = if matches!(state, SigninState::SignedOut { .. }) {
+                Ended::SignedOut
+            } else {
+                Ended::Other
+            };
             // The leave stopped waiting: its own timeout said so.
-            let _gone = tell.send(state.clone());
+            let _gone = tell.send(ended);
             backend.compose.signin(agent, state);
             return;
         }
+        Some(Waiter::Leave(tell)) => leave = Some(tell),
         Some(Waiter::Found(hold)) => found_hold = Some(hold),
+        Some(Waiter::Late(given_up)) => late = Some(given_up),
         None => {}
     }
     let was_reused = matches!(
@@ -55,12 +76,8 @@ pub(crate) async fn signin_event(backend: &AgentsBackend, agent: &AgentId, state
     if reuse_ended {
         ended_by_itself(backend, agent, &state).await;
     }
-    if let SigninState::SignedIn { email, source, .. } = &state
-        && !matches!(
-            &before,
-            Some(SigninState::SignedIn { email: was, source: had, .. })
-                if was == email && had == source
-        )
+    if let SigninState::SignedIn { source, .. } = &state
+        && new_sign_in
     {
         backend.wiring.leaves.signed_in(agent);
         backend.compose.end_switching(agent);
@@ -68,6 +85,16 @@ pub(crate) async fn signin_event(backend: &AgentsBackend, agent: &AgentId, state
         drop(found_hold.take());
         backend.compose.signin(agent, state);
         restart_for_login(backend, agent).await;
+        if let Some(Late { hold, reads }) = late {
+            // The sign-in's own `restart_agents` lifted it.
+            hold.keep();
+            drop(reads);
+            backend.wiring.leaves.end_late(agent, true);
+        }
+        if let Some(tell) = leave {
+            // Gone only when the leave was dropped meanwhile.
+            let _gone = tell.send(Ended::NewSignIn);
+        }
         return;
     }
     drop(found_hold);
@@ -75,6 +102,12 @@ pub(crate) async fn signin_event(backend: &AgentsBackend, agent: &AgentId, state
         && resting
         && !matches!(state, SigninState::SignedIn { .. });
     backend.compose.signin(agent, state);
+    if let Some(Late { hold, reads }) = late {
+        tracing::info!(%agent, "the stop a leave gave up on ended: lifting its hold");
+        hold.lift().await;
+        drop(reads);
+        backend.wiring.leaves.end_late(agent, reuse_ended);
+    }
     if reuse_ended {
         login_changed(backend, agent).await;
     } else if signed_out {

@@ -12,14 +12,20 @@
 //! answers `command.conflict`.
 //!
 //! **A lawyer's leave** ([`leave_reused`]: `StopUsingLogin`, `UseDifferentAccount`, a key or an
-//! endpoint set on a reused login) that does not finish changes nothing: `restart_agents` lifts
-//! the hold, the reads' guard drops, and the command answers `signin.agents_still_running`
-//! (`stop_agents` timed out) or `signin.failed` (no `SignedOut` in time), both retryable. A
-//! leave that finishes leaves the hold: `restart_agents` runs once the new login, key or
-//! endpoint is in place, on the `SignedIn` the pump sees or after a key or an endpoint is stored.
+//! endpoint set on a reused login) whose `stop_agents` times out, or whose call fails, changes
+//! nothing: `restart_agents` lifts the hold, the reads' guard drops, and the command answers
+//! `signin.agents_still_running` or the call's error. With no `SignedOut` in 30 s it answers
+//! `signin.failed`, but S18's stop job may still end the reuse and S18 cannot cancel it: the
+//! holds stay, with the pump ([`Late`](hold::Late)), until the job ends; then the steps after
+//! the stop run if it stopped, and `restart_agents` lifts the hold (review A2). The agent's
+//! slot stays taken till then. A leave that finishes leaves the hold: `restart_agents` runs
+//! once the new login, key or endpoint is in place, on the `SignedIn` the pump sees or after a
+//! key or an endpoint is stored. A new `SignedIn` that lands during the leave ends it as done:
+//! the pump has handled it, `restart_agents` included (review A1).
 //!
 //! **An automatic leave** (`auto.rs`: a split, or a reuse S18 ended by itself) that does not
-//! finish keeps the hold and tries again, showing `Switching`.
+//! finish keeps the hold and tries again, showing `Switching`. It never asks S18 to stop while
+//! a sign-in runs or Clauseo's own login is signed in ([`taken_over`]).
 
 mod auto;
 mod hold;
@@ -27,7 +33,7 @@ mod pump;
 mod slots;
 mod waiters;
 
-use clauseo_agents::{Found, SigninState};
+use clauseo_agents::{Found, SigninState, Source};
 use clauseo_host::AgentsStopped;
 use clauseo_protocol::{AgentId, AgentKind, ErrorCode, HostError, SignInSource};
 use futures::channel::oneshot;
@@ -36,14 +42,16 @@ use futures::future::{Either, select};
 #[cfg(test)]
 pub(crate) use self::auto::auto_leave;
 pub(crate) use self::auto::follow as follow_auto_leaves;
-use self::hold::HostHold;
+use self::hold::{HostHold, Late};
 pub(crate) use self::hold::{LeaveTimer, Wait, retry_after};
 pub(crate) use self::pump::signin_event;
 pub(crate) use self::slots::Leaves;
 use self::waiters::Put;
-pub(crate) use self::waiters::{Token, Waiter, Waiters};
+pub(crate) use self::waiters::{Ended, Token, Waiter, Waiters};
 use super::backend::{AgentsBackend, signin_error};
+use super::compose::is_running;
 use super::readers::ReadHold;
+use crate::bridge::lock;
 
 /// Why one try of the leave order did not finish; nothing of the login changed.
 pub(crate) enum NotLeft {
@@ -51,8 +59,22 @@ pub(crate) enum NotLeft {
     StillRunning,
     /// S18's `SignedOut` did not come within [`LEAVE_WAIT`](hold::LEAVE_WAIT).
     NotStopped,
+    /// A new `SignedIn` came instead, and the pump has handled it, `restart_agents` included.
+    NewSignIn,
+    /// An automatic leave found a sign-in running, or Clauseo's own login signed in, before it
+    /// asked S18 to stop ([`taken_over`]); it asked nothing.
+    TakenOver,
     /// A call failed.
     Error(HostError),
+}
+
+/// Whose leave a try is for.
+pub(crate) enum Whose<'a> {
+    /// A lawyer's: when the 30 s wait runs out, its holds go to the pump in place of its waiter
+    /// ([`Waiter::Late`]), leaving `None` here.
+    Lawyer(&'a mut Option<Late>),
+    /// An automatic leave's, which never asks S18 to stop once something took over.
+    Auto,
 }
 
 impl NotLeft {
@@ -67,6 +89,10 @@ impl NotLeft {
                 ErrorCode::SigninFailed,
                 format!("{agent}'s login you already had did not stop; try again"),
             ),
+            Self::NewSignIn | Self::TakenOver => HostError::new(
+                ErrorCode::CommandConflict,
+                format!("{agent} signed in meanwhile"),
+            ),
             Self::Error(error) => error,
         }
     }
@@ -76,6 +102,7 @@ impl NotLeft {
         match self {
             Self::StillRunning => ErrorCode::SigninAgentsStillRunning,
             Self::NotStopped => ErrorCode::SigninFailed,
+            Self::NewSignIn | Self::TakenOver => ErrorCode::CommandConflict,
             Self::Error(error) => error.code(),
         }
     }
@@ -92,15 +119,29 @@ pub(crate) async fn leave_reused(
     let mut slot = backend.wiring.leaves.begin(agent)?;
     tracing::info!(%agent, "leaving a reused login");
     let reads = backend.wiring.readers.hold(kind).await;
-    // Declared after `reads`, so on a panic it drops first: the host's hold, then the reads'.
     let hold = HostHold::new(std::sync::Arc::clone(&backend.host), agent.clone());
-    match attempt(backend, agent, kind, None).await {
+    // On a panic `Late` drops its fields in order: the host's hold, then the reads'.
+    let mut late = Some(Late { hold, reads });
+    let tried = attempt(backend, agent, kind, None, Whose::Lawyer(&mut late)).await;
+    let Some(Late { hold, reads }) = late else {
+        tracing::info!(%agent, "a leave stopped waiting; its hold stays until S18's job ends");
+        slot.linger();
+        return Err(NotLeft::NotStopped.into_error(agent));
+    };
+    match tried {
         Ok(first_error) => {
             hold.keep();
             slot.left();
             drop(reads);
             login_changed(backend, agent).await;
             first_error.map_or(Ok(()), Err)
+        }
+        Err(NotLeft::NewSignIn) => {
+            tracing::info!(%agent, "a new sign-in took the place of a login being left");
+            hold.keep();
+            slot.left();
+            drop(reads);
+            Ok(())
         }
         Err(not_left) => {
             tracing::info!(%agent, code = not_left.code().as_str(), "a leave did not finish");
@@ -118,6 +159,7 @@ pub(crate) async fn attempt(
     agent: &AgentId,
     kind: AgentKind,
     why: Option<Found>,
+    whose: Whose<'_>,
 ) -> Result<Option<HostError>, NotLeft> {
     match backend.host.stop_agents(agent.clone()).await {
         Ok(AgentsStopped::Exited) => {}
@@ -136,18 +178,81 @@ pub(crate) async fn attempt(
         agent: agent.clone(),
         token,
     };
-    if let Err(error) = backend.agents.stop_using_login(agent, why) {
-        return Err(NotLeft::Error(signin_error(&error)));
-    }
+    ask_to_stop(backend, agent, why, matches!(whose, Whose::Auto))?;
     let wait = backend.wiring.timer.after(Wait::SignedOut);
     let ended = match select(stopped, wait).await {
-        Either::Left((Ok(state), _)) => Some(state),
-        Either::Left((Err(_), _)) | Either::Right(_) => None,
+        Either::Left((Ok(ended), _)) => Some(ended),
+        Either::Left((Err(_), _)) => None,
+        Either::Right(((), stopped)) => give_up(backend, agent, token, whose, stopped).await,
     };
-    if !matches!(ended, Some(SigninState::SignedOut { .. })) {
-        return Err(NotLeft::NotStopped);
+    match ended {
+        Some(Ended::SignedOut) => Ok(after_stop(backend, agent, kind).await),
+        Some(Ended::NewSignIn) => Err(NotLeft::NewSignIn),
+        Some(Ended::Other) | None => Err(NotLeft::NotStopped),
     }
-    Ok(after_stop(backend, agent, kind).await)
+}
+
+/// S18's `stop_using_login`, under the sign-in gate, so no sign-in of desktop's starts between
+/// the check and the call: for an automatic leave, only when nothing took over (`stop_using_login`
+/// replaces a running sign-in, and fails on Clauseo's own login).
+fn ask_to_stop(
+    backend: &AgentsBackend,
+    agent: &AgentId,
+    why: Option<Found>,
+    auto: bool,
+) -> Result<(), NotLeft> {
+    let _gate = lock(&backend.signin_gate);
+    if auto && taken_over(backend, agent) {
+        return Err(NotLeft::TakenOver);
+    }
+    backend
+        .agents
+        .stop_using_login(agent, why)
+        .map_err(|error| NotLeft::Error(signin_error(&error)))
+}
+
+/// The 30 s wait ran out. A lawyer's leave hands its holds to the pump in place of its waiter;
+/// when the pump took the waiter just now, what it hands over is awaited instead.
+async fn give_up(
+    backend: &AgentsBackend,
+    agent: &AgentId,
+    token: Token,
+    whose: Whose<'_>,
+    stopped: oneshot::Receiver<Ended>,
+) -> Option<Ended> {
+    let Whose::Lawyer(late) = whose else {
+        return None;
+    };
+    let given = late.take()?;
+    match backend
+        .wiring
+        .waiters
+        .replace(agent, token, Waiter::Late(given))
+    {
+        Ok(()) => None,
+        Err(waiter) => {
+            if let Waiter::Late(given) = waiter {
+                *late = Some(given);
+            }
+            stopped.await.ok()
+        }
+    }
+}
+
+/// Whether a sign-in S18 runs or has reserved, or Clauseo's own login signed in, has taken the
+/// reused login's place: an automatic leave then asks S18 nothing (review A1).
+pub(crate) fn taken_over(backend: &AgentsBackend, agent: &AgentId) -> bool {
+    backend.agents.sign_in_going(agent)
+        || backend.agents.signin_state(agent).is_some_and(|state| {
+            is_running(&state)
+                || matches!(
+                    state,
+                    SigninState::SignedIn {
+                        source: Source::Own,
+                        ..
+                    }
+                )
+        })
 }
 
 /// The steps after S18 stopped the reuse: `set_reused_login(false)`, `remove_login_links`

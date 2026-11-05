@@ -12,7 +12,7 @@ use clauseo_protocol::{
 };
 use serde_json::json;
 
-use super::fakes::{Rig, command, rig, rig_on, setup_events};
+use super::fakes::{HostCall, Rig, command, rig, rig_on, setup_events};
 use super::{MAIN, SETTINGS, claude};
 use crate::test_support::block_on;
 
@@ -175,4 +175,22 @@ fn a_key_a_failed_read_left_out_at_start_is_taken_in_when_main_s_is_refused() {
         "memory took it in"
     );
     assert!(shows_api_key(&rig));
+}
+
+#[test]
+fn with_no_keychain_a_key_on_a_reused_login_is_refused_before_any_leave() {
+    let rig = rig_on(true, Keychain::none());
+    super::leave::reuse(&rig, &claude());
+    let setup = rig.setup();
+    let answer = rig.pumped(setup.run(SETTINGS, set_key(SETTINGS_KEY)));
+    let error = answer.unwrap_err();
+    assert_eq!(error.code(), ErrorCode::Internal);
+    assert!(error.message().contains("no keychain"), "{error:?}");
+    assert_eq!(
+        rig.host.calls(),
+        Vec::<HostCall>::new(),
+        "no leave, no call"
+    );
+    assert!(rig.calls().is_empty(), "S18 was asked nothing");
+    assert!(rig.backend.wiring.reused.get(&claude()));
 }
