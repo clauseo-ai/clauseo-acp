@@ -47,7 +47,9 @@ pub struct Walked {
     pub visited: u64,
     /// Of those, the ones whose security descriptor changed.
     pub written: u64,
-    /// Junctions, symbolic links and files with more than one link, left bare.
+    /// Junctions, symbolic links and files with more than one link, left bare. A file with
+    /// more than one link that a pool user owns is not skipped by a strict walk or a hand-back
+    /// (N2).
     pub skipped: u64,
     /// Children a pool user owns whose entries were repaired (see [`Strict`]), or, for
     /// [`AclWriter::reclaim`], handed back to the desktop user.
@@ -58,8 +60,11 @@ pub struct Walked {
 /// `watched` (the pool group, the other pool users) or of any type but plain or callback, is
 /// checked before an inherited deny, as is a protected DACL. A child one of `pool` owns (an
 /// agent made it) is repaired: those allows stripped, the protection cleared, its inherited
-/// entries worked out again. A child the lawyer owns is refused. A child the lawyer can't open
-/// at all is refused as [`ApplyFailure::ChildShut`].
+/// entries worked out again; one with more than one link too, since its DACL belongs to the file,
+/// not to one name (N2). A child the lawyer owns is refused. A child the lawyer can't open at
+/// all is refused as [`ApplyFailure::ChildShut`], and so is a pool user's child the walk needs
+/// to write whose handle got no `WRITE_DAC` (or no `WRITE_OWNER`, for a label), so it is set
+/// aside rather than left as it is (N3).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Strict {
     /// Whose explicit allow beats an inherited deny, besides the broad groups.
@@ -162,7 +167,9 @@ pub trait AclWriter {
     fn present(&mut self, grant: &Grant) -> io::Result<bool>;
     /// Works out each file and folder below `root` from its parent's inheritable entries and
     /// the Low label, as far as `reach`, writing what changed. Skips junctions, symbolic links
-    /// and files with more than one link. With `strict`, holds each child to [`Strict`].
+    /// and files with more than one link. With `strict`, holds each child to [`Strict`]. Every
+    /// walk records the protected names below `root` for [`AclWriter::found`], even one that
+    /// fails partway.
     fn propagate(
         &mut self,
         root: &Path,
@@ -186,6 +193,10 @@ pub trait AclWriter {
     /// desktop user (this process's user, through the lawyer's `WRITE_OWNER`), its explicit
     /// label and the allows a strict walk would strip removed, its protection cleared; then
     /// every child's inherited entries are worked out again, as [`AclWriter::propagate`] does.
+    /// A file with more than one link is handed back too (N2). The cleaned DACL is written
+    /// before the owner, so a failure between them leaves a file a pool user still owns, which
+    /// the next hand-back takes again (N13). A pool user's child whose handle lacks
+    /// `WRITE_DAC` or `WRITE_OWNER` is refused as [`ApplyFailure::ChildShut`] (N3).
     fn reclaim(&mut self, root: &Path, pool: &[Sid]) -> Result<Walked, ApplyFailure>;
     /// The explicit mandatory label on `path` now, if any (ours included); `None` when the
     /// path is missing. Read before a label grant is written over it.

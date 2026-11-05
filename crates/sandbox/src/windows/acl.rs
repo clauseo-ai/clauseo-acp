@@ -59,6 +59,8 @@ pub struct NtfsAcl {
     token: Handle,
     /// The child the last failed walk refused, when it was one.
     refused: Option<PathBuf>,
+    /// The protected names the walks met since [`AclWriter::found`] last took them.
+    found: Vec<Found>,
 }
 
 impl NtfsAcl {
@@ -72,13 +74,15 @@ impl NtfsAcl {
         Ok(NtfsAcl {
             token: Handle(token),
             refused: None,
+            found: Vec::new(),
         })
     }
 
-    /// Runs the walk in `mode`, keeping the child it refused for [`AclWriter::refused_at`].
+    /// Runs the walk in `mode`, keeping the child it refused for [`AclWriter::refused_at`] and
+    /// the protected names it met, even when it fails, for [`AclWriter::found`].
     fn run(&mut self, root: &Path, reach: Reach, mode: Mode<'_>) -> Result<Walked, ApplyFailure> {
         self.refused = None;
-        walk::walk(self, root, reach, mode).map_err(|(failure, at)| {
+        walk::walk(&self.token, &mut self.found, root, reach, mode).map_err(|(failure, at)| {
             self.refused = at.map(|wide| PathBuf::from(OsString::from_wide(&wide)));
             failure
         })
@@ -87,36 +91,7 @@ impl NtfsAcl {
 
 impl AclWriter for NtfsAcl {
     fn add(&mut self, grant: &Grant) -> Result<Added, ApplyFailure> {
-        let io = |e: io::Error| ApplyFailure::Io(e.kind());
-        let target = Object::open(grant.path()).map_err(io)?;
-        check_target(&target, grant)?;
-        let spec = AceSpec::for_grant(grant, target.folder).map_err(io)?;
-        let current = target.security(READ_ALL).map_err(io)?;
-        let now = Descriptor::parse(&current).map_err(io)?;
-        if grant.rights().is_label() {
-            let empty = empty_acl();
-            let sacl = Acl::parse(now.sacl.unwrap_or(&empty)).map_err(io)?;
-            if sacl.has(&spec) {
-                return Ok(Added::AlreadyThere);
-            }
-            if !target.write_owner {
-                return Err(ApplyFailure::Io(io::ErrorKind::PermissionDenied));
-            }
-            let bits = now.control & (SACL_PROTECTED | SACL_AUTO_INHERITED);
-            let written = build_descriptor(bits, None, Some(&sacl.with(&spec)));
-            target
-                .set(LABEL_SECURITY_INFORMATION, &written)
-                .map_err(io)?;
-        } else {
-            let dacl = Acl::parse(now.dacl.ok_or(ApplyFailure::NoDacl)?).map_err(io)?;
-            if dacl.has(&spec) {
-                return Ok(Added::AlreadyThere);
-            }
-            let bits = root_bits(now.control);
-            let written = build_descriptor(bits, Some(&dacl.with(&spec)), None);
-            target.set(dacl_info(now.control), &written).map_err(io)?;
-        }
-        Ok(Added::Written)
+        write(grant, None)
     }
 
     fn remove(&mut self, grant: &Grant) -> Result<(), ApplyFailure> {
@@ -196,17 +171,15 @@ impl AclWriter for NtfsAcl {
     }
 
     fn add_expecting(&mut self, grant: &Grant, expected: &Path) -> Result<Added, ApplyFailure> {
-        // Interim: checked through a second open; round 2's N8 compares on add's own handle.
-        match self.same_file(grant.path(), expected) {
-            Ok(true) => self.add(grant),
-            Ok(false) => Err(ApplyFailure::Changed),
-            Err(error) => Err(ApplyFailure::Io(error.kind())),
-        }
+        write(grant, Some(expected))
     }
 
+    /// Sorted, each name once: a launch walks some trees more than once.
     fn found(&mut self) -> Vec<Found> {
-        // Interim: round 2's N1 collects them in the walk.
-        Vec::new()
+        let mut found = std::mem::take(&mut self.found);
+        found.sort();
+        found.dedup();
+        found
     }
 
     fn refused_at(&mut self) -> Option<PathBuf> {
@@ -273,6 +246,51 @@ impl AclWriter for NtfsAcl {
 #[cfg(test)]
 pub(crate) fn descriptor(path: &Path) -> io::Result<Vec<u8>> {
     Object::open(path)?.security(READ_ALL)
+}
+
+/// [`AclWriter::add`], and with `expected` [`AclWriter::add_expecting`]: the target opened
+/// once and checked; with `expected`, compared by the file ID on that same handle with the file
+/// `expected` names (opened without following; a link there is `Changed`); then written
+/// through that handle (N8).
+fn write(grant: &Grant, expected: Option<&Path>) -> Result<Added, ApplyFailure> {
+    let io = |e: io::Error| ApplyFailure::Io(e.kind());
+    let target = Object::open(grant.path()).map_err(io)?;
+    check_target(&target, grant)?;
+    if let Some(expected) = expected {
+        let expected = Object::open(expected).map_err(io)?;
+        if expected.name_surrogate()
+            || target.file_id().map_err(io)? != expected.file_id().map_err(io)?
+        {
+            return Err(ApplyFailure::Changed);
+        }
+    }
+    let spec = AceSpec::for_grant(grant, target.folder).map_err(io)?;
+    let current = target.security(READ_ALL).map_err(io)?;
+    let now = Descriptor::parse(&current).map_err(io)?;
+    if grant.rights().is_label() {
+        let empty = empty_acl();
+        let sacl = Acl::parse(now.sacl.unwrap_or(&empty)).map_err(io)?;
+        if sacl.has(&spec) {
+            return Ok(Added::AlreadyThere);
+        }
+        if !target.write_owner {
+            return Err(ApplyFailure::Io(io::ErrorKind::PermissionDenied));
+        }
+        let bits = now.control & (SACL_PROTECTED | SACL_AUTO_INHERITED);
+        let written = build_descriptor(bits, None, Some(&sacl.with(&spec)));
+        target
+            .set(LABEL_SECURITY_INFORMATION, &written)
+            .map_err(io)?;
+    } else {
+        let dacl = Acl::parse(now.dacl.ok_or(ApplyFailure::NoDacl)?).map_err(io)?;
+        if dacl.has(&spec) {
+            return Ok(Added::AlreadyThere);
+        }
+        let bits = root_bits(now.control);
+        let written = build_descriptor(bits, Some(&dacl.with(&spec)), None);
+        target.set(dacl_info(now.control), &written).map_err(io)?;
+    }
+    Ok(Added::Written)
 }
 
 /// `path` opened without following a link, `None` when it is missing; a link there now, or
