@@ -58,7 +58,9 @@ pub struct MattersSettings {
 }
 
 /// How to start one agent. `process` and `host` launch it; this crate only reads it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+// Its `Debug` (below) names each variable but shows no value: a reader adds the stored API key
+// to a copy (decision record 0048, ruling 5), and no key reaches a log, an error or a `Debug`.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct AgentLaunch {
     /// The program, as an absolute path.
     pub command: String,
@@ -68,6 +70,21 @@ pub struct AgentLaunch {
     /// Variables added to its environment. Never a secret: keys go in the OS keychain.
     #[serde(default)]
     pub env: BTreeMap<String, String>,
+}
+
+impl std::fmt::Debug for AgentLaunch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let env: BTreeMap<&str, &str> = self
+            .env
+            .keys()
+            .map(|name| (name.as_str(), "[redacted]"))
+            .collect();
+        f.debug_struct("AgentLaunch")
+            .field("command", &self.command)
+            .field("args", &self.args)
+            .field("env", &env)
+            .finish()
+    }
 }
 
 /// One agent's firm plan (`plans.<id>`): a gateway or a cloud provider instead of the plan
