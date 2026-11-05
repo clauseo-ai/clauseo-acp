@@ -115,15 +115,19 @@ impl Rig {
             "command": command,
             "args": args,
         }}});
-        crate::write::write_file(&root.join("settings.json"), settings.to_string().as_bytes())
-            .unwrap();
+        crate::write::create_dir_all(&root.join("data")).unwrap();
+        crate::write::write_file(
+            &root.join("data").join("settings.json"),
+            settings.to_string().as_bytes(),
+        )
+        .unwrap();
     }
 
     /// The host on the data folder `dir`, started and serving, with the start-up read
     /// `failing` names failing.
     fn open(dir: TempDir, run: u16, failing: Option<Failing>) -> Self {
         let root = dir.path();
-        let effective = Effective::load(&Locations::under_root(root), &SystemFiles, &[]);
+        let effective = Effective::load(&Locations::under_home(root), &SystemFiles, &[]);
         let launcher = PassthroughLauncher::new(SpawnOptions::new().home(root.join("home")));
         let clock = ManualClock::new(Timestamp::new(1_790_000_000_000).unwrap());
         let config = HostConfig::new(effective, Arc::new(launcher))

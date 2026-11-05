@@ -98,7 +98,7 @@ pub(crate) fn run(wanted: Wanted, adapter: Adapter, env: &BTreeMap<String, Strin
         &data.join("settings.json"),
         serde_json::to_string_pretty(&settings).unwrap().as_bytes(),
     );
-    let locations = Locations::under_root(&data);
+    let locations = Locations::under_home(&root);
     let home = locations.agent_home(wanted.agent);
     let sources = clauseo_settings::system_policy_sources();
     let sources: Vec<&dyn clauseo_settings::PolicySource> =

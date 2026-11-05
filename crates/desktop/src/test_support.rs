@@ -124,7 +124,7 @@ fn on_thread<T: Send + 'static>(step: &str, work: impl FnOnce() -> T + Send + 's
 }
 
 /// `<temp>/clauseo-desktop-<test>-<pid>`, removed when dropped. The data folder is the root
-/// itself (`Locations::under_root`), so nothing touches the real app data folder.
+/// `data` inside it (`Locations::under_home`), so nothing touches the real app data folder.
 pub(crate) struct Scratch {
     root: PathBuf,
 }
@@ -186,7 +186,7 @@ impl Scratch {
             return Self { root };
         };
         // New matters, the Scratch matter included, go in the scratch folder on every OS, set
-        // here and not only through `Locations::under_root`: never the real Documents folder.
+        // here and not only through `Locations::under_home`: never the real Documents folder.
         let entry = serde_json::json!({ "command": agent.display().to_string(), "args": args });
         let mut agents = serde_json::json!({ AGENT: entry });
         if claude {
@@ -196,7 +196,13 @@ impl Scratch {
             "agents": agents,
             "matters": { "default_location": root.join(MATTERS_DIR).display().to_string() }
         });
-        std::fs::write(root.join("settings.json"), settings.to_string()).unwrap();
+        // The settings file is in the data folder, `root/data` (`Locations::under_home`).
+        std::fs::create_dir_all(root.join("data")).unwrap();
+        std::fs::write(
+            root.join("data").join("settings.json"),
+            settings.to_string(),
+        )
+        .unwrap();
         Self { root }
     }
 
@@ -254,13 +260,13 @@ impl Scratch {
 
     /// The launcher the app's own start-up path (`host_config`) gives a host on the folder.
     pub(crate) fn app_launcher(&self) -> Arc<dyn clauseo_process::Launcher> {
-        let effective = Effective::load(&Locations::under_root(&self.root), &SystemFiles, &[]);
+        let effective = Effective::load(&Locations::under_home(&self.root), &SystemFiles, &[]);
         crate::host_config(effective).launcher()
     }
 
     /// The config of a host on the folder, refusing `refused` as a matter.
     pub(crate) fn config(&self, refused: Vec<PathBuf>) -> HostConfig {
-        let effective = Effective::load(&Locations::under_root(&self.root), &SystemFiles, &[]);
+        let effective = Effective::load(&Locations::under_home(&self.root), &SystemFiles, &[]);
         let launcher = crate::host_launcher(None);
         HostConfig::new(effective, Arc::new(launcher)).with_refused_folders(refused)
     }
