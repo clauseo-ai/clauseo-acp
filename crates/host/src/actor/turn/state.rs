@@ -4,7 +4,7 @@ use clauseo_protocol::{
     ContentBlock, DetachReason, ErrorCode, ExpiryReason, MessageId, StopReason, TurnId,
 };
 
-use super::{Current, End, TurnPhase};
+use super::{Current, End, TurnPhase, key_retry};
 
 /// The detail of a `TurnFailed` logged because a commit of the turn failed.
 pub(super) const STORE_DETAIL: &str = "a commit of the turn failed";
@@ -64,6 +64,7 @@ impl Current {
             prompt,
             phase: TurnPhase::Accepting,
             cancelled: false,
+            stopped: key_retry::Stopped::default(),
             refused: false,
             limit: None,
             tool_paths: crate::sent::TurnPaths::default(),

@@ -10,9 +10,12 @@
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use clauseo_host::{HostConfig, LoginLink, ProfileHook};
-use clauseo_protocol::{AgentId, DomainEvent, ErrorCode, StopReason, StreamId, TurnId};
+use clauseo_protocol::{
+    AgentId, CommandOutcome, DomainEvent, ErrorCode, HostCommand, StopReason, StreamId, TurnId,
+};
 use serde_json::{Map, Value};
 
 use crate::codex::{CODEX, codex_dir, turn_failed};
@@ -161,4 +164,44 @@ fn without_a_login_check_a_key_never_authenticates() {
     assert_held_for_sign_in(&events, turn, held);
     host.shutdown();
     assert_never_tried(&lines);
+}
+
+/// The host's log line for the chunk the agent streams while it holds `authenticate`: no
+/// prompt is in flight, so the text is dropped.
+const HELD: &str = "agent text outside a turn was dropped";
+
+/// Waits (at most 20 s) for a log line containing `what`.
+fn until_logged(lines: &Mutex<Vec<String>>, what: &str) {
+    for _ in 0..2000 {
+        if lines.lock().unwrap().iter().any(|line| line.contains(what)) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    panic!("no log line {what:?}: {:#?}", lines.lock().unwrap());
+}
+
+#[test]
+fn a_stop_during_authenticate_sends_no_second_prompt_and_the_turn_ends_cancelled() {
+    let lines = keep_logs();
+    let dir = codex_dir("key_retry_stop", "codex-auth-required-key-stop");
+    let host = start(&dir, Some(LoginLink::Own));
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], CODEX);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (turn, _) = host.prompt(thread, "Look at the matter.");
+    // The agent holds `authenticate` and streams a chunk, which the host drops: the first
+    // prompt already answered, so no prompt is in flight when the Stop comes.
+    until_logged(&lines, HELD);
+    assert_eq!(
+        host.ok(HostCommand::Cancel { thread }),
+        CommandOutcome::Done
+    );
+    let ended = events.until_turn_ended(turn);
+    host.settle();
+    events.drain_ready();
+    // A second `session/prompt` is a mismatch: the scenario ends after `authenticate`.
+    events.assert_no_mismatch();
+    assert_eq!(ended.stop, StopReason::Cancelled, "{}", events.dump());
+    assert!(turn_failed(&events, turn).is_none(), "{}", events.dump());
+    host.shutdown();
 }
