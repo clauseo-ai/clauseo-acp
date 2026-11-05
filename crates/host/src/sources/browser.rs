@@ -178,7 +178,7 @@ pub(crate) fn web_url(url: &str) -> Option<String> {
     };
     let (scheme, rest) = url.split_once("://")?;
     let web = scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https");
-    (web && !rest.is_empty()).then_some(url)
+    (web && !rest.is_empty() && super::is_safe_url_text(&url)).then_some(url)
 }
 
 /// Whether the MCP result in `rawOutput` says the call failed: a non-null `error` (Codex), or

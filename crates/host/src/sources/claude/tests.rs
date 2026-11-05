@@ -281,3 +281,34 @@ fn a_record_url_needs_an_explicit_web_scheme() {
         assert_eq!(record_url(text), None, "{text:?}");
     }
 }
+
+/// D3: a URL holding a bidi control, a space or a control character is dropped, not cleaned; the
+/// URL beside it is kept.
+#[test]
+fn a_link_with_an_unsafe_character_is_dropped() {
+    let links = json!([
+        {"title": "Spoof", "url": "https://evil.example/\u{202E}fdp.exe"},
+        {"title": "Space", "url": "https://a b.example/"},
+        {"title": "Bell", "url": "https://c.example/\u{7}x"},
+        {"title": "Fine", "url": "https://d.example/ok"},
+    ]);
+    let output = json!(format!("Links: {links}"));
+    let input = json!({"query": "x"});
+    assert_eq!(
+        results_of(search(Some(&input), Some(&output), &[])),
+        vec![WebResult::new("Fine", "https://d.example/ok")]
+    );
+}
+
+/// D3: the same check on the fallback's `Title (url)` lines, and on a fetch's URL.
+#[test]
+fn an_unsafe_url_in_content_or_a_fetch_is_no_result_and_no_page() {
+    let input = json!({"query": "x"});
+    let content =
+        text("Spoof (https://evil.example/\u{202E}fdp.exe)\nBell (https://c.example/\u{7}x)");
+    assert_eq!(results_of(search(Some(&input), None, &content)), Vec::new());
+    assert_eq!(
+        fetch(Some(&json!({"url": "https://evil.example/\u{2066}x"}))),
+        None
+    );
+}

@@ -164,6 +164,21 @@ pub(crate) fn clean_title(text: &str) -> String {
         .to_owned()
 }
 
+/// Whether a URL holds only characters a record may keep: no whitespace, no control character
+/// (C0, DEL, C1), and no bidi control (U+200E, U+200F, U+061C, U+202A to U+202E, U+2066 to U+2069).
+/// A URL with one is refused, never cleaned: a bidi control could make a link read as another
+/// address, and a space or control character is no part of a URL.
+pub(crate) fn is_safe_url_text(url: &str) -> bool {
+    !url.chars().any(|c| {
+        c.is_whitespace()
+            || c.is_control()
+            || matches!(
+                c,
+                '\u{200E}' | '\u{200F}' | '\u{061C}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}'
+            )
+    })
+}
+
 /// The URL a record keeps, when `text` is one: an explicit `http://` or `https://` (in either
 /// case) with a host after it. Nothing is added to it: a value with no scheme is no URL, so text
 /// such as `Note (see below)` never becomes a link. The browser's address-bar rule in
@@ -174,7 +189,7 @@ pub(crate) fn record_url(text: &str) -> Option<String> {
         head.eq_ignore_ascii_case(scheme)
             .then(|| &text[scheme.len()..])
     })?;
-    (!rest.is_empty() && !rest.starts_with('/')).then(|| text.to_owned())
+    (!rest.is_empty() && !rest.starts_with('/') && is_safe_url_text(text)).then(|| text.to_owned())
 }
 
 /// A tool call's `rawInput` or `rawOutput` as JSON: inline text only. A blob is too large to be

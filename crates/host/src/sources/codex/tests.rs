@@ -78,3 +78,14 @@ fn a_search_is_a_search_kind_with_a_query_key() {
     assert!(!is_search(ToolKind::Search, None));
     assert!(!is_search(ToolKind::Fetch, Some(&with_query)));
 }
+
+/// D3: a Codex open page with a control character in its URL is no page.
+#[test]
+fn an_unsafe_codex_open_page_url_is_no_page() {
+    assert_eq!(
+        found(
+            &json!({"query": "", "action": {"type": "openPage", "url": "https://c.example/\u{7}x"}})
+        ),
+        None
+    );
+}
