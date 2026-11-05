@@ -7,7 +7,7 @@
 use std::sync::atomic::Ordering;
 
 use clauseo_counts::schema::{Update, UpdateResult};
-use clauseo_host::InstallKind;
+use clauseo_host::{HostConfig, HostExit, InstallKind};
 use clauseo_protocol::{
     CommandOutcome, Count, DeliveryRequest, FailedStage, HostCommand, InstallWhen, StopReason,
     StreamId, UpdateState,
@@ -17,7 +17,7 @@ use crate::counts::open_counts;
 use crate::observe::started;
 use crate::permissions::{answer_from, until_first_request};
 use crate::queue::{CANCEL_WAIT, DURABLE, held, send};
-use crate::support::{Dir, FAKE, Scenario, matter_with_thread, text};
+use crate::support::{Dir, FAKE, Scenario, matter_with_thread, text, wait};
 use crate::update::{
     CURRENT, Download, FakeUpdater, INSTALLING, NEXT, assert_installs, exit_of, marker_text,
     start_updating, start_updating_with, until_ready, until_view, view,
@@ -321,4 +321,25 @@ fn a_marker_that_cannot_be_written_fails_the_install_and_lifts_the_hold() {
     };
     assert_eq!(counted, [(failure, 1)]);
     host.shutdown();
+}
+
+#[test]
+fn an_install_whose_close_failed_stops_and_leaves_no_marker() {
+    // The next start then finds the download again, and reports no failed install.
+    let dir = Dir::new("update_close_failed", &[]);
+    let fake = FakeUpdater::offering(&dir);
+    let mut host = start_updating_with(&dir, 0, &fake, CURRENT, HostConfig::with_failing_close);
+    host.ok(HostCommand::CheckForUpdate {});
+    until_ready(&host);
+    host.ok(install(InstallWhen::AfterTurn));
+    assert_eq!(
+        wait("the host's exit", host.handle.exit()),
+        HostExit::Stopped
+    );
+    let joined = host.take_join().join();
+    assert!(
+        joined.is_err(),
+        "the close's failure is the thread's result"
+    );
+    assert_eq!(marker_text(&dir), None);
 }

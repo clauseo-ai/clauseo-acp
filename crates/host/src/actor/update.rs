@@ -78,7 +78,8 @@ pub(crate) struct UpdateHost {
     read: Option<(Option<UpdateMarker>, Option<CachedDownload>)>,
     /// `None` until the host serves.
     machine: Option<Machine>,
-    files: files::Files,
+    /// Taken at an install's exit ([`exit_files`]).
+    files: Option<files::Files>,
     /// File thread jobs not answered yet.
     files_out: usize,
     timer: Option<AbortHandle>,
@@ -92,6 +93,9 @@ pub(crate) struct UpdateHost {
     cancelling: bool,
     /// What `BeginInstall` handed over, for `Exit::Install`.
     install: Option<Downloaded>,
+    /// `HostConfig::with_failing_close`.
+    #[cfg(feature = "test-support")]
+    fail_close: bool,
 }
 
 /// Starts the updater's part at start-up: the file thread, and its read of `update.json` and
@@ -107,6 +111,8 @@ pub(super) fn start(
         updater,
         jitter_seed,
         app_version,
+        #[cfg(feature = "test-support")]
+        fail_close,
     } = seams;
     let mut host = UpdateHost {
         updater,
@@ -114,7 +120,7 @@ pub(super) fn start(
         seed: jitter_seed,
         read: None,
         machine: None,
-        files: files::Files::start(locations, post),
+        files: Some(files::Files::start(locations, post)),
         files_out: 0,
         timer: None,
         timer_generation: 0,
@@ -124,6 +130,8 @@ pub(super) fn start(
         turns_running: false,
         cancelling: false,
         install: None,
+        #[cfg(feature = "test-support")]
+        fail_close,
     };
     let current = host.current.clone();
     host.send(files::Job::Read { current });
@@ -133,8 +141,10 @@ pub(super) fn start(
 impl UpdateHost {
     /// Queues a file thread job, counted until its end is posted.
     fn send(&mut self, job: files::Job) {
-        self.files_out += 1;
-        self.files.send(job);
+        if let Some(files) = &self.files {
+            self.files_out += 1;
+            files.send(job);
+        }
     }
 }
 
@@ -158,6 +168,35 @@ pub(crate) fn gated(actor: &Actor) -> bool {
 /// The download a `BeginInstall` handed over, once: the actor's exit is then `Exit::Install`.
 pub(super) fn take_install(actor: &mut Actor) -> Option<Downloaded> {
     actor.update.install.take()
+}
+
+/// The file thread, kept past the actor's end by an install's exit.
+pub(super) struct ExitFiles(Option<files::Files>);
+
+impl ExitFiles {
+    /// Deletes `update.json`, waiting for it, off the actor: the install did not happen, so the
+    /// next start finds the download again and reports no failed install.
+    pub(super) async fn clear_marker(self) {
+        if let Some(files) = self.0 {
+            files.clear_and_wait().await;
+        }
+    }
+}
+
+/// Takes the file thread for an install's exit, before the actor is taken apart.
+pub(super) fn exit_files(actor: &mut Actor) -> ExitFiles {
+    ExitFiles(actor.update.files.take())
+}
+
+/// Whether the store's close is to report a failure (`HostConfig::with_failing_close`).
+pub(super) fn fails_close(actor: &Actor) -> bool {
+    #[cfg(feature = "test-support")]
+    return actor.update.fail_close;
+    #[cfg(not(feature = "test-support"))]
+    {
+        let _ = actor;
+        false
+    }
 }
 
 /// One input from the updater's tasks or its file thread.

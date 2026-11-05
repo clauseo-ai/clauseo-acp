@@ -188,8 +188,9 @@ The install takes the quit path:
    `install` stage, counts it, and new sends run again.
 3. The host shuts down: imports and scans cancelled, search, snapshots and matter workers
    stopped, the store closed. Its exit is `HostExit::Install(downloaded)`
-   (`HostHandle::exit`), only when the store closed cleanly; otherwise `Stopped`, desktop just
-   quits, and the next start finds the download again.
+   (`HostHandle::exit`), only when the store closed cleanly; otherwise the marker is deleted
+   (off the actor, waited for) and the exit is `Stopped`: desktop just quits, and the next start
+   finds the download again and reports no failed install.
 4. Desktop's stopper thread flushes the host log (0047) right after `host_start::stop`.
 5. Desktop saves the counts and the window state.
 6. Desktop calls the plugin's `install`. Windows exits inside it; macOS swaps the `.app` and
