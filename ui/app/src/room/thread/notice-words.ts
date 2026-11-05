@@ -35,8 +35,12 @@ export function noticeLine(kind: NoticeKind | undefined, w: NoticeWords): string
           "Clauseo doesn't remember the earlier questions and answers in this conversation. Include what it needs from them in your next question.",
         )
       : null;
-  // read by shape: a value from a newer host, or none (null), that this version doesn't know gives null
-  if (typeof kind !== "object" || kind === null || !("files_came_back" in kind)) return null;
-  const { files, more } = kind.files_came_back;
-  return files.length + more === 0 ? null : cameBack(files, more, w);
+  // read by shape: a value from a newer host, or none (null), that this version doesn't know gives null. The field
+  // is read rather than trusted to `in`: beside another object kind, each variant marks the other's key optional
+  const came =
+    typeof kind === "object" && kind !== null && "files_came_back" in kind
+      ? kind.files_came_back
+      : undefined;
+  if (came === undefined || came.files.length + came.more === 0) return null;
+  return cameBack(came.files, came.more, w);
 }
