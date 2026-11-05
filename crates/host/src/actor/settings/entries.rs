@@ -50,13 +50,17 @@ pub(in crate::actor) fn set_plan(
     let plan = match write {
         PlanWrite::Whole(plan) => plan.map(|plan| *plan),
         PlanWrite::Endpoint(endpoint) => {
-            let mut plan = actor
-                .effective
-                .plan(agent.as_str())
-                .cloned()
-                .unwrap_or_default();
+            let existing = actor.effective.plan(agent.as_str()).cloned();
+            if existing.is_none() && endpoint.is_none() {
+                // No plan and no endpoint: nothing to clear, so no write and no `SettingsChanged`.
+                return Ok(());
+            }
+            // A plan policy sets is locked: `set_plan` refuses it before anything is merged or
+            // written, so a firm plan's provider and variables never reach `settings.json`.
+            let mut plan = existing.unwrap_or_default();
             plan.endpoint = endpoint;
-            Some(plan)
+            // A plan left with nothing in it is removed, never written as `{}`.
+            (plan != Plan::default()).then_some(plan)
         }
     };
     actor

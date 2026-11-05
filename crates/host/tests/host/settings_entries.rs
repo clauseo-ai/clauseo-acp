@@ -275,3 +275,62 @@ fn set_plan_endpoint_keeps_the_provider_and_the_variables() {
     );
     host.shutdown();
 }
+
+/// `settings.json`'s text, or nothing when no write made the file.
+fn settings_text(dir: &Dir) -> String {
+    std::fs::read_to_string(dir.data().join("settings.json")).unwrap_or_default()
+}
+
+fn set_endpoint(host: &Running, url: Option<&str>) -> Result<(), HostError> {
+    wait(
+        "set_plan_endpoint",
+        host.handle
+            .set_plan_endpoint(claude(), url.map(str::to_owned)),
+    )
+}
+
+#[test]
+fn clearing_the_endpoint_of_no_plan_writes_and_sends_nothing() {
+    let dir = Dir::new("entries_plan_endpoint_none", &[]);
+    let host = dir.start(0);
+    let (mut sub, _first) = subscribe_app(&host);
+    set_endpoint(&host, None).unwrap();
+    host.settle();
+    assert_eq!(ready(&mut sub), []);
+    assert!(!settings_text(&dir).contains("plans"), "no plan written");
+    host.shutdown();
+}
+
+#[test]
+fn clearing_a_plans_only_field_removes_the_plan() {
+    let dir = Dir::new("entries_plan_endpoint_last", &[]);
+    let host = dir.start(0);
+    let (mut sub, _first) = subscribe_app(&host);
+    set_endpoint(&host, Some("https://gateway.firm.example")).unwrap();
+    host.settle();
+    let _written = ready(&mut sub);
+    set_endpoint(&host, None).unwrap();
+    host.settle();
+    assert_eq!(changed(&ready(&mut sub)).plans, BTreeMap::new());
+    assert!(
+        !settings_text(&dir).contains("claude-acp"),
+        "no empty plan left"
+    );
+    host.shutdown();
+}
+
+#[test]
+fn set_plan_endpoint_refuses_a_plan_policy_sets() {
+    let dir = Dir::new("entries_plan_endpoint_locked", &[]);
+    let host = dir.start_with_policy(0, r#"{"plans": {"claude-acp": {"provider": "bedrock"}}}"#);
+    let (mut sub, _first) = subscribe_app(&host);
+    let error = set_endpoint(&host, Some("https://gateway.firm.example")).unwrap_err();
+    assert_refused(&error, ErrorCode::SettingsLocked, "plans.claude-acp", &[]);
+    host.settle();
+    assert_eq!(ready(&mut sub), []);
+    assert!(
+        !settings_text(&dir).contains("bedrock"),
+        "the firm's plan is not copied"
+    );
+    host.shutdown();
+}
