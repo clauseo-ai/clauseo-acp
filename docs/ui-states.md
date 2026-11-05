@@ -149,6 +149,8 @@ reported it.
 | Permission answered | `PermissionState::Resolved` with `PermissionChoice::Selected` | option id and kind, by whom (`Principal::LocalDesktop`) |
 | Permission cancelled | `PermissionState::Resolved` with `PermissionChoice::Cancelled` | by whom |
 | Permission refused because a program holds the file open (`held_open`): "Word has Brief.docx open. Close it in Word or save a copy, then ask again." | `PermissionState::Resolved` with `held_open` set; the choice is the reject-once option, or `PermissionChoice::Cancelled` when none was offered | the matter path a program holds open (Word, Excel or PowerPoint by an owner file, or any program on Windows); the lawyer was not asked |
+| Permission for the agent's own plan note, in its own config folder (not one of the lawyer's files) | `PermissionAbout::AgentPlan` in the entry's `about` | as a pending permission; asking and answering are unchanged |
+| Permission about something from a newer Clauseo | `PermissionAbout::Unknown` | as a permission without `about` |
 | Permission expired | `PermissionState::Expired` | one reason below |
 | Permission expired: the agent exited | `ExpiryReason::AgentExited` | the request |
 | Permission expired: the turn ended | `ExpiryReason::TurnEnded` | the request |

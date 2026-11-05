@@ -88,7 +88,8 @@ macro_rules! logged_enums {
                 MatterKind,
                 PageVia,
                 DoneBy,
-                SnoozeBy;
+                SnoozeBy,
+                PermissionAbout;
             closed: TextOrBlob, RawPayload, StreamId;
         }
     };

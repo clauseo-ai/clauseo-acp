@@ -23,6 +23,7 @@ pub(crate) mod folder_support;
 pub(crate) mod forced_ask;
 pub(crate) mod leftovers;
 pub(crate) mod loads;
+pub(crate) mod plan_note;
 mod spec;
 pub(crate) mod title;
 

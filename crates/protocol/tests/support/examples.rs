@@ -17,15 +17,15 @@ use clauseo_protocol::{
     ElicitationOutcome, ElicitationRequest, ElicitationRequested, ElicitationResolved, ErrorCode,
     ExpiryReason, FileChange, FilesChanged, ImportSummary, LimitStopReason, MatterCreated,
     MatterKind, MatterRelocated, ModeChanged, Notice, NoticeLevel, OutsideEdits, PageVia,
-    PageVisited, PermissionChoice, PermissionExpired, PermissionKind, PermissionOption,
-    PermissionRequested, PermissionResolved, PlanEntry, PlanPriority, PlanReplaced, PlanStatus,
-    Principal, PromptCapabilities, QueuedPromptEdited, RawFrom, RenameSource, RestoreScope,
-    SessionCapabilities, SkippedFile, SkippedFileReason, SnoozeBy, SteerOutcome, SteerResolved,
-    SteeringCapability, StepUndone, StopReason, TextAppended, TextKind, TextOrBlob, ThreadArchived,
-    ThreadCreated, ThreadDone, ThreadRenamed, ThreadSnoozed, Timestamp, ToolCallContent,
-    ToolCallPatch, ToolCallStarted, ToolCallStatus, ToolCallUpdated, ToolKind, ToolLocation,
-    TurnEnded, TurnFailed, TurnQueued, TurnStarted, TurnStoppedAtLimit, TurnUsage, UsageUpdated,
-    UserMessage, VersionRestored, WebResult, WebSearchRecorded,
+    PageVisited, PermissionAbout, PermissionChoice, PermissionExpired, PermissionKind,
+    PermissionOption, PermissionRequested, PermissionResolved, PlanEntry, PlanPriority,
+    PlanReplaced, PlanStatus, Principal, PromptCapabilities, QueuedPromptEdited, RawFrom,
+    RenameSource, RestoreScope, SessionCapabilities, SkippedFile, SkippedFileReason, SnoozeBy,
+    SteerOutcome, SteerResolved, SteeringCapability, StepUndone, StopReason, TextAppended,
+    TextKind, TextOrBlob, ThreadArchived, ThreadCreated, ThreadDone, ThreadRenamed, ThreadSnoozed,
+    Timestamp, ToolCallContent, ToolCallPatch, ToolCallStarted, ToolCallStatus, ToolCallUpdated,
+    ToolKind, ToolLocation, TurnEnded, TurnFailed, TurnQueued, TurnStarted, TurnStoppedAtLimit,
+    TurnUsage, UsageUpdated, UserMessage, VersionRestored, WebResult, WebSearchRecorded,
 };
 
 use crate::fixtures::{
@@ -404,6 +404,7 @@ fn session_events() -> Vec<DomainEvent> {
                 agent_label: "Yes".to_owned(),
             }],
             deliverable: Deliverable::Live,
+            about: Some(PermissionAbout::AgentPlan),
         }
         .into(),
         PermissionResolved {

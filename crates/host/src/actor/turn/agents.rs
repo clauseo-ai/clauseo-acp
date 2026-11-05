@@ -9,8 +9,8 @@ use std::sync::Arc;
 
 use clauseo_acp::{AcpEvent, AgentInfo, MessageRole, PendingKey};
 use clauseo_protocol::{
-    AgentChoiceId, AgentSessionId, CompactString, ConfigValue, ElicitationId, ErrorCode, MessageId,
-    PermissionRequestId, ThreadId, TurnId,
+    AgentChoiceId, AgentKind, AgentSessionId, CompactString, ConfigValue, ElicitationId, ErrorCode,
+    MessageId, PermissionRequestId, ThreadId, TurnId,
 };
 
 use super::super::Actor;
@@ -103,6 +103,9 @@ pub(super) struct Agent {
     /// A Claude agent whose launch's folder check found a network drive or a drive without
     /// permissions: it runs in forced ask (`agent/forced_ask.rs`).
     pub(super) forced_ask: bool,
+    /// A Claude agent's plans folder, `<config folder>/plans`, from its launch's environment
+    /// (`agent/plan_note.rs`); `None` for any other agent.
+    pub(super) plan_notes: Option<PathBuf>,
 }
 
 /// What a Codex agent's launch recorded.
@@ -170,7 +173,7 @@ pub(super) fn launch_now(
         let matter = prepared.run.key.matter;
         tracing::info!(%matter, forced_ask, "Claude runs in forced ask: the matter folder is unprotected");
     }
-    let (link, folder, codex) = match launch(actor, thread, prepared) {
+    let (link, folder, codex, plan_notes) = match launch(actor, thread, prepared) {
         Ok(launched) => launched,
         Err(error) => {
             fail_all(actor, thread, waiting, &error);
@@ -207,6 +210,7 @@ pub(super) fn launch_now(
         codex,
         mcp_commands: Vec::new(),
         forced_ask,
+        plan_notes,
     };
     if let Some(state) = state(actor, thread) {
         state.agent = Some(Box::new(agent));
@@ -219,8 +223,9 @@ pub(super) fn next_agent_id() -> u64 {
     NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
-/// What a launch gives: the link, the folder it runs in, and what a Codex launch recorded.
-type Launched = (AgentLink, PathBuf, Option<CodexAgent>);
+/// What a launch gives: the link, the folder it runs in, what a Codex launch recorded, and a
+/// Claude launch's plans folder.
+type Launched = (AgentLink, PathBuf, Option<CodexAgent>, Option<PathBuf>);
 
 /// The launch itself: the spec from the settings (inherited environment, the agent's
 /// variables, then the profile hook's with the host's switches over them, then what the host
@@ -266,6 +271,10 @@ fn launch(actor: &Actor, thread: ThreadId, prepared: Prepared) -> Result<Launche
         agent::session_folder(&folder),
         actor.wiring.path_prepend.as_deref(),
     )?;
+    let claude = AgentKind::of(&row.agent) == Some(AgentKind::Claude);
+    let plan_notes = claude
+        .then(|| agent::plan_note::plans_folder(spec.env(), cfg!(windows)))
+        .flatten();
     let post = actor.post.clone();
     let post: Rc<dyn Fn(agent::AgentInput)> = Rc::new(move |input| {
         // The actor may be gone by then.
@@ -278,7 +287,7 @@ fn launch(actor: &Actor, thread: ThreadId, prepared: Prepared) -> Result<Launche
         Arc::clone(&actor.clock),
         post,
     )?;
-    Ok((link, folder, codex))
+    Ok((link, folder, codex, plan_notes))
 }
 
 /// THE CODEX HOOKS SEAM: the `hooks` object a Codex agent's `CODEX_CONFIG` carries, with its

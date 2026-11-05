@@ -2846,6 +2846,16 @@ export type PatchBatch = {
 	patches: ViewPatch[],
 };
 
+/**  What a permission request is about, when the host can tell. */
+export type PermissionAbout = 
+/**
+ *  The agent saving its own plan note in its own config folder, not one of the
+ *  lawyer's files.
+ */
+"agent_plan" | 
+/**  A value from a newer Clauseo that this version does not know. */
+"unknown";
+
 /**  How a permission request was answered. */
 export type PermissionChoice = 
 /**  An offered option was chosen. The kind is copied from the offer, never narrowed. */
@@ -2874,6 +2884,8 @@ export type PermissionEntry = {
 	deliverable: Deliverable,
 	/**  Where it stands. */
 	state: PermissionState,
+	/**  What the request is about when the host can tell (`PermissionRequested::about`). */
+	about?: PermissionAbout,
 	/**
 	 *  When it was answered or cancelled (display only; the `PermissionResolved` envelope's
 	 *  `ts`). `None` while pending and after it expired.
@@ -2929,6 +2941,11 @@ export type PermissionRequested = {
 	options: PermissionOption[],
 	/**  Whether an answer can reach the agent. */
 	deliverable: Deliverable,
+	/**
+	 *  What the request is about when the host can tell; `agent_plan`: the agent saving its
+	 *  own plan note in its own config folder, not one of the lawyer's files.
+	 */
+	about?: PermissionAbout,
 };
 
 /**  A permission request was answered; the first valid answer wins. */

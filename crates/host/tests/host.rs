@@ -128,6 +128,9 @@ mod papers;
 #[path = "host/permissions.rs"]
 mod permissions;
 #[cfg(test)]
+#[path = "host/plan_note.rs"]
+mod plan_note;
+#[cfg(test)]
 #[path = "host/privacy.rs"]
 mod privacy;
 #[cfg(test)]

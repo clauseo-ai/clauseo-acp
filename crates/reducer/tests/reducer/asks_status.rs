@@ -2,13 +2,13 @@
 //! an expired question settles like an answered one, a turn starts as `NeedsYou` while one
 //! waits, a restored state still counts the questions that wait, and the end of an earlier
 //! prompt's turn leaves the `Starting` of a later one. A request refused because a program holds
-//! the file open keeps the file in its settled state.
+//! the file open keeps the file in its settled state. A request's `about` reaches its entry.
 
 use clauseo_protocol::{
-    ElicitationExpired, ElicitationOutcome, ElicitationRequest, ElicitationRequested,
-    ElicitationResolved, ElicitationState, ExpiryReason, MatterPath, MessageId, PermissionChoice,
-    PermissionExpired, PermissionKind, PermissionRequestId, PermissionResolved, PermissionState,
-    Principal, ThreadStatus, TurnId, TurnStarted, UserMessageStatus, ViewEntry,
+    DomainEvent, ElicitationExpired, ElicitationOutcome, ElicitationRequest, ElicitationRequested,
+    ElicitationResolved, ElicitationState, ExpiryReason, MatterPath, MessageId, PermissionAbout,
+    PermissionChoice, PermissionExpired, PermissionKind, PermissionRequestId, PermissionResolved,
+    PermissionState, Principal, ThreadStatus, TurnId, TurnStarted, UserMessageStatus, ViewEntry,
 };
 use clauseo_reducer::{StreamState, apply};
 
@@ -77,6 +77,38 @@ fn a_permission_refused_for_an_open_document_names_the_file() {
     };
     assert_eq!(entry.state, settled);
     assert_eq!(status(&state), ThreadStatus::Running);
+}
+
+/// `PermissionRequested::about` is copied to the entry, set or absent, and stays once settled.
+#[test]
+fn a_permission_entry_carries_what_the_request_is_about() {
+    for about in [Some(PermissionAbout::AgentPlan), None] {
+        let mut log = Log::thread(23).unwrap();
+        log.push(thread_created().unwrap()).unwrap();
+        start_turn(&mut log, "Plan the lease review.").unwrap();
+        let request: PermissionRequestId = log.fresh().unwrap();
+        let mut requested = permission_requested(request, None);
+        if let DomainEvent::PermissionRequested(event) = &mut requested {
+            event.about = about;
+        }
+        let mut state = fold(log.events());
+        let out = apply(&mut state, &log.push(requested).unwrap()).unwrap();
+        let ViewEntry::Permission(entry) = first_upsert(&out.changes) else {
+            panic!("{:?}", out.changes);
+        };
+        assert_eq!(entry.about, about);
+        let cancelled = PermissionResolved {
+            request,
+            choice: PermissionChoice::Cancelled,
+            by: Principal::LocalDesktop,
+            held_open: None,
+        };
+        let out = apply(&mut state, &log.push(cancelled).unwrap()).unwrap();
+        let ViewEntry::Permission(entry) = first_upsert(&out.changes) else {
+            panic!("{:?}", out.changes);
+        };
+        assert_eq!(entry.about, about);
+    }
 }
 
 #[test]

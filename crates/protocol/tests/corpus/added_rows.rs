@@ -240,4 +240,11 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (355, 0x1cdf_1262_85a5_c82a),
         (237, 0xf7de_a844_c52c_55fd),
     ),
+    (
+        "added/permission_requested-AgentPlan",
+        include_bytes!("added/permission_requested-AgentPlan.jsonl"),
+        include_bytes!("added/permission_requested-AgentPlan.msgpack"),
+        (456, 0x81f9_9f30_e434_cbb8),
+        (318, 0xdb30_7496_d404_eae9),
+    ),
 ];

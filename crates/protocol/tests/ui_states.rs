@@ -14,8 +14,8 @@ use std::ops::RangeInclusive;
 
 use clauseo_protocol::{
     CheckpointKind, Deliverable, Delivery, ElicitationOutcome, ErrorCode, ExpiryReason,
-    LimitSource, MatterStatus, NoticeLevel, PermissionKind, SkippedFileReason, SteerOutcome,
-    StopReason, ThreadStatus, ToolCallStatus, ToolKind,
+    LimitSource, MatterStatus, NoticeLevel, PermissionAbout, PermissionKind, SkippedFileReason,
+    SteerOutcome, StopReason, ThreadStatus, ToolCallStatus, ToolKind,
 };
 
 /// The document, read at build time.
@@ -72,7 +72,7 @@ fn every_listed_variant_is_in_ui_states() {
         data: ThreadStatus, LimitSource, SteerOutcome, MatterStatus;
         unit: StopReason, ToolKind, ToolCallStatus, PermissionKind, ExpiryReason,
             ElicitationOutcome, CheckpointKind, SkippedFileReason, Delivery, ErrorCode,
-            Deliverable, NoticeLevel,
+            Deliverable, NoticeLevel, PermissionAbout,
     );
     let guarded = guarded_names(UI_STATES);
     let missing: Vec<String> = every

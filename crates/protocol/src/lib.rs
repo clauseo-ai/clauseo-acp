@@ -191,7 +191,7 @@ macro_rules! wire_types {
 wire_types! {
     approval::{
         Deliverable, ElicitationOutcome, ElicitationRequest, ElicitationResponse, ExpiryReason,
-        PermissionChoice, PermissionKind, PermissionOption, Principal,
+        PermissionAbout, PermissionChoice, PermissionKind, PermissionOption, Principal,
     },
     browser_install::{BrowserInstallFailure, BrowserInstallState},
     command::{
