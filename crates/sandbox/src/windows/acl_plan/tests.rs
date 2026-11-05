@@ -2,7 +2,9 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 use super::super::admit::{Admitted, FolderRefusal, PathKind, admit_with};
-use super::super::test_world::{FakeGroups, MATTER_SID, USER_SID, World, matter_one, sids};
+use super::super::test_world::{
+    FakeGroups, MATTER_SID, NOTES, STATE, STORE, USER_SID, World, matter_one, sids,
+};
 use super::*;
 use crate::windows::FolderSupport;
 use crate::{Error, Policy};
@@ -304,136 +306,5 @@ fn the_same_sid_twice_is_refused() {
     assert!(matches!(error, Error::Policy(_)), "{error:?}");
 }
 
-/// The plan for `policy`, gated with every folder answering Ok, as an error or not.
-fn refusal(w: &World, policy: &Policy) -> Option<(PathKind, FolderRefusal)> {
-    let admitted = admitted(w, policy, &[], &FakeGroups::default());
-    match plan(&admitted, &sids(), matter_one()) {
-        Ok(_) => None,
-        Err(Error::FolderUnsupported { path_kind, support }) => Some((path_kind, support)),
-        Err(other) => panic!("{other:?}"),
-    }
-}
-
-#[test]
-fn a_notes_folder_on_the_profile_is_refused() {
-    // The review's repro: Modify down the tree on the profile.
-    let w = World::new("plan-notes-home");
-    let policy = w.builder().notes(w.at("home")).build().unwrap();
-    let want = (PathKind::Notes, FolderRefusal::HoldsTheProfile);
-    assert_eq!(refusal(&w, &policy), Some(want));
-}
-
-#[test]
-fn a_read_path_over_other_matters_state_is_refused() {
-    // The review's repro: `data/agent-state` holds every matter's state and notes.
-    let w = World::new("plan-read-agent-state");
-    let policy = w.builder().read(w.at("data/agent-state")).build().unwrap();
-    let want = (PathKind::Read, FolderRefusal::OverlapsDataFolder);
-    assert_eq!(refusal(&w, &policy), Some(want));
-}
-
-#[test]
-fn the_sandbox_records_folder_is_refused_as_a_runtime_path_or_the_claude_store() {
-    let w = World::new("plan-sandbox-records");
-    w.dir.dir("data/sandbox");
-    let runtime = w.builder().runtime(w.at("data/sandbox")).build().unwrap();
-    let want = (PathKind::Runtime, FolderRefusal::OverlapsSandboxRecords);
-    assert_eq!(refusal(&w, &runtime), Some(want));
-    let store = w
-        .builder()
-        .claude_store(w.at("data/sandbox"))
-        .build()
-        .unwrap();
-    let got = refusal(&w, &store).unwrap();
-    assert_eq!(got.1, FolderRefusal::OverlapsSandboxRecords);
-    assert!(
-        matches!(got.0, PathKind::ClaudeStore | PathKind::ClaudeStoreFile),
-        "{got:?}"
-    );
-    // The data folder itself as a read path holds the records folder (a policy that doesn't hide
-    // it; with it hidden, the policy refuses that path itself).
-    let data = Policy::builder(w.at("matter"), w.at("data/agent-state/m1/claude"))
-        .home(w.at("home"))
-        .read(w.at("data"))
-        .build()
-        .unwrap();
-    assert_eq!(
-        refusal(&w, &data).unwrap().1,
-        FolderRefusal::OverlapsSandboxRecords
-    );
-}
-
-#[test]
-fn a_read_path_in_this_matters_own_state_folder_is_planned() {
-    let w = World::new("plan-read-own-state");
-    w.dir.dir("data/agent-state/m1/claude/skills");
-    let policy = w
-        .builder()
-        .read(w.at("data/agent-state/m1/claude/skills"))
-        .build()
-        .unwrap();
-    assert_eq!(refusal(&w, &policy), None);
-}
-
-#[test]
-fn a_runtime_inside_an_agents_install_folder_is_planned_read_only() {
-    let w = World::new("plan-agents-runtime");
-    w.dir.dir("data/agents/claude-acp/node");
-    let policy = w
-        .builder()
-        .runtime(w.at("data/agents/claude-acp/node"))
-        .build()
-        .unwrap();
-    assert_eq!(refusal(&w, &policy), None);
-    let grants = plan(
-        &admitted(&w, &policy, &[], &FakeGroups::default()),
-        &sids(),
-        matter_one(),
-    )
-    .unwrap();
-    let node = w.canonical("data/agents/claude-acp/node");
-    let on_node: Vec<&Grant> = grants.grants().iter().filter(|g| g.path == node).collect();
-    assert_eq!(on_node.len(), 2, "{on_node:#?}");
-    assert!(on_node.iter().all(|g| g.rights == Rights::ReadAndExecute));
-}
-
-#[test]
-fn a_writable_target_inside_an_agents_install_folder_is_refused() {
-    let w = World::new("plan-agents-writable");
-    w.dir.dir("data/agents/claude-acp/node");
-    let policy = w
-        .builder()
-        .notes(w.at("data/agents/claude-acp/node"))
-        .build()
-        .unwrap();
-    let want = (PathKind::Notes, FolderRefusal::OverlapsDataFolder);
-    assert_eq!(refusal(&w, &policy), Some(want));
-}
-
-#[test]
-fn an_agents_home_or_whole_folder_as_a_read_target_is_refused() {
-    let w = World::new("plan-agents-home");
-    w.dir.dir("data/agents/codex-acp/home/.codex");
-    for rel in [
-        "data/agents/codex-acp/home",
-        "data/agents/codex-acp/home/.codex",
-        "data/agents/codex-acp",
-    ] {
-        let policy = w.builder().read(w.at(rel)).build().unwrap();
-        let want = (PathKind::Read, FolderRefusal::OverlapsDataFolder);
-        assert_eq!(refusal(&w, &policy), Some(want), "{rel}");
-    }
-}
-
-#[test]
-fn a_claude_store_in_an_agents_home_is_planned() {
-    // Exactly the policy's Claude store: its folder and its allowed names, nothing around them.
-    let w = World::new("plan-agents-claude-store");
-    w.dir.dir("data/agents/claude-acp/home");
-    let policy = w
-        .builder()
-        .claude_store(w.at("data/agents/claude-acp/home"))
-        .build()
-        .unwrap();
-    assert_eq!(refusal(&w, &policy), None);
-}
+/// The profile, the sandbox records and the data folder's allow list.
+mod data;

@@ -71,7 +71,7 @@ fn a_matter_whose_permissions_cant_change_is_refused() {
 fn a_notes_folder_whose_permissions_cant_change_is_refused() {
     let w = World::new("admit-win-notes-cant-change");
     let policy = w.full_policy();
-    protect_with(&w.at("data/agent-state/m1/notes"), OWNER_RIGHTS_MODIFY).unwrap();
+    protect_with(&w.at(NOTES), OWNER_RIGHTS_MODIFY).unwrap();
     let want = FolderRefusal::Support(FolderSupport::CantChangePermissions);
     assert_refused(&w, &policy, PathKind::Notes, want);
 }
@@ -82,13 +82,10 @@ fn a_matter_on_a_share_is_refused() {
     if !has_admin_share(&w) {
         return;
     }
-    let policy = Policy::builder(
-        admin_share_path(&w.at("matter")),
-        w.at("data/agent-state/m1/claude"),
-    )
-    .home(w.at("home"))
-    .build()
-    .unwrap();
+    let policy = Policy::builder(admin_share_path(&w.at("matter")), w.at(STATE))
+        .home(w.at("home"))
+        .build()
+        .unwrap();
     let want = FolderRefusal::Support(FolderSupport::Network);
     assert_refused(&w, &policy, PathKind::Matter, want);
 }
@@ -101,13 +98,10 @@ fn a_state_folder_on_a_share_refuses_the_whole_launch() {
     if !has_admin_share(&w) {
         return;
     }
-    let policy = Policy::builder(
-        w.at("matter"),
-        admin_share_path(&w.at("data/agent-state/m1/claude")),
-    )
-    .home(w.at("home"))
-    .build()
-    .unwrap();
+    let policy = Policy::builder(w.at("matter"), admin_share_path(&w.at(STATE)))
+        .home(w.at("home"))
+        .build()
+        .unwrap();
     assert_eq!(folder_support(policy.matter()).unwrap(), FolderSupport::Ok);
     let want = FolderRefusal::Support(FolderSupport::Network);
     assert_refused(&w, &policy, PathKind::State, want);
@@ -117,7 +111,7 @@ fn a_state_folder_on_a_share_refuses_the_whole_launch() {
 fn a_missing_folder_is_refused() {
     let w = World::new("admit-win-missing");
     let policy = w.full_policy();
-    remove_dir(&w.at("data/agent-state/m1/notes"));
+    remove_dir(&w.at(NOTES));
     let want = FolderRefusal::CheckFailed(io::ErrorKind::NotFound);
     assert_refused(&w, &policy, PathKind::Notes, want);
 }
@@ -135,4 +129,27 @@ fn a_matter_holding_the_data_folder_is_refused_in_any_letter_case() {
     };
     assert_eq!(path_kind, PathKind::Matter);
     assert_eq!(support, FolderRefusal::OverlapsDataFolder);
+}
+
+#[test]
+fn agents_as_a_junction_like_link_refuses_on_windows() {
+    // The real check: `<data>\agents` a directory link (a name-surrogate reparse point, as a
+    // junction is), read through `symlink_metadata`'s `FILE_FLAG_OPEN_REPARSE_POINT` open.
+    let w = World::new("admit-win-agents-link");
+    w.dir.dir("elsewhere/agents");
+    w.dir.dir("data2");
+    let Ok(_link) = w.dir.symlink_dir("data2/agents", &w.at("elsewhere/agents")) else {
+        assert!(
+            std::env::var_os("CI").is_none(),
+            "CI's runners may make links, and this can't"
+        );
+        eprintln!("skipped: no right to make a link");
+        return;
+    };
+    let policy = w.builder().build().unwrap();
+    let refused = admit(&policy, &w.at("data2"), &[], &FakeGroups::default());
+    let Err(Error::FolderUnsupported { support, .. }) = refused else {
+        panic!("not refused: {refused:?}");
+    };
+    assert_eq!(support, FolderRefusal::ReparsePoint);
 }

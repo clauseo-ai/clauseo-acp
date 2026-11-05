@@ -250,6 +250,30 @@ fn reconcile_keeps_a_pending_entry_whose_ace_is_there_and_drops_one_whose_isnt()
 }
 
 #[test]
+fn marking_an_entry_another_process_dropped_fails() {
+    let temp = TempDir::new("ledger-mark-dropped");
+    let path = ledger_path(temp.path());
+    let mut ledger = open(&path);
+    let mut plan = plan_for(matter_one(), "m1");
+    ledger.record_pending(&mut plan).unwrap();
+    // Another host starts, finds no ACE yet, and drops the pending entries.
+    let done = open(&path).reconcile(|_| Ok(false)).unwrap();
+    assert_eq!(done.dropped, 3);
+    let all = plan.entries().to_vec();
+    let error = ledger.mark_applied(&plan, &all).unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::NotFound);
+    let missing = error
+        .get_ref()
+        .and_then(|e| e.downcast_ref::<MissingEntries>());
+    assert_eq!(missing, Some(&MissingEntries(all)));
+    assert_eq!(
+        open(&path).entries().count(),
+        0,
+        "nothing was marked or put back"
+    );
+}
+
+#[test]
 fn reconcile_with_nothing_to_change_leaves_the_file() {
     let temp = TempDir::new("ledger-reconcile-nothing");
     let path = ledger_path(temp.path());

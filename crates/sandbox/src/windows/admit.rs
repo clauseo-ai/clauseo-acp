@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use super::FolderSupport;
 // The gate itself builds on Windows and for tests; elsewhere only its types do.
 #[cfg(any(windows, test, feature = "test-support"))]
-use super::acl_plan::in_folder;
+use super::acl_plan::{AGENTS_DIR, in_folder};
 #[cfg(any(windows, test, feature = "test-support"))]
 use crate::Error;
 use crate::Policy;
@@ -93,6 +93,12 @@ pub enum FolderRefusal {
     /// Another matter's folder is inside this matter, or holds it: a deny on one would land in
     /// the other's tree, whatever its DACL.
     NestedMatter,
+    /// A name in the path is another spelling of a name to Windows: it ends in `.` or a space,
+    /// holds `:` (a stream), or looks like a short 8.3 name.
+    OddSpelling,
+    /// `<data_dir>\agents`, or the agent folder a path is in, is a junction, a link or another
+    /// reparse point.
+    ReparsePoint,
 }
 
 impl fmt::Display for FolderRefusal {
@@ -117,6 +123,10 @@ impl fmt::Display for FolderRefusal {
                 f.write_str("it is, holds or is inside the sandbox's records folder")
             }
             FolderRefusal::NestedMatter => f.write_str("it is inside this matter, or holds it"),
+            FolderRefusal::OddSpelling => f.write_str("a name in it is spelled another way"),
+            FolderRefusal::ReparsePoint => {
+                f.write_str("the agents' folder it is in is a link or a reparse point")
+            }
         }
     }
 }
@@ -239,6 +249,9 @@ fn gate<'a>(
     if in_folder(matter, &data) || in_folder(&data, matter) {
         return Err(refused(PathKind::Matter, FolderRefusal::OverlapsDataFolder));
     }
+    if let Some((kind, refusal)) = agents_links(policy, &data) {
+        return Err(refused(kind, refusal));
+    }
     for other in others {
         let canonical = dunce::canonicalize(other).unwrap_or_else(|_missing| other.clone());
         let nested = [other, &canonical]
@@ -277,6 +290,71 @@ fn gate<'a>(
         data_dir: data,
         closed,
     })
+}
+
+/// Why the agents' folder can't be trusted, if it can't: `<data_dir>\agents` is a reparse point
+/// (a junction could swap what the canonical paths compare against), or an agent folder that
+/// holds one of the policy's read, runtime or Claude store paths is. Read with
+/// `symlink_metadata`, which opens the name itself (`FILE_FLAG_OPEN_REPARSE_POINT` on Windows)
+/// and sees every reparse point there; a read that fails refuses.
+#[cfg(any(windows, test, feature = "test-support"))]
+fn agents_links(policy: &Policy, data: &Path) -> Option<(PathKind, FolderRefusal)> {
+    let agents = data.join(AGENTS_DIR);
+    let check = |path: &Path| match is_reparse_point(path) {
+        Ok(false) => None,
+        Ok(true) => Some(FolderRefusal::ReparsePoint),
+        Err(error) => Some(FolderRefusal::CheckFailed(error.kind())),
+    };
+    if let Some(refusal) = check(&agents) {
+        return Some((PathKind::Runtime, refusal));
+    }
+    let mut paths: Vec<(PathKind, &Path)> = Vec::new();
+    paths.extend(
+        policy
+            .runtime()
+            .iter()
+            .map(|p| (PathKind::Runtime, p.as_path())),
+    );
+    paths.extend(policy.read().iter().map(|p| (PathKind::Read, p.as_path())));
+    paths.extend(
+        policy
+            .allowed_folders()
+            .iter()
+            .map(|p| (PathKind::AllowedFolder, p.as_path())),
+    );
+    if let Some(store) = policy.claude_store() {
+        paths.push((PathKind::ClaudeStore, store.dir()));
+    }
+    for (kind, path) in paths {
+        if !in_folder(path, &agents) {
+            continue;
+        }
+        let depth = agents.components().count() + 1;
+        let folder: PathBuf = path.components().take(depth).collect();
+        if let Some(refusal) = check(&folder) {
+            return Some((kind, refusal));
+        }
+    }
+    None
+}
+
+/// Whether `path` is a reparse point (on Windows any, elsewhere a symbolic link); a missing
+/// path is not.
+#[cfg(any(windows, test, feature = "test-support"))]
+fn is_reparse_point(path: &Path) -> io::Result<bool> {
+    let meta = match std::fs::symlink_metadata(path) {
+        Ok(meta) => meta,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error),
+    };
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt as _;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+        Ok(meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0)
+    }
+    #[cfg(not(windows))]
+    Ok(meta.file_type().is_symlink())
 }
 
 /// `None` for `Ok`, else why the folder is refused.
