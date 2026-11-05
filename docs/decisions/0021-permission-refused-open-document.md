@@ -54,6 +54,30 @@ more fact: the file.
 - Writes the agent makes without a permission request (Claude's acceptEdits inside the folder,
   Codex's workspace-write and agent modes, any shell command) are not covered here.
 
+## The stale owner-file rule (R9 follow-up, 2026-11-05)
+
+After a Word crash its owner file stays (research 38, point 1: 3 of 3 crashes), and Word's next
+open and close of that document does not remove it. So an owner-file-only check would refuse
+for good: undo, restore, this permission check and the pre-write guard alike
+(clauseo-ai/clauseo-acp-private#224). `held_open` now passes over an owner file the stale rule
+finds stale (`crates/matters/src/locks/stale.rs`), checked for each owner file found:
+
+- macOS: stale only when no `Microsoft Word` process runs at all, `F_GETLK` sees no lock on the
+  document, and the folder is on a local APFS or HFS+ volume (`statfs`). On a network volume a
+  colleague's Word elsewhere leaves an owner file and no local lock, so it stays held there.
+- Windows: stale only when a no-share open of the document succeeds and no `WINWORD.EXE` runs.
+- Linux: no Word, so an owner file is always held.
+- Any query that fails (the process listing, `F_GETLK`, `statfs`, the open) counts as held. A
+  failed process listing counts as "a Word may be running".
+
+Research 38's own rule (point 3) also let an owner file through when it was older than every
+running Word. That is not taken, because of its point 5: after a crash, a Word that reopens the
+document reuses the stale owner file. So a reopened document's owner file predates the new
+Word, and during a save (Word swaps in a new file and locks it a moment later) only the lock
+would guard the document. No path to a silent overwrite matters more than an occasional extra
+"quit Word" step. So a crashed Word's owner file blocks only while some Word runs, and quitting
+Word clears it.
+
 ## Status
 
 proposed

@@ -87,6 +87,8 @@ mod descendants;
 mod error;
 mod handle;
 mod launch;
+#[cfg(all(test, any(target_os = "macos", windows)))]
+mod named_tests;
 mod os;
 mod spec;
 mod stderr;
@@ -105,11 +107,12 @@ pub use timer::ManualTimer;
 pub use timer::{AsyncIoTimer, Timer};
 
 /// The start times, as wall time, of the running processes named `name`: the executable's
-/// process name on macOS (`Microsoft Word`, libproc's `pbi_name` or `pbi_comm`, byte for byte),
+/// file name on macOS (`Microsoft Word`, from libproc's `proc_pidpath`, byte for byte),
 /// the image name on Windows (`WINWORD.EXE`, ignoring ASCII case). An empty list when none runs.
 /// `None` when the answer is unknown: the listing failed, or a process that may be one could not
-/// be read. One listing of every process, and one read per process (macOS) or per match
-/// (Windows). macOS and Windows only; `matters` asks it for Word (its stale owner-file rule).
+/// be read. One listing of every process, and one path read per process and one more read per
+/// match (macOS) or one read per match (Windows). macOS and Windows only; `matters` asks it for
+/// Word (its stale owner-file rule).
 #[cfg(any(target_os = "macos", windows))]
 pub fn processes_named(name: &str) -> Option<Vec<std::time::SystemTime>> {
     os::named(name)

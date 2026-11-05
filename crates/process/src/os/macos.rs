@@ -1,8 +1,9 @@
 //! The macOS listing of an agent's descendants, through libproc: `proc_listchildpids` walks the
 //! tree, `proc_pidinfo(PROC_PIDTBSDINFO)` gives each process's parent, group, start and state,
 //! and `proc_pidpath` its executable. `proc_listallpids` lists every process, for the processes
-//! with a given name and their starts (`named`). Each libproc call has one wrapper here, with its
-//! `unsafe` block and the reason it is sound; nothing else in the crate calls libproc.
+//! with a given executable name and their starts (`named`). Each libproc call has one wrapper
+//! here, with its `unsafe` block and the reason it is sound; nothing else in the crate calls
+//! libproc.
 #![expect(
     unsafe_code,
     reason = "FFI to libproc (proc_listchildpids, proc_listallpids, proc_pidinfo, proc_pidpath)"
@@ -115,25 +116,33 @@ fn children(parent: u32) -> Option<Vec<u32>> {
     }
 }
 
-/// The starts of the running processes whose name (`pbi_name`, or `pbi_comm`, the first 16
-/// bytes) is `name`, compared byte for byte; an empty list when none runs. `None` when the
-/// listing fails or a listed process that still exists cannot be read (it might be one), so the
-/// caller cannot tell. A process that exits between the listing and its read is skipped, and so
-/// is one that has exited and waits to be reaped.
+/// The starts of the running processes whose executable's file name is `name` (`Microsoft
+/// Word` for `/Applications/Microsoft Word.app/Contents/MacOS/Microsoft Word`, wherever the app
+/// sits), compared byte for byte; an empty list when none runs.
+///
+/// Each process is matched by `proc_pidpath`, which xnu answers for any user's process (it is
+/// exempt from `proc_pidinfo`'s same-user check, unlike `PROC_PIDTBSDINFO`, which answers
+/// EPERM for root's and other users' processes). A process whose path cannot be read has exited
+/// or has no executable (a zombie, the kernel), so it is not one and is skipped. Only a match is
+/// read further, by `PROC_PIDTBSDINFO`, for its start. `None` when the listing fails, or a
+/// match that has not exited cannot be read (another user's Word): the caller cannot tell.
 pub(crate) fn named(name: &str) -> Option<Vec<SystemTime>> {
     let mut starts = Vec::new();
     for pid in all_pids()? {
+        let Some(exe) = path(pid) else {
+            continue;
+        };
+        if exe
+            .file_name()
+            .is_none_or(|file| file.as_bytes() != name.as_bytes())
+        {
+            continue;
+        }
         match bsd_info(pid) {
-            Some(bsd) => {
-                if bsd.pbi_status != SZOMB
-                    && (c_name(&bsd.pbi_name) == name.as_bytes()
-                        || c_name(&bsd.pbi_comm) == name.as_bytes())
-                {
-                    starts.push(start_time(&bsd)?);
-                }
-            }
-            // ESRCH: it exited since the listing. Anything else (EPERM, or it answers): it is
-            // there and unread.
+            Some(bsd) if bsd.pbi_status == SZOMB => {}
+            Some(bsd) => starts.push(start_time(&bsd)?),
+            // ESRCH: it exited since its path was read. Anything else (EPERM): it is there and
+            // its start is unread.
             None if gone(pid) => {}
             None => return None,
         }
@@ -144,15 +153,6 @@ pub(crate) fn named(name: &str) -> Option<Vec<SystemTime>> {
 /// Whether no process `pid` exists now: `kill(pid, 0)` answers `ESRCH`.
 fn gone(pid: u32) -> bool {
     i32::try_from(pid).is_ok_and(|pid| kill(Pid::from_raw(pid), None) == Err(Errno::ESRCH))
-}
-
-/// A NUL-terminated name from `proc_bsdinfo`, as its bytes before the first NUL.
-fn c_name(field: &[std::ffi::c_char]) -> Vec<u8> {
-    field
-        .iter()
-        .map(|c| c.to_ne_bytes()[0])
-        .take_while(|&byte| byte != 0)
-        .collect()
 }
 
 /// A process's start as wall time: `pbi_start_tvsec` and `pbi_start_tvusec` since the epoch.

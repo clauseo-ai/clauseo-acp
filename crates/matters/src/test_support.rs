@@ -8,8 +8,8 @@ static PRETEND_WORD: AtomicBool = AtomicBool::new(false);
 
 /// From now on, for the whole process, the stale owner-file rule hears that one Word process
 /// runs, started at the Unix epoch, in place of the real process listing. The rule still runs
-/// and answers held for an owner file a test makes: on macOS the owner file is newer than that
-/// Word's start, on Windows a Word runs. (Linux has no stale rule: an owner file is always
+/// and answers held for an owner file a test makes, since a Word runs (on macOS and Windows
+/// alike). (Linux has no stale rule: an owner file is always
 /// held.) Tests that plant an owner file with no Word running call it from their fixture;
 /// the tests of the stale rule itself live in test binaries that never do. Process-wide, so it
 /// suits nextest's one process per test.
