@@ -2,8 +2,10 @@
 //! `C:\m`, whose DACLs hold their inherited copies without the inherited flag.
 
 use super::*;
+use crate::windows::acl_bytes::owner_sid;
 use crate::windows::record::current_user_sid;
 use crate::windows::test_acl::entries;
+use std::fmt::Write as _;
 
 /// `CREATOR OWNER`.
 const CREATOR_OWNER: &str = "S-1-3-0";
@@ -84,6 +86,25 @@ fn plain_matter(place: &Place) -> PathBuf {
     matter
 }
 
+/// Each of `rels`' entries and owner, one line each, for a failed launch's message.
+fn dump(place: &Place, rels: &[&str]) -> String {
+    let mut out = String::new();
+    for rel in rels {
+        let path = place.at(rel);
+        let owner = descriptor(&path).ok().and_then(|bytes| owner_sid(&bytes));
+        writeln!(out, "{rel}: owner {owner:?}").unwrap();
+        for (kind, flags, mask, sid) in entries(&path) {
+            writeln!(
+                out,
+                "  kind {kind} flags {flags:#04x} mask {mask:#010x} {}",
+                sid.as_str()
+            )
+            .unwrap();
+        }
+    }
+    out
+}
+
 /// The entries `path` holds twice, explicit and inherited: equal but for the inherited flag.
 fn twice(path: &Path) -> Vec<(u8, u8, u32, Sid)> {
     let all = entries(path);
@@ -109,7 +130,18 @@ fn twice(path: &Path) -> Vec<(u8, u8, u32, Sid)> {
 fn a_strict_launch_on_a_plain_matter_passes_and_leaves_each_child_its_entries_once() {
     let place = Place::new("acl-plain-copies");
     let matter = plain_matter(&place);
-    put(&matter, &fence(&matter)).unwrap();
+    put(&matter, &fence(&matter)).unwrap_or_else(|error| {
+        let rels = [
+            "matter",
+            "matter/sub",
+            "matter/lawyer.txt",
+            "matter/sub/doc.txt",
+        ];
+        panic!(
+            "the strict launch was refused with {error:?}:\n{}",
+            dump(&place, &rels)
+        )
+    });
     for rel in ["matter/sub", "matter/sub/doc.txt", "matter/lawyer.txt"] {
         let path = place.at(rel);
         assert!(auto(&path), "{rel} ends auto-inherited");
