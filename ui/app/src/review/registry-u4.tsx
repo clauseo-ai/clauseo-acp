@@ -46,6 +46,19 @@ const ELICITATION: ViewEntry = {
   },
 };
 
+/** Claude's request to save its own plan note: its write, outside the matter, and the request marked agent_plan. */
+const PLAN_NOTE_PATH = "C:\\Users\\lawyer\\.claude\\plans\\the-plan-has-one-splendid-turing.md";
+const planNote = (): ViewEntry[] => {
+  const call = editCall(6, 4, "pending").tool_call!;
+  const write = {
+    ...call,
+    title: `Write ${PLAN_NOTE_PATH}`,
+    locations: [{ outside: { display: PLAN_NOTE_PATH } }],
+  };
+  const request = permission(7, 4).permission!;
+  return [{ tool_call: write }, { permission: { ...request, about: "agent_plan" } }];
+};
+
 /** U4's entries, each id written as it is: an id never moves when an entry is added or taken out. */
 export const U4: Entry[] = [
   {
@@ -170,5 +183,14 @@ export const U4: Entry[] = [
     words: threadWords("Stop the answer"),
     screen: "room/thread",
     render: asked([ELICITATION]),
+  },
+  // the prompt's line for Claude's own plan note, in place of the raw path (stage C #418)
+  {
+    id: "U4-20",
+    words: threadWords(
+      "Claude wants to save its plan as a note in its own folder, not in this matter.",
+    ),
+    screen: "room/thread",
+    render: asked(planNote()),
   },
 ];
