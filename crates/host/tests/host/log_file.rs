@@ -120,9 +120,15 @@ fn the_log_holds_lifecycle_lines_and_no_matter_content() {
         next_date: None,
     });
     assert!(refused.is_err(), "{refused:?}");
-    // The matter's folder goes away; the next prompt finds it missing.
+    // The matter's folder goes away; the next prompt finds it missing. The writer's agent runs
+    // with the folder as its working directory, and Windows refuses to move a folder a running
+    // process is in (sharing violation, os error 32), so the host stops first, as in relocate.rs,
+    // and starts again after the move.
+    host.shutdown();
     let moved = folder.with_file_name("moved-away");
     write::rename(&folder, &moved);
+    let host = dir.start(1);
+    let mut events = host.events(StreamId::Thread(thread));
     host.prompt(thread, PROMPT);
     events.until("the prompt in a missing folder ends", |e| {
         e.events()
