@@ -56,6 +56,7 @@ use clauseo_protocol::{
     HostCommand,
     HostError,
     HostEvent,
+    InstallWhen,
     // The display settings.
     LastStop,
     Lite,
@@ -81,6 +82,7 @@ use clauseo_protocol::{
     ToolLocation,
     ToolsPatch,
     UiPatch,
+    UpdateMode,
     ViewEntry,
     ViewEpoch,
     ViewPatch,
@@ -246,6 +248,9 @@ mod domain_event {
 #[path = "snapshots/host_command.rs"]
 mod host_command;
 
+#[path = "snapshots/update.rs"]
+mod update;
+
 mod view_patch {
     use super::*;
 
@@ -395,6 +400,7 @@ mod host_event {
                 message: "the zip is 10 bytes, its Content-Length 12".to_owned(),
             },
         };
+        UpdateChanged => update_changed: HostEvent::UpdateChanged(super::update::update_view());
     } }
 }
 

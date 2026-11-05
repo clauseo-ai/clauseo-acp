@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     AccountLimits, BrowserInstallState, Cursor, EntryId, Envelope, FolderScanned, HeaderEntry,
     LimitsView, MatterHeaderEntry, MattersChanged, MessageId, Seq, SettingsView, StreamId,
-    ThreadsChanged, ViewEntry, ViewEpoch,
+    ThreadsChanged, UpdateView, ViewEntry, ViewEpoch,
 };
 
 /// One change to a stream's view, at its cursor.
@@ -161,6 +161,9 @@ pub enum HostEvent {
     /// How far a folder scan has got (`HostCommand::ScanFolder`). App-wide, never part of a
     /// stream: it reaches app subscribers only.
     FolderScanned(FolderScanned),
+    /// The updater's state changed: the whole view after the change (decision record 0037).
+    /// App-wide, never part of a stream: it reaches app subscribers only.
+    UpdateChanged(UpdateView),
 }
 
 /// Where a view subscriber stands: an epoch and the last cursor it applied.

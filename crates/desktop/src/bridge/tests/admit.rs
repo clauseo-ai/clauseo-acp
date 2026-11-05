@@ -4,7 +4,8 @@
 //! sends `SetUiSettings`, `SetToolSettings`, `SetPrivacySettings` and `RefreshLimits` (Plan and
 //! usage, U12) and reads `GetSettings`, nothing else; `FirstAct` comes from `main` only; another
 //! label sends nothing (0028, 0036).
-//! The Chrome for Testing download's two commands are main's alone (0029).
+//! The Chrome for Testing download's two commands are main's alone (0029). The updater's
+//! commands and `GetUpdate` go by the table in `the_update_commands_go_by_window` (0037).
 
 use clauseo_protocol::{MatterId, ThreadId};
 use serde_json::json;
@@ -428,4 +429,60 @@ fn only_the_main_window_starts_or_cancels_the_browser_download() {
     // With no download running, main's cancel reaches the host and does nothing.
     let outcome = block_on(bridge.dispatch(MAIN, envelope(cancel)));
     assert!(matches!(outcome, Ok(CommandOutcome::Done)), "{outcome:?}");
+}
+
+/// The updater (0037), one row per window and command: main installs, cancels a scheduled
+/// install and checks; the settings window sets the mode and checks; neither sends the other's,
+/// and a window of any other label sends none. `true` is admitted, `false` refused with
+/// `command.invalid`. Both windows read `GetUpdate`; another label may not.
+#[test]
+fn the_update_commands_go_by_window() {
+    let scratch = Scratch::new("admit-update", &[]);
+    let host = scratch.start(Vec::new());
+    let bridge = host.bridge();
+    let install_now = json!({"install_update": {"when": "now"}});
+    let install_after = json!({"install_update": {"when": "after_turn"}});
+    let cancel = json!({"cancel_scheduled_update": {}});
+    let check = json!({"check_for_update": {}});
+    let auto = json!({"set_update_mode": {"mode": "auto"}});
+    let notify = json!({"set_update_mode": {"mode": "notify"}});
+    let rows = [
+        (MAIN, &install_now, true),
+        (MAIN, &install_after, true),
+        (MAIN, &cancel, true),
+        (MAIN, &check, true),
+        (MAIN, &auto, false),
+        (MAIN, &notify, false),
+        (SETTINGS, &install_now, false),
+        (SETTINGS, &install_after, false),
+        (SETTINGS, &cancel, false),
+        (SETTINGS, &check, true),
+        (SETTINGS, &auto, true),
+        (SETTINGS, &notify, true),
+        ("other", &install_now, false),
+        ("other", &install_after, false),
+        ("other", &cancel, false),
+        ("other", &check, false),
+        ("other", &auto, false),
+        ("other", &notify, false),
+    ];
+    for (window, body, allowed) in rows {
+        let admitted = bridge.admit(window, &command(body.clone()));
+        match admitted {
+            Ok(()) => assert!(allowed, "{window} {body} was admitted"),
+            Err(refusal) => {
+                assert!(!allowed, "{window} {body}: {refusal:?}");
+                assert_eq!(refusal.code(), ErrorCode::CommandInvalid, "{window} {body}");
+            }
+        }
+    }
+    for window in [MAIN, SETTINGS] {
+        let answer = block_on(bridge.query(window, HostQuery::GetUpdate));
+        assert!(
+            matches!(answer, Ok(QueryResult::Update(_))),
+            "{window}: {answer:?}"
+        );
+    }
+    let other = block_on(bridge.query("other", HostQuery::GetUpdate)).unwrap_err();
+    assert_eq!(other.code(), ErrorCode::CommandInvalid);
 }

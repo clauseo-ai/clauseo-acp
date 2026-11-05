@@ -495,7 +495,10 @@ fn unread(host: &Running) -> clauseo_host::AppSubscription {
 fn whole(event: &HostEvent) -> bool {
     match event {
         // A scan's event carries its whole state so far; the last one is part of the catch-up.
-        HostEvent::SettingsChanged(_) | HostEvent::FolderScanned(_) => true,
+        // The update view is whole too (0037), though nothing publishes it yet.
+        HostEvent::SettingsChanged(_)
+        | HostEvent::FolderScanned(_)
+        | HostEvent::UpdateChanged(_) => true,
         HostEvent::MattersChanged(changed) => changed.all,
         HostEvent::ThreadsChanged(changed) => changed.all,
         HostEvent::Patches(_)

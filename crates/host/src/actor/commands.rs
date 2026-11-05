@@ -271,6 +271,10 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
         HostCommand::RestartAgent { .. } => not_built(actor, ctx),
         HostCommand::InstallBrowser {} => super::browser_install::install(actor, ctx),
         HostCommand::CancelBrowserInstall {} => super::browser_install::cancel(actor, ctx),
+        HostCommand::CheckForUpdate {}
+        | HostCommand::InstallUpdate { .. }
+        | HostCommand::CancelScheduledUpdate {}
+        | HostCommand::SetUpdateMode { .. } => super::update::not_wired(actor, ctx),
     }
 }
 

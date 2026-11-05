@@ -1,0 +1,11 @@
+---
+source: crates/protocol/tests/snapshots/update.rs
+assertion_line: 32
+expression: "UpdateState::Failed { version: None, at: at(), stage: FailedStage::Check, }"
+---
+{
+  "failed": {
+    "at": 1760000008000,
+    "stage": "check"
+  }
+}

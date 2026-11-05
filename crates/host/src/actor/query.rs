@@ -1,5 +1,5 @@
 //! Queries: answered from host memory (`ListMatters`, `ListThreads`, `GetSettings`,
-//! `ListAgents`, `GetDefaultLocation`), a
+//! `ListAgents`, `GetDefaultLocation`, `GetUpdate`), a
 //! loaded stream (`PageEntries`), a loaded stream and then the matter's thread
 //! (`CompareVersions`, with a version or the folder now, and `PreviewRestore`) or a store
 //! read on a task of its own (`ReadBlob`); `ListPapers` runs on the matter's worker
@@ -129,6 +129,7 @@ pub(super) fn query(
             let view = super::settings::view(actor);
             let _gone = reply.send(Ok(QueryResult::Settings(view)));
         }
+        HostQuery::GetUpdate => super::update::answer(reply),
         HostQuery::ListPapers { matter } => {
             if let Err(error) = actor.check_matter(matter) {
                 let _gone = reply.send(Err(error));

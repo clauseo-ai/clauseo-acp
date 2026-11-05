@@ -208,6 +208,13 @@ pub fn later_variants() -> Vec<DomainEvent> {
             detail: Some("the guard hook has no program".to_owned()),
         }
         .into(),
+        // Never a turn's failure in practice (the updater's code); here for the corpus.
+        TurnFailed {
+            turn: turn_id(3),
+            code: ErrorCode::UpdateFailed,
+            detail: Some("the signature did not verify".to_owned()),
+        }
+        .into(),
     ]
     .into_iter()
     .chain(setup::turns())

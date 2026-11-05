@@ -207,6 +207,9 @@ mod turn;
 #[path = "host/undo_preview.rs"]
 mod undo_preview;
 #[cfg(test)]
+#[path = "host/update.rs"]
+mod update;
+#[cfg(test)]
 #[path = "host/versions.rs"]
 mod versions;
 #[cfg(test)]

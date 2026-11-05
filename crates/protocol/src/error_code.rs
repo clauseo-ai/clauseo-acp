@@ -190,6 +190,9 @@ error_codes! {
     AgentGuardMissing = "agent.guard_missing", retryable: false, meaning: "A Claude launch that \
         must ask before every change could not set up the guard that makes it ask, so it was \
         not started.";
+    UpdateFailed = "update.failed", retryable: true, meaning: "The update's check, download, \
+        signature check or install failed; the version running keeps running, and a later check \
+        tries again.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

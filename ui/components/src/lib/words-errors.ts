@@ -63,6 +63,7 @@ export type ErrorCode =
   | "signin.failed"
   | "signin.policy_unreadable"
   | "agent.guard_missing"
+  | "update.failed"
   | "unknown";
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
@@ -130,6 +131,7 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   "signin.policy_unreadable":
     "Clauseo can't read your firm's sign-in settings, so it won't sign in until they can be read.",
   "agent.guard_missing": "Clauseo can't start Claude safely here. Reinstall Clauseo.",
+  "update.failed": "The update didn't install. Try again.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };
