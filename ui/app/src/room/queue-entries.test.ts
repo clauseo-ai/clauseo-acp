@@ -89,6 +89,11 @@ test("held: after Stop the step's time, after a failure its code, after a restar
   const h1 = pick(stopped.view);
   expect(h1).toEqual({ kind: "stopped", at: 7000 });
   expect(pick(stopped.view)).toBe(h1);
+  // a turn the agent ended on the lawyer's refusal holds as a Stop does (private #361)
+  const refused = viewOf(
+    reset([queued(5, 2, "Q"), step(4, { stop: "not_allowed", ts: 7500 })], heldHeader),
+  );
+  expect(heldPick()(refused.view)).toEqual({ kind: "stopped", at: 7500 });
   const failed = viewOf(
     reset(
       [queued(5, 2, "Q"), step(4, { stop: "failed", failure: "agent.exited", ts: 8000 })],
