@@ -36,6 +36,15 @@ pub struct JournalState {
     pub next: Usn,
 }
 
+/// Where the first record past `cursor` may start: at `cursor`, or at the next 4 KiB page
+/// boundary, since NTFS never splits a record across journal pages and pads the rest of a page
+/// that can't hold the next one (S15's VM run 5: a cursor 3,968 bytes into a page).
+#[cfg(any(windows, test))]
+pub(crate) fn starts_first(cursor: Usn, usn: Usn) -> bool {
+    let page = cursor.checked_add(0xFFF).map(|end| end & !0xFFF);
+    usn == cursor || Some(usn) == page
+}
+
 /// One journal record, as the unprivileged read gives it (no name).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Change {

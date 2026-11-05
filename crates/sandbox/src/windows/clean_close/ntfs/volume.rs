@@ -50,8 +50,14 @@ pub(super) fn facts(path: &Path) -> io::Result<RootFacts> {
     if name_surrogate(&handle)? {
         return Err(ApplyFailure::Changed.into());
     }
-    let (volume, id) = id_info(&handle)?;
+    // The file system first: FAT32 refuses the file-ID query (error 87), and a volume that
+    // isn't NTFS must come back as that, not as a root that can't be read.
     let ntfs = is_ntfs(&handle)?;
+    let (volume, id) = if ntfs {
+        id_info(&handle)?
+    } else {
+        (0, [0xFF; 16])
+    };
     let final_path = normalized(&handle)?;
     let removable = removable(&final_path);
     Ok(RootFacts {
