@@ -170,15 +170,14 @@ fn without_a_login_check_a_key_never_authenticates() {
 /// prompt is in flight, so the text is dropped.
 const HELD: &str = "agent text outside a turn was dropped";
 
-/// Waits (at most 20 s) for a log line containing `what`.
+/// Waits (at most the watchdog's 20 s) for a log line containing `what`.
 fn until_logged(lines: &Mutex<Vec<String>>, what: &str) {
-    for _ in 0..2000 {
-        if lines.lock().unwrap().iter().any(|line| line.contains(what)) {
-            return;
+    let logged = || lines.lock().unwrap().iter().any(|line| line.contains(what));
+    wait(what, async {
+        while !logged() {
+            async_io::Timer::after(Duration::from_millis(10)).await;
         }
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    panic!("no log line {what:?}: {:#?}", lines.lock().unwrap());
+    });
 }
 
 #[test]
