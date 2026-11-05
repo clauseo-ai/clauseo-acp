@@ -271,6 +271,10 @@ may drop `Everyone` behind a proxy that runs as the desktop user.
 - **Lifting a sibling's deny happens only after the new matter's first launch succeeds.** Until
   then the folder keeps its fix 2 deny, so its new matter's agent reads it only through its own
   entries, which are nearer and come first.
+- **Old inherited-flagged entries on a child that isn't auto-inherited are dropped**, as Explorer's
+  propagation drops them, at every walk that works such a child out, fence walks included: an
+  entry an old tool (`cacls`, `xcopy /O`) flagged inherited is lost, isn't recorded, and isn't
+  restored by forget (accepted).
 - **A launch killed mid-walk** ends with its own pool user's allow and label entries `applied`
   (`reconcile` finds them present), while its fence and sibling denies stay `pending` (N4), so
   the next launch walks those deny trees strictly and still refuses what it would have refused.
