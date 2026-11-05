@@ -239,10 +239,11 @@ S15's tools sat in `windows.conf.json` and S27's in `tauri.conf.json`.
   only toward what it keeps.
 - **What it keeps.** `sandbox` (S15's records), unless `--sandbox-removed`, and
   `sandbox\set-aside` whenever it holds anything.
-- **Exit codes and messages.** 0 deleted; 2 or 3 a folder kept; 1 refused or something left.
-  The uninstaller says one line unless silent: `English.nsh`'s `deleteAppDataKept`, naming the
-  kept folder whenever one is there, else `deleteAppDataFailed`, naming the whole folder. It never
-  falls back to `RMDir /r`. `crates/desktop/src/delete_app_data.rs` holds the contract.
+- **Exit codes and messages.** 0 deleted; 2 or 3 a folder kept and all else gone; 4 a folder
+  kept and something else left; 1 refused or something left with nothing kept. The uninstaller
+  shows one box unless silent (`English.nsh`): `deleteAppDataKept` naming the kept folder,
+  `deleteAppDataKeptFailed` naming it and the data folder, or `deleteAppDataFailed` naming the
+  data folder when nothing was kept. It never falls back to `RMDir /r`. `crates/desktop/src/delete_app_data.rs` holds the contract.
 
 ## Status
 
