@@ -103,14 +103,28 @@ pub(crate) struct Document {
 /// and its SMB and exFAT volumes mark every file executable), and its type is one of
 /// [`DOCUMENT_TYPES`]. `matter.folder_missing` when the folder does not resolve;
 /// `command.invalid` otherwise.
+///
+/// Both sides go through `std::fs::canonicalize`, which on Windows is always verbatim (`\\?\`).
+/// `dunce::canonicalize` drops the prefix below `MAX_PATH` and keeps it above, so a long document
+/// in a short folder would come back verbatim and the folder plain, and `starts_with` would
+/// refuse it. Both verbatim compare. The path handed on is `dunce::simplified`: plain when it
+/// fits, verbatim only when it must be.
 pub(crate) fn check_document(path: &Path, folder: &Path) -> Result<Document, HostError> {
-    let folder = dunce::canonicalize(folder).map_err(|error| {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "both sides verbatim, so a long document in a short folder compares; the path handed on is dunce::simplified"
+    )]
+    let folder = std::fs::canonicalize(folder).map_err(|error| {
         HostError::new(
             ErrorCode::MatterFolderMissing,
             format!("the matter's folder is not there: {error}"),
         )
     })?;
-    let path = dunce::canonicalize(path)
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "both sides verbatim, so a long document in a short folder compares; the path handed on is dunce::simplified"
+    )]
+    let path = std::fs::canonicalize(path)
         .map_err(|error| invalid(format!("the file is not there: {error}")))?;
     if !path.starts_with(&folder) {
         return Err(invalid("the file is not inside its matter's folder"));
@@ -139,7 +153,10 @@ pub(crate) fn check_document(path: &Path, folder: &Path) -> Result<Document, Hos
             "files of the type \"{kind}\" do not open from Clauseo"
         )));
     }
-    Ok(Document { path, kind })
+    Ok(Document {
+        path: dunce::simplified(&path).to_path_buf(),
+        kind,
+    })
 }
 
 /// Opens an https `url` in the default browser with no confirm, for Rust's own callers only
