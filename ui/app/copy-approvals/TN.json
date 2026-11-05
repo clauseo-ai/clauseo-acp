@@ -6,5 +6,21 @@
     "status": "provisional",
     "at": "2026-11-05",
     "by": "app track (provisional; Rohan batch review)"
+  },
+  "TN-02": {
+    "en": "1 paper came back after the undo: {papers}. Clauseo didn't remove it again.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "TN-03": {
+    "en": "{n} papers came back after the undo: {papers}. Clauseo didn't remove them again.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
   }
 }

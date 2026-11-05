@@ -11,6 +11,7 @@ import { HI as folder } from "./words-folder.hi.ts";
 import { HI as frame } from "./words-frame.hi.ts";
 import { HI as limitsThread } from "./words-limits-thread.hi.ts";
 import { HI as limits } from "./words-limits.hi.ts";
+import { HI as list } from "./words-list.hi.ts";
 import { HI as matterForm } from "./words-matter-form.hi.ts";
 import { HI as matters } from "./words-matters.hi.ts";
 import { HI as planCard } from "./words-plan-card.hi.ts";
@@ -42,6 +43,7 @@ export const HINDI = {
   frame,
   "limits-thread": limitsThread,
   limits,
+  list,
   "matter-form": matterForm,
   matters,
   "plan-card": planCard,

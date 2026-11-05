@@ -23,6 +23,7 @@ import type {
   TurnId,
   VersionEntry,
 } from "../../transport/protocol.ts";
+import { fileName } from "@clauseo/components/lib/words-core.ts";
 import { clockOf, dayOf } from "../when.ts";
 
 const DAY_MS = 86_400_000;
@@ -56,14 +57,7 @@ export const calendarOf = (now: Timestamp, zone: string): Calendar => ({
   words: dayWords,
 });
 
-/** A path or a name set apart from the words around it (FSI…PDI), so a right-to-left mark in it can't reorder them. */
-export const isolate = (text: string): string => `\u2068${text}\u2069`;
-
-/** A file's bare name: the last part of its path in the matter folder. */
-export const baseName = (path: string): string => path.split(/[\\/]/).pop() ?? path;
-
-/** A file's name as shown: its bare name, isolated. */
-export const fileName = (path: string): string => isolate(baseName(path));
+export { baseName, fileName, isolate } from "@clauseo/components/lib/words-core.ts";
 
 /** What the room knows of a version beyond the parts' Version: what the host says made it, and its turn's step. */
 export type VersionMeta = {

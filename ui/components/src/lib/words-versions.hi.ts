@@ -159,8 +159,6 @@ const OWN = {
   // History, with the actor first
   "{time} on {date}": "{date}, {time}",
   "{time} today": "आज {time}",
-  // a list of two, as a sentence joins them
-  "{a} and {b}": "{a} और {b}",
 } as const;
 
 const EDGE = {

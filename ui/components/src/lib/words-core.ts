@@ -74,3 +74,34 @@ export function wordsOver<K extends string>(list: () => Hindi<K>) {
     readonly hi: Hindi<K>;
   };
 }
+
+// File names as a line or a dialog shows them, shared by every words file that names a paper: Versions' undo and
+// restore lines, the change note and the thread's notices. In the first load (display.ts imports this file), so a lazy
+// chunk that names a file takes no chunk of its own for it.
+
+/** A path or a name set apart from the words around it (FSI…PDI), so a right-to-left mark in it can't reorder them. */
+export const isolate = (text: string): string => `\u2068${text}\u2069`;
+
+/** A file's bare name: the last part of its path in the matter folder. */
+export const baseName = (path: string): string => path.split(/[\\/]/).pop() ?? path;
+
+/** A file's name as shown: its bare name, isolated. */
+export const fileName = (path: string): string => isolate(baseName(path));
+
+/** The joiner of a list, its own words: "{a} and {b}" in the list area (words-list.hi.ts). */
+const joined = wordsOf("list");
+
+/** "A", "A and B", "A, B and C", in the language: the list's names, joined as the sentence joins them. */
+export function listOf(lang: Lang, items: readonly string[]): string {
+  if (items.length <= 1) return items[0] ?? "";
+  const head = items.slice(0, -1).join(", ");
+  return joined(lang, "{a} and {b}", { a: head, b: items[items.length - 1] ?? "" });
+}
+
+/** Each file's name in a dialog or a line, by its path: the name alone, or, where two of the same list's files share a
+ * name, the whole path; isolated either way. */
+export function namesOf(paths: readonly string[]): (path: string) => string {
+  const count = new Map<string, number>();
+  for (const p of new Set(paths)) count.set(baseName(p), (count.get(baseName(p)) ?? 0) + 1);
+  return (p) => ((count.get(baseName(p)) ?? 0) > 1 ? isolate(p) : fileName(p));
+}
