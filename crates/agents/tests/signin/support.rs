@@ -223,6 +223,25 @@ impl Launcher for Recording {
     }
 }
 
+/// [`Fixture::start_split`]'s install launcher: the environment inherited, each run's
+/// arguments recorded as their `Debug` text.
+#[derive(Clone, Default)]
+pub(crate) struct InstallRuns(Arc<Mutex<Vec<String>>>);
+
+impl InstallRuns {
+    /// Each run's arguments, in order.
+    pub(crate) fn args(&self) -> Vec<String> {
+        lock(&self.0).clone()
+    }
+}
+
+impl Launcher for InstallRuns {
+    fn launch(&self, spec: &LaunchSpec) -> Result<Launched, clauseo_process::Error> {
+        lock(&self.0).push(format!("{:?}", spec.args()));
+        PassthroughLauncher::new(SpawnOptions::new()).launch(spec)
+    }
+}
+
 /// One test's folders, config, timer and launches.
 pub(crate) struct Fixture {
     pub(crate) data: TempDir,
@@ -343,18 +362,42 @@ impl Fixture {
     }
 
     fn start_quiet(&self, agent: AgentId) -> (Agents, Events) {
-        let launcher: Arc<dyn Launcher> = Arc::new(Recording {
+        let (agents, events) =
+            Agents::start(self.config.clone(), self.recording(), self.timer.clone());
+        (agents, Self::events(agent, events))
+    }
+
+    /// Starts `Agents` as R20 does: the recording launcher for sign-in, [`InstallRuns`] for
+    /// installs. Waits for `agent`'s install to report `Ready`.
+    pub(crate) fn start_split(&self, agent: AgentId) -> (Agents, Events, InstallRuns) {
+        let installs = InstallRuns::default();
+        let install: Arc<dyn Launcher> = Arc::new(installs.clone());
+        let (agents, events) = Agents::start_with_launchers(
+            self.config.clone(),
+            install,
+            self.recording(),
+            self.timer.clone(),
+        );
+        let events = Self::events(agent, events);
+        events.until_install_ready();
+        (agents, events, installs)
+    }
+
+    /// The clearing launcher that records each run in `launches`.
+    fn recording(&self) -> Arc<dyn Launcher> {
+        Arc::new(Recording {
             inner: PassthroughLauncher::new(SpawnOptions::new().clear_env()),
             launches: Arc::clone(&self.launches),
             stall: Arc::clone(&self.stall),
-        });
-        let (agents, events) = Agents::start(self.config.clone(), launcher, self.timer.clone());
-        let events = Events {
+        })
+    }
+
+    fn events(agent: AgentId, events: async_channel::Receiver<AgentsEvent>) -> Events {
+        Events {
             rx: events,
             agent,
             notes: Mutex::default(),
-        };
-        (agents, events)
+        }
     }
 
     /// From now on, runs whose arguments hold `word` (`app-server`, `status`) never answer

@@ -328,3 +328,28 @@ fn calls_that_cannot_run_are_refused() {
     );
     assert_eq!(fx.launches(), []);
 }
+
+#[test]
+fn sign_in_runs_through_the_sign_in_launcher_and_never_the_install_one() {
+    let fx = Fixture::new("signin-split", "ok-after:0");
+    let (agents, events, installs) = fx.start_split(claude());
+    agents.sign_in(&claude(), Method::ClaudeAi).unwrap();
+    let (_, last) = events.until_end();
+    assert_eq!(last, signed_in());
+    assert_eq!(
+        fx.runs_of("login").len(),
+        1,
+        "the login went through the sign-in launcher"
+    );
+    assert_ne!(fx.runs_of("status"), []);
+    let auth_runs: Vec<String> = installs
+        .args()
+        .into_iter()
+        .filter(|args| args.contains("\"auth\""))
+        .collect();
+    assert_eq!(
+        auth_runs,
+        Vec::<String>::new(),
+        "no sign-in run on the install launcher"
+    );
+}

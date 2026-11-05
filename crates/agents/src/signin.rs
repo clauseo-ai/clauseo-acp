@@ -15,7 +15,8 @@
 //! - builds its environment with `env::run_env`, from [`crate::SigninConfig::base_env`], and
 //!   for Codex adds `env::codex_store_args` to its arguments;
 //! - starts `<node> <script> args…` with `run::run`, through the `Launcher` the caller gave
-//!   [`crate::Agents::start`]. That launcher must be made with `SpawnOptions::clear_env`, since
+//!   [`crate::Agents::start`] (the `signin` one of [`crate::Agents::start_with_launchers`]).
+//!   That launcher must be made with `SpawnOptions::clear_env`, since
 //!   the built environment is the child's whole environment (see the crate docs, Invariants);
 //! - reads status output with the parsers in `crate::status`;
 //! - compares `auth.json` names with [`crate::same_file`], never by opening either.
