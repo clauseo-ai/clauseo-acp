@@ -217,3 +217,79 @@ fn a_child_the_lawyer_cant_open_is_set_aside_by_the_launch_and_by_forget() {
     assert_eq!(around.asked[1..], [matter.join("sub").join("x.txt")]);
     assert!(!again.exists());
 }
+
+/// Around a temp matter whose credential link must be `credentials`; set-asides refused.
+struct Credentials(PathBuf);
+
+impl FolderList for Credentials {
+    fn subfolders(&self, parent: &Path) -> io::Result<Vec<PathBuf>> {
+        ReadDir.subfolders(parent)
+    }
+}
+
+impl Surroundings for Credentials {
+    fn check(&self, _folder: &Path) -> io::Result<crate::windows::FolderSupport> {
+        Ok(crate::windows::FolderSupport::Ok)
+    }
+
+    fn set_aside(&mut self, _path: &Path) -> io::Result<()> {
+        Err(io::Error::from(io::ErrorKind::Unsupported))
+    }
+
+    fn credentials(&self) -> Option<PathBuf> {
+        Some(self.0.clone())
+    }
+}
+
+/// Round 4, row 5 of the second VM run (L5): the credential link, a hard link to `auth.json`,
+/// gets the pool user's grant and the Low label. The agent then swaps the link for a hard link
+/// to `other.json`: the next launch refuses, and forget took the entries back through the link,
+/// so from `other.json`, leaving them on `auth.json`. Forget now takes them off `auth.json`,
+/// the file the launch recorded.
+#[test]
+fn forget_takes_the_links_entries_off_auth_json_after_the_link_is_swapped() {
+    let place = Place::new("apply-ntfs-link-swap");
+    let auth = place.dir.file("creds/auth.json", "{}");
+    let other = place.dir.file("creds/other.json", "{}");
+    place.dir.hard_link("state/auth.json", &auth);
+    let link = place.at("state/auth.json");
+    let on_link = |sid: &str, rights| Grant {
+        kind: PathKind::CredentialLink,
+        ..grant(&link, sid, rights, Inherit::ThisOnly)
+    };
+    let grants = || {
+        vec![
+            on_link(USER_SID, Rights::ReadWriteData),
+            on_link(LOW_LABEL_SID, Rights::LowLabel),
+        ]
+    };
+    let mut around = Credentials(auth.clone());
+    let (mut ledger, mut acl) = (ledger(&place), NtfsAcl::new().unwrap());
+    let mut plan = AdmittedPlan::from_grants(matter_one(), grants());
+    apply(&mut ledger, &mut plan, &mut acl, &mut around).unwrap();
+    assert!(has(&auth, USER_SID, false) && has(&auth, LOW_LABEL_SID, false));
+
+    crate::windows::write::rename_new(&link, &place.at("state/was-auth.json")).unwrap();
+    place.dir.hard_link("state/auth.json", &other);
+    let mut again = AdmittedPlan::from_grants(matter_one(), grants());
+    let refused = apply(&mut ledger, &mut again, &mut acl, &mut around).unwrap_err();
+    assert!(
+        matches!(
+            refused,
+            Error::AclApply {
+                path_kind: PathKind::CredentialLink,
+                failure: ApplyFailure::Changed,
+                ..
+            }
+        ),
+        "{refused:?}"
+    );
+
+    let done = forget_matter(&mut ledger, matter_one(), &mut acl, &mut around).unwrap();
+    assert_eq!((done.removed, done.kept), (2, 0));
+    for sid in [USER_SID, LOW_LABEL_SID] {
+        assert!(!has(&auth, sid, false), "{sid} left on auth.json");
+        assert!(!has(&other, sid, false), "{sid} on other.json");
+    }
+    assert_eq!(ledger.entries().count(), 0);
+}

@@ -60,6 +60,7 @@ mod file;
 mod held;
 mod outcome;
 mod owed;
+mod recorded;
 mod settle;
 
 use file::{Known, Slot, State, Trust, invalid, read_state};
@@ -67,6 +68,7 @@ pub(crate) use held::Shares;
 use held::{ByPath, Held};
 pub use outcome::{Forgotten, MissingEntries, Reconciled, Take, TakenBack};
 pub use owed::HandbackOwed;
+pub use recorded::RecordedFile;
 
 /// The ledger's file name in `<data_dir>\sandbox`.
 pub const LEDGER_FILE: &str = "acl-ledger.json";
@@ -121,6 +123,11 @@ pub struct Entry {
     /// lawyer's own), put back when ours goes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prior_label: Option<Label>,
+    /// For a credential link's entry, the credentials file its permission entry was written on
+    /// through the link: what a take-back removes it from, as the link may name another file
+    /// by then (S15 `PR3b` round 4, L5).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<RecordedFile>,
 }
 
 impl Entry {
@@ -243,6 +250,7 @@ impl Ledger {
                         inherit: grant.inherit,
                         kind: grant.kind,
                         prior_label: None,
+                        file: None,
                     },
                     extra: Map::new(),
                 }));
@@ -407,6 +415,20 @@ impl Ledger {
             }
             Ok((changed, ()))
         })
+    }
+
+    /// Records `file` as the file entry `id`'s permission entry is written on, before it is
+    /// written (round 4, L5): only an entry `plan` added, still pending, with none recorded.
+    pub fn set_file(
+        &mut self,
+        plan: &AdmittedPlan,
+        id: EntryId,
+        file: &RecordedFile,
+    ) -> io::Result<()> {
+        if !plan.created.contains(&id) {
+            return Ok(());
+        }
+        self.update(false, |state| Ok((recorded::set_file(state, id, file), ())))
     }
 
     /// The trusted `pending` entries, read again under the lock: what [`reconcile`] walks.

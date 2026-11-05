@@ -166,6 +166,19 @@ impl AclWriter for NtfsAcl {
         Ok(a.file_id()? == b.file_id()?)
     }
 
+    fn file_id(&mut self, path: &Path) -> io::Result<Option<super::writer::FileId>> {
+        let object = match Object::open(path) {
+            Ok(object) => object,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        if object.name_surrogate() {
+            return Err(io::Error::from(ApplyFailure::Changed));
+        }
+        let (volume, id) = object.file_id()?;
+        Ok(Some(super::writer::FileId { volume, id }))
+    }
+
     fn add_expecting(&mut self, grant: &Grant, expected: &Path) -> Result<Added, ApplyFailure> {
         write(grant, Some(expected))
     }

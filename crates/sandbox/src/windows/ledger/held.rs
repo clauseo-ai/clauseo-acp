@@ -152,10 +152,17 @@ impl Shares for ByPath {
     }
 }
 
-/// Whether `other` names `entry`'s permission entry: the same entry on the same path, or a Low
-/// label on another name for the same file (the label belongs to the file, N7).
+/// Whether `other` names `entry`'s permission entry: the same entry on the same path, the same
+/// entry on one recorded credentials file (round 4, L5), or a Low label on another name for the
+/// same file (the label belongs to the file, N7).
 fn shares(other: &Entry, entry: &Entry, files: &mut dyn Shares) -> bool {
+    let recorded = |e: &Entry| e.file.as_ref().map(|f| f.id);
     same_ace(other, entry)
+        || (recorded(other).is_some()
+            && recorded(other) == recorded(entry)
+            && other.sid == entry.sid
+            && other.rights == entry.rights
+            && other.inherit == entry.inherit)
         || (other.rights.is_label()
             && entry.rights.is_label()
             && other.sid == entry.sid
