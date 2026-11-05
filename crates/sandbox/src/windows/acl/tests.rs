@@ -32,7 +32,12 @@ fn fence(matter: &Path) -> [Grant; 2] {
 
 /// Writes `grants` and walks the tree strictly, as a launch does.
 fn put(root: &Path, grants: &[Grant]) -> Result<Walked, ApplyFailure> {
-    let mut acl = NtfsAcl::new().unwrap();
+    put_with(&mut NtfsAcl::new().unwrap(), root, grants)
+}
+
+/// [`put`] through `acl`, which keeps the child a refused walk names
+/// ([`AclWriter::refused_at`]).
+fn put_with(acl: &mut NtfsAcl, root: &Path, grants: &[Grant]) -> Result<Walked, ApplyFailure> {
     for g in grants {
         acl.add(g)?;
     }

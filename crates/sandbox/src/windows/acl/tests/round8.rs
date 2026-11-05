@@ -86,23 +86,66 @@ fn plain_matter(place: &Place) -> PathBuf {
     matter
 }
 
-/// Each of `rels`' entries and owner, one line each, for a failed launch's message.
-fn dump(place: &Place, rels: &[&str]) -> String {
+/// Every path from `place`'s folder down (each folder before its children, by name), and the
+/// folders above it to the drive root: owner, DACL control bits and entries, one line each, for
+/// a failed launch's message. The folders above show what the temp folder passed down when the
+/// fixture made the tree, which a child left as made (`a-locked`) still holds.
+fn dump(place: &Place) -> String {
     let mut out = String::new();
-    for rel in rels {
-        let path = place.at(rel);
-        let owner = descriptor(&path).ok().and_then(|bytes| owner_sid(&bytes));
-        writeln!(out, "{rel}: owner {owner:?}").unwrap();
-        for (kind, flags, mask, sid) in entries(&path) {
-            writeln!(
-                out,
-                "  kind {kind} flags {flags:#04x} mask {mask:#010x} {}",
-                sid.as_str()
-            )
-            .unwrap();
+    for above in place
+        .root
+        .ancestors()
+        .skip(1)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+    {
+        describe(&mut out, &above.display().to_string(), above);
+    }
+    let mut paths = vec![place.root.clone()];
+    while let Some(path) = paths.pop() {
+        let rel = path.strip_prefix(&place.root).unwrap_or(&path);
+        describe(&mut out, &format!("place/{}", rel.display()), &path);
+        if let Ok(read) = std::fs::read_dir(&path) {
+            let mut names: Vec<PathBuf> = read.filter_map(|e| e.ok().map(|e| e.path())).collect();
+            names.sort();
+            paths.extend(names.into_iter().rev());
         }
     }
     out
+}
+
+/// One path of [`dump`]: its owner, control bits (`AI` auto-inherited, `P` protected) and
+/// entries, or why it couldn't be read.
+fn describe(out: &mut String, name: &str, path: &Path) {
+    let bytes = match descriptor(path) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            writeln!(out, "{name}: unreadable ({error})").unwrap();
+            return;
+        }
+    };
+    let control = Descriptor::parse(&bytes).map_or(0, |d| d.control);
+    let ai = if control & DACL_AUTO_INHERITED != 0 {
+        " AI"
+    } else {
+        ""
+    };
+    let p = if control & DACL_PROTECTED != 0 {
+        " P"
+    } else {
+        ""
+    };
+    let owner = owner_sid(&bytes);
+    writeln!(out, "{name}: owner {owner:?} control {control:#06x}{ai}{p}").unwrap();
+    for (kind, flags, mask, sid) in entries(path) {
+        writeln!(
+            out,
+            "  kind {kind} flags {flags:#04x} mask {mask:#010x} {}",
+            sid.as_str()
+        )
+        .unwrap();
+    }
 }
 
 /// The entries `path` holds twice, explicit and inherited: equal but for the inherited flag.
@@ -130,18 +173,15 @@ fn twice(path: &Path) -> Vec<(u8, u8, u32, Sid)> {
 fn a_strict_launch_on_a_plain_matter_passes_and_leaves_each_child_its_entries_once() {
     let place = Place::new("acl-plain-copies");
     let matter = plain_matter(&place);
-    put(&matter, &fence(&matter)).unwrap_or_else(|error| {
-        let rels = [
-            "matter",
-            "matter/sub",
-            "matter/lawyer.txt",
-            "matter/sub/doc.txt",
-        ];
+    let mut acl = NtfsAcl::new().unwrap();
+    let launched = put_with(&mut acl, &matter, &fence(&matter));
+    if let Err(error) = launched {
         panic!(
-            "the strict launch was refused with {error:?}:\n{}",
-            dump(&place, &rels)
-        )
-    });
+            "the strict launch was refused with {error:?} at {:?}:\n{}",
+            acl.refused_at(),
+            dump(&place)
+        );
+    }
     for rel in ["matter/sub", "matter/sub/doc.txt", "matter/lawyer.txt"] {
         let path = place.at(rel);
         assert!(auto(&path), "{rel} ends auto-inherited");
