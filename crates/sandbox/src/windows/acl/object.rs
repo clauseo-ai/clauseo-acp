@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later AND Apache-2.0
 // Derived from openai/codex codex-rs/windows-sandbox-rs/src/acl.rs
-// at 092d3acd6bec3e3a14bdc7e7a2810ab628ab759d (rust-v0.162.1); see PROVENANCE.md
+// at 092d3acd6bec3e3a14bdc7e7a2810ab628ab759d (rust-v0.162.1), and its no_reparse_dir.rs
+// at e7f32cf1928a35a9232a633a51c2a03b5a7e2c72 (OBJ_DONT_REPARSE); see PROVENANCE.md
 //! A file or folder opened for the permission writes, never through a link (S15 PR3): a target
 //! or a walk's root by its path (`CreateFileW` with `FILE_FLAG_OPEN_REPARSE_POINT`), and a walk's
 //! child by its name relative to its folder's handle (`NtCreateFile` with `RootDirectory` and
