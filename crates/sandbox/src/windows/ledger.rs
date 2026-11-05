@@ -120,6 +120,12 @@ impl Entry {
     }
 }
 
+/// The entries [`Ledger::mark_applied`] was asked to mark that the file no longer lists; the
+/// inner error of its `NotFound` (`io::Error::get_ref` and `downcast_ref`).
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("the ACL ledger no longer lists {} of this launch's entries", .0.len())]
+pub struct MissingEntries(pub Vec<EntryId>);
+
 /// What [`Ledger::reconcile`] did.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Reconciled {
@@ -247,7 +253,9 @@ impl Ledger {
     }
 
     /// Marks the entries `ids` `applied`, once their permission entries are written. Only ids of
-    /// `plan`'s own entries count; others are ignored.
+    /// `plan`'s own entries count; others are ignored. When one of them is no longer in the file
+    /// (another process reconciled it away), nothing is marked and the error is `NotFound`
+    /// carrying [`MissingEntries`]: the caller must not count that permission entry as listed.
     pub fn mark_applied(&mut self, plan: &AdmittedPlan, ids: &[EntryId]) -> io::Result<()> {
         let ids: Vec<EntryId> = ids
             .iter()
@@ -258,6 +266,17 @@ impl Ledger {
             return Ok(());
         }
         self.update(false, |state| {
+            let missing: Vec<EntryId> = ids
+                .iter()
+                .copied()
+                .filter(|id| !state.entries().any(|entry| entry.id == *id))
+                .collect();
+            if !missing.is_empty() {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    MissingEntries(missing),
+                ));
+            }
             let mut changed = false;
             for slot in &mut state.slots {
                 if let Slot::Known(known) = slot

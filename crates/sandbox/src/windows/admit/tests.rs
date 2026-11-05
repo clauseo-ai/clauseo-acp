@@ -5,7 +5,7 @@ use super::*;
 use crate::windows::acl_plan::{AdmittedPlan, plan};
 use crate::windows::ledger::{Ledger, ledger_path};
 use crate::windows::test_world::{
-    FakeGroups, World, matter_one, matter_two, reserved, sids, user_sid,
+    FakeGroups, NOTES, STATE, STORE, World, matter_one, matter_two, reserved, sids, user_sid,
 };
 
 /// A folder check that answers `answer` for `folder` and `Ok` for every other path.
@@ -50,7 +50,7 @@ fn ledger_with_an_entry(w: &World) -> (Ledger, Vec<u8>) {
         |_| Ok(FolderSupport::Ok),
         &FakeGroups::default(),
     );
-    let grants = plan(&admitted.unwrap(), &sids(), matter_two()).unwrap();
+    let grants = plan(&admitted.unwrap(), &sids(), matter_one()).unwrap();
     let mut two = AdmittedPlan::from_grants(matter_two(), grants.grants()[..2].to_vec());
     ledger.record_pending(&mut two).unwrap();
     let bytes = std::fs::read(&path).unwrap();
@@ -69,9 +69,9 @@ fn every_grant_folder_is_checked() {
     admit_with(&policy, &w.at("data"), &[], check, &FakeGroups::default()).unwrap();
     let want = [
         w.canonical("matter"),
-        w.canonical("data/agent-state/m1/claude"),
-        w.canonical("data/agent-state/m1/notes"),
-        w.canonical("data/claude-home"),
+        w.canonical(STATE),
+        w.canonical(NOTES),
+        w.canonical(STORE),
     ];
     assert_eq!(asked, want);
 }
@@ -83,9 +83,9 @@ fn each_refused_folder_names_its_kind_and_not_its_path() {
     let root = dunce::canonicalize(w.dir.path()).unwrap();
     let cases = [
         ("matter", PathKind::Matter),
-        ("data/agent-state/m1/claude", PathKind::State),
-        ("data/agent-state/m1/notes", PathKind::Notes),
-        ("data/claude-home", PathKind::ClaudeStore),
+        (STATE, PathKind::State),
+        (NOTES, PathKind::Notes),
+        (STORE, PathKind::ClaudeStore),
     ];
     let answers: [fn() -> io::Result<FolderSupport>; 4] = [
         || Ok(FolderSupport::CantChangePermissions),
@@ -128,11 +128,7 @@ fn a_refusal_leaves_the_ledger_byte_identical() {
     let policy = w.full_policy();
     let (mut ledger, before) = ledger_with_an_entry(&w);
     let path = ledger.path().to_owned();
-    for rel in [
-        "matter",
-        "data/agent-state/m1/claude",
-        "data/agent-state/m1/notes",
-    ] {
+    for rel in ["matter", STATE, NOTES] {
         let check = answering(w.canonical(rel), || Ok(FolderSupport::Network));
         let refused = prepare(
             &policy,
@@ -350,6 +346,41 @@ fn another_matter_nested_with_this_one_is_refused_whatever_its_dacl() {
     assert_eq!(support, FolderRefusal::NestedMatter);
 }
 
+/// `<root>/data2/agents` (a data folder of its own; the world's has a real `agents`) as a link to
+/// `target` (a symbolic link: a name-surrogate reparse point, as a
+/// junction is); `None` where this process may not make one.
+fn link_agents(w: &World, target: &Path) -> Option<PathBuf> {
+    #[cfg(unix)]
+    let link = Some(w.dir.symlink("data2/agents", target));
+    #[cfg(windows)]
+    let link = w.dir.symlink_dir("data2/agents", target).ok();
+    link
+}
+
+#[test]
+fn agents_as_a_link_refuses_the_launch() {
+    // Moved aside, then linked to a folder elsewhere: what the canonical paths compare against
+    // could be swapped under them.
+    let w = World::new("admit-agents-link");
+    w.dir.dir("elsewhere/agents/claude-acp/node");
+    w.dir.dir("data2");
+    let Some(_link) = link_agents(&w, &w.at("elsewhere/agents")) else {
+        assert!(
+            std::env::var_os("CI").is_none(),
+            "CI may make links, and this run can't"
+        );
+        eprintln!("skipped: no right to make a link");
+        return;
+    };
+    let policy = w.builder().build().unwrap();
+    let check = |_: &Path| Ok(FolderSupport::Ok);
+    let refused = admit_with(&policy, &w.at("data2"), &[], check, &FakeGroups::default());
+    let Err(Error::FolderUnsupported { support, .. }) = refused else {
+        panic!("not refused: {refused:?}");
+    };
+    assert_eq!(support, FolderRefusal::ReparsePoint);
+}
+
 /// Asserts that `policy` is refused before any folder check, as a matter that overlaps
 /// `data_dir`, and that the ledger is as it was.
 fn assert_overlaps(w: &World, policy: &Policy, data_dir: &Path) {
@@ -403,7 +434,7 @@ fn a_matter_that_holds_the_data_folder_is_refused() {
 #[test]
 fn a_matter_inside_the_data_folder_is_refused() {
     let w = World::new("admit-matter-in-data");
-    let policy = Policy::builder(w.at("data/claude-home"), w.at("elsewhere"))
+    let policy = Policy::builder(w.at(STORE), w.at("elsewhere"))
         .home(w.at("home"))
         .build()
         .unwrap();
@@ -415,7 +446,7 @@ fn a_data_folder_reached_through_another_spelling_still_matches() {
     // `data_dir` is canonicalised: a `..` spelling (and on Windows a short or differently
     // cased one) is the same folder.
     let w = World::new("admit-data-spelling");
-    let policy = Policy::builder(w.at("data/claude-home"), w.at("elsewhere"))
+    let policy = Policy::builder(w.at(STORE), w.at("elsewhere"))
         .home(w.at("home"))
         .build()
         .unwrap();

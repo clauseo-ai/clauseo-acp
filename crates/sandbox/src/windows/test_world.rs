@@ -19,6 +19,13 @@ pub(super) const USER_SID: &str = "S-1-5-21-1111111111-2222222222-3333333333-100
 /// This matter's SID in the tests.
 pub(super) const MATTER_SID: &str = "S-1-5-21-2626480971-3383066999-180375651-600177987";
 
+/// This matter's state folder, under its id as the plan expects, relative to the temp folder.
+pub(super) const STATE: &str = "data/agent-state/01890a5d-ac96-774b-bcce-b302099a8057/claude";
+/// This matter's notes folder.
+pub(super) const NOTES: &str = "data/agent-state/01890a5d-ac96-774b-bcce-b302099a8057/notes";
+/// Clauseo's Claude sign-in home, the one Claude store the plan allows in the data folder.
+pub(super) const STORE: &str = "data/agents/claude-acp/home";
+
 /// This matter's id.
 pub(super) fn matter_one() -> MatterId {
     "01890a5d-ac96-774b-bcce-b302099a8057".parse().unwrap()
@@ -57,9 +64,11 @@ impl World {
         let dir = TempDir::new(test);
         for name in [
             "matter",
-            "data/agent-state/m1/claude",
-            "data/agent-state/m1/notes",
-            "data/claude-home",
+            STATE,
+            NOTES,
+            STORE,
+            "data/agent-state/01890a5d-ac96-774b-8cce-b302099a8058/notes",
+            "data/updates",
             "runtime/node",
             "home/.claude",
             "elsewhere/Precedents",
@@ -82,7 +91,7 @@ impl World {
 
     /// The matter and its state folder, with the home and the data folder hidden.
     pub(super) fn builder(&self) -> PolicyBuilder {
-        Policy::builder(self.at("matter"), self.at("data/agent-state/m1/claude"))
+        Policy::builder(self.at("matter"), self.at(STATE))
             .home(self.at("home"))
             .hidden(self.at("data"))
     }
@@ -96,14 +105,13 @@ impl World {
             .file("matter/.codex/config.toml", "model = \"x\"\n");
         self.dir.file("matter/CLAUDE.md", "# Instructions\n");
         let big = self.dir.file("matter/big.pdf", "large");
-        self.dir.file("data/agent-state/m1/claude/auth.json", "{}");
-        self.dir
-            .file("data/agent-state/m1/claude/settings.json", "{}");
+        self.dir.file(&format!("{STATE}/auth.json"), "{}");
+        self.dir.file(&format!("{STATE}/settings.json"), "{}");
         self.builder()
-            .notes(self.at("data/agent-state/m1/notes"))
-            .credential_link(self.at("data/agent-state/m1/claude/auth.json"))
-            .read_only_in_state(self.at("data/agent-state/m1/claude/settings.json"))
-            .claude_store(self.at("data/claude-home"))
+            .notes(self.at(NOTES))
+            .credential_link(self.at(&format!("{STATE}/auth.json")))
+            .read_only_in_state(self.at(&format!("{STATE}/settings.json")))
+            .claude_store(self.at(STORE))
             .runtime(self.at("runtime/node"))
             .read(self.at("elsewhere"))
             .allowed_folder(self.at("elsewhere/Precedents"))
