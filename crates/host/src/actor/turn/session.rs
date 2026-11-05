@@ -494,11 +494,8 @@ fn attach_commit(
         )?;
     }
     // The skill packs the launch left out, each pack and reason told once per thread (0040).
-    for text in super::launch_checks::pack_notices(actor, thread) {
-        let level = NoticeLevel::Warning;
-        // Words only until `NoticeKind::SkillPackNotLoaded` (0040, stage E's follow-up).
-        let kind = None;
-        out.push(actor, Notice { level, text, kind })?;
+    for notice in super::launch_checks::pack_notices(actor, thread) {
+        out.push(actor, notice)?;
     }
     let now = actor.now().wall;
     let entry = actor

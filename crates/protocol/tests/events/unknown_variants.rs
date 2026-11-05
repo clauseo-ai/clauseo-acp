@@ -6,9 +6,10 @@ use std::fmt::Debug;
 
 use clauseo_protocol::{
     CheckpointKind, ContentBlock, Deliverable, Delivery, DetachReason, DomainEvent, ErrorCode,
-    ExpiryReason, HostError, LimitSource, NoticeLevel, PermissionAbout, PermissionKind, RawFrom,
-    RawPayload, RenameSource, SkippedFileReason, StaleReason, SteerOutcome, StopReason, TextOrBlob,
-    Timestamp, ToolCallStatus, ToolKind, TurnFailed, UnavailableReason,
+    ExpiryReason, HostError, LimitSource, Notice, NoticeKind, NoticeLevel, PackId, PackSkipReason,
+    PermissionAbout, PermissionKind, RawFrom, RawPayload, RenameSource, SkippedFileReason,
+    StaleReason, SteerOutcome, StopReason, TextOrBlob, Timestamp, ToolCallStatus, ToolKind,
+    TurnFailed, UnavailableReason,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -141,6 +142,53 @@ fn notice_level() {
         (NoticeLevel::Warning, "warning"),
     ];
     unit_enum(&NoticeLevel::ALL, &cases, NoticeLevel::Unknown);
+}
+
+#[test]
+fn pack_skip_reason() {
+    let cases = [
+        (PackSkipReason::NotTurnedOn, "not_turned_on"),
+        (PackSkipReason::NotAdmitted, "not_admitted"),
+        (PackSkipReason::Changed, "changed"),
+        (PackSkipReason::Missing, "missing"),
+        (PackSkipReason::Invalid, "invalid"),
+        (PackSkipReason::TooMany, "too_many"),
+    ];
+    unit_enum(&PackSkipReason::ALL, &cases, PackSkipReason::Unknown);
+}
+
+#[test]
+fn notice_kind() {
+    decodes_in_both(r#""context_not_restored""#, &NoticeKind::ContextNotRestored);
+    let pack = PackId::new("nda-kit").unwrap();
+    let skipped = NoticeKind::SkillPackNotLoaded {
+        pack,
+        reason: PackSkipReason::Changed,
+    };
+    decodes_in_both(
+        r#"{"skill_pack_not_loaded":{"pack":"nda-kit","reason":"changed"}}"#,
+        &skipped,
+    );
+    round_trips(&skipped);
+    data_enum_unknown(&unknown_of::<NoticeKind>("later"));
+}
+
+/// A notice logged before `kind` reads with none. A skill pack reason from a newer Clauseo reads
+/// as `Unknown`, and a notice left without its kind writes none.
+#[test]
+fn a_notice_without_or_with_a_newer_skill_pack_reason() {
+    let old: Notice = serde_json::from_str(r#"{"level":"warning","text":"Old."}"#).unwrap();
+    assert_eq!(old.kind, None);
+    let newer = r#"{"level":"warning","text":"Skipped.",
+        "kind":{"skill_pack_not_loaded":{"pack":"nda-kit","reason":"a_later_reason"}}}"#;
+    let notice: Notice = serde_json::from_str(newer).unwrap();
+    let expected = NoticeKind::SkillPackNotLoaded {
+        pack: PackId::new("nda-kit").unwrap(),
+        reason: PackSkipReason::Unknown,
+    };
+    assert_eq!(notice.kind, Some(expected));
+    let written = serde_json::to_string(&old).unwrap();
+    assert_eq!(written, r#"{"level":"warning","text":"Old."}"#);
 }
 
 #[test]

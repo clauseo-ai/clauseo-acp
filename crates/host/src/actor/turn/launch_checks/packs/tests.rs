@@ -6,7 +6,9 @@ use std::path::{Path, PathBuf};
 
 use clauseo_profile::packs::{PackEntry, PackHash, Refusal, Skip};
 use clauseo_profile::{BrowserSidecars, ClauseoProfile, ProfilePaths};
-use clauseo_protocol::{AgentKind, PackId, PackList};
+use clauseo_protocol::{
+    AgentKind, Notice, NoticeKind, NoticeLevel, PackId, PackList, PackSkipReason,
+};
 use clauseo_settings::{Locations, SkillsExtra, SkillsSettings};
 
 use super::{PackNotices, PackPrep, PackRequest, PackSkip, skipped_text};
@@ -187,6 +189,47 @@ fn the_notice_for_a_pack_past_the_cap() {
     );
 }
 
+fn nda_kit() -> PackId {
+    PackId::new("nda-kit").unwrap()
+}
+
+#[test]
+fn each_skip_reads_as_one_of_six_reasons() {
+    let cases = [
+        (PackSkip::NotTurnedOn, PackSkipReason::NotTurnedOn),
+        (PackSkip::NotAdmitted, PackSkipReason::NotAdmitted),
+        (PackSkip::Load(Skip::Changed), PackSkipReason::Changed),
+        (PackSkip::Load(Skip::TooMany), PackSkipReason::TooMany),
+        (
+            PackSkip::Load(Skip::Refused(Refusal::Missing)),
+            PackSkipReason::Missing,
+        ),
+        (
+            PackSkip::Load(Skip::Refused(Refusal::Script)),
+            PackSkipReason::Invalid,
+        ),
+    ];
+    for (skip, reason) in cases {
+        assert_eq!(skip.reason(), reason);
+    }
+}
+
+#[test]
+fn a_host_notice_has_its_kind_its_pack_and_its_reason() {
+    let notice = PackSkip::NotTurnedOn.host_notice(nda_kit());
+    assert_eq!(
+        notice,
+        Notice {
+            level: NoticeLevel::Warning,
+            text: PackSkip::NotTurnedOn.notice("nda-kit"),
+            kind: Some(NoticeKind::SkillPackNotLoaded {
+                pack: nda_kit(),
+                reason: PackSkipReason::NotTurnedOn,
+            }),
+        }
+    );
+}
+
 #[test]
 fn two_invalid_kinds_for_one_pack_are_one_notice() {
     let invalid = |refusal| ("nda-kit".to_owned(), PackSkip::Load(Skip::Refused(refusal)));
@@ -194,13 +237,12 @@ fn two_invalid_kinds_for_one_pack_are_one_notice() {
         pending: vec![invalid(Refusal::Script)],
         ..PackNotices::default()
     };
-    let told =
-        "Clauseo didn't load the skill pack \"nda-kit\". Its files aren't a valid skill pack.";
+    let told = PackSkip::Load(Skip::Refused(Refusal::Script)).host_notice(nda_kit());
     assert_eq!(notices.untold(), [told]);
     // Another invalid kind reads the same, so the thread is not told again.
     notices.pending = vec![invalid(Refusal::Unlisted), invalid(Refusal::TooBig)];
-    assert_eq!(notices.untold(), Vec::<String>::new());
-    // A missing pack is another category: told once.
+    assert_eq!(notices.untold(), Vec::<Notice>::new());
+    // A missing pack is another reason: told once.
     notices.pending = vec![invalid(Refusal::Missing)];
     assert_eq!(notices.untold().len(), 1);
 }

@@ -9,32 +9,29 @@
 //! ```
 
 use clauseo_protocol::{
-    AgentCapabilities, AgentId, AgentNamed, AgentSessionAttached, AgentSessionDetached,
-    AvailableCommand, ChangeKind, CheckpointKind, CheckpointRecorded, CommandsAvailable,
-    CompactionChanged, CompactionStatus, ConfigCategory, ConfigChoice, ConfigOption,
-    ConfigOptionKind, ConfigOptionsReplaced, ContentAppended, ContentBlock, ContentId, Cost,
-    Deliverable, Delivery, DetachReason, DomainEvent, DoneBy, ElicitationExpired,
-    ElicitationOutcome, ElicitationRequest, ElicitationRequested, ElicitationResolved, ErrorCode,
-    ExpiryReason, FileChange, FilesChanged, ImportSummary, LimitStopReason, MatterCreated,
-    MatterKind, MatterRelocated, ModeChanged, Notice, NoticeLevel, OutsideEdits, PageVia,
-    PageVisited, PermissionAbout, PermissionChoice, PermissionExpired, PermissionKind,
-    PermissionOption, PermissionRequested, PermissionResolved, PlanEntry, PlanPriority,
-    PlanReplaced, PlanStatus, Principal, PromptCapabilities, QueuedPromptEdited, RawFrom,
-    RenameSource, RestoreScope, SessionCapabilities, SkippedFile, SkippedFileReason, SnoozeBy,
-    SteerOutcome, SteerResolved, SteeringCapability, StepUndone, StopReason, TextAppended,
-    TextKind, TextOrBlob, ThreadArchived, ThreadCreated, ThreadDone, ThreadRenamed, ThreadSnoozed,
-    Timestamp, ToolCallContent, ToolCallPatch, ToolCallStarted, ToolCallStatus, ToolCallUpdated,
-    ToolKind, ToolLocation, TurnEnded, TurnFailed, TurnQueued, TurnStarted, TurnStoppedAtLimit,
-    TurnUsage, UsageUpdated, UserMessage, VersionRestored, WebResult, WebSearchRecorded,
+    AgentCapabilities, AgentId, AgentNamed, AgentSessionAttached, AgentSessionDetached, ChangeKind,
+    CheckpointKind, CheckpointRecorded, CompactionChanged, CompactionStatus, ContentAppended,
+    ContentBlock, ContentId, Cost, Delivery, DetachReason, DomainEvent, DoneBy, ErrorCode,
+    FileChange, FilesChanged, ImportSummary, LimitStopReason, MatterCreated, MatterKind,
+    MatterRelocated, Notice, NoticeLevel, OutsideEdits, PageVia, PageVisited, PromptCapabilities,
+    QueuedPromptEdited, RawFrom, RenameSource, RestoreScope, SessionCapabilities, SkippedFile,
+    SkippedFileReason, SnoozeBy, SteerOutcome, SteerResolved, SteeringCapability, StepUndone,
+    StopReason, TextAppended, TextKind, TextOrBlob, ThreadArchived, ThreadCreated, ThreadDone,
+    ThreadRenamed, ThreadSnoozed, Timestamp, ToolCallContent, ToolCallPatch, ToolCallStarted,
+    ToolCallStatus, ToolCallUpdated, ToolKind, ToolLocation, TurnEnded, TurnFailed, TurnQueued,
+    TurnStarted, TurnStoppedAtLimit, TurnUsage, UsageUpdated, UserMessage, VersionRestored,
+    WebResult, WebSearchRecorded,
 };
 
 use crate::fixtures::{
-    checkpoint_id, count, elicitation_id, finite, matter_id, message_id, path,
-    permission_request_id, raw, short, thread_id, tool_call_id, turn_id,
+    checkpoint_id, count, finite, matter_id, message_id, path, short, thread_id, tool_call_id,
+    turn_id,
 };
 
 #[path = "examples/later.rs"]
 mod later;
+#[path = "examples/session.rs"]
+mod session;
 #[path = "examples/setup.rs"]
 mod setup;
 
@@ -230,7 +227,7 @@ pub fn every_event() -> Vec<DomainEvent> {
     [
         thread_events(),
         streaming_events(),
-        session_events(),
+        session::session_events(),
         turn_end_events(),
         matter_events(),
     ]
@@ -384,94 +381,6 @@ fn streaming_events() -> Vec<DomainEvent> {
             Some("Limitations Act, 2002".to_owned()),
             PageVia::Browser,
         )
-        .into(),
-    ]
-}
-
-/// Approvals and session state.
-fn session_events() -> Vec<DomainEvent> {
-    let select = ConfigOption {
-        id: short("model"),
-        name: short("Model"),
-        description: None,
-        category: ConfigCategory::Model,
-        kind: ConfigOptionKind::Select {
-            current_value: short("opus"),
-            options: vec![ConfigChoice {
-                value: short("opus"),
-                name: short("Opus"),
-                description: Some("Largest".to_owned()),
-                group: None,
-            }],
-        },
-    };
-    vec![
-        PermissionRequested {
-            request: permission_request_id(10),
-            tool_call: Some(tool_call_id(4)),
-            options: vec![PermissionOption {
-                option_id: short("allow"),
-                kind: PermissionKind::AllowOnce,
-                agent_label: "Yes".to_owned(),
-            }],
-            deliverable: Deliverable::Live,
-            about: Some(PermissionAbout::AgentPlan),
-        }
-        .into(),
-        PermissionResolved {
-            request: permission_request_id(10),
-            choice: PermissionChoice::Cancelled,
-            by: Principal::LocalDesktop,
-            held_open: Some(path("Brief.docx")),
-        }
-        .into(),
-        PermissionExpired {
-            request: permission_request_id(11),
-            reason: ExpiryReason::TurnEnded,
-        }
-        .into(),
-        ElicitationRequested {
-            elicitation: elicitation_id(12),
-            request: ElicitationRequest::Form {
-                message: "Which party?".to_owned(),
-                schema: raw(r#"{"type":"object","properties":{"party":{"type":"string"}}}"#),
-            },
-        }
-        .into(),
-        ElicitationResolved {
-            elicitation: elicitation_id(12),
-            outcome: ElicitationOutcome::Accepted,
-            by: Principal::LocalDesktop,
-        }
-        .into(),
-        ElicitationExpired {
-            elicitation: elicitation_id(13),
-            reason: ExpiryReason::AgentExited,
-        }
-        .into(),
-        PlanReplaced {
-            entries: vec![PlanEntry {
-                content: "Read the lease".to_owned(),
-                priority: PlanPriority::High,
-                status: PlanStatus::InProgress,
-            }],
-        }
-        .into(),
-        ModeChanged {
-            mode_id: short("plan"),
-        }
-        .into(),
-        ConfigOptionsReplaced {
-            options: vec![select],
-        }
-        .into(),
-        CommandsAvailable {
-            commands: vec![AvailableCommand {
-                name: short("review"),
-                description: "Review a document".to_owned(),
-                input_hint: None,
-            }],
-        }
         .into(),
     ]
 }

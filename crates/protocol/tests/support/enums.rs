@@ -91,7 +91,8 @@ macro_rules! logged_enums {
                 SearchSource,
                 DoneBy,
                 SnoozeBy,
-                PermissionAbout;
+                PermissionAbout,
+                PackSkipReason;
             closed: TextOrBlob, RawPayload, StreamId;
         }
     };
