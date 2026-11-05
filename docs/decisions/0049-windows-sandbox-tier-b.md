@@ -71,10 +71,23 @@ build 26100):
     inherited entries from its parent (`CreatePrivateObjectSecurityEx`, as Windows' own
     propagation does) and the inherited Low label, writing only what changed. It skips junctions,
     symbolic links and files with more than one link, which stay bare.
+  - The walk looks up no path but its root's, whose final path must be the planned one. Each
+    folder is opened once and listed through its handle (`FileIdBothDirectoryInfo`); each child
+    is opened by its name relative to that handle (`NtCreateFile` with `RootDirectory` and
+    `FILE_OPEN_REPARSE_POINT`), and its final path must be its folder's plus `\name` before it
+    is written; a folder's final path is checked again before it is listed. An agent that swaps a
+    subfolder for a junction while a walk runs gets the junction opened and skipped, or the walk
+    refused (`Changed`) and the launch rolled back; the walk never writes outside the tree.
+  - A lawyer's own explicit mandatory label is read before the Low label replaces it
+    (`AclWriter::label`), so it can be put back when the Low label goes (`restore_label`).
+  - Reconcile's check (`present`) refuses a target that is a link now or has another final path,
+    rather than judge the entry by another object.
   - A walk can be strict (PR3b makes every tree that carries a deny strict): a child with a
     protected DACL, or with an explicit allow for a group a pool token holds (`Everyone`,
     `Users`, `Authenticated Users`, `INTERACTIVE`, `RESTRICTED` and the rest of
-    `acl_bytes::BROAD_SIDS`), the pool group or another pool user, fails the walk: such a child
+    `acl_bytes::BROAD_SIDS`), the `None` group of the pool's machine (`S-1-5-21-<machine>-513`), the
+    pool group or another pool user, or with an explicit allow of any type but plain or callback
+    (an object allow with no object type applies as a plain one), fails the walk: such a child
     beats the inherited deny. Adding explicit denies there instead was not chosen.
 - **Records.**
   - `HKLM\SOFTWARE\Clauseo\Sandbox`, with an explicit DACL: every pool user's SID, which the
