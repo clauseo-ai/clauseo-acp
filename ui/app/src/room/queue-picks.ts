@@ -15,16 +15,19 @@ const NONE: readonly Queued[] = [];
 const filesOf = (entry: UserMessageEntry) =>
   entry.content.reduce((n, b) => (b.text === undefined ? n + 1 : n), 0);
 
-/** A pick of the queued messages, in the order they go (their entries' order), the same array while each reads the
- * same: one per mount (useState(queuedPick)). */
+/** A pick of the queued messages, in the order they go, the same array while each reads the same: one per mount
+ * (useState(queuedPick)). The order is the host's (0048, P4b; the reducer's queued_order): the messages put back at the
+ * head (`at_head`) first, the latest first, then the rest in their entries' order. */
 export function queuedPick(): (v: StreamView | undefined) => readonly Queued[] {
   let last = NONE;
   return (v) => {
     if (v === undefined) return (last = NONE);
     const next: Queued[] = [];
-    for (const id of userIds(v.ids)) {
-      const entry = v.entries.get(id)?.user_message;
-      if (entry?.status !== "queued") continue;
+    const ids = userIds(v.ids).filter((id) => v.entries.get(id)?.user_message?.status === "queued");
+    const heads = ids.filter((id) => v.entries.get(id)!.user_message!.at_head === true).reverse();
+    const order = heads.length === 0 ? ids : [...heads, ...ids.filter((id) => !heads.includes(id))];
+    for (const id of order) {
+      const entry = v.entries.get(id)!.user_message!;
       const prev = last[next.length];
       const text = questionText(id, entry, v.texts);
       next.push(

@@ -6,7 +6,7 @@ use clauseo_protocol::{
     TurnStoppedAtLimit, UserMessage, UserMessageEntry, UserMessageStatus, ViewEntry,
 };
 
-use super::queue::{mark_prompt, settle_prompt};
+use super::queue::{mark_prompt, mark_put_back, settle_prompt};
 use super::{insert_marker, insert_new, not_yet, set, set_status, set_vec};
 use crate::Applied;
 use crate::change::{Anomaly, ViewChange};
@@ -83,6 +83,7 @@ pub(super) fn user_message(
         status: UserMessageStatus::Sent,
         edited: false,
         steer: None,
+        at_head: false,
         ts,
     };
     push_user_upsert(&mut out.changes, &entry);
@@ -102,7 +103,8 @@ pub(super) fn user_message(
 /// A turn waits. Behind another thread's writer it gives `Queued { behind }`, also as the turn's
 /// second `TurnQueued`, and when no turn runs it becomes the thread's last turn, so its
 /// `TurnEnded` before it starts (a cancel) settles the status; its prompt has left the thread's
-/// queue (`Sent`). Behind its own thread its prompt shows `Queued`, and it leaves the status
+/// queue (`Sent`). Behind its own thread its prompt shows `Queued` (and `at_head` when the turn
+/// was put back at the head, `queued_order.rs`), and it leaves the status
 /// while a turn runs; when none runs, it settles (to `Idle` unless the lawyer is asked).
 pub(super) fn turn_queued(state: &mut ThreadState, event: &TurnQueued, out: &mut Applied) {
     let behind = event.behind();
@@ -111,7 +113,11 @@ pub(super) fn turn_queued(state: &mut ThreadState, event: &TurnQueued, out: &mut
     } else {
         UserMessageStatus::Sent
     };
-    mark_prompt(state, event.turn(), status, out);
+    if behind == state.thread && event.is_at_head() {
+        mark_put_back(state, event.turn(), out);
+    } else {
+        mark_prompt(state, event.turn(), status, out);
+    }
     if behind != state.thread {
         if state.running.is_none() {
             state.turn = Some(event.turn());

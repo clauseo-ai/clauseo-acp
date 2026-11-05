@@ -122,6 +122,12 @@ pub struct UserMessageEntry {
     /// Where a steered message went, once resolved.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub steer: Option<SteerOutcome>,
+    /// Its turn was put back at the head of the queue (its `TurnQueued` is `at_head`,
+    /// decision record 0048, P4b): while queued it goes before the prompts that joined the queue
+    /// in `order`, the latest put back first, as the host runs them. False is written as a
+    /// missing field and a missing field reads as false, so an older view orders as before.
+    #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+    pub at_head: bool,
     /// When it was sent (display only; the `UserMessage` envelope's `ts`).
     pub ts: Timestamp,
 }

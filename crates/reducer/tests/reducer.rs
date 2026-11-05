@@ -27,6 +27,8 @@ mod orders;
 mod props;
 #[path = "reducer/queued.rs"]
 mod queued;
+#[path = "reducer/queued_order.rs"]
+mod queued_order;
 #[path = "reducer/snapshot.rs"]
 mod snapshot;
 #[path = "reducer/steer.rs"]

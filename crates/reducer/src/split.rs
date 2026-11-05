@@ -140,6 +140,7 @@ fn without_content(entry: &UserMessageEntry) -> UserMessageEntry {
         status: entry.status,
         edited: entry.edited,
         steer: entry.steer.clone(),
+        at_head: entry.at_head,
         ts: entry.ts,
     }
 }

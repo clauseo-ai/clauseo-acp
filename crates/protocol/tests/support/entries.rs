@@ -90,6 +90,7 @@ fn thread_entries() -> Vec<ViewEntry> {
             status: UserMessageStatus::Queued,
             edited: false,
             steer: None,
+            at_head: false,
             ts: Timestamp::new(1_760_000_001_000).unwrap(),
         }),
         ViewEntry::AgentText(agent_text_entry()),

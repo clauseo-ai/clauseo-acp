@@ -3,11 +3,12 @@
 //! `refresh_token_reused`), comes back held at the head of its queue, held as a refused
 //! permission's `NotAllowed` holds it (#408), and `restart_agents` for that agent sends it once.
 //! `stop_agents` puts a running turn back the same way and stops the agent. Across a host
-//! restart the turn put back keeps its head place, ahead of the turns queued before it.
+//! restart the turn put back keeps its head place, ahead of the turns queued before it, and
+//! every view orders the queue the same way.
 
 use clauseo_protocol::{
     AgentId, ContentBlock, DeliveryRequest, DomainEvent, ErrorCode, MatterId, StopReason, StreamId,
-    ThreadId, ThreadStatus, TurnId,
+    ThreadId, ThreadStatus, TurnId, ViewEntry, ViewPatchBody,
 };
 
 use crate::codex::{CODEX, codex_dir};
@@ -219,6 +220,8 @@ fn a_turn_held_for_the_sign_in_runs_first_after_a_host_restart() {
     assert!(![first, two, three].contains(&again));
     settle(&host, &mut events);
     assert!(held(&host, matter, thread), "{}", events.dump());
+    // The view shows the queue in the host's order: the turn put back first.
+    assert_eq!(view_queue(&host, thread), [again, two, three]);
     drop(events);
     host.abort();
 
@@ -227,6 +230,7 @@ fn a_turn_held_for_the_sign_in_runs_first_after_a_host_restart() {
     events.until_caught_up();
     settle(&host, &mut events);
     assert!(held(&host, matter, thread), "not held after the restart");
+    assert_eq!(view_queue(&host, thread), [again, two, three]);
     // Signed in: the held turn goes first, then the two queued behind it, in order (the fake
     // agent's prompts check the texts' order too).
     wait("restart_agents", host.handle.restart_agents(fake())).unwrap();
@@ -245,4 +249,30 @@ fn a_turn_held_for_the_sign_in_runs_first_after_a_host_restart() {
     assert!(started(two) < started(three), "{}", events.dump());
     assert!(!held(&host, matter, thread));
     host.shutdown();
+}
+
+/// The turns of the queued prompts in a fresh view of `thread` (its `Reset`), in the order the
+/// view orders them (`clauseo_reducer::queued_order`, as the app's queue strip does).
+fn view_queue(host: &Running, thread: ThreadId) -> Vec<TurnId> {
+    let mut view = host.view(StreamId::Thread(thread), None);
+    view.until("the view's reset", |view| view.patches().next().is_some());
+    let Some(ViewPatchBody::Reset { view_window }) = view.patches().next().map(|patch| &patch.body)
+    else {
+        panic!("the view did not start with a reset: {}", view.dump());
+    };
+    let entries = &view_window.entries;
+    clauseo_reducer::queued_order(entries)
+        .into_iter()
+        .map(|message| {
+            entries
+                .iter()
+                .find_map(|entry| match entry {
+                    ViewEntry::UserMessage(prompt) if prompt.message == message => {
+                        Some(prompt.turn)
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("no prompt {message}: {}", view.dump()))
+        })
+        .collect()
 }

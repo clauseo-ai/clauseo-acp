@@ -63,6 +63,30 @@ test("queued messages in their order, with turn, words and file count; sent ones
   expect(pick(view)).toBe(q);
 });
 
+test("after a restart the message held for the sign-in goes first, the two queued before it behind it (0048, P4b)", () => {
+  // The log's order: "Two" and "Three" queued while the first turn ran, then that turn put back as "Again".
+  const again: ViewEntry = {
+    user_message: { ...queued(9, 4, "Again.").user_message!, at_head: true },
+  };
+  const { view } = viewOf(reset([queued(5, 2, "Two."), queued(6, 3, "Three."), again], heldHeader));
+  expect(queuedPick()(view).map((x) => x.text)).toEqual(["Again.", "Two.", "Three."]);
+  // two put back: the latest first, as the host's restore orders them
+  const later: ViewEntry = {
+    user_message: { ...queued(11, 5, "Later.").user_message!, at_head: true },
+  };
+  const two = viewOf(reset([queued(5, 2, "Two."), again, later], heldHeader));
+  expect(queuedPick()(two.view).map((x) => x.text)).toEqual(["Later.", "Again.", "Two."]);
+});
+
+test("an old snapshot with no at_head orders exactly by entry order, as before", () => {
+  const { view } = viewOf(
+    reset([queued(5, 2, "Two."), queued(6, 3, "Three."), queued(9, 4, "Again.")], heldHeader),
+  );
+  const q = queuedPick()(view);
+  expect(q.map((x) => x.text)).toEqual(["Two.", "Three.", "Again."]);
+  expect(q.every((x) => x.entry.at_head === undefined)).toBe(true);
+});
+
 test("an edit gives a new array whose untouched messages keep their identity; a message sent leaves", () => {
   const { view, apply } = viewOf(
     reset([queued(5, 2, "Second."), queued(6, 3, "Third.")], header("running")),
