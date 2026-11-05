@@ -153,3 +153,29 @@ fn agents_as_a_junction_like_link_refuses_on_windows() {
     };
     assert_eq!(support, FolderRefusal::ReparsePoint);
 }
+
+#[test]
+fn a_claude_store_file_that_is_a_link_refuses_on_windows() {
+    // A directory link at `.credentials.json`: a reparse point where the store's name is read
+    // unresolved, so an entry would follow it.
+    let w = World::new("admit-win-store-link");
+    w.dir.dir("elsewhere/target");
+    let name = format!("{STORE}/.credentials.json");
+    let Ok(_link) = w.dir.symlink_dir(&name, &w.at("elsewhere/target")) else {
+        assert!(
+            std::env::var_os("CI").is_none(),
+            "CI's runners may make links, and this can't"
+        );
+        eprintln!("skipped: no right to make a link");
+        return;
+    };
+    let policy = w.builder().claude_store(w.at(STORE)).build().unwrap();
+    let refused = admit(&policy, &w.at("data"), &[], &FakeGroups::default());
+    let Err(Error::FolderUnsupported { path_kind, support }) = refused else {
+        panic!("not refused: {refused:?}");
+    };
+    assert_eq!(
+        (path_kind, support),
+        (PathKind::ClaudeStoreFile, FolderRefusal::ReparsePoint)
+    );
+}

@@ -96,8 +96,8 @@ pub enum FolderRefusal {
     /// A name in the path is another spelling of a name to Windows: it ends in `.` or a space,
     /// holds `:` (a stream), or looks like a short 8.3 name.
     OddSpelling,
-    /// `<data_dir>\agents`, or the agent folder a path is in, is a junction, a link or another
-    /// reparse point.
+    /// `<data_dir>\agents`, the agent folder a path is in, the credential link or a Claude store
+    /// file is a junction, a symbolic link or another reparse point.
     ReparsePoint,
 }
 
@@ -125,7 +125,7 @@ impl fmt::Display for FolderRefusal {
             FolderRefusal::NestedMatter => f.write_str("it is inside this matter, or holds it"),
             FolderRefusal::OddSpelling => f.write_str("a name in it is spelled another way"),
             FolderRefusal::ReparsePoint => {
-                f.write_str("the agents' folder it is in is a link or a reparse point")
+                f.write_str("it, or the agents' folder it is in, is a link or a reparse point")
             }
         }
     }
@@ -252,6 +252,9 @@ fn gate<'a>(
     if let Some((kind, refusal)) = agents_links(policy, &data) {
         return Err(refused(kind, refusal));
     }
+    if let Some((kind, refusal)) = unresolved_links(policy) {
+        return Err(refused(kind, refusal));
+    }
     for other in others {
         let canonical = dunce::canonicalize(other).unwrap_or_else(|_missing| other.clone());
         let nested = [other, &canonical]
@@ -336,6 +339,34 @@ fn agents_links(policy: &Policy, data: &Path) -> Option<(PathKind, FolderRefusal
         }
     }
     None
+}
+
+/// Why a name the policy keeps unresolved can't take an entry, if it can't: the credential
+/// link and the Claude store's allowed files are read by their own name, never followed, so a
+/// symbolic link or a junction there (a reparse point on Windows) would carry the entry to
+/// whatever it points at. A hard link is fine: the credential link is one by design (the brief),
+/// and shares its file's entries. A missing name is fine: nothing is there to grant on.
+#[cfg(any(windows, test, feature = "test-support"))]
+fn unresolved_links(policy: &Policy) -> Option<(PathKind, FolderRefusal)> {
+    let mut names: Vec<(PathKind, PathBuf)> = Vec::new();
+    if let Some(link) = policy.credential_link() {
+        names.push((PathKind::CredentialLink, link.to_owned()));
+    }
+    if let Some(store) = policy.claude_store() {
+        names.extend(
+            store
+                .files()
+                .into_iter()
+                .map(|f| (PathKind::ClaudeStoreFile, f)),
+        );
+    }
+    names
+        .into_iter()
+        .find_map(|(kind, name)| match is_reparse_point(&name) {
+            Ok(false) => None,
+            Ok(true) => Some((kind, FolderRefusal::ReparsePoint)),
+            Err(error) => Some((kind, FolderRefusal::CheckFailed(error.kind()))),
+        })
 }
 
 /// Whether `path` is a reparse point (on Windows any, elsewhere a symbolic link); a missing

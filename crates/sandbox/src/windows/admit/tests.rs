@@ -346,41 +346,6 @@ fn another_matter_nested_with_this_one_is_refused_whatever_its_dacl() {
     assert_eq!(support, FolderRefusal::NestedMatter);
 }
 
-/// `<root>/data2/agents` (a data folder of its own; the world's has a real `agents`) as a link to
-/// `target` (a symbolic link: a name-surrogate reparse point, as a
-/// junction is); `None` where this process may not make one.
-fn link_agents(w: &World, target: &Path) -> Option<PathBuf> {
-    #[cfg(unix)]
-    let link = Some(w.dir.symlink("data2/agents", target));
-    #[cfg(windows)]
-    let link = w.dir.symlink_dir("data2/agents", target).ok();
-    link
-}
-
-#[test]
-fn agents_as_a_link_refuses_the_launch() {
-    // Moved aside, then linked to a folder elsewhere: what the canonical paths compare against
-    // could be swapped under them.
-    let w = World::new("admit-agents-link");
-    w.dir.dir("elsewhere/agents/claude-acp/node");
-    w.dir.dir("data2");
-    let Some(_link) = link_agents(&w, &w.at("elsewhere/agents")) else {
-        assert!(
-            std::env::var_os("CI").is_none(),
-            "CI may make links, and this run can't"
-        );
-        eprintln!("skipped: no right to make a link");
-        return;
-    };
-    let policy = w.builder().build().unwrap();
-    let check = |_: &Path| Ok(FolderSupport::Ok);
-    let refused = admit_with(&policy, &w.at("data2"), &[], check, &FakeGroups::default());
-    let Err(Error::FolderUnsupported { support, .. }) = refused else {
-        panic!("not refused: {refused:?}");
-    };
-    assert_eq!(support, FolderRefusal::ReparsePoint);
-}
-
 /// Asserts that `policy` is refused before any folder check, as a matter that overlaps
 /// `data_dir`, and that the ledger is as it was.
 fn assert_overlaps(w: &World, policy: &Policy, data_dir: &Path) {
@@ -484,6 +449,10 @@ fn a_matter_beside_the_data_folder_is_admitted() {
     );
     assert!(admitted.is_ok());
 }
+
+/// Links where the gate reads names unresolved: the agents' folder, the credential link, the
+/// Claude store's files.
+mod links;
 
 /// The gate with the real folder check, on CI's Windows job.
 #[cfg(windows)]
