@@ -6,7 +6,8 @@
 //! durable: always to a head sent now (send now, a queued prompt sent now, a requeued steer), else
 //! only after `EndTurn`. Any other stop (`Cancelled`, `NotAllowed`, `Failed`, `AtLimit`,
 //! `Refusal`, `MaxTokens`, `MaxTurnRequests`) holds it until the lawyer moves it: `ResumeQueue`,
-//! `SendQueuedNow` or a new `SendPrompt`. While a steer request is out, it waits for the answer,
+//! `SendQueuedNow` or a new `SendPrompt` (which only queues held while a hold for the sign-in
+//! applies, `sign_in.rs`). While a steer request is out, it waits for the answer,
 //! so a requeued steer takes the head. The held flag lives here only (nothing is logged for it);
 //! the view shows it through `clauseo_reducer::set_queue_held`. At start-up every queued turn
 //! comes back held, rebuilt from the log ([`restore`]).
@@ -204,12 +205,11 @@ fn route(
         return steer::steer(actor, ctx, thread, target, blocks);
     }
     let running = turn_running(actor, thread);
-    let queued = queue(actor, thread).is_some_and(|queue| !queue.is_empty());
-    let joins = delivery == DeliveryRequest::Queue || !queued;
-    if running.is_none() && joins && sign_in::applies(actor, thread) {
-        // Nothing may start: the prompt queues held, at the end.
+    if running.is_none() && sign_in::applies(actor, thread) {
+        // Nothing may start: whatever its delivery, the prompt queues held.
         return sign_in::hold_prompt(actor, ctx, thread, blocks);
     }
+    let queued = queue(actor, thread).is_some_and(|queue| !queue.is_empty());
     match (delivery, running) {
         (DeliveryRequest::Queue, None) if !queued => {
             if let Some(queue) = queue(actor, thread) {
