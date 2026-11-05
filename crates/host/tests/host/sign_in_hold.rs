@@ -9,13 +9,13 @@
 
 use clauseo_protocol::{
     AgentId, CommandOutcome, ContentBlock, DeliveryRequest, DomainEvent, ErrorCode, HostCommand,
-    MatterId, StopReason, StreamId, ThreadId, ThreadStatus, TurnId, ViewEntry, ViewPatchBody,
+    MatterId, StopReason, StreamId, ThreadId, ThreadStatus, TurnId,
 };
 
 use crate::codex::{CODEX, codex_dir};
 use crate::observe::Events;
 use crate::permissions::{answer_from, until_first_request};
-use crate::queue::{allow, held, send, settle, starts, until_queued};
+use crate::queue::{allow, held, send, settle, starts, until_queued, view_queue};
 use crate::support::{Dir, FAKE, Running, Scenario, matter_with_thread, text, wait};
 
 /// The prompt every test sends first.
@@ -313,30 +313,4 @@ fn removing_the_held_turn_clears_the_sign_in_hold_and_the_queue_waits_for_send_n
     assert!(!held(&host, matter, thread));
     events.assert_no_mismatch();
     host.shutdown();
-}
-
-/// The turns of the queued prompts in a fresh view of `thread` (its `Reset`), in the order the
-/// view orders them (`clauseo_reducer::queued_order`, as the app's queue strip does).
-fn view_queue(host: &Running, thread: ThreadId) -> Vec<TurnId> {
-    let mut view = host.view(StreamId::Thread(thread), None);
-    view.until("the view's reset", |view| view.patches().next().is_some());
-    let Some(ViewPatchBody::Reset { view_window }) = view.patches().next().map(|patch| &patch.body)
-    else {
-        panic!("the view did not start with a reset: {}", view.dump());
-    };
-    let entries = &view_window.entries;
-    clauseo_reducer::queued_order(entries)
-        .into_iter()
-        .map(|message| {
-            entries
-                .iter()
-                .find_map(|entry| match entry {
-                    ViewEntry::UserMessage(prompt) if prompt.message == message => {
-                        Some(prompt.turn)
-                    }
-                    _ => None,
-                })
-                .unwrap_or_else(|| panic!("no prompt {message}: {}", view.dump()))
-        })
-        .collect()
 }

@@ -8,7 +8,7 @@ use std::time::Duration;
 use clauseo_protocol::{
     CommandOutcome, Delivery, DeliveryRequest, DomainEvent, ErrorCode, HostCommand,
     MAX_QUEUED_TURNS, MatterId, MessageId, PromptBlock, QueuedPromptEdited, SteerResolved,
-    StopReason, StreamId, ThreadId, TurnId, UserMessage,
+    StopReason, StreamId, ThreadId, TurnId, UserMessage, ViewEntry, ViewPatchBody,
 };
 
 use crate::codex::CODEX;
@@ -117,6 +117,32 @@ pub(crate) fn settle(host: &Running, events: &mut Events) {
 /// Waits until `turn`'s `TurnQueued` is in.
 pub(crate) fn until_queued(events: &mut Events, turn: TurnId) {
     events.until("TurnQueued", |e| e.last_queued(turn).is_some());
+}
+
+/// The turns of the queued prompts in a fresh view of `thread` (its `Reset`), in the order the
+/// view orders them (`clauseo_reducer::queued_order`, as the app's queue strip does).
+pub(crate) fn view_queue(host: &Running, thread: ThreadId) -> Vec<TurnId> {
+    let mut view = host.view(StreamId::Thread(thread), None);
+    view.until("the view's reset", |view| view.patches().next().is_some());
+    let Some(ViewPatchBody::Reset { view_window }) = view.patches().next().map(|patch| &patch.body)
+    else {
+        panic!("the view did not start with a reset: {}", view.dump());
+    };
+    let entries = &view_window.entries;
+    clauseo_reducer::queued_order(entries)
+        .into_iter()
+        .map(|message| {
+            entries
+                .iter()
+                .find_map(|entry| match entry {
+                    ViewEntry::UserMessage(prompt) if prompt.message == message => {
+                        Some(prompt.turn)
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("no prompt {message}: {}", view.dump()))
+        })
+        .collect()
 }
 
 #[test]
