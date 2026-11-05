@@ -41,9 +41,10 @@ export function pressOwn(target: EventTarget, field: Element): boolean {
   return false;
 }
 
-/** Whether `next` is `was` with words put in at one place and nothing taken out: plain typing, a paste. */
+/** Whether `next` is `was` with words put in at one place and nothing taken out, as plain typing and a paste do, or
+ * the same words. */
 export function insertedOnly(was: string, next: string): boolean {
-  if (next.length <= was.length) return false;
+  if (next.length < was.length) return false;
   let i = 0;
   while (i < was.length && was.charCodeAt(i) === next.charCodeAt(i)) i++;
   return next.endsWith(was.slice(i));

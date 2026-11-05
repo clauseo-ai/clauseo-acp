@@ -514,3 +514,43 @@ test("a field left a line too tall by words only put in is fitted whole once typ
   expect(a.style.height).toBe("52px");
   vi.useRealTimers();
 });
+
+/** An input event of the given kind, as an engine sends it after setting the field's words. */
+const typeAs = (text: string, inputType: string) =>
+  act(async () => {
+    Reflect.set(HTMLTextAreaElement.prototype, "value", text, field());
+    field().dispatchEvent(new InputEvent("input", { bubbles: true, inputType }));
+  });
+
+test("a dead key's mark taken out and put back, as macOS commits it, never collapses the field (#117 L, WKWebView)", async () => {
+  await mount(composer({}));
+  const a = field();
+  wraps(a);
+  // 80 characters at 40 a line: two lines, and a third with the mark
+  const words = "न्यायालय ने आज अपना फैसला सुना दिया है। ".repeat(2).slice(0, 79);
+  await type(words.slice(0, 1));
+  await type(words);
+  expect(a.style.height).toBe("52px");
+  const writes: string[] = [];
+  const seen = new MutationObserver((records) => {
+    for (const _ of records) writes.push(a.style.cssText);
+  });
+  seen.observe(a, { attributes: true, attributeFilter: ["style"] });
+  // InScript's `्य` on macOS (WKWebView's log, M1-I): the mark in, taken out, put back, then the next letter
+  await typeAs(`${words}न`, "insertText");
+  await typeAs(`${words}न्`, "insertCompositionText");
+  await typeAs(`${words}न`, "deleteCompositionText");
+  await typeAs(`${words}न्`, "insertFromComposition");
+  await typeAs(`${words}न्य`, "insertText");
+  seen.disconnect();
+  // one write, as the words take the third line; none for the mark's round trip
+  expect(writes).toHaveLength(1);
+  expect(a.style.height).toBe("78px");
+  // a mark taken out for good, as Escape does mid-composition: fitted whole once typing pauses
+  vi.useFakeTimers({ toFake: ["setTimeout"] });
+  await typeAs(words, "deleteCompositionText");
+  expect(a.style.height).toBe("78px");
+  await act(async () => vi.advanceTimersByTime(400));
+  expect(a.style.height).toBe("52px");
+  vi.useRealTimers();
+});
