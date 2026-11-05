@@ -117,6 +117,8 @@ pub(crate) enum After {
     Appended(TurnId),
     /// A prompt sent now joined its head: cancel the current turn.
     Jumped(TurnId),
+    /// A prompt sent now on an idle thread joined its head while an install holds new sends.
+    HeldNow(TurnId),
     /// A queued prompt was edited; `old` is put back if the commit fails.
     Edited {
         turn: TurnId,
@@ -205,10 +207,20 @@ fn route(
 ) -> Result<(), Error> {
     steps::refuse_unsendable(actor, thread)?;
     refuse_stuck(actor, thread)?;
-    // An install under `now` holds new sends: whatever its delivery, a prompt waits queued,
-    // stored and never started, until the install goes ahead or is taken back.
+    // An install under `now` holds new sends: a prompt waits queued, stored and never started,
+    // until the install goes ahead or is taken back. One sent now keeps its place at the head
+    // and starts first once the hold lifts, whatever the stop of the turn ahead (the install
+    // already cancels that turn).
     if super::super::update::gated(actor) {
-        return append(actor, ctx, thread, blocks);
+        return match (delivery, turn_running(actor, thread)) {
+            (DeliveryRequest::Queue, _) => append(actor, ctx, thread, blocks),
+            (DeliveryRequest::SendNow | DeliveryRequest::Steer, Some(running)) => {
+                jump(actor, ctx, thread, running, blocks, delivery)
+            }
+            (DeliveryRequest::SendNow | DeliveryRequest::Steer, None) => {
+                held_now(actor, ctx, thread, blocks, delivery)
+            }
+        };
     }
     if delivery == DeliveryRequest::Steer
         && let Some(target) = steer::target(actor, thread)
@@ -330,6 +342,42 @@ fn jump(
     )
 }
 
+/// A prompt sent now on an idle thread while an install holds new sends: it joins the head,
+/// sent now, so it starts first once the hold lifts, ahead of a held queue, as it would have
+/// started at once.
+fn held_now(
+    actor: &mut Actor,
+    ctx: CommandCtx,
+    thread: ThreadId,
+    blocks: Vec<ContentBlock>,
+    delivery: DeliveryRequest,
+) -> Result<(), Error> {
+    let full = queue(actor, thread).is_some_and(|queue| queue.turns.len() >= MAX_QUEUED_TURNS);
+    if full {
+        return Err(Error::refused(
+            ErrorCode::ThreadQueueFull,
+            format!("the thread already has {MAX_QUEUED_TURNS} queued messages"),
+        ));
+    }
+    log_queued(
+        actor,
+        ctx,
+        thread,
+        None,
+        blocks,
+        delivery,
+        |turn, message, content, queue| {
+            queue.turns.push_front(Queued {
+                turn,
+                message,
+                content,
+                forced: true,
+            });
+            After::HeldNow(turn)
+        },
+    )
+}
+
 /// One commit of a new turn's `UserMessage`, its `TurnQueued` behind `ahead` of its own
 /// thread (behind the thread itself, its thread alone, with none), `SteerResolved { SentNow }`
 /// for a steer, and the receipt (`PromptAccepted`). `place` puts the turn in the queue before
@@ -418,6 +466,10 @@ pub(super) fn committed(actor: &mut Actor, thread: ThreadId, after: After, ok: b
             cancel::cancel_current(actor, thread);
             move_on(actor, thread);
         }
+        (After::HeldNow(_), true) => {
+            counting::question_sent(actor, thread, Delivery::Now);
+            move_on(actor, thread);
+        }
         (After::Requeued(_) | After::Edited { .. }, true) => move_on(actor, thread),
         (After::Steer(ask), true) => {
             counting::question_sent(actor, thread, Delivery::Steer);
@@ -426,7 +478,11 @@ pub(super) fn committed(actor: &mut Actor, thread: ThreadId, after: After, ok: b
         (After::Removed(turn), ok) => commands::removed(actor, thread, turn, ok),
         (After::Held(_), true) => counting::question_sent(actor, thread, Delivery::Queued),
         (
-            After::Appended(turn) | After::Jumped(turn) | After::Requeued(turn) | After::Held(turn),
+            After::Appended(turn)
+            | After::Jumped(turn)
+            | After::HeldNow(turn)
+            | After::Requeued(turn)
+            | After::Held(turn),
             false,
         ) => {
             drop_turn(actor, thread, turn);

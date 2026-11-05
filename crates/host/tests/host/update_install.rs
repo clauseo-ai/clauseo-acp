@@ -16,7 +16,7 @@ use clauseo_protocol::{
 use crate::counts::open_counts;
 use crate::observe::started;
 use crate::permissions::{answer_from, until_first_request};
-use crate::queue::{DURABLE, send};
+use crate::queue::{CANCEL_WAIT, DURABLE, held, send};
 use crate::support::{Dir, FAKE, Scenario, matter_with_thread, text};
 use crate::update::{
     CURRENT, Download, FakeUpdater, INSTALLING, NEXT, assert_installs, exit_of, marker_text,
@@ -232,4 +232,37 @@ fn a_download_that_floods_progress_does_not_stall_the_host() {
     fake.stop_flood.store(true, Ordering::SeqCst);
     until_ready(&host);
     host.shutdown();
+}
+
+#[test]
+fn a_send_now_held_on_the_stopped_thread_starts_once_the_install_is_taken_back() {
+    // Review of R23 PR 4: the held send keeps its intent; without the install it would have
+    // started after the turn it stopped, whatever that turn's stop.
+    let dir = Dir::new(
+        "update_gate_same_thread",
+        &[(FAKE, Scenario::Bundled("cancel-unanswered"))],
+    );
+    let fake = FakeUpdater::offering(&dir);
+    let host = start_updating(&dir, 0, &fake);
+    let (matter, thread, _) = matter_with_thread(&dir, &host, "m", &[], FAKE);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (first, _) = host.prompt(thread, "Draft clause 4.");
+    host.wait_armed(DURABLE);
+    host.ok(HostCommand::CheckForUpdate {});
+    until_ready(&host);
+    host.ok(install(InstallWhen::Now));
+    let (later, _) = send(&host, thread, text("Summarise."), DeliveryRequest::SendNow);
+    host.ok(HostCommand::CancelScheduledUpdate {});
+    host.wait_armed(CANCEL_WAIT);
+    host.clock.advance(CANCEL_WAIT);
+    assert_eq!(events.until_turn_ended(first).stop, StopReason::Cancelled);
+    // It left the queue and went to the agent (which, its script done, has exited): a turn
+    // taken out of the queue unstarted would end `Cancelled`.
+    let ended = events.until_turn_ended(later);
+    assert_ne!(ended.stop, StopReason::Cancelled, "{}", events.dump());
+    assert!(
+        !held(&host, matter, thread),
+        "held after the install was taken back"
+    );
+    host.shutdown_past_cancel();
 }
