@@ -19,7 +19,7 @@ test("slots fill in both languages, and Hindi takes the part of the day first", 
   expect(clock("hi", "3:58 pm")).toBe("दोपहर 3:58");
 });
 
-test.each([["./words.ts"], ["./words-ui.ts"], ["./words-frame.ts"]])(
+test.each([["./words.hi.ts"], ["./words-ui.hi.ts"], ["./words-frame.hi.ts"]])(
   "Hindi sentences in %s end with the danda, never a full stop, and avoid the banned words",
   async (file) => {
     const { readFileSync } = await import("node:fs");

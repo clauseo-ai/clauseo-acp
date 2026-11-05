@@ -1,7 +1,10 @@
 // Where a registered string lives: its words file and English key, and its current text in either language, looked
 // up from that file, so the page and the gate always compare against what the app shows.
+// the Hindi words in at once, as the app has them once its lazy chunk lands: each ref reads its Hindi when made
+import "@clauseo/components/lib/words-hi.ts";
 import type { Lang } from "@clauseo/components/lib/display.ts";
-import { errorHindi, errorSentence, type ErrorKey } from "@clauseo/components/lib/words-errors.ts";
+import { errorSentence, type ErrorKey } from "@clauseo/components/lib/words-errors.ts";
+import { errorHindi } from "@clauseo/components/lib/words-errors.hi.ts";
 import { fw, type FindKey } from "@clauseo/components/lib/words-find.ts";
 import { fr, type FolderKey } from "@clauseo/components/lib/words-folder.ts";
 import { frc, type FolderCardKey } from "@clauseo/components/lib/words-folder-card.ts";
@@ -13,7 +16,8 @@ import { limThread, type LimitThreadKey } from "@clauseo/components/lib/words-li
 import { pc, type PlanCardKey } from "@clauseo/components/lib/words-plan-card.ts";
 import { mf, type MatterFormKey } from "@clauseo/components/lib/words-matter-form.ts";
 import { mt, type MatterKey } from "@clauseo/components/lib/words-matters.ts";
-import { roomHindi, rt, type RoomKey } from "@clauseo/components/lib/words-room.ts";
+import { rt, type RoomKey } from "@clauseo/components/lib/words-room.ts";
+import { roomHindi } from "@clauseo/components/lib/words-room.hi.ts";
 import { rdt, type ReaderKey } from "@clauseo/components/lib/words-reader.ts";
 import { brk, type BreakKey } from "@clauseo/components/lib/words-breaks.ts";
 import { st, type SettingsKey } from "@clauseo/components/lib/words-settings.ts";

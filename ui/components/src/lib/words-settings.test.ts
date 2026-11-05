@@ -5,7 +5,8 @@ import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import { frame } from "./words-frame.ts";
 import { ui } from "./words-ui.ts";
-import { LANGUAGE_NAMES, PREVIEW_PAPERS, settingsWords, st } from "./words-settings.ts";
+import { LANGUAGE_NAMES, PREVIEW_PAPERS, st } from "./words-settings.ts";
+import { settingsWords } from "./words-settings.hi.ts";
 
 test("the sections and their lines say the design's words in both languages", () => {
   expect(
@@ -99,7 +100,9 @@ test("each Hindi sentence ends with the danda, and no banned word or Devanagari 
 });
 
 test("only the sections built so far bring their strings: no later section's name or line is here", () => {
-  const src = readFileSync(new URL("./words-settings.ts", import.meta.url), "utf8");
+  const src = ["./words-settings.ts", "./words-settings.hi.ts"]
+    .map((file) => readFileSync(new URL(file, import.meta.url), "utf8"))
+    .join("\n");
   for (const later of ["Plans", "Indian Kanoon", "Safe workspace", "Updates"])
     expect(Object.keys(settingsWords), later).not.toContain(later);
   // the design's facts (its version and date) stay in the design
