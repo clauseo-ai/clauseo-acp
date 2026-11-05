@@ -98,7 +98,7 @@ fn printable_ascii_keys_pass_including_dash_and_underscore() {
 
 /// Plants `bytes` as `agent`'s item, as another app or Keychain Access would.
 fn plant(keychain: &Keychain, agent: &AgentId, bytes: &[u8]) {
-    let super::Backend::Memory(items) = &keychain.backend else {
+    let super::Backend::Memory(items, _) = &keychain.backend else {
         panic!("plant needs the memory keychain");
     };
     super::lock(items).insert(account(agent), super::Zeroizing::new(bytes.to_vec()));
@@ -262,4 +262,20 @@ fn store_if_absent_racing_on_two_threads_stores_exactly_one() {
             "round {round}: the winner's key is kept"
         );
     }
+}
+
+#[test]
+fn a_memory_keychain_failing_reads_refuses_store_if_absent_and_writes_nothing() {
+    let keychain = Keychain::memory();
+    keychain.fail_reads(true);
+    assert!(matches!(
+        keychain.load(&claude()),
+        Err(KeyError::NoAccess { .. })
+    ));
+    assert!(matches!(
+        keychain.store_if_absent(&claude(), "sk-first"),
+        Err(KeyError::NoAccess { .. })
+    ));
+    keychain.fail_reads(false);
+    assert_eq!(keychain.load(&claude()).unwrap(), None, "nothing written");
 }

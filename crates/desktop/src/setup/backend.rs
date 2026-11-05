@@ -112,22 +112,7 @@ impl AgentsBackend {
             }
             SetupCommand::RetryAgentInstall {
                 use_system_proxy, ..
-            } => {
-                let restartable = matches!(
-                    agents.state(&agent),
-                    Some(
-                        InstallState::Failed(_)
-                            | InstallState::Waiting { .. }
-                            | InstallState::Paused
-                    )
-                );
-                if !restartable {
-                    return Err(invalid(format!(
-                        "{agent}'s install is not failed, waiting or paused; installing asks first"
-                    )));
-                }
-                agents.retry(&agent, use_system_proxy);
-            }
+            } => self.retry(&agent, use_system_proxy)?,
             SetupCommand::StartSignIn { console, .. } => {
                 self.refuse_blocked(&agent)?;
                 let method = plan_method(&agent, console)?;
@@ -186,12 +171,12 @@ impl AgentsBackend {
             SetupCommand::SetAgentKey { key, .. } => {
                 self.refuse_blocked(&agent)?;
                 self.refuse_leaving_reused(&agent)?;
-                self.keys.set(&agent, key, key_write).await?;
-                self.compose.set_key(&agent, true);
+                let then = self.key_trigger(&agent);
+                self.keys.set(&agent, key, key_write, then).await?;
             }
             SetupCommand::ClearAgentKey { .. } => {
-                self.keys.clear(&agent).await?;
-                self.compose.set_key(&agent, false);
+                let then = self.key_trigger(&agent);
+                self.keys.clear(&agent, then).await?;
             }
             SetupCommand::SetFirmEndpoint { url, .. } => {
                 let url = url.as_deref().map(checked_endpoint).transpose()?;
@@ -214,6 +199,30 @@ impl AgentsBackend {
             }
         }
         Ok(())
+    }
+
+    /// `RetryAgentInstall`: `command.invalid` unless `agent`'s install is `Failed`, `Waiting` or
+    /// `Paused`, since it asks nothing; a missing agent installs through `InstallAgent`'s confirm.
+    fn retry(&self, agent: &AgentId, use_system_proxy: bool) -> Result<(), HostError> {
+        let restartable = matches!(
+            self.agents.state(agent),
+            Some(InstallState::Failed(_) | InstallState::Waiting { .. } | InstallState::Paused)
+        );
+        if !restartable {
+            return Err(invalid(format!(
+                "{agent}'s install is not failed, waiting or paused; installing asks first"
+            )));
+        }
+        self.agents.retry(agent, use_system_proxy);
+        Ok(())
+    }
+
+    /// What a key write runs once memory has changed, still in the keychain's order: tells
+    /// [`Compose`] whether `agent` has a key.
+    fn key_trigger(&self, agent: &AgentId) -> impl FnOnce(bool) + Send + 'static {
+        let compose = Arc::clone(&self.compose);
+        let agent = agent.clone();
+        move |stored| compose.set_key(&agent, stored)
     }
 
     /// Asks the lawyer `ask`; a decline is `transport.unauthorized`.

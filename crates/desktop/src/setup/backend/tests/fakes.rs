@@ -219,6 +219,8 @@ pub(super) struct Rig {
     pub(super) confirm: Arc<FakeConfirm>,
     pub(super) opener: Arc<FakeOpener>,
     pub(super) events: Arc<SetupEvents>,
+    /// The memory keychain under the backend's `KeyCache` (clones share it).
+    pub(super) keychain: Keychain,
 }
 
 pub(super) fn home(agent: &AgentId) -> PathBuf {
@@ -226,6 +228,11 @@ pub(super) fn home(agent: &AgentId) -> PathBuf {
 }
 
 pub(super) fn rig(accept: bool) -> Rig {
+    rig_on(accept, Keychain::memory())
+}
+
+/// [`rig`] whose `KeyCache` loads from `keychain` (a memory one) at start.
+pub(super) fn rig_on(accept: bool, keychain: Keychain) -> Rig {
     let agents = Arc::new(FakeAgents::default());
     let host = Arc::new(RecordingHost::default());
     let confirm = Arc::new(FakeConfirm {
@@ -247,10 +254,7 @@ pub(super) fn rig(accept: bool) -> Rig {
         .collect();
     let backend = Arc::new(AgentsBackend {
         agents: Arc::clone(&agents) as Arc<dyn SetupAgents>,
-        keys: Arc::new(KeyCache::load_all(
-            Keychain::memory(),
-            [&claude(), &codex()],
-        )),
+        keys: Arc::new(KeyCache::load_all(keychain.clone(), [&claude(), &codex()])),
         compose: Arc::new(Compose::new(Arc::clone(&events), Arc::new(Fixed))),
         host: Arc::clone(&host) as Arc<dyn SetupHost>,
         confirm: Arc::clone(&confirm) as Arc<dyn SetupConfirm>,
@@ -265,6 +269,7 @@ pub(super) fn rig(accept: bool) -> Rig {
         confirm,
         opener,
         events,
+        keychain,
     }
 }
 

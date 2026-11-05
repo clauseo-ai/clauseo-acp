@@ -55,6 +55,8 @@ use zeroize::Zeroizing;
 use std::collections::BTreeMap;
 #[cfg(any(test, feature = "test-support"))]
 use std::sync::Arc;
+#[cfg(any(test, feature = "test-support"))]
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// The keychain service every agent's key is stored under.
 pub const KEYCHAIN_SERVICE: &str = "ai.clauseo.desktop";
@@ -147,8 +149,9 @@ enum Backend {
     None,
     #[cfg(any(target_os = "macos", windows))]
     Os,
+    /// The items, and whether every read fails (a locked keychain, a denied prompt).
     #[cfg(any(test, feature = "test-support"))]
-    Memory(Arc<Mutex<Items>>),
+    Memory(Arc<Mutex<Items>>, Arc<AtomicBool>),
 }
 
 impl fmt::Debug for Keychain {
@@ -158,7 +161,7 @@ impl fmt::Debug for Keychain {
             #[cfg(any(target_os = "macos", windows))]
             Backend::Os => f.write_str("Keychain(os)"),
             #[cfg(any(test, feature = "test-support"))]
-            Backend::Memory(items) => f
+            Backend::Memory(items, _) => f
                 .debug_tuple("Keychain::memory")
                 .field(&lock(items).keys().collect::<Vec<_>>())
                 .finish(),
@@ -187,7 +190,17 @@ impl Keychain {
     #[cfg(any(test, feature = "test-support"))]
     pub fn memory() -> Keychain {
         Keychain {
-            backend: Backend::Memory(Arc::default()),
+            backend: Backend::Memory(Arc::default(), Arc::default()),
+        }
+    }
+
+    /// Tests only: with `fail`, every read of a memory keychain (and its clones) fails as
+    /// [`KeyError::NoAccess`], as a locked keychain or a denied prompt does, until called again
+    /// with `false`; writes still work. No effect on another keychain.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn fail_reads(&self, fail: bool) {
+        if let Backend::Memory(_, failing) = &self.backend {
+            failing.store(fail, Ordering::SeqCst);
         }
     }
 
@@ -198,7 +211,7 @@ impl Keychain {
             #[cfg(any(target_os = "macos", windows))]
             Backend::Os => os::available(),
             #[cfg(any(test, feature = "test-support"))]
-            Backend::Memory(_) => true,
+            Backend::Memory(..) => true,
         }
     }
 
@@ -241,7 +254,7 @@ impl Keychain {
             #[cfg(any(target_os = "macos", windows))]
             Backend::Os => os::set(agent, key.as_bytes()),
             #[cfg(any(test, feature = "test-support"))]
-            Backend::Memory(items) => {
+            Backend::Memory(items, _) => {
                 let bytes = Zeroizing::new(key.as_bytes().to_vec());
                 lock(items).insert(account(agent), bytes);
                 Ok(())
@@ -257,7 +270,14 @@ impl Keychain {
             #[cfg(any(target_os = "macos", windows))]
             Backend::Os => os::get(agent)?,
             #[cfg(any(test, feature = "test-support"))]
-            Backend::Memory(items) => lock(items).get(&account(agent)).map(|b| b.to_vec()),
+            Backend::Memory(items, failing) => {
+                if failing.load(Ordering::SeqCst) {
+                    return Err(KeyError::NoAccess {
+                        agent: agent.clone(),
+                    });
+                }
+                lock(items).get(&account(agent)).map(|b| b.to_vec())
+            }
         };
         bytes.map(|bytes| into_key(agent, bytes)).transpose()
     }
@@ -281,7 +301,7 @@ impl Keychain {
             #[cfg(any(target_os = "macos", windows))]
             Backend::Os => os::delete(agent),
             #[cfg(any(test, feature = "test-support"))]
-            Backend::Memory(items) => {
+            Backend::Memory(items, _) => {
                 lock(items).remove(&account(agent));
                 Ok(())
             }
