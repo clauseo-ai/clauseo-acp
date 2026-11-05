@@ -21,6 +21,11 @@
     border-radius: 0 var(--r-small) var(--r-small) 0;
     background: linear-gradient(var(--hover), var(--hover)), var(--tile-hover);
   }
+  /* a snoozed row's Wake now, the same over the shelf's rows, which stand on the bare ground */
+  .room-shelf-rows .room-conv-acts {
+    border-radius: 0 var(--r-tile) var(--r-tile) 0;
+    background: linear-gradient(var(--hover), var(--hover)), var(--ground);
+  }
   .room-conv-item:hover .room-conv-acts,
   .room-conv-item:focus-within .room-conv-acts,
   .room-conv-acts:has([data-popup-open]) {
@@ -29,9 +34,9 @@
   .room-conv-item:has(.room-conv-acts):is(:hover, :focus-within) .room-conv-mark {
     visibility: hidden;
   }
-  /* no fade, no clipping (DESIGN.md: never truncate): a shelf row and a done row hold their one button's width at all
-     times, so their words never run under it and nothing moves when it shows */
-  .room-one-act :is(.room-conv, .room-shelf-row) {
+  /* no fade, no clipping (DESIGN.md: never truncate): a done row holds its one button's width at all times, so its
+     words never run under it and nothing moves when it shows */
+  .room-one-act .room-conv {
     padding-right: calc(var(--size-control-small) + var(--s1));
   }
 
@@ -82,15 +87,30 @@
     display: flex;
     flex-direction: column;
   }
+  /* one row of five columns: the chevron, the name, the info icon's slot (empty while folded, so nothing moves as it
+     opens), the room left, and the count; the heading and its button span the row on its columns, and the slot stands
+     over the button beside the heading, outside its name */
   .room-fold-head {
+    display: grid;
+    grid-template-columns: auto auto auto 1fr auto;
+    align-items: center;
+  }
+  .room-fold-h {
+    grid-area: 1 / 1 / 2 / -1;
+    display: grid;
+    grid-template-columns: subgrid;
     margin: 0;
+  }
+  .room-fold-slot {
+    grid-area: 1 / 3;
+    display: flex;
   }
   .room-fold {
     @apply text-small text-quiet is-hover:text-primary;
-    width: 100%;
-    display: flex;
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: subgrid;
     align-items: center;
-    gap: var(--s1-5);
     min-height: var(--size-control-small);
     padding: 0 var(--s3);
     border-radius: var(--r-small);
@@ -100,17 +120,17 @@
     padding: 0 var(--s2);
   }
   .room-fold-icon {
-    flex: none;
+    margin-right: var(--s1-5);
     transition: transform var(--dur-quick) var(--ease-arrive);
   }
   .room-fold[aria-expanded="true"] .room-fold-icon {
     transform: rotate(90deg);
   }
   .room-fold-name {
-    flex: 1 1 auto;
+    grid-column: 2;
   }
   .room-fold-count {
-    flex: none;
+    grid-column: 5;
     font-variant-numeric: tabular-nums;
   }
   .room-fold-line {
@@ -126,12 +146,6 @@
     color: var(--quiet);
     border-radius: var(--r-round);
     @apply is-hover:text-primary;
-  }
-  .room-fold-info {
-    padding: var(--s0-5) var(--s3);
-  }
-  .room-done .room-fold-info {
-    padding: var(--s0-5) var(--s2);
   }
 
   /* the open shelf's rows: the title, its matter or "Whole matter", and when it comes back */

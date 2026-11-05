@@ -64,11 +64,11 @@ test("no title is clipped or faded, at rest, under the pointer or with the focus
         found.push(`${sheet}: ${(m[1] ?? "").trim()}`);
   }
   expect(found).toEqual([]);
-  // a shelf or done row holds its one button's width at all times, not only under the pointer
+  // a done row holds its one button's width at all times, not only under the pointer
   const held = rules().filter((r) =>
     r.decls.get("padding-right")?.includes("--size-control-small"),
   );
-  expect(held.map((r) => r.selector)).toEqual([".room-one-act :is(.room-conv, .room-shelf-row)"]);
+  expect(held.map((r) => r.selector)).toEqual([".room-one-act .room-conv"]);
   expect(held.every((r) => !/:hover|:focus/.test(r.selector))).toBe(true);
 });
 
@@ -81,5 +81,15 @@ test("a conversation's title takes the row up to its mark: its buttons stand ove
   const fill = rules().find((r) => r.selector === ".room-conv-item[data-triage] .room-conv-acts");
   expect(fill?.decls.get("background")).toBe(
     "linear-gradient(var(--hover), var(--hover)), var(--tile-hover)",
+  );
+});
+
+test("a snoozed row's title takes the row: Wake now stands over its end on an opaque fill of the hovered ground", () => {
+  expect(
+    rules().filter((r) => r.selector.includes("room-shelf-row") && r.decls.has("padding-right")),
+  ).toEqual([]);
+  const fill = rules().find((r) => r.selector === ".room-shelf-rows .room-conv-acts");
+  expect(fill?.decls.get("background")).toBe(
+    "linear-gradient(var(--hover), var(--hover)), var(--ground)",
   );
 });

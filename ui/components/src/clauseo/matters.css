@@ -149,14 +149,8 @@
     background: var(--surface);
     box-shadow: var(--e0);
   }
-  .room-recent-row .room-conv-line {
-    align-items: flex-start;
-  }
   .room-recent-row .room-conv-title {
     @apply text-ui text-muted;
-  }
-  .room-recent-row .room-conv-mark {
-    margin-top: var(--icon-line-drop);
   }
   @media (hover: hover) {
     .room-recent-row:hover .room-conv-title {
@@ -238,10 +232,10 @@
     @apply text-primary font-chip;
   }
   /* one line: the title, the plan where it differs from the matter's first, and the status's icon at the line's end, where
-     every row's icon lines up with the next */
+     every row's icon lines up with the next, on the title's first line when it wraps */
   .room-conv-line {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: var(--s1-5);
     min-width: 0;
   }
@@ -254,6 +248,7 @@
     flex: none;
   }
   .room-conv-mark {
+    margin-top: var(--icon-line-drop);
     color: var(--muted);
   }
   .room-conv[data-state="ready"] .room-conv-mark:not([data-waits]) {

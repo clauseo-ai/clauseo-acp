@@ -66,7 +66,7 @@ test("the Done fold: its count, its rows once open, and Mark as not done", async
     "Chronology from the FIR",
     "Earlier bail order, 2024",
   ]);
-  expect(fold()?.querySelector(".room-fold-info button")?.getAttribute("aria-label")).toBe(
+  expect(fold()?.querySelector(".room-fold-head .room-info")?.getAttribute("aria-label")).toBe(
     "Conversations you've read, with nothing waiting, move here each morning.",
   );
   await press(rows[0]?.querySelector('[data-testid="mark-not-done"]'));
@@ -183,6 +183,33 @@ test("the open shelf: a row with its matter and time, Wake now sending snooze_th
   expect(row?.textContent).toBe(`${T_ASK.title}${B.name}Until 6:00\u00a0pm`);
   await press(row?.querySelector('[data-testid="wake-now"]'));
   expect(sent(transport, "snooze_thread")).toEqual([{ thread: T_ASK.thread }]);
+});
+
+test("an open fold's info icon stands in its heading's row after its name, outside the heading, for Done and the shelf", async () => {
+  const l = lists();
+  l.set(B.matter, [{ ...T_ASK, snoozed_until: NOW + 3_600_000 }]);
+  await mount({ lists: l });
+  const shelf = rail()?.querySelector<HTMLElement>('[data-testid="rail-shelf"]');
+  for (const f of [fold(), shelf]) {
+    // folded: the slot stands empty, so nothing moves as the icon comes
+    expect(f?.querySelector(".room-fold-slot")?.childElementCount).toBe(0);
+    await press(f?.querySelector(".room-fold"));
+    const head = f?.querySelector(".room-fold-head");
+    const info = head?.querySelector(".room-info");
+    expect(info).not.toBeNull();
+    // beside the heading, never in its name, and nowhere under the list
+    expect(info?.closest("h1, h2, h3, h4, h5, h6, .room-fold")).toBeNull();
+    expect(
+      info?.parentElement?.previousElementSibling?.querySelector(".room-fold-name"),
+    ).not.toBeNull();
+    expect(f?.querySelectorAll(".room-info")).toHaveLength(1);
+  }
+  expect(fold()?.querySelector(".room-info")?.getAttribute("aria-label")).toBe(
+    "Conversations you've read, with nothing waiting, move here each morning.",
+  );
+  expect(shelf?.querySelector(".room-info")?.getAttribute("aria-label")).toBe(
+    "Back sooner if Clauseo needs you or an answer finishes.",
+  );
 });
 
 const violations = async () =>
