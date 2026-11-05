@@ -101,6 +101,10 @@ export const HI = {
   "{name} changed after Clauseo's edit.": "Clauseo के संपादन के बाद {name} में बदलाव हुए हैं।",
   "You undid Clauseo's changes to {n} papers.": "आपने {n} दस्तावेज़ों में Clauseo के बदलाव पूर्ववत किए।",
   "You undid Clauseo's changes to 1 paper.": "आपने 1 दस्तावेज़ में Clauseo के बदलाव पूर्ववत किए।",
+  // the host's notices in the app's words (a notice's kind; a kind this version doesn't know shows its text): a new
+  // agent session that doesn't remember the earlier turns (provisional, TN-01)
+  "Clauseo doesn't remember the earlier questions and answers in this conversation. Include what it needs from them in your next question.":
+    null, // hi: later
   // the composer
   // in the composer's place while the open conversation is archived (U16a's Find opens one): it takes no question
   "Archived. Read only.": null,

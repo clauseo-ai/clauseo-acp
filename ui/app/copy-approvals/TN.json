@@ -1,0 +1,10 @@
+{
+  "TN-01": {
+    "en": "Clauseo doesn't remember the earlier questions and answers in this conversation. Include what it needs from them in your next question.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  }
+}

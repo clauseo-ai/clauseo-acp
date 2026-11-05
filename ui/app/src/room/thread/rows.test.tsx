@@ -493,3 +493,54 @@ test("a question written in Devanagari takes lang=hi on its own line in the Engl
   expect(asked[0]?.getAttribute("lang")).toBe("hi");
   expect(asked[1]?.hasAttribute("lang")).toBe(false);
 });
+
+test("a host notice shows the app's line for its kind, not its text; an agent's notice and an unknown kind show their text", async () => {
+  h = await mountRoom();
+  const text = "Clauseo's own fallback text.";
+  h.deliver([
+    reset([
+      userMessage(5, 1, "Q"),
+      {
+        notice: {
+          order: 6,
+          event: uuid(1, 10),
+          level: "info",
+          text,
+          kind: "context_not_restored",
+          ts: 6000,
+        },
+      },
+      {
+        notice: {
+          order: 7,
+          event: uuid(2, 10),
+          level: "info",
+          text: "Claude Code was updated.",
+          ts: 7000,
+        },
+      },
+      {
+        notice: {
+          order: 8,
+          event: uuid(3, 10),
+          level: "info",
+          text: "A line from a newer Clauseo.",
+          kind: "something_newer",
+          ts: 8000,
+        },
+      },
+    ]),
+  ]);
+  const notices = h.all("notice");
+  expect(notices.map((n) => n.textContent)).toEqual([
+    th(
+      "en",
+      "Clauseo doesn't remember the earlier questions and answers in this conversation. Include what it needs from them in your next question.",
+    ),
+    "Claude Code was updated.",
+    "A line from a newer Clauseo.",
+  ]);
+  expect(notices[0]?.textContent).not.toBe(text);
+  expect(notices[0]?.getAttribute("dir")).toBe("auto");
+  expect(notices[0]?.dataset["level"]).toBe("info");
+});

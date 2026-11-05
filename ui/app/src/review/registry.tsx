@@ -54,6 +54,7 @@ import { agentText, step, toolCall, TURN, userMessage, uuid } from "../testing/s
 import type { ErrorCode, StepEntry, ViewEntry } from "../transport/protocol.ts";
 import { U16B } from "./registry-u16b.tsx";
 import { FOLDER_RIGHTS } from "./registry-folder-rights.tsx";
+import { TN } from "./registry-notices.tsx";
 
 /* ---------- U3: the live thread's states ---------- */
 
@@ -565,4 +566,5 @@ export const REGISTRY: readonly Entry[] = [
   },
   ...U16B,
   ...FOLDER_RIGHTS,
+  ...TN,
 ];
