@@ -50,6 +50,8 @@
 //!   limits on it (`HostHandle::subscribe_limits`, `follows_limits`), counted and restarted like
 //!   the window's other messages; a restart sends the current view only, never the account
 //!   changes it missed. No other window follows the limits.
+//! - The host's log file (`host_log.rs`, 0047): started in `run` before the app, its guard in
+//!   managed state, flushed by the stop thread after the host stops.
 //! - The anonymous usage counts (`counts.rs`, 0036): opened on the host's start thread and
 //!   handed to the host (`HostConfig::with_counts`), saved and sent by one task on Tauri's
 //!   runtime every 60 s and at exit, with `time_open` from the two windows' focus.
@@ -80,6 +82,7 @@ mod dialogs;
 #[cfg(feature = "e2e")]
 mod e2e;
 mod frame;
+mod host_log;
 mod host_start;
 mod jailed;
 mod machine_memory;
@@ -157,11 +160,14 @@ pub fn run() -> tauri::Result<()> {
     if webview2::stops_start() {
         return Ok(());
     }
+    // The host's log file (decision record 0047), started before the app; its guard is managed
+    // with the app and flushed when the host stops (`host_log.rs`).
+    let host_log = host_log::install(&SystemDirs, &SystemEnv);
     // The scoreboard's t0, before anything else the app does.
     #[cfg(feature = "e2e")]
     e2e::mark_start();
     let context = context::<tauri::Wry>();
-    let builder = tauri::Builder::default();
+    let builder = tauri::Builder::default().manage(host_log);
     // The Mac's app menu, with "Settings…" (settings_window.rs). Windows and Linux get none: a
     // menu would be a bar on the undecorated window.
     #[cfg(target_os = "macos")]
@@ -398,6 +404,8 @@ fn stop_host_then_exit<R: Runtime>(app: &AppHandle<R>, exit: Arc<Exit>, code: i3
             if let Some(counts) = app.try_state::<counts::CountsState>() {
                 counts.save();
             }
+            // The log's queued lines go to the file before either exit below skips the drops.
+            host_log::flush_app(&app);
             exit.stopped.store(true, Ordering::Release);
             // The e2e build ends the process itself once the host has joined. On a Windows
             // session with no visible window (session 0, as in CI) `app.exit` never yields
@@ -421,6 +429,7 @@ fn stop_host_then_exit<R: Runtime>(app: &AppHandle<R>, exit: Arc<Exit>, code: i3
     if stopper.is_err() {
         // No thread for it: exit now; the host's next start repairs what it left open.
         fallback_exit.stopped.store(true, Ordering::Release);
+        host_log::flush_app(&fallback);
         fallback.exit(code);
     }
 }
