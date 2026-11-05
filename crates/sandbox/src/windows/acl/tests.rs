@@ -2,6 +2,7 @@
 //! accounts. Windows CI and win-01 run these.
 
 use super::*;
+use crate::windows::acl_bytes::{ALLOWED, CONTAINER_INHERIT, INHERITED, OBJECT_INHERIT, sid_bytes};
 use crate::windows::acl_plan::{LOW_LABEL_SID, Rights};
 use crate::windows::test_acl::{Place, grant, has, protected};
 use crate::windows::test_dacl::{auto_inherit_with, protect_with};
@@ -368,10 +369,6 @@ fn a_second_walk_writes_nothing_and_the_root_keeps_auto_inherited() {
     let place = Place::new("acl-auto-inherit");
     place.dir.file("matter/sub/doc.txt", "x");
     let matter = place.at("matter");
-    let auto = |path: &Path| {
-        let bytes = descriptor(path).unwrap();
-        Descriptor::parse(&bytes).unwrap().control & DACL_AUTO_INHERITED != 0
-    };
     // The temp folder may not be auto-inherited (the VM's isn't), so the matter is made so.
     auto_inherit_with(&matter, "D:(A;OICI;FA;;;SY)").unwrap();
     assert!(auto(&matter), "the matter starts auto-inherited");
@@ -389,4 +386,102 @@ fn a_second_walk_writes_nothing_and_the_root_keeps_auto_inherited() {
         acl.remove(g).unwrap();
     }
     assert!(auto(&matter));
+}
+
+/// Whether `path`'s DACL is marked auto-inherited (`SE_DACL_AUTO_INHERITED`).
+fn auto(path: &Path) -> bool {
+    let bytes = descriptor(path).unwrap();
+    Descriptor::parse(&bytes).unwrap().control & DACL_AUTO_INHERITED != 0
+}
+
+/// The `Users` group (`S-1-5-32-545`).
+const USERS: &str = "S-1-5-32-545";
+
+/// Gives `path` the DACL a folder or file under a plain `C:\m` has: copies of `C:\`'s
+/// entries marked inherited (owner rights, `SYSTEM` and `Administrators` full control,
+/// `Users` read and execute), without the auto-inherited mark. Written raw, so nothing
+/// propagates and no mark is added.
+fn plain_inherited(path: &Path, folder: bool) {
+    let passed = if folder {
+        OBJECT_INHERIT | CONTAINER_INHERIT
+    } else {
+        0
+    };
+    let mut dacl = empty_acl();
+    for (sid, mask) in [
+        ("S-1-3-4", 0x001f_01ff),
+        ("S-1-5-18", 0x001f_01ff),
+        ("S-1-5-32-544", 0x001f_01ff),
+        (USERS, 0x0012_00a9),
+    ] {
+        let ace = AceSpec {
+            kind: ALLOWED,
+            flags: passed | INHERITED,
+            mask,
+            sid: sid_bytes(&Sid::parse(sid).unwrap()),
+        };
+        dacl = Acl::parse(&dacl).unwrap().with(&ace);
+    }
+    let written = build_descriptor(0, Some(&dacl), None);
+    Object::open(path)
+        .unwrap()
+        .set(DACL_SECURITY_INFORMATION, &written)
+        .unwrap();
+}
+
+/// The Windows run 2, row 15: a matter under a plain `C:\m`, its files there before the first
+/// launch, every DACL a copy of `C:\`'s entries without the auto-inherited mark. The walk must
+/// not turn the inherited `Users` allow into an explicit one: the first strict launch passes,
+/// every DACL ends auto-inherited with `Users` still inherited, and a second launch writes
+/// nothing (and doesn't refuse).
+#[test]
+fn files_under_a_root_not_auto_inherited_pass_the_strict_launch_and_end_auto_inherited() {
+    let place = Place::new("acl-plain-root");
+    let doc = place.dir.file("matter/sub/doc.txt", "x");
+    let lawyer = place.dir.file("matter/lawyer.txt", "x");
+    let (matter, sub) = (place.at("matter"), place.at("matter/sub"));
+    for (path, folder) in [
+        (&doc, false),
+        (&lawyer, false),
+        (&sub, true),
+        (&matter, true),
+    ] {
+        plain_inherited(path, folder);
+        assert!(
+            !auto(path) && has(path, USERS, true),
+            "{path:?} starts plain"
+        );
+    }
+    let grants = fence(&matter);
+    put(&matter, &grants).unwrap();
+    for path in [&matter, &sub, &doc, &lawyer] {
+        assert!(auto(path), "{path:?} ends auto-inherited");
+        assert!(has(path, USERS, true), "{path:?}");
+        assert!(
+            !has(path, USERS, false),
+            "{path:?} has no explicit Users allow"
+        );
+    }
+    assert!(has(&doc, USER_SID, true));
+    let again = put(&matter, &grants).unwrap();
+    assert_eq!(again.written, 0, "{again:?}");
+}
+
+/// The round-4 audit: a target whose final path is longer than `MAX_PATH` comes back in the
+/// `\\?\` form, which `dunce` can't strip; planned in the plain form, it is still the same
+/// target, so the entry is written, found and walked, not refused as `Changed`.
+#[test]
+fn a_target_past_max_path_planned_plainly_is_the_same_target() {
+    let place = Place::new("acl-long");
+    let long = ["a".repeat(100), "b".repeat(100), "c".repeat(100)].join("/");
+    place.dir.file(&format!("matter/{long}/doc.txt"), "x");
+    let folder = place.at(&format!("matter/{long}"));
+    assert!(folder.as_os_str().len() > 260, "{folder:?}");
+    assert!(!folder.as_os_str().to_string_lossy().starts_with(r"\\?\"));
+    let modify = grant(&folder, USER_SID, Rights::Modify, Inherit::Tree);
+    let mut acl = NtfsAcl::new().unwrap();
+    assert_eq!(acl.add(&modify), Ok(Added::Written));
+    assert!(acl.present(&modify).unwrap());
+    acl.propagate(&folder, Reach::Tree, None).unwrap();
+    assert!(has(&folder.join("doc.txt"), USER_SID, true));
 }

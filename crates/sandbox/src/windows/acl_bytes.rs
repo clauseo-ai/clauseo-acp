@@ -419,10 +419,55 @@ impl<'a> Descriptor<'a> {
 /// the mark, every later walk rewrites the child, and the lawyer's folder loses its `AI` for
 /// good (the Windows run at `fca0bf0ca`).
 pub(crate) fn build_descriptor(control: u16, dacl: Option<&[u8]>, sacl: Option<&[u8]>) -> Vec<u8> {
-    let mut control = control | SELF_RELATIVE;
+    let mut control = control;
     if dacl.is_some() && control & DACL_AUTO_INHERITED != 0 {
         control |= DACL_AUTO_INHERIT_REQ;
     }
+    assemble(control, [None, None, sacl, dacl])
+}
+
+/// `descriptor` with its DACL's inherited entries dropped and the DACL marked auto-inherited;
+/// the owner, group, SACL and other control bits kept. A DACL not marked auto-inherited holds
+/// copies of its parent's entries that `CreatePrivateObjectSecurityEx` keeps as explicit when it
+/// works the child out again, so an inherited `Users` allow would become an explicit one and
+/// refuse a strict walk (the Windows run 2, row 15, a plain `C:\m`). As
+/// `SetNamedSecurityInfoW`'s propagation does, they go before the child is worked out from its
+/// parent. A descriptor with no DACL comes back as it is.
+#[cfg(any(windows, test))]
+pub(crate) fn without_inherited(descriptor: &[u8]) -> io::Result<Vec<u8>> {
+    let now = Descriptor::parse(descriptor)?;
+    let Some(dacl) = now.dacl else {
+        return Ok(descriptor.to_vec());
+    };
+    let dacl = Acl::parse(dacl)?;
+    let kept: Vec<&[u8]> = dacl
+        .aces()
+        .iter()
+        .copied()
+        .filter(|ace| flags(ace) & INHERITED == 0)
+        .collect();
+    let dacl = render(dacl.revision.max(2), &kept);
+    let sid_at = |offset_at: usize| -> io::Result<Option<&[u8]>> {
+        let short = || invalid("a SID past the end");
+        let offset = read_u32(descriptor, offset_at).ok_or_else(short)?;
+        if offset == 0 {
+            return Ok(None);
+        }
+        let rest = descriptor
+            .get(usize::try_from(offset).map_err(invalid)?..)
+            .ok_or_else(short)?;
+        let count = usize::from(*rest.get(1).ok_or_else(short)?);
+        rest.get(..8 + 4 * count).map(Some).ok_or_else(short)
+    };
+    let parts = [sid_at(4)?, sid_at(8)?, now.sacl, Some(dacl.as_slice())];
+    Ok(assemble(now.control | DACL_AUTO_INHERITED, parts))
+}
+
+/// A self-relative descriptor of `control` and `parts` (owner, group, SACL, DACL), each
+/// present one put after the header with its offset, and the SACL's and DACL's present bits set.
+fn assemble(control: u16, parts: [Option<&[u8]>; 4]) -> Vec<u8> {
+    let [owner, group, sacl, dacl] = parts;
+    let mut control = control | SELF_RELATIVE;
     let mut out = vec![1, 0, 0, 0];
     out.extend_from_slice(&[0; 16]);
     let mut put = |acl: Option<&[u8]>, offset_at: usize, present: u16, out: &mut Vec<u8>| {
@@ -435,6 +480,8 @@ pub(crate) fn build_descriptor(control: u16, dacl: Option<&[u8]>, sacl: Option<&
             out.extend_from_slice(acl);
         }
     };
+    put(owner, 4, 0, &mut out);
+    put(group, 8, 0, &mut out);
     put(sacl, 12, SACL_PRESENT, &mut out);
     put(dacl, 16, DACL_PRESENT, &mut out);
     if let Some(slot) = out.get_mut(2..4) {
