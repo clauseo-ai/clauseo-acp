@@ -18,6 +18,7 @@ use nix::errno::Errno;
 use nix::sys::signal::kill;
 use nix::unistd::Pid;
 
+use super::name_match::{Kind, Short, kind};
 use crate::descendants::Proc;
 
 /// `SZOMB` from `<sys/proc.h>`: `pbi_status` of a process that has exited and waits to be
@@ -122,21 +123,37 @@ fn children(parent: u32) -> Option<Vec<u32>> {
 ///
 /// Each process is matched by `proc_pidpath`, which xnu answers for any user's process (it is
 /// exempt from `proc_pidinfo`'s same-user check, unlike `PROC_PIDTBSDINFO`, which answers
-/// EPERM for root's and other users' processes). A process whose path cannot be read has exited
-/// or has no executable (a zombie, the kernel), so it is not one and is skipped. Only a match is
-/// read further, by `PROC_PIDTBSDINFO`, for its start. `None` when the listing fails, or a
-/// match that has not exited cannot be read (another user's Word): the caller cannot tell.
+/// EPERM for root's and other users' processes). A process whose path cannot be read (its app
+/// bundle replaced by an update, a zombie, a race with its exit) is read by
+/// `PROC_PIDT_SHORTBSDINFO`, also exempt: one that has exited is skipped, and one that runs
+/// with `name` as its `comm`, or that runs and cannot be read at all, makes the answer `None`
+/// (`name_match::kind`). Only a match is read further, by `PROC_PIDTBSDINFO`, for its start.
+/// `None` when the listing fails, or a match that has not exited cannot be read (another
+/// user's Word): the caller cannot tell.
 pub(crate) fn named(name: &str) -> Option<Vec<SystemTime>> {
     let mut starts = Vec::new();
     for pid in all_pids()? {
-        let Some(exe) = path(pid) else {
-            continue;
+        let exe = path(pid);
+        let file = exe
+            .as_ref()
+            .map(|exe| exe.file_name().map(OsStrExt::as_bytes).unwrap_or_default());
+        let short = if file.is_none() {
+            short_info(pid)
+        } else {
+            None
         };
-        if exe
-            .file_name()
-            .is_none_or(|file| file.as_bytes() != name.as_bytes())
-        {
-            continue;
+        let comm = short.as_ref().map(|short| c_bytes(&short.pbsi_comm));
+        let seen = short
+            .as_ref()
+            .zip(comm.as_deref())
+            .map(|(short, comm)| Short {
+                comm,
+                exited: short.pbsi_status == SZOMB,
+            });
+        match kind(name, file, seen, || gone(pid)) {
+            Kind::Named => {}
+            Kind::Other => continue,
+            Kind::Unknown => return None,
         }
         match bsd_info(pid) {
             Some(bsd) if bsd.pbi_status == SZOMB => {}
@@ -148,6 +165,43 @@ pub(crate) fn named(name: &str) -> Option<Vec<SystemTime>> {
         }
     }
     Some(starts)
+}
+
+/// A NUL-terminated `c_char` field, as its bytes before the first NUL (all of it when it has
+/// none, as `pbsi_comm` may for a 16-byte name).
+fn c_bytes(field: &[std::ffi::c_char]) -> Vec<u8> {
+    field
+        .iter()
+        .map(|c| c.to_ne_bytes()[0])
+        .take_while(|&byte| byte != 0)
+        .collect()
+}
+
+/// `proc_pidinfo(PROC_PIDT_SHORTBSDINFO)` for `pid`; `None` when the call fails or answers
+/// short.
+fn short_info(pid: u32) -> Option<libc::proc_bsdshortinfo> {
+    let pid = c_int::try_from(pid).ok()?;
+    let mut short = std::mem::MaybeUninit::<libc::proc_bsdshortinfo>::zeroed();
+    let size = c_int::try_from(size_of::<libc::proc_bsdshortinfo>()).ok()?;
+    // SAFETY: `short` is a live buffer of exactly `size` bytes, the size of
+    // `proc_bsdshortinfo`, the struct the `PROC_PIDT_SHORTBSDINFO` flavour fills; the call
+    // writes at most `size` bytes. The return is the byte count written, and anything but
+    // `size` is refused before the struct is read.
+    let written = unsafe {
+        libc::proc_pidinfo(
+            pid,
+            libc::PROC_PIDT_SHORTBSDINFO,
+            0,
+            short.as_mut_ptr().cast::<c_void>(),
+            size,
+        )
+    };
+    if written != size {
+        return None;
+    }
+    // SAFETY: the call above wrote the whole struct (`written == size`), and it was zeroed
+    // before, so every field is initialised; `proc_bsdshortinfo` is plain integers and arrays.
+    Some(unsafe { short.assume_init() })
 }
 
 /// Whether no process `pid` exists now: `kill(pid, 0)` answers `ESRCH`.
