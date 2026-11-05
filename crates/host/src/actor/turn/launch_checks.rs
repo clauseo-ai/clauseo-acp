@@ -268,8 +268,15 @@ pub(crate) struct CodexPrepared {
     pub(super) login: Option<Checked>,
 }
 
-/// Phase one: the checks go to their thread, and `waiting` waits on the thread's state.
-pub(super) fn prepare(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>) {
+/// Phase one: the checks go to their thread, and `waiting` waits on the thread's state. With
+/// `keys_wait` (the agent's `agent.keys_loading` refusal, `sign_in::keys_wait`) they start once
+/// it has resolved.
+pub(super) fn prepare(
+    actor: &mut Actor,
+    thread: ThreadId,
+    waiting: Vec<Waiting>,
+    keys_wait: Option<impl std::future::Future<Output = ()> + Send + 'static>,
+) {
     let id = agents::next_agent_id();
     let paths = (|| -> Result<_, Error> {
         let row = &actor.check_thread(thread)?.row;
@@ -323,6 +330,9 @@ pub(super) fn prepare(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>
     let check_clock = std::sync::Arc::clone(&actor.clock);
     let matter = run.key.matter;
     actor.spawn_post(async move {
+        if let Some(keys_wait) = keys_wait {
+            keys_wait.await;
+        }
         let result = codex::prepare::off_actor_or_undo(
             clock,
             job,
@@ -473,6 +483,13 @@ pub(super) fn on_prepared(
     if host_stopping(actor) {
         discard(actor, thread, prepared.run);
         agents::fail_all(actor, thread, waiting, &Error::Closed);
+        return;
+    }
+    // A refusal that came, or stayed, while the checks ran (`agent.keys_loading` waited out
+    // included): nothing launches.
+    if let Some(error) = super::sign_in::launch_refusal(actor, thread) {
+        discard(actor, thread, prepared.run);
+        agents::fail_all(actor, thread, waiting, &error);
         return;
     }
     if let Err(error) = super::sign_in::check_launch(actor, thread, &prepared) {

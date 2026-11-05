@@ -14,7 +14,8 @@
 //!   id, in memory only, until `restart_agents`: no launch of it starts ([`launch_refusal`])
 //!   and a prompt for it queues held (`queue/sign_in.rs`).
 //! - `set_launch_refused` refuses an id's new launches with desktop's code, running sessions
-//!   left alone ([`launch_refusal`]).
+//!   left alone ([`launch_refusal`]). A launch meeting `agent.keys_loading` waits for it to be
+//!   lifted first, at most `KEYS_WAIT` ([`keys_wait`]).
 //! - `set_reused_login` keeps desktop's word on the login's source, which turns on the split
 //!   check ([`check_launch`]).
 
@@ -26,7 +27,8 @@ use super::close::TurnClose;
 use super::launch_checks::Prepared;
 use super::queue::{self, Requeue};
 use super::{Current, agents, cancel, current, state};
-use crate::agent::login_link::{LAUNCH_REFUSALS, LoginLink, LoginSplit, Seen};
+use crate::agent::launch_refusals::KEYS_WAIT;
+use crate::agent::login_link::{LoginLink, LoginSplit, Seen};
 use crate::error::Error;
 
 mod stops;
@@ -144,7 +146,7 @@ pub(super) fn launch_refusal(actor: &Actor, thread: ThreadId) -> Option<Error> {
         ));
     }
     let agent = &actor.threads.get(&thread)?.row.agent;
-    let code = *actor.wiring.sign_in.refused.get(agent)?;
+    let code = actor.wiring.sign_in.refused.get(agent)?;
     tracing::info!(%agent, code = code.as_str(), "a launch is refused");
     Some(Error::refused(
         code,
@@ -152,25 +154,36 @@ pub(super) fn launch_refusal(actor: &Actor, thread: ThreadId) -> Option<Error> {
     ))
 }
 
+/// Whether `thread`'s launch waits for its agent's `agent.keys_loading` refusal: when it is the
+/// refusal in force (no `stop_agents` hold), the wait, at most [`KEYS_WAIT`] on the host clock
+/// and woken when the refusal lifts or changes. The launch checks the refusals again after it
+/// (`launch_checks::on_prepared`).
+pub(super) fn keys_wait(
+    actor: &mut Actor,
+    thread: ThreadId,
+) -> Option<impl std::future::Future<Output = ()> + Send + use<>> {
+    if holds(actor, thread) {
+        return None;
+    }
+    let agent = actor.threads.get(&thread)?.row.agent.clone();
+    if actor.wiring.sign_in.refused.get(&agent) != Some(ErrorCode::AgentKeysLoading) {
+        return None;
+    }
+    tracing::info!(%agent, "a launch waits for the stored keys to load");
+    let timer = actor.clock.after(KEYS_WAIT);
+    Some(actor.wiring.sign_in.refused.wait(&agent, timer))
+}
+
 /// `set_launch_refused`: keeps or clears the refusal of `agent`'s new launches; a code not on
-/// the list is refused with `command.invalid` and changes nothing.
+/// the list is refused with `command.invalid` and changes nothing. A launch waiting on an
+/// `agent.keys_loading` refusal is woken when it lifts or changes.
 fn set_refused(actor: &mut Actor, agent: AgentId, code: Option<ErrorCode>) -> Result<(), Error> {
-    let refused = &mut actor.wiring.sign_in.refused;
-    match code {
-        Some(code) if !LAUNCH_REFUSALS.contains(&code) => {
-            return Err(Error::refused(
-                ErrorCode::CommandInvalid,
-                format!("a launch is not refused with {}", code.as_str()),
-            ));
-        }
-        Some(code) => {
-            tracing::info!(%agent, code = code.as_str(), "new launches are refused");
-            refused.insert(agent, code);
-        }
-        None => {
-            tracing::info!(%agent, "new launches may start");
-            refused.remove(&agent);
-        }
+    let shown = agent.clone();
+    actor.wiring.sign_in.refused.set(agent, code)?;
+    if let Some(code) = code {
+        tracing::info!(agent = %shown, code = code.as_str(), "new launches are refused");
+    } else {
+        tracing::info!(agent = %shown, "new launches may start");
     }
     Ok(())
 }

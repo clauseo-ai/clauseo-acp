@@ -393,11 +393,19 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
   only:** a host restart clears it. The queue then comes back held as every restored queue does,
   and waits for the lawyer, not for `restart_agents`.
 - *`set_launch_refused(agent, Option<ErrorCode>) -> Result<(), HostError>`* refuses the id's
-  **new launches only**. The codes come from a list, `signin.policy_unreadable` for now. Any
-  other code is a bug: debug builds assert, and release builds refuse it with `command.invalid`
-  and change nothing. A turn that would launch fails as any refused launch does, an ordinary
-  `TurnFailed` with that code. **Sessions already running go on until they exit,** unless
-  desktop calls `stop_agents`. `None` lifts the refusal. It is in memory only.
+  **new launches only**. The codes come from a list: `signin.policy_unreadable` and
+  `agent.keys_loading`. Any other code is a bug: debug builds assert, and release builds refuse
+  it with `command.invalid` and change nothing. A turn that would launch fails as any refused
+  launch does, an ordinary `TurnFailed` with that code. **Sessions already running go on until
+  they exit,** unless desktop calls `stop_agents`. A refusal applies to new launches; a running
+  session ends normally. `None` lifts the refusal. It is in memory only.
+  `HostConfig::with_launch_refused` sets the same refusals before the host starts, so none of
+  them depends on a later call (the security review's M3): desktop starts the host with
+  `signin.policy_unreadable` for each agent an unreadable policy blocks and `agent.keys_loading`
+  for every other known agent, and lifts the keys' refusal once the keys have loaded; the
+  policy's stays until the settings lift it. A launch meeting `agent.keys_loading` waits at most
+  2 s on the host clock for it to be lifted, then checks the refusals again: still refused, it
+  fails with that code and no process starts (ruling 4: never launch without the key).
 - *`LoginCheck::shared(&AgentId, agent_home: &Path) -> Shared`*, a second hook call, where
   `Shared` is `Yes`, `No` or `Unknown`. It asks whether the home's `auth.json` is the lawyer's
   file, whatever the link check says. A symlinked `auth.json` is `Split` to `check` (it is no
