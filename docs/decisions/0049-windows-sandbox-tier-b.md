@@ -330,13 +330,26 @@ watcher that repairs new pool-owned files during a session.
 
 ### Shared writable places
 
-A spike probed 62,145 folders under a Low-integrity sandbox token and found two it could write
-that every pool user shares: `C:\ProgramData\Microsoft\DeviceSync` and each pool user's own
-`AppData\LocalLow`. `ProgramData\Microsoft\DeviceSync` was one of the channels two hijacked agents
-could use. A deny of writes for `ClauseoSandboxUsers` on each closes both, with no tool
-regressions. The group's deny applies where an allow to the group would not: deny entries are
-matched against the token's normal groups. PR4's elevated set-up applies it after it creates each
-pool user's profile, and uninstall removes it (`shared_writes.rs`).
+A spike probed 62,145 folders under a Low-integrity sandbox token and found two it could write:
+`C:\ProgramData\Microsoft\DeviceSync`, which every pool user shares, and each pool user's own
+`AppData\LocalLow`. `DeviceSync` was one of the channels two hijacked agents could use.
+`LocalLow` is denied because it is the one Low-writable place outside the session-end repair: a
+file an agent makes there with its own DACL would outlive the session.
+
+Each target gets `ClauseoSandboxUsers`' `DenyWrite`, inherited to the tree. The spike measured
+`icacls` `(W,DC)`; the code writes `0xd0156`, which adds `DELETE`, `WRITE_DAC` and `WRITE_OWNER`.
+Tools running with the full mask are not measured yet: PR4's VM test must confirm them.
+
+Each pool user owns its `LocalLow`, and an owner always has `WRITE_DAC`, so that `LocalLow` also
+gets an `OWNER RIGHTS` deny, which replaces the owner's implied rights. `DeviceSync` is owned by
+`SYSTEM`, which Windows writes to, so it gets none. The grants are written, then walked down
+strictly: a protected child, or one with an explicit allow for the pool, fails its target. A
+`LocalLow` must exist, so PR4 creates each profile first; a missing `DeviceSync` is skipped.
+Each target rolls back only its own grants.
+
+PR4's elevated set-up applies these after it creates each pool user's profile, treats any failed
+target as a set-up failure, and keeps what was written. Uninstall removes them
+(`shared_writes.rs`).
 
 ## Consequences
 
