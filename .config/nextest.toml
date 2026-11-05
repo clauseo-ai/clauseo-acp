@@ -105,14 +105,13 @@ junit = { path = "junit.xml" }
 # tracking issue; an entry comes out in the fix's pull request. The same expression is in both
 # profiles: keep them equal.
 #   - xtask::bin/xtask process::tests::tree::a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does: failed then passed on retry 1 time since 2026-11-04; first https://github.com/clauseo-ai/clauseo-acp/actions/runs/41912294482/job/126862999903 (autoquarantine)
-#   - clauseo-mcp connector::* (Windows only), one entry: the relay-based connector tests stall on Windows now and then (the mode connects, then sends nothing and keeps the connection open: 'the relay read nothing for 10 seconds'), 4 tests so far (trickle, file-token handshake, the two line/request caps), ejecting #465 and #475; R24 bug, stage E fixing; private #412 #414 #417 #418
 #   - clauseo-process named_tests::this_process_is_found_by_its_name_and_a_name_none_has_lists_none: failed then passed on retry 1 time since 2026-11-05; first https://github.com/clauseo-ai/clauseo-acp/actions/runs/42095156670/job/127483236808 (autoquarantine)
 default-filter = 'not (package(xtask) & binary(xtask) & test(=process::tests::tree::a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does) | package(clauseo-process) & test(=named_tests::this_process_is_found_by_its_name_and_a_name_none_has_lists_none))'
 # The Windows overrides are their profile's line plus the tests quarantined on Windows
 # only; the hourly auto-quarantine reads and writes all four lines, so keep them.
 [[profile.ci.overrides]]
 platform = 'cfg(windows)'
-default-filter = 'not (package(xtask) & binary(xtask) & test(=process::tests::tree::a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does) | package(clauseo-process) & test(=named_tests::this_process_is_found_by_its_name_and_a_name_none_has_lists_none) | package(clauseo-mcp) & test(/^connector::/))'
+default-filter = 'not (package(xtask) & binary(xtask) & test(=process::tests::tree::a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does) | package(clauseo-process) & test(=named_tests::this_process_is_found_by_its_name_and_a_name_none_has_lists_none))'
 
 # The quarantined tests alone (see profile ci), run nightly by ci.yml's `quarantine` job, with the
 # ci profile's timeouts and retry, so a fixed one shows as passing.
@@ -122,4 +121,4 @@ failure-output = "immediate-final"
 default-filter = 'package(xtask) & binary(xtask) & test(=process::tests::tree::a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does) | package(clauseo-process) & test(=named_tests::this_process_is_found_by_its_name_and_a_name_none_has_lists_none)'
 [[profile.quarantine.overrides]]
 platform = 'cfg(windows)'
-default-filter = 'package(xtask) & binary(xtask) & test(=process::tests::tree::a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does) | package(clauseo-process) & test(=named_tests::this_process_is_found_by_its_name_and_a_name_none_has_lists_none) | package(clauseo-mcp) & test(/^connector::/)'
+default-filter = 'package(xtask) & binary(xtask) & test(=process::tests::tree::a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does) | package(clauseo-process) & test(=named_tests::this_process_is_found_by_its_name_and_a_name_none_has_lists_none)'

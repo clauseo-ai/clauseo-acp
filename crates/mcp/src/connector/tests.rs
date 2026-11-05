@@ -15,7 +15,7 @@ use std::time::Duration;
 use serde_json::Value;
 
 use super::line::{self, Line};
-use super::{MAX_LINE_BYTES, Settings, USAGE, run_with};
+use super::{MAX_LINE_BYTES, Settings, Shut, USAGE, run_with_shut};
 use crate::write;
 
 /// A 64-character lowercase token. Its content must never reach stdout, stderr or a failure.
@@ -110,11 +110,22 @@ pub(super) fn run_mode(
     name: &[&str],
     input: &[u8],
 ) -> (Result<i32, crate::Failure>, Capture) {
+    run_mode_with(vars, name, input, TcpStream::shutdown)
+}
+
+/// [`run_mode`] with `shut` as the mode's `shutdown`.
+pub(super) fn run_mode_with(
+    vars: &[(&'static str, OsString)],
+    name: &[&str],
+    input: &[u8],
+    shut: Shut,
+) -> (Result<i32, crate::Failure>, Capture) {
     let map = env_of(vars);
     let lookup = |key: &str| map.get(key).cloned();
     let args: Vec<OsString> = name.iter().map(|arg| OsString::from(*arg)).collect();
     let capture = Capture::default();
-    let result = run_with(&args, &lookup, Cursor::new(input.to_vec()), &capture.out());
+    let input = Cursor::new(input.to_vec());
+    let result = run_with_shut(&args, &lookup, input, &capture.out(), shut);
     (result, capture)
 }
 
