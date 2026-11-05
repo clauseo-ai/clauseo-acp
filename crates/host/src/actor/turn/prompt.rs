@@ -6,6 +6,7 @@ use futures::future::{AbortHandle, Abortable, join};
 use super::super::Actor;
 use super::super::input::Input;
 use super::agents::Stage;
+use super::key_retry;
 use super::{AgentReply, BeforePrompt, End, TurnInput, TurnPhase, current, end, spawn, state};
 use crate::agent::{codex, leftovers};
 use crate::undo_note::{self, NoteInput};
@@ -40,6 +41,7 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
         end::end_turn(actor, thread, end);
         return;
     };
+    let retry = key_retry::for_call(actor, thread);
     let Some(current) = current(actor, thread) else {
         return;
     };
@@ -71,7 +73,9 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
             if let Err(error) = checked {
                 return AgentReply::PromptRefused { turn, error };
             }
-            let result = client.prompt(&session, turn, content).await;
+            let result = retry
+                .run(&client, || client.prompt(&session, turn, content.clone()))
+                .await;
             fence.await;
             AgentReply::Prompt { turn, result }
         },

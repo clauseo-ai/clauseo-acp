@@ -19,14 +19,14 @@ use crate::support::{Dir, matter_with_thread, send_prompt, wait};
 
 /// A hook that answers what the test set, records what it was asked, and may wait for a word
 /// from the test first.
-struct Fake {
+pub(crate) struct Fake {
     answer: Mutex<LoginLink>,
     asked: Mutex<Vec<(AgentId, PathBuf)>>,
     hold: Option<Mutex<mpsc::Receiver<()>>>,
 }
 
 impl Fake {
-    fn new(answer: LoginLink) -> Arc<Self> {
+    pub(crate) fn new(answer: LoginLink) -> Arc<Self> {
         Arc::new(Self {
             answer: Mutex::new(answer),
             asked: Mutex::new(Vec::new()),
@@ -49,7 +49,7 @@ impl Fake {
         *self.answer.lock().unwrap() = answer;
     }
 
-    fn asked(&self) -> Vec<(AgentId, PathBuf)> {
+    pub(crate) fn asked(&self) -> Vec<(AgentId, PathBuf)> {
         self.asked.lock().unwrap().clone()
     }
 }
@@ -67,7 +67,7 @@ impl LoginCheck for Fake {
     }
 }
 
-fn codex() -> AgentId {
+pub(crate) fn codex() -> AgentId {
     AgentId::new(CODEX).unwrap()
 }
 
@@ -247,7 +247,7 @@ fn remove_login_links_never_waits_on_the_actor() {
 }
 
 /// A subscriber that keeps every event's text: its message and fields.
-struct Keep(Arc<Mutex<Vec<String>>>);
+pub(crate) struct Keep(pub(crate) Arc<Mutex<Vec<String>>>);
 
 impl tracing::Subscriber for Keep {
     fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {

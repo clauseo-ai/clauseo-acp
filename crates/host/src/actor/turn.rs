@@ -18,6 +18,7 @@ mod end;
 mod failure;
 mod forced_mode;
 mod inputs;
+mod key_retry;
 mod known;
 mod launch_checks;
 mod logout;

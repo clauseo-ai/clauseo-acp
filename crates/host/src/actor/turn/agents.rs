@@ -16,6 +16,7 @@ use clauseo_protocol::{
 use super::super::Actor;
 use super::super::commands::CommandCtx;
 use super::super::input::Input;
+use super::key_retry::KeyRetry;
 use super::launch_checks::{self, Prepared};
 use super::{
     AgentReply, TurnInput, TurnPhase, current, end, host_stopping, lost, session, state, steps,
@@ -119,6 +120,8 @@ pub(super) struct CodexAgent {
     /// A hooks object went into its `CODEX_CONFIG`, so its session start checks that Codex
     /// trusts the guard.
     pub(super) guard: bool,
+    /// Its one `authenticate` with its key (`key_retry.rs`).
+    pub(super) key_retry: KeyRetry,
 }
 
 /// Runs `waiting` once `thread`'s agent has a session, launching the agent first.
@@ -258,8 +261,9 @@ fn launch(actor: &Actor, thread: ThreadId, prepared: Prepared) -> Result<Launche
         let codex = CodexAgent {
             folder: prepared.folder,
             guard,
+            key_retry: KeyRetry::default(),
         };
-        (forced, Some(codex))
+        (forced, Some((codex, prepared.login)))
     } else {
         // A Claude agent's home goes in before `plans_folder` reads the merged map below.
         let forced = prepared
@@ -269,6 +273,11 @@ fn launch(actor: &Actor, thread: ThreadId, prepared: Prepared) -> Result<Launche
         (forced.unwrap_or_default(), None)
     };
     let hook = agent::loads::launch_env(actor.profile.launch_env(&row.agent));
+    // The key retry is armed by the hook's key and the launch's sign-in check.
+    let codex = codex.map(|(mut codex, login)| {
+        codex.key_retry = KeyRetry::at_launch(&hook, login);
+        codex
+    });
     let dropped: &[&str] = if codex.is_some() {
         &agent::codex::DROPPED_VARS
     } else {
