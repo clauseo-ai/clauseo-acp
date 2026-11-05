@@ -91,7 +91,9 @@ fn a_folder_the_lawyer_cant_list_makes_a_partial_scan_that_keeps_the_session_ope
 
     w.dir.file("matter/.claude/settings.json", "{}");
     // The owner keeps `WRITE_DAC` only, to give the folder back at the end.
-    protect_with(&locked, "D:P(A;;FA;;;SY)(A;;0x40000;;;OW)").unwrap();
+    // `READ_CONTROL` with `WRITE_DAC` (`0x60000`): the clean-up's `protect_with` reads the
+    // descriptor too, and `WRITE_DAC` alone refused it with error 5 (VM run 3).
+    protect_with(&locked, "D:P(A;;FA;;;SY)(A;;0x60000;;;OW)").unwrap();
     let checked = after_session(&policy, &data, &matter_one(), "s1", exit()).unwrap();
 
     let from: Vec<_> = checked.moved.iter().map(|e| e.from.clone()).collect();
