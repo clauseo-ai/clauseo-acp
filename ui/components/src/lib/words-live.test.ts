@@ -13,6 +13,8 @@ import {
   PLANNED_CODES,
   type ErrorCode,
 } from "./words-errors.ts";
+import { fr, type FolderKey } from "./words-folder.ts";
+import { frc, type FolderCardKey } from "./words-folder-card.ts";
 import { frame } from "./words-frame.ts";
 import { lim, type LimitKey } from "./words-limits.ts";
 import { th, type ThreadKey } from "./words-thread.ts";
@@ -122,6 +124,17 @@ test("every error code has a sentence with Hindi or Hindi later, and none says a
       if (hindi[plannedKey(c, agent).key] === null) expect(en, en).not.toMatch(BANNED_EN);
       else sound(en, errorWords("hi", c, agent));
     }
+});
+
+test("folder rights' words are English only for now, and none says agent, token or session", () => {
+  for (const k of Object.keys(fr.hi) as FolderKey[]) {
+    expect(fr.hi[k], k).toBeNull();
+    expect(fr("en", k), k).not.toMatch(BANNED_EN);
+  }
+  for (const k of Object.keys(frc.hi) as FolderCardKey[]) {
+    expect(frc.hi[k], k).toBeNull();
+    expect(frc("en", k), k).not.toMatch(BANNED_EN);
+  }
 });
 
 test("a stopped Claude and an interrupted thread read as the thread's own stop, with its one Hindi", () => {

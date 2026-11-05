@@ -3,6 +3,8 @@
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { errorHindi, errorSentence, type ErrorKey } from "@clauseo/components/lib/words-errors.ts";
 import { fw, type FindKey } from "@clauseo/components/lib/words-find.ts";
+import { fr, type FolderKey } from "@clauseo/components/lib/words-folder.ts";
+import { frc, type FolderCardKey } from "@clauseo/components/lib/words-folder-card.ts";
 import { tw, type TriageKey } from "@clauseo/components/lib/words-triage.ts";
 import { twl, type TriageLateKey } from "@clauseo/components/lib/words-triage-late.ts";
 import { frame, type FrameKey } from "@clauseo/components/lib/words-frame.ts";
@@ -189,4 +191,18 @@ export const settingsWords = (key: SettingsKey): WordsRef => ({
   key,
   text: (lang) => st(lang, key),
   later: st.hi[key] === null,
+});
+
+export const folderWords = (key: FolderKey): WordsRef => ({
+  file: "lib/words-folder.ts",
+  key,
+  text: (lang) => fr(lang, key),
+  later: fr.hi[key] === null,
+});
+
+export const folderCardWords = (key: FolderCardKey): WordsRef => ({
+  file: "lib/words-folder-card.ts",
+  key,
+  text: (lang) => frc(lang, key),
+  later: frc.hi[key] === null,
 });
