@@ -25,7 +25,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
 
-use super::journal::{Change, Flow, Journal, JournalError, JournalState};
+use super::journal::{Change, Flow, Journal, JournalError, JournalState, starts_first};
 use super::record::{Known, VolumeMark};
 use super::{FullReason, MOST_TOUCHED, Target};
 use crate::windows::admit::PathKind;
@@ -135,13 +135,14 @@ pub(super) fn read_volume(
 }
 
 /// Whether `change`, the first record read from the cursor, is the one the record saw there:
-/// the same USN, time and file; or, when it saw none yet, one that starts at the cursor.
+/// the same USN, time and file; or, when it saw none yet, one that starts at the cursor or at
+/// the next page boundary with only padding before it ([`starts_first`]).
 fn same_first(mark: &VolumeMark, change: &Change) -> bool {
     match mark.first {
         Some(seen) => {
             change.usn == seen.usn && change.time == seen.time && change.file == seen.file
         }
-        None => change.usn == mark.cursor,
+        None => starts_first(mark.cursor, change.usn),
     }
 }
 

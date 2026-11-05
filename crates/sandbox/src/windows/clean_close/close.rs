@@ -8,7 +8,7 @@ use clauseo_protocol::MatterId;
 
 use super::WalkInputs;
 use super::check::{Busy, busy};
-use super::journal::{Flow, Journal, TreeError, Usn};
+use super::journal::{Flow, Journal, TreeError, Usn, starts_first};
 use super::record::{
     self, CleanRecord, FOLDER, FirstRecord, Header, Item, Known, ROOT, RootMark, VolumeMark,
 };
@@ -128,9 +128,9 @@ pub fn write_clean_close(
     }
 }
 
-/// The journal's record at `cursor` on the volume holding `root`: `None` when none was
-/// written since. One that isn't at the cursor, or a read that fails, is
-/// [`NotWritten::JournalUnread`].
+/// The journal's first record at `cursor` on the volume holding `root`, or at the next page
+/// boundary when the rest of the cursor's page is padding ([`starts_first`]): `None` when none
+/// was written since. One anywhere else, or a read that fails, is [`NotWritten::JournalUnread`].
 fn first_record(
     journal: &dyn Journal,
     root: &std::path::Path,
@@ -153,8 +153,10 @@ fn first_record(
             Flow::Stop
         })
         .map_err(|_unread| NotWritten::JournalUnread)?;
+    // The first record read is the first at or past the cursor, so one at the next page
+    // boundary has only page padding before it.
     match first {
-        Some(change) if change.usn == cursor => Ok(Some(FirstRecord {
+        Some(change) if starts_first(cursor, change.usn) => Ok(Some(FirstRecord {
             usn: change.usn,
             time: change.time,
             file: change.file,

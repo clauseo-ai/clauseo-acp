@@ -147,7 +147,9 @@ fn later_launch(w: &World, files: usize, edit: Option<&Path>) -> LaunchPath {
     assert_eq!(closed, Closed::Written);
 
     if let Some(path) = edit {
-        auto_inherit_with(path, "D:(A;;FA;;;WD)").unwrap();
+        // An Administrators grant: the strict walk accepts it (a broad Everyone allow it
+        // rightly refuses), so the launch is targeted and passes.
+        auto_inherit_with(path, "D:(A;;FA;;;BA)").unwrap();
     }
 
     // The later launch: the check, the set-aside's launch pass, then apply, all with the check.

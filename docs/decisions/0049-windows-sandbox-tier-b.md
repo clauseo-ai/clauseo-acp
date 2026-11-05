@@ -451,6 +451,14 @@ parent as its parent, outside the trees, which is why each root's file ID is che
 - the root facts come from opening each root by path with `FILE_FLAG_OPEN_REPARSE_POINT`, and the
   drive type and bus from the OS.
 
+**Measured (VM run 5, Windows Server 2025, optimised build, the lawyer at Medium).** A later
+launch with nothing changed (the check, the set-aside's launch pass and `apply_checked`) took 20,
+26, 22 and 38 ms warm at 1,000, 5,000, 20,000 and 50,000 files, and 49 ms (5,000) and 79 ms
+(50,000) cold after a reboot, against targets of 300 ms and 1 s. The session end at 50,000 files
+took 8.4 to 12.6 s, of which the close records were 3.2 to 3.5 s; it isn't on the launch path.
+The first record past a cursor can start at the next 4 KiB page, since NTFS pads a journal page
+rather than split a record; the check and the record accept it there when nothing lies between.
+
 **What the skip doesn't change.** A change made after the check reads the journal and before the
 agent starts is not seen until the session-end repair. That window is the one today's walk has
 between visiting a folder and the agent's start.

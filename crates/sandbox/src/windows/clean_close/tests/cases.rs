@@ -404,3 +404,82 @@ fn a_close_record_that_cant_be_written_keeps_no_record() {
     assert!(!s.record_exists());
     assert_eq!(s.launch_path(), LaunchPath::Full(FullReason::NoRecord));
 }
+
+/// A record at `usn`, written by `file`, past every other: a content write, which doesn't count.
+fn record_at(s: &mut Scene, usn: Usn, file: u64) {
+    s.journal.records.push(super::super::journal::Change {
+        usn,
+        file,
+        parent: 8_888_888,
+        reason: WRITE_CLOSE,
+        attributes: 0x20,
+        time: 77,
+    });
+    s.journal.next = usn + 8;
+}
+
+/// Round 2 (VM run 5): the cursor 3,968 bytes into a 4 KiB page, the next record at the next
+/// page, the rest of the page padding.
+#[test]
+fn a_first_record_at_the_next_page_boundary_is_the_first_record() {
+    let mut s = Scene::new("clean-page");
+    s.journal.next = 4096 - 128;
+    let cursor = s.cursor();
+    record_at(&mut s, 4096, 9_999_999);
+    let ok = (&Ok(Walked::default()), &Ok(Checked::default()));
+    assert_eq!(s.close_with(Some(&cursor), ok.0, ok.1), Closed::Written);
+    assert_eq!(s.launch_path(), LaunchPath::Skipped);
+
+    // None at the close; at the launch the first one is at the next page.
+    let mut s = Scene::new("clean-page-none");
+    s.journal.next = 4096 - 128;
+    assert_eq!(s.close(), Closed::Written);
+    record_at(&mut s, 4096, 9_999_999);
+    assert_eq!(s.launch_path(), LaunchPath::Skipped);
+}
+
+#[test]
+fn a_first_record_past_the_next_page_boundary_isnt() {
+    // At the close: no record is written.
+    let mut s = Scene::new("clean-page-past");
+    s.journal.next = 4096 - 128;
+    let cursor = s.cursor();
+    record_at(&mut s, 4096 + 8, 9_999_999);
+    let ok = (&Ok(Walked::default()), &Ok(Checked::default()));
+    assert_eq!(
+        s.close_with(Some(&cursor), ok.0, ok.1),
+        Closed::NotWritten(NotWritten::JournalUnread)
+    );
+    // At the launch: the full walk.
+    let mut s = Scene::new("clean-page-past-launch");
+    s.journal.next = 4096 - 128;
+    assert_eq!(s.close(), Closed::Written);
+    record_at(&mut s, 4096 + 8, 9_999_999);
+    assert_eq!(
+        s.launch_path(),
+        LaunchPath::Full(FullReason::FirstRecordDiffers)
+    );
+    // Inside the cursor's page but past the cursor: neither the cursor nor the next page.
+    let mut s = Scene::new("clean-page-inside");
+    s.journal.next = 4096 - 128;
+    assert_eq!(s.close(), Closed::Written);
+    record_at(&mut s, 4096 - 64, 9_999_999);
+    assert_eq!(
+        s.launch_path(),
+        LaunchPath::Full(FullReason::FirstRecordDiffers)
+    );
+}
+
+/// Round 2: a volume that isn't NTFS, read as FAT32 is now (no file ID), is `NotNtfs`.
+#[test]
+fn a_fat_volume_without_file_ids_is_not_ntfs_not_unreadable() {
+    let mut s = closed("clean-fat");
+    let root = s.root_of(300);
+    let facts = s.journal.roots.get_mut(&root).unwrap();
+    facts.ntfs = false;
+    facts.id = None;
+    facts.volume = 0;
+    assert_eq!(s.launch_path(), LaunchPath::Full(FullReason::NotNtfs));
+    // And no cursor is taken on one.
+    assert_eq!(session_cursor(&s.ledger, s.matter, &s.journal), None);
+}
