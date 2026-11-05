@@ -1011,6 +1011,7 @@ name = "clauseo-desktop"
 version = "0.0.0"
 dependencies = [
  "async-io",
+ "clauseo-agents",
  "clauseo-counts",
  "clauseo-fake_agent",
  "clauseo-host",
@@ -1052,6 +1053,7 @@ dependencies = [
  "url",
  "uuid",
  "windows",
+ "zeroize",
 ]
 
 [[package]]

@@ -86,13 +86,6 @@ fn refused(label: &str, action: SetupAction) -> HostError {
 
 /// The refusal of a key for `agent` that may not replace the one stored: what a backend
 /// answers a [`KeyWrite::OnlyIfAbsent`] write when a key is stored. No key text.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "R20 P5b's backend answers it; the tests' stub does now"
-    )
-)]
 pub(crate) fn key_stored(agent: &AgentId) -> HostError {
     HostError::new(
         ErrorCode::SettingsKeyStored,

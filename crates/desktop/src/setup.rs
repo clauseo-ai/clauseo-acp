@@ -12,17 +12,29 @@
 //! - **A key from `main`** goes to the backend as [`KeyWrite::OnlyIfAbsent`]: the backend
 //!   checks that no key is stored and stores it in one step, and refuses with
 //!   `settings.key_stored` otherwise, so two quick sends cannot both pass.
+//! - **A failed keychain read refuses and never writes.** A read that fails (a locked keychain,
+//!   a denied prompt, an item that is not a key) is not "absent": an `OnlyIfAbsent` key is
+//!   refused (`internal`, `Keychain::store_if_absent` passing the read's error up) and nothing
+//!   is stored. `settings`' `Replace` writes without reading, so it may replace a key; `main`
+//!   may only store one when none is there.
 //! - **Secrets.** A pasted code or a key is a `Secret`, moved into the backend with its
 //!   command and dropped there. Logs name the window, the action, the agent and, on failure,
 //!   the code; never a field of the command.
 //!
-//! Until R20 P5b puts S18's `Agents` and the host's Rust-only calls behind the same trait, the
-//! app runs [`NotWired`], which answers every command with `internal` and publishes only
-//! `setup_info` with no keys,
-//! and the tests a scripted `StubBackend` (`stub.rs`).
+//! The app's backend is [`backend::AgentsBackend`], over S18's `Agents`, the keychain and the
+//! host's Rust-only calls (`backend.rs`, `keys.rs`, `compose.rs`, `host_calls.rs`), behind a
+//! cell its start fills (`start.rs`); the tests use a scripted `StubBackend` (`stub.rs`) too.
 
 mod admit;
+mod backend;
+mod compose;
+mod confirm;
 mod events;
+mod firm_policy;
+mod host_calls;
+mod keys;
+mod start;
+#[cfg(test)]
 mod stub;
 #[cfg(test)]
 mod tests;
@@ -30,14 +42,16 @@ mod tests;
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
-use clauseo_protocol::{AgentId, CommandOutcome, HostError, SetupAction, SetupCommand, SetupEvent};
+use clauseo_protocol::{AgentId, CommandOutcome, HostError, SetupAction, SetupCommand};
 
 use crate::bridge::lock;
 use crate::dialogs::BoxFuture;
 
 pub(crate) use admit::may_setup;
+pub(crate) use confirm::NativeSetupConfirm;
 pub(crate) use events::SetupEvents;
-pub(crate) use stub::NotWired;
+pub(crate) use host_calls::CellHost;
+pub(crate) use start::{BackendCell, SetupParts, SetupStart, spawn};
 #[cfg(test)]
 pub(crate) use stub::StubBackend;
 
@@ -90,14 +104,13 @@ impl Setup {
         }
     }
 
-    /// Setup run by [`NotWired`], the app's until R20 P5b. Its `setup_info` says no key can
-    /// be kept, so the windows hide the key screens until a backend can keep one.
-    pub(crate) fn not_wired() -> Self {
-        let setup = Self::new(Arc::new(NotWired));
-        setup.events.publish(SetupEvent::SetupInfo {
-            keys_available: false,
-        });
-        setup
+    /// Tests: [`Setup::new`] publishing on `events`, which the backend also holds.
+    #[cfg(test)]
+    pub(crate) fn with_events(backend: Arc<dyn SetupBackend>, events: Arc<SetupEvents>) -> Self {
+        Self {
+            events,
+            ..Self::new(backend)
+        }
     }
 
     /// Where the backend publishes, and the windows' channels follow.

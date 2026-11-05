@@ -146,13 +146,6 @@ pub(crate) fn check_document(path: &Path, folder: &Path) -> Result<Document, Hos
 /// (stage D's sign-in page, R20): no command, capability or binding reaches it, and a test checks
 /// none names it. The link check is `open_external`'s, narrowed to https; anything else is
 /// `command.invalid`.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "stage D's R20 calls it; until then only its tests do"
-    )
-)]
 pub(crate) fn open_url_unconfirmed(opener: &dyn Opener, url: &str) -> Result<(), HostError> {
     let link = check_link(url)?;
     if !link.url.starts_with("https://") {

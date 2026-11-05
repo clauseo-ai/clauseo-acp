@@ -1,6 +1,8 @@
 //! The `setup` command's path: the allow-lists, `main`'s first key, the sign-in join, the events
 //! on the windows' channels in order and in fragments, and no secret in a log or a `Debug`.
 
+mod keys;
+
 use std::sync::{Arc, Mutex};
 
 use clauseo_protocol::{
@@ -454,23 +456,29 @@ fn a_large_failed_install_arrives_in_fragments_and_whole() {
 }
 
 #[test]
-fn not_wired_answers_internal_and_publishes_only_that_keys_are_not_offered() {
-    let setup = Setup::not_wired();
-    let feed = setup.events().follow();
+fn a_backend_start_dropped_unfilled_answers_internal_and_publishes_nothing() {
+    let (cell, start) = BackendCell::new();
+    let setup = Setup::new(cell);
+    let mut feed = setup.events().follow();
+    drop(start);
     let error = block_on(setup.run(MAIN, command(SetupAction::InstallAgent))).unwrap_err();
     assert_eq!(error.code(), ErrorCode::Internal);
-    drop(setup);
-    let published = block_on(futures::StreamExt::collect::<Vec<_>>(feed));
-    // Its one event, from its start: no key screens.
-    assert_eq!(
-        published
-            .iter()
-            .map(|text| setup_event(text))
-            .collect::<Vec<_>>(),
-        [SetupEvent::SetupInfo {
-            keys_available: false
-        }]
-    );
+    assert!(feed.try_recv().is_err(), "nothing published");
+}
+
+#[test]
+fn a_command_waits_for_the_backend_start_then_runs_on_it() {
+    let (cell, start) = BackendCell::new();
+    let setup = Arc::new(Setup::new(cell));
+    let stub = Arc::new(StubBackend::default());
+    stub.script(SetupAction::FindLogin, Ok(CommandOutcome::Done), Vec::new());
+    let waiting = {
+        let setup = Arc::clone(&setup);
+        std::thread::spawn(move || block_on(setup.run(SETTINGS, command(SetupAction::FindLogin))))
+    };
+    start.finish(Arc::clone(&stub) as Arc<dyn SetupBackend>);
+    assert_eq!(waiting.join().unwrap(), Ok(CommandOutcome::Done));
+    assert_eq!(stub.calls(), [(SetupAction::FindLogin, claude())]);
 }
 
 #[test]

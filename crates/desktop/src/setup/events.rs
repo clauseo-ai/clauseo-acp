@@ -72,7 +72,8 @@ impl SetupEvents {
     }
 
     /// A new follower: the latest `setup_info`, then each agent's install and sign-in state,
-    /// then every event published from now on, as channel message texts.
+    /// then every event published from now on, as channel message texts. Followers whose
+    /// receiver is gone are dropped here, as at each publish.
     pub(crate) fn follow(&self) -> UnboundedReceiver<Arc<str>> {
         let (follower, feed) = unbounded();
         let mut latest = lock(&self.state);
@@ -90,8 +91,16 @@ impl SetupEvents {
             // The receiver is in hand: an unbounded send to it cannot fail.
             let _sent = follower.unbounded_send(text);
         }
+        // A follower whose receiver is gone goes now too, not only at the next publish.
+        latest.followers.retain(|follower| !follower.is_closed());
         latest.followers.push(follower);
         feed
+    }
+
+    /// How many followers it holds, closed ones not yet dropped included.
+    #[cfg(test)]
+    pub(crate) fn followers(&self) -> usize {
+        lock(&self.state).followers.len()
     }
 
     /// Whether `agent`'s latest sign-in state is a running one.
@@ -105,10 +114,6 @@ impl SetupEvents {
 
 /// Logs a sign-in note (S18's `SigninNote`: `claude_reuse_fallback`, `codex_link_failed`) for
 /// `agent` by its code alone, never an email or a path (0048, ruling 5).
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "R20 P5b's backend logs S18's notes with it")
-)]
 pub(crate) fn note(agent: &AgentId, code: &'static str) {
     tracing::info!(%agent, note = code, "sign-in note");
 }

@@ -101,12 +101,15 @@ fn invalid(message: impl Into<String>) -> HostError {
 }
 
 impl Bridge {
-    /// A bridge to the host whose start lands in `cell`, with no window yet, and setup not
-    /// wired and silent (`Setup::new` on `NotWired`): the app's bridge is
-    /// [`Bridge::with_setup`] with `Setup::not_wired`, which also says no key can be kept.
+    /// Tests: a bridge to the host whose start lands in `cell`, with no window yet, and setup
+    /// on an unscripted `StubBackend`, silent; the app's bridge is [`Bridge::with_setup`]
+    /// with the backend over `Agents`.
     #[cfg(test)]
     pub(crate) fn new(cell: Arc<HostCell>) -> Self {
-        Self::with_setup(cell, Setup::new(Arc::new(crate::setup::NotWired)))
+        Self::with_setup(
+            cell,
+            Setup::new(Arc::new(crate::setup::StubBackend::default())),
+        )
     }
 
     /// [`Bridge::new`] with `setup` answering the `setup` command.
