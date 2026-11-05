@@ -25,6 +25,7 @@ pub mod acl_plan;
 pub mod admit;
 #[cfg(windows)]
 mod detect;
+pub mod fence;
 #[cfg(windows)]
 mod folder;
 pub mod ledger;
@@ -52,6 +53,7 @@ pub use admit::admit_with;
 pub use admit::{Admitted, FolderList, FolderRefusal, PathKind, ReadDir};
 #[cfg(windows)]
 pub(crate) use detect::os_facts;
+pub use fence::{MatterFolders, Neighbours, RegisteredMatter, plan_fence};
 #[cfg(windows)]
 pub use folder::folder_support;
 #[cfg(windows)]

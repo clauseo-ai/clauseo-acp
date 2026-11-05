@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use super::FolderSupport;
+use super::fence::Neighbours;
 // The gate itself builds on Windows and for tests; elsewhere only its types do.
 #[cfg(any(windows, test, feature = "test-support"))]
 use super::acl_plan::in_folder;
@@ -169,6 +170,7 @@ impl FolderList for ReadDir {
 #[derive(Debug)]
 pub struct Admitted<'a> {
     policy: &'a Policy,
+    neighbours: Neighbours,
     data_dir: PathBuf,
     siblings: Vec<PathBuf>,
 }
@@ -179,11 +181,15 @@ impl<'a> Admitted<'a> {
         self.policy
     }
 
-    /// The folders beside the matter in its parent the plan denies the pool group reading, each
-    /// answering `Ok`: not the matter, not a registered matter, no link, none holding or inside
-    /// one of the policy's paths, the profile or the data folder.
+    /// The folders beside the matter the plan denies the pool group reading, each answering
+    /// `Ok`: see [`gate`]'s step 3.
     pub fn siblings(&self) -> &[PathBuf] {
         &self.siblings
+    }
+
+    /// The other matters the launcher passed: the plan fences each one not fenced yet.
+    pub fn neighbours(&self) -> &Neighbours {
+        &self.neighbours
     }
 
     /// Clauseo's data folder, canonical.
@@ -215,10 +221,10 @@ pub fn grant_folders(policy: &Policy) -> Vec<(PathKind, &Path)> {
 pub fn admit<'a>(
     policy: &'a Policy,
     data_dir: &Path,
-    registered: &[PathBuf],
+    neighbours: &Neighbours,
     folders: &dyn FolderList,
 ) -> Result<Admitted<'a>, Error> {
-    gate(policy, data_dir, registered, super::folder_support, folders)
+    gate(policy, data_dir, neighbours, super::folder_support, folders)
 }
 
 /// The gate with a fake folder check, for this crate's tests and, through `test-support`,
@@ -227,11 +233,11 @@ pub fn admit<'a>(
 pub fn admit_with<'a>(
     policy: &'a Policy,
     data_dir: &Path,
-    registered: &[PathBuf],
+    neighbours: &Neighbours,
     check: impl FnMut(&Path) -> io::Result<FolderSupport>,
     folders: &dyn FolderList,
 ) -> Result<Admitted<'a>, Error> {
-    gate(policy, data_dir, registered, check, folders)
+    gate(policy, data_dir, neighbours, check, folders)
 }
 
 /// The gate, with the folder check `check` and the folder lister `folders` as parameters.
@@ -243,25 +249,26 @@ pub fn admit_with<'a>(
 ///    refuses with [`FolderRefusal::OverlapsDataFolder`] for [`PathKind::Matter`].
 /// 1. Each of [`grant_folders`] must answer [`FolderSupport::Ok`]; any other answer, or an
 ///    error, refuses with [`Error::FolderUnsupported`] naming the folder's kind.
-/// 2. `registered` are the other registered matters' folders (their matter, state and notes
-///    folders). One inside this matter, or holding it, refuses with
-///    [`FolderRefusal::NestedMatter`] before any folder check. Isolation from them is the plan's
-///    deny for each other pool user, on this matter's own folders.
-/// 3. The siblings: each folder `folders` lists in the matter's parent, unless the parent is a
-///    volume's root (its folders are the system's: `Windows`, `Program Files`, `Users`; a known
-///    limit). Left out: the matter itself, a registered matter or a folder holding or inside one,
-///    a link or other reparse point, a folder missing by now, and a folder that is, holds or is
-///    inside one of the policy's paths, the profile or the data folder (denying it would deny
-///    the jail's own reads). Each other one must answer `Ok`, as a grant folder does; `Network`
-///    is left alone; any other answer refuses with [`PathKind::Sibling`]. A listing that fails
-///    refuses too.
+/// 2. `neighbours.registered` are the other registered matters. One whose folders are inside
+///    this matter, or hold it, refuses with [`FolderRefusal::NestedMatter`] before any folder
+///    check. Isolation from them is their fences, which the plan carries.
+/// 3. The siblings (`siblings.rs`): each folder `folders` lists in the matter's parent, unless
+///    the parent is a volume's root (its folders are the system's: `Windows`, `Program Files`,
+///    `Users`; a known limit). Left out: the matter itself, a registered matter, a path any
+///    registered matter's policy reaches (`neighbours.reach`) or anything inside one, a link or
+///    other reparse point, a folder missing by now, and a folder over or in one of this
+///    policy's paths, the profile or the data folder (denying it would deny the jail's own
+///    reads). A folder that holds a registered matter or a reached path is not left out whole:
+///    its own folders are taken the same way, down to the matters. Each one kept must answer
+///    `Ok`, as a grant folder does; `Network` is left alone; any other answer refuses with
+///    [`PathKind::Sibling`]. A listing that fails refuses too.
 ///
 /// Nothing is written. A refusal returns before anything is planned.
 #[cfg(any(windows, test, feature = "test-support"))]
 fn gate<'a>(
     policy: &'a Policy,
     data_dir: &Path,
-    registered: &[PathBuf],
+    neighbours: &Neighbours,
     mut check: impl FnMut(&Path) -> io::Result<FolderSupport>,
     folders: &dyn FolderList,
 ) -> Result<Admitted<'a>, Error> {
@@ -283,8 +290,13 @@ fn gate<'a>(
     if let Some((kind, refusal)) = unresolved_links(policy) {
         return Err(refused(kind, refusal));
     }
-    for other in registered {
-        let canonical = dunce::canonicalize(other).unwrap_or_else(|_missing| other.clone());
+    let registered_folders = neighbours
+        .registered
+        .iter()
+        .flat_map(|other| other.folders.each())
+        .map(|(folder, _)| folder);
+    for other in registered_folders {
+        let canonical = dunce::canonicalize(other).unwrap_or_else(|_missing| other.to_owned());
         let nested = [other, &canonical]
             .iter()
             .any(|o| in_folder(o, matter) || in_folder(matter, o));
@@ -297,68 +309,13 @@ fn gate<'a>(
             return Err(refused(kind, refusal));
         }
     }
-    let siblings = siblings(policy, &data, registered, &mut check, folders)?;
+    let siblings = siblings::siblings(policy, &data, neighbours, &mut check, folders)?;
     Ok(Admitted {
         policy,
+        neighbours: neighbours.clone(),
         data_dir: data,
         siblings,
     })
-}
-
-/// Step 3 of [`gate`]: the siblings the plan denies the pool group reading.
-#[cfg(any(windows, test, feature = "test-support"))]
-fn siblings(
-    policy: &Policy,
-    data: &Path,
-    registered: &[PathBuf],
-    check: &mut impl FnMut(&Path) -> io::Result<FolderSupport>,
-    folders: &dyn FolderList,
-) -> Result<Vec<PathBuf>, Error> {
-    let matter = policy.matter();
-    let Some(parent) = matter.parent().filter(|parent| parent.parent().is_some()) else {
-        return Ok(Vec::new());
-    };
-    let listed = folders
-        .subfolders(parent)
-        .map_err(|error| refused(PathKind::Sibling, FolderRefusal::CheckFailed(error.kind())))?;
-    let mut kept: Vec<&Path> = vec![policy.state(), data];
-    kept.extend(policy.notes());
-    kept.extend(policy.home());
-    kept.extend(policy.credential_link());
-    kept.extend(policy.claude_store().map(crate::ClaudeStore::dir));
-    kept.extend(policy.runtime().iter().map(PathBuf::as_path));
-    kept.extend(policy.read().iter().map(PathBuf::as_path));
-    kept.extend(policy.allowed_folders().iter().map(PathBuf::as_path));
-    kept.extend(registered.iter().map(PathBuf::as_path));
-    let overlaps = |a: &Path, b: &Path| in_folder(a, b) || in_folder(b, a);
-    let mut siblings = Vec::new();
-    for listed in listed {
-        let sibling = match dunce::canonicalize(&listed) {
-            Ok(sibling) => sibling,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
-            Err(error) => {
-                let refusal = FolderRefusal::CheckFailed(error.kind());
-                return Err(refused(PathKind::Sibling, refusal));
-            }
-        };
-        let reparse = is_reparse_point(&listed).map_err(|error| {
-            refused(PathKind::Sibling, FolderRefusal::CheckFailed(error.kind()))
-        })?;
-        if reparse || overlaps(&sibling, matter) || kept.iter().any(|k| overlaps(&sibling, k)) {
-            continue;
-        }
-        match check(&sibling) {
-            Ok(FolderSupport::Ok) => siblings.push(sibling),
-            Ok(FolderSupport::Network) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            answer => {
-                if let Some(refusal) = refusal(answer) {
-                    return Err(refused(PathKind::Sibling, refusal));
-                }
-            }
-        }
-    }
-    Ok(siblings)
 }
 
 /// Why the agents' folder can't be trusted, if it can't: `<data_dir>\agents` is a reparse point
@@ -438,7 +395,7 @@ fn unresolved_links(policy: &Policy) -> Option<(PathKind, FolderRefusal)> {
 /// Whether `path` is a reparse point (on Windows any, elsewhere a symbolic link); a missing
 /// path is not.
 #[cfg(any(windows, test, feature = "test-support"))]
-fn is_reparse_point(path: &Path) -> io::Result<bool> {
+pub(super) fn is_reparse_point(path: &Path) -> io::Result<bool> {
     let meta = match std::fs::symlink_metadata(path) {
         Ok(meta) => meta,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
@@ -456,7 +413,7 @@ fn is_reparse_point(path: &Path) -> io::Result<bool> {
 
 /// `None` for `Ok`, else why the folder is refused.
 #[cfg(any(windows, test, feature = "test-support"))]
-fn refusal(answer: io::Result<FolderSupport>) -> Option<FolderRefusal> {
+pub(super) fn refusal(answer: io::Result<FolderSupport>) -> Option<FolderRefusal> {
     match answer {
         Ok(FolderSupport::Ok) => None,
         Ok(support) => Some(FolderRefusal::Support(support)),
@@ -466,10 +423,13 @@ fn refusal(answer: io::Result<FolderSupport>) -> Option<FolderRefusal> {
 
 /// The refusal, logged by kind only.
 #[cfg(any(windows, test, feature = "test-support"))]
-fn refused(path_kind: PathKind, support: FolderRefusal) -> Error {
+pub(super) fn refused(path_kind: PathKind, support: FolderRefusal) -> Error {
     tracing::info!(%path_kind, %support, "tier B refused a folder; nothing was planned");
     Error::FolderUnsupported { path_kind, support }
 }
+
+#[cfg(any(windows, test, feature = "test-support"))]
+mod siblings;
 
 #[cfg(test)]
 mod tests;

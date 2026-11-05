@@ -10,13 +10,18 @@
 //! - `Modify` on the matter, the state and notes folders and the credential link;
 //!   `ReadAndExecute` on runtime and read paths and allowed folders; on Clauseo's Claude login
 //!   home, `CreateFiles` on the folder and `Modify` on its allowed names.
-//! - A Low mandatory label, `S:(ML;OICI;NW;;;LW)` (no-write-up, inherited), on the matter, state
-//!   and notes folders ([`Rights::LowLabel`]): the Low token writes nowhere else labelled higher.
+//! - A Low mandatory label, `S:(ML;OICI;NW;;;LW)` (no-write-up), inherited on the matter, state
+//!   and notes folders and the Claude store folder, and on the credential link file itself
+//!   ([`Rights::LowLabel`]): the Low token writes nothing labelled higher. Side effect, accepted:
+//!   the lawyer's own Low-integrity processes can write those too. Whether the Claude store
+//!   takes writes at Low is PR6's VM row (the store and credential rows of done-when 2).
 //! - A deny of writes for the pool user on each of the policy's read-only paths in the matter and
 //!   the state folder: one deny refuses both of the token's checks.
-//! - Isolation between matters: on this matter's matter, state and notes folders, an inherited
-//!   deny of reads and writes for every other pool user, so a matter that inherits `C:\`'s
-//!   `Users` write entries is closed to other matters' agents (spike B, rows 2 and 4).
+//! - Isolation between matters: the fence ([`plan_fence`]) of this matter, an inherited deny of
+//!   reads and writes for every other pool user on its matter, state and notes folders, so a
+//!   matter that inherits `C:\`'s `Users` write entries is closed to other matters' agents
+//!   (spike B, rows 2 and 4); and the fence of every registered matter not fenced yet, each
+//!   recorded under that matter's id ([`AdmittedPlan::owners`]).
 //! - Sibling folders: on each folder beside the matter in its parent that the gate listed
 //!   ([`Admitted::siblings`]), an inherited deny of reads for the `ClauseoSandboxUsers` group,
 //!   which holds every pool user. The parent itself is left alone, so its listing still shows the
@@ -39,10 +44,11 @@ use clauseo_protocol::MatterId;
 use serde::{Deserialize, Serialize};
 
 use super::admit::{Admitted, PathKind};
+use super::fence::{MatterFolders, plan_fence};
 use super::ledger::EntryId;
 pub use super::sids::Sid;
 use crate::policy::under;
-use crate::{Error, PathRule};
+use crate::{Error, PathRule, Policy};
 
 /// The SIDs a launch's entries name. PR4 makes the pool and the group; the plan takes them as
 /// values.
@@ -190,6 +196,7 @@ impl Grant {
 #[derive(Debug)]
 pub struct AdmittedPlan {
     matter: MatterId,
+    owners: Vec<MatterId>,
     grants: Vec<Grant>,
     pub(crate) entries: Vec<EntryId>,
     pub(crate) created: Vec<EntryId>,
@@ -204,6 +211,12 @@ impl AdmittedPlan {
     /// The grants, in order.
     pub fn grants(&self) -> &[Grant] {
         &self.grants
+    }
+
+    /// The matter whose ledger entry each grant is, in the grants' order: this launch's matter,
+    /// or a registered matter whose fence this launch plans.
+    pub fn owners(&self) -> &[MatterId] {
+        &self.owners
     }
 
     /// Each grant's ledger entry, in the grants' order, once recorded; empty before.
@@ -222,6 +235,7 @@ impl AdmittedPlan {
     pub(crate) fn from_grants(matter: MatterId, grants: Vec<Grant>) -> AdmittedPlan {
         AdmittedPlan {
             matter,
+            owners: vec![matter; grants.len()],
             grants,
             entries: Vec::new(),
             created: Vec::new(),
@@ -251,7 +265,6 @@ pub fn plan(
             "the pool user's SID is also another subject's".to_owned(),
         ));
     }
-    let low = Sid::parse(LOW_LABEL_SID).map_err(|error| Error::Policy(error.to_string()))?;
     let policy = admitted.policy();
     let mut plan = Plan {
         subjects,
@@ -289,30 +302,34 @@ pub fn plan(
             plan.allow(path, Rights::ReadAndExecute, Inherit::Tree, kind);
         }
     }
-    for &(folder, kind) in &own {
-        plan.push(folder, low.clone(), Rights::LowLabel, Inherit::Tree, kind);
-    }
-    for rule in policy.read_only_in_matter() {
-        let inherit = match rule {
-            PathRule::Literal(_) => Inherit::ThisOnly,
-            PathRule::Subpath(_) => Inherit::Tree,
-        };
-        let kind = PathKind::ReadOnlyInMatter;
-        plan.push(rule.path(), pool.clone(), Rights::DenyWrite, inherit, kind);
-    }
-    for path in policy.read_only_in_state() {
-        let kind = PathKind::ReadOnlyInState;
-        plan.push(path, pool.clone(), Rights::DenyWrite, Inherit::Tree, kind);
-    }
-    for other in &subjects.other_pool_users {
-        for &(folder, kind) in &own {
-            let rights = Rights::DenyReadWrite;
-            plan.push(folder, other.clone(), rights, Inherit::Tree, kind);
-        }
+    plan.labels(policy, &own)?;
+    plan.read_only(policy);
+    let mut pool = vec![pool.clone()];
+    pool.extend(subjects.other_pool_users.iter().cloned());
+    let folders = MatterFolders {
+        root: policy.matter().to_owned(),
+        state: policy.state().to_owned(),
+        notes: policy.notes().map(Path::to_owned),
+    };
+    for grant in plan_fence(&folders, &subjects.pool_user, &pool) {
+        plan.push_grant(grant);
     }
     for sibling in admitted.siblings() {
         let (group, kind) = (subjects.pool_group.clone(), PathKind::Sibling);
         plan.push(sibling, group, Rights::DenyRead, Inherit::Tree, kind);
+    }
+    // Every registered matter whose fence the ledger doesn't list as applied: its entries are
+    // its own (the ledger records them under its id).
+    let mut owners = vec![matter; plan.grants.len()];
+    for other in &admitted.neighbours().registered {
+        if other.fenced {
+            continue;
+        }
+        let before = plan.grants.len();
+        for grant in plan_fence(&other.folders, &other.pool_user, &pool) {
+            plan.push_grant(grant);
+        }
+        owners.resize(owners.len() + plan.grants.len() - before, other.id);
     }
     if let Some(home) = policy.home() {
         let claude = home.join(".claude");
@@ -333,6 +350,7 @@ pub fn plan(
     }
     Ok(AdmittedPlan {
         matter,
+        owners,
         grants: plan.grants,
         entries: Vec::new(),
         created: Vec::new(),
@@ -346,6 +364,49 @@ struct Plan<'s> {
 }
 
 impl Plan<'_> {
+    /// The Low labels: inherited on this matter's own folders and the Claude store folder, and
+    /// on the credential link file itself. The Low token writes no object labelled above Low,
+    /// so the store and the link the agent writes get it too; the side effect, accepted, is that
+    /// the lawyer's own Low processes can write them as well.
+    fn labels(&mut self, policy: &Policy, own: &[(&Path, PathKind)]) -> Result<(), Error> {
+        let low = Sid::parse(LOW_LABEL_SID).map_err(|error| Error::Policy(error.to_string()))?;
+        for &(folder, kind) in own {
+            self.push(folder, low.clone(), Rights::LowLabel, Inherit::Tree, kind);
+        }
+        if let Some(store) = policy.claude_store() {
+            let kind = PathKind::ClaudeStore;
+            self.push(
+                store.dir(),
+                low.clone(),
+                Rights::LowLabel,
+                Inherit::Tree,
+                kind,
+            );
+        }
+        if let Some(link) = policy.credential_link() {
+            let kind = PathKind::CredentialLink;
+            self.push(link, low, Rights::LowLabel, Inherit::ThisOnly, kind);
+        }
+        Ok(())
+    }
+
+    /// The pool user's deny of writes on each read-only path in the matter and state folder.
+    fn read_only(&mut self, policy: &Policy) {
+        let pool = self.subjects.pool_user.clone();
+        for rule in policy.read_only_in_matter() {
+            let inherit = match rule {
+                PathRule::Literal(_) => Inherit::ThisOnly,
+                PathRule::Subpath(_) => Inherit::Tree,
+            };
+            let kind = PathKind::ReadOnlyInMatter;
+            self.push(rule.path(), pool.clone(), Rights::DenyWrite, inherit, kind);
+        }
+        for path in policy.read_only_in_state() {
+            let kind = PathKind::ReadOnlyInState;
+            self.push(path, pool.clone(), Rights::DenyWrite, Inherit::Tree, kind);
+        }
+    }
+
     /// An allow for the pool user, and the same for the matter's SID when it is a subject.
     fn allow(&mut self, path: &Path, rights: Rights, inherit: Inherit, kind: PathKind) {
         let pool = self.subjects.pool_user.clone();
@@ -356,13 +417,16 @@ impl Plan<'_> {
     }
 
     fn push(&mut self, path: &Path, sid: Sid, rights: Rights, inherit: Inherit, kind: PathKind) {
-        let grant = Grant {
+        self.push_grant(Grant {
             path: path.to_owned(),
             sid,
             rights,
             inherit,
             kind,
-        };
+        });
+    }
+
+    fn push_grant(&mut self, grant: Grant) {
         let same = |g: &Grant| {
             g.path == grant.path
                 && g.sid == grant.sid

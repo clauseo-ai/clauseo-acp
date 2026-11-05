@@ -38,6 +38,7 @@ use serde_json::Map;
 
 use super::acl_plan::{AdmittedPlan, Grant, Inherit, Rights};
 use super::admit::PathKind;
+use super::fence::{MatterFolders, plan_fence};
 use super::matters::SANDBOX_DIR;
 use super::sids::{Reserved, Sid};
 use super::write;
@@ -144,6 +145,8 @@ pub struct Forgotten {
     pub removed: usize,
     /// Entries whose removal failed, kept for the next try.
     pub kept: usize,
+    /// Entries dropped without a removal: another matter's entry names the same entry.
+    pub shared: usize,
 }
 
 /// The ledger: its path, whom its entries may name, and the contents last read. Each change
@@ -215,11 +218,10 @@ impl Ledger {
                 "this plan was recorded already",
             ));
         }
-        let matter = plan.matter();
         let (entries, created) = self.update(true, |state| {
             let mut entries = Vec::with_capacity(plan.grants().len());
             let mut created = Vec::new();
-            for grant in plan.grants() {
+            for (grant, &matter) in plan.grants().iter().zip(plan.owners()) {
                 if let Some(id) = state
                     .entries()
                     .find(|entry| entry.lists(matter, grant))
@@ -361,9 +363,12 @@ impl Ledger {
     }
 
     /// Forgets `matter`, under the lock: hands each of its trusted entries to `remove`, which
-    /// removes the permission entry (one already gone counts as removed). Entries removed are
-    /// dropped; entries `remove` failed on are kept for the next try. Other matters' entries and
-    /// set aside ones are left as they are, and never handed to `remove`.
+    /// removes the permission entry (one already gone counts as removed), unless another
+    /// matter's entry, pending or applied, names the same path, SID and rights (a shared sibling
+    /// deny): that entry is dropped without a removal, and the permission entry stays for the
+    /// other matter. Entries removed are dropped; entries `remove` failed on are kept for the
+    /// next try. Other matters' entries and set aside ones are left as they are, and never handed
+    /// to `remove`.
     pub fn forget_matter(
         &mut self,
         matter: MatterId,
@@ -371,9 +376,20 @@ impl Ledger {
     ) -> io::Result<Forgotten> {
         self.update(false, |state| {
             let mut done = Forgotten::default();
+            let others: Vec<Entry> = state
+                .entries()
+                .filter(|entry| entry.matter != matter)
+                .cloned()
+                .collect();
             let mut slots = Vec::with_capacity(state.slots.len());
             for slot in std::mem::take(&mut state.slots) {
                 match slot {
+                    Slot::Known(known)
+                        if known.entry.matter == matter
+                            && others.iter().any(|other| same_ace(other, &known.entry)) =>
+                    {
+                        done.shared += 1;
+                    }
                     Slot::Known(known) if known.entry.matter == matter => {
                         match remove(&known.entry) {
                             Ok(()) => done.removed += 1,
@@ -389,8 +405,31 @@ impl Ledger {
                 }
             }
             state.slots = slots;
-            Ok((done.removed > 0, done))
+            Ok((done.removed + done.shared > 0, done))
         })
+    }
+
+    /// Whether `matter`'s fence (`plan_fence` of its `folders` for `assigned` in `pool`) is
+    /// listed in full as applied, as last read: the launcher's input for
+    /// [`RegisteredMatter::fenced`](super::fence::RegisteredMatter::fenced).
+    pub fn fence_applied(
+        &self,
+        matter: MatterId,
+        folders: &MatterFolders,
+        assigned: &Sid,
+        pool: &[Sid],
+    ) -> bool {
+        plan_fence(folders, assigned, pool).iter().all(|grant| {
+            self.entries()
+                .any(|e| e.state == EntryState::Applied && e.lists(matter, grant))
+        })
+    }
+
+    /// Whether another matter's entry names the same permission entry as `entry`: PR3's
+    /// rollback leaves such an entry's ACE in place.
+    pub fn is_shared(&self, entry: &Entry) -> bool {
+        self.entries()
+            .any(|other| other.matter != entry.matter && same_ace(other, entry))
     }
 
     /// One read-modify-write. With `create` false and no ledger file, there is nothing to change:
@@ -445,6 +484,11 @@ impl Ledger {
         }
         Ok(result)
     }
+}
+
+/// Whether two entries name the same permission entry: path, SID and rights.
+fn same_ace(a: &Entry, b: &Entry) -> bool {
+    a.path == b.path && a.sid == b.sid && a.rights == b.rights
 }
 
 #[cfg(test)]
