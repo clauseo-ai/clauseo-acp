@@ -13,7 +13,8 @@
 //! write leaves the old file as it was. Entry numbers come from a counter stored in the file and
 //! advanced under that lock, so they are unique across launches and processes and never reused.
 //! The folder is made, or checked and secured, by `write::make_sandbox_dir` (its protected DACL,
-//! its owner). Nothing is written unless the entries change: a launch refused by the gate never
+//! its owner), and the lock file and the ledger by `write::check_owned_file`, as the matter SIDs'
+//! files are. Nothing is written unless the entries change: a launch refused by the gate never
 //! reaches the ledger, and a missing ledger stays missing until an entry is recorded.
 //!
 //! Only an [`AdmittedPlan`] is recorded, and a rollback ([`Ledger::drop_entries`]) drops only the
@@ -390,7 +391,13 @@ impl Ledger {
             return Ok(result);
         }
         write::make_sandbox_dir(&folder)?;
-        let _held = write::lock_exclusive_for(&folder.join(LEDGER_LOCK), write::LOCK_WAIT)?;
+        // As `MatterSids::sid_for` does: the lock file is checked before it is locked, and the
+        // ledger under the lock (owned by the user, `SYSTEM` or `Administrators`, one link, no
+        // reparse point, its entries reset to the folder's).
+        let lock = folder.join(LEDGER_LOCK);
+        write::check_owned_file(&lock)?;
+        let _held = write::lock_exclusive_for(&lock, write::LOCK_WAIT)?;
+        write::check_owned_file(&self.path)?;
         let fresh = read_state(&self.path, &self.trust)?;
         let mut next = fresh.clone();
         let outcome = change(&mut next);
