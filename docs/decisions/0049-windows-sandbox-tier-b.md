@@ -123,13 +123,14 @@ build 26100):
     up the inherited entries; other trees when their entry was just written or is still pending.
     Every write keeps a DACL's auto-inherited mark (`SE_DACL_AUTO_INHERIT_REQ`), so a walk with
     nothing changed writes nothing and the lawyer's folders keep their `AI`. As
-    `SetNamedSecurityInfo`'s propagation does, a child that is neither protected nor
-    auto-inherited (a DACL some tool wrote without the mark, as the VM found under a plain
-    `C:\m`) loses its old inherited entries before it is worked out
-    from its parent, and is written auto-inherited; the root's write makes it auto-inherited too
-    and keeps its inherited entries. Otherwise an old inherited `Users` allow would turn explicit
-    and refuse every launch. Paths are compared in one normal form, so a walk's verbatim
-    (`\\?\`) paths match the plan's plain ones.
+    `SetNamedSecurityInfo`'s propagation does, a child that isn't protected loses its old inherited
+    entries before the strict check and before it is worked out from its parent, and is written
+    auto-inherited. Old inherited entries include explicit ones equal to what the parent alone
+    gives such a child: under a parent that isn't auto-inherited (a plain `C:\m`), NTFS writes its
+    inherited copies without the inherited flag, and `icacls` only displays them as `(I)` (VM run
+    3). The root's write makes it auto-inherited too and keeps its inherited entries. Otherwise an
+    old inherited `Users` allow would count as explicit and refuse every launch. Paths are compared
+    in one normal form, so a walk's verbatim (`\\?\`) paths match the plan's plain ones.
   - Any failure takes back this launch's new entries: under the ledger's lock they are set
     `removing` on disk (a state of its own, so `reconcile` finishes a rollback or forget that a
     crash stopped, rather than mistake it for a launch), then each permission entry this launch
@@ -274,10 +275,18 @@ may drop `Everyone` behind a proxy that runs as the desktop user.
 - **Lifting a sibling's deny happens only after the new matter's first launch succeeds.** Until
   then the folder keeps its fix 2 deny, so its new matter's agent reads it only through its own
   entries, which are nearer and come first.
-- **Old inherited-flagged entries on a child that isn't auto-inherited are dropped**, as Explorer's
-  propagation drops them, at every walk that works such a child out, fence walks included: an
-  entry an old tool (`cacls`, `xcopy /O`) flagged inherited is lost, isn't recorded, and isn't
-  restored by forget (accepted).
+- **Old inherited entries on a child that isn't protected are dropped**, as Explorer's propagation
+  drops them, at every walk that works such a child out, fence walks included: an entry an old tool
+  (`cacls`, `xcopy /O`) flagged inherited is lost, isn't recorded, and isn't restored by forget.
+  An explicit lawyer entry identical to what the parent gives the child is taken for an inherited
+  copy and comes back inherited, so access doesn't change (accepted).
+- **PR4's uninstall hook must delete every reparse point under the app-data folders, without
+  following it, before Tauri's NSIS "delete app data" runs `RMDir /r`**, which follows junctions:
+  VM run 3 emptied a lawyer folder through a junction set aside under `<data>\sandbox`.
+- **The credential-link mechanism stays, but its use for Claude on Windows goes back to PR6's
+  design**: Claude Code 2.1.293 rewrites its credentials file by a temp file and a rename, and
+  refuses a target with more than one link, so a hard-link credential link goes stale or breaks
+  Claude's token refresh (VM run 3).
 - **Under the `C:\m` layout the lawyer has no `FILE_DELETE_CHILD`**, so a fence walk can't set
   aside a child the lawyer can't open in another matter's tree, and one matter's agent can still
   block other matters' launches until its own exit repair or next launch; PR4's elevated clean-up
