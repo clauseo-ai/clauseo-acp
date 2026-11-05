@@ -4,7 +4,11 @@
 //! and never answered (the host stopped first) moves to a new queued turn, so it is not lost; it
 //! keeps its message's place in the log, behind any prompt queued before it. That differs from a
 //! live requeue, which takes the head: a restart restores the log's order, and the queue comes
-//! back held, so nothing runs before the lawyer looks.
+//! back held, so nothing runs before the lawyer looks. The one exception is a turn put back for
+//! its agent's sign-in (`sign_in.rs`), whose `TurnQueued` is marked `at_head`: it was sent
+//! first and the turns queued behind it may depend on its answer, so it comes back first, and
+//! the queue comes back held for the sign-in, so `restart_agents` resumes it. An older log
+//! has no mark and restores in log order.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -30,6 +34,13 @@ struct Prompt {
     unanswered: bool,
 }
 
+/// The queued turns of a log, in queue order, and whether the first was put back for the
+/// sign-in.
+struct QueuedTurns {
+    turns: Vec<(Restored, MessageId, Vec<ContentBlock>)>,
+    sign_in: bool,
+}
+
 /// A turn the restored queue holds.
 enum Restored {
     /// A queued turn, as logged.
@@ -48,7 +59,8 @@ pub(in super::super) fn restore(
     out: &mut Out,
 ) -> Result<(), Error> {
     let mut turns = Vec::new();
-    for (restored, message, content) in queued_turns(log) {
+    let queued = queued_turns(log);
+    for (restored, message, content) in queued.turns {
         let turn = match restored {
             Restored::Queued(turn) => {
                 if needs_queued(log, thread, turn) {
@@ -82,14 +94,18 @@ pub(in super::super) fn restore(
     let queue = &mut state(actor, thread).ok_or_else(|| lost("a thread"))?.queue;
     queue.turns = turns.into();
     queue.held = !queue.turns.is_empty();
+    queue.sign_in = queue.held && queued.sign_in;
     sync_held(actor, thread);
     Ok(())
 }
 
-/// The queued turns of `log` in queue order: turn, message, content as step 5 sends it.
-fn queued_turns(log: &[Envelope]) -> Vec<(Restored, MessageId, Vec<ContentBlock>)> {
+/// The queued turns of `log` in queue order: turn, message, content as step 5 sends it. A turn
+/// whose `TurnQueued` is marked `at_head` goes first, the latest put back first, as each took
+/// the head when it was put back; the rest follow in the order they joined the queue.
+fn queued_turns(log: &[Envelope]) -> QueuedTurns {
     let mut prompts: BTreeMap<MessageId, Prompt> = BTreeMap::new();
     let mut done: BTreeSet<TurnId> = BTreeSet::new();
+    let mut heads: BTreeSet<TurnId> = BTreeSet::new();
     for (at, envelope) in log.iter().enumerate() {
         let event = &envelope.event;
         if let DomainEvent::UserMessage(message) = event {
@@ -114,28 +130,49 @@ fn queued_turns(log: &[Envelope]) -> Vec<(Restored, MessageId, Vec<ContentBlock>
                 prompt.turn = *turn;
                 prompt.at = at;
             }
+        } else if let DomainEvent::TurnQueued(queued) = event
+            && queued.is_at_head()
+        {
+            heads.insert(queued.turn());
         } else if let DomainEvent::TurnStarted(started) = event {
             done.insert(started.turn);
         } else if let DomainEvent::TurnEnded(ended) = event {
             done.insert(ended.turn);
         }
     }
-    let mut queued: Vec<(usize, Restored, MessageId, Vec<ContentBlock>)> = prompts
+    let mut queued: Vec<(Place, Restored, MessageId, Vec<ContentBlock>)> = prompts
         .into_iter()
         .filter_map(|(message, prompt)| {
-            let restored = if prompt.unanswered {
-                Restored::Unanswered(prompt.turn)
+            let (restored, head) = if prompt.unanswered {
+                (Restored::Unanswered(prompt.turn), false)
             } else if done.contains(&prompt.turn) {
                 return None;
             } else {
-                Restored::Queued(prompt.turn)
+                (Restored::Queued(prompt.turn), heads.contains(&prompt.turn))
             };
-            Some((prompt.at, restored, message, prompt.content))
+            let place = if head {
+                Place::Head(std::cmp::Reverse(prompt.at))
+            } else {
+                Place::Joined(prompt.at)
+            };
+            Some((place, restored, message, prompt.content))
         })
         .collect();
-    queued.sort_by_key(|(at, ..)| *at);
-    queued
+    queued.sort_by_key(|(place, ..)| *place);
+    let sign_in = queued
+        .first()
+        .is_some_and(|(place, ..)| matches!(place, Place::Head(_)));
+    let turns = queued
         .into_iter()
         .map(|(_, restored, message, content)| (restored, message, content))
-        .collect()
+        .collect();
+    QueuedTurns { turns, sign_in }
+}
+
+/// A restored turn's place: the turns put back at the head first, the latest first, then the
+/// rest by where they joined the queue in the log.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Place {
+    Head(std::cmp::Reverse<usize>),
+    Joined(usize),
 }

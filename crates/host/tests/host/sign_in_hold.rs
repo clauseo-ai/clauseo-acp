@@ -2,18 +2,19 @@
 //! `agent.auth_required`, or with an error the sign-in-again test accepts (Codex's
 //! `refresh_token_reused`), comes back held at the head of its queue, held as a refused
 //! permission's `NotAllowed` holds it (#408), and `restart_agents` for that agent sends it once.
-//! `stop_agents` puts a running turn back the same way and stops the agent.
+//! `stop_agents` puts a running turn back the same way and stops the agent. Across a host
+//! restart the turn put back keeps its head place, ahead of the turns queued before it.
 
 use clauseo_protocol::{
-    AgentId, ContentBlock, DomainEvent, ErrorCode, MatterId, StopReason, StreamId, ThreadId,
-    ThreadStatus, TurnId,
+    AgentId, ContentBlock, DeliveryRequest, DomainEvent, ErrorCode, MatterId, StopReason, StreamId,
+    ThreadId, ThreadStatus, TurnId,
 };
 
 use crate::codex::{CODEX, codex_dir};
 use crate::observe::Events;
 use crate::permissions::{answer_from, until_first_request};
-use crate::queue::{held, starts};
-use crate::support::{Dir, FAKE, Running, Scenario, matter_with_thread, wait};
+use crate::queue::{allow, held, send, settle, starts, until_queued};
+use crate::support::{Dir, FAKE, Running, Scenario, matter_with_thread, text, wait};
 
 /// The prompt every test sends first.
 const ASKED: &str = "Look at the matter.";
@@ -180,5 +181,68 @@ fn a_held_sign_in_shows_as_a_refused_permissions_hold_does() {
     host.settle();
     assert_eq!(shown(&host, matter, thread), refused);
     assert!(refused.0);
+    host.shutdown();
+}
+
+#[test]
+fn a_turn_held_for_the_sign_in_runs_first_after_a_host_restart() {
+    let dir = Dir::new(
+        "sign_in_hold_restart",
+        &[(FAKE, Scenario::Local("sign-in-hold-restart"))],
+    );
+    let host = dir.start(0);
+    let (matter, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], FAKE);
+    let mut events = host.events(StreamId::Thread(thread));
+    // Two prompts queue behind the first while it waits on a permission, so they are in the
+    // log before the turn put back for the sign-in.
+    let (first, _) = host.prompt(thread, ASKED);
+    until_first_request(&mut events);
+    let (two, _) = send(&host, thread, text("Two"), DeliveryRequest::Queue);
+    until_queued(&mut events, two);
+    let (three, _) = send(&host, thread, text("Three"), DeliveryRequest::Queue);
+    until_queued(&mut events, three);
+    allow(&host, &mut events, thread);
+    assert_eq!(events.until_turn_ended(first).stop, StopReason::Failed);
+    assert_eq!(failure(&events, first), Some(ErrorCode::AgentAuthRequired));
+    // "Two" waits behind the first turn too: the one put back is the `TurnQueued` at the head.
+    let head = |event: &DomainEvent| matches!(event, DomainEvent::TurnQueued(queued) if queued.is_at_head());
+    events.until("the turn put back", |events| {
+        events.position(head).is_some()
+    });
+    let again = events
+        .events()
+        .find_map(|event| match event {
+            DomainEvent::TurnQueued(queued) if queued.is_at_head() => Some(queued.turn()),
+            _ => None,
+        })
+        .unwrap();
+    assert!(![first, two, three].contains(&again));
+    settle(&host, &mut events);
+    assert!(held(&host, matter, thread), "{}", events.dump());
+    drop(events);
+    host.abort();
+
+    let host = dir.start(1);
+    let mut events = host.events(StreamId::Thread(thread));
+    events.until_caught_up();
+    settle(&host, &mut events);
+    assert!(held(&host, matter, thread), "not held after the restart");
+    // Signed in: the held turn goes first, then the two queued behind it, in order (the fake
+    // agent's prompts check the texts' order too).
+    wait("restart_agents", host.handle.restart_agents(fake())).unwrap();
+    for turn in [again, two, three] {
+        assert_eq!(events.until_turn_ended(turn).stop, StopReason::EndTurn);
+    }
+    settle(&host, &mut events);
+    let started = |turn: TurnId| {
+        events
+            .position(
+                |event| matches!(event, DomainEvent::TurnStarted(started) if started.turn == turn),
+            )
+            .unwrap_or_else(|| panic!("{turn} never started: {}", events.dump()))
+    };
+    assert!(started(again) < started(two), "{}", events.dump());
+    assert!(started(two) < started(three), "{}", events.dump());
+    assert!(!held(&host, matter, thread));
     host.shutdown();
 }
