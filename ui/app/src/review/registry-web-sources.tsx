@@ -1,13 +1,13 @@
 // The copy review entries for the web sources at the end of an answer (room/thread/sources.tsx), apart from
 // registry.tsx. Ids are WEB-01 on, since the registry's id rule (review/status.ts) takes a dash then digits. Each is the
-// real room over FakeTransport: one question, the tool calls that searched and read, the answer, and the envelopes that
-// fill those tool calls' web (sources.ts's fold, until the host puts `web` on the entry itself). WEB-12 and WEB-13 show
-// the list folded, as an answer first does; every other entry shows it open from the start (SourcesOpenAtFirst), so its
-// row is there without a click, and WEB-09 and WEB-10 show the words behind their icon, its tip open.
+// real room over FakeTransport: one question, the tool calls that searched and read, each carrying its `web`
+// (ToolCallWeb) on its entry, the answer, and the step. WEB-12 and WEB-13 show the list folded, as an answer first
+// does; every other entry shows it open from the start (SourcesOpenAtFirst), so its row is there without a click, and
+// WEB-09 and WEB-10 show the words behind their icon, its tip open.
 import { src, type SourcesKey } from "@clauseo/components/lib/words-sources.ts";
 import { agentText, step, userMessage } from "../testing/stream-script.ts";
-import { eventsOf, searched, visited, webCallsFor } from "../testing/web-sources.ts";
-import type { AgentId, Envelope, ViewEntry } from "../transport/protocol.ts";
+import { pageOf, searchOf, webCall, webOf } from "../testing/web-sources.ts";
+import type { AgentId, PageVia, ToolCallWeb, ViewEntry, WebResult } from "../transport/protocol.ts";
 import type { Entry } from "./entry.ts";
 import { threadHost } from "./hosts.ts";
 import { SourcesOpenAtFirst } from "../room/thread/sources.ts";
@@ -42,49 +42,61 @@ const RESULTS = [
   { title: "Notice to quit under the Rent Control Act", url: "https://www.livelaw.in/rent-notice" },
 ];
 
-/** The thread's view: the question, a tool call for each one the envelopes name, titled as the agent's adapter
- * titles it, the answer and its step. */
-const entriesFor = (envelopes: Envelope[], agent: AgentId): ViewEntry[] => [
+/** A tool call the thread shows: its `call-<seq>` id and the web it carries. */
+type Call = { seq: number; web: ToolCallWeb };
+/** A web search the tool call at `seq` ran, with the results the agent got. */
+const searched = (seq: number, query: string, results: WebResult[] = []): Call => ({
+  seq,
+  web: webOf({ search: searchOf(query, results) }),
+});
+/** A page the tool call at `seq` opened, `via` web_fetch by default, with its title when it has one. */
+const visited = (seq: number, url: string, opts?: { title?: string; via?: PageVia }): Call => ({
+  seq,
+  web: webOf({ pages: [pageOf(url, opts)] }),
+});
+
+/** One tool call entry for each call, in order from 10, titled as the agent's adapter titles it. */
+const callsOf = (calls: Call[], agent: AgentId): ViewEntry[] =>
+  calls.map((c, i) => webCall(10 + i, `call-${c.seq}`, c.web, agent));
+
+/** The thread's view: the question, a tool call for each one, carrying its web, the answer and its step. */
+const entriesFor = (calls: Call[], agent: AgentId): ViewEntry[] => [
   QUESTION,
-  ...webCallsFor(envelopes, agent),
+  ...callsOf(calls, agent),
   ANSWER,
   step(50),
 ];
 
-const hostFor = (envelopes: Envelope[], agent: AgentId) => () => {
-  const transport = threadHost({ entries: entriesFor(envelopes, agent), agent });
-  // the fake keeps them and plays them to the list as it mounts
-  transport.deliver(eventsOf(envelopes));
-  return transport;
-};
+const hostFor = (calls: Call[], agent: AgentId) => () =>
+  threadHost({ entries: entriesFor(calls, agent), agent });
 
 /** The list shut, as an answer first shows it. */
 const shut =
-  (envelopes: Envelope[], agent: AgentId = "claude-acp") =>
-  () => <RoomOver host={hostFor(envelopes, agent)} />;
+  (calls: Call[], agent: AgentId = "claude-acp") =>
+  () => <RoomOver host={hostFor(calls, agent)} />;
 /** The list open from the start, as the review shows a row's words: the room's own default stays shut. */
 const opened =
-  (envelopes: Envelope[], agent: AgentId = "claude-acp") =>
+  (calls: Call[], agent: AgentId = "claude-acp") =>
   () => (
     <SourcesOpenAtFirst value>
-      <RoomOver host={hostFor(envelopes, agent)} />
+      <RoomOver host={hostFor(calls, agent)} />
     </SourcesOpenAtFirst>
   );
 
 /** The list open, then the control `selector` names pressed once it shows: for words behind an info tip. */
-const pressing = (envelopes: Envelope[], agent: AgentId, selector: string) => () => (
+const pressing = (calls: Call[], agent: AgentId, selector: string) => () => (
   <SourcesOpenAtFirst value>
-    <RoomClicking host={hostFor(envelopes, agent)} clicks={[selector]} />
+    <RoomClicking host={hostFor(calls, agent)} clicks={[selector]} />
   </SourcesOpenAtFirst>
 );
 /** The list open, then the element `selector` names focused from the keyboard: for words in an icon's tooltip. */
-const focusing = (envelopes: Envelope[], agent: AgentId, selector: string) => () => (
+const focusing = (calls: Call[], agent: AgentId, selector: string) => () => (
   <SourcesOpenAtFirst value>
-    <RoomFocusing host={hostFor(envelopes, agent)} focus={selector} />
+    <RoomFocusing host={hostFor(calls, agent)} focus={selector} />
   </SourcesOpenAtFirst>
 );
 
-const MANY: Envelope[] = [
+const MANY: Call[] = [
   searched(1, "Delhi Rent Control Act notice period", RESULTS),
   searched(2, "section 14 eviction notice thirty days"),
   visited(3, ACT, { title: "Section 14 in the Delhi Rent Control Act, 1958" }),
@@ -119,10 +131,7 @@ export const WEB_SOURCES: Entry[] = [
     id: "WEB-07",
     words: sourcesWords("{name} doesn't list its pages"),
     screen: SCREEN,
-    render: opened(
-      [searched(1, "Delhi Rent Control Act notice period", [], { agent: "codex-acp" })],
-      "codex-acp",
-    ),
+    render: opened([searched(1, "Delhi Rent Control Act notice period", [])], "codex-acp"),
   },
   {
     id: "WEB-09",
@@ -177,9 +186,6 @@ export const WEB_SOURCES: Entry[] = [
     words: sourcesWords("Searches"),
     screen: SCREEN,
     // folded: a search that lists no page, so no count; the search glyph and the chevron, the button named Searches
-    render: shut(
-      [searched(1, "Delhi Rent Control Act notice period", [], { agent: "codex-acp" })],
-      "codex-acp",
-    ),
+    render: shut([searched(1, "Delhi Rent Control Act notice period", [])], "codex-acp"),
   },
 ];

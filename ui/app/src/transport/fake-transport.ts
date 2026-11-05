@@ -15,13 +15,12 @@ import type {
   Settings,
 } from "../room/host-next.ts";
 import { NO_NEXT, WIRE } from "../room/host-next.ts";
-import { ChannelReader, envelopesOf, streamFailedOf, type ChannelEvent } from "./channel.ts";
+import { ChannelReader, streamFailedOf, type ChannelEvent } from "./channel.ts";
 import {
   internalError,
   toHostError,
   type BatchSubscriber,
   type DisplayInfo,
-  type EnvelopeSource,
   type HostTransport,
 } from "./host-transport.ts";
 import type {
@@ -31,7 +30,6 @@ import type {
   RefreshWhy,
   CommandEnvelope,
   CommandOutcome,
-  Envelope,
   FileRefId,
   HostError,
   HostQuery,
@@ -120,7 +118,7 @@ export type FakeHost = {
   setup?: FakeSetupHost;
 };
 
-export class FakeTransport implements HostTransport, NextHostSource, LimitsSource, EnvelopeSource {
+export class FakeTransport implements HostTransport, NextHostSource, LimitsSource {
   readonly kind = "fake";
   readonly calls: FakeCall[] = [];
   /** Problems the channel reader reported. */
@@ -134,9 +132,6 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
   readonly #settingsHeard = new Set<(settings: Settings) => void>();
   readonly #appHeard = new Set<(event: AppEvent) => void>();
   readonly #limits = new LimitsFeed((problem) => this.problems.push(problem));
-  /** Every `events` arm's envelopes delivered so far, and who hears the next. */
-  readonly #envelopes: Envelope[] = [];
-  readonly #envelopesHeard = new Set<(envelopes: readonly Envelope[]) => void>();
   /** H14's settings window, when `host.openSettings` scripts it. */
   readonly openSettings: (() => Promise<void>) | undefined;
   /** The setup wire, when `host.setup` scripts it (store/setup.ts's SetupSource). */
@@ -283,12 +278,6 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
           const view = limitsOf(event);
           if (view === null) this.problems.push("limits_view_changed carried no view");
           else this.#limits.deliver(view);
-        } else {
-          const envelopes = envelopesOf(event);
-          if (envelopes !== null) {
-            this.#envelopes.push(...envelopes);
-            for (const listener of this.#envelopesHeard) listener(envelopes);
-          }
         }
       },
       (problem) => this.problems.push(problem),
@@ -310,13 +299,6 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
 
   onLimits(listener: (view: LimitsView) => void): () => void {
     return this.#limits.onLimits(listener);
-  }
-
-  /** Hears each `events` arm `deliver` plays; a new listener hears the ones delivered before it at once. */
-  onEnvelopes(listener: (envelopes: readonly Envelope[]) => void): () => void {
-    this.#envelopesHeard.add(listener);
-    if (this.#envelopes.length > 0) listener([...this.#envelopes]);
-    return () => this.#envelopesHeard.delete(listener);
   }
 
   /** The `refresh_limits` commands dispatched, in order: the agent (undefined for every agent) and why. */

@@ -1,15 +1,14 @@
 // @vitest-environment happy-dom
-// The web sources at the end of an answer, in the real room over FakeTransport, icons first: envelopes on the channel's
-// events arm put a folded line under their turn's answer (up to three sites' tiles or the search glyph, the count, a
+// The web sources at the end of an answer, in the real room over FakeTransport, icons first: the turn's tool call
+// entries that carry `web` (ToolCallWeb) put a folded line under their turn's answer (up to three sites' tiles or the search glyph, the count, a
 // chevron), which opens to one row per search or page led by its icon; Codex's search and open page say what Codex
 // doesn't tell in a few muted words or an info tip; a browser page shows the browser glyph, named; a link opens through
 // open_external; a Hindi title is marked Hindi; no tile fetches anything; and a turn with none draws nothing.
 import { act } from "react";
 import { afterEach, expect, test } from "vitest";
-import { agentText, reset, step, userMessage } from "../../testing/stream-script.ts";
-import { eventsOf, headerOf, searched, visited, webCallsFor } from "../../testing/web-sources.ts";
-import type { AgentId, Envelope } from "../../transport/protocol.ts";
-import { FakeTransport } from "../../transport/fake-transport.ts";
+import { agentText, reset, step, upsert, userMessage } from "../../testing/stream-script.ts";
+import { headerOf, pageOf, searchOf, webCall, webOf } from "../../testing/web-sources.ts";
+import type { AgentId, PageVia, ToolCallWeb, WebResult } from "../../transport/protocol.ts";
 import { mountRoom, type Harness } from "./harness.ts";
 
 let h: Harness | null = null;
@@ -18,23 +17,36 @@ afterEach(async () => {
   h = null;
 });
 
-/** A turn answered by `agent`, with a tool call entry for each tool call the envelopes name (ToolCallWeb's owner). */
-async function answered(envelopes: Envelope[] | null, agent: AgentId = "claude-acp") {
+/** A turn answered by `agent`, with one tool call entry, carrying its web, for each of `webs`, between the question
+ * and the answer's words. */
+async function answered(webs: ToolCallWeb[], agent: AgentId = "claude-acp") {
   h = await mountRoom();
-  h.deliver([
+  await h.deliverAwaited([
     reset(
       [
         userMessage(5, 1, "What is the notice period under the Rent Control Act?"),
-        ...webCallsFor(envelopes ?? [], agent),
+        ...webs.map((web, i) => webCall(10 + i, `call-${i}`, web, agent)),
         agentText(40, 1, "Thirty days, in writing."),
         step(50),
       ],
       headerOf(agent),
     ),
   ]);
-  if (envelopes !== null) await act(async () => h!.transport.deliver(eventsOf(envelopes)));
   return h;
 }
+
+/** A tool call that ran one search. */
+const searched = (query: string, results: WebResult[] = []): ToolCallWeb =>
+  webOf({ search: searchOf(query, results) });
+/** A tool call that opened one page. */
+const visited = (url: string, opts: { title?: string; via?: PageVia } = {}): ToolCallWeb =>
+  webOf({ pages: [pageOf(url, opts)] });
+/** A tool call entry with no web: the web stripped off one that had it. */
+const bare = (order: number, call: string) => {
+  const entry = webCall(order, call, visited("https://example.com/a"));
+  delete entry.tool_call!.web;
+  return entry;
+};
 
 const toggle = () => h!.one("web-sources-toggle") as HTMLButtonElement;
 const rows = () => h!.all("web-source");
@@ -62,18 +74,18 @@ const lead = (row: Element) => {
   return first?.querySelector("svg") == null ? "none" : "glyph";
 };
 
-test("envelopes delivered put the folded line under that turn's answer: tiles, the count, nothing else", async () => {
+test("tool calls' web puts the folded line under that turn's answer: tiles, the count, nothing else", async () => {
   await answered([
-    searched(1, "notice period rent control", [
+    searched("notice period rent control", [
       {
         title: "Rent Control Act, s. 14",
         url: "https://www.indiacode.nic.in/handle/123456789/1525",
       },
     ]),
-    visited(2, "https://www.indiacode.nic.in/handle/123456789/1525", {
+    visited("https://www.indiacode.nic.in/handle/123456789/1525", {
       title: "Rent Control Act, s. 14",
     }),
-    visited(3, "https://example.com/a"),
+    visited("https://example.com/a"),
   ]);
   const list = h!.one("web-sources");
   expect(list?.closest("section")?.classList.contains("step-answer")).toBe(true);
@@ -91,12 +103,12 @@ test("envelopes delivered put the folded line under that turn's answer: tiles, t
 
 test("the folded line shows at most three marks, distinct, in order, the search glyph for a search with none", async () => {
   await answered([
-    searched(1, "rare query"),
-    visited(2, "https://www.alpha.example/1", { title: "A" }),
-    visited(3, "https://alpha.example/2", { title: "A2" }),
-    searched(4, "second rare query"),
-    visited(5, "https://beta.example/1", { title: "B" }),
-    visited(6, "https://gamma.example/1", { title: "G" }),
+    searched("rare query"),
+    visited("https://www.alpha.example/1", { title: "A" }),
+    visited("https://alpha.example/2", { title: "A2" }),
+    searched("second rare query"),
+    visited("https://beta.example/1", { title: "B" }),
+    visited("https://gamma.example/1", { title: "G" }),
   ]);
   expect(marks()).toEqual(["search", "A:11", "B:11"]);
   // the four pages; the searches are no pages
@@ -105,7 +117,7 @@ test("the folded line shows at most three marks, distinct, in order, the search 
 
 test("a search's results lend the folded line their sites", async () => {
   await answered([
-    searched(1, "notice", [
+    searched("notice", [
       { title: "Z", url: "https://zeta.example/z" },
       { title: "Y", url: "https://yota.example/y" },
     ]),
@@ -116,14 +128,14 @@ test("a search's results lend the folded line their sites", async () => {
 
 test("opening shows one row per source, in order, each led by its icon, and shuts again", async () => {
   await answered([
-    searched(1, "notice period", [
+    searched("notice period", [
       {
         title: "Rent Control Act, s. 14",
         url: "https://www.indiacode.nic.in/handle/123456789/1525",
       },
       { title: "Notice to quit", url: "https://example.com/notice" },
     ]),
-    visited(2, "https://example.com/page", { title: "A page" }),
+    visited("https://example.com/page", { title: "A page" }),
   ]);
   await open();
   expect(toggle().getAttribute("aria-expanded")).toBe("true");
@@ -145,11 +157,11 @@ test("opening shows one row per source, in order, each led by its icon, and shut
 
 test("no row says round 2's sentences", async () => {
   await answered([
-    searched(1, "notice period", [{ title: "A", url: "https://example.com/a" }]),
-    searched(2, "rare query"),
-    visited(3, "https://example.com/b", { title: "B" }),
-    visited(4, "https://example.com/c", { via: "browser", title: "C" }),
-    visited(5, "https://example.com/d"),
+    searched("notice period", [{ title: "A", url: "https://example.com/a" }]),
+    searched("rare query"),
+    visited("https://example.com/b", { title: "B" }),
+    visited("https://example.com/c", { via: "browser", title: "C" }),
+    visited("https://example.com/d"),
   ]);
   await open();
   const text = words(h!.one("web-sources"));
@@ -159,8 +171,9 @@ test("no row says round 2's sentences", async () => {
 
 test("a page opened twice in one tool call shows once", async () => {
   await answered([
-    visited(1, "https://example.com/a", { call: "c" }),
-    visited(2, "https://example.com/a", { call: "c", title: "A" }),
+    webOf({
+      pages: [pageOf("https://example.com/a"), pageOf("https://example.com/a", { title: "A" })],
+    }),
   ]);
   expect(count()).toBe("1 source");
   await open();
@@ -168,7 +181,7 @@ test("a page opened twice in one tool call shows once", async () => {
 });
 
 test("a Claude search with no results says so in two muted words", async () => {
-  await answered([searched(1, "rare query")]);
+  await answered([searched("rare query")]);
   await open();
   expect(h!.one("web-source-query")?.textContent).toBe("'rare query'");
   expect(h!.one("web-source-note")?.textContent).toBe("No results");
@@ -176,7 +189,7 @@ test("a Claude search with no results says so in two muted words", async () => {
 });
 
 test("a Codex search: one muted line behind the info glyph, no links, the search glyph folded", async () => {
-  await answered([searched(1, "notice period", [], { agent: "codex-acp" })], "codex-acp");
+  await answered([searched("notice period")], "codex-acp");
   expect(marks()).toEqual(["search"]);
   // no page, so no count: the glyph and the chevron, the button named for what it opens to
   expect(count()).toBeUndefined();
@@ -190,7 +203,7 @@ test("a Codex search: one muted line behind the info glyph, no links, the search
 });
 
 test("a page Codex opened: its tile and link, and an info tip that says it was opened on OpenAI's side", async () => {
-  await answered([visited(1, "https://example.com/x", { via: "codex_open_page" })], "codex-acp");
+  await answered([visited("https://example.com/x", { via: "codex_open_page" })], "codex-acp");
   await open();
   expect(lead(rows()[0]!)).toBe("tile:E");
   expect(words(rows()[0]).trim()).toBe("x example.com");
@@ -209,8 +222,8 @@ test("a page Codex opened: its tile and link, and an info tip that says it was o
 
 test("a page the browser opened shows the browser glyph in its tile's place, named; an unknown way reads as a plain page", async () => {
   await answered([
-    visited(1, "https://example.com/b", { via: "browser", title: "B" }),
-    visited(2, "https://example.com/u", { via: "teleport" as never, title: "U" }),
+    visited("https://example.com/b", { via: "browser", title: "B" }),
+    visited("https://example.com/u", { via: "teleport" as never, title: "U" }),
   ]);
   await open();
   expect(rows().map(lead)).toEqual(["browser", "tile:E"]);
@@ -227,14 +240,15 @@ test("a page the browser opened shows the browser glyph in its tile's place, nam
 
 test("the count is the distinct pages: a search's results and the pages read, an address in both once, no search counted", async () => {
   await answered([
-    searched(1, "notice period", [
+    searched("notice period", [
       { title: "A", url: "https://example.com/a" },
       { title: "B", url: "https://example.com/b" },
     ]),
-    searched(2, "rare query"),
-    visited(3, "https://example.com/a", { title: "A" }),
-    visited(4, "https://example.com/c", { call: "c" }),
-    visited(5, "https://example.com/c", { call: "c", title: "C" }),
+    searched("rare query"),
+    visited("https://example.com/a", { title: "A" }),
+    webOf({
+      pages: [pageOf("https://example.com/c"), pageOf("https://example.com/c", { title: "C" })],
+    }),
   ]);
   expect(count()).toBe("3 sources");
   expect(toggle().getAttribute("aria-label")).toBeNull();
@@ -243,7 +257,7 @@ test("the count is the distinct pages: a search's results and the pages read, an
 });
 
 test("searches with no pages have no count: the search glyph, the chevron, named Searches", async () => {
-  await answered([searched(1, "rare query"), searched(2, "rarer query")]);
+  await answered([searched("rare query"), searched("rarer query")]);
   expect(marks()).toEqual(["search"]);
   expect(count()).toBeUndefined();
   expect(words(toggle())).toBe("");
@@ -252,10 +266,10 @@ test("searches with no pages have no count: the search glyph, the chevron, named
 
 test("a page with no title never links its whole address: its file name, decoded, then its site; or its site alone", async () => {
   await answered([
-    visited(1, "https://example.com/docs/plain%20notice.pdf?x=1#p2"),
-    visited(2, "https://example.com/opened/", { via: "browser" }),
-    visited(3, "https://www.example.org/"),
-    searched(4, "notice period", [{ title: "", url: "https://example.com/untitled" }]),
+    visited("https://example.com/docs/plain%20notice.pdf?x=1#p2"),
+    visited("https://example.com/opened/", { via: "browser" }),
+    visited("https://www.example.org/"),
+    searched("notice period", [{ title: "", url: "https://example.com/untitled" }]),
   ]);
   await open();
   expect(words(rows()[0])).toBe("plain notice.pdf example.com");
@@ -269,8 +283,8 @@ test("a page with no title never links its whole address: its file name, decoded
 
 test("no tile asks the web for anything: letters only, no image, no favicon address", async () => {
   await answered([
-    searched(1, "notice", [{ title: "A", url: "https://example.com/a" }]),
-    visited(2, "https://example.org/b", { title: "B" }),
+    searched("notice", [{ title: "A", url: "https://example.com/a" }]),
+    visited("https://example.org/b", { title: "B" }),
   ]);
   await open();
   const list = h!.one("web-sources")!;
@@ -281,7 +295,7 @@ test("no tile asks the web for anything: letters only, no image, no favicon addr
 });
 
 test("a link press opens the address through open_external, never the webview", async () => {
-  await answered([visited(1, "https://example.com/very/long/path?q=1", { title: "Long" })]);
+  await answered([visited("https://example.com/very/long/path?q=1", { title: "Long" })]);
   await open();
   const link = h!.one("web-source-link") as HTMLAnchorElement;
   const press = new MouseEvent("click", { bubbles: true, cancelable: true });
@@ -295,9 +309,9 @@ test("a link press opens the address through open_external, never the webview", 
 
 test("an address that isn't http or https sits under no link: a data: page and a file: result are plain text", async () => {
   await answered([
-    visited(1, "data:text/html,<script>alert(1)</script>"),
-    visited(2, "JavaScript:alert(1)", { title: "Looks fine" }),
-    searched(3, "notice period", [
+    visited("data:text/html,<script>alert(1)</script>"),
+    visited("JavaScript:alert(1)", { title: "Looks fine" }),
+    searched("notice period", [
       { title: "Calculator", url: "file:///C:/Windows/System32/calc.exe" },
       { title: "India Code", url: "https://www.indiacode.nic.in/" },
     ]),
@@ -315,7 +329,7 @@ test("an address that isn't http or https sits under no link: a data: page and a
 });
 
 test("a middle click on a source link is cancelled and opens through open_external", async () => {
-  await answered([visited(1, "https://example.com/aux", { title: "Aux" })]);
+  await answered([visited("https://example.com/aux", { title: "Aux" })]);
   await open();
   const link = h!.one("web-source-link") as HTMLAnchorElement;
   const press = new MouseEvent("auxclick", { bubbles: true, cancelable: true, button: 1 });
@@ -329,9 +343,9 @@ test("a middle click on a source link is cancelled and opens through open_extern
 
 test("a Hindi title and query are marked Hindi, an English one isn't, and each is isolated", async () => {
   await answered([
-    searched(1, "किराया नियंत्रण अधिनियम नोटिस"),
-    visited(2, "https://example.in/x", { title: "दिल्ली किराया नियंत्रण अधिनियम, धारा 14" }),
-    visited(3, "https://example.com/y", { title: "Rent Control Act" }),
+    searched("किराया नियंत्रण अधिनियम नोटिस"),
+    visited("https://example.in/x", { title: "दिल्ली किराया नियंत्रण अधिनियम, धारा 14" }),
+    visited("https://example.com/y", { title: "Rent Control Act" }),
   ]);
   await open();
   const bdis = rows().map((r) => r.querySelector("bdi"));
@@ -339,37 +353,45 @@ test("a Hindi title and query are marked Hindi, an English one isn't, and each i
   expect(bdis.map((b) => b?.getAttribute("lang"))).toEqual(["hi", "hi", null]);
 });
 
-test("a source whose tool call isn't one of the turn's shows nothing", async () => {
+test("a tool call without web shows no sources under the answer", async () => {
   h = await mountRoom();
-  h.deliver([reset([userMessage(5, 1, "Q?"), agentText(6, 1, "A."), step(9)])]);
-  await act(async () => h!.transport.deliver(eventsOf([searched(1, "elsewhere")])));
+  await h.deliverAwaited([
+    reset([userMessage(5, 1, "Q?"), bare(10, "call-0"), agentText(40, 1, "A."), step(50)]),
+  ]);
+  expect(h.one("message-agent")).not.toBeNull();
   expect(h.one("web-sources")).toBeNull();
 });
 
-test("no envelopes: nothing under the answer", async () => {
-  await answered(null);
+test("an answer with no tool calls shows nothing under it", async () => {
+  await answered([]);
+  expect(h!.one("message-agent")).not.toBeNull();
   expect(h!.one("web-sources")).toBeNull();
 });
 
-test("FakeTransport plays a new listener the envelopes delivered before it", () => {
-  const transport = new FakeTransport();
-  const first = searched(1, "before");
-  transport.deliver(eventsOf([first]));
-  const heard: Envelope[][] = [];
-  const stop = transport.onEnvelopes((e) => heard.push([...e]));
-  const second = visited(2, "https://example.com");
-  transport.deliver(JSON.stringify(eventsOf([second])));
-  stop();
-  transport.deliver(eventsOf([visited(3, "https://example.com/c")]));
-  expect(heard).toEqual([[first], [second]]);
+test("a tool call's web that arrives later shows: the folded line appears with its count", async () => {
+  h = await mountRoom();
+  await h.deliverAwaited([
+    reset(
+      [userMessage(5, 1, "Q?"), bare(10, "call-0"), agentText(40, 1, "A."), step(50)],
+      headerOf("claude-acp"),
+    ),
+  ]);
+  expect(h.one("web-sources")).toBeNull();
+  const web = webOf({
+    search: searchOf("notice", [{ title: "A", url: "https://example.com/a" }]),
+    pages: [pageOf("https://example.org/b", { title: "B" })],
+  });
+  await act(async () => h!.deliver([upsert(webCall(10, "call-0", web))]));
+  expect(h.one("web-sources")).not.toBeNull();
+  expect(count()).toBe("2 sources");
 });
 
 test("under the folded step chip, the sources line comes after the answer's words and repeats none of the chip's words", async () => {
   await answered([
-    searched(1, "notice period rent control", [
+    searched("notice period rent control", [
       { title: "Rent Control Act, s. 14", url: "https://example.org/act" },
     ]),
-    visited(2, "https://example.com/a"),
+    visited("https://example.com/a"),
   ]);
   const chip = h!.one("step-group")!;
   const said = h!.one("message-agent")!;
