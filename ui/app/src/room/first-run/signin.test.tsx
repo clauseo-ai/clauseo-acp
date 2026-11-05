@@ -14,6 +14,7 @@ import {
   CODEX,
   READY,
   SIGNED_IN,
+  button,
   byId,
   counts,
   enter,
@@ -439,4 +440,25 @@ test.each<[FoundLogin, string]>([
   expect(text()).not.toContain("Use an API key or my firm's account");
   await press("Sign in");
   expect(setups(t).at(-1)).toEqual({ start_sign_in: { agent: CODEX } });
+});
+
+test("plan-key: opening the key panel puts the focus in the API key field, and Cancel gives it back to the button that opened it", async () => {
+  await at({ signed_out: {} });
+  const opener = button("Use an API key or my firm's account") as HTMLButtonElement;
+  opener.focus();
+  await press(opener);
+  expect(document.activeElement).toBe(byId("signin-key"));
+  await press(byId("signin")?.querySelector<HTMLButtonElement>(".fl-gate-cancel") ?? null);
+  expect(byId("signin-key")).toBeNull();
+  expect(document.activeElement?.textContent).toBe("Use an API key or my firm's account");
+});
+
+test("signin-nudge: Paste it puts the focus in the code field, and Cancel gives it back to Paste it", async () => {
+  await at({ waiting: { since: AT, nudge: true } });
+  byId("signin-paste")?.focus();
+  await press(byId("signin-paste"));
+  expect(document.activeElement).toBe(byId("signin-code"));
+  await press(byId("signin-cancel"));
+  expect(byId("signin-code")).toBeNull();
+  expect(document.activeElement).toBe(byId("signin-paste"));
 });

@@ -20,6 +20,7 @@ import type {
   SignIn,
   UiCount,
 } from "../../transport/protocol.ts";
+import { fakeNext } from "../fake-next.ts";
 import { Room } from "../room.tsx";
 import { connectRoom } from "../start.ts";
 
@@ -94,6 +95,8 @@ export type RigOptions = {
   settings?: SettingsView;
   platform?: "mac" | "windows" | "linux";
   language?: Lang;
+  /** The agents the host lists (R15's list_agents): both plans unless a test says otherwise. */
+  agents?: AgentId[];
   /** The folder the picker gives; null: cancelled. */
   picked?: { folder: string; display: string } | null;
 };
@@ -123,6 +126,18 @@ export async function mountFirstRun(o: RigOptions = {}) {
         ? { folder: "folder-ref-1", display: "Documents/Matters/Rathi Steels" }
         : o.picked,
     setup: { first: () => o.first ?? [] },
+    next: fakeNext({
+      matters: () => [],
+      agents: (o.agents ?? [CLAUDE, CODEX]).map((id) => ({
+        id,
+        ...(id === CLAUDE
+          ? { kind: "claude" as const }
+          : id === CODEX
+            ? { kind: "codex" as const }
+            : {}),
+      })),
+      parts: ["agents"],
+    }),
   };
   const transport = new FakeTransport(fake);
   connectRoom(transport, { language: o.language ?? "en" });

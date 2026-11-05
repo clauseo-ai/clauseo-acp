@@ -362,7 +362,8 @@ function RoomFrame({
       ? scratch
         ? w.t("Scratch matter")
         : open.name
-      : view.phase === "ready"
+      : // the first screen stands with no title: the rail says "No matters yet" (design, welcome.tsx)
+        view.phase === "ready" && !welcome
         ? frame(w.lang, "No matters yet")
         : "";
   return (

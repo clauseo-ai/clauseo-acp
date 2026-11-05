@@ -8,14 +8,17 @@ import type { WorkingState } from "@clauseo/components/clauseo/working-line.tsx"
 
 export type Hold = { gate?: ReactNode; working?: WorkingState | null; line?: ReactNode };
 
-type Holder = { hold: Hold | null; heard: Set<() => void> };
+/** `read` gives the hold for the setup store's state now (the first run sets it, null before); `heard` hears each change,
+ * the store's own emits forwarded, so the composer renders in the same commit as the first run. */
+type Holder = { read: () => Hold | null; heard: Set<() => void> };
 
 const holders = new WeakMap<object, Holder>();
 
 /** The transport's one holder, made on first ask. */
 export function holderOf(transport: object): Holder {
   let holder = holders.get(transport);
-  if (holder === undefined) holders.set(transport, (holder = { hold: null, heard: new Set() }));
+  if (holder === undefined)
+    holders.set(transport, (holder = { read: () => null, heard: new Set() }));
   return holder;
 }
 
@@ -25,7 +28,7 @@ export function useHold(transport: object | null): Hold | null {
   "use no memo";
   // with no transport (a composer mounted alone), a holder no first run ever sets
   const holder = holderOf(transport ?? holders);
-  const read = () => holder.hold;
+  const read = () => holder.read();
   return useSyncExternalStore(
     (heard) => {
       holder.heard.add(heard);

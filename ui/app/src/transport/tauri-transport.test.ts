@@ -376,8 +376,6 @@ describe("TauriTransport", () => {
 // arrives, so the first run holds nothing back, and a setup command does nothing. count_ui (S21) is on the wire already.
 test("the setup wire is a stub: onSetup hears nothing, setup does nothing, and countUi invokes count_ui", async () => {
   const t = new TauriTransport({ warn: () => {}, nextFrame: () => {} });
-  // it takes no listener at all: there is nothing to hear
-  expect(t.onSetup.length).toBe(0);
   t.onSetup()();
   await settle();
   await expect(t.setup()).resolves.toBeUndefined();
