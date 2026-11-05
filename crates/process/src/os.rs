@@ -28,4 +28,4 @@ mod windows;
 #[cfg(windows)]
 pub(crate) use windows::{Root, Tree, named, now, prepare, terminate};
 #[cfg(all(windows, feature = "test-support"))]
-pub(crate) use windows::{kill_pid, running, started_before_now};
+pub(crate) use windows::{image_and_parent, kill_pid, running, started_before_now};

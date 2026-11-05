@@ -70,13 +70,15 @@ impl Drop for Reap {
     }
 }
 
-/// The agent's conhost on Windows, and what a test asks about a process there, through
-/// PowerShell's `Get-CimInstance`.
+/// The agent's conhost on Windows, checked natively (`clauseo_process::image_and_parent`); only a
+/// failed check asks PowerShell's `Get-CimInstance` for more, as a cold PowerShell and its WMI
+/// query can take seconds on a loaded runner.
 #[cfg(windows)]
 mod console {
-    use std::ffi::OsStr;
     use std::fmt;
     use std::path::{Path, PathBuf};
+
+    use clauseo_process::image_and_parent;
 
     /// The pid of the agent's conhost in a snapshot `listed` that holds the child `first`. The
     /// agent starts with a console that has no window, so Windows starts a `conhost.exe` for it
@@ -88,37 +90,46 @@ mod console {
             listed.contains(&first),
             "{listed:?} misses the child {first}"
         );
-        let mut others = Vec::new();
-        for pid in listed.into_iter().filter(|&pid| pid != first) {
-            others.push(Info::of(pid).await);
-        }
+        let others: Vec<u32> = listed.into_iter().filter(|&pid| pid != first).collect();
         let conhost = conhost();
         match others.as_slice() {
-            [] => None,
-            [only] if only.is_conhost_of(&conhost, agent) => Some(only.pid),
-            _ => panic!(
-                "besides the child {first}, the snapshot holds more than {conhost:?} with parent \
-                 {agent}: {}",
-                others
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join("; ")
-            ),
+            [] => return None,
+            &[only] if is_conhost_of(only, &conhost, agent) => return Some(only),
+            _ => {}
         }
+        let mut described = Vec::new();
+        for &pid in &others {
+            described.push(Info::of(pid).await.to_string());
+        }
+        panic!(
+            "besides the child {first}, the snapshot holds more than {conhost:?} with parent \
+             {agent}: {}",
+            described.join("; ")
+        )
     }
 
-    /// A process as CIM reports it; each field is empty when CIM did not say.
+    /// Whether process `pid` runs `conhost` (the full path, ASCII case aside) with `agent` as
+    /// its parent.
+    fn is_conhost_of(pid: u32, conhost: &Path, agent: u32) -> bool {
+        image_and_parent(pid).is_some_and(|(image, parent)| {
+            image.as_os_str().eq_ignore_ascii_case(conhost.as_os_str()) && parent == agent
+        })
+    }
+
+    /// A process as the native lookup and CIM report it, for a failure's message; each CIM field
+    /// is empty when CIM did not say.
     struct Info {
         pid: u32,
+        native: Option<(PathBuf, u32)>,
         image: String,
         parent: String,
         created: String,
     }
 
     impl Info {
-        /// Process `pid`'s image, parent pid and creation date.
+        /// Process `pid`'s image and parent pid, natively and from CIM, and its creation date.
         async fn of(pid: u32) -> Info {
+            let native = image_and_parent(pid);
             let script = format!(
                 "$p = Get-CimInstance Win32_Process -Filter 'ProcessId={pid}'; \
                  if ($p) {{ $p.ExecutablePath; $p.ParentProcessId; \
@@ -134,19 +145,11 @@ mod console {
             let mut next = || lines.next().unwrap_or_default();
             Info {
                 pid,
+                native,
                 image: next(),
                 parent: next(),
                 created: next(),
             }
-        }
-
-        /// Whether it runs `conhost` (the full path, ASCII case aside) with `agent` as parent.
-        fn is_conhost_of(&self, conhost: &Path, agent: u32) -> bool {
-            OsStr::new(&self.image).eq_ignore_ascii_case(conhost.as_os_str())
-                && self
-                    .parent
-                    .parse::<u32>()
-                    .is_ok_and(|parent| parent == agent)
         }
     }
 
@@ -154,13 +157,15 @@ mod console {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             let Info {
                 pid,
+                native,
                 image,
                 parent,
                 created,
             } = self;
             write!(
                 f,
-                "pid {pid}: image {image:?}, parent {parent:?}, created {created:?}"
+                "pid {pid}: natively {native:?}; CIM image {image:?}, parent {parent:?}, \
+                 created {created:?}"
             )
         }
     }
