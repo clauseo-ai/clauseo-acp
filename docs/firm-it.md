@@ -87,8 +87,11 @@ user ([tauri#13926](https://github.com/tauri-apps/tauri/issues/13926)).
 - **Check every download** against `SHA256SUMS.txt` from the same release:
   `sha256sum -c SHA256SUMS.txt --ignore-missing` on Linux or macOS (`shasum -a 256 -c` on older
   macOS), or `Get-FileHash .\Clauseo_<v>_x64-machine-setup.exe` in PowerShell and compare by eye.
-  Every asset also has a GitHub build provenance attestation
-  (`gh attestation verify <file> --repo clauseo-ai/clauseo-acp`; decision 0035, "Consequences").
+  The sums come from the same release page as the file, so they show the file is the one listed
+  there. The stronger check is the GitHub build provenance attestation every asset has, made by
+  `.github/workflows/release.yml` (`actions/attest-build-provenance`): it shows the file was built
+  by that workflow from this repository. `gh attestation verify <file> -R clauseo-ai/clauseo-acp`
+  (decision 0035, "Consequences").
 
 ## 3. AppLocker and WDAC
 
@@ -139,15 +142,16 @@ Clauseo draws its window with Microsoft Edge WebView2, Evergreen.
   (`crates/settings/src/locations.rs`, `Locations::resolve_for`), never in the roaming profile.
   New matters go in `Documents\Clauseo` unless `matters.default_location` says otherwise.
 - **Keep Clauseo's data folder out of sync roots and roaming profiles** (OneDrive, iCloud Drive,
-  Dropbox, a roaming profile): it holds the agents' logins as plain files, e.g. Codex's
-  `agents\codex-acp\home\auth.json` in it. By default the folder is in none of them; the risk is
+  Dropbox, a roaming profile): it holds Codex's login, and on Windows Claude's, as plain files, e.g.
+  Codex's `agents\codex-acp\home\auth.json` in it. By default the folder is in none of them; the risk is
   a folder redirection, or `CLAUSEO_DATA_DIR`, putting it there
   ([decision 0048](decisions/0048-signin-on-the-wire.md), "Consequences"). Section 5's persistent
   profile container is a different thing: keep the folder there.
 - **The host log:** `logs\host.log` in the data folder (on a Mac,
   `~/Library/Application Support/ai.clauseo.desktop/logs/host.log`). At 5 MB it rolls over to
   `host.1.log`, then `host.2.log`: three files, 15 MB at most. It holds Clauseo's own warnings and
-  errors, and its own start, stop, agent launch and matter open lines, by id and code only: no
+  errors, and its own lines when it starts and stops, when Claude or Codex starts and ends, and
+  when a matter opens or closes, by id and code only: no
   matter content and no file paths or names. It stays on the machine and is never uploaded. On
   Windows the uninstaller removes it with the rest of the uninstalling user's data folder when
   the "Also delete conversations, saved versions and settings" box is ticked; on a Mac it stays
