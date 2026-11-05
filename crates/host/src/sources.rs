@@ -164,6 +164,19 @@ pub(crate) fn clean_title(text: &str) -> String {
         .to_owned()
 }
 
+/// The URL a record keeps, when `text` is one: an explicit `http://` or `https://` (in either
+/// case) with a host after it. Nothing is added to it: a value with no scheme is no URL, so text
+/// such as `Note (see below)` never becomes a link. The browser's address-bar rule in
+/// `browser.rs`, which adds `https://`, is for the browser's own opens only.
+pub(crate) fn record_url(text: &str) -> Option<String> {
+    let rest = ["https://", "http://"].iter().find_map(|scheme| {
+        let head = text.get(..scheme.len())?;
+        head.eq_ignore_ascii_case(scheme)
+            .then(|| &text[scheme.len()..])
+    })?;
+    (!rest.is_empty() && !rest.starts_with('/')).then(|| text.to_owned())
+}
+
 /// A tool call's `rawInput` or `rawOutput` as JSON: inline text only. A blob is too large to be
 /// a web tool's and is passed over (the watcher reads events before the host spills them).
 pub(crate) fn json_of(text: Option<&TextOrBlob>) -> Option<Value> {

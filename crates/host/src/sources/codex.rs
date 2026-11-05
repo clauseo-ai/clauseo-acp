@@ -13,8 +13,7 @@
 use clauseo_protocol::{PageVia, ToolKind};
 use serde_json::Value;
 
-use super::browser::web_url;
-use super::{Found, query_of};
+use super::{Found, query_of, record_url};
 
 /// Whether a call is Codex's search, by its shape: kind `search`, and an input that has a
 /// `query` (the start item's is empty, but present).
@@ -37,7 +36,7 @@ pub(crate) fn found(input: &Value) -> Option<Found> {
             })
         }
         Some("openPage" | "findInPage") => {
-            let url = web_url(action?.get("url")?.as_str()?)?;
+            let url = record_url(action?.get("url")?.as_str()?)?;
             Some(Found::Page {
                 url,
                 title: None,
