@@ -479,6 +479,8 @@ mod ntfs {
         assert!(!has(&child, pool_user.as_str(), false));
         assert_deny(&child, GROUP_SID, true);
         assert_deny(&child, OWNER_RIGHTS_SID, true);
+        // Removed, so the runner can delete the place: the inherit-only deny would stop it.
+        remove_shared_write_denies(&mut acl, &grants).unwrap();
     }
 
     #[test]
