@@ -330,6 +330,17 @@ fn a_download_is_saved_whole_as_the_one_file_of_its_folder() {
     assert_eq!(names(&updates), ["0.4.1"]);
 }
 
+/// An install that failed and could not put the old app back (macOS) says so in its own I/O
+/// line, never with the folder it names.
+#[test]
+fn an_old_app_not_put_back_is_its_own_io_line() {
+    let error = PluginError::PreviousAppNotRestored(PathBuf::from("/Applications/Clauseo.app"));
+    assert_eq!(
+        plugin::failure(&error),
+        UpdaterError::Io("the update failed and the old app was not put back".to_owned())
+    );
+}
+
 /// No failure line carries the plugin's text, which can name a URL or a path.
 #[test]
 fn no_failure_line_names_a_url_or_a_path() {
