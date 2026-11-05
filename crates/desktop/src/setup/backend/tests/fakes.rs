@@ -9,7 +9,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use clauseo_agents::keys::Keychain;
 use clauseo_agents::{Clock, InstallState, Installed, Method, PasteCode, SigninError, SigninState};
 use clauseo_protocol::{AgentId, HostError, SetupCommand, SetupEvent};
-use clauseo_settings::{AgentLaunch, EntryWrite, Plan};
+use clauseo_settings::{AgentLaunch, EntryWrite};
 use serde_json::json;
 
 use super::super::{AgentInfo, AgentsBackend, SetupAgents};
@@ -98,7 +98,7 @@ impl SetupAgents for FakeAgents {
 #[derive(Clone, PartialEq, Eq)]
 pub(super) enum HostCall {
     SetAgentLaunch(AgentId, AgentLaunch),
-    SetPlan(AgentId, Option<Plan>),
+    SetEndpoint(AgentId, Option<String>),
     RestartAgents(AgentId),
     StopAgents(AgentId),
     SetReusedLogin(AgentId, bool),
@@ -112,7 +112,7 @@ impl std::fmt::Debug for HostCall {
             Self::SetAgentLaunch(agent, launch) => {
                 write!(f, "set_agent_launch({agent}, {launch:?})")
             }
-            Self::SetPlan(agent, plan) => write!(f, "set_plan({agent}, {plan:?})"),
+            Self::SetEndpoint(agent, url) => write!(f, "set_endpoint({agent}, {url:?})"),
             Self::RestartAgents(agent) => write!(f, "restart_agents({agent})"),
             Self::StopAgents(agent) => write!(f, "stop_agents({agent})"),
             Self::SetReusedLogin(agent, reused) => write!(f, "set_reused_login({agent}, {reused})"),
@@ -146,8 +146,12 @@ impl SetupHost for RecordingHost {
         lock(&self.0).push(HostCall::SetAgentLaunch(agent, launch));
         Box::pin(std::future::ready(Ok(EntryWrite::Written)))
     }
-    fn set_plan(&self, agent: AgentId, plan: Option<Plan>) -> BoxFuture<'_, Result<(), HostError>> {
-        self.record(HostCall::SetPlan(agent, plan))
+    fn set_endpoint(
+        &self,
+        agent: AgentId,
+        endpoint: Option<String>,
+    ) -> BoxFuture<'_, Result<(), HostError>> {
+        self.record(HostCall::SetEndpoint(agent, endpoint))
     }
     fn restart_agents(&self, agent: AgentId) -> BoxFuture<'_, Result<(), HostError>> {
         self.record(HostCall::RestartAgents(agent))
@@ -233,6 +237,15 @@ pub(super) fn rig(accept: bool) -> Rig {
 
 /// [`rig`] whose `KeyCache` loads from `keychain` (a memory one) at start.
 pub(super) fn rig_on(accept: bool, keychain: Keychain) -> Rig {
+    rig_with(accept, keychain, false)
+}
+
+/// [`rig`] with Claude's `plans.<id>` set by policy when `plan_locked`.
+pub(super) fn rig_locked(plan_locked: bool) -> Rig {
+    rig_with(true, Keychain::memory(), plan_locked)
+}
+
+fn rig_with(accept: bool, keychain: Keychain, plan_locked: bool) -> Rig {
     let agents = Arc::new(FakeAgents::default());
     let host = Arc::new(RecordingHost::default());
     let confirm = Arc::new(FakeConfirm {
@@ -248,6 +261,8 @@ pub(super) fn rig_on(accept: bool, keychain: Keychain) -> Rig {
                 name: name.to_owned(),
                 hosts: vec!["registry.npmjs.org".to_owned()],
                 home: home(&agent),
+                plan_locked: plan_locked && agent == claude(),
+                provider: false,
             };
             (agent, info)
         })

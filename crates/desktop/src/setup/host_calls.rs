@@ -3,7 +3,7 @@
 //! app goes through the bridge's [`HostCell`] ([`CellHost`]).
 //!
 //! R20 P5b piece A calls [`SetupHost::set_agent_launch`] (an install's `Ready`) and
-//! [`SetupHost::set_plan`] (`SetFirmEndpoint`). The others are piece B's (the leave order, the
+//! [`SetupHost::set_endpoint`] (`SetFirmEndpoint`). The others are piece B's (the leave order, the
 //! restarts, `LoginChanged`). This host has none of them yet (P4b, #440, adds `restart_agents`,
 //! `stop_agents`, `set_reused_login` and `remove_login_links`; `login_changed` is P4b's
 //! follow-up), so [`CellHost`] answers each with `internal` until they land.
@@ -11,7 +11,7 @@
 use std::sync::Arc;
 
 use clauseo_protocol::{AgentId, ErrorCode, HostError};
-use clauseo_settings::{AgentLaunch, EntryWrite, Plan};
+use clauseo_settings::{AgentLaunch, EntryWrite};
 
 use crate::dialogs::BoxFuture;
 use crate::host_start::HostCell;
@@ -25,8 +25,13 @@ pub(crate) trait SetupHost: Send + Sync {
         launch: AgentLaunch,
     ) -> BoxFuture<'_, Result<EntryWrite, HostError>>;
 
-    /// Writes or removes `agent`'s `plans.<id>` (`HostHandle::set_plan`).
-    fn set_plan(&self, agent: AgentId, plan: Option<Plan>) -> BoxFuture<'_, Result<(), HostError>>;
+    /// Sets or removes `agent`'s `plans.<id>.endpoint`, keeping the plan's provider and
+    /// variables (`HostHandle::set_plan_endpoint`).
+    fn set_endpoint(
+        &self,
+        agent: AgentId,
+        endpoint: Option<String>,
+    ) -> BoxFuture<'_, Result<(), HostError>>;
 
     /// Stops each live agent of that id not in a turn and resumes the queues held for its
     /// sign-in (P4b's `restart_agents`). Piece B.
@@ -69,11 +74,12 @@ impl CellHost {
     }
 }
 
-/// The answer to a call this host does not have yet: `internal`, naming the call.
+/// The answer to a call this host does not have yet (R20 P4b adds them): `internal`, naming
+/// the call in words a window may show.
 fn not_in_host(call: &str) -> HostError {
     HostError::new(
         ErrorCode::Internal,
-        format!("the host has no {call} yet (R20 P4b)"),
+        format!("{call} is not available yet in this version of Clauseo"),
     )
 }
 
@@ -92,8 +98,18 @@ impl SetupHost for CellHost {
         })
     }
 
-    fn set_plan(&self, agent: AgentId, plan: Option<Plan>) -> BoxFuture<'_, Result<(), HostError>> {
-        Box::pin(async move { self.cell.host().await?.set_plan(agent, plan).await })
+    fn set_endpoint(
+        &self,
+        agent: AgentId,
+        endpoint: Option<String>,
+    ) -> BoxFuture<'_, Result<(), HostError>> {
+        Box::pin(async move {
+            self.cell
+                .host()
+                .await?
+                .set_plan_endpoint(agent, endpoint)
+                .await
+        })
     }
 
     fn restart_agents(&self, _agent: AgentId) -> BoxFuture<'_, Result<(), HostError>> {

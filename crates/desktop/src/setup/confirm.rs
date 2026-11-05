@@ -3,7 +3,14 @@
 //! server without the lawyer's say. A decline runs nothing and answers
 //! `transport.unauthorized`, as `answer_permission`'s does. The words are fixed text and the
 //! values the backend fills in (the agent's name, the download size, the endpoint's address,
-//! already checked by the settings crate once accepted); Cancel is the default button.
+//! checked before the confirm as the settings crate checks it, `backend.rs`'s
+//! `checked_endpoint`); Cancel is the default button.
+//!
+//! A confirm has no timeout: it waits until the lawyer answers. Cancel, Escape, closing the
+//! dialog, a stopped sheet when the main window closes, or a dialog that never shows (the app
+//! closing) each decline (`dialogs::accepted`, `dialogs::confirm`), so the command runs
+//! nothing. A command dropped while its confirm is up (its window gone) runs nothing either:
+//! the answer reaches no one, and nothing waits on it.
 
 use rfd::MessageLevel;
 use tauri::{AppHandle, Runtime};

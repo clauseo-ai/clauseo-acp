@@ -1,6 +1,6 @@
 //! Desktop's two Rust-only settings writes through `HostHandle` (decision record 0048):
 //! `set_agent_launch` writes an installed agent's `agents.<id>` entry, `set_plan` a firm's
-//! `plans.<id>`. Each sends `SettingsChanged` after a write and nothing after a refusal; a locked
+//! `plans.<id>` (`set_plan_endpoint` its endpoint alone). Each sends `SettingsChanged` after a write and nothing after a refusal; a locked
 //! id is `settings.locked`, a value that breaks a rule `settings.refused`, whose message names
 //! the key and never the value; the lawyer's own entry is left alone.
 
@@ -227,5 +227,50 @@ fn set_plan_refuses_a_plan_policy_sets() {
     assert_refused(&error, ErrorCode::SettingsLocked, "plans.claude-acp", &[]);
     host.settle();
     assert_eq!(ready(&mut sub), []);
+    host.shutdown();
+}
+
+#[test]
+fn set_plan_endpoint_keeps_the_provider_and_the_variables() {
+    let dir = Dir::new("entries_plan_endpoint", &[]);
+    let host = dir.start(0);
+    let (mut sub, _first) = subscribe_app(&host);
+    let plan = Plan {
+        endpoint: None,
+        provider: Some(clauseo_settings::PlanProvider::Anthropic),
+        env: BTreeMap::from([("AWS_REGION".to_owned(), "eu-west-1".to_owned())]),
+    };
+    set_plan(&host, Some(plan)).unwrap();
+    host.settle();
+    let _written = ready(&mut sub);
+    let endpoint = |url: Option<&str>| {
+        wait(
+            "set_plan_endpoint",
+            host.handle
+                .set_plan_endpoint(claude(), url.map(str::to_owned)),
+        )
+    };
+    endpoint(Some("https://gateway.firm.example")).unwrap();
+    host.settle();
+    let view = |endpoint: Option<&str>| PlanView {
+        endpoint: endpoint.map(str::to_owned),
+        provider: Some(PlanProvider::Anthropic),
+        env_names: vec![EnvName::new("AWS_REGION").unwrap()],
+    };
+    assert_eq!(
+        changed(&ready(&mut sub)).plans,
+        BTreeMap::from([(claude(), view(Some("https://gateway.firm.example")))])
+    );
+    assert!(
+        dir.settings_json().contains("eu-west-1"),
+        "the variable's value kept"
+    );
+    endpoint(None).unwrap();
+    host.settle();
+    assert_eq!(
+        changed(&ready(&mut sub)).plans,
+        BTreeMap::from([(claude(), view(None))]),
+        "removing the endpoint keeps the rest"
+    );
     host.shutdown();
 }

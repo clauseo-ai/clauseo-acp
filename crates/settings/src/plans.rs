@@ -192,7 +192,7 @@ fn first_refused(
 /// punycode, so no right-to-left override or zero-width character), `https://` in any case,
 /// then a host and a port of at most 65535 if any, with no user name or password (`@`), query
 /// (`?`), fragment (`#`), backslash, space or control character anywhere.
-pub(crate) fn web_address_ok(url: &str) -> bool {
+pub fn web_address_ok(url: &str) -> bool {
     let Some(rest) = url
         .get(..8)
         .filter(|scheme| url.is_ascii() && scheme.eq_ignore_ascii_case("https://"))

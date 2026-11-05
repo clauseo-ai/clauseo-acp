@@ -16,6 +16,7 @@ use clauseo_settings as settings;
 use clauseo_settings::{AgentLaunch, EntryWrite, Plan, SystemFiles};
 
 use super::super::Actor;
+use super::super::input::PlanWrite;
 use super::view;
 use crate::error::Error;
 
@@ -39,16 +40,28 @@ pub(in crate::actor) fn set_agent_launch(
     Ok(written)
 }
 
-/// `set_plan`: writes `plans.<agent>` as `plan`, or removes it with `None`, and sends
-/// `SettingsChanged`.
+/// `set_plan`: writes `plans.<agent>` as `write` says (the whole plan, or `None` to remove it;
+/// or its endpoint alone, the provider and the variables kept), and sends `SettingsChanged`.
 pub(in crate::actor) fn set_plan(
     actor: &mut Actor,
     agent: &AgentId,
-    plan: Option<&Plan>,
+    write: PlanWrite,
 ) -> Result<(), Error> {
+    let plan = match write {
+        PlanWrite::Whole(plan) => plan.map(|plan| *plan),
+        PlanWrite::Endpoint(endpoint) => {
+            let mut plan = actor
+                .effective
+                .plan(agent.as_str())
+                .cloned()
+                .unwrap_or_default();
+            plan.endpoint = endpoint;
+            Some(plan)
+        }
+    };
     actor
         .effective
-        .set_plan(&SystemFiles, agent.as_str(), plan)?;
+        .set_plan(&SystemFiles, agent.as_str(), plan.as_ref())?;
     changed(actor);
     Ok(())
 }

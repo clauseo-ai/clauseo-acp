@@ -525,7 +525,7 @@ impl Actor {
                 let _gone = reply.send(written);
             }
             Request::SetPlan { agent, plan, reply } => {
-                let written = settings::set_plan(self, &agent, plan.as_deref());
+                let written = settings::set_plan(self, &agent, plan);
                 let _gone = reply.send(written);
             }
             Request::SignIn(request) => turn::sign_in_request(self, request),

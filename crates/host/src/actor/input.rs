@@ -43,6 +43,15 @@ pub(crate) enum SignInRequest {
     },
 }
 
+/// How `SetPlan` writes `plans.<agent>`.
+#[derive(Debug)]
+pub(crate) enum PlanWrite {
+    /// The whole entry, or `None` to remove it.
+    Whole(Option<Box<clauseo_settings::Plan>>),
+    /// The endpoint alone, or `None` to remove it, keeping the provider and the variables.
+    Endpoint(Option<String>),
+}
+
 /// A subscription's number, unique for the host's run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct SubId(pub(crate) u64);
@@ -117,10 +126,10 @@ pub(crate) enum Request {
         launch: Box<clauseo_settings::AgentLaunch>,
         reply: Reply<clauseo_settings::EntryWrite>,
     },
-    /// Desktop's write of an agent's firm plan, `None` to remove it.
+    /// Desktop's write of an agent's firm plan: the whole entry, or its endpoint alone.
     SetPlan {
         agent: AgentId,
-        plan: Option<Box<clauseo_settings::Plan>>,
+        plan: PlanWrite,
         reply: Reply<()>,
     },
     /// A sign-in call (`turn/sign_in.rs`).

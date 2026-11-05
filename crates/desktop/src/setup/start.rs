@@ -134,6 +134,10 @@ impl SetupStart {
                     name: entry.display_name.clone(),
                     hosts,
                     home: locations.agent_home(entry.id.as_str()),
+                    plan_locked: effective.is_locked(&format!("plans.{}", entry.id)),
+                    provider: effective
+                        .plan(entry.id.as_str())
+                        .is_some_and(|plan| plan.provider.is_some()),
                 };
                 (entry.id.clone(), info)
             })
