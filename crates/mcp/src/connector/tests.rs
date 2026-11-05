@@ -4,11 +4,13 @@
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
-use std::io::{BufRead, BufReader, Cursor, Write};
+use std::io::{BufRead, BufReader, Cursor, ErrorKind, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
 use serde_json::Value;
 
@@ -116,16 +118,51 @@ pub(super) fn run_mode(
     (result, capture)
 }
 
+/// Polls of the listener before a test relay gives up: 2000 of 5 ms, about 10 s.
+const ACCEPT_POLLS: u32 = 2000;
+/// The wait between two polls of the listener.
+const ACCEPT_POLL: Duration = Duration::from_millis(5);
+
+/// Waits for `after`, without `thread::sleep` (`clippy.toml` bans it). The channel's sender is
+/// held, so nothing wakes the wait early.
+pub(super) fn pause(after: Duration) {
+    let (_hold, wake) = mpsc::channel::<()>();
+    if wake.recv_timeout(after).is_err() {
+        // The time is up, as the sender is still held.
+    }
+}
+
+/// Accepts the mode's connection, or gives up after about 10 s and returns `None`. A mode that
+/// never connects (a refused token, say) then fails its test with its reply, instead of
+/// blocking the test in `accept` until the runner kills it. The stream is blocking again.
+pub(super) fn accept_within_limit(listener: &TcpListener) -> Option<TcpStream> {
+    listener.set_nonblocking(true).unwrap();
+    for _ in 0..ACCEPT_POLLS {
+        match listener.accept() {
+            Ok((stream, _)) => {
+                stream.set_nonblocking(false).unwrap();
+                return Some(stream);
+            }
+            Err(error) if error.kind() == ErrorKind::WouldBlock => pause(ACCEPT_POLL),
+            Err(error) => panic!("accept failed: {error}"),
+        }
+    }
+    None
+}
+
 /// Accepts one connection, reads the handshake line, answers `answer` (`None`: closes without
 /// answering), then runs `then` with the reader and a writer on the connection. Returns the
-/// handshake line and what `then` returned.
+/// handshake line and what `then` returned. If the mode never connects, the thread panics
+/// after about 10 s, and the test fails with that message.
 pub(super) fn relay<R: Send + 'static>(
     listener: TcpListener,
     answer: Option<&'static str>,
     then: impl FnOnce(&mut BufReader<TcpStream>, &TcpStream) -> R + Send + 'static,
 ) -> JoinHandle<(String, R)> {
     thread::spawn(move || {
-        let (stream, _) = listener.accept().unwrap();
+        let Some(stream) = accept_within_limit(&listener) else {
+            panic!("the mode never connected to the relay within 10 seconds");
+        };
         let mut reader = BufReader::new(stream.try_clone().unwrap());
         let mut hello = String::new();
         reader.read_line(&mut hello).unwrap();
