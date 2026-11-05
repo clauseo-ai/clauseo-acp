@@ -1,11 +1,12 @@
 //! [`apply`] on a real NTFS volume, with the ledger: rollbacks leave no entry, forgetting takes
 //! everything back, and win-01's timing row. Temp folders and synthetic SIDs.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::*;
 use crate::windows::NtfsAcl;
 use crate::windows::acl_plan::{Grant, LOW_LABEL_SID};
+use crate::windows::admit::{FolderList, ReadDir};
 use crate::windows::ledger::ledger_path;
 use crate::windows::test_acl::{Place, grant, has};
 use crate::windows::test_dacl::protect_with;
@@ -29,9 +30,38 @@ fn launch_grants(matter: &Path) -> Vec<Grant> {
     ]
 }
 
+/// Around a temp matter: the real listing, every folder `Ok`, set-asides refused, no
+/// credentials file.
+struct Around;
+
+impl FolderList for Around {
+    fn subfolders(&self, parent: &Path) -> io::Result<Vec<PathBuf>> {
+        ReadDir.subfolders(parent)
+    }
+}
+
+impl Surroundings for Around {
+    fn check(&self, _folder: &Path) -> io::Result<crate::windows::FolderSupport> {
+        Ok(crate::windows::FolderSupport::Ok)
+    }
+
+    fn set_aside(&mut self, _path: &Path) -> io::Result<()> {
+        Err(io::Error::from(io::ErrorKind::Unsupported))
+    }
+
+    fn credentials(&self) -> Option<PathBuf> {
+        None
+    }
+}
+
 fn launch(place: &Place, matter: &Path) -> Result<Applied, Error> {
     let mut plan = AdmittedPlan::from_grants(matter_one(), launch_grants(matter));
-    apply(&mut ledger(place), &mut plan, &mut NtfsAcl::new().unwrap())
+    apply(
+        &mut ledger(place),
+        &mut plan,
+        &mut NtfsAcl::new().unwrap(),
+        &mut Around,
+    )
 }
 
 #[test]
@@ -112,7 +142,13 @@ fn timing_first_propagation_and_fix_costs() {
     };
     let mut plan = AdmittedPlan::from_grants(matter_one(), vec![deny]);
     let started = std::time::Instant::now();
-    apply(&mut ledger(&place), &mut plan, &mut NtfsAcl::new().unwrap()).unwrap();
+    apply(
+        &mut ledger(&place),
+        &mut plan,
+        &mut NtfsAcl::new().unwrap(),
+        &mut Around,
+    )
+    .unwrap();
     let sibling = started.elapsed();
     println!("files {count}: first {first:?}, next launch {again:?}, one sibling deny {sibling:?}");
 }

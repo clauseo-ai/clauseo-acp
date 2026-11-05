@@ -51,22 +51,70 @@ pub(super) fn siblings(
         .collect();
     protected.extend(neighbours.reach.iter().cloned());
     let walk = Walk {
-        matter,
+        matter: Some(matter),
         kept,
         protected,
     };
     let parent_files = walk.parent_files(parent, data, policy, check)?;
     let mut found = Vec::new();
-    walk.folder(parent, check, folders, &mut found)?;
+    walk.folder(parent, check, folders, &mut found, &mut Vec::new())?;
     Ok(Walked {
         siblings: found,
         parent_files,
     })
 }
 
+/// A walk-down set ([`walk_down`]): the folders to deny, and the levels whose files to deny.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct WalkDown {
+    /// Each folder beside a protected path, at every level.
+    pub(crate) siblings: Vec<PathBuf>,
+    /// The top folder and each folder walked into, whose files directly in it a files-only deny
+    /// covers.
+    pub(crate) levels: Vec<PathBuf>,
+}
+
+/// The walk-down set below `top` around `protected` (paths inside it): the gate's step 3 walk
+/// from `top`, with nothing kept but the protected paths, so each folder beside one is taken
+/// and each folder holding one walked into. Each level must answer `Ok` as a sibling does;
+/// `Network` leaves it out. What `apply` writes in place of a sibling deny on a folder that
+/// now holds a matter (S15 PR3 review, M1).
+pub(crate) fn walk_down(
+    top: &Path,
+    protected: &[PathBuf],
+    mut check: impl FnMut(&Path) -> io::Result<FolderSupport>,
+    folders: &dyn FolderList,
+) -> Result<WalkDown, Error> {
+    if protected.is_empty() {
+        return Ok(WalkDown::default());
+    }
+    let walk = Walk {
+        matter: None,
+        kept: Vec::new(),
+        protected: protected.to_vec(),
+    };
+    let mut set = WalkDown::default();
+    let mut levels = vec![top.to_owned()];
+    walk.folder(top, &mut check, folders, &mut set.siblings, &mut levels)?;
+    for level in levels {
+        match check(&level) {
+            Ok(FolderSupport::Ok) => set.levels.push(level),
+            Ok(FolderSupport::Network) => {}
+            answer => {
+                if let Some(refusal) = refusal(answer) {
+                    return Err(refused(PathKind::ParentFiles, refusal));
+                }
+            }
+        }
+    }
+    Ok(set)
+}
+
 /// What the walk leaves alone.
 struct Walk<'p> {
-    matter: &'p Path,
+    /// The launching matter, left out with everything over or in it (none for a walk-down,
+    /// whose protected paths are walked into instead).
+    matter: Option<&'p Path>,
     kept: Vec<PathBuf>,
     protected: Vec<PathBuf>,
 }
@@ -106,13 +154,15 @@ impl Walk<'_> {
         }
     }
 
-    /// Takes each folder in `dir`: denied, left out, or (holding a protected path) walked into.
+    /// Takes each folder in `dir`: denied, left out, or (holding a protected path) walked into,
+    /// each one walked into added to `levels`.
     fn folder(
         &self,
         dir: &Path,
         check: &mut impl FnMut(&Path) -> io::Result<FolderSupport>,
         folders: &dyn FolderList,
         found: &mut Vec<PathBuf>,
+        levels: &mut Vec<PathBuf>,
     ) -> Result<(), Error> {
         let failed =
             |error: io::Error| refused(PathKind::Sibling, FolderRefusal::CheckFailed(error.kind()));
@@ -131,14 +181,16 @@ impl Walk<'_> {
                 continue;
             }
             let overlaps = |a: &Path, b: &Path| in_folder(a, b) || in_folder(b, a);
-            if overlaps(&sibling, self.matter) || self.kept.iter().any(|k| overlaps(&sibling, k)) {
+            let matter = self.matter.is_some_and(|m| overlaps(&sibling, m));
+            if matter || self.kept.iter().any(|k| overlaps(&sibling, k)) {
                 continue;
             }
             if self.protected.iter().any(|p| in_folder(&sibling, p)) {
                 continue;
             }
             if self.protected.iter().any(|p| in_folder(p, &sibling)) {
-                self.folder(&sibling, check, folders, found)?;
+                levels.push(sibling.clone());
+                self.folder(&sibling, check, folders, found, levels)?;
                 continue;
             }
             match check(&sibling) {

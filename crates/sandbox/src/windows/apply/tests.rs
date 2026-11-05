@@ -1,18 +1,20 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
+use clauseo_protocol::MatterId;
+
 use super::*;
 use crate::windows::FolderSupport;
 use crate::windows::acl_plan::Grant;
 use crate::windows::acl_plan::plan;
-use crate::windows::admit::admit_with;
+use crate::windows::admit::{FolderList, ReadDir, admit_with};
 use crate::windows::fence::{MatterFolders, Neighbours};
 use crate::windows::ledger::{EntryState, ledger_path};
 use crate::windows::test_world::{
     FakeFolders, GROUP_SID, NOTES, OTHER_POOL_SIDS, STATE, USER_SID, World, matter_one, matter_two,
     reserved, sids, trusted,
 };
-use crate::windows::writer::Label;
+use crate::windows::writer::{Label, Strict};
 
 type Key = (PathBuf, String, Rights, Inherit);
 
@@ -27,7 +29,10 @@ fn key(grant: &Grant) -> Key {
 
 /// The permission writes, in memory: the entries present, the walks asked for, and failures
 /// to give.
-#[derive(Debug, Default)]
+/// What runs before each fake write.
+type OnAdd = Box<dyn FnMut(&Grant)>;
+
+#[derive(Default)]
 struct FakeAcl {
     aces: BTreeSet<Key>,
     fail_add: Option<PathBuf>,
@@ -37,10 +42,62 @@ struct FakeAcl {
     labels: BTreeMap<PathBuf, Label>,
     /// The labels put back, in order.
     restored: Vec<(PathBuf, Label)>,
+    /// The child the last failed walk refused.
+    refused: Option<PathBuf>,
+    /// The trees handed back, with the pool users named.
+    reclaimed: Vec<(PathBuf, Vec<Sid>)>,
+    /// `fail_walk` fails once only.
+    fail_once: bool,
+    /// A walk of this root panics, as a crash would stop it.
+    panic_walk: Option<PathBuf>,
+    /// A removal panics.
+    panic_remove: bool,
+    /// Runs before each write, as another process acting meanwhile.
+    on_add: Option<OnAdd>,
+}
+
+/// What a launch needs from around the matter, faked: the real listing, every folder `Ok`,
+/// the set-asides asked for, and the credentials file.
+#[derive(Debug, Default)]
+struct Around {
+    set_aside: Vec<PathBuf>,
+    credentials: Option<PathBuf>,
+}
+
+impl FolderList for Around {
+    fn subfolders(&self, parent: &Path) -> io::Result<Vec<PathBuf>> {
+        ReadDir.subfolders(parent)
+    }
+}
+
+impl Surroundings for Around {
+    fn check(&self, _folder: &Path) -> io::Result<FolderSupport> {
+        Ok(FolderSupport::Ok)
+    }
+
+    fn set_aside(&mut self, path: &Path) -> io::Result<()> {
+        self.set_aside.push(path.to_owned());
+        Ok(())
+    }
+
+    fn credentials(&self) -> Option<PathBuf> {
+        self.credentials.clone()
+    }
+}
+
+/// The surroundings of `w`'s matter: its credential link is the credentials file.
+fn around(w: &World) -> Around {
+    Around {
+        credentials: Some(w.at(&format!("{STATE}/auth.json"))),
+        ..Around::default()
+    }
 }
 
 impl AclWriter for FakeAcl {
     fn add(&mut self, grant: &Grant) -> Result<Added, ApplyFailure> {
+        if let Some(hook) = self.on_add.as_mut() {
+            hook(grant);
+        }
         if self.fail_add.as_deref() == Some(grant.path()) {
             return Err(ApplyFailure::Io(io::ErrorKind::PermissionDenied));
         }
@@ -52,6 +109,7 @@ impl AclWriter for FakeAcl {
     }
 
     fn remove(&mut self, grant: &Grant) -> Result<(), ApplyFailure> {
+        assert!(!self.panic_remove, "a crash during a removal");
         self.aces.remove(&key(grant));
         Ok(())
     }
@@ -64,19 +122,41 @@ impl AclWriter for FakeAcl {
         &mut self,
         root: &Path,
         reach: Reach,
-        strict: Option<&[Sid]>,
+        strict: Option<&Strict>,
     ) -> Result<Walked, ApplyFailure> {
         self.walks.push((root.to_owned(), reach, strict.is_some()));
-        if let Some((at, failure)) = &self.fail_walk
+        assert!(
+            self.panic_walk.as_deref() != Some(root),
+            "a crash during a walk"
+        );
+        if let Some((at, failure)) = self.fail_walk.clone()
             && at == root
             && strict.is_some()
         {
-            return Err(*failure);
+            if self.fail_once {
+                self.fail_walk = None;
+            }
+            self.refused = Some(root.join("child"));
+            return Err(failure);
         }
         Ok(Walked {
             visited: 1,
             ..Walked::default()
         })
+    }
+
+    fn refused_at(&mut self) -> Option<PathBuf> {
+        self.refused.take()
+    }
+
+    fn reclaim(&mut self, root: &Path, pool: &[Sid]) -> Result<Walked, ApplyFailure> {
+        self.walks.push((root.to_owned(), Reach::Tree, false));
+        self.reclaimed.push((root.to_owned(), pool.to_vec()));
+        Ok(Walked::default())
+    }
+
+    fn same_file(&mut self, a: &Path, b: &Path) -> io::Result<bool> {
+        Ok(a.file_name() == b.file_name())
     }
 
     fn label(&mut self, path: &Path) -> io::Result<Option<Label>> {
@@ -130,7 +210,7 @@ fn a_launch_lists_every_entry_applied_with_fix_1_and_fix_2_per_matter() {
     let w = world("apply-launch", &[]);
     let (mut ledger, mut acl) = (ledger(&w), FakeAcl::default());
     let mut plan = launch_plan(&w, &["sib1", "sib2"]);
-    let applied = apply(&mut ledger, &mut plan, &mut acl).unwrap();
+    let applied = apply(&mut ledger, &mut plan, &mut acl, &mut around(&w)).unwrap();
 
     assert!(applied.written > 0);
     assert_eq!(ledger.entries().count(), plan.grants().len());
@@ -173,11 +253,23 @@ fn a_launch_lists_every_entry_applied_with_fix_1_and_fix_2_per_matter() {
 fn the_next_launch_writes_nothing_and_still_walks_the_matter_tree() {
     let w = world("apply-again", &[]);
     let (mut ledger, mut acl) = (ledger(&w), FakeAcl::default());
-    apply(&mut ledger, &mut launch_plan(&w, &["sib1"]), &mut acl).unwrap();
+    apply(
+        &mut ledger,
+        &mut launch_plan(&w, &["sib1"]),
+        &mut acl,
+        &mut around(&w),
+    )
+    .unwrap();
     let before: Vec<EntryId> = ledger.entries().map(|e| e.id).collect();
     acl.walks.clear();
 
-    let applied = apply(&mut ledger, &mut launch_plan(&w, &["sib1"]), &mut acl).unwrap();
+    let applied = apply(
+        &mut ledger,
+        &mut launch_plan(&w, &["sib1"]),
+        &mut acl,
+        &mut around(&w),
+    )
+    .unwrap();
     assert_eq!(applied.written, 0);
     assert_eq!(ledger.entries().map(|e| e.id).collect::<Vec<_>>(), before);
     let roots: Vec<&PathBuf> = acl.walks.iter().map(|(r, _, _)| r).collect();
@@ -195,7 +287,13 @@ fn the_next_launch_writes_nothing_and_still_walks_the_matter_tree() {
 fn a_failed_write_rolls_back_only_the_new_entries_of_this_launch() {
     let w = world("apply-rollback", &["sib3", "sib4"]);
     let (mut ledger, mut acl) = (ledger(&w), FakeAcl::default());
-    apply(&mut ledger, &mut launch_plan(&w, &["sib1"]), &mut acl).unwrap();
+    apply(
+        &mut ledger,
+        &mut launch_plan(&w, &["sib1"]),
+        &mut acl,
+        &mut around(&w),
+    )
+    .unwrap();
     let (aces, entries) = (acl.aces.clone(), ledger.entries().count());
 
     acl.fail_add = Some(w.canonical("sib4"));
@@ -203,6 +301,7 @@ fn a_failed_write_rolls_back_only_the_new_entries_of_this_launch() {
         &mut ledger,
         &mut launch_plan(&w, &["sib1", "sib3", "sib4"]),
         &mut acl,
+        &mut around(&w),
     )
     .unwrap_err();
     assert!(
@@ -210,7 +309,8 @@ fn a_failed_write_rolls_back_only_the_new_entries_of_this_launch() {
             error,
             Error::AclApply {
                 path_kind: PathKind::Sibling,
-                failure: ApplyFailure::Io(io::ErrorKind::PermissionDenied)
+                failure: ApplyFailure::Io(io::ErrorKind::PermissionDenied),
+                ..
             }
         ),
         "{error:?}"
@@ -232,7 +332,13 @@ fn a_protected_child_fails_the_walk_rolls_back_and_leaves_no_entry() {
     let w = world("apply-protected", &[]);
     let (mut ledger, mut acl) = (ledger(&w), FakeAcl::default());
     acl.fail_walk = Some((w.canonical("matter"), ApplyFailure::ProtectedChild));
-    let error = apply(&mut ledger, &mut launch_plan(&w, &["sib1"]), &mut acl).unwrap_err();
+    let error = apply(
+        &mut ledger,
+        &mut launch_plan(&w, &["sib1"]),
+        &mut acl,
+        &mut around(&w),
+    )
+    .unwrap_err();
     assert!(matches!(
         error,
         Error::AclApply {
@@ -253,12 +359,14 @@ fn an_explicit_everyone_child_in_a_sibling_refuses_the_launch() {
         &mut ledger,
         &mut launch_plan(&w, &["sib1", "sib2"]),
         &mut acl,
+        &mut around(&w),
     );
     assert!(matches!(
         error,
         Err(Error::AclApply {
             path_kind: PathKind::Sibling,
-            failure: ApplyFailure::BroadAllowChild
+            failure: ApplyFailure::BroadAllowChild,
+            ..
         })
     ));
     assert!(acl.aces.is_empty());
@@ -285,7 +393,13 @@ fn a_rollback_leaves_an_entry_another_matters_entry_names() {
     ledger.record_pending(&mut two).unwrap();
 
     acl.fail_add = Some(w.canonical(NOTES));
-    apply(&mut ledger, &mut launch_plan(&w, &["sib1"]), &mut acl).unwrap_err();
+    apply(
+        &mut ledger,
+        &mut launch_plan(&w, &["sib1"]),
+        &mut acl,
+        &mut around(&w),
+    )
+    .unwrap_err();
     assert!(
         acl.aces.contains(&key(&sibling_deny(&w))),
         "shared: left in place"
@@ -299,13 +413,14 @@ fn a_rollback_leaves_an_entry_another_matters_entry_names() {
 }
 
 #[test]
-fn a_sibling_that_becomes_a_matter_loses_its_deny_first() {
+fn a_sibling_that_becomes_a_matter_loses_its_deny_once_its_first_launch_succeeds() {
     let w = world("apply-lift", &[]);
     let (mut ledger, mut acl) = (ledger(&w), FakeAcl::default());
     apply(
         &mut ledger,
         &mut launch_plan(&w, &["sib1", "sib2"]),
         &mut acl,
+        &mut around(&w),
     )
     .unwrap();
     // Matter two shares sib2's deny.
@@ -321,7 +436,7 @@ fn a_sibling_that_becomes_a_matter_loses_its_deny_first() {
         kind: PathKind::Matter,
     };
     let mut plan = AdmittedPlan::from_grants(matter_two(), vec![modify]);
-    let applied = apply(&mut ledger, &mut plan, &mut acl).unwrap();
+    let applied = apply(&mut ledger, &mut plan, &mut acl, &mut around(&w)).unwrap();
     assert_eq!(applied.lifted, 2, "both matters' entries for the deny");
     assert!(!has(
         &acl,
@@ -343,7 +458,13 @@ fn a_sibling_that_becomes_a_matter_loses_its_deny_first() {
 fn forgetting_a_matter_removes_its_entries_but_a_shared_one_and_walks_each_tree_once() {
     let w = world("apply-forget", &[]);
     let (mut ledger, mut acl) = (ledger(&w), FakeAcl::default());
-    apply(&mut ledger, &mut launch_plan(&w, &["sib1"]), &mut acl).unwrap();
+    apply(
+        &mut ledger,
+        &mut launch_plan(&w, &["sib1"]),
+        &mut acl,
+        &mut around(&w),
+    )
+    .unwrap();
     let mut two = AdmittedPlan::from_grants(matter_two(), vec![sibling_deny(&w)]);
     ledger.record_pending(&mut two).unwrap();
     acl.walks.clear();
@@ -403,13 +524,14 @@ fn growing_the_pool_adds_the_new_users_denies_to_every_registered_matter() {
             fenced: true,
         },
     ];
-    let ok = |_: &Path| Ok(FolderSupport::Ok);
     let small = [sid(USER_SID), sid(OTHER_POOL_SIDS[0])];
-    let first = fence_registered(&mut ledger, &registered, &small, ok, &mut acl).unwrap();
+    let first =
+        fence_registered(&mut ledger, &registered, &small, &mut acl, &mut around(&w)).unwrap();
     assert_eq!(first.written, 3 + 2, "each matter fenced from the other");
 
     let grown = [small[0].clone(), small[1].clone(), sid(OTHER_POOL_SIDS[1])];
-    let next = fence_registered(&mut ledger, &registered, &grown, ok, &mut acl).unwrap();
+    let next =
+        fence_registered(&mut ledger, &registered, &grown, &mut acl, &mut around(&w)).unwrap();
     assert_eq!(
         next.written,
         3 + 2,
@@ -427,3 +549,5 @@ fn growing_the_pool_adds_the_new_users_denies_to_every_registered_matter() {
     let owners: BTreeSet<MatterId> = ledger.entries().map(|e| e.matter).collect();
     assert_eq!(owners, [matter_one(), matter_two()].into_iter().collect());
 }
+
+mod review;
