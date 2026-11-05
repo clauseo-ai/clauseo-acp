@@ -5,9 +5,10 @@
 
 use clauseo_acp::{AcpEvent, AgentUpdate, MessageRole, Origin};
 use clauseo_protocol::{
-    AgentSessionId, CommandsAvailable, CompactString, CompactionStatus, ConfigOptionsReplaced,
-    ContentBlock, DomainEvent, MessageId, ModeChanged, Notice, PlanReplaced, RenameSource,
-    StreamId, TextKind, ThreadId, ThreadRenamed, Title, ToolCallPatch, TurnId, UsageUpdated,
+    AgentId, AgentSessionId, CommandsAvailable, CompactString, CompactionStatus,
+    ConfigOptionsReplaced, ContentBlock, DomainEvent, MessageId, ModeChanged, Notice, PlanReplaced,
+    RenameSource, StreamId, TextKind, ThreadId, ThreadRenamed, Title, ToolCallPatch, TurnId,
+    UsageUpdated,
 };
 use clauseo_store::BlobIn;
 
@@ -19,6 +20,7 @@ use crate::build;
 use crate::coalesce::TextIn;
 use crate::error::Error;
 use crate::rate::{Admitted, RatedUpdate};
+use crate::sources::Sources;
 
 /// Where an update belongs.
 #[derive(Debug, Clone, Copy)]
@@ -320,20 +322,29 @@ fn tool_call(
         current.tool_paths.note(&call.locations, &call.content);
     }
     let id = actor.ids.mint(actor.clock.now().wall)?;
-    let page = state(actor, thread).and_then(|state| state.browser_opens.started(turn, id, &call));
+    let source = source_of(actor, thread, |sources, agent| {
+        sources.started(turn, id, agent, &call)
+    });
     let (built, _fields) = build::tool_call_started(turn, id, call);
     commit(actor, thread, [built.value.into()], built.blobs)?;
-    page_visited(actor, thread, page)
+    sourced(actor, thread, source)
 }
 
-/// Logs the page a browser open visited (`sources/browser.rs`), after its tool call's event.
-fn page_visited(
+/// What a tool call adds to the thread's sources (`sources.rs`), asked of the thread's state
+/// with the thread's agent.
+fn source_of(
     actor: &mut Actor,
     thread: ThreadId,
-    page: Option<clauseo_protocol::PageVisited>,
-) -> Result<(), Error> {
-    match page {
-        Some(page) => commit(actor, thread, [page.into()], Vec::new()),
+    record: impl FnOnce(&mut Sources, &AgentId) -> Option<DomainEvent>,
+) -> Option<DomainEvent> {
+    let agent = actor.check_thread(thread).ok()?.row.agent.clone();
+    record(&mut state(actor, thread)?.sources, &agent)
+}
+
+/// Logs what a tool call added to the thread's sources, after the call's own event.
+fn sourced(actor: &mut Actor, thread: ThreadId, source: Option<DomainEvent>) -> Result<(), Error> {
+    match source {
+        Some(event) => commit(actor, thread, [event], Vec::new()),
         None => Ok(()),
     }
 }
@@ -354,7 +365,7 @@ fn tool_update(
         tracing::debug!(%thread, %acp_id, "an update for an unknown tool call was dropped");
         return Ok(());
     };
-    let mut page = None;
+    let mut source = None;
     match context {
         Context::Outside { replay: true } => return Ok(()),
         Context::Live(turn) => {
@@ -363,14 +374,15 @@ fn tool_update(
                 let content = patch.content.as_deref().unwrap_or_default();
                 current.tool_paths.note(locations, content);
             }
-            page = state(actor, thread)
-                .and_then(|state| state.browser_opens.updated(turn, acp_id, &patch));
+            source = source_of(actor, thread, |sources, agent| {
+                sources.updated(turn, acp_id, agent, &patch)
+            });
         }
         Context::Outside { replay: false } => {}
     }
     let (built, _fields) = build::tool_call_updated(id, patch, fields);
     commit(actor, thread, [built.value.into()], built.blobs)?;
-    page_visited(actor, thread, page)
+    sourced(actor, thread, source)
 }
 
 /// The tool call ACP knows as `acp_id` in `session`, if the host has it.

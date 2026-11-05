@@ -1,0 +1,11 @@
+{"scenario":"claude-web-search","description":"S26's Claude WebSearch: a pending call titled Web search with an empty input, refined to its query, then completed with two Links: arrays (one repeats a URL) and Title (url) content","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1","modes":{"currentModeId":"default","availableModes":[{"id":"default","name":"Manual"},{"id":"acceptEdits","name":"Accept edits"},{"id":"plan","name":"Plan"},{"id":"auto","name":"Auto"}]}}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-search","title":"Web search","name":"WebSearch","kind":"fetch","status":"pending","rawInput":{}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-search","title":"Search \"section 138 NI Act Supreme Court\"","rawInput":{"query":"section 138 NI Act Supreme Court"}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-search","status":"completed","content":[{"type":"content","content":{"type":"text","text":"Lease Act (1882), section 105 (https://main.sci.gov.in/judgment/a)"}}],"rawOutput":"Web search results for query: \"section 138 NI Act Supreme Court\"\n\nLinks: [{\"title\": \"Lease Act (1882), section 105\", \"url\": \"https://main.sci.gov.in/judgment/a\"}, {\"title\": \"Second judgment\", \"url\": \"https://example.org/b#frag\"}]\n\nLinks: [{\"title\": \"Second judgment (repeat)\", \"url\": \"https://example.org/b\"}, {\"title\": \"Third judgment\", \"url\": \"https://indiacode.nic.in/c?id=9\"}]\n\nSummarize these."}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"The Supreme Court's judgment is linked below."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

@@ -169,7 +169,7 @@ fn url_of(raw_input: &TextOrBlob) -> Option<String> {
 /// The page an open's `url` names, as agent-browser reads it: a value with no `:` gets
 /// `https://` in front (`sci.gov.in/x`); then only an `http` or `https` URL counts, so
 /// `about:blank` and other schemes are no page.
-fn web_url(url: &str) -> Option<String> {
+pub(crate) fn web_url(url: &str) -> Option<String> {
     let url = url.trim();
     let url = if url.contains(':') {
         url.to_owned()

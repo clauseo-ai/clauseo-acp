@@ -1,0 +1,13 @@
+{"scenario":"claude-web-fetch","description":"S26's Claude WebFetch: two fetches of the same page, each completed: one WebFetch page each, with no title","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1","modes":{"currentModeId":"default","availableModes":[{"id":"default","name":"Manual"},{"id":"acceptEdits","name":"Accept edits"},{"id":"plan","name":"Plan"},{"id":"auto","name":"Auto"}]}}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-fetch-1","title":"Fetch https://sci.gov.in/judgments/a","name":"WebFetch","kind":"fetch","status":"pending","rawInput":{}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-fetch-1","status":"in_progress","rawInput":{"url":"https://sci.gov.in/judgments/a","prompt":"Summarise the holding"}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-fetch-1","status":"completed","content":[{"type":"content","content":{"type":"text","text":"The court held that the cheque was dishonoured."}}],"rawOutput":"The court held that the cheque was dishonoured."}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-fetch-2","title":"Fetch https://sci.gov.in/judgments/a","name":"WebFetch","kind":"fetch","status":"in_progress","rawInput":{"url":"https://sci.gov.in/judgments/a","prompt":"Find the date"}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-fetch-2","status":"completed","content":[{"type":"content","content":{"type":"text","text":"Decided on 2024-01-02."}}],"rawOutput":"Decided on 2024-01-02."}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"The Supreme Court's judgment is linked below."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

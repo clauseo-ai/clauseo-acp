@@ -47,6 +47,10 @@ mod claude_mode;
 #[path = "host/clear_env.rs"]
 mod clear_env;
 #[cfg(test)]
+#[path = "host/web_sources.rs"]
+mod web_sources;
+
+#[cfg(test)]
 #[path = "host/codex.rs"]
 mod codex;
 #[cfg(test)]
