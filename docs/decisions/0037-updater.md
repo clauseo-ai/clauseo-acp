@@ -34,13 +34,13 @@ PR 2 (this record's) adds the wire, stubbed, and `update.failed`.
   ["https://github.com/clauseo-ai/clauseo-acp/releases/latest/download/latest.json"]`,
   `requireSignedVersion: true`, `allowDowngrades: false`, `windows: { installMode: "passive" }`.
   Full installers, no deltas. `releases/latest` sees only published, non-prerelease releases, so
-  neither a draft nor a test pre-release is ever offered. The flags land with PR 5; the pubkey
-  and the endpoint land with PR 6.
+  neither a draft nor a test pre-release is ever offered. The flags landed with PR 5; the
+  pubkey and the endpoint land with PR 6.
 - **Empty endpoints until the real key.** PRs 1 to 5 land with `endpoints` empty (the
   `tauri-config` check refuses endpoints without a pubkey, and the plugin's `build` fails with
   `EmptyEndpoints`). A build with no endpoint uses `NoUpdater`, shown as `managed` by `package`, so
   it never touches the network. The `e2e` build alone sets an endpoint in code
-  (`E2E_UPDATE_ENDPOINT`) and trusts the test key (lands with PR 5).
+  (`E2E_UPDATE_ENDPOINT`) and trusts the test key (landed with PR 5).
 
 ### The `Updater` trait
 
@@ -63,7 +63,7 @@ The host reaches the plugin through a trait, as it reaches processes through
 - `install` is **not** the host's. On install the host shuts down cleanly and
   `HostHandle::exit` resolves `HostExit::Install(downloaded)` once its thread has stopped;
   desktop then calls the plugin's `install`, which verifies the bytes again (landed with PR 4
-  for the host; PR 5 for desktop).
+  for the host and PR 5 for desktop).
 - The plugin's futures run on `tauri::async_runtime` and hand back a
   `futures::channel::oneshot`; dropping the receiver aborts the task. Timeouts come from the
   host's `Clock::after`, so `ManualClock` tests drive them. Progress reaches the actor through a
@@ -158,7 +158,7 @@ PR 4 wires them (below, "The host's wiring").
 | any other | nothing | everything |
 
 `UpdateChanged` goes to both windows' app feeds; the settings feed restarts with `GetUpdate` as it
-does with `GetSettings` (lands with PR 5; until then the main window alone carries it).
+does with `GetSettings` (landed with PR 5).
 
 ### `update.mode` and failing closed
 
@@ -202,7 +202,7 @@ The install takes the quit path:
    at the next start; if NSIS dies after Windows exited, the next launch of the old exe does the
    same. With `to` equal to the running version it reports `updated_from` instead.
 
-Steps 1 to 3, and `read_update_marker`, landed with PR 4; steps 4 to 7 land with PR 5. S22's crash `Guard::clean_exit`
+Steps 1 to 3, and `read_update_marker`, landed with PR 4; steps 4 to 7 landed with PR 5. S22's crash `Guard::clean_exit`
 call before `install` stays a no-op seam until S22 merges.
 
 ### The host's wiring (PR 4)
@@ -251,6 +251,41 @@ call before `install` stays a no-op seam until S22 merges.
 - **Logs** name a failed step's stage and kind (`network`, `signature`, `io`, `other`), never its
   text, which may hold a path or a URL (0047).
 
+### Desktop's adapter (PR 5)
+
+`crates/desktop/src/update.rs` and its modules implement the trait over the plugin and run the
+install; what the brief left open was decided so:
+
+- **Which updater.** Linux and debug builds give the host none (`NoUpdater`, `managed` by
+  `package`), and so does a release build while `tauri.conf.json` names no endpoint, so the
+  plugin's `build` (which fails with `EmptyEndpoints`) is never called. The `e2e` build takes
+  an updater only from its variables, never from the config, so a test run never reaches the
+  real endpoint: `E2E_FAKE_UPDATE=<version>` (a fake, installed per user, that offers that
+  version at once, finishes its download at once with no file, and is never installed: the app
+  just exits), else `E2E_UPDATE_ENDPOINT` with the test key, else none. The test key is
+  compiled into the `e2e` build alone (`TRUSTS_TEST_KEY`), and two tests fail if a release
+  config or a non-`e2e` build trusts it.
+- **The plugin** is reached through `UpdaterBuilder`, with a 30 s connect and a 60 s read
+  timeout (the host sets no deadline on a check or a download). A release that has no installer
+  for this platform (`TargetNotFound`) is no update, not a failure. An error reaches the host
+  as a fixed line by its kind, never the plugin's text, which can name the URL or a path.
+- **The download** is written to `updates/.<version>.part`, synced, then moved into an emptied
+  `updates/<version>/` as its one file, so that folder never holds a half-written download.
+  A version that is not plain dotted numbers is refused.
+- **Install kind.** Windows: per machine when `Clauseo.exe` is under Program Files or the
+  machine's uninstall key `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Clauseo`
+  (64-bit view) exists; a key that cannot be read counts as there. macOS: a read-only location
+  when the folder holding `Clauseo.app` fails `access(W_OK)`, or the executable is not in an
+  `.app`. Found once at start.
+- **The install, as built.** A task watches `HostHandle::exit`; `HostExit::Install` asks the app
+  to exit, which runs the stopper thread: `host_start::stop`, the log's flush, the counts'
+  save, then the window state's save (the install and the restart skip the exit event
+  window-state saves on), the crash guard's no-op seam, a second flush, and the plugin's
+  `install`. It rebuilds the update with `restore_update(raw_json)`, checks the version is the
+  downloaded one, and hands it the file's bytes, which it verifies again. Windows exits inside
+  it (`installMode: passive`); after it returns, whether it worked (macOS) or failed, the app
+  restarts. A plain exit saves the window state on the exit event, as before.
+
 ### The key's custody
 
 - **Rohan's real key.** Rohan runs `tauri signer generate -w clauseo-updater.key` on his MacBook
@@ -265,7 +300,7 @@ call before `install` stays a no-op seam until S22 merges.
   uploads an old-key `latest.json` that points at N, so a client older than N still reaches it.
 - **The test key.** A throwaway key, `TAURI_SIGNING_PRIVATE_KEY_TEST` in the `release-test`
   environment, signs test releases (0035's `test` mode); its public half is committed as
-  `updater-test.pub` in desktop's release folder (lands with PR 5). Only the `e2e` build trusts it,
+  `updater-test.pub` in desktop's release folder (landed with PR 5). Only the `e2e` build trusts it,
   never a release build.
 
 ### Deviations from the R23 brief

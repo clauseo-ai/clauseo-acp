@@ -207,7 +207,7 @@ source that cannot be read at all (a `policy.json` that does not parse, a regist
 fails) is skipped and **locks each security key off**: `mcp.servers` empty, `tools.web_search`,
 `tools.browser`, `tools.connectors`, `privacy.counts` and `privacy.crash_reports` false, `install.bundle` and
 `install.registry` unset, `skills.extra` `off`, `skills.allow_scripts` false, `skills.curated`
-empty, and no `plans.<id>` at all. The two `privacy` keys can
+empty, `update.mode` `none`, and no `plans.<id>` at all. The two `privacy` keys can
 only be turned off by policy: a policy `true` for one is ignored with a warning, and the lawyer
 keeps their own switch. A key this version does not know is only a warning, so one profile can
 serve mixed versions, **unless its name looks like a security section's** (a section holding a
@@ -245,7 +245,7 @@ the registry or managed preferences) and the section, never a value or a path. (
   (`skills.curated`). Value names ignore case; an agent id keeps
   its case ([`crates/settings/src/policy/registry.rs`](../crates/settings/src/policy/registry.rs)).
 - **`policy.json`:** the shape of the user's `settings.json`: sections `matters`, `agents`, `mcp`,
-  `ui`, `tools`, `privacy`, `plans`, `install` and `skills`, each an object; comments and trailing commas are allowed. Sample:
+  `ui`, `tools`, `privacy`, `plans`, `install`, `skills` and `update`, each an object; comments and trailing commas are allowed. Sample:
   [`docs/firm-it/policy.sample.json`](firm-it/policy.sample.json) (Windows paths).
 - **macOS profile:** a payload whose `PayloadType` is `ai.clauseo.desktop`, with the dotted keys as
   its keys, except agents and plans: one key `agents`, a dictionary from agent id to launch spec, and
@@ -280,6 +280,7 @@ Clauseo's readers with no warning, and fails when this table misses a key.
 | `skills.curated` | list of pack ids (2 to 30 of `a-z 0-9`, single hyphens) | empty | `REG_MULTI_SZ` | `nda-kit` and `lease-kit`, one per line: the packs `curated` admits. Policy only: a `settings.json` value is ignored with a warning. **Security key**: empty if a source is unreadable or any entry is no pack id |
 | `skills.allow_scripts` | boolean | false | `REG_DWORD` 0 or 1 | 0: a pack holding a script or program is not loaded. With 1 such files are copied, never run by Clauseo, though the agent can run them. **Security key**: `false` if a source is unreadable or the value does not type |
 | `skills.enabled` | object: pack id to `sha256:<64 lowercase hex>`, the hash the pack had when turned on | empty | `REG_SZ`, JSON | `{"nda-kit": "sha256:a1b2…"}` (all 64 digits). A pack whose files no longer hash to its value is not loaded. Replaces the user's whole map and locks it. Until turning a pack on from the app ships (0040, PR-E), this is the map in the user's `settings.json` |
+| `update.mode` | `auto`, `notify`, `none` | `auto` | `REG_SZ` | `none`: Clauseo never checks for an update or installs one, and shows that your organisation manages updates. `auto` installs a downloaded update when Clauseo next opens; `notify` waits for the user. **Security key**: locks at `none` if a source is unreadable or the value does not type. A policy name this version doesn't know turns updates off until Clauseo is updated by hand; add new update.* policies only after the matching version is rolled out. Per-machine installs, and Macs whose `.app` sits in a folder the user cannot write, never update themselves anyway. Updates run only once release builds carry the update endpoint (R23 PR 6); until then every build shows updates as managed |
 
 Sources: the key list and kinds are `KEYS` in `crates/settings/src/leaf.rs`; the values and
 defaults are in [`crates/settings/src/schema.rs`](../crates/settings/src/schema.rs).
@@ -302,7 +303,6 @@ it.
 
 | Key | Task | Note |
 |---|---|---|
-| `update.mode` (`auto`, `notify`, `none`) | R23 | `none` for managed fleets; locks at `none` if a policy source is unreadable. Per-machine installs never update themselves anyway |
 | `sandbox.required`, `sandbox.allow_unprotected_auto`, `network.upstream_proxy`, `network.ca_certs`, `network.allowed_domains` | R17 | Security keys |
 
 ## 7. Hosts Clauseo reaches
@@ -313,7 +313,7 @@ allows only the app's own content and its bridge (`app.security.csp` in
 
 | Host | Why | When |
 |---|---|---|
-| `github.com`, then `release-assets.githubusercontent.com` | Downloads and, for per-user installs, updates (`latest.json` on GitHub Releases, decision 0035) | A release asset URL on `github.com` answers 302 to `release-assets.githubusercontent.com` (`curl -sI`, 2026-11-03). The updater is not on yet: `plugins.updater.endpoints` is empty in `crates/desktop/tauri.conf.json` (task R23). Per-machine installs never update themselves |
+| `github.com`, then `release-assets.githubusercontent.com` | Downloads of the installers (GitHub Releases, decision 0035) | When someone downloads an installer. A release asset URL on `github.com` answers 302 to `release-assets.githubusercontent.com` (`curl -sI`, 2026-11-03). The app itself does not reach them yet: see the updater under "Coming" |
 | `go.microsoft.com` (`/fwlink/p/?LinkId=2124703`), then `msedge.sf.dl.delivery.mp.microsoft.com` | WebView2 bootstrapper | Only when the runtime is missing at install, or when a user presses "Download WebView2". The fwlink answers 301 to that host (`curl -sI`, 2026-11-03). The bootstrapper then fetches the runtime through Edge Update from `config.edge.skype.com`, `msedge.api.cdp.microsoft.com` and `msedge.f.tlu.dl.delivery.mp.microsoft.com` (DNS-Client log, measured on Windows Server 2025, 2026-11-03; the same three per user and per machine). A runtime in your image avoids them all |
 | Edge Update's hosts (`config.edge.skype.com`, `msedge.api.cdp.microsoft.com`, `msedge.f.tlu.dl.delivery.mp.microsoft.com` seen for installs) | WebView2 runtime updates | Microsoft's, as for Edge |
 | `api.anthropic.com`, `claude.ai`, `platform.claude.com` | Claude Code, signed in with a Claude plan | While the agent works. An API key needs only `api.anthropic.com` |
@@ -333,6 +333,12 @@ included, and stores no proxy password ([decision 0039](decisions/0039-egress-pr
 
 Coming:
 
+- `github.com/clauseo-ai/clauseo-acp/releases/latest/download/latest.json`, then the release's
+  installer on `github.com` and `release-assets.githubusercontent.com`: the updater, for per-user
+  installs only ([decision 0037](decisions/0037-updater.md)), about once an hour. It starts once
+  release builds carry the update endpoint (task R23, PR 6); until then
+  `plugins.updater.endpoints` is empty in `crates/desktop/tauri.conf.json` and no build checks.
+  Never for per-machine installs, nor while `update.mode` is `none` (section 6).
 - `t.clauseo.chat`: usage counts and crash reports (tasks S21 to S23), only when they are on, and
   firms can force them off (`privacy.*`). HTTPS POSTs with `User-Agent: Clauseo`; they follow
   `HTTPS_PROXY`, then the OS's proxy settings, but not a PAC file yet, and never Clauseo's egress
