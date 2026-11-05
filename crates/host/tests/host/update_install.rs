@@ -385,3 +385,73 @@ fn a_send_now_held_on_an_idle_thread_moves_its_held_queue_on_once_the_install_is
     assert_ne!(ended.stop, StopReason::Cancelled, "{}", events.dump());
     host.shutdown_past_cancel();
 }
+
+/// The data folder's mode is set to `mode` until dropped.
+#[cfg(unix)]
+struct FolderMode<'a>(&'a std::path::Path);
+
+#[cfg(unix)]
+impl FolderMode<'_> {
+    fn set(path: &std::path::Path, mode: u32) -> FolderMode<'_> {
+        write::set_mode(path, mode);
+        FolderMode(path)
+    }
+}
+
+#[cfg(unix)]
+impl Drop for FolderMode<'_> {
+    fn drop(&mut self) {
+        write::set_mode(self.0, 0o700);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_marker_on_disk_whose_folder_sync_failed_still_installs_and_counts_once() {
+    // Review of R23 PR 4: once `update.json` is renamed into place, the data folder's sync
+    // failing is not a failed write.
+    let dir = Dir::new("update_marker_sync_failed", &[]);
+    let counts = open_counts(&dir, true);
+    let fake = FakeUpdater::offering(&dir);
+    let counted = counts.clone();
+    let host = start_updating_with(&dir, 0, &fake, CURRENT, move |config| {
+        config.with_counts(counted)
+    });
+    host.ok(HostCommand::CheckForUpdate {});
+    until_ready(&host);
+    let exit = {
+        // Write and search, no read: the rename works and the folder cannot be opened to sync.
+        let _mode = FolderMode::set(dir.data(), 0o300);
+        host.ok(install(InstallWhen::AfterTurn));
+        wait("the host's exit", host.handle.exit())
+    };
+    let path = dir.data().join("updates").join(NEXT).join("Clauseo.exe");
+    assert_installs(&exit_of_exited(host, exit), &path);
+    assert_eq!(marker_text(&dir).as_deref(), Some(INSTALLING));
+
+    // The install did not take: the next start counts one failure, the only one.
+    let counted = counts.clone();
+    let quiet = FakeUpdater::new(&dir, InstallKind::CurrentUser, None, Download::Instant);
+    let host = start_updating_with(&dir, 1, &quiet, CURRENT, move |config| {
+        config.with_counts(counted)
+    });
+    host.settle();
+    let failed: Vec<_> = counts
+        .today()
+        .update
+        .iter()
+        .filter(|cell| cell.key.result == UpdateResult::Failed)
+        .map(|cell| u64::from(cell.n))
+        .collect();
+    assert_eq!(failed, [1]);
+    host.shutdown();
+}
+
+/// Joins `host`, whose exit was `exit`.
+#[cfg(unix)]
+fn exit_of_exited(mut host: crate::support::Running, exit: HostExit) -> HostExit {
+    host.take_join()
+        .join()
+        .unwrap_or_else(|e| panic!("join: {e}"));
+    exit
+}
