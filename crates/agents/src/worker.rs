@@ -452,12 +452,7 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
         }
         let restartable = matches!(
             self.shared.lock().states.get(agent),
-            Some(
-                InstallState::Failed(_)
-                    | InstallState::Waiting { .. }
-                    | InstallState::Paused
-                    | InstallState::Missing { .. }
-            )
+            Some(InstallState::Failed(_) | InstallState::Waiting { .. } | InstallState::Paused)
         );
         if !restartable {
             return;
