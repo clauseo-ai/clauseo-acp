@@ -71,6 +71,12 @@ pub(crate) fn run(scenario: &Scenario, pace_ms: u32) -> i32 {
                 effects::write_stderr(&diagnostic("stdin closed, holding")).unwrap_or_default();
                 crate::park_forever()
             }
+            OnStdinClose::HangBriefly => {
+                effects::write_stderr(&diagnostic("stdin closed, holding briefly"))
+                    .unwrap_or_default();
+                effects::pause(crate::HANG_BRIEFLY);
+                EXIT_OK
+            }
         },
         Stop::Fail(at, message) => {
             let line = diagnostic(format_args!("{}:{}: {message}", at.file, at.line));

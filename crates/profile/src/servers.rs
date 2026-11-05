@@ -1,17 +1,21 @@
-//! The MCP servers the profile adds. One, `browser`: agent-browser's MCP server behind S27's
-//! guard.
+//! The MCP servers the profile adds: `browser`, agent-browser's MCP server behind S27's guard,
+//! then `case-law`, the paid case-law connector through the host's relay (R24).
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use crate::paths::ProfilePaths;
 use crate::placeholders::{
-    BROWSER_DIR, BROWSER_EXECUTABLE, CDP_PORT, DAEMON_PORT, PROXY_PORT, SESSION_ID, SOCKET_DIR,
-    STREAM_PORT,
+    BROWSER_DIR, BROWSER_EXECUTABLE, CDP_PORT, DAEMON_PORT, PROXY_PORT, RELAY_PORT,
+    RELAY_TOKEN_FILE, SESSION_ID, SOCKET_DIR, STREAM_PORT,
 };
 
 /// The reserved server name: a `mcp.servers.browser` entry in the settings is dropped.
 pub const BROWSER: &str = "browser";
+
+/// The case-law connector's reserved server name (R24): a `mcp.servers.case-law` entry in the
+/// settings or a policy source is dropped (`clauseo_settings::RESERVED_MCP_SERVERS`).
+pub const CASE_LAW: &str = "case-law";
 
 /// One stdio MCP server, as the host sends it in `session/new` and `session/load`. Strings
 /// may hold [`IN_SERVERS`](crate::placeholders::IN_SERVERS) tokens for the host to fill.
@@ -82,6 +86,29 @@ fn browser_for(paths: &ProfilePaths, windows: bool) -> ProfileServer {
         command: paths.browser.clauseo_mcp.clone(),
         args,
         env,
+    }
+}
+
+/// The `case-law` entry (R24): `clauseo-mcp connector case-law`, which relays each JSON-RPC
+/// line to the session's relay in the host. Its two variables are the relay's address,
+/// `CLAUSEO_RELAY=127.0.0.1:{relay_port}`, and the path of the token file,
+/// `CLAUSEO_RELAY_TOKEN_FILE={relay_token_file}`; the token itself is never in the entry. The
+/// host fills both per session, or drops the entry.
+pub fn case_law(paths: &ProfilePaths) -> ProfileServer {
+    ProfileServer {
+        name: CASE_LAW.to_owned(),
+        command: paths.browser.clauseo_mcp.clone(),
+        args: vec!["connector".to_owned(), CASE_LAW.to_owned()],
+        env: BTreeMap::from([
+            (
+                "CLAUSEO_RELAY".to_owned(),
+                format!("127.0.0.1:{RELAY_PORT}"),
+            ),
+            (
+                "CLAUSEO_RELAY_TOKEN_FILE".to_owned(),
+                RELAY_TOKEN_FILE.to_owned(),
+            ),
+        ]),
     }
 }
 

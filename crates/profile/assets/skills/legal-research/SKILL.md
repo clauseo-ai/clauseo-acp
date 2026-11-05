@@ -3,14 +3,14 @@ name: legal-research
 description: Use for Indian legal research that needs more than one search, such as finding the law on a question, checking whether a judgment is still good law, seeing how courts have applied a provision, or building a list of authorities. Covers searching broadly before reading deeply, checking that every element of a legal test has authority, reading the later judgments that cite a case, preferring official court and government sites, and pinning every quote to a page you actually read.
 metadata:
   clauseo:
-    version: 1
+    version: 2
     author: Clauseo
     tools: [web_search, web_fetch, browser]
     tier: builtin
 ---
 # Legal research
 
-The research moves that go beyond one search and one page: finding the law on a question, good-law checks, how courts read a provision, and the disciplines that keep a long run honest. Search and read pages with your web tools and the browser. You have no case-law database or citator here, so every finding comes from a page you opened.
+The research moves that go beyond one search and one page: finding the law on a question, good-law checks, how courts read a provision, and the disciplines that keep a long run honest. Search and read pages with your web tools and the browser. If case-law tools are available in this session, use them first for Indian judgments; otherwise you have no case-law database or citator here, so every finding comes from a page you opened.
 
 ## Keep the matter out of your searches
 

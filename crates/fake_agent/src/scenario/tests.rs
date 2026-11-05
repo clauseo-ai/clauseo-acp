@@ -303,6 +303,8 @@ fn header_is_checked() {
     assert_eq!(parse_header(HEADER).unwrap(), OnStdinClose::Exit);
     let hang = r#"{"scenario":"t","description":"d","on_stdin_close":"hang"}"#;
     assert_eq!(parse_header(hang).unwrap(), OnStdinClose::Hang);
+    let briefly = r#"{"scenario":"t","description":"d","on_stdin_close":"hang_briefly"}"#;
+    assert_eq!(parse_header(briefly).unwrap(), OnStdinClose::HangBriefly);
     let other = r#"{"scenario":"u","description":"d"}"#;
     assert!(
         parse_header(other)
@@ -319,7 +321,7 @@ fn header_is_checked() {
     let bad = r#"{"scenario":"t","description":"d","on_stdin_close":"wait"}"#;
     assert_eq!(
         parse_header(bad).unwrap_err().to_string(),
-        "t.jsonl:1: header: unknown variant `wait`, expected `exit` or `hang`"
+        "t.jsonl:1: header: unknown variant `wait`, expected one of `exit`, `hang`, `hang_briefly`"
     );
     let extra = r#"{"scenario":"t","description":"d","x":1}"#;
     assert!(

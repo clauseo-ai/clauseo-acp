@@ -4,9 +4,11 @@
 //!
 //! Threads: one accept thread per listener; one thread per connection, which reads the hello
 //! and then the lines; one per message in flight; one watchdog per pending handshake. Locks: the
-//! gate before the connections; the turn caps before the day count. Two are held across I/O: the
-//! writer's, which makes each line whole, and the day count's (with the turn caps) across the
-//! `day.json` write and its fsync, so paid calls are written in the order they are counted.
+//! gate before the connections; the turn caps before the day count; the day writer's before the
+//! day count. Two are held across I/O: the line writer's, which makes each line whole, and the
+//! day writer's across the `day.json` write and its fsyncs. The day count's lock is not: a paid
+//! call is counted in memory under it, then waits (lock released) until `day.json` holds that
+//! count or a newer one, before it goes out.
 
 mod accept;
 mod conn;
@@ -28,7 +30,8 @@ use tracing::Dispatch;
 
 use super::RelayEvents;
 use super::limits::{
-    DayCount, LocalDay, MAX_IN_FLIGHT_BYTES_PER_SESSION, MAX_PENDING_HANDSHAKES, TurnCaps,
+    DayCount, DayWriter, LocalDay, MAX_IN_FLIGHT_BYTES_PER_SESSION, MAX_PENDING_HANDSHAKES,
+    TurnCaps,
 };
 use crate::clock::Clock;
 use crate::config::SessionKey;
@@ -65,6 +68,10 @@ pub(crate) struct Hub {
     pub(crate) local_day: Arc<dyn LocalDay>,
     pub(crate) events: Arc<dyn RelayEvents>,
     pub(crate) day: Mutex<DayCount>,
+    /// Every session opened and its address, so a host test can reach a session's relay.
+    #[cfg(feature = "test-support")]
+    opened: Mutex<Vec<(SessionKey, SocketAddr)>>,
+    pub(crate) day_writer: DayWriter,
 }
 
 impl fmt::Debug for Relays {
@@ -78,7 +85,7 @@ impl fmt::Debug for Relays {
 impl Relays {
     /// Reads `day.json` and holds the rest. Binds nothing.
     pub fn new(config: RelayConfig) -> Relays {
-        let day = DayCount::load(config.day_file);
+        let day = DayCount::load(&config.day_file);
         Relays {
             hub: Arc::new(Hub {
                 connector: config.connector,
@@ -87,8 +94,24 @@ impl Relays {
                 local_day: config.local_day,
                 events: config.events,
                 day: Mutex::new(day),
+                day_writer: DayWriter::new(config.day_file),
+                #[cfg(feature = "test-support")]
+                opened: Mutex::new(Vec::new()),
             }),
         }
+    }
+
+    /// Every session opened so far and its relay's address (host tests: the agent's entry holds
+    /// the port, which the test cannot read).
+    #[cfg(feature = "test-support")]
+    #[doc(hidden)]
+    pub fn opened_for_test(&self) -> Vec<(SessionKey, SocketAddr)> {
+        lock(&self.hub.opened).clone()
+    }
+
+    /// The connector the relays forward to: the launch prep asks it whether it is signed in.
+    pub(crate) fn connector(&self) -> &ConnectorHandle {
+        &self.hub.connector
     }
 
     /// Starts `session`'s relay on `listener` (bound on loopback by the caller; any other address
@@ -120,6 +143,8 @@ impl Relays {
             bytes_freed: Condvar::new(),
             dispatch: tracing::dispatcher::get_default(Dispatch::clone),
         });
+        #[cfg(feature = "test-support")]
+        lock(&self.hub.opened).push((session, addr));
         let accepting = Arc::clone(&inner);
         let accept = std::thread::Builder::new()
             .name("clauseo-relay".to_owned())

@@ -11,13 +11,25 @@ use crate::Error;
 /// passed its checks.
 ///
 /// Its `Debug` names each variable but shows no value: the env may carry an API key
-/// (decision record 0048, ruling 5), which never reaches a log, an error or a `Debug`.
+/// (decision record 0048, ruling 5), which never reaches a log, an error or a `Debug`. The
+/// extra secrets it hides ([`LaunchSpec::with_redacted`]) show only as a count.
 #[derive(Clone, PartialEq, Eq)]
 pub struct LaunchSpec {
     program: PathBuf,
     args: Vec<OsString>,
     env: BTreeMap<OsString, OsString>,
     cwd: PathBuf,
+    redacted: Redacted,
+}
+
+/// Secrets the stderr tail hides beyond the env's: `Debug` prints only how many.
+#[derive(Clone, Default, PartialEq, Eq)]
+struct Redacted(Vec<String>);
+
+impl std::fmt::Debug for Redacted {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[{} redacted]", self.0.len())
+    }
 }
 
 impl LaunchSpec {
@@ -53,7 +65,23 @@ impl LaunchSpec {
             args,
             env,
             cwd,
+            redacted: Redacted::default(),
         })
+    }
+
+    /// The same spec, with `secrets` added to what the agent's stderr tail hides, whatever
+    /// variable (if any) holds them: a secret the agent reads from a file, such as the case-law
+    /// relay's token (R24). The same length rule as the env's secrets applies. A launcher that
+    /// builds a new spec around this one carries them over ([`Self::redacted`]).
+    #[must_use]
+    pub fn with_redacted(mut self, secrets: impl IntoIterator<Item = String>) -> LaunchSpec {
+        self.redacted.0.extend(secrets);
+        self
+    }
+
+    /// The secrets [`Self::with_redacted`] added.
+    pub fn redacted(&self) -> &[String] {
+        &self.redacted.0
     }
 
     /// The program, an absolute path.
@@ -85,6 +113,7 @@ impl std::fmt::Debug for LaunchSpec {
             .field("args", &self.args)
             .field("env", &RedactedEnv(&self.env))
             .field("cwd", &self.cwd)
+            .field("redacted", &self.redacted)
             .finish()
     }
 }

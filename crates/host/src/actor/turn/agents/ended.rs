@@ -53,6 +53,8 @@ pub(in super::super) fn stop(actor: &mut Actor, thread: ThreadId) {
     for item in waiting {
         fail_waiting(actor, thread, &item, &Error::Closed);
     }
+    // The session is ending: its case-law relay refuses from now on (R24).
+    launch_checks::relay::end_for(actor, thread);
 }
 
 /// The agent's tasks are done: log the detach, end a turn the exit cut short, and start a new

@@ -104,3 +104,15 @@ fn the_debug_names_each_variable_and_shows_no_value() {
     assert!(shown.contains("ANTHROPIC_API_KEY"), "{shown}");
     assert!(shown.contains("[redacted]"), "{shown}");
 }
+
+#[test]
+fn named_secrets_ride_on_the_spec_and_debug_prints_only_their_count() {
+    let token = "ab".repeat(32);
+    let spec = spec(absolute("agent"), std::env::temp_dir())
+        .unwrap()
+        .with_redacted([token.clone()]);
+    assert_eq!(spec.redacted(), std::slice::from_ref(&token));
+    let debug = format!("{spec:?}");
+    assert!(!debug.contains(&token), "{debug}");
+    assert!(debug.contains("[1 redacted]"), "{debug}");
+}

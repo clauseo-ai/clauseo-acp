@@ -55,8 +55,11 @@ pub(crate) use launch::{LaunchDeny, claude_projects, launch_deny};
 /// plugins, and what it keeps across sessions, so across matters: the prompt history, the
 /// edited files' copies, the to-do lists and the shell snapshots. Not Claude's home whole:
 /// Claude Code writes its plan note to `plans` there with its own Edit tool, and a deny rule
-/// has no exceptions.
-pub(crate) const DENIED: [&str; 34] = [
+/// has no exceptions. And in every run folder, the own one too, the case-law relay's token file
+/// (R24): `clauseo-mcp` reads it itself, so Claude's tools never need it, and a token read
+/// through them would land in the transcript.
+pub(crate) const DENIED: [&str; 35] = [
+    "run/*/relay-token",
     "skill-packs/**",
     "matters/**",
     "logs/**",

@@ -1,5 +1,6 @@
-//! What the stderr tail hides: the home folder, the values of the spec's secret variables, words
-//! starting `sk-` and the word after `Bearer ` (in any case).
+//! What the stderr tail hides: the home folder, the values of the spec's secret variables and the
+//! secrets it names outright (`LaunchSpec::with_redacted`), words starting `sk-` and the word after
+//! `Bearer ` (in any case).
 
 use std::borrow::Cow;
 use std::cmp::Reverse;
@@ -35,8 +36,13 @@ impl std::fmt::Debug for Redactor {
 
 impl Redactor {
     /// `home` becomes `~`. The values of `env`'s variables whose names hold `KEY`, `TOKEN`,
-    /// `SECRET` or `PASSWORD`, at least 8 bytes long, become `[redacted]`.
-    pub(crate) fn new(home: Option<&Path>, env: &BTreeMap<OsString, OsString>) -> Redactor {
+    /// `SECRET` or `PASSWORD`, and each of `extra` (secrets the spec names outright, such as
+    /// a token the agent reads from a file), at least 8 bytes long, become `[redacted]`.
+    pub(crate) fn new(
+        home: Option<&Path>,
+        env: &BTreeMap<OsString, OsString>,
+        extra: &[String],
+    ) -> Redactor {
         let home = home
             .and_then(Path::to_str)
             .filter(|home| !home.is_empty())
@@ -45,6 +51,12 @@ impl Redactor {
             .iter()
             .filter(|(name, value)| is_secret_name(name) && value.len() >= MIN_SECRET)
             .map(|(_, value)| value.to_string_lossy().into_owned())
+            .chain(
+                extra
+                    .iter()
+                    .filter(|secret| secret.len() >= MIN_SECRET)
+                    .cloned(),
+            )
             .collect();
         secrets.sort_unstable_by_key(|secret| Reverse(secret.len()));
         secrets.dedup();
@@ -195,7 +207,7 @@ mod debug_tests {
     fn the_debug_shows_no_secret_and_no_home() {
         const KEY: &str = "sk-ant-api03-NEVER-IN-A-DEBUG-5c1e";
         let env = BTreeMap::from([(OsString::from("ANTHROPIC_API_KEY"), OsString::from(KEY))]);
-        let redactor = Redactor::new(Some(Path::new("/home/lawyer")), &env);
+        let redactor = Redactor::new(Some(Path::new("/home/lawyer")), &env, &[]);
         let shown = format!("{redactor:?}");
         assert!(!shown.contains(KEY), "{shown}");
         assert!(!shown.contains("/home/lawyer"), "{shown}");

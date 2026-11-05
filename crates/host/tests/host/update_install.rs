@@ -195,7 +195,7 @@ fn sends_wait_queued_while_turns_stop_and_start_once_the_install_is_taken_back()
         }
     );
     assert_eq!(others.until_turn_ended(held).stop, StopReason::EndTurn);
-    host.shutdown_past_cancel();
+    crate::support::shutdown_past_cancel(host);
 }
 
 #[test]
@@ -265,7 +265,7 @@ fn a_send_now_held_on_the_stopped_thread_starts_once_the_install_is_taken_back()
         !held(&host, matter, thread),
         "held after the install was taken back"
     );
-    host.shutdown_past_cancel();
+    crate::support::shutdown_past_cancel(host);
 }
 
 #[test]
@@ -383,7 +383,7 @@ fn a_send_now_held_on_an_idle_thread_moves_its_held_queue_on_once_the_install_is
     // `Cancelled`, as a turn taken out of the queue unstarted would).
     let ended = events.until_turn_ended(waiting);
     assert_ne!(ended.stop, StopReason::Cancelled, "{}", events.dump());
-    host.shutdown_past_cancel();
+    crate::support::shutdown_past_cancel(host);
 }
 
 /// The data folder's mode is set to `mode` until dropped.

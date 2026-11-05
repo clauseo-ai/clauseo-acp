@@ -10,7 +10,7 @@ use clauseo_process::Launcher;
 use clauseo_protocol::{AgentId, ErrorCode, MatterId, ThreadId};
 use clauseo_settings::{Effective, PlatformDirs as _, SystemDirs};
 
-use crate::agent::login_link::{LoginCheck, SignIn, SignInAgain};
+use crate::agent::login_link::{LoginCheck, SignInAgain};
 use crate::agent::login_splits::LoginSplits;
 use crate::browser::chrome::ChromeRoots;
 use crate::browser::install::InstallTools;
@@ -26,6 +26,8 @@ use crate::window::PATCH_WINDOW_BYTES;
 
 mod profile_hook;
 pub use profile_hook::{NoProfile, ProfileHook};
+mod wiring;
+pub(crate) use wiring::{LaunchWiring, PackReadHook};
 
 pub use crate::actor::turn::PackRequest;
 
@@ -65,71 +67,6 @@ pub struct TestProxy(pub u16);
 impl EgressProxy for TestProxy {
     fn port_for(&self, _session: SessionKey) -> Option<u16> {
         Some(self.0)
-    }
-}
-
-/// A hook run between a skill pack's two reads, with its id (`HostConfig::with_pack_read_hook`).
-pub(crate) type PackReadHook = Arc<dyn Fn(&str) + Send + Sync>;
-
-/// What the browser entry and the agents' `PATH` need beyond the hook: the proxy, stetdoc's
-/// folder, where to look for Chrome, and the browser slots.
-#[derive(Clone)]
-pub(crate) struct LaunchWiring {
-    pub(crate) proxy: Option<Arc<dyn EgressProxy>>,
-    pub(crate) path_prepend: Option<PathBuf>,
-    /// A Chrome the tests force, in place of the search.
-    pub(crate) browser_executable: Option<PathBuf>,
-    /// Where the launch prep looks for Chrome; `None` is this machine's roots
-    /// (`ChromeRoots::system` with the data folder as app data).
-    pub(crate) chrome_roots: Option<ChromeRoots>,
-    /// The browser slots: the limit from the machine's memory, and the sessions holding one.
-    pub(crate) browser_slots: BrowserSlots,
-    /// macOS and Linux: where the browser socket folders go and the start-up sweep looks;
-    /// `None` is `/tmp`. Tests pass a folder of their own.
-    #[cfg(unix)]
-    pub(crate) browser_socket_root: Option<PathBuf>,
-    /// The environment an agent's spec starts from, in place of the host's own
-    /// (`std::env::vars_os` at launch), for tests; `None` reads the host's.
-    pub(crate) inherited_env: Option<Vec<(OsString, OsString)>>,
-    /// The Chrome for Testing download's tools; `None` is `SystemTools` (curl, ditto, tar).
-    pub(crate) install_tools: Option<Arc<dyn InstallTools>>,
-    /// The sign-in hook, the sign-in-again test, and the host's sign-in state.
-    pub(crate) sign_in: SignIn,
-    /// Run between a skill pack's two reads, for tests (`actor/settings/packs.rs`).
-    pub(crate) pack_read_hook: Option<PackReadHook>,
-}
-
-impl Default for LaunchWiring {
-    fn default() -> Self {
-        Self {
-            proxy: None,
-            path_prepend: None,
-            browser_executable: None,
-            chrome_roots: None,
-            browser_slots: BrowserSlots::new(None),
-            #[cfg(unix)]
-            browser_socket_root: None,
-            inherited_env: None,
-            install_tools: None,
-            sign_in: SignIn::default(),
-            pack_read_hook: None,
-        }
-    }
-}
-
-impl std::fmt::Debug for LaunchWiring {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LaunchWiring")
-            .field("proxy", &self.proxy.is_some())
-            .field("path_prepend", &self.path_prepend)
-            .field("browser_executable", &self.browser_executable)
-            .field("chrome_roots", &self.chrome_roots)
-            .field("browser_slots", &self.browser_slots)
-            // Names and values stay out: the environment holds secrets.
-            .field("inherited_env", &self.inherited_env.is_some())
-            .field("install_tools", &self.install_tools.is_some())
-            .field("sign_in", &self.sign_in)
-            .finish_non_exhaustive()
     }
 }
 
@@ -523,6 +460,15 @@ impl HostConfig {
         self
     }
 
+    /// The case-law connector's relays (R24): each agent launch whose profile offers a
+    /// `case-law` entry, with `tools.connectors` on, no firm `managed-mcp.json` and the
+    /// connector signed in, gets a relay of its own and the entry. Unset (the default), no session
+    /// gets case law. Desktop wiring (PR5) builds the relays from its `Connectors`.
+    pub fn with_case_law_relays(mut self, relays: crate::connectors::Relays) -> Self {
+        self.wiring.relays = Some(relays);
+        self
+    }
+
     /// The sign-in-again test (S18's `is_sign_in_again`): a turn whose agent error's text it
     /// accepts fails as `agent.auth_required`, so its turn is held for the sign-in. Unset (the
     /// default), only `agent.auth_required` itself is.
@@ -554,6 +500,18 @@ impl HostConfig {
     #[cfg(feature = "test-support")]
     pub fn with_pack_read_hook(mut self, hook: Arc<dyn Fn(&str) + Send + Sync>) -> Self {
         self.wiring.pack_read_hook = Some(hook);
+        self
+    }
+
+    /// A hook run off the host thread with a session's run folder once its agent has ended
+    /// (its case-law token revoked) and just before the folder is removed: a test checks what
+    /// the session left at that moment.
+    #[cfg(feature = "test-support")]
+    pub fn with_run_removal_hook(
+        mut self,
+        hook: Arc<dyn Fn(&std::path::Path) + Send + Sync>,
+    ) -> Self {
+        self.wiring.run_removal_hook = Some(hook);
         self
     }
 

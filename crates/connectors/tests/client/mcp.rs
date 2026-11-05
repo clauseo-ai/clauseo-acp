@@ -3,9 +3,15 @@
 use clauseo_connectors::{
     CASE_LAW, McpBody, McpRequestHeaders, ToolOutcome, classify_tool_result_for,
 };
+use serde_json::value::RawValue;
 use serde_json::{Value, json};
 
 use crate::support::*;
+
+/// A raw answer, parsed.
+fn value(raw: &RawValue) -> Value {
+    serde_json::from_str(raw.get()).unwrap()
+}
 
 fn message(method: &str, id: Option<u64>) -> Vec<u8> {
     let mut value = json!({"jsonrpc": "2.0", "method": method, "params": {}});
@@ -36,7 +42,7 @@ fn mcp_post_sends_the_headers_and_returns_json() {
     let McpBody::Json(body) = &reply.body else {
         panic!("expected JSON, got {:?}", reply.body);
     };
-    assert_eq!(body["id"], 9);
+    assert_eq!(value(body)["id"], 9);
     let request = &rig.fake.requests_to("/mcp/case-law")[0];
     let auth = format!("Bearer {}", token.0.expose());
     assert_eq!(request.header("authorization"), Some(auth.as_str()));
@@ -99,7 +105,47 @@ fn an_event_stream_is_one_value_per_data_event() {
         panic!("expected events, got {:?}", reply.body);
     };
     assert_eq!(events.len(), 1);
-    assert_eq!(events[0]["id"], 4);
+    assert_eq!(value(&events[0])["id"], 4);
+}
+
+#[test]
+fn a_json_answer_is_kept_raw_as_sent_and_bad_json_is_refused() {
+    let rig = rig();
+    let text =
+        "  {\"jsonrpc\" : \"2.0\", \"id\":1,\n \"result\":{\"a\":[0,0]}, \"x\":1, \"x\":2}\n";
+    let json_type = [("Content-Type", "application/json")];
+    rig.fake
+        .answer_next("/mcp/case-law", 200, &json_type, text.as_bytes());
+    let reply = rig
+        .handle
+        .mcp_post(
+            &message("tools/list", Some(1)),
+            &McpRequestHeaders::default(),
+        )
+        .unwrap();
+    let McpBody::Json(body) = reply.body else {
+        panic!("expected JSON, got {:?}", reply.body);
+    };
+    // Not re-serialised: the spacing, the newline and the duplicate key are as sent.
+    assert_eq!(body.get(), text.trim());
+    for (status, body, err) in [
+        (200, &b"{not json"[..], "parse"),
+        (200, &b"{\"a\":\"\xff\"}"[..], "parse"),
+        (500, &b"{not json"[..], "http"),
+        (500, &b"\xff"[..], "http"),
+    ] {
+        rig.fake
+            .answer_next("/mcp/case-law", status, &json_type, body);
+        let got = rig.handle.mcp_post(
+            &message("tools/list", Some(1)),
+            &McpRequestHeaders::default(),
+        );
+        match (err, got) {
+            ("parse", Err(clauseo_connectors::Error::Parse(_)))
+            | ("http", Err(clauseo_connectors::Error::Http { status: 500 })) => {}
+            (_, other) => panic!("{status} {body:?}: {other:?}"),
+        }
+    }
 }
 
 #[test]
@@ -128,6 +174,7 @@ fn an_out_of_credit_tool_result_classifies_with_our_pay_link() {
     let McpBody::Json(body) = reply.body else {
         panic!("expected JSON");
     };
+    let body = value(&body);
     let origin = clauseo_connectors::Origin::Fake(rig.fake.base_url());
     let ToolOutcome::OutOfCredit(payment) = classify_tool_result_for(&CASE_LAW, &origin, &body)
     else {
@@ -146,7 +193,7 @@ fn an_out_of_credit_tool_result_classifies_with_our_pay_link() {
     let McpBody::Json(body) = reply.body else {
         panic!("expected JSON");
     };
-    let result: &Value = &body;
+    let result: &Value = &value(&body);
     assert_eq!(
         classify_tool_result_for(&CASE_LAW, &origin, result),
         ToolOutcome::Ok

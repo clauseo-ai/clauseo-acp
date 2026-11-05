@@ -132,14 +132,19 @@ impl ClauseoProfile {
         &self.author
     }
 
-    /// The composed instructions, `{author}` filled, `{work_folder}` and `{matter_notes}` left.
+    /// The composed instructions, `{author}` filled, `{work_folder}`, `{matter_notes}` and
+    /// `{connectors}` left.
     pub fn instructions(&self) -> String {
         self.instructions.compose(&self.author)
     }
 
-    /// The servers for an agent of `kind`: `browser`, whatever the kind.
+    /// The servers for an agent of `kind`, whatever the kind: `browser`, then `case-law` (R24),
+    /// which the host sends only in a session whose relay it opened.
     pub fn servers(&self, _kind: Option<AgentKind>) -> Vec<ProfileServer> {
-        vec![servers::browser(&self.paths)]
+        vec![
+            servers::browser(&self.paths),
+            servers::case_law(&self.paths),
+        ]
     }
 
     /// Claude's options.

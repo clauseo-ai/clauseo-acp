@@ -42,7 +42,8 @@ async-io = { workspace = true }
 futures = { workspace = true, features = ["executor"] }
 # `update.json`'s marker (src/update.rs).
 serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
+# `raw_value`: the case-law relay reads a connector reply without building it as a tree.
+serde_json = { workspace = true, features = ["raw_value"] }
 uuid = { workspace = true, features = ["v7"] }
 tracing = { workspace = true }
 # The log file (log_file.rs, decision record 0047): the formatter, the registry and the filter.
@@ -101,6 +102,8 @@ criterion = { workspace = true }
 # The host's Windows folder-check tests give a folder a protected DACL (`windows::test_dacl`).
 [target.'cfg(windows)'.dev-dependencies]
 clauseo-sandbox = { path = "../sandbox", features = ["test-support"] }
+# The case-law relay's exclusive-bind test binds its port again with SO_REUSEADDR.
+socket2 = { workspace = true }
 
 [[bench]]
 name = "reopen"

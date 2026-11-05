@@ -14,6 +14,7 @@ use crate::http::{self, POLL_TIMEOUT, Reply, SendBody};
 use crate::mcp::{McpBody, McpReply, McpRequestHeaders, parse_event_stream};
 use crate::recharge::{Recharge, RechargeStatus, insufficient_credits_402, parse_recharge};
 use crate::secret::Secret;
+use serde_json::value::RawValue;
 
 /// The account is read at most once a minute; a copy younger than this is served from memory.
 pub const ACCOUNT_MIN_INTERVAL: Duration = Duration::from_mins(1);
@@ -52,7 +53,7 @@ pub(crate) fn mcp_post(
         timeout,
         true,
     )?;
-    mcp_reply(&reply)
+    mcp_reply(reply)
 }
 
 /// The account (`GET /v1/case-law/account?recent_days=30`). A copy younger than
@@ -309,31 +310,52 @@ fn send_with(
     http::send(&handle.inner.shared.agent, method, url, &all, body, timeout).map_err(Error::Network)
 }
 
-/// An MCP answer as [`McpReply`]. A body that is neither JSON nor an event stream is a parse
-/// error on a 2xx and `Http` otherwise.
-fn mcp_reply(reply: &Reply) -> Result<McpReply, Error> {
+/// An MCP answer as [`McpReply`], its JSON kept raw: validated, never built as a tree (a dense
+/// array of 8 MB would take hundreds of MB as a `Value`). The body is moved, not copied, into a
+/// `Json` answer. A body that is neither JSON nor an event stream is a parse error on a 2xx and
+/// `Http` otherwise.
+fn mcp_reply(mut reply: Reply) -> Result<McpReply, Error> {
+    let status = reply.status;
+    let not_json = |err: Error| {
+        if (200..300).contains(&status) {
+            err
+        } else {
+            Error::Http { status }
+        }
+    };
+    let event_stream = reply.content_type.as_deref() == Some("text/event-stream");
     let body = if reply.status == 202 || reply.body.is_empty() {
         McpBody::Empty
-    } else if reply.content_type.as_deref() == Some("text/event-stream") {
-        let text = std::str::from_utf8(&reply.body)
-            .map_err(|_not_utf8| Error::Parse("event stream: not UTF-8".to_owned()))?;
-        McpBody::Events(parse_event_stream(text)?)
     } else {
-        match serde_json::from_slice(&reply.body) {
-            Ok(value) => McpBody::Json(value),
-            Err(err) if (200..300).contains(&reply.status) => {
-                return Err(parse_error("MCP answer", &err));
+        // An MCP answer holds no credential, so its bytes leave the zeroing buffer.
+        let bytes = std::mem::take(&mut *reply.body);
+        match (String::from_utf8(bytes), event_stream) {
+            (Ok(text), true) => McpBody::Events(parse_event_stream(&text)?),
+            (Ok(text), false) => McpBody::Json(
+                raw_json(text).map_err(|err| not_json(parse_error("MCP answer", &err)))?,
+            ),
+            (Err(_not_utf8), true) => {
+                return Err(Error::Parse("event stream: not UTF-8".to_owned()));
             }
-            Err(_) => {
-                return Err(Error::Http {
-                    status: reply.status,
-                });
+            (Err(_not_utf8), false) => {
+                return Err(not_json(Error::Parse("MCP answer: not UTF-8".to_owned())));
             }
         }
     };
     Ok(McpReply {
         status: reply.status,
-        session_id: reply.session_id.clone(),
+        session_id: reply.session_id,
         body,
     })
+}
+
+/// `text` validated as one JSON value and kept as it is, trimmed of the whitespace around it
+/// in place, so `serde_json` keeps the buffer instead of copying the value out of it.
+pub(crate) fn raw_json(mut text: String) -> Result<Box<RawValue>, serde_json::Error> {
+    let json_space = |c: char| matches!(c, ' ' | '\t' | '\n' | '\r');
+    let end = text.trim_end_matches(json_space).len();
+    text.truncate(end);
+    let start = text.len() - text.trim_start_matches(json_space).len();
+    text.drain(..start);
+    RawValue::from_string(text)
 }

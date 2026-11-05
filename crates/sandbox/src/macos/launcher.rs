@@ -89,7 +89,7 @@ impl SeatbeltLauncher {
     /// The spec `launch` starts for `spec`: `sandbox-exec` with the profile and its
     /// parameters, then the agent's program and arguments; the agent's variables plus `TMPDIR`
     /// (the state folder's `tmp`), which `launch` starts with no inherited variables; the same
-    /// working folder.
+    /// working folder and the same secrets for the stderr tail to hide.
     pub fn jailed_spec(&self, spec: &LaunchSpec) -> Result<LaunchSpec, clauseo_process::Error> {
         let mut args = self.profile.args();
         args.push(OsString::from(spec.program()));
@@ -105,6 +105,7 @@ impl SeatbeltLauncher {
             env,
             spec.cwd().to_owned(),
         )
+        .map(|jailed| jailed.with_redacted(spec.redacted().iter().cloned()))
     }
 
     /// Registers with the watcher once, on the first launch.

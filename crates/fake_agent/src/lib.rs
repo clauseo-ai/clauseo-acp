@@ -84,6 +84,9 @@ pub(crate) fn diagnostic(what: impl std::fmt::Display) -> String {
     format!("fake_agent: {what}\n")
 }
 
+/// How long `on_stdin_close: "hang_briefly"` holds before it exits: under nextest's 30 s kill.
+pub const HANG_BRIEFLY: std::time::Duration = std::time::Duration::from_secs(15);
+
 /// Parks the calling thread forever: `--hold`, and stdin closed under `"hang"`.
 pub(crate) fn park_forever() -> ! {
     loop {

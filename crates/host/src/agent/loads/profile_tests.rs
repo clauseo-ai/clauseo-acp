@@ -165,6 +165,7 @@ fn a_folder_named_like_a_token_stays_literal() {
     let folders = Folders {
         work: "/w/{matter_notes}",
         notes: "/n/{work_folder}",
+        connectors: "",
     };
     assert_eq!(
         fill_instructions("{work_folder} and {matter_notes}", folders).unwrap(),
@@ -331,6 +332,7 @@ fn folders() -> Folders<'static> {
     Folders {
         work: "/data/run/t-1/work",
         notes: "/data/agent-state/m/notes",
+        connectors: "",
     }
 }
 
@@ -348,6 +350,7 @@ fn keys(web_search: Switch, login: Login) -> ClaudeKeys<'static> {
         seed_sites: SEED_SITES,
         forced_ask: false,
         data: &NO_DENY,
+        case_law: false,
     }
 }
 
@@ -509,6 +512,7 @@ fn the_instructions_are_filled_and_escaped_for_json() {
     let odd = Folders {
         work: "/data/run/a \"b\"\n\\c/work",
         notes: "/data/agent-state/m/notes",
+        connectors: "",
     };
     fill_meta(&mut meta, odd).unwrap();
     let text = Value::Object(meta).to_string();

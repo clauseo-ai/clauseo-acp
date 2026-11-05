@@ -14,6 +14,7 @@
 //! is in [`profile`].
 
 pub(crate) mod browser;
+pub(crate) mod case_law;
 mod codex;
 #[cfg(test)]
 mod layering_tests;

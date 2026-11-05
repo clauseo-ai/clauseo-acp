@@ -20,9 +20,9 @@ expression: tree_text(paths.claude_plugin())
     },
     "legal-research": {
       "files": {
-        "SKILL.md": "048e73c8a8bbd55ed26bb5757a75f76177c54de47870272720b297f68a8893e8"
+        "SKILL.md": "07df3a60726ed698aa67c46d796f5ca3f7e22da3ab36fb40a56792f53ab11f5a"
       },
-      "version": "1"
+      "version": "2"
     },
     "matter-brief": {
       "files": {
@@ -186,7 +186,7 @@ description: "Use for Indian legal research that needs more than one search, suc
 ---
 # Legal research
 
-The research moves that go beyond one search and one page: finding the law on a question, good-law checks, how courts read a provision, and the disciplines that keep a long run honest. Search and read pages with your web tools and the browser. You have no case-law database or citator here, so every finding comes from a page you opened.
+The research moves that go beyond one search and one page: finding the law on a question, good-law checks, how courts read a provision, and the disciplines that keep a long run honest. Search and read pages with your web tools and the browser. If case-law tools are available in this session, use them first for Indian judgments; otherwise you have no case-law database or citator here, so every finding comes from a page you opened.
 
 ## Keep the matter out of your searches
 

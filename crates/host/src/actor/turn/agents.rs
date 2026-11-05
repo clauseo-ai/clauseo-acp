@@ -266,6 +266,8 @@ fn launch(actor: &Actor, thread: ThreadId, prepared: Prepared) -> Result<Launche
             format!("no agent {} in the settings", row.agent),
         )
     })?;
+    // The relay token reaches the agent in a file; its stderr tail hides it all the same.
+    let redacted = super::launch_checks::relay::redacted(&prepared.run);
     let folder = prepared.stored;
     let (forced, codex) = if let Some(prepared) = prepared.codex {
         let hooks = codex_hooks(actor);
@@ -308,7 +310,8 @@ fn launch(actor: &Actor, thread: ThreadId, prepared: Prepared) -> Result<Launche
         inherited.into_iter(),
         agent::session_folder(&folder),
         actor.wiring.path_prepend.as_deref(),
-    )?;
+    )?
+    .with_redacted(redacted);
     let claude = AgentKind::of(&row.agent) == Some(AgentKind::Claude);
     let plan_notes = claude
         .then(|| agent::plan_note::plans_folder(spec.env(), cfg!(windows)))

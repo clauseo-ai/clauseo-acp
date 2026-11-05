@@ -1,8 +1,10 @@
 //! The relay's limits: the input limits on each connection and the spend caps (starting values,
 //! unmeasured). The turn caps are per session, held in [`TurnCaps`]; the day cap is per install,
-//! held in [`DayCount`] and in `<data_dir>/connectors/day.json`, so a restart does not reset it.
+//! held in [`DayCount`] and written by [`DayWriter`] to `<data_dir>/connectors/day.json`, so a
+//! restart does not reset it.
 
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -76,6 +78,15 @@ pub(crate) struct TurnCaps {
     recharge: u32,
     /// Bumped whenever a bucket starts, so a refund reaches only the bucket it was taken from.
     epoch: u64,
+}
+
+#[cfg(test)]
+impl TurnCaps {
+    /// Sets the paid count of the open turn, or of the between-turns bucket when none is open
+    /// (tests), as that many paid calls would have: a cap is reached in a few real calls.
+    pub(crate) fn set_paid_for_test(&mut self, paid: u32) {
+        self.paid = paid;
+    }
 }
 
 /// One counted call, as [`TurnCaps::refund`] needs it back.
@@ -176,20 +187,23 @@ struct DayFile {
     paid: u32,
 }
 
-/// The install's paid calls today, in memory and in `day.json`.
+/// The install's paid calls today, in memory, under the day lock. [`DayWriter`] keeps
+/// `day.json` up with it, outside that lock.
 #[derive(Debug)]
 pub(crate) struct DayCount {
-    path: PathBuf,
     day: String,
     paid: u32,
+    /// Bumped at every change, so the writer can tell a newer count from an older one. The
+    /// count as loaded is 0, already on disk.
+    seq: u64,
 }
 
 impl DayCount {
     /// Reads `path`. A missing file is a day with no calls; a file that does not read or parse
     /// is the same, with a warning (a same-user process can reset it anyway, which tier C
     /// accepts).
-    pub(crate) fn load(path: PathBuf) -> DayCount {
-        let read = match std::fs::read(&path) {
+    pub(crate) fn load(path: &Path) -> DayCount {
+        let read = match std::fs::read(path) {
             Ok(bytes) => serde_json::from_slice::<DayFile>(&bytes)
                 .ok()
                 .filter(|file| {
@@ -206,15 +220,15 @@ impl DayCount {
             }
         };
         let (day, paid) = read.map_or((String::new(), 0), |file| (file.day, file.paid));
-        DayCount { path, day, paid }
+        DayCount { day, paid, seq: 0 }
     }
 
     /// Takes one paid call on `today` (`YYYY-MM-DD`): a day at [`MAX_PAID_CALLS_PER_DAY`]
     /// refuses. A later day starts at 0. The day before the one held (a time zone crossed
     /// westward) counts against the day held, so travel cannot reset the cap; a day further back
     /// (a clock that once ran ahead and was set right, or a future `day.json`) starts at 0 too,
-    /// so a wrong clock cannot hold the cap for years. The count is written before the call goes
-    /// out; a failed write is logged and the count kept in memory.
+    /// so a wrong clock cannot hold the cap for years. In memory only: the caller has
+    /// [`DayWriter::persist`] write it, after the lock and before the call goes out.
     pub(crate) fn take(&mut self, today: &str) -> Result<(), Cap> {
         if starts_over(&self.day, today) {
             today.clone_into(&mut self.day);
@@ -224,28 +238,77 @@ impl DayCount {
             return Err(Cap::Day);
         }
         self.paid = self.paid.saturating_add(1);
-        self.save();
+        self.seq = self.seq.wrapping_add(1);
         Ok(())
     }
 
-    /// Gives back one paid call of `on`, if that is still the day held.
+    /// Gives back one paid call of `on`, if that is still the day held. In memory only, as
+    /// [`DayCount::take`].
     pub(crate) fn refund(&mut self, on: &str) {
         if self.day == on && self.paid > 0 {
             self.paid -= 1;
-            self.save();
+            self.seq = self.seq.wrapping_add(1);
         }
     }
 
-    fn save(&self) {
-        let file = DayFile {
-            day: self.day.clone(),
-            paid: self.paid,
+    /// The count's sequence number: what [`DayWriter::persist`] is asked to reach.
+    pub(crate) fn seq(&self) -> u64 {
+        self.seq
+    }
+}
+
+/// Writes `day.json` from the [`DayCount`], outside the day lock, so paid calls across
+/// sessions do not queue on each other's fsyncs. Writes are one at a time, each of the newest
+/// count, and never of a count older than the last written (so the file is never behind a call
+/// that [`DayWriter::persist`] returned for). Calls that wait meanwhile are covered by the next
+/// write, which holds their counts too: one write for many.
+#[derive(Debug)]
+pub(crate) struct DayWriter {
+    path: PathBuf,
+    /// The sequence number on disk, and the lock that makes writes one at a time.
+    written: Mutex<u64>,
+    /// The writes made (tests).
+    #[cfg(test)]
+    writes: std::sync::atomic::AtomicU64,
+}
+
+impl DayWriter {
+    pub(crate) fn new(path: PathBuf) -> DayWriter {
+        DayWriter {
+            path,
+            written: Mutex::new(0),
+            #[cfg(test)]
+            writes: std::sync::atomic::AtomicU64::new(0),
+        }
+    }
+
+    /// Returns once `day.json` holds count `seq` of `day` or a newer one. Takes `day`'s lock
+    /// only to copy the count; the caller holds no lock. A failed write is logged and the count
+    /// kept in memory; the next change tries again.
+    pub(crate) fn persist(&self, day: &Mutex<DayCount>, seq: u64) {
+        let mut written = self.written.lock().unwrap_or_else(PoisonError::into_inner);
+        if *written >= seq {
+            return;
+        }
+        let (newest, file) = {
+            let day = day.lock().unwrap_or_else(PoisonError::into_inner);
+            let file = DayFile {
+                day: day.day.clone(),
+                paid: day.paid,
+            };
+            (day.seq, file)
         };
-        let written = serde_json::to_vec(&file)
+        #[cfg(test)]
+        self.writes
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let saved = serde_json::to_vec(&file)
             .map_err(std::io::Error::other)
             .and_then(|bytes| write_beside(&self.path, &bytes));
-        if let Err(err) = written {
-            tracing::warn!(error = %Cause(&err), "connectors: day.json could not be written");
+        match saved {
+            Ok(()) => *written = newest,
+            Err(err) => {
+                tracing::warn!(error = %Cause(&err), "connectors: day.json could not be written");
+            }
         }
     }
 }
@@ -280,12 +343,44 @@ fn days_from_civil(text: &str) -> Option<i64> {
     Some(era * 146_097 + doe - 719_468)
 }
 
-/// Writes `bytes` to `path` atomically, making its folder first.
+/// Writes `bytes` to `path` atomically, making its folder first, then flushes the folder so
+/// the rename itself survives a power cut. When this write made the folder, its parent is
+/// flushed once too, so the folder's own entry survives.
 fn write_beside(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        crate::write::create_dir_all(parent)?;
+    let folder = match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => Path::new("."),
+    };
+    let made = !folder.is_dir();
+    crate::write::create_dir_all(folder)?;
+    if made
+        && let Some(parent) = folder
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        sync_folder(parent)?;
     }
-    crate::write::replace_private_file(path, bytes)
+    crate::write::replace_private_file(path, bytes)?;
+    sync_folder(folder)
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The folder syncs this thread made (tests).
+    pub(crate) static FOLDER_SYNCS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// Flushes `folder`'s entries to disk, so a rename in it is durable. Unix: opens the folder and
+/// fsyncs it (`sync_all`). Windows: nothing; std cannot open a folder for a flush (that needs
+/// `FILE_FLAG_BACKUP_SEMANTICS`), and NTFS journals the rename's metadata.
+pub(crate) fn sync_folder(folder: &Path) -> std::io::Result<()> {
+    #[cfg(test)]
+    FOLDER_SYNCS.with(|syncs| syncs.set(syncs.get().saturating_add(1)));
+    if cfg!(unix) {
+        std::fs::File::open(folder)?.sync_all()
+    } else {
+        Ok(())
+    }
 }
 
 /// The OS's time zone, as the day cap needs it (decision D5): desktop fills it from the OS, and
