@@ -33,7 +33,8 @@ pub(crate) struct Wiring {
 
 impl Wiring {
     /// Over `readers`, `reused` and `plans`, with `start` the settings the backend's facts were
-    /// set from; the host has been told no refusal yet.
+    /// set from; the host started refusing `start`'s blocked agents
+    /// (`SetupStart::launch_refusals`).
     pub(crate) fn new(
         readers: Arc<dyn LeaveReaders>,
         reused: ReusedLogins,
@@ -47,8 +48,8 @@ impl Wiring {
             leaves: Leaves::default(),
             timer: Arc::new(AsyncIoTimer),
             plans,
+            refused: Mutex::new(start.blocked.clone()),
             applied: Mutex::new(start),
-            refused: Mutex::default(),
         }
     }
 

@@ -97,6 +97,36 @@ impl KeyCache {
         lock(&self.keys).contains_key(agent)
     }
 
+    /// Whether the keychain would take `key` as `agent`'s: `command.invalid` (naming the agent
+    /// and the reason, never the key) when it would refuse it. No keychain call.
+    pub(crate) fn check(agent: &AgentId, key: &Secret) -> Result<(), HostError> {
+        clauseo_agents::keys::check(agent, key.expose()).map_err(|error| key_error(&error))
+    }
+
+    /// Reads `agent`'s entry from the keychain, under the write order on a thread of its own:
+    /// `true` when one is stored (memory takes it, then `then(true)`), `false` when none is,
+    /// and the keychain's error (`internal`) when the read fails, memory left as it was.
+    /// `main`'s first key asks it before it leaves a reused login.
+    pub(crate) async fn probe(
+        &self,
+        agent: &AgentId,
+        then: impl FnOnce(bool) + Send + 'static,
+    ) -> Result<bool, HostError> {
+        let (keychain, keys, order) = self.parts();
+        let agent = agent.clone();
+        off_thread(move || -> Result<bool, KeyError> {
+            let _order = lock(&order);
+            let Some(key) = keychain.load(&agent)? else {
+                return Ok(false);
+            };
+            lock(&keys).insert(agent, key);
+            then(true);
+            Ok(true)
+        })
+        .await?
+        .map_err(|error| key_error(&error))
+    }
+
     /// A copy of `agent`'s key, zeroed when dropped: the launch hook's and the limits reads'.
     pub(crate) fn get(&self, agent: &AgentId) -> Option<Zeroizing<String>> {
         lock(&self.keys).get(agent).cloned()

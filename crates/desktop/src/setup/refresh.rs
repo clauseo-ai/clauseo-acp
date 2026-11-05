@@ -8,7 +8,8 @@
 //! firm policy's endpoint or provider that arrives ends a running sign-in quietly, the same
 //! superseding cancel a stored key or endpoint makes (no `signin.cancelled` reaches a window).
 //! The host is told each change of the launch refusal (`set_launch_refused` with
-//! `signin.policy_unreadable`, or `None`), the first time for every blocked agent.
+//! `signin.policy_unreadable`, or `None`); it started with the blocked agents refused
+//! (`SetupStart::launch_refusals`), so a follow that never runs leaves no launch open.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::PoisonError;

@@ -18,6 +18,13 @@
 //! `clauseo-setup-host` thread follows the host's `SettingsChanged` (each one reads the
 //! settings again, `refresh.rs`), its login splits, and the automatic leaves (`leave/auto.rs`:
 //! a split, or a reuse S18 ended by itself), each on its own.
+//!
+//! The launch refusals (decision record 0048, ruling 4 and the security review's M3): the host
+//! starts with them ([`SetupStart::launch_refusals`], `HostConfig::with_launch_refused`), so no
+//! launch comes before them: `signin.policy_unreadable` for each agent an unreadable policy
+//! blocks, `agent.keys_loading` for every other known agent. Once the keys have loaded, the
+//! keys' refusal is lifted ([`lift_keys_loading`]) on the thread that then follows the
+//! settings, so the two never cross; a policy refusal stays until the settings lift it.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -131,6 +138,13 @@ pub(crate) struct SetupStart {
 }
 
 impl SetupStart {
+    /// The refusals the host starts with: `signin.policy_unreadable` for each agent an
+    /// unreadable policy blocks, `agent.keys_loading` for every other known agent until the
+    /// keys have loaded.
+    pub(crate) fn launch_refusals(&self) -> Vec<(AgentId, ErrorCode)> {
+        refusals_at_start(self.known.keys(), &self.settings.blocked)
+    }
+
     /// Reads `effective` for the setup thread, bringing the `firm-policy` markers up to date.
     pub(crate) fn read(effective: &Effective, locations: &Locations) -> Self {
         let snapshot = Snapshot::embedded();
@@ -211,13 +225,15 @@ pub(crate) fn spawn(read: SetupStart, parts: SetupParts, side: HostSide) -> std:
 
 /// The setup thread's work.
 fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
-    let Some(platform) = Platform::current() else {
-        tracing::warn!("no agent installs on this platform: setup answers internal");
-        return;
-    };
     let keys = Arc::new(KeyCache::load_all(Keychain::os(), read.known.keys()));
     // Set once, here: nothing else fills the slot.
     let _set = side.keys.set(Arc::clone(&keys));
+    let Some(platform) = Platform::current() else {
+        tracing::warn!("no agent installs on this platform: setup answers internal");
+        let lift = lift_keys_loading(&*parts.host, read.known.keys(), &read.settings.blocked);
+        futures::executor::block_on(lift);
+        return;
+    };
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
     let mut config = AgentsConfig::new(read.data_dir, platform);
     config.signin.homes = read
@@ -269,14 +285,58 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
     let host_thread = std::thread::Builder::new()
         .name("clauseo-setup-host".to_owned())
         .spawn(move || {
+            lift_on(&follower);
             let settings = follow_settings(&follower, &*reread);
             let leaves = super::leave::follow_auto_leaves(&follower);
             futures::executor::block_on(join(settings, join(follow_splits(&follower), leaves)));
         });
     if let Err(err) = host_thread {
         tracing::warn!(%err, "no thread follows the host: settings and splits are not followed");
+        lift_on(&backend);
     }
     futures::executor::block_on(backend.pump(source));
+}
+
+/// Each of `known` with the refusal the host starts with: `signin.policy_unreadable` when in
+/// `blocked`, else `agent.keys_loading`.
+pub(crate) fn refusals_at_start<'a>(
+    known: impl IntoIterator<Item = &'a AgentId>,
+    blocked: &BTreeSet<AgentId>,
+) -> Vec<(AgentId, ErrorCode)> {
+    known
+        .into_iter()
+        .map(|agent| {
+            let code = if blocked.contains(agent) {
+                ErrorCode::SigninPolicyUnreadable
+            } else {
+                ErrorCode::AgentKeysLoading
+            };
+            (agent.clone(), code)
+        })
+        .collect()
+}
+
+/// [`lift_keys_loading`] for `backend`'s agents, keeping each policy refusal it holds.
+fn lift_on(backend: &AgentsBackend) {
+    let blocked = crate::bridge::lock(&backend.wiring.refused).clone();
+    let lift = lift_keys_loading(&*backend.host, backend.known.keys(), &blocked);
+    futures::executor::block_on(lift);
+}
+
+/// The keys have loaded: each of `known` but those in `blocked` (whose refusal is the
+/// policy's) may launch again. A call that fails is logged by the agent and its code; that
+/// agent's launches stay refused.
+pub(crate) async fn lift_keys_loading<'a>(
+    host: &dyn SetupHost,
+    known: impl IntoIterator<Item = &'a AgentId>,
+    blocked: &BTreeSet<AgentId>,
+) {
+    for agent in known.into_iter().filter(|agent| !blocked.contains(*agent)) {
+        if let Err(error) = host.set_launch_refused(agent.clone(), None).await {
+            let code = error.code().as_str();
+            tracing::warn!(%agent, code, "the keys' launch refusal was not lifted");
+        }
+    }
 }
 
 /// Each `SettingsChanged`: the settings read again and taken in, until the host stops.

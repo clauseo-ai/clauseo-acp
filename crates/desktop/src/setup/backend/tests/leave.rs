@@ -15,7 +15,7 @@ use clauseo_protocol::{AgentId, CommandOutcome, ErrorCode, SetupCommand};
 use serde_json::json;
 
 use super::fakes::{HostCall, Rig, command, rig};
-use super::{SETTINGS, codex};
+use super::{MAIN, SETTINGS, codex};
 use crate::bridge::lock;
 
 pub(super) fn signed_in(source: Source) -> SigninState {
@@ -159,6 +159,50 @@ fn use_found_login_tells_the_host_then_writes_the_entry_then_restarts() {
     );
     assert_eq!(rig.host.calls()[0], HostCall::SetReusedLogin(codex(), true));
     assert!(rig.backend.wiring.reused.get(&codex()));
+}
+
+/// Asserts the reused login was left untouched: no host call, no S18 call, no read held,
+/// still reused everywhere.
+fn assert_untouched(rig: &Rig) {
+    assert_eq!(rig.host.calls(), [], "no host call");
+    assert_eq!(rig.calls(), [], "no S18 call");
+    assert_eq!(
+        rig.journal(),
+        Vec::<String>::new(),
+        "nothing held or written"
+    );
+    assert!(rig.backend.wiring.reused.get(&codex()));
+    assert_eq!(
+        rig.backend.compose.s18(&codex()),
+        Some(signed_in(Source::Reused))
+    );
+}
+
+#[test]
+fn a_key_the_keychain_would_refuse_leaves_the_reused_login_untouched() {
+    let rig = reused_codex();
+    let key = json!({ "key": "sk-ant api03-HAS-A-SPACE" });
+    let setup = rig.setup();
+    let send = setup.run(SETTINGS, command("set_agent_key", &codex(), &key));
+    let error = rig.pumped(send).unwrap_err();
+    assert_eq!(error.code(), ErrorCode::CommandInvalid);
+    assert!(!error.message().contains("api03-HAS-A-SPACE"), "{error:?}");
+    assert_untouched(&rig);
+    assert_eq!(rig.keychain.load(&codex()).unwrap(), None);
+}
+
+#[test]
+fn main_s_first_key_whose_keychain_read_fails_leaves_the_reused_login_untouched() {
+    let rig = reused_codex();
+    rig.keychain.fail_reads(true);
+    let key = json!({ "key": "sk-ant-api03-MAIN-FIRST-KEY" });
+    let setup = rig.setup();
+    let send = setup.run(MAIN, command("set_agent_key", &codex(), &key));
+    let error = rig.pumped(send).unwrap_err();
+    assert_eq!(error.code(), ErrorCode::Internal);
+    assert_untouched(&rig);
+    rig.keychain.fail_reads(false);
+    assert_eq!(rig.keychain.load(&codex()).unwrap(), None, "nothing stored");
 }
 
 /// The split, end to end on the desktop side: temp homes with fake, non-credential files at
