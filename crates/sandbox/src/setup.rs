@@ -62,12 +62,12 @@ pub enum SetupError {
     Failed(String),
 }
 
-/// One protected name an agent made in the matter, moved aside before the next launch (S15 PR3's
-/// `windows::set_aside_protected`; R17 shows one notice per launch that moved any).
+/// One protected name moved aside from the matter (S15 PR3's set-aside: `windows::after_session`
+/// and `windows::before_launch`; R17 shows one notice per launch that moved any).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SetAside {
     /// Where the name was, in the matter.
     pub from: PathBuf,
-    /// Where it went: `<state>\set-aside\<timestamp>\...`.
+    /// Where it went: `<data_dir>\sandbox\set-aside\<matter>\<timestamp>\...`.
     pub to: PathBuf,
 }

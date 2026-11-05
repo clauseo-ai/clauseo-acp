@@ -189,6 +189,15 @@ agent message text to one that does not (`:29655-29658`, `:44519-44523`). It nev
   Windows, S15 also settles the `windows.sandbox` key.
 - Security note: under Windows tier B, Codex's token keeps `Everyone`, so a pipe it makes with
   no security set is readable by another matter's agent; see 0049's accepted risk (D11).
+- Security note, accepted (Rohan, 2026-11-05: tier B runs matters' agents in parallel, with no
+  one-agent-at-a-time policy or firm switch): one hijacked matter agent can't read or write
+  another matter, but two hijacked agents running at once can pass data through channels they
+  name: files the creator gives its own DACL, pipes with an explicit DACL, FAT and exFAT
+  volumes, and `ProgramData\Microsoft\DeviceSync` (a later PR closes it). Dropping `Everyone`
+  wouldn't close the pipe channel against a cooperating agent. The shared-write-place deny PR
+  and the bypass-traverse spike shrink these; a directory watcher that repairs new pool-owned
+  files during a session is to be weighed. See 0049's "Accepted risk: two hijacked agents at
+  once".
 
 ## Status
 
