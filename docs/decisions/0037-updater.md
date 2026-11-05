@@ -271,12 +271,15 @@ install; what the brief left open was decided so:
   as a fixed line by its kind, never the plugin's text, which can name the URL or a path.
 - **The download** is written to `updates/.<version>.part`, synced, then moved into an emptied
   `updates/<version>/` as its one file, so that folder never holds a half-written download.
-  A version that is not plain dotted numbers is refused.
+  A version that is not plain dotted numbers is refused. A download the host cancels after its
+  bytes arrived can still be saved (the write runs off the cancelled task); that is harmless,
+  since the plugin verified those bytes and the install verifies them again.
 - **Install kind.** Windows: per machine when `Clauseo.exe` is under Program Files or the
   machine's uninstall key `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Clauseo`
   (64-bit view) exists; a key that cannot be read counts as there. macOS: a read-only location
-  when the folder holding `Clauseo.app` fails `access(W_OK)`, or the executable is not in an
-  `.app`. Found once at start.
+  when the folder holding `Clauseo.app` or the `.app` itself fails `access(W_OK)` (moving the
+  old bundle out needs both, so a root-owned `.app` from an MDM would ask for an
+  administrator), or the executable is not in an `.app`. Found once at start.
 - **The install, as built.** A task watches `HostHandle::exit`; `HostExit::Install` asks the app
   to exit, which runs the stopper thread: `host_start::stop`, the log's flush, the counts'
   save, then the window state's save (the install and the restart skip the exit event
@@ -284,7 +287,10 @@ install; what the brief left open was decided so:
   `install`. It rebuilds the update with `restore_update(raw_json)`, checks the version is the
   downloaded one, and hands it the file's bytes, which it verifies again. Windows exits inside
   it (`installMode: passive`); after it returns, whether it worked (macOS) or failed, the app
-  restarts. A plain exit saves the window state on the exit event, as before.
+  restarts. A plain exit saves the window state on the exit event, as before. The host log
+  keeps the install on the `clauseo_desktop::lifecycle` target ("installing the update" and
+  "the update is installed", with the version), and a failure at warn with its kind and fixed
+  line (an old app the plugin could not put back is its own I/O line).
 
 ### The key's custody
 
