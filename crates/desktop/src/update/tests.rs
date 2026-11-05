@@ -19,6 +19,7 @@ use std::path::{Path, PathBuf};
 #[cfg(feature = "e2e")]
 use clauseo_host::Updater as _;
 use clauseo_host::{Downloaded, HostExit, InstallKind, Opaque, UpdaterError};
+use clauseo_settings::Locations;
 use serde_json::Value;
 use tauri::test::MockRuntime;
 
@@ -27,6 +28,7 @@ use super::install::{self, After, Steps};
 use super::install_kind::{bundle_folder, mac_kind, windows_kind};
 #[cfg(feature = "e2e")]
 use super::plugin::Pending;
+use crate::test_support::Scratch;
 #[cfg(feature = "e2e")]
 use crate::test_support::block_on;
 
@@ -349,6 +351,52 @@ fn a_failed_install_restarts_as_the_old_version() {
             "install",
             "flush"
         ]
+    );
+}
+
+/// The host log (0047) keeps that an install ran: its version, on the desktop's lifecycle target,
+/// and how it went (versions and kinds only, no path). `install` sets the process's global
+/// subscriber; nextest runs each test in its own process.
+#[test]
+fn the_host_log_keeps_that_an_install_ran_and_how_it_went() {
+    let scratch = Scratch::folder("update-log", &[]);
+    let locations = Locations::under_home(scratch.path());
+    let log = clauseo_host::log_file::install(&locations);
+    let mut steps = Recorded::new(true, Ok(()));
+    install::after_host(HostExit::Install(downloaded()), &mut steps);
+    let failed = Err(UpdaterError::Io(
+        "the update failed and the old app was not put back".to_owned(),
+    ));
+    let mut steps = Recorded::new(true, failed);
+    install::after_host(HostExit::Install(downloaded()), &mut steps);
+    log.flush();
+    let text = std::fs::read_to_string(locations.log_dir().join("host.log")).unwrap();
+    let lines: Vec<&str> = text.lines().collect();
+    let line = |words: &str| {
+        lines
+            .iter()
+            .find(|line| line.contains(words))
+            .unwrap_or_else(|| panic!("no line with {words:?} in {text}"))
+            .to_owned()
+    };
+    let installing = line("installing the update");
+    assert!(
+        installing.contains("clauseo_desktop::lifecycle") && installing.contains("0.4.1"),
+        "{installing}"
+    );
+    let installed = line("the update is installed");
+    assert!(
+        installed.contains("clauseo_desktop::lifecycle") && installed.contains("0.4.1"),
+        "{installed}"
+    );
+    let failed = line("the update did not install");
+    assert!(
+        failed.contains("old app was not put back") && failed.contains("io"),
+        "{failed}"
+    );
+    assert!(
+        !text.contains(&scratch.path().display().to_string()),
+        "no path: {text}"
     );
 }
 

@@ -36,7 +36,8 @@ pub(super) trait Steps {
     fn crash_clean_exit(&mut self);
     /// Flushes the host log.
     fn flush_log(&mut self);
-    /// The plugin's install. Windows never returns from it.
+    /// The plugin's install. Windows never returns from it. Its error holds a fixed line, never
+    /// a path or a URL: it is logged.
     fn install(&mut self, downloaded: &Downloaded) -> Result<(), UpdaterError>;
 }
 
@@ -46,18 +47,29 @@ pub(super) fn after_host(ended: HostExit, steps: &mut impl Steps) -> After {
     let HostExit::Install(downloaded) = ended else {
         return After::Exit;
     };
+    let version = downloaded.version.as_str();
     if !steps.installable(&downloaded) {
-        tracing::info!("the host stopped for an update this build does not install");
+        tracing::info!(
+            target: LIFECYCLE,
+            version,
+            "the host stopped for an update this build does not install"
+        );
         return After::Exit;
     }
     steps.save_window_state();
     steps.crash_clean_exit();
-    tracing::info!(version = %downloaded.version, "installing the update");
+    tracing::info!(target: LIFECYCLE, version, "installing the update");
     steps.flush_log();
     match steps.install(&downloaded) {
-        Ok(()) => tracing::info!("the update is installed; restarting"),
+        Ok(()) => tracing::info!(
+            target: LIFECYCLE,
+            version,
+            "the update is installed; restarting"
+        ),
         Err(error) => tracing::warn!(
             kind = kind(&error),
+            what = line(&error),
+            version,
             "the update did not install; restarting as the old version"
         ),
     }
@@ -65,7 +77,22 @@ pub(super) fn after_host(ended: HostExit, steps: &mut impl Steps) -> After {
     After::Restart
 }
 
-/// An error's kind, for the log: never its text (0047).
+/// The host log's target for the install's lines (0047's lifecycle targets: the file keeps info
+/// from a `clauseo_*` crate's `::lifecycle` target), so it records that an install ran.
+const LIFECYCLE: &str = "clauseo_desktop::lifecycle";
+
+/// An error's fixed line, for the log. Every error [`Steps::install`] gives is one of
+/// `plugin.rs`'s fixed lines (`failure`), never the plugin's text, so it names no path or URL.
+fn line(error: &UpdaterError) -> &str {
+    match error {
+        UpdaterError::Network(line)
+        | UpdaterError::Signature(line)
+        | UpdaterError::Io(line)
+        | UpdaterError::Other(line) => line,
+    }
+}
+
+/// An error's kind, for the log.
 fn kind(error: &UpdaterError) -> &'static str {
     match error {
         UpdaterError::Network(_) => "network",
