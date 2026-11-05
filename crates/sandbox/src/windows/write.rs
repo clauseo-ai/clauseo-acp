@@ -9,7 +9,7 @@
 )]
 
 use std::fs::{File, OpenOptions, TryLockError};
-use std::io::{self, Write as _};
+use std::io::{self, Write};
 use std::path::Path;
 use std::time::Duration;
 
@@ -147,6 +147,15 @@ pub(crate) fn lock_exclusive_for(path: &Path, wait: Duration) -> io::Result<File
 /// `MOVEFILE_REPLACE_EXISTING` on Windows). A reader sees the old file or the new one, never a
 /// part. On failure the new file is removed and `path` is as it was.
 pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    write_atomic_with(path, bytes, Write::write_all)
+}
+
+/// [`write_atomic`] with the write itself as a parameter, so a test can fail it partway.
+pub(crate) fn write_atomic_with(
+    path: &Path,
+    bytes: &[u8],
+    write: impl FnOnce(&mut File, &[u8]) -> io::Result<()>,
+) -> io::Result<()> {
     let name = path
         .file_name()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no file name"))?;
@@ -163,7 +172,7 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
             .write(true)
             .create_new(true)
             .open(&temp)?;
-        file.write_all(bytes)?;
+        write(&mut file, bytes)?;
         file.sync_all()?;
         drop(file);
         std::fs::rename(&temp, path)

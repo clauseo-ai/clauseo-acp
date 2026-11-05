@@ -14,8 +14,12 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use super::FolderSupport;
+// The gate itself builds on Windows and for tests; elsewhere only its types do.
+#[cfg(any(windows, test, feature = "test-support"))]
 use super::acl_plan::in_folder;
-use crate::{Error, Policy};
+#[cfg(any(windows, test, feature = "test-support"))]
+use crate::Error;
+use crate::Policy;
 
 /// Which kind of path a grant or a refusal is about. Errors and logs name this, never the path,
 /// so no matter's or client's name reaches them. Stored in the ledger by its snake-case name;
@@ -81,6 +85,14 @@ pub enum FolderRefusal {
     /// doesn't resolve. Holding it, the matter's `Modify` pair would reach `<data_dir>\sandbox`
     /// (the SID map, the ledger, the marker); inside it, the agent would reach Clauseo's state.
     OverlapsDataFolder,
+    /// The path is the lawyer's profile folder or a folder above it.
+    HoldsTheProfile,
+    /// The path is `<data_dir>\sandbox`, holds it or is inside it: the SID map, the ledger and
+    /// the marker.
+    OverlapsSandboxRecords,
+    /// Another matter's folder is inside this matter, or holds it: a deny on one would land in
+    /// the other's tree, whatever its DACL.
+    NestedMatter,
 }
 
 impl fmt::Display for FolderRefusal {
@@ -100,6 +112,11 @@ impl fmt::Display for FolderRefusal {
             FolderRefusal::OverlapsDataFolder => {
                 f.write_str("it is, holds or is inside Clauseo's data folder")
             }
+            FolderRefusal::HoldsTheProfile => f.write_str("it is or holds the profile folder"),
+            FolderRefusal::OverlapsSandboxRecords => {
+                f.write_str("it is, holds or is inside the sandbox's records folder")
+            }
+            FolderRefusal::NestedMatter => f.write_str("it is inside this matter, or holds it"),
         }
     }
 }
@@ -119,6 +136,7 @@ pub trait GroupAccess {
 #[derive(Debug)]
 pub struct Admitted<'a> {
     policy: &'a Policy,
+    data_dir: PathBuf,
     closed: Vec<PathBuf>,
 }
 
@@ -132,6 +150,11 @@ impl<'a> Admitted<'a> {
     /// denies this matter's SID read and write on each.
     pub fn closed(&self) -> &[PathBuf] {
         &self.closed
+    }
+
+    /// Clauseo's data folder, canonical.
+    pub fn data_dir(&self) -> &Path {
+        &self.data_dir
     }
 }
 
@@ -152,7 +175,8 @@ pub fn grant_folders(policy: &Policy) -> Vec<(PathKind, &Path)> {
     folders
 }
 
-/// The gate on Windows: [`admit_with`] with [`folder_support`](super::folder_support).
+/// The gate on Windows, with [`folder_support`](super::folder_support): see [`gate`] for its
+/// steps. The only way, outside tests, to an [`Admitted`], so to a plan and a ledger entry.
 #[cfg(windows)]
 pub fn admit<'a>(
     policy: &'a Policy,
@@ -160,7 +184,20 @@ pub fn admit<'a>(
     others: &[PathBuf],
     groups: &dyn GroupAccess,
 ) -> Result<Admitted<'a>, Error> {
-    admit_with(policy, data_dir, others, super::folder_support, groups)
+    gate(policy, data_dir, others, super::folder_support, groups)
+}
+
+/// The gate with a fake folder check, for this crate's tests and, through `test-support`,
+/// others'.
+#[cfg(any(test, feature = "test-support"))]
+pub fn admit_with<'a>(
+    policy: &'a Policy,
+    data_dir: &Path,
+    others: &[PathBuf],
+    check: impl FnMut(&Path) -> io::Result<FolderSupport>,
+    groups: &dyn GroupAccess,
+) -> Result<Admitted<'a>, Error> {
+    gate(policy, data_dir, others, check, groups)
 }
 
 /// The gate, with the folder check `check` and the DACL reader `groups` as parameters.
@@ -177,18 +214,39 @@ pub fn admit<'a>(
 ///    so must answer `Ok` too. A `Network` folder is left alone: `ClauseoSandbox` is a local
 ///    account a file server doesn't know, and the restricted token was refused every operation
 ///    over `\\localhost` (`smb-spike.md`). A missing folder is left alone: nothing is there.
-///    Any other answer refuses with [`PathKind::OtherMatter`].
+///    Any other answer refuses with [`PathKind::OtherMatter`]. Before any of that, another
+///    matter's folder inside this matter, or holding it, refuses with
+///    [`FolderRefusal::NestedMatter`], whatever its DACL.
 ///
 /// Nothing is written. A refusal returns before anything is planned.
-pub fn admit_with<'a>(
+#[cfg(any(windows, test, feature = "test-support"))]
+fn gate<'a>(
     policy: &'a Policy,
     data_dir: &Path,
     others: &[PathBuf],
     mut check: impl FnMut(&Path) -> io::Result<FolderSupport>,
     groups: &dyn GroupAccess,
 ) -> Result<Admitted<'a>, Error> {
-    if overlaps_data_folder(policy.matter(), data_dir) {
+    let data = match dunce::canonicalize(data_dir) {
+        Ok(data) => data,
+        Err(error) => {
+            let error = error.kind();
+            tracing::warn!(%error, "the data folder doesn't resolve; tier B refuses");
+            return Err(refused(PathKind::Matter, FolderRefusal::OverlapsDataFolder));
+        }
+    };
+    let matter = policy.matter();
+    if in_folder(matter, &data) || in_folder(&data, matter) {
         return Err(refused(PathKind::Matter, FolderRefusal::OverlapsDataFolder));
+    }
+    for other in others {
+        let canonical = dunce::canonicalize(other).unwrap_or_else(|_missing| other.clone());
+        let nested = [other, &canonical]
+            .iter()
+            .any(|o| in_folder(o, matter) || in_folder(matter, o));
+        if nested {
+            return Err(refused(PathKind::OtherMatter, FolderRefusal::NestedMatter));
+        }
     }
     for (kind, folder) in grant_folders(policy) {
         if let Some(refusal) = refusal(check(folder)) {
@@ -214,23 +272,15 @@ pub fn admit_with<'a>(
             }
         }
     }
-    Ok(Admitted { policy, closed })
-}
-
-/// Whether `matter` (canonical) and `data_dir` are the same folder or one holds the other, or
-/// `data_dir` doesn't resolve.
-fn overlaps_data_folder(matter: &Path, data_dir: &Path) -> bool {
-    match dunce::canonicalize(data_dir) {
-        Ok(data) => in_folder(matter, &data) || in_folder(&data, matter),
-        Err(error) => {
-            let error = error.kind();
-            tracing::warn!(%error, "the data folder doesn't resolve; tier B refuses");
-            true
-        }
-    }
+    Ok(Admitted {
+        policy,
+        data_dir: data,
+        closed,
+    })
 }
 
 /// `None` for `Ok`, else why the folder is refused.
+#[cfg(any(windows, test, feature = "test-support"))]
 fn refusal(answer: io::Result<FolderSupport>) -> Option<FolderRefusal> {
     match answer {
         Ok(FolderSupport::Ok) => None,
@@ -240,6 +290,7 @@ fn refusal(answer: io::Result<FolderSupport>) -> Option<FolderRefusal> {
 }
 
 /// The refusal, logged by kind only.
+#[cfg(any(windows, test, feature = "test-support"))]
 fn refused(path_kind: PathKind, support: FolderRefusal) -> Error {
     tracing::info!(%path_kind, %support, "tier B refused a folder; nothing was planned");
     Error::FolderUnsupported { path_kind, support }

@@ -8,8 +8,9 @@ use std::path::{Component, Path, PathBuf};
 
 use clauseo_protocol::MatterId;
 
-use super::acl_plan::{Sid, Sids};
+use super::acl_plan::Sids;
 use super::admit::GroupAccess;
+use super::sids::{Reserved, Sid};
 use crate::test_support::TempDir;
 use crate::{Policy, PolicyBuilder};
 
@@ -28,11 +29,22 @@ pub(super) fn matter_two() -> MatterId {
     "01890a5d-ac96-774b-8cce-b302099a8058".parse().unwrap()
 }
 
+/// The sandbox user's SID.
+pub(super) fn user_sid() -> Sid {
+    Sid::parse(USER_SID).unwrap()
+}
+
+/// The reserved accounts: a stand-in for the lawyer's own account (another domain than the
+/// matter SID's) and the sandbox user.
+pub(super) fn reserved() -> Reserved {
+    Reserved::new([Sid::parse("S-1-5-21-7-8-9-1001").unwrap(), user_sid()])
+}
+
 /// Both SIDs.
 pub(super) fn sids() -> Sids {
     Sids {
-        user: Sid::new(USER_SID).unwrap(),
-        matter: Sid::new(MATTER_SID).unwrap(),
+        user: Sid::parse(USER_SID).unwrap(),
+        matter: Sid::parse(MATTER_SID).unwrap(),
     }
 }
 
@@ -48,7 +60,7 @@ impl World {
             "data/agent-state/m1/claude",
             "data/agent-state/m1/notes",
             "data/claude-home",
-            "data/agents/node",
+            "runtime/node",
             "home/.claude",
             "elsewhere/Precedents",
             "other/m2",
@@ -92,7 +104,7 @@ impl World {
             .credential_link(self.at("data/agent-state/m1/claude/auth.json"))
             .read_only_in_state(self.at("data/agent-state/m1/claude/settings.json"))
             .claude_store(self.at("data/claude-home"))
-            .runtime(self.at("data/agents/node"))
+            .runtime(self.at("runtime/node"))
             .read(self.at("elsewhere"))
             .allowed_folder(self.at("elsewhere/Precedents"))
             .over_cap([big])

@@ -1,8 +1,8 @@
 use std::fmt::Write as _;
 use std::path::Path;
 
-use super::super::admit::{Admitted, PathKind, admit_with};
-use super::super::test_world::{FakeGroups, MATTER_SID, USER_SID, World, sids};
+use super::super::admit::{Admitted, FolderRefusal, PathKind, admit_with};
+use super::super::test_world::{FakeGroups, MATTER_SID, USER_SID, World, matter_one, sids};
 use super::*;
 use crate::windows::FolderSupport;
 use crate::{Error, Policy};
@@ -50,7 +50,13 @@ fn the_full_plan() {
         ..FakeGroups::default()
     };
     let others = [w.canonical("other/m2"), w.canonical("other/m3")];
-    let grants = plan(&admitted(&w, &policy, &others, &groups), &sids()).unwrap();
+    let grants = plan(
+        &admitted(&w, &policy, &others, &groups),
+        &sids(),
+        matter_one(),
+    )
+    .map(|p| p.grants().to_vec())
+    .unwrap();
     insta::assert_snapshot!(render(&w, &grants));
 }
 
@@ -58,10 +64,19 @@ fn the_full_plan() {
 fn every_allow_comes_in_a_pair() {
     let w = World::new("plan-pairs");
     let policy = w.full_policy();
-    let grants = plan(&admitted(&w, &policy, &[], &FakeGroups::default()), &sids()).unwrap();
+    let grants = plan(
+        &admitted(&w, &policy, &[], &FakeGroups::default()),
+        &sids(),
+        matter_one(),
+    )
+    .map(|p| p.grants().to_vec())
+    .unwrap();
     let allows: Vec<&Grant> = grants.iter().filter(|g| !g.rights.is_deny()).collect();
     assert!(allows.len() >= 20, "{allows:#?}");
-    let (user, matter) = (Sid::new(USER_SID).unwrap(), Sid::new(MATTER_SID).unwrap());
+    let (user, matter) = (
+        Sid::parse(USER_SID).unwrap(),
+        Sid::parse(MATTER_SID).unwrap(),
+    );
     for g in &allows {
         let partner = if g.sid == user { &matter } else { &user };
         assert!(g.sid == user || g.sid == matter, "{g:?}");
@@ -84,7 +99,9 @@ fn every_deny_names_the_matter_sid_alone() {
         ..FakeGroups::default()
     };
     let admitted = admitted(&w, &policy, &[w.canonical("other/m2")], &groups);
-    let grants = plan(&admitted, &sids()).unwrap();
+    let grants = plan(&admitted, &sids(), matter_one())
+        .map(|p| p.grants().to_vec())
+        .unwrap();
     let denies: Vec<&Grant> = grants.iter().filter(|g| g.rights.is_deny()).collect();
     assert_ne!(denies.len(), 0);
     for g in denies {
@@ -96,7 +113,13 @@ fn every_deny_names_the_matter_sid_alone() {
 fn read_only_names_get_deny_write() {
     let w = World::new("plan-read-only");
     let policy = w.full_policy();
-    let grants = plan(&admitted(&w, &policy, &[], &FakeGroups::default()), &sids()).unwrap();
+    let grants = plan(
+        &admitted(&w, &policy, &[], &FakeGroups::default()),
+        &sids(),
+        matter_one(),
+    )
+    .map(|p| p.grants().to_vec())
+    .unwrap();
     let denied = |path: &Path| {
         grants.iter().find(|g| {
             g.path == path && g.rights == Rights::DenyWrite && g.sid.as_str() == MATTER_SID
@@ -154,7 +177,13 @@ fn modify_never_gives_delete_child_or_permission_changes() {
 fn nothing_lands_in_the_profiles_claude_folder() {
     let w = World::new("plan-no-claude");
     let policy = w.full_policy();
-    let grants = plan(&admitted(&w, &policy, &[], &FakeGroups::default()), &sids()).unwrap();
+    let grants = plan(
+        &admitted(&w, &policy, &[], &FakeGroups::default()),
+        &sids(),
+        matter_one(),
+    )
+    .map(|p| p.grants().to_vec())
+    .unwrap();
     let claude = w.canonical("home/.claude");
     let home = w.canonical("home");
     for g in &grants {
@@ -174,7 +203,13 @@ fn a_claude_store_in_the_profiles_claude_folder_is_refused() {
         .claude_store(w.at("home/.claude"))
         .build()
         .unwrap();
-    let error = plan(&admitted(&w, &policy, &[], &FakeGroups::default()), &sids()).unwrap_err();
+    let error = plan(
+        &admitted(&w, &policy, &[], &FakeGroups::default()),
+        &sids(),
+        matter_one(),
+    )
+    .map(|p| p.grants().to_vec())
+    .unwrap_err();
     let Error::Policy(message) = &error else {
         panic!("{error:?}");
     };
@@ -195,7 +230,13 @@ fn a_read_path_in_the_profiles_claude_folder_is_refused() {
         .read(w.at("home/.claude/skills"))
         .build()
         .unwrap();
-    let error = plan(&admitted(&w, &policy, &[], &FakeGroups::default()), &sids()).unwrap_err();
+    let error = plan(
+        &admitted(&w, &policy, &[], &FakeGroups::default()),
+        &sids(),
+        matter_one(),
+    )
+    .map(|p| p.grants().to_vec())
+    .unwrap_err();
     assert!(error.to_string().contains("a read path"), "{error}");
 }
 
@@ -229,7 +270,9 @@ fn another_matter_a_group_can_reach_is_denied_to_this_matter() {
     let grants = plan(
         &admitted(&w, &policy, &[m2.clone(), m3.clone()], &groups),
         &sids(),
+        matter_one(),
     )
+    .map(|p| p.grants().to_vec())
     .unwrap();
     let on = |path: &Path| grants.iter().filter(|g| g.path == path).collect::<Vec<_>>();
     let m2_grants = on(&m2);
@@ -249,31 +292,85 @@ fn the_same_sid_twice_is_refused() {
     let w = World::new("plan-same-sid");
     let policy = w.builder().build().unwrap();
     let same = Sids {
-        user: Sid::new(MATTER_SID).unwrap(),
-        matter: Sid::new(MATTER_SID).unwrap(),
+        user: Sid::parse(MATTER_SID).unwrap(),
+        matter: Sid::parse(MATTER_SID).unwrap(),
     };
-    let error = plan(&admitted(&w, &policy, &[], &FakeGroups::default()), &same).unwrap_err();
+    let error = plan(
+        &admitted(&w, &policy, &[], &FakeGroups::default()),
+        &same,
+        matter_one(),
+    )
+    .unwrap_err();
     assert!(matches!(error, Error::Policy(_)), "{error:?}");
 }
 
-#[test]
-fn a_sid_is_checked_for_shape() {
-    assert!(Sid::new(USER_SID).is_some());
-    assert!(Sid::new("S-1-5-12").is_some());
-    for bad in [
-        "",
-        "S-1",
-        "S-1-",
-        "S-2-5",
-        "s-1-5",
-        "S-1-5-x",
-        "S-1-5--1",
-        "Users",
-        "S-1-99999999999",
-    ] {
-        assert!(Sid::new(bad).is_none(), "{bad}");
+/// The plan for `policy`, gated with every folder answering Ok, as an error or not.
+fn refusal(w: &World, policy: &Policy) -> Option<(PathKind, FolderRefusal)> {
+    let admitted = admitted(w, policy, &[], &FakeGroups::default());
+    match plan(&admitted, &sids(), matter_one()) {
+        Ok(_) => None,
+        Err(Error::FolderUnsupported { path_kind, support }) => Some((path_kind, support)),
+        Err(other) => panic!("{other:?}"),
     }
-    let json = serde_json::to_string(&Sid::new("S-1-5-12").unwrap()).unwrap();
-    assert_eq!(json, "\"S-1-5-12\"");
-    assert!(serde_json::from_str::<Sid>("\"not a sid\"").is_err());
+}
+
+#[test]
+fn a_notes_folder_on_the_profile_is_refused() {
+    // The review's repro: Modify down the tree on the profile.
+    let w = World::new("plan-notes-home");
+    let policy = w.builder().notes(w.at("home")).build().unwrap();
+    let want = (PathKind::Notes, FolderRefusal::HoldsTheProfile);
+    assert_eq!(refusal(&w, &policy), Some(want));
+}
+
+#[test]
+fn a_read_path_over_other_matters_state_is_refused() {
+    // The review's repro: `data/agent-state` holds every matter's state and notes.
+    let w = World::new("plan-read-agent-state");
+    let policy = w.builder().read(w.at("data/agent-state")).build().unwrap();
+    let want = (PathKind::Read, FolderRefusal::OverlapsDataFolder);
+    assert_eq!(refusal(&w, &policy), Some(want));
+}
+
+#[test]
+fn the_sandbox_records_folder_is_refused_as_a_runtime_path_or_the_claude_store() {
+    let w = World::new("plan-sandbox-records");
+    w.dir.dir("data/sandbox");
+    let runtime = w.builder().runtime(w.at("data/sandbox")).build().unwrap();
+    let want = (PathKind::Runtime, FolderRefusal::OverlapsSandboxRecords);
+    assert_eq!(refusal(&w, &runtime), Some(want));
+    let store = w
+        .builder()
+        .claude_store(w.at("data/sandbox"))
+        .build()
+        .unwrap();
+    let got = refusal(&w, &store).unwrap();
+    assert_eq!(got.1, FolderRefusal::OverlapsSandboxRecords);
+    assert!(
+        matches!(got.0, PathKind::ClaudeStore | PathKind::ClaudeStoreFile),
+        "{got:?}"
+    );
+    // The data folder itself as a read path holds the records folder (a policy that doesn't hide
+    // it; with it hidden, the policy refuses that path itself).
+    let data = Policy::builder(w.at("matter"), w.at("data/agent-state/m1/claude"))
+        .home(w.at("home"))
+        .read(w.at("data"))
+        .build()
+        .unwrap();
+    assert_eq!(
+        refusal(&w, &data).unwrap().1,
+        FolderRefusal::OverlapsSandboxRecords
+    );
+}
+
+#[test]
+fn a_read_path_in_this_matters_own_state_folder_is_planned() {
+    let w = World::new("plan-read-own-state");
+    w.dir.dir("data/agent-state/m1/claude/skills");
+    let policy = w
+        .builder()
+        .read(w.at("data/agent-state/m1/claude/skills"))
+        .build()
+        .unwrap();
+    assert_eq!(refusal(&w, &policy), None);
 }

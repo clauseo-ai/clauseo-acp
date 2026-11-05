@@ -6,15 +6,25 @@
 //! keeps each `pending` entry whose permission entry is there (marking it `applied`) and drops
 //! the rest. So every permission entry written is listed, and no `applied` entry lacks one.
 //!
-//! The file is replaced whole, through a temporary file beside it and a rename
-//! (`ledger/write.rs`), so a failed write leaves the old file as it was. Nothing here writes
-//! unless the entries changed: a launch refused by the gate never reaches the ledger, and a
-//! ledger only read is never rewritten.
+//! Every change is a read-modify-write under the exclusive OS lock on `acl-ledger.lock` beside
+//! the file (`write::lock_exclusive_for`, the records' bounded wait): the file is read again
+//! inside the lock, changed, and replaced whole through a uniquely named temporary file and a
+//! rename (`write::write_atomic`), so two processes never lose each other's entries and a failed
+//! write leaves the old file as it was. Entry numbers come from a counter stored in the file and
+//! advanced under that lock, so they are unique across launches and processes and never reused.
+//! The folder is made, or checked and secured, by `write::make_sandbox_dir` (its protected DACL,
+//! its owner). Nothing is written unless the entries change: a launch refused by the gate never
+//! reaches the ledger, and a missing ledger stays missing until an entry is recorded.
 //!
-//! An entry this version can't read (an older shape, a newer kind) is kept as it is, written
-//! back unchanged, and never acted on. A file from a newer format version, or one that isn't
-//! JSON, is refused with `InvalidData` and left alone. The caller holds one [`Ledger`] per data
-//! folder and serialises its calls.
+//! Only an [`AdmittedPlan`] is recorded, and a rollback ([`Ledger::drop_entries`]) drops only the
+//! entries its own plan added.
+//!
+//! Entries are not trusted on load. One this version can't read (an older shape, a newer kind),
+//! one whose SID is neither the `ClauseoSandbox` SID given to [`Ledger::open`] nor a matter-form
+//! SID outside the reserved accounts and domains (`sids::Reserved`), and one whose path isn't
+//! absolute, are kept as they are, written back unchanged, and never acted on or handed out. A
+//! file from a newer format version, or one that isn't JSON, is refused with `InvalidData` and
+//! left alone.
 //!
 //! [`reconcile`]: Ledger::reconcile
 
@@ -23,22 +33,30 @@ use std::path::{Path, PathBuf};
 
 use clauseo_protocol::MatterId;
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::Map;
 
-use super::acl_plan::{Grant, Inherit, Rights, Sid};
+use super::acl_plan::{AdmittedPlan, Grant, Inherit, Rights};
 use super::admit::PathKind;
+use super::matters::SANDBOX_DIR;
+use super::sids::{Reserved, Sid};
+use super::write;
 
-mod write;
+mod file;
+
+use file::{Known, Slot, State, Trust, exists, invalid, read_state, render};
 
 /// The ledger's file name in `<data_dir>\sandbox`.
 pub const LEDGER_FILE: &str = "acl-ledger.json";
+
+/// The lock file every change of [`LEDGER_FILE`] holds, beside it.
+pub const LEDGER_LOCK: &str = "acl-ledger.lock";
 
 /// The format version this code writes and the newest it reads.
 pub const LEDGER_VERSION: u64 = 1;
 
 /// `<data_dir>\sandbox\acl-ledger.json`.
 pub fn ledger_path(data_dir: &Path) -> PathBuf {
-    data_dir.join("sandbox").join(LEDGER_FILE)
+    data_dir.join(SANDBOX_DIR).join(LEDGER_FILE)
 }
 
 /// Whether an entry's permission entry is known to be written.
@@ -51,13 +69,14 @@ pub enum EntryState {
     Applied,
 }
 
-/// An entry's number, unique in its ledger.
+/// An entry's number, unique in its ledger and never reused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct EntryId(pub u64);
 
-/// One permission entry, listed.
+/// One permission entry, listed. Read from the ledger only; never made outside this crate.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct Entry {
     /// Its number.
     pub id: EntryId,
@@ -100,23 +119,6 @@ impl Entry {
     }
 }
 
-/// An entry as read: one this version understands, with any fields a newer version added (kept
-/// so a rewrite doesn't lose them), or one kept as it was.
-#[derive(Debug, Clone)]
-enum Slot {
-    Known(Known),
-    Unknown(Value),
-}
-
-/// An entry this version reads, and the fields it doesn't know.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct Known {
-    #[serde(flatten)]
-    entry: Entry,
-    #[serde(flatten)]
-    extra: Map<String, Value>,
-}
-
 /// What [`Ledger::reconcile`] did.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Reconciled {
@@ -137,78 +139,28 @@ pub struct Forgotten {
     pub kept: usize,
 }
 
-/// The ledger, read into memory. Every change replaces the file before it returns.
+/// The ledger: its path, whom its entries may name, and the contents last read. Each change
+/// reads the file again under its lock, so the contents here are a cache.
 #[derive(Debug)]
 pub struct Ledger {
     path: PathBuf,
-    slots: Vec<Slot>,
-    next_id: u64,
-    extra: Map<String, Value>,
+    trust: Trust,
+    state: State,
 }
 
 impl Ledger {
-    /// Reads the ledger at `path` (see [`ledger_path`]). A missing file is an empty ledger, and
-    /// nothing is written until an entry is recorded. A newer format version or a file that
-    /// isn't a JSON object is `InvalidData`; entries this version can't read are kept as they
-    /// are.
-    pub fn open(path: impl Into<PathBuf>) -> io::Result<Ledger> {
+    /// Reads the ledger at `path` (see [`ledger_path`]). `user` is the `ClauseoSandbox` SID and
+    /// `reserved` the accounts and domains no matter SID may be in (`Reserved::of_this_machine`
+    /// on Windows): an entry naming any other SID is set aside. A missing file is an empty
+    /// ledger. A newer format version or a file that isn't a JSON object is `InvalidData`.
+    pub fn open(path: impl Into<PathBuf>, user: &Sid, reserved: &Reserved) -> io::Result<Ledger> {
         let path = path.into();
-        let bytes = match std::fs::read(&path) {
-            Ok(bytes) => bytes,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                return Ok(Ledger {
-                    path,
-                    slots: Vec::new(),
-                    next_id: 1,
-                    extra: Map::new(),
-                });
-            }
-            Err(error) => return Err(error),
+        let trust = Trust {
+            user: user.clone(),
+            reserved: reserved.clone(),
         };
-        let Value::Object(mut top) = serde_json::from_slice(&bytes).map_err(invalid)? else {
-            return Err(invalid("the ACL ledger is not a JSON object"));
-        };
-        let version = match top.remove("version") {
-            None => 1,
-            Some(Value::Number(n)) => n
-                .as_u64()
-                .ok_or_else(|| invalid("the ACL ledger's version is not a whole number"))?,
-            Some(_) => return Err(invalid("the ACL ledger's version is not a number")),
-        };
-        if version > LEDGER_VERSION {
-            return Err(invalid("the ACL ledger is from a newer Clauseo"));
-        }
-        let slots: Vec<Slot> = match top.remove("entries") {
-            None => Vec::new(),
-            Some(Value::Array(items)) => items.into_iter().map(read_slot).collect(),
-            Some(_) => return Err(invalid("the ACL ledger's entries are not a list")),
-        };
-        let stored_next = top.remove("next_id").and_then(|n| n.as_u64()).unwrap_or(1);
-        let highest = slots
-            .iter()
-            .filter_map(|slot| match slot {
-                Slot::Known(Known { entry, .. }) => Some(entry.id.0),
-                Slot::Unknown(value) => value.get("id").and_then(Value::as_u64),
-            })
-            .max()
-            .unwrap_or(0);
-        let next_id = stored_next.max(highest.saturating_add(1));
-        let unknown = slots
-            .iter()
-            .filter(|s| matches!(s, Slot::Unknown(_)))
-            .count();
-        if unknown > 0 {
-            tracing::warn!(
-                unknown,
-                "the ACL ledger holds entries this version can't read"
-            );
-        }
-        Ok(Ledger {
-            path,
-            slots,
-            next_id,
-            extra: top,
-        })
+        let state = read_state(&path, &trust)?;
+        Ok(Ledger { path, trust, state })
     }
 
     /// The file this ledger replaces.
@@ -216,23 +168,21 @@ impl Ledger {
         &self.path
     }
 
-    /// The entries this version can read, in file order.
+    /// The entries this version reads and trusts, in file order, as last read.
     pub fn entries(&self) -> impl Iterator<Item = &Entry> {
-        self.slots.iter().filter_map(|slot| match slot {
-            Slot::Known(Known { entry, .. }) => Some(entry),
-            Slot::Unknown(_) => None,
-        })
+        self.state.entries()
     }
 
-    /// How many entries this version can't read; they are kept and never acted on.
-    pub fn unknown_entries(&self) -> usize {
-        self.slots
+    /// How many entries are set aside: unread or untrusted. They are kept and never acted on.
+    pub fn set_aside_entries(&self) -> usize {
+        self.state
+            .slots
             .iter()
-            .filter(|slot| matches!(slot, Slot::Unknown(_)))
+            .filter(|slot| matches!(slot, Slot::SetAside(_)))
             .count()
     }
 
-    /// `matter`'s entries, for removal.
+    /// `matter`'s trusted entries, as last read, for removal.
     pub fn matter_entries(&self, matter: MatterId) -> Vec<Entry> {
         self.entries()
             .filter(|entry| entry.matter == matter)
@@ -240,208 +190,230 @@ impl Ledger {
             .collect()
     }
 
-    /// The write-ahead step: lists each of `grants` for `matter` as `pending`, then replaces the
-    /// file, before any permission entry is written. A grant already listed for the matter,
-    /// pending or applied, keeps its entry. Returns each grant's entry number, in order. The
-    /// file is untouched when every grant was listed already, or when the write fails (the
-    /// ledger in memory is then as it was).
-    pub fn record_pending(
-        &mut self,
-        matter: MatterId,
-        grants: &[Grant],
-    ) -> io::Result<Vec<EntryId>> {
-        let mut slots = self.slots.clone();
-        let mut next_id = self.next_id;
-        let mut ids = Vec::with_capacity(grants.len());
-        for grant in grants {
-            let listed = slots.iter().find_map(|slot| match slot {
-                Slot::Known(known) if known.entry.lists(matter, grant) => Some(known.entry.id),
-                Slot::Known(_) | Slot::Unknown(_) => None,
-            });
-            if let Some(id) = listed {
-                ids.push(id);
-                continue;
+    /// The write-ahead step, under the lock: lists each of `plan`'s grants as `pending`, then
+    /// replaces the file, before any permission entry is written. A grant already listed for the
+    /// matter, pending or applied, keeps its entry. The plan learns each grant's entry
+    /// ([`AdmittedPlan::entries`]) and which ones it added ([`AdmittedPlan::created`]). A plan
+    /// already recorded is refused (`InvalidInput`). The file is untouched when every grant was
+    /// listed already, or when the write fails.
+    pub fn record_pending(&mut self, plan: &mut AdmittedPlan) -> io::Result<()> {
+        if !plan.entries.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "this plan was recorded already",
+            ));
+        }
+        let matter = plan.matter();
+        let (entries, created) = self.update(true, |state| {
+            let mut entries = Vec::with_capacity(plan.grants().len());
+            let mut created = Vec::new();
+            for grant in plan.grants() {
+                if let Some(id) = state
+                    .entries()
+                    .find(|entry| entry.lists(matter, grant))
+                    .map(|entry| entry.id)
+                {
+                    entries.push(id);
+                    continue;
+                }
+                let id = EntryId(state.next_id);
+                state.next_id = state
+                    .next_id
+                    .checked_add(1)
+                    .ok_or_else(|| invalid("the ACL ledger ran out of entry numbers"))?;
+                state.slots.push(Slot::Known(Known {
+                    entry: Entry {
+                        id,
+                        matter,
+                        state: EntryState::Pending,
+                        path: grant.path.clone(),
+                        sid: grant.sid.clone(),
+                        rights: grant.rights,
+                        inherit: grant.inherit,
+                        kind: grant.kind,
+                    },
+                    extra: Map::new(),
+                }));
+                entries.push(id);
+                created.push(id);
             }
-            let id = EntryId(next_id);
-            next_id = next_id
-                .checked_add(1)
-                .ok_or_else(|| invalid("the ACL ledger ran out of entry numbers"))?;
-            let entry = Entry {
-                id,
-                matter,
-                state: EntryState::Pending,
-                path: grant.path.clone(),
-                sid: grant.sid.clone(),
-                rights: grant.rights,
-                inherit: grant.inherit,
-                kind: grant.kind,
-            };
-            slots.push(Slot::Known(Known {
-                entry,
-                extra: Map::new(),
-            }));
-            ids.push(id);
-        }
-        if next_id != self.next_id {
-            self.commit(slots, next_id)?;
-        }
-        Ok(ids)
-    }
-
-    /// Marks the entries `ids` `applied`, once their permission entries are written. Numbers
-    /// not listed are ignored.
-    pub fn mark_applied(&mut self, ids: &[EntryId]) -> io::Result<()> {
-        let mut changed = false;
-        let mut slots = self.slots.clone();
-        for slot in &mut slots {
-            if let Slot::Known(Known { entry, .. }) = slot
-                && ids.contains(&entry.id)
-                && entry.state == EntryState::Pending
-            {
-                entry.state = EntryState::Applied;
-                changed = true;
-            }
-        }
-        if changed {
-            self.commit(slots, self.next_id)?;
-        }
+            let changed = !created.is_empty();
+            Ok((changed, (entries, created)))
+        })?;
+        plan.entries = entries;
+        plan.created = created;
         Ok(())
     }
 
-    /// Drops the entries `ids`, once their permission entries are known to be gone (a launch's
-    /// rollback). Numbers not listed are ignored.
-    pub fn drop_entries(&mut self, ids: &[EntryId]) -> io::Result<()> {
-        let before = self.slots.len();
-        let slots: Vec<Slot> = self
-            .slots
+    /// Marks the entries `ids` `applied`, once their permission entries are written. Only ids of
+    /// `plan`'s own entries count; others are ignored.
+    pub fn mark_applied(&mut self, plan: &AdmittedPlan, ids: &[EntryId]) -> io::Result<()> {
+        let ids: Vec<EntryId> = ids
             .iter()
-            .filter(
-                |slot| !matches!(slot, Slot::Known(Known { entry, .. }) if ids.contains(&entry.id)),
-            )
-            .cloned()
+            .copied()
+            .filter(|id| plan.entries.contains(id))
             .collect();
-        if slots.len() != before {
-            self.commit(slots, self.next_id)?;
+        if ids.is_empty() {
+            return Ok(());
         }
+        self.update(false, |state| {
+            let mut changed = false;
+            for slot in &mut state.slots {
+                if let Slot::Known(known) = slot
+                    && ids.contains(&known.entry.id)
+                    && known.entry.state == EntryState::Pending
+                {
+                    known.entry.state = EntryState::Applied;
+                    changed = true;
+                }
+            }
+            Ok((changed, ()))
+        })
+    }
+
+    /// Drops the entries `ids`, once their permission entries are known to be gone: a launch's
+    /// rollback. Only entries `plan` itself added count; an entry an earlier launch listed, or
+    /// another launch's, is never dropped here.
+    pub fn drop_entries(&mut self, plan: &mut AdmittedPlan, ids: &[EntryId]) -> io::Result<()> {
+        let ids: Vec<EntryId> = ids
+            .iter()
+            .copied()
+            .filter(|id| plan.created.contains(id))
+            .collect();
+        if ids.is_empty() {
+            return Ok(());
+        }
+        self.update(false, |state| {
+            let before = state.slots.len();
+            state.slots.retain(
+                |slot| !matches!(slot, Slot::Known(known) if ids.contains(&known.entry.id)),
+            );
+            Ok((state.slots.len() != before, ()))
+        })?;
+        plan.created.retain(|id| !ids.contains(id));
         Ok(())
     }
 
-    /// At start: asks `present` about each `pending` entry. One whose permission entry is there
-    /// is marked `applied`; one whose permission entry isn't is dropped; one `present` fails on
-    /// stays pending for the next start. Applied entries and unread ones are left as they are.
-    /// The file is replaced once, if anything changed.
+    /// At start, under the lock: asks `present` about each trusted `pending` entry. One whose
+    /// permission entry is there is marked `applied`; one whose permission entry isn't is
+    /// dropped; one `present` fails on stays pending for the next start. Applied entries and set
+    /// aside ones are left as they are.
     pub fn reconcile(
         &mut self,
         mut present: impl FnMut(&Entry) -> io::Result<bool>,
     ) -> io::Result<Reconciled> {
-        let mut done = Reconciled::default();
-        let mut slots = Vec::with_capacity(self.slots.len());
-        for slot in &self.slots {
-            let Slot::Known(known) = slot else {
-                slots.push(slot.clone());
-                continue;
-            };
-            let entry = &known.entry;
-            if entry.state != EntryState::Pending {
-                slots.push(slot.clone());
-                continue;
-            }
-            match present(entry) {
-                Ok(true) => {
-                    let mut known = known.clone();
-                    known.entry.state = EntryState::Applied;
+        self.update(false, |state| {
+            let mut done = Reconciled::default();
+            let mut slots = Vec::with_capacity(state.slots.len());
+            for slot in std::mem::take(&mut state.slots) {
+                let Slot::Known(mut known) = slot else {
+                    slots.push(slot);
+                    continue;
+                };
+                if known.entry.state != EntryState::Pending {
                     slots.push(Slot::Known(known));
-                    done.applied += 1;
+                    continue;
                 }
-                Ok(false) => done.dropped += 1,
-                Err(error) => {
-                    // The kinds alone: the error's text may hold the path.
-                    let (kind, error) = (entry.kind, error.kind());
-                    tracing::warn!(%kind, %error, "a pending ACL entry wasn't checked");
-                    slots.push(slot.clone());
-                    done.unchecked += 1;
+                match present(&known.entry) {
+                    Ok(true) => {
+                        known.entry.state = EntryState::Applied;
+                        slots.push(Slot::Known(known));
+                        done.applied += 1;
+                    }
+                    Ok(false) => done.dropped += 1,
+                    Err(error) => {
+                        // The kinds alone: the error's text may hold the path.
+                        let (kind, error) = (known.entry.kind, error.kind());
+                        tracing::warn!(%kind, %error, "a pending ACL entry wasn't checked");
+                        slots.push(Slot::Known(known));
+                        done.unchecked += 1;
+                    }
                 }
             }
-        }
-        if done.applied + done.dropped > 0 {
-            self.commit(slots, self.next_id)?;
-        }
-        Ok(done)
+            state.slots = slots;
+            Ok((done.applied + done.dropped > 0, done))
+        })
     }
 
-    /// Forgets `matter`: hands each of its entries to `remove`, which removes the permission
-    /// entry (an entry that is already gone counts as removed). Entries removed are dropped;
-    /// entries `remove` failed on are kept for the next try. Other matters' entries are left as
-    /// they are. The file is replaced once, if anything was dropped.
+    /// Forgets `matter`, under the lock: hands each of its trusted entries to `remove`, which
+    /// removes the permission entry (one already gone counts as removed). Entries removed are
+    /// dropped; entries `remove` failed on are kept for the next try. Other matters' entries and
+    /// set aside ones are left as they are, and never handed to `remove`.
     pub fn forget_matter(
         &mut self,
         matter: MatterId,
         mut remove: impl FnMut(&Entry) -> io::Result<()>,
     ) -> io::Result<Forgotten> {
-        let mut done = Forgotten::default();
-        let mut slots = Vec::with_capacity(self.slots.len());
-        for slot in &self.slots {
-            match slot {
-                Slot::Known(Known { entry, .. }) if entry.matter == matter => match remove(entry) {
-                    Ok(()) => done.removed += 1,
-                    Err(error) => {
-                        let (kind, error) = (entry.kind, error.kind());
-                        tracing::warn!(%kind, %error, "an ACL entry wasn't removed");
-                        slots.push(slot.clone());
-                        done.kept += 1;
+        self.update(false, |state| {
+            let mut done = Forgotten::default();
+            let mut slots = Vec::with_capacity(state.slots.len());
+            for slot in std::mem::take(&mut state.slots) {
+                match slot {
+                    Slot::Known(known) if known.entry.matter == matter => {
+                        match remove(&known.entry) {
+                            Ok(()) => done.removed += 1,
+                            Err(error) => {
+                                let (kind, error) = (known.entry.kind, error.kind());
+                                tracing::warn!(%kind, %error, "an ACL entry wasn't removed");
+                                slots.push(Slot::Known(known));
+                                done.kept += 1;
+                            }
+                        }
                     }
-                },
-                Slot::Known(_) | Slot::Unknown(_) => slots.push(slot.clone()),
+                    other @ (Slot::Known(_) | Slot::SetAside(_)) => slots.push(other),
+                }
             }
+            state.slots = slots;
+            Ok((done.removed > 0, done))
+        })
+    }
+
+    /// One read-modify-write. With `create` false and no ledger file, there is nothing to change:
+    /// `change` runs on an empty ledger and nothing is made. Otherwise the folder is made or
+    /// secured, the lock taken, the file read again, `change` run on what was read, and the file
+    /// replaced if `change` says it changed something. The cache then matches the file: the new
+    /// contents, or on a failed write what was read.
+    fn update<R>(
+        &mut self,
+        create: bool,
+        change: impl FnOnce(&mut State) -> io::Result<(bool, R)>,
+    ) -> io::Result<R> {
+        let folder = self
+            .path
+            .parent()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "the ledger has no folder"))?
+            .to_owned();
+        if !create && !exists(&self.path)? {
+            let mut state = State::empty();
+            let (_, result) = change(&mut state)?;
+            self.state = State::empty();
+            return Ok(result);
         }
-        if done.removed > 0 {
-            self.commit(slots, self.next_id)?;
+        write::make_sandbox_dir(&folder)?;
+        let _held = write::lock_exclusive_for(&folder.join(LEDGER_LOCK), write::LOCK_WAIT)?;
+        let fresh = read_state(&self.path, &self.trust)?;
+        let mut next = fresh.clone();
+        let outcome = change(&mut next);
+        let (changed, result) = match outcome {
+            Ok(done) => done,
+            Err(error) => {
+                self.state = fresh;
+                return Err(error);
+            }
+        };
+        if changed {
+            if let Err(error) =
+                render(&next).and_then(|bytes| write::write_atomic(&self.path, &bytes))
+            {
+                self.state = fresh;
+                return Err(error);
+            }
+            self.state = next;
+        } else {
+            self.state = fresh;
         }
-        Ok(done)
+        Ok(result)
     }
-
-    /// Replaces the file with `slots`, then takes them; on a failed write the ledger in memory
-    /// stays as it was, matching the file.
-    fn commit(&mut self, slots: Vec<Slot>, next_id: u64) -> io::Result<()> {
-        let bytes = render(&slots, next_id, &self.extra)?;
-        write::replace(&self.path, &bytes)?;
-        self.slots = slots;
-        self.next_id = next_id;
-        Ok(())
-    }
-}
-
-/// One entry as read: known if this version can read it all, else kept as it is.
-fn read_slot(value: Value) -> Slot {
-    match Known::deserialize(&value) {
-        Ok(known) => Slot::Known(known),
-        Err(_) => Slot::Unknown(value),
-    }
-}
-
-/// The file's bytes: pretty JSON, version first, ending in a newline.
-fn render(slots: &[Slot], next_id: u64, extra: &Map<String, Value>) -> io::Result<Vec<u8>> {
-    let mut top = Map::new();
-    top.insert("version".to_owned(), Value::from(LEDGER_VERSION));
-    top.insert("next_id".to_owned(), Value::from(next_id));
-    let mut entries = Vec::with_capacity(slots.len());
-    for slot in slots {
-        entries.push(match slot {
-            Slot::Known(known) => serde_json::to_value(known).map_err(invalid)?,
-            Slot::Unknown(value) => value.clone(),
-        });
-    }
-    top.insert("entries".to_owned(), Value::Array(entries));
-    for (key, value) in extra {
-        top.entry(key.clone()).or_insert_with(|| value.clone());
-    }
-    let mut bytes = serde_json::to_vec_pretty(&Value::Object(top)).map_err(invalid)?;
-    bytes.push(b'\n');
-    Ok(bytes)
-}
-
-fn invalid(error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, error)
 }
 
 #[cfg(test)]

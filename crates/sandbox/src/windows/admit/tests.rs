@@ -2,9 +2,11 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use super::*;
-use crate::windows::acl_plan::plan;
+use crate::windows::acl_plan::{AdmittedPlan, plan};
 use crate::windows::ledger::{Ledger, ledger_path};
-use crate::windows::test_world::{FakeGroups, World, matter_one, matter_two, sids};
+use crate::windows::test_world::{
+    FakeGroups, World, matter_one, matter_two, reserved, sids, user_sid,
+};
 
 /// A folder check that answers `answer` for `folder` and `Ok` for every other path.
 fn answering(
@@ -31,17 +33,15 @@ fn prepare(
     ledger: &mut Ledger,
 ) -> Result<usize, Error> {
     let admitted = admit_with(policy, data, others, check, groups)?;
-    let grants = plan(&admitted, &sids())?;
-    let ids = ledger
-        .record_pending(matter_one(), &grants)
-        .map_err(Error::Probe)?;
-    Ok(ids.len())
+    let mut plan = plan(&admitted, &sids(), matter_one())?;
+    ledger.record_pending(&mut plan).map_err(Error::Probe)?;
+    Ok(plan.entries().len())
 }
 
 /// A ledger with one of another matter's entries already in it, and its bytes.
 fn ledger_with_an_entry(w: &World) -> (Ledger, Vec<u8>) {
     let path = ledger_path(&w.at("data"));
-    let mut ledger = Ledger::open(&path).unwrap();
+    let mut ledger = Ledger::open(&path, &user_sid(), &reserved()).unwrap();
     let other = w.builder().build().unwrap();
     let admitted = admit_with(
         &other,
@@ -50,8 +50,9 @@ fn ledger_with_an_entry(w: &World) -> (Ledger, Vec<u8>) {
         |_| Ok(FolderSupport::Ok),
         &FakeGroups::default(),
     );
-    let grants = plan(&admitted.unwrap(), &sids()).unwrap();
-    ledger.record_pending(matter_two(), &grants[..2]).unwrap();
+    let grants = plan(&admitted.unwrap(), &sids(), matter_two()).unwrap();
+    let mut two = AdmittedPlan::from_grants(matter_two(), grants.grants()[..2].to_vec());
+    ledger.record_pending(&mut two).unwrap();
     let bytes = std::fs::read(&path).unwrap();
     (ledger, bytes)
 }
@@ -168,7 +169,7 @@ fn a_refusal_on_a_fresh_data_folder_makes_no_ledger() {
     let w = World::new("admit-no-ledger");
     let policy = w.full_policy();
     let path = ledger_path(&w.at("data"));
-    let mut ledger = Ledger::open(&path).unwrap();
+    let mut ledger = Ledger::open(&path, &user_sid(), &reserved()).unwrap();
     let check = answering(w.canonical("matter"), || Ok(FolderSupport::NoPermissions));
     assert!(
         prepare(
@@ -305,6 +306,50 @@ fn other_matters_are_not_read_when_a_grant_folder_is_refused() {
     assert!(groups.asked.borrow().is_empty());
 }
 
+#[test]
+fn another_matter_nested_with_this_one_is_refused_whatever_its_dacl() {
+    // Matter `m` and another matter `m\B` inside it, then the other way round. No group can
+    // reach either (the DACL reader says no), and the folder checks all say Ok.
+    let w = World::new("admit-nested");
+    w.dir.dir("matter/B");
+    let policy = w.builder().build().unwrap();
+    let (mut ledger, before) = ledger_with_an_entry(&w);
+    let inner = w.canonical("matter/B");
+    let groups = FakeGroups::default();
+    let check = |_: &Path| Ok(FolderSupport::Ok);
+    let refused = prepare(
+        &policy,
+        &w.at("data"),
+        &[inner],
+        check,
+        &groups,
+        &mut ledger,
+    );
+    let Err(Error::FolderUnsupported { path_kind, support }) = refused else {
+        panic!("not refused: {refused:?}");
+    };
+    assert_eq!(
+        (path_kind, support),
+        (PathKind::OtherMatter, FolderRefusal::NestedMatter)
+    );
+    assert!(
+        groups.asked.borrow().is_empty(),
+        "refused before the DACL is read"
+    );
+    assert_eq!(std::fs::read(ledger.path()).unwrap(), before);
+
+    let inside = Policy::builder(w.at("matter/B"), w.at("elsewhere"))
+        .home(w.at("home"))
+        .build()
+        .unwrap();
+    let outer = [w.at("matter")];
+    let refused = admit_with(&inside, &w.at("data"), &outer, check, &groups);
+    let Err(Error::FolderUnsupported { support, .. }) = refused else {
+        panic!("not refused: {refused:?}");
+    };
+    assert_eq!(support, FolderRefusal::NestedMatter);
+}
+
 /// Asserts that `policy` is refused before any folder check, as a matter that overlaps
 /// `data_dir`, and that the ledger is as it was.
 fn assert_overlaps(w: &World, policy: &Policy, data_dir: &Path) {
@@ -358,7 +403,7 @@ fn a_matter_that_holds_the_data_folder_is_refused() {
 #[test]
 fn a_matter_inside_the_data_folder_is_refused() {
     let w = World::new("admit-matter-in-data");
-    let policy = Policy::builder(w.at("data/agents/node"), w.at("elsewhere"))
+    let policy = Policy::builder(w.at("data/claude-home"), w.at("elsewhere"))
         .home(w.at("home"))
         .build()
         .unwrap();
@@ -370,7 +415,7 @@ fn a_data_folder_reached_through_another_spelling_still_matches() {
     // `data_dir` is canonicalised: a `..` spelling (and on Windows a short or differently
     // cased one) is the same folder.
     let w = World::new("admit-data-spelling");
-    let policy = Policy::builder(w.at("data/agents/node"), w.at("elsewhere"))
+    let policy = Policy::builder(w.at("data/claude-home"), w.at("elsewhere"))
         .home(w.at("home"))
         .build()
         .unwrap();
@@ -411,135 +456,4 @@ fn a_matter_beside_the_data_folder_is_admitted() {
 
 /// The gate with the real folder check, on CI's Windows job.
 #[cfg(windows)]
-mod on_windows {
-    use super::*;
-    use crate::test_support::remove_dir;
-    use crate::windows::folder_support;
-    use crate::windows::test_dacl::protect_with;
-    use crate::windows::tests::admin_share_path;
-
-    /// `OWNER RIGHTS` with Modify only: the owner loses `WRITE_DAC`.
-    const OWNER_RIGHTS_MODIFY: &str = "D:P(A;OICI;0x1301bf;;;OW)";
-
-    /// Asserts that `policy` is refused for `kind` with `want`, and that the ledger is as it was.
-    fn assert_refused(w: &World, policy: &Policy, kind: PathKind, want: FolderRefusal) {
-        let (mut ledger, before) = ledger_with_an_entry(w);
-        let groups = FakeGroups::default();
-        let admitted = admit(policy, &w.at("data"), &[], &groups);
-        let Err(Error::FolderUnsupported { path_kind, support }) = admitted else {
-            panic!("not refused: {admitted:?}");
-        };
-        assert_eq!((path_kind, support), (kind, want));
-        // The launch's own steps refuse at the gate too, before a plan or an entry.
-        let refused = prepare(
-            policy,
-            &w.at("data"),
-            &[],
-            folder_support,
-            &groups,
-            &mut ledger,
-        );
-        assert!(matches!(refused, Err(Error::FolderUnsupported { .. })));
-        assert_eq!(std::fs::read(ledger.path()).unwrap(), before);
-    }
-
-    /// Whether this machine has the admin share CI's runners have; elsewhere the test passes.
-    fn has_admin_share(w: &World) -> bool {
-        if admin_share_path(w.dir.path()).is_dir() {
-            return true;
-        }
-        assert!(
-            std::env::var_os("CI").is_none(),
-            "CI's Windows runners have the admin shares, and this run has none"
-        );
-        eprintln!("skipped: this machine has no admin share for the temp folder");
-        false
-    }
-
-    #[test]
-    fn a_local_world_is_admitted() {
-        let w = World::new("admit-win-ok");
-        let policy = w.full_policy();
-        let admitted = admit(&policy, &w.at("data"), &[], &FakeGroups::default()).unwrap();
-        assert_ne!(plan(&admitted, &sids()).unwrap().len(), 0);
-    }
-
-    #[test]
-    fn a_matter_whose_permissions_cant_change_is_refused() {
-        let w = World::new("admit-win-cant-change");
-        let policy = w.full_policy();
-        protect_with(&w.at("matter"), OWNER_RIGHTS_MODIFY).unwrap();
-        let want = FolderRefusal::Support(FolderSupport::CantChangePermissions);
-        assert_refused(&w, &policy, PathKind::Matter, want);
-    }
-
-    #[test]
-    fn a_notes_folder_whose_permissions_cant_change_is_refused() {
-        let w = World::new("admit-win-notes-cant-change");
-        let policy = w.full_policy();
-        protect_with(&w.at("data/agent-state/m1/notes"), OWNER_RIGHTS_MODIFY).unwrap();
-        let want = FolderRefusal::Support(FolderSupport::CantChangePermissions);
-        assert_refused(&w, &policy, PathKind::Notes, want);
-    }
-
-    #[test]
-    fn a_matter_on_a_share_is_refused() {
-        let w = World::new("admit-win-network-matter");
-        if !has_admin_share(&w) {
-            return;
-        }
-        let policy = Policy::builder(
-            admin_share_path(&w.at("matter")),
-            w.at("data/agent-state/m1/claude"),
-        )
-        .home(w.at("home"))
-        .build()
-        .unwrap();
-        let want = FolderRefusal::Support(FolderSupport::Network);
-        assert_refused(&w, &policy, PathKind::Matter, want);
-    }
-
-    #[test]
-    fn a_state_folder_on_a_share_refuses_the_whole_launch() {
-        // The matter is local and fine; the state folder alone, through `\\localhost\C$`, is
-        // enough to refuse.
-        let w = World::new("admit-win-network-state");
-        if !has_admin_share(&w) {
-            return;
-        }
-        let policy = Policy::builder(
-            w.at("matter"),
-            admin_share_path(&w.at("data/agent-state/m1/claude")),
-        )
-        .home(w.at("home"))
-        .build()
-        .unwrap();
-        assert_eq!(folder_support(policy.matter()).unwrap(), FolderSupport::Ok);
-        let want = FolderRefusal::Support(FolderSupport::Network);
-        assert_refused(&w, &policy, PathKind::State, want);
-    }
-
-    #[test]
-    fn a_missing_folder_is_refused() {
-        let w = World::new("admit-win-missing");
-        let policy = w.full_policy();
-        remove_dir(&w.at("data/agent-state/m1/notes"));
-        let want = FolderRefusal::CheckFailed(io::ErrorKind::NotFound);
-        assert_refused(&w, &policy, PathKind::Notes, want);
-    }
-
-    #[test]
-    fn a_matter_holding_the_data_folder_is_refused_in_any_letter_case() {
-        // NTFS compares names without case: `MATTER\CLAUSEO` is `matter\Clauseo`.
-        let w = World::new("admit-win-data-case");
-        w.dir.dir("matter/Clauseo");
-        let policy = w.builder().build().unwrap();
-        let shouted = PathBuf::from(w.at("matter/Clauseo").to_string_lossy().to_uppercase());
-        let refused = admit(&policy, &shouted, &[], &FakeGroups::default());
-        let Err(Error::FolderUnsupported { path_kind, support }) = refused else {
-            panic!("not refused: {refused:?}");
-        };
-        assert_eq!(path_kind, PathKind::Matter);
-        assert_eq!(support, FolderRefusal::OverlapsDataFolder);
-    }
-}
+mod on_windows;
