@@ -563,29 +563,8 @@ pub(super) fn in_folder(path: &Path, folder: &Path) -> bool {
     })
 }
 
-/// `path` in the verbatim `\\?\` form, whatever its length, by `folder::verbatim_wide`'s
-/// rules: kept when it has the prefix, `\\.\` turned into `\\?\`, `\\server\share` made
-/// `\\?\UNC\server\share`, and `\\?\` put before anything else. So a final path, which is
-/// always verbatim, compares with a policy path, which is plain (S15 `PR3b` round 5: `dunce`'s
-/// plain form kept a path past `MAX_PATH` verbatim, which then matched nothing). Pure text, the
-/// same on every OS; `path` is absolute, with `\` separators. A name that isn't Unicode is kept
-/// as it is, except in a device or share path, which is read lossily.
-pub(super) fn verbatim(path: &Path) -> PathBuf {
-    let bytes = path.as_os_str().as_encoded_bytes();
-    if bytes.starts_with(br"\\?\") {
-        return path.to_owned();
-    }
-    if !bytes.starts_with(br"\\") {
-        let mut wide = std::ffi::OsString::from(r"\\?\");
-        wide.push(path.as_os_str());
-        return PathBuf::from(wide);
-    }
-    let text = path.as_os_str().to_string_lossy();
-    PathBuf::from(match text.strip_prefix(r"\\.\") {
-        Some(rest) => format!(r"\\?\{rest}"),
-        None => format!(r"\\?\UNC\{}", text.get(2..).unwrap_or_default()),
-    })
-}
+mod verbatim;
+pub(in crate::windows) use verbatim::verbatim;
 
 pub(super) mod targets;
 

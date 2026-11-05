@@ -2,6 +2,7 @@
 //! everything back, and win-01's timing row. Temp folders and synthetic SIDs.
 
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
 
 use super::*;
 use crate::windows::NtfsAcl;
@@ -162,7 +163,7 @@ fn timing_first_propagation_and_fix_costs() {
 /// Around a temp matter that sets aside for real: each item is renamed into `aside`, and its
 /// path as asked is kept.
 struct Moving {
-    aside: PathBuf,
+    data: PathBuf,
     asked: Vec<PathBuf>,
 }
 
@@ -177,10 +178,20 @@ impl Surroundings for Moving {
         Ok(crate::windows::FolderSupport::Ok)
     }
 
-    fn set_aside(&mut self, _matter: clauseo_protocol::MatterId, path: &Path) -> io::Result<()> {
+    fn set_aside(&mut self, matter: clauseo_protocol::MatterId, path: &Path) -> io::Result<()> {
         self.asked.push(path.to_owned());
-        let name = format!("{}", self.asked.len());
-        crate::windows::write::rename_new(path, &self.aside.join(name))
+        // The real set-aside, which renames with `DELETE` only: `std::fs::rename` asks for more,
+        // which a file that shuts the lawyer out refuses (round 7, VM run 3).
+        let reason = crate::windows::SetAsideReason::LawyerCantOpen;
+        crate::windows::set_aside_path(
+            &self.data,
+            &matter,
+            path,
+            reason,
+            SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000),
+        )
+        .map(drop)
+        .map_err(io::Error::other)
     }
 
     fn credentials(&self) -> Option<PathBuf> {
@@ -198,10 +209,10 @@ fn a_child_the_lawyer_cant_open_is_set_aside_by_the_launch_and_by_forget() {
     let place = Place::new("apply-ntfs-shut-aside");
     let matter = place.at("matter");
     let shut = place.dir.file("matter/shut.txt", "x");
-    place.dir.dir("aside");
+    place.dir.dir("data");
     protect_with(&shut, "D:P(A;;FA;;;SY)(A;;0x0;;;OW)").unwrap();
     let mut around = Moving {
-        aside: place.at("aside"),
+        data: place.at("data"),
         asked: Vec::new(),
     };
     let mut ledger = ledger(&place);

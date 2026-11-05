@@ -62,6 +62,7 @@ use super::SetAsideFailure;
 use super::files::{FileId, io_failure};
 use super::run::Volume;
 use super::scan::Listed;
+use crate::windows::acl_plan::verbatim;
 use crate::windows::folder::verbatim_wide;
 
 mod scan;
@@ -376,12 +377,12 @@ fn tag(handle: &Handle) -> io::Result<Option<u32>> {
 }
 
 /// Whether the handle's final path (normalized, with its drive letter) is `planned`, compared
-/// part by part as NTFS compares names ([`same_name`]), `\\?\` set aside.
+/// part by part as NTFS compares names ([`same_name`]), both sides in the verbatim form
+/// ([`verbatim`]): `dunce`'s plain form kept a final path past `MAX_PATH`, or with a name that
+/// isn't Unicode, verbatim while the planned path was plain (round 7, VM run 3).
 fn same_path(handle: &Handle, planned: &Path) -> io::Result<bool> {
-    let found = PathBuf::from(OsString::from_wide(&final_path(handle)?));
-    let found = dunce::simplified(&found);
-    let planned = std::path::absolute(planned)?;
-    let planned = dunce::simplified(&planned);
+    let found = verbatim(&PathBuf::from(OsString::from_wide(&final_path(handle)?)));
+    let planned = verbatim(&std::path::absolute(planned)?);
     let (mut a, mut b) = (found.components(), planned.components());
     loop {
         match (a.next(), b.next()) {
