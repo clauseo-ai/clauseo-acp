@@ -198,6 +198,11 @@ jobs:
       - name: Test the pre-push hook
         run: bash .github/scripts/pre-push-test.sh
 
+      # launch-xvfb.sh against a fake xvfb-run: the app's own status decides, not xvfb-run's
+      # clean-up (#479's group, 2026-11-05).
+      - name: Test launch-xvfb.sh
+        run: bash .github/scripts/launch-xvfb-test.sh
+
       # How reducer-bench reads the label bench-ok at run time, against a fake gh.
       - name: Test reducer-bench's bench-ok read
         run: bash .github/scripts/bench-ok-test.sh
