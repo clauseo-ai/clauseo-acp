@@ -8,6 +8,7 @@ use std::sync::mpsc;
 use std::thread;
 
 use clauseo_settings::Locations;
+use futures::channel::oneshot;
 
 use super::UpdateInput;
 use crate::actor::input::Input;
@@ -41,17 +42,20 @@ pub(crate) enum Done {
     Cleared,
 }
 
+/// A job, and where its end goes: the actor's input channel, or `reply` when one waits.
+type Queued = (Job, Option<oneshot::Sender<Done>>);
+
 /// The way to the file thread. Dropping it ends the thread once its queue is empty.
 #[derive(Debug)]
 pub(super) struct Files {
-    jobs: Option<mpsc::Sender<Job>>,
+    jobs: Option<mpsc::Sender<Queued>>,
     post: async_channel::Sender<Input>,
 }
 
 impl Files {
     /// Starts the thread over `locations`, posting each job's end to `post`.
     pub(super) fn start(locations: Locations, post: async_channel::Sender<Input>) -> Self {
-        let (jobs, queue) = mpsc::channel::<Job>();
+        let (jobs, queue) = mpsc::channel::<Queued>();
         let posts = post.clone();
         let started = thread::Builder::new()
             .name(THREAD_NAME.to_owned())
@@ -70,9 +74,9 @@ impl Files {
     /// it found nothing (no marker, no download) or wrote nothing, never run on the actor.
     pub(super) fn send(&self, job: Job) {
         let job = match &self.jobs {
-            Some(jobs) => match jobs.send(job) {
+            Some(jobs) => match jobs.send((job, None)) {
                 Ok(()) => return,
-                Err(mpsc::SendError(job)) => job,
+                Err(mpsc::SendError((job, _))) => job,
             },
             None => job,
         };
@@ -87,14 +91,34 @@ impl Files {
         };
         let _gone = self.post.try_send(Input::Update(UpdateInput::Files(done)));
     }
+
+    /// Deletes `update.json` and waits for it, after the actor's loop has ended: an install
+    /// whose store did not close cleanly does not happen. A failure is logged.
+    pub(super) async fn clear_and_wait(self) {
+        let (reply, done) = oneshot::channel();
+        let queued = self
+            .jobs
+            .as_ref()
+            .is_some_and(|jobs| jobs.send((Job::Clear, Some(reply))).is_ok());
+        if !queued || done.await.is_err() {
+            tracing::warn!("{THREAD_NAME} is gone; update.json was not deleted");
+        }
+    }
 }
 
 /// The thread's loop: each job in turn until the actor drops its sender.
-fn serve(locations: &Locations, queue: &mpsc::Receiver<Job>, post: &async_channel::Sender<Input>) {
-    for job in queue {
+fn serve(
+    locations: &Locations,
+    queue: &mpsc::Receiver<Queued>,
+    post: &async_channel::Sender<Input>,
+) {
+    for (job, reply) in queue {
         let done = run(locations, job);
-        // The actor may be gone by then; nobody is left to tell.
-        let _gone = post.try_send(Input::Update(UpdateInput::Files(done)));
+        // The actor, or the one waiting, may be gone by then; nobody is left to tell.
+        match reply {
+            Some(reply) => drop(reply.send(done)),
+            None => drop(post.try_send(Input::Update(UpdateInput::Files(done)))),
+        }
     }
 }
 

@@ -255,13 +255,28 @@ fn run(
         };
         startup::begin_startup(&mut actor);
         let exit = main_loop::main_loop(&mut actor, requests, internal).await;
+        let fail_close = update::fails_close(&actor);
+        let close = |actor| async move {
+            let closed = shutdown::close(actor).await;
+            if fail_close && closed.is_ok() {
+                return Err(Error::Internal(
+                    "the close failed (a test's seam)".to_owned(),
+                ));
+            }
+            closed
+        };
         match exit {
             Exit::Shutdown(replies) => {
-                let closed = shutdown::close(actor).await;
+                let closed = close(actor).await;
                 Ok(Some((closed, replies, None)))
             }
             Exit::Install(downloaded, replies) => {
-                let closed = shutdown::close(actor).await;
+                let files = update::exit_files(&mut actor);
+                let closed = close(actor).await;
+                if closed.is_err() {
+                    // No install then (`HostExit::Stopped`): nor its marker.
+                    files.clear_marker().await;
+                }
                 Ok(Some((closed, replies, Some(downloaded))))
             }
             #[cfg(feature = "test-support")]

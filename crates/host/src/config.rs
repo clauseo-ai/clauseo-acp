@@ -191,6 +191,9 @@ pub(crate) struct UpdateSeams {
     pub(crate) jitter_seed: Option<u64>,
     /// The app's version, which `UpdateView::current` shows and the marker compares.
     pub(crate) app_version: String,
+    /// The store's close reports a failure once it has closed (`with_failing_close`).
+    #[cfg(feature = "test-support")]
+    pub(crate) fail_close: bool,
 }
 
 impl HostConfig {
@@ -228,6 +231,8 @@ impl HostConfig {
                 jitter_seed: None,
                 // Only a caller that knows the app's version (desktop) can do better.
                 app_version: env!("CARGO_PKG_VERSION").to_owned(),
+                #[cfg(feature = "test-support")]
+                fail_close: false,
             },
         }
     }
@@ -408,6 +413,14 @@ impl HostConfig {
     /// its pool and never waits on one.
     pub fn with_limits_reader(mut self, reader: Arc<dyn ReadLimits>) -> Self {
         self.limits_reader = Some(reader);
+        self
+    }
+
+    /// The store's close reports a failure once it has closed, for the updater's tests of an
+    /// install whose shutdown did not end cleanly.
+    #[cfg(feature = "test-support")]
+    pub fn with_failing_close(mut self) -> Self {
+        self.update.fail_close = true;
         self
     }
 
