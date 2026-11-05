@@ -7,19 +7,24 @@
 ; NSIS_HOOK_PREUNINSTALL runs only for a real uninstall: Tauri's installer runs the old
 ; uninstaller with /UPDATE during an update ($UpdateMode = 1), which keeps everything.
 ;
+; 0. The app must be closed before anything else: the hook runs the template's own
+;    CheckIfAppIsRunning (utils.nsh, which installer.nsi includes at line 26) first, so declining
+;    its prompt aborts the uninstall before S15's removal or any deletion. The template's own call
+;    at 788 then finds nothing running.
 ; 1. When the sandbox's set-up tool (S15, clauseo-sandbox-setup.exe) is beside the app, the
 ;    uninstaller asks it to remove what it set up, elevated, so a currentUser uninstall raises one
-;    UAC prompt. It runs first: it reads its records under the data folder's `sandbox` folder to
-;    take its access rules back off the lawyer's folders. Until S15's binaries are bundled the
-;    file is never there and this step does nothing.
+;    UAC prompt. It reads its records under the data folder's `sandbox` folder to take its access
+;    rules back off the lawyer's folders. Until S15's binaries are bundled the file is never there
+;    and this step does nothing.
 ; 2. When the "Also delete conversations, saved versions and settings" box is ticked, the app
 ;    deletes its data folders itself (`Clauseo.exe --delete-app-data`, delete_app_data.rs), never
 ;    following a link, and the box is cleared so the template's `RmDir /r` never runs: NSIS 3.11's
 ;    `RMDir /r` follows directory junctions, and one under the data folder emptied the lawyer's
-;    folder it pointed at (0035, 2026-11-05). When step 1 failed (the prompt declined, or a
-;    non-zero exit) the app keeps the `sandbox` folder (--keep-sandbox), so the removal can still
-;    be done; it keeps `sandbox\set-aside` whenever it holds the lawyer's files. With the app
-;    missing nothing is deleted. Each outcome but a full deletion says one line (English.nsh).
+;    folder it pointed at (0035, 2026-11-05). The app keeps the `sandbox` folder unless step 1
+;    ran and exited 0 (--sandbox-removed), and keeps `sandbox\set-aside` whenever it holds the
+;    lawyer's files. With the app missing nothing is deleted. Each outcome but a full deletion
+;    says one line (English.nsh): the kept folder when one is there, never the whole folder with
+;    the sandbox's records in it; else the whole folder.
 ;
 ; The words are in English.nsh (deleteAppDataFailed, deleteAppDataKept); the uninstall-declined
 ; line is S15a's.
@@ -32,12 +37,14 @@
 
 !macro NSIS_HOOK_PREUNINSTALL
   ${If} $UpdateMode <> 1
+    ; 0. The app closed first.
+    !insertmacro CheckIfAppIsRunning "$INSTDIR\${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
+
     ; 1. S15's removal, elevated. ExecShellWait gives no exit code, so ShellExecuteExW with
     ; "runas" and SEE_MASK_NOCLOSEPROCESS (0x40), then wait on the process and read its code. A
-    ; declined prompt fails the call. $R5 is 1 when the set-up is gone or was never here.
-    StrCpy $R5 1
+    ; declined prompt fails the call. $R5 is 1 only when the removal ran and exited 0.
+    StrCpy $R5 0
     ${If} ${FileExists} "$INSTDIR\clauseo-sandbox-setup.exe"
-      StrCpy $R5 0
       ; SHELLEXECUTEINFOW as a 32-bit process lays it out: every member 4 bytes, no padding.
       !if ${NSIS_PTR_SIZE} > 4
         !error "hooks.nsh lays out SHELLEXECUTEINFOW for a 32-bit installer; lay it out again"
@@ -65,39 +72,50 @@
     ${If} $DeleteAppDataCheckboxState = 1
       ; First, whatever happens next: the template's `RmDir /r` never runs.
       StrCpy $DeleteAppDataCheckboxState 0
-      ; The app's data goes only once the app is closed; the template checks only after this hook.
-      !insertmacro CheckIfAppIsRunning "$INSTDIR\${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
       ; The rest of the template's block for the box (installer.nsi 879-886), as it does it.
       DeleteRegKey SHCTX "${MANUPRODUCTKEY}"
       DeleteRegKey /ifempty SHCTX "${MANUKEY}"
       DeleteRegValue HKCU "${MANUPRODUCTKEY}" "Installer Language"
       DeleteRegKey /ifempty HKCU "${MANUPRODUCTKEY}"
       DeleteRegKey /ifempty HKCU "${MANUKEY}"
-      ; The folder the messages name. The app finds the folders itself, from the known folders.
-      ReadEnvStr $R9 LOCALAPPDATA
-      StrCpy $R9 "$R9\${BUNDLEID}"
+      ; The uninstalling user's local data folder, for the messages ($LOCALAPPDATA in the
+      ; current user's context; a per-machine uninstall runs in the all-users one, put back
+      ; after). The app finds the folders itself, from the known folders.
+      StrCpy $R6 0
+      ${If} ${ShellVarContextAll}
+        StrCpy $R6 1
+        SetShellVarContext current
+      ${EndIf}
+      StrCpy $R9 "$LOCALAPPDATA\${BUNDLEID}"
+      ${If} $R6 = 1
+        SetShellVarContext all
+      ${EndIf}
       StrCpy $R7 1
       ${If} ${FileExists} "$INSTDIR\${MAINBINARYNAME}.exe"
         ClearErrors
         ${If} $R5 = 1
-          ExecWait '"$INSTDIR\${MAINBINARYNAME}.exe" --delete-app-data' $R7
+          ExecWait '"$INSTDIR\${MAINBINARYNAME}.exe" --delete-app-data --sandbox-removed' $R7
         ${Else}
-          ExecWait '"$INSTDIR\${MAINBINARYNAME}.exe" --delete-app-data --keep-sandbox' $R7
+          ExecWait '"$INSTDIR\${MAINBINARYNAME}.exe" --delete-app-data' $R7
         ${EndIf}
         ${If} ${Errors}
           StrCpy $R7 1
         ${EndIf}
       ${EndIf}
-      ${If} $R7 = ${CLAUSEO_KEPT_SANDBOX}
-        StrCpy $R8 "$R9\sandbox"
-      ${Else}
+      ; The kept folder: the set-aside (3), else `sandbox` whenever it is still there (kept, or
+      ; left by a failure, a refusal or a missing app), so the lawyer is never told to delete its
+      ; records with the rest. None: the whole folder is named instead.
+      StrCpy $R8 ""
+      ${If} $R7 = ${CLAUSEO_KEPT_SET_ASIDE}
         StrCpy $R8 "$R9\sandbox\set-aside"
+      ${ElseIf} ${FileExists} "$R9\sandbox\*.*"
+        StrCpy $R8 "$R9\sandbox"
       ${EndIf}
       ${IfNot} ${Silent}
-        ${If} $R7 = ${CLAUSEO_KEPT_SANDBOX}
-        ${OrIf} $R7 = ${CLAUSEO_KEPT_SET_ASIDE}
+      ${AndIf} $R7 <> ${CLAUSEO_DELETED}
+        ${If} $R8 != ""
           MessageBox MB_OK|MB_ICONEXCLAMATION "$(deleteAppDataKept)"
-        ${ElseIf} $R7 <> ${CLAUSEO_DELETED}
+        ${Else}
           MessageBox MB_OK|MB_ICONEXCLAMATION "$(deleteAppDataFailed)"
         ${EndIf}
       ${EndIf}
