@@ -10,7 +10,8 @@ use std::sync::{Arc, Mutex};
 
 use clauseo_host::AgentsStopped;
 use clauseo_protocol::{
-    AgentId, DeliveryRequest, DomainEvent, MatterId, StopReason, StreamId, ThreadId, TurnId,
+    AgentId, CommandOutcome, DeliveryRequest, DomainEvent, HostCommand, MatterId, StopReason,
+    StreamHeader, StreamId, ThreadId, TurnId, ViewPatchBody,
 };
 
 use crate::codex::Recording;
@@ -77,6 +78,17 @@ fn send_held(at: At<'_>, prompt: &str, delivery: DeliveryRequest) -> TurnId {
     assert_eq!(starts(events, turn), 0, "{prompt}: {}", events.dump());
     assert_eq!(failures(events), failed, "{prompt}: {}", events.dump());
     turn
+}
+
+/// Whether a fresh view of `thread` shows its header's `queue_held`.
+fn view_held(host: &Running, thread: ThreadId) -> bool {
+    let mut view = host.view(StreamId::Thread(thread), None);
+    view.until("the view's reset", |view| view.patches().next().is_some());
+    let Some(ViewPatchBody::Reset { view_window }) = view.patches().next().map(|patch| &patch.body)
+    else {
+        panic!("the view did not start with a reset: {}", view.dump());
+    };
+    matches!(&view_window.header, Some(StreamHeader::Thread(header)) if header.queue_held)
 }
 
 /// How many `TurnFailed` were received.
@@ -241,4 +253,65 @@ fn prompts_sent_while_a_turn_is_held_for_the_sign_in_run_after_it_after_one_rest
     assert!(!held(&host, matter, thread));
     assert_eq!(failures(&events), 1, "{}", events.dump());
     host.shutdown();
+}
+
+/// `ResumeQueue` or `SendQueuedNow` while `stop_agents` holds the agent changes nothing the lawyer
+/// can see: the view and `ListThreads` still show the queue held, and nothing starts or fails.
+/// `restart_agents` then runs each turn once, in the order they were sent.
+fn command_changes_nothing_while_held(
+    dir_test: &str,
+    command: impl Fn(ThreadId, TurnId) -> HostCommand,
+    pick: usize,
+) {
+    let Stopped {
+        dir: _dir,
+        host,
+        launches,
+        matter,
+        thread,
+        mut events,
+    } = Stopped::new(dir_test);
+    let mut turns = Vec::new();
+    for prompt in ["One", "Two", "Three"] {
+        turns.push(send_held(
+            (&host, &mut events, matter, thread, 0),
+            prompt,
+            DeliveryRequest::Queue,
+        ));
+    }
+    let target = turns[pick];
+    assert_eq!(host.ok(command(thread, target)), CommandOutcome::Done);
+    settle(&host, &mut events);
+    assert!(view_held(&host, thread), "the view: {}", events.dump());
+    assert!(held(&host, matter, thread), "{}", events.dump());
+    for turn in &turns {
+        assert_eq!(starts(&events, *turn), 0, "{}", events.dump());
+    }
+    assert_eq!(failures(&events), 0, "{}", events.dump());
+    assert_eq!(launches.lock().unwrap().len(), 1, "no launch while held");
+
+    restart_sends_once(&host, &mut events, &turns);
+    assert!(!held(&host, matter, thread), "{}", events.dump());
+    assert!(!view_held(&host, thread), "{}", events.dump());
+    assert_eq!(failures(&events), 0, "{}", events.dump());
+    assert_eq!(launches.lock().unwrap().len(), 2, "one relaunch");
+    host.shutdown();
+}
+
+#[test]
+fn resume_queue_while_stop_agents_holds_changes_nothing_until_one_restart() {
+    command_changes_nothing_while_held(
+        "hold_appends_resume",
+        |thread, _| HostCommand::ResumeQueue { thread },
+        0,
+    );
+}
+
+#[test]
+fn send_queued_now_while_stop_agents_holds_changes_nothing_until_one_restart() {
+    command_changes_nothing_while_held(
+        "hold_appends_send_queued_now",
+        |thread, turn| HostCommand::SendQueuedNow { thread, turn },
+        2,
+    );
 }
