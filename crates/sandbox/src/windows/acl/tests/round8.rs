@@ -2,6 +2,7 @@
 //! `C:\m`, whose DACLs hold their inherited copies without the inherited flag.
 
 use super::*;
+use crate::windows::record::current_user_sid;
 use crate::windows::test_acl::entries;
 
 /// `CREATOR OWNER`.
@@ -156,13 +157,31 @@ fn an_auto_inherited_child_keeps_an_explicit_entry_its_parent_also_passes_down()
     let other = OTHER_POOL_SIDS[1];
     let matter = place.at("matter");
     let tree = OBJECT_INHERIT | CONTAINER_INHERIT;
-    let passed = [(sid("S-1-5-18"), tree, full), (sid(other), tree, read)];
+    // The lawyer (this process's user) gets full control throughout, inherited as a lawyer's
+    // matter would give it, so a Medium token can walk the tree (VM run 4 failed it there).
+    let me = sid_bytes(&current_user_sid().unwrap());
+    let passed = [
+        (sid("S-1-5-18"), tree, full),
+        (me.clone(), tree, full),
+        (sid(other), tree, read),
+    ];
     raw_dacl_marked(&matter, DACL_AUTO_INHERITED, &passed);
     let ai = place.at("matter/ai.txt");
-    let held = [(sid(other), 0, read), (sid("S-1-5-18"), INHERITED, full)];
+    let held = [
+        (sid(other), 0, read),
+        (sid("S-1-5-18"), INHERITED, full),
+        (me.clone(), INHERITED, full),
+    ];
     raw_dacl_marked(&ai, DACL_AUTO_INHERITED, &held);
     let plain = place.at("matter/plain.txt");
-    raw_dacl(&plain, &[(sid(other), 0, read), (sid("S-1-5-18"), 0, full)]);
+    raw_dacl(
+        &plain,
+        &[
+            (sid(other), 0, read),
+            (sid("S-1-5-18"), 0, full),
+            (me, 0, full),
+        ],
+    );
 
     NtfsAcl::new()
         .unwrap()
