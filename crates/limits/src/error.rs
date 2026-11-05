@@ -46,6 +46,18 @@ pub(crate) enum Error {
 }
 
 impl Error {
+    /// A fixed word for its kind, for a log line: never a path (decision record 0047 keeps
+    /// paths out of `host.log`), as the text of every kind but `Refused` carries one, and a
+    /// refused rule names the path too.
+    pub(crate) fn kind(&self) -> &'static str {
+        match self {
+            Error::Refused { .. } => "refused",
+            Error::RunFolder { .. } => "run_folder",
+            Error::CodexHome { .. } => "codex_home",
+            Error::Io { .. } => "io",
+        }
+    }
+
     /// An [`Error::Io`] for `what` on `path`.
     pub(crate) fn io(what: &'static str, path: impl Into<PathBuf>, source: io::Error) -> Error {
         Error::Io {

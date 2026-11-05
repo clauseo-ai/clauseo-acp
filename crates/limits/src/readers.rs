@@ -194,12 +194,12 @@ impl<T: Timer + Clone + Send + Sync + 'static> ProcessReaders<T> {
         if let Some(launch) = &claude
             && let Err(err) = paths::claude(launch)
         {
-            tracing::warn!(error = %err, "Claude's limits reader is refused");
+            tracing::warn!(kind = err.kind(), "Claude's limits reader is refused");
         }
         if let Some(launch) = &codex
             && let Err(err) = paths::codex_js(launch)
         {
-            tracing::warn!(error = %err, "Codex's limits reader is refused");
+            tracing::warn!(kind = err.kind(), "Codex's limits reader is refused");
         }
         ProcessReaders {
             launcher,
@@ -245,7 +245,7 @@ impl<T: Timer + Clone + Send + Sync + 'static> ProcessReaders<T> {
     /// call after each entry it writes. Every copy of these readers shares the entries, and a
     /// read takes its entry once past its gate, so a read queued behind a hold reads the entry
     /// set before the hold drops. An entry whose paths break a rule is logged here, at `warn`,
-    /// as [`ProcessReaders::new`] logs one.
+    /// by its agent and the error's kind only, as [`ProcessReaders::new`] logs one.
     pub fn set_entry(&self, agent: AgentKind, launch: Option<AgentLaunch>) {
         if let Some(launch) = &launch {
             let refused = match agent {
@@ -253,7 +253,7 @@ impl<T: Timer + Clone + Send + Sync + 'static> ProcessReaders<T> {
                 AgentKind::Codex => paths::codex_js(launch).err(),
             };
             if let Some(err) = refused {
-                tracing::warn!(error = %err, ?agent, "a limits reader is refused");
+                tracing::warn!(kind = err.kind(), ?agent, "a limits reader is refused");
             }
         }
         let mut entries = self.entries.write().unwrap_or_else(PoisonError::into_inner);
