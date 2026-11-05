@@ -155,6 +155,11 @@ anything the agent starts.
 - `built` (macOS): A refused file read or write reaches a denial sink through the unified log
   watcher; `designed`: the denial event and card, and widening access restarts the agent only if
   the lawyer accepts (R18)
+- `built` (macOS, Linux, tier C): Codex's own sandbox denies its shell the data folder's
+  Clauseo-only paths, every other session's run folder and every other matter's notes, later ones
+  included ([0030](decisions/0030-launch-profile.md)). Gaps: `run.old-*` when the data folder's
+  path holds a glob character; none of it on Windows, where Codex's unelevated sandbox
+  can't enforce a read deny (until S15)
 
 ## Egress proxy
 

@@ -217,6 +217,11 @@ fn codex_launch_variables_beat_the_settings_env() {
     });
     if cfg!(windows) {
         expected["windows"] = json!({"sandbox": "unelevated"});
+    } else {
+        // The data-folder fence (`codex_fence.rs`).
+        for (key, value) in crate::codex_fence::checked_keys(&config, &dir, matter, run, &home) {
+            expected[key] = value;
+        }
     }
     assert_eq!(config, expected);
     for dropped in [

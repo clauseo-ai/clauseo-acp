@@ -18,6 +18,7 @@
 //! (or a test clock moved on) must not leave the agent's last chunk unposted behind its `Ended`.
 
 pub(crate) mod codex;
+pub(crate) mod codex_fence;
 pub(crate) mod data_folder;
 pub(crate) mod folder_support;
 pub(crate) mod forced_ask;

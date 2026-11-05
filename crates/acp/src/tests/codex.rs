@@ -9,6 +9,7 @@ fn stored() -> LoadSession {
     LoadSession {
         session: session(),
         cwd: cwd(),
+        additional_directories: Vec::new(),
         mcp_servers: Vec::new(),
         meta: None,
     }

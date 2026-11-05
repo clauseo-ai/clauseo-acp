@@ -100,7 +100,7 @@ pub(super) fn on_replay_log(
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };
-    let (Some(session), Ok(cwd), Ok((meta, mcp_servers)), Stage::Loading) =
+    let (Some(session), Ok(cwd), Ok((meta, mcp_servers, additional_directories)), Stage::Loading) =
         (session, cwd, loads, agent.stage)
     else {
         return;
@@ -123,6 +123,7 @@ pub(super) fn on_replay_log(
         let request = LoadSession {
             session,
             cwd,
+            additional_directories,
             mcp_servers,
             meta: Some(meta),
         };
@@ -144,7 +145,9 @@ fn resume_session(actor: &mut Actor, thread: ThreadId) {
         .get(&thread)
         .and_then(|entry| entry.row.acp_session_id.clone());
     let started = folder(actor, thread).and_then(|cwd| Ok((cwd, session_loads(actor, thread)?)));
-    let (Some(session), Ok((cwd, (meta, mcp_servers)))) = (session, started) else {
+    let (Some(session), Ok((cwd, (meta, mcp_servers, additional_directories)))) =
+        (session, started)
+    else {
         new_session(actor, thread);
         return;
     };
@@ -168,6 +171,7 @@ fn resume_session(actor: &mut Actor, thread: ThreadId) {
         let request = LoadSession {
             session,
             cwd,
+            additional_directories,
             mcp_servers,
             meta: Some(meta),
         };
@@ -184,7 +188,7 @@ fn resume_session(actor: &mut Actor, thread: ThreadId) {
 
 pub(super) fn new_session(actor: &mut Actor, thread: ThreadId) {
     let started = folder(actor, thread).and_then(|cwd| Ok((cwd, session_loads(actor, thread)?)));
-    let (cwd, (meta, mcp_servers)) = match started {
+    let (cwd, (meta, mcp_servers, additional_directories)) = match started {
         Ok(started) => started,
         Err(error) => {
             launch_failed(actor, thread, &error);
@@ -210,6 +214,7 @@ pub(super) fn new_session(actor: &mut Actor, thread: ThreadId) {
         }
         let request = NewSession {
             cwd,
+            additional_directories,
             mcp_servers,
             meta: Some(meta),
         };
@@ -229,14 +234,14 @@ fn matter_of(actor: &Actor, thread: ThreadId) -> Option<MatterId> {
     actor.threads.get(&thread).map(|entry| entry.row.matter)
 }
 
-/// The `_meta` and MCP servers for `thread`'s `session/new` or `session/load`, the same for
-/// both: the profile hook's `_meta` with the host's switches over it, and the servers the
-/// lawyer turned on, then the hook's (none when the firm's `managed-mcp.json` is present). See
-/// `agent/loads.rs` and `profile_loads.rs`.
+/// The `_meta`, MCP servers and extra roots for `thread`'s `session/new` or `session/load`,
+/// the same for both: the profile hook's `_meta` with the host's switches over it, the servers
+/// the lawyer turned on, then the hook's (none when the firm's `managed-mcp.json` is present),
+/// and Codex's `additionalDirectories`. See `agent/loads.rs` and `profile_loads.rs`.
 fn session_loads(
     actor: &mut Actor,
     thread: ThreadId,
-) -> Result<(serde_json::Map<String, serde_json::Value>, Vec<McpServer>), Error> {
+) -> Result<super::profile_loads::SessionLoads, Error> {
     let matter = folder(actor, thread)?;
     super::profile_loads::session_loads(actor, thread, &matter)
 }
