@@ -343,3 +343,45 @@ fn an_install_whose_close_failed_stops_and_leaves_no_marker() {
     );
     assert_eq!(marker_text(&dir), None);
 }
+
+#[test]
+fn a_send_now_held_on_an_idle_thread_moves_its_held_queue_on_once_the_install_is_taken_back() {
+    // Review of R23 PR 4: without the install, the send would have started at once ahead of
+    // the held queue and let it move on after; it does so once the hold lifts.
+    let dir = Dir::new(
+        "update_gate_held_queue",
+        &[
+            (FAKE, Scenario::Bundled("send-now")),
+            (OTHER, Scenario::Bundled("cancel-unanswered")),
+        ],
+    );
+    let fake = FakeUpdater::offering(&dir);
+    let host = start_updating(&dir, 0, &fake);
+    let (matter, thread, _) = matter_with_thread(&dir, &host, "m", &[], FAKE);
+    let (_, other, _) = matter_with_thread(&dir, &host, "other", &[], OTHER);
+    let mut events = host.events(StreamId::Thread(thread));
+    // A queued turn held after a cancel.
+    let (first, _) = host.prompt(thread, "Find the cap.");
+    host.wait_armed(DURABLE);
+    let (waiting, _) = host.prompt(thread, "Then the notice period.");
+    host.ok(HostCommand::Cancel { thread });
+    assert_eq!(events.until_turn_ended(first).stop, StopReason::Cancelled);
+    host.settle();
+    assert!(held(&host, matter, thread), "the queue is not held");
+    // Another thread's turn keeps the install's hold up.
+    host.prompt(other, "Draft clause 4.");
+    host.wait_armed(DURABLE);
+    host.ok(HostCommand::CheckForUpdate {});
+    until_ready(&host);
+    host.ok(install(InstallWhen::Now));
+
+    let text_now = text("Use the 2019 version instead");
+    let (now, _) = send(&host, thread, text_now, DeliveryRequest::SendNow);
+    host.ok(HostCommand::CancelScheduledUpdate {});
+    assert_eq!(events.until_turn_ended(now).stop, StopReason::EndTurn);
+    // The held turn moves on after it (to an agent whose script is done: it does not end
+    // `Cancelled`, as a turn taken out of the queue unstarted would).
+    let ended = events.until_turn_ended(waiting);
+    assert_ne!(ended.stop, StopReason::Cancelled, "{}", events.dump());
+    host.shutdown_past_cancel();
+}
