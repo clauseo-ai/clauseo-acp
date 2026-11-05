@@ -10,7 +10,9 @@
 //!    does; nothing names those objects yet. A crash leaves unnamed loose objects that a later
 //!    checkpoint finds and syncs.
 //! 3. The plan (the version against that walk) and the checks of every target: links, names
-//!    spelled otherwise, skipped files, locks. A lock fails the restore here.
+//!    spelled otherwise, skipped files, locks. A lock fails the restore here, and so does any
+//!    file the walk could not read because another program holds it (on Windows, open with no
+//!    sharing): its content now is unknown, so the outside-edits checkpoint cannot record it.
 //! 4. The walk is committed as the `outside-edits` checkpoint if the folder changed. A crash in
 //!    its publish leaves the ref old or new, by decision record 0007's sync order.
 //! 5. `writeback::apply`: stage, check the targets again, rename, then sync each folder once.
@@ -26,7 +28,7 @@ use std::path::Path;
 
 use clauseo_protocol::{ChangeKind, CheckpointId, CheckpointKind, Count, FileChange, MatterPath};
 
-use crate::checkpoint::{Core, Spec, VersionEntry};
+use crate::checkpoint::{Core, OnHeld, Spec, VersionEntry};
 use crate::diff::content_id;
 use crate::history::Oid;
 use crate::stat::{CacheEntry, EntryState};
@@ -276,10 +278,30 @@ pub(crate) fn preview(
 ) -> Result<RestorePlan, Error> {
     let chosen = chosen(files)?;
     let then = core.tree_files(from)?;
-    let now = core.snapshot(folder, settings)?;
-    let plan = plan(core, folder, settings, &then, &now, chosen.as_ref())?;
-    let locked = locks::locked(folder, &plan.targets());
+    let now = core.snapshot(folder, settings, OnHeld::Report)?;
+    let plan = plan(
+        core,
+        folder,
+        settings,
+        &then,
+        now.entries(),
+        chosen.as_ref(),
+    )?;
+    let locked = with_held(locks::locked(folder, &plan.targets()), now.held());
     plan.public(locked)
+}
+
+/// `locked` (sorted by path bytes) with the files a walk found held (`held`, sorted by path
+/// bytes), sorted and deduplicated: the files a restore refuses for. A held file counts whether
+/// the restore would write it or not, since the restore's walk cannot read it either.
+fn with_held(mut locked: Vec<MatterPath>, held: &[MatterPath]) -> Vec<MatterPath> {
+    if held.is_empty() {
+        return locked;
+    }
+    locked.extend_from_slice(held);
+    locked.sort_unstable_by(|a, b| a.as_str().as_bytes().cmp(b.as_str().as_bytes()));
+    locked.dedup();
+    locked
 }
 
 /// See [`crate::Matter::restore`]. The steps are the module's.
@@ -302,9 +324,10 @@ pub(crate) fn restore(
         });
     }
     let then = core.tree_files(request.from)?;
-    // 2. One walk, whose stored objects the outside-edits checkpoint reuses.
+    // 2. One walk, whose stored objects the outside-edits checkpoint reuses. A file another
+    // program holds is listed, not read, and refuses the restore in step 3.
     let walked = core
-        .scan_folder(folder, settings, None, &mut |_| {})?
+        .scan(folder, settings, None, &mut |_| {}, OnHeld::Report)?
         .ok_or_else(|| Error::history("walk", "cancelled without a cancel flag"))?;
     // 3. The plan and every check before anything is committed.
     let plan = plan(
@@ -315,7 +338,7 @@ pub(crate) fn restore(
         walked.entries(),
         chosen.as_ref(),
     )?;
-    let locked = locks::locked(folder, &plan.targets());
+    let locked = with_held(locks::locked(folder, &plan.targets()), walked.held());
     if !locked.is_empty() {
         return Err(Error::FileLocked { paths: locked });
     }

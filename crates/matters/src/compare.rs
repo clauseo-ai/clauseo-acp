@@ -9,7 +9,7 @@ use std::path::Path;
 use clauseo_protocol::{CheckpointId, FileChange, MatterPath};
 
 use crate::Error;
-use crate::checkpoint::Core;
+use crate::checkpoint::{Core, OnHeld};
 use crate::diff::{DiffFile, content_id, diff_by};
 use crate::history::{HistoryStore, Oid};
 use crate::stat::{CacheEntry, EntryState};
@@ -44,7 +44,8 @@ pub(crate) fn compare(
         return core.changes_between(a, b);
     }
     // At least one side is the folder now.
-    let now = core.snapshot(folder, settings)?;
+    let walked = core.snapshot(folder, settings, OnHeld::Fail)?;
+    let now = walked.entries();
     // Files the folder holds but never versions (over the cap, or cloud-only and never read)
     // are left out of a checkpoint side too, so one now over the cap is not reported deleted
     // (or, the other way round, added), as a checkpoint reports it skipped.
@@ -53,8 +54,8 @@ pub(crate) fn compare(
         .filter(|entry| entry.state == EntryState::Skipped)
         .map(|entry| entry.path.as_str())
         .collect();
-    let old = side(core, from, &now, &unversioned)?;
-    let new = side(core, to, &now, &unversioned)?;
+    let old = side(core, from, now, &unversioned)?;
+    let new = side(core, to, now, &unversioned)?;
     diff_by(&old, &new, &BTreeSet::new(), &mut |file| match file.size {
         Some(size) => Ok(size),
         None => core.size_of(file.path.as_str(), file.blob),

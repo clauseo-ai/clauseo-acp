@@ -90,12 +90,29 @@ fn held_open_by(folder: &Path, path: &MatterPath, given: Option<&[String]>) -> O
     #[cfg(windows)]
     {
         if let Err(err) = crate::write::open_exclusive(&absolute)
-            && matches!(err.raw_os_error(), Some(SHARING_VIOLATION | LOCK_VIOLATION))
+            && held_at_read(&err)
         {
             return Some(HeldOpen::SharingViolation);
         }
     }
     None
+}
+
+/// Whether opening or reading a matter file failed with `err` because another program holds
+/// it: on Windows a sharing violation (32: open with no sharing, as Word may hold a document) or
+/// a lock violation (33: a locked range), the codes [`held_open`]'s no-share open goes by.
+/// Elsewhere `false`: an open file never stops a read on macOS or Linux, and the same numbers
+/// are other errors there (32 is `EPIPE` on Linux).
+pub(crate) fn held_at_read(err: &std::io::Error) -> bool {
+    #[cfg(windows)]
+    {
+        matches!(err.raw_os_error(), Some(SHARING_VIOLATION | LOCK_VIOLATION))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = err;
+        false
+    }
 }
 
 /// Whether a rename or delete of a matter file that failed with `err` failed because another
