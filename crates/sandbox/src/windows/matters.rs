@@ -11,6 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use clauseo_protocol::MatterId;
 use serde::de::{self, MapAccess, Visitor};
@@ -83,6 +84,9 @@ pub struct MatterSids {
     folder: PathBuf,
     reserved: Reserved,
     sids: BTreeMap<MatterId, Sid>,
+    /// How long [`MatterSids::sid_for`] waits for `matters.lock`; `None` is
+    /// [`write::LOCK_WAIT`].
+    lock_wait: Option<Duration>,
 }
 
 /// The SID of `matter` in `data_dir`'s `matters.json`, made and saved first if the matter has
@@ -114,7 +118,14 @@ impl MatterSids {
             folder,
             reserved,
             sids,
+            lock_wait: None,
         })
+    }
+
+    /// Waits up to `wait` for `matters.lock` instead of [`write::LOCK_WAIT`] (10 s).
+    pub fn with_lock_wait(mut self, wait: Duration) -> MatterSids {
+        self.lock_wait = Some(wait);
+        self
     }
 
     /// The SID `matter` had when this was loaded or last changed, if any.
@@ -134,7 +145,8 @@ impl MatterSids {
 
     /// The SID of `matter`. Makes the sandbox folder if missing (`write::make_sandbox_dir`),
     /// then holds `matters.lock` (an exclusive OS file lock, so no other process or instance
-    /// changes the file meanwhile) and reads the file again inside it, so a matter another
+    /// changes the file meanwhile; waiting at most 10 s, or [`MatterSids::with_lock_wait`], then
+    /// an error naming the lock) and reads the file again inside it, so a matter another
     /// instance added since this one loaded is kept. A matter without a SID gets a new random one
     /// that no matter holds and [`Reserved`] admits, and the file is saved with it before it is
     /// returned; if the save fails, the matter has no SID.
@@ -142,7 +154,12 @@ impl MatterSids {
         let failed =
             |why: io::Error| SetupError::Failed(format!("{}: {why}", self.folder.display()));
         write::make_sandbox_dir(&self.folder).map_err(failed)?;
-        let _held = write::lock_exclusive(&self.folder.join(MATTERS_LOCK)).map_err(failed)?;
+        let lock = self.folder.join(MATTERS_LOCK);
+        let _held = match self.lock_wait {
+            None => write::lock_exclusive(&lock),
+            Some(wait) => write::lock_exclusive_for(&lock, wait),
+        }
+        .map_err(|error| SetupError::Failed(format!("matter SIDs: {error}")))?;
         let file = self.folder.join(MATTERS_FILE);
         self.sids = read(&file, &self.reserved)?;
         if let Some(sid) = self.sids.get(matter) {
@@ -373,5 +390,22 @@ mod tests {
         assert_eq!((again.get(&a), again.get(&b)), (Some(&sid_a), Some(&sid_b)));
         // And the first, asked for A again, keeps its SID.
         assert_eq!(first.sid_for(&a).unwrap(), sid_a);
+    }
+
+    #[test]
+    fn a_held_lock_makes_sid_for_give_up_after_its_wait() {
+        let temp = TempDir::new("matter-sids-held");
+        let folder = temp.path().join(SANDBOX_DIR);
+        write::make_sandbox_dir(&folder).unwrap();
+        let _held = write::lock_exclusive(&folder.join(MATTERS_LOCK)).unwrap();
+        let mut sids = MatterSids::load(temp.path())
+            .unwrap()
+            .with_lock_wait(Duration::from_millis(200));
+        let Err(SetupError::Failed(why)) = sids.sid_for(&matter()) else {
+            panic!("sid_for went ahead while the lock was held");
+        };
+        assert!(why.contains(MATTERS_LOCK), "{why}");
+        assert!(!why.contains(&*folder.to_string_lossy()), "{why}");
+        assert!(sids.is_empty());
     }
 }

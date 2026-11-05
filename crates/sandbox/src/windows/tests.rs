@@ -364,3 +364,92 @@ fn the_sandbox_folder_gets_a_protected_private_dacl_again_and_again() {
     super::write::make_sandbox_dir(&folder).unwrap();
     assert_private(&folder);
 }
+
+/// Enables `SeRestorePrivilege` in this test process's token, so it may give a folder to another
+/// account. `false` when the token lacks it (a non-admin runner).
+fn enable_restore_privilege() -> bool {
+    use windows::Win32::Foundation::{CloseHandle, ERROR_SUCCESS, GetLastError, HANDLE, LUID};
+    use windows::Win32::Security::{
+        AdjustTokenPrivileges, LUID_AND_ATTRIBUTES, LookupPrivilegeValueW, SE_PRIVILEGE_ENABLED,
+        TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES,
+    };
+    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+    use windows::core::w;
+
+    let mut token = HANDLE::default();
+    // SAFETY: a pseudo-handle and a live out-pointer.
+    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES, &raw mut token) }
+        .is_err()
+    {
+        return false;
+    }
+    let mut luid = LUID::default();
+    // SAFETY: a NUL-terminated literal and a live out-pointer.
+    let found = unsafe { LookupPrivilegeValueW(None, w!("SeRestorePrivilege"), &raw mut luid) };
+    let privileges = TOKEN_PRIVILEGES {
+        PrivilegeCount: 1,
+        Privileges: [LUID_AND_ATTRIBUTES {
+            Luid: luid,
+            Attributes: SE_PRIVILEGE_ENABLED,
+        }],
+    };
+    // SAFETY: the token was opened to adjust; `privileges` lives for the call. Its success can
+    // still mean "not all assigned", which GetLastError tells.
+    let enabled = found.is_ok()
+        && unsafe { AdjustTokenPrivileges(token, false, Some(&raw const privileges), 0, None, None) }
+            .is_ok()
+        // SAFETY: reads this thread's last error, set by the call above.
+        && unsafe { GetLastError() } == ERROR_SUCCESS;
+    // SAFETY: opened above, closed once.
+    drop(unsafe { CloseHandle(token) });
+    enabled
+}
+
+#[test]
+fn a_sandbox_folder_owned_by_another_account_is_taken_back_or_refused() {
+    use super::private_dir::{owner, owner_allowed, set_owner};
+    use super::sids::Sid;
+
+    let user = super::record::current_user_sid().unwrap();
+    let local_service = Sid::parse("S-1-5-19").unwrap();
+    assert!(owner_allowed(&user, &user));
+    assert!(owner_allowed(&Sid::parse("S-1-5-18").unwrap(), &user));
+    assert!(owner_allowed(&Sid::parse("S-1-5-32-544").unwrap(), &user));
+    assert!(!owner_allowed(&local_service, &user));
+
+    let temp = TempDir::new("sandbox-owner");
+    let folder = temp.path().join("sandbox");
+    super::write::make_sandbox_dir(&folder).unwrap();
+    if !enable_restore_privilege() {
+        println!("skipped the re-own case: this token can't give a folder away");
+        return;
+    }
+    set_owner(&folder, &local_service).unwrap();
+    assert_eq!(owner(&folder).unwrap(), local_service);
+    match super::write::make_sandbox_dir(&folder) {
+        Ok(()) => {
+            assert_eq!(owner(&folder).unwrap(), user);
+            assert_private(&folder);
+        }
+        Err(error) => assert!(error.to_string().contains("owned by S-1-5-19"), "{error}"),
+    }
+}
+
+#[test]
+fn an_explicit_entry_on_a_file_in_the_sandbox_folder_is_dropped() {
+    let temp = TempDir::new("sandbox-file-ace");
+    let folder = temp.path().join("sandbox");
+    super::write::make_sandbox_dir(&folder).unwrap();
+    let file = temp.file("sandbox/matters.json", "{}");
+    test_dacl::protect_with(&file, "D:P(A;;FA;;;WD)").unwrap();
+    assert!(dacl_sddl(&file).contains(";WD)"));
+    super::write::make_sandbox_dir(&folder).unwrap();
+    let sddl = dacl_sddl(&file);
+    assert!(!sddl.starts_with("D:P"), "{sddl}");
+    assert!(!sddl.contains(";WD)"), "{sddl}");
+    for ace in sddl.split('(').skip(1) {
+        let flags = ace.split(';').nth(1).unwrap();
+        assert!(flags.contains("ID"), "an explicit entry is left: {sddl}");
+    }
+    assert_eq!(sddl.split('(').count() - 1, 3, "{sddl}");
+}
