@@ -4,9 +4,10 @@
 //!
 //! R20 P5b piece A calls [`SetupHost::set_agent_launch`] (an install's `Ready`) and
 //! [`SetupHost::set_endpoint`] (`SetFirmEndpoint`). The others are piece B's (the leave order, the
-//! restarts, `LoginChanged`). This host has none of them yet (P4b, #440, adds `restart_agents`,
-//! `stop_agents`, `set_reused_login` and `remove_login_links`; `login_changed` is P4b's
-//! follow-up), so [`CellHost`] answers each with `internal` until they land.
+//! restarts, `LoginChanged`). [`CellHost`] calls through to P4b's (#440) `restart_agents`,
+//! `stop_agents`, `set_reused_login` and `remove_login_links`; this host has no
+//! `login_changed` yet (P4b's follow-up), so [`CellHost`] answers it with `internal` until it
+//! lands.
 
 use std::sync::Arc;
 
@@ -74,7 +75,7 @@ impl CellHost {
     }
 }
 
-/// The answer to a call this host does not have yet (R20 P4b adds them): `internal`, naming
+/// The answer to a call this host does not have yet (P4b's follow-up adds it): `internal`, naming
 /// the call in words a window may show.
 fn not_in_host(call: &str) -> HostError {
     HostError::new(
@@ -112,24 +113,30 @@ impl SetupHost for CellHost {
         })
     }
 
-    fn restart_agents(&self, _agent: AgentId) -> BoxFuture<'_, Result<(), HostError>> {
-        Box::pin(std::future::ready(Err(not_in_host("restart_agents"))))
+    fn restart_agents(&self, agent: AgentId) -> BoxFuture<'_, Result<(), HostError>> {
+        Box::pin(async move { self.cell.host().await?.restart_agents(agent).await })
     }
 
-    fn stop_agents(&self, _agent: AgentId) -> BoxFuture<'_, Result<(), HostError>> {
-        Box::pin(std::future::ready(Err(not_in_host("stop_agents"))))
+    fn stop_agents(&self, agent: AgentId) -> BoxFuture<'_, Result<(), HostError>> {
+        Box::pin(async move { self.cell.host().await?.stop_agents(agent).await })
     }
 
     fn set_reused_login(
         &self,
-        _agent: AgentId,
-        _reused: bool,
+        agent: AgentId,
+        reused: bool,
     ) -> BoxFuture<'_, Result<(), HostError>> {
-        Box::pin(std::future::ready(Err(not_in_host("set_reused_login"))))
+        Box::pin(async move {
+            self.cell
+                .host()
+                .await?
+                .set_reused_login(agent, reused)
+                .await
+        })
     }
 
-    fn remove_login_links(&self, _agent: AgentId) -> BoxFuture<'_, Result<(), HostError>> {
-        Box::pin(std::future::ready(Err(not_in_host("remove_login_links"))))
+    fn remove_login_links(&self, agent: AgentId) -> BoxFuture<'_, Result<(), HostError>> {
+        Box::pin(async move { self.cell.host().await?.remove_login_links(agent).await })
     }
 
     fn login_changed(&self, _agent: AgentId) -> BoxFuture<'_, Result<(), HostError>> {
