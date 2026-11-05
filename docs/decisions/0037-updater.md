@@ -182,7 +182,10 @@ The install takes the quit path:
    stay queued and stored, never dropped; cancelling the install releases them. Under
    `after_turn` nothing is held: new turns run, and the install waits for the last to end.
 2. The "installing <version>" marker (`{ from, to }`) is written to `update.json`
-   (`Locations::update_marker()`), off the actor, before the shutdown and so before the install.
+   (`Locations::update_marker()`), off the actor; the shutdown starts only once the write has
+   ended on disk, new sends held meanwhile. A write that fails installs nothing (a failed
+   install would then report nothing at the next start): the run shows `failed` at the
+   `install` stage, counts it, and new sends run again.
 3. The host shuts down: imports and scans cancelled, search, snapshots and matter workers
    stopped, the store closed. Its exit is `HostExit::Install(downloaded)`
    (`HostHandle::exit`), only when the store closed cleanly; otherwise `Stopped`, desktop just

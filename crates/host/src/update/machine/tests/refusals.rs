@@ -44,7 +44,8 @@ fn takers(input: &Input) -> &'static [&'static str] {
         | Input::DownloadDone(_)
         | Input::PolicyChanged(_)
         | Input::TurnsRunning(_)
-        | Input::TurnsCancelled => panic!("not a command: {input:?}"),
+        | Input::TurnsCancelled
+        | Input::MarkerWritten(_) => panic!("not a command: {input:?}"),
     }
 }
 

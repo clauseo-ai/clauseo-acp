@@ -53,8 +53,8 @@ pub(super) fn run(actor: &mut Actor, fx: Vec<Effect>) {
             Effect::WriteMarker(marker) => actor.update.send(Job::Write(marker)),
             Effect::ClearMarker => actor.update.send(Job::Clear),
             Effect::BeginInstall(downloaded) => {
-                // The command that asked has had its answer: the shutdown drops later ones.
-                // The exit waits for the marker's write (`update::busy`).
+                // The marker is on disk (the machine waits for `MarkerWritten`), and the command
+                // that asked has had its answer: the shutdown drops later ones.
                 actor.update.install = Some(downloaded);
                 shutdown::begin_shutdown(actor, None);
             }

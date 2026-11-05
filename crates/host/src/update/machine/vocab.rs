@@ -63,6 +63,8 @@ pub(crate) enum Input {
     TurnsRunning(bool),
     /// Every turn [`Effect::CancelTurns`] cancelled has ended.
     TurnsCancelled,
+    /// The write [`Effect::WriteMarker`] asked for ended: `true` when `update.json` is on disk.
+    MarkerWritten(bool),
 }
 
 /// What the actor does after a step, in order.
@@ -86,11 +88,12 @@ pub(crate) enum Effect {
     CancelTurns,
     /// Hold new sends queued (`true`) or let them run again (`false`).
     GateNewTurns(bool),
-    /// Write `update.json`, off the actor.
+    /// Write `update.json`, off the actor; send [`Input::MarkerWritten`] once it is done.
     WriteMarker(UpdateMarker),
     /// Delete `update.json`, off the actor: start-up has read it.
     ClearMarker,
-    /// Shut down and exit with `Exit::Install`, handing desktop the download.
+    /// Shut down and exit with `Exit::Install`, handing desktop the download. Only once the
+    /// marker is on disk.
     BeginInstall(Downloaded),
     /// Send `UpdateChanged` with [`Machine::view`].
     Publish,

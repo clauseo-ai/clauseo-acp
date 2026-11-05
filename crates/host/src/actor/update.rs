@@ -166,8 +166,10 @@ pub(super) fn on_input(actor: &mut Actor, input: UpdateInput) {
     match input {
         UpdateInput::Files(done) => {
             update.files_out = update.files_out.saturating_sub(1);
-            if let files::Done::Read { marker, cached } = done {
-                update.read = Some((marker, cached));
+            match done {
+                files::Done::Read { marker, cached } => update.read = Some((marker, cached)),
+                files::Done::Wrote(written) => feed(actor, Input::MarkerWritten(written)),
+                files::Done::Cleared => {}
             }
         }
         UpdateInput::Timer { generation } => {

@@ -9,8 +9,8 @@ use std::sync::atomic::Ordering;
 use clauseo_counts::schema::{Update, UpdateResult};
 use clauseo_host::InstallKind;
 use clauseo_protocol::{
-    CommandOutcome, Count, DeliveryRequest, HostCommand, InstallWhen, StopReason, StreamId,
-    UpdateState,
+    CommandOutcome, Count, DeliveryRequest, FailedStage, HostCommand, InstallWhen, StopReason,
+    StreamId, UpdateState,
 };
 
 use crate::counts::open_counts;
@@ -22,6 +22,7 @@ use crate::update::{
     CURRENT, Download, FakeUpdater, INSTALLING, NEXT, assert_installs, exit_of, marker_text,
     start_updating, start_updating_with, until_ready, until_view, view,
 };
+use crate::write;
 
 /// A second agent id, for a thread whose agent plays another scenario.
 const OTHER: &str = "fake-other";
@@ -265,4 +266,59 @@ fn a_send_now_held_on_the_stopped_thread_starts_once_the_install_is_taken_back()
         "held after the install was taken back"
     );
     host.shutdown_past_cancel();
+}
+
+#[test]
+fn a_marker_that_cannot_be_written_fails_the_install_and_lifts_the_hold() {
+    let dir = Dir::new(
+        "update_marker_unwritable",
+        &[
+            (FAKE, Scenario::Bundled("permission-cancelled")),
+            (OTHER, Scenario::Bundled("prompt-stream")),
+        ],
+    );
+    // A folder where `update.json` goes: the rename onto it fails.
+    write::write(&dir.data().join("update.json").join("in-the-way"), b"x");
+    let counts = open_counts(&dir, true);
+    let fake = FakeUpdater::offering(&dir);
+    let counted = counts.clone();
+    let host = start_updating_with(&dir, 0, &fake, CURRENT, move |config| {
+        config.with_counts(counted)
+    });
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], FAKE);
+    let (_, other, _) = matter_with_thread(&dir, &host, "other", &[], OTHER);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (turn, _) = host.prompt(thread, "Edit the brief.");
+    until_first_request(&mut events);
+    host.ok(HostCommand::CheckForUpdate {});
+    until_ready(&host);
+
+    host.ok(install(InstallWhen::Now));
+    assert_eq!(events.until_turn_ended(turn).stop, StopReason::Cancelled);
+    let failed = until_view(&host, "failed", |view| {
+        matches!(view.state, UpdateState::Failed { .. })
+    });
+    assert!(
+        matches!(
+            &failed.state,
+            UpdateState::Failed { version: Some(v), stage: FailedStage::Install, .. } if v == NEXT
+        ),
+        "{failed:?}"
+    );
+    // Nothing is held any more: a send starts and ends.
+    let mut others = host.events(StreamId::Thread(other));
+    let (next, _) = host.prompt(other, "Summarise.");
+    assert_eq!(others.until_turn_ended(next).stop, StopReason::EndTurn);
+    host.settle();
+    let counted: Vec<_> = counts
+        .today()
+        .update
+        .iter()
+        .map(|cell| (cell.key, u64::from(cell.n)))
+        .collect();
+    let failure = Update {
+        result: UpdateResult::Failed,
+    };
+    assert_eq!(counted, [(failure, 1)]);
+    host.shutdown();
 }

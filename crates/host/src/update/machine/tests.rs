@@ -93,8 +93,15 @@ fn checks(fx: &[Effect]) -> bool {
     fx.contains(&Effect::StartCheck)
 }
 
+/// Whether `fx` starts an install: its marker first, then `BeginInstall` once it is written.
 fn installs(fx: &[Effect]) -> bool {
-    fx.iter().any(|e| matches!(e, Effect::BeginInstall(_)))
+    fx.iter()
+        .any(|e| matches!(e, Effect::WriteMarker(_) | Effect::BeginInstall(_)))
+}
+
+/// The effects of the marker's write ending on disk.
+fn written(m: &Machine) -> Vec<Effect> {
+    go(m, Input::MarkerWritten(true), t0()).1
 }
 
 // Each state, reached through the machine's own steps.
@@ -238,13 +245,11 @@ fn update_ready_installs_now_at_once_with_no_turn_running() {
         version: NEXT.to_owned(),
     };
     assert_eq!(m.view().state, installing);
-    let expected = [
-        Effect::WriteMarker(marker(CURRENT, NEXT)),
-        Effect::BeginInstall(downloaded(&o)),
-        Effect::Publish,
-    ];
+    let expected = [Effect::WriteMarker(marker(CURRENT, NEXT)), Effect::Publish];
     assert_eq!(fx, expected);
-    assert!(!m.gated());
+    // New sends wait while the marker is written; the install begins once it is.
+    assert!(m.gated());
+    assert_eq!(written(&m), [Effect::BeginInstall(downloaded(&o))]);
 }
 
 #[test]
@@ -265,20 +270,17 @@ fn update_now_with_turns_running_gates_and_cancels_then_installs_only_on_turns_c
     // The running bit dropping is not the cancelled turns' end.
     let (m, fx) = go(&m, Input::TurnsRunning(false), t0());
     assert!(!installs(&fx), "{fx:?}");
-    let (_, fx) = go(&m, Input::TurnsCancelled, t0());
-    let expected = [
-        Effect::WriteMarker(marker(CURRENT, NEXT)),
-        Effect::BeginInstall(downloaded(&o)),
-    ];
-    assert_eq!(fx, expected);
+    let (m, fx) = go(&m, Input::TurnsCancelled, t0());
+    assert_eq!(fx, [Effect::WriteMarker(marker(CURRENT, NEXT))]);
+    assert_eq!(written(&m), [Effect::BeginInstall(downloaded(&o))]);
 }
 
 #[test]
 fn update_after_turn_installs_at_once_with_no_turn_running() {
     let (m, o) = ready();
-    let (_, fx) = go(&m, Input::InstallRequested(InstallWhen::AfterTurn), t0());
-    assert!(fx.contains(&Effect::BeginInstall(downloaded(&o))), "{fx:?}");
-    assert!(!fx.contains(&Effect::Count(UpdateResult::AfterAnswer)));
+    let (m, fx) = go(&m, Input::InstallRequested(InstallWhen::AfterTurn), t0());
+    assert!(installs(&fx), "{fx:?}");
+    assert_eq!(written(&m), [Effect::BeginInstall(downloaded(&o))]);
 }
 
 #[test]
@@ -296,17 +298,62 @@ fn update_after_turn_is_scheduled_while_turns_run_and_installs_once_none_runs() 
     let (_, fx) = go(&m, Input::TurnsCancelled, t0());
     assert!(!installs(&fx), "{fx:?}");
     let (m, fx) = go(&m, Input::TurnsRunning(false), t0());
-    let expected = [
-        Effect::WriteMarker(marker(CURRENT, NEXT)),
-        Effect::Count(UpdateResult::AfterAnswer),
-        Effect::BeginInstall(downloaded(&o)),
-        Effect::Publish,
-    ];
+    let expected = [Effect::WriteMarker(marker(CURRENT, NEXT)), Effect::Publish];
     assert_eq!(fx, expected);
     let installing = UpdateState::Installing {
         version: NEXT.to_owned(),
     };
     assert_eq!(m.view().state, installing);
+    // `after_answer` counts once the install begins, the marker on disk.
+    let expected = [
+        Effect::Count(UpdateResult::AfterAnswer),
+        Effect::BeginInstall(downloaded(&o)),
+    ];
+    assert_eq!(written(&m), expected);
+}
+
+#[test]
+fn update_a_marker_that_could_not_be_written_is_a_failed_install_with_the_hold_lifted() {
+    for (name, m) in [
+        (
+            "at once",
+            go(&ready().0, Input::InstallRequested(InstallWhen::Now), t0()).0,
+        ),
+        ("after the cancelled turns", {
+            let m = go(
+                &ready_with_turns().0,
+                Input::InstallRequested(InstallWhen::Now),
+                t0(),
+            )
+            .0;
+            go(&m, Input::TurnsCancelled, t0()).0
+        }),
+    ] {
+        assert!(m.gated(), "{name}");
+        let (m, fx) = go(&m, Input::MarkerWritten(false), t0());
+        let failed = UpdateState::Failed {
+            version: Some(NEXT.to_owned()),
+            at: t0(),
+            stage: FailedStage::Install,
+        };
+        assert_eq!(m.view().state, failed, "{name}");
+        assert!(!m.gated(), "{name}");
+        assert!(!installs(&fx), "{name}: {fx:?}");
+        assert_eq!(
+            fx.first(),
+            Some(&Effect::GateNewTurns(false)),
+            "{name}: {fx:?}"
+        );
+        assert!(
+            fx.contains(&Effect::Count(UpdateResult::Failed)),
+            "{name}: {fx:?}"
+        );
+        assert!(armed(&fx).is_some(), "{name}: {fx:?}");
+        assert_eq!(fx.last(), Some(&Effect::Publish), "{name}: {fx:?}");
+        // A late answer of the write changes nothing.
+        let (_, fx) = go(&m, Input::MarkerWritten(true), t0());
+        assert!(fx.is_empty(), "{name}: {fx:?}");
+    }
 }
 
 #[test]

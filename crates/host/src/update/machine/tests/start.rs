@@ -183,7 +183,7 @@ fn update_auto_installs_last_runs_download_at_start_after_a_check_offers_it_agai
     let (m, fx) = Machine::start(start, t0());
     assert_eq!(fx, [Effect::StartCheck, Effect::Publish]);
     let o = offer(NEXT);
-    let (_, fx) = go(&m, Input::CheckDone(Ok(Some(o.clone()))), t0());
+    let (m, fx) = go(&m, Input::CheckDone(Ok(Some(o.clone()))), t0());
     let from_file = Downloaded {
         version: NEXT.to_owned(),
         path: cached(NEXT).path,
@@ -193,7 +193,8 @@ fn update_auto_installs_last_runs_download_at_start_after_a_check_offers_it_agai
         !fx.iter().any(|e| matches!(e, Effect::StartDownload(_))),
         "{fx:?}"
     );
-    assert!(fx.contains(&Effect::BeginInstall(from_file)), "{fx:?}");
+    assert!(installs(&fx), "{fx:?}");
+    assert_eq!(written(&m), [Effect::BeginInstall(from_file)]);
 }
 
 #[test]

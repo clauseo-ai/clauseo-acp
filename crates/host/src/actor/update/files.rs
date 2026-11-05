@@ -35,8 +35,10 @@ pub(crate) enum Done {
         marker: Option<UpdateMarker>,
         cached: Option<crate::update::CachedDownload>,
     },
-    /// A write or a delete ended; its failure is already logged.
-    Written,
+    /// The marker's write ended: `true` when it is on disk (a failure is already logged).
+    Wrote(bool),
+    /// The marker's delete ended; a failure is already logged.
+    Cleared,
 }
 
 /// The way to the file thread. Dropping it ends the thread once its queue is empty.
@@ -80,7 +82,8 @@ impl Files {
                 marker: None,
                 cached: None,
             },
-            Job::Write(_) | Job::Clear => Done::Written,
+            Job::Write(_) => Done::Wrote(false),
+            Job::Clear => Done::Cleared,
         };
         let _gone = self.post.try_send(Input::Update(UpdateInput::Files(done)));
     }
@@ -108,18 +111,19 @@ pub(super) fn run(locations: &Locations, job: Job) -> Done {
             marker: read_update_marker(locations),
             cached: find_cached(locations, &current),
         },
-        Job::Write(marker) => {
-            if let Err(error) = write_marker(locations, &marker) {
-                // The install still goes ahead: the marker only reports how it went.
+        Job::Write(marker) => match write_marker(locations, &marker) {
+            Ok(()) => Done::Wrote(true),
+            Err(error) => {
+                // No install then: a failed one would report nothing at the next start.
                 tracing::warn!(kind = %error.kind(), "update.json was not written");
+                Done::Wrote(false)
             }
-            Done::Written
-        }
+        },
         Job::Clear => {
             if let Err(error) = clear_marker(locations) {
                 tracing::warn!(kind = %error.kind(), "update.json was not deleted");
             }
-            Done::Written
+            Done::Cleared
         }
     }
 }
