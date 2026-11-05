@@ -142,7 +142,8 @@ export function InstallBar({
   total: number;
   words: string;
 }) {
-  const value = total > 0 ? Math.min(100, (received / total) * 100) : 0;
+  // to a tenth of a percent: a first byte's share would read 5e-7, which ARIA's aria-valuenow refuses
+  const value = total > 0 ? Math.min(100, Math.round((received / total) * 1000) / 10) : 0;
   return (
     <PlanMeter
       className="fl-bar"
