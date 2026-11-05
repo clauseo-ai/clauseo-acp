@@ -13,6 +13,8 @@
 //!   answers once the agents have ended or its wait ran out (`sign_in/stops.rs`), and holds the
 //!   id, in memory only, until `restart_agents`: no launch of it starts ([`launch_refusal`])
 //!   and a prompt for it queues held (`queue/sign_in.rs`).
+//! - `set_launch_refused` refuses an id's new launches with desktop's code, running sessions
+//!   left alone ([`launch_refusal`]).
 //! - `set_reused_login` keeps desktop's word on the login's source, which turns on the split
 //!   check ([`check_launch`]).
 
@@ -24,7 +26,7 @@ use super::close::TurnClose;
 use super::launch_checks::Prepared;
 use super::queue::{self, Requeue};
 use super::{Current, agents, cancel, current, state};
-use crate::agent::login_link::{LoginLink, LoginSplit, Seen};
+use crate::agent::login_link::{LAUNCH_REFUSALS, LoginLink, LoginSplit, Seen};
 use crate::error::Error;
 
 mod stops;
@@ -61,6 +63,9 @@ pub(crate) fn on_request(actor: &mut Actor, request: SignInRequest) {
             // then no matter has a link.
             tracing::info!(%agent, "the matters' login links: none before stage C");
             let _gone = reply.send(Ok(Vec::new()));
+        }
+        SignInRequest::LaunchRefused { agent, code, reply } => {
+            let _gone = reply.send(set_refused(actor, agent, code));
         }
         SignInRequest::LimitsLogin { agent, reply } => {
             super::super::limits::login_changed(actor, agent);
@@ -129,14 +134,45 @@ pub(super) fn holds(actor: &Actor, thread: ThreadId) -> bool {
 }
 
 /// Why a launch of `thread`'s agent may not start: `stop_agents` holds it, so what waits fails
-/// with `agent.auth_required` and a turn goes back held for the sign-in.
+/// with `agent.auth_required` and a turn goes back held for the sign-in; or desktop refuses
+/// its new launches (`set_launch_refused`), so a turn fails with desktop's code.
 pub(super) fn launch_refusal(actor: &Actor, thread: ThreadId) -> Option<Error> {
-    holds(actor, thread).then(|| {
-        Error::refused(
+    if holds(actor, thread) {
+        return Some(Error::refused(
             ErrorCode::AgentAuthRequired,
             "the agent starts again once its sign-in has changed",
-        )
-    })
+        ));
+    }
+    let agent = &actor.threads.get(&thread)?.row.agent;
+    let code = *actor.wiring.sign_in.refused.get(agent)?;
+    tracing::info!(%agent, code = code.as_str(), "a launch is refused");
+    Some(Error::refused(
+        code,
+        "Clauseo is not starting this agent for now",
+    ))
+}
+
+/// `set_launch_refused`: keeps or clears the refusal of `agent`'s new launches; a code not on
+/// the list is refused with `command.invalid` and changes nothing.
+fn set_refused(actor: &mut Actor, agent: AgentId, code: Option<ErrorCode>) -> Result<(), Error> {
+    let refused = &mut actor.wiring.sign_in.refused;
+    match code {
+        Some(code) if !LAUNCH_REFUSALS.contains(&code) => {
+            return Err(Error::refused(
+                ErrorCode::CommandInvalid,
+                format!("a launch is not refused with {}", code.as_str()),
+            ));
+        }
+        Some(code) => {
+            tracing::info!(%agent, code = code.as_str(), "new launches are refused");
+            refused.insert(agent, code);
+        }
+        None => {
+            tracing::info!(%agent, "new launches may start");
+            refused.remove(&agent);
+        }
+    }
+    Ok(())
 }
 
 /// The code a turn failing with an error of `code` and `text` ends with:

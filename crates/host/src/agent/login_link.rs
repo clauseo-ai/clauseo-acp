@@ -32,6 +32,10 @@ use super::login_splits::{self, LoginSplits, SplitSender};
 use crate::clock::Clock;
 use crate::error::Error;
 
+/// The codes `HostHandle::set_launch_refused` takes: the refusals desktop may put on new
+/// launches.
+pub(crate) const LAUNCH_REFUSALS: [ErrorCode; 1] = [ErrorCode::SigninPolicyUnreadable];
+
 /// How long a launch waits for the hook's answer.
 pub(crate) const CHECK_WAIT: Duration = Duration::from_secs(5);
 
@@ -120,6 +124,9 @@ pub(crate) struct SignIn {
     /// The agents `HostHandle::stop_agents` holds until `restart_agents`: none of them
     /// launches, and their prompts queue held. In memory only: a host restart clears it.
     pub(crate) held: BTreeSet<AgentId>,
+    /// The agents whose new launches desktop refuses, with the code their turns fail with
+    /// (`HostHandle::set_launch_refused`). In memory only.
+    pub(crate) refused: BTreeMap<AgentId, ErrorCode>,
 }
 
 impl Default for SignIn {
@@ -133,6 +140,7 @@ impl Default for SignIn {
             reused: BTreeSet::new(),
             seen: BTreeMap::new(),
             held: BTreeSet::new(),
+            refused: BTreeMap::new(),
         }
     }
 }
@@ -145,6 +153,7 @@ impl std::fmt::Debug for SignIn {
             .field("reused", &self.reused)
             .field("seen", &self.seen)
             .field("held", &self.held)
+            .field("refused", &self.refused)
             .finish_non_exhaustive()
     }
 }

@@ -10,9 +10,9 @@ use std::path::PathBuf;
 use std::thread::JoinHandle;
 
 use clauseo_protocol::{
-    AgentId, AgentKind, CommandEnvelope, CommandOutcome, Cursor, FileRefId, FolderRefId, HostError,
-    HostQuery, MatterId, Principal, QueryResult, SearchAnswer, SearchRequest, Seq, StreamId,
-    ViewEpoch,
+    AgentId, AgentKind, CommandEnvelope, CommandOutcome, Cursor, ErrorCode, FileRefId, FolderRefId,
+    HostError, HostQuery, MatterId, Principal, QueryResult, SearchAnswer, SearchRequest, Seq,
+    StreamId, ViewEpoch,
 };
 use futures::channel::oneshot;
 
@@ -411,6 +411,26 @@ impl HostHandle {
         login_link::remove_links(agent, homes)
             .await
             .map_err(HostError::from)
+    }
+
+    /// Refuses `agent`'s new launches with `code` (decision record 0048, P4d), or, with
+    /// `None`, lets them start again. A turn that would launch the agent fails as any refused
+    /// launch does: an ordinary `TurnFailed` with `code`. Running sessions go on until they
+    /// exit; desktop calls [`Self::stop_agents`] to end them sooner. Only the codes desktop may
+    /// put there are taken, `signin.policy_unreadable` for now: another is a bug, which debug
+    /// builds assert, and release builds refuse with `command.invalid`, changing nothing. In
+    /// memory only. Rust only.
+    pub async fn set_launch_refused(
+        &self,
+        agent: AgentId,
+        code: Option<ErrorCode>,
+    ) -> Result<(), HostError> {
+        debug_assert!(
+            code.is_none_or(|code| login_link::LAUNCH_REFUSALS.contains(&code)),
+            "set_launch_refused takes no {code:?}"
+        );
+        self.call(|reply| Request::SignIn(SignInRequest::LaunchRefused { agent, code, reply }))
+            .await
     }
 
     /// Desktop's word that `agent`'s login changed (a sign-in, a sign-out, an account change, or
