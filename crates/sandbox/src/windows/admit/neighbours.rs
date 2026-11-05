@@ -5,7 +5,7 @@
 use std::io;
 use std::path::Path;
 
-use super::{FolderRefusal, FolderSupport, is_reparse_point, refusal};
+use super::{FolderRefusal, FolderSupport, refusal};
 use crate::Error;
 use crate::windows::acl_plan::targets::odd_spelling;
 use crate::windows::fence::{Fence, Neighbours};
@@ -23,11 +23,17 @@ pub(super) fn resolve(neighbours: &Neighbours) -> Neighbours {
     resolved
 }
 
-/// The fence of each registered matter not fenced yet, from `given` (the launcher's spelling,
-/// read before resolving, so a link there is seen): a folder that doesn't exist is left out
-/// (nothing to protect yet; the host's matter creation fences it); one on a network share is
-/// left out too, as a sibling is; any other folder must have no odd spelling, be no link and
-/// answer `Ok`, or the launch is refused with [`Error::NeighbourUnfenceable`] naming that matter.
+/// The fence of each registered matter not fenced yet, each folder checked exactly as that
+/// matter's own launch checks it, so a neighbour is refused only where its own launch would be
+/// too. Its own policy refuses a folder whose own name, as given, is a symbolic link or junction
+/// (a name-surrogate reparse point; `policy/build.rs`'s `root_folder`), and resolves every link
+/// above it; its own plan refuses an odd spelling of the resolved path. So here: a folder that
+/// doesn't exist is left out (nothing to protect yet; the host's matter creation fences it); one
+/// on a network share is left out too, as a sibling is; a folder reached through a linked parent
+/// is fenced at its resolved target; a cloud placeholder or other reparse point that isn't a
+/// name surrogate is accepted, as D7 does. A folder that is itself a link, has an odd resolved
+/// spelling, or can't take the fence refuses the launch with [`Error::NeighbourUnfenceable`]
+/// naming that matter.
 pub(super) fn fences(
     resolved: &Neighbours,
     given: &Neighbours,
@@ -47,13 +53,13 @@ pub(super) fn fences(
                 path_kind: kind,
                 support,
             };
-            if odd_spelling(asked) || odd_spelling(folder) {
-                return Err(refuse(FolderRefusal::OddSpelling));
-            }
-            match is_reparse_point(asked) {
+            match own_name_is_link(asked) {
                 Ok(true) => return Err(refuse(FolderRefusal::ReparsePoint)),
                 Ok(false) => {}
                 Err(error) => return Err(refuse(FolderRefusal::CheckFailed(error.kind()))),
+            }
+            if odd_spelling(folder) {
+                return Err(refuse(FolderRefusal::OddSpelling));
             }
             match check(folder) {
                 Ok(FolderSupport::Ok) => folders.push((folder.to_owned(), kind)),
@@ -76,4 +82,15 @@ pub(super) fn fences(
         }
     }
     Ok(fences)
+}
+
+/// Whether the name `path` itself is a symbolic link or junction, as the policy's own check
+/// reads it (`symlink_metadata`'s `is_symlink`: name-surrogate reparse points only); a missing
+/// path is not.
+fn own_name_is_link(path: &Path) -> io::Result<bool> {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) => Ok(meta.file_type().is_symlink()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
 }
