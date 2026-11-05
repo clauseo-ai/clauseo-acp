@@ -100,13 +100,12 @@ junit = { path = "junit.xml" }
 #   - agents install tests, on Windows only: stall all at once on the loaded runner, 11 timed out
 #     on Windows x64 in run 41840642164 (stage D's #366 gives them 160 s)
 #   - xtask::bin/xtask process::tests::tree::a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does: failed then passed on retry 1 time since 2026-11-04; first https://github.com/clauseo-ai/clauseo-acp/actions/runs/41912294482/job/126862999903 (autoquarantine)
-#   - clauseo-process::pipes sweep::the_sweep_ends_only_what_is_new (Windows only): failed then passed on retry 1 time since 2026-11-05; first https://github.com/clauseo-ai/clauseo-acp/actions/runs/41947320519/job/126982726268 (autoquarantine)
 default-filter = 'not (package(xtask) & binary(xtask) & test(=process::tests::tree::a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does))'
 # On Windows the agents install tests too (their stalls are the Windows runner's; Linux and macOS
 # keep gating them while their crate changes).
 [[profile.ci.overrides]]
 platform = 'cfg(windows)'
-default-filter = 'not (package(xtask) & binary(xtask) & test(=process::tests::tree::a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does) | package(clauseo-agents) & binary(install) | package(clauseo-process) & binary(pipes) & test(=sweep::the_sweep_ends_only_what_is_new))'
+default-filter = 'not (package(xtask) & binary(xtask) & test(=process::tests::tree::a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does) | package(clauseo-agents) & binary(install))'
 
 # The quarantined tests alone (see profile ci), run nightly by ci.yml's `quarantine` job, with the
 # ci profile's timeouts and retry, so a fixed one shows as passing.
@@ -116,4 +115,4 @@ failure-output = "immediate-final"
 default-filter = 'package(xtask) & binary(xtask) & test(=process::tests::tree::a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does)'
 [[profile.quarantine.overrides]]
 platform = 'cfg(windows)'
-default-filter = 'package(xtask) & binary(xtask) & test(=process::tests::tree::a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does) | package(clauseo-agents) & binary(install) | package(clauseo-process) & binary(pipes) & test(=sweep::the_sweep_ends_only_what_is_new)'
+default-filter = 'package(xtask) & binary(xtask) & test(=process::tests::tree::a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does) | package(clauseo-agents) & binary(install)'
