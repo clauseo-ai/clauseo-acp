@@ -324,6 +324,56 @@ fn reach_of(inherit: Inherit) -> Reach {
     }
 }
 
+/// When `matter`'s agent exits (PR6's launcher calls this beside the set-aside's
+/// `after_session`): its matter, state and notes trees walked strictly again, so what the agent
+/// made open to other matters' agents during the session is repaired now rather than at the next
+/// launch (the review's M5). A child the lawyer can't open is set aside as at launch.
+pub fn repair_after_session(
+    ledger: &Ledger,
+    matter: clauseo_protocol::MatterId,
+    acl: &mut dyn AclWriter,
+    around: &mut dyn Surroundings,
+) -> Result<Walked, Error> {
+    let entries = ledger.matter_entries(matter);
+    let sids = |keep: &dyn Fn(Rights) -> bool| -> Vec<Sid> {
+        entries
+            .iter()
+            .filter(|e| keep(e.rights))
+            .map(|e| e.sid.clone())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    };
+    let strict = Strict {
+        watched: sids(&|r| matches!(r, Rights::DenyReadWrite | Rights::DenyRead)),
+        pool: sids(&|r| !r.is_label()),
+    };
+    let own = [PathKind::Matter, PathKind::State, PathKind::Notes];
+    let roots: BTreeSet<(PathBuf, PathKind)> = entries
+        .iter()
+        .filter(|e| own.contains(&e.kind) && e.rights == Rights::Modify)
+        .map(|e| (e.path.clone(), e.kind))
+        .collect();
+    let mut seen = Walked::default();
+    for (root, kind) in roots {
+        let walk = Walk {
+            root,
+            reach: Reach::Tree,
+            strict: true,
+            kind,
+        };
+        let walked = walk_with_set_aside(acl, around, &walk, Some(&strict)).map_err(
+            |(path_kind, failure)| Error::AclApply {
+                path_kind,
+                failure,
+                at: acl.refused_at(),
+            },
+        )?;
+        seen.add(walked);
+    }
+    Ok(seen)
+}
+
 /// Fences every registered matter against the whole `pool`, as when the pool grows: each
 /// matter's folders resolved and checked as the gate checks a neighbour's (`around`'s folder
 /// check), then the fence planned and applied. Entries listed already are kept, so only the new
